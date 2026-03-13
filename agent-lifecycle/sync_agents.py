@@ -185,15 +185,22 @@ def main():
     parser.add_argument("--def-file", default="../config/agents.json", help="定义文件路径")
     parser.add_argument("--dry-run", action="store_true", help="预览")
     parser.add_argument("--yes", action="store_true", help="自动确认")
+    parser.add_argument("--offline", action="store_true", help="离线模式 (跳过网络操作)")
     args = parser.parse_args()
 
     policy_cfg = load_json(args.config).get("agents", {})
     def_cfg = load_json(args.def_file)
 
+    if args.offline:
+        logging.info("离线模式：跳过更新检查")
+    
     logging.info("正在审计 Agent 生命周期意愿清单 (策略驱动)...")
     all_ok = True
     for name, definition in def_cfg.items():
         policy = policy_cfg.get(name, {})
+        # 离线模式下禁用 auto_update
+        if args.offline:
+            policy = {**policy, "auto_update": False}
         if not reconcile_agent(name, definition, policy, args.dry_run):
             all_ok = False
             

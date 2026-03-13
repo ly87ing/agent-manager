@@ -307,10 +307,13 @@ function show_summary() {
 }
 
 DRY_RUN_FLAG=""
+OFFLINE_FLAG=""
 case "${1:-}" in
     --dry-run) cmd="all"; DRY_RUN_FLAG="--dry-run"; shift ;;
+    --offline) cmd="all"; OFFLINE_FLAG="--offline"; shift ;;
     *) if [ $# -eq 0 ]; then cmd="all"; else cmd="$1"; shift; fi
-       [[ "$*" == *"--dry-run"* ]] && DRY_RUN_FLAG="--dry-run" ;;
+       [[ "$*" == *"--dry-run"* ]] && DRY_RUN_FLAG="--dry-run"
+       [[ "$*" == *"--offline"* ]] && OFFLINE_FLAG="--offline" ;;
 esac
 
 case "$cmd" in
@@ -318,16 +321,18 @@ case "$cmd" in
         clear; echo -e "${HDR_BLUE}${BOLD}🚀 Agent Manager 全量同步启动${NC}\n"
         detect_agents
         echo -e "${HDR_BLUE}${BOLD}2. 任务流水线 (Tasks)${NC}"
-        if [ -d "$ROOT_DIR/.git" ]; then
+        if [ -d "$ROOT_DIR/.git" ] && [ -z "$OFFLINE_FLAG" ]; then
             if out=$(git -C "$ROOT_DIR" pull 2>&1) && [[ "$out" != *"Already up to date"* ]]; then
                 status_line "DONE" "逻辑已更新，热重载中..."; exec "$0" "$@"
             else status_line "DONE" "逻辑已是最新"; fi
+        elif [ -n "$OFFLINE_FLAG" ]; then
+            status_line "SKIP" "离线模式，跳过 git 更新"
         fi
         > "$TEMP_LOG"
         status_line "RUNNING" "对齐 Agent 生命周期..."
-        (timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-lifecycle\" && $PYTHON_CMD sync_agents.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/agents.json\" --yes $DRY_RUN_FLAG" >> "$TEMP_LOG" 2>&1) && status_line "DONE" "生命周期对齐完成" || { status_line "ERROR" "生命周期失败"; echo "FAILED: agents" >> "$TEMP_LOG"; }
+        (timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-lifecycle\" && $PYTHON_CMD sync_agents.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/agents.json\" --yes $DRY_RUN_FLAG $OFFLINE_FLAG" >> "$TEMP_LOG" 2>&1) && status_line "DONE" "生命周期对齐完成" || { status_line "ERROR" "生命周期失败"; echo "FAILED: agents" >> "$TEMP_LOG"; }
         status_line "RUNNING" "同步全局工具..."
-        (timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-tool\" && $PYTHON_CMD sync_tools.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/tools.json\" --yes $DRY_RUN_FLAG" >> "$TEMP_LOG" 2>&1) && status_line "DONE" "工具链同步完成" || { status_line "ERROR" "工具失败"; echo "FAILED: tools" >> "$TEMP_LOG"; }
+        (timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-tool\" && $PYTHON_CMD sync_tools.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/tools.json\" --yes $DRY_RUN_FLAG $OFFLINE_FLAG" >> "$TEMP_LOG" 2>&1) && status_line "DONE" "工具链同步完成" || { status_line "ERROR" "工具失败"; echo "FAILED: tools" >> "$TEMP_LOG"; }
         status_line "RUNNING" "同步 Agent Rules..."
         (timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-rule\" && ./scripts/sync-agent-rules.sh $DRY_RUN_FLAG" >> "$TEMP_LOG" 2>&1) && status_line "DONE" "规则分发完成" || { status_line "ERROR" "规则同步失败"; echo "FAILED: rules" >> "$TEMP_LOG"; }
         status_line "RUNNING" "链接专业技能..."

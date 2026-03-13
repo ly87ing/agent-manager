@@ -6,6 +6,7 @@ import subprocess
 import shutil
 import json
 import sys
+import time
 from pathlib import Path
 
 # 配置日志：统一审计时间戳
@@ -22,23 +23,65 @@ def load_json(path):
             return json.load(f)
     except: return {}
 
-def run_cmd(cmd, cwd=None):
+def run_cmd(cmd, cwd=None, timeout=None):
     """运行 shell 命令并返回结果"""
     try:
-        result = subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True, shell=isinstance(cmd, str))
+        result = subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True, shell=isinstance(cmd, str), timeout=timeout)
         return True, result.stdout
+    except subprocess.TimeoutExpired:
+        return False, "TIMEOUT"
     except subprocess.CalledProcessError as e:
         return False, f"{e.stderr}\n{e.stdout}"
 
-def is_git_up_to_date(cwd):
-    """通过 rev-parse 检查 git 是否已经是最新"""
-    try:
-        subprocess.run("git fetch", cwd=cwd, shell=True, check=True, capture_output=True)
-        local = subprocess.check_output("git rev-parse HEAD", cwd=cwd, shell=True).strip()
-        remote = subprocess.check_output("git rev-parse @{u}", cwd=cwd, shell=True).strip()
-        return local == remote
-    except:
-        return False
+
+class GitStatusCache:
+    """缓存 git 仓库状态，避免重复执行慢速网络请求"""
+    _instance = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._cache = {}
+        return cls._instance
+    
+    def is_git_up_to_date(self, cwd, timeout=5):
+        """检查 git 是否已是最新（带缓存和超时）"""
+        cwd_str = str(Path(cwd).resolve())
+        
+        # 检查缓存
+        if cwd_str in self._cache:
+            return self._cache[cwd_str]
+        
+        # 快速检查：先看本地是否有未提交更改
+        success, out = run_cmd("git status --porcelain", cwd=cwd, timeout=timeout)
+        if not success:
+            self._cache[cwd_str] = True  # 失败时保守假设是最新的
+            return True
+        
+        if out.strip():
+            # 有本地修改，需要更新
+            self._cache[cwd_str] = False
+            return False
+        
+        # 检查远程更新：使用 ls-remote 代替 fetch（更快，不修改本地状态）
+        success, out = run_cmd("git ls-remote origin HEAD", cwd=cwd, timeout=timeout)
+        if not success or out.strip() == "":
+            self._cache[cwd_str] = True  # 无法检查时保守假设是最新的
+            return True
+        
+        remote_hash = out.strip().split()[0]
+        
+        success, local_out = run_cmd("git rev-parse HEAD", cwd=cwd, timeout=timeout)
+        if not success:
+            self._cache[cwd_str] = True
+            return True
+        
+        local_hash = local_out.strip()
+        
+        result = (local_hash == remote_hash)
+        self._cache[cwd_str] = result
+        return result
+
 
 def apply_overrides(name, target_dir, dry_run=False):
     """将本地补丁应用到目标工具目录"""
@@ -103,7 +146,7 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
             else:
                 if dry_run: logging.info(f"[TOOL: {name}] (预览: 计划检查更新)")
                 else:
-                    if is_git_up_to_date(target_dir): logging.info(f"[TOOL: {name}] (内容已最新)")
+                    if git_cache.is_git_up_to_date(target_dir): logging.info(f"[TOOL: {name}] (内容已最新)")
                     else:
                         success, out = run_cmd("git pull", cwd=target_dir)
                         if success: logging.info(f"[TOOL: {name}] (已更新)"); needs_setup = True
@@ -141,16 +184,23 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="预览")
     parser.add_argument("--force", action="store_true", help="强制初始化")
     parser.add_argument("--yes", action="store_true", help="自动清理")
+    parser.add_argument("--offline", action="store_true", help="离线模式 (跳过网络操作)")
     args = parser.parse_args()
 
     policy_cfg = load_json(args.config).get("tools", {})
     def_cfg = load_json(args.def_file).get("tools", {})
     base_dir = Path(args.base_dir).resolve()
 
+    if args.offline:
+        logging.info("离线模式：跳过 git 更新检查")
+    
     logging.info("同步全局工具 (策略驱动)...")
     all_ok = True
     for name, definition in def_cfg.items():
         policy = policy_cfg.get(name, {})
+        # 离线模式下禁用 auto_update
+        if args.offline:
+            policy = {**policy, "auto_update": False}
         if not sync_tool(name, definition, policy, base_dir, args.dry_run, args.force):
             all_ok = False
     
