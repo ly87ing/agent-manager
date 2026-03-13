@@ -1,0 +1,18 @@
+{
+  "servers": {
+    "augment-context-engine": {
+      "command": "auggie",
+      "args": ["--mcp", "--mcp-auto-workspace"],
+      "env": {},
+      "agents": null
+    }
+  },
+  "agent_paths": {
+    "Claude Code": "~/.claude.json",
+    "Gemini CLI": "~/.gemini/settings.json",
+    "Cursor": "~/.cursor/mcp.json",
+    "GitHub Copilot": "~/.copilot/mcp-config.json",
+    "OpenCode": { "path": "~/.config/opencode/opencode.json", "format": "json" },
+    "Codex": { "path": "~/.codex/config.toml", "format": "toml" }
+  }
+}

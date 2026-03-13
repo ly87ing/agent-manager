@@ -1,0 +1,13 @@
+# name|group|source|target
+codex_global|global|rules/global/main.md|~/.codex/rules/global.md
+claude_global|global|rules/global/main.md|~/.claude/rules/global.md
+opencode_global|global|rules/global/main.md|~/.config/opencode/rules/global.md
+gemini_global|global|rules/global/main.md|~/.gemini/rules/global.md
+cursor_global|global|rules/global/main.md|~/.cursor/rules/global.md
+copilot_global|global|rules/global/main.md|~/.copilot/rules/global.md
+
+codex_modules|global|rules/global/modules|~/.codex/rules/modules
+claude_modules|global|rules/global/modules|~/.claude/rules/modules
+opencode_modules|global|rules/global/modules|~/.config/opencode/rules/modules
+gemini_modules|global|rules/global/modules|~/.gemini/rules/modules
+cursor_modules|global|rules/global/modules|~/.cursor/rules/modules

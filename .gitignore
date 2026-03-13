@@ -1,0 +1,28 @@
+# Local configuration
+config/mcp.env.json
+
+# Temporary logs
+/tmp/agent_manager_sync.log
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# macOS
+.DS_Store
+
+# Agent Rule backups
+agent-rule/rules/**/*.bak.*
+**/*.bak.[0-9]*

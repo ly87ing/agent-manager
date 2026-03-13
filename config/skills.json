@@ -1,0 +1,20 @@
+{
+  "repositories": {
+    "playwright-best-practices-skill": {
+      "url": "https://github.com/currents-dev/playwright-best-practices-skill.git",
+      "agents": null
+    },
+    "superpowers": {
+      "url": "https://github.com/obra/superpowers",
+      "agents": null
+    }
+  },
+  "agents": {
+    "Gemini CLI": "~/.gemini/skills",
+    "Claude Code": "~/.claude/skills",
+    "Codex": "~/.codex/skills",
+    "Cursor": "~/.cursor/rules",
+    "OpenCode": "~/.config/opencode/skills",
+    "GitHub Copilot": "~/.copilot/skills"
+  }
+}

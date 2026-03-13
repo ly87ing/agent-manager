@@ -1,0 +1,79 @@
+{
+  "Claude Code": {
+    "bin": "claude",
+    "preferred_provider": "brew",
+    "providers": {
+      "npm": {
+        "install": "npm install -g @anthropic-ai/claude-code",
+        "uninstall": "npm uninstall -g @anthropic-ai/claude-code",
+        "upgrade": "npm install -g @anthropic-ai/claude-code@latest"
+      },
+      "brew": {
+        "install": "brew install --cask claude-code",
+        "uninstall": "brew uninstall --cask claude-code",
+        "upgrade": "brew upgrade --cask claude-code"
+      }
+    }
+  },
+  "Gemini CLI": {
+    "bin": "gemini",
+    "preferred_provider": "brew",
+    "providers": {
+      "npm": {
+        "install": "npm install -g @google/gemini-cli",
+        "uninstall": "npm uninstall -g @google/gemini-cli",
+        "upgrade": "npm install -g @google/gemini-cli@latest"
+      },
+      "brew": {
+        "install": "brew install gemini-cli",
+        "uninstall": "brew uninstall gemini-cli",
+        "upgrade": "brew upgrade gemini-cli"
+      }
+    }
+  },
+  "Cursor IDE": {
+    "bin": "cursor",
+    "app_path": "/Applications/Cursor.app",
+    "preferred_provider": "brew",
+    "providers": {
+      "brew": {
+        "install": "brew install --cask cursor",
+        "uninstall": "brew uninstall --cask cursor",
+        "upgrade": "brew upgrade --cask cursor"
+      }
+    }
+  },
+  "GitHub Copilot CLI": {
+    "bin": "copilot",
+    "ext_name": "copilot",
+    "preferred_provider": "brew",
+    "providers": {
+      "brew": {
+        "install": "brew install --cask copilot-cli",
+        "uninstall": "brew uninstall --cask copilot-cli",
+        "upgrade": "brew upgrade --cask copilot-cli"
+      },
+      "gh": {
+        "install": "gh extension install github/gh-copilot",
+        "uninstall": "gh extension remove copilot",
+        "upgrade": "gh extension upgrade copilot"
+      }
+    }
+  },
+  "OpenCode": {
+    "bin": "opencode",
+    "preferred_provider": "brew",
+    "providers": {
+      "npm": {
+        "install": "npm install -g @opencode/cli",
+        "uninstall": "npm uninstall -g @opencode/cli",
+        "upgrade": "npm install -g @opencode/cli@latest"
+      },
+      "brew": {
+        "install": "brew install opencode",
+        "uninstall": "brew uninstall opencode",
+        "upgrade": "brew upgrade opencode"
+      }
+    }
+  }
+}
