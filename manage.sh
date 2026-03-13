@@ -77,6 +77,38 @@ import json, os, shutil, subprocess, re
 def load(p):
     try: return json.load(open(p))
     except: return {}
+
+_brew_formulae = None
+_brew_casks = None
+_gh_exts = None
+
+def get_brew_formulae():
+    global _brew_formulae
+    if _brew_formulae is None:
+        if shutil.which('brew'):
+            res = subprocess.run('brew list --formula', shell=True, capture_output=True, text=True)
+            _brew_formulae = set(res.stdout.split()) if res.returncode == 0 else set()
+        else: _brew_formulae = set()
+    return _brew_formulae
+
+def get_brew_casks():
+    global _brew_casks
+    if _brew_casks is None:
+        if shutil.which('brew'):
+            res = subprocess.run('brew list --cask', shell=True, capture_output=True, text=True)
+            _brew_casks = set(res.stdout.split()) if res.returncode == 0 else set()
+        else: _brew_casks = set()
+    return _brew_casks
+
+def get_gh_exts():
+    global _gh_exts
+    if _gh_exts is None:
+        if shutil.which('gh'):
+            res = subprocess.run('gh extension list', shell=True, capture_output=True, text=True)
+            _gh_exts = res.stdout if res.returncode == 0 else ''
+        else: _gh_exts = ''
+    return _gh_exts
+
 def detect_all_providers(bin_name, config):
     found = []
     def get_pkg_name(cmd):
@@ -90,17 +122,18 @@ def detect_all_providers(bin_name, config):
     
     # 2. 包管理器探测
     brew_pkg = get_pkg_name(config.get('providers', {}).get('brew', {}).get('install', ''))
-    if shutil.which('brew') and brew_pkg:
-        if subprocess.run(f'brew list --formula {brew_pkg}', shell=True, capture_output=True).returncode == 0: found.append('brew')
-        elif subprocess.run(f'brew list --cask {brew_pkg}', shell=True, capture_output=True).returncode == 0: found.append('brew-cask')
+    if brew_pkg:
+        if brew_pkg in get_brew_formulae(): found.append('brew')
+        elif brew_pkg in get_brew_casks(): found.append('brew-cask')
     
     if is_npm: found.append('npm')
     
-    if config.get('ext_name') and shutil.which('gh'):
-        out = subprocess.run('gh extension list', shell=True, capture_output=True, text=True).stdout
-        if any(line.strip().startswith(config['ext_name']) for line in out.splitlines()): found.append('gh')
+    ext_name = config.get('ext_name')
+    if ext_name:
+        out = get_gh_exts()
+        if any(line.strip().startswith(ext_name) for line in out.splitlines()): found.append('gh')
     
-    # 如果物理存在但未识别出源
+    # 物理路径或 App 路径探测兜底
     app_path = config.get('app_path')
     if (app_path and os.path.exists(app_path)) or p_path:
         if not found: found.append('system')
@@ -161,6 +194,38 @@ import json, os, hashlib, shutil, re, subprocess
 def get_md5(p):
     try: return hashlib.md5(open(p, 'rb').read()).hexdigest()
     except: return None
+
+_brew_formulae = None
+_brew_casks = None
+_gh_exts = None
+
+def get_brew_formulae():
+    global _brew_formulae
+    if _brew_formulae is None:
+        if shutil.which('brew'):
+            res = subprocess.run('brew list --formula', shell=True, capture_output=True, text=True)
+            _brew_formulae = set(res.stdout.split()) if res.returncode == 0 else set()
+        else: _brew_formulae = set()
+    return _brew_formulae
+
+def get_brew_casks():
+    global _brew_casks
+    if _brew_casks is None:
+        if shutil.which('brew'):
+            res = subprocess.run('brew list --cask', shell=True, capture_output=True, text=True)
+            _brew_casks = set(res.stdout.split()) if res.returncode == 0 else set()
+        else: _brew_casks = set()
+    return _brew_casks
+
+def get_gh_exts():
+    global _gh_exts
+    if _gh_exts is None:
+        if shutil.which('gh'):
+            res = subprocess.run('gh extension list', shell=True, capture_output=True, text=True)
+            _gh_exts = res.stdout if res.returncode == 0 else ''
+        else: _gh_exts = ''
+    return _gh_exts
+
 def detect_all_providers(bin_name, config):
     found = []
     def get_pkg_name(cmd):
@@ -172,14 +237,15 @@ def detect_all_providers(bin_name, config):
     is_npm = p_path and ('/node/' in p_path or '/npm/' in p_path or p_path.endswith('node') or p_path.endswith('npm'))
 
     brew_pkg = get_pkg_name(config.get('providers', {}).get('brew', {}).get('install', ''))
-    if shutil.which('brew') and brew_pkg:
-        if subprocess.run(f'brew list --formula {brew_pkg}', shell=True, capture_output=True).returncode == 0: found.append('brew')
-        elif subprocess.run(f'brew list --cask {brew_pkg}', shell=True, capture_output=True).returncode == 0: found.append('brew-cask')
+    if brew_pkg:
+        if brew_pkg in get_brew_formulae(): found.append('brew')
+        elif brew_pkg in get_brew_casks(): found.append('brew-cask')
     
     if is_npm: found.append('npm')
-    if config.get('ext_name') and shutil.which('gh'):
-        out = subprocess.run('gh extension list', shell=True, capture_output=True, text=True).stdout
-        if any(line.strip().startswith(config['ext_name']) for line in out.splitlines()): found.append('gh')
+    ext_name = config.get('ext_name')
+    if ext_name:
+        out = get_gh_exts()
+        if any(line.strip().startswith(ext_name) for line in out.splitlines()): found.append('gh')
     
     # 物理路径或 App 路径探测兜底
     app_path = config.get('app_path')
