@@ -6,6 +6,7 @@ import subprocess
 import json
 import shutil
 import sys
+import re
 from pathlib import Path
 
 # 配置日志
@@ -30,32 +31,89 @@ def run_cmd(cmd):
     except subprocess.CalledProcessError as e:
         return False, f"{e.stderr}\n{e.stdout}"
 
-def detect_all_providers(bin_name, config=None):
-    """全量扫描当前系统中管理该 Agent 的所有 Provider"""
-    found = []
-    
-    def get_pkg_name(cmd):
-        import re
-        if not cmd: return None
-        m = re.search(r'(?:install|uninstall)(?:\s+--cask)?\s+([^\s@]+)', cmd)
-        return m.group(1) if m else None
 
+class ProviderCache:
+    """缓存包管理器查询结果，避免重复执行慢速命令"""
+    _instance = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+    
+    def __init__(self):
+        if self._initialized:
+            return
+        self._initialized = True
+        self._brew_formulae = None
+        self._brew_casks = None
+        self._gh_extensions = None
+    
+    def get_brew_formulae(self):
+        """一次性获取所有已安装的 brew formula 包名"""
+        if self._brew_formulae is None:
+            self._brew_formulae = set()
+            if shutil.which("brew"):
+                success, out = run_cmd("brew list --formula -1")
+                if success:
+                    self._brew_formulae = set(out.strip().split('\n')) if out.strip() else set()
+        return self._brew_formulae
+    
+    def get_brew_casks(self):
+        """一次性获取所有已安装的 brew cask 包名"""
+        if self._brew_casks is None:
+            self._brew_casks = set()
+            if shutil.which("brew"):
+                success, out = run_cmd("brew list --cask -1")
+                if success:
+                    self._brew_casks = set(out.strip().split('\n')) if out.strip() else set()
+        return self._brew_casks
+    
+    def get_gh_extensions(self):
+        """一次性获取所有已安装的 gh 扩展"""
+        if self._gh_extensions is None:
+            self._gh_extensions = ""
+            if shutil.which("gh"):
+                success, out = run_cmd("gh extension list")
+                if success:
+                    self._gh_extensions = out
+        return self._gh_extensions
+
+
+def get_pkg_name(cmd):
+    """从安装命令中提取包名"""
+    if not cmd: return None
+    m = re.search(r'(?:install|uninstall)(?:\s+--cask)?\s+([^\s@]+)', cmd)
+    return m.group(1) if m else None
+
+
+def detect_all_providers(bin_name, config=None):
+    """全量扫描当前系统中管理该 Agent 的所有 Provider（使用缓存优化）"""
+    found = []
+    cache = ProviderCache()
+
+    # 检测 gh extension
     if config and "ext_name" in config:
         ext_name = config["ext_name"]
-        if shutil.which("gh"):
-            success, out = run_cmd("gh extension list")
-            if success and any(line.strip().startswith(ext_name) for line in out.splitlines()):
-                found.append("gh")
+        gh_out = cache.get_gh_extensions()
+        if any(line.strip().startswith(ext_name) for line in gh_out.splitlines()):
+            found.append("gh")
 
+    # 检测 brew formula/cask（使用缓存的包列表进行集合查找）
     brew_pkg = get_pkg_name(config.get('providers', {}).get('brew', {}).get('install', '')) if config else None
-    if shutil.which("brew") and brew_pkg:
-        if run_cmd(f"brew list --formula {brew_pkg} 2>/dev/null")[0]: found.append("brew")
-        elif run_cmd(f"brew list --cask {brew_pkg} 2>/dev/null")[0]: found.append("brew-cask")
-            
+    if brew_pkg:
+        if brew_pkg in cache.get_brew_formulae():
+            found.append("brew")
+        elif brew_pkg in cache.get_brew_casks():
+            found.append("brew-cask")
+    
+    # 检测 npm
     bin_path = shutil.which(bin_name)
     if bin_path and ("/node/" in bin_path or "/npm/" in bin_path or bin_path.endswith("node") or bin_path.endswith("npm")):
         found.append("npm")
     
+    # 检测系统路径或 App
     app_path = config.get('app_path') if config else None
     if (app_path and os.path.exists(app_path)) or bin_path:
         if not found: found.append("system")

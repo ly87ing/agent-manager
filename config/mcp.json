@@ -3,7 +3,9 @@
     "augment-context-engine": {
       "command": "auggie",
       "args": ["--mcp", "--mcp-auto-workspace"],
-      "env": {},
+      "env": {
+        "AUGMENT_SESSION_AUTH": "${AUGMENT_SESSION_AUTH}"
+      },
       "agents": null
     }
   },

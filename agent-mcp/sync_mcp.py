@@ -94,6 +94,14 @@ def install_dependencies_and_build(repo_path, config, dry_run=False):
         else: logging.error(f"[{repo_path.name}] 失败: {out}"); success_all = False
     return success_all
 
+def toml_quote(value):
+    """TOML 字符串转义：如果包含双引号则使用单引号，否则使用双引号"""
+    if '"' in value:
+        # 使用 TOML literal string (单引号)，不需要转义
+        return f"'{value}'"
+    return f'"{value}"'
+
+
 def update_toml_config(agent_name, config_path, active_servers, all_managed_servers, dry_run):
     """原子化更新 TOML 配置"""
     path = Path(config_path).expanduser()
@@ -121,7 +129,7 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
         block += f'args = [{", ".join([f"\"{a}\"" for a in settings["args"]])}]\n'
         env = {**settings.get("env", {}), "_MANAGED_BY": "agent-manager"}
         block += f'[mcp_servers.{name}.env]\n'
-        for k, v in env.items(): block += f'{k} = "{v}"\n'
+        for k, v in env.items(): block += f'{k} = {toml_quote(v)}\n'
         new_blocks.append(block)
     
     full_content = base_content + "".join(new_blocks)
@@ -191,25 +199,57 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False):
                     with open(config_path, 'r', encoding='utf-8') as f: current_config = json.load(f)
                 except: pass
             
-            key_name = "mcp" if agent_name == "OpenCode" and "mcp" in current_config else "mcpServers"
+            # OpenCode 使用 "mcp" 键，其他 Agent 使用 "mcpServers"
+            is_opencode = agent_name == "OpenCode"
+            key_name = "mcp" if is_opencode and "mcp" in current_config else "mcpServers"
+            if is_opencode: key_name = "mcp"  # OpenCode 强制使用 mcp
             if key_name not in current_config: current_config[key_name] = {}
             
             # Orphan Removal
             for k in list(current_config[key_name].keys()):
                 srv = current_config[key_name][k]
-                if isinstance(srv, dict) and srv.get('env', {}).get('_MANAGED_BY') == 'agent-manager':
-                    if k not in active_mcp_settings:
-                        logging.info(f"INFO: [AGENT: {agent_name}] 移除孤儿 MCP: {k}")
-                        del current_config[key_name][k]
+                if isinstance(srv, dict):
+                    # 检查 env 或 environment 中的 _MANAGED_BY
+                    env_dict = srv.get('env', srv.get('environment', {}))
+                    if env_dict.get('_MANAGED_BY') == 'agent-manager':
+                        if k not in active_mcp_settings:
+                            logging.info(f"INFO: [AGENT: {agent_name}] 移除孤儿 MCP: {k}")
+                            del current_config[key_name][k]
             
             # Inject
             for name, settings in active_mcp_settings.items():
-                if "env" not in settings: settings["env"] = {}
-                settings["env"]["_MANAGED_BY"] = "agent-manager"
-                current_config[key_name][name] = settings
+                if is_opencode:
+                    # OpenCode 特殊格式: command 是数组，environment 替代 env
+                    cmd_array = [settings["command"]] + settings.get("args", [])
+                    env_dict = {**settings.get("env", {}), "_MANAGED_BY": "agent-manager"}
+                    current_config[key_name][name] = {
+                        "type": "local",
+                        "command": cmd_array,
+                        "environment": env_dict
+                    }
+                else:
+                    # 标准格式
+                    if "env" not in settings: settings["env"] = {}
+                    settings["env"]["_MANAGED_BY"] = "agent-manager"
+                    current_config[key_name][name] = settings
                 logging.info(f"INFO: [AGENT: {agent_name}] 更新 MCP: {name}")
             
             atomic_write_json(config_path, current_config)
+
+def sync_secrets_repo(secrets_path):
+    """Phase 0: 如果 secrets 目录是 Git 仓库，执行自动更新"""
+    if not secrets_path.exists(): return
+    
+    # 检查 secrets 目录本身或其子目录
+    targets = [secrets_path] + [d for d in secrets_path.iterdir() if d.is_dir()]
+    for target in targets:
+        if (target / ".git").exists():
+            logging.info(f"发现密钥仓库: {target.name}，正在同步最新凭证...")
+            success, output = run_cmd("git pull", cwd=target)
+            if success:
+                logging.info(f"密钥仓库 {target.name} 同步成功。")
+            else:
+                logging.warning(f"密钥仓库 {target.name} 同步失败 (可能是网络或权限问题): {output}")
 
 def main():
     parser = argparse.ArgumentParser(description="MCP Server 管理工具 (策略对齐)")
@@ -229,6 +269,43 @@ def main():
     for name, s_def in definition_cfg.items():
         if name in policy_cfg:
             s_def.update(policy_cfg[name])
+
+    # [凭证保护] Phase 0: 扫描并同步密钥池 (secrets/ 目录)
+    env_vars = {}
+    root_dir = Path(args.def_file).resolve().parent.parent
+    secrets_dir = root_dir / "secrets"
+    
+    if not args.dry_run:
+        sync_secrets_repo(secrets_dir)
+    
+    # 加载全局凭证并进行占位符替换
+    search_paths = [root_dir / ".env", secrets_dir]
+    
+    for p in search_paths:
+        if not p.exists(): continue
+        files = [p] if p.is_file() else list(p.glob("*.env"))
+        for f in files:
+            logging.info(f"正在从凭证源加载: {f.name}")
+            with open(f, 'r', encoding='utf-8') as f_in:
+                for line in f_in:
+                    line = line.strip()
+                    if not line or line.startswith('#'): continue
+                    if '=' in line:
+                        k, v = line.split('=', 1)
+                        env_vars[k.strip()] = v.strip().strip('"').strip("'")
+    
+    # 递归遍历 definition_cfg，进行注入
+    for srv_name, srv_def in definition_cfg.items():
+        if "env" in srv_def:
+            for k, v in srv_def["env"].items():
+                if isinstance(v, str) and v.startswith("${") and v.endswith("}"):
+                    var_name = v[2:-1]
+                    if var_name in env_vars:
+                        srv_def["env"][k] = env_vars[var_name]
+                        logging.info(f"[{srv_name}] 注入凭证: {k} (来源: secrets 池)")
+                    elif var_name in os.environ:
+                        srv_def["env"][k] = os.environ[var_name]
+                        logging.info(f"[{srv_name}] 从系统环境注入: {k}")
 
     base_dir = Path(args.base_dir).resolve()
     if not base_dir.exists() and not args.dry_run: base_dir.mkdir(parents=True, exist_ok=True)

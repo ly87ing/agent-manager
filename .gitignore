@@ -31,3 +31,9 @@ agent-skill/*
 agent-tool/*
 !agent-tool/*.py
 !agent-tool/overrides/
+.env
+
+# Secrets management
+secrets/*
+!secrets/.gitkeep
+!secrets/README.md

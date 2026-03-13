@@ -80,62 +80,45 @@ def load(p):
     try: return json.load(open(p))
     except: return {}
 
-_brew_formulae = None
-_brew_casks = None
-_gh_exts = None
+# 预先一次性加载所有包列表（关键优化：避免逐个包执行 brew list）
+_brew_formulae = set()
+_brew_casks = set()
+_gh_exts = ''
 
-def get_brew_formulae():
-    global _brew_formulae
-    if _brew_formulae is None:
-        if shutil.which('brew'):
-            res = subprocess.run('brew list --formula', shell=True, capture_output=True, text=True)
-            _brew_formulae = set(res.stdout.split()) if res.returncode == 0 else set()
-        else: _brew_formulae = set()
-    return _brew_formulae
+if shutil.which('brew'):
+    res = subprocess.run('brew list --formula -1', shell=True, capture_output=True, text=True)
+    if res.returncode == 0 and res.stdout.strip():
+        _brew_formulae = set(res.stdout.strip().split('\n'))
+    res = subprocess.run('brew list --cask -1', shell=True, capture_output=True, text=True)
+    if res.returncode == 0 and res.stdout.strip():
+        _brew_casks = set(res.stdout.strip().split('\n'))
 
-def get_brew_casks():
-    global _brew_casks
-    if _brew_casks is None:
-        if shutil.which('brew'):
-            res = subprocess.run('brew list --cask', shell=True, capture_output=True, text=True)
-            _brew_casks = set(res.stdout.split()) if res.returncode == 0 else set()
-        else: _brew_casks = set()
-    return _brew_casks
+if shutil.which('gh'):
+    res = subprocess.run('gh extension list', shell=True, capture_output=True, text=True)
+    if res.returncode == 0:
+        _gh_exts = res.stdout
 
-def get_gh_exts():
-    global _gh_exts
-    if _gh_exts is None:
-        if shutil.which('gh'):
-            res = subprocess.run('gh extension list', shell=True, capture_output=True, text=True)
-            _gh_exts = res.stdout if res.returncode == 0 else ''
-        else: _gh_exts = ''
-    return _gh_exts
+def get_pkg_name(cmd):
+    if not cmd: return None
+    m = re.search(r'(?:install|uninstall)(?:\s+--cask)?\s+([^\s@]+)', cmd)
+    return m.group(1) if m else None
 
 def detect_all_providers(bin_name, config):
     found = []
-    def get_pkg_name(cmd):
-        if not cmd: return None
-        m = re.search(r'(?:install|uninstall)(?:\s+--cask)?\s+([^\s@]+)', cmd)
-        return m.group(1) if m else None
-
-    # 1. 物理探测 (兜底)
     p_path = shutil.which(bin_name)
     is_npm = p_path and ('/node/' in p_path or '/npm/' in p_path or p_path.endswith('node') or p_path.endswith('npm'))
     
-    # 2. 包管理器探测
     brew_pkg = get_pkg_name(config.get('providers', {}).get('brew', {}).get('install', ''))
     if brew_pkg:
-        if brew_pkg in get_brew_formulae(): found.append('brew')
-        elif brew_pkg in get_brew_casks(): found.append('brew-cask')
+        if brew_pkg in _brew_formulae: found.append('brew')
+        elif brew_pkg in _brew_casks: found.append('brew-cask')
     
     if is_npm: found.append('npm')
     
     ext_name = config.get('ext_name')
-    if ext_name:
-        out = get_gh_exts()
-        if any(line.strip().startswith(ext_name) for line in out.splitlines()): found.append('gh')
+    if ext_name and any(line.strip().startswith(ext_name) for line in _gh_exts.splitlines()):
+        found.append('gh')
     
-    # 物理路径或 App 路径探测兜底
     app_path = config.get('app_path')
     if (app_path and os.path.exists(app_path)) or p_path:
         if not found: found.append('system')
@@ -143,14 +126,12 @@ def detect_all_providers(bin_name, config):
 
 cfg = load('$CONFIG_FILE')
 def_a = load('$ROOT_DIR/config/agents.json')
-# Agents
 for k, v in cfg.get('agents', {}).items():
     if not v.get('enabled', True): continue
     d = def_a.get(k, {})
     all_act = detect_all_providers(d.get('bin',''), d)
     stat = '${SUCCESS_GREEN}✓${NC}' if all_act else '${PENDING_GOLD}○${NC}'
     print(f'   {stat} {k:20} (安装源:{\"/\".join(all_act) if all_act else \"未发现\"})')
-# Tools
 for k, v in cfg.get('tools', {}).items():
     if v.get('enabled', True):
         act = shutil.which(k) is not None or os.path.exists(f'$ROOT_DIR/agent-tool/{k}')
@@ -197,59 +178,44 @@ def get_md5(p):
     try: return hashlib.md5(open(p, 'rb').read()).hexdigest()
     except: return None
 
-_brew_formulae = None
-_brew_casks = None
-_gh_exts = None
+# 预先一次性加载所有包列表（关键优化）
+_brew_formulae = set()
+_brew_casks = set()
+_gh_exts = ''
 
-def get_brew_formulae():
-    global _brew_formulae
-    if _brew_formulae is None:
-        if shutil.which('brew'):
-            res = subprocess.run('brew list --formula', shell=True, capture_output=True, text=True)
-            _brew_formulae = set(res.stdout.split()) if res.returncode == 0 else set()
-        else: _brew_formulae = set()
-    return _brew_formulae
+if shutil.which('brew'):
+    res = subprocess.run('brew list --formula -1', shell=True, capture_output=True, text=True)
+    if res.returncode == 0 and res.stdout.strip():
+        _brew_formulae = set(res.stdout.strip().split('\n'))
+    res = subprocess.run('brew list --cask -1', shell=True, capture_output=True, text=True)
+    if res.returncode == 0 and res.stdout.strip():
+        _brew_casks = set(res.stdout.strip().split('\n'))
 
-def get_brew_casks():
-    global _brew_casks
-    if _brew_casks is None:
-        if shutil.which('brew'):
-            res = subprocess.run('brew list --cask', shell=True, capture_output=True, text=True)
-            _brew_casks = set(res.stdout.split()) if res.returncode == 0 else set()
-        else: _brew_casks = set()
-    return _brew_casks
+if shutil.which('gh'):
+    res = subprocess.run('gh extension list', shell=True, capture_output=True, text=True)
+    if res.returncode == 0:
+        _gh_exts = res.stdout
 
-def get_gh_exts():
-    global _gh_exts
-    if _gh_exts is None:
-        if shutil.which('gh'):
-            res = subprocess.run('gh extension list', shell=True, capture_output=True, text=True)
-            _gh_exts = res.stdout if res.returncode == 0 else ''
-        else: _gh_exts = ''
-    return _gh_exts
+def get_pkg_name(cmd):
+    if not cmd: return None
+    m = re.search(r'(?:install|uninstall)(?:\s+--cask)?\s+([^\s@]+)', cmd)
+    return m.group(1) if m else None
 
 def detect_all_providers(bin_name, config):
     found = []
-    def get_pkg_name(cmd):
-        if not cmd: return None
-        m = re.search(r'(?:install|uninstall)(?:\s+--cask)?\s+([^\s@]+)', cmd)
-        return m.group(1) if m else None
-    
     p_path = shutil.which(bin_name)
     is_npm = p_path and ('/node/' in p_path or '/npm/' in p_path or p_path.endswith('node') or p_path.endswith('npm'))
 
     brew_pkg = get_pkg_name(config.get('providers', {}).get('brew', {}).get('install', ''))
     if brew_pkg:
-        if brew_pkg in get_brew_formulae(): found.append('brew')
-        elif brew_pkg in get_brew_casks(): found.append('brew-cask')
+        if brew_pkg in _brew_formulae: found.append('brew')
+        elif brew_pkg in _brew_casks: found.append('brew-cask')
     
     if is_npm: found.append('npm')
     ext_name = config.get('ext_name')
-    if ext_name:
-        out = get_gh_exts()
-        if any(line.strip().startswith(ext_name) for line in out.splitlines()): found.append('gh')
+    if ext_name and any(line.strip().startswith(ext_name) for line in _gh_exts.splitlines()):
+        found.append('gh')
     
-    # 物理路径或 App 路径探测兜底
     app_path = config.get('app_path')
     if (app_path and os.path.exists(app_path)) or p_path:
         if not found: found.append('system')
@@ -389,5 +355,5 @@ case "$cmd" in
     help|-h|--help|-help)
         echo -e "${HDR_BLUE}Agent Manager 帮助手册 (Platinum Edition)${NC}"
         echo "常用命令: all, ui, doctor, detect, cleanup, backups:list, backups:restore" ;;
-    *) echo -e "${ERROR_RED}错误: 未知命令 '$1'${NC}"; exit 1 ;;
+    *) echo -e "${ERROR_RED}错误: 未知命令 '$cmd'${NC}"; exit 1 ;;
 esac
