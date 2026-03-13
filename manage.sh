@@ -65,8 +65,10 @@ function timeout_run() {
         local child_pid=$!
         (sleep "$seconds"; kill -9 "$child_pid" 2>/dev/null) &
         local killer_pid=$!
-        wait "$child_pid" 2>/dev/null || true
+        local exit_code=0
+        wait "$child_pid" 2>/dev/null || exit_code=$?
         kill "$killer_pid" 2>/dev/null || true
+        return $exit_code
     fi
 }
 
