@@ -26,3 +26,8 @@ yarn-error.log*
 # Agent Rule backups
 agent-rule/rules/**/*.bak.*
 **/*.bak.[0-9]*
+agent-skill/*
+!agent-skill/*.py
+agent-tool/*
+!agent-tool/*.py
+!agent-tool/overrides/
