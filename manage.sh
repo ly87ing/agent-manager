@@ -319,6 +319,22 @@ esac
 case "$cmd" in
     all|"")
         clear; echo -e "${HDR_BLUE}${BOLD}🚀 Agent Manager 全量同步启动${NC}\n"
+        
+        # Phase 0: 自动检查并初始化 secrets
+        if [ ! -d "$ROOT_DIR/secrets/.git" ]; then
+            echo -e "${HDR_BLUE}${BOLD}1. 凭证仓库检查 (Secrets Check)${NC}"
+            if [ -n "$OFFLINE_FLAG" ]; then
+                status_line "SKIP" "离线模式，跳过 secrets 检查"
+            else
+                if [ -x "$ROOT_DIR/scripts/init-secrets.sh" ]; then
+                    bash "$ROOT_DIR/scripts/init-secrets.sh" || {
+                        echo -e "${ERROR_RED}⚠️  secrets 初始化失败，继续执行但 MCP 可能无法正常工作${NC}"
+                    }
+                fi
+            fi
+            echo ""
+        fi
+        
         detect_agents
         echo -e "${HDR_BLUE}${BOLD}2. 任务流水线 (Tasks)${NC}"
         if [ -d "$ROOT_DIR/.git" ] && [ -z "$OFFLINE_FLAG" ]; then
