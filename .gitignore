@@ -33,6 +33,5 @@ agent-tool/*
 !agent-tool/overrides/
 .env
 
-# Secrets management (submodule)
-# The secrets/ directory is managed as a git submodule
-# See: .gitmodules and https://github.com/ly87ing/secrets.git
+# Secrets (independent git repository)
+secrets/
