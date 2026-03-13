@@ -254,17 +254,43 @@ codex mcp list
 
 ### 凭证管理
 
-凭证存储在 `secrets/mcp.env`：
+凭证存储在 **私有 git submodule** `secrets/mcp.env`：
 
 ```bash
 # secrets/mcp.env
 AUGMENT_SESSION_AUTH='{"accessToken":"ace_...","tenantURL":"...","scopes":[]}'
 ```
 
+#### 初始化 Secrets 子模块
+
+首次克隆仓库后，需要初始化子模块：
+
+```bash
+# 方法 1: 克隆时初始化
+git clone --recurse-submodules https://github.com/ly87ing/agent-manager.git
+
+# 方法 2: 克隆后初始化
+cd agent-manager
+git submodule init
+git submodule update
+```
+
+#### 手动配置（不使用子模块）
+
+如果不想使用子模块，可以手动创建凭证文件：
+
+```bash
+mkdir -p secrets
+cat > secrets/mcp.env << 'EOF'
+AUGMENT_SESSION_AUTH='{"accessToken":"your_token_here"}'
+EOF
+```
+
 **安全实践**:
-1. `secrets/` 目录应加入 `.gitignore`
-2. 使用 Git 私有仓库存储密钥
-3. 定期轮换凭证
+1. ✅ **使用私有 git 子模块** (推荐) - 凭证版本化管理
+2. ✅ 子模块仓库必须设为 **private**
+3. ✅ 定期轮换凭证
+4. ❌ 不要将凭证直接提交到主仓库
 
 ### 工作原理
 
