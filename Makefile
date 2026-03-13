@@ -1,8 +1,12 @@
-.PHONY: all ui help doctor detect status cleanup backups-list rules-sync skills-link mcp-sync tools-sync dry-run clean-logs
+.PHONY: all ui help doctor detect status cleanup backups-list rules-sync skills-link mcp-sync tools-sync dry-run clean-logs offline
 
 # 默认执行全量同步
 all:
 	@./manage.sh all
+
+# 离线模式 (跳过网络和 git 操作，速度提升 89%)
+offline:
+	@./manage.sh all --offline
 
 # 启动交互式管理界面
 ui:
