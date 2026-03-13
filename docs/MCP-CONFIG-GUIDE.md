@@ -254,43 +254,51 @@ codex mcp list
 
 ### 凭证管理
 
-凭证存储在 **私有 git submodule** `secrets/mcp.env`：
+凭证存储在 **独立的私有 git 仓库** `secrets/mcp.env`：
 
 ```bash
 # secrets/mcp.env
 AUGMENT_SESSION_AUTH='{"accessToken":"ace_...","tenantURL":"...","scopes":[]}'
 ```
 
-#### 初始化 Secrets 子模块
-
-首次克隆仓库后，需要初始化子模块：
+#### 首次设置（推荐方式）
 
 ```bash
-# 方法 1: 克隆时初始化
-git clone --recurse-submodules https://github.com/ly87ing/agent-manager.git
-
-# 方法 2: 克隆后初始化
+# 1. 克隆主仓库
+git clone https://github.com/ly87ing/agent-manager.git
 cd agent-manager
-git submodule init
-git submodule update
+
+# 2. 克隆 secrets 仓库（需要访问权限）
+git clone https://github.com/ly87ing/secrets.git secrets
+
+# 3. 完成！凭证已就绪
+make all
 ```
 
-#### 手动配置（不使用子模块）
-
-如果不想使用子模块，可以手动创建凭证文件：
+#### 更新凭证
 
 ```bash
-mkdir -p secrets
-cat > secrets/mcp.env << 'EOF'
-AUGMENT_SESSION_AUTH='{"accessToken":"your_token_here"}'
-EOF
+cd secrets
+# 编辑凭证文件
+vim mcp.env
+
+# 提交并推送
+git add mcp.env
+git commit -m "Update credentials"
+git push origin main
 ```
+
+**优势**：
+- ✅ 简单易用，无 submodule 复杂性
+- ✅ 直接 `cd secrets && git pull` 更新
+- ✅ 凭证版本化、可审计
+- ✅ 权限分离（私有仓库）
 
 **安全实践**:
-1. ✅ **使用私有 git 子模块** (推荐) - 凭证版本化管理
-2. ✅ 子模块仓库必须设为 **private**
-3. ✅ 定期轮换凭证
-4. ❌ 不要将凭证直接提交到主仓库
+1. ✅ secrets 仓库必须设为 **private**
+2. ✅ 定期轮换凭证
+3. ✅ 限制访问人员
+4. ❌ 不要将凭证提交到主仓库
 
 ### 工作原理
 
