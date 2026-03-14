@@ -1,6 +1,9 @@
 .PHONY: all ui help doctor detect status cleanup backups-list rules-sync skills-link mcp-sync tools-sync dry-run clean-logs offline
 
-# 默认执行全量同步
+# 默认目标：显示帮助，不执行任何同步操作
+.DEFAULT_GOAL := help
+
+# 显式执行全量同步（包括安装/更新）
 all:
 	@./manage.sh all
 
