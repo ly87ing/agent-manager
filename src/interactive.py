@@ -5,6 +5,7 @@ import sys
 import tempfile
 import shutil
 from pathlib import Path
+import copy
 
 # 颜色定义
 RED = "\033[0;31m"
@@ -48,155 +49,156 @@ def load_json(path):
             return json.load(f)
     except: return {}
 
-def save_json(path, data):
-    """原子化写入，确保配置文件安全"""
-    path_obj = Path(path).resolve()
-    os.makedirs(path_obj.parent, exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(dir=str(path_obj.parent), prefix=f"{path_obj.name}.tmp_")
-    try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        os.replace(temp_path, path_obj)
-    except Exception as e:
-        if os.path.exists(temp_path): os.remove(temp_path)
-        print(f"{RED}保存失败: {e}{NC}")
+def save_json(data, path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
-def get_policy(): return load_json("config/manager.json")
-def save_policy(data): save_json("config/manager.json", data)
+def deep_update(dst, src):
+    for k, v in src.items():
+        if isinstance(v, dict) and isinstance(dst.get(k), dict):
+            deep_update(dst[k], v)
+        else:
+            dst[k] = v
 
-# --- 模块功能 ---
+def get_base_config():
+    base_path = os.path.join("config", "manager.json")
+    return load_json(base_path)
 
-def manage_item_policy(category, name):
-    """管理项目的策略意愿 (Enabled/Disabled 等)"""
-    policy_cfg = get_policy()
-    if category not in policy_cfg: policy_cfg[category] = {}
-    if name not in policy_cfg[category]: policy_cfg[category][name] = {"enabled": True}
-    
-    item_policy = policy_cfg[category][name]
-    
-    while True:
-        print(f"\n策略中心 [{category}] -> {BOLD}{name}{NC}")
-        status = f"{GREEN}[启用]{NC}" if item_policy.get("enabled", True) else f"{RED}[禁用]{NC}"
-        print(f"1. 切换状态: {status}")
-        
-        if category == "agents":
-            auto_i = f"{GREEN}[开启]{NC}" if item_policy.get("auto_install", True) else f"{RED}[关闭]{NC}"
-            auto_u = f"{GREEN}[开启]{NC}" if item_policy.get("auto_update", True) else f"{RED}[关闭]{NC}"
-            print(f"2. 自动安装: {auto_i}")
-            print(f"3. 自动更新: {auto_u}")
-            print(f"4. 设置首选供应源: {YELLOW}{item_policy.get('preferred_provider', '未设置')}{NC}")
-        elif category == "tools":
-            auto_u = f"{GREEN}[开启]{NC}" if item_policy.get("auto_update", True) else f"{RED}[关闭]{NC}"
-            print(f"2. 自动更新: {auto_u}")
+def get_local_config():
+    local_path = os.path.join("config", "manager.local.json")
+    # Ensure file exists
+    if not os.path.exists(local_path):
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        with open(local_path, 'w', encoding='utf-8') as f:
+            json.dump({}, f, indent=2)
+    return load_json(local_path)
 
-        print("q. 返回上级")
-        
-        op = ask("选择操作")
-        if op.lower() == 'q': break
-        if op == '1': item_policy["enabled"] = not item_policy.get("enabled", True)
-        elif op == '2' and category == "agents": item_policy["auto_install"] = not item_policy.get("auto_install", True)
-        elif op == '2' and category == "tools": item_policy["auto_update"] = not item_policy.get("auto_update", True)
-        elif op == '3' and category == "agents": item_policy["auto_update"] = not item_policy.get("auto_update", True)
-        elif op == '4' and category == "agents":
-            item_policy["preferred_provider"] = ask("首选源 (brew/npm/gh)", item_policy.get("preferred_provider", "npm"))
-        
-        save_policy(policy_cfg)
-        mark_sync_required()
+def get_effective_config():
+    base = get_base_config()
+    local = get_local_config()
+    merged = copy.deepcopy(base)
+    deep_update(merged, local)
+    return merged
 
-def menu_agents():
-    def_path = "config/agents.json"
-    def_cfg = load_json(def_path)
-    
-    while True:
-        os.system('clear')
-        policy_cfg = get_policy().get("agents", {})
-        print(f"{HDR_BLUE}=== Agent 全生命周期管理 ==={NC}")
-        item_list = sorted(def_cfg.keys())
-        for i, name in enumerate(item_list, 1):
-            p = policy_cfg.get(name, {})
-            status = f"{GREEN}ON{NC}" if p.get("enabled", True) else f"{RED}OFF{NC}"
-            print(f"{i}. [{status}] {BOLD}{name:20}{NC}")
-        
-        print("\nq. 返回 / [序号] 管理策略 / e. 编辑技术定义")
-        choice = ask("选择操作")
-        if choice.lower() == 'q': break
-        if choice.lower() == 'e':
-            print(f"{YELLOW}提示: 技术定义包含安装指令等细节，建议直接编辑 config/agents.json{NC}")
-            input("按回车继续...")
-            continue
-        try:
-            name = item_list[int(choice)-1]
-            manage_item_policy("agents", name)
-        except: pass
+def get_policy(): 
+    # 返回合并后的策略用于显示
+    return get_effective_config()
 
-def menu_mcp():
-    def_path = "config/mcp.json"
-    def_cfg = load_json(def_path)
-    
-    while True:
-        os.system('clear')
-        policy_cfg = get_policy().get("mcp", {})
-        print(f"{BLUE}=== MCP 服务管理 ==={NC}")
-        items = def_cfg.get("servers", {})
-        item_list = sorted(items.keys())
-        for i, name in enumerate(item_list, 1):
-            p = policy_cfg.get(name, {})
-            status = f"{GREEN}ON{NC}" if p.get("enabled", True) else f"{RED}OFF{NC}"
-            print(f"{i}. [{status}] {BOLD}{name}{NC}")
-        
-        print("\na. 添加定义 / [序号] 切换策略 / q. 返回")
-        choice = ask("选择操作")
-        if choice.lower() == 'q': break
-        if choice.lower() == 'a':
-            # 简化添加流程
-            name = ask("服务名称")
-            if name:
-                items[name] = {"command": ask("命令", "node"), "args": [], "env": {}}
-                save_json(def_path, def_cfg)
-                mark_sync_required()
-            continue
-        try:
-            name = item_list[int(choice)-1]
-            manage_item_policy("mcp", name)
-        except: pass
+def save_policy(data): 
+    # 只保存到用户侧覆盖文件
+    local_path = os.path.join("config", "manager.local.json")
+    save_json(data, local_path)
+
+# --- 交互式界面 ---
 
 def main():
-    global SYNC_REQUIRED
+    # 确保本地配置文件存在
+    local_path = os.path.join("config", "manager.local.json")
+    if not os.path.exists(local_path):
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        with open(local_path, 'w', encoding='utf-8') as f:
+            json.dump({}, f, indent=2)
+    
+    print(f"{HDR_BLUE}{BOLD}Agent Manager 交互式配置中心{NC}")
+    print("=" * 50)
+    
     while True:
-        os.system('clear')
-        print(f"{HDR_BLUE}{BOLD}╔════════════════════════════════════════════╗{NC}")
-        print(f"{HDR_BLUE}{BOLD}║      Agent Manager 统一策略控制塔         ║{NC}")
-        print(f"{HDR_BLUE}{BOLD}╚════════════════════════════════════════════╝{NC}")
-        if SYNC_REQUIRED: print(f"\n  {PENDING_GOLD}{BOLD}⚠ 注意: 策略已变更，请执行同步 (Run Sync) 以应用到系统。{NC}")
+        print("\n请选择操作:")
+        print("1. 查看当前策略（合并后）")
+        print("2. 编辑 Agent 策略")
+        print("3. 编辑 Tool 策略")
+        print("4. 编辑 Skill 策律")
+        print("5. 编辑 MCP 策略")
+        print("6. 保存并同步")
+        print("7. 退出而不保存")
         
-        print(f"\n  {WHITE}1.{NC} 管理 {BOLD}Agents{NC} 生命周期意愿")
-        print(f"  {WHITE}2.{NC} 管理 {BOLD}MCP{NC} 服务启用策略")
-        print(f"  {WHITE}3.{NC} 管理 {BOLD}Tools{NC} 安装与更新策略")
-        print(f"  {WHITE}4.{NC} 管理 {BOLD}Skills{NC} 启用状态")
-        print(f"  {WHITE}5.{NC} {YELLOW}执行全量环境大扫除 (Cleanup){NC}")
-        print(f"  {WHITE}d.{NC} {BLUE}执行深度诊断 (Doctor){NC}")
-        print(f"  {WHITE}s.{NC} {SUCCESS_GREEN}立即同步并认证 (Run Sync){NC}")
-        print(f"  {WHITE}q.{NC} 退出")
+        choice = ask("请输入选项编号", "1")
         
-        choice = ask("\n请选择功能")
-        if choice == '1': menu_agents()
-        elif choice == '2': menu_mcp()
-        elif choice == '3':
-            item = ask("工具名称")
-            if item: manage_item_policy("tools", item)
-        elif choice == '4':
-            item = ask("技能名称")
-            if item: manage_item_policy("skills", item)
-        elif choice == '5':
-            if ask_yes_no("确认执行环境大扫除?", "n"): os.system("./manage.sh cleanup")
-            input("\n回车返回...")
-        elif choice == 'd': os.system("./manage.sh doctor"); input("\n回车返回...")
-        elif choice == 's': 
-            os.system("./manage.sh all")
-            input("\n回车返回...")
-            SYNC_REQUIRED = False
-        elif choice.lower() == 'q': break
+        if choice == "1":
+            policy = get_policy()
+            print(json.dumps(policy, indent=2, ensure_ascii=False))
+        elif choice == "2":
+            edit_section("agents", "Agent")
+        elif choice == "3":
+            edit_section("tools", "Tool")
+        elif choice == "4":
+            edit_section("skills", "Skill")
+        elif choice == "5":
+            edit_section("mcp", "MCP")
+        elif choice == "6":
+            policy = get_policy()
+            save_policy(policy)
+            print(f"{SUCCESS_GREEN}配置已保存到用户侧覆盖文件，请运行 ./manage.sh all 以应用更改。{NC}")
+            break
+        elif choice == "7":
+            print("已放弃更改。")
+            break
+        else:
+            print(f"{ERROR_RED}无效选项，请重新选择。{NC}")
+
+def edit_section(section_key, section_name):
+    # For editing we work on the local config directly, but we need to show current effective values
+    effective = get_policy()
+    local = get_local_config()
+    section_eff = effective.get(section_key, {})
+    section_loc = local.get(section_key, {})
+    if not section_eff:
+        print(f"{YELLOW}暂无{section_name}策略。{NC}")
+        return
+    
+    print(f"\n{section_name}策略列表:")
+    keys = list(section_eff.keys())
+    for i, k in enumerate(keys, 1):
+        print(f"  {i}. {k}")
+    print("  0. 返回")
+    
+    idx = ask("请选择要编辑的条目编号 (0 返回)", "0")
+    try:
+        idx_int = int(idx)
+        if idx_int == 0:
+            return
+        if not (1 <= idx_int <= len(keys)):
+            print(f"{ERROR_RED}无效编号。{NC}")
+            return
+    except ValueError:
+        print(f"{ERROR_RED}请输入数字。{NC}")
+        return
+    
+    key = keys[idx_int - 1]
+    # Current effective value
+    current_eff_val = section_eff.get(key, {})
+    # Current local value (may be missing)
+    current_loc_val = section_loc.get(key, {})
+    print(f"\n正在编辑 {section_name}: {key}")
+    print(f"当前有效值: {json.dumps(current_eff_val, indent=2, ensure_ascii=False)}")
+    print(f"当前本地值: {json.dumps(current_loc_val, indent=2, ensure_ascii=False)}")
+    
+    # 简单的键值编辑：这里我们允许编辑 enabled, auto_install, auto_update 三个字段
+    enabled = ask_yes_no(f"启用 {key}?", current_eff_val.get("enabled", True))
+    auto_install = ask_yes_no(f"自动安装 {key}?", current_eff_val.get("auto_install", True))
+    auto_update = ask_yes_no(f"自动更新 {key}?", current_eff_val.get("auto_update", True))
+    
+    new_val = {
+        "enabled": enabled,
+        "auto_install": auto_install,
+        "auto_update": auto_update
+    }
+    
+    # Update local config only
+    if section_key not in local:
+        local[section_key] = {}
+    local[section_key][key] = new_val
+    # Save local config
+    save_json(local, os.path.join("config", "manager.local.json"))
+    # Update SYNC_REQUIRED flag
+    global SYNC_REQUIRED
+    SYNC_REQUIRED = True
+    print(f"{SUCCESS_GREEN}{section_name} {key} 已更新并保存到用户侧覆盖文件。{NC}")
 
 if __name__ == "__main__":
-    try: main()
-    except KeyboardInterrupt: print("\n已退出。")
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n已中断。")
+        sys.exit(1)

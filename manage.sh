@@ -19,7 +19,37 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 USER_NAME=$(whoami)
 TEMP_LOG="/tmp/agent_manager_sync_${USER_NAME}.log"
 LOCK_FILE="/tmp/agent_manager_${USER_NAME}.lock"
-CONFIG_FILE="$ROOT_DIR/config/manager.json"
+# 基线策略（仓库提供）
+BASE_CONFIG="$ROOT_DIR/config/manager.json"
+# 本地覆盖（不参与 Git）
+LOCAL_CONFIG="$ROOT_DIR/config/manager.local.json"
+
+# 如果本地覆盖文件存在，则读取并深度合并
+if [ -f "$LOCAL_CONFIG" ]; then
+    CONFIG_FILE="$(mktemp)"
+    python3 -c "
+import json, sys
+with open('$BASE_CONFIG', 'r', encoding='utf-8') as f:
+    base = json.load(f)
+try:
+    with open('$LOCAL_CONFIG', 'r', encoding='utf-8') as f:
+        local = json.load(f)
+except Exception as e:
+    local = {}
+def deep_update(dst, src):
+    for k, v in src.items():
+        if isinstance(v, dict) and isinstance(dst.get(k), dict):
+            deep_update(dst[k], v)
+        else:
+            dst[k] = v
+deep_update(base, local)
+with open('$CONFIG_FILE', 'w', encoding='utf-8') as f:
+    json.dump(base, f, indent=2, ensure_ascii=False)
+"
+else
+    # 没有本地覆盖时直接使用基线
+    CONFIG_FILE="$BASE_CONFIG"
+fi
 
 # 原子锁检查
 if [[ "${1:-}" != "help" && "${1:-}" != "-h" && "${1:-}" != "--help" && "${1:-}" != "-help" && "${1:-}" != "detect" && "${1:-}" != "doctor" && "${1:-}" != "backups:list" && "${1:-}" != "backups:restore" && "${1:-}" != "unlock" ]]; then
