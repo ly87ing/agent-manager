@@ -7,16 +7,16 @@
 本项目严格遵循各 Agent 官方最新规范，确保配置注入的精准与安全：
 
 ```text
-  ┌────────────────┬──────────────────────────────────┬──────────┬─────────────┐
-  │ Agent 名称     │ 官方标准路径                     │ 文件格式 │ 核心键名    │
-  ├────────────────┼──────────────────────────────────┼──────────┼─────────────┤
-  │ Claude Code    │ ~/.claude.json                   │ JSON     │ mcpServers  │
-  │ Gemini CLI     │ ~/.gemini/settings.json          │ JSON     │ mcpServers  │
-  │ Cursor         │ ~/.cursor/mcp.json               │ JSON     │ mcpServers  │
-  │ GitHub Copilot │ ~/.copilot/mcp-config.json       │ JSON     │ mcpServers  │
-  │ OpenCode       │ ~/.config/opencode/opencode.json │ JSON     │ mcp         │
-  │ Codex          │ ~/.codex/config.toml             │ TOML     │ mcp_servers │
-  └────────────────┴──────────────────────────────────┴──────────┴─────────────┘
+   ┌────────────────┬──────────────────────────────────┬──────────┬─────────────┐
+   │ Agent 名称     │ 官方标准路径                     │ 文件格式 │ 核心键名    │
+   ├────────────────┼──────────────────────────────────┼──────────┼─────────────┤
+   │ Claude Code    │ ~/.claude.json                   │ JSON     │ mcpServers  │
+   │ Gemini CLI     │ ~/.gemini/settings.json          │ JSON     │ mcpServers  │
+   │ Cursor         │ ~/.cursor/mcp.json               │ JSON     │ mcpServers  │
+   │ GitHub Copilot │ ~/.copilot/mcp-config.json       │ JSON     │ mcpServers  │
+   │ OpenCode       │ ~/.config/opencode/opencode.json │ JSON     │ mcp         │
+   │ Codex          │ ~/.codex/config.toml             │ TOML     │ mcp_servers │
+   └────────────────┴──────────────────────────────────┴──────────┴─────────────┘
 ```
 
 ## Agent 安装源依据 (Official Evidence)
@@ -48,6 +48,12 @@
 ### 4. 环境自愈与清理
 - **一键大扫除 (Cleanup)**：精准回收备份、碎片、孤儿仓库及冗余日志。
 - **失效洗刷 (Scrubbing)**：自动清理 Agent 目录中的死亡软链。
+
+## 平台支持 (Platform Support)
+
+- 本项目目前在 **macOS** 和 **Linux** 上经过完整测试并保证正常运行。  
+- 在 **Windows** 上，建议使用 **WSL2、Git‑Bash 或 Cygwin** 等提供 POSIX 兼容层的环境，以获得完整功能。  
+- 若希望在原生 PowerShell 或 CMD 中直接使用，需要对脚本进行额外的跨平台改造（将外部命令替换为 PowerShell 等价实现），此工作尚未完成。
 
 ## 管理指令集
 
