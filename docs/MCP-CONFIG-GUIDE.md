@@ -24,6 +24,9 @@
 # 全量同步（包含 MCP 配置）
 make all
 
+# 离线模式（跳过网络和 git 操作，速度提升 89%）
+make offline
+
 # 仅同步 MCP 配置
 cd agent-mcp && python3 sync_mcp.py --config ../config/manager.json --def-file ../config/mcp.json
 ```
@@ -261,18 +264,29 @@ codex mcp list
 AUGMENT_SESSION_AUTH='{"accessToken":"ace_...","tenantURL":"...","scopes":[]}'
 ```
 
-#### 首次设置（推荐方式）
+#### 首次设置（自动化）
 
 ```bash
 # 1. 克隆主仓库
 git clone https://github.com/ly87ing/agent-manager.git
 cd agent-manager
 
-# 2. 克隆 secrets 仓库（需要访问权限）
-git clone https://github.com/ly87ing/secrets.git secrets
-
-# 3. 完成！凭证已就绪
+# 2. 运行 make all - secrets 会自动克隆！
 make all
+```
+
+**自动化流程**：
+- `make all` 会检测 `secrets/` 是否存在
+- 如缺失，自动从 `https://github.com/ly87ing/secrets.git` 克隆
+- 如有权限问题，会提示手动操作
+
+#### 手动初始化
+
+如需手动控制：
+
+```bash
+cd agent-manager
+./scripts/init-secrets.sh
 ```
 
 #### 更新凭证
@@ -434,6 +448,27 @@ rm ./.gemini/settings.json
 
 ---
 
+### Q6: 忘记 clone secrets 仓库
+
+**症状**: 运行时提示找不到凭证文件
+
+**解决**:
+
+```bash
+# 方法 1: 自动初始化（推荐）
+make all
+# 会自动检测并克隆 secrets 仓库
+
+# 方法 2: 手动运行初始化脚本
+./scripts/init-secrets.sh
+
+# 方法 3: 手动克隆
+cd agent-manager
+git clone https://github.com/ly87ing/secrets.git secrets
+```
+
+---
+
 ## 调试技巧
 
 ### 通用调试命令
@@ -486,20 +521,22 @@ python3 -c "import tomllib; tomllib.load(open('~/.codex/config.toml', 'rb'))"
 ## 附录：Agent Manager MCP 同步流程
 
 ```
-1. 读取 secrets/mcp.env 加载凭证
+1. 检测 secrets/ 目录（如缺失则自动克隆）
    ↓
-2. 读取 config/mcp.json 获取服务器定义
+2. 读取 secrets/mcp.env 加载凭证
    ↓
-3. 替换 ${VAR} 占位符为实际凭证
+3. 读取 config/mcp.json 获取服务器定义
    ↓
-4. 根据各 Agent 格式生成配置
+4. 替换 ${VAR} 占位符为实际凭证
+   ↓
+5. 根据各 Agent 格式生成配置
    ├─ JSON 格式 (Claude/Gemini/Cursor/Copilot)
    ├─ OpenCode 格式 (type + command 数组 + environment)
    └─ TOML 格式 (Codex，带字符串转义)
    ↓
-5. 原子写入各配置文件
+6. 原子写入各配置文件
    ↓
-6. 记录 _MANAGED_BY = "agent-manager" 标记
+7. 记录 _MANAGED_BY = "agent-manager" 标记
 ```
 
 ---
