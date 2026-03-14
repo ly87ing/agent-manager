@@ -88,6 +88,9 @@ class GitStatusCache:
         self._cache[cwd_str] = result
         return result
 
+# 实例化缓存
+git_cache = GitStatusCache()
+
 
 def apply_overrides(name, target_dir, dry_run=False):
     """将本地补丁应用到目标工具目录"""
