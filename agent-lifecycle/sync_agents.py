@@ -23,13 +23,20 @@ def load_json(path):
             return json.load(f)
     except: return {}
 
-def run_cmd(cmd):
+def run_cmd(cmd, timeout=300):
     """运行 shell 命令并返回结果"""
     try:
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True, shell=True)
+        # If cmd is a list, we do not use shell
+        if isinstance(cmd, list):
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True, shell=False, timeout=timeout)
+        else:
+            # Assume it's a string and we need shell for complex commands
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True, shell=True, timeout=timeout)
         return True, result.stdout
+    except subprocess.TimeoutExpired:
+        return False, f"TIMEOUT after {timeout} seconds: {cmd}"
     except subprocess.CalledProcessError as e:
-        return False, f"{e.stderr}\n{e.stdout}"
+        return False, f"Command '{cmd}' failed with exit code {e.returncode}: {e.stderr}"
 
 
 class ProviderCache:
@@ -55,7 +62,7 @@ class ProviderCache:
         if self._brew_formulae is None:
             self._brew_formulae = set()
             if shutil.which("brew"):
-                success, out = run_cmd("brew list --formula -1")
+                success, out = run_cmd(["brew", "list", "--formula", "-1"])
                 if success:
                     self._brew_formulae = set(out.strip().split('\n')) if out.strip() else set()
         return self._brew_formulae
@@ -65,7 +72,7 @@ class ProviderCache:
         if self._brew_casks is None:
             self._brew_casks = set()
             if shutil.which("brew"):
-                success, out = run_cmd("brew list --cask -1")
+                success, out = run_cmd(["brew", "list", "--cask", "-1"])
                 if success:
                     self._brew_casks = set(out.strip().split('\n')) if out.strip() else set()
         return self._brew_casks
@@ -75,7 +82,7 @@ class ProviderCache:
         if self._gh_extensions is None:
             self._gh_extensions = ""
             if shutil.which("gh"):
-                success, out = run_cmd("gh extension list")
+                success, out = run_cmd(["gh", "extension", "list"])
                 if success:
                     self._gh_extensions = out
         return self._gh_extensions

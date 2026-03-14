@@ -26,12 +26,18 @@ def load_json(path):
 def run_cmd(cmd, cwd=None, timeout=None):
     """运行 shell 命令并返回结果"""
     try:
-        result = subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True, shell=isinstance(cmd, str), timeout=timeout)
+        # Determine if we should use shell
+        if isinstance(cmd, list):
+            # Use list form without shell
+            result = subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True, shell=False, timeout=timeout)
+        else:
+            # Use string form with shell
+            result = subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True, shell=True, timeout=timeout)
         return True, result.stdout
     except subprocess.TimeoutExpired:
-        return False, "TIMEOUT"
+        return False, f"TIMEOUT after {timeout} seconds: {cmd}"
     except subprocess.CalledProcessError as e:
-        return False, f"{e.stderr}\n{e.stdout}"
+        return False, f"Command '{cmd}' failed with exit code {e.returncode}: {e.stderr}"
 
 
 class GitStatusCache:
@@ -53,7 +59,7 @@ class GitStatusCache:
             return self._cache[cwd_str]
         
         # 快速检查：先看本地是否有未提交更改
-        success, out = run_cmd("git status --porcelain", cwd=cwd, timeout=timeout)
+        success, out = run_cmd(["git", "status", "--porcelain"], cwd=cwd, timeout=timeout)
         if not success:
             self._cache[cwd_str] = True  # 失败时保守假设是最新的
             return True
@@ -64,14 +70,14 @@ class GitStatusCache:
             return False
         
         # 检查远程更新：使用 ls-remote 代替 fetch（更快，不修改本地状态）
-        success, out = run_cmd("git ls-remote origin HEAD", cwd=cwd, timeout=timeout)
+        success, out = run_cmd(["git", "ls-remote", "origin", "HEAD"], cwd=cwd, timeout=timeout)
         if not success or out.strip() == "":
             self._cache[cwd_str] = True  # 无法检查时保守假设是最新的
             return True
         
         remote_hash = out.strip().split()[0]
         
-        success, local_out = run_cmd("git rev-parse HEAD", cwd=cwd, timeout=timeout)
+        success, local_out = run_cmd(["git", "rev-parse", "HEAD"], cwd=cwd, timeout=timeout)
         if not success:
             self._cache[cwd_str] = True
             return True
@@ -148,7 +154,7 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
                 else:
                     if git_cache.is_git_up_to_date(target_dir): logging.info(f"[TOOL: {name}] (内容已最新)")
                     else:
-                        success, out = run_cmd("git pull", cwd=target_dir)
+                        success, out = run_cmd(["git", "pull"], cwd=target_dir)
                         if success: logging.info(f"[TOOL: {name}] (已更新)"); needs_setup = True
                         else: logging.error(f"[TOOL: {name}] (更新失败: {out})"); success_build = False
         else:
@@ -157,7 +163,7 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
                 if not dry_run: shutil.rmtree(target_dir)
             logging.info(f"正在安装 {name}...")
             if not dry_run:
-                success, out = run_cmd(f"git clone {url} \"{target_dir}\"")
+                success, out = run_cmd(["git", "clone", url, str(target_dir)])
                 if success: logging.info(f"[TOOL: {name}] (安装成功)"); needs_setup = True
                 else: logging.error(f"[TOOL: {name}] (下载失败: {out})"); success_build = False
         

@@ -10,6 +10,7 @@ import datetime
 import shutil
 import tempfile
 from pathlib import Path
+import shlex
 
 # 配置日志：统一审计时间戳
 logging.basicConfig(
@@ -39,13 +40,21 @@ def atomic_write_json(path, data):
         if os.path.exists(temp_path): os.remove(temp_path)
         raise e
 
-def run_cmd(cmd, cwd=None):
+def run_cmd(cmd, cwd=None, timeout=300):
     """运行 shell 命令并返回结果"""
     try:
-        result = subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True, shell=isinstance(cmd, str))
+        # Determine if we should use shell
+        if isinstance(cmd, list):
+            # Use list form without shell
+            result = subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True, shell=False, timeout=timeout)
+        else:
+            # Use string form with shell
+            result = subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True, shell=True, timeout=timeout)
         return True, result.stdout
+    except subprocess.TimeoutExpired:
+        return False, f"TIMEOUT after {timeout} seconds: {cmd}"
     except subprocess.CalledProcessError as e:
-        return False, f"{e.stderr}\n{e.stdout}"
+        return False, f"Command '{cmd}' failed with exit code {e.returncode}: {e.stderr}\n{e.stdout}"
 
 def clone_or_update_repo(name, url, base_dir, dry_run=False):
     """下载或更新 Git 仓库"""
@@ -55,7 +64,7 @@ def clone_or_update_repo(name, url, base_dir, dry_run=False):
             if dry_run: logging.info(f"[{name}] (预览: 计划检查更新)")
             else:
                 logging.info(f"正在检查 {name} 更新...")
-                success, output = run_cmd("git pull", cwd=target_dir)
+                success, output = run_cmd(["git", "pull"], cwd=target_dir)
                 if success: logging.info(f"[{name}] 更新成功。")
                 else: logging.error(f"[{name}] 更新失败: {output}")
         else:
@@ -63,7 +72,7 @@ def clone_or_update_repo(name, url, base_dir, dry_run=False):
     else:
         logging.info(f"[{name}] 仓库不存在，准备下载 (git clone)...")
         if not dry_run:
-            success, output = run_cmd(f"git clone {url} \"{target_dir}\"")
+            success, output = run_cmd(["git", "clone", url, str(target_dir)])
             if success: logging.info(f"[{name}] 下载成功。")
             else: logging.error(f"[{name}] 下载失败: {output}")
     return target_dir
@@ -83,7 +92,12 @@ def install_dependencies_and_build(repo_path, config, dry_run=False):
         if (repo_path / "yarn.lock").exists(): cmd = "yarn install"
         elif (repo_path / "pnpm-lock.yaml").exists(): cmd = "pnpm install"
         else: cmd = "npm install"
-        ok, out = run_cmd(cmd, cwd=repo_path)
+        # Convert command string to list for safer execution
+        if isinstance(cmd, str):
+            cmd_list = shlex.split(cmd)
+            ok, out = run_cmd(cmd_list, cwd=repo_path)
+        else:
+            ok, out = run_cmd(cmd, cwd=repo_path)
         if ok:
             with open(repo_path / "package.json", 'r', encoding='utf-8') as f:
                 try:
