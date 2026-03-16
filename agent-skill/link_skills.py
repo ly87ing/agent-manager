@@ -30,6 +30,10 @@ def run_cmd(cmd, cwd=None):
         return True, result.stdout
     except subprocess.CalledProcessError as e:
         return False, e.stderr
+    except FileNotFoundError as e:
+        return False, f"Directory or executable not found: {e}"
+    except Exception as e:
+        return False, f"Unexpected error executing cmd: {e}"
 
 def install_dependencies_and_build(repo_path, config, dry_run=False):
     """根据仓库内容执行依赖安装与初始化"""
@@ -43,16 +47,22 @@ def install_dependencies_and_build(repo_path, config, dry_run=False):
 
     if (repo_path / "package.json").exists():
         logging.info(f"[{repo_path.name}] 处理 Node.js 依赖...")
-        if (repo_path / "yarn.lock").exists(): cmd = "yarn install"
-        elif (repo_path / "pnpm-lock.yaml").exists(): cmd = "pnpm install"
-        else: cmd = "npm install"
+        if (repo_path / "yarn.lock").exists():
+            pkg_mgr = "yarn"
+            cmd = "yarn install"
+        elif (repo_path / "pnpm-lock.yaml").exists():
+            pkg_mgr = "pnpm"
+            cmd = "pnpm install"
+        else:
+            pkg_mgr = "npm"
+            cmd = "npm install"
         ok, out = run_cmd(cmd, cwd=repo_path)
         if ok:
             with open(repo_path / "package.json", 'r', encoding='utf-8') as f:
                 try:
                     pkg_data = json.load(f)
                     if "scripts" in pkg_data and "build" in pkg_data["scripts"]:
-                        run_cmd("npm run build", cwd=repo_path)
+                        run_cmd(f"{pkg_mgr} run build", cwd=repo_path)
                 except: pass
         else: logging.error(f"[{repo_path.name}] 依赖安装失败: {out}"); success_all = False
             

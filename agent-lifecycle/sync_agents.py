@@ -37,6 +37,10 @@ def run_cmd(cmd, timeout=300):
         return False, f"TIMEOUT after {timeout} seconds: {cmd}"
     except subprocess.CalledProcessError as e:
         return False, f"Command '{cmd}' failed with exit code {e.returncode}: {e.stderr}"
+    except FileNotFoundError as e:
+        return False, f"Directory or executable not found: {e}"
+    except Exception as e:
+        return False, f"Unexpected error executing '{cmd}': {e}"
 
 
 class ProviderCache:

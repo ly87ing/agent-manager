@@ -38,6 +38,10 @@ def run_cmd(cmd, cwd=None, timeout=None):
         return False, f"TIMEOUT after {timeout} seconds: {cmd}"
     except subprocess.CalledProcessError as e:
         return False, f"Command '{cmd}' failed with exit code {e.returncode}: {e.stderr}"
+    except FileNotFoundError as e:
+        return False, f"Directory or executable not found: {e}"
+    except Exception as e:
+        return False, f"Unexpected error executing '{cmd}': {e}"
 
 
 class GitStatusCache:
@@ -157,6 +161,7 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
                 else:
                     if git_cache.is_git_up_to_date(target_dir): logging.info(f"[TOOL: {name}] (内容已最新)")
                     else:
+                        run_cmd(["git", "reset", "--hard"], cwd=target_dir) # Clean overrides before pull
                         success, out = run_cmd(["git", "pull"], cwd=target_dir)
                         if success: logging.info(f"[TOOL: {name}] (已更新)"); needs_setup = True
                         else: logging.error(f"[TOOL: {name}] (更新失败: {out})"); success_build = False

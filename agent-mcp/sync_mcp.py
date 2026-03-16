@@ -55,6 +55,10 @@ def run_cmd(cmd, cwd=None, timeout=300):
         return False, f"TIMEOUT after {timeout} seconds: {cmd}"
     except subprocess.CalledProcessError as e:
         return False, f"Command '{cmd}' failed with exit code {e.returncode}: {e.stderr}\n{e.stdout}"
+    except FileNotFoundError as e:
+        return False, f"Directory or executable not found: {e}"
+    except Exception as e:
+        return False, f"Unexpected error executing '{cmd}': {e}"
 
 def clone_or_update_repo(name, url, base_dir, dry_run=False):
     """下载或更新 Git 仓库"""
@@ -140,7 +144,8 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
     new_blocks = []
     for name, settings in active_servers.items():
         block = f'\n\n[mcp_servers.{name}]\ncommand = "{settings["command"]}"\n'
-        block += f'args = [{", ".join([f"\"{a}\"" for a in settings["args"]])}]\n'
+        args_str = ", ".join([f'"{a}"' for a in settings["args"]])
+        block += f'args = [{args_str}]\n'
         env = {**settings.get("env", {}), "_MANAGED_BY": "agent-manager"}
         block += f'[mcp_servers.{name}.env]\n'
         for k, v in env.items(): block += f'{k} = {toml_quote(v)}\n'
@@ -224,7 +229,7 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False):
                 srv = current_config[key_name][k]
                 if isinstance(srv, dict):
                     # 检查 env 或 environment 中的 _MANAGED_BY
-                    env_dict = srv.get('env', srv.get('environment', {}))
+                    env_dict = (srv.get('env') or srv.get('environment') or {})
                     if env_dict.get('_MANAGED_BY') == 'agent-manager':
                         if k not in active_mcp_settings:
                             logging.info(f"INFO: [AGENT: {agent_name}] 移除孤儿 MCP: {k}")

@@ -63,8 +63,13 @@ if [[ "${1:-}" != "help" && "${1:-}" != "-h" && "${1:-}" != "--help" && "${1:-}"
         fi
     fi
     echo $$ > "$LOCK_FILE"
-    trap 'rm -f "$LOCK_FILE"' EXIT
 fi
+
+function cleanup_on_exit() {
+    [ -f "$LOCK_FILE" ] && rm -f "$LOCK_FILE"
+    [ -n "${CONFIG_FILE:-}" ] && [[ "$CONFIG_FILE" != "$BASE_CONFIG" ]] && rm -f "$CONFIG_FILE"
+}
+trap cleanup_on_exit EXIT
 
 # 确保执行权限
 chmod +x "$ROOT_DIR/agent-rule/scripts/"*.sh > /dev/null 2>&1 || true
@@ -391,20 +396,58 @@ case "$cmd" in
     doctor|status) doctor_check ;;
     detect) detect_agents ;;
     unlock) rm -f "$LOCK_FILE"; echo "锁已解除。" ;;
-    backups:list) find "$HOME" -maxdepth 3 \( -name "*.bak.*" -o -name "*.bak" \) | sort -r | head -n 20 ;;
+    backups:list) find "$HOME" -maxdepth 3 \( -name "*.bak.*" -o -name "*.bak" \) 2>/dev/null | sort -r | head -n 20 || true ;;
     backups:restore) 
-        files=$(find "$HOME" -maxdepth 3 \( -name "*.bak.*" -o -name "*.bak" \) | sort -r | head -n 10)
+        files=$(find "$HOME" -maxdepth 3 \( -name "*.bak.*" -o -name "*.bak" \) 2>/dev/null | sort -r | head -n 10 || true)
         if [ -z "$files" ]; then echo "未发现备份。"; exit 0; fi
         select f in $files; do cp -i "$f" "${f%.bak.*}"; echo "已恢复。"; break; done < /dev/tty ;;
+    mcp:sync)
+        (cd "$ROOT_DIR/agent-mcp" && $PYTHON_CMD sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json" $DRY_RUN_FLAG) ;;
+    rules:sync)
+        (cd "$ROOT_DIR/agent-rule" && ./scripts/sync-agent-rules.sh $DRY_RUN_FLAG) ;;
+    skills:link)
+        (cd "$ROOT_DIR/agent-skill" && $PYTHON_CMD link_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json" --yes $DRY_RUN_FLAG) ;;
+    tools:sync)
+        (cd "$ROOT_DIR/agent-tool" && $PYTHON_CMD sync_tools.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/tools.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG) ;;
     cleanup)
         echo -e "${HDR_BLUE}正在执行全量环境大扫除...${NC}"
-        (cd "$ROOT_DIR/agent-rule" && ./scripts/clean-agent-rule-backups.sh --yes || true)
-        local agents_paths=$($PYTHON_CMD -c "import json,os; def get_p(v): return os.path.expanduser(v if isinstance(v,str) else v.get('path','')); try: m=json.load(open('$ROOT_DIR/config/mcp.json')).get('agent_paths',{}).values(); s=json.load(open('$ROOT_DIR/config/skills.json')).get('agents',{}).values(); print('\n'.join({os.path.dirname(get_p(p)) for p in list(m)+list(s) if p})) except: pass")
+        # (cd "$ROOT_DIR/agent-rule" && ./scripts/clean-agent-rule-backups.sh --yes || true)
+        agents_paths=$($PYTHON_CMD -c "
+import json, os
+def get_p(v): 
+    return os.path.expanduser(v if isinstance(v,str) else v.get('path',''))
+try:
+    m=json.load(open('$ROOT_DIR/config/mcp.json')).get('agent_paths',{}).values()
+    s=json.load(open('$ROOT_DIR/config/skills.json')).get('agents',{}).values()
+    print('\n'.join({os.path.dirname(get_p(p)) for p in list(m)+list(s) if p}))
+except Exception:
+    pass
+")
         echo "$agents_paths" | while read -r d; do [ -d "$d" ] && find "$d" -maxdepth 1 \( -name "*.bak.*" -o -name "*.tmp_*" \) -delete 2>/dev/null || true; done
         rm -f /tmp/agent_manager_sync_${USER_NAME}.log*
         echo -e "${SUCCESS_GREEN}全量清理完成。${NC}" ;;
     help|-h|--help|-help)
-        echo -e "${HDR_BLUE}Agent Manager 帮助手册 (Platinum Edition)${NC}"
-        echo "常用命令: all, ui, doctor, detect, cleanup, backups:list, backups:restore" ;;
+        echo -e "${HDR_BLUE}${BOLD}Agent Manager 帮助手册 (Platinum Edition)${NC}\n"
+        echo -e "${BOLD}${HDR_BLUE}=== 全局参数 (Flags) ===${NC}"
+        echo -e "  ${PENDING_GOLD}--dry-run${NC}       空转模式，演示过程日志输出但不产生真实的侧边影响"
+        echo -e "  ${PENDING_GOLD}--offline${NC}       离线模式，跳过 Git 同步与在线环境依赖拉取验证，极大提升速度\n"
+        echo -e "${BOLD}${HDR_BLUE}=== 日常入口 (Main Flows) ===${NC}"
+        echo -e "  ${SUCCESS_GREEN}all${NC}             执行全量同步配置（默认执行，同直接执行 \`make\`）"
+        echo -e "  ${SUCCESS_GREEN}ui${NC}              启动基于 Terminal 的交互式的可视化管理终端界面"
+        echo -e "  ${SUCCESS_GREEN}doctor / status${NC} 进行深度的资源校验、配置自检与环境排错诊断"
+        echo -e "  ${SUCCESS_GREEN}detect${NC}          仅执行各 Agent 开发工具的环境探测与支持情况检测\n"
+        echo -e "${BOLD}${HDR_BLUE}=== 运维排错 (Maintenance) ===${NC}"
+        echo -e "  ${VAL_PURPLE}cleanup${NC}         执行全量环境大扫除，深度清理临时文件、无用快照缓存及历史日志"
+        echo -e "  ${VAL_PURPLE}unlock${NC}          强制清除因意外中断或多进程引起的任务挂起和进程锁"
+        echo -e "  ${VAL_PURPLE}backups:list${NC}    查找并列出近期系统中可用的容灾备份配置快照，最多20个"
+        echo -e "  ${VAL_PURPLE}backups:restore${NC} 交互式快照选择，用于从特定备份快照中恢复配置"
+        echo -e "  ${VAL_PURPLE}logs${NC}            查看系统最近一次执行的完整全链路同步日志"
+        echo -e "  ${VAL_PURPLE}clean-logs${NC}      清空由同步流程留存的所有运行日志文件\n"
+        echo -e "${BOLD}${HDR_BLUE}=== 分步原子控制 (Atomic syncs) ===${NC}"
+        echo -e "  ${BORDER_GRAY}mcp:sync${NC}        独立执行所有环境上下文向开发客户端 (如 Cursor, Windsurf) 的 MCP 注册及注入"
+        echo -e "  ${BORDER_GRAY}rules:sync${NC}      独立执行规则与系统级 prompt 指令向各个 Agent 的拷贝或软链接分发"
+        echo -e "  ${BORDER_GRAY}skills:link${NC}     独立执行全局或系统级专业技能代码集到 Agent 沙盒空间的映射配置与软链接"
+        echo -e "  ${BORDER_GRAY}tools:sync${NC}      独立同步或安装全局统一增强工具链条"
+        echo "" ;;
     *) echo -e "${ERROR_RED}错误: 未知命令 '$cmd'${NC}"; exit 1 ;;
 esac

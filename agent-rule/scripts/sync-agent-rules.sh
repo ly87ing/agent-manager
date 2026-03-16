@@ -95,7 +95,14 @@ awk -F'|' '
   BEGIN { err=0 }
   /^#/ || NF<4 { next }
   {
-    dst = $4; sub(/\{\{HOME\}\}/, ENVIRON["HOME"], dst)
+    dst = $4; 
+    sub(/\{\{HOME\}\}/, ENVIRON["HOME"], dst);
+    if (dst ~ /^~\//) {
+        sub(/^~\//, ENVIRON["HOME"] "/", dst);
+    } else if (dst == "~") {
+        dst = ENVIRON["HOME"];
+    }
+    
     if (seen[dst]) {
       print "❌ 关键错误: 规则路径冲突! " $1 " 与 " seen[dst] " 均指向: " dst > "/dev/stderr"
       err=1

@@ -1,4 +1,4 @@
-.PHONY: all ui help doctor detect status cleanup backups-list rules-sync skills-link mcp-sync tools-sync dry-run clean-logs offline
+.PHONY: all ui help doctor detect status cleanup unlock backups-list restore logs rules-sync skills-link mcp-sync tools-sync dry-run clean-logs offline
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -40,10 +40,17 @@ restore:
 	@./manage.sh backups:restore
 
 # 环境探测
+detect:
+	@./manage.sh detect
 
 # 查看最近同步日志
 logs:
 	@cat /tmp/agent_manager_sync_$(shell whoami).log | less -R
+
+# 清理日志
+clean-logs:
+	@rm -f /tmp/agent_manager_sync_$(shell whoami).log*
+	@echo "日志已清理"
 
 # 独立同步任务
 rules-sync:

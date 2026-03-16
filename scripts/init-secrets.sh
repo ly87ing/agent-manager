@@ -17,7 +17,7 @@ if [ -d "$SECRETS_DIR" ]; then
         echo ""
         echo "正在拉取最新凭证..."
         cd "$SECRETS_DIR"
-        git pull origin main 2>&1 || echo "⚠️  拉取失败，请检查网络连接"
+        git pull 2>&1 || echo "⚠️  拉取失败，请检查网络连接"
         echo ""
         echo "✅ secrets 已是最新"
         exit 0
