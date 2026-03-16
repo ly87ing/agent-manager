@@ -1,4 +1,4 @@
-.PHONY: all ui help doctor docker detect status cleanup unlock backups-list restore logs rules-sync skills-link mcp-sync tools-sync dry-run clean-logs offline
+.PHONY: all ui help doctor detect status cleanup unlock backups-list restore logs rules-sync skills-link mcp-sync tools-sync dry-run clean-logs offline
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -17,11 +17,6 @@ ui:
 
 # 系统健康深度诊断
 doctor:
-	@./manage.sh doctor
-
-docker:
-	@echo "⚠️  未找到 'docker' 指令，您可能想输入的是 'make doctor' (深度诊断)？"
-	@echo "   正在为您执行 'make doctor'...\n"
 	@./manage.sh doctor
 
 # 快速查看状态 (同 doctor)
