@@ -414,16 +414,37 @@ case "$cmd" in
         # (cd "$ROOT_DIR/agent-rule" && ./scripts/clean-agent-rule-backups.sh --yes || true)
         agents_paths=$($PYTHON_CMD -c "
 import json, os
-def get_p(v): 
+def expand(v): 
     return os.path.expanduser(v if isinstance(v,str) else v.get('path',''))
+
+targets = []
 try:
     m=json.load(open('$ROOT_DIR/config/mcp.json')).get('agent_paths',{}).values()
     s=json.load(open('$ROOT_DIR/config/skills.json')).get('agents',{}).values()
-    print('\n'.join({os.path.dirname(get_p(p)) for p in list(m)+list(s) if p}))
+    for p in list(m)+list(s):
+        if p: targets.append(expand(p))
+
+    # 加入 rule 的备份路径
+    rm = '$ROOT_DIR/config/rules-targets.list'
+    if os.path.exists(rm):
+        for line in open(rm):
+            if not line.strip() or line.startswith('#'): continue
+            dst = line.strip().split('|')[3].replace('{{HOME}}', '~')
+            targets.append(os.path.expanduser(dst))
 except Exception:
     pass
+
+for t in set(targets): print(t)
 ")
-        echo "$agents_paths" | while read -r d; do [ -d "$d" ] && find "$d" -maxdepth 1 \( -name "*.bak.*" -o -name "*.tmp_*" \) -delete 2>/dev/null || true; done
+        echo "$agents_paths" | while read -r p; do
+            if [ -n "$p" ]; then
+                d=$(dirname "$p")
+                b=$(basename "$p")
+                if [ -d "$d" ]; then
+                    find "$d" -maxdepth 1 \( -name "${b}.bak.*" -o -name "${b}.tmp_*" -o -name "*.tmp_*" \) -type f -delete 2>/dev/null || true
+                fi
+            fi
+        done
         rm -f /tmp/agent_manager_sync_${USER_NAME}.log*
         echo -e "${SUCCESS_GREEN}全量清理完成。${NC}" ;;
     help|-h|--help|-help)

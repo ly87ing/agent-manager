@@ -174,16 +174,16 @@ def edit_section(section_key, section_name):
     print(f"当前有效值: {json.dumps(current_eff_val, indent=2, ensure_ascii=False)}")
     print(f"当前本地值: {json.dumps(current_loc_val, indent=2, ensure_ascii=False)}")
     
-    # 简单的键值编辑：这里我们允许编辑 enabled, auto_install, auto_update 三个字段
+    # 简单的键值编辑：根据 section_key 决定是否有构建类配置
     enabled = ask_yes_no(f"启用 {key}?", current_eff_val.get("enabled", True))
-    auto_install = ask_yes_no(f"自动安装 {key}?", current_eff_val.get("auto_install", True))
-    auto_update = ask_yes_no(f"自动更新 {key}?", current_eff_val.get("auto_update", True))
     
-    new_val = {
-        "enabled": enabled,
-        "auto_install": auto_install,
-        "auto_update": auto_update
-    }
+    new_val = { "enabled": enabled }
+    
+    if section_key in ["agents", "tools"]:
+        auto_install = ask_yes_no(f"自动安装 {key}?", current_eff_val.get("auto_install", True))
+        auto_update = ask_yes_no(f"自动更新 {key}?", current_eff_val.get("auto_update", True))
+        new_val["auto_install"] = auto_install
+        new_val["auto_update"] = auto_update
     
     # Update local config only
     if section_key not in local:
