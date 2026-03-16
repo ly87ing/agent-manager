@@ -12,6 +12,7 @@
 - **Plan Before Editing:** Start with codebase retrieval to explore, analyze context and impact, and plan your approach *before* making non-trivial edits.
 - **Exact Match Search:** Use local file tools or `rg` only for exact string matches, config keys, logs, or generated files.
 - **Verification is CRITICAL:** Always run tests, lint, or other local verification after modification.
+- **Artifact Hygiene:** Before invoking Playwright, browser automation, generators, or debug tooling, classify outputs as project assets, workflow-consumed artifacts, or disposable run artifacts. Follow the target project's established conventions first. Use project-local ignored output directories only for workflow-consumed artifacts already used by repository workflows, or when the user explicitly asks to establish a reusable project convention. Otherwise, treat the output as disposable and use OS temp directories unless a working-tree path is required.
 
 ## 3. Domain Rules (Progressive Disclosure)
 
@@ -28,3 +29,7 @@
 - **Frontend Development & Verification:**
   If your task involves UI, frontend validation logic, or user flows, you **MUST** read:
   `modules/frontend.md`
+
+- **Generated Output & Artifact Hygiene:**
+  If your task involves `playwright-cli`, Playwright, browser automation, generators, generated test artifacts, or temporary debug artifacts, you **MUST** read:
+  `modules/artifact-hygiene.md`
