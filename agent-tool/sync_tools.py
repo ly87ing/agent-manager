@@ -111,8 +111,10 @@ def apply_overrides(name, target_dir, dry_run=False):
                 logging.info(f"  (预览: 计划覆盖 {rel_path})")
                 continue
             dst.parent.mkdir(parents=True, exist_ok=True)
-            if dst.is_symlink() or dst.exists():
+            if dst.is_symlink() or dst.is_file():
                 dst.unlink()
+            elif dst.is_dir():
+                shutil.rmtree(dst)
             shutil.copy2(src, dst)
             logging.info(f"  已覆盖: {rel_path}")
 

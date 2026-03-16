@@ -191,8 +191,12 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False):
         config_path = Path(config_path_str).expanduser()
         
         if not config_path.parent.exists():
-            logging.info(f"INFO: [AGENT: {agent_name}] Agent 目录缺失，跳过。")
-            continue
+            logging.info(f"INFO: [AGENT: {agent_name}] Agent 目录缺失，自动创建以确保后续配置注入。")
+            try:
+                config_path.parent.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                logging.error(f"无法创建配置目录 {config_path.parent}: {e}")
+                continue
 
         if not dry_run: backup_config(config_path, dry_run)
 

@@ -95,6 +95,10 @@ awk -F'|' '
   BEGIN { err=0 }
   /^#/ || NF<4 { next }
   {
+    # Trim leading/trailing whitespaces defensively for all fields
+    gsub(/^[ \t]+|[ \t]+$/, "", $1)
+    gsub(/^[ \t]+|[ \t]+$/, "", $3)
+    gsub(/^[ \t]+|[ \t]+$/, "", $4)
     dst = $4; 
     sub(/\{\{HOME\}\}/, ENVIRON["HOME"], dst);
     if (dst ~ /^~\//) {
@@ -114,6 +118,12 @@ awk -F'|' '
 
 # --- 执行同步 ---
 while IFS='|' read -r name group src_rel dst_pat; do
+  # Trim whitespaces
+  name=$(echo "$name" | awk '{$1=$1;print}')
+  group=$(echo "$group" | awk '{$1=$1;print}')
+  src_rel=$(echo "$src_rel" | awk '{$1=$1;print}')
+  dst_pat=$(echo "$dst_pat" | awk '{$1=$1;print}')
+
   [[ -z "$name" || "$name" == \#* ]] && continue
   [[ "$group_filter" != "all" && "$group_filter" != "$group" ]] && continue
   [[ -n "$target_filter" && "$target_filter" != "$name" ]] && continue
