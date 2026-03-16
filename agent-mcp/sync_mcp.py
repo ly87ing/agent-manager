@@ -93,9 +93,15 @@ def install_dependencies_and_build(repo_path, config, dry_run=False):
 
     if (repo_path / "package.json").exists():
         logging.info(f"[{repo_path.name}] 处理 Node.js 依赖...")
-        if (repo_path / "yarn.lock").exists(): cmd = "yarn install"
-        elif (repo_path / "pnpm-lock.yaml").exists(): cmd = "pnpm install"
-        else: cmd = "npm install"
+        if (repo_path / "yarn.lock").exists():
+            pkg_mgr = "yarn"
+            cmd = "yarn install"
+        elif (repo_path / "pnpm-lock.yaml").exists():
+            pkg_mgr = "pnpm"
+            cmd = "pnpm install"
+        else:
+            pkg_mgr = "npm"
+            cmd = "npm install"
         # Convert command string to list for safer execution
         if isinstance(cmd, str):
             cmd_list = shlex.split(cmd)
@@ -107,7 +113,7 @@ def install_dependencies_and_build(repo_path, config, dry_run=False):
                 try:
                     pkg_data = json.load(f)
                     if "scripts" in pkg_data and "build" in pkg_data["scripts"]:
-                        run_cmd("npm run build", cwd=repo_path)
+                        run_cmd(f"{pkg_mgr} run build", cwd=repo_path)
                 except: pass
         else: logging.error(f"[{repo_path.name}] 失败: {out}"); success_all = False
     return success_all
