@@ -23,7 +23,7 @@ def load_json(path):
             return json.load(f)
     except: return {}
 
-def run_cmd(cmd, cwd=None, timeout=300):
+def run_cmd(cmd, cwd=None, timeout=None):
     """运行 shell 命令并返回结果"""
     try:
         # Determine if we should use shell
@@ -155,21 +155,28 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
     target_dir = Path(base_dir) / name
     needs_setup = force
     success_build = True
+    should_apply_overrides = False
 
     if url:
         if target_dir.exists() and (target_dir / ".git").exists():
             if not auto_update:
                 logging.info(f"[TOOL: {name}] 已就绪，auto_update 关闭。")
+                should_apply_overrides = True
             else:
                 if dry_run: logging.info(f"[TOOL: {name}] (预览: 计划检查更新)")
                 else:
                     status_ok, status_out = run_cmd(["git", "status", "--porcelain"], cwd=target_dir, timeout=5)
                     if status_ok and status_out.strip():
                         logging.warning(f"[TOOL: {name}] 检测到本地未提交更改，跳过更新以保护工作区。")
-                    elif git_cache.is_git_up_to_date(target_dir): logging.info(f"[TOOL: {name}] (内容已最新)")
+                    elif git_cache.is_git_up_to_date(target_dir):
+                        logging.info(f"[TOOL: {name}] (内容已最新)")
+                        should_apply_overrides = True
                     else:
                         success, out = run_cmd(["git", "pull"], cwd=target_dir)
-                        if success: logging.info(f"[TOOL: {name}] (已更新)"); needs_setup = True
+                        if success:
+                            logging.info(f"[TOOL: {name}] (已更新)")
+                            needs_setup = True
+                            should_apply_overrides = True
                         else: logging.error(f"[TOOL: {name}] (更新失败: {out})"); success_build = False
         else:
             if target_dir.exists():
@@ -178,10 +185,13 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
             logging.info(f"正在安装 {name}...")
             if not dry_run:
                 success, out = run_cmd(["git", "clone", url, str(target_dir)])
-                if success: logging.info(f"[TOOL: {name}] (安装成功)"); needs_setup = True
+                if success:
+                    logging.info(f"[TOOL: {name}] (安装成功)")
+                    needs_setup = True
+                    should_apply_overrides = True
                 else: logging.error(f"[TOOL: {name}] (下载失败: {out})"); success_build = False
         
-        if not dry_run: apply_overrides(name, target_dir, dry_run)
+        if not dry_run and should_apply_overrides: apply_overrides(name, target_dir, dry_run)
         if setup_cmd and needs_setup and not dry_run:
             logging.info(f"执行 {name} 初始化...")
             ok, out = run_cmd(setup_cmd, cwd=target_dir)

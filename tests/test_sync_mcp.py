@@ -1,8 +1,11 @@
 import json
 import subprocess
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
+
+from tests.agent_mcp_import import sync_mcp
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -103,3 +106,96 @@ class SyncMcpTests(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse(agent_config_path.exists(), result.stdout + result.stderr)
+
+    def test_sync_failure_preserves_existing_managed_mcp_entry(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            agent_config_path = temp_root / "agent.json"
+            agent_config_path.write_text(
+                json.dumps(
+                    {
+                        "mcpServers": {
+                            "bad-mcp": {
+                                "command": "node",
+                                "args": ["/old/server.js"],
+                                "env": {"_MANAGED_BY": "agent-manager"},
+                            },
+                            "user-mcp": {
+                                "command": "echo",
+                                "args": [],
+                                "env": {"KEEP": "1"},
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            repo_path = temp_root / "bad-mcp"
+            repo_path.mkdir()
+            (repo_path / ".git").mkdir()
+
+            sync_mcp.manage_mcp_config(
+                {"TmpAgent": str(agent_config_path)},
+                {
+                    "bad-mcp": {
+                        "enabled": True,
+                        "_sync_ready": False,
+                        "_repo_path": str(repo_path),
+                        "command": "node",
+                        "args": ["{repo_path}/server.js"],
+                        "env": {},
+                    }
+                },
+            )
+
+            updated = json.loads(agent_config_path.read_text(encoding="utf-8"))
+            self.assertIn("bad-mcp", updated["mcpServers"])
+            self.assertIn("user-mcp", updated["mcpServers"])
+
+    def test_sync_failure_preserves_existing_managed_mcp_entry_in_toml(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            agent_config_path = temp_root / "config.toml"
+            agent_config_path.write_text(
+                "\n".join(
+                    [
+                        "[mcp_servers.bad-mcp]",
+                        'command = "node"',
+                        'args = ["/old/server.js"]',
+                        "[mcp_servers.bad-mcp.env]",
+                        '_MANAGED_BY = "agent-manager"',
+                        "",
+                        "[mcp_servers.user-mcp]",
+                        'command = "echo"',
+                        "args = []",
+                        "[mcp_servers.user-mcp.env]",
+                        'KEEP = "1"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            repo_path = temp_root / "bad-mcp"
+            repo_path.mkdir()
+            (repo_path / ".git").mkdir()
+
+            sync_mcp.manage_mcp_config(
+                {"Codex": {"path": str(agent_config_path), "format": "toml"}},
+                {
+                    "bad-mcp": {
+                        "enabled": True,
+                        "_sync_ready": False,
+                        "_repo_path": str(repo_path),
+                        "command": "node",
+                        "args": ["{repo_path}/server.js"],
+                        "env": {},
+                    }
+                },
+            )
+
+            updated = tomllib.loads(agent_config_path.read_text(encoding="utf-8"))
+            self.assertIn("bad-mcp", updated["mcp_servers"])
+            self.assertEqual(updated["mcp_servers"]["bad-mcp"]["args"], ["/old/server.js"])
+            self.assertIn("user-mcp", updated["mcp_servers"])

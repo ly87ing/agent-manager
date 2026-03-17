@@ -129,7 +129,7 @@ def toml_quote(value):
     return f'"{value}"'
 
 
-def update_toml_config(agent_name, config_path, active_servers, all_managed_servers, dry_run):
+def update_toml_config(agent_name, config_path, active_servers, all_managed_servers, preserved_servers, dry_run):
     """原子化更新 TOML 配置"""
     path = Path(config_path).expanduser()
     content = ""
@@ -142,10 +142,14 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
     
     new_chunks = []
     managed_names = set(all_managed_servers)
+    preserved_names = set(preserved_servers)
     for chunk in chunks:
         header_match = re.search(r'\[\s*mcp_servers\.([^.\]\s]+)', chunk)
         if header_match:
             srv_name = header_match.group(1)
+            if srv_name in preserved_names:
+                new_chunks.append(chunk)
+                continue
             if srv_name in managed_names or '_MANAGED_BY = "agent-manager"' in chunk: continue
         new_chunks.append(chunk)
     
@@ -194,10 +198,13 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False):
         config_path = Path(config_path_str).expanduser()
 
         active_mcp_settings = {}
+        preserved_failed_servers = set()
         for name, srv_config in mcp_servers.items():
             if not srv_config.get("enabled", True): continue
-            if not srv_config.get("_sync_ready", True): continue
             if srv_config.get("agents") and agent_name not in srv_config["agents"]: continue
+            if not srv_config.get("_sync_ready", True):
+                preserved_failed_servers.add(name)
+                continue
             
             repo_path_str = srv_config.get("_repo_path", "")
             repo_path = Path(repo_path_str).resolve() if repo_path_str else ""
@@ -223,7 +230,7 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False):
         if not dry_run: backup_config(config_path, dry_run)
 
         if file_format == "toml":
-            update_toml_config(agent_name, config_path, active_mcp_settings, mcp_servers.keys(), dry_run)
+            update_toml_config(agent_name, config_path, active_mcp_settings, mcp_servers.keys(), preserved_failed_servers, dry_run)
             continue
 
         if dry_run:
@@ -248,6 +255,8 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False):
                     # 检查 env 或 environment 中的 _MANAGED_BY
                     env_dict = (srv.get('env') or srv.get('environment') or {})
                     if env_dict.get('_MANAGED_BY') == 'agent-manager':
+                        if k in preserved_failed_servers:
+                            continue
                         if k not in active_mcp_settings:
                             logging.info(f"INFO: [AGENT: {agent_name}] 移除孤儿 MCP: {k}")
                             del current_config[key_name][k]
