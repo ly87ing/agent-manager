@@ -27,7 +27,7 @@
   `modules/style.md`
 
 - **Frontend Development & Verification:**
-  If your task involves UI, frontend validation logic, or user flows, you **MUST** read:
+  If your task involves UI, frontend validation logic, user flows, or Playwright/browser automation execution, you **MUST** read:
   `modules/frontend.md`
 
 - **Generated Output & Artifact Hygiene:**
