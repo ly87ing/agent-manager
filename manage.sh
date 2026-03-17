@@ -23,6 +23,7 @@ LOCK_FILE="/tmp/agent_manager_${USER_NAME}.lock"
 BASE_CONFIG="$ROOT_DIR/config/manager.json"
 # 本地覆盖（不参与 Git）
 LOCAL_CONFIG="$ROOT_DIR/config/manager.local.json"
+LOCK_ACQUIRED="false"
 
 # 如果本地覆盖文件存在，则读取并深度合并
 if [ -f "$LOCAL_CONFIG" ]; then
@@ -52,7 +53,7 @@ else
 fi
 
 # 原子锁检查
-if [[ "${1:-}" != "help" && "${1:-}" != "-h" && "${1:-}" != "--help" && "${1:-}" != "-help" && "${1:-}" != "detect" && "${1:-}" != "doctor" && "${1:-}" != "backups:list" && "${1:-}" != "backups:restore" && "${1:-}" != "unlock" ]]; then
+if [[ "${1:-}" != "help" && "${1:-}" != "-h" && "${1:-}" != "--help" && "${1:-}" != "-help" && "${1:-}" != "detect" && "${1:-}" != "doctor" && "${1:-}" != "backups:list" && "${1:-}" != "backups:restore" && "${1:-}" != "unlock" && "${1:-}" != "logs" ]]; then
     if [ -f "$LOCK_FILE" ]; then
         old_pid=$(cat "$LOCK_FILE")
         if [[ "$old_pid" != "$$" ]] && ps -p "$old_pid" > /dev/null 2>&1; then
@@ -63,11 +64,19 @@ if [[ "${1:-}" != "help" && "${1:-}" != "-h" && "${1:-}" != "--help" && "${1:-}"
         fi
     fi
     echo $$ > "$LOCK_FILE"
+    LOCK_ACQUIRED="true"
 fi
 
 function cleanup_on_exit() {
-    [ -f "$LOCK_FILE" ] && rm -f "$LOCK_FILE"
+    if [ "$LOCK_ACQUIRED" = "true" ] && [ -f "$LOCK_FILE" ] && [ "$(cat "$LOCK_FILE" 2>/dev/null)" = "$$" ]; then
+        rm -f "$LOCK_FILE"
+    fi
     [ -n "${CONFIG_FILE:-}" ] && [[ "$CONFIG_FILE" != "$BASE_CONFIG" ]] && rm -f "$CONFIG_FILE"
+
+    local running_jobs=$(jobs -p)
+    if [ -n "$running_jobs" ]; then
+        kill $running_jobs 2>/dev/null || true
+    fi
 }
 trap cleanup_on_exit EXIT
 
@@ -115,21 +124,30 @@ def load(p):
     try: return json.load(open(p))
     except: return {}
 
+def run_cmd(cmd):
+    try:
+        return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+    except Exception:
+        class Dummy:
+            returncode = 1
+            stdout = ''
+        return Dummy()
+
 # 预先一次性加载所有包列表（关键优化：避免逐个包执行 brew list）
 _brew_formulae = set()
 _brew_casks = set()
 _gh_exts = ''
 
 if shutil.which('brew'):
-    res = subprocess.run('brew list --formula -1', shell=True, capture_output=True, text=True)
+    res = run_cmd('brew list --formula -1')
     if res.returncode == 0 and res.stdout.strip():
         _brew_formulae = set(res.stdout.strip().split('\n'))
-    res = subprocess.run('brew list --cask -1', shell=True, capture_output=True, text=True)
+    res = run_cmd('brew list --cask -1')
     if res.returncode == 0 and res.stdout.strip():
         _brew_casks = set(res.stdout.strip().split('\n'))
 
 if shutil.which('gh'):
-    res = subprocess.run('gh extension list', shell=True, capture_output=True, text=True)
+    res = run_cmd('gh extension list')
     if res.returncode == 0:
         _gh_exts = res.stdout
 
@@ -213,21 +231,30 @@ def get_md5(p):
     try: return hashlib.md5(open(p, 'rb').read()).hexdigest()
     except: return None
 
+def run_cmd(cmd):
+    try:
+        return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+    except Exception:
+        class Dummy:
+            returncode = 1
+            stdout = ''
+        return Dummy()
+
 # 预先一次性加载所有包列表（关键优化）
 _brew_formulae = set()
 _brew_casks = set()
 _gh_exts = ''
 
 if shutil.which('brew'):
-    res = subprocess.run('brew list --formula -1', shell=True, capture_output=True, text=True)
+    res = run_cmd('brew list --formula -1')
     if res.returncode == 0 and res.stdout.strip():
         _brew_formulae = set(res.stdout.strip().split('\n'))
-    res = subprocess.run('brew list --cask -1', shell=True, capture_output=True, text=True)
+    res = run_cmd('brew list --cask -1')
     if res.returncode == 0 and res.stdout.strip():
         _brew_casks = set(res.stdout.strip().split('\n'))
 
 if shutil.which('gh'):
-    res = subprocess.run('gh extension list', shell=True, capture_output=True, text=True)
+    res = run_cmd('gh extension list')
     if res.returncode == 0:
         _gh_exts = res.stdout
 
@@ -326,6 +353,36 @@ print(f'__ERRORS__:{errs}')
     fi
 }
 
+function run_task_with_progress() {
+    local title="$1"
+    local success_msg="$2"
+    local err_msg="$3"
+    shift 3
+
+    status_line "RUNNING" "$title..."
+    "$@" >> "$TEMP_LOG" 2>&1 &
+    local pid=$!
+
+    while kill -0 $pid 2>/dev/null; do
+        if [ -s "$TEMP_LOG" ]; then
+            local last_msg=$(tail -n 1 "$TEMP_LOG" 2>/dev/null | sed -E 's/^[0-9-]+ [0-9:]+ \[(INFO|WARNING|ERROR)\] //g; s/INFO: //g; s/^[[:space:]]*//; s/\r//g' | awk '{print substr($0,1,55)}')
+            if [ -n "$last_msg" ]; then
+                status_line "RUNNING" "$title: $last_msg"
+            fi
+        fi
+        sleep 0.3
+    done
+    if wait "$pid"; then
+        status_line "DONE" "$success_msg"
+        return 0
+    else
+        local exit_code=$?
+        status_line "ERROR" "$err_msg"
+        echo "FAILED: $title" >> "$TEMP_LOG"
+        return "$exit_code"
+    fi
+}
+
 function show_summary() {
     echo -e "${HDR_BLUE}${BOLD}3. 最终赋能详情汇总 (Deployment Architecture)${NC}"
     echo -e "${BORDER_GRAY}----------------------------------------------------------------${NC}"
@@ -343,6 +400,7 @@ function show_summary() {
 
 DRY_RUN_FLAG=""
 OFFLINE_FLAG=""
+TASK_FAILURES=0
 case "${1:-}" in
     --dry-run) cmd="all"; DRY_RUN_FLAG="--dry-run"; shift ;;
     --offline) cmd="all"; OFFLINE_FLAG="--offline"; shift ;;
@@ -380,22 +438,29 @@ case "$cmd" in
             status_line "SKIP" "离线模式，跳过 git 更新"
         fi
         > "$TEMP_LOG"
-        status_line "RUNNING" "对齐 Agent 生命周期..."
-        (timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-lifecycle\" && $PYTHON_CMD sync_agents.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/agents.json\" --yes $DRY_RUN_FLAG $OFFLINE_FLAG" >> "$TEMP_LOG" 2>&1) && status_line "DONE" "生命周期对齐完成" || { status_line "ERROR" "生命周期失败"; echo "FAILED: agents" >> "$TEMP_LOG"; }
-        status_line "RUNNING" "同步全局工具..."
-        (timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-tool\" && $PYTHON_CMD sync_tools.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/tools.json\" --yes $DRY_RUN_FLAG $OFFLINE_FLAG" >> "$TEMP_LOG" 2>&1) && status_line "DONE" "工具链同步完成" || { status_line "ERROR" "工具失败"; echo "FAILED: tools" >> "$TEMP_LOG"; }
-        status_line "RUNNING" "同步 Agent Rules..."
-        (timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-rule\" && ./scripts/sync-agent-rules.sh $DRY_RUN_FLAG" >> "$TEMP_LOG" 2>&1) && status_line "DONE" "规则分发完成" || { status_line "ERROR" "规则同步失败"; echo "FAILED: rules" >> "$TEMP_LOG"; }
-        status_line "RUNNING" "链接专业技能..."
-        (timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-skill\" && $PYTHON_CMD link_skills.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/skills.json\" --yes $DRY_RUN_FLAG" >> "$TEMP_LOG" 2>&1) && status_line "DONE" "技能链接完成" || { status_line "ERROR" "技能链接失败"; echo "FAILED: skills" >> "$TEMP_LOG"; }
-        status_line "RUNNING" "注入 MCP 配置..."
-        (timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-mcp\" && $PYTHON_CMD sync_mcp.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/mcp.json\" $DRY_RUN_FLAG" >> "$TEMP_LOG" 2>&1) && status_line "DONE" "MCP 注入完成" || { status_line "ERROR" "MCP 失败"; echo "FAILED: mcp" >> "$TEMP_LOG"; }
+        if ! run_task_with_progress "对齐 Agent 生命周期" "生命周期对齐完成" "生命周期失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-lifecycle\" && $PYTHON_CMD sync_agents.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/agents.json\" --yes $DRY_RUN_FLAG $OFFLINE_FLAG"; then TASK_FAILURES=1; fi
+        if ! run_task_with_progress "同步全局工具" "工具链同步完成" "工具失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-tool\" && $PYTHON_CMD sync_tools.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/tools.json\" --yes $DRY_RUN_FLAG $OFFLINE_FLAG"; then TASK_FAILURES=1; fi
+        if ! run_task_with_progress "同步 Agent Rules" "规则分发完成" "规则同步失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-rule\" && ./scripts/sync-agent-rules.sh $DRY_RUN_FLAG"; then TASK_FAILURES=1; fi
+        if ! run_task_with_progress "链接专业技能" "技能链接完成" "技能链接失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-skill\" && $PYTHON_CMD link_skills.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/skills.json\" --yes $DRY_RUN_FLAG"; then TASK_FAILURES=1; fi
+        if ! run_task_with_progress "注入 MCP 配置" "MCP 注入完成" "MCP 失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-mcp\" && $PYTHON_CMD sync_mcp.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/mcp.json\" $DRY_RUN_FLAG"; then TASK_FAILURES=1; fi
         show_summary
+        [ "$TASK_FAILURES" -eq 0 ] || exit 1
         ;;
     ui) $PYTHON_CMD "$ROOT_DIR/src/interactive.py" ;;
     doctor|status) doctor_check ;;
     detect) detect_agents ;;
     unlock) rm -f "$LOCK_FILE"; echo "锁已解除。" ;;
+    logs)
+        if [ -f "$TEMP_LOG" ]; then
+            if [ -t 1 ] && command -v less >/dev/null 2>&1; then
+                less -R "$TEMP_LOG"
+            else
+                cat "$TEMP_LOG"
+            fi
+        else
+            echo "暂无日志。"
+        fi ;;
+    clean-logs) rm -f "${TEMP_LOG}"*; echo "日志已清理" ;;
     backups:list) find "$HOME" -maxdepth 3 \( -name "*.bak.*" -o -name "*.bak" \) 2>/dev/null | sort -r | head -n 20 || true ;;
     backups:restore) 
         files=$(find "$HOME" -maxdepth 3 \( -name "*.bak.*" -o -name "*.bak" \) 2>/dev/null | sort -r | head -n 10 || true)

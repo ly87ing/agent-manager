@@ -71,15 +71,18 @@ def clone_or_update_repo(name, url, base_dir, dry_run=False):
                 success, output = run_cmd(["git", "pull"], cwd=target_dir)
                 if success: logging.info(f"[{name}] 更新成功。")
                 else: logging.error(f"[{name}] 更新失败: {output}")
+                return target_dir, success
+            return target_dir, True
         else:
-            logging.warning(f"[{name}] 目录存在但不是 git 仓库，跳过更新。")
-    else:
-        logging.info(f"[{name}] 仓库不存在，准备下载 (git clone)...")
-        if not dry_run:
-            success, output = run_cmd(["git", "clone", url, str(target_dir)])
-            if success: logging.info(f"[{name}] 下载成功。")
-            else: logging.error(f"[{name}] 下载失败: {output}")
-    return target_dir
+            logging.error(f"[{name}] 目录存在但不是 git 仓库，无法继续管理。")
+            return target_dir, False
+    logging.info(f"[{name}] 仓库不存在，准备下载 (git clone)...")
+    if not dry_run:
+        success, output = run_cmd(["git", "clone", url, str(target_dir)])
+        if success: logging.info(f"[{name}] 下载成功。")
+        else: logging.error(f"[{name}] 下载失败: {output}")
+        return target_dir, success
+    return target_dir, True
 
 def install_dependencies_and_build(repo_path, config, dry_run=False):
     """根据仓库类型自动安装依赖和构建"""
@@ -189,20 +192,11 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False):
         config_path_str = agent_meta if isinstance(agent_meta, str) else agent_meta.get("path")
         file_format = "json" if isinstance(agent_meta, str) else agent_meta.get("format", "json")
         config_path = Path(config_path_str).expanduser()
-        
-        if not config_path.parent.exists():
-            logging.info(f"INFO: [AGENT: {agent_name}] Agent 目录缺失，自动创建以确保后续配置注入。")
-            try:
-                config_path.parent.mkdir(parents=True, exist_ok=True)
-            except Exception as e:
-                logging.error(f"无法创建配置目录 {config_path.parent}: {e}")
-                continue
-
-        if not dry_run: backup_config(config_path, dry_run)
 
         active_mcp_settings = {}
         for name, srv_config in mcp_servers.items():
             if not srv_config.get("enabled", True): continue
+            if not srv_config.get("_sync_ready", True): continue
             if srv_config.get("agents") and agent_name not in srv_config["agents"]: continue
             
             repo_path_str = srv_config.get("_repo_path", "")
@@ -214,6 +208,19 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False):
                 "args": parsed_args,
                 "env": srv_config.get("env", {})
             }
+
+        if not active_mcp_settings and not config_path.exists():
+            continue
+
+        if not config_path.parent.exists():
+            logging.info(f"INFO: [AGENT: {agent_name}] Agent 目录缺失，自动创建以确保后续配置注入。")
+            try:
+                config_path.parent.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                logging.error(f"无法创建配置目录 {config_path.parent}: {e}")
+                continue
+
+        if not dry_run: backup_config(config_path, dry_run)
 
         if file_format == "toml":
             update_toml_config(agent_name, config_path, active_mcp_settings, mcp_servers.keys(), dry_run)
@@ -341,6 +348,7 @@ def main():
 
     all_build_success = True
     for srv_name, srv_config in definition_cfg.items():
+        srv_config["_sync_ready"] = srv_config.get("enabled", True)
         url = srv_config.get("url")
         if not url:
             srv_config["_repo_path"] = ""
@@ -348,11 +356,17 @@ def main():
             target_dir = Path(base_dir) / srv_name
             srv_config["_repo_path"] = str(target_dir)
             if not srv_config.get("enabled", True): continue
-            repo_path = clone_or_update_repo(srv_name, url, base_dir, dry_run=args.dry_run)
+            repo_path, repo_ok = clone_or_update_repo(srv_name, url, base_dir, dry_run=args.dry_run)
+            if not repo_ok:
+                all_build_success = False
+                srv_config["_sync_ready"] = False
+                if not (repo_path.exists() and (repo_path / ".git").exists()):
+                    continue
             if not args.dry_run and repo_path.exists():
                 if not install_dependencies_and_build(repo_path, srv_config, dry_run=args.dry_run):
                     all_build_success = False
-    
+                    srv_config["_sync_ready"] = False
+
     manage_mcp_config(AGENT_TARGETS, definition_cfg, dry_run=args.dry_run)
     if not all_build_success: sys.exit(1)
     logging.info("任务完成！")

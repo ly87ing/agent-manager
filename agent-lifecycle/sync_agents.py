@@ -66,7 +66,7 @@ class ProviderCache:
         if self._brew_formulae is None:
             self._brew_formulae = set()
             if shutil.which("brew"):
-                success, out = run_cmd(["brew", "list", "--formula", "-1"])
+                success, out = run_cmd(["brew", "list", "--formula", "-1"], timeout=10)
                 if success:
                     self._brew_formulae = set(out.strip().split('\n')) if out.strip() else set()
         return self._brew_formulae
@@ -76,7 +76,7 @@ class ProviderCache:
         if self._brew_casks is None:
             self._brew_casks = set()
             if shutil.which("brew"):
-                success, out = run_cmd(["brew", "list", "--cask", "-1"])
+                success, out = run_cmd(["brew", "list", "--cask", "-1"], timeout=10)
                 if success:
                     self._brew_casks = set(out.strip().split('\n')) if out.strip() else set()
         return self._brew_casks
@@ -86,7 +86,7 @@ class ProviderCache:
         if self._gh_extensions is None:
             self._gh_extensions = ""
             if shutil.which("gh"):
-                success, out = run_cmd(["gh", "extension", "list"])
+                success, out = run_cmd(["gh", "extension", "list"], timeout=10)
                 if success:
                     self._gh_extensions = out
         return self._gh_extensions
@@ -121,7 +121,12 @@ def detect_all_providers(bin_name, config=None):
     
     # 检测 npm
     bin_path = shutil.which(bin_name)
-    if bin_path and ("/node/" in bin_path or "/npm/" in bin_path or bin_path.endswith("node") or bin_path.endswith("npm")):
+    resolved_bin_path = os.path.realpath(bin_path) if bin_path else ""
+    npm_candidates = [p for p in (bin_path, resolved_bin_path) if p]
+    if any(
+        "/node/" in p or "/npm/" in p or "/node_modules/" in p or p.endswith("node") or p.endswith("npm")
+        for p in npm_candidates
+    ):
         found.append("npm")
     
     # 检测系统路径或 App

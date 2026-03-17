@@ -23,11 +23,13 @@ def load_json(path):
             return json.load(f)
     except: return {}
 
-def run_cmd(cmd, cwd=None):
+def run_cmd(cmd, cwd=None, timeout=300):
     """运行 shell 命令并返回结果"""
     try:
-        result = subprocess.run(cmd, cwd=cwd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=isinstance(cmd, str))
+        result = subprocess.run(cmd, cwd=cwd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=isinstance(cmd, str), timeout=timeout)
         return True, result.stdout
+    except subprocess.TimeoutExpired:
+        return False, f"TIMEOUT after {timeout} seconds: {cmd}"
     except subprocess.CalledProcessError as e:
         return False, e.stderr
     except FileNotFoundError as e:
@@ -83,13 +85,18 @@ def clone_or_update_repo(name, url, base_dir, dry_run=False):
             success, output = run_cmd(["git", "pull"], cwd=target_dir)
             if success: logging.info(f"[{name}] 更新成功。")
             else: logging.error(f"[{name}] 更新失败: {output}")
-    else:
-        logging.info(f"[{name}] 仓库不存在，准备下载...")
-        if not dry_run:
-            success, output = run_cmd(["git", "clone", url, str(target_dir)])
-            if success: logging.info(f"[{name}] 下载成功。")
-            else: logging.error(f"[{name}] 下载失败: {output}")
-    return target_dir
+            return target_dir, success
+        return target_dir, True
+    if target_dir.exists():
+        logging.error(f"[{name}] 目录存在但不是 git 仓库，无法继续管理。")
+        return target_dir, False
+    logging.info(f"[{name}] 仓库不存在，准备下载...")
+    if not dry_run:
+        success, output = run_cmd(["git", "clone", url, str(target_dir)])
+        if success: logging.info(f"[{name}] 下载成功。")
+        else: logging.error(f"[{name}] 下载失败: {output}")
+        return target_dir, success
+    return target_dir, True
 
 def find_skills_recursively(search_path):
     found_skills = {}
@@ -126,18 +133,18 @@ def scrub_dead_links(agents_config, base_dir, dry_run=False):
         target_base = Path(target_path).expanduser()
         if not target_base.exists() or not target_base.is_dir(): continue
         for item in target_base.iterdir():
-            if item.is_symlink():
-                try:
-                    target = item.resolve(strict=True)
-                    if not target.exists() and str(item.readlink()).startswith(str(base_dir)):
-                        logging.info(f"[AGENT: {agent_name}] 移除死链: {item.name}")
-                        if not dry_run: item.unlink()
-                except:
-                    try:
-                        if str(Path(os.readlink(item)).resolve()).startswith(str(base_dir)):
-                            logging.info(f"[AGENT: {agent_name}] 移除死链: {item.name}")
-                            if not dry_run: item.unlink()
-                    except: pass
+            if not item.is_symlink() or item.exists():
+                continue
+            try:
+                raw_target = Path(os.readlink(item)).expanduser()
+                resolved_target = raw_target if raw_target.is_absolute() else (item.parent / raw_target)
+                resolved_target = resolved_target.resolve(strict=False)
+                if str(resolved_target).startswith(str(base_dir)):
+                    logging.info(f"[AGENT: {agent_name}] 移除死链: {item.name}")
+                    if not dry_run:
+                        item.unlink()
+            except OSError:
+                continue
 
 def prune_orphan_repos(base_dir, managed_names, dry_run=False, force_yes=False):
     base_path = Path(base_dir).resolve()
@@ -195,7 +202,11 @@ def main():
         if not config.get("enabled", True):
             logging.info(f"[{repo_name}] (策略已禁用，跳过)")
             continue
-        repo_path = clone_or_update_repo(repo_name, config.get("url"), base_dir, args.dry_run)
+        repo_path, repo_ok = clone_or_update_repo(repo_name, config.get("url"), base_dir, args.dry_run)
+        if not repo_ok:
+            all_success = False
+            if not (repo_path.exists() and (repo_path / ".git").exists()):
+                continue
         if not install_dependencies_and_build(repo_path, config, args.dry_run): all_success = False
         skills = find_skills_recursively(repo_path)
         for s_name, s_path in skills.items():

@@ -38,8 +38,10 @@ def ask(prompt, default=None):
     return input(f"{BOLD}{prompt}{NC}: ").strip()
 
 def ask_yes_no(prompt, default="y"):
-    res = input(f"{BOLD}{prompt}{NC} (y/n) [{YELLOW}{default}{NC}]: ").strip().lower()
-    if not res: res = default
+    default_value = default if isinstance(default, str) else ("y" if default else "n")
+    res = input(f"{BOLD}{prompt}{NC} (y/n) [{YELLOW}{default_value}{NC}]: ").strip().lower()
+    if not res:
+        res = default_value
     return res == 'y'
 
 def load_json(path):
@@ -77,6 +79,9 @@ def get_local_config():
 def get_effective_config():
     base = get_base_config()
     local = get_local_config()
+    return merge_config(base, local)
+
+def merge_config(base, local):
     merged = copy.deepcopy(base)
     deep_update(merged, local)
     return merged
@@ -102,7 +107,9 @@ def main():
     
     print(f"{HDR_BLUE}{BOLD}Agent Manager 交互式配置中心{NC}")
     print("=" * 50)
-    
+
+    local_policy = get_local_config()
+
     while True:
         print("\n请选择操作:")
         print("1. 查看当前策略（合并后）")
@@ -110,25 +117,24 @@ def main():
         print("3. 编辑 Tool 策略")
         print("4. 编辑 Skill 策律")
         print("5. 编辑 MCP 策略")
-        print("6. 保存并同步")
+        print("6. 保存更改")
         print("7. 退出而不保存")
         
         choice = ask("请输入选项编号", "1")
         
         if choice == "1":
-            policy = get_policy()
+            policy = merge_config(get_base_config(), local_policy)
             print(json.dumps(policy, indent=2, ensure_ascii=False))
         elif choice == "2":
-            edit_section("agents", "Agent")
+            edit_section("agents", "Agent", local_policy)
         elif choice == "3":
-            edit_section("tools", "Tool")
+            edit_section("tools", "Tool", local_policy)
         elif choice == "4":
-            edit_section("skills", "Skill")
+            edit_section("skills", "Skill", local_policy)
         elif choice == "5":
-            edit_section("mcp", "MCP")
+            edit_section("mcp", "MCP", local_policy)
         elif choice == "6":
-            policy = get_policy()
-            save_policy(policy)
+            save_policy(local_policy)
             print(f"{SUCCESS_GREEN}配置已保存到用户侧覆盖文件，请运行 ./manage.sh all 以应用更改。{NC}")
             break
         elif choice == "7":
@@ -137,10 +143,10 @@ def main():
         else:
             print(f"{ERROR_RED}无效选项，请重新选择。{NC}")
 
-def edit_section(section_key, section_name):
+def edit_section(section_key, section_name, local_policy):
     # For editing we work on the local config directly, but we need to show current effective values
-    effective = get_policy()
-    local = get_local_config()
+    effective = merge_config(get_base_config(), local_policy)
+    local = local_policy
     section_eff = effective.get(section_key, {})
     section_loc = local.get(section_key, {})
     if not section_eff:
@@ -179,22 +185,23 @@ def edit_section(section_key, section_name):
     
     new_val = { "enabled": enabled }
     
-    if section_key in ["agents", "tools"]:
+    if section_key == "agents":
         auto_install = ask_yes_no(f"自动安装 {key}?", current_eff_val.get("auto_install", True))
         auto_update = ask_yes_no(f"自动更新 {key}?", current_eff_val.get("auto_update", True))
         new_val["auto_install"] = auto_install
+        new_val["auto_update"] = auto_update
+    elif section_key == "tools":
+        auto_update = ask_yes_no(f"自动更新 {key}?", current_eff_val.get("auto_update", True))
         new_val["auto_update"] = auto_update
     
     # Update local config only
     if section_key not in local:
         local[section_key] = {}
     local[section_key][key] = new_val
-    # Save local config
-    save_json(local, os.path.join("config", "manager.local.json"))
     # Update SYNC_REQUIRED flag
     global SYNC_REQUIRED
     SYNC_REQUIRED = True
-    print(f"{SUCCESS_GREEN}{section_name} {key} 已更新并保存到用户侧覆盖文件。{NC}")
+    print(f"{SUCCESS_GREEN}{section_name} {key} 已更新，等待保存。{NC}")
 
 if __name__ == "__main__":
     try:

@@ -23,7 +23,7 @@ def load_json(path):
             return json.load(f)
     except: return {}
 
-def run_cmd(cmd, cwd=None, timeout=None):
+def run_cmd(cmd, cwd=None, timeout=300):
     """运行 shell 命令并返回结果"""
     try:
         # Determine if we should use shell
@@ -163,9 +163,11 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
             else:
                 if dry_run: logging.info(f"[TOOL: {name}] (预览: 计划检查更新)")
                 else:
-                    if git_cache.is_git_up_to_date(target_dir): logging.info(f"[TOOL: {name}] (内容已最新)")
+                    status_ok, status_out = run_cmd(["git", "status", "--porcelain"], cwd=target_dir, timeout=5)
+                    if status_ok and status_out.strip():
+                        logging.warning(f"[TOOL: {name}] 检测到本地未提交更改，跳过更新以保护工作区。")
+                    elif git_cache.is_git_up_to_date(target_dir): logging.info(f"[TOOL: {name}] (内容已最新)")
                     else:
-                        run_cmd(["git", "reset", "--hard"], cwd=target_dir) # Clean overrides before pull
                         success, out = run_cmd(["git", "pull"], cwd=target_dir)
                         if success: logging.info(f"[TOOL: {name}] (已更新)"); needs_setup = True
                         else: logging.error(f"[TOOL: {name}] (更新失败: {out})"); success_build = False
