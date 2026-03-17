@@ -9,6 +9,7 @@ import copy
 
 # 颜色定义
 RED = "\033[0;31m"
+ERROR_RED = "\033[0;31m"
 GREEN = "\033[0;32m"
 YELLOW = "\033[0;33m"
 BLUE = "\033[1;34m"
@@ -183,7 +184,8 @@ def edit_section(section_key, section_name, local_policy):
     # 简单的键值编辑：根据 section_key 决定是否有构建类配置
     enabled = ask_yes_no(f"启用 {key}?", current_eff_val.get("enabled", True))
     
-    new_val = { "enabled": enabled }
+    new_val = copy.deepcopy(current_loc_val)
+    new_val["enabled"] = enabled
     
     if section_key == "agents":
         auto_install = ask_yes_no(f"自动安装 {key}?", current_eff_val.get("auto_install", True))
