@@ -126,7 +126,7 @@ def main():
         print("1. 查看当前策略（合并后）")
         print("2. 编辑 Agent 策略")
         print("3. 编辑 Tool 策略")
-        print("4. 编辑 Skill 策律")
+        print("4. 编辑 Skill 策略")
         print("5. 编辑 MCP 策略")
         print("6. 保存更改")
         print("7. 退出而不保存")
@@ -146,7 +146,10 @@ def main():
             edit_section("mcp", "MCP", local_policy)
         elif choice == "6":
             save_policy(local_policy)
-            print(f"{SUCCESS_GREEN}配置已保存到用户侧覆盖文件，请运行 ./manage.sh all 以应用更改。{NC}")
+            print(
+                f"{SUCCESS_GREEN}配置已保存到用户侧覆盖文件，请运行 ./manage.sh update 以应用更改；"
+                f"若需安装缺失 Agent，请改用 ./manage.sh bootstrap。{NC}"
+            )
             break
         elif choice == "7":
             print("已放弃更改。")

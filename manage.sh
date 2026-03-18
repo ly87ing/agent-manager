@@ -18,11 +18,11 @@ WHITE='\033[1;37m'
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 USER_NAME=$(whoami)
 RUN_ID="$(date +%Y%m%d%H%M%S)_$$"
-LOG_PREFIX="/tmp/agent_manager_sync_${USER_NAME}"
+LOG_PREFIX="${AGENT_MANAGER_LOG_PREFIX:-/tmp/agent_manager_sync_${USER_NAME}}"
 TEMP_LOG="${LOG_PREFIX}_${RUN_ID}.log"
-LATEST_LOG_POINTER="${LOG_PREFIX}.latest"
-LEGACY_LOG_PATH="${LOG_PREFIX}.log"
-LOCK_FILE="/tmp/agent_manager_${USER_NAME}.lock"
+LATEST_LOG_POINTER="${AGENT_MANAGER_LATEST_LOG_POINTER:-${LOG_PREFIX}.latest}"
+LEGACY_LOG_PATH="${AGENT_MANAGER_LEGACY_LOG_PATH:-${LOG_PREFIX}.log}"
+LOCK_FILE="${AGENT_MANAGER_LOCK_FILE:-/tmp/agent_manager_${USER_NAME}.lock}"
 LOCK_DIR="${LOCK_FILE}.d"
 LOCK_PID_FILE="${LOCK_DIR}/pid"
 # 基线策略（仓库提供）
@@ -245,74 +245,20 @@ function resolve_latest_log_path() {
 function detect_agents() {
     echo -e "${HDR_BLUE}${BOLD}1. 环境探测与健康自检 (Environment Health Check)${NC} ${BORDER_GRAY}[OS: $OS_TYPE]${NC}"
     $PYTHON_CMD -c "
-import json, os, shutil, subprocess, re, sys
+import os, shutil, sys
 sys.path.insert(0, '$ROOT_DIR')
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
-def load(p):
-    try: return json.load(open(p))
-    except: return {}
+from src.manage_runtime_probe import ProviderInventory, detect_all_providers, load_json
 
-def run_cmd(cmd):
-    try:
-        return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
-    except Exception:
-        class Dummy:
-            returncode = 1
-            stdout = ''
-        return Dummy()
-
-# 预先一次性加载所有包列表（关键优化：避免逐个包执行 brew list）
-_brew_formulae = set()
-_brew_casks = set()
-_gh_exts = ''
-
-if shutil.which('brew'):
-    res = run_cmd('brew list --formula -1')
-    if res.returncode == 0 and res.stdout.strip():
-        _brew_formulae = set(res.stdout.strip().split('\n'))
-    res = run_cmd('brew list --cask -1')
-    if res.returncode == 0 and res.stdout.strip():
-        _brew_casks = set(res.stdout.strip().split('\n'))
-
-if shutil.which('gh'):
-    res = run_cmd('gh extension list')
-    if res.returncode == 0:
-        _gh_exts = res.stdout
-
-def get_pkg_name(cmd):
-    if not cmd: return None
-    m = re.search(r'(?:install|uninstall)(?:\s+--cask)?\s+([^\s@]+)', cmd)
-    return m.group(1) if m else None
-
-def detect_all_providers(bin_name, config):
-    found = []
-    p_path = shutil.which(bin_name)
-    is_npm = p_path and ('/node/' in p_path or '/npm/' in p_path or p_path.endswith('node') or p_path.endswith('npm'))
-    
-    brew_pkg = get_pkg_name(config.get('providers', {}).get('brew', {}).get('install', ''))
-    if brew_pkg:
-        if brew_pkg in _brew_formulae: found.append('brew')
-        elif brew_pkg in _brew_casks: found.append('brew-cask')
-    
-    if is_npm: found.append('npm')
-    
-    ext_name = config.get('ext_name')
-    if ext_name and any(line.strip().startswith(ext_name) for line in _gh_exts.splitlines()):
-        found.append('gh')
-    
-    app_path = config.get('app_path')
-    if (app_path and os.path.exists(app_path)) or p_path:
-        if not found: found.append('system')
-    return found
-
-cfg = load('$CONFIG_FILE')
+inventory = ProviderInventory()
+cfg = load_json('$CONFIG_FILE')
 cfg['agents'] = canonicalize_agent_mapping(cfg.get('agents', {}))
-def_a = canonicalize_agent_mapping(load('$ROOT_DIR/config/agents.json'))
+def_a = canonicalize_agent_mapping(load_json('$ROOT_DIR/config/agents.json'))
 for k, v in cfg.get('agents', {}).items():
     if not v.get('enabled', True): continue
     d = def_a.get(k, {})
     label = get_agent_display_name(k, d)
-    all_act = detect_all_providers(d.get('bin',''), d)
+    all_act = detect_all_providers(d.get('bin',''), d, inventory=inventory)
     stat = '${SUCCESS_GREEN}✓${NC}' if all_act else '${PENDING_GOLD}○${NC}'
     print(f'   {stat} {label:20} (安装源:{\"/\".join(all_act) if all_act else \"未发现\"})')
 for k, v in cfg.get('tools', {}).items():
@@ -356,9 +302,11 @@ function doctor_check() {
     # 一致性审计
     [ "$silent" == "false" ] && echo -e "\n${BOLD}[ 路径、内容与链接一致性审计 ]${NC}"
     local audit_out=$($PYTHON_CMD -c "
-import json, os, hashlib, shutil, re, subprocess, sys
+import os, hashlib, re, sys
 sys.path.insert(0, '$ROOT_DIR')
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
+from src.manage_runtime_probe import ProviderInventory, detect_all_providers, load_json
+
 def get_md5(p):
     try: return hashlib.md5(open(p, 'rb').read()).hexdigest()
     except: return None
@@ -384,69 +332,17 @@ def rules_match(src, dst):
             return False
         return build_tree_signature(src) == build_tree_signature(dst)
     return get_md5(src) == get_md5(dst)
-
-def run_cmd(cmd):
-    try:
-        return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
-    except Exception:
-        class Dummy:
-            returncode = 1
-            stdout = ''
-        return Dummy()
-
-# 预先一次性加载所有包列表（关键优化）
-_brew_formulae = set()
-_brew_casks = set()
-_gh_exts = ''
-
-if shutil.which('brew'):
-    res = run_cmd('brew list --formula -1')
-    if res.returncode == 0 and res.stdout.strip():
-        _brew_formulae = set(res.stdout.strip().split('\n'))
-    res = run_cmd('brew list --cask -1')
-    if res.returncode == 0 and res.stdout.strip():
-        _brew_casks = set(res.stdout.strip().split('\n'))
-
-if shutil.which('gh'):
-    res = run_cmd('gh extension list')
-    if res.returncode == 0:
-        _gh_exts = res.stdout
-
-def get_pkg_name(cmd):
-    if not cmd: return None
-    m = re.search(r'(?:install|uninstall)(?:\s+--cask)?\s+([^\s@]+)', cmd)
-    return m.group(1) if m else None
-
-def detect_all_providers(bin_name, config):
-    found = []
-    p_path = shutil.which(bin_name)
-    is_npm = p_path and ('/node/' in p_path or '/npm/' in p_path or p_path.endswith('node') or p_path.endswith('npm'))
-
-    brew_pkg = get_pkg_name(config.get('providers', {}).get('brew', {}).get('install', ''))
-    if brew_pkg:
-        if brew_pkg in _brew_formulae: found.append('brew')
-        elif brew_pkg in _brew_casks: found.append('brew-cask')
-    
-    if is_npm: found.append('npm')
-    ext_name = config.get('ext_name')
-    if ext_name and any(line.strip().startswith(ext_name) for line in _gh_exts.splitlines()):
-        found.append('gh')
-    
-    app_path = config.get('app_path')
-    if (app_path and os.path.exists(app_path)) or p_path:
-        if not found: found.append('system')
-    return found
-
+inventory = ProviderInventory()
 errs = 0
-cfg = json.load(open('$CONFIG_FILE'))
+cfg = load_json('$CONFIG_FILE')
 cfg['agents'] = canonicalize_agent_mapping(cfg.get('agents', {}))
-def_a = canonicalize_agent_mapping(json.load(open('$ROOT_DIR/config/agents.json')))
+def_a = canonicalize_agent_mapping(load_json('$ROOT_DIR/config/agents.json'))
 # 1. Agent Policy
 print('${BOLD}--- Agent 状态与策略一致性 ---${NC}')
 for k, v in cfg.get('agents', {}).items():
     d = def_a.get(k, {})
     label = get_agent_display_name(k, d)
-    all_act = detect_all_providers(d.get('bin',''), d)
+    all_act = detect_all_providers(d.get('bin',''), d, inventory=inventory)
     is_act = len(all_act) > 0
     des = v.get('enabled', True)
     pref = v.get('preferred_provider') or d.get('preferred_provider', 'npm')
@@ -464,16 +360,18 @@ for k, d in def_a.items():
         print(f'  ${PENDING_GOLD}⚠${NC} {get_agent_display_name(k, d):20}: 未声明策略（已忽略）')
 # 2. MCP
 print('\n${BOLD}--- MCP 注入审计 ---${NC}')
-ap = canonicalize_agent_mapping(json.load(open('$ROOT_DIR/config/mcp.json')).get('agent_paths', {}))
+ap = canonicalize_agent_mapping(load_json('$ROOT_DIR/config/mcp.json').get('agent_paths', {}))
 for k, v in ap.items():
     p = os.path.expanduser(v if isinstance(v, str) else v.get('path', ''))
     if os.path.exists(p):
         cnt = len(re.findall(r'_MANAGED_BY', open(p).read()))
         print(f'  ${SUCCESS_GREEN}✓${NC} {get_agent_display_name(k)}: 已注入 {cnt} 个托管服务')
-    else: print(f'  ${ERROR_RED}✗${NC} {get_agent_display_name(k)}: 缺失'); errs += 1
+    else:
+        print(f'  ${ERROR_RED}✗${NC} {get_agent_display_name(k)}: 缺失')
+        errs += 1
 # 3. Skills
 print('\n${BOLD}--- Skills 链接审计 ---${NC}')
-s_cfg = json.load(open('$ROOT_DIR/config/skills.json'))
+s_cfg = load_json('$ROOT_DIR/config/skills.json')
 for a_name, a_path in canonicalize_agent_mapping(s_cfg.get('agents', {})).items():
     p = os.path.expanduser(a_path)
     if os.path.exists(p):
@@ -597,6 +495,43 @@ function begin_workflow() {
     echo -e "${HDR_BLUE}${BOLD}${title}${NC}\n"
 }
 
+function shell_join() {
+    local rendered=""
+    printf -v rendered '%q ' "$@"
+    printf '%s' "${rendered% }"
+}
+
+function run_task_in_dir() {
+    local title="$1"
+    local success_msg="$2"
+    local err_msg="$3"
+    local timeout_seconds="$4"
+    local workdir="$5"
+    shift 5
+
+    local command_str
+    command_str="$(shell_join "$@")"
+    run_task_with_progress "$title" "$success_msg" "$err_msg" timeout_run "$timeout_seconds" bash -c "cd \"$workdir\" && $command_str"
+}
+
+function begin_pipeline_execution() {
+    detect_agents
+    echo -e "${HDR_BLUE}${BOLD}2. 任务流水线 (Tasks)${NC}"
+    update_latest_log_pointer
+    TASK_FAILURES=0
+}
+
+function run_pipeline_step() {
+    if ! "$@"; then
+        TASK_FAILURES=1
+    fi
+}
+
+function finish_pipeline_execution() {
+    show_summary
+    [ "$TASK_FAILURES" -eq 0 ] || exit 1
+}
+
 function maybe_init_secrets() {
     if [ -d "$ROOT_DIR/secrets/.git" ]; then
         return 0
@@ -616,17 +551,59 @@ function maybe_init_secrets() {
     echo ""
 }
 
+function run_agent_lifecycle_task() {
+    local extra_flag="${1:-}"
+    local args=(sync_agents.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/agents.json" --yes)
+    if [ -n "$extra_flag" ]; then args+=("$extra_flag"); fi
+    if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
+    if [ -n "$OFFLINE_FLAG" ]; then args+=("$OFFLINE_FLAG"); fi
+    run_task_in_dir "对齐 Agent 生命周期" "生命周期对齐完成" "生命周期失败" 600 "$ROOT_DIR/agent-lifecycle" "$PYTHON_CMD" "${args[@]}"
+}
+
+function run_tools_sync_task() {
+    local args=(sync_tools.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/tools.json" --yes)
+    if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
+    if [ -n "$OFFLINE_FLAG" ]; then args+=("$OFFLINE_FLAG"); fi
+    run_task_in_dir "同步全局工具" "工具链同步完成" "工具失败" 600 "$ROOT_DIR/agent-tool" "$PYTHON_CMD" "${args[@]}"
+}
+
+function run_rules_sync_task() {
+    local args=(./scripts/sync-agent-rules.sh)
+    if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
+    run_task_in_dir "同步 Agent Rules" "规则分发完成" "规则同步失败" 600 "$ROOT_DIR/agent-rule" "${args[@]}"
+}
+
+function run_skills_link_task() {
+    local force_offline="${1:-false}"
+    local args=(link_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json" --yes)
+    if [ "$force_offline" = "true" ] || [ -n "$OFFLINE_FLAG" ]; then args+=(--offline); fi
+    if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
+    run_task_in_dir "链接专业技能" "技能链接完成" "技能链接失败" 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" "${args[@]}"
+}
+
+function run_mcp_sync_task() {
+    local prepare_runtime="${1:-false}"
+    local force_offline="${2:-false}"
+    local title="注入 MCP 配置"
+    local args=(sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json")
+
+    if [ "$prepare_runtime" = "true" ]; then
+        title="准备并注入 MCP 配置"
+        args+=(--prepare-runtime)
+    fi
+    if [ "$force_offline" = "true" ] || [ -n "$OFFLINE_FLAG" ]; then args+=(--offline); fi
+    if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
+
+    run_task_in_dir "$title" "MCP 注入完成" "MCP 失败" 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" "${args[@]}"
+}
+
 function run_sync_pipeline() {
     begin_workflow "🔄 Agent Manager 配置同步启动"
-    detect_agents
-    echo -e "${HDR_BLUE}${BOLD}2. 任务流水线 (Tasks)${NC}"
-    update_latest_log_pointer
-    TASK_FAILURES=0
-    if ! run_task_with_progress "同步 Agent Rules" "规则分发完成" "规则同步失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-rule\" && ./scripts/sync-agent-rules.sh $DRY_RUN_FLAG"; then TASK_FAILURES=1; fi
-    if ! run_task_with_progress "链接专业技能" "技能链接完成" "技能链接失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-skill\" && $PYTHON_CMD link_skills.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/skills.json\" --yes --offline $DRY_RUN_FLAG"; then TASK_FAILURES=1; fi
-    if ! run_task_with_progress "注入 MCP 配置" "MCP 注入完成" "MCP 失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-mcp\" && $PYTHON_CMD sync_mcp.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/mcp.json\" --offline $DRY_RUN_FLAG"; then TASK_FAILURES=1; fi
-    show_summary
-    [ "$TASK_FAILURES" -eq 0 ] || exit 1
+    begin_pipeline_execution
+    run_pipeline_step run_rules_sync_task
+    run_pipeline_step run_skills_link_task true
+    run_pipeline_step run_mcp_sync_task false true
+    finish_pipeline_execution
 }
 
 function run_update_pipeline() {
@@ -634,17 +611,13 @@ function run_update_pipeline() {
     local agent_extra_flags="$2"
     begin_workflow "$title"
     maybe_init_secrets
-    detect_agents
-    echo -e "${HDR_BLUE}${BOLD}2. 任务流水线 (Tasks)${NC}"
-    update_latest_log_pointer
-    TASK_FAILURES=0
-    if ! run_task_with_progress "对齐 Agent 生命周期" "生命周期对齐完成" "生命周期失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-lifecycle\" && $PYTHON_CMD sync_agents.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/agents.json\" --yes $agent_extra_flags $DRY_RUN_FLAG $OFFLINE_FLAG"; then TASK_FAILURES=1; fi
-    if ! run_task_with_progress "同步全局工具" "工具链同步完成" "工具失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-tool\" && $PYTHON_CMD sync_tools.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/tools.json\" --yes $DRY_RUN_FLAG $OFFLINE_FLAG"; then TASK_FAILURES=1; fi
-    if ! run_task_with_progress "同步 Agent Rules" "规则分发完成" "规则同步失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-rule\" && ./scripts/sync-agent-rules.sh $DRY_RUN_FLAG"; then TASK_FAILURES=1; fi
-    if ! run_task_with_progress "链接专业技能" "技能链接完成" "技能链接失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-skill\" && $PYTHON_CMD link_skills.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/skills.json\" --yes $DRY_RUN_FLAG $OFFLINE_FLAG"; then TASK_FAILURES=1; fi
-    if ! run_task_with_progress "准备并注入 MCP 配置" "MCP 注入完成" "MCP 失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-mcp\" && $PYTHON_CMD sync_mcp.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/mcp.json\" --prepare-runtime $DRY_RUN_FLAG $OFFLINE_FLAG"; then TASK_FAILURES=1; fi
-    show_summary
-    [ "$TASK_FAILURES" -eq 0 ] || exit 1
+    begin_pipeline_execution
+    run_pipeline_step run_agent_lifecycle_task "$agent_extra_flags"
+    run_pipeline_step run_tools_sync_task
+    run_pipeline_step run_rules_sync_task
+    run_pipeline_step run_skills_link_task false
+    run_pipeline_step run_mcp_sync_task true false
+    finish_pipeline_execution
 }
 
 function run_self_update() {

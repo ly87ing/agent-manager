@@ -26,6 +26,12 @@
 ```
 这将提供全系统状态概览，显示任何明显的错误或警告。
 
+如需先验证顶层命令编排本身而不触发真实安装/更新，可先运行：
+```bash
+make smoke
+```
+这会串行执行 `sync/update/plan/self-update` 的安全预演路径。
+
 ### 2. 检查日志输出
 Agent Manager 使用标准化日志格式。最近的操作日志位于：
 - `/tmp/agent_manager_sync_$(whoami).log*` (主同步日志)

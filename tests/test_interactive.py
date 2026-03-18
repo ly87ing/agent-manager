@@ -115,6 +115,32 @@ class InteractiveWorkflowTests(unittest.TestCase):
             },
         )
 
+    def test_save_message_recommends_update_or_bootstrap(self):
+        output = io.StringIO()
+        with working_directory(self.root):
+            iterator = iter(
+                [
+                    "2",
+                    "1",
+                    "n",
+                    "n",
+                    "n",
+                    "6",
+                ]
+            )
+            with mock.patch.object(
+                builtins,
+                "input",
+                side_effect=lambda _prompt="": next(iterator),
+            ):
+                with mock.patch("sys.stdout", output):
+                    interactive.main()
+
+        rendered = output.getvalue()
+        self.assertIn("./manage.sh update", rendered)
+        self.assertIn("./manage.sh bootstrap", rendered)
+        self.assertNotIn("请运行 ./manage.sh all 以应用更改", rendered)
+
     def test_tool_edit_only_persists_auto_update(self):
         iterator = iter(["1", "n", "n"])
         local_policy = {}
@@ -146,3 +172,4 @@ class InteractiveWorkflowTests(unittest.TestCase):
                     interactive.main()
 
         self.assertIn("6. 保存更改", output.getvalue())
+        self.assertIn("4. 编辑 Skill 策略", output.getvalue())

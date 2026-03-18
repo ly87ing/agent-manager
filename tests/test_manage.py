@@ -12,8 +12,6 @@ MANAGE = ROOT / "manage.sh"
 USER = getuser()
 LOCK_PATH = Path(f"/tmp/agent_manager_{USER}.lock")
 LOCK_DIR = Path(f"/tmp/agent_manager_{USER}.lock.d")
-LATEST_LOG_POINTER = Path(f"/tmp/agent_manager_sync_{USER}.latest")
-LEGACY_LOG_PATH = Path(f"/tmp/agent_manager_sync_{USER}.log")
 
 
 def move_aside(path: Path):
@@ -45,6 +43,21 @@ def restore_path(path: Path, backup):
 
 
 class ManageScriptTests(unittest.TestCase):
+    def setUp(self):
+        self.runtime_dir = Path(tempfile.mkdtemp(prefix="agent_manager_manage_test_"))
+        self.lock_path = self.runtime_dir / "agent_manager.lock"
+        self.lock_dir = Path(f"{self.lock_path}.d")
+        self.log_prefix = self.runtime_dir / "agent_manager_sync"
+        self.latest_log_pointer = Path(f"{self.log_prefix}.latest")
+        self.legacy_log_path = Path(f"{self.log_prefix}.log")
+        self.addCleanup(shutil.rmtree, self.runtime_dir, ignore_errors=True)
+
+    def _managed_env(self, base_env=None):
+        env = dict(base_env or os.environ.copy())
+        env["AGENT_MANAGER_LOCK_FILE"] = str(self.lock_path)
+        env["AGENT_MANAGER_LOG_PREFIX"] = str(self.log_prefix)
+        return env
+
     def _write_stub(self, path: Path, content: str):
         path.write_text(content, encoding="utf-8")
         path.chmod(0o755)
@@ -59,7 +72,7 @@ class ManageScriptTests(unittest.TestCase):
         self._write_stub(path, content)
 
     def test_doctor_does_not_remove_existing_lock(self):
-        original = LOCK_PATH.read_text(encoding="utf-8") if LOCK_PATH.exists() else None
+        original = self.lock_path.read_text(encoding="utf-8") if self.lock_path.exists() else None
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_root = Path(temp_dir) / "repo"
@@ -80,8 +93,8 @@ class ManageScriptTests(unittest.TestCase):
                 )
                 (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
 
-                LOCK_PATH.write_text("999999", encoding="utf-8")
-                env = os.environ.copy()
+                self.lock_path.write_text("999999", encoding="utf-8")
+                env = self._managed_env()
                 env["HOME"] = str(temp_home)
                 result = subprocess.run(
                     [str(temp_root / "manage.sh"), "doctor"],
@@ -93,13 +106,13 @@ class ManageScriptTests(unittest.TestCase):
                 )
 
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertTrue(LOCK_PATH.exists())
-                self.assertEqual(LOCK_PATH.read_text(encoding="utf-8"), "999999")
+                self.assertTrue(self.lock_path.exists())
+                self.assertEqual(self.lock_path.read_text(encoding="utf-8"), "999999")
         finally:
             if original is None:
-                LOCK_PATH.unlink(missing_ok=True)
+                self.lock_path.unlink(missing_ok=True)
             else:
-                LOCK_PATH.write_text(original, encoding="utf-8")
+                self.lock_path.write_text(original, encoding="utf-8")
 
     def test_failed_task_reports_error_and_returns_non_zero(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -114,6 +127,7 @@ class ManageScriptTests(unittest.TestCase):
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--dry-run", "--offline"],
                 cwd=temp_root,
+                env=self._managed_env(),
                 capture_output=True,
                 check=False,
             )
@@ -174,6 +188,7 @@ class ManageScriptTests(unittest.TestCase):
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "sync"],
                 cwd=temp_root,
+                env=self._managed_env(),
                 capture_output=True,
                 check=False,
             )
@@ -240,6 +255,7 @@ class ManageScriptTests(unittest.TestCase):
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "update"],
                 cwd=temp_root,
+                env=self._managed_env(),
                 capture_output=True,
                 check=False,
             )
@@ -306,6 +322,7 @@ class ManageScriptTests(unittest.TestCase):
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "bootstrap"],
                 cwd=temp_root,
+                env=self._managed_env(),
                 capture_output=True,
                 check=False,
             )
@@ -337,7 +354,7 @@ class ManageScriptTests(unittest.TestCase):
             self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log, "False")
             self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 99\n")
 
-            env = os.environ.copy()
+            env = self._managed_env()
             env["PATH"] = f"{fake_bin}:{env['PATH']}"
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "self-update"],
@@ -407,6 +424,7 @@ class ManageScriptTests(unittest.TestCase):
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "plan"],
                 cwd=temp_root,
+                env=self._managed_env(),
                 capture_output=True,
                 check=False,
             )
@@ -431,6 +449,7 @@ class ManageScriptTests(unittest.TestCase):
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--dry-run"],
                 cwd=temp_root,
+                env=self._managed_env(),
                 capture_output=True,
                 check=False,
             )
@@ -449,6 +468,7 @@ class ManageScriptTests(unittest.TestCase):
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--dry-run", "--offline"],
                 cwd=temp_root,
+                env=self._managed_env(),
                 capture_output=True,
                 check=False,
             )
@@ -487,6 +507,7 @@ class ManageScriptTests(unittest.TestCase):
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--offline"],
                 cwd=temp_root,
+                env=self._managed_env(),
                 capture_output=True,
                 check=False,
             )
@@ -526,6 +547,7 @@ class ManageScriptTests(unittest.TestCase):
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--offline"],
                 cwd=temp_root,
+                env=self._managed_env(),
                 capture_output=True,
                 check=False,
             )
@@ -566,6 +588,7 @@ class ManageScriptTests(unittest.TestCase):
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--offline"],
                 cwd=temp_root,
+                env=self._managed_env(),
                 capture_output=True,
                 check=False,
             )
@@ -606,6 +629,7 @@ class ManageScriptTests(unittest.TestCase):
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--offline"],
                 cwd=temp_root,
+                env=self._managed_env(),
                 capture_output=True,
                 check=False,
             )
@@ -646,6 +670,7 @@ class ManageScriptTests(unittest.TestCase):
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--offline"],
                 cwd=temp_root,
+                env=self._managed_env(),
                 capture_output=True,
                 check=False,
             )
@@ -655,15 +680,16 @@ class ManageScriptTests(unittest.TestCase):
             self.assertLessEqual(combined.count("对齐 Agent 生命周期: [AGENT: Claude Code] 状态一致"), 2, combined)
 
     def test_atomic_lock_directory_blocks_new_run(self):
-        lock_backup = move_aside(LOCK_PATH)
-        lock_dir_backup = move_aside(LOCK_DIR)
+        lock_backup = move_aside(self.lock_path)
+        lock_dir_backup = move_aside(self.lock_dir)
         holder = subprocess.Popen(["sleep", "60"])
         try:
-            LOCK_DIR.mkdir(parents=True)
-            (LOCK_DIR / "pid").write_text(str(holder.pid), encoding="utf-8")
+            self.lock_dir.mkdir(parents=True)
+            (self.lock_dir / "pid").write_text(str(holder.pid), encoding="utf-8")
             result = subprocess.run(
                 [str(MANAGE), "--dry-run", "--offline"],
                 cwd=ROOT,
+                env=self._managed_env(),
                 capture_output=True,
                 check=False,
             )
@@ -674,41 +700,92 @@ class ManageScriptTests(unittest.TestCase):
         finally:
             holder.terminate()
             holder.wait(timeout=5)
-            restore_path(LOCK_PATH, lock_backup)
-            restore_path(LOCK_DIR, lock_dir_backup)
+            restore_path(self.lock_path, lock_backup)
+            restore_path(self.lock_dir, lock_dir_backup)
 
     def test_unlock_removes_atomic_lock_artifacts(self):
-        lock_backup = move_aside(LOCK_PATH)
-        lock_dir_backup = move_aside(LOCK_DIR)
+        lock_backup = move_aside(self.lock_path)
+        lock_dir_backup = move_aside(self.lock_dir)
         try:
-            LOCK_PATH.write_text("999999", encoding="utf-8")
-            LOCK_DIR.mkdir(parents=True)
-            (LOCK_DIR / "pid").write_text("999999", encoding="utf-8")
+            self.lock_path.write_text("999999", encoding="utf-8")
+            self.lock_dir.mkdir(parents=True)
+            (self.lock_dir / "pid").write_text("999999", encoding="utf-8")
             result = subprocess.run(
                 [str(MANAGE), "unlock"],
                 cwd=ROOT,
+                env=self._managed_env(),
                 capture_output=True,
                 text=True,
                 check=False,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertFalse(LOCK_PATH.exists())
-            self.assertFalse(LOCK_DIR.exists())
+            self.assertFalse(self.lock_path.exists())
+            self.assertFalse(self.lock_dir.exists())
         finally:
-            restore_path(LOCK_PATH, lock_backup)
-            restore_path(LOCK_DIR, lock_dir_backup)
+            restore_path(self.lock_path, lock_backup)
+            restore_path(self.lock_dir, lock_dir_backup)
+
+    def test_custom_lock_env_ignores_default_global_lock(self):
+        global_lock_backup = move_aside(LOCK_PATH)
+        global_lock_dir_backup = move_aside(LOCK_DIR)
+        holder = subprocess.Popen(["sleep", "60"])
+        try:
+            LOCK_DIR.mkdir(parents=True)
+            (LOCK_DIR / "pid").write_text(str(holder.pid), encoding="utf-8")
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_root = Path(temp_dir) / "repo"
+                shutil.copytree(ROOT, temp_root)
+                self._write_stub(
+                    temp_root / "agent-lifecycle" / "sync_agents.py",
+                    "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+                )
+                self._write_stub(
+                    temp_root / "agent-tool" / "sync_tools.py",
+                    "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+                )
+                self._write_stub(
+                    temp_root / "agent-skill" / "link_skills.py",
+                    "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+                )
+                self._write_stub(
+                    temp_root / "agent-mcp" / "sync_mcp.py",
+                    "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+                )
+                self._write_stub(
+                    temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
+                    "#!/usr/bin/env bash\nexit 0\n",
+                )
+
+                result = subprocess.run(
+                    [str(temp_root / "manage.sh"), "--dry-run", "--offline"],
+                    cwd=temp_root,
+                    env=self._managed_env(),
+                    capture_output=True,
+                    check=False,
+                )
+
+                combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+                self.assertEqual(result.returncode, 0, combined)
+                self.assertNotIn("另一个管理任务", combined)
+        finally:
+            holder.terminate()
+            holder.wait(timeout=5)
+            restore_path(LOCK_PATH, global_lock_backup)
+            restore_path(LOCK_DIR, global_lock_dir_backup)
 
     def test_logs_command_outputs_latest_run_log(self):
-        latest_backup = move_aside(LATEST_LOG_POINTER)
-        legacy_backup = move_aside(LEGACY_LOG_PATH)
-        unique_log = Path(f"/tmp/agent_manager_sync_{USER}_{os.getpid()}_latest.log")
+        latest_backup = move_aside(self.latest_log_pointer)
+        legacy_backup = move_aside(self.legacy_log_path)
+        unique_log = self.runtime_dir / "latest.log"
         unique_backup = move_aside(unique_log)
         try:
             unique_log.write_text("hello latest log\n", encoding="utf-8")
-            LATEST_LOG_POINTER.write_text(str(unique_log), encoding="utf-8")
+            self.latest_log_pointer.write_text(str(unique_log), encoding="utf-8")
             result = subprocess.run(
                 [str(MANAGE), "logs"],
                 cwd=ROOT,
+                env=self._managed_env(),
                 capture_output=True,
                 text=True,
                 check=False,
@@ -716,33 +793,34 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("hello latest log", result.stdout)
         finally:
-            restore_path(LATEST_LOG_POINTER, latest_backup)
-            restore_path(LEGACY_LOG_PATH, legacy_backup)
+            restore_path(self.latest_log_pointer, latest_backup)
+            restore_path(self.legacy_log_path, legacy_backup)
             restore_path(unique_log, unique_backup)
 
     def test_clean_logs_command_removes_log_files(self):
-        latest_backup = move_aside(LATEST_LOG_POINTER)
-        legacy_backup = move_aside(LEGACY_LOG_PATH)
-        unique_log = Path(f"/tmp/agent_manager_sync_{USER}_{os.getpid()}_cleanup.log")
+        latest_backup = move_aside(self.latest_log_pointer)
+        legacy_backup = move_aside(self.legacy_log_path)
+        unique_log = Path(f"{self.log_prefix}_cleanup.log")
         unique_backup = move_aside(unique_log)
         try:
-            LEGACY_LOG_PATH.write_text("hello legacy log\n", encoding="utf-8")
+            self.legacy_log_path.write_text("hello legacy log\n", encoding="utf-8")
             unique_log.write_text("hello unique log\n", encoding="utf-8")
-            LATEST_LOG_POINTER.write_text(str(unique_log), encoding="utf-8")
+            self.latest_log_pointer.write_text(str(unique_log), encoding="utf-8")
             result = subprocess.run(
                 [str(MANAGE), "clean-logs"],
                 cwd=ROOT,
+                env=self._managed_env(),
                 capture_output=True,
                 text=True,
                 check=False,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertFalse(LEGACY_LOG_PATH.exists())
+            self.assertFalse(self.legacy_log_path.exists())
             self.assertFalse(unique_log.exists())
-            self.assertFalse(LATEST_LOG_POINTER.exists())
+            self.assertFalse(self.latest_log_pointer.exists())
         finally:
-            restore_path(LATEST_LOG_POINTER, latest_backup)
-            restore_path(LEGACY_LOG_PATH, legacy_backup)
+            restore_path(self.latest_log_pointer, latest_backup)
+            restore_path(self.legacy_log_path, legacy_backup)
             restore_path(unique_log, unique_backup)
 
     def test_mcp_sync_defaults_to_config_only_mode(self):
@@ -773,6 +851,7 @@ class ManageScriptTests(unittest.TestCase):
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "mcp:sync"],
                 cwd=temp_root,
+                env=self._managed_env(),
                 capture_output=True,
                 check=False,
             )

@@ -1,4 +1,4 @@
-.PHONY: all bootstrap sync update plan self-update ui help doctor detect status cleanup unlock backups-list restore logs rules-sync skills-link mcp-sync mcp-prepare tools-sync dry-run clean-logs offline
+.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect status cleanup unlock backups-list restore logs rules-sync skills-link mcp-sync mcp-prepare tools-sync dry-run clean-logs offline
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -26,6 +26,10 @@ plan:
 # 仅更新 agent-manager 仓库自身逻辑
 self-update:
 	@./manage.sh self-update
+
+# 跨平台 smoke 验证（安全预演路径）
+smoke:
+	@./scripts/ci-smoke.sh
 
 # 兼容旧入口：离线本地同步
 offline:

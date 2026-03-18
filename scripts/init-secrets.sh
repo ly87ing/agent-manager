@@ -45,7 +45,8 @@ if git clone "$REPO_URL" secrets 2>&1; then
     ls -la "$SECRETS_DIR"/*.env 2>/dev/null || echo "  (暂无 .env 文件)"
     echo ""
     echo "=========================================="
-    echo "  初始化完成！现在可以运行：make all"
+    echo "  初始化完成！现在可以运行：make update"
+    echo "  若需安装缺失 Agent，请改用：make bootstrap"
     echo "=========================================="
     exit 0
 else
