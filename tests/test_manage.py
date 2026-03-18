@@ -216,6 +216,30 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("playwright-cli", combined)
             self.assertIn("工具就绪:否", combined)
 
+    def test_detect_repo_backed_tool_requires_readiness_artifacts_after_clone(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root)
+            temp_home.mkdir()
+            (temp_root / "agent-tool" / "playwright-cli" / ".git").mkdir(parents=True, exist_ok=True)
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "detect"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertIn("playwright-cli", combined)
+            self.assertIn("工具就绪:否", combined)
+
     def test_doctor_stops_after_config_syntax_errors(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
@@ -236,6 +260,43 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("agents.json: 语法错误", combined)
             self.assertNotIn("--- Agent 状态与策略一致性 ---", combined)
             self.assertNotIn("Claude Code         : 漂移", combined)
+
+    def test_doctor_fails_when_required_definition_file_is_missing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root)
+            temp_home.mkdir()
+            (temp_root / "config" / "tools.json").unlink()
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {},\n  "servers": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "doctor"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("tools.json: 缺失", combined)
+            self.assertNotIn("环境状态完美", combined)
 
     def test_doctor_fails_when_configured_skill_target_is_missing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -313,6 +374,45 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("--- Tools 就绪审计 ---", combined)
             self.assertIn("playwright-cli", combined)
             self.assertIn("未就绪", combined)
+
+    def test_doctor_skips_node_and_npm_when_policy_does_not_need_them(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root)
+            temp_home.mkdir()
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {},\n  "servers": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            env["PATH"] = "/usr/bin:/bin"
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "doctor"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertNotIn("node: 缺失", combined)
+            self.assertNotIn("npm: 缺失", combined)
+            self.assertIn("环境状态完美", combined)
 
     def test_doctor_snapshot_statistics_only_count_managed_backups(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -288,25 +288,75 @@ function doctor_check() {
         echo -e "${BOLD}[ 管理系统版本 ]${NC}  ${VAL_PURPLE}$(git -C "$ROOT_DIR" rev-parse --short HEAD)${NC} ($(git -C "$ROOT_DIR" log -1 --format=%cd --date=short))\n"
     fi
 
-    # 运行环境
-    if [ "$silent" == "false" ]; then
-        echo -e "${BOLD}[ 运行环境 ]${NC}"
-        for c in "$PYTHON_CMD" "node" "npm" "git" "make"; do
-            command -v $c >/dev/null 2>&1 && echo -e "  ${SUCCESS_GREEN}✓${NC} $c: $($c --version | head -n1)" || { echo -e "  ${ERROR_RED}✗${NC} $c: 缺失"; errors=$((errors+1)); }
-        done
-        echo -e "\n${BOLD}[ 存储空间 ]${NC}"
-        echo -e "  ${SUCCESS_GREEN}✓${NC} 磁盘可用: $(df -h . | tail -n1 | awk '{print $4}')\n"
-    fi
-
     # 配置审计
     [ "$silent" == "false" ] && echo -e "${BOLD}[ 配置与安全 ]${NC}"
-    for f in "$ROOT_DIR"/config/*.json; do
+    local required_json_files=(
+        "$ROOT_DIR/config/manager.json"
+        "$ROOT_DIR/config/agents.json"
+        "$ROOT_DIR/config/tools.json"
+        "$ROOT_DIR/config/skills.json"
+        "$ROOT_DIR/config/mcp.json"
+    )
+    for f in "${required_json_files[@]}"; do
+        if [ ! -f "$f" ]; then
+            echo -e "  ${ERROR_RED}✗${NC} $(basename "$f"): 缺失"
+            errors=$((errors+1))
+            continue
+        fi
         if $PYTHON_CMD -m json.tool "$f" >/dev/null 2>&1; then
             [ "$silent" == "false" ] && echo -ne "  ${SUCCESS_GREEN}✓${NC} $(basename "$f"): 格式正确"
             local secrets=$($PYTHON_CMD -c "import re; c=open('$f').read(); f=re.findall(r'(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_\\\\-]{20,})', c); print(' '.join(f))")
             if [ -n "$secrets" ]; then echo -e " ${ERROR_RED}(⚠ 包含明文密钥风险!)${NC}"; errors=$((errors+1)); else [ "$silent" == "false" ] && echo ""; fi
-        else echo -e "  ${ERROR_RED}✗${NC} $(basename "$f"): 语法错误"; errors=$((errors+1)); fi
+        else
+            echo -e "  ${ERROR_RED}✗${NC} $(basename "$f"): 语法错误"
+            errors=$((errors+1))
+        fi
     done
+
+    if [ $errors -gt 0 ]; then
+        [ "$silent" == "false" ] && echo -e "${ERROR_RED}${BOLD}❌ 认证失败：发现 $errors 个配置问题。${NC}"
+        return 1
+    fi
+
+    # 运行环境
+    if [ "$silent" == "false" ]; then
+        echo -e "\n${BOLD}[ 运行环境 ]${NC}"
+    fi
+    local runtime_commands
+    runtime_commands="$($PYTHON_CMD -c "
+import sys
+sys.path.insert(0, '$ROOT_DIR')
+from src.agent_ids import canonicalize_agent_mapping
+from src.manage_runtime_probe import collect_required_runtime_commands, load_json
+
+cfg = load_json('$CONFIG_FILE', strict=True, missing_ok=False)
+cfg['agents'] = canonicalize_agent_mapping(cfg.get('agents', {}))
+agent_defs = canonicalize_agent_mapping(load_json('$ROOT_DIR/config/agents.json', strict=True, missing_ok=False))
+tool_defs = load_json('$ROOT_DIR/config/tools.json', strict=True, missing_ok=False).get('tools', {})
+skill_cfg = load_json('$ROOT_DIR/config/skills.json', strict=True, missing_ok=False)
+mcp_cfg = load_json('$ROOT_DIR/config/mcp.json', strict=True, missing_ok=False)
+
+for cmd in collect_required_runtime_commands(cfg, agent_defs, tool_defs, skill_cfg, mcp_cfg):
+    print(cmd)
+")"
+    local env_commands=("$PYTHON_CMD")
+    if [ -n "$runtime_commands" ]; then
+        while IFS= read -r cmd_name; do
+            [ -n "$cmd_name" ] && env_commands+=("$cmd_name")
+        done <<< "$runtime_commands"
+    fi
+    for c in "${env_commands[@]}"; do
+        if command -v "$c" >/dev/null 2>&1; then
+            [ "$silent" == "false" ] && echo -e "  ${SUCCESS_GREEN}✓${NC} $c: $($c --version 2>&1 | head -n1)"
+        else
+            [ "$silent" == "false" ] && echo -e "  ${ERROR_RED}✗${NC} $c: 缺失"
+            errors=$((errors+1))
+        fi
+    done
+    if [ "$silent" == "false" ]; then
+        echo -e "\n${BOLD}[ 存储空间 ]${NC}"
+        echo -e "  ${SUCCESS_GREEN}✓${NC} 磁盘可用: $(df -h . | tail -n1 | awk '{print $4}')\n"
+    fi
 
     if [ $errors -gt 0 ]; then
         [ "$silent" == "false" ] && echo -e "${ERROR_RED}${BOLD}❌ 认证失败：发现 $errors 个配置问题。${NC}"

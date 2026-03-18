@@ -203,6 +203,73 @@ class SyncToolsTests(unittest.TestCase):
 
             self.assertEqual(apply_overrides.call_count, 0)
 
+    def test_successful_setup_marks_repo_ready(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_dir = Path(temp_dir) / "playwright-cli"
+
+            def fake_run_cmd(cmd, cwd=None, timeout=300):
+                if isinstance(cmd, list) and cmd[:2] == ["git", "clone"]:
+                    target_dir.mkdir()
+                    (target_dir / ".git").mkdir()
+                    (target_dir / "node_modules").mkdir()
+                    return True, "cloned"
+                if cmd == "npm install && npx playwright install":
+                    return True, "setup ok"
+                return True, ""
+
+            with mock.patch.object(sync_tools, "run_cmd", side_effect=fake_run_cmd):
+                with mock.patch.object(sync_tools, "apply_overrides"):
+                    ok = sync_tools.sync_tool(
+                        "playwright-cli",
+                        {
+                            "url": "https://example.invalid/repo.git",
+                            "setup": "npm install && npx playwright install",
+                            "ready_paths": ["node_modules"],
+                        },
+                        {"enabled": True, "auto_update": True},
+                        Path(temp_dir),
+                    )
+
+            self.assertTrue(ok)
+            self.assertTrue((target_dir / sync_tools.TOOL_READY_MARKER).exists())
+            self.assertFalse((target_dir / sync_tools.TOOL_BROKEN_MARKER).exists())
+
+    def test_failed_setup_marks_repo_broken_and_clears_ready_marker(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_dir = Path(temp_dir) / "playwright-cli"
+            target_dir.mkdir()
+            (target_dir / ".git").mkdir()
+            (target_dir / "node_modules").mkdir()
+            (target_dir / sync_tools.TOOL_READY_MARKER).write_text("ready\n", encoding="utf-8")
+            sync_tools.git_cache._cache = {}
+
+            def fake_run_cmd(cmd, cwd=None, timeout=300):
+                if cmd == ["git", "status", "--porcelain"]:
+                    return True, ""
+                if cmd == ["git", "pull"]:
+                    return True, "pulled"
+                if cmd == "npm install && npx playwright install":
+                    return False, "setup failed"
+                return True, ""
+
+            with mock.patch.object(sync_tools.git_cache, "is_git_up_to_date", return_value=False):
+                with mock.patch.object(sync_tools, "run_cmd", side_effect=fake_run_cmd):
+                    with mock.patch.object(sync_tools, "apply_overrides"):
+                        ok = sync_tools.sync_tool(
+                            "playwright-cli",
+                            {
+                                "url": "https://example.invalid/repo.git",
+                                "setup": "npm install && npx playwright install",
+                                "ready_paths": ["node_modules"],
+                            },
+                            {"enabled": True, "auto_update": True},
+                            Path(temp_dir),
+                        )
+
+            self.assertFalse(ok)
+            self.assertFalse((target_dir / sync_tools.TOOL_READY_MARKER).exists())
+            self.assertTrue((target_dir / sync_tools.TOOL_BROKEN_MARKER).exists())
+
     def test_update_failure_does_not_apply_overrides(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             target_dir = Path(temp_dir) / "playwright-cli"

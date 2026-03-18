@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.json_config import load_json_file
+from src.manage_runtime_probe import TOOL_BROKEN_MARKER, TOOL_READY_MARKER
 from src.runtime_logging import configure_logging
 
 configure_logging()
@@ -90,6 +91,29 @@ class GitStatusCache:
 git_cache = GitStatusCache()
 
 
+def ready_marker_path(target_dir: Path) -> Path:
+    return target_dir / TOOL_READY_MARKER
+
+
+def broken_marker_path(target_dir: Path) -> Path:
+    return target_dir / TOOL_BROKEN_MARKER
+
+
+def mark_tool_ready(target_dir: Path):
+    ready_marker_path(target_dir).write_text("ready\n", encoding="utf-8")
+    broken_marker_path(target_dir).unlink(missing_ok=True)
+
+
+def mark_tool_broken(target_dir: Path):
+    broken_marker_path(target_dir).write_text("broken\n", encoding="utf-8")
+    ready_marker_path(target_dir).unlink(missing_ok=True)
+
+
+def clear_tool_markers(target_dir: Path):
+    ready_marker_path(target_dir).unlink(missing_ok=True)
+    broken_marker_path(target_dir).unlink(missing_ok=True)
+
+
 def apply_overrides(name, target_dir, dry_run=False):
     """将本地补丁应用到目标工具目录"""
     override_dir = Path(__file__).parent / "overrides" / name
@@ -150,6 +174,7 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
     needs_setup = force
     success_build = True
     should_apply_overrides = False
+    repo_state_changed = False
 
     if url:
         if target_dir.exists() and (target_dir / ".git").exists():
@@ -171,6 +196,7 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
                             logging.info(f"[TOOL: {name}] (已更新)")
                             needs_setup = True
                             should_apply_overrides = True
+                            repo_state_changed = True
                         else: logging.error(f"[TOOL: {name}] (更新失败: {out})"); success_build = False
         else:
             if target_dir.exists():
@@ -183,13 +209,22 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
                     logging.info(f"[TOOL: {name}] (安装成功)")
                     needs_setup = True
                     should_apply_overrides = True
+                    repo_state_changed = True
                 else: logging.error(f"[TOOL: {name}] (下载失败: {out})"); success_build = False
         
         if not dry_run and should_apply_overrides: apply_overrides(name, target_dir, dry_run)
         if setup_cmd and needs_setup and not dry_run:
             logging.info(f"执行 {name} 初始化...")
             ok, out = run_cmd(setup_cmd, cwd=target_dir)
-            if not ok: logging.error(f"[TOOL: {name}] 构建失败: {out}"); success_build = False
+            if not ok:
+                logging.error(f"[TOOL: {name}] 构建失败: {out}")
+                success_build = False
+
+        if not dry_run and target_dir.exists() and (target_dir / ".git").exists():
+            if success_build:
+                mark_tool_ready(target_dir)
+            elif repo_state_changed or force:
+                mark_tool_broken(target_dir)
 
     elif install_cmd:
         if dry_run: logging.info(f"[TOOL: {name}] (预览: 计划执行安装)")

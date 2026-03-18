@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import shutil
 import subprocess
 
@@ -70,10 +71,94 @@ def detect_npm_from_paths(bin_path, resolved_bin_path="", brew_detected=False):
     return path_indicates_npm(resolved_bin_path)
 
 
+TOOL_READY_MARKER = ".agent-manager-ready"
+TOOL_BROKEN_MARKER = ".agent-manager-broken"
+
+
+def iter_command_heads(command):
+    if not command:
+        return []
+    heads = []
+    for segment in re.split(r"\s*(?:&&|\|\||;|\|)\s*", command):
+        segment = segment.strip()
+        if not segment:
+            continue
+        try:
+            tokens = shlex.split(segment)
+        except ValueError:
+            tokens = segment.split()
+        if tokens:
+            heads.append(os.path.basename(tokens[0]))
+    return heads
+
+
+def collect_required_runtime_commands(config, agent_defs, tool_defs, skill_cfg, mcp_cfg):
+    required = []
+
+    def add(cmd):
+        if cmd and cmd not in required:
+            required.append(cmd)
+
+    for agent_name, policy in config.get("agents", {}).items():
+        if not policy.get("enabled", True):
+            continue
+        definition = agent_defs.get(agent_name, {})
+        providers = definition.get("providers", {})
+        preferred = policy.get("preferred_provider") or definition.get("preferred_provider")
+        candidate_providers = []
+        if preferred and preferred in providers:
+            candidate_providers.append(providers[preferred])
+        else:
+            candidate_providers.extend(providers.values())
+        if policy.get("auto_install", True):
+            for provider in candidate_providers:
+                for head in iter_command_heads(provider.get("install")):
+                    add(head)
+        if policy.get("auto_update", True):
+            for provider in candidate_providers:
+                for head in iter_command_heads(provider.get("upgrade")):
+                    add(head)
+
+    for tool_name, policy in config.get("tools", {}).items():
+        if not policy.get("enabled", True):
+            continue
+        definition = tool_defs.get(tool_name, {})
+        if definition.get("url"):
+            add("git")
+        for head in iter_command_heads(definition.get("install")):
+            add(head)
+        for head in iter_command_heads(definition.get("setup")):
+            add(head)
+
+    for repo_name, repo_def in skill_cfg.get("repositories", {}).items():
+        policy = config.get("skills", {}).get(repo_name, {})
+        if policy.get("enabled", True) and repo_def.get("url"):
+            add("git")
+
+    for server_name, server_def in mcp_cfg.get("servers", {}).items():
+        policy = config.get("mcp", {}).get(server_name, {})
+        if not policy.get("enabled", True):
+            continue
+        if server_def.get("url"):
+            add("git")
+
+    return required
+
+
 def detect_tool_readiness(name, definition, repo_root):
     managed_repo_dir = os.path.join(repo_root, "agent-tool", name)
     if definition.get("url"):
-        return os.path.isdir(managed_repo_dir) and os.path.isdir(os.path.join(managed_repo_dir, ".git"))
+        git_dir = os.path.join(managed_repo_dir, ".git")
+        if not os.path.isdir(managed_repo_dir) or not os.path.isdir(git_dir):
+            return False
+        if os.path.exists(os.path.join(managed_repo_dir, TOOL_BROKEN_MARKER)):
+            return False
+        ready_paths = definition.get("ready_paths") or []
+        if ready_paths:
+            return all(os.path.exists(os.path.join(managed_repo_dir, rel_path)) for rel_path in ready_paths)
+        if os.path.exists(os.path.join(managed_repo_dir, TOOL_READY_MARKER)):
+            return True
+        return not definition.get("setup")
     return shutil.which(name) is not None
 
 

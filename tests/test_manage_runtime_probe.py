@@ -17,9 +17,60 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
             ready = manage_runtime_probe.detect_tool_readiness(
                 "playwright-cli",
-                {"url": "https://github.com/microsoft/playwright-cli.git"},
+                {
+                    "url": "https://github.com/microsoft/playwright-cli.git",
+                    "setup": "npm install && npx playwright install",
+                    "ready_paths": ["node_modules"],
+                },
                 "/repo",
             )
+
+        self.assertFalse(ready)
+
+    def test_detect_tool_readiness_requires_ready_paths_for_repo_backed_tools(self):
+        with mock.patch("src.manage_runtime_probe.os.path.isdir", return_value=True):
+            with mock.patch("src.manage_runtime_probe.os.path.exists", return_value=False):
+                ready = manage_runtime_probe.detect_tool_readiness(
+                    "playwright-cli",
+                    {
+                        "url": "https://github.com/microsoft/playwright-cli.git",
+                        "setup": "npm install && npx playwright install",
+                        "ready_paths": ["node_modules"],
+                    },
+                    "/repo",
+                )
+
+        self.assertFalse(ready)
+
+    def test_detect_tool_readiness_accepts_backfilled_ready_paths(self):
+        with mock.patch("src.manage_runtime_probe.os.path.isdir", return_value=True):
+            with mock.patch("src.manage_runtime_probe.os.path.exists") as path_exists:
+                path_exists.side_effect = lambda path: path.endswith("node_modules")
+                ready = manage_runtime_probe.detect_tool_readiness(
+                    "playwright-cli",
+                    {
+                        "url": "https://github.com/microsoft/playwright-cli.git",
+                        "setup": "npm install && npx playwright install",
+                        "ready_paths": ["node_modules"],
+                    },
+                    "/repo",
+                )
+
+        self.assertTrue(ready)
+
+    def test_detect_tool_readiness_honors_broken_repo_marker(self):
+        with mock.patch("src.manage_runtime_probe.os.path.isdir", return_value=True):
+            with mock.patch("src.manage_runtime_probe.os.path.exists") as path_exists:
+                path_exists.side_effect = lambda path: path.endswith(".agent-manager-broken") or path.endswith("node_modules")
+                ready = manage_runtime_probe.detect_tool_readiness(
+                    "playwright-cli",
+                    {
+                        "url": "https://github.com/microsoft/playwright-cli.git",
+                        "setup": "npm install && npx playwright install",
+                        "ready_paths": ["node_modules"],
+                    },
+                    "/repo",
+                )
 
         self.assertFalse(ready)
 
@@ -32,6 +83,17 @@ class ManageRuntimeProbeTests(unittest.TestCase):
             )
 
         self.assertTrue(ready)
+
+    def test_collect_required_runtime_commands_skips_node_for_empty_policy(self):
+        required = manage_runtime_probe.collect_required_runtime_commands(
+            {"agents": {}, "tools": {}, "skills": {}, "mcp": {}},
+            {},
+            {},
+            {"repositories": {}},
+            {"servers": {}},
+        )
+
+        self.assertEqual(required, [])
 
     def test_detect_all_providers_supports_windows_npm_bin_path(self):
         inventory = manage_runtime_probe.ProviderInventory(
