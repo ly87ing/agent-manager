@@ -149,7 +149,7 @@ function acquire_lock() {
 }
 
 # 原子锁检查
-if [[ "$cmd" != "help" && "$cmd" != "-h" && "$cmd" != "--help" && "$cmd" != "-help" && "$cmd" != "detect" && "$cmd" != "doctor" && "$cmd" != "status" && "$cmd" != "backups:list" && "$cmd" != "backups:restore" && "$cmd" != "unlock" && "$cmd" != "logs" ]]; then
+if [[ "$cmd" != "help" && "$cmd" != "-h" && "$cmd" != "--help" && "$cmd" != "-help" && "$cmd" != "detect" && "$cmd" != "doctor" && "$cmd" != "status" && "$cmd" != "backups:list" && "$cmd" != "unlock" && "$cmd" != "logs" ]]; then
     acquire_lock
 fi
 
@@ -658,6 +658,46 @@ function run_self_update() {
     git -C "$ROOT_DIR" pull
 }
 
+function backup_restore_target_path() {
+    local backup_path="$1"
+    if [[ "$backup_path" == *.bak.* ]]; then
+        printf '%s\n' "${backup_path%.bak.*}"
+        return
+    fi
+    if [[ "$backup_path" == *.bak ]]; then
+        printf '%s\n' "${backup_path%.bak}"
+        return
+    fi
+    return 1
+}
+
+function restore_backup_entry() {
+    local backup_path="$1"
+    local target_path
+    if ! target_path="$(backup_restore_target_path "$backup_path")"; then
+        echo "无法推导备份目标: $backup_path"
+        return 1
+    fi
+
+    if [ -e "$target_path" ] || [ -L "$target_path" ]; then
+        rm -rf "$target_path"
+    fi
+
+    if [ -d "$backup_path" ] && [ ! -L "$backup_path" ]; then
+        cp -R "$backup_path" "$target_path"
+    else
+        cp "$backup_path" "$target_path"
+    fi
+}
+
+function restore_backup_selection_input() {
+    if [ -t 0 ] && [ -r /dev/tty ]; then
+        printf '/dev/tty'
+    else
+        printf '/dev/stdin'
+    fi
+}
+
 case "$cmd" in
     all|""|bootstrap)
         run_update_pipeline "🚀 Agent Manager 全量同步启动" ""
@@ -696,9 +736,17 @@ case "$cmd" in
     clean-logs) rm -f "${LOG_PREFIX}"*.log "$LATEST_LOG_POINTER"; echo "日志已清理" ;;
     backups:list) find "$HOME" -maxdepth 3 \( -name "*.bak.*" -o -name "*.bak" \) 2>/dev/null | sort -r | head -n 20 || true ;;
     backups:restore) 
-        files=$(find "$HOME" -maxdepth 3 \( -name "*.bak.*" -o -name "*.bak" \) 2>/dev/null | sort -r | head -n 10 || true)
-        if [ -z "$files" ]; then echo "未发现备份。"; exit 0; fi
-        select f in $files; do cp -i "$f" "${f%.bak.*}"; echo "已恢复。"; break; done < /dev/tty ;;
+        files=()
+        while IFS= read -r line; do
+            files+=("$line")
+        done < <(find "$HOME" -maxdepth 3 \( -name "*.bak.*" -o -name "*.bak" \) 2>/dev/null | sort -r | head -n 10 || true)
+        if [ "${#files[@]}" -eq 0 ]; then echo "未发现备份。"; exit 0; fi
+        selection_input="$(restore_backup_selection_input)"
+        select f in "${files[@]}"; do
+            [ -n "${f:-}" ] || { echo "无效选择。"; continue; }
+            restore_backup_entry "$f" && echo "已恢复。"
+            break
+        done < "$selection_input" ;;
     mcp:sync)
         (cd "$ROOT_DIR/agent-mcp" && $PYTHON_CMD sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json" $DRY_RUN_FLAG $OFFLINE_FLAG) ;;
     mcp:prepare)
@@ -741,7 +789,7 @@ for t in set(targets): print(t)
                 d=$(dirname "$p")
                 b=$(basename "$p")
                 if [ -d "$d" ]; then
-                    find "$d" -maxdepth 1 \( -name "${b}.bak.*" -o -name "${b}.tmp_*" -o -name "*.tmp_*" \) -type f -delete 2>/dev/null || true
+                    find "$d" -maxdepth 1 \( -name "${b}.bak.*" -o -name "${b}.tmp_*" \) -type f -delete 2>/dev/null || true
                 fi
             fi
         done
