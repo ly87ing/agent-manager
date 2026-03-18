@@ -13,13 +13,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.json_config import load_json_file
+from src.runtime_logging import configure_logging
 
-# 配置日志：统一审计时间戳
-logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
+configure_logging()
 
 def run_cmd(cmd, cwd=None, timeout=None):
     """运行 shell 命令并返回结果"""

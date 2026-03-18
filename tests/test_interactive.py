@@ -141,6 +141,18 @@ class InteractiveWorkflowTests(unittest.TestCase):
         self.assertIn("./manage.sh bootstrap", rendered)
         self.assertNotIn("请运行 ./manage.sh all 以应用更改", rendered)
 
+    def test_save_policy_uses_atomic_json_write(self):
+        local_policy = {"agents": {"claude-code": {"enabled": False}}}
+
+        with working_directory(self.root):
+            with mock.patch.object(interactive, "atomic_write_json_file") as atomic_write:
+                interactive.save_policy(local_policy)
+
+        atomic_write.assert_called_once_with(
+            (self.root / "config" / "manager.local.json").resolve(),
+            local_policy,
+        )
+
     def test_tool_edit_only_persists_auto_update(self):
         iterator = iter(["1", "n", "n"])
         local_policy = {}

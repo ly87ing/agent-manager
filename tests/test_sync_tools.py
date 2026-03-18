@@ -1,3 +1,4 @@
+import os
 import subprocess
 import shutil
 import tempfile
@@ -100,6 +101,38 @@ class SyncToolsTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(victim_dir.exists(), result.stdout + result.stderr)
+
+    def test_log_level_environment_enables_debug_output(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            config_path.write_text('{"tools": {}}', encoding="utf-8")
+            def_path.write_text('{"tools": {}}', encoding="utf-8")
+            env = os.environ.copy()
+            env["LOG_LEVEL"] = "DEBUG"
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(Path(sync_tools.__file__).resolve()),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "tools"),
+                ],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertIn("[DEBUG] Logging initialized at level DEBUG", combined)
 
     def test_dirty_git_repo_is_not_reset_hard(self):
         with tempfile.TemporaryDirectory() as temp_dir:

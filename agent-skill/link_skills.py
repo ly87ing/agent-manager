@@ -15,13 +15,9 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.agent_ids import canonicalize_agent_list, canonicalize_agent_mapping
 from src.json_config import load_json_file
+from src.runtime_logging import configure_logging
 
-# 配置日志：统一审计时间戳
-logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
+configure_logging()
 
 MANAGED_REPO_DIRNAME = "repositories"
 OWNER_MARKER = ".agent-manager-owned"

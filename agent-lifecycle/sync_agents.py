@@ -16,13 +16,9 @@ if str(REPO_ROOT) not in sys.path:
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
 from src.json_config import load_json_file
 from src.manage_runtime_probe import detect_npm_from_paths
+from src.runtime_logging import configure_logging
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
+configure_logging()
 
 def run_cmd(cmd, timeout=300):
     """运行 shell 命令并返回结果"""
@@ -324,8 +320,8 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=T
 
 def main():
     parser = argparse.ArgumentParser(description="Agent 生命周期对齐工具")
-    parser.add_argument("--config", default="../config/manager.json", help="策略配置路径")
-    parser.add_argument("--def-file", default="../config/agents.json", help="定义文件路径")
+    parser.add_argument("--config", default=str(REPO_ROOT / "config" / "manager.json"), help="策略配置路径")
+    parser.add_argument("--def-file", default=str(REPO_ROOT / "config" / "agents.json"), help="定义文件路径")
     parser.add_argument("--dry-run", action="store_true", help="预览")
     parser.add_argument("--yes", action="store_true", help="自动确认")
     parser.add_argument("--offline", action="store_true", help="离线模式 (跳过网络操作)")

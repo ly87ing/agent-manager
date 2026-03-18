@@ -44,3 +44,19 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("python3 -m unittest discover -s tests -p 'test*.py' -v", content)
         self.assertIn("Run smoke validation", content)
         self.assertTrue("make smoke" in content or "./scripts/ci-smoke.sh" in content)
+
+    def test_python_subengines_share_runtime_log_level_support(self):
+        for rel_path in (
+            "agent-lifecycle/sync_agents.py",
+            "agent-tool/sync_tools.py",
+            "agent-skill/link_skills.py",
+            "agent-mcp/sync_mcp.py",
+        ):
+            content = (ROOT / rel_path).read_text(encoding="utf-8")
+            self.assertIn("from src.runtime_logging import configure_logging", content, rel_path)
+            self.assertIn("configure_logging()", content, rel_path)
+
+    def test_troubleshooting_log_level_guidance_matches_runtime(self):
+        troubleshooting = (ROOT / "docs" / "TROUBLESHOOTING.md").read_text(encoding="utf-8")
+        self.assertIn("LOG_LEVEL=DEBUG ./manage.sh bootstrap", troubleshooting)
+        self.assertNotIn("永久修改 manage.sh 中的 logging.basicConfig level", troubleshooting)

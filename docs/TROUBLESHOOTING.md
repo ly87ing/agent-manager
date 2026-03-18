@@ -420,11 +420,11 @@ python3 -m json.tool config/mcp.json > /dev/null && echo "mcp.json: 有效"
 
 ### 启用调试日志
 ```bash
-# 临时启用调试级别日志
-export LOG_LEVEL=DEBUG
-./manage.sh bootstrap
+# 临时启用调试级别日志（所有 Python 同步引擎都会读取 LOG_LEVEL）
+LOG_LEVEL=DEBUG ./manage.sh bootstrap
 
-# 或永久修改 manage.sh 中的 logging.basicConfig level
+# 也可以只调试某个子引擎
+LOG_LEVEL=DEBUG python3 agent-mcp/sync_mcp.py --config config/manager.json --def-file config/mcp.json --dry-run
 ```
 
 ### 检查环境变量注入

@@ -1,4 +1,5 @@
 import json
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -360,6 +361,51 @@ class ReconcileAgentTests(unittest.TestCase):
 
 
 class PolicyOwnershipTests(unittest.TestCase):
+    def test_direct_invocation_uses_repo_root_default_paths(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            repo_root = temp_root / "repo"
+            config_dir = repo_root / "config"
+            config_dir.mkdir(parents=True)
+            shutil.copytree(ROOT / "src", repo_root / "src")
+            config_dir.joinpath("manager.json").write_text(
+                json.dumps({"agents": {}}),
+                encoding="utf-8",
+            )
+            config_dir.joinpath("agents.json").write_text(
+                json.dumps(
+                    {
+                        "mystery-agent": {
+                            "display_name": "Mystery Agent",
+                            "bin": "definitely-not-installed",
+                            "providers": {},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            script_dir = repo_root / "agent-lifecycle"
+            script_dir.mkdir(parents=True)
+            script_path = script_dir / "sync_agents.py"
+            script_path.write_text(MODULE_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(script_path),
+                    "--dry-run",
+                    "--yes",
+                ],
+                cwd=temp_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Agent 状态对齐任务完成", result.stdout + result.stderr)
+
     def test_missing_policy_entries_are_ignored(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

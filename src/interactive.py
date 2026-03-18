@@ -12,7 +12,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
-from src.json_config import load_json_file
+from src.json_config import atomic_write_json_file, load_json_file
 
 # 颜色定义
 RED = "\033[0;31m"
@@ -56,9 +56,7 @@ def load_json(path, *, strict=False, missing_ok=True):
     return load_json_file(path, strict=strict, missing_ok=missing_ok)
 
 def save_json(data, path):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    atomic_write_json_file(path, data)
 
 def get_config_root():
     cwd_root = Path.cwd()
@@ -84,9 +82,7 @@ def get_local_config():
     local_path = get_config_root() / "config" / "manager.local.json"
     # Ensure file exists
     if not local_path.exists():
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(local_path, 'w', encoding='utf-8') as f:
-            json.dump({}, f, indent=2)
+        save_json({}, local_path)
     local = load_json(local_path, strict=True)
     if "agents" in local:
         local["agents"] = canonicalize_agent_mapping(local.get("agents", {}))
@@ -119,9 +115,7 @@ def main():
     # 确保本地配置文件存在
     local_path = get_config_root() / "config" / "manager.local.json"
     if not local_path.exists():
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(local_path, 'w', encoding='utf-8') as f:
-            json.dump({}, f, indent=2)
+        save_json({}, local_path)
     
     try:
         local_policy = get_local_config()
