@@ -183,6 +183,27 @@ function status_line() {
     esac
 }
 
+function format_progress_tail() {
+    local message="$1"
+    local limit="${2:-55}"
+    "$PYTHON_CMD" - "$message" "$limit" <<'PY'
+import re
+import sys
+
+message = sys.argv[1]
+limit = int(sys.argv[2])
+
+message = re.sub(r'^[0-9-]+ [0-9:]+ \[(INFO|WARNING|ERROR)\] ', '', message)
+message = re.sub(r'^INFO: ', '', message)
+message = message.replace('\r', '').strip()
+
+if not message:
+    sys.exit(0)
+
+print(message[:limit], end='')
+PY
+}
+
 function timeout_run() {
     local seconds="$1"; shift
     if command -v timeout >/dev/null 2>&1; then timeout "$seconds" "$@"
@@ -504,15 +525,33 @@ function run_task_with_progress() {
     shift 3
 
     status_line "RUNNING" "$title..."
+    local start_line=0
+    if [ -f "$TEMP_LOG" ]; then
+        start_line=$(wc -l < "$TEMP_LOG" | tr -d ' ')
+    fi
+    local start_ts
+    start_ts=$(date +%s)
     "$@" >> "$TEMP_LOG" 2>&1 &
     local pid=$!
 
     while kill -0 $pid 2>/dev/null; do
+        local elapsed
+        elapsed=$(( $(date +%s) - start_ts ))
         if [ -s "$TEMP_LOG" ]; then
-            local last_msg=$(tail -n 1 "$TEMP_LOG" 2>/dev/null | sed -E 's/^[0-9-]+ [0-9:]+ \[(INFO|WARNING|ERROR)\] //g; s/INFO: //g; s/^[[:space:]]*//; s/\r//g' | awk '{print substr($0,1,55)}')
-            if [ -n "$last_msg" ]; then
-                status_line "RUNNING" "$title: $last_msg"
+            local last_msg=""
+            local next_line=$((start_line + 1))
+            local raw_msg=""
+            raw_msg=$(tail -n +"$next_line" "$TEMP_LOG" 2>/dev/null | tail -n 1)
+            if [ -n "$raw_msg" ]; then
+                last_msg=$(format_progress_tail "$raw_msg")
             fi
+            if [ -n "$last_msg" ]; then
+                status_line "RUNNING" "$title: $last_msg · 已运行 ${elapsed}s"
+            else
+                status_line "RUNNING" "$title... · 已运行 ${elapsed}s"
+            fi
+        else
+            status_line "RUNNING" "$title... · 已运行 ${elapsed}s"
         fi
         sleep 0.3
     done

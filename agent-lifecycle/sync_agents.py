@@ -172,6 +172,27 @@ def detect_provider_state(bin_name, definition):
         "unsupported": unsupported,
     }
 
+def get_update_probe_cmd(provider_name, provider_cfg):
+    if not provider_cfg:
+        return None
+    explicit = provider_cfg.get("check_update")
+    if explicit:
+        return explicit
+    if provider_name.startswith("brew"):
+        pkg_name = get_pkg_name(provider_cfg.get("install", ""))
+        if not pkg_name:
+            return None
+        if provider_name == "brew-cask":
+            return f"brew outdated --cask {pkg_name}"
+        return f"brew outdated {pkg_name}"
+    return None
+
+def resolve_active_provider_variant(managed_actual, provider_key):
+    for provider_name in managed_actual:
+        if canonical_provider_name(provider_name) == provider_key:
+            return provider_name
+    return provider_key
+
 def reconcile_agent(agent_id, definition, policy, dry_run=False):
     label = get_agent_display_name(agent_id, definition)
     # 合并策略
@@ -275,11 +296,21 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False):
         logging.info(f"[AGENT: {label}] 状态一致，正在尝试检查更新...")
         actual_provider_keys = [canonical_provider_name(provider) for provider in managed_actual]
         p_key = preferred if preferred in actual_provider_keys else actual_provider_keys[0]
+        active_provider = resolve_active_provider_variant(managed_actual, p_key)
         p_cfg = providers.get(p_key)
         if p_cfg and "upgrade" in p_cfg:
             if dry_run:
                 logging.info(f"  (预览: 计划执行 {p_cfg['upgrade']})")
             else:
+                probe_cmd = get_update_probe_cmd(active_provider, p_cfg)
+                if probe_cmd:
+                    probe_success, probe_out = run_cmd(probe_cmd, timeout=60)
+                    if probe_success:
+                        if not probe_out.strip():
+                            logging.info(f"[AGENT: {label}] 未发现可用更新，跳过升级。")
+                            return True
+                    else:
+                        logging.warning(f"[AGENT: {label}] 更新探测失败，回退到直接升级: {probe_out}")
                 success, out = run_cmd(p_cfg["upgrade"])
                 if success:
                     post_state = detect_provider_state(bin_name, definition)

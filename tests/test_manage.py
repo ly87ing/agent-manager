@@ -45,6 +45,10 @@ def restore_path(path: Path, backup):
 
 
 class ManageScriptTests(unittest.TestCase):
+    def _write_stub(self, path: Path, content: str):
+        path.write_text(content, encoding="utf-8")
+        path.chmod(0o755)
+
     def test_doctor_does_not_remove_existing_lock(self):
         original = LOCK_PATH.read_text(encoding="utf-8") if LOCK_PATH.exists() else None
         try:
@@ -153,27 +157,23 @@ class ManageScriptTests(unittest.TestCase):
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root)
 
-            def write_stub(path: Path, content: str):
-                path.write_text(content, encoding="utf-8")
-                path.chmod(0o755)
-
-            write_stub(
+            self._write_stub(
                 temp_root / "agent-lifecycle" / "sync_agents.py",
                 "#!/usr/bin/env python3\nimport sys\nsys.exit(0 if '--offline' in sys.argv else 9)\n",
             )
-            write_stub(
+            self._write_stub(
                 temp_root / "agent-tool" / "sync_tools.py",
                 "#!/usr/bin/env python3\nimport sys\nsys.exit(0 if '--offline' in sys.argv else 9)\n",
             )
-            write_stub(
+            self._write_stub(
                 temp_root / "agent-skill" / "link_skills.py",
                 "#!/usr/bin/env python3\nimport sys\nsys.exit(0 if '--offline' in sys.argv else 9)\n",
             )
-            write_stub(
+            self._write_stub(
                 temp_root / "agent-mcp" / "sync_mcp.py",
                 "#!/usr/bin/env python3\nimport sys\nsys.exit(0 if '--offline' in sys.argv else 9)\n",
             )
-            write_stub(
+            self._write_stub(
                 temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
                 "#!/usr/bin/env bash\nexit 0\n",
             )
@@ -187,6 +187,126 @@ class ManageScriptTests(unittest.TestCase):
 
             combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
             self.assertEqual(result.returncode, 0, combined)
+
+    def test_progress_output_preserves_utf8_log_lines(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root)
+
+            self._write_stub(
+                temp_root / "agent-lifecycle" / "sync_agents.py",
+                (
+                    "#!/usr/bin/env python3\n"
+                    "import sys, time\n"
+                    "print('[AGENT: Claude Code] 状态一致，正在尝试检查更新并验证远端元数据完整性...', flush=True)\n"
+                    "time.sleep(1)\n"
+                    "sys.exit(0)\n"
+                ),
+            )
+            self._write_stub(
+                temp_root / "agent-tool" / "sync_tools.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-skill" / "link_skills.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-mcp" / "sync_mcp.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 0\n")
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "--offline"],
+                cwd=temp_root,
+                capture_output=True,
+                check=False,
+            )
+
+            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertNotIn("\ufffd", combined)
+
+    def test_progress_output_reports_elapsed_time_for_long_running_task(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root)
+
+            self._write_stub(
+                temp_root / "agent-lifecycle" / "sync_agents.py",
+                (
+                    "#!/usr/bin/env python3\n"
+                    "import sys, time\n"
+                    "print('[AGENT: Claude Code] 状态一致，正在尝试检查更新...', flush=True)\n"
+                    "time.sleep(1)\n"
+                    "sys.exit(0)\n"
+                ),
+            )
+            self._write_stub(
+                temp_root / "agent-tool" / "sync_tools.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-skill" / "link_skills.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-mcp" / "sync_mcp.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 0\n")
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "--offline"],
+                cwd=temp_root,
+                capture_output=True,
+                check=False,
+            )
+
+            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertRegex(combined, r"已运行 [0-9]+s")
+
+    def test_progress_output_does_not_reuse_previous_task_log_lines(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root)
+
+            self._write_stub(
+                temp_root / "agent-lifecycle" / "sync_agents.py",
+                (
+                    "#!/usr/bin/env python3\n"
+                    "import sys, time\n"
+                    "print('[AGENT: Claude Code] 状态一致，正在尝试检查更新...', flush=True)\n"
+                    "time.sleep(1)\n"
+                    "sys.exit(0)\n"
+                ),
+            )
+            self._write_stub(
+                temp_root / "agent-tool" / "sync_tools.py",
+                "#!/usr/bin/env python3\nimport sys, time\ntime.sleep(1)\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-skill" / "link_skills.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-mcp" / "sync_mcp.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 0\n")
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "--offline"],
+                cwd=temp_root,
+                capture_output=True,
+                check=False,
+            )
+
+            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertNotRegex(combined, r"同步全局工具: .*Claude Code")
 
     def test_atomic_lock_directory_blocks_new_run(self):
         lock_backup = move_aside(LOCK_PATH)

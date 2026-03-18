@@ -158,6 +158,58 @@ class ReconcileAgentTests(unittest.TestCase):
         self.assertFalse(result)
         run_cmd.assert_called_once()
 
+    def test_brew_upgrade_skips_when_outdated_probe_is_empty(self):
+        definition = {
+            "display_name": "OpenCode",
+            "bin": "opencode",
+            "providers": {
+                "brew": {
+                    "install": "brew install opencode",
+                    "upgrade": "brew upgrade opencode",
+                }
+            },
+        }
+        policy = {"enabled": True, "auto_update": True, "preferred_provider": "brew"}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", return_value=["brew"]),
+            mock.patch.object(sync_agents, "run_cmd", return_value=(True, "")) as run_cmd,
+            self.assertLogs(level="INFO") as logs,
+        ):
+            result = sync_agents.reconcile_agent("opencode", definition, policy)
+
+        self.assertTrue(result)
+        run_cmd.assert_called_once_with("brew outdated opencode", timeout=60)
+        self.assertTrue(any("未发现可用更新" in line for line in logs.output), logs.output)
+
+    def test_brew_cask_upgrade_runs_outdated_probe_before_upgrade(self):
+        definition = {
+            "display_name": "Claude Code",
+            "bin": "claude",
+            "providers": {
+                "brew": {
+                    "install": "brew install --cask claude-code",
+                    "upgrade": "brew upgrade --cask claude-code",
+                }
+            },
+        }
+        policy = {"enabled": True, "auto_update": True, "preferred_provider": "brew"}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", side_effect=[["brew-cask"], ["brew-cask"]]),
+            mock.patch.object(sync_agents, "run_cmd", side_effect=[(True, "claude-code"), (True, "updated")]) as run_cmd,
+        ):
+            result = sync_agents.reconcile_agent("claude-code", definition, policy)
+
+        self.assertTrue(result)
+        self.assertEqual(
+            run_cmd.call_args_list,
+            [
+                mock.call("brew outdated --cask claude-code", timeout=60),
+                mock.call("brew upgrade --cask claude-code"),
+            ],
+        )
+
 
 class PolicyOwnershipTests(unittest.TestCase):
     def test_missing_policy_entries_are_ignored(self):
