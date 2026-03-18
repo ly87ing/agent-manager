@@ -57,6 +57,33 @@ class SyncRulesTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse(stale_file.exists(), result.stdout + result.stderr)
 
+    def test_directory_sync_removes_stale_backup_artifacts_without_rebackup(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root)
+            target_dir = temp_root / "tmp-target" / "modules"
+            source_dir = temp_root / "agent-rule" / "rules" / "global" / "modules"
+            shutil.copytree(source_dir, target_dir)
+            stale_backup = target_dir / "frontend.md.bak.20260318123628"
+            stale_backup.write_text("old backup\n", encoding="utf-8")
+            (temp_root / "config" / "rules-targets.list").write_text(
+                f"test_modules|global|rules/global/modules|{target_dir}\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [str(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh")],
+                cwd=temp_root / "agent-rule",
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertFalse(stale_backup.exists(), combined)
+            self.assertEqual(list(target_dir.glob("*.bak.*")), [], combined)
+
     def test_copy_mode_replaces_broken_directory_symlink_target(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"

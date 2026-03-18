@@ -489,3 +489,48 @@ class SyncMcpTests(unittest.TestCase):
             self.assertIn("bad-mcp", updated["mcp_servers"])
             self.assertEqual(updated["mcp_servers"]["bad-mcp"]["args"], ["/old/server.js"])
             self.assertIn("user-mcp", updated["mcp_servers"])
+
+    def test_managed_toml_server_with_env_subtable_is_not_misclassified_as_user_owned(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            agent_config_path = temp_root / "config.toml"
+            agent_config_path.write_text(
+                "\n".join(
+                    [
+                        '[mcp_servers.augment-context-engine]',
+                        'command = "auggie"',
+                        'args = ["--mcp", "--mcp-auto-workspace"]',
+                        '[mcp_servers.augment-context-engine.env]',
+                        'AUGMENT_SESSION_AUTH = "old-token"',
+                        '_MANAGED_BY = "agent-manager"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            ok = sync_mcp.update_toml_config(
+                "codex",
+                agent_config_path,
+                {
+                    "augment-context-engine": {
+                        "command": "auggie",
+                        "args": ["--mcp", "--mcp-auto-workspace"],
+                        "env": {"AUGMENT_SESSION_AUTH": "new-token"},
+                    }
+                },
+                {"augment-context-engine"},
+                set(),
+                dry_run=False,
+            )
+
+            self.assertTrue(ok)
+            updated = tomllib.loads(agent_config_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                updated["mcp_servers"]["augment-context-engine"]["env"]["AUGMENT_SESSION_AUTH"],
+                "new-token",
+            )
+            self.assertEqual(
+                updated["mcp_servers"]["augment-context-engine"]["env"]["_MANAGED_BY"],
+                "agent-manager",
+            )

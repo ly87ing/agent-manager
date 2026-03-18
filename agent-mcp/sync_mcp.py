@@ -179,6 +179,28 @@ def toml_quote(value):
     return f'"{value}"'
 
 
+def extract_toml_mcp_server_name(chunk):
+    header_match = re.search(r'^\s*\[\s*mcp_servers\.([^\.\]\s]+)', chunk, re.MULTILINE)
+    if not header_match:
+        return None
+    return header_match.group(1)
+
+
+def merge_toml_chunks_by_server(chunks):
+    if not chunks:
+        return chunks
+    merged_chunks = [chunks[0]]
+    previous_server = extract_toml_mcp_server_name(chunks[0])
+    for chunk in chunks[1:]:
+        current_server = extract_toml_mcp_server_name(chunk)
+        if current_server and current_server == previous_server:
+            merged_chunks[-1] += chunk
+            continue
+        merged_chunks.append(chunk)
+        previous_server = current_server
+    return merged_chunks
+
+
 def update_toml_config(agent_name, config_path, active_servers, all_managed_servers, preserved_servers, dry_run):
     """原子化更新 TOML 配置"""
     path = Path(config_path).expanduser()
@@ -195,15 +217,15 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
     parts = re.split(r'(\n\s*\[)', content)
     chunks = [parts[0]]
     for i in range(1, len(parts), 2): chunks.append(parts[i] + parts[i+1])
+    chunks = merge_toml_chunks_by_server(chunks)
     
     new_chunks = []
     managed_names = set(all_managed_servers)
     preserved_names = set(preserved_servers)
     blocked_active_names = set()
     for chunk in chunks:
-        header_match = re.search(r'\[\s*mcp_servers\.([^.\]\s]+)', chunk)
-        if header_match:
-            srv_name = header_match.group(1)
+        srv_name = extract_toml_mcp_server_name(chunk)
+        if srv_name:
             if srv_name in preserved_names:
                 new_chunks.append(chunk)
                 continue

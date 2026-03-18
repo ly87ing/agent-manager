@@ -84,7 +84,9 @@ remove_target() {
   local target="$1"
   echo "remove(stale): $target"
   if [ "$dry_run" = "false" ]; then
-    if [ "$backup_enabled" = "true" ] && { [ -e "$target" ] || [ -L "$target" ]; }; then
+    if is_ephemeral_artifact "$target"; then
+      rm -rf "$target"
+    elif [ "$backup_enabled" = "true" ] && { [ -e "$target" ] || [ -L "$target" ]; }; then
       backup_target "$target"
     else
       rm -rf "$target"
@@ -102,6 +104,12 @@ replace_existing_target() {
       rm -rf "$target"
     fi
   fi
+}
+
+is_ephemeral_artifact() {
+  local target_name
+  target_name="$(basename "$1")"
+  [[ "$target_name" == *.bak.* || "$target_name" == *.tmp_* ]]
 }
 
 sync_copy() {
