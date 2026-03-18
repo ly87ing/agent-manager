@@ -29,13 +29,23 @@ EXCLUDED_SKILL_DIRS = {".git", "node_modules", "__pycache__", "venv", ".venv"}
 
 
 class DuplicateSkillNameError(ValueError):
-    def __init__(self, skill_name, first_path, second_path):
-        self.skill_name = skill_name
-        self.first_path = Path(first_path)
-        self.second_path = Path(second_path)
-        super().__init__(
-            f"发现重复 skill name: {skill_name} ({self.first_path} / {self.second_path})"
-        )
+    def __init__(self, conflicts):
+        normalized_conflicts = {}
+        for skill_name in sorted(conflicts):
+            unique_paths = []
+            for path in conflicts[skill_name]:
+                path_obj = Path(path)
+                if path_obj not in unique_paths:
+                    unique_paths.append(path_obj)
+            normalized_conflicts[skill_name] = tuple(unique_paths)
+        self.conflicts = normalized_conflicts
+        self.skill_names = tuple(normalized_conflicts.keys())
+        self.skill_name = self.skill_names[0]
+        details = []
+        for skill_name, paths in self.conflicts.items():
+            rendered_paths = " / ".join(str(path) for path in paths)
+            details.append(f"{skill_name} ({rendered_paths})")
+        super().__init__(f"发现重复 skill name: {'; '.join(details)}")
 
 def load_json(path):
     if not os.path.exists(path): return {}
@@ -223,6 +233,7 @@ def clone_or_update_repo(name, url, base_dir, dry_run=False, offline=False, auto
 
 def find_skills_recursively(search_path):
     found_skills = {}
+    duplicate_conflicts = {}
     search_path = Path(search_path).resolve()
     if not search_path.exists():
         return found_skills
@@ -235,12 +246,12 @@ def find_skills_recursively(search_path):
                 continue
             existing_skill_dir = found_skills.get(skill_name)
             if existing_skill_dir is not None:
-                raise DuplicateSkillNameError(
-                    skill_name,
-                    existing_skill_dir,
-                    skill_dir,
-                )
+                duplicate_paths = duplicate_conflicts.setdefault(skill_name, [existing_skill_dir])
+                duplicate_paths.append(skill_dir)
+                continue
             found_skills[skill_name] = skill_dir
+    if duplicate_conflicts:
+        raise DuplicateSkillNameError(duplicate_conflicts)
     return found_skills
 
 def create_link(source, link, dry_run=False):
@@ -299,6 +310,41 @@ def merge_allowed_agents(existing_agents, new_agents):
     if existing_agents is None or new_agents is None:
         return None
     return sorted(set(existing_agents) | set(new_agents))
+
+
+def record_duplicate_link_target(duplicate_link_targets, skill_name, allowed_agents):
+    if skill_name not in duplicate_link_targets:
+        duplicate_link_targets[skill_name] = None if allowed_agents is None else list(allowed_agents)
+        return
+    duplicate_link_targets[skill_name] = merge_allowed_agents(
+        duplicate_link_targets[skill_name],
+        allowed_agents,
+    )
+
+
+def remove_repo_skill_links(repo_path, targets, allowed_agents=None, dry_run=False):
+    repo_path = Path(repo_path).resolve()
+    active_targets = targets
+    if allowed_agents is not None:
+        active_targets = {k: v for k, v in targets.items() if k in allowed_agents}
+    for agent_name, target_path in active_targets.items():
+        target_base = Path(target_path).expanduser()
+        if not target_base.exists() or not target_base.is_dir():
+            continue
+        for item in target_base.iterdir():
+            if not item.is_symlink():
+                continue
+            try:
+                raw_target = Path(os.readlink(item)).expanduser()
+                resolved_target = raw_target if raw_target.is_absolute() else (item.parent / raw_target)
+                resolved_target = resolved_target.resolve(strict=False)
+            except OSError:
+                continue
+            if resolved_target != repo_path and repo_path not in resolved_target.parents:
+                continue
+            logging.error(f"[AGENT: {agent_name}] 移除来自失效仓库的 skill 链接: {item.name}")
+            if not dry_run:
+                item.unlink()
 
 
 def remove_skill_links(skill_name, targets, allowed_agents=None, dry_run=False):
@@ -395,10 +441,18 @@ def main():
             skills = find_skills_recursively(repo_path)
         except DuplicateSkillNameError as exc:
             logging.error(f"[{repo_name}] {exc}")
-            duplicate_skill_names.add(exc.skill_name)
-            duplicate_link_targets[exc.skill_name] = merge_allowed_agents(
-                duplicate_link_targets.get(exc.skill_name),
+            for skill_name in exc.skill_names:
+                duplicate_skill_names.add(skill_name)
+                record_duplicate_link_target(
+                    duplicate_link_targets,
+                    skill_name,
+                    config.get("agents"),
+                )
+            remove_repo_skill_links(
+                repo_path,
+                AGENT_TARGETS,
                 config.get("agents"),
+                args.dry_run,
             )
             all_success = False
             continue
@@ -412,12 +466,14 @@ def main():
             duplicate_skill_names.add(s_name)
             all_success = False
             existing_repo, existing_path, existing_allowed_agents = existing
-            duplicate_link_targets[s_name] = merge_allowed_agents(
-                duplicate_link_targets.get(s_name),
+            record_duplicate_link_target(
+                duplicate_link_targets,
+                s_name,
                 existing_allowed_agents,
             )
-            duplicate_link_targets[s_name] = merge_allowed_agents(
-                duplicate_link_targets.get(s_name),
+            record_duplicate_link_target(
+                duplicate_link_targets,
+                s_name,
                 allowed_agents,
             )
             logging.error(

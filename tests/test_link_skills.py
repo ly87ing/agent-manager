@@ -445,6 +445,206 @@ class LinkSkillsTests(unittest.TestCase):
             self.assertFalse(existing_link.exists(), combined)
             self.assertFalse(existing_link.is_symlink(), combined)
 
+    def test_internal_duplicate_skill_names_do_not_remove_other_agent_links(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            claude_target = temp_root / "targets" / "claude"
+            codex_target = temp_root / "targets" / "codex"
+            repo_a = temp_root / "skills" / "repositories" / "repo-a"
+            external_skill = temp_root / "external" / "dup-a"
+            (repo_a / ".git").mkdir(parents=True)
+            (repo_a / "a1").mkdir()
+            (repo_a / "a2").mkdir()
+            (repo_a / "a1" / "SKILL.md").write_text(
+                "---\nname: dup-a\ndescription: Alpha\n---\n\n# Alpha\n",
+                encoding="utf-8",
+            )
+            (repo_a / "a2" / "SKILL.md").write_text(
+                "---\nname: dup-a\ndescription: Beta\n---\n\n# Beta\n",
+                encoding="utf-8",
+            )
+            external_skill.mkdir(parents=True)
+            claude_target.mkdir(parents=True)
+            codex_target.mkdir(parents=True)
+            (claude_target / "dup-a").symlink_to(repo_a / "a1")
+            other_agent_link = codex_target / "dup-a"
+            other_agent_link.symlink_to(external_skill)
+            config_path.write_text(
+                json.dumps({"skills": {"repo-a": {"enabled": True}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "repo-a": {"url": "https://example.invalid/a.git", "agents": ["claude-code"]},
+                        },
+                        "agents": {
+                            "claude-code": str(claude_target),
+                            "codex": str(codex_target),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "skills"),
+                    "--offline",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertFalse((claude_target / "dup-a").exists(), combined)
+            self.assertTrue(other_agent_link.exists(), combined)
+            self.assertTrue(other_agent_link.is_symlink(), combined)
+            self.assertEqual(other_agent_link.resolve(), external_skill.resolve())
+
+    def test_internal_duplicate_skill_names_remove_all_conflicted_links(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            agent_target = temp_root / "targets" / "claude"
+            repo_a = temp_root / "skills" / "repositories" / "repo-a"
+            (repo_a / ".git").mkdir(parents=True)
+            for directory, skill_name in (
+                ("a1", "dup-a"),
+                ("a2", "dup-a"),
+                ("b1", "dup-b"),
+                ("b2", "dup-b"),
+            ):
+                (repo_a / directory).mkdir()
+                (repo_a / directory / "SKILL.md").write_text(
+                    f"---\nname: {skill_name}\ndescription: Example\n---\n\n# Example\n",
+                    encoding="utf-8",
+                )
+            agent_target.mkdir(parents=True)
+            link_a = agent_target / "dup-a"
+            link_b = agent_target / "dup-b"
+            link_a.symlink_to(repo_a / "a1")
+            link_b.symlink_to(repo_a / "b1")
+            config_path.write_text(
+                json.dumps({"skills": {"repo-a": {"enabled": True}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "repo-a": {"url": "https://example.invalid/a.git", "agents": ["claude-code"]},
+                        },
+                        "agents": {"claude-code": str(agent_target)},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "skills"),
+                    "--offline",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("dup-a", combined)
+            self.assertIn("dup-b", combined)
+            self.assertFalse(link_a.exists(), combined)
+            self.assertFalse(link_b.exists(), combined)
+
+    def test_internal_duplicate_skill_names_remove_existing_non_conflicted_links_from_invalid_repo(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            agent_target = temp_root / "targets" / "claude"
+            repo_a = temp_root / "skills" / "repositories" / "repo-a"
+            (repo_a / ".git").mkdir(parents=True)
+            (repo_a / "dup1").mkdir()
+            (repo_a / "dup2").mkdir()
+            (repo_a / "stable").mkdir()
+            (repo_a / "dup1" / "SKILL.md").write_text(
+                "---\nname: dup-a\ndescription: First\n---\n\n# First\n",
+                encoding="utf-8",
+            )
+            (repo_a / "dup2" / "SKILL.md").write_text(
+                "---\nname: dup-a\ndescription: Second\n---\n\n# Second\n",
+                encoding="utf-8",
+            )
+            (repo_a / "stable" / "SKILL.md").write_text(
+                "---\nname: stable-skill\ndescription: Stable\n---\n\n# Stable\n",
+                encoding="utf-8",
+            )
+            agent_target.mkdir(parents=True)
+            stable_link = agent_target / "stable-skill"
+            stable_link.symlink_to(repo_a / "stable")
+            config_path.write_text(
+                json.dumps({"skills": {"repo-a": {"enabled": True}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "repo-a": {"url": "https://example.invalid/a.git", "agents": ["claude-code"]},
+                        },
+                        "agents": {"claude-code": str(agent_target)},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "skills"),
+                    "--offline",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertFalse(stable_link.exists(), combined)
+            self.assertFalse(stable_link.is_symlink(), combined)
+
     def test_scrub_dead_links_removes_broken_relative_link(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
