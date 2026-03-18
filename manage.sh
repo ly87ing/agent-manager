@@ -39,7 +39,7 @@ cmd=""
 # 如果本地覆盖文件存在，则读取并深度合并
 if [ -f "$LOCAL_CONFIG" ]; then
     CONFIG_FILE="$(mktemp)"
-    python3 -c "
+    if ! python3 -c "
 import json, sys
 sys.path.insert(0, '$ROOT_DIR')
 from src.agent_ids import canonicalize_agent_mapping
@@ -49,7 +49,8 @@ try:
     with open('$LOCAL_CONFIG', 'r', encoding='utf-8') as f:
         local = json.load(f)
 except Exception as e:
-    local = {}
+    print(f'本地覆盖配置无效: {e}', file=sys.stderr)
+    sys.exit(2)
 def deep_update(dst, src):
     for k, v in src.items():
         if isinstance(v, dict) and isinstance(dst.get(k), dict):
@@ -61,7 +62,10 @@ if 'agents' in base:
     base['agents'] = canonicalize_agent_mapping(base.get('agents', {}))
 with open('$CONFIG_FILE', 'w', encoding='utf-8') as f:
     json.dump(base, f, indent=2, ensure_ascii=False)
-"
+"; then
+        rm -f "$CONFIG_FILE"
+        exit 1
+    fi
 else
     # 没有本地覆盖时直接使用基线
     CONFIG_FILE="$BASE_CONFIG"
@@ -621,6 +625,7 @@ function run_update_pipeline() {
 }
 
 function run_self_update() {
+    local repo_status
     if [ -n "$OFFLINE_FLAG" ]; then
         echo "离线模式，跳过 agent-manager 自更新。"
         return 0
@@ -631,6 +636,14 @@ function run_self_update() {
     fi
     if [ ! -d "$ROOT_DIR/.git" ]; then
         echo "当前目录不是 Git 仓库，跳过自更新。"
+        return 0
+    fi
+    if ! repo_status=$(git -C "$ROOT_DIR" status --porcelain); then
+        echo "无法检查仓库状态，跳过自更新。"
+        return 1
+    fi
+    if [ -n "$repo_status" ]; then
+        echo "检测到本地未提交更改，跳过自更新以保护工作区。"
         return 0
     fi
     git -C "$ROOT_DIR" pull

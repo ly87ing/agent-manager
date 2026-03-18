@@ -137,6 +137,40 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("工具失败", combined)
             self.assertIn("规则分发完成", combined)
 
+    def test_invalid_local_override_aborts_before_running_tasks(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root)
+            call_log = temp_root / "calls.log"
+            (temp_root / "config" / "manager.local.json").write_text("{ invalid json\n", encoding="utf-8")
+
+            self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log, "True")
+            self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log, "True")
+            self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log, "True")
+            self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log, "True")
+            self._write_stub(
+                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
+                (
+                    "#!/usr/bin/env bash\n"
+                    f"printf '%s\\n' rules >> {str(call_log)!r}\n"
+                    "exit 0\n"
+                ),
+            )
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "sync"],
+                cwd=temp_root,
+                env=self._managed_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("本地覆盖配置无效", combined)
+            self.assertFalse(call_log.exists(), combined)
+
     def test_sync_runs_only_local_config_tasks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
@@ -344,6 +378,9 @@ class ManageScriptTests(unittest.TestCase):
                 (
                     "#!/usr/bin/env bash\n"
                     f"printf '%s\\n' \"git $*\" >> {str(call_log)!r}\n"
+                    "if [ \"$3\" = \"status\" ] && [ \"$4\" = \"--porcelain\" ]; then\n"
+                    "  exit 0\n"
+                    "fi\n"
                     "echo 'Already up to date'\n"
                     "exit 0\n"
                 ),
@@ -367,8 +404,47 @@ class ManageScriptTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             log_lines = call_log.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(log_lines), 2, log_lines)
+            self.assertIn(f"git -C {temp_root.resolve()} status --porcelain", log_lines[0])
+            self.assertIn(f"git -C {temp_root.resolve()} pull", log_lines[1])
+
+    def test_self_update_skips_dirty_worktree(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root)
+            call_log = temp_root / "calls.log"
+            fake_bin = temp_root / "fake-bin"
+            fake_bin.mkdir()
+            self._write_stub(
+                fake_bin / "git",
+                (
+                    "#!/usr/bin/env bash\n"
+                    f"printf '%s\\n' \"git $*\" >> {str(call_log)!r}\n"
+                    "if [ \"$3\" = \"status\" ] && [ \"$4\" = \"--porcelain\" ]; then\n"
+                    "  printf ' M manage.sh\\n'\n"
+                    "  exit 0\n"
+                    "fi\n"
+                    "echo 'pull should not run'\n"
+                    "exit 0\n"
+                ),
+            )
+
+            env = self._managed_env()
+            env["PATH"] = f"{fake_bin}:{env['PATH']}"
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "self-update"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("跳过自更新以保护工作区", result.stdout + result.stderr)
+            log_lines = call_log.read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(log_lines), 1, log_lines)
-            self.assertIn(f"git -C {temp_root.resolve()} pull", log_lines[0])
+            self.assertIn(f"git -C {temp_root.resolve()} status --porcelain", log_lines[0])
 
     def test_plan_runs_bootstrap_pipeline_in_dry_run_mode(self):
         with tempfile.TemporaryDirectory() as temp_dir:

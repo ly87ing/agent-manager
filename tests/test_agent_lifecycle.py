@@ -10,6 +10,9 @@ from agent_lifecycle_import import sync_agents
 
 ROOT = Path(__file__).resolve().parent.parent
 MODULE_PATH = ROOT / "agent-lifecycle" / "sync_agents.py"
+FAKE_BREW_CELLAR_GEMINI_DIST = (
+    "/usr/local/Cellar/gemini-cli/ANY_VERSION/libexec/lib/node_modules/@google/gemini-cli/dist/index.js"
+)
 
 
 class DetectAllProvidersTests(unittest.TestCase):
@@ -42,6 +45,36 @@ class DetectAllProvidersTests(unittest.TestCase):
         )
 
         self.assertIn("npm", providers)
+
+    @mock.patch.object(sync_agents, "ProviderCache")
+    @mock.patch.object(sync_agents.os.path, "exists", return_value=False)
+    @mock.patch.object(sync_agents.os.path, "realpath")
+    @mock.patch.object(sync_agents.shutil, "which", return_value="/usr/local/bin/gemini")
+    def test_brew_managed_node_modules_path_is_not_misclassified_as_npm(
+        self,
+        _which,
+        realpath,
+        _exists,
+        provider_cache_cls,
+    ):
+        cache = provider_cache_cls.return_value
+        cache.get_gh_extensions.return_value = ""
+        cache.get_brew_formulae.return_value = {"gemini-cli"}
+        cache.get_brew_casks.return_value = set()
+        realpath.return_value = FAKE_BREW_CELLAR_GEMINI_DIST
+
+        providers = sync_agents.detect_all_providers(
+            "gemini",
+            {
+                "providers": {
+                    "brew": {
+                        "install": "brew install gemini-cli",
+                    }
+                }
+            },
+        )
+
+        self.assertEqual(providers, ["brew"])
 
     @mock.patch.object(sync_agents, "ProviderCache")
     @mock.patch.object(sync_agents.os.path, "exists", return_value=False)

@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
+from src.manage_runtime_probe import detect_npm_from_paths
 
 # 配置日志
 logging.basicConfig(
@@ -105,12 +106,6 @@ def get_pkg_name(cmd):
     return m.group(1) if m else None
 
 
-def normalize_path_for_match(path):
-    if not path:
-        return ""
-    return path.replace("\\", "/")
-
-
 def detect_all_providers(bin_name, config=None):
     """全量扫描当前系统中管理该 Agent 的所有 Provider（使用缓存优化）"""
     found = []
@@ -134,15 +129,10 @@ def detect_all_providers(bin_name, config=None):
     # 检测 npm
     bin_path = shutil.which(bin_name)
     resolved_bin_path = os.path.realpath(bin_path) if bin_path else ""
-    npm_candidates = [normalize_path_for_match(p) for p in (bin_path, resolved_bin_path) if p]
-    if any(
-        "/node/" in p
-        or "/npm/" in p
-        or "/node_modules/" in p
-        or p.endswith("node")
-        or p.endswith("npm")
-        or p.endswith("npm.cmd")
-        for p in npm_candidates
+    if detect_npm_from_paths(
+        bin_path,
+        resolved_bin_path,
+        brew_detected=any(provider.startswith("brew") for provider in found),
     ):
         found.append("npm")
     

@@ -4,6 +4,11 @@ from unittest import mock
 from src import manage_runtime_probe
 
 
+FAKE_BREW_CELLAR_GEMINI_BIN = (
+    "/opt/homebrew/Cellar/gemini-cli/ANY_VERSION/libexec/lib/node_modules/@google/gemini-cli/bin/gemini.js"
+)
+
+
 class ManageRuntimeProbeTests(unittest.TestCase):
     def test_detect_all_providers_supports_windows_npm_bin_path(self):
         inventory = manage_runtime_probe.ProviderInventory(
@@ -93,7 +98,31 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
         self.assertEqual(providers, ["brew-cask", "npm", "gh"])
 
-    def test_detect_all_providers_does_not_infer_npm_from_resolved_symlink_only(self):
+    def test_detect_all_providers_infers_npm_from_non_brew_resolved_symlink(self):
+        inventory = manage_runtime_probe.ProviderInventory(
+            run_cmd=lambda cmd, timeout=10: (False, ""),
+            which=lambda binary: {
+                "claude": "/usr/local/bin/claude",
+            }.get(binary),
+            path_exists=lambda _path: False,
+            realpath=lambda _path: "/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.js",
+        )
+
+        providers = manage_runtime_probe.detect_all_providers(
+            "claude",
+            {
+                "providers": {
+                    "npm": {
+                        "install": "npm install -g @anthropic-ai/claude-code",
+                    }
+                }
+            },
+            inventory=inventory,
+        )
+
+        self.assertEqual(providers, ["npm"])
+
+    def test_detect_all_providers_does_not_infer_npm_from_brew_managed_resolved_symlink(self):
         command_outputs = {
             ("brew", "list", "--formula", "-1"): (True, "gemini-cli\n"),
             ("gh", "extension", "list"): (True, ""),
@@ -109,7 +138,7 @@ class ManageRuntimeProbeTests(unittest.TestCase):
                 "gemini": "/opt/homebrew/bin/gemini",
             }.get(binary),
             path_exists=lambda _path: False,
-            realpath=lambda _path: "/opt/homebrew/lib/node_modules/@google/gemini-cli/bin/gemini.js",
+            realpath=lambda _path: FAKE_BREW_CELLAR_GEMINI_BIN,
         )
 
         providers = manage_runtime_probe.detect_all_providers(

@@ -46,6 +46,36 @@ def normalize_path_for_match(path):
     return path.replace("\\", "/")
 
 
+def path_looks_brew_managed(path):
+    normalized = normalize_path_for_match(path)
+    return "/Cellar/" in normalized or "/Caskroom/" in normalized
+
+
+def path_indicates_npm(path):
+    normalized = normalize_path_for_match(path)
+    return bool(
+        normalized
+        and (
+            "/node/" in normalized
+            or "/npm/" in normalized
+            or "/node_modules/" in normalized
+            or normalized.endswith("node")
+            or normalized.endswith("npm")
+            or normalized.endswith("npm.cmd")
+        )
+    )
+
+
+def detect_npm_from_paths(bin_path, resolved_bin_path="", brew_detected=False):
+    if path_indicates_npm(bin_path):
+        return True
+    if not resolved_bin_path:
+        return False
+    if brew_detected and path_looks_brew_managed(resolved_bin_path):
+        return False
+    return path_indicates_npm(resolved_bin_path)
+
+
 class ProviderInventory:
     def __init__(
         self,
@@ -94,7 +124,7 @@ class ProviderInventory:
         config = config or {}
 
         bin_path = self._which(bin_name)
-        normalized_bin_path = normalize_path_for_match(bin_path)
+        resolved_bin_path = self._realpath(bin_path) if bin_path else ""
 
         brew_pkg = get_pkg_name(config.get("providers", {}).get("brew", {}).get("install", ""))
         if brew_pkg:
@@ -103,13 +133,10 @@ class ProviderInventory:
             elif brew_pkg in self.get_brew_casks():
                 found.append("brew-cask")
 
-        if normalized_bin_path and (
-            "/node/" in normalized_bin_path
-            or "/npm/" in normalized_bin_path
-            or "/node_modules/" in normalized_bin_path
-            or normalized_bin_path.endswith("node")
-            or normalized_bin_path.endswith("npm")
-            or normalized_bin_path.endswith("npm.cmd")
+        if detect_npm_from_paths(
+            bin_path,
+            resolved_bin_path,
+            brew_detected=any(provider.startswith("brew") for provider in found),
         ):
             found.append("npm")
 
