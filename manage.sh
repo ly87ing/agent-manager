@@ -531,27 +531,35 @@ function run_task_with_progress() {
     fi
     local start_ts
     start_ts=$(date +%s)
+    local last_display=""
+    local last_raw_msg=""
+    local last_msg=""
     "$@" >> "$TEMP_LOG" 2>&1 &
     local pid=$!
 
     while kill -0 $pid 2>/dev/null; do
         local elapsed
         elapsed=$(( $(date +%s) - start_ts ))
+        local current_display=""
         if [ -s "$TEMP_LOG" ]; then
-            local last_msg=""
             local next_line=$((start_line + 1))
             local raw_msg=""
             raw_msg=$(tail -n +"$next_line" "$TEMP_LOG" 2>/dev/null | tail -n 1)
-            if [ -n "$raw_msg" ]; then
+            if [ -n "$raw_msg" ] && [ "$raw_msg" != "$last_raw_msg" ]; then
+                last_raw_msg="$raw_msg"
                 last_msg=$(format_progress_tail "$raw_msg")
             fi
             if [ -n "$last_msg" ]; then
-                status_line "RUNNING" "$title: $last_msg · 已运行 ${elapsed}s"
+                current_display="$title: $last_msg · 已运行 ${elapsed}s"
             else
-                status_line "RUNNING" "$title... · 已运行 ${elapsed}s"
+                current_display="$title... · 已运行 ${elapsed}s"
             fi
         else
-            status_line "RUNNING" "$title... · 已运行 ${elapsed}s"
+            current_display="$title... · 已运行 ${elapsed}s"
+        fi
+        if [ "$current_display" != "$last_display" ]; then
+            status_line "RUNNING" "$current_display"
+            last_display="$current_display"
         fi
         sleep 0.3
     done

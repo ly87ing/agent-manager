@@ -310,7 +310,8 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False):
                             logging.info(f"[AGENT: {label}] 未发现可用更新，跳过升级。")
                             return True
                     else:
-                        logging.warning(f"[AGENT: {label}] 更新探测失败，回退到直接升级: {probe_out}")
+                        logging.warning(f"[AGENT: {label}] 更新探测失败，跳过升级: {probe_out}")
+                        return True
                 success, out = run_cmd(p_cfg["upgrade"])
                 if success:
                     post_state = detect_provider_state(bin_name, definition)

@@ -210,6 +210,30 @@ class ReconcileAgentTests(unittest.TestCase):
             ],
         )
 
+    def test_brew_probe_failure_skips_direct_upgrade(self):
+        definition = {
+            "display_name": "OpenCode",
+            "bin": "opencode",
+            "providers": {
+                "brew": {
+                    "install": "brew install opencode",
+                    "upgrade": "brew upgrade opencode",
+                }
+            },
+        }
+        policy = {"enabled": True, "auto_update": True, "preferred_provider": "brew"}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", return_value=["brew"]),
+            mock.patch.object(sync_agents, "run_cmd", return_value=(False, "brew locked")) as run_cmd,
+            self.assertLogs(level="WARNING") as logs,
+        ):
+            result = sync_agents.reconcile_agent("opencode", definition, policy)
+
+        self.assertTrue(result)
+        run_cmd.assert_called_once_with("brew outdated opencode", timeout=60)
+        self.assertTrue(any("更新探测失败，跳过升级" in line for line in logs.output), logs.output)
+
 
 class PolicyOwnershipTests(unittest.TestCase):
     def test_missing_policy_entries_are_ignored(self):

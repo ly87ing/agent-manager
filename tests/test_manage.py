@@ -308,6 +308,46 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, combined)
             self.assertNotRegex(combined, r"同步全局工具: .*Claude Code")
 
+    def test_progress_output_does_not_redraw_identical_message_every_poll(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root)
+
+            self._write_stub(
+                temp_root / "agent-lifecycle" / "sync_agents.py",
+                (
+                    "#!/usr/bin/env python3\n"
+                    "import sys, time\n"
+                    "print('[AGENT: Claude Code] 状态一致，正在尝试检查更新...', flush=True)\n"
+                    "time.sleep(1.2)\n"
+                    "sys.exit(0)\n"
+                ),
+            )
+            self._write_stub(
+                temp_root / "agent-tool" / "sync_tools.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-skill" / "link_skills.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-mcp" / "sync_mcp.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 0\n")
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "--offline"],
+                cwd=temp_root,
+                capture_output=True,
+                check=False,
+            )
+
+            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertLessEqual(combined.count("对齐 Agent 生命周期: [AGENT: Claude Code] 状态一致"), 2, combined)
+
     def test_atomic_lock_directory_blocks_new_run(self):
         lock_backup = move_aside(LOCK_PATH)
         lock_dir_backup = move_aside(LOCK_DIR)
