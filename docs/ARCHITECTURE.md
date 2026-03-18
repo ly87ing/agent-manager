@@ -111,8 +111,9 @@ graph TD
 
 - **原子锁**：需要写入或同步的命令会先抢占 `/tmp/agent_manager_<user>.lock.d`，并在其中写入持有者 PID；兼容保留 `/tmp/agent_manager_<user>.lock` 作为元数据。`unlock` 会同时清理目录锁和遗留锁文件。
 - **按次日志**：每次运行写入独立日志 `/tmp/agent_manager_sync_<user>_<runid>.log`，并更新 `/tmp/agent_manager_sync_<user>.latest` 指针；`logs` 读取 latest，`clean-logs` 清理 latest 与全部历史运行日志。
-- **`--dry-run`**：只输出计划动作，跳过 `git pull`、secrets 初始化、仓库 clone/pull、依赖安装和构建等远端副作用；允许保留只读探测和预览日志。
+- **`--dry-run`**：只输出计划动作，跳过 secrets 初始化、仓库 clone/pull、依赖安装和构建等远端副作用；允许保留只读探测和预览日志。若与 `self-update` 组合，只预览仓库自更新动作。
 - **`--offline`**：禁止任何远程拉取、下载和安装。生命周期、tools、skills、MCP 同步器都只能复用本地已存在仓库/配置；如果本地前置资源缺失，应显式报错而不是偷偷联网。
+- **命令分层**：`sync` 只做本地配置收敛；`update` 会补齐并刷新非 Agent 安装类资源，并只更新已安装 Agent；`bootstrap` / `all` 才负责缺失 Agent 的安装；`self-update` 只更新 agent-manager 仓库自身。
 
 ---
 
@@ -202,7 +203,7 @@ agent-manager/
 
 ### 工作流程
 1. 用户通过修改 `config/manager.json` 表达意愿
-2. 运行 `make all` 或 `./manage.sh all` 启动同步
+2. 选择入口：`make sync` 做本地配置收敛，`make update` 刷新远端资源，`make bootstrap` / `./manage.sh all` 做全量安装、更新与同步
 3. `manage.sh` 先解析 `dry-run` / `offline`，获取原子锁，并建立本次运行专属日志
 4. 各同步引擎读取策略和定义，检测当前状态
 5. 根据运行模式执行安装、更新或卸载操作

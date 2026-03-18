@@ -21,11 +21,11 @@
 使用 Agent Manager 自动同步所有 Agent 的 MCP 配置：
 
 ```bash
-# 全量同步（包含 MCP 配置）
-make all
+# 全量同步（包含 Agent 安装、资源更新和 MCP 配置）
+make bootstrap
 
-# 离线模式（跳过网络和 git 操作，速度提升 89%）
-make offline
+# 本地配置同步（仅注入本地已有配置，不联网）
+make sync
 
 # 仅同步 MCP 配置
 cd agent-mcp && python3 sync_mcp.py --config ../config/manager.json --def-file ../config/mcp.json
@@ -271,12 +271,12 @@ AUGMENT_SESSION_AUTH='{"accessToken":"ace_...","tenantURL":"...","scopes":[]}'
 git clone https://github.com/ly87ing/agent-manager.git
 cd agent-manager
 
-# 2. 运行 make all
-make all
+# 2. 运行 make bootstrap
+make bootstrap
 ```
 
 **自动化流程**：
-- `make all` 仍会在顶层检查 `secrets/` 是否存在
+- `make update` / `make bootstrap` 会在顶层检查 `secrets/` 是否存在
 - `mcp:sync` 默认只做 **配置注入**，不会主动 clone MCP repo、build，或 `git pull secrets`
 - 如需显式准备 MCP 运行时（repo clone/pull、setup/build、同步本地 secrets 仓库），请使用 `./manage.sh mcp:prepare`
 
@@ -456,7 +456,7 @@ rm ./.gemini/settings.json
 
 ```bash
 # 方法 1: 自动初始化（推荐）
-make all
+make update
 # 会自动检测并克隆 secrets 仓库
 
 # 方法 2: 手动运行初始化脚本
@@ -521,7 +521,7 @@ python3 -c "import tomllib; tomllib.load(open('~/.codex/config.toml', 'rb'))"
 ## 附录：Agent Manager MCP 同步流程
 
 ```
-默认模式（mcp:sync / make all 中的 MCP 步骤）:
+默认模式（mcp:sync / make sync / make update / make bootstrap 中的 MCP 步骤）:
 1. 读取 config/mcp.json 获取服务器定义
    ↓
 2. 按固定优先级加载凭证: root/.env → secrets/*.env(按文件名排序覆盖) → 系统环境变量回退

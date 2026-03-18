@@ -1,15 +1,35 @@
-.PHONY: all ui help doctor detect status cleanup unlock backups-list restore logs rules-sync skills-link mcp-sync mcp-prepare tools-sync dry-run clean-logs offline
+.PHONY: all bootstrap sync update plan self-update ui help doctor detect status cleanup unlock backups-list restore logs rules-sync skills-link mcp-sync mcp-prepare tools-sync dry-run clean-logs offline
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
 
-# 显式执行全量同步（包括安装/更新）
+# 全量执行（安装 + 更新 + 同步）
 all:
 	@./manage.sh all
 
-# 离线模式 (禁止远程拉取/安装，仅使用本地已存在资源)
+# 新机器初始化或全量收敛
+bootstrap:
+	@./manage.sh bootstrap
+
+# 仅同步当前配置，不联网、不安装
+sync:
+	@./manage.sh sync
+
+# 更新远端资源并收敛本地环境，但不安装缺失 Agent
+update:
+	@./manage.sh update
+
+# 预演一次完整 bootstrap
+plan:
+	@./manage.sh plan
+
+# 仅更新 agent-manager 仓库自身逻辑
+self-update:
+	@./manage.sh self-update
+
+# 兼容旧入口：离线本地同步
 offline:
-	@./manage.sh all --offline
+	@./manage.sh offline
 
 # 启动交互式管理界面
 ui:
@@ -69,7 +89,7 @@ tools-sync:
 
 # 预览模式 (仅输出计划动作，跳过远端副作用)
 dry-run:
-	@./manage.sh all --dry-run
+	@./manage.sh plan
 
 help:
 	@./manage.sh help

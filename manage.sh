@@ -589,49 +589,100 @@ function show_summary() {
     echo ""
 }
 
+function begin_workflow() {
+    local title="$1"
+    if [ -t 1 ] && command -v clear >/dev/null 2>&1 && [ -n "${TERM:-}" ] && [ "${TERM:-}" != "dumb" ]; then
+        clear
+    fi
+    echo -e "${HDR_BLUE}${BOLD}${title}${NC}\n"
+}
+
+function maybe_init_secrets() {
+    if [ -d "$ROOT_DIR/secrets/.git" ]; then
+        return 0
+    fi
+    echo -e "${HDR_BLUE}${BOLD}1. 凭证仓库检查 (Secrets Check)${NC}"
+    if [ -n "$OFFLINE_FLAG" ]; then
+        status_line "SKIP" "离线模式，跳过 secrets 检查"
+    elif [ -n "$DRY_RUN_FLAG" ]; then
+        status_line "SKIP" "空转模式，跳过 secrets 检查"
+    else
+        if [ -x "$ROOT_DIR/scripts/init-secrets.sh" ]; then
+            bash "$ROOT_DIR/scripts/init-secrets.sh" || {
+                echo -e "${ERROR_RED}⚠️  secrets 初始化失败，继续执行但 MCP 可能无法正常工作${NC}"
+            }
+        fi
+    fi
+    echo ""
+}
+
+function run_sync_pipeline() {
+    begin_workflow "🔄 Agent Manager 配置同步启动"
+    detect_agents
+    echo -e "${HDR_BLUE}${BOLD}2. 任务流水线 (Tasks)${NC}"
+    update_latest_log_pointer
+    TASK_FAILURES=0
+    if ! run_task_with_progress "同步 Agent Rules" "规则分发完成" "规则同步失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-rule\" && ./scripts/sync-agent-rules.sh $DRY_RUN_FLAG"; then TASK_FAILURES=1; fi
+    if ! run_task_with_progress "链接专业技能" "技能链接完成" "技能链接失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-skill\" && $PYTHON_CMD link_skills.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/skills.json\" --yes --offline $DRY_RUN_FLAG"; then TASK_FAILURES=1; fi
+    if ! run_task_with_progress "注入 MCP 配置" "MCP 注入完成" "MCP 失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-mcp\" && $PYTHON_CMD sync_mcp.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/mcp.json\" --offline $DRY_RUN_FLAG"; then TASK_FAILURES=1; fi
+    show_summary
+    [ "$TASK_FAILURES" -eq 0 ] || exit 1
+}
+
+function run_update_pipeline() {
+    local title="$1"
+    local agent_extra_flags="$2"
+    begin_workflow "$title"
+    maybe_init_secrets
+    detect_agents
+    echo -e "${HDR_BLUE}${BOLD}2. 任务流水线 (Tasks)${NC}"
+    update_latest_log_pointer
+    TASK_FAILURES=0
+    if ! run_task_with_progress "对齐 Agent 生命周期" "生命周期对齐完成" "生命周期失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-lifecycle\" && $PYTHON_CMD sync_agents.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/agents.json\" --yes $agent_extra_flags $DRY_RUN_FLAG $OFFLINE_FLAG"; then TASK_FAILURES=1; fi
+    if ! run_task_with_progress "同步全局工具" "工具链同步完成" "工具失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-tool\" && $PYTHON_CMD sync_tools.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/tools.json\" --yes $DRY_RUN_FLAG $OFFLINE_FLAG"; then TASK_FAILURES=1; fi
+    if ! run_task_with_progress "同步 Agent Rules" "规则分发完成" "规则同步失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-rule\" && ./scripts/sync-agent-rules.sh $DRY_RUN_FLAG"; then TASK_FAILURES=1; fi
+    if ! run_task_with_progress "链接专业技能" "技能链接完成" "技能链接失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-skill\" && $PYTHON_CMD link_skills.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/skills.json\" --yes $DRY_RUN_FLAG $OFFLINE_FLAG"; then TASK_FAILURES=1; fi
+    if ! run_task_with_progress "准备并注入 MCP 配置" "MCP 注入完成" "MCP 失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-mcp\" && $PYTHON_CMD sync_mcp.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/mcp.json\" --prepare-runtime $DRY_RUN_FLAG $OFFLINE_FLAG"; then TASK_FAILURES=1; fi
+    show_summary
+    [ "$TASK_FAILURES" -eq 0 ] || exit 1
+}
+
+function run_self_update() {
+    if [ -n "$OFFLINE_FLAG" ]; then
+        echo "离线模式，跳过 agent-manager 自更新。"
+        return 0
+    fi
+    if [ -n "$DRY_RUN_FLAG" ]; then
+        echo "预览模式：计划执行 agent-manager 仓库更新。"
+        return 0
+    fi
+    if [ ! -d "$ROOT_DIR/.git" ]; then
+        echo "当前目录不是 Git 仓库，跳过自更新。"
+        return 0
+    fi
+    git -C "$ROOT_DIR" pull
+}
+
 case "$cmd" in
-    all|"")
-        if [ -t 1 ] && command -v clear >/dev/null 2>&1 && [ -n "${TERM:-}" ] && [ "${TERM:-}" != "dumb" ]; then
-            clear
-        fi
-        echo -e "${HDR_BLUE}${BOLD}🚀 Agent Manager 全量同步启动${NC}\n"
-        
-        # Phase 0: 自动检查并初始化 secrets
-        if [ ! -d "$ROOT_DIR/secrets/.git" ]; then
-            echo -e "${HDR_BLUE}${BOLD}1. 凭证仓库检查 (Secrets Check)${NC}"
-            if [ -n "$OFFLINE_FLAG" ]; then
-                status_line "SKIP" "离线模式，跳过 secrets 检查"
-            elif [ -n "$DRY_RUN_FLAG" ]; then
-                status_line "SKIP" "空转模式，跳过 secrets 检查"
-            else
-                if [ -x "$ROOT_DIR/scripts/init-secrets.sh" ]; then
-                    bash "$ROOT_DIR/scripts/init-secrets.sh" || {
-                        echo -e "${ERROR_RED}⚠️  secrets 初始化失败，继续执行但 MCP 可能无法正常工作${NC}"
-                    }
-                fi
-            fi
-            echo ""
-        fi
-        
-        detect_agents
-        echo -e "${HDR_BLUE}${BOLD}2. 任务流水线 (Tasks)${NC}"
-        if [ -n "$OFFLINE_FLAG" ]; then
-            status_line "SKIP" "离线模式，跳过 git 更新"
-        elif [ -n "$DRY_RUN_FLAG" ]; then
-            status_line "SKIP" "空转模式，跳过 git 更新"
-        elif [ -d "$ROOT_DIR/.git" ] && [ -z "$OFFLINE_FLAG" ]; then
-            if out=$(git -C "$ROOT_DIR" pull 2>&1) && [[ "$out" != *"Already up to date"* ]]; then
-                status_line "DONE" "逻辑已更新，热重载中..."; exec "$0" "${ORIGINAL_ARGS[@]}"
-            else status_line "DONE" "逻辑已是最新"; fi
-        fi
-        update_latest_log_pointer
-        if ! run_task_with_progress "对齐 Agent 生命周期" "生命周期对齐完成" "生命周期失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-lifecycle\" && $PYTHON_CMD sync_agents.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/agents.json\" --yes $DRY_RUN_FLAG $OFFLINE_FLAG"; then TASK_FAILURES=1; fi
-        if ! run_task_with_progress "同步全局工具" "工具链同步完成" "工具失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-tool\" && $PYTHON_CMD sync_tools.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/tools.json\" --yes $DRY_RUN_FLAG $OFFLINE_FLAG"; then TASK_FAILURES=1; fi
-        if ! run_task_with_progress "同步 Agent Rules" "规则分发完成" "规则同步失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-rule\" && ./scripts/sync-agent-rules.sh $DRY_RUN_FLAG"; then TASK_FAILURES=1; fi
-        if ! run_task_with_progress "链接专业技能" "技能链接完成" "技能链接失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-skill\" && $PYTHON_CMD link_skills.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/skills.json\" --yes $DRY_RUN_FLAG $OFFLINE_FLAG"; then TASK_FAILURES=1; fi
-        if ! run_task_with_progress "注入 MCP 配置" "MCP 注入完成" "MCP 失败" timeout_run 600 bash -c "cd \"$ROOT_DIR/agent-mcp\" && $PYTHON_CMD sync_mcp.py --config \"$CONFIG_FILE\" --def-file \"$ROOT_DIR/config/mcp.json\" $DRY_RUN_FLAG $OFFLINE_FLAG"; then TASK_FAILURES=1; fi
-        show_summary
-        [ "$TASK_FAILURES" -eq 0 ] || exit 1
+    all|""|bootstrap)
+        run_update_pipeline "🚀 Agent Manager 全量同步启动" ""
+        ;;
+    update)
+        run_update_pipeline "🔄 Agent Manager 资源更新启动" "--no-install"
+        ;;
+    sync)
+        run_sync_pipeline
+        ;;
+    plan)
+        DRY_RUN_FLAG="--dry-run"
+        run_update_pipeline "🧭 Agent Manager 变更预演启动" ""
+        ;;
+    self-update)
+        run_self_update
+        ;;
+    offline)
+        OFFLINE_FLAG="--offline"
+        run_sync_pipeline
         ;;
     ui) $PYTHON_CMD "$ROOT_DIR/src/interactive.py" ;;
     doctor|status) doctor_check ;;
@@ -707,7 +758,12 @@ for t in set(targets): print(t)
         echo -e "  ${PENDING_GOLD}--dry-run${NC}       空转模式，仅输出计划动作并跳过 Git / secrets 等远端副作用"
         echo -e "  ${PENDING_GOLD}--offline${NC}       离线模式，禁止远程拉取/安装；仅使用本地已存在仓库与配置\n"
         echo -e "${BOLD}${HDR_BLUE}=== 日常入口 (Main Flows) ===${NC}"
-        echo -e "  ${SUCCESS_GREEN}all${NC}             执行全量同步配置（默认执行，同直接执行 \`make\`）"
+        echo -e "  ${SUCCESS_GREEN}sync${NC}            仅同步本地配置到 rules / skills / MCP，不联网、不安装"
+        echo -e "  ${SUCCESS_GREEN}update${NC}          更新远端资源并收敛本地环境，但不安装缺失 Agent"
+        echo -e "  ${SUCCESS_GREEN}bootstrap${NC}       执行全量安装、更新与同步，适合新机器初始化"
+        echo -e "  ${SUCCESS_GREEN}all${NC}             \`bootstrap\` 的兼容别名"
+        echo -e "  ${SUCCESS_GREEN}plan${NC}            预演一次完整 \`bootstrap\`（dry-run）"
+        echo -e "  ${SUCCESS_GREEN}self-update${NC}     仅更新 agent-manager 仓库自身逻辑"
         echo -e "  ${SUCCESS_GREEN}ui${NC}              启动基于 Terminal 的交互式的可视化管理终端界面"
         echo -e "  ${SUCCESS_GREEN}doctor / status${NC} 进行深度的资源校验、配置自检与环境排错诊断"
         echo -e "  ${SUCCESS_GREEN}detect${NC}          仅执行各 Agent 开发工具的环境探测与支持情况检测\n"

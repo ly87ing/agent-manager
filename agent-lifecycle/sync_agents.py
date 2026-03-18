@@ -193,7 +193,7 @@ def resolve_active_provider_variant(managed_actual, provider_key):
             return provider_name
     return provider_key
 
-def reconcile_agent(agent_id, definition, policy, dry_run=False):
+def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=True):
     label = get_agent_display_name(agent_id, definition)
     # 合并策略
     enabled = policy.get("enabled", True)
@@ -233,6 +233,9 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False):
         return True
 
     if enabled and not is_installed:
+        if not allow_install:
+            logging.info(f"[AGENT: {label}] 禁止安装缺失 Agent，跳过安装。")
+            return True
         if not auto_install:
             logging.info(f"[AGENT: {label}] 配置开启但 auto_install 关闭，跳过安装。")
             return True
@@ -331,6 +334,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="预览")
     parser.add_argument("--yes", action="store_true", help="自动确认")
     parser.add_argument("--offline", action="store_true", help="离线模式 (跳过网络操作)")
+    parser.add_argument("--no-install", action="store_true", help="禁止安装缺失的 Agent，仅做更新/卸载/审计")
     args = parser.parse_args()
 
     policy_cfg = canonicalize_agent_mapping(load_json(args.config).get("agents", {}))
@@ -350,7 +354,7 @@ def main():
         # 离线模式下禁用 auto_update
         if args.offline:
             policy = {**policy, "auto_update": False}
-        if not reconcile_agent(agent_id, definition, policy, args.dry_run):
+        if not reconcile_agent(agent_id, definition, policy, args.dry_run, allow_install=not args.no_install):
             all_ok = False
             
     if not all_ok: sys.exit(1)

@@ -45,6 +45,29 @@ class DetectAllProvidersTests(unittest.TestCase):
 
 
 class ReconcileAgentTests(unittest.TestCase):
+    def test_no_install_mode_skips_missing_enabled_agent(self):
+        definition = {
+            "display_name": "Claude Code",
+            "bin": "claude",
+            "providers": {
+                "npm": {
+                    "install": "npm install -g @anthropic-ai/claude-code",
+                }
+            },
+        }
+        policy = {"enabled": True, "auto_install": True}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", return_value=[]),
+            mock.patch.object(sync_agents, "run_cmd") as run_cmd,
+            self.assertLogs(level="INFO") as logs,
+        ):
+            result = sync_agents.reconcile_agent("claude-code", definition, policy, allow_install=False)
+
+        self.assertTrue(result)
+        run_cmd.assert_not_called()
+        self.assertTrue(any("禁止安装缺失 Agent" in line for line in logs.output), logs.output)
+
     def test_system_only_detection_is_audited_but_not_updated(self):
         definition = {
             "display_name": "Claude Code",

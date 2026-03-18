@@ -94,7 +94,7 @@ ANOTHER_API_KEY="sk-abc123..."
 ### 自动化流程（推荐）
 ```mermaid
 graph TD
-    A[运行 make all] --> B{secrets/ 目录存在吗?}
+    A[运行 make update / make bootstrap] --> B{secrets/ 目录存在吗?}
     B -->|否| C[自动从 git clone https://github.com/ly87ing/secrets.git secrets]
     B -->|是| D[更新现有 secrets 仓库]
     C --> E[读取 secrets/mcp.env]
@@ -151,8 +151,8 @@ graph TD
 
 ### 初始化凭证仓库
 ```bash
-# 方法1：通过make命令自动初始化（推荐）
-make all
+# 方法1：通过 make 命令自动初始化（推荐）
+make update
 # 系统会检测secrets/目录是否存在并自动克隆
 
 # 方法2：手动运行初始化脚本
@@ -226,7 +226,7 @@ make mcp-sync
 5. 查看日志寻找"正在从凭证源加载"的消息
 
 **解决方案**：
-- 重新运行 `make all` 确保secrets仓库被正确初始化
+- 重新运行 `make update` 或 `make bootstrap`，确保 secrets 仓库被正确初始化
 - 手动检查凭证文件格式
 - 验证占位符替换是否正常工作
 

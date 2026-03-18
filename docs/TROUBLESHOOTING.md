@@ -267,7 +267,7 @@ python3 -m json.tool config/mcp.json > /dev/null && echo "mcp.json: 有效"
 
 1. **secrets/ 目录未初始化**
    - 检查：`ls -la secrets/` 是否显示为 Git 仓库
-   - 解决：运行 `./manage.sh all` 或 `./scripts/init-secrets.sh`
+   - 解决：运行 `./manage.sh update`、`./manage.sh bootstrap` 或 `./scripts/init-secrets.sh`
 
 2. **凭证文件格式错误**
    - 检查：`secrets/mcp.env` 是否为有效的 KEY=VALUE 格式
@@ -307,7 +307,7 @@ python3 -m json.tool config/mcp.json > /dev/null && echo "mcp.json: 有效"
 
 ## 同步失败问题
 
-### 问题：make all 或 ./manage.sh all 执行失败
+### 问题：make update / make bootstrap 或对应的 manage.sh 命令执行失败
 **症状**：同步过程在某个阶段中止并返回错误码
 
 #### 常见原因和解决方案：
@@ -359,7 +359,7 @@ python3 -m json.tool config/mcp.json > /dev/null && echo "mcp.json: 有效"
 ## 性能问题
 
 ### 问题：同步过程异常缓慢
-**症状**：`make all` 执行时间异常长（正常应在几分钟内完成）
+**症状**：`make update` / `make bootstrap` 执行时间异常长（正常应在几分钟内完成）
 
 #### 常见原因和解决方案：
 
@@ -416,7 +416,7 @@ python3 -m json.tool config/mcp.json > /dev/null && echo "mcp.json: 有效"
 ```bash
 # 临时启用调试级别日志
 export LOG_LEVEL=DEBUG
-./manage.sh all
+./manage.sh bootstrap
 
 # 或永久修改 manage.sh 中的 logging.basicConfig level
 ```
@@ -437,7 +437,7 @@ watch -n 0.1 "ls -la ~/.claude/ | grep tmp"
 ### 模拟同步而不实际修改
 ```bash
 # 使用 --dry-run 标志预览将要执行的操作
-./manage.sh all --dry-run
+./manage.sh plan
 cd agent-mcp && python3 sync_mcp.py --config ../config/manager.json --def-file ../config/mcp.json --dry-run
 # 等效的 dry-run 标志适用于所有同步引擎
 ```
@@ -479,7 +479,7 @@ rm -rf ~/.claude.json ~/.gemini/settings.json ~/.cursor/mcp.json ~/.copilot/mcp-
 rm -rf ~/.claude/skills/* ~/.gemini/skills/* ~/.cursor/rules/* ~/.copilot/skills/* ~/.config/opencode/skills/* ~/.codex/skills/*
 
 # 3. 重新从 Agent Manager 同步
-./manage.sh all
+./manage.sh bootstrap
 
 # 4. 如需恢复 secrets，重新初始化
 ./scripts/init-secrets.sh
@@ -548,7 +548,7 @@ cp -r ~/agent-manager-backup/claude/skills/* ~/.claude/skills/
 1. 总是从 `./manage.sh doctor` 开始进行一般诊断
 2. 检查日志以获取具体错误信息
 3. 逐个组件隔离问题
-4. 如不确定，使用 `--dry-run` 先预览操作
+4. 如不确定，使用 `./manage.sh plan` 或 `--dry-run` 先预览操作
 5. 定期备份重要配置和凭证
 6. 保持系统和依赖的更新
 
