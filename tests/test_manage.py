@@ -114,6 +114,7 @@ class ManageScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root)
+            remove_path(temp_root / "secrets")
 
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--dry-run"],
@@ -132,6 +133,7 @@ class ManageScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root)
+            remove_path(temp_root / "secrets")
 
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--dry-run", "--offline"],
