@@ -43,6 +43,68 @@ class DetectAllProvidersTests(unittest.TestCase):
 
         self.assertIn("npm", providers)
 
+    @mock.patch.object(sync_agents, "ProviderCache")
+    @mock.patch.object(sync_agents.os.path, "exists", return_value=False)
+    @mock.patch.object(sync_agents.os.path, "realpath")
+    @mock.patch.object(sync_agents.shutil, "which", return_value=r"C:\Users\ly\AppData\Roaming\npm\claude.cmd")
+    def test_detects_npm_from_windows_npm_bin_path(
+        self,
+        _which,
+        realpath,
+        _exists,
+        provider_cache_cls,
+    ):
+        cache = provider_cache_cls.return_value
+        cache.get_gh_extensions.return_value = ""
+        cache.get_brew_formulae.return_value = set()
+        cache.get_brew_casks.return_value = set()
+        realpath.return_value = r"C:\Users\ly\AppData\Roaming\npm\claude.cmd"
+
+        providers = sync_agents.detect_all_providers(
+            "claude",
+            {
+                "providers": {
+                    "npm": {
+                        "install": "npm install -g @anthropic-ai/claude-code",
+                    }
+                }
+            },
+        )
+
+        self.assertIn("npm", providers)
+
+    @mock.patch.object(sync_agents, "ProviderCache")
+    @mock.patch.object(sync_agents.os.path, "exists", return_value=False)
+    @mock.patch.object(sync_agents.os.path, "realpath")
+    @mock.patch.object(sync_agents.shutil, "which", return_value=r"C:\Users\ly\AppData\Local\Programs\Claude\claude.cmd")
+    def test_detects_npm_when_windows_bin_resolves_into_node_modules(
+        self,
+        _which,
+        realpath,
+        _exists,
+        provider_cache_cls,
+    ):
+        cache = provider_cache_cls.return_value
+        cache.get_gh_extensions.return_value = ""
+        cache.get_brew_formulae.return_value = set()
+        cache.get_brew_casks.return_value = set()
+        realpath.return_value = (
+            r"C:\Users\ly\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\bin\claude.js"
+        )
+
+        providers = sync_agents.detect_all_providers(
+            "claude",
+            {
+                "providers": {
+                    "npm": {
+                        "install": "npm install -g @anthropic-ai/claude-code",
+                    }
+                }
+            },
+        )
+
+        self.assertIn("npm", providers)
+
 
 class ReconcileAgentTests(unittest.TestCase):
     def test_no_install_mode_skips_missing_enabled_agent(self):

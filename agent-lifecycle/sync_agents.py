@@ -105,6 +105,12 @@ def get_pkg_name(cmd):
     return m.group(1) if m else None
 
 
+def normalize_path_for_match(path):
+    if not path:
+        return ""
+    return path.replace("\\", "/")
+
+
 def detect_all_providers(bin_name, config=None):
     """全量扫描当前系统中管理该 Agent 的所有 Provider（使用缓存优化）"""
     found = []
@@ -128,9 +134,14 @@ def detect_all_providers(bin_name, config=None):
     # 检测 npm
     bin_path = shutil.which(bin_name)
     resolved_bin_path = os.path.realpath(bin_path) if bin_path else ""
-    npm_candidates = [p for p in (bin_path, resolved_bin_path) if p]
+    npm_candidates = [normalize_path_for_match(p) for p in (bin_path, resolved_bin_path) if p]
     if any(
-        "/node/" in p or "/npm/" in p or "/node_modules/" in p or p.endswith("node") or p.endswith("npm")
+        "/node/" in p
+        or "/npm/" in p
+        or "/node_modules/" in p
+        or p.endswith("node")
+        or p.endswith("npm")
+        or p.endswith("npm.cmd")
         for p in npm_candidates
     ):
         found.append("npm")

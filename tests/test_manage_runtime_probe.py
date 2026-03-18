@@ -5,6 +5,54 @@ from src import manage_runtime_probe
 
 
 class ManageRuntimeProbeTests(unittest.TestCase):
+    def test_detect_all_providers_supports_windows_npm_bin_path(self):
+        inventory = manage_runtime_probe.ProviderInventory(
+            run_cmd=lambda cmd, timeout=10: (False, ""),
+            which=lambda binary: r"C:\Users\ly\AppData\Roaming\npm\claude.cmd" if binary == "claude" else None,
+            path_exists=lambda _path: False,
+            realpath=lambda path: path,
+        )
+
+        providers = manage_runtime_probe.detect_all_providers(
+            "claude",
+            {
+                "providers": {
+                    "npm": {
+                        "install": "npm install -g @anthropic-ai/claude-code",
+                    }
+                }
+            },
+            inventory=inventory,
+        )
+
+        self.assertEqual(providers, ["npm"])
+
+    def test_detect_all_providers_supports_windows_node_modules_path(self):
+        inventory = manage_runtime_probe.ProviderInventory(
+            run_cmd=lambda cmd, timeout=10: (False, ""),
+            which=lambda binary: (
+                r"C:\Users\ly\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\bin\claude.js"
+                if binary == "claude"
+                else None
+            ),
+            path_exists=lambda _path: False,
+            realpath=lambda path: path,
+        )
+
+        providers = manage_runtime_probe.detect_all_providers(
+            "claude",
+            {
+                "providers": {
+                    "npm": {
+                        "install": "npm install -g @anthropic-ai/claude-code",
+                    }
+                }
+            },
+            inventory=inventory,
+        )
+
+        self.assertEqual(providers, ["npm"])
+
     def test_detect_all_providers_matches_manage_shell_order(self):
         command_outputs = {
             ("brew", "list", "--formula", "-1"): (True, ""),

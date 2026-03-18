@@ -40,6 +40,12 @@ def get_pkg_name(cmd):
     return match.group(1) if match else None
 
 
+def normalize_path_for_match(path):
+    if not path:
+        return ""
+    return path.replace("\\", "/")
+
+
 class ProviderInventory:
     def __init__(
         self,
@@ -88,6 +94,7 @@ class ProviderInventory:
         config = config or {}
 
         bin_path = self._which(bin_name)
+        normalized_bin_path = normalize_path_for_match(bin_path)
 
         brew_pkg = get_pkg_name(config.get("providers", {}).get("brew", {}).get("install", ""))
         if brew_pkg:
@@ -96,12 +103,13 @@ class ProviderInventory:
             elif brew_pkg in self.get_brew_casks():
                 found.append("brew-cask")
 
-        if bin_path and (
-            "/node/" in bin_path
-            or "/npm/" in bin_path
-            or "/node_modules/" in bin_path
-            or bin_path.endswith("node")
-            or bin_path.endswith("npm")
+        if normalized_bin_path and (
+            "/node/" in normalized_bin_path
+            or "/npm/" in normalized_bin_path
+            or "/node_modules/" in normalized_bin_path
+            or normalized_bin_path.endswith("node")
+            or normalized_bin_path.endswith("npm")
+            or normalized_bin_path.endswith("npm.cmd")
         ):
             found.append("npm")
 
