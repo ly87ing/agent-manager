@@ -43,6 +43,31 @@ expand_home() {
   printf '%s' "$value"
 }
 
+validate_manifest_entry() {
+  local name="$1" src_rel="$2" dst_pat="$3"
+  local src_abs="$repo_root/$src_rel"
+
+  if [[ -z "$name" || -z "$src_rel" || -z "$dst_pat" ]]; then
+    echo "❌ 关键错误: manifest 条目字段不能为空: $name|$src_rel|$dst_pat" >&2
+    return 1
+  fi
+
+  if [[ "$src_rel" == *".."* ]]; then
+    echo "❌ 关键错误: manifest source 禁止包含 '..': $src_rel" >&2
+    return 1
+  fi
+
+  if [[ "$dst_pat" != /* && "$dst_pat" != "~"* && "$dst_pat" != "{{HOME}}"* ]]; then
+    echo "❌ 关键错误: manifest target 必须是绝对路径或以 ~ / {{HOME}} 开头: $dst_pat" >&2
+    return 1
+  fi
+
+  if [[ ! -e "$src_abs" ]]; then
+    echo "❌ 关键错误: manifest source 不存在: $src_rel" >&2
+    return 1
+  fi
+}
+
 backup_target() {
   local target="$1"
   if [ "$backup_enabled" != "true" ] || [ ! -e "$target" ]; then return 0; fi
@@ -55,6 +80,18 @@ backup_target() {
   fi
 }
 
+remove_target() {
+  local target="$1"
+  echo "remove(stale): $target"
+  if [ "$dry_run" = "false" ]; then
+    if [ "$backup_enabled" = "true" ] && { [ -e "$target" ] || [ -L "$target" ]; }; then
+      backup_target "$target"
+    else
+      rm -rf "$target"
+    fi
+  fi
+}
+
 sync_copy() {
   local src="$1" dst="$2"
   if [ -d "$src" ]; then
@@ -63,6 +100,14 @@ sync_copy() {
     find "$src" -maxdepth 1 -not -path "$src" | while read -r item; do
       sync_copy "$item" "$dst/${item#$src/}"
     done
+    if [ -d "$dst" ]; then
+      find "$dst" -maxdepth 1 -mindepth 1 | while read -r existing; do
+        local rel="${existing#$dst/}"
+        if [ ! -e "$src/$rel" ] && [ ! -L "$src/$rel" ]; then
+          remove_target "$existing"
+        fi
+      done
+    fi
   else
     if [ -e "$dst" ]; then
       local s_inode=$(stat -f %i "$src" 2>/dev/null || stat -c %i "$src")
@@ -115,6 +160,19 @@ awk -F'|' '
   }
   END { exit err }
 ' "$manifest_path" || exit 1
+
+while IFS='|' read -r name group src_rel dst_pat; do
+  name=$(echo "$name" | awk '{$1=$1;print}')
+  group=$(echo "$group" | awk '{$1=$1;print}')
+  src_rel=$(echo "$src_rel" | awk '{$1=$1;print}')
+  dst_pat=$(echo "$dst_pat" | awk '{$1=$1;print}')
+
+  [[ -z "$name" || "$name" == \#* ]] && continue
+  [[ "$group_filter" != "all" && "$group_filter" != "$group" ]] && continue
+  [[ -n "$target_filter" && "$target_filter" != "$name" ]] && continue
+
+  validate_manifest_entry "$name" "$src_rel" "$dst_pat" || exit 1
+done < "$manifest_path"
 
 # --- 执行同步 ---
 while IFS='|' read -r name group src_rel dst_pat; do

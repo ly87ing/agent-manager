@@ -20,16 +20,16 @@
 
 - **Architecture & System Design:**
   If your task involves creating new modules, modifying shared/common code, or architectural decisions, you **MUST** read:
-  `modules/architecture.md` (Relative to this file's path, or typically located at `~/.<agent>/modules/architecture.md` or equivalent config directory).
+  `modules/architecture.md` (Relative to this file's path, or typically located at `~/.<agent>/rules/modules/architecture.md`).
 
 - **Code Style & Integrity:**
   If your task involves writing new code, handling data/config, or adding comments, you **MUST** read:
-  `modules/style.md`
+  `modules/style.md` (Typically located at `~/.<agent>/rules/modules/style.md`).
 
 - **Frontend Development & Verification:**
   If your task involves UI, frontend validation logic, user flows, or Playwright/browser automation execution, you **MUST** read:
-  `modules/frontend.md`
+  `modules/frontend.md` (Typically located at `~/.<agent>/rules/modules/frontend.md`).
 
 - **Generated Output & Artifact Hygiene:**
   If your task involves `playwright-cli`, Playwright, browser automation, generators, generated test artifacts, or temporary debug artifacts, you **MUST** read:
-  `modules/artifact-hygiene.md`
+  `modules/artifact-hygiene.md` (Typically located at `~/.<agent>/rules/modules/artifact-hygiene.md`).
