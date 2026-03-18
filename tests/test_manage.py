@@ -171,6 +171,47 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("本地覆盖配置无效", combined)
             self.assertFalse(call_log.exists(), combined)
 
+    def test_detect_fails_on_invalid_agent_definitions(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root)
+            (temp_root / "config" / "agents.json").write_text("{ invalid json\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "detect"],
+                cwd=temp_root,
+                env=self._managed_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("agents.json", combined)
+            self.assertIn("无效", combined)
+
+    def test_doctor_stops_after_config_syntax_errors(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root)
+            (temp_root / "config" / "agents.json").write_text("{ invalid json\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "doctor"],
+                cwd=temp_root,
+                env=self._managed_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("agents.json: 语法错误", combined)
+            self.assertNotIn("--- Agent 状态与策略一致性 ---", combined)
+            self.assertNotIn("Claude Code         : 漂移", combined)
+
     def test_sync_runs_only_local_config_tasks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"

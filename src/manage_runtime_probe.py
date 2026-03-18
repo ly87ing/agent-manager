@@ -5,17 +5,11 @@ import re
 import shutil
 import subprocess
 
+from src.json_config import load_json_file
 
-def load_json(path):
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as handle:
-            import json
 
-            return json.load(handle)
-    except Exception:
-        return {}
+def load_json(path, *, strict=False, missing_ok=True):
+    return load_json_file(path, strict=strict, missing_ok=missing_ok)
 
 
 def default_run_cmd(cmd, timeout=10):

@@ -254,22 +254,26 @@ sys.path.insert(0, '$ROOT_DIR')
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
 from src.manage_runtime_probe import ProviderInventory, detect_all_providers, load_json
 
-inventory = ProviderInventory()
-cfg = load_json('$CONFIG_FILE')
-cfg['agents'] = canonicalize_agent_mapping(cfg.get('agents', {}))
-def_a = canonicalize_agent_mapping(load_json('$ROOT_DIR/config/agents.json'))
-for k, v in cfg.get('agents', {}).items():
-    if not v.get('enabled', True): continue
-    d = def_a.get(k, {})
-    label = get_agent_display_name(k, d)
-    all_act = detect_all_providers(d.get('bin',''), d, inventory=inventory)
-    stat = '${SUCCESS_GREEN}✓${NC}' if all_act else '${PENDING_GOLD}○${NC}'
-    print(f'   {stat} {label:20} (安装源:{\"/\".join(all_act) if all_act else \"未发现\"})')
-for k, v in cfg.get('tools', {}).items():
-    if v.get('enabled', True):
-        act = shutil.which(k) is not None or os.path.exists(f'$ROOT_DIR/agent-tool/{k}')
-        stat = '${SUCCESS_GREEN}⚒${NC}' if act else '${PENDING_GOLD}⚠${NC}'
-        print(f'   {stat} {k:20} (工具就绪:{\"是\" if act else \"否\"})')
+try:
+    inventory = ProviderInventory()
+    cfg = load_json('$CONFIG_FILE', strict=True, missing_ok=False)
+    cfg['agents'] = canonicalize_agent_mapping(cfg.get('agents', {}))
+    def_a = canonicalize_agent_mapping(load_json('$ROOT_DIR/config/agents.json', strict=True, missing_ok=False))
+    for k, v in cfg.get('agents', {}).items():
+        if not v.get('enabled', True): continue
+        d = def_a.get(k, {})
+        label = get_agent_display_name(k, d)
+        all_act = detect_all_providers(d.get('bin',''), d, inventory=inventory)
+        stat = '${SUCCESS_GREEN}✓${NC}' if all_act else '${PENDING_GOLD}○${NC}'
+        print(f'   {stat} {label:20} (安装源:{\"/\".join(all_act) if all_act else \"未发现\"})')
+    for k, v in cfg.get('tools', {}).items():
+        if v.get('enabled', True):
+            act = shutil.which(k) is not None or os.path.exists(f'$ROOT_DIR/agent-tool/{k}')
+            stat = '${SUCCESS_GREEN}⚒${NC}' if act else '${PENDING_GOLD}⚠${NC}'
+            print(f'   {stat} {k:20} (工具就绪:{\"是\" if act else \"否\"})')
+except ValueError as exc:
+    print(str(exc), file=sys.stderr)
+    sys.exit(1)
 "
     echo ""
 }
@@ -302,6 +306,11 @@ function doctor_check() {
             if [ -n "$secrets" ]; then echo -e " ${ERROR_RED}(⚠ 包含明文密钥风险!)${NC}"; errors=$((errors+1)); else [ "$silent" == "false" ] && echo ""; fi
         else echo -e "  ${ERROR_RED}✗${NC} $(basename "$f"): 语法错误"; errors=$((errors+1)); fi
     done
+
+    if [ $errors -gt 0 ]; then
+        [ "$silent" == "false" ] && echo -e "${ERROR_RED}${BOLD}❌ 认证失败：发现 $errors 个配置问题。${NC}"
+        return 1
+    fi
 
     # 一致性审计
     [ "$silent" == "false" ] && echo -e "\n${BOLD}[ 路径、内容与链接一致性审计 ]${NC}"

@@ -400,6 +400,88 @@ class PolicyOwnershipTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("未声明策略", result.stdout + result.stderr)
 
+    def test_invalid_policy_config_fails_loudly(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            config_path.write_text("{ invalid json\n", encoding="utf-8")
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "claude-code": {
+                            "display_name": "Claude Code",
+                            "bin": "claude",
+                            "providers": {
+                                "npm": {
+                                    "install": "npm install -g @anthropic-ai/claude-code",
+                                }
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("config.json", combined)
+            self.assertIn("无效", combined)
+
+    def test_invalid_definition_file_fails_loudly(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "agents": {
+                            "claude-code": {
+                                "enabled": True,
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            def_path.write_text("{ invalid json\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("defs.json", combined)
+            self.assertIn("无效", combined)
+
 
 class AgentIdConsistencyTests(unittest.TestCase):
     def test_config_uses_stable_agent_ids(self):

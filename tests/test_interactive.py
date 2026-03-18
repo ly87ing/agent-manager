@@ -173,3 +173,31 @@ class InteractiveWorkflowTests(unittest.TestCase):
 
         self.assertIn("6. 保存更改", output.getvalue())
         self.assertIn("4. 编辑 Skill 策略", output.getvalue())
+
+    def test_invalid_local_override_fails_loudly(self):
+        (self.root / "config" / "manager.local.json").write_text("{ invalid json\n", encoding="utf-8")
+        output = io.StringIO()
+
+        with working_directory(self.root):
+            with self.assertRaises(SystemExit) as exc:
+                with mock.patch("sys.stdout", output):
+                    interactive.main()
+
+        self.assertEqual(exc.exception.code, 1)
+        rendered = output.getvalue()
+        self.assertIn("manager.local.json", rendered)
+        self.assertIn("无效", rendered)
+
+    def test_invalid_base_config_fails_loudly(self):
+        (self.root / "config" / "manager.json").write_text("{ invalid json\n", encoding="utf-8")
+        output = io.StringIO()
+
+        with working_directory(self.root):
+            with self.assertRaises(SystemExit) as exc:
+                with mock.patch("sys.stdout", output):
+                    interactive.main()
+
+        self.assertEqual(exc.exception.code, 1)
+        rendered = output.getvalue()
+        self.assertIn("manager.json", rendered)
+        self.assertIn("无效", rendered)

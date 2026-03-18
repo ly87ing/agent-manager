@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
+from src.json_config import load_json_file
 from src.manage_runtime_probe import detect_npm_from_paths
 
 # 配置日志
@@ -22,13 +23,6 @@ logging.basicConfig(
     format='%(asctime)s [%(levelname)s] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
-
-def load_json(path):
-    if not os.path.exists(path): return {}
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except: return {}
 
 def run_cmd(cmd, timeout=300):
     """运行 shell 命令并返回结果"""
@@ -338,8 +332,14 @@ def main():
     parser.add_argument("--no-install", action="store_true", help="禁止安装缺失的 Agent，仅做更新/卸载/审计")
     args = parser.parse_args()
 
-    policy_cfg = canonicalize_agent_mapping(load_json(args.config).get("agents", {}))
-    def_cfg = canonicalize_agent_mapping(load_json(args.def_file))
+    try:
+        policy_cfg = canonicalize_agent_mapping(
+            load_json_file(args.config, strict=True, missing_ok=False).get("agents", {})
+        )
+        def_cfg = canonicalize_agent_mapping(load_json_file(args.def_file, strict=True, missing_ok=False))
+    except ValueError as exc:
+        logging.error(str(exc))
+        sys.exit(1)
 
     if args.offline:
         logging.info("离线模式：跳过更新检查")

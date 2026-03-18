@@ -8,6 +8,7 @@ from pathlib import Path
 import copy
 
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
+from src.json_config import load_json_file
 
 # 颜色定义
 RED = "\033[0;31m"
@@ -47,12 +48,8 @@ def ask_yes_no(prompt, default="y"):
         res = default_value
     return res == 'y'
 
-def load_json(path):
-    if not os.path.exists(path): return {}
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except: return {}
+def load_json(path, *, strict=False, missing_ok=True):
+    return load_json_file(path, strict=strict, missing_ok=missing_ok)
 
 def save_json(data, path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -68,7 +65,7 @@ def deep_update(dst, src):
 
 def get_base_config():
     base_path = os.path.join("config", "manager.json")
-    base = load_json(base_path)
+    base = load_json(base_path, strict=True, missing_ok=False)
     if "agents" in base:
         base["agents"] = canonicalize_agent_mapping(base.get("agents", {}))
     return base
@@ -80,7 +77,7 @@ def get_local_config():
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
         with open(local_path, 'w', encoding='utf-8') as f:
             json.dump({}, f, indent=2)
-    local = load_json(local_path)
+    local = load_json(local_path, strict=True)
     if "agents" in local:
         local["agents"] = canonicalize_agent_mapping(local.get("agents", {}))
     return local
@@ -116,10 +113,15 @@ def main():
         with open(local_path, 'w', encoding='utf-8') as f:
             json.dump({}, f, indent=2)
     
+    try:
+        local_policy = get_local_config()
+        get_base_config()
+    except ValueError as exc:
+        print(f"{ERROR_RED}{exc}{NC}")
+        raise SystemExit(1)
+
     print(f"{HDR_BLUE}{BOLD}Agent Manager 交互式配置中心{NC}")
     print("=" * 50)
-
-    local_policy = get_local_config()
 
     while True:
         print("\n请选择操作:")
