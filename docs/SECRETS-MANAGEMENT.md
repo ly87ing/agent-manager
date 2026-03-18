@@ -113,7 +113,7 @@ graph TD
     B --> C[git add mcp.env]
     C --> D[git commit -m "描述更新内容"]
     D --> E[git push origin main]
-    E --> F[运行 make mcp-sync 或 ./manage.sh mcp-sync]
+    E --> F[运行 make mcp-sync 或 ./manage.sh mcp:sync]
     F --> G[系统重新读取凭证并更新配置]
 ```
 
@@ -296,14 +296,21 @@ make mcp-sync
 ```
 
 Agent Manager 会：
-1. 从 `secrets/mcp.env` 读取实际值
-2. 替换配置中的 `${AUGMENT_SESSION_AUTH}` 占位符
-3. 生成 Agent 特定的配置格式
-4. 原子写入目标配置文件
+1. 先读取仓库根目录的 `.env`
+2. 再读取 `secrets/*.env`（按文件名排序，后者覆盖前者）
+3. 若占位符仍未命中，再回退到系统环境变量
+4. 替换配置中的 `${AUGMENT_SESSION_AUTH}` 占位符
+5. 生成 Agent 特定的配置格式
+6. 原子写入目标配置文件
+
+额外说明：
+- `./manage.sh mcp:sync` 默认只消费本地已有凭证，不会主动 `git pull secrets`
+- `./manage.sh mcp:prepare` 或 `sync_mcp.py --prepare-runtime` 才会显式同步本地 secrets Git 仓库
+- 真实写入模式下，如果占位符仍未解析，MCP 同步会直接失败，不会写入半成品配置
 
 ### 支持的占位符格式
 - `${VAR_NAME}`: 标准替换格式
-- 环境变量回退：如果secrets中未找到，会检查系统环境变量
+- 环境变量回退：仅在 `.env` 和 `secrets/*.env` 都未命中时，才检查系统环境变量
 - 多个占位符：同一文件中可以有多个不同的占位符
 
 ### 凭证注入位置

@@ -271,14 +271,14 @@ AUGMENT_SESSION_AUTH='{"accessToken":"ace_...","tenantURL":"...","scopes":[]}'
 git clone https://github.com/ly87ing/agent-manager.git
 cd agent-manager
 
-# 2. 运行 make all - secrets 会自动克隆！
+# 2. 运行 make all
 make all
 ```
 
 **自动化流程**：
-- `make all` 会检测 `secrets/` 是否存在
-- 如缺失，自动从 `https://github.com/ly87ing/secrets.git` 克隆
-- 如有权限问题，会提示手动操作
+- `make all` 仍会在顶层检查 `secrets/` 是否存在
+- `mcp:sync` 默认只做 **配置注入**，不会主动 clone MCP repo、build，或 `git pull secrets`
+- 如需显式准备 MCP 运行时（repo clone/pull、setup/build、同步本地 secrets 仓库），请使用 `./manage.sh mcp:prepare`
 
 #### 手动初始化
 
@@ -304,7 +304,7 @@ git push origin main
 
 **优势**：
 - ✅ 简单易用，无 submodule 复杂性
-- ✅ 直接 `cd secrets && git pull` 更新
+- ✅ `mcp:sync` 和 `mcp:prepare` 的职责分离，配置同步不再隐式联网
 - ✅ 凭证版本化、可审计
 - ✅ 权限分离（私有仓库）
 
@@ -521,22 +521,25 @@ python3 -c "import tomllib; tomllib.load(open('~/.codex/config.toml', 'rb'))"
 ## 附录：Agent Manager MCP 同步流程
 
 ```
-1. 检测 secrets/ 目录（如缺失则自动克隆）
+默认模式（mcp:sync / make all 中的 MCP 步骤）:
+1. 读取 config/mcp.json 获取服务器定义
    ↓
-2. 读取 secrets/mcp.env 加载凭证
+2. 按固定优先级加载凭证: root/.env → secrets/*.env(按文件名排序覆盖) → 系统环境变量回退
    ↓
-3. 读取 config/mcp.json 获取服务器定义
+3. 替换 ${VAR} 占位符；若真实执行时仍有未解析占位符，则直接失败
    ↓
-4. 替换 ${VAR} 占位符为实际凭证
-   ↓
-5. 根据各 Agent 格式生成配置
+4. 根据各 Agent 格式生成配置
    ├─ JSON 格式 (Claude/Gemini/Cursor/Copilot)
    ├─ OpenCode 格式 (type + command 数组 + environment)
    └─ TOML 格式 (Codex，带字符串转义)
    ↓
-6. 原子写入各配置文件
+5. 校验现有配置可解析、生成结果合法、且仅删除 _MANAGED_BY=agent-manager 的托管段
    ↓
-7. 记录 _MANAGED_BY = "agent-manager" 标记
+6. 原子写入各配置文件并记录 _MANAGED_BY = "agent-manager" 标记
+
+显式运行时准备（mcp:prepare / sync_mcp.py --prepare-runtime）额外执行:
+7. 同步本地 secrets Git 仓库（非 offline 且非 dry-run）
+8. clone/pull MCP repo，按需要执行 setup/build
 ```
 
 ---

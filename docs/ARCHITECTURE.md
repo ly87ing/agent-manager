@@ -20,6 +20,7 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 核心设计原则：
 - **策略与定义分离**：管理用户意愿（manager.json）与技术细节（agents.json等）分离
 - **原子化操作**：所有文件写入采用临时文件原子替换模式
+- **显式运行时契约**：`dry-run` / `offline` / 锁 / 日志行为必须由 `manage.sh` 统一解释，不能由各同步器各自猜测
 - **差异审计**：实时监控物理文件与定义仓库的内容偏离
 - **高性能探测**：通过全局状态缓存避免频繁I/O操作
 
@@ -35,6 +36,7 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `auto_install`: 是否自动安装
 - `auto_update`: 是否自动更新
 - `preferred_provider`: 首选安装来源
+- `agents` 键使用稳定的机器可读 ID（如 `claude-code`, `cursor`），而不是面向用户的展示名
 
 ### 2. 定义层 (Definition Layer)
 **文件位置**: `config/*.json`
@@ -44,6 +46,10 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `tools.json`: 工具安装和设置指令
 - `skills.json`: Skill仓库地址和Agent映射
 - `mcp.json`: MCP服务器定义和Agent路径映射
+- Agent 定义中的 `display_name` 仅用于展示和日志；跨配置引用统一使用稳定 ID
+- `agents.json` 中的 `providers` 只声明 agent-manager 可托管的安装源；`system` 只是运行时探测信号，不是可配置的 provider key
+- `preferred_provider` 必须指向 `providers` 中真实存在的键，否则生命周期同步应直接失败
+- `skills.json` 中的 skill 仓库支持 `commit` / `ref` 版本约束；技能名来自仓库内 `SKILL.md` frontmatter 的 `name`
 
 ### 3. 同步引擎 (Sync Engines)
 **文件位置**: 各agent-*目录下的sync_*.py脚本
@@ -54,12 +60,17 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `agent-skill/link_skills.py`: Skill链接管理
 - `agent-mcp/sync_mcp.py`: MCP配置注入
 
+其中 `agent-lifecycle/sync_agents.py` 需要明确区分三种状态：
+- **managed provider**：定义文件中声明且 agent-manager 知道如何 install/uninstall/upgrade 的来源
+- **system-only detect**：只是在 PATH 或 App 目录中探测到二进制/应用存在，但不代表 agent-manager 可以安全接管
+- **unsupported provider**：运行时探测到了来源，但定义里没有声明；这类情况必须显式报错，不能静默继续
+
 ### 4. 审计与验证 (Audit & Verification)
 **文件位置**: `manage.sh` 中的doctor_check函数
 
 提供全系统健康检查：
 - 配置语法验证
-- 一致性审计（MD5漂移检测）
+- 一致性审计（文件内容与目录结构漂移检测）
 - 环境依赖检查
 - 安全风险扫描
 
@@ -94,6 +105,15 @@ graph TD
     G --> H[原子写入目标配置文件]
 ```
 
+### 管理入口运行时契约
+
+`manage.sh` 是唯一的顶层编排入口，负责统一解释全局 flag 和运行时状态：
+
+- **原子锁**：需要写入或同步的命令会先抢占 `/tmp/agent_manager_<user>.lock.d`，并在其中写入持有者 PID；兼容保留 `/tmp/agent_manager_<user>.lock` 作为元数据。`unlock` 会同时清理目录锁和遗留锁文件。
+- **按次日志**：每次运行写入独立日志 `/tmp/agent_manager_sync_<user>_<runid>.log`，并更新 `/tmp/agent_manager_sync_<user>.latest` 指针；`logs` 读取 latest，`clean-logs` 清理 latest 与全部历史运行日志。
+- **`--dry-run`**：只输出计划动作，跳过 `git pull`、secrets 初始化、仓库 clone/pull、依赖安装和构建等远端副作用；允许保留只读探测和预览日志。
+- **`--offline`**：禁止任何远程拉取、下载和安装。生命周期、tools、skills、MCP 同步器都只能复用本地已存在仓库/配置；如果本地前置资源缺失，应显式报错而不是偷偷联网。
+
 ---
 
 ## 安全机制
@@ -111,6 +131,7 @@ graph TD
 - 永不写入主仓库或日志
 - 使用环境变量占位符替换
 - 支持凭证轮换和审计
+- `--offline` 下不会同步 secrets 仓库，只会消费本地已有 secrets 内容
 
 ### 3. 权限最小化
 - 配置文件默认权限为 600 (仅所有者可读写)
@@ -123,6 +144,8 @@ graph TD
 
 ### 添加新Agent
 1. 在 `config/agents.json` 中添加Agent定义
+   - 键名必须是稳定 ID（例如 `github-copilot`）
+   - `display_name` 用于 CLI/UI 展示
    - bin: 可执行文件名称
    - preferred_provider: 首选安装来源
    - providers: 各安装来源的install/uninstall/upgrade命令
@@ -141,8 +164,12 @@ graph TD
 ### 添加新Skill
 1. 在 `config/skills.json` 的repositories中添加Git仓库
    - url: 仓库地址
+   - commit / ref: 可选版本约束；`commit` 优先级高于 `ref`
    - agents: 限定生效的Agent列表（null表示全部）
-2. 系统将自动克隆仓库、安装依赖并创建符号链接
+2. 仓库会被缓存到 `agent-skill/repositories/<repo-name>/`
+3. 只有带 `.agent-manager-owned` 标记的托管缓存目录才会被自动清理
+4. 技能目录必须包含 `SKILL.md`，并在 frontmatter 中声明 `name`
+5. `auto_update: false` 时系统会复用本地缓存但跳过 `git pull`；`--offline` 则禁止下载和远程更新
 
 ---
 
@@ -165,6 +192,7 @@ agent-manager/
 ├── agent-lifecycle/          # Agent生命周期管理
 ├── agent-tool/               # 工具管理
 ├── agent-skill/              # Skill管理
+│   └── repositories/         # Skill 仓库托管缓存（owner-marked）
 ├── agent-mcp/                # MCP管理
 ├── agent-rule/               # 规则管理
 ├── secrets/                  # 凭证仓库（git子模块或独立仓库）
@@ -175,11 +203,12 @@ agent-manager/
 ### 工作流程
 1. 用户通过修改 `config/manager.json` 表达意愿
 2. 运行 `make all` 或 `./manage.sh all` 启动同步
-3. 各同步引擎读取策略和定义，检测当前状态
-4. 根据需要执行安装、更新或卸载操作
-5. 生成Agent特定的配置文件并原子写入
-6. 记录管理标记 (_MANAGED_BY = "agent-manager") 以便审计
-7. 运行健康检查验证同步结果
+3. `manage.sh` 先解析 `dry-run` / `offline`，获取原子锁，并建立本次运行专属日志
+4. 各同步引擎读取策略和定义，检测当前状态
+5. 根据运行模式执行安装、更新或卸载操作
+6. 生成Agent特定的配置文件并原子写入
+7. 记录管理标记 (_MANAGED_BY = "agent-manager") 以便审计
+8. 运行健康检查验证同步结果
 
 ---
 
@@ -196,11 +225,11 @@ agent-manager/
 - 为了最大兼容性，系统必须支持目标Agent的原生格式
 - 通过特殊处理确保TOML中的特殊字符正确转义
 
-### 为什么使用符号链接而非复制文件？
-- 减少磁盘空间占用
-- 确保始终使用最新版本
-- 简化更新过程（只需更新源仓库）
-- 保持与原始仓库的一致性
+### 为什么 Rules 同时支持复制和符号链接，并默认使用复制？
+- 默认复制更稳妥：目标目录可独立审计、备份和回滚，不依赖源仓库持续存在
+- 目录型规则需要收敛同步：复制模式可以在分发时删除陈旧文件，避免模块残留
+- 符号链接仍然保留给显式选择的高级用法，用于节省空间或实时跟随源内容
+- `manage.sh doctor` 会按文件内容和目录结构审计规则目标，而不是只对单文件做 MD5 对比
 
 ---
 
