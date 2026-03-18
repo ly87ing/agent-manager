@@ -2,10 +2,11 @@ import unittest
 from unittest import mock
 
 from src import manage_runtime_probe
-
-
-FAKE_BREW_CELLAR_GEMINI_BIN = (
-    "/opt/homebrew/Cellar/gemini-cli/ANY_VERSION/libexec/lib/node_modules/@google/gemini-cli/bin/gemini.js"
+from tests.provider_path_fixtures import (
+    posix_brew_cellar_module_path,
+    posix_npm_global_module_path,
+    windows_npm_bin_path,
+    windows_npm_module_path,
 )
 
 
@@ -13,7 +14,7 @@ class ManageRuntimeProbeTests(unittest.TestCase):
     def test_detect_all_providers_supports_windows_npm_bin_path(self):
         inventory = manage_runtime_probe.ProviderInventory(
             run_cmd=lambda cmd, timeout=10: (False, ""),
-            which=lambda binary: r"C:\Users\ly\AppData\Roaming\npm\claude.cmd" if binary == "claude" else None,
+            which=lambda binary: windows_npm_bin_path("claude") if binary == "claude" else None,
             path_exists=lambda _path: False,
             realpath=lambda path: path,
         )
@@ -36,7 +37,7 @@ class ManageRuntimeProbeTests(unittest.TestCase):
         inventory = manage_runtime_probe.ProviderInventory(
             run_cmd=lambda cmd, timeout=10: (False, ""),
             which=lambda binary: (
-                r"C:\Users\ly\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\bin\claude.js"
+                windows_npm_module_path("@anthropic-ai/claude-code", "bin/claude.js")
                 if binary == "claude"
                 else None
             ),
@@ -72,7 +73,7 @@ class ManageRuntimeProbeTests(unittest.TestCase):
             mapping = {
                 "brew": "/opt/homebrew/bin/brew",
                 "gh": "/opt/homebrew/bin/gh",
-                "claude": "/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.js",
+                "claude": posix_npm_global_module_path("@anthropic-ai/claude-code", "bin/claude.js"),
             }
             return mapping.get(binary)
 
@@ -105,7 +106,7 @@ class ManageRuntimeProbeTests(unittest.TestCase):
                 "claude": "/usr/local/bin/claude",
             }.get(binary),
             path_exists=lambda _path: False,
-            realpath=lambda _path: "/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.js",
+            realpath=lambda _path: posix_npm_global_module_path("@anthropic-ai/claude-code", "bin/claude.js"),
         )
 
         providers = manage_runtime_probe.detect_all_providers(
@@ -138,7 +139,11 @@ class ManageRuntimeProbeTests(unittest.TestCase):
                 "gemini": "/opt/homebrew/bin/gemini",
             }.get(binary),
             path_exists=lambda _path: False,
-            realpath=lambda _path: FAKE_BREW_CELLAR_GEMINI_BIN,
+            realpath=lambda _path: posix_brew_cellar_module_path(
+                "gemini-cli",
+                "@google/gemini-cli",
+                "bin/gemini.js",
+            ),
         )
 
         providers = manage_runtime_probe.detect_all_providers(

@@ -6,13 +6,16 @@ from unittest import mock
 from pathlib import Path
 
 from agent_lifecycle_import import sync_agents
+from tests.provider_path_fixtures import (
+    posix_brew_cellar_module_path,
+    posix_npm_global_module_path,
+    windows_npm_bin_path,
+    windows_npm_module_path,
+)
 
 
 ROOT = Path(__file__).resolve().parent.parent
 MODULE_PATH = ROOT / "agent-lifecycle" / "sync_agents.py"
-FAKE_BREW_CELLAR_GEMINI_DIST = (
-    "/usr/local/Cellar/gemini-cli/ANY_VERSION/libexec/lib/node_modules/@google/gemini-cli/dist/index.js"
-)
 
 
 class DetectAllProvidersTests(unittest.TestCase):
@@ -31,7 +34,7 @@ class DetectAllProvidersTests(unittest.TestCase):
         cache.get_gh_extensions.return_value = ""
         cache.get_brew_formulae.return_value = set()
         cache.get_brew_casks.return_value = set()
-        realpath.return_value = "/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.js"
+        realpath.return_value = posix_npm_global_module_path("@anthropic-ai/claude-code", "bin/claude.js")
 
         providers = sync_agents.detect_all_providers(
             "claude",
@@ -61,7 +64,12 @@ class DetectAllProvidersTests(unittest.TestCase):
         cache.get_gh_extensions.return_value = ""
         cache.get_brew_formulae.return_value = {"gemini-cli"}
         cache.get_brew_casks.return_value = set()
-        realpath.return_value = FAKE_BREW_CELLAR_GEMINI_DIST
+        realpath.return_value = posix_brew_cellar_module_path(
+            "gemini-cli",
+            "@google/gemini-cli",
+            "dist/index.js",
+            prefix="/usr/local",
+        )
 
         providers = sync_agents.detect_all_providers(
             "gemini",
@@ -79,7 +87,7 @@ class DetectAllProvidersTests(unittest.TestCase):
     @mock.patch.object(sync_agents, "ProviderCache")
     @mock.patch.object(sync_agents.os.path, "exists", return_value=False)
     @mock.patch.object(sync_agents.os.path, "realpath")
-    @mock.patch.object(sync_agents.shutil, "which", return_value=r"C:\Users\ly\AppData\Roaming\npm\claude.cmd")
+    @mock.patch.object(sync_agents.shutil, "which", return_value=windows_npm_bin_path("claude"))
     def test_detects_npm_from_windows_npm_bin_path(
         self,
         _which,
@@ -91,7 +99,7 @@ class DetectAllProvidersTests(unittest.TestCase):
         cache.get_gh_extensions.return_value = ""
         cache.get_brew_formulae.return_value = set()
         cache.get_brew_casks.return_value = set()
-        realpath.return_value = r"C:\Users\ly\AppData\Roaming\npm\claude.cmd"
+        realpath.return_value = windows_npm_bin_path("claude")
 
         providers = sync_agents.detect_all_providers(
             "claude",
@@ -109,7 +117,7 @@ class DetectAllProvidersTests(unittest.TestCase):
     @mock.patch.object(sync_agents, "ProviderCache")
     @mock.patch.object(sync_agents.os.path, "exists", return_value=False)
     @mock.patch.object(sync_agents.os.path, "realpath")
-    @mock.patch.object(sync_agents.shutil, "which", return_value=r"C:\Users\ly\AppData\Local\Programs\Claude\claude.cmd")
+    @mock.patch.object(sync_agents.shutil, "which", return_value=r"C:\Users\test\AppData\Local\Programs\Claude\claude.cmd")
     def test_detects_npm_when_windows_bin_resolves_into_node_modules(
         self,
         _which,
@@ -121,9 +129,7 @@ class DetectAllProvidersTests(unittest.TestCase):
         cache.get_gh_extensions.return_value = ""
         cache.get_brew_formulae.return_value = set()
         cache.get_brew_casks.return_value = set()
-        realpath.return_value = (
-            r"C:\Users\ly\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\bin\claude.js"
-        )
+        realpath.return_value = windows_npm_module_path("@anthropic-ai/claude-code", "bin/claude.js")
 
         providers = sync_agents.detect_all_providers(
             "claude",
