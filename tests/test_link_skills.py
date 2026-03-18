@@ -665,3 +665,21 @@ class LinkSkillsTests(unittest.TestCase):
             link_skills.scrub_dead_links({"TestAgent": str(agent_dir)}, managed_dir)
 
             self.assertFalse(link.is_symlink())
+
+    def test_default_skill_catalog_includes_ui_ux_pro_max_repo_for_all_agents(self):
+        skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
+
+        repo = skills_config["repositories"].get("ui-ux-pro-max-skill")
+
+        self.assertIsNotNone(repo)
+        self.assertEqual(repo["url"], "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill")
+        self.assertEqual(repo["commit"], "07f4ef3ac2568c25a3b0c8ef5165a86abc3e56e4")
+        self.assertIsNone(repo["agents"])
+
+    def test_default_manager_policy_explicitly_enables_ui_ux_pro_max_repo(self):
+        manager_config = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            manager_config["skills"].get("ui-ux-pro-max-skill"),
+            {"enabled": True},
+        )

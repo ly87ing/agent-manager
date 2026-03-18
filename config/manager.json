@@ -12,7 +12,8 @@
   },
   "skills": {
     "playwright-best-practices-skill": { "enabled": true },
-    "superpowers": { "enabled": true }
+    "superpowers": { "enabled": true },
+    "ui-ux-pro-max-skill": { "enabled": true }
   },
   "mcp": {
     "augment-context-engine": { "enabled": true }
