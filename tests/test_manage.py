@@ -962,17 +962,31 @@ class ManageScriptTests(unittest.TestCase):
 
     def test_backups_restore_restores_directory_backup_with_spaces(self):
         with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root)
+            temp_home.mkdir()
+
             backup_dir = temp_home / "Library" / "Application Support" / "Agent Rules.bak.20260318"
             target_dir = temp_home / "Library" / "Application Support" / "Agent Rules"
             backup_dir.mkdir(parents=True)
             (backup_dir / "rule.md").write_text("# restored\n", encoding="utf-8")
+
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {},\n  "servers": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text(
+                "claude|copy|global|%s\n" % target_dir,
+                encoding="utf-8",
+            )
+
             env = self._managed_env()
             env["HOME"] = str(temp_home)
 
             result = subprocess.run(
-                [str(MANAGE), "backups:restore"],
-                cwd=ROOT,
+                [str(temp_root / "manage.sh"), "backups:restore"],
+                cwd=temp_root,
                 env=env,
                 input="1\n",
                 capture_output=True,
@@ -984,6 +998,39 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, combined)
             self.assertTrue((target_dir / "rule.md").exists(), combined)
             self.assertEqual((target_dir / "rule.md").read_text(encoding="utf-8"), "# restored\n")
+
+    def test_backups_restore_restores_plain_bak_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root)
+            temp_home.mkdir()
+
+            target_file = temp_home / ".claude.json"
+            backup_file = temp_home / ".claude.json.bak"
+            backup_file.write_text('{"restored": true}\n', encoding="utf-8")
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {\n    "claude-code": "%s"\n  },\n  "servers": {}\n}\n'
+                % target_file,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "backups:restore"],
+                cwd=temp_root,
+                env=env,
+                input="1\n",
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertEqual(target_file.read_text(encoding="utf-8"), '{"restored": true}\n')
 
     def test_backups_restore_respects_global_lock(self):
         lock_backup = move_aside(self.lock_path)
@@ -1018,6 +1065,43 @@ class ManageScriptTests(unittest.TestCase):
             holder.wait(timeout=5)
             restore_path(self.lock_path, lock_backup)
             restore_path(self.lock_dir, lock_dir_backup)
+
+    def test_backups_list_ignores_unmanaged_home_backups(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root)
+            temp_home.mkdir()
+
+            managed_target = temp_home / ".claude.json"
+            managed_backup = temp_home / ".claude.json.bak.20260318"
+            unrelated_backup = temp_home / "Documents" / "report.txt.bak.20260318"
+            unrelated_backup.parent.mkdir(parents=True)
+            managed_backup.write_text("{}", encoding="utf-8")
+            unrelated_backup.write_text("private\n", encoding="utf-8")
+
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {\n    "claude-code": "%s"\n  },\n  "servers": {}\n}\n'
+                % managed_target,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "backups:list"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertIn(str(managed_backup), combined)
+            self.assertNotIn(str(unrelated_backup), combined)
 
     def test_cleanup_only_removes_target_scoped_temp_files(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1060,6 +1144,45 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse(managed_tmp.exists(), result.stdout + result.stderr)
             self.assertTrue(unrelated_tmp.exists(), result.stdout + result.stderr)
+
+    def test_cleanup_removes_directory_backups_for_managed_rules_targets(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root)
+            temp_home.mkdir()
+
+            rule_target = temp_home / ".claude" / "rules" / "modules"
+            rule_backup = temp_home / ".claude" / "rules" / "modules.bak.20260318"
+            rule_backup.mkdir(parents=True)
+            (rule_backup / "style.md").write_text("# backup\n", encoding="utf-8")
+
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {},\n  "servers": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text(
+                "claude_modules|modules|rules/global/modules|%s\n" % rule_target,
+                encoding="utf-8",
+            )
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "cleanup"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse(rule_backup.exists(), result.stdout + result.stderr)
 
     def test_mcp_sync_defaults_to_config_only_mode(self):
         with tempfile.TemporaryDirectory() as temp_dir:

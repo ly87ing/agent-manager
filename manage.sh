@@ -658,6 +658,77 @@ function run_self_update() {
     git -C "$ROOT_DIR" pull
 }
 
+function list_managed_target_paths() {
+    local include_skills="${1:-false}"
+    ROOT_DIR="$ROOT_DIR" INCLUDE_SKILLS="$include_skills" HOME="$HOME" "$PYTHON_CMD" - <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+root = Path(os.environ["ROOT_DIR"])
+include_skills = os.environ.get("INCLUDE_SKILLS") == "true"
+targets = set()
+
+def add_target(value):
+    if isinstance(value, dict):
+        value = value.get("path")
+    if not value:
+        return
+    expanded = str(value).replace("{{HOME}}", str(Path.home()))
+    targets.add(str(Path(expanded).expanduser()))
+
+try:
+    mcp_cfg = json.loads((root / "config" / "mcp.json").read_text(encoding="utf-8"))
+except Exception as exc:
+    print(f"mcp.json 无效: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+for value in mcp_cfg.get("agent_paths", {}).values():
+    add_target(value)
+
+if include_skills:
+    try:
+        skills_cfg = json.loads((root / "config" / "skills.json").read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"skills.json 无效: {exc}", file=sys.stderr)
+        sys.exit(1)
+    for value in skills_cfg.get("agents", {}).values():
+        add_target(value)
+
+manifest_path = root / "config" / "rules-targets.list"
+if manifest_path.exists():
+    for raw_line in manifest_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [part.strip() for part in line.split("|")]
+        if len(parts) < 4:
+            print(f"rules-targets.list 非法条目: {raw_line}", file=sys.stderr)
+            sys.exit(1)
+        add_target(parts[3])
+
+for target in sorted(targets):
+    print(target)
+PY
+}
+
+function list_managed_backup_entries() {
+    local targets_output
+    if ! targets_output="$(list_managed_target_paths false)"; then
+        return 1
+    fi
+
+    local target
+    while IFS= read -r target; do
+        [ -n "$target" ] || continue
+        local target_dir target_name
+        target_dir="$(dirname "$target")"
+        target_name="$(basename "$target")"
+        find "$target_dir" -maxdepth 1 \( -name "${target_name}.bak" -o -name "${target_name}.bak.*" \) 2>/dev/null || true
+    done <<< "$targets_output" | sort -r | awk '!seen[$0]++'
+}
+
 function backup_restore_target_path() {
     local backup_path="$1"
     if [[ "$backup_path" == *.bak.* ]]; then
@@ -671,6 +742,16 @@ function backup_restore_target_path() {
     return 1
 }
 
+function copy_backup_payload() {
+    local backup_path="$1"
+    local destination_path="$2"
+    if [ -d "$backup_path" ] && [ ! -L "$backup_path" ]; then
+        cp -pR "$backup_path" "$destination_path"
+    else
+        cp -pP "$backup_path" "$destination_path"
+    fi
+}
+
 function restore_backup_entry() {
     local backup_path="$1"
     local target_path
@@ -679,15 +760,40 @@ function restore_backup_entry() {
         return 1
     fi
 
-    if [ -e "$target_path" ] || [ -L "$target_path" ]; then
-        rm -rf "$target_path"
+    local target_parent target_name staging_path rollback_path
+    target_parent="$(dirname "$target_path")"
+    target_name="$(basename "$target_path")"
+    staging_path="$target_parent/.${target_name}.restore_tmp_${RUN_ID}"
+    rollback_path="$target_parent/.${target_name}.restore_old_${RUN_ID}"
+
+    mkdir -p "$target_parent" || return 1
+    rm -rf "$staging_path" "$rollback_path"
+
+    if ! copy_backup_payload "$backup_path" "$staging_path"; then
+        rm -rf "$staging_path"
+        echo "恢复失败：无法读取备份 $backup_path"
+        return 1
     fi
 
-    if [ -d "$backup_path" ] && [ ! -L "$backup_path" ]; then
-        cp -R "$backup_path" "$target_path"
-    else
-        cp "$backup_path" "$target_path"
+    if [ -e "$target_path" ] || [ -L "$target_path" ]; then
+        if ! mv "$target_path" "$rollback_path"; then
+            rm -rf "$staging_path"
+            echo "恢复失败：无法暂存现有目标 $target_path"
+            return 1
+        fi
     fi
+
+    if mv "$staging_path" "$target_path"; then
+        rm -rf "$rollback_path"
+        return 0
+    fi
+
+    echo "恢复失败：无法写入目标 $target_path"
+    rm -rf "$staging_path"
+    if [ -e "$rollback_path" ] || [ -L "$rollback_path" ]; then
+        mv "$rollback_path" "$target_path" 2>/dev/null || true
+    fi
+    return 1
 }
 
 function restore_backup_selection_input() {
@@ -734,12 +840,15 @@ case "$cmd" in
             echo "暂无日志。"
         fi ;;
     clean-logs) rm -f "${LOG_PREFIX}"*.log "$LATEST_LOG_POINTER"; echo "日志已清理" ;;
-    backups:list) find "$HOME" -maxdepth 3 \( -name "*.bak.*" -o -name "*.bak" \) 2>/dev/null | sort -r | head -n 20 || true ;;
+    backups:list)
+        if ! list_managed_backup_entries | head -n 20; then
+            exit 1
+        fi ;;
     backups:restore) 
         files=()
         while IFS= read -r line; do
             files+=("$line")
-        done < <(find "$HOME" -maxdepth 3 \( -name "*.bak.*" -o -name "*.bak" \) 2>/dev/null | sort -r | head -n 10 || true)
+        done < <(list_managed_backup_entries | head -n 10)
         if [ "${#files[@]}" -eq 0 ]; then echo "未发现备份。"; exit 0; fi
         selection_input="$(restore_backup_selection_input)"
         select f in "${files[@]}"; do
@@ -759,37 +868,17 @@ case "$cmd" in
         (cd "$ROOT_DIR/agent-tool" && $PYTHON_CMD sync_tools.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/tools.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG) ;;
     cleanup)
         echo -e "${HDR_BLUE}正在执行全量环境大扫除...${NC}"
-        # (cd "$ROOT_DIR/agent-rule" && ./scripts/clean-agent-rule-backups.sh --yes || true)
-        agents_paths=$($PYTHON_CMD -c "
-import json, os
-def expand(v): 
-    return os.path.expanduser(v if isinstance(v,str) else v.get('path',''))
-
-targets = []
-try:
-    m=json.load(open('$ROOT_DIR/config/mcp.json')).get('agent_paths',{}).values()
-    s=json.load(open('$ROOT_DIR/config/skills.json')).get('agents',{}).values()
-    for p in list(m)+list(s):
-        if p: targets.append(expand(p))
-
-    # 加入 rule 的备份路径
-    rm = '$ROOT_DIR/config/rules-targets.list'
-    if os.path.exists(rm):
-        for line in open(rm):
-            if not line.strip() or line.startswith('#'): continue
-            dst = line.strip().split('|')[3].replace('{{HOME}}', '~')
-            targets.append(os.path.expanduser(dst))
-except Exception:
-    pass
-
-for t in set(targets): print(t)
-")
+        if ! agents_paths="$(list_managed_target_paths true)"; then
+            exit 1
+        fi
         echo "$agents_paths" | while read -r p; do
             if [ -n "$p" ]; then
                 d=$(dirname "$p")
                 b=$(basename "$p")
                 if [ -d "$d" ]; then
-                    find "$d" -maxdepth 1 \( -name "${b}.bak.*" -o -name "${b}.tmp_*" \) -type f -delete 2>/dev/null || true
+                    find "$d" -maxdepth 1 \( -name "${b}.bak.*" -o -name "${b}.tmp_*" -o -name ".${b}.restore_tmp_*" -o -name ".${b}.restore_old_*" \) -print0 2>/dev/null | while IFS= read -r -d '' candidate; do
+                        rm -rf "$candidate"
+                    done
                 fi
             fi
         done
