@@ -679,7 +679,7 @@ case "$cmd" in
         OFFLINE_FLAG="--offline"
         run_sync_pipeline
         ;;
-    ui) $PYTHON_CMD "$ROOT_DIR/src/interactive.py" ;;
+    ui) (cd "$ROOT_DIR" && $PYTHON_CMD -m src.interactive) ;;
     doctor|status) doctor_check ;;
     detect) detect_agents ;;
     unlock) remove_lock_artifacts; echo "锁已解除。" ;;

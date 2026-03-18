@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.agent_ids import canonicalize_agent_list, canonicalize_agent_mapping
+from src.json_config import load_json_file
 
 # 配置日志：统一审计时间戳
 logging.basicConfig(
@@ -46,13 +47,6 @@ class DuplicateSkillNameError(ValueError):
             rendered_paths = " / ".join(str(path) for path in paths)
             details.append(f"{skill_name} ({rendered_paths})")
         super().__init__(f"发现重复 skill name: {'; '.join(details)}")
-
-def load_json(path):
-    if not os.path.exists(path): return {}
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except: return {}
 
 def run_cmd(cmd, cwd=None, timeout=300):
     """运行 shell 命令并返回结果"""
@@ -382,17 +376,22 @@ def manage_links(skill_name, source_path, targets, allowed_agents, is_enabled=Tr
 
 def main():
     parser = argparse.ArgumentParser(description="Agent Skill 管理工具 (策略对齐)")
-    parser.add_argument("--config", default="../config/manager.json", help="策略配置")
-    parser.add_argument("--def-file", default="../config/skills.json", help="定义文件")
-    parser.add_argument("--base-dir", default=".", help="目录")
+    parser.add_argument("--config", default=str(REPO_ROOT / "config" / "manager.json"), help="策略配置")
+    parser.add_argument("--def-file", default=str(REPO_ROOT / "config" / "skills.json"), help="定义文件")
+    parser.add_argument("--base-dir", default=str(Path(__file__).resolve().parent), help="目录")
     parser.add_argument("--dry-run", action="store_true", help="预览")
     parser.add_argument("--offline", action="store_true", help="离线模式 (跳过远程仓库更新与依赖安装)")
     parser.add_argument("--yes", action="store_true", help="自动清理")
     args = parser.parse_args()
     
+    try:
+        policy_cfg = load_json_file(args.config, strict=True, missing_ok=False).get("skills", {})
+        full_def = load_json_file(args.def_file, strict=True, missing_ok=False)
+    except ValueError as exc:
+        logging.error(str(exc))
+        sys.exit(1)
+
     # 对齐职责：合并策略
-    policy_cfg = load_json(args.config).get("skills", {})
-    full_def = load_json(args.def_file)
     REPOS = {name: dict(config) for name, config in full_def.get("repositories", {}).items()}
     AGENT_TARGETS = canonicalize_agent_mapping(
         {k: (v if isinstance(v, str) else v.get("path")) for k, v in full_def.get("agents", {}).items()}

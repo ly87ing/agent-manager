@@ -16,6 +16,66 @@ SPEC.loader.exec_module(link_skills)
 
 
 class LinkSkillsTests(unittest.TestCase):
+    def test_invalid_policy_config_exits_non_zero(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            config_path.write_text("{ invalid json\n", encoding="utf-8")
+            def_path.write_text('{"repositories": {}, "agents": {}}', encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "skills"),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("config.json", combined)
+            self.assertIn("无效", combined)
+
+    def test_invalid_definition_config_exits_non_zero(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            config_path.write_text('{"skills": {}}', encoding="utf-8")
+            def_path.write_text("{ invalid json\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "skills"),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("defs.json", combined)
+            self.assertIn("无效", combined)
+
     def test_offline_mode_uses_existing_repo_without_git_update(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

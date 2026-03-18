@@ -4,10 +4,15 @@ import argparse
 import logging
 import subprocess
 import shutil
-import json
 import sys
 import time
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.json_config import load_json_file
 
 # 配置日志：统一审计时间戳
 logging.basicConfig(
@@ -15,13 +20,6 @@ logging.basicConfig(
     format='%(asctime)s [%(levelname)s] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
-
-def load_json(path):
-    if not os.path.exists(path): return {}
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except: return {}
 
 def run_cmd(cmd, cwd=None, timeout=None):
     """运行 shell 命令并返回结果"""
@@ -208,18 +206,25 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
 
 def main():
     parser = argparse.ArgumentParser(description="Agent Tool 管理工具 (策略驱动)")
-    parser.add_argument("--base-dir", default=".", help="基础目录")
-    parser.add_argument("--config", default="../config/manager.json", help="策略路径")
-    parser.add_argument("--def-file", default="../config/tools.json", help="定义路径")
+    parser.add_argument("--base-dir", default=str(Path(__file__).resolve().parent), help="基础目录")
+    parser.add_argument("--config", default=str(REPO_ROOT / "config" / "manager.json"), help="策略路径")
+    parser.add_argument("--def-file", default=str(REPO_ROOT / "config" / "tools.json"), help="定义路径")
     parser.add_argument("--dry-run", action="store_true", help="预览")
     parser.add_argument("--force", action="store_true", help="强制初始化")
     parser.add_argument("--yes", action="store_true", help="自动清理")
     parser.add_argument("--offline", action="store_true", help="离线模式 (跳过网络操作)")
     args = parser.parse_args()
 
-    policy_cfg = load_json(args.config).get("tools", {})
-    def_cfg = load_json(args.def_file).get("tools", {})
+    try:
+        policy_cfg = load_json_file(args.config, strict=True, missing_ok=False).get("tools", {})
+        def_cfg = load_json_file(args.def_file, strict=True, missing_ok=False).get("tools", {})
+    except ValueError as exc:
+        logging.error(str(exc))
+        sys.exit(1)
+
     base_dir = Path(args.base_dir).resolve()
+    if not base_dir.exists() and not args.dry_run:
+        base_dir.mkdir(parents=True, exist_ok=True)
 
     if args.offline:
         logging.info("离线模式：跳过 git 更新检查")

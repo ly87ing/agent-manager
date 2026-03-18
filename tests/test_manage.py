@@ -212,6 +212,26 @@ class ManageScriptTests(unittest.TestCase):
             self.assertNotIn("--- Agent 状态与策略一致性 ---", combined)
             self.assertNotIn("Claude Code         : 漂移", combined)
 
+    def test_ui_command_launches_interactive_menu(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root)
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "ui"],
+                cwd=temp_root,
+                env=self._managed_env(),
+                input="7\n",
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertIn("Agent Manager 交互式配置中心", combined)
+            self.assertIn("7. 退出", combined)
+
     def test_sync_runs_only_local_config_tasks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"

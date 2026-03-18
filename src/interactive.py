@@ -7,6 +7,10 @@ import shutil
 from pathlib import Path
 import copy
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
 from src.json_config import load_json_file
 
@@ -56,6 +60,12 @@ def save_json(data, path):
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
+def get_config_root():
+    cwd_root = Path.cwd()
+    if (cwd_root / "config" / "manager.json").exists():
+        return cwd_root
+    return REPO_ROOT
+
 def deep_update(dst, src):
     for k, v in src.items():
         if isinstance(v, dict) and isinstance(dst.get(k), dict):
@@ -64,17 +74,17 @@ def deep_update(dst, src):
             dst[k] = v
 
 def get_base_config():
-    base_path = os.path.join("config", "manager.json")
+    base_path = get_config_root() / "config" / "manager.json"
     base = load_json(base_path, strict=True, missing_ok=False)
     if "agents" in base:
         base["agents"] = canonicalize_agent_mapping(base.get("agents", {}))
     return base
 
 def get_local_config():
-    local_path = os.path.join("config", "manager.local.json")
+    local_path = get_config_root() / "config" / "manager.local.json"
     # Ensure file exists
-    if not os.path.exists(local_path):
-        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    if not local_path.exists():
+        local_path.parent.mkdir(parents=True, exist_ok=True)
         with open(local_path, 'w', encoding='utf-8') as f:
             json.dump({}, f, indent=2)
     local = load_json(local_path, strict=True)
@@ -100,16 +110,16 @@ def get_policy():
 
 def save_policy(data): 
     # 只保存到用户侧覆盖文件
-    local_path = os.path.join("config", "manager.local.json")
+    local_path = get_config_root() / "config" / "manager.local.json"
     save_json(data, local_path)
 
 # --- 交互式界面 ---
 
 def main():
     # 确保本地配置文件存在
-    local_path = os.path.join("config", "manager.local.json")
-    if not os.path.exists(local_path):
-        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    local_path = get_config_root() / "config" / "manager.local.json"
+    if not local_path.exists():
+        local_path.parent.mkdir(parents=True, exist_ok=True)
         with open(local_path, 'w', encoding='utf-8') as f:
             json.dump({}, f, indent=2)
     

@@ -1,4 +1,5 @@
 import subprocess
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,8 +7,100 @@ from unittest import mock
 
 from tests.agent_tool_import import sync_tools
 
+ROOT = Path(__file__).resolve().parent.parent
+
 
 class SyncToolsTests(unittest.TestCase):
+    def test_invalid_policy_config_exits_non_zero(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            config_path.write_text("{ invalid json\n", encoding="utf-8")
+            def_path.write_text('{"tools": {}}', encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(Path(sync_tools.__file__).resolve()),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                ],
+                cwd=temp_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("config.json", combined)
+            self.assertIn("无效", combined)
+
+    def test_invalid_definition_config_exits_non_zero(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            config_path.write_text('{"tools": {}}', encoding="utf-8")
+            def_path.write_text("{ invalid json\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(Path(sync_tools.__file__).resolve()),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                ],
+                cwd=temp_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("defs.json", combined)
+            self.assertIn("无效", combined)
+
+    def test_default_base_dir_does_not_prune_current_working_directory(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            repo_root = temp_root / "repo"
+            shutil.copytree(ROOT, repo_root)
+            module_path = repo_root / "agent-tool" / "sync_tools.py"
+            working_dir = temp_root / "cwd"
+            victim_dir = working_dir / "agent-lifecycle"
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            working_dir.mkdir()
+            victim_dir.mkdir()
+            config_path.write_text('{"tools": {}}', encoding="utf-8")
+            def_path.write_text('{"tools": {}}', encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(module_path),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--yes",
+                ],
+                cwd=working_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(victim_dir.exists(), result.stdout + result.stderr)
+
     def test_dirty_git_repo_is_not_reset_hard(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             target_dir = Path(temp_dir) / "playwright-cli"

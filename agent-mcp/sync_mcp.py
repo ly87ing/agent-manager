@@ -18,6 +18,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.agent_ids import canonicalize_agent_list, canonicalize_agent_mapping
+from src.json_config import load_json_file
 
 # 配置日志：统一审计时间戳
 logging.basicConfig(
@@ -27,13 +28,6 @@ logging.basicConfig(
 )
 
 PLACEHOLDER_RE = re.compile(r"\$\{([^}]+)\}")
-
-def load_json(path):
-    if not os.path.exists(path): return {}
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except: return {}
 
 def atomic_write_json(path, data):
     """原子化写入 JSON"""
@@ -405,17 +399,22 @@ def sync_secrets_repo(secrets_path):
 
 def main():
     parser = argparse.ArgumentParser(description="MCP Server 管理工具 (策略对齐)")
-    parser.add_argument("--config", default="../config/manager.json", help="策略路径")
-    parser.add_argument("--def-file", default="../config/mcp.json", help="定义路径")
-    parser.add_argument("--base-dir", default=".", help="基础目录")
+    parser.add_argument("--config", default=str(REPO_ROOT / "config" / "manager.json"), help="策略路径")
+    parser.add_argument("--def-file", default=str(REPO_ROOT / "config" / "mcp.json"), help="定义路径")
+    parser.add_argument("--base-dir", default=str(Path(__file__).resolve().parent), help="基础目录")
     parser.add_argument("--dry-run", action="store_true", help="预览")
     parser.add_argument("--offline", action="store_true", help="离线模式 (跳过远程仓库与 secrets 更新)")
     parser.add_argument("--prepare-runtime", action="store_true", help="显式准备 repo/runtime（clone、pull、setup、build）")
     args = parser.parse_args()
 
+    try:
+        policy_cfg = load_json_file(args.config, strict=True, missing_ok=False).get("mcp", {})
+        full_def = load_json_file(args.def_file, strict=True, missing_ok=False)
+    except ValueError as exc:
+        logging.error(str(exc))
+        sys.exit(1)
+
     # 对齐职责：从 manager.json 读取策略，从 mcp.json 读取定义与路径
-    policy_cfg = load_json(args.config).get("mcp", {})
-    full_def = load_json(args.def_file)
     definition_cfg = full_def.get("servers", {})
     AGENT_TARGETS = canonicalize_agent_mapping(full_def.get("agent_paths", {}))
 
