@@ -70,6 +70,13 @@ def detect_npm_from_paths(bin_path, resolved_bin_path="", brew_detected=False):
     return path_indicates_npm(resolved_bin_path)
 
 
+def detect_tool_readiness(name, definition, repo_root):
+    managed_repo_dir = os.path.join(repo_root, "agent-tool", name)
+    if definition.get("url"):
+        return os.path.isdir(managed_repo_dir) and os.path.isdir(os.path.join(managed_repo_dir, ".git"))
+    return shutil.which(name) is not None
+
+
 class ProviderInventory:
     def __init__(
         self,

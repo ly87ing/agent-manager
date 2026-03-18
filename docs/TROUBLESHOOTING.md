@@ -34,7 +34,8 @@ make smoke
 
 ### 2. 检查日志输出
 Agent Manager 使用标准化日志格式。最近的操作日志位于：
-- `/tmp/agent_manager_sync_$(whoami).log*` (主同步日志)
+- `/tmp/agent_manager_sync_<user>.latest` (最近一次运行的日志指针)
+- `/tmp/agent_manager_sync_<user>_<runid>.log` (按次归档的完整日志)
 - 各组件特定日志（在操作过程中输出到终端）
 
 ### 3. 验证基本依赖
@@ -210,14 +211,14 @@ python3 -m json.tool config/mcp.json > /dev/null && echo "mcp.json: 有效"
 #### 常见原因和解决方案：
 
 1. **Skill 仓库克隆失败**
-   - 检查：查看 agent-skill/ 目录中是否存在对应的 skill 仓库
+   - 检查：查看 `agent-skill/repositories/` 目录中是否存在对应的 skill 仓库缓存
      ```bash
-     ls -la agent-skill/
-     # 应该看到 playwright-best-practices-skill/ 和 superpowers/ 目录
+     ls -la agent-skill/repositories/
+     # 应该看到 playwright-best-practices-skill/、superpowers/ 等仓库目录
      ```
    - 解决：
      * 验证网络连接和 Git 访问权限
-     * 手动尝试克隆：`git clone <skill-repo-url> agent-skill/<skill-name>`
+     * 手动尝试克隆：`git clone <skill-repo-url> agent-skill/repositories/<repo-name>`
      * 检查 Git 凭证或 SSH 密钥设置（如果是私有仓库）
 
 2. **依赖安装失败**
@@ -253,7 +254,7 @@ python3 -m json.tool config/mcp.json > /dev/null && echo "mcp.json: 有效"
 2. **Skill 未正确注册**
    - 检查：Skill 的 SKILL.md 文件是否包含正确的元数据
      ```bash
-     head -10 agent-skill/playwright-best-practices-skill/SKILL.md
+     head -10 agent-skill/repositories/playwright-best-practices-skill/SKILL.md
      # 应该看到 name:, description: 等元数据
      ```
    - 解决：确保 skill 仓库包含有效的 SKILL.md 文件
@@ -529,7 +530,7 @@ cp -r ~/agent-manager-backup/claude/skills/* ~/.claude/skills/
 |----------|----------|----------|
 | `ERROR: Agent lifecycle failed` | Agent 安装/更新/卸载过程中出错 | 检查特定 Agent 的安装日志，验证包管理器可用性 |
 | `ERROR: MCP failed` | MCP 配置注入失败 | 检查 MCP-CONFIG-GUIDE.md，验证凭证和格式 |
-| `ERROR: Skills failed` | Skill 同步或链接失败 | 检查 agent-skill/ 目录日志，验证 Git 访问和依赖 |
+| `ERROR: Skills failed` | Skill 同步或链接失败 | 检查 `agent-skill/repositories/` 仓库缓存和同步日志，验证 Git 访问和依赖 |
 | `ERROR: Tools failed` | 工具安装失败 | 检查工具特定的安装要求和网络连接 |
 | `ERROR: Rules failed` | 规则同步失败 | 检查 agent-rule/ 目录和 Git 访问权限 |
 | `Found multiple matches for oldString` | 配置替换时字符串匹配不唯一 | 检查正在替换的配置内容，使匹配更具体 |

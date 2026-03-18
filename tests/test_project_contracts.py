@@ -61,6 +61,14 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("LOG_LEVEL=DEBUG ./manage.sh bootstrap", troubleshooting)
         self.assertNotIn("永久修改 manage.sh 中的 logging.basicConfig level", troubleshooting)
 
+    def test_troubleshooting_uses_latest_log_and_skill_cache_paths(self):
+        troubleshooting = (ROOT / "docs" / "TROUBLESHOOTING.md").read_text(encoding="utf-8")
+        self.assertIn("agent_manager_sync_<user>.latest", troubleshooting)
+        self.assertIn("agent_manager_sync_<user>_<runid>.log", troubleshooting)
+        self.assertIn("agent-skill/repositories/", troubleshooting)
+        self.assertNotIn("/tmp/agent_manager_sync_$(whoami).log*", troubleshooting)
+        self.assertNotIn("agent-skill/<skill-name>", troubleshooting)
+
     def test_readme_cleanup_contract_matches_runtime_scope(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("精准回收受管备份、碎片及冗余日志", readme)

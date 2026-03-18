@@ -11,6 +11,28 @@ from tests.provider_path_fixtures import (
 
 
 class ManageRuntimeProbeTests(unittest.TestCase):
+    def test_detect_tool_readiness_requires_git_clone_for_repo_backed_tools(self):
+        with mock.patch("src.manage_runtime_probe.os.path.isdir") as isdir:
+            isdir.side_effect = lambda path: path == "/repo/agent-tool/playwright-cli"
+
+            ready = manage_runtime_probe.detect_tool_readiness(
+                "playwright-cli",
+                {"url": "https://github.com/microsoft/playwright-cli.git"},
+                "/repo",
+            )
+
+        self.assertFalse(ready)
+
+    def test_detect_tool_readiness_uses_binary_for_install_based_tools(self):
+        with mock.patch("src.manage_runtime_probe.shutil.which", return_value="/usr/local/bin/auggie"):
+            ready = manage_runtime_probe.detect_tool_readiness(
+                "auggie",
+                {"install": "npm install -g @augmentcode/auggie"},
+                "/repo",
+            )
+
+        self.assertTrue(ready)
+
     def test_detect_all_providers_supports_windows_npm_bin_path(self):
         inventory = manage_runtime_probe.ProviderInventory(
             run_cmd=lambda cmd, timeout=10: (False, ""),

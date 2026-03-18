@@ -249,16 +249,17 @@ function resolve_latest_log_path() {
 function detect_agents() {
     echo -e "${HDR_BLUE}${BOLD}1. 环境探测与健康自检 (Environment Health Check)${NC} ${BORDER_GRAY}[OS: $OS_TYPE]${NC}"
     $PYTHON_CMD -c "
-import os, shutil, sys
+import sys
 sys.path.insert(0, '$ROOT_DIR')
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
-from src.manage_runtime_probe import ProviderInventory, detect_all_providers, load_json
+from src.manage_runtime_probe import ProviderInventory, detect_all_providers, detect_tool_readiness, load_json
 
 try:
     inventory = ProviderInventory()
     cfg = load_json('$CONFIG_FILE', strict=True, missing_ok=False)
     cfg['agents'] = canonicalize_agent_mapping(cfg.get('agents', {}))
     def_a = canonicalize_agent_mapping(load_json('$ROOT_DIR/config/agents.json', strict=True, missing_ok=False))
+    tool_defs = load_json('$ROOT_DIR/config/tools.json', strict=True, missing_ok=False).get('tools', {})
     for k, v in cfg.get('agents', {}).items():
         if not v.get('enabled', True): continue
         d = def_a.get(k, {})
@@ -268,7 +269,7 @@ try:
         print(f'   {stat} {label:20} (安装源:{\"/\".join(all_act) if all_act else \"未发现\"})')
     for k, v in cfg.get('tools', {}).items():
         if v.get('enabled', True):
-            act = shutil.which(k) is not None or os.path.exists(f'$ROOT_DIR/agent-tool/{k}')
+            act = detect_tool_readiness(k, tool_defs.get(k, {}), '$ROOT_DIR')
             stat = '${SUCCESS_GREEN}⚒${NC}' if act else '${PENDING_GOLD}⚠${NC}'
             print(f'   {stat} {k:20} (工具就绪:{\"是\" if act else \"否\"})')
 except ValueError as exc:
@@ -318,7 +319,7 @@ function doctor_check() {
 import os, hashlib, re, sys
 sys.path.insert(0, '$ROOT_DIR')
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
-from src.manage_runtime_probe import ProviderInventory, detect_all_providers, load_json
+from src.manage_runtime_probe import ProviderInventory, detect_all_providers, detect_tool_readiness, load_json
 
 def get_md5(p):
     try: return hashlib.md5(open(p, 'rb').read()).hexdigest()
@@ -350,6 +351,7 @@ errs = 0
 cfg = load_json('$CONFIG_FILE')
 cfg['agents'] = canonicalize_agent_mapping(cfg.get('agents', {}))
 def_a = canonicalize_agent_mapping(load_json('$ROOT_DIR/config/agents.json'))
+tool_defs = load_json('$ROOT_DIR/config/tools.json').get('tools', {})
 # 1. Agent Policy
 print('${BOLD}--- Agent 状态与策略一致性 ---${NC}')
 for k, v in cfg.get('agents', {}).items():
@@ -371,7 +373,22 @@ for k, v in cfg.get('agents', {}).items():
 for k, d in def_a.items():
     if k not in cfg.get('agents', {}):
         print(f'  ${PENDING_GOLD}⚠${NC} {get_agent_display_name(k, d):20}: 未声明策略（已忽略）')
-# 2. MCP
+# 2. Tools
+print('\n${BOLD}--- Tools 就绪审计 ---${NC}')
+for tool_name, policy in cfg.get('tools', {}).items():
+    if not policy.get('enabled', True):
+        continue
+    definition = tool_defs.get(tool_name)
+    if not definition:
+        print(f'  ${ERROR_RED}✗${NC} {tool_name:20}: 缺少定义')
+        errs += 1
+        continue
+    if detect_tool_readiness(tool_name, definition, '$ROOT_DIR'):
+        print(f'  ${SUCCESS_GREEN}✓${NC} {tool_name:20}: 已就绪')
+    else:
+        print(f'  ${ERROR_RED}✗${NC} {tool_name:20}: 未就绪')
+        errs += 1
+# 3. MCP
 print('\n${BOLD}--- MCP 注入审计 ---${NC}')
 ap = canonicalize_agent_mapping(load_json('$ROOT_DIR/config/mcp.json').get('agent_paths', {}))
 for k, v in ap.items():
@@ -382,7 +399,7 @@ for k, v in ap.items():
     else:
         print(f'  ${ERROR_RED}✗${NC} {get_agent_display_name(k)}: 缺失')
         errs += 1
-# 3. Skills
+# 4. Skills
 print('\n${BOLD}--- Skills 链接审计 ---${NC}')
 s_cfg = load_json('$ROOT_DIR/config/skills.json')
 for a_name, a_path in canonicalize_agent_mapping(s_cfg.get('agents', {})).items():
@@ -393,7 +410,7 @@ for a_name, a_path in canonicalize_agent_mapping(s_cfg.get('agents', {})).items(
     else:
         print(f'  ${ERROR_RED}✗${NC} {get_agent_display_name(a_name):15}: 缺失')
         errs += 1
-# 4. Rules
+# 5. Rules
 print('\n${BOLD}--- Rules 内容/结构审计 ---${NC}')
 rm = '$ROOT_DIR/config/rules-targets.list'
 if os.path.exists(rm):
