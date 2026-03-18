@@ -212,6 +212,91 @@ class ManageScriptTests(unittest.TestCase):
             self.assertNotIn("--- Agent 状态与策略一致性 ---", combined)
             self.assertNotIn("Claude Code         : 漂移", combined)
 
+    def test_doctor_fails_when_configured_skill_target_is_missing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root)
+            temp_home.mkdir()
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {},\n  "servers": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {\n    "claude-code": "%s/.claude/skills"\n  }\n}\n'
+                % temp_home,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "doctor"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("--- Skills 链接审计 ---", combined)
+            self.assertIn("Claude Code", combined)
+            self.assertIn("缺失", combined)
+
+    def test_doctor_snapshot_statistics_only_count_managed_backups(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root)
+            temp_home.mkdir()
+
+            managed_target = temp_home / ".claude.json"
+            managed_target.write_text("{}", encoding="utf-8")
+            managed_backup = temp_home / ".claude.json.bak.20260318"
+            unrelated_backup = temp_home / "Documents" / "report.txt.bak.20260318"
+            unrelated_backup.parent.mkdir(parents=True)
+            managed_backup.write_text("managed\n", encoding="utf-8")
+            unrelated_backup.write_text("private\n", encoding="utf-8")
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {\n    "claude-code": "%s"\n  },\n  "servers": {}\n}\n'
+                % managed_target,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "doctor"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertIn("有效历史快照: 1 个", combined)
+            self.assertNotIn("有效历史快照: 2 个", combined)
+
     def test_ui_command_launches_interactive_menu(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
@@ -1066,6 +1151,45 @@ class ManageScriptTests(unittest.TestCase):
             restore_path(self.lock_path, lock_backup)
             restore_path(self.lock_dir, lock_dir_backup)
 
+    def test_backups_restore_returns_non_zero_when_restore_fails(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root)
+            temp_home.mkdir()
+
+            target_file = temp_home / ".claude.json"
+            backup_file = temp_home / ".claude.json.bak"
+            backup_file.write_text('{"restored": true}\n', encoding="utf-8")
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {\n    "claude-code": "%s"\n  },\n  "servers": {}\n}\n'
+                % target_file,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+
+            temp_home.chmod(0o500)
+            try:
+                result = subprocess.run(
+                    [str(temp_root / "manage.sh"), "backups:restore"],
+                    cwd=temp_root,
+                    env=env,
+                    input="1\n",
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            finally:
+                temp_home.chmod(0o700)
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("恢复失败", combined)
+            self.assertFalse(target_file.exists(), combined)
+
     def test_backups_list_ignores_unmanaged_home_backups(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
@@ -1102,6 +1226,48 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, combined)
             self.assertIn(str(managed_backup), combined)
             self.assertNotIn(str(unrelated_backup), combined)
+
+    def test_backups_list_orders_newest_entries_first(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root)
+            (temp_home / "A").mkdir(parents=True)
+            (temp_home / "Z").mkdir(parents=True)
+
+            older_target = temp_home / "Z" / "zeta.json"
+            newer_target = temp_home / "A" / "alpha.json"
+            older_backup = temp_home / "Z" / "zeta.json.bak.202603181200"
+            newer_backup = temp_home / "A" / "alpha.json.bak.202603201200"
+            older_backup.write_text("older\n", encoding="utf-8")
+            newer_backup.write_text("newer\n", encoding="utf-8")
+            os.utime(older_backup, (1710763200, 1710763200))
+            os.utime(newer_backup, (1710936000, 1710936000))
+
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {\n    "claude-code": "%s",\n    "gemini-cli": "%s"\n  },\n  "servers": {}\n}\n'
+                % (older_target, newer_target),
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "backups:list"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            lines = [line for line in result.stdout.splitlines() if line.strip()]
+            self.assertGreaterEqual(len(lines), 2, combined)
+            self.assertEqual(lines[0], str(newer_backup), combined)
+            self.assertEqual(lines[1], str(older_backup), combined)
 
     def test_cleanup_only_removes_target_scoped_temp_files(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1144,6 +1310,42 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse(managed_tmp.exists(), result.stdout + result.stderr)
             self.assertTrue(unrelated_tmp.exists(), result.stdout + result.stderr)
+
+    def test_cleanup_removes_plain_bak_for_managed_targets(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root)
+            temp_home.mkdir()
+
+            managed_target = temp_home / ".claude.json"
+            plain_backup = temp_home / ".claude.json.bak"
+            plain_backup.write_text("{}", encoding="utf-8")
+
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {\n    "claude-code": "%s"\n  },\n  "servers": {}\n}\n'
+                % managed_target,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "cleanup"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse(plain_backup.exists(), result.stdout + result.stderr)
 
     def test_cleanup_removes_directory_backups_for_managed_rules_targets(self):
         with tempfile.TemporaryDirectory() as temp_dir:

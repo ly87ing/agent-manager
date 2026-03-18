@@ -60,3 +60,8 @@ class ProjectContractTests(unittest.TestCase):
         troubleshooting = (ROOT / "docs" / "TROUBLESHOOTING.md").read_text(encoding="utf-8")
         self.assertIn("LOG_LEVEL=DEBUG ./manage.sh bootstrap", troubleshooting)
         self.assertNotIn("永久修改 manage.sh 中的 logging.basicConfig level", troubleshooting)
+
+    def test_readme_cleanup_contract_matches_runtime_scope(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("精准回收受管备份、碎片及冗余日志", readme)
+        self.assertNotIn("孤儿仓库", readme)

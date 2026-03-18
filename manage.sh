@@ -387,9 +387,12 @@ print('\n${BOLD}--- Skills 链接审计 ---${NC}')
 s_cfg = load_json('$ROOT_DIR/config/skills.json')
 for a_name, a_path in canonicalize_agent_mapping(s_cfg.get('agents', {})).items():
     p = os.path.expanduser(a_path)
-    if os.path.exists(p):
+    if os.path.isdir(p):
         links = [f for f in os.listdir(p) if os.path.islink(os.path.join(p, f))]
         print(f'  ● {get_agent_display_name(a_name):15}: {len(links)} 个物理链接')
+    else:
+        print(f'  ${ERROR_RED}✗${NC} {get_agent_display_name(a_name):15}: 缺失')
+        errs += 1
 # 4. Rules
 print('\n${BOLD}--- Rules 内容/结构审计 ---${NC}')
 rm = '$ROOT_DIR/config/rules-targets.list'
@@ -416,7 +419,12 @@ print(f'__ERRORS__:{errs}')
     # 容灾快照
     if [ "$silent" == "false" ]; then
         echo -e "\n${BOLD}[ 容灾快照统计 ]${NC}"
-        local baks=$(find "$HOME" -maxdepth 3 \( -name "*.bak.*" -o -name "*.bak" \) 2>/dev/null | wc -l | tr -d ' ')
+        local baks=0 backup_entries
+        if backup_entries="$(list_managed_backup_entries 2>/dev/null)"; then
+            if [ -n "$backup_entries" ]; then
+                baks=$(printf '%s\n' "$backup_entries" | sed '/^$/d' | wc -l | tr -d ' ')
+            fi
+        fi
         echo -e "  ${SUCCESS_GREEN}✓${NC} 有效历史快照: $baks 个\n"
     fi
 
@@ -719,14 +727,34 @@ function list_managed_backup_entries() {
         return 1
     fi
 
-    local target
-    while IFS= read -r target; do
-        [ -n "$target" ] || continue
-        local target_dir target_name
-        target_dir="$(dirname "$target")"
-        target_name="$(basename "$target")"
-        find "$target_dir" -maxdepth 1 \( -name "${target_name}.bak" -o -name "${target_name}.bak.*" \) 2>/dev/null || true
-    done <<< "$targets_output" | sort -r | awk '!seen[$0]++'
+    TARGETS_OUTPUT="$targets_output" "$PYTHON_CMD" - <<'PY'
+import os
+import sys
+
+targets = [line for line in os.environ.get("TARGETS_OUTPUT", "").splitlines() if line.strip()]
+entries = {}
+
+for target in targets:
+    target_dir = os.path.dirname(target)
+    target_name = os.path.basename(target)
+    try:
+        names = os.listdir(target_dir)
+    except OSError:
+        continue
+
+    for name in names:
+        if name != f"{target_name}.bak" and not name.startswith(f"{target_name}.bak."):
+            continue
+        path = os.path.join(target_dir, name)
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        entries[path] = max(entries.get(path, float("-inf")), mtime)
+
+for path, _mtime in sorted(entries.items(), key=lambda item: (-item[1], item[0])):
+    print(path)
+PY
 }
 
 function backup_restore_target_path() {
@@ -853,7 +881,11 @@ case "$cmd" in
         selection_input="$(restore_backup_selection_input)"
         select f in "${files[@]}"; do
             [ -n "${f:-}" ] || { echo "无效选择。"; continue; }
-            restore_backup_entry "$f" && echo "已恢复。"
+            if restore_backup_entry "$f"; then
+                echo "已恢复。"
+            else
+                exit 1
+            fi
             break
         done < "$selection_input" ;;
     mcp:sync)
@@ -876,7 +908,7 @@ case "$cmd" in
                 d=$(dirname "$p")
                 b=$(basename "$p")
                 if [ -d "$d" ]; then
-                    find "$d" -maxdepth 1 \( -name "${b}.bak.*" -o -name "${b}.tmp_*" -o -name ".${b}.restore_tmp_*" -o -name ".${b}.restore_old_*" \) -print0 2>/dev/null | while IFS= read -r -d '' candidate; do
+                    find "$d" -maxdepth 1 \( -name "${b}.bak" -o -name "${b}.bak.*" -o -name "${b}.tmp_*" -o -name ".${b}.restore_tmp_*" -o -name ".${b}.restore_old_*" \) -print0 2>/dev/null | while IFS= read -r -d '' candidate; do
                         rm -rf "$candidate"
                     done
                 fi
