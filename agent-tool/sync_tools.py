@@ -13,7 +13,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.json_config import load_json_file
-from src.manage_runtime_probe import TOOL_BROKEN_MARKER, TOOL_READY_MARKER
+from src.manage_runtime_probe import (
+    TOOL_BROKEN_MARKER,
+    TOOL_READY_MARKER,
+    detect_tool_readiness,
+    repo_tool_artifacts_ready,
+)
 from src.runtime_logging import configure_logging
 
 configure_logging()
@@ -172,6 +177,7 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
     setup_cmd = definition.get("setup")
     target_dir = Path(base_dir) / name
     needs_setup = force
+    setup_failed = False
     success_build = True
     should_apply_overrides = False
     repo_state_changed = False
@@ -179,8 +185,12 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
     if url:
         if target_dir.exists() and (target_dir / ".git").exists():
             if not auto_update:
-                logging.info(f"[TOOL: {name}] 已就绪，auto_update 关闭。")
-                should_apply_overrides = True
+                if detect_tool_readiness(name, definition, base_dir):
+                    logging.info(f"[TOOL: {name}] 已就绪，auto_update 关闭。")
+                    should_apply_overrides = True
+                else:
+                    logging.warning(f"[TOOL: {name}] 检测到现有仓库未就绪，auto_update 关闭，保留当前状态。")
+                    success_build = False
             else:
                 if dry_run: logging.info(f"[TOOL: {name}] (预览: 计划检查更新)")
                 else:
@@ -218,13 +228,21 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
             ok, out = run_cmd(setup_cmd, cwd=target_dir)
             if not ok:
                 logging.error(f"[TOOL: {name}] 构建失败: {out}")
+                setup_failed = True
                 success_build = False
 
         if not dry_run and target_dir.exists() and (target_dir / ".git").exists():
-            if success_build:
-                mark_tool_ready(target_dir)
-            elif repo_state_changed or force:
+            repo_ready = repo_tool_artifacts_ready(definition, target_dir)
+            if setup_failed:
                 mark_tool_broken(target_dir)
+            elif success_build and repo_ready and (
+                repo_state_changed or force or not broken_marker_path(target_dir).exists()
+            ):
+                mark_tool_ready(target_dir)
+            elif (repo_state_changed or force) and not repo_ready:
+                mark_tool_broken(target_dir)
+            if not detect_tool_readiness(name, definition, base_dir):
+                success_build = False
 
     elif install_cmd:
         if dry_run: logging.info(f"[TOOL: {name}] (预览: 计划执行安装)")

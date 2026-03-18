@@ -270,6 +270,29 @@ class SyncToolsTests(unittest.TestCase):
             self.assertFalse((target_dir / sync_tools.TOOL_READY_MARKER).exists())
             self.assertTrue((target_dir / sync_tools.TOOL_BROKEN_MARKER).exists())
 
+    def test_auto_update_false_preserves_broken_repo_state(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_dir = Path(temp_dir) / "playwright-cli"
+            target_dir.mkdir()
+            (target_dir / ".git").mkdir()
+            (target_dir / sync_tools.TOOL_BROKEN_MARKER).write_text("broken\n", encoding="utf-8")
+
+            with mock.patch.object(sync_tools, "apply_overrides"):
+                ok = sync_tools.sync_tool(
+                    "playwright-cli",
+                    {
+                        "url": "https://example.invalid/repo.git",
+                        "setup": "npm install && npx playwright install",
+                        "ready_paths": ["node_modules"],
+                    },
+                    {"enabled": True, "auto_update": False},
+                    Path(temp_dir),
+                )
+
+            self.assertFalse(ok)
+            self.assertTrue((target_dir / sync_tools.TOOL_BROKEN_MARKER).exists())
+            self.assertFalse((target_dir / sync_tools.TOOL_READY_MARKER).exists())
+
     def test_update_failure_does_not_apply_overrides(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             target_dir = Path(temp_dir) / "playwright-cli"

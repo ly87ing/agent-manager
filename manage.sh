@@ -290,17 +290,22 @@ function doctor_check() {
 
     # 配置审计
     [ "$silent" == "false" ] && echo -e "${BOLD}[ 配置与安全 ]${NC}"
-    local required_json_files=(
+    local required_config_files=(
         "$ROOT_DIR/config/manager.json"
         "$ROOT_DIR/config/agents.json"
         "$ROOT_DIR/config/tools.json"
         "$ROOT_DIR/config/skills.json"
         "$ROOT_DIR/config/mcp.json"
+        "$ROOT_DIR/config/rules-targets.list"
     )
-    for f in "${required_json_files[@]}"; do
+    for f in "${required_config_files[@]}"; do
         if [ ! -f "$f" ]; then
             echo -e "  ${ERROR_RED}✗${NC} $(basename "$f"): 缺失"
             errors=$((errors+1))
+            continue
+        fi
+        if [[ "$f" != *.json ]]; then
+            [ "$silent" == "false" ] && echo -e "  ${SUCCESS_GREEN}✓${NC} $(basename "$f"): 存在"
             continue
         fi
         if $PYTHON_CMD -m json.tool "$f" >/dev/null 2>&1; then

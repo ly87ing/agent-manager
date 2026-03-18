@@ -40,8 +40,13 @@ Agent Manager 使用标准化日志格式。最近的操作日志位于：
 
 ### 3. 验证基本依赖
 ```bash
-# 检查必要命令是否可用
-which python3 git brew npm gh
+# 先确认基础命令存在
+which python3 git
+
+# 如当前策略启用了 brew / npm / gh provider、repo 型 tool 或需要 setup 的资源，
+# 再补查对应命令
+which brew npm gh
+
 # 检查版本
 python3 --version
 git --version
@@ -58,6 +63,7 @@ python3 -m json.tool config/agents.json > /dev/null && echo "agents.json: 有效
 python3 -m json.tool config/tools.json > /dev/null && echo "tools.json: 有效"
 python3 -m json.tool config/skills.json > /dev/null && echo "skills.json: 有效"
 python3 -m json.tool config/mcp.json > /dev/null && echo "mcp.json: 有效"
+test -f config/rules-targets.list && echo "rules-targets.list: 存在"
 ```
 
 ---

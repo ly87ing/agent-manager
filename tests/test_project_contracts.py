@@ -61,6 +61,11 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("LOG_LEVEL=DEBUG ./manage.sh bootstrap", troubleshooting)
         self.assertNotIn("永久修改 manage.sh 中的 logging.basicConfig level", troubleshooting)
 
+    def test_troubleshooting_mentions_rules_manifest_and_policy_scoped_dependencies(self):
+        troubleshooting = (ROOT / "docs" / "TROUBLESHOOTING.md").read_text(encoding="utf-8")
+        self.assertIn("如当前策略启用了 brew / npm / gh provider", troubleshooting)
+        self.assertIn("rules-targets.list: 存在", troubleshooting)
+
     def test_troubleshooting_uses_latest_log_and_skill_cache_paths(self):
         troubleshooting = (ROOT / "docs" / "TROUBLESHOOTING.md").read_text(encoding="utf-8")
         self.assertIn("agent_manager_sync_<user>.latest", troubleshooting)
@@ -68,6 +73,12 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("agent-skill/repositories/", troubleshooting)
         self.assertNotIn("/tmp/agent_manager_sync_$(whoami).log*", troubleshooting)
         self.assertNotIn("agent-skill/<skill-name>", troubleshooting)
+
+    def test_readme_atomic_write_contract_matches_runtime_scope(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("配置文件采用“临时文件原子替换”模式", readme)
+        self.assertIn("目录型 rules 则采用收敛式同步", readme)
+        self.assertNotIn("所有配置文件及规则文件均采用“临时文件原子替换”模式", readme)
 
     def test_readme_cleanup_contract_matches_runtime_scope(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")

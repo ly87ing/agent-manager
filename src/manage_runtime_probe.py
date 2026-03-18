@@ -145,20 +145,38 @@ def collect_required_runtime_commands(config, agent_defs, tool_defs, skill_cfg, 
     return required
 
 
+def repo_tool_artifacts_ready(definition, managed_repo_dir):
+    ready_paths = definition.get("ready_paths") or []
+    if ready_paths:
+        return all(os.path.exists(os.path.join(managed_repo_dir, rel_path)) for rel_path in ready_paths)
+    return not definition.get("setup")
+
+
+def resolve_managed_tool_dir(root_or_base, name):
+    base = os.fspath(root_or_base)
+    candidates = [
+        os.path.join(base, "agent-tool", name),
+        os.path.join(base, name),
+    ]
+    for candidate in candidates:
+        if os.path.exists(candidate) or os.path.islink(candidate):
+            return candidate
+    return candidates[0]
+
+
 def detect_tool_readiness(name, definition, repo_root):
-    managed_repo_dir = os.path.join(repo_root, "agent-tool", name)
+    managed_repo_dir = resolve_managed_tool_dir(repo_root, name)
     if definition.get("url"):
         git_dir = os.path.join(managed_repo_dir, ".git")
         if not os.path.isdir(managed_repo_dir) or not os.path.isdir(git_dir):
             return False
         if os.path.exists(os.path.join(managed_repo_dir, TOOL_BROKEN_MARKER)):
             return False
-        ready_paths = definition.get("ready_paths") or []
-        if ready_paths:
-            return all(os.path.exists(os.path.join(managed_repo_dir, rel_path)) for rel_path in ready_paths)
+        if repo_tool_artifacts_ready(definition, managed_repo_dir):
+            return True
         if os.path.exists(os.path.join(managed_repo_dir, TOOL_READY_MARKER)):
             return True
-        return not definition.get("setup")
+        return False
     return shutil.which(name) is not None
 
 
