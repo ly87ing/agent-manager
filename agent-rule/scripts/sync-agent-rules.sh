@@ -70,7 +70,7 @@ validate_manifest_entry() {
 
 backup_target() {
   local target="$1"
-  if [ "$backup_enabled" != "true" ] || [ ! -e "$target" ]; then return 0; fi
+  if [ "$backup_enabled" != "true" ] || { [ ! -e "$target" ] && [ ! -L "$target" ]; }; then return 0; fi
   local timestamp="$(date +%Y%m%d%H%M%S)"
   local backup_path="${target}.bak.${timestamp}"
   echo "backup: $target -> $backup_path"
@@ -92,11 +92,27 @@ remove_target() {
   fi
 }
 
+replace_existing_target() {
+  local target="$1"
+  if [ "$backup_enabled" = "true" ]; then
+    backup_target "$target"
+  else
+    echo "remove(existing): $target"
+    if [ "$dry_run" = "false" ]; then
+      rm -rf "$target"
+    fi
+  fi
+}
+
 sync_copy() {
   local src="$1" dst="$2"
   if [ -d "$src" ]; then
-    [ -e "$dst" ] && [ ! -d "$dst" ] && backup_target "$dst"
-    mkdir -p "$dst"
+    if [ -L "$dst" ] || { [ -e "$dst" ] && [ ! -d "$dst" ]; }; then
+      replace_existing_target "$dst"
+    fi
+    if [ "$dry_run" = "false" ]; then
+      mkdir -p "$dst"
+    fi
     find "$src" -maxdepth 1 -not -path "$src" | while read -r item; do
       sync_copy "$item" "$dst/${item#$src/}"
     done
@@ -109,12 +125,14 @@ sync_copy() {
       done
     fi
   else
-    if [ -e "$dst" ]; then
+    if [ -L "$dst" ]; then
+      replace_existing_target "$dst"
+    elif [ -e "$dst" ]; then
       local s_inode=$(stat -f %i "$src" 2>/dev/null || stat -c %i "$src")
       local d_inode=$(stat -f %i "$dst" 2>/dev/null || stat -c %i "$dst")
       [ "$s_inode" == "$d_inode" ] && return 0
       cmp -s "$src" "$dst" && { [ "$dry_run" = "false" ] && echo "unchanged: $dst"; return 0; }
-      backup_target "$dst"
+      replace_existing_target "$dst"
     fi
     echo "copy(atomic): $src -> $dst"
     if [ "$dry_run" = "false" ]; then
@@ -127,7 +145,9 @@ sync_copy() {
 
 sync_symlink() {
   local src="$1" dst="$2"
-  [ -e "$dst" ] || [ -L "$dst" ] && backup_target "$dst"
+  if [ -e "$dst" ] || [ -L "$dst" ]; then
+    replace_existing_target "$dst"
+  fi
   echo "symlink: $src -> $dst"
   if [ "$dry_run" = "false" ]; then
     mkdir -p "$(dirname "$dst")"

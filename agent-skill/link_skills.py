@@ -27,6 +27,16 @@ OWNER_MARKER = ".agent-manager-owned"
 SKILL_FILE = "SKILL.md"
 EXCLUDED_SKILL_DIRS = {".git", "node_modules", "__pycache__", "venv", ".venv"}
 
+
+class DuplicateSkillNameError(ValueError):
+    def __init__(self, skill_name, first_path, second_path):
+        self.skill_name = skill_name
+        self.first_path = Path(first_path)
+        self.second_path = Path(second_path)
+        super().__init__(
+            f"发现重复 skill name: {skill_name} ({self.first_path} / {self.second_path})"
+        )
+
 def load_json(path):
     if not os.path.exists(path): return {}
     try:
@@ -214,14 +224,22 @@ def clone_or_update_repo(name, url, base_dir, dry_run=False, offline=False, auto
 def find_skills_recursively(search_path):
     found_skills = {}
     search_path = Path(search_path).resolve()
-    if not search_path.exists(): return found_skills
+    if not search_path.exists():
+        return found_skills
     for root, dirs, files in os.walk(search_path):
-        dirs[:] = [d for d in dirs if d not in EXCLUDED_SKILL_DIRS]
+        dirs[:] = sorted(d for d in dirs if d not in EXCLUDED_SKILL_DIRS)
         if SKILL_FILE in files:
             skill_dir = Path(root)
             skill_name = read_skill_name(skill_dir / SKILL_FILE)
             if not skill_name:
                 continue
+            existing_skill_dir = found_skills.get(skill_name)
+            if existing_skill_dir is not None:
+                raise DuplicateSkillNameError(
+                    skill_name,
+                    existing_skill_dir,
+                    skill_dir,
+                )
             found_skills[skill_name] = skill_dir
     return found_skills
 
@@ -276,6 +294,29 @@ def prune_orphan_repos(base_dir, managed_names, dry_run=False, force_yes=False):
         if force_yes or (sys.stdin.isatty() and input(f"删除 {item.name}? (y/n): ").lower() == 'y'):
             shutil.rmtree(item); logging.info(f"已清理: {item.name}")
 
+
+def merge_allowed_agents(existing_agents, new_agents):
+    if existing_agents is None or new_agents is None:
+        return None
+    return sorted(set(existing_agents) | set(new_agents))
+
+
+def remove_skill_links(skill_name, targets, allowed_agents=None, dry_run=False):
+    active_targets = targets
+    if allowed_agents is not None:
+        active_targets = {k: v for k, v in targets.items() if k in allowed_agents}
+    for agent_name, target_path in active_targets.items():
+        link_path = Path(target_path).expanduser() / skill_name
+        if not (link_path.exists() or link_path.is_symlink()):
+            continue
+        logging.error(f"[AGENT: {agent_name}] 移除冲突 skill 链接: {skill_name}")
+        if dry_run:
+            continue
+        if link_path.is_dir() and not link_path.is_symlink():
+            shutil.rmtree(link_path)
+        else:
+            link_path.unlink()
+
 def manage_links(skill_name, source_path, targets, allowed_agents, is_enabled=True, dry_run=False):
     active_targets = targets
     if allowed_agents is not None:
@@ -323,6 +364,10 @@ def main():
     scrub_dead_links(AGENT_TARGETS, repo_base_dir, args.dry_run)
     
     all_success = True
+    duplicate_skill_names = set()
+    duplicate_link_targets = {}
+    pending_links = []
+    global_skill_registry = {}
     for repo_name, config in REPOS.items():
         if not config.get("enabled", True):
             logging.info(f"[{repo_name}] (策略已禁用，跳过)")
@@ -344,11 +389,51 @@ def main():
         if not ensure_repo_version(repo_path, config, args.dry_run, args.offline):
             all_success = False
             continue
-        if not install_dependencies_and_build(repo_path, config, args.dry_run, args.offline): all_success = False
-        skills = find_skills_recursively(repo_path)
+        if not install_dependencies_and_build(repo_path, config, args.dry_run, args.offline):
+            all_success = False
+        try:
+            skills = find_skills_recursively(repo_path)
+        except DuplicateSkillNameError as exc:
+            logging.error(f"[{repo_name}] {exc}")
+            duplicate_skill_names.add(exc.skill_name)
+            duplicate_link_targets[exc.skill_name] = merge_allowed_agents(
+                duplicate_link_targets.get(exc.skill_name),
+                config.get("agents"),
+            )
+            all_success = False
+            continue
+        allowed_agents = config.get("agents")
+        pending_links.append((repo_name, allowed_agents, skills))
         for s_name, s_path in skills.items():
-            manage_links(s_name, s_path, AGENT_TARGETS, config.get("agents"), True, args.dry_run)
-    
+            existing = global_skill_registry.get(s_name)
+            if existing is None:
+                global_skill_registry[s_name] = (repo_name, s_path, allowed_agents)
+                continue
+            duplicate_skill_names.add(s_name)
+            all_success = False
+            existing_repo, existing_path, existing_allowed_agents = existing
+            duplicate_link_targets[s_name] = merge_allowed_agents(
+                duplicate_link_targets.get(s_name),
+                existing_allowed_agents,
+            )
+            duplicate_link_targets[s_name] = merge_allowed_agents(
+                duplicate_link_targets.get(s_name),
+                allowed_agents,
+            )
+            logging.error(
+                f"发现跨仓库重复 skill name: {s_name} ({existing_repo}:{existing_path} / {repo_name}:{s_path})"
+            )
+
+    for s_name, allowed_agents in duplicate_link_targets.items():
+        remove_skill_links(s_name, AGENT_TARGETS, allowed_agents, args.dry_run)
+
+    for repo_name, allowed_agents, skills in pending_links:
+        for s_name, s_path in skills.items():
+            if s_name in duplicate_skill_names:
+                logging.error(f"[{repo_name}] 跳过重复 skill name: {s_name}")
+                continue
+            manage_links(s_name, s_path, AGENT_TARGETS, allowed_agents, True, args.dry_run)
+
     if not args.dry_run: prune_orphan_repos(repo_base_dir, REPOS.keys(), args.dry_run, args.yes)
     if not all_success: sys.exit(1)
     logging.info("技能同步完成！")

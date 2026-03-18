@@ -88,6 +88,25 @@ class LinkSkillsTests(unittest.TestCase):
             self.assertEqual(skills["canonical-skill"].resolve(), skill_dir.resolve())
             self.assertNotIn("directory-name", skills)
 
+    def test_find_skills_rejects_duplicate_metadata_names(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            first_skill = temp_root / "repo" / "skill-one"
+            second_skill = temp_root / "repo" / "skill-two"
+            first_skill.mkdir(parents=True)
+            second_skill.mkdir(parents=True)
+            first_skill.joinpath("SKILL.md").write_text(
+                "---\nname: duplicate-skill\ndescription: First\n---\n\n# First\n",
+                encoding="utf-8",
+            )
+            second_skill.joinpath("SKILL.md").write_text(
+                "---\nname: duplicate-skill\ndescription: Second\n---\n\n# Second\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(ValueError):
+                link_skills.find_skills_recursively(temp_root / "repo")
+
     def test_prune_orphan_repos_only_removes_manager_owned_directories(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             cache_dir = Path(temp_dir) / "repositories"
@@ -287,6 +306,144 @@ class LinkSkillsTests(unittest.TestCase):
             )
 
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_duplicate_skill_names_across_repositories_fail_closed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            agent_target = temp_root / "targets" / "claude"
+            repo_a = temp_root / "skills" / "repositories" / "repo-a"
+            repo_b = temp_root / "skills" / "repositories" / "repo-b"
+            for repo_path in (repo_a, repo_b):
+                (repo_path / ".git").mkdir(parents=True)
+            (repo_a / "alpha").mkdir()
+            (repo_b / "beta").mkdir()
+            (repo_a / "alpha" / "SKILL.md").write_text(
+                "---\nname: duplicate-skill\ndescription: Alpha\n---\n\n# Alpha\n",
+                encoding="utf-8",
+            )
+            (repo_b / "beta" / "SKILL.md").write_text(
+                "---\nname: duplicate-skill\ndescription: Beta\n---\n\n# Beta\n",
+                encoding="utf-8",
+            )
+            agent_target.parent.mkdir(parents=True)
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "skills": {
+                            "repo-a": {"enabled": True},
+                            "repo-b": {"enabled": True},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "repo-a": {"url": "https://example.invalid/a.git", "agents": ["claude-code"]},
+                            "repo-b": {"url": "https://example.invalid/b.git", "agents": ["claude-code"]},
+                        },
+                        "agents": {"claude-code": str(agent_target)},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "skills"),
+                    "--offline",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("duplicate-skill", combined)
+            self.assertFalse((agent_target / "duplicate-skill").exists())
+
+    def test_duplicate_skill_names_remove_existing_links_for_conflicted_skill(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            agent_target = temp_root / "targets" / "claude"
+            repo_a = temp_root / "skills" / "repositories" / "repo-a"
+            repo_b = temp_root / "skills" / "repositories" / "repo-b"
+            for repo_path in (repo_a, repo_b):
+                (repo_path / ".git").mkdir(parents=True)
+            (repo_a / "alpha").mkdir()
+            (repo_b / "beta").mkdir()
+            (repo_a / "alpha" / "SKILL.md").write_text(
+                "---\nname: duplicate-skill\ndescription: Alpha\n---\n\n# Alpha\n",
+                encoding="utf-8",
+            )
+            (repo_b / "beta" / "SKILL.md").write_text(
+                "---\nname: duplicate-skill\ndescription: Beta\n---\n\n# Beta\n",
+                encoding="utf-8",
+            )
+            agent_target.mkdir(parents=True)
+            existing_link = agent_target / "duplicate-skill"
+            existing_link.symlink_to(repo_a / "alpha")
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "skills": {
+                            "repo-a": {"enabled": True},
+                            "repo-b": {"enabled": True},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "repo-a": {"url": "https://example.invalid/a.git", "agents": ["claude-code"]},
+                            "repo-b": {"url": "https://example.invalid/b.git", "agents": ["claude-code"]},
+                        },
+                        "agents": {"claude-code": str(agent_target)},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "skills"),
+                    "--offline",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertFalse(existing_link.exists(), combined)
+            self.assertFalse(existing_link.is_symlink(), combined)
 
     def test_scrub_dead_links_removes_broken_relative_link(self):
         with tempfile.TemporaryDirectory() as temp_dir:
