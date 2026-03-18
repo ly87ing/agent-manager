@@ -7,6 +7,8 @@ import shutil
 from pathlib import Path
 import copy
 
+from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
+
 # 颜色定义
 RED = "\033[0;31m"
 ERROR_RED = "\033[0;31m"
@@ -66,7 +68,10 @@ def deep_update(dst, src):
 
 def get_base_config():
     base_path = os.path.join("config", "manager.json")
-    return load_json(base_path)
+    base = load_json(base_path)
+    if "agents" in base:
+        base["agents"] = canonicalize_agent_mapping(base.get("agents", {}))
+    return base
 
 def get_local_config():
     local_path = os.path.join("config", "manager.local.json")
@@ -75,7 +80,10 @@ def get_local_config():
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
         with open(local_path, 'w', encoding='utf-8') as f:
             json.dump({}, f, indent=2)
-    return load_json(local_path)
+    local = load_json(local_path)
+    if "agents" in local:
+        local["agents"] = canonicalize_agent_mapping(local.get("agents", {}))
+    return local
 
 def get_effective_config():
     base = get_base_config()
@@ -85,6 +93,8 @@ def get_effective_config():
 def merge_config(base, local):
     merged = copy.deepcopy(base)
     deep_update(merged, local)
+    if "agents" in merged:
+        merged["agents"] = canonicalize_agent_mapping(merged.get("agents", {}))
     return merged
 
 def get_policy(): 
@@ -157,7 +167,8 @@ def edit_section(section_key, section_name, local_policy):
     print(f"\n{section_name}策略列表:")
     keys = list(section_eff.keys())
     for i, k in enumerate(keys, 1):
-        print(f"  {i}. {k}")
+        label = get_agent_display_name(k) if section_key == "agents" else k
+        print(f"  {i}. {label}")
     print("  0. 返回")
     
     idx = ask("请选择要编辑的条目编号 (0 返回)", "0")
@@ -173,27 +184,28 @@ def edit_section(section_key, section_name, local_policy):
         return
     
     key = keys[idx_int - 1]
+    label = get_agent_display_name(key) if section_key == "agents" else key
     # Current effective value
     current_eff_val = section_eff.get(key, {})
     # Current local value (may be missing)
     current_loc_val = section_loc.get(key, {})
-    print(f"\n正在编辑 {section_name}: {key}")
+    print(f"\n正在编辑 {section_name}: {label}")
     print(f"当前有效值: {json.dumps(current_eff_val, indent=2, ensure_ascii=False)}")
     print(f"当前本地值: {json.dumps(current_loc_val, indent=2, ensure_ascii=False)}")
     
     # 简单的键值编辑：根据 section_key 决定是否有构建类配置
-    enabled = ask_yes_no(f"启用 {key}?", current_eff_val.get("enabled", True))
+    enabled = ask_yes_no(f"启用 {label}?", current_eff_val.get("enabled", True))
     
     new_val = copy.deepcopy(current_loc_val)
     new_val["enabled"] = enabled
     
     if section_key == "agents":
-        auto_install = ask_yes_no(f"自动安装 {key}?", current_eff_val.get("auto_install", True))
-        auto_update = ask_yes_no(f"自动更新 {key}?", current_eff_val.get("auto_update", True))
+        auto_install = ask_yes_no(f"自动安装 {label}?", current_eff_val.get("auto_install", True))
+        auto_update = ask_yes_no(f"自动更新 {label}?", current_eff_val.get("auto_update", True))
         new_val["auto_install"] = auto_install
         new_val["auto_update"] = auto_update
     elif section_key == "tools":
-        auto_update = ask_yes_no(f"自动更新 {key}?", current_eff_val.get("auto_update", True))
+        auto_update = ask_yes_no(f"自动更新 {label}?", current_eff_val.get("auto_update", True))
         new_val["auto_update"] = auto_update
     
     # Update local config only
@@ -203,7 +215,7 @@ def edit_section(section_key, section_name, local_policy):
     # Update SYNC_REQUIRED flag
     global SYNC_REQUIRED
     SYNC_REQUIRED = True
-    print(f"{SUCCESS_GREEN}{section_name} {key} 已更新，等待保存。{NC}")
+    print(f"{SUCCESS_GREEN}{section_name} {label} 已更新，等待保存。{NC}")
 
 if __name__ == "__main__":
     try:

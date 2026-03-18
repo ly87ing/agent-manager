@@ -11,6 +11,13 @@ import shutil
 import tempfile
 from pathlib import Path
 import shlex
+import tomllib
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.agent_ids import canonicalize_agent_list, canonicalize_agent_mapping
 
 # 配置日志：统一审计时间戳
 logging.basicConfig(
@@ -18,6 +25,8 @@ logging.basicConfig(
     format='%(asctime)s [%(levelname)s] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
+
+PLACEHOLDER_RE = re.compile(r"\$\{([^}]+)\}")
 
 def load_json(path):
     if not os.path.exists(path): return {}
@@ -60,12 +69,14 @@ def run_cmd(cmd, cwd=None, timeout=300):
     except Exception as e:
         return False, f"Unexpected error executing '{cmd}': {e}"
 
-def clone_or_update_repo(name, url, base_dir, dry_run=False):
+def clone_or_update_repo(name, url, base_dir, dry_run=False, offline=False):
     """下载或更新 Git 仓库"""
     target_dir = Path(base_dir) / name
     if target_dir.exists():
         if (target_dir / ".git").exists():
             if dry_run: logging.info(f"[{name}] (预览: 计划检查更新)")
+            elif offline:
+                logging.info(f"[{name}] 离线模式，跳过仓库更新。")
             else:
                 logging.info(f"正在检查 {name} 更新...")
                 success, output = run_cmd(["git", "pull"], cwd=target_dir)
@@ -77,6 +88,12 @@ def clone_or_update_repo(name, url, base_dir, dry_run=False):
             logging.error(f"[{name}] 目录存在但不是 git 仓库，无法继续管理。")
             return target_dir, False
     logging.info(f"[{name}] 仓库不存在，准备下载 (git clone)...")
+    if dry_run:
+        logging.info(f"[{name}] (预览: 离线/在线均仅展示计划，不实际下载)")
+        return target_dir, True
+    if offline:
+        logging.error(f"[{name}] 离线模式且本地仓库缺失，无法下载。")
+        return target_dir, False
     if not dry_run:
         success, output = run_cmd(["git", "clone", url, str(target_dir)])
         if success: logging.info(f"[{name}] 下载成功。")
@@ -84,9 +101,12 @@ def clone_or_update_repo(name, url, base_dir, dry_run=False):
         return target_dir, success
     return target_dir, True
 
-def install_dependencies_and_build(repo_path, config, dry_run=False):
+def install_dependencies_and_build(repo_path, config, dry_run=False, offline=False):
     """根据仓库类型自动安装依赖和构建"""
     if dry_run: return True
+    if offline:
+        logging.info(f"[{repo_path.name}] 离线模式，跳过依赖安装与构建。")
+        return True
     success_all = True
     setup_cmd = config.get("setup")
     if setup_cmd:
@@ -121,6 +141,36 @@ def install_dependencies_and_build(repo_path, config, dry_run=False):
         else: logging.error(f"[{repo_path.name}] 失败: {out}"); success_all = False
     return success_all
 
+def config_requires_repo_path(config):
+    values = [config.get("command", "")] + config.get("args", [])
+    return any(isinstance(value, str) and "{repo_path}" in value for value in values)
+
+def find_unresolved_placeholders(value, path=""):
+    unresolved = []
+    if isinstance(value, dict):
+        for key, inner in value.items():
+            next_path = f"{path}.{key}" if path else str(key)
+            unresolved.extend(find_unresolved_placeholders(inner, next_path))
+    elif isinstance(value, list):
+        for idx, inner in enumerate(value):
+            next_path = f"{path}[{idx}]"
+            unresolved.extend(find_unresolved_placeholders(inner, next_path))
+    elif isinstance(value, str):
+        for match in PLACEHOLDER_RE.findall(value):
+            unresolved.append((path or "<root>", match))
+    return unresolved
+
+def load_existing_json_config(agent_name, config_path):
+    current_config = {"mcpServers": {}}
+    if not config_path.exists():
+        return current_config
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as exc:
+        logging.error(f"INFO: [AGENT: {agent_name}] 现有 JSON 配置解析失败，已停止覆盖: {exc}")
+        return None
+
 def toml_quote(value):
     """TOML 字符串转义：如果包含双引号则使用单引号，否则使用双引号"""
     if '"' in value:
@@ -134,7 +184,13 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
     path = Path(config_path).expanduser()
     content = ""
     if path.exists():
-        with open(path, 'r', encoding='utf-8') as f: content = f.read()
+        with open(path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        try:
+            tomllib.loads(content)
+        except tomllib.TOMLDecodeError as exc:
+            logging.error(f"INFO: [AGENT: {agent_name}] 现有 TOML 配置解析失败，已停止覆盖: {exc}")
+            return False
 
     parts = re.split(r'(\n\s*\[)', content)
     chunks = [parts[0]]
@@ -143,6 +199,7 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
     new_chunks = []
     managed_names = set(all_managed_servers)
     preserved_names = set(preserved_servers)
+    blocked_active_names = set()
     for chunk in chunks:
         header_match = re.search(r'\[\s*mcp_servers\.([^.\]\s]+)', chunk)
         if header_match:
@@ -150,12 +207,23 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
             if srv_name in preserved_names:
                 new_chunks.append(chunk)
                 continue
-            if srv_name in managed_names or '_MANAGED_BY = "agent-manager"' in chunk: continue
+            is_managed_chunk = '_MANAGED_BY = "agent-manager"' in chunk
+            if srv_name in active_servers and not is_managed_chunk:
+                if dry_run:
+                    logging.info(f"INFO: [AGENT: {agent_name}] 发现同名用户自管 TOML 段，真实执行时将拒绝接管: {srv_name} (预览)")
+                    blocked_active_names.add(srv_name)
+                else:
+                    logging.error(f"INFO: [AGENT: {agent_name}] 发现同名用户自管 TOML 段，拒绝接管: {srv_name}")
+                    return False
+            if is_managed_chunk and (srv_name in managed_names or srv_name in active_servers):
+                continue
         new_chunks.append(chunk)
     
     base_content = "".join(new_chunks).strip()
     new_blocks = []
     for name, settings in active_servers.items():
+        if name in blocked_active_names:
+            continue
         block = f'\n\n[mcp_servers.{name}]\ncommand = "{settings["command"]}"\n'
         args_str = ", ".join([f'"{a}"' for a in settings["args"]])
         block += f'args = [{args_str}]\n'
@@ -165,6 +233,11 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
         new_blocks.append(block)
     
     full_content = base_content + "".join(new_blocks)
+    try:
+        tomllib.loads(full_content.strip() + "\n")
+    except tomllib.TOMLDecodeError as exc:
+        logging.error(f"INFO: [AGENT: {agent_name}] 生成的 TOML 非法，已停止写入: {exc}")
+        return False
     if not dry_run:
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, temp_path = tempfile.mkstemp(dir=str(path.parent), prefix=f"{path.name}.tmp_")
@@ -176,6 +249,8 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
         except Exception as e:
             if os.path.exists(temp_path): os.remove(temp_path)
             logging.error(f"TOML 写入失败: {e}")
+            return False
+    return True
 
 def backup_config(path, dry_run=False):
     """5 代轮转备份"""
@@ -192,6 +267,7 @@ def backup_config(path, dry_run=False):
 
 def manage_mcp_config(agents_config, mcp_servers, dry_run=False):
     """更新各个 Agent 的 MCP 配置文件"""
+    all_ok = True
     for agent_name, agent_meta in agents_config.items():
         config_path_str = agent_meta if isinstance(agent_meta, str) else agent_meta.get("path")
         file_format = "json" if isinstance(agent_meta, str) else agent_meta.get("format", "json")
@@ -225,25 +301,33 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False):
                 config_path.parent.mkdir(parents=True, exist_ok=True)
             except Exception as e:
                 logging.error(f"无法创建配置目录 {config_path.parent}: {e}")
+                all_ok = False
                 continue
 
         if not dry_run: backup_config(config_path, dry_run)
 
         if file_format == "toml":
-            update_toml_config(agent_name, config_path, active_mcp_settings, mcp_servers.keys(), preserved_failed_servers, dry_run)
+            if not update_toml_config(
+                agent_name,
+                config_path,
+                active_mcp_settings,
+                mcp_servers.keys(),
+                preserved_failed_servers,
+                dry_run,
+            ):
+                all_ok = False
             continue
 
         if dry_run:
             logging.info(f"INFO: [AGENT: {agent_name}] (预览: 计划原子更新 JSON)")
         else:
-            current_config = {"mcpServers": {}}
-            if config_path.exists():
-                try:
-                    with open(config_path, 'r', encoding='utf-8') as f: current_config = json.load(f)
-                except: pass
+            current_config = load_existing_json_config(agent_name, config_path)
+            if current_config is None:
+                all_ok = False
+                continue
             
             # OpenCode 使用 "mcp" 键，其他 Agent 使用 "mcpServers"
-            is_opencode = agent_name == "OpenCode"
+            is_opencode = agent_name == "opencode"
             key_name = "mcp" if is_opencode and "mcp" in current_config else "mcpServers"
             if is_opencode: key_name = "mcp"  # OpenCode 强制使用 mcp
             if key_name not in current_config: current_config[key_name] = {}
@@ -280,6 +364,7 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False):
                 logging.info(f"INFO: [AGENT: {agent_name}] 更新 MCP: {name}")
             
             atomic_write_json(config_path, current_config)
+    return all_ok
 
 def sync_secrets_repo(secrets_path):
     """Phase 0: 如果 secrets 目录是 Git 仓库，执行自动更新"""
@@ -302,25 +387,30 @@ def main():
     parser.add_argument("--def-file", default="../config/mcp.json", help="定义路径")
     parser.add_argument("--base-dir", default=".", help="基础目录")
     parser.add_argument("--dry-run", action="store_true", help="预览")
+    parser.add_argument("--offline", action="store_true", help="离线模式 (跳过远程仓库与 secrets 更新)")
+    parser.add_argument("--prepare-runtime", action="store_true", help="显式准备 repo/runtime（clone、pull、setup、build）")
     args = parser.parse_args()
 
     # 对齐职责：从 manager.json 读取策略，从 mcp.json 读取定义与路径
     policy_cfg = load_json(args.config).get("mcp", {})
     full_def = load_json(args.def_file)
     definition_cfg = full_def.get("servers", {})
-    AGENT_TARGETS = full_def.get("agent_paths", {})
+    AGENT_TARGETS = canonicalize_agent_mapping(full_def.get("agent_paths", {}))
 
     # 递归合并策略开关
     for name, s_def in definition_cfg.items():
         if name in policy_cfg:
             s_def.update(policy_cfg[name])
+        s_def["agents"] = canonicalize_agent_list(s_def.get("agents"))
 
     # [凭证保护] Phase 0: 扫描并同步密钥池 (secrets/ 目录)
     env_vars = {}
     root_dir = Path(args.def_file).resolve().parent.parent
     secrets_dir = root_dir / "secrets"
     
-    if not args.dry_run:
+    if args.offline:
+        logging.info("离线模式，跳过 secrets 仓库同步。")
+    elif args.prepare_runtime and not args.dry_run:
         sync_secrets_repo(secrets_dir)
     
     # 加载全局凭证并进行占位符替换
@@ -328,7 +418,7 @@ def main():
     
     for p in search_paths:
         if not p.exists(): continue
-        files = [p] if p.is_file() else list(p.glob("*.env"))
+        files = [p] if p.is_file() else sorted(p.glob("*.env"))
         for f in files:
             logging.info(f"正在从凭证源加载: {f.name}")
             with open(f, 'r', encoding='utf-8') as f_in:
@@ -352,6 +442,22 @@ def main():
                         srv_def["env"][k] = os.environ[var_name]
                         logging.info(f"[{srv_name}] 从系统环境注入: {k}")
 
+    unresolved = []
+    for srv_name, srv_def in definition_cfg.items():
+        if not srv_def.get("enabled", True):
+            continue
+        unresolved.extend(
+            [(f"servers.{srv_name}.{path}", var) for path, var in find_unresolved_placeholders(srv_def)]
+        )
+    if unresolved:
+        for path, var_name in unresolved:
+            if args.dry_run:
+                logging.info(f"未解析的占位符: {path} -> ${{{var_name}}} (预览)")
+            else:
+                logging.error(f"未解析的占位符: {path} -> ${{{var_name}}}")
+        if not args.dry_run:
+            sys.exit(1)
+
     base_dir = Path(args.base_dir).resolve()
     if not base_dir.exists() and not args.dry_run: base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -365,18 +471,42 @@ def main():
             target_dir = Path(base_dir) / srv_name
             srv_config["_repo_path"] = str(target_dir)
             if not srv_config.get("enabled", True): continue
-            repo_path, repo_ok = clone_or_update_repo(srv_name, url, base_dir, dry_run=args.dry_run)
-            if not repo_ok:
-                all_build_success = False
-                srv_config["_sync_ready"] = False
-                if not (repo_path.exists() and (repo_path / ".git").exists()):
-                    continue
-            if not args.dry_run and repo_path.exists():
-                if not install_dependencies_and_build(repo_path, srv_config, dry_run=args.dry_run):
+            repo_required = config_requires_repo_path(srv_config)
+            local_repo_ready = target_dir.exists() and (target_dir / ".git").exists()
+            if args.prepare_runtime:
+                repo_path, repo_ok = clone_or_update_repo(
+                    srv_name,
+                    url,
+                    base_dir,
+                    dry_run=args.dry_run,
+                    offline=args.offline,
+                )
+                if not repo_ok:
                     all_build_success = False
                     srv_config["_sync_ready"] = False
+                    if not (repo_path.exists() and (repo_path / ".git").exists()):
+                        continue
+                if not args.dry_run and repo_path.exists():
+                    if not install_dependencies_and_build(
+                        repo_path,
+                        srv_config,
+                        dry_run=args.dry_run,
+                        offline=args.offline,
+                    ):
+                        all_build_success = False
+                        srv_config["_sync_ready"] = False
+            else:
+                if repo_required and not local_repo_ready:
+                    message = f"[{srv_name}] 配置依赖本地 repo_path，但当前未发现本地仓库；请显式运行 --prepare-runtime。"
+                    if args.dry_run:
+                        logging.info(f"{message} (预览)")
+                    else:
+                        logging.error(message)
+                        all_build_success = False
+                        srv_config["_sync_ready"] = False
 
-    manage_mcp_config(AGENT_TARGETS, definition_cfg, dry_run=args.dry_run)
+    if not manage_mcp_config(AGENT_TARGETS, definition_cfg, dry_run=args.dry_run):
+        all_build_success = False
     if not all_build_success: sys.exit(1)
     logging.info("任务完成！")
 

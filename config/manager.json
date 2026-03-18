@@ -1,10 +1,10 @@
 {
   "agents": {
-    "Claude Code": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "brew" },
-    "Gemini CLI": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "brew" },
-    "Cursor IDE": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "brew" },
-    "GitHub Copilot CLI": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "brew" },
-    "OpenCode": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "brew" }
+    "claude-code": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "brew" },
+    "gemini-cli": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "brew" },
+    "cursor": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "brew" },
+    "github-copilot": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "brew" },
+    "opencode": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "brew" }
   },
   "tools": {
     "playwright-cli": { "enabled": true, "auto_update": true },

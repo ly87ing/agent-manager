@@ -9,29 +9,84 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MANAGE = ROOT / "manage.sh"
+USER = getuser()
+LOCK_PATH = Path(f"/tmp/agent_manager_{USER}.lock")
+LOCK_DIR = Path(f"/tmp/agent_manager_{USER}.lock.d")
+LATEST_LOG_POINTER = Path(f"/tmp/agent_manager_sync_{USER}.latest")
+LEGACY_LOG_PATH = Path(f"/tmp/agent_manager_sync_{USER}.log")
+
+
+def move_aside(path: Path):
+    if not path.exists() and not path.is_symlink():
+        return None
+    backup_root = Path(tempfile.gettempdir()) / "agent_manager_test_backups"
+    backup_root.mkdir(exist_ok=True)
+    backup = backup_root / f"{os.getpid()}_{path.name}"
+    if backup.exists() or backup.is_symlink():
+        if backup.is_dir() and not backup.is_symlink():
+            shutil.rmtree(backup)
+        else:
+            backup.unlink()
+    shutil.move(str(path), str(backup))
+    return backup
+
+
+def remove_path(path: Path):
+    if path.is_symlink() or path.is_file():
+        path.unlink(missing_ok=True)
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+def restore_path(path: Path, backup):
+    remove_path(path)
+    if backup is not None:
+        shutil.move(str(backup), str(path))
 
 
 class ManageScriptTests(unittest.TestCase):
     def test_doctor_does_not_remove_existing_lock(self):
-        lock_path = Path(f"/tmp/agent_manager_{getuser()}.lock")
-        original = lock_path.read_text(encoding="utf-8") if lock_path.exists() else None
+        original = LOCK_PATH.read_text(encoding="utf-8") if LOCK_PATH.exists() else None
         try:
-            lock_path.write_text("999999", encoding="utf-8")
-            result = subprocess.run(
-                [str(MANAGE), "doctor"],
-                cwd=ROOT,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertTrue(lock_path.exists())
-            self.assertEqual(lock_path.read_text(encoding="utf-8"), "999999")
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_root = Path(temp_dir) / "repo"
+                temp_home = Path(temp_dir) / "home"
+                temp_home.mkdir()
+                shutil.copytree(ROOT, temp_root)
+                (temp_root / "config" / "manager.json").write_text(
+                    '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
+                    encoding="utf-8",
+                )
+                (temp_root / "config" / "mcp.json").write_text(
+                    '{\n  "agent_paths": {},\n  "servers": {}\n}\n',
+                    encoding="utf-8",
+                )
+                (temp_root / "config" / "skills.json").write_text(
+                    '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                    encoding="utf-8",
+                )
+                (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+                LOCK_PATH.write_text("999999", encoding="utf-8")
+                env = os.environ.copy()
+                env["HOME"] = str(temp_home)
+                result = subprocess.run(
+                    [str(temp_root / "manage.sh"), "doctor"],
+                    cwd=temp_root,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertTrue(LOCK_PATH.exists())
+                self.assertEqual(LOCK_PATH.read_text(encoding="utf-8"), "999999")
         finally:
             if original is None:
-                lock_path.unlink(missing_ok=True)
+                LOCK_PATH.unlink(missing_ok=True)
             else:
-                lock_path.write_text(original, encoding="utf-8")
+                LOCK_PATH.write_text(original, encoding="utf-8")
 
     def test_failed_task_reports_error_and_returns_non_zero(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -55,11 +110,134 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("工具失败", combined)
             self.assertIn("规则分发完成", combined)
 
-    def test_logs_command_outputs_log_file(self):
-        log_path = Path(f"/tmp/agent_manager_sync_{getuser()}.log")
-        original = log_path.read_text(encoding="utf-8") if log_path.exists() else None
+    def test_dry_run_skips_secrets_bootstrap_and_git_pull(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root)
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "--dry-run"],
+                cwd=temp_root,
+                capture_output=True,
+                check=False,
+            )
+
+            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertIn("空转模式，跳过 secrets 检查", combined)
+            self.assertIn("空转模式，跳过 git 更新", combined)
+            self.assertNotIn("正在克隆凭证仓库", combined)
+
+    def test_dry_run_offline_combination_respects_offline_flag(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root)
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "--dry-run", "--offline"],
+                cwd=temp_root,
+                capture_output=True,
+                check=False,
+            )
+
+            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertIn("离线模式，跳过 secrets 检查", combined)
+            self.assertIn("离线模式，跳过 git 更新", combined)
+            self.assertNotIn("正在克隆凭证仓库", combined)
+
+    def test_offline_is_forwarded_to_networked_subtasks(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root)
+
+            def write_stub(path: Path, content: str):
+                path.write_text(content, encoding="utf-8")
+                path.chmod(0o755)
+
+            write_stub(
+                temp_root / "agent-lifecycle" / "sync_agents.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0 if '--offline' in sys.argv else 9)\n",
+            )
+            write_stub(
+                temp_root / "agent-tool" / "sync_tools.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0 if '--offline' in sys.argv else 9)\n",
+            )
+            write_stub(
+                temp_root / "agent-skill" / "link_skills.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0 if '--offline' in sys.argv else 9)\n",
+            )
+            write_stub(
+                temp_root / "agent-mcp" / "sync_mcp.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0 if '--offline' in sys.argv else 9)\n",
+            )
+            write_stub(
+                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
+                "#!/usr/bin/env bash\nexit 0\n",
+            )
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "--offline"],
+                cwd=temp_root,
+                capture_output=True,
+                check=False,
+            )
+
+            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            self.assertEqual(result.returncode, 0, combined)
+
+    def test_atomic_lock_directory_blocks_new_run(self):
+        lock_backup = move_aside(LOCK_PATH)
+        lock_dir_backup = move_aside(LOCK_DIR)
+        holder = subprocess.Popen(["sleep", "60"])
         try:
-            log_path.write_text("hello log\n", encoding="utf-8")
+            LOCK_DIR.mkdir(parents=True)
+            (LOCK_DIR / "pid").write_text(str(holder.pid), encoding="utf-8")
+            result = subprocess.run(
+                [str(MANAGE), "--dry-run", "--offline"],
+                cwd=ROOT,
+                capture_output=True,
+                check=False,
+            )
+
+            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("另一个管理任务", combined)
+        finally:
+            holder.terminate()
+            holder.wait(timeout=5)
+            restore_path(LOCK_PATH, lock_backup)
+            restore_path(LOCK_DIR, lock_dir_backup)
+
+    def test_unlock_removes_atomic_lock_artifacts(self):
+        lock_backup = move_aside(LOCK_PATH)
+        lock_dir_backup = move_aside(LOCK_DIR)
+        try:
+            LOCK_PATH.write_text("999999", encoding="utf-8")
+            LOCK_DIR.mkdir(parents=True)
+            (LOCK_DIR / "pid").write_text("999999", encoding="utf-8")
+            result = subprocess.run(
+                [str(MANAGE), "unlock"],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse(LOCK_PATH.exists())
+            self.assertFalse(LOCK_DIR.exists())
+        finally:
+            restore_path(LOCK_PATH, lock_backup)
+            restore_path(LOCK_DIR, lock_dir_backup)
+
+    def test_logs_command_outputs_latest_run_log(self):
+        latest_backup = move_aside(LATEST_LOG_POINTER)
+        legacy_backup = move_aside(LEGACY_LOG_PATH)
+        unique_log = Path(f"/tmp/agent_manager_sync_{USER}_{os.getpid()}_latest.log")
+        unique_backup = move_aside(unique_log)
+        try:
+            unique_log.write_text("hello latest log\n", encoding="utf-8")
+            LATEST_LOG_POINTER.write_text(str(unique_log), encoding="utf-8")
             result = subprocess.run(
                 [str(MANAGE), "logs"],
                 cwd=ROOT,
@@ -68,21 +246,21 @@ class ManageScriptTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn("hello log", result.stdout)
+            self.assertIn("hello latest log", result.stdout)
         finally:
-            if original is None:
-                log_path.unlink(missing_ok=True)
-            else:
-                log_path.write_text(original, encoding="utf-8")
+            restore_path(LATEST_LOG_POINTER, latest_backup)
+            restore_path(LEGACY_LOG_PATH, legacy_backup)
+            restore_path(unique_log, unique_backup)
 
     def test_clean_logs_command_removes_log_files(self):
-        log_path = Path(f"/tmp/agent_manager_sync_{getuser()}.log")
-        rotated_log_path = Path(f"/tmp/agent_manager_sync_{getuser()}.log.1")
-        original = log_path.read_text(encoding="utf-8") if log_path.exists() else None
-        original_rotated = rotated_log_path.read_text(encoding="utf-8") if rotated_log_path.exists() else None
+        latest_backup = move_aside(LATEST_LOG_POINTER)
+        legacy_backup = move_aside(LEGACY_LOG_PATH)
+        unique_log = Path(f"/tmp/agent_manager_sync_{USER}_{os.getpid()}_cleanup.log")
+        unique_backup = move_aside(unique_log)
         try:
-            log_path.write_text("hello log\n", encoding="utf-8")
-            rotated_log_path.write_text("old log\n", encoding="utf-8")
+            LEGACY_LOG_PATH.write_text("hello legacy log\n", encoding="utf-8")
+            unique_log.write_text("hello unique log\n", encoding="utf-8")
+            LATEST_LOG_POINTER.write_text(str(unique_log), encoding="utf-8")
             result = subprocess.run(
                 [str(MANAGE), "clean-logs"],
                 cwd=ROOT,
@@ -91,14 +269,46 @@ class ManageScriptTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertFalse(log_path.exists())
-            self.assertFalse(rotated_log_path.exists())
+            self.assertFalse(LEGACY_LOG_PATH.exists())
+            self.assertFalse(unique_log.exists())
+            self.assertFalse(LATEST_LOG_POINTER.exists())
         finally:
-            if original is None:
-                log_path.unlink(missing_ok=True)
-            else:
-                log_path.write_text(original, encoding="utf-8")
-            if original_rotated is None:
-                rotated_log_path.unlink(missing_ok=True)
-            else:
-                rotated_log_path.write_text(original_rotated, encoding="utf-8")
+            restore_path(LATEST_LOG_POINTER, latest_backup)
+            restore_path(LEGACY_LOG_PATH, legacy_backup)
+            restore_path(unique_log, unique_backup)
+
+    def test_mcp_sync_defaults_to_config_only_mode(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root)
+            agent_config_path = temp_root / "tmp-agent.json"
+            (temp_root / "config" / "mcp.json").write_text(
+                """
+{
+  "agent_paths": {
+    "claude-code": "%s"
+  },
+  "servers": {
+    "bad-mcp": {
+      "url": "https://invalid.example.invalid/nope.git",
+      "command": "echo",
+      "args": [],
+      "env": {}
+    }
+  }
+}
+                """
+                % agent_config_path,
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "mcp:sync"],
+                cwd=temp_root,
+                capture_output=True,
+                check=False,
+            )
+
+            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertTrue(agent_config_path.exists(), combined)

@@ -13,7 +13,116 @@ MODULE_PATH = ROOT / "agent-mcp" / "sync_mcp.py"
 
 
 class SyncMcpTests(unittest.TestCase):
-    def test_clone_failure_exits_non_zero(self):
+    def test_default_sync_mode_does_not_clone_invalid_repo(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            agent_config_path = temp_root / "agent.json"
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            config_path.write_text(
+                json.dumps({"mcp": {"bad-mcp": {"enabled": True}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "servers": {
+                            "bad-mcp": {
+                                "url": "https://invalid.example.invalid/nope.git",
+                                "command": "echo",
+                                "args": [],
+                                "env": {},
+                            }
+                        },
+                        "agent_paths": {
+                            "claude-code": str(agent_config_path),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "mcp"),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            updated = json.loads(agent_config_path.read_text(encoding="utf-8"))
+            self.assertIn("bad-mcp", updated["mcpServers"])
+
+    def test_offline_mode_skips_repo_update_and_uses_existing_repo(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_dir = temp_root / "config"
+            config_dir.mkdir()
+            agent_config_path = temp_root / "agent.json"
+            repo_path = temp_root / "mcp" / "offline-mcp"
+            (repo_path / ".git").mkdir(parents=True)
+
+            config_path = config_dir / "config.json"
+            def_path = config_dir / "defs.json"
+            config_path.write_text(
+                json.dumps({"mcp": {"offline-mcp": {"enabled": True}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "servers": {
+                            "offline-mcp": {
+                                "url": "https://invalid.example.invalid/nope.git",
+                                "command": "node",
+                                "args": ["{repo_path}/server.js"],
+                                "env": {},
+                            }
+                        },
+                        "agent_paths": {
+                            "claude-code": str(agent_config_path),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "mcp"),
+                    "--offline",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            updated = json.loads(agent_config_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                updated["mcpServers"]["offline-mcp"]["args"],
+                [f"{repo_path.resolve()}/server.js"],
+            )
+
+    def test_prepare_runtime_clone_failure_exits_non_zero(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             config_path = temp_root / "config.json"
@@ -49,6 +158,7 @@ class SyncMcpTests(unittest.TestCase):
                     str(def_path),
                     "--base-dir",
                     str(temp_root / "mcp"),
+                    "--prepare-runtime",
                 ],
                 cwd=ROOT,
                 capture_output=True,
@@ -58,7 +168,7 @@ class SyncMcpTests(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_clone_failure_does_not_write_broken_agent_config(self):
+    def test_prepare_runtime_clone_failure_does_not_write_broken_agent_config(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             agent_config_path = temp_root / "agent.json"
@@ -97,6 +207,7 @@ class SyncMcpTests(unittest.TestCase):
                     str(def_path),
                     "--base-dir",
                     str(temp_root / "mcp"),
+                    "--prepare-runtime",
                 ],
                 cwd=ROOT,
                 capture_output=True,
@@ -106,6 +217,185 @@ class SyncMcpTests(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse(agent_config_path.exists(), result.stdout + result.stderr)
+
+    def test_invalid_existing_json_aborts_without_overwrite(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            agent_config_path = temp_root / "agent.json"
+            original = '{"mcpServers":'
+            agent_config_path.write_text(original, encoding="utf-8")
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            config_path.write_text(
+                json.dumps({"mcp": {"demo": {"enabled": True}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "servers": {
+                            "demo": {
+                                "command": "echo",
+                                "args": [],
+                                "env": {},
+                            }
+                        },
+                        "agent_paths": {
+                            "claude-code": str(agent_config_path),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "mcp"),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(agent_config_path.read_text(encoding="utf-8"), original)
+
+    def test_invalid_existing_toml_aborts_without_overwrite(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            agent_config_path = temp_root / "config.toml"
+            original = "[mcp_servers.demo\ncommand = \"echo\"\n"
+            agent_config_path.write_text(original, encoding="utf-8")
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            config_path.write_text(
+                json.dumps({"mcp": {"demo": {"enabled": True}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "servers": {
+                            "demo": {
+                                "command": "echo",
+                                "args": [],
+                                "env": {},
+                            }
+                        },
+                        "agent_paths": {
+                            "codex": {"path": str(agent_config_path), "format": "toml"},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "mcp"),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(agent_config_path.read_text(encoding="utf-8"), original)
+
+    def test_unresolved_placeholder_aborts_sync(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            agent_config_path = temp_root / "agent.json"
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            config_path.write_text(
+                json.dumps({"mcp": {"demo": {"enabled": True}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "servers": {
+                            "demo": {
+                                "command": "echo",
+                                "args": [],
+                                "env": {"TOKEN": "${MISSING_TOKEN}"},
+                            }
+                        },
+                        "agent_paths": {
+                            "claude-code": str(agent_config_path),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "mcp"),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse(agent_config_path.exists(), result.stdout + result.stderr)
+
+    def test_user_owned_toml_section_with_managed_server_name_is_preserved(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            agent_config_path = temp_root / "config.toml"
+            agent_config_path.write_text(
+                "\n".join(
+                    [
+                        "[mcp_servers.bad-mcp]",
+                        'command = "echo"',
+                        "args = []",
+                        "[mcp_servers.bad-mcp.env]",
+                        'KEEP = "1"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            sync_mcp.update_toml_config(
+                "codex",
+                agent_config_path,
+                {},
+                {"bad-mcp"},
+                set(),
+                dry_run=False,
+            )
+
+            updated = tomllib.loads(agent_config_path.read_text(encoding="utf-8"))
+            self.assertIn("bad-mcp", updated["mcp_servers"])
+            self.assertEqual(updated["mcp_servers"]["bad-mcp"]["env"]["KEEP"], "1")
 
     def test_sync_failure_preserves_existing_managed_mcp_entry(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -182,7 +472,7 @@ class SyncMcpTests(unittest.TestCase):
             (repo_path / ".git").mkdir()
 
             sync_mcp.manage_mcp_config(
-                {"Codex": {"path": str(agent_config_path), "format": "toml"}},
+                {"codex": {"path": str(agent_config_path), "format": "toml"}},
                 {
                     "bad-mcp": {
                         "enabled": True,

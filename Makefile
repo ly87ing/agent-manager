@@ -1,4 +1,4 @@
-.PHONY: all ui help doctor detect status cleanup unlock backups-list restore logs rules-sync skills-link mcp-sync tools-sync dry-run clean-logs offline
+.PHONY: all ui help doctor detect status cleanup unlock backups-list restore logs rules-sync skills-link mcp-sync mcp-prepare tools-sync dry-run clean-logs offline
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -7,7 +7,7 @@
 all:
 	@./manage.sh all
 
-# 离线模式 (跳过网络和 git 操作，速度提升 89%)
+# 离线模式 (禁止远程拉取/安装，仅使用本地已存在资源)
 offline:
 	@./manage.sh all --offline
 
@@ -45,12 +45,11 @@ detect:
 
 # 查看最近同步日志
 logs:
-	@cat /tmp/agent_manager_sync_$(shell whoami).log | less -R
+	@./manage.sh logs
 
 # 清理日志
 clean-logs:
-	@rm -f /tmp/agent_manager_sync_$(shell whoami).log*
-	@echo "日志已清理"
+	@./manage.sh clean-logs
 
 # 独立同步任务
 rules-sync:
@@ -62,10 +61,13 @@ skills-link:
 mcp-sync:
 	@./manage.sh mcp:sync
 
+mcp-prepare:
+	@./manage.sh mcp:prepare
+
 tools-sync:
 	@./manage.sh tools:sync
 
-# 预览模式 (Dry Run)
+# 预览模式 (仅输出计划动作，跳过远端副作用)
 dry-run:
 	@./manage.sh all --dry-run
 

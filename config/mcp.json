@@ -10,11 +10,11 @@
     }
   },
   "agent_paths": {
-    "Claude Code": "~/.claude.json",
-    "Gemini CLI": "~/.gemini/settings.json",
-    "Cursor": "~/.cursor/mcp.json",
-    "GitHub Copilot": "~/.copilot/mcp-config.json",
-    "OpenCode": { "path": "~/.config/opencode/opencode.json", "format": "json" },
-    "Codex": { "path": "~/.codex/config.toml", "format": "toml" }
+    "claude-code": "~/.claude.json",
+    "gemini-cli": "~/.gemini/settings.json",
+    "cursor": "~/.cursor/mcp.json",
+    "github-copilot": "~/.copilot/mcp-config.json",
+    "opencode": { "path": "~/.config/opencode/opencode.json", "format": "json" },
+    "codex": { "path": "~/.codex/config.toml", "format": "toml" }
   }
 }

@@ -42,7 +42,7 @@ class InteractiveWorkflowTests(unittest.TestCase):
             json.dump(
                 {
                     "agents": {
-                        "Claude Code": {
+                        "claude-code": {
                             "enabled": True,
                             "auto_install": True,
                             "auto_update": True,
@@ -106,7 +106,7 @@ class InteractiveWorkflowTests(unittest.TestCase):
             json.loads(local_path.read_text(encoding="utf-8")),
             {
                 "agents": {
-                    "Claude Code": {
+                    "claude-code": {
                         "enabled": False,
                         "auto_install": False,
                         "auto_update": False,

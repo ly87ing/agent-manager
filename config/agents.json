@@ -1,5 +1,6 @@
 {
-  "Claude Code": {
+  "claude-code": {
+    "display_name": "Claude Code",
     "bin": "claude",
     "preferred_provider": "brew",
     "providers": {
@@ -15,7 +16,8 @@
       }
     }
   },
-  "Gemini CLI": {
+  "gemini-cli": {
+    "display_name": "Gemini CLI",
     "bin": "gemini",
     "preferred_provider": "brew",
     "providers": {
@@ -31,7 +33,8 @@
       }
     }
   },
-  "Cursor IDE": {
+  "cursor": {
+    "display_name": "Cursor IDE",
     "bin": "cursor",
     "app_path": "/Applications/Cursor.app",
     "preferred_provider": "brew",
@@ -43,7 +46,8 @@
       }
     }
   },
-  "GitHub Copilot CLI": {
+  "github-copilot": {
+    "display_name": "GitHub Copilot CLI",
     "bin": "copilot",
     "ext_name": "copilot",
     "preferred_provider": "brew",
@@ -60,7 +64,8 @@
       }
     }
   },
-  "OpenCode": {
+  "opencode": {
+    "display_name": "OpenCode",
     "bin": "opencode",
     "preferred_provider": "brew",
     "providers": {

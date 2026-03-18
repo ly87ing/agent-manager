@@ -9,6 +9,12 @@ import sys
 import re
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
+
 # 配置日志
 logging.basicConfig(
     level=logging.INFO, 
@@ -136,7 +142,38 @@ def detect_all_providers(bin_name, config=None):
         
     return found
 
-def reconcile_agent(name, definition, policy, dry_run=False):
+def canonical_provider_name(provider_name):
+    if provider_name.startswith("brew"):
+        return "brew"
+    return provider_name
+
+def classify_provider_state(actual_providers, definition):
+    managed_defs = definition.get("providers", {})
+    managed = []
+    system_only = []
+    unsupported = []
+    for provider in actual_providers:
+        canonical = canonical_provider_name(provider)
+        if provider == "system":
+            system_only.append(provider)
+        elif canonical in managed_defs:
+            managed.append(provider)
+        else:
+            unsupported.append(provider)
+    return managed, system_only, unsupported
+
+def detect_provider_state(bin_name, definition):
+    actual = detect_all_providers(bin_name, definition)
+    managed, system_only, unsupported = classify_provider_state(actual, definition)
+    return {
+        "all": actual,
+        "managed": managed,
+        "system_only": system_only,
+        "unsupported": unsupported,
+    }
+
+def reconcile_agent(agent_id, definition, policy, dry_run=False):
+    label = get_agent_display_name(agent_id, definition)
     # 合并策略
     enabled = policy.get("enabled", True)
     auto_install = policy.get("auto_install", True)
@@ -146,53 +183,113 @@ def reconcile_agent(name, definition, policy, dry_run=False):
     
     bin_name = definition.get("bin")
     providers = definition.get("providers", {})
+
+    if preferred not in providers:
+        logging.error(
+            f"[AGENT: {label}] invalid preferred_provider='{preferred}'，可选值: {', '.join(sorted(providers)) or '无'}"
+        )
+        return False
     
-    all_actual = detect_all_providers(bin_name, definition)
+    state = detect_provider_state(bin_name, definition)
+    all_actual = state["all"]
+    managed_actual = state["managed"]
+    system_actual = state["system_only"]
+    unsupported_actual = state["unsupported"]
     is_installed = len(all_actual) > 0
     
-    if len(all_actual) > 1:
-        logging.warning(f"[AGENT: {name}] 发现多源安装冲突! 涉及: {', '.join(all_actual)}。")
+    if len(managed_actual) > 1:
+        logging.warning(f"[AGENT: {label}] 发现多源安装冲突! 涉及: {', '.join(managed_actual)}。")
+
+    if unsupported_actual:
+        logging.error(f"[AGENT: {label}] 检测到未声明的 Provider: {', '.join(unsupported_actual)}。")
+        return False
+
+    if system_actual and not managed_actual:
+        if enabled:
+            logging.info(f"[AGENT: {label}] 仅检测到系统安装，视为外部存在，不执行托管安装/更新。")
+        else:
+            logging.info(f"[AGENT: {label}] 仅检测到系统安装，视为外部存在，不执行卸载。")
+        return True
 
     if enabled and not is_installed:
         if not auto_install:
-            logging.info(f"[AGENT: {name}] 配置开启但 auto_install 关闭，跳过安装。")
+            logging.info(f"[AGENT: {label}] 配置开启但 auto_install 关闭，跳过安装。")
             return True
-        logging.info(f"[AGENT: {name}] 状态对齐: 准备通过 {preferred} 安装...")
+        logging.info(f"[AGENT: {label}] 状态对齐: 准备通过 {preferred} 安装...")
         p_cfg = providers.get(preferred)
-        if p_cfg:
-            if dry_run: logging.info(f"  (预览: 计划执行 {p_cfg['install']})")
+        if not p_cfg or "install" not in p_cfg:
+            logging.error(f"[AGENT: {label}] Provider '{preferred}' 缺少 install 命令。")
+            return False
+        if dry_run:
+            logging.info(f"  (预览: 计划执行 {p_cfg['install']})")
+        else:
+            success, out = run_cmd(p_cfg["install"])
+            if success:
+                post_state = detect_provider_state(bin_name, definition)
+                if not post_state["managed"]:
+                    logging.error(f"[AGENT: {label}] 安装后复核失败：仍未检测到受管 Provider。")
+                    return False
+                logging.info(f"[AGENT: {label}] 安装成功。")
             else:
-                success, out = run_cmd(p_cfg["install"])
-                if success: logging.info(f"[AGENT: {name}] 安装成功。")
-                else: logging.error(f"[AGENT: {name}] 安装失败: {out}"); return False
+                logging.error(f"[AGENT: {label}] 安装失败: {out}")
+                return False
         return True
 
     elif not enabled and is_installed:
-        logging.warning(f"[AGENT: {name}] 状态对齐: 配置已禁用，准备卸载...")
-        for provider in all_actual:
-            p_key = "brew" if "brew" in provider else provider
+        if not managed_actual:
+            logging.info(f"[AGENT: {label}] 检测到外部安装，但当前无受管 Provider，可跳过卸载。")
+            return True
+        logging.warning(f"[AGENT: {label}] 状态对齐: 配置已禁用，准备卸载...")
+        all_ok = True
+        for provider in managed_actual:
+            p_key = canonical_provider_name(provider)
             p_cfg = providers.get(p_key)
-            if p_cfg and "uninstall" in p_cfg:
-                if dry_run: logging.info(f"  (预览: 计划执行 {p_cfg['uninstall']})")
+            if not p_cfg or "uninstall" not in p_cfg:
+                logging.error(f"[AGENT: {label}] Provider '{provider}' 缺少 uninstall 命令。")
+                all_ok = False
+                continue
+            if dry_run:
+                logging.info(f"  (预览: 计划执行 {p_cfg['uninstall']})")
+            else:
+                success, out = run_cmd(p_cfg["uninstall"])
+                if success:
+                    logging.info(f"[AGENT: {label}] 从 {provider} 卸载成功。")
                 else:
-                    success, out = run_cmd(p_cfg["uninstall"])
-                    if success: logging.info(f"[AGENT: {name}] 从 {provider} 卸载成功。")
-                    else: logging.error(f"[AGENT: {name}] 卸载失败: {out}")
+                    logging.error(f"[AGENT: {label}] 卸载失败: {out}")
+                    all_ok = False
+        if not all_ok or dry_run:
+            return all_ok
+        post_state = detect_provider_state(bin_name, definition)
+        if post_state["managed"]:
+            logging.error(f"[AGENT: {label}] 卸载后复核失败：仍检测到受管 Provider: {', '.join(post_state['managed'])}。")
+            return False
         return True
 
     elif enabled and is_installed:
-        if not auto_update:
-            logging.info(f"[AGENT: {name}] 状态就绪，auto_update 关闭，跳过更新。")
+        if not managed_actual:
+            logging.info(f"[AGENT: {label}] 检测到外部安装，但当前无受管 Provider，跳过更新。")
             return True
-        logging.info(f"[AGENT: {name}] 状态一致，正在尝试检查更新...")
-        p_key = "brew" if "brew" in all_actual[0] else all_actual[0]
+        if not auto_update:
+            logging.info(f"[AGENT: {label}] 状态就绪，auto_update 关闭，跳过更新。")
+            return True
+        logging.info(f"[AGENT: {label}] 状态一致，正在尝试检查更新...")
+        actual_provider_keys = [canonical_provider_name(provider) for provider in managed_actual]
+        p_key = preferred if preferred in actual_provider_keys else actual_provider_keys[0]
         p_cfg = providers.get(p_key)
         if p_cfg and "upgrade" in p_cfg:
-            if dry_run: logging.info(f"  (预览: 计划执行 {p_cfg['upgrade']})")
+            if dry_run:
+                logging.info(f"  (预览: 计划执行 {p_cfg['upgrade']})")
             else:
                 success, out = run_cmd(p_cfg["upgrade"])
-                if success: logging.info(f"[AGENT: {name}] 已是最新 / 升级成功。")
-                else: logging.warning(f"[AGENT: {name}] 升级尝试未完全成功: {out}")
+                if success:
+                    post_state = detect_provider_state(bin_name, definition)
+                    if not post_state["managed"]:
+                        logging.error(f"[AGENT: {label}] 升级后复核失败：受管 Provider 已丢失。")
+                        return False
+                    logging.info(f"[AGENT: {label}] 已是最新 / 升级成功。")
+                else:
+                    logging.error(f"[AGENT: {label}] 升级失败: {out}")
+                    return False
     return True
 
 def main():
@@ -204,20 +301,24 @@ def main():
     parser.add_argument("--offline", action="store_true", help="离线模式 (跳过网络操作)")
     args = parser.parse_args()
 
-    policy_cfg = load_json(args.config).get("agents", {})
-    def_cfg = load_json(args.def_file)
+    policy_cfg = canonicalize_agent_mapping(load_json(args.config).get("agents", {}))
+    def_cfg = canonicalize_agent_mapping(load_json(args.def_file))
 
     if args.offline:
         logging.info("离线模式：跳过更新检查")
     
     logging.info("正在审计 Agent 生命周期意愿清单 (策略驱动)...")
     all_ok = True
-    for name, definition in def_cfg.items():
-        policy = policy_cfg.get(name, {})
+    for agent_id, definition in def_cfg.items():
+        label = get_agent_display_name(agent_id, definition)
+        if agent_id not in policy_cfg:
+            logging.info(f"[AGENT: {label}] 未声明策略，跳过。")
+            continue
+        policy = policy_cfg.get(agent_id, {})
         # 离线模式下禁用 auto_update
         if args.offline:
             policy = {**policy, "auto_update": False}
-        if not reconcile_agent(name, definition, policy, args.dry_run):
+        if not reconcile_agent(agent_id, definition, policy, args.dry_run):
             all_ok = False
             
     if not all_ok: sys.exit(1)
