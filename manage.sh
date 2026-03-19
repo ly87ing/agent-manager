@@ -43,12 +43,11 @@ if [ -f "$LOCAL_CONFIG" ]; then
 import json, sys
 sys.path.insert(0, '$ROOT_DIR')
 from src.agent_ids import canonicalize_agent_mapping
-with open('$BASE_CONFIG', 'r', encoding='utf-8') as f:
-    base = json.load(f)
+from src.json_config import load_json_object_file
+base = load_json_object_file('$BASE_CONFIG', strict=True, missing_ok=False)
 try:
-    with open('$LOCAL_CONFIG', 'r', encoding='utf-8') as f:
-        local = json.load(f)
-except Exception as e:
+    local = load_json_object_file('$LOCAL_CONFIG', strict=True, missing_ok=False)
+except ValueError as e:
     print(f'本地覆盖配置无效: {e}', file=sys.stderr)
     sys.exit(2)
 def deep_update(dst, src):
@@ -252,14 +251,26 @@ function detect_agents() {
 import sys
 sys.path.insert(0, '$ROOT_DIR')
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
-from src.manage_runtime_probe import ProviderInventory, detect_all_providers, detect_tool_readiness, load_json
+from src.json_config import ensure_mapping_value_types, get_typed_mapping_section
+from src.manage_runtime_probe import (
+    ProviderInventory,
+    collect_active_mcp_target_agents,
+    collect_active_rule_agents,
+    collect_active_skill_target_agents,
+    detect_all_providers,
+    detect_tool_readiness,
+    load_json,
+    rule_target_agent_id,
+)
 
 try:
     inventory = ProviderInventory()
     cfg = load_json('$CONFIG_FILE', strict=True, missing_ok=False)
-    cfg['agents'] = canonicalize_agent_mapping(cfg.get('agents', {}))
-    def_a = canonicalize_agent_mapping(load_json('$ROOT_DIR/config/agents.json', strict=True, missing_ok=False))
-    tool_defs = load_json('$ROOT_DIR/config/tools.json', strict=True, missing_ok=False).get('tools', {})
+    cfg['agents'] = canonicalize_agent_mapping(get_typed_mapping_section(cfg, 'agents', 'manager.json', (dict,), '对象'))
+    def_a = canonicalize_agent_mapping(
+        ensure_mapping_value_types(load_json('$ROOT_DIR/config/agents.json', strict=True, missing_ok=False), 'agents.json', (dict,), '对象')
+    )
+    tool_defs = get_typed_mapping_section(load_json('$ROOT_DIR/config/tools.json', strict=True, missing_ok=False), 'tools', 'tools.json', (dict,), '对象')
     for k, v in cfg.get('agents', {}).items():
         if not v.get('enabled', True): continue
         d = def_a.get(k, {})
@@ -277,6 +288,43 @@ except ValueError as exc:
     sys.exit(1)
 "
     echo ""
+}
+
+function validate_json_shape() {
+    local file_path="$1"
+    ROOT_DIR="$ROOT_DIR" FILE_PATH="$file_path" "$PYTHON_CMD" - <<'PY'
+import os
+import sys
+from pathlib import Path
+
+root = Path(os.environ["ROOT_DIR"])
+path = Path(os.environ["FILE_PATH"])
+sys.path.insert(0, str(root))
+
+from src.json_config import ensure_mapping_value_types, get_typed_mapping_section, load_json_object_file
+
+try:
+    data = load_json_object_file(path, strict=True, missing_ok=False)
+    name = path.name
+    if name == "manager.json":
+        get_typed_mapping_section(data, "agents", name, (dict,), "对象")
+        get_typed_mapping_section(data, "tools", name, (dict,), "对象")
+        get_typed_mapping_section(data, "skills", name, (dict,), "对象")
+        get_typed_mapping_section(data, "mcp", name, (dict,), "对象")
+    elif name == "tools.json":
+        get_typed_mapping_section(data, "tools", name, (dict,), "对象")
+    elif name == "skills.json":
+        get_typed_mapping_section(data, "repositories", name, (dict,), "对象")
+        get_typed_mapping_section(data, "agents", name, (str, dict), "字符串或对象")
+    elif name == "mcp.json":
+        get_typed_mapping_section(data, "servers", name, (dict,), "对象")
+        get_typed_mapping_section(data, "agent_paths", name, (str, dict), "字符串或对象")
+    elif name == "agents.json":
+        ensure_mapping_value_types(data, name, (dict,), "对象")
+except ValueError as exc:
+    print(str(exc), file=sys.stderr)
+    sys.exit(1)
+PY
 }
 
 function doctor_check() {
@@ -310,6 +358,12 @@ function doctor_check() {
         fi
         if $PYTHON_CMD -m json.tool "$f" >/dev/null 2>&1; then
             [ "$silent" == "false" ] && echo -ne "  ${SUCCESS_GREEN}✓${NC} $(basename "$f"): 格式正确"
+            if ! validate_json_shape "$f" >/dev/null 2>&1; then
+                echo -e " ${ERROR_RED}(结构非法)${NC}"
+                validate_json_shape "$f" 2>&1 | sed 's/^/    /'
+                errors=$((errors+1))
+                continue
+            fi
             local secrets=$($PYTHON_CMD -c "import re; c=open('$f').read(); f=re.findall(r'(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_\\\\-]{20,})', c); print(' '.join(f))")
             if [ -n "$secrets" ]; then echo -e " ${ERROR_RED}(⚠ 包含明文密钥风险!)${NC}"; errors=$((errors+1)); else [ "$silent" == "false" ] && echo ""; fi
         else
@@ -332,16 +386,27 @@ function doctor_check() {
 import sys
 sys.path.insert(0, '$ROOT_DIR')
 from src.agent_ids import canonicalize_agent_mapping
+from src.json_config import ensure_mapping_value_types, get_typed_mapping_section
 from src.manage_runtime_probe import collect_required_runtime_commands, load_json
 
 cfg = load_json('$CONFIG_FILE', strict=True, missing_ok=False)
-cfg['agents'] = canonicalize_agent_mapping(cfg.get('agents', {}))
-agent_defs = canonicalize_agent_mapping(load_json('$ROOT_DIR/config/agents.json', strict=True, missing_ok=False))
-tool_defs = load_json('$ROOT_DIR/config/tools.json', strict=True, missing_ok=False).get('tools', {})
-skill_cfg = load_json('$ROOT_DIR/config/skills.json', strict=True, missing_ok=False)
-mcp_cfg = load_json('$ROOT_DIR/config/mcp.json', strict=True, missing_ok=False)
+cfg['agents'] = canonicalize_agent_mapping(get_typed_mapping_section(cfg, 'agents', 'manager.json', (dict,), '对象'))
+agent_defs = canonicalize_agent_mapping(
+    ensure_mapping_value_types(load_json('$ROOT_DIR/config/agents.json', strict=True, missing_ok=False), 'agents.json', (dict,), '对象')
+)
+tool_defs = get_typed_mapping_section(load_json('$ROOT_DIR/config/tools.json', strict=True, missing_ok=False), 'tools', 'tools.json', (dict,), '对象')
+skill_cfg_raw = load_json('$ROOT_DIR/config/skills.json', strict=True, missing_ok=False)
+skill_cfg = {
+    'repositories': get_typed_mapping_section(skill_cfg_raw, 'repositories', 'skills.json', (dict,), '对象'),
+    'agents': get_typed_mapping_section(skill_cfg_raw, 'agents', 'skills.json', (str, dict), '字符串或对象'),
+}
+mcp_cfg_raw = load_json('$ROOT_DIR/config/mcp.json', strict=True, missing_ok=False)
+mcp_cfg = {
+    'servers': get_typed_mapping_section(mcp_cfg_raw, 'servers', 'mcp.json', (dict,), '对象'),
+    'agent_paths': get_typed_mapping_section(mcp_cfg_raw, 'agent_paths', 'mcp.json', (str, dict), '字符串或对象'),
+}
 
-for cmd in collect_required_runtime_commands(cfg, agent_defs, tool_defs, skill_cfg, mcp_cfg):
+for cmd in collect_required_runtime_commands(cfg, agent_defs, tool_defs, skill_cfg, mcp_cfg, repo_root='$ROOT_DIR'):
     print(cmd)
 ")"
     local env_commands=("$PYTHON_CMD")
@@ -374,7 +439,17 @@ for cmd in collect_required_runtime_commands(cfg, agent_defs, tool_defs, skill_c
 import os, hashlib, re, sys
 sys.path.insert(0, '$ROOT_DIR')
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
-from src.manage_runtime_probe import ProviderInventory, detect_all_providers, detect_tool_readiness, load_json
+from src.json_config import ensure_mapping_value_types, get_typed_mapping_section
+from src.manage_runtime_probe import (
+    ProviderInventory,
+    collect_active_mcp_target_agents,
+    collect_active_rule_agents,
+    collect_active_skill_target_agents,
+    detect_all_providers,
+    detect_tool_readiness,
+    load_json,
+    rule_target_agent_id,
+)
 
 def get_md5(p):
     try: return hashlib.md5(open(p, 'rb').read()).hexdigest()
@@ -404,9 +479,24 @@ def rules_match(src, dst):
 inventory = ProviderInventory()
 errs = 0
 cfg = load_json('$CONFIG_FILE')
-cfg['agents'] = canonicalize_agent_mapping(cfg.get('agents', {}))
-def_a = canonicalize_agent_mapping(load_json('$ROOT_DIR/config/agents.json'))
-tool_defs = load_json('$ROOT_DIR/config/tools.json').get('tools', {})
+cfg['agents'] = canonicalize_agent_mapping(get_typed_mapping_section(cfg, 'agents', 'manager.json', (dict,), '对象'))
+def_a = canonicalize_agent_mapping(
+    ensure_mapping_value_types(load_json('$ROOT_DIR/config/agents.json'), 'agents.json', (dict,), '对象')
+)
+tool_defs = get_typed_mapping_section(load_json('$ROOT_DIR/config/tools.json'), 'tools', 'tools.json', (dict,), '对象')
+skill_cfg_raw = load_json('$ROOT_DIR/config/skills.json')
+skill_cfg = {
+    'repositories': get_typed_mapping_section(skill_cfg_raw, 'repositories', 'skills.json', (dict,), '对象'),
+    'agents': get_typed_mapping_section(skill_cfg_raw, 'agents', 'skills.json', (str, dict), '字符串或对象'),
+}
+mcp_cfg_raw = load_json('$ROOT_DIR/config/mcp.json')
+mcp_cfg = {
+    'servers': get_typed_mapping_section(mcp_cfg_raw, 'servers', 'mcp.json', (dict,), '对象'),
+    'agent_paths': get_typed_mapping_section(mcp_cfg_raw, 'agent_paths', 'mcp.json', (str, dict), '字符串或对象'),
+}
+active_skill_agents = collect_active_skill_target_agents(cfg, skill_cfg)
+active_mcp_agents = collect_active_mcp_target_agents(cfg, mcp_cfg)
+active_rule_agents = collect_active_rule_agents(cfg, skill_cfg, mcp_cfg)
 # 1. Agent Policy
 print('${BOLD}--- Agent 状态与策略一致性 ---${NC}')
 for k, v in cfg.get('agents', {}).items():
@@ -445,8 +535,10 @@ for tool_name, policy in cfg.get('tools', {}).items():
         errs += 1
 # 3. MCP
 print('\n${BOLD}--- MCP 注入审计 ---${NC}')
-ap = canonicalize_agent_mapping(load_json('$ROOT_DIR/config/mcp.json').get('agent_paths', {}))
+ap = canonicalize_agent_mapping(mcp_cfg.get('agent_paths', {}))
 for k, v in ap.items():
+    if k not in active_mcp_agents:
+        continue
     p = os.path.expanduser(v if isinstance(v, str) else v.get('path', ''))
     if os.path.exists(p):
         cnt = len(re.findall(r'_MANAGED_BY', open(p).read()))
@@ -456,8 +548,9 @@ for k, v in ap.items():
         errs += 1
 # 4. Skills
 print('\n${BOLD}--- Skills 链接审计 ---${NC}')
-s_cfg = load_json('$ROOT_DIR/config/skills.json')
-for a_name, a_path in canonicalize_agent_mapping(s_cfg.get('agents', {})).items():
+for a_name, a_path in canonicalize_agent_mapping(skill_cfg.get('agents', {})).items():
+    if a_name not in active_skill_agents:
+        continue
     p = os.path.expanduser(a_path)
     if os.path.isdir(p):
         links = [f for f in os.listdir(p) if os.path.islink(os.path.join(p, f))]
@@ -476,6 +569,8 @@ if os.path.exists(rm):
         if len(p) < 4:
             print(f'  ${ERROR_RED}✗${NC} {stripped}: manifest 非法')
             errs += 1
+            continue
+        if rule_target_agent_id(p[0]) not in active_rule_agents:
             continue
         src = os.path.join('$ROOT_DIR/agent-rule', p[2])
         dst = os.path.expanduser(p[3].replace('{{HOME}}', os.path.expanduser('~')))
@@ -660,8 +755,76 @@ function run_tools_sync_task() {
     run_task_in_dir "同步全局工具" "工具链同步完成" "工具失败" 600 "$ROOT_DIR/agent-tool" "$PYTHON_CMD" "${args[@]}"
 }
 
+function list_active_rule_targets() {
+    ROOT_DIR="$ROOT_DIR" CONFIG_FILE="$CONFIG_FILE" "$PYTHON_CMD" - <<'PY'
+import os
+import sys
+from pathlib import Path
+
+root = Path(os.environ["ROOT_DIR"])
+config_path = os.environ["CONFIG_FILE"]
+sys.path.insert(0, str(root))
+
+from src.agent_ids import canonicalize_agent_mapping
+from src.json_config import get_typed_mapping_section
+from src.manage_runtime_probe import (
+    collect_active_rule_agents,
+    load_json,
+    rule_target_agent_id,
+)
+
+try:
+    cfg = load_json(config_path, strict=True, missing_ok=False)
+    cfg["agents"] = canonicalize_agent_mapping(get_typed_mapping_section(cfg, "agents", "manager.json", (dict,), "对象"))
+    skill_cfg_raw = load_json(root / "config" / "skills.json", strict=True, missing_ok=False)
+    skill_cfg = {
+        "repositories": get_typed_mapping_section(skill_cfg_raw, "repositories", "skills.json", (dict,), "对象"),
+        "agents": get_typed_mapping_section(skill_cfg_raw, "agents", "skills.json", (str, dict), "字符串或对象"),
+    }
+    mcp_cfg_raw = load_json(root / "config" / "mcp.json", strict=True, missing_ok=False)
+    mcp_cfg = {
+        "servers": get_typed_mapping_section(mcp_cfg_raw, "servers", "mcp.json", (dict,), "对象"),
+        "agent_paths": get_typed_mapping_section(mcp_cfg_raw, "agent_paths", "mcp.json", (str, dict), "字符串或对象"),
+    }
+except ValueError as exc:
+    print(str(exc), file=sys.stderr)
+    sys.exit(1)
+
+active_rule_agents = collect_active_rule_agents(cfg, skill_cfg, mcp_cfg)
+if not active_rule_agents:
+    sys.exit(0)
+
+manifest_path = root / "config" / "rules-targets.list"
+if not manifest_path.exists():
+    print("rules-targets.list 缺失", file=sys.stderr)
+    sys.exit(1)
+
+for raw_line in manifest_path.read_text(encoding="utf-8").splitlines():
+    line = raw_line.strip()
+    if not line or line.startswith("#"):
+        continue
+    parts = [part.strip() for part in line.split("|")]
+    if len(parts) < 4:
+        print(f"rules-targets.list 非法条目: {raw_line}", file=sys.stderr)
+        sys.exit(1)
+    if rule_target_agent_id(parts[0]) in active_rule_agents:
+        print(parts[0])
+PY
+}
+
 function run_rules_sync_task() {
     local args=(./scripts/sync-agent-rules.sh)
+    local target_names
+    if ! target_names="$(list_active_rule_targets)"; then
+        return 1
+    fi
+    if [ -z "$target_names" ]; then
+        status_line "SKIP" "当前策略未启用任何 Rules 目标"
+        return 0
+    fi
+    while IFS= read -r target_name; do
+        [ -n "$target_name" ] && args+=(--target "$target_name")
+    done <<< "$target_names"
     if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
     run_task_in_dir "同步 Agent Rules" "规则分发完成" "规则同步失败" 600 "$ROOT_DIR/agent-rule" "${args[@]}"
 }
@@ -749,6 +912,9 @@ from pathlib import Path
 root = Path(os.environ["ROOT_DIR"])
 include_skills = os.environ.get("INCLUDE_SKILLS") == "true"
 targets = set()
+sys.path.insert(0, str(root))
+
+from src.json_config import get_typed_mapping_section, load_json_object_file
 
 def add_target(value):
     if isinstance(value, dict):
@@ -759,34 +925,38 @@ def add_target(value):
     targets.add(str(Path(expanded).expanduser()))
 
 try:
-    mcp_cfg = json.loads((root / "config" / "mcp.json").read_text(encoding="utf-8"))
-except Exception as exc:
-    print(f"mcp.json 无效: {exc}", file=sys.stderr)
+    mcp_cfg = load_json_object_file(root / "config" / "mcp.json", strict=True, missing_ok=False)
+    mcp_agent_paths = get_typed_mapping_section(mcp_cfg, "agent_paths", "mcp.json", (str, dict), "字符串或对象")
+except ValueError as exc:
+    print(str(exc), file=sys.stderr)
     sys.exit(1)
 
-for value in mcp_cfg.get("agent_paths", {}).values():
+for value in mcp_agent_paths.values():
     add_target(value)
 
 if include_skills:
     try:
-        skills_cfg = json.loads((root / "config" / "skills.json").read_text(encoding="utf-8"))
-    except Exception as exc:
-        print(f"skills.json 无效: {exc}", file=sys.stderr)
+        skills_cfg = load_json_object_file(root / "config" / "skills.json", strict=True, missing_ok=False)
+        skill_agents = get_typed_mapping_section(skills_cfg, "agents", "skills.json", (str, dict), "字符串或对象")
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
         sys.exit(1)
-    for value in skills_cfg.get("agents", {}).values():
+    for value in skill_agents.values():
         add_target(value)
 
 manifest_path = root / "config" / "rules-targets.list"
-if manifest_path.exists():
-    for raw_line in manifest_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = [part.strip() for part in line.split("|")]
-        if len(parts) < 4:
-            print(f"rules-targets.list 非法条目: {raw_line}", file=sys.stderr)
-            sys.exit(1)
-        add_target(parts[3])
+if not manifest_path.exists():
+    print("rules-targets.list 缺失", file=sys.stderr)
+    sys.exit(1)
+for raw_line in manifest_path.read_text(encoding="utf-8").splitlines():
+    line = raw_line.strip()
+    if not line or line.startswith("#"):
+        continue
+    parts = [part.strip() for part in line.split("|")]
+    if len(parts) < 4:
+        print(f"rules-targets.list 非法条目: {raw_line}", file=sys.stderr)
+        sys.exit(1)
+    add_target(parts[3])
 
 for target in sorted(targets):
     print(target)
@@ -904,6 +1074,10 @@ function restore_backup_selection_input() {
     fi
 }
 
+function is_dry_run_mode() {
+    [ -n "$DRY_RUN_FLAG" ]
+}
+
 case "$cmd" in
     all|""|bootstrap)
         run_update_pipeline "🚀 Agent Manager 全量同步启动" ""
@@ -928,7 +1102,13 @@ case "$cmd" in
     ui) (cd "$ROOT_DIR" && $PYTHON_CMD -m src.interactive) ;;
     doctor|status) doctor_check ;;
     detect) detect_agents ;;
-    unlock) remove_lock_artifacts; echo "锁已解除。" ;;
+    unlock)
+        if is_dry_run_mode; then
+            echo "预览模式：计划清理原子锁目录与遗留锁文件。"
+        else
+            remove_lock_artifacts
+            echo "锁已解除。"
+        fi ;;
     logs)
         if latest_log=$(resolve_latest_log_path); then
             if [ -t 1 ] && command -v less >/dev/null 2>&1; then
@@ -939,17 +1119,34 @@ case "$cmd" in
         else
             echo "暂无日志。"
         fi ;;
-    clean-logs) rm -f "${LOG_PREFIX}"*.log "$LATEST_LOG_POINTER"; echo "日志已清理" ;;
+    clean-logs)
+        if is_dry_run_mode; then
+            echo "预览模式：计划清理 latest 指针与所有按次运行日志。"
+        else
+            rm -f "${LOG_PREFIX}"*.log "$LATEST_LOG_POINTER"
+            echo "日志已清理"
+        fi ;;
     backups:list)
-        if ! list_managed_backup_entries | head -n 20; then
+        if ! backup_entries="$(list_managed_backup_entries)"; then
             exit 1
+        fi
+        if [ -n "$backup_entries" ]; then
+            printf '%s\n' "$backup_entries" | head -n 20
         fi ;;
     backups:restore) 
         files=()
+        if ! backup_entries="$(list_managed_backup_entries)"; then
+            exit 1
+        fi
         while IFS= read -r line; do
             files+=("$line")
-        done < <(list_managed_backup_entries | head -n 10)
+        done <<< "$(printf '%s\n' "$backup_entries" | head -n 10)"
         if [ "${#files[@]}" -eq 0 ]; then echo "未发现备份。"; exit 0; fi
+        if is_dry_run_mode; then
+            echo "预览模式：以下备份可用于恢复（最多10个），实际恢复已跳过："
+            printf '%s\n' "${files[@]}"
+            exit 0
+        fi
         selection_input="$(restore_backup_selection_input)"
         select f in "${files[@]}"; do
             [ -n "${f:-}" ] || { echo "无效选择。"; continue; }
@@ -965,7 +1162,18 @@ case "$cmd" in
     mcp:prepare)
         (cd "$ROOT_DIR/agent-mcp" && $PYTHON_CMD sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json" --prepare-runtime $DRY_RUN_FLAG $OFFLINE_FLAG) ;;
     rules:sync)
-        (cd "$ROOT_DIR/agent-rule" && ./scripts/sync-agent-rules.sh $DRY_RUN_FLAG) ;;
+        if ! target_names="$(list_active_rule_targets)"; then
+            exit 1
+        fi
+        if [ -z "$target_names" ]; then
+            echo "当前策略未启用任何 Rules 目标。"
+            exit 0
+        fi
+        rule_args=()
+        while IFS= read -r target_name; do
+            [ -n "$target_name" ] && rule_args+=(--target "$target_name")
+        done <<< "$target_names"
+        (cd "$ROOT_DIR/agent-rule" && ./scripts/sync-agent-rules.sh "${rule_args[@]}" $DRY_RUN_FLAG) ;;
     skills:link)
         (cd "$ROOT_DIR/agent-skill" && $PYTHON_CMD link_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG) ;;
     tools:sync)
@@ -975,23 +1183,39 @@ case "$cmd" in
         if ! agents_paths="$(list_managed_target_paths true)"; then
             exit 1
         fi
+        if is_dry_run_mode; then
+            echo "预览模式：计划清理以下受管备份、临时文件与运行日志。"
+        fi
         echo "$agents_paths" | while read -r p; do
             if [ -n "$p" ]; then
                 d=$(dirname "$p")
                 b=$(basename "$p")
                 if [ -d "$d" ]; then
                     find "$d" -maxdepth 1 \( -name "${b}.bak" -o -name "${b}.bak.*" -o -name "${b}.tmp_*" -o -name ".${b}.restore_tmp_*" -o -name ".${b}.restore_old_*" \) -print0 2>/dev/null | while IFS= read -r -d '' candidate; do
-                        rm -rf "$candidate"
+                        if is_dry_run_mode; then
+                            echo "  - $candidate"
+                        else
+                            rm -rf "$candidate"
+                        fi
                     done
                 fi
             fi
         done
-        rm -f "${LOG_PREFIX}"*.log "$LATEST_LOG_POINTER"
-        echo -e "${SUCCESS_GREEN}全量清理完成。${NC}" ;;
+        if is_dry_run_mode; then
+            for log_candidate in "${LOG_PREFIX}"*.log "$LATEST_LOG_POINTER"; do
+                if [ -e "$log_candidate" ] || [ -L "$log_candidate" ]; then
+                    echo "  - $log_candidate"
+                fi
+            done
+            echo -e "${SUCCESS_GREEN}全量清理预演完成。${NC}"
+        else
+            rm -f "${LOG_PREFIX}"*.log "$LATEST_LOG_POINTER"
+            echo -e "${SUCCESS_GREEN}全量清理完成。${NC}"
+        fi ;;
     help|-h|--help|-help)
         echo -e "${HDR_BLUE}${BOLD}Agent Manager 帮助手册 (Platinum Edition)${NC}\n"
         echo -e "${BOLD}${HDR_BLUE}=== 全局参数 (Flags) ===${NC}"
-        echo -e "  ${PENDING_GOLD}--dry-run${NC}       空转模式，仅输出计划动作并跳过 Git / secrets 等远端副作用"
+        echo -e "  ${PENDING_GOLD}--dry-run${NC}       空转模式，仅输出计划动作并跳过会修改本地或远端状态的副作用"
         echo -e "  ${PENDING_GOLD}--offline${NC}       离线模式，禁止远程拉取/安装；仅使用本地已存在仓库与配置\n"
         echo -e "${BOLD}${HDR_BLUE}=== 日常入口 (Main Flows) ===${NC}"
         echo -e "  ${SUCCESS_GREEN}sync${NC}            仅同步本地配置到 rules / skills / MCP，不联网、不安装"

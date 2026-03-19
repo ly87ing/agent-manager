@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.json_config import load_json_file
+from src.json_config import get_typed_mapping_section, load_json_object_file
 from src.manage_runtime_probe import (
     TOOL_BROKEN_MARKER,
     TOOL_READY_MARKER,
@@ -22,6 +22,8 @@ from src.manage_runtime_probe import (
 from src.runtime_logging import configure_logging
 
 configure_logging()
+
+OWNER_MARKER = ".agent-manager-owned"
 
 def run_cmd(cmd, cwd=None, timeout=None):
     """运行 shell 命令并返回结果"""
@@ -119,6 +121,18 @@ def clear_tool_markers(target_dir: Path):
     broken_marker_path(target_dir).unlink(missing_ok=True)
 
 
+def owner_marker_path(target_dir: Path) -> Path:
+    return target_dir / OWNER_MARKER
+
+
+def write_owner_marker(target_dir: Path, tool_name: str):
+    owner_marker_path(target_dir).write_text(f"{tool_name}\n", encoding="utf-8")
+
+
+def is_manager_owned_tool_dir(target_dir: Path) -> bool:
+    return owner_marker_path(target_dir).is_file()
+
+
 def apply_overrides(name, target_dir, dry_run=False):
     """将本地补丁应用到目标工具目录"""
     override_dir = Path(__file__).parent / "overrides" / name
@@ -149,6 +163,9 @@ def prune_orphan_tools(base_dir, managed_names, dry_run=False, force_yes=False):
 
     for item in base_path.iterdir():
         if item.is_dir() and item.name not in managed_names and item.name not in excluded:
+            if not is_manager_owned_tool_dir(item):
+                logging.info(f"跳过非托管工具目录: {item.name}")
+                continue
             logging.warning(f"检测到孤儿工具目录: {item.name}")
             if dry_run: continue
             
@@ -232,6 +249,7 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
                 success_build = False
 
         if not dry_run and target_dir.exists() and (target_dir / ".git").exists():
+            write_owner_marker(target_dir, name)
             repo_ready = repo_tool_artifacts_ready(definition, target_dir)
             if setup_failed:
                 mark_tool_broken(target_dir)
@@ -265,8 +283,10 @@ def main():
     args = parser.parse_args()
 
     try:
-        policy_cfg = load_json_file(args.config, strict=True, missing_ok=False).get("tools", {})
-        def_cfg = load_json_file(args.def_file, strict=True, missing_ok=False).get("tools", {})
+        policy_root = load_json_object_file(args.config, strict=True, missing_ok=False)
+        def_root = load_json_object_file(args.def_file, strict=True, missing_ok=False)
+        policy_cfg = get_typed_mapping_section(policy_root, "tools", Path(args.config).name, (dict,), "对象")
+        def_cfg = get_typed_mapping_section(def_root, "tools", Path(args.def_file).name, (dict,), "对象")
     except ValueError as exc:
         logging.error(str(exc))
         sys.exit(1)
@@ -281,6 +301,9 @@ def main():
     logging.info("同步全局工具 (策略驱动)...")
     all_ok = True
     for name, definition in def_cfg.items():
+        if name not in policy_cfg:
+            logging.info(f"[TOOL: {name}] 未声明策略，跳过。")
+            continue
         policy = policy_cfg.get(name, {})
         # 离线模式下禁用 auto_update
         if args.offline:

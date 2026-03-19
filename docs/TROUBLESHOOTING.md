@@ -260,7 +260,7 @@ test -f config/rules-targets.list && echo "rules-targets.list: 存在"
 2. **Skill 未正确注册**
    - 检查：Skill 的 SKILL.md 文件是否包含正确的元数据
      ```bash
-     head -10 agent-skill/repositories/playwright-best-practices-skill/SKILL.md
+     find agent-skill/repositories/playwright-best-practices-skill -name SKILL.md -maxdepth 6 | head -n 1
      # 应该看到 name:, description: 等元数据
      ```
    - 解决：确保 skill 仓库包含有效的 SKILL.md 文件

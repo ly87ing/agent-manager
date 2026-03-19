@@ -14,7 +14,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
-from src.json_config import load_json_file
+from src.json_config import ensure_mapping_value_types, get_typed_mapping_section, load_json_object_file
 from src.manage_runtime_probe import detect_npm_from_paths
 from src.runtime_logging import configure_logging
 
@@ -329,10 +329,14 @@ def main():
     args = parser.parse_args()
 
     try:
+        policy_root = load_json_object_file(args.config, strict=True, missing_ok=False)
+        def_root = load_json_object_file(args.def_file, strict=True, missing_ok=False)
         policy_cfg = canonicalize_agent_mapping(
-            load_json_file(args.config, strict=True, missing_ok=False).get("agents", {})
+            get_typed_mapping_section(policy_root, "agents", Path(args.config).name, (dict,), "对象")
         )
-        def_cfg = canonicalize_agent_mapping(load_json_file(args.def_file, strict=True, missing_ok=False))
+        def_cfg = canonicalize_agent_mapping(
+            ensure_mapping_value_types(def_root, Path(args.def_file).name, (dict,), "对象")
+        )
     except ValueError as exc:
         logging.error(str(exc))
         sys.exit(1)

@@ -74,6 +74,22 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
         self.assertFalse(ready)
 
+    def test_detect_tool_readiness_does_not_trust_ready_marker_when_ready_paths_are_missing(self):
+        with mock.patch("src.manage_runtime_probe.os.path.isdir", return_value=True):
+            with mock.patch("src.manage_runtime_probe.os.path.exists") as path_exists:
+                path_exists.side_effect = lambda path: path.endswith(".agent-manager-ready")
+                ready = manage_runtime_probe.detect_tool_readiness(
+                    "playwright-cli",
+                    {
+                        "url": "https://github.com/microsoft/playwright-cli.git",
+                        "setup": "npm install && npx playwright install",
+                        "ready_paths": ["node_modules"],
+                    },
+                    "/repo",
+                )
+
+        self.assertFalse(ready)
+
     def test_detect_tool_readiness_uses_binary_for_install_based_tools(self):
         with mock.patch("src.manage_runtime_probe.shutil.which", return_value="/usr/local/bin/auggie"):
             ready = manage_runtime_probe.detect_tool_readiness(
@@ -92,6 +108,41 @@ class ManageRuntimeProbeTests(unittest.TestCase):
             {"repositories": {}},
             {"servers": {}},
         )
+
+        self.assertEqual(required, [])
+
+    def test_collect_required_runtime_commands_ignores_undeclared_skill_and_mcp_repos(self):
+        required = manage_runtime_probe.collect_required_runtime_commands(
+            {"agents": {}, "tools": {}, "skills": {}, "mcp": {}},
+            {},
+            {},
+            {"repositories": {"repo1": {"url": "https://example.invalid/repo.git"}}},
+            {"servers": {"srv1": {"url": "https://example.invalid/mcp.git"}}},
+        )
+
+        self.assertEqual(required, [])
+
+    def test_collect_required_runtime_commands_skips_ready_repo_tool_setup_when_auto_update_disabled(self):
+        with mock.patch("src.manage_runtime_probe.detect_tool_readiness", return_value=True):
+            required = manage_runtime_probe.collect_required_runtime_commands(
+                {
+                    "agents": {},
+                    "tools": {"playwright-cli": {"enabled": True, "auto_update": False}},
+                    "skills": {},
+                    "mcp": {},
+                },
+                {},
+                {
+                    "playwright-cli": {
+                        "url": "https://github.com/microsoft/playwright-cli.git",
+                        "setup": "npm install && npx playwright install",
+                        "ready_paths": ["node_modules"],
+                    }
+                },
+                {"repositories": {}},
+                {"servers": {}},
+                repo_root="/repo",
+            )
 
         self.assertEqual(required, [])
 

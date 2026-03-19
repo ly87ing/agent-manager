@@ -14,7 +14,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.agent_ids import canonicalize_agent_list, canonicalize_agent_mapping
-from src.json_config import load_json_file
+from src.json_config import get_typed_mapping_section, load_json_object_file
 from src.runtime_logging import configure_logging
 
 configure_logging()
@@ -247,6 +247,7 @@ def find_skills_recursively(search_path):
 def create_link(source, link, dry_run=False):
     if dry_run: return
     source, link = Path(source).resolve(), Path(link)
+    link_parent = link.parent.resolve()
     if link.exists() or link.is_symlink():
         try:
             if link.is_symlink() or not link.is_dir(): link.unlink()
@@ -256,7 +257,7 @@ def create_link(source, link, dry_run=False):
         if platform.system() == "Windows":
             subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(source)], check=True, capture_output=True)
         else:
-            rel_source = os.path.relpath(source, link.parent)
+            rel_source = os.path.relpath(source, link_parent)
             os.symlink(rel_source, link, target_is_directory=True)
             logging.info(f"链接: {rel_source} -> {link.name}")
     except Exception as e: logging.error(f"链接失败: {e}")
@@ -381,16 +382,19 @@ def main():
     args = parser.parse_args()
     
     try:
-        policy_cfg = load_json_file(args.config, strict=True, missing_ok=False).get("skills", {})
-        full_def = load_json_file(args.def_file, strict=True, missing_ok=False)
+        policy_root = load_json_object_file(args.config, strict=True, missing_ok=False)
+        full_def = load_json_object_file(args.def_file, strict=True, missing_ok=False)
+        policy_cfg = get_typed_mapping_section(policy_root, "skills", Path(args.config).name, (dict,), "对象")
+        repositories = get_typed_mapping_section(full_def, "repositories", Path(args.def_file).name, (dict,), "对象")
+        agent_targets = get_typed_mapping_section(full_def, "agents", Path(args.def_file).name, (str, dict), "字符串或对象")
     except ValueError as exc:
         logging.error(str(exc))
         sys.exit(1)
 
     # 对齐职责：合并策略
-    REPOS = {name: dict(config) for name, config in full_def.get("repositories", {}).items()}
+    REPOS = {name: dict(config) for name, config in repositories.items()}
     AGENT_TARGETS = canonicalize_agent_mapping(
-        {k: (v if isinstance(v, str) else v.get("path")) for k, v in full_def.get("agents", {}).items()}
+        {k: (v if isinstance(v, str) else v.get("path")) for k, v in agent_targets.items()}
     )
     
     for name, r_def in REPOS.items():
@@ -410,8 +414,24 @@ def main():
     pending_links = []
     global_skill_registry = {}
     for repo_name, config in REPOS.items():
+        repo_path = repo_base_dir / repo_name
+        if repo_name not in policy_cfg:
+            logging.info(f"[{repo_name}] 未声明策略，跳过。")
+            remove_repo_skill_links(
+                repo_path,
+                AGENT_TARGETS,
+                None,
+                args.dry_run,
+            )
+            continue
         if not config.get("enabled", True):
             logging.info(f"[{repo_name}] (策略已禁用，跳过)")
+            remove_repo_skill_links(
+                repo_path,
+                AGENT_TARGETS,
+                None,
+                args.dry_run,
+            )
             continue
         repo_path, repo_ok = clone_or_update_repo(
             repo_name,
@@ -446,12 +466,21 @@ def main():
             remove_repo_skill_links(
                 repo_path,
                 AGENT_TARGETS,
-                config.get("agents"),
+                None,
                 args.dry_run,
             )
             all_success = False
             continue
         allowed_agents = config.get("agents")
+        if allowed_agents is not None:
+            disallowed_agents = sorted(set(AGENT_TARGETS) - set(allowed_agents))
+            if disallowed_agents:
+                remove_repo_skill_links(
+                    repo_path,
+                    AGENT_TARGETS,
+                    disallowed_agents,
+                    args.dry_run,
+                )
         pending_links.append((repo_name, allowed_agents, skills))
         for s_name, s_path in skills.items():
             existing = global_skill_registry.get(s_name)
@@ -485,7 +514,9 @@ def main():
                 continue
             manage_links(s_name, s_path, AGENT_TARGETS, allowed_agents, True, args.dry_run)
 
-    if not args.dry_run: prune_orphan_repos(repo_base_dir, REPOS.keys(), args.dry_run, args.yes)
+    if not args.dry_run:
+        prune_orphan_repos(repo_base_dir, REPOS.keys(), args.dry_run, args.yes)
+        scrub_dead_links(AGENT_TARGETS, repo_base_dir, args.dry_run)
     if not all_success: sys.exit(1)
     logging.info("技能同步完成！")
 

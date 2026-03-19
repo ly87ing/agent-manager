@@ -12,7 +12,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
-from src.json_config import atomic_write_json_file, load_json_file
+from src.json_config import atomic_write_json_file, get_typed_mapping_section, load_json_object_file
 
 # 颜色定义
 RED = "\033[0;31m"
@@ -53,7 +53,7 @@ def ask_yes_no(prompt, default="y"):
     return res == 'y'
 
 def load_json(path, *, strict=False, missing_ok=True):
-    return load_json_file(path, strict=strict, missing_ok=missing_ok)
+    return load_json_object_file(path, strict=strict, missing_ok=missing_ok)
 
 def save_json(data, path):
     atomic_write_json_file(path, data)
@@ -74,8 +74,12 @@ def deep_update(dst, src):
 def get_base_config():
     base_path = get_config_root() / "config" / "manager.json"
     base = load_json(base_path, strict=True, missing_ok=False)
-    if "agents" in base:
-        base["agents"] = canonicalize_agent_mapping(base.get("agents", {}))
+    base["agents"] = canonicalize_agent_mapping(
+        get_typed_mapping_section(base, "agents", "manager.json", (dict,), "对象")
+    )
+    base["tools"] = get_typed_mapping_section(base, "tools", "manager.json", (dict,), "对象")
+    base["skills"] = get_typed_mapping_section(base, "skills", "manager.json", (dict,), "对象")
+    base["mcp"] = get_typed_mapping_section(base, "mcp", "manager.json", (dict,), "对象")
     return base
 
 def get_local_config():
@@ -85,7 +89,15 @@ def get_local_config():
         save_json({}, local_path)
     local = load_json(local_path, strict=True)
     if "agents" in local:
-        local["agents"] = canonicalize_agent_mapping(local.get("agents", {}))
+        local["agents"] = canonicalize_agent_mapping(
+            get_typed_mapping_section(local, "agents", "manager.local.json", (dict,), "对象")
+        )
+    if "tools" in local:
+        local["tools"] = get_typed_mapping_section(local, "tools", "manager.local.json", (dict,), "对象")
+    if "skills" in local:
+        local["skills"] = get_typed_mapping_section(local, "skills", "manager.local.json", (dict,), "对象")
+    if "mcp" in local:
+        local["mcp"] = get_typed_mapping_section(local, "mcp", "manager.local.json", (dict,), "对象")
     return local
 
 def get_effective_config():

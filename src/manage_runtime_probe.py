@@ -6,11 +6,12 @@ import shlex
 import shutil
 import subprocess
 
-from src.json_config import load_json_file
+from src.agent_ids import canonicalize_agent_id, canonicalize_agent_list, canonicalize_agent_mapping
+from src.json_config import load_json_object_file
 
 
 def load_json(path, *, strict=False, missing_ok=True):
-    return load_json_file(path, strict=strict, missing_ok=missing_ok)
+    return load_json_object_file(path, strict=strict, missing_ok=missing_ok)
 
 
 def default_run_cmd(cmd, timeout=10):
@@ -73,6 +74,14 @@ def detect_npm_from_paths(bin_path, resolved_bin_path="", brew_detected=False):
 
 TOOL_READY_MARKER = ".agent-manager-ready"
 TOOL_BROKEN_MARKER = ".agent-manager-broken"
+RULE_TARGET_PREFIX_TO_ID = {
+    "claude": "claude-code",
+    "gemini": "gemini-cli",
+    "cursor": "cursor",
+    "copilot": "github-copilot",
+    "opencode": "opencode",
+    "codex": "codex",
+}
 
 
 def iter_command_heads(command):
@@ -92,7 +101,7 @@ def iter_command_heads(command):
     return heads
 
 
-def collect_required_runtime_commands(config, agent_defs, tool_defs, skill_cfg, mcp_cfg):
+def collect_required_runtime_commands(config, agent_defs, tool_defs, skill_cfg, mcp_cfg, repo_root=None):
     required = []
 
     def add(cmd):
@@ -123,26 +132,89 @@ def collect_required_runtime_commands(config, agent_defs, tool_defs, skill_cfg, 
         if not policy.get("enabled", True):
             continue
         definition = tool_defs.get(tool_name, {})
-        if definition.get("url"):
+        tool_ready = False
+        if repo_root is not None:
+            tool_ready = detect_tool_readiness(tool_name, definition, repo_root)
+        needs_tool_runtime = not (tool_ready and not policy.get("auto_update", True))
+        if definition.get("url") and needs_tool_runtime:
             add("git")
-        for head in iter_command_heads(definition.get("install")):
-            add(head)
-        for head in iter_command_heads(definition.get("setup")):
-            add(head)
+        if needs_tool_runtime:
+            for head in iter_command_heads(definition.get("install")):
+                add(head)
+            for head in iter_command_heads(definition.get("setup")):
+                add(head)
 
     for repo_name, repo_def in skill_cfg.get("repositories", {}).items():
-        policy = config.get("skills", {}).get(repo_name, {})
+        policy = config.get("skills", {}).get(repo_name)
+        if policy is None:
+            continue
         if policy.get("enabled", True) and repo_def.get("url"):
             add("git")
 
     for server_name, server_def in mcp_cfg.get("servers", {}).items():
-        policy = config.get("mcp", {}).get(server_name, {})
-        if not policy.get("enabled", True):
+        policy = config.get("mcp", {}).get(server_name)
+        if policy is None or not policy.get("enabled", True):
             continue
         if server_def.get("url"):
             add("git")
 
     return required
+
+
+def expand_targeted_agents(agent_ids, available_agent_ids):
+    available = set(available_agent_ids)
+    normalized_agents = canonicalize_agent_list(agent_ids)
+    if normalized_agents is None:
+        return available
+    return {agent_id for agent_id in normalized_agents if agent_id in available}
+
+
+def collect_active_skill_target_agents(config, skill_cfg):
+    agent_targets = canonicalize_agent_mapping(skill_cfg.get("agents", {}))
+    repositories = skill_cfg.get("repositories", {})
+    active = set()
+    for repo_name, policy in config.get("skills", {}).items():
+        if not policy.get("enabled", True):
+            continue
+        definition = repositories.get(repo_name)
+        if not definition:
+            continue
+        merged = dict(definition)
+        merged.update(policy)
+        active.update(expand_targeted_agents(merged.get("agents"), agent_targets.keys()))
+    return active
+
+
+def collect_active_mcp_target_agents(config, mcp_cfg):
+    agent_targets = canonicalize_agent_mapping(mcp_cfg.get("agent_paths", {}))
+    servers = mcp_cfg.get("servers", {})
+    active = set()
+    for server_name, policy in config.get("mcp", {}).items():
+        if not policy.get("enabled", True):
+            continue
+        definition = servers.get(server_name)
+        if not definition:
+            continue
+        merged = dict(definition)
+        merged.update(policy)
+        active.update(expand_targeted_agents(merged.get("agents"), agent_targets.keys()))
+    return active
+
+
+def collect_active_rule_agents(config, skill_cfg, mcp_cfg):
+    active = {
+        agent_id
+        for agent_id, policy in canonicalize_agent_mapping(config.get("agents", {})).items()
+        if policy.get("enabled", True)
+    }
+    active.update(collect_active_skill_target_agents(config, skill_cfg))
+    active.update(collect_active_mcp_target_agents(config, mcp_cfg))
+    return active
+
+
+def rule_target_agent_id(target_name):
+    prefix = target_name.split("_", 1)[0]
+    return RULE_TARGET_PREFIX_TO_ID.get(prefix, canonicalize_agent_id(prefix))
 
 
 def repo_tool_artifacts_ready(definition, managed_repo_dir):
@@ -172,8 +244,11 @@ def detect_tool_readiness(name, definition, repo_root):
             return False
         if os.path.exists(os.path.join(managed_repo_dir, TOOL_BROKEN_MARKER)):
             return False
+        ready_paths = definition.get("ready_paths") or []
         if repo_tool_artifacts_ready(definition, managed_repo_dir):
             return True
+        if ready_paths:
+            return False
         if os.path.exists(os.path.join(managed_repo_dir, TOOL_READY_MARKER)):
             return True
         return False

@@ -73,6 +73,36 @@ class SyncMcpTests(unittest.TestCase):
             self.assertIn("defs.json", combined)
             self.assertIn("无效", combined)
 
+    def test_non_object_definition_section_exits_non_zero(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            config_path.write_text('{"mcp": {}}', encoding="utf-8")
+            def_path.write_text('{"servers": [], "agent_paths": {}}', encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "mcp"),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("defs.json.servers", combined)
+            self.assertIn("必须是对象", combined)
+
     def test_default_sync_mode_does_not_clone_invalid_repo(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -181,6 +211,188 @@ class SyncMcpTests(unittest.TestCase):
                 updated["mcpServers"]["offline-mcp"]["args"],
                 [f"{repo_path.resolve()}/server.js"],
             )
+
+    def test_missing_policy_server_is_ignored(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            agent_config_path = temp_root / "agent.json"
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            config_path.write_text(json.dumps({"mcp": {}}), encoding="utf-8")
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "servers": {
+                            "ignored-mcp": {
+                                "command": "echo",
+                                "args": [],
+                                "env": {},
+                            }
+                        },
+                        "agent_paths": {
+                            "claude-code": str(agent_config_path),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "mcp"),
+                    "--dry-run",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertNotIn("计划原子更新 JSON", combined)
+            self.assertNotIn("更新 MCP: ignored-mcp", combined)
+
+    def test_missing_policy_server_removes_existing_managed_json_entry(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            agent_config_path = temp_root / "agent.json"
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            config_path.write_text(json.dumps({"mcp": {}}), encoding="utf-8")
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "servers": {
+                            "ignored-mcp": {
+                                "command": "echo",
+                                "args": [],
+                                "env": {},
+                            }
+                        },
+                        "agent_paths": {
+                            "claude-code": str(agent_config_path),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            agent_config_path.write_text(
+                json.dumps(
+                    {
+                        "mcpServers": {
+                            "ignored-mcp": {
+                                "command": "echo",
+                                "args": [],
+                                "env": {"_MANAGED_BY": "agent-manager"},
+                            },
+                            "user-mcp": {
+                                "command": "echo",
+                                "args": [],
+                                "env": {"KEEP": "1"},
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "mcp"),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            updated = json.loads(agent_config_path.read_text(encoding="utf-8"))
+            self.assertNotIn("ignored-mcp", updated["mcpServers"])
+            self.assertIn("user-mcp", updated["mcpServers"])
+
+    def test_missing_policy_server_removes_existing_managed_toml_entry(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            agent_config_path = temp_root / "config.toml"
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            config_path.write_text(json.dumps({"mcp": {}}), encoding="utf-8")
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "servers": {
+                            "ignored-mcp": {
+                                "command": "echo",
+                                "args": [],
+                                "env": {},
+                            }
+                        },
+                        "agent_paths": {
+                            "codex": {"path": str(agent_config_path), "format": "toml"},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            agent_config_path.write_text(
+                "\n".join(
+                    [
+                        "[mcp_servers.ignored-mcp]",
+                        'command = "echo"',
+                        "args = []",
+                        "[mcp_servers.ignored-mcp.env]",
+                        '_MANAGED_BY = "agent-manager"',
+                        "",
+                        "[mcp_servers.user-mcp]",
+                        'command = "echo"',
+                        "args = []",
+                        "[mcp_servers.user-mcp.env]",
+                        'KEEP = "1"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "mcp"),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            updated = tomllib.loads(agent_config_path.read_text(encoding="utf-8"))
+            self.assertNotIn("ignored-mcp", updated["mcp_servers"])
+            self.assertIn("user-mcp", updated["mcp_servers"])
 
     def test_prepare_runtime_clone_failure_exits_non_zero(self):
         with tempfile.TemporaryDirectory() as temp_dir:

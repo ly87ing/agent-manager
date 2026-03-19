@@ -68,6 +68,34 @@ class SyncToolsTests(unittest.TestCase):
             self.assertIn("defs.json", combined)
             self.assertIn("无效", combined)
 
+    def test_non_object_definition_config_exits_non_zero(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            config_path.write_text('{"tools": {}}', encoding="utf-8")
+            def_path.write_text("[]\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(Path(sync_tools.__file__).resolve()),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                ],
+                cwd=temp_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("defs.json", combined)
+            self.assertIn("顶层必须是对象", combined)
+
     def test_default_base_dir_does_not_prune_current_working_directory(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -102,6 +130,58 @@ class SyncToolsTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(victim_dir.exists(), result.stdout + result.stderr)
 
+    def test_missing_policy_tool_does_not_prune_unmanaged_directories(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            tools_dir = temp_root / "tools"
+            foreign_dir = tools_dir / "foreign-dir"
+            tools_dir.mkdir()
+            foreign_dir.mkdir()
+            config_path.write_text('{"tools": {}}', encoding="utf-8")
+            def_path.write_text(
+                '{"tools": {"playwright-cli": {"url": "https://example.invalid/repo.git"}}}',
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(Path(sync_tools.__file__).resolve()),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(tools_dir),
+                    "--yes",
+                ],
+                cwd=temp_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertTrue(foreign_dir.exists(), combined)
+            self.assertIn("跳过非托管工具目录: foreign-dir", combined)
+
+    def test_prune_orphan_tools_only_removes_manager_owned_directories(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            owned_dir = base_dir / "owned-orphan"
+            foreign_dir = base_dir / "foreign-orphan"
+            owned_dir.mkdir()
+            foreign_dir.mkdir()
+            sync_tools.write_owner_marker(owned_dir, "owned-orphan")
+
+            sync_tools.prune_orphan_tools(base_dir, managed_names=set(), dry_run=False, force_yes=True)
+
+            self.assertFalse(owned_dir.exists())
+            self.assertTrue(foreign_dir.exists())
+
     def test_log_level_environment_enables_debug_output(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -133,6 +213,40 @@ class SyncToolsTests(unittest.TestCase):
             combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
             self.assertIn("[DEBUG] Logging initialized at level DEBUG", combined)
+
+    def test_missing_policy_tool_is_ignored(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            config_path.write_text('{"tools": {}}', encoding="utf-8")
+            def_path.write_text(
+                '{"tools": {"playwright-cli": {"url": "https://example.invalid/repo.git"}}}',
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(Path(sync_tools.__file__).resolve()),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "tools"),
+                    "--dry-run",
+                ],
+                cwd=temp_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertIn("未声明策略，跳过", combined)
+            self.assertNotIn("正在安装 playwright-cli", combined)
 
     def test_dirty_git_repo_is_not_reset_hard(self):
         with tempfile.TemporaryDirectory() as temp_dir:

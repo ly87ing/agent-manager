@@ -18,7 +18,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.agent_ids import canonicalize_agent_list, canonicalize_agent_mapping
-from src.json_config import load_json_file
+from src.json_config import get_typed_mapping_section, load_json_object_file
 from src.runtime_logging import configure_logging
 
 configure_logging()
@@ -156,7 +156,10 @@ def load_existing_json_config(agent_name, config_path):
         return current_config
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            parsed = json.load(f)
+            if not isinstance(parsed, dict):
+                raise ValueError("顶层必须是对象")
+            return parsed
     except Exception as exc:
         logging.error(f"INFO: [AGENT: {agent_name}] 现有 JSON 配置解析失败，已停止覆盖: {exc}")
         return None
@@ -210,7 +213,6 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
     chunks = merge_toml_chunks_by_server(chunks)
     
     new_chunks = []
-    managed_names = set(all_managed_servers)
     preserved_names = set(preserved_servers)
     blocked_active_names = set()
     for chunk in chunks:
@@ -227,7 +229,7 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
                 else:
                     logging.error(f"INFO: [AGENT: {agent_name}] 发现同名用户自管 TOML 段，拒绝接管: {srv_name}")
                     return False
-            if is_managed_chunk and (srv_name in managed_names or srv_name in active_servers):
+            if is_managed_chunk:
                 continue
         new_chunks.append(chunk)
     
@@ -280,6 +282,9 @@ def backup_config(path, dry_run=False):
 def manage_mcp_config(agents_config, mcp_servers, dry_run=False):
     """更新各个 Agent 的 MCP 配置文件"""
     all_ok = True
+    declared_managed_servers = {
+        name for name, srv_config in mcp_servers.items() if srv_config.get("_declared_in_policy", True)
+    }
     for agent_name, agent_meta in agents_config.items():
         config_path_str = agent_meta if isinstance(agent_meta, str) else agent_meta.get("path")
         file_format = "json" if isinstance(agent_meta, str) else agent_meta.get("format", "json")
@@ -288,6 +293,8 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False):
         active_mcp_settings = {}
         preserved_failed_servers = set()
         for name, srv_config in mcp_servers.items():
+            if not srv_config.get("_declared_in_policy", True):
+                continue
             if not srv_config.get("enabled", True): continue
             if srv_config.get("agents") and agent_name not in srv_config["agents"]: continue
             if not srv_config.get("_sync_ready", True):
@@ -323,7 +330,7 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False):
                 agent_name,
                 config_path,
                 active_mcp_settings,
-                mcp_servers.keys(),
+                declared_managed_servers,
                 preserved_failed_servers,
                 dry_run,
             ):
@@ -402,20 +409,27 @@ def main():
     parser.add_argument("--offline", action="store_true", help="离线模式 (跳过远程仓库与 secrets 更新)")
     parser.add_argument("--prepare-runtime", action="store_true", help="显式准备 repo/runtime（clone、pull、setup、build）")
     args = parser.parse_args()
-
+    
     try:
-        policy_cfg = load_json_file(args.config, strict=True, missing_ok=False).get("mcp", {})
-        full_def = load_json_file(args.def_file, strict=True, missing_ok=False)
+        policy_root = load_json_object_file(args.config, strict=True, missing_ok=False)
+        full_def = load_json_object_file(args.def_file, strict=True, missing_ok=False)
+        policy_cfg = get_typed_mapping_section(policy_root, "mcp", Path(args.config).name, (dict,), "对象")
     except ValueError as exc:
         logging.error(str(exc))
         sys.exit(1)
 
     # 对齐职责：从 manager.json 读取策略，从 mcp.json 读取定义与路径
-    definition_cfg = full_def.get("servers", {})
-    AGENT_TARGETS = canonicalize_agent_mapping(full_def.get("agent_paths", {}))
+    try:
+        definition_cfg = get_typed_mapping_section(full_def, "servers", Path(args.def_file).name, (dict,), "对象")
+        agent_paths = get_typed_mapping_section(full_def, "agent_paths", Path(args.def_file).name, (str, dict), "字符串或对象")
+    except ValueError as exc:
+        logging.error(str(exc))
+        sys.exit(1)
+    AGENT_TARGETS = canonicalize_agent_mapping(agent_paths)
 
     # 递归合并策略开关
     for name, s_def in definition_cfg.items():
+        s_def["_declared_in_policy"] = name in policy_cfg
         if name in policy_cfg:
             s_def.update(policy_cfg[name])
         s_def["agents"] = canonicalize_agent_list(s_def.get("agents"))
@@ -461,6 +475,8 @@ def main():
 
     unresolved = []
     for srv_name, srv_def in definition_cfg.items():
+        if not srv_def.get("_declared_in_policy"):
+            continue
         if not srv_def.get("enabled", True):
             continue
         unresolved.extend(
@@ -480,13 +496,16 @@ def main():
 
     all_build_success = True
     for srv_name, srv_config in definition_cfg.items():
-        srv_config["_sync_ready"] = srv_config.get("enabled", True)
+        srv_config["_sync_ready"] = srv_config.get("_declared_in_policy", False) and srv_config.get("enabled", True)
         url = srv_config.get("url")
         if not url:
             srv_config["_repo_path"] = ""
         else:
             target_dir = Path(base_dir) / srv_name
             srv_config["_repo_path"] = str(target_dir)
+            if not srv_config.get("_declared_in_policy"):
+                logging.info(f"[{srv_name}] 未声明策略，跳过。")
+                continue
             if not srv_config.get("enabled", True): continue
             repo_required = config_requires_repo_path(srv_config)
             local_repo_ready = target_dir.exists() and (target_dir / ".git").exists()

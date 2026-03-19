@@ -213,3 +213,17 @@ class InteractiveWorkflowTests(unittest.TestCase):
         rendered = output.getvalue()
         self.assertIn("manager.json", rendered)
         self.assertIn("无效", rendered)
+
+    def test_non_object_base_config_fails_loudly(self):
+        (self.root / "config" / "manager.json").write_text("[]\n", encoding="utf-8")
+        output = io.StringIO()
+
+        with working_directory(self.root):
+            with self.assertRaises(SystemExit) as exc:
+                with mock.patch("sys.stdout", output):
+                    interactive.main()
+
+        self.assertEqual(exc.exception.code, 1)
+        rendered = output.getvalue()
+        self.assertIn("manager.json", rendered)
+        self.assertIn("顶层必须是对象", rendered)

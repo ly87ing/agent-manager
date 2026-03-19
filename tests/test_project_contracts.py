@@ -71,8 +71,10 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("agent_manager_sync_<user>.latest", troubleshooting)
         self.assertIn("agent_manager_sync_<user>_<runid>.log", troubleshooting)
         self.assertIn("agent-skill/repositories/", troubleshooting)
+        self.assertIn("find agent-skill/repositories/playwright-best-practices-skill -name SKILL.md", troubleshooting)
         self.assertNotIn("/tmp/agent_manager_sync_$(whoami).log*", troubleshooting)
         self.assertNotIn("agent-skill/<skill-name>", troubleshooting)
+        self.assertNotIn("agent-skill/repositories/playwright-best-practices-skill/SKILL.md", troubleshooting)
 
     def test_readme_atomic_write_contract_matches_runtime_scope(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -84,3 +86,10 @@ class ProjectContractTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("精准回收受管备份、碎片及冗余日志", readme)
         self.assertNotIn("孤儿仓库", readme)
+
+    def test_architecture_dry_run_contract_mentions_local_maintenance_writes(self):
+        architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+        self.assertIn("cleanup", architecture)
+        self.assertIn("backups:restore", architecture)
+        self.assertIn("clean-logs", architecture)
+        self.assertIn("会修改本地状态的维护动作", architecture)

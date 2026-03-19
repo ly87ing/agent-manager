@@ -199,7 +199,15 @@ class SyncRulesTests(unittest.TestCase):
             (target_dir / "stale.md").write_text("stale\n", encoding="utf-8")
 
             (temp_root / "config" / "manager.json").write_text(
-                json.dumps({"agents": {}, "tools": {}, "skills": {}, "mcp": {}}, indent=2),
+                json.dumps(
+                    {
+                        "agents": {"claude-code": {"enabled": True}},
+                        "tools": {},
+                        "skills": {},
+                        "mcp": {},
+                    },
+                    indent=2,
+                ),
                 encoding="utf-8",
             )
             (temp_root / "config" / "mcp.json").write_text(
@@ -211,7 +219,7 @@ class SyncRulesTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (temp_root / "config" / "rules-targets.list").write_text(
-                f"test_modules|global|rules/global/modules|{target_dir}\n",
+                f"claude_modules|global|rules/global/modules|{target_dir}\n",
                 encoding="utf-8",
             )
 
@@ -225,7 +233,7 @@ class SyncRulesTests(unittest.TestCase):
 
             combined = result.stdout + result.stderr
             self.assertNotEqual(result.returncode, 0, combined)
-            self.assertIn("test_modules", combined)
+            self.assertIn("claude_modules", combined)
 
     def test_main_rule_points_to_actual_modules_distribution_path(self):
         content = (ROOT / "agent-rule" / "rules" / "global" / "main.md").read_text(encoding="utf-8")

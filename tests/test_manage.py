@@ -171,6 +171,41 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("本地覆盖配置无效", combined)
             self.assertFalse(call_log.exists(), combined)
 
+    def test_non_object_local_override_aborts_before_running_tasks(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root)
+            call_log = temp_root / "calls.log"
+            (temp_root / "config" / "manager.local.json").write_text("[]\n", encoding="utf-8")
+
+            self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log, "True")
+            self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log, "True")
+            self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log, "True")
+            self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log, "True")
+            self._write_stub(
+                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
+                (
+                    "#!/usr/bin/env bash\n"
+                    f"printf '%s\\n' rules >> {str(call_log)!r}\n"
+                    "exit 0\n"
+                ),
+            )
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "sync"],
+                cwd=temp_root,
+                env=self._managed_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("本地覆盖配置无效", combined)
+            self.assertIn("manager.local.json 顶层必须是对象", combined)
+            self.assertFalse(call_log.exists(), combined)
+
     def test_detect_fails_on_invalid_agent_definitions(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
@@ -190,6 +225,46 @@ class ManageScriptTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, combined)
             self.assertIn("agents.json", combined)
             self.assertIn("无效", combined)
+
+    def test_detect_fails_on_non_object_agent_definition_entry(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root)
+            (temp_root / "config" / "agents.json").write_text('{"claude-code": []}\n', encoding="utf-8")
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "detect"],
+                cwd=temp_root,
+                env=self._managed_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("agents.json.claude-code", combined)
+            self.assertIn("必须是对象", combined)
+
+    def test_detect_fails_on_non_object_tool_definitions(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root)
+            (temp_root / "config" / "tools.json").write_text('{"tools": []}\n', encoding="utf-8")
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "detect"],
+                cwd=temp_root,
+                env=self._managed_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("tools.json.tools", combined)
+            self.assertIn("必须是对象", combined)
 
     def test_detect_repo_backed_tool_requires_managed_git_repo(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -260,6 +335,28 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("agents.json: 语法错误", combined)
             self.assertNotIn("--- Agent 状态与策略一致性 ---", combined)
             self.assertNotIn("Claude Code         : 漂移", combined)
+
+    def test_doctor_stops_after_config_shape_errors(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root)
+            (temp_root / "config" / "tools.json").write_text('{"tools": []}\n', encoding="utf-8")
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "doctor"],
+                cwd=temp_root,
+                env=self._managed_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("tools.json: 格式正确", combined)
+            self.assertIn("结构非法", combined)
+            self.assertIn("tools.json.tools 必须是对象", combined)
+            self.assertNotIn("--- Agent 状态与策略一致性 ---", combined)
 
     def test_doctor_fails_when_required_definition_file_is_missing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -342,7 +439,7 @@ class ManageScriptTests(unittest.TestCase):
             temp_home.mkdir()
 
             (temp_root / "config" / "manager.json").write_text(
-                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {"missing-skill": {"enabled": true}},\n  "mcp": {}\n}\n',
                 encoding="utf-8",
             )
             (temp_root / "config" / "mcp.json").write_text(
@@ -350,7 +447,7 @@ class ManageScriptTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (temp_root / "config" / "skills.json").write_text(
-                '{\n  "repositories": {},\n  "agents": {\n    "claude-code": "%s/.claude/skills"\n  }\n}\n'
+                '{\n  "repositories": {\n    "missing-skill": {"url": "https://example.invalid/repo.git", "agents": ["claude-code"]}\n  },\n  "agents": {\n    "claude-code": "%s/.claude/skills"\n  }\n}\n'
                 % temp_home,
                 encoding="utf-8",
             )
@@ -448,7 +545,107 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, combined)
             self.assertNotIn("node: 缺失", combined)
             self.assertNotIn("npm: 缺失", combined)
+
+    def test_doctor_skips_tool_setup_commands_when_repo_tool_is_ready_and_auto_update_disabled(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root)
+            temp_home.mkdir()
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {"playwright-cli": {"enabled": true, "auto_update": false}},\n  "skills": {},\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {},\n  "servers": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+            tool_repo = temp_root / "agent-tool" / "playwright-cli"
+            tool_repo.mkdir(parents=True, exist_ok=True)
+            (tool_repo / ".git").mkdir(exist_ok=True)
+            (tool_repo / "node_modules").mkdir(exist_ok=True)
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            env["PATH"] = "/usr/bin:/bin"
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "doctor"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertNotIn("npm: 缺失", combined)
+            self.assertNotIn("npx: 缺失", combined)
             self.assertIn("环境状态完美", combined)
+
+    def test_doctor_empty_policy_ignores_default_mcp_skill_and_rules_targets(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root)
+            temp_home.mkdir()
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            env["PATH"] = "/usr/bin:/bin"
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "doctor"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertNotIn("--- MCP 注入审计 ---\n  ✗", combined)
+            self.assertNotIn("--- Skills 链接审计 ---\n  ✗", combined)
+            self.assertNotIn("--- Rules 内容/结构审计 ---\n  ✗", combined)
+            self.assertIn("环境状态完美", combined)
+
+    def test_sync_empty_policy_skips_optional_subengines(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root)
+            temp_home.mkdir()
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "sync", "--dry-run"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertIn("当前策略未启用任何 Rules 目标", combined)
+            self.assertNotIn("计划原子更新 JSON", combined)
+            self.assertNotIn("准备下载到托管缓存", combined)
+            self.assertNotIn("正在安装 playwright-cli", combined)
 
     def test_doctor_snapshot_statistics_only_count_managed_backups(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -466,7 +663,7 @@ class ManageScriptTests(unittest.TestCase):
             unrelated_backup.write_text("private\n", encoding="utf-8")
 
             (temp_root / "config" / "manager.json").write_text(
-                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {"bad-mcp": {"enabled": true}}\n}\n',
                 encoding="utf-8",
             )
             (temp_root / "config" / "mcp.json").write_text(
@@ -1146,6 +1343,30 @@ class ManageScriptTests(unittest.TestCase):
             restore_path(self.lock_path, lock_backup)
             restore_path(self.lock_dir, lock_dir_backup)
 
+    def test_unlock_dry_run_preserves_atomic_lock_artifacts(self):
+        lock_backup = move_aside(self.lock_path)
+        lock_dir_backup = move_aside(self.lock_dir)
+        try:
+            self.lock_path.write_text("999999", encoding="utf-8")
+            self.lock_dir.mkdir(parents=True)
+            (self.lock_dir / "pid").write_text("999999", encoding="utf-8")
+            result = subprocess.run(
+                [str(MANAGE), "--dry-run", "unlock"],
+                cwd=ROOT,
+                env=self._managed_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertIn("计划清理原子锁目录与遗留锁文件", combined)
+            self.assertTrue(self.lock_path.exists(), combined)
+            self.assertTrue(self.lock_dir.exists(), combined)
+        finally:
+            restore_path(self.lock_path, lock_backup)
+            restore_path(self.lock_dir, lock_dir_backup)
+
     def test_custom_lock_env_ignores_default_global_lock(self):
         global_lock_backup = move_aside(LOCK_PATH)
         global_lock_dir_backup = move_aside(LOCK_DIR)
@@ -1244,6 +1465,34 @@ class ManageScriptTests(unittest.TestCase):
             restore_path(self.legacy_log_path, legacy_backup)
             restore_path(unique_log, unique_backup)
 
+    def test_clean_logs_dry_run_preserves_log_files(self):
+        latest_backup = move_aside(self.latest_log_pointer)
+        legacy_backup = move_aside(self.legacy_log_path)
+        unique_log = Path(f"{self.log_prefix}_cleanup.log")
+        unique_backup = move_aside(unique_log)
+        try:
+            self.legacy_log_path.write_text("hello legacy log\n", encoding="utf-8")
+            unique_log.write_text("hello unique log\n", encoding="utf-8")
+            self.latest_log_pointer.write_text(str(unique_log), encoding="utf-8")
+            result = subprocess.run(
+                [str(MANAGE), "--dry-run", "clean-logs"],
+                cwd=ROOT,
+                env=self._managed_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertIn("计划清理 latest 指针与所有按次运行日志", combined)
+            self.assertTrue(self.legacy_log_path.exists(), combined)
+            self.assertTrue(unique_log.exists(), combined)
+            self.assertTrue(self.latest_log_pointer.exists(), combined)
+        finally:
+            restore_path(self.latest_log_pointer, latest_backup)
+            restore_path(self.legacy_log_path, legacy_backup)
+            restore_path(unique_log, unique_backup)
+
     def test_backups_restore_restores_directory_backup_with_spaces(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
@@ -1315,6 +1564,41 @@ class ManageScriptTests(unittest.TestCase):
             combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
             self.assertEqual(target_file.read_text(encoding="utf-8"), '{"restored": true}\n')
+
+    def test_backups_restore_dry_run_does_not_modify_target(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root)
+            temp_home.mkdir()
+
+            target_file = temp_home / ".claude.json"
+            target_file.write_text('{"current": true}\n', encoding="utf-8")
+            backup_file = temp_home / ".claude.json.bak"
+            backup_file.write_text('{"restored": true}\n', encoding="utf-8")
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {\n    "claude-code": "%s"\n  },\n  "servers": {}\n}\n'
+                % target_file,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "--dry-run", "backups:restore"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertIn("以下备份可用于恢复", combined)
+            self.assertIn(str(backup_file), combined)
+            self.assertEqual(target_file.read_text(encoding="utf-8"), '{"current": true}\n')
 
     def test_backups_restore_respects_global_lock(self):
         lock_backup = move_aside(self.lock_path)
@@ -1468,6 +1752,52 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(lines[0], str(newer_backup), combined)
             self.assertEqual(lines[1], str(older_backup), combined)
 
+    def test_backups_list_fails_when_rules_manifest_is_missing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root)
+            temp_home.mkdir()
+            (temp_root / "config" / "rules-targets.list").unlink()
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "backups:list"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("rules-targets.list 缺失", combined)
+
+    def test_backups_restore_fails_when_managed_scope_enumeration_fails(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root)
+            temp_home.mkdir()
+            (temp_root / "config" / "rules-targets.list").unlink()
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "backups:restore"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("rules-targets.list 缺失", combined)
+
     def test_cleanup_only_removes_target_scoped_temp_files(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
@@ -1585,11 +1915,76 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse(rule_backup.exists(), result.stdout + result.stderr)
 
+    def test_cleanup_dry_run_preserves_managed_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root)
+            temp_home.mkdir()
+
+            target_dir = temp_home / ".claude"
+            target_dir.mkdir(parents=True)
+            managed_target = target_dir / "settings.json"
+            managed_target.write_text("{}", encoding="utf-8")
+            managed_tmp = target_dir / "settings.json.tmp_123"
+            managed_backup = target_dir / "settings.json.bak.20260318"
+            managed_tmp.write_text("tmp", encoding="utf-8")
+            managed_backup.write_text("bak", encoding="utf-8")
+            latest_log = temp_home / "latest.log"
+            latest_log.write_text("log\n", encoding="utf-8")
+
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {\n    "claude-code": "%s"\n  },\n  "servers": {}\n}\n'
+                % managed_target,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            env["AGENT_MANAGER_LOG_PREFIX"] = str(temp_home / "agent_manager_sync_test")
+            env["AGENT_MANAGER_LATEST_LOG_POINTER"] = str(latest_log)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "--dry-run", "cleanup"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertIn("计划清理以下受管备份、临时文件与运行日志", combined)
+            self.assertTrue(managed_tmp.exists(), combined)
+            self.assertTrue(managed_backup.exists(), combined)
+            self.assertTrue(latest_log.exists(), combined)
+
     def test_mcp_sync_defaults_to_config_only_mode(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root)
             agent_config_path = temp_root / "tmp-agent.json"
+            (temp_root / "config" / "manager.json").write_text(
+                """
+{
+  "agents": {},
+  "tools": {},
+  "skills": {},
+  "mcp": {
+    "bad-mcp": {
+      "enabled": true
+    }
+  }
+}
+                """.strip()
+                + "\n",
+                encoding="utf-8",
+            )
             (temp_root / "config" / "mcp.json").write_text(
                 """
 {
