@@ -272,7 +272,18 @@ class ManageScriptTests(unittest.TestCase):
             temp_home = Path(temp_dir) / "home"
             shutil.copytree(ROOT, temp_root)
             temp_home.mkdir()
-            (temp_root / "agent-tool" / "playwright-cli").mkdir(parents=True, exist_ok=True)
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n'
+                '  "agents": {},\n'
+                '  "tools": {"playwright-cli": {"enabled": true, "auto_update": true}},\n'
+                '  "skills": {},\n'
+                '  "mcp": {}\n'
+                '}\n',
+                encoding="utf-8",
+            )
+            repo_tool_dir = temp_root / "agent-tool" / "playwright-cli"
+            remove_path(repo_tool_dir)
+            repo_tool_dir.mkdir(parents=True, exist_ok=True)
 
             env = self._managed_env()
             env["HOME"] = str(temp_home)
@@ -288,8 +299,7 @@ class ManageScriptTests(unittest.TestCase):
 
             combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
-            self.assertIn("playwright-cli", combined)
-            self.assertIn("工具就绪:否", combined)
+            self.assertRegex(combined, r"playwright-cli\s+\(工具就绪:否\)")
 
     def test_detect_repo_backed_tool_requires_readiness_artifacts_after_clone(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -297,7 +307,18 @@ class ManageScriptTests(unittest.TestCase):
             temp_home = Path(temp_dir) / "home"
             shutil.copytree(ROOT, temp_root)
             temp_home.mkdir()
-            (temp_root / "agent-tool" / "playwright-cli" / ".git").mkdir(parents=True, exist_ok=True)
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n'
+                '  "agents": {},\n'
+                '  "tools": {"playwright-cli": {"enabled": true, "auto_update": true}},\n'
+                '  "skills": {},\n'
+                '  "mcp": {}\n'
+                '}\n',
+                encoding="utf-8",
+            )
+            repo_tool_dir = temp_root / "agent-tool" / "playwright-cli"
+            remove_path(repo_tool_dir)
+            (repo_tool_dir / ".git").mkdir(parents=True, exist_ok=True)
 
             env = self._managed_env()
             env["HOME"] = str(temp_home)
@@ -312,8 +333,7 @@ class ManageScriptTests(unittest.TestCase):
 
             combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
-            self.assertIn("playwright-cli", combined)
-            self.assertIn("工具就绪:否", combined)
+            self.assertRegex(combined, r"playwright-cli\s+\(工具就绪:否\)")
 
     def test_doctor_stops_after_config_syntax_errors(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -490,6 +510,9 @@ class ManageScriptTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+            repo_tool_dir = temp_root / "agent-tool" / "playwright-cli"
+            remove_path(repo_tool_dir)
+            (repo_tool_dir / ".git").mkdir(parents=True, exist_ok=True)
 
             env = self._managed_env()
             env["HOME"] = str(temp_home)
@@ -505,8 +528,7 @@ class ManageScriptTests(unittest.TestCase):
             combined = result.stdout + result.stderr
             self.assertNotEqual(result.returncode, 0, combined)
             self.assertIn("--- Tools 就绪审计 ---", combined)
-            self.assertIn("playwright-cli", combined)
-            self.assertIn("未就绪", combined)
+            self.assertRegex(combined, r"playwright-cli\s+: 未就绪")
 
     def test_doctor_skips_node_and_npm_when_policy_does_not_need_them(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -566,6 +588,7 @@ class ManageScriptTests(unittest.TestCase):
             )
             (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
             tool_repo = temp_root / "agent-tool" / "playwright-cli"
+            remove_path(tool_repo)
             tool_repo.mkdir(parents=True, exist_ok=True)
             (tool_repo / ".git").mkdir(exist_ok=True)
             (tool_repo / "node_modules").mkdir(exist_ok=True)
