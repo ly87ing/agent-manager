@@ -148,7 +148,7 @@ function acquire_lock() {
 }
 
 # 原子锁检查
-if [[ "$cmd" != "help" && "$cmd" != "-h" && "$cmd" != "--help" && "$cmd" != "-help" && "$cmd" != "detect" && "$cmd" != "doctor" && "$cmd" != "status" && "$cmd" != "backups:list" && "$cmd" != "unlock" && "$cmd" != "logs" ]]; then
+if [[ "$cmd" != "help" && "$cmd" != "-h" && "$cmd" != "--help" && "$cmd" != "-help" && "$cmd" != "detect" && "$cmd" != "doctor" && "$cmd" != "status" && "$cmd" != "backups:list" && "$cmd" != "unlock" && "$cmd" != "logs" && "$cmd" != "fetch-models" ]]; then
     acquire_lock
 fi
 
@@ -1178,6 +1178,23 @@ case "$cmd" in
         (cd "$ROOT_DIR/agent-skill" && $PYTHON_CMD link_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG) ;;
     tools:sync)
         (cd "$ROOT_DIR/agent-tool" && $PYTHON_CMD sync_tools.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/tools.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG) ;;
+    fetch-models)
+        args=()
+        for arg in "${ORIGINAL_ARGS[@]}"; do
+            if [[ "$arg" != "--dry-run" && "$arg" != "--offline" && "$arg" != "fetch-models" ]]; then
+                args+=("$arg")
+            fi
+        done
+        if [ "${#args[@]}" -eq 1 ]; then
+            echo -e "${ERROR_RED}用法: ./manage.sh fetch-models [base_uri api_key]${NC}"
+            exit 1
+        fi
+        if [ "${#args[@]}" -ge 2 ]; then
+            $PYTHON_CMD "$ROOT_DIR/scripts/fetch_models.py" "${args[0]}" "${args[1]}"
+        else
+            $PYTHON_CMD "$ROOT_DIR/scripts/fetch_models.py"
+        fi
+        ;;
     cleanup)
         echo -e "${HDR_BLUE}正在执行全量环境大扫除...${NC}"
         if ! agents_paths="$(list_managed_target_paths true)"; then
@@ -1226,7 +1243,8 @@ case "$cmd" in
         echo -e "  ${SUCCESS_GREEN}self-update${NC}     仅更新 agent-manager 仓库自身逻辑"
         echo -e "  ${SUCCESS_GREEN}ui${NC}              启动基于 Terminal 的交互式的可视化管理终端界面"
         echo -e "  ${SUCCESS_GREEN}doctor / status${NC} 进行深度的资源校验、配置自检与环境排错诊断"
-        echo -e "  ${SUCCESS_GREEN}detect${NC}          仅执行各 Agent 开发工具的环境探测与支持情况检测\n"
+        echo -e "  ${SUCCESS_GREEN}detect${NC}          仅执行各 Agent 开发工具的环境探测与支持情况检测"
+        echo -e "  ${SUCCESS_GREEN}fetch-models${NC}    探测并获取模型列表。用法: ./manage.sh fetch-models <url> <key>\n"
         echo -e "${BOLD}${HDR_BLUE}=== 运维排错 (Maintenance) ===${NC}"
         echo -e "  ${VAL_PURPLE}cleanup${NC}         执行全量环境大扫除，深度清理临时文件、无用快照缓存及历史日志"
         echo -e "  ${VAL_PURPLE}unlock${NC}          强制清除原子锁目录与遗留锁文件"

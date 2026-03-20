@@ -65,6 +65,7 @@
 - `make self-update`: 仅更新 agent-manager 仓库自身逻辑。
 - `make smoke`: 运行跨平台安全预演 smoke 校验，验证主入口命令的 dry-run / preview 契约。
 - `make doctor` / `make status`: 执行全系统深度体检。
+- `make fetch-models`: 探测并获取 API 端点支持的模型列表 (支持 OpenAI / Anthropic 格式)。
 - `make restore`: 交互式回滚历史快照。
 - `make ui`: 启动交互式配置管理中心。
 

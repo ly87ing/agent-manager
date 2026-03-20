@@ -1,4 +1,4 @@
-.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect status cleanup unlock backups-list restore logs rules-sync skills-link mcp-sync mcp-prepare tools-sync dry-run clean-logs offline
+.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list restore logs rules-sync skills-link mcp-sync mcp-prepare tools-sync dry-run clean-logs offline
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -66,6 +66,10 @@ restore:
 # 环境探测
 detect:
 	@./manage.sh detect
+
+# 探测并获取支持的模型列表 (用法: make fetch-models url=<API地址> key=<API_KEY>)
+fetch-models:
+	@./manage.sh fetch-models $(url) $(key)
 
 # 查看最近同步日志
 logs:
