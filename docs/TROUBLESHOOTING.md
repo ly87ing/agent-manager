@@ -548,7 +548,7 @@ cp -r ~/agent-manager-backup/claude/skills/* ~/.claude/skills/
 | `Configuration is invalid` (OpenCode) | MCP 配置格式错误 | 检查是否包含 `type: "local"`、`command` 为数组、`environment` 而不是 `env` |
 | `Unexpected key or value` (Codex) | TOML 格式错误，通常是 JSON 字符串未正确转义 | 使用单引号包裹包含双引号的值：`KEY = '{"json":"value"}'` |
 | `Disconnected` (Gemini CLI) | 通常是正常的按需启动行为 | 实际使用 MCP 功能时服务器会自动启动；使用 `gemini debug mcp` 检查 |
-| `Command not found: auggie` | auggrie 未安装或不在 PATH 中 | 安装：`npm install -g @augmentcode/auggie` 或检查安装路径 |
+| `Command not found: auggie` | auggie 未安装或不在 PATH 中 | 安装：`npm install -g @augmentcode/auggie` 或检查安装路径 |
 | `Authentication failed` | 凭证无效或过期 | 更新 secrets/mcp.env 中的凭证并重新同步 |
 
 ---
