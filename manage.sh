@@ -455,8 +455,9 @@ from src.manage_runtime_probe import (
 )
 
 def get_md5(p):
-    try: return hashlib.md5(open(p, 'rb').read()).hexdigest()
-    except: return None
+    try:
+        with open(p, 'rb') as _f: return hashlib.md5(_f.read()).hexdigest()
+    except OSError: return None
 
 def build_tree_signature(root):
     sig = {}
