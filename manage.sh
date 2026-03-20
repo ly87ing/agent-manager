@@ -364,7 +364,10 @@ function doctor_check() {
                 errors=$((errors+1))
                 continue
             fi
-            local secrets=$($PYTHON_CMD -c "import re; c=open('$f').read(); f=re.findall(r'(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_\\\\-]{20,})', c); print(' '.join(f))")
+            local secrets=$($PYTHON_CMD -c "import re
+with open('$f', encoding='utf-8') as _f: c=_f.read()
+f=re.findall(r'(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_\\\\-]{20,})', c)
+print(' '.join(f))")
             if [ -n "$secrets" ]; then echo -e " ${ERROR_RED}(⚠ 包含明文密钥风险!)${NC}"; errors=$((errors+1)); else [ "$silent" == "false" ] && echo ""; fi
         else
             echo -e "  ${ERROR_RED}✗${NC} $(basename "$f"): 语法错误"
@@ -562,22 +565,23 @@ for a_name, a_path in canonicalize_agent_mapping(skill_cfg.get('agents', {})).it
 print('\n${BOLD}--- Rules 内容/结构审计 ---${NC}')
 rm = '$ROOT_DIR/config/rules-targets.list'
 if os.path.exists(rm):
-    for line in open(rm):
-        stripped = line.strip()
-        if not stripped or stripped.startswith('#'): continue
-        p = [part.strip() for part in stripped.split('|')]
-        if len(p) < 4:
-            print(f'  ${ERROR_RED}✗${NC} {stripped}: manifest 非法')
-            errs += 1
-            continue
-        if rule_target_agent_id(p[0]) not in active_rule_agents:
-            continue
-        src = os.path.join('$ROOT_DIR/agent-rule', p[2])
-        dst = os.path.expanduser(p[3].replace('{{HOME}}', os.path.expanduser('~')))
-        if os.path.exists(dst):
-            if not rules_match(src, dst): print(f'  ${PENDING_GOLD}⚠${NC} {p[0]}: 漂移'); errs += 1
-            else: print(f'  ${SUCCESS_GREEN}✓${NC} {p[0]}: 一致')
-        else: print(f'  ${ERROR_RED}✗${NC} {p[0]}: 缺失'); errs += 1
+    with open(rm, encoding='utf-8') as _rm:
+        for line in _rm:
+            stripped = line.strip()
+            if not stripped or stripped.startswith('#'): continue
+            p = [part.strip() for part in stripped.split('|')]
+            if len(p) < 4:
+                print(f'  ${ERROR_RED}✗${NC} {stripped}: manifest 非法')
+                errs += 1
+                continue
+            if rule_target_agent_id(p[0]) not in active_rule_agents:
+                continue
+            src = os.path.join('$ROOT_DIR/agent-rule', p[2])
+            dst = os.path.expanduser(p[3].replace('{{HOME}}', os.path.expanduser('~')))
+            if os.path.exists(dst):
+                if not rules_match(src, dst): print(f'  ${PENDING_GOLD}⚠${NC} {p[0]}: 漂移'); errs += 1
+                else: print(f'  ${SUCCESS_GREEN}✓${NC} {p[0]}: 一致')
+            else: print(f'  ${ERROR_RED}✗${NC} {p[0]}: 缺失'); errs += 1
 print(f'__ERRORS__:{errs}')
 ")
     [ "$silent" == "false" ] && echo "$audit_out" | grep -v "__ERRORS__"
