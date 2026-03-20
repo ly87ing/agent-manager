@@ -726,19 +726,28 @@ function finish_pipeline_execution() {
 }
 
 function maybe_init_secrets() {
-    if [ -d "$ROOT_DIR/secrets/.git" ]; then
-        return 0
-    fi
     echo -e "${HDR_BLUE}${BOLD}1. 凭证仓库检查 (Secrets Check)${NC}"
-    if [ -n "$OFFLINE_FLAG" ]; then
-        status_line "SKIP" "离线模式，跳过 secrets 检查"
-    elif [ -n "$DRY_RUN_FLAG" ]; then
-        status_line "SKIP" "空转模式，跳过 secrets 检查"
+    if [ -d "$ROOT_DIR/secrets/.git" ]; then
+        if [ -n "$OFFLINE_FLAG" ]; then
+            status_line "SKIP" "离线模式，跳过 secrets 拉取"
+        elif [ -n "$DRY_RUN_FLAG" ]; then
+            status_line "SKIP" "空转模式，跳过 secrets 拉取"
+        else
+            status_line "INFO" "拉取最新凭证..."
+            git -C "$ROOT_DIR/secrets" pull 2>&1 || \
+                echo -e "${ERROR_RED}⚠️  secrets 拉取失败，将使用本地已有凭证${NC}"
+        fi
     else
-        if [ -x "$ROOT_DIR/scripts/init-secrets.sh" ]; then
-            bash "$ROOT_DIR/scripts/init-secrets.sh" || {
-                echo -e "${ERROR_RED}⚠️  secrets 初始化失败，继续执行但 MCP 可能无法正常工作${NC}"
-            }
+        if [ -n "$OFFLINE_FLAG" ]; then
+            status_line "SKIP" "离线模式，跳过 secrets 检查"
+        elif [ -n "$DRY_RUN_FLAG" ]; then
+            status_line "SKIP" "空转模式，跳过 secrets 检查"
+        else
+            if [ -x "$ROOT_DIR/scripts/init-secrets.sh" ]; then
+                bash "$ROOT_DIR/scripts/init-secrets.sh" || {
+                    echo -e "${ERROR_RED}⚠️  secrets 初始化失败，继续执行但 MCP 可能无法正常工作${NC}"
+                }
+            fi
         fi
     fi
     echo ""
