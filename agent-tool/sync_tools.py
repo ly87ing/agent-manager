@@ -362,6 +362,15 @@ def main():
         if name not in policy_cfg:
             logging.info(f"[TOOL: {name}] 未声明策略，跳过。")
             continue
+        # 检查前置依赖是否就绪
+        requires = definition.get("requires", [])
+        unmet = [
+            req for req in requires
+            if not _check_ready(req, (def_cfg.get(req) or {}).get("ready_check"))
+        ]
+        if unmet:
+            logging.info(f"[TOOL: {name}] 前置依赖未就绪 {unmet}，跳过。")
+            continue
         policy = policy_cfg.get(name, {})
         # 离线模式下禁用 auto_update
         if args.offline:
