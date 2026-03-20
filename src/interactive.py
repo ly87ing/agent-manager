@@ -15,7 +15,6 @@ from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
 from src.json_config import atomic_write_json_file, get_typed_mapping_section, load_json_object_file
 
 # 颜色定义
-RED = "\033[0;31m"
 ERROR_RED = "\033[0;31m"
 GREEN = "\033[0;32m"
 YELLOW = "\033[0;33m"
@@ -234,8 +233,7 @@ def edit_section(section_key, section_name, local_policy):
         local[section_key] = {}
     local[section_key][key] = new_val
     # Update SYNC_REQUIRED flag
-    global SYNC_REQUIRED
-    SYNC_REQUIRED = True
+    mark_sync_required()
     print(f"{SUCCESS_GREEN}{section_name} {label} 已更新，等待保存。{NC}")
 
 if __name__ == "__main__":
