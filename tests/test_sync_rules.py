@@ -13,7 +13,7 @@ class SyncRulesTests(unittest.TestCase):
     def test_dry_run_does_not_create_directory_targets(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root)
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             target_dir = temp_root / "tmp-target" / "modules"
             self.assertFalse(target_dir.exists())
             (temp_root / "config" / "rules-targets.list").write_text(
@@ -35,7 +35,7 @@ class SyncRulesTests(unittest.TestCase):
     def test_directory_sync_removes_stale_files(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root)
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             target_dir = temp_root / "tmp-target" / "modules"
             source_dir = temp_root / "agent-rule" / "rules" / "global" / "modules"
             shutil.copytree(source_dir, target_dir)
@@ -60,7 +60,7 @@ class SyncRulesTests(unittest.TestCase):
     def test_directory_sync_removes_stale_backup_artifacts_without_rebackup(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root)
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             target_dir = temp_root / "tmp-target" / "modules"
             source_dir = temp_root / "agent-rule" / "rules" / "global" / "modules"
             shutil.copytree(source_dir, target_dir)
@@ -87,7 +87,7 @@ class SyncRulesTests(unittest.TestCase):
     def test_copy_mode_replaces_broken_directory_symlink_target(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root)
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             target_dir = temp_root / "tmp-target" / "modules"
             target_dir.parent.mkdir(parents=True)
             target_dir.symlink_to(temp_root / "missing-modules")
@@ -113,7 +113,7 @@ class SyncRulesTests(unittest.TestCase):
     def test_copy_mode_replaces_live_directory_symlink_target(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root)
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             real_dir = temp_root / "elsewhere"
             real_dir.mkdir(parents=True)
             target_dir = temp_root / "tmp-target" / "modules"
@@ -142,7 +142,7 @@ class SyncRulesTests(unittest.TestCase):
     def test_symlink_mode_replaces_broken_symlink_target(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root)
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             target_path = temp_root / "tmp-target" / "main.md"
             target_path.parent.mkdir(parents=True)
             target_path.symlink_to(temp_root / "missing-target.md")
@@ -172,7 +172,7 @@ class SyncRulesTests(unittest.TestCase):
     def test_invalid_manifest_target_is_rejected_before_writes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root)
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             bad_target = "relative/rules/global.md"
             (temp_root / "config" / "rules-targets.list").write_text(
                 f"bad_target|global|rules/global/main.md|{bad_target}\n",
@@ -192,7 +192,7 @@ class SyncRulesTests(unittest.TestCase):
     def test_doctor_audits_directory_targets_structurally(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root)
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             target_dir = temp_root / "tmp-target" / "modules"
             source_dir = temp_root / "agent-rule" / "rules" / "global" / "modules"
             shutil.copytree(source_dir, target_dir)

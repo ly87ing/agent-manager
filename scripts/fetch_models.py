@@ -31,7 +31,7 @@ def fetch_models(base_uri, api_key):
         if hasattr(e, 'read'):
             try:
                 openai_err += f" (响应: {e.read().decode('utf-8')[:100]})"
-            except:
+            except Exception:
                 pass
     except Exception as e:
         openai_err = str(e)
@@ -61,7 +61,7 @@ def fetch_models(base_uri, api_key):
         if hasattr(e, 'read'):
             try:
                 anthropic_err += f" (响应: {e.read().decode('utf-8')[:100]})"
-            except:
+            except Exception:
                 pass
     except Exception as e:
         anthropic_err = str(e)

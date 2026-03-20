@@ -100,7 +100,7 @@ class SyncToolsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             repo_root = temp_root / "repo"
-            shutil.copytree(ROOT, repo_root)
+            shutil.copytree(ROOT, repo_root, ignore=shutil.ignore_patterns('repositories'))
             module_path = repo_root / "agent-tool" / "sync_tools.py"
             working_dir = temp_root / "cwd"
             victim_dir = working_dir / "agent-lifecycle"

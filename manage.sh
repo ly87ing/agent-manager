@@ -541,7 +541,7 @@ for k, v in ap.items():
         continue
     p = os.path.expanduser(v if isinstance(v, str) else v.get('path', ''))
     if os.path.exists(p):
-        cnt = len(re.findall(r'_MANAGED_BY', open(p).read()))
+        with open(p, encoding='utf-8') as _f: cnt = len(re.findall(r'_MANAGED_BY', _f.read()))
         print(f'  ${SUCCESS_GREEN}✓${NC} {get_agent_display_name(k)}: 已注入 {cnt} 个托管服务')
     else:
         print(f'  ${ERROR_RED}✗${NC} {get_agent_display_name(k)}: 缺失')

@@ -175,7 +175,8 @@ def install_dependencies_and_build(repo_path, config, dry_run=False, offline=Fal
                     pkg_data = json.load(f)
                     if "scripts" in pkg_data and "build" in pkg_data["scripts"]:
                         run_cmd(f"{pkg_mgr} run build", cwd=repo_path)
-                except: pass
+                except Exception:
+                    pass
         else: logging.error(f"[{repo_path.name}] 依赖安装失败: {out}"); success_all = False
             
     elif (repo_path / "requirements.txt").exists() or (repo_path / "pyproject.toml").exists():
@@ -219,7 +220,6 @@ def clone_or_update_repo(name, url, base_dir, dry_run=False, offline=False, auto
     else:
         logging.error(f"[{name}] 下载失败: {output}")
     return target_dir, success
-    return target_dir, True
 
 def find_skills_recursively(search_path):
     found_skills = {}
@@ -252,7 +252,7 @@ def create_link(source, link, dry_run=False):
         try:
             if link.is_symlink() or not link.is_dir(): link.unlink()
             else: shutil.rmtree(link)
-        except: return
+        except OSError: return
     try:
         if platform.system() == "Windows":
             subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(source)], check=True, capture_output=True)

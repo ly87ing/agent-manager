@@ -127,7 +127,8 @@ def install_dependencies_and_build(repo_path, config, dry_run=False, offline=Fal
                     pkg_data = json.load(f)
                     if "scripts" in pkg_data and "build" in pkg_data["scripts"]:
                         run_cmd(f"{pkg_mgr} run build", cwd=repo_path)
-                except: pass
+                except Exception:
+                    pass
         else: logging.error(f"[{repo_path.name}] 失败: {out}"); success_all = False
     return success_all
 
@@ -151,7 +152,9 @@ def find_unresolved_placeholders(value, path=""):
     return unresolved
 
 def load_existing_json_config(agent_name, config_path):
-    current_config = {"mcpServers": {}}
+    is_opencode = agent_name == "opencode"
+    mcp_key = "mcp" if is_opencode else "mcpServers"
+    current_config = {mcp_key: {}}
     if not config_path.exists():
         return current_config
     try:
@@ -161,7 +164,7 @@ def load_existing_json_config(agent_name, config_path):
                 raise ValueError("顶层必须是对象")
             return parsed
     except Exception as exc:
-        logging.error(f"INFO: [AGENT: {agent_name}] 现有 JSON 配置解析失败，已停止覆盖: {exc}")
+        logging.error(f"[AGENT: {agent_name}] 现有 JSON 配置解析失败，已停止覆盖: {exc}")
         return None
 
 def toml_quote(value):
@@ -204,7 +207,7 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
         try:
             tomllib.loads(content)
         except tomllib.TOMLDecodeError as exc:
-            logging.error(f"INFO: [AGENT: {agent_name}] 现有 TOML 配置解析失败，已停止覆盖: {exc}")
+            logging.error(f"[AGENT: {agent_name}] 现有 TOML 配置解析失败，已停止覆盖: {exc}")
             return False
 
     parts = re.split(r'(\n\s*\[)', content)
@@ -227,7 +230,7 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
                     logging.info(f"INFO: [AGENT: {agent_name}] 发现同名用户自管 TOML 段，真实执行时将拒绝接管: {srv_name} (预览)")
                     blocked_active_names.add(srv_name)
                 else:
-                    logging.error(f"INFO: [AGENT: {agent_name}] 发现同名用户自管 TOML 段，拒绝接管: {srv_name}")
+                    logging.error(f"[AGENT: {agent_name}] 发现同名用户自管 TOML 段，拒绝接管: {srv_name}")
                     return False
             if is_managed_chunk:
                 continue
@@ -250,7 +253,7 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
     try:
         tomllib.loads(full_content.strip() + "\n")
     except tomllib.TOMLDecodeError as exc:
-        logging.error(f"INFO: [AGENT: {agent_name}] 生成的 TOML 非法，已停止写入: {exc}")
+        logging.error(f"[AGENT: {agent_name}] 生成的 TOML 非法，已停止写入: {exc}")
         return False
     if not dry_run:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -277,7 +280,7 @@ def backup_config(path, dry_run=False):
         backups = sorted(list(path.parent.glob(f"{path.name}.bak.*")), key=os.path.getmtime, reverse=True)
         for old_bak in backups[5:]:
             try: os.remove(old_bak)
-            except: pass
+            except OSError: pass
 
 def manage_mcp_config(agents_config, mcp_servers, dry_run=False):
     """更新各个 Agent 的 MCP 配置文件"""
@@ -347,8 +350,7 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False):
             
             # OpenCode 使用 "mcp" 键，其他 Agent 使用 "mcpServers"
             is_opencode = agent_name == "opencode"
-            key_name = "mcp" if is_opencode and "mcp" in current_config else "mcpServers"
-            if is_opencode: key_name = "mcp"  # OpenCode 强制使用 mcp
+            key_name = "mcp" if is_opencode else "mcpServers"
             if key_name not in current_config: current_config[key_name] = {}
             
             # Orphan Removal
