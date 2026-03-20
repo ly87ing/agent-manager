@@ -227,7 +227,7 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
             is_managed_chunk = '_MANAGED_BY = "agent-manager"' in chunk
             if srv_name in active_servers and not is_managed_chunk:
                 if dry_run:
-                    logging.info(f"INFO: [AGENT: {agent_name}] 发现同名用户自管 TOML 段，真实执行时将拒绝接管: {srv_name} (预览)")
+                    logging.info(f"[AGENT: {agent_name}] 发现同名用户自管 TOML 段，真实执行时将拒绝接管: {srv_name} (预览)")
                     blocked_active_names.add(srv_name)
                 else:
                     logging.error(f"[AGENT: {agent_name}] 发现同名用户自管 TOML 段，拒绝接管: {srv_name}")
@@ -262,7 +262,7 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
             with os.fdopen(fd, 'w', encoding='utf-8') as f: f.write(full_content.strip() + "\n")
             os.replace(temp_path, path)
             os.chmod(path, 0o600)
-            logging.info(f"INFO: [AGENT: {agent_name}] TOML 配置已原子更新。")
+            logging.info(f"[AGENT: {agent_name}] TOML 配置已原子更新。")
         except Exception as e:
             if os.path.exists(temp_path): os.remove(temp_path)
             logging.error(f"TOML 写入失败: {e}")
@@ -318,7 +318,7 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False):
             continue
 
         if not config_path.parent.exists():
-            logging.info(f"INFO: [AGENT: {agent_name}] Agent 目录缺失，自动创建以确保后续配置注入。")
+            logging.info(f"[AGENT: {agent_name}] Agent 目录缺失，自动创建以确保后续配置注入。")
             try:
                 config_path.parent.mkdir(parents=True, exist_ok=True)
             except Exception as e:
@@ -341,7 +341,7 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False):
             continue
 
         if dry_run:
-            logging.info(f"INFO: [AGENT: {agent_name}] (预览: 计划原子更新 JSON)")
+            logging.info(f"[AGENT: {agent_name}] (预览: 计划原子更新 JSON)")
         else:
             current_config = load_existing_json_config(agent_name, config_path)
             if current_config is None:
@@ -363,7 +363,7 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False):
                         if k in preserved_failed_servers:
                             continue
                         if k not in active_mcp_settings:
-                            logging.info(f"INFO: [AGENT: {agent_name}] 移除孤儿 MCP: {k}")
+                            logging.info(f"[AGENT: {agent_name}] 移除孤儿 MCP: {k}")
                             del current_config[key_name][k]
             
             # Inject
@@ -382,7 +382,7 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False):
                     if "env" not in settings: settings["env"] = {}
                     settings["env"]["_MANAGED_BY"] = "agent-manager"
                     current_config[key_name][name] = settings
-                logging.info(f"INFO: [AGENT: {agent_name}] 更新 MCP: {name}")
+                logging.info(f"[AGENT: {agent_name}] 更新 MCP: {name}")
             
             atomic_write_json(config_path, current_config)
     return all_ok
