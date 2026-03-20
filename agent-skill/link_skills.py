@@ -15,6 +15,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.agent_ids import canonicalize_agent_list, canonicalize_agent_mapping
 from src.json_config import get_typed_mapping_section, load_json_object_file
+from src.manage_runtime_probe import is_agent_installed
 from src.runtime_logging import configure_logging
 
 configure_logging()
@@ -396,6 +397,14 @@ def main():
     AGENT_TARGETS = canonicalize_agent_mapping(
         {k: (v if isinstance(v, str) else v.get("path")) for k, v in agent_targets.items()}
     )
+
+    # 过滤未安装的 agent
+    agent_defs = load_json_object_file(REPO_ROOT / "config" / "agents.json", strict=False, missing_ok=True) or {}
+    installed_agents = {name for name, defn in agent_defs.items() if is_agent_installed(name, defn)}
+    skipped = [name for name in AGENT_TARGETS if name not in installed_agents]
+    for name in skipped:
+        logging.info(f"[AGENT: {name}] 未安装，跳过 skill 链接。")
+    AGENT_TARGETS = {k: v for k, v in AGENT_TARGETS.items() if k in installed_agents}
     
     for name, r_def in REPOS.items():
         if name in policy_cfg: r_def.update(policy_cfg[name])

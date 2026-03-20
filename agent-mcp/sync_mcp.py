@@ -19,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.agent_ids import canonicalize_agent_list, canonicalize_agent_mapping
 from src.json_config import get_typed_mapping_section, load_json_object_file
+from src.manage_runtime_probe import is_agent_installed
 from src.runtime_logging import configure_logging
 
 configure_logging()
@@ -280,13 +281,18 @@ def backup_config(path, dry_run=False):
             try: os.remove(old_bak)
             except OSError: pass
 
-def manage_mcp_config(agents_config, mcp_servers, dry_run=False):
+def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None):
     """更新各个 Agent 的 MCP 配置文件"""
     all_ok = True
     declared_managed_servers = {
         name for name, srv_config in mcp_servers.items() if srv_config.get("_declared_in_policy", True)
     }
     for agent_name, agent_meta in agents_config.items():
+        if agent_defs:
+            defn = agent_defs.get(agent_name, {})
+            if not is_agent_installed(agent_name, defn):
+                logging.info(f"[AGENT: {agent_name}] 未安装，跳过 MCP 注入。")
+                continue
         config_path_str = agent_meta if isinstance(agent_meta, str) else agent_meta.get("path")
         file_format = "json" if isinstance(agent_meta, str) else agent_meta.get("format", "json")
         config_path = Path(config_path_str).expanduser()
@@ -541,7 +547,8 @@ def main():
                         all_build_success = False
                         srv_config["_sync_ready"] = False
 
-    if not manage_mcp_config(AGENT_TARGETS, definition_cfg, dry_run=args.dry_run):
+    agent_defs = load_json_object_file(REPO_ROOT / "config" / "agents.json", strict=False, missing_ok=True) or {}
+    if not manage_mcp_config(AGENT_TARGETS, definition_cfg, dry_run=args.dry_run, agent_defs=agent_defs):
         all_build_success = False
     if not all_build_success: sys.exit(1)
     logging.info("任务完成！")

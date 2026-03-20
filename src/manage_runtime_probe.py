@@ -334,3 +334,18 @@ class ProviderInventory:
 def detect_all_providers(bin_name, config=None, inventory=None):
     active_inventory = inventory or ProviderInventory()
     return active_inventory.detect_all_providers(bin_name, config)
+
+
+def is_agent_installed(agent_name: str, agent_def: dict) -> bool:
+    """快速检查 agent 是否已安装。
+
+    优先检查 bin（shutil.which），其次检查 app_path（os.path.exists）。
+    两者均未配置时返回 False。
+    """
+    bin_name = agent_def.get("bin")
+    if bin_name and shutil.which(bin_name):
+        return True
+    app_path = agent_def.get("app_path")
+    if app_path and os.path.exists(os.path.expanduser(app_path)):
+        return True
+    return False
