@@ -1,0 +1,15 @@
+{
+  "targets": {
+    "tmux": {
+      "template": "agent-terminal/templates/tmux.conf.tmpl",
+      "destination": "~/.tmux.conf",
+      "chmod": "0600"
+    },
+    "iterm2_dynamic_profile": {
+      "template": "agent-terminal/templates/iterm2-profile.json.tmpl",
+      "destination": "~/Library/Application Support/iTerm2/DynamicProfiles/managed.json",
+      "chmod": "0600"
+    }
+  },
+  "secrets_file": "secrets/terminal.env"
+}

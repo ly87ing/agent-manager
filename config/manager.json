@@ -8,7 +8,9 @@
   },
   "tools": {
     "playwright-cli": { "enabled": true, "auto_update": true },
-    "auggie": { "enabled": true, "auto_update": true }
+    "auggie": { "enabled": true, "auto_update": true },
+    "iterm2": { "enabled": true, "auto_update": true },
+    "tmux": { "enabled": true, "auto_update": true }
   },
   "skills": {
     "playwright-best-practices-skill": { "enabled": true },

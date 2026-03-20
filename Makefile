@@ -1,4 +1,4 @@
-.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list restore logs rules-sync skills-link mcp-sync mcp-prepare tools-sync dry-run clean-logs offline
+.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list restore logs rules-sync skills-link mcp-sync mcp-prepare tools-sync terminal-sync dry-run clean-logs offline
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -94,6 +94,9 @@ mcp-prepare:
 
 tools-sync:
 	@./manage.sh tools:sync
+
+terminal-sync:
+	@./manage.sh terminal:sync
 
 # 预览模式 (仅输出计划动作，跳过远端副作用)
 dry-run:

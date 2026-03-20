@@ -180,13 +180,50 @@ def prune_orphan_tools(base_dir, managed_names, dry_run=False, force_yes=False):
                 shutil.rmtree(item)
                 logging.info(f"  已成功清理: {item.name}")
 
+def _check_ready(name: str, ready_check: str | None) -> bool:
+    """根据 ready_check 字段判断工具是否已就绪。
+
+    支持两种前缀：
+      bin:<name>  — 用 shutil.which 检查可执行文件是否在 PATH 中
+      app:<path>  — 用 os.path.exists 检查 .app 包是否存在
+    若 ready_check 为空则始终返回 False（视为未安装）。
+    """
+    if not ready_check:
+        return False
+    if ready_check.startswith("bin:"):
+        bin_name = ready_check[4:].strip()
+        found = shutil.which(bin_name) is not None
+        logging.debug(f"[TOOL: {name}] ready_check bin:{bin_name} -> {found}")
+        return found
+    if ready_check.startswith("app:"):
+        app_path = os.path.expanduser(ready_check[4:].strip())
+        found = os.path.exists(app_path)
+        logging.debug(f"[TOOL: {name}] ready_check app:{app_path} -> {found}")
+        return found
+    logging.warning(f"[TOOL: {name}] 未知 ready_check 格式: {ready_check}，视为未就绪")
+    return False
+
+
 def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
     # 合并策略
     enabled = policy.get("enabled", True)
     auto_update = policy.get("auto_update", True)
     
     if not enabled:
-        logging.info(f"[TOOL: {name}] (策略已禁用，跳过)")
+        uninstall_cmd = definition.get("uninstall")
+        ready_check = definition.get("ready_check")
+        if uninstall_cmd and _check_ready(name, ready_check):
+            if dry_run:
+                logging.info(f"[TOOL: {name}] (预览: 策略已禁用，计划卸载)")
+            else:
+                logging.info(f"[TOOL: {name}] 策略已禁用，执行卸载...")
+                ok, out = run_cmd(uninstall_cmd)
+                if not ok:
+                    logging.error(f"[TOOL: {name}] 卸载失败: {out}")
+                    return False
+                logging.info(f"[TOOL: {name}] 已卸载")
+        else:
+            logging.info(f"[TOOL: {name}] (策略已禁用，跳过)")
         return True
 
     url = definition.get("url")
@@ -263,12 +300,33 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
                 success_build = False
 
     elif install_cmd:
-        if dry_run: logging.info(f"[TOOL: {name}] (预览: 计划执行安装)")
+        ready_check = definition.get("ready_check")
+        upgrade_cmd = definition.get("upgrade")
+
+        # 检查工具是否已就绪
+        already_ready = _check_ready(name, ready_check)
+
+        if already_ready:
+            if auto_update and upgrade_cmd:
+                if dry_run:
+                    logging.info(f"[TOOL: {name}] (预览: 计划执行升级)")
+                else:
+                    logging.info(f"[TOOL: {name}] 已安装，执行升级...")
+                    ok, out = run_cmd(upgrade_cmd)
+                    if not ok:
+                        logging.warning(f"[TOOL: {name}] 升级失败（保留现有版本）: {out}")
+            else:
+                logging.info(f"[TOOL: {name}] 已就绪，跳过安装。")
         else:
-            logging.info(f"执行 {name} 全局安装...")
-            ok, out = run_cmd(install_cmd)
-            if not ok: logging.error(f"[TOOL: {name}] 安装失败: {out}"); success_build = False
-                
+            if dry_run:
+                logging.info(f"[TOOL: {name}] (预览: 计划执行安装)")
+            else:
+                logging.info(f"执行 {name} 全局安装...")
+                ok, out = run_cmd(install_cmd)
+                if not ok:
+                    logging.error(f"[TOOL: {name}] 安装失败: {out}")
+                    success_build = False
+
     return success_build
 
 def main():

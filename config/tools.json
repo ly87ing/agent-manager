@@ -7,6 +7,18 @@
     },
     "auggie": {
       "install": "npm install -g @augmentcode/auggie"
+    },
+    "iterm2": {
+      "install": "brew install --cask iterm2",
+      "uninstall": "brew uninstall --cask iterm2",
+      "upgrade": "brew upgrade --cask iterm2",
+      "ready_check": "app:/Applications/iTerm.app"
+    },
+    "tmux": {
+      "install": "brew install tmux",
+      "uninstall": "brew uninstall tmux",
+      "upgrade": "brew upgrade tmux",
+      "ready_check": "bin:tmux"
     }
   }
 }

@@ -1,0 +1,45 @@
+# _MANAGED_BY = agent-manager
+# 本文件由 agent-terminal/sync_terminal.py 自动生成，请勿手动编辑
+
+# 前缀键
+set -g prefix ${TMUX_PREFIX}
+unbind C-b
+bind ${TMUX_PREFIX} send-prefix
+
+# 终端颜色
+set -g default-terminal "screen-256color"
+set -ga terminal-overrides ",xterm-256color:Tc"
+
+# 鼠标支持
+set -g mouse on
+
+# 历史行数
+set -g history-limit 10000
+
+# 窗口编号从 1 开始
+set -g base-index 1
+setw -g pane-base-index 1
+
+# 窗口标题
+set -g set-titles on
+set -g set-titles-string "#T"
+
+# 面板分割快捷键（保持当前目录）
+bind | split-window -h -c "#{pane_current_path}"
+bind - split-window -v -c "#{pane_current_path}"
+unbind '"'
+unbind %
+
+# 面板导航（Vim 风格）
+bind h select-pane -L
+bind j select-pane -D
+bind k select-pane -U
+bind l select-pane -R
+
+# 重载配置
+bind r source-file ~/.tmux.conf \; display-message "配置已重载"
+
+# 状态栏
+set -g status-interval 5
+set -g status-left-length 30
+set -g status-right-length 60

@@ -858,12 +858,20 @@ function run_mcp_sync_task() {
     run_task_in_dir "$title" "MCP 注入完成" "MCP 失败" 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" "${args[@]}"
 }
 
+function run_terminal_sync_task() {
+    local args=(sync_terminal.py)
+    if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
+    if [ -n "$OFFLINE_FLAG" ]; then args+=("$OFFLINE_FLAG"); fi
+    run_task_in_dir "同步终端配置" "终端配置同步完成" "终端配置失败" 120 "$ROOT_DIR/agent-terminal" "$PYTHON_CMD" "${args[@]}"
+}
+
 function run_sync_pipeline() {
     begin_workflow "🔄 Agent Manager 配置同步启动"
     begin_pipeline_execution
     run_pipeline_step run_rules_sync_task
     run_pipeline_step run_skills_link_task true
     run_pipeline_step run_mcp_sync_task false true
+    run_pipeline_step run_terminal_sync_task
     finish_pipeline_execution
 }
 
@@ -878,6 +886,7 @@ function run_update_pipeline() {
     run_pipeline_step run_rules_sync_task
     run_pipeline_step run_skills_link_task false
     run_pipeline_step run_mcp_sync_task true false
+    run_pipeline_step run_terminal_sync_task
     finish_pipeline_execution
 }
 
@@ -1183,6 +1192,8 @@ case "$cmd" in
         (cd "$ROOT_DIR/agent-skill" && $PYTHON_CMD link_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG) ;;
     tools:sync)
         (cd "$ROOT_DIR/agent-tool" && $PYTHON_CMD sync_tools.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/tools.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG) ;;
+    terminal:sync)
+        (cd "$ROOT_DIR/agent-terminal" && $PYTHON_CMD sync_terminal.py $DRY_RUN_FLAG $OFFLINE_FLAG) ;;
     fetch-models)
         args=()
         for arg in "${ORIGINAL_ARGS[@]}"; do
@@ -1263,6 +1274,7 @@ case "$cmd" in
         echo -e "  ${BORDER_GRAY}rules:sync${NC}      独立执行规则与系统级 prompt 指令向各个 Agent 的拷贝或软链接分发"
         echo -e "  ${BORDER_GRAY}skills:link${NC}     独立执行全局或系统级专业技能代码集到 Agent 沙盒空间的映射配置与软链接"
         echo -e "  ${BORDER_GRAY}tools:sync${NC}      独立同步或安装全局统一增强工具链条"
+        echo -e "  ${BORDER_GRAY}terminal:sync${NC}   独立同步终端工具（iTerm2/tmux）配置模板到家目录"
         echo "" ;;
     *) echo -e "${ERROR_RED}错误: 未知命令 '$cmd'${NC}"; exit 1 ;;
 esac
