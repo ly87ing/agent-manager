@@ -84,12 +84,10 @@ def clone_or_update_repo(name, url, base_dir, dry_run=False, offline=False):
     if offline:
         logging.error(f"[{name}] 离线模式且本地仓库缺失，无法下载。")
         return target_dir, False
-    if not dry_run:
-        success, output = run_cmd(["git", "clone", url, str(target_dir)])
-        if success: logging.info(f"[{name}] 下载成功。")
-        else: logging.error(f"[{name}] 下载失败: {output}")
-        return target_dir, success
-    return target_dir, True
+    success, output = run_cmd(["git", "clone", url, str(target_dir)])
+    if success: logging.info(f"[{name}] 下载成功。")
+    else: logging.error(f"[{name}] 下载失败: {output}")
+    return target_dir, success
 
 def install_dependencies_and_build(repo_path, config, dry_run=False, offline=False):
     """根据仓库类型自动安装依赖和构建"""
