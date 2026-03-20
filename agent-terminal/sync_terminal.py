@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import shutil
 import stat
 import sys
 import tempfile
@@ -23,6 +24,19 @@ from src.runtime_logging import configure_logging
 from src.template_utils import load_env_file, render_template
 
 configure_logging()
+
+
+def _check_tool_ready(tool_name: str) -> bool:
+    """检查工具是否已安装（bin 在 PATH 中，或已知 app 路径存在）。"""
+    _APP_PATHS: dict[str, str] = {
+        "iterm2": "/Applications/iTerm.app",
+    }
+    if shutil.which(tool_name):
+        return True
+    app_path = _APP_PATHS.get(tool_name)
+    if app_path and os.path.exists(app_path):
+        return True
+    return False
 
 
 def _parse_chmod(chmod_str: str | None) -> int | None:
@@ -82,6 +96,12 @@ def sync_terminal(config_path: Path, repo_root: Path, dry_run: bool = False, off
         if not isinstance(target_cfg, dict):
             logging.error(f"[TERMINAL: {target_name}] 配置必须是对象，跳过")
             all_ok = False
+            continue
+
+        requires = target_cfg.get("requires", [])
+        unmet = [t for t in requires if not _check_tool_ready(t)]
+        if unmet:
+            logging.info(f"[TERMINAL: {target_name}] 前置工具未安装 {unmet}，跳过。")
             continue
 
         tmpl_rel = target_cfg.get("template")

@@ -32,6 +32,32 @@ manifest_path="$repo_root/../config/rules-targets.list"
 
 [ -f "$manifest_path" ] || { echo "Manifest not found: $manifest_path" >&2; exit 1; }
 
+# 根据目标路径前缀推断 agent，检查是否已安装
+# 返回 0 表示已安装（或无法推断，默认放行），返回 1 表示未安装
+agent_installed_for_target() {
+  local dst_pat="$1"
+  local expanded
+  expanded="$(expand_home "$dst_pat")"
+  case "$expanded" in
+    "$HOME"/.claude/*|"$HOME"/.claude)
+      command -v claude >/dev/null 2>&1 ;;
+    "$HOME"/.gemini/*|"$HOME"/.gemini)
+      command -v gemini >/dev/null 2>&1 ;;
+    "$HOME"/.cursor/*|"$HOME"/.cursor)
+      command -v cursor >/dev/null 2>&1 || [ -d "/Applications/Cursor.app" ] ;;
+    "$HOME"/.copilot/*|"$HOME"/.copilot)
+      command -v copilot >/dev/null 2>&1 || command -v gh >/dev/null 2>&1 ;;
+    "$HOME"/.config/opencode/*|"$HOME"/.config/opencode)
+      command -v opencode >/dev/null 2>&1 ;;
+    "$HOME"/.codex/*|"$HOME"/.codex)
+      # codex 无标准 bin，检查配置目录是否存在
+      [ -d "$HOME/.codex" ] ;;
+    *)
+      # 无法推断，默认放行
+      return 0 ;;
+  esac
+}
+
 expand_home() {
   local value="$1"
   value="${value//\{\{HOME\}\}/$HOME}"
@@ -216,6 +242,11 @@ while IFS='|' read -r name group src_rel dst_pat; do
 
   src_abs="$repo_root/$src_rel"
   dst_abs="$(expand_home "$dst_pat")"
+
+  if ! agent_installed_for_target "$dst_pat"; then
+    echo "INFO: [AGENT: Rules] $name 目标 agent 未安装，跳过。"
+    continue
+  fi
 
   if [ "$mode" == "copy" ]; then sync_copy "$src_abs" "$dst_abs"
   else sync_symlink "$src_abs" "$dst_abs"; fi
