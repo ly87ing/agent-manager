@@ -156,6 +156,10 @@ class ManageScriptTests(unittest.TestCase):
                     "exit 0\n"
                 ),
             )
+            self._write_stub(
+                temp_root / "agent-terminal" / "sync_terminal.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
 
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "sync"],
@@ -189,6 +193,10 @@ class ManageScriptTests(unittest.TestCase):
                     f"printf '%s\\n' rules >> {str(call_log)!r}\n"
                     "exit 0\n"
                 ),
+            )
+            self._write_stub(
+                temp_root / "agent-terminal" / "sync_terminal.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
             )
 
             result = subprocess.run(
@@ -776,6 +784,10 @@ class ManageScriptTests(unittest.TestCase):
                 ),
             )
             self._write_stub(
+                temp_root / "agent-terminal" / "sync_terminal.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
                 temp_root / "scripts" / "init-secrets.sh",
                 (
                     "#!/usr/bin/env bash\n"
@@ -840,6 +852,10 @@ class ManageScriptTests(unittest.TestCase):
                     f"printf '%s\\n' \"rules $*\" >> {str(call_log)!r}\n"
                     "exit 0\n"
                 ),
+            )
+            self._write_stub(
+                temp_root / "agent-terminal" / "sync_terminal.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
             )
             self._write_stub(
                 temp_root / "scripts" / "init-secrets.sh",
@@ -909,6 +925,10 @@ class ManageScriptTests(unittest.TestCase):
                 ),
             )
             self._write_stub(
+                temp_root / "agent-terminal" / "sync_terminal.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
                 temp_root / "scripts" / "init-secrets.sh",
                 (
                     "#!/usr/bin/env bash\n"
@@ -955,6 +975,10 @@ class ManageScriptTests(unittest.TestCase):
             self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log, "False")
             self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log, "False")
             self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 99\n")
+            self._write_stub(
+                temp_root / "agent-terminal" / "sync_terminal.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
 
             env = self._managed_env()
             env["PATH"] = f"{fake_bin}:{env['PATH']}"
@@ -1054,6 +1078,10 @@ class ManageScriptTests(unittest.TestCase):
                 ),
             )
             self._write_stub(
+                temp_root / "agent-terminal" / "sync_terminal.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
                 temp_root / "scripts" / "init-secrets.sh",
                 (
                     "#!/usr/bin/env bash\n"
@@ -1144,6 +1172,10 @@ class ManageScriptTests(unittest.TestCase):
                 temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
                 "#!/usr/bin/env bash\nexit 0\n",
             )
+            self._write_stub(
+                temp_root / "agent-terminal" / "sync_terminal.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
 
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--offline"],
@@ -1184,6 +1216,10 @@ class ManageScriptTests(unittest.TestCase):
                 "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
             )
             self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 0\n")
+            self._write_stub(
+                temp_root / "agent-terminal" / "sync_terminal.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
 
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--offline"],
@@ -1225,6 +1261,10 @@ class ManageScriptTests(unittest.TestCase):
                 "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
             )
             self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 0\n")
+            self._write_stub(
+                temp_root / "agent-terminal" / "sync_terminal.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
 
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--offline"],
@@ -1266,6 +1306,10 @@ class ManageScriptTests(unittest.TestCase):
                 "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
             )
             self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 0\n")
+            self._write_stub(
+                temp_root / "agent-terminal" / "sync_terminal.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
 
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--offline"],
@@ -1307,6 +1351,10 @@ class ManageScriptTests(unittest.TestCase):
                 "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
             )
             self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 0\n")
+            self._write_stub(
+                temp_root / "agent-terminal" / "sync_terminal.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
 
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--offline"],
@@ -1420,6 +1468,10 @@ class ManageScriptTests(unittest.TestCase):
                 self._write_stub(
                     temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
                     "#!/usr/bin/env bash\nexit 0\n",
+                )
+                self._write_stub(
+                    temp_root / "agent-terminal" / "sync_terminal.py",
+                    "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
                 )
 
                 result = subprocess.run(

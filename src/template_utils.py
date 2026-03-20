@@ -34,12 +34,14 @@ def load_env_file(path: str | Path) -> dict[str, str]:
 def render_template(tmpl_str: str, env: dict[str, str]) -> str:
     """将模板字符串中的 ${VAR} 占位符替换为 env 中对应值。
 
-    若存在未被替换的 ${VAR} 占位符则抛出 ValueError。
+    只替换 env 中存在的变量；未在 env 中声明的 ${VAR} 保持原样（pass-through），
+    以支持 zshrc 等包含 shell 自身变量语法的模板。
+    若 env 中声明的变量值为空字符串则正常替换（允许空值）。
     """
     def replacer(match: re.Match) -> str:
         var_name = match.group(1)
         if var_name not in env:
-            raise ValueError(f"模板变量未定义: ${{{var_name}}}")
+            return match.group(0)  # 保持原样
         return env[var_name]
 
     result = re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", replacer, tmpl_str)

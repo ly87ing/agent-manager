@@ -1,45 +1,101 @@
 # _MANAGED_BY = agent-manager
 # 本文件由 agent-terminal/sync_terminal.py 自动生成，请勿手动编辑
 
-# 前缀键
-set -g prefix ${TMUX_PREFIX}
-unbind C-b
-bind ${TMUX_PREFIX} send-prefix
-
-# 终端颜色
+# ============================================================
+# 基础设置
+# ============================================================
 set -g default-terminal "screen-256color"
 set -ga terminal-overrides ",xterm-256color:Tc"
-
-# 鼠标支持
 set -g mouse on
-
-# 历史行数
-set -g history-limit 10000
-
-# 窗口编号从 1 开始
 set -g base-index 1
 setw -g pane-base-index 1
+set -g renumber-windows on
+set -g escape-time 0
 
-# 窗口标题
-set -g set-titles on
-set -g set-titles-string "#T"
+# ============================================================
+# 快捷键提示 - 双行状态栏（类似 Zellij 底栏）
+# ============================================================
+set -g status 2
+set -g status-position bottom
+set -g status-interval 5
 
-# 面板分割快捷键（保持当前目录）
-bind | split-window -h -c "#{pane_current_path}"
-bind - split-window -v -c "#{pane_current_path}"
-unbind '"'
-unbind %
+# 第一行：会话/窗口信息
+set -g status-style "bg=colour235,fg=colour251"
+set -g status-left "#[fg=colour235,bg=colour108,bold]  #S #[fg=colour108,bg=colour235] "
+set -g status-left-length 30
+set -g status-right "#[fg=colour243] %m/%d #[fg=colour251]%H:%M  "
+set -g status-right-length 50
 
-# 面板导航（Vim 风格）
+# 窗口标签样式
+setw -g window-status-format "#[fg=colour243] #I:#W "
+setw -g window-status-current-format "#[fg=colour235,bg=colour73,bold] #I:#W #[fg=colour73,bg=colour235]"
+
+# 第二行：快捷键提示栏
+set -g status-format[1] "#[align=centre,bg=colour235,fg=colour246]  Ctrl-b  #[fg=colour232,bg=colour76,bold] c #[bg=colour235,fg=colour231,nobold] 新窗口  #[fg=colour232,bg=colour76,bold] \" #[bg=colour235,fg=colour231,nobold] 横分  #[fg=colour232,bg=colour76,bold] %% #[bg=colour235,fg=colour231,nobold] 竖分  #[fg=colour232,bg=colour76,bold] x #[bg=colour235,fg=colour231,nobold] 关闭  #[fg=colour232,bg=colour76,bold] z #[bg=colour235,fg=colour231,nobold] 全屏  #[fg=colour232,bg=colour76,bold] HJKL #[bg=colour235,fg=colour231,nobold] 调整  #[fg=colour232,bg=colour76,bold] d #[bg=colour235,fg=colour231,nobold] 分离  #[fg=colour232,bg=colour76,bold] s #[bg=colour235,fg=colour231,nobold] 会话  #[fg=colour232,bg=colour76,bold] [ #[bg=colour235,fg=colour231,nobold] 复制  #[fg=colour232,bg=colour214,bold] ? #[bg=colour235,fg=colour231,nobold] 帮助 "
+
+# ============================================================
+# 快捷键帮助菜单（prefix + ? 弹出）
+# ============================================================
+unbind ?
+bind-key ? display-menu -T " 快捷键帮助 " -x C -y C \
+  "" \
+  "-#[align=centre]── 窗口操作 ──" "" "" \
+  "新建窗口          (c)" c "new-window" \
+  "关闭窗口          (x)" x "kill-window" \
+  "重命名窗口        (,)" , "command-prompt -p '新名称:' 'rename-window %%'" \
+  "窗口列表          (w)" w "choose-window" \
+  "" \
+  "-#[align=centre]── 面板操作 ──" "" "" \
+  "横向分割          (\")" '"' "split-window -v -c '#{pane_current_path}'" \
+  "纵向分割          (%%)" % "split-window -h -c '#{pane_current_path}'" \
+  "关闭面板          (x)" x "kill-pane" \
+  "全屏切换          (z)" z "resize-pane -Z" \
+  "面板布局          (空格)" Space "next-layout" \
+  "" \
+  "-#[align=centre]── 导航 ──" "" "" \
+  "面板切换          (hjkl)" h "select-pane -L" \
+  "调整大小          (HJKL)" H "resize-pane -L 5" \
+  "" \
+  "-#[align=centre]── 会话操作 ──" "" "" \
+  "会话列表          (s)" s "choose-tree -Zs" \
+  "分离会话          (d)" d "detach-client" \
+  "重命名会话        ($)" '$' "command-prompt -p '新名称:' 'rename-session %%'" \
+  "" \
+  "-#[align=centre]── 复制模式 ──" "" "" \
+  "进入复制模式      ([)" '[' "copy-mode" \
+  "粘贴              (])" ']' "paste-buffer" \
+  "" \
+  "-#[align=centre]── 其他 ──" "" "" \
+  "命令模式          (:)" ':' "command-prompt" \
+  "重载配置          (r)" r "source-file ~/.tmux.conf; display '配置已重载'"
+
+# ============================================================
+# 便捷绑定
+# ============================================================
+# 重载配置
+bind r source-file ~/.tmux.conf \; display-message "配置已重载"
+
+# 分屏时保留当前路径
+bind '"' split-window -v -c "#{pane_current_path}"
+bind '%' split-window -h -c "#{pane_current_path}"
+
+# 用 hjkl 切换面板
 bind h select-pane -L
 bind j select-pane -D
 bind k select-pane -U
 bind l select-pane -R
 
-# 重载配置
-bind r source-file ~/.tmux.conf \; display-message "配置已重载"
+# 用 HJKL 调整面板大小
+bind -r H resize-pane -L 5
+bind -r J resize-pane -D 5
+bind -r K resize-pane -U 5
+bind -r L resize-pane -R 5
 
-# 状态栏
-set -g status-interval 5
-set -g status-left-length 30
-set -g status-right-length 60
+# ============================================================
+# 插件
+# ============================================================
+set -g @plugin 'tmux-plugins/tpm'
+set -g @plugin 'alexwforsythe/tmux-which-key'
+
+# TPM 初始化（必须放在最后）
+run '~/.tmux/plugins/tpm/tpm'
