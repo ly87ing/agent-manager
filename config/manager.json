@@ -10,7 +10,14 @@
     "playwright-cli": { "enabled": true, "auto_update": true },
     "auggie": { "enabled": true, "auto_update": true },
     "iterm2": { "enabled": true, "auto_update": true },
-    "tmux": { "enabled": true, "auto_update": true }
+    "tmux": { "enabled": true, "auto_update": true },
+    "tpm": { "enabled": true, "auto_update": true },
+    "oh-my-zsh": { "enabled": true, "auto_update": true },
+    "powerlevel10k": { "enabled": true, "auto_update": true },
+    "zsh-autosuggestions": { "enabled": true, "auto_update": true },
+    "zsh-syntax-highlighting": { "enabled": true, "auto_update": true },
+    "terminal-notifier": { "enabled": true, "auto_update": true },
+    "meslo-nerd-font": { "enabled": true, "auto_update": true }
   },
   "skills": {
     "playwright-best-practices-skill": { "enabled": true },
