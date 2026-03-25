@@ -122,6 +122,11 @@ def ensure_repo_version(repo_path, config, dry_run=False, offline=False):
     logging.info(f"[{repo_path.name}] 已检出 {revision_kind} {revision}。")
     return True
 
+def repo_head_is_detached(repo_path):
+    success, _ = run_cmd(["git", "symbolic-ref", "-q", "HEAD"], cwd=repo_path)
+    return not success
+
+
 def read_skill_name(skill_md_path):
     try:
         content = Path(skill_md_path).read_text(encoding="utf-8")
@@ -207,7 +212,10 @@ def clone_or_update_repo(name, url, base_dir, dry_run=False, offline=False, auto
         elif not auto_update:
             logging.info(f"[{name}] auto_update 关闭，跳过仓库更新。")
         else:
-            success, output = run_cmd(["git", "pull", "--ff-only"], cwd=target_dir)
+            update_cmd = ["git", "pull", "--ff-only"]
+            if repo_head_is_detached(target_dir):
+                update_cmd = ["git", "fetch", "--tags", "origin"]
+            success, output = run_cmd(update_cmd, cwd=target_dir)
             if success: logging.info(f"[{name}] 更新成功。")
             else: logging.error(f"[{name}] 更新失败: {output}")
             return target_dir, success
@@ -336,6 +344,23 @@ def scrub_dead_links(agents_config, base_dir, dry_run=False):
             except OSError:
                 continue
 
+def is_active_skill_target(agent_name, target_path, agent_defs):
+    agent_def = agent_defs.get(agent_name)
+    if agent_def is not None:
+        return is_agent_installed(agent_name, agent_def)
+    return False
+
+
+def resolve_repo_link_targets(active_targets, all_targets, allowed_agents):
+    if allowed_agents is None:
+        return dict(active_targets)
+
+    repo_targets = {k: v for k, v in active_targets.items() if k in allowed_agents}
+    if "codex" in allowed_agents and "codex" in all_targets:
+        repo_targets.setdefault("codex", all_targets["codex"])
+    return repo_targets
+
+
 def prune_orphan_repos(base_dir, managed_names, dry_run=False, force_yes=False):
     base_path = Path(base_dir).resolve()
     excluded = {".gitignore", "__pycache__"}
@@ -416,7 +441,7 @@ def manage_links(skill_name, source_path, targets, allowed_agents, is_enabled=Tr
     for agent_name, target_path in active_targets.items():
         target_base = Path(target_path).expanduser()
         link_path = target_base / skill_name
-        if not target_base.parent.exists() and is_enabled: continue
+        if agent_name != "codex" and not target_base.parent.exists() and is_enabled: continue
         if not is_enabled:
             if (link_path.exists() or link_path.is_symlink()) and not dry_run:
                 if link_path.is_dir() and not link_path.is_symlink(): shutil.rmtree(link_path)
@@ -454,7 +479,9 @@ def main():
 
     # 区分全量 targets（用于清理旧链接）和活跃 targets（用于新建链接）
     agent_defs = load_json_object_file(REPO_ROOT / "config" / "agents.json", strict=False, missing_ok=True) or {}
-    installed_agents = {name for name, defn in agent_defs.items() if is_agent_installed(name, defn)}
+    installed_agents = {
+        name for name, target_path in AGENT_TARGETS.items() if is_active_skill_target(name, target_path, agent_defs)
+    }
     skipped = [name for name in AGENT_TARGETS if name not in installed_agents]
     for name in skipped:
         logging.info(f"[AGENT: {name}] 未安装，跳过新建 skill 链接（保留清理能力）。")
@@ -546,16 +573,16 @@ def main():
             all_success = False
             continue
         allowed_agents = config.get("agents")
-        if allowed_agents is not None:
-            disallowed_agents = sorted(set(ALL_AGENT_TARGETS) - set(allowed_agents))
-            if disallowed_agents:
-                remove_repo_skill_links(
-                    repo_path,
-                    ALL_AGENT_TARGETS,
-                    disallowed_agents,
-                    args.dry_run,
-                )
-        pending_links.append((repo_name, allowed_agents, skills))
+        repo_targets = resolve_repo_link_targets(AGENT_TARGETS, ALL_AGENT_TARGETS, allowed_agents)
+        inactive_agents = sorted(set(ALL_AGENT_TARGETS) - set(repo_targets))
+        if inactive_agents:
+            remove_repo_skill_links(
+                repo_path,
+                ALL_AGENT_TARGETS,
+                inactive_agents,
+                args.dry_run,
+            )
+        pending_links.append((repo_name, repo_targets, skills))
         for s_name, s_path in skills.items():
             existing = global_skill_registry.get(s_name)
             if existing is None:
@@ -581,12 +608,12 @@ def main():
     for s_name, allowed_agents in duplicate_link_targets.items():
         remove_skill_links(s_name, ALL_AGENT_TARGETS, allowed_agents, args.dry_run)
 
-    for repo_name, allowed_agents, skills in pending_links:
+    for repo_name, repo_targets, skills in pending_links:
         for s_name, s_path in skills.items():
             if s_name in duplicate_skill_names:
                 logging.error(f"[{repo_name}] 跳过重复 skill name: {s_name}")
                 continue
-            manage_links(s_name, s_path, AGENT_TARGETS, allowed_agents, True, args.dry_run)
+            manage_links(s_name, s_path, repo_targets, None, True, args.dry_run)
 
     if not args.dry_run:
         prune_orphan_repos(repo_base_dir, REPOS.keys(), args.dry_run, args.yes)

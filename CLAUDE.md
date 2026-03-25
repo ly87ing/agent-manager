@@ -82,7 +82,7 @@ config/rules-targets.list ← Rules 分发清单，格式：name|group|source|ta
 
 `preferred_provider` 必须指向 `agents.json` 中 `providers` 的真实键，否则同步直接失败（不静默降级）。
 
-**Codex 的特殊定位**：`codex` 仅作为 MCP 和 Rules 的分发目标（在 `mcp.json`、`rules-targets.list` 中有条目），不纳入生命周期管理（`agents.json` 和 `manager.json` 中无 codex）。这是有意设计。
+**Codex 的特殊定位**：`codex` 作为 MCP、Rules 与 Skills 的分发目标（在 `mcp.json`、`rules-targets.list`、`skills.json` 中有条目），但不纳入生命周期管理（`agents.json` 和 `manager.json` 中无 codex）。这是有意设计。
 
 ### Agent 配置文件路径（官方规范）
 

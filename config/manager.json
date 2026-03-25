@@ -20,7 +20,7 @@
     "meslo-nerd-font": { "enabled": true, "auto_update": true }
   },
   "skills": {
-    "anthropic-frontend-design-skill": { "enabled": true },
+    "openai-frontend-skill": { "enabled": true },
     "playwright-best-practices-skill": { "enabled": true },
     "superpowers": { "enabled": true },
     "ui-ux-pro-max-skill": { "enabled": true }

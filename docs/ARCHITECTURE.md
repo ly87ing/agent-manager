@@ -174,7 +174,7 @@ graph TD
 2. 仓库会被缓存到 `agent-skill/repositories/<repo-name>/`
 3. 只有带 `.agent-manager-owned` 标记的托管缓存目录才会被自动清理
 4. 技能目录必须包含 `SKILL.md`，并在 frontmatter 中声明 `name`
-5. `auto_update: false` 时系统会复用本地缓存但跳过 `git pull`；`--offline` 则禁止下载和远程更新
+5. `auto_update: false` 时系统会复用本地缓存但跳过远程更新；在线模式下分支头仓库使用 `git pull --ff-only`，固定 commit/ref 导致的 detached HEAD 缓存则使用 `git fetch --tags origin`；`--offline` 则禁止下载和远程更新
 
 ---
 

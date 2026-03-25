@@ -16,6 +16,22 @@ SPEC.loader.exec_module(link_skills)
 
 
 class LinkSkillsTests(unittest.TestCase):
+    def test_codex_is_not_globally_active_without_lifecycle_definition(self):
+        self.assertFalse(link_skills.is_active_skill_target("codex", "/tmp/.codex/skills", {}))
+
+    def test_resolve_repo_link_targets_adds_codex_only_for_explicit_repo_scope(self):
+        active_targets = {"claude-code": "/tmp/claude"}
+        all_targets = {
+            "claude-code": "/tmp/claude",
+            "codex": "/tmp/.codex/skills",
+        }
+
+        unscoped_targets = link_skills.resolve_repo_link_targets(active_targets, all_targets, None)
+        scoped_targets = link_skills.resolve_repo_link_targets(active_targets, all_targets, ["codex"])
+
+        self.assertEqual(unscoped_targets, {"claude-code": "/tmp/claude"})
+        self.assertEqual(scoped_targets, {"codex": "/tmp/.codex/skills"})
+
     def test_invalid_policy_config_exits_non_zero(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -454,6 +470,129 @@ class LinkSkillsTests(unittest.TestCase):
             self.assertFalse((codex_dir / "my-skill").exists())
             self.assertIn("移除来自失效仓库的 skill 链接: my-skill", combined)
 
+    def test_codex_target_can_receive_links_without_lifecycle_agent_definition(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            source_repo = temp_root / "source-repo"
+            source_repo.mkdir()
+            subprocess.run(["git", "init"], cwd=source_repo, capture_output=True, text=True, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=source_repo, check=True)
+            subprocess.run(["git", "config", "user.name", "Test User"], cwd=source_repo, check=True)
+            skill_dir = source_repo / "skills" / ".curated" / "frontend-skill"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: frontend-skill\ndescription: OpenAI\n---\n\n# Frontend Skill\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "."], cwd=source_repo, check=True)
+            subprocess.run(["git", "commit", "-m", "seed"], cwd=source_repo, capture_output=True, text=True, check=True)
+
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            codex_target = temp_root / "targets" / "codex" / "skills"
+            config_path.write_text(
+                json.dumps({"skills": {"openai-frontend-skill": {"enabled": True}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "openai-frontend-skill": {
+                                "url": str(source_repo),
+                                "skill_paths": ["skills/.curated/frontend-skill"],
+                                "agents": ["codex"],
+                            }
+                        },
+                        "agents": {
+                            "codex": str(codex_target),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "skills"),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertTrue(codex_target.parent.exists(), combined)
+            self.assertTrue((codex_target / "frontend-skill").is_symlink(), combined)
+
+    def test_unscoped_repository_removes_stale_codex_link(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            base_dir = temp_root / "skills"
+            repo_dir = base_dir / "repositories" / "shared-repo"
+            skill_dir = repo_dir / "bundle" / "shared-skill"
+            codex_dir = temp_root / "targets" / "codex" / "skills"
+            codex_dir.mkdir(parents=True)
+            repo_dir.mkdir(parents=True)
+            (repo_dir / ".git").mkdir()
+            (repo_dir / ".agent-manager-owned").write_text("true\n", encoding="utf-8")
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text("---\nname: shared-skill\n---\n", encoding="utf-8")
+            (codex_dir / "shared-skill").symlink_to(skill_dir)
+            config_path.write_text(
+                json.dumps({"skills": {"shared-repo": {"enabled": True, "auto_update": False}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "shared-repo": {
+                                "url": "https://example.invalid/repo.git",
+                                "agents": None,
+                            }
+                        },
+                        "agents": {
+                            "codex": str(codex_dir),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(base_dir),
+                    "--yes",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertFalse((codex_dir / "shared-skill").exists(), combined)
+
     def test_ref_pin_is_honored_in_managed_cache(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -542,6 +681,104 @@ class LinkSkillsTests(unittest.TestCase):
             self.assertEqual(head, commit_v1)
             self.assertTrue((agent_target / "pinned-skill").is_symlink())
 
+    def test_detached_managed_repo_uses_fetch_instead_of_pull(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            source_repo = temp_root / "source-repo"
+            source_repo.mkdir()
+            subprocess.run(["git", "init"], cwd=source_repo, capture_output=True, text=True, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=source_repo, check=True)
+            subprocess.run(["git", "config", "user.name", "Test User"], cwd=source_repo, check=True)
+            skill_dir = source_repo / "pinned-skill"
+            skill_dir.mkdir()
+            skill_md = skill_dir / "SKILL.md"
+            skill_md.write_text(
+                "---\nname: pinned-skill\ndescription: Example\n---\n\n# v1\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "."], cwd=source_repo, check=True)
+            subprocess.run(["git", "commit", "-m", "v1"], cwd=source_repo, capture_output=True, text=True, check=True)
+            commit_v1 = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=source_repo,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+
+            skill_md.write_text(
+                "---\nname: pinned-skill\ndescription: Example\n---\n\n# v2\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "."], cwd=source_repo, check=True)
+            subprocess.run(["git", "commit", "-m", "v2"], cwd=source_repo, capture_output=True, text=True, check=True)
+
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            agent_target = temp_root / "targets" / "claude"
+            agent_target.parent.mkdir(parents=True)
+            config_path.write_text(
+                json.dumps({"skills": {"pinned-repo": {"enabled": True}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "pinned-repo": {
+                                "url": str(source_repo),
+                                "commit": commit_v1,
+                                "agents": ["claude-code"],
+                            }
+                        },
+                        "agents": {
+                            "claude-code": str(agent_target),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            first = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "skills"),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            first_output = first.stdout + first.stderr
+            self.assertEqual(first.returncode, 0, first_output)
+
+            second = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "skills"),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            second_output = second.stdout + second.stderr
+            self.assertEqual(second.returncode, 0, second_output)
+            self.assertNotIn("You are not currently on a branch.", second_output)
+
     def test_auto_update_false_uses_existing_managed_cache_repo_without_pull(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -605,12 +842,12 @@ class LinkSkillsTests(unittest.TestCase):
             subprocess.run(["git", "init"], cwd=source_repo, capture_output=True, text=True, check=True)
             subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=source_repo, check=True)
             subprocess.run(["git", "config", "user.name", "Test User"], cwd=source_repo, check=True)
-            selected_dir = source_repo / "skills" / "frontend-design"
+            selected_dir = source_repo / "skills" / ".curated" / "frontend-skill"
             other_dir = source_repo / "skills" / "other-skill"
             selected_dir.mkdir(parents=True)
             other_dir.mkdir(parents=True)
             (selected_dir / "SKILL.md").write_text(
-                "---\nname: frontend-design\ndescription: Selected\n---\n\n# Selected\n",
+                "---\nname: frontend-skill\ndescription: Selected\n---\n\n# Selected\n",
                 encoding="utf-8",
             )
             (other_dir / "SKILL.md").write_text(
@@ -625,16 +862,16 @@ class LinkSkillsTests(unittest.TestCase):
             agent_target = temp_root / "targets" / "claude"
             agent_target.parent.mkdir(parents=True)
             config_path.write_text(
-                json.dumps({"skills": {"anthropic-frontend-design-skill": {"enabled": True}}}),
+                json.dumps({"skills": {"openai-frontend-skill": {"enabled": True}}}),
                 encoding="utf-8",
             )
             def_path.write_text(
                 json.dumps(
                     {
                         "repositories": {
-                            "anthropic-frontend-design-skill": {
+                            "openai-frontend-skill": {
                                 "url": str(source_repo),
-                                "skill_paths": ["skills/frontend-design"],
+                                "skill_paths": ["skills/.curated/frontend-skill"],
                                 "agents": ["claude-code"],
                             }
                         },
@@ -665,7 +902,7 @@ class LinkSkillsTests(unittest.TestCase):
 
             combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
-            self.assertTrue((agent_target / "frontend-design").is_symlink(), combined)
+            self.assertTrue((agent_target / "frontend-skill").is_symlink(), combined)
             self.assertFalse((agent_target / "other-skill").exists(), combined)
 
     def test_clone_failure_exits_non_zero(self):
@@ -1088,22 +1325,21 @@ class LinkSkillsTests(unittest.TestCase):
             {"enabled": True},
         )
 
-    def test_default_skill_catalog_includes_anthropic_frontend_design_repo(self):
+    def test_default_skill_catalog_includes_openai_frontend_skill_for_codex_only(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
 
-        repo = skills_config["repositories"].get("anthropic-frontend-design-skill")
+        repo = skills_config["repositories"].get("openai-frontend-skill")
 
         self.assertIsNotNone(repo)
-        self.assertEqual(repo["url"], "https://github.com/anthropics/skills.git")
-        self.assertEqual(repo["commit"], "887114fd09f8f24a7e6c907f9ee505348498ab6a")
-        self.assertEqual(repo["upgrade_strategy"], "latest-tag")
-        self.assertEqual(repo["skill_paths"], ["skills/frontend-design"])
-        self.assertIsNone(repo["agents"])
+        self.assertEqual(repo["url"], "https://github.com/openai/skills.git")
+        self.assertEqual(repo["commit"], "82d2c5b44ac234ec0f204f647562a4349d90ef43")
+        self.assertEqual(repo["skill_paths"], ["skills/.curated/frontend-skill"])
+        self.assertEqual(repo["agents"], ["codex"])
 
-    def test_default_manager_policy_explicitly_enables_anthropic_frontend_design_repo(self):
+    def test_default_manager_policy_explicitly_enables_openai_frontend_skill(self):
         manager_config = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
 
         self.assertEqual(
-            manager_config["skills"].get("anthropic-frontend-design-skill"),
+            manager_config["skills"].get("openai-frontend-skill"),
             {"enabled": True},
         )

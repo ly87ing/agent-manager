@@ -175,16 +175,19 @@ def collect_target_repositories(policy_cfg, repositories, requested_repos):
         missing = [name for name in requested_repos if name not in repositories]
         if missing:
             raise SkillUpgradeError(f"未定义的 skill 仓库: {', '.join(missing)}")
-        return requested_repos
+        return requested_repos, []
 
     targets = []
+    skipped_missing_strategy = []
     for repo_name, repo_config in repositories.items():
         policy = policy_cfg.get(repo_name)
         if policy is None or not policy.get("enabled", True):
             continue
         if repo_config.get("upgrade_strategy"):
             targets.append(repo_name)
-    return targets
+            continue
+        skipped_missing_strategy.append(repo_name)
+    return targets, skipped_missing_strategy
 
 
 def upgrade_repositories(config_path, def_path, requested_repos=None, dry_run=False, offline=False):
@@ -193,9 +196,19 @@ def upgrade_repositories(config_path, def_path, requested_repos=None, dry_run=Fa
     policy_cfg = get_typed_mapping_section(policy_root, "skills", Path(config_path).name, (dict,), "对象")
     repositories = get_typed_mapping_section(defs_root, "repositories", Path(def_path).name, (dict,), "对象")
 
-    targets = collect_target_repositories(policy_cfg, repositories, requested_repos or [])
+    targets, skipped_missing_strategy = collect_target_repositories(policy_cfg, repositories, requested_repos or [])
+    if skipped_missing_strategy:
+        logging.info(
+            "以下已启用 skill 仓库未配置 upgrade_strategy，跳过显式升级: "
+            + ", ".join(skipped_missing_strategy)
+        )
+        for repo_name in skipped_missing_strategy:
+            logging.debug(f"[{repo_name}] 已启用，但未配置 upgrade_strategy。")
     if not targets:
-        logging.info("当前策略未配置任何可升级 skill 仓库。")
+        if skipped_missing_strategy:
+            logging.info("当前策略下没有可升级 skill 仓库；已启用仓库均未配置 upgrade_strategy。")
+        else:
+            logging.info("当前策略未配置任何可升级 skill 仓库。")
         return 0
 
     updated_defs = copy.deepcopy(defs_root)

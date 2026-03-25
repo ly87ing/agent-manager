@@ -241,8 +241,16 @@ test -f config/rules-targets.list && echo "rules-targets.list: 存在"
    - 检查：目标 Agent 的 skill/ 或 rules/ 目录权限
    - 解决：
      * 确保目标目录存在且可写
+     * 对 Codex 来说，如果 skill 仓库显式限定了 `agents: ["codex"]`，首次同步会自动创建 `~/.codex/skills`
+     * 其他 Agent 仍要求其目标目录父路径已存在，且对应 Agent 已被系统判定为已安装
      * 在 Windows 上，可能需要以管理员身份运行或开发者模式
      * 检查是否有现有的冲突文件或目录阻止链接创建
+
+4. **`skills:upgrade` 没有实际升级任何仓库**
+   - 检查：命令输出是否提示“未配置 `upgrade_strategy`，跳过显式升级”
+   - 解决：
+     * 这是信息提示，不是失败；表示当前启用的 skill 仓库都被固定版本锁定，但没有声明 release/tag 跟踪策略
+     * 只有在 `config/skills.json` 的仓库定义里配置了 `upgrade_strategy`（如 `latest-tag` / `latest-release`）时，`make skills:upgrade` 才会实际尝试升级
 
 ### 问题：链接的 skill 无法被 Agent 识别
 **症状**：Skill 已链接但 Agent 未响应 skill 触发词或命令

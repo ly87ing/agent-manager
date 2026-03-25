@@ -16,6 +16,52 @@ SPEC.loader.exec_module(upgrade_skills)
 
 
 class UpgradeSkillsTests(unittest.TestCase):
+    def test_upgrade_without_strategy_reports_skipped_enabled_repositories(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            config_path.write_text(
+                json.dumps({"skills": {"openai-frontend-skill": {"enabled": True}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "openai-frontend-skill": {
+                                "url": "https://github.com/openai/skills.git",
+                                "commit": "82d2c5b44ac234ec0f204f647562a4349d90ef43",
+                                "agents": ["codex"],
+                            }
+                        },
+                        "agents": {"codex": str(temp_root / "targets" / "codex")},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertIn("openai-frontend-skill", combined)
+            self.assertIn("未配置 upgrade_strategy", combined)
+            self.assertIn("没有可升级 skill 仓库", combined)
+
     def test_latest_tag_upgrade_writes_new_commit_and_removes_ref(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
