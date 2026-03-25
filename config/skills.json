@@ -14,7 +14,14 @@
     "superpowers": {
       "url": "https://github.com/obra/superpowers",
       "commit": "7e516434f2a30114300efc9247db32fb37daa5f9",
-      "agents": null
+      "agents": [
+        "claude-code",
+        "gemini-cli",
+        "cursor",
+        "github-copilot",
+        "opencode",
+        "codex"
+      ]
     },
     "ui-ux-pro-max-skill": {
       "url": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill",

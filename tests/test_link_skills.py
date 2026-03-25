@@ -1328,6 +1328,19 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertEqual(repo["commit"], "07f4ef3ac2568c25a3b0c8ef5165a86abc3e56e4")
         self.assertIsNone(repo["agents"])
 
+    def test_default_skill_catalog_includes_superpowers_for_all_supported_agents(self):
+        skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
+
+        repo = skills_config["repositories"].get("superpowers")
+
+        self.assertIsNotNone(repo)
+        self.assertEqual(repo["url"], "https://github.com/obra/superpowers")
+        self.assertEqual(repo["commit"], "7e516434f2a30114300efc9247db32fb37daa5f9")
+        self.assertEqual(
+            set(repo["agents"]),
+            {"claude-code", "gemini-cli", "cursor", "github-copilot", "opencode", "codex"},
+        )
+
     def test_default_manager_policy_explicitly_enables_ui_ux_pro_max_repo(self):
         manager_config = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
 
