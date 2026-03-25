@@ -737,7 +737,7 @@ function maybe_init_secrets() {
             status_line "SKIP" "空转模式，跳过 secrets 拉取"
         else
             status_line "INFO" "拉取最新凭证..."
-            git -C "$ROOT_DIR/secrets" pull 2>&1 || \
+            git -C "$ROOT_DIR/secrets" pull --ff-only 2>&1 || \
                 echo -e "${ERROR_RED}⚠️  secrets 拉取失败，将使用本地已有凭证${NC}"
         fi
     else
@@ -924,7 +924,7 @@ function run_self_update() {
         echo "检测到本地未提交更改，跳过自更新以保护工作区。"
         return 0
     fi
-    git -C "$ROOT_DIR" pull
+    git -C "$ROOT_DIR" pull --ff-only
 }
 
 function list_managed_target_paths() {

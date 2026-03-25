@@ -15,7 +15,11 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
 from src.json_config import ensure_mapping_value_types, get_typed_mapping_section, load_json_object_file
-from src.manage_runtime_probe import detect_npm_from_paths
+from src.manage_runtime_probe import (
+    ProviderInventory as ProviderCache,
+    detect_all_providers as detect_all_providers_runtime,
+    get_pkg_name,
+)
 from src.runtime_logging import configure_logging
 
 configure_logging()
@@ -40,98 +44,9 @@ def run_cmd(cmd, timeout=300):
         return False, f"Unexpected error executing '{cmd}': {e}"
 
 
-class ProviderCache:
-    """缓存包管理器查询结果，避免重复执行慢速命令"""
-    _instance = None
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
-    
-    def __init__(self):
-        if self._initialized:
-            return
-        self._initialized = True
-        self._brew_formulae = None
-        self._brew_casks = None
-        self._gh_extensions = None
-    
-    def get_brew_formulae(self):
-        """一次性获取所有已安装的 brew formula 包名"""
-        if self._brew_formulae is None:
-            self._brew_formulae = set()
-            if shutil.which("brew"):
-                success, out = run_cmd(["brew", "list", "--formula", "-1"], timeout=10)
-                if success:
-                    self._brew_formulae = set(out.strip().split('\n')) if out.strip() else set()
-        return self._brew_formulae
-    
-    def get_brew_casks(self):
-        """一次性获取所有已安装的 brew cask 包名"""
-        if self._brew_casks is None:
-            self._brew_casks = set()
-            if shutil.which("brew"):
-                success, out = run_cmd(["brew", "list", "--cask", "-1"], timeout=10)
-                if success:
-                    self._brew_casks = set(out.strip().split('\n')) if out.strip() else set()
-        return self._brew_casks
-    
-    def get_gh_extensions(self):
-        """一次性获取所有已安装的 gh 扩展"""
-        if self._gh_extensions is None:
-            self._gh_extensions = ""
-            if shutil.which("gh"):
-                success, out = run_cmd(["gh", "extension", "list"], timeout=10)
-                if success:
-                    self._gh_extensions = out
-        return self._gh_extensions
-
-
-def get_pkg_name(cmd):
-    """从安装命令中提取包名"""
-    if not cmd: return None
-    m = re.search(r'(?:install|uninstall)(?:\s+--cask)?\s+([^\s@]+)', cmd)
-    return m.group(1) if m else None
-
-
 def detect_all_providers(bin_name, config=None):
-    """全量扫描当前系统中管理该 Agent 的所有 Provider（使用缓存优化）"""
-    found = []
-    cache = ProviderCache()
-
-    # 检测 gh extension
-    if config and "ext_name" in config:
-        ext_name = config["ext_name"]
-        gh_out = cache.get_gh_extensions()
-        if any(line.strip().startswith(ext_name) for line in gh_out.splitlines()):
-            found.append("gh")
-
-    # 检测 brew formula/cask（使用缓存的包列表进行集合查找）
-    brew_pkg = get_pkg_name(config.get('providers', {}).get('brew', {}).get('install', '')) if config else None
-    if brew_pkg:
-        if brew_pkg in cache.get_brew_formulae():
-            found.append("brew")
-        elif brew_pkg in cache.get_brew_casks():
-            found.append("brew-cask")
-    
-    # 检测 npm
-    bin_path = shutil.which(bin_name)
-    resolved_bin_path = os.path.realpath(bin_path) if bin_path else ""
-    if detect_npm_from_paths(
-        bin_path,
-        resolved_bin_path,
-        brew_detected=any(provider.startswith("brew") for provider in found),
-    ):
-        found.append("npm")
-    
-    # 检测系统路径或 App
-    app_path = config.get('app_path') if config else None
-    if (app_path and os.path.exists(app_path)) or bin_path:
-        if not found: found.append("system")
-        
-    return found
+    """委托共享 runtime probe 执行 Provider 探测，避免实现漂移。"""
+    return detect_all_providers_runtime(bin_name, config, inventory=ProviderCache())
 
 def canonical_provider_name(provider_name):
     if provider_name.startswith("brew"):

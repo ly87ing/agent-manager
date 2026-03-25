@@ -806,3 +806,38 @@ class SyncMcpTests(unittest.TestCase):
                 updated["mcp_servers"]["augment-context-engine"]["env"]["_MANAGED_BY"],
                 "agent-manager",
             )
+
+    def test_update_toml_config_escapes_quoted_args_and_quoted_server_names(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            agent_config_path = temp_root / "config.toml"
+
+            ok = sync_mcp.update_toml_config(
+                "codex",
+                agent_config_path,
+                {
+                    'augment "beta".engine': {
+                        "command": 'node "server"',
+                        "args": ['--label=he said "hi"', r"C:\Program Files\Augment\server.js"],
+                        "env": {"AUGMENT_SESSION_AUTH": 'token "quoted"'},
+                    }
+                },
+                {'augment "beta".engine'},
+                set(),
+                dry_run=False,
+            )
+
+            self.assertTrue(ok)
+            updated = tomllib.loads(agent_config_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                updated["mcp_servers"]['augment "beta".engine']["command"],
+                'node "server"',
+            )
+            self.assertEqual(
+                updated["mcp_servers"]['augment "beta".engine']["args"],
+                ['--label=he said "hi"', r"C:\Program Files\Augment\server.js"],
+            )
+            self.assertEqual(
+                updated["mcp_servers"]['augment "beta".engine']["env"]["AUGMENT_SESSION_AUTH"],
+                'token "quoted"',
+            )

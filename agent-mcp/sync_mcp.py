@@ -25,6 +25,11 @@ from src.runtime_logging import configure_logging
 configure_logging()
 
 PLACEHOLDER_RE = re.compile(r"\$\{([^}]+)\}")
+TOML_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+TOML_SERVER_HEADER_RE = re.compile(
+    r'^\s*\[\s*mcp_servers\.(?P<key>"(?:\\.|[^"\\])*"|[A-Za-z0-9_-]+)',
+    re.MULTILINE,
+)
 
 def atomic_write_json(path, data):
     """原子化写入 JSON"""
@@ -70,7 +75,7 @@ def clone_or_update_repo(name, url, base_dir, dry_run=False, offline=False):
                 logging.info(f"[{name}] 离线模式，跳过仓库更新。")
             else:
                 logging.info(f"正在检查 {name} 更新...")
-                success, output = run_cmd(["git", "pull"], cwd=target_dir)
+                success, output = run_cmd(["git", "pull", "--ff-only"], cwd=target_dir)
                 if success: logging.info(f"[{name}] 更新成功。")
                 else: logging.error(f"[{name}] 更新失败: {output}")
                 return target_dir, success
@@ -170,18 +175,25 @@ def load_existing_json_config(agent_name, config_path):
         return None
 
 def toml_quote(value):
-    """TOML 字符串转义：如果包含双引号则使用单引号，否则使用双引号"""
-    if '"' in value:
-        # 使用 TOML literal string (单引号)，不需要转义
-        return f"'{value}'"
-    return f'"{value}"'
+    """返回合法的 TOML basic string。"""
+    return json.dumps(value, ensure_ascii=False)
+
+
+def toml_key(value):
+    """返回 TOML bare key 或 quoted key。"""
+    if TOML_BARE_KEY_RE.fullmatch(value):
+        return value
+    return json.dumps(value, ensure_ascii=False)
 
 
 def extract_toml_mcp_server_name(chunk):
-    header_match = re.search(r'^\s*\[\s*mcp_servers\.([^\.\]\s]+)', chunk, re.MULTILINE)
+    header_match = TOML_SERVER_HEADER_RE.search(chunk)
     if not header_match:
         return None
-    return header_match.group(1)
+    key_token = header_match.group("key")
+    if key_token.startswith('"'):
+        return json.loads(key_token)
+    return key_token
 
 
 def merge_toml_chunks_by_server(chunks):
@@ -243,12 +255,13 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
     for name, settings in active_servers.items():
         if name in blocked_active_names:
             continue
-        block = f'\n\n[mcp_servers.{name}]\ncommand = "{settings["command"]}"\n'
-        args_str = ", ".join([f'"{a}"' for a in settings["args"]])
-        block += f'args = [{args_str}]\n'
+        quoted_name = toml_key(name)
+        block = f"\n\n[mcp_servers.{quoted_name}]\ncommand = {toml_quote(settings['command'])}\n"
+        block += f"args = {json.dumps(settings['args'], ensure_ascii=False)}\n"
         env = {**settings.get("env", {}), "_MANAGED_BY": "agent-manager"}
-        block += f'[mcp_servers.{name}.env]\n'
-        for k, v in env.items(): block += f'{k} = {toml_quote(v)}\n'
+        block += f"[mcp_servers.{quoted_name}.env]\n"
+        for k, v in env.items():
+            block += f"{toml_key(k)} = {toml_quote(v)}\n"
         new_blocks.append(block)
     
     full_content = base_content + "".join(new_blocks)

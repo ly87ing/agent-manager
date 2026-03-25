@@ -1060,7 +1060,52 @@ class ManageScriptTests(unittest.TestCase):
             log_lines = call_log.read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(log_lines), 2, log_lines)
             self.assertIn(f"git -C {temp_root.resolve()} status --porcelain", log_lines[0])
-            self.assertIn(f"git -C {temp_root.resolve()} pull", log_lines[1])
+            self.assertIn(f"git -C {temp_root.resolve()} pull --ff-only", log_lines[1])
+
+    def test_update_pipeline_pulls_secrets_with_ff_only(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            call_log = temp_root / "calls.log"
+            fake_bin = temp_root / "fake-bin"
+            fake_bin.mkdir()
+            (temp_root / "secrets" / ".git").mkdir(parents=True, exist_ok=True)
+
+            self._write_stub(
+                fake_bin / "git",
+                (
+                    "#!/usr/bin/env bash\n"
+                    f"printf '%s\\n' \"git $*\" >> {str(call_log)!r}\n"
+                    "exit 0\n"
+                ),
+            )
+            self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log, "True")
+            self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log, "True")
+            self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log, "True")
+            self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log, "True")
+            self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 0\n")
+            self._write_stub(
+                temp_root / "agent-terminal" / "sync_terminal.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+
+            env = self._managed_env()
+            env["PATH"] = f"{fake_bin}:{env['PATH']}"
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "update"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            log_lines = call_log.read_text(encoding="utf-8").splitlines()
+            self.assertTrue(
+                any(line == f"git -C {temp_root.resolve() / 'secrets'} pull --ff-only" for line in log_lines),
+                log_lines,
+            )
 
     def test_self_update_skips_dirty_worktree(self):
         with tempfile.TemporaryDirectory() as temp_dir:

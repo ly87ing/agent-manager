@@ -6,7 +6,7 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
-from agent_lifecycle_import import sync_agents
+from tests.agent_lifecycle_import import sync_agents
 from tests.provider_path_fixtures import (
     posix_brew_cellar_module_path,
     posix_npm_global_module_path,
@@ -20,128 +20,123 @@ MODULE_PATH = ROOT / "agent-lifecycle" / "sync_agents.py"
 
 
 class DetectAllProvidersTests(unittest.TestCase):
-    @mock.patch.object(sync_agents, "ProviderCache")
-    @mock.patch.object(sync_agents.os.path, "exists", return_value=False)
-    @mock.patch.object(sync_agents.os.path, "realpath")
-    @mock.patch.object(sync_agents.shutil, "which", return_value="/usr/local/bin/claude")
-    def test_detects_npm_when_bin_resolves_into_node_modules(
-        self,
-        _which,
-        realpath,
-        _exists,
-        provider_cache_cls,
-    ):
-        cache = provider_cache_cls.return_value
-        cache.get_gh_extensions.return_value = ""
-        cache.get_brew_formulae.return_value = set()
-        cache.get_brew_casks.return_value = set()
-        realpath.return_value = posix_npm_global_module_path("@anthropic-ai/claude-code", "bin/claude.js")
+    def test_detect_all_providers_delegates_to_runtime_probe_inventory(self):
+        with mock.patch.object(sync_agents, "ProviderCache") as provider_cache_cls:
+            with mock.patch.object(
+                sync_agents,
+                "detect_all_providers_runtime",
+                return_value=["npm"],
+                create=True,
+            ) as runtime_detect:
+                providers = sync_agents.detect_all_providers("claude", {"providers": {}})
 
-        providers = sync_agents.detect_all_providers(
+        self.assertEqual(providers, ["npm"])
+        runtime_detect.assert_called_once_with(
             "claude",
-            {
-                "providers": {
-                    "brew": {
-                        "install": "brew install --cask claude-code",
-                    }
-                }
-            },
+            {"providers": {}},
+            inventory=provider_cache_cls.return_value,
         )
+
+    def test_detects_npm_when_bin_resolves_into_node_modules(self):
+        inventory = sync_agents.ProviderCache(
+            run_cmd=lambda cmd, timeout=10: (False, ""),
+            which=lambda binary: "/usr/local/bin/claude" if binary == "claude" else None,
+            path_exists=lambda _path: False,
+            realpath=lambda _path: posix_npm_global_module_path("@anthropic-ai/claude-code", "bin/claude.js"),
+        )
+
+        with mock.patch.object(sync_agents, "ProviderCache", return_value=inventory):
+            providers = sync_agents.detect_all_providers(
+                "claude",
+                {
+                    "providers": {
+                        "brew": {
+                            "install": "brew install --cask claude-code",
+                        }
+                    }
+                },
+            )
 
         self.assertIn("npm", providers)
 
-    @mock.patch.object(sync_agents, "ProviderCache")
-    @mock.patch.object(sync_agents.os.path, "exists", return_value=False)
-    @mock.patch.object(sync_agents.os.path, "realpath")
-    @mock.patch.object(sync_agents.shutil, "which", return_value="/usr/local/bin/gemini")
-    def test_brew_managed_node_modules_path_is_not_misclassified_as_npm(
-        self,
-        _which,
-        realpath,
-        _exists,
-        provider_cache_cls,
-    ):
-        cache = provider_cache_cls.return_value
-        cache.get_gh_extensions.return_value = ""
-        cache.get_brew_formulae.return_value = {"gemini-cli"}
-        cache.get_brew_casks.return_value = set()
-        realpath.return_value = posix_brew_cellar_module_path(
-            "gemini-cli",
-            "@google/gemini-cli",
-            "dist/index.js",
-            prefix="/usr/local",
+    def test_brew_managed_node_modules_path_is_not_misclassified_as_npm(self):
+        command_outputs = {
+            ("brew", "list", "--formula", "-1"): (True, "gemini-cli\n"),
+            ("gh", "extension", "list"): (True, ""),
+        }
+
+        inventory = sync_agents.ProviderCache(
+            run_cmd=lambda cmd, timeout=10: command_outputs.get(tuple(cmd), (False, "")),
+            which=lambda binary: {
+                "brew": "/usr/local/bin/brew",
+                "gemini": "/usr/local/bin/gemini",
+            }.get(binary),
+            path_exists=lambda _path: False,
+            realpath=lambda _path: posix_brew_cellar_module_path(
+                "gemini-cli",
+                "@google/gemini-cli",
+                "dist/index.js",
+                prefix="/usr/local",
+            ),
         )
 
-        providers = sync_agents.detect_all_providers(
-            "gemini",
-            {
-                "providers": {
-                    "brew": {
-                        "install": "brew install gemini-cli",
+        with mock.patch.object(sync_agents, "ProviderCache", return_value=inventory):
+            providers = sync_agents.detect_all_providers(
+                "gemini",
+                {
+                    "providers": {
+                        "brew": {
+                            "install": "brew install gemini-cli",
+                        }
                     }
-                }
-            },
-        )
+                },
+            )
 
         self.assertEqual(providers, ["brew"])
 
-    @mock.patch.object(sync_agents, "ProviderCache")
-    @mock.patch.object(sync_agents.os.path, "exists", return_value=False)
-    @mock.patch.object(sync_agents.os.path, "realpath")
-    @mock.patch.object(sync_agents.shutil, "which", return_value=windows_npm_bin_path("claude"))
-    def test_detects_npm_from_windows_npm_bin_path(
-        self,
-        _which,
-        realpath,
-        _exists,
-        provider_cache_cls,
-    ):
-        cache = provider_cache_cls.return_value
-        cache.get_gh_extensions.return_value = ""
-        cache.get_brew_formulae.return_value = set()
-        cache.get_brew_casks.return_value = set()
-        realpath.return_value = windows_npm_bin_path("claude")
-
-        providers = sync_agents.detect_all_providers(
-            "claude",
-            {
-                "providers": {
-                    "npm": {
-                        "install": "npm install -g @anthropic-ai/claude-code",
-                    }
-                }
-            },
+    def test_detects_npm_from_windows_npm_bin_path(self):
+        inventory = sync_agents.ProviderCache(
+            run_cmd=lambda cmd, timeout=10: (False, ""),
+            which=lambda binary: windows_npm_bin_path("claude") if binary == "claude" else None,
+            path_exists=lambda _path: False,
+            realpath=lambda path: path,
         )
+
+        with mock.patch.object(sync_agents, "ProviderCache", return_value=inventory):
+            providers = sync_agents.detect_all_providers(
+                "claude",
+                {
+                    "providers": {
+                        "npm": {
+                            "install": "npm install -g @anthropic-ai/claude-code",
+                        }
+                    }
+                },
+            )
 
         self.assertIn("npm", providers)
 
-    @mock.patch.object(sync_agents, "ProviderCache")
-    @mock.patch.object(sync_agents.os.path, "exists", return_value=False)
-    @mock.patch.object(sync_agents.os.path, "realpath")
-    @mock.patch.object(sync_agents.shutil, "which", return_value=r"C:\Users\test\AppData\Local\Programs\Claude\claude.cmd")
-    def test_detects_npm_when_windows_bin_resolves_into_node_modules(
-        self,
-        _which,
-        realpath,
-        _exists,
-        provider_cache_cls,
-    ):
-        cache = provider_cache_cls.return_value
-        cache.get_gh_extensions.return_value = ""
-        cache.get_brew_formulae.return_value = set()
-        cache.get_brew_casks.return_value = set()
-        realpath.return_value = windows_npm_module_path("@anthropic-ai/claude-code", "bin/claude.js")
-
-        providers = sync_agents.detect_all_providers(
-            "claude",
-            {
-                "providers": {
-                    "npm": {
-                        "install": "npm install -g @anthropic-ai/claude-code",
-                    }
-                }
-            },
+    def test_detects_npm_when_windows_bin_resolves_into_node_modules(self):
+        inventory = sync_agents.ProviderCache(
+            run_cmd=lambda cmd, timeout=10: (False, ""),
+            which=lambda binary: (
+                r"C:\Users\test\AppData\Local\Programs\Claude\claude.cmd" if binary == "claude" else None
+            ),
+            path_exists=lambda _path: False,
+            realpath=lambda _path: windows_npm_module_path("@anthropic-ai/claude-code", "bin/claude.js"),
         )
+
+        with mock.patch.object(sync_agents, "ProviderCache", return_value=inventory):
+            providers = sync_agents.detect_all_providers(
+                "claude",
+                {
+                    "providers": {
+                        "npm": {
+                            "install": "npm install -g @anthropic-ai/claude-code",
+                        }
+                    }
+                },
+            )
 
         self.assertIn("npm", providers)
 
