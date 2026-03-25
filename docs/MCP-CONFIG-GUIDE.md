@@ -502,7 +502,17 @@ opencode --print "test mcp"  # 测试模式
 # Codex
 codex mcp list
 # 检查 TOML 语法
-python3 -c "import tomllib; tomllib.load(open('~/.codex/config.toml', 'rb'))"
+python3 - <<'PY'
+import os
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+with open(os.path.expanduser("~/.codex/config.toml"), "rb") as fh:
+    tomllib.load(fh)
+print("Codex 配置有效")
+PY
+# Python 3.10 及以下若提示缺少 tomli，请先执行: python3 -m pip install tomli
 ```
 
 ### 日志位置

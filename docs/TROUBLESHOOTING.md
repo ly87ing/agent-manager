@@ -124,7 +124,17 @@ test -f config/rules-targets.list && echo "rules-targets.list: 存在"
      ```bash
      python3 -m json.tool ~/.claude.json > /dev/null && echo "Claude 配置有效"
      # 或对于 TOML
-     python3 -c "import tomllib; tomllib.load(open('~/.codex/config.toml', 'rb'))" && echo "Codex 配置有效"
+     python3 - <<'PY'
+     import os
+     try:
+         import tomllib
+     except ModuleNotFoundError:
+         import tomli as tomllib
+     with open(os.path.expanduser("~/.codex/config.toml"), "rb") as fh:
+         tomllib.load(fh)
+     print("Codex 配置有效")
+     PY
+     # Python 3.10 及以下若提示缺少 tomli，请先执行: python3 -m pip install tomli
      ```
    - 解决：备份损坏的配置并让 Agent Manager 重新生成，或手动修复
 

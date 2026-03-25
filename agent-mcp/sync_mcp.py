@@ -11,7 +11,6 @@ import shutil
 import tempfile
 from pathlib import Path
 import shlex
-import tomllib
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -21,6 +20,7 @@ from src.agent_ids import canonicalize_agent_list, canonicalize_agent_mapping
 from src.json_config import get_typed_mapping_section, load_json_object_file
 from src.manage_runtime_probe import is_agent_installed
 from src.runtime_logging import configure_logging
+from src.toml_compat import tomllib
 
 configure_logging()
 

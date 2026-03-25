@@ -1,10 +1,10 @@
 import json
 import subprocess
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
 
+from src.toml_compat import tomllib
 from tests.agent_mcp_import import sync_mcp
 
 

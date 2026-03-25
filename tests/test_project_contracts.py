@@ -134,6 +134,14 @@ class ProjectContractTests(unittest.TestCase):
         self.assertNotIn("agent-skill/<skill-name>", troubleshooting)
         self.assertNotIn("agent-skill/repositories/playwright-best-practices-skill/SKILL.md", troubleshooting)
 
+    def test_docs_explain_tomli_fallback_for_toml_validation(self):
+        troubleshooting = (ROOT / "docs" / "TROUBLESHOOTING.md").read_text(encoding="utf-8")
+        mcp_guide = (ROOT / "docs" / "MCP-CONFIG-GUIDE.md").read_text(encoding="utf-8")
+        self.assertIn("import tomli as tomllib", troubleshooting)
+        self.assertIn("import tomli as tomllib", mcp_guide)
+        self.assertIn("pip install tomli", troubleshooting)
+        self.assertIn("pip install tomli", mcp_guide)
+
     def test_readme_atomic_write_contract_matches_runtime_scope(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("配置文件采用“临时文件原子替换”模式", readme)
