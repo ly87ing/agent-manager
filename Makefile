@@ -1,4 +1,4 @@
-.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list restore logs rules-sync skills-link mcp-sync mcp-prepare tools-sync terminal-sync dry-run clean-logs offline
+.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\:list restore backups\:restore logs rules-sync rules\:sync skills-link skills\:link skills\:upgrade mcp-sync mcp\:sync mcp-prepare mcp\:prepare tools-sync tools\:sync terminal-sync terminal\:sync dry-run clean-logs offline
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -59,8 +59,14 @@ unlock:
 backups-list:
 	@./manage.sh backups:list
 
+backups\:list:
+	@./manage.sh backups:list
+
 # 交互式备份恢复
 restore:
+	@./manage.sh backups:restore
+
+backups\:restore:
 	@./manage.sh backups:restore
 
 # 环境探测
@@ -83,19 +89,40 @@ clean-logs:
 rules-sync:
 	@./manage.sh rules:sync
 
+rules\:sync:
+	@./manage.sh rules:sync
+
 skills-link:
 	@./manage.sh skills:link
 
+skills\:link:
+	@./manage.sh skills:link
+
+skills\:upgrade:
+	@./manage.sh skills:upgrade
+
 mcp-sync:
+	@./manage.sh mcp:sync
+
+mcp\:sync:
 	@./manage.sh mcp:sync
 
 mcp-prepare:
 	@./manage.sh mcp:prepare
 
+mcp\:prepare:
+	@./manage.sh mcp:prepare
+
 tools-sync:
 	@./manage.sh tools:sync
 
+tools\:sync:
+	@./manage.sh tools:sync
+
 terminal-sync:
+	@./manage.sh terminal:sync
+
+terminal\:sync:
 	@./manage.sh terminal:sync
 
 # 预览模式 (仅输出计划动作，跳过远端副作用)

@@ -1,3 +1,5 @@
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -16,6 +18,57 @@ class ProjectContractTests(unittest.TestCase):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
         self.assertIn(".PHONY: all bootstrap sync update plan self-update smoke", makefile)
         self.assertIn("\nsmoke:\n\t@./scripts/ci-smoke.sh\n", makefile)
+
+    def test_makefile_supports_colon_manage_subcommands(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            (temp_root / "Makefile").write_text((ROOT / "Makefile").read_text(encoding="utf-8"), encoding="utf-8")
+            call_log = temp_root / "calls.log"
+            (temp_root / "manage.sh").write_text(
+                (
+                    "#!/usr/bin/env bash\n"
+                    f"printf '%s\\n' \"$*\" >> {str(call_log)!r}\n"
+                    "exit 0\n"
+                ),
+                encoding="utf-8",
+            )
+            (temp_root / "manage.sh").chmod(0o755)
+
+            for goal in (
+                "backups:list",
+                "backups:restore",
+                "rules:sync",
+                "skills:link",
+                "skills:upgrade",
+                "mcp:sync",
+                "mcp:prepare",
+                "tools:sync",
+                "terminal:sync",
+            ):
+                result = subprocess.run(
+                    ["make", goal],
+                    cwd=temp_root,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+                self.assertEqual(result.returncode, 0, f"{goal}: {result.stdout}{result.stderr}")
+
+            self.assertEqual(
+                call_log.read_text(encoding="utf-8").splitlines(),
+                [
+                    "backups:list",
+                    "backups:restore",
+                    "rules:sync",
+                    "skills:link",
+                    "skills:upgrade",
+                    "mcp:sync",
+                    "mcp:prepare",
+                    "tools:sync",
+                    "terminal:sync",
+                ],
+            )
 
     def test_ci_smoke_script_exercises_safe_preview_flows(self):
         smoke_script = ROOT / "scripts" / "ci-smoke.sh"
