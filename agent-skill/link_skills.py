@@ -484,6 +484,9 @@ def main():
     }
     skipped = [name for name in AGENT_TARGETS if name not in installed_agents]
     for name in skipped:
+        if name == "codex":
+            logging.info(f"[AGENT: {name}] 不参与全局 skill 新建；仅在仓库显式声明 agents 时接收 skill 链接。")
+            continue
         logging.info(f"[AGENT: {name}] 未安装，跳过新建 skill 链接（保留清理能力）。")
     ALL_AGENT_TARGETS = AGENT_TARGETS  # 全量，用于清理旧链接
     AGENT_TARGETS = {k: v for k, v in AGENT_TARGETS.items() if k in installed_agents}  # 活跃，用于新建链接

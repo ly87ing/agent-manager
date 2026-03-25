@@ -32,6 +32,17 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertEqual(unscoped_targets, {"claude-code": "/tmp/claude"})
         self.assertEqual(scoped_targets, {"codex": "/tmp/.codex/skills"})
 
+    def test_resolve_repo_link_targets_reports_explicit_codex_targets(self):
+        active_targets = {"claude-code": "/tmp/claude"}
+        all_targets = {
+            "claude-code": "/tmp/claude",
+            "codex": "/tmp/.codex/skills",
+        }
+
+        scoped_targets = link_skills.resolve_repo_link_targets(active_targets, all_targets, ["claude-code", "codex"])
+
+        self.assertEqual(set(scoped_targets), {"claude-code", "codex"})
+
     def test_invalid_policy_config_exits_non_zero(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

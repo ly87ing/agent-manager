@@ -161,7 +161,7 @@ graph TD
    - command: 执行命令
    - args: 参数列表
    - env: 环境变量映射（支持${VAR}占位符）
-   - agents: 限定生效的Agent列表（null表示全部）
+   - agents: 限定生效的Agent列表（null表示全部活跃 skill 目标；像 Codex 这类特殊目标只有显式声明时才会纳入）
 2. 系统将自动处理不同Agent的格式差异
 
 ### 添加新Skill
