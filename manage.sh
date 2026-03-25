@@ -34,6 +34,7 @@ DRY_RUN_FLAG=""
 OFFLINE_FLAG=""
 TASK_FAILURES=0
 ORIGINAL_ARGS=("$@")
+CMD_ARGS=()
 cmd=""
 
 # 如果本地覆盖文件存在，则读取并深度合并
@@ -81,6 +82,8 @@ while [ $# -gt 0 ]; do
         *)
             if [ -z "$cmd" ]; then
                 cmd="$1"
+            else
+                CMD_ARGS+=("$1")
             fi
             ;;
     esac
@@ -1199,17 +1202,25 @@ case "$cmd" in
         (cd "$ROOT_DIR/agent-rule" && ./scripts/sync-agent-rules.sh "${rule_args[@]}" $DRY_RUN_FLAG) ;;
     skills:link)
         (cd "$ROOT_DIR/agent-skill" && $PYTHON_CMD link_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG) ;;
+    skills:upgrade)
+        upgrade_args=(upgrade_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json")
+        if [ "${#CMD_ARGS[@]}" -gt 0 ]; then
+            for repo_name in "${CMD_ARGS[@]}"; do
+                upgrade_args+=(--repo "$repo_name")
+            done
+        fi
+        if [ -n "$DRY_RUN_FLAG" ]; then upgrade_args+=("$DRY_RUN_FLAG"); fi
+        if [ -n "$OFFLINE_FLAG" ]; then upgrade_args+=("$OFFLINE_FLAG"); fi
+        (cd "$ROOT_DIR/agent-skill" && $PYTHON_CMD "${upgrade_args[@]}") ;;
     tools:sync)
         (cd "$ROOT_DIR/agent-tool" && $PYTHON_CMD sync_tools.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/tools.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG) ;;
     terminal:sync)
         (cd "$ROOT_DIR/agent-terminal" && $PYTHON_CMD sync_terminal.py $DRY_RUN_FLAG $OFFLINE_FLAG) ;;
     fetch-models)
         args=()
-        for arg in "${ORIGINAL_ARGS[@]}"; do
-            if [[ "$arg" != "--dry-run" && "$arg" != "--offline" && "$arg" != "fetch-models" ]]; then
-                args+=("$arg")
-            fi
-        done
+        if [ "${#CMD_ARGS[@]}" -gt 0 ]; then
+            args=("${CMD_ARGS[@]}")
+        fi
         if [ "${#args[@]}" -eq 1 ]; then
             echo -e "${ERROR_RED}用法: ./manage.sh fetch-models [base_uri api_key]${NC}"
             exit 1
@@ -1282,6 +1293,7 @@ case "$cmd" in
         echo -e "  ${BORDER_GRAY}mcp:prepare${NC}     显式准备 MCP 运行时（clone/pull repo、同步 secrets、setup/build）"
         echo -e "  ${BORDER_GRAY}rules:sync${NC}      独立执行规则与系统级 prompt 指令向各个 Agent 的拷贝或软链接分发"
         echo -e "  ${BORDER_GRAY}skills:link${NC}     独立执行全局或系统级专业技能代码集到 Agent 沙盒空间的映射配置与软链接"
+        echo -e "  ${BORDER_GRAY}skills:upgrade${NC}  显式解析并回写 skill 仓库的最新可审计版本（仅 release/tag，失败即停止）"
         echo -e "  ${BORDER_GRAY}tools:sync${NC}      独立同步或安装全局统一增强工具链条"
         echo -e "  ${BORDER_GRAY}terminal:sync${NC}   独立同步终端工具（iTerm2/tmux）配置模板到家目录"
         echo "" ;;

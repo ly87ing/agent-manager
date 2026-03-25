@@ -1,5 +1,12 @@
 {
   "repositories": {
+    "anthropic-frontend-design-skill": {
+      "url": "https://github.com/anthropics/skills.git",
+      "commit": "887114fd09f8f24a7e6c907f9ee505348498ab6a",
+      "upgrade_strategy": "latest-tag",
+      "skill_paths": ["skills/frontend-design"],
+      "agents": null
+    },
     "playwright-best-practices-skill": {
       "url": "https://github.com/currents-dev/playwright-best-practices-skill.git",
       "commit": "ef329e7e65149918e1ff0eed2cf7d2e6e6f9eb5b",

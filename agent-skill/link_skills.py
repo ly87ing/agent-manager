@@ -45,6 +45,11 @@ class DuplicateSkillNameError(ValueError):
             details.append(f"{skill_name} ({rendered_paths})")
         super().__init__(f"发现重复 skill name: {'; '.join(details)}")
 
+
+class SkillPathSelectionError(ValueError):
+    pass
+
+
 def run_cmd(cmd, cwd=None, timeout=300):
     """运行 shell 命令并返回结果"""
     try:
@@ -175,7 +180,10 @@ def install_dependencies_and_build(repo_path, config, dry_run=False, offline=Fal
                 try:
                     pkg_data = json.load(f)
                     if "scripts" in pkg_data and "build" in pkg_data["scripts"]:
-                        run_cmd(f"{pkg_mgr} run build", cwd=repo_path)
+                        build_ok, build_out = run_cmd([pkg_mgr, "run", "build"], cwd=repo_path)
+                        if not build_ok:
+                            logging.error(f"[{repo_path.name}] build 失败: {build_out}")
+                            success_all = False
                 except Exception:
                     pass
         else: logging.error(f"[{repo_path.name}] 依赖安装失败: {out}"); success_all = False
@@ -235,6 +243,52 @@ def find_skills_recursively(search_path):
             skill_name = read_skill_name(skill_dir / SKILL_FILE)
             if not skill_name:
                 continue
+            existing_skill_dir = found_skills.get(skill_name)
+            if existing_skill_dir is not None:
+                duplicate_paths = duplicate_conflicts.setdefault(skill_name, [existing_skill_dir])
+                duplicate_paths.append(skill_dir)
+                continue
+            found_skills[skill_name] = skill_dir
+    if duplicate_conflicts:
+        raise DuplicateSkillNameError(duplicate_conflicts)
+    return found_skills
+
+
+def resolve_skill_search_paths(repo_path, config):
+    repo_path = Path(repo_path).resolve()
+    raw_paths = config.get("skill_paths")
+    if raw_paths is None:
+        return [repo_path]
+    if not isinstance(raw_paths, list) or not raw_paths:
+        raise SkillPathSelectionError("skill_paths 必须是非空数组。")
+
+    search_paths = []
+    for raw_path in raw_paths:
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            raise SkillPathSelectionError("skill_paths 中的每一项都必须是非空字符串。")
+        search_path = (repo_path / raw_path).resolve(strict=False)
+        if search_path != repo_path and repo_path not in search_path.parents:
+            raise SkillPathSelectionError(f"skill_paths 包含越界路径: {raw_path}")
+        if not search_path.exists():
+            raise SkillPathSelectionError(f"skill_paths 指向的目录不存在: {raw_path}")
+        if not search_path.is_dir():
+            raise SkillPathSelectionError(f"skill_paths 指向的路径不是目录: {raw_path}")
+        search_paths.append(search_path)
+    return search_paths
+
+
+def find_configured_skills(repo_path, config):
+    found_skills = {}
+    duplicate_conflicts = {}
+    for search_path in resolve_skill_search_paths(repo_path, config):
+        try:
+            skills = find_skills_recursively(search_path)
+        except DuplicateSkillNameError as exc:
+            for skill_name, paths in exc.conflicts.items():
+                duplicate_paths = duplicate_conflicts.setdefault(skill_name, [])
+                duplicate_paths.extend(paths)
+            continue
+        for skill_name, skill_dir in skills.items():
             existing_skill_dir = found_skills.get(skill_name)
             if existing_skill_dir is not None:
                 duplicate_paths = duplicate_conflicts.setdefault(skill_name, [existing_skill_dir])
@@ -398,14 +452,15 @@ def main():
         {k: (v if isinstance(v, str) else v.get("path")) for k, v in agent_targets.items()}
     )
 
-    # 过滤未安装的 agent
+    # 区分全量 targets（用于清理旧链接）和活跃 targets（用于新建链接）
     agent_defs = load_json_object_file(REPO_ROOT / "config" / "agents.json", strict=False, missing_ok=True) or {}
     installed_agents = {name for name, defn in agent_defs.items() if is_agent_installed(name, defn)}
     skipped = [name for name in AGENT_TARGETS if name not in installed_agents]
     for name in skipped:
-        logging.info(f"[AGENT: {name}] 未安装，跳过 skill 链接。")
-    AGENT_TARGETS = {k: v for k, v in AGENT_TARGETS.items() if k in installed_agents}
-    
+        logging.info(f"[AGENT: {name}] 未安装，跳过新建 skill 链接（保留清理能力）。")
+    ALL_AGENT_TARGETS = AGENT_TARGETS  # 全量，用于清理旧链接
+    AGENT_TARGETS = {k: v for k, v in AGENT_TARGETS.items() if k in installed_agents}  # 活跃，用于新建链接
+
     for name, r_def in REPOS.items():
         if name in policy_cfg: r_def.update(policy_cfg[name])
         r_def["agents"] = canonicalize_agent_list(r_def.get("agents"))
@@ -415,8 +470,8 @@ def main():
     if not base_dir.exists() and not args.dry_run: base_dir.mkdir(parents=True, exist_ok=True)
     if not repo_base_dir.exists() and not args.dry_run: repo_base_dir.mkdir(parents=True, exist_ok=True)
     logging.info("执行环境洗刷...")
-    scrub_dead_links(AGENT_TARGETS, repo_base_dir, args.dry_run)
-    
+    scrub_dead_links(ALL_AGENT_TARGETS, repo_base_dir, args.dry_run)
+
     all_success = True
     duplicate_skill_names = set()
     duplicate_link_targets = {}
@@ -428,7 +483,7 @@ def main():
             logging.info(f"[{repo_name}] 未声明策略，跳过。")
             remove_repo_skill_links(
                 repo_path,
-                AGENT_TARGETS,
+                ALL_AGENT_TARGETS,
                 None,
                 args.dry_run,
             )
@@ -437,7 +492,7 @@ def main():
             logging.info(f"[{repo_name}] (策略已禁用，跳过)")
             remove_repo_skill_links(
                 repo_path,
-                AGENT_TARGETS,
+                ALL_AGENT_TARGETS,
                 None,
                 args.dry_run,
             )
@@ -462,7 +517,7 @@ def main():
         if not install_dependencies_and_build(repo_path, config, args.dry_run, args.offline):
             all_success = False
         try:
-            skills = find_skills_recursively(repo_path)
+            skills = find_configured_skills(repo_path, config)
         except DuplicateSkillNameError as exc:
             logging.error(f"[{repo_name}] {exc}")
             for skill_name in exc.skill_names:
@@ -474,7 +529,17 @@ def main():
                 )
             remove_repo_skill_links(
                 repo_path,
-                AGENT_TARGETS,
+                ALL_AGENT_TARGETS,
+                None,
+                args.dry_run,
+            )
+            all_success = False
+            continue
+        except SkillPathSelectionError as exc:
+            logging.error(f"[{repo_name}] {exc}")
+            remove_repo_skill_links(
+                repo_path,
+                ALL_AGENT_TARGETS,
                 None,
                 args.dry_run,
             )
@@ -482,11 +547,11 @@ def main():
             continue
         allowed_agents = config.get("agents")
         if allowed_agents is not None:
-            disallowed_agents = sorted(set(AGENT_TARGETS) - set(allowed_agents))
+            disallowed_agents = sorted(set(ALL_AGENT_TARGETS) - set(allowed_agents))
             if disallowed_agents:
                 remove_repo_skill_links(
                     repo_path,
-                    AGENT_TARGETS,
+                    ALL_AGENT_TARGETS,
                     disallowed_agents,
                     args.dry_run,
                 )
@@ -514,7 +579,7 @@ def main():
             )
 
     for s_name, allowed_agents in duplicate_link_targets.items():
-        remove_skill_links(s_name, AGENT_TARGETS, allowed_agents, args.dry_run)
+        remove_skill_links(s_name, ALL_AGENT_TARGETS, allowed_agents, args.dry_run)
 
     for repo_name, allowed_agents, skills in pending_links:
         for s_name, s_path in skills.items():
@@ -525,7 +590,7 @@ def main():
 
     if not args.dry_run:
         prune_orphan_repos(repo_base_dir, REPOS.keys(), args.dry_run, args.yes)
-        scrub_dead_links(AGENT_TARGETS, repo_base_dir, args.dry_run)
+        scrub_dead_links(ALL_AGENT_TARGETS, repo_base_dir, args.dry_run)
     if not all_success: sys.exit(1)
     logging.info("技能同步完成！")
 

@@ -59,6 +59,8 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `agent-tool/sync_tools.py`: 工具链管理
 - `agent-skill/link_skills.py`: Skill链接管理
 - `agent-mcp/sync_mcp.py`: MCP配置注入
+- `agent-terminal/sync_terminal.py`: 终端配置模板渲染与原子写入
+- `agent-rule/scripts/sync-agent-rules.sh`: Rules文件分发（shell实现）
 
 其中 `agent-lifecycle/sync_agents.py` 需要明确区分三种状态：
 - **managed provider**：定义文件中声明且 agent-manager 知道如何 install/uninstall/upgrade 的来源
@@ -166,6 +168,8 @@ graph TD
 1. 在 `config/skills.json` 的repositories中添加Git仓库
    - url: 仓库地址
    - commit / ref: 可选版本约束；`commit` 优先级高于 `ref`
+   - upgrade_strategy: 可选，显式升级命令使用的版本跟踪策略；当前支持 `latest-tag` 与 `latest-release`
+   - skill_paths: 可选，相对仓库根目录的子路径列表；用于只暴露仓库中的指定 skill 目录或 skill 集合目录
    - agents: 限定生效的Agent列表（null表示全部）
 2. 仓库会被缓存到 `agent-skill/repositories/<repo-name>/`
 3. 只有带 `.agent-manager-owned` 标记的托管缓存目录才会被自动清理

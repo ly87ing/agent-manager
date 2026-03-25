@@ -597,6 +597,77 @@ class LinkSkillsTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue((agent_target / "stable-skill").is_symlink())
 
+    def test_selected_skill_paths_limit_repo_exposure(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            source_repo = temp_root / "source-repo"
+            source_repo.mkdir()
+            subprocess.run(["git", "init"], cwd=source_repo, capture_output=True, text=True, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=source_repo, check=True)
+            subprocess.run(["git", "config", "user.name", "Test User"], cwd=source_repo, check=True)
+            selected_dir = source_repo / "skills" / "frontend-design"
+            other_dir = source_repo / "skills" / "other-skill"
+            selected_dir.mkdir(parents=True)
+            other_dir.mkdir(parents=True)
+            (selected_dir / "SKILL.md").write_text(
+                "---\nname: frontend-design\ndescription: Selected\n---\n\n# Selected\n",
+                encoding="utf-8",
+            )
+            (other_dir / "SKILL.md").write_text(
+                "---\nname: other-skill\ndescription: Unselected\n---\n\n# Other\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "."], cwd=source_repo, check=True)
+            subprocess.run(["git", "commit", "-m", "seed"], cwd=source_repo, capture_output=True, text=True, check=True)
+
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            agent_target = temp_root / "targets" / "claude"
+            agent_target.parent.mkdir(parents=True)
+            config_path.write_text(
+                json.dumps({"skills": {"anthropic-frontend-design-skill": {"enabled": True}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "anthropic-frontend-design-skill": {
+                                "url": str(source_repo),
+                                "skill_paths": ["skills/frontend-design"],
+                                "agents": ["claude-code"],
+                            }
+                        },
+                        "agents": {
+                            "claude-code": str(agent_target),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "skills"),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertTrue((agent_target / "frontend-design").is_symlink(), combined)
+            self.assertFalse((agent_target / "other-skill").exists(), combined)
+
     def test_clone_failure_exits_non_zero(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -1014,5 +1085,25 @@ class LinkSkillsTests(unittest.TestCase):
 
         self.assertEqual(
             manager_config["skills"].get("ui-ux-pro-max-skill"),
+            {"enabled": True},
+        )
+
+    def test_default_skill_catalog_includes_anthropic_frontend_design_repo(self):
+        skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
+
+        repo = skills_config["repositories"].get("anthropic-frontend-design-skill")
+
+        self.assertIsNotNone(repo)
+        self.assertEqual(repo["url"], "https://github.com/anthropics/skills.git")
+        self.assertEqual(repo["commit"], "887114fd09f8f24a7e6c907f9ee505348498ab6a")
+        self.assertEqual(repo["upgrade_strategy"], "latest-tag")
+        self.assertEqual(repo["skill_paths"], ["skills/frontend-design"])
+        self.assertIsNone(repo["agents"])
+
+    def test_default_manager_policy_explicitly_enables_anthropic_frontend_design_repo(self):
+        manager_config = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            manager_config["skills"].get("anthropic-frontend-design-skill"),
             {"enabled": True},
         )

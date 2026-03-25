@@ -814,6 +814,71 @@ class ManageScriptTests(unittest.TestCase):
             self.assertFalse(any(line.startswith("tools ") for line in log_lines), log_lines)
             self.assertFalse(any(line == "init-secrets" for line in log_lines), log_lines)
 
+    def test_skills_upgrade_dispatches_upgrade_script(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            call_log = temp_root / "calls.log"
+
+            self._write_stub(
+                temp_root / "agent-skill" / "upgrade_skills.py",
+                (
+                    "#!/usr/bin/env python3\n"
+                    "import sys\n"
+                    f"open({str(call_log)!r}, 'a', encoding='utf-8').write('upgrade ' + ' '.join(sys.argv[1:]) + '\\n')\n"
+                    "sys.exit(0 if '--config' in sys.argv and '--def-file' in sys.argv and '--dry-run' in sys.argv else 92)\n"
+                ),
+            )
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "--dry-run", "skills:upgrade"],
+                cwd=temp_root,
+                env=self._managed_env(),
+                capture_output=True,
+                check=False,
+            )
+
+            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            self.assertEqual(result.returncode, 0, combined)
+            log_lines = call_log.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(log_lines), 1, log_lines)
+            self.assertTrue(log_lines[0].startswith("upgrade "), log_lines)
+            self.assertIn("--config", log_lines[0])
+            self.assertIn("--def-file", log_lines[0])
+            self.assertIn("--dry-run", log_lines[0])
+
+    def test_skills_upgrade_forwards_requested_repositories(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            call_log = temp_root / "calls.log"
+
+            self._write_stub(
+                temp_root / "agent-skill" / "upgrade_skills.py",
+                (
+                    "#!/usr/bin/env python3\n"
+                    "import sys\n"
+                    f"open({str(call_log)!r}, 'a', encoding='utf-8').write('upgrade ' + ' '.join(sys.argv[1:]) + '\\n')\n"
+                    "expected = ['--repo', 'repo-a', '--repo', 'repo-b']\n"
+                    "sys.exit(0 if all(item in sys.argv for item in expected) else 93)\n"
+                ),
+            )
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "skills:upgrade", "repo-a", "repo-b"],
+                cwd=temp_root,
+                env=self._managed_env(),
+                capture_output=True,
+                check=False,
+            )
+
+            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            self.assertEqual(result.returncode, 0, combined)
+            log_lines = call_log.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(log_lines), 1, log_lines)
+            self.assertIn("--repo repo-a", log_lines[0])
+            self.assertIn("--repo repo-b", log_lines[0])
+
     def test_update_refreshes_resources_without_agent_install(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
