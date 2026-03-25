@@ -252,6 +252,9 @@ def detect_tool_readiness(name, definition, repo_root):
         if os.path.exists(os.path.join(managed_repo_dir, TOOL_READY_MARKER)):
             return True
         return False
+    ready_check = definition.get("ready_check")
+    if ready_check:
+        return check_tool_ready(name, ready_check)
     return shutil.which(name) is not None
 
 
@@ -334,6 +337,51 @@ class ProviderInventory:
 def detect_all_providers(bin_name, config=None, inventory=None):
     active_inventory = inventory or ProviderInventory()
     return active_inventory.detect_all_providers(bin_name, config)
+
+
+def check_tool_ready(name: str, ready_check: str | None) -> bool:
+    """根据 ready_check 字段判断工具是否已就绪。
+
+    支持三种前缀：
+      bin:<name>   — shutil.which 检查可执行文件
+      app:<path>   — os.path.exists 检查路径（支持 ~）
+      brew:<pkg>   — brew list 检查已安装的 formula/cask（跨架构通用）
+    若 ready_check 为空则始终返回 False。
+    """
+    import logging
+    if not ready_check:
+        return False
+    if ready_check.startswith("bin:"):
+        bin_name = ready_check[4:].strip()
+        found = shutil.which(bin_name) is not None
+        logging.debug(f"[TOOL: {name}] ready_check bin:{bin_name} -> {found}")
+        return found
+    if ready_check.startswith("app:"):
+        app_path = os.path.expanduser(ready_check[4:].strip())
+        found = os.path.exists(app_path)
+        logging.debug(f"[TOOL: {name}] ready_check app:{app_path} -> {found}")
+        return found
+    if ready_check.startswith("brew:"):
+        pkg_name = ready_check[5:].strip()
+        brew_bin = shutil.which("brew")
+        if not brew_bin:
+            logging.debug(f"[TOOL: {name}] ready_check brew:{pkg_name} -> False (brew not found)")
+            return False
+        try:
+            result = subprocess.run(
+                [brew_bin, "list", "--versions", pkg_name],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            found = result.returncode == 0 and bool(result.stdout.strip())
+        except Exception:
+            found = False
+        logging.debug(f"[TOOL: {name}] ready_check brew:{pkg_name} -> {found}")
+        return found
+    logging.warning(f"[TOOL: {name}] 未知 ready_check 格式: {ready_check}，视为未就绪")
+    return False
 
 
 def is_agent_installed(agent_name: str, agent_def: dict) -> bool:

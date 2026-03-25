@@ -34,8 +34,8 @@ def atomic_write_json(path, data):
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
+        os.chmod(temp_path, 0o600)
         os.replace(temp_path, path)
-        os.chmod(path, 0o600)
     except Exception as e:
         if os.path.exists(temp_path): os.remove(temp_path)
         raise e
@@ -125,7 +125,10 @@ def install_dependencies_and_build(repo_path, config, dry_run=False, offline=Fal
                 try:
                     pkg_data = json.load(f)
                     if "scripts" in pkg_data and "build" in pkg_data["scripts"]:
-                        run_cmd(f"{pkg_mgr} run build", cwd=repo_path)
+                        build_ok, build_out = run_cmd([pkg_mgr, "run", "build"], cwd=repo_path)
+                        if not build_ok:
+                            logging.error(f"[{repo_path.name}] build 失败: {build_out}")
+                            success_all = False
                 except Exception:
                     pass
         else: logging.error(f"[{repo_path.name}] 失败: {out}"); success_all = False
@@ -259,8 +262,8 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
         fd, temp_path = tempfile.mkstemp(dir=str(path.parent), prefix=f"{path.name}.tmp_")
         try:
             with os.fdopen(fd, 'w', encoding='utf-8') as f: f.write(full_content.strip() + "\n")
+            os.chmod(temp_path, 0o600)
             os.replace(temp_path, path)
-            os.chmod(path, 0o600)
             logging.info(f"[AGENT: {agent_name}] TOML 配置已原子更新。")
         except Exception as e:
             if os.path.exists(temp_path): os.remove(temp_path)
@@ -288,11 +291,10 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None
         name for name, srv_config in mcp_servers.items() if srv_config.get("_declared_in_policy", True)
     }
     for agent_name, agent_meta in agents_config.items():
+        agent_installed = True
         if agent_defs:
             defn = agent_defs.get(agent_name, {})
-            if not is_agent_installed(agent_name, defn):
-                logging.info(f"[AGENT: {agent_name}] 未安装，跳过 MCP 注入。")
-                continue
+            agent_installed = is_agent_installed(agent_name, defn)
         config_path_str = agent_meta if isinstance(agent_meta, str) else agent_meta.get("path")
         file_format = "json" if isinstance(agent_meta, str) else agent_meta.get("format", "json")
         config_path = Path(config_path_str).expanduser()
@@ -317,6 +319,13 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None
                 "args": parsed_args,
                 "env": srv_config.get("env", {})
             }
+
+        if not agent_installed:
+            if not config_path.exists():
+                logging.info(f"[AGENT: {agent_name}] 未安装且无配置文件，跳过 MCP 注入。")
+                continue
+            logging.info(f"[AGENT: {agent_name}] 未安装，仅清理已托管配置。")
+            active_mcp_settings = {}
 
         if not active_mcp_settings and not config_path.exists():
             continue
@@ -400,7 +409,7 @@ def sync_secrets_repo(secrets_path):
     for target in targets:
         if (target / ".git").exists():
             logging.info(f"发现密钥仓库: {target.name}，正在同步最新凭证...")
-            success, output = run_cmd("git pull", cwd=target)
+            success, output = run_cmd(["git", "pull", "--ff-only"], cwd=target)
             if success:
                 logging.info(f"密钥仓库 {target.name} 同步成功。")
             else:

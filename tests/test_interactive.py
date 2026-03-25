@@ -35,6 +35,7 @@ class InteractiveWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
+        interactive.SYNC_REQUIRED = False
         self.root = Path(self.temp_dir.name)
         config_dir = self.root / "config"
         config_dir.mkdir()
@@ -75,6 +76,7 @@ class InteractiveWorkflowTests(unittest.TestCase):
                 interactive.main()
 
     def test_exit_without_save_discards_changes(self):
+        # 编辑后选择退出，确认提示选 y（确认放弃）
         self.run_main_with_inputs(
             [
                 "2",
@@ -83,11 +85,38 @@ class InteractiveWorkflowTests(unittest.TestCase):
                 "n",
                 "n",
                 "7",
+                "y",  # 确认放弃未保存更改
             ]
         )
 
         local_path = self.root / "config" / "manager.local.json"
         self.assertEqual(json.loads(local_path.read_text(encoding="utf-8")), {})
+
+    def test_exit_without_changes_needs_no_confirmation(self):
+        # 未做任何编辑，直接退出不需要确认
+        self.run_main_with_inputs(["7"])
+
+        local_path = self.root / "config" / "manager.local.json"
+        self.assertEqual(json.loads(local_path.read_text(encoding="utf-8")), {})
+
+    def test_exit_without_save_can_be_cancelled(self):
+        # 编辑后选退出，然后选 n 取消，再选 6 保存
+        self.run_main_with_inputs(
+            [
+                "2",
+                "1",
+                "n",
+                "n",
+                "n",
+                "7",
+                "n",  # 取消放弃，继续留在菜单
+                "6",  # 选择保存
+            ]
+        )
+
+        local_path = self.root / "config" / "manager.local.json"
+        saved = json.loads(local_path.read_text(encoding="utf-8"))
+        self.assertIn("agents", saved)
 
     def test_save_persists_only_local_overrides(self):
         self.run_main_with_inputs(

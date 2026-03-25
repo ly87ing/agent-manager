@@ -61,9 +61,9 @@ def atomic_write_json_file(path, data, *, chmod=None):
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(data, handle, indent=2, ensure_ascii=False)
             handle.write("\n")
-        os.replace(temp_path, target_path)
         if chmod is not None:
-            os.chmod(target_path, chmod)
+            os.chmod(temp_path, chmod)
+        os.replace(temp_path, target_path)
     except Exception:
         if os.path.exists(temp_path):
             os.remove(temp_path)

@@ -100,6 +100,33 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
         self.assertTrue(ready)
 
+    def test_detect_tool_readiness_uses_ready_check_for_app_type_tools(self):
+        with mock.patch("src.manage_runtime_probe.os.path.exists", return_value=True):
+            ready = manage_runtime_probe.detect_tool_readiness(
+                "iterm2",
+                {
+                    "install": "brew install --cask iterm2",
+                    "ready_check": "app:/Applications/iTerm.app",
+                },
+                "/repo",
+            )
+
+        self.assertTrue(ready)
+
+    def test_detect_tool_readiness_ready_check_takes_precedence_over_which(self):
+        with mock.patch("src.manage_runtime_probe.os.path.exists", return_value=False):
+            with mock.patch("src.manage_runtime_probe.shutil.which", return_value="/usr/bin/iterm2"):
+                ready = manage_runtime_probe.detect_tool_readiness(
+                    "iterm2",
+                    {
+                        "install": "brew install --cask iterm2",
+                        "ready_check": "app:/Applications/iTerm.app",
+                    },
+                    "/repo",
+                )
+
+        self.assertFalse(ready)
+
     def test_collect_required_runtime_commands_skips_node_for_empty_policy(self):
         required = manage_runtime_probe.collect_required_runtime_commands(
             {"agents": {}, "tools": {}, "skills": {}, "mcp": {}},

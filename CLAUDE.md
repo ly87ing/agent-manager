@@ -55,6 +55,7 @@ make doctor
 | agent-skill | `link_skills.py` | Skill 仓库克隆与链接 |
 | agent-mcp | `sync_mcp.py` | MCP 配置注入到各 Agent 配置文件 |
 | agent-rule | `scripts/sync-agent-rules.sh` | Rules 文件分发到各 Agent 规则目录（shell 实现） |
+| agent-terminal | `sync_terminal.py` | 终端配置模板渲染与原子写入（zshrc 等） |
 
 所有 Python 同步引擎都必须从 `src.runtime_logging` 导入 `configure_logging()` 以共享统一日志级别控制。`agent-rule` 是唯一的 shell 实现，由 `manage.sh` 直接调用。
 
@@ -65,6 +66,7 @@ make doctor
 - `agent_ids.py`：稳定的机器可读 Agent ID 常量
 - `interactive.py`：交互式 UI 组件
 - `manage_runtime_probe.py`：运行时环境探测（PATH 扫描、`.app` 目录兜底）
+- `template_utils.py`：模板渲染（`${VAR}` 占位符替换）与 env 文件加载
 
 ### 配置层级
 
@@ -74,6 +76,7 @@ config/agents.json        ← 定义层：安装源 providers，必须与 manage
 config/mcp.json           ← MCP 服务器定义，secrets/mcp.env 中的 ${VAR} 在注入时替换
 config/skills.json        ← Skill 仓库 URL + commit/ref 版本约束 + Agent 映射
 config/tools.json         ← 工具安装指令（git-repo 型：含 url + setup；npm 型：含 install）
+config/terminal.json      ← 终端配置模板目标清单（模板路径、写入路径、权限、前置依赖）
 config/rules-targets.list ← Rules 分发清单，格式：name|group|source|target
 ```
 

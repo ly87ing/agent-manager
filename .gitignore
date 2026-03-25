@@ -22,6 +22,7 @@ yarn-error.log*
 
 # macOS
 .DS_Store
+.claude/scheduled_tasks.lock
 
 # Agent Rule backups
 agent-rule/rules/**/*.bak.*

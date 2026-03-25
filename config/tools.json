@@ -6,7 +6,8 @@
       "ready_paths": ["node_modules"]
     },
     "auggie": {
-      "install": "npm install -g @augmentcode/auggie"
+      "install": "npm install -g @augmentcode/auggie",
+      "ready_check": "bin:auggie"
     },
     "iterm2": {
       "install": "brew install --cask iterm2",
@@ -24,7 +25,7 @@
       "requires": ["tmux"],
       "install": "git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm",
       "upgrade": "git -C ~/.tmux/plugins/tpm pull",
-      "ready_check": "app:~/.tmux/plugins/tpm/bin/tpm"
+      "ready_check": "app:~/.tmux/plugins/tpm"
     },
     "oh-my-zsh": {
       "install": "sh -c \"$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\" \"\" --unattended",
@@ -36,21 +37,21 @@
       "install": "brew install powerlevel10k",
       "uninstall": "brew uninstall powerlevel10k",
       "upgrade": "brew upgrade powerlevel10k",
-      "ready_check": "app:/usr/local/share/powerlevel10k/powerlevel10k.zsh-theme"
+      "ready_check": "brew:powerlevel10k"
     },
     "zsh-autosuggestions": {
       "requires": ["oh-my-zsh"],
       "install": "brew install zsh-autosuggestions",
       "uninstall": "brew uninstall zsh-autosuggestions",
       "upgrade": "brew upgrade zsh-autosuggestions",
-      "ready_check": "app:/usr/local/opt/zsh-autosuggestions"
+      "ready_check": "brew:zsh-autosuggestions"
     },
     "zsh-syntax-highlighting": {
       "requires": ["oh-my-zsh"],
       "install": "brew install zsh-syntax-highlighting",
       "uninstall": "brew uninstall zsh-syntax-highlighting",
       "upgrade": "brew upgrade zsh-syntax-highlighting",
-      "ready_check": "app:/usr/local/opt/zsh-syntax-highlighting"
+      "ready_check": "brew:zsh-syntax-highlighting"
     },
     "terminal-notifier": {
       "requires": ["iterm2"],

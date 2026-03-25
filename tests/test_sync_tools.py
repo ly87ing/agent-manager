@@ -421,7 +421,7 @@ class SyncToolsTests(unittest.TestCase):
                     return True, "remotehash\tHEAD\n"
                 if cmd == ["git", "rev-parse", "HEAD"]:
                     return True, "localhash\n"
-                if cmd == ["git", "pull"]:
+                if cmd == ["git", "pull", "--ff-only"]:
                     return False, "pull failed"
                 return True, ""
 

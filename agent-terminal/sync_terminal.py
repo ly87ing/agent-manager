@@ -9,8 +9,6 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-import shutil
-import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -20,23 +18,17 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.json_config import load_json_object_file
+from src.manage_runtime_probe import check_tool_ready
 from src.runtime_logging import configure_logging
 from src.template_utils import load_env_file, render_template
 
 configure_logging()
 
 
-def _check_tool_ready(tool_name: str) -> bool:
-    """检查工具是否已安装（bin 在 PATH 中，或已知 app 路径存在）。"""
-    _APP_PATHS: dict[str, str] = {
-        "iterm2": "/Applications/iTerm.app",
-    }
-    if shutil.which(tool_name):
-        return True
-    app_path = _APP_PATHS.get(tool_name)
-    if app_path and os.path.exists(app_path):
-        return True
-    return False
+def _check_tool_ready(tool_name: str, tool_defs: dict) -> bool:
+    """检查工具是否已安装，复用 tools.json 中的 ready_check 字段。"""
+    ready_check = (tool_defs.get(tool_name) or {}).get("ready_check")
+    return check_tool_ready(tool_name, ready_check)
 
 
 def _parse_chmod(chmod_str: str | None) -> int | None:
@@ -60,9 +52,9 @@ def _atomic_write_text(dest_path: Path, content: str, mode: int | None, dry_run:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(content)
-        os.replace(tmp_path, dest_path)
         if mode is not None:
-            os.chmod(dest_path, mode)
+            os.chmod(tmp_path, mode)
+        os.replace(tmp_path, dest_path)
         logging.info(f"  已写入: {dest_path}")
         return True
     except Exception as exc:
@@ -80,6 +72,9 @@ def sync_terminal(config_path: Path, repo_root: Path, dry_run: bool = False, off
     if not isinstance(targets, dict):
         logging.error("terminal.json: targets 必须是对象")
         return False
+
+    tools_cfg = load_json_object_file(repo_root / "config" / "tools.json", strict=False, missing_ok=True)
+    tool_defs: dict = tools_cfg.get("tools", {})
 
     secrets_rel = cfg.get("secrets_file", "secrets/terminal.env")
     secrets_path = repo_root / secrets_rel
@@ -99,7 +94,7 @@ def sync_terminal(config_path: Path, repo_root: Path, dry_run: bool = False, off
             continue
 
         requires = target_cfg.get("requires", [])
-        unmet = [t for t in requires if not _check_tool_ready(t)]
+        unmet = [t for t in requires if not _check_tool_ready(t, tool_defs)]
         if unmet:
             logging.info(f"[TERMINAL: {target_name}] 前置工具未安装 {unmet}，跳过。")
             continue

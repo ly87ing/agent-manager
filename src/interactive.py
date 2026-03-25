@@ -169,6 +169,10 @@ def main():
             )
             break
         elif choice == "7":
+            if SYNC_REQUIRED:
+                confirm = ask_yes_no("有未保存的更改，确认放弃？", "n")
+                if not confirm:
+                    continue
             print("已放弃更改。")
             break
         else:

@@ -16,6 +16,7 @@ from src.json_config import get_typed_mapping_section, load_json_object_file
 from src.manage_runtime_probe import (
     TOOL_BROKEN_MARKER,
     TOOL_READY_MARKER,
+    check_tool_ready,
     detect_tool_readiness,
     repo_tool_artifacts_ready,
 )
@@ -181,27 +182,8 @@ def prune_orphan_tools(base_dir, managed_names, dry_run=False, force_yes=False):
                 logging.info(f"  已成功清理: {item.name}")
 
 def _check_ready(name: str, ready_check: str | None) -> bool:
-    """根据 ready_check 字段判断工具是否已就绪。
-
-    支持两种前缀：
-      bin:<name>  — 用 shutil.which 检查可执行文件是否在 PATH 中
-      app:<path>  — 用 os.path.exists 检查 .app 包是否存在
-    若 ready_check 为空则始终返回 False（视为未安装）。
-    """
-    if not ready_check:
-        return False
-    if ready_check.startswith("bin:"):
-        bin_name = ready_check[4:].strip()
-        found = shutil.which(bin_name) is not None
-        logging.debug(f"[TOOL: {name}] ready_check bin:{bin_name} -> {found}")
-        return found
-    if ready_check.startswith("app:"):
-        app_path = os.path.expanduser(ready_check[4:].strip())
-        found = os.path.exists(app_path)
-        logging.debug(f"[TOOL: {name}] ready_check app:{app_path} -> {found}")
-        return found
-    logging.warning(f"[TOOL: {name}] 未知 ready_check 格式: {ready_check}，视为未就绪")
-    return False
+    """根据 ready_check 字段判断工具是否已就绪。委托给 manage_runtime_probe.check_tool_ready。"""
+    return check_tool_ready(name, ready_check)
 
 
 def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
@@ -255,7 +237,7 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
                         logging.info(f"[TOOL: {name}] (内容已最新)")
                         should_apply_overrides = True
                     else:
-                        success, out = run_cmd(["git", "pull"], cwd=target_dir)
+                        success, out = run_cmd(["git", "pull", "--ff-only"], cwd=target_dir)
                         if success:
                             logging.info(f"[TOOL: {name}] (已更新)")
                             needs_setup = True
