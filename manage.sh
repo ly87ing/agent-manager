@@ -33,6 +33,9 @@ LOCK_ACQUIRED="false"
 DRY_RUN_FLAG=""
 OFFLINE_FLAG=""
 TASK_FAILURES=0
+DOCTOR_STATUS="healthy"
+DOCTOR_WARNING_OPTIONAL_TOOLS=0
+DOCTOR_WARNING_UNMATERIALIZED=0
 ORIGINAL_ARGS=("$@")
 CMD_ARGS=()
 cmd=""
@@ -89,7 +92,7 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
-[ -n "$cmd" ] || cmd="all"
+[ -n "$cmd" ] || cmd="help"
 
 function read_lock_pid() {
     if [ -f "$LOCK_PID_FILE" ]; then
@@ -262,6 +265,7 @@ from src.manage_runtime_probe import (
     collect_active_skill_target_agents,
     detect_all_providers,
     detect_tool_readiness,
+    is_agent_installed,
     load_json,
     rule_target_agent_id,
 )
@@ -283,7 +287,7 @@ try:
         print(f'   {stat} {label:20} (安装源:{\"/\".join(all_act) if all_act else \"未发现\"})')
     for k, v in cfg.get('tools', {}).items():
         if v.get('enabled', True):
-            act = detect_tool_readiness(k, tool_defs.get(k, {}), '$ROOT_DIR')
+            act = detect_tool_readiness(k, tool_defs.get(k, {}), '$ROOT_DIR', inventory=inventory)
             stat = '${SUCCESS_GREEN}⚒${NC}' if act else '${PENDING_GOLD}⚠${NC}'
             print(f'   {stat} {k:20} (工具就绪:{\"是\" if act else \"否\"})')
 except ValueError as exc:
@@ -334,6 +338,10 @@ function doctor_check() {
     local silent="${1:-false}"
     [ "$silent" == "false" ] && echo -e "${HDR_BLUE}${BOLD}Agent Manager 深度诊断 (Doctor Check)${NC}\n"
     local errors=0
+    local warnings=0
+    DOCTOR_STATUS="healthy"
+    DOCTOR_WARNING_OPTIONAL_TOOLS=0
+    DOCTOR_WARNING_UNMATERIALIZED=0
     
     if [ "$silent" == "false" ] && [ -d "$ROOT_DIR/.git" ]; then
         echo -e "${BOLD}[ 管理系统版本 ]${NC}  ${VAL_PURPLE}$(git -C "$ROOT_DIR" rev-parse --short HEAD)${NC} ($(git -C "$ROOT_DIR" log -1 --format=%cd --date=short))\n"
@@ -453,6 +461,7 @@ from src.manage_runtime_probe import (
     collect_active_skill_target_agents,
     detect_all_providers,
     detect_tool_readiness,
+    is_agent_installed,
     load_json,
     rule_target_agent_id,
 )
@@ -485,6 +494,9 @@ def rules_match(src, dst):
     return get_md5(src) == get_md5(dst)
 inventory = ProviderInventory()
 errs = 0
+warns = 0
+warn_optional_tools = 0
+warn_unmaterialized = 0
 cfg = load_json('$CONFIG_FILE')
 cfg['agents'] = canonicalize_agent_mapping(get_typed_mapping_section(cfg, 'agents', 'manager.json', (dict,), '对象'))
 def_a = canonicalize_agent_mapping(
@@ -504,6 +516,12 @@ mcp_cfg = {
 active_skill_agents = collect_active_skill_target_agents(cfg, skill_cfg)
 active_mcp_agents = collect_active_mcp_target_agents(cfg, mcp_cfg)
 active_rule_agents = collect_active_rule_agents(cfg, skill_cfg, mcp_cfg)
+
+def generated_target_status(agent_id):
+    if is_agent_installed(agent_id, def_a.get(agent_id, {})):
+        return 'installed'
+    return 'uninstalled'
+
 # 1. Agent Policy
 print('${BOLD}--- Agent 状态与策略一致性 ---${NC}')
 for k, v in cfg.get('agents', {}).items():
@@ -535,11 +553,17 @@ for tool_name, policy in cfg.get('tools', {}).items():
         print(f'  ${ERROR_RED}✗${NC} {tool_name:20}: 缺少定义')
         errs += 1
         continue
-    if detect_tool_readiness(tool_name, definition, '$ROOT_DIR'):
+    severity = definition.get('doctor_severity', 'error')
+    if detect_tool_readiness(tool_name, definition, '$ROOT_DIR', inventory=inventory):
         print(f'  ${SUCCESS_GREEN}✓${NC} {tool_name:20}: 已就绪')
     else:
-        print(f'  ${ERROR_RED}✗${NC} {tool_name:20}: 未就绪')
-        errs += 1
+        if severity == 'warning':
+            print(f'  ${PENDING_GOLD}⚠${NC} {tool_name:20}: 可选项未就绪')
+            warns += 1
+            warn_optional_tools += 1
+        else:
+            print(f'  ${ERROR_RED}✗${NC} {tool_name:20}: 未就绪')
+            errs += 1
 # 3. MCP
 print('\n${BOLD}--- MCP 注入审计 ---${NC}')
 ap = canonicalize_agent_mapping(mcp_cfg.get('agent_paths', {}))
@@ -551,8 +575,12 @@ for k, v in ap.items():
         with open(p, encoding='utf-8') as _f: cnt = len(re.findall(r'_MANAGED_BY', _f.read()))
         print(f'  ${SUCCESS_GREEN}✓${NC} {get_agent_display_name(k)}: 已注入 {cnt} 个托管服务')
     else:
-        print(f'  ${ERROR_RED}✗${NC} {get_agent_display_name(k)}: 缺失')
-        errs += 1
+        if generated_target_status(k) == 'installed':
+            print(f'  ${PENDING_GOLD}⚠${NC} {get_agent_display_name(k)}: 尚未生成 MCP 配置')
+        else:
+            print(f'  ${PENDING_GOLD}⚠${NC} {get_agent_display_name(k)}: Agent 未安装，未生成 MCP 配置')
+        warns += 1
+        warn_unmaterialized += 1
 # 4. Skills
 print('\n${BOLD}--- Skills 链接审计 ---${NC}')
 for a_name, a_path in canonicalize_agent_mapping(skill_cfg.get('agents', {})).items():
@@ -563,8 +591,12 @@ for a_name, a_path in canonicalize_agent_mapping(skill_cfg.get('agents', {})).it
         links = [f for f in os.listdir(p) if os.path.islink(os.path.join(p, f))]
         print(f'  ● {get_agent_display_name(a_name):15}: {len(links)} 个物理链接')
     else:
-        print(f'  ${ERROR_RED}✗${NC} {get_agent_display_name(a_name):15}: 缺失')
-        errs += 1
+        if generated_target_status(a_name) == 'installed':
+            print(f'  ${PENDING_GOLD}⚠${NC} {get_agent_display_name(a_name):15}: 尚未建立 skills 目录')
+        else:
+            print(f'  ${PENDING_GOLD}⚠${NC} {get_agent_display_name(a_name):15}: Agent 未安装，未建立 skills 目录')
+        warns += 1
+        warn_unmaterialized += 1
 # 5. Rules
 print('\n${BOLD}--- Rules 内容/结构审计 ---${NC}')
 rm = '$ROOT_DIR/config/rules-targets.list'
@@ -585,11 +617,32 @@ if os.path.exists(rm):
             if os.path.exists(dst):
                 if not rules_match(src, dst): print(f'  ${PENDING_GOLD}⚠${NC} {p[0]}: 漂移'); errs += 1
                 else: print(f'  ${SUCCESS_GREEN}✓${NC} {p[0]}: 一致')
-            else: print(f'  ${ERROR_RED}✗${NC} {p[0]}: 缺失'); errs += 1
+            else:
+                if generated_target_status(rule_target_agent_id(p[0])) == 'installed':
+                    print(f'  ${PENDING_GOLD}⚠${NC} {p[0]}: 尚未分发')
+                else:
+                    print(f'  ${PENDING_GOLD}⚠${NC} {p[0]}: Agent 未安装，未分发')
+                warns += 1
+                warn_unmaterialized += 1
 print(f'__ERRORS__:{errs}')
+print(f'__WARNINGS__:{warns}')
+print(f'__WARN_OPTIONAL_TOOLS__:{warn_optional_tools}')
+print(f'__WARN_UNMATERIALIZED__:{warn_unmaterialized}')
 ")
-    [ "$silent" == "false" ] && echo "$audit_out" | grep -v "__ERRORS__"
-    errors=$((errors + $(echo "$audit_out" | grep "__ERRORS__" | cut -d: -f2)))
+    local audit_errors audit_warnings audit_warn_optional audit_warn_unmaterialized
+    [ "$silent" == "false" ] && echo "$audit_out" | grep -v "__ERRORS__" | grep -v "__WARNINGS__" | grep -v "__WARN_OPTIONAL_TOOLS__" | grep -v "__WARN_UNMATERIALIZED__"
+    audit_errors="$(printf '%s\n' "$audit_out" | awk -F: '/__ERRORS__/ {print $2}')"
+    audit_warnings="$(printf '%s\n' "$audit_out" | awk -F: '/__WARNINGS__/ {print $2}')"
+    audit_warn_optional="$(printf '%s\n' "$audit_out" | awk -F: '/__WARN_OPTIONAL_TOOLS__/ {print $2}')"
+    audit_warn_unmaterialized="$(printf '%s\n' "$audit_out" | awk -F: '/__WARN_UNMATERIALIZED__/ {print $2}')"
+    [ -n "$audit_errors" ] || audit_errors=0
+    [ -n "$audit_warnings" ] || audit_warnings=0
+    [ -n "$audit_warn_optional" ] || audit_warn_optional=0
+    [ -n "$audit_warn_unmaterialized" ] || audit_warn_unmaterialized=0
+    errors=$((errors + audit_errors))
+    warnings=$((warnings + audit_warnings))
+    DOCTOR_WARNING_OPTIONAL_TOOLS=$((DOCTOR_WARNING_OPTIONAL_TOOLS + audit_warn_optional))
+    DOCTOR_WARNING_UNMATERIALIZED=$((DOCTOR_WARNING_UNMATERIALIZED + audit_warn_unmaterialized))
 
     # 容灾快照
     if [ "$silent" == "false" ]; then
@@ -601,12 +654,28 @@ print(f'__ERRORS__:{errs}')
             fi
         fi
         echo -e "  ${SUCCESS_GREEN}✓${NC} 有效历史快照: $baks 个\n"
+        if [ $warnings -gt 0 ]; then
+            echo -e "${BOLD}[ 提示项分类 ]${NC}"
+            if [ "$DOCTOR_WARNING_OPTIONAL_TOOLS" -gt 0 ]; then
+                echo -e "  ${PENDING_GOLD}⚠${NC} 可选工具未就绪: ${DOCTOR_WARNING_OPTIONAL_TOOLS} 项"
+            fi
+            if [ "$DOCTOR_WARNING_UNMATERIALIZED" -gt 0 ]; then
+                echo -e "  ${PENDING_GOLD}⚠${NC} 托管产物尚未生成: ${DOCTOR_WARNING_UNMATERIALIZED} 项"
+            fi
+            echo ""
+        fi
     fi
 
-    if [ $errors -eq 0 ]; then
+    if [ $errors -eq 0 ] && [ $warnings -eq 0 ]; then
+        DOCTOR_STATUS="healthy"
         [ "$silent" == "false" ] && echo -e "${SUCCESS_GREEN}${BOLD}✨ 认证通过：环境状态完美。${NC}"
         return 0
+    elif [ $errors -eq 0 ]; then
+        DOCTOR_STATUS="warning"
+        [ "$silent" == "false" ] && echo -e "${PENDING_GOLD}${BOLD}⚠ 认证完成：发现 $warnings 个提示项。${NC}"
+        return 0
     else
+        DOCTOR_STATUS="error"
         [ "$silent" == "false" ] && echo -e "${ERROR_RED}${BOLD}❌ 认证失败：发现 $errors 个一致性问题。${NC}"
         return 1
     fi
@@ -679,7 +748,35 @@ function show_summary() {
     echo "$clean_log" | grep -E "同步完成|安装成功" | sed 's/\[AGENT: Rules\] //g; s/\[TOOL: \(.*\)\]/  ⚒ \1/g' | sort -u || echo "   无变动。"
     echo -e "${BORDER_GRAY}----------------------------------------------------------------${NC}"
     echo -e "${HDR_BLUE}${BOLD}4. 自动健康验证 (Post-Sync Verification)${NC}"
-    doctor_check silent && echo -e "   ${SUCCESS_GREEN}${BOLD}CERTIFIED HEALTHY${NC}" || echo -e "   ${ERROR_RED}${BOLD}HEALTH WARNING${NC}"
+    if doctor_check silent; then
+        case "$DOCTOR_STATUS" in
+            healthy) echo -e "   ${SUCCESS_GREEN}${BOLD}CERTIFIED HEALTHY${NC}" ;;
+            warning)
+                echo -e "   ${PENDING_GOLD}${BOLD}HEALTH CAUTION${NC}"
+                local warning_parts=()
+                if [ "${DOCTOR_WARNING_OPTIONAL_TOOLS:-0}" -gt 0 ]; then
+                    warning_parts+=("可选工具未就绪 ${DOCTOR_WARNING_OPTIONAL_TOOLS} 项")
+                fi
+                if [ "${DOCTOR_WARNING_UNMATERIALIZED:-0}" -gt 0 ]; then
+                    warning_parts+=("托管产物尚未生成 ${DOCTOR_WARNING_UNMATERIALIZED} 项")
+                fi
+                if [ ${#warning_parts[@]} -gt 0 ]; then
+                    local joined_warning_parts=""
+                    local part
+                    for part in "${warning_parts[@]}"; do
+                        if [ -n "$joined_warning_parts" ]; then
+                            joined_warning_parts="${joined_warning_parts}；"
+                        fi
+                        joined_warning_parts="${joined_warning_parts}${part}"
+                    done
+                    echo -e "   ${PENDING_GOLD}${joined_warning_parts}${NC}"
+                fi
+                ;;
+            *) echo -e "   ${SUCCESS_GREEN}${BOLD}CERTIFIED HEALTHY${NC}" ;;
+        esac
+    else
+        echo -e "   ${ERROR_RED}${BOLD}HEALTH WARNING${NC}"
+    fi
     echo ""
 }
 
@@ -871,6 +968,38 @@ function run_mcp_sync_task() {
 }
 
 function run_terminal_sync_task() {
+    local force_run="${1:-false}"
+    if [ "$force_run" != "true" ]; then
+        ROOT_DIR="$ROOT_DIR" CONFIG_FILE="$CONFIG_FILE" "$PYTHON_CMD" - <<'PY'
+import os
+import sys
+from pathlib import Path
+
+root = Path(os.environ["ROOT_DIR"])
+sys.path.insert(0, str(root))
+
+from src.json_config import load_json_object_file
+
+cfg = load_json_object_file(os.environ["CONFIG_FILE"], strict=True, missing_ok=False)
+terminal_cfg = cfg.get("terminal", {})
+if terminal_cfg is None:
+    terminal_cfg = {}
+if not isinstance(terminal_cfg, dict):
+    print("manager.json.terminal 必须是对象", file=sys.stderr)
+    sys.exit(2)
+
+sys.exit(0 if terminal_cfg.get("enabled", False) else 1)
+PY
+        local terminal_enabled_rc=$?
+        if [ "$terminal_enabled_rc" -eq 2 ]; then
+            return 1
+        fi
+        if [ "$terminal_enabled_rc" -ne 0 ]; then
+            status_line "SKIP" "终端策略未启用，跳过终端配置同步"
+            return 0
+        fi
+    fi
+
     local args=(sync_terminal.py)
     if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
     if [ -n "$OFFLINE_FLAG" ]; then args+=("$OFFLINE_FLAG"); fi
@@ -1105,7 +1234,7 @@ function is_dry_run_mode() {
 }
 
 case "$cmd" in
-    all|""|bootstrap)
+    all|bootstrap)
         run_update_pipeline "🚀 Agent Manager 全量同步启动" ""
         ;;
     update)
@@ -1215,7 +1344,7 @@ case "$cmd" in
     tools:sync)
         (cd "$ROOT_DIR/agent-tool" && $PYTHON_CMD sync_tools.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/tools.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG) ;;
     terminal:sync)
-        (cd "$ROOT_DIR/agent-terminal" && $PYTHON_CMD sync_terminal.py $DRY_RUN_FLAG $OFFLINE_FLAG) ;;
+        run_terminal_sync_task true ;;
     fetch-models)
         args=()
         if [ "${#CMD_ARGS[@]}" -gt 0 ]; then
@@ -1267,6 +1396,7 @@ case "$cmd" in
         fi ;;
     help|-h|--help|-help)
         echo -e "${HDR_BLUE}${BOLD}Agent Manager 帮助手册 (Platinum Edition)${NC}\n"
+        echo -e "直接执行 ${BOLD}./manage.sh${NC} 时默认显示本帮助，不会触发同步。\n"
         echo -e "${BOLD}${HDR_BLUE}=== 全局参数 (Flags) ===${NC}"
         echo -e "  ${PENDING_GOLD}--dry-run${NC}       空转模式，仅输出计划动作并跳过会修改本地或远端状态的副作用"
         echo -e "  ${PENDING_GOLD}--offline${NC}       离线模式，禁止远程拉取/安装；仅使用本地已存在仓库与配置\n"

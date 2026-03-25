@@ -25,6 +25,7 @@
 ./manage.sh doctor
 ```
 这将提供全系统状态概览，显示任何明显的错误或警告。
+其中缺失但尚未生成的 MCP / skills / rules 目标会归入 `托管产物尚未生成` 提示项；可选组件缺失会归入 `可选工具未就绪`。真正的配置错误、依赖缺失和内容漂移仍会阻断认证。
 
 如需先验证顶层命令编排本身而不触发真实安装/更新，可先运行：
 ```bash
@@ -288,7 +289,7 @@ test -f config/rules-targets.list && echo "rules-targets.list: 存在"
 
 1. **secrets/ 目录未初始化**
    - 检查：`ls -la secrets/` 是否显示为 Git 仓库
-   - 解决：运行 `./manage.sh update`、`./manage.sh bootstrap` 或 `./scripts/init-secrets.sh`
+   - 解决：运行 `SECRETS_REPO_URL=https://example.com/your-secrets.git ./manage.sh update`、`SECRETS_REPO_URL=https://example.com/your-secrets.git ./manage.sh bootstrap`，或执行 `./scripts/init-secrets.sh https://example.com/your-secrets.git`
 
 2. **凭证文件格式错误**
    - 检查：`secrets/mcp.env` 是否为有效的 KEY=VALUE 格式
@@ -503,7 +504,7 @@ rm -rf ~/.claude/skills/* ~/.gemini/skills/* ~/.cursor/rules/* ~/.copilot/skills
 ./manage.sh bootstrap
 
 # 4. 如需恢复 secrets，重新初始化
-./scripts/init-secrets.sh
+./scripts/init-secrets.sh https://example.com/your-secrets.git
 ```
 
 ### 恢复到已知良好状态

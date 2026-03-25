@@ -456,15 +456,15 @@ rm ./.gemini/settings.json
 
 ```bash
 # 方法 1: 自动初始化（推荐）
-make update
+SECRETS_REPO_URL=https://example.com/your-secrets.git make update
 # 会自动检测并克隆 secrets 仓库
 
 # 方法 2: 手动运行初始化脚本
-./scripts/init-secrets.sh
+./scripts/init-secrets.sh https://example.com/your-secrets.git
 
 # 方法 3: 手动克隆
 cd agent-manager
-git clone https://github.com/ly87ing/secrets.git secrets
+git clone https://example.com/your-secrets.git secrets
 ```
 
 ---

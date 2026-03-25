@@ -25,12 +25,14 @@
       "requires": ["tmux"],
       "install": "git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm",
       "upgrade": "git -C ~/.tmux/plugins/tpm pull",
-      "ready_check": "app:~/.tmux/plugins/tpm"
+      "ready_check": "app:~/.tmux/plugins/tpm",
+      "doctor_severity": "warning"
     },
     "oh-my-zsh": {
       "install": "sh -c \"$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\" \"\" --unattended",
       "upgrade": "git -C ~/.oh-my-zsh pull",
-      "ready_check": "app:~/.oh-my-zsh"
+      "ready_check": "app:~/.oh-my-zsh",
+      "doctor_severity": "warning"
     },
     "powerlevel10k": {
       "requires": ["oh-my-zsh"],
@@ -65,7 +67,8 @@
       "install": "brew install --cask font-meslo-lg-nerd-font",
       "uninstall": "brew uninstall --cask font-meslo-lg-nerd-font",
       "upgrade": "brew upgrade --cask font-meslo-lg-nerd-font",
-      "ready_check": "app:~/Library/Fonts/MesloLGS NF Regular.ttf"
+      "ready_check": "app:~/Library/Fonts/MesloLGS NF Regular.ttf",
+      "doctor_severity": "warning"
     }
   }
 }

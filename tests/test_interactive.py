@@ -47,6 +47,7 @@ class InteractiveWorkflowTests(unittest.TestCase):
                             "enabled": True,
                             "auto_install": True,
                             "auto_update": True,
+                            "preferred_provider": "brew",
                         }
                     },
                     "tools": {
@@ -57,6 +58,22 @@ class InteractiveWorkflowTests(unittest.TestCase):
                     },
                     "skills": {},
                     "mcp": {},
+                },
+                f,
+                indent=2,
+                ensure_ascii=False,
+            )
+        with open(config_dir / "agents.json", "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "claude-code": {
+                        "display_name": "Claude Code",
+                        "preferred_provider": "brew",
+                        "providers": {
+                            "brew": {"install": "brew install --cask claude-code"},
+                            "npm": {"install": "npm install -g @anthropic-ai/claude-code"},
+                        },
+                    }
                 },
                 f,
                 indent=2,
@@ -84,6 +101,7 @@ class InteractiveWorkflowTests(unittest.TestCase):
                 "n",
                 "n",
                 "n",
+                "",
                 "7",
                 "y",  # 确认放弃未保存更改
             ]
@@ -108,6 +126,7 @@ class InteractiveWorkflowTests(unittest.TestCase):
                 "n",
                 "n",
                 "n",
+                "",
                 "7",
                 "n",  # 取消放弃，继续留在菜单
                 "6",  # 选择保存
@@ -126,6 +145,7 @@ class InteractiveWorkflowTests(unittest.TestCase):
                 "n",
                 "n",
                 "n",
+                "",
                 "6",
             ]
         )
@@ -139,6 +159,7 @@ class InteractiveWorkflowTests(unittest.TestCase):
                         "enabled": False,
                         "auto_install": False,
                         "auto_update": False,
+                        "preferred_provider": "brew",
                     }
                 }
             },
@@ -154,6 +175,7 @@ class InteractiveWorkflowTests(unittest.TestCase):
                     "n",
                     "n",
                     "n",
+                    "",
                     "6",
                 ]
             )
@@ -205,6 +227,31 @@ class InteractiveWorkflowTests(unittest.TestCase):
             },
         )
 
+    def test_agent_edit_persists_preferred_provider(self):
+        iterator = iter(["1", "y", "y", "y", "npm"])
+        local_policy = {}
+        with working_directory(self.root):
+            with mock.patch.object(
+                builtins,
+                "input",
+                side_effect=lambda _prompt="": next(iterator),
+            ):
+                interactive.edit_section("agents", "Agent", local_policy)
+
+        self.assertEqual(
+            local_policy,
+            {
+                "agents": {
+                    "claude-code": {
+                        "enabled": True,
+                        "auto_install": True,
+                        "auto_update": True,
+                        "preferred_provider": "npm",
+                    }
+                }
+            },
+        )
+
     def test_main_menu_says_save_changes(self):
         output = io.StringIO()
         with working_directory(self.root):
@@ -214,6 +261,15 @@ class InteractiveWorkflowTests(unittest.TestCase):
 
         self.assertIn("6. 保存更改", output.getvalue())
         self.assertIn("4. 编辑 Skill 策略", output.getvalue())
+
+    def test_main_menu_mentions_local_override_file(self):
+        output = io.StringIO()
+        with working_directory(self.root):
+            with mock.patch.object(builtins, "input", return_value="7"):
+                with mock.patch("sys.stdout", output):
+                    interactive.main()
+
+        self.assertIn("manager.local.json", output.getvalue())
 
     def test_invalid_local_override_fails_loudly(self):
         (self.root / "config" / "manager.local.json").write_text("{ invalid json\n", encoding="utf-8")

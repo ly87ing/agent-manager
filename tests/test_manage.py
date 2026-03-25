@@ -459,7 +459,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("rules-targets.list: 缺失", combined)
             self.assertNotIn("环境状态完美", combined)
 
-    def test_doctor_fails_when_configured_skill_target_is_missing(self):
+    def test_doctor_warns_when_configured_skill_target_is_missing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
@@ -493,10 +493,11 @@ class ManageScriptTests(unittest.TestCase):
             )
 
             combined = result.stdout + result.stderr
-            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertEqual(result.returncode, 0, combined)
             self.assertIn("--- Skills 链接审计 ---", combined)
             self.assertIn("Claude Code", combined)
-            self.assertIn("缺失", combined)
+            self.assertIn("尚未建立 skills 目录", combined)
+            self.assertIn("发现 1 个提示项", combined)
 
     def test_doctor_fails_when_enabled_tool_is_not_ready(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -537,6 +538,245 @@ class ManageScriptTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, combined)
             self.assertIn("--- Tools 就绪审计 ---", combined)
             self.assertRegex(combined, r"playwright-cli\s+: 未就绪")
+
+    def test_doctor_warns_but_returns_zero_for_optional_tool_gap(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            temp_home.mkdir()
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {\n    "tpm": { "enabled": true }\n  },\n  "skills": {},\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {},\n  "servers": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "doctor"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertIn("--- Tools 就绪审计 ---", combined)
+            self.assertRegex(combined, r"tpm\s+: 可选项未就绪")
+            self.assertIn("发现 1 个提示项", combined)
+
+    def test_doctor_warns_for_missing_generated_targets_when_agent_is_not_installed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            temp_home.mkdir()
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {\n    "superpowers": { "enabled": true }\n  },\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "agents.json").write_text(
+                '{\n  "claude-code": {\n    "display_name": "Claude Code",\n    "bin": "__missing_claude__"\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {\n    "claude-code": "%s/.claude.json"\n  },\n  "servers": {\n    "augment-context-engine": {\n      "command": "auggie",\n      "args": ["--mcp"],\n      "agents": ["claude-code"]\n    }\n  }\n}\n'
+                % temp_home,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {\n    "superpowers": {\n      "url": "https://example.invalid/superpowers.git",\n      "agents": ["claude-code"]\n    }\n  },\n  "agents": {\n    "claude-code": "%s/.claude/skills"\n  }\n}\n'
+                % temp_home,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text(
+                "claude_global|global|rules/global/main.md|%s/.claude/rules/global.md\n" % temp_home,
+                encoding="utf-8",
+            )
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            env["PATH"] = "/usr/bin:/bin"
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "doctor"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertRegex(combined, r"Claude Code: Agent 未安装，未生成 MCP 配置")
+            self.assertRegex(combined, r"Claude Code\s+: Agent 未安装，未建立 skills 目录")
+            self.assertRegex(combined, r"claude_global: Agent 未安装，未分发")
+            self.assertIn("发现 3 个提示项", combined)
+
+    def test_doctor_groups_warning_categories_in_summary(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            temp_home.mkdir()
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {\n    "tpm": { "enabled": true }\n  },\n  "skills": {\n    "superpowers": { "enabled": true }\n  },\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "agents.json").write_text(
+                '{\n  "claude-code": {\n    "display_name": "Claude Code",\n    "bin": "__missing_claude__"\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {\n    "claude-code": "%s/.claude.json"\n  },\n  "servers": {\n    "augment-context-engine": {\n      "command": "auggie",\n      "args": ["--mcp"],\n      "agents": ["claude-code"]\n    }\n  }\n}\n'
+                % temp_home,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {\n    "superpowers": {\n      "url": "https://example.invalid/superpowers.git",\n      "agents": ["claude-code"]\n    }\n  },\n  "agents": {\n    "claude-code": "%s/.claude/skills"\n  }\n}\n'
+                % temp_home,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text(
+                "claude_global|global|rules/global/main.md|%s/.claude/rules/global.md\n" % temp_home,
+                encoding="utf-8",
+            )
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            env["PATH"] = "/usr/bin:/bin"
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "doctor"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertIn("[ 提示项分类 ]", combined)
+            self.assertIn("可选工具未就绪: 1 项", combined)
+            self.assertIn("托管产物尚未生成: 3 项", combined)
+            self.assertIn("发现 4 个提示项", combined)
+
+    def test_sync_preview_reports_health_caution_for_optional_tool_gaps(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            temp_home.mkdir()
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {\n    "tpm": { "enabled": true }\n  },\n  "skills": {},\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {},\n  "servers": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+            self._write_stub(
+                temp_root / "agent-skill" / "link_skills.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-mcp" / "sync_mcp.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "sync", "--dry-run"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=20,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertIn("HEALTH CAUTION", combined)
+            self.assertIn("可选工具未就绪 1 项", combined)
+            self.assertNotIn("HEALTH WARNING", combined)
+
+    def test_sync_preview_reports_health_caution_for_missing_generated_targets(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            temp_home.mkdir()
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {\n    "superpowers": { "enabled": true }\n  },\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "agents.json").write_text(
+                '{\n  "claude-code": {\n    "display_name": "Claude Code",\n    "bin": "__missing_claude__"\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {\n    "claude-code": "%s/.claude.json"\n  },\n  "servers": {\n    "augment-context-engine": {\n      "command": "auggie",\n      "args": ["--mcp"],\n      "agents": ["claude-code"]\n    }\n  }\n}\n'
+                % temp_home,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {\n    "superpowers": {\n      "url": "https://example.invalid/superpowers.git",\n      "agents": ["claude-code"]\n    }\n  },\n  "agents": {\n    "claude-code": "%s/.claude/skills"\n  }\n}\n'
+                % temp_home,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text(
+                "claude_global|global|rules/global/main.md|%s/.claude/rules/global.md\n" % temp_home,
+                encoding="utf-8",
+            )
+            self._write_stub(
+                temp_root / "agent-skill" / "link_skills.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-mcp" / "sync_mcp.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            env["PATH"] = "/usr/bin:/bin"
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "sync", "--dry-run"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=20,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertIn("HEALTH CAUTION", combined)
+            self.assertNotIn("HEALTH WARNING", combined)
 
     def test_doctor_skips_node_and_npm_when_policy_does_not_need_them(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -744,6 +984,49 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("Agent Manager 交互式配置中心", combined)
             self.assertIn("7. 退出", combined)
 
+    def test_manage_without_command_shows_help_and_does_not_run_pipeline(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            call_log = temp_root / "calls.log"
+
+            self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log, "True")
+            self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log, "True")
+            self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log, "True")
+            self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log, "True")
+            self._append_log_stub(temp_root / "agent-terminal" / "sync_terminal.py", "terminal", call_log, "True")
+            self._write_stub(
+                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
+                (
+                    "#!/usr/bin/env bash\n"
+                    f"printf '%s\\n' rules >> {str(call_log)!r}\n"
+                    "exit 0\n"
+                ),
+            )
+            self._write_stub(
+                temp_root / "scripts" / "init-secrets.sh",
+                (
+                    "#!/usr/bin/env bash\n"
+                    f"printf '%s\\n' init-secrets >> {str(call_log)!r}\n"
+                    "exit 0\n"
+                ),
+            )
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "--dry-run", "--offline"],
+                cwd=temp_root,
+                env=self._managed_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertIn("Agent Manager 帮助手册", combined)
+            self.assertFalse(call_log.exists(), combined)
+
     def test_sync_runs_only_local_config_tasks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
@@ -813,6 +1096,61 @@ class ManageScriptTests(unittest.TestCase):
             self.assertFalse(any(line.startswith("agents ") for line in log_lines), log_lines)
             self.assertFalse(any(line.startswith("tools ") for line in log_lines), log_lines)
             self.assertFalse(any(line == "init-secrets" for line in log_lines), log_lines)
+
+    def test_sync_skips_terminal_when_terminal_policy_disabled(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            call_log = temp_root / "calls.log"
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n'
+                '  "agents": {},\n'
+                '  "tools": {},\n'
+                '  "skills": {},\n'
+                '  "mcp": {},\n'
+                '  "terminal": { "enabled": false }\n'
+                '}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {},\n  "servers": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log, "True")
+            self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log, "True")
+            self._append_log_stub(temp_root / "agent-terminal" / "sync_terminal.py", "terminal", call_log, "True")
+            self._write_stub(
+                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
+                (
+                    "#!/usr/bin/env bash\n"
+                    f"printf '%s\\n' \"rules $*\" >> {str(call_log)!r}\n"
+                    "exit 0\n"
+                ),
+            )
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "sync"],
+                cwd=temp_root,
+                env=self._managed_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            log_lines = call_log.read_text(encoding="utf-8").splitlines()
+            self.assertTrue(any(line.startswith("skills ") for line in log_lines), log_lines)
+            self.assertTrue(any(line.startswith("mcp ") for line in log_lines), log_lines)
+            self.assertFalse(any(line.startswith("terminal ") for line in log_lines), log_lines)
 
     def test_skills_upgrade_dispatches_upgrade_script(self):
         with tempfile.TemporaryDirectory() as temp_dir:

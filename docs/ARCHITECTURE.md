@@ -18,7 +18,7 @@
 Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单一入口管理多种 AI 编码助手的完整生命周期。系统采用模块化设计，将策略意愿与具体实现分离，确保配置的精准与安全。
 
 核心设计原则：
-- **策略与定义分离**：管理用户意愿（manager.json）与技术细节（agents.json等）分离
+- **策略与定义分离**：仓库基线策略（`manager.json`）与机器本地覆盖（`manager.local.json`）在运行时合并，再与技术细节定义（`agents.json`等）配合生效
 - **原子化操作**：所有文件写入采用临时文件原子替换模式
 - **显式运行时契约**：`dry-run` / `offline` / 锁 / 日志行为必须由 `manage.sh` 统一解释，不能由各同步器各自猜测
 - **差异审计**：实时监控物理文件与定义仓库的内容偏离
@@ -29,13 +29,16 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 ## 核心组件
 
 ### 1. 策略层 (Policy Layer)
-**文件位置**: `config/manager.json`
+**文件位置**: `config/manager.json` + `config/manager.local.json`
 
 用户决策入口，定义：
 - `enabled`: 是否启用该Agent/Tool/Skill/MCP
 - `auto_install`: 是否自动安装
 - `auto_update`: 是否自动更新
 - `preferred_provider`: 首选安装来源
+- `manager.json`: 仓库提供的可审计默认值
+- `manager.local.json`: 不参与 Git 的本地覆盖层；`make ui` 默认写入这里
+- `terminal.enabled`: 控制主流程是否执行终端配置同步；终端配置默认关闭
 - `agents` 键使用稳定的机器可读 ID（如 `claude-code`, `cursor`），而不是面向用户的展示名
 
 ### 2. 定义层 (Definition Layer)
@@ -75,6 +78,7 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - 一致性审计（文件内容与目录结构漂移检测）
 - 环境依赖检查
 - 安全风险扫描
+- 对尚未物化的 MCP / skills / rules 目标给出提示级告警，而不是与真实漂移混为一谈
 
 ---
 
@@ -83,7 +87,7 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 ### 配置同步流程
 ```mermaid
 graph TD
-    A[用户修改 manager.json] --> B[同步引擎读取策略]
+    A[用户修改 manager.json / manager.local.json] --> B[运行时合并有效策略]
     B --> C[读取对应的 definition.json]
     C --> D[检测当前系统状态]
     D --> E{状态是否需要变更?}
@@ -113,9 +117,11 @@ graph TD
 
 - **原子锁**：需要写入或同步的命令会先抢占 `/tmp/agent_manager_<user>.lock.d`，并在其中写入持有者 PID；兼容保留 `/tmp/agent_manager_<user>.lock` 作为元数据。`unlock` 会同时清理目录锁和遗留锁文件。
 - **按次日志**：每次运行写入独立日志 `/tmp/agent_manager_sync_<user>_<runid>.log`，并更新 `/tmp/agent_manager_sync_<user>.latest` 指针；`logs` 读取 latest，`clean-logs` 清理 latest 与全部历史运行日志。
+- **安全默认入口**：直接执行 `./manage.sh` 只显示帮助，不会隐式退化到 `all`。
 - **`--dry-run`**：只输出计划动作，跳过 secrets 初始化、仓库 clone/pull、依赖安装、构建，以及 `cleanup` / `unlock` / `backups:restore` / `clean-logs` 这类会修改本地状态的维护动作；允许保留只读探测和预览日志。若与 `self-update` 组合，只预览仓库自更新动作。
 - **`--offline`**：禁止任何远程拉取、下载和安装。生命周期、tools、skills、MCP 同步器都只能复用本地已存在仓库/配置；如果本地前置资源缺失，应显式报错而不是偷偷联网。
 - **命令分层**：`sync` 只做本地配置收敛；`update` 会补齐并刷新非 Agent 安装类资源，并只更新已安装 Agent；`bootstrap` / `all` 才负责缺失 Agent 的安装；`self-update` 只更新 agent-manager 仓库自身。
+- **终端配置默认关闭**：只有当有效策略中的 `terminal.enabled` 为 `true` 时，`sync` / `update` / `bootstrap` 才会触发终端配置同步；显式执行 `terminal:sync` 仍可单独运行。
 
 ---
 
@@ -206,7 +212,7 @@ agent-manager/
 ```
 
 ### 工作流程
-1. 用户通过修改 `config/manager.json` 表达意愿
+1. 用户通过修改 `config/manager.json` 或 `config/manager.local.json` 表达意愿
 2. 选择入口：`make sync` 做本地配置收敛，`make update` 刷新远端资源，`make bootstrap` 做全量安装、更新与同步；`./manage.sh all` 仅作为兼容别名保留
 3. `manage.sh` 先解析 `dry-run` / `offline`，获取原子锁，并建立本次运行专属日志
 4. 各同步引擎读取策略和定义，检测当前状态
@@ -235,6 +241,11 @@ agent-manager/
 - 目录型规则需要收敛同步：复制模式可以在分发时删除陈旧文件，避免模块残留
 - 符号链接仍然保留给显式选择的高级用法，用于节省空间或实时跟随源内容
 - `manage.sh doctor` 会按文件内容和目录结构审计规则目标，而不是只对单文件做 MD5 对比
+
+### 为什么将终端配置改为显式启用？
+- `~/.zshrc`、`~/.tmux.conf` 和 iTerm2 动态配置属于高影响用户资产
+- 将其纳入默认主流程会放大首次上手的风险和心智负担
+- 因此主流程改为仅在 `terminal.enabled=true` 时执行，保持 Agent 管理与终端接管解耦
 
 ---
 

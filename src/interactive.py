@@ -12,7 +12,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
-from src.json_config import atomic_write_json_file, get_typed_mapping_section, load_json_object_file
+from src.json_config import atomic_write_json_file, ensure_mapping_value_types, get_typed_mapping_section, load_json_object_file
 
 # 颜色定义
 ERROR_RED = "\033[0;31m"
@@ -81,6 +81,16 @@ def get_base_config():
     base["mcp"] = get_typed_mapping_section(base, "mcp", "manager.json", (dict,), "对象")
     return base
 
+
+def get_agent_definitions():
+    defs_path = get_config_root() / "config" / "agents.json"
+    if not defs_path.exists():
+        return {}
+    defs = load_json(defs_path, strict=True, missing_ok=False)
+    return canonicalize_agent_mapping(
+        ensure_mapping_value_types(defs, "agents.json", (dict,), "对象")
+    )
+
 def get_local_config():
     local_path = get_config_root() / "config" / "manager.local.json"
     # Ensure file exists
@@ -137,6 +147,8 @@ def main():
 
     print(f"{HDR_BLUE}{BOLD}Agent Manager 交互式配置中心{NC}")
     print("=" * 50)
+    print(f"当前编辑文件: {get_config_root() / 'config' / 'manager.local.json'}")
+    print("基线策略来自 config/manager.json；此界面只写本地覆盖层。")
 
     while True:
         print("\n请选择操作:")
@@ -228,6 +240,17 @@ def edit_section(section_key, section_name, local_policy):
         auto_update = ask_yes_no(f"自动更新 {label}?", current_eff_val.get("auto_update", True))
         new_val["auto_install"] = auto_install
         new_val["auto_update"] = auto_update
+        agent_defs = get_agent_definitions()
+        provider_defs = (agent_defs.get(key) or {}).get("providers") or {}
+        provider_options = list(provider_defs.keys())
+        if provider_options:
+            default_provider = current_eff_val.get("preferred_provider") or (agent_defs.get(key) or {}).get("preferred_provider") or provider_options[0]
+            while True:
+                provider = ask(f"首选安装来源 {provider_options}", default_provider)
+                if provider in provider_options:
+                    new_val["preferred_provider"] = provider
+                    break
+                print(f"{ERROR_RED}无效 provider，请输入 {provider_options} 之一。{NC}")
     elif section_key == "tools":
         auto_update = ask_yes_no(f"自动更新 {label}?", current_eff_val.get("auto_update", True))
         new_val["auto_update"] = auto_update

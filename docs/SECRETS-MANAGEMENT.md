@@ -95,7 +95,7 @@ ANOTHER_API_KEY="sk-abc123..."
 ```mermaid
 graph TD
     A[运行 make update / make bootstrap] --> B{secrets/ 目录存在吗?}
-    B -->|否| C[自动从 git clone https://github.com/ly87ing/secrets.git secrets]
+    B -->|否| C[从 SECRETS_REPO_URL 或脚本参数读取私有仓库地址]
     B -->|是| D[更新现有 secrets 仓库]
     C --> E[读取 secrets/mcp.env]
     D --> E
@@ -152,14 +152,14 @@ graph TD
 ### 初始化凭证仓库
 ```bash
 # 方法1：通过 make 命令自动初始化（推荐）
-make update
+SECRETS_REPO_URL=https://example.com/your-secrets.git make update
 # 系统会检测secrets/目录是否存在并自动克隆
 
 # 方法2：手动运行初始化脚本
-./scripts/init-secrets.sh
+./scripts/init-secrets.sh https://example.com/your-secrets.git
 
 # 方法3：直接克隆
-git clone https://github.com/ly87ing/secrets.git secrets
+git clone https://example.com/your-secrets.git secrets
 ```
 
 ### 更新凭证

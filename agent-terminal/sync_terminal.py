@@ -93,6 +93,15 @@ def sync_terminal(config_path: Path, repo_root: Path, dry_run: bool = False, off
             all_ok = False
             continue
 
+        enabled = target_cfg.get("enabled", True)
+        if not isinstance(enabled, bool):
+            logging.error(f"[TERMINAL: {target_name}] enabled 必须是布尔值，跳过")
+            all_ok = False
+            continue
+        if not enabled:
+            logging.info(f"[TERMINAL: {target_name}] 已禁用，跳过。")
+            continue
+
         requires = target_cfg.get("requires", [])
         unmet = [t for t in requires if not _check_tool_ready(t, tool_defs)]
         if unmet:

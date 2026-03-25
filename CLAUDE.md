@@ -33,7 +33,7 @@ make doctor
 
 ### 核心设计原则
 
-- **策略与定义分离**：`config/manager.json` 是用户意愿的唯一决策入口；`config/agents.json`、`tools.json`、`skills.json`、`mcp.json` 保存技术细节
+- **策略与定义分离**：`config/manager.json` 提供仓库基线，`config/manager.local.json` 提供机器本地覆盖；`config/agents.json`、`tools.json`、`skills.json`、`mcp.json` 保存技术细节
 - **原子化写入**：所有配置文件写入使用临时文件原子替换模式；目录型 rules 使用收敛式同步
 - **显式运行时契约**：`dry-run` / `offline` / 锁 / 日志行为由 `manage.sh` 统一解释，各同步器不自行猜测
 - **`_MANAGED_BY` 标记**：所有托管写入的配置都注入此标记，用于审计追踪
@@ -71,7 +71,8 @@ make doctor
 ### 配置层级
 
 ```
-config/manager.json       ← 策略层：用户意愿（enabled / auto_install / preferred_provider）
+config/manager.json       ← 策略层基线：仓库默认意愿（enabled / auto_install / preferred_provider）
+config/manager.local.json ← 策略层覆盖：本机私有偏好；运行时深度合并，UI 默认写入这里
 config/agents.json        ← 定义层：安装源 providers，必须与 manager.json 中的 preferred_provider 对应
 config/mcp.json           ← MCP 服务器定义，secrets/mcp.env 中的 ${VAR} 在注入时替换
 config/skills.json        ← Skill 仓库 URL + commit/ref 版本约束 + Agent 映射
@@ -80,7 +81,7 @@ config/terminal.json      ← 终端配置模板目标清单（模板路径、�
 config/rules-targets.list ← Rules 分发清单，格式：name|group|source|target
 ```
 
-`preferred_provider` 必须指向 `agents.json` 中 `providers` 的真实键，否则同步直接失败（不静默降级）。
+`preferred_provider` 必须指向 `agents.json` 中 `providers` 的真实键，否则同步直接失败（不静默降级）。`terminal.enabled` 默认为 `false`，主流程不会隐式改写终端配置。
 
 **Codex 的特殊定位**：`codex` 作为 MCP、Rules 与 Skills 的分发目标（在 `mcp.json`、`rules-targets.list`、`skills.json` 中有条目），但不纳入生命周期管理（`agents.json` 和 `manager.json` 中无 codex）。这是有意设计。
 

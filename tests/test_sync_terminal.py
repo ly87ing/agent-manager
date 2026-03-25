@@ -190,6 +190,31 @@ class SyncTerminalTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse(dest.exists(), "requires 未满足时不应写入文件")
 
+    def test_disabled_target_is_skipped_without_writing(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            tmpl = d / "test.tmpl"
+            tmpl.write_text("hello", encoding="utf-8")
+            dest = d / "result.txt"
+            cfg = d / "terminal.json"
+            cfg.write_text(
+                json.dumps(
+                    {
+                        "targets": {
+                            "test-target": {
+                                "enabled": False,
+                                "template": str(tmpl),
+                                "destination": str(dest),
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = _run(["--config", str(cfg)])
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse(dest.exists(), "disabled 目标不应写入文件")
+
     def test_non_dict_targets_exits_nonzero(self):
         with tempfile.TemporaryDirectory() as d:
             cfg = Path(d) / "terminal.json"

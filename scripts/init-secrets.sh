@@ -4,7 +4,6 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 SECRETS_DIR="$ROOT_DIR/secrets"
-DEFAULT_REPO="https://github.com/ly87ing/secrets.git"
 
 echo "=========================================="
 echo "  Agent Manager - Secrets 初始化"
@@ -31,8 +30,16 @@ fi
 echo "🔍 检测到 secrets 目录缺失"
 echo ""
 
-REPO_URL="${1:-$DEFAULT_REPO}"
-[ -n "$SECRETS_REPO_URL" ] && REPO_URL="$SECRETS_REPO_URL"
+REPO_URL="${1:-${SECRETS_REPO_URL:-}}"
+
+if [ -z "$REPO_URL" ]; then
+    echo "❌ 未配置 secrets 仓库地址"
+    echo ""
+    echo "请通过以下任一方式提供："
+    echo "  SECRETS_REPO_URL=https://example.com/your-secrets.git make update"
+    echo "  ./scripts/init-secrets.sh <your-secrets-repo-url>"
+    exit 1
+fi
 
 echo "正在克隆凭证仓库：$REPO_URL"
 echo ""

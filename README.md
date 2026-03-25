@@ -34,7 +34,8 @@
 ## 核心健全性特性
 
 ### 1. 策略与定义分离 (Policy vs. Definition)
-- **统一意愿清单 (`manager.json`)**：作为唯一决策入口，控制 `enabled`、`auto_install`、`auto_update` 以及 `preferred_provider`。
+- **仓库基线 (`manager.json`)**：保存可审计的默认策略。
+- **本地覆盖 (`manager.local.json`)**：运行时与 `manager.json` 深度合并；`make ui` 只写这一层，适合机器本地偏好与私有配置。
 - **模块化定义 (`agents.json`等)**：保存官方指令细节，支持 Policy 的强制覆盖。
 
 ### 2. 事务级数据安全
@@ -49,6 +50,10 @@
 - **一键大扫除 (Cleanup)**：精准回收受管备份、碎片及冗余日志。
 - **失效洗刷 (Scrubbing)**：自动清理 Agent 目录中的死亡软链。
 
+### 5. 安全默认值
+- **安全入口**：直接执行 `./manage.sh` 只显示帮助，不触发同步。
+- **终端配置默认关闭**：`sync` / `update` / `bootstrap` 默认不会改写 `~/.zshrc`、`~/.tmux.conf` 或 iTerm2 动态配置；如需启用，请在 `config/manager.local.json` 中设置 `"terminal": { "enabled": true }`。
+
 ## 平台支持 (Platform Support)
 
 - 本项目当前以 **macOS** 为主要验证平台；**Linux** 路径保持 POSIX 兼容设计，但仍建议在目标环境自行回归验证。  
@@ -57,6 +62,7 @@
 
 ## 管理指令集
 
+- `./manage.sh`: 显示帮助；这是脚本的安全默认入口。
 - `make sync`: 仅同步当前配置到 rules / skills / MCP，本地收敛，不联网、不安装。
 - `make update`: 更新远端资源并收敛本地环境，但不安装缺失 Agent。
 - `make bootstrap`: 执行全量安装、更新与同步，适合新机器初始化。
@@ -64,10 +70,21 @@
 - `make plan`: 预演一次完整 `bootstrap`。
 - `make self-update`: 仅更新 agent-manager 仓库自身逻辑。
 - `make smoke`: 运行跨平台安全预演 smoke 校验，验证主入口命令的 dry-run / preview 契约。
-- `make doctor` / `make status`: 执行全系统深度体检。
+- `make doctor` / `make status`: 执行全系统深度体检，并把 warning 细分为 `可选工具未就绪` 与 `托管产物尚未生成` 两类提示项。
 - `make fetch-models`: 探测并获取 API 端点支持的模型列表 (支持 OpenAI / Anthropic 格式)。
 - `make restore`: 交互式回滚历史快照。
 - `make ui`: 启动交互式配置管理中心。
+
+## Secrets 初始化
+
+- 不再内置固定的 secrets 仓库地址。
+- 需要通过环境变量 `SECRETS_REPO_URL` 或脚本参数显式提供仓库地址，例如：
+
+```bash
+SECRETS_REPO_URL=https://example.com/your-secrets.git make update
+# 或
+./scripts/init-secrets.sh https://example.com/your-secrets.git
+```
 
 ## 许可证
 Apache-2.0

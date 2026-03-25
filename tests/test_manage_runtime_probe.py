@@ -127,6 +127,53 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
         self.assertFalse(ready)
 
+    def test_detect_tool_readiness_reuses_brew_inventory_across_multiple_tools(self):
+        calls = []
+
+        def run_cmd(cmd, timeout=10):
+            calls.append(tuple(cmd))
+            if tuple(cmd) == ("brew", "list", "--formula", "-1"):
+                return True, "powerlevel10k\nzsh-autosuggestions\nzsh-syntax-highlighting\n"
+            if tuple(cmd) == ("brew", "list", "--cask", "-1"):
+                return True, ""
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        inventory = manage_runtime_probe.ProviderInventory(
+            run_cmd=run_cmd,
+            which=lambda binary: "/opt/homebrew/bin/brew" if binary == "brew" else None,
+        )
+
+        self.assertTrue(
+            manage_runtime_probe.detect_tool_readiness(
+                "powerlevel10k",
+                {"ready_check": "brew:powerlevel10k"},
+                "/repo",
+                inventory=inventory,
+            )
+        )
+        self.assertTrue(
+            manage_runtime_probe.detect_tool_readiness(
+                "zsh-autosuggestions",
+                {"ready_check": "brew:zsh-autosuggestions"},
+                "/repo",
+                inventory=inventory,
+            )
+        )
+        self.assertTrue(
+            manage_runtime_probe.detect_tool_readiness(
+                "zsh-syntax-highlighting",
+                {"ready_check": "brew:zsh-syntax-highlighting"},
+                "/repo",
+                inventory=inventory,
+            )
+        )
+
+        self.assertEqual(calls.count(("brew", "list", "--formula", "-1")), 1)
+        self.assertLessEqual(calls.count(("brew", "list", "--cask", "-1")), 1)
+        self.assertNotIn(("brew", "list", "--versions", "powerlevel10k"), calls)
+        self.assertNotIn(("brew", "list", "--versions", "zsh-autosuggestions"), calls)
+        self.assertNotIn(("brew", "list", "--versions", "zsh-syntax-highlighting"), calls)
+
     def test_collect_required_runtime_commands_skips_node_for_empty_policy(self):
         required = manage_runtime_probe.collect_required_runtime_commands(
             {"agents": {}, "tools": {}, "skills": {}, "mcp": {}},

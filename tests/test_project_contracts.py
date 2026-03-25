@@ -14,6 +14,11 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("make bootstrap", script)
         self.assertNotIn("初始化完成！现在可以运行：make all", script)
 
+    def test_init_secrets_requires_explicit_repo_configuration(self):
+        script = (ROOT / "scripts" / "init-secrets.sh").read_text(encoding="utf-8")
+        self.assertIn("SECRETS_REPO_URL", script)
+        self.assertNotIn("https://github.com/ly87ing/secrets.git", script)
+
     def test_makefile_exposes_smoke_target(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
         self.assertIn(".PHONY: all bootstrap sync update plan self-update smoke", makefile)
@@ -140,9 +145,19 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("精准回收受管备份、碎片及冗余日志", readme)
         self.assertNotIn("孤儿仓库", readme)
 
+    def test_readme_documents_local_override_and_terminal_opt_in(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("manager.local.json", readme)
+        self.assertIn("终端配置默认关闭", readme)
+
     def test_architecture_dry_run_contract_mentions_local_maintenance_writes(self):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
         self.assertIn("cleanup", architecture)
         self.assertIn("backups:restore", architecture)
         self.assertIn("clean-logs", architecture)
         self.assertIn("会修改本地状态的维护动作", architecture)
+
+    def test_architecture_documents_local_override_and_terminal_policy(self):
+        architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+        self.assertIn("manager.local.json", architecture)
+        self.assertIn("终端配置默认关闭", architecture)

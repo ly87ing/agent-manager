@@ -27,5 +27,8 @@
   },
   "mcp": {
     "augment-context-engine": { "enabled": true }
+  },
+  "terminal": {
+    "enabled": false
   }
 }
