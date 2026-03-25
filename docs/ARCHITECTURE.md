@@ -71,7 +71,7 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - **unsupported provider**：运行时探测到了来源，但定义里没有声明；这类情况必须显式报错，不能静默继续
 
 ### 4. 审计与验证 (Audit & Verification)
-**文件位置**: `manage.sh` 中的doctor_check函数
+**文件位置**: `src/manage_doctor.py` + `manage.sh` 中的 `doctor_check` 包装器
 
 提供全系统健康检查：
 - 配置语法验证
@@ -79,6 +79,7 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - 环境依赖检查
 - 安全风险扫描
 - 对尚未物化的 MCP / skills / rules 目标给出提示级告警，而不是与真实漂移混为一谈
+- `doctor / status --json` 会输出同一份结构化诊断报告，供 CI 或外部脚本消费
 
 ---
 
@@ -122,6 +123,8 @@ graph TD
 - **`--offline`**：禁止任何远程拉取、下载和安装。生命周期、tools、skills、MCP 同步器都只能复用本地已存在仓库/配置；如果本地前置资源缺失，应显式报错而不是偷偷联网。
 - **命令分层**：`sync` 只做本地配置收敛；`update` 会补齐并刷新非 Agent 安装类资源，并只更新已安装 Agent；`bootstrap` / `all` 才负责缺失 Agent 的安装；`self-update` 只更新 agent-manager 仓库自身。
 - **终端配置默认关闭**：只有当有效策略中的 `terminal.enabled` 为 `true` 时，`sync` / `update` / `bootstrap` 才会触发终端配置同步；显式执行 `terminal:sync` 仍可单独运行。
+- **诊断双出口**：`doctor / status` 默认输出面向人的文本报告；追加 `--json` 时输出机器可读 JSON，不再需要从文本中抓取 warning 计数。
+- **最小 smoke 策略**：`scripts/ci-smoke.sh` 通过 `AGENT_MANAGER_BASE_CONFIG=config/manager.smoke.json` 运行安全预演，避免把默认全量策略带来的未物化提示项混进 CI 基线。
 
 ---
 

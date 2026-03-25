@@ -80,6 +80,8 @@ class ProjectContractTests(unittest.TestCase):
         self.assertTrue(smoke_script.exists(), "missing ci smoke script")
 
         content = smoke_script.read_text(encoding="utf-8")
+        self.assertIn("AGENT_MANAGER_BASE_CONFIG", content)
+        self.assertIn("manager.smoke.json", content)
         self.assertIn("AGENT_MANAGER_LOCK_FILE", content)
         self.assertIn("AGENT_MANAGER_LOG_PREFIX", content)
         self.assertIn("./manage.sh sync --dry-run", content)
@@ -175,3 +177,9 @@ class ProjectContractTests(unittest.TestCase):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
         self.assertIn("manager.local.json", architecture)
         self.assertIn("终端配置默认关闭", architecture)
+
+    def test_architecture_documents_doctor_python_module(self):
+        architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+        manage_script = (ROOT / "manage.sh").read_text(encoding="utf-8")
+        self.assertIn("src/manage_doctor.py", architecture)
+        self.assertIn("src.manage_doctor", manage_script)

@@ -1,4 +1,5 @@
 import os
+import json
 import shutil
 import subprocess
 import tempfile
@@ -674,6 +675,60 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("可选工具未就绪: 1 项", combined)
             self.assertIn("托管产物尚未生成: 3 项", combined)
             self.assertIn("发现 4 个提示项", combined)
+
+    def test_doctor_json_output_is_machine_readable(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            temp_home.mkdir()
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {\n    "tpm": { "enabled": true }\n  },\n  "skills": {\n    "superpowers": { "enabled": true }\n  },\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "agents.json").write_text(
+                '{\n  "claude-code": {\n    "display_name": "Claude Code",\n    "bin": "__missing_claude__"\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {\n    "claude-code": "%s/.claude.json"\n  },\n  "servers": {\n    "augment-context-engine": {\n      "command": "auggie",\n      "args": ["--mcp"],\n      "agents": ["claude-code"]\n    }\n  }\n}\n'
+                % temp_home,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {\n    "superpowers": {\n      "url": "https://example.invalid/superpowers.git",\n      "agents": ["claude-code"]\n    }\n  },\n  "agents": {\n    "claude-code": "%s/.claude/skills"\n  }\n}\n'
+                % temp_home,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text(
+                "claude_global|global|rules/global/main.md|%s/.claude/rules/global.md\n" % temp_home,
+                encoding="utf-8",
+            )
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            env["PATH"] = "/usr/bin:/bin"
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "doctor", "--json"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "warning")
+            self.assertEqual(payload["summary"]["warnings"], 4)
+            self.assertEqual(payload["summary"]["warning_categories"]["optional_tools"], 1)
+            self.assertEqual(payload["summary"]["warning_categories"]["unmaterialized"], 3)
+            self.assertEqual(payload["summary"]["errors"], 0)
+            self.assertIn("tools", payload["sections"])
+            self.assertIn("mcp", payload["sections"])
+            self.assertIn("skills", payload["sections"])
+            self.assertIn("rules", payload["sections"])
 
     def test_sync_preview_reports_health_caution_for_optional_tool_gaps(self):
         with tempfile.TemporaryDirectory() as temp_dir:

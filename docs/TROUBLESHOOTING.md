@@ -27,11 +27,17 @@
 这将提供全系统状态概览，显示任何明显的错误或警告。
 其中缺失但尚未生成的 MCP / skills / rules 目标会归入 `托管产物尚未生成` 提示项；可选组件缺失会归入 `可选工具未就绪`。真正的配置错误、依赖缺失和内容漂移仍会阻断认证。
 
+如需供脚本或 CI 解析，请改用：
+```bash
+./manage.sh doctor --json
+```
+这会输出结构化 JSON，包含总体 `status`、错误/提示计数以及分 section 的条目列表。
+
 如需先验证顶层命令编排本身而不触发真实安装/更新，可先运行：
 ```bash
 make smoke
 ```
-这会串行执行 `sync/update/plan/self-update` 的安全预演路径。
+这会串行执行 `sync/update/plan/self-update` 的安全预演路径，并通过 `config/manager.smoke.json` 切到最小策略，避免把默认全量策略下预期存在的未物化产物混入 smoke 基线。
 
 ### 2. 检查日志输出
 Agent Manager 使用标准化日志格式。最近的操作日志位于：

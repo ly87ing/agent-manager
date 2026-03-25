@@ -69,8 +69,8 @@
 - `make all`: `make bootstrap` 的兼容别名。
 - `make plan`: 预演一次完整 `bootstrap`。
 - `make self-update`: 仅更新 agent-manager 仓库自身逻辑。
-- `make smoke`: 运行跨平台安全预演 smoke 校验，验证主入口命令的 dry-run / preview 契约。
-- `make doctor` / `make status`: 执行全系统深度体检，并把 warning 细分为 `可选工具未就绪` 与 `托管产物尚未生成` 两类提示项。
+- `make smoke`: 运行跨平台安全预演 smoke 校验，基于最小策略文件 `config/manager.smoke.json` 验证主入口命令的 dry-run / preview 契约。
+- `make doctor` / `make status`: 执行全系统深度体检，并把 warning 细分为 `可选工具未就绪` 与 `托管产物尚未生成` 两类提示项；追加 `--json` 可输出机器可读诊断报告。
 - `make fetch-models`: 探测并获取 API 端点支持的模型列表 (支持 OpenAI / Anthropic 格式)。
 - `make restore`: 交互式回滚历史快照。
 - `make ui`: 启动交互式配置管理中心。

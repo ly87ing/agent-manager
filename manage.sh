@@ -26,9 +26,9 @@ LOCK_FILE="${AGENT_MANAGER_LOCK_FILE:-/tmp/agent_manager_${USER_NAME}.lock}"
 LOCK_DIR="${LOCK_FILE}.d"
 LOCK_PID_FILE="${LOCK_DIR}/pid"
 # 基线策略（仓库提供）
-BASE_CONFIG="$ROOT_DIR/config/manager.json"
+BASE_CONFIG="${AGENT_MANAGER_BASE_CONFIG:-$ROOT_DIR/config/manager.json}"
 # 本地覆盖（不参与 Git）
-LOCAL_CONFIG="$ROOT_DIR/config/manager.local.json"
+LOCAL_CONFIG="${AGENT_MANAGER_LOCAL_CONFIG:-$ROOT_DIR/config/manager.local.json}"
 LOCK_ACQUIRED="false"
 DRY_RUN_FLAG=""
 OFFLINE_FLAG=""
@@ -335,350 +335,41 @@ PY
 }
 
 function doctor_check() {
-    local silent="${1:-false}"
-    [ "$silent" == "false" ] && echo -e "${HDR_BLUE}${BOLD}Agent Manager 深度诊断 (Doctor Check)${NC}\n"
-    local errors=0
-    local warnings=0
-    DOCTOR_STATUS="healthy"
-    DOCTOR_WARNING_OPTIONAL_TOOLS=0
-    DOCTOR_WARNING_UNMATERIALIZED=0
-    
-    if [ "$silent" == "false" ] && [ -d "$ROOT_DIR/.git" ]; then
-        echo -e "${BOLD}[ 管理系统版本 ]${NC}  ${VAL_PURPLE}$(git -C "$ROOT_DIR" rev-parse --short HEAD)${NC} ($(git -C "$ROOT_DIR" log -1 --format=%cd --date=short))\n"
+    local mode="${1:-text}"
+    local json_report
+    if ! json_report="$($PYTHON_CMD -m src.manage_doctor --root-dir "$ROOT_DIR" --config-file "$CONFIG_FILE" --python-cmd "$PYTHON_CMD" --format json)"; then
+        true
     fi
 
-    # 配置审计
-    [ "$silent" == "false" ] && echo -e "${BOLD}[ 配置与安全 ]${NC}"
-    local required_config_files=(
-        "$ROOT_DIR/config/manager.json"
-        "$ROOT_DIR/config/agents.json"
-        "$ROOT_DIR/config/tools.json"
-        "$ROOT_DIR/config/skills.json"
-        "$ROOT_DIR/config/mcp.json"
-        "$ROOT_DIR/config/rules-targets.list"
-    )
-    for f in "${required_config_files[@]}"; do
-        if [ ! -f "$f" ]; then
-            echo -e "  ${ERROR_RED}✗${NC} $(basename "$f"): 缺失"
-            errors=$((errors+1))
-            continue
-        fi
-        if [[ "$f" != *.json ]]; then
-            [ "$silent" == "false" ] && echo -e "  ${SUCCESS_GREEN}✓${NC} $(basename "$f"): 存在"
-            continue
-        fi
-        if $PYTHON_CMD -m json.tool "$f" >/dev/null 2>&1; then
-            [ "$silent" == "false" ] && echo -ne "  ${SUCCESS_GREEN}✓${NC} $(basename "$f"): 格式正确"
-            if ! validate_json_shape "$f" >/dev/null 2>&1; then
-                echo -e " ${ERROR_RED}(结构非法)${NC}"
-                validate_json_shape "$f" 2>&1 | sed 's/^/    /'
-                errors=$((errors+1))
-                continue
-            fi
-            local secrets=$($PYTHON_CMD -c "import re
-with open('$f', encoding='utf-8') as _f: c=_f.read()
-f=re.findall(r'(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_\\\\-]{20,})', c)
-print(' '.join(f))")
-            if [ -n "$secrets" ]; then echo -e " ${ERROR_RED}(⚠ 包含明文密钥风险!)${NC}"; errors=$((errors+1)); else [ "$silent" == "false" ] && echo ""; fi
-        else
-            echo -e "  ${ERROR_RED}✗${NC} $(basename "$f"): 语法错误"
-            errors=$((errors+1))
-        fi
-    done
-
-    if [ $errors -gt 0 ]; then
-        [ "$silent" == "false" ] && echo -e "${ERROR_RED}${BOLD}❌ 认证失败：发现 $errors 个配置问题。${NC}"
-        return 1
-    fi
-
-    # 运行环境
-    if [ "$silent" == "false" ]; then
-        echo -e "\n${BOLD}[ 运行环境 ]${NC}"
-    fi
-    local runtime_commands
-    runtime_commands="$($PYTHON_CMD -c "
+    read -r DOCTOR_STATUS DOCTOR_WARNING_OPTIONAL_TOOLS DOCTOR_WARNING_UNMATERIALIZED <<EOF
+$($PYTHON_CMD - "$json_report" <<'PY'
+import json
 import sys
-sys.path.insert(0, '$ROOT_DIR')
-from src.agent_ids import canonicalize_agent_mapping
-from src.json_config import ensure_mapping_value_types, get_typed_mapping_section
-from src.manage_runtime_probe import collect_required_runtime_commands, load_json
 
-cfg = load_json('$CONFIG_FILE', strict=True, missing_ok=False)
-cfg['agents'] = canonicalize_agent_mapping(get_typed_mapping_section(cfg, 'agents', 'manager.json', (dict,), '对象'))
-agent_defs = canonicalize_agent_mapping(
-    ensure_mapping_value_types(load_json('$ROOT_DIR/config/agents.json', strict=True, missing_ok=False), 'agents.json', (dict,), '对象')
+report = json.loads(sys.argv[1])
+summary = report.get("summary", {})
+categories = summary.get("warning_categories", {})
+print(
+    report.get("status", "error"),
+    categories.get("optional_tools", 0),
+    categories.get("unmaterialized", 0),
 )
-tool_defs = get_typed_mapping_section(load_json('$ROOT_DIR/config/tools.json', strict=True, missing_ok=False), 'tools', 'tools.json', (dict,), '对象')
-skill_cfg_raw = load_json('$ROOT_DIR/config/skills.json', strict=True, missing_ok=False)
-skill_cfg = {
-    'repositories': get_typed_mapping_section(skill_cfg_raw, 'repositories', 'skills.json', (dict,), '对象'),
-    'agents': get_typed_mapping_section(skill_cfg_raw, 'agents', 'skills.json', (str, dict), '字符串或对象'),
-}
-mcp_cfg_raw = load_json('$ROOT_DIR/config/mcp.json', strict=True, missing_ok=False)
-mcp_cfg = {
-    'servers': get_typed_mapping_section(mcp_cfg_raw, 'servers', 'mcp.json', (dict,), '对象'),
-    'agent_paths': get_typed_mapping_section(mcp_cfg_raw, 'agent_paths', 'mcp.json', (str, dict), '字符串或对象'),
-}
-
-for cmd in collect_required_runtime_commands(cfg, agent_defs, tool_defs, skill_cfg, mcp_cfg, repo_root='$ROOT_DIR'):
-    print(cmd)
-")"
-    local env_commands=("$PYTHON_CMD")
-    if [ -n "$runtime_commands" ]; then
-        while IFS= read -r cmd_name; do
-            [ -n "$cmd_name" ] && env_commands+=("$cmd_name")
-        done <<< "$runtime_commands"
-    fi
-    for c in "${env_commands[@]}"; do
-        if command -v "$c" >/dev/null 2>&1; then
-            [ "$silent" == "false" ] && echo -e "  ${SUCCESS_GREEN}✓${NC} $c: $($c --version 2>&1 | head -n1)"
-        else
-            [ "$silent" == "false" ] && echo -e "  ${ERROR_RED}✗${NC} $c: 缺失"
-            errors=$((errors+1))
-        fi
-    done
-    if [ "$silent" == "false" ]; then
-        echo -e "\n${BOLD}[ 存储空间 ]${NC}"
-        echo -e "  ${SUCCESS_GREEN}✓${NC} 磁盘可用: $(df -h . | tail -n1 | awk '{print $4}')\n"
-    fi
-
-    if [ $errors -gt 0 ]; then
-        [ "$silent" == "false" ] && echo -e "${ERROR_RED}${BOLD}❌ 认证失败：发现 $errors 个配置问题。${NC}"
-        return 1
-    fi
-
-    # 一致性审计
-    [ "$silent" == "false" ] && echo -e "\n${BOLD}[ 路径、内容与链接一致性审计 ]${NC}"
-    local audit_out=$($PYTHON_CMD -c "
-import os, hashlib, re, sys
-sys.path.insert(0, '$ROOT_DIR')
-from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
-from src.json_config import ensure_mapping_value_types, get_typed_mapping_section
-from src.manage_runtime_probe import (
-    ProviderInventory,
-    collect_active_mcp_target_agents,
-    collect_active_rule_agents,
-    collect_active_skill_target_agents,
-    detect_all_providers,
-    detect_tool_readiness,
-    is_agent_installed,
-    load_json,
-    rule_target_agent_id,
+PY
 )
+EOF
 
-def get_md5(p):
-    try:
-        with open(p, 'rb') as _f: return hashlib.md5(_f.read()).hexdigest()
-    except OSError: return None
+    case "$mode" in
+        json)
+            printf '%s\n' "$json_report"
+            ;;
+        silent)
+            ;;
+        *)
+            "$PYTHON_CMD" -m src.manage_doctor --root-dir "$ROOT_DIR" --config-file "$CONFIG_FILE" --python-cmd "$PYTHON_CMD" --format text
+            ;;
+    esac
 
-def build_tree_signature(root):
-    sig = {}
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames.sort()
-        filenames.sort()
-        rel_dir = os.path.relpath(dirpath, root)
-        rel_dir = '' if rel_dir == '.' else rel_dir
-        for dirname in dirnames:
-            rel_path = os.path.join(rel_dir, dirname).replace(os.sep, '/')
-            sig[f'{rel_path}/'] = 'dir'
-        for filename in filenames:
-            rel_path = os.path.join(rel_dir, filename).replace(os.sep, '/')
-            sig[rel_path] = get_md5(os.path.join(dirpath, filename))
-    return sig
-
-def rules_match(src, dst):
-    if os.path.isdir(src) or os.path.isdir(dst):
-        if not (os.path.isdir(src) and os.path.isdir(dst)):
-            return False
-        return build_tree_signature(src) == build_tree_signature(dst)
-    return get_md5(src) == get_md5(dst)
-inventory = ProviderInventory()
-errs = 0
-warns = 0
-warn_optional_tools = 0
-warn_unmaterialized = 0
-cfg = load_json('$CONFIG_FILE')
-cfg['agents'] = canonicalize_agent_mapping(get_typed_mapping_section(cfg, 'agents', 'manager.json', (dict,), '对象'))
-def_a = canonicalize_agent_mapping(
-    ensure_mapping_value_types(load_json('$ROOT_DIR/config/agents.json'), 'agents.json', (dict,), '对象')
-)
-tool_defs = get_typed_mapping_section(load_json('$ROOT_DIR/config/tools.json'), 'tools', 'tools.json', (dict,), '对象')
-skill_cfg_raw = load_json('$ROOT_DIR/config/skills.json')
-skill_cfg = {
-    'repositories': get_typed_mapping_section(skill_cfg_raw, 'repositories', 'skills.json', (dict,), '对象'),
-    'agents': get_typed_mapping_section(skill_cfg_raw, 'agents', 'skills.json', (str, dict), '字符串或对象'),
-}
-mcp_cfg_raw = load_json('$ROOT_DIR/config/mcp.json')
-mcp_cfg = {
-    'servers': get_typed_mapping_section(mcp_cfg_raw, 'servers', 'mcp.json', (dict,), '对象'),
-    'agent_paths': get_typed_mapping_section(mcp_cfg_raw, 'agent_paths', 'mcp.json', (str, dict), '字符串或对象'),
-}
-active_skill_agents = collect_active_skill_target_agents(cfg, skill_cfg)
-active_mcp_agents = collect_active_mcp_target_agents(cfg, mcp_cfg)
-active_rule_agents = collect_active_rule_agents(cfg, skill_cfg, mcp_cfg)
-
-def generated_target_status(agent_id):
-    if is_agent_installed(agent_id, def_a.get(agent_id, {})):
-        return 'installed'
-    return 'uninstalled'
-
-# 1. Agent Policy
-print('${BOLD}--- Agent 状态与策略一致性 ---${NC}')
-for k, v in cfg.get('agents', {}).items():
-    d = def_a.get(k, {})
-    label = get_agent_display_name(k, d)
-    all_act = detect_all_providers(d.get('bin',''), d, inventory=inventory)
-    is_act = len(all_act) > 0
-    des = v.get('enabled', True)
-    pref = v.get('preferred_provider') or d.get('preferred_provider', 'npm')
-    if is_act == des:
-        detail = f'({all_act[0] if is_act else \"未安装\"})'
-        # 允许策略中的 brew 匹配实际的 brew 或 brew-cask
-        act_base = all_act[0].split('-')[0] if is_act else \"\"
-        if is_act and act_base != pref.split('-')[0]: detail += f' ${PENDING_GOLD}(偏离偏好: {pref})${NC}'
-        print(f'  ${SUCCESS_GREEN}✓${NC} {label:20}: {detail}')
-    else: 
-        print(f'  ${ERROR_RED}✗${NC} {label:20}: 漂移 (实际:{\"已装\" if is_act else \"未装\"})')
-        errs += 1
-for k, d in def_a.items():
-    if k not in cfg.get('agents', {}):
-        print(f'  ${PENDING_GOLD}⚠${NC} {get_agent_display_name(k, d):20}: 未声明策略（已忽略）')
-# 2. Tools
-print('\n${BOLD}--- Tools 就绪审计 ---${NC}')
-for tool_name, policy in cfg.get('tools', {}).items():
-    if not policy.get('enabled', True):
-        continue
-    definition = tool_defs.get(tool_name)
-    if not definition:
-        print(f'  ${ERROR_RED}✗${NC} {tool_name:20}: 缺少定义')
-        errs += 1
-        continue
-    severity = definition.get('doctor_severity', 'error')
-    if detect_tool_readiness(tool_name, definition, '$ROOT_DIR', inventory=inventory):
-        print(f'  ${SUCCESS_GREEN}✓${NC} {tool_name:20}: 已就绪')
-    else:
-        if severity == 'warning':
-            print(f'  ${PENDING_GOLD}⚠${NC} {tool_name:20}: 可选项未就绪')
-            warns += 1
-            warn_optional_tools += 1
-        else:
-            print(f'  ${ERROR_RED}✗${NC} {tool_name:20}: 未就绪')
-            errs += 1
-# 3. MCP
-print('\n${BOLD}--- MCP 注入审计 ---${NC}')
-ap = canonicalize_agent_mapping(mcp_cfg.get('agent_paths', {}))
-for k, v in ap.items():
-    if k not in active_mcp_agents:
-        continue
-    p = os.path.expanduser(v if isinstance(v, str) else v.get('path', ''))
-    if os.path.exists(p):
-        with open(p, encoding='utf-8') as _f: cnt = len(re.findall(r'_MANAGED_BY', _f.read()))
-        print(f'  ${SUCCESS_GREEN}✓${NC} {get_agent_display_name(k)}: 已注入 {cnt} 个托管服务')
-    else:
-        if generated_target_status(k) == 'installed':
-            print(f'  ${PENDING_GOLD}⚠${NC} {get_agent_display_name(k)}: 尚未生成 MCP 配置')
-        else:
-            print(f'  ${PENDING_GOLD}⚠${NC} {get_agent_display_name(k)}: Agent 未安装，未生成 MCP 配置')
-        warns += 1
-        warn_unmaterialized += 1
-# 4. Skills
-print('\n${BOLD}--- Skills 链接审计 ---${NC}')
-for a_name, a_path in canonicalize_agent_mapping(skill_cfg.get('agents', {})).items():
-    if a_name not in active_skill_agents:
-        continue
-    p = os.path.expanduser(a_path)
-    if os.path.isdir(p):
-        links = [f for f in os.listdir(p) if os.path.islink(os.path.join(p, f))]
-        print(f'  ● {get_agent_display_name(a_name):15}: {len(links)} 个物理链接')
-    else:
-        if generated_target_status(a_name) == 'installed':
-            print(f'  ${PENDING_GOLD}⚠${NC} {get_agent_display_name(a_name):15}: 尚未建立 skills 目录')
-        else:
-            print(f'  ${PENDING_GOLD}⚠${NC} {get_agent_display_name(a_name):15}: Agent 未安装，未建立 skills 目录')
-        warns += 1
-        warn_unmaterialized += 1
-# 5. Rules
-print('\n${BOLD}--- Rules 内容/结构审计 ---${NC}')
-rm = '$ROOT_DIR/config/rules-targets.list'
-if os.path.exists(rm):
-    with open(rm, encoding='utf-8') as _rm:
-        for line in _rm:
-            stripped = line.strip()
-            if not stripped or stripped.startswith('#'): continue
-            p = [part.strip() for part in stripped.split('|')]
-            if len(p) < 4:
-                print(f'  ${ERROR_RED}✗${NC} {stripped}: manifest 非法')
-                errs += 1
-                continue
-            if rule_target_agent_id(p[0]) not in active_rule_agents:
-                continue
-            src = os.path.join('$ROOT_DIR/agent-rule', p[2])
-            dst = os.path.expanduser(p[3].replace('{{HOME}}', os.path.expanduser('~')))
-            if os.path.exists(dst):
-                if not rules_match(src, dst): print(f'  ${PENDING_GOLD}⚠${NC} {p[0]}: 漂移'); errs += 1
-                else: print(f'  ${SUCCESS_GREEN}✓${NC} {p[0]}: 一致')
-            else:
-                if generated_target_status(rule_target_agent_id(p[0])) == 'installed':
-                    print(f'  ${PENDING_GOLD}⚠${NC} {p[0]}: 尚未分发')
-                else:
-                    print(f'  ${PENDING_GOLD}⚠${NC} {p[0]}: Agent 未安装，未分发')
-                warns += 1
-                warn_unmaterialized += 1
-print(f'__ERRORS__:{errs}')
-print(f'__WARNINGS__:{warns}')
-print(f'__WARN_OPTIONAL_TOOLS__:{warn_optional_tools}')
-print(f'__WARN_UNMATERIALIZED__:{warn_unmaterialized}')
-")
-    local audit_errors audit_warnings audit_warn_optional audit_warn_unmaterialized
-    [ "$silent" == "false" ] && echo "$audit_out" | grep -v "__ERRORS__" | grep -v "__WARNINGS__" | grep -v "__WARN_OPTIONAL_TOOLS__" | grep -v "__WARN_UNMATERIALIZED__"
-    audit_errors="$(printf '%s\n' "$audit_out" | awk -F: '/__ERRORS__/ {print $2}')"
-    audit_warnings="$(printf '%s\n' "$audit_out" | awk -F: '/__WARNINGS__/ {print $2}')"
-    audit_warn_optional="$(printf '%s\n' "$audit_out" | awk -F: '/__WARN_OPTIONAL_TOOLS__/ {print $2}')"
-    audit_warn_unmaterialized="$(printf '%s\n' "$audit_out" | awk -F: '/__WARN_UNMATERIALIZED__/ {print $2}')"
-    [ -n "$audit_errors" ] || audit_errors=0
-    [ -n "$audit_warnings" ] || audit_warnings=0
-    [ -n "$audit_warn_optional" ] || audit_warn_optional=0
-    [ -n "$audit_warn_unmaterialized" ] || audit_warn_unmaterialized=0
-    errors=$((errors + audit_errors))
-    warnings=$((warnings + audit_warnings))
-    DOCTOR_WARNING_OPTIONAL_TOOLS=$((DOCTOR_WARNING_OPTIONAL_TOOLS + audit_warn_optional))
-    DOCTOR_WARNING_UNMATERIALIZED=$((DOCTOR_WARNING_UNMATERIALIZED + audit_warn_unmaterialized))
-
-    # 容灾快照
-    if [ "$silent" == "false" ]; then
-        echo -e "\n${BOLD}[ 容灾快照统计 ]${NC}"
-        local baks=0 backup_entries
-        if backup_entries="$(list_managed_backup_entries 2>/dev/null)"; then
-            if [ -n "$backup_entries" ]; then
-                baks=$(printf '%s\n' "$backup_entries" | sed '/^$/d' | wc -l | tr -d ' ')
-            fi
-        fi
-        echo -e "  ${SUCCESS_GREEN}✓${NC} 有效历史快照: $baks 个\n"
-        if [ $warnings -gt 0 ]; then
-            echo -e "${BOLD}[ 提示项分类 ]${NC}"
-            if [ "$DOCTOR_WARNING_OPTIONAL_TOOLS" -gt 0 ]; then
-                echo -e "  ${PENDING_GOLD}⚠${NC} 可选工具未就绪: ${DOCTOR_WARNING_OPTIONAL_TOOLS} 项"
-            fi
-            if [ "$DOCTOR_WARNING_UNMATERIALIZED" -gt 0 ]; then
-                echo -e "  ${PENDING_GOLD}⚠${NC} 托管产物尚未生成: ${DOCTOR_WARNING_UNMATERIALIZED} 项"
-            fi
-            echo ""
-        fi
-    fi
-
-    if [ $errors -eq 0 ] && [ $warnings -eq 0 ]; then
-        DOCTOR_STATUS="healthy"
-        [ "$silent" == "false" ] && echo -e "${SUCCESS_GREEN}${BOLD}✨ 认证通过：环境状态完美。${NC}"
-        return 0
-    elif [ $errors -eq 0 ]; then
-        DOCTOR_STATUS="warning"
-        [ "$silent" == "false" ] && echo -e "${PENDING_GOLD}${BOLD}⚠ 认证完成：发现 $warnings 个提示项。${NC}"
-        return 0
-    else
-        DOCTOR_STATUS="error"
-        [ "$silent" == "false" ] && echo -e "${ERROR_RED}${BOLD}❌ 认证失败：发现 $errors 个一致性问题。${NC}"
-        return 1
-    fi
+    [ "$DOCTOR_STATUS" != "error" ]
 }
 
 function run_task_with_progress() {
@@ -1255,7 +946,13 @@ case "$cmd" in
         run_sync_pipeline
         ;;
     ui) (cd "$ROOT_DIR" && $PYTHON_CMD -m src.interactive) ;;
-    doctor|status) doctor_check ;;
+    doctor|status)
+        if [ "${CMD_ARGS[0]:-}" = "--json" ]; then
+            doctor_check json
+        else
+            doctor_check
+        fi
+        ;;
     detect) detect_agents ;;
     unlock)
         if is_dry_run_mode; then
