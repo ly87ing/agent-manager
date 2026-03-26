@@ -167,9 +167,20 @@ function cleanup_on_exit() {
     local running_jobs=$(jobs -p)
     if [ -n "$running_jobs" ]; then
         kill $running_jobs 2>/dev/null || true
+        wait $running_jobs 2>/dev/null || true
     fi
 }
+
+function handle_signal_exit() {
+    local exit_code="$1"
+    trap - EXIT
+    cleanup_on_exit
+    exit "$exit_code"
+}
+
 trap cleanup_on_exit EXIT
+trap 'handle_signal_exit 143' TERM
+trap 'handle_signal_exit 130' INT
 
 # 确保执行权限
 chmod +x "$ROOT_DIR/agent-rule/scripts/"*.sh > /dev/null 2>&1 || true
@@ -226,6 +237,84 @@ function timeout_run() {
         kill "$killer_pid" 2>/dev/null || true
         return $exit_code
     fi
+}
+
+function run_supervised_task() {
+    local timeout_seconds="$1"
+    local workdir="$2"
+    local command_str="$3"
+
+    exec "$PYTHON_CMD" - "$timeout_seconds" "$workdir" "$command_str" <<'PY'
+import os
+import signal
+import subprocess
+import sys
+import time
+
+timeout_seconds = int(sys.argv[1])
+workdir = sys.argv[2]
+command_str = sys.argv[3]
+child = None
+
+
+def terminate_group(sig, grace_seconds=1.0):
+    if child is None:
+        return
+    try:
+        os.killpg(child.pid, sig)
+    except ProcessLookupError:
+        return
+
+    deadline = time.time() + grace_seconds
+    while time.time() < deadline:
+        try:
+            os.killpg(child.pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.05)
+
+    if sig != signal.SIGKILL:
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def handle_signal(signum, _frame):
+    terminate_group(signal.SIGTERM)
+    sys.exit(128 + signum)
+
+
+signal.signal(signal.SIGTERM, handle_signal)
+signal.signal(signal.SIGINT, handle_signal)
+
+child = subprocess.Popen(
+    ["bash", "-lc", command_str],
+    cwd=workdir,
+    preexec_fn=os.setsid,
+)
+
+try:
+    return_code = child.wait(timeout=timeout_seconds)
+except subprocess.TimeoutExpired:
+    terminate_group(signal.SIGTERM)
+    sys.exit(124)
+
+terminate_group(signal.SIGTERM, grace_seconds=0.5)
+sys.exit(return_code)
+PY
+}
+
+function run_supervised_command_in_dir() {
+    local timeout_seconds="$1"
+    local workdir="$2"
+    shift 2
+
+    local command_str
+    command_str="$(shell_join "$@")"
+    run_supervised_task "$timeout_seconds" "$workdir" "$command_str" &
+    local pid=$!
+    wait "$pid"
 }
 
 function update_latest_log_pointer() {
@@ -495,7 +584,7 @@ function run_task_in_dir() {
 
     local command_str
     command_str="$(shell_join "$@")"
-    run_task_with_progress "$title" "$success_msg" "$err_msg" timeout_run "$timeout_seconds" bash -c "cd \"$workdir\" && $command_str"
+    run_task_with_progress "$title" "$success_msg" "$err_msg" run_supervised_task "$timeout_seconds" "$workdir" "$command_str"
 }
 
 function begin_pipeline_execution() {
@@ -1010,9 +1099,9 @@ case "$cmd" in
             break
         done < "$selection_input" ;;
     mcp:sync)
-        (cd "$ROOT_DIR/agent-mcp" && $PYTHON_CMD sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json" $DRY_RUN_FLAG $OFFLINE_FLAG) ;;
+        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json" $DRY_RUN_FLAG $OFFLINE_FLAG ;;
     mcp:prepare)
-        (cd "$ROOT_DIR/agent-mcp" && $PYTHON_CMD sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json" --prepare-runtime $DRY_RUN_FLAG $OFFLINE_FLAG) ;;
+        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json" --prepare-runtime $DRY_RUN_FLAG $OFFLINE_FLAG ;;
     rules:sync)
         if ! target_names="$(list_active_rule_targets)"; then
             exit 1
@@ -1025,9 +1114,9 @@ case "$cmd" in
         while IFS= read -r target_name; do
             [ -n "$target_name" ] && rule_args+=(--target "$target_name")
         done <<< "$target_names"
-        (cd "$ROOT_DIR/agent-rule" && ./scripts/sync-agent-rules.sh "${rule_args[@]}" $DRY_RUN_FLAG) ;;
+        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" ./scripts/sync-agent-rules.sh "${rule_args[@]}" $DRY_RUN_FLAG ;;
     skills:link)
-        (cd "$ROOT_DIR/agent-skill" && $PYTHON_CMD link_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG) ;;
+        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" link_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG ;;
     skills:upgrade)
         upgrade_args=(upgrade_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json")
         if [ "${#CMD_ARGS[@]}" -gt 0 ]; then
@@ -1037,9 +1126,9 @@ case "$cmd" in
         fi
         if [ -n "$DRY_RUN_FLAG" ]; then upgrade_args+=("$DRY_RUN_FLAG"); fi
         if [ -n "$OFFLINE_FLAG" ]; then upgrade_args+=("$OFFLINE_FLAG"); fi
-        (cd "$ROOT_DIR/agent-skill" && $PYTHON_CMD "${upgrade_args[@]}") ;;
+        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" "${upgrade_args[@]}" ;;
     tools:sync)
-        (cd "$ROOT_DIR/agent-tool" && $PYTHON_CMD sync_tools.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/tools.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG) ;;
+        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-tool" "$PYTHON_CMD" sync_tools.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/tools.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG ;;
     terminal:sync)
         run_terminal_sync_task true ;;
     fetch-models)

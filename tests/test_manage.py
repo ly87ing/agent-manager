@@ -1,8 +1,10 @@
 import os
 import json
 import shutil
+import signal
 import subprocess
 import tempfile
+import time
 import unittest
 from getpass import getuser
 from pathlib import Path
@@ -1895,6 +1897,109 @@ class ManageScriptTests(unittest.TestCase):
             restore_path(self.lock_path, lock_backup)
             restore_path(self.lock_dir, lock_dir_backup)
 
+    def test_termination_cleans_up_descendant_processes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+
+            child_pid_file = Path(temp_dir) / "child.pid"
+            ready_file = Path(temp_dir) / "ready"
+
+            self._write_stub(
+                temp_root / "agent-lifecycle" / "sync_agents.py",
+                (
+                    "#!/usr/bin/env python3\n"
+                    "import os\n"
+                    "import signal\n"
+                    "import subprocess\n"
+                    "import sys\n"
+                    "import time\n"
+                    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+                    "with open(os.environ['CHILD_PID_FILE'], 'w', encoding='utf-8') as fh:\n"
+                    "    fh.write(str(child.pid))\n"
+                    "Path = __import__('pathlib').Path\n"
+                    "Path(os.environ['READY_FILE']).write_text('ready\\n', encoding='utf-8')\n"
+                    "signal.signal(signal.SIGTERM, lambda *_args: sys.exit(143))\n"
+                    "while True:\n"
+                    "    time.sleep(1)\n"
+                ),
+            )
+            self._write_stub(
+                temp_root / "agent-tool" / "sync_tools.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-skill" / "link_skills.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-mcp" / "sync_mcp.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
+                "#!/usr/bin/env bash\nexit 0\n",
+            )
+            self._write_stub(
+                temp_root / "agent-terminal" / "sync_terminal.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+
+            env = self._managed_env()
+            env["CHILD_PID_FILE"] = str(child_pid_file)
+            env["READY_FILE"] = str(ready_file)
+
+            proc = subprocess.Popen(
+                [str(temp_root / "manage.sh"), "--offline", "update"],
+                cwd=temp_root,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            child_pid = None
+            try:
+                deadline = time.time() + 10
+                while time.time() < deadline:
+                    if ready_file.exists() and child_pid_file.exists():
+                        child_pid = int(child_pid_file.read_text(encoding="utf-8").strip())
+                        break
+                    if proc.poll() is not None:
+                        break
+                    time.sleep(0.1)
+
+                self.assertIsNotNone(child_pid, "生命周期任务未按预期启动子进程")
+                os.kill(child_pid, 0)
+
+                proc.terminate()
+                proc.wait(timeout=10)
+                proc.communicate(timeout=1)
+
+                deadline = time.time() + 3
+                child_alive = True
+                while time.time() < deadline:
+                    try:
+                        os.kill(child_pid, 0)
+                    except OSError:
+                        child_alive = False
+                        break
+                    time.sleep(0.1)
+
+                self.assertFalse(child_alive, f"manage.sh 退出后子进程仍存活: {child_pid}")
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.communicate(timeout=5)
+                else:
+                    proc.stdout.close()
+                    proc.stderr.close()
+                if child_pid is not None:
+                    try:
+                        os.kill(child_pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+
     def test_unlock_removes_atomic_lock_artifacts(self):
         lock_backup = move_aside(self.lock_path)
         lock_dir_backup = move_aside(self.lock_dir)
@@ -2594,3 +2699,89 @@ class ManageScriptTests(unittest.TestCase):
             combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
             self.assertEqual(result.returncode, 0, combined)
             self.assertTrue(agent_config_path.exists(), combined)
+
+    def test_atomic_mcp_sync_termination_cleans_up_descendant_processes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+
+            child_pid_file = Path(temp_dir) / "mcp-child.pid"
+            ready_file = Path(temp_dir) / "mcp-ready"
+
+            self._write_stub(
+                temp_root / "agent-mcp" / "sync_mcp.py",
+                (
+                    "#!/usr/bin/env python3\n"
+                    "import os\n"
+                    "import signal\n"
+                    "import subprocess\n"
+                    "import sys\n"
+                    "import time\n"
+                    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+                    "with open(os.environ['CHILD_PID_FILE'], 'w', encoding='utf-8') as fh:\n"
+                    "    fh.write(str(child.pid))\n"
+                    "Path = __import__('pathlib').Path\n"
+                    "Path(os.environ['READY_FILE']).write_text('ready\\n', encoding='utf-8')\n"
+                    "signal.signal(signal.SIGTERM, lambda *_args: sys.exit(143))\n"
+                    "while True:\n"
+                    "    time.sleep(1)\n"
+                ),
+            )
+
+            env = self._managed_env()
+            env["CHILD_PID_FILE"] = str(child_pid_file)
+            env["READY_FILE"] = str(ready_file)
+
+            proc = subprocess.Popen(
+                [str(temp_root / "manage.sh"), "--offline", "mcp:sync"],
+                cwd=temp_root,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            child_pid = None
+            try:
+                deadline = time.time() + 10
+                while time.time() < deadline:
+                    if ready_file.exists() and child_pid_file.exists():
+                        child_pid = int(child_pid_file.read_text(encoding="utf-8").strip())
+                        break
+                    if proc.poll() is not None:
+                        break
+                    time.sleep(0.1)
+
+                self.assertIsNotNone(child_pid, "mcp:sync 未按预期启动子进程")
+                os.kill(child_pid, 0)
+
+                proc.terminate()
+                proc.wait(timeout=10)
+                proc.stdout.close()
+                proc.stderr.close()
+
+                deadline = time.time() + 3
+                child_alive = True
+                while time.time() < deadline:
+                    try:
+                        os.kill(child_pid, 0)
+                    except OSError:
+                        child_alive = False
+                        break
+                    time.sleep(0.1)
+
+                self.assertFalse(child_alive, f"mcp:sync 退出后子进程仍存活: {child_pid}")
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                    proc.stdout.close()
+                    proc.stderr.close()
+                else:
+                    proc.stdout.close()
+                    proc.stderr.close()
+                if child_pid is not None:
+                    try:
+                        os.kill(child_pid, signal.SIGKILL)
+                    except OSError:
+                        pass
