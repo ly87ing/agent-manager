@@ -74,6 +74,44 @@ class ManageScriptTests(unittest.TestCase):
         )
         self._write_stub(path, content)
 
+    def _await_probe_child_pid(self, proc: subprocess.Popen, child_pid_file: Path, ready_file: Path, message: str):
+        child_pid = None
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            if ready_file.exists() and child_pid_file.exists():
+                child_pid = int(child_pid_file.read_text(encoding="utf-8").strip())
+                break
+            if proc.poll() is not None:
+                break
+            time.sleep(0.1)
+
+        self.assertIsNotNone(child_pid, message)
+        os.kill(child_pid, 0)
+        return child_pid
+
+    def _close_process_pipes(self, proc: subprocess.Popen):
+        if proc.stdout is not None:
+            proc.stdout.close()
+        if proc.stderr is not None:
+            proc.stderr.close()
+
+    def _assert_descendant_exits_after_parent_termination(self, proc: subprocess.Popen, child_pid: int, message: str):
+        proc.terminate()
+        proc.wait(timeout=10)
+        self._close_process_pipes(proc)
+
+        deadline = time.time() + 3
+        child_alive = True
+        while time.time() < deadline:
+            try:
+                os.kill(child_pid, 0)
+            except OSError:
+                child_alive = False
+                break
+            time.sleep(0.1)
+
+        self.assertFalse(child_alive, message)
+
     def test_doctor_does_not_remove_existing_lock(self):
         original = self.lock_path.read_text(encoding="utf-8") if self.lock_path.exists() else None
         try:
@@ -1502,6 +1540,106 @@ class ManageScriptTests(unittest.TestCase):
                 log_lines,
             )
 
+    def test_update_pipeline_secrets_pull_termination_cleans_up_descendant_processes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+
+            child_pid_file = Path(temp_dir) / "secrets-pull-child.pid"
+            ready_file = Path(temp_dir) / "secrets-pull-ready"
+            fake_bin = temp_root / "fake-bin"
+            fake_bin.mkdir()
+            (temp_root / "secrets" / ".git").mkdir(parents=True, exist_ok=True)
+
+            self._write_stub(
+                fake_bin / "git",
+                (
+                    "#!/usr/bin/env bash\n"
+                    "if [ \"$1\" = \"-C\" ]; then\n"
+                    "  shift 2\n"
+                    "fi\n"
+                    "if [ \"$1\" = \"pull\" ] && [ \"$2\" = \"--ff-only\" ]; then\n"
+                    "  python3 - <<'PY'\n"
+                    "import os\n"
+                    "import signal\n"
+                    "import subprocess\n"
+                    "import sys\n"
+                    "import time\n"
+                    "from pathlib import Path\n"
+                    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+                    "Path(os.environ['CHILD_PID_FILE']).write_text(str(child.pid), encoding='utf-8')\n"
+                    "Path(os.environ['READY_FILE']).write_text('ready\\n', encoding='utf-8')\n"
+                    "signal.signal(signal.SIGTERM, lambda *_args: sys.exit(143))\n"
+                    "while True:\n"
+                    "    time.sleep(1)\n"
+                    "PY\n"
+                    "fi\n"
+                    "exit 0\n"
+                ),
+            )
+            self._write_stub(
+                temp_root / "agent-lifecycle" / "sync_agents.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-tool" / "sync_tools.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-skill" / "link_skills.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-mcp" / "sync_mcp.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
+                "#!/usr/bin/env bash\nexit 0\n",
+            )
+            self._write_stub(
+                temp_root / "agent-terminal" / "sync_terminal.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+
+            env = self._managed_env()
+            env["PATH"] = f"{fake_bin}:{env['PATH']}"
+            env["CHILD_PID_FILE"] = str(child_pid_file)
+            env["READY_FILE"] = str(ready_file)
+
+            proc = subprocess.Popen(
+                [str(temp_root / "manage.sh"), "update"],
+                cwd=temp_root,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            child_pid = None
+            try:
+                child_pid = self._await_probe_child_pid(
+                    proc,
+                    child_pid_file,
+                    ready_file,
+                    "update secrets pull 未按预期启动子进程",
+                )
+                self._assert_descendant_exits_after_parent_termination(
+                    proc,
+                    child_pid,
+                    f"update secrets pull 退出后子进程仍存活: {child_pid}",
+                )
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                self._close_process_pipes(proc)
+                if child_pid is not None:
+                    try:
+                        os.kill(child_pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+
     def test_self_update_skips_dirty_worktree(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
@@ -1539,6 +1677,240 @@ class ManageScriptTests(unittest.TestCase):
             log_lines = call_log.read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(log_lines), 1, log_lines)
             self.assertIn(f"git -C {temp_root.resolve()} status --porcelain", log_lines[0])
+
+    def test_self_update_termination_cleans_up_descendant_processes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+
+            child_pid_file = Path(temp_dir) / "self-update-child.pid"
+            ready_file = Path(temp_dir) / "self-update-ready"
+            fake_bin = temp_root / "fake-bin"
+            fake_bin.mkdir()
+
+            self._write_stub(
+                fake_bin / "git",
+                (
+                    "#!/usr/bin/env bash\n"
+                    "if [ \"$1\" = \"-C\" ]; then\n"
+                    "  shift 2\n"
+                    "fi\n"
+                    "if [ \"$1\" = \"status\" ] && [ \"$2\" = \"--porcelain\" ]; then\n"
+                    "  exit 0\n"
+                    "fi\n"
+                    "if [ \"$1\" = \"pull\" ] && [ \"$2\" = \"--ff-only\" ]; then\n"
+                    "  python3 - <<'PY'\n"
+                    "import os\n"
+                    "import signal\n"
+                    "import subprocess\n"
+                    "import sys\n"
+                    "import time\n"
+                    "from pathlib import Path\n"
+                    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+                    "Path(os.environ['CHILD_PID_FILE']).write_text(str(child.pid), encoding='utf-8')\n"
+                    "Path(os.environ['READY_FILE']).write_text('ready\\n', encoding='utf-8')\n"
+                    "signal.signal(signal.SIGTERM, lambda *_args: sys.exit(143))\n"
+                    "while True:\n"
+                    "    time.sleep(1)\n"
+                    "PY\n"
+                    "fi\n"
+                    "echo \"unexpected git args: $*\" >&2\n"
+                    "exit 2\n"
+                ),
+            )
+
+            env = self._managed_env()
+            env["PATH"] = f"{fake_bin}:{env['PATH']}"
+            env["CHILD_PID_FILE"] = str(child_pid_file)
+            env["READY_FILE"] = str(ready_file)
+
+            proc = subprocess.Popen(
+                [str(temp_root / "manage.sh"), "self-update"],
+                cwd=temp_root,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            child_pid = None
+            try:
+                child_pid = self._await_probe_child_pid(
+                    proc,
+                    child_pid_file,
+                    ready_file,
+                    "self-update 未按预期启动子进程",
+                )
+                self._assert_descendant_exits_after_parent_termination(
+                    proc,
+                    child_pid,
+                    f"self-update 退出后子进程仍存活: {child_pid}",
+                )
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                self._close_process_pipes(proc)
+                if child_pid is not None:
+                    try:
+                        os.kill(child_pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+
+    def test_update_init_secrets_termination_cleans_up_descendant_processes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+
+            child_pid_file = Path(temp_dir) / "init-secrets-child.pid"
+            ready_file = Path(temp_dir) / "init-secrets-ready"
+            remove_path(temp_root / "secrets")
+
+            self._write_stub(
+                temp_root / "scripts" / "init-secrets.sh",
+                (
+                    "#!/usr/bin/env bash\n"
+                    "python3 - <<'PY'\n"
+                    "import os\n"
+                    "import signal\n"
+                    "import subprocess\n"
+                    "import sys\n"
+                    "import time\n"
+                    "from pathlib import Path\n"
+                    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+                    "Path(os.environ['CHILD_PID_FILE']).write_text(str(child.pid), encoding='utf-8')\n"
+                    "Path(os.environ['READY_FILE']).write_text('ready\\n', encoding='utf-8')\n"
+                    "signal.signal(signal.SIGTERM, lambda *_args: sys.exit(143))\n"
+                    "while True:\n"
+                    "    time.sleep(1)\n"
+                    "PY\n"
+                ),
+            )
+            self._write_stub(
+                temp_root / "agent-lifecycle" / "sync_agents.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-tool" / "sync_tools.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-skill" / "link_skills.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-mcp" / "sync_mcp.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
+                "#!/usr/bin/env bash\nexit 0\n",
+            )
+            self._write_stub(
+                temp_root / "agent-terminal" / "sync_terminal.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+
+            env = self._managed_env()
+            env["CHILD_PID_FILE"] = str(child_pid_file)
+            env["READY_FILE"] = str(ready_file)
+
+            proc = subprocess.Popen(
+                [str(temp_root / "manage.sh"), "update"],
+                cwd=temp_root,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            child_pid = None
+            try:
+                child_pid = self._await_probe_child_pid(
+                    proc,
+                    child_pid_file,
+                    ready_file,
+                    "init-secrets 未按预期启动子进程",
+                )
+                self._assert_descendant_exits_after_parent_termination(
+                    proc,
+                    child_pid,
+                    f"init-secrets 退出后子进程仍存活: {child_pid}",
+                )
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                self._close_process_pipes(proc)
+                if child_pid is not None:
+                    try:
+                        os.kill(child_pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+
+    def test_fetch_models_termination_cleans_up_descendant_processes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+
+            child_pid_file = Path(temp_dir) / "fetch-models-child.pid"
+            ready_file = Path(temp_dir) / "fetch-models-ready"
+
+            self._write_stub(
+                temp_root / "scripts" / "fetch_models.py",
+                (
+                    "#!/usr/bin/env python3\n"
+                    "import os\n"
+                    "import signal\n"
+                    "import subprocess\n"
+                    "import sys\n"
+                    "import time\n"
+                    "from pathlib import Path\n"
+                    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+                    "Path(os.environ['CHILD_PID_FILE']).write_text(str(child.pid), encoding='utf-8')\n"
+                    "Path(os.environ['READY_FILE']).write_text('ready\\n', encoding='utf-8')\n"
+                    "signal.signal(signal.SIGTERM, lambda *_args: sys.exit(143))\n"
+                    "while True:\n"
+                    "    time.sleep(1)\n"
+                ),
+            )
+
+            env = self._managed_env()
+            env["CHILD_PID_FILE"] = str(child_pid_file)
+            env["READY_FILE"] = str(ready_file)
+
+            proc = subprocess.Popen(
+                [str(temp_root / "manage.sh"), "fetch-models"],
+                cwd=temp_root,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            child_pid = None
+            try:
+                child_pid = self._await_probe_child_pid(
+                    proc,
+                    child_pid_file,
+                    ready_file,
+                    "fetch-models 未按预期启动子进程",
+                )
+                self._assert_descendant_exits_after_parent_termination(
+                    proc,
+                    child_pid,
+                    f"fetch-models 退出后子进程仍存活: {child_pid}",
+                )
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                self._close_process_pipes(proc)
+                if child_pid is not None:
+                    try:
+                        os.kill(child_pid, signal.SIGKILL)
+                    except OSError:
+                        pass
 
     def test_plan_runs_bootstrap_pipeline_in_dry_run_mode(self):
         with tempfile.TemporaryDirectory() as temp_dir:

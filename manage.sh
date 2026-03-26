@@ -289,7 +289,7 @@ signal.signal(signal.SIGTERM, handle_signal)
 signal.signal(signal.SIGINT, handle_signal)
 
 child = subprocess.Popen(
-    ["bash", "-lc", command_str],
+    ["bash", "-c", command_str],
     cwd=workdir,
     preexec_fn=os.setsid,
 )
@@ -614,8 +614,9 @@ function maybe_init_secrets() {
             status_line "SKIP" "空转模式，跳过 secrets 拉取"
         else
             status_line "INFO" "拉取最新凭证..."
-            git -C "$ROOT_DIR/secrets" pull --ff-only 2>&1 || \
+            if ! run_supervised_command_in_dir 600 "$ROOT_DIR" git -C "$ROOT_DIR/secrets" pull --ff-only; then
                 echo -e "${ERROR_RED}⚠️  secrets 拉取失败，将使用本地已有凭证${NC}"
+            fi
         fi
     else
         if [ -n "$OFFLINE_FLAG" ]; then
@@ -624,7 +625,7 @@ function maybe_init_secrets() {
             status_line "SKIP" "空转模式，跳过 secrets 检查"
         else
             if [ -x "$ROOT_DIR/scripts/init-secrets.sh" ]; then
-                bash "$ROOT_DIR/scripts/init-secrets.sh" || {
+                run_supervised_command_in_dir 600 "$ROOT_DIR" bash "$ROOT_DIR/scripts/init-secrets.sh" || {
                     echo -e "${ERROR_RED}⚠️  secrets 初始化失败，继续执行但 MCP 可能无法正常工作${NC}"
                 }
             fi
@@ -833,7 +834,7 @@ function run_self_update() {
         echo "检测到本地未提交更改，跳过自更新以保护工作区。"
         return 0
     fi
-    git -C "$ROOT_DIR" pull --ff-only
+    run_supervised_command_in_dir 600 "$ROOT_DIR" git -C "$ROOT_DIR" pull --ff-only
 }
 
 function list_managed_target_paths() {
@@ -1141,9 +1142,9 @@ case "$cmd" in
             exit 1
         fi
         if [ "${#args[@]}" -ge 2 ]; then
-            $PYTHON_CMD "$ROOT_DIR/scripts/fetch_models.py" "${args[0]}" "${args[1]}"
+            run_supervised_command_in_dir 600 "$ROOT_DIR" "$PYTHON_CMD" "$ROOT_DIR/scripts/fetch_models.py" "${args[0]}" "${args[1]}"
         else
-            $PYTHON_CMD "$ROOT_DIR/scripts/fetch_models.py"
+            run_supervised_command_in_dir 600 "$ROOT_DIR" "$PYTHON_CMD" "$ROOT_DIR/scripts/fetch_models.py"
         fi
         ;;
     cleanup)
