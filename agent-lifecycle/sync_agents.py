@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
+from src.command_runner import run_command
 from src.json_config import ensure_mapping_value_types, get_typed_mapping_section, load_json_object_file
 from src.manage_runtime_probe import (
     ProviderInventory as ProviderCache,
@@ -27,12 +28,7 @@ configure_logging()
 def run_cmd(cmd, timeout=300):
     """运行 shell 命令并返回结果"""
     try:
-        # If cmd is a list, we do not use shell
-        if isinstance(cmd, list):
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True, shell=False, timeout=timeout)
-        else:
-            # Assume it's a string and we need shell for complex commands
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True, shell=True, timeout=timeout)
+        result = run_command(cmd, check=True, capture_output=True, text=True, timeout=timeout)
         return True, result.stdout
     except subprocess.TimeoutExpired:
         return False, f"TIMEOUT after {timeout} seconds: {cmd}"

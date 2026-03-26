@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.json_config import get_typed_mapping_section, load_json_object_file
+from src.command_runner import run_command
 from src.manage_runtime_probe import (
     TOOL_BROKEN_MARKER,
     TOOL_READY_MARKER,
@@ -29,13 +30,7 @@ OWNER_MARKER = ".agent-manager-owned"
 def run_cmd(cmd, cwd=None, timeout=None):
     """运行 shell 命令并返回结果"""
     try:
-        # Determine if we should use shell
-        if isinstance(cmd, list):
-            # Use list form without shell
-            result = subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True, shell=False, timeout=timeout)
-        else:
-            # Use string form with shell
-            result = subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True, shell=True, timeout=timeout)
+        result = run_command(cmd, cwd=cwd, check=True, capture_output=True, text=True, timeout=timeout)
         return True, result.stdout
     except subprocess.TimeoutExpired:
         return False, f"TIMEOUT after {timeout} seconds: {cmd}"

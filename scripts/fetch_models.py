@@ -5,6 +5,28 @@ import urllib.request
 import urllib.error
 import json
 
+
+def mask_api_key(api_key):
+    if len(api_key) <= 8:
+        return "*" * len(api_key)
+    return f"{api_key[:4]}...{api_key[-4:]}"
+
+
+def render_configuration_guide(base_uri, api_key, api_type, models):
+    return "\n".join([
+        "",
+        "=" * 50,
+        "💡 【小白配置指南】",
+        "=" * 50,
+        "如果这是给 Cursor / Cline / Windsurf 等工具配置，请按以下方式填写：",
+        f"1. 选择提供商: 选择【{api_type}】或者开启【兼容模式/Custom OpenAI】",
+        f"2. Base URL: 填写 \033[1;32m{base_uri.rstrip('/')}/v1\033[0m",
+        f"3. API Key: 填写 \033[1;32m{mask_api_key(api_key)}\033[0m",
+        f"4. 自定义模型名称: 随便挑上面列表里的一个（比如 \033[1;32m{models[0]}\033[0m）填入自定义模型列表即可",
+        "=" * 50,
+    ])
+
+
 def fetch_models(base_uri, api_key):
     # 处理 base_uri，移除结尾的斜杠和 /v1 以便拼接
     base_uri = base_uri.rstrip('/')
@@ -96,16 +118,7 @@ def main():
         print(f"\n✅ 成功！一共获取到 {len(models)} 个支持的模型:")
         for m in sorted(models):
             print(f"  - {m}")
-        
-        print("\n" + "="*50)
-        print("💡 【小白配置指南】")
-        print("="*50)
-        print("如果这是给 Cursor / Cline / Windsurf 等工具配置，请按以下方式填写：")
-        print(f"1. 选择提供商: 选择【{api_type}】或者开启【兼容模式/Custom OpenAI】")
-        print(f"2. Base URL: 填写 \033[1;32m{base_uri.rstrip('/')}/v1\033[0m")
-        print(f"3. API Key: 填写 \033[1;32m{api_key}\033[0m")
-        print(f"4. 自定义模型名称: 随便挑上面列表里的一个（比如 \033[1;32m{models[0]}\033[0m）填入自定义模型列表即可")
-        print("="*50)
+        print(render_configuration_guide(base_uri, api_key, api_type, models))
         
         sys.exit(0)
     else:

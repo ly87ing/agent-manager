@@ -487,6 +487,7 @@ function update_latest_log_pointer() {
     mkdir -p "$(dirname "$TEMP_LOG")"
     : > "$TEMP_LOG"
     printf '%s\n' "$TEMP_LOG" > "$LATEST_LOG_POINTER"
+    chmod 600 "$TEMP_LOG" "$LATEST_LOG_POINTER" 2>/dev/null || true
     ln -sfn "$TEMP_LOG" "$LEGACY_LOG_PATH" 2>/dev/null || true
 }
 

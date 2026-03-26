@@ -17,6 +17,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.agent_ids import canonicalize_agent_list, canonicalize_agent_mapping
+from src.command_runner import run_command
 from src.json_config import get_typed_mapping_section, load_json_object_file
 from src.manage_runtime_probe import is_agent_installed
 from src.runtime_logging import configure_logging
@@ -48,13 +49,7 @@ def atomic_write_json(path, data):
 def run_cmd(cmd, cwd=None, timeout=300):
     """运行 shell 命令并返回结果"""
     try:
-        # Determine if we should use shell
-        if isinstance(cmd, list):
-            # Use list form without shell
-            result = subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True, shell=False, timeout=timeout)
-        else:
-            # Use string form with shell
-            result = subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True, shell=True, timeout=timeout)
+        result = run_command(cmd, cwd=cwd, check=True, capture_output=True, text=True, timeout=timeout)
         return True, result.stdout
     except subprocess.TimeoutExpired:
         return False, f"TIMEOUT after {timeout} seconds: {cmd}"

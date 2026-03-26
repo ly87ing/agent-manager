@@ -2,6 +2,7 @@ import os
 import json
 import shutil
 import signal
+import stat
 import subprocess
 import tempfile
 import time
@@ -2687,6 +2688,60 @@ class ManageScriptTests(unittest.TestCase):
             restore_path(self.latest_log_pointer, latest_backup)
             restore_path(self.legacy_log_path, legacy_backup)
             restore_path(unique_log, unique_backup)
+
+    def test_pipeline_logs_use_owner_only_permissions(self):
+        latest_backup = move_aside(self.latest_log_pointer)
+        legacy_backup = move_aside(self.legacy_log_path)
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_root = Path(temp_dir) / "repo"
+                shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+
+                self._write_stub(
+                    temp_root / "agent-lifecycle" / "sync_agents.py",
+                    "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+                )
+                self._write_stub(
+                    temp_root / "agent-tool" / "sync_tools.py",
+                    "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+                )
+                self._write_stub(
+                    temp_root / "agent-skill" / "link_skills.py",
+                    "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+                )
+                self._write_stub(
+                    temp_root / "agent-mcp" / "sync_mcp.py",
+                    "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+                )
+                self._write_stub(
+                    temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
+                    "#!/usr/bin/env bash\nexit 0\n",
+                )
+                self._write_stub(
+                    temp_root / "agent-terminal" / "sync_terminal.py",
+                    "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+                )
+
+                result = subprocess.run(
+                    [str(temp_root / "manage.sh"), "--offline", "update"],
+                    cwd=temp_root,
+                    env=self._managed_env(),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+                combined = result.stdout + result.stderr
+                self.assertEqual(result.returncode, 0, combined)
+                self.assertTrue(self.latest_log_pointer.exists(), combined)
+
+                latest_log = Path(self.latest_log_pointer.read_text(encoding="utf-8").strip())
+                self.assertTrue(latest_log.exists(), combined)
+                self.assertEqual(stat.S_IMODE(latest_log.stat().st_mode), 0o600)
+                self.assertEqual(stat.S_IMODE(self.latest_log_pointer.stat().st_mode), 0o600)
+        finally:
+            restore_path(self.latest_log_pointer, latest_backup)
+            restore_path(self.legacy_log_path, legacy_backup)
 
     def test_backups_restore_restores_directory_backup_with_spaces(self):
         with tempfile.TemporaryDirectory() as temp_dir:
