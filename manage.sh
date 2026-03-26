@@ -36,6 +36,7 @@ TASK_FAILURES=0
 DOCTOR_STATUS="healthy"
 DOCTOR_WARNING_OPTIONAL_TOOLS=0
 DOCTOR_WARNING_UNMATERIALIZED=0
+TEMP_ARTIFACTS=()
 ORIGINAL_ARGS=("$@")
 CMD_ARGS=()
 cmd=""
@@ -163,6 +164,12 @@ function cleanup_on_exit() {
         remove_lock_artifacts
     fi
     [ -n "${CONFIG_FILE:-}" ] && [[ "$CONFIG_FILE" != "$BASE_CONFIG" ]] && rm -f "$CONFIG_FILE"
+    local artifact
+    if [ "${#TEMP_ARTIFACTS[@]}" -gt 0 ]; then
+        for artifact in "${TEMP_ARTIFACTS[@]}"; do
+            rm -f "$artifact" 2>/dev/null || true
+        done
+    fi
 
     local running_jobs=$(jobs -p)
     if [ -n "$running_jobs" ]; then
@@ -318,6 +325,56 @@ function run_supervised_command_in_dir() {
     run_supervised_task "$timeout_seconds" "$workdir" "$command_str" &
     local pid=$!
     wait "$pid"
+}
+
+function register_temp_artifact() {
+    TEMP_ARTIFACTS+=("$1")
+}
+
+function unregister_temp_artifact() {
+    local target="$1"
+    local remaining=()
+    local artifact
+    for artifact in "${TEMP_ARTIFACTS[@]}"; do
+        if [ "$artifact" != "$target" ]; then
+            remaining+=("$artifact")
+        fi
+    done
+    if [ "${#remaining[@]}" -gt 0 ]; then
+        TEMP_ARTIFACTS=("${remaining[@]}")
+    else
+        TEMP_ARTIFACTS=()
+    fi
+}
+
+function run_supervised_capture_command_in_dir() {
+    local result_var="$1"
+    local timeout_seconds="$2"
+    local workdir="$3"
+    shift 3
+
+    local command_str
+    local output_file
+    local pid
+    local exit_code
+    local captured=""
+    command_str="$(shell_join "$@")"
+    output_file="$(mktemp "${TMPDIR:-/tmp}/agent-manager-capture.XXXXXX")" || return 1
+    register_temp_artifact "$output_file"
+
+    run_supervised_task "$timeout_seconds" "$workdir" "$command_str" > "$output_file" &
+    pid=$!
+    wait "$pid"
+    exit_code=$?
+
+    if [ -f "$output_file" ]; then
+        captured="$(cat "$output_file")"
+    fi
+    unregister_temp_artifact "$output_file"
+    rm -f "$output_file"
+
+    printf -v "$result_var" '%s' "$captured"
+    return "$exit_code"
 }
 
 function run_supervised_interactive_command_in_dir() {
@@ -935,7 +992,7 @@ function run_self_update() {
         echo "当前目录不是 Git 仓库，跳过自更新。"
         return 0
     fi
-    if ! repo_status=$(git -C "$ROOT_DIR" status --porcelain); then
+    if ! run_supervised_capture_command_in_dir repo_status 600 "$ROOT_DIR" git -C "$ROOT_DIR" status --porcelain; then
         echo "无法检查仓库状态，跳过自更新。"
         return 1
     fi

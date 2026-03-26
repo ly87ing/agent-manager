@@ -1559,6 +1559,82 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn(f"git -C {temp_root.resolve()} status --porcelain", log_lines[0])
             self.assertIn(f"git -C {temp_root.resolve()} pull --ff-only", log_lines[1])
 
+    def test_self_update_status_termination_cleans_up_descendant_processes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+
+            child_pid_file = Path(temp_dir) / "self-update-status-child.pid"
+            ready_file = Path(temp_dir) / "self-update-status-ready"
+            fake_bin = temp_root / "fake-bin"
+            fake_bin.mkdir()
+
+            self._write_stub(
+                fake_bin / "git",
+                (
+                    "#!/usr/bin/env bash\n"
+                    "if [ \"$1\" = \"-C\" ]; then\n"
+                    "  shift 2\n"
+                    "fi\n"
+                    "if [ \"$1\" = \"status\" ] && [ \"$2\" = \"--porcelain\" ]; then\n"
+                    "  python3 - <<'PY'\n"
+                    "import os\n"
+                    "import signal\n"
+                    "import subprocess\n"
+                    "import sys\n"
+                    "import time\n"
+                    "from pathlib import Path\n"
+                    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+                    "Path(os.environ['CHILD_PID_FILE']).write_text(str(child.pid), encoding='utf-8')\n"
+                    "Path(os.environ['READY_FILE']).write_text('ready\\n', encoding='utf-8')\n"
+                    "signal.signal(signal.SIGTERM, lambda *_args: sys.exit(143))\n"
+                    "while True:\n"
+                    "    time.sleep(1)\n"
+                    "PY\n"
+                    "fi\n"
+                    "echo \"unexpected git args: $*\" >&2\n"
+                    "exit 2\n"
+                ),
+            )
+
+            env = self._managed_env()
+            env["PATH"] = f"{fake_bin}:{env['PATH']}"
+            env["CHILD_PID_FILE"] = str(child_pid_file)
+            env["READY_FILE"] = str(ready_file)
+
+            proc = subprocess.Popen(
+                [str(temp_root / "manage.sh"), "self-update"],
+                cwd=temp_root,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            child_pid = None
+            try:
+                child_pid = self._await_probe_child_pid(
+                    proc,
+                    child_pid_file,
+                    ready_file,
+                    "self-update status 未按预期启动子进程",
+                )
+                self._assert_descendant_exits_after_parent_termination(
+                    proc,
+                    child_pid,
+                    f"self-update status 退出后子进程仍存活: {child_pid}",
+                )
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                self._close_process_pipes(proc)
+                if child_pid is not None:
+                    try:
+                        os.kill(child_pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+
     def test_update_pipeline_pulls_secrets_with_ff_only(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
