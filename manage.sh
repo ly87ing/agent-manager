@@ -295,7 +295,10 @@ child = subprocess.Popen(
 )
 
 try:
-    return_code = child.wait(timeout=timeout_seconds)
+    if timeout_seconds > 0:
+        return_code = child.wait(timeout=timeout_seconds)
+    else:
+        return_code = child.wait()
 except subprocess.TimeoutExpired:
     terminate_group(signal.SIGTERM)
     sys.exit(124)
@@ -315,6 +318,112 @@ function run_supervised_command_in_dir() {
     run_supervised_task "$timeout_seconds" "$workdir" "$command_str" &
     local pid=$!
     wait "$pid"
+}
+
+function run_supervised_interactive_command_in_dir() {
+    local timeout_seconds="$1"
+    local workdir="$2"
+    shift 2
+
+    local command_str
+    local python_code
+    command_str="$(shell_join "$@")"
+    python_code="$(cat <<'PY'
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import time
+
+timeout_seconds = int(sys.argv[1])
+workdir = sys.argv[2]
+command_str = sys.argv[3]
+lock_file = sys.argv[4]
+lock_dir = sys.argv[5]
+config_file = sys.argv[6]
+base_config = sys.argv[7]
+child = None
+
+
+def cleanup_local_artifacts():
+    try:
+        with open(lock_file, "r", encoding="utf-8") as handle:
+            if handle.read().strip() == str(os.getpid()):
+                try:
+                    os.remove(lock_file)
+                except FileNotFoundError:
+                    pass
+                shutil.rmtree(lock_dir, ignore_errors=True)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
+
+    if config_file and config_file != base_config:
+        try:
+            os.remove(config_file)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
+
+
+def terminate_group(sig, grace_seconds=1.0):
+    if child is None:
+        return
+    try:
+        os.killpg(child.pid, sig)
+    except ProcessLookupError:
+        return
+
+    deadline = time.time() + grace_seconds
+    while time.time() < deadline:
+        try:
+            os.killpg(child.pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.05)
+
+    if sig != signal.SIGKILL:
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def handle_signal(signum, _frame):
+    terminate_group(signal.SIGTERM)
+    cleanup_local_artifacts()
+    sys.exit(128 + signum)
+
+
+signal.signal(signal.SIGTERM, handle_signal)
+signal.signal(signal.SIGINT, handle_signal)
+
+child = subprocess.Popen(
+    ["bash", "-c", command_str],
+    cwd=workdir,
+    preexec_fn=os.setsid,
+)
+
+try:
+    if timeout_seconds > 0:
+        return_code = child.wait(timeout=timeout_seconds)
+    else:
+        return_code = child.wait()
+except subprocess.TimeoutExpired:
+    terminate_group(signal.SIGTERM)
+    cleanup_local_artifacts()
+    sys.exit(124)
+
+terminate_group(signal.SIGTERM, grace_seconds=0.5)
+cleanup_local_artifacts()
+sys.exit(return_code)
+PY
+)"
+
+    exec "$PYTHON_CMD" -c "$python_code" "$timeout_seconds" "$workdir" "$command_str" "$LOCK_FILE" "$LOCK_DIR" "${CONFIG_FILE:-}" "$BASE_CONFIG"
 }
 
 function update_latest_log_pointer() {
@@ -1035,7 +1144,9 @@ case "$cmd" in
         OFFLINE_FLAG="--offline"
         run_sync_pipeline
         ;;
-    ui) (cd "$ROOT_DIR" && $PYTHON_CMD -m src.interactive) ;;
+    ui)
+        run_supervised_interactive_command_in_dir 0 "$ROOT_DIR" "$PYTHON_CMD" -m src.interactive
+        ;;
     doctor|status)
         if [ "${CMD_ARGS[0]:-}" = "--json" ]; then
             doctor_check json

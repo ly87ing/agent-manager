@@ -1079,6 +1079,70 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("Agent Manager 交互式配置中心", combined)
             self.assertIn("7. 退出", combined)
 
+    def test_ui_termination_cleans_up_descendant_processes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+
+            child_pid_file = Path(temp_dir) / "ui-child.pid"
+            ready_file = Path(temp_dir) / "ui-ready"
+
+            self._write_stub(
+                temp_root / "src" / "interactive.py",
+                (
+                    "#!/usr/bin/env python3\n"
+                    "import os\n"
+                    "import signal\n"
+                    "import subprocess\n"
+                    "import sys\n"
+                    "import time\n"
+                    "from pathlib import Path\n"
+                    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+                    "Path(os.environ['CHILD_PID_FILE']).write_text(str(child.pid), encoding='utf-8')\n"
+                    "Path(os.environ['READY_FILE']).write_text('ready\\n', encoding='utf-8')\n"
+                    "signal.signal(signal.SIGTERM, lambda *_args: sys.exit(143))\n"
+                    "while True:\n"
+                    "    time.sleep(1)\n"
+                ),
+            )
+
+            env = self._managed_env()
+            env["CHILD_PID_FILE"] = str(child_pid_file)
+            env["READY_FILE"] = str(ready_file)
+
+            proc = subprocess.Popen(
+                [str(temp_root / "manage.sh"), "ui"],
+                cwd=temp_root,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            child_pid = None
+            try:
+                child_pid = self._await_probe_child_pid(
+                    proc,
+                    child_pid_file,
+                    ready_file,
+                    "ui 未按预期启动子进程",
+                )
+                self._assert_descendant_exits_after_parent_termination(
+                    proc,
+                    child_pid,
+                    f"ui 退出后子进程仍存活: {child_pid}",
+                )
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                self._close_process_pipes(proc)
+                if child_pid is not None:
+                    try:
+                        os.kill(child_pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+
     def test_manage_without_command_shows_help_and_does_not_run_pipeline(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
