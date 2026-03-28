@@ -6,6 +6,9 @@ from src import toml_compat
 
 
 class TomlCompatTests(unittest.TestCase):
+    def setUp(self):
+        toml_compat.load_tomllib.cache_clear()
+
     def tearDown(self):
         toml_compat.load_tomllib.cache_clear()
 

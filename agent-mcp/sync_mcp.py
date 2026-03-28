@@ -16,7 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.agent_ids import canonicalize_agent_list, canonicalize_agent_mapping
+from src.agent_ids import canonicalize_agent_id, canonicalize_agent_list, canonicalize_agent_mapping
 from src.command_runner import run_command
 from src.json_config import get_typed_mapping_section, load_json_object_file
 from src.manage_runtime_probe import is_agent_installed
@@ -25,7 +25,7 @@ from src.toml_compat import tomllib
 
 configure_logging()
 
-PLACEHOLDER_RE = re.compile(r"\$\{([^}]+)\}")
+PLACEHOLDER_RE = re.compile(r"^\$\{([^}]+)\}$")
 TOML_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 TOML_SERVER_HEADER_RE = re.compile(
     r'^\s*\[\s*mcp_servers\.(?P<key>"(?:\\.|[^"\\])*"|[A-Za-z0-9_-]+)',
@@ -138,6 +138,12 @@ def config_requires_repo_path(config):
     values = [config.get("command", "")] + config.get("args", [])
     return any(isinstance(value, str) and "{repo_path}" in value for value in values)
 
+def placeholder_name(value):
+    if not isinstance(value, str):
+        return None
+    match = PLACEHOLDER_RE.fullmatch(value)
+    return match.group(1) if match else None
+
 def find_unresolved_placeholders(value, path=""):
     unresolved = []
     if isinstance(value, dict):
@@ -149,7 +155,8 @@ def find_unresolved_placeholders(value, path=""):
             next_path = f"{path}[{idx}]"
             unresolved.extend(find_unresolved_placeholders(inner, next_path))
     elif isinstance(value, str):
-        for match in PLACEHOLDER_RE.findall(value):
+        match = placeholder_name(value)
+        if match is not None:
             unresolved.append((path or "<root>", match))
     return unresolved
 
@@ -226,7 +233,6 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
     
     new_chunks = []
     preserved_names = set(preserved_servers)
-    blocked_active_names = set()
     for chunk in chunks:
         srv_name = extract_toml_mcp_server_name(chunk)
         if srv_name:
@@ -234,13 +240,10 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
                 new_chunks.append(chunk)
                 continue
             is_managed_chunk = '_MANAGED_BY = "agent-manager"' in chunk
-            if srv_name in active_servers and not is_managed_chunk:
-                if dry_run:
-                    logging.info(f"[AGENT: {agent_name}] 发现同名用户自管 TOML 段，真实执行时将拒绝接管: {srv_name} (预览)")
-                    blocked_active_names.add(srv_name)
-                else:
-                    logging.error(f"[AGENT: {agent_name}] 发现同名用户自管 TOML 段，拒绝接管: {srv_name}")
-                    return False
+            if srv_name in active_servers:
+                if not is_managed_chunk:
+                    logging.info(f"[AGENT: {agent_name}] 接管同名 TOML 段: {srv_name}")
+                continue
             if is_managed_chunk:
                 continue
         new_chunks.append(chunk)
@@ -248,8 +251,6 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
     base_content = "".join(new_chunks).strip()
     new_blocks = []
     for name, settings in active_servers.items():
-        if name in blocked_active_names:
-            continue
         quoted_name = toml_key(name)
         block = f"\n\n[mcp_servers.{quoted_name}]\ncommand = {toml_quote(settings['command'])}\n"
         block += f"args = {json.dumps(settings['args'], ensure_ascii=False)}\n"
@@ -292,6 +293,16 @@ def backup_config(path, dry_run=False):
             try: os.remove(old_bak)
             except OSError: pass
 
+
+def should_sync_mcp_target(agent_name, agent_defs):
+    if not agent_defs:
+        return True
+    agent_def = agent_defs.get(agent_name)
+    if agent_def is None:
+        # Codex is config-managed even though it has no lifecycle install metadata yet.
+        return canonicalize_agent_id(agent_name) == "codex"
+    return is_agent_installed(agent_name, agent_def)
+
 def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None):
     """更新各个 Agent 的 MCP 配置文件"""
     all_ok = True
@@ -299,10 +310,7 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None
         name for name, srv_config in mcp_servers.items() if srv_config.get("_declared_in_policy", True)
     }
     for agent_name, agent_meta in agents_config.items():
-        agent_installed = True
-        if agent_defs:
-            defn = agent_defs.get(agent_name, {})
-            agent_installed = is_agent_installed(agent_name, defn)
+        agent_installed = should_sync_mcp_target(agent_name, agent_defs)
         config_path_str = agent_meta if isinstance(agent_meta, str) else agent_meta.get("path")
         file_format = "json" if isinstance(agent_meta, str) else agent_meta.get("format", "json")
         config_path = Path(config_path_str).expanduser()
@@ -487,8 +495,8 @@ def main():
     for srv_name, srv_def in definition_cfg.items():
         if "env" in srv_def:
             for k, v in srv_def["env"].items():
-                if isinstance(v, str) and v.startswith("${") and v.endswith("}"):
-                    var_name = v[2:-1]
+                var_name = placeholder_name(v)
+                if var_name is not None:
                     if var_name in env_vars:
                         srv_def["env"][k] = env_vars[var_name]
                         logging.info(f"[{srv_name}] 注入凭证: {k} (来源: secrets 池)")

@@ -9,7 +9,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
+from src.agent_ids import canonicalize_agent_list, canonicalize_agent_mapping, get_agent_display_name
 from src.json_config import ensure_mapping_value_types, get_typed_mapping_section, load_json_object_file
 from src.manage_runtime_probe import (
     ProviderInventory,
@@ -29,6 +29,7 @@ from src.toml_compat import load_tomllib
 SECRET_PATTERN = re.compile(
     r"(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_\-]{20,})"
 )
+PLACEHOLDER_PATTERN = re.compile(r"^\$\{[^}]+\}$")
 RULE_TARGET_PREFIX_TO_ID = {
     "claude": "claude-code",
     "gemini": "gemini-cli",
@@ -224,6 +225,302 @@ def active_toml_target_agents(config: dict, agent_defs: dict, mcp_cfg: dict) -> 
     return names
 
 
+def _normalize_mcp_args(raw_args) -> tuple[str, ...] | None:
+    if raw_args is None:
+        return ()
+    if not isinstance(raw_args, list):
+        return None
+    if not all(isinstance(value, str) for value in raw_args):
+        return None
+    return tuple(raw_args)
+
+
+def _normalize_expected_mcp_env(env_dict: dict) -> dict[str, tuple[str, object]] | None:
+    items: dict[str, tuple[str, object]] = {}
+    for key, value in env_dict.items():
+        if key == "_MANAGED_BY":
+            continue
+        if not isinstance(key, str):
+            return None
+        if isinstance(value, str) and PLACEHOLDER_PATTERN.fullmatch(value):
+            items[key] = ("placeholder", None)
+        else:
+            items[key] = ("literal", value)
+    return items
+
+
+def _normalize_actual_mcp_env(env_dict: dict) -> dict[str, tuple[str, object]] | None:
+    items: dict[str, tuple[str, object]] = {}
+    for key, value in env_dict.items():
+        if key == "_MANAGED_BY":
+            continue
+        if not isinstance(key, str):
+            return None
+        if isinstance(value, str) and PLACEHOLDER_PATTERN.fullmatch(value):
+            items[key] = ("placeholder", None)
+        else:
+            items[key] = ("literal", value)
+    return items
+
+
+def _managed_mcp_matches(expected: dict[str, object], actual: dict[str, object]) -> bool:
+    if expected.get("command") != actual.get("command"):
+        return False
+    if expected.get("args") != actual.get("args"):
+        return False
+
+    expected_env = expected.get("env")
+    actual_env = actual.get("env")
+    if not isinstance(expected_env, dict) or not isinstance(actual_env, dict):
+        return expected_env == actual_env
+    if set(expected_env) != set(actual_env):
+        return False
+
+    for key, (expected_kind, expected_value) in expected_env.items():
+        actual_kind, actual_value = actual_env[key]
+        if expected_kind == "placeholder":
+            if actual_kind != "literal":
+                return False
+            continue
+        if actual_kind != "literal" or actual_value != expected_value:
+            return False
+    return True
+
+
+def _normalize_expected_mcp_definition(settings: dict) -> dict[str, object]:
+    env_dict = settings.get("env", {})
+    if not isinstance(env_dict, dict):
+        env_dict = {}
+    return {
+        "command": settings.get("command") if isinstance(settings.get("command"), str) else None,
+        "args": _normalize_mcp_args(settings.get("args")),
+        "env": _normalize_expected_mcp_env(env_dict),
+    }
+
+
+def _normalize_actual_mcp_definition(settings: dict, agent_id: str) -> dict[str, object] | None:
+    env_dict = settings.get("env")
+    if not isinstance(env_dict, dict):
+        env_dict = settings.get("environment")
+    if not isinstance(env_dict, dict) or env_dict.get("_MANAGED_BY") != "agent-manager":
+        return None
+
+    if agent_id == "opencode" and isinstance(settings.get("command"), list):
+        command_parts = settings.get("command")
+        command = command_parts[0] if command_parts and isinstance(command_parts[0], str) else None
+        args = _normalize_mcp_args(command_parts[1:] if isinstance(command_parts, list) else None)
+    else:
+        command = settings.get("command") if isinstance(settings.get("command"), str) else None
+        args = _normalize_mcp_args(settings.get("args"))
+
+    return {
+        "command": command,
+        "args": args,
+        "env": _normalize_actual_mcp_env(env_dict),
+    }
+
+
+def expected_managed_mcp_servers(config: dict, mcp_cfg: dict, agent_id: str) -> dict[str, dict[str, object]]:
+    expected = {}
+    servers = mcp_cfg.get("servers", {})
+    for server_name, policy in config.get("mcp", {}).items():
+        if not policy.get("enabled", True):
+            continue
+        definition = servers.get(server_name)
+        if not definition:
+            continue
+        merged = dict(definition)
+        merged.update(policy)
+        targeted_agents = canonicalize_agent_list(merged.get("agents"))
+        if targeted_agents is None or agent_id in targeted_agents:
+            expected[server_name] = _normalize_expected_mcp_definition(merged)
+    return expected
+
+
+def managed_mcp_servers(target_path: str, file_format: str, agent_id: str) -> dict[str, dict[str, object]]:
+    def servers_from_mapping(server_mapping: dict) -> dict[str, dict[str, object]]:
+        servers: dict[str, dict[str, object]] = {}
+        for server_name, settings in server_mapping.items():
+            if not isinstance(server_name, str) or not isinstance(settings, dict):
+                continue
+            normalized = _normalize_actual_mcp_definition(settings, agent_id)
+            if normalized is not None:
+                servers[server_name] = normalized
+        return servers
+
+    try:
+        with open(target_path, encoding="utf-8") as handle:
+            raw = handle.read()
+    except OSError as exc:
+        raise ValueError(str(exc)) from exc
+
+    if file_format == "toml":
+        parser_module = load_tomllib()
+        try:
+            parsed = parser_module.loads(raw)
+        except Exception as exc:
+            raise ValueError(str(exc)) from exc
+        server_mapping = parsed.get("mcp_servers", {})
+        if not isinstance(server_mapping, dict):
+            return {}
+        return servers_from_mapping(server_mapping)
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(str(exc)) from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("顶层必须是对象")
+    preferred_key = "mcp" if agent_id == "opencode" else "mcpServers"
+    server_mapping = parsed.get(preferred_key)
+    if not isinstance(server_mapping, dict):
+        fallback_key = "mcpServers" if preferred_key == "mcp" else "mcp"
+        server_mapping = parsed.get(fallback_key, {})
+    if not isinstance(server_mapping, dict):
+        return {}
+    return servers_from_mapping(server_mapping)
+
+
+def managed_mcp_server_names(target_path: str, file_format: str, agent_id: str) -> set[str]:
+    return set(managed_mcp_servers(target_path, file_format, agent_id))
+
+
+def count_managed_mcp_servers(target_path: str, file_format: str, agent_id: str) -> int:
+    return len(managed_mcp_server_names(target_path, file_format, agent_id))
+
+
+def read_skill_name(skill_md_path: Path) -> str | None:
+    try:
+        content = skill_md_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    lines = content.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    for line in lines[1:]:
+        stripped = line.strip()
+        if stripped == "---":
+            break
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        if key.strip() == "name":
+            skill_name = value.strip().strip("'\"")
+            if skill_name:
+                return skill_name
+            break
+    return None
+
+
+def resolve_skill_search_paths(repo_path: Path, config: dict) -> list[Path]:
+    raw_paths = config.get("skill_paths")
+    if raw_paths is None:
+        return [repo_path]
+    if not isinstance(raw_paths, list) or not raw_paths:
+        raise ValueError("skill_paths 必须是非空数组")
+
+    search_paths = []
+    for raw_path in raw_paths:
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            raise ValueError("skill_paths 中的每一项都必须是非空字符串")
+        search_path = (repo_path / raw_path).resolve(strict=False)
+        if search_path != repo_path and repo_path not in search_path.parents:
+            raise ValueError(f"skill_paths 包含越界路径: {raw_path}")
+        if not search_path.exists():
+            raise ValueError(f"skill_paths 指向的目录不存在: {raw_path}")
+        if not search_path.is_dir():
+            raise ValueError(f"skill_paths 指向的路径不是目录: {raw_path}")
+        search_paths.append(search_path)
+    return search_paths
+
+
+def expected_managed_skill_targets(root_dir: Path, config: dict, skill_cfg: dict, agent_id: str) -> tuple[dict[str, str], list[str]]:
+    expected: dict[str, str] = {}
+    problems: list[str] = []
+    repo_base = root_dir / "agent-skill" / "repositories"
+    repositories = skill_cfg.get("repositories", {})
+    excluded_dirs = {".git", "node_modules", "__pycache__", "venv", ".venv"}
+
+    for repo_name, policy in config.get("skills", {}).items():
+        if not policy.get("enabled", True):
+            continue
+        definition = repositories.get(repo_name)
+        if not definition:
+            continue
+        merged = dict(definition)
+        merged.update(policy)
+        targeted_agents = canonicalize_agent_list(merged.get("agents"))
+        if targeted_agents is not None and agent_id not in targeted_agents:
+            continue
+
+        repo_path = (repo_base / repo_name).resolve()
+        if not repo_path.exists():
+            problems.append(f"{repo_name}: 仓库缓存缺失")
+            continue
+        try:
+            search_paths = resolve_skill_search_paths(repo_path, merged)
+        except ValueError as exc:
+            problems.append(f"{repo_name}: {exc}")
+            continue
+
+        repo_targets: dict[str, str] = {}
+        duplicate_names: set[str] = set()
+        for search_path in search_paths:
+            for walk_root, dirs, files in os.walk(search_path):
+                dirs[:] = sorted(d for d in dirs if d not in excluded_dirs)
+                if "SKILL.md" not in files:
+                    continue
+                skill_dir = Path(walk_root).resolve()
+                skill_name = read_skill_name(skill_dir / "SKILL.md")
+                if not skill_name:
+                    continue
+                rendered_path = str(skill_dir)
+                existing = repo_targets.get(skill_name)
+                if existing is not None and existing != rendered_path:
+                    duplicate_names.add(skill_name)
+                    continue
+                repo_targets[skill_name] = rendered_path
+
+        if duplicate_names:
+            problems.append(f"{repo_name}: 重复 skill name: {', '.join(sorted(duplicate_names))}")
+            continue
+
+        for skill_name, rendered_path in repo_targets.items():
+            existing = expected.get(skill_name)
+            if existing is not None and existing != rendered_path:
+                problems.append(f"重复 skill name: {skill_name}")
+                continue
+            expected[skill_name] = rendered_path
+    return expected, problems
+
+
+def actual_skill_targets(target_path: str) -> dict[str, str]:
+    actual: dict[str, str] = {}
+    for name in os.listdir(target_path):
+        link_path = Path(target_path) / name
+        if not link_path.is_symlink():
+            continue
+        try:
+            raw_target = Path(os.readlink(link_path)).expanduser()
+            resolved_target = raw_target if raw_target.is_absolute() else (link_path.parent / raw_target)
+            actual[name] = str(resolved_target.resolve(strict=False))
+        except OSError:
+            actual[name] = "<broken>"
+    return actual
+
+
+def is_managed_skill_target_path(target_path: str, managed_repo_base: Path) -> bool:
+    if target_path == "<broken>":
+        return False
+    resolved_target = Path(target_path).resolve(strict=False)
+    managed_repo_base = managed_repo_base.resolve()
+    return resolved_target == managed_repo_base or managed_repo_base in resolved_target.parents
+
+
+def format_name_set(names: set[str]) -> str:
+    return ", ".join(sorted(names)) if names else "无"
+
+
 def collect_managed_target_paths(root_dir: Path, *, include_skills: bool) -> list[str]:
     targets: set[str] = set()
 
@@ -320,9 +617,13 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
             continue
         try:
             data = load_json_object_file(abs_path, strict=True, missing_ok=False)
+        except ValueError as exc:
+            append_entry(report, "config", make_entry(name, "error", f"语法错误: {exc}"))
+            continue
+        try:
             validate_json_shape(data, name)
         except ValueError as exc:
-            append_entry(report, "config", make_entry(name, "error", str(exc)))
+            append_entry(report, "config", make_entry(name, "error", f"格式正确，但结构非法: {exc}"))
             continue
         content = abs_path.read_text(encoding="utf-8")
         if SECRET_PATTERN.search(content):
@@ -444,12 +745,51 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
         if agent_id not in active_mcp_agents:
             continue
         target_path = path_config if isinstance(path_config, str) else path_config.get("path", "")
+        file_format = "json" if isinstance(path_config, str) else path_config.get("format", "json")
         target_path = os.path.expanduser(target_path)
         label = get_agent_display_name(agent_id, agent_defs.get(agent_id, {}))
+        expected_servers = expected_managed_mcp_servers(config, mcp_cfg, agent_id)
+        expected_names = set(expected_servers)
+        expected_count = len(expected_names)
         if os.path.exists(target_path):
-            with open(target_path, encoding="utf-8") as handle:
-                count = len(re.findall(r"_MANAGED_BY", handle.read()))
-            append_entry(report, "mcp", make_entry(label, "ok", f"已注入 {count} 个托管服务"))
+            try:
+                actual_servers = managed_mcp_servers(target_path, file_format, agent_id)
+            except ValueError as exc:
+                append_entry(report, "mcp", make_entry(label, "error", f"MCP 配置解析失败: {exc}"))
+                continue
+            actual_names = set(actual_servers)
+            actual_count = len(actual_names)
+            if actual_names != expected_names:
+                append_entry(
+                    report,
+                    "mcp",
+                    make_entry(
+                        label,
+                        "error",
+                        "托管服务集合漂移 "
+                        f"(期望 {expected_count} 个托管服务: {format_name_set(expected_names)}，"
+                        f"实际 {actual_count} 个托管服务: {format_name_set(actual_names)})",
+                    ),
+                )
+                continue
+
+            drift_names = {
+                name
+                for name in expected_names
+                if not _managed_mcp_matches(expected_servers[name], actual_servers.get(name, {}))
+            }
+            if not drift_names:
+                append_entry(report, "mcp", make_entry(label, "ok", f"已注入 {actual_count} 个托管服务"))
+            else:
+                append_entry(
+                    report,
+                    "mcp",
+                    make_entry(
+                        label,
+                        "error",
+                        f"托管服务配置漂移 ({format_name_set(drift_names)})",
+                    ),
+                )
         else:
             if generated_target_status(agent_id) == "installed":
                 message = "尚未生成 MCP 配置"
@@ -462,9 +802,58 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
             continue
         target_path = os.path.expanduser(agent_path)
         label = get_agent_display_name(agent_id, agent_defs.get(agent_id, {}))
+        managed_repo_base = (root_dir / "agent-skill" / "repositories").resolve()
+        expected_targets, skill_target_problems = expected_managed_skill_targets(root_dir, config, skill_cfg, agent_id)
         if os.path.isdir(target_path):
-            links = [name for name in os.listdir(target_path) if os.path.islink(os.path.join(target_path, name))]
-            append_entry(report, "skills", make_entry(label, "ok", f"{len(links)} 个物理链接"))
+            if skill_target_problems:
+                append_entry(
+                    report,
+                    "skills",
+                    make_entry(label, "error", f"技能托管目标解析失败: {'; '.join(skill_target_problems)}"),
+                )
+                continue
+            actual_targets = actual_skill_targets(target_path)
+            expected_names = set(expected_targets)
+            actual_names = set(actual_targets)
+            missing_names = expected_names - actual_names
+            drift_names = {name for name in expected_names if actual_targets.get(name) != expected_targets.get(name)}
+            extra_managed_names = {
+                name
+                for name, actual_target in actual_targets.items()
+                if name not in expected_names and is_managed_skill_target_path(actual_target, managed_repo_base)
+            }
+            if not missing_names and not drift_names and not extra_managed_names:
+                append_entry(report, "skills", make_entry(label, "ok", f"{len(expected_names)} 个受管链接"))
+            elif missing_names:
+                append_entry(
+                    report,
+                    "skills",
+                    make_entry(
+                        label,
+                        "error",
+                        f"skill 链接缺失 ({format_name_set(missing_names)})",
+                    ),
+                )
+            elif drift_names:
+                append_entry(
+                    report,
+                    "skills",
+                    make_entry(
+                        label,
+                        "error",
+                        f"skill 目标漂移 ({format_name_set(drift_names)})",
+                    ),
+                )
+            else:
+                append_entry(
+                    report,
+                    "skills",
+                    make_entry(
+                        label,
+                        "error",
+                        f"存在额外受管 skill 链接 ({format_name_set(extra_managed_names)})",
+                    ),
+                )
         else:
             if generated_target_status(agent_id) == "installed":
                 message = "尚未建立 skills 目录"

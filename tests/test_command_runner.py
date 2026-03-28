@@ -29,3 +29,35 @@ class CommandRunnerTests(unittest.TestCase):
 
         self.assertTrue(use_shell)
         self.assertEqual(prepared, command)
+
+    def test_prepare_command_ignores_shell_markers_inside_quotes(self):
+        command = 'python3 -c \'print("a&&b")\''
+
+        prepared, use_shell = prepare_command(command)
+
+        self.assertFalse(use_shell)
+        self.assertEqual(prepared, ["python3", "-c", 'print("a&&b")'])
+
+    def test_prepare_command_preserves_env_assignments_for_shell(self):
+        command = "FOO=bar git status"
+
+        prepared, use_shell = prepare_command(command)
+
+        self.assertTrue(use_shell)
+        self.assertEqual(prepared, command)
+
+    def test_prepare_command_preserves_glob_expansion_for_shell(self):
+        command = "echo *.json"
+
+        prepared, use_shell = prepare_command(command)
+
+        self.assertTrue(use_shell)
+        self.assertEqual(prepared, command)
+
+    def test_prepare_command_preserves_variable_expansion_for_shell(self):
+        command = "echo $HOME"
+
+        prepared, use_shell = prepare_command(command)
+
+        self.assertTrue(use_shell)
+        self.assertEqual(prepared, command)

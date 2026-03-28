@@ -11,6 +11,30 @@ from tests.provider_path_fixtures import (
 
 
 class ManageRuntimeProbeTests(unittest.TestCase):
+    def test_iter_command_heads_ignores_shell_operators_inside_quotes(self):
+        self.assertEqual(
+            manage_runtime_probe.iter_command_heads('python3 -c \'print("a&&b")\''),
+            ["python3"],
+        )
+
+    def test_iter_command_heads_skips_leading_env_assignments(self):
+        self.assertEqual(
+            manage_runtime_probe.iter_command_heads("FOO=bar git status"),
+            ["git"],
+        )
+
+    def test_iter_command_heads_skips_env_wrapper(self):
+        self.assertEqual(
+            manage_runtime_probe.iter_command_heads("env FOO=bar git status"),
+            ["git"],
+        )
+
+    def test_iter_command_heads_skips_command_wrapper(self):
+        self.assertEqual(
+            manage_runtime_probe.iter_command_heads("command git status"),
+            ["git"],
+        )
+
     def test_detect_tool_readiness_requires_git_clone_for_repo_backed_tools(self):
         with mock.patch("src.manage_runtime_probe.os.path.isdir") as isdir:
             isdir.side_effect = lambda path: path == "/repo/agent-tool/playwright-cli"

@@ -82,13 +82,93 @@ RULE_TARGET_PREFIX_TO_ID = {
     "opencode": "opencode",
     "codex": "codex",
 }
+ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
+ENV_WRAPPER_FLAGS_WITH_VALUE = {"-C", "--chdir", "-S", "--split-string", "-u", "--unset"}
+ENV_WRAPPER_FLAGS = {"-i", "--ignore-environment", "-0", "--null"}
+
+
+def split_command_segments(command):
+    segments = []
+    in_single = False
+    in_double = False
+    escaped = False
+    start = 0
+    index = 0
+
+    while index < len(command):
+        char = command[index]
+        if escaped:
+            escaped = False
+            index += 1
+            continue
+        if char == "\\" and not in_single:
+            escaped = True
+            index += 1
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+            index += 1
+            continue
+        if char == '"' and not in_single:
+            in_double = not in_double
+            index += 1
+            continue
+        if not in_single and not in_double:
+            if command.startswith(("&&", "||"), index):
+                segments.append(command[start:index])
+                index += 2
+                start = index
+                continue
+            if char in ";|":
+                segments.append(command[start:index])
+                index += 1
+                start = index
+                continue
+        index += 1
+
+    segments.append(command[start:])
+    return segments
+
+
+def command_head(tokens):
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if ENV_ASSIGNMENT_RE.match(token):
+            index += 1
+            continue
+
+        base = os.path.basename(token)
+        if base == "env":
+            index += 1
+            while index < len(tokens):
+                token = tokens[index]
+                if token == "--":
+                    index += 1
+                    break
+                if ENV_ASSIGNMENT_RE.match(token) or token in ENV_WRAPPER_FLAGS:
+                    index += 1
+                    continue
+                if token in ENV_WRAPPER_FLAGS_WITH_VALUE:
+                    index += 2
+                    continue
+                if token.startswith("--unset=") or token.startswith("--chdir="):
+                    index += 1
+                    continue
+                break
+            continue
+        if base == "command":
+            index += 1
+            continue
+        return base
+    return None
 
 
 def iter_command_heads(command):
     if not command:
         return []
     heads = []
-    for segment in re.split(r"\s*(?:&&|\|\||;|\|)\s*", command):
+    for segment in split_command_segments(command):
         segment = segment.strip()
         if not segment:
             continue
@@ -96,8 +176,9 @@ def iter_command_heads(command):
             tokens = shlex.split(segment)
         except ValueError:
             tokens = segment.split()
-        if tokens:
-            heads.append(os.path.basename(tokens[0]))
+        head = command_head(tokens)
+        if head:
+            heads.append(head)
     return heads
 
 

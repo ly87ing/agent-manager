@@ -13,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.agent_ids import canonicalize_agent_list, canonicalize_agent_mapping
+from src.agent_ids import canonicalize_agent_id, canonicalize_agent_list, canonicalize_agent_mapping
 from src.command_runner import run_command
 from src.json_config import get_typed_mapping_section, load_json_object_file
 from src.manage_runtime_probe import is_agent_installed
@@ -357,7 +357,7 @@ def is_active_skill_target(agent_name, target_path, agent_defs):
     agent_def = agent_defs.get(agent_name)
     if agent_def is not None:
         return is_agent_installed(agent_name, agent_def)
-    return False
+    return canonicalize_agent_id(agent_name) == "codex"
 
 
 def resolve_repo_link_targets(active_targets, all_targets, allowed_agents):
@@ -402,8 +402,31 @@ def record_duplicate_link_target(duplicate_link_targets, skill_name, allowed_age
     )
 
 
-def remove_repo_skill_links(repo_path, targets, allowed_agents=None, dry_run=False):
+def collect_repo_skill_names_for_cleanup(repo_path, config=None):
     repo_path = Path(repo_path).resolve()
+    search_paths = [repo_path]
+    if config is not None:
+        try:
+            search_paths = resolve_skill_search_paths(repo_path, config)
+        except SkillPathSelectionError:
+            search_paths = [repo_path]
+    skill_names = set()
+    for search_path in search_paths:
+        if not search_path.exists():
+            continue
+        for root, dirs, files in os.walk(search_path):
+            dirs[:] = sorted(d for d in dirs if d not in EXCLUDED_SKILL_DIRS)
+            if SKILL_FILE not in files:
+                continue
+            skill_name = read_skill_name(Path(root) / SKILL_FILE)
+            if skill_name:
+                skill_names.add(skill_name)
+    return skill_names
+
+
+def remove_repo_skill_links(repo_path, targets, allowed_agents=None, dry_run=False, skill_names=None):
+    repo_path = Path(repo_path).resolve()
+    managed_skill_names = set(skill_names or [])
     active_targets = targets
     if allowed_agents is not None:
         active_targets = {k: v for k, v in targets.items() if k in allowed_agents}
@@ -414,13 +437,7 @@ def remove_repo_skill_links(repo_path, targets, allowed_agents=None, dry_run=Fal
         for item in target_base.iterdir():
             if not item.is_symlink():
                 continue
-            try:
-                raw_target = Path(os.readlink(item)).expanduser()
-                resolved_target = raw_target if raw_target.is_absolute() else (item.parent / raw_target)
-                resolved_target = resolved_target.resolve(strict=False)
-            except OSError:
-                continue
-            if resolved_target != repo_path and repo_path not in resolved_target.parents:
+            if item.name not in managed_skill_names:
                 continue
             logging.error(f"[AGENT: {agent_name}] 移除来自失效仓库的 skill 链接: {item.name}")
             if not dry_run:
@@ -523,8 +540,9 @@ def main():
             remove_repo_skill_links(
                 repo_path,
                 ALL_AGENT_TARGETS,
-                None,
+                config.get("agents"),
                 args.dry_run,
+                collect_repo_skill_names_for_cleanup(repo_path, config),
             )
             continue
         if not config.get("enabled", True):
@@ -532,8 +550,9 @@ def main():
             remove_repo_skill_links(
                 repo_path,
                 ALL_AGENT_TARGETS,
-                None,
+                config.get("agents"),
                 args.dry_run,
+                collect_repo_skill_names_for_cleanup(repo_path, config),
             )
             continue
         repo_path, repo_ok = clone_or_update_repo(
@@ -548,6 +567,9 @@ def main():
             all_success = False
             if not (repo_path.exists() and (repo_path / ".git").exists()):
                 continue
+        if args.dry_run and not repo_path.exists():
+            logging.info(f"[{repo_name}] (预览: 本地仓库缺失，跳过 skill 枚举)")
+            continue
         if not args.dry_run:
             write_owner_marker(repo_path, repo_name)
         if not ensure_repo_version(repo_path, config, args.dry_run, args.offline):
@@ -569,8 +591,9 @@ def main():
             remove_repo_skill_links(
                 repo_path,
                 ALL_AGENT_TARGETS,
-                None,
+                config.get("agents"),
                 args.dry_run,
+                collect_repo_skill_names_for_cleanup(repo_path, config),
             )
             all_success = False
             continue
@@ -579,8 +602,9 @@ def main():
             remove_repo_skill_links(
                 repo_path,
                 ALL_AGENT_TARGETS,
-                None,
+                config.get("agents"),
                 args.dry_run,
+                collect_repo_skill_names_for_cleanup(repo_path, config),
             )
             all_success = False
             continue
@@ -593,6 +617,7 @@ def main():
                 ALL_AGENT_TARGETS,
                 inactive_agents,
                 args.dry_run,
+                set(skills),
             )
         pending_links.append((repo_name, repo_targets, skills))
         for s_name, s_path in skills.items():

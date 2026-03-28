@@ -1173,7 +1173,7 @@ class ManageScriptTests(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "--dry-run", "--offline"],
+                [str(temp_root / "manage.sh")],
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,

@@ -638,6 +638,13 @@ class SyncMcpTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse(agent_config_path.exists(), result.stdout + result.stderr)
 
+    def test_find_unresolved_placeholders_ignores_literal_string_with_placeholder_substring(self):
+        unresolved = sync_mcp.find_unresolved_placeholders(
+            {"env": {"PROMPT": "prefix-${USER}-suffix"}}
+        )
+
+        self.assertEqual(unresolved, [])
+
     def test_user_owned_toml_section_with_managed_server_name_is_preserved(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -668,6 +675,50 @@ class SyncMcpTests(unittest.TestCase):
             updated = tomllib.loads(agent_config_path.read_text(encoding="utf-8"))
             self.assertIn("bad-mcp", updated["mcp_servers"])
             self.assertEqual(updated["mcp_servers"]["bad-mcp"]["env"]["KEEP"], "1")
+
+    def test_user_owned_toml_section_with_active_managed_server_name_is_replaced(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            agent_config_path = temp_root / "config.toml"
+            agent_config_path.write_text(
+                "\n".join(
+                    [
+                        "[mcp_servers.bad-mcp]",
+                        'command = "echo"',
+                        "args = []",
+                        "[mcp_servers.bad-mcp.env]",
+                        'KEEP = "1"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            ok = sync_mcp.update_toml_config(
+                "codex",
+                agent_config_path,
+                {
+                    "bad-mcp": {
+                        "command": "node",
+                        "args": ["server.js"],
+                        "env": {"TOKEN": "new-token"},
+                    }
+                },
+                {"bad-mcp"},
+                set(),
+                dry_run=False,
+            )
+
+            self.assertTrue(ok)
+            updated = tomllib.loads(agent_config_path.read_text(encoding="utf-8"))
+            self.assertEqual(updated["mcp_servers"]["bad-mcp"]["command"], "node")
+            self.assertEqual(updated["mcp_servers"]["bad-mcp"]["args"], ["server.js"])
+            self.assertNotIn("KEEP", updated["mcp_servers"]["bad-mcp"]["env"])
+            self.assertEqual(updated["mcp_servers"]["bad-mcp"]["env"]["TOKEN"], "new-token")
+            self.assertEqual(
+                updated["mcp_servers"]["bad-mcp"]["env"]["_MANAGED_BY"],
+                "agent-manager",
+            )
 
     def test_sync_failure_preserves_existing_managed_mcp_entry(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -761,6 +812,62 @@ class SyncMcpTests(unittest.TestCase):
             self.assertIn("bad-mcp", updated["mcp_servers"])
             self.assertEqual(updated["mcp_servers"]["bad-mcp"]["args"], ["/old/server.js"])
             self.assertIn("user-mcp", updated["mcp_servers"])
+
+    def test_codex_target_receives_managed_mcp_without_lifecycle_definition(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            agent_config_path = temp_root / "config.toml"
+            agent_config_path.write_text('model = "gpt-5.4"\n', encoding="utf-8")
+
+            sync_mcp.manage_mcp_config(
+                {"codex": {"path": str(agent_config_path), "format": "toml"}},
+                {
+                    "augment-context-engine": {
+                        "enabled": True,
+                        "_declared_in_policy": True,
+                        "_sync_ready": True,
+                        "command": "auggie",
+                        "args": ["--mcp", "--mcp-auto-workspace"],
+                        "env": {"AUGMENT_SESSION_AUTH": "token"},
+                    }
+                },
+                agent_defs={"claude-code": {"bin": "claude"}},
+            )
+
+            updated = tomllib.loads(agent_config_path.read_text(encoding="utf-8"))
+            self.assertIn("augment-context-engine", updated["mcp_servers"])
+            self.assertEqual(
+                updated["mcp_servers"]["augment-context-engine"]["command"],
+                "auggie",
+            )
+            self.assertEqual(
+                updated["mcp_servers"]["augment-context-engine"]["env"]["_MANAGED_BY"],
+                "agent-manager",
+            )
+
+    def test_unknown_target_without_lifecycle_definition_is_not_treated_as_syncable(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            agent_config_path = temp_root / "config.toml"
+            agent_config_path.write_text('model = "gpt-5.4"\n', encoding="utf-8")
+
+            sync_mcp.manage_mcp_config(
+                {"mystery-agent": {"path": str(agent_config_path), "format": "toml"}},
+                {
+                    "augment-context-engine": {
+                        "enabled": True,
+                        "_declared_in_policy": True,
+                        "_sync_ready": True,
+                        "command": "auggie",
+                        "args": ["--mcp", "--mcp-auto-workspace"],
+                        "env": {"AUGMENT_SESSION_AUTH": "token"},
+                    }
+                },
+                agent_defs={"claude-code": {"bin": "claude"}},
+            )
+
+            updated = tomllib.loads(agent_config_path.read_text(encoding="utf-8"))
+            self.assertNotIn("mcp_servers", updated)
 
     def test_managed_toml_server_with_env_subtable_is_not_misclassified_as_user_owned(self):
         with tempfile.TemporaryDirectory() as temp_dir:

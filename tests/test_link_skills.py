@@ -16,11 +16,14 @@ SPEC.loader.exec_module(link_skills)
 
 
 class LinkSkillsTests(unittest.TestCase):
-    def test_codex_is_not_globally_active_without_lifecycle_definition(self):
-        self.assertFalse(link_skills.is_active_skill_target("codex", "/tmp/.codex/skills", {}))
+    def test_codex_is_globally_active_without_lifecycle_definition(self):
+        self.assertTrue(link_skills.is_active_skill_target("codex", "/tmp/.codex/skills", {}))
 
-    def test_resolve_repo_link_targets_adds_codex_only_for_explicit_repo_scope(self):
-        active_targets = {"claude-code": "/tmp/claude"}
+    def test_resolve_repo_link_targets_includes_globally_active_codex_for_unscoped_repo(self):
+        active_targets = {
+            "claude-code": "/tmp/claude",
+            "codex": "/tmp/.codex/skills",
+        }
         all_targets = {
             "claude-code": "/tmp/claude",
             "codex": "/tmp/.codex/skills",
@@ -29,7 +32,7 @@ class LinkSkillsTests(unittest.TestCase):
         unscoped_targets = link_skills.resolve_repo_link_targets(active_targets, all_targets, None)
         scoped_targets = link_skills.resolve_repo_link_targets(active_targets, all_targets, ["codex"])
 
-        self.assertEqual(unscoped_targets, {"claude-code": "/tmp/claude"})
+        self.assertEqual(unscoped_targets, active_targets)
         self.assertEqual(scoped_targets, {"codex": "/tmp/.codex/skills"})
 
     def test_resolve_repo_link_targets_reports_explicit_codex_targets(self):
@@ -236,6 +239,59 @@ class LinkSkillsTests(unittest.TestCase):
             self.assertIn("未声明策略，跳过", combined)
             self.assertNotIn("准备下载到托管缓存", combined)
 
+    def test_dry_run_missing_repo_with_skill_paths_does_not_fail(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            base_dir = temp_root / "skills"
+            target_dir = temp_root / "targets" / "codex"
+            target_dir.mkdir(parents=True)
+            config_path.write_text(
+                json.dumps({"skills": {"demo-skill": {"enabled": True}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "demo-skill": {
+                                "url": "https://example.invalid/repo.git",
+                                "skill_paths": ["bundle/frontend-skill"],
+                                "agents": ["codex"],
+                            }
+                        },
+                        "agents": {
+                            "codex": str(target_dir),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(base_dir),
+                    "--dry-run",
+                    "--yes",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertIn("本地仓库缺失，跳过 skill 枚举", combined)
+
     def test_missing_policy_repository_removes_existing_managed_links(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -293,6 +349,130 @@ class LinkSkillsTests(unittest.TestCase):
             self.assertFalse((target_dir / "my-skill").exists())
             self.assertIn("未声明策略，跳过", combined)
             self.assertIn("移除来自失效仓库的 skill 链接: my-skill", combined)
+
+    def test_missing_policy_repository_preserves_unmanaged_alias_link(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            base_dir = temp_root / "skills"
+            repo_dir = base_dir / "repositories" / "ignored-skill"
+            skill_dir = repo_dir / "bundle" / "my-skill"
+            target_dir = temp_root / "targets" / "claude"
+            target_dir.mkdir(parents=True)
+            repo_dir.mkdir(parents=True)
+            (repo_dir / ".git").mkdir()
+            (repo_dir / ".agent-manager-owned").write_text("true\n", encoding="utf-8")
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text("---\nname: my-skill\n---\n", encoding="utf-8")
+            alias_link = target_dir / "alias-skill"
+            alias_link.symlink_to(skill_dir)
+            config_path.write_text('{"skills": {}}', encoding="utf-8")
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "ignored-skill": {
+                                "url": "https://example.invalid/repo.git",
+                                "agents": ["claude-code"],
+                            }
+                        },
+                        "agents": {
+                            "claude-code": str(target_dir),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(base_dir),
+                    "--yes",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertTrue(alias_link.exists(), combined)
+            self.assertTrue(alias_link.is_symlink(), combined)
+
+    def test_managed_skill_name_replaces_local_directory_without_touching_other_names(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            base_dir = temp_root / "skills"
+            repo_dir = base_dir / "repositories" / "demo-skill"
+            skill_dir = repo_dir / "bundle" / "my-skill"
+            target_dir = temp_root / "targets" / "claude"
+            target_dir.mkdir(parents=True)
+            repo_dir.mkdir(parents=True)
+            (repo_dir / ".git").mkdir()
+            (repo_dir / ".agent-manager-owned").write_text("true\n", encoding="utf-8")
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text("---\nname: my-skill\n---\n", encoding="utf-8")
+            (target_dir / "my-skill").mkdir()
+            (target_dir / "my-skill" / "local.txt").write_text("keep? no\n", encoding="utf-8")
+            (target_dir / "user-skill").mkdir()
+            (target_dir / "user-skill" / "local.txt").write_text("keep\n", encoding="utf-8")
+            config_path.write_text(
+                json.dumps({"skills": {"demo-skill": {"enabled": True, "auto_update": False}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "demo-skill": {
+                                "url": "https://example.invalid/repo.git",
+                                "agents": ["claude-code"],
+                            }
+                        },
+                        "agents": {
+                            "claude-code": str(target_dir),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(base_dir),
+                    "--offline",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            managed_link = target_dir / "my-skill"
+            self.assertTrue(managed_link.is_symlink(), combined)
+            self.assertEqual(managed_link.resolve(), skill_dir.resolve())
+            self.assertTrue((target_dir / "user-skill").is_dir(), combined)
+            self.assertTrue((target_dir / "user-skill" / "local.txt").exists(), combined)
 
     def test_find_skills_uses_metadata_name_from_skill_md(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -545,7 +725,7 @@ class LinkSkillsTests(unittest.TestCase):
             self.assertTrue(codex_target.parent.exists(), combined)
             self.assertTrue((codex_target / "frontend-skill").is_symlink(), combined)
 
-    def test_unscoped_repository_removes_stale_codex_link(self):
+    def test_unscoped_repository_keeps_codex_link(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             config_path = temp_root / "config.json"
@@ -602,7 +782,7 @@ class LinkSkillsTests(unittest.TestCase):
 
             combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
-            self.assertFalse((codex_dir / "shared-skill").exists(), combined)
+            self.assertTrue((codex_dir / "shared-skill").exists(), combined)
 
     def test_ref_pin_is_honored_in_managed_cache(self):
         with tempfile.TemporaryDirectory() as temp_dir:

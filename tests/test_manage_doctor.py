@@ -1,6 +1,7 @@
 import shutil
 import tempfile
 import unittest
+import json
 from pathlib import Path
 from unittest import mock
 
@@ -46,3 +47,562 @@ class ManageDoctorReportTests(unittest.TestCase):
             self.assertIn("TOML parser", runtime_names)
             self.assertEqual(runtime_names["TOML parser"]["status"], "error")
             self.assertIn("tomli", runtime_names["TOML parser"]["message"])
+
+    def test_report_flags_existing_mcp_file_with_missing_managed_entries(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            codex_config = temp_home / ".codex" / "config.toml"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            codex_config.parent.mkdir(parents=True)
+            codex_config.write_text("[mcp_servers.user-owned]\ncommand = \"echo\"\n", encoding="utf-8")
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {\n    "codex": { "path": "%s", "format": "toml" }\n  },\n  "servers": {\n    "augment-context-engine": {\n      "command": "auggie",\n      "args": ["--mcp"],\n      "agents": ["codex"]\n    }\n  }\n}\n'
+                % codex_config,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            report = build_report(
+                root_dir=temp_root,
+                config_file=temp_root / "config" / "manager.json",
+                python_cmd="python3",
+            )
+
+            self.assertEqual(report["status"], "error")
+            mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
+            self.assertIn("Codex", mcp_names)
+            self.assertEqual(mcp_names["Codex"]["status"], "error")
+            self.assertIn("期望 1 个托管服务", mcp_names["Codex"]["message"])
+
+    def test_report_ignores_foreign_managed_by_marker_in_toml_mcp_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            codex_config = temp_home / ".codex" / "config.toml"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            codex_config.parent.mkdir(parents=True)
+            codex_config.write_text(
+                "\n".join(
+                    [
+                        "[mcp_servers.user-owned]",
+                        'command = "echo"',
+                        "args = []",
+                        "[mcp_servers.user-owned.env]",
+                        '_MANAGED_BY = "someone-else"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {\n    "codex": { "path": "%s", "format": "toml" }\n  },\n  "servers": {\n    "augment-context-engine": {\n      "command": "auggie",\n      "args": ["--mcp"],\n      "agents": ["codex"]\n    }\n  }\n}\n'
+                % codex_config,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            report = build_report(
+                root_dir=temp_root,
+                config_file=temp_root / "config" / "manager.json",
+                python_cmd="python3",
+            )
+
+            self.assertEqual(report["status"], "error")
+            mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
+            self.assertEqual(mcp_names["Codex"]["status"], "error")
+            self.assertIn("实际 0 个", mcp_names["Codex"]["message"])
+
+    def test_report_ignores_foreign_managed_by_marker_in_json_mcp_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            cursor_config = Path(temp_dir) / "cursor" / "mcp.json"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            cursor_config.parent.mkdir(parents=True)
+            cursor_config.write_text(
+                json.dumps(
+                    {
+                        "mcpServers": {
+                            "user-owned": {
+                                "command": "echo",
+                                "args": [],
+                                "env": {"_MANAGED_BY": "someone-else"},
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {\n    "cursor": { "path": "%s", "format": "json" }\n  },\n  "servers": {\n    "augment-context-engine": {\n      "command": "auggie",\n      "args": ["--mcp"],\n      "agents": ["cursor"]\n    }\n  }\n}\n'
+                % cursor_config,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            report = build_report(
+                root_dir=temp_root,
+                config_file=temp_root / "config" / "manager.json",
+                python_cmd="python3",
+            )
+
+            self.assertEqual(report["status"], "error")
+            mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
+            self.assertEqual(mcp_names["Cursor IDE"]["status"], "error")
+            self.assertIn("实际 0 个", mcp_names["Cursor IDE"]["message"])
+
+    def test_report_flags_wrong_managed_mcp_name_even_when_count_matches(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            codex_config = temp_home / ".codex" / "config.toml"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            codex_config.parent.mkdir(parents=True)
+            codex_config.write_text(
+                "\n".join(
+                    [
+                        "[mcp_servers.bad-mcp]",
+                        'command = "echo"',
+                        "args = []",
+                        "[mcp_servers.bad-mcp.env]",
+                        '_MANAGED_BY = "agent-manager"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {\n    "codex": { "path": "%s", "format": "toml" }\n  },\n  "servers": {\n    "augment-context-engine": {\n      "command": "auggie",\n      "args": ["--mcp"],\n      "agents": ["codex"]\n    }\n  }\n}\n'
+                % codex_config,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            report = build_report(
+                root_dir=temp_root,
+                config_file=temp_root / "config" / "manager.json",
+                python_cmd="python3",
+            )
+
+            self.assertEqual(report["status"], "error")
+            mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
+            self.assertEqual(mcp_names["Codex"]["status"], "error")
+            self.assertIn("augment-context-engine", mcp_names["Codex"]["message"])
+            self.assertIn("bad-mcp", mcp_names["Codex"]["message"])
+
+    def test_report_flags_missing_managed_skill_even_when_unmanaged_link_count_matches(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            target_dir = Path(temp_dir) / "targets" / "claude"
+            managed_repo = temp_root / "agent-skill" / "repositories" / "demo-repo"
+            managed_skill = managed_repo / "bundle" / "managed-skill"
+            external_skill = Path(temp_dir) / "external" / "user-skill"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            target_dir.mkdir(parents=True)
+            managed_skill.mkdir(parents=True)
+            (managed_repo / ".git").mkdir()
+            (managed_repo / ".agent-manager-owned").write_text("true\n", encoding="utf-8")
+            (managed_skill / "SKILL.md").write_text(
+                "---\nname: managed-skill\ndescription: Managed\n---\n\n# Managed\n",
+                encoding="utf-8",
+            )
+            external_skill.mkdir(parents=True)
+            (target_dir / "user-skill").symlink_to(external_skill)
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {\n    "demo-repo": { "enabled": true }\n  },\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "demo-repo": {
+                                "url": "https://example.invalid/repo.git",
+                                "agents": ["claude-code"],
+                            }
+                        },
+                        "agents": {
+                            "claude-code": str(target_dir),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{"servers": {}, "agent_paths": {}}',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            report = build_report(
+                root_dir=temp_root,
+                config_file=temp_root / "config" / "manager.json",
+                python_cmd="python3",
+            )
+
+            self.assertEqual(report["status"], "error")
+            skill_names = {entry["name"]: entry for entry in report["sections"]["skills"]}
+            self.assertEqual(skill_names["Claude Code"]["status"], "error")
+            self.assertIn("managed-skill", skill_names["Claude Code"]["message"])
+
+    def test_report_ignores_extra_unmanaged_skill_link_when_managed_targets_match(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            target_dir = Path(temp_dir) / "targets" / "claude"
+            managed_repo = temp_root / "agent-skill" / "repositories" / "demo-repo"
+            managed_skill = managed_repo / "bundle" / "managed-skill"
+            external_skill = Path(temp_dir) / "external" / "user-skill"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            target_dir.mkdir(parents=True)
+            managed_skill.mkdir(parents=True)
+            (managed_repo / ".git").mkdir()
+            (managed_repo / ".agent-manager-owned").write_text("true\n", encoding="utf-8")
+            (managed_skill / "SKILL.md").write_text(
+                "---\nname: managed-skill\ndescription: Managed\n---\n\n# Managed\n",
+                encoding="utf-8",
+            )
+            external_skill.mkdir(parents=True)
+            (target_dir / "managed-skill").symlink_to(managed_skill)
+            (target_dir / "user-skill").symlink_to(external_skill)
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {\n    "demo-repo": { "enabled": true }\n  },\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "demo-repo": {
+                                "url": "https://example.invalid/repo.git",
+                                "agents": ["claude-code"],
+                            }
+                        },
+                        "agents": {
+                            "claude-code": str(target_dir),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{"servers": {}, "agent_paths": {}}',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            report = build_report(
+                root_dir=temp_root,
+                config_file=temp_root / "config" / "manager.json",
+                python_cmd="python3",
+            )
+
+            skill_names = {entry["name"]: entry for entry in report["sections"]["skills"]}
+            self.assertEqual(skill_names["Claude Code"]["status"], "ok")
+            self.assertEqual(skill_names["Claude Code"]["message"], "1 个受管链接")
+
+    def test_report_flags_extra_managed_skill_link_not_declared_in_policy(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            target_dir = Path(temp_dir) / "targets" / "claude"
+            managed_repo = temp_root / "agent-skill" / "repositories" / "demo-repo"
+            managed_skill = managed_repo / "bundle" / "managed-skill"
+            extra_repo = temp_root / "agent-skill" / "repositories" / "old-repo"
+            extra_skill = extra_repo / "bundle" / "other-skill"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            target_dir.mkdir(parents=True)
+            managed_skill.mkdir(parents=True)
+            extra_skill.mkdir(parents=True)
+            (managed_repo / ".git").mkdir()
+            (managed_repo / ".agent-manager-owned").write_text("true\n", encoding="utf-8")
+            (extra_repo / ".git").mkdir()
+            (extra_repo / ".agent-manager-owned").write_text("true\n", encoding="utf-8")
+            (managed_skill / "SKILL.md").write_text(
+                "---\nname: managed-skill\ndescription: Managed\n---\n\n# Managed\n",
+                encoding="utf-8",
+            )
+            (extra_skill / "SKILL.md").write_text(
+                "---\nname: other-skill\ndescription: Old\n---\n\n# Old\n",
+                encoding="utf-8",
+            )
+            (target_dir / "managed-skill").symlink_to(managed_skill)
+            (target_dir / "other-skill").symlink_to(extra_skill)
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {\n    "demo-repo": { "enabled": true }\n  },\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "demo-repo": {
+                                "url": "https://example.invalid/repo.git",
+                                "agents": ["claude-code"],
+                            }
+                        },
+                        "agents": {
+                            "claude-code": str(target_dir),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{"servers": {}, "agent_paths": {}}',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            report = build_report(
+                root_dir=temp_root,
+                config_file=temp_root / "config" / "manager.json",
+                python_cmd="python3",
+            )
+
+            self.assertEqual(report["status"], "error")
+            skill_names = {entry["name"]: entry for entry in report["sections"]["skills"]}
+            self.assertEqual(skill_names["Claude Code"]["status"], "error")
+            self.assertIn("other-skill", skill_names["Claude Code"]["message"])
+
+    def test_report_flags_managed_mcp_content_drift_for_expected_server(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            codex_config = temp_home / ".codex" / "config.toml"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            codex_config.parent.mkdir(parents=True)
+            codex_config.write_text(
+                "\n".join(
+                    [
+                        "[mcp_servers.augment-context-engine]",
+                        'command = "echo"',
+                        'args = ["--wrong"]',
+                        "[mcp_servers.augment-context-engine.env]",
+                        '_MANAGED_BY = "agent-manager"',
+                        'AUGMENT_SESSION_AUTH = "resolved-token"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {\n    "codex": { "path": "%s", "format": "toml" }\n  },\n  "servers": {\n    "augment-context-engine": {\n      "command": "auggie",\n      "args": ["--mcp", "--mcp-auto-workspace"],\n      "env": { "AUGMENT_SESSION_AUTH": "${AUGMENT_SESSION_AUTH}" },\n      "agents": ["codex"]\n    }\n  }\n}\n'
+                % codex_config,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            report = build_report(
+                root_dir=temp_root,
+                config_file=temp_root / "config" / "manager.json",
+                python_cmd="python3",
+            )
+
+            self.assertEqual(report["status"], "error")
+            mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
+            self.assertEqual(mcp_names["Codex"]["status"], "error")
+            self.assertIn("augment-context-engine", mcp_names["Codex"]["message"])
+            self.assertIn("配置漂移", mcp_names["Codex"]["message"])
+
+    def test_report_accepts_resolved_secret_for_managed_mcp_server(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            codex_config = temp_home / ".codex" / "config.toml"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            codex_config.parent.mkdir(parents=True)
+            codex_config.write_text(
+                "\n".join(
+                    [
+                        "[mcp_servers.augment-context-engine]",
+                        'command = "auggie"',
+                        'args = ["--mcp", "--mcp-auto-workspace"]',
+                        "[mcp_servers.augment-context-engine.env]",
+                        '_MANAGED_BY = "agent-manager"',
+                        'AUGMENT_SESSION_AUTH = "resolved-token"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {\n    "codex": { "path": "%s", "format": "toml" }\n  },\n  "servers": {\n    "augment-context-engine": {\n      "command": "auggie",\n      "args": ["--mcp", "--mcp-auto-workspace"],\n      "env": { "AUGMENT_SESSION_AUTH": "${AUGMENT_SESSION_AUTH}" },\n      "agents": ["codex"]\n    }\n  }\n}\n'
+                % codex_config,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            report = build_report(
+                root_dir=temp_root,
+                config_file=temp_root / "config" / "manager.json",
+                python_cmd="python3",
+            )
+
+            self.assertEqual(report["status"], "healthy")
+            mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
+            self.assertEqual(mcp_names["Codex"]["status"], "ok")
+
+    def test_report_flags_unresolved_placeholder_in_managed_mcp_server(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            codex_config = temp_home / ".codex" / "config.toml"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            codex_config.parent.mkdir(parents=True)
+            codex_config.write_text(
+                "\n".join(
+                    [
+                        "[mcp_servers.augment-context-engine]",
+                        'command = "auggie"',
+                        'args = ["--mcp", "--mcp-auto-workspace"]',
+                        "[mcp_servers.augment-context-engine.env]",
+                        '_MANAGED_BY = "agent-manager"',
+                        'AUGMENT_SESSION_AUTH = "${AUGMENT_SESSION_AUTH}"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {\n    "codex": { "path": "%s", "format": "toml" }\n  },\n  "servers": {\n    "augment-context-engine": {\n      "command": "auggie",\n      "args": ["--mcp", "--mcp-auto-workspace"],\n      "env": { "AUGMENT_SESSION_AUTH": "${AUGMENT_SESSION_AUTH}" },\n      "agents": ["codex"]\n    }\n  }\n}\n'
+                % codex_config,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            report = build_report(
+                root_dir=temp_root,
+                config_file=temp_root / "config" / "manager.json",
+                python_cmd="python3",
+            )
+
+            self.assertEqual(report["status"], "error")
+            mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
+            self.assertEqual(mcp_names["Codex"]["status"], "error")
+            self.assertIn("配置漂移", mcp_names["Codex"]["message"])
+
+    def test_report_accepts_literal_mcp_value_containing_placeholder_substring(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            codex_config = temp_home / ".codex" / "config.toml"
+            literal_value = "prefix-${USER}-suffix"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            codex_config.parent.mkdir(parents=True)
+            codex_config.write_text(
+                "\n".join(
+                    [
+                        "[mcp_servers.augment-context-engine]",
+                        'command = "auggie"',
+                        'args = ["--mcp"]',
+                        "[mcp_servers.augment-context-engine.env]",
+                        '_MANAGED_BY = "agent-manager"',
+                        f'PROMPT = "{literal_value}"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                json.dumps(
+                    {
+                        "agent_paths": {
+                            "codex": {"path": str(codex_config), "format": "toml"}
+                        },
+                        "servers": {
+                            "augment-context-engine": {
+                                "command": "auggie",
+                                "args": ["--mcp"],
+                                "env": {"PROMPT": literal_value},
+                                "agents": ["codex"],
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            report = build_report(
+                root_dir=temp_root,
+                config_file=temp_root / "config" / "manager.json",
+                python_cmd="python3",
+            )
+
+            self.assertEqual(report["status"], "healthy")
+            mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
+            self.assertEqual(mcp_names["Codex"]["status"], "ok")

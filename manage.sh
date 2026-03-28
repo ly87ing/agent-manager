@@ -93,7 +93,13 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
-[ -n "$cmd" ] || cmd="help"
+if [ -z "$cmd" ]; then
+    if [ -n "$DRY_RUN_FLAG" ] || [ -n "$OFFLINE_FLAG" ]; then
+        cmd="all"
+    else
+        cmd="help"
+    fi
+fi
 
 function read_lock_pid() {
     if [ -f "$LOCK_PID_FILE" ]; then
