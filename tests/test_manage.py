@@ -1349,9 +1349,13 @@ class ManageScriptTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (temp_root / "config" / "rules-targets.list").write_text(
-                "codex_global|global|rules/dist/codex/main.md|%s/.codex/rules/global.md\n" % temp_home,
+                "codex_global|global|rules/dist/codex/AGENTS.md|%s/.codex/AGENTS.md\n" % temp_home,
                 encoding="utf-8",
             )
+            (temp_home / ".codex").mkdir(parents=True, exist_ok=True)
+            legacy_path = temp_home / ".codex" / "rules" / "global.md"
+            legacy_path.parent.mkdir(parents=True, exist_ok=True)
+            legacy_path.write_text("legacy codex rule\n", encoding="utf-8")
 
             env = self._managed_env()
             env["HOME"] = str(temp_home)
@@ -1365,7 +1369,9 @@ class ManageScriptTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertTrue((temp_home / ".codex" / "rules" / "global.md").exists(), result.stdout + result.stderr)
+            self.assertTrue((temp_home / ".codex" / "AGENTS.md").exists(), result.stdout + result.stderr)
+            self.assertFalse(legacy_path.exists(), result.stdout + result.stderr)
+            self.assertEqual(len(list(legacy_path.parent.glob("global.md.bak.*"))), 1, result.stdout + result.stderr)
 
     def test_skills_upgrade_dispatches_upgrade_script(self):
         with tempfile.TemporaryDirectory() as temp_dir:

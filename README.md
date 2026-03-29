@@ -57,6 +57,8 @@
 ### 6. Rules 源码与分发分层
 - **可编辑源码**：跨 Agent 的共享规则片段维护在 `agent-rule/rules/src/`。
 - **生成产物**：面向各 Agent 实际分发的规则文件维护在 `agent-rule/rules/dist/`，由构建脚本生成。
+- **Codex 原生文件名**：Codex 全局规则产物生成为 `agent-rule/rules/dist/codex/AGENTS.md`，并同步到 `~/.codex/AGENTS.md`；其它 Agent 继续使用各自的 `main.md` / `global.md` 布局。
+- **迁移清理**：Codex 同步到 `~/.codex/AGENTS.md` 时，会清理旧的 `~/.codex/rules/global.md`，避免遗留冲突规则。
 - **分发清单**：`config/rules-targets.list` 只引用 `rules/dist/*` 产物，不直接引用源码片段。
 - **维护入口**：修改 `agent-rule/rules/src/` 后，先执行 `make rules-build`，再执行 `make rules:sync`。
 

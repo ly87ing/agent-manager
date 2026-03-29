@@ -25,6 +25,6 @@ Before executing work in a matching domain, read the corresponding module with y
 
 - **Generated Output & Artifact Hygiene:** For Playwright, generators, generated artifacts, or temporary debug output, read `modules/artifact-hygiene.md`.
 
-# Codex Adapter
+## Codex Guidance
 
 Use the shared rule core as the default policy. Prefer direct local verification, explicit file edits, and deterministic command usage over speculative narration.

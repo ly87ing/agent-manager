@@ -9,6 +9,13 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class RuleLayoutTests(unittest.TestCase):
+    DIST_FILENAMES = {
+        "codex": "AGENTS.md",
+        "claude": "main.md",
+        "gemini": "main.md",
+        "ide": "main.md",
+    }
+
     def _copy_repo(self, temp_dir: str) -> Path:
         temp_root = Path(temp_dir) / "repo"
         shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", ".git", ".worktrees"))
@@ -39,9 +46,13 @@ class RuleLayoutTests(unittest.TestCase):
 
             combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
-            for target in ("codex", "claude", "gemini", "ide"):
-                path = temp_root / "agent-rule" / "rules" / "dist" / target / "main.md"
+            for target, filename in self.DIST_FILENAMES.items():
+                path = temp_root / "agent-rule" / "rules" / "dist" / target / filename
                 self.assertTrue(path.exists(), f"missing built rule for {target}: {combined}")
+            self.assertFalse(
+                (temp_root / "agent-rule" / "rules" / "dist" / "codex" / "main.md").exists(),
+                combined,
+            )
 
     def test_build_copies_shared_modules(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -72,8 +83,8 @@ class RuleLayoutTests(unittest.TestCase):
 
     def test_built_outputs_include_required_shared_clauses(self):
         expected_clause = "Use Chinese (Simplified) for interactions and generated content."
-        for target in ("codex", "claude", "gemini", "ide"):
-            content = (ROOT / "agent-rule" / "rules" / "dist" / target / "main.md").read_text(encoding="utf-8")
+        for target, filename in self.DIST_FILENAMES.items():
+            content = (ROOT / "agent-rule" / "rules" / "dist" / target / filename).read_text(encoding="utf-8")
             self.assertIn(expected_clause, content, target)
             self.assertIn("modules/artifact-hygiene.md", content, target)
 

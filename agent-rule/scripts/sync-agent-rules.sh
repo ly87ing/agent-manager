@@ -120,6 +120,24 @@ remove_target() {
   fi
 }
 
+cleanup_legacy_target_paths() {
+  local name="$1"
+  local dst_abs="$2"
+  local legacy_path=""
+
+  case "$name" in
+    codex_global)
+      if [ "$dst_abs" = "$HOME/.codex/AGENTS.md" ]; then
+        legacy_path="$HOME/.codex/rules/global.md"
+      fi
+      ;;
+  esac
+
+  if [ -n "$legacy_path" ] && { [ -e "$legacy_path" ] || [ -L "$legacy_path" ]; }; then
+    remove_target "$legacy_path"
+  fi
+}
+
 replace_existing_target() {
   local target="$1"
   if [ "$backup_enabled" = "true" ]; then
@@ -250,6 +268,7 @@ while IFS='|' read -r name group src_rel dst_pat; do
 
   if [ "$mode" == "copy" ]; then sync_copy "$src_abs" "$dst_abs"
   else sync_symlink "$src_abs" "$dst_abs"; fi
+  cleanup_legacy_target_paths "$name" "$dst_abs"
   echo "INFO: [AGENT: Rules] $name 同步完成"
 done < "$manifest_path"
 

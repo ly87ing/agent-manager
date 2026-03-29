@@ -1,3 +1,4 @@
+import os
 import json
 import shutil
 import subprocess
@@ -10,6 +11,66 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class SyncRulesTests(unittest.TestCase):
+    def test_codex_sync_supports_native_agents_filename(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            (temp_home / ".codex").mkdir(parents=True)
+            target_path = temp_home / ".codex" / "AGENTS.md"
+            (temp_root / "config" / "rules-targets.list").write_text(
+                f"codex_global|global|rules/dist/codex/AGENTS.md|{target_path}\n",
+                encoding="utf-8",
+            )
+
+            env = os.environ.copy()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh"), "--target", "codex_global"],
+                cwd=temp_root / "agent-rule",
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            source_path = temp_root / "agent-rule" / "rules" / "dist" / "codex" / "AGENTS.md"
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertTrue(target_path.exists(), combined)
+            self.assertEqual(target_path.read_text(encoding="utf-8"), source_path.read_text(encoding="utf-8"))
+
+    def test_codex_sync_removes_legacy_global_rule_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            (temp_home / ".codex" / "rules").mkdir(parents=True)
+            legacy_path = temp_home / ".codex" / "rules" / "global.md"
+            legacy_path.write_text("legacy codex rule\n", encoding="utf-8")
+            target_path = temp_home / ".codex" / "AGENTS.md"
+            (temp_root / "config" / "rules-targets.list").write_text(
+                f"codex_global|global|rules/dist/codex/AGENTS.md|{target_path}\n",
+                encoding="utf-8",
+            )
+
+            env = os.environ.copy()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh"), "--target", "codex_global"],
+                cwd=temp_root / "agent-rule",
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertTrue(target_path.exists(), combined)
+            self.assertFalse(legacy_path.exists(), combined)
+            self.assertEqual(len(list(legacy_path.parent.glob("global.md.bak.*"))), 1, combined)
+
     def test_dry_run_does_not_create_directory_targets(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
@@ -242,7 +303,8 @@ class SyncRulesTests(unittest.TestCase):
 
     def test_manifest_targets_built_rule_outputs(self):
         manifest = (ROOT / "config" / "rules-targets.list").read_text(encoding="utf-8")
-        self.assertIn("codex_global|global|rules/dist/codex/main.md|~/.codex/rules/global.md", manifest)
+        self.assertIn("codex_global|global|rules/dist/codex/AGENTS.md|~/.codex/AGENTS.md", manifest)
+        self.assertNotIn("codex_global|global|rules/dist/codex/main.md|~/.codex/rules/global.md", manifest)
         self.assertIn("claude_global|global|rules/dist/claude/main.md|~/.claude/rules/global.md", manifest)
         self.assertIn("gemini_global|global|rules/dist/gemini/main.md|~/.gemini/rules/global.md", manifest)
         self.assertIn("cursor_global|global|rules/dist/ide/main.md|~/.cursor/rules/global.md", manifest)

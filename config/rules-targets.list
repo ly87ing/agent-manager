@@ -1,5 +1,5 @@
 # name|group|source|target
-codex_global|global|rules/dist/codex/main.md|~/.codex/rules/global.md
+codex_global|global|rules/dist/codex/AGENTS.md|~/.codex/AGENTS.md
 claude_global|global|rules/dist/claude/main.md|~/.claude/rules/global.md
 opencode_global|global|rules/dist/ide/main.md|~/.config/opencode/rules/global.md
 gemini_global|global|rules/dist/gemini/main.md|~/.gemini/rules/global.md

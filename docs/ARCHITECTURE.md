@@ -131,7 +131,10 @@ graph TD
 
 - `agent-rule/rules/src/` 保存可编辑的共享 core、共享 modules 和 agent adapters。
 - `agent-rule/scripts/build-agent-rules.py` 负责把 `src/` 片段生成到 `agent-rule/rules/dist/`。
+- `agent-rule/rules/dist/codex/AGENTS.md` 是 Codex 的原生全局规则产物；其它 Agent 仍保持 `dist/<target>/main.md`。
 - `config/rules-targets.list` 只声明 `agent-rule/rules/dist/` 下的可分发产物到各 Agent 目标路径的映射。
+- Codex 的全局目标路径是 `~/.codex/AGENTS.md`；其它 Agent 在本阶段不调整目标文件名。
+- Codex 规则同步会清理历史遗留的 `~/.codex/rules/global.md`，避免新旧全局规则并存。
 - `manage.sh rules:build` / `make rules-build` 用于刷新 `dist/`。
 - `manage.sh rules:sync` / `make rules:sync` 用于把 `dist/` 产物同步到目标 Agent 目录。
 - `scripts/evals/run_rule_effectiveness_eval.py` 读取 `scripts/evals/fixtures/` 中的离线 JSON fixture，校验题目与 run artifact schema，并输出稳定的规则效果摘要；`make eval-rules` 是其推荐入口。
