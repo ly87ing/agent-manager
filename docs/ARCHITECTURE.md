@@ -137,6 +137,8 @@ graph TD
 - Codex 规则同步会清理历史遗留的 `~/.codex/rules/global.md`，避免新旧全局规则并存。
 - `manage.sh rules:build` / `make rules-build` 用于刷新 `dist/`。
 - `manage.sh rules:sync` / `make rules:sync` 用于把 `dist/` 产物同步到目标 Agent 目录。
+- `config/claude-hooks.json` 定义仓库级 Claude hooks，`agent-rule/scripts/sync-claude-hooks.py` 会把它渲染到 `.claude/settings.json`。
+- `manage.sh claude:hooks:sync` / `make claude-hooks-sync` 用于刷新项目内的 Claude hooks 配置。
 - `scripts/evals/run_rule_effectiveness_eval.py` 读取 `scripts/evals/fixtures/` 中的离线 JSON fixture，校验题目与 run artifact schema，并输出稳定的规则效果摘要；`make eval-rules` 是其推荐入口。
 
 ---

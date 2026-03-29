@@ -1,4 +1,4 @@
-.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\:list restore backups\:restore logs rules-build rules\:build rules-sync rules\:sync skills-link skills\:link skills\:upgrade mcp-sync mcp\:sync mcp-prepare mcp\:prepare tools-sync tools\:sync terminal-sync terminal\:sync dry-run clean-logs offline eval-rules
+.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\:list restore backups\:restore logs rules-build rules\:build rules-sync rules\:sync skills-link skills\:link skills\:upgrade mcp-sync mcp\:sync mcp-prepare mcp\:prepare tools-sync tools\:sync terminal-sync terminal\:sync claude-hooks-sync claude\:hooks\:sync dry-run clean-logs offline eval-rules
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -130,6 +130,12 @@ terminal-sync:
 
 terminal\:sync:
 	@./manage.sh terminal:sync
+
+claude-hooks-sync:
+	@./manage.sh claude:hooks:sync
+
+claude\:hooks\:sync:
+	@./manage.sh claude:hooks:sync
 
 # 预览模式 (仅输出计划动作，跳过远端副作用)
 dry-run:

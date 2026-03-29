@@ -60,6 +60,7 @@
 - **Codex 原生文件名**：Codex 全局规则产物生成为 `agent-rule/rules/dist/codex/AGENTS.md`，并同步到 `~/.codex/AGENTS.md`；其它 Agent 继续使用各自的 `main.md` / `global.md` 布局。
 - **迁移清理**：Codex 同步到 `~/.codex/AGENTS.md` 时，会清理旧的 `~/.codex/rules/global.md`，避免遗留冲突规则。
 - **Claude 记忆分层**：根目录 `CLAUDE.md` 只保留仓库级高频记忆，`agent-rule/CLAUDE.md` 和 `tests/CLAUDE.md` 承载目录级维护细节。
+- **Claude hooks**：`config/claude-hooks.json` 生成仓库级 `.claude/settings.json`，用 `make claude-hooks-sync` 刷新 deterministic hook 配置。
 - **分发清单**：`config/rules-targets.list` 只引用 `rules/dist/*` 产物，不直接引用源码片段。
 - **维护入口**：修改 `agent-rule/rules/src/` 后，先执行 `make rules-build`，再执行 `make rules:sync`。
 
