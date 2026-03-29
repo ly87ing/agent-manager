@@ -1373,6 +1373,70 @@ class ManageScriptTests(unittest.TestCase):
             self.assertFalse(legacy_path.exists(), result.stdout + result.stderr)
             self.assertEqual(len(list(legacy_path.parent.glob("global.md.bak.*"))), 1, result.stdout + result.stderr)
 
+    def test_rules_sync_updates_all_active_rule_targets(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            (temp_home / ".claude" / "rules").mkdir(parents=True, exist_ok=True)
+            (temp_home / ".codex").mkdir(parents=True, exist_ok=True)
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n'
+                '  "agents": {\n'
+                '    "claude-code": { "enabled": true }\n'
+                '  },\n'
+                '  "tools": {},\n'
+                '  "skills": {\n'
+                '    "openai-frontend-skill": { "enabled": true }\n'
+                '  },\n'
+                '  "mcp": {}\n'
+                '}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n'
+                '  "repositories": {\n'
+                '    "openai-frontend-skill": {\n'
+                '      "url": "https://example.invalid/openai-frontend-skill.git",\n'
+                '      "agents": ["codex"]\n'
+                '    }\n'
+                '  },\n'
+                '  "agents": {\n'
+                '    "codex": "%s/.codex/skills"\n'
+                '  }\n'
+                '}\n' % temp_home,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {},\n  "servers": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text(
+                (
+                    "claude_global|global|rules/dist/claude/main.md|%s/.claude/rules/global.md\n"
+                    "codex_global|global|rules/dist/codex/AGENTS.md|%s/.codex/AGENTS.md\n"
+                )
+                % (temp_home, temp_home),
+                encoding="utf-8",
+            )
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "rules:sync"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertTrue((temp_home / ".claude" / "rules" / "global.md").exists(), combined)
+            self.assertTrue((temp_home / ".codex" / "AGENTS.md").exists(), combined)
+
     def test_skills_upgrade_dispatches_upgrade_script(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"

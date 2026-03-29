@@ -11,6 +11,54 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class SyncRulesTests(unittest.TestCase):
+    def test_multiple_target_filters_sync_all_requested_targets(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+
+            (temp_home / ".claude" / "rules").mkdir(parents=True)
+            (temp_home / ".codex").mkdir(parents=True)
+            claude_target = temp_home / ".claude" / "rules" / "global.md"
+            codex_target = temp_home / ".codex" / "AGENTS.md"
+            (temp_root / "config" / "rules-targets.list").write_text(
+                (
+                    f"claude_global|global|rules/dist/claude/main.md|{claude_target}\n"
+                    f"codex_global|global|rules/dist/codex/AGENTS.md|{codex_target}\n"
+                ),
+                encoding="utf-8",
+            )
+
+            env = os.environ.copy()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [
+                    str(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh"),
+                    "--target",
+                    "claude_global",
+                    "--target",
+                    "codex_global",
+                ],
+                cwd=temp_root / "agent-rule",
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertTrue(claude_target.exists(), combined)
+            self.assertTrue(codex_target.exists(), combined)
+            self.assertEqual(
+                claude_target.read_text(encoding="utf-8"),
+                (temp_root / "agent-rule" / "rules" / "dist" / "claude" / "main.md").read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                codex_target.read_text(encoding="utf-8"),
+                (temp_root / "agent-rule" / "rules" / "dist" / "codex" / "AGENTS.md").read_text(encoding="utf-8"),
+            )
+
     def test_codex_sync_supports_native_agents_filename(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"

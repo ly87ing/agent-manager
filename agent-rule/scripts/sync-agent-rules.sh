@@ -5,14 +5,14 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/sync-agent-rules.sh [--mode copy|symlink] [--group all|global] [--target NAME] [--dry-run] [--no-backup]
+  ./scripts/sync-agent-rules.sh [--mode copy|symlink] [--group all|global] [--target NAME ...] [--dry-run] [--no-backup]
 EOF
   exit 1
 }
 
 mode="copy"
 group_filter="all"
-target_filter=""
+target_filters=()
 dry_run="false"
 backup_enabled="true"
 
@@ -20,7 +20,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --mode) mode="$2"; shift 2 ;;
     --group) group_filter="$2"; shift 2 ;;
-    --target) target_filter="$2"; shift 2 ;;
+    --target) target_filters+=("$2"); shift 2 ;;
     --dry-run) dry_run="true"; shift ;;
     --no-backup) backup_enabled="false"; shift ;;
     *) usage ;;
@@ -67,6 +67,20 @@ expand_home() {
     value="${HOME}"
   fi
   printf '%s' "$value"
+}
+
+target_selected() {
+  local name="$1"
+  local target
+  if [ "${#target_filters[@]}" -eq 0 ]; then
+    return 0
+  fi
+  for target in "${target_filters[@]}"; do
+    if [ "$target" = "$name" ]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 validate_manifest_entry() {
@@ -241,7 +255,7 @@ while IFS='|' read -r name group src_rel dst_pat; do
 
   [[ -z "$name" || "$name" == \#* ]] && continue
   [[ "$group_filter" != "all" && "$group_filter" != "$group" ]] && continue
-  [[ -n "$target_filter" && "$target_filter" != "$name" ]] && continue
+  target_selected "$name" || continue
 
   validate_manifest_entry "$name" "$src_rel" "$dst_pat" || exit 1
 done < "$manifest_path"
@@ -256,7 +270,7 @@ while IFS='|' read -r name group src_rel dst_pat; do
 
   [[ -z "$name" || "$name" == \#* ]] && continue
   [[ "$group_filter" != "all" && "$group_filter" != "$group" ]] && continue
-  [[ -n "$target_filter" && "$target_filter" != "$name" ]] && continue
+  target_selected "$name" || continue
 
   src_abs="$repo_root/$src_rel"
   dst_abs="$(expand_home "$dst_pat")"
