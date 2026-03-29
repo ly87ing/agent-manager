@@ -84,6 +84,12 @@
 - `make restore`: 交互式回滚历史快照。
 - `make ui`: 启动交互式配置管理中心。
 
+## Repo-native Guidance
+
+- 根目录 `AGENTS.md` 提供仓库级的 setup、测试命令、done-when 规则与生成文件边界。
+- `agent-rule/AGENTS.md` 只覆盖 `agent-rule/rules/src/` 到 `agent-rule/rules/dist/` 的编辑和重建流程。
+- `tests/AGENTS.md` 只覆盖测试命令、fixtures 和 contract-test 的写法。
+
 ## Secrets 初始化
 
 - 不再内置固定的 secrets 仓库地址。

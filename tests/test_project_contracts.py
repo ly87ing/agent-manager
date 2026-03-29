@@ -180,6 +180,43 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("agent-rule/rules/dist/", readme)
         self.assertIn("make rules-build", readme)
 
+    def test_repo_root_agents_guidance_covers_setup_tests_done_when_and_generated_boundaries(self):
+        agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("Python 3 and make", agents)
+        self.assertIn("python3 -m unittest discover -s tests -p 'test*.py' -v", agents)
+        self.assertIn("make smoke", agents)
+        self.assertIn("done-when", agents)
+        self.assertIn("generated", agents)
+        self.assertIn("agent-rule/rules/dist/", agents)
+
+    def test_agent_rule_agents_guidance_stays_narrow_and_build_focused(self):
+        agents = (ROOT / "agent-rule" / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("agent-rule/rules/src/", agents)
+        self.assertIn("agent-rule/rules/dist/", agents)
+        self.assertIn("make rules-build", agents)
+        self.assertIn("make rules:sync", agents)
+        self.assertNotIn("python3 -m unittest discover -s tests -p 'test*.py' -v", agents)
+        self.assertNotIn("## Setup", agents)
+        self.assertNotIn("## Test commands", agents)
+        self.assertNotIn("## done-when", agents)
+        self.assertNotIn("README and docs match the implemented behavior.", agents)
+        self.assertNotIn("No generated file was hand-edited.", agents)
+        self.assertNotIn("make smoke", agents)
+
+    def test_tests_agents_guidance_stays_narrow_and_contract_focused(self):
+        agents = (ROOT / "tests" / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("python3 -m unittest tests.test_project_contracts -v", agents)
+        self.assertIn("fixtures", agents)
+        self.assertIn("contract", agents)
+        self.assertIn("keep each test focused", agents)
+        self.assertNotIn("make rules-build", agents)
+        self.assertNotIn("## Setup", agents)
+        self.assertNotIn("## Test commands", agents)
+        self.assertNotIn("## done-when", agents)
+        self.assertNotIn("README and docs match the implemented behavior.", agents)
+        self.assertNotIn("No generated file was hand-edited.", agents)
+        self.assertNotIn("make smoke", agents)
+
     def test_architecture_dry_run_contract_mentions_local_maintenance_writes(self):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
         self.assertIn("cleanup", architecture)
