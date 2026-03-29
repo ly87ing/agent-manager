@@ -98,6 +98,49 @@ class SyncRulesTests(unittest.TestCase):
                 ),
             )
 
+    def test_repo_root_targets_replace_existing_files_without_backup_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            cursor_target = temp_root / ".cursor" / "rules" / "agent-manager.mdc"
+            copilot_target = temp_root / ".github" / "copilot-instructions.md"
+            cursor_target.parent.mkdir(parents=True, exist_ok=True)
+            copilot_target.parent.mkdir(parents=True, exist_ok=True)
+            cursor_target.write_text("stale cursor\n", encoding="utf-8")
+            copilot_target.write_text("stale copilot\n", encoding="utf-8")
+            (temp_root / "config" / "rules-targets.list").write_text(
+                (
+                    "cursor_global|global|rules/dist/cursor/agent-manager.mdc|{{REPO_ROOT}}/.cursor/rules/agent-manager.mdc\n"
+                    "copilot_global|global|rules/dist/copilot/copilot-instructions.md|{{REPO_ROOT}}/.github/copilot-instructions.md\n"
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [str(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh")],
+                cwd=temp_root / "agent-rule",
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertEqual(
+                cursor_target.read_text(encoding="utf-8"),
+                (temp_root / "agent-rule" / "rules" / "dist" / "cursor" / "agent-manager.mdc").read_text(
+                    encoding="utf-8"
+                ),
+            )
+            self.assertEqual(
+                copilot_target.read_text(encoding="utf-8"),
+                (temp_root / "agent-rule" / "rules" / "dist" / "copilot" / "copilot-instructions.md").read_text(
+                    encoding="utf-8"
+                ),
+            )
+            self.assertEqual(list(cursor_target.parent.glob("agent-manager.mdc.bak.*")), [], combined)
+            self.assertEqual(list(copilot_target.parent.glob("copilot-instructions.md.bak.*")), [], combined)
+
     def test_codex_sync_supports_native_agents_filename(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"

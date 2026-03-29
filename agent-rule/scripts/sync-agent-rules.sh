@@ -112,6 +112,13 @@ validate_manifest_entry() {
 
 backup_target() {
   local target="$1"
+  if is_repo_native_target "$target"; then
+    echo "remove(existing repo-native): $target"
+    if [ "$dry_run" = "false" ]; then
+      rm -rf "$target"
+    fi
+    return 0
+  fi
   if [ "$backup_enabled" != "true" ] || { [ ! -e "$target" ] && [ ! -L "$target" ]; }; then return 0; fi
   local timestamp="$(date +%Y%m%d%H%M%S)"
   local backup_path="${target}.bak.${timestamp}"
@@ -181,6 +188,18 @@ cleanup_legacy_target_paths() {
   fi
 }
 
+cleanup_repo_native_backups() {
+  local target="$1"
+  local stale_backup=""
+  is_repo_native_target "$target" || return 0
+
+  for stale_backup in "${target}.bak."*; do
+    if [ -e "$stale_backup" ] || [ -L "$stale_backup" ]; then
+      remove_target "$stale_backup"
+    fi
+  done
+}
+
 replace_existing_target() {
   local target="$1"
   if [ "$backup_enabled" = "true" ]; then
@@ -197,6 +216,18 @@ is_ephemeral_artifact() {
   local target_name
   target_name="$(basename "$1")"
   [[ "$target_name" == *.bak.* || "$target_name" == *.tmp_* ]]
+}
+
+is_repo_native_target() {
+  local target="$1"
+  case "$target" in
+    "$workspace_root"/.cursor/*|"$workspace_root"/.github/*|"$workspace_root"/AGENTS.md|"$workspace_root"/CLAUDE.md|"$workspace_root"/GEMINI.md)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 sync_copy() {
@@ -311,6 +342,7 @@ while IFS='|' read -r name group src_rel dst_pat; do
 
   if [ "$mode" == "copy" ]; then sync_copy "$src_abs" "$dst_abs"
   else sync_symlink "$src_abs" "$dst_abs"; fi
+  cleanup_repo_native_backups "$dst_abs"
   cleanup_legacy_target_paths "$name" "$dst_abs"
   echo "INFO: [AGENT: Rules] $name 同步完成"
 done < "$manifest_path"

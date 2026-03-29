@@ -1,3 +1,1 @@
-# Claude Adapter
-
-Keep project memory concise and project-specific. Do not duplicate shared standing policy in Claude-specific memory files unless the repository needs a local override.
+- Keep Claude-specific memory concise and project-specific; add only repository-local overrides not already covered by shared rules.
