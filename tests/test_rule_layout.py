@@ -97,3 +97,7 @@ class RuleLayoutTests(unittest.TestCase):
             combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
             self.assertEqual(self._dist_snapshot(ROOT), self._dist_snapshot(temp_root))
+
+    def test_legacy_global_rule_tree_has_been_removed(self):
+        legacy_root = ROOT / "agent-rule" / "rules" / "global"
+        self.assertFalse(legacy_root.exists(), "legacy rules/global tree should not exist once dist is the only artifact source")

@@ -126,7 +126,7 @@ class SyncRulesTests(unittest.TestCase):
             target_dir = temp_root / "tmp-target" / "modules"
             self.assertFalse(target_dir.exists())
             (temp_root / "config" / "rules-targets.list").write_text(
-                f"test_modules|global|rules/global/modules|{target_dir}\n",
+                f"test_modules|global|rules/dist/modules|{target_dir}\n",
                 encoding="utf-8",
             )
 
@@ -146,12 +146,12 @@ class SyncRulesTests(unittest.TestCase):
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             target_dir = temp_root / "tmp-target" / "modules"
-            source_dir = temp_root / "agent-rule" / "rules" / "global" / "modules"
+            source_dir = temp_root / "agent-rule" / "rules" / "dist" / "modules"
             shutil.copytree(source_dir, target_dir)
             stale_file = target_dir / "stale.md"
             stale_file.write_text("stale\n", encoding="utf-8")
             (temp_root / "config" / "rules-targets.list").write_text(
-                f"test_modules|global|rules/global/modules|{target_dir}\n",
+                f"test_modules|global|rules/dist/modules|{target_dir}\n",
                 encoding="utf-8",
             )
 
@@ -171,12 +171,12 @@ class SyncRulesTests(unittest.TestCase):
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             target_dir = temp_root / "tmp-target" / "modules"
-            source_dir = temp_root / "agent-rule" / "rules" / "global" / "modules"
+            source_dir = temp_root / "agent-rule" / "rules" / "dist" / "modules"
             shutil.copytree(source_dir, target_dir)
             stale_backup = target_dir / "frontend.md.bak.20260318123628"
             stale_backup.write_text("old backup\n", encoding="utf-8")
             (temp_root / "config" / "rules-targets.list").write_text(
-                f"test_modules|global|rules/global/modules|{target_dir}\n",
+                f"test_modules|global|rules/dist/modules|{target_dir}\n",
                 encoding="utf-8",
             )
 
@@ -201,7 +201,7 @@ class SyncRulesTests(unittest.TestCase):
             target_dir.parent.mkdir(parents=True)
             target_dir.symlink_to(temp_root / "missing-modules")
             (temp_root / "config" / "rules-targets.list").write_text(
-                f"test_modules|global|rules/global/modules|{target_dir}\n",
+                f"test_modules|global|rules/dist/modules|{target_dir}\n",
                 encoding="utf-8",
             )
 
@@ -229,7 +229,7 @@ class SyncRulesTests(unittest.TestCase):
             target_dir.parent.mkdir(parents=True)
             target_dir.symlink_to(real_dir)
             (temp_root / "config" / "rules-targets.list").write_text(
-                f"test_modules|global|rules/global/modules|{target_dir}\n",
+                f"test_modules|global|rules/dist/modules|{target_dir}\n",
                 encoding="utf-8",
             )
 
@@ -256,7 +256,7 @@ class SyncRulesTests(unittest.TestCase):
             target_path.parent.mkdir(parents=True)
             target_path.symlink_to(temp_root / "missing-target.md")
             (temp_root / "config" / "rules-targets.list").write_text(
-                f"test_main|global|rules/global/main.md|{target_path}\n",
+                f"test_main|global|rules/dist/claude/main.md|{target_path}\n",
                 encoding="utf-8",
             )
 
@@ -272,7 +272,7 @@ class SyncRulesTests(unittest.TestCase):
                 check=False,
             )
 
-            source_path = temp_root / "agent-rule" / "rules" / "global" / "main.md"
+            source_path = temp_root / "agent-rule" / "rules" / "dist" / "claude" / "main.md"
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(target_path.is_symlink(), result.stdout + result.stderr)
             self.assertEqual(target_path.resolve(), source_path.resolve())
@@ -284,7 +284,7 @@ class SyncRulesTests(unittest.TestCase):
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             bad_target = "relative/rules/global.md"
             (temp_root / "config" / "rules-targets.list").write_text(
-                f"bad_target|global|rules/global/main.md|{bad_target}\n",
+                f"bad_target|global|rules/dist/claude/main.md|{bad_target}\n",
                 encoding="utf-8",
             )
 
@@ -303,7 +303,7 @@ class SyncRulesTests(unittest.TestCase):
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             target_dir = temp_root / "tmp-target" / "modules"
-            source_dir = temp_root / "agent-rule" / "rules" / "global" / "modules"
+            source_dir = temp_root / "agent-rule" / "rules" / "dist" / "modules"
             shutil.copytree(source_dir, target_dir)
             (target_dir / "stale.md").write_text("stale\n", encoding="utf-8")
 
@@ -328,7 +328,7 @@ class SyncRulesTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (temp_root / "config" / "rules-targets.list").write_text(
-                f"claude_modules|global|rules/global/modules|{target_dir}\n",
+                f"claude_modules|global|rules/dist/modules|{target_dir}\n",
                 encoding="utf-8",
             )
 
@@ -345,8 +345,8 @@ class SyncRulesTests(unittest.TestCase):
             self.assertIn("claude_modules", combined)
 
     def test_main_rule_points_to_actual_modules_distribution_path(self):
-        content = (ROOT / "agent-rule" / "rules" / "global" / "main.md").read_text(encoding="utf-8")
-        self.assertIn("~/.<agent>/rules/modules/architecture.md", content)
+        content = (ROOT / "agent-rule" / "rules" / "dist" / "claude" / "main.md").read_text(encoding="utf-8")
+        self.assertIn("read `modules/architecture.md`", content)
         self.assertNotIn("~/.<agent>/modules/architecture.md", content)
 
     def test_manifest_targets_built_rule_outputs(self):

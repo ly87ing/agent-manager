@@ -55,13 +55,14 @@
 - **终端配置默认关闭**：`sync` / `update` / `bootstrap` 默认不会改写 `~/.zshrc`、`~/.tmux.conf` 或 iTerm2 动态配置；如需启用，请在 `config/manager.local.json` 中设置 `"terminal": { "enabled": true }`。
 
 ### 6. Rules 源码与分发分层
-- **可编辑源码**：跨 Agent 的共享规则片段维护在 `agent-rule/rules/src/`。
-- **生成产物**：面向各 Agent 实际分发的规则文件维护在 `agent-rule/rules/dist/`，由构建脚本生成。
+- **可编辑源码**：跨 Agent 的共享规则片段只维护在 `agent-rule/rules/src/`，这是仓库内唯一可编辑的 rule source。
+- **生成产物**：面向各 Agent 实际分发的规则文件只维护在 `agent-rule/rules/dist/`，由构建脚本生成；仓库内不再保留第二套 `rules/global/*` source tree。
 - **Codex 原生文件名**：Codex 全局规则产物生成为 `agent-rule/rules/dist/codex/AGENTS.md`，并同步到 `~/.codex/AGENTS.md`；其它 Agent 继续使用各自的 `main.md` / `global.md` 布局。
 - **迁移清理**：Codex 同步到 `~/.codex/AGENTS.md` 时，会清理旧的 `~/.codex/rules/global.md`，避免遗留冲突规则。
 - **Claude 记忆分层**：根目录 `CLAUDE.md` 只保留仓库级高频记忆，`agent-rule/CLAUDE.md` 和 `tests/CLAUDE.md` 承载目录级维护细节。
 - **Claude hooks**：`config/claude-hooks.json` 生成仓库级 `.claude/settings.json`，用 `make claude-hooks-sync` 刷新 deterministic hook 配置。
-- **指令质量评测**：`make eval-rules` 现在同时输出任务成功率、verification、skill exposure 和 always-on instruction budget 指标。
+- **Codex hooks**：`config/codex-hooks.json` 生成仓库级 `.codex/hooks.json`，用 `make codex-hooks-sync` 刷新 deterministic Codex hook 配置。
+- **指令质量评测**：`make eval-rules` 现在同时输出任务成功率、verification、skill exposure 和 always-on instruction budget 指标，并强制校验 `min_case_count`、`required_agents`、`success / verification 阈值`。
 - **分发清单**：`config/rules-targets.list` 只引用 `rules/dist/*` 产物，不直接引用源码片段。
 - **维护入口**：修改 `agent-rule/rules/src/` 后，先执行 `make rules-build`，再执行 `make rules:sync`。
 
@@ -82,10 +83,11 @@
 - `make self-update`: 仅更新 agent-manager 仓库自身逻辑。
 - `make smoke`: 运行跨平台安全预演 smoke 校验，基于最小策略文件 `config/manager.smoke.json` 验证主入口命令的 dry-run / preview 契约。
 - `make eval-rules`: 运行离线规则效果评测，读取 `scripts/evals/fixtures/` 中的固定 JSON 样例并输出稳定的机器可读摘要。
-- `make instructions:check`: 共享指令、skills exposure 和项目内 hooks 变更前的统一回归门；会串行跑 instruction-related project contracts、rules budget/layout、skill exposure、rules sync / managed hooks 契约，以及 baseline 规则评测。
+- `make instructions:check`: 共享指令、skills exposure 和项目内 hooks 变更前的统一回归门（硬门禁）；会串行跑 instruction-related project contracts、rules budget/layout、skill exposure、rules sync / Claude/Codex managed hooks 契约、eval schema/metric 契约，以及 baseline 规则评测。
 - `make doctor` / `make status`: 执行全系统深度体检，并把 warning 细分为 `可选工具未就绪` 与 `托管产物尚未生成` 两类提示项；追加 `--json` 可输出机器可读诊断报告。
 - `make rules-build`: 从 `agent-rule/rules/src/` 生成 `agent-rule/rules/dist/` 下的可分发规则产物。
 - `make rules:sync`: 将 `agent-rule/rules/dist/` 中的规则产物分发到各 Agent 规则目录。
+- `make codex-hooks-sync`: 刷新仓库级 `.codex/hooks.json`。
 - `make fetch-models`: 探测并获取 API 端点支持的模型列表 (支持 OpenAI / Anthropic 格式)。
 - `make restore`: 交互式回滚历史快照。
 - `make ui`: 启动交互式配置管理中心。

@@ -645,7 +645,7 @@ class ManageScriptTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (temp_root / "config" / "rules-targets.list").write_text(
-                "claude_global|global|rules/global/main.md|%s/.claude/rules/global.md\n" % temp_home,
+                "claude_global|global|rules/dist/claude/main.md|%s/.claude/rules/global.md\n" % temp_home,
                 encoding="utf-8",
             )
 
@@ -694,7 +694,7 @@ class ManageScriptTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (temp_root / "config" / "rules-targets.list").write_text(
-                "claude_global|global|rules/global/main.md|%s/.claude/rules/global.md\n" % temp_home,
+                "claude_global|global|rules/dist/claude/main.md|%s/.claude/rules/global.md\n" % temp_home,
                 encoding="utf-8",
             )
 
@@ -743,7 +743,7 @@ class ManageScriptTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (temp_root / "config" / "rules-targets.list").write_text(
-                "claude_global|global|rules/global/main.md|%s/.claude/rules/global.md\n" % temp_home,
+                "claude_global|global|rules/dist/claude/main.md|%s/.claude/rules/global.md\n" % temp_home,
                 encoding="utf-8",
             )
 
@@ -844,7 +844,7 @@ class ManageScriptTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (temp_root / "config" / "rules-targets.list").write_text(
-                "claude_global|global|rules/global/main.md|%s/.claude/rules/global.md\n" % temp_home,
+                "claude_global|global|rules/dist/claude/main.md|%s/.claude/rules/global.md\n" % temp_home,
                 encoding="utf-8",
             )
             self._write_stub(
@@ -3272,7 +3272,7 @@ class ManageScriptTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (temp_root / "config" / "rules-targets.list").write_text(
-                "claude_modules|modules|rules/global/modules|%s\n" % rule_target,
+                "claude_modules|modules|rules/dist/modules|%s\n" % rule_target,
                 encoding="utf-8",
             )
 

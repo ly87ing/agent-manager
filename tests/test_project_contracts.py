@@ -41,6 +41,9 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("tests.test_skill_exposure_contracts", makefile)
         self.assertIn("tests.test_sync_rules", makefile)
         self.assertIn("tests.test_sync_claude_hooks", makefile)
+        self.assertIn("tests.test_sync_codex_hooks", makefile)
+        self.assertIn("tests.test_rule_effectiveness_eval", makefile)
+        self.assertIn("tests.test_skill_usage_metrics", makefile)
         self.assertIn(
             "run_rule_effectiveness_eval.py --baseline ./scripts/evals/fixtures/rule_effectiveness_baseline.json",
             makefile,
@@ -67,6 +70,8 @@ class ProjectContractTests(unittest.TestCase):
                 "backups:restore",
                 "rules:build",
                 "rules:sync",
+                "claude:hooks:sync",
+                "codex:hooks:sync",
                 "skills:link",
                 "skills:upgrade",
                 "mcp:sync",
@@ -91,6 +96,8 @@ class ProjectContractTests(unittest.TestCase):
                     "backups:restore",
                     "rules:build",
                     "rules:sync",
+                    "claude:hooks:sync",
+                    "codex:hooks:sync",
                     "skills:link",
                     "skills:upgrade",
                     "mcp:sync",
@@ -210,6 +217,15 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("共享指令", readme)
         self.assertIn("hooks", readme)
         self.assertIn("回归门", readme)
+        self.assertIn("硬门禁", readme)
+        self.assertIn("required_agents", readme)
+        self.assertIn("success / verification 阈值", readme)
+
+    def test_readme_documents_codex_hooks_workflow(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("config/codex-hooks.json", readme)
+        self.assertIn(".codex/hooks.json", readme)
+        self.assertIn("make codex-hooks-sync", readme)
 
     def test_repo_root_agents_guidance_covers_setup_tests_done_when_and_generated_boundaries(self):
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
@@ -271,6 +287,7 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("agent-rule/scripts/build-agent-rules.py", architecture)
         self.assertIn("agent-rule/rules/src/", architecture)
         self.assertIn("agent-rule/rules/dist/", architecture)
+        self.assertIn("不再保留第二条平行的规则文本流", architecture)
 
     def test_architecture_documents_instruction_quality_regression_target(self):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
@@ -278,6 +295,16 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("共享指令", architecture)
         self.assertIn("skills exposure", architecture)
         self.assertIn("managed hooks", architecture)
+        self.assertIn("硬门禁", architecture)
+        self.assertIn("required_agents", architecture)
+        self.assertIn("success / verification", architecture)
+
+    def test_architecture_documents_codex_hooks_pipeline(self):
+        architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+        self.assertIn("config/codex-hooks.json", architecture)
+        self.assertIn("agent-rule/scripts/sync-codex-hooks.py", architecture)
+        self.assertIn(".codex/hooks.json", architecture)
+        self.assertIn("make codex-hooks-sync", architecture)
 
     def test_claude_memory_stays_project_specific(self):
         memory = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")

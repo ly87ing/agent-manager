@@ -95,8 +95,39 @@ def require_non_negative_number(mapping: dict, key: str, label: str, index: int)
     return value
 
 
-def load_cases(path: Path) -> list[dict]:
+def load_case_suite(path: Path) -> tuple[dict, list[dict]]:
     payload = load_json_object(path, "cases")
+    requirements = payload.get("requirements")
+    if not isinstance(requirements, dict):
+        raise ValueError("cases.requirements must be an object")
+
+    min_case_count = requirements.get("min_case_count")
+    if not isinstance(min_case_count, int) or isinstance(min_case_count, bool) or min_case_count <= 0:
+        raise ValueError("cases.requirements.min_case_count must be a positive integer")
+
+    required_agents = requirements.get("required_agents")
+    if not isinstance(required_agents, list) or not required_agents:
+        raise ValueError("cases.requirements.required_agents must be a non-empty list")
+    normalized_agents = []
+    for index, agent_name in enumerate(required_agents):
+        if not isinstance(agent_name, str) or not agent_name.strip():
+            raise ValueError(f"cases.requirements.required_agents[{index}] must be a non-empty string")
+        normalized_agents.append(agent_name)
+
+    min_success_rate = requirements.get("min_success_rate")
+    if not isinstance(min_success_rate, (int, float)) or isinstance(min_success_rate, bool):
+        raise ValueError("cases.requirements.min_success_rate must be a number")
+    min_success_rate = float(min_success_rate)
+    if not 0.0 <= min_success_rate <= 1.0:
+        raise ValueError("cases.requirements.min_success_rate must be between 0 and 1")
+
+    min_verification_rate = requirements.get("min_verification_rate")
+    if not isinstance(min_verification_rate, (int, float)) or isinstance(min_verification_rate, bool):
+        raise ValueError("cases.requirements.min_verification_rate must be a number")
+    min_verification_rate = float(min_verification_rate)
+    if not 0.0 <= min_verification_rate <= 1.0:
+        raise ValueError("cases.requirements.min_verification_rate must be between 0 and 1")
+
     cases = payload.get("cases")
     if not isinstance(cases, list):
         raise ValueError("cases must contain a list named 'cases'")
@@ -113,7 +144,21 @@ def load_cases(path: Path) -> list[dict]:
             raise ValueError(f"duplicate case_id: {case_id}")
         seen_case_ids.add(case_id)
         normalized.append({"id": case_id, **case})
-    return normalized
+
+    return (
+        {
+            "min_case_count": min_case_count,
+            "required_agents": normalized_agents,
+            "min_success_rate": min_success_rate,
+            "min_verification_rate": min_verification_rate,
+        },
+        normalized,
+    )
+
+
+def load_cases(path: Path) -> list[dict]:
+    _, cases = load_case_suite(path)
+    return cases
 
 
 def load_runs(path: Path) -> list[dict]:
@@ -258,6 +303,7 @@ def measure_always_on_instruction_tokens_by_agent() -> dict[str, int]:
 
 
 def grade_rule_effectiveness(
+    requirements: dict,
     cases: list[dict],
     runs: list[dict],
     available_skill_count_by_agent: dict[str, int],
@@ -311,15 +357,40 @@ def grade_rule_effectiveness(
     if case_count == 0:
         raise ValueError("cases list must not be empty")
 
+    if case_count < requirements["min_case_count"]:
+        raise ValueError(
+            f"case_count {case_count} is below cases.requirements.min_case_count {requirements['min_case_count']}"
+        )
+
+    evaluated_agents = sorted({run["agent"] for run in runs if run["agent"]})
+    missing_agents = sorted(set(requirements["required_agents"]) - set(evaluated_agents))
+    if missing_agents:
+        raise ValueError(
+            f"required_agents coverage missing: {', '.join(missing_agents)}"
+        )
+
+    success_rate = success_count / case_count
+    verification_rate = verification_count / case_count
+    if success_rate < requirements["min_success_rate"]:
+        raise ValueError(
+            f"success_rate {success_rate} is below cases.requirements.min_success_rate {requirements['min_success_rate']}"
+        )
+    if verification_rate < requirements["min_verification_rate"]:
+        raise ValueError(
+            "verification_rate "
+            f"{verification_rate} is below cases.requirements.min_verification_rate {requirements['min_verification_rate']}"
+        )
+
     return {
         "case_count": case_count,
-        "success_rate": success_count / case_count,
-        "verification_rate": verification_count / case_count,
+        "success_rate": success_rate,
+        "verification_rate": verification_rate,
         "avg_prompt_tokens": total_prompt_tokens / case_count,
         "avg_duration_s": total_duration_s / case_count,
         "avg_file_reads": total_file_reads / case_count,
         "avg_tool_calls": total_tool_calls / case_count,
         "avg_triggered_skill_count": total_triggered_skill_count / case_count,
+        "evaluated_agents": evaluated_agents,
         "available_skill_count_by_agent": available_skill_count_by_agent,
         "always_on_instruction_tokens_by_agent": always_on_instruction_tokens_by_agent,
         "cases": graded_cases,
@@ -349,11 +420,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        cases = load_cases(args.cases)
+        requirements, cases = load_case_suite(args.cases)
         runs = load_runs(args.baseline)
         available_skill_count_by_agent = load_available_skill_count_by_agent(args.skills_config)
         always_on_instruction_tokens_by_agent = measure_always_on_instruction_tokens_by_agent()
         summary = grade_rule_effectiveness(
+            requirements,
             cases,
             runs,
             available_skill_count_by_agent,

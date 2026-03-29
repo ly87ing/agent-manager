@@ -1295,6 +1295,8 @@ case "$cmd" in
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" ./scripts/sync-agent-rules.sh "${rule_args[@]}" $DRY_RUN_FLAG ;;
     claude:hooks:sync)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" "$PYTHON_CMD" ./scripts/sync-claude-hooks.py $DRY_RUN_FLAG ;;
+    codex:hooks:sync)
+        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" "$PYTHON_CMD" ./scripts/sync-codex-hooks.py $DRY_RUN_FLAG ;;
     skills:link)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" link_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG ;;
     skills:upgrade)
@@ -1390,6 +1392,7 @@ case "$cmd" in
         echo -e "  ${BORDER_GRAY}rules:build${NC}     从 agent-rule/rules/src/ 生成可分发的 dist 规则产物"
         echo -e "  ${BORDER_GRAY}rules:sync${NC}      独立执行规则与系统级 prompt 指令向各个 Agent 的拷贝或软链接分发"
         echo -e "  ${BORDER_GRAY}claude:hooks:sync${NC} 独立刷新仓库级 Claude hooks 到 .claude/settings.json"
+        echo -e "  ${BORDER_GRAY}codex:hooks:sync${NC} 独立刷新仓库级 Codex hooks 到 .codex/hooks.json"
         echo -e "  ${BORDER_GRAY}skills:link${NC}     独立执行全局或系统级专业技能代码集到 Agent 沙盒空间的映射配置与软链接"
         echo -e "  ${BORDER_GRAY}skills:upgrade${NC}  显式解析并回写 skill 仓库的最新可审计版本（仅 release/tag，失败即停止）"
         echo -e "  ${BORDER_GRAY}tools:sync${NC}      独立同步或安装全局统一增强工具链条"

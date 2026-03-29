@@ -50,12 +50,18 @@ class SkillUsageMetricsTests(unittest.TestCase):
                 "opencode": 15,
             },
         )
-        self.assertEqual(summary["avg_triggered_skill_count"], 1.5)
+        self.assertEqual(summary["avg_triggered_skill_count"], 1.25)
         self.assertEqual(summary["always_on_instruction_tokens_by_agent"], self._expected_instruction_tokens_by_agent())
         self.assertEqual(
             [(case["case_id"], case["agent"], case["triggered_skill_count"]) for case in summary["cases"]],
             [
                 ("add-make-target", "codex", 1),
+                ("doctor-flags-unmaterialized-rules", "codex", 1),
+                ("manifest-targets-dist-artifacts", "codex", 1),
+                ("prevent-dist-edit-drift", "claude-code", 1),
+                ("rule-budget-regression-guard", "claude-code", 2),
+                ("scoped-memory-contract", "claude-code", 1),
+                ("sync-codex-hooks", "codex", 1),
                 ("validate-fixture-schema", "claude-code", 2),
             ],
         )
@@ -69,6 +75,12 @@ class SkillUsageMetricsTests(unittest.TestCase):
             cases_path.write_text(
                 json.dumps(
                     {
+                        "requirements": {
+                            "min_case_count": 1,
+                            "required_agents": ["codex"],
+                            "min_success_rate": 1.0,
+                            "min_verification_rate": 1.0,
+                        },
                         "cases": [
                             {
                                 "id": "single-case",

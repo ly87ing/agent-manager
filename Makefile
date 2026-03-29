@@ -1,4 +1,4 @@
-.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\:list restore backups\:restore logs rules-build rules\:build rules-sync rules\:sync skills-link skills\:link skills\:upgrade mcp-sync mcp\:sync mcp-prepare mcp\:prepare tools-sync tools\:sync terminal-sync terminal\:sync claude-hooks-sync claude\:hooks\:sync dry-run clean-logs offline eval-rules instructions-check instructions\:check
+.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\:list restore backups\:restore logs rules-build rules\:build rules-sync rules\:sync skills-link skills\:link skills\:upgrade mcp-sync mcp\:sync mcp-prepare mcp\:prepare tools-sync tools\:sync terminal-sync terminal\:sync claude-hooks-sync claude\:hooks\:sync codex-hooks-sync codex\:hooks\:sync dry-run clean-logs offline eval-rules instructions-check instructions\:check
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -137,6 +137,12 @@ claude-hooks-sync:
 claude\:hooks\:sync:
 	@./manage.sh claude:hooks:sync
 
+codex-hooks-sync:
+	@./manage.sh codex:hooks:sync
+
+codex\:hooks\:sync:
+	@./manage.sh codex:hooks:sync
+
 # 预览模式 (仅输出计划动作，跳过远端副作用)
 dry-run:
 	@./manage.sh plan
@@ -147,7 +153,7 @@ eval-rules:
 
 # 指令质量回归门 (共享指令 / skills exposure / managed hooks)
 instructions-check:
-	@python3 -m unittest tests.test_project_contracts tests.test_rule_budgets tests.test_rule_layout tests.test_skill_exposure_contracts tests.test_sync_rules tests.test_sync_claude_hooks -v
+	@python3 -m unittest tests.test_project_contracts tests.test_rule_budgets tests.test_rule_layout tests.test_skill_exposure_contracts tests.test_sync_rules tests.test_sync_claude_hooks tests.test_sync_codex_hooks tests.test_rule_effectiveness_eval tests.test_skill_usage_metrics -v
 	@python3 ./scripts/evals/run_rule_effectiveness_eval.py --baseline ./scripts/evals/fixtures/rule_effectiveness_baseline.json
 
 instructions\:check: instructions-check
