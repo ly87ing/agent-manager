@@ -76,6 +76,7 @@
 - `make plan`: 预演一次完整 `bootstrap`。
 - `make self-update`: 仅更新 agent-manager 仓库自身逻辑。
 - `make smoke`: 运行跨平台安全预演 smoke 校验，基于最小策略文件 `config/manager.smoke.json` 验证主入口命令的 dry-run / preview 契约。
+- `make eval-rules`: 运行离线规则效果评测，读取 `scripts/evals/fixtures/` 中的固定 JSON 样例并输出稳定的机器可读摘要。
 - `make doctor` / `make status`: 执行全系统深度体检，并把 warning 细分为 `可选工具未就绪` 与 `托管产物尚未生成` 两类提示项；追加 `--json` 可输出机器可读诊断报告。
 - `make rules-build`: 从 `agent-rule/rules/src/` 生成 `agent-rule/rules/dist/` 下的可分发规则产物。
 - `make rules:sync`: 将 `agent-rule/rules/dist/` 中的规则产物分发到各 Agent 规则目录。

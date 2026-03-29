@@ -1,4 +1,4 @@
-.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\:list restore backups\:restore logs rules-build rules\:build rules-sync rules\:sync skills-link skills\:link skills\:upgrade mcp-sync mcp\:sync mcp-prepare mcp\:prepare tools-sync tools\:sync terminal-sync terminal\:sync dry-run clean-logs offline
+.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\:list restore backups\:restore logs rules-build rules\:build rules-sync rules\:sync skills-link skills\:link skills\:upgrade mcp-sync mcp\:sync mcp-prepare mcp\:prepare tools-sync tools\:sync terminal-sync terminal\:sync dry-run clean-logs offline eval-rules
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -134,6 +134,10 @@ terminal\:sync:
 # 预览模式 (仅输出计划动作，跳过远端副作用)
 dry-run:
 	@./manage.sh plan
+
+# 离线规则效果评测 (读取本地 fixtures 并输出稳定 JSON 摘要)
+eval-rules:
+	@python3 ./scripts/evals/run_rule_effectiveness_eval.py
 
 help:
 	@./manage.sh help

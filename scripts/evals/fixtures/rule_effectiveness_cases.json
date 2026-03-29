@@ -1,0 +1,16 @@
+{
+  "cases": [
+    {
+      "id": "add-make-target",
+      "title": "Add a make target that runs the eval harness offline",
+      "prompt": "Introduce a deterministic make eval-rules entrypoint that reads local fixtures and prints a JSON summary.",
+      "tags": ["make", "offline", "eval"]
+    },
+    {
+      "id": "validate-fixture-schema",
+      "title": "Reject malformed JSON fixtures before grading",
+      "prompt": "Validate the rule effectiveness fixture schema and fail fast when a required field is missing.",
+      "tags": ["json", "validation", "tests"]
+    }
+  ]
+}

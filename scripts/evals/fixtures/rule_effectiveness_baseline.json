@@ -1,0 +1,22 @@
+{
+  "runs": [
+    {
+      "case_id": "add-make-target",
+      "success": true,
+      "verified": true,
+      "prompt_tokens": 128,
+      "duration_s": 4.5,
+      "file_reads": 5,
+      "tool_calls": 7
+    },
+    {
+      "case_id": "validate-fixture-schema",
+      "success": false,
+      "verified": false,
+      "prompt_tokens": 72,
+      "duration_s": 2.5,
+      "file_reads": 3,
+      "tool_calls": 5
+    }
+  ]
+}

@@ -134,6 +134,7 @@ graph TD
 - `config/rules-targets.list` 只声明 `agent-rule/rules/dist/` 下的可分发产物到各 Agent 目标路径的映射。
 - `manage.sh rules:build` / `make rules-build` 用于刷新 `dist/`。
 - `manage.sh rules:sync` / `make rules:sync` 用于把 `dist/` 产物同步到目标 Agent 目录。
+- `scripts/evals/run_rule_effectiveness_eval.py` 读取 `scripts/evals/fixtures/` 中的离线 JSON fixture，校验题目与 run artifact schema，并输出稳定的规则效果摘要；`make eval-rules` 是其推荐入口。
 
 ---
 
