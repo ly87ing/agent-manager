@@ -325,6 +325,14 @@ def validate_repo_agent_scope(repo_name, config, skills):
     if config.get("agents") is None and len(skills) > 1:
         raise SkillAgentScopeError(f"{repo_name}: 多 skill 仓库必须显式声明 agents，禁止使用 agents: null")
 
+
+def validate_repo_skill_count(repo_name, config):
+    skill_count = config.get("skill_count")
+    if skill_count is None:
+        return
+    if not isinstance(skill_count, int) or isinstance(skill_count, bool) or skill_count <= 0:
+        raise ValueError(f"{repo_name}: skill_count 必须是正整数")
+
 def create_link(source, link, dry_run=False):
     if dry_run: return
     source, link = Path(source).resolve(), Path(link)
@@ -529,6 +537,10 @@ def main():
     for name, r_def in REPOS.items():
         if name in policy_cfg: r_def.update(policy_cfg[name])
         r_def["agents"] = canonicalize_agent_list(r_def.get("agents"))
+        validate_repo_skill_count(name, r_def)
+        unknown_agents = [agent_name for agent_name in (r_def["agents"] or []) if agent_name not in AGENT_TARGETS]
+        if unknown_agents:
+            raise ValueError(f"{name}: agents 包含未声明的 target: {', '.join(sorted(unknown_agents))}")
 
     base_dir = Path(args.base_dir).resolve()
     repo_base_dir = get_managed_repo_base(base_dir)

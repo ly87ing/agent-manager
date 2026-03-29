@@ -2,6 +2,8 @@
   "runs": [
     {
       "case_id": "add-make-target",
+      "agent": "codex",
+      "triggered_skills": ["frontend-skill"],
       "success": true,
       "verified": true,
       "prompt_tokens": 128,
@@ -11,6 +13,8 @@
     },
     {
       "case_id": "validate-fixture-schema",
+      "agent": "claude-code",
+      "triggered_skills": ["writing-plans", "verification-before-completion"],
       "success": false,
       "verified": false,
       "prompt_tokens": 72,

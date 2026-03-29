@@ -4,13 +4,16 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 from pathlib import Path
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent.parent
 DEFAULT_CASES_PATH = SCRIPT_DIR / "fixtures" / "rule_effectiveness_cases.json"
 DEFAULT_BASELINE_PATH = SCRIPT_DIR / "fixtures" / "rule_effectiveness_baseline.json"
+DEFAULT_SKILLS_PATH = REPO_ROOT / "config" / "skills.json"
 
 
 def load_json_object(path: Path, label: str) -> dict:
@@ -41,6 +44,29 @@ def require_bool(mapping: dict, key: str, label: str, index: int) -> bool:
     if not isinstance(value, bool):
         raise ValueError(f"{label}[{index}].{key} must be a boolean")
     return value
+
+
+def require_optional_string(mapping: dict, key: str, label: str, index: int) -> str | None:
+    value = mapping.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{label}[{index}].{key} must be a non-empty string")
+    return value
+
+
+def require_optional_string_list(mapping: dict, key: str, label: str, index: int) -> list[str]:
+    value = mapping.get(key)
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{label}[{index}].{key} must be a list of non-empty strings")
+    normalized = []
+    for item_index, item in enumerate(value):
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"{label}[{index}].{key}[{item_index}] must be a non-empty string")
+        normalized.append(item)
+    return normalized
 
 
 def require_number(mapping: dict, key: str, label: str, index: int) -> float:
@@ -101,6 +127,8 @@ def load_runs(path: Path) -> list[dict]:
         if not isinstance(run, dict):
             raise ValueError(f"runs[{index}] must be a JSON object")
         case_id = require_string(run, "case_id", "runs", index)
+        agent = require_optional_string(run, "agent", "runs", index)
+        triggered_skills = require_optional_string_list(run, "triggered_skills", "runs", index)
         success = require_bool(run, "success", "runs", index)
         verified = require_bool(run, "verified", "runs", index)
         prompt_tokens = require_non_negative_int(run, "prompt_tokens", "runs", index)
@@ -110,6 +138,8 @@ def load_runs(path: Path) -> list[dict]:
         normalized.append(
             {
                 "case_id": case_id,
+                "agent": agent,
+                "triggered_skills": triggered_skills,
                 "success": success,
                 "verified": verified,
                 "prompt_tokens": prompt_tokens,
@@ -131,7 +161,108 @@ def _index_runs(runs: list[dict]) -> dict[str, dict]:
     return indexed
 
 
-def grade_rule_effectiveness(cases: list[dict], runs: list[dict]) -> dict:
+def load_available_skill_count_by_agent(path: Path) -> dict[str, int]:
+    payload = load_json_object(path, "skills")
+    repositories = payload.get("repositories")
+    agents = payload.get("agents")
+    if not isinstance(repositories, dict):
+        raise ValueError("skills must contain an object named 'repositories'")
+    if not isinstance(agents, dict):
+        raise ValueError("skills must contain an object named 'agents'")
+
+    counts = {agent_name: 0 for agent_name in sorted(agents)}
+    repo_root = path.resolve().parent.parent
+    skills_repo_root = repo_root / "agent-skill" / "repositories"
+    for repo_name, repo in repositories.items():
+        if not isinstance(repo, dict):
+            raise ValueError(f"skills.repositories.{repo_name} must be an object")
+        skill_count = repo.get("skill_count")
+        if not isinstance(skill_count, int) or isinstance(skill_count, bool) or skill_count <= 0:
+            raise ValueError(f"skills.repositories.{repo_name}.skill_count must be a positive integer")
+        actual_skill_count = measure_repo_skill_count(repo_name, repo, skills_repo_root)
+        if actual_skill_count is not None and actual_skill_count != skill_count:
+            raise ValueError(
+                f"skills.repositories.{repo_name}.skill_count mismatch: config={skill_count} actual={actual_skill_count}"
+            )
+        allowed_agents = repo.get("agents")
+        if allowed_agents is None:
+            target_agents = list(counts)
+        else:
+            if not isinstance(allowed_agents, list) or not allowed_agents:
+                raise ValueError(f"skills.repositories.{repo_name}.agents must be a non-empty list when present")
+            target_agents = []
+            for index, agent_name in enumerate(allowed_agents):
+                if not isinstance(agent_name, str) or not agent_name.strip():
+                    raise ValueError(
+                        f"skills.repositories.{repo_name}.agents[{index}] must be a non-empty string"
+                    )
+                if agent_name not in counts:
+                    raise ValueError(
+                        f"skills.repositories.{repo_name}.agents[{index}] references unknown agent: {agent_name}"
+                    )
+                target_agents.append(agent_name)
+        for agent_name in target_agents:
+            counts[agent_name] += skill_count
+    return counts
+
+
+def measure_repo_skill_count(repo_name: str, repo: dict, skills_repo_root: Path) -> int | None:
+    repo_path = skills_repo_root / repo_name
+    if not repo_path.exists():
+        return None
+    raw_paths = repo.get("skill_paths")
+    search_paths = [repo_path]
+    if raw_paths is not None:
+        if not isinstance(raw_paths, list) or not raw_paths:
+            raise ValueError(f"skills.repositories.{repo_name}.skill_paths must be a non-empty list when present")
+        search_paths = []
+        for index, raw_path in enumerate(raw_paths):
+            if not isinstance(raw_path, str) or not raw_path.strip():
+                raise ValueError(
+                    f"skills.repositories.{repo_name}.skill_paths[{index}] must be a non-empty string"
+                )
+            search_path = (repo_path / raw_path).resolve(strict=False)
+            if search_path != repo_path and repo_path not in search_path.parents:
+                raise ValueError(f"skills.repositories.{repo_name}.skill_paths[{index}] escapes the repository")
+            if not search_path.exists() or not search_path.is_dir():
+                raise ValueError(
+                    f"skills.repositories.{repo_name}.skill_paths[{index}] must point to an existing directory"
+                )
+            search_paths.append(search_path)
+
+    skill_count = 0
+    for search_path in search_paths:
+        for root, dirs, files in os.walk(search_path):
+            dirs[:] = sorted(d for d in dirs if d not in {".git", "node_modules", "__pycache__", "venv", ".venv"})
+            if "SKILL.md" in files:
+                skill_count += 1
+    return skill_count
+
+
+def measure_always_on_instruction_tokens_by_agent() -> dict[str, int]:
+    path_map = {
+        "codex": [REPO_ROOT / "agent-rule" / "rules" / "dist" / "codex" / "AGENTS.md", REPO_ROOT / "AGENTS.md"],
+        "claude-code": [
+            REPO_ROOT / "agent-rule" / "rules" / "dist" / "claude" / "main.md",
+            REPO_ROOT / "CLAUDE.md",
+        ],
+        "gemini-cli": [REPO_ROOT / "agent-rule" / "rules" / "dist" / "gemini" / "main.md"],
+        "cursor": [REPO_ROOT / "agent-rule" / "rules" / "dist" / "ide" / "main.md"],
+        "github-copilot": [REPO_ROOT / "agent-rule" / "rules" / "dist" / "ide" / "main.md"],
+        "opencode": [REPO_ROOT / "agent-rule" / "rules" / "dist" / "ide" / "main.md"],
+    }
+    return {
+        agent_name: sum(round(len(path.read_text(encoding="utf-8")) / 4) for path in paths)
+        for agent_name, paths in path_map.items()
+    }
+
+
+def grade_rule_effectiveness(
+    cases: list[dict],
+    runs: list[dict],
+    available_skill_count_by_agent: dict[str, int],
+    always_on_instruction_tokens_by_agent: dict[str, int],
+) -> dict:
     runs_by_case_id = _index_runs(runs)
 
     case_ids = {case["id"] for case in cases}
@@ -148,6 +279,7 @@ def grade_rule_effectiveness(cases: list[dict], runs: list[dict]) -> dict:
     total_duration_s = 0.0
     total_file_reads = 0.0
     total_tool_calls = 0.0
+    total_triggered_skill_count = 0.0
     success_count = 0
     verification_count = 0
 
@@ -159,10 +291,13 @@ def grade_rule_effectiveness(cases: list[dict], runs: list[dict]) -> dict:
         total_duration_s += run["duration_s"]
         total_file_reads += run["file_reads"]
         total_tool_calls += run["tool_calls"]
+        total_triggered_skill_count += len(run["triggered_skills"])
         graded_cases.append(
             {
                 "case_id": case["id"],
                 "title": case["title"],
+                "agent": run["agent"],
+                "triggered_skill_count": len(run["triggered_skills"]),
                 "success": run["success"],
                 "verified": run["verified"],
                 "prompt_tokens": run["prompt_tokens"],
@@ -184,6 +319,9 @@ def grade_rule_effectiveness(cases: list[dict], runs: list[dict]) -> dict:
         "avg_duration_s": total_duration_s / case_count,
         "avg_file_reads": total_file_reads / case_count,
         "avg_tool_calls": total_tool_calls / case_count,
+        "avg_triggered_skill_count": total_triggered_skill_count / case_count,
+        "available_skill_count_by_agent": available_skill_count_by_agent,
+        "always_on_instruction_tokens_by_agent": always_on_instruction_tokens_by_agent,
         "cases": graded_cases,
     }
 
@@ -197,6 +335,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_BASELINE_PATH,
         help="Path to the run artifact baseline fixture",
     )
+    parser.add_argument(
+        "--skills-config",
+        type=Path,
+        default=DEFAULT_SKILLS_PATH,
+        help="Path to the skills configuration used for skill exposure metrics",
+    )
     return parser
 
 
@@ -207,7 +351,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         cases = load_cases(args.cases)
         runs = load_runs(args.baseline)
-        summary = grade_rule_effectiveness(cases, runs)
+        available_skill_count_by_agent = load_available_skill_count_by_agent(args.skills_config)
+        always_on_instruction_tokens_by_agent = measure_always_on_instruction_tokens_by_agent()
+        summary = grade_rule_effectiveness(
+            cases,
+            runs,
+            available_skill_count_by_agent,
+            always_on_instruction_tokens_by_agent,
+        )
     except ValueError as exc:
         print(f"rule effectiveness eval: {exc}", file=sys.stderr)
         return 1
