@@ -51,6 +51,10 @@ class SkillPathSelectionError(ValueError):
     pass
 
 
+class SkillAgentScopeError(ValueError):
+    pass
+
+
 def run_cmd(cmd, cwd=None, timeout=300):
     """运行 shell 命令并返回结果"""
     try:
@@ -316,6 +320,11 @@ def find_configured_skills(repo_path, config):
         raise DuplicateSkillNameError(duplicate_conflicts)
     return found_skills
 
+
+def validate_repo_agent_scope(repo_name, config, skills):
+    if config.get("agents") is None and len(skills) > 1:
+        raise SkillAgentScopeError(f"{repo_name}: 多 skill 仓库必须显式声明 agents，禁止使用 agents: null")
+
 def create_link(source, link, dry_run=False):
     if dry_run: return
     source, link = Path(source).resolve(), Path(link)
@@ -579,6 +588,7 @@ def main():
             all_success = False
         try:
             skills = find_configured_skills(repo_path, config)
+            validate_repo_agent_scope(repo_name, config, skills)
         except DuplicateSkillNameError as exc:
             logging.error(f"[{repo_name}] {exc}")
             for skill_name in exc.skill_names:
@@ -597,7 +607,7 @@ def main():
             )
             all_success = False
             continue
-        except SkillPathSelectionError as exc:
+        except (SkillPathSelectionError, SkillAgentScopeError) as exc:
             logging.error(f"[{repo_name}] {exc}")
             remove_repo_skill_links(
                 repo_path,

@@ -239,3 +239,13 @@ class SyncRulesTests(unittest.TestCase):
         content = (ROOT / "agent-rule" / "rules" / "global" / "main.md").read_text(encoding="utf-8")
         self.assertIn("~/.<agent>/rules/modules/architecture.md", content)
         self.assertNotIn("~/.<agent>/modules/architecture.md", content)
+
+    def test_manifest_targets_built_rule_outputs(self):
+        manifest = (ROOT / "config" / "rules-targets.list").read_text(encoding="utf-8")
+        self.assertIn("codex_global|global|rules/dist/codex/main.md|~/.codex/rules/global.md", manifest)
+        self.assertIn("claude_global|global|rules/dist/claude/main.md|~/.claude/rules/global.md", manifest)
+        self.assertIn("gemini_global|global|rules/dist/gemini/main.md|~/.gemini/rules/global.md", manifest)
+        self.assertIn("cursor_global|global|rules/dist/ide/main.md|~/.cursor/rules/global.md", manifest)
+        self.assertIn("copilot_global|global|rules/dist/ide/main.md|~/.copilot/rules/global.md", manifest)
+        self.assertIn("opencode_global|global|rules/dist/ide/main.md|~/.config/opencode/rules/global.md", manifest)
+        self.assertIn("codex_modules|global|rules/dist/modules|~/.codex/rules/modules", manifest)

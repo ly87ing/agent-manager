@@ -54,6 +54,12 @@
 - **安全入口**：直接执行 `./manage.sh` 只显示帮助，不触发同步。
 - **终端配置默认关闭**：`sync` / `update` / `bootstrap` 默认不会改写 `~/.zshrc`、`~/.tmux.conf` 或 iTerm2 动态配置；如需启用，请在 `config/manager.local.json` 中设置 `"terminal": { "enabled": true }`。
 
+### 6. Rules 源码与分发分层
+- **可编辑源码**：跨 Agent 的共享规则片段维护在 `agent-rule/rules/src/`。
+- **生成产物**：面向各 Agent 实际分发的规则文件维护在 `agent-rule/rules/dist/`，由构建脚本生成。
+- **分发清单**：`config/rules-targets.list` 只引用 `rules/dist/*` 产物，不直接引用源码片段。
+- **维护入口**：修改 `agent-rule/rules/src/` 后，先执行 `make rules-build`，再执行 `make rules:sync`。
+
 ## 平台支持 (Platform Support)
 
 - 本项目当前以 **macOS** 为主要验证平台；**Linux** 路径保持 POSIX 兼容设计，但仍建议在目标环境自行回归验证。  
@@ -71,6 +77,8 @@
 - `make self-update`: 仅更新 agent-manager 仓库自身逻辑。
 - `make smoke`: 运行跨平台安全预演 smoke 校验，基于最小策略文件 `config/manager.smoke.json` 验证主入口命令的 dry-run / preview 契约。
 - `make doctor` / `make status`: 执行全系统深度体检，并把 warning 细分为 `可选工具未就绪` 与 `托管产物尚未生成` 两类提示项；追加 `--json` 可输出机器可读诊断报告。
+- `make rules-build`: 从 `agent-rule/rules/src/` 生成 `agent-rule/rules/dist/` 下的可分发规则产物。
+- `make rules:sync`: 将 `agent-rule/rules/dist/` 中的规则产物分发到各 Agent 规则目录。
 - `make fetch-models`: 探测并获取 API 端点支持的模型列表 (支持 OpenAI / Anthropic 格式)。
 - `make restore`: 交互式回滚历史快照。
 - `make ui`: 启动交互式配置管理中心。

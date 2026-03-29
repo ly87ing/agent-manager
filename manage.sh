@@ -1278,6 +1278,8 @@ case "$cmd" in
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json" $DRY_RUN_FLAG $OFFLINE_FLAG ;;
     mcp:prepare)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json" --prepare-runtime $DRY_RUN_FLAG $OFFLINE_FLAG ;;
+    rules:build)
+        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" "$PYTHON_CMD" ./scripts/build-agent-rules.py ;;
     rules:sync)
         if ! target_names="$(list_active_rule_targets)"; then
             exit 1
@@ -1383,6 +1385,7 @@ case "$cmd" in
         echo -e "${BOLD}${HDR_BLUE}=== 分步原子控制 (Atomic syncs) ===${NC}"
         echo -e "  ${BORDER_GRAY}mcp:sync${NC}        仅执行 MCP 配置注入（默认不 clone / build / pull secrets）"
         echo -e "  ${BORDER_GRAY}mcp:prepare${NC}     显式准备 MCP 运行时（clone/pull repo、同步 secrets、setup/build）"
+        echo -e "  ${BORDER_GRAY}rules:build${NC}     从 agent-rule/rules/src/ 生成可分发的 dist 规则产物"
         echo -e "  ${BORDER_GRAY}rules:sync${NC}      独立执行规则与系统级 prompt 指令向各个 Agent 的拷贝或软链接分发"
         echo -e "  ${BORDER_GRAY}skills:link${NC}     独立执行全局或系统级专业技能代码集到 Agent 沙盒空间的映射配置与软链接"
         echo -e "  ${BORDER_GRAY}skills:upgrade${NC}  显式解析并回写 skill 仓库的最新可审计版本（仅 release/tag，失败即停止）"

@@ -1096,6 +1096,9 @@ class LinkSkillsTests(unittest.TestCase):
             self.assertTrue((agent_target / "frontend-skill").is_symlink(), combined)
             self.assertFalse((agent_target / "other-skill").exists(), combined)
 
+    def test_scoped_repository_only_links_declared_skill_paths(self):
+        self.test_selected_skill_paths_limit_repo_exposure()
+
     def test_clone_failure_exits_non_zero(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -1498,7 +1501,7 @@ class LinkSkillsTests(unittest.TestCase):
 
             self.assertFalse(link.is_symlink())
 
-    def test_default_skill_catalog_includes_ui_ux_pro_max_repo_for_all_agents(self):
+    def test_default_skill_catalog_includes_ui_ux_pro_max_repo_with_explicit_agents(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
 
         repo = skills_config["repositories"].get("ui-ux-pro-max-skill")
@@ -1506,7 +1509,17 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertIsNotNone(repo)
         self.assertEqual(repo["url"], "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill")
         self.assertEqual(repo["commit"], "07f4ef3ac2568c25a3b0c8ef5165a86abc3e56e4")
-        self.assertIsNone(repo["agents"])
+        self.assertEqual(repo["agents"], ["claude-code", "codex"])
+
+    def test_default_skill_catalog_includes_playwright_best_practices_repo_with_explicit_agents(self):
+        skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
+
+        repo = skills_config["repositories"].get("playwright-best-practices-skill")
+
+        self.assertIsNotNone(repo)
+        self.assertEqual(repo["url"], "https://github.com/currents-dev/playwright-best-practices-skill.git")
+        self.assertEqual(repo["commit"], "ef329e7e65149918e1ff0eed2cf7d2e6e6f9eb5b")
+        self.assertEqual(repo["agents"], ["claude-code", "codex", "cursor", "github-copilot", "opencode"])
 
     def test_default_skill_catalog_includes_superpowers_for_all_supported_agents(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))

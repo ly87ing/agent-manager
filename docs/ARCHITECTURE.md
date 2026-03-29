@@ -63,6 +63,7 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `agent-skill/link_skills.py`: Skill链接管理
 - `agent-mcp/sync_mcp.py`: MCP配置注入
 - `agent-terminal/sync_terminal.py`: 终端配置模板渲染与原子写入
+- `agent-rule/scripts/build-agent-rules.py`: Rules 源码片段构建为可分发产物
 - `agent-rule/scripts/sync-agent-rules.sh`: Rules文件分发（shell实现）
 
 其中 `agent-lifecycle/sync_agents.py` 需要明确区分三种状态：
@@ -125,6 +126,14 @@ graph TD
 - **终端配置默认关闭**：只有当有效策略中的 `terminal.enabled` 为 `true` 时，`sync` / `update` / `bootstrap` 才会触发终端配置同步；显式执行 `terminal:sync` 仍可单独运行。
 - **诊断双出口**：`doctor / status` 默认输出面向人的文本报告；追加 `--json` 时输出机器可读 JSON，不再需要从文本中抓取 warning 计数。
 - **最小 smoke 策略**：`scripts/ci-smoke.sh` 通过 `AGENT_MANAGER_BASE_CONFIG=config/manager.smoke.json` 运行安全预演，避免把默认全量策略带来的未物化提示项混进 CI 基线。
+
+### Rules 构建与分发流程
+
+- `agent-rule/rules/src/` 保存可编辑的共享 core、共享 modules 和 agent adapters。
+- `agent-rule/scripts/build-agent-rules.py` 负责把 `src/` 片段生成到 `agent-rule/rules/dist/`。
+- `config/rules-targets.list` 只声明 `agent-rule/rules/dist/` 下的可分发产物到各 Agent 目标路径的映射。
+- `manage.sh rules:build` / `make rules-build` 用于刷新 `dist/`。
+- `manage.sh rules:sync` / `make rules:sync` 用于把 `dist/` 产物同步到目标 Agent 目录。
 
 ---
 
@@ -209,6 +218,9 @@ agent-manager/
 │   └── repositories/         # Skill 仓库托管缓存（owner-marked）
 ├── agent-mcp/                # MCP管理
 ├── agent-rule/               # 规则管理
+│   ├── rules/src/            # 可编辑规则源码
+│   ├── rules/dist/           # 生成后的分发产物
+│   └── scripts/build-agent-rules.py
 ├── secrets/                  # 凭证仓库（git子模块或独立仓库）
 ├── docs/                     # 文档
 └── manage.sh                 # 主管理脚本

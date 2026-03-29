@@ -71,6 +71,8 @@ python3 -m json.tool config/tools.json > /dev/null && echo "tools.json: 有效"
 python3 -m json.tool config/skills.json > /dev/null && echo "skills.json: 有效"
 python3 -m json.tool config/mcp.json > /dev/null && echo "mcp.json: 有效"
 test -f config/rules-targets.list && echo "rules-targets.list: 存在"
+test -d agent-rule/rules/src && echo "rules src: 存在"
+test -d agent-rule/rules/dist && echo "rules dist: 存在"
 ```
 
 ---
@@ -108,6 +110,23 @@ test -f config/rules-targets.list && echo "rules-targets.list: 存在"
 4. **路径未更新**
    - 检查：手动安装后，终端未重新加载 PATH
    - 解决：重新启动终端或执行 `hash -r` 重新加载命令路径缓存
+
+### 问题：Rules 修改后没有分发到目标 Agent
+**症状**：已经修改 `agent-rule/rules/src/`，但目标 Agent 目录里的规则仍然是旧内容
+
+#### 检查与解决：
+1. 先重建分发产物
+   ```bash
+   make rules-build
+   ```
+2. 再执行规则同步
+   ```bash
+   make rules:sync
+   ```
+3. 如需确认产物是否存在，检查：
+   ```bash
+   find agent-rule/rules/dist -maxdepth 2 -type f | sort
+   ```
 
 ### 问题：Agent 安装后无法正常工作
 **症状**：Agent 已安装但功能异常或报错

@@ -9,7 +9,7 @@
     "playwright-best-practices-skill": {
       "url": "https://github.com/currents-dev/playwright-best-practices-skill.git",
       "commit": "ef329e7e65149918e1ff0eed2cf7d2e6e6f9eb5b",
-      "agents": null
+      "agents": ["claude-code", "codex", "cursor", "github-copilot", "opencode"]
     },
     "superpowers": {
       "url": "https://github.com/obra/superpowers",
@@ -26,7 +26,7 @@
     "ui-ux-pro-max-skill": {
       "url": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill",
       "commit": "07f4ef3ac2568c25a3b0c8ef5165a86abc3e56e4",
-      "agents": null
+      "agents": ["claude-code", "codex"]
     }
   },
   "agents": {

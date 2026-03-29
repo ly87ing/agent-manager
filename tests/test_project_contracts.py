@@ -24,6 +24,12 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn(".PHONY: all bootstrap sync update plan self-update smoke", makefile)
         self.assertIn("\nsmoke:\n\t@./scripts/ci-smoke.sh\n", makefile)
 
+    def test_makefile_exposes_rules_build_target(self):
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertIn("rules-build", makefile)
+        self.assertIn("rules\\:build", makefile)
+        self.assertIn("\nrules-build:\n\t@./manage.sh rules:build\n", makefile)
+
     def test_makefile_supports_colon_manage_subcommands(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -42,6 +48,7 @@ class ProjectContractTests(unittest.TestCase):
             for goal in (
                 "backups:list",
                 "backups:restore",
+                "rules:build",
                 "rules:sync",
                 "skills:link",
                 "skills:upgrade",
@@ -65,6 +72,7 @@ class ProjectContractTests(unittest.TestCase):
                 [
                     "backups:list",
                     "backups:restore",
+                    "rules:build",
                     "rules:sync",
                     "skills:link",
                     "skills:upgrade",
@@ -166,6 +174,12 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("manager.local.json", readme)
         self.assertIn("终端配置默认关闭", readme)
 
+    def test_readme_documents_rules_source_build_dist_flow(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("agent-rule/rules/src/", readme)
+        self.assertIn("agent-rule/rules/dist/", readme)
+        self.assertIn("make rules-build", readme)
+
     def test_architecture_dry_run_contract_mentions_local_maintenance_writes(self):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
         self.assertIn("cleanup", architecture)
@@ -183,3 +197,15 @@ class ProjectContractTests(unittest.TestCase):
         manage_script = (ROOT / "manage.sh").read_text(encoding="utf-8")
         self.assertIn("src/manage_doctor.py", architecture)
         self.assertIn("src.manage_doctor", manage_script)
+
+    def test_architecture_documents_rules_build_flow(self):
+        architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+        self.assertIn("agent-rule/scripts/build-agent-rules.py", architecture)
+        self.assertIn("agent-rule/rules/src/", architecture)
+        self.assertIn("agent-rule/rules/dist/", architecture)
+
+    def test_claude_memory_stays_project_specific(self):
+        memory = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertNotIn("Primary Semantic Search", memory)
+        self.assertNotIn("Verification is CRITICAL", memory)
+        self.assertIn("config/rules-targets.list", memory)

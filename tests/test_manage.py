@@ -1312,6 +1312,61 @@ class ManageScriptTests(unittest.TestCase):
             self.assertTrue(any(line.startswith("mcp ") for line in log_lines), log_lines)
             self.assertFalse(any(line.startswith("terminal ") for line in log_lines), log_lines)
 
+    def test_rules_sync_uses_built_rule_layout(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            (temp_home / ".codex").mkdir(parents=True)
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n'
+                '  "agents": {},\n'
+                '  "tools": {},\n'
+                '  "skills": {\n'
+                '    "openai-frontend-skill": { "enabled": true }\n'
+                '  },\n'
+                '  "mcp": {}\n'
+                '}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n'
+                '  "repositories": {\n'
+                '    "openai-frontend-skill": {\n'
+                '      "url": "https://example.invalid/openai-frontend-skill.git",\n'
+                '      "agents": ["codex"]\n'
+                '    }\n'
+                '  },\n'
+                '  "agents": {\n'
+                '    "codex": "%s/.codex/skills"\n'
+                '  }\n'
+                '}\n' % temp_home,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {},\n  "servers": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text(
+                "codex_global|global|rules/dist/codex/main.md|%s/.codex/rules/global.md\n" % temp_home,
+                encoding="utf-8",
+            )
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "rules:sync"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue((temp_home / ".codex" / "rules" / "global.md").exists(), result.stdout + result.stderr)
+
     def test_skills_upgrade_dispatches_upgrade_script(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
