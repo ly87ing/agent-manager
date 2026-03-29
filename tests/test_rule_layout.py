@@ -11,9 +11,10 @@ ROOT = Path(__file__).resolve().parent.parent
 class RuleLayoutTests(unittest.TestCase):
     DIST_FILENAMES = {
         "codex": "AGENTS.md",
-        "claude": "main.md",
-        "gemini": "main.md",
-        "ide": "main.md",
+        "claude": "CLAUDE.md",
+        "gemini": "GEMINI.md",
+        "cursor": "agent-manager.mdc",
+        "copilot": "copilot-instructions.md",
     }
 
     def _copy_repo(self, temp_dir: str) -> Path:
@@ -53,6 +54,10 @@ class RuleLayoutTests(unittest.TestCase):
                 (temp_root / "agent-rule" / "rules" / "dist" / "codex" / "main.md").exists(),
                 combined,
             )
+            self.assertFalse(
+                (temp_root / "agent-rule" / "rules" / "dist" / "ide").exists(),
+                combined,
+            )
 
     def test_build_copies_shared_modules(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -87,6 +92,10 @@ class RuleLayoutTests(unittest.TestCase):
             content = (ROOT / "agent-rule" / "rules" / "dist" / target / filename).read_text(encoding="utf-8")
             self.assertIn(expected_clause, content, target)
             self.assertIn("modules/artifact-hygiene.md", content, target)
+        cursor_rule = (ROOT / "agent-rule" / "rules" / "dist" / "cursor" / "agent-manager.mdc").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("alwaysApply: true", cursor_rule)
 
     def test_committed_dist_matches_fresh_build_output(self):
         with tempfile.TemporaryDirectory() as temp_dir:

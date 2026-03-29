@@ -1,14 +1,12 @@
 # name|group|source|target
 codex_global|global|rules/dist/codex/AGENTS.md|~/.codex/AGENTS.md
-claude_global|global|rules/dist/claude/main.md|~/.claude/rules/global.md
-opencode_global|global|rules/dist/ide/main.md|~/.config/opencode/rules/global.md
-gemini_global|global|rules/dist/gemini/main.md|~/.gemini/rules/global.md
-cursor_global|global|rules/dist/ide/main.md|~/.cursor/rules/global.md
-copilot_global|global|rules/dist/ide/main.md|~/.copilot/rules/global.md
+claude_global|global|rules/dist/claude/CLAUDE.md|~/.claude/CLAUDE.md
+gemini_global|global|rules/dist/gemini/GEMINI.md|~/.gemini/GEMINI.md
+cursor_global|global|rules/dist/cursor/agent-manager.mdc|{{REPO_ROOT}}/.cursor/rules/agent-manager.mdc
+copilot_global|global|rules/dist/copilot/copilot-instructions.md|{{REPO_ROOT}}/.github/copilot-instructions.md
 
-codex_modules|global|rules/dist/modules|~/.codex/rules/modules
-claude_modules|global|rules/dist/modules|~/.claude/rules/modules
-opencode_modules|global|rules/dist/modules|~/.config/opencode/rules/modules
-gemini_modules|global|rules/dist/modules|~/.gemini/rules/modules
-cursor_modules|global|rules/dist/modules|~/.cursor/rules/modules
-copilot_modules|global|rules/dist/modules|~/.copilot/rules/modules
+codex_modules|global|rules/dist/modules|~/.codex/modules
+claude_modules|global|rules/dist/modules|~/.claude/modules
+gemini_modules|global|rules/dist/modules|~/.gemini/modules
+cursor_modules|global|rules/dist/modules|{{REPO_ROOT}}/.cursor/rules/modules
+copilot_modules|global|rules/dist/modules|{{REPO_ROOT}}/.github/modules

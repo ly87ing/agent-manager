@@ -201,7 +201,7 @@ class ClaudeHooksSyncTests(unittest.TestCase):
             temp_root = self._copy_repo(temp_dir)
             payload = {
                 "tool_input": {
-                    "file_path": str(temp_root / "agent-rule" / "rules" / "dist" / "claude" / "main.md")
+                    "file_path": str(temp_root / "agent-rule" / "rules" / "dist" / "claude" / "CLAUDE.md")
                 }
             }
 
@@ -276,7 +276,7 @@ class ClaudeHooksSyncTests(unittest.TestCase):
             temp_root = self._copy_repo(temp_dir)
             self._init_git_repo(temp_root)
             src_path = temp_root / "agent-rule" / "rules" / "src" / "shared" / "core.md"
-            dist_path = temp_root / "agent-rule" / "rules" / "dist" / "claude" / "main.md"
+            dist_path = temp_root / "agent-rule" / "rules" / "dist" / "claude" / "CLAUDE.md"
             src_path.write_text(src_path.read_text(encoding="utf-8") + "\n# touch\n", encoding="utf-8")
             dist_path.write_text(dist_path.read_text(encoding="utf-8") + "\n# manual touch\n", encoding="utf-8")
 

@@ -288,13 +288,19 @@ def measure_always_on_instruction_tokens_by_agent() -> dict[str, int]:
     path_map = {
         "codex": [REPO_ROOT / "agent-rule" / "rules" / "dist" / "codex" / "AGENTS.md", REPO_ROOT / "AGENTS.md"],
         "claude-code": [
-            REPO_ROOT / "agent-rule" / "rules" / "dist" / "claude" / "main.md",
+            REPO_ROOT / "agent-rule" / "rules" / "dist" / "claude" / "CLAUDE.md",
             REPO_ROOT / "CLAUDE.md",
         ],
-        "gemini-cli": [REPO_ROOT / "agent-rule" / "rules" / "dist" / "gemini" / "main.md"],
-        "cursor": [REPO_ROOT / "agent-rule" / "rules" / "dist" / "ide" / "main.md"],
-        "github-copilot": [REPO_ROOT / "agent-rule" / "rules" / "dist" / "ide" / "main.md"],
-        "opencode": [REPO_ROOT / "agent-rule" / "rules" / "dist" / "ide" / "main.md"],
+        "gemini-cli": [REPO_ROOT / "agent-rule" / "rules" / "dist" / "gemini" / "GEMINI.md"],
+        "cursor": [
+            REPO_ROOT / "agent-rule" / "rules" / "dist" / "cursor" / "agent-manager.mdc",
+            REPO_ROOT / ".cursor" / "rules" / "agent-manager.mdc",
+        ],
+        "github-copilot": [
+            REPO_ROOT / "agent-rule" / "rules" / "dist" / "copilot" / "copilot-instructions.md",
+            REPO_ROOT / ".github" / "copilot-instructions.md",
+        ],
+        "opencode": [REPO_ROOT / "AGENTS.md"],
     }
     return {
         agent_name: sum(round(len(path.read_text(encoding="utf-8")) / 4) for path in paths)

@@ -22,11 +22,17 @@ class SkillUsageMetricsTests(unittest.TestCase):
     def _expected_instruction_tokens_by_agent(self) -> dict[str, int]:
         path_map = {
             "codex": [ROOT / "agent-rule" / "rules" / "dist" / "codex" / "AGENTS.md", ROOT / "AGENTS.md"],
-            "claude-code": [ROOT / "agent-rule" / "rules" / "dist" / "claude" / "main.md", ROOT / "CLAUDE.md"],
-            "gemini-cli": [ROOT / "agent-rule" / "rules" / "dist" / "gemini" / "main.md"],
-            "cursor": [ROOT / "agent-rule" / "rules" / "dist" / "ide" / "main.md"],
-            "github-copilot": [ROOT / "agent-rule" / "rules" / "dist" / "ide" / "main.md"],
-            "opencode": [ROOT / "agent-rule" / "rules" / "dist" / "ide" / "main.md"],
+            "claude-code": [ROOT / "agent-rule" / "rules" / "dist" / "claude" / "CLAUDE.md", ROOT / "CLAUDE.md"],
+            "gemini-cli": [ROOT / "agent-rule" / "rules" / "dist" / "gemini" / "GEMINI.md"],
+            "cursor": [
+                ROOT / "agent-rule" / "rules" / "dist" / "cursor" / "agent-manager.mdc",
+                ROOT / ".cursor" / "rules" / "agent-manager.mdc",
+            ],
+            "github-copilot": [
+                ROOT / "agent-rule" / "rules" / "dist" / "copilot" / "copilot-instructions.md",
+                ROOT / ".github" / "copilot-instructions.md",
+            ],
+            "opencode": [ROOT / "AGENTS.md"],
         }
         return {
             agent: sum(round(len(path.read_text(encoding="utf-8")) / 4) for path in paths)

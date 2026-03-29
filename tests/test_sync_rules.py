@@ -17,13 +17,13 @@ class SyncRulesTests(unittest.TestCase):
             temp_home = Path(temp_dir) / "home"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
 
-            (temp_home / ".claude" / "rules").mkdir(parents=True)
+            (temp_home / ".claude").mkdir(parents=True)
             (temp_home / ".codex").mkdir(parents=True)
-            claude_target = temp_home / ".claude" / "rules" / "global.md"
+            claude_target = temp_home / ".claude" / "CLAUDE.md"
             codex_target = temp_home / ".codex" / "AGENTS.md"
             (temp_root / "config" / "rules-targets.list").write_text(
                 (
-                    f"claude_global|global|rules/dist/claude/main.md|{claude_target}\n"
+                    f"claude_global|global|rules/dist/claude/CLAUDE.md|{claude_target}\n"
                     f"codex_global|global|rules/dist/codex/AGENTS.md|{codex_target}\n"
                 ),
                 encoding="utf-8",
@@ -52,11 +52,50 @@ class SyncRulesTests(unittest.TestCase):
             self.assertTrue(codex_target.exists(), combined)
             self.assertEqual(
                 claude_target.read_text(encoding="utf-8"),
-                (temp_root / "agent-rule" / "rules" / "dist" / "claude" / "main.md").read_text(encoding="utf-8"),
+                (temp_root / "agent-rule" / "rules" / "dist" / "claude" / "CLAUDE.md").read_text(encoding="utf-8"),
             )
             self.assertEqual(
                 codex_target.read_text(encoding="utf-8"),
                 (temp_root / "agent-rule" / "rules" / "dist" / "codex" / "AGENTS.md").read_text(encoding="utf-8"),
+            )
+
+    def test_sync_supports_repo_root_targets_via_repo_root_placeholder(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            cursor_target = temp_root / ".cursor" / "rules" / "agent-manager.mdc"
+            copilot_target = temp_root / ".github" / "copilot-instructions.md"
+            (temp_root / "config" / "rules-targets.list").write_text(
+                (
+                    "cursor_global|global|rules/dist/cursor/agent-manager.mdc|{{REPO_ROOT}}/.cursor/rules/agent-manager.mdc\n"
+                    "copilot_global|global|rules/dist/copilot/copilot-instructions.md|{{REPO_ROOT}}/.github/copilot-instructions.md\n"
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [str(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh")],
+                cwd=temp_root / "agent-rule",
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertTrue(cursor_target.exists(), combined)
+            self.assertTrue(copilot_target.exists(), combined)
+            self.assertEqual(
+                cursor_target.read_text(encoding="utf-8"),
+                (temp_root / "agent-rule" / "rules" / "dist" / "cursor" / "agent-manager.mdc").read_text(
+                    encoding="utf-8"
+                ),
+            )
+            self.assertEqual(
+                copilot_target.read_text(encoding="utf-8"),
+                (temp_root / "agent-rule" / "rules" / "dist" / "copilot" / "copilot-instructions.md").read_text(
+                    encoding="utf-8"
+                ),
             )
 
     def test_codex_sync_supports_native_agents_filename(self):
@@ -256,7 +295,7 @@ class SyncRulesTests(unittest.TestCase):
             target_path.parent.mkdir(parents=True)
             target_path.symlink_to(temp_root / "missing-target.md")
             (temp_root / "config" / "rules-targets.list").write_text(
-                f"test_main|global|rules/dist/claude/main.md|{target_path}\n",
+                f"test_main|global|rules/dist/claude/CLAUDE.md|{target_path}\n",
                 encoding="utf-8",
             )
 
@@ -272,7 +311,7 @@ class SyncRulesTests(unittest.TestCase):
                 check=False,
             )
 
-            source_path = temp_root / "agent-rule" / "rules" / "dist" / "claude" / "main.md"
+            source_path = temp_root / "agent-rule" / "rules" / "dist" / "claude" / "CLAUDE.md"
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(target_path.is_symlink(), result.stdout + result.stderr)
             self.assertEqual(target_path.resolve(), source_path.resolve())
@@ -284,7 +323,7 @@ class SyncRulesTests(unittest.TestCase):
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             bad_target = "relative/rules/global.md"
             (temp_root / "config" / "rules-targets.list").write_text(
-                f"bad_target|global|rules/dist/claude/main.md|{bad_target}\n",
+                f"bad_target|global|rules/dist/claude/CLAUDE.md|{bad_target}\n",
                 encoding="utf-8",
             )
 
@@ -345,7 +384,7 @@ class SyncRulesTests(unittest.TestCase):
             self.assertIn("claude_modules", combined)
 
     def test_main_rule_points_to_actual_modules_distribution_path(self):
-        content = (ROOT / "agent-rule" / "rules" / "dist" / "claude" / "main.md").read_text(encoding="utf-8")
+        content = (ROOT / "agent-rule" / "rules" / "dist" / "claude" / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertIn("read `modules/architecture.md`", content)
         self.assertNotIn("~/.<agent>/modules/architecture.md", content)
 
@@ -353,9 +392,19 @@ class SyncRulesTests(unittest.TestCase):
         manifest = (ROOT / "config" / "rules-targets.list").read_text(encoding="utf-8")
         self.assertIn("codex_global|global|rules/dist/codex/AGENTS.md|~/.codex/AGENTS.md", manifest)
         self.assertNotIn("codex_global|global|rules/dist/codex/main.md|~/.codex/rules/global.md", manifest)
-        self.assertIn("claude_global|global|rules/dist/claude/main.md|~/.claude/rules/global.md", manifest)
-        self.assertIn("gemini_global|global|rules/dist/gemini/main.md|~/.gemini/rules/global.md", manifest)
-        self.assertIn("cursor_global|global|rules/dist/ide/main.md|~/.cursor/rules/global.md", manifest)
-        self.assertIn("copilot_global|global|rules/dist/ide/main.md|~/.copilot/rules/global.md", manifest)
-        self.assertIn("opencode_global|global|rules/dist/ide/main.md|~/.config/opencode/rules/global.md", manifest)
-        self.assertIn("codex_modules|global|rules/dist/modules|~/.codex/rules/modules", manifest)
+        self.assertIn("claude_global|global|rules/dist/claude/CLAUDE.md|~/.claude/CLAUDE.md", manifest)
+        self.assertIn("gemini_global|global|rules/dist/gemini/GEMINI.md|~/.gemini/GEMINI.md", manifest)
+        self.assertIn(
+            "cursor_global|global|rules/dist/cursor/agent-manager.mdc|{{REPO_ROOT}}/.cursor/rules/agent-manager.mdc",
+            manifest,
+        )
+        self.assertIn(
+            "copilot_global|global|rules/dist/copilot/copilot-instructions.md|{{REPO_ROOT}}/.github/copilot-instructions.md",
+            manifest,
+        )
+        self.assertNotIn("opencode_global|global|rules/dist/ide/main.md|~/.config/opencode/rules/global.md", manifest)
+        self.assertIn("codex_modules|global|rules/dist/modules|~/.codex/modules", manifest)
+        self.assertIn("claude_modules|global|rules/dist/modules|~/.claude/modules", manifest)
+        self.assertIn("gemini_modules|global|rules/dist/modules|~/.gemini/modules", manifest)
+        self.assertIn("cursor_modules|global|rules/dist/modules|{{REPO_ROOT}}/.cursor/rules/modules", manifest)
+        self.assertIn("copilot_modules|global|rules/dist/modules|{{REPO_ROOT}}/.github/modules", manifest)

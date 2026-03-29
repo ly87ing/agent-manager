@@ -132,12 +132,13 @@ graph TD
 - `agent-rule/rules/src/` 保存可编辑的共享 core、共享 modules 和 agent adapters。
 - `agent-rule/scripts/build-agent-rules.py` 负责把 `src/` 片段生成到 `agent-rule/rules/dist/`。
 - 仓库内不再保留第二条平行的规则文本流；`agent-rule/rules/global/*` 已退出仓库 source-of-truth。
-- `agent-rule/rules/dist/codex/AGENTS.md` 是 Codex 的原生全局规则产物；其它 Agent 仍保持 `dist/<target>/main.md`。
+- `agent-rule/rules/dist/codex/AGENTS.md`、`dist/claude/CLAUDE.md`、`dist/gemini/GEMINI.md`、`dist/cursor/agent-manager.mdc`、`dist/copilot/copilot-instructions.md` 分别对应各 agent 的原生入口格式。
 - `config/rules-targets.list` 只声明 `agent-rule/rules/dist/` 下的可分发产物到各 Agent 目标路径的映射。
-- Codex 的全局目标路径是 `~/.codex/AGENTS.md`；其它 Agent 在本阶段不调整目标文件名。
-- Codex 规则同步会清理历史遗留的 `~/.codex/rules/global.md`，避免新旧全局规则并存。
+- manifest 现在同时支持家目录 target 和 `{{REPO_ROOT}}` repo-native target，用一条分发链覆盖全局文件与仓库内原生文件。
+- Cursor / Copilot 的原生入口分别落到 `{{REPO_ROOT}}/.cursor/rules/agent-manager.mdc` 和 `{{REPO_ROOT}}/.github/copilot-instructions.md`；OpenCode 直接消费仓库根 `AGENTS.md`。
+- 规则同步会清理历史遗留的 `~/.<agent>/rules/global.md` 和旧 `rules/modules` 目录，避免新旧入口并存。
 - `manage.sh rules:build` / `make rules-build` 用于刷新 `dist/`。
-- `manage.sh rules:sync` / `make rules:sync` 用于把 `dist/` 产物同步到目标 Agent 目录。
+- `manage.sh rules:sync` / `make rules:sync` 用于把 `dist/` 产物同步到目标 Agent 目录与 repo-native 文件位置。
 - `config/claude-hooks.json` 定义仓库级 Claude hooks，`agent-rule/scripts/sync-claude-hooks.py` 会把它渲染到 `.claude/settings.json`。
 - `config/codex-hooks.json` 定义仓库级 Codex hooks，`agent-rule/scripts/sync-codex-hooks.py` 会把它渲染到 `.codex/hooks.json`。
 - `manage.sh claude:hooks:sync` / `make claude-hooks-sync` 用于刷新项目内的 Claude hooks 配置。

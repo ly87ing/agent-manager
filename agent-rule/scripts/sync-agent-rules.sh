@@ -28,6 +28,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+workspace_root="$(cd "$repo_root/.." && pwd -P)"
 manifest_path="$repo_root/../config/rules-targets.list"
 
 [ -f "$manifest_path" ] || { echo "Manifest not found: $manifest_path" >&2; exit 1; }
@@ -37,7 +38,7 @@ manifest_path="$repo_root/../config/rules-targets.list"
 agent_installed_for_target() {
   local dst_pat="$1"
   local expanded
-  expanded="$(expand_home "$dst_pat")"
+  expanded="$(expand_target_path "$dst_pat")"
   case "$expanded" in
     "$HOME"/.claude/*|"$HOME"/.claude)
       command -v claude >/dev/null 2>&1 ;;
@@ -58,8 +59,9 @@ agent_installed_for_target() {
   esac
 }
 
-expand_home() {
+expand_target_path() {
   local value="$1"
+  value="${value//\{\{REPO_ROOT\}\}/$workspace_root}"
   value="${value//\{\{HOME\}\}/$HOME}"
   if [[ "$value" == "~/"* ]]; then
     value="${HOME}/${value#\~/}"
@@ -97,8 +99,8 @@ validate_manifest_entry() {
     return 1
   fi
 
-  if [[ "$dst_pat" != /* && "$dst_pat" != "~"* && "$dst_pat" != "{{HOME}}"* ]]; then
-    echo "❌ 关键错误: manifest target 必须是绝对路径或以 ~ / {{HOME}} 开头: $dst_pat" >&2
+  if [[ "$dst_pat" != /* && "$dst_pat" != "~"* && "$dst_pat" != "{{HOME}}"* && "$dst_pat" != "{{REPO_ROOT}}"* ]]; then
+    echo "❌ 关键错误: manifest target 必须是绝对路径或以 ~ / {{HOME}} / {{REPO_ROOT}} 开头: $dst_pat" >&2
     return 1
   fi
 
@@ -144,6 +146,33 @@ cleanup_legacy_target_paths() {
       if [ "$dst_abs" = "$HOME/.codex/AGENTS.md" ]; then
         legacy_path="$HOME/.codex/rules/global.md"
       fi
+      ;;
+    claude_global)
+      legacy_path="$HOME/.claude/rules/global.md"
+      ;;
+    gemini_global)
+      legacy_path="$HOME/.gemini/rules/global.md"
+      ;;
+    cursor_global)
+      legacy_path="$HOME/.cursor/rules/global.md"
+      ;;
+    copilot_global)
+      legacy_path="$HOME/.copilot/rules/global.md"
+      ;;
+    codex_modules)
+      legacy_path="$HOME/.codex/rules/modules"
+      ;;
+    claude_modules)
+      legacy_path="$HOME/.claude/rules/modules"
+      ;;
+    gemini_modules)
+      legacy_path="$HOME/.gemini/rules/modules"
+      ;;
+    cursor_modules)
+      legacy_path="$HOME/.cursor/rules/modules"
+      ;;
+    copilot_modules)
+      legacy_path="$HOME/.copilot/rules/modules"
       ;;
   esac
 
@@ -273,7 +302,7 @@ while IFS='|' read -r name group src_rel dst_pat; do
   target_selected "$name" || continue
 
   src_abs="$repo_root/$src_rel"
-  dst_abs="$(expand_home "$dst_pat")"
+  dst_abs="$(expand_target_path "$dst_pat")"
 
   if ! agent_installed_for_target "$dst_pat"; then
     echo "INFO: [AGENT: Rules] $name 目标 agent 未安装，跳过。"

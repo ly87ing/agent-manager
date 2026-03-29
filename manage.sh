@@ -648,6 +648,7 @@ function run_task_with_progress() {
     local start_ts
     start_ts=$(date +%s)
     local last_display=""
+    local last_display_key=""
     local last_raw_msg=""
     local last_msg=""
     "$@" >> "$TEMP_LOG" 2>&1 &
@@ -657,6 +658,7 @@ function run_task_with_progress() {
         local elapsed
         elapsed=$(( $(date +%s) - start_ts ))
         local current_display=""
+        local current_key=""
         if [ -s "$TEMP_LOG" ]; then
             local next_line=$((start_line + 1))
             local raw_msg=""
@@ -667,15 +669,19 @@ function run_task_with_progress() {
             fi
             if [ -n "$last_msg" ]; then
                 current_display="$title: $last_msg · 已运行 ${elapsed}s"
+                current_key="$title:$last_msg"
             else
                 current_display="$title... · 已运行 ${elapsed}s"
+                current_key="$current_display"
             fi
         else
             current_display="$title... · 已运行 ${elapsed}s"
+            current_key="$current_display"
         fi
-        if [ "$current_display" != "$last_display" ]; then
+        if [ "$current_key" != "$last_display_key" ]; then
             status_line "RUNNING" "$current_display"
             last_display="$current_display"
+            last_display_key="$current_key"
         fi
         sleep 0.3
     done
@@ -859,9 +865,6 @@ except ValueError as exc:
     sys.exit(1)
 
 active_rule_agents = collect_active_rule_agents(cfg, skill_cfg, mcp_cfg)
-if not active_rule_agents:
-    sys.exit(0)
-
 manifest_path = root / "config" / "rules-targets.list"
 if not manifest_path.exists():
     print("rules-targets.list 缺失", file=sys.stderr)
@@ -875,7 +878,7 @@ for raw_line in manifest_path.read_text(encoding="utf-8").splitlines():
     if len(parts) < 4:
         print(f"rules-targets.list 非法条目: {raw_line}", file=sys.stderr)
         sys.exit(1)
-    if rule_target_agent_id(parts[0]) in active_rule_agents:
+    if "{{REPO_ROOT}}" in parts[3] or rule_target_agent_id(parts[0]) in active_rule_agents:
         print(parts[0])
 PY
 }

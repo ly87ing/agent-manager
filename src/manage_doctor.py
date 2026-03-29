@@ -529,7 +529,7 @@ def collect_managed_target_paths(root_dir: Path, *, include_skills: bool) -> lis
             value = value.get("path")
         if not value:
             return
-        expanded = str(value).replace("{{HOME}}", str(Path.home()))
+        expanded = str(value).replace("{{HOME}}", str(Path.home())).replace("{{REPO_ROOT}}", str(root_dir))
         targets.add(str(Path(expanded).expanduser()))
 
     mcp_cfg = load_json_object_file(root_dir / "config" / "mcp.json", strict=True, missing_ok=False)
@@ -872,17 +872,25 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
                 append_entry(report, "rules", make_entry(stripped, "error", "manifest 非法"))
                 continue
             agent_id = rule_target_agent_id(parts[0])
-            if agent_id not in active_rule_agents:
-                continue
             src = os.path.join(root_dir, "agent-rule", parts[2])
-            dst = os.path.expanduser(parts[3].replace("{{HOME}}", os.path.expanduser("~")))
+            is_repo_root_target = "{{REPO_ROOT}}" in parts[3]
+            if agent_id not in active_rule_agents and not is_repo_root_target:
+                continue
+            dst = (
+                parts[3]
+                .replace("{{HOME}}", os.path.expanduser("~"))
+                .replace("{{REPO_ROOT}}", str(root_dir))
+            )
+            dst = os.path.expanduser(dst)
             if os.path.exists(dst):
                 if rules_match(src, dst):
                     append_entry(report, "rules", make_entry(parts[0], "ok", "一致"))
                 else:
                     append_entry(report, "rules", make_entry(parts[0], "error", "漂移"))
             else:
-                if generated_target_status(RULE_TARGET_PREFIX_TO_ID.get(parts[0].split("_", 1)[0], agent_id)) == "installed":
+                if is_repo_root_target or generated_target_status(
+                    RULE_TARGET_PREFIX_TO_ID.get(parts[0].split("_", 1)[0], agent_id)
+                ) == "installed":
                     message = "尚未分发"
                 else:
                     message = "Agent 未安装，未分发"

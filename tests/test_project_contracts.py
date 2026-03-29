@@ -203,6 +203,10 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("agent-rule/rules/src/", readme)
         self.assertIn("agent-rule/rules/dist/", readme)
         self.assertIn("make rules-build", readme)
+        self.assertIn(".cursor/rules/agent-manager.mdc", readme)
+        self.assertIn(".github/copilot-instructions.md", readme)
+        self.assertIn("GEMINI.md", readme)
+        self.assertIn("CLAUDE.md", readme)
 
     def test_readme_documents_scoped_claude_memory_layout(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -288,6 +292,9 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("agent-rule/rules/src/", architecture)
         self.assertIn("agent-rule/rules/dist/", architecture)
         self.assertIn("不再保留第二条平行的规则文本流", architecture)
+        self.assertIn("{{REPO_ROOT}}", architecture)
+        self.assertIn(".cursor/rules/agent-manager.mdc", architecture)
+        self.assertIn(".github/copilot-instructions.md", architecture)
 
     def test_architecture_documents_instruction_quality_regression_target(self):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
