@@ -140,6 +140,7 @@ graph TD
 - `config/claude-hooks.json` 定义仓库级 Claude hooks，`agent-rule/scripts/sync-claude-hooks.py` 会把它渲染到 `.claude/settings.json`。
 - `manage.sh claude:hooks:sync` / `make claude-hooks-sync` 用于刷新项目内的 Claude hooks 配置。
 - `scripts/evals/run_rule_effectiveness_eval.py` 读取 `scripts/evals/fixtures/` 中的离线 JSON fixture，校验题目与 run artifact schema，并输出稳定的规则效果摘要；`make eval-rules` 是其推荐入口。
+- `make instructions:check` 是修改共享指令、skills exposure 或 managed hooks 前的统一回归门；它串起 instruction-related project contracts、rules budget、layout、sync、Claude hook contract tests，以及 baseline 规则评测。
 
 ---
 

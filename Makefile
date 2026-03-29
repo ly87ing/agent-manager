@@ -1,4 +1,4 @@
-.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\:list restore backups\:restore logs rules-build rules\:build rules-sync rules\:sync skills-link skills\:link skills\:upgrade mcp-sync mcp\:sync mcp-prepare mcp\:prepare tools-sync tools\:sync terminal-sync terminal\:sync claude-hooks-sync claude\:hooks\:sync dry-run clean-logs offline eval-rules
+.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\:list restore backups\:restore logs rules-build rules\:build rules-sync rules\:sync skills-link skills\:link skills\:upgrade mcp-sync mcp\:sync mcp-prepare mcp\:prepare tools-sync tools\:sync terminal-sync terminal\:sync claude-hooks-sync claude\:hooks\:sync dry-run clean-logs offline eval-rules instructions-check instructions\:check
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -144,6 +144,13 @@ dry-run:
 # 离线规则效果评测 (读取本地 fixtures 并输出稳定 JSON 摘要)
 eval-rules:
 	@python3 ./scripts/evals/run_rule_effectiveness_eval.py
+
+# 指令质量回归门 (共享指令 / skills exposure / managed hooks)
+instructions-check:
+	@python3 -m unittest tests.test_project_contracts tests.test_rule_budgets tests.test_rule_layout tests.test_skill_exposure_contracts tests.test_sync_rules tests.test_sync_claude_hooks -v
+	@python3 ./scripts/evals/run_rule_effectiveness_eval.py --baseline ./scripts/evals/fixtures/rule_effectiveness_baseline.json
+
+instructions\:check: instructions-check
 
 help:
 	@./manage.sh help

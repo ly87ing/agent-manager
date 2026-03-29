@@ -30,6 +30,23 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("rules\\:build", makefile)
         self.assertIn("\nrules-build:\n\t@./manage.sh rules:build\n", makefile)
 
+    def test_makefile_exposes_instruction_quality_target(self):
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertIn("instructions-check", makefile)
+        self.assertIn("instructions\\:check", makefile)
+        self.assertIn("\ninstructions-check:\n", makefile)
+        self.assertIn("tests.test_project_contracts", makefile)
+        self.assertIn("tests.test_rule_budgets", makefile)
+        self.assertIn("tests.test_rule_layout", makefile)
+        self.assertIn("tests.test_skill_exposure_contracts", makefile)
+        self.assertIn("tests.test_sync_rules", makefile)
+        self.assertIn("tests.test_sync_claude_hooks", makefile)
+        self.assertIn(
+            "run_rule_effectiveness_eval.py --baseline ./scripts/evals/fixtures/rule_effectiveness_baseline.json",
+            makefile,
+        )
+        self.assertIn("\ninstructions\\:check: instructions-check\n", makefile)
+
     def test_makefile_supports_colon_manage_subcommands(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -187,6 +204,13 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("tests/CLAUDE.md", readme)
         self.assertIn("仓库级高频记忆", readme)
 
+    def test_readme_documents_instruction_quality_regression_target(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("make instructions:check", readme)
+        self.assertIn("共享指令", readme)
+        self.assertIn("hooks", readme)
+        self.assertIn("回归门", readme)
+
     def test_repo_root_agents_guidance_covers_setup_tests_done_when_and_generated_boundaries(self):
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("Python 3 and make", agents)
@@ -247,6 +271,13 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("agent-rule/scripts/build-agent-rules.py", architecture)
         self.assertIn("agent-rule/rules/src/", architecture)
         self.assertIn("agent-rule/rules/dist/", architecture)
+
+    def test_architecture_documents_instruction_quality_regression_target(self):
+        architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+        self.assertIn("make instructions:check", architecture)
+        self.assertIn("共享指令", architecture)
+        self.assertIn("skills exposure", architecture)
+        self.assertIn("managed hooks", architecture)
 
     def test_claude_memory_stays_project_specific(self):
         memory = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
