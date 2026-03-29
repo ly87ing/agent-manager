@@ -180,6 +180,13 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("agent-rule/rules/dist/", readme)
         self.assertIn("make rules-build", readme)
 
+    def test_readme_documents_scoped_claude_memory_layout(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("根目录 `CLAUDE.md`", readme)
+        self.assertIn("agent-rule/CLAUDE.md", readme)
+        self.assertIn("tests/CLAUDE.md", readme)
+        self.assertIn("仓库级高频记忆", readme)
+
     def test_repo_root_agents_guidance_covers_setup_tests_done_when_and_generated_boundaries(self):
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("Python 3 and make", agents)
@@ -246,3 +253,35 @@ class ProjectContractTests(unittest.TestCase):
         self.assertNotIn("Primary Semantic Search", memory)
         self.assertNotIn("Verification is CRITICAL", memory)
         self.assertIn("config/rules-targets.list", memory)
+
+    def test_root_claude_md_stays_concise_and_points_to_scoped_memory(self):
+        memory = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertLessEqual(len(memory.splitlines()), 80)
+        self.assertIn("make smoke", memory)
+        self.assertIn("make sync", memory)
+        self.assertIn("make doctor", memory)
+        self.assertIn("agent-rule/CLAUDE.md", memory)
+        self.assertIn("tests/CLAUDE.md", memory)
+        self.assertNotIn("Agent 配置文件路径", memory)
+        self.assertNotIn("~/.cursor/mcp.json", memory)
+        self.assertNotIn("agent-lifecycle | `sync_agents.py`", memory)
+
+    def test_agent_rule_claude_md_stays_narrow_and_build_focused(self):
+        memory = (ROOT / "agent-rule" / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("agent-rule/rules/src/", memory)
+        self.assertIn("agent-rule/rules/dist/", memory)
+        self.assertIn("make rules-build", memory)
+        self.assertIn("make rules:sync", memory)
+        self.assertNotIn("python3 -m unittest discover -s tests -p 'test*.py' -v", memory)
+        self.assertNotIn("make smoke", memory)
+        self.assertNotIn("manage.sh 是唯一顶层编排入口", memory)
+
+    def test_tests_claude_md_stays_narrow_and_contract_focused(self):
+        memory = (ROOT / "tests" / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("python3 -m unittest tests.test_project_contracts -v", memory)
+        self.assertIn("fixtures", memory)
+        self.assertIn("contract", memory)
+        self.assertIn("keep each test focused", memory)
+        self.assertNotIn("make rules-build", memory)
+        self.assertNotIn("make smoke", memory)
+        self.assertNotIn("manage.sh 是唯一顶层编排入口", memory)
