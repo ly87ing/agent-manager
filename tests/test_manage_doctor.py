@@ -12,6 +12,72 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class ManageDoctorReportTests(unittest.TestCase):
+    def test_report_flags_repo_secret_outside_secrets_directory(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            openai_key = "sk-proj-" + "abcdefghijklmnopqrstuvwxyz12"
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {},\n  "servers": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+            (temp_root / "leak.txt").write_text(
+                f'OPENAI_API_KEY="{openai_key}"\n',
+                encoding="utf-8",
+            )
+
+            report = build_report(
+                root_dir=temp_root,
+                config_file=temp_root / "config" / "manager.json",
+                python_cmd="python3",
+            )
+
+            self.assertEqual(report["status"], "error")
+            security_entries = {entry["name"]: entry for entry in report["sections"]["security"]}
+            self.assertIn("leak.txt", security_entries)
+            self.assertIn("openai_like_key", security_entries["leak.txt"]["message"])
+
+    def test_report_repo_secret_scan_ignores_placeholder_examples(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {},\n  "servers": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+            (temp_root / "notes.md").write_text(
+                'AUGMENT_SESSION_AUTH=\'{"accessToken":"ace_...","tenantURL":"...","scopes":[]}\'\n',
+                encoding="utf-8",
+            )
+
+            report = build_report(
+                root_dir=temp_root,
+                config_file=temp_root / "config" / "manager.json",
+                python_cmd="python3",
+            )
+
+            self.assertNotEqual(report["status"], "error")
+            security_entries = {entry["name"]: entry for entry in report["sections"]["security"]}
+            self.assertEqual(security_entries["tracked repo files"]["status"], "ok")
+
     def test_report_requires_toml_parser_for_active_toml_targets(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"

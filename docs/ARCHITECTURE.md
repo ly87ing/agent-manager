@@ -81,6 +81,7 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - 安全风险扫描
 - 对尚未物化的 MCP / skills / rules 目标给出提示级告警，而不是与真实漂移混为一谈
 - `doctor / status --json` 会输出同一份结构化诊断报告，供 CI 或外部脚本消费
+- 主仓库敏感信息扫描默认排除 `secrets/` 私有仓库与忽略缓存，只针对 `agent-manager` 自身受控文件判定泄露风险
 
 ---
 
@@ -164,6 +165,7 @@ graph TD
 - 使用环境变量占位符替换
 - 支持凭证轮换和审计
 - `--offline` 下不会同步 secrets 仓库，只会消费本地已有 secrets 内容
+- `make secrets-check`、CI smoke 和 `doctor` 会拦截主仓库中的疑似明文 secrets，防止真实凭证混入 `agent-manager`
 
 ### 3. 权限最小化
 - 配置文件默认权限为 600 (仅所有者可读写)

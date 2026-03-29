@@ -38,6 +38,9 @@ jobs:
         if: ${{ matrix.python-version != '3.11' }}
         run: python3 -m pip install tomli
 
+      - name: Run tracked secret scan
+        run: make secrets-check
+
       - name: Run unit tests
         run: python3 -m unittest discover -s tests -p 'test*.py' -v
 

@@ -23,12 +23,9 @@ from src.manage_runtime_probe import (
     load_json,
     rule_target_agent_id,
 )
+from src.secret_scan import scan_repo_for_secrets, scan_text_for_secrets
 from src.toml_compat import load_tomllib
 
-
-SECRET_PATTERN = re.compile(
-    r"(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_\-]{20,})"
-)
 PLACEHOLDER_PATTERN = re.compile(r"^\$\{[^}]+\}$")
 RULE_TARGET_PREFIX_TO_ID = {
     "claude": "claude-code",
@@ -587,6 +584,7 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
         "version": git_version_info(root_dir),
         "sections": {
             "config": [],
+            "security": [],
             "runtime": [],
             "storage": [],
             "agents": [],
@@ -626,10 +624,23 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
             append_entry(report, "config", make_entry(name, "error", f"格式正确，但结构非法: {exc}"))
             continue
         content = abs_path.read_text(encoding="utf-8")
-        if SECRET_PATTERN.search(content):
+        if scan_text_for_secrets(content, file_label=name):
             append_entry(report, "config", make_entry(name, "error", "格式正确，但包含明文密钥风险"))
         else:
             append_entry(report, "config", make_entry(name, "ok", "格式正确"))
+
+    repo_secret_findings = scan_repo_for_secrets(root_dir)
+    if repo_secret_findings:
+        grouped_findings: dict[str, list[tuple[int, str]]] = {}
+        for finding in repo_secret_findings:
+            grouped_findings.setdefault(finding.path, []).append((finding.line, finding.kind))
+        for path, items in sorted(grouped_findings.items()):
+            sample = ", ".join(f"{kind}@L{line}" for line, kind in items[:3])
+            if len(items) > 3:
+                sample = f"{sample} 等 {len(items)} 处"
+            append_entry(report, "security", make_entry(path, "error", f"疑似明文敏感信息: {sample}"))
+    else:
+        append_entry(report, "security", make_entry("tracked repo files", "ok", "未发现疑似明文敏感信息"))
 
     if report["summary"]["errors"] > 0:
         report["status"] = "error"
@@ -922,6 +933,13 @@ def render_text(report: dict) -> str:
     for entry in report["sections"]["config"]:
         symbol = {"ok": "✓", "warning": "⚠", "notice": "⚠", "error": "✗"}[entry["status"]]
         lines.append(f"  {symbol} {entry['name']}: {entry['message']}")
+
+    if report["sections"]["security"]:
+        lines.append("")
+        lines.append("[ 主仓库敏感信息扫描 ]")
+        for entry in report["sections"]["security"]:
+            symbol = {"ok": "✓", "warning": "⚠", "notice": "⚠", "error": "✗"}[entry["status"]]
+            lines.append(f"  {symbol} {entry['name']}: {entry['message']}")
 
     if report["summary"]["errors"] == 0 or report["sections"]["runtime"]:
         lines.append("")

@@ -24,6 +24,12 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn(".PHONY: all bootstrap sync update plan self-update smoke", makefile)
         self.assertIn("\nsmoke:\n\t@./scripts/ci-smoke.sh\n", makefile)
 
+    def test_makefile_exposes_secrets_check_target(self):
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertIn("secrets-check", makefile)
+        self.assertIn("secrets\\:check", makefile)
+        self.assertIn("\nsecrets-check:\n\t@python3 ./scripts/check_no_secrets.py\n", makefile)
+
     def test_makefile_exposes_rules_build_target(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
         self.assertIn("rules-build", makefile)
@@ -112,6 +118,7 @@ class ProjectContractTests(unittest.TestCase):
         self.assertTrue(smoke_script.exists(), "missing ci smoke script")
 
         content = smoke_script.read_text(encoding="utf-8")
+        self.assertIn("run make secrets-check", content)
         self.assertIn("AGENT_MANAGER_BASE_CONFIG", content)
         self.assertIn("manager.smoke.json", content)
         self.assertIn("AGENT_MANAGER_LOCK_FILE", content)
@@ -139,6 +146,8 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("Install tomli for Python < 3.11", content)
         self.assertIn("matrix.python-version != '3.11'", content)
         self.assertIn("python3 -m pip install tomli", content)
+        self.assertIn("Run tracked secret scan", content)
+        self.assertIn("make secrets-check", content)
         self.assertIn("python3 -m unittest discover -s tests -p 'test*.py' -v", content)
         self.assertIn("Run smoke validation", content)
         self.assertTrue("make smoke" in content or "./scripts/ci-smoke.sh" in content)
@@ -218,6 +227,12 @@ class ProjectContractTests(unittest.TestCase):
     def test_readme_documents_instruction_quality_regression_target(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("make instructions:check", readme)
+
+    def test_readme_documents_secret_scan_target(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("make secrets-check", readme)
+        self.assertIn("主仓库禁存 secrets", readme)
+        self.assertIn("疑似明文敏感信息", readme)
         self.assertIn("共享指令", readme)
         self.assertIn("hooks", readme)
         self.assertIn("回归门", readme)

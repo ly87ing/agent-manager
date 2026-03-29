@@ -24,6 +24,7 @@ run() {
 
 cd "$ROOT_DIR"
 
+run make secrets-check
 run ./manage.sh help
 run ./manage.sh sync --dry-run
 run ./manage.sh update --dry-run

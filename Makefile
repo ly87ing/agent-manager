@@ -1,4 +1,4 @@
-.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\:list restore backups\:restore logs rules-build rules\:build rules-sync rules\:sync skills-link skills\:link skills\:upgrade mcp-sync mcp\:sync mcp-prepare mcp\:prepare tools-sync tools\:sync terminal-sync terminal\:sync claude-hooks-sync claude\:hooks\:sync codex-hooks-sync codex\:hooks\:sync dry-run clean-logs offline eval-rules instructions-check instructions\:check
+.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\:list restore backups\:restore logs rules-build rules\:build rules-sync rules\:sync skills-link skills\:link skills\:upgrade mcp-sync mcp\:sync mcp-prepare mcp\:prepare tools-sync tools\:sync terminal-sync terminal\:sync claude-hooks-sync claude\:hooks\:sync codex-hooks-sync codex\:hooks\:sync dry-run clean-logs offline eval-rules secrets-check secrets\:check instructions-check instructions\:check
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -30,6 +30,13 @@ self-update:
 # 跨平台 smoke 验证（安全预演路径）
 smoke:
 	@./scripts/ci-smoke.sh
+
+# 主仓库明文敏感信息扫描
+secrets-check:
+	@python3 ./scripts/check_no_secrets.py
+
+secrets\:check:
+	@python3 ./scripts/check_no_secrets.py
 
 # 兼容旧入口：离线本地同步
 offline:
