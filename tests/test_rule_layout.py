@@ -73,6 +73,14 @@ class RuleLayoutTests(unittest.TestCase):
             self.assertTrue((modules_dir / "frontend.md").exists(), combined)
             self.assertTrue((modules_dir / "artifact-hygiene.md").exists(), combined)
 
+    def test_frontend_module_captures_playwright_and_devtools_boundary(self):
+        frontend_module = (ROOT / "agent-rule" / "rules" / "dist" / "modules" / "frontend.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Default to Playwright for frontend functional validation", frontend_module)
+        self.assertIn("Use Chrome DevTools for Browser-Level Diagnosis", frontend_module)
+        self.assertIn("Do Not Replace Regression Coverage", frontend_module)
+
     def test_build_removes_stale_dist_outputs(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = self._copy_repo(temp_dir)
