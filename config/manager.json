@@ -26,7 +26,8 @@
     "ui-ux-pro-max-skill": { "enabled": true }
   },
   "mcp": {
-    "augment-context-engine": { "enabled": true }
+    "augment-context-engine": { "enabled": true },
+    "chrome-devtools": { "enabled": true }
   },
   "terminal": {
     "enabled": false

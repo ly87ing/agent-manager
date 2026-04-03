@@ -2,6 +2,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+from copy import deepcopy
 from pathlib import Path
 
 from src.toml_compat import tomllib
@@ -13,6 +14,65 @@ MODULE_PATH = ROOT / "agent-mcp" / "sync_mcp.py"
 
 
 class SyncMcpTests(unittest.TestCase):
+    def test_committed_mcp_policy_enables_chrome_devtools_latest(self):
+        definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
+        policy = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
+
+        chrome_devtools = definitions["servers"]["chrome-devtools"]
+        self.assertEqual(chrome_devtools["command"], "npx")
+        self.assertEqual(chrome_devtools["args"], ["-y", "chrome-devtools-mcp@latest"])
+        self.assertEqual(chrome_devtools.get("env", {}), {})
+        self.assertIsNone(chrome_devtools["agents"])
+        self.assertTrue(policy["mcp"]["chrome-devtools"]["enabled"])
+
+    def test_committed_chrome_devtools_definition_syncs_into_json_and_codex_toml(self):
+        definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
+        chrome_devtools = deepcopy(definitions["servers"]["chrome-devtools"])
+        chrome_devtools.update(
+            {
+                "enabled": True,
+                "_declared_in_policy": True,
+                "_sync_ready": True,
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            json_config_path = temp_root / "agent.json"
+            toml_config_path = temp_root / "config.toml"
+            toml_config_path.write_text('model = "gpt-5.4"\n', encoding="utf-8")
+
+            ok = sync_mcp.manage_mcp_config(
+                {
+                    "TmpAgent": str(json_config_path),
+                    "codex": {"path": str(toml_config_path), "format": "toml"},
+                },
+                {"chrome-devtools": chrome_devtools},
+            )
+
+            self.assertTrue(ok)
+            json_updated = json.loads(json_config_path.read_text(encoding="utf-8"))
+            self.assertEqual(json_updated["mcpServers"]["chrome-devtools"]["command"], "npx")
+            self.assertEqual(
+                json_updated["mcpServers"]["chrome-devtools"]["args"],
+                ["-y", "chrome-devtools-mcp@latest"],
+            )
+            self.assertEqual(
+                json_updated["mcpServers"]["chrome-devtools"]["env"]["_MANAGED_BY"],
+                "agent-manager",
+            )
+
+            toml_updated = tomllib.loads(toml_config_path.read_text(encoding="utf-8"))
+            self.assertEqual(toml_updated["mcp_servers"]["chrome-devtools"]["command"], "npx")
+            self.assertEqual(
+                toml_updated["mcp_servers"]["chrome-devtools"]["args"],
+                ["-y", "chrome-devtools-mcp@latest"],
+            )
+            self.assertEqual(
+                toml_updated["mcp_servers"]["chrome-devtools"]["env"]["_MANAGED_BY"],
+                "agent-manager",
+            )
+
     def test_invalid_policy_config_exits_non_zero(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

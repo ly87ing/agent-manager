@@ -7,6 +7,12 @@
         "AUGMENT_SESSION_AUTH": "${AUGMENT_SESSION_AUTH}"
       },
       "agents": null
+    },
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest"],
+      "env": {},
+      "agents": null
     }
   },
   "agent_paths": {

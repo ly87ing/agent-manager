@@ -19,6 +19,8 @@
    └────────────────┴──────────────────────────────────┴──────────┴─────────────┘
 ```
 
+默认受管 MCP 服务器当前包含 `augment-context-engine`（代码库检索）和 `chrome-devtools`（浏览器调试 / network / performance，使用官方推荐的 `npx -y chrome-devtools-mcp@latest`）。
+
 ## Agent 安装源依据 (Official Evidence)
 
 本项目的生命周期管理逻辑严格对齐以下官方发布渠道：

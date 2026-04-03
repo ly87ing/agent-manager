@@ -8,9 +8,11 @@
 
 1. [快速开始](#快速开始)
 2. [各 Agent 的 MCP 配置格式](#各-agent-的-mcp-配置格式)
-3. [augment-context-engine 专项说明](#augment-context-engine-专项说明)
-4. [常见问题与解决方案](#常见问题与解决方案)
-5. [调试技巧](#调试技巧)
+3. [当前仓库默认受管 MCP 服务器](#当前仓库默认受管-mcp-服务器)
+4. [augment-context-engine 专项说明](#augment-context-engine-专项说明)
+5. [chrome-devtools 专项说明](#chrome-devtools-专项说明)
+6. [常见问题与解决方案](#常见问题与解决方案)
+7. [调试技巧](#调试技巧)
 
 ---
 
@@ -34,6 +36,20 @@ cd agent-mcp && python3 sync_mcp.py --config ../config/manager.json --def-file .
 ### 手动配置
 
 如果自动配置失败，参考下文各 Agent 的配置格式手动添加。
+
+---
+
+## 当前仓库默认受管 MCP 服务器
+
+| Server | 用途 | 受管命令 | 凭证 | 默认策略 |
+|--------|------|----------|------|----------|
+| `augment-context-engine` | 代码库检索、语义搜索、codebase-retrieval | `auggie --mcp --mcp-auto-workspace` | `AUGMENT_SESSION_AUTH` | 启用 |
+| `chrome-devtools` | Chrome DevTools 浏览器调试、性能分析、network / console / screenshot | `npx -y chrome-devtools-mcp@latest` | 无 | 启用 |
+
+**维护约定**:
+- `chrome-devtools` 跟随官方 `@latest`，source-of-truth 维护在 `config/mcp.json`，由 `sync_mcp.py` 统一分发到所有受支持 Agent。
+- 首次调用 `chrome-devtools` 时，`npx` 可能会下载最新包版本；需要本机有可用的 Node.js / npm 运行时。
+- 如果后续需要统一增加 `--browserUrl`、`--headless`、`--isolated` 等参数，应修改 `config/mcp.json`，不要手改单个 Agent 的 MCP 配置文件。
 
 ---
 
@@ -341,6 +357,35 @@ Gemini CLI 的 stdio MCP 服务器采用**按需启动**策略：
 # 实际使用测试
 gemini -p "请用 codebase-retrieval 查看当前项目的结构"
 ```
+
+---
+
+## chrome-devtools 专项说明
+
+### 什么是 chrome-devtools
+
+`chrome-devtools` 是 Chrome 官方提供的 MCP server，用于让 Agent 直接连接和控制 Chrome，执行页面调试、network 观察、console 检查、性能 trace、截图和其他 DevTools 级别诊断。
+
+### 当前维护策略
+
+本项目默认通过以下命令受管分发给所有支持 MCP 的 Agent：
+
+```bash
+npx -y chrome-devtools-mcp@latest
+```
+
+这样可以跟随 Chrome DevTools 官方 MCP server 的最新发布，而不需要在每个 Agent 的本地配置里分别升级版本。
+
+### 使用约束
+
+- `chrome-devtools` 不依赖额外 secrets，占位符注入链不会为它加载专用凭证。
+- `npx` 会在首次运行或本地缓存失效时解析并下载最新版本，因此应将版本波动视为上游变更，而不是本仓库内的 drift。
+- 如果需要连接已运行的 Chrome、统一打开 headless、接受自签名证书或追加其他浏览器参数，应在 `config/mcp.json` 的 `args` 中集中维护，而不是在各 Agent 侧手工追加。
+
+### 官方参考
+
+- Chrome 官方博客：<https://developer.chrome.com/blog/chrome-devtools-mcp>
+- 官方仓库：<https://github.com/mcp/chromedevtools/chrome-devtools-mcp>
 
 ---
 
