@@ -1,0 +1,1195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>iPhone 远程连接 Mac 上 Codex CLI 方案</title>
+  <style>
+    :root {
+      --bg: #0c1412;
+      --bg-soft: #14211d;
+      --panel: rgba(18, 31, 27, 0.78);
+      --panel-strong: rgba(21, 37, 32, 0.92);
+      --line: rgba(163, 207, 190, 0.22);
+      --line-strong: rgba(163, 207, 190, 0.42);
+      --text: #f3efe5;
+      --muted: #b7c1bb;
+      --accent: #89e3b3;
+      --accent-strong: #51c38a;
+      --accent-warm: #f7c985;
+      --danger: #f48e8e;
+      --shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+      --radius-lg: 28px;
+      --radius-md: 18px;
+      --content-width: 110rem;
+      --nav-width: 16rem;
+      --rail-width: 18rem;
+      --hero-gap: clamp(2rem, 4vw, 4rem);
+      --body-font: "Avenir Next", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Segoe UI", sans-serif;
+      --display-font: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      font-family: var(--body-font);
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(81, 195, 138, 0.14), transparent 34%),
+        radial-gradient(circle at 90% 18%, rgba(247, 201, 133, 0.12), transparent 25%),
+        linear-gradient(180deg, #0d1613 0%, #0a100f 100%);
+      min-height: 100vh;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      background-size: 32px 32px;
+      mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0.75));
+    }
+
+    .progress {
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 3px;
+      width: 100%;
+      transform-origin: left center;
+      transform: scaleX(0);
+      background: linear-gradient(90deg, var(--accent), var(--accent-warm));
+      z-index: 50;
+    }
+
+    .shell {
+      width: min(calc(100% - 2.5rem), var(--content-width));
+      margin: 0 auto;
+      padding: 1.25rem 0 4rem;
+    }
+
+    .viewer-note {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.65rem;
+      padding: 0.6rem 0.95rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(18, 28, 25, 0.78);
+      color: var(--muted);
+      font-size: 0.92rem;
+      letter-spacing: 0.01em;
+    }
+
+    .viewer-note strong {
+      color: var(--text);
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: clamp(2.8rem, 5vw, 4.8rem);
+      margin-top: 1rem;
+      border: 1px solid var(--line);
+      border-radius: 36px;
+      background:
+        linear-gradient(135deg, rgba(16, 28, 24, 0.96), rgba(13, 20, 18, 0.82)),
+        radial-gradient(circle at 20% 20%, rgba(137, 227, 179, 0.18), transparent 35%);
+      box-shadow: var(--shadow);
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: auto -10% -24% auto;
+      width: 30rem;
+      height: 30rem;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(137, 227, 179, 0.12), transparent 65%);
+      filter: blur(24px);
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 0.45rem 0.85rem;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      color: var(--accent);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-size: 0.72rem;
+      background: rgba(14, 22, 19, 0.55);
+      backdrop-filter: blur(10px);
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.08fr) minmax(24rem, 0.92fr);
+      gap: var(--hero-gap);
+      align-items: center;
+      margin-top: 1.4rem;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-family: var(--display-font);
+      font-size: clamp(2.6rem, 6vw, 5.4rem);
+      line-height: 0.96;
+      letter-spacing: -0.04em;
+      max-width: 12ch;
+    }
+
+    .hero p.lead {
+      max-width: 48rem;
+      margin: 1.2rem 0 0;
+      color: var(--muted);
+      font-size: clamp(1rem, 1.18vw, 1.18rem);
+      line-height: 1.8;
+    }
+
+    .hero-keyline {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-top: 1.6rem;
+    }
+
+    .hero-keyline span {
+      padding: 0.62rem 0.95rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.03);
+      font-size: 0.92rem;
+    }
+
+    .diagram {
+      position: relative;
+      padding: 1.35rem;
+      border-radius: 26px;
+      border: 1px solid var(--line);
+      background: rgba(11, 18, 16, 0.78);
+      min-height: 26rem;
+    }
+
+    .diagram-grid {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .diagram-step {
+      position: relative;
+      padding: 1rem 1rem 1rem 1.2rem;
+      border-radius: 18px;
+      border: 1px solid rgba(137, 227, 179, 0.14);
+      background: linear-gradient(180deg, rgba(28, 44, 38, 0.6), rgba(12, 18, 16, 0.58));
+      transform: translateY(0);
+      animation: floatPulse 5.2s ease-in-out infinite;
+    }
+
+    .diagram-step:nth-child(2) { animation-delay: 0.35s; }
+    .diagram-step:nth-child(3) { animation-delay: 0.7s; }
+    .diagram-step:nth-child(4) { animation-delay: 1.05s; }
+    .diagram-step:nth-child(5) { animation-delay: 1.4s; }
+
+    .diagram-step::before {
+      content: "";
+      position: absolute;
+      left: 1.1rem;
+      top: -1rem;
+      width: 1px;
+      height: 1rem;
+      background: linear-gradient(180deg, transparent, rgba(137, 227, 179, 0.48));
+    }
+
+    .diagram-step:first-child::before {
+      display: none;
+    }
+
+    .diagram-step h3 {
+      margin: 0 0 0.22rem;
+      font-size: 1rem;
+      line-height: 1.4;
+    }
+
+    .diagram-step p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.65;
+      font-size: 0.94rem;
+    }
+
+    .diagram-step .tag {
+      display: inline-block;
+      margin-bottom: 0.6rem;
+      color: var(--accent);
+      font-size: 0.78rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(14rem, var(--nav-width)) minmax(0, 1fr) minmax(15rem, var(--rail-width));
+      gap: 2.2rem;
+      margin-top: 2rem;
+    }
+
+    .side-nav {
+      position: sticky;
+      top: 1rem;
+      align-self: start;
+      padding: 1.1rem;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: rgba(14, 21, 19, 0.72);
+      backdrop-filter: blur(14px);
+    }
+
+    .side-nav strong {
+      display: block;
+      margin-bottom: 0.9rem;
+      color: var(--accent);
+      font-size: 0.88rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .side-nav a {
+      display: block;
+      padding: 0.72rem 0.8rem;
+      margin-bottom: 0.35rem;
+      border-radius: 14px;
+      color: var(--muted);
+      text-decoration: none;
+      transition: background-color 180ms ease, color 180ms ease, transform 180ms ease;
+    }
+
+    .side-nav a:hover,
+    .side-nav a.active {
+      color: var(--text);
+      background: rgba(137, 227, 179, 0.12);
+      transform: translateX(4px);
+    }
+
+    .content {
+      display: grid;
+      gap: 1.65rem;
+    }
+
+    .desktop-rail {
+      position: sticky;
+      top: 1rem;
+      align-self: start;
+      display: grid;
+      gap: 1rem;
+    }
+
+    .rail-panel {
+      padding: 1.15rem 1.15rem 1.2rem;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: rgba(14, 21, 19, 0.74);
+      backdrop-filter: blur(14px);
+    }
+
+    .rail-panel h3 {
+      margin: 0;
+      font-size: 0.98rem;
+      color: var(--text);
+    }
+
+    .rail-panel p,
+    .rail-panel li {
+      color: var(--muted);
+      line-height: 1.75;
+      font-size: 0.93rem;
+    }
+
+    .rail-panel ul {
+      margin: 0.7rem 0 0;
+      padding-left: 1rem;
+    }
+
+    .rail-panel .section-label {
+      margin-bottom: 0.65rem;
+    }
+
+    .rail-panel.current-section {
+      border-color: rgba(137, 227, 179, 0.26);
+      background:
+        linear-gradient(180deg, rgba(19, 31, 27, 0.9), rgba(12, 19, 17, 0.82)),
+        radial-gradient(circle at top left, rgba(137, 227, 179, 0.08), transparent 50%);
+    }
+
+    .rail-kicker {
+      color: var(--accent-warm);
+      font-size: 0.78rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .rail-summary-title {
+      margin-top: 0.45rem;
+    }
+
+    .rail-summary-body {
+      margin-top: 0.65rem;
+    }
+
+    section {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--panel);
+      padding: clamp(1.7rem, 2.4vw, 2.6rem);
+      backdrop-filter: blur(12px);
+    }
+
+    section.reveal {
+      opacity: 0;
+      transform: translateY(22px);
+      transition: opacity 500ms ease, transform 500ms ease;
+    }
+
+    section.reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .section-label {
+      color: var(--accent);
+      font-size: 0.82rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 0.55rem;
+    }
+
+    h2 {
+      margin: 0;
+      font-family: var(--display-font);
+      font-size: clamp(1.75rem, 3vw, 2.8rem);
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+    }
+
+    .intro {
+      margin: 1rem 0 0;
+      max-width: 56rem;
+      color: var(--muted);
+      line-height: 1.85;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem 1.25rem;
+      margin-top: 1.4rem;
+    }
+
+    .plain-block {
+      padding: 1.1rem 0 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .plain-block:first-child {
+      border-top: 0;
+      padding-top: 0;
+    }
+
+    .plain-block h3 {
+      margin: 0 0 0.5rem;
+      font-size: 1.04rem;
+    }
+
+    .plain-block p,
+    .plain-block li {
+      color: var(--muted);
+      line-height: 1.8;
+    }
+
+    .plain-block ul,
+    .timeline ol,
+    .steps ol,
+    .faq-list {
+      margin: 0.6rem 0 0;
+      padding-left: 1.15rem;
+    }
+
+    .rack {
+      margin-top: 1.5rem;
+      display: grid;
+      gap: 0.85rem;
+    }
+
+    .rack-row {
+      display: grid;
+      grid-template-columns: minmax(10rem, 12rem) minmax(0, 1fr);
+      gap: 1rem;
+      padding: 0.95rem 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .rack-row:first-child {
+      border-top: 0;
+      padding-top: 0;
+    }
+
+    .rack-row strong {
+      display: block;
+      color: var(--text);
+      font-size: 0.95rem;
+    }
+
+    .rack-row p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.8;
+    }
+
+    .timeline {
+      margin-top: 1.4rem;
+      padding-left: 1rem;
+      border-left: 1px solid var(--line-strong);
+    }
+
+    .timeline li {
+      margin: 0 0 1.2rem;
+      padding-left: 0.8rem;
+      color: var(--muted);
+      line-height: 1.8;
+    }
+
+    .timeline li::marker {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .callout {
+      margin-top: 1.4rem;
+      padding: 1rem 1.1rem;
+      border-radius: 18px;
+      border: 1px solid rgba(247, 201, 133, 0.2);
+      background: linear-gradient(180deg, rgba(247, 201, 133, 0.09), rgba(247, 201, 133, 0.03));
+      color: var(--text);
+      line-height: 1.75;
+    }
+
+    pre {
+      margin: 1rem 0 0;
+      padding: 1rem 1rem 1.05rem;
+      overflow-x: auto;
+      border-radius: 18px;
+      border: 1px solid rgba(137, 227, 179, 0.15);
+      background: rgba(8, 12, 11, 0.9);
+      color: #d9f7e4;
+      font-family: "SFMono-Regular", "Menlo", "Monaco", "Courier New", monospace;
+      font-size: 0.93rem;
+      line-height: 1.7;
+    }
+
+    .code-shell {
+      position: relative;
+      margin-top: 1rem;
+    }
+
+    .code-shell pre {
+      margin-top: 0;
+      padding-top: 3rem;
+    }
+
+    .copy-button {
+      position: absolute;
+      top: 0.7rem;
+      right: 0.75rem;
+      z-index: 1;
+      border: 1px solid rgba(137, 227, 179, 0.18);
+      border-radius: 999px;
+      padding: 0.42rem 0.78rem;
+      background: rgba(18, 28, 25, 0.92);
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-family: var(--body-font);
+      cursor: pointer;
+      transition: border-color 180ms ease, color 180ms ease, background-color 180ms ease, transform 180ms ease;
+    }
+
+    .copy-button:hover {
+      color: var(--text);
+      border-color: rgba(137, 227, 179, 0.38);
+      transform: translateY(-1px);
+    }
+
+    .copy-button.is-copied {
+      color: var(--bg);
+      background: var(--accent);
+      border-color: transparent;
+    }
+
+    code {
+      font-family: "SFMono-Regular", "Menlo", "Monaco", "Courier New", monospace;
+      font-size: 0.95em;
+      color: #d6f7e2;
+    }
+
+    .mini-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+      margin-top: 1.4rem;
+    }
+
+    .mini-grid .plain-block {
+      padding-top: 0;
+      border-top: 0;
+    }
+
+    .status-list {
+      margin-top: 1rem;
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .status-item {
+      display: grid;
+      grid-template-columns: 8rem minmax(0, 1fr);
+      gap: 1rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid var(--line);
+    }
+
+    .status-item:first-child {
+      padding-top: 0;
+      border-top: 0;
+    }
+
+    .status-item strong {
+      color: var(--accent);
+    }
+
+    .faq-list li {
+      margin-bottom: 1rem;
+      color: var(--muted);
+      line-height: 1.8;
+    }
+
+    .faq-list strong {
+      color: var(--text);
+    }
+
+    .footer-note {
+      margin-top: 1.4rem;
+      color: var(--muted);
+      font-size: 0.95rem;
+      line-height: 1.8;
+    }
+
+    @keyframes floatPulse {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-4px); }
+    }
+
+    @media (max-width: 1280px) {
+      .layout {
+        grid-template-columns: minmax(14rem, var(--nav-width)) minmax(0, 1fr);
+      }
+
+      .desktop-rail {
+        position: static;
+        grid-column: 2;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 1024px) {
+      .hero-grid,
+      .layout,
+      .split,
+      .mini-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .side-nav {
+        position: static;
+        display: flex;
+        gap: 0.5rem;
+        overflow-x: auto;
+        padding: 0.8rem;
+      }
+
+      .side-nav strong {
+        display: none;
+      }
+
+      .side-nav a {
+        white-space: nowrap;
+        margin-bottom: 0;
+        padding-inline: 1rem;
+      }
+
+      .desktop-rail {
+        grid-column: auto;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .shell {
+        width: min(calc(100% - 1rem), 100%);
+        padding-bottom: 2rem;
+      }
+
+      .hero {
+        margin-top: 0.5rem;
+        border-radius: 24px;
+      }
+
+      .hero h1 {
+        max-width: 8ch;
+      }
+
+      .diagram {
+        min-height: auto;
+      }
+
+      .rack-row,
+      .status-item {
+        grid-template-columns: 1fr;
+      }
+
+      .desktop-rail {
+        display: none;
+      }
+
+      pre {
+        font-size: 0.88rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="progress" id="progress"></div>
+  <div class="shell">
+    <div class="viewer-note"><strong>推荐查看方式：</strong>PC 浏览器优先，移动端仅作补充阅读。</div>
+    <header class="hero" id="top">
+      <div class="eyebrow">Remote Codex Blueprint</div>
+      <div class="hero-grid">
+        <div>
+          <h1>用 iPhone 远程进入你 Mac 上的 Codex CLI</h1>
+          <p class="lead">
+            这是一条最短、最稳、最适合长期编程的链路。手机不是把任务发给中间代理，而是通过
+            <code>Tailscale</code> 接入你的私有网络，借助 <code>SSH</code> 直接进入 Mac 的 shell，
+            再由 <code>tmux</code> 托管会话，让 <code>Codex CLI</code> 一直运行在你自己的机器上。
+          </p>
+          <div class="hero-keyline">
+            <span>iPhone 负责入口</span>
+            <span>Tailscale 负责私网连通</span>
+            <span>Termius 负责 SSH 终端</span>
+            <span>tmux 负责会话保活</span>
+            <span>Codex CLI 负责编程任务</span>
+          </div>
+        </div>
+        <div class="diagram" aria-label="全链路架构图">
+          <div class="diagram-grid">
+            <div class="diagram-step">
+              <span class="tag">Step 1</span>
+              <h3>iPhone + Tailscale</h3>
+              <p>手机先加入同一个 tailnet。它获得一条只对你的私网可见的访问路径，不需要公网暴露 Mac 的 22 端口。</p>
+            </div>
+            <div class="diagram-step">
+              <span class="tag">Step 2</span>
+              <h3>Termius 发起 SSH</h3>
+              <p>你在 Termius 点一下保存好的 Host，连接到 <code>YOUR_MAC_TAILNET_FQDN</code>。</p>
+            </div>
+            <div class="diagram-step">
+              <span class="tag">Step 3</span>
+              <h3>Mac Remote Login</h3>
+              <p>macOS 的 <code>Remote Login</code> 接收 SSH，会话落到你自己的用户 shell。</p>
+            </div>
+            <div class="diagram-step">
+              <span class="tag">Step 4</span>
+              <h3>tmux 接管会话</h3>
+              <p>连接后自动附着到 <code>codex</code> session；断网、锁屏、切应用都不会杀掉正在运行的任务。</p>
+            </div>
+            <div class="diagram-step">
+              <span class="tag">Step 5</span>
+              <h3>Codex CLI 继续工作</h3>
+              <p>你看到和控制的是 Mac 本机上的真实终端上下文，包括仓库、测试、日志和文件系统。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="layout">
+      <nav class="side-nav" aria-label="章节导航">
+        <strong>目录</strong>
+        <a href="#overview">总览</a>
+        <a href="#architecture">架构</a>
+        <a href="#principle">原理</a>
+        <a href="#flow">消息流</a>
+        <a href="#mac">Mac 端</a>
+        <a href="#ios">iOS 端</a>
+        <a href="#routine">日常使用</a>
+        <a href="#security">安全边界</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+
+      <main class="content">
+        <section id="overview" class="reveal" data-rail-title="总览" data-rail-summary="这条方案的核心是把 iPhone 变成 Mac 的安全远程终端入口，而不是把任务先交给中间机器人再转发给 Codex。">
+          <div class="section-label">Overview</div>
+          <h2>一句话方案</h2>
+          <p class="intro">
+            你要实现的是“在外面拿起手机，就能继续使用家里或公司那台 Mac 上的 Codex CLI 做编程任务”。最合适的链路不是消息机器人，也不是另一个 AI 平台包一层，而是把 iPhone 变成那台 Mac 的安全远程终端入口。
+          </p>
+          <div class="callout">
+            最终方案固定为：<strong>iPhone 上装 Tailscale 和 Termius，Mac 上装 Tailscale，开启 Remote Login，使用 tmux 持久化 Codex CLI 会话。</strong>
+          </div>
+          <div class="callout">
+            文中的用户名、域名、Tailscale IP 和 Host 名都应视为占位符。真实值请保存到你的 secret 库或私密配置中，不要写回当前仓库。
+          </div>
+          <div class="split">
+            <div class="plain-block">
+              <h3>这套方案解决什么问题</h3>
+              <ul>
+                <li>不在公网暴露 SSH 端口。</li>
+                <li>手机掉后台或网络切换时，不丢失 Codex 会话。</li>
+                <li>你控制的是本机真实仓库，不是第三方平台里的镜像环境。</li>
+                <li>链路短，出问题时容易排查。</li>
+              </ul>
+            </div>
+            <div class="plain-block">
+              <h3>这套方案不是什么</h3>
+              <ul>
+                <li>不是“飞书发一句话，后台自动派任务”的异步机器人。</li>
+                <li>不是“云端 Codex 替你保管工作目录”的托管方案。</li>
+                <li>不是“远程桌面控制 iTerm2 图形界面”。</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section id="architecture" class="reveal" data-rail-title="架构" data-rail-summary="整条链路拆成五个清晰组件：iPhone、Tailscale、Termius、macOS Remote Login、tmux 加 Codex CLI，各自职责单一。">
+          <div class="section-label">Architecture</div>
+          <h2>完整架构拆解</h2>
+          <p class="intro">
+            这条链路只有五个核心组件。每个组件只有一个明确职责，所以整体非常稳定，也更容易知道哪里出了问题。
+          </p>
+          <div class="rack">
+            <div class="rack-row">
+              <strong>iPhone</strong>
+              <p>你的远程操作入口。负责发起连接、输入命令、查看 Codex 输出。它不执行编程任务本身。</p>
+            </div>
+            <div class="rack-row">
+              <strong>Tailscale</strong>
+              <p>负责把 iPhone 和 Mac 放进同一个私网 tailnet。它解决的是“怎么安全连上去”，不是“怎么操作终端”。</p>
+            </div>
+            <div class="rack-row">
+              <strong>Termius</strong>
+              <p>iPhone 上的 SSH 客户端。它通过 Tailscale 网络连接到 Mac 的 SSH 服务，并负责你的终端交互体验。</p>
+            </div>
+            <div class="rack-row">
+              <strong>macOS Remote Login</strong>
+              <p>Mac 自带的 SSH server。开启后，它会接收来自 tailnet 内部的 SSH 连接，并把你送进对应的用户 shell。</p>
+            </div>
+            <div class="rack-row">
+              <strong>tmux + Codex CLI</strong>
+              <p><code>tmux</code> 负责让远程会话不中断，<code>Codex CLI</code> 负责真正的代码理解、修改、测试与执行。</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="principle" class="reveal" data-rail-title="原理" data-rail-summary="Tailscale 解决网络打通，SSH 解决终端建立，tmux 解决会话保活，Codex CLI 始终在 Mac 本机运行。">
+          <div class="section-label">Principle</div>
+          <h2>原理是怎样运作的</h2>
+          <div class="mini-grid">
+            <div class="plain-block">
+              <h3>1. Tailscale 做的是网络层打通</h3>
+              <p>
+                Tailscale 基于 WireGuard 思路把设备放进同一个私网。你的 iPhone 和 Mac 都登录同一个 tailnet 后，
+                iPhone 就能通过 Tailscale IP 或 MagicDNS 名称访问 Mac，例如 <code>YOUR_MAC_TAILNET_FQDN</code>。
+              </p>
+            </div>
+            <div class="plain-block">
+              <h3>2. SSH 做的是终端会话建立</h3>
+              <p>
+                Termius 发起 SSH 连接，macOS 的 <code>Remote Login</code> 接受该连接。认证通过后，你拿到的是
+                Mac 上那个用户的 shell，而不是某个中间代理包装出来的终端。
+              </p>
+            </div>
+            <div class="plain-block">
+              <h3>3. tmux 做的是会话保活</h3>
+              <p>
+                iOS 很容易切后台、锁屏或切换网络。没有 <code>tmux</code> 时，SSH 断开通常就意味着当前终端进程也会终止。
+                用 <code>tmux</code> 后，Codex 在后台 session 里持续运行，下一次连接只需要重新 attach。
+              </p>
+            </div>
+            <div class="plain-block">
+              <h3>4. Codex CLI 始终运行在 Mac 本机</h3>
+              <p>
+                仓库、依赖、测试工具、git 状态、SSH key、环境变量，都仍然在你的 Mac 上。手机只是远程入口，这意味着本机开发体验和远程开发体验几乎是一致的。
+              </p>
+            </div>
+          </div>
+          <div class="callout">
+            这也是为什么不推荐把这件事先做成“微信消息 -> 中间代理 -> 再调 Codex”的原因：对真正的编程任务来说，原生终端链路更短、更透明、上下文也更完整。
+          </div>
+        </section>
+
+        <section id="flow" class="reveal" data-rail-title="消息流" data-rail-summary="中间传输的是标准 SSH 终端字节流：Termius 发起连接，macOS 创建 shell，脚本附着 tmux，Codex 输出再经 SSH 回到手机。">
+          <div class="section-label">Flow</div>
+          <h2>中间消息是如何交互的</h2>
+          <p class="intro">
+            整个全链路里，真正传输的不是“业务消息包”，而是标准 SSH 终端字节流。你点开 Host 之后，控制和输出按下面顺序流动。
+          </p>
+          <div class="timeline">
+            <ol>
+              <li>iPhone 打开 Tailscale，确认已经接入你的 tailnet。</li>
+              <li>你在 Termius 点击一个预先保存好的 Host，例如 <code>codex-remote-host</code>。</li>
+              <li>Termius 通过 Tailscale 网络，向 <code>YOUR_MAC_TAILNET_FQDN:22</code> 发起 SSH 连接。</li>
+              <li>Mac 上的 <code>Remote Login</code> 收到连接请求，校验用户名和 SSH key。</li>
+              <li>认证通过后，macOS 为该用户启动一个 shell 会话。</li>
+              <li>登录后自动执行一个启动脚本，例如 <code>~/bin/codex-remote</code>。</li>
+              <li>脚本检查是否存在名为 <code>codex</code> 的 <code>tmux</code> session；没有就创建，有就直接附着。</li>
+              <li><code>tmux</code> 内部已经启动或继续显示 <code>Codex CLI</code>；你接下来在手机上的输入，会变成 Mac 上终端的标准输入，Codex 的输出再经 SSH 流回 iPhone。</li>
+            </ol>
+          </div>
+          <pre><code>iPhone
+  -> Tailscale tailnet
+  -> SSH(Termius)
+  -> macOS Remote Login
+  -> login shell
+  -> ~/bin/codex-remote
+  -> tmux session: codex
+  -> Codex CLI
+  -> stdout / stderr
+  -> SSH 回传到 iPhone</code></pre>
+        </section>
+
+        <section id="mac" class="reveal" data-rail-title="Mac 端" data-rail-summary="Mac 是执行端，需要负责 Tailscale 在线、Remote Login、tmux 会话和 Codex CLI 的长期运行。">
+          <div class="section-label">Mac Setup</div>
+          <h2>Mac 上需要做什么</h2>
+          <p class="intro">
+            Mac 是执行端。它负责运行 Tailscale、暴露 SSH、保持 tmux 会话，并在这个会话里长期运行你的 Codex CLI。
+          </p>
+          <div class="steps">
+            <div class="plain-block">
+              <h3>步骤 1：安装并登录 Tailscale</h3>
+              <p>在 Mac 上安装 Tailscale 官方客户端，登录你的账号，并确认它已经加入目标 tailnet。</p>
+            </div>
+            <div class="plain-block">
+              <h3>步骤 2：开启 Remote Login</h3>
+              <p>打开系统设置，进入 <code>General -> Sharing -> Remote Login</code>，只允许你自己的账号登录。</p>
+              <p>如果你的代码目录在 <code>Desktop</code> 或 <code>Documents</code> 等受保护路径，可按需打开 <code>Allow full disk access for remote users</code>。</p>
+            </div>
+            <div class="plain-block">
+              <h3>步骤 3：安装 tmux</h3>
+              <p>建议通过 Homebrew 安装，确保断线重连时会话仍然存在。</p>
+              <pre><code>brew install tmux</code></pre>
+            </div>
+            <div class="plain-block">
+              <h3>步骤 4：确保 Codex CLI 可直接运行</h3>
+              <p>先在本机终端里确认 <code>codex</code> 已安装、已登录、能在目标仓库正常运行。</p>
+            </div>
+            <div class="plain-block">
+              <h3>步骤 5：准备一键附着脚本</h3>
+              <p>这个脚本的作用是：如果 <code>tmux</code> session 不存在，就创建并启动 Codex；如果已存在，就直接附着进去。</p>
+              <pre><code>mkdir -p ~/bin
+
+cat &gt; ~/bin/codex-remote &lt;&lt;'EOF'
+#!/bin/zsh
+set -e
+
+SESSION="codex"
+PROJECT="$HOME/code/your-repo"
+
+if ! tmux has-session -t "$SESSION" 2&gt;/dev/null; then
+  tmux new-session -d -s "$SESSION" -c "$PROJECT" "codex"
+fi
+
+exec tmux attach -t "$SESSION"
+EOF
+
+chmod +x ~/bin/codex-remote</code></pre>
+            </div>
+            <div class="plain-block">
+              <h3>步骤 6：可选，本机别名</h3>
+              <p>如果你也想在 Mac 本机快速进入同一个会话，可以在 <code>~/.zshrc</code> 里加一条别名。</p>
+              <pre><code>alias cdx='~/bin/codex-remote'</code></pre>
+            </div>
+          </div>
+        </section>
+
+        <section id="ios" class="reveal" data-rail-title="iOS 端" data-rail-summary="iPhone 只承担入口角色：加入 tailnet，并通过 Termius 以 SSH key 方式一键连到 Mac。">
+          <div class="section-label">iOS Setup</div>
+          <h2>iPhone 上需要做什么</h2>
+          <p class="intro">
+            iPhone 只承担两个角色：接入 tailnet，以及作为 SSH 终端使用。推荐组合是 <code>Tailscale + Termius</code>。
+          </p>
+          <div class="split">
+            <div class="plain-block">
+              <h3>步骤 1：安装并登录 Tailscale</h3>
+              <ul>
+                <li>在 App Store 安装 Tailscale。</li>
+                <li>登录与 Mac 相同的账号或同一个组织下的 tailnet。</li>
+                <li>确认在 Tailscale 设备列表中能看到你的 Mac。</li>
+              </ul>
+            </div>
+            <div class="plain-block">
+              <h3>步骤 2：安装 Termius</h3>
+              <ul>
+                <li>在 App Store 安装 Termius。</li>
+                <li>导入或生成你的 SSH key。</li>
+                <li>确保对应公钥已经在 Mac 的 <code>~/.ssh/authorized_keys</code> 里。</li>
+              </ul>
+            </div>
+          </div>
+          <div class="plain-block">
+            <h3>步骤 3：在 Termius 新建 Host</h3>
+            <p>推荐配置如下。这样你以后只需要点一下 Host 就能进入 Codex 会话。</p>
+            <pre><code>Name: codex-remote-host
+Address: YOUR_MAC_TAILNET_FQDN
+Port: 22
+Username: YOUR_MAC_USER
+Authentication: SSH Key
+Startup Snippet: ~/bin/codex-remote</code></pre>
+          </div>
+          <div class="plain-block">
+            <h3>步骤 4：首次连接验证</h3>
+            <p>点开这个 Host 后，如果一切配置正确，你看到的不会是普通 shell 提示符，而是直接进入或附着到你 Mac 上的 Codex 会话。</p>
+          </div>
+        </section>
+
+        <section id="routine" class="reveal" data-rail-title="日常使用" data-rail-summary="日常动作被收敛成一套稳定流程：Mac 保持在线，iPhone 打开 Tailscale 和 Termius，tmux 负责恢复原会话。">
+          <div class="section-label">Routine</div>
+          <h2>日常怎么使用</h2>
+          <div class="status-list">
+            <div class="status-item">
+              <strong>出门前</strong>
+              <div>确认 Mac 开机、联网、Tailscale 在线，且本机可以正常运行 <code>codex</code>。</div>
+            </div>
+            <div class="status-item">
+              <strong>开始工作</strong>
+              <div>iPhone 打开 Tailscale，随后打开 Termius，点一下 <code>codex-remote-host</code> Host。</div>
+            </div>
+            <div class="status-item">
+              <strong>继续任务</strong>
+              <div>如果此前的 Codex 还在跑，你会重新回到原来的 <code>tmux</code> 会话；如果没有，会自动创建新会话。</div>
+            </div>
+            <div class="status-item">
+              <strong>临时离开</strong>
+              <div>直接退出或把 iPhone 切后台即可。SSH 断开不会终止 <code>tmux</code> 里的 Codex。</div>
+            </div>
+            <div class="status-item">
+              <strong>切换项目</strong>
+              <div>可以为不同仓库准备不同脚本或不同 <code>tmux</code> session，例如 <code>codex-work</code>、<code>codex-side</code>。</div>
+            </div>
+          </div>
+          <div class="plain-block">
+            <h3>多项目脚本示例</h3>
+            <pre><code>#!/bin/zsh
+set -e
+
+SESSION="codex-work"
+PROJECT="$HOME/work/project-a"
+
+if ! tmux has-session -t "$SESSION" 2&gt;/dev/null; then
+  tmux new-session -d -s "$SESSION" -c "$PROJECT" "codex"
+fi
+
+exec tmux attach -t "$SESSION"</code></pre>
+          </div>
+        </section>
+
+        <section id="security" class="reveal" data-rail-title="安全边界" data-rail-summary="安全重点是不要暴露公网 22 端口，只允许指定账号登录，并优先使用 SSH key。">
+          <div class="section-label">Security</div>
+          <h2>安全边界与推荐做法</h2>
+          <p class="intro">
+            这套方案的核心优势之一就是安全边界清晰。只要你不主动暴露公网 SSH 端口，它的攻击面会比传统“公网开放 22 端口 + 密码登录”小很多。
+          </p>
+          <div class="split">
+            <div class="plain-block">
+              <h3>建议保留的边界</h3>
+              <ul>
+                <li>不要做路由器端口映射，不把 22 端口暴露到公网。</li>
+                <li>Remote Login 只允许指定账号，而不是 <code>All users</code>。</li>
+                <li>优先使用 SSH key，不要长期依赖密码登录。</li>
+                <li>Codex 仍在本机运行，代码和凭证不离开 Mac。</li>
+              </ul>
+            </div>
+            <div class="plain-block">
+              <h3>后续可加固的项</h3>
+              <ul>
+                <li>给 Tailscale 开启更细的 ACL，只允许你的手机访问这台 Mac。</li>
+                <li>为不同仓库设置独立会话和只读检查脚本。</li>
+                <li>视需要使用 <code>mosh</code> 或更强的终端保活策略。</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section id="faq" class="reveal" data-rail-title="FAQ" data-rail-summary="这里收口了几个高频问题，包括为什么 Mac 不需要装 Termius、为什么不推荐远程桌面、以及 tmux 的必要性。">
+          <div class="section-label">FAQ</div>
+          <h2>常见问题</h2>
+          <ol class="faq-list">
+            <li><strong>Mac 端也要装 Termius 吗？</strong> 不需要。Termius 只是 iPhone 上的 SSH 客户端，Mac 端只需要 Tailscale、Remote Login、tmux 和 Codex CLI。</li>
+            <li><strong>为什么不直接用远程桌面控制 iTerm2？</strong> 因为手机屏幕小、远程桌面延迟高，而且文本终端比图形远程桌面更稳、更清晰。</li>
+            <li><strong>为什么不用 WorkBuddy 或飞书机器人？</strong> 那些方案更适合消息派单或自动化任务，不如原生 SSH 终端适合持续编程。</li>
+            <li><strong>没有 tmux 会怎样？</strong> iPhone 切后台或网络断开时，Codex 很可能跟着断。tmux 是整个方案里最关键的保活层。</li>
+            <li><strong>如果 Mac 休眠了怎么办？</strong> iPhone 无法连接到已休眠且离线的 Mac，所以实际使用时要保证 Mac 处于开机联网状态。</li>
+          </ol>
+          <p class="footer-note">
+            这份页面的目标不是介绍所有可能的远程开发方案，而是固定出一条最适合你当前环境的主路径：<code>iPhone + Tailscale + Termius -> Mac -> tmux -> Codex CLI</code>。
+          </p>
+        </section>
+      </main>
+
+      <aside class="desktop-rail" aria-label="桌面侧栏信息">
+        <div class="rail-panel current-section">
+          <div class="section-label">Current Section</div>
+          <div class="rail-kicker" id="rail-kicker">正在阅读</div>
+          <h3 class="rail-summary-title" id="rail-title">总览</h3>
+          <p class="rail-summary-body" id="rail-summary">这条方案的核心是把 iPhone 变成 Mac 的安全远程终端入口，而不是把任务先交给中间机器人再转发给 Codex。</p>
+        </div>
+        <div class="rail-panel">
+          <div class="section-label">Desktop First</div>
+          <h3>这份页面怎么读</h3>
+          <p>左侧用来跳转章节，中间是完整说明，右侧固定显示关键结论和最短操作路径，适合在 PC 上边看边配置。</p>
+        </div>
+        <div class="rail-panel">
+          <div class="section-label">Quick Start</div>
+          <h3>最短落地顺序</h3>
+          <ul>
+            <li>Mac 安装并登录 Tailscale</li>
+            <li>Mac 开启 Remote Login</li>
+            <li>Mac 安装 tmux 并准备 <code>~/bin/codex-remote</code></li>
+            <li>iPhone 安装 Tailscale 和 Termius</li>
+            <li>Termius Host 指向 <code>YOUR_MAC_TAILNET_FQDN</code></li>
+          </ul>
+        </div>
+        <div class="rail-panel">
+          <div class="section-label">Entry Command</div>
+          <h3>远程进入的最终效果</h3>
+          <pre><code>Host: codex-remote-host
+Address: YOUR_MAC_TAILNET_FQDN
+Startup: ~/bin/codex-remote</code></pre>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    const sections = [...document.querySelectorAll("main section")];
+    const navLinks = [...document.querySelectorAll(".side-nav a")];
+    const progress = document.getElementById("progress");
+    const railTitle = document.getElementById("rail-title");
+    const railSummary = document.getElementById("rail-summary");
+    const railKicker = document.getElementById("rail-kicker");
+    const preBlocks = [...document.querySelectorAll("pre")];
+
+    const setRailContent = (section) => {
+      if (!section || !railTitle || !railSummary || !railKicker) return;
+      railTitle.textContent = section.dataset.railTitle || section.querySelector("h2")?.textContent || "当前章节";
+      railSummary.textContent = section.dataset.railSummary || "";
+      railKicker.textContent = "正在阅读 · " + (section.dataset.railTitle || "章节");
+    };
+
+    const copyText = async (text) => {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+
+      const helper = document.createElement("textarea");
+      helper.value = text;
+      helper.setAttribute("readonly", "");
+      helper.style.position = "absolute";
+      helper.style.left = "-9999px";
+      document.body.appendChild(helper);
+      helper.select();
+      const copied = document.execCommand("copy");
+      document.body.removeChild(helper);
+      return copied;
+    };
+
+    preBlocks.forEach((pre) => {
+      const wrapper = document.createElement("div");
+      wrapper.className = "code-shell";
+      pre.parentNode.insertBefore(wrapper, pre);
+      wrapper.appendChild(pre);
+
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "copy-button";
+      button.textContent = "复制";
+      button.addEventListener("click", async () => {
+        const text = pre.innerText;
+        const original = button.textContent;
+        try {
+          const copied = await copyText(text);
+          button.textContent = copied ? "已复制" : "复制失败";
+          button.classList.toggle("is-copied", copied);
+        } catch (error) {
+          button.textContent = "复制失败";
+        }
+
+        window.setTimeout(() => {
+          button.textContent = original;
+          button.classList.remove("is-copied");
+        }, 1400);
+      });
+
+      wrapper.appendChild(button);
+    });
+
+    const sectionObserver = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("visible");
+        }
+      });
+    }, { threshold: 0.14 });
+
+    sections.forEach((section) => sectionObserver.observe(section));
+
+    const navObserver = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        setRailContent(entry.target);
+        navLinks.forEach((link) => {
+          link.classList.toggle("active", link.getAttribute("href") === "#" + entry.target.id);
+          if (link.classList.contains("active")) {
+            link.setAttribute("aria-current", "true");
+          } else {
+            link.removeAttribute("aria-current");
+          }
+        });
+      });
+    }, { rootMargin: "-35% 0px -50% 0px", threshold: 0.01 });
+
+    sections.forEach((section) => navObserver.observe(section));
+    if (sections.length) setRailContent(sections[0]);
+
+    const updateProgress = () => {
+      const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+      const ratio = scrollable > 0 ? window.scrollY / scrollable : 0;
+      progress.style.transform = `scaleX(${Math.min(Math.max(ratio, 0), 1)})`;
+    };
+
+    updateProgress();
+    window.addEventListener("scroll", updateProgress, { passive: true });
+    window.addEventListener("resize", updateProgress);
+  </script>
+</body>
+</html>
