@@ -351,6 +351,25 @@ def create_link(source, link, dry_run=False):
             logging.info(f"链接: {rel_source} -> {link.name}")
     except Exception as e: logging.error(f"链接失败: {e}")
 
+def resolve_link_target(link_path):
+    raw_target = Path(os.readlink(link_path)).expanduser()
+    resolved_target = raw_target if raw_target.is_absolute() else (link_path.parent / raw_target)
+    return resolved_target.resolve(strict=False)
+
+
+def is_path_within_base(path, base_path):
+    resolved_path = Path(path).resolve(strict=False)
+    resolved_base = Path(base_path).resolve(strict=False)
+    return resolved_path == resolved_base or resolved_base in resolved_path.parents
+
+
+def link_points_within_base(link_path, base_path):
+    try:
+        return is_path_within_base(resolve_link_target(link_path), base_path)
+    except OSError:
+        return False
+
+
 def scrub_dead_links(agents_config, base_dir, dry_run=False):
     base_dir = Path(base_dir).resolve()
     for agent_name, target_path in agents_config.items():
@@ -359,16 +378,10 @@ def scrub_dead_links(agents_config, base_dir, dry_run=False):
         for item in target_base.iterdir():
             if not item.is_symlink() or item.exists():
                 continue
-            try:
-                raw_target = Path(os.readlink(item)).expanduser()
-                resolved_target = raw_target if raw_target.is_absolute() else (item.parent / raw_target)
-                resolved_target = resolved_target.resolve(strict=False)
-                if str(resolved_target).startswith(str(base_dir)):
-                    logging.info(f"[AGENT: {agent_name}] 移除死链: {item.name}")
-                    if not dry_run:
-                        item.unlink()
-            except OSError:
-                continue
+            if link_points_within_base(item, base_dir):
+                logging.info(f"[AGENT: {agent_name}] 移除死链: {item.name}")
+                if not dry_run:
+                    item.unlink()
 
 def is_active_skill_target(agent_name, target_path, agent_defs):
     agent_def = agent_defs.get(agent_name)
@@ -455,6 +468,8 @@ def remove_repo_skill_links(repo_path, targets, allowed_agents=None, dry_run=Fal
             if not item.is_symlink():
                 continue
             if item.name not in managed_skill_names:
+                continue
+            if not link_points_within_base(item, repo_path):
                 continue
             logging.error(f"[AGENT: {agent_name}] 移除来自失效仓库的 skill 链接: {item.name}")
             if not dry_run:

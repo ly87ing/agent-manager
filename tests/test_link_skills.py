@@ -408,6 +408,66 @@ class LinkSkillsTests(unittest.TestCase):
             self.assertTrue(alias_link.exists(), combined)
             self.assertTrue(alias_link.is_symlink(), combined)
 
+    def test_missing_policy_repository_preserves_same_name_unmanaged_live_link(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            base_dir = temp_root / "skills"
+            repo_dir = base_dir / "repositories" / "ignored-skill"
+            skill_dir = repo_dir / "bundle" / "my-skill"
+            external_skill = temp_root / "external" / "my-skill"
+            target_dir = temp_root / "targets" / "claude"
+            target_dir.mkdir(parents=True)
+            repo_dir.mkdir(parents=True)
+            (repo_dir / ".git").mkdir()
+            (repo_dir / ".agent-manager-owned").write_text("true\n", encoding="utf-8")
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text("---\nname: my-skill\n---\n", encoding="utf-8")
+            external_skill.mkdir(parents=True)
+            live_link = target_dir / "my-skill"
+            live_link.symlink_to(external_skill)
+            config_path.write_text('{"skills": {}}', encoding="utf-8")
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "ignored-skill": {
+                                "url": "https://example.invalid/repo.git",
+                                "agents": ["claude-code"],
+                            }
+                        },
+                        "agents": {
+                            "claude-code": str(target_dir),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(base_dir),
+                    "--yes",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertTrue(live_link.exists(), combined)
+            self.assertTrue(live_link.is_symlink(), combined)
+
     def test_managed_skill_name_replaces_local_directory_without_touching_other_names(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -1500,6 +1560,23 @@ class LinkSkillsTests(unittest.TestCase):
             link_skills.scrub_dead_links({"TestAgent": str(agent_dir)}, managed_dir)
 
             self.assertFalse(link.is_symlink())
+
+    def test_scrub_dead_links_preserves_broken_link_outside_managed_dir_with_same_prefix(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            managed_dir = temp_root / "managed"
+            foreign_dir = temp_root / "managed-foreign"
+            agent_dir = temp_root / "agent" / "skills"
+            managed_dir.mkdir()
+            foreign_dir.mkdir()
+            agent_dir.mkdir(parents=True)
+
+            link = agent_dir / "skill"
+            link.symlink_to(foreign_dir / "missing-skill")
+
+            link_skills.scrub_dead_links({"TestAgent": str(agent_dir)}, managed_dir)
+
+            self.assertTrue(link.is_symlink())
 
     def test_default_skill_catalog_includes_ui_ux_pro_max_repo_with_explicit_agents(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
