@@ -107,6 +107,7 @@
 ## Secrets 初始化
 
 - 不再内置固定的 secrets 仓库地址。
+- 真实的 `Tailscale` / `SSH` / 远程访问信息也必须只存放在外部私有 `secrets/` 仓库；当前仓库仅允许占位符和通用说明。
 - 需要通过环境变量 `SECRETS_REPO_URL` 或脚本参数显式提供仓库地址，例如：
 
 ```bash
