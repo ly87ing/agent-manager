@@ -4,13 +4,35 @@
       "install": "npm install -g @playwright/cli@latest",
       "uninstall": "npm uninstall -g @playwright/cli",
       "upgrade": "npm install -g @playwright/cli@latest",
-      "ready_check": "bin:playwright-cli"
+      "setup": "playwright-cli install-browser",
+      "ready_check": "bin:playwright-cli",
+      "runtime_ready_globs_any": [
+        "~/Library/Caches/ms-playwright/chromium-*",
+        "~/.cache/ms-playwright/chromium-*",
+        "~/AppData/Local/ms-playwright/chromium-*"
+      ]
     },
     "agent-browser": {
       "install": "npm install -g agent-browser@latest",
       "uninstall": "npm uninstall -g agent-browser",
       "upgrade": "npm install -g agent-browser@latest",
-      "ready_check": "bin:agent-browser"
+      "setup": "agent-browser install",
+      "ready_check": "bin:agent-browser",
+      "runtime_ready_checks_any": [
+        "app:/Applications/Google Chrome.app",
+        "app:/Applications/Chromium.app",
+        "app:C:/Program Files/Google/Chrome/Application/chrome.exe",
+        "app:C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+        "bin:google-chrome",
+        "bin:google-chrome-stable",
+        "bin:chromium",
+        "bin:chromium-browser"
+      ],
+      "runtime_ready_globs_any": [
+        "~/Library/Caches/ms-playwright/chromium-*",
+        "~/.cache/ms-playwright/chromium-*",
+        "~/AppData/Local/ms-playwright/chromium-*"
+      ]
     },
     "auggie": {
       "install": "npm install -g @augmentcode/auggie",

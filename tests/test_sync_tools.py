@@ -21,10 +21,174 @@ class SyncToolsTests(unittest.TestCase):
         self.assertTrue(manager["tools"]["agent-browser"]["enabled"])
         self.assertEqual(tool_defs["playwright-cli"]["install"], "npm install -g @playwright/cli@latest")
         self.assertEqual(tool_defs["playwright-cli"]["upgrade"], "npm install -g @playwright/cli@latest")
+        self.assertEqual(tool_defs["playwright-cli"]["setup"], "playwright-cli install-browser")
         self.assertEqual(tool_defs["playwright-cli"]["ready_check"], "bin:playwright-cli")
+        self.assertIn("~/Library/Caches/ms-playwright/chromium-*", tool_defs["playwright-cli"]["runtime_ready_globs_any"])
         self.assertEqual(tool_defs["agent-browser"]["install"], "npm install -g agent-browser@latest")
         self.assertEqual(tool_defs["agent-browser"]["upgrade"], "npm install -g agent-browser@latest")
+        self.assertEqual(tool_defs["agent-browser"]["setup"], "agent-browser install")
         self.assertEqual(tool_defs["agent-browser"]["ready_check"], "bin:agent-browser")
+        self.assertIn("app:/Applications/Google Chrome.app", tool_defs["agent-browser"]["runtime_ready_checks_any"])
+        self.assertIn("~/Library/Caches/ms-playwright/chromium-*", tool_defs["agent-browser"]["runtime_ready_globs_any"])
+
+    def test_install_based_tool_with_setup_requires_setup_marker(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ready = sync_tools.detect_tool_readiness(
+                "agent-browser",
+                {
+                    "install": "npm install -g agent-browser@latest",
+                    "setup": "agent-browser install",
+                    "ready_check": "bin:agent-browser",
+                },
+                temp_dir,
+            )
+
+        self.assertFalse(ready)
+
+    def test_install_based_tool_runs_setup_and_marks_ready(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_dir = Path(temp_dir) / "agent-browser"
+            state = {"binary_ready": False, "runtime_ready": False}
+
+            def fake_run_cmd(cmd, cwd=None, timeout=300):
+                if cmd == "npm install -g agent-browser@latest":
+                    state["binary_ready"] = True
+                    return True, "installed"
+                if cmd == "agent-browser install":
+                    state["runtime_ready"] = True
+                    return True, "setup ok"
+                return True, ""
+
+            def fake_check_ready(name, ready_check):
+                return state["binary_ready"]
+
+            def fake_detect_tool_readiness(name, definition, repo_root, inventory=None):
+                return state["binary_ready"] and state["runtime_ready"] and (
+                    target_dir / sync_tools.TOOL_READY_MARKER
+                ).exists()
+
+            with mock.patch.object(sync_tools, "run_cmd", side_effect=fake_run_cmd):
+                with mock.patch.object(sync_tools, "_check_ready", side_effect=fake_check_ready):
+                    with mock.patch.object(sync_tools, "detect_tool_readiness", side_effect=fake_detect_tool_readiness):
+                        ok = sync_tools.sync_tool(
+                            "agent-browser",
+                            {
+                                "install": "npm install -g agent-browser@latest",
+                                "upgrade": "npm install -g agent-browser@latest",
+                                "setup": "agent-browser install",
+                                "ready_check": "bin:agent-browser",
+                            },
+                            {"enabled": True, "auto_update": False},
+                            Path(temp_dir),
+                        )
+
+            self.assertTrue(ok)
+            self.assertTrue((target_dir / sync_tools.TOOL_READY_MARKER).exists())
+            self.assertFalse((target_dir / sync_tools.TOOL_BROKEN_MARKER).exists())
+
+    def test_install_based_tool_skips_setup_when_runtime_is_already_available_after_upgrade(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state = {"binary_ready": True}
+
+            def fake_run_cmd(cmd, cwd=None, timeout=300):
+                if cmd == "agent-browser install":
+                    raise AssertionError("setup should not run when runtime is already available")
+                return True, "ok"
+
+            def fake_check_ready(name, ready_check):
+                return state["binary_ready"]
+
+            def fake_detect_tool_readiness(name, definition, repo_root, inventory=None):
+                return True
+
+            with mock.patch.object(sync_tools, "run_cmd", side_effect=fake_run_cmd) as run_cmd:
+                with mock.patch.object(sync_tools, "_check_ready", side_effect=fake_check_ready):
+                    with mock.patch.object(sync_tools, "detect_tool_readiness", side_effect=fake_detect_tool_readiness):
+                        ok = sync_tools.sync_tool(
+                            "agent-browser",
+                            {
+                                "install": "npm install -g agent-browser@latest",
+                                "upgrade": "npm install -g agent-browser@latest",
+                                "setup": "agent-browser install",
+                                "ready_check": "bin:agent-browser",
+                                "runtime_ready_checks_any": ["app:/Applications/Google Chrome.app"],
+                            },
+                            {"enabled": True, "auto_update": True},
+                            Path(temp_dir),
+                        )
+
+            self.assertTrue(ok)
+            self.assertEqual(run_cmd.call_args_list, [mock.call("npm install -g agent-browser@latest")])
+
+    def test_install_based_tool_setup_failure_marks_broken(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_dir = Path(temp_dir) / "agent-browser"
+            state = {"binary_ready": False}
+
+            def fake_run_cmd(cmd, cwd=None, timeout=300):
+                if cmd == "npm install -g agent-browser@latest":
+                    state["binary_ready"] = True
+                    return True, "installed"
+                if cmd == "agent-browser install":
+                    return False, "setup failed"
+                return True, ""
+
+            def fake_check_ready(name, ready_check):
+                return state["binary_ready"]
+
+            with mock.patch.object(sync_tools, "run_cmd", side_effect=fake_run_cmd):
+                with mock.patch.object(sync_tools, "_check_ready", side_effect=fake_check_ready):
+                    ok = sync_tools.sync_tool(
+                        "agent-browser",
+                        {
+                            "install": "npm install -g agent-browser@latest",
+                            "upgrade": "npm install -g agent-browser@latest",
+                            "setup": "agent-browser install",
+                            "ready_check": "bin:agent-browser",
+                        },
+                        {"enabled": True, "auto_update": False},
+                        Path(temp_dir),
+                    )
+
+            self.assertFalse(ok)
+            self.assertTrue((target_dir / sync_tools.TOOL_BROKEN_MARKER).exists())
+            self.assertFalse((target_dir / sync_tools.TOOL_READY_MARKER).exists())
+
+    def test_install_based_tool_success_without_runtime_probe_marks_broken(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_dir = Path(temp_dir) / "playwright-cli"
+            state = {"binary_ready": False}
+
+            def fake_run_cmd(cmd, cwd=None, timeout=300):
+                if cmd == "npm install -g @playwright/cli@latest":
+                    state["binary_ready"] = True
+                    return True, "installed"
+                if cmd == "playwright-cli install-browser":
+                    return True, "setup ok"
+                return True, ""
+
+            def fake_check_ready(name, ready_check):
+                return state["binary_ready"]
+
+            with mock.patch.object(sync_tools, "run_cmd", side_effect=fake_run_cmd):
+                with mock.patch.object(sync_tools, "_check_ready", side_effect=fake_check_ready):
+                    with mock.patch.object(sync_tools, "detect_tool_readiness", return_value=False):
+                        ok = sync_tools.sync_tool(
+                            "playwright-cli",
+                            {
+                                "install": "npm install -g @playwright/cli@latest",
+                                "upgrade": "npm install -g @playwright/cli@latest",
+                                "setup": "playwright-cli install-browser",
+                                "ready_check": "bin:playwright-cli",
+                                "runtime_ready_globs_any": ["~/Library/Caches/ms-playwright/chromium-*"],
+                            },
+                            {"enabled": True, "auto_update": False},
+                            Path(temp_dir),
+                        )
+
+            self.assertFalse(ok)
+            self.assertTrue((target_dir / sync_tools.TOOL_BROKEN_MARKER).exists())
+            self.assertFalse((target_dir / sync_tools.TOOL_READY_MARKER).exists())
 
     def test_invalid_policy_config_exits_non_zero(self):
         with tempfile.TemporaryDirectory() as temp_dir:

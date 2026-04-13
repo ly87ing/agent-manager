@@ -279,11 +279,23 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
     elif install_cmd:
         ready_check = definition.get("ready_check")
         upgrade_cmd = definition.get("upgrade")
+        setup_cmd = definition.get("setup")
+        runtime_ready_checks = definition.get("runtime_ready_checks_any") or []
+        binary_ready = _check_ready(name, ready_check)
+        tool_ready = detect_tool_readiness(name, definition, base_dir)
+        needs_setup = force or (bool(setup_cmd) and not tool_ready)
+        setup_failed = False
 
-        # 检查工具是否已就绪
-        already_ready = _check_ready(name, ready_check)
+        def setup_required_after_binary_change():
+            if not setup_cmd:
+                return False
+            if force:
+                return True
+            if runtime_ready_checks:
+                return not detect_tool_readiness(name, definition, base_dir)
+            return True
 
-        if already_ready:
+        if binary_ready:
             if auto_update and upgrade_cmd:
                 if dry_run:
                     logging.info(f"[TOOL: {name}] (预览: 计划执行升级)")
@@ -292,8 +304,13 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
                     ok, out = run_cmd(upgrade_cmd)
                     if not ok:
                         logging.warning(f"[TOOL: {name}] 升级失败（保留现有版本）: {out}")
-            else:
+                    else:
+                        binary_ready = _check_ready(name, ready_check)
+                        needs_setup = setup_required_after_binary_change()
+            elif tool_ready:
                 logging.info(f"[TOOL: {name}] 已就绪，跳过安装。")
+            else:
+                logging.info(f"[TOOL: {name}] CLI 已安装但运行时未就绪，准备执行初始化。")
         else:
             if dry_run:
                 logging.info(f"[TOOL: {name}] (预览: 计划执行安装)")
@@ -303,6 +320,35 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
                 if not ok:
                     logging.error(f"[TOOL: {name}] 安装失败: {out}")
                     success_build = False
+                else:
+                    binary_ready = _check_ready(name, ready_check)
+                    needs_setup = setup_required_after_binary_change()
+
+        if setup_cmd and needs_setup:
+            if dry_run:
+                logging.info(f"[TOOL: {name}] (预览: 计划执行初始化)")
+            elif success_build:
+                target_dir.mkdir(parents=True, exist_ok=True)
+                write_owner_marker(target_dir, name)
+                clear_tool_markers(target_dir)
+                logging.info(f"执行 {name} 初始化...")
+                ok, out = run_cmd(setup_cmd)
+                if not ok:
+                    logging.error(f"[TOOL: {name}] 初始化失败: {out}")
+                    setup_failed = True
+                    success_build = False
+                    mark_tool_broken(target_dir)
+                else:
+                    mark_tool_ready(target_dir)
+
+        if not dry_run and setup_cmd and (target_dir.exists() or setup_failed):
+            target_dir.mkdir(parents=True, exist_ok=True)
+            write_owner_marker(target_dir, name)
+            if setup_failed:
+                mark_tool_broken(target_dir)
+            elif success_build and not detect_tool_readiness(name, definition, base_dir):
+                mark_tool_broken(target_dir)
+                success_build = False
 
     return success_build
 

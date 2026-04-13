@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import glob
 import os
 import re
 import shlex
@@ -222,7 +223,11 @@ def collect_required_runtime_commands(config, agent_defs, tool_defs, skill_cfg, 
         if needs_tool_runtime:
             for head in iter_command_heads(definition.get("install")):
                 add(head)
+            ready_check = definition.get("ready_check") or ""
+            tool_binary = ready_check[4:].strip() if ready_check.startswith("bin:") else None
             for head in iter_command_heads(definition.get("setup")):
+                if tool_binary and head == tool_binary:
+                    continue
                 add(head)
 
     for repo_name, repo_def in skill_cfg.get("repositories", {}).items():
@@ -307,6 +312,31 @@ def repo_tool_artifacts_ready(definition, managed_repo_dir):
     return not definition.get("setup")
 
 
+def any_ready_checks_pass(name, ready_checks, inventory=None):
+    return any(check_tool_ready(name, ready_check, inventory=inventory) for ready_check in ready_checks or [])
+
+
+def any_globs_match(patterns):
+    for pattern in patterns or []:
+        expanded = os.path.expanduser(pattern)
+        if glob.glob(expanded):
+            return True
+    return False
+
+
+def install_tool_artifacts_ready(definition, managed_tool_dir):
+    ready_paths = definition.get("ready_paths") or []
+    if ready_paths:
+        return all(os.path.exists(os.path.join(managed_tool_dir, rel_path)) for rel_path in ready_paths)
+    runtime_ready_globs = definition.get("runtime_ready_globs_any") or []
+    runtime_ready_checks = definition.get("runtime_ready_checks_any") or []
+    if runtime_ready_globs or runtime_ready_checks:
+        return False
+    if definition.get("setup"):
+        return os.path.exists(os.path.join(managed_tool_dir, TOOL_READY_MARKER))
+    return True
+
+
 def resolve_managed_tool_dir(root_or_base, name):
     base = os.fspath(root_or_base)
     candidates = [
@@ -336,8 +366,18 @@ def detect_tool_readiness(name, definition, repo_root, inventory=None):
             return True
         return False
     ready_check = definition.get("ready_check")
+    if ready_check and not check_tool_ready(name, ready_check, inventory=inventory):
+        return False
+    if any_ready_checks_pass(name, definition.get("runtime_ready_checks_any"), inventory=inventory):
+        return True
+    if any_globs_match(definition.get("runtime_ready_globs_any")):
+        return True
+    if definition.get("setup") or definition.get("ready_paths"):
+        if os.path.exists(os.path.join(managed_repo_dir, TOOL_BROKEN_MARKER)):
+            return False
+        return install_tool_artifacts_ready(definition, managed_repo_dir)
     if ready_check:
-        return check_tool_ready(name, ready_check, inventory=inventory)
+        return True
     return shutil.which(name) is not None
 
 

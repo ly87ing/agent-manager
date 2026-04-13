@@ -124,6 +124,101 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
         self.assertTrue(ready)
 
+    def test_detect_tool_readiness_requires_setup_marker_for_install_based_tools(self):
+        def path_exists(path):
+            return False
+
+        with mock.patch("src.manage_runtime_probe.os.path.exists", side_effect=path_exists):
+            with mock.patch("src.manage_runtime_probe.shutil.which", return_value="/usr/local/bin/agent-browser"):
+                ready = manage_runtime_probe.detect_tool_readiness(
+                    "agent-browser",
+                    {
+                        "install": "npm install -g agent-browser@latest",
+                        "setup": "agent-browser install",
+                        "ready_check": "bin:agent-browser",
+                    },
+                    "/repo",
+                )
+
+        self.assertFalse(ready)
+
+    def test_detect_tool_readiness_accepts_setup_marker_for_install_based_tools(self):
+        def path_exists(path):
+            return path.endswith("agent-tool/agent-browser/.agent-manager-ready")
+
+        with mock.patch("src.manage_runtime_probe.os.path.exists", side_effect=path_exists):
+            with mock.patch("src.manage_runtime_probe.shutil.which", return_value="/usr/local/bin/agent-browser"):
+                ready = manage_runtime_probe.detect_tool_readiness(
+                    "agent-browser",
+                    {
+                        "install": "npm install -g agent-browser@latest",
+                        "setup": "agent-browser install",
+                        "ready_check": "bin:agent-browser",
+                    },
+                    "/repo",
+                )
+
+        self.assertTrue(ready)
+
+    def test_detect_tool_readiness_accepts_runtime_ready_checks_without_setup_marker(self):
+        with mock.patch("src.manage_runtime_probe.os.path.exists", return_value=False):
+            with mock.patch(
+                "src.manage_runtime_probe.check_tool_ready",
+                side_effect=[True, True],
+            ):
+                ready = manage_runtime_probe.detect_tool_readiness(
+                    "agent-browser",
+                    {
+                        "install": "npm install -g agent-browser@latest",
+                        "setup": "agent-browser install",
+                        "ready_check": "bin:agent-browser",
+                        "runtime_ready_checks_any": ["app:/Applications/Google Chrome.app"],
+                    },
+                    "/repo",
+                )
+
+        self.assertTrue(ready)
+
+    def test_detect_tool_readiness_requires_runtime_glob_match_when_probe_is_configured(self):
+        def path_exists(path):
+            return path.endswith("playwright-cli/.agent-manager-ready")
+
+        with mock.patch("src.manage_runtime_probe.os.path.exists", side_effect=path_exists):
+            with mock.patch("src.manage_runtime_probe.check_tool_ready", return_value=True):
+                with mock.patch("src.manage_runtime_probe.glob.glob", return_value=[]):
+                    ready = manage_runtime_probe.detect_tool_readiness(
+                        "playwright-cli",
+                        {
+                            "install": "npm install -g @playwright/cli@latest",
+                            "setup": "playwright-cli install-browser",
+                            "ready_check": "bin:playwright-cli",
+                            "runtime_ready_globs_any": ["~/Library/Caches/ms-playwright/chromium-*"],
+                        },
+                        "/repo",
+                    )
+
+        self.assertFalse(ready)
+
+    def test_detect_tool_readiness_accepts_runtime_glob_match_for_install_based_tools(self):
+        with mock.patch("src.manage_runtime_probe.os.path.exists", return_value=False):
+            with mock.patch("src.manage_runtime_probe.check_tool_ready", return_value=True):
+                with mock.patch(
+                    "src.manage_runtime_probe.glob.glob",
+                    return_value=["/Users/example/Library/Caches/ms-playwright/chromium-1219"],
+                ):
+                    ready = manage_runtime_probe.detect_tool_readiness(
+                        "playwright-cli",
+                        {
+                            "install": "npm install -g @playwright/cli@latest",
+                            "setup": "playwright-cli install-browser",
+                            "ready_check": "bin:playwright-cli",
+                            "runtime_ready_globs_any": ["~/Library/Caches/ms-playwright/chromium-*"],
+                        },
+                        "/repo",
+                    )
+
+        self.assertTrue(ready)
+
     def test_detect_tool_readiness_uses_ready_check_for_app_type_tools(self):
         with mock.patch("src.manage_runtime_probe.os.path.exists", return_value=True):
             ready = manage_runtime_probe.detect_tool_readiness(
@@ -242,6 +337,30 @@ class ManageRuntimeProbeTests(unittest.TestCase):
         )
 
         self.assertEqual(required, ["npx"])
+
+    def test_collect_required_runtime_commands_skips_tool_owned_setup_heads_for_unready_install_tool(self):
+        with mock.patch("src.manage_runtime_probe.detect_tool_readiness", return_value=False):
+            required = manage_runtime_probe.collect_required_runtime_commands(
+                {
+                    "agents": {},
+                    "tools": {"agent-browser": {"enabled": True, "auto_update": False}},
+                    "skills": {},
+                    "mcp": {},
+                },
+                {},
+                {
+                    "agent-browser": {
+                        "install": "npm install -g agent-browser@latest",
+                        "setup": "agent-browser install",
+                        "ready_check": "bin:agent-browser",
+                    }
+                },
+                {"repositories": {}},
+                {"servers": {}},
+                repo_root="/repo",
+            )
+
+        self.assertEqual(required, ["npm"])
 
     def test_collect_required_runtime_commands_skips_ready_repo_tool_setup_when_auto_update_disabled(self):
         with mock.patch("src.manage_runtime_probe.detect_tool_readiness", return_value=True):
