@@ -73,11 +73,12 @@ class RuleLayoutTests(unittest.TestCase):
             self.assertTrue((modules_dir / "frontend.md").exists(), combined)
             self.assertTrue((modules_dir / "artifact-hygiene.md").exists(), combined)
 
-    def test_frontend_module_captures_playwright_and_devtools_boundary(self):
+    def test_frontend_module_captures_browser_tool_boundaries(self):
         frontend_module = (ROOT / "agent-rule" / "rules" / "dist" / "modules" / "frontend.md").read_text(
             encoding="utf-8"
         )
         self.assertIn("Default to Playwright for frontend functional validation", frontend_module)
+        self.assertIn("Use agent-browser for Agent-Driven Web Tasks", frontend_module)
         self.assertIn("Use Chrome DevTools for Browser-Level Diagnosis", frontend_module)
         self.assertIn("Do Not Replace Regression Coverage", frontend_module)
 

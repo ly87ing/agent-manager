@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import shutil
@@ -12,6 +13,19 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class SyncToolsTests(unittest.TestCase):
+    def test_committed_browser_tool_policy_tracks_latest_channels(self):
+        manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
+        tool_defs = json.loads((ROOT / "config" / "tools.json").read_text(encoding="utf-8"))["tools"]
+
+        self.assertTrue(manager["tools"]["playwright-cli"]["enabled"])
+        self.assertTrue(manager["tools"]["agent-browser"]["enabled"])
+        self.assertEqual(tool_defs["playwright-cli"]["install"], "npm install -g @playwright/cli@latest")
+        self.assertEqual(tool_defs["playwright-cli"]["upgrade"], "npm install -g @playwright/cli@latest")
+        self.assertEqual(tool_defs["playwright-cli"]["ready_check"], "bin:playwright-cli")
+        self.assertEqual(tool_defs["agent-browser"]["install"], "npm install -g agent-browser@latest")
+        self.assertEqual(tool_defs["agent-browser"]["upgrade"], "npm install -g agent-browser@latest")
+        self.assertEqual(tool_defs["agent-browser"]["ready_check"], "bin:agent-browser")
+
     def test_invalid_policy_config_exits_non_zero(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

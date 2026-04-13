@@ -49,6 +49,7 @@ cd agent-mcp && python3 sync_mcp.py --config ../config/manager.json --def-file .
 **维护约定**:
 - `chrome-devtools` 跟随官方 `@latest`，source-of-truth 维护在 `config/mcp.json`，由 `sync_mcp.py` 统一分发到所有受支持 Agent。
 - 首次调用 `chrome-devtools` 时，`npx` 可能会下载最新包版本；需要本机有可用的 Node.js / npm 运行时。
+- `make doctor` 会在 `chrome-devtools` 处于启用状态时预检 `npx` 运行时是否可用；实际包版本仍以首次调用或缓存失效后的 `@latest` 解析结果为准。
 - 如果后续需要统一增加 `--browserUrl`、`--headless`、`--isolated` 等参数，应修改 `config/mcp.json`，不要手改单个 Agent 的 MCP 配置文件。
 
 ---

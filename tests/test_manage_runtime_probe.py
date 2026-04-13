@@ -220,6 +220,29 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
         self.assertEqual(required, [])
 
+    def test_collect_required_runtime_commands_includes_npx_for_active_chrome_devtools_mcp(self):
+        required = manage_runtime_probe.collect_required_runtime_commands(
+            {
+                "agents": {},
+                "tools": {},
+                "skills": {},
+                "mcp": {"chrome-devtools": {"enabled": True}},
+            },
+            {},
+            {},
+            {"repositories": {}},
+            {
+                "servers": {
+                    "chrome-devtools": {
+                        "command": "npx",
+                        "args": ["-y", "chrome-devtools-mcp@latest"],
+                    }
+                }
+            },
+        )
+
+        self.assertEqual(required, ["npx"])
+
     def test_collect_required_runtime_commands_skips_ready_repo_tool_setup_when_auto_update_disabled(self):
         with mock.patch("src.manage_runtime_probe.detect_tool_readiness", return_value=True):
             required = manage_runtime_probe.collect_required_runtime_commands(

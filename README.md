@@ -20,6 +20,7 @@
 ```
 
 默认受管 MCP 服务器当前包含 `augment-context-engine`（代码库检索）和 `chrome-devtools`（浏览器调试 / network / performance，使用官方推荐的 `npx -y chrome-devtools-mcp@latest`）。
+默认受管浏览器工具当前包含 `playwright-cli` 和 `agent-browser`；二者通过官方 npm `@latest` 通道受管安装与更新，而 `chrome-devtools` 继续作为 MCP server 通过 `npx ...@latest` 在运行时跟随上游最新版本。
 
 ## Agent 安装源依据 (Official Evidence)
 

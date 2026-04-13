@@ -49,6 +49,7 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `tools.json`: 工具安装和设置指令
 - `skills.json`: Skill仓库地址和Agent映射
 - `mcp.json`: MCP服务器定义和Agent路径映射
+- 浏览器自动化相关能力按上游官方分发模型分别托管：`playwright-cli` 与 `agent-browser` 在 `tools.json` 中通过 npm `@latest` 管理，`chrome-devtools` 在 `mcp.json` 中通过 `npx -y chrome-devtools-mcp@latest` 维护。
 - Agent 定义中的 `display_name` 仅用于展示和日志；跨配置引用统一使用稳定 ID
 - `agents.json` 中的 `providers` 只声明 agent-manager 可托管的安装源；`system` 只是运行时探测信号，不是可配置的 provider key
 - `preferred_provider` 必须指向 `providers` 中真实存在的键，否则生命周期同步应直接失败

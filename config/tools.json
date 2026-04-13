@@ -1,9 +1,16 @@
 {
   "tools": {
     "playwright-cli": {
-      "url": "https://github.com/microsoft/playwright-cli.git",
-      "setup": "npm install && npx playwright install",
-      "ready_paths": ["node_modules"]
+      "install": "npm install -g @playwright/cli@latest",
+      "uninstall": "npm uninstall -g @playwright/cli",
+      "upgrade": "npm install -g @playwright/cli@latest",
+      "ready_check": "bin:playwright-cli"
+    },
+    "agent-browser": {
+      "install": "npm install -g agent-browser@latest",
+      "uninstall": "npm uninstall -g agent-browser",
+      "upgrade": "npm install -g agent-browser@latest",
+      "ready_check": "bin:agent-browser"
     },
     "auggie": {
       "install": "npm install -g @augmentcode/auggie",

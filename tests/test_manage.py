@@ -331,6 +331,18 @@ class ManageScriptTests(unittest.TestCase):
                 '}\n',
                 encoding="utf-8",
             )
+            (temp_root / "config" / "tools.json").write_text(
+                '{\n'
+                '  "tools": {\n'
+                '    "playwright-cli": {\n'
+                '      "url": "https://github.com/microsoft/playwright-cli.git",\n'
+                '      "setup": "npm install && npx playwright install",\n'
+                '      "ready_paths": ["node_modules"]\n'
+                '    }\n'
+                '  }\n'
+                '}\n',
+                encoding="utf-8",
+            )
             repo_tool_dir = temp_root / "agent-tool" / "playwright-cli"
             remove_path(repo_tool_dir)
             repo_tool_dir.mkdir(parents=True, exist_ok=True)
@@ -363,6 +375,18 @@ class ManageScriptTests(unittest.TestCase):
                 '  "tools": {"playwright-cli": {"enabled": true, "auto_update": true}},\n'
                 '  "skills": {},\n'
                 '  "mcp": {}\n'
+                '}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "tools.json").write_text(
+                '{\n'
+                '  "tools": {\n'
+                '    "playwright-cli": {\n'
+                '      "url": "https://github.com/microsoft/playwright-cli.git",\n'
+                '      "setup": "npm install && npx playwright install",\n'
+                '      "ready_paths": ["node_modules"]\n'
+                '    }\n'
+                '  }\n'
                 '}\n',
                 encoding="utf-8",
             )
@@ -550,6 +574,18 @@ class ManageScriptTests(unittest.TestCase):
 
             (temp_root / "config" / "manager.json").write_text(
                 '{\n  "agents": {},\n  "tools": {\n    "playwright-cli": { "enabled": true }\n  },\n  "skills": {},\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "tools.json").write_text(
+                '{\n'
+                '  "tools": {\n'
+                '    "playwright-cli": {\n'
+                '      "url": "https://github.com/microsoft/playwright-cli.git",\n'
+                '      "setup": "npm install && npx playwright install",\n'
+                '      "ready_paths": ["node_modules"]\n'
+                '    }\n'
+                '  }\n'
+                '}\n',
                 encoding="utf-8",
             )
             (temp_root / "config" / "mcp.json").write_text(
@@ -920,6 +956,18 @@ class ManageScriptTests(unittest.TestCase):
             temp_home.mkdir()
             (temp_root / "config" / "manager.json").write_text(
                 '{\n  "agents": {},\n  "tools": {"playwright-cli": {"enabled": true, "auto_update": false}},\n  "skills": {},\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "tools.json").write_text(
+                '{\n'
+                '  "tools": {\n'
+                '    "playwright-cli": {\n'
+                '      "url": "https://github.com/microsoft/playwright-cli.git",\n'
+                '      "setup": "npm install && npx playwright install",\n'
+                '      "ready_paths": ["node_modules"]\n'
+                '    }\n'
+                '  }\n'
+                '}\n',
                 encoding="utf-8",
             )
             (temp_root / "config" / "mcp.json").write_text(

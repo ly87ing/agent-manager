@@ -236,6 +236,8 @@ def collect_required_runtime_commands(config, agent_defs, tool_defs, skill_cfg, 
         policy = config.get("mcp", {}).get(server_name)
         if policy is None or not policy.get("enabled", True):
             continue
+        if server_def.get("command") == "npx":
+            add("npx")
         if server_def.get("url"):
             add("git")
 
