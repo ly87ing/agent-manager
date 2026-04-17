@@ -1801,6 +1801,7 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertEqual(repo["url"], "https://github.com/ly87ing/agent-skills.git")
         self.assertEqual(repo["skill_count"], 3)
         self.assertEqual(repo["agents"], ["claude-code", "codex"])
+        self.assertNotIn("ignored_skill_paths", repo)
         self.assertNotIn("commit", repo)
         self.assertNotIn("ref", repo)
 
