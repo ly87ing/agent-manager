@@ -35,6 +35,12 @@ class ManageRuntimeProbeTests(unittest.TestCase):
             ["git"],
         )
 
+    def test_iter_command_heads_skips_command_wrapper_flags(self):
+        self.assertEqual(
+            manage_runtime_probe.iter_command_heads("command -v git >/dev/null || brew install git"),
+            ["git", "brew"],
+        )
+
     def test_detect_tool_readiness_requires_git_clone_for_repo_backed_tools(self):
         with mock.patch("src.manage_runtime_probe.os.path.isdir") as isdir:
             isdir.side_effect = lambda path: path == "/repo/agent-tool/playwright-cli"

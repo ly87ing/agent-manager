@@ -181,7 +181,7 @@ def _check_ready(name: str, ready_check: str | None) -> bool:
     return check_tool_ready(name, ready_check)
 
 
-def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
+def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False, offline=False):
     # 合并策略
     enabled = policy.get("enabled", True)
     auto_update = policy.get("auto_update", True)
@@ -240,6 +240,12 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
                             repo_state_changed = True
                         else: logging.error(f"[TOOL: {name}] (更新失败: {out})"); success_build = False
         else:
+            if offline:
+                if target_dir.exists():
+                    logging.error(f"[TOOL: {name}] 离线模式且本地仓库缺失/损坏，无法重装。")
+                else:
+                    logging.error(f"[TOOL: {name}] 离线模式且本地仓库缺失，无法下载。")
+                return False
             if target_dir.exists():
                 logging.warning(f"[TOOL: {name}] 目录异常，正在重装...")
                 if not dry_run: shutil.rmtree(target_dir)
@@ -283,6 +289,23 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False):
         runtime_ready_checks = definition.get("runtime_ready_checks_any") or []
         binary_ready = _check_ready(name, ready_check)
         tool_ready = detect_tool_readiness(name, definition, base_dir)
+        if offline:
+            if dry_run:
+                if not binary_ready:
+                    logging.info(f"[TOOL: {name}] (预览: 离线模式会阻止安装)")
+                elif setup_cmd and not tool_ready:
+                    logging.info(f"[TOOL: {name}] (预览: 离线模式会阻止初始化)")
+                else:
+                    logging.info(f"[TOOL: {name}] (预览: 离线模式下保留当前状态)")
+                return True
+            if not binary_ready:
+                logging.error(f"[TOOL: {name}] 离线模式且工具未安装，禁止安装。")
+                return False
+            if setup_cmd and not tool_ready:
+                logging.error(f"[TOOL: {name}] 离线模式且运行时未就绪，禁止初始化。")
+                return False
+            logging.info(f"[TOOL: {name}] 离线模式，保留当前就绪状态。")
+            return True
         needs_setup = force or (bool(setup_cmd) and not tool_ready)
         setup_failed = False
 
@@ -398,7 +421,7 @@ def main():
         # 离线模式下禁用 auto_update
         if args.offline:
             policy = {**policy, "auto_update": False}
-        if not sync_tool(name, definition, policy, base_dir, args.dry_run, args.force):
+        if not sync_tool(name, definition, policy, base_dir, args.dry_run, args.force, args.offline):
             all_ok = False
     
     if not args.dry_run: prune_orphan_tools(base_dir, def_cfg.keys(), args.dry_run, args.yes)

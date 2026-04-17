@@ -495,6 +495,63 @@ class SyncToolsTests(unittest.TestCase):
 
             self.assertEqual(apply_overrides.call_count, 0)
 
+    def test_offline_mode_does_not_clone_missing_repo_tool(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                mock.patch.object(sync_tools, "run_cmd") as run_cmd,
+                self.assertLogs(level="ERROR") as logs,
+            ):
+                ok = sync_tools.sync_tool(
+                    "playwright-cli",
+                    {"url": "https://example.invalid/repo.git"},
+                    {"enabled": True, "auto_update": False},
+                    Path(temp_dir),
+                    offline=True,
+                )
+
+        self.assertFalse(ok)
+        run_cmd.assert_not_called()
+        self.assertTrue(any("离线模式且本地仓库缺失" in line for line in logs.output), logs.output)
+
+    def test_dry_run_offline_mode_reports_missing_repo_tool_as_blocker(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertLogs(level="ERROR") as logs:
+                ok = sync_tools.sync_tool(
+                    "playwright-cli",
+                    {"url": "https://example.invalid/repo.git"},
+                    {"enabled": True, "auto_update": False},
+                    Path(temp_dir),
+                    dry_run=True,
+                    offline=True,
+                )
+
+        self.assertFalse(ok)
+        self.assertTrue(any("离线模式且本地仓库缺失" in line for line in logs.output), logs.output)
+
+    def test_offline_mode_does_not_install_missing_install_based_tool(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                mock.patch.object(sync_tools, "run_cmd") as run_cmd,
+                mock.patch.object(sync_tools, "_check_ready", return_value=False),
+                mock.patch.object(sync_tools, "detect_tool_readiness", return_value=False),
+                self.assertLogs(level="ERROR") as logs,
+            ):
+                ok = sync_tools.sync_tool(
+                    "agent-browser",
+                    {
+                        "install": "npm install -g agent-browser@latest",
+                        "setup": "agent-browser install",
+                        "ready_check": "bin:agent-browser",
+                    },
+                    {"enabled": True, "auto_update": False},
+                    Path(temp_dir),
+                    offline=True,
+                )
+
+        self.assertFalse(ok)
+        run_cmd.assert_not_called()
+        self.assertTrue(any("离线模式且工具未安装" in line for line in logs.output), logs.output)
+
     def test_successful_setup_marks_repo_ready(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             target_dir = Path(temp_dir) / "playwright-cli"

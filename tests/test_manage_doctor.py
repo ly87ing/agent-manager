@@ -517,6 +517,69 @@ class ManageDoctorReportTests(unittest.TestCase):
             self.assertIn("augment-context-engine", mcp_names["Codex"]["message"])
             self.assertIn("配置漂移", mcp_names["Codex"]["message"])
 
+    def test_report_accepts_resolved_repo_path_for_repo_backed_managed_mcp_server(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            cursor_config = Path(temp_dir) / "cursor" / "mcp.json"
+            repo_path = temp_root / "agent-mcp" / "demo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            cursor_config.parent.mkdir(parents=True)
+            repo_path.mkdir(parents=True)
+            (repo_path / ".git").mkdir()
+            cursor_config.write_text(
+                json.dumps(
+                    {
+                        "mcpServers": {
+                            "demo": {
+                                "command": "node",
+                                "args": [f"{repo_path.resolve()}/server.js"],
+                                "env": {"_MANAGED_BY": "agent-manager"},
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {\n    "demo": { "enabled": true }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                json.dumps(
+                    {
+                        "agent_paths": {
+                            "cursor": {"path": str(cursor_config), "format": "json"},
+                        },
+                        "servers": {
+                            "demo": {
+                                "url": "https://example.invalid/repo.git",
+                                "command": "node",
+                                "args": ["{repo_path}/server.js"],
+                                "env": {},
+                                "agents": ["cursor"],
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            report = build_report(
+                root_dir=temp_root,
+                config_file=temp_root / "config" / "manager.json",
+                python_cmd="python3",
+            )
+
+            self.assertEqual(report["status"], "healthy")
+            mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
+            self.assertEqual(mcp_names["Cursor IDE"]["status"], "ok")
+
     def test_report_accepts_resolved_secret_for_managed_mcp_server(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
@@ -563,6 +626,65 @@ class ManageDoctorReportTests(unittest.TestCase):
             self.assertEqual(report["status"], "healthy")
             mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
             self.assertEqual(mcp_names["Codex"]["status"], "ok")
+
+    def test_report_flags_opencode_config_using_wrong_mcpservers_key(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            opencode_config = Path(temp_dir) / "opencode.json"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            opencode_config.write_text(
+                json.dumps(
+                    {
+                        "mcpServers": {
+                            "demo": {
+                                "command": "echo",
+                                "args": [],
+                                "env": {"_MANAGED_BY": "agent-manager"},
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {\n    "demo": { "enabled": true }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                json.dumps(
+                    {
+                        "agent_paths": {
+                            "opencode": {"path": str(opencode_config), "format": "json"},
+                        },
+                        "servers": {
+                            "demo": {
+                                "command": "echo",
+                                "args": [],
+                                "env": {},
+                                "agents": ["opencode"],
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{\n  "repositories": {},\n  "agents": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            report = build_report(
+                root_dir=temp_root,
+                config_file=temp_root / "config" / "manager.json",
+                python_cmd="python3",
+            )
+
+            self.assertEqual(report["status"], "error")
+            mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
+            self.assertEqual(mcp_names["OpenCode"]["status"], "error")
+            self.assertIn("实际 0 个", mcp_names["OpenCode"]["message"])
 
     def test_report_flags_unresolved_placeholder_in_managed_mcp_server(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -171,6 +171,11 @@ def load_existing_json_config(agent_name, config_path):
             parsed = json.load(f)
             if not isinstance(parsed, dict):
                 raise ValueError("顶层必须是对象")
+            current_value = parsed.get(mcp_key)
+            if current_value is None:
+                parsed[mcp_key] = {}
+            elif not isinstance(current_value, dict):
+                raise ValueError(f"{mcp_key} 必须是对象")
             return parsed
     except Exception as exc:
         logging.error(f"[AGENT: {agent_name}] 现有 JSON 配置解析失败，已停止覆盖: {exc}")
@@ -369,17 +374,18 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None
                 all_ok = False
             continue
 
+        current_config = load_existing_json_config(agent_name, config_path)
+        if current_config is None:
+            all_ok = False
+            continue
+
+        # OpenCode 使用 "mcp" 键，其他 Agent 使用 "mcpServers"
+        is_opencode = agent_name == "opencode"
+        key_name = "mcp" if is_opencode else "mcpServers"
+
         if dry_run:
             logging.info(f"[AGENT: {agent_name}] (预览: 计划原子更新 JSON)")
         else:
-            current_config = load_existing_json_config(agent_name, config_path)
-            if current_config is None:
-                all_ok = False
-                continue
-            
-            # OpenCode 使用 "mcp" 键，其他 Agent 使用 "mcpServers"
-            is_opencode = agent_name == "opencode"
-            key_name = "mcp" if is_opencode else "mcpServers"
             if key_name not in current_config: current_config[key_name] = {}
             
             # Orphan Removal

@@ -86,6 +86,15 @@ RULE_TARGET_PREFIX_TO_ID = {
 ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
 ENV_WRAPPER_FLAGS_WITH_VALUE = {"-C", "--chdir", "-S", "--split-string", "-u", "--unset"}
 ENV_WRAPPER_FLAGS = {"-i", "--ignore-environment", "-0", "--null"}
+COMMAND_WRAPPER_FLAG_CHARS = {"p", "v", "V"}
+
+
+def is_command_wrapper_flag(token):
+    if token == "--":
+        return False
+    if not token.startswith("-") or token == "-":
+        return False
+    return all(char in COMMAND_WRAPPER_FLAG_CHARS for char in token[1:])
 
 
 def split_command_segments(command):
@@ -160,6 +169,15 @@ def command_head(tokens):
             continue
         if base == "command":
             index += 1
+            while index < len(tokens):
+                token = tokens[index]
+                if token == "--":
+                    index += 1
+                    break
+                if is_command_wrapper_flag(token):
+                    index += 1
+                    continue
+                break
             continue
         return base
     return None

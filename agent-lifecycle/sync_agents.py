@@ -95,7 +95,7 @@ def resolve_active_provider_variant(managed_actual, provider_key):
             return provider_name
     return provider_key
 
-def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=True):
+def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=True, offline=False):
     label = get_agent_display_name(agent_id, definition)
     # 合并策略
     enabled = policy.get("enabled", True)
@@ -141,6 +141,12 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=T
         if not auto_install:
             logging.info(f"[AGENT: {label}] 配置开启但 auto_install 关闭，跳过安装。")
             return True
+        if offline:
+            if dry_run:
+                logging.info(f"[AGENT: {label}] (预览: 离线模式会阻止安装缺失 Agent)")
+                return True
+            logging.error(f"[AGENT: {label}] 离线模式且 Agent 缺失，禁止安装。")
+            return False
         logging.info(f"[AGENT: {label}] 状态对齐: 准备通过 {preferred} 安装...")
         p_cfg = providers.get(preferred)
         if not p_cfg or "install" not in p_cfg:
@@ -266,7 +272,14 @@ def main():
         # 离线模式下禁用 auto_update
         if args.offline:
             policy = {**policy, "auto_update": False}
-        if not reconcile_agent(agent_id, definition, policy, args.dry_run, allow_install=not args.no_install):
+        if not reconcile_agent(
+            agent_id,
+            definition,
+            policy,
+            args.dry_run,
+            allow_install=not args.no_install,
+            offline=args.offline,
+        ):
             all_ok = False
             
     if not all_ok: sys.exit(1)

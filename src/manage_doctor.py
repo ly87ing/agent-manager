@@ -284,13 +284,22 @@ def _managed_mcp_matches(expected: dict[str, object], actual: dict[str, object])
     return True
 
 
-def _normalize_expected_mcp_definition(settings: dict) -> dict[str, object]:
+def _normalize_expected_mcp_definition(
+    settings: dict,
+    *,
+    root_dir: Path | None = None,
+    server_name: str | None = None,
+) -> dict[str, object]:
     env_dict = settings.get("env", {})
     if not isinstance(env_dict, dict):
         env_dict = {}
+    args = _normalize_mcp_args(settings.get("args"))
+    if args is not None and root_dir is not None and server_name and settings.get("url"):
+        repo_path = str((root_dir / "agent-mcp" / server_name).resolve())
+        args = tuple(arg.replace("{repo_path}", repo_path) for arg in args)
     return {
         "command": settings.get("command") if isinstance(settings.get("command"), str) else None,
-        "args": _normalize_mcp_args(settings.get("args")),
+        "args": args,
         "env": _normalize_expected_mcp_env(env_dict),
     }
 
@@ -317,7 +326,12 @@ def _normalize_actual_mcp_definition(settings: dict, agent_id: str) -> dict[str,
     }
 
 
-def expected_managed_mcp_servers(config: dict, mcp_cfg: dict, agent_id: str) -> dict[str, dict[str, object]]:
+def expected_managed_mcp_servers(
+    root_dir: Path,
+    config: dict,
+    mcp_cfg: dict,
+    agent_id: str,
+) -> dict[str, dict[str, object]]:
     expected = {}
     servers = mcp_cfg.get("servers", {})
     for server_name, policy in config.get("mcp", {}).items():
@@ -330,7 +344,11 @@ def expected_managed_mcp_servers(config: dict, mcp_cfg: dict, agent_id: str) -> 
         merged.update(policy)
         targeted_agents = canonicalize_agent_list(merged.get("agents"))
         if targeted_agents is None or agent_id in targeted_agents:
-            expected[server_name] = _normalize_expected_mcp_definition(merged)
+            expected[server_name] = _normalize_expected_mcp_definition(
+                merged,
+                root_dir=root_dir,
+                server_name=server_name,
+            )
     return expected
 
 
@@ -369,10 +387,9 @@ def managed_mcp_servers(target_path: str, file_format: str, agent_id: str) -> di
     if not isinstance(parsed, dict):
         raise ValueError("顶层必须是对象")
     preferred_key = "mcp" if agent_id == "opencode" else "mcpServers"
-    server_mapping = parsed.get(preferred_key)
-    if not isinstance(server_mapping, dict):
-        fallback_key = "mcpServers" if preferred_key == "mcp" else "mcp"
-        server_mapping = parsed.get(fallback_key, {})
+    server_mapping = parsed.get(preferred_key, {})
+    if server_mapping is None:
+        return {}
     if not isinstance(server_mapping, dict):
         return {}
     return servers_from_mapping(server_mapping)
@@ -759,7 +776,7 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
         file_format = "json" if isinstance(path_config, str) else path_config.get("format", "json")
         target_path = os.path.expanduser(target_path)
         label = get_agent_display_name(agent_id, agent_defs.get(agent_id, {}))
-        expected_servers = expected_managed_mcp_servers(config, mcp_cfg, agent_id)
+        expected_servers = expected_managed_mcp_servers(root_dir, config, mcp_cfg, agent_id)
         expected_names = set(expected_servers)
         expected_count = len(expected_names)
         if os.path.exists(target_path):

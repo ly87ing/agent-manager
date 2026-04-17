@@ -600,6 +600,57 @@ class SyncMcpTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(agent_config_path.read_text(encoding="utf-8"), original)
 
+    def test_invalid_existing_json_dry_run_also_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            agent_config_path = temp_root / "agent.json"
+            original = '{"mcpServers":'
+            agent_config_path.write_text(original, encoding="utf-8")
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            config_path.write_text(
+                json.dumps({"mcp": {"demo": {"enabled": True}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "servers": {
+                            "demo": {
+                                "command": "echo",
+                                "args": [],
+                                "env": {},
+                            }
+                        },
+                        "agent_paths": {
+                            "claude-code": str(agent_config_path),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "mcp"),
+                    "--dry-run",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(agent_config_path.read_text(encoding="utf-8"), original)
+
     def test_invalid_existing_toml_aborts_without_overwrite(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -825,6 +876,30 @@ class SyncMcpTests(unittest.TestCase):
             updated = json.loads(agent_config_path.read_text(encoding="utf-8"))
             self.assertIn("bad-mcp", updated["mcpServers"])
             self.assertIn("user-mcp", updated["mcpServers"])
+
+    def test_invalid_existing_json_mcp_section_aborts_without_overwrite(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            agent_config_path = temp_root / "agent.json"
+            original = json.dumps({"mcpServers": []})
+            agent_config_path.write_text(original, encoding="utf-8")
+
+            ok = sync_mcp.manage_mcp_config(
+                {"TmpAgent": str(agent_config_path)},
+                {
+                    "demo": {
+                        "enabled": True,
+                        "_declared_in_policy": True,
+                        "_sync_ready": True,
+                        "command": "echo",
+                        "args": [],
+                        "env": {},
+                    }
+                },
+            )
+
+            self.assertFalse(ok)
+            self.assertEqual(agent_config_path.read_text(encoding="utf-8"), original)
 
     def test_sync_failure_preserves_existing_managed_mcp_entry_in_toml(self):
         with tempfile.TemporaryDirectory() as temp_dir:
