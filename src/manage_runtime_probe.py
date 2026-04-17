@@ -79,7 +79,6 @@ RULE_TARGET_PREFIX_TO_ID = {
     "claude": "claude-code",
     "gemini": "gemini-cli",
     "cursor": "cursor",
-    "copilot": "github-copilot",
     "opencode": "opencode",
     "codex": "codex",
 }

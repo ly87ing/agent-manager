@@ -29,12 +29,12 @@ class LinkSkillsTests(unittest.TestCase):
                 "repositories": {
                     "scoped-repo": {
                         "url": "https://example.invalid/repo.git",
-                        "agents": ["claude-code", "github-copilot"],
+                        "agents": ["claude-code", "cursor"],
                     }
                 },
                 "agents": {
                     "claude-code": str(temp_root / "targets" / "claude"),
-                    "github-copilot": str(temp_root / "targets" / "copilot"),
+                    "cursor": str(temp_root / "targets" / "cursor"),
                 },
             }
 
@@ -42,7 +42,7 @@ class LinkSkillsTests(unittest.TestCase):
                 mock.patch.object(
                     link_skills,
                     "load_json_object_file",
-                    side_effect=[policy_root, full_def, {"claude-code": {}, "github-copilot": {}}],
+                    side_effect=[policy_root, full_def, {"claude-code": {}, "cursor": {}}],
                 ),
                 mock.patch.object(
                     link_skills,

@@ -46,8 +46,6 @@ agent_installed_for_target() {
       command -v gemini >/dev/null 2>&1 ;;
     "$HOME"/.cursor/*|"$HOME"/.cursor)
       command -v cursor >/dev/null 2>&1 || [ -d "/Applications/Cursor.app" ] ;;
-    "$HOME"/.copilot/*|"$HOME"/.copilot)
-      command -v copilot >/dev/null 2>&1 || command -v gh >/dev/null 2>&1 ;;
     "$HOME"/.config/opencode/*|"$HOME"/.config/opencode)
       command -v opencode >/dev/null 2>&1 ;;
     "$HOME"/.codex/*|"$HOME"/.codex)
@@ -163,9 +161,6 @@ cleanup_legacy_target_paths() {
     cursor_global)
       legacy_path="$HOME/.cursor/rules/global.md"
       ;;
-    copilot_global)
-      legacy_path="$HOME/.copilot/rules/global.md"
-      ;;
     codex_modules)
       legacy_path="$HOME/.codex/rules/modules"
       ;;
@@ -177,9 +172,6 @@ cleanup_legacy_target_paths() {
       ;;
     cursor_modules)
       legacy_path="$HOME/.cursor/rules/modules"
-      ;;
-    copilot_modules)
-      legacy_path="$HOME/.copilot/rules/modules"
       ;;
   esac
 

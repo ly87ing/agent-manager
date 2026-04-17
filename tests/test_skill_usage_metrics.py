@@ -28,10 +28,6 @@ class SkillUsageMetricsTests(unittest.TestCase):
                 ROOT / "agent-rule" / "rules" / "dist" / "cursor" / "agent-manager.mdc",
                 ROOT / ".cursor" / "rules" / "agent-manager.mdc",
             ],
-            "github-copilot": [
-                ROOT / "agent-rule" / "rules" / "dist" / "copilot" / "copilot-instructions.md",
-                ROOT / ".github" / "copilot-instructions.md",
-            ],
             "opencode": [ROOT / "AGENTS.md"],
         }
         return {

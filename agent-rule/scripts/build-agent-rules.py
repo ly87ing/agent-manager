@@ -11,7 +11,7 @@ SRC_ROOT = ROOT / "rules" / "src"
 DIST_ROOT = ROOT / "rules" / "dist"
 MODULES_SRC = SRC_ROOT / "shared" / "modules"
 MODULES_DIST = DIST_ROOT / "modules"
-TARGETS = ("codex", "claude", "gemini", "cursor", "copilot")
+TARGETS = ("codex", "claude", "gemini", "cursor")
 TARGET_SPECS = {
     "codex": {"adapter": "codex", "filename": "AGENTS.md"},
     "claude": {"adapter": "claude", "filename": "CLAUDE.md"},
@@ -21,7 +21,6 @@ TARGET_SPECS = {
         "filename": "agent-manager.mdc",
         "prefix_lines": ["---", "alwaysApply: true", "---"],
     },
-    "copilot": {"adapter": "ide", "filename": "copilot-instructions.md"},
 }
 
 

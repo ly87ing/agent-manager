@@ -14,7 +14,6 @@ class RuleLayoutTests(unittest.TestCase):
         "claude": "CLAUDE.md",
         "gemini": "GEMINI.md",
         "cursor": "agent-manager.mdc",
-        "copilot": "copilot-instructions.md",
     }
 
     def _copy_repo(self, temp_dir: str) -> Path:
@@ -58,6 +57,7 @@ class RuleLayoutTests(unittest.TestCase):
                 (temp_root / "agent-rule" / "rules" / "dist" / "ide").exists(),
                 combined,
             )
+            self.assertFalse((temp_root / "agent-rule" / "rules" / "dist" / "copilot").exists(), combined)
 
     def test_build_copies_shared_modules(self):
         with tempfile.TemporaryDirectory() as temp_dir:

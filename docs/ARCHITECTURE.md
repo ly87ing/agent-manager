@@ -134,10 +134,10 @@ graph TD
 - `agent-rule/rules/src/` 保存可编辑的共享 core、共享 modules 和 agent adapters。
 - `agent-rule/scripts/build-agent-rules.py` 负责把 `src/` 片段生成到 `agent-rule/rules/dist/`。
 - 仓库内不再保留第二条平行的规则文本流；`agent-rule/rules/global/*` 已退出仓库 source-of-truth。
-- `agent-rule/rules/dist/codex/AGENTS.md`、`dist/claude/CLAUDE.md`、`dist/gemini/GEMINI.md`、`dist/cursor/agent-manager.mdc`、`dist/copilot/copilot-instructions.md` 分别对应各 agent 的原生入口格式。
+- `agent-rule/rules/dist/codex/AGENTS.md`、`dist/claude/CLAUDE.md`、`dist/gemini/GEMINI.md`、`dist/cursor/agent-manager.mdc` 分别对应各 agent 的原生入口格式。
 - `config/rules-targets.list` 只声明 `agent-rule/rules/dist/` 下的可分发产物到各 Agent 目标路径的映射。
 - manifest 现在同时支持家目录 target 和 `{{REPO_ROOT}}` repo-native target，用一条分发链覆盖全局文件与仓库内原生文件。
-- Cursor / Copilot 的原生入口分别落到 `{{REPO_ROOT}}/.cursor/rules/agent-manager.mdc` 和 `{{REPO_ROOT}}/.github/copilot-instructions.md`；OpenCode 直接消费仓库根 `AGENTS.md`。
+- Cursor 的原生入口落到 `{{REPO_ROOT}}/.cursor/rules/agent-manager.mdc`；OpenCode 直接消费仓库根 `AGENTS.md`。
 - 规则同步会清理历史遗留的 `~/.<agent>/rules/global.md` 和旧 `rules/modules` 目录，避免新旧入口并存。
 - `manage.sh rules:build` / `make rules-build` 用于刷新 `dist/`。
 - `manage.sh rules:sync` / `make rules:sync` 用于把 `dist/` 产物同步到目标 Agent 目录与 repo-native 文件位置。
@@ -179,7 +179,7 @@ graph TD
 
 ### 添加新Agent
 1. 在 `config/agents.json` 中添加Agent定义
-   - 键名必须是稳定 ID（例如 `github-copilot`）
+   - 键名必须是稳定 ID（例如 `claude-code`）
    - `display_name` 用于 CLI/UI 展示
    - bin: 可执行文件名称
    - preferred_provider: 首选安装来源

@@ -1058,7 +1058,7 @@ class ManageScriptTests(unittest.TestCase):
             combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
             self.assertIn("cursor_global", combined)
-            self.assertIn("copilot_global", combined)
+            self.assertNotIn("copilot_global", combined)
             self.assertNotIn("当前策略未启用任何 Rules 目标", combined)
             self.assertNotIn("计划原子更新 JSON", combined)
             self.assertNotIn("准备下载到托管缓存", combined)
@@ -1505,10 +1505,7 @@ class ManageScriptTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (temp_root / "config" / "rules-targets.list").write_text(
-                (
-                    "cursor_global|global|rules/dist/cursor/agent-manager.mdc|{{REPO_ROOT}}/.cursor/rules/agent-manager.mdc\n"
-                    "copilot_global|global|rules/dist/copilot/copilot-instructions.md|{{REPO_ROOT}}/.github/copilot-instructions.md\n"
-                ),
+                "cursor_global|global|rules/dist/cursor/agent-manager.mdc|{{REPO_ROOT}}/.cursor/rules/agent-manager.mdc\n",
                 encoding="utf-8",
             )
 
@@ -1524,7 +1521,6 @@ class ManageScriptTests(unittest.TestCase):
             combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
             self.assertTrue((temp_root / ".cursor" / "rules" / "agent-manager.mdc").exists(), combined)
-            self.assertTrue((temp_root / ".github" / "copilot-instructions.md").exists(), combined)
 
     def test_skills_upgrade_dispatches_upgrade_script(self):
         with tempfile.TemporaryDirectory() as temp_dir:

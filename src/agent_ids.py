@@ -16,10 +16,6 @@ AGENT_METADATA = {
         "display_name": "Cursor IDE",
         "aliases": ["Cursor", "Cursor IDE"],
     },
-    "github-copilot": {
-        "display_name": "GitHub Copilot CLI",
-        "aliases": ["GitHub Copilot", "GitHub Copilot CLI"],
-    },
     "opencode": {
         "display_name": "OpenCode",
         "aliases": ["OpenCode"],

@@ -51,7 +51,7 @@ make sync
 - 首次调用 `chrome-devtools` 时，`npx` 可能会下载最新包版本；需要本机有可用的 Node.js / npm 运行时。
 - `make doctor` 会在 `chrome-devtools` 处于启用状态时预检 `npx` 运行时是否可用；实际包版本仍以首次调用或缓存失效后的 `@latest` 解析结果为准。
 - 如果后续需要统一增加 `--browserUrl`、`--headless`、`--isolated` 等参数，应修改 `config/mcp.json`，不要手改单个 Agent 的 MCP 配置文件。
-- 本项目不再维护本地 GitHub Copilot CLI，因此不会再向 `~/.copilot/mcp-config.json` 注入托管 MCP；仓库内 repo-native `.github/copilot-instructions.md` 仍由 rules 分发维护。
+- 本项目不管理 GitHub Copilot，因此不会再向其配置目录注入托管 MCP，也不会再生成 Copilot 专属 repo-native rules 文件。
 
 ---
 

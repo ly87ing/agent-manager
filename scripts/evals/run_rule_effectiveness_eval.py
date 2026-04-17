@@ -296,10 +296,6 @@ def measure_always_on_instruction_tokens_by_agent() -> dict[str, int]:
             REPO_ROOT / "agent-rule" / "rules" / "dist" / "cursor" / "agent-manager.mdc",
             REPO_ROOT / ".cursor" / "rules" / "agent-manager.mdc",
         ],
-        "github-copilot": [
-            REPO_ROOT / "agent-rule" / "rules" / "dist" / "copilot" / "copilot-instructions.md",
-            REPO_ROOT / ".github" / "copilot-instructions.md",
-        ],
         "opencode": [REPO_ROOT / "AGENTS.md"],
     }
     return {
