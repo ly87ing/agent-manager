@@ -1,5 +1,10 @@
 {
   "repositories": {
+    "agent-skills": {
+      "url": "https://github.com/ly87ing/agent-skills.git",
+      "skill_count": 3,
+      "agents": ["claude-code", "codex"]
+    },
     "openai-frontend-skill": {
       "url": "https://github.com/openai/skills.git",
       "commit": "82d2c5b44ac234ec0f204f647562a4349d90ef43",

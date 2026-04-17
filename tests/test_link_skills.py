@@ -2,9 +2,11 @@ import importlib.util
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -18,6 +20,52 @@ SPEC.loader.exec_module(link_skills)
 class LinkSkillsTests(unittest.TestCase):
     def test_codex_is_globally_active_without_lifecycle_definition(self):
         self.assertTrue(link_skills.is_active_skill_target("codex", "/tmp/.codex/skills", {}))
+
+    def test_main_allows_scoped_repo_targets_that_are_declared_but_inactive(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            policy_root = {"skills": {"scoped-repo": {"enabled": False}}}
+            full_def = {
+                "repositories": {
+                    "scoped-repo": {
+                        "url": "https://example.invalid/repo.git",
+                        "agents": ["claude-code", "github-copilot"],
+                    }
+                },
+                "agents": {
+                    "claude-code": str(temp_root / "targets" / "claude"),
+                    "github-copilot": str(temp_root / "targets" / "copilot"),
+                },
+            }
+
+            with (
+                mock.patch.object(
+                    link_skills,
+                    "load_json_object_file",
+                    side_effect=[policy_root, full_def, {"claude-code": {}, "github-copilot": {}}],
+                ),
+                mock.patch.object(
+                    link_skills,
+                    "is_active_skill_target",
+                    side_effect=lambda agent_name, *_args: agent_name == "claude-code",
+                ),
+                mock.patch.object(
+                    sys,
+                    "argv",
+                    [
+                        str(MODULE_PATH),
+                        "--config",
+                        str(temp_root / "config.json"),
+                        "--def-file",
+                        str(temp_root / "defs.json"),
+                        "--base-dir",
+                        str(temp_root / "skills"),
+                        "--dry-run",
+                        "--yes",
+                    ],
+                ),
+            ):
+                link_skills.main()
 
     def test_resolve_repo_link_targets_includes_globally_active_codex_for_unscoped_repo(self):
         active_targets = {
@@ -1588,6 +1636,18 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertEqual(repo["commit"], "07f4ef3ac2568c25a3b0c8ef5165a86abc3e56e4")
         self.assertEqual(repo["agents"], ["claude-code", "codex"])
 
+    def test_default_skill_catalog_includes_agent_skills_repo_with_explicit_agents(self):
+        skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
+
+        repo = skills_config["repositories"].get("agent-skills")
+
+        self.assertIsNotNone(repo)
+        self.assertEqual(repo["url"], "https://github.com/ly87ing/agent-skills.git")
+        self.assertEqual(repo["skill_count"], 3)
+        self.assertEqual(repo["agents"], ["claude-code", "codex"])
+        self.assertNotIn("commit", repo)
+        self.assertNotIn("ref", repo)
+
     def test_default_skill_catalog_includes_playwright_best_practices_repo_with_explicit_agents(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
 
@@ -1616,6 +1676,14 @@ class LinkSkillsTests(unittest.TestCase):
 
         self.assertEqual(
             manager_config["skills"].get("ui-ux-pro-max-skill"),
+            {"enabled": True},
+        )
+
+    def test_default_manager_policy_explicitly_enables_agent_skills_repo(self):
+        manager_config = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            manager_config["skills"].get("agent-skills"),
             {"enabled": True},
         )
 

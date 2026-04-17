@@ -553,7 +553,7 @@ def main():
         if name in policy_cfg: r_def.update(policy_cfg[name])
         r_def["agents"] = canonicalize_agent_list(r_def.get("agents"))
         validate_repo_skill_count(name, r_def)
-        unknown_agents = [agent_name for agent_name in (r_def["agents"] or []) if agent_name not in AGENT_TARGETS]
+        unknown_agents = [agent_name for agent_name in (r_def["agents"] or []) if agent_name not in ALL_AGENT_TARGETS]
         if unknown_agents:
             raise ValueError(f"{name}: agents 包含未声明的 target: {', '.join(sorted(unknown_agents))}")
 
