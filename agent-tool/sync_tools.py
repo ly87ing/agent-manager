@@ -4,6 +4,8 @@ import argparse
 import logging
 import subprocess
 import shutil
+import json
+import shlex
 import sys
 import time
 from pathlib import Path
@@ -14,6 +16,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.json_config import get_typed_mapping_section, load_json_object_file
 from src.command_runner import run_command
+from src.git_remote_probe import probe_git_remote_state as probe_git_remote_repo_state
 from src.manage_runtime_probe import (
     TOOL_BROKEN_MARKER,
     TOOL_READY_MARKER,
@@ -52,46 +55,99 @@ class GitStatusCache:
             cls._instance._cache = {}
         return cls._instance
     
-    def is_git_up_to_date(self, cwd, timeout=5):
-        """检查 git 是否已是最新（带缓存和超时）"""
+    def probe_git_remote_state(self, cwd, timeout=5):
+        """检查 git 远端状态（带缓存和超时）"""
         cwd_str = str(Path(cwd).resolve())
-        
-        # 检查缓存
         if cwd_str in self._cache:
             return self._cache[cwd_str]
-        
-        # 快速检查：先看本地是否有未提交更改
-        success, out = run_cmd(["git", "status", "--porcelain"], cwd=cwd, timeout=timeout)
-        if not success:
-            self._cache[cwd_str] = True  # 失败时保守假设是最新的
-            return True
-        
-        if out.strip():
-            # 有本地修改，需要更新
-            self._cache[cwd_str] = False
-            return False
-        
-        # 检查远程更新：使用 ls-remote 代替 fetch（更快，不修改本地状态）
-        success, out = run_cmd(["git", "ls-remote", "origin", "HEAD"], cwd=cwd, timeout=timeout)
-        if not success or out.strip() == "":
-            self._cache[cwd_str] = True  # 无法检查时保守假设是最新的
-            return True
-        
-        remote_hash = out.strip().split()[0]
-        
-        success, local_out = run_cmd(["git", "rev-parse", "HEAD"], cwd=cwd, timeout=timeout)
-        if not success:
-            self._cache[cwd_str] = True
-            return True
-        
-        local_hash = local_out.strip()
-        
-        result = (local_hash == remote_hash)
+
+        result = probe_git_remote_repo_state(run_cmd, cwd, timeout=timeout)
         self._cache[cwd_str] = result
         return result
 
+    def is_git_up_to_date(self, cwd, timeout=5):
+        """兼容旧调用方，只返回布尔最新状态。"""
+        return self.probe_git_remote_state(cwd, timeout=timeout)["status"] == "latest"
+
 # 实例化缓存
 git_cache = GitStatusCache()
+
+
+def probe_git_remote_state(cwd, timeout=5):
+    return git_cache.probe_git_remote_state(cwd, timeout=timeout)
+
+
+def _extract_npm_package_name(command):
+    if not command:
+        return None
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = command.split()
+    if len(tokens) < 3 or tokens[0] != "npm" or tokens[1] != "install":
+        return None
+    for token in tokens[2:]:
+        if token.startswith("-"):
+            continue
+        if token.startswith("@") and "@" in token[1:]:
+            return token.rsplit("@", 1)[0]
+        if "@" in token:
+            return token.split("@", 1)[0]
+        return token
+    return None
+
+
+def _build_brew_outdated_probe(command):
+    if not command:
+        return None
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = command.split()
+    if len(tokens) < 3 or tokens[0] != "brew" or tokens[1] not in {"install", "upgrade"}:
+        return None
+    cask = False
+    for token in tokens[2:]:
+        if token == "--cask":
+            cask = True
+            continue
+        if token.startswith("-"):
+            continue
+        if cask:
+            return ["brew", "outdated", "--cask", token]
+        return ["brew", "outdated", token]
+    return None
+
+
+def probe_package_update_state(name, definition):
+    upgrade_cmd = definition.get("upgrade") or definition.get("install")
+    npm_package = _extract_npm_package_name(upgrade_cmd)
+    if npm_package:
+        ok, out = run_cmd(["npm", "list", "-g", npm_package, "--depth=0", "--json"], timeout=60)
+        if not ok or not out.strip():
+            return "unknown"
+        try:
+            parsed = json.loads(out)
+            local_version = parsed["dependencies"][npm_package]["version"]
+        except (KeyError, TypeError, ValueError):
+            return "unknown"
+        ok, out = run_cmd(["npm", "view", npm_package, "version"], timeout=60)
+        if not ok:
+            return "unknown"
+        remote_version = out.strip()
+        if not remote_version:
+            return "unknown"
+        return "latest" if local_version == remote_version else "stale"
+
+    brew_probe = _build_brew_outdated_probe(upgrade_cmd)
+    if brew_probe:
+        ok, out = run_cmd(brew_probe, timeout=60)
+        if not ok:
+            return "unknown"
+        return "latest" if not out.strip() else "stale"
+
+    logging.info(f"[TOOL: {name}] 未识别的升级探测类型，回退为 unknown。")
+    return "unknown"
 
 
 def ready_marker_path(target_dir: Path) -> Path:
@@ -228,17 +284,21 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False, of
                     status_ok, status_out = run_cmd(["git", "status", "--porcelain"], cwd=target_dir, timeout=5)
                     if status_ok and status_out.strip():
                         logging.warning(f"[TOOL: {name}] 检测到本地未提交更改，跳过更新以保护工作区。")
-                    elif git_cache.is_git_up_to_date(target_dir):
-                        logging.info(f"[TOOL: {name}] (内容已最新)")
-                        should_apply_overrides = True
                     else:
-                        success, out = run_cmd(["git", "pull", "--ff-only"], cwd=target_dir)
-                        if success:
-                            logging.info(f"[TOOL: {name}] (已更新)")
-                            needs_setup = True
+                        probe_state = probe_git_remote_state(target_dir, timeout=5)
+                        if probe_state["status"] == "latest":
+                            logging.info(f"[TOOL: {name}] (内容已最新)")
                             should_apply_overrides = True
-                            repo_state_changed = True
-                        else: logging.error(f"[TOOL: {name}] (更新失败: {out})"); success_build = False
+                        else:
+                            if probe_state["status"] == "unknown":
+                                logging.warning(f"[TOOL: {name}] 更新探测失败，继续执行拉取以避免漏更。")
+                            success, out = run_cmd(["git", "pull", "--ff-only"], cwd=target_dir)
+                            if success:
+                                logging.info(f"[TOOL: {name}] (已更新)")
+                                needs_setup = True
+                                should_apply_overrides = True
+                                repo_state_changed = True
+                            else: logging.error(f"[TOOL: {name}] (更新失败: {out})"); success_build = False
         else:
             if offline:
                 if target_dir.exists():
@@ -287,6 +347,8 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False, of
         upgrade_cmd = definition.get("upgrade")
         setup_cmd = definition.get("setup")
         runtime_ready_checks = definition.get("runtime_ready_checks_any") or []
+        runtime_ready_globs = definition.get("runtime_ready_globs_any") or []
+        ready_paths = definition.get("ready_paths") or []
         binary_ready = _check_ready(name, ready_check)
         tool_ready = detect_tool_readiness(name, definition, base_dir)
         if offline:
@@ -314,7 +376,7 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False, of
                 return False
             if force:
                 return True
-            if runtime_ready_checks:
+            if runtime_ready_checks or runtime_ready_globs or ready_paths:
                 return not detect_tool_readiness(name, definition, base_dir)
             return True
 
@@ -323,13 +385,19 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False, of
                 if dry_run:
                     logging.info(f"[TOOL: {name}] (预览: 计划执行升级)")
                 else:
-                    logging.info(f"[TOOL: {name}] 已安装，执行升级...")
-                    ok, out = run_cmd(upgrade_cmd)
-                    if not ok:
-                        logging.warning(f"[TOOL: {name}] 升级失败（保留现有版本）: {out}")
+                    package_state = "stale" if force else probe_package_update_state(name, definition)
+                    if package_state == "latest":
+                        logging.info(f"[TOOL: {name}] 已是最新版本，跳过升级。")
                     else:
-                        binary_ready = _check_ready(name, ready_check)
-                        needs_setup = setup_required_after_binary_change()
+                        if package_state == "unknown":
+                            logging.warning(f"[TOOL: {name}] 更新探测失败，继续执行升级以避免漏更。")
+                        logging.info(f"[TOOL: {name}] 已安装，执行升级...")
+                        ok, out = run_cmd(upgrade_cmd)
+                        if not ok:
+                            logging.warning(f"[TOOL: {name}] 升级失败（保留现有版本）: {out}")
+                        else:
+                            binary_ready = _check_ready(name, ready_check)
+                            needs_setup = setup_required_after_binary_change()
             elif tool_ready:
                 logging.info(f"[TOOL: {name}] 已就绪，跳过安装。")
             else:

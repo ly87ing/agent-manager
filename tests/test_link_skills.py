@@ -240,6 +240,48 @@ class LinkSkillsTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue((agent_target / "example-skill").is_symlink())
 
+    def test_clone_or_update_repo_skips_pull_when_probe_reports_latest(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            managed_root = Path(temp_dir) / "repositories"
+            repo_path = managed_root / "demo-skill"
+            (repo_path / ".git").mkdir(parents=True)
+
+            with mock.patch.object(
+                link_skills,
+                "probe_git_remote_state",
+                return_value={"status": "latest", "remote_head": "abc", "local_remote_head": "abc"},
+            ):
+                with mock.patch.object(link_skills, "repo_head_is_detached", return_value=False):
+                    with mock.patch.object(link_skills, "run_cmd") as run_cmd:
+                        repo, ok = link_skills.clone_or_update_repo(
+                            "demo-skill",
+                            "https://example.invalid/repo.git",
+                            managed_root,
+                        )
+
+        self.assertEqual(repo, repo_path)
+        self.assertTrue(ok)
+        self.assertEqual(run_cmd.call_count, 0)
+
+    def test_clone_or_update_repo_probe_failure_falls_back_to_pull(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            managed_root = Path(temp_dir) / "repositories"
+            repo_path = managed_root / "demo-skill"
+            (repo_path / ".git").mkdir(parents=True)
+
+            with mock.patch.object(link_skills, "probe_git_remote_state", return_value={"status": "unknown"}):
+                with mock.patch.object(link_skills, "repo_head_is_detached", return_value=False):
+                    with mock.patch.object(link_skills, "run_cmd", return_value=(True, "updated")) as run_cmd:
+                        repo, ok = link_skills.clone_or_update_repo(
+                            "demo-skill",
+                            "https://example.invalid/repo.git",
+                            managed_root,
+                        )
+
+        self.assertEqual(repo, repo_path)
+        self.assertTrue(ok)
+        self.assertEqual(run_cmd.call_args_list, [mock.call(["git", "pull", "--ff-only"], cwd=repo_path)])
+
     def test_missing_policy_repository_is_ignored(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

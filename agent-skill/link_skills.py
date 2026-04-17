@@ -15,6 +15,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.agent_ids import canonicalize_agent_id, canonicalize_agent_list, canonicalize_agent_mapping
 from src.command_runner import run_command
+from src.git_remote_probe import probe_git_remote_state
 from src.json_config import get_typed_mapping_section, load_json_object_file
 from src.manage_runtime_probe import is_agent_installed
 from src.runtime_logging import configure_logging
@@ -246,9 +247,21 @@ def clone_or_update_repo(name, url, base_dir, dry_run=False, offline=False, auto
         elif not auto_update:
             logging.info(f"[{name}] auto_update 关闭，跳过仓库更新。")
         else:
+            probe_state = probe_git_remote_state(run_cmd, target_dir)
             update_cmd = ["git", "pull", "--ff-only"]
             if repo_head_is_detached(target_dir):
+                if (
+                    probe_state["status"] == "latest"
+                    and probe_state.get("local_remote_head") == probe_state.get("remote_head")
+                ):
+                    logging.info(f"[{name}] 内容已最新。")
+                    return target_dir, True
                 update_cmd = ["git", "fetch", "--tags", "origin"]
+            elif probe_state["status"] == "latest":
+                logging.info(f"[{name}] 内容已最新。")
+                return target_dir, True
+            elif probe_state["status"] == "unknown":
+                logging.warning(f"[{name}] 更新探测失败，继续刷新远端状态以避免漏更。")
             success, output = run_cmd(update_cmd, cwd=target_dir)
             if success: logging.info(f"[{name}] 更新成功。")
             else: logging.error(f"[{name}] 更新失败: {output}")

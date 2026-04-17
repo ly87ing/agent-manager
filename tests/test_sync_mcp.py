@@ -73,6 +73,48 @@ class SyncMcpTests(unittest.TestCase):
                 "agent-manager",
             )
 
+    def test_clone_or_update_repo_skips_pull_when_probe_reports_latest(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            repo_path = base_dir / "demo-mcp"
+            (repo_path / ".git").mkdir(parents=True)
+
+            with unittest.mock.patch.object(
+                sync_mcp,
+                "probe_git_remote_state",
+                return_value={"status": "latest", "remote_head": "abc", "local_remote_head": "abc"},
+            ):
+                with unittest.mock.patch.object(sync_mcp, "repo_head_is_detached", return_value=False):
+                    with unittest.mock.patch.object(sync_mcp, "run_cmd") as run_cmd:
+                        repo, ok = sync_mcp.clone_or_update_repo(
+                            "demo-mcp",
+                            "https://example.invalid/repo.git",
+                            base_dir,
+                        )
+
+        self.assertEqual(repo, repo_path)
+        self.assertTrue(ok)
+        self.assertEqual(run_cmd.call_count, 0)
+
+    def test_clone_or_update_repo_probe_failure_falls_back_to_pull(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            repo_path = base_dir / "demo-mcp"
+            (repo_path / ".git").mkdir(parents=True)
+
+            with unittest.mock.patch.object(sync_mcp, "probe_git_remote_state", return_value={"status": "unknown"}):
+                with unittest.mock.patch.object(sync_mcp, "repo_head_is_detached", return_value=False):
+                    with unittest.mock.patch.object(sync_mcp, "run_cmd", return_value=(True, "updated")) as run_cmd:
+                        repo, ok = sync_mcp.clone_or_update_repo(
+                            "demo-mcp",
+                            "https://example.invalid/repo.git",
+                            base_dir,
+                        )
+
+        self.assertEqual(repo, repo_path)
+        self.assertTrue(ok)
+        self.assertEqual(run_cmd.call_args_list, [unittest.mock.call(["git", "pull", "--ff-only"], cwd=repo_path)])
+
     def test_invalid_policy_config_exits_non_zero(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

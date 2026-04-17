@@ -110,24 +110,116 @@ class SyncToolsTests(unittest.TestCase):
             def fake_detect_tool_readiness(name, definition, repo_root, inventory=None):
                 return True
 
-            with mock.patch.object(sync_tools, "run_cmd", side_effect=fake_run_cmd) as run_cmd:
-                with mock.patch.object(sync_tools, "_check_ready", side_effect=fake_check_ready):
-                    with mock.patch.object(sync_tools, "detect_tool_readiness", side_effect=fake_detect_tool_readiness):
-                        ok = sync_tools.sync_tool(
-                            "agent-browser",
-                            {
-                                "install": "npm install -g agent-browser@latest",
-                                "upgrade": "npm install -g agent-browser@latest",
-                                "setup": "agent-browser install",
-                                "ready_check": "bin:agent-browser",
-                                "runtime_ready_checks_any": ["app:/Applications/Google Chrome.app"],
-                            },
-                            {"enabled": True, "auto_update": True},
-                            Path(temp_dir),
-                        )
+            with mock.patch.object(sync_tools, "probe_package_update_state", return_value="stale"):
+                with mock.patch.object(sync_tools, "run_cmd", side_effect=fake_run_cmd) as run_cmd:
+                    with mock.patch.object(sync_tools, "_check_ready", side_effect=fake_check_ready):
+                        with mock.patch.object(sync_tools, "detect_tool_readiness", side_effect=fake_detect_tool_readiness):
+                            ok = sync_tools.sync_tool(
+                                "agent-browser",
+                                {
+                                    "install": "npm install -g agent-browser@latest",
+                                    "upgrade": "npm install -g agent-browser@latest",
+                                    "setup": "agent-browser install",
+                                    "ready_check": "bin:agent-browser",
+                                    "runtime_ready_checks_any": ["app:/Applications/Google Chrome.app"],
+                                },
+                                {"enabled": True, "auto_update": True},
+                                Path(temp_dir),
+                            )
 
             self.assertTrue(ok)
             self.assertEqual(run_cmd.call_args_list, [mock.call("npm install -g agent-browser@latest")])
+
+    def test_probe_package_update_state_reports_latest_for_matching_npm_versions(self):
+        def fake_run_cmd(cmd, cwd=None, timeout=300):
+            if cmd == ["npm", "list", "-g", "@augmentcode/auggie", "--depth=0", "--json"]:
+                return True, json.dumps({"dependencies": {"@augmentcode/auggie": {"version": "0.24.0"}}})
+            if cmd == ["npm", "view", "@augmentcode/auggie", "version"]:
+                return True, "0.24.0\n"
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        with mock.patch.object(sync_tools, "run_cmd", side_effect=fake_run_cmd):
+            state = sync_tools.probe_package_update_state(
+                "auggie",
+                {
+                    "install": "npm install -g @augmentcode/auggie@latest",
+                    "upgrade": "npm install -g @augmentcode/auggie@latest",
+                },
+            )
+
+        self.assertEqual(state, "latest")
+
+    def test_install_based_tool_skips_upgrade_when_package_probe_reports_latest(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with mock.patch.object(sync_tools, "probe_package_update_state", return_value="latest"):
+                with mock.patch.object(sync_tools, "_check_ready", return_value=True):
+                    with mock.patch.object(sync_tools, "detect_tool_readiness", return_value=True):
+                        with mock.patch.object(sync_tools, "run_cmd") as run_cmd:
+                            ok = sync_tools.sync_tool(
+                                "auggie",
+                                {
+                                    "install": "npm install -g @augmentcode/auggie@latest",
+                                    "upgrade": "npm install -g @augmentcode/auggie@latest",
+                                    "ready_check": "bin:auggie",
+                                },
+                                {"enabled": True, "auto_update": True},
+                                Path(temp_dir),
+                            )
+
+        self.assertTrue(ok)
+        self.assertEqual(run_cmd.call_count, 0)
+
+    def test_install_based_tool_probe_failure_still_runs_upgrade(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with mock.patch.object(sync_tools, "probe_package_update_state", return_value="unknown"):
+                with mock.patch.object(sync_tools, "_check_ready", return_value=True):
+                    with mock.patch.object(sync_tools, "detect_tool_readiness", return_value=True):
+                        with mock.patch.object(sync_tools, "run_cmd", return_value=(True, "upgraded")) as run_cmd:
+                            ok = sync_tools.sync_tool(
+                                "auggie",
+                                {
+                                    "install": "npm install -g @augmentcode/auggie@latest",
+                                    "upgrade": "npm install -g @augmentcode/auggie@latest",
+                                    "ready_check": "bin:auggie",
+                                },
+                                {"enabled": True, "auto_update": True},
+                                Path(temp_dir),
+                            )
+
+        self.assertTrue(ok)
+        self.assertEqual(run_cmd.call_args_list, [mock.call("npm install -g @augmentcode/auggie@latest")])
+
+    def test_install_based_tool_skips_setup_when_runtime_glob_is_already_available_after_upgrade(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state = {"binary_ready": True}
+
+            def fake_run_cmd(cmd, cwd=None, timeout=300):
+                if cmd == "playwright-cli install-browser":
+                    raise AssertionError("setup should not run when runtime globs already match")
+                return True, "ok"
+
+            def fake_check_ready(name, ready_check):
+                return state["binary_ready"]
+
+            with mock.patch.object(sync_tools, "probe_package_update_state", return_value="stale"):
+                with mock.patch.object(sync_tools, "run_cmd", side_effect=fake_run_cmd) as run_cmd:
+                    with mock.patch.object(sync_tools, "_check_ready", side_effect=fake_check_ready):
+                        with mock.patch.object(sync_tools, "detect_tool_readiness", return_value=True):
+                            ok = sync_tools.sync_tool(
+                                "playwright-cli",
+                                {
+                                    "install": "npm install -g @playwright/cli@latest",
+                                    "upgrade": "npm install -g @playwright/cli@latest",
+                                    "setup": "playwright-cli install-browser",
+                                    "ready_check": "bin:playwright-cli",
+                                    "runtime_ready_globs_any": ["~/Library/Caches/ms-playwright/chromium-*"],
+                                },
+                                {"enabled": True, "auto_update": True},
+                                Path(temp_dir),
+                            )
+
+        self.assertTrue(ok)
+        self.assertEqual(run_cmd.call_args_list, [mock.call("npm install -g @playwright/cli@latest")])
 
     def test_install_based_tool_setup_failure_marks_broken(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -679,6 +771,34 @@ class SyncToolsTests(unittest.TestCase):
                     )
 
             self.assertEqual(apply_overrides.call_count, 0)
+
+    def test_repo_backed_tool_probe_failure_falls_back_to_pull(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_dir = Path(temp_dir) / "playwright-cli"
+            target_dir.mkdir()
+            (target_dir / ".git").mkdir()
+
+            def fake_run_cmd(cmd, cwd=None, timeout=300):
+                if cmd == ["git", "status", "--porcelain"]:
+                    return True, ""
+                if cmd == ["git", "pull", "--ff-only"]:
+                    return True, "updated"
+                raise AssertionError(f"unexpected command: {cmd}")
+
+            with mock.patch.object(sync_tools, "probe_git_remote_state", return_value={"status": "unknown"}):
+                with mock.patch.object(sync_tools, "run_cmd", side_effect=fake_run_cmd) as run_cmd:
+                    with mock.patch.object(sync_tools, "apply_overrides") as apply_overrides:
+                        ok = sync_tools.sync_tool(
+                            "playwright-cli",
+                            {"url": "https://example.invalid/repo.git"},
+                            {"enabled": True, "auto_update": True},
+                            Path(temp_dir),
+                        )
+
+        self.assertTrue(ok)
+        self.assertIn(mock.call(["git", "status", "--porcelain"], cwd=target_dir, timeout=5), run_cmd.call_args_list)
+        self.assertIn(mock.call(["git", "pull", "--ff-only"], cwd=target_dir), run_cmd.call_args_list)
+        self.assertEqual(apply_overrides.call_count, 1)
 
     def test_setup_command_is_not_subject_to_global_300_second_timeout(self):
         with tempfile.TemporaryDirectory() as temp_dir:
