@@ -7,20 +7,17 @@
     },
     "openai-frontend-skill": {
       "url": "https://github.com/openai/skills.git",
-      "commit": "82d2c5b44ac234ec0f204f647562a4349d90ef43",
       "skill_paths": ["skills/.curated/frontend-skill"],
       "skill_count": 1,
       "agents": ["codex"]
     },
     "playwright-best-practices-skill": {
       "url": "https://github.com/currents-dev/playwright-best-practices-skill.git",
-      "commit": "ef329e7e65149918e1ff0eed2cf7d2e6e6f9eb5b",
       "skill_count": 1,
       "agents": ["claude-code", "codex", "cursor", "github-copilot", "opencode"]
     },
     "superpowers": {
       "url": "https://github.com/obra/superpowers",
-      "commit": "7e516434f2a30114300efc9247db32fb37daa5f9",
       "skill_count": 14,
       "agents": [
         "claude-code",
@@ -33,7 +30,6 @@
     },
     "ui-ux-pro-max-skill": {
       "url": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill",
-      "commit": "07f4ef3ac2568c25a3b0c8ef5165a86abc3e56e4",
       "skill_count": 7,
       "agents": ["claude-code", "codex"]
     }

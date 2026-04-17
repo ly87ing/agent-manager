@@ -101,9 +101,30 @@ def resolve_requested_revision(config):
         return "ref", str(config["ref"])
     return None, None
 
+def resolve_remote_default_branch(repo_path):
+    ok, out = run_cmd(["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cwd=repo_path)
+    if ok:
+        ref_name = out.strip()
+        if ref_name.startswith("origin/"):
+            return ref_name.removeprefix("origin/")
+    for candidate in ("main", "master"):
+        if resolve_git_commit(repo_path, f"origin/{candidate}") is not None:
+            return candidate
+    return None
+
 def ensure_repo_version(repo_path, config, dry_run=False, offline=False):
     revision_kind, revision = resolve_requested_revision(config)
     if not revision:
+        if not dry_run and config.get("auto_update", True) and repo_head_is_detached(repo_path):
+            default_branch = resolve_remote_default_branch(repo_path)
+            if not default_branch:
+                logging.info(f"[{repo_path.name}] 未固定版本且仓库处于 detached HEAD，但无法解析远端默认分支；保留当前状态。")
+                return True
+            success, output = run_cmd(["git", "checkout", "-B", default_branch, f"origin/{default_branch}"], cwd=repo_path)
+            if not success:
+                logging.error(f"[{repo_path.name}] 切回默认分支 {default_branch} 失败: {output}")
+                return False
+            logging.info(f"[{repo_path.name}] 已切回默认分支 {default_branch} 并对齐最新远端状态。")
         return True
     if dry_run:
         logging.info(f"[{repo_path.name}] (预览: 计划检出 {revision_kind} {revision})")

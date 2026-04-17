@@ -1078,6 +1078,161 @@ class LinkSkillsTests(unittest.TestCase):
             self.assertEqual(second.returncode, 0, second_output)
             self.assertNotIn("You are not currently on a branch.", second_output)
 
+    def test_unpinned_repository_switches_detached_cache_back_to_default_branch_latest(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            source_repo = temp_root / "source-repo"
+            source_repo.mkdir()
+            subprocess.run(["git", "init"], cwd=source_repo, capture_output=True, text=True, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=source_repo, check=True)
+            subprocess.run(["git", "config", "user.name", "Test User"], cwd=source_repo, check=True)
+            default_branch = subprocess.run(
+                ["git", "branch", "--show-current"],
+                cwd=source_repo,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            skill_dir = source_repo / "tracked-skill"
+            skill_dir.mkdir()
+            skill_md = skill_dir / "SKILL.md"
+            skill_md.write_text(
+                "---\nname: tracked-skill\ndescription: Example\n---\n\n# v1\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "."], cwd=source_repo, check=True)
+            subprocess.run(["git", "commit", "-m", "v1"], cwd=source_repo, capture_output=True, text=True, check=True)
+            commit_v1 = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=source_repo,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+
+            skill_md.write_text(
+                "---\nname: tracked-skill\ndescription: Example\n---\n\n# v2\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "."], cwd=source_repo, check=True)
+            subprocess.run(["git", "commit", "-m", "v2"], cwd=source_repo, capture_output=True, text=True, check=True)
+            commit_v2 = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=source_repo,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            agent_target = temp_root / "targets" / "claude"
+            agent_target.parent.mkdir(parents=True)
+            config_path.write_text(
+                json.dumps({"skills": {"tracked-repo": {"enabled": True}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "tracked-repo": {
+                                "url": str(source_repo),
+                                "commit": commit_v1,
+                                "agents": ["claude-code"],
+                            }
+                        },
+                        "agents": {
+                            "claude-code": str(agent_target),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            first = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "skills"),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            first_output = first.stdout + first.stderr
+            self.assertEqual(first.returncode, 0, first_output)
+
+            managed_repo = temp_root / "skills" / "repositories" / "tracked-repo"
+            detached_head = subprocess.run(
+                ["git", "symbolic-ref", "-q", "HEAD"],
+                cwd=managed_repo,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(detached_head.returncode, 0, detached_head.stdout + detached_head.stderr)
+
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "tracked-repo": {
+                                "url": str(source_repo),
+                                "agents": ["claude-code"],
+                            }
+                        },
+                        "agents": {
+                            "claude-code": str(agent_target),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            second = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "skills"),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            second_output = second.stdout + second.stderr
+            self.assertEqual(second.returncode, 0, second_output)
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=managed_repo,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            current_branch = subprocess.run(
+                ["git", "branch", "--show-current"],
+                cwd=managed_repo,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            self.assertEqual(head, commit_v2)
+            self.assertEqual(current_branch, default_branch)
+            self.assertTrue((agent_target / "tracked-skill").is_symlink())
+
     def test_auto_update_false_uses_existing_managed_cache_repo_without_pull(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -1633,8 +1788,9 @@ class LinkSkillsTests(unittest.TestCase):
 
         self.assertIsNotNone(repo)
         self.assertEqual(repo["url"], "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill")
-        self.assertEqual(repo["commit"], "07f4ef3ac2568c25a3b0c8ef5165a86abc3e56e4")
         self.assertEqual(repo["agents"], ["claude-code", "codex"])
+        self.assertNotIn("commit", repo)
+        self.assertNotIn("ref", repo)
 
     def test_default_skill_catalog_includes_agent_skills_repo_with_explicit_agents(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
@@ -1655,8 +1811,9 @@ class LinkSkillsTests(unittest.TestCase):
 
         self.assertIsNotNone(repo)
         self.assertEqual(repo["url"], "https://github.com/currents-dev/playwright-best-practices-skill.git")
-        self.assertEqual(repo["commit"], "ef329e7e65149918e1ff0eed2cf7d2e6e6f9eb5b")
         self.assertEqual(repo["agents"], ["claude-code", "codex", "cursor", "github-copilot", "opencode"])
+        self.assertNotIn("commit", repo)
+        self.assertNotIn("ref", repo)
 
     def test_default_skill_catalog_includes_superpowers_for_all_supported_agents(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
@@ -1665,11 +1822,12 @@ class LinkSkillsTests(unittest.TestCase):
 
         self.assertIsNotNone(repo)
         self.assertEqual(repo["url"], "https://github.com/obra/superpowers")
-        self.assertEqual(repo["commit"], "7e516434f2a30114300efc9247db32fb37daa5f9")
         self.assertEqual(
             set(repo["agents"]),
             {"claude-code", "gemini-cli", "cursor", "github-copilot", "opencode", "codex"},
         )
+        self.assertNotIn("commit", repo)
+        self.assertNotIn("ref", repo)
 
     def test_default_manager_policy_explicitly_enables_ui_ux_pro_max_repo(self):
         manager_config = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
@@ -1694,9 +1852,10 @@ class LinkSkillsTests(unittest.TestCase):
 
         self.assertIsNotNone(repo)
         self.assertEqual(repo["url"], "https://github.com/openai/skills.git")
-        self.assertEqual(repo["commit"], "82d2c5b44ac234ec0f204f647562a4349d90ef43")
         self.assertEqual(repo["skill_paths"], ["skills/.curated/frontend-skill"])
         self.assertEqual(repo["agents"], ["codex"])
+        self.assertNotIn("commit", repo)
+        self.assertNotIn("ref", repo)
 
     def test_default_manager_policy_explicitly_enables_openai_frontend_skill(self):
         manager_config = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
