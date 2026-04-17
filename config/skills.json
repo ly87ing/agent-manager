@@ -14,7 +14,7 @@
     "playwright-best-practices-skill": {
       "url": "https://github.com/currents-dev/playwright-best-practices-skill.git",
       "skill_count": 1,
-      "agents": ["claude-code", "codex", "cursor", "github-copilot", "opencode"]
+      "agents": ["claude-code", "codex", "cursor", "opencode"]
     },
     "superpowers": {
       "url": "https://github.com/obra/superpowers",
@@ -23,7 +23,6 @@
         "claude-code",
         "gemini-cli",
         "cursor",
-        "github-copilot",
         "opencode",
         "codex"
       ]
@@ -39,7 +38,6 @@
     "claude-code": "~/.claude/skills",
     "codex": "~/.codex/skills",
     "cursor": "~/.cursor/rules",
-    "opencode": "~/.config/opencode/skills",
-    "github-copilot": "~/.copilot/skills"
+    "opencode": "~/.config/opencode/skills"
   }
 }

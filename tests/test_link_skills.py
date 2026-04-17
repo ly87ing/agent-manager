@@ -1854,7 +1854,7 @@ class LinkSkillsTests(unittest.TestCase):
 
         self.assertIsNotNone(repo)
         self.assertEqual(repo["url"], "https://github.com/currents-dev/playwright-best-practices-skill.git")
-        self.assertEqual(repo["agents"], ["claude-code", "codex", "cursor", "github-copilot", "opencode"])
+        self.assertEqual(repo["agents"], ["claude-code", "codex", "cursor", "opencode"])
         self.assertNotIn("commit", repo)
         self.assertNotIn("ref", repo)
 
@@ -1867,7 +1867,7 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertEqual(repo["url"], "https://github.com/obra/superpowers")
         self.assertEqual(
             set(repo["agents"]),
-            {"claude-code", "gemini-cli", "cursor", "github-copilot", "opencode", "codex"},
+            {"claude-code", "gemini-cli", "cursor", "opencode", "codex"},
         )
         self.assertNotIn("commit", repo)
         self.assertNotIn("ref", repo)

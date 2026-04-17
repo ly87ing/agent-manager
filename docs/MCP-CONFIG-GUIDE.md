@@ -26,11 +26,11 @@
 # 全量同步（包含 Agent 安装、资源更新和 MCP 配置）
 make bootstrap
 
-# 本地配置同步（仅注入本地已有配置，不联网）
+# 本地环境收敛（会更新受管 MCP 资源并准备运行时）
 make sync
 
 # 仅同步 MCP 配置
-cd agent-mcp && python3 sync_mcp.py --config ../config/manager.json --def-file ../config/mcp.json
+./manage.sh mcp:sync
 ```
 
 ### 手动配置
@@ -51,6 +51,7 @@ cd agent-mcp && python3 sync_mcp.py --config ../config/manager.json --def-file .
 - 首次调用 `chrome-devtools` 时，`npx` 可能会下载最新包版本；需要本机有可用的 Node.js / npm 运行时。
 - `make doctor` 会在 `chrome-devtools` 处于启用状态时预检 `npx` 运行时是否可用；实际包版本仍以首次调用或缓存失效后的 `@latest` 解析结果为准。
 - 如果后续需要统一增加 `--browserUrl`、`--headless`、`--isolated` 等参数，应修改 `config/mcp.json`，不要手改单个 Agent 的 MCP 配置文件。
+- 本项目不再维护本地 GitHub Copilot CLI，因此不会再向 `~/.copilot/mcp-config.json` 注入托管 MCP；仓库内 repo-native `.github/copilot-instructions.md` 仍由 rules 分发维护。
 
 ---
 
@@ -65,7 +66,6 @@ cd agent-mcp && python3 sync_mcp.py --config ../config/manager.json --def-file .
 | **Claude Code** | `~/.claude.json` | `mcpServers` | 字符串 + args 数组 | `env` | - |
 | **Gemini CLI** | `~/.gemini/settings.json` | `mcpServers` | 字符串 + args 数组 | `env` | 项目配置优先 |
 | **Cursor** | `~/.cursor/mcp.json` | `mcpServers` | 字符串 + args 数组 | `env` | - |
-| **GitHub Copilot** | `~/.copilot/mcp-config.json` | `mcpServers` | 字符串 + args 数组 | `env` | - |
 | **OpenCode** | `~/.config/opencode/opencode.json` | `mcp` | **数组** | `environment` | 必须有 `type: "local"` |
 | **Codex** | `~/.codex/config.toml` | `[mcp_servers.*]` | 字符串 + args 数组 | `[mcp_servers.*.env]` | TOML 字符串转义 |
 
@@ -128,26 +128,6 @@ gemini mcp list
 ### Cursor
 
 **配置文件**: `~/.cursor/mcp.json`
-
-```json
-{
-  "mcpServers": {
-    "augment-context-engine": {
-      "command": "auggie",
-      "args": ["--mcp", "--mcp-auto-workspace"],
-      "env": {
-        "AUGMENT_SESSION_AUTH": "{\"accessToken\":\"...\"}"
-      }
-    }
-  }
-}
-```
-
----
-
-### GitHub Copilot
-
-**配置文件**: `~/.copilot/mcp-config.json`
 
 ```json
 {
@@ -294,8 +274,8 @@ make bootstrap
 
 **自动化流程**：
 - `make update` / `make bootstrap` 会在顶层检查 `secrets/` 是否存在
-- `mcp:sync` 默认只做 **配置注入**，不会主动 clone MCP repo、build，或 `git pull secrets`
-- 如需显式准备 MCP 运行时（repo clone/pull、setup/build、同步本地 secrets 仓库），请使用 `./manage.sh mcp:prepare`
+- `mcp:sync` 默认会准备 MCP 运行时：同步本地 secrets 仓库、按需 clone/pull MCP repo，并执行 setup/build
+- 如需阻止联网拉取或安装，请追加 `--offline`
 
 #### 手动初始化
 
@@ -321,7 +301,7 @@ git push origin main
 
 **优势**：
 - ✅ 简单易用，无 submodule 复杂性
-- ✅ `mcp:sync` 和 `mcp:prepare` 的职责分离，配置同步不再隐式联网
+- ✅ `mcp:sync` / `mcp:prepare` 默认都会把配置与运行时一起收敛，减少“配置已写入但运行时未准备”的半完成状态
 - ✅ 凭证版本化、可审计
 - ✅ 权限分离（私有仓库）
 
@@ -487,9 +467,9 @@ rm ./.gemini/settings.json
 
 3. 重新同步配置:
    ```bash
-   make mcp-sync
+   ./manage.sh mcp:sync
    # 或
-   cd agent-mcp && python3 sync_mcp.py --config ../config/manager.json --def-file ../config/mcp.json
+   cd agent-mcp && python3 sync_mcp.py --config ../config/manager.json --def-file ../config/mcp.json --prepare-runtime
    ```
 
 ---
@@ -570,7 +550,6 @@ PY
 | OpenCode | `--debug` 标志 |
 | Codex | 终端输出 |
 | Cursor | 开发者工具 |
-| GitHub Copilot | 输出面板 |
 
 ---
 
@@ -585,15 +564,13 @@ PY
 3. 替换 ${VAR} 占位符；若真实执行时仍有未解析占位符，则直接失败
    ↓
 4. 根据各 Agent 格式生成配置
-   ├─ JSON 格式 (Claude/Gemini/Cursor/Copilot)
+   ├─ JSON 格式 (Claude/Gemini/Cursor)
    ├─ OpenCode 格式 (type + command 数组 + environment)
    └─ TOML 格式 (Codex，带字符串转义)
    ↓
 5. 校验现有配置可解析、生成结果合法、且仅删除 _MANAGED_BY=agent-manager 的托管段
    ↓
 6. 原子写入各配置文件并记录 _MANAGED_BY = "agent-manager" 标记
-
-显式运行时准备（mcp:prepare / sync_mcp.py --prepare-runtime）额外执行:
 7. 同步本地 secrets Git 仓库（非 offline 且非 dry-run）
 8. clone/pull MCP repo，按需要执行 setup/build
 ```

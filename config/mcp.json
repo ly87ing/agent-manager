@@ -19,7 +19,6 @@
     "claude-code": "~/.claude.json",
     "gemini-cli": "~/.gemini/settings.json",
     "cursor": "~/.cursor/mcp.json",
-    "github-copilot": "~/.copilot/mcp-config.json",
     "opencode": { "path": "~/.config/opencode/opencode.json", "format": "json" },
     "codex": { "path": "~/.codex/config.toml", "format": "toml" }
   }

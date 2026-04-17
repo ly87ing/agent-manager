@@ -139,7 +139,6 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
      claude --version    # Claude Code
      gemini --version    # Gemini CLI
      cursor --version    # Cursor (通常在 About 菜单中)
-     copilot --version   # GitHub Copilot CLI
      opencode --version  # OpenCode
      ```
    - 解决：参考官方文档升级到兼容版本
@@ -196,7 +195,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
      cat secrets/mcp.env  # 注意：这会显示凭证！
      
      # 检查占位符是否被正确替换
-     grep -r "AUGMENT_SESSION_AUTH" ~/.claude.json ~/.gemini/settings.json ~/.cursor/mcp.json ~/.copilot/mcp-config.json ~/.config/opencode/opencode.json ~/.codex/config.toml
+     grep -r "AUGMENT_SESSION_AUTH" ~/.claude.json ~/.gemini/settings.json ~/.cursor/mcp.json ~/.config/opencode/opencode.json ~/.codex/config.toml
      ```
    - 解决：
      * 确保 secrets/ 目录存在并为有效的 Git 仓库
@@ -512,7 +511,7 @@ done
 ### 验证符号链接完整性
 ```bash
 # 检查所有技能链接是否有效
-find ~/.claude/skills ~/.gemini/skills ~/.cursor/rules ~/.copilot/skills ~/.config/opencode/skills ~/.codex/skills -type l 2>/dev/null | while read link; do
+find ~/.claude/skills ~/.gemini/skills ~/.cursor/rules ~/.config/opencode/skills ~/.codex/skills -type l 2>/dev/null | while read link; do
   if [ -e "$link" ]; then
     echo "OK: $link -> $(readlink $link)"
   else
@@ -532,8 +531,8 @@ done
 ```bash
 # 1. 停止所有正在运行的 Agent 实例
 # 2. 删除管理的配置和链接
-rm -rf ~/.claude.json ~/.gemini/settings.json ~/.cursor/mcp.json ~/.copilot/mcp-config.json ~/.config/opencode/opencode.json ~/.codex/config.toml
-rm -rf ~/.claude/skills/* ~/.gemini/skills/* ~/.cursor/rules/* ~/.copilot/skills/* ~/.config/opencode/skills/* ~/.codex/skills/*
+rm -rf ~/.claude.json ~/.gemini/settings.json ~/.cursor/mcp.json ~/.config/opencode/opencode.json ~/.codex/config.toml
+rm -rf ~/.claude/skills/* ~/.gemini/skills/* ~/.cursor/rules/* ~/.config/opencode/skills/* ~/.codex/skills/*
 
 # 3. 重新从 Agent Manager 同步
 ./manage.sh bootstrap

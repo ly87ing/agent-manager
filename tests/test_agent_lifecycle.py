@@ -601,7 +601,6 @@ class AgentIdConsistencyTests(unittest.TestCase):
             "claude-code",
             "gemini-cli",
             "cursor",
-            "github-copilot",
             "opencode",
         }
 

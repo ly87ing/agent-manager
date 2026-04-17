@@ -316,8 +316,8 @@ Agent Manager 会：
 6. 原子写入目标配置文件
 
 额外说明：
-- `./manage.sh mcp:sync` 默认只消费本地已有凭证，不会主动 `git pull secrets`
-- `./manage.sh mcp:prepare` 或 `sync_mcp.py --prepare-runtime` 才会显式同步本地 secrets Git 仓库
+- `./manage.sh mcp:sync` / `./manage.sh mcp:prepare` 默认都会准备 MCP 运行时，并在非 `--offline` 模式下同步本地 secrets Git 仓库
+- 如需只消费本地已有凭证，请显式追加 `--offline`
 - 真实写入模式下，如果占位符仍未解析，MCP 同步会直接失败，不会写入半成品配置
 
 ### 支持的占位符格式
@@ -327,7 +327,7 @@ Agent Manager 会：
 
 ### 凭证注入位置
 不同Agent的凭�注入位置有所不同：
-- JSON格式 Agents (Claude Code, Gemini CLI, Cursor, Copilot): 在 `env` 对象中
+- JSON格式 Agents (Claude Code, Gemini CLI, Cursor): 在 `env` 对象中
 - OpenCode: 在 `environment` 对象中
 - Codex (TOML): 在 `[mcp_servers.*.env]` 节下
 

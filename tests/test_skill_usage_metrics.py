@@ -52,7 +52,6 @@ class SkillUsageMetricsTests(unittest.TestCase):
                 "codex": 26,
                 "cursor": 15,
                 "gemini-cli": 14,
-                "github-copilot": 15,
                 "opencode": 15,
             },
         )

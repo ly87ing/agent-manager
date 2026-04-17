@@ -1,6 +1,6 @@
 # Agent Manager (Ultimate Edition)
 
-🚀 **AI 助手环境一键管理中枢**。通过单一入口，实现对 Claude Code, Gemini CLI, Cursor, GitHub Copilot, Codex, OpenCode 的全生命周期管理。
+🚀 **AI 助手环境一键管理中枢**。通过单一入口，实现对 Claude Code, Gemini CLI, Cursor, Codex, OpenCode 的全生命周期管理。
 
 ## 核心规范速查表 (Authoritative Spec)
 
@@ -13,7 +13,6 @@
    │ Claude Code    │ ~/.claude.json                   │ JSON     │ mcpServers  │
    │ Gemini CLI     │ ~/.gemini/settings.json          │ JSON     │ mcpServers  │
    │ Cursor         │ ~/.cursor/mcp.json               │ JSON     │ mcpServers  │
-   │ GitHub Copilot │ ~/.copilot/mcp-config.json       │ JSON     │ mcpServers  │
    │ OpenCode       │ ~/.config/opencode/opencode.json │ JSON     │ mcp         │
    │ Codex          │ ~/.codex/config.toml             │ TOML     │ mcp_servers │
    └────────────────┴──────────────────────────────────┴──────────┴─────────────┘
@@ -32,7 +31,6 @@
 | **Claude Code** | `claude` | `@anthropic-ai/claude-code` | `cask: claude-code` | [Brew Cask Info](https://formulae.brew.sh/cask/claude-code) |
 | **Gemini CLI** | `gemini` | `@google/gemini-cli` | `formula: gemini-cli` | [Brew Core Info](https://formulae.brew.sh/formula/gemini-cli) |
 | **Cursor IDE** | `cursor` | - | `cask: cursor` | [Brew Cask Info](https://formulae.brew.sh/cask/cursor) |
-| **Copilot CLI** | `copilot` | - | `cask: copilot-cli` | [Brew Cask Info](https://formulae.brew.sh/cask/copilot-cli) |
 | **OpenCode** | `opencode` | `@opencode/cli` | `tap: anomalyco/tap/opencode` | [Official GitHub](https://github.com/anomalyco/opencode) |
 
 ## 核心健全性特性
@@ -62,7 +60,7 @@
 ### 6. Rules 源码与分发分层
 - **可编辑源码**：跨 Agent 的共享规则片段只维护在 `agent-rule/rules/src/`，这是仓库内唯一可编辑的 rule source。
 - **生成产物**：面向各 Agent 实际分发的规则文件只维护在 `agent-rule/rules/dist/`，由构建脚本生成；仓库内不再保留第二套 `rules/global/*` source tree。
-- **按 Agent 原生格式分发**：Codex 生成 `AGENTS.md`，Claude 生成 `CLAUDE.md`，Gemini 生成 `GEMINI.md`，Cursor 生成 repo-native `.cursor/rules/agent-manager.mdc`，Copilot 生成 repo-native `.github/copilot-instructions.md`。
+- **按 Agent 原生格式分发**：Codex 生成 `AGENTS.md`，Claude 生成 `CLAUDE.md`，Gemini 生成 `GEMINI.md`，Cursor 生成 repo-native `.cursor/rules/agent-manager.mdc`；仓库级 Copilot 指令继续生成 repo-native `.github/copilot-instructions.md`，但本项目不再维护本地 GitHub Copilot CLI 的安装、MCP 或 skills 目录。
 - **原生 modules 位置**：全局文件旁边的 `modules/` 目录也会跟着落到原生同级位置，例如 `~/.codex/modules`、`~/.claude/modules`、`~/.gemini/modules`、`{{REPO_ROOT}}/.cursor/rules/modules`、`{{REPO_ROOT}}/.github/modules`。
 - **OpenCode 入口**：OpenCode 不再伪造 `~/.config/opencode/rules/global.md`；直接使用仓库根 `AGENTS.md` 这个 repo-native 入口。
 - **迁移清理**：原生分发会清理旧的 `~/.<agent>/rules/global.md` 和旧 `rules/modules` 残留，避免新旧入口并存。

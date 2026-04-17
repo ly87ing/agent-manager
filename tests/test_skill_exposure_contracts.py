@@ -25,7 +25,7 @@ class SkillExposureContractTests(unittest.TestCase):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
         expected_scopes = {
             "agent-skills": ["claude-code", "codex"],
-            "superpowers": ["claude-code", "gemini-cli", "cursor", "github-copilot", "opencode", "codex"],
+            "superpowers": ["claude-code", "gemini-cli", "cursor", "opencode", "codex"],
             "ui-ux-pro-max-skill": ["claude-code", "codex"],
         }
 

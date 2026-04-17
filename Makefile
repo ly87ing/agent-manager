@@ -11,7 +11,7 @@ all:
 bootstrap:
 	@./manage.sh bootstrap
 
-# 仅同步当前配置，不联网、不安装
+# 同步当前配置并收敛 skills / MCP 资源；不处理 Agent 安装
 sync:
 	@./manage.sh sync
 
