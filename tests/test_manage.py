@@ -1237,7 +1237,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("Agent Manager 帮助手册", combined)
             self.assertFalse(call_log.exists(), combined)
 
-    def test_sync_runs_only_local_config_tasks(self):
+    def test_sync_refreshes_skills_and_mcp_without_agent_or_tool_lifecycle(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -1260,13 +1260,13 @@ class ManageScriptTests(unittest.TestCase):
                 temp_root / "agent-skill" / "link_skills.py",
                 "skills",
                 call_log,
-                "'--offline' in sys.argv and '--dry-run' not in sys.argv",
+                "'--offline' not in sys.argv and '--dry-run' not in sys.argv",
             )
             self._append_log_stub(
                 temp_root / "agent-mcp" / "sync_mcp.py",
                 "mcp",
                 call_log,
-                "'--offline' in sys.argv and '--prepare-runtime' not in sys.argv",
+                "'--offline' not in sys.argv and '--prepare-runtime' in sys.argv",
             )
             self._write_stub(
                 temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
@@ -3428,45 +3428,21 @@ class ManageScriptTests(unittest.TestCase):
             self.assertTrue(managed_backup.exists(), combined)
             self.assertTrue(latest_log.exists(), combined)
 
-    def test_mcp_sync_defaults_to_config_only_mode(self):
+    def test_mcp_sync_prepares_runtime_by_default(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            agent_config_path = temp_root / "tmp-agent.json"
-            (temp_root / "config" / "manager.json").write_text(
-                """
-{
-  "agents": {},
-  "tools": {},
-  "skills": {},
-  "mcp": {
-    "bad-mcp": {
-      "enabled": true
-    }
-  }
-}
-                """.strip()
-                + "\n",
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "mcp.json").write_text(
-                """
-{
-  "agent_paths": {
-    "claude-code": "%s"
-  },
-  "servers": {
-    "bad-mcp": {
-      "url": "https://invalid.example.invalid/nope.git",
-      "command": "echo",
-      "args": [],
-      "env": {}
-    }
-  }
-}
-                """
-                % agent_config_path,
-                encoding="utf-8",
+            call_log = temp_root / "calls.log"
+
+            self._write_stub(
+                temp_root / "agent-mcp" / "sync_mcp.py",
+                (
+                    "#!/usr/bin/env python3\n"
+                    "import sys\n"
+                    "from pathlib import Path\n"
+                    f"Path({str(call_log)!r}).write_text(' '.join(sys.argv[1:]) + '\\n', encoding='utf-8')\n"
+                    "sys.exit(0 if '--prepare-runtime' in sys.argv and '--offline' not in sys.argv else 91)\n"
+                ),
             )
 
             result = subprocess.run(
@@ -3474,12 +3450,15 @@ class ManageScriptTests(unittest.TestCase):
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,
+                text=True,
                 check=False,
             )
 
-            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
-            self.assertTrue(agent_config_path.exists(), combined)
+            logged = call_log.read_text(encoding="utf-8")
+            self.assertIn("--prepare-runtime", logged)
+            self.assertNotIn("--offline", logged)
 
     def test_atomic_mcp_sync_termination_cleans_up_descendant_processes(self):
         with tempfile.TemporaryDirectory() as temp_dir:

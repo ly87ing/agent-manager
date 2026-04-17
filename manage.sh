@@ -967,8 +967,8 @@ function run_sync_pipeline() {
     begin_workflow "🔄 Agent Manager 配置同步启动"
     begin_pipeline_execution
     run_pipeline_step run_rules_sync_task
-    run_pipeline_step run_skills_link_task true
-    run_pipeline_step run_mcp_sync_task false true
+    run_pipeline_step run_skills_link_task false
+    run_pipeline_step run_mcp_sync_task true false
     run_pipeline_step run_terminal_sync_task
     finish_pipeline_execution
 }
@@ -1278,7 +1278,7 @@ case "$cmd" in
             break
         done < "$selection_input" ;;
     mcp:sync)
-        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json" $DRY_RUN_FLAG $OFFLINE_FLAG ;;
+        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json" --prepare-runtime $DRY_RUN_FLAG $OFFLINE_FLAG ;;
     mcp:prepare)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json" --prepare-runtime $DRY_RUN_FLAG $OFFLINE_FLAG ;;
     rules:build)
@@ -1372,7 +1372,7 @@ case "$cmd" in
         echo -e "  ${PENDING_GOLD}--dry-run${NC}       空转模式，仅输出计划动作并跳过会修改本地或远端状态的副作用"
         echo -e "  ${PENDING_GOLD}--offline${NC}       离线模式，禁止远程拉取/安装；仅使用本地已存在仓库与配置\n"
         echo -e "${BOLD}${HDR_BLUE}=== 日常入口 (Main Flows) ===${NC}"
-        echo -e "  ${SUCCESS_GREEN}sync${NC}            仅同步本地配置到 rules / skills / MCP，不联网、不安装"
+        echo -e "  ${SUCCESS_GREEN}sync${NC}            同步 rules，并将 skills / MCP 对齐到最新；不处理 Agent / Tool 生命周期"
         echo -e "  ${SUCCESS_GREEN}update${NC}          更新远端资源并收敛本地环境，但不安装缺失 Agent"
         echo -e "  ${SUCCESS_GREEN}bootstrap${NC}       执行全量安装、更新与同步，适合新机器初始化"
         echo -e "  ${SUCCESS_GREEN}all${NC}             \`bootstrap\` 的兼容别名"
@@ -1390,8 +1390,8 @@ case "$cmd" in
         echo -e "  ${VAL_PURPLE}logs${NC}            查看最近一次执行的完整全链路同步日志（latest 指针）"
         echo -e "  ${VAL_PURPLE}clean-logs${NC}      清空 latest 指针与所有按次留存的运行日志文件\n"
         echo -e "${BOLD}${HDR_BLUE}=== 分步原子控制 (Atomic syncs) ===${NC}"
-        echo -e "  ${BORDER_GRAY}mcp:sync${NC}        仅执行 MCP 配置注入（默认不 clone / build / pull secrets）"
-        echo -e "  ${BORDER_GRAY}mcp:prepare${NC}     显式准备 MCP 运行时（clone/pull repo、同步 secrets、setup/build）"
+        echo -e "  ${BORDER_GRAY}mcp:sync${NC}        准备并注入 MCP 配置（默认检查/拉取 repo、同步 secrets、setup/build）"
+        echo -e "  ${BORDER_GRAY}mcp:prepare${NC}     \`mcp:sync\` 的兼容别名；同样会准备 MCP 运行时"
         echo -e "  ${BORDER_GRAY}rules:build${NC}     从 agent-rule/rules/src/ 生成可分发的 dist 规则产物"
         echo -e "  ${BORDER_GRAY}rules:sync${NC}      独立执行规则与系统级 prompt 指令向各个 Agent 的拷贝或软链接分发"
         echo -e "  ${BORDER_GRAY}claude:hooks:sync${NC} 独立刷新仓库级 Claude hooks 到 .claude/settings.json"

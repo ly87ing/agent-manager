@@ -13,6 +13,15 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class SyncToolsTests(unittest.TestCase):
+    def test_committed_auggie_policy_tracks_latest_channel(self):
+        manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
+        tool_defs = json.loads((ROOT / "config" / "tools.json").read_text(encoding="utf-8"))["tools"]
+
+        self.assertTrue(manager["tools"]["auggie"]["enabled"])
+        self.assertTrue(manager["tools"]["auggie"]["auto_update"])
+        self.assertEqual(tool_defs["auggie"]["install"], "npm install -g @augmentcode/auggie@latest")
+        self.assertEqual(tool_defs["auggie"]["upgrade"], "npm install -g @augmentcode/auggie@latest")
+
     def test_committed_browser_tool_policy_tracks_latest_channels(self):
         manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
         tool_defs = json.loads((ROOT / "config" / "tools.json").read_text(encoding="utf-8"))["tools"]

@@ -35,7 +35,8 @@
       ]
     },
     "auggie": {
-      "install": "npm install -g @augmentcode/auggie",
+      "install": "npm install -g @augmentcode/auggie@latest",
+      "upgrade": "npm install -g @augmentcode/auggie@latest",
       "ready_check": "bin:auggie"
     },
     "iterm2": {
