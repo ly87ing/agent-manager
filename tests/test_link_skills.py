@@ -1861,6 +1861,14 @@ class LinkSkillsTests(unittest.TestCase):
 
         self.assertIsNotNone(repo)
         self.assertEqual(repo["url"], "https://github.com/ly87ing/agent-skills.git")
+        self.assertEqual(
+            repo["skill_paths"],
+            [
+                "legacy-component-skinning",
+                "safe-merge-review",
+                "xylink-legacy-component-skinning",
+            ],
+        )
         self.assertEqual(repo["skill_count"], 3)
         self.assertEqual(repo["agents"], ["claude-code", "codex"])
         self.assertNotIn("ignored_skill_paths", repo)
