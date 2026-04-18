@@ -457,7 +457,7 @@ def main():
     parser.add_argument("--def-file", default=str(REPO_ROOT / "config" / "tools.json"), help="定义路径")
     parser.add_argument("--dry-run", action="store_true", help="预览")
     parser.add_argument("--force", action="store_true", help="强制初始化")
-    parser.add_argument("--force-refresh", action="store_true", help="更新探测失败时仍强制执行远端刷新")
+    parser.add_argument("-f", "--force-refresh", action="store_true", help="更新探测失败时仍强制执行远端刷新")
     parser.add_argument("--yes", action="store_true", help="自动清理")
     parser.add_argument("--offline", action="store_true", help="离线模式 (跳过网络操作)")
     args = parser.parse_args()

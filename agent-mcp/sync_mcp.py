@@ -468,7 +468,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="预览")
     parser.add_argument("--offline", action="store_true", help="离线模式 (跳过远程仓库与 secrets 更新)")
     parser.add_argument("--prepare-runtime", action="store_true", help="显式准备 repo/runtime（clone、pull、setup、build）")
-    parser.add_argument("--force-refresh", action="store_true", help="更新探测失败时仍强制执行远端刷新")
+    parser.add_argument("-f", "--force-refresh", action="store_true", help="更新探测失败时仍强制执行远端刷新")
     args = parser.parse_args()
     
     try:

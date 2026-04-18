@@ -18,6 +18,19 @@ SPEC.loader.exec_module(link_skills)
 
 
 class LinkSkillsTests(unittest.TestCase):
+    def test_help_lists_force_refresh_short_flag(self):
+        result = subprocess.run(
+            ["python3", str(MODULE_PATH), "-h"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        combined = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, combined)
+        self.assertIn("-f, --force-refresh", combined)
+
     def test_codex_is_globally_active_without_lifecycle_definition(self):
         self.assertTrue(link_skills.is_active_skill_target("codex", "/tmp/.codex/skills", {}))
 

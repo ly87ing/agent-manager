@@ -553,7 +553,7 @@ def main():
     parser.add_argument("--base-dir", default=str(Path(__file__).resolve().parent), help="目录")
     parser.add_argument("--dry-run", action="store_true", help="预览")
     parser.add_argument("--offline", action="store_true", help="离线模式 (跳过远程仓库更新与依赖安装)")
-    parser.add_argument("--force-refresh", action="store_true", help="更新探测失败时仍强制执行远端刷新")
+    parser.add_argument("-f", "--force-refresh", action="store_true", help="更新探测失败时仍强制执行远端刷新")
     parser.add_argument("--yes", action="store_true", help="自动清理")
     args = parser.parse_args()
     

@@ -84,7 +84,7 @@ while [ $# -gt 0 ]; do
         --offline)
             OFFLINE_FLAG="--offline"
             ;;
-        --force-refresh)
+        -f|--force-refresh)
             FORCE_REFRESH_FLAG="--force-refresh"
             ;;
         *)
@@ -1378,7 +1378,7 @@ case "$cmd" in
         echo -e "${BOLD}${HDR_BLUE}=== 全局参数 (Flags) ===${NC}"
         echo -e "  ${PENDING_GOLD}--dry-run${NC}       空转模式，仅输出计划动作并跳过会修改本地或远端状态的副作用"
         echo -e "  ${PENDING_GOLD}--offline${NC}       离线模式，禁止远程拉取/安装；仅使用本地已存在仓库与配置\n"
-        echo -e "  ${PENDING_GOLD}--force-refresh${NC} 更新探测失败时仍强制执行远端刷新；默认会跳过这些保守回退下载\n"
+        echo -e "  ${PENDING_GOLD}-f, --force-refresh${NC} 更新探测失败时仍强制执行远端刷新；默认会跳过这些保守回退下载\n"
         echo -e "${BOLD}${HDR_BLUE}=== 日常入口 (Main Flows) ===${NC}"
         echo -e "  ${SUCCESS_GREEN}sync${NC}            同步 rules，并将 skills / MCP 对齐到最新；不处理 Agent / Tool 生命周期"
         echo -e "  ${SUCCESS_GREEN}update${NC}          更新远端资源并收敛本地环境，但不安装缺失 Agent"

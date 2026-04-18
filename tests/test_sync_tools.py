@@ -10,9 +10,23 @@ from unittest import mock
 from tests.agent_tool_import import sync_tools
 
 ROOT = Path(__file__).resolve().parent.parent
+MODULE_PATH = ROOT / "agent-tool" / "sync_tools.py"
 
 
 class SyncToolsTests(unittest.TestCase):
+    def test_help_lists_force_refresh_short_flag(self):
+        result = subprocess.run(
+            ["python3", str(MODULE_PATH), "-h"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        combined = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, combined)
+        self.assertIn("-f, --force-refresh", combined)
+
     def test_committed_auggie_policy_tracks_latest_channel(self):
         manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
         tool_defs = json.loads((ROOT / "config" / "tools.json").read_text(encoding="utf-8"))["tools"]
