@@ -59,9 +59,11 @@
 
 ### 6. Rules 源码与分发分层
 - **可编辑源码**：跨 Agent 的共享规则片段只维护在 `agent-rule/rules/src/`，这是仓库内唯一可编辑的 rule source。
+- **共享 core 职责**：`agent-rule/rules/src/shared/core.md` 只放所有 Agent 都应始终生效的短规则；这里优先约束“先显式说明假设、优先最简单本地改动、保持 surgical edits、按 verification point 推进”。
 - **生成产物**：面向各 Agent 实际分发的规则文件只维护在 `agent-rule/rules/dist/`，由构建脚本生成；仓库内不再保留第二套 `rules/global/*` source tree。
 - **按 Agent 原生格式分发**：Codex 生成 `AGENTS.md`，Claude 生成 `CLAUDE.md`，Gemini 生成 `GEMINI.md`，Cursor 生成 repo-native `.cursor/rules/agent-manager.mdc`。
 - **原生 modules 位置**：全局文件旁边的 `modules/` 目录也会跟着落到原生同级位置，例如 `~/.codex/modules`、`~/.claude/modules`、`~/.gemini/modules`、`{{REPO_ROOT}}/.cursor/rules/modules`。
+- **分层原则**：低频、专题或工具边界细节放 `agent-rule/rules/src/shared/modules/`；Agent 私有差异只放 `agent-rule/rules/src/agents/*/adapter.md`，不要把这些内容回灌进 shared core。
 - **OpenCode 入口**：OpenCode 不再伪造 `~/.config/opencode/rules/global.md`；直接使用仓库根 `AGENTS.md` 这个 repo-native 入口。
 - **迁移清理**：原生分发会清理旧的 `~/.<agent>/rules/global.md` 和旧 `rules/modules` 残留，避免新旧入口并存。
 - **Claude 记忆分层**：根目录 `CLAUDE.md` 只保留仓库级高频记忆，`agent-rule/CLAUDE.md` 和 `tests/CLAUDE.md` 承载目录级维护细节。

@@ -1,1 +1,1 @@
-- Prefer direct local verification, explicit file edits, and deterministic command usage over speculative narration.
+- Keep Codex-specific guidance minimal and rely on shared rules for general workflow.

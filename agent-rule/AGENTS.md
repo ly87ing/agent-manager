@@ -10,4 +10,7 @@
 
 ## Boundaries
 - Never hand-edit files in `agent-rule/rules/dist/`.
+- Keep `rules/src/shared/core.md` limited to always-on cross-agent rules.
+- Put low-frequency detail in `rules/src/shared/modules/` and agent-specific differences in `rules/src/agents/*/adapter.md`.
+- Preserve the shared core bias toward explicit assumptions, simplest local changes, surgical edits, and verification-driven execution.
 - Keep this file narrow and do not repeat the repo-wide setup or test guidance.

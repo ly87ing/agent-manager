@@ -217,6 +217,16 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("GEMINI.md", readme)
         self.assertIn("CLAUDE.md", readme)
 
+    def test_readme_documents_shared_rule_design_principles(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("agent-rule/rules/src/shared/core.md", readme)
+        self.assertIn("显式说明假设", readme)
+        self.assertIn("最简单本地改动", readme)
+        self.assertIn("surgical edits", readme)
+        self.assertIn("verification point", readme)
+        self.assertIn("agent-rule/rules/src/shared/modules/", readme)
+        self.assertIn("agent-rule/rules/src/agents/*/adapter.md", readme)
+
     def test_readme_documents_scoped_claude_memory_layout(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("根目录 `CLAUDE.md`", readme)
