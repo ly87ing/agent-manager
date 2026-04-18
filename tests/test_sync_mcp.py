@@ -96,7 +96,26 @@ class SyncMcpTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(run_cmd.call_count, 0)
 
-    def test_clone_or_update_repo_probe_failure_falls_back_to_pull(self):
+    def test_clone_or_update_repo_probe_failure_skips_pull_by_default(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            repo_path = base_dir / "demo-mcp"
+            (repo_path / ".git").mkdir(parents=True)
+
+            with unittest.mock.patch.object(sync_mcp, "probe_git_remote_state", return_value={"status": "unknown"}):
+                with unittest.mock.patch.object(sync_mcp, "repo_head_is_detached", return_value=False):
+                    with unittest.mock.patch.object(sync_mcp, "run_cmd") as run_cmd:
+                        repo, ok = sync_mcp.clone_or_update_repo(
+                            "demo-mcp",
+                            "https://example.invalid/repo.git",
+                            base_dir,
+                        )
+
+        self.assertEqual(repo, repo_path)
+        self.assertTrue(ok)
+        self.assertEqual(run_cmd.call_count, 0)
+
+    def test_clone_or_update_repo_probe_failure_force_refresh_runs_pull(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             base_dir = Path(temp_dir)
             repo_path = base_dir / "demo-mcp"
@@ -109,6 +128,7 @@ class SyncMcpTests(unittest.TestCase):
                             "demo-mcp",
                             "https://example.invalid/repo.git",
                             base_dir,
+                            force_refresh=True,
                         )
 
         self.assertEqual(repo, repo_path)

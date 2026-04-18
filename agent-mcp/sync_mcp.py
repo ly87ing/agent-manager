@@ -65,7 +65,7 @@ def repo_head_is_detached(repo_path):
     success, _ = run_cmd(["git", "symbolic-ref", "-q", "HEAD"], cwd=repo_path)
     return not success
 
-def clone_or_update_repo(name, url, base_dir, dry_run=False, offline=False):
+def clone_or_update_repo(name, url, base_dir, dry_run=False, offline=False, force_refresh=False):
     """下载或更新 Git 仓库"""
     target_dir = Path(base_dir) / name
     if target_dir.exists():
@@ -88,8 +88,11 @@ def clone_or_update_repo(name, url, base_dir, dry_run=False, offline=False):
                 elif probe_state["status"] == "latest":
                     logging.info(f"[{name}] 内容已最新。")
                     return target_dir, True
+                elif probe_state["status"] == "unknown" and not force_refresh:
+                    logging.warning(f"[{name}] 更新探测失败，默认跳过远端刷新；如需强制刷新请使用 --force-refresh。")
+                    return target_dir, True
                 elif probe_state["status"] == "unknown":
-                    logging.warning(f"[{name}] 更新探测失败，继续刷新远端状态以避免漏更。")
+                    logging.warning(f"[{name}] 更新探测失败，但已显式开启强制刷新，继续刷新远端状态。")
                 success, output = run_cmd(update_cmd, cwd=target_dir)
                 if success: logging.info(f"[{name}] 更新成功。")
                 else: logging.error(f"[{name}] 更新失败: {output}")
@@ -465,6 +468,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="预览")
     parser.add_argument("--offline", action="store_true", help="离线模式 (跳过远程仓库与 secrets 更新)")
     parser.add_argument("--prepare-runtime", action="store_true", help="显式准备 repo/runtime（clone、pull、setup、build）")
+    parser.add_argument("--force-refresh", action="store_true", help="更新探测失败时仍强制执行远端刷新")
     args = parser.parse_args()
     
     try:
@@ -573,6 +577,7 @@ def main():
                     base_dir,
                     dry_run=args.dry_run,
                     offline=args.offline,
+                    force_refresh=args.force_refresh,
                 )
                 if not repo_ok:
                     all_build_success = False

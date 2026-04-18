@@ -237,7 +237,7 @@ def _check_ready(name: str, ready_check: str | None) -> bool:
     return check_tool_ready(name, ready_check)
 
 
-def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False, offline=False):
+def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False, offline=False, force_refresh=False):
     # 合并策略
     enabled = policy.get("enabled", True)
     auto_update = policy.get("auto_update", True)
@@ -290,15 +290,19 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False, of
                             logging.info(f"[TOOL: {name}] (内容已最新)")
                             should_apply_overrides = True
                         else:
-                            if probe_state["status"] == "unknown":
-                                logging.warning(f"[TOOL: {name}] 更新探测失败，继续执行拉取以避免漏更。")
-                            success, out = run_cmd(["git", "pull", "--ff-only"], cwd=target_dir)
-                            if success:
-                                logging.info(f"[TOOL: {name}] (已更新)")
-                                needs_setup = True
+                            if probe_state["status"] == "unknown" and not force_refresh:
+                                logging.warning(f"[TOOL: {name}] 更新探测失败，默认跳过拉取；如需强制刷新请使用 --force-refresh。")
                                 should_apply_overrides = True
-                                repo_state_changed = True
-                            else: logging.error(f"[TOOL: {name}] (更新失败: {out})"); success_build = False
+                            else:
+                                if probe_state["status"] == "unknown":
+                                    logging.warning(f"[TOOL: {name}] 更新探测失败，但已显式开启强制刷新，继续执行拉取。")
+                                success, out = run_cmd(["git", "pull", "--ff-only"], cwd=target_dir)
+                                if success:
+                                    logging.info(f"[TOOL: {name}] (已更新)")
+                                    needs_setup = True
+                                    should_apply_overrides = True
+                                    repo_state_changed = True
+                                else: logging.error(f"[TOOL: {name}] (更新失败: {out})"); success_build = False
         else:
             if offline:
                 if target_dir.exists():
@@ -389,15 +393,18 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False, of
                     if package_state == "latest":
                         logging.info(f"[TOOL: {name}] 已是最新版本，跳过升级。")
                     else:
-                        if package_state == "unknown":
-                            logging.warning(f"[TOOL: {name}] 更新探测失败，继续执行升级以避免漏更。")
-                        logging.info(f"[TOOL: {name}] 已安装，执行升级...")
-                        ok, out = run_cmd(upgrade_cmd)
-                        if not ok:
-                            logging.warning(f"[TOOL: {name}] 升级失败（保留现有版本）: {out}")
+                        if package_state == "unknown" and not force_refresh:
+                            logging.warning(f"[TOOL: {name}] 更新探测失败，默认跳过升级；如需强制刷新请使用 --force-refresh。")
                         else:
-                            binary_ready = _check_ready(name, ready_check)
-                            needs_setup = setup_required_after_binary_change()
+                            if package_state == "unknown":
+                                logging.warning(f"[TOOL: {name}] 更新探测失败，但已显式开启强制刷新，继续执行升级。")
+                            logging.info(f"[TOOL: {name}] 已安装，执行升级...")
+                            ok, out = run_cmd(upgrade_cmd)
+                            if not ok:
+                                logging.warning(f"[TOOL: {name}] 升级失败（保留现有版本）: {out}")
+                            else:
+                                binary_ready = _check_ready(name, ready_check)
+                                needs_setup = setup_required_after_binary_change()
             elif tool_ready:
                 logging.info(f"[TOOL: {name}] 已就绪，跳过安装。")
             else:
@@ -450,6 +457,7 @@ def main():
     parser.add_argument("--def-file", default=str(REPO_ROOT / "config" / "tools.json"), help="定义路径")
     parser.add_argument("--dry-run", action="store_true", help="预览")
     parser.add_argument("--force", action="store_true", help="强制初始化")
+    parser.add_argument("--force-refresh", action="store_true", help="更新探测失败时仍强制执行远端刷新")
     parser.add_argument("--yes", action="store_true", help="自动清理")
     parser.add_argument("--offline", action="store_true", help="离线模式 (跳过网络操作)")
     args = parser.parse_args()
@@ -489,7 +497,16 @@ def main():
         # 离线模式下禁用 auto_update
         if args.offline:
             policy = {**policy, "auto_update": False}
-        if not sync_tool(name, definition, policy, base_dir, args.dry_run, args.force, args.offline):
+        if not sync_tool(
+            name,
+            definition,
+            policy,
+            base_dir,
+            args.dry_run,
+            args.force,
+            args.offline,
+            args.force_refresh,
+        ):
             all_ok = False
     
     if not args.dry_run: prune_orphan_tools(base_dir, def_cfg.keys(), args.dry_run, args.yes)

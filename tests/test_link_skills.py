@@ -263,7 +263,26 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(run_cmd.call_count, 0)
 
-    def test_clone_or_update_repo_probe_failure_falls_back_to_pull(self):
+    def test_clone_or_update_repo_probe_failure_skips_pull_by_default(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            managed_root = Path(temp_dir) / "repositories"
+            repo_path = managed_root / "demo-skill"
+            (repo_path / ".git").mkdir(parents=True)
+
+            with mock.patch.object(link_skills, "probe_git_remote_state", return_value={"status": "unknown"}):
+                with mock.patch.object(link_skills, "repo_head_is_detached", return_value=False):
+                    with mock.patch.object(link_skills, "run_cmd") as run_cmd:
+                        repo, ok = link_skills.clone_or_update_repo(
+                            "demo-skill",
+                            "https://example.invalid/repo.git",
+                            managed_root,
+                        )
+
+        self.assertEqual(repo, repo_path)
+        self.assertTrue(ok)
+        self.assertEqual(run_cmd.call_count, 0)
+
+    def test_clone_or_update_repo_probe_failure_force_refresh_runs_pull(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             managed_root = Path(temp_dir) / "repositories"
             repo_path = managed_root / "demo-skill"
@@ -276,6 +295,7 @@ class LinkSkillsTests(unittest.TestCase):
                             "demo-skill",
                             "https://example.invalid/repo.git",
                             managed_root,
+                            force_refresh=True,
                         )
 
         self.assertEqual(repo, repo_path)

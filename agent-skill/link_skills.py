@@ -236,7 +236,7 @@ def install_dependencies_and_build(repo_path, config, dry_run=False, offline=Fal
         if not ok: logging.error(f"[{repo_path.name}] 依赖安装失败: {out}"); success_all = False
     return success_all
 
-def clone_or_update_repo(name, url, base_dir, dry_run=False, offline=False, auto_update=True):
+def clone_or_update_repo(name, url, base_dir, dry_run=False, offline=False, auto_update=True, force_refresh=False):
     """下载或更新 Git 仓库"""
     target_dir = Path(base_dir) / name
     if target_dir.exists() and (target_dir / ".git").exists():
@@ -260,8 +260,11 @@ def clone_or_update_repo(name, url, base_dir, dry_run=False, offline=False, auto
             elif probe_state["status"] == "latest":
                 logging.info(f"[{name}] 内容已最新。")
                 return target_dir, True
+            elif probe_state["status"] == "unknown" and not force_refresh:
+                logging.warning(f"[{name}] 更新探测失败，默认跳过远端刷新；如需强制刷新请使用 --force-refresh。")
+                return target_dir, True
             elif probe_state["status"] == "unknown":
-                logging.warning(f"[{name}] 更新探测失败，继续刷新远端状态以避免漏更。")
+                logging.warning(f"[{name}] 更新探测失败，但已显式开启强制刷新，继续刷新远端状态。")
             success, output = run_cmd(update_cmd, cwd=target_dir)
             if success: logging.info(f"[{name}] 更新成功。")
             else: logging.error(f"[{name}] 更新失败: {output}")
@@ -550,6 +553,7 @@ def main():
     parser.add_argument("--base-dir", default=str(Path(__file__).resolve().parent), help="目录")
     parser.add_argument("--dry-run", action="store_true", help="预览")
     parser.add_argument("--offline", action="store_true", help="离线模式 (跳过远程仓库更新与依赖安装)")
+    parser.add_argument("--force-refresh", action="store_true", help="更新探测失败时仍强制执行远端刷新")
     parser.add_argument("--yes", action="store_true", help="自动清理")
     args = parser.parse_args()
     
@@ -632,6 +636,7 @@ def main():
             args.dry_run,
             args.offline,
             config.get("auto_update", True),
+            args.force_refresh,
         )
         if not repo_ok:
             all_success = False

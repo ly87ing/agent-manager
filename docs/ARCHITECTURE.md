@@ -207,6 +207,7 @@ graph TD
 3. 只有带 `.agent-manager-owned` 标记的托管缓存目录才会被自动清理
 4. 技能目录必须包含 `SKILL.md`，并在 frontmatter 中声明 `name`
 5. `auto_update: false` 时系统会复用本地缓存但跳过远程更新；在线模式下分支头仓库使用 `git pull --ff-only`，固定 commit/ref 导致的 detached HEAD 缓存则使用 `git fetch --tags origin`；`--offline` 则禁止下载和远程更新
+6. 默认情况下，如果 tool 版本探测或 repo 远端探测返回 `unknown`，系统会记录 warning 并跳过保守回退下载；只有显式传入 `--force-refresh` 时，才会恢复“探测失败后继续升级 / pull / fetch”的旧路径
 
 ---
 

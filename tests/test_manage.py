@@ -1658,6 +1658,75 @@ class ManageScriptTests(unittest.TestCase):
             self.assertTrue(any(line.startswith("skills ") for line in log_lines), log_lines)
             self.assertTrue(any(line.startswith("mcp ") and "--prepare-runtime" in line for line in log_lines), log_lines)
 
+    def test_update_force_refresh_propagates_to_tools_skills_and_mcp(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            call_log = temp_root / "calls.log"
+            remove_path(temp_root / "secrets")
+
+            self._append_log_stub(
+                temp_root / "agent-lifecycle" / "sync_agents.py",
+                "agents",
+                call_log,
+                "'--force-refresh' not in sys.argv",
+            )
+            self._append_log_stub(
+                temp_root / "agent-tool" / "sync_tools.py",
+                "tools",
+                call_log,
+                "'--force-refresh' in sys.argv",
+            )
+            self._append_log_stub(
+                temp_root / "agent-skill" / "link_skills.py",
+                "skills",
+                call_log,
+                "'--force-refresh' in sys.argv",
+            )
+            self._append_log_stub(
+                temp_root / "agent-mcp" / "sync_mcp.py",
+                "mcp",
+                call_log,
+                "'--prepare-runtime' in sys.argv and '--force-refresh' in sys.argv",
+            )
+            self._write_stub(
+                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
+                (
+                    "#!/usr/bin/env bash\n"
+                    f"printf '%s\\n' \"rules $*\" >> {str(call_log)!r}\n"
+                    "exit 0\n"
+                ),
+            )
+            self._write_stub(
+                temp_root / "agent-terminal" / "sync_terminal.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "scripts" / "init-secrets.sh",
+                (
+                    "#!/usr/bin/env bash\n"
+                    "mkdir -p \"$PWD/../secrets/.git\"\n"
+                    f"printf '%s\\n' init-secrets >> {str(call_log)!r}\n"
+                    "exit 0\n"
+                ),
+            )
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "--force-refresh", "update"],
+                cwd=temp_root,
+                env=self._managed_env(),
+                capture_output=True,
+                check=False,
+            )
+
+            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            self.assertEqual(result.returncode, 0, combined)
+            log_lines = call_log.read_text(encoding="utf-8").splitlines()
+            self.assertTrue(any(line.startswith("agents ") and "--force-refresh" not in line for line in log_lines), log_lines)
+            self.assertTrue(any(line.startswith("tools ") and "--force-refresh" in line for line in log_lines), log_lines)
+            self.assertTrue(any(line.startswith("skills ") and "--force-refresh" in line for line in log_lines), log_lines)
+            self.assertTrue(any(line.startswith("mcp ") and "--force-refresh" in line for line in log_lines), log_lines)
+
     def test_bootstrap_allows_agent_install(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"

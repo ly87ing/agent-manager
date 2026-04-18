@@ -32,6 +32,7 @@ LOCAL_CONFIG="${AGENT_MANAGER_LOCAL_CONFIG:-$ROOT_DIR/config/manager.local.json}
 LOCK_ACQUIRED="false"
 DRY_RUN_FLAG=""
 OFFLINE_FLAG=""
+FORCE_REFRESH_FLAG=""
 TASK_FAILURES=0
 DOCTOR_STATUS="healthy"
 DOCTOR_WARNING_OPTIONAL_TOOLS=0
@@ -82,6 +83,9 @@ while [ $# -gt 0 ]; do
             ;;
         --offline)
             OFFLINE_FLAG="--offline"
+            ;;
+        --force-refresh)
+            FORCE_REFRESH_FLAG="--force-refresh"
             ;;
         *)
             if [ -z "$cmd" ]; then
@@ -826,6 +830,7 @@ function run_tools_sync_task() {
     local args=(sync_tools.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/tools.json" --yes)
     if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
     if [ -n "$OFFLINE_FLAG" ]; then args+=("$OFFLINE_FLAG"); fi
+    if [ -n "$FORCE_REFRESH_FLAG" ]; then args+=("$FORCE_REFRESH_FLAG"); fi
     run_task_in_dir "同步全局工具" "工具链同步完成" "工具失败" 600 "$ROOT_DIR/agent-tool" "$PYTHON_CMD" "${args[@]}"
 }
 
@@ -905,6 +910,7 @@ function run_skills_link_task() {
     local args=(link_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json" --yes)
     if [ "$force_offline" = "true" ] || [ -n "$OFFLINE_FLAG" ]; then args+=(--offline); fi
     if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
+    if [ -n "$FORCE_REFRESH_FLAG" ]; then args+=("$FORCE_REFRESH_FLAG"); fi
     run_task_in_dir "链接专业技能" "技能链接完成" "技能链接失败" 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" "${args[@]}"
 }
 
@@ -920,6 +926,7 @@ function run_mcp_sync_task() {
     fi
     if [ "$force_offline" = "true" ] || [ -n "$OFFLINE_FLAG" ]; then args+=(--offline); fi
     if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
+    if [ -n "$FORCE_REFRESH_FLAG" ]; then args+=("$FORCE_REFRESH_FLAG"); fi
 
     run_task_in_dir "$title" "MCP 注入完成" "MCP 失败" 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" "${args[@]}"
 }
@@ -1278,9 +1285,9 @@ case "$cmd" in
             break
         done < "$selection_input" ;;
     mcp:sync)
-        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json" --prepare-runtime $DRY_RUN_FLAG $OFFLINE_FLAG ;;
+        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json" --prepare-runtime $DRY_RUN_FLAG $OFFLINE_FLAG $FORCE_REFRESH_FLAG ;;
     mcp:prepare)
-        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json" --prepare-runtime $DRY_RUN_FLAG $OFFLINE_FLAG ;;
+        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json" --prepare-runtime $DRY_RUN_FLAG $OFFLINE_FLAG $FORCE_REFRESH_FLAG ;;
     rules:build)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" "$PYTHON_CMD" ./scripts/build-agent-rules.py ;;
     rules:sync)
@@ -1301,7 +1308,7 @@ case "$cmd" in
     codex:hooks:sync)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" "$PYTHON_CMD" ./scripts/sync-codex-hooks.py $DRY_RUN_FLAG ;;
     skills:link)
-        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" link_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG ;;
+        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" link_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG $FORCE_REFRESH_FLAG ;;
     skills:upgrade)
         upgrade_args=(upgrade_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json")
         if [ "${#CMD_ARGS[@]}" -gt 0 ]; then
@@ -1313,7 +1320,7 @@ case "$cmd" in
         if [ -n "$OFFLINE_FLAG" ]; then upgrade_args+=("$OFFLINE_FLAG"); fi
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" "${upgrade_args[@]}" ;;
     tools:sync)
-        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-tool" "$PYTHON_CMD" sync_tools.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/tools.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG ;;
+        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-tool" "$PYTHON_CMD" sync_tools.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/tools.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG $FORCE_REFRESH_FLAG ;;
     terminal:sync)
         run_terminal_sync_task true ;;
     fetch-models)
@@ -1371,6 +1378,7 @@ case "$cmd" in
         echo -e "${BOLD}${HDR_BLUE}=== 全局参数 (Flags) ===${NC}"
         echo -e "  ${PENDING_GOLD}--dry-run${NC}       空转模式，仅输出计划动作并跳过会修改本地或远端状态的副作用"
         echo -e "  ${PENDING_GOLD}--offline${NC}       离线模式，禁止远程拉取/安装；仅使用本地已存在仓库与配置\n"
+        echo -e "  ${PENDING_GOLD}--force-refresh${NC} 更新探测失败时仍强制执行远端刷新；默认会跳过这些保守回退下载\n"
         echo -e "${BOLD}${HDR_BLUE}=== 日常入口 (Main Flows) ===${NC}"
         echo -e "  ${SUCCESS_GREEN}sync${NC}            同步 rules，并将 skills / MCP 对齐到最新；不处理 Agent / Tool 生命周期"
         echo -e "  ${SUCCESS_GREEN}update${NC}          更新远端资源并收敛本地环境，但不安装缺失 Agent"

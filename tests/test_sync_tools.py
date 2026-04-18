@@ -169,7 +169,27 @@ class SyncToolsTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(run_cmd.call_count, 0)
 
-    def test_install_based_tool_probe_failure_still_runs_upgrade(self):
+    def test_install_based_tool_probe_failure_skips_upgrade_by_default(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with mock.patch.object(sync_tools, "probe_package_update_state", return_value="unknown"):
+                with mock.patch.object(sync_tools, "_check_ready", return_value=True):
+                    with mock.patch.object(sync_tools, "detect_tool_readiness", return_value=True):
+                        with mock.patch.object(sync_tools, "run_cmd") as run_cmd:
+                            ok = sync_tools.sync_tool(
+                                "auggie",
+                                {
+                                    "install": "npm install -g @augmentcode/auggie@latest",
+                                    "upgrade": "npm install -g @augmentcode/auggie@latest",
+                                    "ready_check": "bin:auggie",
+                                },
+                                {"enabled": True, "auto_update": True},
+                                Path(temp_dir),
+                            )
+
+        self.assertTrue(ok)
+        self.assertEqual(run_cmd.call_count, 0)
+
+    def test_install_based_tool_probe_failure_force_refresh_runs_upgrade(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             with mock.patch.object(sync_tools, "probe_package_update_state", return_value="unknown"):
                 with mock.patch.object(sync_tools, "_check_ready", return_value=True):
@@ -184,6 +204,7 @@ class SyncToolsTests(unittest.TestCase):
                                 },
                                 {"enabled": True, "auto_update": True},
                                 Path(temp_dir),
+                                force_refresh=True,
                             )
 
         self.assertTrue(ok)
@@ -696,13 +717,13 @@ class SyncToolsTests(unittest.TestCase):
             def fake_run_cmd(cmd, cwd=None, timeout=300):
                 if cmd == ["git", "status", "--porcelain"]:
                     return True, ""
-                if cmd == ["git", "pull"]:
+                if cmd == ["git", "pull", "--ff-only"]:
                     return True, "pulled"
                 if cmd == "npm install && npx playwright install":
                     return False, "setup failed"
                 return True, ""
 
-            with mock.patch.object(sync_tools.git_cache, "is_git_up_to_date", return_value=False):
+            with mock.patch.object(sync_tools, "probe_git_remote_state", return_value={"status": "stale"}):
                 with mock.patch.object(sync_tools, "run_cmd", side_effect=fake_run_cmd):
                     with mock.patch.object(sync_tools, "apply_overrides"):
                         ok = sync_tools.sync_tool(
@@ -772,7 +793,32 @@ class SyncToolsTests(unittest.TestCase):
 
             self.assertEqual(apply_overrides.call_count, 0)
 
-    def test_repo_backed_tool_probe_failure_falls_back_to_pull(self):
+    def test_repo_backed_tool_probe_failure_skips_pull_by_default(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_dir = Path(temp_dir) / "playwright-cli"
+            target_dir.mkdir()
+            (target_dir / ".git").mkdir()
+
+            def fake_run_cmd(cmd, cwd=None, timeout=300):
+                if cmd == ["git", "status", "--porcelain"]:
+                    return True, ""
+                raise AssertionError(f"unexpected command: {cmd}")
+
+            with mock.patch.object(sync_tools, "probe_git_remote_state", return_value={"status": "unknown"}):
+                with mock.patch.object(sync_tools, "run_cmd", side_effect=fake_run_cmd) as run_cmd:
+                    with mock.patch.object(sync_tools, "apply_overrides") as apply_overrides:
+                        ok = sync_tools.sync_tool(
+                            "playwright-cli",
+                            {"url": "https://example.invalid/repo.git"},
+                            {"enabled": True, "auto_update": True},
+                            Path(temp_dir),
+                        )
+
+        self.assertTrue(ok)
+        self.assertIn(mock.call(["git", "status", "--porcelain"], cwd=target_dir, timeout=5), run_cmd.call_args_list)
+        self.assertEqual(apply_overrides.call_count, 1)
+
+    def test_repo_backed_tool_probe_failure_force_refresh_runs_pull(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             target_dir = Path(temp_dir) / "playwright-cli"
             target_dir.mkdir()
@@ -793,6 +839,7 @@ class SyncToolsTests(unittest.TestCase):
                             {"url": "https://example.invalid/repo.git"},
                             {"enabled": True, "auto_update": True},
                             Path(temp_dir),
+                            force_refresh=True,
                         )
 
         self.assertTrue(ok)
