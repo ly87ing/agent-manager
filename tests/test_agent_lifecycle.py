@@ -610,3 +610,18 @@ class AgentIdConsistencyTests(unittest.TestCase):
         self.assertTrue(managed_agent_ids.issubset(set(mcp_targets)))
         self.assertIn("codex", skill_targets)
         self.assertIn("codex", mcp_targets)
+
+
+class CommittedAgentPolicyTests(unittest.TestCase):
+    def test_committed_agent_policy_disables_default_cursor_auto_install(self):
+        manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
+
+        self.assertTrue(manager["agents"]["claude-code"]["auto_install"])
+        self.assertTrue(manager["agents"]["gemini-cli"]["auto_install"])
+        self.assertFalse(manager["agents"]["cursor"]["auto_install"])
+        self.assertFalse(manager["agents"]["opencode"]["auto_install"])
+
+    def test_committed_agent_policy_disables_default_opencode_auto_install(self):
+        manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
+
+        self.assertFalse(manager["agents"]["opencode"]["auto_install"])
