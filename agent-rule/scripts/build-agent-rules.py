@@ -12,6 +12,12 @@ DIST_ROOT = ROOT / "rules" / "dist"
 MODULES_SRC = SRC_ROOT / "shared" / "modules"
 MODULES_DIST = DIST_ROOT / "modules"
 TARGETS = ("codex", "claude", "gemini", "cursor")
+CODEX_MODULE_PATHS = {
+    "modules/architecture.md": "~/.codex/modules/architecture.md",
+    "modules/style.md": "~/.codex/modules/style.md",
+    "modules/frontend.md": "~/.codex/modules/frontend.md",
+    "modules/artifact-hygiene.md": "~/.codex/modules/artifact-hygiene.md",
+}
 TARGET_SPECS = {
     "codex": {"adapter": "codex", "filename": "AGENTS.md"},
     "claude": {"adapter": "claude", "filename": "CLAUDE.md"},
@@ -42,13 +48,23 @@ def write_dist_gitkeep() -> None:
     (DIST_ROOT / ".gitkeep").write_text("", encoding="utf-8")
 
 
+def render_target_content(target: str, core_lines: list[str], adapter_lines: list[str]) -> str:
+    content = "\n".join([*core_lines, *adapter_lines])
+    if target == "codex":
+        for relative_path, codex_path in CODEX_MODULE_PATHS.items():
+            content = content.replace(f"`{relative_path}`", f"`{codex_path}`")
+    return content + "\n"
+
+
 def build_target_file(target: str) -> None:
     target_dir = DIST_ROOT / target
     target_dir.mkdir(parents=True, exist_ok=True)
     core_lines = compact_lines(read_text(SRC_ROOT / "shared" / "core.md"))
     spec = TARGET_SPECS[target]
     adapter_lines = compact_lines(read_text(SRC_ROOT / "agents" / spec["adapter"] / "adapter.md"))
-    content = "\n".join([*spec.get("prefix_lines", []), *core_lines, *adapter_lines]) + "\n"
+    content = "\n".join(
+        [*spec.get("prefix_lines", []), render_target_content(target, core_lines, adapter_lines).rstrip()]
+    ) + "\n"
     filename = spec["filename"]
     (target_dir / filename).write_text(content, encoding="utf-8")
 

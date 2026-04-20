@@ -402,10 +402,15 @@ class SyncRulesTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, combined)
             self.assertIn("claude_modules", combined)
 
-    def test_main_rule_points_to_actual_modules_distribution_path(self):
+    def test_claude_main_rule_points_to_relative_modules_path(self):
         content = (ROOT / "agent-rule" / "rules" / "dist" / "claude" / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertIn("read `modules/architecture.md`", content)
         self.assertNotIn("~/.<agent>/modules/architecture.md", content)
+
+    def test_codex_main_rule_points_to_home_modules_path(self):
+        content = (ROOT / "agent-rule" / "rules" / "dist" / "codex" / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("read `~/.codex/modules/architecture.md`", content)
+        self.assertNotIn("read `modules/architecture.md`", content)
 
     def test_manifest_targets_built_rule_outputs(self):
         manifest = (ROOT / "config" / "rules-targets.list").read_text(encoding="utf-8")
