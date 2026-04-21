@@ -20,6 +20,7 @@
     "gemini-cli": "~/.gemini/settings.json",
     "cursor": "~/.cursor/mcp.json",
     "opencode": { "path": "~/.config/opencode/opencode.json", "format": "json" },
-    "codex": { "path": "~/.codex/config.toml", "format": "toml" }
+    "codex": { "path": "~/.codex/config.toml", "format": "toml" },
+    "kimi-cli": { "path": "~/.kimi/mcp.json", "format": "json" }
   }
 }

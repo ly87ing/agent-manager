@@ -27,6 +27,13 @@ class SyncMcpTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, combined)
         self.assertIn("-f, --force-refresh", combined)
 
+    def test_committed_mcp_definitions_include_kimi_cli_json_target(self):
+        definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            definitions["agent_paths"]["kimi-cli"],
+            {"path": "~/.kimi/mcp.json", "format": "json"},
+        )
+
     def test_committed_mcp_policy_enables_chrome_devtools_latest(self):
         definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
         policy = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
