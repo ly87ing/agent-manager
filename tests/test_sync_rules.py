@@ -192,6 +192,39 @@ class SyncRulesTests(unittest.TestCase):
             self.assertTrue(target_path.exists(), combined)
             self.assertEqual(target_path.read_text(encoding="utf-8"), source_path.read_text(encoding="utf-8"))
 
+    def test_kimi_sync_skips_when_kimi_binary_is_missing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            (temp_home / ".kimi").mkdir(parents=True)
+            target_path = temp_home / ".kimi" / "AGENTS.md"
+            (temp_root / "config" / "rules-targets.list").write_text(
+                f"kimi_global|global|rules/dist/kimi/AGENTS.md|{target_path}\n",
+                encoding="utf-8",
+            )
+
+            env = os.environ.copy()
+            env["HOME"] = str(temp_home)
+            filtered_paths = []
+            for raw_path in env.get("PATH", "").split(os.pathsep):
+                if raw_path and not (Path(raw_path) / "kimi").exists():
+                    filtered_paths.append(raw_path)
+            env["PATH"] = os.pathsep.join(filtered_paths)
+            result = subprocess.run(
+                [str(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh"), "--target", "kimi_global"],
+                cwd=temp_root / "agent-rule",
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertFalse(target_path.exists(), combined)
+            self.assertIn("kimi_global 目标 agent 未安装，跳过", combined)
+
     def test_codex_sync_removes_legacy_global_rule_path(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"

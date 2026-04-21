@@ -189,6 +189,88 @@ class ManageDoctorReportTests(unittest.TestCase):
             self.assertEqual(mcp_names["Kimi Code CLI"]["status"], "error")
             self.assertIn("期望 1 个托管服务", mcp_names["Kimi Code CLI"]["message"])
 
+    def test_rules_audit_marks_kimi_target_unmaterialized_when_installed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            temp_home.mkdir(parents=True, exist_ok=True)
+
+            (temp_root / "config" / "manager.json").write_text(
+                (
+                    '{\n  "agents": {\n    "kimi-cli": { "enabled": true, "auto_install": false, "auto_update": false }\n  },'
+                    '\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n'
+                ),
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{"agent_paths": {}, "servers": {}}',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{"repositories": {}, "agents": {}}',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text(
+                "kimi_global|global|rules/dist/kimi/AGENTS.md|~/.kimi/AGENTS.md\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch(
+                "src.manage_doctor.is_agent_installed",
+                side_effect=lambda agent_id, _definition: agent_id == "kimi-cli",
+            ):
+                report = build_report(
+                    root_dir=temp_root,
+                    config_file=temp_root / "config" / "manager.json",
+                    python_cmd="python3",
+                )
+
+            rules_names = {entry["name"]: entry for entry in report["sections"]["rules"]}
+            self.assertEqual(rules_names["kimi_global"]["status"], "warning")
+            self.assertEqual(rules_names["kimi_global"]["message"], "尚未分发")
+
+    def test_rules_audit_marks_kimi_target_unmaterialized_when_uninstalled(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            temp_home.mkdir(parents=True, exist_ok=True)
+
+            (temp_root / "config" / "manager.json").write_text(
+                (
+                    '{\n  "agents": {\n    "kimi-cli": { "enabled": true, "auto_install": false, "auto_update": false }\n  },'
+                    '\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n'
+                ),
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{"agent_paths": {}, "servers": {}}',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{"repositories": {}, "agents": {}}',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text(
+                "kimi_global|global|rules/dist/kimi/AGENTS.md|~/.kimi/AGENTS.md\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch(
+                "src.manage_doctor.is_agent_installed",
+                side_effect=lambda agent_id, _definition: False if agent_id == "kimi-cli" else True,
+            ):
+                report = build_report(
+                    root_dir=temp_root,
+                    config_file=temp_root / "config" / "manager.json",
+                    python_cmd="python3",
+                )
+
+            rules_names = {entry["name"]: entry for entry in report["sections"]["rules"]}
+            self.assertEqual(rules_names["kimi_global"]["status"], "warning")
+            self.assertEqual(rules_names["kimi_global"]["message"], "Agent 未安装，未分发")
+
     def test_report_ignores_foreign_managed_by_marker_in_toml_mcp_file(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
