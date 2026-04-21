@@ -4,6 +4,7 @@ config/mcp.env.json
 # Temporary logs
 /tmp/agent_manager_sync.log
 *.log
+.worktrees/
 
 # Python
 __pycache__/
