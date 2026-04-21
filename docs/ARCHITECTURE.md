@@ -15,7 +15,7 @@
 
 ## 系统概览
 
-Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单一入口管理多种 AI 编码助手的完整生命周期。系统采用模块化设计，将策略意愿与具体实现分离，确保配置的精准与安全。
+Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单一入口管理多种 AI 编码助手的完整生命周期（当前包括 Claude Code、Gemini CLI、Cursor、Codex、OpenCode、Kimi Code CLI）。系统采用模块化设计，将策略意愿与具体实现分离，确保配置的精准与安全。
 
 核心设计原则：
 - **策略与定义分离**：仓库基线策略（`manager.json`）与机器本地覆盖（`manager.local.json`）在运行时合并，再与技术细节定义（`agents.json`等）配合生效
@@ -54,6 +54,8 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `agents.json` 中的 `providers` 只声明 agent-manager 可托管的安装源；`system` 只是运行时探测信号，不是可配置的 provider key
 - `preferred_provider` 必须指向 `providers` 中真实存在的键，否则生命周期同步应直接失败
 - `skills.json` 中的 skill 仓库支持 `commit` / `ref` 版本约束；技能名来自仓库内 `SKILL.md` frontmatter 的 `name`
+- 新增 Agent 时必须同时声明 MCP / skills / rules 三类 target path：`config/mcp.json` 的 `agent_paths`、`config/skills.json` 的 `agents` 映射、`config/rules-targets.list` 的规则与 modules 分发目标
+- `Kimi Code CLI` 当前受管路径为 `~/.kimi/mcp.json`、`~/.kimi/skills`、`~/.kimi/AGENTS.md`、`~/.kimi/modules`；`~/.kimi/config.toml` 不在本轮托管范围
 
 ### 3. 同步引擎 (Sync Engines)
 **文件位置**: 各agent-*目录下的sync_*.py脚本
@@ -187,6 +189,7 @@ graph TD
 2. 在 `config/manager.json` 中添加策略条目
 3. 如需MCP支持，在 `config/mcp.json` 的agent_paths中添加映射
 4. 如需Skill支持，在 `config/skills.json` 的agents中添加映射
+5. 如需Rules支持，在 `config/rules-targets.list` 中声明该 Agent 的 rules 入口与 modules 目标路径
 
 ### 添加新MCP服务器
 1. 在 `config/mcp.json` 的servers中添加定义

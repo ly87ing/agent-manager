@@ -1,6 +1,6 @@
 # Agent Manager (Ultimate Edition)
 
-🚀 **AI 助手环境一键管理中枢**。通过单一入口，实现对 Claude Code, Gemini CLI, Cursor, Codex, OpenCode 的全生命周期管理。
+🚀 **AI 助手环境一键管理中枢**。通过单一入口，实现对 Claude Code, Gemini CLI, Cursor, Codex, OpenCode, Kimi Code CLI 的全生命周期管理。
 
 ## 核心规范速查表 (Authoritative Spec)
 
@@ -22,6 +22,7 @@
 默认受管浏览器工具当前包含 `playwright-cli` 和 `agent-browser`；二者通过官方 npm `@latest` 通道受管安装与更新。`playwright-cli` 在安装或升级后会继续执行 `install-browser` 同步 Playwright browsers，并用 Playwright cache 的真实 payload 做就绪重验；`agent-browser` 优先复用系统已有的 Chrome/Chromium，也会接受 Playwright cache 中的 Chromium 作为可复用运行时，仅在缺少这些浏览器运行时时才需要执行 `agent-browser install`。`chrome-devtools` 继续作为 MCP server 通过 `npx ...@latest` 在运行时跟随上游最新版本。
 默认受管 skill 仓库当前包含 `agent-skills`、`openai-frontend-skill`、`playwright-best-practices-skill`、`superpowers` 和 `ui-ux-pro-max-skill`；它们在未显式声明 `commit` / `ref` 时，会在同步时跟随上游默认分支最新状态；其中 `agent-skills` 仅向 `Claude Code` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 3 个 skill 包，避免上游新增 skill 被默认带入。
 默认自动安装的 Agent 当前包含 `Claude Code` 和 `Gemini CLI`；`Cursor IDE` 与 `OpenCode` 仍受管，但默认不自动安装，需要时可通过策略显式开启。
+`Kimi Code CLI` 已成为受管 Agent，当前受管路径为 `~/.kimi/mcp.json`、`~/.kimi/skills`、`~/.kimi/AGENTS.md`、`~/.kimi/modules`；`~/.kimi/config.toml` 不在本轮托管范围。
 
 ## Agent 安装源依据 (Official Evidence)
 
@@ -62,8 +63,8 @@
 - **可编辑源码**：跨 Agent 的共享规则片段只维护在 `agent-rule/rules/src/`，这是仓库内唯一可编辑的 rule source。
 - **共享 core 职责**：`agent-rule/rules/src/shared/core.md` 只放所有 Agent 都应始终生效的短规则；这里优先约束“先显式说明假设、优先最简单本地改动、保持 surgical edits、按 verification point 推进”。
 - **生成产物**：面向各 Agent 实际分发的规则文件只维护在 `agent-rule/rules/dist/`，由构建脚本生成；仓库内不再保留第二套 `rules/global/*` source tree。
-- **按 Agent 原生格式分发**：Codex 生成 `AGENTS.md`，Claude 生成 `CLAUDE.md`，Gemini 生成 `GEMINI.md`，Cursor 生成 repo-native `.cursor/rules/agent-manager.mdc`。
-- **原生 modules 位置**：全局文件旁边的 `modules/` 目录也会跟着落到原生同级位置，例如 `~/.codex/modules`、`~/.claude/modules`、`~/.gemini/modules`、`{{REPO_ROOT}}/.cursor/rules/modules`。
+- **按 Agent 原生格式分发**：Codex 生成 `AGENTS.md`，Claude 生成 `CLAUDE.md`，Gemini 生成 `GEMINI.md`，Cursor 生成 repo-native `.cursor/rules/agent-manager.mdc`，Kimi Code CLI 使用 `~/.kimi/AGENTS.md` 作为受管 rules 入口。
+- **原生 modules 位置**：全局文件旁边的 `modules/` 目录也会跟着落到原生同级位置，例如 `~/.codex/modules`、`~/.claude/modules`、`~/.gemini/modules`、`~/.kimi/modules`、`{{REPO_ROOT}}/.cursor/rules/modules`。
 - **Codex 路径特例**：由于 Codex 会把用户级规则合并进当前工作区指令视图，生成的 `~/.codex/AGENTS.md` 会直接引用 `config/rules-targets.list` 中 `codex_modules` 配置的目标路径（默认是 `~/.codex/modules/*.md`），避免把相对 `modules/` 误解析为仓库内路径。
 - **分层原则**：低频、专题或工具边界细节放 `agent-rule/rules/src/shared/modules/`；Agent 私有差异只放 `agent-rule/rules/src/agents/*/adapter.md`，不要把这些内容回灌进 shared core。
 - **OpenCode 入口**：OpenCode 不再伪造 `~/.config/opencode/rules/global.md`；直接使用仓库根 `AGENTS.md` 这个 repo-native 入口。

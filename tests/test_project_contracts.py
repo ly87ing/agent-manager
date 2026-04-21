@@ -256,6 +256,16 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn(".codex/hooks.json", readme)
         self.assertIn("make codex-hooks-sync", readme)
 
+    def test_readme_documents_kimi_cli_management_paths(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("Kimi Code CLI", readme)
+        self.assertIn("~/.kimi/mcp.json", readme)
+        self.assertIn("~/.kimi/skills", readme)
+        self.assertIn("~/.kimi/AGENTS.md", readme)
+        self.assertIn("~/.kimi/modules", readme)
+        self.assertIn("~/.kimi/config.toml", readme)
+        self.assertIn("不在本轮托管范围", readme)
+
     def test_repo_root_agents_guidance_covers_setup_tests_done_when_and_generated_boundaries(self):
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("Python 3 and make", agents)
@@ -337,6 +347,16 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("agent-rule/scripts/sync-codex-hooks.py", architecture)
         self.assertIn(".codex/hooks.json", architecture)
         self.assertIn("make codex-hooks-sync", architecture)
+
+    def test_architecture_documents_kimi_cli_management_paths(self):
+        architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+        self.assertIn("Kimi Code CLI", architecture)
+        self.assertIn("~/.kimi/mcp.json", architecture)
+        self.assertIn("~/.kimi/skills", architecture)
+        self.assertIn("~/.kimi/AGENTS.md", architecture)
+        self.assertIn("~/.kimi/modules", architecture)
+        self.assertIn("~/.kimi/config.toml", architecture)
+        self.assertIn("不在本轮托管范围", architecture)
 
     def test_claude_memory_stays_project_specific(self):
         memory = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
