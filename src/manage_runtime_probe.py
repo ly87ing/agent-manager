@@ -50,9 +50,30 @@ def get_uv_tool_name(cmd: str | None) -> str | None:
         return None
     if tokens[1:3] != ["tool", "install"]:
         return None
-    # 最后一个非 flag token 视为 package name。失败则返回 None（fail-close）。
-    candidates = [token for token in tokens[3:] if token and not token.startswith("-")]
-    return candidates[-1] if candidates else None
+    # 只支持极少量明确的 flags 解析（fail-close），避免误把 flag value 当成 package。
+    positional = []
+    index = 3
+    while index < len(tokens):
+        token = tokens[index]
+        if not token:
+            index += 1
+            continue
+
+        if token.startswith("-"):
+            if token == "--python":
+                index += 2
+                continue
+            if token.startswith("--python="):
+                index += 1
+                continue
+            return None
+
+        positional.append(token)
+        index += 1
+
+    if len(positional) != 1:
+        return None
+    return positional[0]
 
 
 def normalize_path_for_match(path):
