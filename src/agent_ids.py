@@ -24,6 +24,10 @@ AGENT_METADATA = {
         "display_name": "Codex",
         "aliases": ["Codex"],
     },
+    "kimi-cli": {
+        "display_name": "Kimi Code CLI",
+        "aliases": ["Kimi Code CLI", "Kimi CLI", "kimi-cli", "kimi"],
+    },
 }
 
 

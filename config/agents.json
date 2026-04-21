@@ -62,5 +62,17 @@
         "upgrade": "brew upgrade opencode"
       }
     }
+  },
+  "kimi-cli": {
+    "display_name": "Kimi Code CLI",
+    "bin": "kimi",
+    "preferred_provider": "uv",
+    "providers": {
+      "uv": {
+        "install": "uv tool install --python 3.13 kimi-cli",
+        "uninstall": "uv tool uninstall kimi-cli",
+        "upgrade": "uv tool upgrade kimi-cli --no-cache"
+      }
+    }
   }
 }

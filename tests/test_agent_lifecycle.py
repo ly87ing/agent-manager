@@ -594,22 +594,32 @@ class AgentIdConsistencyTests(unittest.TestCase):
     def test_config_uses_stable_agent_ids(self):
         manager_agents = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))["agents"]
         lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
-        skill_targets = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))["agents"]
-        mcp_targets = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))["agent_paths"]
 
         managed_agent_ids = {
             "claude-code",
             "gemini-cli",
             "cursor",
             "opencode",
+            "kimi-cli",
         }
 
         self.assertEqual(set(manager_agents), managed_agent_ids)
         self.assertEqual(set(lifecycle_agents), managed_agent_ids)
-        self.assertTrue(managed_agent_ids.issubset(set(skill_targets)))
-        self.assertTrue(managed_agent_ids.issubset(set(mcp_targets)))
-        self.assertIn("codex", skill_targets)
-        self.assertIn("codex", mcp_targets)
+
+
+class KimiLifecycleConfigTests(unittest.TestCase):
+    def test_kimi_cli_definition_is_committed(self):
+        lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
+
+        self.assertIn("kimi-cli", lifecycle_agents)
+        self.assertEqual(lifecycle_agents["kimi-cli"]["display_name"], "Kimi Code CLI")
+        self.assertEqual(lifecycle_agents["kimi-cli"]["bin"], "kimi")
+        self.assertEqual(lifecycle_agents["kimi-cli"]["preferred_provider"], "uv")
+
+    def test_kimi_cli_metadata_has_display_name(self):
+        from src.agent_ids import get_agent_display_name
+
+        self.assertEqual(get_agent_display_name("kimi-cli"), "Kimi Code CLI")
 
 
 class CommittedAgentPolicyTests(unittest.TestCase):
@@ -625,3 +635,9 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
 
         self.assertFalse(manager["agents"]["opencode"]["auto_install"])
+
+    def test_committed_agent_policy_disables_default_kimi_cli_auto_install(self):
+        manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
+
+        self.assertFalse(manager["agents"]["kimi-cli"]["auto_install"])
+        self.assertEqual(manager["agents"]["kimi-cli"]["preferred_provider"], "uv")

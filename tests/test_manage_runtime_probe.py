@@ -560,6 +560,42 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
         self.assertEqual(providers, ["system"])
 
+    def test_detect_all_providers_detects_uv_tool_installation(self):
+        command_outputs = {
+            ("uv", "tool", "list"): (True, "kimi-cli 0.2.0\n"),
+        }
+
+        def run_cmd(cmd, timeout=10):
+            return command_outputs.get(tuple(cmd), (False, ""))
+
+        def which(binary):
+            mapping = {
+                "uv": "/opt/homebrew/bin/uv",
+                "kimi": "/opt/homebrew/bin/kimi",
+            }
+            return mapping.get(binary)
+
+        inventory = manage_runtime_probe.ProviderInventory(
+            run_cmd=run_cmd,
+            which=which,
+            path_exists=lambda _path: False,
+            realpath=lambda path: path,
+        )
+
+        providers = manage_runtime_probe.detect_all_providers(
+            "kimi",
+            {
+                "providers": {
+                    "uv": {
+                        "install": "uv tool install --python 3.13 kimi-cli",
+                    }
+                }
+            },
+            inventory=inventory,
+        )
+
+        self.assertEqual(providers, ["uv"])
+
     def test_inventory_caches_provider_queries(self):
         run_cmd = mock.Mock(
             side_effect=[

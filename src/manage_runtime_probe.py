@@ -37,6 +37,24 @@ def get_pkg_name(cmd):
     return match.group(1) if match else None
 
 
+def get_uv_tool_name(cmd: str | None) -> str | None:
+    if not cmd:
+        return None
+    try:
+        tokens = shlex.split(cmd)
+    except ValueError:
+        tokens = cmd.split()
+    if len(tokens) < 4:
+        return None
+    if tokens[0] != "uv":
+        return None
+    if tokens[1:3] != ["tool", "install"]:
+        return None
+    # 最后一个非 flag token 视为 package name。失败则返回 None（fail-close）。
+    candidates = [token for token in tokens[3:] if token and not token.startswith("-")]
+    return candidates[-1] if candidates else None
+
+
 def normalize_path_for_match(path):
     if not path:
         return ""
@@ -413,6 +431,7 @@ class ProviderInventory:
         self._brew_formulae = None
         self._brew_casks = None
         self._gh_extensions = None
+        self._uv_tools = None
 
     def get_brew_formulae(self):
         if self._brew_formulae is None:
@@ -441,6 +460,23 @@ class ProviderInventory:
                     self._gh_extensions = out
         return self._gh_extensions
 
+    def get_uv_tools(self):
+        if self._uv_tools is None:
+            self._uv_tools = set()
+            if self._which("uv"):
+                success, out = self._run_cmd(["uv", "tool", "list"], timeout=10)
+                if success and out.strip():
+                    tools = set()
+                    for line in out.splitlines():
+                        line = line.strip()
+                        if not line:
+                            continue
+                        name = line.split()[0].strip()
+                        if name:
+                            tools.add(name)
+                    self._uv_tools = tools
+        return self._uv_tools
+
     def detect_all_providers(self, bin_name, config=None):
         found = []
         config = config or {}
@@ -465,6 +501,10 @@ class ProviderInventory:
         ext_name = config.get("ext_name")
         if ext_name and any(line.strip().startswith(ext_name) for line in self.get_gh_extensions().splitlines()):
             found.append("gh")
+
+        uv_pkg = get_uv_tool_name(config.get("providers", {}).get("uv", {}).get("install"))
+        if uv_pkg == "kimi-cli" and uv_pkg in self.get_uv_tools():
+            found.append("uv")
 
         app_path = config.get("app_path")
         if (app_path and self._path_exists(app_path)) or bin_path:
