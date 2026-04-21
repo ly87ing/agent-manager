@@ -25,6 +25,18 @@ except json.JSONDecodeError:
 if data.get("stop_hook_active"):
     sys.exit(0)
 
+
+def emit_block(reason: str) -> None:
+    json.dump(
+        {
+            "decision": "block",
+            "reason": reason,
+        },
+        sys.stdout,
+    )
+    sys.stdout.write("\n")
+    sys.exit(0)
+
 repo_root = Path(project_dir)
 src_root = repo_root / "agent-rule" / "rules" / "src"
 dist_root = repo_root / "agent-rule" / "rules" / "dist"
@@ -33,6 +45,11 @@ manifest_path = repo_root / "config" / "rules-targets.list"
 
 if not src_root.exists() or not dist_root.exists() or not builder.exists():
     sys.exit(0)
+if not manifest_path.exists():
+    emit_block(
+        "Managed rules manifest is missing: config/rules-targets.list. "
+        "Run make rules-build and restore the manifest before stopping."
+    )
 
 
 def snapshot(root: Path) -> dict[str, str]:
@@ -43,42 +60,39 @@ def snapshot(root: Path) -> dict[str, str]:
     }
 
 
-with tempfile.TemporaryDirectory() as temp_dir:
-    temp_root = Path(temp_dir) / "repo"
-    temp_builder = temp_root / "agent-rule" / "scripts" / "build-agent-rules.py"
-    temp_src_root = temp_root / "agent-rule" / "rules" / "src"
-    temp_manifest_path = temp_root / "config" / "rules-targets.list"
-    temp_builder.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(builder, temp_builder)
-    shutil.copytree(src_root, temp_src_root)
-    temp_manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(manifest_path, temp_manifest_path)
-    build = subprocess.run(
-        [sys.executable, str(temp_builder)],
-        cwd=temp_root / "agent-rule",
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if build.returncode != 0:
-        json.dump(
-            {
-                "decision": "block",
-                "reason": "Managed rules could not be rebuilt for verification. Run make rules-build and fix the build before stopping.",
-            },
-            sys.stdout,
+try:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_root = Path(temp_dir) / "repo"
+        temp_builder = temp_root / "agent-rule" / "scripts" / "build-agent-rules.py"
+        temp_src_root = temp_root / "agent-rule" / "rules" / "src"
+        temp_manifest_path = temp_root / "config" / "rules-targets.list"
+        temp_builder.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(builder, temp_builder)
+        shutil.copytree(src_root, temp_src_root)
+        temp_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(manifest_path, temp_manifest_path)
+        build = subprocess.run(
+            [sys.executable, str(temp_builder)],
+            cwd=temp_root / "agent-rule",
+            capture_output=True,
+            text=True,
+            check=False,
         )
-        sys.stdout.write("\n")
-        sys.exit(0)
-    fresh_dist = snapshot(temp_root / "agent-rule" / "rules" / "dist")
+        if build.returncode != 0:
+            emit_block(
+                "Managed rules could not be rebuilt for verification. "
+                "Run make rules-build and fix the build before stopping."
+            )
+        fresh_dist = snapshot(temp_root / "agent-rule" / "rules" / "dist")
+except OSError as exc:
+    emit_block(
+        "Managed rules verification inputs are unreadable "
+        f"({manifest_path.name}: {exc}). Run make rules-build and fix the managed rules files before stopping."
+    )
 
 if snapshot(dist_root) != fresh_dist:
-    json.dump(
-        {
-            "decision": "block",
-            "reason": "Rules dist is out of sync with the current source/build logic. Run make rules-build before stopping.",
-        },
-        sys.stdout,
+    emit_block(
+        "Rules dist is out of sync with the current source/build logic. "
+        "Run make rules-build before stopping."
     )
-    sys.stdout.write("\n")
 PY

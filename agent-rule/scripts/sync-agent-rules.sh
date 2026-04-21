@@ -30,6 +30,8 @@ done
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 workspace_root="$(cd "$repo_root/.." && pwd -P)"
 manifest_path="$repo_root/../config/rules-targets.list"
+python_cmd="python3"
+command -v python3 >/dev/null 2>&1 || python_cmd="python"
 
 [ -f "$manifest_path" ] || { echo "Manifest not found: $manifest_path" >&2; exit 1; }
 
@@ -274,30 +276,40 @@ sync_symlink() {
 }
 
 # --- 核心增强：路径冲突预检 ---
-awk -F'|' '
-  BEGIN { err=0 }
-  /^#/ || NF<4 { next }
-  {
-    # Trim leading/trailing whitespaces defensively for all fields
-    gsub(/^[ \t]+|[ \t]+$/, "", $1)
-    gsub(/^[ \t]+|[ \t]+$/, "", $3)
-    gsub(/^[ \t]+|[ \t]+$/, "", $4)
-    dst = $4; 
-    sub(/\{\{HOME\}\}/, ENVIRON["HOME"], dst);
-    if (dst ~ /^~\//) {
-        sub(/^~\//, ENVIRON["HOME"] "/", dst);
-    } else if (dst == "~") {
-        dst = ENVIRON["HOME"];
-    }
-    
-    if (seen[dst]) {
-      print "❌ 关键错误: 规则路径冲突! " $1 " 与 " seen[dst] " 均指向: " dst > "/dev/stderr"
-      err=1
-    }
-    seen[dst] = $1
-  }
-  END { exit err }
-' "$manifest_path" || exit 1
+MANIFEST_PATH="$manifest_path" WORKSPACE_ROOT="$workspace_root" HOME_DIR="$HOME" "$python_cmd" - <<'PY' || exit 1
+import os
+import sys
+from pathlib import Path
+
+manifest_path = Path(os.environ["MANIFEST_PATH"])
+workspace_root = os.environ["WORKSPACE_ROOT"]
+home_dir = os.environ["HOME_DIR"]
+seen: dict[str, str] = {}
+
+for raw_line in manifest_path.read_text(encoding="utf-8").splitlines():
+    line = raw_line.strip()
+    if not line or line.startswith("#"):
+        continue
+
+    parts = [field.strip() for field in raw_line.split("|", 3)]
+    if len(parts) < 4:
+        continue
+
+    name, _group, _source, dst = parts
+    dst = dst.replace("{{REPO_ROOT}}", workspace_root)
+    dst = dst.replace("{{HOME}}", home_dir)
+    if dst.startswith("~/"):
+        dst = os.path.join(home_dir, dst[2:])
+    elif dst == "~":
+        dst = home_dir
+
+    normalized = os.path.realpath(os.path.normpath(dst))
+    previous = seen.get(normalized)
+    if previous is not None:
+        print(f"❌ 关键错误: 规则路径冲突! {name} 与 {previous} 均指向: {normalized}", file=sys.stderr)
+        sys.exit(1)
+    seen[normalized] = name
+PY
 
 while IFS='|' read -r name group src_rel dst_pat; do
   name=$(echo "$name" | awk '{$1=$1;print}')

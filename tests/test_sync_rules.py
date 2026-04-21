@@ -367,6 +367,32 @@ class SyncRulesTests(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_manifest_conflict_detects_repo_root_placeholder_and_absolute_equivalent(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            duplicate_target = (temp_root / ".cursor" / "rules" / "agent-manager.mdc").resolve()
+            (temp_root / "config" / "rules-targets.list").write_text(
+                (
+                    "cursor_global|global|rules/dist/cursor/agent-manager.mdc|"
+                    "{{REPO_ROOT}}/.cursor/rules/agent-manager.mdc\n"
+                    f"duplicate_cursor|global|rules/dist/cursor/agent-manager.mdc|{duplicate_target}\n"
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [str(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh")],
+                cwd=temp_root / "agent-rule",
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("规则路径冲突", combined)
+
     def test_doctor_audits_directory_targets_structurally(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"

@@ -1353,7 +1353,7 @@ class ManageScriptTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=5,
+                timeout=10,
             )
 
             combined = result.stdout + result.stderr

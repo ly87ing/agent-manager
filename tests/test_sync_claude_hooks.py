@@ -295,6 +295,27 @@ class ClaudeHooksSyncTests(unittest.TestCase):
             self.assertEqual(response["decision"], "block")
             self.assertIn("make rules-build", response["reason"])
 
+    def test_check_rules_build_hook_blocks_when_manifest_is_missing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = self._copy_repo(temp_dir)
+            manifest_path = temp_root / "config" / "rules-targets.list"
+            manifest_path.unlink()
+
+            result = subprocess.run(
+                ["bash", str(temp_root / "agent-rule" / "hooks" / "check-rules-build.sh")],
+                cwd=temp_root,
+                env={**os.environ, "CLAUDE_PROJECT_DIR": str(temp_root)},
+                input=json.dumps({"hook_event_name": "Stop"}),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            response = json.loads(result.stdout)
+            self.assertEqual(response["decision"], "block")
+            self.assertIn("rules-targets.list", response["reason"])
+
     def test_manage_command_syncs_project_claude_hooks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = self._copy_repo(temp_dir)
