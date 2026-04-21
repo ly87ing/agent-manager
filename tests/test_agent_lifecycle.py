@@ -594,6 +594,8 @@ class AgentIdConsistencyTests(unittest.TestCase):
     def test_config_uses_stable_agent_ids(self):
         manager_agents = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))["agents"]
         lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
+        skill_targets = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))["agents"]
+        mcp_agent_paths = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))["agent_paths"]
 
         managed_agent_ids = {
             "claude-code",
@@ -602,9 +604,17 @@ class AgentIdConsistencyTests(unittest.TestCase):
             "opencode",
             "kimi-cli",
         }
+        skill_agent_ids = managed_agent_ids | {"codex"}
 
         self.assertEqual(set(manager_agents), managed_agent_ids)
         self.assertEqual(set(lifecycle_agents), managed_agent_ids)
+        self.assertEqual(set(skill_targets), skill_agent_ids)
+        self.assertEqual(set(mcp_agent_paths), skill_agent_ids)
+
+        # codex 是仅 skills/mcp target：不参与 lifecycle 管理，但仍可作为技能/工具配置目标。
+        self.assertNotIn("codex", managed_agent_ids)
+        self.assertIn("codex", skill_agent_ids)
+        self.assertIn("kimi-cli", managed_agent_ids)
 
 
 class KimiLifecycleConfigTests(unittest.TestCase):
