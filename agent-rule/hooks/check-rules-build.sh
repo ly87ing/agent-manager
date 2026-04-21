@@ -29,6 +29,7 @@ repo_root = Path(project_dir)
 src_root = repo_root / "agent-rule" / "rules" / "src"
 dist_root = repo_root / "agent-rule" / "rules" / "dist"
 builder = repo_root / "agent-rule" / "scripts" / "build-agent-rules.py"
+manifest_path = repo_root / "config" / "rules-targets.list"
 
 if not src_root.exists() or not dist_root.exists() or not builder.exists():
     sys.exit(0)
@@ -46,9 +47,12 @@ with tempfile.TemporaryDirectory() as temp_dir:
     temp_root = Path(temp_dir) / "repo"
     temp_builder = temp_root / "agent-rule" / "scripts" / "build-agent-rules.py"
     temp_src_root = temp_root / "agent-rule" / "rules" / "src"
+    temp_manifest_path = temp_root / "config" / "rules-targets.list"
     temp_builder.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(builder, temp_builder)
     shutil.copytree(src_root, temp_src_root)
+    temp_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(manifest_path, temp_manifest_path)
     build = subprocess.run(
         [sys.executable, str(temp_builder)],
         cwd=temp_root / "agent-rule",

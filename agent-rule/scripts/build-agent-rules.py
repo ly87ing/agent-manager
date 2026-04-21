@@ -2,22 +2,20 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = ROOT.parent
 SRC_ROOT = ROOT / "rules" / "src"
 DIST_ROOT = ROOT / "rules" / "dist"
 MODULES_SRC = SRC_ROOT / "shared" / "modules"
 MODULES_DIST = DIST_ROOT / "modules"
 TARGETS = ("codex", "claude", "gemini", "cursor")
-CODEX_MODULE_PATHS = {
-    "modules/architecture.md": "~/.codex/modules/architecture.md",
-    "modules/style.md": "~/.codex/modules/style.md",
-    "modules/frontend.md": "~/.codex/modules/frontend.md",
-    "modules/artifact-hygiene.md": "~/.codex/modules/artifact-hygiene.md",
-}
+MANIFEST_PATH = REPO_ROOT / "config" / "rules-targets.list"
+MODULE_REFERENCE_PATTERN = re.compile(r"`modules/([^`]+\.md)`")
 TARGET_SPECS = {
     "codex": {"adapter": "codex", "filename": "AGENTS.md"},
     "claude": {"adapter": "claude", "filename": "CLAUDE.md"},
@@ -48,11 +46,33 @@ def write_dist_gitkeep() -> None:
     (DIST_ROOT / ".gitkeep").write_text("", encoding="utf-8")
 
 
+def read_manifest_target(name: str) -> str:
+    for raw_line in MANIFEST_PATH.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        entry_name, _group, _source, target = line.split("|", 3)
+        if entry_name == name:
+            return target
+    raise ValueError(f"missing manifest target: {name}")
+
+
+def render_instruction_path(target: str) -> str:
+    if target.startswith("{{REPO_ROOT}}"):
+        return target.replace("{{REPO_ROOT}}", str(REPO_ROOT), 1)
+    if target.startswith("{{HOME}}"):
+        return target.replace("{{HOME}}", "~", 1)
+    return target
+
+
 def render_target_content(target: str, core_lines: list[str], adapter_lines: list[str]) -> str:
     content = "\n".join([*core_lines, *adapter_lines])
     if target == "codex":
-        for relative_path, codex_path in CODEX_MODULE_PATHS.items():
-            content = content.replace(f"`{relative_path}`", f"`{codex_path}`")
+        codex_modules_root = render_instruction_path(read_manifest_target("codex_modules")).rstrip("/")
+        content = MODULE_REFERENCE_PATTERN.sub(
+            lambda match: f"`{codex_modules_root}/{match.group(1)}`",
+            content,
+        )
     return content + "\n"
 
 

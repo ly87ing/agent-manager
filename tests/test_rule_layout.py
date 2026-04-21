@@ -82,6 +82,53 @@ class RuleLayoutTests(unittest.TestCase):
         self.assertIn("Use Chrome DevTools for Browser-Level Diagnosis", frontend_module)
         self.assertIn("Do Not Replace Regression Coverage", frontend_module)
 
+    def test_codex_module_paths_follow_manifest_target(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = self._copy_repo(temp_dir)
+            manifest_path = temp_root / "config" / "rules-targets.list"
+            manifest = manifest_path.read_text(encoding="utf-8")
+            manifest_path.write_text(
+                manifest.replace(
+                    "codex_modules|global|rules/dist/modules|~/.codex/modules",
+                    "codex_modules|global|rules/dist/modules|~/.codex-alt/modules",
+                ),
+                encoding="utf-8",
+            )
+
+            result = self._run_builder(temp_root)
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            codex_rule = (temp_root / "agent-rule" / "rules" / "dist" / "codex" / "AGENTS.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("read `~/.codex-alt/modules/architecture.md`", codex_rule)
+            self.assertNotIn("read `~/.codex/modules/architecture.md`", codex_rule)
+
+    def test_codex_rewrites_new_shared_module_references(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = self._copy_repo(temp_dir)
+            core_path = temp_root / "agent-rule" / "rules" / "src" / "shared" / "core.md"
+            core_path.write_text(
+                core_path.read_text(encoding="utf-8")
+                + "- If custom verification rules change, read `modules/custom.md` before editing.\n",
+                encoding="utf-8",
+            )
+            (temp_root / "agent-rule" / "rules" / "src" / "shared" / "modules" / "custom.md").write_text(
+                "# Custom\n",
+                encoding="utf-8",
+            )
+
+            result = self._run_builder(temp_root)
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            codex_rule = (temp_root / "agent-rule" / "rules" / "dist" / "codex" / "AGENTS.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("read `~/.codex/modules/custom.md`", codex_rule)
+            self.assertNotIn("read `modules/custom.md`", codex_rule)
+
     def test_build_removes_stale_dist_outputs(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = self._copy_repo(temp_dir)

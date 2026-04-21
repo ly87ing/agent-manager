@@ -11,6 +11,17 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class SyncRulesTests(unittest.TestCase):
+    def _read_manifest_target(self, name: str) -> str:
+        manifest = (ROOT / "config" / "rules-targets.list").read_text(encoding="utf-8")
+        for raw_line in manifest.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            entry_name, _group, _source, target = line.split("|", 3)
+            if entry_name == name:
+                return target
+        raise AssertionError(f"missing manifest target: {name}")
+
     def test_multiple_target_filters_sync_all_requested_targets(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
@@ -407,9 +418,10 @@ class SyncRulesTests(unittest.TestCase):
         self.assertIn("read `modules/architecture.md`", content)
         self.assertNotIn("~/.<agent>/modules/architecture.md", content)
 
-    def test_codex_main_rule_points_to_home_modules_path(self):
+    def test_codex_main_rule_points_to_manifest_modules_path(self):
         content = (ROOT / "agent-rule" / "rules" / "dist" / "codex" / "AGENTS.md").read_text(encoding="utf-8")
-        self.assertIn("read `~/.codex/modules/architecture.md`", content)
+        codex_modules_target = self._read_manifest_target("codex_modules").rstrip("/")
+        self.assertIn(f"read `{codex_modules_target}/architecture.md`", content)
         self.assertNotIn("read `modules/architecture.md`", content)
 
     def test_manifest_targets_built_rule_outputs(self):
