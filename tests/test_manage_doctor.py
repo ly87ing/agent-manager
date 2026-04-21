@@ -193,6 +193,7 @@ class ManageDoctorReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
+            target_path = temp_home / ".kimi" / "AGENTS.md"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
             temp_home.mkdir(parents=True, exist_ok=True)
 
@@ -212,7 +213,7 @@ class ManageDoctorReportTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (temp_root / "config" / "rules-targets.list").write_text(
-                "kimi_global|global|rules/dist/kimi/AGENTS.md|~/.kimi/AGENTS.md\n",
+                f"kimi_global|global|rules/dist/kimi/AGENTS.md|{target_path}\n",
                 encoding="utf-8",
             )
 
@@ -234,6 +235,7 @@ class ManageDoctorReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
+            target_path = temp_home / ".kimi" / "AGENTS.md"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
             temp_home.mkdir(parents=True, exist_ok=True)
 
@@ -253,7 +255,7 @@ class ManageDoctorReportTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (temp_root / "config" / "rules-targets.list").write_text(
-                "kimi_global|global|rules/dist/kimi/AGENTS.md|~/.kimi/AGENTS.md\n",
+                f"kimi_global|global|rules/dist/kimi/AGENTS.md|{target_path}\n",
                 encoding="utf-8",
             )
 
