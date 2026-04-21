@@ -41,6 +41,10 @@ class ManageRuntimeProbeTests(unittest.TestCase):
             ["git", "brew"],
         )
 
+    def test_rule_target_agent_id_maps_kimi_prefix_to_kimi_cli(self):
+        self.assertEqual(manage_runtime_probe.rule_target_agent_id("kimi_global"), "kimi-cli")
+        self.assertEqual(manage_runtime_probe.rule_target_agent_id("kimi_modules"), "kimi-cli")
+
     def test_detect_tool_readiness_requires_git_clone_for_repo_backed_tools(self):
         with mock.patch("src.manage_runtime_probe.os.path.isdir") as isdir:
             isdir.side_effect = lambda path: path == "/repo/agent-tool/playwright-cli"

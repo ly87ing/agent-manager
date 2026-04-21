@@ -53,6 +53,8 @@ agent_installed_for_target() {
     "$HOME"/.codex/*|"$HOME"/.codex)
       # codex 无标准 bin，检查配置目录是否存在
       [ -d "$HOME/.codex" ] ;;
+    "$HOME"/.kimi/*|"$HOME"/.kimi)
+      command -v kimi >/dev/null 2>&1 ;;
     *)
       # 无法推断，默认放行
       return 0 ;;

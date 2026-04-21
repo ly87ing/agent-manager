@@ -157,6 +157,41 @@ class SyncRulesTests(unittest.TestCase):
             self.assertTrue(target_path.exists(), combined)
             self.assertEqual(target_path.read_text(encoding="utf-8"), source_path.read_text(encoding="utf-8"))
 
+    def test_kimi_sync_supports_native_agents_filename(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            temp_bin = Path(temp_dir) / "bin"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            (temp_home / ".kimi").mkdir(parents=True)
+            target_path = temp_home / ".kimi" / "AGENTS.md"
+            (temp_root / "config" / "rules-targets.list").write_text(
+                f"kimi_global|global|rules/dist/kimi/AGENTS.md|{target_path}\n",
+                encoding="utf-8",
+            )
+            temp_bin.mkdir(parents=True)
+            kimi_bin = temp_bin / "kimi"
+            kimi_bin.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+            kimi_bin.chmod(0o755)
+
+            env = os.environ.copy()
+            env["HOME"] = str(temp_home)
+            env["PATH"] = f"{temp_bin}{os.pathsep}{env.get('PATH', '')}"
+            result = subprocess.run(
+                [str(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh"), "--target", "kimi_global"],
+                cwd=temp_root / "agent-rule",
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            source_path = temp_root / "agent-rule" / "rules" / "dist" / "kimi" / "AGENTS.md"
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertTrue(target_path.exists(), combined)
+            self.assertEqual(target_path.read_text(encoding="utf-8"), source_path.read_text(encoding="utf-8"))
+
     def test_codex_sync_removes_legacy_global_rule_path(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
@@ -450,9 +485,16 @@ class SyncRulesTests(unittest.TestCase):
         self.assertIn(f"read `{codex_modules_target}/architecture.md`", content)
         self.assertNotIn("read `modules/architecture.md`", content)
 
+    def test_kimi_main_rule_points_to_manifest_modules_path(self):
+        content = (ROOT / "agent-rule" / "rules" / "dist" / "kimi" / "AGENTS.md").read_text(encoding="utf-8")
+        kimi_modules_target = self._read_manifest_target("kimi_modules").rstrip("/")
+        self.assertIn(f"read `{kimi_modules_target}/architecture.md`", content)
+        self.assertNotIn("read `modules/architecture.md`", content)
+
     def test_manifest_targets_built_rule_outputs(self):
         manifest = (ROOT / "config" / "rules-targets.list").read_text(encoding="utf-8")
         self.assertIn("codex_global|global|rules/dist/codex/AGENTS.md|~/.codex/AGENTS.md", manifest)
+        self.assertIn("kimi_global|global|rules/dist/kimi/AGENTS.md|~/.kimi/AGENTS.md", manifest)
         self.assertNotIn("codex_global|global|rules/dist/codex/main.md|~/.codex/rules/global.md", manifest)
         self.assertIn("claude_global|global|rules/dist/claude/CLAUDE.md|~/.claude/CLAUDE.md", manifest)
         self.assertIn("gemini_global|global|rules/dist/gemini/GEMINI.md|~/.gemini/GEMINI.md", manifest)
@@ -467,6 +509,7 @@ class SyncRulesTests(unittest.TestCase):
         self.assertNotIn("copilot_global|global|rules/dist/copilot/copilot-instructions.md", manifest)
         self.assertNotIn("opencode_global|global|rules/dist/ide/main.md|~/.config/opencode/rules/global.md", manifest)
         self.assertIn("codex_modules|global|rules/dist/modules|~/.codex/modules", manifest)
+        self.assertIn("kimi_modules|global|rules/dist/modules|~/.kimi/modules", manifest)
         self.assertIn("claude_modules|global|rules/dist/modules|~/.claude/modules", manifest)
         self.assertIn("gemini_modules|global|rules/dist/modules|~/.gemini/modules", manifest)
         self.assertIn("cursor_modules|global|rules/dist/modules|{{REPO_ROOT}}/.cursor/rules/modules", manifest)

@@ -120,6 +120,7 @@ RULE_TARGET_PREFIX_TO_ID = {
     "cursor": "cursor",
     "opencode": "opencode",
     "codex": "codex",
+    "kimi": "kimi-cli",
 }
 ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
 ENV_WRAPPER_FLAGS_WITH_VALUE = {"-C", "--chdir", "-S", "--split-string", "-u", "--unset"}

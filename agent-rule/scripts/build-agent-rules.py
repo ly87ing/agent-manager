@@ -13,11 +13,12 @@ SRC_ROOT = ROOT / "rules" / "src"
 DIST_ROOT = ROOT / "rules" / "dist"
 MODULES_SRC = SRC_ROOT / "shared" / "modules"
 MODULES_DIST = DIST_ROOT / "modules"
-TARGETS = ("codex", "claude", "gemini", "cursor")
+TARGETS = ("codex", "kimi", "claude", "gemini", "cursor")
 MANIFEST_PATH = REPO_ROOT / "config" / "rules-targets.list"
 MODULE_REFERENCE_PATTERN = re.compile(r"`modules/([^`]+\.md)`")
 TARGET_SPECS = {
     "codex": {"adapter": "codex", "filename": "AGENTS.md"},
+    "kimi": {"adapter": "kimi", "filename": "AGENTS.md"},
     "claude": {"adapter": "claude", "filename": "CLAUDE.md"},
     "gemini": {"adapter": "gemini", "filename": "GEMINI.md"},
     "cursor": {
@@ -25,6 +26,10 @@ TARGET_SPECS = {
         "filename": "agent-manager.mdc",
         "prefix_lines": ["---", "alwaysApply: true", "---"],
     },
+}
+MODULE_MANIFEST_TARGETS = {
+    "codex": "codex_modules",
+    "kimi": "kimi_modules",
 }
 
 
@@ -67,10 +72,11 @@ def render_instruction_path(target: str) -> str:
 
 def render_target_content(target: str, core_lines: list[str], adapter_lines: list[str]) -> str:
     content = "\n".join([*core_lines, *adapter_lines])
-    if target == "codex":
-        codex_modules_root = render_instruction_path(read_manifest_target("codex_modules")).rstrip("/")
+    modules_target = MODULE_MANIFEST_TARGETS.get(target)
+    if modules_target:
+        modules_root = render_instruction_path(read_manifest_target(modules_target)).rstrip("/")
         content = MODULE_REFERENCE_PATTERN.sub(
-            lambda match: f"`{codex_modules_root}/{match.group(1)}`",
+            lambda match: f"`{modules_root}/{match.group(1)}`",
             content,
         )
     return content + "\n"

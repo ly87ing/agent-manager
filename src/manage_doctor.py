@@ -33,6 +33,7 @@ RULE_TARGET_PREFIX_TO_ID = {
     "cursor": "cursor",
     "opencode": "opencode",
     "codex": "codex",
+    "kimi": "kimi-cli",
 }
 REQUIRED_CONFIG_FILES = (
     "config/manager.json",

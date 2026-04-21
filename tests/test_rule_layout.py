@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 class RuleLayoutTests(unittest.TestCase):
     DIST_FILENAMES = {
         "codex": "AGENTS.md",
+        "kimi": "AGENTS.md",
         "claude": "CLAUDE.md",
         "gemini": "GEMINI.md",
         "cursor": "agent-manager.mdc",
@@ -104,6 +105,29 @@ class RuleLayoutTests(unittest.TestCase):
             )
             self.assertIn("read `~/.codex-alt/modules/architecture.md`", codex_rule)
             self.assertNotIn("read `~/.codex/modules/architecture.md`", codex_rule)
+
+    def test_kimi_module_paths_follow_manifest_target(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = self._copy_repo(temp_dir)
+            manifest_path = temp_root / "config" / "rules-targets.list"
+            manifest = manifest_path.read_text(encoding="utf-8")
+            manifest_path.write_text(
+                manifest.replace(
+                    "kimi_modules|global|rules/dist/modules|~/.kimi/modules",
+                    "kimi_modules|global|rules/dist/modules|~/.kimi-alt/modules",
+                ),
+                encoding="utf-8",
+            )
+
+            result = self._run_builder(temp_root)
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            kimi_rule = (temp_root / "agent-rule" / "rules" / "dist" / "kimi" / "AGENTS.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("read `~/.kimi-alt/modules/architecture.md`", kimi_rule)
+            self.assertNotIn("read `~/.kimi/modules/architecture.md`", kimi_rule)
 
     def test_codex_rewrites_new_shared_module_references(self):
         with tempfile.TemporaryDirectory() as temp_dir:

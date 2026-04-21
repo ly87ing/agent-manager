@@ -1,10 +1,12 @@
 # name|group|source|target
 codex_global|global|rules/dist/codex/AGENTS.md|~/.codex/AGENTS.md
+kimi_global|global|rules/dist/kimi/AGENTS.md|~/.kimi/AGENTS.md
 claude_global|global|rules/dist/claude/CLAUDE.md|~/.claude/CLAUDE.md
 gemini_global|global|rules/dist/gemini/GEMINI.md|~/.gemini/GEMINI.md
 cursor_global|global|rules/dist/cursor/agent-manager.mdc|{{REPO_ROOT}}/.cursor/rules/agent-manager.mdc
 
 codex_modules|global|rules/dist/modules|~/.codex/modules
+kimi_modules|global|rules/dist/modules|~/.kimi/modules
 claude_modules|global|rules/dist/modules|~/.claude/modules
 gemini_modules|global|rules/dist/modules|~/.gemini/modules
 cursor_modules|global|rules/dist/modules|{{REPO_ROOT}}/.cursor/rules/modules

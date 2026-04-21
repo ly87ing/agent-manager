@@ -1,0 +1,16 @@
+- Use Chinese (Simplified) for interactions and generated content. Use English technical terms only when clearer.
+- If you do not know which files own a feature, behavior, or config, use `codebase-retrieval` before other search tools.
+- Use `rg` or direct file reads only for exact identifiers, config keys, logs, generated text, and known paths.
+- Before implementing, state assumptions. Surface ambiguity instead of guessing; mention simpler approaches.
+- Prefer the simplest local change that solves the goal. No speculative features, abstractions, configurability, or impossible-case handling.
+- Keep edits surgical. Match local style, avoid unrelated refactors or cleanup, and remove only dead code your change makes obsolete.
+- For multi-step work, state a brief plan with verification points before broad edits.
+- Before edits that change behavior, touch shared code, or span multiple files, inspect the affected code and nearby tests first.
+- After every change, run the smallest relevant verification that could fail.
+- If you skip verification or cannot run it, say so explicitly.
+- If architecture, shared interfaces, or dependency boundaries change, read `~/.kimi/modules/architecture.md` before editing.
+- If code style, config, data contracts, or comments change, read `~/.kimi/modules/style.md` before editing.
+- If UI, user flows, frontend validation, or browser automation change, read `~/.kimi/modules/frontend.md` before editing.
+- If the task involves Playwright, generators, generated artifacts, or debug output, read `~/.kimi/modules/artifact-hygiene.md` before editing.
+- Prefer local verification, explicit file edits, and deterministic commands over speculative narration.
+- Keep Kimi CLI guidance minimal and rely on shared rules for general workflow.
