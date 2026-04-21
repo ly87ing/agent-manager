@@ -259,12 +259,18 @@ class ProjectContractTests(unittest.TestCase):
     def test_readme_documents_kimi_cli_management_paths(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("Kimi Code CLI", readme)
+        self.assertIn("对 `Claude Code`、`Gemini CLI`、`Cursor`、`OpenCode`、`Kimi Code CLI` 做生命周期管理", readme)
+        self.assertIn("对 `Codex` 提供受管 MCP / skills / rules 支持", readme)
         self.assertIn("~/.kimi/mcp.json", readme)
+        self.assertIn("│ Kimi Code CLI", readme)
         self.assertIn("~/.kimi/skills", readme)
         self.assertIn("~/.kimi/AGENTS.md", readme)
         self.assertIn("~/.kimi/modules", readme)
-        self.assertIn("~/.kimi/config.toml", readme)
-        self.assertIn("不在本轮托管范围", readme)
+        self.assertIn("`~/.kimi/config.toml` 不在本轮托管范围", readme)
+
+    def test_readme_documents_agent_skills_scope_matches_config(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("`agent-skills` 面向 `Claude Code`、`Kimi Code CLI` 与 `Codex` 暴露", readme)
 
     def test_repo_root_agents_guidance_covers_setup_tests_done_when_and_generated_boundaries(self):
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
@@ -351,12 +357,15 @@ class ProjectContractTests(unittest.TestCase):
     def test_architecture_documents_kimi_cli_management_paths(self):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
         self.assertIn("Kimi Code CLI", architecture)
+        self.assertIn("对 `Claude Code`、`Gemini CLI`、`Cursor`、`OpenCode`、`Kimi Code CLI` 做生命周期管理", architecture)
+        self.assertIn("对 `Codex` 提供受管 MCP / skills / rules 支持", architecture)
         self.assertIn("~/.kimi/mcp.json", architecture)
         self.assertIn("~/.kimi/skills", architecture)
         self.assertIn("~/.kimi/AGENTS.md", architecture)
         self.assertIn("~/.kimi/modules", architecture)
-        self.assertIn("~/.kimi/config.toml", architecture)
-        self.assertIn("不在本轮托管范围", architecture)
+        self.assertIn("`~/.kimi/config.toml` 不在本轮托管范围", architecture)
+        self.assertIn("如需启用某类能力，再声明对应的 MCP / skills / rules target path", architecture)
+        self.assertNotIn("新增 Agent 时必须同时声明 MCP / skills / rules 三类 target path", architecture)
 
     def test_claude_memory_stays_project_specific(self):
         memory = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")

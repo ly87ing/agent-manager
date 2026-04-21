@@ -1,6 +1,6 @@
 # Agent Manager (Ultimate Edition)
 
-🚀 **AI 助手环境一键管理中枢**。通过单一入口，实现对 Claude Code, Gemini CLI, Cursor, Codex, OpenCode, Kimi Code CLI 的全生命周期管理。
+🚀 **AI 助手环境一键管理中枢**。通过单一入口，对 `Claude Code`、`Gemini CLI`、`Cursor`、`OpenCode`、`Kimi Code CLI` 做生命周期管理，并对 `Codex` 提供受管 MCP / skills / rules 支持。
 
 ## 核心规范速查表 (Authoritative Spec)
 
@@ -14,13 +14,14 @@
    │ Gemini CLI     │ ~/.gemini/settings.json          │ JSON     │ mcpServers  │
    │ Cursor         │ ~/.cursor/mcp.json               │ JSON     │ mcpServers  │
    │ OpenCode       │ ~/.config/opencode/opencode.json │ JSON     │ mcp         │
+   │ Kimi Code CLI  │ ~/.kimi/mcp.json                 │ JSON     │ mcpServers  │
    │ Codex          │ ~/.codex/config.toml             │ TOML     │ mcp_servers │
    └────────────────┴──────────────────────────────────┴──────────┴─────────────┘
 ```
 
 默认受管 MCP 服务器当前包含 `augment-context-engine`（代码库检索）和 `chrome-devtools`（浏览器调试 / network / performance，使用官方推荐的 `npx -y chrome-devtools-mcp@latest`）。
 默认受管浏览器工具当前包含 `playwright-cli` 和 `agent-browser`；二者通过官方 npm `@latest` 通道受管安装与更新。`playwright-cli` 在安装或升级后会继续执行 `install-browser` 同步 Playwright browsers，并用 Playwright cache 的真实 payload 做就绪重验；`agent-browser` 优先复用系统已有的 Chrome/Chromium，也会接受 Playwright cache 中的 Chromium 作为可复用运行时，仅在缺少这些浏览器运行时时才需要执行 `agent-browser install`。`chrome-devtools` 继续作为 MCP server 通过 `npx ...@latest` 在运行时跟随上游最新版本。
-默认受管 skill 仓库当前包含 `agent-skills`、`openai-frontend-skill`、`playwright-best-practices-skill`、`superpowers` 和 `ui-ux-pro-max-skill`；它们在未显式声明 `commit` / `ref` 时，会在同步时跟随上游默认分支最新状态；其中 `agent-skills` 仅向 `Claude Code` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 3 个 skill 包，避免上游新增 skill 被默认带入。
+默认受管 skill 仓库当前包含 `agent-skills`、`openai-frontend-skill`、`playwright-best-practices-skill`、`superpowers` 和 `ui-ux-pro-max-skill`；它们在未显式声明 `commit` / `ref` 时，会在同步时跟随上游默认分支最新状态；其中 `agent-skills` 面向 `Claude Code`、`Kimi Code CLI` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 3 个 skill 包，避免上游新增 skill 被默认带入。
 默认自动安装的 Agent 当前包含 `Claude Code` 和 `Gemini CLI`；`Cursor IDE` 与 `OpenCode` 仍受管，但默认不自动安装，需要时可通过策略显式开启。
 `Kimi Code CLI` 已成为受管 Agent，当前受管路径为 `~/.kimi/mcp.json`、`~/.kimi/skills`、`~/.kimi/AGENTS.md`、`~/.kimi/modules`；`~/.kimi/config.toml` 不在本轮托管范围。
 

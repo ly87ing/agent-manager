@@ -15,7 +15,7 @@
 
 ## 系统概览
 
-Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单一入口管理多种 AI 编码助手的完整生命周期（当前包括 Claude Code、Gemini CLI、Cursor、Codex、OpenCode、Kimi Code CLI）。系统采用模块化设计，将策略意愿与具体实现分离，确保配置的精准与安全。
+Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单一入口，对 `Claude Code`、`Gemini CLI`、`Cursor`、`OpenCode`、`Kimi Code CLI` 做生命周期管理，并对 `Codex` 提供受管 MCP / skills / rules 支持。系统采用模块化设计，将策略意愿与具体实现分离，确保配置的精准与安全。
 
 核心设计原则：
 - **策略与定义分离**：仓库基线策略（`manager.json`）与机器本地覆盖（`manager.local.json`）在运行时合并，再与技术细节定义（`agents.json`等）配合生效
@@ -54,7 +54,7 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `agents.json` 中的 `providers` 只声明 agent-manager 可托管的安装源；`system` 只是运行时探测信号，不是可配置的 provider key
 - `preferred_provider` 必须指向 `providers` 中真实存在的键，否则生命周期同步应直接失败
 - `skills.json` 中的 skill 仓库支持 `commit` / `ref` 版本约束；技能名来自仓库内 `SKILL.md` frontmatter 的 `name`
-- 新增 Agent 时必须同时声明 MCP / skills / rules 三类 target path：`config/mcp.json` 的 `agent_paths`、`config/skills.json` 的 `agents` 映射、`config/rules-targets.list` 的规则与 modules 分发目标
+- 新增 Agent 时，如需启用某类能力，再声明对应的 MCP / skills / rules target path：`config/mcp.json` 的 `agent_paths`、`config/skills.json` 的 `agents` 映射、`config/rules-targets.list` 的规则与 modules 分发目标
 - `Kimi Code CLI` 当前受管路径为 `~/.kimi/mcp.json`、`~/.kimi/skills`、`~/.kimi/AGENTS.md`、`~/.kimi/modules`；`~/.kimi/config.toml` 不在本轮托管范围
 
 ### 3. 同步引擎 (Sync Engines)
