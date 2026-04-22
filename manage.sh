@@ -1407,7 +1407,16 @@ case "$cmd" in
         echo -e "  ${BORDER_GRAY}skills:link${NC}     独立执行全局或系统级专业技能代码集到 Agent 沙盒空间的映射配置与软链接"
         echo -e "  ${BORDER_GRAY}skills:upgrade${NC}  显式解析并回写 skill 仓库的最新可审计版本（仅 release/tag，失败即停止）"
         echo -e "  ${BORDER_GRAY}tools:sync${NC}      独立同步或安装全局统一增强工具链条"
-        echo -e "  ${BORDER_GRAY}terminal:sync${NC}   独立同步终端工具（iTerm2/tmux）配置模板到家目录"
+        echo -e "  ${BORDER_GRAY}terminal:sync${NC}   独立同步终端工具（iTerm2/tmux）配置模板到家目录\n"
+        echo -e "${BOLD}${HDR_BLUE}=== CC-Bridge Runtime ===${NC}"
+        echo -e "  ${SUCCESS_GREEN}cc-bridge-install${NC}  首次安装并启动，固定到最新稳定 release"
+        echo -e "  ${SUCCESS_GREEN}cc-bridge-start${NC}    启动前先检查最新稳定版本；有新版本会先升级再启动"
+        echo -e "  ${SUCCESS_GREEN}cc-bridge-stop${NC}     停止当前容器，但保留宿主机数据目录和状态文件"
+        echo -e "  ${SUCCESS_GREEN}cc-bridge-deploy${NC}   兼容旧入口：按最新稳定 release 完成首次部署"
+        echo -e "  ${SUCCESS_GREEN}cc-bridge-update${NC}   升级到最新稳定 release，并在升级前备份 data/"
+        echo -e "  ${SUCCESS_GREEN}cc-bridge-seed${NC}     从 secrets 导入账号池和 API token"
+        echo -e "  ${SUCCESS_GREEN}cc-bridge-rollback${NC} 回滚到最近一次成功部署前记录的上一个 tag"
+        echo -e "  ${SUCCESS_GREEN}cc-bridge-status${NC}   输出 tag、PID、访问 URL、端口和 Docker 运行状态"
         echo "" ;;
     *) echo -e "${ERROR_RED}错误: 未知命令 '$cmd'${NC}"; exit 1 ;;
 esac

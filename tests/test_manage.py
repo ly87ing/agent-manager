@@ -1238,6 +1238,28 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("-f, --force-refresh", combined)
             self.assertFalse(call_log.exists(), combined)
 
+    def test_make_default_help_lists_cc_bridge_runtime_targets(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+
+            result = subprocess.run(
+                ["make"],
+                cwd=temp_root,
+                env=self._managed_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertIn("cc-bridge-install", combined)
+            self.assertIn("cc-bridge-start", combined)
+            self.assertIn("cc-bridge-stop", combined)
+            self.assertIn("cc-bridge-status", combined)
+
     def test_sync_refreshes_skills_and_mcp_without_agent_or_tool_lifecycle(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
