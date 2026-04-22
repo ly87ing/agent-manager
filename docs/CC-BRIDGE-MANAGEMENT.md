@@ -3,6 +3,7 @@
 本文档说明如何用当前仓库以“外围托管”的方式管理 `cc-bridge`：
 
 - `agent-manager` 负责 secrets、版本发现、运行目录渲染、安装 / 启动 / 停止 / 升级入口和回滚入口
+- `agent-manager` 还负责基于上游显式 release tag 构建美国化派生镜像
 - `Docker` 负责容器生命周期
 - 真实敏感信息只允许放在外部私有 `secrets/` 仓库
 
@@ -12,6 +13,13 @@
 - `DATABASE_DRIVER` 必须是 `sqlite`
 - 数据持久化固定使用宿主机 bind mount，不使用 Docker named volume
 - 运行目录默认是 `~/services/cc-bridge`，可用 `CC_BRIDGE_RUNTIME_DIR` 覆盖
+- 运行时区域配置固定要求：
+  - `TZ=America/Los_Angeles`
+  - `LANG=en_US.UTF-8`
+  - `LANGUAGE=en_US:en`
+  - `LC_ALL=en_US.UTF-8`
+- 实际运行镜像固定是美国化派生镜像，不直接运行裸 `ghcr.io/mamoworks/cc-bridge:<tag>`
+- 如果容器内实际时区或 locale 不满足上述要求，安装 / 启动 / 升级 / 回滚会直接失败，不做降级容错
 
 生成后的宿主机运行目录形态：
 
@@ -28,7 +36,7 @@
 
 - `data/`：挂载到容器 `/app/data`
 - `backups/`：每次升级前自动生成 `tar.gz` 备份
-- `state/`：记录当前 tag、上一个 tag、最近一次成功升级时间
+- `state/`：记录当前 tag、上一个 tag、最近一次成功升级时间，以及派生镜像 fingerprint 缓存
 
 ## Secrets 文件
 
@@ -91,22 +99,33 @@ https://api.github.com/repos/MamoWorks/cc-bridge/releases/latest
 ```
 
 - 解析 `tag_name`
-- 以显式 tag 渲染本机 `compose.yaml`
-- 执行 `docker compose down`
-- 备份宿主机 `data/`
-- 再执行 `docker compose pull && docker compose up -d`
+- 用显式 tag 解析上游镜像 `ghcr.io/mamoworks/cc-bridge:<tag>`
+- 以 `scripts/cc-bridge/image/Dockerfile` 生成美国化派生镜像 `agent-manager/cc-bridge-us:<tag>`
+- 以派生镜像渲染本机 `compose.yaml`
+- 再执行部署 / 启动动作
 
 其中：
 
 - `make cc-bridge-start` 启动前会先检查最新稳定版本
 - 如果当前未安装，就按最新稳定版本完成安装并启动
 - 如果当前已安装但发现新版本，就先升级再启动
-- 如果当前已经是最新稳定版本，只执行 `docker compose up -d`
+- 如果当前已经是最新稳定版本，会先检查派生镜像 fingerprint 是否仍然匹配
+- 只有在上游 tag、本地派生镜像构建上下文或本地派生镜像缓存发生变化时才会重新 build
+- 如果当前已经是最新稳定版本且派生镜像没有变化，只执行 `docker compose up -d`
+- 如果当前 tag 没变但派生镜像需要重建，会执行 `docker compose up -d --force-recreate`
+
+部署路径细节：
+
+- 首次安装 / 升级 / 回滚前，会先准备目标 tag 的派生镜像；如果 `docker pull`、`docker build` 或区域设置验证失败，会直接报错
+- 派生镜像准备成功后，才会执行 `docker compose down`
+- 升级和回滚会在停容器后备份宿主机 `data/`
+- 然后执行 `docker compose up -d`
 
 这样做的结果是：
 
 - 你不需要自己查新版本
 - 运行时仍然是固定 tag，方便审计和回滚
+- 没有变化时不会重复 build，相同 tag 的日常启动成本更低
 
 ## 命令
 
@@ -177,6 +196,9 @@ make cc-bridge-rollback
 - 如果 `releases/latest` 查询失败，安装 / 启动 / 部署 / 更新都会直接失败，不会猜测版本
 - 如果 `cc-bridge.env` 缺失或 `ADMIN_PASSWORD` 为空，脚本会失败关闭
 - 如果 `DATABASE_DRIVER` 不是 `sqlite`，脚本会拒绝继续，避免半支持状态
+- 如果 `TZ` / `LANG` / `LANGUAGE` / `LC_ALL` 被配置成非美国目标值，脚本会直接失败
+- 如果美国化派生镜像 Dockerfile 缺失，或派生镜像构建失败，脚本会直接失败
+- 如果容器镜像里没有真正可用的 `America/Los_Angeles` 时区或 `en_US.UTF-8` locale，脚本会直接失败
 - 如果升级后 healthcheck 失败，更新路径会自动尝试回滚到更新前记录的当前 tag
 - 数据目录备份保留在宿主机 `backups/` 中；如需回滚数据，请手工从备份恢复
 

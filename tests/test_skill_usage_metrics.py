@@ -44,11 +44,12 @@ class SkillUsageMetricsTests(unittest.TestCase):
         self.assertEqual(
             summary["available_skill_count_by_agent"],
             {
-                "claude-code": 25,
-                "codex": 26,
-                "cursor": 15,
-                "gemini-cli": 14,
-                "opencode": 15,
+                "claude-code": 26,
+                "codex": 27,
+                "cursor": 16,
+                "gemini-cli": 15,
+                "kimi-cli": 26,
+                "opencode": 16,
             },
         )
         self.assertEqual(summary["avg_triggered_skill_count"], 1.25)

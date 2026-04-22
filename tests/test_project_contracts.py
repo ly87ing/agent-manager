@@ -372,6 +372,10 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("make cc-bridge-rollback", readme)
         self.assertIn("启动前会先检查最新稳定版本", readme)
         self.assertIn("Claude Code 的接入环境变量示例", readme)
+        self.assertIn("America/Los_Angeles", readme)
+        self.assertIn("en_US.UTF-8", readme)
+        self.assertIn("美国化派生镜像", readme)
+        self.assertIn("只有在上游 tag、本地派生镜像构建上下文或本地派生镜像缓存发生变化时才会重新 build", readme)
         self.assertIn("docs/CC-BRIDGE-MANAGEMENT.md", readme)
 
     def test_cc_bridge_management_doc_covers_install_start_stop_and_auto_update_start(self):
@@ -382,6 +386,17 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("启动前会先检查最新稳定版本", doc)
         self.assertIn("ANTHROPIC_BASE_URL", doc)
         self.assertIn("ADMIN_PASSWORD", doc)
+        self.assertIn("TZ=America/Los_Angeles", doc)
+        self.assertIn("LANG=en_US.UTF-8", doc)
+        self.assertIn("美国化派生镜像", doc)
+        self.assertIn("只有在上游 tag、本地派生镜像构建上下文或本地派生镜像缓存发生变化时才会重新 build", doc)
+
+    def test_cc_bridge_managed_image_dockerfile_exists(self):
+        dockerfile = ROOT / "scripts" / "cc-bridge" / "image" / "Dockerfile"
+        self.assertTrue(dockerfile.exists())
+        rendered = dockerfile.read_text(encoding="utf-8")
+        self.assertIn("America/Los_Angeles", rendered)
+        self.assertIn("en_US.UTF-8", rendered)
 
     def test_repo_root_agents_guidance_covers_setup_tests_done_when_and_generated_boundaries(self):
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")

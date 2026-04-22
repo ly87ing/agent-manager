@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import http.client
 import json
 import os
+import re
+import shlex
 import subprocess
 import sys
 import tarfile
@@ -24,8 +27,15 @@ from src.template_utils import load_env_file, render_template
 
 DEFAULT_RELEASE_API_URL = "https://api.github.com/repos/MamoWorks/cc-bridge/releases/latest"
 DEFAULT_IMAGE_REPO = "ghcr.io/mamoworks/cc-bridge"
+DEFAULT_MANAGED_IMAGE_REPO = "agent-manager/cc-bridge-us"
 DEFAULT_RUNTIME_DIR = Path.home() / "services" / "cc-bridge"
 CONTAINER_NAME = "cc-bridge"
+REQUIRED_REGIONAL_ENV = {
+    "TZ": "America/Los_Angeles",
+    "LANG": "en_US.UTF-8",
+    "LANGUAGE": "en_US:en",
+    "LC_ALL": "en_US.UTF-8",
+}
 COMPOSE_TEMPLATE = """services:
   cc-bridge:
     image: "${CC_BRIDGE_IMAGE_REF}"
@@ -45,6 +55,10 @@ def manager_root() -> Path:
     if override:
         return Path(override).expanduser().resolve()
     return DEFAULT_REPO_ROOT
+
+
+def cc_bridge_image_build_context() -> Path:
+    return SCRIPT_PATH.parent / "image"
 
 
 def parse_latest_release_tag(payload: dict) -> str:
@@ -99,6 +113,11 @@ def load_runtime_config(root_dir: Path) -> dict:
     if database_driver != "sqlite":
         raise ValueError("DATABASE_DRIVER must be sqlite for the managed cc-bridge runtime")
 
+    for key, required_value in REQUIRED_REGIONAL_ENV.items():
+        configured_value = raw_env.get(key, "").strip()
+        if configured_value and configured_value != required_value:
+            raise ValueError(f"{key} must be {required_value} for the managed cc-bridge runtime")
+
     runtime_dir = Path(raw_env.get("CC_BRIDGE_RUNTIME_DIR", str(DEFAULT_RUNTIME_DIR))).expanduser()
     if not runtime_dir.is_absolute():
         runtime_dir = (root_dir / runtime_dir).resolve()
@@ -110,6 +129,8 @@ def load_runtime_config(root_dir: Path) -> dict:
     app_env["SERVER_PORT"] = server_port
     app_env["DATABASE_DRIVER"] = "sqlite"
     app_env.setdefault("LOG_LEVEL", "info")
+    for key, required_value in REQUIRED_REGIONAL_ENV.items():
+        app_env[key] = required_value
     for key in list(app_env):
         if key.startswith("CC_BRIDGE_"):
             del app_env[key]
@@ -123,6 +144,26 @@ def load_runtime_config(root_dir: Path) -> dict:
         "app_env": app_env,
         "secrets_env_path": env_path,
     }
+
+
+def normalize_managed_image_tag(tag: str) -> str:
+    normalized = re.sub(r"[^0-9A-Za-z_.-]+", "-", str(tag).strip())
+    normalized = normalized.strip(".-")
+    if not normalized:
+        raise ValueError(f"release tag cannot be converted into a Docker image tag: {tag!r}")
+    return normalized
+
+
+def build_upstream_image_ref(settings: dict, tag: str) -> str:
+    return f"{settings['image_repo']}:{tag}"
+
+
+def build_managed_image_ref(tag: str) -> str:
+    return f"{DEFAULT_MANAGED_IMAGE_REPO}:{normalize_managed_image_tag(tag)}"
+
+
+def managed_image_state_name(tag: str) -> str:
+    return f"managed-image-{normalize_managed_image_tag(tag)}.fingerprint"
 
 
 def render_compose_yaml(runtime_dir: Path, image_ref: str, server_port: str) -> str:
@@ -179,7 +220,7 @@ def write_latest_known_tag(runtime_dir: Path, latest_tag: str):
 def render_runtime_files(settings: dict, tag: str):
     runtime_dir = settings["runtime_dir"]
     ensure_runtime_dirs(runtime_dir)
-    image_ref = f"{settings['image_repo']}:{tag}"
+    image_ref = build_managed_image_ref(tag)
     write_text(runtime_dir / "compose.yaml", render_compose_yaml(runtime_dir, image_ref, settings["server_port"]))
     write_text(runtime_dir / ".env.rendered", render_env_file(settings["app_env"]))
 
@@ -230,6 +271,65 @@ def run_checked(argv: list[str], cwd: Path, run_command_func=default_run_command
 def docker_compose(runtime_dir: Path, args: list[str], run_command_func=default_run_command) -> str:
     docker_bin = os.environ.get("CC_BRIDGE_DOCKER_BIN", "docker")
     return run_checked([docker_bin, "compose", "-f", "compose.yaml", *args], runtime_dir, run_command_func)
+
+
+def compute_managed_image_fingerprint(settings: dict, tag: str) -> str:
+    context_dir = cc_bridge_image_build_context()
+    dockerfile_path = context_dir / "Dockerfile"
+    if not dockerfile_path.exists():
+        raise FileNotFoundError(f"missing managed cc-bridge Dockerfile: {dockerfile_path}")
+    hasher = hashlib.sha256()
+    hasher.update(build_upstream_image_ref(settings, tag).encode("utf-8"))
+    for path in sorted(path for path in context_dir.rglob("*") if path.is_file()):
+        hasher.update(str(path.relative_to(context_dir)).encode("utf-8"))
+        hasher.update(b"\0")
+        hasher.update(path.read_bytes())
+        hasher.update(b"\0")
+    return hasher.hexdigest()
+
+
+def docker_image_exists(image_ref: str, root_dir: Path, run_command_func=default_run_command) -> bool:
+    docker_bin = os.environ.get("CC_BRIDGE_DOCKER_BIN", "docker")
+    result = run_command_func([docker_bin, "image", "inspect", image_ref], root_dir)
+    code, _output = _coerce_run_result(result)
+    return code == 0
+
+
+def prepare_runtime_image(settings: dict, tag: str, run_command_func=default_run_command) -> dict[str, object]:
+    docker_bin = os.environ.get("CC_BRIDGE_DOCKER_BIN", "docker")
+    root_dir = settings["root_dir"]
+    runtime_dir = settings["runtime_dir"]
+    context_dir = cc_bridge_image_build_context()
+    dockerfile_path = context_dir / "Dockerfile"
+    if not dockerfile_path.exists():
+        raise FileNotFoundError(f"missing managed cc-bridge Dockerfile: {dockerfile_path}")
+    upstream_image_ref = build_upstream_image_ref(settings, tag)
+    managed_image_ref = build_managed_image_ref(tag)
+    ensure_runtime_dirs(runtime_dir)
+    fingerprint = compute_managed_image_fingerprint(settings, tag)
+    fingerprint_path = runtime_dir / "state" / managed_image_state_name(tag)
+    cached_fingerprint = fingerprint_path.read_text(encoding="utf-8").strip() if fingerprint_path.exists() else ""
+    if cached_fingerprint == fingerprint and docker_image_exists(managed_image_ref, root_dir, run_command_func):
+        return {"image_ref": managed_image_ref, "rebuilt": False}
+    run_checked([docker_bin, "pull", upstream_image_ref], root_dir, run_command_func)
+    run_checked(
+        [
+            docker_bin,
+            "build",
+            "--pull",
+            "--build-arg",
+            f"CC_BRIDGE_UPSTREAM_IMAGE={upstream_image_ref}",
+            "-t",
+            managed_image_ref,
+            "-f",
+            str(dockerfile_path),
+            str(context_dir),
+        ],
+        root_dir,
+        run_command_func,
+    )
+    write_text(fingerprint_path, f"{fingerprint}\n")
+    return {"image_ref": managed_image_ref, "rebuilt": True}
 
 
 def docker_inspect_container(runtime_dir: Path, run_command_func=default_run_command) -> dict:
@@ -358,6 +458,44 @@ def perform_healthcheck(
         raise last_error
 
 
+def build_runtime_regional_validation_script() -> str:
+    checks = []
+    for key, required_value in REQUIRED_REGIONAL_ENV.items():
+        expected = shlex.quote(required_value)
+        checks.append(
+            f'test "${{{key}:-}}" = {expected} || {{ echo "{key} must be {required_value}, got: ${{{key}:-<empty>}}" >&2; exit 1; }}'
+        )
+    checks.extend(
+        [
+            'test -f /usr/share/zoneinfo/America/Los_Angeles || { echo "missing zoneinfo file for America/Los_Angeles" >&2; exit 1; }',
+            'tz_name="$(date +%Z 2>/dev/null || true)"',
+            'case "$tz_name" in PST|PDT) ;; *) echo "timezone check failed: expected PST or PDT, got: ${tz_name:-<empty>}" >&2; exit 1 ;; esac',
+            'tz_offset="$(date +%z 2>/dev/null || true)"',
+            'case "$tz_offset" in -0700|-0800) ;; *) echo "timezone offset check failed: expected -0700 or -0800, got: ${tz_offset:-<empty>}" >&2; exit 1 ;; esac',
+            'command -v locale >/dev/null 2>&1 || { echo "locale command is missing in the container" >&2; exit 1; }',
+            'locale -a >/tmp/cc-bridge-locale-a.out 2>/tmp/cc-bridge-locale-a.err || { cat /tmp/cc-bridge-locale-a.err >&2; exit 1; }',
+            'test ! -s /tmp/cc-bridge-locale-a.err || { cat /tmp/cc-bridge-locale-a.err >&2; exit 1; }',
+            "tr 'A-Z' 'a-z' </tmp/cc-bridge-locale-a.out | grep -Eq '^en_us\\.utf-?8$' || { echo \"en_US.UTF-8 locale is not installed in the container\" >&2; exit 1; }",
+            'locale >/tmp/cc-bridge-locale.out 2>/tmp/cc-bridge-locale.err || { cat /tmp/cc-bridge-locale.err >&2; exit 1; }',
+            'test ! -s /tmp/cc-bridge-locale.err || { cat /tmp/cc-bridge-locale.err >&2; exit 1; }',
+            "grep -Eq '^LANG=en_US\\.UTF-8$' /tmp/cc-bridge-locale.out || { cat /tmp/cc-bridge-locale.out >&2; exit 1; }",
+            "grep -Eq '^LANGUAGE=en_US:en$' /tmp/cc-bridge-locale.out || { cat /tmp/cc-bridge-locale.out >&2; exit 1; }",
+            "grep -Eq '^LC_ALL=en_US\\.UTF-8$' /tmp/cc-bridge-locale.out || { cat /tmp/cc-bridge-locale.out >&2; exit 1; }",
+            'locale charmap >/tmp/cc-bridge-charmap.out 2>/tmp/cc-bridge-charmap.err || { cat /tmp/cc-bridge-charmap.err >&2; exit 1; }',
+            'test ! -s /tmp/cc-bridge-charmap.err || { cat /tmp/cc-bridge-charmap.err >&2; exit 1; }',
+            "grep -Eq '^UTF-8$' /tmp/cc-bridge-charmap.out || { cat /tmp/cc-bridge-charmap.out >&2; exit 1; }",
+        ]
+    )
+    return "set -eu\n" + "\n".join(checks)
+
+
+def verify_runtime_regional_settings(settings: dict, run_command_func=default_run_command):
+    runtime_dir = settings["runtime_dir"]
+    docker_bin = os.environ.get("CC_BRIDGE_DOCKER_BIN", "docker")
+    validation_script = build_runtime_regional_validation_script()
+    run_checked([docker_bin, "exec", CONTAINER_NAME, "sh", "-lc", validation_script], runtime_dir, run_command_func)
+
+
 def _deploy_tag(
     settings: dict,
     *,
@@ -366,6 +504,7 @@ def _deploy_tag(
     previous_tag: str,
     run_command_func=default_run_command,
     healthcheck_func=perform_healthcheck,
+    runtime_validation_func=verify_runtime_regional_settings,
     now_func=timestamp_now,
     take_backup: bool = True,
 ):
@@ -374,9 +513,9 @@ def _deploy_tag(
     render_runtime_files(settings, target_tag)
     docker_compose(runtime_dir, ["down"], run_command_func)
     backup_path = backup_data_dir(runtime_dir, timestamp) if take_backup else None
-    docker_compose(runtime_dir, ["pull"], run_command_func)
     docker_compose(runtime_dir, ["up", "-d"], run_command_func)
     healthcheck_func(settings)
+    runtime_validation_func(settings, run_command_func=run_command_func)
     write_state(runtime_dir, target_tag, previous_tag, latest_tag, timestamp)
     return backup_path
 
@@ -387,6 +526,7 @@ def update_to_latest_release(
     fetch_tag_func=fetch_latest_release_tag,
     run_command_func=default_run_command,
     healthcheck_func=perform_healthcheck,
+    runtime_validation_func=verify_runtime_regional_settings,
     now_func=timestamp_now,
     sync_secrets_func=sync_secrets_repo,
 ):
@@ -396,6 +536,7 @@ def update_to_latest_release(
     current_tag = read_state_text(runtime_dir, "current-tag")
     previous_tag_before_update = read_state_text(runtime_dir, "previous-tag")
     latest_tag = fetch_tag_func()
+    prepare_runtime_image(settings, latest_tag, run_command_func=run_command_func)
     try:
         backup_path = _deploy_tag(
             settings,
@@ -404,11 +545,13 @@ def update_to_latest_release(
             previous_tag=current_tag,
             run_command_func=run_command_func,
             healthcheck_func=healthcheck_func,
+            runtime_validation_func=runtime_validation_func,
             now_func=now_func,
         )
     except Exception:
         if current_tag and current_tag != latest_tag:
             print(f"update failed, attempting automatic rollback to {current_tag}", file=sys.stderr)
+            prepare_runtime_image(settings, current_tag, run_command_func=run_command_func)
             _deploy_tag(
                 settings,
                 target_tag=current_tag,
@@ -416,6 +559,7 @@ def update_to_latest_release(
                 previous_tag=previous_tag_before_update,
                 run_command_func=run_command_func,
                 healthcheck_func=healthcheck_func,
+                runtime_validation_func=runtime_validation_func,
                 now_func=now_func,
                 take_backup=False,
             )
@@ -435,6 +579,7 @@ def install_runtime(
     fetch_tag_func=fetch_latest_release_tag,
     run_command_func=default_run_command,
     healthcheck_func=perform_healthcheck,
+    runtime_validation_func=verify_runtime_regional_settings,
     now_func=timestamp_now,
     sync_secrets_func=sync_secrets_repo,
 ):
@@ -443,6 +588,7 @@ def install_runtime(
         fetch_tag_func=fetch_tag_func,
         run_command_func=run_command_func,
         healthcheck_func=healthcheck_func,
+        runtime_validation_func=runtime_validation_func,
         now_func=now_func,
         sync_secrets_func=sync_secrets_func,
     )
@@ -454,6 +600,7 @@ def start_runtime(
     fetch_tag_func=fetch_latest_release_tag,
     run_command_func=default_run_command,
     healthcheck_func=perform_healthcheck,
+    runtime_validation_func=verify_runtime_regional_settings,
     now_func=timestamp_now,
     sync_secrets_func=sync_secrets_repo,
 ):
@@ -465,6 +612,7 @@ def start_runtime(
     latest_tag = fetch_tag_func()
 
     if not current_tag or not (runtime_dir / "compose.yaml").exists():
+        prepare_runtime_image(settings, latest_tag, run_command_func=run_command_func)
         backup_path = _deploy_tag(
             settings,
             target_tag=latest_tag,
@@ -472,6 +620,7 @@ def start_runtime(
             previous_tag=current_tag,
             run_command_func=run_command_func,
             healthcheck_func=healthcheck_func,
+            runtime_validation_func=runtime_validation_func,
             now_func=now_func,
         )
         return {
@@ -488,13 +637,20 @@ def start_runtime(
             fetch_tag_func=lambda: latest_tag,
             run_command_func=run_command_func,
             healthcheck_func=healthcheck_func,
+            runtime_validation_func=runtime_validation_func,
             now_func=now_func,
             sync_secrets_func=lambda root_dir: None,
         )
 
+    image_prepare_result = prepare_runtime_image(settings, current_tag, run_command_func=run_command_func)
+    render_runtime_files(settings, current_tag)
     write_latest_known_tag(runtime_dir, latest_tag)
-    docker_compose(runtime_dir, ["up", "-d"], run_command_func)
+    compose_args = ["up", "-d"]
+    if image_prepare_result["rebuilt"]:
+        compose_args.append("--force-recreate")
+    docker_compose(runtime_dir, compose_args, run_command_func)
     healthcheck_func(settings)
+    runtime_validation_func(settings, run_command_func=run_command_func)
     return {
         "current_tag": current_tag,
         "previous_tag": previous_tag,
@@ -530,6 +686,7 @@ def rollback_to_previous_release(
     root_dir: Path,
     run_command_func=default_run_command,
     healthcheck_func=perform_healthcheck,
+    runtime_validation_func=verify_runtime_regional_settings,
     now_func=timestamp_now,
     sync_secrets_func=sync_secrets_repo,
 ):
@@ -541,6 +698,7 @@ def rollback_to_previous_release(
     latest_tag = read_state_text(runtime_dir, "latest-known-tag") or current_tag or previous_tag
     if not previous_tag:
         raise ValueError("no previous-tag state is available for rollback")
+    prepare_runtime_image(settings, previous_tag, run_command_func=run_command_func)
     _deploy_tag(
         settings,
         target_tag=previous_tag,
@@ -548,6 +706,7 @@ def rollback_to_previous_release(
         previous_tag=current_tag,
         run_command_func=run_command_func,
         healthcheck_func=healthcheck_func,
+        runtime_validation_func=runtime_validation_func,
         now_func=now_func,
     )
     return {

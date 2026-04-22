@@ -24,7 +24,7 @@ class RuleEffectivenessEvalTests(unittest.TestCase):
     def test_makefile_exposes_eval_rules_target(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
         self.assertIn(
-            ".PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\\:list restore backups\\:restore logs rules-build rules\\:build rules-sync rules\\:sync skills-link skills\\:link skills\\:upgrade mcp-sync mcp\\:sync mcp-prepare mcp\\:prepare tools-sync tools\\:sync terminal-sync terminal\\:sync claude-hooks-sync claude\\:hooks\\:sync codex-hooks-sync codex\\:hooks\\:sync dry-run clean-logs offline eval-rules secrets-check secrets\\:check instructions-check instructions\\:check cc-bridge-deploy cc-bridge-update cc-bridge-seed cc-bridge-rollback cc-bridge-status",
+            ".PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\\:list restore backups\\:restore logs rules-build rules\\:build rules-sync rules\\:sync skills-link skills\\:link skills\\:upgrade mcp-sync mcp\\:sync mcp-prepare mcp\\:prepare tools-sync tools\\:sync terminal-sync terminal\\:sync claude-hooks-sync claude\\:hooks\\:sync codex-hooks-sync codex\\:hooks\\:sync dry-run clean-logs offline eval-rules secrets-check secrets\\:check instructions-check instructions\\:check cc-bridge-install cc-bridge-start cc-bridge-stop cc-bridge-deploy cc-bridge-update cc-bridge-seed cc-bridge-rollback cc-bridge-status",
             makefile,
         )
         self.assertIn("\neval-rules:\n\t@python3 ./scripts/evals/run_rule_effectiveness_eval.py\n", makefile)

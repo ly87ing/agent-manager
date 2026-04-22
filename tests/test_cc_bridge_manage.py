@@ -52,6 +52,165 @@ class CcBridgeManageTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "DATABASE_DRIVER"):
                 cc_bridge_manage.load_runtime_config(root)
 
+    def test_load_runtime_config_defaults_to_us_regional_settings(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            secrets_dir = root / "secrets"
+            secrets_dir.mkdir()
+            (secrets_dir / "cc-bridge.env").write_text(
+                (
+                    "CC_BRIDGE_RUNTIME_DIR=/tmp/runtime\n"
+                    "DATABASE_DRIVER=sqlite\n"
+                    "ADMIN_PASSWORD=secret\n"
+                ),
+                encoding="utf-8",
+            )
+
+            settings = cc_bridge_manage.load_runtime_config(root)
+
+            self.assertEqual(settings["app_env"]["TZ"], "America/Los_Angeles")
+            self.assertEqual(settings["app_env"]["LANG"], "en_US.UTF-8")
+            self.assertEqual(settings["app_env"]["LANGUAGE"], "en_US:en")
+            self.assertEqual(settings["app_env"]["LC_ALL"], "en_US.UTF-8")
+
+    def test_load_runtime_config_rejects_non_us_regional_override(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            secrets_dir = root / "secrets"
+            secrets_dir.mkdir()
+            (secrets_dir / "cc-bridge.env").write_text(
+                (
+                    "CC_BRIDGE_RUNTIME_DIR=/tmp/runtime\n"
+                    "DATABASE_DRIVER=sqlite\n"
+                    "TZ=UTC\n"
+                    "ADMIN_PASSWORD=secret\n"
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "TZ must be America/Los_Angeles"):
+                cc_bridge_manage.load_runtime_config(root)
+
+    def test_render_runtime_files_uses_managed_us_image_ref(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_dir = Path(temp_dir) / "runtime"
+            settings = {
+                "runtime_dir": runtime_dir,
+                "server_port": "5674",
+                "app_env": {
+                    "SERVER_HOST": "0.0.0.0",
+                    "SERVER_PORT": "5674",
+                    "DATABASE_DRIVER": "sqlite",
+                    "LOG_LEVEL": "info",
+                    "ADMIN_PASSWORD": "secret",
+                    "TZ": "America/Los_Angeles",
+                    "LANG": "en_US.UTF-8",
+                    "LANGUAGE": "en_US:en",
+                    "LC_ALL": "en_US.UTF-8",
+                },
+            }
+
+            cc_bridge_manage.render_runtime_files(settings, "v1.8.3")
+
+            compose_yaml = (runtime_dir / "compose.yaml").read_text(encoding="utf-8")
+            self.assertIn('image: "agent-manager/cc-bridge-us:v1.8.3"', compose_yaml)
+            self.assertNotIn('image: "ghcr.io/mamoworks/cc-bridge:v1.8.3"', compose_yaml)
+
+    def test_prepare_runtime_image_pulls_upstream_and_builds_managed_image(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            runtime_dir = root / "runtime"
+            settings = {
+                "root_dir": root,
+                "runtime_dir": runtime_dir,
+                "image_repo": "ghcr.io/mamoworks/cc-bridge",
+            }
+            calls = []
+
+            def fake_run_command(argv, cwd=None):
+                calls.append((tuple(argv), None if cwd is None else str(cwd)))
+                return 0
+
+            result = cc_bridge_manage.prepare_runtime_image(
+                settings,
+                "v1.8.3",
+                run_command_func=fake_run_command,
+            )
+
+            context_dir = cc_bridge_manage.cc_bridge_image_build_context()
+            dockerfile_path = context_dir / "Dockerfile"
+            self.assertEqual(
+                result,
+                {
+                    "image_ref": "agent-manager/cc-bridge-us:v1.8.3",
+                    "rebuilt": True,
+                },
+            )
+            self.assertEqual(
+                calls,
+                [
+                    (("docker", "pull", "ghcr.io/mamoworks/cc-bridge:v1.8.3"), str(root)),
+                    (
+                        (
+                            "docker",
+                            "build",
+                            "--pull",
+                            "--build-arg",
+                            "CC_BRIDGE_UPSTREAM_IMAGE=ghcr.io/mamoworks/cc-bridge:v1.8.3",
+                            "-t",
+                            "agent-manager/cc-bridge-us:v1.8.3",
+                            "-f",
+                            str(dockerfile_path),
+                            str(context_dir),
+                        ),
+                        str(root),
+                    ),
+                ],
+            )
+
+    def test_prepare_runtime_image_skips_build_when_context_and_tag_are_unchanged(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            runtime_dir = root / "runtime"
+            settings = {
+                "root_dir": root,
+                "runtime_dir": runtime_dir,
+                "image_repo": "ghcr.io/mamoworks/cc-bridge",
+            }
+            cc_bridge_manage.ensure_runtime_dirs(runtime_dir)
+            fingerprint_path = runtime_dir / "state" / "managed-image-v1.8.3.fingerprint"
+            fingerprint_path.write_text(
+                cc_bridge_manage.compute_managed_image_fingerprint(settings, "v1.8.3") + "\n",
+                encoding="utf-8",
+            )
+            calls = []
+
+            def fake_run_command(argv, cwd=None):
+                calls.append((tuple(argv), None if cwd is None else str(cwd)))
+                if tuple(argv) == ("docker", "image", "inspect", "agent-manager/cc-bridge-us:v1.8.3"):
+                    return subprocess.CompletedProcess(argv, 0, stdout="[]", stderr="")
+                raise AssertionError(f"unexpected command: {argv!r}")
+
+            result = cc_bridge_manage.prepare_runtime_image(
+                settings,
+                "v1.8.3",
+                run_command_func=fake_run_command,
+            )
+
+            self.assertEqual(
+                result,
+                {
+                    "image_ref": "agent-manager/cc-bridge-us:v1.8.3",
+                    "rebuilt": False,
+                },
+            )
+            self.assertEqual(
+                calls,
+                [
+                    (("docker", "image", "inspect", "agent-manager/cc-bridge-us:v1.8.3"), str(root)),
+                ],
+            )
+
     def test_perform_healthcheck_retries_transient_connection_failures(self):
         attempts = []
         sleep_calls = []
@@ -147,6 +306,7 @@ class CcBridgeManageTests(unittest.TestCase):
                 fetch_tag_func=lambda: "v1.8.3",
                 run_command_func=fake_run_command,
                 healthcheck_func=lambda settings: None,
+                runtime_validation_func=lambda settings, run_command_func=None: None,
                 now_func=lambda: "20260421-120000",
                 sync_secrets_func=lambda root_dir: None,
             )
@@ -166,8 +326,23 @@ class CcBridgeManageTests(unittest.TestCase):
             self.assertEqual(
                 calls,
                 [
+                    (("docker", "pull", "ghcr.io/mamoworks/cc-bridge:v1.8.3"), str(root)),
+                    (
+                        (
+                            "docker",
+                            "build",
+                            "--pull",
+                            "--build-arg",
+                            "CC_BRIDGE_UPSTREAM_IMAGE=ghcr.io/mamoworks/cc-bridge:v1.8.3",
+                            "-t",
+                            "agent-manager/cc-bridge-us:v1.8.3",
+                            "-f",
+                            str(cc_bridge_manage.cc_bridge_image_build_context() / "Dockerfile"),
+                            str(cc_bridge_manage.cc_bridge_image_build_context()),
+                        ),
+                        str(root),
+                    ),
                     (("docker", "compose", "-f", "compose.yaml", "down"), str(runtime_dir)),
-                    (("docker", "compose", "-f", "compose.yaml", "pull"), str(runtime_dir)),
                     (("docker", "compose", "-f", "compose.yaml", "up", "-d"), str(runtime_dir)),
                 ],
             )
@@ -199,6 +374,7 @@ class CcBridgeManageTests(unittest.TestCase):
                 fetch_tag_func=lambda: "v1.8.3",
                 run_command_func=fake_run_command,
                 healthcheck_func=lambda settings: None,
+                runtime_validation_func=lambda settings, run_command_func=None: None,
                 now_func=lambda: "20260422-090000",
                 sync_secrets_func=lambda root_dir: None,
             )
@@ -214,8 +390,23 @@ class CcBridgeManageTests(unittest.TestCase):
             self.assertEqual(
                 calls,
                 [
+                    (("docker", "pull", "ghcr.io/mamoworks/cc-bridge:v1.8.3"), str(root)),
+                    (
+                        (
+                            "docker",
+                            "build",
+                            "--pull",
+                            "--build-arg",
+                            "CC_BRIDGE_UPSTREAM_IMAGE=ghcr.io/mamoworks/cc-bridge:v1.8.3",
+                            "-t",
+                            "agent-manager/cc-bridge-us:v1.8.3",
+                            "-f",
+                            str(cc_bridge_manage.cc_bridge_image_build_context() / "Dockerfile"),
+                            str(cc_bridge_manage.cc_bridge_image_build_context()),
+                        ),
+                        str(root),
+                    ),
                     (("docker", "compose", "-f", "compose.yaml", "down"), str(runtime_dir)),
-                    (("docker", "compose", "-f", "compose.yaml", "pull"), str(runtime_dir)),
                     (("docker", "compose", "-f", "compose.yaml", "up", "-d"), str(runtime_dir)),
                 ],
             )
@@ -253,6 +444,7 @@ class CcBridgeManageTests(unittest.TestCase):
                 fetch_tag_func=lambda: "v1.8.3",
                 run_command_func=fake_run_command,
                 healthcheck_func=lambda settings: None,
+                runtime_validation_func=lambda settings, run_command_func=None: None,
                 now_func=lambda: "20260422-090500",
                 sync_secrets_func=lambda root_dir: None,
             )
@@ -263,13 +455,96 @@ class CcBridgeManageTests(unittest.TestCase):
             self.assertEqual(
                 calls,
                 [
+                    (("docker", "pull", "ghcr.io/mamoworks/cc-bridge:v1.8.3"), str(root)),
+                    (
+                        (
+                            "docker",
+                            "build",
+                            "--pull",
+                            "--build-arg",
+                            "CC_BRIDGE_UPSTREAM_IMAGE=ghcr.io/mamoworks/cc-bridge:v1.8.3",
+                            "-t",
+                            "agent-manager/cc-bridge-us:v1.8.3",
+                            "-f",
+                            str(cc_bridge_manage.cc_bridge_image_build_context() / "Dockerfile"),
+                            str(cc_bridge_manage.cc_bridge_image_build_context()),
+                        ),
+                        str(root),
+                    ),
                     (("docker", "compose", "-f", "compose.yaml", "down"), str(runtime_dir)),
-                    (("docker", "compose", "-f", "compose.yaml", "pull"), str(runtime_dir)),
                     (("docker", "compose", "-f", "compose.yaml", "up", "-d"), str(runtime_dir)),
                 ],
             )
 
-    def test_start_runtime_uses_compose_up_when_already_on_latest_release(self):
+    def test_start_runtime_uses_existing_managed_image_when_already_current(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            runtime_dir = root / "runtime"
+            secrets_dir = root / "secrets"
+            secrets_dir.mkdir()
+            (secrets_dir / "cc-bridge.env").write_text(
+                (
+                    f"CC_BRIDGE_RUNTIME_DIR={runtime_dir}\n"
+                    "SERVER_PORT=5674\n"
+                    "DATABASE_DRIVER=sqlite\n"
+                    "ADMIN_PASSWORD=secret\n"
+                ),
+                encoding="utf-8",
+            )
+            runtime_dir.mkdir(parents=True)
+            (runtime_dir / "compose.yaml").write_text("services:\n", encoding="utf-8")
+            (runtime_dir / "state").mkdir(parents=True)
+            (runtime_dir / "state" / "current-tag").write_text("v1.8.3\n", encoding="utf-8")
+            (runtime_dir / "state" / "previous-tag").write_text("v1.8.2\n", encoding="utf-8")
+            (runtime_dir / "state" / "managed-image-v1.8.3.fingerprint").write_text(
+                cc_bridge_manage.compute_managed_image_fingerprint(
+                    {
+                        "root_dir": root,
+                        "runtime_dir": runtime_dir,
+                        "image_repo": "ghcr.io/mamoworks/cc-bridge",
+                    },
+                    "v1.8.3",
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            calls = []
+
+            def fake_run_command(argv, cwd=None):
+                calls.append((tuple(argv), None if cwd is None else str(cwd)))
+                if tuple(argv) == ("docker", "image", "inspect", "agent-manager/cc-bridge-us:v1.8.3"):
+                    return subprocess.CompletedProcess(argv, 0, stdout="[]", stderr="")
+                return 0
+
+            result = cc_bridge_manage.start_runtime(
+                root_dir=root,
+                fetch_tag_func=lambda: "v1.8.3",
+                run_command_func=fake_run_command,
+                healthcheck_func=lambda settings: None,
+                runtime_validation_func=lambda settings, run_command_func=None: None,
+                sync_secrets_func=lambda root_dir: None,
+            )
+
+            self.assertEqual(result["current_tag"], "v1.8.3")
+            self.assertEqual(result["latest_tag"], "v1.8.3")
+            self.assertIn(
+                'TZ="America/Los_Angeles"',
+                (runtime_dir / ".env.rendered").read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                (runtime_dir / "state" / "latest-known-tag").read_text(encoding="utf-8"),
+                "v1.8.3\n",
+            )
+            self.assertEqual(
+                calls,
+                [
+                    (("docker", "image", "inspect", "agent-manager/cc-bridge-us:v1.8.3"), str(root)),
+                    (("docker", "compose", "-f", "compose.yaml", "up", "-d"), str(runtime_dir)),
+                ],
+            )
+
+    def test_start_runtime_force_recreates_when_current_managed_image_needs_rebuild(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             runtime_dir = root / "runtime"
@@ -301,18 +576,150 @@ class CcBridgeManageTests(unittest.TestCase):
                 fetch_tag_func=lambda: "v1.8.3",
                 run_command_func=fake_run_command,
                 healthcheck_func=lambda settings: None,
+                runtime_validation_func=lambda settings, run_command_func=None: None,
                 sync_secrets_func=lambda root_dir: None,
             )
 
             self.assertEqual(result["current_tag"], "v1.8.3")
             self.assertEqual(result["latest_tag"], "v1.8.3")
             self.assertEqual(
-                (runtime_dir / "state" / "latest-known-tag").read_text(encoding="utf-8"),
-                "v1.8.3\n",
+                calls,
+                [
+                    (("docker", "pull", "ghcr.io/mamoworks/cc-bridge:v1.8.3"), str(root)),
+                    (
+                        (
+                            "docker",
+                            "build",
+                            "--pull",
+                            "--build-arg",
+                            "CC_BRIDGE_UPSTREAM_IMAGE=ghcr.io/mamoworks/cc-bridge:v1.8.3",
+                            "-t",
+                            "agent-manager/cc-bridge-us:v1.8.3",
+                            "-f",
+                            str(cc_bridge_manage.cc_bridge_image_build_context() / "Dockerfile"),
+                            str(cc_bridge_manage.cc_bridge_image_build_context()),
+                        ),
+                        str(root),
+                    ),
+                    (("docker", "compose", "-f", "compose.yaml", "up", "-d", "--force-recreate"), str(runtime_dir)),
+                ],
             )
+
+    def test_update_to_latest_release_fails_close_before_compose_when_managed_image_build_fails(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            runtime_dir = root / "runtime"
+            secrets_dir = root / "secrets"
+            secrets_dir.mkdir()
+            (secrets_dir / "cc-bridge.env").write_text(
+                (
+                    f"CC_BRIDGE_RUNTIME_DIR={runtime_dir}\n"
+                    "SERVER_PORT=5674\n"
+                    "DATABASE_DRIVER=sqlite\n"
+                    "ADMIN_PASSWORD=secret\n"
+                ),
+                encoding="utf-8",
+            )
+            (runtime_dir / "state").mkdir(parents=True)
+            (runtime_dir / "state" / "current-tag").write_text("v1.8.2\n", encoding="utf-8")
+            calls = []
+
+            def fake_run_command(argv, cwd=None):
+                calls.append((tuple(argv), None if cwd is None else str(cwd)))
+                if tuple(argv[:2]) == ("docker", "build"):
+                    return subprocess.CompletedProcess(argv, 1, stdout="", stderr="docker build failed\n")
+                return 0
+
+            with self.assertRaisesRegex(RuntimeError, "docker build failed"):
+                cc_bridge_manage.update_to_latest_release(
+                    root_dir=root,
+                    fetch_tag_func=lambda: "v1.8.3",
+                    run_command_func=fake_run_command,
+                    healthcheck_func=lambda settings: None,
+                    runtime_validation_func=lambda settings, run_command_func=None: None,
+                    sync_secrets_func=lambda root_dir: None,
+                )
+
             self.assertEqual(
                 calls,
                 [
+                    (("docker", "pull", "ghcr.io/mamoworks/cc-bridge:v1.8.3"), str(root)),
+                    (
+                        (
+                            "docker",
+                            "build",
+                            "--pull",
+                            "--build-arg",
+                            "CC_BRIDGE_UPSTREAM_IMAGE=ghcr.io/mamoworks/cc-bridge:v1.8.3",
+                            "-t",
+                            "agent-manager/cc-bridge-us:v1.8.3",
+                            "-f",
+                            str(cc_bridge_manage.cc_bridge_image_build_context() / "Dockerfile"),
+                            str(cc_bridge_manage.cc_bridge_image_build_context()),
+                        ),
+                        str(root),
+                    ),
+                ],
+            )
+
+    def test_rollback_to_previous_release_builds_managed_image_before_redeploy(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            runtime_dir = root / "runtime"
+            secrets_dir = root / "secrets"
+            secrets_dir.mkdir()
+            (secrets_dir / "cc-bridge.env").write_text(
+                (
+                    f"CC_BRIDGE_RUNTIME_DIR={runtime_dir}\n"
+                    "SERVER_PORT=5674\n"
+                    "DATABASE_DRIVER=sqlite\n"
+                    "ADMIN_PASSWORD=secret\n"
+                ),
+                encoding="utf-8",
+            )
+            (runtime_dir / "data").mkdir(parents=True)
+            (runtime_dir / "data" / "claude-code-gateway.db").write_text("sqlite\n", encoding="utf-8")
+            (runtime_dir / "state").mkdir(parents=True)
+            (runtime_dir / "state" / "current-tag").write_text("v1.8.3\n", encoding="utf-8")
+            (runtime_dir / "state" / "previous-tag").write_text("v1.8.2\n", encoding="utf-8")
+            (runtime_dir / "state" / "latest-known-tag").write_text("v1.8.3\n", encoding="utf-8")
+            calls = []
+
+            def fake_run_command(argv, cwd=None):
+                calls.append((tuple(argv), None if cwd is None else str(cwd)))
+                return 0
+
+            result = cc_bridge_manage.rollback_to_previous_release(
+                root_dir=root,
+                run_command_func=fake_run_command,
+                healthcheck_func=lambda settings: None,
+                runtime_validation_func=lambda settings, run_command_func=None: None,
+                now_func=lambda: "20260422-120000",
+                sync_secrets_func=lambda root_dir: None,
+            )
+
+            self.assertEqual(result["current_tag"], "v1.8.2")
+            self.assertEqual(result["previous_tag"], "v1.8.3")
+            self.assertEqual(
+                calls,
+                [
+                    (("docker", "pull", "ghcr.io/mamoworks/cc-bridge:v1.8.2"), str(root)),
+                    (
+                        (
+                            "docker",
+                            "build",
+                            "--pull",
+                            "--build-arg",
+                            "CC_BRIDGE_UPSTREAM_IMAGE=ghcr.io/mamoworks/cc-bridge:v1.8.2",
+                            "-t",
+                            "agent-manager/cc-bridge-us:v1.8.2",
+                            "-f",
+                            str(cc_bridge_manage.cc_bridge_image_build_context() / "Dockerfile"),
+                            str(cc_bridge_manage.cc_bridge_image_build_context()),
+                        ),
+                        str(root),
+                    ),
+                    (("docker", "compose", "-f", "compose.yaml", "down"), str(runtime_dir)),
                     (("docker", "compose", "-f", "compose.yaml", "up", "-d"), str(runtime_dir)),
                 ],
             )
@@ -354,6 +761,27 @@ class CcBridgeManageTests(unittest.TestCase):
                 [
                     (("docker", "compose", "-f", "compose.yaml", "stop"), str(runtime_dir)),
                 ],
+            )
+
+    def test_verify_runtime_regional_settings_rejects_missing_en_us_locale(self):
+        runtime_dir = Path("/tmp/runtime")
+
+        def fake_run_command(argv, cwd=None):
+            self.assertEqual(
+                tuple(argv[:5]),
+                ("docker", "exec", "cc-bridge", "sh", "-lc"),
+            )
+            return subprocess.CompletedProcess(
+                argv,
+                1,
+                stdout="",
+                stderr="en_US.UTF-8 locale is not installed in the container\n",
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "en_US.UTF-8 locale is not installed"):
+            cc_bridge_manage.verify_runtime_regional_settings(
+                {"runtime_dir": runtime_dir},
+                run_command_func=fake_run_command,
             )
 
     def test_status_report_includes_runtime_metadata_and_update_available(self):

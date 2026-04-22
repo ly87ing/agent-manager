@@ -132,6 +132,9 @@ SECRETS_REPO_URL=https://example.com/your-secrets.git make update
 - `make cc-bridge-seed`: 从 `secrets/cc-bridge.accounts.json` 和 `secrets/cc-bridge.api-tokens.json` 导入账号池与网关 token。
 - `make cc-bridge-rollback`: 回滚到最近一次成功部署前记录的上一个 tag。
 - `make cc-bridge-status`: 输出当前 tag、最新稳定 tag、容器主进程 PID、访问 URL、端口、Docker 运行状态，以及 Claude Code 的接入环境变量示例。
+- `cc-bridge` 实际运行的不是裸上游镜像，而是基于显式 release tag 生成的美国化派生镜像，用来强制提供 `America/Los_Angeles` 时区和 `en_US.UTF-8` locale。
+- `cc-bridge` 只有在上游 tag、本地派生镜像构建上下文或本地派生镜像缓存发生变化时才会重新 build；没有变化时会直接复用现有派生镜像。
+- `cc-bridge` 运行时默认强制使用 `America/Los_Angeles` 时区和 `en_US.UTF-8` 美国英语 locale；如果容器内实际做不到这些设置，`install/start/update/rollback` 会直接失败。
 - `cc-bridge` 数据目录固定走宿主机挂载，不使用 Docker named volume；默认挂载目标是运行目录下的 `data/` 到容器 `/app/data`。
 - 具体文件布局、secret 格式和运行命令见 [docs/CC-BRIDGE-MANAGEMENT.md](./docs/CC-BRIDGE-MANAGEMENT.md)。
 
