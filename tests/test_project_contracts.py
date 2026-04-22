@@ -58,11 +58,26 @@ class ProjectContractTests(unittest.TestCase):
 
     def test_makefile_exposes_cc_bridge_runtime_targets(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertIn("cc-bridge-install", makefile)
+        self.assertIn("cc-bridge-start", makefile)
+        self.assertIn("cc-bridge-stop", makefile)
         self.assertIn("cc-bridge-deploy", makefile)
         self.assertIn("cc-bridge-update", makefile)
         self.assertIn("cc-bridge-seed", makefile)
         self.assertIn("cc-bridge-rollback", makefile)
         self.assertIn("cc-bridge-status", makefile)
+        self.assertIn(
+            "\ncc-bridge-install:\n\t@python3 ./scripts/cc-bridge/manage.py install\n",
+            makefile,
+        )
+        self.assertIn(
+            "\ncc-bridge-start:\n\t@python3 ./scripts/cc-bridge/manage.py start\n",
+            makefile,
+        )
+        self.assertIn(
+            "\ncc-bridge-stop:\n\t@python3 ./scripts/cc-bridge/manage.py stop\n",
+            makefile,
+        )
         self.assertIn(
             "\ncc-bridge-deploy:\n\t@python3 ./scripts/cc-bridge/manage.py deploy\n",
             makefile,
@@ -160,6 +175,9 @@ class ProjectContractTests(unittest.TestCase):
             (script_dir / "manage.py").chmod(0o755)
 
             for goal in (
+                "cc-bridge-install",
+                "cc-bridge-start",
+                "cc-bridge-stop",
                 "cc-bridge-deploy",
                 "cc-bridge-update",
                 "cc-bridge-seed",
@@ -177,7 +195,7 @@ class ProjectContractTests(unittest.TestCase):
 
             self.assertEqual(
                 call_log.read_text(encoding="utf-8").splitlines(),
-                ["deploy", "update", "seed", "rollback", "status"],
+                ["install", "start", "stop", "deploy", "update", "seed", "rollback", "status"],
             )
 
     def test_ci_smoke_script_exercises_safe_preview_flows(self):
@@ -346,10 +364,21 @@ class ProjectContractTests(unittest.TestCase):
 
     def test_readme_documents_cc_bridge_runtime_workflow(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("make cc-bridge-install", readme)
+        self.assertIn("make cc-bridge-start", readme)
+        self.assertIn("make cc-bridge-stop", readme)
         self.assertIn("make cc-bridge-deploy", readme)
         self.assertIn("make cc-bridge-update", readme)
         self.assertIn("make cc-bridge-rollback", readme)
+        self.assertIn("启动前会先检查最新稳定版本", readme)
         self.assertIn("docs/CC-BRIDGE-MANAGEMENT.md", readme)
+
+    def test_cc_bridge_management_doc_covers_install_start_stop_and_auto_update_start(self):
+        doc = (ROOT / "docs" / "CC-BRIDGE-MANAGEMENT.md").read_text(encoding="utf-8")
+        self.assertIn("make cc-bridge-install", doc)
+        self.assertIn("make cc-bridge-start", doc)
+        self.assertIn("make cc-bridge-stop", doc)
+        self.assertIn("启动前会先检查最新稳定版本", doc)
 
     def test_repo_root_agents_guidance_covers_setup_tests_done_when_and_generated_boundaries(self):
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")

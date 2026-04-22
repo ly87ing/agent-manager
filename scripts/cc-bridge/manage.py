@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import subprocess
 import sys
 import tarfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib import error, request
@@ -23,6 +25,7 @@ from src.template_utils import load_env_file, render_template
 DEFAULT_RELEASE_API_URL = "https://api.github.com/repos/MamoWorks/cc-bridge/releases/latest"
 DEFAULT_IMAGE_REPO = "ghcr.io/mamoworks/cc-bridge"
 DEFAULT_RUNTIME_DIR = Path.home() / "services" / "cc-bridge"
+CONTAINER_NAME = "cc-bridge"
 COMPOSE_TEMPLATE = """services:
   cc-bridge:
     image: "${CC_BRIDGE_IMAGE_REF}"
@@ -168,6 +171,11 @@ def write_state(runtime_dir: Path, current_tag: str, previous_tag: str, latest_t
     write_text(state_dir / "last-updated-at", f"{timestamp}\n")
 
 
+def write_latest_known_tag(runtime_dir: Path, latest_tag: str):
+    if latest_tag:
+        write_text(runtime_dir / "state" / "latest-known-tag", f"{latest_tag}\n")
+
+
 def render_runtime_files(settings: dict, tag: str):
     runtime_dir = settings["runtime_dir"]
     ensure_runtime_dirs(runtime_dir)
@@ -222,6 +230,31 @@ def run_checked(argv: list[str], cwd: Path, run_command_func=default_run_command
 def docker_compose(runtime_dir: Path, args: list[str], run_command_func=default_run_command) -> str:
     docker_bin = os.environ.get("CC_BRIDGE_DOCKER_BIN", "docker")
     return run_checked([docker_bin, "compose", "-f", "compose.yaml", *args], runtime_dir, run_command_func)
+
+
+def docker_inspect_container(runtime_dir: Path, run_command_func=default_run_command) -> dict:
+    docker_bin = os.environ.get("CC_BRIDGE_DOCKER_BIN", "docker")
+    try:
+        raw = run_checked([docker_bin, "inspect", CONTAINER_NAME], runtime_dir, run_command_func)
+    except Exception:
+        return {"container_status": "not_created", "pid": 0}
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"container_status": "unknown", "pid": 0}
+
+    if not isinstance(payload, list) or not payload or not isinstance(payload[0], dict):
+        return {"container_status": "unknown", "pid": 0}
+
+    state = payload[0].get("State", {})
+    status = str(state.get("Status", "unknown")).strip() or "unknown"
+    pid_raw = state.get("Pid", 0)
+    try:
+        pid = int(pid_raw)
+    except (TypeError, ValueError):
+        pid = 0
+    return {"container_status": status, "pid": pid}
 
 
 def sync_secrets_repo(root_dir: Path, run_command_func=default_run_command):
@@ -295,15 +328,34 @@ def http_request_ok(
         raise RuntimeError(f"request failed for {method} {url}: {exc.reason}") from exc
 
 
-def perform_healthcheck(settings: dict):
+def perform_healthcheck(
+    settings: dict,
+    *,
+    attempts: int = 10,
+    delay_seconds: float = 1.0,
+    sleep_func=time.sleep,
+    request_ok_func=http_request_ok,
+    request_json_func=http_request_json,
+):
     base_url = f"http://127.0.0.1:{settings['server_port']}"
-    http_request_ok("GET", f"{base_url}/login", timeout=10)
-    http_request_json(
-        "GET",
-        f"{base_url}/admin/dashboard",
-        bearer_token=settings["admin_password"],
-        timeout=10,
-    )
+    last_error = None
+    for attempt_index in range(max(attempts, 1)):
+        try:
+            request_ok_func("GET", f"{base_url}/login", timeout=10)
+            request_json_func(
+                "GET",
+                f"{base_url}/admin/dashboard",
+                bearer_token=settings["admin_password"],
+                timeout=10,
+            )
+            return
+        except (RuntimeError, http.client.HTTPException, OSError) as exc:
+            last_error = exc
+            if attempt_index + 1 >= max(attempts, 1):
+                raise
+            sleep_func(delay_seconds)
+    if last_error is not None:
+        raise last_error
 
 
 def _deploy_tag(
@@ -374,6 +426,102 @@ def update_to_latest_release(
         "latest_tag": latest_tag,
         "backup_path": None if backup_path is None else str(backup_path),
         "runtime_dir": str(runtime_dir),
+    }
+
+
+def install_runtime(
+    *,
+    root_dir: Path,
+    fetch_tag_func=fetch_latest_release_tag,
+    run_command_func=default_run_command,
+    healthcheck_func=perform_healthcheck,
+    now_func=timestamp_now,
+    sync_secrets_func=sync_secrets_repo,
+):
+    return update_to_latest_release(
+        root_dir=root_dir,
+        fetch_tag_func=fetch_tag_func,
+        run_command_func=run_command_func,
+        healthcheck_func=healthcheck_func,
+        now_func=now_func,
+        sync_secrets_func=sync_secrets_func,
+    )
+
+
+def start_runtime(
+    *,
+    root_dir: Path,
+    fetch_tag_func=fetch_latest_release_tag,
+    run_command_func=default_run_command,
+    healthcheck_func=perform_healthcheck,
+    now_func=timestamp_now,
+    sync_secrets_func=sync_secrets_repo,
+):
+    sync_secrets_func(root_dir)
+    settings = load_runtime_config(root_dir)
+    runtime_dir = settings["runtime_dir"]
+    current_tag = read_state_text(runtime_dir, "current-tag")
+    previous_tag = read_state_text(runtime_dir, "previous-tag")
+    latest_tag = fetch_tag_func()
+
+    if not current_tag or not (runtime_dir / "compose.yaml").exists():
+        backup_path = _deploy_tag(
+            settings,
+            target_tag=latest_tag,
+            latest_tag=latest_tag,
+            previous_tag=current_tag,
+            run_command_func=run_command_func,
+            healthcheck_func=healthcheck_func,
+            now_func=now_func,
+        )
+        return {
+            "current_tag": latest_tag,
+            "previous_tag": current_tag,
+            "latest_tag": latest_tag,
+            "backup_path": None if backup_path is None else str(backup_path),
+            "runtime_dir": str(runtime_dir),
+        }
+
+    if current_tag != latest_tag:
+        return update_to_latest_release(
+            root_dir=root_dir,
+            fetch_tag_func=lambda: latest_tag,
+            run_command_func=run_command_func,
+            healthcheck_func=healthcheck_func,
+            now_func=now_func,
+            sync_secrets_func=lambda root_dir: None,
+        )
+
+    write_latest_known_tag(runtime_dir, latest_tag)
+    docker_compose(runtime_dir, ["up", "-d"], run_command_func)
+    healthcheck_func(settings)
+    return {
+        "current_tag": current_tag,
+        "previous_tag": previous_tag,
+        "latest_tag": latest_tag,
+        "runtime_dir": str(runtime_dir),
+    }
+
+
+def stop_runtime(
+    *,
+    root_dir: Path,
+    run_command_func=default_run_command,
+    sync_secrets_func=sync_secrets_repo,
+):
+    sync_secrets_func(root_dir)
+    settings = load_runtime_config(root_dir)
+    runtime_dir = settings["runtime_dir"]
+    if not (runtime_dir / "compose.yaml").exists():
+        return {
+            "runtime_dir": str(runtime_dir),
+            "stopped": False,
+            "reason": "compose.yaml not rendered yet",
+        }
+    docker_compose(runtime_dir, ["stop"], run_command_func)
+    return {
+        "runtime_dir": str(runtime_dir),
+        "stopped": True,
     }
 
 
@@ -486,15 +634,32 @@ def seed_runtime(root_dir: Path):
     }
 
 
-def build_status_report(runtime_dir: Path, latest_tag: str, docker_ps_output: str) -> dict:
+def build_status_report(
+    runtime_dir: Path,
+    latest_tag: str,
+    docker_ps_output: str,
+    *,
+    server_port: str,
+    container_status: str,
+    pid: int,
+) -> dict:
     current_tag = read_state_text(runtime_dir, "current-tag")
     previous_tag = read_state_text(runtime_dir, "previous-tag")
     cleaned_status = docker_ps_output.strip()
+    base_url = f"http://127.0.0.1:{server_port}"
     return {
         "current_tag": current_tag,
         "previous_tag": previous_tag,
         "latest_tag": latest_tag,
         "update_available": bool(current_tag and latest_tag and current_tag != latest_tag),
+        "runtime_dir": str(runtime_dir),
+        "container_name": CONTAINER_NAME,
+        "container_status": container_status,
+        "pid": pid,
+        "port": str(server_port),
+        "base_url": base_url,
+        "login_url": f"{base_url}/login",
+        "admin_url": f"{base_url}/admin/dashboard",
         "docker_status": cleaned_status,
     }
 
@@ -507,19 +672,32 @@ def fetch_latest_tag_for_status(runtime_dir: Path) -> str:
         return cached or "unknown"
 
 
-def collect_status(root_dir: Path, run_command_func=default_run_command) -> dict:
+def collect_status(
+    root_dir: Path,
+    run_command_func=default_run_command,
+    fetch_latest_tag_func=fetch_latest_tag_for_status,
+) -> dict:
     sync_secrets_repo(root_dir, run_command_func)
     settings = load_runtime_config(root_dir)
     runtime_dir = settings["runtime_dir"]
+    container_state = {"container_status": "not_installed", "pid": 0}
     try:
         if not (runtime_dir / "compose.yaml").exists():
             docker_ps_output = "compose.yaml not rendered yet"
         else:
             docker_ps_output = docker_compose(runtime_dir, ["ps"], run_command_func)
+            container_state = docker_inspect_container(runtime_dir, run_command_func)
     except Exception as exc:
         docker_ps_output = str(exc)
-    latest_tag = fetch_latest_tag_for_status(runtime_dir)
-    return build_status_report(runtime_dir, latest_tag, docker_ps_output)
+    latest_tag = fetch_latest_tag_func(runtime_dir)
+    return build_status_report(
+        runtime_dir,
+        latest_tag,
+        docker_ps_output,
+        server_port=settings["server_port"],
+        container_status=container_state["container_status"],
+        pid=container_state["pid"],
+    )
 
 
 def print_status(report: dict, as_json: bool):
@@ -530,6 +708,13 @@ def print_status(report: dict, as_json: bool):
     print(f"previous_tag: {report['previous_tag'] or 'unknown'}")
     print(f"latest_tag: {report['latest_tag'] or 'unknown'}")
     print(f"update_available: {'yes' if report['update_available'] else 'no'}")
+    print(f"container_status: {report['container_status']}")
+    print(f"pid: {report['pid'] or 'unknown'}")
+    print(f"runtime_dir: {report['runtime_dir']}")
+    print(f"port: {report['port']}")
+    print(f"base_url: {report['base_url']}")
+    print(f"login_url: {report['login_url']}")
+    print(f"admin_url: {report['admin_url']}")
     print("docker_status:")
     if report["docker_status"]:
         print(report["docker_status"])
@@ -541,6 +726,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Manage a host-mounted cc-bridge runtime via Docker.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    subparsers.add_parser("install", help="Install the latest stable release and start the runtime.")
+    subparsers.add_parser("start", help="Start the runtime; upgrade first when a newer stable release exists.")
+    subparsers.add_parser("stop", help="Stop the runtime without deleting data.")
     subparsers.add_parser("deploy", help="Fetch the latest stable release tag and deploy it.")
     subparsers.add_parser("update", help="Fetch the latest stable release tag and update the runtime.")
     subparsers.add_parser("seed", help="Seed accounts and gateway tokens from secrets files.")
@@ -554,7 +742,19 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     root_dir = manager_root()
     try:
-        if args.command in {"deploy", "update"}:
+        if args.command in {"deploy", "install"}:
+            result = install_runtime(root_dir=root_dir)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return 0
+        if args.command == "start":
+            result = start_runtime(root_dir=root_dir)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return 0
+        if args.command == "stop":
+            result = stop_runtime(root_dir=root_dir)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return 0
+        if args.command == "update":
             result = update_to_latest_release(root_dir=root_dir)
             print(json.dumps(result, indent=2, ensure_ascii=False))
             return 0

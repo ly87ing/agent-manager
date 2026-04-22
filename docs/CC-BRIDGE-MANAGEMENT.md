@@ -2,7 +2,7 @@
 
 本文档说明如何用当前仓库以“外围托管”的方式管理 `cc-bridge`：
 
-- `agent-manager` 负责 secrets、版本发现、运行目录渲染、升级入口和回滚入口
+- `agent-manager` 负责 secrets、版本发现、运行目录渲染、安装 / 启动 / 停止 / 升级入口和回滚入口
 - `Docker` 负责容器生命周期
 - 真实敏感信息只允许放在外部私有 `secrets/` 仓库
 
@@ -83,8 +83,8 @@ ADMIN_PASSWORD=YOUR_STRONG_PASSWORD
 
 ## 自动更新策略
 
-- 更新命令不会使用漂移的 `:latest`
-- 每次执行 `make cc-bridge-deploy` 或 `make cc-bridge-update` 时，脚本都会读取：
+- 安装、启动和更新命令都不会使用漂移的 `:latest`
+- 每次执行 `make cc-bridge-install`、`make cc-bridge-start`、`make cc-bridge-deploy` 或 `make cc-bridge-update` 时，脚本都会读取：
 
 ```text
 https://api.github.com/repos/MamoWorks/cc-bridge/releases/latest
@@ -96,6 +96,13 @@ https://api.github.com/repos/MamoWorks/cc-bridge/releases/latest
 - 备份宿主机 `data/`
 - 再执行 `docker compose pull && docker compose up -d`
 
+其中：
+
+- `make cc-bridge-start` 启动前会先检查最新稳定版本
+- 如果当前未安装，就按最新稳定版本完成安装并启动
+- 如果当前已安装但发现新版本，就先升级再启动
+- 如果当前已经是最新稳定版本，只执行 `docker compose up -d`
+
 这样做的结果是：
 
 - 你不需要自己查新版本
@@ -103,7 +110,25 @@ https://api.github.com/repos/MamoWorks/cc-bridge/releases/latest
 
 ## 命令
 
-### 首次部署
+### 首次安装并启动
+
+```bash
+make cc-bridge-install
+```
+
+### 启动服务
+
+```bash
+make cc-bridge-start
+```
+
+### 停止服务
+
+```bash
+make cc-bridge-stop
+```
+
+### 兼容旧入口：首次部署
 
 ```bash
 make cc-bridge-deploy
@@ -127,6 +152,13 @@ make cc-bridge-seed
 make cc-bridge-status
 ```
 
+状态输出会包含：
+
+- 当前 tag、上一个 tag、最新稳定 tag
+- 是否存在可升级版本
+- 容器运行状态和容器主进程 PID
+- 运行目录、访问 URL、登录 URL、管理 URL 与端口
+
 ### 回滚到上一个版本
 
 ```bash
@@ -135,7 +167,7 @@ make cc-bridge-rollback
 
 ## 失败模式与回滚
 
-- 如果 `releases/latest` 查询失败，部署/更新会直接失败，不会猜测版本
+- 如果 `releases/latest` 查询失败，安装 / 启动 / 部署 / 更新都会直接失败，不会猜测版本
 - 如果 `cc-bridge.env` 缺失或 `ADMIN_PASSWORD` 为空，脚本会失败关闭
 - 如果 `DATABASE_DRIVER` 不是 `sqlite`，脚本会拒绝继续，避免半支持状态
 - 如果升级后 healthcheck 失败，更新路径会自动尝试回滚到更新前记录的当前 tag
