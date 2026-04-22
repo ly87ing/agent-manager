@@ -158,6 +158,13 @@ make cc-bridge-status
 - 是否存在可升级版本
 - 容器运行状态和容器主进程 PID
 - 运行目录、访问 URL、登录 URL、管理 URL 与端口
+- Claude Code 的 `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` 配置示例
+
+其中 Claude Code 接入注意事项：
+
+- `ANTHROPIC_BASE_URL` 指向 `cc-bridge` 暴露的本地地址
+- `ANTHROPIC_AUTH_TOKEN` 需要使用 `cc-bridge` 的 API token
+- `ADMIN_PASSWORD` 只用于管理接口和初始化，不适合作为 Claude Code 的调用 token
 
 ### 回滚到上一个版本
 

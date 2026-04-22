@@ -1,5 +1,7 @@
+import contextlib
 import http.client
 import importlib.util
+import io
 import subprocess
 import tempfile
 import unittest
@@ -385,6 +387,23 @@ class CcBridgeManageTests(unittest.TestCase):
                     "base_url": "http://127.0.0.1:5674",
                     "login_url": "http://127.0.0.1:5674/login",
                     "admin_url": "http://127.0.0.1:5674/admin/dashboard",
+                    "claude_code": {
+                        "settings_path": "~/.claude/settings.json",
+                        "base_url_env": "ANTHROPIC_BASE_URL",
+                        "auth_token_env": "ANTHROPIC_AUTH_TOKEN",
+                        "auth_token_placeholder": "<cc_bridge_api_token>",
+                        "token_note": "Use a cc-bridge API token for Claude Code; the admin password only works for admin APIs.",
+                        "shell_exports": {
+                            "ANTHROPIC_BASE_URL": "http://127.0.0.1:5674",
+                            "ANTHROPIC_AUTH_TOKEN": "<cc_bridge_api_token>",
+                        },
+                        "settings_json": {
+                            "env": {
+                                "ANTHROPIC_BASE_URL": "http://127.0.0.1:5674",
+                                "ANTHROPIC_AUTH_TOKEN": "<cc_bridge_api_token>",
+                            }
+                        },
+                    },
                     "docker_status": "NAME STATUS\ncc-bridge Up 3 minutes",
                 },
             )
@@ -439,3 +458,51 @@ class CcBridgeManageTests(unittest.TestCase):
             self.assertEqual(report["base_url"], "http://127.0.0.1:6789")
             self.assertEqual(report["login_url"], "http://127.0.0.1:6789/login")
             self.assertEqual(report["admin_url"], "http://127.0.0.1:6789/admin/dashboard")
+            self.assertEqual(
+                report["claude_code"]["shell_exports"]["ANTHROPIC_BASE_URL"],
+                "http://127.0.0.1:6789",
+            )
+
+    def test_print_status_includes_claude_code_configuration_snippet(self):
+        report = {
+            "current_tag": "v1.8.3",
+            "previous_tag": "",
+            "latest_tag": "v1.8.3",
+            "update_available": False,
+            "runtime_dir": "/tmp/runtime",
+            "container_name": "cc-bridge",
+            "container_status": "running",
+            "pid": 4321,
+            "port": "5674",
+            "base_url": "http://127.0.0.1:5674",
+            "login_url": "http://127.0.0.1:5674/login",
+            "admin_url": "http://127.0.0.1:5674/admin/dashboard",
+            "claude_code": {
+                "settings_path": "~/.claude/settings.json",
+                "base_url_env": "ANTHROPIC_BASE_URL",
+                "auth_token_env": "ANTHROPIC_AUTH_TOKEN",
+                "auth_token_placeholder": "<cc_bridge_api_token>",
+                "token_note": "Use a cc-bridge API token for Claude Code; the admin password only works for admin APIs.",
+                "shell_exports": {
+                    "ANTHROPIC_BASE_URL": "http://127.0.0.1:5674",
+                    "ANTHROPIC_AUTH_TOKEN": "<cc_bridge_api_token>",
+                },
+                "settings_json": {
+                    "env": {
+                        "ANTHROPIC_BASE_URL": "http://127.0.0.1:5674",
+                        "ANTHROPIC_AUTH_TOKEN": "<cc_bridge_api_token>",
+                    }
+                },
+            },
+            "docker_status": "NAME STATUS\ncc-bridge Up 3 minutes",
+        }
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            cc_bridge_manage.print_status(report, as_json=False)
+
+        rendered = buffer.getvalue()
+        self.assertIn("claude_code_settings_path: ~/.claude/settings.json", rendered)
+        self.assertIn("export ANTHROPIC_BASE_URL=http://127.0.0.1:5674", rendered)
+        self.assertIn("export ANTHROPIC_AUTH_TOKEN=<cc_bridge_api_token>", rendered)
+        self.assertIn('"ANTHROPIC_BASE_URL": "http://127.0.0.1:5674"', rendered)

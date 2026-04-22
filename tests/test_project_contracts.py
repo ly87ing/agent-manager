@@ -371,6 +371,7 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("make cc-bridge-update", readme)
         self.assertIn("make cc-bridge-rollback", readme)
         self.assertIn("启动前会先检查最新稳定版本", readme)
+        self.assertIn("Claude Code 的接入环境变量示例", readme)
         self.assertIn("docs/CC-BRIDGE-MANAGEMENT.md", readme)
 
     def test_cc_bridge_management_doc_covers_install_start_stop_and_auto_update_start(self):
@@ -379,6 +380,8 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("make cc-bridge-start", doc)
         self.assertIn("make cc-bridge-stop", doc)
         self.assertIn("启动前会先检查最新稳定版本", doc)
+        self.assertIn("ANTHROPIC_BASE_URL", doc)
+        self.assertIn("ADMIN_PASSWORD", doc)
 
     def test_repo_root_agents_guidance_covers_setup_tests_done_when_and_generated_boundaries(self):
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")

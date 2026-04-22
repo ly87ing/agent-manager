@@ -634,6 +634,27 @@ def seed_runtime(root_dir: Path):
     }
 
 
+def build_claude_code_config(base_url: str) -> dict:
+    placeholder_token = "<cc_bridge_api_token>"
+    return {
+        "settings_path": "~/.claude/settings.json",
+        "base_url_env": "ANTHROPIC_BASE_URL",
+        "auth_token_env": "ANTHROPIC_AUTH_TOKEN",
+        "auth_token_placeholder": placeholder_token,
+        "token_note": "Use a cc-bridge API token for Claude Code; the admin password only works for admin APIs.",
+        "shell_exports": {
+            "ANTHROPIC_BASE_URL": base_url,
+            "ANTHROPIC_AUTH_TOKEN": placeholder_token,
+        },
+        "settings_json": {
+            "env": {
+                "ANTHROPIC_BASE_URL": base_url,
+                "ANTHROPIC_AUTH_TOKEN": placeholder_token,
+            }
+        },
+    }
+
+
 def build_status_report(
     runtime_dir: Path,
     latest_tag: str,
@@ -660,6 +681,7 @@ def build_status_report(
         "base_url": base_url,
         "login_url": f"{base_url}/login",
         "admin_url": f"{base_url}/admin/dashboard",
+        "claude_code": build_claude_code_config(base_url),
         "docker_status": cleaned_status,
     }
 
@@ -704,6 +726,7 @@ def print_status(report: dict, as_json: bool):
     if as_json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return
+    claude_code = report["claude_code"]
     print(f"current_tag: {report['current_tag'] or 'unknown'}")
     print(f"previous_tag: {report['previous_tag'] or 'unknown'}")
     print(f"latest_tag: {report['latest_tag'] or 'unknown'}")
@@ -715,6 +738,13 @@ def print_status(report: dict, as_json: bool):
     print(f"base_url: {report['base_url']}")
     print(f"login_url: {report['login_url']}")
     print(f"admin_url: {report['admin_url']}")
+    print(f"claude_code_settings_path: {claude_code['settings_path']}")
+    print(f"claude_code_note: {claude_code['token_note']}")
+    print("claude_code_shell_exports:")
+    print(f"export {claude_code['base_url_env']}={claude_code['shell_exports'][claude_code['base_url_env']]}")
+    print(f"export {claude_code['auth_token_env']}={claude_code['shell_exports'][claude_code['auth_token_env']]}")
+    print("claude_code_settings_json:")
+    print(json.dumps(claude_code["settings_json"], indent=2, ensure_ascii=False))
     print("docker_status:")
     if report["docker_status"]:
         print(report["docker_status"])
