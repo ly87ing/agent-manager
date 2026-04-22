@@ -10,6 +10,11 @@
       "skill_count": 3,
       "agents": ["claude-code", "kimi-cli", "codex"]
     },
+    "oa-skill": {
+      "url": "https://github.com/ly87ing/oa-skill.git",
+      "skill_paths": ["skills/xyai-manager"],
+      "skill_count": 1
+    },
     "openai-frontend-skill": {
       "url": "https://github.com/openai/skills.git",
       "skill_paths": ["skills/.curated/frontend-skill"],

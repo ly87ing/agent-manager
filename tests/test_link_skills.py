@@ -1929,6 +1929,19 @@ class LinkSkillsTests(unittest.TestCase):
             {"enabled": True},
         )
 
+    def test_default_skill_catalog_includes_oa_skill_repo_with_explicit_skill_path(self):
+        skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
+
+        repo = skills_config["repositories"].get("oa-skill")
+
+        self.assertIsNotNone(repo)
+        self.assertEqual(repo["url"], "https://github.com/ly87ing/oa-skill.git")
+        self.assertEqual(repo["skill_paths"], ["skills/xyai-manager"])
+        self.assertEqual(repo["skill_count"], 1)
+        self.assertNotIn("agents", repo)
+        self.assertNotIn("commit", repo)
+        self.assertNotIn("ref", repo)
+
     def test_default_skill_catalog_includes_openai_frontend_skill_for_codex_only(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
 
@@ -1946,5 +1959,13 @@ class LinkSkillsTests(unittest.TestCase):
 
         self.assertEqual(
             manager_config["skills"].get("openai-frontend-skill"),
+            {"enabled": True},
+        )
+
+    def test_default_manager_policy_explicitly_enables_oa_skill_repo(self):
+        manager_config = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            manager_config["skills"].get("oa-skill"),
             {"enabled": True},
         )
