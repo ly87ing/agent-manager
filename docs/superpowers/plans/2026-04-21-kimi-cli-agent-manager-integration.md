@@ -24,26 +24,16 @@
 
 ```python
 class AgentIdConsistencyTests(unittest.TestCase):
-    def test_config_uses_stable_agent_ids(self):
-        manager_agents = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))["agents"]
+    def test_kimi_cli_definition_is_declared_in_lifecycle_config(self):
         lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
-        skill_targets = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))["agents"]
-        mcp_targets = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))["agent_paths"]
 
-        managed_agent_ids = {
-            "claude-code",
-            "gemini-cli",
-            "cursor",
-            "opencode",
-            "kimi-cli",
-        }
+        self.assertIn("kimi-cli", lifecycle_agents)
+        self.assertEqual(lifecycle_agents["kimi-cli"]["display_name"], "Kimi Code CLI")
+        self.assertEqual(lifecycle_agents["kimi-cli"]["bin"], "kimi")
+        self.assertEqual(lifecycle_agents["kimi-cli"]["preferred_provider"], "uv")
 
-        self.assertEqual(set(manager_agents), managed_agent_ids)
-        self.assertEqual(set(lifecycle_agents), managed_agent_ids)
-        self.assertTrue(managed_agent_ids.issubset(set(skill_targets)))
-        self.assertTrue(managed_agent_ids.issubset(set(mcp_targets)))
-        self.assertIn("codex", skill_targets)
-        self.assertIn("codex", mcp_targets)
+    def test_kimi_cli_display_name_is_exposed_via_agent_metadata(self):
+        self.assertEqual(get_agent_display_name("kimi-cli"), "Kimi Code CLI")
 
 
 class CommittedAgentPolicyTests(unittest.TestCase):
@@ -92,7 +82,7 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
 Run: `python3 -m unittest tests.test_agent_lifecycle.AgentIdConsistencyTests tests.test_agent_lifecycle.CommittedAgentPolicyTests tests.test_manage_runtime_probe.ManageRuntimeProbeTests.test_detect_all_providers_supports_uv_tool_install -v`
 
-Expected: FAIL，提示 `kimi-cli` 尚未出现在稳定 agent id、默认策略或 provider 探测结果中。
+Expected: FAIL，提示 `config/agents.json`、`config/manager.json` 或 provider 探测里还没有 `kimi-cli` / `uv`。
 
 - [ ] **Step 4: 增加 Kimi agent 定义、默认策略和展示名**
 
@@ -356,11 +346,36 @@ git commit -m "feat: add kimi cli mcp target support"
 ### Task 3: 固定并实现 Kimi skills target 与暴露范围
 
 **Files:**
+- Modify: `tests/test_agent_lifecycle.py`
 - Modify: `tests/test_skill_exposure_contracts.py`
 - Modify: `tests/test_link_skills.py`
 - Modify: `config/skills.json`
 
 - [ ] **Step 1: 写失败中的 skill target 与 scope 契约测试**
+
+```python
+class AgentIdConsistencyTests(unittest.TestCase):
+    def test_config_uses_stable_agent_ids(self):
+        manager_agents = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))["agents"]
+        lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
+        skill_targets = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))["agents"]
+        mcp_targets = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))["agent_paths"]
+
+        managed_agent_ids = {
+            "claude-code",
+            "gemini-cli",
+            "cursor",
+            "opencode",
+            "kimi-cli",
+        }
+
+        self.assertEqual(set(manager_agents), managed_agent_ids)
+        self.assertEqual(set(lifecycle_agents), managed_agent_ids)
+        self.assertTrue(managed_agent_ids.issubset(set(skill_targets)))
+        self.assertTrue(managed_agent_ids.issubset(set(mcp_targets)))
+        self.assertIn("codex", skill_targets)
+        self.assertIn("codex", mcp_targets)
+```
 
 ```python
 class SkillExposureContractTests(unittest.TestCase):
@@ -402,7 +417,7 @@ class LinkSkillsTests(unittest.TestCase):
 
 - [ ] **Step 2: 运行测试确认它们先失败**
 
-Run: `python3 -m unittest tests.test_skill_exposure_contracts tests.test_link_skills -v`
+Run: `python3 -m unittest tests.test_agent_lifecycle tests.test_skill_exposure_contracts tests.test_link_skills -v`
 
 Expected: FAIL，`config/skills.json` 还没有 `kimi-cli` target，也还没把 `claude-code` 范围内的 skill 仓库扩到 `kimi-cli`。
 
@@ -439,14 +454,14 @@ Expected: FAIL，`config/skills.json` 还没有 `kimi-cli` target，也还没把
 
 - [ ] **Step 4: 重新运行 skills 契约测试**
 
-Run: `python3 -m unittest tests.test_skill_exposure_contracts tests.test_link_skills -v`
+Run: `python3 -m unittest tests.test_agent_lifecycle tests.test_skill_exposure_contracts tests.test_link_skills -v`
 
 Expected: PASS，`kimi-cli` 作为新 target 出现在 `skills.json` 中，且只接收当前已经对 `claude-code` 开放的 skill 仓库。
 
 - [ ] **Step 5: 提交这一组变更**
 
 ```bash
-git add tests/test_skill_exposure_contracts.py tests/test_link_skills.py config/skills.json
+git add tests/test_agent_lifecycle.py tests/test_skill_exposure_contracts.py tests/test_link_skills.py config/skills.json
 git commit -m "feat: add kimi cli skill target support"
 ```
 
