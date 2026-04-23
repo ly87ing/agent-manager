@@ -2,16 +2,76 @@ import shutil
 import tempfile
 import unittest
 import json
+import os
 from pathlib import Path
 from unittest import mock
 
-from src.manage_doctor import build_report
+from src.manage_doctor import actual_skill_targets, build_report
 
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 class ManageDoctorReportTests(unittest.TestCase):
+    def test_actual_skill_targets_includes_windows_junctions(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_dir = Path(temp_dir) / "targets"
+            junction_path = target_dir / "frontend-skill"
+            managed_target = Path(temp_dir) / "managed" / "frontend-skill"
+            target_dir.mkdir()
+            junction_path.mkdir()
+            real_readlink = os.readlink
+
+            with (
+                mock.patch.object(
+                    os.path,
+                    "isjunction",
+                    side_effect=lambda path: Path(path) == junction_path,
+                    create=True,
+                ),
+                mock.patch(
+                    "src.manage_doctor.os.readlink",
+                    side_effect=lambda path: str(managed_target) if Path(path) == junction_path else real_readlink(path),
+                ),
+            ):
+                actual_targets, broken_names = actual_skill_targets(str(target_dir))
+
+            self.assertEqual(
+                actual_targets,
+                {"frontend-skill": str(managed_target.resolve(strict=False))},
+            )
+            self.assertEqual(broken_names, set())
+
+    def test_actual_skill_targets_normalizes_windows_substitution_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_dir = Path(temp_dir) / "targets"
+            junction_path = target_dir / "frontend-skill"
+            target_dir.mkdir()
+            junction_path.mkdir()
+            substitution_target = r"\\?\C:\repo\agent-skill\repositories\demo-repo\bundle\frontend-skill"
+            normalized_target = r"C:\repo\agent-skill\repositories\demo-repo\bundle\frontend-skill"
+            real_readlink = os.readlink
+
+            with (
+                mock.patch.object(
+                    os.path,
+                    "isjunction",
+                    side_effect=lambda path: Path(path) == junction_path,
+                    create=True,
+                ),
+                mock.patch(
+                    "src.manage_doctor.os.readlink",
+                    side_effect=lambda path: substitution_target if Path(path) == junction_path else real_readlink(path),
+                ),
+            ):
+                actual_targets, broken_names = actual_skill_targets(str(target_dir))
+
+            self.assertEqual(
+                actual_targets,
+                {"frontend-skill": normalized_target},
+            )
+            self.assertEqual(broken_names, set())
+
     def test_report_flags_enabled_agent_when_provider_exists_but_runtime_entrypoint_is_missing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"

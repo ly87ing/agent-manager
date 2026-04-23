@@ -2,10 +2,12 @@
 import os
 import argparse
 import logging
+import ntpath
 import subprocess
 import shutil
 import json
 import platform
+import stat
 import sys
 from pathlib import Path
 
@@ -374,10 +376,9 @@ def create_link(source, link, dry_run=False):
     if dry_run: return
     source, link = Path(source).resolve(), Path(link)
     link_parent = link.parent.resolve()
-    if link.exists() or link.is_symlink():
+    if link.exists() or is_link_entry(link):
         try:
-            if link.is_symlink() or not link.is_dir(): link.unlink()
-            else: shutil.rmtree(link)
+            remove_path(link)
         except OSError: return
     try:
         if platform.system() == "Windows":
@@ -388,16 +389,90 @@ def create_link(source, link, dry_run=False):
             logging.info(f"链接: {rel_source} -> {link.name}")
     except Exception as e: logging.error(f"链接失败: {e}")
 
-def resolve_link_target(link_path):
-    raw_target = Path(os.readlink(link_path)).expanduser()
-    resolved_target = raw_target if raw_target.is_absolute() else (link_path.parent / raw_target)
-    return resolved_target.resolve(strict=False)
+def is_windows_directory_link(path):
+    path = Path(path)
+    checker = getattr(os.path, "isjunction", None)
+    if checker is not None:
+        try:
+            if checker(path):
+                return True
+        except OSError:
+            return False
+    try:
+        stat_result = os.lstat(path)
+    except OSError:
+        return False
+    file_attrs = getattr(stat_result, "st_file_attributes", 0)
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    directory_flag = getattr(stat, "FILE_ATTRIBUTE_DIRECTORY", 0)
+    return bool(reparse_flag and directory_flag and file_attrs & reparse_flag and file_attrs & directory_flag)
+
+
+def is_link_entry(path):
+    path = Path(path)
+    return path.is_symlink() or is_windows_directory_link(path)
+
+
+def normalize_windows_device_path(path):
+    path_str = os.fspath(path)
+    prefix_mappings = (
+        ("\\\\?\\UNC\\", "\\\\"),
+        ("\\??\\UNC\\", "\\\\"),
+        ("\\\\?\\", ""),
+        ("\\??\\", ""),
+    )
+    for prefix, replacement in prefix_mappings:
+        if path_str.startswith(prefix):
+            return replacement + path_str[len(prefix):]
+    return path_str
+
+
+def normalize_path_for_compare(path):
+    path_str = normalize_windows_device_path(path)
+    if ntpath.isabs(path_str):
+        return "windows", ntpath.normcase(ntpath.normpath(path_str))
+    return "posix", str(Path(path_str).expanduser().resolve(strict=False))
+
+
+def remove_path(path):
+    path = Path(path)
+    if is_windows_directory_link(path) and not path.is_symlink():
+        shutil.rmtree(path)
+        return
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+        return
+    path.unlink()
+
+
+def resolve_link_target(link_path) -> str:
+    link_path = Path(link_path)
+    if not is_link_entry(link_path):
+        raise OSError(f"Not a link entry: {link_path}")
+    try:
+        raw_target = normalize_windows_device_path(os.readlink(link_path))
+        if ntpath.isabs(raw_target):
+            return ntpath.normpath(raw_target)
+        raw_target_path = Path(raw_target).expanduser()
+        resolved_target = raw_target_path if raw_target_path.is_absolute() else (link_path.parent / raw_target_path)
+        return str(resolved_target.resolve(strict=False))
+    except OSError:
+        if is_windows_directory_link(link_path):
+            return str(link_path.resolve(strict=False))
+        raise
 
 
 def is_path_within_base(path, base_path):
-    resolved_path = Path(path).resolve(strict=False)
-    resolved_base = Path(base_path).resolve(strict=False)
-    return resolved_path == resolved_base or resolved_base in resolved_path.parents
+    path_kind, resolved_path = normalize_path_for_compare(path)
+    base_kind, resolved_base = normalize_path_for_compare(base_path)
+    if path_kind != base_kind:
+        return False
+    commonpath_func = ntpath.commonpath if path_kind == "windows" else os.path.commonpath
+    try:
+        common_path = commonpath_func([resolved_path, resolved_base])
+    except ValueError:
+        return False
+    return common_path == resolved_base
 
 
 def link_points_within_base(link_path, base_path):
@@ -407,17 +482,21 @@ def link_points_within_base(link_path, base_path):
         return False
 
 
-def scrub_dead_links(agents_config, base_dir, dry_run=False):
+def scrub_dead_links(agents_config, base_dir, dry_run=False, managed_skill_names_by_agent=None):
     base_dir = Path(base_dir).resolve()
+    managed_skill_names_by_agent = managed_skill_names_by_agent or {}
     for agent_name, target_path in agents_config.items():
+        agent_managed_skill_names = set(managed_skill_names_by_agent.get(agent_name, ()))
         target_base = Path(target_path).expanduser()
         if not target_base.exists() or not target_base.is_dir(): continue
         for item in target_base.iterdir():
-            if not item.is_symlink() or item.exists():
+            if item.exists() or not is_link_entry(item):
+                continue
+            if item.name not in agent_managed_skill_names and not link_points_within_base(item, base_dir):
                 continue
             logging.info(f"[AGENT: {agent_name}] 移除死链: {item.name}")
             if not dry_run:
-                item.unlink()
+                remove_path(item)
 
 def is_active_skill_target(agent_name, target_path, agent_defs):
     target_base = Path(target_path).expanduser()
@@ -504,7 +583,7 @@ def remove_repo_skill_links(repo_path, targets, allowed_agents=None, dry_run=Fal
         if not target_base.exists() or not target_base.is_dir():
             continue
         for item in target_base.iterdir():
-            if not item.is_symlink():
+            if not is_link_entry(item):
                 continue
             if item.name not in managed_skill_names:
                 continue
@@ -512,7 +591,7 @@ def remove_repo_skill_links(repo_path, targets, allowed_agents=None, dry_run=Fal
                 continue
             logging.error(f"[AGENT: {agent_name}] 移除来自失效仓库的 skill 链接: {item.name}")
             if not dry_run:
-                item.unlink()
+                remove_path(item)
 
 
 def remove_skill_links(skill_name, targets, allowed_agents=None, dry_run=False):
@@ -521,15 +600,12 @@ def remove_skill_links(skill_name, targets, allowed_agents=None, dry_run=False):
         active_targets = {k: v for k, v in targets.items() if k in allowed_agents}
     for agent_name, target_path in active_targets.items():
         link_path = Path(target_path).expanduser() / skill_name
-        if not (link_path.exists() or link_path.is_symlink()):
+        if not (link_path.exists() or is_link_entry(link_path)):
             continue
         logging.error(f"[AGENT: {agent_name}] 移除冲突 skill 链接: {skill_name}")
         if dry_run:
             continue
-        if link_path.is_dir() and not link_path.is_symlink():
-            shutil.rmtree(link_path)
-        else:
-            link_path.unlink()
+        remove_path(link_path)
 
 def manage_links(skill_name, source_path, targets, allowed_agents, is_enabled=True, dry_run=False):
     active_targets = targets
@@ -540,13 +616,23 @@ def manage_links(skill_name, source_path, targets, allowed_agents, is_enabled=Tr
         link_path = target_base / skill_name
         if agent_name != "codex" and not target_base.parent.exists() and is_enabled: continue
         if not is_enabled:
-            if (link_path.exists() or link_path.is_symlink()) and not dry_run:
-                if link_path.is_dir() and not link_path.is_symlink(): shutil.rmtree(link_path)
-                else: link_path.unlink()
+            if (link_path.exists() or is_link_entry(link_path)) and not dry_run:
+                remove_path(link_path)
             continue
         if not target_base.exists() and not dry_run: target_base.mkdir(parents=True, exist_ok=True)
         if dry_run: logging.info(f"[AGENT: {agent_name}] (预览: 计划加载 {skill_name})"); continue
         create_link(source_path, link_path, dry_run)
+
+
+def collect_current_managed_skill_names_by_agent(pending_links, duplicate_skill_names):
+    managed_skill_names_by_agent = {}
+    for _repo_name, repo_targets, skills in pending_links:
+        active_skill_names = {skill_name for skill_name in skills if skill_name not in duplicate_skill_names}
+        if not active_skill_names:
+            continue
+        for agent_name in repo_targets:
+            managed_skill_names_by_agent.setdefault(agent_name, set()).update(active_skill_names)
+    return managed_skill_names_by_agent
 
 def main():
     parser = argparse.ArgumentParser(description="Agent Skill 管理工具 (策略对齐)")
@@ -602,7 +688,8 @@ def main():
     if not base_dir.exists() and not args.dry_run: base_dir.mkdir(parents=True, exist_ok=True)
     if not repo_base_dir.exists() and not args.dry_run: repo_base_dir.mkdir(parents=True, exist_ok=True)
     logging.info("执行环境洗刷...")
-    scrub_dead_links(ALL_AGENT_TARGETS, repo_base_dir, args.dry_run)
+    if not args.dry_run:
+        scrub_dead_links(ALL_AGENT_TARGETS, repo_base_dir, False)
 
     all_success = True
     duplicate_skill_names = set()
@@ -730,9 +817,25 @@ def main():
                 continue
             manage_links(s_name, s_path, repo_targets, None, True, args.dry_run)
 
-    if not args.dry_run:
+    managed_skill_names_by_agent = collect_current_managed_skill_names_by_agent(
+        pending_links,
+        duplicate_skill_names,
+    )
+    if args.dry_run:
+        scrub_dead_links(
+            ALL_AGENT_TARGETS,
+            repo_base_dir,
+            True,
+            managed_skill_names_by_agent,
+        )
+    else:
         prune_orphan_repos(repo_base_dir, REPOS.keys(), args.dry_run, args.yes)
-        scrub_dead_links(ALL_AGENT_TARGETS, repo_base_dir, args.dry_run)
+        scrub_dead_links(
+            ALL_AGENT_TARGETS,
+            repo_base_dir,
+            False,
+            managed_skill_names_by_agent,
+        )
     if not all_success: sys.exit(1)
     logging.info("技能同步完成！")
 

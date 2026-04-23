@@ -775,6 +775,71 @@ class LinkSkillsTests(unittest.TestCase):
             self.assertIn("发现孤儿仓库: orphan-skill", combined)
             self.assertIn("移除死链: my-skill", combined)
 
+    def test_dry_run_previews_dead_link_cleanup_for_currently_managed_skill(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            base_dir = temp_root / "skills"
+            repo_dir = base_dir / "repositories" / "demo-skill"
+            skill_dir = repo_dir / "bundle" / "my-skill"
+            target_dir = temp_root / "targets" / "claude"
+            foreign_dir = temp_root / "foreign"
+            target_dir.mkdir(parents=True)
+            foreign_dir.mkdir()
+            repo_dir.mkdir(parents=True)
+            (repo_dir / ".git").mkdir()
+            (repo_dir / ".agent-manager-owned").write_text("true\n", encoding="utf-8")
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text("---\nname: my-skill\n---\n", encoding="utf-8")
+            os.symlink(foreign_dir / "missing-skill", target_dir / "my-skill")
+            config_path.write_text(
+                json.dumps({"skills": {"demo-skill": {"enabled": True, "auto_update": False}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "demo-skill": {
+                                "url": "https://example.invalid/repo.git",
+                                "agents": ["claude-code"],
+                            }
+                        },
+                        "agents": {
+                            "claude-code": str(target_dir),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(base_dir),
+                    "--dry-run",
+                    "--offline",
+                    "--yes",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertTrue((target_dir / "my-skill").is_symlink())
+            self.assertIn("(预览: 计划加载 my-skill)", combined)
+            self.assertIn("移除死链: my-skill", combined)
+
     def test_enabled_repository_removes_links_from_disallowed_agents(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -1839,7 +1904,7 @@ class LinkSkillsTests(unittest.TestCase):
 
             self.assertFalse(link.is_symlink())
 
-    def test_scrub_dead_links_removes_broken_link_outside_managed_dir_with_same_prefix(self):
+    def test_scrub_dead_links_preserves_broken_link_outside_managed_dir_with_same_prefix(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             managed_dir = temp_root / "managed"
@@ -1854,7 +1919,90 @@ class LinkSkillsTests(unittest.TestCase):
 
             link_skills.scrub_dead_links({"TestAgent": str(agent_dir)}, managed_dir)
 
+            self.assertTrue(link.is_symlink())
+
+    def test_scrub_dead_links_preserves_broken_link_for_disabled_repo_name(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            managed_dir = temp_root / "managed"
+            repo_dir = managed_dir / "disabled-repo"
+            skill_dir = repo_dir / "bundle" / "skill"
+            foreign_dir = temp_root / "foreign"
+            agent_dir = temp_root / "agent" / "skills"
+            repo_dir.mkdir(parents=True)
+            skill_dir.mkdir(parents=True)
+            foreign_dir.mkdir()
+            agent_dir.mkdir(parents=True)
+            (repo_dir / ".git").mkdir()
+            (repo_dir / ".agent-manager-owned").write_text("true\n", encoding="utf-8")
+            (skill_dir / "SKILL.md").write_text("---\nname: skill\n---\n", encoding="utf-8")
+
+            link = agent_dir / "skill"
+            link.symlink_to(foreign_dir / "missing-skill")
+
+            link_skills.scrub_dead_links({"TestAgent": str(agent_dir)}, managed_dir)
+
+            self.assertTrue(link.is_symlink())
+
+    def test_scrub_dead_links_removes_broken_link_for_currently_managed_skill_name(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            managed_dir = temp_root / "managed"
+            repo_dir = managed_dir / "demo-repo"
+            skill_dir = repo_dir / "bundle" / "skill"
+            foreign_dir = temp_root / "managed-foreign"
+            agent_dir = temp_root / "agent" / "skills"
+            repo_dir.mkdir(parents=True)
+            skill_dir.mkdir(parents=True)
+            foreign_dir.mkdir()
+            agent_dir.mkdir(parents=True)
+            (repo_dir / ".git").mkdir()
+            (repo_dir / ".agent-manager-owned").write_text("true\n", encoding="utf-8")
+            (skill_dir / "SKILL.md").write_text("---\nname: skill\n---\n", encoding="utf-8")
+
+            link = agent_dir / "skill"
+            link.symlink_to(foreign_dir / "missing-skill")
+
+            link_skills.scrub_dead_links(
+                {"TestAgent": str(agent_dir)},
+                managed_dir,
+                managed_skill_names_by_agent={"TestAgent": {"skill"}},
+            )
+
             self.assertFalse(link.is_symlink())
+
+    def test_scrub_dead_links_preserves_broken_link_for_skill_managed_by_other_agent(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            managed_dir = temp_root / "managed"
+            repo_dir = managed_dir / "codex-repo"
+            skill_dir = repo_dir / "bundle" / "frontend-skill"
+            foreign_dir = temp_root / "foreign"
+            agent_dir = temp_root / "agent" / "skills"
+            repo_dir.mkdir(parents=True)
+            skill_dir.mkdir(parents=True)
+            foreign_dir.mkdir()
+            agent_dir.mkdir(parents=True)
+            (repo_dir / ".git").mkdir()
+            (repo_dir / ".agent-manager-owned").write_text("true\n", encoding="utf-8")
+            (skill_dir / "SKILL.md").write_text("---\nname: frontend-skill\n---\n", encoding="utf-8")
+
+            link = agent_dir / "frontend-skill"
+            link.symlink_to(foreign_dir / "missing-skill")
+
+            link_skills.scrub_dead_links(
+                {"claude-code": str(agent_dir)},
+                managed_dir,
+                managed_skill_names_by_agent={"codex": {"frontend-skill"}},
+            )
+
+            self.assertTrue(link.is_symlink())
+
+    def test_is_path_within_base_accepts_windows_substitution_path(self):
+        managed_path = r"\\?\C:\repo\agent-skill\repositories\demo-repo\bundle\frontend-skill"
+        base_path = r"C:\repo\agent-skill\repositories"
+
+        self.assertTrue(link_skills.is_path_within_base(managed_path, base_path))
 
     def test_default_skill_catalog_includes_ui_ux_pro_max_repo_with_explicit_agents(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))

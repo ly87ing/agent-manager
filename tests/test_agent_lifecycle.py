@@ -377,6 +377,31 @@ class ReconcileAgentTests(unittest.TestCase):
         self.assertTrue(result)
         run_cmd.assert_called_once_with("brew reinstall --cask claude-code")
 
+    def test_reconcile_agent_does_not_repair_missing_runtime_entrypoint_in_offline_mode(self):
+        definition = {
+            "display_name": "Claude Code",
+            "bin": "claude",
+            "providers": {
+                "brew": {
+                    "install": "brew install --cask claude-code",
+                    "upgrade": "brew upgrade --cask claude-code",
+                }
+            },
+        }
+        policy = {"enabled": True, "auto_update": True, "preferred_provider": "brew"}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", return_value=["brew-cask"]),
+            mock.patch.object(sync_agents, "is_agent_installed", return_value=False),
+            mock.patch.object(sync_agents, "run_cmd", return_value=(True, "reinstalled")) as run_cmd,
+            self.assertLogs(level="ERROR") as logs,
+        ):
+            result = sync_agents.reconcile_agent("claude-code", definition, policy, offline=True)
+
+        self.assertFalse(result)
+        run_cmd.assert_not_called()
+        self.assertTrue(any("离线模式" in line and "修复" in line for line in logs.output), logs.output)
+
     def test_brew_probe_failure_skips_direct_upgrade(self):
         definition = {
             "display_name": "OpenCode",

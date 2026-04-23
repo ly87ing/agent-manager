@@ -221,6 +221,12 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=T
             logging.info(f"[AGENT: {label}] 检测到外部安装，但当前无受管 Provider，跳过更新。")
             return True
         if not runtime_ready:
+            if offline:
+                if dry_run:
+                    logging.info(f"[AGENT: {label}] (预览: 离线模式会阻止修复缺失的运行入口)")
+                    return True
+                logging.error(f"[AGENT: {label}] 离线模式下禁止修复缺失的运行入口。")
+                return False
             logging.warning(f"[AGENT: {label}] 检测到受管 Provider，但运行入口缺失，准备尝试修复...")
             actual_provider_keys = [canonical_provider_name(provider) for provider in managed_actual]
             p_key = preferred if preferred in actual_provider_keys else actual_provider_keys[0]

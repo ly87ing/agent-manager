@@ -3,9 +3,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import ntpath
 import os
 import re
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 
@@ -513,12 +515,10 @@ def actual_skill_targets(target_path: str) -> tuple[dict[str, str], set[str]]:
     broken: set[str] = set()
     for name in os.listdir(target_path):
         link_path = Path(target_path) / name
-        if not link_path.is_symlink():
+        if not _is_skill_link_path(link_path):
             continue
         try:
-            raw_target = Path(os.readlink(link_path)).expanduser()
-            resolved_target = raw_target if raw_target.is_absolute() else (link_path.parent / raw_target)
-            actual[name] = str(resolved_target.resolve(strict=False))
+            actual[name] = str(_resolve_skill_link_target(link_path))
             if not link_path.exists():
                 broken.add(name)
         except OSError:
@@ -527,12 +527,92 @@ def actual_skill_targets(target_path: str) -> tuple[dict[str, str], set[str]]:
     return actual, broken
 
 
+def _is_windows_directory_link(path: Path) -> bool:
+    checker = getattr(os.path, "isjunction", None)
+    if checker is not None:
+        try:
+            if checker(path):
+                return True
+        except OSError:
+            return False
+    try:
+        stat_result = os.lstat(path)
+    except OSError:
+        return False
+    file_attrs = getattr(stat_result, "st_file_attributes", 0)
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    directory_flag = getattr(stat, "FILE_ATTRIBUTE_DIRECTORY", 0)
+    return bool(reparse_flag and directory_flag and file_attrs & reparse_flag and file_attrs & directory_flag)
+
+
+def _is_skill_link_path(path: Path) -> bool:
+    return path.is_symlink() or _is_windows_directory_link(path)
+
+
+def _normalize_windows_device_path(path: str | os.PathLike[str]) -> str:
+    path_str = os.fspath(path)
+    prefix_mappings = (
+        ("\\\\?\\UNC\\", "\\\\"),
+        ("\\??\\UNC\\", "\\\\"),
+        ("\\\\?\\", ""),
+        ("\\??\\", ""),
+    )
+    for prefix, replacement in prefix_mappings:
+        if path_str.startswith(prefix):
+            return replacement + path_str[len(prefix):]
+    return path_str
+
+
+def _normalize_comparable_path(path: str | os.PathLike[str]) -> tuple[str, str]:
+    path_str = _normalize_windows_device_path(path)
+    if ntpath.isabs(path_str):
+        return "windows", ntpath.normcase(ntpath.normpath(path_str))
+    return "posix", str(Path(path_str).expanduser().resolve(strict=False))
+
+
+def _paths_match(left: str | os.PathLike[str] | None, right: str | os.PathLike[str] | None) -> bool:
+    if left is None or right is None:
+        return left == right
+    left_kind, left_path = _normalize_comparable_path(left)
+    right_kind, right_path = _normalize_comparable_path(right)
+    if left_kind != right_kind:
+        return False
+    return left_path == right_path
+
+
+def _path_within_base(path: str | os.PathLike[str], base_path: str | os.PathLike[str]) -> bool:
+    path_kind, normalized_path = _normalize_comparable_path(path)
+    base_kind, normalized_base = _normalize_comparable_path(base_path)
+    if path_kind != base_kind:
+        return False
+    commonpath_func = ntpath.commonpath if path_kind == "windows" else os.path.commonpath
+    try:
+        common_path = commonpath_func([normalized_path, normalized_base])
+    except ValueError:
+        return False
+    return common_path == normalized_base
+
+
+def _resolve_skill_link_target(path: Path) -> str:
+    if not _is_skill_link_path(path):
+        raise OSError(f"Not a link entry: {path}")
+    try:
+        raw_target = _normalize_windows_device_path(os.readlink(path))
+        if ntpath.isabs(raw_target):
+            return ntpath.normpath(raw_target)
+        raw_target_path = Path(raw_target).expanduser()
+        resolved_target = raw_target_path if raw_target_path.is_absolute() else (path.parent / raw_target_path)
+        return str(resolved_target.resolve(strict=False))
+    except OSError:
+        if _is_windows_directory_link(path):
+            return str(path.resolve(strict=False))
+        raise
+
+
 def is_managed_skill_target_path(target_path: str, managed_repo_base: Path) -> bool:
     if target_path == "<broken>":
         return False
-    resolved_target = Path(target_path).resolve(strict=False)
-    managed_repo_base = managed_repo_base.resolve()
-    return resolved_target == managed_repo_base or managed_repo_base in resolved_target.parents
+    return _path_within_base(target_path, managed_repo_base)
 
 
 def format_name_set(names: set[str]) -> str:
@@ -852,7 +932,9 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
             expected_names = set(expected_targets)
             actual_names = set(actual_targets)
             missing_names = expected_names - actual_names
-            drift_names = {name for name in expected_names if actual_targets.get(name) != expected_targets.get(name)}
+            drift_names = {
+                name for name in expected_names if not _paths_match(actual_targets.get(name), expected_targets.get(name))
+            }
             extra_managed_names = {
                 name
                 for name, actual_target in actual_targets.items()
