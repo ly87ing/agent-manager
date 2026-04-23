@@ -775,6 +775,50 @@ class LinkSkillsTests(unittest.TestCase):
             self.assertIn("发现孤儿仓库: orphan-skill", combined)
             self.assertIn("移除死链: my-skill", combined)
 
+    def test_dry_run_previews_orphan_repository_cleanup(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            base_dir = temp_root / "skills"
+            repo_dir = base_dir / "repositories" / "orphan-skill"
+            repo_dir.mkdir(parents=True)
+            (repo_dir / ".agent-manager-owned").write_text("true\n", encoding="utf-8")
+            config_path.write_text('{"skills": {}}', encoding="utf-8")
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {},
+                        "agents": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(base_dir),
+                    "--dry-run",
+                    "--yes",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertTrue(repo_dir.exists())
+            self.assertIn("发现孤儿仓库: orphan-skill", combined)
+
     def test_dry_run_previews_dead_link_cleanup_for_currently_managed_skill(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

@@ -821,21 +821,13 @@ def main():
         pending_links,
         duplicate_skill_names,
     )
-    if args.dry_run:
-        scrub_dead_links(
-            ALL_AGENT_TARGETS,
-            repo_base_dir,
-            True,
-            managed_skill_names_by_agent,
-        )
-    else:
-        prune_orphan_repos(repo_base_dir, REPOS.keys(), args.dry_run, args.yes)
-        scrub_dead_links(
-            ALL_AGENT_TARGETS,
-            repo_base_dir,
-            False,
-            managed_skill_names_by_agent,
-        )
+    prune_orphan_repos(repo_base_dir, REPOS.keys(), args.dry_run, args.yes)
+    scrub_dead_links(
+        ALL_AGENT_TARGETS,
+        repo_base_dir,
+        args.dry_run,
+        managed_skill_names_by_agent,
+    )
     if not all_success: sys.exit(1)
     logging.info("技能同步完成！")
 
