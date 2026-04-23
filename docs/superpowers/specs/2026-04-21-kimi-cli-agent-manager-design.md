@@ -1,12 +1,14 @@
 # Kimi CLI 接入 Agent Manager 设计
 
+> Superseded note (2026-04-23): 本文最初记录的是“用户级 `~/.kimi/AGENTS.md` / `~/.kimi/modules`”方案。当前仓库已切换为更符合 Kimi 官方 `AGENTS.md` 层级加载语义的 repo-native `.kimi/AGENTS.md` / `.kimi/modules` 方案；下面内容已按当前实现更新。
+
 ## 目标
 
 将 `Kimi Code CLI` 作为一等受管 agent 接入 `agent-manager`，覆盖以下能力：
 
 - lifecycle：安装、升级、卸载、状态探测
 - MCP：同步到 `~/.kimi/mcp.json`
-- rules：同步到 `~/.kimi/AGENTS.md` 与 `~/.kimi/modules/`
+- rules：同步到 `{{REPO_ROOT}}/.kimi/AGENTS.md` 与 `{{REPO_ROOT}}/.kimi/modules/`
 - skills：同步到 `~/.kimi/skills/`
 
 同时保持项目级规则入口不变，继续复用仓库根和目录级 `AGENTS.md`。
@@ -19,8 +21,8 @@
 2. 官方安装源只托管 `uv` provider，不额外引入 npm 或 brew 的非官方安装路径
 3. MCP 复用现有 JSON `mcpServers` 注入逻辑，不新增 Kimi 特例格式
 4. skills 复用现有目录 link 管理逻辑，目标目录为 `~/.kimi/skills`
-5. rules 为 Kimi 新增独立分发 target，生成 `~/.kimi/AGENTS.md` 与 `~/.kimi/modules`
-6. Kimi 的 rules 产物不能直接复用 Codex 产物，必须把模块引用重写到 `~/.kimi/modules/*.md`
+5. rules 为 Kimi 新增独立分发 target，生成 `{{REPO_ROOT}}/.kimi/AGENTS.md` 与 `{{REPO_ROOT}}/.kimi/modules`
+6. Kimi 的 rules 产物不能直接复用 Codex 产物；由于 Kimi 当前走 repo-native `.kimi/AGENTS.md`，模块引用保持相对 `modules/*.md`
 7. 本轮不托管 `~/.kimi/config.toml`，不接管 provider、login、API key 或 Beta hooks
 
 ## 假设与边界
@@ -31,14 +33,14 @@
 - Kimi 官方推荐安装链路是 `uv tool install --python 3.13 kimi-cli`
 - Kimi 官方 MCP 配置文件是 `~/.kimi/mcp.json`，顶层键为 `mcpServers`
 - Kimi 官方 skills 目录是 `~/.kimi/skills`
-- Kimi 官方会把项目根到当前目录逐层合并的 `AGENTS.md` 注入运行时上下文
+- Kimi 官方会把项目根到当前目录逐层合并的 `AGENTS.md` 与 `.kimi/AGENTS.md` 注入运行时上下文
 
 边界：
 
 - 不托管 `~/.kimi/config.toml`
 - 不托管 Kimi provider 选择、model 配置、登录态或真实 secrets
 - 不托管 Kimi Beta hooks
-- 不新增 Kimi 专属 repo-native 项目配置目录
+- 不新增除 `.kimi/AGENTS.md` / `.kimi/modules` 之外的 Kimi 专属 repo-native 项目配置目录
 - 不把所有 `codex` 专属 skill 无差别开放给 `kimi-cli`
 
 ## 生命周期设计
@@ -111,13 +113,13 @@ skill 暴露策略：
    - 新增 `kimi` target
    - 生成文件名为 `AGENTS.md`
    - 规则主体以现有共享 core 为基础
-   - 模块引用重写到 `~/.kimi/modules/*.md`
+   - 模块引用保持为相对 `modules/*.md`
 2. [`config/rules-targets.list`](/Users/ly/agent-manager/config/rules-targets.list)
-   - 新增 `kimi_global|global|rules/dist/kimi/AGENTS.md|~/.kimi/AGENTS.md`
-   - 新增 `kimi_modules|global|rules/dist/modules|~/.kimi/modules`
+   - 新增 `kimi_global|global|rules/dist/kimi/AGENTS.md|{{REPO_ROOT}}/.kimi/AGENTS.md`
+   - 新增 `kimi_modules|global|rules/dist/modules|{{REPO_ROOT}}/.kimi/modules`
 3. [`agent-rule/scripts/sync-agent-rules.sh`](/Users/ly/agent-manager/agent-rule/scripts/sync-agent-rules.sh)
-   - 补充 `~/.kimi` 目标路径的 agent 安装判定
-   - 使用 `command -v kimi` 判断用户级 target 是否应参与同步
+   - 将 `.kimi/*` 视作 repo-native target
+   - 同步时清理旧的 `~/.kimi/AGENTS.md` 与 `~/.kimi/modules` 遗留路径
 4. [`src/manage_runtime_probe.py`](/Users/ly/agent-manager/src/manage_runtime_probe.py)
    - 扩展 rule target 前缀映射，纳入 `kimi`
 5. [`src/manage_doctor.py`](/Users/ly/agent-manager/src/manage_doctor.py)
@@ -125,9 +127,9 @@ skill 暴露策略：
 
 项目级 rules 保持不变：
 
-- 仓库根 `AGENTS.md` 继续作为 Kimi 的项目级入口
+- 仓库根 `AGENTS.md` 继续作为 Kimi 的项目级入口之一
 - 目录级 `AGENTS.md` 继续由 Kimi 官方的逐层合并机制消费
-- 不新增 `.kimi/AGENTS.md` 这种 repo-native 副本
+- 新增 repo-native `.kimi/AGENTS.md` 作为项目内受管 rules 入口
 
 ## 文档与契约设计
 
@@ -139,7 +141,7 @@ skill 暴露策略：
 需要明确记录：
 
 - `Kimi Code CLI` 已成为受管 agent
-- 用户级托管路径为 `~/.kimi/mcp.json`、`~/.kimi/skills`、`~/.kimi/AGENTS.md`、`~/.kimi/modules`
+- 当前受管路径为 `~/.kimi/mcp.json`、`~/.kimi/skills`、`{{REPO_ROOT}}/.kimi/AGENTS.md`、`{{REPO_ROOT}}/.kimi/modules`
 - `~/.kimi/config.toml` 不在本轮托管范围
 
 ## 失败模式与处理
@@ -153,8 +155,8 @@ skill 暴露策略：
 3. 用户已手工维护 `~/.kimi/skills/`
    - 仅清理 agent-manager 管理的 links
    - 遇到未知冲突目录时直接报错
-4. 用户已存在 `~/.kimi/AGENTS.md` 或 `~/.kimi/modules`
-   - 按现有 rules sync 语义先备份再替换
+4. 用户已存在旧的 `~/.kimi/AGENTS.md` 或 `~/.kimi/modules`
+   - 按现有 rules sync 语义先备份，再清理 legacy 路径
 5. Kimi 对模块引用的消费行为与预期不同
    - `AGENTS.md` 主体必须自洽
    - 后续若验证不兼容，再退回单文件内联方案
@@ -170,7 +172,8 @@ skill 暴露策略：
 3. skills 回滚
    - 仅删除 agent-manager 建立的 links
 4. rules 回滚
-   - 使用 `~/.kimi/AGENTS.md.bak.*` 和 `~/.kimi/modules.bak.*` 恢复
+   - 使用 `{{REPO_ROOT}}/.kimi/AGENTS.md.bak.*` 和 `{{REPO_ROOT}}/.kimi/modules.bak.*` 恢复
+   - 如需恢复旧的用户级入口，再显式从 `~/.kimi/*.bak.*` 取回 legacy 备份
 
 ## 验证方式
 
@@ -195,6 +198,6 @@ skill 暴露策略：
 - `agent-manager` 能识别并管理 `Kimi Code CLI`
 - `~/.kimi/mcp.json` 能收到受管 MCP
 - `~/.kimi/skills/` 能收到与 `Claude Code` 同级别的受管 skills scope
-- `~/.kimi/AGENTS.md` 与 `~/.kimi/modules/` 能被稳定生成与同步
+- `{{REPO_ROOT}}/.kimi/AGENTS.md` 与 `{{REPO_ROOT}}/.kimi/modules/` 能被稳定生成与同步
 - README 和架构文档与实现保持一致
 - 本轮实现不修改 `~/.kimi/config.toml`

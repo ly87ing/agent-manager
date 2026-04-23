@@ -1,10 +1,12 @@
 # Kimi CLI Integration Implementation Plan
 
+> Superseded note (2026-04-23): 本计划最初按“用户级 `~/.kimi/AGENTS.md` / `~/.kimi/modules`”方案编写。当前仓库实现已切换为 repo-native `.kimi/AGENTS.md` / `.kimi/modules`，下面凡涉及 Kimi rules 目标路径的描述，均以当前实现为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将 `Kimi Code CLI` 接入 `agent-manager` 的 lifecycle、MCP、rules 和 skills 管理链路，同时保持 `~/.kimi/config.toml` 不在本轮托管范围。
 
-**Architecture:** 这次变更复用现有 `Claude Code` / `Gemini CLI` / `Codex` 的管理模式，只在稳定 agent id、provider 探测、目标路径映射和规则分发目标上增加 `kimi-cli`。实现遵循最小本地改动原则：MCP 继续走 JSON `mcpServers`，skills 继续走目录 link，rules 新增 `kimi` target 并把模块引用重写到 `~/.kimi/modules/*.md`，不碰 Kimi 的登录态、provider、model 和 hooks。
+**Architecture:** 这次变更复用现有 `Claude Code` / `Gemini CLI` / `Codex` 的管理模式，只在稳定 agent id、provider 探测、目标路径映射和规则分发目标上增加 `kimi-cli`。实现遵循最小本地改动原则：MCP 继续走 JSON `mcpServers`，skills 继续走目录 link，rules 新增 `kimi` target 并分发到 repo-native `.kimi/AGENTS.md` / `.kimi/modules`，不碰 Kimi 的登录态、provider、model 和 hooks。
 
 **Tech Stack:** Python unittest, JSON config, Bash, Markdown, generated rule artifacts
 
@@ -532,7 +534,7 @@ Run: `python3 -m unittest tests.test_manage_runtime_probe.ManageRuntimeProbeTest
 
 Expected: FAIL，当前还没有 `kimi` rule target，也还没有 `.kimi` 路径的同步分支。
 
-- [ ] **Step 4: 在 rules 构建器中增加 Kimi target，并把模块引用改写到 `~/.kimi/modules`**
+- [ ] **Step 4: 在 rules 构建器中增加 Kimi target，并让 repo-native `.kimi/AGENTS.md` 使用相对 `modules/` 引用**
 
 ```python
 TARGETS = ("codex", "claude", "gemini", "cursor", "kimi")
@@ -568,8 +570,8 @@ def render_target_content(target: str, core_lines: list[str], adapter_lines: lis
 - [ ] **Step 5: 增加 manifest 与 rules sync 的 Kimi 目标**
 
 ```text
-kimi_global|global|rules/dist/kimi/AGENTS.md|~/.kimi/AGENTS.md
-kimi_modules|global|rules/dist/modules|~/.kimi/modules
+kimi_global|global|rules/dist/kimi/AGENTS.md|{{REPO_ROOT}}/.kimi/AGENTS.md
+kimi_modules|global|rules/dist/modules|{{REPO_ROOT}}/.kimi/modules
 ```
 
 ```bash
@@ -617,7 +619,7 @@ Expected: PASS，并生成 `agent-rule/rules/dist/kimi/AGENTS.md`。
 
 Run: `python3 -m unittest tests.test_manage_runtime_probe tests.test_sync_rules -v`
 
-Expected: PASS，`rule_target_agent_id("kimi_global")` 和 `rule_target_agent_id("kimi_modules")` 都映射到 `kimi-cli`，rules sync 可以把新产物分发到 `~/.kimi/AGENTS.md`。
+Expected: PASS，`rule_target_agent_id("kimi_global")` 和 `rule_target_agent_id("kimi_modules")` 都映射到 `kimi-cli`，rules sync 可以把新产物分发到 `{{REPO_ROOT}}/.kimi/AGENTS.md`。
 
 - [ ] **Step 8: 提交这一组变更**
 
@@ -642,8 +644,8 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("Kimi Code CLI", readme)
         self.assertIn("~/.kimi/mcp.json", readme)
         self.assertIn("~/.kimi/skills", readme)
-        self.assertIn("~/.kimi/AGENTS.md", readme)
-        self.assertIn("~/.kimi/modules", readme)
+        self.assertIn("{{REPO_ROOT}}/.kimi/AGENTS.md", readme)
+        self.assertIn("{{REPO_ROOT}}/.kimi/modules", readme)
         self.assertIn("~/.kimi/config.toml", readme)
         self.assertIn("不在本轮托管范围", readme)
 
@@ -652,8 +654,8 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("Kimi Code CLI", architecture)
         self.assertIn("~/.kimi/mcp.json", architecture)
         self.assertIn("~/.kimi/skills", architecture)
-        self.assertIn("~/.kimi/AGENTS.md", architecture)
-        self.assertIn("~/.kimi/modules", architecture)
+        self.assertIn("{{REPO_ROOT}}/.kimi/AGENTS.md", architecture)
+        self.assertIn("{{REPO_ROOT}}/.kimi/modules", architecture)
         self.assertIn("~/.kimi/config.toml", architecture)
         self.assertIn("不在本轮托管范围", architecture)
 ```
@@ -667,13 +669,13 @@ Expected: FAIL，README 和架构文档还没有 Kimi 管理路径及边界说�
 - [ ] **Step 3: 更新 README 的受管 agent、路径和边界说明**
 
 ```md
-默认受管 Agent 当前包含 `Claude Code`、`Gemini CLI`、`Kimi Code CLI`、`Cursor IDE` 和 `OpenCode`；其中 `Kimi Code CLI` 的 lifecycle 由 `uv` 管理，MCP / skills / rules 目标分别为 `~/.kimi/mcp.json`、`~/.kimi/skills`、`~/.kimi/AGENTS.md` 和 `~/.kimi/modules`。`~/.kimi/config.toml` 不在本轮托管范围内。
+默认受管 Agent 当前包含 `Claude Code`、`Gemini CLI`、`Kimi Code CLI`、`Cursor IDE` 和 `OpenCode`；其中 `Kimi Code CLI` 的 lifecycle 由 `uv` 管理，MCP / skills / rules 目标分别为 `~/.kimi/mcp.json`、`~/.kimi/skills`、`{{REPO_ROOT}}/.kimi/AGENTS.md` 和 `{{REPO_ROOT}}/.kimi/modules`。`~/.kimi/config.toml` 不在本轮托管范围内。
 ```
 
 - [ ] **Step 4: 更新架构文档的扩展性与 rules 分发说明**
 
 ```md
-添加新 Agent 时，除 `config/agents.json` 与 `config/manager.json` 外，如需 MCP / skills / rules 支持，还需要分别在 `config/mcp.json`、`config/skills.json` 与 `config/rules-targets.list` 中声明目标路径。`Kimi Code CLI` 当前的受管路径为 `~/.kimi/mcp.json`、`~/.kimi/skills`、`~/.kimi/AGENTS.md` 和 `~/.kimi/modules`；`~/.kimi/config.toml` 保持用户自管。
+添加新 Agent 时，除 `config/agents.json` 与 `config/manager.json` 外，如需 MCP / skills / rules 支持，还需要分别在 `config/mcp.json`、`config/skills.json` 与 `config/rules-targets.list` 中声明目标路径。`Kimi Code CLI` 当前的受管路径为 `~/.kimi/mcp.json`、`~/.kimi/skills`、`{{REPO_ROOT}}/.kimi/AGENTS.md` 和 `{{REPO_ROOT}}/.kimi/modules`；`~/.kimi/config.toml` 保持用户自管。
 ```
 
 - [ ] **Step 5: 重新运行文档契约测试**
