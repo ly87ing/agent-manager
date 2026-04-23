@@ -8,9 +8,9 @@
 - Before edits that change behavior, touch shared code, or span multiple files, inspect the affected code and nearby tests first.
 - After every change, run the smallest relevant verification that could fail.
 - If you skip verification or cannot run it, say so explicitly.
-- If architecture, shared interfaces, or dependency boundaries change, read `~/.kimi/modules/architecture.md` before editing.
-- If code style, config, data contracts, or comments change, read `~/.kimi/modules/style.md` before editing.
-- If UI, user flows, frontend validation, or browser automation change, read `~/.kimi/modules/frontend.md` before editing.
-- If the task involves Playwright, generators, generated artifacts, or debug output, read `~/.kimi/modules/artifact-hygiene.md` before editing.
+- If architecture, shared interfaces, or dependency boundaries change, read `modules/architecture.md` before editing.
+- If code style, config, data contracts, or comments change, read `modules/style.md` before editing.
+- If UI, user flows, frontend validation, or browser automation change, read `modules/frontend.md` before editing.
+- If the task involves Playwright, generators, generated artifacts, or debug output, read `modules/artifact-hygiene.md` before editing.
 - Prefer local verification, explicit file edits, and deterministic commands over speculative narration.
 - Keep Kimi CLI guidance minimal and rely on shared rules for general workflow.

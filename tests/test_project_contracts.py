@@ -349,8 +349,8 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("~/.kimi/mcp.json", readme)
         self.assertIn("│ Kimi Code CLI", readme)
         self.assertIn("~/.kimi/skills", readme)
-        self.assertIn("~/.kimi/AGENTS.md", readme)
-        self.assertIn("~/.kimi/modules", readme)
+        self.assertIn("`{{REPO_ROOT}}/.kimi/AGENTS.md`", readme)
+        self.assertIn("`{{REPO_ROOT}}/.kimi/modules`", readme)
         self.assertIn("`~/.kimi/config.toml` 不在本轮托管范围", readme)
 
     def test_readme_documents_agent_skills_scope_matches_config(self):
@@ -498,8 +498,8 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("对 `Codex` 提供受管 MCP / skills / rules 支持", architecture)
         self.assertIn("~/.kimi/mcp.json", architecture)
         self.assertIn("~/.kimi/skills", architecture)
-        self.assertIn("~/.kimi/AGENTS.md", architecture)
-        self.assertIn("~/.kimi/modules", architecture)
+        self.assertIn("`{{REPO_ROOT}}/.kimi/AGENTS.md`", architecture)
+        self.assertIn("`{{REPO_ROOT}}/.kimi/modules`", architecture)
         self.assertIn("`~/.kimi/config.toml` 不在本轮托管范围", architecture)
         self.assertIn("如需启用某类能力，再声明对应的 MCP / skills / rules target path", architecture)
         self.assertNotIn("新增 Agent 时必须同时声明 MCP / skills / rules 三类 target path", architecture)

@@ -4,6 +4,7 @@ Focus on performance and accessibility. Ensure all dynamic data is validated.
 
 ## Browser Tool Selection Rules
 - **Choose by Intent, Not Raw Capability**: Prefer Chrome DevTools or `agent-browser` for screenshot-driven UI verification, layout/alignment checks, scroll behavior checks, multi-tab sweeps, and other one-off visual inspection. Use `agent-browser` when the goal is for the agent to complete a persistent, multi-step website task. Use Playwright when the goal is reproducible assertions, regression coverage, network mocking, or CI-stable automation.
+- **Bias Toward Session-Aware Tools for Authenticated Flows**: If the task depends on reusing an authenticated browser session, persistent profile state, or a long-lived interactive browsing flow, prefer `agent-browser` first instead of assuming a fresh isolated Chrome DevTools session will have the right context.
 
 ## Playwright Execution Rules
 - **Default to Headless**: All Playwright CLI invocations MUST use headless mode by default. This is essential for CI/CD environments, batch execution, and minimizing resource usage without disrupting the user's workspace.
@@ -19,6 +20,7 @@ Focus on performance and accessibility. Ensure all dynamic data is validated.
 ## Chrome DevTools Escalation Rules
 - **Use Chrome DevTools for Browser-Level Diagnosis**: Use Chrome DevTools, or the agent's Chrome DevTools integration when available, for performance traces, Core Web Vitals, long tasks, layout shift, paint or rendering analysis, memory issues, request waterfall inspection, headers or timing breakdowns, cache behavior, initiator chains, throttling, and low-level WebSocket inspection.
 - **Prefer Chrome DevTools for Visual Verification**: Prefer Chrome DevTools or `agent-browser` for screenshot capture, visual comparison, layout inspection, CSS debugging, responsive spot checks, and manual route-by-route UI review when the user did not ask for a reusable regression test.
+- **Use Isolated Sessions by Default, Attach Only When Context Matters**: Prefer isolated Chrome DevTools sessions by default to avoid cross-agent profile interference. If the work explicitly depends on an existing logged-in Chrome session, attach to a running browser or switch to `agent-browser` instead of silently assuming isolation is harmless.
 - **Prefer Root-Cause Analysis Over Ad Hoc Automation**: When the goal is to diagnose performance or network behavior rather than preserve a regression test, prefer Chrome DevTools over writing throwaway Playwright code.
 - **Do Not Replace Regression Coverage**: Chrome DevTools is a diagnosis tool, not a substitute for Playwright regression coverage. If DevTools work reveals a stable user-facing bug or scenario worth protecting, add or update the smallest relevant Playwright check unless the user explicitly wants manual diagnosis only.
 - **Split Network Work by Intent**: For network issues, use Playwright when you need deterministic request assertions, waiting, interception, or mocking. Use Chrome DevTools when you need waterfall, cache, priority, initiator, connection, or timing analysis.

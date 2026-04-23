@@ -29,7 +29,6 @@ TARGET_SPECS = {
 }
 MODULE_MANIFEST_TARGETS = {
     "codex": "codex_modules",
-    "kimi": "kimi_modules",
 }
 
 

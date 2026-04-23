@@ -55,7 +55,7 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `preferred_provider` 必须指向 `providers` 中真实存在的键，否则生命周期同步应直接失败
 - `skills.json` 中的 skill 仓库支持 `commit` / `ref` 版本约束；技能名来自仓库内 `SKILL.md` frontmatter 的 `name`
 - 新增 Agent 时，如需启用某类能力，再声明对应的 MCP / skills / rules target path：`config/mcp.json` 的 `agent_paths`、`config/skills.json` 的 `agents` 映射、`config/rules-targets.list` 的规则与 modules 分发目标
-- `Kimi Code CLI` 当前受管路径为 `~/.kimi/mcp.json`、`~/.kimi/skills`、`~/.kimi/AGENTS.md`、`~/.kimi/modules`；`~/.kimi/config.toml` 不在本轮托管范围
+- `Kimi Code CLI` 当前受管路径为 `~/.kimi/mcp.json`、`~/.kimi/skills`、`{{REPO_ROOT}}/.kimi/AGENTS.md`、`{{REPO_ROOT}}/.kimi/modules`；`~/.kimi/config.toml` 不在本轮托管范围
 
 ### 3. 同步引擎 (Sync Engines)
 **文件位置**: 各agent-*目录下的sync_*.py脚本

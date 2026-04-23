@@ -165,8 +165,14 @@ cleanup_legacy_target_paths() {
     cursor_global)
       legacy_path="$HOME/.cursor/rules/global.md"
       ;;
+    kimi_global)
+      legacy_path="$HOME/.kimi/AGENTS.md"
+      ;;
     codex_modules)
       legacy_path="$HOME/.codex/rules/modules"
+      ;;
+    kimi_modules)
+      legacy_path="$HOME/.kimi/modules"
       ;;
     claude_modules)
       legacy_path="$HOME/.claude/rules/modules"
@@ -217,7 +223,7 @@ is_ephemeral_artifact() {
 is_repo_native_target() {
   local target="$1"
   case "$target" in
-    "$workspace_root"/.cursor/*|"$workspace_root"/.github/*|"$workspace_root"/AGENTS.md|"$workspace_root"/CLAUDE.md|"$workspace_root"/GEMINI.md)
+    "$workspace_root"/.cursor/*|"$workspace_root"/.github/*|"$workspace_root"/.kimi/*|"$workspace_root"/AGENTS.md|"$workspace_root"/CLAUDE.md|"$workspace_root"/GEMINI.md)
       return 0
       ;;
     *)
