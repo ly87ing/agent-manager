@@ -1954,11 +1954,32 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertNotIn("commit", repo)
         self.assertNotIn("ref", repo)
 
+    def test_default_skill_catalog_includes_anthropic_frontend_design_skill_for_kimi_only(self):
+        skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
+
+        repo = skills_config["repositories"].get("anthropic-frontend-design-skill")
+
+        self.assertIsNotNone(repo)
+        self.assertEqual(repo["url"], "https://github.com/anthropics/skills.git")
+        self.assertEqual(repo["skill_paths"], ["skills/frontend-design"])
+        self.assertEqual(repo["skill_count"], 1)
+        self.assertEqual(repo["agents"], ["kimi-cli"])
+        self.assertNotIn("commit", repo)
+        self.assertNotIn("ref", repo)
+
     def test_default_manager_policy_explicitly_enables_openai_frontend_skill(self):
         manager_config = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
 
         self.assertEqual(
             manager_config["skills"].get("openai-frontend-skill"),
+            {"enabled": True},
+        )
+
+    def test_default_manager_policy_explicitly_enables_anthropic_frontend_design_skill(self):
+        manager_config = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            manager_config["skills"].get("anthropic-frontend-design-skill"),
             {"enabled": True},
         )
 

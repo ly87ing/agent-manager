@@ -362,6 +362,12 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("`oa-skill`", readme)
         self.assertIn("`xyai-manager`", readme)
 
+    def test_readme_documents_anthropic_frontend_design_skill_for_kimi(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("`anthropic-frontend-design-skill`", readme)
+        self.assertIn("Anthropic 官方 `skills/frontend-design`", readme)
+        self.assertIn("仅面向 `Kimi Code CLI` 暴露", readme)
+
     def test_readme_documents_cc_bridge_runtime_workflow(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("make cc-bridge-install", readme)

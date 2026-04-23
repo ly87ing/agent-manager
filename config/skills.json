@@ -21,6 +21,12 @@
       "skill_count": 1,
       "agents": ["codex"]
     },
+    "anthropic-frontend-design-skill": {
+      "url": "https://github.com/anthropics/skills.git",
+      "skill_paths": ["skills/frontend-design"],
+      "skill_count": 1,
+      "agents": ["kimi-cli"]
+    },
     "playwright-best-practices-skill": {
       "url": "https://github.com/currents-dev/playwright-best-practices-skill.git",
       "skill_count": 1,
