@@ -482,17 +482,40 @@ def link_points_within_base(link_path, base_path):
         return False
 
 
-def scrub_dead_links(agents_config, base_dir, dry_run=False, managed_skill_names_by_agent=None):
+def link_points_within_any_base(link_path, base_paths):
+    for base_path in base_paths or ():
+        if link_points_within_base(link_path, base_path):
+            return True
+    return False
+
+
+def scrub_dead_links(
+    agents_config,
+    base_dir,
+    dry_run=False,
+    managed_skill_names_by_agent=None,
+    planned_removed_base_paths=None,
+):
     base_dir = Path(base_dir).resolve()
     managed_skill_names_by_agent = managed_skill_names_by_agent or {}
+    planned_removed_base_paths = tuple(
+        Path(base_path).resolve(strict=False) for base_path in (planned_removed_base_paths or ())
+    )
     for agent_name, target_path in agents_config.items():
         agent_managed_skill_names = set(managed_skill_names_by_agent.get(agent_name, ()))
         target_base = Path(target_path).expanduser()
         if not target_base.exists() or not target_base.is_dir(): continue
         for item in target_base.iterdir():
-            if item.exists() or not is_link_entry(item):
+            if not is_link_entry(item):
                 continue
-            if item.name not in agent_managed_skill_names and not link_points_within_base(item, base_dir):
+            points_to_planned_removed_base = link_points_within_any_base(item, planned_removed_base_paths)
+            if item.exists() and not points_to_planned_removed_base:
+                continue
+            if (
+                item.name not in agent_managed_skill_names
+                and not link_points_within_base(item, base_dir)
+                and not points_to_planned_removed_base
+            ):
                 continue
             logging.info(f"[AGENT: {agent_name}] 移除死链: {item.name}")
             if not dry_run:
@@ -521,7 +544,9 @@ def resolve_repo_link_targets(active_targets, all_targets, allowed_agents):
 def prune_orphan_repos(base_dir, managed_names, dry_run=False, force_yes=False):
     base_path = Path(base_dir).resolve()
     excluded = {".gitignore", "__pycache__"}
-    if not base_path.exists(): return
+    planned_removed_paths = []
+    if not base_path.exists():
+        return planned_removed_paths
     for item in base_path.iterdir():
         if not item.is_dir() or item.name in managed_names or item.name in excluded:
             continue
@@ -529,9 +554,15 @@ def prune_orphan_repos(base_dir, managed_names, dry_run=False, force_yes=False):
             logging.info(f"跳过非托管目录: {item.name}")
             continue
         logging.warning(f"发现孤儿仓库: {item.name}")
-        if dry_run: continue
+        item_path = item.resolve(strict=False)
+        if dry_run:
+            if force_yes:
+                planned_removed_paths.append(item_path)
+            continue
         if force_yes or (sys.stdin.isatty() and input(f"删除 {item.name}? (y/n): ").lower() == 'y'):
+            planned_removed_paths.append(item_path)
             shutil.rmtree(item); logging.info(f"已清理: {item.name}")
+    return planned_removed_paths
 
 
 def merge_allowed_agents(existing_agents, new_agents):
@@ -821,12 +852,13 @@ def main():
         pending_links,
         duplicate_skill_names,
     )
-    prune_orphan_repos(repo_base_dir, REPOS.keys(), args.dry_run, args.yes)
+    planned_removed_repo_paths = prune_orphan_repos(repo_base_dir, REPOS.keys(), args.dry_run, args.yes)
     scrub_dead_links(
         ALL_AGENT_TARGETS,
         repo_base_dir,
         args.dry_run,
         managed_skill_names_by_agent,
+        planned_removed_repo_paths,
     )
     if not all_success: sys.exit(1)
     logging.info("技能同步完成！")
