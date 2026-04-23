@@ -20,6 +20,7 @@ from src.manage_runtime_probe import (
     ProviderInventory as ProviderCache,
     detect_all_providers as detect_all_providers_runtime,
     get_pkg_name,
+    is_agent_installed,
 )
 from src.runtime_logging import configure_logging
 
@@ -89,6 +90,23 @@ def get_update_probe_cmd(provider_name, provider_cfg):
         return f"brew outdated {pkg_name}"
     return None
 
+
+def get_repair_cmd(provider_name, provider_cfg):
+    if not provider_cfg:
+        return None
+    explicit = provider_cfg.get("repair")
+    if explicit:
+        return explicit
+    install_cmd = provider_cfg.get("install")
+    if provider_name.startswith("brew"):
+        pkg_name = get_pkg_name(install_cmd or "")
+        if not pkg_name:
+            return None
+        if provider_name == "brew-cask":
+            return f"brew reinstall --cask {pkg_name}"
+        return f"brew reinstall {pkg_name}"
+    return provider_cfg.get("upgrade") or install_cmd
+
 def resolve_active_provider_variant(managed_actual, provider_key):
     for provider_name in managed_actual:
         if canonical_provider_name(provider_name) == provider_key:
@@ -119,6 +137,7 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=T
     system_actual = state["system_only"]
     unsupported_actual = state["unsupported"]
     is_installed = len(all_actual) > 0
+    runtime_ready = is_agent_installed(agent_id, definition)
     
     if len(managed_actual) > 1:
         logging.warning(f"[AGENT: {label}] 发现多源安装冲突! 涉及: {', '.join(managed_actual)}。")
@@ -200,6 +219,32 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=T
     elif enabled and is_installed:
         if not managed_actual:
             logging.info(f"[AGENT: {label}] 检测到外部安装，但当前无受管 Provider，跳过更新。")
+            return True
+        if not runtime_ready:
+            logging.warning(f"[AGENT: {label}] 检测到受管 Provider，但运行入口缺失，准备尝试修复...")
+            actual_provider_keys = [canonical_provider_name(provider) for provider in managed_actual]
+            p_key = preferred if preferred in actual_provider_keys else actual_provider_keys[0]
+            active_provider = resolve_active_provider_variant(managed_actual, p_key)
+            p_cfg = providers.get(p_key)
+            repair_cmd = get_repair_cmd(active_provider, p_cfg)
+            if not repair_cmd:
+                logging.error(f"[AGENT: {label}] Provider '{active_provider}' 缺少 repair/install/upgrade 命令，无法修复。")
+                return False
+            if dry_run:
+                logging.info(f"  (预览: 计划执行 {repair_cmd})")
+                return True
+            success, out = run_cmd(repair_cmd)
+            if not success:
+                logging.error(f"[AGENT: {label}] 修复失败: {out}")
+                return False
+            post_state = detect_provider_state(bin_name, definition)
+            if not post_state["managed"]:
+                logging.error(f"[AGENT: {label}] 修复后复核失败：受管 Provider 已丢失。")
+                return False
+            if not is_agent_installed(agent_id, definition):
+                logging.error(f"[AGENT: {label}] 修复后复核失败：运行入口仍缺失。")
+                return False
+            logging.info(f"[AGENT: {label}] 修复成功。")
             return True
         if not auto_update:
             logging.info(f"[AGENT: {label}] 状态就绪，auto_update 关闭，跳过更新。")

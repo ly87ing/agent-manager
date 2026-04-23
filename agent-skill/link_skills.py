@@ -415,12 +415,14 @@ def scrub_dead_links(agents_config, base_dir, dry_run=False):
         for item in target_base.iterdir():
             if not item.is_symlink() or item.exists():
                 continue
-            if link_points_within_base(item, base_dir):
-                logging.info(f"[AGENT: {agent_name}] 移除死链: {item.name}")
-                if not dry_run:
-                    item.unlink()
+            logging.info(f"[AGENT: {agent_name}] 移除死链: {item.name}")
+            if not dry_run:
+                item.unlink()
 
 def is_active_skill_target(agent_name, target_path, agent_defs):
+    target_base = Path(target_path).expanduser()
+    if target_base.exists() or target_base.parent.exists():
+        return True
     agent_def = agent_defs.get(agent_name)
     if agent_def is not None:
         return is_agent_installed(agent_name, agent_def)

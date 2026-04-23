@@ -12,6 +12,44 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class ManageDoctorReportTests(unittest.TestCase):
+    def test_report_flags_enabled_agent_when_provider_exists_but_runtime_entrypoint_is_missing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {\n    "claude-code": { "enabled": true, "auto_install": true, "auto_update": true }\n  },\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "agents.json").write_text(
+                '{\n  "claude-code": {\n    "display_name": "Claude Code",\n    "bin": "claude",\n    "preferred_provider": "brew",\n    "providers": {\n      "brew": {\n        "install": "brew install --cask claude-code",\n        "upgrade": "brew upgrade --cask claude-code"\n      }\n    }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{"agent_paths": {}, "servers": {}}',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{"repositories": {}, "agents": {}}',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            with (
+                mock.patch("src.manage_doctor.detect_all_providers", return_value=["brew-cask"]),
+                mock.patch("src.manage_doctor.is_agent_installed", return_value=False),
+            ):
+                report = build_report(
+                    root_dir=temp_root,
+                    config_file=temp_root / "config" / "manager.json",
+                    python_cmd="python3",
+                )
+
+            self.assertEqual(report["status"], "error")
+            agent_names = {entry["name"]: entry for entry in report["sections"]["agents"]}
+            self.assertEqual(agent_names["Claude Code"]["status"], "error")
+            self.assertIn("运行入口缺失", agent_names["Claude Code"]["message"])
+
     def test_report_flags_repo_secret_outside_secrets_directory(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
@@ -214,6 +252,7 @@ class ManageDoctorReportTests(unittest.TestCase):
                 "kimi_global|global|rules/dist/kimi/AGENTS.md|{{REPO_ROOT}}/.kimi/AGENTS.md\n",
                 encoding="utf-8",
             )
+            target_path.unlink(missing_ok=True)
 
             with mock.patch(
                 "src.manage_doctor.is_agent_installed",
@@ -254,6 +293,7 @@ class ManageDoctorReportTests(unittest.TestCase):
                 "kimi_global|global|rules/dist/kimi/AGENTS.md|{{REPO_ROOT}}/.kimi/AGENTS.md\n",
                 encoding="utf-8",
             )
+            target_path.unlink(missing_ok=True)
 
             with mock.patch(
                 "src.manage_doctor.is_agent_installed",
@@ -586,6 +626,62 @@ class ManageDoctorReportTests(unittest.TestCase):
             skill_names = {entry["name"]: entry for entry in report["sections"]["skills"]}
             self.assertEqual(skill_names["Claude Code"]["status"], "error")
             self.assertIn("other-skill", skill_names["Claude Code"]["message"])
+
+    def test_report_flags_broken_skill_link_even_when_managed_targets_match(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            target_dir = Path(temp_dir) / "targets" / "claude"
+            managed_repo = temp_root / "agent-skill" / "repositories" / "demo-repo"
+            managed_skill = managed_repo / "bundle" / "managed-skill"
+            missing_skill = Path(temp_dir) / "external" / "missing-skill"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            target_dir.mkdir(parents=True)
+            managed_skill.mkdir(parents=True)
+            (managed_repo / ".git").mkdir()
+            (managed_repo / ".agent-manager-owned").write_text("true\n", encoding="utf-8")
+            (managed_skill / "SKILL.md").write_text(
+                "---\nname: managed-skill\ndescription: Managed\n---\n\n# Managed\n",
+                encoding="utf-8",
+            )
+            (target_dir / "managed-skill").symlink_to(managed_skill)
+            (target_dir / "dead-skill").symlink_to(missing_skill)
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {\n    "demo-repo": { "enabled": true }\n  },\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "demo-repo": {
+                                "url": "https://example.invalid/repo.git",
+                                "agents": ["claude-code"],
+                            }
+                        },
+                        "agents": {
+                            "claude-code": str(target_dir),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{"servers": {}, "agent_paths": {}}',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            report = build_report(
+                root_dir=temp_root,
+                config_file=temp_root / "config" / "manager.json",
+                python_cmd="python3",
+            )
+
+            self.assertEqual(report["status"], "error")
+            skill_names = {entry["name"]: entry for entry in report["sections"]["skills"]}
+            self.assertEqual(skill_names["Claude Code"]["status"], "error")
+            self.assertIn("dead-skill", skill_names["Claude Code"]["message"])
 
     def test_report_flags_managed_mcp_content_drift_for_expected_server(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -508,8 +508,9 @@ def expected_managed_skill_targets(root_dir: Path, config: dict, skill_cfg: dict
     return expected, problems
 
 
-def actual_skill_targets(target_path: str) -> dict[str, str]:
+def actual_skill_targets(target_path: str) -> tuple[dict[str, str], set[str]]:
     actual: dict[str, str] = {}
+    broken: set[str] = set()
     for name in os.listdir(target_path):
         link_path = Path(target_path) / name
         if not link_path.is_symlink():
@@ -518,9 +519,12 @@ def actual_skill_targets(target_path: str) -> dict[str, str]:
             raw_target = Path(os.readlink(link_path)).expanduser()
             resolved_target = raw_target if raw_target.is_absolute() else (link_path.parent / raw_target)
             actual[name] = str(resolved_target.resolve(strict=False))
+            if not link_path.exists():
+                broken.add(name)
         except OSError:
             actual[name] = "<broken>"
-    return actual
+            broken.add(name)
+    return actual, broken
 
 
 def is_managed_skill_target_path(target_path: str, managed_repo_base: Path) -> bool:
@@ -727,9 +731,13 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
         label = get_agent_display_name(agent_id, definition)
         providers = detect_all_providers(definition.get("bin", ""), definition, inventory=inventory)
         is_active = len(providers) > 0
+        runtime_ready = is_agent_installed(agent_id, definition)
         desired = policy.get("enabled", True)
         preferred = policy.get("preferred_provider") or definition.get("preferred_provider", "npm")
-        if is_active == desired:
+        if is_active and not runtime_ready:
+            detail = providers[0] if providers else "unknown"
+            append_entry(report, "agents", make_entry(label, "error", f"{detail} 已安装，但运行入口缺失"))
+        elif is_active == desired:
             detail = providers[0] if is_active else "未安装"
             if is_active and providers[0].split("-")[0] != preferred.split("-")[0]:
                 detail = f"{detail} (偏离偏好: {preferred})"
@@ -840,7 +848,7 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
                     make_entry(label, "error", f"技能托管目标解析失败: {'; '.join(skill_target_problems)}"),
                 )
                 continue
-            actual_targets = actual_skill_targets(target_path)
+            actual_targets, broken_names = actual_skill_targets(target_path)
             expected_names = set(expected_targets)
             actual_names = set(actual_targets)
             missing_names = expected_names - actual_names
@@ -850,7 +858,17 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
                 for name, actual_target in actual_targets.items()
                 if name not in expected_names and is_managed_skill_target_path(actual_target, managed_repo_base)
             }
-            if not missing_names and not drift_names and not extra_managed_names:
+            if broken_names:
+                append_entry(
+                    report,
+                    "skills",
+                    make_entry(
+                        label,
+                        "error",
+                        f"存在死链 skill 链接 ({format_name_set(broken_names)})",
+                    ),
+                )
+            elif not missing_names and not drift_names and not extra_managed_names:
                 append_entry(report, "skills", make_entry(label, "ok", f"{len(expected_names)} 个受管链接"))
             elif missing_names:
                 append_entry(

@@ -340,6 +340,7 @@ class ReconcileAgentTests(unittest.TestCase):
 
         with (
             mock.patch.object(sync_agents, "detect_all_providers", side_effect=[["brew-cask"], ["brew-cask"]]),
+            mock.patch.object(sync_agents, "is_agent_installed", return_value=True),
             mock.patch.object(sync_agents, "run_cmd", side_effect=[(True, "claude-code"), (True, "updated")]) as run_cmd,
         ):
             result = sync_agents.reconcile_agent("claude-code", definition, policy)
@@ -352,6 +353,29 @@ class ReconcileAgentTests(unittest.TestCase):
                 mock.call("brew upgrade --cask claude-code"),
             ],
         )
+
+    def test_reconcile_agent_repairs_managed_provider_when_runtime_entrypoint_is_missing(self):
+        definition = {
+            "display_name": "Claude Code",
+            "bin": "claude",
+            "providers": {
+                "brew": {
+                    "install": "brew install --cask claude-code",
+                    "upgrade": "brew upgrade --cask claude-code",
+                }
+            },
+        }
+        policy = {"enabled": True, "auto_update": True, "preferred_provider": "brew"}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", side_effect=[["brew-cask"], ["brew-cask"]]),
+            mock.patch.object(sync_agents, "is_agent_installed", side_effect=[False, True]),
+            mock.patch.object(sync_agents, "run_cmd", return_value=(True, "reinstalled")) as run_cmd,
+        ):
+            result = sync_agents.reconcile_agent("claude-code", definition, policy)
+
+        self.assertTrue(result)
+        run_cmd.assert_called_once_with("brew reinstall --cask claude-code")
 
     def test_brew_probe_failure_skips_direct_upgrade(self):
         definition = {

@@ -1839,7 +1839,7 @@ class LinkSkillsTests(unittest.TestCase):
 
             self.assertFalse(link.is_symlink())
 
-    def test_scrub_dead_links_preserves_broken_link_outside_managed_dir_with_same_prefix(self):
+    def test_scrub_dead_links_removes_broken_link_outside_managed_dir_with_same_prefix(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             managed_dir = temp_root / "managed"
@@ -1854,7 +1854,7 @@ class LinkSkillsTests(unittest.TestCase):
 
             link_skills.scrub_dead_links({"TestAgent": str(agent_dir)}, managed_dir)
 
-            self.assertTrue(link.is_symlink())
+            self.assertFalse(link.is_symlink())
 
     def test_default_skill_catalog_includes_ui_ux_pro_max_repo_with_explicit_agents(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
