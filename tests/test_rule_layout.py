@@ -78,10 +78,11 @@ class RuleLayoutTests(unittest.TestCase):
         frontend_module = (ROOT / "agent-rule" / "rules" / "dist" / "modules" / "frontend.md").read_text(
             encoding="utf-8"
         )
-        self.assertIn("Default to Playwright for frontend functional validation", frontend_module)
+        self.assertIn("Prefer Chrome DevTools or `agent-browser` for screenshot-driven UI verification", frontend_module)
+        self.assertIn("Use Playwright for reproducible assertions, regression coverage", frontend_module)
         self.assertIn("Use agent-browser for Agent-Driven Web Tasks", frontend_module)
         self.assertIn("Use Chrome DevTools for Browser-Level Diagnosis", frontend_module)
-        self.assertIn("Do Not Replace Regression Coverage", frontend_module)
+        self.assertIn("report the tool failure explicitly before falling back", frontend_module)
 
     def test_codex_module_paths_follow_manifest_target(self):
         with tempfile.TemporaryDirectory() as temp_dir:

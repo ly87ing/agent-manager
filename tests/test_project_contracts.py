@@ -362,6 +362,11 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("`oa-skill`", readme)
         self.assertIn("`xyai-manager`", readme)
 
+    def test_readme_documents_isolated_chrome_devtools_mcp(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("chrome-devtools-mcp@latest --isolated", readme)
+        self.assertIn("避免多个 agent 共享同一个 browser profile", readme)
+
     def test_readme_documents_anthropic_frontend_design_skill_for_kimi(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("`anthropic-frontend-design-skill`", readme)

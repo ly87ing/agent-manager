@@ -340,7 +340,7 @@ class ManageRuntimeProbeTests(unittest.TestCase):
                 "servers": {
                     "chrome-devtools": {
                         "command": "npx",
-                        "args": ["-y", "chrome-devtools-mcp@latest"],
+                        "args": ["-y", "chrome-devtools-mcp@latest", "--isolated"],
                     }
                 }
             },

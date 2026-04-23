@@ -40,7 +40,7 @@ class SyncMcpTests(unittest.TestCase):
 
         chrome_devtools = definitions["servers"]["chrome-devtools"]
         self.assertEqual(chrome_devtools["command"], "npx")
-        self.assertEqual(chrome_devtools["args"], ["-y", "chrome-devtools-mcp@latest"])
+        self.assertEqual(chrome_devtools["args"], ["-y", "chrome-devtools-mcp@latest", "--isolated"])
         self.assertEqual(chrome_devtools.get("env", {}), {})
         self.assertIsNone(chrome_devtools["agents"])
         self.assertTrue(policy["mcp"]["chrome-devtools"]["enabled"])
@@ -75,7 +75,7 @@ class SyncMcpTests(unittest.TestCase):
             self.assertEqual(json_updated["mcpServers"]["chrome-devtools"]["command"], "npx")
             self.assertEqual(
                 json_updated["mcpServers"]["chrome-devtools"]["args"],
-                ["-y", "chrome-devtools-mcp@latest"],
+                ["-y", "chrome-devtools-mcp@latest", "--isolated"],
             )
             self.assertEqual(
                 json_updated["mcpServers"]["chrome-devtools"]["env"]["_MANAGED_BY"],
@@ -86,7 +86,7 @@ class SyncMcpTests(unittest.TestCase):
             self.assertEqual(toml_updated["mcp_servers"]["chrome-devtools"]["command"], "npx")
             self.assertEqual(
                 toml_updated["mcp_servers"]["chrome-devtools"]["args"],
-                ["-y", "chrome-devtools-mcp@latest"],
+                ["-y", "chrome-devtools-mcp@latest", "--isolated"],
             )
             self.assertEqual(
                 toml_updated["mcp_servers"]["chrome-devtools"]["env"]["_MANAGED_BY"],
