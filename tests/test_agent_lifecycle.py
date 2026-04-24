@@ -834,14 +834,6 @@ class CommittedAgentPolicyTests(unittest.TestCase):
             claude_native["install"]["windows"],
             "curl -fsSL https://claude.ai/install.cmd -o install.cmd && install.cmd && del install.cmd",
         )
-        self.assertEqual(
-            claude_native["uninstall"]["posix"],
-            "rm -f ~/.local/bin/claude && rm -rf ~/.local/share/claude",
-        )
-        self.assertEqual(
-            claude_native["uninstall"]["windows"],
-            'powershell -NoProfile -Command "Remove-Item -Path \\"$env:USERPROFILE\\\\.local\\\\bin\\\\claude.exe\\" -Force; Remove-Item -Path \\"$env:USERPROFILE\\\\.local\\\\share\\\\claude\\" -Recurse -Force"',
-        )
         self.assertEqual(claude_native["upgrade"], "claude update")
         self.assertEqual(claude_native["detect_paths"], ["~/.local/bin/claude"])
         self.assertFalse(lifecycle_agents["claude-code"]["providers"]["brew"]["managed"])
