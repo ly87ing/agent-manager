@@ -343,12 +343,22 @@ class ProjectContractTests(unittest.TestCase):
 
     def test_readme_documents_official_cli_lifecycle_policy(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("按各 Agent 官方当前推荐方式维护", readme)
         self.assertIn("`Claude Code`、`Codex`、`Gemini CLI`", readme)
         self.assertIn("仅用于识别并提示迁移", readme)
         self.assertIn("默认自动安装的 Agent 当前包含 `Claude Code`、`Codex` 和 `Gemini CLI`", readme)
         self.assertIn("`Claude Code` 当前默认走官方 native installer", readme)
+        self.assertIn(
+            "`Claude Code native` 当前已经补齐官方 uninstall 路径，因此 `install / update / uninstall` 都可继续走官方 installer 语义。",
+            readme,
+        )
         self.assertIn("`Codex` 与 `Gemini CLI` 默认走官方 npm 包", readme)
+        self.assertIn("`Codex` / `Gemini CLI` 的 `npm` 是官方合规默认路径", readme)
         self.assertIn("`Claude Code local install` 不纳入 `agent-manager` lifecycle 托管", readme)
+        self.assertIn("`Kimi Code CLI` 的 `install script + uv tool` 是官方合规组合路径", readme)
+        self.assertIn("放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer", readme)
+        self.assertIn("当前官方文档只明确了 install / update", readme)
+        self.assertIn("不伪造 `Cursor CLI` 的受管 uninstall 命令", readme)
 
     def test_readme_documents_kimi_cli_management_paths(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -361,16 +371,15 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("`{{REPO_ROOT}}/.kimi/modules`", readme)
         self.assertIn("`~/.kimi/config.toml` 不在本轮托管范围", readme)
 
-    def test_troubleshooting_documents_cli_provider_migration_paths(self):
+    def test_troubleshooting_documents_official_lifecycle_gap_guidance(self):
         troubleshooting = (ROOT / "docs" / "TROUBLESHOOTING.md").read_text(encoding="utf-8")
-        self.assertIn("历史 brew 安装", troubleshooting)
-        self.assertIn("claude migrate-installer", troubleshooting)
-        self.assertIn("检测到外部安装，未纳入 agent-manager 托管", troubleshooting)
-        self.assertIn("Codex", troubleshooting)
-        self.assertIn("Gemini CLI", troubleshooting)
-        self.assertIn("`Claude Code`：官方 native installer", troubleshooting)
-        self.assertIn("`Codex`：官方 npm 包 `@openai/codex`", troubleshooting)
-        self.assertIn("`Gemini CLI`：官方 npm 包 `@google/gemini-cli`", troubleshooting)
+        heading = "### 问题：检测到官方生命周期动作缺口"
+        self.assertIn(heading, troubleshooting)
+        section = troubleshooting.split(heading, 1)[1].split("\n### ", 1)[0]
+        self.assertIn("官方生命周期动作缺口", section)
+        self.assertIn("官方当前未提供受管 uninstall 动作", section)
+        self.assertIn("fail-close", section)
+        self.assertIn("不会伪造删除命令", section)
 
     def test_readme_documents_agent_skills_scope_matches_config(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")

@@ -47,6 +47,7 @@ REQUIRED_CONFIG_FILES = (
     "config/mcp.json",
     "config/rules-targets.list",
 )
+SUPPORTED_UNSUPPORTED_ACTIONS = {"install", "update", "uninstall", "repair"}
 
 
 def human_size(num_bytes: int) -> str:
@@ -111,6 +112,33 @@ def append_entry(report: dict, section: str, entry: dict) -> None:
             report["summary"]["warning_categories"]["optional_tools"] += 1
         elif category == "unmaterialized":
             report["summary"]["warning_categories"]["unmaterialized"] += 1
+        elif category == "official_gap":
+            report["summary"]["warning_categories"]["official_gaps"] += 1
+
+
+def get_unsupported_actions(provider_cfg: dict | None) -> set[str]:
+    if not provider_cfg or "unsupported_actions" not in provider_cfg:
+        return set()
+
+    raw = provider_cfg.get("unsupported_actions")
+    if not isinstance(raw, list):
+        raise ValueError("unsupported_actions 必须是字符串列表。")
+
+    unsupported_actions = set()
+    invalid_actions = []
+    for action in raw:
+        if isinstance(action, str) and action in SUPPORTED_UNSUPPORTED_ACTIONS:
+            unsupported_actions.add(action)
+        else:
+            invalid_actions.append(repr(action))
+
+    if invalid_actions:
+        raise ValueError(
+            "unsupported_actions 仅支持 "
+            f"{', '.join(sorted(SUPPORTED_UNSUPPORTED_ACTIONS))}；收到: {', '.join(invalid_actions)}。"
+        )
+
+    return unsupported_actions
 
 
 def validate_json_shape(data: dict, name: str) -> None:
@@ -703,6 +731,7 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
             "warning_categories": {
                 "optional_tools": 0,
                 "unmaterialized": 0,
+                "official_gaps": 0,
             },
         },
     }
@@ -817,6 +846,20 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
         runtime_ready = is_agent_installed(agent_id, definition)
         desired = policy.get("enabled", True)
         preferred = policy.get("preferred_provider") or definition.get("preferred_provider", "npm")
+        preferred_name = canonical_provider_name(preferred)
+        preferred_cfg = definition.get("providers", {}).get(preferred_name, {})
+        try:
+            preferred_unsupported_actions = get_unsupported_actions(preferred_cfg)
+        except ValueError as exc:
+            append_entry(
+                report,
+                "agents",
+                make_entry(label, "error", f"Provider '{preferred_name}' unsupported_actions 配置非法: {exc}"),
+            )
+            continue
+        preferred_is_active = any(
+            canonical_provider_name(provider_name) == preferred_name for provider_name in state["managed"]
+        )
         if state["unsupported"]:
             append_entry(
                 report,
@@ -838,6 +881,21 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
         elif is_active and not runtime_ready:
             detail = state["managed"][0] if state["managed"] else (providers[0] if providers else "unknown")
             append_entry(report, "agents", make_entry(label, "error", f"{detail} 已安装，但运行入口缺失"))
+        elif (
+            not desired
+            and preferred_is_active
+            and "uninstall" in preferred_unsupported_actions
+        ):
+            append_entry(
+                report,
+                "agents",
+                make_entry(
+                    label,
+                    "warning",
+                    "官方当前未提供受管 uninstall 动作，agent-manager 不会伪造删除命令；请先按官方流程自行卸载",
+                    category="official_gap",
+                ),
+            )
         elif is_active == desired:
             detail = state["managed"][0] if state["managed"] else (providers[0] if providers else "未安装")
             if state["managed"] and canonical_provider_name(state["managed"][0]) != canonical_provider_name(preferred):
@@ -1129,13 +1187,19 @@ def render_text(report: dict) -> str:
             lines.append(f"  {symbol} {entry['name']}: {entry['message']}")
 
     categories = report["summary"]["warning_categories"]
-    if report["summary"]["warnings"] > 0 and (categories["optional_tools"] > 0 or categories["unmaterialized"] > 0):
+    if report["summary"]["warnings"] > 0 and (
+        categories["optional_tools"] > 0
+        or categories["unmaterialized"] > 0
+        or categories["official_gaps"] > 0
+    ):
         lines.append("")
         lines.append("[ 提示项分类 ]")
         if categories["optional_tools"] > 0:
             lines.append(f"  ⚠ 可选工具未就绪: {categories['optional_tools']} 项")
         if categories["unmaterialized"] > 0:
             lines.append(f"  ⚠ 托管产物尚未生成: {categories['unmaterialized']} 项")
+        if categories["official_gaps"] > 0:
+            lines.append(f"  ⚠ 官方生命周期动作缺口: {categories['official_gaps']} 项")
 
     lines.append("")
     if report["status"] == "healthy":

@@ -512,6 +512,178 @@ class ReconcileAgentTests(unittest.TestCase):
         run_cmd.assert_not_called()
         self.assertTrue(any("离线模式" in line and "修复" in line for line in logs.output), logs.output)
 
+    def test_install_reports_official_gap_for_unsupported_install(self):
+        definition = {
+            "display_name": "Cursor CLI",
+            "bin": "cursor-agent",
+            "providers": {
+                "native": {
+                    "managed": True,
+                    "install": "cursor-agent install",
+                    "unsupported_actions": ["install"],
+                }
+            },
+        }
+        policy = {"enabled": True, "auto_install": True, "preferred_provider": "native"}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", return_value=[]),
+            mock.patch.object(sync_agents, "run_cmd") as run_cmd,
+            self.assertLogs(level="ERROR") as logs,
+        ):
+            result = sync_agents.reconcile_agent("cursor", definition, policy)
+
+        self.assertFalse(result)
+        run_cmd.assert_not_called()
+        self.assertTrue(any("官方当前未提供受管 install 动作" in line for line in logs.output), logs.output)
+
+    def test_update_reports_official_gap_for_unsupported_update(self):
+        definition = {
+            "display_name": "Cursor CLI",
+            "bin": "cursor-agent",
+            "providers": {
+                "native": {
+                    "managed": True,
+                    "upgrade": "cursor-agent update",
+                    "unsupported_actions": ["update"],
+                }
+            },
+        }
+        policy = {"enabled": True, "auto_update": True, "preferred_provider": "native"}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", return_value=["native"]),
+            mock.patch.object(sync_agents, "is_agent_installed", return_value=True),
+            mock.patch.object(sync_agents, "run_cmd") as run_cmd,
+            self.assertLogs(level="ERROR") as logs,
+        ):
+            result = sync_agents.reconcile_agent("cursor", definition, policy)
+
+        self.assertFalse(result)
+        run_cmd.assert_not_called()
+        self.assertTrue(any("官方当前未提供受管 update 动作" in line for line in logs.output), logs.output)
+
+    def test_uninstall_reports_official_gap_for_unsupported_uninstall(self):
+        definition = {
+            "display_name": "Cursor CLI",
+            "bin": "cursor-agent",
+            "providers": {
+                "native": {
+                    "managed": True,
+                    "upgrade": "cursor-agent update",
+                    "unsupported_actions": ["uninstall"],
+                }
+            },
+        }
+        policy = {"enabled": False, "preferred_provider": "native"}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", return_value=["native"]),
+            mock.patch.object(sync_agents, "is_agent_installed", return_value=True),
+            mock.patch.object(sync_agents, "run_cmd") as run_cmd,
+            self.assertLogs(level="ERROR") as logs,
+        ):
+            result = sync_agents.reconcile_agent("cursor", definition, policy)
+
+        self.assertFalse(result)
+        run_cmd.assert_not_called()
+        self.assertTrue(any("官方当前未提供受管 uninstall 动作" in line for line in logs.output), logs.output)
+
+    def test_repair_fails_when_all_repair_paths_are_officially_unsupported(self):
+        definition = {
+            "display_name": "Cursor CLI",
+            "bin": "cursor-agent",
+            "providers": {
+                "native": {
+                    "managed": True,
+                    "install": "cursor-agent install",
+                    "upgrade": "cursor-agent update",
+                    "unsupported_actions": ["repair", "update", "install"],
+                }
+            },
+        }
+        policy = {"enabled": True, "auto_update": True, "preferred_provider": "native"}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", return_value=["native"]),
+            mock.patch.object(sync_agents, "is_agent_installed", return_value=False),
+            mock.patch.object(sync_agents, "run_cmd") as run_cmd,
+            self.assertLogs(level="ERROR") as logs,
+        ):
+            result = sync_agents.reconcile_agent("cursor", definition, policy)
+
+        self.assertFalse(result)
+        run_cmd.assert_not_called()
+        self.assertTrue(
+            any("官方当前未提供受管 repair / update / install 动作" in line for line in logs.output),
+            logs.output,
+        )
+
+    def test_install_fails_closed_when_unsupported_actions_is_invalid(self):
+        invalid_values = [
+            "install",
+            ["launch"],
+        ]
+
+        for unsupported_actions in invalid_values:
+            with self.subTest(unsupported_actions=unsupported_actions):
+                definition = {
+                    "display_name": "Cursor CLI",
+                    "bin": "cursor-agent",
+                    "providers": {
+                        "native": {
+                            "managed": True,
+                            "install": "cursor-agent install",
+                            "unsupported_actions": unsupported_actions,
+                        }
+                    },
+                }
+                policy = {"enabled": True, "auto_install": True, "preferred_provider": "native"}
+
+                with (
+                    mock.patch.object(sync_agents, "detect_all_providers", return_value=[]),
+                    mock.patch.object(sync_agents, "run_cmd") as run_cmd,
+                    self.assertLogs(level="ERROR") as logs,
+                ):
+                    result = sync_agents.reconcile_agent("cursor", definition, policy)
+
+                self.assertFalse(result)
+                run_cmd.assert_not_called()
+                self.assertTrue(any("unsupported_actions" in line for line in logs.output), logs.output)
+
+    def test_get_repair_cmd_falls_back_to_upgrade_when_repair_is_unsupported(self):
+        provider_cfg = {
+            "install": "cursor-agent install",
+            "upgrade": "cursor-agent update",
+            "unsupported_actions": ["repair"],
+        }
+
+        repair_cmd = sync_agents.get_repair_cmd("native", provider_cfg)
+
+        self.assertEqual(repair_cmd, "cursor-agent update")
+
+    def test_get_repair_cmd_falls_back_to_install_when_update_is_unsupported(self):
+        provider_cfg = {
+            "install": "cursor-agent install",
+            "upgrade": "cursor-agent update",
+            "unsupported_actions": ["repair", "update"],
+        }
+
+        repair_cmd = sync_agents.get_repair_cmd("native", provider_cfg)
+
+        self.assertEqual(repair_cmd, "cursor-agent install")
+
+    def test_get_repair_cmd_brew_fails_fast_when_install_pkg_cannot_be_resolved(self):
+        provider_cfg = {
+            "install": "brew tap homebrew/cask",
+            "upgrade": "brew upgrade --cask claude-code",
+            "unsupported_actions": ["repair"],
+        }
+
+        repair_cmd = sync_agents.get_repair_cmd("brew-cask", provider_cfg)
+
+        self.assertIsNone(repair_cmd)
+
     def test_brew_probe_failure_skips_direct_upgrade(self):
         definition = {
             "display_name": "OpenCode",
@@ -833,6 +1005,14 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         self.assertEqual(
             claude_native["install"]["windows"],
             "curl -fsSL https://claude.ai/install.cmd -o install.cmd && install.cmd && del install.cmd",
+        )
+        self.assertEqual(
+            claude_native["uninstall"]["posix"],
+            "rm -f ~/.local/bin/claude && rm -rf ~/.local/share/claude",
+        )
+        self.assertEqual(
+            claude_native["uninstall"]["windows"],
+            'powershell -NoProfile -Command "Remove-Item -Path \\"$env:USERPROFILE\\\\.local\\\\bin\\\\claude.exe\\" -Force; Remove-Item -Path \\"$env:USERPROFILE\\\\.local\\\\share\\\\claude\\" -Recurse -Force"',
         )
         self.assertEqual(claude_native["upgrade"], "claude update")
         self.assertEqual(claude_native["detect_paths"], ["~/.local/bin/claude"])

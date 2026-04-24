@@ -29,6 +29,9 @@ from src.runtime_logging import configure_logging
 
 configure_logging()
 
+SUPPORTED_UNSUPPORTED_ACTIONS = {"install", "update", "uninstall", "repair"}
+
+
 def run_cmd(cmd, timeout=300):
     """运行 shell 命令并返回结果"""
     try:
@@ -54,6 +57,51 @@ def detect_provider_state(bin_name, definition):
     state["all"] = actual
     return state
 
+
+def get_unsupported_actions(provider_cfg):
+    if not provider_cfg or "unsupported_actions" not in provider_cfg:
+        return set()
+
+    raw = provider_cfg.get("unsupported_actions")
+    if not isinstance(raw, list):
+        raise ValueError("unsupported_actions 必须是字符串列表。")
+
+    unsupported_actions = set()
+    invalid_actions = []
+    for action in raw:
+        if isinstance(action, str) and action in SUPPORTED_UNSUPPORTED_ACTIONS:
+            unsupported_actions.add(action)
+        else:
+            invalid_actions.append(repr(action))
+
+    if invalid_actions:
+        raise ValueError(
+            "unsupported_actions 仅支持 "
+            f"{', '.join(sorted(SUPPORTED_UNSUPPORTED_ACTIONS))}；收到: {', '.join(invalid_actions)}。"
+        )
+
+    return unsupported_actions
+
+
+def get_validated_unsupported_actions(label, provider_name, provider_cfg):
+    try:
+        return get_unsupported_actions(provider_cfg)
+    except ValueError as exc:
+        logging.error(f"[AGENT: {label}] Provider '{provider_name}' unsupported_actions 配置非法: {exc}")
+        return None
+
+
+def action_is_officially_unsupported(provider_cfg, action, unsupported_actions=None):
+    actions = unsupported_actions if unsupported_actions is not None else get_unsupported_actions(provider_cfg)
+    return action in actions
+
+
+def log_official_gap(label, provider_name, action):
+    logging.error(
+        f"[AGENT: {label}] Provider '{provider_name}' 官方当前未提供受管 {action} 动作。"
+    )
+
+
 def get_update_probe_cmd(provider_name, provider_cfg):
     if not provider_cfg:
         return None
@@ -71,21 +119,33 @@ def get_update_probe_cmd(provider_name, provider_cfg):
     return None
 
 
-def get_repair_cmd(provider_name, provider_cfg):
+def get_repair_cmd(provider_name, provider_cfg, unsupported_actions=None):
     if not provider_cfg:
         return None
-    explicit = resolve_provider_command(provider_cfg.get("repair"))
-    if explicit:
-        return explicit
-    install_cmd = resolve_provider_command(provider_cfg.get("install"))
-    if provider_name.startswith("brew"):
-        pkg_name = get_pkg_name(install_cmd or "")
-        if not pkg_name:
-            return None
-        if provider_name == "brew-cask":
-            return f"brew reinstall --cask {pkg_name}"
-        return f"brew reinstall {pkg_name}"
-    return resolve_provider_command(provider_cfg.get("upgrade")) or install_cmd
+    active_unsupported_actions = (
+        get_unsupported_actions(provider_cfg) if unsupported_actions is None else unsupported_actions
+    )
+    if not action_is_officially_unsupported(provider_cfg, "repair", active_unsupported_actions):
+        explicit = resolve_provider_command(provider_cfg.get("repair"))
+        if explicit:
+            return explicit
+
+    install_cmd = None
+    if not action_is_officially_unsupported(provider_cfg, "install", active_unsupported_actions):
+        install_cmd = resolve_provider_command(provider_cfg.get("install"))
+        if provider_name.startswith("brew"):
+            pkg_name = get_pkg_name(install_cmd or "")
+            if not pkg_name:
+                return None
+            if provider_name == "brew-cask":
+                return f"brew reinstall --cask {pkg_name}"
+            return f"brew reinstall {pkg_name}"
+
+    if not action_is_officially_unsupported(provider_cfg, "update", active_unsupported_actions):
+        upgrade_cmd = resolve_provider_command(provider_cfg.get("upgrade"))
+        if upgrade_cmd:
+            return upgrade_cmd
+    return install_cmd
 
 def resolve_active_provider_variant(managed_actual, provider_key):
     for provider_name in managed_actual:
@@ -157,6 +217,12 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=T
             return False
         logging.info(f"[AGENT: {label}] 状态对齐: 准备通过 {preferred} 安装...")
         p_cfg = providers.get(preferred)
+        unsupported_actions = get_validated_unsupported_actions(label, preferred, p_cfg)
+        if unsupported_actions is None:
+            return False
+        if action_is_officially_unsupported(p_cfg, "install", unsupported_actions):
+            log_official_gap(label, preferred, "install")
+            return False
         install_cmd = resolve_provider_command(p_cfg.get("install")) if p_cfg else None
         if not install_cmd:
             logging.error(f"[AGENT: {label}] Provider '{preferred}' 缺少 install 命令。")
@@ -181,10 +247,20 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=T
             logging.info(f"[AGENT: {label}] 检测到外部安装，但当前无受管 Provider，可跳过卸载。")
             return True
         logging.warning(f"[AGENT: {label}] 状态对齐: 配置已禁用，准备卸载...")
-        all_ok = True
+        managed_provider_entries = []
         for provider in managed_actual:
             p_key = canonical_provider_name(provider)
             p_cfg = providers.get(p_key)
+            unsupported_actions = get_validated_unsupported_actions(label, provider, p_cfg)
+            if unsupported_actions is None:
+                return False
+            managed_provider_entries.append((provider, p_cfg, unsupported_actions))
+        all_ok = True
+        for provider, p_cfg, unsupported_actions in managed_provider_entries:
+            if action_is_officially_unsupported(p_cfg, "uninstall", unsupported_actions):
+                log_official_gap(label, provider, "uninstall")
+                all_ok = False
+                continue
             uninstall_cmd = resolve_provider_command(p_cfg.get("uninstall")) if p_cfg else None
             if not uninstall_cmd:
                 logging.error(f"[AGENT: {label}] Provider '{provider}' 缺少 uninstall 命令。")
@@ -223,9 +299,17 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=T
             p_key = preferred if preferred in actual_provider_keys else actual_provider_keys[0]
             active_provider = resolve_active_provider_variant(managed_actual, p_key)
             p_cfg = providers.get(p_key)
-            repair_cmd = get_repair_cmd(active_provider, p_cfg)
+            unsupported_actions = get_validated_unsupported_actions(label, active_provider, p_cfg)
+            if unsupported_actions is None:
+                return False
+            repair_cmd = get_repair_cmd(active_provider, p_cfg, unsupported_actions)
             if not repair_cmd:
-                logging.error(f"[AGENT: {label}] Provider '{active_provider}' 缺少 repair/install/upgrade 命令，无法修复。")
+                if {"repair", "update", "install"}.issubset(unsupported_actions):
+                    logging.error(
+                        f"[AGENT: {label}] Provider '{active_provider}' 官方当前未提供受管 repair / update / install 动作，无法修复。"
+                    )
+                else:
+                    logging.error(f"[AGENT: {label}] Provider '{active_provider}' 缺少 repair/install/upgrade 命令，无法修复。")
                 return False
             if dry_run:
                 logging.info(f"  (预览: 计划执行 {repair_cmd})")
@@ -251,6 +335,12 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=T
         p_key = preferred if preferred in actual_provider_keys else actual_provider_keys[0]
         active_provider = resolve_active_provider_variant(managed_actual, p_key)
         p_cfg = providers.get(p_key)
+        unsupported_actions = get_validated_unsupported_actions(label, active_provider, p_cfg)
+        if unsupported_actions is None:
+            return False
+        if action_is_officially_unsupported(p_cfg, "update", unsupported_actions):
+            log_official_gap(label, active_provider, "update")
+            return False
         upgrade_cmd = resolve_provider_command(p_cfg.get("upgrade")) if p_cfg else None
         if p_cfg and "upgrade" in p_cfg and not upgrade_cmd:
             logging.error(f"[AGENT: {label}] Provider '{active_provider}' 缺少 upgrade 命令。")

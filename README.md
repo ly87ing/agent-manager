@@ -24,20 +24,22 @@
 默认受管 skill 仓库当前包含 `agent-skills`、`oa-skill`、`openai-frontend-skill`、`anthropic-frontend-design-skill`、`playwright-best-practices-skill`、`superpowers` 和 `ui-ux-pro-max-skill`；它们在未显式声明 `commit` / `ref` 时，会在同步时跟随上游默认分支最新状态；其中 `agent-skills` 面向 `Claude Code`、`Kimi Code CLI` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 3 个 skill 包，避免上游新增 skill 被默认带入；`oa-skill` 当前通过显式 `skill_paths` 默认接入仓库内唯一的 `xyai-manager` skill；`anthropic-frontend-design-skill` 仅面向 `Kimi Code CLI` 暴露，并通过显式 `skill_paths` 锁定 Anthropic 官方 `skills/frontend-design`。
 默认自动安装的 Agent 当前包含 `Claude Code`、`Codex` 和 `Gemini CLI`；`Cursor CLI`、`OpenCode` 与 `Kimi Code CLI` 仍受管，但默认不自动安装，需要时可通过策略显式开启。
 `Claude Code` 当前默认走官方 native installer；`Codex` 与 `Gemini CLI` 默认走官方 npm 包。历史 `brew` 安装仅用于识别并提示迁移，不再作为这三个 CLI 的受管 provider。
+`Claude Code native` 当前已经补齐官方 uninstall 路径，因此 `install / update / uninstall` 都可继续走官方 installer 语义。
 `Claude Code` 仍保留 `npm` 作为 legacy-compatible 受管 provider；`Claude Code local install` 不纳入 `agent-manager` lifecycle 托管，因为它依赖 shell alias 暴露入口，当前探测链路不会越权接管。
-`Cursor` 当前默认受管目标已切换为官方 `cursor-agent` CLI；它继续复用 `~/.cursor/mcp.json` 与 repo-native `.cursor/rules`，不再把 `brew cask cursor` 当作默认生命周期来源。
+`Cursor` 当前默认受管目标已切换为官方 `cursor-agent` CLI；它继续复用 `~/.cursor/mcp.json` 与 repo-native `.cursor/rules`，不再把 `brew cask cursor` 当作默认生命周期来源。当前官方文档只明确了 install / update，因此仓库不伪造 `Cursor CLI` 的受管 uninstall 命令。
 `OpenCode` 当前默认走官方 install script，并通过 `opencode upgrade --method curl` 执行更新；历史 `npm` / `brew` 安装仅用于识别并提示迁移。
 `Kimi Code CLI` 当前默认走官方 install script；升级与卸载继续使用官方支持的 `uv tool` 路径，避免仓库把 `uv` 本身误当成前台安装方式。
 `Kimi Code CLI` 已成为受管 Agent，当前受管路径为 `~/.kimi/mcp.json`、`~/.kimi/skills`、`{{REPO_ROOT}}/.kimi/AGENTS.md`、`{{REPO_ROOT}}/.kimi/modules`；`~/.kimi/config.toml` 不在本轮托管范围。
+以上 lifecycle 口径统一按各 Agent 官方当前推荐方式维护。`Codex` / `Gemini CLI` 的 `npm` 是官方合规默认路径，`Kimi Code CLI` 的 `install script + uv tool` 是官方合规组合路径；放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer。
 
 ## Official CLI Lifecycle Policy
 
 | CLI | 默认受管 provider | 兼容受管 provider | detect-only 历史来源 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
-| `Claude Code` | `native` | `npm` | `brew` | 默认使用官方 installer；若已是 npm 版，可继续受管或按官方 `claude migrate-installer` 手工迁移。 |
+| `Claude Code` | `native` | `npm` | `brew` | 默认使用官方 installer；若已是 npm 版，可继续受管或按官方 `claude migrate-installer` 手工迁移；官方 uninstall 路径也已纳入托管。 |
 | `Codex` | `npm` | - | `brew` | 已纳入正式 lifecycle 管理；历史 brew 安装只用于审计和迁移提示。 |
 | `Gemini CLI` | `npm` | - | `brew` | 默认使用官方 npm stable 包；brew 只做历史识别。 |
-| `Cursor` | `native` | - | - | 默认使用官方 `cursor-agent` install script；继续复用现有 `~/.cursor` 配置与 repo-native rules。 |
+| `Cursor` | `native` | - | - | 默认使用官方 `cursor-agent` install script；继续复用现有 `~/.cursor` 配置与 repo-native rules；当前官方文档只明确 install / update。 |
 | `OpenCode` | `native` | - | `npm`, `brew` | 默认使用官方 install script 与内建升级命令；历史 npm / brew 安装只做审计。 |
 | `Kimi Code CLI` | `native` | - | - | 默认使用官方 install script；底层升级/卸载继续走 `uv tool` 官方路径。 |
 

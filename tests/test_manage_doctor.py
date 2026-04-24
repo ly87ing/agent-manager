@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from unittest import mock
 
-from src.manage_doctor import actual_skill_targets, build_report
+from src.manage_doctor import actual_skill_targets, build_report, render_text
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -185,6 +185,93 @@ class ManageDoctorReportTests(unittest.TestCase):
             self.assertEqual(report["status"], "error")
             self.assertEqual(agent_names["Codex"]["status"], "error")
             self.assertIn("未纳入 agent-manager 托管", agent_names["Codex"]["message"])
+
+    def test_report_flags_official_gap_for_disabled_cursor_without_managed_uninstall(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {\n    "cursor": { "enabled": false, "auto_install": false, "auto_update": false, "preferred_provider": "native" }\n  },\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "agents.json").write_text(
+                '{\n  "cursor": {\n    "display_name": "Cursor CLI",\n    "bin": "cursor-agent",\n    "preferred_provider": "native",\n    "providers": {\n      "native": {\n        "managed": true,\n        "upgrade": "cursor-agent update",\n        "unsupported_actions": ["uninstall"]\n      }\n    }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{"agent_paths": {}, "servers": {}}',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{"repositories": {}, "agents": {}}',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            with (
+                mock.patch("src.manage_doctor.detect_all_providers", return_value=["native"]),
+                mock.patch("src.manage_doctor.is_agent_installed", return_value=True),
+            ):
+                report = build_report(
+                    root_dir=temp_root,
+                    config_file=temp_root / "config" / "manager.json",
+                    python_cmd="python3",
+                )
+
+            agent_names = {entry["name"]: entry for entry in report["sections"]["agents"]}
+            self.assertEqual(report["status"], "warning")
+            self.assertEqual(report["summary"]["warnings"], 1)
+            self.assertEqual(agent_names["Cursor CLI"]["status"], "warning")
+            self.assertEqual(agent_names["Cursor CLI"]["category"], "official_gap")
+            self.assertIn("官方当前未提供受管 uninstall 动作", agent_names["Cursor CLI"]["message"])
+            self.assertIn("不会伪造删除命令", agent_names["Cursor CLI"]["message"])
+            self.assertEqual(report["summary"]["warning_categories"]["official_gaps"], 1)
+            self.assertEqual(report["summary"]["warning_categories"]["optional_tools"], 0)
+            self.assertEqual(report["summary"]["warning_categories"]["unmaterialized"], 0)
+            self.assertIn("官方生命周期动作缺口", render_text(report))
+
+    def test_report_flags_invalid_unsupported_actions_in_doctor_as_error(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {\n    "cursor": { "enabled": false, "auto_install": false, "auto_update": false, "preferred_provider": "native" }\n  },\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "agents.json").write_text(
+                '{\n  "cursor": {\n    "display_name": "Cursor CLI",\n    "bin": "cursor-agent",\n    "preferred_provider": "native",\n    "providers": {\n      "native": {\n        "managed": true,\n        "upgrade": "cursor-agent update",\n        "unsupported_actions": "uninstall"\n      }\n    }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{"agent_paths": {}, "servers": {}}',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{"repositories": {}, "agents": {}}',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            with (
+                mock.patch("src.manage_doctor.detect_all_providers", return_value=["native"]),
+                mock.patch("src.manage_doctor.is_agent_installed", return_value=True),
+            ):
+                report = build_report(
+                    root_dir=temp_root,
+                    config_file=temp_root / "config" / "manager.json",
+                    python_cmd="python3",
+                )
+
+            agent_names = {entry["name"]: entry for entry in report["sections"]["agents"]}
+            self.assertEqual(report["status"], "error")
+            self.assertEqual(agent_names["Cursor CLI"]["status"], "error")
+            self.assertIn("unsupported_actions 配置非法", agent_names["Cursor CLI"]["message"])
+            self.assertEqual(report["summary"]["errors"], 1)
+            self.assertEqual(report["summary"]["warnings"], 0)
+            self.assertEqual(report["summary"]["warning_categories"]["official_gaps"], 0)
+            self.assertNotIn("category", agent_names["Cursor CLI"])
 
     def test_report_flags_repo_secret_outside_secrets_directory(self):
         with tempfile.TemporaryDirectory() as temp_dir:

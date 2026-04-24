@@ -116,6 +116,8 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 **症状**：`doctor` 报告 `已弃用安装来源`，或 `update` / `bootstrap` 直接失败
 
 #### 处理建议：
+处理原则：按各 Agent 官方当前推荐方式维护。放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer；`Codex` / `Gemini CLI` 的 `npm` 是官方合规默认路径，`Kimi Code CLI` 的 `install script + uv tool` 是官方合规组合路径。
+
 1. `Claude Code`
    - 手工卸载 brew 版本，再让 `agent-manager` 走官方 native installer
    - 如果当前已经是 npm 版并希望切到 native，按官方 `claude migrate-installer` 迁移
@@ -139,6 +141,14 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
    - `Cursor`：官方 `cursor-agent` install script
    - `OpenCode`：官方 install script `https://opencode.ai/install`
    - `Kimi Code CLI`：官方 install script `https://code.kimi.com/install.sh`
+
+### 问题：检测到官方生命周期动作缺口
+**症状**：`doctor` 报告 `官方生命周期动作缺口`，或某个 Agent 条目提示 `官方当前未提供受管 uninstall 动作`
+
+#### 处理建议：
+1. 这表示当前 provider 存在官方动作缺口，不是本地配置漏写；`agent-manager` 会保持 fail-close。
+2. 当前已知示例是 `Cursor CLI`：当前官方文档未给出受管 uninstall 命令。
+3. 如需停用该 agent，请先按官方流程自行卸载，再重新运行 `./manage.sh doctor` 确认状态；`agent-manager` 不会伪造删除命令。
 
 ### 问题：Rules 修改后没有分发到目标 Agent
 **症状**：已经修改 `agent-rule/rules/src/`，但目标 Agent 目录里的规则仍然是旧内容
