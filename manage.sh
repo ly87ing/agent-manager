@@ -518,7 +518,7 @@ function resolve_latest_log_path() {
 }
 
 function detect_agents() {
-    echo -e "${HDR_BLUE}${BOLD}1. 环境探测与健康自检 (Environment Health Check)${NC} ${BORDER_GRAY}[OS: $OS_TYPE]${NC}"
+    echo -e "${HDR_BLUE}${BOLD}2. 环境探测与健康自检 (Environment Health Check)${NC} ${BORDER_GRAY}[OS: $OS_TYPE]${NC}"
     $PYTHON_CMD -c "
 import sys
 sys.path.insert(0, '$ROOT_DIR')
@@ -655,6 +655,8 @@ function run_task_with_progress() {
     local last_display_key=""
     local last_raw_msg=""
     local last_msg=""
+    local last_detail_lines=0
+
     "$@" >> "$TEMP_LOG" 2>&1 &
     local pid=$!
 
@@ -663,6 +665,9 @@ function run_task_with_progress() {
         elapsed=$(( $(date +%s) - start_ts ))
         local current_display=""
         local current_key=""
+        local detail_output=""
+        local current_detail_lines=0
+
         if [ -s "$TEMP_LOG" ]; then
             local next_line=$((start_line + 1))
             local raw_msg=""
@@ -678,17 +683,36 @@ function run_task_with_progress() {
                 current_display="$title... · 已运行 ${elapsed}s"
                 current_key="$current_display"
             fi
+
+            detail_output=$(tail -n +"$next_line" "$TEMP_LOG" 2>/dev/null | tail -n 5 | tr -d '\r' | sed -E $'s/\033\\[[0-9;]*[a-zA-Z]//g' | cut -c 1-100 | sed -e $'s/^/      │ \033[90m/' -e $'s/$/\033[0m/')
+            if [ -n "$detail_output" ]; then
+                current_detail_lines=$(echo -n "$detail_output" | grep -c '^' || true)
+            fi
         else
             current_display="$title... · 已运行 ${elapsed}s"
             current_key="$current_display"
         fi
-        if [ "$current_key" != "$last_display_key" ]; then
-            status_line "RUNNING" "$current_display"
-            last_display="$current_display"
-            last_display_key="$current_key"
+
+        if [ "$last_detail_lines" -gt 0 ]; then
+            printf "\033[%dA" "$last_detail_lines"
         fi
-        sleep 0.3
+
+        status_line "RUNNING" "$current_display"
+        printf "\033[J"
+
+        if [ "$current_detail_lines" -gt 0 ]; then
+            printf "\n%s" "$detail_output"
+        fi
+
+        last_detail_lines="$current_detail_lines"
+        sleep 0.5
     done
+
+    if [ "$last_detail_lines" -gt 0 ]; then
+        printf "\033[%dA" "$last_detail_lines"
+        printf "\033[J"
+    fi
+
     if wait "$pid"; then
         status_line "DONE" "$success_msg"
         return 0
@@ -696,12 +720,20 @@ function run_task_with_progress() {
         local exit_code=$?
         status_line "ERROR" "$err_msg"
         echo "FAILED: $title" >> "$TEMP_LOG"
+        if [ -f "$TEMP_LOG" ]; then
+            local recent_errors=""
+            recent_errors=$(grep -E "ERROR|安装失败|工具失败|TIMEOUT|failed with exit code" "$TEMP_LOG" | tail -n 3)
+            if [ -n "$recent_errors" ]; then
+                echo -e "${ERROR_RED}详情:${NC}"
+                echo "$recent_errors" | sed 's/^/  /'
+            fi
+        fi
         return "$exit_code"
     fi
 }
 
 function show_summary() {
-    echo -e "${HDR_BLUE}${BOLD}3. 最终赋能详情汇总 (Deployment Architecture)${NC}"
+    echo -e "${HDR_BLUE}${BOLD}4. 最终赋能详情汇总 (Deployment Architecture)${NC}"
     echo -e "${BORDER_GRAY}----------------------------------------------------------------${NC}"
     if [ ! -f "$TEMP_LOG" ]; then echo "   无运行记录。"; return; fi
     local clean_log=$(sed -E 's/^[0-9:-]+ [0-9:-]+ \[INFO\] //g; s/^INFO: //g' "$TEMP_LOG")
@@ -710,7 +742,7 @@ function show_summary() {
     echo -e "\n${BOLD}${HDR_BLUE}[ 规则与工具 ]${NC}"
     echo "$clean_log" | grep -E "同步完成|安装成功" | sed 's/\[AGENT: Rules\] //g; s/\[TOOL: \(.*\)\]/  ⚒ \1/g' | sort -u || echo "   无变动。"
     echo -e "${BORDER_GRAY}----------------------------------------------------------------${NC}"
-    echo -e "${HDR_BLUE}${BOLD}4. 自动健康验证 (Post-Sync Verification)${NC}"
+    echo -e "${HDR_BLUE}${BOLD}5. 自动健康验证 (Post-Sync Verification)${NC}"
     if doctor_check silent; then
         case "$DOCTOR_STATUS" in
             healthy) echo -e "   ${SUCCESS_GREEN}${BOLD}CERTIFIED HEALTHY${NC}" ;;
@@ -772,7 +804,7 @@ function run_task_in_dir() {
 
 function begin_pipeline_execution() {
     detect_agents
-    echo -e "${HDR_BLUE}${BOLD}2. 任务流水线 (Tasks)${NC}"
+    echo -e "${HDR_BLUE}${BOLD}3. 任务流水线 (Tasks)${NC}"
     update_latest_log_pointer
     TASK_FAILURES=0
 }

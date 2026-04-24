@@ -17,6 +17,7 @@
     },
     "openai-frontend-skill": {
       "url": "https://github.com/openai/skills.git",
+      "commit": "30444aed500c00c85294d12074f6e3ee794f808a",
       "skill_paths": ["skills/.curated/frontend-skill"],
       "skill_count": 1,
       "agents": ["codex"]

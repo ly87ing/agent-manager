@@ -30,8 +30,15 @@ configure_logging()
 
 OWNER_MARKER = ".agent-manager-owned"
 
+def _inject_npm_flags(cmd):
+    if isinstance(cmd, str) and cmd.strip().startswith("npm install -g"):
+        return cmd.strip() + " --no-audit --no-fund"
+    return cmd
+
+
 def run_cmd(cmd, cwd=None, timeout=None):
     """运行 shell 命令并返回结果"""
+    cmd = _inject_npm_flags(cmd)
     try:
         result = run_command(cmd, cwd=cwd, check=True, capture_output=True, text=True, timeout=timeout)
         return True, result.stdout
