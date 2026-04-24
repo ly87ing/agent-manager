@@ -677,7 +677,7 @@ class KimiLifecycleConfigTests(unittest.TestCase):
 
 
 class CommittedAgentPolicyTests(unittest.TestCase):
-    def test_committed_agent_policy_tracks_official_cli_provider_defaults(self):
+    def test_committed_agent_policy_locks_official_cli_lifecycle_defaults(self):
         manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
         lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
 
@@ -685,14 +685,17 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         self.assertTrue(manager["agents"]["claude-code"]["auto_install"])
         self.assertTrue(manager["agents"]["claude-code"]["auto_update"])
         self.assertEqual(manager["agents"]["claude-code"]["preferred_provider"], "native")
+        self.assertEqual(lifecycle_agents["claude-code"]["preferred_provider"], "native")
         self.assertTrue(manager["agents"]["gemini-cli"]["enabled"])
         self.assertTrue(manager["agents"]["gemini-cli"]["auto_install"])
         self.assertTrue(manager["agents"]["gemini-cli"]["auto_update"])
         self.assertEqual(manager["agents"]["gemini-cli"]["preferred_provider"], "npm")
+        self.assertEqual(lifecycle_agents["gemini-cli"]["preferred_provider"], "npm")
         self.assertTrue(manager["agents"]["codex"]["enabled"])
         self.assertTrue(manager["agents"]["codex"]["auto_install"])
         self.assertTrue(manager["agents"]["codex"]["auto_update"])
         self.assertEqual(manager["agents"]["codex"]["preferred_provider"], "npm")
+        self.assertEqual(lifecycle_agents["codex"]["preferred_provider"], "npm")
         self.assertFalse(manager["agents"]["cursor"]["auto_install"])
         self.assertFalse(manager["agents"]["opencode"]["auto_install"])
         self.assertFalse(manager["agents"]["kimi-cli"]["auto_install"])
@@ -712,6 +715,7 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         )
         self.assertEqual(claude_native["upgrade"], "claude update")
         self.assertEqual(claude_native["detect_paths"], ["~/.local/bin/claude"])
+        self.assertFalse(lifecycle_agents["claude-code"]["providers"]["brew"]["managed"])
 
         codex_npm = lifecycle_agents["codex"]["providers"]["npm"]
         self.assertTrue(codex_npm["managed"])
