@@ -13,8 +13,8 @@ AGENT_METADATA = {
         "aliases": ["Gemini CLI"],
     },
     "cursor": {
-        "display_name": "Cursor IDE",
-        "aliases": ["Cursor", "Cursor IDE"],
+        "display_name": "Cursor CLI",
+        "aliases": ["Cursor", "Cursor CLI", "Cursor IDE", "cursor-agent"],
     },
     "opencode": {
         "display_name": "OpenCode",

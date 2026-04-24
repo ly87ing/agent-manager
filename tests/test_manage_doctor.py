@@ -536,8 +536,8 @@ class ManageDoctorReportTests(unittest.TestCase):
 
             self.assertEqual(report["status"], "error")
             mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
-            self.assertEqual(mcp_names["Cursor IDE"]["status"], "error")
-            self.assertIn("实际 0 个", mcp_names["Cursor IDE"]["message"])
+            self.assertEqual(mcp_names["Cursor CLI"]["status"], "error")
+            self.assertIn("实际 0 个", mcp_names["Cursor CLI"]["message"])
 
     def test_report_flags_wrong_managed_mcp_name_even_when_count_matches(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -929,7 +929,7 @@ class ManageDoctorReportTests(unittest.TestCase):
 
             self.assertEqual(report["status"], "healthy")
             mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
-            self.assertEqual(mcp_names["Cursor IDE"]["status"], "ok")
+            self.assertEqual(mcp_names["Cursor CLI"]["status"], "ok")
 
     def test_report_accepts_resolved_secret_for_managed_mcp_server(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -123,17 +123,22 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
    - 手工卸载 brew 版本，再执行 `npm install -g @openai/codex`
 3. `Gemini CLI`
    - 手工卸载 brew 版本，再执行 `npm install -g @google/gemini-cli`
+4. `OpenCode`
+   - 手工卸载 brew 版本，再执行官方 install script：`curl -fsSL https://opencode.ai/install | bash`
 
 ### 问题：检测到外部安装但未纳入托管
 **症状**：`doctor` 报告 `检测到外部安装，未纳入 agent-manager 托管`
 
 #### 处理建议：
-1. 确认当前 PATH 中的 `claude` / `codex` / `gemini` 是否来自官方受管来源
+1. 确认当前 PATH 中的 `claude` / `codex` / `gemini` / `cursor-agent` / `opencode` / `kimi` 是否来自官方受管来源
 2. 清理系统残留或自定义包装脚本，再重新执行 `./manage.sh doctor`
 3. 若希望继续由 `agent-manager` 管理，请回到官方受管 provider：
    - `Claude Code`：官方 native installer（或保留已存在的 npm 受管安装）
    - `Codex`：官方 npm 包 `@openai/codex`
    - `Gemini CLI`：官方 npm 包 `@google/gemini-cli`
+   - `Cursor`：官方 `cursor-agent` install script
+   - `OpenCode`：官方 install script `https://opencode.ai/install`
+   - `Kimi Code CLI`：官方 install script `https://code.kimi.com/install.sh`
 
 ### 问题：Rules 修改后没有分发到目标 Agent
 **症状**：已经修改 `agent-rule/rules/src/`，但目标 Agent 目录里的规则仍然是旧内容
@@ -162,8 +167,9 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
      ```bash
      claude --version    # Claude Code
      gemini --version    # Gemini CLI
-     cursor --version    # Cursor (通常在 About 菜单中)
+     cursor-agent --version  # Cursor CLI
      opencode --version  # OpenCode
+     kimi --version      # Kimi Code CLI
      ```
    - 解决：参考官方文档升级到兼容版本
 

@@ -35,7 +35,12 @@ def get_pkg_name(cmd):
     if not cmd:
         return None
     match = re.search(r"(?:install|uninstall)(?:\s+--cask)?\s+([^\s@]+)", cmd)
-    return match.group(1) if match else None
+    if not match:
+        return None
+    pkg_name = match.group(1)
+    if cmd.lstrip().startswith("brew "):
+        return pkg_name.split("/")[-1]
+    return pkg_name
 
 
 def get_uv_tool_name(cmd: str | None) -> str | None:
@@ -610,6 +615,9 @@ class ProviderInventory:
                 if isinstance(path, str) and path
             }
             if candidate_paths and normalized_detect_paths.intersection(candidate_paths):
+                add_found(provider_name)
+            detect_uv_tool = provider_cfg.get("detect_uv_tool")
+            if isinstance(detect_uv_tool, str) and detect_uv_tool and detect_uv_tool in self.get_uv_tools():
                 add_found(provider_name)
 
         brew_pkg = get_pkg_name(config.get("providers", {}).get("brew", {}).get("install", ""))

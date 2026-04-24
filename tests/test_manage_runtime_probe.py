@@ -736,15 +736,15 @@ class ManageRuntimeProbeTests(unittest.TestCase):
             "kimi",
             {
                 "providers": {
-                    "uv": {
-                        "install": "uv tool install --python 3.13 kimi-cli",
+                    "native": {
+                        "detect_uv_tool": "kimi-cli",
                     }
                 }
             },
             inventory=inventory,
         )
 
-        self.assertEqual(providers, ["uv"])
+        self.assertEqual(providers, ["native"])
 
     def test_detect_all_providers_detects_uv_tool_installation_with_trailing_python_flag(self):
         command_outputs = {
@@ -772,15 +772,44 @@ class ManageRuntimeProbeTests(unittest.TestCase):
             "kimi",
             {
                 "providers": {
-                    "uv": {
-                        "install": "uv tool install kimi-cli --python 3.13",
+                    "native": {
+                        "install": "curl -LsSf https://code.kimi.com/install.sh | bash",
+                        "detect_uv_tool": "kimi-cli",
                     }
                 }
             },
             inventory=inventory,
         )
 
-        self.assertEqual(providers, ["uv"])
+        self.assertEqual(providers, ["native"])
+
+    def test_detect_all_providers_matches_opencode_native_detect_paths(self):
+        native_path = os.path.expanduser("~/.local/bin/opencode")
+        inventory = manage_runtime_probe.ProviderInventory(
+            run_cmd=lambda cmd, timeout=10: (False, ""),
+            which=lambda binary: native_path if binary == "opencode" else None,
+            path_exists=lambda _path: False,
+            realpath=lambda path: path,
+        )
+
+        providers = manage_runtime_probe.detect_all_providers(
+            "opencode",
+            {
+                "providers": {
+                    "native": {
+                        "managed": True,
+                        "detect_paths": [
+                            "~/.local/bin/opencode",
+                            "~/bin/opencode",
+                            "~/.opencode/bin/opencode",
+                        ],
+                    }
+                }
+            },
+            inventory=inventory,
+        )
+
+        self.assertEqual(providers, ["native"])
 
     def test_inventory_caches_provider_queries(self):
         run_cmd = mock.Mock(

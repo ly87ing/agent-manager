@@ -68,44 +68,61 @@
     }
   },
   "cursor": {
-    "display_name": "Cursor IDE",
-    "bin": "cursor",
-    "app_path": "/Applications/Cursor.app",
-    "preferred_provider": "brew",
+    "display_name": "Cursor CLI",
+    "bin": "cursor-agent",
+    "preferred_provider": "native",
+    "require_managed_provider": true,
     "providers": {
-      "brew": {
-        "install": "brew install --cask cursor",
-        "uninstall": "brew uninstall --cask cursor",
-        "upgrade": "brew upgrade --cask cursor"
+      "native": {
+        "managed": true,
+        "install": {
+          "darwin": "curl https://cursor.com/install -fsS | bash",
+          "linux": "curl https://cursor.com/install -fsS | bash"
+        },
+        "upgrade": "cursor-agent update",
+        "detect_paths": ["~/.local/bin/cursor-agent", "~/.cursor/bin/cursor-agent"]
       }
     }
   },
   "opencode": {
     "display_name": "OpenCode",
     "bin": "opencode",
-    "preferred_provider": "brew",
+    "preferred_provider": "native",
+    "require_managed_provider": true,
     "providers": {
+      "native": {
+        "managed": true,
+        "install": "curl -fsSL https://opencode.ai/install | bash",
+        "uninstall": "opencode uninstall --force",
+        "upgrade": "opencode upgrade --method curl",
+        "detect_paths": ["~/.local/bin/opencode", "~/bin/opencode", "~/.opencode/bin/opencode"]
+      },
       "npm": {
-        "install": "npm install -g @opencode/cli",
-        "uninstall": "npm uninstall -g @opencode/cli",
-        "upgrade": "npm install -g @opencode/cli@latest"
+        "managed": false,
+        "install": "npm install -g opencode-ai",
+        "uninstall": "npm uninstall -g opencode-ai",
+        "upgrade": "npm install -g opencode-ai@latest"
       },
       "brew": {
-        "install": "brew install opencode",
-        "uninstall": "brew uninstall opencode",
-        "upgrade": "brew upgrade opencode"
+        "managed": false,
+        "install": "brew install anomalyco/tap/opencode",
+        "uninstall": "brew uninstall anomalyco/tap/opencode",
+        "upgrade": "brew upgrade anomalyco/tap/opencode"
       }
     }
   },
   "kimi-cli": {
     "display_name": "Kimi Code CLI",
     "bin": "kimi",
-    "preferred_provider": "uv",
+    "preferred_provider": "native",
+    "require_managed_provider": true,
     "providers": {
-      "uv": {
-        "install": "uv tool install --python 3.13 kimi-cli",
+      "native": {
+        "managed": true,
+        "install": "curl -LsSf https://code.kimi.com/install.sh | bash",
         "uninstall": "uv tool uninstall kimi-cli",
-        "upgrade": "uv tool upgrade kimi-cli --no-cache"
+        "upgrade": "uv tool upgrade kimi-cli --no-cache",
+        "detect_uv_tool": "kimi-cli"
       }
     }
   }

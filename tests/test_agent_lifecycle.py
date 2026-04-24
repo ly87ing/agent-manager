@@ -778,7 +778,7 @@ class KimiLifecycleConfigTests(unittest.TestCase):
         self.assertIn("kimi-cli", lifecycle_agents)
         self.assertEqual(lifecycle_agents["kimi-cli"]["display_name"], "Kimi Code CLI")
         self.assertEqual(lifecycle_agents["kimi-cli"]["bin"], "kimi")
-        self.assertEqual(lifecycle_agents["kimi-cli"]["preferred_provider"], "uv")
+        self.assertEqual(lifecycle_agents["kimi-cli"]["preferred_provider"], "native")
 
     def test_kimi_cli_metadata_has_display_name(self):
         from src.agent_ids import get_agent_display_name
@@ -807,13 +807,24 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         self.assertEqual(manager["agents"]["codex"]["preferred_provider"], "npm")
         self.assertEqual(lifecycle_agents["codex"]["preferred_provider"], "npm")
         self.assertFalse(manager["agents"]["cursor"]["auto_install"])
+        self.assertTrue(manager["agents"]["cursor"]["auto_update"])
+        self.assertEqual(manager["agents"]["cursor"]["preferred_provider"], "native")
+        self.assertEqual(lifecycle_agents["cursor"]["display_name"], "Cursor CLI")
+        self.assertEqual(lifecycle_agents["cursor"]["bin"], "cursor-agent")
+        self.assertEqual(lifecycle_agents["cursor"]["preferred_provider"], "native")
         self.assertFalse(manager["agents"]["opencode"]["auto_install"])
+        self.assertTrue(manager["agents"]["opencode"]["auto_update"])
+        self.assertEqual(manager["agents"]["opencode"]["preferred_provider"], "native")
+        self.assertEqual(lifecycle_agents["opencode"]["preferred_provider"], "native")
         self.assertFalse(manager["agents"]["kimi-cli"]["auto_install"])
-        self.assertEqual(manager["agents"]["kimi-cli"]["preferred_provider"], "uv")
+        self.assertTrue(manager["agents"]["kimi-cli"]["auto_update"])
+        self.assertEqual(manager["agents"]["kimi-cli"]["preferred_provider"], "native")
+        self.assertEqual(lifecycle_agents["kimi-cli"]["preferred_provider"], "native")
 
         self.assertTrue(lifecycle_agents["claude-code"]["require_managed_provider"])
         self.assertTrue(lifecycle_agents["gemini-cli"]["require_managed_provider"])
         self.assertTrue(lifecycle_agents["codex"]["require_managed_provider"])
+        self.assertTrue(lifecycle_agents["kimi-cli"]["require_managed_provider"])
 
         claude_native = lifecycle_agents["claude-code"]["providers"]["native"]
         self.assertTrue(claude_native["managed"])
@@ -846,8 +857,36 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         gemini_brew = lifecycle_agents["gemini-cli"]["providers"]["brew"]
         self.assertFalse(gemini_brew["managed"])
 
+        cursor_native = lifecycle_agents["cursor"]["providers"]["native"]
+        self.assertTrue(cursor_native["managed"])
+        self.assertEqual(cursor_native["install"]["darwin"], "curl https://cursor.com/install -fsS | bash")
+        self.assertEqual(cursor_native["install"]["linux"], "curl https://cursor.com/install -fsS | bash")
+        self.assertEqual(cursor_native["upgrade"], "cursor-agent update")
+        self.assertEqual(
+            cursor_native["detect_paths"],
+            ["~/.local/bin/cursor-agent", "~/.cursor/bin/cursor-agent"],
+        )
+
+        opencode_native = lifecycle_agents["opencode"]["providers"]["native"]
+        self.assertTrue(opencode_native["managed"])
+        self.assertEqual(opencode_native["install"], "curl -fsSL https://opencode.ai/install | bash")
+        self.assertEqual(opencode_native["uninstall"], "opencode uninstall --force")
+        self.assertEqual(opencode_native["upgrade"], "opencode upgrade --method curl")
+        self.assertEqual(
+            opencode_native["detect_paths"],
+            ["~/.local/bin/opencode", "~/bin/opencode", "~/.opencode/bin/opencode"],
+        )
+        self.assertFalse(lifecycle_agents["opencode"]["providers"]["brew"]["managed"])
+
+        kimi_native = lifecycle_agents["kimi-cli"]["providers"]["native"]
+        self.assertTrue(kimi_native["managed"])
+        self.assertEqual(kimi_native["install"], "curl -LsSf https://code.kimi.com/install.sh | bash")
+        self.assertEqual(kimi_native["uninstall"], "uv tool uninstall kimi-cli")
+        self.assertEqual(kimi_native["upgrade"], "uv tool upgrade kimi-cli --no-cache")
+        self.assertEqual(kimi_native["detect_uv_tool"], "kimi-cli")
+
     def test_committed_agent_policy_disables_default_kimi_cli_auto_install(self):
         manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
 
         self.assertFalse(manager["agents"]["kimi-cli"]["auto_install"])
-        self.assertEqual(manager["agents"]["kimi-cli"]["preferred_provider"], "uv")
+        self.assertEqual(manager["agents"]["kimi-cli"]["preferred_provider"], "native")

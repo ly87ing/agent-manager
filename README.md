@@ -22,9 +22,12 @@
 默认受管 MCP 服务器当前包含 `augment-context-engine`（代码库检索）和 `chrome-devtools`（浏览器调试 / network / performance，使用官方推荐的 `npx -y chrome-devtools-mcp@latest --isolated`，避免多个 agent 共享同一个 browser profile 时互相冲突）。
 默认受管浏览器工具当前包含 `playwright-cli` 和 `agent-browser`；二者通过官方 npm `@latest` 通道受管安装与更新。`playwright-cli` 在安装或升级后会继续执行 `install-browser` 同步 Playwright browsers，并用 Playwright cache 的真实 payload 做就绪重验；`agent-browser` 优先复用系统已有的 Chrome/Chromium，也会接受 Playwright cache 中的 Chromium 作为可复用运行时，仅在缺少这些浏览器运行时时才需要执行 `agent-browser install`。`chrome-devtools` 继续作为 MCP server 通过 `npx ...@latest` 在运行时跟随上游最新版本。
 默认受管 skill 仓库当前包含 `agent-skills`、`oa-skill`、`openai-frontend-skill`、`anthropic-frontend-design-skill`、`playwright-best-practices-skill`、`superpowers` 和 `ui-ux-pro-max-skill`；它们在未显式声明 `commit` / `ref` 时，会在同步时跟随上游默认分支最新状态；其中 `agent-skills` 面向 `Claude Code`、`Kimi Code CLI` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 3 个 skill 包，避免上游新增 skill 被默认带入；`oa-skill` 当前通过显式 `skill_paths` 默认接入仓库内唯一的 `xyai-manager` skill；`anthropic-frontend-design-skill` 仅面向 `Kimi Code CLI` 暴露，并通过显式 `skill_paths` 锁定 Anthropic 官方 `skills/frontend-design`。
-默认自动安装的 Agent 当前包含 `Claude Code`、`Codex` 和 `Gemini CLI`；`Cursor IDE`、`OpenCode` 与 `Kimi Code CLI` 仍受管，但默认不自动安装，需要时可通过策略显式开启。
+默认自动安装的 Agent 当前包含 `Claude Code`、`Codex` 和 `Gemini CLI`；`Cursor CLI`、`OpenCode` 与 `Kimi Code CLI` 仍受管，但默认不自动安装，需要时可通过策略显式开启。
 `Claude Code` 当前默认走官方 native installer；`Codex` 与 `Gemini CLI` 默认走官方 npm 包。历史 `brew` 安装仅用于识别并提示迁移，不再作为这三个 CLI 的受管 provider。
 `Claude Code` 仍保留 `npm` 作为 legacy-compatible 受管 provider；`Claude Code local install` 不纳入 `agent-manager` lifecycle 托管，因为它依赖 shell alias 暴露入口，当前探测链路不会越权接管。
+`Cursor` 当前默认受管目标已切换为官方 `cursor-agent` CLI；它继续复用 `~/.cursor/mcp.json` 与 repo-native `.cursor/rules`，不再把 `brew cask cursor` 当作默认生命周期来源。
+`OpenCode` 当前默认走官方 install script，并通过 `opencode upgrade --method curl` 执行更新；历史 `npm` / `brew` 安装仅用于识别并提示迁移。
+`Kimi Code CLI` 当前默认走官方 install script；升级与卸载继续使用官方支持的 `uv tool` 路径，避免仓库把 `uv` 本身误当成前台安装方式。
 `Kimi Code CLI` 已成为受管 Agent，当前受管路径为 `~/.kimi/mcp.json`、`~/.kimi/skills`、`{{REPO_ROOT}}/.kimi/AGENTS.md`、`{{REPO_ROOT}}/.kimi/modules`；`~/.kimi/config.toml` 不在本轮托管范围。
 
 ## Official CLI Lifecycle Policy
@@ -34,6 +37,9 @@
 | `Claude Code` | `native` | `npm` | `brew` | 默认使用官方 installer；若已是 npm 版，可继续受管或按官方 `claude migrate-installer` 手工迁移。 |
 | `Codex` | `npm` | - | `brew` | 已纳入正式 lifecycle 管理；历史 brew 安装只用于审计和迁移提示。 |
 | `Gemini CLI` | `npm` | - | `brew` | 默认使用官方 npm stable 包；brew 只做历史识别。 |
+| `Cursor` | `native` | - | - | 默认使用官方 `cursor-agent` install script；继续复用现有 `~/.cursor` 配置与 repo-native rules。 |
+| `OpenCode` | `native` | - | `npm`, `brew` | 默认使用官方 install script 与内建升级命令；历史 npm / brew 安装只做审计。 |
+| `Kimi Code CLI` | `native` | - | - | 默认使用官方 install script；底层升级/卸载继续走 `uv tool` 官方路径。 |
 
 ## Agent 安装源依据 (Official Channels Catalog)
 
@@ -44,8 +50,9 @@
 | **Claude Code** | `claude` | 官方 native installer / `@anthropic-ai/claude-code` | `cask: claude-code` | `brew` 仅保留 detect-only 语义。 |
 | **Codex** | `codex` | `@openai/codex` | `cask: codex` | 受管 lifecycle 默认走 npm。 |
 | **Gemini CLI** | `gemini` | `@google/gemini-cli` | `formula: gemini-cli` | 受管 lifecycle 默认走 npm stable。 |
-| **Cursor IDE** | `cursor` | - | `cask: cursor` | 当前仍按 brew 受管。 |
-| **OpenCode** | `opencode` | `@opencode/cli` | `tap: anomalyco/tap/opencode` | 当前默认仍按 brew/tap 受管。 |
+| **Cursor CLI** | `cursor-agent` | 官方 install script | - | 默认受管目标为官方 `cursor-agent` CLI；继续复用 `~/.cursor` 配置。 |
+| **OpenCode** | `opencode` | 官方 install script / `opencode-ai` | `tap: anomalyco/tap/opencode` | 默认受管 lifecycle 走官方 install script；`npm` / `brew` 只保留 detect-only 语义。 |
+| **Kimi Code CLI** | `kimi` | 官方 install script | - | 默认受管 lifecycle 走官方 install script；升级/卸载通过 `uv tool`。 |
 
 ## 核心健全性特性
 
