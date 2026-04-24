@@ -1,7 +1,8 @@
 {
   "agents": {
-    "claude-code": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "brew" },
-    "gemini-cli": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "brew" },
+    "claude-code": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "native" },
+    "gemini-cli": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "npm" },
+    "codex": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "npm" },
     "cursor": { "enabled": true, "auto_install": false, "auto_update": true, "preferred_provider": "brew" },
     "opencode": { "enabled": true, "auto_install": false, "auto_update": true, "preferred_provider": "brew" },
     "kimi-cli": { "enabled": true, "auto_install": false, "auto_update": true, "preferred_provider": "uv" }

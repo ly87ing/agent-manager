@@ -651,19 +651,14 @@ class AgentIdConsistencyTests(unittest.TestCase):
             "gemini-cli",
             "cursor",
             "opencode",
+            "codex",
             "kimi-cli",
         }
-        skill_agent_ids = managed_agent_ids | {"codex"}
 
         self.assertEqual(set(manager_agents), managed_agent_ids)
         self.assertEqual(set(lifecycle_agents), managed_agent_ids)
-        self.assertEqual(set(skill_targets), skill_agent_ids)
-        self.assertEqual(set(mcp_agent_paths), skill_agent_ids)
-
-        # codex 是仅 skills/mcp target：不参与 lifecycle 管理，但仍可作为技能/工具配置目标。
-        self.assertNotIn("codex", managed_agent_ids)
-        self.assertIn("codex", skill_agent_ids)
-        self.assertIn("kimi-cli", managed_agent_ids)
+        self.assertEqual(set(skill_targets), managed_agent_ids)
+        self.assertEqual(set(mcp_agent_paths), managed_agent_ids)
 
 
 class KimiLifecycleConfigTests(unittest.TestCase):
@@ -682,18 +677,60 @@ class KimiLifecycleConfigTests(unittest.TestCase):
 
 
 class CommittedAgentPolicyTests(unittest.TestCase):
-    def test_committed_agent_policy_disables_default_cursor_auto_install(self):
+    def test_committed_agent_policy_tracks_official_cli_provider_defaults(self):
         manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
+        lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
 
+        self.assertTrue(manager["agents"]["claude-code"]["enabled"])
         self.assertTrue(manager["agents"]["claude-code"]["auto_install"])
+        self.assertTrue(manager["agents"]["claude-code"]["auto_update"])
+        self.assertEqual(manager["agents"]["claude-code"]["preferred_provider"], "native")
+        self.assertTrue(manager["agents"]["gemini-cli"]["enabled"])
         self.assertTrue(manager["agents"]["gemini-cli"]["auto_install"])
+        self.assertTrue(manager["agents"]["gemini-cli"]["auto_update"])
+        self.assertEqual(manager["agents"]["gemini-cli"]["preferred_provider"], "npm")
+        self.assertTrue(manager["agents"]["codex"]["enabled"])
+        self.assertTrue(manager["agents"]["codex"]["auto_install"])
+        self.assertTrue(manager["agents"]["codex"]["auto_update"])
+        self.assertEqual(manager["agents"]["codex"]["preferred_provider"], "npm")
         self.assertFalse(manager["agents"]["cursor"]["auto_install"])
         self.assertFalse(manager["agents"]["opencode"]["auto_install"])
+        self.assertFalse(manager["agents"]["kimi-cli"]["auto_install"])
+        self.assertEqual(manager["agents"]["kimi-cli"]["preferred_provider"], "uv")
 
-    def test_committed_agent_policy_disables_default_opencode_auto_install(self):
-        manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
+        self.assertTrue(lifecycle_agents["claude-code"]["require_managed_provider"])
+        self.assertTrue(lifecycle_agents["gemini-cli"]["require_managed_provider"])
+        self.assertTrue(lifecycle_agents["codex"]["require_managed_provider"])
 
-        self.assertFalse(manager["agents"]["opencode"]["auto_install"])
+        claude_native = lifecycle_agents["claude-code"]["providers"]["native"]
+        self.assertTrue(claude_native["managed"])
+        self.assertEqual(claude_native["install"]["darwin"], "curl -fsSL https://claude.ai/install.sh | bash")
+        self.assertEqual(claude_native["install"]["linux"], "curl -fsSL https://claude.ai/install.sh | bash")
+        self.assertEqual(
+            claude_native["install"]["windows"],
+            "curl -fsSL https://claude.ai/install.cmd -o install.cmd && install.cmd && del install.cmd",
+        )
+        self.assertEqual(claude_native["upgrade"], "claude update")
+        self.assertEqual(claude_native["detect_paths"], ["~/.local/bin/claude"])
+
+        codex_npm = lifecycle_agents["codex"]["providers"]["npm"]
+        self.assertTrue(codex_npm["managed"])
+        self.assertEqual(codex_npm["install"], "npm install -g @openai/codex")
+        self.assertEqual(codex_npm["uninstall"], "npm uninstall -g @openai/codex")
+        self.assertEqual(codex_npm["upgrade"], "npm install -g @openai/codex@latest")
+
+        codex_brew = lifecycle_agents["codex"]["providers"]["brew"]
+        self.assertFalse(codex_brew["managed"])
+        self.assertEqual(codex_brew["install"], "brew install --cask codex")
+
+        gemini_npm = lifecycle_agents["gemini-cli"]["providers"]["npm"]
+        self.assertTrue(gemini_npm["managed"])
+        self.assertEqual(gemini_npm["install"], "npm install -g @google/gemini-cli")
+        self.assertEqual(gemini_npm["uninstall"], "npm uninstall -g @google/gemini-cli")
+        self.assertEqual(gemini_npm["upgrade"], "npm install -g @google/gemini-cli@latest")
+
+        gemini_brew = lifecycle_agents["gemini-cli"]["providers"]["brew"]
+        self.assertFalse(gemini_brew["managed"])
 
     def test_committed_agent_policy_disables_default_kimi_cli_auto_install(self):
         manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))

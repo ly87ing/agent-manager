@@ -2,14 +2,27 @@
   "claude-code": {
     "display_name": "Claude Code",
     "bin": "claude",
-    "preferred_provider": "brew",
+    "preferred_provider": "native",
+    "require_managed_provider": true,
     "providers": {
+      "native": {
+        "managed": true,
+        "install": {
+          "darwin": "curl -fsSL https://claude.ai/install.sh | bash",
+          "linux": "curl -fsSL https://claude.ai/install.sh | bash",
+          "windows": "curl -fsSL https://claude.ai/install.cmd -o install.cmd && install.cmd && del install.cmd"
+        },
+        "upgrade": "claude update",
+        "detect_paths": ["~/.local/bin/claude"]
+      },
       "npm": {
+        "managed": true,
         "install": "npm install -g @anthropic-ai/claude-code",
         "uninstall": "npm uninstall -g @anthropic-ai/claude-code",
         "upgrade": "npm install -g @anthropic-ai/claude-code@latest"
       },
       "brew": {
+        "managed": false,
         "install": "brew install --cask claude-code",
         "uninstall": "brew uninstall --cask claude-code",
         "upgrade": "brew upgrade --cask claude-code"
@@ -19,17 +32,38 @@
   "gemini-cli": {
     "display_name": "Gemini CLI",
     "bin": "gemini",
-    "preferred_provider": "brew",
+    "preferred_provider": "npm",
+    "require_managed_provider": true,
     "providers": {
       "npm": {
+        "managed": true,
         "install": "npm install -g @google/gemini-cli",
         "uninstall": "npm uninstall -g @google/gemini-cli",
         "upgrade": "npm install -g @google/gemini-cli@latest"
       },
       "brew": {
+        "managed": false,
         "install": "brew install gemini-cli",
         "uninstall": "brew uninstall gemini-cli",
         "upgrade": "brew upgrade gemini-cli"
+      }
+    }
+  },
+  "codex": {
+    "display_name": "Codex",
+    "bin": "codex",
+    "preferred_provider": "npm",
+    "require_managed_provider": true,
+    "providers": {
+      "npm": {
+        "managed": true,
+        "install": "npm install -g @openai/codex",
+        "uninstall": "npm uninstall -g @openai/codex",
+        "upgrade": "npm install -g @openai/codex@latest"
+      },
+      "brew": {
+        "managed": false,
+        "install": "brew install --cask codex"
       }
     }
   },
