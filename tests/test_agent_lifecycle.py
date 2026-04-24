@@ -890,6 +890,7 @@ class CommittedAgentPolicyTests(unittest.TestCase):
 
         cursor_native = lifecycle_agents["cursor"]["providers"]["native"]
         self.assertEqual(cursor_native["unsupported_actions"], ["uninstall"])
+        self.assertNotIn("uninstall", cursor_native)
 
         self.assertEqual(lifecycle_agents["codex"]["preferred_provider"], "npm")
         self.assertEqual(lifecycle_agents["gemini-cli"]["preferred_provider"], "npm")
