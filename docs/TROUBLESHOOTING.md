@@ -87,29 +87,53 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 1. **安装来源不可用**
    - 检查：`./manage.sh detect` 显示具体哪些安装来源失败
    - 解决：确保对应的包管理器已安装和可用
-     - 对于 brew：`brew doctor` 并确保在 PATH 中
-     - 对于 npm：`npm config get prefix` 应返回可写目录
-     - 对于 gh：`gh auth status` 检查 GitHub 认证
+     - 对于 `Claude Code` 官方 native provider：确认 `curl`、`bash` 和官方安装目录在 PATH 中
+     - 对于 `Codex` / `Gemini CLI` 的 npm provider：`npm config get prefix` 应返回可写目录
+     - 对于仍以 brew 受管的其他 Agent：`brew doctor` 并确保在 PATH 中
+     - 对于 gh provider：`gh auth status` 检查 GitHub 认证
 
 2. **网络或权限问题**
    - 检查：尝试手动执行安装命令
      ```bash
-     # 例如，对于 Claude Code brew 安装
-     brew install --cask claude-code
+     # 例如，对于 Codex 官方 npm 安装
+     npm install -g @openai/codex
      ```
    - 解决：解决网络连接问题或使用 sudo（如果需要且安全）
 
 3. **冲突的安装来源**
-   - 检查：`manage.sh detect` 显示多源安装冲突 (如 brew 和 npm 同时安装)
-   - 解决：选择首选来源并移除冲突的安装
+   - 检查：`manage.sh detect` 显示多源安装冲突 (如 brew 和 npm / native 同时安装)
+   - 解决：保留当前受管 provider，并移除历史或冲突来源
      ```bash
-     # 例如，保留 brew 版本，移除 npm 版本
-     npm uninstall -g @anthropic-ai/claude-code
+     # 例如，Claude Code 已切到 native 时，先卸载历史 brew 版本
+     brew uninstall --cask claude-code
      ```
 
 4. **路径未更新**
    - 检查：手动安装后，终端未重新加载 PATH
    - 解决：重新启动终端或执行 `hash -r` 重新加载命令路径缓存
+
+### 问题：历史 brew 安装被判定为不合规
+**症状**：`doctor` 报告 `已弃用安装来源`，或 `update` / `bootstrap` 直接失败
+
+#### 处理建议：
+1. `Claude Code`
+   - 手工卸载 brew 版本，再让 `agent-manager` 走官方 native installer
+   - 如果当前已经是 npm 版并希望切到 native，按官方 `claude migrate-installer` 迁移
+2. `Codex`
+   - 手工卸载 brew 版本，再执行 `npm install -g @openai/codex`
+3. `Gemini CLI`
+   - 手工卸载 brew 版本，再执行 `npm install -g @google/gemini-cli`
+
+### 问题：检测到外部安装但未纳入托管
+**症状**：`doctor` 报告 `检测到外部安装，未纳入 agent-manager 托管`
+
+#### 处理建议：
+1. 确认当前 PATH 中的 `claude` / `codex` / `gemini` 是否来自官方受管来源
+2. 清理系统残留或自定义包装脚本，再重新执行 `./manage.sh doctor`
+3. 若希望继续由 `agent-manager` 管理，请回到官方受管 provider：
+   - `Claude Code`：官方 native installer（或保留已存在的 npm 受管安装）
+   - `Codex`：官方 npm 包 `@openai/codex`
+   - `Gemini CLI`：官方 npm 包 `@google/gemini-cli`
 
 ### 问题：Rules 修改后没有分发到目标 Agent
 **症状**：已经修改 `agent-rule/rules/src/`，但目标 Agent 目录里的规则仍然是旧内容

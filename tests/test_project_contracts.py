@@ -341,17 +341,36 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn(".codex/hooks.json", readme)
         self.assertIn("make codex-hooks-sync", readme)
 
+    def test_readme_documents_official_cli_lifecycle_policy(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("`Claude Code`、`Codex`、`Gemini CLI`", readme)
+        self.assertIn("仅用于识别并提示迁移", readme)
+        self.assertIn("默认自动安装的 Agent 当前包含 `Claude Code`、`Codex` 和 `Gemini CLI`", readme)
+        self.assertIn("`Claude Code` 当前默认走官方 native installer", readme)
+        self.assertIn("`Codex` 与 `Gemini CLI` 默认走官方 npm 包", readme)
+        self.assertIn("`Claude Code local install` 不纳入 `agent-manager` lifecycle 托管", readme)
+
     def test_readme_documents_kimi_cli_management_paths(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("Kimi Code CLI", readme)
-        self.assertIn("对 `Claude Code`、`Gemini CLI`、`Cursor`、`OpenCode`、`Kimi Code CLI` 做生命周期管理", readme)
-        self.assertIn("对 `Codex` 提供受管 MCP / skills / rules 支持", readme)
+        self.assertIn("对 `Claude Code`、`Codex`、`Gemini CLI`、`Cursor`、`OpenCode`、`Kimi Code CLI` 做生命周期管理", readme)
         self.assertIn("~/.kimi/mcp.json", readme)
         self.assertIn("│ Kimi Code CLI", readme)
         self.assertIn("~/.kimi/skills", readme)
         self.assertIn("`{{REPO_ROOT}}/.kimi/AGENTS.md`", readme)
         self.assertIn("`{{REPO_ROOT}}/.kimi/modules`", readme)
         self.assertIn("`~/.kimi/config.toml` 不在本轮托管范围", readme)
+
+    def test_troubleshooting_documents_cli_provider_migration_paths(self):
+        troubleshooting = (ROOT / "docs" / "TROUBLESHOOTING.md").read_text(encoding="utf-8")
+        self.assertIn("历史 brew 安装", troubleshooting)
+        self.assertIn("claude migrate-installer", troubleshooting)
+        self.assertIn("检测到外部安装，未纳入 agent-manager 托管", troubleshooting)
+        self.assertIn("Codex", troubleshooting)
+        self.assertIn("Gemini CLI", troubleshooting)
+        self.assertIn("`Claude Code`：官方 native installer", troubleshooting)
+        self.assertIn("`Codex`：官方 npm 包 `@openai/codex`", troubleshooting)
+        self.assertIn("`Gemini CLI`：官方 npm 包 `@google/gemini-cli`", troubleshooting)
 
     def test_readme_documents_agent_skills_scope_matches_config(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")

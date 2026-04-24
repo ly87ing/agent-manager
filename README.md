@@ -1,6 +1,6 @@
 # Agent Manager (Ultimate Edition)
 
-🚀 **AI 助手环境一键管理中枢**。通过单一入口，对 `Claude Code`、`Gemini CLI`、`Cursor`、`OpenCode`、`Kimi Code CLI` 做生命周期管理，并对 `Codex` 提供受管 MCP / skills / rules 支持。
+🚀 **AI 助手环境一键管理中枢**。通过单一入口，对 `Claude Code`、`Codex`、`Gemini CLI`、`Cursor`、`OpenCode`、`Kimi Code CLI` 做生命周期管理。
 
 ## 核心规范速查表 (Authoritative Spec)
 
@@ -22,19 +22,30 @@
 默认受管 MCP 服务器当前包含 `augment-context-engine`（代码库检索）和 `chrome-devtools`（浏览器调试 / network / performance，使用官方推荐的 `npx -y chrome-devtools-mcp@latest --isolated`，避免多个 agent 共享同一个 browser profile 时互相冲突）。
 默认受管浏览器工具当前包含 `playwright-cli` 和 `agent-browser`；二者通过官方 npm `@latest` 通道受管安装与更新。`playwright-cli` 在安装或升级后会继续执行 `install-browser` 同步 Playwright browsers，并用 Playwright cache 的真实 payload 做就绪重验；`agent-browser` 优先复用系统已有的 Chrome/Chromium，也会接受 Playwright cache 中的 Chromium 作为可复用运行时，仅在缺少这些浏览器运行时时才需要执行 `agent-browser install`。`chrome-devtools` 继续作为 MCP server 通过 `npx ...@latest` 在运行时跟随上游最新版本。
 默认受管 skill 仓库当前包含 `agent-skills`、`oa-skill`、`openai-frontend-skill`、`anthropic-frontend-design-skill`、`playwright-best-practices-skill`、`superpowers` 和 `ui-ux-pro-max-skill`；它们在未显式声明 `commit` / `ref` 时，会在同步时跟随上游默认分支最新状态；其中 `agent-skills` 面向 `Claude Code`、`Kimi Code CLI` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 3 个 skill 包，避免上游新增 skill 被默认带入；`oa-skill` 当前通过显式 `skill_paths` 默认接入仓库内唯一的 `xyai-manager` skill；`anthropic-frontend-design-skill` 仅面向 `Kimi Code CLI` 暴露，并通过显式 `skill_paths` 锁定 Anthropic 官方 `skills/frontend-design`。
-默认自动安装的 Agent 当前包含 `Claude Code` 和 `Gemini CLI`；`Cursor IDE` 与 `OpenCode` 仍受管，但默认不自动安装，需要时可通过策略显式开启。
+默认自动安装的 Agent 当前包含 `Claude Code`、`Codex` 和 `Gemini CLI`；`Cursor IDE`、`OpenCode` 与 `Kimi Code CLI` 仍受管，但默认不自动安装，需要时可通过策略显式开启。
+`Claude Code` 当前默认走官方 native installer；`Codex` 与 `Gemini CLI` 默认走官方 npm 包。历史 `brew` 安装仅用于识别并提示迁移，不再作为这三个 CLI 的受管 provider。
+`Claude Code` 仍保留 `npm` 作为 legacy-compatible 受管 provider；`Claude Code local install` 不纳入 `agent-manager` lifecycle 托管，因为它依赖 shell alias 暴露入口，当前探测链路不会越权接管。
 `Kimi Code CLI` 已成为受管 Agent，当前受管路径为 `~/.kimi/mcp.json`、`~/.kimi/skills`、`{{REPO_ROOT}}/.kimi/AGENTS.md`、`{{REPO_ROOT}}/.kimi/modules`；`~/.kimi/config.toml` 不在本轮托管范围。
 
-## Agent 安装源依据 (Official Evidence)
+## Official CLI Lifecycle Policy
 
-本项目的生命周期管理逻辑严格对齐以下官方发布渠道：
-
-| 助手名称 | 二进制标识 | NPM 官方源 (Primary) | Homebrew 官方源 (macOS) | 官方依据 (Proof) |
+| CLI | 默认受管 provider | 兼容受管 provider | detect-only 历史来源 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
-| **Claude Code** | `claude` | `@anthropic-ai/claude-code` | `cask: claude-code` | [Brew Cask Info](https://formulae.brew.sh/cask/claude-code) |
-| **Gemini CLI** | `gemini` | `@google/gemini-cli` | `formula: gemini-cli` | [Brew Core Info](https://formulae.brew.sh/formula/gemini-cli) |
-| **Cursor IDE** | `cursor` | - | `cask: cursor` | [Brew Cask Info](https://formulae.brew.sh/cask/cursor) |
-| **OpenCode** | `opencode` | `@opencode/cli` | `tap: anomalyco/tap/opencode` | [Official GitHub](https://github.com/anomalyco/opencode) |
+| `Claude Code` | `native` | `npm` | `brew` | 默认使用官方 installer；若已是 npm 版，可继续受管或按官方 `claude migrate-installer` 手工迁移。 |
+| `Codex` | `npm` | - | `brew` | 已纳入正式 lifecycle 管理；历史 brew 安装只用于审计和迁移提示。 |
+| `Gemini CLI` | `npm` | - | `brew` | 默认使用官方 npm stable 包；brew 只做历史识别。 |
+
+## Agent 安装源依据 (Official Channels Catalog)
+
+下表列出上游公开安装渠道，但不等于 `agent-manager` 会默认或继续托管这些渠道；对 `Claude Code`、`Codex`、`Gemini CLI` 的实际受管策略以上一节为准。
+
+| 助手名称 | 二进制标识 | 官方 npm / 安装器 | Homebrew 官方源 (macOS) | 备注 |
+| :--- | :--- | :--- | :--- | :--- |
+| **Claude Code** | `claude` | 官方 native installer / `@anthropic-ai/claude-code` | `cask: claude-code` | `brew` 仅保留 detect-only 语义。 |
+| **Codex** | `codex` | `@openai/codex` | `cask: codex` | 受管 lifecycle 默认走 npm。 |
+| **Gemini CLI** | `gemini` | `@google/gemini-cli` | `formula: gemini-cli` | 受管 lifecycle 默认走 npm stable。 |
+| **Cursor IDE** | `cursor` | - | `cask: cursor` | 当前仍按 brew 受管。 |
+| **OpenCode** | `opencode` | `@opencode/cli` | `tap: anomalyco/tap/opencode` | 当前默认仍按 brew/tap 受管。 |
 
 ## 核心健全性特性
 
