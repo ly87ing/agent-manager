@@ -110,6 +110,82 @@ class ManageDoctorReportTests(unittest.TestCase):
             self.assertEqual(agent_names["Claude Code"]["status"], "error")
             self.assertIn("运行入口缺失", agent_names["Claude Code"]["message"])
 
+    def test_report_flags_deprecated_provider_as_error(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {\n    "claude-code": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "native" }\n  },\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "agents.json").write_text(
+                '{\n  "claude-code": {\n    "display_name": "Claude Code",\n    "bin": "claude",\n    "require_managed_provider": true,\n    "providers": {\n      "native": { "managed": true, "upgrade": "claude update" },\n      "brew": { "managed": false, "install": "brew install --cask claude-code" }\n    }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{"agent_paths": {}, "servers": {}}',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{"repositories": {}, "agents": {}}',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            with (
+                mock.patch("src.manage_doctor.detect_all_providers", return_value=["brew-cask"]),
+                mock.patch("src.manage_doctor.is_agent_installed", return_value=True),
+            ):
+                report = build_report(
+                    root_dir=temp_root,
+                    config_file=temp_root / "config" / "manager.json",
+                    python_cmd="python3",
+                )
+
+            agent_names = {entry["name"]: entry for entry in report["sections"]["agents"]}
+            self.assertEqual(report["status"], "error")
+            self.assertEqual(agent_names["Claude Code"]["status"], "error")
+            self.assertIn("已弃用安装来源", agent_names["Claude Code"]["message"])
+
+    def test_report_flags_system_only_provider_when_managed_provider_is_required(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {\n    "codex": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "npm" }\n  },\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "agents.json").write_text(
+                '{\n  "codex": {\n    "display_name": "Codex",\n    "bin": "codex",\n    "require_managed_provider": true,\n    "providers": {\n      "npm": { "managed": true, "upgrade": "npm install -g @openai/codex@latest" }\n    }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{"agent_paths": {}, "servers": {}}',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{"repositories": {}, "agents": {}}',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            with (
+                mock.patch("src.manage_doctor.detect_all_providers", return_value=["system"]),
+                mock.patch("src.manage_doctor.is_agent_installed", return_value=True),
+            ):
+                report = build_report(
+                    root_dir=temp_root,
+                    config_file=temp_root / "config" / "manager.json",
+                    python_cmd="python3",
+                )
+
+            agent_names = {entry["name"]: entry for entry in report["sections"]["agents"]}
+            self.assertEqual(report["status"], "error")
+            self.assertEqual(agent_names["Codex"]["status"], "error")
+            self.assertIn("未纳入 agent-manager 托管", agent_names["Codex"]["message"])
+
     def test_report_flags_repo_secret_outside_secrets_directory(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"

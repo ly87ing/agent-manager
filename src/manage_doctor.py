@@ -15,6 +15,8 @@ from src.agent_ids import canonicalize_agent_list, canonicalize_agent_mapping, g
 from src.json_config import ensure_mapping_value_types, get_typed_mapping_section, load_json_object_file
 from src.manage_runtime_probe import (
     ProviderInventory,
+    canonical_provider_name,
+    classify_provider_state,
     collect_active_mcp_target_agents,
     collect_active_rule_agents,
     collect_active_skill_target_agents,
@@ -810,16 +812,35 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
         definition = agent_defs.get(agent_id, {})
         label = get_agent_display_name(agent_id, definition)
         providers = detect_all_providers(definition.get("bin", ""), definition, inventory=inventory)
+        state = classify_provider_state(providers, definition)
         is_active = len(providers) > 0
         runtime_ready = is_agent_installed(agent_id, definition)
         desired = policy.get("enabled", True)
         preferred = policy.get("preferred_provider") or definition.get("preferred_provider", "npm")
-        if is_active and not runtime_ready:
-            detail = providers[0] if providers else "unknown"
+        if state["unsupported"]:
+            append_entry(
+                report,
+                "agents",
+                make_entry(label, "error", f"检测到未声明的 Provider: {', '.join(state['unsupported'])}"),
+            )
+        elif state["deprecated"]:
+            append_entry(
+                report,
+                "agents",
+                make_entry(label, "error", f"检测到已弃用安装来源: {', '.join(state['deprecated'])}"),
+            )
+        elif state["system_only"] and definition.get("require_managed_provider", False):
+            append_entry(
+                report,
+                "agents",
+                make_entry(label, "error", "检测到外部安装，未纳入 agent-manager 托管"),
+            )
+        elif is_active and not runtime_ready:
+            detail = state["managed"][0] if state["managed"] else (providers[0] if providers else "unknown")
             append_entry(report, "agents", make_entry(label, "error", f"{detail} 已安装，但运行入口缺失"))
         elif is_active == desired:
-            detail = providers[0] if is_active else "未安装"
-            if is_active and providers[0].split("-")[0] != preferred.split("-")[0]:
+            detail = state["managed"][0] if state["managed"] else (providers[0] if providers else "未安装")
+            if state["managed"] and canonical_provider_name(state["managed"][0]) != canonical_provider_name(preferred):
                 detail = f"{detail} (偏离偏好: {preferred})"
             append_entry(report, "agents", make_entry(label, "ok", detail))
         else:
