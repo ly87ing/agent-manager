@@ -834,6 +834,14 @@ class CommittedAgentPolicyTests(unittest.TestCase):
             claude_native["install"]["windows"],
             "curl -fsSL https://claude.ai/install.cmd -o install.cmd && install.cmd && del install.cmd",
         )
+        self.assertEqual(
+            claude_native["uninstall"]["posix"],
+            "rm -f ~/.local/bin/claude && rm -rf ~/.local/share/claude",
+        )
+        self.assertEqual(
+            claude_native["uninstall"]["windows"],
+            'powershell -NoProfile -Command "Remove-Item -Path \\"$env:USERPROFILE\\\\.local\\\\bin\\\\claude.exe\\" -Force; Remove-Item -Path \\"$env:USERPROFILE\\\\.local\\\\share\\\\claude\\" -Recurse -Force"',
+        )
         self.assertEqual(claude_native["upgrade"], "claude update")
         self.assertEqual(claude_native["detect_paths"], ["~/.local/bin/claude"])
         self.assertFalse(lifecycle_agents["claude-code"]["providers"]["brew"]["managed"])
@@ -884,6 +892,19 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         self.assertEqual(kimi_native["uninstall"], "uv tool uninstall kimi-cli")
         self.assertEqual(kimi_native["upgrade"], "uv tool upgrade kimi-cli --no-cache")
         self.assertEqual(kimi_native["detect_uv_tool"], "kimi-cli")
+
+    def test_committed_agent_policy_locks_officially_supported_actions_matrix(self):
+        lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
+
+        cursor_native = lifecycle_agents["cursor"]["providers"]["native"]
+        self.assertEqual(cursor_native["unsupported_actions"], ["uninstall"])
+
+        self.assertEqual(lifecycle_agents["codex"]["preferred_provider"], "npm")
+        self.assertEqual(lifecycle_agents["gemini-cli"]["preferred_provider"], "npm")
+        self.assertEqual(
+            lifecycle_agents["kimi-cli"]["providers"]["native"]["uninstall"],
+            "uv tool uninstall kimi-cli",
+        )
 
     def test_committed_agent_policy_disables_default_kimi_cli_auto_install(self):
         manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
