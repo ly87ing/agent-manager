@@ -175,6 +175,11 @@ def resolve_provider_command(command_value, platform_name=None):
     return None
 
 
+def is_windows_platform(platform_name=None):
+    normalized_platform = (platform_name or sys.platform or "").lower()
+    return normalized_platform.startswith(("win", "cygwin", "msys"))
+
+
 TOOL_READY_MARKER = ".agent-manager-ready"
 TOOL_BROKEN_MARKER = ".agent-manager-broken"
 RULE_TARGET_PREFIX_TO_ID = {
@@ -303,6 +308,19 @@ def iter_command_heads(command):
     return heads
 
 
+def iter_runtime_command_heads(command, platform_name=None):
+    heads = []
+    for head in iter_command_heads(command):
+        normalized_head = head.lower()
+        if is_windows_platform(platform_name):
+            if normalized_head == "del":
+                continue
+            if normalized_head in {"install.cmd", "install.bat", "install.ps1"}:
+                continue
+        heads.append(head)
+    return heads
+
+
 def collect_required_runtime_commands(config, agent_defs, tool_defs, skill_cfg, mcp_cfg, repo_root=None):
     required = []
 
@@ -326,14 +344,14 @@ def collect_required_runtime_commands(config, agent_defs, tool_defs, skill_cfg, 
                 if not provider_is_managed(provider):
                     continue
                 command = resolve_provider_command(provider.get("install"))
-                for head in iter_command_heads(command):
+                for head in iter_runtime_command_heads(command):
                     add(head)
         if policy.get("auto_update", True):
             for provider in candidate_providers:
                 if not provider_is_managed(provider):
                     continue
                 command = resolve_provider_command(provider.get("upgrade"))
-                for head in iter_command_heads(command):
+                for head in iter_runtime_command_heads(command):
                     add(head)
 
     for tool_name, policy in config.get("tools", {}).items():
@@ -579,6 +597,21 @@ class ProviderInventory:
             if provider_name and provider_name not in found:
                 found.append(provider_name)
 
+        candidate_paths = {
+            normalize_path_for_match(os.path.expanduser(path))
+            for path in (bin_path, resolved_bin_path)
+            if path
+        }
+        for provider_name, provider_cfg in config.get("providers", {}).items():
+            detect_paths = provider_cfg.get("detect_paths") or []
+            normalized_detect_paths = {
+                normalize_path_for_match(os.path.expanduser(path))
+                for path in detect_paths
+                if isinstance(path, str) and path
+            }
+            if candidate_paths and normalized_detect_paths.intersection(candidate_paths):
+                add_found(provider_name)
+
         brew_pkg = get_pkg_name(config.get("providers", {}).get("brew", {}).get("install", ""))
         if brew_pkg:
             if brew_pkg in self.get_brew_formulae():
@@ -600,21 +633,6 @@ class ProviderInventory:
         uv_pkg = get_uv_tool_name(config.get("providers", {}).get("uv", {}).get("install"))
         if uv_pkg == "kimi-cli" and uv_pkg in self.get_uv_tools():
             add_found("uv")
-
-        candidate_paths = {
-            normalize_path_for_match(os.path.expanduser(path))
-            for path in (bin_path, resolved_bin_path)
-            if path
-        }
-        for provider_name, provider_cfg in config.get("providers", {}).items():
-            detect_paths = provider_cfg.get("detect_paths") or []
-            normalized_detect_paths = {
-                normalize_path_for_match(os.path.expanduser(path))
-                for path in detect_paths
-                if isinstance(path, str) and path
-            }
-            if candidate_paths and normalized_detect_paths.intersection(candidate_paths):
-                add_found(provider_name)
 
         app_path = config.get("app_path")
         if (app_path and self._path_exists(app_path)) or bin_path:

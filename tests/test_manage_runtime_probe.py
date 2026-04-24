@@ -24,6 +24,17 @@ class ManageRuntimeProbeTests(unittest.TestCase):
             "installer darwin",
         )
 
+    def test_resolve_provider_command_uses_windows_entry_on_win32(self):
+        command = {
+            "default": "installer default",
+            "windows": "installer windows",
+        }
+
+        self.assertEqual(
+            manage_runtime_probe.resolve_provider_command(command, platform_name="win32"),
+            "installer windows",
+        )
+
     def test_iter_command_heads_ignores_shell_operators_inside_quotes(self):
         self.assertEqual(
             manage_runtime_probe.iter_command_heads('python3 -c \'print("a&&b")\''),
@@ -398,6 +409,40 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
         self.assertEqual(required, ["curl", "bash", "claude"])
 
+    def test_collect_required_runtime_commands_ignores_windows_transient_installer_heads(self):
+        with mock.patch("src.manage_runtime_probe.sys.platform", "win32"):
+            required = manage_runtime_probe.collect_required_runtime_commands(
+                {
+                    "agents": {"claude-code": {"enabled": True}},
+                    "tools": {},
+                    "skills": {},
+                    "mcp": {},
+                },
+                {
+                    "claude-code": {
+                        "providers": {
+                            "native": {
+                                "managed": True,
+                                "install": {
+                                    "windows": (
+                                        "curl -fsSL https://example.invalid/install.cmd -o install.cmd "
+                                        "&& install.cmd && del install.cmd"
+                                    ),
+                                },
+                                "upgrade": {
+                                    "windows": "claude update",
+                                },
+                            }
+                        }
+                    }
+                },
+                {},
+                {"repositories": {}},
+                {"servers": {}},
+            )
+
+        self.assertEqual(required, ["curl", "claude"])
+
     def test_collect_required_runtime_commands_skips_tool_owned_setup_heads_for_unready_install_tool(self):
         with mock.patch("src.manage_runtime_probe.detect_tool_readiness", return_value=False):
             required = manage_runtime_probe.collect_required_runtime_commands(
@@ -637,6 +682,33 @@ class ManageRuntimeProbeTests(unittest.TestCase):
         )
 
         self.assertEqual(providers, ["native"])
+
+    def test_detect_all_providers_prefers_declared_native_path_over_npm_realpath(self):
+        native_path = os.path.expanduser("~/.local/bin/claude")
+        inventory = manage_runtime_probe.ProviderInventory(
+            run_cmd=lambda cmd, timeout=10: (False, ""),
+            which=lambda binary: native_path if binary == "claude" else None,
+            path_exists=lambda _path: False,
+            realpath=lambda _path: posix_npm_global_module_path("@anthropic-ai/claude-code", "bin/claude.js"),
+        )
+
+        providers = manage_runtime_probe.detect_all_providers(
+            "claude",
+            {
+                "providers": {
+                    "native": {
+                        "managed": True,
+                        "detect_paths": ["~/.local/bin/claude"],
+                    },
+                    "npm": {
+                        "install": "npm install -g @anthropic-ai/claude-code",
+                    },
+                }
+            },
+            inventory=inventory,
+        )
+
+        self.assertEqual(providers, ["native", "npm"])
 
     def test_detect_all_providers_detects_uv_tool_installation(self):
         command_outputs = {
