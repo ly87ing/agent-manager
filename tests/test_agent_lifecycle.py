@@ -211,6 +211,61 @@ class ReconcileAgentTests(unittest.TestCase):
         run_cmd.assert_not_called()
         self.assertTrue(any("仅检测到系统安装" in line for line in logs.output), logs.output)
 
+    def test_deprecated_provider_fails_when_agent_requires_managed_provider(self):
+        definition = {
+            "display_name": "Claude Code",
+            "bin": "claude",
+            "require_managed_provider": True,
+            "providers": {
+                "native": {
+                    "managed": True,
+                    "upgrade": "claude update",
+                },
+                "brew": {
+                    "managed": False,
+                    "install": "brew install --cask claude-code",
+                },
+            },
+        }
+        policy = {"enabled": True, "auto_update": True, "preferred_provider": "native"}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", return_value=["brew-cask"]),
+            mock.patch.object(sync_agents, "is_agent_installed", return_value=True),
+            mock.patch.object(sync_agents, "run_cmd") as run_cmd,
+            self.assertLogs(level="ERROR") as logs,
+        ):
+            result = sync_agents.reconcile_agent("claude-code", definition, policy)
+
+        self.assertFalse(result)
+        run_cmd.assert_not_called()
+        self.assertTrue(any("已弃用安装来源" in line for line in logs.output), logs.output)
+
+    def test_system_only_provider_fails_when_agent_requires_managed_provider(self):
+        definition = {
+            "display_name": "Codex",
+            "bin": "codex",
+            "require_managed_provider": True,
+            "providers": {
+                "npm": {
+                    "managed": True,
+                    "upgrade": "npm install -g @openai/codex@latest",
+                }
+            },
+        }
+        policy = {"enabled": True, "auto_update": True, "preferred_provider": "npm"}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", return_value=["system"]),
+            mock.patch.object(sync_agents, "run_cmd") as run_cmd,
+            self.assertLogs(level="ERROR") as logs,
+        ):
+            result = sync_agents.reconcile_agent("codex", definition, policy)
+
+        self.assertFalse(result)
+        run_cmd.assert_not_called()
+        self.assertTrue(any("未受管外部安装" in line for line in logs.output), logs.output)
+
     def test_invalid_preferred_provider_fails_loudly(self):
         definition = {
             "display_name": "Claude Code",
@@ -258,6 +313,61 @@ class ReconcileAgentTests(unittest.TestCase):
 
         self.assertFalse(result)
         run_cmd.assert_called_once()
+
+    def test_install_uses_platform_resolved_command(self):
+        definition = {
+            "display_name": "Claude Code",
+            "bin": "claude",
+            "providers": {
+                "native": {
+                    "managed": True,
+                    "install": {
+                        "darwin": "curl -fsSL https://claude.ai/install.sh | bash",
+                        "default": "echo unsupported",
+                    },
+                }
+            },
+        }
+        policy = {"enabled": True, "auto_install": True, "preferred_provider": "native"}
+
+        with (
+            mock.patch("src.manage_runtime_probe.sys.platform", "darwin"),
+            mock.patch.object(sync_agents, "detect_all_providers", side_effect=[[], ["native"]]),
+            mock.patch.object(sync_agents, "is_agent_installed", return_value=False),
+            mock.patch.object(sync_agents, "run_cmd", return_value=(True, "installed")) as run_cmd,
+        ):
+            result = sync_agents.reconcile_agent("claude-code", definition, policy)
+
+        self.assertTrue(result)
+        run_cmd.assert_called_once_with("curl -fsSL https://claude.ai/install.sh | bash")
+
+    def test_upgrade_fails_when_platform_specific_command_is_unresolved(self):
+        definition = {
+            "display_name": "Claude Code",
+            "bin": "claude",
+            "providers": {
+                "native": {
+                    "managed": True,
+                    "upgrade": {
+                        "darwin": "claude update",
+                    },
+                }
+            },
+        }
+        policy = {"enabled": True, "auto_update": True, "preferred_provider": "native"}
+
+        with (
+            mock.patch("src.manage_runtime_probe.sys.platform", "linux"),
+            mock.patch.object(sync_agents, "detect_all_providers", return_value=["native"]),
+            mock.patch.object(sync_agents, "is_agent_installed", return_value=True),
+            mock.patch.object(sync_agents, "run_cmd") as run_cmd,
+            self.assertLogs(level="ERROR") as logs,
+        ):
+            result = sync_agents.reconcile_agent("claude-code", definition, policy)
+
+        self.assertFalse(result)
+        run_cmd.assert_not_called()
+        self.assertTrue(any("缺少 upgrade 命令" in line for line in logs.output), logs.output)
 
     def test_uninstall_rechecks_post_condition(self):
         definition = {

@@ -18,9 +18,12 @@ from src.command_runner import run_command
 from src.json_config import ensure_mapping_value_types, get_typed_mapping_section, load_json_object_file
 from src.manage_runtime_probe import (
     ProviderInventory as ProviderCache,
+    canonical_provider_name,
+    classify_provider_state,
     detect_all_providers as detect_all_providers_runtime,
     get_pkg_name,
     is_agent_installed,
+    resolve_provider_command,
 )
 from src.runtime_logging import configure_logging
 
@@ -45,44 +48,21 @@ def detect_all_providers(bin_name, config=None):
     """委托共享 runtime probe 执行 Provider 探测，避免实现漂移。"""
     return detect_all_providers_runtime(bin_name, config, inventory=ProviderCache())
 
-def canonical_provider_name(provider_name):
-    if provider_name.startswith("brew"):
-        return "brew"
-    return provider_name
-
-def classify_provider_state(actual_providers, definition):
-    managed_defs = definition.get("providers", {})
-    managed = []
-    system_only = []
-    unsupported = []
-    for provider in actual_providers:
-        canonical = canonical_provider_name(provider)
-        if provider == "system":
-            system_only.append(provider)
-        elif canonical in managed_defs:
-            managed.append(provider)
-        else:
-            unsupported.append(provider)
-    return managed, system_only, unsupported
-
 def detect_provider_state(bin_name, definition):
     actual = detect_all_providers(bin_name, definition)
-    managed, system_only, unsupported = classify_provider_state(actual, definition)
-    return {
-        "all": actual,
-        "managed": managed,
-        "system_only": system_only,
-        "unsupported": unsupported,
-    }
+    state = classify_provider_state(actual, definition)
+    state["all"] = actual
+    return state
 
 def get_update_probe_cmd(provider_name, provider_cfg):
     if not provider_cfg:
         return None
-    explicit = provider_cfg.get("check_update")
+    explicit = resolve_provider_command(provider_cfg.get("check_update"))
     if explicit:
         return explicit
     if provider_name.startswith("brew"):
-        pkg_name = get_pkg_name(provider_cfg.get("install", ""))
+        install_cmd = resolve_provider_command(provider_cfg.get("install"))
+        pkg_name = get_pkg_name(install_cmd or "")
         if not pkg_name:
             return None
         if provider_name == "brew-cask":
@@ -94,10 +74,10 @@ def get_update_probe_cmd(provider_name, provider_cfg):
 def get_repair_cmd(provider_name, provider_cfg):
     if not provider_cfg:
         return None
-    explicit = provider_cfg.get("repair")
+    explicit = resolve_provider_command(provider_cfg.get("repair"))
     if explicit:
         return explicit
-    install_cmd = provider_cfg.get("install")
+    install_cmd = resolve_provider_command(provider_cfg.get("install"))
     if provider_name.startswith("brew"):
         pkg_name = get_pkg_name(install_cmd or "")
         if not pkg_name:
@@ -105,7 +85,7 @@ def get_repair_cmd(provider_name, provider_cfg):
         if provider_name == "brew-cask":
             return f"brew reinstall --cask {pkg_name}"
         return f"brew reinstall {pkg_name}"
-    return provider_cfg.get("upgrade") or install_cmd
+    return resolve_provider_command(provider_cfg.get("upgrade")) or install_cmd
 
 def resolve_active_provider_variant(managed_actual, provider_key):
     for provider_name in managed_actual:
@@ -134,6 +114,7 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=T
     state = detect_provider_state(bin_name, definition)
     all_actual = state["all"]
     managed_actual = state["managed"]
+    deprecated_actual = state["deprecated"]
     system_actual = state["system_only"]
     unsupported_actual = state["unsupported"]
     is_installed = len(all_actual) > 0
@@ -144,6 +125,14 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=T
 
     if unsupported_actual:
         logging.error(f"[AGENT: {label}] 检测到未声明的 Provider: {', '.join(unsupported_actual)}。")
+        return False
+
+    if deprecated_actual:
+        logging.error(f"[AGENT: {label}] 检测到已弃用安装来源: {', '.join(deprecated_actual)}；请先迁移到受管 provider。")
+        return False
+
+    if system_actual and not managed_actual and definition.get("require_managed_provider", False):
+        logging.error(f"[AGENT: {label}] 检测到未受管外部安装，当前策略要求受管 provider。")
         return False
 
     if system_actual and not managed_actual:
@@ -168,13 +157,14 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=T
             return False
         logging.info(f"[AGENT: {label}] 状态对齐: 准备通过 {preferred} 安装...")
         p_cfg = providers.get(preferred)
-        if not p_cfg or "install" not in p_cfg:
+        install_cmd = resolve_provider_command(p_cfg.get("install")) if p_cfg else None
+        if not install_cmd:
             logging.error(f"[AGENT: {label}] Provider '{preferred}' 缺少 install 命令。")
             return False
         if dry_run:
-            logging.info(f"  (预览: 计划执行 {p_cfg['install']})")
+            logging.info(f"  (预览: 计划执行 {install_cmd})")
         else:
-            success, out = run_cmd(p_cfg["install"])
+            success, out = run_cmd(install_cmd)
             if success:
                 post_state = detect_provider_state(bin_name, definition)
                 if not post_state["managed"]:
@@ -195,14 +185,15 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=T
         for provider in managed_actual:
             p_key = canonical_provider_name(provider)
             p_cfg = providers.get(p_key)
-            if not p_cfg or "uninstall" not in p_cfg:
+            uninstall_cmd = resolve_provider_command(p_cfg.get("uninstall")) if p_cfg else None
+            if not uninstall_cmd:
                 logging.error(f"[AGENT: {label}] Provider '{provider}' 缺少 uninstall 命令。")
                 all_ok = False
                 continue
             if dry_run:
-                logging.info(f"  (预览: 计划执行 {p_cfg['uninstall']})")
+                logging.info(f"  (预览: 计划执行 {uninstall_cmd})")
             else:
-                success, out = run_cmd(p_cfg["uninstall"])
+                success, out = run_cmd(uninstall_cmd)
                 if success:
                     logging.info(f"[AGENT: {label}] 从 {provider} 卸载成功。")
                 else:
@@ -260,9 +251,13 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=T
         p_key = preferred if preferred in actual_provider_keys else actual_provider_keys[0]
         active_provider = resolve_active_provider_variant(managed_actual, p_key)
         p_cfg = providers.get(p_key)
-        if p_cfg and "upgrade" in p_cfg:
+        upgrade_cmd = resolve_provider_command(p_cfg.get("upgrade")) if p_cfg else None
+        if p_cfg and "upgrade" in p_cfg and not upgrade_cmd:
+            logging.error(f"[AGENT: {label}] Provider '{active_provider}' 缺少 upgrade 命令。")
+            return False
+        if upgrade_cmd:
             if dry_run:
-                logging.info(f"  (预览: 计划执行 {p_cfg['upgrade']})")
+                logging.info(f"  (预览: 计划执行 {upgrade_cmd})")
             else:
                 probe_cmd = get_update_probe_cmd(active_provider, p_cfg)
                 if probe_cmd:
@@ -274,7 +269,7 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=T
                     else:
                         logging.warning(f"[AGENT: {label}] 更新探测失败，跳过升级: {probe_out}")
                         return True
-                success, out = run_cmd(p_cfg["upgrade"])
+                success, out = run_cmd(upgrade_cmd)
                 if success:
                     post_state = detect_provider_state(bin_name, definition)
                     if not post_state["managed"]:
