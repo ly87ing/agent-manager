@@ -127,6 +127,7 @@
         "install": "curl -LsSf https://code.kimi.com/install.sh | bash",
         "uninstall": "uv tool uninstall kimi-cli",
         "upgrade": "uv tool upgrade kimi-cli --no-cache",
+        "detect_paths": ["~/.local/bin/kimi"],
         "detect_uv_tool": "kimi-cli"
       }
     }

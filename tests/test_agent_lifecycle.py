@@ -141,6 +141,38 @@ class DetectAllProvidersTests(unittest.TestCase):
         self.assertIn("npm", providers)
 
 
+class RunCommandHardeningTests(unittest.TestCase):
+    def test_run_cmd_forces_official_registry_for_global_npm_installs(self):
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="ok", stderr="")
+
+        with mock.patch.object(sync_agents, "run_command", return_value=completed) as run_command:
+            success, output = sync_agents.run_cmd("npm install -g @openai/codex")
+
+        self.assertTrue(success)
+        self.assertEqual(output, "ok")
+        invoked = run_command.call_args.args[0]
+        self.assertIn("--registry https://registry.npmjs.org", invoked)
+        self.assertIn("--fetch-retries 2", invoked)
+        self.assertIn("--fetch-timeout 120000", invoked)
+        self.assertIn("--no-audit", invoked)
+        self.assertIn("--no-fund", invoked)
+
+    def test_run_cmd_adds_retry_flags_to_official_curl_installers(self):
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="ok", stderr="")
+
+        with mock.patch.object(sync_agents, "run_command", return_value=completed) as run_command:
+            success, output = sync_agents.run_cmd("curl -fsSL https://claude.ai/install.sh | bash")
+
+        self.assertTrue(success)
+        self.assertEqual(output, "ok")
+        invoked = run_command.call_args.args[0]
+        self.assertIn("--retry 3", invoked)
+        self.assertIn("--retry-all-errors", invoked)
+        self.assertIn("--connect-timeout 15", invoked)
+        self.assertIn("--max-time 180", invoked)
+        self.assertIn("https://claude.ai/install.sh", invoked)
+
+
 class ReconcileAgentTests(unittest.TestCase):
     def test_no_install_mode_skips_missing_enabled_agent(self):
         definition = {
@@ -426,6 +458,7 @@ class ReconcileAgentTests(unittest.TestCase):
 
         with (
             mock.patch.object(sync_agents, "detect_all_providers", return_value=["brew"]),
+            mock.patch.object(sync_agents, "is_agent_installed", return_value=True),
             mock.patch.object(sync_agents, "run_cmd", return_value=(True, "")) as run_cmd,
             self.assertLogs(level="INFO") as logs,
         ):
@@ -699,6 +732,7 @@ class ReconcileAgentTests(unittest.TestCase):
 
         with (
             mock.patch.object(sync_agents, "detect_all_providers", return_value=["brew"]),
+            mock.patch.object(sync_agents, "is_agent_installed", return_value=True),
             mock.patch.object(sync_agents, "run_cmd", return_value=(False, "brew locked")) as run_cmd,
             self.assertLogs(level="WARNING") as logs,
         ):
@@ -707,6 +741,54 @@ class ReconcileAgentTests(unittest.TestCase):
         self.assertTrue(result)
         run_cmd.assert_called_once_with("brew outdated opencode", timeout=60)
         self.assertTrue(any("更新探测失败，跳过升级" in line for line in logs.output), logs.output)
+
+    def test_direct_upgrade_network_failure_skips_upgrade(self):
+        definition = {
+            "display_name": "Gemini CLI",
+            "bin": "gemini",
+            "providers": {
+                "npm": {
+                    "upgrade": "npm install -g @google/gemini-cli@latest",
+                }
+            },
+        }
+        policy = {"enabled": True, "auto_update": True, "preferred_provider": "npm"}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", return_value=["npm"]),
+            mock.patch.object(sync_agents, "is_agent_installed", return_value=True),
+            mock.patch.object(sync_agents, "run_cmd", return_value=(False, "npm error code ENOTFOUND")) as run_cmd,
+            self.assertLogs(level="WARNING") as logs,
+        ):
+            result = sync_agents.reconcile_agent("gemini-cli", definition, policy)
+
+        self.assertTrue(result)
+        run_cmd.assert_called_once_with("npm install -g @google/gemini-cli@latest")
+        self.assertTrue(any("升级遇到网络错误，跳过升级" in line for line in logs.output), logs.output)
+
+    def test_direct_upgrade_non_network_failure_still_fails(self):
+        definition = {
+            "display_name": "Gemini CLI",
+            "bin": "gemini",
+            "providers": {
+                "npm": {
+                    "upgrade": "npm install -g @google/gemini-cli@latest",
+                }
+            },
+        }
+        policy = {"enabled": True, "auto_update": True, "preferred_provider": "npm"}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", return_value=["npm"]),
+            mock.patch.object(sync_agents, "is_agent_installed", return_value=True),
+            mock.patch.object(sync_agents, "run_cmd", return_value=(False, "permission denied")) as run_cmd,
+            self.assertLogs(level="ERROR") as logs,
+        ):
+            result = sync_agents.reconcile_agent("gemini-cli", definition, policy)
+
+        self.assertFalse(result)
+        run_cmd.assert_called_once_with("npm install -g @google/gemini-cli@latest")
+        self.assertTrue(any("升级失败" in line for line in logs.output), logs.output)
 
 
 class PolicyOwnershipTests(unittest.TestCase):
@@ -1064,6 +1146,7 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         self.assertEqual(kimi_native["uninstall"], "uv tool uninstall kimi-cli")
         self.assertEqual(kimi_native["upgrade"], "uv tool upgrade kimi-cli --no-cache")
         self.assertEqual(kimi_native["detect_uv_tool"], "kimi-cli")
+        self.assertEqual(kimi_native["detect_paths"], ["~/.local/bin/kimi"])
 
     def test_committed_agent_policy_locks_officially_supported_actions_matrix(self):
         lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))

@@ -30,10 +30,84 @@ from src.runtime_logging import configure_logging
 configure_logging()
 
 SUPPORTED_UNSUPPORTED_ACTIONS = {"install", "update", "uninstall", "repair"}
+NETWORK_ERROR_MARKERS = (
+    "ENOTFOUND",
+    "ECONNREFUSED",
+    "ECONNRESET",
+    "ETIMEDOUT",
+    "EAI_AGAIN",
+    "Could not resolve host",
+    "Failed to fetch",
+    "getaddrinfo",
+    "network connectivity",
+)
+OFFICIAL_NPM_REGISTRY = "https://registry.npmjs.org"
+OFFICIAL_INSTALLER_URL_MARKERS = (
+    "https://claude.ai/install",
+    "https://cursor.com/install",
+    "https://opencode.ai/install",
+    "https://code.kimi.com/install.sh",
+)
+
+
+def _inject_npm_flags(cmd):
+    if not isinstance(cmd, str):
+        return cmd
+
+    stripped = cmd.strip()
+    if not stripped.startswith("npm install -g"):
+        return stripped
+
+    hardened = stripped
+    npm_flags = (
+        ("--registry", OFFICIAL_NPM_REGISTRY),
+        ("--fetch-retries", "2"),
+        ("--fetch-retry-factor", "2"),
+        ("--fetch-retry-mintimeout", "10000"),
+        ("--fetch-retry-maxtimeout", "60000"),
+        ("--fetch-timeout", "120000"),
+    )
+    for flag, value in npm_flags:
+        if f"{flag} " in hardened or f"{flag}=" in hardened:
+            continue
+        hardened = f"{hardened} {flag} {value}"
+    if "--no-audit" not in hardened:
+        hardened = f"{hardened} --no-audit"
+    if "--no-fund" not in hardened:
+        hardened = f"{hardened} --no-fund"
+    return hardened
+
+
+def _inject_curl_retry_flags(cmd):
+    if not isinstance(cmd, str):
+        return cmd
+
+    stripped = cmd.strip()
+    if not stripped.startswith("curl "):
+        return stripped
+    if not any(marker in stripped for marker in OFFICIAL_INSTALLER_URL_MARKERS):
+        return stripped
+    if "--retry " in stripped or "--retry=" in stripped:
+        return stripped
+    return stripped.replace(
+        "curl ",
+        "curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 15 --max-time 180 ",
+        1,
+    )
+
+
+def _prepare_command(cmd):
+    prepared = _inject_npm_flags(cmd)
+    return _inject_curl_retry_flags(prepared)
+
+
+def is_network_error(output):
+    return any(marker in (output or "") for marker in NETWORK_ERROR_MARKERS)
 
 
 def run_cmd(cmd, timeout=300):
     """运行 shell 命令并返回结果"""
+    cmd = _prepare_command(cmd)
     try:
         result = run_command(cmd, check=True, capture_output=True, text=True, timeout=timeout)
         return True, result.stdout
@@ -367,6 +441,9 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=T
                         return False
                     logging.info(f"[AGENT: {label}] 已是最新 / 升级成功。")
                 else:
+                    if is_network_error(out):
+                        logging.warning(f"[AGENT: {label}] 升级遇到网络错误，跳过升级: {out}")
+                        return True
                     logging.error(f"[AGENT: {label}] 升级失败: {out}")
                     return False
     return True
