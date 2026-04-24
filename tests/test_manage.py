@@ -2502,12 +2502,54 @@ class ManageScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            call_log = temp_root / "calls.log"
+            fake_bin = temp_root / "fake-bin"
+            fake_bin.mkdir()
             remove_path(temp_root / "secrets")
+
+            self._write_stub(
+                fake_bin / "git",
+                (
+                    "#!/usr/bin/env bash\n"
+                    f"printf '%s\\n' \"git $*\" >> {str(call_log)!r}\n"
+                    "exit 0\n"
+                ),
+            )
+            self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log, "'--dry-run' in sys.argv")
+            self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log, "'--dry-run' in sys.argv")
+            self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log, "'--dry-run' in sys.argv")
+            self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log, "'--dry-run' in sys.argv")
+            self._write_stub(
+                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
+                (
+                    "#!/usr/bin/env bash\n"
+                    f"printf '%s\\n' \"rules $*\" >> {str(call_log)!r}\n"
+                    "case \"$*\" in\n"
+                    "  *--dry-run*) exit 0 ;;\n"
+                    "  *) exit 23 ;;\n"
+                    "esac\n"
+                ),
+            )
+            self._write_stub(
+                temp_root / "agent-terminal" / "sync_terminal.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "scripts" / "init-secrets.sh",
+                (
+                    "#!/usr/bin/env bash\n"
+                    f"printf '%s\\n' init-secrets >> {str(call_log)!r}\n"
+                    "exit 17\n"
+                ),
+            )
+
+            env = self._managed_env()
+            env["PATH"] = f"{fake_bin}:{env['PATH']}"
 
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--dry-run"],
                 cwd=temp_root,
-                env=self._managed_env(),
+                env=env,
                 capture_output=True,
                 check=False,
             )
@@ -2516,17 +2558,62 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, combined)
             self.assertIn("空转模式，跳过 secrets 检查", combined)
             self.assertNotIn("正在克隆凭证仓库", combined)
+            log_lines = call_log.read_text(encoding="utf-8").splitlines()
+            self.assertFalse(any(line == "init-secrets" for line in log_lines), log_lines)
+            self.assertFalse(
+                any(line == f"git -C {temp_root.resolve() / 'secrets'} pull --ff-only" for line in log_lines),
+                log_lines,
+            )
 
     def test_dry_run_offline_combination_respects_offline_flag(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            call_log = temp_root / "calls.log"
+            fake_bin = temp_root / "fake-bin"
+            fake_bin.mkdir()
             remove_path(temp_root / "secrets")
+
+            self._write_stub(
+                fake_bin / "git",
+                (
+                    "#!/usr/bin/env bash\n"
+                    f"printf '%s\\n' \"git $*\" >> {str(call_log)!r}\n"
+                    "exit 0\n"
+                ),
+            )
+            self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log, "True")
+            self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log, "True")
+            self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log, "True")
+            self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log, "True")
+            self._write_stub(
+                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
+                (
+                    "#!/usr/bin/env bash\n"
+                    f"printf '%s\\n' \"rules $*\" >> {str(call_log)!r}\n"
+                    "exit 0\n"
+                ),
+            )
+            self._write_stub(
+                temp_root / "agent-terminal" / "sync_terminal.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "scripts" / "init-secrets.sh",
+                (
+                    "#!/usr/bin/env bash\n"
+                    f"printf '%s\\n' init-secrets >> {str(call_log)!r}\n"
+                    "exit 17\n"
+                ),
+            )
+
+            env = self._managed_env()
+            env["PATH"] = f"{fake_bin}:{env['PATH']}"
 
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--dry-run", "--offline"],
                 cwd=temp_root,
-                env=self._managed_env(),
+                env=env,
                 capture_output=True,
                 check=False,
             )
@@ -2535,6 +2622,12 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, combined)
             self.assertIn("离线模式，跳过 secrets 检查", combined)
             self.assertNotIn("正在克隆凭证仓库", combined)
+            log_lines = call_log.read_text(encoding="utf-8").splitlines()
+            self.assertFalse(any(line == "init-secrets" for line in log_lines), log_lines)
+            self.assertFalse(
+                any(line == f"git -C {temp_root.resolve() / 'secrets'} pull --ff-only" for line in log_lines),
+                log_lines,
+            )
 
     def test_offline_is_forwarded_to_networked_subtasks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
