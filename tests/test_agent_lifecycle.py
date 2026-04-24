@@ -441,7 +441,7 @@ class ReconcileAgentTests(unittest.TestCase):
             result = sync_agents.reconcile_agent("claude-code", definition, policy)
 
         self.assertFalse(result)
-        run_cmd.assert_called_once()
+        run_cmd.assert_called_once_with("npm update -g @anthropic-ai/claude-code")
 
     def test_brew_upgrade_skips_when_outdated_probe_is_empty(self):
         definition = {
@@ -496,6 +496,55 @@ class ReconcileAgentTests(unittest.TestCase):
                 mock.call("brew upgrade --cask claude-code"),
             ],
         )
+
+    def test_npm_upgrade_executes_upgrade_command_without_probe(self):
+        definition = {
+            "display_name": "Gemini CLI",
+            "bin": "gemini",
+            "providers": {
+                "npm": {
+                    "install": "npm install -g @google/gemini-cli",
+                    "upgrade": "npm install -g @google/gemini-cli@latest",
+                }
+            },
+        }
+        policy = {"enabled": True, "auto_update": True, "preferred_provider": "npm"}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", return_value=["npm"]),
+            mock.patch.object(sync_agents, "is_agent_installed", return_value=True),
+            mock.patch.object(sync_agents, "run_cmd", return_value=(True, "updated")) as run_cmd,
+            self.assertLogs(level="INFO") as logs,
+        ):
+            result = sync_agents.reconcile_agent("gemini-cli", definition, policy)
+
+        self.assertTrue(result)
+        run_cmd.assert_called_once_with("npm install -g @google/gemini-cli@latest")
+        self.assertTrue(any("正在执行升级命令" in line for line in logs.output), logs.output)
+
+    def test_native_upgrade_without_probe_logs_real_execution_state(self):
+        definition = {
+            "display_name": "Claude Code",
+            "bin": "claude",
+            "providers": {
+                "native": {
+                    "upgrade": "claude update",
+                }
+            },
+        }
+        policy = {"enabled": True, "auto_update": True, "preferred_provider": "native"}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", side_effect=[["native"], ["native"]]),
+            mock.patch.object(sync_agents, "is_agent_installed", return_value=True),
+            mock.patch.object(sync_agents, "run_cmd", return_value=(True, "updated")) as run_cmd,
+            self.assertLogs(level="INFO") as logs,
+        ):
+            result = sync_agents.reconcile_agent("claude-code", definition, policy)
+
+        self.assertTrue(result)
+        run_cmd.assert_called_once_with("claude update")
+        self.assertTrue(any("正在执行升级命令" in line for line in logs.output), logs.output)
 
     def test_reconcile_agent_repairs_managed_provider_when_runtime_entrypoint_is_missing(self):
         definition = {

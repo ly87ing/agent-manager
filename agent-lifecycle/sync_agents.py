@@ -404,7 +404,6 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=T
         if not auto_update:
             logging.info(f"[AGENT: {label}] 状态就绪，auto_update 关闭，跳过更新。")
             return True
-        logging.info(f"[AGENT: {label}] 状态一致，正在尝试检查更新...")
         actual_provider_keys = [canonical_provider_name(provider) for provider in managed_actual]
         p_key = preferred if preferred in actual_provider_keys else actual_provider_keys[0]
         active_provider = resolve_active_provider_variant(managed_actual, p_key)
@@ -425,6 +424,7 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=T
             else:
                 probe_cmd = get_update_probe_cmd(active_provider, p_cfg)
                 if probe_cmd:
+                    logging.info(f"[AGENT: {label}] 状态一致，正在检查是否有可用更新...")
                     probe_success, probe_out = run_cmd(probe_cmd, timeout=60)
                     if probe_success:
                         if not probe_out.strip():
@@ -433,6 +433,8 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=T
                     else:
                         logging.warning(f"[AGENT: {label}] 更新探测失败，跳过升级: {probe_out}")
                         return True
+                else:
+                    logging.info(f"[AGENT: {label}] 状态一致，未配置轻量探测，正在执行升级命令...")
                 success, out = run_cmd(upgrade_cmd)
                 if success:
                     post_state = detect_provider_state(bin_name, definition)
