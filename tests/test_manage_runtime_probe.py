@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest import mock
 
@@ -11,6 +12,18 @@ from tests.provider_path_fixtures import (
 
 
 class ManageRuntimeProbeTests(unittest.TestCase):
+    def test_resolve_provider_command_prefers_darwin_over_posix_and_default(self):
+        command = {
+            "default": "installer default",
+            "posix": "installer posix",
+            "darwin": "installer darwin",
+        }
+
+        self.assertEqual(
+            manage_runtime_probe.resolve_provider_command(command, platform_name="darwin"),
+            "installer darwin",
+        )
+
     def test_iter_command_heads_ignores_shell_operators_inside_quotes(self):
         self.assertEqual(
             manage_runtime_probe.iter_command_heads('python3 -c \'print("a&&b")\''),
@@ -348,6 +361,43 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
         self.assertEqual(required, ["npx"])
 
+    def test_collect_required_runtime_commands_skips_unmanaged_agent_providers_and_resolves_commands(self):
+        required = manage_runtime_probe.collect_required_runtime_commands(
+            {
+                "agents": {"claude-code": {"enabled": True}},
+                "tools": {},
+                "skills": {},
+                "mcp": {},
+            },
+            {
+                "claude-code": {
+                    "providers": {
+                        "native": {
+                            "managed": True,
+                            "install": {
+                                "default": "curl -fsSL https://example.invalid/install.sh | bash",
+                                "darwin": "curl -fsSL https://example.invalid/install.sh | bash",
+                            },
+                            "upgrade": {
+                                "default": "claude update",
+                                "darwin": "claude update",
+                            },
+                        },
+                        "system": {
+                            "managed": False,
+                            "install": "external-installer bootstrap",
+                            "upgrade": "external-installer update",
+                        },
+                    }
+                }
+            },
+            {},
+            {"repositories": {}},
+            {"servers": {}},
+        )
+
+        self.assertEqual(required, ["curl", "bash", "claude"])
+
     def test_collect_required_runtime_commands_skips_tool_owned_setup_heads_for_unready_install_tool(self):
         with mock.patch("src.manage_runtime_probe.detect_tool_readiness", return_value=False):
             required = manage_runtime_probe.collect_required_runtime_commands(
@@ -563,6 +613,30 @@ class ManageRuntimeProbeTests(unittest.TestCase):
         )
 
         self.assertEqual(providers, ["system"])
+
+    def test_detect_all_providers_matches_declared_native_paths_before_system_fallback(self):
+        native_path = os.path.expanduser("~/.local/bin/claude")
+        inventory = manage_runtime_probe.ProviderInventory(
+            run_cmd=lambda cmd, timeout=10: (False, ""),
+            which=lambda binary: native_path if binary == "claude" else None,
+            path_exists=lambda _path: False,
+            realpath=lambda path: path,
+        )
+
+        providers = manage_runtime_probe.detect_all_providers(
+            "claude",
+            {
+                "providers": {
+                    "native": {
+                        "managed": True,
+                        "detect_paths": ["~/.local/bin/claude"],
+                    }
+                }
+            },
+            inventory=inventory,
+        )
+
+        self.assertEqual(providers, ["native"])
 
     def test_detect_all_providers_detects_uv_tool_installation(self):
         command_outputs = {

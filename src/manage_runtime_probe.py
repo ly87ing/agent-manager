@@ -6,6 +6,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 
 from src.agent_ids import canonicalize_agent_id, canonicalize_agent_list, canonicalize_agent_mapping
 from src.json_config import load_json_object_file
@@ -110,6 +111,68 @@ def detect_npm_from_paths(bin_path, resolved_bin_path="", brew_detected=False):
     if brew_detected and path_looks_brew_managed(resolved_bin_path):
         return False
     return path_indicates_npm(resolved_bin_path)
+
+
+def provider_is_managed(provider_cfg):
+    return (provider_cfg or {}).get("managed", True)
+
+
+def canonical_provider_name(provider_name):
+    if provider_name.startswith("brew"):
+        return "brew"
+    return provider_name
+
+
+def classify_provider_state(actual_providers, definition):
+    provider_defs = definition.get("providers", {})
+    state = {
+        "managed": [],
+        "deprecated": [],
+        "system_only": [],
+        "unsupported": [],
+    }
+    for provider_name in actual_providers:
+        if provider_name == "system":
+            state["system_only"].append(provider_name)
+            continue
+        provider_cfg = provider_defs.get(canonical_provider_name(provider_name))
+        if provider_cfg is None:
+            state["unsupported"].append(provider_name)
+            continue
+        if provider_is_managed(provider_cfg):
+            state["managed"].append(provider_name)
+        else:
+            state["deprecated"].append(provider_name)
+    return state
+
+
+def resolve_provider_command(command_value, platform_name=None):
+    if isinstance(command_value, str):
+        return command_value
+    if not isinstance(command_value, dict):
+        return None
+
+    normalized_platform = (platform_name or sys.platform or "").lower()
+    if normalized_platform.startswith("darwin"):
+        keys = ("darwin", "posix", "default")
+    elif normalized_platform.startswith("linux"):
+        keys = ("linux", "posix", "default")
+    elif normalized_platform.startswith(("win", "cygwin", "msys")):
+        keys = ("windows", "default")
+    else:
+        keys = ("posix", "default")
+
+    allowed_keys = {"default", "posix", "darwin", "linux", "windows"}
+    if any(key not in allowed_keys for key in command_value):
+        return None
+
+    for key in keys:
+        value = command_value.get(key)
+        if isinstance(value, str):
+            return value
+        if value is not None:
+            return None
+    return None
 
 
 TOOL_READY_MARKER = ".agent-manager-ready"
@@ -260,11 +323,17 @@ def collect_required_runtime_commands(config, agent_defs, tool_defs, skill_cfg, 
             candidate_providers.extend(providers.values())
         if policy.get("auto_install", True):
             for provider in candidate_providers:
-                for head in iter_command_heads(provider.get("install")):
+                if not provider_is_managed(provider):
+                    continue
+                command = resolve_provider_command(provider.get("install"))
+                for head in iter_command_heads(command):
                     add(head)
         if policy.get("auto_update", True):
             for provider in candidate_providers:
-                for head in iter_command_heads(provider.get("upgrade")):
+                if not provider_is_managed(provider):
+                    continue
+                command = resolve_provider_command(provider.get("upgrade"))
+                for head in iter_command_heads(command):
                     add(head)
 
     for tool_name, policy in config.get("tools", {}).items():
@@ -506,32 +575,51 @@ class ProviderInventory:
         bin_path = self._which(bin_name)
         resolved_bin_path = self._realpath(bin_path) if bin_path else ""
 
+        def add_found(provider_name):
+            if provider_name and provider_name not in found:
+                found.append(provider_name)
+
         brew_pkg = get_pkg_name(config.get("providers", {}).get("brew", {}).get("install", ""))
         if brew_pkg:
             if brew_pkg in self.get_brew_formulae():
-                found.append("brew")
+                add_found("brew")
             elif brew_pkg in self.get_brew_casks():
-                found.append("brew-cask")
+                add_found("brew-cask")
 
         if detect_npm_from_paths(
             bin_path,
             resolved_bin_path,
             brew_detected=any(provider.startswith("brew") for provider in found),
         ):
-            found.append("npm")
+            add_found("npm")
 
         ext_name = config.get("ext_name")
         if ext_name and any(line.strip().startswith(ext_name) for line in self.get_gh_extensions().splitlines()):
-            found.append("gh")
+            add_found("gh")
 
         uv_pkg = get_uv_tool_name(config.get("providers", {}).get("uv", {}).get("install"))
         if uv_pkg == "kimi-cli" and uv_pkg in self.get_uv_tools():
-            found.append("uv")
+            add_found("uv")
+
+        candidate_paths = {
+            normalize_path_for_match(os.path.expanduser(path))
+            for path in (bin_path, resolved_bin_path)
+            if path
+        }
+        for provider_name, provider_cfg in config.get("providers", {}).items():
+            detect_paths = provider_cfg.get("detect_paths") or []
+            normalized_detect_paths = {
+                normalize_path_for_match(os.path.expanduser(path))
+                for path in detect_paths
+                if isinstance(path, str) and path
+            }
+            if candidate_paths and normalized_detect_paths.intersection(candidate_paths):
+                add_found(provider_name)
 
         app_path = config.get("app_path")
         if (app_path and self._path_exists(app_path)) or bin_path:
             if not found:
-                found.append("system")
+                add_found("system")
 
         return found
 
