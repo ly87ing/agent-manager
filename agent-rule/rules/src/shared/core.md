@@ -13,3 +13,4 @@
 - If UI, user flows, frontend validation, or browser automation change, read `modules/frontend.md` before editing.
 - If the task involves Playwright, generators, generated artifacts, or debug output, read `modules/artifact-hygiene.md` before editing.
 - Prefer local verification, explicit file edits, and deterministic commands over speculative narration.
+- When searching the internet, default to using the `grok-search` MCP tools (`web_search`, `web_fetch`).
