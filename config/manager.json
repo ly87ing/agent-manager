@@ -31,7 +31,8 @@
   },
   "mcp": {
     "augment-context-engine": { "enabled": true },
-    "chrome-devtools": { "enabled": true }
+    "chrome-devtools": { "enabled": true },
+    "grok-search": { "enabled": true }
   },
   "terminal": {
     "enabled": false

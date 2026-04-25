@@ -13,6 +13,19 @@
       "args": ["-y", "chrome-devtools-mcp@latest", "--isolated"],
       "env": {},
       "agents": null
+    },
+    "grok-search": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily",
+        "grok-search"
+      ],
+      "env": {
+        "GROK_API_URL": "${GROK_API_URL}",
+        "GROK_API_KEY": "${GROK_API_KEY}"
+      },
+      "agents": null
     }
   },
   "agent_paths": {
