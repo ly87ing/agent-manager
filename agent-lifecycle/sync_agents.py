@@ -7,6 +7,9 @@ import json
 import shutil
 import sys
 import re
+import tempfile
+import time
+from getpass import getuser
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -48,6 +51,16 @@ OFFICIAL_INSTALLER_URL_MARKERS = (
     "https://opencode.ai/install",
     "https://code.kimi.com/install.sh",
 )
+INSTALL_CMD_TIMEOUT = 900
+ASYNC_ACTION_ENV = "AGENT_MANAGER_AGENT_ASYNC_DIR"
+ASYNC_STATUS_RUNNING = "running"
+ASYNC_STATUS_QUEUED = "queued"
+ASYNC_STATUS_SUCCEEDED = "succeeded"
+ASYNC_STATUS_SKIPPED = "skipped"
+ASYNC_STATUS_FAILED = "failed"
+ASYNC_ACTIVE_STATUSES = {ASYNC_STATUS_QUEUED, ASYNC_STATUS_RUNNING}
+ASYNC_FINAL_STATUSES = {ASYNC_STATUS_SUCCEEDED, ASYNC_STATUS_SKIPPED, ASYNC_STATUS_FAILED}
+ASYNC_POLL_INTERVAL_SECONDS = 0.2
 
 
 def _inject_npm_flags(cmd):
@@ -119,6 +132,263 @@ def run_cmd(cmd, timeout=300):
         return False, f"Directory or executable not found: {e}"
     except Exception as e:
         return False, f"Unexpected error executing '{cmd}': {e}"
+
+
+def get_async_state_dir():
+    configured = os.environ.get(ASYNC_ACTION_ENV)
+    if configured:
+        return Path(configured).expanduser()
+    return Path(tempfile.gettempdir()) / f"agent_manager_agent_lifecycle_{getuser()}"
+
+
+def ensure_async_state_dir():
+    state_dir = get_async_state_dir()
+    state_dir.mkdir(parents=True, exist_ok=True)
+    return state_dir
+
+
+def get_async_state_path(agent_id):
+    return ensure_async_state_dir() / f"{agent_id}.json"
+
+
+def get_async_payload_path(agent_id):
+    return ensure_async_state_dir() / f"{agent_id}.payload.json"
+
+
+def get_async_log_path(agent_id):
+    return ensure_async_state_dir() / f"{agent_id}.log"
+
+
+def now_timestamp():
+    return time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def write_json_file(path: Path, payload: dict):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(f"{path.suffix}.tmp")
+    tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp_path, path)
+
+
+def read_json_file(path: Path):
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_async_state(agent_id):
+    return read_json_file(get_async_state_path(agent_id))
+
+
+def update_async_state(agent_id, payload):
+    write_json_file(get_async_state_path(agent_id), payload)
+
+
+def list_async_states():
+    state_dir = ensure_async_state_dir()
+    states = []
+    for state_path in sorted(state_dir.glob("*.json")):
+        if state_path.name.endswith(".payload.json"):
+            continue
+        payload = read_json_file(state_path)
+        if payload is not None:
+            states.append(payload)
+    return states
+
+
+def action_label(action):
+    return {"install": "安装", "update": "升级"}.get(action, action)
+
+
+def build_async_state(agent_id, label, action, command, log_path, payload_path, status, message, **extra):
+    state = {
+        "agent_id": agent_id,
+        "label": label,
+        "action": action,
+        "status": status,
+        "message": message,
+        "command": command,
+        "log_path": str(log_path),
+        "payload_path": str(payload_path),
+        "updated_at": now_timestamp(),
+    }
+    state.update(extra)
+    return state
+
+
+def execute_managed_action(agent_id, definition, label, action, command, timeout):
+    success, output = run_cmd(command, timeout=timeout)
+    if success:
+        post_state = detect_provider_state(definition.get("bin"), definition)
+        if not post_state["managed"]:
+            return False, f"[AGENT: {label}] {action_label(action)}后复核失败：仍未检测到受管 Provider。", "error"
+        if action == "install":
+            return True, f"[AGENT: {label}] 安装成功。", "info"
+        return True, f"[AGENT: {label}] 已是最新 / 升级成功。", "info"
+
+    if action == "update" and is_network_error(output):
+        return True, f"[AGENT: {label}] 升级遇到网络错误，跳过升级: {output}", "warning"
+
+    return False, f"[AGENT: {label}] {action_label(action)}失败: {output}", "error"
+
+
+def run_async_job(payload_path_str):
+    payload_path = Path(payload_path_str)
+    payload = read_json_file(payload_path)
+    if payload is None:
+        logging.error(f"异步任务描述不存在: {payload_path}")
+        return 1
+
+    agent_id = payload["agent_id"]
+    label = payload["label"]
+    action = payload["action"]
+    state = build_async_state(
+        agent_id,
+        label,
+        action,
+        payload["command"],
+        Path(payload["log_path"]),
+        payload_path,
+        ASYNC_STATUS_RUNNING,
+        f"后台{action_label(action)}任务执行中。",
+        pid=os.getpid(),
+        started_at=payload.get("started_at") or now_timestamp(),
+    )
+    update_async_state(agent_id, state)
+    logging.info(f"[AGENT: {label}] 后台{action_label(action)}任务启动。")
+
+    ok, message, level = execute_managed_action(
+        agent_id,
+        payload["definition"],
+        label,
+        action,
+        payload["command"],
+        payload["timeout"],
+    )
+    getattr(logging, level)(message)
+    final_status = ASYNC_STATUS_SUCCEEDED if ok else ASYNC_STATUS_FAILED
+    if ok and level == "warning":
+        final_status = ASYNC_STATUS_SKIPPED
+
+    final_state = build_async_state(
+        agent_id,
+        label,
+        action,
+        payload["command"],
+        Path(payload["log_path"]),
+        payload_path,
+        final_status,
+        message,
+        pid=os.getpid(),
+        started_at=state["started_at"],
+        finished_at=now_timestamp(),
+    )
+    update_async_state(agent_id, final_state)
+    return 0 if ok else 1
+
+
+def schedule_async_action(agent_id, definition, label, action, command, timeout):
+    existing = load_async_state(agent_id)
+    if existing and existing.get("status") in ASYNC_ACTIVE_STATUSES:
+        logging.info(f"[AGENT: {label}] 已有后台{action_label(action)}任务在执行，跳过重复提交。")
+        return existing
+
+    state_path = get_async_state_path(agent_id)
+    payload_path = get_async_payload_path(agent_id)
+    log_path = get_async_log_path(agent_id)
+    payload = {
+        "agent_id": agent_id,
+        "label": label,
+        "action": action,
+        "command": command,
+        "timeout": timeout,
+        "definition": definition,
+        "log_path": str(log_path),
+        "started_at": now_timestamp(),
+    }
+    write_json_file(payload_path, payload)
+    queued_state = build_async_state(
+        agent_id,
+        label,
+        action,
+        command,
+        log_path,
+        payload_path,
+        ASYNC_STATUS_QUEUED,
+        f"后台{action_label(action)}任务已提交。",
+        state_path=str(state_path),
+    )
+    update_async_state(agent_id, queued_state)
+
+    with log_path.open("w", encoding="utf-8") as log_handle:
+        process = subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve()), "--run-async-job", str(payload_path)],
+            stdin=subprocess.DEVNULL,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            cwd=str(Path(__file__).resolve().parent),
+            start_new_session=True,
+        )
+
+    queued_state["pid"] = process.pid
+    queued_state["updated_at"] = now_timestamp()
+    update_async_state(agent_id, queued_state)
+    logging.info(
+        f"[AGENT: {label}] 已提交后台{action_label(action)}任务 (PID: {process.pid})，状态文件: {state_path}"
+    )
+    return queued_state
+
+
+def wait_for_async_actions(agent_labels):
+    pending = dict(agent_labels)
+    all_ok = True
+    while pending:
+        finished = []
+        for agent_id, label in pending.items():
+            state = load_async_state(agent_id)
+            if state is None:
+                logging.error(f"[AGENT: {label}] 后台任务状态文件缺失。")
+                all_ok = False
+                finished.append(agent_id)
+                continue
+            status = state.get("status")
+            if status in ASYNC_ACTIVE_STATUSES:
+                continue
+            message = state.get("message") or "后台任务已结束。"
+            if status == ASYNC_STATUS_SUCCEEDED:
+                logging.info(message)
+            elif status == ASYNC_STATUS_SKIPPED:
+                logging.warning(message)
+            else:
+                logging.error(message)
+                all_ok = False
+            finished.append(agent_id)
+        for agent_id in finished:
+            pending.pop(agent_id, None)
+        if pending:
+            time.sleep(ASYNC_POLL_INTERVAL_SECONDS)
+    return all_ok
+
+
+def print_async_status():
+    states = list_async_states()
+    if not states:
+        print("当前没有 Agent 生命周期后台任务记录。")
+        return 0
+
+    exit_code = 0
+    for state in states:
+        label = state.get("label") or state.get("agent_id")
+        action = action_label(state.get("action", "unknown"))
+        status = state.get("status", "unknown")
+        message = state.get("message", "")
+        log_path = state.get("log_path", "")
+        print(f"[AGENT: {label}] {action}任务状态={status}；{message}")
+        if log_path:
+            print(f"  log: {log_path}")
+        if status == ASYNC_STATUS_FAILED:
+            exit_code = 1
+    return exit_code
 
 
 def detect_all_providers(bin_name, config=None):
@@ -227,7 +497,16 @@ def resolve_active_provider_variant(managed_actual, provider_key):
             return provider_name
     return provider_key
 
-def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=True, offline=False):
+def reconcile_agent(
+    agent_id,
+    definition,
+    policy,
+    dry_run=False,
+    allow_install=True,
+    offline=False,
+    async_actions=False,
+    wait_async_actions=False,
+):
     label = get_agent_display_name(agent_id, definition)
     # 合并策略
     enabled = policy.get("enabled", True)
@@ -304,16 +583,22 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=T
         if dry_run:
             logging.info(f"  (预览: 计划执行 {install_cmd})")
         else:
-            success, out = run_cmd(install_cmd)
-            if success:
-                post_state = detect_provider_state(bin_name, definition)
-                if not post_state["managed"]:
-                    logging.error(f"[AGENT: {label}] 安装后复核失败：仍未检测到受管 Provider。")
-                    return False
-                logging.info(f"[AGENT: {label}] 安装成功。")
+            if async_actions:
+                schedule_async_action(agent_id, definition, label, "install", install_cmd, INSTALL_CMD_TIMEOUT)
+                if wait_async_actions:
+                    return wait_for_async_actions({agent_id: label})
             else:
-                logging.error(f"[AGENT: {label}] 安装失败: {out}")
-                return False
+                success, message, level = execute_managed_action(
+                    agent_id,
+                    definition,
+                    label,
+                    "install",
+                    install_cmd,
+                    INSTALL_CMD_TIMEOUT,
+                )
+                getattr(logging, level)(message)
+                if not success:
+                    return False
         return True
 
     elif not enabled and is_installed:
@@ -435,19 +720,22 @@ def reconcile_agent(agent_id, definition, policy, dry_run=False, allow_install=T
                         return True
                 else:
                     logging.info(f"[AGENT: {label}] 状态一致，未配置轻量探测，正在执行升级命令...")
-                success, out = run_cmd(upgrade_cmd)
-                if success:
-                    post_state = detect_provider_state(bin_name, definition)
-                    if not post_state["managed"]:
-                        logging.error(f"[AGENT: {label}] 升级后复核失败：受管 Provider 已丢失。")
-                        return False
-                    logging.info(f"[AGENT: {label}] 已是最新 / 升级成功。")
+                if async_actions:
+                    schedule_async_action(agent_id, definition, label, "update", upgrade_cmd, 300)
+                    if wait_async_actions:
+                        return wait_for_async_actions({agent_id: label})
                 else:
-                    if is_network_error(out):
-                        logging.warning(f"[AGENT: {label}] 升级遇到网络错误，跳过升级: {out}")
-                        return True
-                    logging.error(f"[AGENT: {label}] 升级失败: {out}")
-                    return False
+                    success, message, level = execute_managed_action(
+                        agent_id,
+                        definition,
+                        label,
+                        "update",
+                        upgrade_cmd,
+                        300,
+                    )
+                    getattr(logging, level)(message)
+                    if not success:
+                        return False
     return True
 
 def main():
@@ -458,7 +746,17 @@ def main():
     parser.add_argument("--yes", action="store_true", help="自动确认")
     parser.add_argument("--offline", action="store_true", help="离线模式 (跳过网络操作)")
     parser.add_argument("--no-install", action="store_true", help="禁止安装缺失的 Agent，仅做更新/卸载/审计")
+    parser.add_argument("--async-actions", action="store_true", help="将安装/升级动作投递为后台任务")
+    parser.add_argument("--wait-async-actions", action="store_true", help="等待后台安装/升级任务结束")
+    parser.add_argument("--show-async-status", action="store_true", help="显示后台任务状态")
+    parser.add_argument("--run-async-job", help=argparse.SUPPRESS)
     args = parser.parse_args()
+
+    if args.run_async_job:
+        sys.exit(run_async_job(args.run_async_job))
+
+    if args.show_async_status:
+        sys.exit(print_async_status())
 
     try:
         policy_root = load_json_object_file(args.config, strict=True, missing_ok=False)
@@ -494,6 +792,8 @@ def main():
             args.dry_run,
             allow_install=not args.no_install,
             offline=args.offline,
+            async_actions=args.async_actions and not args.dry_run,
+            wait_async_actions=args.wait_async_actions,
         ):
             all_ok = False
             

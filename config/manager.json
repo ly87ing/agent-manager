@@ -24,7 +24,6 @@
   "skills": {
     "agent-skills": { "enabled": true },
     "oa-skill": { "enabled": true },
-    "openai-frontend-skill": { "enabled": true },
     "anthropic-frontend-design-skill": { "enabled": true },
     "playwright-best-practices-skill": { "enabled": true },
     "superpowers": { "enabled": true },

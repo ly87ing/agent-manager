@@ -943,6 +943,8 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
         file_format = "json" if isinstance(path_config, str) else path_config.get("format", "json")
         target_path = os.path.expanduser(target_path)
         label = get_agent_display_name(agent_id, agent_defs.get(agent_id, {}))
+        agent_policy = config.get("agents", {}).get(agent_id, {})
+        agent_enabled = agent_policy.get("enabled", True)
         expected_servers = expected_managed_mcp_servers(root_dir, config, mcp_cfg, agent_id)
         expected_names = set(expected_servers)
         expected_count = len(expected_names)
@@ -954,6 +956,21 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
                 continue
             actual_names = set(actual_servers)
             actual_count = len(actual_names)
+            if not agent_enabled:
+                if actual_names:
+                    append_entry(
+                        report,
+                        "mcp",
+                        make_entry(
+                            label,
+                            "error",
+                            "策略已禁用，但仍残留托管服务 "
+                            f"({actual_count} 个: {format_name_set(actual_names)})",
+                        ),
+                    )
+                else:
+                    append_entry(report, "mcp", make_entry(label, "ok", "策略已禁用"))
+                continue
             if actual_names != expected_names:
                 append_entry(
                     report,
@@ -986,11 +1003,14 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
                     ),
                 )
         else:
-            if generated_target_status(agent_id) == "installed":
+            if not agent_enabled:
+                append_entry(report, "mcp", make_entry(label, "ok", "策略已禁用"))
+            elif generated_target_status(agent_id) == "installed":
                 message = "尚未生成 MCP 配置"
+                append_entry(report, "mcp", make_entry(label, "warning", message, category="unmaterialized"))
             else:
                 message = "Agent 未安装，未生成 MCP 配置"
-            append_entry(report, "mcp", make_entry(label, "warning", message, category="unmaterialized"))
+                append_entry(report, "mcp", make_entry(label, "warning", message, category="unmaterialized"))
 
     for agent_id, agent_path in canonicalize_agent_mapping(skill_cfg.get("agents", {})).items():
         if agent_id not in active_skill_agents:

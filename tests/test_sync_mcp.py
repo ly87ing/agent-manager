@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from copy import deepcopy
 from pathlib import Path
+from unittest import mock
 
 from src.toml_compat import tomllib
 from tests.agent_mcp_import import sync_mcp
@@ -958,6 +959,46 @@ class SyncMcpTests(unittest.TestCase):
             updated = json.loads(agent_config_path.read_text(encoding="utf-8"))
             self.assertIn("bad-mcp", updated["mcpServers"])
             self.assertIn("user-mcp", updated["mcpServers"])
+
+    def test_manage_mcp_config_fails_cleanly_when_backup_is_not_writable(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            agent_config_path = temp_root / "agent.json"
+            original = {
+                "mcpServers": {
+                    "user-mcp": {
+                        "command": "echo",
+                        "args": [],
+                    }
+                }
+            }
+            agent_config_path.write_text(json.dumps(original), encoding="utf-8")
+
+            with (
+                self.assertLogs(level="ERROR") as captured,
+                mock.patch.object(
+                    sync_mcp.shutil,
+                    "copy2",
+                    side_effect=PermissionError("Operation not permitted"),
+                ),
+            ):
+                ok = sync_mcp.manage_mcp_config(
+                    {"TmpAgent": str(agent_config_path)},
+                    {
+                        "demo": {
+                            "enabled": True,
+                            "_declared_in_policy": True,
+                            "_sync_ready": True,
+                            "command": "echo",
+                            "args": [],
+                            "env": {},
+                        }
+                    },
+                )
+
+            self.assertFalse(ok)
+            self.assertEqual(json.loads(agent_config_path.read_text(encoding="utf-8")), original)
+            self.assertIn("备份现有 MCP 配置失败", "\n".join(captured.output))
 
     def test_invalid_existing_json_mcp_section_aborts_without_overwrite(self):
         with tempfile.TemporaryDirectory() as temp_dir:

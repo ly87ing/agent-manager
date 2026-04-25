@@ -15,13 +15,6 @@
       "skill_paths": ["skills/xyai-manager"],
       "skill_count": 1
     },
-    "openai-frontend-skill": {
-      "url": "https://github.com/openai/skills.git",
-      "commit": "30444aed500c00c85294d12074f6e3ee794f808a",
-      "skill_paths": ["skills/.curated/frontend-skill"],
-      "skill_count": 1,
-      "agents": ["codex"]
-    },
     "anthropic-frontend-design-skill": {
       "url": "https://github.com/anthropics/skills.git",
       "skill_paths": ["skills/frontend-design"],

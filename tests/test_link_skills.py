@@ -2285,17 +2285,12 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertNotIn("commit", repo)
         self.assertNotIn("ref", repo)
 
-    def test_default_skill_catalog_includes_openai_frontend_skill_for_codex_only(self):
+    def test_default_skill_catalog_does_not_reference_removed_openai_frontend_skill(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
 
         repo = skills_config["repositories"].get("openai-frontend-skill")
 
-        self.assertIsNotNone(repo)
-        self.assertEqual(repo["url"], "https://github.com/openai/skills.git")
-        self.assertEqual(repo["skill_paths"], ["skills/.curated/frontend-skill"])
-        self.assertEqual(repo["agents"], ["codex"])
-        self.assertNotIn("commit", repo)
-        self.assertNotIn("ref", repo)
+        self.assertIsNone(repo)
 
     def test_default_skill_catalog_includes_anthropic_frontend_design_skill_for_kimi_only(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
@@ -2310,13 +2305,10 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertNotIn("commit", repo)
         self.assertNotIn("ref", repo)
 
-    def test_default_manager_policy_explicitly_enables_openai_frontend_skill(self):
+    def test_default_manager_policy_does_not_enable_removed_openai_frontend_skill(self):
         manager_config = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
 
-        self.assertEqual(
-            manager_config["skills"].get("openai-frontend-skill"),
-            {"enabled": True},
-        )
+        self.assertIsNone(manager_config["skills"].get("openai-frontend-skill"))
 
     def test_default_manager_policy_explicitly_enables_anthropic_frontend_design_skill(self):
         manager_config = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))

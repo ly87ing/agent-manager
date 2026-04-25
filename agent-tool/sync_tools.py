@@ -126,6 +126,24 @@ def _build_brew_outdated_probe(command):
     return None
 
 
+def _extract_git_pull_target(command):
+    if not command:
+        return None
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = command.split()
+    if len(tokens) < 4 or tokens[0] != "git":
+        return None
+    if tokens[1] != "-C":
+        return None
+    target_dir = tokens[2]
+    action = tokens[3]
+    if action != "pull":
+        return None
+    return Path(target_dir).expanduser()
+
+
 def probe_package_update_state(name, definition):
     upgrade_cmd = definition.get("upgrade") or definition.get("install")
     npm_package = _extract_npm_package_name(upgrade_cmd)
@@ -152,6 +170,10 @@ def probe_package_update_state(name, definition):
         if not ok:
             return "unknown"
         return "latest" if not out.strip() else "stale"
+
+    git_pull_target = _extract_git_pull_target(upgrade_cmd)
+    if git_pull_target:
+        return probe_git_remote_state(git_pull_target, timeout=5)["status"]
 
     logging.info(f"[TOOL: {name}] 未识别的升级探测类型，回退为 unknown。")
     return "unknown"

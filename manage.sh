@@ -33,6 +33,7 @@ LOCK_ACQUIRED="false"
 DRY_RUN_FLAG=""
 OFFLINE_FLAG=""
 FORCE_REFRESH_FLAG=""
+WAIT_AGENT_LIFECYCLE_FLAG=""
 TASK_FAILURES=0
 DOCTOR_STATUS="healthy"
 DOCTOR_WARNING_OPTIONAL_TOOLS=0
@@ -86,6 +87,9 @@ while [ $# -gt 0 ]; do
             ;;
         -f|--force-refresh)
             FORCE_REFRESH_FLAG="--force-refresh"
+            ;;
+        --wait-agent-lifecycle)
+            WAIT_AGENT_LIFECYCLE_FLAG="--wait-async-actions"
             ;;
         *)
             if [ -z "$cmd" ]; then
@@ -165,7 +169,7 @@ function acquire_lock() {
 }
 
 # 原子锁检查
-if [[ "$cmd" != "help" && "$cmd" != "-h" && "$cmd" != "--help" && "$cmd" != "-help" && "$cmd" != "detect" && "$cmd" != "doctor" && "$cmd" != "status" && "$cmd" != "backups:list" && "$cmd" != "unlock" && "$cmd" != "logs" && "$cmd" != "fetch-models" ]]; then
+if [[ "$cmd" != "help" && "$cmd" != "-h" && "$cmd" != "--help" && "$cmd" != "-help" && "$cmd" != "detect" && "$cmd" != "doctor" && "$cmd" != "status" && "$cmd" != "backups:list" && "$cmd" != "unlock" && "$cmd" != "logs" && "$cmd" != "fetch-models" && "$cmd" != "agent-status" && "$cmd" != "agents:status" ]]; then
     acquire_lock
 fi
 
@@ -743,6 +747,12 @@ function show_summary() {
     echo "$clean_log" | grep -E "同步完成|安装成功" | sed 's/\[AGENT: Rules\] //g; s/\[TOOL: \(.*\)\]/  ⚒ \1/g' | sort -u || echo "   无变动。"
     echo -e "${BORDER_GRAY}----------------------------------------------------------------${NC}"
     echo -e "${HDR_BLUE}${BOLD}5. 自动健康验证 (Post-Sync Verification)${NC}"
+    if [ "$TASK_FAILURES" -ne 0 ]; then
+        echo -e "   ${ERROR_RED}${BOLD}HEALTH CHECK SKIPPED${NC}"
+        echo -e "   ${ERROR_RED}存在失败任务，未宣告健康状态。${NC}"
+        echo ""
+        return
+    fi
     if doctor_check silent; then
         case "$DOCTOR_STATUS" in
             healthy) echo -e "   ${SUCCESS_GREEN}${BOLD}CERTIFIED HEALTHY${NC}" ;;
@@ -855,7 +865,13 @@ function run_agent_lifecycle_task() {
     if [ -n "$extra_flag" ]; then args+=("$extra_flag"); fi
     if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
     if [ -n "$OFFLINE_FLAG" ]; then args+=("$OFFLINE_FLAG"); fi
+    if [ -z "$DRY_RUN_FLAG" ]; then args+=(--async-actions); fi
+    if [ -n "$WAIT_AGENT_LIFECYCLE_FLAG" ]; then args+=("$WAIT_AGENT_LIFECYCLE_FLAG"); fi
     run_task_in_dir "对齐 Agent 生命周期" "生命周期对齐完成" "生命周期失败" 600 "$ROOT_DIR/agent-lifecycle" "$PYTHON_CMD" "${args[@]}"
+}
+
+function run_agent_lifecycle_status_task() {
+    run_supervised_command_in_dir 60 "$ROOT_DIR/agent-lifecycle" "$PYTHON_CMD" sync_agents.py --show-async-status
 }
 
 function run_tools_sync_task() {
@@ -1259,6 +1275,9 @@ case "$cmd" in
         else
             doctor_check
         fi
+        ;;
+    agent-status|agents:status)
+        run_agent_lifecycle_status_task
         ;;
     detect) detect_agents ;;
     unlock)

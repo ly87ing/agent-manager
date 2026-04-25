@@ -178,6 +178,8 @@ class ManageScriptTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, combined)
             self.assertIn("工具失败", combined)
             self.assertIn("规则分发完成", combined)
+            self.assertIn("HEALTH CHECK SKIPPED", combined)
+            self.assertNotIn("CERTIFIED HEALTHY", combined)
 
     def test_invalid_local_override_aborts_before_running_tasks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1675,7 +1677,15 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, combined)
             log_lines = call_log.read_text(encoding="utf-8").splitlines()
             self.assertIn("init-secrets", log_lines, log_lines)
-            self.assertTrue(any(line.startswith("agents ") and "--no-install" in line for line in log_lines), log_lines)
+            self.assertTrue(
+                any(
+                    line.startswith("agents ")
+                    and "--no-install" in line
+                    and "--async-actions" in line
+                    for line in log_lines
+                ),
+                log_lines,
+            )
             self.assertTrue(any(line.startswith("tools ") for line in log_lines), log_lines)
             self.assertTrue(any(line.startswith("rules ") for line in log_lines), log_lines)
             self.assertTrue(any(line.startswith("skills ") for line in log_lines), log_lines)
@@ -1745,7 +1755,15 @@ class ManageScriptTests(unittest.TestCase):
             combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
             self.assertEqual(result.returncode, 0, combined)
             log_lines = call_log.read_text(encoding="utf-8").splitlines()
-            self.assertTrue(any(line.startswith("agents ") and "--force-refresh" not in line for line in log_lines), log_lines)
+            self.assertTrue(
+                any(
+                    line.startswith("agents ")
+                    and "--force-refresh" not in line
+                    and "--async-actions" in line
+                    for line in log_lines
+                ),
+                log_lines,
+            )
             self.assertTrue(any(line.startswith("tools ") and "--force-refresh" in line for line in log_lines), log_lines)
             self.assertTrue(any(line.startswith("skills ") and "--force-refresh" in line for line in log_lines), log_lines)
             self.assertTrue(any(line.startswith("mcp ") and "--force-refresh" in line for line in log_lines), log_lines)
@@ -1814,7 +1832,15 @@ class ManageScriptTests(unittest.TestCase):
             combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
             self.assertEqual(result.returncode, 0, combined)
             log_lines = call_log.read_text(encoding="utf-8").splitlines()
-            self.assertTrue(any(line.startswith("agents ") and "--force-refresh" not in line for line in log_lines), log_lines)
+            self.assertTrue(
+                any(
+                    line.startswith("agents ")
+                    and "--force-refresh" not in line
+                    and "--async-actions" in line
+                    for line in log_lines
+                ),
+                log_lines,
+            )
             self.assertTrue(any(line.startswith("tools ") and "--force-refresh" in line for line in log_lines), log_lines)
             self.assertTrue(any(line.startswith("skills ") and "--force-refresh" in line for line in log_lines), log_lines)
             self.assertTrue(any(line.startswith("mcp ") and "--force-refresh" in line for line in log_lines), log_lines)
@@ -1883,7 +1909,74 @@ class ManageScriptTests(unittest.TestCase):
             combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
             self.assertEqual(result.returncode, 0, combined)
             log_lines = call_log.read_text(encoding="utf-8").splitlines()
-            self.assertTrue(any(line.startswith("agents ") and "--no-install" not in line for line in log_lines), log_lines)
+            self.assertTrue(
+                any(
+                    line.startswith("agents ")
+                    and "--no-install" not in line
+                    and "--async-actions" in line
+                    for line in log_lines
+                ),
+                log_lines,
+            )
+
+    def test_update_wait_agent_lifecycle_forwards_wait_flag(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            call_log = temp_root / "calls.log"
+            remove_path(temp_root / "secrets")
+
+            self._append_log_stub(
+                temp_root / "agent-lifecycle" / "sync_agents.py",
+                "agents",
+                call_log,
+                "'--async-actions' in sys.argv and '--wait-async-actions' in sys.argv and '--no-install' in sys.argv",
+            )
+            self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log, "True")
+            self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log, "True")
+            self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log, "True")
+            self._write_stub(
+                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
+                (
+                    "#!/usr/bin/env bash\n"
+                    f"printf '%s\\n' \"rules $*\" >> {str(call_log)!r}\n"
+                    "exit 0\n"
+                ),
+            )
+            self._write_stub(
+                temp_root / "agent-terminal" / "sync_terminal.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "scripts" / "init-secrets.sh",
+                (
+                    "#!/usr/bin/env bash\n"
+                    "mkdir -p \"$PWD/../secrets/.git\"\n"
+                    f"printf '%s\\n' init-secrets >> {str(call_log)!r}\n"
+                    "exit 0\n"
+                ),
+            )
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "--wait-agent-lifecycle", "update"],
+                cwd=temp_root,
+                env=self._managed_env(),
+                capture_output=True,
+                check=False,
+            )
+
+            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            self.assertEqual(result.returncode, 0, combined)
+            log_lines = call_log.read_text(encoding="utf-8").splitlines()
+            self.assertTrue(
+                any(
+                    line.startswith("agents ")
+                    and "--wait-async-actions" in line
+                    and "--async-actions" in line
+                    for line in log_lines
+                ),
+                log_lines,
+            )
 
     def test_self_update_only_runs_repo_pull(self):
         with tempfile.TemporaryDirectory() as temp_dir:

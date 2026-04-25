@@ -411,6 +411,56 @@ class ManageDoctorReportTests(unittest.TestCase):
             self.assertEqual(mcp_names["Codex"]["status"], "error")
             self.assertIn("期望 1 个托管服务", mcp_names["Codex"]["message"])
 
+    def test_report_treats_disabled_agent_without_managed_mcp_entries_as_ok(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            cursor_config = Path(temp_dir) / "cursor" / "mcp.json"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            cursor_config.parent.mkdir(parents=True)
+            cursor_config.write_text(
+                json.dumps(
+                    {
+                        "mcpServers": {
+                            "user-owned": {
+                                "command": "echo",
+                                "args": [],
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {\n    "cursor": { "enabled": false, "auto_install": false, "auto_update": false }\n  },\n  "tools": {},\n  "skills": {},\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                '{\n  "agent_paths": {\n    "cursor": { "path": "%s", "format": "json" }\n  },\n  "servers": {\n    "augment-context-engine": {\n      "command": "auggie",\n      "args": ["--mcp"],\n      "agents": ["cursor"]\n    }\n  }\n}\n'
+                % cursor_config,
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{"repositories": {}, "agents": {}}',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            with (
+                mock.patch("src.manage_doctor.detect_all_providers", return_value=[]),
+                mock.patch("src.manage_doctor.is_agent_installed", return_value=False),
+            ):
+                report = build_report(
+                    root_dir=temp_root,
+                    config_file=temp_root / "config" / "manager.json",
+                    python_cmd="python3",
+                )
+
+            self.assertEqual(report["status"], "healthy")
+            mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
+            self.assertEqual(mcp_names["Cursor CLI"]["status"], "ok")
+            self.assertEqual(mcp_names["Cursor CLI"]["message"], "策略已禁用")
+
     def test_report_flags_kimi_cli_json_target_with_missing_managed_entries(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"

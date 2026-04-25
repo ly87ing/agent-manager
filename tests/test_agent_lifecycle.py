@@ -371,7 +371,97 @@ class ReconcileAgentTests(unittest.TestCase):
             result = sync_agents.reconcile_agent("claude-code", definition, policy)
 
         self.assertTrue(result)
-        run_cmd.assert_called_once_with("curl -fsSL https://claude.ai/install.sh | bash")
+        run_cmd.assert_called_once_with(
+            "curl -fsSL https://claude.ai/install.sh | bash",
+            timeout=sync_agents.INSTALL_CMD_TIMEOUT,
+        )
+
+    def test_npm_install_uses_extended_timeout(self):
+        definition = {
+            "display_name": "Gemini CLI",
+            "bin": "gemini",
+            "providers": {
+                "npm": {
+                    "managed": True,
+                    "install": "npm install -g @google/gemini-cli",
+                }
+            },
+        }
+        policy = {"enabled": True, "auto_install": True, "preferred_provider": "npm"}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", side_effect=[[], ["npm"]]),
+            mock.patch.object(sync_agents, "is_agent_installed", return_value=False),
+            mock.patch.object(sync_agents, "run_cmd", return_value=(True, "installed")) as run_cmd,
+        ):
+            result = sync_agents.reconcile_agent("gemini-cli", definition, policy)
+
+        self.assertTrue(result)
+        run_cmd.assert_called_once_with(
+            "npm install -g @google/gemini-cli",
+            timeout=sync_agents.INSTALL_CMD_TIMEOUT,
+        )
+
+    def test_async_install_enqueues_background_job(self):
+        definition = {
+            "display_name": "Gemini CLI",
+            "bin": "gemini",
+            "providers": {
+                "npm": {
+                    "managed": True,
+                    "install": "npm install -g @google/gemini-cli",
+                }
+            },
+        }
+        policy = {"enabled": True, "auto_install": True, "preferred_provider": "npm"}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", return_value=[]),
+            mock.patch.object(sync_agents, "schedule_async_action", return_value={"status": "queued"}) as schedule,
+            mock.patch.object(sync_agents, "run_cmd") as run_cmd,
+        ):
+            result = sync_agents.reconcile_agent("gemini-cli", definition, policy, async_actions=True)
+
+        self.assertTrue(result)
+        run_cmd.assert_not_called()
+        schedule.assert_called_once_with(
+            "gemini-cli",
+            definition,
+            "Gemini CLI",
+            "install",
+            "npm install -g @google/gemini-cli",
+            sync_agents.INSTALL_CMD_TIMEOUT,
+        )
+
+    def test_async_install_waits_for_background_job_when_requested(self):
+        definition = {
+            "display_name": "Gemini CLI",
+            "bin": "gemini",
+            "providers": {
+                "npm": {
+                    "managed": True,
+                    "install": "npm install -g @google/gemini-cli",
+                }
+            },
+        }
+        policy = {"enabled": True, "auto_install": True, "preferred_provider": "npm"}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", return_value=[]),
+            mock.patch.object(sync_agents, "schedule_async_action", return_value={"status": "queued"}) as schedule,
+            mock.patch.object(sync_agents, "wait_for_async_actions", return_value=True) as wait_for,
+        ):
+            result = sync_agents.reconcile_agent(
+                "gemini-cli",
+                definition,
+                policy,
+                async_actions=True,
+                wait_async_actions=True,
+            )
+
+        self.assertTrue(result)
+        schedule.assert_called_once()
+        wait_for.assert_called_once_with({"gemini-cli": "Gemini CLI"})
 
     def test_upgrade_fails_when_platform_specific_command_is_unresolved(self):
         definition = {
@@ -441,7 +531,7 @@ class ReconcileAgentTests(unittest.TestCase):
             result = sync_agents.reconcile_agent("claude-code", definition, policy)
 
         self.assertFalse(result)
-        run_cmd.assert_called_once_with("npm update -g @anthropic-ai/claude-code")
+        run_cmd.assert_called_once_with("npm update -g @anthropic-ai/claude-code", timeout=300)
 
     def test_brew_upgrade_skips_when_outdated_probe_is_empty(self):
         definition = {
@@ -493,7 +583,7 @@ class ReconcileAgentTests(unittest.TestCase):
             run_cmd.call_args_list,
             [
                 mock.call("brew outdated --cask claude-code", timeout=60),
-                mock.call("brew upgrade --cask claude-code"),
+                mock.call("brew upgrade --cask claude-code", timeout=300),
             ],
         )
 
@@ -519,7 +609,7 @@ class ReconcileAgentTests(unittest.TestCase):
             result = sync_agents.reconcile_agent("gemini-cli", definition, policy)
 
         self.assertTrue(result)
-        run_cmd.assert_called_once_with("npm install -g @google/gemini-cli@latest")
+        run_cmd.assert_called_once_with("npm install -g @google/gemini-cli@latest", timeout=300)
         self.assertTrue(any("正在执行升级命令" in line for line in logs.output), logs.output)
 
     def test_native_upgrade_without_probe_logs_real_execution_state(self):
@@ -543,8 +633,40 @@ class ReconcileAgentTests(unittest.TestCase):
             result = sync_agents.reconcile_agent("claude-code", definition, policy)
 
         self.assertTrue(result)
-        run_cmd.assert_called_once_with("claude update")
+        run_cmd.assert_called_once_with("claude update", timeout=300)
         self.assertTrue(any("正在执行升级命令" in line for line in logs.output), logs.output)
+
+    def test_async_npm_upgrade_enqueues_background_job_without_probe(self):
+        definition = {
+            "display_name": "Gemini CLI",
+            "bin": "gemini",
+            "providers": {
+                "npm": {
+                    "install": "npm install -g @google/gemini-cli",
+                    "upgrade": "npm install -g @google/gemini-cli@latest",
+                }
+            },
+        }
+        policy = {"enabled": True, "auto_update": True, "preferred_provider": "npm"}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", return_value=["npm"]),
+            mock.patch.object(sync_agents, "is_agent_installed", return_value=True),
+            mock.patch.object(sync_agents, "schedule_async_action", return_value={"status": "queued"}) as schedule,
+            mock.patch.object(sync_agents, "run_cmd") as run_cmd,
+        ):
+            result = sync_agents.reconcile_agent("gemini-cli", definition, policy, async_actions=True)
+
+        self.assertTrue(result)
+        run_cmd.assert_not_called()
+        schedule.assert_called_once_with(
+            "gemini-cli",
+            definition,
+            "Gemini CLI",
+            "update",
+            "npm install -g @google/gemini-cli@latest",
+            300,
+        )
 
     def test_reconcile_agent_repairs_managed_provider_when_runtime_entrypoint_is_missing(self):
         definition = {
@@ -812,7 +934,7 @@ class ReconcileAgentTests(unittest.TestCase):
             result = sync_agents.reconcile_agent("gemini-cli", definition, policy)
 
         self.assertTrue(result)
-        run_cmd.assert_called_once_with("npm install -g @google/gemini-cli@latest")
+        run_cmd.assert_called_once_with("npm install -g @google/gemini-cli@latest", timeout=300)
         self.assertTrue(any("升级遇到网络错误，跳过升级" in line for line in logs.output), logs.output)
 
     def test_direct_upgrade_non_network_failure_still_fails(self):
@@ -836,7 +958,7 @@ class ReconcileAgentTests(unittest.TestCase):
             result = sync_agents.reconcile_agent("gemini-cli", definition, policy)
 
         self.assertFalse(result)
-        run_cmd.assert_called_once_with("npm install -g @google/gemini-cli@latest")
+        run_cmd.assert_called_once_with("npm install -g @google/gemini-cli@latest", timeout=300)
         self.assertTrue(any("升级失败" in line for line in logs.output), logs.output)
 
 

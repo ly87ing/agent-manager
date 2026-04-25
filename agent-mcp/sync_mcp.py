@@ -308,18 +308,25 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
             return False
     return True
 
-def backup_config(path, dry_run=False):
+def backup_config(path, dry_run=False, agent_name=None):
     """5 代轮转备份"""
     path = Path(path).expanduser()
-    if not path.exists(): return
+    if not path.exists():
+        return True
     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     bak_path = path.with_suffix(f"{path.suffix}.bak.{timestamp}")
     if not dry_run:
-        shutil.copy2(path, bak_path)
+        try:
+            shutil.copy2(path, bak_path)
+        except OSError as exc:
+            label = f"[AGENT: {agent_name}] " if agent_name else ""
+            logging.error(f"{label}备份现有 MCP 配置失败: {exc}")
+            return False
         backups = sorted(list(path.parent.glob(f"{path.name}.bak.*")), key=os.path.getmtime, reverse=True)
         for old_bak in backups[5:]:
             try: os.remove(old_bak)
             except OSError: pass
+    return True
 
 
 def should_sync_mcp_target(agent_name, agent_defs):
@@ -383,7 +390,9 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None
                 all_ok = False
                 continue
 
-        if not dry_run: backup_config(config_path, dry_run)
+        if not dry_run and not backup_config(config_path, dry_run, agent_name=agent_name):
+            all_ok = False
+            continue
 
         if file_format == "toml":
             if not update_toml_config(

@@ -45,10 +45,10 @@ class SkillUsageMetricsTests(unittest.TestCase):
             summary["available_skill_count_by_agent"],
             {
                 "claude-code": 26,
-                "codex": 27,
+                "codex": 26,
                 "cursor": 16,
                 "gemini-cli": 15,
-                "kimi-cli": 26,
+                "kimi-cli": 27,
                 "opencode": 16,
             },
         )
