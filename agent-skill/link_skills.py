@@ -511,11 +511,7 @@ def scrub_dead_links(
             points_to_planned_removed_base = link_points_within_any_base(item, planned_removed_base_paths)
             if item.exists() and not points_to_planned_removed_base:
                 continue
-            if (
-                item.name not in agent_managed_skill_names
-                and not link_points_within_base(item, base_dir)
-                and not points_to_planned_removed_base
-            ):
+            if item.name not in agent_managed_skill_names and not points_to_planned_removed_base:
                 continue
             logging.info(f"[AGENT: {agent_name}] 移除死链: {item.name}")
             if not dry_run:

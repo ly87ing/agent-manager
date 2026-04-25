@@ -2078,7 +2078,7 @@ class LinkSkillsTests(unittest.TestCase):
             self.assertFalse(stable_link.exists(), combined)
             self.assertFalse(stable_link.is_symlink(), combined)
 
-    def test_scrub_dead_links_removes_broken_relative_link(self):
+    def test_scrub_dead_links_preserves_broken_relative_link_without_managed_ownership(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             managed_dir = temp_root / "managed"
@@ -2096,6 +2096,31 @@ class LinkSkillsTests(unittest.TestCase):
             target.parent.rmdir()
 
             link_skills.scrub_dead_links({"TestAgent": str(agent_dir)}, managed_dir)
+
+            self.assertTrue(link.is_symlink())
+
+    def test_scrub_dead_links_removes_broken_relative_link_for_current_agent_managed_skill(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            managed_dir = temp_root / "managed"
+            agent_dir = temp_root / "agent" / "skills"
+            managed_dir.mkdir()
+            agent_dir.mkdir(parents=True)
+
+            target = managed_dir / "repo" / "skill"
+            target.parent.mkdir(parents=True)
+            target.mkdir()
+            link = agent_dir / "skill"
+            link.symlink_to(os.path.relpath(target, agent_dir))
+
+            target.rmdir()
+            target.parent.rmdir()
+
+            link_skills.scrub_dead_links(
+                {"TestAgent": str(agent_dir)},
+                managed_dir,
+                managed_skill_names_by_agent={"TestAgent": {"skill"}},
+            )
 
             self.assertFalse(link.is_symlink())
 
