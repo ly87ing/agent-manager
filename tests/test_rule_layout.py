@@ -159,9 +159,12 @@ class RuleLayoutTests(unittest.TestCase):
 
     def test_built_outputs_include_required_shared_clauses(self):
         expected_clause = "Use Chinese (Simplified) for interactions and generated content."
-        explicit_search_clause = (
-            "If you do not know which files own a feature, behavior, or config, use `codebase-retrieval` "
-            "before other search tools."
+        explicit_code_search_clause = (
+            "For codebase exploration: use `codebase-retrieval` when locations are unknown; use `rg` or direct "
+            "file reads ONLY for known paths or exact identifiers."
+        )
+        explicit_web_search_clause = (
+            "For internet searches: strictly default to `web_search` and `web_fetch` (grok-search)."
         )
         explicit_verification_clause = "If you skip verification or cannot run it, say so explicitly."
         explicit_context_clause = (
@@ -171,7 +174,8 @@ class RuleLayoutTests(unittest.TestCase):
         for target, filename in self.DIST_FILENAMES.items():
             content = (ROOT / "agent-rule" / "rules" / "dist" / target / filename).read_text(encoding="utf-8")
             self.assertIn(expected_clause, content, target)
-            self.assertIn(explicit_search_clause, content, target)
+            self.assertIn(explicit_code_search_clause, content, target)
+            self.assertIn(explicit_web_search_clause, content, target)
             self.assertIn(explicit_verification_clause, content, target)
             self.assertIn(explicit_context_clause, content, target)
             self.assertIn("modules/artifact-hygiene.md", content, target)

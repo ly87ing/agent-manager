@@ -1250,6 +1250,9 @@ case "$cmd" in
         run_update_pipeline "🚀 Agent Manager 全量同步启动" ""
         ;;
     update)
+        if [ -z "$WAIT_AGENT_LIFECYCLE_FLAG" ]; then
+            WAIT_AGENT_LIFECYCLE_FLAG="--wait-async-actions"
+        fi
         run_update_pipeline "🔄 Agent Manager 资源更新启动" "--no-install"
         ;;
     sync)
@@ -1429,10 +1432,11 @@ case "$cmd" in
         echo -e "${BOLD}${HDR_BLUE}=== 全局参数 (Flags) ===${NC}"
         echo -e "  ${PENDING_GOLD}--dry-run${NC}       空转模式，仅输出计划动作并跳过会修改本地或远端状态的副作用"
         echo -e "  ${PENDING_GOLD}--offline${NC}       离线模式，禁止远程拉取/安装；仅使用本地已存在仓库与配置\n"
-        echo -e "  ${PENDING_GOLD}-f, --force-refresh${NC} 更新探测失败时仍强制执行远端刷新；默认会跳过这些保守回退下载\n"
+        echo -e "  ${PENDING_GOLD}-f, --force-refresh${NC} 更新探测失败时仍强制执行远端刷新；默认会跳过这些保守回退下载"
+        echo -e "  ${PENDING_GOLD}--wait-agent-lifecycle${NC} 等待 Agent 生命周期后台安装/升级结束；update 默认已启用\n"
         echo -e "${BOLD}${HDR_BLUE}=== 日常入口 (Main Flows) ===${NC}"
         echo -e "  ${SUCCESS_GREEN}sync${NC}            同步 rules，并将 skills / MCP 对齐到最新；不处理 Agent / Tool 生命周期"
-        echo -e "  ${SUCCESS_GREEN}update${NC}          更新远端资源并收敛本地环境，但不安装缺失 Agent"
+        echo -e "  ${SUCCESS_GREEN}update${NC}          更新远端资源并等待 Agent 生命周期完成，但不安装缺失 Agent"
         echo -e "  ${SUCCESS_GREEN}bootstrap${NC}       执行全量安装、更新与同步，适合新机器初始化"
         echo -e "  ${SUCCESS_GREEN}all${NC}             \`bootstrap\` 的兼容别名"
         echo -e "  ${SUCCESS_GREEN}plan${NC}            预演一次完整 \`bootstrap\`（dry-run）"

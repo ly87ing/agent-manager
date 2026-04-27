@@ -1238,6 +1238,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, combined)
             self.assertIn("Agent Manager 帮助手册", combined)
             self.assertIn("-f, --force-refresh", combined)
+            self.assertIn("--wait-agent-lifecycle", combined)
             self.assertFalse(call_log.exists(), combined)
 
     def test_make_default_help_lists_cc_bridge_runtime_targets(self):
@@ -1612,7 +1613,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("--repo repo-a", log_lines[0])
             self.assertIn("--repo repo-b", log_lines[0])
 
-    def test_update_refreshes_resources_without_agent_install(self):
+    def test_update_refreshes_resources_without_agent_install_and_waits_for_agent_lifecycle(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -1682,6 +1683,7 @@ class ManageScriptTests(unittest.TestCase):
                     line.startswith("agents ")
                     and "--no-install" in line
                     and "--async-actions" in line
+                    and "--wait-async-actions" in line
                     for line in log_lines
                 ),
                 log_lines,

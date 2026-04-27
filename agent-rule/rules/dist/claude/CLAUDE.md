@@ -1,6 +1,6 @@
 - Use Chinese (Simplified) for interactions and generated content. Use English technical terms only when clearer.
-- If you do not know which files own a feature, behavior, or config, use `codebase-retrieval` before other search tools.
-- Use `rg` or direct file reads only for exact identifiers, config keys, logs, generated text, and known paths.
+- For codebase exploration: use `codebase-retrieval` when locations are unknown; use `rg` or direct file reads ONLY for known paths or exact identifiers.
+- For internet searches: strictly default to `web_search` and `web_fetch` (grok-search). Escalate to `agent-browser` ONLY IF the target requires JS execution, authentication, or interactive UI navigation.
 - Before implementing, state assumptions. Surface ambiguity instead of guessing; mention simpler approaches.
 - Prefer the simplest local change that solves the goal. No speculative features, abstractions, configurability, or impossible-case handling.
 - Keep edits surgical. Match local style, avoid unrelated refactors or cleanup, and remove only dead code your change makes obsolete.
