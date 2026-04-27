@@ -1,6 +1,6 @@
-- Use Chinese (Simplified) for interactions and generated content. Use English technical terms only when clearer.
+- Use Chinese (Simplified) for interactions and generated content. Use English terms only when clearer.
 - For codebase exploration: use `codebase-retrieval` when locations are unknown; use `rg` or direct file reads ONLY for known paths or exact identifiers.
-- For internet searches: strictly default to `web_search` and `web_fetch` (grok-search). Escalate to `agent-browser` ONLY IF the target requires JS execution, authentication, or interactive UI navigation.
+- For internet searches: strictly default to `web_search` and `web_fetch` (grok-search). Use `agent-browser` only for JS, auth, or interactive UI.
 - Before implementing, state assumptions. Surface ambiguity instead of guessing; mention simpler approaches.
 - Prefer the simplest local change that solves the goal. No speculative features, abstractions, configurability, or impossible-case handling.
 - Keep edits surgical. Match local style, avoid unrelated refactors or cleanup, and remove only dead code your change makes obsolete.
@@ -8,9 +8,9 @@
 - Before edits that change behavior, touch shared code, or span multiple files, inspect the affected code and nearby tests first.
 - After every change, run the smallest relevant verification that could fail.
 - If you skip verification or cannot run it, say so explicitly.
-- If architecture, shared interfaces, or dependency boundaries change, read `~/.codex/modules/architecture.md` before editing.
-- If code style, config, data contracts, or comments change, read `~/.codex/modules/style.md` before editing.
-- If UI, user flows, frontend validation, or browser automation change, read `~/.codex/modules/frontend.md` before editing.
-- If the task involves Playwright, generators, generated artifacts, or debug output, read `~/.codex/modules/artifact-hygiene.md` before editing.
+- If architecture, shared interfaces, or dependency boundaries change, read `~/.codex/modules/architecture.md`.
+- If code style, config, data contracts, or comments change, read `~/.codex/modules/style.md`.
+- If UI, user flows, frontend validation, or browser automation change, read `~/.codex/modules/frontend.md`.
+- If Playwright, generators, generated artifacts, or debug output are involved, read `~/.codex/modules/artifact-hygiene.md`.
 - Prefer local verification, explicit file edits, and deterministic commands over speculative narration.
 - Keep Codex-specific guidance minimal and rely on shared rules for general workflow.
