@@ -3724,6 +3724,94 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse(rule_backup.exists(), result.stdout + result.stderr)
 
+    def test_cleanup_expands_repo_root_rule_targets(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            temp_home.mkdir()
+
+            repo_native_backup = temp_root / ".kimi" / "AGENTS.md.bak.20260423"
+            repo_native_backup.parent.mkdir(parents=True, exist_ok=True)
+            repo_native_backup.write_text("old repo-native backup\n", encoding="utf-8")
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "cleanup"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse(repo_native_backup.exists(), result.stdout + result.stderr)
+
+    def test_cleanup_removes_legacy_rule_backups(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            temp_home.mkdir()
+
+            legacy_backups = [
+                temp_home / ".codex" / "rules" / "global.md.bak.20260329",
+                temp_home / ".claude" / "rules" / "modules.bak.20260329",
+                temp_home / ".config" / "opencode" / "rules" / "global.md.bak.20260329",
+                temp_home / ".config" / "opencode" / "oh-my-opencode.jsonc.bak",
+            ]
+            for backup in legacy_backups:
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                backup.write_text("old managed backup\n", encoding="utf-8")
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "cleanup"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            for backup in legacy_backups:
+                self.assertFalse(backup.exists(), result.stdout + result.stderr)
+
+    def test_cleanup_removes_gemini_invalid_json_tmp_backups(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            temp_home.mkdir()
+
+            invalid_backup = (
+                temp_home
+                / ".gemini"
+                / "tmp"
+                / "session"
+                / "logs.json.invalid_json.1766550378705.bak"
+            )
+            invalid_backup.parent.mkdir(parents=True)
+            invalid_backup.write_text("{invalid\n", encoding="utf-8")
+
+            env = self._managed_env()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "cleanup"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse(invalid_backup.exists(), result.stdout + result.stderr)
+
     def test_cleanup_dry_run_preserves_managed_artifacts(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"

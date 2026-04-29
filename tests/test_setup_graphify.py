@@ -31,7 +31,7 @@ class SetupGraphifyTests(unittest.TestCase):
 
         self.assertIn(("claude-code", "skill", "~/.claude/skills/graphify/SKILL.md", "skill.md"), rendered)
         self.assertIn(("codex", "skill", "~/.codex/skills/graphify/SKILL.md", "skill-codex.md"), rendered)
-        self.assertIn(("codex", "skill", "~/.agents/skills/graphify/SKILL.md", "skill-codex.md"), rendered)
+        self.assertNotIn(("codex", "skill", "~/.agents/skills/graphify/SKILL.md", "skill-codex.md"), rendered)
         self.assertIn(("gemini-cli", "skill", "~/.gemini/skills/graphify/SKILL.md", "skill.md"), rendered)
         self.assertIn(("opencode", "skill", "~/.config/opencode/skills/graphify/SKILL.md", "skill-opencode.md"), rendered)
         self.assertIn(("kimi-cli", "skill", "~/.kimi/skills/graphify/SKILL.md", "skill.md"), rendered)
@@ -59,3 +59,26 @@ class SetupGraphifyTests(unittest.TestCase):
     def test_cursor_rule_is_conditional_on_existing_graph(self):
         self.assertIn("When the current project has a graphify knowledge graph", setup_graphify.CURSOR_RULE)
         self.assertIn("graphify-out/GRAPH_REPORT.md", setup_graphify.CURSOR_RULE)
+
+    def test_prune_stale_targets_removes_old_agent_skill_copy(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            marker_dir = Path(temp_dir) / "graphify"
+            stale_skill = Path(temp_dir) / "home" / ".agents" / "skills" / "graphify" / "SKILL.md"
+            stale_skill.parent.mkdir(parents=True)
+            stale_skill.write_text("---\nname: graphify\n---\n", encoding="utf-8")
+            (stale_skill.parent / ".graphify_version").write_text("0.5.4", encoding="utf-8")
+
+            setup_graphify.prune_stale_targets(marker_dir, current_targets=[], deprecated_targets=[stale_skill])
+
+            self.assertFalse(stale_skill.parent.exists())
+
+    def test_prune_stale_targets_preserves_unmarked_user_copy(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            marker_dir = Path(temp_dir) / "graphify"
+            user_skill = Path(temp_dir) / "home" / ".agents" / "skills" / "graphify" / "SKILL.md"
+            user_skill.parent.mkdir(parents=True)
+            user_skill.write_text("---\nname: graphify\n---\n", encoding="utf-8")
+
+            setup_graphify.prune_stale_targets(marker_dir, current_targets=[], deprecated_targets=[user_skill])
+
+            self.assertTrue(user_skill.exists())

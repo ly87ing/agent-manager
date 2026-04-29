@@ -1088,7 +1088,7 @@ def add_target(value):
         value = value.get("path")
     if not value:
         return
-    expanded = str(value).replace("{{HOME}}", str(Path.home()))
+    expanded = str(value).replace("{{HOME}}", str(Path.home())).replace("{{REPO_ROOT}}", str(root))
     targets.add(str(Path(expanded).expanduser()))
 
 try:
@@ -1128,6 +1128,47 @@ for raw_line in manifest_path.read_text(encoding="utf-8").splitlines():
 for target in sorted(targets):
     print(target)
 PY
+}
+
+function list_cleanup_target_paths() {
+    local targets_output
+    if ! targets_output="$(list_managed_target_paths true)"; then
+        return 1
+    fi
+
+    TARGETS_OUTPUT="$targets_output" HOME="$HOME" "$PYTHON_CMD" - <<'PY'
+import os
+from pathlib import Path
+
+targets = {line for line in os.environ.get("TARGETS_OUTPUT", "").splitlines() if line.strip()}
+legacy_targets = [
+    "~/.codex/rules/global.md",
+    "~/.codex/rules/modules",
+    "~/.claude/rules/global.md",
+    "~/.claude/rules/modules",
+    "~/.gemini/rules/global.md",
+    "~/.gemini/rules/modules",
+    "~/.cursor/rules/global.md",
+    "~/.cursor/rules/modules",
+    "~/.kimi/AGENTS.md",
+    "~/.kimi/modules",
+    "~/.config/opencode/rules/global.md",
+    "~/.config/opencode/rules/modules",
+    "~/.config/opencode/oh-my-opencode.jsonc",
+]
+for target in legacy_targets:
+    targets.add(str(Path(target).expanduser()))
+
+for target in sorted(targets):
+    print(target)
+PY
+}
+
+function list_cleanup_extra_artifacts() {
+    local gemini_tmp="$HOME/.gemini/tmp"
+    if [ -d "$gemini_tmp" ]; then
+        find "$gemini_tmp" -type f -name "*.invalid_json.*.bak" -print 2>/dev/null
+    fi
 }
 
 function list_managed_backup_entries() {
@@ -1394,7 +1435,7 @@ case "$cmd" in
         ;;
     cleanup)
         echo -e "${HDR_BLUE}正在执行全量环境大扫除...${NC}"
-        if ! agents_paths="$(list_managed_target_paths true)"; then
+        if ! agents_paths="$(list_cleanup_target_paths)"; then
             exit 1
         fi
         if is_dry_run_mode; then
@@ -1415,6 +1456,17 @@ case "$cmd" in
                 fi
             fi
         done
+        if cleanup_extra="$(list_cleanup_extra_artifacts)"; then
+            echo "$cleanup_extra" | while read -r candidate; do
+                if [ -n "$candidate" ]; then
+                    if is_dry_run_mode; then
+                        echo "  - $candidate"
+                    else
+                        rm -rf "$candidate"
+                    fi
+                fi
+            done
+        fi
         if is_dry_run_mode; then
             for log_candidate in "${LOG_PREFIX}"*.log "$LATEST_LOG_POINTER"; do
                 if [ -e "$log_candidate" ] || [ -L "$log_candidate" ]; then

@@ -29,6 +29,10 @@ SKILL_FILE_BY_AGENT = {
     "kimi-cli": "skill.md",
 }
 
+DEPRECATED_TARGETS = [
+    Path("~/.agents/skills/graphify/SKILL.md"),
+]
+
 CURSOR_RULE = """\
 ---
 description: graphify knowledge graph context
@@ -122,17 +126,6 @@ def build_graphify_targets(skill_cfg: dict) -> list[GraphifyTarget]:
             ),
         )
 
-    if "codex" in agent_targets:
-        add_unique_target(
-            targets,
-            GraphifyTarget(
-                agent_id="codex",
-                kind="skill",
-                path=Path("~/.agents/skills/graphify/SKILL.md"),
-                skill_file="skill-codex.md",
-            ),
-        )
-
     return targets
 
 
@@ -217,6 +210,56 @@ def write_marker(marker_dir: Path, targets: list[GraphifyTarget], version: str) 
     )
 
 
+def _target_key(path: Path) -> str:
+    return str(path.expanduser())
+
+
+def previous_marker_targets(marker_dir: Path) -> list[Path]:
+    marker_path = marker_dir / "managed-targets.json"
+    if not marker_path.exists():
+        return []
+    try:
+        payload = json.loads(marker_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    targets = []
+    for item in payload.get("targets", []):
+        if not isinstance(item, dict):
+            continue
+        raw_path = item.get("path")
+        if isinstance(raw_path, str) and raw_path.strip():
+            targets.append(Path(raw_path.strip()))
+    return targets
+
+
+def remove_graphify_target(path: Path) -> None:
+    destination = path.expanduser()
+    if destination.name == "SKILL.md":
+        skill_dir = destination.parent
+        version_marker = skill_dir / ".graphify_version"
+        if version_marker.exists():
+            shutil.rmtree(skill_dir, ignore_errors=True)
+        return
+    if destination.is_file() and destination.read_text(encoding="utf-8", errors="ignore") == CURSOR_RULE:
+        destination.unlink()
+
+
+def prune_stale_targets(
+    marker_dir: Path,
+    current_targets: list[GraphifyTarget],
+    deprecated_targets: list[Path] | None = None,
+) -> None:
+    current_paths = {_target_key(target.path) for target in current_targets}
+    stale_paths = previous_marker_targets(marker_dir) + list(deprecated_targets or DEPRECATED_TARGETS)
+    seen = set()
+    for stale_path in stale_paths:
+        key = _target_key(stale_path)
+        if key in seen or key in current_paths:
+            continue
+        seen.add(key)
+        remove_graphify_target(stale_path)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Install graphify skill files for managed agents")
     parser.add_argument("--config", default=str(ROOT / "config" / "skills.json"), help="skills.json path")
@@ -227,7 +270,9 @@ def main(argv: list[str] | None = None) -> int:
     targets = build_graphify_targets(skill_cfg)
     install_cursor_rules(targets)
     version = install_skill_files(targets)
-    write_marker(Path(args.marker_dir), targets, version)
+    marker_dir = Path(args.marker_dir)
+    prune_stale_targets(marker_dir, targets)
+    write_marker(marker_dir, targets, version)
     print(f"graphify installed for {len(targets)} managed agent target(s)")
     return 0
 
