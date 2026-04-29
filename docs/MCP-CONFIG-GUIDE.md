@@ -192,6 +192,7 @@ Error: Configuration is invalid
 [mcp_servers.augment-context-engine]
 command = "auggie"
 args = ["--mcp", "--mcp-auto-workspace"]
+startup_timeout_sec = 120
 
 [mcp_servers.augment-context-engine.env]
 AUGMENT_SESSION_AUTH = '{"accessToken":"...","tenantURL":"...","scopes":[]}'

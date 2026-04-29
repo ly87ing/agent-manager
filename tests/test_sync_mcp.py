@@ -46,6 +46,39 @@ class SyncMcpTests(unittest.TestCase):
         self.assertIsNone(chrome_devtools["agents"])
         self.assertTrue(policy["mcp"]["chrome-devtools"]["enabled"])
 
+    def test_committed_grok_search_definition_sets_codex_startup_timeout(self):
+        definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(definitions["servers"]["grok-search"]["startup_timeout_sec"], 120)
+
+    def test_codex_toml_receives_startup_timeout_without_json_leak(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            json_config_path = temp_root / "agent.json"
+            toml_config_path = temp_root / "config.toml"
+
+            ok = sync_mcp.manage_mcp_config(
+                {
+                    "TmpAgent": str(json_config_path),
+                    "codex": {"path": str(toml_config_path), "format": "toml"},
+                },
+                {
+                    "grok-search": {
+                        "command": "uvx",
+                        "args": ["--from", "repo", "grok-search"],
+                        "env": {"GROK_API_KEY": "token"},
+                        "startup_timeout_sec": 120,
+                    }
+                },
+            )
+
+            self.assertTrue(ok)
+            json_updated = json.loads(json_config_path.read_text(encoding="utf-8"))
+            self.assertNotIn("startup_timeout_sec", json_updated["mcpServers"]["grok-search"])
+
+            toml_updated = tomllib.loads(toml_config_path.read_text(encoding="utf-8"))
+            self.assertEqual(toml_updated["mcp_servers"]["grok-search"]["startup_timeout_sec"], 120)
+
     def test_committed_chrome_devtools_definition_syncs_into_json_and_codex_toml(self):
         definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
         chrome_devtools = deepcopy(definitions["servers"]["chrome-devtools"])

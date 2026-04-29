@@ -32,6 +32,7 @@ TOML_SERVER_HEADER_RE = re.compile(
     r'^\s*\[\s*mcp_servers\.(?P<key>"(?:\\.|[^"\\])*"|[A-Za-z0-9_-]+)',
     re.MULTILINE,
 )
+TOML_SERVER_INT_KEYS = ("startup_timeout_sec",)
 
 def atomic_write_json(path, data):
     """原子化写入 JSON"""
@@ -282,6 +283,14 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
         quoted_name = toml_key(name)
         block = f"\n\n[mcp_servers.{quoted_name}]\ncommand = {toml_quote(settings['command'])}\n"
         block += f"args = {json.dumps(settings['args'], ensure_ascii=False)}\n"
+        for key in TOML_SERVER_INT_KEYS:
+            if key not in settings:
+                continue
+            value = settings[key]
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                logging.error(f"[AGENT: {agent_name}] {name}.{key} 必须是正整数")
+                return False
+            block += f"{toml_key(key)} = {value}\n"
         env = {**settings.get("env", {}), "_MANAGED_BY": "agent-manager"}
         block += f"[mcp_servers.{quoted_name}.env]\n"
         for k, v in env.items():
@@ -365,11 +374,16 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None
             repo_path = Path(repo_path_str).resolve() if repo_path_str else ""
             parsed_args = [arg.replace("{repo_path}", str(repo_path)) for arg in srv_config.get("args", [])]
             
-            active_mcp_settings[name] = {
+            active_settings = {
                 "command": srv_config.get("command"),
                 "args": parsed_args,
                 "env": srv_config.get("env", {})
             }
+            if file_format == "toml":
+                for key in TOML_SERVER_INT_KEYS:
+                    if key in srv_config:
+                        active_settings[key] = srv_config[key]
+            active_mcp_settings[name] = active_settings
 
         if not agent_installed:
             if not config_path.exists():

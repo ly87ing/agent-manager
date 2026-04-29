@@ -21,6 +21,7 @@
         "git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily",
         "grok-search"
       ],
+      "startup_timeout_sec": 120,
       "env": {
         "GROK_API_URL": "${GROK_API_URL}",
         "GROK_API_KEY": "${GROK_API_KEY}"
