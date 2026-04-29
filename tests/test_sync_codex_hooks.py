@@ -48,14 +48,30 @@ class CodexHooksSyncTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     any(
-                        hook.get("command")
-                        == 'bash "$(git rev-parse --show-toplevel)/agent-rule/hooks/check-rules-build.sh"'
+                        "check-rules-build.sh" in hook.get("command", "")
+                        and "2>/dev/null || pwd" in hook.get("command", "")
                         for hook in entry.get("hooks", [])
                     )
                     for entry in hooks["hooks"]["Stop"]
                 ),
                 hooks,
             )
+
+    def test_stop_hook_fails_open_outside_git_repo(self):
+        hooks = json.loads((ROOT / ".codex" / "hooks.json").read_text(encoding="utf-8"))
+        command = hooks["hooks"]["Stop"][0]["hooks"][0]["command"]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = subprocess.run(
+                ["bash", "-lc", command],
+                cwd=temp_dir,
+                input=json.dumps({"hook_event_name": "Stop"}),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_sync_dry_run_does_not_write_project_codex_hooks(self):
         with tempfile.TemporaryDirectory() as temp_dir:

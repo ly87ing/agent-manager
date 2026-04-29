@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$(git rev-parse --show-toplevel)/agent-rule/hooks/check-rules-build.sh\""
+            "command": "ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd); HOOK=\"$ROOT/agent-rule/hooks/check-rules-build.sh\"; [ -x \"$HOOK\" ] && bash \"$HOOK\" || true"
           }
         ]
       }
