@@ -215,6 +215,35 @@ class SyncTerminalTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse(dest.exists(), "disabled 目标不应写入文件")
 
+    def test_zshrc_codex_s_alias_uses_full_auto(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            dest = d / "zshrc"
+            secrets = d / "empty.env"
+            secrets.write_text("", encoding="utf-8")
+            cfg = d / "terminal.json"
+            cfg.write_text(
+                json.dumps(
+                    {
+                        "secrets_file": str(secrets),
+                        "targets": {
+                            "zshrc": {
+                                "template": "agent-terminal/templates/zshrc.tmpl",
+                                "destination": str(dest),
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = _run(["--config", str(cfg)])
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+            rendered = dest.read_text(encoding="utf-8")
+            self.assertIn("alias codex-s='codex --full-auto'", rendered)
+            self.assertNotIn("alias codex-s='codex -s danger-full-access'", rendered)
+
     def test_non_dict_targets_exits_nonzero(self):
         with tempfile.TemporaryDirectory() as d:
             cfg = Path(d) / "terminal.json"
