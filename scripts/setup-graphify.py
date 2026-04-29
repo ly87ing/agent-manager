@@ -42,6 +42,7 @@ alwaysApply: true
 When the current project has a graphify knowledge graph at graphify-out/:
 
 - Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
+- If graphify-out/graph.json is older than relevant source files, treat the graph as orientation and verify against current files
 - If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
 - After meaningful code changes, run `graphify update .` when keeping the graph current is part of the task
 """

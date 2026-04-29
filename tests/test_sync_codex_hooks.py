@@ -40,9 +40,7 @@ class CodexHooksSyncTests(unittest.TestCase):
             self.assertIn("Stop", hooks["hooks"])
             self.assertTrue(
                 any(
-                    any("graphify-out/graph.json" in hook.get("command", "") for hook in entry.get("hooks", []))
-                    and any("tool_input" in hook.get("command", "") for hook in entry.get("hooks", []))
-                    and any("case \"$CMD\"" in hook.get("command", "") for hook in entry.get("hooks", []))
+                    any("graphify-context-hint.sh" in hook.get("command", "") for hook in entry.get("hooks", []))
                     for entry in hooks["hooks"]["PreToolUse"]
                 ),
                 hooks,

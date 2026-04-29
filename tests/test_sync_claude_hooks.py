@@ -51,7 +51,7 @@ class ClaudeHooksSyncTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     entry.get("matcher") == "Bash"
-                    and any("graphify-out/graph.json" in hook.get("command", "") for hook in entry.get("hooks", []))
+                    and any("graphify-context-hint.sh" in hook.get("command", "") for hook in entry.get("hooks", []))
                     for entry in pre_tool_hooks
                 ),
                 settings,
@@ -228,6 +228,33 @@ class ClaudeHooksSyncTests(unittest.TestCase):
             self.assertEqual(response["hookSpecificOutput"]["hookEventName"], "PreToolUse")
             self.assertEqual(response["hookSpecificOutput"]["permissionDecision"], "deny")
             self.assertIn("generated output", response["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_graphify_context_hook_warns_when_graph_is_stale(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = self._copy_repo(temp_dir)
+            self._init_git_repo(temp_root)
+            graph_path = temp_root / "graphify-out" / "graph.json"
+            graph_path.parent.mkdir()
+            graph_path.write_text("{}", encoding="utf-8")
+            source_path = temp_root / "src.py"
+            source_path.write_text("print('current')\n", encoding="utf-8")
+            os.utime(graph_path, (1, 1))
+            os.utime(source_path, (2, 2))
+
+            result = subprocess.run(
+                ["bash", str(temp_root / "agent-rule" / "hooks" / "graphify-context-hint.sh")],
+                cwd=temp_root,
+                input=json.dumps({"tool_input": {"command": "rg current ."}}),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            response = json.loads(result.stdout)
+            additional_context = response["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("appears stale", additional_context)
+            self.assertIn("verify facts against current files", additional_context)
 
     def test_check_rules_build_hook_blocks_stop_when_src_changed_without_dist_refresh(self):
         with tempfile.TemporaryDirectory() as temp_dir:

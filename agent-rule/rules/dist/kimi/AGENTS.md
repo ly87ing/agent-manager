@@ -1,7 +1,7 @@
 - Use Chinese (Simplified) for interactions and generated content. Use English terms only when clearer.
 - For codebase exploration: use `codebase-retrieval` when locations are unknown; use `rg` or direct file reads ONLY for known paths or exact identifiers.
 - For internet searches: strictly default to `web_search` and `web_fetch` (grok-search). Use `agent-browser` only for JS, auth, or interactive UI.
-- If `graphify-out/GRAPH_REPORT.md` exists, read it before broad codebase/architecture work; prefer graphify query/path/explain for cross-module questions.
+- If `graphify-out/GRAPH_REPORT.md` exists, read it before broad codebase work. If the graph is stale, treat it as orientation; verify current files.
 - Before implementing, state assumptions, ambiguity, simpler approaches.
 - Prefer the simplest local change. No speculative features, abstractions, config, or impossible-case handling.
 - Keep edits surgical: match local style, avoid unrelated cleanup, and remove only dead code made obsolete.

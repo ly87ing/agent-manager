@@ -168,6 +168,7 @@ class RuleLayoutTests(unittest.TestCase):
         )
         explicit_verification_clause = "If you skip verification or cannot run it, say so explicitly."
         explicit_graphify_clause = "If `graphify-out/GRAPH_REPORT.md` exists, read it before broad codebase"
+        explicit_graphify_stale_clause = "If the graph is stale, treat it as orientation"
         explicit_context_clause = (
             "Before edits that change behavior, touch shared code, or span multiple files, inspect the affected "
             "code and nearby tests first."
@@ -179,6 +180,7 @@ class RuleLayoutTests(unittest.TestCase):
             self.assertIn(explicit_web_search_clause, content, target)
             self.assertIn(explicit_verification_clause, content, target)
             self.assertIn(explicit_graphify_clause, content, target)
+            self.assertIn(explicit_graphify_stale_clause, content, target)
             self.assertIn(explicit_context_clause, content, target)
             self.assertIn("modules/artifact-hygiene.md", content, target)
         cursor_rule = (ROOT / "agent-rule" / "rules" / "dist" / "cursor" / "agent-manager.mdc").read_text(
