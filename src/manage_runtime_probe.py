@@ -672,6 +672,14 @@ class ProviderInventory:
             found = pkg_name in self.get_brew_formulae() or pkg_name in self.get_brew_casks()
             logging.debug(f"[TOOL: {name}] ready_check brew:{pkg_name} -> {found}")
             return found
+        if ready_check.startswith("uvtool:"):
+            pkg_name = ready_check[7:].strip()
+            if not self._which("uv"):
+                logging.debug(f"[TOOL: {name}] ready_check uvtool:{pkg_name} -> False (uv not found)")
+                return False
+            found = pkg_name in self.get_uv_tools()
+            logging.debug(f"[TOOL: {name}] ready_check uvtool:{pkg_name} -> {found}")
+            return found
         logging.warning(f"[TOOL: {name}] 未知 ready_check 格式: {ready_check}，视为未就绪")
         return False
 
@@ -684,10 +692,11 @@ def detect_all_providers(bin_name, config=None, inventory=None):
 def check_tool_ready(name: str, ready_check: str | None, inventory=None) -> bool:
     """根据 ready_check 字段判断工具是否已就绪。
 
-    支持三种前缀：
+    支持四种前缀：
       bin:<name>   — shutil.which 检查可执行文件
       app:<path>   — os.path.exists 检查路径（支持 ~）
       brew:<pkg>   — brew list 检查已安装的 formula/cask（跨架构通用）
+      uvtool:<pkg> — uv tool list 检查已安装的 uv tool
     若 ready_check 为空则始终返回 False。
     """
     active_inventory = inventory or ProviderInventory()

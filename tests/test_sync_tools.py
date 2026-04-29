@@ -54,6 +54,20 @@ class SyncToolsTests(unittest.TestCase):
         self.assertIn("app:/Applications/Google Chrome.app", tool_defs["agent-browser"]["runtime_ready_checks_any"])
         self.assertIn("~/Library/Caches/ms-playwright/chromium-*", tool_defs["agent-browser"]["runtime_ready_globs_any"])
 
+    def test_committed_graphify_policy_installs_cli_and_agent_skills(self):
+        manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
+        tool_defs = json.loads((ROOT / "config" / "tools.json").read_text(encoding="utf-8"))["tools"]
+
+        self.assertTrue(manager["tools"]["graphify"]["enabled"])
+        self.assertTrue(manager["tools"]["graphify"]["auto_update"])
+        self.assertEqual(tool_defs["graphify"]["install"], "uv tool install --force graphifyy")
+        self.assertEqual(tool_defs["graphify"]["upgrade"], "uv tool upgrade graphifyy")
+        self.assertEqual(
+            tool_defs["graphify"]["setup"],
+            "python3 scripts/setup-graphify.py --marker-dir agent-tool/graphify",
+        )
+        self.assertEqual(tool_defs["graphify"]["ready_check"], "uvtool:graphifyy")
+
     def test_install_based_tool_with_setup_requires_setup_marker(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ready = sync_tools.detect_tool_readiness(
@@ -178,6 +192,42 @@ class SyncToolsTests(unittest.TestCase):
 
         self.assertEqual(state, "latest")
         probe_git_remote_state.assert_called_once_with(Path("~/.tmux/plugins/tpm").expanduser(), timeout=5)
+
+    def test_probe_package_update_state_reports_latest_for_uv_tool_versions(self):
+        def fake_run_cmd(cmd, cwd=None, timeout=300):
+            if cmd == ["uv", "tool", "list"]:
+                return True, "graphifyy v0.5.4\n- graphify\n"
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        with mock.patch.object(sync_tools, "run_cmd", side_effect=fake_run_cmd):
+            with mock.patch.object(sync_tools, "fetch_pypi_latest_version", return_value="0.5.4"):
+                state = sync_tools.probe_package_update_state(
+                    "graphify",
+                    {
+                        "install": "uv tool install graphifyy",
+                        "upgrade": "uv tool upgrade graphifyy",
+                    },
+                )
+
+        self.assertEqual(state, "latest")
+
+    def test_probe_package_update_state_reports_stale_for_uv_tool_versions(self):
+        def fake_run_cmd(cmd, cwd=None, timeout=300):
+            if cmd == ["uv", "tool", "list"]:
+                return True, "graphifyy v0.5.3\n- graphify\n"
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        with mock.patch.object(sync_tools, "run_cmd", side_effect=fake_run_cmd):
+            with mock.patch.object(sync_tools, "fetch_pypi_latest_version", return_value="0.5.4"):
+                state = sync_tools.probe_package_update_state(
+                    "graphify",
+                    {
+                        "install": "uv tool install graphifyy",
+                        "upgrade": "uv tool upgrade graphifyy",
+                    },
+                )
+
+        self.assertEqual(state, "stale")
 
     def test_probe_package_update_state_reports_stale_for_git_pull_upgrade(self):
         with mock.patch.object(

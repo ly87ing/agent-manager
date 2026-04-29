@@ -8,6 +8,8 @@ import json
 import shlex
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -104,6 +106,93 @@ def _extract_npm_package_name(command):
     return None
 
 
+def _extract_uv_tool_name(command):
+    if not command:
+        return None
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = command.split()
+    if len(tokens) < 4 or tokens[:2] != ["uv", "tool"] or tokens[2] not in {"install", "upgrade"}:
+        return None
+
+    flags_with_value = {
+        "-p",
+        "--python",
+        "--with",
+        "--with-requirements",
+        "-c",
+        "--constraints",
+        "--overrides",
+        "-b",
+        "--build-constraints",
+        "-P",
+        "--upgrade-package",
+        "--resolution",
+        "--prerelease",
+        "--fork-strategy",
+        "--exclude-newer",
+        "--index",
+        "--default-index",
+        "-i",
+        "--index-url",
+        "--extra-index-url",
+        "-f",
+        "--find-links",
+        "--index-strategy",
+        "--keyring-provider",
+        "--reinstall-package",
+        "--link-mode",
+        "-C",
+        "--config-setting",
+        "--no-build-isolation-package",
+        "--no-build-package",
+        "--no-binary-package",
+        "--cache-dir",
+    }
+    index = 3
+    while index < len(tokens):
+        token = tokens[index]
+        if token in flags_with_value:
+            index += 2
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        return token.split("[", 1)[0].split("=", 1)[0].strip()
+    return None
+
+
+def _parse_uv_tool_version(output, package_name):
+    prefix = f"{package_name} "
+    for line in output.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith(prefix):
+            continue
+        parts = stripped.split()
+        if len(parts) < 2:
+            return None
+        version = parts[1]
+        return version[1:] if version.startswith("v") else version
+    return None
+
+
+def fetch_pypi_latest_version(package_name):
+    request = urllib.request.Request(
+        f"https://pypi.org/pypi/{package_name}/json",
+        headers={"User-Agent": "agent-manager"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, ValueError, KeyError):
+        return None
+    version = payload.get("info", {}).get("version")
+    if not isinstance(version, str) or not version.strip():
+        return None
+    return version.strip()
+
+
 def _build_brew_outdated_probe(command):
     if not command:
         return None
@@ -160,6 +249,19 @@ def probe_package_update_state(name, definition):
         if not ok:
             return "unknown"
         remote_version = out.strip()
+        if not remote_version:
+            return "unknown"
+        return "latest" if local_version == remote_version else "stale"
+
+    uv_tool = _extract_uv_tool_name(upgrade_cmd) or _extract_uv_tool_name(definition.get("install"))
+    if uv_tool:
+        ok, out = run_cmd(["uv", "tool", "list"], timeout=60)
+        if not ok or not out.strip():
+            return "unknown"
+        local_version = _parse_uv_tool_version(out, uv_tool)
+        if not local_version:
+            return "unknown"
+        remote_version = fetch_pypi_latest_version(uv_tool)
         if not remote_version:
             return "unknown"
         return "latest" if local_version == remote_version else "stale"
@@ -459,7 +561,7 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False, of
                 write_owner_marker(target_dir, name)
                 clear_tool_markers(target_dir)
                 logging.info(f"执行 {name} 初始化...")
-                ok, out = run_cmd(setup_cmd)
+                ok, out = run_cmd(setup_cmd, cwd=REPO_ROOT)
                 if not ok:
                     logging.error(f"[TOOL: {name}] 初始化失败: {out}")
                     setup_failed = True

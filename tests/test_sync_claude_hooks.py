@@ -50,6 +50,14 @@ class ClaudeHooksSyncTests(unittest.TestCase):
             pre_tool_hooks = settings["hooks"]["PreToolUse"]
             self.assertTrue(
                 any(
+                    entry.get("matcher") == "Bash"
+                    and any("graphify-out/graph.json" in hook.get("command", "") for hook in entry.get("hooks", []))
+                    for entry in pre_tool_hooks
+                ),
+                settings,
+            )
+            self.assertTrue(
+                any(
                     entry.get("matcher") == "Edit|MultiEdit|Write"
                     and any(
                         hook.get("command") == 'bash "$CLAUDE_PROJECT_DIR/agent-rule/hooks/block-dist-edits.sh"'

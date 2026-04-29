@@ -34,6 +34,13 @@
         "~/AppData/Local/ms-playwright/chromium-*"
       ]
     },
+    "graphify": {
+      "install": "uv tool install --force graphifyy",
+      "uninstall": "uv tool uninstall graphifyy",
+      "upgrade": "uv tool upgrade graphifyy",
+      "setup": "python3 scripts/setup-graphify.py --marker-dir agent-tool/graphify",
+      "ready_check": "uvtool:graphifyy"
+    },
     "auggie": {
       "install": "npm install -g @augmentcode/auggie@latest",
       "upgrade": "npm install -g @augmentcode/auggie@latest",

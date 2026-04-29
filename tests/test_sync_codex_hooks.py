@@ -36,7 +36,17 @@ class CodexHooksSyncTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             hooks = self._read_hooks(temp_root)
             self.assertIn("hooks", hooks)
+            self.assertIn("PreToolUse", hooks["hooks"])
             self.assertIn("Stop", hooks["hooks"])
+            self.assertTrue(
+                any(
+                    any("graphify-out/graph.json" in hook.get("command", "") for hook in entry.get("hooks", []))
+                    and any("tool_input" in hook.get("command", "") for hook in entry.get("hooks", []))
+                    and any("case \"$CMD\"" in hook.get("command", "") for hook in entry.get("hooks", []))
+                    for entry in hooks["hooks"]["PreToolUse"]
+                ),
+                hooks,
+            )
             self.assertTrue(
                 any(
                     any(

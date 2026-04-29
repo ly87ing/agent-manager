@@ -20,7 +20,7 @@
 ```
 
 默认受管 MCP 服务器当前包含 `augment-context-engine`（代码库检索）和 `chrome-devtools`（浏览器调试 / network / performance，使用官方推荐的 `npx -y chrome-devtools-mcp@latest --isolated`，避免多个 agent 共享同一个 browser profile 时互相冲突）。
-默认受管浏览器工具当前包含 `playwright-cli` 和 `agent-browser`；二者通过官方 npm `@latest` 通道受管安装与更新。`playwright-cli` 在安装或升级后会继续执行 `install-browser` 同步 Playwright browsers，并用 Playwright cache 的真实 payload 做就绪重验；`agent-browser` 优先复用系统已有的 Chrome/Chromium，也会接受 Playwright cache 中的 Chromium 作为可复用运行时，仅在缺少这些浏览器运行时时才需要执行 `agent-browser install`。`chrome-devtools` 继续作为 MCP server 通过 `npx ...@latest` 在运行时跟随上游最新版本。
+默认受管浏览器工具当前包含 `playwright-cli` 和 `agent-browser`；二者通过官方 npm `@latest` 通道受管安装与更新。`playwright-cli` 在安装或升级后会继续执行 `install-browser` 同步 Playwright browsers，并用 Playwright cache 的真实 payload 做就绪重验；`agent-browser` 优先复用系统已有的 Chrome/Chromium，也会接受 Playwright cache 中的 Chromium 作为可复用运行时，仅在缺少这些浏览器运行时时才需要执行 `agent-browser install`。`graphify` 通过官方 PyPI 包 `graphifyy` 由 `uv tool` 受管，并把 `/graphify` skill 安装到所有声明的 Agent skill/rule 目标；本仓 rules 与 hooks 负责启用“有图先看图”的 always-on 提示。`chrome-devtools` 继续作为 MCP server 通过 `npx ...@latest` 在运行时跟随上游最新版本。
 默认受管 skill 仓库当前包含 `agent-skills`、`oa-skill`、`anthropic-frontend-design-skill`、`playwright-best-practices-skill`、`superpowers` 和 `ui-ux-pro-max-skill`；它们在未显式声明 `commit` / `ref` 时，会在同步时跟随上游默认分支最新状态；其中 `agent-skills` 面向 `Claude Code`、`Kimi Code CLI` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 3 个 skill 包，避免上游新增 skill 被默认带入；`oa-skill` 当前通过显式 `skill_paths` 默认接入仓库内唯一的 `xyai-manager` skill；`anthropic-frontend-design-skill` 仅面向 `Kimi Code CLI` 暴露，并通过显式 `skill_paths` 锁定 Anthropic 官方 `skills/frontend-design`。OpenAI 官方仓库当前最新主分支已不再提供 `frontend-skill`，因此默认清单不再引用该路径，避免 `make all` 在跟随上游最新状态时失败。
 默认自动安装的 Agent 当前包含 `Claude Code`、`Codex` 和 `Gemini CLI`；`Cursor CLI`、`OpenCode` 与 `Kimi Code CLI` 仍受管，但默认不自动安装，需要时可通过策略显式开启。
 `Claude Code` 当前默认走官方 native installer；`Codex` 与 `Gemini CLI` 默认走官方 npm 包。历史 `brew` 安装仅用于识别并提示迁移，不再作为这三个 CLI 的受管 provider。
@@ -93,6 +93,7 @@
 - **Claude 记忆分层**：根目录 `CLAUDE.md` 只保留仓库级高频记忆，`agent-rule/CLAUDE.md` 和 `tests/CLAUDE.md` 承载目录级维护细节。
 - **Claude hooks**：`config/claude-hooks.json` 生成仓库级 `.claude/settings.json`，用 `make claude-hooks-sync` 刷新 deterministic hook 配置。
 - **Codex hooks**：`config/codex-hooks.json` 生成仓库级 `.codex/hooks.json`，用 `make codex-hooks-sync` 刷新 deterministic Codex hook 配置。
+- **graphify 启用**：`config/tools.json` 中的 `graphify` 安装官方 `graphifyy` CLI，`scripts/setup-graphify.py` 将 skill 分发到 Claude、Codex、Gemini、OpenCode、Kimi 和 Cursor 目标；shared rules 与 Claude/Codex hooks 会在项目已有 `graphify-out/graph.json` 时优先提示读取图谱报告。
 - **指令质量评测**：`make eval-rules` 现在同时输出任务成功率、verification、skill exposure 和 always-on instruction budget 指标，并强制校验 `min_case_count`、`required_agents`、`success / verification 阈值`。
 - **分发清单**：`config/rules-targets.list` 只引用 `rules/dist/*` 产物，不直接引用源码片段。
 - **维护入口**：修改 `agent-rule/rules/src/` 后，先执行 `make rules-build`，再执行 `make rules:sync`；这一步现在也会刷新仓库内的 repo-native Cursor 指令文件。
