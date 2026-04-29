@@ -28,7 +28,10 @@ class SkillUsageMetricsTests(unittest.TestCase):
                 ROOT / "agent-rule" / "rules" / "dist" / "cursor" / "agent-manager.mdc",
                 ROOT / ".cursor" / "rules" / "agent-manager.mdc",
             ],
-            "opencode": [ROOT / "AGENTS.md"],
+            "kimi-cli": [
+                ROOT / "agent-rule" / "rules" / "dist" / "kimi" / "AGENTS.md",
+                ROOT / ".kimi" / "AGENTS.md",
+            ],
         }
         return {
             agent: sum(round(len(path.read_text(encoding="utf-8")) / 4) for path in paths)
@@ -58,9 +61,9 @@ class SkillUsageMetricsTests(unittest.TestCase):
             [(case["case_id"], case["agent"], case["triggered_skill_count"]) for case in summary["cases"]],
             [
                 ("add-make-target", "codex", 1),
-                ("doctor-flags-unmaterialized-rules", "codex", 1),
-                ("manifest-targets-dist-artifacts", "codex", 1),
-                ("prevent-dist-edit-drift", "claude-code", 1),
+                ("doctor-flags-unmaterialized-rules", "gemini-cli", 1),
+                ("manifest-targets-dist-artifacts", "kimi-cli", 1),
+                ("prevent-dist-edit-drift", "cursor", 1),
                 ("rule-budget-regression-guard", "claude-code", 2),
                 ("scoped-memory-contract", "claude-code", 1),
                 ("sync-codex-hooks", "codex", 1),

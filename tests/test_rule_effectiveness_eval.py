@@ -9,6 +9,16 @@ ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "evals" / "run_rule_effectiveness_eval.py"
 CASES = ROOT / "scripts" / "evals" / "fixtures" / "rule_effectiveness_cases.json"
 BASELINE = ROOT / "scripts" / "evals" / "fixtures" / "rule_effectiveness_baseline.json"
+RULE_TARGETS = ROOT / "config" / "rules-targets.list"
+
+
+RULE_TARGET_AGENT_IDS = {
+    "claude": "claude-code",
+    "codex": "codex",
+    "cursor": "cursor",
+    "gemini": "gemini-cli",
+    "kimi": "kimi-cli",
+}
 
 
 class RuleEffectivenessEvalTests(unittest.TestCase):
@@ -20,6 +30,22 @@ class RuleEffectivenessEvalTests(unittest.TestCase):
             text=True,
             check=False,
         )
+
+    def _managed_rule_agents(self) -> set[str]:
+        managed_rule_agents = set()
+        for raw_line in RULE_TARGETS.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            target_name, _group, source, _target = line.split("|", 3)
+            if not target_name.endswith("_global"):
+                continue
+            source_parts = Path(source).parts
+            self.assertGreaterEqual(len(source_parts), 4, source)
+            rule_target = source_parts[2]
+            self.assertIn(rule_target, RULE_TARGET_AGENT_IDS, source)
+            managed_rule_agents.add(RULE_TARGET_AGENT_IDS[rule_target])
+        return managed_rule_agents
 
     def test_makefile_exposes_eval_rules_target(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
@@ -43,7 +69,7 @@ class RuleEffectivenessEvalTests(unittest.TestCase):
         self.assertEqual(summary["avg_file_reads"], 4.125)
         self.assertEqual(summary["avg_tool_calls"], 6.125)
         self.assertEqual(summary["avg_triggered_skill_count"], 1.25)
-        self.assertEqual(summary["evaluated_agents"], ["claude-code", "codex"])
+        self.assertEqual(summary["evaluated_agents"], ["claude-code", "codex", "cursor", "gemini-cli", "kimi-cli"])
         self.assertEqual(
             [case["case_id"] for case in summary["cases"]],
             [
@@ -57,6 +83,22 @@ class RuleEffectivenessEvalTests(unittest.TestCase):
                 "validate-fixture-schema",
             ],
         )
+
+    def test_default_required_agents_cover_managed_rule_targets(self):
+        requirements = json.loads(CASES.read_text(encoding="utf-8"))["requirements"]
+        required_agents = set(requirements["required_agents"])
+
+        self.assertEqual(required_agents, self._managed_rule_agents())
+
+    def test_instruction_token_metrics_cover_managed_rule_targets(self):
+        result = self._run_eval()
+        combined = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, combined)
+
+        summary = json.loads(result.stdout)
+        measured_agents = set(summary["always_on_instruction_tokens_by_agent"])
+
+        self.assertEqual(measured_agents, self._managed_rule_agents())
 
     def test_rule_effectiveness_eval_rejects_invalid_case_schema(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -13,7 +13,7 @@
     },
     {
       "case_id": "doctor-flags-unmaterialized-rules",
-      "agent": "codex",
+      "agent": "gemini-cli",
       "triggered_skills": ["verification-before-completion"],
       "success": true,
       "verified": true,
@@ -24,7 +24,7 @@
     },
     {
       "case_id": "manifest-targets-dist-artifacts",
-      "agent": "codex",
+      "agent": "kimi-cli",
       "triggered_skills": ["test-driven-development"],
       "success": true,
       "verified": true,
@@ -35,7 +35,7 @@
     },
     {
       "case_id": "prevent-dist-edit-drift",
-      "agent": "claude-code",
+      "agent": "cursor",
       "triggered_skills": ["verification-before-completion"],
       "success": true,
       "verified": true,

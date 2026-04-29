@@ -1,7 +1,7 @@
 {
   "requirements": {
     "min_case_count": 8,
-    "required_agents": ["codex", "claude-code"],
+    "required_agents": ["claude-code", "codex", "cursor", "gemini-cli", "kimi-cli"],
     "min_success_rate": 1.0,
     "min_verification_rate": 1.0
   },

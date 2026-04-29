@@ -296,7 +296,10 @@ def measure_always_on_instruction_tokens_by_agent() -> dict[str, int]:
             REPO_ROOT / "agent-rule" / "rules" / "dist" / "cursor" / "agent-manager.mdc",
             REPO_ROOT / ".cursor" / "rules" / "agent-manager.mdc",
         ],
-        "opencode": [REPO_ROOT / "AGENTS.md"],
+        "kimi-cli": [
+            REPO_ROOT / "agent-rule" / "rules" / "dist" / "kimi" / "AGENTS.md",
+            REPO_ROOT / ".kimi" / "AGENTS.md",
+        ],
     }
     return {
         agent_name: sum(round(len(path.read_text(encoding="utf-8")) / 4) for path in paths)
