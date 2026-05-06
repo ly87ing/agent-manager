@@ -27,6 +27,7 @@ SKILL_FILE_BY_AGENT = {
     "gemini-cli": "skill.md",
     "opencode": "skill-opencode.md",
     "kimi-cli": "skill.md",
+    "qodercli": "skill.md",
 }
 
 DEPRECATED_TARGETS = [

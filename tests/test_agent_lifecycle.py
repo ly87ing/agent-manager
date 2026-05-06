@@ -1188,6 +1188,7 @@ class AgentIdConsistencyTests(unittest.TestCase):
             "opencode",
             "codex",
             "kimi-cli",
+            "qodercli",
         }
 
         self.assertEqual(set(manager_agents), managed_agent_ids)

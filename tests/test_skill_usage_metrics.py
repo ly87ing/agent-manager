@@ -32,6 +32,10 @@ class SkillUsageMetricsTests(unittest.TestCase):
                 ROOT / "agent-rule" / "rules" / "dist" / "kimi" / "AGENTS.md",
                 ROOT / ".kimi" / "AGENTS.md",
             ],
+            "qodercli": [
+                ROOT / "agent-rule" / "rules" / "dist" / "qoder" / "QODER.md",
+                ROOT / ".qoder" / "QODER.md",
+            ],
         }
         return {
             agent: sum(round(len(path.read_text(encoding="utf-8")) / 4) for path in paths)
@@ -53,9 +57,10 @@ class SkillUsageMetricsTests(unittest.TestCase):
                 "gemini-cli": 15,
                 "kimi-cli": 27,
                 "opencode": 16,
+                "qodercli": 27,
             },
         )
-        self.assertEqual(summary["avg_triggered_skill_count"], 1.25)
+        self.assertEqual(summary["avg_triggered_skill_count"], 11 / 9)
         self.assertEqual(summary["always_on_instruction_tokens_by_agent"], self._expected_instruction_tokens_by_agent())
         self.assertEqual(
             [(case["case_id"], case["agent"], case["triggered_skill_count"]) for case in summary["cases"]],
@@ -64,6 +69,7 @@ class SkillUsageMetricsTests(unittest.TestCase):
                 ("doctor-flags-unmaterialized-rules", "gemini-cli", 1),
                 ("manifest-targets-dist-artifacts", "kimi-cli", 1),
                 ("prevent-dist-edit-drift", "cursor", 1),
+                ("qodercli-case", "qodercli", 1),
                 ("rule-budget-regression-guard", "claude-code", 2),
                 ("scoped-memory-contract", "claude-code", 1),
                 ("sync-codex-hooks", "codex", 1),

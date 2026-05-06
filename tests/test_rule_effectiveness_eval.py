@@ -18,6 +18,7 @@ RULE_TARGET_AGENT_IDS = {
     "cursor": "cursor",
     "gemini": "gemini-cli",
     "kimi": "kimi-cli",
+    "qoder": "qodercli",
 }
 
 
@@ -61,15 +62,15 @@ class RuleEffectivenessEvalTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, combined)
 
         summary = json.loads(result.stdout)
-        self.assertEqual(summary["case_count"], 8)
+        self.assertEqual(summary["case_count"], 9)
         self.assertEqual(summary["success_rate"], 1.0)
         self.assertEqual(summary["verification_rate"], 1.0)
-        self.assertEqual(summary["avg_prompt_tokens"], 95.0)
-        self.assertEqual(summary["avg_duration_s"], 3.375)
-        self.assertEqual(summary["avg_file_reads"], 4.125)
-        self.assertEqual(summary["avg_tool_calls"], 6.125)
-        self.assertEqual(summary["avg_triggered_skill_count"], 1.25)
-        self.assertEqual(summary["evaluated_agents"], ["claude-code", "codex", "cursor", "gemini-cli", "kimi-cli"])
+        self.assertEqual(summary["avg_prompt_tokens"], 96.0)
+        self.assertEqual(summary["avg_duration_s"], 31.0 / 9)
+        self.assertEqual(summary["avg_file_reads"], 38.0 / 9)
+        self.assertEqual(summary["avg_tool_calls"], 56.0 / 9)
+        self.assertEqual(summary["avg_triggered_skill_count"], 11 / 9)
+        self.assertEqual(summary["evaluated_agents"], ["claude-code", "codex", "cursor", "gemini-cli", "kimi-cli", "qodercli"])
         self.assertEqual(
             [case["case_id"] for case in summary["cases"]],
             [
@@ -77,6 +78,7 @@ class RuleEffectivenessEvalTests(unittest.TestCase):
                 "doctor-flags-unmaterialized-rules",
                 "manifest-targets-dist-artifacts",
                 "prevent-dist-edit-drift",
+                "qodercli-case",
                 "rule-budget-regression-guard",
                 "scoped-memory-contract",
                 "sync-codex-hooks",

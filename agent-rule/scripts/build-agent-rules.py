@@ -13,7 +13,7 @@ SRC_ROOT = ROOT / "rules" / "src"
 DIST_ROOT = ROOT / "rules" / "dist"
 MODULES_SRC = SRC_ROOT / "shared" / "modules"
 MODULES_DIST = DIST_ROOT / "modules"
-TARGETS = ("codex", "kimi", "claude", "gemini", "cursor")
+TARGETS = ("codex", "kimi", "claude", "gemini", "cursor", "qoder")
 MANIFEST_PATH = REPO_ROOT / "config" / "rules-targets.list"
 MODULE_REFERENCE_PATTERN = re.compile(r"`modules/([^`]+\.md)`")
 TARGET_SPECS = {
@@ -21,6 +21,7 @@ TARGET_SPECS = {
     "kimi": {"adapter": "kimi", "filename": "AGENTS.md"},
     "claude": {"adapter": "claude", "filename": "CLAUDE.md"},
     "gemini": {"adapter": "gemini", "filename": "GEMINI.md"},
+    "qoder": {"adapter": "qoder", "filename": "QODER.md"},
     "cursor": {
         "adapter": "ide",
         "filename": "agent-manager.mdc",

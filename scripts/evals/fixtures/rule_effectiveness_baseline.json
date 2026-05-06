@@ -3,7 +3,9 @@
     {
       "case_id": "add-make-target",
       "agent": "codex",
-      "triggered_skills": ["writing-plans"],
+      "triggered_skills": [
+        "writing-plans"
+      ],
       "success": true,
       "verified": true,
       "prompt_tokens": 128,
@@ -14,7 +16,9 @@
     {
       "case_id": "doctor-flags-unmaterialized-rules",
       "agent": "gemini-cli",
-      "triggered_skills": ["verification-before-completion"],
+      "triggered_skills": [
+        "verification-before-completion"
+      ],
       "success": true,
       "verified": true,
       "prompt_tokens": 100,
@@ -25,7 +29,9 @@
     {
       "case_id": "manifest-targets-dist-artifacts",
       "agent": "kimi-cli",
-      "triggered_skills": ["test-driven-development"],
+      "triggered_skills": [
+        "test-driven-development"
+      ],
       "success": true,
       "verified": true,
       "prompt_tokens": 104,
@@ -36,7 +42,9 @@
     {
       "case_id": "prevent-dist-edit-drift",
       "agent": "cursor",
-      "triggered_skills": ["verification-before-completion"],
+      "triggered_skills": [
+        "verification-before-completion"
+      ],
       "success": true,
       "verified": true,
       "prompt_tokens": 88,
@@ -47,7 +55,10 @@
     {
       "case_id": "rule-budget-regression-guard",
       "agent": "claude-code",
-      "triggered_skills": ["test-driven-development", "verification-before-completion"],
+      "triggered_skills": [
+        "test-driven-development",
+        "verification-before-completion"
+      ],
       "success": true,
       "verified": true,
       "prompt_tokens": 92,
@@ -58,7 +69,9 @@
     {
       "case_id": "scoped-memory-contract",
       "agent": "claude-code",
-      "triggered_skills": ["writing-plans"],
+      "triggered_skills": [
+        "writing-plans"
+      ],
       "success": true,
       "verified": true,
       "prompt_tokens": 80,
@@ -69,7 +82,9 @@
     {
       "case_id": "sync-codex-hooks",
       "agent": "codex",
-      "triggered_skills": ["test-driven-development"],
+      "triggered_skills": [
+        "test-driven-development"
+      ],
       "success": true,
       "verified": true,
       "prompt_tokens": 96,
@@ -80,13 +95,29 @@
     {
       "case_id": "validate-fixture-schema",
       "agent": "claude-code",
-      "triggered_skills": ["writing-plans", "verification-before-completion"],
+      "triggered_skills": [
+        "writing-plans",
+        "verification-before-completion"
+      ],
       "success": true,
       "verified": true,
       "prompt_tokens": 72,
       "duration_s": 2.5,
       "file_reads": 3,
       "tool_calls": 5
+    },
+    {
+      "case_id": "qodercli-case",
+      "agent": "qodercli",
+      "triggered_skills": [
+        "test-driven-development"
+      ],
+      "success": true,
+      "verified": true,
+      "prompt_tokens": 104,
+      "duration_s": 4.0,
+      "file_reads": 5,
+      "tool_calls": 7
     }
   ]
 }

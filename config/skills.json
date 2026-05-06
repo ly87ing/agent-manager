@@ -8,7 +8,7 @@
         "xylink-legacy-component-skinning"
       ],
       "skill_count": 3,
-      "agents": ["claude-code", "kimi-cli", "codex"]
+      "agents": ["claude-code", "kimi-cli", "codex", "qodercli"]
     },
     "oa-skill": {
       "url": "https://github.com/ly87ing/oa-skill.git",
@@ -19,12 +19,12 @@
       "url": "https://github.com/anthropics/skills.git",
       "skill_paths": ["skills/frontend-design"],
       "skill_count": 1,
-      "agents": ["kimi-cli"]
+      "agents": ["kimi-cli", "qodercli"]
     },
     "playwright-best-practices-skill": {
       "url": "https://github.com/currents-dev/playwright-best-practices-skill.git",
       "skill_count": 1,
-      "agents": ["claude-code", "kimi-cli", "codex", "cursor", "opencode"]
+      "agents": ["claude-code", "kimi-cli", "codex", "cursor", "opencode", "qodercli"]
     },
     "superpowers": {
       "url": "https://github.com/obra/superpowers",
@@ -35,13 +35,14 @@
         "cursor",
         "opencode",
         "kimi-cli",
-        "codex"
+        "codex",
+        "qodercli"
       ]
     },
     "ui-ux-pro-max-skill": {
       "url": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill",
       "skill_count": 7,
-      "agents": ["claude-code", "kimi-cli", "codex"]
+      "agents": ["claude-code", "kimi-cli", "codex", "qodercli"]
     }
   },
   "agents": {
@@ -50,6 +51,7 @@
     "kimi-cli": "~/.kimi/skills",
     "codex": "~/.codex/skills",
     "cursor": "~/.cursor/rules",
-    "opencode": "~/.config/opencode/skills"
+    "opencode": "~/.config/opencode/skills",
+    "qodercli": "~/.qoder/skills"
   }
 }

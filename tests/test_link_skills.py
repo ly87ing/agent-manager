@@ -2231,7 +2231,7 @@ class LinkSkillsTests(unittest.TestCase):
 
         self.assertIsNotNone(repo)
         self.assertEqual(repo["url"], "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill")
-        self.assertEqual(repo["agents"], ["claude-code", "kimi-cli", "codex"])
+        self.assertEqual(repo["agents"], ["claude-code", "kimi-cli", "codex", "qodercli"])
         self.assertNotIn("commit", repo)
         self.assertNotIn("ref", repo)
 
@@ -2251,7 +2251,7 @@ class LinkSkillsTests(unittest.TestCase):
             ],
         )
         self.assertEqual(repo["skill_count"], 3)
-        self.assertEqual(repo["agents"], ["claude-code", "kimi-cli", "codex"])
+        self.assertEqual(repo["agents"], ["claude-code", "kimi-cli", "codex", "qodercli"])
         self.assertNotIn("ignored_skill_paths", repo)
         self.assertNotIn("commit", repo)
         self.assertNotIn("ref", repo)
@@ -2263,7 +2263,7 @@ class LinkSkillsTests(unittest.TestCase):
 
         self.assertIsNotNone(repo)
         self.assertEqual(repo["url"], "https://github.com/currents-dev/playwright-best-practices-skill.git")
-        self.assertEqual(repo["agents"], ["claude-code", "kimi-cli", "codex", "cursor", "opencode"])
+        self.assertEqual(repo["agents"], ["claude-code", "kimi-cli", "codex", "cursor", "opencode", "qodercli"])
         self.assertNotIn("commit", repo)
         self.assertNotIn("ref", repo)
 
@@ -2276,7 +2276,7 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertEqual(repo["url"], "https://github.com/obra/superpowers")
         self.assertEqual(
             set(repo["agents"]),
-            {"claude-code", "gemini-cli", "cursor", "opencode", "kimi-cli", "codex"},
+            {"claude-code", "gemini-cli", "cursor", "opencode", "kimi-cli", "codex", "qodercli"},
         )
         self.assertNotIn("commit", repo)
         self.assertNotIn("ref", repo)
@@ -2326,7 +2326,7 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertEqual(repo["url"], "https://github.com/anthropics/skills.git")
         self.assertEqual(repo["skill_paths"], ["skills/frontend-design"])
         self.assertEqual(repo["skill_count"], 1)
-        self.assertEqual(repo["agents"], ["kimi-cli"])
+        self.assertEqual(repo["agents"], ["kimi-cli", "qodercli"])
         self.assertNotIn("commit", repo)
         self.assertNotIn("ref", repo)
 

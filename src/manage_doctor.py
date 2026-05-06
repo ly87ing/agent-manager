@@ -38,6 +38,7 @@ RULE_TARGET_PREFIX_TO_ID = {
     "opencode": "opencode",
     "codex": "codex",
     "kimi": "kimi-cli",
+    "qoder": "qodercli",
 }
 REQUIRED_CONFIG_FILES = (
     "config/manager.json",

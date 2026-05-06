@@ -131,5 +131,21 @@
         "detect_uv_tool": "kimi-cli"
       }
     }
-  }
-}
+  },    "qodercli": {
+    "display_name": "Qoder CLI",
+    "bin": "qodercli",
+    "preferred_provider": "native",
+    "require_managed_provider": true,
+    "providers": {
+      "native": {
+        "managed": true,
+        "install": {
+          "darwin": "curl -fsSL https://qoder.com/install | bash",
+          "linux": "curl -fsSL https://qoder.com/install | bash"
+        },
+        "upgrade": "curl -fsSL https://qoder.com/install | bash",
+        "detect_paths": ["~/.local/bin/qodercli"]
+      }
+    }
+    }
+    }

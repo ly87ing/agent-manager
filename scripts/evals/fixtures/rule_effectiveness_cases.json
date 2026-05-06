@@ -1,7 +1,14 @@
 {
   "requirements": {
-    "min_case_count": 8,
-    "required_agents": ["claude-code", "codex", "cursor", "gemini-cli", "kimi-cli"],
+    "min_case_count": 9,
+    "required_agents": [
+      "claude-code",
+      "codex",
+      "cursor",
+      "gemini-cli",
+      "kimi-cli",
+      "qodercli"
+    ],
     "min_success_rate": 1.0,
     "min_verification_rate": 1.0
   },
@@ -10,49 +17,90 @@
       "id": "add-make-target",
       "title": "Add a make target that runs the eval harness offline",
       "prompt": "Introduce a deterministic make eval-rules entrypoint that reads local fixtures and prints a JSON summary.",
-      "tags": ["make", "offline", "eval"]
+      "tags": [
+        "make",
+        "offline",
+        "eval"
+      ]
     },
     {
       "id": "doctor-flags-unmaterialized-rules",
       "title": "Doctor reports missing managed rule artifacts as warnings",
       "prompt": "Verify doctor reports unmaterialized rule targets as warnings instead of silent drift.",
-      "tags": ["doctor", "rules", "warning"]
+      "tags": [
+        "doctor",
+        "rules",
+        "warning"
+      ]
     },
     {
       "id": "manifest-targets-dist-artifacts",
       "title": "Manifest points only at dist rule artifacts",
       "prompt": "Ensure active rule targets reference agent-rule/rules/dist instead of any legacy global source.",
-      "tags": ["manifest", "dist", "rules"]
+      "tags": [
+        "manifest",
+        "dist",
+        "rules"
+      ]
     },
     {
       "id": "prevent-dist-edit-drift",
       "title": "Managed hooks stop direct dist drift",
       "prompt": "Protect generated rule artifacts from direct edits and require rebuilding from rules/src.",
-      "tags": ["hooks", "generated", "dist"]
+      "tags": [
+        "hooks",
+        "generated",
+        "dist"
+      ]
     },
     {
       "id": "rule-budget-regression-guard",
       "title": "Prompt budgets stay under the configured envelope",
       "prompt": "Reject rule changes that bloat always-on instruction text beyond the configured budget.",
-      "tags": ["budget", "prompt", "regression"]
+      "tags": [
+        "budget",
+        "prompt",
+        "regression"
+      ]
     },
     {
       "id": "scoped-memory-contract",
       "title": "Scoped memory stays narrow and role-specific",
       "prompt": "Keep repo and directory-level memory files concise, scoped, and free of duplicated standing policy.",
-      "tags": ["memory", "scope", "contracts"]
+      "tags": [
+        "memory",
+        "scope",
+        "contracts"
+      ]
     },
     {
       "id": "sync-codex-hooks",
       "title": "Codex hooks are generated from managed definitions",
       "prompt": "Render repo-level Codex hooks from managed config and keep committed artifacts in sync.",
-      "tags": ["codex", "hooks", "sync"]
+      "tags": [
+        "codex",
+        "hooks",
+        "sync"
+      ]
     },
     {
       "id": "validate-fixture-schema",
       "title": "Reject malformed JSON fixtures before grading",
       "prompt": "Validate the rule effectiveness fixture schema and fail fast when a required field is missing.",
-      "tags": ["json", "validation", "tests"]
+      "tags": [
+        "json",
+        "validation",
+        "tests"
+      ]
+    },
+    {
+      "id": "qodercli-case",
+      "title": "Qoder CLI specific test case",
+      "prompt": "This is a placeholder for Qoder CLI.",
+      "tags": [
+        "qodercli",
+        "test"
+      ]
     }
   ]
 }

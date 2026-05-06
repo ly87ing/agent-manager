@@ -300,6 +300,10 @@ def measure_always_on_instruction_tokens_by_agent() -> dict[str, int]:
             REPO_ROOT / "agent-rule" / "rules" / "dist" / "kimi" / "AGENTS.md",
             REPO_ROOT / ".kimi" / "AGENTS.md",
         ],
+        "qodercli": [
+            REPO_ROOT / "agent-rule" / "rules" / "dist" / "qoder" / "QODER.md",
+            REPO_ROOT / ".qoder" / "QODER.md",
+        ],
     }
     return {
         agent_name: sum(round(len(path.read_text(encoding="utf-8")) / 4) for path in paths)

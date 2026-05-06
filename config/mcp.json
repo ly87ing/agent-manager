@@ -35,6 +35,7 @@
     "cursor": "~/.cursor/mcp.json",
     "opencode": { "path": "~/.config/opencode/opencode.json", "format": "json" },
     "codex": { "path": "~/.codex/config.toml", "format": "toml" },
-    "kimi-cli": { "path": "~/.kimi/mcp.json", "format": "json" }
+    "kimi-cli": { "path": "~/.kimi/mcp.json", "format": "json" },
+    "qodercli": { "path": "~/.qoder/mcp.json", "format": "json" }
   }
 }
