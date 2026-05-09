@@ -51,6 +51,17 @@ class SyncMcpTests(unittest.TestCase):
 
         self.assertEqual(definitions["servers"]["grok-search"]["startup_timeout_sec"], 120)
 
+    def test_committed_grok_search_definition_declares_search_provider_credentials(self):
+        definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
+
+        env = definitions["servers"]["grok-search"]["env"]
+        self.assertIn("TAVILY_ENABLED", env)
+        self.assertIn("TAVILY_API_KEY", env)
+        self.assertIn("FIRECRAWL_API_KEY", env)
+        self.assertEqual(env["TAVILY_ENABLED"], "${TAVILY_ENABLED}")
+        self.assertEqual(env["TAVILY_API_KEY"], "${TAVILY_API_KEY}")
+        self.assertEqual(env["FIRECRAWL_API_KEY"], "${FIRECRAWL_API_KEY}")
+
     def test_codex_toml_receives_startup_timeout_without_json_leak(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

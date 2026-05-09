@@ -74,6 +74,11 @@ ANOTHER_API_KEY="sk-abc123..."
 - `AUGMENT_SESSION_AUTH`: 新方式的完整会话认证JSON
 - `AUGMENT_API_TOKEN`: 旧方式的API Token（已废弃但可能仍被部分系统使用）
 - `AUGMENT_API_URL`: API端点URL（旧方式需要）
+- `GROK_API_URL`: grok-search MCP 使用的 Grok API 入口
+- `GROK_API_KEY`: grok-search MCP 使用的 Grok API Key
+- `TAVILY_ENABLED`: grok-search MCP 是否启用 Tavily provider，例如 `true`
+- `TAVILY_API_KEY`: grok-search MCP 使用的 Tavily API Key
+- `FIRECRAWL_API_KEY`: grok-search MCP 使用的 Firecrawl API Key
 
 ### 2. 其他服务凭证
 根据集成的服务而定义：
