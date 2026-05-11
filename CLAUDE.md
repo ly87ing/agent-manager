@@ -15,7 +15,7 @@ This file keeps repo-level memory for Claude Code in this repository.
 - `config/manager.json` 是仓库基线，`config/manager.local.json` 是本机覆盖。
 - `agent-rule/rules/src/` 是可编辑规则源码，`agent-rule/rules/dist/` 是生成产物。
 - `config/rules-targets.list` 定义 built rule artifact 到各 agent 目标路径的映射。
-- `codex` 只作为 MCP、Rules、Skills 的分发目标，不纳入生命周期管理。
+- `codex` 纳入 Agent lifecycle 管理，默认 provider 为 npm，升级使用 `codex update`；同时接收 MCP、Rules、Skills 分发。
 - `tests/` 里的测试以 on-disk contract/integration 为主，迭代时优先跑最窄的 unittest 目标。
 - `terminal.enabled` 默认为 `false`，主流程不会隐式改写终端配置。
 

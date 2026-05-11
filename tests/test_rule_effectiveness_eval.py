@@ -86,6 +86,15 @@ class RuleEffectivenessEvalTests(unittest.TestCase):
             ],
         )
 
+    def test_rule_effectiveness_cases_do_not_use_placeholder_prompts(self):
+        cases = json.loads(CASES.read_text(encoding="utf-8"))["cases"]
+
+        for case in cases:
+            prompt = case["prompt"].lower()
+            title = case["title"].lower()
+            self.assertNotIn("placeholder", prompt, case["id"])
+            self.assertNotIn("placeholder", title, case["id"])
+
     def test_default_required_agents_cover_managed_rule_targets(self):
         requirements = json.loads(CASES.read_text(encoding="utf-8"))["requirements"]
         required_agents = set(requirements["required_agents"])

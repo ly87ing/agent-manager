@@ -15,6 +15,7 @@ class RuleLayoutTests(unittest.TestCase):
         "claude": "CLAUDE.md",
         "gemini": "GEMINI.md",
         "cursor": "agent-manager.mdc",
+        "qoder": "QODER.md",
     }
 
     def _copy_repo(self, temp_dir: str) -> Path:
@@ -215,3 +216,10 @@ class RuleLayoutTests(unittest.TestCase):
     def test_legacy_global_rule_tree_has_been_removed(self):
         legacy_root = ROOT / "agent-rule" / "rules" / "global"
         self.assertFalse(legacy_root.exists(), "legacy rules/global tree should not exist once dist is the only artifact source")
+
+    def test_legacy_materialized_home_rule_tree_has_been_removed(self):
+        legacy_home_root = ROOT / "agent-rule" / "~"
+        self.assertFalse(
+            legacy_home_root.exists(),
+            "materialized legacy home-rule fixtures should not live under agent-rule/~",
+        )

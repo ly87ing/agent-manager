@@ -538,6 +538,11 @@ class ProjectContractTests(unittest.TestCase):
         self.assertNotIn("Verification is CRITICAL", memory)
         self.assertIn("config/rules-targets.list", memory)
 
+    def test_claude_memory_matches_codex_lifecycle_policy(self):
+        memory = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("`codex` 纳入 Agent lifecycle 管理", memory)
+        self.assertNotIn("`codex` 只作为 MCP、Rules、Skills 的分发目标，不纳入生命周期管理。", memory)
+
     def test_root_claude_md_stays_concise_and_points_to_scoped_memory(self):
         memory = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertLessEqual(len(memory.splitlines()), 80)

@@ -95,11 +95,12 @@
     },
     {
       "id": "qodercli-case",
-      "title": "Qoder CLI specific test case",
-      "prompt": "This is a placeholder for Qoder CLI.",
+      "title": "Qoder CLI rule target stays covered",
+      "prompt": "Verify Qoder CLI receives repo-native QODER.md rules and modules from rules/dist with the same layout and budget coverage as other managed rule agents.",
       "tags": [
         "qodercli",
-        "test"
+        "rules",
+        "coverage"
       ]
     }
   ]
