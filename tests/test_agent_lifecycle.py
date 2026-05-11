@@ -1276,7 +1276,7 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         self.assertTrue(codex_npm["managed"])
         self.assertEqual(codex_npm["install"], "npm install -g @openai/codex")
         self.assertEqual(codex_npm["uninstall"], "npm uninstall -g @openai/codex")
-        self.assertEqual(codex_npm["upgrade"], "npm install -g @openai/codex@latest")
+        self.assertEqual(codex_npm["upgrade"], "codex update")
 
         codex_brew = lifecycle_agents["codex"]["providers"]["brew"]
         self.assertFalse(codex_brew["managed"])
@@ -1333,6 +1333,15 @@ class CommittedAgentPolicyTests(unittest.TestCase):
             lifecycle_agents["kimi-cli"]["providers"]["native"]["uninstall"],
             "uv tool uninstall kimi-cli",
         )
+
+    def test_committed_agent_policy_uses_native_updaters_when_available(self):
+        lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(lifecycle_agents["claude-code"]["providers"]["native"]["upgrade"], "claude update")
+        self.assertEqual(lifecycle_agents["codex"]["providers"]["npm"]["upgrade"], "codex update")
+        self.assertEqual(lifecycle_agents["cursor"]["providers"]["native"]["upgrade"], "cursor-agent update")
+        self.assertEqual(lifecycle_agents["opencode"]["providers"]["native"]["upgrade"], "opencode upgrade --method curl")
+        self.assertEqual(lifecycle_agents["qodercli"]["providers"]["native"]["upgrade"], "qodercli update")
 
     def test_committed_agent_policy_disables_default_kimi_cli_auto_install(self):
         manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
