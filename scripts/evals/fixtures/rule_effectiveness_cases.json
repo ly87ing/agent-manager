@@ -1,6 +1,6 @@
 {
   "requirements": {
-    "min_case_count": 9,
+    "min_case_count": 11,
     "required_agents": [
       "claude-code",
       "codex",
@@ -21,6 +21,16 @@
         "make",
         "offline",
         "eval"
+      ]
+    },
+    {
+      "id": "browser-tool-intent-boundary",
+      "title": "Browser tool selection is driven by task intent",
+      "prompt": "Refine frontend browser guidance so session-aware task execution, deterministic Playwright checks, and DevTools diagnosis remain distinct by user intent.",
+      "tags": [
+        "frontend",
+        "browser",
+        "tools"
       ]
     },
     {
@@ -71,6 +81,16 @@
         "memory",
         "scope",
         "contracts"
+      ]
+    },
+    {
+      "id": "simple-task-preamble-boundary",
+      "title": "Simple edits avoid unnecessary implementation preambles",
+      "prompt": "Tighten shared core so trivial edits are not forced through full assumption and ambiguity preambles while non-trivial work still states assumptions and verification points.",
+      "tags": [
+        "core",
+        "prompt-budget",
+        "workflow"
       ]
     },
     {

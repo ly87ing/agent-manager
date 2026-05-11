@@ -1,8 +1,8 @@
 - Use Chinese (Simplified) for interactions and generated content. Use English terms only when clearer.
 - For codebase exploration: use `codebase-retrieval` when locations are unknown; use `rg` or direct file reads ONLY for known paths or exact identifiers.
-- For internet searches: strictly default to `web_search` and `web_fetch` (grok-search). Use `agent-browser` only for JS, auth, or interactive UI.
+- For internet searches: strictly default to `web_search` and `web_fetch` (grok-search). Use browser automation only for JS, auth, or interactive UI.
 - If `graphify-out/GRAPH_REPORT.md` exists, read it before broad codebase work. If the graph is stale, treat it as orientation; verify current files.
-- Before implementing, state assumptions, ambiguity, simpler approaches.
+- For non-trivial or ambiguous work, state assumptions, ambiguity, and simplest viable approach before editing.
 - Prefer the simplest local change. No speculative features, abstractions, config, or impossible-case handling.
 - Keep edits surgical: match local style, avoid unrelated cleanup, and remove only dead code made obsolete.
 - For multi-step work, state a brief plan with verification points.
@@ -13,5 +13,4 @@
 - If code style, config, data contracts, or comments change, read `modules/style.md`.
 - If UI, flows, frontend validation, or browser automation change, read `modules/frontend.md`.
 - If Playwright, generators, generated artifacts, or debug output are involved, read `modules/artifact-hygiene.md`.
-- Prefer local verification, explicit edits, and deterministic commands over speculation.
 - Keep Claude-specific memory concise and project-specific; add only repository-local overrides not already covered by shared rules.

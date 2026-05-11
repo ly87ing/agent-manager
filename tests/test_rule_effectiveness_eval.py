@@ -62,25 +62,27 @@ class RuleEffectivenessEvalTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, combined)
 
         summary = json.loads(result.stdout)
-        self.assertEqual(summary["case_count"], 9)
+        self.assertEqual(summary["case_count"], 11)
         self.assertEqual(summary["success_rate"], 1.0)
         self.assertEqual(summary["verification_rate"], 1.0)
         self.assertEqual(summary["avg_prompt_tokens"], 96.0)
-        self.assertEqual(summary["avg_duration_s"], 31.0 / 9)
-        self.assertEqual(summary["avg_file_reads"], 38.0 / 9)
-        self.assertEqual(summary["avg_tool_calls"], 56.0 / 9)
-        self.assertEqual(summary["avg_triggered_skill_count"], 11 / 9)
+        self.assertEqual(summary["avg_duration_s"], 37.0 / 11)
+        self.assertEqual(summary["avg_file_reads"], 46.0 / 11)
+        self.assertEqual(summary["avg_tool_calls"], 68.0 / 11)
+        self.assertEqual(summary["avg_triggered_skill_count"], 13 / 11)
         self.assertEqual(summary["evaluated_agents"], ["claude-code", "codex", "cursor", "gemini-cli", "kimi-cli", "qodercli"])
         self.assertEqual(
             [case["case_id"] for case in summary["cases"]],
             [
                 "add-make-target",
+                "browser-tool-intent-boundary",
                 "doctor-flags-unmaterialized-rules",
                 "manifest-targets-dist-artifacts",
                 "prevent-dist-edit-drift",
                 "qodercli-case",
                 "rule-budget-regression-guard",
                 "scoped-memory-contract",
+                "simple-task-preamble-boundary",
                 "sync-codex-hooks",
                 "validate-fixture-schema",
             ],

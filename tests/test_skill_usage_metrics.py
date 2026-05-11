@@ -60,18 +60,20 @@ class SkillUsageMetricsTests(unittest.TestCase):
                 "qodercli": 27,
             },
         )
-        self.assertEqual(summary["avg_triggered_skill_count"], 11 / 9)
+        self.assertEqual(summary["avg_triggered_skill_count"], 13 / 11)
         self.assertEqual(summary["always_on_instruction_tokens_by_agent"], self._expected_instruction_tokens_by_agent())
         self.assertEqual(
             [(case["case_id"], case["agent"], case["triggered_skill_count"]) for case in summary["cases"]],
             [
                 ("add-make-target", "codex", 1),
+                ("browser-tool-intent-boundary", "cursor", 1),
                 ("doctor-flags-unmaterialized-rules", "gemini-cli", 1),
                 ("manifest-targets-dist-artifacts", "kimi-cli", 1),
                 ("prevent-dist-edit-drift", "cursor", 1),
                 ("qodercli-case", "qodercli", 1),
                 ("rule-budget-regression-guard", "claude-code", 2),
                 ("scoped-memory-contract", "claude-code", 1),
+                ("simple-task-preamble-boundary", "codex", 1),
                 ("sync-codex-hooks", "codex", 1),
                 ("validate-fixture-schema", "claude-code", 2),
             ],

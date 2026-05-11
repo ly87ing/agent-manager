@@ -27,6 +27,19 @@
       "tool_calls": 7
     },
     {
+      "case_id": "browser-tool-intent-boundary",
+      "agent": "cursor",
+      "triggered_skills": [
+        "verification-before-completion"
+      ],
+      "success": true,
+      "verified": true,
+      "prompt_tokens": 104,
+      "duration_s": 3.0,
+      "file_reads": 4,
+      "tool_calls": 6
+    },
+    {
       "case_id": "manifest-targets-dist-artifacts",
       "agent": "kimi-cli",
       "triggered_skills": [
@@ -88,6 +101,19 @@
       "success": true,
       "verified": true,
       "prompt_tokens": 96,
+      "duration_s": 3.0,
+      "file_reads": 4,
+      "tool_calls": 6
+    },
+    {
+      "case_id": "simple-task-preamble-boundary",
+      "agent": "codex",
+      "triggered_skills": [
+        "verification-before-completion"
+      ],
+      "success": true,
+      "verified": true,
+      "prompt_tokens": 88,
       "duration_s": 3.0,
       "file_reads": 4,
       "tool_calls": 6
