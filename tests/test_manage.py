@@ -1847,7 +1847,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertTrue(any(line.startswith("skills ") and "--force-refresh" in line for line in log_lines), log_lines)
             self.assertTrue(any(line.startswith("mcp ") and "--force-refresh" in line for line in log_lines), log_lines)
 
-    def test_bootstrap_allows_agent_install(self):
+    def test_bootstrap_allows_agent_install_and_waits_for_agent_lifecycle(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -1858,7 +1858,7 @@ class ManageScriptTests(unittest.TestCase):
                 temp_root / "agent-lifecycle" / "sync_agents.py",
                 "agents",
                 call_log,
-                "'--no-install' not in sys.argv and '--offline' not in sys.argv",
+                "'--no-install' not in sys.argv and '--offline' not in sys.argv and '--wait-async-actions' in sys.argv",
             )
             self._append_log_stub(
                 temp_root / "agent-tool" / "sync_tools.py",
@@ -1916,6 +1916,7 @@ class ManageScriptTests(unittest.TestCase):
                     line.startswith("agents ")
                     and "--no-install" not in line
                     and "--async-actions" in line
+                    and "--wait-async-actions" in line
                     for line in log_lines
                 ),
                 log_lines,

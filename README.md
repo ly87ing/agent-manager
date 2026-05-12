@@ -109,7 +109,7 @@
 - `./manage.sh`: 显示帮助；这是脚本的安全默认入口。
 - `make sync`: 同步当前配置到 rules，并将 skills / MCP 资源对齐到最新；不处理 Agent / Tool 生命周期。
 - `make update`: 更新远端资源并收敛本地环境，等待 Agent 生命周期更新完成，但不安装缺失 Agent。
-- `make bootstrap`: 执行全量安装、更新与同步，适合新机器初始化。
+- `make bootstrap`: 执行全量安装、更新与同步，并等待 Agent 生命周期安装/升级完成，适合新机器初始化。
 - `make all`: `make bootstrap` 的兼容别名。
 - `make plan`: 预演一次完整 `bootstrap`。
 - `make self-update`: 仅更新 agent-manager 仓库自身逻辑。
