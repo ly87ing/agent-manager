@@ -12,4 +12,3 @@ Read this rule before introducing new modules, changing shared interfaces, or al
 ## Before Completion
 
 - Verify every changed entry point still has an obvious dependency path and no new circular dependency.
-- Run the narrowest relevant verification for the affected boundary. If automation is missing, state that gap explicitly instead of implying coverage.

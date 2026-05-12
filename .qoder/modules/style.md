@@ -12,4 +12,3 @@ Apply this rule whenever you write code, touch config or data contracts, or add 
 ## Before Completion
 
 - Re-read the diff for accidental churn, dead code, debug leftovers, and misleading names.
-- Run the narrowest relevant verification for the edited area and report any skipped checks or missing automation.

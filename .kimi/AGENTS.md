@@ -1,16 +1,14 @@
 - Use Chinese (Simplified) for interactions and generated content. Use English terms only when clearer.
-- For codebase exploration: use `codebase-retrieval` when locations are unknown; use `rg` or direct file reads ONLY for known paths or exact identifiers.
+- For codebase exploration: use `codebase-retrieval` (augment MCP) when locations are unknown; use `rg` or direct file reads ONLY for known paths or exact identifiers.
 - For internet searches: strictly default to `web_search` and `web_fetch` (grok-search). Use browser automation only for JS, auth, or interactive UI.
-- If `graphify-out/GRAPH_REPORT.md` exists, read it before broad codebase work. If the graph is stale, treat it as orientation; verify current files.
 - For non-trivial or ambiguous work, state assumptions, ambiguity, and simplest viable approach before editing.
 - Prefer the simplest local change. No speculative features, abstractions, config, or impossible-case handling.
 - Keep edits surgical: match local style, avoid unrelated cleanup, and remove only dead code made obsolete.
 - For multi-step work, state a brief plan with verification points.
 - Before edits that change behavior, touch shared code, or span multiple files, inspect the affected code and nearby tests first.
 - After every change, run the smallest relevant verification that could fail.
-- If you skip verification or cannot run it, say so explicitly.
+- If you skip verification, cannot run it, or ran something that did not actually exercise the change, say so explicitly.
 - If architecture, interfaces, or dependency boundaries change, read `modules/architecture.md`.
 - If code style, config, data contracts, or comments change, read `modules/style.md`.
 - If UI, flows, frontend validation, or browser automation change, read `modules/frontend.md`.
 - If Playwright, generators, generated artifacts, or debug output are involved, read `modules/artifact-hygiene.md`.
-- Keep Kimi CLI guidance minimal and rely on shared rules for general workflow.
