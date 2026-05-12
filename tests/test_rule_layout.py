@@ -168,7 +168,10 @@ class RuleLayoutTests(unittest.TestCase):
         explicit_web_search_clause = (
             "For internet searches: strictly default to `web_search` and `web_fetch` (grok-search)."
         )
-        explicit_verification_clause = "If you skip verification or cannot run it, say so explicitly."
+        explicit_verification_clause = (
+            "If you skip verification, cannot run it, or ran something that did not actually exercise "
+            "the change, say so explicitly."
+        )
         explicit_context_clause = (
             "Before edits that change behavior, touch shared code, or span multiple files, inspect the affected "
             "code and nearby tests first."

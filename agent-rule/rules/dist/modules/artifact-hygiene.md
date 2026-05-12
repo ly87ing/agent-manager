@@ -33,7 +33,7 @@ Before invoking `playwright-cli` or Playwright commands, classify the output:
 Defaults:
 
 - Start from the repository's Playwright config, CI pipeline, and reporting conventions before adding output paths.
-- Treat `playwright-report/`, `test-results/`, `blob-report/` as workflow-consumed only when workflows actually use them.
+- Treat `playwright-report/`, `test-results/`, `blob-report/` as workflow-consumed only when workflows actually use them, not as storage for one-off investigation files.
 - Don't update `.gitignore` or invent output conventions for disposable artifacts.
 - If a disposable experiment is worth keeping, promote it to a maintained asset and delete the original.
 
