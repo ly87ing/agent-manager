@@ -50,14 +50,6 @@ class ClaudeHooksSyncTests(unittest.TestCase):
             pre_tool_hooks = settings["hooks"]["PreToolUse"]
             self.assertTrue(
                 any(
-                    entry.get("matcher") == "Bash"
-                    and any("graphify-context-hint.sh" in hook.get("command", "") for hook in entry.get("hooks", []))
-                    for entry in pre_tool_hooks
-                ),
-                settings,
-            )
-            self.assertTrue(
-                any(
                     entry.get("matcher") == "Edit|MultiEdit|Write"
                     and any(
                         hook.get("command") == 'bash "$CLAUDE_PROJECT_DIR/agent-rule/hooks/block-dist-edits.sh"'
@@ -66,6 +58,14 @@ class ClaudeHooksSyncTests(unittest.TestCase):
                     for entry in pre_tool_hooks
                 ),
                 settings,
+            )
+            self.assertFalse(
+                any(
+                    "graphify-context-hint.sh" in hook.get("command", "")
+                    for entry in pre_tool_hooks
+                    for hook in entry.get("hooks", [])
+                ),
+                f"graphify hook should be absent: {pre_tool_hooks}",
             )
 
     def test_sync_preserves_unrelated_settings_and_deduplicates_managed_hooks(self):
@@ -198,6 +198,7 @@ class ClaudeHooksSyncTests(unittest.TestCase):
                 "Read graphify-out/GRAPH_REPORT.md before searching raw files.\"}}' "
                 "|| true ;; esac"
             )
+            graphify_hook_command = 'bash "$CLAUDE_PROJECT_DIR/agent-rule/hooks/graphify-context-hint.sh"'
             unrelated_command = "echo keep me"
             settings_path = temp_root / ".claude" / "settings.json"
             current = json.loads(settings_path.read_text(encoding="utf-8"))
@@ -206,6 +207,13 @@ class ClaudeHooksSyncTests(unittest.TestCase):
                 {
                     "matcher": "Bash",
                     "hooks": [{"type": "command", "command": legacy_command}],
+                },
+            )
+            current["hooks"]["PreToolUse"].insert(
+                1,
+                {
+                    "matcher": "Bash",
+                    "hooks": [{"type": "command", "command": graphify_hook_command}],
                 },
             )
             current["hooks"]["PreToolUse"].append(
@@ -226,7 +234,14 @@ class ClaudeHooksSyncTests(unittest.TestCase):
                     any(legacy_command == hook.get("command") for hook in entry.get("hooks", []))
                     for entry in pre_tool_hooks
                 ),
-                f"legacy hook should be stripped: {pre_tool_hooks}",
+                f"legacy inline hook should be stripped: {pre_tool_hooks}",
+            )
+            self.assertFalse(
+                any(
+                    any(graphify_hook_command == hook.get("command") for hook in entry.get("hooks", []))
+                    for entry in pre_tool_hooks
+                ),
+                f"graphify-context-hint.sh hook should be stripped: {pre_tool_hooks}",
             )
             self.assertTrue(
                 any(
@@ -279,33 +294,6 @@ class ClaudeHooksSyncTests(unittest.TestCase):
             self.assertEqual(response["hookSpecificOutput"]["hookEventName"], "PreToolUse")
             self.assertEqual(response["hookSpecificOutput"]["permissionDecision"], "deny")
             self.assertIn("generated output", response["hookSpecificOutput"]["permissionDecisionReason"])
-
-    def test_graphify_context_hook_warns_when_graph_is_stale(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = self._copy_repo(temp_dir)
-            self._init_git_repo(temp_root)
-            graph_path = temp_root / "graphify-out" / "graph.json"
-            graph_path.parent.mkdir()
-            graph_path.write_text("{}", encoding="utf-8")
-            source_path = temp_root / "src.py"
-            source_path.write_text("print('current')\n", encoding="utf-8")
-            os.utime(graph_path, (1, 1))
-            os.utime(source_path, (2, 2))
-
-            result = subprocess.run(
-                ["bash", str(temp_root / "agent-rule" / "hooks" / "graphify-context-hint.sh")],
-                cwd=temp_root,
-                input=json.dumps({"tool_input": {"command": "rg current ."}}),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            response = json.loads(result.stdout)
-            additional_context = response["hookSpecificOutput"]["additionalContext"]
-            self.assertIn("appears stale", additional_context)
-            self.assertIn("verify facts against current files", additional_context)
 
     def test_check_rules_build_hook_blocks_stop_when_src_changed_without_dist_refresh(self):
         with tempfile.TemporaryDirectory() as temp_dir:

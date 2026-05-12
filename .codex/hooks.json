@@ -1,16 +1,5 @@
 {
   "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd); bash \"$ROOT/agent-rule/hooks/graphify-context-hint.sh\""
-          }
-        ]
-      }
-    ],
     "Stop": [
       {
         "hooks": [
