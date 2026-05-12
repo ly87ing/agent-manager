@@ -1,5 +1,12 @@
 {
   "settings_path": "../.claude/settings.json",
+  "removed_signatures": [
+    {
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "command_contains": "graphify-out/GRAPH_REPORT.md before searching raw files"
+    }
+  ],
   "hooks": {
     "PreToolUse": [
       {

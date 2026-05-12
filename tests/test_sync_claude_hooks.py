@@ -185,6 +185,57 @@ class ClaudeHooksSyncTests(unittest.TestCase):
             committed = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
             self.assertEqual(committed, self._read_settings(temp_root))
 
+    def test_sync_strips_removed_signatures(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = self._copy_repo(temp_dir)
+            legacy_command = (
+                "CMD=$(python3 -c \"import json,sys; d=json.load(sys.stdin); "
+                "print(d.get('tool_input',d).get('command',''))\" 2>/dev/null || true); "
+                "case \"$CMD\" in *grep*|*rg\\ *|*ripgrep*) "
+                "[ -f graphify-out/graph.json ] && echo "
+                "'{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\","
+                "\"additionalContext\":\"graphify: Knowledge graph exists. "
+                "Read graphify-out/GRAPH_REPORT.md before searching raw files.\"}}' "
+                "|| true ;; esac"
+            )
+            unrelated_command = "echo keep me"
+            settings_path = temp_root / ".claude" / "settings.json"
+            current = json.loads(settings_path.read_text(encoding="utf-8"))
+            current["hooks"]["PreToolUse"].insert(
+                0,
+                {
+                    "matcher": "Bash",
+                    "hooks": [{"type": "command", "command": legacy_command}],
+                },
+            )
+            current["hooks"]["PreToolUse"].append(
+                {
+                    "matcher": "Bash",
+                    "hooks": [{"type": "command", "command": unrelated_command}],
+                }
+            )
+            settings_path.write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
+
+            result = self._run_sync(temp_root)
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            settings = self._read_settings(temp_root)
+            pre_tool_hooks = settings["hooks"]["PreToolUse"]
+            self.assertFalse(
+                any(
+                    any(legacy_command == hook.get("command") for hook in entry.get("hooks", []))
+                    for entry in pre_tool_hooks
+                ),
+                f"legacy hook should be stripped: {pre_tool_hooks}",
+            )
+            self.assertTrue(
+                any(
+                    any(hook.get("command") == unrelated_command for hook in entry.get("hooks", []))
+                    for entry in pre_tool_hooks
+                ),
+                f"unrelated hook should be preserved: {pre_tool_hooks}",
+            )
+
     def test_sync_resolves_settings_path_relative_to_custom_config(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = self._copy_repo(temp_dir)
