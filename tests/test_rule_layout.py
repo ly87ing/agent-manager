@@ -162,8 +162,8 @@ class RuleLayoutTests(unittest.TestCase):
     def test_built_outputs_include_required_shared_clauses(self):
         expected_clause = "Use Chinese (Simplified) for interactions and generated content."
         explicit_code_search_clause = (
-            "For codebase exploration: use `codebase-retrieval` when locations are unknown; use `rg` or direct "
-            "file reads ONLY for known paths or exact identifiers."
+            "For codebase exploration: prefer `codebase-retrieval` (augment MCP) when locations are unknown, "
+            "falling back to `rg`; use direct file reads ONLY for known paths or exact identifiers."
         )
         explicit_web_search_clause = (
             "For internet searches: strictly default to `web_search` and `web_fetch` (grok-search)."
