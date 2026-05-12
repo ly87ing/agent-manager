@@ -1,1 +1,0 @@
-- Keep CLI guidance concise and use task-triggered modules for low-frequency detail.

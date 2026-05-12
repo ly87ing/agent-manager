@@ -1,1 +1,0 @@
-- Keep editor-facing guardrails short and leave detailed workflow guidance to shared modules.

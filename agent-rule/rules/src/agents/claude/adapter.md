@@ -1,1 +1,0 @@
-- Keep Claude-specific memory concise and project-specific; add only repository-local overrides not already covered by shared rules.

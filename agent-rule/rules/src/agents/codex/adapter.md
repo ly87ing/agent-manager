@@ -1,1 +1,0 @@
-- Keep Codex-specific guidance minimal and rely on shared rules for general workflow.

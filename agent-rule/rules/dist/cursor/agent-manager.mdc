@@ -15,4 +15,3 @@ alwaysApply: true
 - If code style, config, data contracts, or comments change, read `modules/style.md`.
 - If UI, flows, frontend validation, or browser automation change, read `modules/frontend.md`.
 - If Playwright, generators, generated artifacts, or debug output are involved, read `modules/artifact-hygiene.md`.
-- Keep editor-facing guardrails short and leave detailed workflow guidance to shared modules.

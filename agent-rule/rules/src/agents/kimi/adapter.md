@@ -1,1 +1,0 @@
-- Keep Kimi CLI guidance minimal and rely on shared rules for general workflow.

@@ -12,4 +12,3 @@
 - If code style, config, data contracts, or comments change, read `~/.codex/modules/style.md`.
 - If UI, flows, frontend validation, or browser automation change, read `~/.codex/modules/frontend.md`.
 - If Playwright, generators, generated artifacts, or debug output are involved, read `~/.codex/modules/artifact-hygiene.md`.
-- Keep Codex-specific guidance minimal and rely on shared rules for general workflow.

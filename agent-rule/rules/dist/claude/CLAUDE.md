@@ -12,4 +12,3 @@
 - If code style, config, data contracts, or comments change, read `modules/style.md`.
 - If UI, flows, frontend validation, or browser automation change, read `modules/frontend.md`.
 - If Playwright, generators, generated artifacts, or debug output are involved, read `modules/artifact-hygiene.md`.
-- Keep Claude-specific memory concise and project-specific; add only repository-local overrides not already covered by shared rules.
