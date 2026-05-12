@@ -1,40 +1,41 @@
 # Artifact Hygiene Guidelines
 
-Prefer the target project's existing conventions over universal output rules. Choose output locations based on whether the files are maintained by the team or consumed by project workflows.
+Prefer the target project's existing conventions over universal output rules. Choose locations by whether files are maintained by the team or already consumed by repository workflows.
 
 ## Output Classification
 
-- **Project assets:** files intentionally maintained by the team or expected to be reused, such as source code, shared helpers, stable fixtures, maintained config, approved snapshots, and durable documentation.
-- **Workflow-consumed artifacts:** generated files that may be transient but are already expected by repository workflows such as config, scripts, or CI, or that the user explicitly asked to standardize as a reusable project convention.
-- **Disposable run artifacts:** ad hoc debug scripts, copied reports, temporary screenshots, traces, videos, downloads, storage state, JSON/HTML dumps, and investigation notes that only serve the current run and are not referenced by project workflows.
+- **Project assets:** team-maintained files — source code, shared helpers, stable fixtures, maintained config, approved snapshots, durable docs.
+- **Workflow-consumed artifacts:** generated files that repository workflows (CI, scripts, config) already depend on, or that the user explicitly asks to standardize.
+- **Disposable run artifacts:** ad hoc debug scripts, copied reports, temporary screenshots, traces, videos, downloads, storage state, JSON/HTML dumps, and investigation notes that only serve the current run.
 
-## Required Workflow
+## Where Each Goes
 
-1. Classify the expected output before running the tool.
-2. If the project already defines a location or naming convention for that output, follow it.
-3. If the output is a project asset, store it in the maintained project path and keep it cleanly reviewable.
-4. If the output is generated and already consumed by repository workflows, prefer the project's standard gitignored output directory inside the working tree.
-5. If the repository does not already consume that output, establish a new project-local convention only when the user explicitly asks for one.
-6. If reuse or workflow consumption is uncertain, classify the output as a disposable run artifact.
-7. If the output is disposable and no workflow depends on a working-tree path, use `mktemp -d`, `$TMPDIR`, or `/tmp`.
-8. Do not create or widen `.gitignore`, config conventions, or repository directories just to host disposable outputs for the current task.
-9. If a disposable artifact must temporarily land in a project-local ignored directory, delete it before completion unless the user explicitly asks to keep it.
-10. Never place disposable artifacts in tracked paths or likely-to-be-committed locations such as the repository root, `docs/`, `scripts/`, `tests/fixtures/`, or ad hoc folders created for a single run.
+- Project asset → the maintained project path; keep it cleanly reviewable.
+- Workflow-consumed → the project's standard gitignored output directory.
+- Disposable with no required working-tree path → `mktemp -d`, `$TMPDIR`, or `/tmp`.
+- Uncertain → treat as disposable.
 
-## Playwright-Specific Rules
+## Constraints
 
-Before invoking `playwright-cli` or Playwright test commands, classify the expected output as a project asset, workflow-consumed artifact, or disposable run artifact.
+- Don't create or widen `.gitignore`, config conventions, or repository directories just to host disposable outputs.
+- Don't invent a new project-local convention unless the user explicitly asks for one.
+- Never place disposable artifacts in tracked paths or likely-to-be-committed locations (repo root, `docs/`, `scripts/`, `tests/fixtures/`, ad hoc folders).
+- If a disposable artifact must temporarily land in a project-local ignored directory, delete it before completion unless the user asks to keep it.
 
-- **Usually project assets:** test specs, page objects, shared fixtures, helper utilities, stable config changes, and intentionally maintained visual snapshots.
-- **Usually workflow-consumed artifacts:** `playwright-report/`, `test-results/`, `blob-report/`, JUnit or JSON result files, and other outputs explicitly referenced by project scripts or CI.
-- **Usually disposable run artifacts:** one-off traces, videos, screenshots, downloads, copied reports, temporary auth state, and ad hoc HAR, JSON, or storage dumps created only for a local investigation.
+## Playwright Specifics
 
-## Playwright Defaults
+Before invoking `playwright-cli` or Playwright commands, classify the output:
+
+- **Project assets:** test specs, page objects, shared fixtures, helper utilities, stable config changes, intentionally maintained visual snapshots.
+- **Workflow-consumed:** `playwright-report/`, `test-results/`, `blob-report/`, JUnit/JSON result files actually used by project workflows.
+- **Disposable:** one-off traces, videos, screenshots, downloads, copied reports, temporary auth state, ad hoc HAR/JSON/storage dumps for local investigation.
+
+Defaults:
 
 - Start from the repository's Playwright config, CI pipeline, and reporting conventions before adding output paths.
-- Treat standard ignored directories such as `playwright-report/`, `test-results/`, and `blob-report/` as workflow-consumed locations only when repository workflows actually use them, not as storage for one-off investigation files.
-- Do not update the target project's `.gitignore` or invent a repository output convention just to preserve disposable Playwright artifacts.
-- If a disposable experiment is worth keeping, promote it into a maintained project asset and delete the disposable original.
+- Treat `playwright-report/`, `test-results/`, `blob-report/` as workflow-consumed only when workflows actually use them.
+- Don't update `.gitignore` or invent output conventions for disposable artifacts.
+- If a disposable experiment is worth keeping, promote it to a maintained asset and delete the original.
 
 ## Decision Rule
 
