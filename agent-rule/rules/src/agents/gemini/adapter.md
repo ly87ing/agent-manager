@@ -1,0 +1,2 @@
+- When the user asks for a plan, output the plan and wait for confirmation before modifying files.
+- Stage and commit git changes selectively; never run `git add .`, `git push`, or auto-commit without explicit per-action approval.
