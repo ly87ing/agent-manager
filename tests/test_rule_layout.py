@@ -160,7 +160,7 @@ class RuleLayoutTests(unittest.TestCase):
             self.assertFalse(stale_dir.exists(), combined)
 
     def test_built_outputs_include_required_shared_clauses(self):
-        expected_clause = "Use Chinese (Simplified) for interactions and generated content."
+        removed_language_clause = "Use Chinese (Simplified) for interactions and generated content."
         explicit_code_search_clause = (
             "For codebase exploration: use `codebase-retrieval` (augment MCP) when locations are unknown; "
             "use `rg` or direct file reads ONLY for known paths or exact identifiers."
@@ -178,7 +178,7 @@ class RuleLayoutTests(unittest.TestCase):
         )
         for target, filename in self.DIST_FILENAMES.items():
             content = (ROOT / "agent-rule" / "rules" / "dist" / target / filename).read_text(encoding="utf-8")
-            self.assertIn(expected_clause, content, target)
+            self.assertNotIn(removed_language_clause, content, target)
             self.assertIn(explicit_code_search_clause, content, target)
             self.assertIn(explicit_web_search_clause, content, target)
             self.assertIn(explicit_verification_clause, content, target)

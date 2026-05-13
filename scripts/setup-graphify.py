@@ -37,7 +37,7 @@ DEPRECATED_TARGETS = [
 CURSOR_RULE = """\
 ---
 description: graphify knowledge graph context
-alwaysApply: true
+alwaysApply: false
 ---
 
 When the current project has a graphify knowledge graph at graphify-out/:

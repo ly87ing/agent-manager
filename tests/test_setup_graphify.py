@@ -60,6 +60,8 @@ class SetupGraphifyTests(unittest.TestCase):
         self.assertIn("When the current project has a graphify knowledge graph", setup_graphify.CURSOR_RULE)
         self.assertIn("graphify-out/GRAPH_REPORT.md", setup_graphify.CURSOR_RULE)
         self.assertIn("treat the graph as orientation and verify against current files", setup_graphify.CURSOR_RULE)
+        self.assertNotIn("alwaysApply: true", setup_graphify.CURSOR_RULE)
+        self.assertIn("alwaysApply: false", setup_graphify.CURSOR_RULE)
 
     def test_prune_stale_targets_removes_old_agent_skill_copy(self):
         with tempfile.TemporaryDirectory() as temp_dir:

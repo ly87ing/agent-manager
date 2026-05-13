@@ -323,6 +323,12 @@ class ProjectContractTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("make instructions:check", readme)
 
+    def test_readme_documents_graphify_as_on_demand_after_default_hint_removal(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("按需使用", readme)
+        self.assertIn("不再通过 shared rules 或 Claude/Codex hooks 默认提示读取 graphify 报告", readme)
+        self.assertNotIn("本仓 rules 与 hooks 负责启用“有图先看图”的 always-on 提示", readme)
+
     def test_readme_documents_secret_scan_target(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("make secrets-check", readme)

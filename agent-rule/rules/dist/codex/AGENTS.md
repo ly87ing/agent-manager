@@ -1,4 +1,3 @@
-- Use Chinese (Simplified) for interactions and generated content. Use English terms only when clearer.
 - For codebase exploration: use `codebase-retrieval` (augment MCP) when locations are unknown; use `rg` or direct file reads ONLY for known paths or exact identifiers.
 - For internet searches: strictly default to `web_search` and `web_fetch` (grok-search). Use browser automation only for JS, auth, or interactive UI.
 - For non-trivial or ambiguous work, state assumptions, ambiguity, and simplest viable approach before editing.
