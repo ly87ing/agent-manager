@@ -46,6 +46,12 @@
       "upgrade": "npm install -g @augmentcode/auggie@latest",
       "ready_check": "bin:auggie"
     },
+    "ccstatusline": {
+      "install": "npm install -g ccstatusline@latest",
+      "uninstall": "npm uninstall -g ccstatusline",
+      "upgrade": "npm install -g ccstatusline@latest",
+      "ready_check": "bin:ccstatusline"
+    },
     "iterm2": {
       "install": "brew install --cask iterm2",
       "uninstall": "brew uninstall --cask iterm2",

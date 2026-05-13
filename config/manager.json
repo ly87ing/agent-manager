@@ -13,6 +13,7 @@
     "agent-browser": { "enabled": true, "auto_update": true },
     "graphify": { "enabled": true, "auto_update": true },
     "auggie": { "enabled": true, "auto_update": true },
+    "ccstatusline": { "enabled": true, "auto_update": true },
     "iterm2": { "enabled": true, "auto_update": true },
     "tmux": { "enabled": true, "auto_update": true },
     "tpm": { "enabled": true, "auto_update": true },

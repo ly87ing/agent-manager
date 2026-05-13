@@ -7,6 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MODULE = ROOT / "agent-terminal" / "sync_terminal.py"
+THEMES_DIR = ROOT / "agent-terminal" / "iterm-themes"
 
 
 def _run(args, extra_env=None):
@@ -250,6 +251,105 @@ class SyncTerminalTests(unittest.TestCase):
             cfg.write_text(json.dumps({"targets": ["bad"]}), encoding="utf-8")
             result = _run(["--config", str(cfg)])
             self.assertNotEqual(result.returncode, 0)
+
+
+class Iterm2PresetMergeTests(unittest.TestCase):
+    """A target with `iterm2_preset: NAME` injects the vendored preset's
+    color keys into the rendered DynamicProfile's first profile dict."""
+
+    def test_preset_keys_merged_into_first_profile(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            tmpl = d / "iterm2.tmpl"
+            tmpl.write_text(
+                json.dumps({"Profiles": [{"Name": "Managed", "Guid": "abc"}]}),
+                encoding="utf-8",
+            )
+            dest = d / "managed.json"
+            secrets = d / "empty.env"
+            secrets.write_text("", encoding="utf-8")
+            cfg = d / "terminal.json"
+            cfg.write_text(
+                json.dumps(
+                    {
+                        "secrets_file": str(secrets),
+                        "targets": {
+                            "iterm": {
+                                "template": str(tmpl),
+                                "destination": str(dest),
+                                "iterm2_preset": "TokyoNight Storm",
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = _run(["--config", str(cfg)])
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            data = json.loads(dest.read_text())
+            profile = data["Profiles"][0]
+            # ANSI 0-15 + Background/Foreground present
+            self.assertIn("Ansi 0 Color", profile)
+            self.assertIn("Ansi 15 Color", profile)
+            self.assertIn("Background Color", profile)
+            self.assertIn("Foreground Color", profile)
+            # Original keys preserved
+            self.assertEqual(profile["Name"], "Managed")
+            self.assertEqual(profile["Guid"], "abc")
+
+    def test_unknown_preset_name_exits_nonzero(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            tmpl = d / "iterm2.tmpl"
+            tmpl.write_text(json.dumps({"Profiles": [{"Name": "X"}]}), encoding="utf-8")
+            dest = d / "out.json"
+            cfg = d / "terminal.json"
+            cfg.write_text(
+                json.dumps(
+                    {
+                        "targets": {
+                            "iterm": {
+                                "template": str(tmpl),
+                                "destination": str(dest),
+                                "iterm2_preset": "DoesNotExist",
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = _run(["--config", str(cfg)])
+            self.assertNotEqual(result.returncode, 0)
+
+    def test_target_without_preset_behaves_unchanged(self):
+        """Backward compat: omitting `iterm2_preset` writes the rendered template verbatim."""
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            tmpl = d / "iterm2.tmpl"
+            payload = {"Profiles": [{"Name": "Static"}]}
+            tmpl.write_text(json.dumps(payload), encoding="utf-8")
+            dest = d / "out.json"
+            cfg = d / "terminal.json"
+            cfg.write_text(
+                json.dumps(
+                    {"targets": {"iterm": {"template": str(tmpl), "destination": str(dest)}}}
+                ),
+                encoding="utf-8",
+            )
+            result = _run(["--config", str(cfg)])
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(json.loads(dest.read_text()), payload)
+
+
+class TerminalContractTests(unittest.TestCase):
+    """Repo-level contracts on config/terminal.json."""
+
+    def test_iterm2_target_locks_a_vendored_preset(self):
+        cfg = json.loads((ROOT / "config" / "terminal.json").read_text())
+        preset = cfg["targets"]["iterm2_dynamic_profile"].get("iterm2_preset")
+        self.assertIsNotNone(preset, "iterm2 target must lock a preset name")
+        preset_file = THEMES_DIR / f"{preset}.itermcolors"
+        self.assertTrue(preset_file.is_file(), f"vendored preset missing: {preset_file}")
 
 
 if __name__ == "__main__":

@@ -7,8 +7,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
+import plistlib
 import sys
 import tempfile
 from pathlib import Path
@@ -23,6 +25,8 @@ from src.runtime_logging import configure_logging
 from src.template_utils import load_env_file, render_template
 
 configure_logging()
+
+ITERM_THEMES_DIR = Path(__file__).resolve().parent / "iterm-themes"
 
 
 def _check_tool_ready(tool_name: str, tool_defs: dict) -> bool:
@@ -62,6 +66,29 @@ def _atomic_write_text(dest_path: Path, content: str, mode: int | None, dry_run:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
         return False
+
+
+def _merge_iterm_preset(rendered: str, preset_name: str) -> str:
+    """Merge a vendored .itermcolors preset's color keys into the first profile.
+
+    The rendered template must parse as JSON with a top-level `Profiles` list.
+    Color keys from `iterm-themes/<preset_name>.itermcolors` (plist) are
+    injected into `Profiles[0]`, overriding any inline color values.
+    """
+    preset_file = ITERM_THEMES_DIR / f"{preset_name}.itermcolors"
+    if not preset_file.is_file():
+        raise FileNotFoundError(
+            f"iterm2_preset 引用了未 vendored 的主题: {preset_file}"
+        )
+    color_map = plistlib.loads(preset_file.read_bytes())
+    profile_doc = json.loads(rendered)
+    profiles = profile_doc.get("Profiles")
+    if not isinstance(profiles, list) or not profiles:
+        raise ValueError("iterm2 模板缺少 Profiles[0]，无法注入预设色")
+    profile = profiles[0]
+    for key, value in color_map.items():
+        profile[key] = value
+    return json.dumps(profile_doc, indent=2, ensure_ascii=False) + "\n"
 
 
 def sync_terminal(config_path: Path, repo_root: Path, dry_run: bool = False, offline: bool = False) -> bool:
@@ -132,12 +159,30 @@ def sync_terminal(config_path: Path, repo_root: Path, dry_run: bool = False, off
             all_ok = False
             continue
 
+        preset_name = target_cfg.get("iterm2_preset")
+        if preset_name:
+            try:
+                rendered = _merge_iterm_preset(rendered, preset_name)
+            except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+                logging.error(f"[TERMINAL: {target_name}] preset 合并失败: {exc}")
+                all_ok = False
+                continue
+
         dest_path = Path(os.path.expanduser(dest_str))
         mode = _parse_chmod(chmod_str)
 
         logging.info(f"[TERMINAL: {target_name}] 同步 {tmpl_rel} -> {dest_path}")
         if not _atomic_write_text(dest_path, rendered, mode, dry_run):
             all_ok = False
+
+    if _check_tool_ready("iterm2", tool_defs):
+        try:
+            from import_iterm_themes import run_import as _run_iterm_import
+        except ImportError as exc:
+            logging.warning(f"[ITERM THEMES] 无法加载导入器: {exc}")
+        else:
+            if not _run_iterm_import(dry_run=dry_run):
+                all_ok = False
 
     return all_ok
 
