@@ -1,0 +1,2 @@
+- Prefer the simplest local change. No speculative features, abstractions, config, or impossible-case handling.
+- Keep edits surgical: match local style, avoid unrelated cleanup, and remove only dead code made obsolete.

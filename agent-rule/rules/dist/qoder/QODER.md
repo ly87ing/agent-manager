@@ -1,8 +1,5 @@
-- For codebase exploration: use `codebase-retrieval` (augment MCP) when locations are unknown; use `rg` or direct file reads ONLY for known paths or exact identifiers.
 - For internet searches: strictly default to `web_search` and `web_fetch` (grok-search). Use browser automation only for JS, auth, or interactive UI.
 - For non-trivial or ambiguous work, state assumptions, ambiguity, and simplest viable approach before editing.
-- Prefer the simplest local change. No speculative features, abstractions, config, or impossible-case handling.
-- Keep edits surgical: match local style, avoid unrelated cleanup, and remove only dead code made obsolete.
 - For multi-step work, state a brief plan with verification points.
 - Before edits that change behavior, touch shared code, or span multiple files, inspect the affected code and nearby tests first.
 - After every change, run the smallest relevant verification that could fail.
@@ -11,3 +8,5 @@
 - If code style, config, data contracts, or comments change, read `modules/style.md`.
 - If UI, flows, frontend validation, or browser automation change, read `modules/frontend.md`.
 - If Playwright, generators, generated artifacts, or debug output are involved, read `modules/artifact-hygiene.md`.
+- Prefer the simplest local change. No speculative features, abstractions, config, or impossible-case handling.
+- Keep edits surgical: match local style, avoid unrelated cleanup, and remove only dead code made obsolete.
