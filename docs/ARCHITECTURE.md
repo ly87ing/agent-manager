@@ -142,7 +142,7 @@ graph TD
 - `manage.sh rules:build` / `make rules-build` 用于刷新 `dist/`。
 - `manage.sh rules:sync` / `make rules:sync` 用于把 `dist/` 产物同步到目标 Agent 目录与 repo-native 文件位置。
 - `config/claude-hooks.json` 定义仓库级 Claude hooks，`agent-rule/scripts/sync-claude-hooks.py` 会把它渲染到 `.claude/settings.json`。
-- `config/codex-hooks.json` 定义仓库级 Codex hooks，`agent-rule/scripts/sync-codex-hooks.py` 会把它渲染到 `.codex/hooks.json`。
+- `config/codex-hooks.json` 定义仓库级 Codex hooks，`agent-rule/scripts/sync-codex-hooks.py` 会把它渲染到 `.codex/hooks.json`；当前 Codex hooks 包含 `PreToolUse` 的生成产物写保护和 `Stop` 的规则构建一致性校验。
 - `manage.sh claude:hooks:sync` / `make claude-hooks-sync` 用于刷新项目内的 Claude hooks 配置。
 - `manage.sh codex:hooks:sync` / `make codex-hooks-sync` 用于刷新项目内的 Codex hooks 配置。
 - `scripts/evals/run_rule_effectiveness_eval.py` 读取 `scripts/evals/fixtures/` 中的离线 JSON fixture，校验题目与 run artifact schema，并强制执行 `min_case_count`、`required_agents`、`success / verification` 阈值等 suite requirements；`make eval-rules` 是其推荐入口。

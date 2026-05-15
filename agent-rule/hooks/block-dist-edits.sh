@@ -46,6 +46,8 @@ def command_writes_dist(command: str | None) -> bool:
     # path in the bash command itself, so they fall through unblocked.
     if not command or "agent-rule/rules/dist" not in command:
         return False
+    if re.search(r"^\*\*\* (Add|Update|Delete) File: .*/?agent-rule/rules/dist/", command, re.MULTILINE):
+        return True
     return bool(re.search(
         r"(\s>{1,2}\s|\btee\b|\bcp\b|\bmv\b|\brm\b|\bdd\b|\bsed\s+-i)",
         command,

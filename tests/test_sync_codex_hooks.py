@@ -36,8 +36,16 @@ class CodexHooksSyncTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             hooks = self._read_hooks(temp_root)
             self.assertIn("hooks", hooks)
+            self.assertIn("PreToolUse", hooks["hooks"])
             self.assertIn("Stop", hooks["hooks"])
-            self.assertNotIn("PreToolUse", hooks["hooks"])
+            self.assertTrue(
+                any(
+                    entry.get("matcher") == "Bash|apply_patch|Edit|Write"
+                    and any("block-dist-edits.sh" in hook.get("command", "") for hook in entry.get("hooks", []))
+                    for entry in hooks["hooks"]["PreToolUse"]
+                ),
+                hooks,
+            )
             self.assertTrue(
                 any(
                     any(
@@ -65,6 +73,34 @@ class CodexHooksSyncTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_pre_tool_hook_denies_codex_apply_patch_to_generated_rules(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = self._copy_repo(temp_dir)
+            command = "\n".join(
+                [
+                    "*** Begin Patch",
+                    "*** Update File: agent-rule/rules/dist/codex/AGENTS.md",
+                    "@@",
+                    "+bad manual edit",
+                    "*** End Patch",
+                ]
+            )
+
+            result = subprocess.run(
+                ["bash", str(temp_root / "agent-rule" / "hooks" / "block-dist-edits.sh")],
+                cwd=temp_root,
+                input=json.dumps({"tool_input": {"command": command}}),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            response = json.loads(result.stdout)
+            self.assertEqual(response["hookSpecificOutput"]["hookEventName"], "PreToolUse")
+            self.assertEqual(response["hookSpecificOutput"]["permissionDecision"], "deny")
+            self.assertIn("generated output", response["hookSpecificOutput"]["permissionDecisionReason"])
 
     def test_sync_dry_run_does_not_write_project_codex_hooks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
