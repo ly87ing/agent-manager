@@ -38,6 +38,7 @@ Agent Manager 采用**凭证外置**的设计理念，将敏感信息（如API�
 ```
 secrets/
 ├── mcp.env                 # 主要的MCP凭证文件
+├── claude.env              # Claude Code 凭证（AUTH_TOKEN / BASE_URL）
 ├── .git/                   # 凭证仓库的Git元数据
 └── 其他环境特定的.env文件
 ```
@@ -80,14 +81,21 @@ ANOTHER_API_KEY="sk-abc123..."
 - `TAVILY_API_KEY`: grok-search MCP 使用的 Tavily API Key
 - `FIRECRAWL_API_KEY`: grok-search MCP 使用的 Firecrawl API Key
 
-### 2. 其他服务凭证
+### 2. Claude Code 凭证
+存放于 `secrets/claude.env`，由 `scripts/claude/sync_env.py` 注入 `~/.claude/settings.json` 的 `env` 块：
+- `ANTHROPIC_AUTH_TOKEN`: 走自定义 `ANTHROPIC_BASE_URL`（代理 / 中转）时携带的鉴权 token
+- `ANTHROPIC_BASE_URL`: API endpoint。留空或不写时 Claude Code 直连官方 `api.anthropic.com`
+
+占位符在 `config/claude-env.json` 中声明。需要轮换时编辑 `secrets/claude.env` 后 `make claude-env-sync` 即可。
+
+### 3. 其他服务凭证
 根据集成的服务而定义：
 - GitHub Personal Access Token (用于某些扩展)
 - API keys for various AI providers
 - Database connection strings
 - 其他第三方服务凭证
 
-### 3. 远程访问与网络身份信息
+### 4. 远程访问与网络身份信息
 以下信息虽然不一定是传统意义上的 API key，但在本项目中同样按敏感信息处理：
 - `Tailscale` 设备名、Tailnet DNS name、完整 `.ts.net` 域名
 - `Tailscale` IPv4 地址、ACL / grants 中使用的真实主机映射
