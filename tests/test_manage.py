@@ -60,8 +60,6 @@ class ManageScriptTests(unittest.TestCase):
         env = dict(base_env or os.environ.copy())
         env["AGENT_MANAGER_LOCK_FILE"] = str(self.lock_path)
         env["AGENT_MANAGER_LOG_PREFIX"] = str(self.log_prefix)
-        env.setdefault("ANTHROPIC_AUTH_TOKEN", "test-anthropic-token")
-        env.setdefault("ANTHROPIC_BASE_URL", "https://anthropic.example.invalid")
         return env
 
     def _write_stub(self, path: Path, content: str):

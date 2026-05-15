@@ -38,7 +38,6 @@ Agent Manager 采用**凭证外置**的设计理念，将敏感信息（如API�
 ```
 secrets/
 ├── mcp.env                 # 主要的MCP凭证文件
-├── claude.env              # Claude Code 凭证（AUTH_TOKEN / BASE_URL）
 ├── .git/                   # 凭证仓库的Git元数据
 └── 其他环境特定的.env文件
 ```
@@ -82,11 +81,7 @@ ANOTHER_API_KEY="sk-abc123..."
 - `FIRECRAWL_API_KEY`: grok-search MCP 使用的 Firecrawl API Key
 
 ### 2. Claude Code 凭证
-存放于 `secrets/claude.env`，由 `scripts/claude/sync_env.py` 注入 `~/.claude/settings.json` 的 `env` 块：
-- `ANTHROPIC_AUTH_TOKEN`: 走自定义 `ANTHROPIC_BASE_URL`（代理 / 中转）时携带的鉴权 token
-- `ANTHROPIC_BASE_URL`: API endpoint。留空或不写时 Claude Code 直连官方 `api.anthropic.com`
-
-占位符在 `config/claude-env.json` 中声明。需要轮换时编辑 `secrets/claude.env` 后 `make claude-env-sync` 即可。
+Claude Code 凭证不再由 agent-manager 注入，也不再维护 `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL` 的环境变量同步链路。Claude Code 的 provider、key 和 `~/.claude/settings.json` 由 cc-switch 维护，避免 agent-manager 与 cc-switch 对同一组 env key 反复覆盖。
 
 ### 3. 其他服务凭证
 根据集成的服务而定义：

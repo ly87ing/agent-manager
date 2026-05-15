@@ -979,19 +979,12 @@ function run_mcp_sync_task() {
     run_task_in_dir "$title" "MCP 注入完成" "MCP 失败" 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" "${args[@]}"
 }
 
-function run_claude_env_sync_task() {
-    local args=(./scripts/claude/sync_env.py)
-    if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
-    run_task_in_dir "注入 Claude 凭证" "Claude 凭证注入完成" "Claude 凭证失败" 300 "$ROOT_DIR" "$PYTHON_CMD" "${args[@]}"
-}
-
 function run_sync_pipeline() {
     begin_workflow "🔄 Agent Manager 配置同步启动"
     begin_pipeline_execution
     run_pipeline_step run_rules_sync_task
     run_pipeline_step run_skills_link_task false
     run_pipeline_step run_mcp_sync_task true false
-    run_pipeline_step run_claude_env_sync_task
     finish_pipeline_execution
 }
 
@@ -1006,7 +999,6 @@ function run_update_pipeline() {
     run_pipeline_step run_rules_sync_task
     run_pipeline_step run_skills_link_task false
     run_pipeline_step run_mcp_sync_task true false
-    run_pipeline_step run_claude_env_sync_task
     finish_pipeline_execution
 }
 
@@ -1363,8 +1355,6 @@ case "$cmd" in
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" ./scripts/sync-agent-rules.sh "${rule_args[@]}" $DRY_RUN_FLAG ;;
     claude:hooks:sync)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" "$PYTHON_CMD" ./scripts/sync-claude-hooks.py $DRY_RUN_FLAG ;;
-    claude:env:sync)
-        run_supervised_command_in_dir 600 "$ROOT_DIR" "$PYTHON_CMD" ./scripts/claude/sync_env.py $DRY_RUN_FLAG ;;
     claude:statusline:install)
         run_supervised_command_in_dir 600 "$ROOT_DIR" "$PYTHON_CMD" ./scripts/claude/install_statusline.py $DRY_RUN_FLAG ;;
     claude:statusline:wire)
