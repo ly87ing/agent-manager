@@ -1,3 +1,4 @@
+import json
 import subprocess
 import tempfile
 import unittest
@@ -439,14 +440,23 @@ class ProjectContractTests(unittest.TestCase):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
         manage_sh = (ROOT / "manage.sh").read_text(encoding="utf-8")
         secrets_doc = (ROOT / "docs" / "SECRETS-MANAGEMENT.md").read_text(encoding="utf-8")
+        public_rule = json.loads((ROOT / "config" / "claude-env.json").read_text(encoding="utf-8"))
 
         self.assertNotIn("claude-env-sync", makefile)
         self.assertNotIn("claude:env:sync", manage_sh)
         self.assertNotIn("run_claude_env_sync_task", manage_sh)
-        self.assertFalse((ROOT / "config" / "claude-env.json").exists())
+        self.assertEqual(public_rule["settings_path"], "~/.claude/settings.json")
+        self.assertEqual(
+            public_rule["env"],
+            {
+                "ANTHROPIC_AUTH_TOKEN": "${ANTHROPIC_AUTH_TOKEN}",
+                "ANTHROPIC_BASE_URL": "${ANTHROPIC_BASE_URL}",
+            },
+        )
         self.assertFalse((ROOT / "scripts" / "claude" / "sync_env.py").exists())
         self.assertFalse((ROOT / "tests" / "test_sync_claude_env.py").exists())
         self.assertIn("Claude Code 凭证不再由 agent-manager 注入", secrets_doc)
+        self.assertIn("config/claude-env.json", secrets_doc)
         self.assertIn("cc-switch", secrets_doc)
 
     def test_repo_root_agents_guidance_covers_setup_tests_done_when_and_generated_boundaries(self):

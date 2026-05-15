@@ -83,6 +83,8 @@ ANOTHER_API_KEY="sk-abc123..."
 ### 2. Claude Code 凭证
 Claude Code 凭证不再由 agent-manager 注入，也不再维护 `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL` 的环境变量同步链路。Claude Code 的 provider、key 和 `~/.claude/settings.json` 由 cc-switch 维护，避免 agent-manager 与 cc-switch 对同一组 env key 反复覆盖。
 
+仓库仍保留 `config/claude-env.json` 作为公开 rule：它只声明 Claude Code provider env key 的占位符和 settings 路径，不包含真实值，也不会被 agent-manager 写入用户级 Claude Code 配置。
+
 ### 3. 其他服务凭证
 根据集成的服务而定义：
 - GitHub Personal Access Token (用于某些扩展)
