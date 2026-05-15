@@ -161,10 +161,6 @@ class RuleLayoutTests(unittest.TestCase):
 
     def test_built_outputs_include_required_shared_clauses(self):
         removed_language_clause = "Use Chinese (Simplified) for interactions and generated content."
-        explicit_code_search_clause = (
-            "For codebase exploration: use `codebase-retrieval` (augment MCP) when locations are unknown; "
-            "use `rg` or direct file reads ONLY for known paths or exact identifiers."
-        )
         explicit_web_search_clause = (
             "For internet searches: strictly default to `web_search` and `web_fetch` (grok-search)."
         )
@@ -179,7 +175,9 @@ class RuleLayoutTests(unittest.TestCase):
         for target, filename in self.DIST_FILENAMES.items():
             content = (ROOT / "agent-rule" / "rules" / "dist" / target / filename).read_text(encoding="utf-8")
             self.assertNotIn(removed_language_clause, content, target)
-            self.assertIn(explicit_code_search_clause, content, target)
+            self.assertNotIn("For codebase exploration:", content, target)
+            self.assertNotIn("codebase-retrieval", content, target)
+            self.assertNotIn("augment MCP", content, target)
             self.assertIn(explicit_web_search_clause, content, target)
             self.assertIn(explicit_verification_clause, content, target)
             self.assertNotIn("graphify-out/GRAPH_REPORT.md", content, target)

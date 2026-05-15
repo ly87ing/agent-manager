@@ -43,7 +43,7 @@ make sync
 
 | Server | 用途 | 受管命令 | 凭证 | 默认策略 |
 |--------|------|----------|------|----------|
-| `augment-context-engine` | 代码库检索、语义搜索、codebase-retrieval | `auggie --mcp --mcp-auto-workspace` | `AUGMENT_SESSION_AUTH` | 启用 |
+| `augment-context-engine` | 代码库检索、语义搜索、codebase-retrieval | `auggie --mcp --mcp-auto-workspace` | `AUGMENT_SESSION_AUTH` | 默认禁用 |
 | `chrome-devtools` | Chrome DevTools 浏览器调试、性能分析、network / console / screenshot | `npx -y chrome-devtools-mcp@latest` | 无 | 启用 |
 | `grok-search` | web_search / web_fetch 联网搜索与网页抓取 | `uvx --from git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily grok-search` | `GROK_API_URL`, `GROK_API_KEY`, `TAVILY_ENABLED`, `TAVILY_API_KEY`, `FIRECRAWL_API_KEY` | 启用 |
 

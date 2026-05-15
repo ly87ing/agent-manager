@@ -24,7 +24,7 @@
     "ui-ux-pro-max-skill": { "enabled": true }
   },
   "mcp": {
-    "augment-context-engine": { "enabled": true },
+    "augment-context-engine": { "enabled": false },
     "chrome-devtools": { "enabled": true },
     "grok-search": { "enabled": true }
   }

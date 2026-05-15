@@ -49,6 +49,11 @@ class SyncMcpTests(unittest.TestCase):
         self.assertIsInstance(agents, list)
         self.assertNotIn("qodercli", agents)
 
+    def test_committed_mcp_policy_keeps_augment_context_engine_disabled_by_default(self):
+        policy = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
+
+        self.assertFalse(policy["mcp"]["augment-context-engine"]["enabled"])
+
     def test_committed_mcp_policy_enables_chrome_devtools_latest(self):
         definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
         policy = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
