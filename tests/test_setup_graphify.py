@@ -20,9 +20,6 @@ class SetupGraphifyTests(unittest.TestCase):
                 "claude-code": "~/.claude/skills",
                 "codex": "~/.codex/skills",
                 "gemini-cli": "~/.gemini/skills",
-                "cursor": "~/.cursor/rules",
-                "opencode": "~/.config/opencode/skills",
-                "kimi-cli": "~/.kimi/skills",
             }
         }
 
@@ -33,9 +30,7 @@ class SetupGraphifyTests(unittest.TestCase):
         self.assertIn(("codex", "skill", "~/.codex/skills/graphify/SKILL.md", "skill-codex.md"), rendered)
         self.assertNotIn(("codex", "skill", "~/.agents/skills/graphify/SKILL.md", "skill-codex.md"), rendered)
         self.assertIn(("gemini-cli", "skill", "~/.gemini/skills/graphify/SKILL.md", "skill.md"), rendered)
-        self.assertIn(("opencode", "skill", "~/.config/opencode/skills/graphify/SKILL.md", "skill-opencode.md"), rendered)
-        self.assertIn(("kimi-cli", "skill", "~/.kimi/skills/graphify/SKILL.md", "skill.md"), rendered)
-        self.assertIn(("cursor", "cursor-rule", "~/.cursor/rules/graphify.mdc", ""), rendered)
+        self.assertEqual(len(rendered), 3)
 
     def test_write_marker_records_installed_targets(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -56,12 +51,17 @@ class SetupGraphifyTests(unittest.TestCase):
             self.assertEqual(marker["targets"][0]["agent_id"], "claude-code")
             self.assertEqual(marker["targets"][0]["path"], "~/.claude/skills/graphify/SKILL.md")
 
-    def test_cursor_rule_is_conditional_on_existing_graph(self):
-        self.assertIn("When the current project has a graphify knowledge graph", setup_graphify.CURSOR_RULE)
-        self.assertIn("graphify-out/GRAPH_REPORT.md", setup_graphify.CURSOR_RULE)
-        self.assertIn("treat the graph as orientation and verify against current files", setup_graphify.CURSOR_RULE)
-        self.assertNotIn("alwaysApply: true", setup_graphify.CURSOR_RULE)
-        self.assertIn("alwaysApply: false", setup_graphify.CURSOR_RULE)
+    def test_build_targets_ignores_retired_agent_targets(self):
+        skill_cfg = {
+            "agents": {
+                "cursor": "~/.cursor/rules",
+                "opencode": "~/.config/opencode/skills",
+                "kimi-cli": "~/.kimi/skills",
+                "qodercli": "~/.qoder/skills",
+            }
+        }
+
+        self.assertEqual(setup_graphify.build_graphify_targets(skill_cfg), [])
 
     def test_prune_stale_targets_removes_old_agent_skill_copy(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -186,62 +186,17 @@ class ManageDoctorReportTests(unittest.TestCase):
             self.assertEqual(agent_names["Codex"]["status"], "error")
             self.assertIn("未纳入 agent-manager 托管", agent_names["Codex"]["message"])
 
-    def test_report_flags_official_gap_for_disabled_cursor_without_managed_uninstall(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
-
-            (temp_root / "config" / "manager.json").write_text(
-                '{\n  "agents": {\n    "cursor": { "enabled": false, "auto_install": false, "auto_update": false, "preferred_provider": "native" }\n  },\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "agents.json").write_text(
-                '{\n  "cursor": {\n    "display_name": "Cursor CLI",\n    "bin": "cursor-agent",\n    "preferred_provider": "native",\n    "providers": {\n      "native": {\n        "managed": true,\n        "upgrade": "cursor-agent update",\n        "unsupported_actions": ["uninstall"]\n      }\n    }\n  }\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "mcp.json").write_text(
-                '{"agent_paths": {}, "servers": {}}',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "skills.json").write_text(
-                '{"repositories": {}, "agents": {}}',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
-
-            with (
-                mock.patch("src.manage_doctor.detect_all_providers", return_value=["native"]),
-                mock.patch("src.manage_doctor.is_agent_installed", return_value=True),
-            ):
-                report = build_report(
-                    root_dir=temp_root,
-                    config_file=temp_root / "config" / "manager.json",
-                    python_cmd="python3",
-                )
-
-            agent_names = {entry["name"]: entry for entry in report["sections"]["agents"]}
-            self.assertEqual(report["status"], "warning")
-            self.assertEqual(report["summary"]["warnings"], 1)
-            self.assertEqual(agent_names["Cursor CLI"]["status"], "warning")
-            self.assertEqual(agent_names["Cursor CLI"]["category"], "official_gap")
-            self.assertIn("官方当前未提供受管 uninstall 动作", agent_names["Cursor CLI"]["message"])
-            self.assertIn("不会伪造删除命令", agent_names["Cursor CLI"]["message"])
-            self.assertEqual(report["summary"]["warning_categories"]["official_gaps"], 1)
-            self.assertEqual(report["summary"]["warning_categories"]["optional_tools"], 0)
-            self.assertEqual(report["summary"]["warning_categories"]["unmaterialized"], 0)
-            self.assertIn("官方生命周期动作缺口", render_text(report))
-
     def test_report_flags_invalid_unsupported_actions_in_doctor_as_error(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
 
             (temp_root / "config" / "manager.json").write_text(
-                '{\n  "agents": {\n    "cursor": { "enabled": false, "auto_install": false, "auto_update": false, "preferred_provider": "native" }\n  },\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
+                '{\n  "agents": {\n    "codex": { "enabled": false, "auto_install": false, "auto_update": false, "preferred_provider": "npm" }\n  },\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
                 encoding="utf-8",
             )
             (temp_root / "config" / "agents.json").write_text(
-                '{\n  "cursor": {\n    "display_name": "Cursor CLI",\n    "bin": "cursor-agent",\n    "preferred_provider": "native",\n    "providers": {\n      "native": {\n        "managed": true,\n        "upgrade": "cursor-agent update",\n        "unsupported_actions": "uninstall"\n      }\n    }\n  }\n}\n',
+                '{\n  "codex": {\n    "display_name": "Codex",\n    "bin": "codex",\n    "preferred_provider": "npm",\n    "providers": {\n      "npm": {\n        "managed": true,\n        "uninstall": "npm uninstall -g @openai/codex",\n        "unsupported_actions": "uninstall"\n      }\n    }\n  }\n}\n',
                 encoding="utf-8",
             )
             (temp_root / "config" / "mcp.json").write_text(
@@ -266,12 +221,12 @@ class ManageDoctorReportTests(unittest.TestCase):
 
             agent_names = {entry["name"]: entry for entry in report["sections"]["agents"]}
             self.assertEqual(report["status"], "error")
-            self.assertEqual(agent_names["Cursor CLI"]["status"], "error")
-            self.assertIn("unsupported_actions 配置非法", agent_names["Cursor CLI"]["message"])
+            self.assertEqual(agent_names["Codex"]["status"], "error")
+            self.assertIn("unsupported_actions 配置非法", agent_names["Codex"]["message"])
             self.assertEqual(report["summary"]["errors"], 1)
             self.assertEqual(report["summary"]["warnings"], 0)
             self.assertEqual(report["summary"]["warning_categories"]["official_gaps"], 0)
-            self.assertNotIn("category", agent_names["Cursor CLI"])
+            self.assertNotIn("category", agent_names["Codex"])
 
     def test_report_flags_repo_secret_outside_secrets_directory(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -411,177 +366,6 @@ class ManageDoctorReportTests(unittest.TestCase):
             self.assertEqual(mcp_names["Codex"]["status"], "error")
             self.assertIn("期望 1 个托管服务", mcp_names["Codex"]["message"])
 
-    def test_report_treats_disabled_agent_without_managed_mcp_entries_as_ok(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            cursor_config = Path(temp_dir) / "cursor" / "mcp.json"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
-            cursor_config.parent.mkdir(parents=True)
-            cursor_config.write_text(
-                json.dumps(
-                    {
-                        "mcpServers": {
-                            "user-owned": {
-                                "command": "echo",
-                                "args": [],
-                            }
-                        }
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            (temp_root / "config" / "manager.json").write_text(
-                '{\n  "agents": {\n    "cursor": { "enabled": false, "auto_install": false, "auto_update": false }\n  },\n  "tools": {},\n  "skills": {},\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "mcp.json").write_text(
-                '{\n  "agent_paths": {\n    "cursor": { "path": "%s", "format": "json" }\n  },\n  "servers": {\n    "augment-context-engine": {\n      "command": "auggie",\n      "args": ["--mcp"],\n      "agents": ["cursor"]\n    }\n  }\n}\n'
-                % cursor_config,
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "skills.json").write_text(
-                '{"repositories": {}, "agents": {}}',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
-
-            with (
-                mock.patch("src.manage_doctor.detect_all_providers", return_value=[]),
-                mock.patch("src.manage_doctor.is_agent_installed", return_value=False),
-            ):
-                report = build_report(
-                    root_dir=temp_root,
-                    config_file=temp_root / "config" / "manager.json",
-                    python_cmd="python3",
-                )
-
-            self.assertEqual(report["status"], "healthy")
-            mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
-            self.assertEqual(mcp_names["Cursor CLI"]["status"], "ok")
-            self.assertEqual(mcp_names["Cursor CLI"]["message"], "策略已禁用")
-
-    def test_report_flags_kimi_cli_json_target_with_missing_managed_entries(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            temp_home = Path(temp_dir) / "home"
-            kimi_config = temp_home / ".kimi" / "mcp.json"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
-            kimi_config.parent.mkdir(parents=True)
-            kimi_config.write_text(
-                json.dumps({"mcpServers": {"user-owned": {"command": "echo", "args": []}}}),
-                encoding="utf-8",
-            )
-
-            (temp_root / "config" / "manager.json").write_text(
-                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "mcp.json").write_text(
-                '{\n  "agent_paths": {\n    "kimi-cli": { "path": "%s", "format": "json" }\n  },\n  "servers": {\n    "augment-context-engine": {\n      "command": "auggie",\n      "args": ["--mcp"],\n      "agents": ["kimi-cli"]\n    }\n  }\n}\n'
-                % kimi_config,
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "skills.json").write_text(
-                '{\n  "repositories": {},\n  "agents": {}\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
-
-            report = build_report(
-                root_dir=temp_root,
-                config_file=temp_root / "config" / "manager.json",
-                python_cmd="python3",
-            )
-
-            self.assertEqual(report["status"], "error")
-            mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
-            self.assertIn("Kimi Code CLI", mcp_names)
-            self.assertEqual(mcp_names["Kimi Code CLI"]["status"], "error")
-            self.assertIn("期望 1 个托管服务", mcp_names["Kimi Code CLI"]["message"])
-
-    def test_rules_audit_marks_kimi_target_unmaterialized_when_installed(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            target_path = temp_root / ".kimi" / "AGENTS.md"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
-
-            (temp_root / "config" / "manager.json").write_text(
-                (
-                    '{\n  "agents": {\n    "kimi-cli": { "enabled": true, "auto_install": false, "auto_update": false }\n  },'
-                    '\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n'
-                ),
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "mcp.json").write_text(
-                '{"agent_paths": {}, "servers": {}}',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "skills.json").write_text(
-                '{"repositories": {}, "agents": {}}',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text(
-                "kimi_global|global|rules/dist/kimi/AGENTS.md|{{REPO_ROOT}}/.kimi/AGENTS.md\n",
-                encoding="utf-8",
-            )
-            target_path.unlink(missing_ok=True)
-
-            with mock.patch(
-                "src.manage_doctor.is_agent_installed",
-                side_effect=lambda agent_id, _definition: agent_id == "kimi-cli",
-            ):
-                report = build_report(
-                    root_dir=temp_root,
-                    config_file=temp_root / "config" / "manager.json",
-                    python_cmd="python3",
-                )
-
-            rules_names = {entry["name"]: entry for entry in report["sections"]["rules"]}
-            self.assertEqual(rules_names["kimi_global"]["status"], "warning")
-            self.assertEqual(rules_names["kimi_global"]["message"], "尚未分发")
-
-    def test_rules_audit_marks_kimi_target_unmaterialized_when_uninstalled(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            target_path = temp_root / ".kimi" / "AGENTS.md"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
-
-            (temp_root / "config" / "manager.json").write_text(
-                (
-                    '{\n  "agents": {\n    "kimi-cli": { "enabled": true, "auto_install": false, "auto_update": false }\n  },'
-                    '\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n'
-                ),
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "mcp.json").write_text(
-                '{"agent_paths": {}, "servers": {}}',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "skills.json").write_text(
-                '{"repositories": {}, "agents": {}}',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text(
-                "kimi_global|global|rules/dist/kimi/AGENTS.md|{{REPO_ROOT}}/.kimi/AGENTS.md\n",
-                encoding="utf-8",
-            )
-            target_path.unlink(missing_ok=True)
-
-            with mock.patch(
-                "src.manage_doctor.is_agent_installed",
-                side_effect=lambda agent_id, _definition: False if agent_id == "kimi-cli" else True,
-            ):
-                report = build_report(
-                    root_dir=temp_root,
-                    config_file=temp_root / "config" / "manager.json",
-                    python_cmd="python3",
-                )
-
-            rules_names = {entry["name"]: entry for entry in report["sections"]["rules"]}
-            self.assertEqual(rules_names["kimi_global"]["status"], "warning")
-            self.assertEqual(rules_names["kimi_global"]["message"], "尚未分发")
-
     def test_report_ignores_foreign_managed_by_marker_in_toml_mcp_file(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
@@ -628,53 +412,6 @@ class ManageDoctorReportTests(unittest.TestCase):
             mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
             self.assertEqual(mcp_names["Codex"]["status"], "error")
             self.assertIn("实际 0 个", mcp_names["Codex"]["message"])
-
-    def test_report_ignores_foreign_managed_by_marker_in_json_mcp_file(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            cursor_config = Path(temp_dir) / "cursor" / "mcp.json"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
-            cursor_config.parent.mkdir(parents=True)
-            cursor_config.write_text(
-                json.dumps(
-                    {
-                        "mcpServers": {
-                            "user-owned": {
-                                "command": "echo",
-                                "args": [],
-                                "env": {"_MANAGED_BY": "someone-else"},
-                            }
-                        }
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            (temp_root / "config" / "manager.json").write_text(
-                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "mcp.json").write_text(
-                '{\n  "agent_paths": {\n    "cursor": { "path": "%s", "format": "json" }\n  },\n  "servers": {\n    "augment-context-engine": {\n      "command": "auggie",\n      "args": ["--mcp"],\n      "agents": ["cursor"]\n    }\n  }\n}\n'
-                % cursor_config,
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "skills.json").write_text(
-                '{\n  "repositories": {},\n  "agents": {}\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
-
-            report = build_report(
-                root_dir=temp_root,
-                config_file=temp_root / "config" / "manager.json",
-                python_cmd="python3",
-            )
-
-            self.assertEqual(report["status"], "error")
-            mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
-            self.assertEqual(mcp_names["Cursor CLI"]["status"], "error")
-            self.assertIn("实际 0 个", mcp_names["Cursor CLI"]["message"])
 
     def test_report_flags_wrong_managed_mcp_name_even_when_count_matches(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1005,69 +742,6 @@ class ManageDoctorReportTests(unittest.TestCase):
             self.assertIn("augment-context-engine", mcp_names["Codex"]["message"])
             self.assertIn("配置漂移", mcp_names["Codex"]["message"])
 
-    def test_report_accepts_resolved_repo_path_for_repo_backed_managed_mcp_server(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            cursor_config = Path(temp_dir) / "cursor" / "mcp.json"
-            repo_path = temp_root / "agent-mcp" / "demo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
-            cursor_config.parent.mkdir(parents=True)
-            repo_path.mkdir(parents=True)
-            (repo_path / ".git").mkdir()
-            cursor_config.write_text(
-                json.dumps(
-                    {
-                        "mcpServers": {
-                            "demo": {
-                                "command": "node",
-                                "args": [f"{repo_path.resolve()}/server.js"],
-                                "env": {"_MANAGED_BY": "agent-manager"},
-                            }
-                        }
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            (temp_root / "config" / "manager.json").write_text(
-                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {\n    "demo": { "enabled": true }\n  }\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "mcp.json").write_text(
-                json.dumps(
-                    {
-                        "agent_paths": {
-                            "cursor": {"path": str(cursor_config), "format": "json"},
-                        },
-                        "servers": {
-                            "demo": {
-                                "url": "https://example.invalid/repo.git",
-                                "command": "node",
-                                "args": ["{repo_path}/server.js"],
-                                "env": {},
-                                "agents": ["cursor"],
-                            }
-                        },
-                    }
-                ),
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "skills.json").write_text(
-                '{\n  "repositories": {},\n  "agents": {}\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
-
-            report = build_report(
-                root_dir=temp_root,
-                config_file=temp_root / "config" / "manager.json",
-                python_cmd="python3",
-            )
-
-            self.assertEqual(report["status"], "healthy")
-            mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
-            self.assertEqual(mcp_names["Cursor CLI"]["status"], "ok")
-
     def test_report_accepts_resolved_secret_for_managed_mcp_server(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
@@ -1114,65 +788,6 @@ class ManageDoctorReportTests(unittest.TestCase):
             self.assertEqual(report["status"], "healthy")
             mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
             self.assertEqual(mcp_names["Codex"]["status"], "ok")
-
-    def test_report_flags_opencode_config_using_wrong_mcpservers_key(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            opencode_config = Path(temp_dir) / "opencode.json"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
-            opencode_config.write_text(
-                json.dumps(
-                    {
-                        "mcpServers": {
-                            "demo": {
-                                "command": "echo",
-                                "args": [],
-                                "env": {"_MANAGED_BY": "agent-manager"},
-                            }
-                        }
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            (temp_root / "config" / "manager.json").write_text(
-                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {\n    "demo": { "enabled": true }\n  }\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "mcp.json").write_text(
-                json.dumps(
-                    {
-                        "agent_paths": {
-                            "opencode": {"path": str(opencode_config), "format": "json"},
-                        },
-                        "servers": {
-                            "demo": {
-                                "command": "echo",
-                                "args": [],
-                                "env": {},
-                                "agents": ["opencode"],
-                            }
-                        },
-                    }
-                ),
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "skills.json").write_text(
-                '{\n  "repositories": {},\n  "agents": {}\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
-
-            report = build_report(
-                root_dir=temp_root,
-                config_file=temp_root / "config" / "manager.json",
-                python_cmd="python3",
-            )
-
-            self.assertEqual(report["status"], "error")
-            mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
-            self.assertEqual(mcp_names["OpenCode"]["status"], "error")
-            self.assertIn("实际 0 个", mcp_names["OpenCode"]["message"])
 
     def test_report_flags_unresolved_placeholder_in_managed_mcp_server(self):
         with tempfile.TemporaryDirectory() as temp_dir:

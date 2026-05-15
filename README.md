@@ -1,47 +1,37 @@
 # Agent Manager (Ultimate Edition)
 
-🚀 **AI 助手环境一键管理中枢**。通过单一入口，对 `Claude Code`、`Codex`、`Gemini CLI`、`Cursor`、`OpenCode`、`Kimi Code CLI` 做生命周期管理。
+🚀 **AI 助手环境一键管理中枢**。通过单一入口，只对 `Claude Code`、`Codex`、`Gemini CLI` 做 Agent 生命周期、MCP、skills 和 rules 管理。退役 Agent 的旧路径只保留必要的清理/迁移逻辑，不再作为受管目标维护。
 
 ## 核心规范速查表 (Authoritative Spec)
 
 本项目严格遵循各 Agent 官方最新规范，确保配置注入的精准与安全：
 
 ```text
-   ┌────────────────┬──────────────────────────────────┬──────────┬─────────────┐
-   │ Agent 名称     │ 官方标准路径                     │ 文件格式 │ 核心键名    │
-   ├────────────────┼──────────────────────────────────┼──────────┼─────────────┤
-   │ Claude Code    │ ~/.claude.json                   │ JSON     │ mcpServers  │
-   │ Gemini CLI     │ ~/.gemini/settings.json          │ JSON     │ mcpServers  │
-   │ Cursor         │ ~/.cursor/mcp.json               │ JSON     │ mcpServers  │
-   │ OpenCode       │ ~/.config/opencode/opencode.json │ JSON     │ mcp         │
-   │ Kimi Code CLI  │ ~/.kimi/mcp.json                 │ JSON     │ mcpServers  │
-   │ Codex          │ ~/.codex/config.toml             │ TOML     │ mcp_servers │
-   └────────────────┴──────────────────────────────────┴──────────┴─────────────┘
+   ┌────────────────┬─────────────────────────┬──────────┬─────────────┐
+   │ Agent 名称     │ 官方标准路径            │ 文件格式 │ 核心键名    │
+   ├────────────────┼─────────────────────────┼──────────┼─────────────┤
+   │ Claude Code    │ ~/.claude.json          │ JSON     │ mcpServers  │
+   │ Gemini CLI     │ ~/.gemini/settings.json │ JSON     │ mcpServers  │
+   │ Codex          │ ~/.codex/config.toml    │ TOML     │ mcp_servers │
+   └────────────────┴─────────────────────────┴──────────┴─────────────┘
 ```
 
 默认启用的 MCP 服务器当前包含 `chrome-devtools`（浏览器调试 / network / performance，使用官方推荐的 `npx -y chrome-devtools-mcp@latest --isolated`，避免多个 agent 共享同一个 browser profile 时互相冲突）和 `grok-search`（联网搜索与网页抓取，真实 provider key 只从 secrets 注入）。`augment-context-engine` 的定义仍保留，但在缺少 `AUGMENT_SESSION_AUTH` 时默认不启用。
-默认受管浏览器工具当前包含 `playwright-cli` 和 `agent-browser`；二者通过官方 npm `@latest` 通道受管安装与更新。`playwright-cli` 在安装或升级后会继续执行 `install-browser` 同步 Playwright browsers，并用 Playwright cache 的真实 payload 做就绪重验；`agent-browser` 优先复用系统已有的 Chrome/Chromium，也会接受 Playwright cache 中的 Chromium 作为可复用运行时，仅在缺少这些浏览器运行时时才需要执行 `agent-browser install`。`graphify` 通过官方 PyPI 包 `graphifyy` 由 `uv tool` 受管，并把 `/graphify` skill/rule 安装到所有声明的 Agent 目标；graphify 按需使用，不再通过 shared rules 或 Claude/Codex hooks 默认提示读取 graphify 报告。`chrome-devtools` 继续作为 MCP server 通过 `npx ...@latest` 在运行时跟随上游最新版本。
-默认受管 skill 仓库当前包含 `agent-skills`、`oa-skill`、`anthropic-frontend-design-skill`、`playwright-best-practices-skill`、`superpowers` 和 `ui-ux-pro-max-skill`；它们在未显式声明 `commit` / `ref` 时，会在同步时跟随上游默认分支最新状态；其中 `agent-skills` 面向 `Claude Code`、`Kimi Code CLI` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 3 个 skill 包，避免上游新增 skill 被默认带入；`oa-skill` 当前通过显式 `skill_paths` 默认接入仓库内唯一的 `xyai-manager` skill；`anthropic-frontend-design-skill` 仅面向 `Kimi Code CLI` 暴露，并通过显式 `skill_paths` 锁定 Anthropic 官方 `skills/frontend-design`。OpenAI 官方仓库当前最新主分支已不再提供 `frontend-skill`，因此默认清单不再引用该路径，避免 `make all` 在跟随上游最新状态时失败。
-默认自动安装的 Agent 当前包含 `Claude Code`、`Codex` 和 `Gemini CLI`；`Cursor CLI`、`OpenCode` 与 `Kimi Code CLI` 仍受管，但默认不自动安装，需要时可通过策略显式开启。
+默认受管浏览器工具当前包含 `playwright-cli` 和 `agent-browser`；二者通过官方 npm `@latest` 通道受管安装与更新。`playwright-cli` 在安装或升级后会继续执行 `install-browser` 同步 Playwright browsers，并用 Playwright cache 的真实 payload 做就绪重验；`agent-browser` 优先复用系统已有的 Chrome/Chromium，也会接受 Playwright cache 中的 Chromium 作为可复用运行时，仅在缺少这些浏览器运行时时才需要执行 `agent-browser install`。`graphify` 通过官方 PyPI 包 `graphifyy` 由 `uv tool` 受管，并把 `/graphify` skill 安装到 Claude、Codex、Gemini 三个声明的 Agent 目标；graphify 按需使用，不再通过 shared rules 或 Claude/Codex hooks 默认提示读取 graphify 报告。`chrome-devtools` 继续作为 MCP server 通过 `npx ...@latest` 在运行时跟随上游最新版本。
+默认受管 skill 仓库当前包含 `agent-skills`、`oa-skill`、`anthropic-frontend-design-skill`、`playwright-best-practices-skill`、`superpowers` 和 `ui-ux-pro-max-skill`；它们在未显式声明 `commit` / `ref` 时，会在同步时跟随上游默认分支最新状态；其中 `agent-skills` 面向 `Claude Code` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 3 个 skill 包，避免上游新增 skill 被默认带入；`oa-skill` 当前通过显式 `skill_paths` 默认接入仓库内唯一的 `xyai-manager` skill；`anthropic-frontend-design-skill` 仅面向 `Claude Code` 暴露，并通过显式 `skill_paths` 锁定 Anthropic 官方 `skills/frontend-design`。OpenAI 官方仓库当前最新主分支已不再提供 `frontend-skill`，因此默认清单不再引用该路径，避免 `make all` 在跟随上游最新状态时失败。
+默认自动安装的 Agent 当前只包含 `Claude Code`、`Codex` 和 `Gemini CLI`。
 `Claude Code` 当前默认走官方 native installer；`Codex` 与 `Gemini CLI` 默认走官方 npm 包。历史 `brew` 安装仅用于识别并提示迁移，不再作为这三个 CLI 的受管 provider。
 `Claude Code native` 当前已经补齐官方 uninstall 路径，因此 `install / update / uninstall` 都可继续走官方 installer 语义。
 `Claude Code` 仍保留 `npm` 作为 legacy-compatible 受管 provider；`Claude Code local install` 不纳入 `agent-manager` lifecycle 托管，因为它依赖 shell alias 暴露入口，当前探测链路不会越权接管。
-`Cursor` 当前默认受管目标已切换为官方 `cursor-agent` CLI；它继续复用 `~/.cursor/mcp.json` 与 repo-native `.cursor/rules`，不再把 `brew cask cursor` 当作默认生命周期来源。当前官方文档只明确了 install / update，因此仓库不伪造 `Cursor CLI` 的受管 uninstall 命令。
-`OpenCode` 当前默认走官方 install script，并通过 `opencode upgrade --method curl` 执行更新；历史 `npm` / `brew` 安装仅用于识别并提示迁移。
-`Kimi Code CLI` 当前默认走官方 install script；升级与卸载继续使用官方支持的 `uv tool` 路径，避免仓库把 `uv` 本身误当成前台安装方式。
-`Kimi Code CLI` 已成为受管 Agent，当前受管路径为 `~/.kimi/mcp.json`、`~/.kimi/skills`、`{{REPO_ROOT}}/.kimi/AGENTS.md`、`{{REPO_ROOT}}/.kimi/modules`；`~/.kimi/config.toml` 不在本轮托管范围。
-以上 lifecycle 口径统一按各 Agent 官方当前推荐方式维护。`Codex` / `Gemini CLI` 的 `npm` 是官方合规默认路径，`Kimi Code CLI` 的 `install script + uv tool` 是官方合规组合路径；放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer。
+以上 lifecycle 口径统一按三个当前受管 Agent 的官方推荐方式维护。`Claude Code` 优先使用官方 native installer 和 `claude update`；`Codex` 使用官方 npm 包并通过 `npm install -g @openai/codex@latest` 升级；`Gemini CLI` 使用官方 npm stable 包并通过 `npm install -g @google/gemini-cli@latest` 升级。放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer。
 
 ## Official CLI Lifecycle Policy
 
 | CLI | 默认受管 provider | 兼容受管 provider | detect-only 历史来源 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
 | `Claude Code` | `native` | `npm` | `brew` | 默认使用官方 installer；若已是 npm 版，可继续受管或按官方 `claude migrate-installer` 手工迁移；官方 uninstall 路径也已纳入托管。 |
-| `Codex` | `npm` | - | `brew` | 已纳入正式 lifecycle 管理；历史 brew 安装只用于审计和迁移提示。 |
-| `Gemini CLI` | `npm` | - | `brew` | 默认使用官方 npm stable 包；brew 只做历史识别。 |
-| `Cursor` | `native` | - | - | 默认使用官方 `cursor-agent` install script；继续复用现有 `~/.cursor` 配置与 repo-native rules；当前官方文档只明确 install / update。 |
-| `OpenCode` | `native` | - | `npm`, `brew` | 默认使用官方 install script 与内建升级命令；历史 npm / brew 安装只做审计。 |
-| `Kimi Code CLI` | `native` | - | - | 默认使用官方 install script；底层升级/卸载继续走 `uv tool` 官方路径。 |
+| `Codex` | `npm` | - | `brew` | 使用官方 npm 包；升级固定为 `npm install -g @openai/codex@latest`，历史 brew 安装只用于审计和迁移提示。 |
+| `Gemini CLI` | `npm` | - | `brew` | 使用官方 npm stable 包；升级固定为 `npm install -g @google/gemini-cli@latest`，brew 只做历史识别。 |
 
 ## Agent 安装源依据 (Official Channels Catalog)
 
@@ -52,9 +42,6 @@
 | **Claude Code** | `claude` | 官方 native installer / `@anthropic-ai/claude-code` | `cask: claude-code` | `brew` 仅保留 detect-only 语义。 |
 | **Codex** | `codex` | `@openai/codex` | `cask: codex` | 受管 lifecycle 默认走 npm。 |
 | **Gemini CLI** | `gemini` | `@google/gemini-cli` | `formula: gemini-cli` | 受管 lifecycle 默认走 npm stable。 |
-| **Cursor CLI** | `cursor-agent` | 官方 install script | - | 默认受管目标为官方 `cursor-agent` CLI；继续复用 `~/.cursor` 配置。 |
-| **OpenCode** | `opencode` | 官方 install script / `opencode-ai` | `tap: anomalyco/tap/opencode` | 默认受管 lifecycle 走官方 install script；`npm` / `brew` 只保留 detect-only 语义。 |
-| **Kimi Code CLI** | `kimi` | 官方 install script | - | 默认受管 lifecycle 走官方 install script；升级/卸载通过 `uv tool`。 |
 
 ## 核心健全性特性
 
@@ -84,19 +71,18 @@
 - **可编辑源码**：跨 Agent 的共享规则片段只维护在 `agent-rule/rules/src/`，这是仓库内唯一可编辑的 rule source。
 - **共享 core 职责**：`agent-rule/rules/src/shared/core.md` 只放所有 Agent 都应始终生效的短规则；这里优先约束“非平凡或有歧义任务先显式说明假设、优先最简单本地改动、保持 surgical edits、按 verification point 推进”。
 - **生成产物**：面向各 Agent 实际分发的规则文件只维护在 `agent-rule/rules/dist/`，由构建脚本生成；仓库内不再保留第二套 `rules/global/*` source tree。
-- **按 Agent 原生格式分发**：Codex 生成 `AGENTS.md`，Claude 生成 `CLAUDE.md`，Gemini 生成 `GEMINI.md`，Cursor 生成 repo-native `.cursor/rules/agent-manager.mdc`，Kimi Code CLI 使用 repo-native `.kimi/AGENTS.md` 作为受管 rules 入口。
-- **原生 modules 位置**：全局文件旁边的 `modules/` 目录也会跟着落到原生同级位置，例如 `~/.codex/modules`、`~/.claude/modules`、`~/.gemini/modules`、`{{REPO_ROOT}}/.kimi/modules`、`{{REPO_ROOT}}/.cursor/rules/modules`。
+- **按 Agent 原生格式分发**：Codex 生成 `AGENTS.md`，Claude 生成 `CLAUDE.md`，Gemini 生成 `GEMINI.md`。
+- **原生 modules 位置**：全局文件旁边的 `modules/` 目录也会跟着落到原生同级位置，例如 `~/.codex/modules`、`~/.claude/modules`、`~/.gemini/modules`。
 - **Codex 路径特例**：由于 Codex 会把用户级规则合并进当前工作区指令视图，生成的 `~/.codex/AGENTS.md` 会直接引用 `config/rules-targets.list` 中 `codex_modules` 配置的目标路径（默认是 `~/.codex/modules/*.md`），避免把相对 `modules/` 误解析为仓库内路径。
 - **分层原则**：低频、专题或工具边界细节放 `agent-rule/rules/src/shared/modules/`；Agent 私有差异只放 `agent-rule/rules/src/agents/*/adapter.md`，不要把这些内容回灌进 shared core。
-- **OpenCode 入口**：OpenCode 不再伪造 `~/.config/opencode/rules/global.md`；直接使用仓库根 `AGENTS.md` 这个 repo-native 入口。
 - **迁移清理**：原生分发会清理旧的 `~/.<agent>/rules/global.md` 和旧 `rules/modules` 残留，避免新旧入口并存。
 - **Claude 记忆分层**：根目录 `CLAUDE.md` 只保留仓库级高频记忆，`agent-rule/CLAUDE.md` 和 `tests/CLAUDE.md` 承载目录级维护细节。
 - **Claude hooks**：`config/claude-hooks.json` 生成仓库级 `.claude/settings.json`，用 `make claude-hooks-sync` 刷新 deterministic hook 配置。
 - **Codex hooks**：`config/codex-hooks.json` 生成仓库级 `.codex/hooks.json`，用 `make codex-hooks-sync` 刷新 deterministic Codex hook 配置。
-- **graphify 启用**：`config/tools.json` 中的 `graphify` 安装官方 `graphifyy` CLI，`scripts/setup-graphify.py` 将 skill/rule 分发到 Claude、Codex、Gemini、OpenCode、Kimi 和 Cursor 目标；graphify 按需使用，不再通过 shared rules 或 Claude/Codex hooks 默认提示读取 graphify 报告。
+- **graphify 启用**：`config/tools.json` 中的 `graphify` 安装官方 `graphifyy` CLI，`scripts/setup-graphify.py` 将 skill 分发到 Claude、Codex、Gemini 目标；graphify 按需使用，不再通过 shared rules 或 Claude/Codex hooks 默认提示读取 graphify 报告。
 - **指令质量评测**：`make eval-rules` 现在同时输出任务成功率、verification、skill exposure 和 always-on instruction budget 指标，并强制校验 `min_case_count`、`required_agents`、`success / verification 阈值`。
 - **分发清单**：`config/rules-targets.list` 只引用 `rules/dist/*` 产物，不直接引用源码片段。
-- **维护入口**：修改 `agent-rule/rules/src/` 后，先执行 `make rules-build`，再执行 `make rules:sync`；这一步现在也会刷新仓库内的 repo-native Cursor 指令文件。
+- **维护入口**：修改 `agent-rule/rules/src/` 后，先执行 `make rules-build`，再执行 `make rules:sync`。
 
 ## 平台支持 (Platform Support)
 
@@ -119,7 +105,7 @@
 - `make instructions:check`: 共享指令、skills exposure 和项目内 hooks 变更前的统一回归门（硬门禁）；会串行跑 instruction-related project contracts、rules budget/layout、skill exposure、rules sync / Claude/Codex managed hooks 契约、eval schema/metric 契约，以及 baseline 规则评测。
 - `make doctor` / `make status`: 执行全系统深度体检，并把 warning 细分为 `可选工具未就绪` 与 `托管产物尚未生成` 两类提示项；同时扫描主仓库中是否存在疑似明文敏感信息。追加 `--json` 可输出机器可读诊断报告。
 - `make rules-build`: 从 `agent-rule/rules/src/` 生成 `agent-rule/rules/dist/` 下的可分发规则产物。
-- `make rules:sync`: 将 `agent-rule/rules/dist/` 中的规则产物分发到各 Agent 原生入口；其中 Cursor 会刷新仓库内的 repo-native 文件。
+- `make rules:sync`: 将 `agent-rule/rules/dist/` 中的规则产物分发到各 Agent 原生入口。
 - `make codex-hooks-sync`: 刷新仓库级 `.codex/hooks.json`。
 - `make fetch-models`: 探测并获取 API 端点支持的模型列表 (支持 OpenAI / Anthropic 格式)。
 - `make restore`: 交互式回滚历史快照。

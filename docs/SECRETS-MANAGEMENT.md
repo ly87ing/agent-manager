@@ -340,8 +340,7 @@ Agent Manager 会：
 
 ### 凭证注入位置
 不同Agent的凭�注入位置有所不同：
-- JSON格式 Agents (Claude Code, Gemini CLI, Cursor): 在 `env` 对象中
-- OpenCode: 在 `environment` 对象中
+- JSON格式 Agents (Claude Code, Gemini CLI): 在 `env` 对象中
 - Codex (TOML): 在 `[mcp_servers.*.env]` 节下
 
 ---

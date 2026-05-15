@@ -15,7 +15,7 @@
 
 ## 系统概览
 
-Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单一入口，对 `Claude Code`、`Gemini CLI`、`Cursor`、`OpenCode`、`Kimi Code CLI` 做生命周期管理，并对 `Codex` 提供受管 MCP / skills / rules 支持。系统采用模块化设计，将策略意愿与具体实现分离，确保配置的精准与安全。
+Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单一入口，只对 `Claude Code`、`Codex`、`Gemini CLI` 做 Agent 生命周期、MCP、skills 和 rules 管理。系统采用模块化设计，将策略意愿与具体实现分离，确保配置的精准与安全。
 
 核心设计原则：
 - **策略与定义分离**：仓库基线策略（`manager.json`）与机器本地覆盖（`manager.local.json`）在运行时合并，再与技术细节定义（`agents.json`等）配合生效
@@ -39,7 +39,7 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `manager.json`: 仓库提供的可审计默认值
 - `manager.local.json`: 不参与 Git 的本地覆盖层；`make ui` 默认写入这里
 - `agent-manager` 不维护终端 dotfiles；用户级 shell/tmux/iTerm 配置不属于受管目标
-- `agents` 键使用稳定的机器可读 ID（如 `claude-code`, `cursor`），而不是面向用户的展示名
+- `agents` 键使用稳定的机器可读 ID（如 `claude-code`, `codex`, `gemini-cli`），而不是面向用户的展示名
 
 ### 2. 定义层 (Definition Layer)
 **文件位置**: `config/*.json`
@@ -49,13 +49,12 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `tools.json`: 工具安装和设置指令
 - `skills.json`: Skill仓库地址和Agent映射
 - `mcp.json`: MCP服务器定义和Agent路径映射
-- 浏览器自动化相关能力按上游官方分发模型分别托管：`playwright-cli` 与 `agent-browser` 在 `tools.json` 中通过 npm `@latest` 管理。`playwright-cli` 的 runtime setup 由 `playwright-cli install-browser` 完成，并通过 Playwright cache 中的 Chromium payload 重新验证；`agent-browser` 的 readiness 先检查系统 Chrome/Chromium，再检查 Playwright cache 中可复用的 Chromium，只有这些 probe 都失败时才依赖受管 setup；`graphify` 作为 `graphifyy` CLI 由 `uv tool` 管理，并通过 `scripts/setup-graphify.py` 将 skill/rule 安装到各 Agent 目标；`chrome-devtools` 在 `mcp.json` 中通过 `npx -y chrome-devtools-mcp@latest` 维护。
+- 浏览器自动化相关能力按上游官方分发模型分别托管：`playwright-cli` 与 `agent-browser` 在 `tools.json` 中通过 npm `@latest` 管理。`playwright-cli` 的 runtime setup 由 `playwright-cli install-browser` 完成，并通过 Playwright cache 中的 Chromium payload 重新验证；`agent-browser` 的 readiness 先检查系统 Chrome/Chromium，再检查 Playwright cache 中可复用的 Chromium，只有这些 probe 都失败时才依赖受管 setup；`graphify` 作为 `graphifyy` CLI 由 `uv tool` 管理，并通过 `scripts/setup-graphify.py` 将 skill 安装到 Claude、Codex、Gemini 目标；`chrome-devtools` 在 `mcp.json` 中通过 `npx -y chrome-devtools-mcp@latest` 维护。
 - Agent 定义中的 `display_name` 仅用于展示和日志；跨配置引用统一使用稳定 ID
 - `agents.json` 中的 `providers` 只声明 agent-manager 可托管的安装源；`system` 只是运行时探测信号，不是可配置的 provider key
 - `preferred_provider` 必须指向 `providers` 中真实存在的键，否则生命周期同步应直接失败
 - `skills.json` 中的 skill 仓库支持 `commit` / `ref` 版本约束；技能名来自仓库内 `SKILL.md` frontmatter 的 `name`
-- 新增 Agent 时，如需启用某类能力，再声明对应的 MCP / skills / rules target path：`config/mcp.json` 的 `agent_paths`、`config/skills.json` 的 `agents` 映射、`config/rules-targets.list` 的规则与 modules 分发目标
-- `Kimi Code CLI` 当前受管路径为 `~/.kimi/mcp.json`、`~/.kimi/skills`、`{{REPO_ROOT}}/.kimi/AGENTS.md`、`{{REPO_ROOT}}/.kimi/modules`；`~/.kimi/config.toml` 不在本轮托管范围
+- 新增 Agent 时，如需启用某类能力，再声明对应的 MCP / skills / rules target path：`config/mcp.json` 的 `agent_paths`、`config/skills.json` 的 `agents` 映射、`config/rules-targets.list` 的规则与 modules 分发目标。当前默认受管目标只包含 `Claude Code`、`Codex` 和 `Gemini CLI`
 
 ### 3. 同步引擎 (Sync Engines)
 **文件位置**: 各agent-*目录下的sync_*.py脚本
@@ -136,10 +135,9 @@ graph TD
 - `agent-rule/rules/src/` 保存可编辑的共享 core、共享 modules 和 agent adapters。
 - `agent-rule/scripts/build-agent-rules.py` 负责把 `src/` 片段生成到 `agent-rule/rules/dist/`。
 - 仓库内不再保留第二条平行的规则文本流；`agent-rule/rules/global/*` 已退出仓库 source-of-truth。
-- `agent-rule/rules/dist/codex/AGENTS.md`、`dist/claude/CLAUDE.md`、`dist/gemini/GEMINI.md`、`dist/cursor/agent-manager.mdc` 分别对应各 agent 的原生入口格式。
+- `agent-rule/rules/dist/codex/AGENTS.md`、`dist/claude/CLAUDE.md`、`dist/gemini/GEMINI.md` 分别对应各 agent 的原生入口格式。
 - `config/rules-targets.list` 只声明 `agent-rule/rules/dist/` 下的可分发产物到各 Agent 目标路径的映射。
-- manifest 现在同时支持家目录 target 和 `{{REPO_ROOT}}` repo-native target，用一条分发链覆盖全局文件与仓库内原生文件。
-- Cursor 的原生入口落到 `{{REPO_ROOT}}/.cursor/rules/agent-manager.mdc`；OpenCode 直接消费仓库根 `AGENTS.md`。
+- manifest 支持家目录 target 和 `{{REPO_ROOT}}` repo-native target；当前受管 rules 只使用 Claude、Codex、Gemini 的家目录目标。
 - 规则同步会清理历史遗留的 `~/.<agent>/rules/global.md` 和旧 `rules/modules` 目录，避免新旧入口并存。
 - `manage.sh rules:build` / `make rules-build` 用于刷新 `dist/`。
 - `manage.sh rules:sync` / `make rules:sync` 用于把 `dist/` 产物同步到目标 Agent 目录与 repo-native 文件位置。

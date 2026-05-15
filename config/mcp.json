@@ -6,7 +6,7 @@
       "env": {
         "AUGMENT_SESSION_AUTH": "${AUGMENT_SESSION_AUTH}"
       },
-      "agents": ["claude-code", "gemini-cli", "codex", "kimi-cli"]
+      "agents": ["claude-code", "gemini-cli", "codex"]
     },
     "chrome-devtools": {
       "command": "npx",
@@ -35,10 +35,6 @@
   "agent_paths": {
     "claude-code": "~/.claude.json",
     "gemini-cli": "~/.gemini/settings.json",
-    "cursor": "~/.cursor/mcp.json",
-    "opencode": { "path": "~/.config/opencode/opencode.json", "format": "json" },
-    "codex": { "path": "~/.codex/config.toml", "format": "toml" },
-    "kimi-cli": { "path": "~/.kimi/mcp.json", "format": "json" },
-    "qodercli": { "path": "~/.qoder/settings.json", "format": "json" }
+    "codex": { "path": "~/.codex/config.toml", "format": "toml" }
   }
 }

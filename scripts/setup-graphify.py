@@ -25,28 +25,11 @@ SKILL_FILE_BY_AGENT = {
     "claude-code": "skill.md",
     "codex": "skill-codex.md",
     "gemini-cli": "skill.md",
-    "opencode": "skill-opencode.md",
-    "kimi-cli": "skill.md",
-    "qodercli": "skill.md",
 }
 
 DEPRECATED_TARGETS = [
     Path("~/.agents/skills/graphify/SKILL.md"),
 ]
-
-CURSOR_RULE = """\
----
-description: graphify knowledge graph context
-alwaysApply: false
----
-
-When the current project has a graphify knowledge graph at graphify-out/:
-
-- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
-- If graphify-out/graph.json is older than relevant source files, treat the graph as orientation and verify against current files
-- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
-- After meaningful code changes, run `graphify update .` when keeping the graph current is part of the task
-"""
 
 COPY_SKILLS_CODE = r"""
 import json
@@ -105,16 +88,6 @@ def build_graphify_targets(skill_cfg: dict) -> list[GraphifyTarget]:
         target_base = target_base_path(raw_target)
         if target_base is None:
             continue
-        if agent_id == "cursor":
-            add_unique_target(
-                targets,
-                GraphifyTarget(
-                    agent_id=agent_id,
-                    kind="cursor-rule",
-                    path=target_base / "graphify.mdc",
-                ),
-            )
-            continue
         skill_file = SKILL_FILE_BY_AGENT.get(agent_id)
         if not skill_file:
             continue
@@ -155,15 +128,6 @@ def resolve_graphify_python() -> str:
     if Path(parts[0]).exists():
         return parts[0]
     return sys.executable
-
-
-def install_cursor_rules(targets: list[GraphifyTarget]) -> None:
-    for target in targets:
-        if target.kind != "cursor-rule":
-            continue
-        destination = target.path.expanduser()
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(CURSOR_RULE, encoding="utf-8")
 
 
 def install_skill_files(targets: list[GraphifyTarget], graphify_python: str | None = None) -> str:
@@ -242,8 +206,6 @@ def remove_graphify_target(path: Path) -> None:
         if version_marker.exists():
             shutil.rmtree(skill_dir, ignore_errors=True)
         return
-    if destination.is_file() and destination.read_text(encoding="utf-8", errors="ignore") == CURSOR_RULE:
-        destination.unlink()
 
 
 def prune_stale_targets(
@@ -270,7 +232,6 @@ def main(argv: list[str] | None = None) -> int:
 
     skill_cfg = read_json(Path(args.config))
     targets = build_graphify_targets(skill_cfg)
-    install_cursor_rules(targets)
     version = install_skill_files(targets)
     marker_dir = Path(args.marker_dir)
     prune_stale_targets(marker_dir, targets)

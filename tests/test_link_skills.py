@@ -42,12 +42,12 @@ class LinkSkillsTests(unittest.TestCase):
                 "repositories": {
                     "scoped-repo": {
                         "url": "https://example.invalid/repo.git",
-                        "agents": ["claude-code", "cursor"],
+                        "agents": ["claude-code", "gemini-cli"],
                     }
                 },
                 "agents": {
                     "claude-code": str(temp_root / "targets" / "claude"),
-                    "cursor": str(temp_root / "targets" / "cursor"),
+                    "gemini-cli": str(temp_root / "targets" / "gemini"),
                 },
             }
 
@@ -55,7 +55,7 @@ class LinkSkillsTests(unittest.TestCase):
                 mock.patch.object(
                     link_skills,
                     "load_json_object_file",
-                    side_effect=[policy_root, full_def, {"claude-code": {}, "cursor": {}}],
+                    side_effect=[policy_root, full_def, {"claude-code": {}, "gemini-cli": {}}],
                 ),
                 mock.patch.object(
                     link_skills,
@@ -2231,7 +2231,7 @@ class LinkSkillsTests(unittest.TestCase):
 
         self.assertIsNotNone(repo)
         self.assertEqual(repo["url"], "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill")
-        self.assertEqual(repo["agents"], ["claude-code", "kimi-cli", "codex", "qodercli"])
+        self.assertEqual(repo["agents"], ["claude-code", "codex"])
         self.assertNotIn("commit", repo)
         self.assertNotIn("ref", repo)
 
@@ -2251,7 +2251,7 @@ class LinkSkillsTests(unittest.TestCase):
             ],
         )
         self.assertEqual(repo["skill_count"], 3)
-        self.assertEqual(repo["agents"], ["claude-code", "kimi-cli", "codex", "qodercli"])
+        self.assertEqual(repo["agents"], ["claude-code", "codex"])
         self.assertNotIn("ignored_skill_paths", repo)
         self.assertNotIn("commit", repo)
         self.assertNotIn("ref", repo)
@@ -2263,7 +2263,7 @@ class LinkSkillsTests(unittest.TestCase):
 
         self.assertIsNotNone(repo)
         self.assertEqual(repo["url"], "https://github.com/currents-dev/playwright-best-practices-skill.git")
-        self.assertEqual(repo["agents"], ["claude-code", "kimi-cli", "codex", "cursor", "opencode", "qodercli"])
+        self.assertEqual(repo["agents"], ["claude-code", "codex"])
         self.assertNotIn("commit", repo)
         self.assertNotIn("ref", repo)
 
@@ -2276,7 +2276,7 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertEqual(repo["url"], "https://github.com/obra/superpowers")
         self.assertEqual(
             set(repo["agents"]),
-            {"claude-code", "gemini-cli", "cursor", "opencode", "kimi-cli", "codex", "qodercli"},
+            {"claude-code", "gemini-cli", "codex"},
         )
         self.assertNotIn("commit", repo)
         self.assertNotIn("ref", repo)
@@ -2317,7 +2317,7 @@ class LinkSkillsTests(unittest.TestCase):
 
         self.assertIsNone(repo)
 
-    def test_default_skill_catalog_includes_anthropic_frontend_design_skill_for_kimi_only(self):
+    def test_default_skill_catalog_includes_anthropic_frontend_design_skill_for_claude_only(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
 
         repo = skills_config["repositories"].get("anthropic-frontend-design-skill")
@@ -2326,7 +2326,7 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertEqual(repo["url"], "https://github.com/anthropics/skills.git")
         self.assertEqual(repo["skill_paths"], ["skills/frontend-design"])
         self.assertEqual(repo["skill_count"], 1)
-        self.assertEqual(repo["agents"], ["kimi-cli", "qodercli"])
+        self.assertEqual(repo["agents"], ["claude-code"])
         self.assertNotIn("commit", repo)
         self.assertNotIn("ref", repo)
 

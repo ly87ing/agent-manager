@@ -65,9 +65,10 @@ class ManageRuntimeProbeTests(unittest.TestCase):
             ["git", "brew"],
         )
 
-    def test_rule_target_agent_id_maps_kimi_prefix_to_kimi_cli(self):
-        self.assertEqual(manage_runtime_probe.rule_target_agent_id("kimi_global"), "kimi-cli")
-        self.assertEqual(manage_runtime_probe.rule_target_agent_id("kimi_modules"), "kimi-cli")
+    def test_rule_target_agent_id_maps_current_prefixes(self):
+        self.assertEqual(manage_runtime_probe.rule_target_agent_id("claude_global"), "claude-code")
+        self.assertEqual(manage_runtime_probe.rule_target_agent_id("gemini_modules"), "gemini-cli")
+        self.assertEqual(manage_runtime_probe.rule_target_agent_id("codex_global"), "codex")
 
     def test_detect_tool_readiness_requires_git_clone_for_repo_backed_tools(self):
         with mock.patch("src.manage_runtime_probe.os.path.isdir") as isdir:
@@ -643,15 +644,15 @@ class ManageRuntimeProbeTests(unittest.TestCase):
     def test_detect_all_providers_falls_back_to_system_when_binary_exists(self):
         inventory = manage_runtime_probe.ProviderInventory(
             run_cmd=lambda cmd, timeout=10: (False, ""),
-            which=lambda binary: "/Applications/Cursor.app/Contents/MacOS/Cursor" if binary == "cursor" else None,
-            path_exists=lambda path: path == "/Applications/Cursor.app",
+            which=lambda binary: "/opt/local/bin/sample-agent" if binary == "sample-agent" else None,
+            path_exists=lambda path: path == "/Applications/SampleAgent.app",
             realpath=lambda path: path,
         )
 
         providers = manage_runtime_probe.detect_all_providers(
-            "cursor",
+            "sample-agent",
             {
-                "app_path": "/Applications/Cursor.app",
+                "app_path": "/Applications/SampleAgent.app",
                 "providers": {},
             },
             inventory=inventory,
@@ -712,7 +713,7 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
     def test_detect_all_providers_detects_uv_tool_installation(self):
         command_outputs = {
-            ("uv", "tool", "list"): (True, "kimi-cli 0.2.0\n"),
+            ("uv", "tool", "list"): (True, "sample-cli 0.2.0\n"),
         }
 
         def run_cmd(cmd, timeout=10):
@@ -721,7 +722,7 @@ class ManageRuntimeProbeTests(unittest.TestCase):
         def which(binary):
             mapping = {
                 "uv": "/opt/homebrew/bin/uv",
-                "kimi": "/opt/homebrew/bin/kimi",
+                "sample": "/opt/homebrew/bin/sample",
             }
             return mapping.get(binary)
 
@@ -733,11 +734,11 @@ class ManageRuntimeProbeTests(unittest.TestCase):
         )
 
         providers = manage_runtime_probe.detect_all_providers(
-            "kimi",
+            "sample",
             {
                 "providers": {
                     "native": {
-                        "detect_uv_tool": "kimi-cli",
+                        "detect_uv_tool": "sample-cli",
                     }
                 }
             },
@@ -764,7 +765,7 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
     def test_detect_all_providers_detects_uv_tool_installation_with_trailing_python_flag(self):
         command_outputs = {
-            ("uv", "tool", "list"): (True, "kimi-cli 0.2.0\n"),
+            ("uv", "tool", "list"): (True, "sample-cli 0.2.0\n"),
         }
 
         def run_cmd(cmd, timeout=10):
@@ -773,7 +774,7 @@ class ManageRuntimeProbeTests(unittest.TestCase):
         def which(binary):
             mapping = {
                 "uv": "/opt/homebrew/bin/uv",
-                "kimi": "/opt/homebrew/bin/kimi",
+                "sample": "/opt/homebrew/bin/sample",
             }
             return mapping.get(binary)
 
@@ -785,12 +786,12 @@ class ManageRuntimeProbeTests(unittest.TestCase):
         )
 
         providers = manage_runtime_probe.detect_all_providers(
-            "kimi",
+            "sample",
             {
                 "providers": {
                     "native": {
-                        "install": "curl -LsSf https://code.kimi.com/install.sh | bash",
-                        "detect_uv_tool": "kimi-cli",
+                        "install": "curl -LsSf https://example.invalid/install.sh | bash",
+                        "detect_uv_tool": "sample-cli",
                     }
                 }
             },
@@ -799,25 +800,24 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
         self.assertEqual(providers, ["native"])
 
-    def test_detect_all_providers_matches_opencode_native_detect_paths(self):
-        native_path = os.path.expanduser("~/.local/bin/opencode")
+    def test_detect_all_providers_matches_declared_extra_native_detect_paths(self):
+        native_path = os.path.expanduser("~/.local/bin/sample-agent")
         inventory = manage_runtime_probe.ProviderInventory(
             run_cmd=lambda cmd, timeout=10: (False, ""),
-            which=lambda binary: native_path if binary == "opencode" else None,
+            which=lambda binary: native_path if binary == "sample-agent" else None,
             path_exists=lambda _path: False,
             realpath=lambda path: path,
         )
 
         providers = manage_runtime_probe.detect_all_providers(
-            "opencode",
+            "sample-agent",
             {
                 "providers": {
                     "native": {
                         "managed": True,
                         "detect_paths": [
-                            "~/.local/bin/opencode",
-                            "~/bin/opencode",
-                            "~/.opencode/bin/opencode",
+                            "~/.local/bin/sample-agent",
+                            "~/bin/sample-agent",
                         ],
                     }
                 }

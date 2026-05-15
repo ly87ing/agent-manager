@@ -59,7 +59,7 @@ cleanup:
 
 # 删除受管 Agent home 下超过 30 天的 .bak.* 文件
 backups-gc:
-	@find ~/.claude ~/.codex ~/.gemini ~/.kimi ~/.cursor ~/.qoder ~/.config/opencode -maxdepth 2 -type f -name '*.bak.*' -mtime +30 -print -delete 2>/dev/null || true
+	@find ~/.claude ~/.codex ~/.gemini -maxdepth 2 -type f -name '*.bak.*' -mtime +30 -print -delete 2>/dev/null || true
 
 backups\:gc:
 	@$(MAKE) backups-gc

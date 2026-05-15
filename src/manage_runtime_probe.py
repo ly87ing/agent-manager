@@ -190,11 +190,7 @@ TOOL_BROKEN_MARKER = ".agent-manager-broken"
 RULE_TARGET_PREFIX_TO_ID = {
     "claude": "claude-code",
     "gemini": "gemini-cli",
-    "cursor": "cursor",
-    "opencode": "opencode",
     "codex": "codex",
-    "kimi": "kimi-cli",
-    "qoder": "qodercli",
 }
 ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
 ENV_WRAPPER_FLAGS_WITH_VALUE = {"-C", "--chdir", "-S", "--split-string", "-u", "--unset"}
@@ -640,7 +636,7 @@ class ProviderInventory:
             add_found("gh")
 
         uv_pkg = get_uv_tool_name(config.get("providers", {}).get("uv", {}).get("install"))
-        if uv_pkg == "kimi-cli" and uv_pkg in self.get_uv_tools():
+        if uv_pkg and uv_pkg in self.get_uv_tools():
             add_found("uv")
 
         app_path = config.get("app_path")

@@ -292,18 +292,6 @@ def measure_always_on_instruction_tokens_by_agent() -> dict[str, int]:
             REPO_ROOT / "CLAUDE.md",
         ],
         "gemini-cli": [REPO_ROOT / "agent-rule" / "rules" / "dist" / "gemini" / "GEMINI.md"],
-        "cursor": [
-            REPO_ROOT / "agent-rule" / "rules" / "dist" / "cursor" / "agent-manager.mdc",
-            REPO_ROOT / ".cursor" / "rules" / "agent-manager.mdc",
-        ],
-        "kimi-cli": [
-            REPO_ROOT / "agent-rule" / "rules" / "dist" / "kimi" / "AGENTS.md",
-            REPO_ROOT / ".kimi" / "AGENTS.md",
-        ],
-        "qodercli": [
-            REPO_ROOT / "agent-rule" / "rules" / "dist" / "qoder" / "QODER.md",
-            REPO_ROOT / ".qoder" / "QODER.md",
-        ],
     }
     return {
         agent_name: sum(round(len(path.read_text(encoding="utf-8")) / 4) for path in paths)

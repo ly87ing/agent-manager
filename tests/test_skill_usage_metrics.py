@@ -24,18 +24,6 @@ class SkillUsageMetricsTests(unittest.TestCase):
             "codex": [ROOT / "agent-rule" / "rules" / "dist" / "codex" / "AGENTS.md", ROOT / "AGENTS.md"],
             "claude-code": [ROOT / "agent-rule" / "rules" / "dist" / "claude" / "CLAUDE.md", ROOT / "CLAUDE.md"],
             "gemini-cli": [ROOT / "agent-rule" / "rules" / "dist" / "gemini" / "GEMINI.md"],
-            "cursor": [
-                ROOT / "agent-rule" / "rules" / "dist" / "cursor" / "agent-manager.mdc",
-                ROOT / ".cursor" / "rules" / "agent-manager.mdc",
-            ],
-            "kimi-cli": [
-                ROOT / "agent-rule" / "rules" / "dist" / "kimi" / "AGENTS.md",
-                ROOT / ".kimi" / "AGENTS.md",
-            ],
-            "qodercli": [
-                ROOT / "agent-rule" / "rules" / "dist" / "qoder" / "QODER.md",
-                ROOT / ".qoder" / "QODER.md",
-            ],
         }
         return {
             agent: sum(round(len(path.read_text(encoding="utf-8")) / 4) for path in paths)
@@ -51,26 +39,21 @@ class SkillUsageMetricsTests(unittest.TestCase):
         self.assertEqual(
             summary["available_skill_count_by_agent"],
             {
-                "claude-code": 26,
+                "claude-code": 27,
                 "codex": 26,
-                "cursor": 16,
                 "gemini-cli": 15,
-                "kimi-cli": 27,
-                "opencode": 16,
-                "qodercli": 27,
             },
         )
-        self.assertEqual(summary["avg_triggered_skill_count"], 13 / 11)
+        self.assertEqual(summary["avg_triggered_skill_count"], 12 / 10)
         self.assertEqual(summary["always_on_instruction_tokens_by_agent"], self._expected_instruction_tokens_by_agent())
         self.assertEqual(
             [(case["case_id"], case["agent"], case["triggered_skill_count"]) for case in summary["cases"]],
             [
                 ("add-make-target", "codex", 1),
-                ("browser-tool-intent-boundary", "cursor", 1),
+                ("browser-tool-intent-boundary", "claude-code", 1),
                 ("doctor-flags-unmaterialized-rules", "gemini-cli", 1),
-                ("manifest-targets-dist-artifacts", "kimi-cli", 1),
-                ("prevent-dist-edit-drift", "cursor", 1),
-                ("qodercli-case", "qodercli", 1),
+                ("manifest-targets-dist-artifacts", "claude-code", 1),
+                ("prevent-dist-edit-drift", "claude-code", 1),
                 ("rule-budget-regression-guard", "claude-code", 2),
                 ("scoped-memory-contract", "claude-code", 1),
                 ("simple-task-preamble-boundary", "codex", 1),

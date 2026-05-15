@@ -295,8 +295,10 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("agent-rule/rules/src/", readme)
         self.assertIn("agent-rule/rules/dist/", readme)
         self.assertIn("make rules-build", readme)
-        self.assertIn(".cursor/rules/agent-manager.mdc", readme)
+        self.assertIn("AGENTS.md", readme)
         self.assertNotIn(".github/copilot-instructions.md", readme)
+        self.assertNotIn(".cursor/rules/agent-manager.mdc", readme)
+        self.assertNotIn(".kimi/AGENTS.md", readme)
         self.assertIn("GEMINI.md", readme)
         self.assertIn("CLAUDE.md", readme)
 
@@ -347,33 +349,33 @@ class ProjectContractTests(unittest.TestCase):
 
     def test_readme_documents_official_cli_lifecycle_policy(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("按各 Agent 官方当前推荐方式维护", readme)
+        self.assertIn("按三个当前受管 Agent 的官方推荐方式维护", readme)
         self.assertIn("`Claude Code`、`Codex`、`Gemini CLI`", readme)
         self.assertIn("仅用于识别并提示迁移", readme)
-        self.assertIn("默认自动安装的 Agent 当前包含 `Claude Code`、`Codex` 和 `Gemini CLI`", readme)
+        self.assertIn("默认自动安装的 Agent 当前只包含 `Claude Code`、`Codex` 和 `Gemini CLI`", readme)
         self.assertIn("`Claude Code` 当前默认走官方 native installer", readme)
         self.assertIn(
             "`Claude Code native` 当前已经补齐官方 uninstall 路径，因此 `install / update / uninstall` 都可继续走官方 installer 语义。",
             readme,
         )
         self.assertIn("`Codex` 与 `Gemini CLI` 默认走官方 npm 包", readme)
-        self.assertIn("`Codex` / `Gemini CLI` 的 `npm` 是官方合规默认路径", readme)
+        self.assertIn("`Codex` 使用官方 npm 包并通过 `npm install -g @openai/codex@latest` 升级", readme)
+        self.assertIn("`Gemini CLI` 使用官方 npm stable 包并通过 `npm install -g @google/gemini-cli@latest` 升级", readme)
         self.assertIn("`Claude Code local install` 不纳入 `agent-manager` lifecycle 托管", readme)
-        self.assertIn("`Kimi Code CLI` 的 `install script + uv tool` 是官方合规组合路径", readme)
         self.assertIn("放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer", readme)
-        self.assertIn("当前官方文档只明确了 install / update", readme)
-        self.assertIn("不伪造 `Cursor CLI` 的受管 uninstall 命令", readme)
+        self.assertNotIn("Cursor CLI", readme)
+        self.assertNotIn("OpenCode", readme)
+        self.assertNotIn("Kimi Code CLI", readme)
 
-    def test_readme_documents_kimi_cli_management_paths(self):
+    def test_readme_documents_current_agent_scope(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("Kimi Code CLI", readme)
-        self.assertIn("对 `Claude Code`、`Codex`、`Gemini CLI`、`Cursor`、`OpenCode`、`Kimi Code CLI` 做生命周期管理", readme)
-        self.assertIn("~/.kimi/mcp.json", readme)
-        self.assertIn("│ Kimi Code CLI", readme)
-        self.assertIn("~/.kimi/skills", readme)
-        self.assertIn("`{{REPO_ROOT}}/.kimi/AGENTS.md`", readme)
-        self.assertIn("`{{REPO_ROOT}}/.kimi/modules`", readme)
-        self.assertIn("`~/.kimi/config.toml` 不在本轮托管范围", readme)
+        self.assertIn("只对 `Claude Code`、`Codex`、`Gemini CLI` 做 Agent 生命周期、MCP、skills 和 rules 管理", readme)
+        self.assertIn("│ Claude Code", readme)
+        self.assertIn("│ Gemini CLI", readme)
+        self.assertIn("│ Codex", readme)
+        self.assertNotIn("│ Cursor", readme)
+        self.assertNotIn("│ OpenCode", readme)
+        self.assertNotIn("│ Kimi Code CLI", readme)
 
     def test_troubleshooting_documents_official_lifecycle_gap_guidance(self):
         troubleshooting = (ROOT / "docs" / "TROUBLESHOOTING.md").read_text(encoding="utf-8")
@@ -383,11 +385,12 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("官方生命周期动作缺口", section)
         self.assertIn("官方当前未提供受管 uninstall 动作", section)
         self.assertIn("fail-close", section)
+        self.assertIn("当前三个受管 Agent 的默认 provider 都已有明确 install / update / uninstall 路径", section)
         self.assertIn("不会伪造删除命令", section)
 
     def test_readme_documents_agent_skills_scope_matches_config(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("`agent-skills` 面向 `Claude Code`、`Kimi Code CLI` 与 `Codex` 暴露", readme)
+        self.assertIn("`agent-skills` 面向 `Claude Code` 与 `Codex` 暴露", readme)
 
     def test_readme_documents_default_oa_skill_repo(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -399,11 +402,11 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("chrome-devtools-mcp@latest --isolated", readme)
         self.assertIn("避免多个 agent 共享同一个 browser profile", readme)
 
-    def test_readme_documents_anthropic_frontend_design_skill_for_kimi(self):
+    def test_readme_documents_anthropic_frontend_design_skill_for_claude(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("`anthropic-frontend-design-skill`", readme)
         self.assertIn("Anthropic 官方 `skills/frontend-design`", readme)
-        self.assertIn("仅面向 `Kimi Code CLI` 暴露", readme)
+        self.assertIn("仅面向 `Claude Code` 暴露", readme)
 
     def test_readme_documents_cc_bridge_runtime_workflow(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -503,7 +506,10 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("agent-rule/rules/dist/", architecture)
         self.assertIn("不再保留第二条平行的规则文本流", architecture)
         self.assertIn("{{REPO_ROOT}}", architecture)
-        self.assertIn(".cursor/rules/agent-manager.mdc", architecture)
+        self.assertIn("dist/codex/AGENTS.md", architecture)
+        self.assertIn("dist/claude/CLAUDE.md", architecture)
+        self.assertIn("dist/gemini/GEMINI.md", architecture)
+        self.assertNotIn(".cursor/rules/agent-manager.mdc", architecture)
         self.assertNotIn(".github/copilot-instructions.md", architecture)
 
     def test_architecture_documents_instruction_quality_regression_target(self):
@@ -523,16 +529,13 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn(".codex/hooks.json", architecture)
         self.assertIn("make codex-hooks-sync", architecture)
 
-    def test_architecture_documents_kimi_cli_management_paths(self):
+    def test_architecture_documents_current_agent_scope(self):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
-        self.assertIn("Kimi Code CLI", architecture)
-        self.assertIn("对 `Claude Code`、`Gemini CLI`、`Cursor`、`OpenCode`、`Kimi Code CLI` 做生命周期管理", architecture)
-        self.assertIn("对 `Codex` 提供受管 MCP / skills / rules 支持", architecture)
-        self.assertIn("~/.kimi/mcp.json", architecture)
-        self.assertIn("~/.kimi/skills", architecture)
-        self.assertIn("`{{REPO_ROOT}}/.kimi/AGENTS.md`", architecture)
-        self.assertIn("`{{REPO_ROOT}}/.kimi/modules`", architecture)
-        self.assertIn("`~/.kimi/config.toml` 不在本轮托管范围", architecture)
+        self.assertIn("只对 `Claude Code`、`Codex`、`Gemini CLI` 做 Agent 生命周期、MCP、skills 和 rules 管理", architecture)
+        self.assertIn("当前默认受管目标只包含 `Claude Code`、`Codex` 和 `Gemini CLI`", architecture)
+        self.assertNotIn("Kimi Code CLI", architecture)
+        self.assertNotIn("OpenCode", architecture)
+        self.assertNotIn("Cursor", architecture)
         self.assertIn("如需启用某类能力，再声明对应的 MCP / skills / rules target path", architecture)
         self.assertNotIn("新增 Agent 时必须同时声明 MCP / skills / rules 三类 target path", architecture)
 

@@ -63,89 +63,12 @@
         "managed": true,
         "install": "npm install -g @openai/codex",
         "uninstall": "npm uninstall -g @openai/codex",
-        "upgrade": "codex update"
+        "upgrade": "npm install -g @openai/codex@latest"
       },
       "brew": {
         "managed": false,
         "install": "brew install --cask codex"
       }
     }
-  },
-  "cursor": {
-    "display_name": "Cursor CLI",
-    "bin": "cursor-agent",
-    "preferred_provider": "native",
-    "require_managed_provider": true,
-    "providers": {
-      "native": {
-        "managed": true,
-        "install": {
-          "darwin": "curl https://cursor.com/install -fsS | bash",
-          "linux": "curl https://cursor.com/install -fsS | bash"
-        },
-        "upgrade": "cursor-agent update",
-        "unsupported_actions": ["uninstall"],
-        "detect_paths": ["~/.local/bin/cursor-agent", "~/.cursor/bin/cursor-agent"]
-      }
-    }
-  },
-  "opencode": {
-    "display_name": "OpenCode",
-    "bin": "opencode",
-    "preferred_provider": "native",
-    "require_managed_provider": true,
-    "providers": {
-      "native": {
-        "managed": true,
-        "install": "curl -fsSL https://opencode.ai/install | bash",
-        "uninstall": "opencode uninstall --force",
-        "upgrade": "opencode upgrade --method curl",
-        "detect_paths": ["~/.local/bin/opencode", "~/bin/opencode", "~/.opencode/bin/opencode"]
-      },
-      "npm": {
-        "managed": false,
-        "install": "npm install -g opencode-ai",
-        "uninstall": "npm uninstall -g opencode-ai",
-        "upgrade": "npm install -g opencode-ai@latest"
-      },
-      "brew": {
-        "managed": false,
-        "install": "brew install anomalyco/tap/opencode",
-        "uninstall": "brew uninstall anomalyco/tap/opencode",
-        "upgrade": "brew upgrade anomalyco/tap/opencode"
-      }
-    }
-  },
-  "kimi-cli": {
-    "display_name": "Kimi Code CLI",
-    "bin": "kimi",
-    "preferred_provider": "native",
-    "require_managed_provider": true,
-    "providers": {
-      "native": {
-        "managed": true,
-        "install": "curl -LsSf https://code.kimi.com/install.sh | bash",
-        "uninstall": "uv tool uninstall kimi-cli",
-        "upgrade": "uv tool upgrade kimi-cli --no-cache",
-        "detect_paths": ["~/.local/bin/kimi"],
-        "detect_uv_tool": "kimi-cli"
-      }
-    }
-  },    "qodercli": {
-    "display_name": "Qoder CLI",
-    "bin": "qodercli",
-    "preferred_provider": "native",
-    "require_managed_provider": true,
-    "providers": {
-      "native": {
-        "managed": true,
-        "install": {
-          "darwin": "curl -fsSL https://qoder.com/install | bash",
-          "linux": "curl -fsSL https://qoder.com/install | bash"
-        },
-        "upgrade": "qodercli update",
-        "detect_paths": ["~/.local/bin/qodercli"]
-      }
-    }
-    }
-    }
+  }
+}

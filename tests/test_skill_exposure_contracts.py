@@ -24,9 +24,9 @@ class SkillExposureContractTests(unittest.TestCase):
     def test_multi_skill_repository_agent_scopes_stay_intentional(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
         expected_scopes = {
-            "agent-skills": ["claude-code", "kimi-cli", "codex", "qodercli"],
-            "superpowers": ["claude-code", "gemini-cli", "cursor", "opencode", "kimi-cli", "codex", "qodercli"],
-            "ui-ux-pro-max-skill": ["claude-code", "kimi-cli", "codex", "qodercli"],
+            "agent-skills": ["claude-code", "codex"],
+            "superpowers": ["claude-code", "gemini-cli", "codex"],
+            "ui-ux-pro-max-skill": ["claude-code", "codex"],
         }
 
         for repo_name, expected_agents in expected_scopes.items():

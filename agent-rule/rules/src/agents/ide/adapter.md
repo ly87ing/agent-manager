@@ -1,1 +1,0 @@
-- Reference files via `@file` and symbols via `@symbol` instead of pasting large excerpts into chat.

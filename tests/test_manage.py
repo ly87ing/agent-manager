@@ -60,6 +60,8 @@ class ManageScriptTests(unittest.TestCase):
         env = dict(base_env or os.environ.copy())
         env["AGENT_MANAGER_LOCK_FILE"] = str(self.lock_path)
         env["AGENT_MANAGER_LOG_PREFIX"] = str(self.log_prefix)
+        env.setdefault("ANTHROPIC_AUTH_TOKEN", "test-anthropic-token")
+        env.setdefault("ANTHROPIC_BASE_URL", "https://anthropic.example.invalid")
         return env
 
     def _write_stub(self, path: Path, content: str):
@@ -1074,9 +1076,9 @@ class ManageScriptTests(unittest.TestCase):
 
             combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
-            self.assertIn("cursor_global", combined)
+            self.assertIn("当前策略未启用任何 Rules 目标", combined)
+            self.assertNotIn("cursor_global", combined)
             self.assertNotIn("copilot_global", combined)
-            self.assertNotIn("当前策略未启用任何 Rules 目标", combined)
             self.assertNotIn("计划原子更新 JSON", combined)
             self.assertNotIn("准备下载到托管缓存", combined)
             self.assertNotIn("正在安装 playwright-cli", combined)
@@ -1521,40 +1523,9 @@ class ManageScriptTests(unittest.TestCase):
             self.assertTrue((temp_home / ".claude" / "CLAUDE.md").exists(), combined)
             self.assertTrue((temp_home / ".codex" / "AGENTS.md").exists(), combined)
 
-    def test_rules_sync_materializes_repo_root_targets_without_active_agent_enablement(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
-
-            (temp_root / "config" / "manager.json").write_text(
-                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "skills.json").write_text(
-                '{\n  "repositories": {},\n  "agents": {}\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "mcp.json").write_text(
-                '{\n  "agent_paths": {},\n  "servers": {}\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text(
-                "cursor_global|global|rules/dist/cursor/agent-manager.mdc|{{REPO_ROOT}}/.cursor/rules/agent-manager.mdc\n",
-                encoding="utf-8",
-            )
-
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "rules:sync"],
-                cwd=temp_root,
-                env=self._managed_env(),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            combined = result.stdout + result.stderr
-            self.assertEqual(result.returncode, 0, combined)
-            self.assertTrue((temp_root / ".cursor" / "rules" / "agent-manager.mdc").exists(), combined)
+    def test_rules_manifest_has_no_repo_root_targets_by_default(self):
+        manifest = (ROOT / "config" / "rules-targets.list").read_text(encoding="utf-8")
+        self.assertNotIn("{{REPO_ROOT}}", manifest)
 
     def test_skills_upgrade_dispatches_upgrade_script(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3653,30 +3624,9 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse(rule_backup.exists(), result.stdout + result.stderr)
 
-    def test_cleanup_expands_repo_root_rule_targets(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            temp_home.mkdir()
-
-            repo_native_backup = temp_root / ".kimi" / "AGENTS.md.bak.20260423"
-            repo_native_backup.parent.mkdir(parents=True, exist_ok=True)
-            repo_native_backup.write_text("old repo-native backup\n", encoding="utf-8")
-
-            env = self._managed_env()
-            env["HOME"] = str(temp_home)
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "cleanup"],
-                cwd=temp_root,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertFalse(repo_native_backup.exists(), result.stdout + result.stderr)
+    def test_cleanup_scope_has_no_repo_native_rule_targets_by_default(self):
+        manifest = (ROOT / "config" / "rules-targets.list").read_text(encoding="utf-8")
+        self.assertNotIn("{{REPO_ROOT}}", manifest)
 
     def test_cleanup_removes_legacy_rule_backups(self):
         with tempfile.TemporaryDirectory() as temp_dir:

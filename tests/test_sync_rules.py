@@ -74,14 +74,14 @@ class SyncRulesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
-            cursor_target = temp_root / ".cursor" / "rules" / "agent-manager.mdc"
+            target_path = temp_root / "CLAUDE.generated.md"
             (temp_root / "config" / "rules-targets.list").write_text(
-                "cursor_global|global|rules/dist/cursor/agent-manager.mdc|{{REPO_ROOT}}/.cursor/rules/agent-manager.mdc\n",
+                "claude_global|global|rules/dist/claude/CLAUDE.md|{{REPO_ROOT}}/CLAUDE.generated.md\n",
                 encoding="utf-8",
             )
 
             result = subprocess.run(
-                [str(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh")],
+                [str(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh"), "--target", "claude_global"],
                 cwd=temp_root / "agent-rule",
                 capture_output=True,
                 text=True,
@@ -90,28 +90,25 @@ class SyncRulesTests(unittest.TestCase):
 
             combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
-            self.assertTrue(cursor_target.exists(), combined)
+            self.assertTrue(target_path.exists(), combined)
             self.assertEqual(
-                cursor_target.read_text(encoding="utf-8"),
-                (temp_root / "agent-rule" / "rules" / "dist" / "cursor" / "agent-manager.mdc").read_text(
-                    encoding="utf-8"
-                ),
+                target_path.read_text(encoding="utf-8"),
+                (temp_root / "agent-rule" / "rules" / "dist" / "claude" / "CLAUDE.md").read_text(encoding="utf-8"),
             )
 
-    def test_repo_root_targets_replace_existing_files_without_backup_artifacts(self):
+    def test_repo_root_targets_replace_existing_files_with_backup(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
-            cursor_target = temp_root / ".cursor" / "rules" / "agent-manager.mdc"
-            cursor_target.parent.mkdir(parents=True, exist_ok=True)
-            cursor_target.write_text("stale cursor\n", encoding="utf-8")
+            target_path = temp_root / "CLAUDE.generated.md"
+            target_path.write_text("old content\n", encoding="utf-8")
             (temp_root / "config" / "rules-targets.list").write_text(
-                "cursor_global|global|rules/dist/cursor/agent-manager.mdc|{{REPO_ROOT}}/.cursor/rules/agent-manager.mdc\n",
+                "claude_global|global|rules/dist/claude/CLAUDE.md|{{REPO_ROOT}}/CLAUDE.generated.md\n",
                 encoding="utf-8",
             )
 
             result = subprocess.run(
-                [str(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh")],
+                [str(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh"), "--target", "claude_global"],
                 cwd=temp_root / "agent-rule",
                 capture_output=True,
                 text=True,
@@ -120,13 +117,8 @@ class SyncRulesTests(unittest.TestCase):
 
             combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
-            self.assertEqual(
-                cursor_target.read_text(encoding="utf-8"),
-                (temp_root / "agent-rule" / "rules" / "dist" / "cursor" / "agent-manager.mdc").read_text(
-                    encoding="utf-8"
-                ),
-            )
-            self.assertEqual(list(cursor_target.parent.glob("agent-manager.mdc.bak.*")), [], combined)
+            self.assertNotIn("old content", target_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(list(temp_root.glob("CLAUDE.generated.md.bak.*"))), 1)
 
     def test_codex_sync_supports_native_agents_filename(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -156,63 +148,6 @@ class SyncRulesTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, combined)
             self.assertTrue(target_path.exists(), combined)
             self.assertEqual(target_path.read_text(encoding="utf-8"), source_path.read_text(encoding="utf-8"))
-
-    def test_kimi_sync_supports_repo_native_agents_filename(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
-            target_path = temp_root / ".kimi" / "AGENTS.md"
-            (temp_root / "config" / "rules-targets.list").write_text(
-                f"kimi_global|global|rules/dist/kimi/AGENTS.md|{target_path}\n",
-                encoding="utf-8",
-            )
-
-            env = os.environ.copy()
-            result = subprocess.run(
-                [str(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh"), "--target", "kimi_global"],
-                cwd=temp_root / "agent-rule",
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            source_path = temp_root / "agent-rule" / "rules" / "dist" / "kimi" / "AGENTS.md"
-            combined = result.stdout + result.stderr
-            self.assertEqual(result.returncode, 0, combined)
-            self.assertTrue(target_path.exists(), combined)
-            self.assertEqual(target_path.read_text(encoding="utf-8"), source_path.read_text(encoding="utf-8"))
-
-    def test_kimi_sync_removes_legacy_home_rule_path_when_using_repo_native_target(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
-            (temp_home / ".kimi").mkdir(parents=True, exist_ok=True)
-            legacy_path = temp_home / ".kimi" / "AGENTS.md"
-            legacy_path.write_text("legacy kimi rule\n", encoding="utf-8")
-            target_path = temp_root / ".kimi" / "AGENTS.md"
-            (temp_root / "config" / "rules-targets.list").write_text(
-                f"kimi_global|global|rules/dist/kimi/AGENTS.md|{target_path}\n",
-                encoding="utf-8",
-            )
-
-            env = os.environ.copy()
-            env["HOME"] = str(temp_home)
-            result = subprocess.run(
-                [str(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh"), "--target", "kimi_global"],
-                cwd=temp_root / "agent-rule",
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            combined = result.stdout + result.stderr
-            self.assertEqual(result.returncode, 0, combined)
-            self.assertTrue(target_path.exists(), combined)
-            self.assertFalse(legacy_path.exists(), combined)
-            self.assertEqual(len(list(legacy_path.parent.glob("AGENTS.md.bak.*"))), 1, combined)
 
     def test_codex_sync_removes_legacy_global_rule_path(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -428,12 +363,12 @@ class SyncRulesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            duplicate_target = (temp_root / ".cursor" / "rules" / "agent-manager.mdc").resolve()
+            duplicate_target = (temp_root / "CLAUDE.generated.md").resolve()
             (temp_root / "config" / "rules-targets.list").write_text(
                 (
-                    "cursor_global|global|rules/dist/cursor/agent-manager.mdc|"
-                    "{{REPO_ROOT}}/.cursor/rules/agent-manager.mdc\n"
-                    f"duplicate_cursor|global|rules/dist/cursor/agent-manager.mdc|{duplicate_target}\n"
+                    "claude_global|global|rules/dist/claude/CLAUDE.md|"
+                    "{{REPO_ROOT}}/CLAUDE.generated.md\n"
+                    f"duplicate_claude|global|rules/dist/claude/CLAUDE.md|{duplicate_target}\n"
                 ),
                 encoding="utf-8",
             )
@@ -507,31 +442,30 @@ class SyncRulesTests(unittest.TestCase):
         self.assertIn(f"read `{codex_modules_target}/architecture.md`", content)
         self.assertNotIn("read `modules/architecture.md`", content)
 
-    def test_kimi_main_rule_points_to_relative_modules_path(self):
-        content = (ROOT / "agent-rule" / "rules" / "dist" / "kimi" / "AGENTS.md").read_text(encoding="utf-8")
-        self.assertIn("read `modules/architecture.md`", content)
-        self.assertNotIn("{{REPO_ROOT}}/.kimi/modules/architecture.md", content)
-
     def test_manifest_targets_built_rule_outputs(self):
         manifest = (ROOT / "config" / "rules-targets.list").read_text(encoding="utf-8")
         self.assertIn("codex_global|global|rules/dist/codex/AGENTS.md|~/.codex/AGENTS.md", manifest)
-        self.assertIn("kimi_global|global|rules/dist/kimi/AGENTS.md|{{REPO_ROOT}}/.kimi/AGENTS.md", manifest)
-        self.assertNotIn("codex_global|global|rules/dist/codex/main.md|~/.codex/rules/global.md", manifest)
         self.assertIn("claude_global|global|rules/dist/claude/CLAUDE.md|~/.claude/CLAUDE.md", manifest)
         self.assertIn("gemini_global|global|rules/dist/gemini/GEMINI.md|~/.gemini/GEMINI.md", manifest)
-        self.assertIn(
-            "cursor_global|global|rules/dist/cursor/agent-manager.mdc|{{REPO_ROOT}}/.cursor/rules/agent-manager.mdc",
-            manifest,
-        )
-        self.assertIn(
-            "cursor_global|global|rules/dist/cursor/agent-manager.mdc|{{REPO_ROOT}}/.cursor/rules/agent-manager.mdc",
-            manifest,
-        )
-        self.assertNotIn("copilot_global|global|rules/dist/copilot/copilot-instructions.md", manifest)
-        self.assertNotIn("opencode_global|global|rules/dist/ide/main.md|~/.config/opencode/rules/global.md", manifest)
         self.assertIn("codex_modules|global|rules/dist/modules|~/.codex/modules", manifest)
-        self.assertIn("kimi_modules|global|rules/dist/modules|{{REPO_ROOT}}/.kimi/modules", manifest)
         self.assertIn("claude_modules|global|rules/dist/modules|~/.claude/modules", manifest)
         self.assertIn("gemini_modules|global|rules/dist/modules|~/.gemini/modules", manifest)
-        self.assertIn("cursor_modules|global|rules/dist/modules|{{REPO_ROOT}}/.cursor/rules/modules", manifest)
-        self.assertNotIn("copilot_modules|global|rules/dist/modules|{{REPO_ROOT}}/.github/modules", manifest)
+        for legacy in ("kimi", "qoder", "cursor", "opencode", "copilot"):
+            self.assertNotIn(f"{legacy}_global", manifest)
+            self.assertNotIn(f"{legacy}_modules", manifest)
+
+    def test_sync_script_does_not_route_retired_agent_targets(self):
+        script = (ROOT / "agent-rule" / "scripts" / "sync-agent-rules.sh").read_text(encoding="utf-8")
+        for retired in (
+            "$HOME\"/.cursor",
+            "$HOME\"/.config/opencode",
+            "$HOME\"/.kimi",
+            "$HOME\"/.qoder",
+            "$workspace_root\"/.cursor",
+            "$workspace_root\"/.kimi",
+            "command -v cursor",
+            "command -v opencode",
+            "command -v kimi",
+            "command -v qoder",
+        ):
+            self.assertNotIn(retired, script)

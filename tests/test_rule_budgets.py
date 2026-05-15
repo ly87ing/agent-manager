@@ -25,7 +25,7 @@ class RuleBudgetTests(unittest.TestCase):
         self.assertIn(phrase, artifact)
 
     def test_agent_adapters_stay_within_budget(self):
-        for target in ("codex", "claude", "gemini", "ide", "kimi", "qoder"):
+        for target in ("codex", "claude", "gemini"):
             content = (ROOT / "agent-rule" / "rules" / "src" / "agents" / target / "adapter.md").read_text(
                 encoding="utf-8"
             )

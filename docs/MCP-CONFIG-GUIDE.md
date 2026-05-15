@@ -66,8 +66,6 @@ make sync
 |-------|-------------|--------|-------------|-----------|----------|
 | **Claude Code** | `~/.claude.json` | `mcpServers` | 字符串 + args 数组 | `env` | - |
 | **Gemini CLI** | `~/.gemini/settings.json` | `mcpServers` | 字符串 + args 数组 | `env` | 项目配置优先 |
-| **Cursor** | `~/.cursor/mcp.json` | `mcpServers` | 字符串 + args 数组 | `env` | - |
-| **OpenCode** | `~/.config/opencode/opencode.json` | `mcp` | **数组** | `environment` | 必须有 `type: "local"` |
 | **Codex** | `~/.codex/config.toml` | `[mcp_servers.*]` | 字符串 + args 数组 | `[mcp_servers.*.env]` | TOML 字符串转义 |
 
 ---
@@ -123,65 +121,6 @@ make sync
 ```bash
 gemini mcp list
 ```
-
----
-
-### Cursor
-
-**配置文件**: `~/.cursor/mcp.json`
-
-```json
-{
-  "mcpServers": {
-    "augment-context-engine": {
-      "command": "auggie",
-      "args": ["--mcp", "--mcp-auto-workspace"],
-      "env": {
-        "AUGMENT_SESSION_AUTH": "{\"accessToken\":\"...\"}"
-      }
-    }
-  }
-}
-```
-
----
-
-### OpenCode ⚠️
-
-**配置文件**: `~/.config/opencode/opencode.json`
-
-```json
-{
-  "mcp": {
-    "augment-context-engine": {
-      "type": "local",
-      "command": ["auggie", "--mcp", "--mcp-auto-workspace"],
-      "environment": {
-        "AUGMENT_SESSION_AUTH": "{\"accessToken\":\"...\"}",
-        "_MANAGED_BY": "agent-manager"
-      }
-    }
-  }
-}
-```
-
-**特殊要求**:
-1. 根键是 `mcp` 而不是 `mcpServers`
-2. `command` 必须是**数组**（不是字符串 + args）
-3. 环境变量键是 `environment` 而不是 `env`
-4. **必须**有 `type: "local"` 字段
-
-**验证命令**:
-```bash
-opencode mcp list
-```
-
-**常见错误**:
-```
-Error: Configuration is invalid
-↳ Invalid input mcp.augment-context-engine
-```
-→ 缺少 `type: "local"` 或 `command` 格式错误
 
 ---
 
@@ -379,26 +318,7 @@ npx -y chrome-devtools-mcp@latest
 
 ## 常见问题与解决方案
 
-### Q1: OpenCode 报错 "Invalid input mcp.*"
-
-**原因**: 配置格式不符合 OpenCode 的 schema 要求
-
-**解决**: 确保包含以下三个要素：
-```json
-{
-  "mcp": {
-    "server-name": {
-      "type": "local",           // ← 必需
-      "command": ["cmd", "..."],  // ← 必须是数组
-      "environment": {}           // ← 不是 env
-    }
-  }
-}
-```
-
----
-
-### Q2: Codex 报错 "unexpected key or value"
+### Q1: Codex 报错 "unexpected key or value"
 
 **原因**: TOML 中 JSON 字符串的双引号未正确处理
 
@@ -413,7 +333,7 @@ KEY = '{"nested":"value"}'
 
 ---
 
-### Q3: Gemini CLI 配置不生效
+### Q2: Gemini CLI 配置不生效
 
 **原因**: 项目配置覆盖了全局配置
 
@@ -429,7 +349,7 @@ rm ./.gemini/settings.json
 
 ---
 
-### Q4: MCP 服务器无法启动
+### Q3: MCP 服务器无法启动
 
 **排查步骤**:
 
@@ -452,11 +372,10 @@ rm ./.gemini/settings.json
 4. **查看 Agent 日志**:
    - Claude Code: 检查对话错误信息
    - Gemini CLI: `gemini debug mcp`
-   - OpenCode: 启动时添加 `--debug` 标志
 
 ---
 
-### Q5: 凭证过期/失效
+### Q4: 凭证过期/失效
 
 **症状**: MCP 服务器启动失败，提示认证错误
 
@@ -528,10 +447,6 @@ auggie --mcp --mcp-auto-workspace
 gemini mcp list
 gemini debug mcp  # 需要登录
 
-# OpenCode
-opencode mcp list
-opencode --print "test mcp"  # 测试模式
-
 # Codex
 codex mcp list
 # 检查 TOML 语法
@@ -554,9 +469,7 @@ PY
 |-------|---------|
 | Claude Code | 终端输出 |
 | Gemini CLI | `gemini debug mcp` |
-| OpenCode | `--debug` 标志 |
 | Codex | 终端输出 |
-| Cursor | 开发者工具 |
 
 ---
 
@@ -571,8 +484,7 @@ PY
 3. 替换 ${VAR} 占位符；若真实执行时仍有未解析占位符，则直接失败
    ↓
 4. 根据各 Agent 格式生成配置
-   ├─ JSON 格式 (Claude/Gemini/Cursor)
-   ├─ OpenCode 格式 (type + command 数组 + environment)
+   ├─ JSON 格式 (Claude/Gemini)
    └─ TOML 格式 (Codex，带字符串转义)
    ↓
 5. 校验现有配置可解析、生成结果合法、且仅删除 _MANAGED_BY=agent-manager 的托管段

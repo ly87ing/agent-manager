@@ -11,11 +11,8 @@ ROOT = Path(__file__).resolve().parent.parent
 class RuleLayoutTests(unittest.TestCase):
     DIST_FILENAMES = {
         "codex": "AGENTS.md",
-        "kimi": "AGENTS.md",
         "claude": "CLAUDE.md",
         "gemini": "GEMINI.md",
-        "cursor": "agent-manager.mdc",
-        "qoder": "QODER.md",
     }
 
     def _copy_repo(self, temp_dir: str) -> Path:
@@ -109,19 +106,6 @@ class RuleLayoutTests(unittest.TestCase):
             self.assertIn("read `~/.codex-alt/modules/architecture.md`", codex_rule)
             self.assertNotIn("read `~/.codex/modules/architecture.md`", codex_rule)
 
-    def test_kimi_module_paths_stay_relative_for_repo_native_target(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = self._copy_repo(temp_dir)
-            result = self._run_builder(temp_root)
-
-            combined = result.stdout + result.stderr
-            self.assertEqual(result.returncode, 0, combined)
-            kimi_rule = (temp_root / "agent-rule" / "rules" / "dist" / "kimi" / "AGENTS.md").read_text(
-                encoding="utf-8"
-            )
-            self.assertIn("read `modules/architecture.md`", kimi_rule)
-            self.assertNotIn("read `~/.kimi/modules/architecture.md`", kimi_rule)
-
     def test_codex_rewrites_new_shared_module_references(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = self._copy_repo(temp_dir)
@@ -183,10 +167,6 @@ class RuleLayoutTests(unittest.TestCase):
             self.assertNotIn("graphify-out/GRAPH_REPORT.md", content, target)
             self.assertIn(explicit_context_clause, content, target)
             self.assertIn("modules/artifact-hygiene.md", content, target)
-        cursor_rule = (ROOT / "agent-rule" / "rules" / "dist" / "cursor" / "agent-manager.mdc").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("alwaysApply: true", cursor_rule)
 
     def test_built_outputs_stay_compact_and_omit_scaffolding_text(self):
         forbidden_fragments = (

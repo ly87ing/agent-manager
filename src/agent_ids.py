@@ -12,25 +12,9 @@ AGENT_METADATA = {
         "display_name": "Gemini CLI",
         "aliases": ["Gemini CLI"],
     },
-    "cursor": {
-        "display_name": "Cursor CLI",
-        "aliases": ["Cursor", "Cursor CLI", "Cursor IDE", "cursor-agent"],
-    },
-    "opencode": {
-        "display_name": "OpenCode",
-        "aliases": ["OpenCode"],
-    },
     "codex": {
         "display_name": "Codex",
         "aliases": ["Codex"],
-    },
-    "kimi-cli": {
-        "display_name": "Kimi Code CLI",
-        "aliases": ["Kimi Code CLI", "Kimi CLI", "kimi-cli", "kimi"],
-    },
-    "qodercli": {
-        "display_name": "Qoder CLI",
-        "aliases": ["Qoder CLI", "Qoder", "qodercli", "qoder"],
     },
 }
 

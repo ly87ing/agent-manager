@@ -89,7 +89,6 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
    - 解决：确保对应的包管理器已安装和可用
      - 对于 `Claude Code` 官方 native provider：确认 `curl`、`bash` 和官方安装目录在 PATH 中
      - 对于 `Codex` / `Gemini CLI` 的 npm provider：`npm config get prefix` 应返回可写目录
-     - 对于仍以 brew 受管的其他 Agent：`brew doctor` 并确保在 PATH 中
      - 对于 gh provider：`gh auth status` 检查 GitHub 认证
 
 2. **网络或权限问题**
@@ -116,7 +115,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 **症状**：`doctor` 报告 `已弃用安装来源`，或 `update` / `bootstrap` 直接失败
 
 #### 处理建议：
-处理原则：按各 Agent 官方当前推荐方式维护。放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer；`Codex` / `Gemini CLI` 的 `npm` 是官方合规默认路径，`Kimi Code CLI` 的 `install script + uv tool` 是官方合规组合路径。
+处理原则：当前只维护 `Claude Code`、`Codex` 和 `Gemini CLI`。放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer；`Codex` / `Gemini CLI` 的 `npm` 是官方合规默认路径。
 
 1. `Claude Code`
    - 手工卸载 brew 版本，再让 `agent-manager` 走官方 native installer
@@ -125,30 +124,25 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
    - 手工卸载 brew 版本，再执行 `npm install -g @openai/codex`
 3. `Gemini CLI`
    - 手工卸载 brew 版本，再执行 `npm install -g @google/gemini-cli`
-4. `OpenCode`
-   - 手工卸载 brew 版本，再执行官方 install script：`curl -fsSL https://opencode.ai/install | bash`
 
 ### 问题：检测到外部安装但未纳入托管
 **症状**：`doctor` 报告 `检测到外部安装，未纳入 agent-manager 托管`
 
 #### 处理建议：
-1. 确认当前 PATH 中的 `claude` / `codex` / `gemini` / `cursor-agent` / `opencode` / `kimi` 是否来自官方受管来源
+1. 确认当前 PATH 中的 `claude` / `codex` / `gemini` 是否来自官方受管来源
 2. 清理系统残留或自定义包装脚本，再重新执行 `./manage.sh doctor`
 3. 若希望继续由 `agent-manager` 管理，请回到官方受管 provider：
    - `Claude Code`：官方 native installer（或保留已存在的 npm 受管安装）
    - `Codex`：官方 npm 包 `@openai/codex`
    - `Gemini CLI`：官方 npm 包 `@google/gemini-cli`
-   - `Cursor`：官方 `cursor-agent` install script
-   - `OpenCode`：官方 install script `https://opencode.ai/install`
-   - `Kimi Code CLI`：官方 install script `https://code.kimi.com/install.sh`
 
 ### 问题：检测到官方生命周期动作缺口
 **症状**：`doctor` 报告 `官方生命周期动作缺口`，或某个 Agent 条目提示 `官方当前未提供受管 uninstall 动作`
 
 #### 处理建议：
-1. 这表示当前 provider 存在官方动作缺口，不是本地配置漏写；`agent-manager` 会保持 fail-close。
-2. 当前已知示例是 `Cursor CLI`：当前官方文档未给出受管 uninstall 命令。
-3. 如需停用该 agent，请先按官方流程自行卸载，再重新运行 `./manage.sh doctor` 确认状态；`agent-manager` 不会伪造删除命令。
+1. 这表示某个 provider 存在官方动作缺口，不是本地配置漏写；`agent-manager` 会保持 fail-close。
+2. 当前三个受管 Agent 的默认 provider 都已有明确 install / update / uninstall 路径；如果后续新增 provider，必须先确认官方命令，再纳入托管。
+3. 如需停用存在动作缺口的 provider，请先按官方流程自行卸载，再重新运行 `./manage.sh doctor` 确认状态；`agent-manager` 不会伪造删除命令。
 
 ### 问题：Rules 修改后没有分发到目标 Agent
 **症状**：已经修改 `agent-rule/rules/src/`，但目标 Agent 目录里的规则仍然是旧内容
@@ -176,10 +170,8 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
    - 检查：查看 Agent 版本是否符合最低要求
      ```bash
      claude --version    # Claude Code
+     codex --version     # Codex
      gemini --version    # Gemini CLI
-     cursor-agent --version  # Cursor CLI
-     opencode --version  # OpenCode
-     kimi --version      # Kimi Code CLI
      ```
    - 解决：参考官方文档升级到兼容版本
 
@@ -222,9 +214,8 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 1. **配置格式错误**
    - 检查：参考 MCP-CONFIG-GUIDE.md 中的格式对比表验证配置
    - 常见错误：
-     * OpenCode：缺少 `type: "local"` 或 `command` 不是数组
      * Codex：TOML 中 JSON 字符串未用单引号包裹
-     * 其他 Agent：环境变量键使用 `env` 而不是正确的键名
+     * Claude Code / Gemini CLI：根键应为 `mcpServers`，环境变量键应为 `env`
    - 解决：根据具体 Agent 类型修正配置格式
 
 2. **凭证未正确注入**
@@ -235,7 +226,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
      cat secrets/mcp.env  # 注意：这会显示凭证！
      
      # 检查占位符是否被正确替换
-     grep -r "AUGMENT_SESSION_AUTH" ~/.claude.json ~/.gemini/settings.json ~/.cursor/mcp.json ~/.config/opencode/opencode.json ~/.codex/config.toml
+     grep -r "AUGMENT_SESSION_AUTH" ~/.claude.json ~/.gemini/settings.json ~/.codex/config.toml
      ```
    - 解决：
      * 确保 secrets/ 目录存在并为有效的 Git 仓库
@@ -551,7 +542,7 @@ done
 ### 验证符号链接完整性
 ```bash
 # 检查所有技能链接是否有效
-find ~/.claude/skills ~/.gemini/skills ~/.cursor/rules ~/.config/opencode/skills ~/.codex/skills -type l 2>/dev/null | while read link; do
+find ~/.claude/skills ~/.gemini/skills ~/.codex/skills -type l 2>/dev/null | while read link; do
   if [ -e "$link" ]; then
     echo "OK: $link -> $(readlink $link)"
   else
@@ -571,8 +562,8 @@ done
 ```bash
 # 1. 停止所有正在运行的 Agent 实例
 # 2. 删除管理的配置和链接
-rm -rf ~/.claude.json ~/.gemini/settings.json ~/.cursor/mcp.json ~/.config/opencode/opencode.json ~/.codex/config.toml
-rm -rf ~/.claude/skills/* ~/.gemini/skills/* ~/.cursor/rules/* ~/.config/opencode/skills/* ~/.codex/skills/*
+rm -rf ~/.claude.json ~/.gemini/settings.json ~/.codex/config.toml
+rm -rf ~/.claude/skills/* ~/.gemini/skills/* ~/.codex/skills/*
 
 # 3. 重新从 Agent Manager 同步
 ./manage.sh bootstrap
@@ -628,7 +619,6 @@ cp -r ~/agent-manager-backup/claude/skills/* ~/.claude/skills/
 ### 常见 Agent 错误
 | 错误消息 | 可能原因 | 解决方案 |
 |----------|----------|----------|
-| `Configuration is invalid` (OpenCode) | MCP 配置格式错误 | 检查是否包含 `type: "local"`、`command` 为数组、`environment` 而不是 `env` |
 | `Unexpected key or value` (Codex) | TOML 格式错误，通常是 JSON 字符串未正确转义 | 使用单引号包裹包含双引号的值：`KEY = '{"json":"value"}'` |
 | `Disconnected` (Gemini CLI) | 通常是正常的按需启动行为 | 实际使用 MCP 功能时服务器会自动启动；使用 `gemini debug mcp` 检查 |
 | `Command not found: auggie` | auggie 未安装或不在 PATH 中 | 安装：`npm install -g @augmentcode/auggie` 或检查安装路径 |

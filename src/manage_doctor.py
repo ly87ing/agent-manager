@@ -34,11 +34,7 @@ PLACEHOLDER_PATTERN = re.compile(r"^\$\{[^}]+\}$")
 RULE_TARGET_PREFIX_TO_ID = {
     "claude": "claude-code",
     "gemini": "gemini-cli",
-    "cursor": "cursor",
-    "opencode": "opencode",
     "codex": "codex",
-    "kimi": "kimi-cli",
-    "qoder": "qodercli",
 }
 REQUIRED_CONFIG_FILES = (
     "config/manager.json",
@@ -344,13 +340,8 @@ def _normalize_actual_mcp_definition(settings: dict, agent_id: str) -> dict[str,
     if not isinstance(env_dict, dict) or env_dict.get("_MANAGED_BY") != "agent-manager":
         return None
 
-    if agent_id == "opencode" and isinstance(settings.get("command"), list):
-        command_parts = settings.get("command")
-        command = command_parts[0] if command_parts and isinstance(command_parts[0], str) else None
-        args = _normalize_mcp_args(command_parts[1:] if isinstance(command_parts, list) else None)
-    else:
-        command = settings.get("command") if isinstance(settings.get("command"), str) else None
-        args = _normalize_mcp_args(settings.get("args"))
+    command = settings.get("command") if isinstance(settings.get("command"), str) else None
+    args = _normalize_mcp_args(settings.get("args"))
 
     return {
         "command": command,
@@ -419,8 +410,7 @@ def managed_mcp_servers(target_path: str, file_format: str, agent_id: str) -> di
         raise ValueError(str(exc)) from exc
     if not isinstance(parsed, dict):
         raise ValueError("顶层必须是对象")
-    preferred_key = "mcp" if agent_id == "opencode" else "mcpServers"
-    server_mapping = parsed.get(preferred_key, {})
+    server_mapping = parsed.get("mcpServers", {})
     if server_mapping is None:
         return {}
     if not isinstance(server_mapping, dict):

@@ -28,26 +28,19 @@ class SyncMcpTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, combined)
         self.assertIn("-f, --force-refresh", combined)
 
-    def test_committed_mcp_definitions_include_kimi_cli_json_target(self):
+    def test_committed_mcp_definitions_target_only_managed_agents(self):
         definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
         self.assertEqual(
-            definitions["agent_paths"]["kimi-cli"],
-            {"path": "~/.kimi/mcp.json", "format": "json"},
+            set(definitions["agent_paths"].keys()),
+            {"claude-code", "gemini-cli", "codex"},
         )
 
-    def test_committed_mcp_definitions_include_qoder_cli_settings_target(self):
-        definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
-        self.assertEqual(
-            definitions["agent_paths"]["qodercli"],
-            {"path": "~/.qoder/settings.json", "format": "json"},
-        )
-
-    def test_committed_augment_context_engine_excludes_qoder_cli(self):
+    def test_committed_augment_context_engine_targets_only_managed_agents(self):
         definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
         agents = definitions["servers"]["augment-context-engine"]["agents"]
 
         self.assertIsInstance(agents, list)
-        self.assertNotIn("qodercli", agents)
+        self.assertEqual(set(agents), {"claude-code", "gemini-cli", "codex"})
 
     def test_committed_mcp_policy_keeps_augment_context_engine_disabled_by_default(self):
         policy = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))

@@ -47,9 +47,6 @@ NETWORK_ERROR_MARKERS = (
 OFFICIAL_NPM_REGISTRY = "https://registry.npmjs.org"
 OFFICIAL_INSTALLER_URL_MARKERS = (
     "https://claude.ai/install",
-    "https://cursor.com/install",
-    "https://opencode.ai/install",
-    "https://code.kimi.com/install.sh",
 )
 INSTALL_CMD_TIMEOUT = 900
 ASYNC_ACTION_ENV = "AGENT_MANAGER_AGENT_ASYNC_DIR"

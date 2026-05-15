@@ -535,12 +535,12 @@ class ReconcileAgentTests(unittest.TestCase):
 
     def test_brew_upgrade_skips_when_outdated_probe_is_empty(self):
         definition = {
-            "display_name": "OpenCode",
-            "bin": "opencode",
+            "display_name": "Gemini CLI",
+            "bin": "gemini",
             "providers": {
                 "brew": {
-                    "install": "brew install opencode",
-                    "upgrade": "brew upgrade opencode",
+                    "install": "brew install gemini-cli",
+                    "upgrade": "brew upgrade gemini-cli",
                 }
             },
         }
@@ -552,10 +552,10 @@ class ReconcileAgentTests(unittest.TestCase):
             mock.patch.object(sync_agents, "run_cmd", return_value=(True, "")) as run_cmd,
             self.assertLogs(level="INFO") as logs,
         ):
-            result = sync_agents.reconcile_agent("opencode", definition, policy)
+            result = sync_agents.reconcile_agent("gemini-cli", definition, policy)
 
         self.assertTrue(result)
-        run_cmd.assert_called_once_with("brew outdated opencode", timeout=60)
+        run_cmd.assert_called_once_with("brew outdated gemini-cli", timeout=60)
         self.assertTrue(any("未发现可用更新" in line for line in logs.output), logs.output)
 
     def test_brew_cask_upgrade_runs_outdated_probe_before_upgrade(self):
@@ -718,12 +718,12 @@ class ReconcileAgentTests(unittest.TestCase):
 
     def test_install_reports_official_gap_for_unsupported_install(self):
         definition = {
-            "display_name": "Cursor CLI",
-            "bin": "cursor-agent",
+            "display_name": "Sample Agent",
+            "bin": "sample-agent",
             "providers": {
                 "native": {
                     "managed": True,
-                    "install": "cursor-agent install",
+                    "install": "sample-agent install",
                     "unsupported_actions": ["install"],
                 }
             },
@@ -735,7 +735,7 @@ class ReconcileAgentTests(unittest.TestCase):
             mock.patch.object(sync_agents, "run_cmd") as run_cmd,
             self.assertLogs(level="ERROR") as logs,
         ):
-            result = sync_agents.reconcile_agent("cursor", definition, policy)
+            result = sync_agents.reconcile_agent("sample-agent", definition, policy)
 
         self.assertFalse(result)
         run_cmd.assert_not_called()
@@ -743,12 +743,12 @@ class ReconcileAgentTests(unittest.TestCase):
 
     def test_update_reports_official_gap_for_unsupported_update(self):
         definition = {
-            "display_name": "Cursor CLI",
-            "bin": "cursor-agent",
+            "display_name": "Sample Agent",
+            "bin": "sample-agent",
             "providers": {
                 "native": {
                     "managed": True,
-                    "upgrade": "cursor-agent update",
+                    "upgrade": "sample-agent update",
                     "unsupported_actions": ["update"],
                 }
             },
@@ -761,7 +761,7 @@ class ReconcileAgentTests(unittest.TestCase):
             mock.patch.object(sync_agents, "run_cmd") as run_cmd,
             self.assertLogs(level="ERROR") as logs,
         ):
-            result = sync_agents.reconcile_agent("cursor", definition, policy)
+            result = sync_agents.reconcile_agent("sample-agent", definition, policy)
 
         self.assertFalse(result)
         run_cmd.assert_not_called()
@@ -769,12 +769,12 @@ class ReconcileAgentTests(unittest.TestCase):
 
     def test_uninstall_reports_official_gap_for_unsupported_uninstall(self):
         definition = {
-            "display_name": "Cursor CLI",
-            "bin": "cursor-agent",
+            "display_name": "Sample Agent",
+            "bin": "sample-agent",
             "providers": {
                 "native": {
                     "managed": True,
-                    "upgrade": "cursor-agent update",
+                    "upgrade": "sample-agent update",
                     "unsupported_actions": ["uninstall"],
                 }
             },
@@ -787,7 +787,7 @@ class ReconcileAgentTests(unittest.TestCase):
             mock.patch.object(sync_agents, "run_cmd") as run_cmd,
             self.assertLogs(level="ERROR") as logs,
         ):
-            result = sync_agents.reconcile_agent("cursor", definition, policy)
+            result = sync_agents.reconcile_agent("sample-agent", definition, policy)
 
         self.assertFalse(result)
         run_cmd.assert_not_called()
@@ -795,13 +795,13 @@ class ReconcileAgentTests(unittest.TestCase):
 
     def test_repair_fails_when_all_repair_paths_are_officially_unsupported(self):
         definition = {
-            "display_name": "Cursor CLI",
-            "bin": "cursor-agent",
+            "display_name": "Sample Agent",
+            "bin": "sample-agent",
             "providers": {
                 "native": {
                     "managed": True,
-                    "install": "cursor-agent install",
-                    "upgrade": "cursor-agent update",
+                    "install": "sample-agent install",
+                    "upgrade": "sample-agent update",
                     "unsupported_actions": ["repair", "update", "install"],
                 }
             },
@@ -814,7 +814,7 @@ class ReconcileAgentTests(unittest.TestCase):
             mock.patch.object(sync_agents, "run_cmd") as run_cmd,
             self.assertLogs(level="ERROR") as logs,
         ):
-            result = sync_agents.reconcile_agent("cursor", definition, policy)
+            result = sync_agents.reconcile_agent("sample-agent", definition, policy)
 
         self.assertFalse(result)
         run_cmd.assert_not_called()
@@ -832,12 +832,12 @@ class ReconcileAgentTests(unittest.TestCase):
         for unsupported_actions in invalid_values:
             with self.subTest(unsupported_actions=unsupported_actions):
                 definition = {
-                    "display_name": "Cursor CLI",
-                    "bin": "cursor-agent",
+                    "display_name": "Sample Agent",
+                    "bin": "sample-agent",
                     "providers": {
                         "native": {
                             "managed": True,
-                            "install": "cursor-agent install",
+                            "install": "sample-agent install",
                             "unsupported_actions": unsupported_actions,
                         }
                     },
@@ -849,7 +849,7 @@ class ReconcileAgentTests(unittest.TestCase):
                     mock.patch.object(sync_agents, "run_cmd") as run_cmd,
                     self.assertLogs(level="ERROR") as logs,
                 ):
-                    result = sync_agents.reconcile_agent("cursor", definition, policy)
+                    result = sync_agents.reconcile_agent("sample-agent", definition, policy)
 
                 self.assertFalse(result)
                 run_cmd.assert_not_called()
@@ -857,25 +857,25 @@ class ReconcileAgentTests(unittest.TestCase):
 
     def test_get_repair_cmd_falls_back_to_upgrade_when_repair_is_unsupported(self):
         provider_cfg = {
-            "install": "cursor-agent install",
-            "upgrade": "cursor-agent update",
+            "install": "sample-agent install",
+            "upgrade": "sample-agent update",
             "unsupported_actions": ["repair"],
         }
 
         repair_cmd = sync_agents.get_repair_cmd("native", provider_cfg)
 
-        self.assertEqual(repair_cmd, "cursor-agent update")
+        self.assertEqual(repair_cmd, "sample-agent update")
 
     def test_get_repair_cmd_falls_back_to_install_when_update_is_unsupported(self):
         provider_cfg = {
-            "install": "cursor-agent install",
-            "upgrade": "cursor-agent update",
+            "install": "sample-agent install",
+            "upgrade": "sample-agent update",
             "unsupported_actions": ["repair", "update"],
         }
 
         repair_cmd = sync_agents.get_repair_cmd("native", provider_cfg)
 
-        self.assertEqual(repair_cmd, "cursor-agent install")
+        self.assertEqual(repair_cmd, "sample-agent install")
 
     def test_get_repair_cmd_brew_fails_fast_when_install_pkg_cannot_be_resolved(self):
         provider_cfg = {
@@ -890,12 +890,12 @@ class ReconcileAgentTests(unittest.TestCase):
 
     def test_brew_probe_failure_skips_direct_upgrade(self):
         definition = {
-            "display_name": "OpenCode",
-            "bin": "opencode",
+            "display_name": "Gemini CLI",
+            "bin": "gemini",
             "providers": {
                 "brew": {
-                    "install": "brew install opencode",
-                    "upgrade": "brew upgrade opencode",
+                    "install": "brew install gemini-cli",
+                    "upgrade": "brew upgrade gemini-cli",
                 }
             },
         }
@@ -907,10 +907,10 @@ class ReconcileAgentTests(unittest.TestCase):
             mock.patch.object(sync_agents, "run_cmd", return_value=(False, "brew locked")) as run_cmd,
             self.assertLogs(level="WARNING") as logs,
         ):
-            result = sync_agents.reconcile_agent("opencode", definition, policy)
+            result = sync_agents.reconcile_agent("gemini-cli", definition, policy)
 
         self.assertTrue(result)
-        run_cmd.assert_called_once_with("brew outdated opencode", timeout=60)
+        run_cmd.assert_called_once_with("brew outdated gemini-cli", timeout=60)
         self.assertTrue(any("更新探测失败，跳过升级" in line for line in logs.output), logs.output)
 
     def test_direct_upgrade_network_failure_skips_upgrade(self):
@@ -1181,35 +1181,12 @@ class AgentIdConsistencyTests(unittest.TestCase):
         skill_targets = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))["agents"]
         mcp_agent_paths = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))["agent_paths"]
 
-        managed_agent_ids = {
-            "claude-code",
-            "gemini-cli",
-            "cursor",
-            "opencode",
-            "codex",
-            "kimi-cli",
-            "qodercli",
-        }
+        managed_agent_ids = {"claude-code", "gemini-cli", "codex"}
 
         self.assertEqual(set(manager_agents), managed_agent_ids)
         self.assertEqual(set(lifecycle_agents), managed_agent_ids)
         self.assertEqual(set(skill_targets), managed_agent_ids)
         self.assertEqual(set(mcp_agent_paths), managed_agent_ids)
-
-
-class KimiLifecycleConfigTests(unittest.TestCase):
-    def test_kimi_cli_definition_is_committed(self):
-        lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
-
-        self.assertIn("kimi-cli", lifecycle_agents)
-        self.assertEqual(lifecycle_agents["kimi-cli"]["display_name"], "Kimi Code CLI")
-        self.assertEqual(lifecycle_agents["kimi-cli"]["bin"], "kimi")
-        self.assertEqual(lifecycle_agents["kimi-cli"]["preferred_provider"], "native")
-
-    def test_kimi_cli_metadata_has_display_name(self):
-        from src.agent_ids import get_agent_display_name
-
-        self.assertEqual(get_agent_display_name("kimi-cli"), "Kimi Code CLI")
 
 
 class CommittedAgentPolicyTests(unittest.TestCase):
@@ -1232,25 +1209,10 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         self.assertTrue(manager["agents"]["codex"]["auto_update"])
         self.assertEqual(manager["agents"]["codex"]["preferred_provider"], "npm")
         self.assertEqual(lifecycle_agents["codex"]["preferred_provider"], "npm")
-        self.assertFalse(manager["agents"]["cursor"]["auto_install"])
-        self.assertTrue(manager["agents"]["cursor"]["auto_update"])
-        self.assertEqual(manager["agents"]["cursor"]["preferred_provider"], "native")
-        self.assertEqual(lifecycle_agents["cursor"]["display_name"], "Cursor CLI")
-        self.assertEqual(lifecycle_agents["cursor"]["bin"], "cursor-agent")
-        self.assertEqual(lifecycle_agents["cursor"]["preferred_provider"], "native")
-        self.assertFalse(manager["agents"]["opencode"]["auto_install"])
-        self.assertTrue(manager["agents"]["opencode"]["auto_update"])
-        self.assertEqual(manager["agents"]["opencode"]["preferred_provider"], "native")
-        self.assertEqual(lifecycle_agents["opencode"]["preferred_provider"], "native")
-        self.assertFalse(manager["agents"]["kimi-cli"]["auto_install"])
-        self.assertTrue(manager["agents"]["kimi-cli"]["auto_update"])
-        self.assertEqual(manager["agents"]["kimi-cli"]["preferred_provider"], "native")
-        self.assertEqual(lifecycle_agents["kimi-cli"]["preferred_provider"], "native")
 
         self.assertTrue(lifecycle_agents["claude-code"]["require_managed_provider"])
         self.assertTrue(lifecycle_agents["gemini-cli"]["require_managed_provider"])
         self.assertTrue(lifecycle_agents["codex"]["require_managed_provider"])
-        self.assertTrue(lifecycle_agents["kimi-cli"]["require_managed_provider"])
 
         claude_native = lifecycle_agents["claude-code"]["providers"]["native"]
         self.assertTrue(claude_native["managed"])
@@ -1264,10 +1226,6 @@ class CommittedAgentPolicyTests(unittest.TestCase):
             claude_native["uninstall"]["posix"],
             "rm -f ~/.local/bin/claude && rm -rf ~/.local/share/claude",
         )
-        self.assertEqual(
-            claude_native["uninstall"]["windows"],
-            'powershell -NoProfile -Command "Remove-Item -Path \\"$env:USERPROFILE\\\\.local\\\\bin\\\\claude.exe\\" -Force; Remove-Item -Path \\"$env:USERPROFILE\\\\.local\\\\share\\\\claude\\" -Recurse -Force"',
-        )
         self.assertEqual(claude_native["upgrade"], "claude update")
         self.assertEqual(claude_native["detect_paths"], ["~/.local/bin/claude"])
         self.assertFalse(lifecycle_agents["claude-code"]["providers"]["brew"]["managed"])
@@ -1276,7 +1234,7 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         self.assertTrue(codex_npm["managed"])
         self.assertEqual(codex_npm["install"], "npm install -g @openai/codex")
         self.assertEqual(codex_npm["uninstall"], "npm uninstall -g @openai/codex")
-        self.assertEqual(codex_npm["upgrade"], "codex update")
+        self.assertEqual(codex_npm["upgrade"], "npm install -g @openai/codex@latest")
 
         codex_brew = lifecycle_agents["codex"]["providers"]["brew"]
         self.assertFalse(codex_brew["managed"])
@@ -1291,60 +1249,16 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         gemini_brew = lifecycle_agents["gemini-cli"]["providers"]["brew"]
         self.assertFalse(gemini_brew["managed"])
 
-        cursor_native = lifecycle_agents["cursor"]["providers"]["native"]
-        self.assertTrue(cursor_native["managed"])
-        self.assertEqual(cursor_native["install"]["darwin"], "curl https://cursor.com/install -fsS | bash")
-        self.assertEqual(cursor_native["install"]["linux"], "curl https://cursor.com/install -fsS | bash")
-        self.assertEqual(cursor_native["upgrade"], "cursor-agent update")
-        self.assertEqual(
-            cursor_native["detect_paths"],
-            ["~/.local/bin/cursor-agent", "~/.cursor/bin/cursor-agent"],
-        )
-
-        opencode_native = lifecycle_agents["opencode"]["providers"]["native"]
-        self.assertTrue(opencode_native["managed"])
-        self.assertEqual(opencode_native["install"], "curl -fsSL https://opencode.ai/install | bash")
-        self.assertEqual(opencode_native["uninstall"], "opencode uninstall --force")
-        self.assertEqual(opencode_native["upgrade"], "opencode upgrade --method curl")
-        self.assertEqual(
-            opencode_native["detect_paths"],
-            ["~/.local/bin/opencode", "~/bin/opencode", "~/.opencode/bin/opencode"],
-        )
-        self.assertFalse(lifecycle_agents["opencode"]["providers"]["brew"]["managed"])
-
-        kimi_native = lifecycle_agents["kimi-cli"]["providers"]["native"]
-        self.assertTrue(kimi_native["managed"])
-        self.assertEqual(kimi_native["install"], "curl -LsSf https://code.kimi.com/install.sh | bash")
-        self.assertEqual(kimi_native["uninstall"], "uv tool uninstall kimi-cli")
-        self.assertEqual(kimi_native["upgrade"], "uv tool upgrade kimi-cli --no-cache")
-        self.assertEqual(kimi_native["detect_uv_tool"], "kimi-cli")
-        self.assertEqual(kimi_native["detect_paths"], ["~/.local/bin/kimi"])
-
-    def test_committed_agent_policy_locks_officially_supported_actions_matrix(self):
-        lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
-
-        cursor_native = lifecycle_agents["cursor"]["providers"]["native"]
-        self.assertEqual(cursor_native["unsupported_actions"], ["uninstall"])
-        self.assertNotIn("uninstall", cursor_native)
-
-        self.assertEqual(lifecycle_agents["codex"]["preferred_provider"], "npm")
-        self.assertEqual(lifecycle_agents["gemini-cli"]["preferred_provider"], "npm")
-        self.assertEqual(
-            lifecycle_agents["kimi-cli"]["providers"]["native"]["uninstall"],
-            "uv tool uninstall kimi-cli",
-        )
-
     def test_committed_agent_policy_uses_native_updaters_when_available(self):
         lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
 
         self.assertEqual(lifecycle_agents["claude-code"]["providers"]["native"]["upgrade"], "claude update")
-        self.assertEqual(lifecycle_agents["codex"]["providers"]["npm"]["upgrade"], "codex update")
-        self.assertEqual(lifecycle_agents["cursor"]["providers"]["native"]["upgrade"], "cursor-agent update")
-        self.assertEqual(lifecycle_agents["opencode"]["providers"]["native"]["upgrade"], "opencode upgrade --method curl")
-        self.assertEqual(lifecycle_agents["qodercli"]["providers"]["native"]["upgrade"], "qodercli update")
+        self.assertEqual(lifecycle_agents["codex"]["providers"]["npm"]["upgrade"], "npm install -g @openai/codex@latest")
 
-    def test_committed_agent_policy_disables_default_kimi_cli_auto_install(self):
+    def test_committed_agent_policy_excludes_deprecated_agents(self):
         manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
+        lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
 
-        self.assertFalse(manager["agents"]["kimi-cli"]["auto_install"])
-        self.assertEqual(manager["agents"]["kimi-cli"]["preferred_provider"], "native")
+        for removed in ("cursor", "opencode", "kimi-cli", "qodercli"):
+            self.assertNotIn(removed, manager["agents"])
+            self.assertNotIn(removed, lifecycle_agents)

@@ -1,13 +1,10 @@
 {
   "requirements": {
-    "min_case_count": 11,
+    "min_case_count": 10,
     "required_agents": [
       "claude-code",
       "codex",
-      "cursor",
-      "gemini-cli",
-      "kimi-cli",
-      "qodercli"
+      "gemini-cli"
     ],
     "min_success_rate": 1.0,
     "min_verification_rate": 1.0
@@ -111,16 +108,6 @@
         "json",
         "validation",
         "tests"
-      ]
-    },
-    {
-      "id": "qodercli-case",
-      "title": "Qoder CLI rule target stays covered",
-      "prompt": "Verify Qoder CLI receives repo-native QODER.md rules and modules from rules/dist with the same layout and budget coverage as other managed rule agents.",
-      "tags": [
-        "qodercli",
-        "rules",
-        "coverage"
       ]
     }
   ]
