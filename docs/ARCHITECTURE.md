@@ -121,7 +121,7 @@ graph TD
 
 - **原子锁**：需要写入或同步的命令会先抢占 `/tmp/agent_manager_<user>.lock.d`，并在其中写入持有者 PID；兼容保留 `/tmp/agent_manager_<user>.lock` 作为元数据。`unlock` 会同时清理目录锁和遗留锁文件。
 - **按次日志**：每次运行写入独立日志 `/tmp/agent_manager_sync_<user>_<runid>.log`，并更新 `/tmp/agent_manager_sync_<user>.latest` 指针；`logs` 读取 latest，`clean-logs` 清理 latest 与全部历史运行日志。
-- **`cleanup`**：清理当前受管目标旁的 `.bak` / `.tmp_*` / restore 临时文件，同时覆盖已退役的 legacy rules 备份路径和 Gemini `tmp` 下的 invalid-json 备份；不清理无受管历史证据的用户文件。
+- **`cleanup`**：清理当前受管目标旁的 `.bak` / `.tmp_*` / restore 临时文件，同时覆盖当前三类 Agent 的 legacy rules 备份路径和 Gemini `tmp` 下的 invalid-json 备份；不清理无受管历史证据的用户文件。
 - **安全默认入口**：直接执行 `./manage.sh` 只显示帮助，不会隐式退化到 `all`。
 - **`--dry-run`**：只输出计划动作，跳过 secrets 初始化、仓库 clone/pull、依赖安装、构建，以及 `cleanup` / `unlock` / `backups:restore` / `clean-logs` 这类会修改本地状态的维护动作；允许保留只读探测和预览日志。若与 `self-update` 组合，只预览仓库自更新动作。
 - **`--offline`**：禁止任何远程拉取、下载和安装。生命周期、tools、skills、MCP 同步器都只能复用本地已存在仓库/配置；如果本地前置资源缺失，应显式报错而不是偷偷联网。

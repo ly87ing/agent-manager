@@ -27,10 +27,6 @@ SKILL_FILE_BY_AGENT = {
     "gemini-cli": "skill.md",
 }
 
-DEPRECATED_TARGETS = [
-    Path("~/.agents/skills/graphify/SKILL.md"),
-]
-
 COPY_SKILLS_CODE = r"""
 import json
 import shutil
@@ -211,10 +207,9 @@ def remove_graphify_target(path: Path) -> None:
 def prune_stale_targets(
     marker_dir: Path,
     current_targets: list[GraphifyTarget],
-    deprecated_targets: list[Path] | None = None,
 ) -> None:
     current_paths = {_target_key(target.path) for target in current_targets}
-    stale_paths = previous_marker_targets(marker_dir) + list(deprecated_targets or DEPRECATED_TARGETS)
+    stale_paths = previous_marker_targets(marker_dir)
     seen = set()
     for stale_path in stale_paths:
         key = _target_key(stale_path)

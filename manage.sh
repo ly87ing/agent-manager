@@ -1115,13 +1115,6 @@ legacy_targets = [
     "~/.claude/rules/modules",
     "~/.gemini/rules/global.md",
     "~/.gemini/rules/modules",
-    "~/.cursor/rules/global.md",
-    "~/.cursor/rules/modules",
-    "~/.kimi/AGENTS.md",
-    "~/.kimi/modules",
-    "~/.config/opencode/rules/global.md",
-    "~/.config/opencode/rules/modules",
-    "~/.config/opencode/oh-my-opencode.jsonc",
 ]
 for target in legacy_targets:
     targets.add(str(Path(target).expanduser()))

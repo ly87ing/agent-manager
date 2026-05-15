@@ -1194,6 +1194,9 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
         lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
 
+        self.assertEqual(set(manager["agents"]), {"claude-code", "gemini-cli", "codex"})
+        self.assertEqual(set(lifecycle_agents), {"claude-code", "gemini-cli", "codex"})
+
         self.assertTrue(manager["agents"]["claude-code"]["enabled"])
         self.assertTrue(manager["agents"]["claude-code"]["auto_install"])
         self.assertTrue(manager["agents"]["claude-code"]["auto_update"])
@@ -1254,11 +1257,3 @@ class CommittedAgentPolicyTests(unittest.TestCase):
 
         self.assertEqual(lifecycle_agents["claude-code"]["providers"]["native"]["upgrade"], "claude update")
         self.assertEqual(lifecycle_agents["codex"]["providers"]["npm"]["upgrade"], "npm install -g @openai/codex@latest")
-
-    def test_committed_agent_policy_excludes_deprecated_agents(self):
-        manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
-        lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
-
-        for removed in ("cursor", "opencode", "kimi-cli", "qodercli"):
-            self.assertNotIn(removed, manager["agents"])
-            self.assertNotIn(removed, lifecycle_agents)

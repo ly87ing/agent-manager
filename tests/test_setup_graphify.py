@@ -51,18 +51,6 @@ class SetupGraphifyTests(unittest.TestCase):
             self.assertEqual(marker["targets"][0]["agent_id"], "claude-code")
             self.assertEqual(marker["targets"][0]["path"], "~/.claude/skills/graphify/SKILL.md")
 
-    def test_build_targets_ignores_retired_agent_targets(self):
-        skill_cfg = {
-            "agents": {
-                "cursor": "~/.cursor/rules",
-                "opencode": "~/.config/opencode/skills",
-                "kimi-cli": "~/.kimi/skills",
-                "qodercli": "~/.qoder/skills",
-            }
-        }
-
-        self.assertEqual(setup_graphify.build_graphify_targets(skill_cfg), [])
-
     def test_prune_stale_targets_removes_old_agent_skill_copy(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             marker_dir = Path(temp_dir) / "graphify"
@@ -70,8 +58,24 @@ class SetupGraphifyTests(unittest.TestCase):
             stale_skill.parent.mkdir(parents=True)
             stale_skill.write_text("---\nname: graphify\n---\n", encoding="utf-8")
             (stale_skill.parent / ".graphify_version").write_text("0.5.4", encoding="utf-8")
+            marker_dir.mkdir(parents=True)
+            (marker_dir / "managed-targets.json").write_text(
+                json.dumps(
+                    {
+                        "targets": [
+                            {
+                                "agent_id": "claude-code",
+                                "kind": "skill",
+                                "path": stale_skill.as_posix(),
+                                "skill_file": "skill.md",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
 
-            setup_graphify.prune_stale_targets(marker_dir, current_targets=[], deprecated_targets=[stale_skill])
+            setup_graphify.prune_stale_targets(marker_dir, current_targets=[])
 
             self.assertFalse(stale_skill.parent.exists())
 
@@ -82,6 +86,6 @@ class SetupGraphifyTests(unittest.TestCase):
             user_skill.parent.mkdir(parents=True)
             user_skill.write_text("---\nname: graphify\n---\n", encoding="utf-8")
 
-            setup_graphify.prune_stale_targets(marker_dir, current_targets=[], deprecated_targets=[user_skill])
+            setup_graphify.prune_stale_targets(marker_dir, current_targets=[])
 
             self.assertTrue(user_skill.exists())

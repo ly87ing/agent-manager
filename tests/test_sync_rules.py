@@ -450,22 +450,3 @@ class SyncRulesTests(unittest.TestCase):
         self.assertIn("codex_modules|global|rules/dist/modules|~/.codex/modules", manifest)
         self.assertIn("claude_modules|global|rules/dist/modules|~/.claude/modules", manifest)
         self.assertIn("gemini_modules|global|rules/dist/modules|~/.gemini/modules", manifest)
-        for legacy in ("kimi", "qoder", "cursor", "opencode", "copilot"):
-            self.assertNotIn(f"{legacy}_global", manifest)
-            self.assertNotIn(f"{legacy}_modules", manifest)
-
-    def test_sync_script_does_not_route_retired_agent_targets(self):
-        script = (ROOT / "agent-rule" / "scripts" / "sync-agent-rules.sh").read_text(encoding="utf-8")
-        for retired in (
-            "$HOME\"/.cursor",
-            "$HOME\"/.config/opencode",
-            "$HOME\"/.kimi",
-            "$HOME\"/.qoder",
-            "$workspace_root\"/.cursor",
-            "$workspace_root\"/.kimi",
-            "command -v cursor",
-            "command -v opencode",
-            "command -v kimi",
-            "command -v qoder",
-        ):
-            self.assertNotIn(retired, script)

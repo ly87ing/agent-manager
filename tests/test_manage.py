@@ -1077,8 +1077,6 @@ class ManageScriptTests(unittest.TestCase):
             combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
             self.assertIn("当前策略未启用任何 Rules 目标", combined)
-            self.assertNotIn("cursor_global", combined)
-            self.assertNotIn("copilot_global", combined)
             self.assertNotIn("计划原子更新 JSON", combined)
             self.assertNotIn("准备下载到托管缓存", combined)
             self.assertNotIn("正在安装 playwright-cli", combined)
@@ -3628,7 +3626,7 @@ class ManageScriptTests(unittest.TestCase):
         manifest = (ROOT / "config" / "rules-targets.list").read_text(encoding="utf-8")
         self.assertNotIn("{{REPO_ROOT}}", manifest)
 
-    def test_cleanup_removes_legacy_rule_backups(self):
+    def test_cleanup_removes_current_agent_legacy_rule_backups(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
@@ -3638,8 +3636,7 @@ class ManageScriptTests(unittest.TestCase):
             legacy_backups = [
                 temp_home / ".codex" / "rules" / "global.md.bak.20260329",
                 temp_home / ".claude" / "rules" / "modules.bak.20260329",
-                temp_home / ".config" / "opencode" / "rules" / "global.md.bak.20260329",
-                temp_home / ".config" / "opencode" / "oh-my-opencode.jsonc.bak",
+                temp_home / ".gemini" / "rules" / "global.md.bak.20260329",
             ]
             for backup in legacy_backups:
                 backup.parent.mkdir(parents=True, exist_ok=True)

@@ -18,7 +18,7 @@ def render_configuration_guide(base_uri, api_key, api_type, models):
         "=" * 50,
         "💡 【小白配置指南】",
         "=" * 50,
-        "如果这是给 Cursor / Cline / Windsurf 等工具配置，请按以下方式填写：",
+        "如果这是给 AI 工具配置，请按以下方式填写：",
         f"1. 选择提供商: 选择【{api_type}】或者开启【兼容模式/Custom OpenAI】",
         f"2. Base URL: 填写 \033[1;32m{base_uri.rstrip('/')}/v1\033[0m",
         f"3. API Key: 填写 \033[1;32m{mask_api_key(api_key)}\033[0m",

@@ -283,7 +283,7 @@ class ClaudeThemeMergeTests(unittest.TestCase):
 
 class ClaudeStatuslineWireTargetTests(unittest.TestCase):
     """The `claude:statusline:wire` orchestration target only ever points at
-    ~/.claude/settings.json — never at qoder or any other agent."""
+    ~/.claude/settings.json."""
 
     def test_makefile_exposes_wire_target(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
@@ -301,10 +301,8 @@ class ClaudeStatuslineWireTargetTests(unittest.TestCase):
         wire_block = manage[wire_idx:wire_idx + 800]
         self.assertIn("install_statusline.py", wire_block)
         self.assertIn("--apply-settings", wire_block)
-        self.assertNotIn(".qoder", wire_block)
         self.assertNotIn(".codex", wire_block)
         self.assertNotIn(".gemini", wire_block)
-        self.assertNotIn(".kimi", wire_block)
         # Must not pass --settings-path (which could redirect elsewhere)
         self.assertNotIn("--settings-path", wire_block)
 
