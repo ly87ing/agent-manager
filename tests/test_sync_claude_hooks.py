@@ -46,7 +46,7 @@ class ClaudeHooksSyncTests(unittest.TestCase):
             self.assertIn("hooks", settings)
             self.assertIn("PreToolUse", settings["hooks"])
             self.assertIn("Stop", settings["hooks"])
-            self.assertIn("SubagentStop", settings["hooks"])
+            self.assertNotIn("SubagentStop", settings["hooks"])
             pre_tool_hooks = settings["hooks"]["PreToolUse"]
             self.assertTrue(
                 any(

@@ -10,6 +10,10 @@
       "event": "PreToolUse",
       "matcher": "Bash",
       "command_contains": "agent-rule/hooks/graphify-context-hint.sh"
+    },
+    {
+      "event": "SubagentStop",
+      "command_contains": "agent-rule/hooks/check-rules-build.sh"
     }
   ],
   "hooks": {
@@ -25,16 +29,6 @@
       }
     ],
     "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/agent-rule/hooks/check-rules-build.sh\""
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
       {
         "hooks": [
           {

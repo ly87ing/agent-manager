@@ -5,6 +5,19 @@ set -euo pipefail
 payload="$(cat)"
 project_dir="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 
+# Fast-path: skip the expensive rebuild verification when every rules-affecting
+# path matches HEAD. Falls through to the heavy check when git is unavailable
+# or any input has diverged.
+if dirty="$(git -C "$project_dir" status --porcelain -- \
+        agent-rule/rules/src \
+        agent-rule/rules/dist \
+        agent-rule/scripts/build-agent-rules.py \
+        config/rules-targets.list 2>/dev/null)"; then
+    if [ -z "$dirty" ]; then
+        exit 0
+    fi
+fi
+
 PAYLOAD="$payload" PROJECT_DIR="$project_dir" python3 - <<'PY'
 import json
 import os
