@@ -184,14 +184,17 @@ class SyncToolsTests(unittest.TestCase):
             return_value={"status": "latest"},
         ) as probe_git_remote_state:
             state = sync_tools.probe_package_update_state(
-                "tpm",
+                "repo-helper",
                 {
-                    "upgrade": "git -C ~/.tmux/plugins/tpm pull",
+                    "upgrade": "git -C ~/.agent-manager/tools/repo-helper pull",
                 },
             )
 
         self.assertEqual(state, "latest")
-        probe_git_remote_state.assert_called_once_with(Path("~/.tmux/plugins/tpm").expanduser(), timeout=5)
+        probe_git_remote_state.assert_called_once_with(
+            Path("~/.agent-manager/tools/repo-helper").expanduser(),
+            timeout=5,
+        )
 
     def test_probe_package_update_state_reports_latest_for_uv_tool_versions(self):
         def fake_run_cmd(cmd, cwd=None, timeout=300):
@@ -236,14 +239,17 @@ class SyncToolsTests(unittest.TestCase):
             return_value={"status": "stale"},
         ) as probe_git_remote_state:
             state = sync_tools.probe_package_update_state(
-                "oh-my-zsh",
+                "repo-helper",
                 {
-                    "upgrade": "git -C ~/.oh-my-zsh pull",
+                    "upgrade": "git -C ~/.agent-manager/tools/repo-helper pull",
                 },
             )
 
         self.assertEqual(state, "stale")
-        probe_git_remote_state.assert_called_once_with(Path("~/.oh-my-zsh").expanduser(), timeout=5)
+        probe_git_remote_state.assert_called_once_with(
+            Path("~/.agent-manager/tools/repo-helper").expanduser(),
+            timeout=5,
+        )
 
     def test_install_based_tool_skips_upgrade_when_package_probe_reports_latest(self):
         with tempfile.TemporaryDirectory() as temp_dir:

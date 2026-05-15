@@ -35,6 +35,20 @@ class SyncMcpTests(unittest.TestCase):
             {"path": "~/.kimi/mcp.json", "format": "json"},
         )
 
+    def test_committed_mcp_definitions_include_qoder_cli_settings_target(self):
+        definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            definitions["agent_paths"]["qodercli"],
+            {"path": "~/.qoder/settings.json", "format": "json"},
+        )
+
+    def test_committed_augment_context_engine_excludes_qoder_cli(self):
+        definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
+        agents = definitions["servers"]["augment-context-engine"]["agents"]
+
+        self.assertIsInstance(agents, list)
+        self.assertNotIn("qodercli", agents)
+
     def test_committed_mcp_policy_enables_chrome_devtools_latest(self):
         definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
         policy = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
@@ -136,6 +150,34 @@ class SyncMcpTests(unittest.TestCase):
             self.assertEqual(
                 toml_updated["mcp_servers"]["chrome-devtools"]["env"]["_MANAGED_BY"],
                 "agent-manager",
+            )
+
+    def test_gemini_json_receives_managed_mcp_timeout(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            gemini_config_path = temp_root / "settings.json"
+
+            with mock.patch.object(sync_mcp, "is_agent_installed", return_value=True):
+                ok = sync_mcp.manage_mcp_config(
+                    {"gemini-cli": {"path": str(gemini_config_path), "format": "json"}},
+                    {
+                        "augment-context-engine": {
+                            "enabled": True,
+                            "_declared_in_policy": True,
+                            "_sync_ready": True,
+                            "command": "auggie",
+                            "args": ["--mcp", "--mcp-auto-workspace"],
+                            "env": {"AUGMENT_SESSION_AUTH": "token"},
+                        }
+                    },
+                    agent_defs={"gemini-cli": {"bin": "gemini"}},
+                )
+
+            self.assertTrue(ok)
+            updated = json.loads(gemini_config_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                updated["mcpServers"]["augment-context-engine"]["timeout"],
+                60000,
             )
 
     def test_clone_or_update_repo_skips_pull_when_probe_reports_latest(self):
@@ -875,6 +917,73 @@ class SyncMcpTests(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse(agent_config_path.exists(), result.stdout + result.stderr)
+
+    def test_mcp_sync_uses_mcp_env_without_terminal_env_override(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_dir = temp_root / "config"
+            secrets_dir = temp_root / "secrets"
+            config_dir.mkdir()
+            secrets_dir.mkdir()
+            agent_config_path = temp_root / "agent.json"
+            config_path = config_dir / "manager.json"
+            def_path = config_dir / "mcp.json"
+
+            config_path.write_text(
+                json.dumps({"mcp": {"grok-search": {"enabled": True}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "servers": {
+                            "grok-search": {
+                                "command": "uvx",
+                                "args": ["grok-search"],
+                                "env": {
+                                    "GROK_API_URL": "${GROK_API_URL}",
+                                    "GROK_API_KEY": "${GROK_API_KEY}",
+                                },
+                            }
+                        },
+                        "agent_paths": {
+                            "claude-code": str(agent_config_path),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (secrets_dir / "mcp.env").write_text(
+                'GROK_API_URL="https://mcp.example/v1"\nGROK_API_KEY="mcp-key"\n',
+                encoding="utf-8",
+            )
+            (secrets_dir / "terminal.env").write_text(
+                'GROK_API_KEY="terminal-key"\n',
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(temp_root / "mcp"),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            updated = json.loads(agent_config_path.read_text(encoding="utf-8"))
+            env = updated["mcpServers"]["grok-search"]["env"]
+            self.assertEqual(env["GROK_API_URL"], "https://mcp.example/v1")
+            self.assertEqual(env["GROK_API_KEY"], "mcp-key")
 
     def test_find_unresolved_placeholders_ignores_literal_string_with_placeholder_substring(self):
         unresolved = sync_mcp.find_unresolved_placeholders(

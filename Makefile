@@ -1,4 +1,4 @@
-.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\:list restore backups\:restore logs rules-build rules\:build rules-sync rules\:sync skills-link skills\:link skills\:upgrade mcp-sync mcp\:sync mcp-prepare mcp\:prepare tools-sync tools\:sync terminal-sync terminal\:sync claude-hooks-sync claude\:hooks\:sync claude-statusline-install claude\:statusline\:install claude-statusline-wire claude\:statusline\:wire codex-hooks-sync codex\:hooks\:sync dry-run clean-logs offline eval-rules secrets-check secrets\:check instructions-check instructions\:check cc-bridge-install cc-bridge-start cc-bridge-stop cc-bridge-deploy cc-bridge-update cc-bridge-seed cc-bridge-rollback cc-bridge-status
+.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\:list restore backups\:restore logs rules-build rules\:build rules-sync rules\:sync skills-link skills\:link skills\:upgrade mcp-sync mcp\:sync mcp-prepare mcp\:prepare tools-sync tools\:sync claude-hooks-sync claude\:hooks\:sync claude-statusline-install claude\:statusline\:install claude-statusline-wire claude\:statusline\:wire codex-hooks-sync codex\:hooks\:sync dry-run clean-logs offline eval-rules secrets-check secrets\:check instructions-check instructions\:check cc-bridge-install cc-bridge-start cc-bridge-stop cc-bridge-deploy cc-bridge-update cc-bridge-seed cc-bridge-rollback cc-bridge-status
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -131,12 +131,6 @@ tools-sync:
 
 tools\:sync:
 	@./manage.sh tools:sync
-
-terminal-sync:
-	@./manage.sh terminal:sync
-
-terminal\:sync:
-	@./manage.sh terminal:sync
 
 claude-hooks-sync:
 	@./manage.sh claude:hooks:sync

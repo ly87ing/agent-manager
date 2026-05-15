@@ -979,52 +979,12 @@ function run_mcp_sync_task() {
     run_task_in_dir "$title" "MCP 注入完成" "MCP 失败" 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" "${args[@]}"
 }
 
-function run_terminal_sync_task() {
-    local force_run="${1:-false}"
-    if [ "$force_run" != "true" ]; then
-        ROOT_DIR="$ROOT_DIR" CONFIG_FILE="$CONFIG_FILE" "$PYTHON_CMD" - <<'PY'
-import os
-import sys
-from pathlib import Path
-
-root = Path(os.environ["ROOT_DIR"])
-sys.path.insert(0, str(root))
-
-from src.json_config import load_json_object_file
-
-cfg = load_json_object_file(os.environ["CONFIG_FILE"], strict=True, missing_ok=False)
-terminal_cfg = cfg.get("terminal", {})
-if terminal_cfg is None:
-    terminal_cfg = {}
-if not isinstance(terminal_cfg, dict):
-    print("manager.json.terminal 必须是对象", file=sys.stderr)
-    sys.exit(2)
-
-sys.exit(0 if terminal_cfg.get("enabled", False) else 1)
-PY
-        local terminal_enabled_rc=$?
-        if [ "$terminal_enabled_rc" -eq 2 ]; then
-            return 1
-        fi
-        if [ "$terminal_enabled_rc" -ne 0 ]; then
-            status_line "SKIP" "终端策略未启用，跳过终端配置同步"
-            return 0
-        fi
-    fi
-
-    local args=(sync_terminal.py)
-    if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
-    if [ -n "$OFFLINE_FLAG" ]; then args+=("$OFFLINE_FLAG"); fi
-    run_task_in_dir "同步终端配置" "终端配置同步完成" "终端配置失败" 120 "$ROOT_DIR/agent-terminal" "$PYTHON_CMD" "${args[@]}"
-}
-
 function run_sync_pipeline() {
     begin_workflow "🔄 Agent Manager 配置同步启动"
     begin_pipeline_execution
     run_pipeline_step run_rules_sync_task
     run_pipeline_step run_skills_link_task false
     run_pipeline_step run_mcp_sync_task true false
-    run_pipeline_step run_terminal_sync_task
     finish_pipeline_execution
 }
 
@@ -1039,7 +999,6 @@ function run_update_pipeline() {
     run_pipeline_step run_rules_sync_task
     run_pipeline_step run_skills_link_task false
     run_pipeline_step run_mcp_sync_task true false
-    run_pipeline_step run_terminal_sync_task
     finish_pipeline_execution
 }
 
@@ -1428,8 +1387,6 @@ case "$cmd" in
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" "${upgrade_args[@]}" ;;
     tools:sync)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-tool" "$PYTHON_CMD" sync_tools.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/tools.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG $FORCE_REFRESH_FLAG ;;
-    terminal:sync)
-        run_terminal_sync_task true ;;
     fetch-models)
         args=()
         if [ "${#CMD_ARGS[@]}" -gt 0 ]; then
@@ -1527,8 +1484,7 @@ case "$cmd" in
         echo -e "  ${BORDER_GRAY}codex:hooks:sync${NC} 独立刷新仓库级 Codex hooks 到 .codex/hooks.json"
         echo -e "  ${BORDER_GRAY}skills:link${NC}     独立执行全局或系统级专业技能代码集到 Agent 沙盒空间的映射配置与软链接"
         echo -e "  ${BORDER_GRAY}skills:upgrade${NC}  显式解析并回写 skill 仓库的最新可审计版本（仅 release/tag，失败即停止）"
-        echo -e "  ${BORDER_GRAY}tools:sync${NC}      独立同步或安装全局统一增强工具链条"
-        echo -e "  ${BORDER_GRAY}terminal:sync${NC}   独立同步终端工具（iTerm2/tmux）配置模板到家目录\n"
+        echo -e "  ${BORDER_GRAY}tools:sync${NC}      独立同步或安装全局统一增强工具链条\n"
         echo -e "${BOLD}${HDR_BLUE}=== CC-Bridge Runtime ===${NC}"
         echo -e "  ${SUCCESS_GREEN}cc-bridge-install${NC}  首次安装并启动，固定到最新稳定 release"
         echo -e "  ${SUCCESS_GREEN}cc-bridge-start${NC}    启动前先检查最新稳定版本；有新版本会先升级再启动"

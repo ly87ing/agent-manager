@@ -126,7 +126,6 @@ class ProjectContractTests(unittest.TestCase):
                 "mcp:sync",
                 "mcp:prepare",
                 "tools:sync",
-                "terminal:sync",
             ):
                 result = subprocess.run(
                     ["make", goal],
@@ -152,7 +151,6 @@ class ProjectContractTests(unittest.TestCase):
                     "mcp:sync",
                     "mcp:prepare",
                     "tools:sync",
-                    "terminal:sync",
                 ],
             )
 
@@ -287,10 +285,10 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("精准回收受管备份、碎片及冗余日志", readme)
         self.assertNotIn("孤儿仓库", readme)
 
-    def test_readme_documents_local_override_and_terminal_opt_in(self):
+    def test_readme_documents_local_override_and_terminal_boundary(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("manager.local.json", readme)
-        self.assertIn("终端配置默认关闭", readme)
+        self.assertIn("不接管终端配置", readme)
 
     def test_readme_documents_rules_source_build_dist_flow(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -487,10 +485,10 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("clean-logs", architecture)
         self.assertIn("会修改本地状态的维护动作", architecture)
 
-    def test_architecture_documents_local_override_and_terminal_policy(self):
+    def test_architecture_documents_local_override_and_terminal_boundary(self):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
         self.assertIn("manager.local.json", architecture)
-        self.assertIn("终端配置默认关闭", architecture)
+        self.assertIn("不接管终端配置", architecture)
 
     def test_architecture_documents_doctor_python_module(self):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")

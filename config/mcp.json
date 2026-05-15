@@ -6,7 +6,7 @@
       "env": {
         "AUGMENT_SESSION_AUTH": "${AUGMENT_SESSION_AUTH}"
       },
-      "agents": null
+      "agents": ["claude-code", "gemini-cli", "codex", "kimi-cli"]
     },
     "chrome-devtools": {
       "command": "npx",
@@ -39,6 +39,6 @@
     "opencode": { "path": "~/.config/opencode/opencode.json", "format": "json" },
     "codex": { "path": "~/.codex/config.toml", "format": "toml" },
     "kimi-cli": { "path": "~/.kimi/mcp.json", "format": "json" },
-    "qodercli": { "path": "~/.qoder/mcp.json", "format": "json" }
+    "qodercli": { "path": "~/.qoder/settings.json", "format": "json" }
   }
 }

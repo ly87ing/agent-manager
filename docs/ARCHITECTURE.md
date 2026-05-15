@@ -38,7 +38,7 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `preferred_provider`: 首选安装来源
 - `manager.json`: 仓库提供的可审计默认值
 - `manager.local.json`: 不参与 Git 的本地覆盖层；`make ui` 默认写入这里
-- `terminal.enabled`: 控制主流程是否执行终端配置同步；终端配置默认关闭
+- `agent-manager` 不维护终端 dotfiles；用户级 shell/tmux/iTerm 配置不属于受管目标
 - `agents` 键使用稳定的机器可读 ID（如 `claude-code`, `cursor`），而不是面向用户的展示名
 
 ### 2. 定义层 (Definition Layer)
@@ -65,7 +65,6 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `agent-tool/sync_tools.py`: 工具链管理
 - `agent-skill/link_skills.py`: Skill链接管理
 - `agent-mcp/sync_mcp.py`: MCP配置注入
-- `agent-terminal/sync_terminal.py`: 终端配置模板渲染与原子写入
 - `agent-rule/scripts/build-agent-rules.py`: Rules 源码片段构建为可分发产物
 - `agent-rule/scripts/sync-agent-rules.sh`: Rules文件分发（shell实现）
 
@@ -128,7 +127,7 @@ graph TD
 - **`--dry-run`**：只输出计划动作，跳过 secrets 初始化、仓库 clone/pull、依赖安装、构建，以及 `cleanup` / `unlock` / `backups:restore` / `clean-logs` 这类会修改本地状态的维护动作；允许保留只读探测和预览日志。若与 `self-update` 组合，只预览仓库自更新动作。
 - **`--offline`**：禁止任何远程拉取、下载和安装。生命周期、tools、skills、MCP 同步器都只能复用本地已存在仓库/配置；如果本地前置资源缺失，应显式报错而不是偷偷联网。
 - **命令分层**：`sync` 只做本地配置收敛；`update` 会补齐并刷新非 Agent 安装类资源，并只更新已安装 Agent；`bootstrap` / `all` 才负责缺失 Agent 的安装；`self-update` 只更新 agent-manager 仓库自身。
-- **终端配置默认关闭**：只有当有效策略中的 `terminal.enabled` 为 `true` 时，`sync` / `update` / `bootstrap` 才会触发终端配置同步；显式执行 `terminal:sync` 仍可单独运行。
+- **不接管终端配置**：`sync` / `update` / `bootstrap` 不会改写 `~/.zshrc`、`~/.tmux.conf`、iTerm2 动态配置等用户级终端文件；仓库也不提供 `terminal:sync` 入口。
 - **诊断双出口**：`doctor / status` 默认输出面向人的文本报告；追加 `--json` 时输出机器可读 JSON，不再需要从文本中抓取 warning 计数。
 - **最小 smoke 策略**：`scripts/ci-smoke.sh` 通过 `AGENT_MANAGER_BASE_CONFIG=config/manager.smoke.json` 运行安全预演，避免把默认全量策略带来的未物化提示项混进 CI 基线。
 
@@ -276,10 +275,10 @@ agent-manager/
 - 符号链接仍然保留给显式选择的高级用法，用于节省空间或实时跟随源内容
 - `manage.sh doctor` 会按文件内容和目录结构审计规则目标，而不是只对单文件做 MD5 对比
 
-### 为什么将终端配置改为显式启用？
+### 为什么不再维护终端配置？
 - `~/.zshrc`、`~/.tmux.conf` 和 iTerm2 动态配置属于高影响用户资产
-- 将其纳入默认主流程会放大首次上手的风险和心智负担
-- 因此主流程改为仅在 `terminal.enabled=true` 时执行，保持 Agent 管理与终端接管解耦
+- 这些文件高度依赖个人机器、Shell 习惯、JDK/SDK 路径和本地密钥布局
+- 因此 agent-manager 只管理 Agent、tools、skills、rules 和 MCP，不再维护终端 dotfiles 的模板渲染或写入
 
 ---
 

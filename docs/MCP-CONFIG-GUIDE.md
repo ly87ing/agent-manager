@@ -566,7 +566,7 @@ PY
 默认模式（mcp:sync / make sync / make update / make bootstrap 中的 MCP 步骤）:
 1. 读取 config/mcp.json 获取服务器定义
    ↓
-2. 按固定优先级加载凭证: root/.env → secrets/*.env(按文件名排序覆盖) → 系统环境变量回退
+2. 按固定优先级加载 MCP 凭证: root/.env → secrets/mcp.env → 系统环境变量回退
    ↓
 3. 替换 ${VAR} 占位符；若真实执行时仍有未解析占位符，则直接失败
    ↓

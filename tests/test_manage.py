@@ -75,6 +75,25 @@ class ManageScriptTests(unittest.TestCase):
         )
         self._write_stub(path, content)
 
+    def _write_optional_tool_definition(self, temp_root: Path, name: str = "optional-helper"):
+        (temp_root / "config" / "tools.json").write_text(
+            json.dumps(
+                {
+                    "tools": {
+                        name: {
+                            "install": "true",
+                            "upgrade": "true",
+                            "ready_check": "bin:__missing_optional_helper__",
+                            "doctor_severity": "warning",
+                        }
+                    }
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
     def _await_probe_child_pid(self, proc: subprocess.Popen, child_pid_file: Path, ready_file: Path, message: str):
         child_pid = None
         deadline = time.time() + 10
@@ -200,10 +219,6 @@ class ManageScriptTests(unittest.TestCase):
                     "exit 0\n"
                 ),
             )
-            self._write_stub(
-                temp_root / "agent-terminal" / "sync_terminal.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
-            )
 
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "sync"],
@@ -237,10 +252,6 @@ class ManageScriptTests(unittest.TestCase):
                     f"printf '%s\\n' rules >> {str(call_log)!r}\n"
                     "exit 0\n"
                 ),
-            )
-            self._write_stub(
-                temp_root / "agent-terminal" / "sync_terminal.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
             )
 
             result = subprocess.run(
@@ -627,9 +638,10 @@ class ManageScriptTests(unittest.TestCase):
             temp_home.mkdir()
 
             (temp_root / "config" / "manager.json").write_text(
-                '{\n  "agents": {},\n  "tools": {\n    "tpm": { "enabled": true }\n  },\n  "skills": {},\n  "mcp": {}\n}\n',
+                '{\n  "agents": {},\n  "tools": {\n    "optional-helper": { "enabled": true }\n  },\n  "skills": {},\n  "mcp": {}\n}\n',
                 encoding="utf-8",
             )
+            self._write_optional_tool_definition(temp_root)
             (temp_root / "config" / "mcp.json").write_text(
                 '{\n  "agent_paths": {},\n  "servers": {}\n}\n',
                 encoding="utf-8",
@@ -654,7 +666,7 @@ class ManageScriptTests(unittest.TestCase):
             combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
             self.assertIn("--- Tools 就绪审计 ---", combined)
-            self.assertRegex(combined, r"tpm\s+: 可选项未就绪")
+            self.assertRegex(combined, r"optional-helper\s+: 可选项未就绪")
             self.assertIn("发现 1 个提示项", combined)
 
     def test_doctor_warns_for_missing_generated_targets_when_agent_is_not_installed(self):
@@ -714,9 +726,10 @@ class ManageScriptTests(unittest.TestCase):
             temp_home.mkdir()
 
             (temp_root / "config" / "manager.json").write_text(
-                '{\n  "agents": {},\n  "tools": {\n    "tpm": { "enabled": true }\n  },\n  "skills": {\n    "superpowers": { "enabled": true }\n  },\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
+                '{\n  "agents": {},\n  "tools": {\n    "optional-helper": { "enabled": true }\n  },\n  "skills": {\n    "superpowers": { "enabled": true }\n  },\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
                 encoding="utf-8",
             )
+            self._write_optional_tool_definition(temp_root)
             (temp_root / "config" / "agents.json").write_text(
                 '{\n  "claude-code": {\n    "display_name": "Claude Code",\n    "bin": "__missing_claude__"\n  }\n}\n',
                 encoding="utf-8",
@@ -763,9 +776,10 @@ class ManageScriptTests(unittest.TestCase):
             temp_home.mkdir()
 
             (temp_root / "config" / "manager.json").write_text(
-                '{\n  "agents": {},\n  "tools": {\n    "tpm": { "enabled": true }\n  },\n  "skills": {\n    "superpowers": { "enabled": true }\n  },\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
+                '{\n  "agents": {},\n  "tools": {\n    "optional-helper": { "enabled": true }\n  },\n  "skills": {\n    "superpowers": { "enabled": true }\n  },\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
                 encoding="utf-8",
             )
+            self._write_optional_tool_definition(temp_root)
             (temp_root / "config" / "agents.json").write_text(
                 '{\n  "claude-code": {\n    "display_name": "Claude Code",\n    "bin": "__missing_claude__"\n  }\n}\n',
                 encoding="utf-8",
@@ -817,9 +831,10 @@ class ManageScriptTests(unittest.TestCase):
             temp_home.mkdir()
 
             (temp_root / "config" / "manager.json").write_text(
-                '{\n  "agents": {},\n  "tools": {\n    "tpm": { "enabled": true }\n  },\n  "skills": {},\n  "mcp": {}\n}\n',
+                '{\n  "agents": {},\n  "tools": {\n    "optional-helper": { "enabled": true }\n  },\n  "skills": {},\n  "mcp": {}\n}\n',
                 encoding="utf-8",
             )
+            self._write_optional_tool_definition(temp_root)
             (temp_root / "config" / "mcp.json").write_text(
                 '{\n  "agent_paths": {},\n  "servers": {}\n}\n',
                 encoding="utf-8",
@@ -1206,7 +1221,6 @@ class ManageScriptTests(unittest.TestCase):
             self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log, "True")
             self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log, "True")
             self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log, "True")
-            self._append_log_stub(temp_root / "agent-terminal" / "sync_terminal.py", "terminal", call_log, "True")
             self._write_stub(
                 temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
                 (
@@ -1303,10 +1317,6 @@ class ManageScriptTests(unittest.TestCase):
                 ),
             )
             self._write_stub(
-                temp_root / "agent-terminal" / "sync_terminal.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
-            )
-            self._write_stub(
                 temp_root / "scripts" / "init-secrets.sh",
                 (
                     "#!/usr/bin/env bash\n"
@@ -1333,7 +1343,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertFalse(any(line.startswith("tools ") for line in log_lines), log_lines)
             self.assertFalse(any(line == "init-secrets" for line in log_lines), log_lines)
 
-    def test_sync_skips_terminal_when_terminal_policy_disabled(self):
+    def test_sync_does_not_run_terminal_management(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -1344,8 +1354,7 @@ class ManageScriptTests(unittest.TestCase):
                 '  "agents": {},\n'
                 '  "tools": {},\n'
                 '  "skills": {},\n'
-                '  "mcp": {},\n'
-                '  "terminal": { "enabled": false }\n'
+                '  "mcp": {}\n'
                 '}\n',
                 encoding="utf-8",
             )
@@ -1361,7 +1370,6 @@ class ManageScriptTests(unittest.TestCase):
 
             self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log, "True")
             self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log, "True")
-            self._append_log_stub(temp_root / "agent-terminal" / "sync_terminal.py", "terminal", call_log, "True")
             self._write_stub(
                 temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
                 (
@@ -1653,10 +1661,6 @@ class ManageScriptTests(unittest.TestCase):
                 ),
             )
             self._write_stub(
-                temp_root / "agent-terminal" / "sync_terminal.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
-            )
-            self._write_stub(
                 temp_root / "scripts" / "init-secrets.sh",
                 (
                     "#!/usr/bin/env bash\n"
@@ -1733,10 +1737,6 @@ class ManageScriptTests(unittest.TestCase):
                 ),
             )
             self._write_stub(
-                temp_root / "agent-terminal" / "sync_terminal.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
-            )
-            self._write_stub(
                 temp_root / "scripts" / "init-secrets.sh",
                 (
                     "#!/usr/bin/env bash\n"
@@ -1808,10 +1808,6 @@ class ManageScriptTests(unittest.TestCase):
                     f"printf '%s\\n' \"rules $*\" >> {str(call_log)!r}\n"
                     "exit 0\n"
                 ),
-            )
-            self._write_stub(
-                temp_root / "agent-terminal" / "sync_terminal.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
             )
             self._write_stub(
                 temp_root / "scripts" / "init-secrets.sh",
@@ -1887,10 +1883,6 @@ class ManageScriptTests(unittest.TestCase):
                 ),
             )
             self._write_stub(
-                temp_root / "agent-terminal" / "sync_terminal.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
-            )
-            self._write_stub(
                 temp_root / "scripts" / "init-secrets.sh",
                 (
                     "#!/usr/bin/env bash\n"
@@ -1947,10 +1939,6 @@ class ManageScriptTests(unittest.TestCase):
                 ),
             )
             self._write_stub(
-                temp_root / "agent-terminal" / "sync_terminal.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
-            )
-            self._write_stub(
                 temp_root / "scripts" / "init-secrets.sh",
                 (
                     "#!/usr/bin/env bash\n"
@@ -2005,10 +1993,6 @@ class ManageScriptTests(unittest.TestCase):
             self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log, "False")
             self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log, "False")
             self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 99\n")
-            self._write_stub(
-                temp_root / "agent-terminal" / "sync_terminal.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
-            )
 
             env = self._managed_env()
             env["PATH"] = f"{fake_bin}:{env['PATH']}"
@@ -2125,10 +2109,6 @@ class ManageScriptTests(unittest.TestCase):
             self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log, "True")
             self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log, "True")
             self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 0\n")
-            self._write_stub(
-                temp_root / "agent-terminal" / "sync_terminal.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
-            )
 
             env = self._managed_env()
             env["PATH"] = f"{fake_bin}:{env['PATH']}"
@@ -2204,10 +2184,6 @@ class ManageScriptTests(unittest.TestCase):
             self._write_stub(
                 temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
                 "#!/usr/bin/env bash\nexit 0\n",
-            )
-            self._write_stub(
-                temp_root / "agent-terminal" / "sync_terminal.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
             )
 
             env = self._managed_env()
@@ -2414,10 +2390,6 @@ class ManageScriptTests(unittest.TestCase):
                 temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
                 "#!/usr/bin/env bash\nexit 0\n",
             )
-            self._write_stub(
-                temp_root / "agent-terminal" / "sync_terminal.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
-            )
 
             env = self._managed_env()
             env["CHILD_PID_FILE"] = str(child_pid_file)
@@ -2563,10 +2535,6 @@ class ManageScriptTests(unittest.TestCase):
                 ),
             )
             self._write_stub(
-                temp_root / "agent-terminal" / "sync_terminal.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
-            )
-            self._write_stub(
                 temp_root / "scripts" / "init-secrets.sh",
                 (
                     "#!/usr/bin/env bash\n"
@@ -2625,10 +2593,6 @@ class ManageScriptTests(unittest.TestCase):
                     "  *) exit 23 ;;\n"
                     "esac\n"
                 ),
-            )
-            self._write_stub(
-                temp_root / "agent-terminal" / "sync_terminal.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
             )
             self._write_stub(
                 temp_root / "scripts" / "init-secrets.sh",
@@ -2691,10 +2655,6 @@ class ManageScriptTests(unittest.TestCase):
                 ),
             )
             self._write_stub(
-                temp_root / "agent-terminal" / "sync_terminal.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
-            )
-            self._write_stub(
                 temp_root / "scripts" / "init-secrets.sh",
                 (
                     "#!/usr/bin/env bash\n"
@@ -2750,10 +2710,6 @@ class ManageScriptTests(unittest.TestCase):
                 temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
                 "#!/usr/bin/env bash\nexit 0\n",
             )
-            self._write_stub(
-                temp_root / "agent-terminal" / "sync_terminal.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
-            )
 
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--offline"],
@@ -2794,10 +2750,6 @@ class ManageScriptTests(unittest.TestCase):
                 "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
             )
             self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 0\n")
-            self._write_stub(
-                temp_root / "agent-terminal" / "sync_terminal.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
-            )
 
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--offline"],
@@ -2839,10 +2791,6 @@ class ManageScriptTests(unittest.TestCase):
                 "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
             )
             self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 0\n")
-            self._write_stub(
-                temp_root / "agent-terminal" / "sync_terminal.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
-            )
 
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--offline"],
@@ -2884,10 +2832,6 @@ class ManageScriptTests(unittest.TestCase):
                 "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
             )
             self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 0\n")
-            self._write_stub(
-                temp_root / "agent-terminal" / "sync_terminal.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
-            )
 
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--offline"],
@@ -2929,10 +2873,6 @@ class ManageScriptTests(unittest.TestCase):
                 "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
             )
             self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 0\n")
-            self._write_stub(
-                temp_root / "agent-terminal" / "sync_terminal.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
-            )
 
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "--offline"],
@@ -3012,10 +2952,6 @@ class ManageScriptTests(unittest.TestCase):
             self._write_stub(
                 temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
                 "#!/usr/bin/env bash\nexit 0\n",
-            )
-            self._write_stub(
-                temp_root / "agent-terminal" / "sync_terminal.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
             )
 
             env = self._managed_env()
@@ -3150,10 +3086,6 @@ class ManageScriptTests(unittest.TestCase):
                     temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
                     "#!/usr/bin/env bash\nexit 0\n",
                 )
-                self._write_stub(
-                    temp_root / "agent-terminal" / "sync_terminal.py",
-                    "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
-                )
 
                 result = subprocess.run(
                     [str(temp_root / "manage.sh"), "--dry-run", "--offline"],
@@ -3276,10 +3208,6 @@ class ManageScriptTests(unittest.TestCase):
                 self._write_stub(
                     temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
                     "#!/usr/bin/env bash\nexit 0\n",
-                )
-                self._write_stub(
-                    temp_root / "agent-terminal" / "sync_terminal.py",
-                    "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
                 )
 
                 result = subprocess.run(

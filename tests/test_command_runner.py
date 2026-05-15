@@ -6,12 +6,12 @@ from src.command_runner import prepare_command
 
 class CommandRunnerTests(unittest.TestCase):
     def test_prepare_command_splits_simple_string_without_shell(self):
-        prepared, use_shell = prepare_command("git -C ~/.oh-my-zsh pull")
+        prepared, use_shell = prepare_command("git -C ~/.agent-manager/tools/repo-helper pull")
 
         self.assertFalse(use_shell)
         self.assertEqual(prepared[0], "git")
         self.assertEqual(prepared[1], "-C")
-        self.assertEqual(prepared[2], str(Path.home() / ".oh-my-zsh"))
+        self.assertEqual(prepared[2], str(Path.home() / ".agent-manager" / "tools" / "repo-helper"))
         self.assertEqual(prepared[3], "pull")
 
     def test_prepare_command_preserves_compound_shell_syntax(self):

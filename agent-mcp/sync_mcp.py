@@ -33,6 +33,7 @@ TOML_SERVER_HEADER_RE = re.compile(
     re.MULTILINE,
 )
 TOML_SERVER_INT_KEYS = ("startup_timeout_sec",)
+GEMINI_MCP_TIMEOUT_MS = 60000
 
 def atomic_write_json(path, data):
     """原子化写入 JSON"""
@@ -379,6 +380,8 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None
                 "args": parsed_args,
                 "env": srv_config.get("env", {})
             }
+            if agent_name == "gemini-cli":
+                active_settings["timeout"] = GEMINI_MCP_TIMEOUT_MS
             if file_format == "toml":
                 for key in TOML_SERVER_INT_KEYS:
                     if key in srv_config:
@@ -483,6 +486,21 @@ def sync_secrets_repo(secrets_path):
             else:
                 logging.warning(f"密钥仓库 {target.name} 同步失败 (可能是网络或权限问题): {output}")
 
+def load_env_files(paths):
+    env_vars = {}
+    for path in paths:
+        if not path.exists():
+            continue
+        logging.info(f"正在从凭证源加载: {path.name}")
+        with open(path, 'r', encoding='utf-8') as f_in:
+            for line in f_in:
+                line = line.strip()
+                if not line or line.startswith('#'): continue
+                if '=' in line:
+                    k, v = line.split('=', 1)
+                    env_vars[k.strip()] = v.strip().strip('"').strip("'")
+    return env_vars
+
 def main():
     parser = argparse.ArgumentParser(description="MCP Server 管理工具 (策略对齐)")
     parser.add_argument("--config", default=str(REPO_ROOT / "config" / "manager.json"), help="策略路径")
@@ -528,21 +546,9 @@ def main():
     elif args.prepare_runtime and not args.dry_run:
         sync_secrets_repo(secrets_dir)
     
-    # 加载全局凭证并进行占位符替换
-    search_paths = [root_dir / ".env", secrets_dir]
-    
-    for p in search_paths:
-        if not p.exists(): continue
-        files = [p] if p.is_file() else sorted(p.glob("*.env"))
-        for f in files:
-            logging.info(f"正在从凭证源加载: {f.name}")
-            with open(f, 'r', encoding='utf-8') as f_in:
-                for line in f_in:
-                    line = line.strip()
-                    if not line or line.startswith('#'): continue
-                    if '=' in line:
-                        k, v = line.split('=', 1)
-                        env_vars[k.strip()] = v.strip().strip('"').strip("'")
+    # 加载 MCP 专用凭证并进行占位符替换。不要扫描 secrets/*.env，
+    # 避免 terminal.env 等其他域的同名变量覆盖 MCP 专用 key。
+    env_vars.update(load_env_files([root_dir / ".env", secrets_dir / "mcp.env"]))
     
     # 递归遍历 definition_cfg，进行注入
     for srv_name, srv_def in definition_cfg.items():

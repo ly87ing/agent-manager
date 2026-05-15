@@ -2,8 +2,5 @@
   "agents": {},
   "tools": {},
   "skills": {},
-  "mcp": {},
-  "terminal": {
-    "enabled": false
-  }
+  "mcp": {}
 }

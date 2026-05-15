@@ -256,10 +256,10 @@ class ManageRuntimeProbeTests(unittest.TestCase):
     def test_detect_tool_readiness_uses_ready_check_for_app_type_tools(self):
         with mock.patch("src.manage_runtime_probe.os.path.exists", return_value=True):
             ready = manage_runtime_probe.detect_tool_readiness(
-                "iterm2",
+                "demo-app",
                 {
-                    "install": "brew install --cask iterm2",
-                    "ready_check": "app:/Applications/iTerm.app",
+                    "install": "brew install --cask demo-app",
+                    "ready_check": "app:/Applications/Demo.app",
                 },
                 "/repo",
             )
@@ -268,12 +268,12 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
     def test_detect_tool_readiness_ready_check_takes_precedence_over_which(self):
         with mock.patch("src.manage_runtime_probe.os.path.exists", return_value=False):
-            with mock.patch("src.manage_runtime_probe.shutil.which", return_value="/usr/bin/iterm2"):
+            with mock.patch("src.manage_runtime_probe.shutil.which", return_value="/usr/bin/demo-app"):
                 ready = manage_runtime_probe.detect_tool_readiness(
-                    "iterm2",
+                    "demo-app",
                     {
-                        "install": "brew install --cask iterm2",
-                        "ready_check": "app:/Applications/iTerm.app",
+                        "install": "brew install --cask demo-app",
+                        "ready_check": "app:/Applications/Demo.app",
                     },
                     "/repo",
                 )
@@ -286,7 +286,7 @@ class ManageRuntimeProbeTests(unittest.TestCase):
         def run_cmd(cmd, timeout=10):
             calls.append(tuple(cmd))
             if tuple(cmd) == ("brew", "list", "--formula", "-1"):
-                return True, "powerlevel10k\nzsh-autosuggestions\nzsh-syntax-highlighting\n"
+                return True, "jq\nripgrep\nfd\n"
             if tuple(cmd) == ("brew", "list", "--cask", "-1"):
                 return True, ""
             raise AssertionError(f"unexpected command: {cmd}")
@@ -298,24 +298,24 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
         self.assertTrue(
             manage_runtime_probe.detect_tool_readiness(
-                "powerlevel10k",
-                {"ready_check": "brew:powerlevel10k"},
+                "jq",
+                {"ready_check": "brew:jq"},
                 "/repo",
                 inventory=inventory,
             )
         )
         self.assertTrue(
             manage_runtime_probe.detect_tool_readiness(
-                "zsh-autosuggestions",
-                {"ready_check": "brew:zsh-autosuggestions"},
+                "ripgrep",
+                {"ready_check": "brew:ripgrep"},
                 "/repo",
                 inventory=inventory,
             )
         )
         self.assertTrue(
             manage_runtime_probe.detect_tool_readiness(
-                "zsh-syntax-highlighting",
-                {"ready_check": "brew:zsh-syntax-highlighting"},
+                "fd",
+                {"ready_check": "brew:fd"},
                 "/repo",
                 inventory=inventory,
             )
@@ -323,9 +323,9 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
         self.assertEqual(calls.count(("brew", "list", "--formula", "-1")), 1)
         self.assertLessEqual(calls.count(("brew", "list", "--cask", "-1")), 1)
-        self.assertNotIn(("brew", "list", "--versions", "powerlevel10k"), calls)
-        self.assertNotIn(("brew", "list", "--versions", "zsh-autosuggestions"), calls)
-        self.assertNotIn(("brew", "list", "--versions", "zsh-syntax-highlighting"), calls)
+        self.assertNotIn(("brew", "list", "--versions", "jq"), calls)
+        self.assertNotIn(("brew", "list", "--versions", "ripgrep"), calls)
+        self.assertNotIn(("brew", "list", "--versions", "fd"), calls)
 
     def test_collect_required_runtime_commands_skips_node_for_empty_policy(self):
         required = manage_runtime_probe.collect_required_runtime_commands(
