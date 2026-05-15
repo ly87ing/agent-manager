@@ -1,4 +1,4 @@
-.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\:list restore backups\:restore logs rules-build rules\:build rules-sync rules\:sync skills-link skills\:link skills\:upgrade mcp-sync mcp\:sync mcp-prepare mcp\:prepare tools-sync tools\:sync claude-hooks-sync claude\:hooks\:sync claude-statusline-install claude\:statusline\:install claude-statusline-wire claude\:statusline\:wire codex-hooks-sync codex\:hooks\:sync dry-run clean-logs offline eval-rules secrets-check secrets\:check instructions-check instructions\:check cc-bridge-install cc-bridge-start cc-bridge-stop cc-bridge-deploy cc-bridge-update cc-bridge-seed cc-bridge-rollback cc-bridge-status
+.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\:list backups-gc backups\:gc restore backups\:restore logs rules-build rules\:build rules-sync rules\:sync skills-link skills\:link skills\:upgrade mcp-sync mcp\:sync mcp-prepare mcp\:prepare tools-sync tools\:sync claude-hooks-sync claude\:hooks\:sync claude-statusline-install claude\:statusline\:install claude-statusline-wire claude\:statusline\:wire codex-hooks-sync codex\:hooks\:sync dry-run clean-logs offline eval-rules secrets-check secrets\:check instructions-check instructions\:check cc-bridge-install cc-bridge-start cc-bridge-stop cc-bridge-deploy cc-bridge-update cc-bridge-seed cc-bridge-rollback cc-bridge-status
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -56,6 +56,13 @@ status: doctor
 # 全量大扫除 (清理备份、日志、残留)
 cleanup:
 	@./manage.sh cleanup
+
+# 删除受管 Agent home 下超过 30 天的 .bak.* 文件
+backups-gc:
+	@find ~/.claude ~/.codex ~/.gemini ~/.kimi ~/.cursor ~/.qoder ~/.config/opencode -maxdepth 2 -type f -name '*.bak.*' -mtime +30 -print -delete 2>/dev/null || true
+
+backups\:gc:
+	@$(MAKE) backups-gc
 
 # 强制解除资源锁
 unlock:

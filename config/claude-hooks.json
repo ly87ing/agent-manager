@@ -14,12 +14,17 @@
     {
       "event": "SubagentStop",
       "command_contains": "agent-rule/hooks/check-rules-build.sh"
+    },
+    {
+      "event": "PreToolUse",
+      "matcher": "Edit|MultiEdit|Write",
+      "command_contains": "agent-rule/hooks/block-dist-edits.sh"
     }
   ],
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Edit|MultiEdit|Write",
+        "matcher": "Edit|MultiEdit|Write|Bash",
         "hooks": [
           {
             "type": "command",

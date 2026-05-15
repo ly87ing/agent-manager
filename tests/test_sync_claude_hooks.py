@@ -50,7 +50,7 @@ class ClaudeHooksSyncTests(unittest.TestCase):
             pre_tool_hooks = settings["hooks"]["PreToolUse"]
             self.assertTrue(
                 any(
-                    entry.get("matcher") == "Edit|MultiEdit|Write"
+                    entry.get("matcher") == "Edit|MultiEdit|Write|Bash"
                     and any(
                         hook.get("command") == 'bash "$CLAUDE_PROJECT_DIR/agent-rule/hooks/block-dist-edits.sh"'
                         for hook in entry.get("hooks", [])
@@ -132,7 +132,7 @@ class ClaudeHooksSyncTests(unittest.TestCase):
                 sum(
                     1
                     for entry in pre_tool_hooks
-                    if entry.get("matcher") == "Edit|MultiEdit|Write"
+                    if entry.get("matcher") == "Edit|MultiEdit|Write|Bash"
                     and any(
                         hook.get("command") == 'bash "$CLAUDE_PROJECT_DIR/agent-rule/hooks/block-dist-edits.sh"'
                         for hook in entry.get("hooks", [])
@@ -294,6 +294,78 @@ class ClaudeHooksSyncTests(unittest.TestCase):
             self.assertEqual(response["hookSpecificOutput"]["hookEventName"], "PreToolUse")
             self.assertEqual(response["hookSpecificOutput"]["permissionDecision"], "deny")
             self.assertIn("generated output", response["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def _run_block_dist_edits(self, temp_root: Path, payload: dict) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["bash", str(temp_root / "agent-rule" / "hooks" / "block-dist-edits.sh")],
+            cwd=temp_root,
+            env={**os.environ, "CLAUDE_PROJECT_DIR": str(temp_root)},
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_block_dist_edits_hook_denies_bash_redirect_writes_to_dist(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = self._copy_repo(temp_dir)
+
+            result = self._run_block_dist_edits(
+                temp_root,
+                {"tool_input": {"command": "echo broken > agent-rule/rules/dist/claude/CLAUDE.md"}},
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            response = json.loads(result.stdout)
+            self.assertEqual(response["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_block_dist_edits_hook_denies_bash_rm_of_dist(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = self._copy_repo(temp_dir)
+
+            result = self._run_block_dist_edits(
+                temp_root,
+                {"tool_input": {"command": "rm agent-rule/rules/dist/claude/CLAUDE.md"}},
+            )
+
+            response = json.loads(result.stdout)
+            self.assertEqual(response["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_block_dist_edits_hook_allows_bash_read_of_dist(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = self._copy_repo(temp_dir)
+
+            result = self._run_block_dist_edits(
+                temp_root,
+                {"tool_input": {"command": "cat agent-rule/rules/dist/claude/CLAUDE.md"}},
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(result.stdout.strip(), "", "read of dist should not deny")
+
+    def test_block_dist_edits_hook_allows_make_rules_build(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = self._copy_repo(temp_dir)
+
+            result = self._run_block_dist_edits(
+                temp_root,
+                {"tool_input": {"command": "make rules-build"}},
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(result.stdout.strip(), "", "managed builder must not be denied")
+
+    def test_block_dist_edits_hook_fast_path_skips_payload_without_dist(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = self._copy_repo(temp_dir)
+
+            result = self._run_block_dist_edits(
+                temp_root,
+                {"tool_input": {"command": "ls -la"}},
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(result.stdout.strip(), "")
 
     def test_check_rules_build_hook_blocks_stop_when_src_changed_without_dist_refresh(self):
         with tempfile.TemporaryDirectory() as temp_dir:
