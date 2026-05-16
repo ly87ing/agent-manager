@@ -1,5 +1,6 @@
 # Local configuration
 config/mcp.env.json
+.qoder/
 
 # Temporary logs
 /tmp/agent_manager_sync.log
