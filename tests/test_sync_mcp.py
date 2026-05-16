@@ -69,10 +69,16 @@ class SyncMcpTests(unittest.TestCase):
         env = definitions["servers"]["grok-search"]["env"]
         self.assertIn("TAVILY_ENABLED", env)
         self.assertIn("TAVILY_API_KEY", env)
+        self.assertIn("TAVILY_API_URL", env)
         self.assertIn("FIRECRAWL_API_KEY", env)
+        self.assertIn("FIRECRAWL_API_URL", env)
+        self.assertIn("GROK_MODEL", env)
         self.assertEqual(env["TAVILY_ENABLED"], "${TAVILY_ENABLED}")
         self.assertEqual(env["TAVILY_API_KEY"], "${TAVILY_API_KEY}")
+        self.assertEqual(env["TAVILY_API_URL"], "${TAVILY_API_URL}")
         self.assertEqual(env["FIRECRAWL_API_KEY"], "${FIRECRAWL_API_KEY}")
+        self.assertEqual(env["FIRECRAWL_API_URL"], "${FIRECRAWL_API_URL}")
+        self.assertEqual(env["GROK_MODEL"], "${GROK_MODEL}")
 
     def test_codex_toml_receives_startup_timeout_without_json_leak(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -45,7 +45,7 @@ make sync
 |--------|------|----------|------|----------|
 | `augment-context-engine` | 代码库检索、语义搜索、codebase-retrieval | `auggie --mcp --mcp-auto-workspace` | `AUGMENT_SESSION_AUTH` | 默认禁用 |
 | `chrome-devtools` | Chrome DevTools 浏览器调试、性能分析、network / console / screenshot | `npx -y chrome-devtools-mcp@latest` | 无 | 启用 |
-| `grok-search` | web_search / web_fetch 联网搜索与网页抓取 | `uvx --from git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily grok-search` | `GROK_API_URL`, `GROK_API_KEY`, `TAVILY_ENABLED`, `TAVILY_API_KEY`, `FIRECRAWL_API_KEY` | 启用 |
+| `grok-search` | web_search / web_fetch 联网搜索与网页抓取 | `uvx --from git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily grok-search` | `GROK_API_URL`, `GROK_API_KEY`, `GROK_MODEL`, `TAVILY_ENABLED`, `TAVILY_API_KEY`, `TAVILY_API_URL`, `FIRECRAWL_API_KEY`, `FIRECRAWL_API_URL` | 启用 |
 
 **维护约定**:
 - `chrome-devtools` 跟随官方 `@latest`，source-of-truth 维护在 `config/mcp.json`，由 `sync_mcp.py` 统一分发到所有受支持 Agent。
@@ -202,9 +202,12 @@ codex mcp list
 AUGMENT_SESSION_AUTH='{"accessToken":"ace_...","tenantURL":"...","scopes":[]}'
 GROK_API_URL='YOUR_GROK_API_URL'
 GROK_API_KEY='YOUR_GROK_API_KEY'
+GROK_MODEL='grok-4-fast'
 TAVILY_ENABLED='true'
 TAVILY_API_KEY='YOUR_TAVILY_API_KEY'
+TAVILY_API_URL='https://api.tavily.com'
 FIRECRAWL_API_KEY='YOUR_FIRECRAWL_API_KEY'
+FIRECRAWL_API_URL='https://api.firecrawl.dev/v2'
 ```
 
 #### 首次设置（自动化）

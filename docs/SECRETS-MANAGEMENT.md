@@ -76,9 +76,12 @@ ANOTHER_API_KEY="sk-abc123..."
 - `AUGMENT_API_URL`: API端点URL（旧方式需要）
 - `GROK_API_URL`: grok-search MCP 使用的 Grok API 入口
 - `GROK_API_KEY`: grok-search MCP 使用的 Grok API Key
+- `GROK_MODEL`: grok-search MCP 默认模型，例如 `grok-4-fast`
 - `TAVILY_ENABLED`: grok-search MCP 是否启用 Tavily provider，例如 `true`
 - `TAVILY_API_KEY`: grok-search MCP 使用的 Tavily API Key
+- `TAVILY_API_URL`: grok-search MCP 使用的 Tavily API 端点，例如 `https://api.tavily.com`
 - `FIRECRAWL_API_KEY`: grok-search MCP 使用的 Firecrawl API Key
+- `FIRECRAWL_API_URL`: grok-search MCP 使用的 Firecrawl API 端点，例如 `https://api.firecrawl.dev/v2`
 
 ### 2. Claude Code 凭证
 Claude Code 凭证不再由 agent-manager 注入，也不再维护 `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL` 的环境变量同步链路。Claude Code 的 provider、key 和 `~/.claude/settings.json` 由 cc-switch 维护，避免 agent-manager 与 cc-switch 对同一组 env key 反复覆盖。
