@@ -3,11 +3,10 @@
     "agent-skills": {
       "url": "https://github.com/ly87ing/agent-skills.git",
       "skill_paths": [
-        "legacy-component-skinning",
         "safe-merge-review",
         "xylink-legacy-component-skinning"
       ],
-      "skill_count": 3,
+      "skill_count": 2,
       "agents": ["claude-code", "codex"]
     },
     "oa-skill": {
