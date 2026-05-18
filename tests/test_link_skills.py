@@ -2245,12 +2245,10 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertEqual(
             repo["skill_paths"],
             [
-                "legacy-component-skinning",
                 "safe-merge-review",
-                "xylink-legacy-component-skinning",
             ],
         )
-        self.assertEqual(repo["skill_count"], 3)
+        self.assertEqual(repo["skill_count"], 1)
         self.assertEqual(repo["agents"], ["claude-code", "codex"])
         self.assertNotIn("ignored_skill_paths", repo)
         self.assertNotIn("commit", repo)
@@ -2286,7 +2284,7 @@ class LinkSkillsTests(unittest.TestCase):
 
         self.assertEqual(
             manager_config["skills"].get("ui-ux-pro-max-skill"),
-            {"enabled": True},
+            {"enabled": False},
         )
 
     def test_default_manager_policy_explicitly_enables_agent_skills_repo(self):

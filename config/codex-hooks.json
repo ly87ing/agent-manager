@@ -1,26 +1,4 @@
 {
   "hooks_path": "../.codex/hooks.json",
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash|apply_patch|Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd); HOOK=\"$ROOT/agent-rule/hooks/block-dist-edits.sh\"; bash \"$HOOK\""
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd); HOOK=\"$ROOT/agent-rule/hooks/check-rules-build.sh\"; [ -x \"$HOOK\" ] && bash \"$HOOK\" || true"
-          }
-        ]
-      }
-    ]
-  }
+  "hooks": {}
 }

@@ -811,6 +811,16 @@ def main():
                 args.dry_run,
                 set(skills),
             )
+        all_repo_skill_names = collect_repo_skill_names_for_cleanup(repo_path)
+        unconfigured_skill_names = all_repo_skill_names - set(skills.keys())
+        if unconfigured_skill_names:
+            remove_repo_skill_links(
+                repo_path,
+                ALL_AGENT_TARGETS,
+                allowed_agents,
+                args.dry_run,
+                unconfigured_skill_names,
+            )
         pending_links.append((repo_name, repo_targets, skills))
         for s_name, s_path in skills.items():
             existing = global_skill_registry.get(s_name)

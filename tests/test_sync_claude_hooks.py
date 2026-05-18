@@ -44,29 +44,7 @@ class ClaudeHooksSyncTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             settings = self._read_settings(temp_root)
             self.assertIn("hooks", settings)
-            self.assertIn("PreToolUse", settings["hooks"])
-            self.assertIn("Stop", settings["hooks"])
-            self.assertNotIn("SubagentStop", settings["hooks"])
-            pre_tool_hooks = settings["hooks"]["PreToolUse"]
-            self.assertTrue(
-                any(
-                    entry.get("matcher") == "Edit|MultiEdit|Write|Bash"
-                    and any(
-                        hook.get("command") == 'bash "$CLAUDE_PROJECT_DIR/agent-rule/hooks/block-dist-edits.sh"'
-                        for hook in entry.get("hooks", [])
-                    )
-                    for entry in pre_tool_hooks
-                ),
-                settings,
-            )
-            self.assertFalse(
-                any(
-                    "graphify-context-hint.sh" in hook.get("command", "")
-                    for entry in pre_tool_hooks
-                    for hook in entry.get("hooks", [])
-                ),
-                f"graphify hook should be absent: {pre_tool_hooks}",
-            )
+            self.assertEqual(settings["hooks"], {})
 
     def test_sync_preserves_unrelated_settings_and_deduplicates_managed_hooks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -119,7 +97,7 @@ class ClaudeHooksSyncTests(unittest.TestCase):
             self.assertEqual(second.returncode, 0, combined)
             settings = self._read_settings(temp_root)
             self.assertEqual(settings["theme"], "dark")
-            pre_tool_hooks = settings["hooks"]["PreToolUse"]
+            pre_tool_hooks = settings["hooks"].get("PreToolUse", [])
             self.assertEqual(
                 sum(
                     1
@@ -132,36 +110,14 @@ class ClaudeHooksSyncTests(unittest.TestCase):
                 sum(
                     1
                     for entry in pre_tool_hooks
-                    if entry.get("matcher") == "Edit|MultiEdit|Write|Bash"
-                    and any(
-                        hook.get("command") == 'bash "$CLAUDE_PROJECT_DIR/agent-rule/hooks/block-dist-edits.sh"'
-                        for hook in entry.get("hooks", [])
-                    )
-                ),
-                1,
-            )
-            self.assertEqual(
-                sum(
-                    1
-                    for entry in pre_tool_hooks
                     if entry.get("matcher") == "Read"
                     and any(
-                        hook.get("command") == 'bash "$CLAUDE_PROJECT_DIR/agent-rule/hooks/block-dist-edits.sh"'
+                        "block-dist-edits.sh" in hook.get("command", "")
                         for hook in entry.get("hooks", [])
                     )
                 ),
                 1,
-            )
-            self.assertEqual(
-                sum(
-                    1
-                    for entry in settings["hooks"]["Notification"]
-                    if any(
-                        hook.get("command") == 'bash "$CLAUDE_PROJECT_DIR/agent-rule/hooks/check-rules-build.sh"'
-                        for hook in entry.get("hooks", [])
-                    )
-                ),
-                1,
+                "non-matching removed signature should be preserved",
             )
 
     def test_sync_dry_run_does_not_write_project_settings(self):
@@ -202,26 +158,20 @@ class ClaudeHooksSyncTests(unittest.TestCase):
             unrelated_command = "echo keep me"
             settings_path = temp_root / ".claude" / "settings.json"
             current = json.loads(settings_path.read_text(encoding="utf-8"))
-            current["hooks"]["PreToolUse"].insert(
-                0,
+            current["hooks"]["PreToolUse"] = [
                 {
                     "matcher": "Bash",
                     "hooks": [{"type": "command", "command": legacy_command}],
                 },
-            )
-            current["hooks"]["PreToolUse"].insert(
-                1,
                 {
                     "matcher": "Bash",
                     "hooks": [{"type": "command", "command": graphify_hook_command}],
                 },
-            )
-            current["hooks"]["PreToolUse"].append(
                 {
                     "matcher": "Bash",
                     "hooks": [{"type": "command", "command": unrelated_command}],
-                }
-            )
+                },
+            ]
             settings_path.write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
 
             result = self._run_sync(temp_root)

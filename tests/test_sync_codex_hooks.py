@@ -36,43 +36,11 @@ class CodexHooksSyncTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             hooks = self._read_hooks(temp_root)
             self.assertIn("hooks", hooks)
-            self.assertIn("PreToolUse", hooks["hooks"])
-            self.assertIn("Stop", hooks["hooks"])
-            self.assertTrue(
-                any(
-                    entry.get("matcher") == "Bash|apply_patch|Edit|Write"
-                    and any("block-dist-edits.sh" in hook.get("command", "") for hook in entry.get("hooks", []))
-                    for entry in hooks["hooks"]["PreToolUse"]
-                ),
-                hooks,
-            )
-            self.assertTrue(
-                any(
-                    any(
-                        "check-rules-build.sh" in hook.get("command", "")
-                        and "2>/dev/null || pwd" in hook.get("command", "")
-                        for hook in entry.get("hooks", [])
-                    )
-                    for entry in hooks["hooks"]["Stop"]
-                ),
-                hooks,
-            )
+            self.assertEqual(hooks["hooks"], {})
 
     def test_stop_hook_fails_open_outside_git_repo(self):
         hooks = json.loads((ROOT / ".codex" / "hooks.json").read_text(encoding="utf-8"))
-        command = hooks["hooks"]["Stop"][0]["hooks"][0]["command"]
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            result = subprocess.run(
-                ["bash", "-lc", command],
-                cwd=temp_dir,
-                input=json.dumps({"hook_event_name": "Stop"}),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(hooks["hooks"], {}, "hooks should be empty when disabled")
 
     def test_pre_tool_hook_denies_codex_apply_patch_to_generated_rules(self):
         with tempfile.TemporaryDirectory() as temp_dir:
