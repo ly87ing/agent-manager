@@ -16,7 +16,7 @@
     "oa-skill": { "enabled": true },
     "anthropic-frontend-design-skill": { "enabled": true },
     "playwright-best-practices-skill": { "enabled": true },
-    "superpowers": { "enabled": true },
+    "superpowers": { "enabled": false },
     "ui-ux-pro-max-skill": { "enabled": true }
   },
   "mcp": {
