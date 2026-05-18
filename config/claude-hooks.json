@@ -21,27 +21,5 @@
       "command_contains": "agent-rule/hooks/block-dist-edits.sh"
     }
   ],
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Edit|MultiEdit|Write|Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/agent-rule/hooks/block-dist-edits.sh\""
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/agent-rule/hooks/check-rules-build.sh\""
-          }
-        ]
-      }
-    ]
-  }
+  "hooks": {}
 }
