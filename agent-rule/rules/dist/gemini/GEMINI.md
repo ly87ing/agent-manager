@@ -1,4 +1,5 @@
 - For internet searches: strictly default to `web_search` and `web_fetch` (grok-search). Use browser automation only for JS, auth, or interactive UI.
+- Use Chinese (Simplified) for interactions and generated content. Use English terms only when clearer.
 - For non-trivial or ambiguous work, state assumptions, ambiguity, and simplest viable approach before editing.
 - For multi-step work, state a brief plan with verification points.
 - Before edits that change behavior, touch shared code, or span multiple files, inspect the affected code and nearby tests first.
