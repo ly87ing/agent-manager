@@ -962,12 +962,6 @@ function run_skills_link_task() {
     run_task_in_dir "链接专业技能" "技能链接完成" "技能链接失败" 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" "${args[@]}"
 }
 
-function run_ccstatusline_config_sync_task() {
-    local args=(./scripts/claude/install_ccstatusline_config.py)
-    if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
-    run_task_in_dir "同步 ccstatusline 配置" "ccstatusline 配置同步完成" "ccstatusline 配置同步失败" 600 "$ROOT_DIR" "$PYTHON_CMD" "${args[@]}"
-}
-
 function run_mcp_sync_task() {
     local prepare_runtime="${1:-false}"
     local force_offline="${2:-false}"
@@ -991,7 +985,6 @@ function run_sync_pipeline() {
     run_pipeline_step run_rules_sync_task
     run_pipeline_step run_skills_link_task false
     run_pipeline_step run_mcp_sync_task true false
-    run_pipeline_step run_ccstatusline_config_sync_task
     finish_pipeline_execution
 }
 
@@ -1006,7 +999,6 @@ function run_update_pipeline() {
     run_pipeline_step run_rules_sync_task
     run_pipeline_step run_skills_link_task false
     run_pipeline_step run_mcp_sync_task true false
-    run_pipeline_step run_ccstatusline_config_sync_task
     finish_pipeline_execution
 }
 
@@ -1366,15 +1358,10 @@ case "$cmd" in
     claude:statusline:install)
         run_supervised_command_in_dir 600 "$ROOT_DIR" "$PYTHON_CMD" ./scripts/claude/install_statusline.py $DRY_RUN_FLAG ;;
     claude:statusline:wire)
-        ccsl_cmd=$(command -v ccstatusline 2>/dev/null || echo "$HOME/.npm-global/bin/ccstatusline")
         run_supervised_command_in_dir 600 "$ROOT_DIR" "$PYTHON_CMD" ./scripts/claude/install_statusline.py \
             --apply-settings \
-            --statusline-command "$ccsl_cmd" \
             --theme dark-daltonized \
-            $DRY_RUN_FLAG
-        run_supervised_command_in_dir 600 "$ROOT_DIR" "$PYTHON_CMD" ./scripts/claude/install_ccstatusline_config.py $DRY_RUN_FLAG ;;
-    claude:statusline:config)
-        run_supervised_command_in_dir 600 "$ROOT_DIR" "$PYTHON_CMD" ./scripts/claude/install_ccstatusline_config.py $DRY_RUN_FLAG ;;
+            $DRY_RUN_FLAG ;;
     codex:hooks:sync)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" "$PYTHON_CMD" ./scripts/sync-codex-hooks.py $DRY_RUN_FLAG ;;
     skills:link)
@@ -1484,8 +1471,7 @@ case "$cmd" in
         echo -e "  ${BORDER_GRAY}rules:sync${NC}      独立执行规则与系统级 prompt 指令向各个 Agent 的拷贝或软链接分发"
         echo -e "  ${BORDER_GRAY}claude:hooks:sync${NC} 独立刷新仓库级 Claude hooks 到 .claude/settings.json"
         echo -e "  ${BORDER_GRAY}claude:statusline:install${NC} 安装精简 statusline 脚本到 ~/.claude/statusline.sh"
-        echo -e "  ${BORDER_GRAY}claude:statusline:wire${NC}    将 ccstatusline + theme 写入 ~/.claude/settings.json（仅作用于 Claude Code），并同步 ccstatusline 配置"
-        echo -e "  ${BORDER_GRAY}claude:statusline:config${NC}  仅同步 ccstatusline.settings.json 到 ~/.config/ccstatusline/"
+        echo -e "  ${BORDER_GRAY}claude:statusline:wire${NC}    将 statusline.sh 路径写入 ~/.claude/settings.json（仅作用于 Claude Code）"
         echo -e "  ${BORDER_GRAY}codex:hooks:sync${NC} 独立刷新仓库级 Codex hooks 到 .codex/hooks.json"
         echo -e "  ${BORDER_GRAY}skills:link${NC}     独立执行全局或系统级专业技能代码集到 Agent 沙盒空间的映射配置与软链接"
         echo -e "  ${BORDER_GRAY}skills:upgrade${NC}  显式解析并回写 skill 仓库的最新可审计版本（仅 release/tag，失败即停止）"

@@ -8,8 +8,7 @@
     "playwright-cli": { "enabled": true, "auto_update": true },
     "agent-browser": { "enabled": true, "auto_update": true },
     "graphify": { "enabled": true, "auto_update": true },
-    "auggie": { "enabled": true, "auto_update": true },
-    "ccstatusline": { "enabled": true, "auto_update": true }
+    "auggie": { "enabled": true, "auto_update": true }
   },
   "skills": {
     "agent-skills": { "enabled": true },

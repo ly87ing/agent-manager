@@ -15,12 +15,15 @@ INSTALLER = ROOT / "scripts" / "claude" / "install_statusline.py"
 
 class ClaudeStatuslineScriptTests(unittest.TestCase):
     def _run_statusline(self, payload: dict) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["NO_COLOR"] = "1"
         return subprocess.run(
             ["bash", str(STATUSLINE)],
             input=json.dumps(payload),
             capture_output=True,
             text=True,
             check=False,
+            env=env,
         )
 
     def test_statusline_script_is_committed_and_executable(self):
@@ -45,7 +48,7 @@ class ClaudeStatuslineScriptTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout, "Opus 4.7 | demo-repo (feature/x)")
+            self.assertEqual(result.stdout, "Opus 4.7 | demo-repo ⎇ feature/x")
 
     def test_statusline_omits_branch_outside_git(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -58,6 +61,62 @@ class ClaudeStatuslineScriptTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout, "claude-fast | loose-dir")
+
+    def test_statusline_includes_effort_and_output_style(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self._run_statusline({
+                "model": {"display_name": "Opus 4.7"},
+                "effort": "xhigh",
+                "output_style": {"name": "Explanatory"},
+                "workspace": {"current_dir": temp_dir},
+            })
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("xhigh", result.stdout)
+            self.assertIn("Explanatory", result.stdout)
+
+    def test_statusline_shows_usable_context_percentage_and_bar(self):
+        """Context% maps the 0–80% raw range onto 0–100% usable, so ~96%
+        usable warns of an imminent auto-compact even though raw is 77%."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self._run_statusline({
+                "model": {"display_name": "Opus 4.7"},
+                "workspace": {"current_dir": temp_dir},
+                "context_window": {
+                    "context_window_size": 200_000,
+                    "current_usage": {
+                        "input_tokens": 140_000,
+                        "cache_read_input_tokens": 14_000,
+                    },
+                },
+            })
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertRegex(result.stdout, r"Ctx 9[0-9]% ▓+░+")
+
+    def test_statusline_formats_cost_and_clock_from_stdin(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self._run_statusline({
+                "model": {"display_name": "Opus 4.7"},
+                "workspace": {"current_dir": temp_dir},
+                "cost": {"total_cost_usd": 0.42, "total_duration_ms": 92345},
+            })
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("$0.42", result.stdout)
+            # 92345 ms → 92 s → "1m"
+            self.assertIn("1m", result.stdout)
+
+    def test_statusline_ignores_transcript_path(self):
+        """Zero transcript IO contract: pointing transcript_path at a path
+        that does not exist must NOT affect output or cause failure — the
+        helper must never touch that file."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            payload = {
+                "model": {"display_name": "Opus 4.7"},
+                "workspace": {"current_dir": temp_dir},
+                "transcript_path": "/dev/null/definitely-does-not-exist",
+            }
+            result = self._run_statusline(payload)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Opus 4.7", result.stdout)
 
 
 class ClaudeStatuslineInstallerTests(unittest.TestCase):

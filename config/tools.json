@@ -45,12 +45,6 @@
       "install": "npm install -g @augmentcode/auggie@latest",
       "upgrade": "npm install -g @augmentcode/auggie@latest",
       "ready_check": "bin:auggie"
-    },
-    "ccstatusline": {
-      "install": "npm install -g ccstatusline@latest",
-      "uninstall": "npm uninstall -g ccstatusline",
-      "upgrade": "npm install -g ccstatusline@latest",
-      "ready_check": "bin:ccstatusline"
     }
   }
 }
