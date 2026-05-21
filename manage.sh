@@ -1363,7 +1363,10 @@ case "$cmd" in
             --apply-settings \
             --statusline-command "$ccsl_cmd" \
             --theme dark-daltonized \
-            $DRY_RUN_FLAG ;;
+            $DRY_RUN_FLAG
+        run_supervised_command_in_dir 600 "$ROOT_DIR" "$PYTHON_CMD" ./scripts/claude/install_ccstatusline_config.py $DRY_RUN_FLAG ;;
+    claude:statusline:config)
+        run_supervised_command_in_dir 600 "$ROOT_DIR" "$PYTHON_CMD" ./scripts/claude/install_ccstatusline_config.py $DRY_RUN_FLAG ;;
     codex:hooks:sync)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" "$PYTHON_CMD" ./scripts/sync-codex-hooks.py $DRY_RUN_FLAG ;;
     skills:link)
@@ -1473,7 +1476,8 @@ case "$cmd" in
         echo -e "  ${BORDER_GRAY}rules:sync${NC}      独立执行规则与系统级 prompt 指令向各个 Agent 的拷贝或软链接分发"
         echo -e "  ${BORDER_GRAY}claude:hooks:sync${NC} 独立刷新仓库级 Claude hooks 到 .claude/settings.json"
         echo -e "  ${BORDER_GRAY}claude:statusline:install${NC} 安装精简 statusline 脚本到 ~/.claude/statusline.sh"
-        echo -e "  ${BORDER_GRAY}claude:statusline:wire${NC}    将 ccstatusline + theme 写入 ~/.claude/settings.json（仅作用于 Claude Code）"
+        echo -e "  ${BORDER_GRAY}claude:statusline:wire${NC}    将 ccstatusline + theme 写入 ~/.claude/settings.json（仅作用于 Claude Code），并同步 ccstatusline 配置"
+        echo -e "  ${BORDER_GRAY}claude:statusline:config${NC}  仅同步 ccstatusline.settings.json 到 ~/.config/ccstatusline/"
         echo -e "  ${BORDER_GRAY}codex:hooks:sync${NC} 独立刷新仓库级 Codex hooks 到 .codex/hooks.json"
         echo -e "  ${BORDER_GRAY}skills:link${NC}     独立执行全局或系统级专业技能代码集到 Agent 沙盒空间的映射配置与软链接"
         echo -e "  ${BORDER_GRAY}skills:upgrade${NC}  显式解析并回写 skill 仓库的最新可审计版本（仅 release/tag，失败即停止）"
