@@ -90,7 +90,7 @@ if [ -n "${ctx_used:-}" ] && [ -n "${ctx_size:-}" ] && [ "$ctx_size" -gt 0 ] 2>/
     elif [ "$usable" -ge 70 ]; then ctx_color='1;33'
     else                            ctx_color='32'
     fi
-    parts+=("$(c "$ctx_color" "Ctx ${usable}% ${bar}")")
+    parts+=("$(c "$ctx_color" "${bar}")")
 fi
 
 if [ -n "${cost_usd:-}" ]; then

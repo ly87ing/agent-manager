@@ -75,8 +75,8 @@ class ClaudeStatuslineScriptTests(unittest.TestCase):
             self.assertIn("Explanatory", result.stdout)
 
     def test_statusline_shows_usable_context_percentage_and_bar(self):
-        """Context% maps the 0–80% raw range onto 0–100% usable, so ~96%
-        usable warns of an imminent auto-compact even though raw is 77%."""
+        """Context bar maps the 0–80% raw range onto 0–100% usable so the
+        bar nearly fills near auto-compact even though raw is only 77%."""
         with tempfile.TemporaryDirectory() as temp_dir:
             result = self._run_statusline({
                 "model": {"display_name": "Opus 4.7"},
@@ -90,7 +90,7 @@ class ClaudeStatuslineScriptTests(unittest.TestCase):
                 },
             })
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertRegex(result.stdout, r"Ctx 9[0-9]% ▓+░+")
+            self.assertRegex(result.stdout, r"▓{9}░")
 
     def test_statusline_formats_cost_and_clock_from_stdin(self):
         with tempfile.TemporaryDirectory() as temp_dir:
