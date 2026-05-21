@@ -19,7 +19,7 @@ US=$'\x1f'
 fields=$(printf '%s' "$input" | jq -rj --arg sep "$US" '
   [
     (.model.display_name // .model.id // "claude"),
-    (.effort // ""),
+    ((.effort | if type == "object" then (.level // "") else . end) // ""),
     (.output_style.name // ""),
     (.workspace.current_dir // .cwd // "."),
     (.cost.total_cost_usd // ""),
