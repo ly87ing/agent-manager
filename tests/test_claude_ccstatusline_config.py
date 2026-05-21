@@ -122,5 +122,31 @@ class CcstatuslineManageWiringTests(unittest.TestCase):
         self.assertIn("claude-statusline-config", makefile)
 
 
+class CcstatuslinePipelineWiringTests(unittest.TestCase):
+    """`make update` / `make all` / `make sync` reconcile the ccstatusline
+    config by running install_ccstatusline_config.py inside the standard
+    pipelines."""
+
+    def setUp(self) -> None:
+        self.manage = (ROOT / "manage.sh").read_text(encoding="utf-8")
+
+    def _pipeline_block(self, fn_name: str) -> str:
+        start = self.manage.index(f"function {fn_name}()")
+        end = self.manage.index("\n}\n", start)
+        return self.manage[start:end]
+
+    def test_task_helper_is_defined(self):
+        self.assertIn("function run_ccstatusline_config_sync_task()", self.manage)
+        self.assertIn("install_ccstatusline_config.py", self.manage)
+
+    def test_update_pipeline_includes_config_sync(self):
+        block = self._pipeline_block("run_update_pipeline")
+        self.assertIn("run_ccstatusline_config_sync_task", block)
+
+    def test_sync_pipeline_includes_config_sync(self):
+        block = self._pipeline_block("run_sync_pipeline")
+        self.assertIn("run_ccstatusline_config_sync_task", block)
+
+
 if __name__ == "__main__":
     unittest.main()

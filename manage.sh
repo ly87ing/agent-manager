@@ -962,6 +962,12 @@ function run_skills_link_task() {
     run_task_in_dir "链接专业技能" "技能链接完成" "技能链接失败" 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" "${args[@]}"
 }
 
+function run_ccstatusline_config_sync_task() {
+    local args=(./scripts/claude/install_ccstatusline_config.py)
+    if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
+    run_task_in_dir "同步 ccstatusline 配置" "ccstatusline 配置同步完成" "ccstatusline 配置同步失败" 600 "$ROOT_DIR" "$PYTHON_CMD" "${args[@]}"
+}
+
 function run_mcp_sync_task() {
     local prepare_runtime="${1:-false}"
     local force_offline="${2:-false}"
@@ -985,6 +991,7 @@ function run_sync_pipeline() {
     run_pipeline_step run_rules_sync_task
     run_pipeline_step run_skills_link_task false
     run_pipeline_step run_mcp_sync_task true false
+    run_pipeline_step run_ccstatusline_config_sync_task
     finish_pipeline_execution
 }
 
@@ -999,6 +1006,7 @@ function run_update_pipeline() {
     run_pipeline_step run_rules_sync_task
     run_pipeline_step run_skills_link_task false
     run_pipeline_step run_mcp_sync_task true false
+    run_pipeline_step run_ccstatusline_config_sync_task
     finish_pipeline_execution
 }
 
