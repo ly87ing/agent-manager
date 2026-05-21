@@ -61,7 +61,7 @@ fi
 parts=()
 parts+=("$(c '38;5;30'  "$model")")
 [ -n "$effort" ] && parts+=("$(c '38;5;140' "$effort")")
-[ -n "$style" ]  && parts+=("$(c '38;5;80'  "$style")")
+[ -n "$style" ] && [ "$style" != "default" ] && parts+=("$(c '38;5;80'  "$style")")
 
 dirpart="$(c '38;5;33' "$dir")"
 if [ -n "$branch" ]; then
