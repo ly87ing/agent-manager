@@ -86,9 +86,9 @@ if [ -n "${ctx_used:-}" ] && [ -n "${ctx_size:-}" ] && [ "$ctx_size" -gt 0 ] 2>/
         if [ "$i" -lt "$filled" ]; then bar="${bar}▓"; else bar="${bar}░"; fi
         i=$(( i + 1 ))
     done
-    if   [ "$usable" -ge 90 ]; then ctx_color='38;5;196'
-    elif [ "$usable" -ge 70 ]; then ctx_color='38;5;220'
-    else                            ctx_color='38;5;82'
+    if   [ "$usable" -ge 90 ]; then ctx_color='1;31'
+    elif [ "$usable" -ge 70 ]; then ctx_color='1;33'
+    else                            ctx_color='32'
     fi
     parts+=("$(c "$ctx_color" "Ctx ${usable}% ${bar}")")
 fi
