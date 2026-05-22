@@ -103,6 +103,7 @@ DISABLED_CHROME_FEATURES = (
     "WebBluetooth",
     "WebUSB",
     "WebHID",
+    "WebXR",
     "Serial",
 )
 BASE_CHROME_ARGS = [
@@ -1333,6 +1334,8 @@ def verification_report_payload(
                 "runtime_bluetooth_api_present": False,
                 "runtime_usb_api_present": False,
                 "runtime_hid_api_present": False,
+                "runtime_webxr_api_present": False,
+                "runtime_gamepad_count": 0,
                 "runtime_webrtc_supported": True,
                 "runtime_webrtc_local_ip_leak": False,
                 "runtime_profile_webrtc_policy": "disable_non_proxied_udp",
@@ -1387,6 +1390,14 @@ def verification_report_payload(
                     "serial": 0,
                 },
                 "automation_hardware_device_identity_exposed": False,
+                "automation_webxr_api_present": False,
+                "automation_gamepad_count": 0,
+                "automation_gamepad_identity_exposed": False,
+                "automation_midi_permission_not_granted": True,
+                "automation_midi_identity_exposed": False,
+                "automation_sensor_permissions_not_granted": True,
+                "automation_window_management_permission_not_granted": True,
+                "automation_screen_details_identity_exposed": False,
                 "automation_media_device_identity_exposed": False,
                 "automation_camera_permission_not_granted": True,
                 "automation_microphone_permission_not_granted": True,
@@ -1568,6 +1579,9 @@ def runtime_probe_html() -> str:
         "usbPresent:'usb' in navigator,"
         "hidPresent:'hid' in navigator,"
         "serialPresent:'serial' in navigator,"
+        "xrPresent:'xr' in navigator,"
+        "gamepadCount:typeof navigator.getGamepads==='function'?"
+        "Array.from(navigator.getGamepads()||[]).filter(Boolean).length:0,"
         "timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,"
         "intlLocale:Intl.DateTimeFormat().resolvedOptions().locale,"
         "intlCalendar:Intl.DateTimeFormat().resolvedOptions().calendar,"
@@ -1794,6 +1808,10 @@ def runtime_desktop_surface_mismatches(runtime_context: dict) -> tuple[str, ...]
         mismatches.append("runtime USB API")
     if runtime_context.get("hidPresent") is not False:
         mismatches.append("runtime HID API")
+    if runtime_context.get("xrPresent") is not False:
+        mismatches.append("runtime WebXR API")
+    if runtime_context.get("gamepadCount") != 0:
+        mismatches.append("runtime gamepad count")
     return tuple(mismatches)
 
 
@@ -2275,6 +2293,33 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation hardware device probe")
     if observed.get("hardwareDeviceIdentityExposed") is not False:
         mismatches.append("automation hardware device identity")
+    if observed.get("xrPresent") is not False:
+        mismatches.append("automation WebXR API")
+    if observed.get("gamepadProbeError"):
+        mismatches.append("automation gamepad probe")
+    if observed.get("gamepadCount") != 0:
+        mismatches.append("automation gamepad count")
+    if observed.get("gamepadIdentityExposed") is not False:
+        mismatches.append("automation gamepad identity")
+    if observed.get("midiProbeError"):
+        mismatches.append("automation MIDI probe")
+    if observed.get("midiPermission") == "granted":
+        mismatches.append("automation MIDI permission")
+    if observed.get("midiInputCount") != 0:
+        mismatches.append("automation MIDI input count")
+    if observed.get("midiOutputCount") != 0:
+        mismatches.append("automation MIDI output count")
+    if observed.get("midiIdentityExposed") is not False:
+        mismatches.append("automation MIDI identity")
+    if observed.get("windowManagementPermission") == "granted":
+        mismatches.append("automation window management permission")
+    if observed.get("screenDetailsProbeError"):
+        mismatches.append("automation screen details probe")
+    if observed.get("screenDetailsIdentityExposed") is not False:
+        mismatches.append("automation screen details identity")
+    for permission_name in ("accelerometerPermission", "gyroscopePermission", "magnetometerPermission"):
+        if observed.get(permission_name) == "granted":
+            mismatches.append(f"automation {permission_name}")
     if observed.get("mediaDeviceProbeError"):
         mismatches.append("automation media device probe")
     if observed.get("mediaDeviceIdentityExposed") is not False:
@@ -2425,6 +2470,23 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             },
                             hardwareDeviceIdentityExposed: false,
                             hardwareDeviceProbeErrors: {},
+                            xrPresent: 'xr' in navigator,
+                            gamepadCount: 0,
+                            gamepadIdentityExposed: false,
+                            gamepadProbeError: null,
+                            midiPermission: null,
+                            midiInputCount: 0,
+                            midiOutputCount: 0,
+                            midiIdentityExposed: false,
+                            midiAccessDenied: false,
+                            midiProbeError: null,
+                            accelerometerPermission: null,
+                            gyroscopePermission: null,
+                            magnetometerPermission: null,
+                            windowManagementPermission: null,
+                            screenDetailsIdentityExposed: false,
+                            screenDetailsAccessDenied: false,
+                            screenDetailsProbeError: null,
                             mediaDeviceCount: null,
                             mediaDeviceKinds: [],
                             mediaDeviceIdentityExposed: false,
@@ -2449,6 +2511,11 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                           observed.cameraPermission = await permissionState('camera');
                           observed.microphonePermission = await permissionState('microphone');
                           observed.notificationsPermission = await permissionState('notifications');
+                          observed.midiPermission = await permissionState('midi');
+                          observed.accelerometerPermission = await permissionState('accelerometer');
+                          observed.gyroscopePermission = await permissionState('gyroscope');
+                          observed.magnetometerPermission = await permissionState('magnetometer');
+                          observed.windowManagementPermission = await permissionState('window-management');
                           try {
                             const canvas = document.createElement('canvas');
                             const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
@@ -2572,6 +2639,58 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                           await probeHardwareDeviceApi('usb', 'getDevices');
                           await probeHardwareDeviceApi('hid', 'getDevices');
                           await probeHardwareDeviceApi('serial', 'getPorts');
+                          try {
+                            if (typeof navigator.getGamepads === 'function') {
+                              const gamepads = Array.from(navigator.getGamepads() || []).filter(Boolean);
+                              observed.gamepadCount = gamepads.length;
+                              observed.gamepadIdentityExposed = gamepads.some((gamepad) => Boolean(gamepad.id));
+                            }
+                          } catch (error) {
+                            observed.gamepadProbeError = String(error && error.name || error);
+                          }
+                          try {
+                            if (navigator.requestMIDIAccess) {
+                              const midiAccess = await Promise.race([
+                                navigator.requestMIDIAccess({sysex: false}),
+                                new Promise((resolve) => setTimeout(() => resolve('timeout'), 500)),
+                              ]);
+                              if (midiAccess === 'timeout') {
+                                observed.midiProbeError = 'timeout';
+                              } else {
+                                const inputs = midiAccess.inputs ? Array.from(midiAccess.inputs.values()) : [];
+                                const outputs = midiAccess.outputs ? Array.from(midiAccess.outputs.values()) : [];
+                                observed.midiInputCount = inputs.length;
+                                observed.midiOutputCount = outputs.length;
+                                observed.midiIdentityExposed = inputs.length > 0 || outputs.length > 0;
+                              }
+                            }
+                          } catch (error) {
+                            if (error && error.name === 'NotAllowedError') {
+                              observed.midiAccessDenied = true;
+                            } else {
+                              observed.midiProbeError = String(error && error.name || error);
+                            }
+                          }
+                          try {
+                            if (typeof window.getScreenDetails === 'function') {
+                              const screenDetails = await Promise.race([
+                                window.getScreenDetails(),
+                                new Promise((resolve) => setTimeout(() => resolve('timeout'), 500)),
+                              ]);
+                              if (screenDetails === 'timeout') {
+                                observed.screenDetailsProbeError = 'timeout';
+                              } else {
+                                const screens = screenDetails.screens ? Array.from(screenDetails.screens) : [];
+                                observed.screenDetailsIdentityExposed = screens.some((screen) => Boolean(screen.label));
+                              }
+                            }
+                          } catch (error) {
+                            if (error && error.name === 'NotAllowedError') {
+                              observed.screenDetailsAccessDenied = true;
+                            } else {
+                              observed.screenDetailsProbeError = String(error && error.name || error);
+                            }
+                          }
                           try {
                             if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
                               const devices = await Promise.race([

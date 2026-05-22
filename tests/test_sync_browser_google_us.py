@@ -291,7 +291,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertIn("--disable-speech-api", automation_context["chrome_launch"]["args"])
             self.assertIn("--deny-permission-prompts", automation_context["chrome_launch"]["args"])
             self.assertIn(
-                "--disable-features=ReduceAcceptLanguage,WebGPU,FontAccess,WebBluetooth,WebUSB,WebHID,Serial",
+                "--disable-features=ReduceAcceptLanguage,WebGPU,FontAccess,WebBluetooth,WebUSB,WebHID,WebXR,Serial",
                 automation_context["chrome_launch"]["args"],
             )
             self.assertIn("--disable-blink-features=AutomationControlled", automation_context["chrome_launch"]["args"])
@@ -351,7 +351,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["automation"]["context_permissions"], ["geolocation"])
             self.assertEqual(
                 verification_report["enforced_features"]["locale"]["disabled_chrome_features"],
-                ["ReduceAcceptLanguage", "WebGPU", "FontAccess", "WebBluetooth", "WebUSB", "WebHID", "Serial"],
+                ["ReduceAcceptLanguage", "WebGPU", "FontAccess", "WebBluetooth", "WebUSB", "WebHID", "WebXR", "Serial"],
             )
             self.assertEqual(
                 verification_report["enforced_features"]["device_permissions"][
@@ -433,6 +433,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_bluetooth_api_present"])
             self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_usb_api_present"])
             self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_hid_api_present"])
+            self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_webxr_api_present"])
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_gamepad_count"], 0)
             self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_webrtc_supported"])
             self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_webrtc_local_ip_leak"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_profile_webrtc_policy"], "disable_non_proxied_udp")
@@ -523,6 +525,20 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertFalse(
                 verification_report["enforced_features"]["automation"]["automation_hardware_device_identity_exposed"]
             )
+            self.assertFalse(verification_report["enforced_features"]["automation"]["automation_webxr_api_present"])
+            self.assertEqual(verification_report["enforced_features"]["automation"]["automation_gamepad_count"], 0)
+            self.assertFalse(verification_report["enforced_features"]["automation"]["automation_gamepad_identity_exposed"])
+            self.assertTrue(verification_report["enforced_features"]["automation"]["automation_midi_permission_not_granted"])
+            self.assertFalse(verification_report["enforced_features"]["automation"]["automation_midi_identity_exposed"])
+            self.assertTrue(verification_report["enforced_features"]["automation"]["automation_sensor_permissions_not_granted"])
+            self.assertTrue(
+                verification_report["enforced_features"]["automation"][
+                    "automation_window_management_permission_not_granted"
+                ]
+            )
+            self.assertFalse(
+                verification_report["enforced_features"]["automation"]["automation_screen_details_identity_exposed"]
+            )
             self.assertFalse(verification_report["enforced_features"]["automation"]["automation_media_device_identity_exposed"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_camera_permission_not_granted"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_microphone_permission_not_granted"])
@@ -550,7 +566,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertIn("--disable-speech-api", launcher_content)
             self.assertIn("--deny-permission-prompts", launcher_content)
             self.assertIn(
-                "--disable-features=ReduceAcceptLanguage,WebGPU,FontAccess,WebBluetooth,WebUSB,WebHID,Serial",
+                "--disable-features=ReduceAcceptLanguage,WebGPU,FontAccess,WebBluetooth,WebUSB,WebHID,WebXR,Serial",
                 launcher_content,
             )
             self.assertIn("--disable-blink-features=AutomationControlled", launcher_content)
@@ -917,6 +933,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             '"pdfViewerEnabled":true,"pluginsLength":5,"mimeTypesLength":2,'
             '"speechSynthesisPresent":false,"localFontAccessPresent":false,'
             '"bluetoothPresent":false,"usbPresent":false,"hidPresent":false,"serialPresent":true,'
+            '"xrPresent":false,"gamepadCount":0,'
             '"timezone":"America/Los_Angeles","timezoneOffset":'
             + str(timezone_offset)
             + ',"intlLocale":"en-US",'
@@ -976,6 +993,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertFalse(runtime_context["usbPresent"])
         self.assertFalse(runtime_context["hidPresent"])
         self.assertTrue(runtime_context["serialPresent"])
+        self.assertFalse(runtime_context["xrPresent"])
+        self.assertEqual(runtime_context["gamepadCount"], 0)
         self.assertEqual(runtime_context["timezone"], "America/Los_Angeles")
         self.assertEqual(runtime_context["timezoneOffset"], timezone_offset)
         self.assertEqual(runtime_context["intlCalendar"], "gregory")
@@ -1118,6 +1137,20 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "hardwareDeviceCounts": {"bluetooth": 0, "usb": 0, "hid": 0, "serial": 0},
             "hardwareDeviceIdentityExposed": False,
             "hardwareDeviceProbeErrors": {},
+            "xrPresent": False,
+            "gamepadCount": 0,
+            "gamepadIdentityExposed": False,
+            "midiPermission": "denied",
+            "midiInputCount": 0,
+            "midiOutputCount": 0,
+            "midiIdentityExposed": False,
+            "midiProbeError": None,
+            "accelerometerPermission": "denied",
+            "gyroscopePermission": "denied",
+            "magnetometerPermission": "denied",
+            "windowManagementPermission": "denied",
+            "screenDetailsIdentityExposed": False,
+            "screenDetailsProbeError": None,
             "mediaDeviceIdentityExposed": False,
             "cameraPermission": "prompt",
             "microphonePermission": "prompt",
@@ -1225,6 +1258,18 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         observed["hardwareDeviceCounts"] = {"bluetooth": 1, "usb": 1, "hid": 1, "serial": 1}
         observed["hardwareDeviceIdentityExposed"] = True
         observed["hardwareDeviceProbeErrors"] = {}
+        observed["xrPresent"] = True
+        observed["gamepadCount"] = 1
+        observed["gamepadIdentityExposed"] = True
+        observed["midiPermission"] = "granted"
+        observed["midiInputCount"] = 1
+        observed["midiOutputCount"] = 1
+        observed["midiIdentityExposed"] = True
+        observed["windowManagementPermission"] = "granted"
+        observed["screenDetailsIdentityExposed"] = True
+        observed["accelerometerPermission"] = "granted"
+        observed["gyroscopePermission"] = "granted"
+        observed["magnetometerPermission"] = "granted"
         observed["mediaDeviceIdentityExposed"] = True
         mismatches = module.validate_automation_context_observation(observed, browser_context)
 
@@ -1252,6 +1297,18 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertIn("automation hid device count", mismatches)
         self.assertIn("automation serial device count", mismatches)
         self.assertIn("automation hardware device identity", mismatches)
+        self.assertIn("automation WebXR API", mismatches)
+        self.assertIn("automation gamepad count", mismatches)
+        self.assertIn("automation gamepad identity", mismatches)
+        self.assertIn("automation MIDI permission", mismatches)
+        self.assertIn("automation MIDI input count", mismatches)
+        self.assertIn("automation MIDI output count", mismatches)
+        self.assertIn("automation MIDI identity", mismatches)
+        self.assertIn("automation window management permission", mismatches)
+        self.assertIn("automation screen details identity", mismatches)
+        self.assertIn("automation accelerometerPermission", mismatches)
+        self.assertIn("automation gyroscopePermission", mismatches)
+        self.assertIn("automation magnetometerPermission", mismatches)
         self.assertIn("automation media device identity", mismatches)
 
         observed["innerWidth"] = 1365
@@ -1275,6 +1332,18 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         observed["hardwareDeviceApis"] = {"bluetooth": False, "usb": False, "hid": False, "serial": True}
         observed["hardwareDeviceCounts"] = {"bluetooth": 0, "usb": 0, "hid": 0, "serial": 0}
         observed["hardwareDeviceIdentityExposed"] = False
+        observed["xrPresent"] = False
+        observed["gamepadCount"] = 0
+        observed["gamepadIdentityExposed"] = False
+        observed["midiPermission"] = "denied"
+        observed["midiInputCount"] = 0
+        observed["midiOutputCount"] = 0
+        observed["midiIdentityExposed"] = False
+        observed["windowManagementPermission"] = "denied"
+        observed["screenDetailsIdentityExposed"] = False
+        observed["accelerometerPermission"] = "denied"
+        observed["gyroscopePermission"] = "denied"
+        observed["magnetometerPermission"] = "denied"
         observed["mediaDeviceIdentityExposed"] = False
         observed["cameraPermission"] = "granted"
         observed["languages"] = ["en-US"]
