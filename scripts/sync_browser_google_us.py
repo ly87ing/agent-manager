@@ -841,6 +841,7 @@ def automation_context_payload(exit_profile: ExitProfile | None, managed_user_da
             "locale": APP_LOCALE,
             "timezone_id": timezone_id,
             "user_agent": user_agent,
+            "navigator_languages": ["en-US", "en"],
             "client_hints_platform": client_hints_platform(platform_name),
             "navigator_platform": navigator_platform(platform_name),
             "geolocation": geolocation,
@@ -1139,6 +1140,7 @@ def verification_report_payload(
                 "context_permissions": ["geolocation"],
                 "runtime_language": APP_LOCALE,
                 "runtime_languages": ["en-US", "en"],
+                "automation_languages": ["en-US", "en"],
                 "runtime_intl_locale": APP_LOCALE,
                 "runtime_intl_calendar": "gregory",
                 "runtime_intl_numbering_system": "latn",
@@ -1696,7 +1698,7 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
     if observed.get("language") != APP_LOCALE:
         mismatches.append("automation navigator.language")
     languages = observed.get("languages")
-    if not isinstance(languages, list) or not languages or languages[0] != APP_LOCALE:
+    if languages != browser_context.get("navigator_languages"):
         mismatches.append("automation navigator.languages")
     if observed.get("timezone") != browser_context.get("timezone_id"):
         mismatches.append("automation timezone")
@@ -1894,7 +1896,7 @@ def load_automation_browser_context(config_dir: Path) -> dict | AutomationContex
 
 
 def new_us_playwright_context(browser, browser_context: dict):
-    return browser.new_context(
+    context = browser.new_context(
         locale=browser_context.get("locale"),
         timezone_id=browser_context.get("timezone_id"),
         geolocation=browser_context.get("geolocation"),
@@ -1908,6 +1910,21 @@ def new_us_playwright_context(browser, browser_context: dict):
         has_touch=browser_context.get("has_touch"),
         color_scheme=browser_context.get("color_scheme"),
     )
+    navigator_languages = browser_context.get("navigator_languages")
+    if isinstance(navigator_languages, list) and navigator_languages:
+        languages_json = json.dumps(navigator_languages)
+        context.add_init_script(
+            f"""
+            (() => {{
+              const frozenLanguages = Object.freeze(Array.from({languages_json}));
+              Object.defineProperty(Navigator.prototype, 'languages', {{
+                configurable: true,
+                get: () => frozenLanguages,
+              }});
+            }})();
+            """
+        )
+    return context
 
 
 def verify_google_domain_with_browser_context(

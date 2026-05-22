@@ -194,6 +194,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(automation_context["browser_context"]["timezone_id"], "America/Los_Angeles")
             self.assertIn("Chrome/", automation_context["browser_context"]["user_agent"])
             self.assertIn("Safari/537.36", automation_context["browser_context"]["user_agent"])
+            self.assertEqual(automation_context["browser_context"]["navigator_languages"], ["en-US", "en"])
             self.assertEqual(automation_context["browser_context"]["client_hints_platform"], "macOS")
             self.assertEqual(automation_context["browser_context"]["navigator_platform"], "MacIntel")
             self.assertEqual(automation_context["browser_context"]["viewport"], {"width": 1365, "height": 768})
@@ -252,6 +253,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["automation"]["context_permissions"], ["geolocation"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_language"], "en-US")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_languages"], ["en-US", "en"])
+            self.assertEqual(verification_report["enforced_features"]["automation"]["automation_languages"], ["en-US", "en"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_locale"], "en-US")
             self.assertIsInstance(
                 verification_report["enforced_features"]["automation"]["timezone_offset_minutes"],
@@ -729,6 +731,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             ),
+            "navigator_languages": ["en-US", "en"],
             "client_hints_platform": "macOS",
             "navigator_platform": "MacIntel",
             "geolocation": {"latitude": 34.0522, "longitude": -118.2437, "accuracy": 50000},
@@ -746,7 +749,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "userAgentDataMobile": False,
             "userAgentDataPlatform": "macOS",
             "language": "en-US",
-            "languages": ["en-US"],
+            "languages": ["en-US", "en"],
             "timezone": "America/Los_Angeles",
             "timezoneOffset": module.expected_timezone_offset_minutes("America/Los_Angeles"),
             "intlLocale": "en-US",
@@ -797,6 +800,13 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertIn("automation viewport width", mismatches)
         self.assertIn("automation touch points", mismatches)
         self.assertIn("automation coarse pointer", mismatches)
+
+        observed["innerWidth"] = 1365
+        observed["maxTouchPoints"] = 0
+        observed["coarsePointer"] = False
+        observed["languages"] = ["en-US"]
+        mismatches = module.validate_automation_context_observation(observed, browser_context)
+        self.assertIn("automation navigator.languages", mismatches)
 
     def test_browser_google_marker_detection_catches_hk_signals(self):
         spec = importlib.util.spec_from_file_location("sync_browser_google_us_test", SCRIPT)
