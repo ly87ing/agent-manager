@@ -38,7 +38,12 @@ EXIT_PROFILE_GEOLOCATION_ACCURACY = 50000
 VERIFICATION_REPORT_VERSION = 1
 CHROME_ARGS = [
     "--lang=en-US",
+    "--accept-lang=en-US,en",
     "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+    "--no-first-run",
+    "--disable-search-engine-choice-screen",
+    "--disable-sync",
+    "--disable-extensions",
 ]
 BLOCK_CONTENT_SETTING = 2
 GOOGLE_HK_MARKERS = ("google.com.hk", "hong kong")
@@ -428,6 +433,17 @@ def sync_preferences(path: Path) -> bool:
     return changed
 
 
+def sync_managed_browser_us_profile(user_data_dir: Path) -> list[str]:
+    changed_paths = []
+    local_state_path = user_data_dir / "Local State"
+    preferences_path = user_data_dir / "Default" / "Preferences"
+    if sync_local_state(local_state_path):
+        changed_paths.append(str(local_state_path))
+    if sync_preferences(preferences_path):
+        changed_paths.append(str(preferences_path))
+    return changed_paths
+
+
 def nested_value(mapping: dict, keys: tuple[str, ...]):
     current = mapping
     for key in keys:
@@ -521,9 +537,16 @@ def audit_preferences(path: Path) -> dict:
     return record
 
 
-def audit_browser_state(browser_roots: list[BrowserRoot], explicit_profile: str | None) -> dict:
+def audit_browser_state(
+    browser_roots: list[BrowserRoot],
+    explicit_profile: str | None,
+    managed_browser_root: BrowserRoot | None = None,
+) -> dict:
     audit = {"overall_ok": True, "roots": []}
-    for browser_root in browser_roots:
+    root_scopes = [(browser_root, explicit_profile) for browser_root in browser_roots]
+    if managed_browser_root is not None:
+        root_scopes.append((managed_browser_root, None))
+    for browser_root, profile_scope in root_scopes:
         root_record = {
             "name": browser_root.name,
             "user_data_dir": str(browser_root.user_data_dir),
@@ -541,10 +564,10 @@ def audit_browser_state(browser_roots: list[BrowserRoot], explicit_profile: str 
         if not root_record["local_state"]["ok"]:
             audit["overall_ok"] = False
 
-        preference_paths = discover_preference_paths(browser_root.user_data_dir, explicit_profile)
+        preference_paths = discover_preference_paths(browser_root.user_data_dir, profile_scope)
         if not preference_paths:
             root_record["warnings"].append("no regular profile Preferences found")
-            if explicit_profile:
+            if profile_scope:
                 audit["overall_ok"] = False
         for preferences_path in preference_paths:
             profile_record = audit_preferences(preferences_path)
@@ -556,7 +579,7 @@ def audit_browser_state(browser_roots: list[BrowserRoot], explicit_profile: str 
     return audit
 
 
-def automation_context_payload(exit_profile: ExitProfile | None) -> dict:
+def automation_context_payload(exit_profile: ExitProfile | None, managed_user_data_dir: Path) -> dict:
     timezone_id = resolved_timezone_id(exit_profile)
     geolocation = resolved_geolocation(exit_profile)
     config_dir_label = "$AGENT_MANAGER_BROWSER_US_CONFIG_DIR"
@@ -571,8 +594,13 @@ def automation_context_payload(exit_profile: ExitProfile | None) -> dict:
             },
         },
         "chrome_launch": {
-            "args": CHROME_ARGS,
+            "args": [
+                f"--user-data-dir={managed_user_data_dir}",
+                "--profile-directory=Default",
+                *CHROME_ARGS,
+            ],
             "launcher": f"{config_dir_label}/browser-us-chrome.sh",
+            "managed_user_data_dir": str(managed_user_data_dir),
         },
         "environment": {
             "TZ": timezone_id,
@@ -600,8 +628,9 @@ def shell_export_line(name: str, value: str) -> str:
     return f"export {name}={shlex.quote(value)}"
 
 
-def browser_us_launcher_content(config_path: Path, timezone_id: str, platform_name: str) -> str:
+def browser_us_launcher_content(config_path: Path, managed_user_data_dir: Path, timezone_id: str, platform_name: str) -> str:
     chrome_args = " ".join(shlex.quote(arg) for arg in CHROME_ARGS)
+    user_data_arg = '--user-data-dir="$BROWSER_US_USER_DATA_DIR"'
     lines = [
         "#!/usr/bin/env bash",
         "set -euo pipefail",
@@ -613,6 +642,9 @@ def browser_us_launcher_content(config_path: Path, timezone_id: str, platform_na
         shell_export_line("LC_ALL", ENV_LOCALE),
         shell_export_line("AGENT_MANAGER_BROWSER_US_CONTEXT", str(config_path)),
         shell_export_line("AGENT_MANAGER_BROWSER_US_CHROME_ARGS", " ".join(CHROME_ARGS)),
+        shell_export_line("AGENT_MANAGER_BROWSER_US_USER_DATA_DIR", str(managed_user_data_dir)),
+        'BROWSER_US_USER_DATA_DIR="${AGENT_MANAGER_BROWSER_US_USER_DATA_DIR}"',
+        'mkdir -p "$BROWSER_US_USER_DATA_DIR"',
         "",
     ]
     if platform_name == "darwin":
@@ -623,7 +655,7 @@ def browser_us_launcher_content(config_path: Path, timezone_id: str, platform_na
                 '  echo "Google Chrome executable not found: $CHROME_BIN" >&2',
                 "  exit 127",
                 "fi",
-                f'exec "$CHROME_BIN" {chrome_args} "$@"',
+                f'exec "$CHROME_BIN" {user_data_arg} --profile-directory=Default {chrome_args} "$@"',
             ]
         )
     elif platform_name.startswith("win"):
@@ -644,7 +676,7 @@ def browser_us_launcher_content(config_path: Path, timezone_id: str, platform_na
                 '  echo "Chrome/Chromium executable not found; set AGENT_MANAGER_BROWSER_US_CHROME_BIN." >&2',
                 "  exit 127",
                 "fi",
-                f'exec "$CHROME_BIN" {chrome_args} "$@"',
+                f'exec "$CHROME_BIN" {user_data_arg} --profile-directory=Default {chrome_args} "$@"',
             ]
         )
     return "\n".join(lines) + "\n"
@@ -659,7 +691,8 @@ def sync_automation_context(config_dir: Path, exit_profile: ExitProfile | None, 
     config_path = config_dir / "browser-us-context.json"
     env_path = config_dir / "browser-us.env"
     launcher_path = config_dir / "browser-us-chrome.sh"
-    payload = automation_context_payload(exit_profile)
+    managed_user_data_dir = config_dir / "browser-us-profile"
+    payload = automation_context_payload(exit_profile, managed_user_data_dir)
     payload["chrome_launch"]["launcher"] = str(launcher_path)
     timezone_id = payload["environment"]["TZ"]
 
@@ -680,6 +713,7 @@ def sync_automation_context(config_dir: Path, exit_profile: ExitProfile | None, 
             shell_export_line("AGENT_MANAGER_BROWSER_US_CONTEXT", str(config_path)),
             shell_export_line("AGENT_MANAGER_BROWSER_US_CHROME_ARGS", " ".join(CHROME_ARGS)),
             shell_export_line("AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER", str(launcher_path)),
+            shell_export_line("AGENT_MANAGER_BROWSER_US_USER_DATA_DIR", str(managed_user_data_dir)),
             "",
         ]
     )
@@ -689,7 +723,7 @@ def sync_automation_context(config_dir: Path, exit_profile: ExitProfile | None, 
         write_text_atomic(env_path, env_content)
         changed_paths.append(str(env_path))
 
-    launcher_content = browser_us_launcher_content(config_path, timezone_id, platform_name)
+    launcher_content = browser_us_launcher_content(config_path, managed_user_data_dir, timezone_id, platform_name)
     previous_launcher = launcher_path.read_text(encoding="utf-8") if launcher_path.exists() else None
     launcher_mode = launcher_path.stat().st_mode & 0o777 if launcher_path.exists() else None
     if previous_launcher != launcher_content or launcher_mode != 0o755:
@@ -702,6 +736,7 @@ def sync_automation_context(config_dir: Path, exit_profile: ExitProfile | None, 
 
 def verification_report_payload(
     browser_roots: list[BrowserRoot],
+    managed_browser_root: BrowserRoot,
     explicit_profile: str | None,
     exit_profile: ExitProfile | None,
     verification_state: str,
@@ -734,6 +769,13 @@ def verification_report_payload(
                 "profile_scope": explicit_profile or "all regular profiles",
             }
             for browser_root in browser_roots
+        ]
+        + [
+            {
+                "name": managed_browser_root.name,
+                "user_data_dir": str(managed_browser_root.user_data_dir),
+                "profile_scope": "Default",
+            }
         ],
         "enforced_features": {
             "locale": {
@@ -787,6 +829,7 @@ def verification_report_payload(
                 "extra_http_accept_language": "en-US,en;q=0.9",
                 "chrome_launch_args": CHROME_ARGS,
                 "chrome_launcher": "$AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER",
+                "managed_user_data_dir": "$AGENT_MANAGER_BROWSER_US_USER_DATA_DIR",
             },
         },
         "limits": [
@@ -800,6 +843,7 @@ def verification_report_payload(
 def sync_verification_report(
     config_dir: Path,
     browser_roots: list[BrowserRoot],
+    managed_browser_root: BrowserRoot,
     explicit_profile: str | None,
     exit_profile: ExitProfile | None,
     verification_state: str,
@@ -809,6 +853,7 @@ def sync_verification_report(
     report_path = config_dir / "browser-us-verification.json"
     payload = verification_report_payload(
         browser_roots,
+        managed_browser_root,
         explicit_profile,
         exit_profile,
         verification_state,
@@ -1022,6 +1067,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def print_dry_run(args: argparse.Namespace, browser_roots: list[BrowserRoot], config_dir: Path) -> None:
     print("Would sync Google US browser state:")
+    print(f"  Agent Manager Browser US: {config_dir / 'browser-us-profile'} (Default)")
     for root in browser_roots:
         profile_label = args.profile or "all regular profiles"
         print(f"  {root.name}: {root.user_data_dir} ({profile_label})")
@@ -1191,6 +1237,7 @@ def main(argv: list[str] | None = None) -> int:
     platform_name = sys.platform
     config_dir = Path(args.config_dir).expanduser() if args.config_dir else args.home.expanduser() / ".config" / "agent-manager"
     browser_roots = resolve_browser_roots(args, platform_name)
+    managed_browser_root = BrowserRoot("Agent Manager Browser US", config_dir / "browser-us-profile")
 
     if args.dry_run:
         print_dry_run(args, browser_roots, config_dir)
@@ -1201,16 +1248,18 @@ def main(argv: list[str] | None = None) -> int:
         return exit_resolution.return_code
 
     changed_paths = []
+    changed_paths.extend(sync_managed_browser_us_profile(managed_browser_root.user_data_dir))
     changed_paths.extend(sync_browser_roots(browser_roots, args.profile))
     changed_paths.extend(sync_automation_context(config_dir, exit_resolution.exit_profile, platform_name))
     if args.post_sync_settle_seconds > 0:
         time.sleep(args.post_sync_settle_seconds)
-    browser_state_audit = audit_browser_state(browser_roots, args.profile)
+    browser_state_audit = audit_browser_state(browser_roots, args.profile, managed_browser_root)
     google_domain_resolution = resolve_google_domain(args, exit_resolution)
     changed_paths.extend(
         sync_verification_report(
             config_dir,
             browser_roots,
+            managed_browser_root,
             args.profile,
             exit_resolution.exit_profile,
             exit_resolution.verification_state,

@@ -113,6 +113,9 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             verification_report = json.loads((config_dir / "browser-us-verification.json").read_text(encoding="utf-8"))
             launcher_path = config_dir / "browser-us-chrome.sh"
             launcher_content = launcher_path.read_text(encoding="utf-8")
+            managed_profile_root = config_dir / "browser-us-profile"
+            managed_local_state = json.loads((managed_profile_root / "Local State").read_text(encoding="utf-8"))
+            managed_preferences = json.loads((managed_profile_root / "Default" / "Preferences").read_text(encoding="utf-8"))
 
             self.assertEqual(local_state["intl"]["app_locale"], "en-US")
             self.assertEqual(local_state["countryid_at_install"], 244)
@@ -143,22 +146,39 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(default_preferences["account_values"]["intl"]["accept_languages"], "en-US,en")
             self.assertEqual(default_preferences["default_search_provider"]["name"], "Google US")
             self.assertEqual(default_preferences["profile"]["content_settings"]["exceptions"]["geolocation"], {})
+            self.assertEqual(managed_local_state["intl"]["app_locale"], "en-US")
+            self.assertEqual(managed_preferences["intl"]["accept_languages"], "en-US,en")
             self.assertEqual(automation_context["browser_context"]["locale"], "en-US")
             self.assertEqual(automation_context["browser_context"]["timezone_id"], "America/Los_Angeles")
             self.assertEqual(automation_context["google"]["home_url"], "https://www.google.com/?hl=en-US&gl=US&pws=0")
             self.assertEqual(automation_context["chrome_launch"]["launcher"], str(launcher_path))
+            self.assertEqual(automation_context["chrome_launch"]["managed_user_data_dir"], str(managed_profile_root))
+            self.assertIn(f"--user-data-dir={managed_profile_root}", automation_context["chrome_launch"]["args"])
+            self.assertIn("--disable-sync", automation_context["chrome_launch"]["args"])
+            self.assertIn("--disable-extensions", automation_context["chrome_launch"]["args"])
             self.assertIn("--force-webrtc-ip-handling-policy=disable_non_proxied_udp", automation_context["chrome_launch"]["args"])
             self.assertEqual(verification_report["overall_status"], "limited")
             self.assertEqual(verification_report["exit"]["verification_state"], "manually_skipped")
             self.assertEqual(verification_report["google_domain"]["verification_state"], "exit_check_skipped")
             self.assertTrue(verification_report["browser_state_audit"]["overall_ok"])
+            self.assertIn(
+                "Agent Manager Browser US",
+                {root["name"] for root in verification_report["browser_state_audit"]["roots"]},
+            )
             self.assertEqual(verification_report["enforced_features"]["local_state_country"]["variations_country"], "us")
             self.assertEqual(verification_report["enforced_features"]["google"]["home_url"], "https://www.google.com/?hl=en-US&gl=US&pws=0")
             self.assertEqual(verification_report["enforced_features"]["google"]["search_gl"], "US")
             self.assertEqual(verification_report["enforced_features"]["automation"]["chrome_launcher"], "$AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER")
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["managed_user_data_dir"],
+                "$AGENT_MANAGER_BROWSER_US_USER_DATA_DIR",
+            )
             self.assertEqual(launcher_path.stat().st_mode & 0o777, 0o755)
             self.assertIn("export TZ=America/Los_Angeles", launcher_content)
             self.assertIn("--lang=en-US", launcher_content)
+            self.assertIn('--user-data-dir="$BROWSER_US_USER_DATA_DIR"', launcher_content)
+            self.assertIn("--disable-sync", launcher_content)
+            self.assertIn("--disable-extensions", launcher_content)
             self.assertTrue((config_dir / "browser-us.env").exists())
             self.assertTrue((chrome_root / "Local State.agent-manager-before-google-us").exists())
             self.assertTrue((profile_dir / "Preferences.agent-manager-before-google-us").exists())
@@ -208,6 +228,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(automation_context["exit_profile"]["ip"], "203.0.113.31")
             self.assertEqual(automation_context["exit_profile"]["country_code"], "US")
             self.assertEqual(automation_context["chrome_launch"]["launcher"], str(launcher_path))
+            self.assertEqual(automation_context["chrome_launch"]["managed_user_data_dir"], str(config_dir / "browser-us-profile"))
             self.assertEqual(verification_report["overall_status"], "complete")
             self.assertEqual(verification_report["exit"]["verification_state"], "verified_us")
             self.assertEqual(verification_report["google_domain"]["verification_state"], "exit_profile_json_skipped")
@@ -218,6 +239,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertIn("export TZ=America/New_York", launcher_content)
             self.assertIn("export TZ=America/New_York", env_content)
             self.assertIn("AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER", env_content)
+            self.assertIn("AGENT_MANAGER_BROWSER_US_USER_DATA_DIR", env_content)
             first_digest = self._tree_digest(root)
 
             second_result = self._run(
@@ -268,6 +290,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
     def test_dry_run_does_not_write_chrome_profile(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             chrome_root = Path(temp_dir) / "chrome"
+            config_dir = Path(temp_dir) / "config"
             profile_dir = self._write_chrome_profile(chrome_root)
             before_local_state = (chrome_root / "Local State").read_text(encoding="utf-8")
             before_preferences = (profile_dir / "Preferences").read_text(encoding="utf-8")
@@ -275,6 +298,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             result = self._run(
                 "--chrome-user-data-dir",
                 str(chrome_root),
+                "--config-dir",
+                str(config_dir),
                 "--dry-run",
                 "--no-browser-open",
                 "--skip-exit-check",
@@ -284,6 +309,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, combined)
             self.assertEqual((chrome_root / "Local State").read_text(encoding="utf-8"), before_local_state)
             self.assertEqual((profile_dir / "Preferences").read_text(encoding="utf-8"), before_preferences)
+            self.assertFalse((config_dir / "browser-us-profile").exists())
 
     def test_missing_chrome_profile_is_warning_not_failure(self):
         with tempfile.TemporaryDirectory() as temp_dir:
