@@ -6,6 +6,7 @@ import http.cookiejar
 import http.server
 import json
 import os
+import re
 import select
 import shlex
 import shutil
@@ -46,7 +47,8 @@ US_DESKTOP_HAS_TOUCH = False
 US_DESKTOP_COLOR_SCHEME = "light"
 EXIT_PROFILE_GEOLOCATION_ACCURACY = 50000
 VERIFICATION_REPORT_VERSION = 1
-CHROME_ARGS = [
+FALLBACK_CHROME_VERSION = "120.0.0.0"
+BASE_CHROME_ARGS = [
     "--lang=en-US",
     "--accept-lang=en-US,en",
     f"--window-size={US_DESKTOP_VIEWPORT['width']},{US_DESKTOP_VIEWPORT['height']}",
@@ -728,14 +730,88 @@ def audit_browser_state(
     return audit
 
 
-def automation_context_payload(exit_profile: ExitProfile | None, managed_user_data_dir: Path) -> dict:
+def chrome_executable_candidates(platform_name: str) -> list[Path]:
+    candidates = []
+    configured_chrome = clean_string(os.environ.get("AGENT_MANAGER_BROWSER_US_CHROME_BIN"))
+    if configured_chrome:
+        candidates.append(Path(configured_chrome).expanduser())
+    if platform_name == "darwin":
+        candidates.append(Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"))
+    elif platform_name.startswith("win"):
+        local_app_data = clean_string(os.environ.get("LOCALAPPDATA"))
+        if local_app_data:
+            candidates.append(Path(local_app_data) / "Google" / "Chrome" / "Application" / "chrome.exe")
+    else:
+        for executable_name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
+            executable = shutil.which(executable_name)
+            if executable:
+                candidates.append(Path(executable))
+    return candidates
+
+
+def detected_chrome_version(platform_name: str) -> str | None:
+    for executable in chrome_executable_candidates(platform_name):
+        if not executable.exists():
+            continue
+        try:
+            result = subprocess.run(
+                [str(executable), "--version"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        version_text = f"{result.stdout} {result.stderr}"
+        match = re.search(r"\b(\d+\.\d+\.\d+\.\d+)\b", version_text)
+        if match:
+            return match.group(1)
+    return None
+
+
+def desktop_user_agent_platform(platform_name: str) -> str:
+    if platform_name == "darwin":
+        return "Macintosh; Intel Mac OS X 10_15_7"
+    if platform_name.startswith("win"):
+        return "Windows NT 10.0; Win64; x64"
+    return "X11; Linux x86_64"
+
+
+def client_hints_platform(platform_name: str) -> str:
+    if platform_name == "darwin":
+        return "macOS"
+    if platform_name.startswith("win"):
+        return "Windows"
+    return "Linux"
+
+
+def resolved_us_desktop_user_agent(platform_name: str) -> str:
+    chrome_version = detected_chrome_version(platform_name) or FALLBACK_CHROME_VERSION
+    return (
+        f"Mozilla/5.0 ({desktop_user_agent_platform(platform_name)}) "
+        f"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_version} Safari/537.36"
+    )
+
+
+def browser_us_chrome_args(user_agent: str) -> list[str]:
+    return [
+        *BASE_CHROME_ARGS,
+        f"--user-agent={user_agent}",
+    ]
+
+
+def automation_context_payload(exit_profile: ExitProfile | None, managed_user_data_dir: Path, platform_name: str) -> dict:
     timezone_id = resolved_timezone_id(exit_profile)
     geolocation = resolved_geolocation(exit_profile)
+    user_agent = resolved_us_desktop_user_agent(platform_name)
     config_dir_label = "$AGENT_MANAGER_BROWSER_US_CONFIG_DIR"
     return {
         "browser_context": {
             "locale": APP_LOCALE,
             "timezone_id": timezone_id,
+            "user_agent": user_agent,
+            "client_hints_platform": client_hints_platform(platform_name),
             "geolocation": geolocation,
             "permissions": ["geolocation"],
             "extra_http_headers": {
@@ -752,7 +828,7 @@ def automation_context_payload(exit_profile: ExitProfile | None, managed_user_da
             "args": [
                 f"--user-data-dir={managed_user_data_dir}",
                 "--profile-directory=Default",
-                *CHROME_ARGS,
+                *browser_us_chrome_args(user_agent),
             ],
             "launcher": f"{config_dir_label}/browser-us-chrome.sh",
             "managed_user_data_dir": str(managed_user_data_dir),
@@ -785,8 +861,14 @@ def shell_export_line(name: str, value: str) -> str:
     return f"export {name}={shlex.quote(value)}"
 
 
-def browser_us_launcher_content(config_path: Path, managed_user_data_dir: Path, timezone_id: str, platform_name: str) -> str:
-    chrome_args = " ".join(shlex.quote(arg) for arg in CHROME_ARGS)
+def browser_us_launcher_content(
+    config_path: Path,
+    managed_user_data_dir: Path,
+    timezone_id: str,
+    user_agent: str,
+    platform_name: str,
+) -> str:
+    chrome_args = " ".join(shlex.quote(arg) for arg in browser_us_chrome_args(user_agent))
     user_data_arg = '--user-data-dir="$BROWSER_US_USER_DATA_DIR"'
     lines = [
         "#!/usr/bin/env bash",
@@ -798,7 +880,8 @@ def browser_us_launcher_content(config_path: Path, managed_user_data_dir: Path, 
         "export LANGUAGE=en_US:en",
         shell_export_line("LC_ALL", ENV_LOCALE),
         shell_export_line("AGENT_MANAGER_BROWSER_US_CONTEXT", str(config_path)),
-        shell_export_line("AGENT_MANAGER_BROWSER_US_CHROME_ARGS", " ".join(CHROME_ARGS)),
+        shell_export_line("AGENT_MANAGER_BROWSER_US_CHROME_ARGS", " ".join(browser_us_chrome_args(user_agent))),
+        shell_export_line("AGENT_MANAGER_BROWSER_US_USER_AGENT", user_agent),
         shell_export_line("AGENT_MANAGER_BROWSER_US_DEFAULT_USER_DATA_DIR", str(managed_user_data_dir)),
         shell_export_line("AGENT_MANAGER_BROWSER_US_DEFAULT_URL", NCR_URL),
         'export AGENT_MANAGER_BROWSER_US_USER_DATA_DIR="${AGENT_MANAGER_BROWSER_US_USER_DATA_DIR:-$AGENT_MANAGER_BROWSER_US_DEFAULT_USER_DATA_DIR}"',
@@ -854,9 +937,10 @@ def sync_automation_context(config_dir: Path, exit_profile: ExitProfile | None, 
     env_path = config_dir / "browser-us.env"
     launcher_path = config_dir / "browser-us-chrome.sh"
     managed_user_data_dir = config_dir / "browser-us-profile"
-    payload = automation_context_payload(exit_profile, managed_user_data_dir)
+    payload = automation_context_payload(exit_profile, managed_user_data_dir, platform_name)
     payload["chrome_launch"]["launcher"] = str(launcher_path)
     timezone_id = payload["environment"]["TZ"]
+    user_agent = payload["browser_context"]["user_agent"]
 
     changed_paths = []
     previous_payload = load_json_mapping(config_path) if config_path.exists() else None
@@ -873,9 +957,10 @@ def sync_automation_context(config_dir: Path, exit_profile: ExitProfile | None, 
             "export LANGUAGE=en_US:en",
             shell_export_line("LC_ALL", ENV_LOCALE),
             shell_export_line("AGENT_MANAGER_BROWSER_US_CONTEXT", str(config_path)),
-            shell_export_line("AGENT_MANAGER_BROWSER_US_CHROME_ARGS", " ".join(CHROME_ARGS)),
+            shell_export_line("AGENT_MANAGER_BROWSER_US_CHROME_ARGS", " ".join(browser_us_chrome_args(user_agent))),
             shell_export_line("AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER", str(launcher_path)),
             shell_export_line("AGENT_MANAGER_BROWSER_US_USER_DATA_DIR", str(managed_user_data_dir)),
+            shell_export_line("AGENT_MANAGER_BROWSER_US_USER_AGENT", user_agent),
             shell_export_line("AGENT_MANAGER_BROWSER_US_DEFAULT_URL", NCR_URL),
             "",
         ]
@@ -886,7 +971,7 @@ def sync_automation_context(config_dir: Path, exit_profile: ExitProfile | None, 
         write_text_atomic(env_path, env_content)
         changed_paths.append(str(env_path))
 
-    launcher_content = browser_us_launcher_content(config_path, managed_user_data_dir, timezone_id, platform_name)
+    launcher_content = browser_us_launcher_content(config_path, managed_user_data_dir, timezone_id, user_agent, platform_name)
     previous_launcher = launcher_path.read_text(encoding="utf-8") if launcher_path.exists() else None
     launcher_mode = launcher_path.stat().st_mode & 0o777 if launcher_path.exists() else None
     if previous_launcher != launcher_content or launcher_mode != 0o755:
@@ -902,6 +987,7 @@ def verification_report_payload(
     managed_browser_root: BrowserRoot,
     explicit_profile: str | None,
     exit_profile: ExitProfile | None,
+    platform_name: str,
     verification_state: str,
     google_domain_resolution: GoogleDomainResolution,
     browser_google_resolution: BrowserGoogleResolution,
@@ -911,6 +997,8 @@ def verification_report_payload(
 ) -> dict:
     timezone_id = resolved_timezone_id(exit_profile)
     geolocation = resolved_geolocation(exit_profile)
+    user_agent = resolved_us_desktop_user_agent(platform_name)
+    expected_client_hints_platform = client_hints_platform(platform_name)
     state_ok = browser_state_audit.get("overall_ok") is True
     google_domain_ok = google_domain_resolution.return_code == 0
     browser_google_ok = browser_google_resolution.return_code == 0
@@ -1038,13 +1126,15 @@ def verification_report_payload(
                 "runtime_profile_webrtc_policy": "disable_non_proxied_udp",
                 "runtime_profile_geolocation_setting": BLOCK_CONTENT_SETTING,
                 "extra_http_accept_language": "en-US,en;q=0.9",
+                "user_agent": user_agent,
+                "client_hints_platform": expected_client_hints_platform,
                 "desktop_viewport": dict(US_DESKTOP_VIEWPORT),
                 "desktop_screen": dict(US_DESKTOP_SCREEN),
                 "desktop_device_scale_factor": US_DESKTOP_DEVICE_SCALE_FACTOR,
                 "desktop_is_mobile": US_DESKTOP_IS_MOBILE,
                 "desktop_has_touch": US_DESKTOP_HAS_TOUCH,
                 "desktop_color_scheme": US_DESKTOP_COLOR_SCHEME,
-                "chrome_launch_args": CHROME_ARGS,
+                "chrome_launch_args": browser_us_chrome_args(user_agent),
                 "chrome_launcher": "$AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER",
                 "managed_user_data_dir": "$AGENT_MANAGER_BROWSER_US_USER_DATA_DIR",
                 "default_url": NCR_URL,
@@ -1064,6 +1154,7 @@ def sync_verification_report(
     managed_browser_root: BrowserRoot,
     explicit_profile: str | None,
     exit_profile: ExitProfile | None,
+    platform_name: str,
     verification_state: str,
     google_domain_resolution: GoogleDomainResolution,
     browser_google_resolution: BrowserGoogleResolution,
@@ -1077,6 +1168,7 @@ def sync_verification_report(
         managed_browser_root,
         explicit_profile,
         exit_profile,
+        platform_name,
         verification_state,
         google_domain_resolution,
         browser_google_resolution,
@@ -1186,6 +1278,9 @@ def runtime_probe_html() -> str:
         "<script>"
         "(async()=>{"
         "const observed={"
+        "userAgent:navigator.userAgent,"
+        "userAgentDataMobile:navigator.userAgentData?navigator.userAgentData.mobile:null,"
+        "userAgentDataPlatform:navigator.userAgentData?navigator.userAgentData.platform:null,"
         "language:navigator.language,"
         "languages:Array.from(navigator.languages||[]),"
         "timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,"
@@ -1257,6 +1352,9 @@ def runtime_probe_html() -> str:
 class RuntimeProbeHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         self.server.observed_headers["accept-language"] = self.headers.get("Accept-Language")
+        self.server.observed_headers["user-agent"] = self.headers.get("User-Agent")
+        self.server.observed_headers["sec-ch-ua-platform"] = self.headers.get("Sec-CH-UA-Platform")
+        self.server.observed_headers["sec-ch-ua-mobile"] = self.headers.get("Sec-CH-UA-Mobile")
         body = runtime_probe_html().encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -1291,8 +1389,28 @@ def runtime_context_from_output(output: str) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
-def validate_runtime_context(runtime_context: dict, timezone_id: str) -> tuple[str, ...]:
+def validate_runtime_context(
+    runtime_context: dict,
+    timezone_id: str,
+    user_agent: str,
+    expected_client_hints_platform: str,
+) -> tuple[str, ...]:
     mismatches = []
+    if runtime_context.get("userAgent") != user_agent:
+        mismatches.append("navigator.userAgent")
+    if runtime_context.get("userAgentHeader") != user_agent:
+        mismatches.append("User-Agent header")
+    if runtime_context.get("userAgentDataMobile") not in (False, None):
+        mismatches.append("runtime user agent mobile")
+    user_agent_data_platform = runtime_context.get("userAgentDataPlatform")
+    if user_agent_data_platform is not None and user_agent_data_platform != expected_client_hints_platform:
+        mismatches.append("runtime user agent platform")
+    sec_ch_ua_platform = runtime_context.get("secChUaPlatform")
+    if sec_ch_ua_platform is not None and sec_ch_ua_platform.strip('"') != expected_client_hints_platform:
+        mismatches.append("Sec-CH-UA-Platform")
+    sec_ch_ua_mobile = runtime_context.get("secChUaMobile")
+    if sec_ch_ua_mobile is not None and sec_ch_ua_mobile != "?0":
+        mismatches.append("Sec-CH-UA-Mobile")
     if runtime_context.get("language") != APP_LOCALE:
         mismatches.append("navigator.language")
     if runtime_context.get("languages") != ["en-US", "en"]:
@@ -1429,7 +1547,13 @@ def collect_runtime_stdout(process: subprocess.Popen, timeout: float) -> tuple[s
             chunks.append(chunk)
 
 
-def verify_runtime_browser_context(launcher_path: Path, timezone_id: str, timeout: float) -> RuntimeResolution:
+def verify_runtime_browser_context(
+    launcher_path: Path,
+    timezone_id: str,
+    user_agent: str,
+    expected_client_hints_platform: str,
+    timeout: float,
+) -> RuntimeResolution:
     if timeout <= 0:
         return RuntimeResolution(5, "invalid_timeout", errors=("runtime timeout must be positive",))
     if not launcher_path.exists() or not os.access(launcher_path, os.X_OK):
@@ -1482,9 +1606,12 @@ def verify_runtime_browser_context(launcher_path: Path, timezone_id: str, timeou
             errors=(f"runtime output marker missing; process_state={process_state}",),
         )
     runtime_context["acceptLanguageHeader"] = server.observed_headers.get("accept-language")
+    runtime_context["userAgentHeader"] = server.observed_headers.get("user-agent")
+    runtime_context["secChUaPlatform"] = server.observed_headers.get("sec-ch-ua-platform")
+    runtime_context["secChUaMobile"] = server.observed_headers.get("sec-ch-ua-mobile")
     runtime_context.update(profile_policy)
 
-    mismatches = validate_runtime_context(runtime_context, timezone_id)
+    mismatches = validate_runtime_context(runtime_context, timezone_id, user_agent, expected_client_hints_platform)
     if mismatches:
         return RuntimeResolution(
             5,
@@ -1510,6 +1637,15 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
     observed_geolocation = observed.get("geolocation") if isinstance(observed.get("geolocation"), dict) else None
     expected_viewport = browser_context.get("viewport") if isinstance(browser_context.get("viewport"), dict) else None
     expected_screen = browser_context.get("screen") if isinstance(browser_context.get("screen"), dict) else None
+    expected_user_agent = browser_context.get("user_agent")
+    expected_client_hints_platform = browser_context.get("client_hints_platform")
+    if observed.get("userAgent") != expected_user_agent:
+        mismatches.append("automation navigator.userAgent")
+    if observed.get("userAgentHeader") != expected_user_agent:
+        mismatches.append("automation User-Agent header")
+    user_agent_data_platform = observed.get("userAgentDataPlatform")
+    if user_agent_data_platform is not None and user_agent_data_platform != expected_client_hints_platform:
+        mismatches.append("automation user agent platform")
     if observed.get("language") != APP_LOCALE:
         mismatches.append("automation navigator.language")
     languages = observed.get("languages")
@@ -1569,9 +1705,9 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
     return tuple(mismatches)
 
 
-def playwright_chrome_launch_options(platform_name: str) -> dict:
+def playwright_chrome_launch_options(platform_name: str, user_agent: str) -> dict:
     launch_args = [
-        *CHROME_ARGS,
+        *browser_us_chrome_args(user_agent),
         "--disable-gpu",
         "--disable-background-networking",
     ]
@@ -1607,13 +1743,16 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
     browser_context = context_payload.get("browser_context")
     if not isinstance(browser_context, dict):
         return AutomationContextResolution(6, "context_invalid_failed", errors=("browser_context must be an object",))
+    user_agent = browser_context.get("user_agent")
+    if not isinstance(user_agent, str) or not user_agent:
+        return AutomationContextResolution(6, "context_invalid_failed", errors=("browser_context.user_agent must be a string",))
 
     server, thread, runtime_url = start_runtime_probe_server()
     try:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(
                 timeout=max(1000, int(timeout * 1000)),
-                **playwright_chrome_launch_options(platform_name),
+                **playwright_chrome_launch_options(platform_name, user_agent),
             )
             try:
                 context = new_us_playwright_context(browser, browser_context)
@@ -1629,12 +1768,15 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                                 latitude: pos.coords.latitude,
                                 longitude: pos.coords.longitude,
                                 accuracy: pos.coords.accuracy,
-                              }),
+                            }),
                               (error) => resolve({error: error.code + ':' + error.message}),
                               {maximumAge: 0, timeout: 5000}
                             );
                           });
                           return {
+                            userAgent: navigator.userAgent,
+                            userAgentDataMobile: navigator.userAgentData ? navigator.userAgentData.mobile : null,
+                            userAgentDataPlatform: navigator.userAgentData ? navigator.userAgentData.platform : null,
                             language: navigator.language,
                             languages: Array.from(navigator.languages || []),
                             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -1654,7 +1796,6 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             coarsePointer: window.matchMedia('(pointer: coarse)').matches,
                             lightColorScheme: window.matchMedia('(prefers-color-scheme: light)').matches,
                             darkColorScheme: window.matchMedia('(prefers-color-scheme: dark)').matches,
-                            userAgentDataMobile: navigator.userAgentData ? navigator.userAgentData.mobile : null,
                             geolocation: position,
                           };
                         }
@@ -1674,6 +1815,7 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
     if not isinstance(observed, dict):
         return AutomationContextResolution(6, "automation_context_output_missing", process_state="output_missing")
     observed["acceptLanguageHeader"] = server.observed_headers.get("accept-language")
+    observed["userAgentHeader"] = server.observed_headers.get("user-agent")
     mismatches = validate_automation_context_observation(observed, browser_context)
     if mismatches:
         return AutomationContextResolution(
@@ -1704,6 +1846,7 @@ def new_us_playwright_context(browser, browser_context: dict):
         geolocation=browser_context.get("geolocation"),
         permissions=browser_context.get("permissions") or [],
         extra_http_headers=browser_context.get("extra_http_headers") or {},
+        user_agent=browser_context.get("user_agent"),
         viewport=browser_context.get("viewport"),
         screen=browser_context.get("screen"),
         device_scale_factor=browser_context.get("device_scale_factor"),
@@ -1736,11 +1879,14 @@ def verify_google_domain_with_browser_context(
 
     browser = None
     context = None
+    user_agent = browser_context.get("user_agent")
+    if not isinstance(user_agent, str) or not user_agent:
+        return BrowserGoogleResolution(7, "context_invalid_failed", errors=("browser_context.user_agent must be a string",))
     try:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(
                 timeout=max(1000, int(timeout * 1000)),
-                **playwright_chrome_launch_options(platform_name),
+                **playwright_chrome_launch_options(platform_name, user_agent),
             )
             try:
                 context = new_us_playwright_context(browser, browser_context)
@@ -2188,7 +2334,12 @@ def resolve_browser_google(
     return browser_google_resolution
 
 
-def resolve_runtime_context(args: argparse.Namespace, config_dir: Path, exit_resolution: ExitResolution) -> RuntimeResolution:
+def resolve_runtime_context(
+    args: argparse.Namespace,
+    config_dir: Path,
+    exit_resolution: ExitResolution,
+    platform_name: str,
+) -> RuntimeResolution:
     if args.offline:
         return RuntimeResolution(0, "offline_skipped")
     if args.skip_exit_check:
@@ -2200,15 +2351,21 @@ def resolve_runtime_context(args: argparse.Namespace, config_dir: Path, exit_res
     if exit_resolution.verification_state != "verified_us":
         return RuntimeResolution(0, "exit_not_verified_us_skipped")
 
+    user_agent = resolved_us_desktop_user_agent(platform_name)
+    expected_client_hints_platform = client_hints_platform(platform_name)
     runtime_resolution = verify_runtime_browser_context(
         config_dir / "browser-us-chrome.sh",
         resolved_timezone_id(exit_resolution.exit_profile),
+        user_agent,
+        expected_client_hints_platform,
         args.runtime_check_timeout,
     )
     if runtime_resolution.verification_state == "runtime_output_missing":
         runtime_resolution = verify_runtime_browser_context(
             config_dir / "browser-us-chrome.sh",
             resolved_timezone_id(exit_resolution.exit_profile),
+            user_agent,
+            expected_client_hints_platform,
             args.runtime_check_timeout,
         )
     if runtime_resolution.return_code == 0:
@@ -2218,6 +2375,7 @@ def resolve_runtime_context(args: argparse.Namespace, config_dir: Path, exit_res
             f"language: {observed.get('language')}, "
             f"languages: {observed.get('languages')}, "
             f"timezone: {observed.get('timezone')}, "
+            f"User-Agent: {observed.get('userAgent')}, "
             f"Accept-Language: {observed.get('acceptLanguageHeader')}, "
             f"geolocation permission: {observed.get('geolocationPermission')}, "
             f"WebRTC local IP leak: {observed.get('webrtcLocalIpLeak')}"
@@ -2334,7 +2492,7 @@ def main(argv: list[str] | None = None) -> int:
     if google_domain_resolution.return_code == 0:
         browser_google_resolution = resolve_browser_google(args, config_dir, exit_resolution, platform_name)
         if browser_google_resolution.return_code == 0:
-            runtime_resolution = resolve_runtime_context(args, config_dir, exit_resolution)
+            runtime_resolution = resolve_runtime_context(args, config_dir, exit_resolution, platform_name)
         else:
             runtime_resolution = RuntimeResolution(0, "browser_google_failed_skipped")
         if browser_google_resolution.return_code == 0 and runtime_resolution.return_code == 0:
@@ -2354,6 +2512,7 @@ def main(argv: list[str] | None = None) -> int:
             managed_browser_root,
             args.profile,
             exit_resolution.exit_profile,
+            platform_name,
             exit_resolution.verification_state,
             google_domain_resolution,
             browser_google_resolution,

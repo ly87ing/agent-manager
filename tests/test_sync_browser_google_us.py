@@ -192,6 +192,9 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertFalse(any(path.exists() or path.is_symlink() for path in volatile_state_paths))
             self.assertEqual(automation_context["browser_context"]["locale"], "en-US")
             self.assertEqual(automation_context["browser_context"]["timezone_id"], "America/Los_Angeles")
+            self.assertIn("Chrome/", automation_context["browser_context"]["user_agent"])
+            self.assertIn("Safari/537.36", automation_context["browser_context"]["user_agent"])
+            self.assertEqual(automation_context["browser_context"]["client_hints_platform"], "macOS")
             self.assertEqual(automation_context["browser_context"]["viewport"], {"width": 1365, "height": 768})
             self.assertEqual(automation_context["browser_context"]["screen"], {"width": 1365, "height": 768})
             self.assertEqual(automation_context["browser_context"]["device_scale_factor"], 1)
@@ -204,6 +207,9 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertIn(f"--user-data-dir={managed_profile_root}", automation_context["chrome_launch"]["args"])
             self.assertIn("--window-size=1365,768", automation_context["chrome_launch"]["args"])
             self.assertIn("--force-device-scale-factor=1", automation_context["chrome_launch"]["args"])
+            self.assertTrue(
+                any(arg.startswith("--user-agent=Mozilla/5.0") for arg in automation_context["chrome_launch"]["args"])
+            )
             self.assertIn("--disable-sync", automation_context["chrome_launch"]["args"])
             self.assertIn("--disable-extensions", automation_context["chrome_launch"]["args"])
             self.assertIn("--force-webrtc-ip-handling-policy=disable_non_proxied_udp", automation_context["chrome_launch"]["args"])
@@ -265,6 +271,11 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_webrtc_local_ip_leak"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_profile_webrtc_policy"], "disable_non_proxied_udp")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_profile_geolocation_setting"], 2)
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["user_agent"],
+                automation_context["browser_context"]["user_agent"],
+            )
+            self.assertEqual(verification_report["enforced_features"]["automation"]["client_hints_platform"], "macOS")
             self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_viewport"], {"width": 1365, "height": 768})
             self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_screen"], {"width": 1365, "height": 768})
             self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_device_scale_factor"], 1)
@@ -284,6 +295,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertIn("--lang=en-US", launcher_content)
             self.assertIn("--window-size=1365,768", launcher_content)
             self.assertIn("--force-device-scale-factor=1", launcher_content)
+            self.assertIn("--user-agent=", launcher_content)
+            self.assertIn("AGENT_MANAGER_BROWSER_US_USER_AGENT", launcher_content)
             self.assertIn('--user-data-dir="$BROWSER_US_USER_DATA_DIR"', launcher_content)
             self.assertIn("--disable-sync", launcher_content)
             self.assertIn("--disable-extensions", launcher_content)
@@ -612,11 +625,21 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["google_domain"]["hk_markers"], ["google.com.hk"])
 
     def test_runtime_context_parser_extracts_us_runtime_payload(self):
+        runtime_user_agent = (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
         payload = (
             "<html><head><script>document.write('AGENT_MANAGER_RUNTIME_JSON:'"
             "+JSON.stringify({language:navigator.language}));</script></head>"
             "<body>AGENT_MANAGER_RUNTIME_JSON:"
-            '{"language":"en-US","languages":["en-US","en"],'
+            '{"userAgent":"'
+            + runtime_user_agent
+            + '","userAgentHeader":"'
+            + runtime_user_agent
+            + '","userAgentDataMobile":false,"userAgentDataPlatform":"macOS",'
+            '"secChUaPlatform":"\\"macOS\\"","secChUaMobile":"?0",'
+            '"language":"en-US","languages":["en-US","en"],'
             '"timezone":"America/Los_Angeles","intlLocale":"en-US",'
             '"intlCalendar":"gregory","intlNumberingSystem":"latn","intlHourCycle":"h12",'
             '"collatorLocale":"en-US","pluralRulesLocale":"en-US","relativeTimeFormatLocale":"en-US",'
@@ -644,8 +667,12 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         finally:
             sys.modules.pop(spec.name, None)
         runtime_context = module.runtime_context_from_output(payload)
-        mismatches = module.validate_runtime_context(runtime_context, "America/Los_Angeles")
+        mismatches = module.validate_runtime_context(runtime_context, "America/Los_Angeles", runtime_user_agent, "macOS")
 
+        self.assertEqual(runtime_context["userAgent"], runtime_user_agent)
+        self.assertEqual(runtime_context["userAgentHeader"], runtime_user_agent)
+        self.assertFalse(runtime_context["userAgentDataMobile"])
+        self.assertEqual(runtime_context["userAgentDataPlatform"], "macOS")
         self.assertEqual(runtime_context["language"], "en-US")
         self.assertEqual(runtime_context["languages"], ["en-US", "en"])
         self.assertEqual(runtime_context["timezone"], "America/Los_Angeles")
@@ -687,6 +714,11 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         browser_context = {
             "locale": "en-US",
             "timezone_id": "America/Los_Angeles",
+            "user_agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "client_hints_platform": "macOS",
             "geolocation": {"latitude": 34.0522, "longitude": -118.2437, "accuracy": 50000},
             "viewport": {"width": 1365, "height": 768},
             "screen": {"width": 1365, "height": 768},
@@ -696,6 +728,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "color_scheme": "light",
         }
         observed = {
+            "userAgent": browser_context["user_agent"],
+            "userAgentHeader": browser_context["user_agent"],
+            "userAgentDataMobile": False,
+            "userAgentDataPlatform": "macOS",
             "language": "en-US",
             "languages": ["en-US"],
             "timezone": "America/Los_Angeles",
@@ -716,7 +752,6 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "coarsePointer": False,
             "lightColorScheme": True,
             "darkColorScheme": False,
-            "userAgentDataMobile": False,
             "geolocation": {"latitude": 34.0522, "longitude": -118.2437, "accuracy": 50000},
         }
 
