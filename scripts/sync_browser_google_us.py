@@ -63,6 +63,7 @@ BASE_CHROME_ARGS = [
     "--disable-search-engine-choice-screen",
     "--disable-sync",
     "--disable-extensions",
+    "--deny-permission-prompts",
     f"--disable-features={','.join(DISABLED_CHROME_FEATURES)}",
     "--disable-blink-features=AutomationControlled",
 ]
@@ -1221,6 +1222,7 @@ def verification_report_payload(
                 "managed_profile_camera_exceptions": {},
                 "managed_profile_microphone_exceptions": {},
                 "managed_profile_notifications_exceptions": {},
+                "permission_prompts": "denied_by_chrome_launch_arg",
                 "regular_profile_policy": "not forced; active Chrome may recreate device permission defaults or site exceptions",
             },
             "automation": {
