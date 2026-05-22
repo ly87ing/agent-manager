@@ -676,9 +676,13 @@ def browser_us_launcher_content(config_path: Path, managed_user_data_dir: Path, 
         shell_export_line("AGENT_MANAGER_BROWSER_US_CONTEXT", str(config_path)),
         shell_export_line("AGENT_MANAGER_BROWSER_US_CHROME_ARGS", " ".join(CHROME_ARGS)),
         shell_export_line("AGENT_MANAGER_BROWSER_US_DEFAULT_USER_DATA_DIR", str(managed_user_data_dir)),
+        shell_export_line("AGENT_MANAGER_BROWSER_US_DEFAULT_URL", NCR_URL),
         'export AGENT_MANAGER_BROWSER_US_USER_DATA_DIR="${AGENT_MANAGER_BROWSER_US_USER_DATA_DIR:-$AGENT_MANAGER_BROWSER_US_DEFAULT_USER_DATA_DIR}"',
         'BROWSER_US_USER_DATA_DIR="${AGENT_MANAGER_BROWSER_US_USER_DATA_DIR}"',
         'mkdir -p "$BROWSER_US_USER_DATA_DIR"',
+        'if [ "$#" -eq 0 ]; then',
+        '  set -- "$AGENT_MANAGER_BROWSER_US_DEFAULT_URL"',
+        "fi",
         "",
     ]
     if platform_name == "darwin":
@@ -748,6 +752,7 @@ def sync_automation_context(config_dir: Path, exit_profile: ExitProfile | None, 
             shell_export_line("AGENT_MANAGER_BROWSER_US_CHROME_ARGS", " ".join(CHROME_ARGS)),
             shell_export_line("AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER", str(launcher_path)),
             shell_export_line("AGENT_MANAGER_BROWSER_US_USER_DATA_DIR", str(managed_user_data_dir)),
+            shell_export_line("AGENT_MANAGER_BROWSER_US_DEFAULT_URL", NCR_URL),
             "",
         ]
     )
@@ -875,6 +880,7 @@ def verification_report_payload(
                 "chrome_launch_args": CHROME_ARGS,
                 "chrome_launcher": "$AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER",
                 "managed_user_data_dir": "$AGENT_MANAGER_BROWSER_US_USER_DATA_DIR",
+                "default_url": NCR_URL,
             },
         },
         "limits": [

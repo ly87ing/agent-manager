@@ -173,6 +173,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["google"]["home_url"], "https://www.google.com/?hl=en-US&gl=US&pws=0")
             self.assertEqual(verification_report["enforced_features"]["google"]["search_gl"], "US")
             self.assertEqual(verification_report["enforced_features"]["automation"]["chrome_launcher"], "$AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["default_url"], "https://www.google.com/ncr")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_language"], "en-US")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_languages"], ["en-US", "en"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_locale"], "en-US")
@@ -186,6 +187,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             )
             self.assertEqual(launcher_path.stat().st_mode & 0o777, 0o755)
             self.assertIn("export TZ=America/Los_Angeles", launcher_content)
+            self.assertIn("AGENT_MANAGER_BROWSER_US_DEFAULT_URL=https://www.google.com/ncr", launcher_content)
+            self.assertIn('if [ "$#" -eq 0 ]; then', launcher_content)
             self.assertIn("--lang=en-US", launcher_content)
             self.assertIn('--user-data-dir="$BROWSER_US_USER_DATA_DIR"', launcher_content)
             self.assertIn("--disable-sync", launcher_content)
@@ -252,6 +255,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertIn("export TZ=America/New_York", env_content)
             self.assertIn("AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER", env_content)
             self.assertIn("AGENT_MANAGER_BROWSER_US_USER_DATA_DIR", env_content)
+            self.assertIn("AGENT_MANAGER_BROWSER_US_DEFAULT_URL", env_content)
             first_digest = self._tree_digest(root)
 
             second_result = self._run(
