@@ -43,6 +43,9 @@ DEFAULT_GEOLOCATION = {
 }
 US_DESKTOP_VIEWPORT = {"width": 1365, "height": 768}
 US_DESKTOP_SCREEN = {"width": 1365, "height": 768}
+US_DESKTOP_SCREEN_COLOR_DEPTH = 24
+US_DESKTOP_SCREEN_ORIENTATION_TYPE = "landscape-primary"
+US_DESKTOP_SCREEN_ORIENTATION_ANGLE = 0
 US_DESKTOP_DEVICE_SCALE_FACTOR = 1
 US_DESKTOP_IS_MOBILE = False
 US_DESKTOP_HAS_TOUCH = False
@@ -1374,6 +1377,13 @@ def verification_report_payload(
                 "automation_navigator_app_version": navigator_app_version_from_user_agent(user_agent),
                 "desktop_viewport": dict(US_DESKTOP_VIEWPORT),
                 "desktop_screen": dict(US_DESKTOP_SCREEN),
+                "desktop_screen_avail": dict(US_DESKTOP_SCREEN),
+                "desktop_screen_color_depth": US_DESKTOP_SCREEN_COLOR_DEPTH,
+                "desktop_screen_pixel_depth": US_DESKTOP_SCREEN_COLOR_DEPTH,
+                "desktop_screen_orientation_type": US_DESKTOP_SCREEN_ORIENTATION_TYPE,
+                "desktop_screen_orientation_angle": US_DESKTOP_SCREEN_ORIENTATION_ANGLE,
+                "desktop_visual_viewport": dict(US_DESKTOP_VIEWPORT),
+                "desktop_visual_viewport_scale": 1,
                 "desktop_device_scale_factor": US_DESKTOP_DEVICE_SCALE_FACTOR,
                 "desktop_is_mobile": US_DESKTOP_IS_MOBILE,
                 "desktop_has_touch": US_DESKTOP_HAS_TOUCH,
@@ -2263,6 +2273,27 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
             mismatches.append("automation screen width")
         if observed.get("screenHeight") != expected_screen.get("height"):
             mismatches.append("automation screen height")
+        if observed.get("availWidth") != expected_screen.get("width"):
+            mismatches.append("automation screen available width")
+        if observed.get("availHeight") != expected_screen.get("height"):
+            mismatches.append("automation screen available height")
+    if observed.get("screenColorDepth") != US_DESKTOP_SCREEN_COLOR_DEPTH:
+        mismatches.append("automation screen color depth")
+    if observed.get("screenPixelDepth") != US_DESKTOP_SCREEN_COLOR_DEPTH:
+        mismatches.append("automation screen pixel depth")
+    if observed.get("screenOrientationType") != US_DESKTOP_SCREEN_ORIENTATION_TYPE:
+        mismatches.append("automation screen orientation type")
+    if observed.get("screenOrientationAngle") != US_DESKTOP_SCREEN_ORIENTATION_ANGLE:
+        mismatches.append("automation screen orientation angle")
+    if observed.get("screenIsExtended") is not False:
+        mismatches.append("automation extended screen")
+    if isinstance(expected_viewport, dict):
+        if observed.get("visualViewportWidth") != expected_viewport.get("width"):
+            mismatches.append("automation visual viewport width")
+        if observed.get("visualViewportHeight") != expected_viewport.get("height"):
+            mismatches.append("automation visual viewport height")
+    if observed.get("visualViewportScale") != 1:
+        mismatches.append("automation visual viewport scale")
     if observed.get("devicePixelRatio") != browser_context.get("device_scale_factor"):
         mismatches.append("automation device scale factor")
     if observed.get("maxTouchPoints") != 0:
@@ -2491,6 +2522,16 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             innerHeight: window.innerHeight,
                             screenWidth: window.screen.width,
                             screenHeight: window.screen.height,
+                            availWidth: window.screen.availWidth,
+                            availHeight: window.screen.availHeight,
+                            screenColorDepth: window.screen.colorDepth,
+                            screenPixelDepth: window.screen.pixelDepth,
+                            screenOrientationType: window.screen.orientation ? window.screen.orientation.type : null,
+                            screenOrientationAngle: window.screen.orientation ? window.screen.orientation.angle : null,
+                            screenIsExtended: window.screen.isExtended,
+                            visualViewportWidth: window.visualViewport ? window.visualViewport.width : null,
+                            visualViewportHeight: window.visualViewport ? window.visualViewport.height : null,
+                            visualViewportScale: window.visualViewport ? window.visualViewport.scale : null,
                             devicePixelRatio: window.devicePixelRatio,
                             maxTouchPoints: navigator.maxTouchPoints,
                             coarsePointer: window.matchMedia('(pointer: coarse)').matches,

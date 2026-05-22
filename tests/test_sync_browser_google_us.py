@@ -491,6 +491,19 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             )
             self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_viewport"], {"width": 1365, "height": 768})
             self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_screen"], {"width": 1365, "height": 768})
+            self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_screen_avail"], {"width": 1365, "height": 768})
+            self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_screen_color_depth"], 24)
+            self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_screen_pixel_depth"], 24)
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["desktop_screen_orientation_type"],
+                "landscape-primary",
+            )
+            self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_screen_orientation_angle"], 0)
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["desktop_visual_viewport"],
+                {"width": 1365, "height": 768},
+            )
+            self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_visual_viewport_scale"], 1)
             self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_device_scale_factor"], 1)
             self.assertFalse(verification_report["enforced_features"]["automation"]["desktop_is_mobile"])
             self.assertFalse(verification_report["enforced_features"]["automation"]["desktop_has_touch"])
@@ -1156,6 +1169,16 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "innerHeight": 768,
             "screenWidth": 1365,
             "screenHeight": 768,
+            "availWidth": 1365,
+            "availHeight": 768,
+            "screenColorDepth": 24,
+            "screenPixelDepth": 24,
+            "screenOrientationType": "landscape-primary",
+            "screenOrientationAngle": 0,
+            "screenIsExtended": False,
+            "visualViewportWidth": 1365,
+            "visualViewportHeight": 768,
+            "visualViewportScale": 1,
             "devicePixelRatio": 1,
             "maxTouchPoints": 0,
             "coarsePointer": False,
@@ -1302,6 +1325,15 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         observed["localeWeekInfo"] = {"firstDay": 7, "weekend": [6, 7]}
         observed["localeTimeZones"] = ["America/Los_Angeles", "America/New_York"]
         observed["innerWidth"] = 390
+        observed["availWidth"] = 390
+        observed["screenColorDepth"] = 30
+        observed["screenPixelDepth"] = 30
+        observed["screenOrientationType"] = "portrait-primary"
+        observed["screenOrientationAngle"] = 90
+        observed["screenIsExtended"] = True
+        observed["visualViewportWidth"] = 390
+        observed["visualViewportHeight"] = 700
+        observed["visualViewportScale"] = 2
         observed["maxTouchPoints"] = 5
         observed["coarsePointer"] = True
         observed["finePointer"] = False
@@ -1339,6 +1371,15 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         mismatches = module.validate_automation_context_observation(observed, browser_context)
 
         self.assertIn("automation viewport width", mismatches)
+        self.assertIn("automation screen available width", mismatches)
+        self.assertIn("automation screen color depth", mismatches)
+        self.assertIn("automation screen pixel depth", mismatches)
+        self.assertIn("automation screen orientation type", mismatches)
+        self.assertIn("automation screen orientation angle", mismatches)
+        self.assertIn("automation extended screen", mismatches)
+        self.assertIn("automation visual viewport width", mismatches)
+        self.assertIn("automation visual viewport height", mismatches)
+        self.assertIn("automation visual viewport scale", mismatches)
         self.assertIn("automation touch points", mismatches)
         self.assertIn("automation coarse pointer", mismatches)
         self.assertIn("automation fine pointer", mismatches)
@@ -1377,6 +1418,15 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertIn("automation media device identity", mismatches)
 
         observed["innerWidth"] = 1365
+        observed["availWidth"] = 1365
+        observed["screenColorDepth"] = 24
+        observed["screenPixelDepth"] = 24
+        observed["screenOrientationType"] = "landscape-primary"
+        observed["screenOrientationAngle"] = 0
+        observed["screenIsExtended"] = False
+        observed["visualViewportWidth"] = 1365
+        observed["visualViewportHeight"] = 768
+        observed["visualViewportScale"] = 1
         observed["maxTouchPoints"] = 0
         observed["coarsePointer"] = False
         observed["finePointer"] = True
