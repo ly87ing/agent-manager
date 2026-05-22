@@ -933,9 +933,15 @@ def verification_report_payload(
                 "runtime_intl_calendar": "gregory",
                 "runtime_intl_numbering_system": "latn",
                 "runtime_intl_hour_cycle": "h12",
+                "runtime_collator_locale": APP_LOCALE,
+                "runtime_plural_rules_locale": APP_LOCALE,
+                "runtime_relative_time_format_locale": APP_LOCALE,
                 "runtime_intl_locale_region": "US",
                 "runtime_navigator_language_region": "US",
                 "runtime_number_format": "1,234,567.89",
+                "runtime_currency_format": "$1,234.56",
+                "runtime_date_format": "5/22/26",
+                "runtime_region_display_name": "United States",
                 "runtime_list_format": "A, B, and C",
                 "runtime_accept_language_header": "en-US,en;q=0.9",
                 "runtime_geolocation_permission": "denied",
@@ -1093,9 +1099,15 @@ def runtime_probe_html() -> str:
         "intlCalendar:Intl.DateTimeFormat().resolvedOptions().calendar,"
         "intlNumberingSystem:Intl.DateTimeFormat().resolvedOptions().numberingSystem,"
         "intlHourCycle:Intl.DateTimeFormat(undefined,{hour:'numeric'}).resolvedOptions().hourCycle,"
+        "collatorLocale:Intl.Collator().resolvedOptions().locale,"
+        "pluralRulesLocale:new Intl.PluralRules().resolvedOptions().locale,"
+        "relativeTimeFormatLocale:new Intl.RelativeTimeFormat().resolvedOptions().locale,"
         "intlLocaleRegion:null,"
         "navigatorLanguageRegion:null,"
         "numberFormat:new Intl.NumberFormat().format(1234567.89),"
+        "currencyFormat:new Intl.NumberFormat(undefined,{style:'currency',currency:'USD'}).format(1234.56),"
+        "dateFormat:new Intl.DateTimeFormat(undefined,{dateStyle:'short',timeZone:'UTC'}).format(new Date(Date.UTC(2026,4,22))),"
+        "regionDisplayName:null,"
         "listFormat:new Intl.ListFormat().format(['A','B','C']),"
         "timezoneOffset:new Date().getTimezoneOffset(),"
         "geolocationPermission:null,"
@@ -1108,6 +1120,7 @@ def runtime_probe_html() -> str:
         "};"
         "try{observed.intlLocaleRegion=new Intl.Locale(observed.intlLocale).region||null;}catch(error){}"
         "try{observed.navigatorLanguageRegion=new Intl.Locale(observed.language).region||null;}catch(error){}"
+        "try{observed.regionDisplayName=new Intl.DisplayNames(undefined,{type:'region'}).of('US');}catch(error){}"
         "try{"
         "if(navigator.permissions&&navigator.permissions.query){"
         "observed.geolocationPermission=(await navigator.permissions.query({name:'geolocation'})).state;"
@@ -1200,12 +1213,24 @@ def validate_runtime_context(runtime_context: dict, timezone_id: str) -> tuple[s
         mismatches.append("Intl numbering system")
     if runtime_context.get("intlHourCycle") != "h12":
         mismatches.append("Intl hour cycle")
+    if runtime_context.get("collatorLocale") != APP_LOCALE:
+        mismatches.append("Intl collator locale")
+    if runtime_context.get("pluralRulesLocale") != APP_LOCALE:
+        mismatches.append("Intl plural rules locale")
+    if runtime_context.get("relativeTimeFormatLocale") != APP_LOCALE:
+        mismatches.append("Intl relative time format locale")
     if runtime_context.get("intlLocaleRegion") != "US":
         mismatches.append("Intl locale region")
     if runtime_context.get("navigatorLanguageRegion") != "US":
         mismatches.append("navigator language region")
     if runtime_context.get("numberFormat") != "1,234,567.89":
         mismatches.append("Intl number format")
+    if runtime_context.get("currencyFormat") != "$1,234.56":
+        mismatches.append("Intl currency format")
+    if runtime_context.get("dateFormat") != "5/22/26":
+        mismatches.append("Intl date format")
+    if runtime_context.get("regionDisplayName") != "United States":
+        mismatches.append("Intl region display name")
     if runtime_context.get("listFormat") != "A, B, and C":
         mismatches.append("Intl list format")
     if not accept_language_is_us(runtime_context.get("acceptLanguageHeader")):
@@ -1396,6 +1421,20 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation navigator.languages")
     if observed.get("timezone") != browser_context.get("timezone_id"):
         mismatches.append("automation timezone")
+    if observed.get("intlLocale") != APP_LOCALE:
+        mismatches.append("automation Intl locale")
+    if observed.get("collatorLocale") != APP_LOCALE:
+        mismatches.append("automation Intl collator locale")
+    if observed.get("pluralRulesLocale") != APP_LOCALE:
+        mismatches.append("automation Intl plural rules locale")
+    if observed.get("relativeTimeFormatLocale") != APP_LOCALE:
+        mismatches.append("automation Intl relative time format locale")
+    if observed.get("dateFormat") != "5/22/26":
+        mismatches.append("automation Intl date format")
+    if observed.get("currencyFormat") != "$1,234.56":
+        mismatches.append("automation Intl currency format")
+    if observed.get("regionDisplayName") != "United States":
+        mismatches.append("automation Intl region display name")
     if not accept_language_is_us(observed.get("acceptLanguageHeader")):
         mismatches.append("automation Accept-Language")
     if not isinstance(expected_geolocation, dict) or not isinstance(observed_geolocation, dict):
@@ -1485,6 +1524,13 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             language: navigator.language,
                             languages: Array.from(navigator.languages || []),
                             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                            intlLocale: Intl.DateTimeFormat().resolvedOptions().locale,
+                            collatorLocale: Intl.Collator().resolvedOptions().locale,
+                            pluralRulesLocale: new Intl.PluralRules().resolvedOptions().locale,
+                            relativeTimeFormatLocale: new Intl.RelativeTimeFormat().resolvedOptions().locale,
+                            dateFormat: Intl.DateTimeFormat(undefined, {dateStyle: 'short', timeZone: 'UTC'}).format(new Date(Date.UTC(2026, 4, 22))),
+                            currencyFormat: Intl.NumberFormat(undefined, {style: 'currency', currency: 'USD'}).format(1234.56),
+                            regionDisplayName: new Intl.DisplayNames(undefined, {type: 'region'}).of('US'),
                             geolocation: position,
                           };
                         }

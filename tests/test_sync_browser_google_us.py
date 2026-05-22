@@ -188,9 +188,15 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_calendar"], "gregory")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_numbering_system"], "latn")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_hour_cycle"], "h12")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_collator_locale"], "en-US")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_plural_rules_locale"], "en-US")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_relative_time_format_locale"], "en-US")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_locale_region"], "US")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_navigator_language_region"], "US")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_number_format"], "1,234,567.89")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_currency_format"], "$1,234.56")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_date_format"], "5/22/26")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_region_display_name"], "United States")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_list_format"], "A, B, and C")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_accept_language_header"], "en-US,en;q=0.9")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_geolocation_permission"], "denied")
@@ -544,8 +550,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             '{"language":"en-US","languages":["en-US","en"],'
             '"timezone":"America/Los_Angeles","intlLocale":"en-US",'
             '"intlCalendar":"gregory","intlNumberingSystem":"latn","intlHourCycle":"h12",'
+            '"collatorLocale":"en-US","pluralRulesLocale":"en-US","relativeTimeFormatLocale":"en-US",'
             '"intlLocaleRegion":"US","navigatorLanguageRegion":"US",'
             '"numberFormat":"1,234,567.89","listFormat":"A, B, and C",'
+            '"currencyFormat":"$1,234.56","dateFormat":"5/22/26","regionDisplayName":"United States",'
             '"acceptLanguageHeader":"en-US,en;q=0.9",'
             '"geolocationPermission":"denied",'
             '"webrtcSupported":true,'
@@ -575,9 +583,15 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertEqual(runtime_context["intlCalendar"], "gregory")
         self.assertEqual(runtime_context["intlNumberingSystem"], "latn")
         self.assertEqual(runtime_context["intlHourCycle"], "h12")
+        self.assertEqual(runtime_context["collatorLocale"], "en-US")
+        self.assertEqual(runtime_context["pluralRulesLocale"], "en-US")
+        self.assertEqual(runtime_context["relativeTimeFormatLocale"], "en-US")
         self.assertEqual(runtime_context["intlLocaleRegion"], "US")
         self.assertEqual(runtime_context["navigatorLanguageRegion"], "US")
         self.assertEqual(runtime_context["numberFormat"], "1,234,567.89")
+        self.assertEqual(runtime_context["currencyFormat"], "$1,234.56")
+        self.assertEqual(runtime_context["dateFormat"], "5/22/26")
+        self.assertEqual(runtime_context["regionDisplayName"], "United States")
         self.assertEqual(runtime_context["listFormat"], "A, B, and C")
         self.assertEqual(runtime_context["acceptLanguageHeader"], "en-US,en;q=0.9")
         self.assertEqual(runtime_context["geolocationPermission"], "denied")
@@ -610,6 +624,13 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "language": "en-US",
             "languages": ["en-US"],
             "timezone": "America/Los_Angeles",
+            "intlLocale": "en-US",
+            "collatorLocale": "en-US",
+            "pluralRulesLocale": "en-US",
+            "relativeTimeFormatLocale": "en-US",
+            "dateFormat": "5/22/26",
+            "currencyFormat": "$1,234.56",
+            "regionDisplayName": "United States",
             "acceptLanguageHeader": "en-US,en;q=0.9",
             "geolocation": {"latitude": 34.0522, "longitude": -118.2437, "accuracy": 50000},
         }
