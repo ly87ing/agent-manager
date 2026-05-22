@@ -177,6 +177,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_language"], "en-US")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_languages"], ["en-US", "en"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_locale"], "en-US")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_locale_region"], "US")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_navigator_language_region"], "US")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_number_format"], "1,234,567.89")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_list_format"], "A, B, and C")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_accept_language_header"], "en-US,en;q=0.9")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_geolocation_permission"], "denied")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_profile_webrtc_policy"], "disable_non_proxied_udp")
@@ -518,6 +522,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "<body>AGENT_MANAGER_RUNTIME_JSON:"
             '{"language":"en-US","languages":["en-US","en"],'
             '"timezone":"America/Los_Angeles","intlLocale":"en-US",'
+            '"intlLocaleRegion":"US","navigatorLanguageRegion":"US",'
+            '"numberFormat":"1,234,567.89","listFormat":"A, B, and C",'
             '"acceptLanguageHeader":"en-US,en;q=0.9",'
             '"geolocationPermission":"denied",'
             '"profileWebrtcPolicy":"disable_non_proxied_udp",'
@@ -538,6 +544,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertEqual(runtime_context["language"], "en-US")
         self.assertEqual(runtime_context["languages"], ["en-US", "en"])
         self.assertEqual(runtime_context["timezone"], "America/Los_Angeles")
+        self.assertEqual(runtime_context["intlLocaleRegion"], "US")
+        self.assertEqual(runtime_context["navigatorLanguageRegion"], "US")
+        self.assertEqual(runtime_context["numberFormat"], "1,234,567.89")
+        self.assertEqual(runtime_context["listFormat"], "A, B, and C")
         self.assertEqual(runtime_context["acceptLanguageHeader"], "en-US,en;q=0.9")
         self.assertEqual(runtime_context["geolocationPermission"], "denied")
         self.assertEqual(runtime_context["profileWebrtcPolicy"], "disable_non_proxied_udp")

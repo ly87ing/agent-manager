@@ -872,6 +872,10 @@ def verification_report_payload(
                 "runtime_language": APP_LOCALE,
                 "runtime_languages": ["en-US", "en"],
                 "runtime_intl_locale": APP_LOCALE,
+                "runtime_intl_locale_region": "US",
+                "runtime_navigator_language_region": "US",
+                "runtime_number_format": "1,234,567.89",
+                "runtime_list_format": "A, B, and C",
                 "runtime_accept_language_header": "en-US,en;q=0.9",
                 "runtime_geolocation_permission": "denied",
                 "runtime_profile_webrtc_policy": "disable_non_proxied_udp",
@@ -1014,9 +1018,15 @@ def runtime_probe_html() -> str:
         "languages:Array.from(navigator.languages||[]),"
         "timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,"
         "intlLocale:Intl.DateTimeFormat().resolvedOptions().locale,"
+        "intlLocaleRegion:null,"
+        "navigatorLanguageRegion:null,"
+        "numberFormat:new Intl.NumberFormat().format(1234567.89),"
+        "listFormat:new Intl.ListFormat().format(['A','B','C']),"
         "timezoneOffset:new Date().getTimezoneOffset(),"
         "geolocationPermission:null"
         "};"
+        "try{observed.intlLocaleRegion=new Intl.Locale(observed.intlLocale).region||null;}catch(error){}"
+        "try{observed.navigatorLanguageRegion=new Intl.Locale(observed.language).region||null;}catch(error){}"
         "try{"
         "if(navigator.permissions&&navigator.permissions.query){"
         "observed.geolocationPermission=(await navigator.permissions.query({name:'geolocation'})).state;"
@@ -1079,6 +1089,14 @@ def validate_runtime_context(runtime_context: dict, timezone_id: str) -> tuple[s
         mismatches.append("Intl timezone")
     if runtime_context.get("intlLocale") != APP_LOCALE:
         mismatches.append("Intl locale")
+    if runtime_context.get("intlLocaleRegion") != "US":
+        mismatches.append("Intl locale region")
+    if runtime_context.get("navigatorLanguageRegion") != "US":
+        mismatches.append("navigator language region")
+    if runtime_context.get("numberFormat") != "1,234,567.89":
+        mismatches.append("Intl number format")
+    if runtime_context.get("listFormat") != "A, B, and C":
+        mismatches.append("Intl list format")
     if not accept_language_is_us(runtime_context.get("acceptLanguageHeader")):
         mismatches.append("Accept-Language")
     if runtime_context.get("geolocationPermission") != "denied":
