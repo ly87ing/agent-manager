@@ -41,6 +41,7 @@ DEFAULT_GEOLOCATION = {
     "longitude": -122.4194,
     "accuracy": 100,
 }
+US_TIMEZONE_PROBE_UTC = datetime.datetime(2026, 5, 22, 12, 0, 0, tzinfo=datetime.timezone.utc)
 US_DESKTOP_VIEWPORT = {"width": 1365, "height": 768}
 US_DESKTOP_SCREEN = {"width": 1365, "height": 768}
 US_DESKTOP_SCREEN_COLOR_DEPTH = 24
@@ -562,15 +563,71 @@ def resolved_geolocation(exit_profile: ExitProfile | None) -> dict:
 
 
 def expected_timezone_offset_minutes(timezone_id: str) -> int | None:
+    return expected_timezone_offset_minutes_at(timezone_id, datetime.datetime.now(datetime.timezone.utc))
+
+
+def expected_timezone_offset_minutes_at(timezone_id: str, utc_datetime: datetime.datetime) -> int | None:
     try:
         timezone = ZoneInfo(timezone_id)
     except ZoneInfoNotFoundError:
         return None
-    now_utc = datetime.datetime.now(datetime.timezone.utc)
-    offset = now_utc.astimezone(timezone).utcoffset()
+    offset = utc_datetime.astimezone(timezone).utcoffset()
     if offset is None:
         return None
     return int(round(-offset.total_seconds() / 60))
+
+
+def timezone_offset_label(offset_minutes: int | None) -> str | None:
+    if offset_minutes is None:
+        return None
+    sign = "-" if offset_minutes >= 0 else "+"
+    absolute_minutes = abs(offset_minutes)
+    return f"GMT{sign}{absolute_minutes // 60:02d}{absolute_minutes % 60:02d}"
+
+
+def us_timezone_display_needles(timezone_id: str) -> tuple[str, ...]:
+    if timezone_id in {"America/Los_Angeles", "America/Vancouver", "America/Tijuana"}:
+        return ("Pacific",)
+    if timezone_id.startswith("America/Indiana/") or timezone_id.startswith("America/Kentucky/"):
+        return ("Eastern",)
+    if timezone_id in {"America/New_York", "America/Detroit", "America/Toronto", "America/Nassau"}:
+        return ("Eastern",)
+    if timezone_id in {"America/Chicago", "America/Indiana/Knox", "America/Menominee"}:
+        return ("Central",)
+    if timezone_id.startswith("America/North_Dakota/"):
+        return ("Central",)
+    if timezone_id in {"America/Denver", "America/Boise"}:
+        return ("Mountain",)
+    if timezone_id == "America/Phoenix":
+        return ("Mountain",)
+    if timezone_id in {"America/Anchorage", "America/Juneau", "America/Nome", "America/Sitka", "America/Yakutat"}:
+        return ("Alaska",)
+    if timezone_id == "America/Adak":
+        return ("Hawaii", "Aleutian")
+    if timezone_id == "Pacific/Honolulu":
+        return ("Hawaii",)
+    if timezone_id == "America/Puerto_Rico":
+        return ("Atlantic",)
+    if timezone_id in {"Pacific/Guam", "Pacific/Saipan"}:
+        return ("Chamorro",)
+    if timezone_id == "Pacific/Pago_Pago":
+        return ("Samoa",)
+    return ()
+
+
+def timezone_display_matches(observed: dict, timezone_id: str) -> bool:
+    offset_label = timezone_offset_label(expected_timezone_offset_minutes_at(timezone_id, US_TIMEZONE_PROBE_UTC))
+    combined = " ".join(
+        str(observed.get(field) or "")
+        for field in ("dateToString", "dateToTimeString", "timeZoneLongFormat", "timeZoneNameLong")
+    )
+    lowered = combined.lower()
+    if any(marker in lowered for marker in ("hong kong", "china standard", "gmt+0800", "hkt")):
+        return False
+    if offset_label and offset_label not in combined:
+        return False
+    needles = us_timezone_display_needles(timezone_id)
+    return not needles or any(needle in combined for needle in needles)
 
 
 def sync_local_state(path: Path, enforce_country: bool = True) -> bool:
@@ -1182,6 +1239,10 @@ def verification_report_payload(
     expected_client_hints_platform = client_hints_platform(platform_name)
     expected_navigator_platform = navigator_platform(platform_name)
     timezone_offset_minutes = expected_timezone_offset_minutes(timezone_id)
+    timezone_probe_offset_label = timezone_offset_label(
+        expected_timezone_offset_minutes_at(timezone_id, US_TIMEZONE_PROBE_UTC)
+    )
+    timezone_display_needles = list(us_timezone_display_needles(timezone_id))
     state_ok = browser_state_audit.get("overall_ok") is True
     google_domain_ok = google_domain_resolution.return_code == 0
     browser_google_ok = browser_google_resolution.return_code == 0
@@ -1302,6 +1363,8 @@ def verification_report_payload(
                 "locale": APP_LOCALE,
                 "timezone_id": timezone_id,
                 "timezone_offset_minutes": timezone_offset_minutes,
+                "timezone_probe_offset_label": timezone_probe_offset_label,
+                "timezone_display_needles": timezone_display_needles,
                 "context_geolocation": geolocation,
                 "context_permissions": ["geolocation"],
                 "runtime_language": APP_LOCALE,
@@ -1636,6 +1699,10 @@ def runtime_probe_html() -> str:
         "numberFormat:new Intl.NumberFormat().format(1234567.89),"
         "currencyFormat:new Intl.NumberFormat(undefined,{style:'currency',currency:'USD'}).format(1234.56),"
         "dateFormat:new Intl.DateTimeFormat(undefined,{dateStyle:'short',timeZone:'UTC'}).format(new Date(Date.UTC(2026,4,22))),"
+        "dateToString:new Date(Date.UTC(2026,4,22,12,0,0)).toString(),"
+        "dateToTimeString:new Date(Date.UTC(2026,4,22,12,0,0)).toTimeString(),"
+        "timeZoneLongFormat:null,"
+        "timeZoneNameLong:null,"
         "regionDisplayName:null,"
         "listFormat:new Intl.ListFormat().format(['A','B','C']),"
         "timezoneOffset:new Date().getTimezoneOffset(),"
@@ -1659,6 +1726,13 @@ def runtime_probe_html() -> str:
         "observed.localeTimeZones=intlLocale.getTimeZones?intlLocale.getTimeZones():null;"
         "}catch(error){observed.localeInfoError=String(error&&error.name||error);}"
         "try{observed.regionDisplayName=new Intl.DisplayNames(undefined,{type:'region'}).of('US');}catch(error){}"
+        "try{const fixedDate=new Date(Date.UTC(2026,4,22,12,0,0));"
+        "const timeZoneFormatter=new Intl.DateTimeFormat(undefined,{weekday:'long',year:'numeric',month:'long',"
+        "day:'numeric',hour:'numeric',minute:'numeric',timeZoneName:'long'});"
+        "observed.timeZoneLongFormat=timeZoneFormatter.format(fixedDate);"
+        "const timeZonePart=timeZoneFormatter.formatToParts(fixedDate).find((part)=>part.type==='timeZoneName');"
+        "observed.timeZoneNameLong=timeZonePart?timeZonePart.value:null;"
+        "}catch(error){observed.timeZoneNameError=String(error&&error.name||error);}"
         "try{"
         "if(navigator.userAgentData&&navigator.userAgentData.getHighEntropyValues){"
         "observed.userAgentDataHighEntropy=await navigator.userAgentData.getHighEntropyValues(["
@@ -1911,6 +1985,8 @@ def validate_runtime_context(
         mismatches.append("timezone offset rule")
     elif runtime_context.get("timezoneOffset") != expected_offset:
         mismatches.append("timezone offset")
+    if runtime_context.get("timeZoneNameError") or not timezone_display_matches(runtime_context, timezone_id):
+        mismatches.append("Date timezone display")
     if runtime_context.get("intlLocale") != APP_LOCALE:
         mismatches.append("Intl locale")
     if runtime_context.get("intlCalendar") != "gregory":
@@ -2225,6 +2301,8 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation timezone offset rule")
     elif observed.get("timezoneOffset") != expected_offset:
         mismatches.append("automation timezone offset")
+    if observed.get("timeZoneNameError") or not timezone_display_matches(observed, str(browser_context.get("timezone_id") or "")):
+        mismatches.append("automation Date timezone display")
     if observed.get("intlLocale") != APP_LOCALE:
         mismatches.append("automation Intl locale")
     if observed.get("collatorLocale") != APP_LOCALE:
@@ -2505,6 +2583,10 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             appVersion: navigator.appVersion,
                             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
                             timezoneOffset: new Date().getTimezoneOffset(),
+                            dateToString: new Date(Date.UTC(2026, 4, 22, 12, 0, 0)).toString(),
+                            dateToTimeString: new Date(Date.UTC(2026, 4, 22, 12, 0, 0)).toTimeString(),
+                            timeZoneLongFormat: null,
+                            timeZoneNameLong: null,
                             intlLocale: Intl.DateTimeFormat().resolvedOptions().locale,
                             collatorLocale: Intl.Collator().resolvedOptions().locale,
                             pluralRulesLocale: new Intl.PluralRules().resolvedOptions().locale,
@@ -2612,6 +2694,25 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                           observed.gyroscopePermission = await permissionState('gyroscope');
                           observed.magnetometerPermission = await permissionState('magnetometer');
                           observed.windowManagementPermission = await permissionState('window-management');
+                          try {
+                            const fixedDate = new Date(Date.UTC(2026, 4, 22, 12, 0, 0));
+                            const timeZoneFormatter = new Intl.DateTimeFormat(undefined, {
+                              weekday: 'long',
+                              year: 'numeric',
+                              month: 'long',
+                              day: 'numeric',
+                              hour: 'numeric',
+                              minute: 'numeric',
+                              timeZoneName: 'long',
+                            });
+                            observed.timeZoneLongFormat = timeZoneFormatter.format(fixedDate);
+                            const timeZonePart = timeZoneFormatter
+                              .formatToParts(fixedDate)
+                              .find((part) => part.type === 'timeZoneName');
+                            observed.timeZoneNameLong = timeZonePart ? timeZonePart.value : null;
+                          } catch (error) {
+                            observed.timeZoneNameError = String(error && error.name || error);
+                          }
                           try {
                             const canvas = document.createElement('canvas');
                             const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');

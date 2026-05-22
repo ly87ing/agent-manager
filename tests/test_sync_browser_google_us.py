@@ -383,6 +383,14 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
                 verification_report["enforced_features"]["automation"]["timezone_offset_minutes"],
                 int,
             )
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["timezone_probe_offset_label"],
+                "GMT-0700",
+            )
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["timezone_display_needles"],
+                ["Pacific"],
+            )
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_calendar"], "gregory")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_numbering_system"], "latn")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_hour_cycle"], "h12")
@@ -671,6 +679,14 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertTrue(verification_report["browser_state_audit"]["overall_ok"])
             self.assertEqual(verification_report["exit"]["profile"]["ip"], "203.0.113.31")
             self.assertEqual(verification_report["enforced_features"]["automation"]["timezone_id"], "America/New_York")
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["timezone_probe_offset_label"],
+                "GMT-0400",
+            )
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["timezone_display_needles"],
+                ["Eastern"],
+            )
             self.assertEqual(
                 verification_report["enforced_features"]["automation"]["context_geolocation"],
                 {"latitude": 40.7128, "longitude": -74.006, "accuracy": 50000},
@@ -990,7 +1006,12 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             '"localeNumberingSystems":["latn"],'
             '"localeTimeZones":["America/Los_Angeles","America/New_York"],'
             '"numberFormat":"1,234,567.89","listFormat":"A, B, and C",'
-            '"currencyFormat":"$1,234.56","dateFormat":"5/22/26","regionDisplayName":"United States",'
+            '"currencyFormat":"$1,234.56","dateFormat":"5/22/26",'
+            '"dateToString":"Fri May 22 2026 05:00:00 GMT-0700 (Pacific Daylight Time)",'
+            '"dateToTimeString":"05:00:00 GMT-0700 (Pacific Daylight Time)",'
+            '"timeZoneLongFormat":"Friday, May 22, 2026 at 5:00 AM Pacific Daylight Time",'
+            '"timeZoneNameLong":"Pacific Daylight Time",'
+            '"regionDisplayName":"United States",'
             '"acceptLanguageHeader":"en-US,en;q=0.9",'
             '"geolocationPermission":"denied",'
             '"notificationPermission":"denied",'
@@ -1066,6 +1087,13 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertEqual(runtime_context["numberFormat"], "1,234,567.89")
         self.assertEqual(runtime_context["currencyFormat"], "$1,234.56")
         self.assertEqual(runtime_context["dateFormat"], "5/22/26")
+        self.assertEqual(runtime_context["dateToString"], "Fri May 22 2026 05:00:00 GMT-0700 (Pacific Daylight Time)")
+        self.assertEqual(runtime_context["dateToTimeString"], "05:00:00 GMT-0700 (Pacific Daylight Time)")
+        self.assertEqual(
+            runtime_context["timeZoneLongFormat"],
+            "Friday, May 22, 2026 at 5:00 AM Pacific Daylight Time",
+        )
+        self.assertEqual(runtime_context["timeZoneNameLong"], "Pacific Daylight Time")
         self.assertEqual(runtime_context["regionDisplayName"], "United States")
         self.assertEqual(runtime_context["listFormat"], "A, B, and C")
         self.assertEqual(runtime_context["acceptLanguageHeader"], "en-US,en;q=0.9")
@@ -1162,6 +1190,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "localeNumberingSystems": ["latn"],
             "localeTimeZones": ["America/Los_Angeles", "America/New_York"],
             "dateFormat": "5/22/26",
+            "dateToString": "Fri May 22 2026 05:00:00 GMT-0700 (Pacific Daylight Time)",
+            "dateToTimeString": "05:00:00 GMT-0700 (Pacific Daylight Time)",
+            "timeZoneLongFormat": "Friday, May 22, 2026 at 5:00 AM Pacific Daylight Time",
+            "timeZoneNameLong": "Pacific Daylight Time",
             "currencyFormat": "$1,234.56",
             "regionDisplayName": "United States",
             "acceptLanguageHeader": "en-US,en;q=0.9",
@@ -1231,16 +1263,25 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
 
         observed["timezone"] = "Asia/Hong_Kong"
         observed["timezoneOffset"] = module.expected_timezone_offset_minutes("Asia/Hong_Kong")
+        observed["dateToString"] = "Fri May 22 2026 20:00:00 GMT+0800 (Hong Kong Standard Time)"
+        observed["dateToTimeString"] = "20:00:00 GMT+0800 (Hong Kong Standard Time)"
+        observed["timeZoneLongFormat"] = "Friday, May 22, 2026 at 8:00 PM Hong Kong Standard Time"
+        observed["timeZoneNameLong"] = "Hong Kong Standard Time"
         observed["geolocation"] = {"latitude": 22.3193, "longitude": 114.1694, "accuracy": 50000}
         mismatches = module.validate_automation_context_observation(observed, browser_context)
 
         self.assertIn("automation timezone", mismatches)
         self.assertIn("automation timezone offset", mismatches)
+        self.assertIn("automation Date timezone display", mismatches)
         self.assertIn("automation geolocation latitude", mismatches)
         self.assertIn("automation geolocation longitude", mismatches)
 
         observed["timezone"] = "America/Los_Angeles"
         observed["timezoneOffset"] = module.expected_timezone_offset_minutes("America/Los_Angeles")
+        observed["dateToString"] = "Fri May 22 2026 05:00:00 GMT-0700 (Pacific Daylight Time)"
+        observed["dateToTimeString"] = "05:00:00 GMT-0700 (Pacific Daylight Time)"
+        observed["timeZoneLongFormat"] = "Friday, May 22, 2026 at 5:00 AM Pacific Daylight Time"
+        observed["timeZoneNameLong"] = "Pacific Daylight Time"
         observed["geolocation"] = {"latitude": 34.0522, "longitude": -118.2437, "accuracy": 50000}
         observed["platform"] = "Win32"
         mismatches = module.validate_automation_context_observation(observed, browser_context)
