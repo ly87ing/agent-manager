@@ -52,6 +52,34 @@ US_DESKTOP_DEVICE_MEMORY_GB = 8
 US_DESKTOP_WEBGL_VENDOR = "Intel Inc."
 US_DESKTOP_WEBGL_RENDERER = "Intel Iris OpenGL Engine"
 US_CANVAS_FONT_METRIC_FALLBACK_FAMILY = "Arial"
+US_KEYBOARD_LAYOUT_MAP = {
+    "Backquote": "`",
+    "Backslash": "\\",
+    "BracketLeft": "[",
+    "BracketRight": "]",
+    "Comma": ",",
+    "Digit1": "1",
+    "Digit2": "2",
+    "Digit3": "3",
+    "Digit4": "4",
+    "Digit5": "5",
+    "Digit6": "6",
+    "Digit7": "7",
+    "Digit8": "8",
+    "Digit9": "9",
+    "Digit0": "0",
+    "Equal": "=",
+    "IntlBackslash": "\\",
+    "KeyQ": "q",
+    "KeyW": "w",
+    "KeyY": "y",
+    "KeyZ": "z",
+    "Minus": "-",
+    "Period": ".",
+    "Quote": "'",
+    "Semicolon": ";",
+    "Slash": "/",
+}
 BLOCKED_FONT_FAMILIES = (
     "PingFang SC",
     "PingFang TC",
@@ -956,6 +984,7 @@ def automation_context_payload(exit_profile: ExitProfile | None, managed_user_da
             "webgl_renderer": US_DESKTOP_WEBGL_RENDERER,
             "blocked_font_families": list(BLOCKED_FONT_FAMILIES),
             "font_metric_fallback_family": US_CANVAS_FONT_METRIC_FALLBACK_FAMILY,
+            "keyboard_layout_map": dict(US_KEYBOARD_LAYOUT_MAP),
         },
         "chrome_launch": {
             "args": [
@@ -1322,6 +1351,7 @@ def verification_report_payload(
                 "automation_webgl_renderer": US_DESKTOP_WEBGL_RENDERER,
                 "automation_blocked_font_families": list(BLOCKED_FONT_FAMILIES),
                 "automation_font_metric_fallback_family": US_CANVAS_FONT_METRIC_FALLBACK_FAMILY,
+                "automation_keyboard_layout_map": dict(US_KEYBOARD_LAYOUT_MAP),
                 "automation_locale_week_info": {"firstDay": 7, "weekend": [6, 7]},
                 "automation_locale_text_info": {"direction": "ltr"},
                 "automation_locale_hour_cycles": ["h12"],
@@ -2041,6 +2071,9 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
     observed_geolocation = observed.get("geolocation") if isinstance(observed.get("geolocation"), dict) else None
     expected_viewport = browser_context.get("viewport") if isinstance(browser_context.get("viewport"), dict) else None
     expected_screen = browser_context.get("screen") if isinstance(browser_context.get("screen"), dict) else None
+    expected_keyboard_layout = (
+        browser_context.get("keyboard_layout_map") if isinstance(browser_context.get("keyboard_layout_map"), dict) else None
+    )
     expected_user_agent = browser_context.get("user_agent")
     expected_client_hints_platform = browser_context.get("client_hints_platform")
     expected_navigator_platform = browser_context.get("navigator_platform")
@@ -2179,6 +2212,10 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation speech synthesis")
     if observed.get("localFontAccessPresent") is not False:
         mismatches.append("automation local font access")
+    if observed.get("keyboardLayoutError"):
+        mismatches.append("automation keyboard layout probe")
+    if isinstance(expected_keyboard_layout, dict) and observed.get("keyboardLayout") != expected_keyboard_layout:
+        mismatches.append("automation keyboard layout")
     if observed.get("webGpuProbeError"):
         mismatches.append("automation WebGPU probe")
     if observed.get("webGpuAdapterAvailable") is not False:
@@ -2316,6 +2353,7 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             mimeTypesLength: navigator.mimeTypes.length,
                             speechSynthesisPresent: 'speechSynthesis' in window,
                             localFontAccessPresent: 'queryLocalFonts' in window,
+                            keyboardLayout: null,
                             webGpuPresent: 'gpu' in navigator,
                             webGpuAdapterAvailable: null,
                             mediaDeviceCount: null,
@@ -2407,6 +2445,23 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             }
                           } catch (error) {
                             observed.userAgentDataHighEntropyError = String(error && error.name || error);
+                          }
+                          try {
+                            if (navigator.keyboard && navigator.keyboard.getLayoutMap) {
+                              const layoutMap = await Promise.race([
+                                navigator.keyboard.getLayoutMap(),
+                                new Promise((resolve) => setTimeout(() => resolve(null), 500)),
+                              ]);
+                              if (layoutMap) {
+                                const keyboardLayoutKeys = Array.from(window.__agentManagerKeyboardLayoutKeys || []);
+                                observed.keyboardLayout = {};
+                                for (const key of keyboardLayoutKeys) {
+                                  observed.keyboardLayout[key] = layoutMap.get(key);
+                                }
+                              }
+                            }
+                          } catch (error) {
+                            observed.keyboardLayoutError = String(error && error.name || error);
                           }
                           try {
                             if (navigator.gpu && navigator.gpu.requestAdapter) {
@@ -2507,6 +2562,7 @@ def new_us_playwright_context(browser, browser_context: dict):
     webgl_renderer = browser_context.get("webgl_renderer")
     blocked_font_families = browser_context.get("blocked_font_families")
     font_metric_fallback_family = browser_context.get("font_metric_fallback_family")
+    keyboard_layout_map = browser_context.get("keyboard_layout_map")
     if isinstance(hardware_concurrency, int) and not isinstance(hardware_concurrency, bool) and hardware_concurrency > 0:
         context.add_init_script(
             f"""
@@ -2650,6 +2706,49 @@ def new_us_playwright_context(browser, browser_context: dict):
                 }})();
                 """
             )
+    if isinstance(keyboard_layout_map, dict) and keyboard_layout_map:
+        keyboard_layout_json = json.dumps(keyboard_layout_map, sort_keys=True)
+        context.add_init_script(
+            f"""
+            (() => {{
+              const keyboardLayout = Object.freeze(Object.assign({{}}, {keyboard_layout_json}));
+              const keyboardLayoutKeys = Object.freeze(Object.keys(keyboardLayout));
+              const createKeyboardLayoutMap = () => {{
+                const keyboardMap = new Map(keyboardLayoutKeys.map((key) => [key, keyboardLayout[key]]));
+                Object.defineProperty(keyboardMap, Symbol.toStringTag, {{
+                  configurable: true,
+                  value: 'KeyboardLayoutMap',
+                }});
+                return keyboardMap;
+              }};
+              Object.defineProperty(window, '__agentManagerKeyboardLayoutKeys', {{
+                configurable: true,
+                value: keyboardLayoutKeys,
+              }});
+              const keyboard = navigator.keyboard;
+              if (keyboard && keyboard.getLayoutMap) {{
+                const keyboardPrototype = Object.getPrototypeOf(keyboard);
+                Object.defineProperty(keyboardPrototype, 'getLayoutMap', {{
+                  configurable: true,
+                  value() {{
+                    return Promise.resolve(createKeyboardLayoutMap());
+                  }},
+                }});
+              }} else {{
+                Object.defineProperty(Navigator.prototype, 'keyboard', {{
+                  configurable: true,
+                  get() {{
+                    return {{
+                      getLayoutMap() {{
+                        return Promise.resolve(createKeyboardLayoutMap());
+                      }},
+                    }};
+                  }},
+                }});
+              }}
+            }})();
+            """
+        )
     if isinstance(navigator_languages, list) and navigator_languages:
         languages_json = json.dumps(navigator_languages)
         context.add_init_script(

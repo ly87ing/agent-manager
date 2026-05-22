@@ -275,6 +275,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertIn("PingFang SC", automation_context["browser_context"]["blocked_font_families"])
             self.assertIn("MingLiU", automation_context["browser_context"]["blocked_font_families"])
             self.assertEqual(automation_context["browser_context"]["font_metric_fallback_family"], "Arial")
+            self.assertEqual(automation_context["browser_context"]["keyboard_layout_map"]["KeyQ"], "q")
+            self.assertEqual(automation_context["browser_context"]["keyboard_layout_map"]["KeyZ"], "z")
             self.assertEqual(automation_context["google"]["home_url"], "https://www.google.com/?hl=en-US&gl=US&pws=0")
             self.assertEqual(automation_context["chrome_launch"]["launcher"], str(launcher_path))
             self.assertEqual(automation_context["chrome_launch"]["managed_user_data_dir"], str(managed_profile_root))
@@ -475,6 +477,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(
                 verification_report["enforced_features"]["automation"]["automation_font_metric_fallback_family"],
                 "Arial",
+            )
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["automation_keyboard_layout_map"]["KeyZ"],
+                "z",
             )
             self.assertEqual(
                 verification_report["enforced_features"]["automation"]["automation_locale_week_info"],
@@ -1013,6 +1019,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "webgl_renderer": "Intel Iris OpenGL Engine",
             "blocked_font_families": ["PingFang SC", "MingLiU"],
             "font_metric_fallback_family": "Arial",
+            "keyboard_layout_map": {"KeyQ": "q", "KeyZ": "z"},
         }
         observed = {
             "userAgent": browser_context["user_agent"],
@@ -1073,6 +1080,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
                 "blocked": {"PingFang SC": False, "MingLiU": False},
                 "metricMatches": {"PingFang SC": True, "MingLiU": True},
             },
+            "keyboardLayout": {"KeyQ": "q", "KeyZ": "z"},
             "pdfViewerEnabled": True,
             "pluginsLength": 5,
             "mimeTypesLength": 2,
@@ -1180,6 +1188,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         observed["pluginsLength"] = 0
         observed["speechSynthesisPresent"] = True
         observed["localFontAccessPresent"] = True
+        observed["keyboardLayout"] = {"KeyQ": "a", "KeyZ": "w"}
         observed["webGpuAdapterAvailable"] = True
         observed["mediaDeviceIdentityExposed"] = True
         mismatches = module.validate_automation_context_observation(observed, browser_context)
@@ -1198,6 +1207,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertIn("automation plugins", mismatches)
         self.assertIn("automation speech synthesis", mismatches)
         self.assertIn("automation local font access", mismatches)
+        self.assertIn("automation keyboard layout", mismatches)
         self.assertIn("automation WebGPU adapter", mismatches)
         self.assertIn("automation media device identity", mismatches)
 
@@ -1217,6 +1227,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         observed["pluginsLength"] = 5
         observed["speechSynthesisPresent"] = False
         observed["localFontAccessPresent"] = False
+        observed["keyboardLayout"] = {"KeyQ": "q", "KeyZ": "z"}
         observed["webGpuAdapterAvailable"] = False
         observed["mediaDeviceIdentityExposed"] = False
         observed["cameraPermission"] = "granted"
