@@ -60,6 +60,7 @@ BASE_CHROME_ARGS = [
     "--disable-search-engine-choice-screen",
     "--disable-sync",
     "--disable-extensions",
+    "--disable-blink-features=AutomationControlled",
 ]
 BLOCK_CONTENT_SETTING = 2
 GOOGLE_HK_MARKERS = ("google.com.hk", "hong kong")
@@ -1189,6 +1190,7 @@ def verification_report_payload(
                 "runtime_accept_language_header": "en-US,en;q=0.9",
                 "runtime_sec_ch_ua_platform": expected_client_hints_platform,
                 "runtime_sec_ch_ua_mobile": "?0",
+                "runtime_webdriver": False,
                 "runtime_geolocation_permission": "denied",
                 "runtime_webrtc_supported": True,
                 "runtime_webrtc_local_ip_leak": False,
@@ -1199,6 +1201,7 @@ def verification_report_payload(
                 "client_hints_platform": expected_client_hints_platform,
                 "automation_sec_ch_ua_platform": expected_client_hints_platform,
                 "automation_sec_ch_ua_mobile": "?0",
+                "automation_webdriver": False,
                 "navigator_platform": expected_navigator_platform,
                 "desktop_viewport": dict(US_DESKTOP_VIEWPORT),
                 "desktop_screen": dict(US_DESKTOP_SCREEN),
@@ -1354,6 +1357,7 @@ def runtime_probe_html() -> str:
         "platform:navigator.platform,"
         "userAgentDataMobile:navigator.userAgentData?navigator.userAgentData.mobile:null,"
         "userAgentDataPlatform:navigator.userAgentData?navigator.userAgentData.platform:null,"
+        "webdriver:navigator.webdriver,"
         "language:navigator.language,"
         "languages:Array.from(navigator.languages||[]),"
         "timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,"
@@ -1478,6 +1482,8 @@ def validate_runtime_context(
         mismatches.append("navigator.platform")
     if runtime_context.get("userAgentDataMobile") not in (False, None):
         mismatches.append("runtime user agent mobile")
+    if runtime_context.get("webdriver") not in (False, None):
+        mismatches.append("runtime webdriver")
     user_agent_data_platform = runtime_context.get("userAgentDataPlatform")
     if user_agent_data_platform is not None and user_agent_data_platform != expected_client_hints_platform:
         mismatches.append("runtime user agent platform")
@@ -1786,6 +1792,8 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation coarse pointer")
     if observed.get("userAgentDataMobile") not in (False, None):
         mismatches.append("automation user agent mobile")
+    if observed.get("webdriver") not in (False, None):
+        mismatches.append("automation webdriver")
     if observed.get("lightColorScheme") is not True or observed.get("darkColorScheme") is not False:
         mismatches.append("automation color scheme")
     if not isinstance(expected_geolocation, dict) or not isinstance(observed_geolocation, dict):
@@ -1873,6 +1881,7 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             platform: navigator.platform,
                             userAgentDataMobile: navigator.userAgentData ? navigator.userAgentData.mobile : null,
                             userAgentDataPlatform: navigator.userAgentData ? navigator.userAgentData.platform : null,
+                            webdriver: navigator.webdriver,
                             language: navigator.language,
                             languages: Array.from(navigator.languages || []),
                             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,

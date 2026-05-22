@@ -237,6 +237,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             )
             self.assertIn("--disable-sync", automation_context["chrome_launch"]["args"])
             self.assertIn("--disable-extensions", automation_context["chrome_launch"]["args"])
+            self.assertIn("--disable-blink-features=AutomationControlled", automation_context["chrome_launch"]["args"])
             self.assertIn("--force-webrtc-ip-handling-policy=disable_non_proxied_udp", automation_context["chrome_launch"]["args"])
             self.assertEqual(verification_report["overall_status"], "limited")
             self.assertEqual(verification_report["exit"]["verification_state"], "manually_skipped")
@@ -310,6 +311,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_accept_language_header"], "en-US,en;q=0.9")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_sec_ch_ua_platform"], "macOS")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_sec_ch_ua_mobile"], "?0")
+            self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_webdriver"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_geolocation_permission"], "denied")
             self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_webrtc_supported"])
             self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_webrtc_local_ip_leak"])
@@ -322,6 +324,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["automation"]["client_hints_platform"], "macOS")
             self.assertEqual(verification_report["enforced_features"]["automation"]["automation_sec_ch_ua_platform"], "macOS")
             self.assertEqual(verification_report["enforced_features"]["automation"]["automation_sec_ch_ua_mobile"], "?0")
+            self.assertFalse(verification_report["enforced_features"]["automation"]["automation_webdriver"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["navigator_platform"], "MacIntel")
             self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_viewport"], {"width": 1365, "height": 768})
             self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_screen"], {"width": 1365, "height": 768})
@@ -347,6 +350,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertIn('--user-data-dir="$BROWSER_US_USER_DATA_DIR"', launcher_content)
             self.assertIn("--disable-sync", launcher_content)
             self.assertIn("--disable-extensions", launcher_content)
+            self.assertIn("--disable-blink-features=AutomationControlled", launcher_content)
             self.assertTrue((config_dir / "browser-us.env").exists())
             self.assertTrue((chrome_root / "Local State.agent-manager-before-google-us").exists())
             self.assertTrue((profile_dir / "Preferences.agent-manager-before-google-us").exists())
@@ -694,6 +698,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             + runtime_user_agent
             + '","platform":"MacIntel","userAgentDataMobile":false,"userAgentDataPlatform":"macOS",'
             '"secChUaPlatform":"\\"macOS\\"","secChUaMobile":"?0",'
+            '"webdriver":false,'
             '"language":"en-US","languages":["en-US","en"],'
             '"timezone":"America/Los_Angeles","timezoneOffset":'
             + str(timezone_offset)
@@ -724,6 +729,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertEqual(runtime_context["platform"], "MacIntel")
         self.assertFalse(runtime_context["userAgentDataMobile"])
         self.assertEqual(runtime_context["userAgentDataPlatform"], "macOS")
+        self.assertFalse(runtime_context["webdriver"])
         self.assertEqual(runtime_context["language"], "en-US")
         self.assertEqual(runtime_context["languages"], ["en-US", "en"])
         self.assertEqual(runtime_context["timezone"], "America/Los_Angeles")
@@ -789,6 +795,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "userAgentDataPlatform": "macOS",
             "secChUaPlatform": '"macOS"',
             "secChUaMobile": "?0",
+            "webdriver": False,
             "language": "en-US",
             "languages": ["en-US", "en"],
             "timezone": "America/Los_Angeles",
@@ -841,6 +848,11 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
 
         observed["secChUaPlatform"] = '"macOS"'
         observed["secChUaMobile"] = "?0"
+        observed["webdriver"] = True
+        mismatches = module.validate_automation_context_observation(observed, browser_context)
+        self.assertIn("automation webdriver", mismatches)
+
+        observed["webdriver"] = False
         observed["innerWidth"] = 390
         observed["maxTouchPoints"] = 5
         observed["coarsePointer"] = True
