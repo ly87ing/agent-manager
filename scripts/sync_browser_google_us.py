@@ -1182,6 +1182,12 @@ def verification_report_payload(
                 "runtime_relative_time_format_locale": APP_LOCALE,
                 "runtime_intl_locale_region": "US",
                 "runtime_navigator_language_region": "US",
+                "runtime_locale_week_info": {"firstDay": 7, "weekend": [6, 7]},
+                "runtime_locale_text_info": {"direction": "ltr"},
+                "runtime_locale_hour_cycles": ["h12"],
+                "runtime_locale_calendars": ["gregory"],
+                "runtime_locale_numbering_systems": ["latn"],
+                "runtime_locale_timezones_include_current_timezone": True,
                 "runtime_number_format": "1,234,567.89",
                 "runtime_currency_format": "$1,234.56",
                 "runtime_date_format": "5/22/26",
@@ -1209,6 +1215,12 @@ def verification_report_payload(
                 "desktop_is_mobile": US_DESKTOP_IS_MOBILE,
                 "desktop_has_touch": US_DESKTOP_HAS_TOUCH,
                 "desktop_color_scheme": US_DESKTOP_COLOR_SCHEME,
+                "automation_locale_week_info": {"firstDay": 7, "weekend": [6, 7]},
+                "automation_locale_text_info": {"direction": "ltr"},
+                "automation_locale_hour_cycles": ["h12"],
+                "automation_locale_calendars": ["gregory"],
+                "automation_locale_numbering_systems": ["latn"],
+                "automation_locale_timezones_include_current_timezone": True,
                 "chrome_launch_args": browser_us_chrome_args(user_agent),
                 "chrome_launcher": "$AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER",
                 "managed_user_data_dir": "$AGENT_MANAGER_BROWSER_US_USER_DATA_DIR",
@@ -1370,6 +1382,12 @@ def runtime_probe_html() -> str:
         "relativeTimeFormatLocale:new Intl.RelativeTimeFormat().resolvedOptions().locale,"
         "intlLocaleRegion:null,"
         "navigatorLanguageRegion:null,"
+        "localeWeekInfo:null,"
+        "localeTextInfo:null,"
+        "localeHourCycles:null,"
+        "localeCalendars:null,"
+        "localeNumberingSystems:null,"
+        "localeTimeZones:null,"
         "numberFormat:new Intl.NumberFormat().format(1234567.89),"
         "currencyFormat:new Intl.NumberFormat(undefined,{style:'currency',currency:'USD'}).format(1234.56),"
         "dateFormat:new Intl.DateTimeFormat(undefined,{dateStyle:'short',timeZone:'UTC'}).format(new Date(Date.UTC(2026,4,22))),"
@@ -1386,6 +1404,14 @@ def runtime_probe_html() -> str:
         "};"
         "try{observed.intlLocaleRegion=new Intl.Locale(observed.intlLocale).region||null;}catch(error){}"
         "try{observed.navigatorLanguageRegion=new Intl.Locale(observed.language).region||null;}catch(error){}"
+        "try{const intlLocale=new Intl.Locale(observed.intlLocale);"
+        "observed.localeWeekInfo=intlLocale.getWeekInfo?intlLocale.getWeekInfo():null;"
+        "observed.localeTextInfo=intlLocale.getTextInfo?intlLocale.getTextInfo():null;"
+        "observed.localeHourCycles=intlLocale.getHourCycles?intlLocale.getHourCycles():null;"
+        "observed.localeCalendars=intlLocale.getCalendars?intlLocale.getCalendars():null;"
+        "observed.localeNumberingSystems=intlLocale.getNumberingSystems?intlLocale.getNumberingSystems():null;"
+        "observed.localeTimeZones=intlLocale.getTimeZones?intlLocale.getTimeZones():null;"
+        "}catch(error){observed.localeInfoError=String(error&&error.name||error);}"
         "try{observed.regionDisplayName=new Intl.DisplayNames(undefined,{type:'region'}).of('US');}catch(error){}"
         "try{"
         "if(navigator.permissions&&navigator.permissions.query){"
@@ -1522,6 +1548,24 @@ def validate_runtime_context(
         mismatches.append("Intl locale region")
     if runtime_context.get("navigatorLanguageRegion") != "US":
         mismatches.append("navigator language region")
+    if runtime_context.get("localeInfoError"):
+        mismatches.append("Intl locale info")
+    if runtime_context.get("localeWeekInfo") != {"firstDay": 7, "weekend": [6, 7]}:
+        mismatches.append("Intl locale week info")
+    if runtime_context.get("localeTextInfo") != {"direction": "ltr"}:
+        mismatches.append("Intl locale text info")
+    locale_hour_cycles = runtime_context.get("localeHourCycles")
+    if not isinstance(locale_hour_cycles, list) or "h12" not in locale_hour_cycles:
+        mismatches.append("Intl locale hour cycles")
+    locale_calendars = runtime_context.get("localeCalendars")
+    if not isinstance(locale_calendars, list) or "gregory" not in locale_calendars:
+        mismatches.append("Intl locale calendars")
+    locale_numbering_systems = runtime_context.get("localeNumberingSystems")
+    if not isinstance(locale_numbering_systems, list) or "latn" not in locale_numbering_systems:
+        mismatches.append("Intl locale numbering systems")
+    locale_time_zones = runtime_context.get("localeTimeZones")
+    if not isinstance(locale_time_zones, list) or timezone_id not in locale_time_zones:
+        mismatches.append("Intl locale time zones")
     if runtime_context.get("numberFormat") != "1,234,567.89":
         mismatches.append("Intl number format")
     if runtime_context.get("currencyFormat") != "$1,234.56":
@@ -1762,6 +1806,24 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation Intl plural rules locale")
     if observed.get("relativeTimeFormatLocale") != APP_LOCALE:
         mismatches.append("automation Intl relative time format locale")
+    if observed.get("localeInfoError"):
+        mismatches.append("automation Intl locale info")
+    if observed.get("localeWeekInfo") != {"firstDay": 7, "weekend": [6, 7]}:
+        mismatches.append("automation Intl locale week info")
+    if observed.get("localeTextInfo") != {"direction": "ltr"}:
+        mismatches.append("automation Intl locale text info")
+    locale_hour_cycles = observed.get("localeHourCycles")
+    if not isinstance(locale_hour_cycles, list) or "h12" not in locale_hour_cycles:
+        mismatches.append("automation Intl locale hour cycles")
+    locale_calendars = observed.get("localeCalendars")
+    if not isinstance(locale_calendars, list) or "gregory" not in locale_calendars:
+        mismatches.append("automation Intl locale calendars")
+    locale_numbering_systems = observed.get("localeNumberingSystems")
+    if not isinstance(locale_numbering_systems, list) or "latn" not in locale_numbering_systems:
+        mismatches.append("automation Intl locale numbering systems")
+    locale_time_zones = observed.get("localeTimeZones")
+    if not isinstance(locale_time_zones, list) or browser_context.get("timezone_id") not in locale_time_zones:
+        mismatches.append("automation Intl locale time zones")
     if observed.get("dateFormat") != "5/22/26":
         mismatches.append("automation Intl date format")
     if observed.get("currencyFormat") != "$1,234.56":
@@ -1876,7 +1938,7 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                               {maximumAge: 0, timeout: 5000}
                             );
                           });
-                          return {
+                          const observed = {
                             userAgent: navigator.userAgent,
                             platform: navigator.platform,
                             userAgentDataMobile: navigator.userAgentData ? navigator.userAgentData.mobile : null,
@@ -1890,6 +1952,12 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             collatorLocale: Intl.Collator().resolvedOptions().locale,
                             pluralRulesLocale: new Intl.PluralRules().resolvedOptions().locale,
                             relativeTimeFormatLocale: new Intl.RelativeTimeFormat().resolvedOptions().locale,
+                            localeWeekInfo: null,
+                            localeTextInfo: null,
+                            localeHourCycles: null,
+                            localeCalendars: null,
+                            localeNumberingSystems: null,
+                            localeTimeZones: null,
                             dateFormat: Intl.DateTimeFormat(undefined, {dateStyle: 'short', timeZone: 'UTC'}).format(new Date(Date.UTC(2026, 4, 22))),
                             currencyFormat: Intl.NumberFormat(undefined, {style: 'currency', currency: 'USD'}).format(1234.56),
                             regionDisplayName: new Intl.DisplayNames(undefined, {type: 'region'}).of('US'),
@@ -1904,6 +1972,18 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             darkColorScheme: window.matchMedia('(prefers-color-scheme: dark)').matches,
                             geolocation: position,
                           };
+                          try {
+                            const intlLocale = new Intl.Locale(observed.intlLocale);
+                            observed.localeWeekInfo = intlLocale.getWeekInfo ? intlLocale.getWeekInfo() : null;
+                            observed.localeTextInfo = intlLocale.getTextInfo ? intlLocale.getTextInfo() : null;
+                            observed.localeHourCycles = intlLocale.getHourCycles ? intlLocale.getHourCycles() : null;
+                            observed.localeCalendars = intlLocale.getCalendars ? intlLocale.getCalendars() : null;
+                            observed.localeNumberingSystems = intlLocale.getNumberingSystems ? intlLocale.getNumberingSystems() : null;
+                            observed.localeTimeZones = intlLocale.getTimeZones ? intlLocale.getTimeZones() : null;
+                          } catch (error) {
+                            observed.localeInfoError = String(error && error.name || error);
+                          }
+                          return observed;
                         }
                         """
                     )

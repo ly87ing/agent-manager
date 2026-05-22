@@ -303,6 +303,20 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_relative_time_format_locale"], "en-US")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_locale_region"], "US")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_navigator_language_region"], "US")
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["runtime_locale_week_info"],
+                {"firstDay": 7, "weekend": [6, 7]},
+            )
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["runtime_locale_text_info"],
+                {"direction": "ltr"},
+            )
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_locale_hour_cycles"], ["h12"])
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_locale_calendars"], ["gregory"])
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_locale_numbering_systems"], ["latn"])
+            self.assertTrue(
+                verification_report["enforced_features"]["automation"]["runtime_locale_timezones_include_current_timezone"]
+            )
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_number_format"], "1,234,567.89")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_currency_format"], "$1,234.56")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_date_format"], "5/22/26")
@@ -332,6 +346,23 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertFalse(verification_report["enforced_features"]["automation"]["desktop_is_mobile"])
             self.assertFalse(verification_report["enforced_features"]["automation"]["desktop_has_touch"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_color_scheme"], "light")
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["automation_locale_week_info"],
+                {"firstDay": 7, "weekend": [6, 7]},
+            )
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["automation_locale_text_info"],
+                {"direction": "ltr"},
+            )
+            self.assertEqual(verification_report["enforced_features"]["automation"]["automation_locale_hour_cycles"], ["h12"])
+            self.assertEqual(verification_report["enforced_features"]["automation"]["automation_locale_calendars"], ["gregory"])
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["automation_locale_numbering_systems"],
+                ["latn"],
+            )
+            self.assertTrue(
+                verification_report["enforced_features"]["automation"]["automation_locale_timezones_include_current_timezone"]
+            )
             self.assertFalse(verification_report["enforced_features"]["webrtc"]["runtime_local_ip_leak"])
             self.assertEqual(verification_report["enforced_features"]["webrtc"]["runtime_private_ip_candidate_count"], 0)
             self.assertEqual(
@@ -706,6 +737,12 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             '"intlCalendar":"gregory","intlNumberingSystem":"latn","intlHourCycle":"h12",'
             '"collatorLocale":"en-US","pluralRulesLocale":"en-US","relativeTimeFormatLocale":"en-US",'
             '"intlLocaleRegion":"US","navigatorLanguageRegion":"US",'
+            '"localeWeekInfo":{"firstDay":7,"weekend":[6,7]},'
+            '"localeTextInfo":{"direction":"ltr"},'
+            '"localeHourCycles":["h12"],'
+            '"localeCalendars":["gregory"],'
+            '"localeNumberingSystems":["latn"],'
+            '"localeTimeZones":["America/Los_Angeles","America/New_York"],'
             '"numberFormat":"1,234,567.89","listFormat":"A, B, and C",'
             '"currencyFormat":"$1,234.56","dateFormat":"5/22/26","regionDisplayName":"United States",'
             '"acceptLanguageHeader":"en-US,en;q=0.9",'
@@ -742,6 +779,12 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertEqual(runtime_context["relativeTimeFormatLocale"], "en-US")
         self.assertEqual(runtime_context["intlLocaleRegion"], "US")
         self.assertEqual(runtime_context["navigatorLanguageRegion"], "US")
+        self.assertEqual(runtime_context["localeWeekInfo"], {"firstDay": 7, "weekend": [6, 7]})
+        self.assertEqual(runtime_context["localeTextInfo"], {"direction": "ltr"})
+        self.assertEqual(runtime_context["localeHourCycles"], ["h12"])
+        self.assertEqual(runtime_context["localeCalendars"], ["gregory"])
+        self.assertEqual(runtime_context["localeNumberingSystems"], ["latn"])
+        self.assertIn("America/Los_Angeles", runtime_context["localeTimeZones"])
         self.assertEqual(runtime_context["numberFormat"], "1,234,567.89")
         self.assertEqual(runtime_context["currencyFormat"], "$1,234.56")
         self.assertEqual(runtime_context["dateFormat"], "5/22/26")
@@ -804,6 +847,12 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "collatorLocale": "en-US",
             "pluralRulesLocale": "en-US",
             "relativeTimeFormatLocale": "en-US",
+            "localeWeekInfo": {"firstDay": 7, "weekend": [6, 7]},
+            "localeTextInfo": {"direction": "ltr"},
+            "localeHourCycles": ["h12"],
+            "localeCalendars": ["gregory"],
+            "localeNumberingSystems": ["latn"],
+            "localeTimeZones": ["America/Los_Angeles", "America/New_York"],
             "dateFormat": "5/22/26",
             "currencyFormat": "$1,234.56",
             "regionDisplayName": "United States",
@@ -853,6 +902,14 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertIn("automation webdriver", mismatches)
 
         observed["webdriver"] = False
+        observed["localeWeekInfo"] = {"firstDay": 1, "weekend": [6, 7]}
+        observed["localeTimeZones"] = ["Asia/Hong_Kong"]
+        mismatches = module.validate_automation_context_observation(observed, browser_context)
+        self.assertIn("automation Intl locale week info", mismatches)
+        self.assertIn("automation Intl locale time zones", mismatches)
+
+        observed["localeWeekInfo"] = {"firstDay": 7, "weekend": [6, 7]}
+        observed["localeTimeZones"] = ["America/Los_Angeles", "America/New_York"]
         observed["innerWidth"] = 390
         observed["maxTouchPoints"] = 5
         observed["coarsePointer"] = True
