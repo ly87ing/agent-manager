@@ -270,6 +270,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(automation_context["browser_context"]["color_scheme"], "light")
             self.assertEqual(automation_context["browser_context"]["hardware_concurrency"], 8)
             self.assertEqual(automation_context["browser_context"]["device_memory_gb"], 8)
+            self.assertEqual(
+                automation_context["browser_context"]["network_information"],
+                {"effective_type": "4g", "rtt_ms": 50, "downlink_mbps": 10, "save_data": False, "type": None},
+            )
             self.assertEqual(automation_context["browser_context"]["webgl_vendor"], "Intel Inc.")
             self.assertEqual(automation_context["browser_context"]["webgl_renderer"], "Intel Iris OpenGL Engine")
             self.assertIn("PingFang SC", automation_context["browser_context"]["blocked_font_families"])
@@ -518,6 +522,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_color_scheme"], "light")
             self.assertEqual(verification_report["enforced_features"]["automation"]["automation_hardware_concurrency"], 8)
             self.assertEqual(verification_report["enforced_features"]["automation"]["automation_device_memory_gb"], 8)
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["automation_network_information"],
+                {"effective_type": "4g", "rtt_ms": 50, "downlink_mbps": 10, "save_data": False, "type": None},
+            )
             self.assertEqual(verification_report["enforced_features"]["automation"]["automation_webgl_vendor"], "Intel Inc.")
             self.assertEqual(
                 verification_report["enforced_features"]["automation"]["automation_webgl_renderer"],
@@ -591,6 +599,11 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_camera_permission_not_granted"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_microphone_permission_not_granted"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_notifications_permission_not_granted"])
+            self.assertEqual(verification_report["enforced_features"]["automation"]["automation_sensitive_permission_grants"], {})
+            self.assertIn(
+                "clipboard-read",
+                verification_report["enforced_features"]["automation"]["automation_permission_probe_names"],
+            )
             self.assertFalse(verification_report["enforced_features"]["webrtc"]["runtime_local_ip_leak"])
             self.assertEqual(verification_report["enforced_features"]["webrtc"]["runtime_private_ip_candidate_count"], 0)
             self.assertTrue(verification_report["enforced_features"]["network_path"]["quic_disabled"])
@@ -1015,6 +1028,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             '"acceptLanguageHeader":"en-US,en;q=0.9",'
             '"geolocationPermission":"denied",'
             '"notificationPermission":"denied",'
+            '"connectionPresent":true,"connectionEffectiveType":"4g","connectionSaveData":false,"connectionType":null,'
             '"webrtcSupported":true,'
             '"webrtcCandidateCount":0,'
             '"webrtcHostCandidateCount":0,'
@@ -1099,6 +1113,9 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertEqual(runtime_context["acceptLanguageHeader"], "en-US,en;q=0.9")
         self.assertEqual(runtime_context["geolocationPermission"], "denied")
         self.assertEqual(runtime_context["notificationPermission"], "denied")
+        self.assertTrue(runtime_context["connectionPresent"])
+        self.assertEqual(runtime_context["connectionEffectiveType"], "4g")
+        self.assertFalse(runtime_context["connectionSaveData"])
         self.assertTrue(runtime_context["webrtcSupported"])
         self.assertEqual(runtime_context["webrtcCandidateCount"], 0)
         self.assertEqual(runtime_context["webrtcHostCandidateCount"], 0)
@@ -1141,6 +1158,13 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "color_scheme": "light",
             "hardware_concurrency": 8,
             "device_memory_gb": 8,
+            "network_information": {
+                "effective_type": "4g",
+                "rtt_ms": 50,
+                "downlink_mbps": 10,
+                "save_data": False,
+                "type": None,
+            },
             "webgl_vendor": "Intel Inc.",
             "webgl_renderer": "Intel Iris OpenGL Engine",
             "blocked_font_families": ["PingFang SC", "MingLiU"],
@@ -1220,6 +1244,29 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "darkColorScheme": False,
             "hardwareConcurrency": 8,
             "deviceMemory": 8,
+            "connectionPresent": True,
+            "connectionEffectiveType": "4g",
+            "connectionRtt": 50,
+            "connectionDownlink": 10,
+            "connectionSaveData": False,
+            "connectionType": None,
+            "permissionStates": {
+                "camera": "denied",
+                "microphone": "denied",
+                "notifications": "denied",
+                "clipboard-read": "denied",
+                "clipboard-write": "denied",
+                "idle-detection": "denied",
+                "persistent-storage": "denied",
+                "background-sync": "denied",
+                "periodic-background-sync": "denied",
+                "payment-handler": "denied",
+                "midi": "denied",
+                "accelerometer": "denied",
+                "gyroscope": "denied",
+                "magnetometer": "denied",
+                "window-management": "denied",
+            },
             "webglVendor": "Intel Inc.",
             "webglRenderer": "Intel Iris OpenGL Engine",
             "fontChecks": {
@@ -1381,6 +1428,12 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         observed["hoverHover"] = False
         observed["hardwareConcurrency"] = 2
         observed["deviceMemory"] = 4
+        observed["connectionEffectiveType"] = "2g"
+        observed["connectionRtt"] = 500
+        observed["connectionDownlink"] = 0.3
+        observed["connectionSaveData"] = True
+        observed["connectionType"] = "cellular"
+        observed["permissionStates"]["clipboard-read"] = "granted"
         observed["webglVendor"] = "Google Inc. (Apple)"
         observed["webglRenderer"] = "ANGLE Metal Renderer"
         observed["fontChecks"] = {
@@ -1427,6 +1480,12 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertIn("automation hover", mismatches)
         self.assertIn("automation hardware concurrency", mismatches)
         self.assertIn("automation device memory", mismatches)
+        self.assertIn("automation network effective type", mismatches)
+        self.assertIn("automation network rtt", mismatches)
+        self.assertIn("automation network downlink", mismatches)
+        self.assertIn("automation network save data", mismatches)
+        self.assertIn("automation network type", mismatches)
+        self.assertIn("automation sensitive permission grants", mismatches)
         self.assertIn("automation WebGL vendor", mismatches)
         self.assertIn("automation WebGL renderer", mismatches)
         self.assertIn("automation blocked font: PingFang SC", mismatches)
@@ -1474,6 +1533,12 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         observed["hoverHover"] = True
         observed["hardwareConcurrency"] = 8
         observed["deviceMemory"] = 8
+        observed["connectionEffectiveType"] = "4g"
+        observed["connectionRtt"] = 50
+        observed["connectionDownlink"] = 10
+        observed["connectionSaveData"] = False
+        observed["connectionType"] = None
+        observed["permissionStates"]["clipboard-read"] = "denied"
         observed["webglVendor"] = "Intel Inc."
         observed["webglRenderer"] = "Intel Iris OpenGL Engine"
         observed["fontChecks"] = {

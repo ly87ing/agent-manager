@@ -53,6 +53,13 @@ US_DESKTOP_HAS_TOUCH = False
 US_DESKTOP_COLOR_SCHEME = "light"
 US_DESKTOP_HARDWARE_CONCURRENCY = 8
 US_DESKTOP_DEVICE_MEMORY_GB = 8
+US_DESKTOP_NETWORK_INFORMATION = {
+    "effective_type": "4g",
+    "rtt_ms": 50,
+    "downlink_mbps": 10,
+    "save_data": False,
+    "type": None,
+}
 US_DESKTOP_WEBGL_VENDOR = "Intel Inc."
 US_DESKTOP_WEBGL_RENDERER = "Intel Iris OpenGL Engine"
 US_CANVAS_FONT_METRIC_FALLBACK_FAMILY = "Arial"
@@ -130,6 +137,23 @@ BASE_CHROME_ARGS = [
 BLOCK_CONTENT_SETTING = 2
 DEVICE_PERMISSION_CONTENT_SETTINGS = ("media_stream_camera", "media_stream_mic", "notifications")
 GOOGLE_HK_MARKERS = ("google.com.hk", "hong kong")
+DENIED_PERMISSION_PROBES = (
+    "camera",
+    "microphone",
+    "notifications",
+    "clipboard-read",
+    "clipboard-write",
+    "idle-detection",
+    "persistent-storage",
+    "background-sync",
+    "periodic-background-sync",
+    "payment-handler",
+    "midi",
+    "accelerometer",
+    "gyroscope",
+    "magnetometer",
+    "window-management",
+)
 SYSTEM_PROFILE_NAMES = {"System Profile", "Guest Profile"}
 MANAGED_PROFILE_VOLATILE_STATE_RELATIVE_PATHS = (
     "Default/Account Web Data",
@@ -630,6 +654,16 @@ def timezone_display_matches(observed: dict, timezone_id: str) -> bool:
     return not needles or any(needle in combined for needle in needles)
 
 
+def permission_states_allow_no_grants(observed: dict, permission_names: tuple[str, ...] = DENIED_PERMISSION_PROBES) -> bool:
+    permission_states = observed.get("permissionStates")
+    if not isinstance(permission_states, dict):
+        return False
+    for permission_name in permission_names:
+        if permission_states.get(permission_name) == "granted":
+            return False
+    return True
+
+
 def sync_local_state(path: Path, enforce_country: bool = True) -> bool:
     data = load_json_mapping(path)
     intl = mapping_section(data, "intl")
@@ -1056,6 +1090,7 @@ def automation_context_payload(exit_profile: ExitProfile | None, managed_user_da
             "color_scheme": US_DESKTOP_COLOR_SCHEME,
             "hardware_concurrency": US_DESKTOP_HARDWARE_CONCURRENCY,
             "device_memory_gb": US_DESKTOP_DEVICE_MEMORY_GB,
+            "network_information": dict(US_DESKTOP_NETWORK_INFORMATION),
             "webgl_vendor": US_DESKTOP_WEBGL_VENDOR,
             "webgl_renderer": US_DESKTOP_WEBGL_RENDERER,
             "blocked_font_families": list(BLOCKED_FONT_FAMILIES),
@@ -1453,6 +1488,7 @@ def verification_report_payload(
                 "desktop_color_scheme": US_DESKTOP_COLOR_SCHEME,
                 "automation_hardware_concurrency": US_DESKTOP_HARDWARE_CONCURRENCY,
                 "automation_device_memory_gb": US_DESKTOP_DEVICE_MEMORY_GB,
+                "automation_network_information": dict(US_DESKTOP_NETWORK_INFORMATION),
                 "automation_webgl_vendor": US_DESKTOP_WEBGL_VENDOR,
                 "automation_webgl_renderer": US_DESKTOP_WEBGL_RENDERER,
                 "automation_blocked_font_families": list(BLOCKED_FONT_FAMILIES),
@@ -1494,6 +1530,8 @@ def verification_report_payload(
                 "automation_camera_permission_not_granted": True,
                 "automation_microphone_permission_not_granted": True,
                 "automation_notifications_permission_not_granted": True,
+                "automation_sensitive_permission_grants": {},
+                "automation_permission_probe_names": list(DENIED_PERMISSION_PROBES),
                 "chrome_launch_args": browser_us_chrome_args(user_agent),
                 "chrome_launcher": "$AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER",
                 "managed_user_data_dir": "$AGENT_MANAGER_BROWSER_US_USER_DATA_DIR",
@@ -1708,6 +1746,10 @@ def runtime_probe_html() -> str:
         "timezoneOffset:new Date().getTimezoneOffset(),"
         "geolocationPermission:null,"
         "notificationPermission:typeof Notification==='function'?Notification.permission:null,"
+        "connectionPresent:!!(navigator.connection||navigator.mozConnection||navigator.webkitConnection),"
+        "connectionEffectiveType:null,"
+        "connectionSaveData:null,"
+        "connectionType:null,"
         "webrtcSupported:typeof RTCPeerConnection==='function',"
         "webrtcCandidateCount:0,"
         "webrtcHostCandidateCount:0,"
@@ -1748,6 +1790,12 @@ def runtime_probe_html() -> str:
         "}catch(error){"
         "observed.geolocationPermissionError=String(error&&error.name||error);"
         "}"
+        "try{const connection=navigator.connection||navigator.mozConnection||navigator.webkitConnection;"
+        "if(connection){"
+        "observed.connectionEffectiveType=connection.effectiveType||null;"
+        "observed.connectionSaveData=Boolean(connection.saveData);"
+        "observed.connectionType=connection.type||null;"
+        "}}catch(error){observed.connectionError=String(error&&error.name||error);}"
         "try{"
         "if(observed.webrtcSupported){"
         "const candidates=[];"
@@ -2039,6 +2087,13 @@ def validate_runtime_context(
         mismatches.append("geolocation permission")
     if runtime_context.get("notificationPermission") != "denied":
         mismatches.append("Notification permission")
+    if runtime_context.get("connectionError"):
+        mismatches.append("network information probe")
+    if runtime_context.get("connectionPresent") is True:
+        if runtime_context.get("connectionEffectiveType") != US_DESKTOP_NETWORK_INFORMATION["effective_type"]:
+            mismatches.append("network information effective type")
+        if runtime_context.get("connectionSaveData") is not US_DESKTOP_NETWORK_INFORMATION["save_data"]:
+            mismatches.append("network information save data")
     if runtime_context.get("profileWebrtcPolicy") != "disable_non_proxied_udp":
         mismatches.append("profile WebRTC policy")
     if runtime_context.get("profileWebrtcNonproxiedUdpEnabled") is not False:
@@ -2249,6 +2304,9 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
     expected_keyboard_layout = (
         browser_context.get("keyboard_layout_map") if isinstance(browser_context.get("keyboard_layout_map"), dict) else None
     )
+    expected_network_information = (
+        browser_context.get("network_information") if isinstance(browser_context.get("network_information"), dict) else None
+    )
     expected_user_agent = browser_context.get("user_agent")
     expected_client_hints_platform = browser_context.get("client_hints_platform")
     expected_navigator_platform = browser_context.get("navigator_platform")
@@ -2392,6 +2450,23 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation hardware concurrency")
     if observed.get("deviceMemory") != browser_context.get("device_memory_gb"):
         mismatches.append("automation device memory")
+    if isinstance(expected_network_information, dict):
+        if observed.get("connectionError"):
+            mismatches.append("automation network information probe")
+        if observed.get("connectionPresent") is not True:
+            mismatches.append("automation network information")
+        if observed.get("connectionEffectiveType") != expected_network_information.get("effective_type"):
+            mismatches.append("automation network effective type")
+        if observed.get("connectionRtt") != expected_network_information.get("rtt_ms"):
+            mismatches.append("automation network rtt")
+        if observed.get("connectionDownlink") != expected_network_information.get("downlink_mbps"):
+            mismatches.append("automation network downlink")
+        if observed.get("connectionSaveData") is not expected_network_information.get("save_data"):
+            mismatches.append("automation network save data")
+        if observed.get("connectionType") != expected_network_information.get("type"):
+            mismatches.append("automation network type")
+    if not permission_states_allow_no_grants(observed):
+        mismatches.append("automation sensitive permission grants")
     if observed.get("webglVendor") != browser_context.get("webgl_vendor"):
         mismatches.append("automation WebGL vendor")
     if observed.get("webglRenderer") != browser_context.get("webgl_renderer"):
@@ -2662,6 +2737,13 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             gyroscopePermission: null,
                             magnetometerPermission: null,
                             windowManagementPermission: null,
+                            permissionStates: {},
+                            connectionPresent: !!(navigator.connection || navigator.mozConnection || navigator.webkitConnection),
+                            connectionEffectiveType: null,
+                            connectionRtt: null,
+                            connectionDownlink: null,
+                            connectionSaveData: null,
+                            connectionType: null,
                             screenDetailsIdentityExposed: false,
                             screenDetailsAccessDenied: false,
                             screenDetailsProbeError: null,
@@ -2694,6 +2776,21 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                           observed.gyroscopePermission = await permissionState('gyroscope');
                           observed.magnetometerPermission = await permissionState('magnetometer');
                           observed.windowManagementPermission = await permissionState('window-management');
+                          for (const permissionName of Array.from(window.__agentManagerPermissionProbeNames || [])) {
+                            observed.permissionStates[permissionName] = await permissionState(permissionName);
+                          }
+                          try {
+                            const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+                            if (connection) {
+                              observed.connectionEffectiveType = connection.effectiveType || null;
+                              observed.connectionRtt = connection.rtt || null;
+                              observed.connectionDownlink = connection.downlink || null;
+                              observed.connectionSaveData = Boolean(connection.saveData);
+                              observed.connectionType = connection.type || null;
+                            }
+                          } catch (error) {
+                            observed.connectionError = String(error && error.name || error);
+                          }
                           try {
                             const fixedDate = new Date(Date.UTC(2026, 4, 22, 12, 0, 0));
                             const timeZoneFormatter = new Intl.DateTimeFormat(undefined, {
@@ -2970,11 +3067,23 @@ def new_us_playwright_context(browser, browser_context: dict):
     navigator_languages = browser_context.get("navigator_languages")
     hardware_concurrency = browser_context.get("hardware_concurrency")
     device_memory_gb = browser_context.get("device_memory_gb")
+    network_information = browser_context.get("network_information")
     webgl_vendor = browser_context.get("webgl_vendor")
     webgl_renderer = browser_context.get("webgl_renderer")
     blocked_font_families = browser_context.get("blocked_font_families")
     font_metric_fallback_family = browser_context.get("font_metric_fallback_family")
     keyboard_layout_map = browser_context.get("keyboard_layout_map")
+    permission_probe_names_json = json.dumps(list(DENIED_PERMISSION_PROBES))
+    context.add_init_script(
+        f"""
+        (() => {{
+          Object.defineProperty(window, '__agentManagerPermissionProbeNames', {{
+            configurable: true,
+            value: Object.freeze(Array.from({permission_probe_names_json})),
+          }});
+        }})();
+        """
+    )
     if isinstance(hardware_concurrency, int) and not isinstance(hardware_concurrency, bool) and hardware_concurrency > 0:
         context.add_init_script(
             f"""
@@ -2997,6 +3106,52 @@ def new_us_playwright_context(browser, browser_context: dict):
             }})();
             """
         )
+    if isinstance(network_information, dict):
+        effective_type = network_information.get("effective_type")
+        rtt_ms = network_information.get("rtt_ms")
+        downlink_mbps = network_information.get("downlink_mbps")
+        save_data = network_information.get("save_data")
+        connection_type = network_information.get("type")
+        if (
+            isinstance(effective_type, str)
+            and isinstance(rtt_ms, int)
+            and not isinstance(rtt_ms, bool)
+            and isinstance(downlink_mbps, (int, float))
+            and not isinstance(downlink_mbps, bool)
+            and isinstance(save_data, bool)
+            and (connection_type is None or isinstance(connection_type, str))
+        ):
+            network_information_json = json.dumps(
+                {
+                    "effectiveType": effective_type,
+                    "rtt": rtt_ms,
+                    "downlink": downlink_mbps,
+                    "saveData": save_data,
+                    "type": connection_type,
+                },
+                sort_keys=True,
+            )
+            context.add_init_script(
+                f"""
+                (() => {{
+                  const networkInformation = Object.freeze(Object.assign({{}}, {network_information_json}));
+                  const patchConnection = (connection) => {{
+                    if (!connection) {{
+                      return;
+                    }}
+                    const connectionPrototype = Object.getPrototypeOf(connection);
+                    const patchTarget = connectionPrototype || connection;
+                    for (const [key, value] of Object.entries(networkInformation)) {{
+                      Object.defineProperty(patchTarget, key, {{
+                        configurable: true,
+                        get: () => value,
+                      }});
+                    }}
+                  }};
+                  patchConnection(navigator.connection || navigator.mozConnection || navigator.webkitConnection);
+                }})();
+                """
+            )
     if isinstance(webgl_vendor, str) and webgl_vendor and isinstance(webgl_renderer, str) and webgl_renderer:
         webgl_vendor_json = json.dumps(webgl_vendor)
         webgl_renderer_json = json.dumps(webgl_renderer)
