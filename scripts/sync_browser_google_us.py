@@ -858,6 +858,8 @@ def verification_report_payload(
                 "multiple_routes_enabled": False,
                 "nonproxied_udp_enabled": False,
                 "chrome_launch_policy": "disable_non_proxied_udp",
+                "runtime_local_ip_leak": False,
+                "runtime_private_ip_candidate_count": 0,
             },
             "geolocation": {
                 "regular_profile_content_setting": BLOCK_CONTENT_SETTING,
@@ -881,6 +883,8 @@ def verification_report_payload(
                 "runtime_list_format": "A, B, and C",
                 "runtime_accept_language_header": "en-US,en;q=0.9",
                 "runtime_geolocation_permission": "denied",
+                "runtime_webrtc_supported": True,
+                "runtime_webrtc_local_ip_leak": False,
                 "runtime_profile_webrtc_policy": "disable_non_proxied_udp",
                 "runtime_profile_geolocation_setting": BLOCK_CONTENT_SETTING,
                 "extra_http_accept_language": "en-US,en;q=0.9",
@@ -1029,7 +1033,13 @@ def runtime_probe_html() -> str:
         "numberFormat:new Intl.NumberFormat().format(1234567.89),"
         "listFormat:new Intl.ListFormat().format(['A','B','C']),"
         "timezoneOffset:new Date().getTimezoneOffset(),"
-        "geolocationPermission:null"
+        "geolocationPermission:null,"
+        "webrtcSupported:typeof RTCPeerConnection==='function',"
+        "webrtcCandidateCount:0,"
+        "webrtcHostCandidateCount:0,"
+        "webrtcMdnsCandidateCount:0,"
+        "webrtcPrivateIpCandidateCount:0,"
+        "webrtcLocalIpLeak:false"
         "};"
         "try{observed.intlLocaleRegion=new Intl.Locale(observed.intlLocale).region||null;}catch(error){}"
         "try{observed.navigatorLanguageRegion=new Intl.Locale(observed.language).region||null;}catch(error){}"
@@ -1039,6 +1049,30 @@ def runtime_probe_html() -> str:
         "}"
         "}catch(error){"
         "observed.geolocationPermissionError=String(error&&error.name||error);"
+        "}"
+        "try{"
+        "if(observed.webrtcSupported){"
+        "const candidates=[];"
+        "const pc=new RTCPeerConnection({iceServers:[]});"
+        "pc.createDataChannel('agent-manager-us-probe');"
+        "pc.onicecandidate=(event)=>{if(event.candidate&&event.candidate.candidate){candidates.push(event.candidate.candidate);}};"
+        "await pc.setLocalDescription(await pc.createOffer());"
+        "await new Promise((resolve)=>{"
+        "let resolved=false;"
+        "const finish=()=>{if(!resolved){resolved=true;resolve();}};"
+        "pc.onicegatheringstatechange=()=>{if(pc.iceGatheringState==='complete'){finish();}};"
+        "setTimeout(finish,1500);"
+        "});"
+        "pc.close();"
+        "const privatePattern=/\\b(10(?:\\.\\d{1,3}){3}|192\\.168(?:\\.\\d{1,3}){2}|172\\.(?:1[6-9]|2\\d|3[0-1])(?:\\.\\d{1,3}){2}|127(?:\\.\\d{1,3}){3}|169\\.254(?:\\.\\d{1,3}){2}|::1|f[cd][0-9a-f]{2}:|fe80:)\\b/i;"
+        "observed.webrtcCandidateCount=candidates.length;"
+        "observed.webrtcHostCandidateCount=candidates.filter((candidate)=>/\\btyp host\\b/i.test(candidate)).length;"
+        "observed.webrtcMdnsCandidateCount=candidates.filter((candidate)=>/\\.local\\b/i.test(candidate)).length;"
+        "observed.webrtcPrivateIpCandidateCount=candidates.filter((candidate)=>privatePattern.test(candidate)).length;"
+        "observed.webrtcLocalIpLeak=observed.webrtcHostCandidateCount>0||observed.webrtcMdnsCandidateCount>0||observed.webrtcPrivateIpCandidateCount>0;"
+        "}"
+        "}catch(error){"
+        "observed.webrtcProbeError=String(error&&error.name||error);"
         "}"
         "document.body.textContent="
         + marker
@@ -1117,6 +1151,14 @@ def validate_runtime_context(runtime_context: dict, timezone_id: str) -> tuple[s
         mismatches.append("profile WebRTC policy")
     if runtime_context.get("profileWebrtcNonproxiedUdpEnabled") is not False:
         mismatches.append("profile WebRTC nonproxied UDP")
+    if runtime_context.get("webrtcSupported") is not True:
+        mismatches.append("WebRTC runtime probe support")
+    if runtime_context.get("webrtcProbeError"):
+        mismatches.append("WebRTC runtime probe")
+    if runtime_context.get("webrtcLocalIpLeak") is not False:
+        mismatches.append("WebRTC local IP leak")
+    if runtime_context.get("webrtcPrivateIpCandidateCount") != 0:
+        mismatches.append("WebRTC private IP candidates")
     if runtime_context.get("profileGeolocationSetting") != BLOCK_CONTENT_SETTING:
         mismatches.append("profile geolocation setting")
     return tuple(mismatches)
@@ -1592,7 +1634,8 @@ def resolve_runtime_context(args: argparse.Namespace, config_dir: Path, exit_res
             f"languages: {observed.get('languages')}, "
             f"timezone: {observed.get('timezone')}, "
             f"Accept-Language: {observed.get('acceptLanguageHeader')}, "
-            f"geolocation permission: {observed.get('geolocationPermission')}"
+            f"geolocation permission: {observed.get('geolocationPermission')}, "
+            f"WebRTC local IP leak: {observed.get('webrtcLocalIpLeak')}"
         )
         return runtime_resolution
 

@@ -186,8 +186,12 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_list_format"], "A, B, and C")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_accept_language_header"], "en-US,en;q=0.9")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_geolocation_permission"], "denied")
+            self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_webrtc_supported"])
+            self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_webrtc_local_ip_leak"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_profile_webrtc_policy"], "disable_non_proxied_udp")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_profile_geolocation_setting"], 2)
+            self.assertFalse(verification_report["enforced_features"]["webrtc"]["runtime_local_ip_leak"])
+            self.assertEqual(verification_report["enforced_features"]["webrtc"]["runtime_private_ip_candidate_count"], 0)
             self.assertEqual(
                 verification_report["enforced_features"]["automation"]["managed_user_data_dir"],
                 "$AGENT_MANAGER_BROWSER_US_USER_DATA_DIR",
@@ -530,6 +534,12 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             '"numberFormat":"1,234,567.89","listFormat":"A, B, and C",'
             '"acceptLanguageHeader":"en-US,en;q=0.9",'
             '"geolocationPermission":"denied",'
+            '"webrtcSupported":true,'
+            '"webrtcCandidateCount":0,'
+            '"webrtcHostCandidateCount":0,'
+            '"webrtcMdnsCandidateCount":0,'
+            '"webrtcPrivateIpCandidateCount":0,'
+            '"webrtcLocalIpLeak":false,'
             '"profileWebrtcPolicy":"disable_non_proxied_udp",'
             '"profileWebrtcNonproxiedUdpEnabled":false,'
             '"profileGeolocationSetting":2}'
@@ -557,6 +567,12 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertEqual(runtime_context["listFormat"], "A, B, and C")
         self.assertEqual(runtime_context["acceptLanguageHeader"], "en-US,en;q=0.9")
         self.assertEqual(runtime_context["geolocationPermission"], "denied")
+        self.assertTrue(runtime_context["webrtcSupported"])
+        self.assertEqual(runtime_context["webrtcCandidateCount"], 0)
+        self.assertEqual(runtime_context["webrtcHostCandidateCount"], 0)
+        self.assertEqual(runtime_context["webrtcMdnsCandidateCount"], 0)
+        self.assertEqual(runtime_context["webrtcPrivateIpCandidateCount"], 0)
+        self.assertFalse(runtime_context["webrtcLocalIpLeak"])
         self.assertEqual(runtime_context["profileWebrtcPolicy"], "disable_non_proxied_udp")
         self.assertFalse(runtime_context["profileWebrtcNonproxiedUdpEnabled"])
         self.assertEqual(runtime_context["profileGeolocationSetting"], 2)
