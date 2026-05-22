@@ -163,6 +163,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["overall_status"], "limited")
             self.assertEqual(verification_report["exit"]["verification_state"], "manually_skipped")
             self.assertEqual(verification_report["google_domain"]["verification_state"], "exit_check_skipped")
+            self.assertEqual(verification_report["browser_google"]["verification_state"], "exit_check_skipped")
             self.assertEqual(verification_report["runtime"]["verification_state"], "exit_check_skipped")
             self.assertEqual(verification_report["automation_context"]["verification_state"], "exit_check_skipped")
             self.assertTrue(verification_report["browser_state_audit"]["overall_ok"])
@@ -173,6 +174,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["local_state_country"]["variations_country"], "us")
             self.assertEqual(verification_report["enforced_features"]["google"]["home_url"], "https://www.google.com/?hl=en-US&gl=US&pws=0")
             self.assertEqual(verification_report["enforced_features"]["google"]["search_gl"], "US")
+            self.assertEqual(verification_report["enforced_features"]["google"]["browser_google_after_ncr"], "https://www.google.com/?hl=en-US&gl=US&pws=0")
             self.assertEqual(verification_report["enforced_features"]["automation"]["chrome_launcher"], "$AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER")
             self.assertEqual(verification_report["enforced_features"]["automation"]["default_url"], "https://www.google.com/ncr")
             self.assertEqual(
@@ -263,6 +265,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["overall_status"], "complete")
             self.assertEqual(verification_report["exit"]["verification_state"], "verified_us")
             self.assertEqual(verification_report["google_domain"]["verification_state"], "exit_profile_json_skipped")
+            self.assertEqual(verification_report["browser_google"]["verification_state"], "exit_profile_json_skipped")
             self.assertEqual(verification_report["runtime"]["verification_state"], "exit_profile_json_skipped")
             self.assertEqual(verification_report["automation_context"]["verification_state"], "exit_profile_json_skipped")
             self.assertTrue(verification_report["browser_state_audit"]["overall_ok"])
@@ -620,3 +623,21 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertIn("automation timezone", mismatches)
         self.assertIn("automation geolocation latitude", mismatches)
         self.assertIn("automation geolocation longitude", mismatches)
+
+    def test_browser_google_marker_detection_catches_hk_signals(self):
+        spec = importlib.util.spec_from_file_location("sync_browser_google_us_test", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.modules.pop(spec.name, None)
+
+        self.assertEqual(
+            module.google_hk_markers_from_text(
+                "https://www.google.com/?hl=en-US&gl=US&pws=0",
+                "<html><a href='https://www.google.com.hk/imghp'>Images</a> Hong Kong</html>",
+            ),
+            ("google.com.hk", "hong kong"),
+        )
+        self.assertEqual(module.google_hk_markers_from_text("https://www.google.com/", "Google"), ())

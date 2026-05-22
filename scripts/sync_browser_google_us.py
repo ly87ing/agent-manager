@@ -93,6 +93,17 @@ class GoogleDomainResolution:
 
 
 @dataclass(frozen=True)
+class BrowserGoogleResolution:
+    return_code: int
+    verification_state: str
+    final_url: str | None = None
+    title: str | None = None
+    hk_markers: tuple[str, ...] = ()
+    process_state: str | None = None
+    errors: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class RuntimeResolution:
     return_code: int
     verification_state: str
@@ -369,6 +380,17 @@ def google_domain_payload(google_domain_resolution: GoogleDomainResolution) -> d
         "final_url": google_domain_resolution.final_url,
         "hk_markers": list(google_domain_resolution.hk_markers),
         "errors": list(google_domain_resolution.errors),
+    }
+
+
+def browser_google_payload(browser_google_resolution: BrowserGoogleResolution) -> dict:
+    return {
+        "verification_state": browser_google_resolution.verification_state,
+        "final_url": browser_google_resolution.final_url,
+        "title": browser_google_resolution.title,
+        "hk_markers": list(browser_google_resolution.hk_markers),
+        "process_state": browser_google_resolution.process_state,
+        "errors": list(browser_google_resolution.errors),
     }
 
 
@@ -798,6 +820,7 @@ def verification_report_payload(
     exit_profile: ExitProfile | None,
     verification_state: str,
     google_domain_resolution: GoogleDomainResolution,
+    browser_google_resolution: BrowserGoogleResolution,
     runtime_resolution: RuntimeResolution,
     automation_context_resolution: AutomationContextResolution,
     browser_state_audit: dict,
@@ -806,11 +829,19 @@ def verification_report_payload(
     geolocation = resolved_geolocation(exit_profile)
     state_ok = browser_state_audit.get("overall_ok") is True
     google_domain_ok = google_domain_resolution.return_code == 0
+    browser_google_ok = browser_google_resolution.return_code == 0
     runtime_ok = runtime_resolution.return_code == 0
     automation_context_ok = automation_context_resolution.return_code == 0
-    if verification_state == "verified_us" and state_ok and google_domain_ok and runtime_ok and automation_context_ok:
+    if (
+        verification_state == "verified_us"
+        and state_ok
+        and google_domain_ok
+        and browser_google_ok
+        and runtime_ok
+        and automation_context_ok
+    ):
         overall_status = "complete"
-    elif state_ok and google_domain_ok and runtime_ok and automation_context_ok:
+    elif state_ok and google_domain_ok and browser_google_ok and runtime_ok and automation_context_ok:
         overall_status = "limited"
     else:
         overall_status = "failed"
@@ -822,6 +853,7 @@ def verification_report_payload(
             "profile": exit_profile_payload(exit_profile),
         },
         "google_domain": google_domain_payload(google_domain_resolution),
+        "browser_google": browser_google_payload(browser_google_resolution),
         "runtime": runtime_payload(runtime_resolution),
         "automation_context": automation_context_verification_payload(automation_context_resolution),
         "browser_state_audit": browser_state_audit,
@@ -873,6 +905,7 @@ def verification_report_payload(
                 "search_gl": "US",
                 "search_hl": "en-US",
                 "hk_markers_blocked_after_ncr": list(GOOGLE_HK_MARKERS),
+                "browser_google_after_ncr": GOOGLE_HOME_URL,
             },
             "webrtc": {
                 "ip_handling_policy": "disable_non_proxied_udp",
@@ -933,6 +966,7 @@ def sync_verification_report(
     exit_profile: ExitProfile | None,
     verification_state: str,
     google_domain_resolution: GoogleDomainResolution,
+    browser_google_resolution: BrowserGoogleResolution,
     runtime_resolution: RuntimeResolution,
     automation_context_resolution: AutomationContextResolution,
     browser_state_audit: dict,
@@ -945,6 +979,7 @@ def sync_verification_report(
         exit_profile,
         verification_state,
         google_domain_resolution,
+        browser_google_resolution,
         runtime_resolution,
         automation_context_resolution,
         browser_state_audit,
@@ -1034,6 +1069,11 @@ def verify_google_domain_after_ncr(timeout: float) -> GoogleDomainResolution:
     if hk_markers:
         return GoogleDomainResolution(4, "hk_detected_failed", final_url=final_url, hk_markers=hk_markers)
     return GoogleDomainResolution(0, "verified_google_com_after_ncr", final_url=final_url)
+
+
+def google_hk_markers_from_text(*values: str | None) -> tuple[str, ...]:
+    combined_text = "\n".join(value for value in values if isinstance(value, str)).lower()
+    return tuple(marker for marker in GOOGLE_HK_MARKERS if marker.lower() in combined_text)
 
 
 RUNTIME_JSON_MARKER = "AGENT_MANAGER_RUNTIME_JSON:"
@@ -1476,6 +1516,98 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
     return AutomationContextResolution(0, "verified_automation_context_us", observed=observed, process_state="verified")
 
 
+def load_automation_browser_context(config_dir: Path) -> dict | AutomationContextResolution:
+    try:
+        context_payload = load_json_mapping(config_dir / "browser-us-context.json")
+    except ValueError as exc:
+        return AutomationContextResolution(6, "context_invalid_failed", errors=(str(exc),))
+    browser_context = context_payload.get("browser_context")
+    if not isinstance(browser_context, dict):
+        return AutomationContextResolution(6, "context_invalid_failed", errors=("browser_context must be an object",))
+    return browser_context
+
+
+def new_us_playwright_context(browser, browser_context: dict):
+    return browser.new_context(
+        locale=browser_context.get("locale"),
+        timezone_id=browser_context.get("timezone_id"),
+        geolocation=browser_context.get("geolocation"),
+        permissions=browser_context.get("permissions") or [],
+        extra_http_headers=browser_context.get("extra_http_headers") or {},
+    )
+
+
+def verify_google_domain_with_browser_context(
+    config_dir: Path,
+    timeout: float,
+    platform_name: str,
+) -> BrowserGoogleResolution:
+    if timeout <= 0:
+        return BrowserGoogleResolution(7, "invalid_timeout", errors=("browser Google timeout must be positive",))
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        return BrowserGoogleResolution(7, "playwright_missing_failed", errors=(str(exc),))
+
+    browser_context = load_automation_browser_context(config_dir)
+    if isinstance(browser_context, AutomationContextResolution):
+        return BrowserGoogleResolution(
+            7,
+            browser_context.verification_state,
+            errors=browser_context.errors,
+            process_state=browser_context.process_state,
+        )
+
+    browser = None
+    context = None
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(
+                timeout=max(1000, int(timeout * 1000)),
+                **playwright_chrome_launch_options(platform_name),
+            )
+            try:
+                context = new_us_playwright_context(browser, browser_context)
+                page = context.new_page()
+                page.goto(NCR_URL, wait_until="domcontentloaded", timeout=max(1000, int(timeout * 1000)))
+                page.goto(GOOGLE_HOME_URL, wait_until="domcontentloaded", timeout=max(1000, int(timeout * 1000)))
+                final_url = page.url
+                title = page.title()
+                try:
+                    body_text = page.locator("body").inner_text(timeout=max(1000, int(min(timeout, 5) * 1000)))
+                except Exception:
+                    body_text = ""
+                html = page.content()
+            finally:
+                if context is not None:
+                    context.close()
+                if browser is not None:
+                    browser.close()
+    except Exception as exc:
+        return BrowserGoogleResolution(7, "browser_google_failed", process_state="failed", errors=(str(exc),))
+
+    parsed_host = urllib.parse.urlparse(final_url).netloc.lower()
+    hk_markers = google_hk_markers_from_text(final_url, title, body_text, html)
+    if parsed_host.endswith("google.com.hk") and "final_url_host:google.com.hk" not in hk_markers:
+        hk_markers = (*hk_markers, "final_url_host:google.com.hk")
+    if hk_markers:
+        return BrowserGoogleResolution(
+            7,
+            "browser_google_hk_detected_failed",
+            final_url=final_url,
+            title=title,
+            hk_markers=hk_markers,
+            process_state="verified_with_hk_markers",
+        )
+    return BrowserGoogleResolution(
+        0,
+        "verified_browser_google_com_after_ncr",
+        final_url=final_url,
+        title=title,
+        process_state="verified",
+    )
+
+
 EXIT_PROFILE_PROBES = [
     "https://ipinfo.io/json",
     "https://ipapi.co/json",
@@ -1586,6 +1718,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="warn instead of failing when google.com/ncr domain verification cannot be completed",
     )
     parser.add_argument(
+        "--skip-browser-google-check",
+        action="store_true",
+        default=os.environ.get("AGENT_MANAGER_BROWSER_US_SKIP_BROWSER_GOOGLE_CHECK") == "1",
+        help="skip the live Chrome/Playwright google.com/ncr verification",
+    )
+    parser.add_argument(
+        "--allow-unverified-browser-google",
+        action="store_true",
+        default=os.environ.get("AGENT_MANAGER_BROWSER_US_ALLOW_UNVERIFIED_BROWSER_GOOGLE") == "1",
+        help="warn instead of failing when live Chrome/Playwright google.com/ncr verification cannot be completed",
+    )
+    parser.add_argument(
+        "--browser-google-check-timeout",
+        type=float,
+        default=float(os.environ.get("AGENT_MANAGER_BROWSER_US_BROWSER_GOOGLE_CHECK_TIMEOUT", "20")),
+        help="timeout in seconds for live Chrome/Playwright google.com/ncr verification",
+    )
+    parser.add_argument(
         "--skip-runtime-check",
         action="store_true",
         default=os.environ.get("AGENT_MANAGER_BROWSER_US_SKIP_RUNTIME_CHECK") == "1",
@@ -1649,6 +1799,8 @@ def print_dry_run(args: argparse.Namespace, browser_roots: list[BrowserRoot], co
     print(f"Would write verification report under {config_dir}")
     if not args.offline and not args.skip_exit_check and not args.skip_google_domain_check:
         print("Would verify google.com/ncr keeps Google on google.com instead of google.com.hk")
+    if not args.offline and not args.skip_exit_check and not args.skip_browser_google_check:
+        print("Would verify Chrome/Playwright keeps Google on google.com instead of google.com.hk")
     if not args.offline and not args.skip_exit_check and not args.skip_runtime_check:
         print("Would verify headless Chrome runtime language, languages, Intl locale, and timezone")
     if not args.offline and not args.skip_exit_check and not args.skip_automation_context_check:
@@ -1798,6 +1950,59 @@ def resolve_google_domain(args: argparse.Namespace, exit_resolution: ExitResolut
     return google_domain_resolution
 
 
+def resolve_browser_google(
+    args: argparse.Namespace,
+    config_dir: Path,
+    exit_resolution: ExitResolution,
+    platform_name: str,
+) -> BrowserGoogleResolution:
+    if args.offline:
+        return BrowserGoogleResolution(0, "offline_skipped")
+    if args.skip_exit_check:
+        return BrowserGoogleResolution(0, "exit_check_skipped")
+    if args.skip_browser_google_check:
+        return BrowserGoogleResolution(0, "manually_skipped")
+    if args.exit_profile_json:
+        return BrowserGoogleResolution(0, "exit_profile_json_skipped")
+    if exit_resolution.verification_state != "verified_us":
+        return BrowserGoogleResolution(0, "exit_not_verified_us_skipped")
+
+    browser_google_resolution = verify_google_domain_with_browser_context(
+        config_dir,
+        args.browser_google_check_timeout,
+        platform_name,
+    )
+    if browser_google_resolution.return_code == 0:
+        print(f"Verified browser Google domain after NCR: {browser_google_resolution.final_url}")
+        return browser_google_resolution
+
+    if browser_google_resolution.verification_state == "browser_google_failed" and args.allow_unverified_browser_google:
+        print("WARN: could not verify browser Google domain state", file=sys.stderr)
+        for error in browser_google_resolution.errors[:3]:
+            print(f"WARN: {error}", file=sys.stderr)
+        return BrowserGoogleResolution(
+            0,
+            "unverified_allowed",
+            final_url=browser_google_resolution.final_url,
+            title=browser_google_resolution.title,
+            hk_markers=browser_google_resolution.hk_markers,
+            process_state=browser_google_resolution.process_state,
+            errors=browser_google_resolution.errors,
+        )
+
+    if browser_google_resolution.hk_markers:
+        print(
+            "ERROR: browser Google NCR verification still found HK markers: "
+            f"{', '.join(browser_google_resolution.hk_markers)}",
+            file=sys.stderr,
+        )
+    else:
+        print("ERROR: could not verify browser Google domain state", file=sys.stderr)
+        for error in browser_google_resolution.errors[:3]:
+            print(f"ERROR: {error}", file=sys.stderr)
+    return browser_google_resolution
+
+
 def resolve_runtime_context(args: argparse.Namespace, config_dir: Path, exit_resolution: ExitResolution) -> RuntimeResolution:
     if args.offline:
         return RuntimeResolution(0, "offline_skipped")
@@ -1914,6 +2119,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.runtime_check_timeout <= 0:
         print("ERROR: --runtime-check-timeout must be positive", file=sys.stderr)
         return 2
+    if args.browser_google_check_timeout <= 0:
+        print("ERROR: --browser-google-check-timeout must be positive", file=sys.stderr)
+        return 2
     if args.automation_context_check_timeout <= 0:
         print("ERROR: --automation-context-check-timeout must be positive", file=sys.stderr)
         return 2
@@ -1939,12 +2147,19 @@ def main(argv: list[str] | None = None) -> int:
     browser_state_audit = audit_browser_state(browser_roots, args.profile, managed_browser_root)
     google_domain_resolution = resolve_google_domain(args, exit_resolution)
     if google_domain_resolution.return_code == 0:
-        runtime_resolution = resolve_runtime_context(args, config_dir, exit_resolution)
-        if runtime_resolution.return_code == 0:
+        browser_google_resolution = resolve_browser_google(args, config_dir, exit_resolution, platform_name)
+        if browser_google_resolution.return_code == 0:
+            runtime_resolution = resolve_runtime_context(args, config_dir, exit_resolution)
+        else:
+            runtime_resolution = RuntimeResolution(0, "browser_google_failed_skipped")
+        if browser_google_resolution.return_code == 0 and runtime_resolution.return_code == 0:
             automation_context_resolution = resolve_automation_context(args, config_dir, exit_resolution, platform_name)
+        elif browser_google_resolution.return_code != 0:
+            automation_context_resolution = AutomationContextResolution(0, "browser_google_failed_skipped")
         else:
             automation_context_resolution = AutomationContextResolution(0, "runtime_failed_skipped")
     else:
+        browser_google_resolution = BrowserGoogleResolution(0, "google_domain_failed_skipped")
         runtime_resolution = RuntimeResolution(0, "google_domain_failed_skipped")
         automation_context_resolution = AutomationContextResolution(0, "google_domain_failed_skipped")
     changed_paths.extend(
@@ -1956,6 +2171,7 @@ def main(argv: list[str] | None = None) -> int:
             exit_resolution.exit_profile,
             exit_resolution.verification_state,
             google_domain_resolution,
+            browser_google_resolution,
             runtime_resolution,
             automation_context_resolution,
             browser_state_audit,
@@ -1966,6 +2182,8 @@ def main(argv: list[str] | None = None) -> int:
         return 3
     if google_domain_resolution.return_code != 0:
         return google_domain_resolution.return_code
+    if browser_google_resolution.return_code != 0:
+        return browser_google_resolution.return_code
     if runtime_resolution.return_code != 0:
         return runtime_resolution.return_code
     if automation_context_resolution.return_code != 0:
