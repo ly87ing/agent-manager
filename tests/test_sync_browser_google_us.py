@@ -272,6 +272,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(automation_context["browser_context"]["device_memory_gb"], 8)
             self.assertEqual(automation_context["browser_context"]["webgl_vendor"], "Intel Inc.")
             self.assertEqual(automation_context["browser_context"]["webgl_renderer"], "Intel Iris OpenGL Engine")
+            self.assertIn("PingFang SC", automation_context["browser_context"]["blocked_font_families"])
+            self.assertIn("MingLiU", automation_context["browser_context"]["blocked_font_families"])
             self.assertEqual(automation_context["google"]["home_url"], "https://www.google.com/?hl=en-US&gl=US&pws=0")
             self.assertEqual(automation_context["chrome_launch"]["launcher"], str(launcher_path))
             self.assertEqual(automation_context["chrome_launch"]["managed_user_data_dir"], str(managed_profile_root))
@@ -458,6 +460,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(
                 verification_report["enforced_features"]["automation"]["automation_webgl_renderer"],
                 "Intel Iris OpenGL Engine",
+            )
+            self.assertIn(
+                "PingFang SC",
+                verification_report["enforced_features"]["automation"]["automation_blocked_font_families"],
             )
             self.assertEqual(
                 verification_report["enforced_features"]["automation"]["automation_locale_week_info"],
@@ -986,6 +992,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "device_memory_gb": 8,
             "webgl_vendor": "Intel Inc.",
             "webgl_renderer": "Intel Iris OpenGL Engine",
+            "blocked_font_families": ["PingFang SC", "MingLiU"],
         }
         observed = {
             "userAgent": browser_context["user_agent"],
@@ -1042,6 +1049,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "deviceMemory": 8,
             "webglVendor": "Intel Inc.",
             "webglRenderer": "Intel Iris OpenGL Engine",
+            "fontChecks": {"blocked": {"PingFang SC": False, "MingLiU": False}},
             "pdfViewerEnabled": True,
             "pluginsLength": 5,
             "mimeTypesLength": 2,
@@ -1138,6 +1146,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         observed["deviceMemory"] = 4
         observed["webglVendor"] = "Google Inc. (Apple)"
         observed["webglRenderer"] = "ANGLE Metal Renderer"
+        observed["fontChecks"] = {"blocked": {"PingFang SC": True, "MingLiU": False}}
         observed["pluginsLength"] = 0
         mismatches = module.validate_automation_context_observation(observed, browser_context)
 
@@ -1150,6 +1159,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertIn("automation device memory", mismatches)
         self.assertIn("automation WebGL vendor", mismatches)
         self.assertIn("automation WebGL renderer", mismatches)
+        self.assertIn("automation blocked font: PingFang SC", mismatches)
         self.assertIn("automation plugins", mismatches)
 
         observed["innerWidth"] = 1365
@@ -1161,6 +1171,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         observed["deviceMemory"] = 8
         observed["webglVendor"] = "Intel Inc."
         observed["webglRenderer"] = "Intel Iris OpenGL Engine"
+        observed["fontChecks"] = {"blocked": {"PingFang SC": False, "MingLiU": False}}
         observed["pluginsLength"] = 5
         observed["cameraPermission"] = "granted"
         observed["languages"] = ["en-US"]

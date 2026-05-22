@@ -51,6 +51,19 @@ US_DESKTOP_HARDWARE_CONCURRENCY = 8
 US_DESKTOP_DEVICE_MEMORY_GB = 8
 US_DESKTOP_WEBGL_VENDOR = "Intel Inc."
 US_DESKTOP_WEBGL_RENDERER = "Intel Iris OpenGL Engine"
+BLOCKED_FONT_FAMILIES = (
+    "PingFang SC",
+    "PingFang TC",
+    "Hiragino Sans GB",
+    "Heiti SC",
+    "Songti SC",
+    "Microsoft YaHei",
+    "SimSun",
+    "MingLiU",
+    "PMingLiU",
+    "Noto Sans CJK SC",
+    "Noto Sans CJK TC",
+)
 EXIT_PROFILE_GEOLOCATION_ACCURACY = 50000
 VERIFICATION_REPORT_VERSION = 1
 FALLBACK_CHROME_VERSION = "120.0.0.0"
@@ -939,6 +952,7 @@ def automation_context_payload(exit_profile: ExitProfile | None, managed_user_da
             "device_memory_gb": US_DESKTOP_DEVICE_MEMORY_GB,
             "webgl_vendor": US_DESKTOP_WEBGL_VENDOR,
             "webgl_renderer": US_DESKTOP_WEBGL_RENDERER,
+            "blocked_font_families": list(BLOCKED_FONT_FAMILIES),
         },
         "chrome_launch": {
             "args": [
@@ -1301,6 +1315,7 @@ def verification_report_payload(
                 "automation_device_memory_gb": US_DESKTOP_DEVICE_MEMORY_GB,
                 "automation_webgl_vendor": US_DESKTOP_WEBGL_VENDOR,
                 "automation_webgl_renderer": US_DESKTOP_WEBGL_RENDERER,
+                "automation_blocked_font_families": list(BLOCKED_FONT_FAMILIES),
                 "automation_locale_week_info": {"firstDay": 7, "weekend": [6, 7]},
                 "automation_locale_text_info": {"direction": "ltr"},
                 "automation_locale_hour_cycles": ["h12"],
@@ -2122,6 +2137,15 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation WebGL vendor")
     if observed.get("webglRenderer") != browser_context.get("webgl_renderer"):
         mismatches.append("automation WebGL renderer")
+    expected_blocked_fonts = browser_context.get("blocked_font_families")
+    observed_blocked_fonts = (observed.get("fontChecks") or {}).get("blocked")
+    if isinstance(expected_blocked_fonts, list) and expected_blocked_fonts:
+        if not isinstance(observed_blocked_fonts, dict):
+            mismatches.append("automation blocked font checks")
+        else:
+            for font_family in expected_blocked_fonts:
+                if observed_blocked_fonts.get(font_family) is not False:
+                    mismatches.append(f"automation blocked font: {font_family}")
     if observed.get("pdfViewerEnabled") is not True:
         mismatches.append("automation pdf viewer")
     if not positive_integer(observed.get("pluginsLength")):
@@ -2251,6 +2275,7 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             deviceMemory: navigator.deviceMemory,
                             webglVendor: null,
                             webglRenderer: null,
+                            fontChecks: {blocked: {}},
                             pdfViewerEnabled: navigator.pdfViewerEnabled,
                             pluginsLength: navigator.plugins.length,
                             mimeTypesLength: navigator.mimeTypes.length,
@@ -2285,6 +2310,16 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             }
                           } catch (error) {
                             observed.webglError = String(error && error.name || error);
+                          }
+                          try {
+                            const blockedFontFamilies = Array.from(window.__agentManagerBlockedFontFamilies || []);
+                            for (const fontFamily of blockedFontFamilies) {
+                              observed.fontChecks.blocked[fontFamily] = document.fonts && document.fonts.check
+                                ? document.fonts.check('12px "' + fontFamily.replace(/"/g, '') + '"')
+                                : null;
+                            }
+                          } catch (error) {
+                            observed.fontCheckError = String(error && error.name || error);
                           }
                           try {
                             const intlLocale = new Intl.Locale(observed.intlLocale);
@@ -2380,6 +2415,7 @@ def new_us_playwright_context(browser, browser_context: dict):
     device_memory_gb = browser_context.get("device_memory_gb")
     webgl_vendor = browser_context.get("webgl_vendor")
     webgl_renderer = browser_context.get("webgl_renderer")
+    blocked_font_families = browser_context.get("blocked_font_families")
     if isinstance(hardware_concurrency, int) and not isinstance(hardware_concurrency, bool) and hardware_concurrency > 0:
         context.add_init_script(
             f"""
@@ -2433,6 +2469,47 @@ def new_us_playwright_context(browser, browser_context: dict):
             }})();
             """
         )
+    if isinstance(blocked_font_families, list) and blocked_font_families:
+        blocked_font_names = [font for font in blocked_font_families if isinstance(font, str) and font]
+        if blocked_font_names:
+            blocked_font_names_json = json.dumps(blocked_font_names)
+            context.add_init_script(
+                f"""
+                (() => {{
+                  const blockedFontFamilies = Object.freeze(Array.from({blocked_font_names_json}));
+                  const blockedFontNeedles = blockedFontFamilies.map((font) => font.toLowerCase());
+                  Object.defineProperty(window, '__agentManagerBlockedFontFamilies', {{
+                    configurable: true,
+                    value: blockedFontFamilies,
+                  }});
+                  const shouldBlockFont = (font) => {{
+                    const fontText = String(font || '').toLowerCase();
+                    return blockedFontNeedles.some((blockedFont) => fontText.includes(blockedFont));
+                  }};
+                  const patchFontCheck = (target) => {{
+                    if (!target || !target.check) {{
+                      return;
+                    }}
+                    const originalCheck = target.check;
+                    Object.defineProperty(target, 'check', {{
+                      configurable: true,
+                      value(font, text) {{
+                        if (shouldBlockFont(font)) {{
+                          return false;
+                        }}
+                        return originalCheck.apply(this, arguments);
+                      }},
+                    }});
+                  }};
+                  if (window.FontFaceSet && FontFaceSet.prototype) {{
+                    patchFontCheck(FontFaceSet.prototype);
+                  }}
+                  if (document.fonts) {{
+                    patchFontCheck(document.fonts);
+                  }}
+                }})();
+                """
+            )
     if isinstance(navigator_languages, list) and navigator_languages:
         languages_json = json.dumps(navigator_languages)
         context.add_init_script(
