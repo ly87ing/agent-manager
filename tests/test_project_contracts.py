@@ -127,6 +127,7 @@ class ProjectContractTests(unittest.TestCase):
                 "mcp:sync",
                 "mcp:prepare",
                 "tools:sync",
+                "browser:sync",
             ):
                 result = subprocess.run(
                     ["make", goal],
@@ -152,6 +153,7 @@ class ProjectContractTests(unittest.TestCase):
                     "mcp:sync",
                     "mcp:prepare",
                     "tools:sync",
+                    "browser:sync",
                 ],
             )
 

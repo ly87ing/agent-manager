@@ -882,6 +882,13 @@ function run_tools_sync_task() {
     run_task_in_dir "同步全局工具" "工具链同步完成" "工具失败" 600 "$ROOT_DIR/agent-tool" "$PYTHON_CMD" "${args[@]}"
 }
 
+function run_browser_us_sync_task() {
+    local args=(scripts/sync_browser_google_us.py)
+    if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
+    if [ -n "$OFFLINE_FLAG" ]; then args+=("$OFFLINE_FLAG"); fi
+    run_task_in_dir "同步浏览器 Google US 前置状态" "浏览器 US 状态同步完成" "浏览器 US 同步失败" 120 "$ROOT_DIR" "$PYTHON_CMD" "${args[@]}"
+}
+
 function list_active_rule_targets() {
     ROOT_DIR="$ROOT_DIR" CONFIG_FILE="$CONFIG_FILE" "$PYTHON_CMD" - <<'PY'
 import os
@@ -996,6 +1003,7 @@ function run_update_pipeline() {
     begin_pipeline_execution
     run_pipeline_step run_agent_lifecycle_task "$agent_extra_flags"
     run_pipeline_step run_tools_sync_task
+    run_pipeline_step run_browser_us_sync_task
     run_pipeline_step run_rules_sync_task
     run_pipeline_step run_skills_link_task false
     run_pipeline_step run_mcp_sync_task true false
@@ -1378,6 +1386,8 @@ case "$cmd" in
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" "${upgrade_args[@]}" ;;
     tools:sync)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-tool" "$PYTHON_CMD" sync_tools.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/tools.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG $FORCE_REFRESH_FLAG ;;
+    browser:sync)
+        run_supervised_command_in_dir 120 "$ROOT_DIR" "$PYTHON_CMD" "$ROOT_DIR/scripts/sync_browser_google_us.py" $DRY_RUN_FLAG $OFFLINE_FLAG ;;
     fetch-models)
         args=()
         if [ "${#CMD_ARGS[@]}" -gt 0 ]; then
@@ -1475,7 +1485,8 @@ case "$cmd" in
         echo -e "  ${BORDER_GRAY}codex:hooks:sync${NC} 独立刷新仓库级 Codex hooks 到 .codex/hooks.json"
         echo -e "  ${BORDER_GRAY}skills:link${NC}     独立执行全局或系统级专业技能代码集到 Agent 沙盒空间的映射配置与软链接"
         echo -e "  ${BORDER_GRAY}skills:upgrade${NC}  显式解析并回写 skill 仓库的最新可审计版本（仅 release/tag，失败即停止）"
-        echo -e "  ${BORDER_GRAY}tools:sync${NC}      独立同步或安装全局统一增强工具链条\n"
+        echo -e "  ${BORDER_GRAY}tools:sync${NC}      独立同步或安装全局统一增强工具链条"
+        echo -e "  ${BORDER_GRAY}browser:sync${NC}    独立同步 Chrome 的 Google US 浏览器前置状态\n"
         echo -e "${BOLD}${HDR_BLUE}=== CC-Bridge Runtime ===${NC}"
         echo -e "  ${SUCCESS_GREEN}cc-bridge-install${NC}  首次安装并启动，固定到最新稳定 release"
         echo -e "  ${SUCCESS_GREEN}cc-bridge-start${NC}    启动前先检查最新稳定版本；有新版本会先升级再启动"
