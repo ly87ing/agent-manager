@@ -800,6 +800,22 @@ def client_hints_platform(platform_name: str) -> str:
     return "Linux"
 
 
+def navigator_platform(platform_name: str) -> str:
+    if platform_name == "darwin":
+        return "MacIntel"
+    if platform_name.startswith("win"):
+        return "Win32"
+    return "Linux x86_64"
+
+
+def navigator_platform_from_user_agent(user_agent: str) -> str:
+    if "Macintosh;" in user_agent:
+        return "MacIntel"
+    if "Windows" in user_agent:
+        return "Win32"
+    return "Linux x86_64"
+
+
 def resolved_us_desktop_user_agent(platform_name: str) -> str:
     chrome_version = detected_chrome_version(platform_name) or FALLBACK_CHROME_VERSION
     return (
@@ -826,6 +842,7 @@ def automation_context_payload(exit_profile: ExitProfile | None, managed_user_da
             "timezone_id": timezone_id,
             "user_agent": user_agent,
             "client_hints_platform": client_hints_platform(platform_name),
+            "navigator_platform": navigator_platform(platform_name),
             "geolocation": geolocation,
             "permissions": ["geolocation"],
             "extra_http_headers": {
@@ -1013,6 +1030,7 @@ def verification_report_payload(
     geolocation = resolved_geolocation(exit_profile)
     user_agent = resolved_us_desktop_user_agent(platform_name)
     expected_client_hints_platform = client_hints_platform(platform_name)
+    expected_navigator_platform = navigator_platform(platform_name)
     timezone_offset_minutes = expected_timezone_offset_minutes(timezone_id)
     state_ok = browser_state_audit.get("overall_ok") is True
     google_domain_ok = google_domain_resolution.return_code == 0
@@ -1144,6 +1162,7 @@ def verification_report_payload(
                 "extra_http_accept_language": "en-US,en;q=0.9",
                 "user_agent": user_agent,
                 "client_hints_platform": expected_client_hints_platform,
+                "navigator_platform": expected_navigator_platform,
                 "desktop_viewport": dict(US_DESKTOP_VIEWPORT),
                 "desktop_screen": dict(US_DESKTOP_SCREEN),
                 "desktop_device_scale_factor": US_DESKTOP_DEVICE_SCALE_FACTOR,
@@ -1295,6 +1314,7 @@ def runtime_probe_html() -> str:
         "(async()=>{"
         "const observed={"
         "userAgent:navigator.userAgent,"
+        "platform:navigator.platform,"
         "userAgentDataMobile:navigator.userAgentData?navigator.userAgentData.mobile:null,"
         "userAgentDataPlatform:navigator.userAgentData?navigator.userAgentData.platform:null,"
         "language:navigator.language,"
@@ -1416,6 +1436,9 @@ def validate_runtime_context(
         mismatches.append("navigator.userAgent")
     if runtime_context.get("userAgentHeader") != user_agent:
         mismatches.append("User-Agent header")
+    expected_navigator_platform = navigator_platform_from_user_agent(user_agent)
+    if runtime_context.get("platform") != expected_navigator_platform:
+        mismatches.append("navigator.platform")
     if runtime_context.get("userAgentDataMobile") not in (False, None):
         mismatches.append("runtime user agent mobile")
     user_agent_data_platform = runtime_context.get("userAgentDataPlatform")
@@ -1660,10 +1683,13 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
     expected_screen = browser_context.get("screen") if isinstance(browser_context.get("screen"), dict) else None
     expected_user_agent = browser_context.get("user_agent")
     expected_client_hints_platform = browser_context.get("client_hints_platform")
+    expected_navigator_platform = browser_context.get("navigator_platform")
     if observed.get("userAgent") != expected_user_agent:
         mismatches.append("automation navigator.userAgent")
     if observed.get("userAgentHeader") != expected_user_agent:
         mismatches.append("automation User-Agent header")
+    if observed.get("platform") != expected_navigator_platform:
+        mismatches.append("automation navigator.platform")
     user_agent_data_platform = observed.get("userAgentDataPlatform")
     if user_agent_data_platform is not None and user_agent_data_platform != expected_client_hints_platform:
         mismatches.append("automation user agent platform")
@@ -1801,6 +1827,7 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                           });
                           return {
                             userAgent: navigator.userAgent,
+                            platform: navigator.platform,
                             userAgentDataMobile: navigator.userAgentData ? navigator.userAgentData.mobile : null,
                             userAgentDataPlatform: navigator.userAgentData ? navigator.userAgentData.platform : null,
                             language: navigator.language,

@@ -195,6 +195,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertIn("Chrome/", automation_context["browser_context"]["user_agent"])
             self.assertIn("Safari/537.36", automation_context["browser_context"]["user_agent"])
             self.assertEqual(automation_context["browser_context"]["client_hints_platform"], "macOS")
+            self.assertEqual(automation_context["browser_context"]["navigator_platform"], "MacIntel")
             self.assertEqual(automation_context["browser_context"]["viewport"], {"width": 1365, "height": 768})
             self.assertEqual(automation_context["browser_context"]["screen"], {"width": 1365, "height": 768})
             self.assertEqual(automation_context["browser_context"]["device_scale_factor"], 1)
@@ -280,6 +281,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
                 automation_context["browser_context"]["user_agent"],
             )
             self.assertEqual(verification_report["enforced_features"]["automation"]["client_hints_platform"], "macOS")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["navigator_platform"], "MacIntel")
             self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_viewport"], {"width": 1365, "height": 768})
             self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_screen"], {"width": 1365, "height": 768})
             self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_device_scale_factor"], 1)
@@ -649,7 +651,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             + runtime_user_agent
             + '","userAgentHeader":"'
             + runtime_user_agent
-            + '","userAgentDataMobile":false,"userAgentDataPlatform":"macOS",'
+            + '","platform":"MacIntel","userAgentDataMobile":false,"userAgentDataPlatform":"macOS",'
             '"secChUaPlatform":"\\"macOS\\"","secChUaMobile":"?0",'
             '"language":"en-US","languages":["en-US","en"],'
             '"timezone":"America/Los_Angeles","timezoneOffset":'
@@ -678,6 +680,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
 
         self.assertEqual(runtime_context["userAgent"], runtime_user_agent)
         self.assertEqual(runtime_context["userAgentHeader"], runtime_user_agent)
+        self.assertEqual(runtime_context["platform"], "MacIntel")
         self.assertFalse(runtime_context["userAgentDataMobile"])
         self.assertEqual(runtime_context["userAgentDataPlatform"], "macOS")
         self.assertEqual(runtime_context["language"], "en-US")
@@ -727,6 +730,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
                 "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             ),
             "client_hints_platform": "macOS",
+            "navigator_platform": "MacIntel",
             "geolocation": {"latitude": 34.0522, "longitude": -118.2437, "accuracy": 50000},
             "viewport": {"width": 1365, "height": 768},
             "screen": {"width": 1365, "height": 768},
@@ -738,6 +742,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         observed = {
             "userAgent": browser_context["user_agent"],
             "userAgentHeader": browser_context["user_agent"],
+            "platform": "MacIntel",
             "userAgentDataMobile": False,
             "userAgentDataPlatform": "macOS",
             "language": "en-US",
@@ -779,6 +784,11 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         observed["timezone"] = "America/Los_Angeles"
         observed["timezoneOffset"] = module.expected_timezone_offset_minutes("America/Los_Angeles")
         observed["geolocation"] = {"latitude": 34.0522, "longitude": -118.2437, "accuracy": 50000}
+        observed["platform"] = "Win32"
+        mismatches = module.validate_automation_context_observation(observed, browser_context)
+        self.assertIn("automation navigator.platform", mismatches)
+
+        observed["platform"] = "MacIntel"
         observed["innerWidth"] = 390
         observed["maxTouchPoints"] = 5
         observed["coarsePointer"] = True
