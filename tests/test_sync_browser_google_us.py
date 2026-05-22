@@ -14,7 +14,7 @@ SCRIPT = ROOT / "scripts" / "sync_browser_google_us.py"
 class SyncBrowserGoogleUsTests(unittest.TestCase):
     def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["python3", str(SCRIPT), *args],
+            ["python3", str(SCRIPT), "--post-sync-settle-seconds", "0", *args],
             cwd=ROOT,
             capture_output=True,
             text=True,
@@ -145,12 +145,15 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(default_preferences["profile"]["content_settings"]["exceptions"]["geolocation"], {})
             self.assertEqual(automation_context["browser_context"]["locale"], "en-US")
             self.assertEqual(automation_context["browser_context"]["timezone_id"], "America/Los_Angeles")
+            self.assertEqual(automation_context["google"]["home_url"], "https://www.google.com/?hl=en-US&gl=US&pws=0")
             self.assertEqual(automation_context["chrome_launch"]["launcher"], str(launcher_path))
             self.assertIn("--force-webrtc-ip-handling-policy=disable_non_proxied_udp", automation_context["chrome_launch"]["args"])
             self.assertEqual(verification_report["overall_status"], "limited")
             self.assertEqual(verification_report["exit"]["verification_state"], "manually_skipped")
+            self.assertEqual(verification_report["google_domain"]["verification_state"], "exit_check_skipped")
             self.assertTrue(verification_report["browser_state_audit"]["overall_ok"])
             self.assertEqual(verification_report["enforced_features"]["local_state_country"]["variations_country"], "us")
+            self.assertEqual(verification_report["enforced_features"]["google"]["home_url"], "https://www.google.com/?hl=en-US&gl=US&pws=0")
             self.assertEqual(verification_report["enforced_features"]["google"]["search_gl"], "US")
             self.assertEqual(verification_report["enforced_features"]["automation"]["chrome_launcher"], "$AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER")
             self.assertEqual(launcher_path.stat().st_mode & 0o777, 0o755)
@@ -207,6 +210,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(automation_context["chrome_launch"]["launcher"], str(launcher_path))
             self.assertEqual(verification_report["overall_status"], "complete")
             self.assertEqual(verification_report["exit"]["verification_state"], "verified_us")
+            self.assertEqual(verification_report["google_domain"]["verification_state"], "exit_profile_json_skipped")
             self.assertTrue(verification_report["browser_state_audit"]["overall_ok"])
             self.assertEqual(verification_report["exit"]["profile"]["ip"], "203.0.113.31")
             self.assertEqual(verification_report["enforced_features"]["automation"]["timezone_id"], "America/New_York")
@@ -353,6 +357,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
                     "--config-dir",
                     str(config_dir),
                     "--no-browser-open",
+                    "--post-sync-settle-seconds",
+                    "0",
                     "--exit-check-timeout",
                     "0.1",
                 ],
@@ -390,3 +396,75 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             verification_report = json.loads((config_dir / "browser-us-verification.json").read_text(encoding="utf-8"))
             self.assertEqual(verification_report["overall_status"], "failed")
             self.assertFalse(verification_report["browser_state_audit"]["overall_ok"])
+
+    def test_google_domain_verification_fails_when_ncr_still_returns_hk(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            chrome_root = root / "chrome"
+            config_dir = root / "config"
+            self._write_chrome_profile(chrome_root)
+            sitecustomize = root / "sitecustomize.py"
+            sitecustomize.write_text(
+                "\n".join(
+                    [
+                        "import json",
+                        "import urllib.request",
+                        "class Headers:",
+                        "    def get_content_charset(self):",
+                        "        return 'utf-8'",
+                        "class Response:",
+                        "    def __init__(self, url, body):",
+                        "        self._url = url",
+                        "        self._body = body.encode('utf-8')",
+                        "        self.headers = Headers()",
+                        "    def __enter__(self):",
+                        "        return self",
+                        "    def __exit__(self, *args):",
+                        "        return False",
+                        "    def read(self, *args):",
+                        "        return self._body",
+                        "    def geturl(self):",
+                        "        return self._url",
+                        "def fake_urlopen(request, timeout=0):",
+                        "    payload = {'ip': '203.0.113.31', 'country': 'US', 'timezone': 'America/Los_Angeles'}",
+                        "    return Response(getattr(request, 'full_url', str(request)), json.dumps(payload))",
+                        "class Opener:",
+                        "    def open(self, request, timeout=0):",
+                        "        url = getattr(request, 'full_url', str(request))",
+                        "        body = '<html><a href=\"https://www.google.com.hk/imghp\">Images</a></html>'",
+                        "        return Response(url, body)",
+                        "urllib.request.urlopen = fake_urlopen",
+                        "urllib.request.build_opener = lambda *args, **kwargs: Opener()",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(root)
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(SCRIPT),
+                    "--chrome-user-data-dir",
+                    str(chrome_root),
+                    "--config-dir",
+                    str(config_dir),
+                    "--no-browser-open",
+                    "--post-sync-settle-seconds",
+                    "0",
+                ],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 4, result.stdout + result.stderr)
+            self.assertIn("HK markers", result.stderr)
+            verification_report = json.loads((config_dir / "browser-us-verification.json").read_text(encoding="utf-8"))
+            self.assertEqual(verification_report["overall_status"], "failed")
+            self.assertEqual(verification_report["google_domain"]["verification_state"], "hk_detected_failed")
+            self.assertEqual(verification_report["google_domain"]["hk_markers"], ["google.com.hk"])

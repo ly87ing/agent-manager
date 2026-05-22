@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import http.cookiejar
 import json
 import os
 import shlex
@@ -9,7 +10,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +23,7 @@ APP_LOCALE = "en-US"
 COUNTRY_ID_US = 244
 ENV_LOCALE = "en_US.UTF-8"
 NCR_URL = "https://www.google.com/ncr"
+GOOGLE_HOME_URL = "https://www.google.com/?hl=en-US&gl=US&pws=0"
 SEARCH_URL = "https://www.google.com/search?q={searchTerms}&hl=en-US&gl=US&pws=0"
 SUGGEST_URL = "https://www.google.com/complete/search?client=chrome&q={searchTerms}&hl=en-US&gl=US"
 TRANSLATE_TARGET_LANGUAGE = "en"
@@ -37,6 +41,7 @@ CHROME_ARGS = [
     "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
 ]
 BLOCK_CONTENT_SETTING = 2
+GOOGLE_HK_MARKERS = ("google.com.hk", "hong kong")
 SYSTEM_PROFILE_NAMES = {"System Profile", "Guest Profile"}
 
 
@@ -66,6 +71,15 @@ class ExitResolution:
     return_code: int
     exit_profile: ExitProfile | None
     verification_state: str
+    errors: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class GoogleDomainResolution:
+    return_code: int
+    verification_state: str
+    final_url: str | None = None
+    hk_markers: tuple[str, ...] = ()
     errors: tuple[str, ...] = ()
 
 
@@ -322,6 +336,15 @@ def exit_profile_payload(exit_profile: ExitProfile | None) -> dict:
     }
 
 
+def google_domain_payload(google_domain_resolution: GoogleDomainResolution) -> dict:
+    return {
+        "verification_state": google_domain_resolution.verification_state,
+        "final_url": google_domain_resolution.final_url,
+        "hk_markers": list(google_domain_resolution.hk_markers),
+        "errors": list(google_domain_resolution.errors),
+    }
+
+
 def resolved_timezone_id(exit_profile: ExitProfile | None) -> str:
     if exit_profile and exit_profile.is_us() and exit_profile.timezone_id:
         return exit_profile.timezone_id
@@ -560,6 +583,7 @@ def automation_context_payload(exit_profile: ExitProfile | None) -> dict:
         "exit_profile": exit_profile_payload(exit_profile),
         "google": {
             "ncr_url": NCR_URL,
+            "home_url": GOOGLE_HOME_URL,
             "search_url": SEARCH_URL,
             "suggest_url": SUGGEST_URL,
         },
@@ -681,14 +705,16 @@ def verification_report_payload(
     explicit_profile: str | None,
     exit_profile: ExitProfile | None,
     verification_state: str,
+    google_domain_resolution: GoogleDomainResolution,
     browser_state_audit: dict,
 ) -> dict:
     timezone_id = resolved_timezone_id(exit_profile)
     geolocation = resolved_geolocation(exit_profile)
     state_ok = browser_state_audit.get("overall_ok") is True
-    if verification_state == "verified_us" and state_ok:
+    google_domain_ok = google_domain_resolution.return_code == 0
+    if verification_state == "verified_us" and state_ok and google_domain_ok:
         overall_status = "complete"
-    elif state_ok:
+    elif state_ok and google_domain_ok:
         overall_status = "limited"
     else:
         overall_status = "failed"
@@ -699,6 +725,7 @@ def verification_report_payload(
             "verification_state": verification_state,
             "profile": exit_profile_payload(exit_profile),
         },
+        "google_domain": google_domain_payload(google_domain_resolution),
         "browser_state_audit": browser_state_audit,
         "browser_roots": [
             {
@@ -734,10 +761,12 @@ def verification_report_payload(
             },
             "google": {
                 "ncr_url": NCR_URL,
+                "home_url": GOOGLE_HOME_URL,
                 "search_url": SEARCH_URL,
                 "suggest_url": SUGGEST_URL,
                 "search_gl": "US",
                 "search_hl": "en-US",
+                "hk_markers_blocked_after_ncr": list(GOOGLE_HK_MARKERS),
             },
             "webrtc": {
                 "ip_handling_policy": "disable_non_proxied_udp",
@@ -774,6 +803,7 @@ def sync_verification_report(
     explicit_profile: str | None,
     exit_profile: ExitProfile | None,
     verification_state: str,
+    google_domain_resolution: GoogleDomainResolution,
     browser_state_audit: dict,
 ) -> list[str]:
     report_path = config_dir / "browser-us-verification.json"
@@ -782,6 +812,7 @@ def sync_verification_report(
         explicit_profile,
         exit_profile,
         verification_state,
+        google_domain_resolution,
         browser_state_audit,
     )
     previous_payload = load_json_mapping(report_path) if report_path.exists() else None
@@ -836,6 +867,39 @@ def read_json_url(url: str, timeout: float) -> dict:
     if not isinstance(payload, dict):
         raise ValueError("response must contain a JSON object")
     return payload
+
+
+def read_google_text(opener: urllib.request.OpenerDirector, url: str, timeout: float) -> tuple[str, str]:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept-Language": "en-US,en;q=0.9",
+            "User-Agent": "agent-manager",
+        },
+    )
+    with opener.open(request, timeout=timeout) as response:
+        body = response.read(500_000)
+        charset = response.headers.get_content_charset() or "utf-8"
+        return response.geturl(), body.decode(charset, errors="ignore")
+
+
+def verify_google_domain_after_ncr(timeout: float) -> GoogleDomainResolution:
+    cookie_jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+    try:
+        read_google_text(opener, NCR_URL, timeout)
+        final_url, body = read_google_text(opener, GOOGLE_HOME_URL, timeout)
+    except (OSError, TimeoutError, urllib.error.URLError, UnicodeError) as exc:
+        return GoogleDomainResolution(4, "unverified_failed", errors=(str(exc),))
+
+    parsed_host = urllib.parse.urlparse(final_url).netloc.lower()
+    body_lower = body.lower()
+    hk_markers = tuple(marker for marker in GOOGLE_HK_MARKERS if marker.lower() in body_lower)
+    if parsed_host.endswith("google.com.hk") and "final_url_host:google.com.hk" not in hk_markers:
+        hk_markers = (*hk_markers, "final_url_host:google.com.hk")
+    if hk_markers:
+        return GoogleDomainResolution(4, "hk_detected_failed", final_url=final_url, hk_markers=hk_markers)
+    return GoogleDomainResolution(0, "verified_google_com_after_ncr", final_url=final_url)
 
 
 EXIT_PROFILE_PROBES = [
@@ -935,6 +999,24 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("AGENT_MANAGER_BROWSER_US_EXIT_PROFILE_JSON"),
         help="read public exit IP profile from a JSON file instead of network probes",
     )
+    parser.add_argument(
+        "--skip-google-domain-check",
+        action="store_true",
+        default=os.environ.get("AGENT_MANAGER_BROWSER_US_SKIP_GOOGLE_DOMAIN_CHECK") == "1",
+        help="skip the live google.com/ncr domain verification",
+    )
+    parser.add_argument(
+        "--allow-unverified-google-domain",
+        action="store_true",
+        default=os.environ.get("AGENT_MANAGER_BROWSER_US_ALLOW_UNVERIFIED_GOOGLE_DOMAIN") == "1",
+        help="warn instead of failing when google.com/ncr domain verification cannot be completed",
+    )
+    parser.add_argument(
+        "--post-sync-settle-seconds",
+        type=float,
+        default=float(os.environ.get("AGENT_MANAGER_BROWSER_US_POST_SYNC_SETTLE_SECONDS", "10")),
+        help="seconds to wait before the final browser profile read-back audit",
+    )
     return parser
 
 
@@ -949,9 +1031,13 @@ def print_dry_run(args: argparse.Namespace, browser_roots: list[BrowserRoot], co
     print(f"Would set accepted languages to {ACCEPT_LANGUAGES}")
     print(f"Would set default Google search URL to {SEARCH_URL}")
     print("Would set WebRTC policy to disable_non_proxied_udp")
+    if args.post_sync_settle_seconds > 0:
+        print(f"Would wait {args.post_sync_settle_seconds:g}s before the final browser profile read-back audit")
     if not args.offline and not args.skip_exit_check:
         print("Would verify public proxy exit profile and fail unless a US country is detected")
     print(f"Would write verification report under {config_dir}")
+    if not args.offline and not args.skip_exit_check and not args.skip_google_domain_check:
+        print("Would verify google.com/ncr keeps Google on google.com instead of google.com.hk")
     if not args.offline and not args.no_browser_open:
         print(f"Would open {NCR_URL}")
 
@@ -1056,8 +1142,52 @@ def resolve_exit_profile(args: argparse.Namespace) -> ExitResolution:
     return ExitResolution(2, exit_profile, "non_us_failed")
 
 
+def resolve_google_domain(args: argparse.Namespace, exit_resolution: ExitResolution) -> GoogleDomainResolution:
+    if args.offline:
+        return GoogleDomainResolution(0, "offline_skipped")
+    if args.skip_exit_check:
+        return GoogleDomainResolution(0, "exit_check_skipped")
+    if args.skip_google_domain_check:
+        return GoogleDomainResolution(0, "manually_skipped")
+    if args.exit_profile_json:
+        return GoogleDomainResolution(0, "exit_profile_json_skipped")
+    if exit_resolution.verification_state != "verified_us":
+        return GoogleDomainResolution(0, "exit_not_verified_us_skipped")
+
+    google_domain_resolution = verify_google_domain_after_ncr(args.exit_check_timeout)
+    if google_domain_resolution.return_code == 0:
+        print(f"Verified Google domain after NCR: {google_domain_resolution.final_url}")
+        return google_domain_resolution
+
+    if google_domain_resolution.verification_state == "unverified_failed" and args.allow_unverified_google_domain:
+        print("WARN: could not verify google.com/ncr domain state", file=sys.stderr)
+        for error in google_domain_resolution.errors[:3]:
+            print(f"WARN: {error}", file=sys.stderr)
+        return GoogleDomainResolution(
+            0,
+            "unverified_allowed",
+            final_url=google_domain_resolution.final_url,
+            hk_markers=google_domain_resolution.hk_markers,
+            errors=google_domain_resolution.errors,
+        )
+
+    if google_domain_resolution.hk_markers:
+        print(
+            f"ERROR: google.com/ncr verification still found HK markers: {', '.join(google_domain_resolution.hk_markers)}",
+            file=sys.stderr,
+        )
+    else:
+        print("ERROR: could not verify google.com/ncr domain state", file=sys.stderr)
+        for error in google_domain_resolution.errors[:3]:
+            print(f"ERROR: {error}", file=sys.stderr)
+    return google_domain_resolution
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.post_sync_settle_seconds < 0:
+        print("ERROR: --post-sync-settle-seconds must be non-negative", file=sys.stderr)
+        return 2
     platform_name = sys.platform
     config_dir = Path(args.config_dir).expanduser() if args.config_dir else args.home.expanduser() / ".config" / "agent-manager"
     browser_roots = resolve_browser_roots(args, platform_name)
@@ -1073,7 +1203,10 @@ def main(argv: list[str] | None = None) -> int:
     changed_paths = []
     changed_paths.extend(sync_browser_roots(browser_roots, args.profile))
     changed_paths.extend(sync_automation_context(config_dir, exit_resolution.exit_profile, platform_name))
+    if args.post_sync_settle_seconds > 0:
+        time.sleep(args.post_sync_settle_seconds)
     browser_state_audit = audit_browser_state(browser_roots, args.profile)
+    google_domain_resolution = resolve_google_domain(args, exit_resolution)
     changed_paths.extend(
         sync_verification_report(
             config_dir,
@@ -1081,12 +1214,15 @@ def main(argv: list[str] | None = None) -> int:
             args.profile,
             exit_resolution.exit_profile,
             exit_resolution.verification_state,
+            google_domain_resolution,
             browser_state_audit,
         )
     )
     if not browser_state_audit["overall_ok"]:
         print_browser_state_audit_errors(browser_state_audit)
         return 3
+    if google_domain_resolution.return_code != 0:
+        return google_domain_resolution.return_code
 
     opened_ncr = False
     if args.offline:
