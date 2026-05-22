@@ -68,7 +68,7 @@ BLOCKED_FONT_FAMILIES = (
 EXIT_PROFILE_GEOLOCATION_ACCURACY = 50000
 VERIFICATION_REPORT_VERSION = 1
 FALLBACK_CHROME_VERSION = "120.0.0.0"
-DISABLED_CHROME_FEATURES = ("ReduceAcceptLanguage", "WebGPU")
+DISABLED_CHROME_FEATURES = ("ReduceAcceptLanguage", "WebGPU", "FontAccess")
 BASE_CHROME_ARGS = [
     "--lang=en-US",
     "--accept-lang=en-US,en",
@@ -1292,6 +1292,7 @@ def verification_report_payload(
                 "runtime_geolocation_permission": "denied",
                 "runtime_notification_permission": "denied",
                 "runtime_speech_synthesis_present": False,
+                "runtime_local_font_access_present": False,
                 "runtime_webrtc_supported": True,
                 "runtime_webrtc_local_ip_leak": False,
                 "runtime_profile_webrtc_policy": "disable_non_proxied_udp",
@@ -1330,6 +1331,7 @@ def verification_report_payload(
                 "automation_pdf_viewer_enabled": True,
                 "automation_plugins_present": True,
                 "automation_speech_synthesis_present": False,
+                "automation_local_font_access_present": False,
                 "automation_webgpu_adapter_available": False,
                 "automation_media_device_identity_exposed": False,
                 "automation_camera_permission_not_granted": True,
@@ -1507,6 +1509,7 @@ def runtime_probe_html() -> str:
         "pluginsLength:navigator.plugins.length,"
         "mimeTypesLength:navigator.mimeTypes.length,"
         "speechSynthesisPresent:'speechSynthesis' in window,"
+        "localFontAccessPresent:'queryLocalFonts' in window,"
         "timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,"
         "intlLocale:Intl.DateTimeFormat().resolvedOptions().locale,"
         "intlCalendar:Intl.DateTimeFormat().resolvedOptions().calendar,"
@@ -1725,6 +1728,8 @@ def runtime_desktop_surface_mismatches(runtime_context: dict) -> tuple[str, ...]
         mismatches.append("runtime mime types")
     if runtime_context.get("speechSynthesisPresent") is not False:
         mismatches.append("runtime speech synthesis")
+    if runtime_context.get("localFontAccessPresent") is not False:
+        mismatches.append("runtime local font access")
     return tuple(mismatches)
 
 
@@ -2172,6 +2177,8 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation mime types")
     if observed.get("speechSynthesisPresent") is not False:
         mismatches.append("automation speech synthesis")
+    if observed.get("localFontAccessPresent") is not False:
+        mismatches.append("automation local font access")
     if observed.get("webGpuProbeError"):
         mismatches.append("automation WebGPU probe")
     if observed.get("webGpuAdapterAvailable") is not False:
@@ -2308,6 +2315,7 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             pluginsLength: navigator.plugins.length,
                             mimeTypesLength: navigator.mimeTypes.length,
                             speechSynthesisPresent: 'speechSynthesis' in window,
+                            localFontAccessPresent: 'queryLocalFonts' in window,
                             webGpuPresent: 'gpu' in navigator,
                             webGpuAdapterAvailable: null,
                             mediaDeviceCount: null,
