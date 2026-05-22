@@ -65,6 +65,7 @@ BASE_CHROME_ARGS = [
     "--disable-blink-features=AutomationControlled",
 ]
 BLOCK_CONTENT_SETTING = 2
+DEVICE_PERMISSION_CONTENT_SETTINGS = ("media_stream_camera", "media_stream_mic", "notifications")
 GOOGLE_HK_MARKERS = ("google.com.hk", "hong kong")
 SYSTEM_PROFILE_NAMES = {"System Profile", "Guest Profile"}
 MANAGED_PROFILE_VOLATILE_STATE_RELATIVE_PATHS = (
@@ -510,22 +511,27 @@ def expected_timezone_offset_minutes(timezone_id: str) -> int | None:
     return int(round(-offset.total_seconds() / 60))
 
 
-def sync_local_state(path: Path) -> bool:
+def sync_local_state(path: Path, enforce_country: bool = True) -> bool:
     data = load_json_mapping(path)
     intl = mapping_section(data, "intl")
     changed = set_mapping_value(intl, "app_locale", APP_LOCALE)
-    changed |= set_mapping_value(data, "countryid_at_install", COUNTRY_ID_US)
-    changed |= set_mapping_value(data, "variations_country", VARIATIONS_COUNTRY)
-    changed |= set_mapping_value(data, "variations_safe_seed_locale", APP_LOCALE)
-    changed |= set_mapping_value(data, "variations_safe_seed_permanent_consistency_country", VARIATIONS_COUNTRY)
-    changed |= set_mapping_value(data, "variations_safe_seed_session_consistency_country", VARIATIONS_COUNTRY)
+    if enforce_country:
+        changed |= set_mapping_value(data, "countryid_at_install", COUNTRY_ID_US)
+        changed |= set_mapping_value(data, "variations_country", VARIATIONS_COUNTRY)
+        changed |= set_mapping_value(data, "variations_safe_seed_locale", APP_LOCALE)
+        changed |= set_mapping_value(data, "variations_safe_seed_permanent_consistency_country", VARIATIONS_COUNTRY)
+        changed |= set_mapping_value(data, "variations_safe_seed_session_consistency_country", VARIATIONS_COUNTRY)
     if changed:
         ensure_backup(path)
         write_json_atomic(path, data)
     return changed
 
 
-def sync_preferences(path: Path, enforce_install_country: bool = True) -> bool:
+def sync_preferences(
+    path: Path,
+    enforce_install_country: bool = True,
+    enforce_device_permissions: bool = True,
+) -> bool:
     data = load_json_mapping(path)
     changed = False
     if enforce_install_country:
@@ -570,6 +576,10 @@ def sync_preferences(path: Path, enforce_install_country: bool = True) -> bool:
     exceptions = mapping_section(content_settings, "exceptions")
     changed |= set_mapping_value(exceptions, "geolocation", {})
     changed |= set_mapping_value(exceptions, "geolocation_with_options", {})
+    if enforce_device_permissions:
+        for setting_name in DEVICE_PERMISSION_CONTENT_SETTINGS:
+            changed |= set_mapping_value(default_content_settings, setting_name, BLOCK_CONTENT_SETTING)
+            changed |= set_mapping_value(exceptions, setting_name, {})
     changed |= set_mapping_value(exceptions, "reduced_accept_language", {})
 
     if changed:
@@ -638,7 +648,7 @@ def audit_expected_value(data: dict, key_path: tuple[str, ...], expected, mismat
         )
 
 
-def audit_local_state(path: Path) -> dict:
+def audit_local_state(path: Path, enforce_country: bool = True) -> dict:
     record = {"path": str(path), "exists": path.exists(), "ok": False, "mismatches": []}
     if not path.exists():
         record["mismatches"].append({"path": str(path), "expected": "existing JSON object", "actual": "missing"})
@@ -650,26 +660,31 @@ def audit_local_state(path: Path) -> dict:
         return record
 
     audit_expected_value(data, ("intl", "app_locale"), APP_LOCALE, record["mismatches"])
-    audit_expected_value(data, ("countryid_at_install",), COUNTRY_ID_US, record["mismatches"])
-    audit_expected_value(data, ("variations_country",), VARIATIONS_COUNTRY, record["mismatches"])
-    audit_expected_value(data, ("variations_safe_seed_locale",), APP_LOCALE, record["mismatches"])
-    audit_expected_value(
-        data,
-        ("variations_safe_seed_permanent_consistency_country",),
-        VARIATIONS_COUNTRY,
-        record["mismatches"],
-    )
-    audit_expected_value(
-        data,
-        ("variations_safe_seed_session_consistency_country",),
-        VARIATIONS_COUNTRY,
-        record["mismatches"],
-    )
+    if enforce_country:
+        audit_expected_value(data, ("countryid_at_install",), COUNTRY_ID_US, record["mismatches"])
+        audit_expected_value(data, ("variations_country",), VARIATIONS_COUNTRY, record["mismatches"])
+        audit_expected_value(data, ("variations_safe_seed_locale",), APP_LOCALE, record["mismatches"])
+        audit_expected_value(
+            data,
+            ("variations_safe_seed_permanent_consistency_country",),
+            VARIATIONS_COUNTRY,
+            record["mismatches"],
+        )
+        audit_expected_value(
+            data,
+            ("variations_safe_seed_session_consistency_country",),
+            VARIATIONS_COUNTRY,
+            record["mismatches"],
+        )
     record["ok"] = not record["mismatches"]
     return record
 
 
-def audit_preferences(path: Path, enforce_install_country: bool = True) -> dict:
+def audit_preferences(
+    path: Path,
+    enforce_install_country: bool = True,
+    enforce_device_permissions: bool = True,
+) -> dict:
     record = {"path": str(path), "exists": path.exists(), "ok": False, "mismatches": []}
     if not path.exists():
         record["mismatches"].append({"path": str(path), "expected": "existing JSON object", "actual": "missing"})
@@ -703,6 +718,17 @@ def audit_preferences(path: Path, enforce_install_country: bool = True) -> dict:
         (("profile", "content_settings", "exceptions", "geolocation_with_options"), {}),
         (("profile", "content_settings", "exceptions", "reduced_accept_language"), {}),
     ]
+    if enforce_device_permissions:
+        expected_values.extend(
+            [
+                (("profile", "default_content_setting_values", "media_stream_camera"), BLOCK_CONTENT_SETTING),
+                (("profile", "default_content_setting_values", "media_stream_mic"), BLOCK_CONTENT_SETTING),
+                (("profile", "default_content_setting_values", "notifications"), BLOCK_CONTENT_SETTING),
+                (("profile", "content_settings", "exceptions", "media_stream_camera"), {}),
+                (("profile", "content_settings", "exceptions", "media_stream_mic"), {}),
+                (("profile", "content_settings", "exceptions", "notifications"), {}),
+            ]
+        )
     if enforce_install_country:
         expected_values.insert(0, (("countryid_at_install",), COUNTRY_ID_US))
     for key_path, expected in expected_values:
@@ -736,10 +762,16 @@ def audit_browser_state(
     managed_browser_root: BrowserRoot | None = None,
 ) -> dict:
     audit = {"overall_ok": True, "roots": []}
-    root_scopes = [(browser_root, explicit_profile, False) for browser_root in browser_roots]
+    root_scopes = [(browser_root, explicit_profile, False, False, False) for browser_root in browser_roots]
     if managed_browser_root is not None:
-        root_scopes.append((managed_browser_root, None, True))
-    for browser_root, profile_scope, enforce_install_country in root_scopes:
+        root_scopes.append((managed_browser_root, None, True, True, True))
+    for (
+        browser_root,
+        profile_scope,
+        enforce_local_state_country,
+        enforce_install_country,
+        enforce_device_permissions,
+    ) in root_scopes:
         root_record = {
             "name": browser_root.name,
             "user_data_dir": str(browser_root.user_data_dir),
@@ -754,7 +786,10 @@ def audit_browser_state(
             audit["roots"].append(root_record)
             continue
 
-        root_record["local_state"] = audit_local_state(browser_root.user_data_dir / "Local State")
+        root_record["local_state"] = audit_local_state(
+            browser_root.user_data_dir / "Local State",
+            enforce_country=enforce_local_state_country,
+        )
         if not root_record["local_state"]["ok"]:
             audit["overall_ok"] = False
 
@@ -764,12 +799,16 @@ def audit_browser_state(
             if profile_scope:
                 audit["overall_ok"] = False
         for preferences_path in preference_paths:
-            profile_record = audit_preferences(preferences_path, enforce_install_country=enforce_install_country)
+            profile_record = audit_preferences(
+                preferences_path,
+                enforce_install_country=enforce_install_country,
+                enforce_device_permissions=enforce_device_permissions,
+            )
             if not profile_record["ok"]:
                 audit["overall_ok"] = False
             root_record["profiles"].append(profile_record)
 
-        if enforce_install_country:
+        if enforce_local_state_country:
             root_record["volatile_state"] = audit_managed_profile_volatile_state(browser_root.user_data_dir)
             if not root_record["volatile_state"]["ok"]:
                 audit["overall_ok"] = False
@@ -1123,11 +1162,12 @@ def verification_report_payload(
                 "environment_locale": ENV_LOCALE,
             },
             "local_state_country": {
-                "countryid_at_install": COUNTRY_ID_US,
-                "variations_country": VARIATIONS_COUNTRY,
-                "variations_safe_seed_locale": APP_LOCALE,
-                "variations_safe_seed_permanent_consistency_country": VARIATIONS_COUNTRY,
-                "variations_safe_seed_session_consistency_country": VARIATIONS_COUNTRY,
+                "managed_profile_countryid_at_install": COUNTRY_ID_US,
+                "managed_profile_variations_country": VARIATIONS_COUNTRY,
+                "managed_profile_variations_safe_seed_locale": APP_LOCALE,
+                "managed_profile_variations_safe_seed_permanent_consistency_country": VARIATIONS_COUNTRY,
+                "managed_profile_variations_safe_seed_session_consistency_country": VARIATIONS_COUNTRY,
+                "regular_profile_country_fields": "not forced; active Chrome may rewrite Local State country fields",
             },
             "profile_country": {
                 "managed_profile_countryid_at_install": COUNTRY_ID_US,
@@ -1171,6 +1211,15 @@ def verification_report_payload(
                 "regular_profile_geolocation_with_options_exceptions": {},
                 "automation_geolocation": geolocation,
             },
+            "device_permissions": {
+                "managed_profile_camera_content_setting": BLOCK_CONTENT_SETTING,
+                "managed_profile_microphone_content_setting": BLOCK_CONTENT_SETTING,
+                "managed_profile_notifications_content_setting": BLOCK_CONTENT_SETTING,
+                "managed_profile_camera_exceptions": {},
+                "managed_profile_microphone_exceptions": {},
+                "managed_profile_notifications_exceptions": {},
+                "regular_profile_policy": "not forced; active Chrome may recreate device permission defaults or site exceptions",
+            },
             "automation": {
                 "locale": APP_LOCALE,
                 "timezone_id": timezone_id,
@@ -1211,10 +1260,14 @@ def verification_report_payload(
                 "runtime_plugins_present": True,
                 "runtime_webdriver": False,
                 "runtime_geolocation_permission": "denied",
+                "runtime_notification_permission": "denied",
                 "runtime_webrtc_supported": True,
                 "runtime_webrtc_local_ip_leak": False,
                 "runtime_profile_webrtc_policy": "disable_non_proxied_udp",
                 "runtime_profile_geolocation_setting": BLOCK_CONTENT_SETTING,
+                "runtime_profile_camera_setting": BLOCK_CONTENT_SETTING,
+                "runtime_profile_microphone_setting": BLOCK_CONTENT_SETTING,
+                "runtime_profile_notifications_setting": BLOCK_CONTENT_SETTING,
                 "extra_http_accept_language": "en-US,en;q=0.9",
                 "user_agent": user_agent,
                 "client_hints_platform": expected_client_hints_platform,
@@ -1239,6 +1292,9 @@ def verification_report_payload(
                 "automation_locale_timezones_include_current_timezone": True,
                 "automation_pdf_viewer_enabled": True,
                 "automation_plugins_present": True,
+                "automation_camera_permission_not_granted": True,
+                "automation_microphone_permission_not_granted": True,
+                "automation_notifications_permission_not_granted": True,
                 "chrome_launch_args": browser_us_chrome_args(user_agent),
                 "chrome_launcher": "$AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER",
                 "managed_user_data_dir": "$AGENT_MANAGER_BROWSER_US_USER_DATA_DIR",
@@ -1433,6 +1489,7 @@ def runtime_probe_html() -> str:
         "listFormat:new Intl.ListFormat().format(['A','B','C']),"
         "timezoneOffset:new Date().getTimezoneOffset(),"
         "geolocationPermission:null,"
+        "notificationPermission:typeof Notification==='function'?Notification.permission:null,"
         "webrtcSupported:typeof RTCPeerConnection==='function',"
         "webrtcCandidateCount:0,"
         "webrtcHostCandidateCount:0,"
@@ -1727,6 +1784,8 @@ def validate_runtime_context(
         mismatches.append("Accept-Language")
     if runtime_context.get("geolocationPermission") != "denied":
         mismatches.append("geolocation permission")
+    if runtime_context.get("notificationPermission") != "denied":
+        mismatches.append("Notification permission")
     if runtime_context.get("profileWebrtcPolicy") != "disable_non_proxied_udp":
         mismatches.append("profile WebRTC policy")
     if runtime_context.get("profileWebrtcNonproxiedUdpEnabled") is not False:
@@ -1741,6 +1800,12 @@ def validate_runtime_context(
         mismatches.append("WebRTC private IP candidates")
     if runtime_context.get("profileGeolocationSetting") != BLOCK_CONTENT_SETTING:
         mismatches.append("profile geolocation setting")
+    if runtime_context.get("profileCameraSetting") != BLOCK_CONTENT_SETTING:
+        mismatches.append("profile camera setting")
+    if runtime_context.get("profileMicrophoneSetting") != BLOCK_CONTENT_SETTING:
+        mismatches.append("profile microphone setting")
+    if runtime_context.get("profileNotificationsSetting") != BLOCK_CONTENT_SETTING:
+        mismatches.append("profile notifications setting")
     return tuple(mismatches)
 
 
@@ -1753,6 +1818,18 @@ def runtime_profile_policy_snapshot(user_data_dir: Path) -> dict:
         "profileWebrtcPolicy": nested_value(preferences, ("webrtc", "ip_handling_policy")),
         "profileWebrtcNonproxiedUdpEnabled": nested_value(preferences, ("webrtc", "nonproxied_udp_enabled")),
         "profileGeolocationSetting": nested_value(preferences, ("profile", "default_content_setting_values", "geolocation")),
+        "profileCameraSetting": nested_value(
+            preferences,
+            ("profile", "default_content_setting_values", "media_stream_camera"),
+        ),
+        "profileMicrophoneSetting": nested_value(
+            preferences,
+            ("profile", "default_content_setting_values", "media_stream_mic"),
+        ),
+        "profileNotificationsSetting": nested_value(
+            preferences,
+            ("profile", "default_content_setting_values", "notifications"),
+        ),
     }
 
 
@@ -2026,6 +2103,9 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation plugins")
     if not positive_integer(observed.get("mimeTypesLength")):
         mismatches.append("automation mime types")
+    for permission_name in ("cameraPermission", "microphonePermission", "notificationsPermission"):
+        if observed.get(permission_name) == "granted":
+            mismatches.append(f"automation {permission_name}")
     if not isinstance(expected_geolocation, dict) or not isinstance(observed_geolocation, dict):
         mismatches.append("automation geolocation")
         return tuple(mismatches)
@@ -2145,8 +2225,27 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             pdfViewerEnabled: navigator.pdfViewerEnabled,
                             pluginsLength: navigator.plugins.length,
                             mimeTypesLength: navigator.mimeTypes.length,
+                            cameraPermission: null,
+                            microphonePermission: null,
+                            notificationsPermission: null,
+                            notificationPermission: typeof Notification === 'function' ? Notification.permission : null,
                             geolocation: position,
                           };
+                          async function permissionState(name) {
+                            try {
+                              if (!navigator.permissions || !navigator.permissions.query) {
+                                return null;
+                              }
+                              const permission = navigator.permissions.query({name}).then((result) => result.state);
+                              const timedOut = new Promise((resolve) => setTimeout(() => resolve('timeout'), 500));
+                              return await Promise.race([permission, timedOut]);
+                            } catch (error) {
+                              return 'error:' + String(error && error.name || error);
+                            }
+                          }
+                          observed.cameraPermission = await permissionState('camera');
+                          observed.microphonePermission = await permissionState('microphone');
+                          observed.notificationsPermission = await permissionState('notifications');
                           try {
                             const intlLocale = new Intl.Locale(observed.intlLocale);
                             observed.localeWeekInfo = intlLocale.getWeekInfo ? intlLocale.getWeekInfo() : null;
@@ -2538,7 +2637,7 @@ def sync_browser_roots(browser_roots: list[BrowserRoot], explicit_profile: str |
             continue
 
         local_state_path = user_data_dir / "Local State"
-        if sync_local_state(local_state_path):
+        if sync_local_state(local_state_path, enforce_country=False):
             changed_paths.append(str(local_state_path))
 
         preference_paths = discover_preference_paths(user_data_dir, explicit_profile)
@@ -2548,7 +2647,11 @@ def sync_browser_roots(browser_roots: list[BrowserRoot], explicit_profile: str |
 
         for preferences_path in preference_paths:
             if preferences_path.exists():
-                if sync_preferences(preferences_path, enforce_install_country=False):
+                if sync_preferences(
+                    preferences_path,
+                    enforce_install_country=False,
+                    enforce_device_permissions=False,
+                ):
                     changed_paths.append(str(preferences_path))
             else:
                 print(f"WARN: browser profile Preferences not found: {preferences_path}", file=sys.stderr)

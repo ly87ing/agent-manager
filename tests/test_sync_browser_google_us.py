@@ -75,6 +75,15 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
                                     "reduced_accept_language": {
                                         "https://search.example.test,*": {"setting": 1},
                                     },
+                                    "media_stream_camera": {
+                                        "https://camera.example.test,*": {"setting": 1},
+                                    },
+                                    "media_stream_mic": {
+                                        "https://mic.example.test,*": {"setting": 1},
+                                    },
+                                    "notifications": {
+                                        "https://notify.example.test,*": {"setting": 1},
+                                    },
                                 },
                             },
                         },
@@ -181,11 +190,11 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             )
 
             self.assertEqual(local_state["intl"]["app_locale"], "en-US")
-            self.assertEqual(local_state["countryid_at_install"], 244)
-            self.assertEqual(local_state["variations_country"], "us")
-            self.assertEqual(local_state["variations_safe_seed_locale"], "en-US")
-            self.assertEqual(local_state["variations_safe_seed_permanent_consistency_country"], "us")
-            self.assertEqual(local_state["variations_safe_seed_session_consistency_country"], "us")
+            self.assertNotIn("countryid_at_install", local_state)
+            self.assertNotIn("variations_country", local_state)
+            self.assertEqual(local_state["variations_safe_seed_locale"], "zh-CN")
+            self.assertEqual(local_state["variations_safe_seed_permanent_consistency_country"], "cn")
+            self.assertEqual(local_state["variations_safe_seed_session_consistency_country"], "cn")
             self.assertEqual(local_state["keep"], "local-state")
             self.assertEqual(preferences["countryid_at_install"], 21843)
             self.assertEqual(preferences["intl"]["accept_languages"], "en-US,en")
@@ -201,17 +210,50 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(preferences["webrtc"]["ip_handling_policy"], "disable_non_proxied_udp")
             self.assertFalse(preferences["webrtc"]["nonproxied_udp_enabled"])
             self.assertEqual(preferences["profile"]["default_content_setting_values"]["geolocation"], 2)
+            self.assertNotIn("media_stream_camera", preferences["profile"]["default_content_setting_values"])
+            self.assertNotIn("media_stream_mic", preferences["profile"]["default_content_setting_values"])
+            self.assertNotIn("notifications", preferences["profile"]["default_content_setting_values"])
             self.assertEqual(preferences["profile"]["content_settings"]["exceptions"]["geolocation"], {})
             self.assertEqual(preferences["profile"]["content_settings"]["exceptions"]["geolocation_with_options"], {})
+            self.assertEqual(
+                preferences["profile"]["content_settings"]["exceptions"]["media_stream_camera"],
+                {"https://camera.example.test,*": {"setting": 1}},
+            )
+            self.assertEqual(
+                preferences["profile"]["content_settings"]["exceptions"]["media_stream_mic"],
+                {"https://mic.example.test,*": {"setting": 1}},
+            )
+            self.assertEqual(
+                preferences["profile"]["content_settings"]["exceptions"]["notifications"],
+                {"https://notify.example.test,*": {"setting": 1}},
+            )
             self.assertEqual(preferences["profile"]["content_settings"]["exceptions"]["reduced_accept_language"], {})
             self.assertEqual(preferences["keep"], "Profile 1")
             self.assertEqual(default_preferences["intl"]["accept_languages"], "en-US,en")
             self.assertEqual(default_preferences["account_values"]["intl"]["accept_languages"], "en-US,en")
             self.assertEqual(default_preferences["default_search_provider"]["name"], "Google US")
             self.assertEqual(default_preferences["profile"]["content_settings"]["exceptions"]["geolocation"], {})
+            self.assertEqual(
+                default_preferences["profile"]["content_settings"]["exceptions"]["media_stream_camera"],
+                {"https://camera.example.test,*": {"setting": 1}},
+            )
+            self.assertEqual(
+                default_preferences["profile"]["content_settings"]["exceptions"]["media_stream_mic"],
+                {"https://mic.example.test,*": {"setting": 1}},
+            )
+            self.assertEqual(
+                default_preferences["profile"]["content_settings"]["exceptions"]["notifications"],
+                {"https://notify.example.test,*": {"setting": 1}},
+            )
             self.assertEqual(managed_local_state["intl"]["app_locale"], "en-US")
             self.assertEqual(managed_preferences["countryid_at_install"], 244)
             self.assertEqual(managed_preferences["intl"]["accept_languages"], "en-US,en")
+            self.assertEqual(managed_preferences["profile"]["default_content_setting_values"]["media_stream_camera"], 2)
+            self.assertEqual(managed_preferences["profile"]["default_content_setting_values"]["media_stream_mic"], 2)
+            self.assertEqual(managed_preferences["profile"]["default_content_setting_values"]["notifications"], 2)
+            self.assertEqual(managed_preferences["profile"]["content_settings"]["exceptions"]["media_stream_camera"], {})
+            self.assertEqual(managed_preferences["profile"]["content_settings"]["exceptions"]["media_stream_mic"], {})
+            self.assertEqual(managed_preferences["profile"]["content_settings"]["exceptions"]["notifications"], {})
             self.assertFalse(any(path.exists() or path.is_symlink() for path in volatile_state_paths))
             self.assertEqual(automation_context["browser_context"]["locale"], "en-US")
             self.assertEqual(automation_context["browser_context"]["timezone_id"], "America/Los_Angeles")
@@ -254,7 +296,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             )
             self.assertTrue(managed_audit["volatile_state"]["ok"])
             self.assertFalse(any(path_record["exists"] for path_record in managed_audit["volatile_state"]["paths"]))
-            self.assertEqual(verification_report["enforced_features"]["local_state_country"]["variations_country"], "us")
+            self.assertEqual(
+                verification_report["enforced_features"]["local_state_country"]["managed_profile_variations_country"],
+                "us",
+            )
             self.assertEqual(
                 verification_report["enforced_features"]["managed_profile_storage"]["volatile_state_policy"],
                 "cleared_on_every_sync",
@@ -289,6 +334,24 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
                 {"latitude": 37.7749, "longitude": -122.4194, "accuracy": 100},
             )
             self.assertEqual(verification_report["enforced_features"]["automation"]["context_permissions"], ["geolocation"])
+            self.assertEqual(
+                verification_report["enforced_features"]["device_permissions"][
+                    "managed_profile_camera_content_setting"
+                ],
+                2,
+            )
+            self.assertEqual(
+                verification_report["enforced_features"]["device_permissions"][
+                    "managed_profile_microphone_content_setting"
+                ],
+                2,
+            )
+            self.assertEqual(
+                verification_report["enforced_features"]["device_permissions"][
+                    "managed_profile_notifications_content_setting"
+                ],
+                2,
+            )
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_language"], "en-US")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_languages"], ["en-US", "en"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["automation_languages"], ["en-US", "en"])
@@ -341,10 +404,14 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_plugins_present"])
             self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_webdriver"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_geolocation_permission"], "denied")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_notification_permission"], "denied")
             self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_webrtc_supported"])
             self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_webrtc_local_ip_leak"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_profile_webrtc_policy"], "disable_non_proxied_udp")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_profile_geolocation_setting"], 2)
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_profile_camera_setting"], 2)
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_profile_microphone_setting"], 2)
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_profile_notifications_setting"], 2)
             self.assertEqual(
                 verification_report["enforced_features"]["automation"]["user_agent"],
                 automation_context["browser_context"]["user_agent"],
@@ -390,6 +457,9 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             )
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_pdf_viewer_enabled"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_plugins_present"])
+            self.assertTrue(verification_report["enforced_features"]["automation"]["automation_camera_permission_not_granted"])
+            self.assertTrue(verification_report["enforced_features"]["automation"]["automation_microphone_permission_not_granted"])
+            self.assertTrue(verification_report["enforced_features"]["automation"]["automation_notifications_permission_not_granted"])
             self.assertFalse(verification_report["enforced_features"]["webrtc"]["runtime_local_ip_leak"])
             self.assertEqual(verification_report["enforced_features"]["webrtc"]["runtime_private_ip_candidate_count"], 0)
             self.assertTrue(verification_report["enforced_features"]["network_path"]["quic_disabled"])
@@ -788,6 +858,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             '"currencyFormat":"$1,234.56","dateFormat":"5/22/26","regionDisplayName":"United States",'
             '"acceptLanguageHeader":"en-US,en;q=0.9",'
             '"geolocationPermission":"denied",'
+            '"notificationPermission":"denied",'
             '"webrtcSupported":true,'
             '"webrtcCandidateCount":0,'
             '"webrtcHostCandidateCount":0,'
@@ -796,7 +867,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             '"webrtcLocalIpLeak":false,'
             '"profileWebrtcPolicy":"disable_non_proxied_udp",'
             '"profileWebrtcNonproxiedUdpEnabled":false,'
-            '"profileGeolocationSetting":2}'
+            '"profileGeolocationSetting":2,'
+            '"profileCameraSetting":2,'
+            '"profileMicrophoneSetting":2,'
+            '"profileNotificationsSetting":2}'
             "</body></html>"
         )
         runtime_context = module.runtime_context_from_output(payload)
@@ -844,6 +918,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertEqual(runtime_context["listFormat"], "A, B, and C")
         self.assertEqual(runtime_context["acceptLanguageHeader"], "en-US,en;q=0.9")
         self.assertEqual(runtime_context["geolocationPermission"], "denied")
+        self.assertEqual(runtime_context["notificationPermission"], "denied")
         self.assertTrue(runtime_context["webrtcSupported"])
         self.assertEqual(runtime_context["webrtcCandidateCount"], 0)
         self.assertEqual(runtime_context["webrtcHostCandidateCount"], 0)
@@ -853,6 +928,9 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertEqual(runtime_context["profileWebrtcPolicy"], "disable_non_proxied_udp")
         self.assertFalse(runtime_context["profileWebrtcNonproxiedUdpEnabled"])
         self.assertEqual(runtime_context["profileGeolocationSetting"], 2)
+        self.assertEqual(runtime_context["profileCameraSetting"], 2)
+        self.assertEqual(runtime_context["profileMicrophoneSetting"], 2)
+        self.assertEqual(runtime_context["profileNotificationsSetting"], 2)
         self.assertEqual(mismatches, ())
 
     def test_automation_context_validator_rejects_non_us_context_drift(self):
@@ -936,6 +1014,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "pdfViewerEnabled": True,
             "pluginsLength": 5,
             "mimeTypesLength": 2,
+            "cameraPermission": "prompt",
+            "microphonePermission": "prompt",
+            "notificationsPermission": "prompt",
+            "notificationPermission": "default",
             "geolocation": {"latitude": 34.0522, "longitude": -118.2437, "accuracy": 50000},
         }
 
@@ -1037,8 +1119,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         observed["finePointer"] = True
         observed["hoverHover"] = True
         observed["pluginsLength"] = 5
+        observed["cameraPermission"] = "granted"
         observed["languages"] = ["en-US"]
         mismatches = module.validate_automation_context_observation(observed, browser_context)
+        self.assertIn("automation cameraPermission", mismatches)
         self.assertIn("automation navigator.languages", mismatches)
 
     def test_browser_google_marker_detection_catches_hk_signals(self):
