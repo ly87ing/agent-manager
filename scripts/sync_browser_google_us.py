@@ -1194,8 +1194,10 @@ def verification_report_payload(
                 "runtime_region_display_name": "United States",
                 "runtime_list_format": "A, B, and C",
                 "runtime_accept_language_header": "en-US,en;q=0.9",
+                "runtime_sec_ch_ua_matches_chrome_major": True,
                 "runtime_sec_ch_ua_platform": expected_client_hints_platform,
                 "runtime_sec_ch_ua_mobile": "?0",
+                "runtime_user_agent_data_brands_match_chrome_major": True,
                 "runtime_webdriver": False,
                 "runtime_geolocation_permission": "denied",
                 "runtime_webrtc_supported": True,
@@ -1205,8 +1207,10 @@ def verification_report_payload(
                 "extra_http_accept_language": "en-US,en;q=0.9",
                 "user_agent": user_agent,
                 "client_hints_platform": expected_client_hints_platform,
+                "automation_sec_ch_ua_matches_chrome_major": True,
                 "automation_sec_ch_ua_platform": expected_client_hints_platform,
                 "automation_sec_ch_ua_mobile": "?0",
+                "automation_user_agent_data_brands_match_chrome_major": True,
                 "automation_webdriver": False,
                 "navigator_platform": expected_navigator_platform,
                 "desktop_viewport": dict(US_DESKTOP_VIEWPORT),
@@ -1369,6 +1373,7 @@ def runtime_probe_html() -> str:
         "platform:navigator.platform,"
         "userAgentDataMobile:navigator.userAgentData?navigator.userAgentData.mobile:null,"
         "userAgentDataPlatform:navigator.userAgentData?navigator.userAgentData.platform:null,"
+        "userAgentDataBrands:navigator.userAgentData?Array.from(navigator.userAgentData.brands||[]):null,"
         "webdriver:navigator.webdriver,"
         "language:navigator.language,"
         "languages:Array.from(navigator.languages||[]),"
@@ -1456,6 +1461,7 @@ class RuntimeProbeHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         self.server.observed_headers["accept-language"] = self.headers.get("Accept-Language")
         self.server.observed_headers["user-agent"] = self.headers.get("User-Agent")
+        self.server.observed_headers["sec-ch-ua"] = self.headers.get("Sec-CH-UA")
         self.server.observed_headers["sec-ch-ua-platform"] = self.headers.get("Sec-CH-UA-Platform")
         self.server.observed_headers["sec-ch-ua-mobile"] = self.headers.get("Sec-CH-UA-Mobile")
         body = runtime_probe_html().encode("utf-8")
@@ -1492,6 +1498,31 @@ def runtime_context_from_output(output: str) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
+def chrome_major_version(user_agent: str) -> str | None:
+    match = re.search(r"\bChrome/(\d+)\.", user_agent)
+    return match.group(1) if match else None
+
+
+def user_agent_data_brands_match_chrome_major(brands, user_agent: str) -> bool:
+    major_version = chrome_major_version(user_agent)
+    if major_version is None or not isinstance(brands, list):
+        return False
+    for brand in brands:
+        if not isinstance(brand, dict):
+            continue
+        if brand.get("brand") in {"Chromium", "Google Chrome"} and str(brand.get("version")) == major_version:
+            return True
+    return False
+
+
+def sec_ch_ua_matches_chrome_major(value, user_agent: str) -> bool:
+    text = clean_string(value)
+    major_version = chrome_major_version(user_agent)
+    if text is None or major_version is None:
+        return False
+    return f'v="{major_version}"' in text and ('"Chromium"' in text or '"Google Chrome"' in text)
+
+
 def validate_runtime_context(
     runtime_context: dict,
     timezone_id: str,
@@ -1510,9 +1541,13 @@ def validate_runtime_context(
         mismatches.append("runtime user agent mobile")
     if runtime_context.get("webdriver") not in (False, None):
         mismatches.append("runtime webdriver")
+    if not user_agent_data_brands_match_chrome_major(runtime_context.get("userAgentDataBrands"), user_agent):
+        mismatches.append("runtime user agent brands")
     user_agent_data_platform = runtime_context.get("userAgentDataPlatform")
     if user_agent_data_platform is not None and user_agent_data_platform != expected_client_hints_platform:
         mismatches.append("runtime user agent platform")
+    if not sec_ch_ua_matches_chrome_major(runtime_context.get("secChUa"), user_agent):
+        mismatches.append("Sec-CH-UA")
     sec_ch_ua_platform = runtime_context.get("secChUaPlatform")
     if sec_ch_ua_platform is not None and sec_ch_ua_platform.strip('"') != expected_client_hints_platform:
         mismatches.append("Sec-CH-UA-Platform")
@@ -1738,6 +1773,7 @@ def verify_runtime_browser_context(
         )
     runtime_context["acceptLanguageHeader"] = server.observed_headers.get("accept-language")
     runtime_context["userAgentHeader"] = server.observed_headers.get("user-agent")
+    runtime_context["secChUa"] = server.observed_headers.get("sec-ch-ua")
     runtime_context["secChUaPlatform"] = server.observed_headers.get("sec-ch-ua-platform")
     runtime_context["secChUaMobile"] = server.observed_headers.get("sec-ch-ua-mobile")
     runtime_context.update(profile_policy)
@@ -1780,6 +1816,10 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
     user_agent_data_platform = observed.get("userAgentDataPlatform")
     if user_agent_data_platform is not None and user_agent_data_platform != expected_client_hints_platform:
         mismatches.append("automation user agent platform")
+    if not user_agent_data_brands_match_chrome_major(observed.get("userAgentDataBrands"), expected_user_agent):
+        mismatches.append("automation user agent brands")
+    if not sec_ch_ua_matches_chrome_major(observed.get("secChUa"), expected_user_agent):
+        mismatches.append("automation Sec-CH-UA")
     sec_ch_ua_platform = observed.get("secChUaPlatform")
     if sec_ch_ua_platform is not None and sec_ch_ua_platform.strip('"') != expected_client_hints_platform:
         mismatches.append("automation Sec-CH-UA-Platform")
@@ -1943,6 +1983,7 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             platform: navigator.platform,
                             userAgentDataMobile: navigator.userAgentData ? navigator.userAgentData.mobile : null,
                             userAgentDataPlatform: navigator.userAgentData ? navigator.userAgentData.platform : null,
+                            userAgentDataBrands: navigator.userAgentData ? Array.from(navigator.userAgentData.brands || []) : null,
                             webdriver: navigator.webdriver,
                             language: navigator.language,
                             languages: Array.from(navigator.languages || []),
@@ -2002,6 +2043,7 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
         return AutomationContextResolution(6, "automation_context_output_missing", process_state="output_missing")
     observed["acceptLanguageHeader"] = server.observed_headers.get("accept-language")
     observed["userAgentHeader"] = server.observed_headers.get("user-agent")
+    observed["secChUa"] = server.observed_headers.get("sec-ch-ua")
     observed["secChUaPlatform"] = server.observed_headers.get("sec-ch-ua-platform")
     observed["secChUaMobile"] = server.observed_headers.get("sec-ch-ua-mobile")
     mismatches = validate_automation_context_observation(observed, browser_context)

@@ -323,8 +323,12 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_region_display_name"], "United States")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_list_format"], "A, B, and C")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_accept_language_header"], "en-US,en;q=0.9")
+            self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_sec_ch_ua_matches_chrome_major"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_sec_ch_ua_platform"], "macOS")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_sec_ch_ua_mobile"], "?0")
+            self.assertTrue(
+                verification_report["enforced_features"]["automation"]["runtime_user_agent_data_brands_match_chrome_major"]
+            )
             self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_webdriver"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_geolocation_permission"], "denied")
             self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_webrtc_supported"])
@@ -336,8 +340,14 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
                 automation_context["browser_context"]["user_agent"],
             )
             self.assertEqual(verification_report["enforced_features"]["automation"]["client_hints_platform"], "macOS")
+            self.assertTrue(verification_report["enforced_features"]["automation"]["automation_sec_ch_ua_matches_chrome_major"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["automation_sec_ch_ua_platform"], "macOS")
             self.assertEqual(verification_report["enforced_features"]["automation"]["automation_sec_ch_ua_mobile"], "?0")
+            self.assertTrue(
+                verification_report["enforced_features"]["automation"][
+                    "automation_user_agent_data_brands_match_chrome_major"
+                ]
+            )
             self.assertFalse(verification_report["enforced_features"]["automation"]["automation_webdriver"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["navigator_platform"], "MacIntel")
             self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_viewport"], {"width": 1365, "height": 768})
@@ -728,6 +738,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             + '","userAgentHeader":"'
             + runtime_user_agent
             + '","platform":"MacIntel","userAgentDataMobile":false,"userAgentDataPlatform":"macOS",'
+            '"userAgentDataBrands":[{"brand":"Chromium","version":"120"},{"brand":"Google Chrome","version":"120"}],'
+            '"secChUa":"\\"Chromium\\";v=\\"120\\", \\"Google Chrome\\";v=\\"120\\", \\"Not/A)Brand\\";v=\\"99\\"",'
             '"secChUaPlatform":"\\"macOS\\"","secChUaMobile":"?0",'
             '"webdriver":false,'
             '"language":"en-US","languages":["en-US","en"],'
@@ -766,6 +778,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertEqual(runtime_context["platform"], "MacIntel")
         self.assertFalse(runtime_context["userAgentDataMobile"])
         self.assertEqual(runtime_context["userAgentDataPlatform"], "macOS")
+        self.assertEqual(runtime_context["userAgentDataBrands"][0], {"brand": "Chromium", "version": "120"})
+        self.assertIn('"Google Chrome";v="120"', runtime_context["secChUa"])
         self.assertFalse(runtime_context["webdriver"])
         self.assertEqual(runtime_context["language"], "en-US")
         self.assertEqual(runtime_context["languages"], ["en-US", "en"])
@@ -836,6 +850,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "platform": "MacIntel",
             "userAgentDataMobile": False,
             "userAgentDataPlatform": "macOS",
+            "userAgentDataBrands": [{"brand": "Chromium", "version": "120"}, {"brand": "Google Chrome", "version": "120"}],
+            "secChUa": '"Chromium";v="120", "Google Chrome";v="120", "Not/A)Brand";v="99"',
             "secChUaPlatform": '"macOS"',
             "secChUaMobile": "?0",
             "webdriver": False,
@@ -889,6 +905,17 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertIn("automation navigator.platform", mismatches)
 
         observed["platform"] = "MacIntel"
+        observed["userAgentDataBrands"] = [{"brand": "Chromium", "version": "99"}]
+        observed["secChUa"] = '"Chromium";v="99"'
+        mismatches = module.validate_automation_context_observation(observed, browser_context)
+        self.assertIn("automation user agent brands", mismatches)
+        self.assertIn("automation Sec-CH-UA", mismatches)
+
+        observed["userAgentDataBrands"] = [
+            {"brand": "Chromium", "version": "120"},
+            {"brand": "Google Chrome", "version": "120"},
+        ]
+        observed["secChUa"] = '"Chromium";v="120", "Google Chrome";v="120", "Not/A)Brand";v="99"'
         observed["secChUaPlatform"] = '"Windows"'
         observed["secChUaMobile"] = "?1"
         mismatches = module.validate_automation_context_observation(observed, browser_context)
