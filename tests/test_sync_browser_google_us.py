@@ -177,6 +177,9 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_language"], "en-US")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_languages"], ["en-US", "en"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_locale"], "en-US")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_calendar"], "gregory")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_numbering_system"], "latn")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_hour_cycle"], "h12")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_locale_region"], "US")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_navigator_language_region"], "US")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_number_format"], "1,234,567.89")
@@ -522,6 +525,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "<body>AGENT_MANAGER_RUNTIME_JSON:"
             '{"language":"en-US","languages":["en-US","en"],'
             '"timezone":"America/Los_Angeles","intlLocale":"en-US",'
+            '"intlCalendar":"gregory","intlNumberingSystem":"latn","intlHourCycle":"h12",'
             '"intlLocaleRegion":"US","navigatorLanguageRegion":"US",'
             '"numberFormat":"1,234,567.89","listFormat":"A, B, and C",'
             '"acceptLanguageHeader":"en-US,en;q=0.9",'
@@ -544,6 +548,9 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertEqual(runtime_context["language"], "en-US")
         self.assertEqual(runtime_context["languages"], ["en-US", "en"])
         self.assertEqual(runtime_context["timezone"], "America/Los_Angeles")
+        self.assertEqual(runtime_context["intlCalendar"], "gregory")
+        self.assertEqual(runtime_context["intlNumberingSystem"], "latn")
+        self.assertEqual(runtime_context["intlHourCycle"], "h12")
         self.assertEqual(runtime_context["intlLocaleRegion"], "US")
         self.assertEqual(runtime_context["navigatorLanguageRegion"], "US")
         self.assertEqual(runtime_context["numberFormat"], "1,234,567.89")

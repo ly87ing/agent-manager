@@ -872,6 +872,9 @@ def verification_report_payload(
                 "runtime_language": APP_LOCALE,
                 "runtime_languages": ["en-US", "en"],
                 "runtime_intl_locale": APP_LOCALE,
+                "runtime_intl_calendar": "gregory",
+                "runtime_intl_numbering_system": "latn",
+                "runtime_intl_hour_cycle": "h12",
                 "runtime_intl_locale_region": "US",
                 "runtime_navigator_language_region": "US",
                 "runtime_number_format": "1,234,567.89",
@@ -1018,6 +1021,9 @@ def runtime_probe_html() -> str:
         "languages:Array.from(navigator.languages||[]),"
         "timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,"
         "intlLocale:Intl.DateTimeFormat().resolvedOptions().locale,"
+        "intlCalendar:Intl.DateTimeFormat().resolvedOptions().calendar,"
+        "intlNumberingSystem:Intl.DateTimeFormat().resolvedOptions().numberingSystem,"
+        "intlHourCycle:Intl.DateTimeFormat(undefined,{hour:'numeric'}).resolvedOptions().hourCycle,"
         "intlLocaleRegion:null,"
         "navigatorLanguageRegion:null,"
         "numberFormat:new Intl.NumberFormat().format(1234567.89),"
@@ -1089,6 +1095,12 @@ def validate_runtime_context(runtime_context: dict, timezone_id: str) -> tuple[s
         mismatches.append("Intl timezone")
     if runtime_context.get("intlLocale") != APP_LOCALE:
         mismatches.append("Intl locale")
+    if runtime_context.get("intlCalendar") != "gregory":
+        mismatches.append("Intl calendar")
+    if runtime_context.get("intlNumberingSystem") != "latn":
+        mismatches.append("Intl numbering system")
+    if runtime_context.get("intlHourCycle") != "h12":
+        mismatches.append("Intl hour cycle")
     if runtime_context.get("intlLocaleRegion") != "US":
         mismatches.append("Intl locale region")
     if runtime_context.get("navigatorLanguageRegion") != "US":
