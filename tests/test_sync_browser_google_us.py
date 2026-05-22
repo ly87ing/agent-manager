@@ -422,6 +422,15 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
                     "runtime_user_agent_high_entropy_matches_desktop_surface"
                 ]
             )
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_navigator_vendor"], "Google Inc.")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_navigator_product"], "Gecko")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_navigator_product_sub"], "20030107")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_navigator_app_code_name"], "Mozilla")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_navigator_app_name"], "Netscape")
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["runtime_navigator_app_version"],
+                automation_context["browser_context"]["user_agent"].removeprefix("Mozilla/"),
+            )
             self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_desktop_surface"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_pdf_viewer_enabled"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_plugins_present"])
@@ -462,6 +471,24 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             )
             self.assertFalse(verification_report["enforced_features"]["automation"]["automation_webdriver"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["navigator_platform"], "MacIntel")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["automation_navigator_vendor"], "Google Inc.")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["automation_navigator_product"], "Gecko")
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["automation_navigator_product_sub"],
+                "20030107",
+            )
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["automation_navigator_app_code_name"],
+                "Mozilla",
+            )
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["automation_navigator_app_name"],
+                "Netscape",
+            )
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["automation_navigator_app_version"],
+                automation_context["browser_context"]["user_agent"].removeprefix("Mozilla/"),
+            )
             self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_viewport"], {"width": 1365, "height": 768})
             self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_screen"], {"width": 1365, "height": 768})
             self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_device_scale_factor"], 1)
@@ -925,6 +952,9 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             '"secChUa":"\\"Chromium\\";v=\\"120\\", \\"Google Chrome\\";v=\\"120\\", \\"Not/A)Brand\\";v=\\"99\\"",'
             '"secChUaPlatform":"\\"macOS\\"","secChUaMobile":"?0",'
             '"webdriver":false,'
+            '"vendor":"Google Inc.","product":"Gecko","productSub":"20030107",'
+            '"appCodeName":"Mozilla","appName":"Netscape",'
+            '"appVersion":"5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",'
             '"language":"en-US","languages":["en-US","en"],'
             '"innerWidth":1365,"innerHeight":629,"outerWidth":0,"outerHeight":0,'
             '"screenWidth":800,"screenHeight":600,"availWidth":800,"availHeight":600,'
@@ -977,6 +1007,15 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertEqual(runtime_context["userAgentDataHighEntropy"]["platformVersion"], "")
         self.assertIn('"Google Chrome";v="120"', runtime_context["secChUa"])
         self.assertFalse(runtime_context["webdriver"])
+        self.assertEqual(runtime_context["vendor"], "Google Inc.")
+        self.assertEqual(runtime_context["product"], "Gecko")
+        self.assertEqual(runtime_context["productSub"], "20030107")
+        self.assertEqual(runtime_context["appCodeName"], "Mozilla")
+        self.assertEqual(runtime_context["appName"], "Netscape")
+        self.assertEqual(
+            runtime_context["appVersion"],
+            "5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        )
         self.assertEqual(runtime_context["language"], "en-US")
         self.assertEqual(runtime_context["languages"], ["en-US", "en"])
         self.assertEqual(runtime_context["innerWidth"], 1365)
@@ -1089,6 +1128,12 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "secChUaPlatform": '"macOS"',
             "secChUaMobile": "?0",
             "webdriver": False,
+            "vendor": "Google Inc.",
+            "product": "Gecko",
+            "productSub": "20030107",
+            "appCodeName": "Mozilla",
+            "appName": "Netscape",
+            "appVersion": "5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "language": "en-US",
             "languages": ["en-US", "en"],
             "timezone": "America/Los_Angeles",
@@ -1228,6 +1273,26 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertIn("automation webdriver", mismatches)
 
         observed["webdriver"] = False
+        observed["appVersion"] = "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        observed["vendor"] = "Apple Computer, Inc."
+        observed["productSub"] = "20100101"
+        observed["appName"] = "Other"
+        observed["appCodeName"] = "Other"
+        observed["product"] = "Other"
+        mismatches = module.validate_automation_context_observation(observed, browser_context)
+        self.assertIn("automation navigator.appVersion", mismatches)
+        self.assertIn("automation navigator.vendor", mismatches)
+        self.assertIn("automation navigator.productSub", mismatches)
+        self.assertIn("automation navigator.appName", mismatches)
+        self.assertIn("automation navigator.appCodeName", mismatches)
+        self.assertIn("automation navigator.product", mismatches)
+
+        observed["appVersion"] = "5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        observed["vendor"] = "Google Inc."
+        observed["productSub"] = "20030107"
+        observed["appName"] = "Netscape"
+        observed["appCodeName"] = "Mozilla"
+        observed["product"] = "Gecko"
         observed["localeWeekInfo"] = {"firstDay": 1, "weekend": [6, 7]}
         observed["localeTimeZones"] = ["Asia/Hong_Kong"]
         mismatches = module.validate_automation_context_observation(observed, browser_context)

@@ -948,6 +948,13 @@ def navigator_platform_from_user_agent(user_agent: str) -> str:
     return "Linux x86_64"
 
 
+def navigator_app_version_from_user_agent(user_agent: str) -> str:
+    prefix = "Mozilla/"
+    if user_agent.startswith(prefix):
+        return user_agent[len(prefix) :]
+    return user_agent
+
+
 def resolved_us_desktop_user_agent(platform_name: str) -> str:
     chrome_version = detected_chrome_version(platform_name) or FALLBACK_CHROME_VERSION
     return (
@@ -1323,6 +1330,12 @@ def verification_report_payload(
                 "runtime_sec_ch_ua_mobile": "?0",
                 "runtime_user_agent_data_brands_match_chrome_major": True,
                 "runtime_user_agent_high_entropy_matches_desktop_surface": True,
+                "runtime_navigator_vendor": "Google Inc.",
+                "runtime_navigator_product": "Gecko",
+                "runtime_navigator_product_sub": "20030107",
+                "runtime_navigator_app_code_name": "Mozilla",
+                "runtime_navigator_app_name": "Netscape",
+                "runtime_navigator_app_version": navigator_app_version_from_user_agent(user_agent),
                 "runtime_desktop_surface": True,
                 "runtime_pdf_viewer_enabled": True,
                 "runtime_plugins_present": True,
@@ -1353,6 +1366,12 @@ def verification_report_payload(
                 "automation_user_agent_high_entropy_matches_desktop_surface": True,
                 "automation_webdriver": False,
                 "navigator_platform": expected_navigator_platform,
+                "automation_navigator_vendor": "Google Inc.",
+                "automation_navigator_product": "Gecko",
+                "automation_navigator_product_sub": "20030107",
+                "automation_navigator_app_code_name": "Mozilla",
+                "automation_navigator_app_name": "Netscape",
+                "automation_navigator_app_version": navigator_app_version_from_user_agent(user_agent),
                 "desktop_viewport": dict(US_DESKTOP_VIEWPORT),
                 "desktop_screen": dict(US_DESKTOP_SCREEN),
                 "desktop_device_scale_factor": US_DESKTOP_DEVICE_SCALE_FACTOR,
@@ -1553,6 +1572,12 @@ def runtime_probe_html() -> str:
         "userAgentDataBrands:navigator.userAgentData?Array.from(navigator.userAgentData.brands||[]):null,"
         "userAgentDataHighEntropy:null,"
         "webdriver:navigator.webdriver,"
+        "vendor:navigator.vendor,"
+        "product:navigator.product,"
+        "productSub:navigator.productSub,"
+        "appCodeName:navigator.appCodeName,"
+        "appName:navigator.appName,"
+        "appVersion:navigator.appVersion,"
         "language:navigator.language,"
         "languages:Array.from(navigator.languages||[]),"
         "innerWidth:window.innerWidth,"
@@ -1829,6 +1854,18 @@ def validate_runtime_context(
     expected_navigator_platform = navigator_platform_from_user_agent(user_agent)
     if runtime_context.get("platform") != expected_navigator_platform:
         mismatches.append("navigator.platform")
+    if runtime_context.get("vendor") != "Google Inc.":
+        mismatches.append("navigator.vendor")
+    if runtime_context.get("product") != "Gecko":
+        mismatches.append("navigator.product")
+    if runtime_context.get("productSub") != "20030107":
+        mismatches.append("navigator.productSub")
+    if runtime_context.get("appCodeName") != "Mozilla":
+        mismatches.append("navigator.appCodeName")
+    if runtime_context.get("appName") != "Netscape":
+        mismatches.append("navigator.appName")
+    if runtime_context.get("appVersion") != navigator_app_version_from_user_agent(user_agent):
+        mismatches.append("navigator.appVersion")
     if runtime_context.get("userAgentDataMobile") not in (False, None):
         mismatches.append("runtime user agent mobile")
     if runtime_context.get("webdriver") not in (False, None):
@@ -2135,6 +2172,18 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation User-Agent header")
     if observed.get("platform") != expected_navigator_platform:
         mismatches.append("automation navigator.platform")
+    if observed.get("vendor") != "Google Inc.":
+        mismatches.append("automation navigator.vendor")
+    if observed.get("product") != "Gecko":
+        mismatches.append("automation navigator.product")
+    if observed.get("productSub") != "20030107":
+        mismatches.append("automation navigator.productSub")
+    if observed.get("appCodeName") != "Mozilla":
+        mismatches.append("automation navigator.appCodeName")
+    if observed.get("appName") != "Netscape":
+        mismatches.append("automation navigator.appName")
+    if observed.get("appVersion") != navigator_app_version_from_user_agent(str(expected_user_agent or "")):
+        mismatches.append("automation navigator.appVersion")
     user_agent_data_platform = observed.get("userAgentDataPlatform")
     if user_agent_data_platform is not None and user_agent_data_platform != expected_client_hints_platform:
         mismatches.append("automation user agent platform")
@@ -2417,6 +2466,12 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             webdriver: navigator.webdriver,
                             language: navigator.language,
                             languages: Array.from(navigator.languages || []),
+                            vendor: navigator.vendor,
+                            product: navigator.product,
+                            productSub: navigator.productSub,
+                            appCodeName: navigator.appCodeName,
+                            appName: navigator.appName,
+                            appVersion: navigator.appVersion,
                             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
                             timezoneOffset: new Date().getTimezoneOffset(),
                             intlLocale: Intl.DateTimeFormat().resolvedOptions().locale,
