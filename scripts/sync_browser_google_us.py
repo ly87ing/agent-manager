@@ -379,11 +379,122 @@ def sync_preferences(path: Path) -> bool:
     profile = mapping_section(data, "profile")
     default_content_settings = mapping_section(profile, "default_content_setting_values")
     changed |= set_mapping_value(default_content_settings, "geolocation", BLOCK_CONTENT_SETTING)
+    content_settings = mapping_section(profile, "content_settings")
+    exceptions = mapping_section(content_settings, "exceptions")
+    changed |= set_mapping_value(exceptions, "geolocation", {})
 
     if changed:
         ensure_backup(path)
         write_json_atomic(path, data)
     return changed
+
+
+def nested_value(mapping: dict, keys: tuple[str, ...]):
+    current = mapping
+    for key in keys:
+        if not isinstance(current, dict) or key not in current:
+            return None
+        current = current[key]
+    return current
+
+
+def audit_expected_value(data: dict, key_path: tuple[str, ...], expected, mismatches: list[dict]) -> None:
+    actual = nested_value(data, key_path)
+    if actual != expected:
+        mismatches.append(
+            {
+                "path": ".".join(key_path),
+                "expected": expected,
+                "actual": actual,
+            }
+        )
+
+
+def audit_local_state(path: Path) -> dict:
+    record = {"path": str(path), "exists": path.exists(), "ok": False, "mismatches": []}
+    if not path.exists():
+        record["mismatches"].append({"path": str(path), "expected": "existing JSON object", "actual": "missing"})
+        return record
+    try:
+        data = load_json_mapping(path)
+    except ValueError as exc:
+        record["mismatches"].append({"path": str(path), "expected": "valid JSON object", "actual": str(exc)})
+        return record
+
+    audit_expected_value(data, ("intl", "app_locale"), APP_LOCALE, record["mismatches"])
+    audit_expected_value(data, ("countryid_at_install",), 244, record["mismatches"])
+    audit_expected_value(data, ("variations_country",), "us", record["mismatches"])
+    record["ok"] = not record["mismatches"]
+    return record
+
+
+def audit_preferences(path: Path) -> dict:
+    record = {"path": str(path), "exists": path.exists(), "ok": False, "mismatches": []}
+    if not path.exists():
+        record["mismatches"].append({"path": str(path), "expected": "existing JSON object", "actual": "missing"})
+        return record
+    try:
+        data = load_json_mapping(path)
+    except ValueError as exc:
+        record["mismatches"].append({"path": str(path), "expected": "valid JSON object", "actual": str(exc)})
+        return record
+
+    expected_values = [
+        (("intl", "accept_languages"), ACCEPT_LANGUAGES),
+        (("intl", "selected_languages"), ACCEPT_LANGUAGES),
+        (("spellcheck", "dictionaries"), ["en-US"]),
+        (("spellcheck", "dictionary"), "en-US"),
+        (("spellcheck", "use_spelling_service"), True),
+        (("default_search_provider", "enabled"), True),
+        (("default_search_provider", "keyword"), "google.com"),
+        (("default_search_provider", "name"), "Google US"),
+        (("default_search_provider", "search_url"), SEARCH_URL),
+        (("default_search_provider", "suggest_url"), SUGGEST_URL),
+        (("webrtc", "ip_handling_policy"), "disable_non_proxied_udp"),
+        (("webrtc", "multiple_routes_enabled"), False),
+        (("webrtc", "nonproxied_udp_enabled"), False),
+        (("profile", "default_content_setting_values", "geolocation"), BLOCK_CONTENT_SETTING),
+        (("profile", "content_settings", "exceptions", "geolocation"), {}),
+    ]
+    for key_path, expected in expected_values:
+        audit_expected_value(data, key_path, expected, record["mismatches"])
+    record["ok"] = not record["mismatches"]
+    return record
+
+
+def audit_browser_state(browser_roots: list[BrowserRoot], explicit_profile: str | None) -> dict:
+    audit = {"overall_ok": True, "roots": []}
+    for browser_root in browser_roots:
+        root_record = {
+            "name": browser_root.name,
+            "user_data_dir": str(browser_root.user_data_dir),
+            "exists": browser_root.user_data_dir.exists(),
+            "local_state": None,
+            "profiles": [],
+            "warnings": [],
+        }
+        if not browser_root.user_data_dir.exists():
+            root_record["warnings"].append("browser user data directory not found")
+            audit["roots"].append(root_record)
+            continue
+
+        root_record["local_state"] = audit_local_state(browser_root.user_data_dir / "Local State")
+        if not root_record["local_state"]["ok"]:
+            audit["overall_ok"] = False
+
+        preference_paths = discover_preference_paths(browser_root.user_data_dir, explicit_profile)
+        if not preference_paths:
+            root_record["warnings"].append("no regular profile Preferences found")
+            if explicit_profile:
+                audit["overall_ok"] = False
+        for preferences_path in preference_paths:
+            profile_record = audit_preferences(preferences_path)
+            if not profile_record["ok"]:
+                audit["overall_ok"] = False
+            root_record["profiles"].append(profile_record)
+
+        audit["roots"].append(root_record)
+    return audit
 
 
 def automation_context_payload(exit_profile: ExitProfile | None) -> dict:
@@ -534,16 +645,25 @@ def verification_report_payload(
     explicit_profile: str | None,
     exit_profile: ExitProfile | None,
     verification_state: str,
+    browser_state_audit: dict,
 ) -> dict:
     timezone_id = resolved_timezone_id(exit_profile)
     geolocation = resolved_geolocation(exit_profile)
+    state_ok = browser_state_audit.get("overall_ok") is True
+    if verification_state == "verified_us" and state_ok:
+        overall_status = "complete"
+    elif state_ok:
+        overall_status = "limited"
+    else:
+        overall_status = "failed"
     return {
         "version": VERIFICATION_REPORT_VERSION,
-        "overall_status": "complete" if verification_state == "verified_us" else "limited",
+        "overall_status": overall_status,
         "exit": {
             "verification_state": verification_state,
             "profile": exit_profile_payload(exit_profile),
         },
+        "browser_state_audit": browser_state_audit,
         "browser_roots": [
             {
                 "name": browser_root.name,
@@ -603,9 +723,16 @@ def sync_verification_report(
     explicit_profile: str | None,
     exit_profile: ExitProfile | None,
     verification_state: str,
+    browser_state_audit: dict,
 ) -> list[str]:
     report_path = config_dir / "browser-us-verification.json"
-    payload = verification_report_payload(browser_roots, explicit_profile, exit_profile, verification_state)
+    payload = verification_report_payload(
+        browser_roots,
+        explicit_profile,
+        exit_profile,
+        verification_state,
+        browser_state_audit,
+    )
     previous_payload = load_json_mapping(report_path) if report_path.exists() else None
     if previous_payload == payload:
         return []
@@ -804,6 +931,25 @@ def sync_browser_roots(browser_roots: list[BrowserRoot], explicit_profile: str |
     return changed_paths
 
 
+def print_browser_state_audit_errors(browser_state_audit: dict) -> None:
+    for root_record in browser_state_audit.get("roots", []):
+        local_state = root_record.get("local_state")
+        if local_state and not local_state.get("ok"):
+            for mismatch in local_state.get("mismatches", []):
+                print(
+                    f"ERROR: {root_record['name']} Local State mismatch: {mismatch}",
+                    file=sys.stderr,
+                )
+        for profile_record in root_record.get("profiles", []):
+            if profile_record.get("ok"):
+                continue
+            for mismatch in profile_record.get("mismatches", []):
+                print(
+                    f"ERROR: {root_record['name']} Preferences mismatch: {mismatch}",
+                    file=sys.stderr,
+                )
+
+
 def exit_profile_summary(exit_profile: ExitProfile) -> str:
     parts = [f"country: {exit_profile.country_code}"]
     if exit_profile.ip:
@@ -876,6 +1022,7 @@ def main(argv: list[str] | None = None) -> int:
     changed_paths = []
     changed_paths.extend(sync_browser_roots(browser_roots, args.profile))
     changed_paths.extend(sync_automation_context(config_dir, exit_resolution.exit_profile, platform_name))
+    browser_state_audit = audit_browser_state(browser_roots, args.profile)
     changed_paths.extend(
         sync_verification_report(
             config_dir,
@@ -883,8 +1030,12 @@ def main(argv: list[str] | None = None) -> int:
             args.profile,
             exit_resolution.exit_profile,
             exit_resolution.verification_state,
+            browser_state_audit,
         )
     )
+    if not browser_state_audit["overall_ok"]:
+        print_browser_state_audit_errors(browser_state_audit)
+        return 3
 
     opened_ncr = False
     if args.offline:

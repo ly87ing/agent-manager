@@ -44,6 +44,15 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
                     {
                         "intl": {"accept_languages": "zh-CN,zh"},
                         "default_search_provider": {"name": "Old Google"},
+                        "profile": {
+                            "content_settings": {
+                                "exceptions": {
+                                    "geolocation": {
+                                        "https://example.test,*": {"setting": 1},
+                                    },
+                                },
+                            },
+                        },
                         "keep": target_dir.name,
                     }
                 ),
@@ -95,15 +104,18 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(preferences["webrtc"]["ip_handling_policy"], "disable_non_proxied_udp")
             self.assertFalse(preferences["webrtc"]["nonproxied_udp_enabled"])
             self.assertEqual(preferences["profile"]["default_content_setting_values"]["geolocation"], 2)
+            self.assertEqual(preferences["profile"]["content_settings"]["exceptions"]["geolocation"], {})
             self.assertEqual(preferences["keep"], "Profile 1")
             self.assertEqual(default_preferences["intl"]["accept_languages"], "en-US,en")
             self.assertEqual(default_preferences["default_search_provider"]["name"], "Google US")
+            self.assertEqual(default_preferences["profile"]["content_settings"]["exceptions"]["geolocation"], {})
             self.assertEqual(automation_context["browser_context"]["locale"], "en-US")
             self.assertEqual(automation_context["browser_context"]["timezone_id"], "America/Los_Angeles")
             self.assertEqual(automation_context["chrome_launch"]["launcher"], str(launcher_path))
             self.assertIn("--force-webrtc-ip-handling-policy=disable_non_proxied_udp", automation_context["chrome_launch"]["args"])
             self.assertEqual(verification_report["overall_status"], "limited")
             self.assertEqual(verification_report["exit"]["verification_state"], "manually_skipped")
+            self.assertTrue(verification_report["browser_state_audit"]["overall_ok"])
             self.assertEqual(verification_report["enforced_features"]["local_state_country"]["variations_country"], "us")
             self.assertEqual(verification_report["enforced_features"]["google"]["search_gl"], "US")
             self.assertEqual(verification_report["enforced_features"]["automation"]["chrome_launcher"], "$AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER")
@@ -161,6 +173,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(automation_context["chrome_launch"]["launcher"], str(launcher_path))
             self.assertEqual(verification_report["overall_status"], "complete")
             self.assertEqual(verification_report["exit"]["verification_state"], "verified_us")
+            self.assertTrue(verification_report["browser_state_audit"]["overall_ok"])
             self.assertEqual(verification_report["exit"]["profile"]["ip"], "203.0.113.31")
             self.assertEqual(verification_report["enforced_features"]["automation"]["timezone_id"], "America/New_York")
             self.assertEqual(launcher_path.stat().st_mode & 0o777, 0o755)
@@ -320,3 +333,26 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertIn("could not verify public exit profile", result.stderr)
             self.assertFalse((config_dir / "browser-us-context.json").exists())
             self.assertFalse((config_dir / "browser-us-verification.json").exists())
+
+    def test_post_sync_verification_fails_for_missing_explicit_profile(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            chrome_root = Path(temp_dir) / "chrome"
+            config_dir = Path(temp_dir) / "config"
+            self._write_chrome_profile(chrome_root)
+
+            result = self._run(
+                "--chrome-user-data-dir",
+                str(chrome_root),
+                "--config-dir",
+                str(config_dir),
+                "--profile",
+                "Missing Profile",
+                "--no-browser-open",
+                "--skip-exit-check",
+            )
+
+            self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+            self.assertIn("Preferences mismatch", result.stderr)
+            verification_report = json.loads((config_dir / "browser-us-verification.json").read_text(encoding="utf-8"))
+            self.assertEqual(verification_report["overall_status"], "failed")
+            self.assertFalse(verification_report["browser_state_audit"]["overall_ok"])
