@@ -24,7 +24,9 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
     def _tree_digest(self, root: Path) -> dict[str, str]:
         result = {}
         for path in sorted(item for item in root.rglob("*") if item.is_file()):
-            result[str(path.relative_to(root))] = sha256(path.read_bytes()).hexdigest()
+            relative_path = str(path.relative_to(root))
+            file_mode = path.stat().st_mode & 0o777
+            result[relative_path] = f"{file_mode:o}:{sha256(path.read_bytes()).hexdigest()}"
         return result
 
     def _write_chrome_profile(self, chrome_root: Path):
@@ -77,6 +79,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             default_preferences = json.loads((chrome_root / "Default" / "Preferences").read_text(encoding="utf-8"))
             automation_context = json.loads((config_dir / "browser-us-context.json").read_text(encoding="utf-8"))
             verification_report = json.loads((config_dir / "browser-us-verification.json").read_text(encoding="utf-8"))
+            launcher_path = config_dir / "browser-us-chrome.sh"
+            launcher_content = launcher_path.read_text(encoding="utf-8")
 
             self.assertEqual(local_state["intl"]["app_locale"], "en-US")
             self.assertEqual(local_state["countryid_at_install"], 244)
@@ -96,11 +100,16 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(default_preferences["default_search_provider"]["name"], "Google US")
             self.assertEqual(automation_context["browser_context"]["locale"], "en-US")
             self.assertEqual(automation_context["browser_context"]["timezone_id"], "America/Los_Angeles")
+            self.assertEqual(automation_context["chrome_launch"]["launcher"], str(launcher_path))
             self.assertIn("--force-webrtc-ip-handling-policy=disable_non_proxied_udp", automation_context["chrome_launch"]["args"])
             self.assertEqual(verification_report["overall_status"], "limited")
             self.assertEqual(verification_report["exit"]["verification_state"], "manually_skipped")
             self.assertEqual(verification_report["enforced_features"]["local_state_country"]["variations_country"], "us")
             self.assertEqual(verification_report["enforced_features"]["google"]["search_gl"], "US")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["chrome_launcher"], "$AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER")
+            self.assertEqual(launcher_path.stat().st_mode & 0o777, 0o755)
+            self.assertIn("export TZ=America/Los_Angeles", launcher_content)
+            self.assertIn("--lang=en-US", launcher_content)
             self.assertTrue((config_dir / "browser-us.env").exists())
             self.assertTrue((chrome_root / "Local State.agent-manager-before-google-us").exists())
             self.assertTrue((profile_dir / "Preferences.agent-manager-before-google-us").exists())
@@ -140,6 +149,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             automation_context = json.loads((config_dir / "browser-us-context.json").read_text(encoding="utf-8"))
             verification_report = json.loads((config_dir / "browser-us-verification.json").read_text(encoding="utf-8"))
             env_content = (config_dir / "browser-us.env").read_text(encoding="utf-8")
+            launcher_path = config_dir / "browser-us-chrome.sh"
+            launcher_content = launcher_path.read_text(encoding="utf-8")
             self.assertEqual(automation_context["browser_context"]["timezone_id"], "America/New_York")
             self.assertEqual(automation_context["browser_context"]["geolocation"]["latitude"], 40.7128)
             self.assertEqual(automation_context["browser_context"]["geolocation"]["longitude"], -74.006)
@@ -147,11 +158,15 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(automation_context["environment"]["TZ"], "America/New_York")
             self.assertEqual(automation_context["exit_profile"]["ip"], "203.0.113.31")
             self.assertEqual(automation_context["exit_profile"]["country_code"], "US")
+            self.assertEqual(automation_context["chrome_launch"]["launcher"], str(launcher_path))
             self.assertEqual(verification_report["overall_status"], "complete")
             self.assertEqual(verification_report["exit"]["verification_state"], "verified_us")
             self.assertEqual(verification_report["exit"]["profile"]["ip"], "203.0.113.31")
             self.assertEqual(verification_report["enforced_features"]["automation"]["timezone_id"], "America/New_York")
+            self.assertEqual(launcher_path.stat().st_mode & 0o777, 0o755)
+            self.assertIn("export TZ=America/New_York", launcher_content)
             self.assertIn("export TZ=America/New_York", env_content)
+            self.assertIn("AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER", env_content)
             first_digest = self._tree_digest(root)
 
             second_result = self._run(
