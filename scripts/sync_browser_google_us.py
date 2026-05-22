@@ -412,10 +412,11 @@ def sync_local_state(path: Path) -> bool:
     return changed
 
 
-def sync_preferences(path: Path) -> bool:
+def sync_preferences(path: Path, enforce_install_country: bool = True) -> bool:
     data = load_json_mapping(path)
     changed = False
-    changed |= set_mapping_value(data, "countryid_at_install", COUNTRY_ID_US)
+    if enforce_install_country:
+        changed |= set_mapping_value(data, "countryid_at_install", COUNTRY_ID_US)
 
     intl = mapping_section(data, "intl")
     changed |= set_mapping_value(intl, "accept_languages", ACCEPT_LANGUAGES)
@@ -527,7 +528,7 @@ def audit_local_state(path: Path) -> dict:
     return record
 
 
-def audit_preferences(path: Path) -> dict:
+def audit_preferences(path: Path, enforce_install_country: bool = True) -> dict:
     record = {"path": str(path), "exists": path.exists(), "ok": False, "mismatches": []}
     if not path.exists():
         record["mismatches"].append({"path": str(path), "expected": "existing JSON object", "actual": "missing"})
@@ -539,7 +540,6 @@ def audit_preferences(path: Path) -> dict:
         return record
 
     expected_values = [
-        (("countryid_at_install",), COUNTRY_ID_US),
         (("intl", "accept_languages"), ACCEPT_LANGUAGES),
         (("intl", "selected_languages"), ACCEPT_LANGUAGES),
         (("account_values", "intl", "accept_languages"), ACCEPT_LANGUAGES),
@@ -562,6 +562,8 @@ def audit_preferences(path: Path) -> dict:
         (("profile", "content_settings", "exceptions", "geolocation_with_options"), {}),
         (("profile", "content_settings", "exceptions", "reduced_accept_language"), {}),
     ]
+    if enforce_install_country:
+        expected_values.insert(0, (("countryid_at_install",), COUNTRY_ID_US))
     for key_path, expected in expected_values:
         audit_expected_value(data, key_path, expected, record["mismatches"])
     record["ok"] = not record["mismatches"]
@@ -574,10 +576,10 @@ def audit_browser_state(
     managed_browser_root: BrowserRoot | None = None,
 ) -> dict:
     audit = {"overall_ok": True, "roots": []}
-    root_scopes = [(browser_root, explicit_profile) for browser_root in browser_roots]
+    root_scopes = [(browser_root, explicit_profile, False) for browser_root in browser_roots]
     if managed_browser_root is not None:
-        root_scopes.append((managed_browser_root, None))
-    for browser_root, profile_scope in root_scopes:
+        root_scopes.append((managed_browser_root, None, True))
+    for browser_root, profile_scope, enforce_install_country in root_scopes:
         root_record = {
             "name": browser_root.name,
             "user_data_dir": str(browser_root.user_data_dir),
@@ -601,7 +603,7 @@ def audit_browser_state(
             if profile_scope:
                 audit["overall_ok"] = False
         for preferences_path in preference_paths:
-            profile_record = audit_preferences(preferences_path)
+            profile_record = audit_preferences(preferences_path, enforce_install_country=enforce_install_country)
             if not profile_record["ok"]:
                 audit["overall_ok"] = False
             root_record["profiles"].append(profile_record)
@@ -830,7 +832,8 @@ def verification_report_payload(
                 "variations_safe_seed_session_consistency_country": VARIATIONS_COUNTRY,
             },
             "profile_country": {
-                "countryid_at_install": COUNTRY_ID_US,
+                "managed_profile_countryid_at_install": COUNTRY_ID_US,
+                "regular_profile_countryid_at_install": "not forced; active Chrome may rewrite this volatile install-time field",
             },
             "translate": {
                 "recent_target": TRANSLATE_TARGET_LANGUAGE,
@@ -1406,7 +1409,7 @@ def sync_browser_roots(browser_roots: list[BrowserRoot], explicit_profile: str |
 
         for preferences_path in preference_paths:
             if preferences_path.exists():
-                if sync_preferences(preferences_path):
+                if sync_preferences(preferences_path, enforce_install_country=False):
                     changed_paths.append(str(preferences_path))
             else:
                 print(f"WARN: browser profile Preferences not found: {preferences_path}", file=sys.stderr)
