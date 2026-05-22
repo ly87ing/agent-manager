@@ -88,21 +88,44 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
     def _write_managed_profile_volatile_state(self, config_dir: Path) -> list[Path]:
         managed_root = config_dir / "browser-us-profile"
         file_relative_paths = [
+            "Default/Account Web Data",
+            "Default/Account Web Data-journal",
             "Default/Cookies",
             "Default/Cookies-journal",
+            "Default/Favicons",
+            "Default/Favicons-journal",
             "Default/History",
             "Default/History-journal",
+            "Default/Network Persistent State",
             "Default/Network/Cookies",
             "Default/Network/Cookies-journal",
+            "Default/Reporting and NEL",
+            "Default/Reporting and NEL-journal",
+            "Default/Safe Browsing Cookies",
+            "Default/Safe Browsing Cookies-journal",
+            "Default/Top Sites",
+            "Default/Top Sites-journal",
+            "Default/Trust Tokens",
+            "Default/Trust Tokens-journal",
+            "Default/Web Data",
+            "Default/Web Data-journal",
         ]
         directory_relative_paths = [
+            "Default/ClientCertificates",
+            "Default/DawnGraphiteCache",
+            "Default/DawnWebGPUCache",
             "Default/IndexedDB",
             "Default/Local Storage",
+            "Default/PersistentOriginTrials",
+            "Default/Sessions",
             "Default/Session Storage",
             "Default/Service Worker",
+            "Default/Shared Dictionary",
+            "Default/Site Characteristics Database",
             "Default/Cache",
             "Default/Code Cache",
             "Default/GPUCache",
+            "Default/WebStorage",
         ]
         volatile_targets = []
         for relative_path in file_relative_paths:
@@ -239,6 +262,18 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             )
             self.assertIn(
                 "Default/Local Storage",
+                verification_report["enforced_features"]["managed_profile_storage"]["cleared_relative_paths"],
+            )
+            self.assertIn(
+                "Default/Network Persistent State",
+                verification_report["enforced_features"]["managed_profile_storage"]["cleared_relative_paths"],
+            )
+            self.assertIn(
+                "Default/Trust Tokens",
+                verification_report["enforced_features"]["managed_profile_storage"]["cleared_relative_paths"],
+            )
+            self.assertIn(
+                "Default/Site Characteristics Database",
                 verification_report["enforced_features"]["managed_profile_storage"]["cleared_relative_paths"],
             )
             self.assertEqual(verification_report["enforced_features"]["google"]["home_url"], "https://www.google.com/?hl=en-US&gl=US&pws=0")
