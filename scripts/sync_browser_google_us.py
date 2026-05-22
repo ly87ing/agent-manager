@@ -1198,6 +1198,7 @@ def verification_report_payload(
                 "runtime_sec_ch_ua_platform": expected_client_hints_platform,
                 "runtime_sec_ch_ua_mobile": "?0",
                 "runtime_user_agent_data_brands_match_chrome_major": True,
+                "runtime_user_agent_high_entropy_matches_desktop_surface": True,
                 "runtime_webdriver": False,
                 "runtime_geolocation_permission": "denied",
                 "runtime_webrtc_supported": True,
@@ -1211,6 +1212,7 @@ def verification_report_payload(
                 "automation_sec_ch_ua_platform": expected_client_hints_platform,
                 "automation_sec_ch_ua_mobile": "?0",
                 "automation_user_agent_data_brands_match_chrome_major": True,
+                "automation_user_agent_high_entropy_matches_desktop_surface": True,
                 "automation_webdriver": False,
                 "navigator_platform": expected_navigator_platform,
                 "desktop_viewport": dict(US_DESKTOP_VIEWPORT),
@@ -1374,6 +1376,7 @@ def runtime_probe_html() -> str:
         "userAgentDataMobile:navigator.userAgentData?navigator.userAgentData.mobile:null,"
         "userAgentDataPlatform:navigator.userAgentData?navigator.userAgentData.platform:null,"
         "userAgentDataBrands:navigator.userAgentData?Array.from(navigator.userAgentData.brands||[]):null,"
+        "userAgentDataHighEntropy:null,"
         "webdriver:navigator.webdriver,"
         "language:navigator.language,"
         "languages:Array.from(navigator.languages||[]),"
@@ -1418,6 +1421,14 @@ def runtime_probe_html() -> str:
         "observed.localeTimeZones=intlLocale.getTimeZones?intlLocale.getTimeZones():null;"
         "}catch(error){observed.localeInfoError=String(error&&error.name||error);}"
         "try{observed.regionDisplayName=new Intl.DisplayNames(undefined,{type:'region'}).of('US');}catch(error){}"
+        "try{"
+        "if(navigator.userAgentData&&navigator.userAgentData.getHighEntropyValues){"
+        "observed.userAgentDataHighEntropy=await navigator.userAgentData.getHighEntropyValues(["
+        "'architecture','bitness','formFactor','fullVersionList','model','platform',"
+        "'platformVersion','uaFullVersion','wow64','mobile'"
+        "]);"
+        "}"
+        "}catch(error){observed.userAgentDataHighEntropyError=String(error&&error.name||error);}"
         "try{"
         "if(navigator.permissions&&navigator.permissions.query){"
         "observed.geolocationPermission=(await navigator.permissions.query({name:'geolocation'})).state;"
@@ -1523,6 +1534,41 @@ def sec_ch_ua_matches_chrome_major(value, user_agent: str) -> bool:
     return f'v="{major_version}"' in text and ('"Chromium"' in text or '"Google Chrome"' in text)
 
 
+def user_agent_high_entropy_matches_desktop_surface(
+    high_entropy,
+    user_agent: str,
+    expected_client_hints_platform: str,
+) -> bool:
+    if not isinstance(high_entropy, dict) or not isinstance(user_agent, str):
+        return False
+    if high_entropy.get("platform") != expected_client_hints_platform:
+        return False
+    if high_entropy.get("mobile") is not False:
+        return False
+    if high_entropy.get("model") not in ("", None):
+        return False
+    if high_entropy.get("wow64") not in (False, None):
+        return False
+
+    full_version_list = high_entropy.get("fullVersionList")
+    if isinstance(full_version_list, list) and full_version_list:
+        if not user_agent_data_brands_match_chrome_major(full_version_list, user_agent):
+            return False
+
+    ua_full_version = clean_string(high_entropy.get("uaFullVersion"))
+    major_version = chrome_major_version(user_agent)
+    if ua_full_version and (major_version is None or not ua_full_version.startswith(f"{major_version}.")):
+        return False
+
+    if "Macintosh; Intel Mac OS X 10_15_7" in user_agent:
+        if high_entropy.get("platformVersion") not in ("", "10_15_7", None):
+            return False
+        if high_entropy.get("architecture") not in ("", "x86", None):
+            return False
+
+    return True
+
+
 def validate_runtime_context(
     runtime_context: dict,
     timezone_id: str,
@@ -1546,6 +1592,12 @@ def validate_runtime_context(
     user_agent_data_platform = runtime_context.get("userAgentDataPlatform")
     if user_agent_data_platform is not None and user_agent_data_platform != expected_client_hints_platform:
         mismatches.append("runtime user agent platform")
+    if runtime_context.get("userAgentDataHighEntropyError") or not user_agent_high_entropy_matches_desktop_surface(
+        runtime_context.get("userAgentDataHighEntropy"),
+        user_agent,
+        expected_client_hints_platform,
+    ):
+        mismatches.append("runtime user agent high entropy")
     if not sec_ch_ua_matches_chrome_major(runtime_context.get("secChUa"), user_agent):
         mismatches.append("Sec-CH-UA")
     sec_ch_ua_platform = runtime_context.get("secChUaPlatform")
@@ -1818,6 +1870,12 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation user agent platform")
     if not user_agent_data_brands_match_chrome_major(observed.get("userAgentDataBrands"), expected_user_agent):
         mismatches.append("automation user agent brands")
+    if observed.get("userAgentDataHighEntropyError") or not user_agent_high_entropy_matches_desktop_surface(
+        observed.get("userAgentDataHighEntropy"),
+        expected_user_agent,
+        expected_client_hints_platform,
+    ):
+        mismatches.append("automation user agent high entropy")
     if not sec_ch_ua_matches_chrome_major(observed.get("secChUa"), expected_user_agent):
         mismatches.append("automation Sec-CH-UA")
     sec_ch_ua_platform = observed.get("secChUaPlatform")
@@ -1984,6 +2042,7 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             userAgentDataMobile: navigator.userAgentData ? navigator.userAgentData.mobile : null,
                             userAgentDataPlatform: navigator.userAgentData ? navigator.userAgentData.platform : null,
                             userAgentDataBrands: navigator.userAgentData ? Array.from(navigator.userAgentData.brands || []) : null,
+                            userAgentDataHighEntropy: null,
                             webdriver: navigator.webdriver,
                             language: navigator.language,
                             languages: Array.from(navigator.languages || []),
@@ -2023,6 +2082,24 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             observed.localeTimeZones = intlLocale.getTimeZones ? intlLocale.getTimeZones() : null;
                           } catch (error) {
                             observed.localeInfoError = String(error && error.name || error);
+                          }
+                          try {
+                            if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+                              observed.userAgentDataHighEntropy = await navigator.userAgentData.getHighEntropyValues([
+                                'architecture',
+                                'bitness',
+                                'formFactor',
+                                'fullVersionList',
+                                'model',
+                                'platform',
+                                'platformVersion',
+                                'uaFullVersion',
+                                'wow64',
+                                'mobile',
+                              ]);
+                            }
+                          } catch (error) {
+                            observed.userAgentDataHighEntropyError = String(error && error.name || error);
                           }
                           return observed;
                         }

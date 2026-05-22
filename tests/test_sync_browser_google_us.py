@@ -329,6 +329,11 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertTrue(
                 verification_report["enforced_features"]["automation"]["runtime_user_agent_data_brands_match_chrome_major"]
             )
+            self.assertTrue(
+                verification_report["enforced_features"]["automation"][
+                    "runtime_user_agent_high_entropy_matches_desktop_surface"
+                ]
+            )
             self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_webdriver"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_geolocation_permission"], "denied")
             self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_webrtc_supported"])
@@ -346,6 +351,11 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertTrue(
                 verification_report["enforced_features"]["automation"][
                     "automation_user_agent_data_brands_match_chrome_major"
+                ]
+            )
+            self.assertTrue(
+                verification_report["enforced_features"]["automation"][
+                    "automation_user_agent_high_entropy_matches_desktop_surface"
                 ]
             )
             self.assertFalse(verification_report["enforced_features"]["automation"]["automation_webdriver"])
@@ -739,6 +749,9 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             + runtime_user_agent
             + '","platform":"MacIntel","userAgentDataMobile":false,"userAgentDataPlatform":"macOS",'
             '"userAgentDataBrands":[{"brand":"Chromium","version":"120"},{"brand":"Google Chrome","version":"120"}],'
+            '"userAgentDataHighEntropy":{'
+            '"architecture":"","bitness":"","fullVersionList":[],"mobile":false,'
+            '"model":"","platform":"macOS","platformVersion":"","uaFullVersion":"","wow64":false},'
             '"secChUa":"\\"Chromium\\";v=\\"120\\", \\"Google Chrome\\";v=\\"120\\", \\"Not/A)Brand\\";v=\\"99\\"",'
             '"secChUaPlatform":"\\"macOS\\"","secChUaMobile":"?0",'
             '"webdriver":false,'
@@ -779,6 +792,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertFalse(runtime_context["userAgentDataMobile"])
         self.assertEqual(runtime_context["userAgentDataPlatform"], "macOS")
         self.assertEqual(runtime_context["userAgentDataBrands"][0], {"brand": "Chromium", "version": "120"})
+        self.assertEqual(runtime_context["userAgentDataHighEntropy"]["platformVersion"], "")
         self.assertIn('"Google Chrome";v="120"', runtime_context["secChUa"])
         self.assertFalse(runtime_context["webdriver"])
         self.assertEqual(runtime_context["language"], "en-US")
@@ -851,6 +865,17 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "userAgentDataMobile": False,
             "userAgentDataPlatform": "macOS",
             "userAgentDataBrands": [{"brand": "Chromium", "version": "120"}, {"brand": "Google Chrome", "version": "120"}],
+            "userAgentDataHighEntropy": {
+                "architecture": "x86",
+                "bitness": "",
+                "fullVersionList": [],
+                "mobile": False,
+                "model": "",
+                "platform": "macOS",
+                "platformVersion": "10_15_7",
+                "uaFullVersion": "",
+                "wow64": False,
+            },
             "secChUa": '"Chromium";v="120", "Google Chrome";v="120", "Not/A)Brand";v="99"',
             "secChUaPlatform": '"macOS"',
             "secChUaMobile": "?0",
@@ -924,6 +949,31 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
 
         observed["secChUaPlatform"] = '"macOS"'
         observed["secChUaMobile"] = "?0"
+        observed["userAgentDataHighEntropy"] = {
+            "architecture": "x86",
+            "bitness": "",
+            "fullVersionList": [],
+            "mobile": False,
+            "model": "",
+            "platform": "macOS",
+            "platformVersion": "15_0_0",
+            "uaFullVersion": "",
+            "wow64": False,
+        }
+        mismatches = module.validate_automation_context_observation(observed, browser_context)
+        self.assertIn("automation user agent high entropy", mismatches)
+
+        observed["userAgentDataHighEntropy"] = {
+            "architecture": "x86",
+            "bitness": "",
+            "fullVersionList": [],
+            "mobile": False,
+            "model": "",
+            "platform": "macOS",
+            "platformVersion": "10_15_7",
+            "uaFullVersion": "",
+            "wow64": False,
+        }
         observed["webdriver"] = True
         mismatches = module.validate_automation_context_observation(observed, browser_context)
         self.assertIn("automation webdriver", mismatches)
