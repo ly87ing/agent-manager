@@ -1,6 +1,8 @@
+import importlib.util
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from hashlib import sha256
@@ -160,6 +162,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["overall_status"], "limited")
             self.assertEqual(verification_report["exit"]["verification_state"], "manually_skipped")
             self.assertEqual(verification_report["google_domain"]["verification_state"], "exit_check_skipped")
+            self.assertEqual(verification_report["runtime"]["verification_state"], "exit_check_skipped")
             self.assertTrue(verification_report["browser_state_audit"]["overall_ok"])
             self.assertIn(
                 "Agent Manager Browser US",
@@ -169,6 +172,9 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["google"]["home_url"], "https://www.google.com/?hl=en-US&gl=US&pws=0")
             self.assertEqual(verification_report["enforced_features"]["google"]["search_gl"], "US")
             self.assertEqual(verification_report["enforced_features"]["automation"]["chrome_launcher"], "$AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_language"], "en-US")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_languages"], ["en-US", "en"])
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_locale"], "en-US")
             self.assertEqual(
                 verification_report["enforced_features"]["automation"]["managed_user_data_dir"],
                 "$AGENT_MANAGER_BROWSER_US_USER_DATA_DIR",
@@ -232,6 +238,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["overall_status"], "complete")
             self.assertEqual(verification_report["exit"]["verification_state"], "verified_us")
             self.assertEqual(verification_report["google_domain"]["verification_state"], "exit_profile_json_skipped")
+            self.assertEqual(verification_report["runtime"]["verification_state"], "exit_profile_json_skipped")
             self.assertTrue(verification_report["browser_state_audit"]["overall_ok"])
             self.assertEqual(verification_report["exit"]["profile"]["ip"], "203.0.113.31")
             self.assertEqual(verification_report["enforced_features"]["automation"]["timezone_id"], "America/New_York")
@@ -494,3 +501,27 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["overall_status"], "failed")
             self.assertEqual(verification_report["google_domain"]["verification_state"], "hk_detected_failed")
             self.assertEqual(verification_report["google_domain"]["hk_markers"], ["google.com.hk"])
+
+    def test_runtime_context_parser_extracts_us_runtime_payload(self):
+        payload = (
+            "<html><head><script>document.write('AGENT_MANAGER_RUNTIME_JSON:'"
+            "+JSON.stringify({language:navigator.language}));</script></head>"
+            "<body>AGENT_MANAGER_RUNTIME_JSON:"
+            '{"language":"en-US","languages":["en-US","en"],'
+            '"timezone":"America/Los_Angeles","intlLocale":"en-US"}'
+            "</body></html>"
+        )
+        spec = importlib.util.spec_from_file_location("sync_browser_google_us_test", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.modules.pop(spec.name, None)
+        runtime_context = module.runtime_context_from_output(payload)
+        mismatches = module.validate_runtime_context(runtime_context, "America/Los_Angeles")
+
+        self.assertEqual(runtime_context["language"], "en-US")
+        self.assertEqual(runtime_context["languages"], ["en-US", "en"])
+        self.assertEqual(runtime_context["timezone"], "America/Los_Angeles")
+        self.assertEqual(mismatches, ())

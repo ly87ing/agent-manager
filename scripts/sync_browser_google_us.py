@@ -5,8 +5,10 @@ import argparse
 import http.cookiejar
 import json
 import os
+import select
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -85,6 +87,15 @@ class GoogleDomainResolution:
     verification_state: str
     final_url: str | None = None
     hk_markers: tuple[str, ...] = ()
+    errors: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class RuntimeResolution:
+    return_code: int
+    verification_state: str
+    observed: dict | None = None
+    process_state: str | None = None
     errors: tuple[str, ...] = ()
 
 
@@ -347,6 +358,15 @@ def google_domain_payload(google_domain_resolution: GoogleDomainResolution) -> d
         "final_url": google_domain_resolution.final_url,
         "hk_markers": list(google_domain_resolution.hk_markers),
         "errors": list(google_domain_resolution.errors),
+    }
+
+
+def runtime_payload(runtime_resolution: RuntimeResolution) -> dict:
+    return {
+        "verification_state": runtime_resolution.verification_state,
+        "observed": runtime_resolution.observed,
+        "process_state": runtime_resolution.process_state,
+        "errors": list(runtime_resolution.errors),
     }
 
 
@@ -642,7 +662,8 @@ def browser_us_launcher_content(config_path: Path, managed_user_data_dir: Path, 
         shell_export_line("LC_ALL", ENV_LOCALE),
         shell_export_line("AGENT_MANAGER_BROWSER_US_CONTEXT", str(config_path)),
         shell_export_line("AGENT_MANAGER_BROWSER_US_CHROME_ARGS", " ".join(CHROME_ARGS)),
-        shell_export_line("AGENT_MANAGER_BROWSER_US_USER_DATA_DIR", str(managed_user_data_dir)),
+        shell_export_line("AGENT_MANAGER_BROWSER_US_DEFAULT_USER_DATA_DIR", str(managed_user_data_dir)),
+        'export AGENT_MANAGER_BROWSER_US_USER_DATA_DIR="${AGENT_MANAGER_BROWSER_US_USER_DATA_DIR:-$AGENT_MANAGER_BROWSER_US_DEFAULT_USER_DATA_DIR}"',
         'BROWSER_US_USER_DATA_DIR="${AGENT_MANAGER_BROWSER_US_USER_DATA_DIR}"',
         'mkdir -p "$BROWSER_US_USER_DATA_DIR"',
         "",
@@ -741,15 +762,17 @@ def verification_report_payload(
     exit_profile: ExitProfile | None,
     verification_state: str,
     google_domain_resolution: GoogleDomainResolution,
+    runtime_resolution: RuntimeResolution,
     browser_state_audit: dict,
 ) -> dict:
     timezone_id = resolved_timezone_id(exit_profile)
     geolocation = resolved_geolocation(exit_profile)
     state_ok = browser_state_audit.get("overall_ok") is True
     google_domain_ok = google_domain_resolution.return_code == 0
-    if verification_state == "verified_us" and state_ok and google_domain_ok:
+    runtime_ok = runtime_resolution.return_code == 0
+    if verification_state == "verified_us" and state_ok and google_domain_ok and runtime_ok:
         overall_status = "complete"
-    elif state_ok and google_domain_ok:
+    elif state_ok and google_domain_ok and runtime_ok:
         overall_status = "limited"
     else:
         overall_status = "failed"
@@ -761,6 +784,7 @@ def verification_report_payload(
             "profile": exit_profile_payload(exit_profile),
         },
         "google_domain": google_domain_payload(google_domain_resolution),
+        "runtime": runtime_payload(runtime_resolution),
         "browser_state_audit": browser_state_audit,
         "browser_roots": [
             {
@@ -826,6 +850,9 @@ def verification_report_payload(
             "automation": {
                 "locale": APP_LOCALE,
                 "timezone_id": timezone_id,
+                "runtime_language": APP_LOCALE,
+                "runtime_languages": ["en-US", "en"],
+                "runtime_intl_locale": APP_LOCALE,
                 "extra_http_accept_language": "en-US,en;q=0.9",
                 "chrome_launch_args": CHROME_ARGS,
                 "chrome_launcher": "$AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER",
@@ -848,6 +875,7 @@ def sync_verification_report(
     exit_profile: ExitProfile | None,
     verification_state: str,
     google_domain_resolution: GoogleDomainResolution,
+    runtime_resolution: RuntimeResolution,
     browser_state_audit: dict,
 ) -> list[str]:
     report_path = config_dir / "browser-us-verification.json"
@@ -858,6 +886,7 @@ def sync_verification_report(
         exit_profile,
         verification_state,
         google_domain_resolution,
+        runtime_resolution,
         browser_state_audit,
     )
     previous_payload = load_json_mapping(report_path) if report_path.exists() else None
@@ -945,6 +974,171 @@ def verify_google_domain_after_ncr(timeout: float) -> GoogleDomainResolution:
     if hk_markers:
         return GoogleDomainResolution(4, "hk_detected_failed", final_url=final_url, hk_markers=hk_markers)
     return GoogleDomainResolution(0, "verified_google_com_after_ncr", final_url=final_url)
+
+
+RUNTIME_JSON_MARKER = "AGENT_MANAGER_RUNTIME_JSON:"
+
+
+def runtime_probe_data_url() -> str:
+    script = (
+        "<script>"
+        "document.write('"
+        + RUNTIME_JSON_MARKER
+        + "'+JSON.stringify({"
+        "language:navigator.language,"
+        "languages:Array.from(navigator.languages||[]),"
+        "timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,"
+        "intlLocale:Intl.DateTimeFormat().resolvedOptions().locale"
+        "}));"
+        "</script>"
+    )
+    return "data:text/html;charset=utf-8," + urllib.parse.quote(script)
+
+
+def runtime_context_from_output(output: str) -> dict | None:
+    marker_index = output.rfind(RUNTIME_JSON_MARKER)
+    if marker_index == -1:
+        return None
+    json_start = marker_index + len(RUNTIME_JSON_MARKER)
+    json_end = output.find("</", json_start)
+    payload_text = output[json_start:] if json_end == -1 else output[json_start:json_end]
+    try:
+        payload = json.loads(payload_text)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def validate_runtime_context(runtime_context: dict, timezone_id: str) -> tuple[str, ...]:
+    mismatches = []
+    if runtime_context.get("language") != APP_LOCALE:
+        mismatches.append("navigator.language")
+    if runtime_context.get("languages") != ["en-US", "en"]:
+        mismatches.append("navigator.languages")
+    if runtime_context.get("timezone") != timezone_id:
+        mismatches.append("Intl timezone")
+    if runtime_context.get("intlLocale") != APP_LOCALE:
+        mismatches.append("Intl locale")
+    return tuple(mismatches)
+
+
+def terminate_process_group(process: subprocess.Popen) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            return
+
+
+def text_from_timeout_output(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="ignore")
+    return str(value)
+
+
+def collect_runtime_stdout(process: subprocess.Popen, timeout: float) -> tuple[str, str]:
+    if process.stdout is None:
+        return "", "stdout_unavailable"
+
+    if os.name == "nt":
+        try:
+            stdout, _stderr = process.communicate(timeout=timeout)
+            return text_from_timeout_output(stdout), f"exited_{process.returncode}"
+        except subprocess.TimeoutExpired as exc:
+            partial_stdout = text_from_timeout_output(exc.output)
+            return partial_stdout, "timed_out"
+
+    deadline = time.monotonic() + timeout
+    chunks: list[bytes] = []
+    stdout_fd = process.stdout.fileno()
+
+    def decoded_output() -> str:
+        return b"".join(chunks).decode("utf-8", errors="ignore")
+
+    while True:
+        output = decoded_output()
+        if runtime_context_from_output(output) is not None:
+            return output, "output_observed"
+
+        if process.poll() is not None:
+            while True:
+                try:
+                    chunk = os.read(stdout_fd, 4096)
+                except BlockingIOError:
+                    break
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            return decoded_output(), f"exited_{process.returncode}"
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return output, "timed_out"
+
+        readable, _writable, _exceptional = select.select([stdout_fd], [], [], min(0.25, remaining))
+        if not readable:
+            continue
+        chunk = os.read(stdout_fd, 4096)
+        if chunk:
+            chunks.append(chunk)
+
+
+def verify_runtime_browser_context(launcher_path: Path, timezone_id: str, timeout: float) -> RuntimeResolution:
+    if timeout <= 0:
+        return RuntimeResolution(5, "invalid_timeout", errors=("runtime timeout must be positive",))
+    if not launcher_path.exists() or not os.access(launcher_path, os.X_OK):
+        return RuntimeResolution(5, "launcher_missing", errors=(str(launcher_path),))
+
+    with tempfile.TemporaryDirectory(
+        prefix="agent-manager-browser-us-runtime-",
+        ignore_cleanup_errors=True,
+    ) as temp_user_data_dir:
+        command = [
+            str(launcher_path),
+            "--headless",
+            "--disable-gpu",
+            "--disable-background-networking",
+            "--dump-dom",
+            runtime_probe_data_url(),
+        ]
+        env = os.environ.copy()
+        env["AGENT_MANAGER_BROWSER_US_USER_DATA_DIR"] = temp_user_data_dir
+        process = subprocess.Popen(
+            command,
+            cwd=str(launcher_path.parent),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        stdout, process_state = collect_runtime_stdout(process, timeout)
+        if process.poll() is None:
+            terminate_process_group(process)
+
+    runtime_context = runtime_context_from_output(stdout or "")
+    if runtime_context is None:
+        if process_state == "timed_out":
+            process_state = "timed_out_without_output"
+        return RuntimeResolution(5, "runtime_output_missing", process_state=process_state)
+
+    mismatches = validate_runtime_context(runtime_context, timezone_id)
+    if mismatches:
+        return RuntimeResolution(
+            5,
+            "runtime_mismatch_failed",
+            observed=runtime_context,
+            process_state=process_state,
+            errors=mismatches,
+        )
+    return RuntimeResolution(0, "verified_runtime_us", observed=runtime_context, process_state="verified")
 
 
 EXIT_PROFILE_PROBES = [
@@ -1057,6 +1251,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="warn instead of failing when google.com/ncr domain verification cannot be completed",
     )
     parser.add_argument(
+        "--skip-runtime-check",
+        action="store_true",
+        default=os.environ.get("AGENT_MANAGER_BROWSER_US_SKIP_RUNTIME_CHECK") == "1",
+        help="skip the headless Chrome runtime locale/timezone verification",
+    )
+    parser.add_argument(
+        "--allow-unverified-runtime",
+        action="store_true",
+        default=os.environ.get("AGENT_MANAGER_BROWSER_US_ALLOW_UNVERIFIED_RUNTIME") == "1",
+        help="warn instead of failing when headless Chrome runtime verification cannot be completed",
+    )
+    parser.add_argument(
+        "--runtime-check-timeout",
+        type=float,
+        default=float(os.environ.get("AGENT_MANAGER_BROWSER_US_RUNTIME_CHECK_TIMEOUT", "20")),
+        help="timeout in seconds for headless Chrome runtime verification",
+    )
+    parser.add_argument(
         "--post-sync-settle-seconds",
         type=float,
         default=float(os.environ.get("AGENT_MANAGER_BROWSER_US_POST_SYNC_SETTLE_SECONDS", "10")),
@@ -1084,6 +1296,8 @@ def print_dry_run(args: argparse.Namespace, browser_roots: list[BrowserRoot], co
     print(f"Would write verification report under {config_dir}")
     if not args.offline and not args.skip_exit_check and not args.skip_google_domain_check:
         print("Would verify google.com/ncr keeps Google on google.com instead of google.com.hk")
+    if not args.offline and not args.skip_exit_check and not args.skip_runtime_check:
+        print("Would verify headless Chrome runtime language, languages, Intl locale, and timezone")
     if not args.offline and not args.no_browser_open:
         print(f"Would open {NCR_URL}")
 
@@ -1229,10 +1443,58 @@ def resolve_google_domain(args: argparse.Namespace, exit_resolution: ExitResolut
     return google_domain_resolution
 
 
+def resolve_runtime_context(args: argparse.Namespace, config_dir: Path, exit_resolution: ExitResolution) -> RuntimeResolution:
+    if args.offline:
+        return RuntimeResolution(0, "offline_skipped")
+    if args.skip_exit_check:
+        return RuntimeResolution(0, "exit_check_skipped")
+    if args.skip_runtime_check:
+        return RuntimeResolution(0, "manually_skipped")
+    if args.exit_profile_json:
+        return RuntimeResolution(0, "exit_profile_json_skipped")
+    if exit_resolution.verification_state != "verified_us":
+        return RuntimeResolution(0, "exit_not_verified_us_skipped")
+
+    runtime_resolution = verify_runtime_browser_context(
+        config_dir / "browser-us-chrome.sh",
+        resolved_timezone_id(exit_resolution.exit_profile),
+        args.runtime_check_timeout,
+    )
+    if runtime_resolution.return_code == 0:
+        observed = runtime_resolution.observed or {}
+        print(
+            "Verified browser runtime: "
+            f"language: {observed.get('language')}, "
+            f"languages: {observed.get('languages')}, "
+            f"timezone: {observed.get('timezone')}"
+        )
+        return runtime_resolution
+
+    if args.allow_unverified_runtime:
+        print("WARN: could not verify browser runtime US state", file=sys.stderr)
+        for error in runtime_resolution.errors[:3]:
+            print(f"WARN: {error}", file=sys.stderr)
+        return RuntimeResolution(
+            0,
+            "unverified_allowed",
+            observed=runtime_resolution.observed,
+            process_state=runtime_resolution.process_state,
+            errors=runtime_resolution.errors,
+        )
+
+    print("ERROR: could not verify browser runtime US state", file=sys.stderr)
+    for error in runtime_resolution.errors[:3]:
+        print(f"ERROR: {error}", file=sys.stderr)
+    return runtime_resolution
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.post_sync_settle_seconds < 0:
         print("ERROR: --post-sync-settle-seconds must be non-negative", file=sys.stderr)
+        return 2
+    if args.runtime_check_timeout <= 0:
+        print("ERROR: --runtime-check-timeout must be positive", file=sys.stderr)
         return 2
     platform_name = sys.platform
     config_dir = Path(args.config_dir).expanduser() if args.config_dir else args.home.expanduser() / ".config" / "agent-manager"
@@ -1255,6 +1517,10 @@ def main(argv: list[str] | None = None) -> int:
         time.sleep(args.post_sync_settle_seconds)
     browser_state_audit = audit_browser_state(browser_roots, args.profile, managed_browser_root)
     google_domain_resolution = resolve_google_domain(args, exit_resolution)
+    if google_domain_resolution.return_code == 0:
+        runtime_resolution = resolve_runtime_context(args, config_dir, exit_resolution)
+    else:
+        runtime_resolution = RuntimeResolution(0, "google_domain_failed_skipped")
     changed_paths.extend(
         sync_verification_report(
             config_dir,
@@ -1264,6 +1530,7 @@ def main(argv: list[str] | None = None) -> int:
             exit_resolution.exit_profile,
             exit_resolution.verification_state,
             google_domain_resolution,
+            runtime_resolution,
             browser_state_audit,
         )
     )
@@ -1272,6 +1539,8 @@ def main(argv: list[str] | None = None) -> int:
         return 3
     if google_domain_resolution.return_code != 0:
         return google_domain_resolution.return_code
+    if runtime_resolution.return_code != 0:
+        return runtime_resolution.return_code
 
     opened_ncr = False
     if args.offline:
