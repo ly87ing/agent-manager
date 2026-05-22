@@ -43,7 +43,9 @@ DEFAULT_GEOLOCATION = {
 }
 US_TIMEZONE_PROBE_UTC = datetime.datetime(2026, 5, 22, 12, 0, 0, tzinfo=datetime.timezone.utc)
 US_DESKTOP_VIEWPORT = {"width": 1365, "height": 768}
+US_DESKTOP_CHROME_WINDOW = {"width": 1365, "height": 907}
 US_DESKTOP_SCREEN = {"width": 1365, "height": 768}
+US_DESKTOP_SCREEN_INFO = f"{US_DESKTOP_SCREEN['width']}x{US_DESKTOP_SCREEN['height']}"
 US_DESKTOP_SCREEN_COLOR_DEPTH = 24
 US_DESKTOP_SCREEN_ORIENTATION_TYPE = "landscape-primary"
 US_DESKTOP_SCREEN_ORIENTATION_ANGLE = 0
@@ -120,7 +122,8 @@ DISABLED_CHROME_FEATURES = (
 BASE_CHROME_ARGS = [
     "--lang=en-US",
     "--accept-lang=en-US,en",
-    f"--window-size={US_DESKTOP_VIEWPORT['width']},{US_DESKTOP_VIEWPORT['height']}",
+    f"--window-size={US_DESKTOP_CHROME_WINDOW['width']},{US_DESKTOP_CHROME_WINDOW['height']}",
+    f"--screen-info={{{US_DESKTOP_SCREEN_INFO}}}",
     f"--force-device-scale-factor={US_DESKTOP_DEVICE_SCALE_FACTOR}",
     "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
     "--disable-quic",
@@ -1438,6 +1441,13 @@ def verification_report_payload(
                 "runtime_navigator_app_name": "Netscape",
                 "runtime_navigator_app_version": navigator_app_version_from_user_agent(user_agent),
                 "runtime_desktop_surface": True,
+                "chrome_window_size": dict(US_DESKTOP_CHROME_WINDOW),
+                "runtime_screen": dict(US_DESKTOP_SCREEN),
+                "runtime_screen_avail": dict(US_DESKTOP_SCREEN),
+                "runtime_screen_color_depth": US_DESKTOP_SCREEN_COLOR_DEPTH,
+                "runtime_screen_pixel_depth": US_DESKTOP_SCREEN_COLOR_DEPTH,
+                "runtime_screen_orientation_type": US_DESKTOP_SCREEN_ORIENTATION_TYPE,
+                "runtime_screen_orientation_angle": US_DESKTOP_SCREEN_ORIENTATION_ANGLE,
                 "runtime_pdf_viewer_enabled": True,
                 "runtime_plugins_present": True,
                 "runtime_webdriver": False,
@@ -1699,6 +1709,10 @@ def runtime_probe_html() -> str:
         "screenHeight:window.screen.height,"
         "availWidth:window.screen.availWidth,"
         "availHeight:window.screen.availHeight,"
+        "screenColorDepth:window.screen.colorDepth,"
+        "screenPixelDepth:window.screen.pixelDepth,"
+        "screenOrientationType:window.screen.orientation?window.screen.orientation.type:null,"
+        "screenOrientationAngle:window.screen.orientation?window.screen.orientation.angle:null,"
         "devicePixelRatio:window.devicePixelRatio,"
         "maxTouchPoints:navigator.maxTouchPoints,"
         "coarsePointer:window.matchMedia('(pointer: coarse)').matches,"
@@ -1937,6 +1951,24 @@ def runtime_desktop_surface_mismatches(runtime_context: dict) -> tuple[str, ...]
     mismatches = []
     if runtime_context.get("innerWidth") != US_DESKTOP_VIEWPORT["width"]:
         mismatches.append("runtime viewport width")
+    if runtime_context.get("innerHeight") != US_DESKTOP_VIEWPORT["height"]:
+        mismatches.append("runtime viewport height")
+    if runtime_context.get("screenWidth") != US_DESKTOP_SCREEN["width"]:
+        mismatches.append("runtime screen width")
+    if runtime_context.get("screenHeight") != US_DESKTOP_SCREEN["height"]:
+        mismatches.append("runtime screen height")
+    if runtime_context.get("availWidth") != US_DESKTOP_SCREEN["width"]:
+        mismatches.append("runtime screen available width")
+    if runtime_context.get("availHeight") != US_DESKTOP_SCREEN["height"]:
+        mismatches.append("runtime screen available height")
+    if runtime_context.get("screenColorDepth") != US_DESKTOP_SCREEN_COLOR_DEPTH:
+        mismatches.append("runtime screen color depth")
+    if runtime_context.get("screenPixelDepth") != US_DESKTOP_SCREEN_COLOR_DEPTH:
+        mismatches.append("runtime screen pixel depth")
+    if runtime_context.get("screenOrientationType") != US_DESKTOP_SCREEN_ORIENTATION_TYPE:
+        mismatches.append("runtime screen orientation type")
+    if runtime_context.get("screenOrientationAngle") != US_DESKTOP_SCREEN_ORIENTATION_ANGLE:
+        mismatches.append("runtime screen orientation angle")
     if runtime_context.get("devicePixelRatio") != US_DESKTOP_DEVICE_SCALE_FACTOR:
         mismatches.append("runtime device scale factor")
     if runtime_context.get("maxTouchPoints") != 0:

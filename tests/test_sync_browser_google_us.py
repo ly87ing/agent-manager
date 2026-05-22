@@ -285,7 +285,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(automation_context["chrome_launch"]["launcher"], str(launcher_path))
             self.assertEqual(automation_context["chrome_launch"]["managed_user_data_dir"], str(managed_profile_root))
             self.assertIn(f"--user-data-dir={managed_profile_root}", automation_context["chrome_launch"]["args"])
-            self.assertIn("--window-size=1365,768", automation_context["chrome_launch"]["args"])
+            self.assertIn("--window-size=1365,907", automation_context["chrome_launch"]["args"])
+            self.assertIn("--screen-info={1365x768}", automation_context["chrome_launch"]["args"])
             self.assertIn("--force-device-scale-factor=1", automation_context["chrome_launch"]["args"])
             self.assertTrue(
                 any(arg.startswith("--user-agent=Mozilla/5.0") for arg in automation_context["chrome_launch"]["args"])
@@ -444,6 +445,25 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
                 automation_context["browser_context"]["user_agent"].removeprefix("Mozilla/"),
             )
             self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_desktop_surface"])
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["chrome_window_size"],
+                {"width": 1365, "height": 907},
+            )
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["runtime_screen"],
+                {"width": 1365, "height": 768},
+            )
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["runtime_screen_avail"],
+                {"width": 1365, "height": 768},
+            )
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_screen_color_depth"], 24)
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_screen_pixel_depth"], 24)
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["runtime_screen_orientation_type"],
+                "landscape-primary",
+            )
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_screen_orientation_angle"], 0)
             self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_pdf_viewer_enabled"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_plugins_present"])
             self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_webdriver"])
@@ -617,7 +637,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertIn("AGENT_MANAGER_BROWSER_US_DEFAULT_URL=https://www.google.com/ncr", launcher_content)
             self.assertIn('if [ "$#" -eq 0 ]; then', launcher_content)
             self.assertIn("--lang=en-US", launcher_content)
-            self.assertIn("--window-size=1365,768", launcher_content)
+            self.assertIn("--window-size=1365,907", launcher_content)
+            self.assertIn("--screen-info={1365x768}", launcher_content)
             self.assertIn("--force-device-scale-factor=1", launcher_content)
             self.assertIn("--user-agent=", launcher_content)
             self.assertIn("AGENT_MANAGER_BROWSER_US_USER_AGENT", launcher_content)
@@ -998,8 +1019,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             '"appCodeName":"Mozilla","appName":"Netscape",'
             '"appVersion":"5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",'
             '"language":"en-US","languages":["en-US","en"],'
-            '"innerWidth":1365,"innerHeight":629,"outerWidth":0,"outerHeight":0,'
-            '"screenWidth":800,"screenHeight":600,"availWidth":800,"availHeight":600,'
+            '"innerWidth":1365,"innerHeight":768,"outerWidth":0,"outerHeight":0,'
+            '"screenWidth":1365,"screenHeight":768,"availWidth":1365,"availHeight":768,'
+            '"screenColorDepth":24,"screenPixelDepth":24,'
+            '"screenOrientationType":"landscape-primary","screenOrientationAngle":0,'
             '"devicePixelRatio":1,"maxTouchPoints":0,"coarsePointer":false,'
             '"finePointer":true,"hoverHover":true,"lightColorScheme":true,"darkColorScheme":false,'
             '"pdfViewerEnabled":true,"pluginsLength":5,"mimeTypesLength":2,'
@@ -1067,6 +1090,15 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertEqual(runtime_context["language"], "en-US")
         self.assertEqual(runtime_context["languages"], ["en-US", "en"])
         self.assertEqual(runtime_context["innerWidth"], 1365)
+        self.assertEqual(runtime_context["innerHeight"], 768)
+        self.assertEqual(runtime_context["screenWidth"], 1365)
+        self.assertEqual(runtime_context["screenHeight"], 768)
+        self.assertEqual(runtime_context["availWidth"], 1365)
+        self.assertEqual(runtime_context["availHeight"], 768)
+        self.assertEqual(runtime_context["screenColorDepth"], 24)
+        self.assertEqual(runtime_context["screenPixelDepth"], 24)
+        self.assertEqual(runtime_context["screenOrientationType"], "landscape-primary")
+        self.assertEqual(runtime_context["screenOrientationAngle"], 0)
         self.assertEqual(runtime_context["devicePixelRatio"], 1)
         self.assertFalse(runtime_context["coarsePointer"])
         self.assertTrue(runtime_context["finePointer"])
