@@ -252,6 +252,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_language"], "en-US")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_languages"], ["en-US", "en"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_locale"], "en-US")
+            self.assertIsInstance(
+                verification_report["enforced_features"]["automation"]["timezone_offset_minutes"],
+                int,
+            )
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_calendar"], "gregory")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_numbering_system"], "latn")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_hour_cycle"], "h12")
@@ -625,6 +629,14 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["google_domain"]["hk_markers"], ["google.com.hk"])
 
     def test_runtime_context_parser_extracts_us_runtime_payload(self):
+        spec = importlib.util.spec_from_file_location("sync_browser_google_us_test", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.modules.pop(spec.name, None)
+        timezone_offset = module.expected_timezone_offset_minutes("America/Los_Angeles")
         runtime_user_agent = (
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -640,7 +652,9 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             + '","userAgentDataMobile":false,"userAgentDataPlatform":"macOS",'
             '"secChUaPlatform":"\\"macOS\\"","secChUaMobile":"?0",'
             '"language":"en-US","languages":["en-US","en"],'
-            '"timezone":"America/Los_Angeles","intlLocale":"en-US",'
+            '"timezone":"America/Los_Angeles","timezoneOffset":'
+            + str(timezone_offset)
+            + ',"intlLocale":"en-US",'
             '"intlCalendar":"gregory","intlNumberingSystem":"latn","intlHourCycle":"h12",'
             '"collatorLocale":"en-US","pluralRulesLocale":"en-US","relativeTimeFormatLocale":"en-US",'
             '"intlLocaleRegion":"US","navigatorLanguageRegion":"US",'
@@ -659,13 +673,6 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             '"profileGeolocationSetting":2}'
             "</body></html>"
         )
-        spec = importlib.util.spec_from_file_location("sync_browser_google_us_test", SCRIPT)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = module
-        try:
-            spec.loader.exec_module(module)
-        finally:
-            sys.modules.pop(spec.name, None)
         runtime_context = module.runtime_context_from_output(payload)
         mismatches = module.validate_runtime_context(runtime_context, "America/Los_Angeles", runtime_user_agent, "macOS")
 
@@ -676,6 +683,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertEqual(runtime_context["language"], "en-US")
         self.assertEqual(runtime_context["languages"], ["en-US", "en"])
         self.assertEqual(runtime_context["timezone"], "America/Los_Angeles")
+        self.assertEqual(runtime_context["timezoneOffset"], timezone_offset)
         self.assertEqual(runtime_context["intlCalendar"], "gregory")
         self.assertEqual(runtime_context["intlNumberingSystem"], "latn")
         self.assertEqual(runtime_context["intlHourCycle"], "h12")
@@ -735,6 +743,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "language": "en-US",
             "languages": ["en-US"],
             "timezone": "America/Los_Angeles",
+            "timezoneOffset": module.expected_timezone_offset_minutes("America/Los_Angeles"),
             "intlLocale": "en-US",
             "collatorLocale": "en-US",
             "pluralRulesLocale": "en-US",
@@ -758,14 +767,17 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertEqual(module.validate_automation_context_observation(observed, browser_context), ())
 
         observed["timezone"] = "Asia/Hong_Kong"
+        observed["timezoneOffset"] = module.expected_timezone_offset_minutes("Asia/Hong_Kong")
         observed["geolocation"] = {"latitude": 22.3193, "longitude": 114.1694, "accuracy": 50000}
         mismatches = module.validate_automation_context_observation(observed, browser_context)
 
         self.assertIn("automation timezone", mismatches)
+        self.assertIn("automation timezone offset", mismatches)
         self.assertIn("automation geolocation latitude", mismatches)
         self.assertIn("automation geolocation longitude", mismatches)
 
         observed["timezone"] = "America/Los_Angeles"
+        observed["timezoneOffset"] = module.expected_timezone_offset_minutes("America/Los_Angeles")
         observed["geolocation"] = {"latitude": 34.0522, "longitude": -118.2437, "accuracy": 50000}
         observed["innerWidth"] = 390
         observed["maxTouchPoints"] = 5

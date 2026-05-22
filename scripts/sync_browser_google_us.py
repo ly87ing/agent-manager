@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import http.cookiejar
 import http.server
 import json
@@ -21,6 +22,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 ACCEPT_LANGUAGES = "en-US,en"
@@ -460,6 +462,18 @@ def resolved_geolocation(exit_profile: ExitProfile | None) -> dict:
             "accuracy": EXIT_PROFILE_GEOLOCATION_ACCURACY,
         }
     return dict(DEFAULT_GEOLOCATION)
+
+
+def expected_timezone_offset_minutes(timezone_id: str) -> int | None:
+    try:
+        timezone = ZoneInfo(timezone_id)
+    except ZoneInfoNotFoundError:
+        return None
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    offset = now_utc.astimezone(timezone).utcoffset()
+    if offset is None:
+        return None
+    return int(round(-offset.total_seconds() / 60))
 
 
 def sync_local_state(path: Path) -> bool:
@@ -999,6 +1013,7 @@ def verification_report_payload(
     geolocation = resolved_geolocation(exit_profile)
     user_agent = resolved_us_desktop_user_agent(platform_name)
     expected_client_hints_platform = client_hints_platform(platform_name)
+    timezone_offset_minutes = expected_timezone_offset_minutes(timezone_id)
     state_ok = browser_state_audit.get("overall_ok") is True
     google_domain_ok = google_domain_resolution.return_code == 0
     browser_google_ok = browser_google_resolution.return_code == 0
@@ -1101,6 +1116,7 @@ def verification_report_payload(
             "automation": {
                 "locale": APP_LOCALE,
                 "timezone_id": timezone_id,
+                "timezone_offset_minutes": timezone_offset_minutes,
                 "context_geolocation": geolocation,
                 "context_permissions": ["geolocation"],
                 "runtime_language": APP_LOCALE,
@@ -1417,6 +1433,11 @@ def validate_runtime_context(
         mismatches.append("navigator.languages")
     if runtime_context.get("timezone") != timezone_id:
         mismatches.append("Intl timezone")
+    expected_offset = expected_timezone_offset_minutes(timezone_id)
+    if expected_offset is None:
+        mismatches.append("timezone offset rule")
+    elif runtime_context.get("timezoneOffset") != expected_offset:
+        mismatches.append("timezone offset")
     if runtime_context.get("intlLocale") != APP_LOCALE:
         mismatches.append("Intl locale")
     if runtime_context.get("intlCalendar") != "gregory":
@@ -1653,6 +1674,11 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation navigator.languages")
     if observed.get("timezone") != browser_context.get("timezone_id"):
         mismatches.append("automation timezone")
+    expected_offset = expected_timezone_offset_minutes(browser_context.get("timezone_id"))
+    if expected_offset is None:
+        mismatches.append("automation timezone offset rule")
+    elif observed.get("timezoneOffset") != expected_offset:
+        mismatches.append("automation timezone offset")
     if observed.get("intlLocale") != APP_LOCALE:
         mismatches.append("automation Intl locale")
     if observed.get("collatorLocale") != APP_LOCALE:
@@ -1780,6 +1806,7 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             language: navigator.language,
                             languages: Array.from(navigator.languages || []),
                             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                            timezoneOffset: new Date().getTimezoneOffset(),
                             intlLocale: Intl.DateTimeFormat().resolvedOptions().locale,
                             collatorLocale: Intl.Collator().resolvedOptions().locale,
                             pluralRulesLocale: new Intl.PluralRules().resolvedOptions().locale,
