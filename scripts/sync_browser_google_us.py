@@ -101,6 +101,15 @@ class RuntimeResolution:
     errors: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class AutomationContextResolution:
+    return_code: int
+    verification_state: str
+    observed: dict | None = None
+    process_state: str | None = None
+    errors: tuple[str, ...] = ()
+
+
 def load_json_mapping(path: Path) -> dict:
     if not path.exists():
         return {}
@@ -369,6 +378,15 @@ def runtime_payload(runtime_resolution: RuntimeResolution) -> dict:
         "observed": runtime_resolution.observed,
         "process_state": runtime_resolution.process_state,
         "errors": list(runtime_resolution.errors),
+    }
+
+
+def automation_context_verification_payload(automation_context_resolution: AutomationContextResolution) -> dict:
+    return {
+        "verification_state": automation_context_resolution.verification_state,
+        "observed": automation_context_resolution.observed,
+        "process_state": automation_context_resolution.process_state,
+        "errors": list(automation_context_resolution.errors),
     }
 
 
@@ -781,6 +799,7 @@ def verification_report_payload(
     verification_state: str,
     google_domain_resolution: GoogleDomainResolution,
     runtime_resolution: RuntimeResolution,
+    automation_context_resolution: AutomationContextResolution,
     browser_state_audit: dict,
 ) -> dict:
     timezone_id = resolved_timezone_id(exit_profile)
@@ -788,9 +807,10 @@ def verification_report_payload(
     state_ok = browser_state_audit.get("overall_ok") is True
     google_domain_ok = google_domain_resolution.return_code == 0
     runtime_ok = runtime_resolution.return_code == 0
-    if verification_state == "verified_us" and state_ok and google_domain_ok and runtime_ok:
+    automation_context_ok = automation_context_resolution.return_code == 0
+    if verification_state == "verified_us" and state_ok and google_domain_ok and runtime_ok and automation_context_ok:
         overall_status = "complete"
-    elif state_ok and google_domain_ok and runtime_ok:
+    elif state_ok and google_domain_ok and runtime_ok and automation_context_ok:
         overall_status = "limited"
     else:
         overall_status = "failed"
@@ -803,6 +823,7 @@ def verification_report_payload(
         },
         "google_domain": google_domain_payload(google_domain_resolution),
         "runtime": runtime_payload(runtime_resolution),
+        "automation_context": automation_context_verification_payload(automation_context_resolution),
         "browser_state_audit": browser_state_audit,
         "browser_roots": [
             {
@@ -871,6 +892,8 @@ def verification_report_payload(
             "automation": {
                 "locale": APP_LOCALE,
                 "timezone_id": timezone_id,
+                "context_geolocation": geolocation,
+                "context_permissions": ["geolocation"],
                 "runtime_language": APP_LOCALE,
                 "runtime_languages": ["en-US", "en"],
                 "runtime_intl_locale": APP_LOCALE,
@@ -911,6 +934,7 @@ def sync_verification_report(
     verification_state: str,
     google_domain_resolution: GoogleDomainResolution,
     runtime_resolution: RuntimeResolution,
+    automation_context_resolution: AutomationContextResolution,
     browser_state_audit: dict,
 ) -> list[str]:
     report_path = config_dir / "browser-us-verification.json"
@@ -922,6 +946,7 @@ def sync_verification_report(
         verification_state,
         google_domain_resolution,
         runtime_resolution,
+        automation_context_resolution,
         browser_state_audit,
     )
     previous_payload = load_json_mapping(report_path) if report_path.exists() else None
@@ -1291,7 +1316,12 @@ def verify_runtime_browser_context(launcher_path: Path, timezone_id: str, timeou
     if runtime_context is None:
         if process_state == "timed_out":
             process_state = "timed_out_without_output"
-        return RuntimeResolution(5, "runtime_output_missing", process_state=process_state)
+        return RuntimeResolution(
+            5,
+            "runtime_output_missing",
+            process_state=process_state,
+            errors=(f"runtime output marker missing; process_state={process_state}",),
+        )
     runtime_context["acceptLanguageHeader"] = server.observed_headers.get("accept-language")
     runtime_context.update(profile_policy)
 
@@ -1305,6 +1335,145 @@ def verify_runtime_browser_context(launcher_path: Path, timezone_id: str, timeou
             errors=mismatches,
         )
     return RuntimeResolution(0, "verified_runtime_us", observed=runtime_context, process_state="verified")
+
+
+def coordinates_match(actual, expected, tolerance: float = 0.000001) -> bool:
+    actual_number = parse_float(actual)
+    expected_number = parse_float(expected)
+    if actual_number is None or expected_number is None:
+        return False
+    return abs(actual_number - expected_number) <= tolerance
+
+
+def validate_automation_context_observation(observed: dict, browser_context: dict) -> tuple[str, ...]:
+    mismatches = []
+    expected_geolocation = browser_context.get("geolocation") if isinstance(browser_context, dict) else None
+    observed_geolocation = observed.get("geolocation") if isinstance(observed.get("geolocation"), dict) else None
+    if observed.get("language") != APP_LOCALE:
+        mismatches.append("automation navigator.language")
+    languages = observed.get("languages")
+    if not isinstance(languages, list) or not languages or languages[0] != APP_LOCALE:
+        mismatches.append("automation navigator.languages")
+    if observed.get("timezone") != browser_context.get("timezone_id"):
+        mismatches.append("automation timezone")
+    if not accept_language_is_us(observed.get("acceptLanguageHeader")):
+        mismatches.append("automation Accept-Language")
+    if not isinstance(expected_geolocation, dict) or not isinstance(observed_geolocation, dict):
+        mismatches.append("automation geolocation")
+        return tuple(mismatches)
+    if not coordinates_match(observed_geolocation.get("latitude"), expected_geolocation.get("latitude")):
+        mismatches.append("automation geolocation latitude")
+    if not coordinates_match(observed_geolocation.get("longitude"), expected_geolocation.get("longitude")):
+        mismatches.append("automation geolocation longitude")
+    if not coordinates_match(observed_geolocation.get("accuracy"), expected_geolocation.get("accuracy"), tolerance=0.001):
+        mismatches.append("automation geolocation accuracy")
+    return tuple(mismatches)
+
+
+def playwright_chrome_launch_options(platform_name: str) -> dict:
+    launch_args = [
+        *CHROME_ARGS,
+        "--disable-gpu",
+        "--disable-background-networking",
+    ]
+    launch_options = {
+        "headless": True,
+        "args": launch_args,
+    }
+    chrome_bin = os.environ.get("AGENT_MANAGER_BROWSER_US_CHROME_BIN")
+    if chrome_bin:
+        launch_options["executable_path"] = chrome_bin
+        return launch_options
+    if platform_name == "darwin":
+        default_chrome_bin = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        if default_chrome_bin.exists():
+            launch_options["executable_path"] = str(default_chrome_bin)
+            return launch_options
+    launch_options["channel"] = "chrome"
+    return launch_options
+
+
+def verify_automation_browser_context(config_dir: Path, timeout: float, platform_name: str) -> AutomationContextResolution:
+    if timeout <= 0:
+        return AutomationContextResolution(6, "invalid_timeout", errors=("automation context timeout must be positive",))
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        return AutomationContextResolution(6, "playwright_missing_failed", errors=(str(exc),))
+
+    try:
+        context_payload = load_json_mapping(config_dir / "browser-us-context.json")
+    except ValueError as exc:
+        return AutomationContextResolution(6, "context_invalid_failed", errors=(str(exc),))
+    browser_context = context_payload.get("browser_context")
+    if not isinstance(browser_context, dict):
+        return AutomationContextResolution(6, "context_invalid_failed", errors=("browser_context must be an object",))
+
+    server, thread, runtime_url = start_runtime_probe_server()
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(
+                timeout=max(1000, int(timeout * 1000)),
+                **playwright_chrome_launch_options(platform_name),
+            )
+            try:
+                context = browser.new_context(
+                    locale=browser_context.get("locale"),
+                    timezone_id=browser_context.get("timezone_id"),
+                    geolocation=browser_context.get("geolocation"),
+                    permissions=browser_context.get("permissions") or [],
+                    extra_http_headers=browser_context.get("extra_http_headers") or {},
+                )
+                try:
+                    page = context.new_page()
+                    page.goto(runtime_url, wait_until="load", timeout=max(1000, int(timeout * 1000)))
+                    observed = page.evaluate(
+                        """
+                        async () => {
+                          const position = await new Promise((resolve) => {
+                            navigator.geolocation.getCurrentPosition(
+                              (pos) => resolve({
+                                latitude: pos.coords.latitude,
+                                longitude: pos.coords.longitude,
+                                accuracy: pos.coords.accuracy,
+                              }),
+                              (error) => resolve({error: error.code + ':' + error.message}),
+                              {maximumAge: 0, timeout: 5000}
+                            );
+                          });
+                          return {
+                            language: navigator.language,
+                            languages: Array.from(navigator.languages || []),
+                            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                            geolocation: position,
+                          };
+                        }
+                        """
+                    )
+                finally:
+                    context.close()
+            finally:
+                browser.close()
+    except Exception as exc:
+        return AutomationContextResolution(6, "automation_context_failed", process_state="failed", errors=(str(exc),))
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+    if not isinstance(observed, dict):
+        return AutomationContextResolution(6, "automation_context_output_missing", process_state="output_missing")
+    observed["acceptLanguageHeader"] = server.observed_headers.get("accept-language")
+    mismatches = validate_automation_context_observation(observed, browser_context)
+    if mismatches:
+        return AutomationContextResolution(
+            6,
+            "automation_context_mismatch_failed",
+            observed=observed,
+            process_state="verified_with_mismatch",
+            errors=mismatches,
+        )
+    return AutomationContextResolution(0, "verified_automation_context_us", observed=observed, process_state="verified")
 
 
 EXIT_PROFILE_PROBES = [
@@ -1435,6 +1604,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="timeout in seconds for headless Chrome runtime verification",
     )
     parser.add_argument(
+        "--skip-automation-context-check",
+        action="store_true",
+        default=os.environ.get("AGENT_MANAGER_BROWSER_US_SKIP_AUTOMATION_CONTEXT_CHECK") == "1",
+        help="skip the Playwright automation geolocation/context verification",
+    )
+    parser.add_argument(
+        "--allow-unverified-automation-context",
+        action="store_true",
+        default=os.environ.get("AGENT_MANAGER_BROWSER_US_ALLOW_UNVERIFIED_AUTOMATION_CONTEXT") == "1",
+        help="warn instead of failing when Playwright automation context verification cannot be completed",
+    )
+    parser.add_argument(
+        "--automation-context-check-timeout",
+        type=float,
+        default=float(os.environ.get("AGENT_MANAGER_BROWSER_US_AUTOMATION_CONTEXT_CHECK_TIMEOUT", "20")),
+        help="timeout in seconds for Playwright automation geolocation/context verification",
+    )
+    parser.add_argument(
         "--post-sync-settle-seconds",
         type=float,
         default=float(os.environ.get("AGENT_MANAGER_BROWSER_US_POST_SYNC_SETTLE_SECONDS", "10")),
@@ -1464,6 +1651,8 @@ def print_dry_run(args: argparse.Namespace, browser_roots: list[BrowserRoot], co
         print("Would verify google.com/ncr keeps Google on google.com instead of google.com.hk")
     if not args.offline and not args.skip_exit_check and not args.skip_runtime_check:
         print("Would verify headless Chrome runtime language, languages, Intl locale, and timezone")
+    if not args.offline and not args.skip_exit_check and not args.skip_automation_context_check:
+        print("Would verify Playwright automation geolocation and browser context")
     if not args.offline and not args.no_browser_open:
         print(f"Would open {NCR_URL}")
 
@@ -1626,6 +1815,12 @@ def resolve_runtime_context(args: argparse.Namespace, config_dir: Path, exit_res
         resolved_timezone_id(exit_resolution.exit_profile),
         args.runtime_check_timeout,
     )
+    if runtime_resolution.verification_state == "runtime_output_missing":
+        runtime_resolution = verify_runtime_browser_context(
+            config_dir / "browser-us-chrome.sh",
+            resolved_timezone_id(exit_resolution.exit_profile),
+            args.runtime_check_timeout,
+        )
     if runtime_resolution.return_code == 0:
         observed = runtime_resolution.observed or {}
         print(
@@ -1657,6 +1852,60 @@ def resolve_runtime_context(args: argparse.Namespace, config_dir: Path, exit_res
     return runtime_resolution
 
 
+def resolve_automation_context(
+    args: argparse.Namespace,
+    config_dir: Path,
+    exit_resolution: ExitResolution,
+    platform_name: str,
+) -> AutomationContextResolution:
+    if args.offline:
+        return AutomationContextResolution(0, "offline_skipped")
+    if args.skip_exit_check:
+        return AutomationContextResolution(0, "exit_check_skipped")
+    if args.skip_automation_context_check:
+        return AutomationContextResolution(0, "manually_skipped")
+    if args.exit_profile_json:
+        return AutomationContextResolution(0, "exit_profile_json_skipped")
+    if exit_resolution.verification_state != "verified_us":
+        return AutomationContextResolution(0, "exit_not_verified_us_skipped")
+
+    automation_context_resolution = verify_automation_browser_context(
+        config_dir,
+        args.automation_context_check_timeout,
+        platform_name,
+    )
+    if automation_context_resolution.return_code == 0:
+        observed = automation_context_resolution.observed or {}
+        geolocation = observed.get("geolocation") if isinstance(observed.get("geolocation"), dict) else {}
+        print(
+            "Verified automation browser context: "
+            f"language: {observed.get('language')}, "
+            f"languages: {observed.get('languages')}, "
+            f"timezone: {observed.get('timezone')}, "
+            f"Accept-Language: {observed.get('acceptLanguageHeader')}, "
+            f"geolocation: {geolocation.get('latitude')},{geolocation.get('longitude')} "
+            f"accuracy: {geolocation.get('accuracy')}"
+        )
+        return automation_context_resolution
+
+    if args.allow_unverified_automation_context:
+        print("WARN: could not verify Playwright automation browser context", file=sys.stderr)
+        for error in automation_context_resolution.errors[:3]:
+            print(f"WARN: {error}", file=sys.stderr)
+        return AutomationContextResolution(
+            0,
+            "unverified_allowed",
+            observed=automation_context_resolution.observed,
+            process_state=automation_context_resolution.process_state,
+            errors=automation_context_resolution.errors,
+        )
+
+    print("ERROR: could not verify Playwright automation browser context", file=sys.stderr)
+    for error in automation_context_resolution.errors[:3]:
+        print(f"ERROR: {error}", file=sys.stderr)
+    return automation_context_resolution
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.post_sync_settle_seconds < 0:
@@ -1664,6 +1913,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.runtime_check_timeout <= 0:
         print("ERROR: --runtime-check-timeout must be positive", file=sys.stderr)
+        return 2
+    if args.automation_context_check_timeout <= 0:
+        print("ERROR: --automation-context-check-timeout must be positive", file=sys.stderr)
         return 2
     platform_name = sys.platform
     config_dir = Path(args.config_dir).expanduser() if args.config_dir else args.home.expanduser() / ".config" / "agent-manager"
@@ -1688,8 +1940,13 @@ def main(argv: list[str] | None = None) -> int:
     google_domain_resolution = resolve_google_domain(args, exit_resolution)
     if google_domain_resolution.return_code == 0:
         runtime_resolution = resolve_runtime_context(args, config_dir, exit_resolution)
+        if runtime_resolution.return_code == 0:
+            automation_context_resolution = resolve_automation_context(args, config_dir, exit_resolution, platform_name)
+        else:
+            automation_context_resolution = AutomationContextResolution(0, "runtime_failed_skipped")
     else:
         runtime_resolution = RuntimeResolution(0, "google_domain_failed_skipped")
+        automation_context_resolution = AutomationContextResolution(0, "google_domain_failed_skipped")
     changed_paths.extend(
         sync_verification_report(
             config_dir,
@@ -1700,6 +1957,7 @@ def main(argv: list[str] | None = None) -> int:
             exit_resolution.verification_state,
             google_domain_resolution,
             runtime_resolution,
+            automation_context_resolution,
             browser_state_audit,
         )
     )
@@ -1710,6 +1968,8 @@ def main(argv: list[str] | None = None) -> int:
         return google_domain_resolution.return_code
     if runtime_resolution.return_code != 0:
         return runtime_resolution.return_code
+    if automation_context_resolution.return_code != 0:
+        return automation_context_resolution.return_code
 
     opened_ncr = False
     if args.offline:

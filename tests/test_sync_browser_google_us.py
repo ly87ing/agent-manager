@@ -164,6 +164,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["exit"]["verification_state"], "manually_skipped")
             self.assertEqual(verification_report["google_domain"]["verification_state"], "exit_check_skipped")
             self.assertEqual(verification_report["runtime"]["verification_state"], "exit_check_skipped")
+            self.assertEqual(verification_report["automation_context"]["verification_state"], "exit_check_skipped")
             self.assertTrue(verification_report["browser_state_audit"]["overall_ok"])
             self.assertIn(
                 "Agent Manager Browser US",
@@ -174,6 +175,11 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["google"]["search_gl"], "US")
             self.assertEqual(verification_report["enforced_features"]["automation"]["chrome_launcher"], "$AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER")
             self.assertEqual(verification_report["enforced_features"]["automation"]["default_url"], "https://www.google.com/ncr")
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["context_geolocation"],
+                {"latitude": 37.7749, "longitude": -122.4194, "accuracy": 100},
+            )
+            self.assertEqual(verification_report["enforced_features"]["automation"]["context_permissions"], ["geolocation"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_language"], "en-US")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_languages"], ["en-US", "en"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_intl_locale"], "en-US")
@@ -258,9 +264,14 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["exit"]["verification_state"], "verified_us")
             self.assertEqual(verification_report["google_domain"]["verification_state"], "exit_profile_json_skipped")
             self.assertEqual(verification_report["runtime"]["verification_state"], "exit_profile_json_skipped")
+            self.assertEqual(verification_report["automation_context"]["verification_state"], "exit_profile_json_skipped")
             self.assertTrue(verification_report["browser_state_audit"]["overall_ok"])
             self.assertEqual(verification_report["exit"]["profile"]["ip"], "203.0.113.31")
             self.assertEqual(verification_report["enforced_features"]["automation"]["timezone_id"], "America/New_York")
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["context_geolocation"],
+                {"latitude": 40.7128, "longitude": -74.006, "accuracy": 50000},
+            )
             self.assertEqual(launcher_path.stat().st_mode & 0o777, 0o755)
             self.assertIn("export TZ=America/New_York", launcher_content)
             self.assertIn("export TZ=America/New_York", env_content)
@@ -577,3 +588,35 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertFalse(runtime_context["profileWebrtcNonproxiedUdpEnabled"])
         self.assertEqual(runtime_context["profileGeolocationSetting"], 2)
         self.assertEqual(mismatches, ())
+
+    def test_automation_context_validator_rejects_non_us_context_drift(self):
+        spec = importlib.util.spec_from_file_location("sync_browser_google_us_test", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.modules.pop(spec.name, None)
+
+        browser_context = {
+            "locale": "en-US",
+            "timezone_id": "America/Los_Angeles",
+            "geolocation": {"latitude": 34.0522, "longitude": -118.2437, "accuracy": 50000},
+        }
+        observed = {
+            "language": "en-US",
+            "languages": ["en-US"],
+            "timezone": "America/Los_Angeles",
+            "acceptLanguageHeader": "en-US,en;q=0.9",
+            "geolocation": {"latitude": 34.0522, "longitude": -118.2437, "accuracy": 50000},
+        }
+
+        self.assertEqual(module.validate_automation_context_observation(observed, browser_context), ())
+
+        observed["timezone"] = "Asia/Hong_Kong"
+        observed["geolocation"] = {"latitude": 22.3193, "longitude": 114.1694, "accuracy": 50000}
+        mismatches = module.validate_automation_context_observation(observed, browser_context)
+
+        self.assertIn("automation timezone", mismatches)
+        self.assertIn("automation geolocation latitude", mismatches)
+        self.assertIn("automation geolocation longitude", mismatches)
