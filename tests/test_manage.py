@@ -61,6 +61,7 @@ class ManageScriptTests(unittest.TestCase):
         env["AGENT_MANAGER_LOCK_FILE"] = str(self.lock_path)
         env["AGENT_MANAGER_LOG_PREFIX"] = str(self.log_prefix)
         env["AGENT_MANAGER_CHROME_USER_DATA_DIR"] = str(self.runtime_dir / "chrome-user-data")
+        env["AGENT_MANAGER_BROWSER_US_CONFIG_DIR"] = str(self.runtime_dir / "browser-us-config")
         env["AGENT_MANAGER_BROWSER_US_NO_OPEN"] = "1"
         env["AGENT_MANAGER_BROWSER_US_SKIP_EXIT_CHECK"] = "1"
         return env
