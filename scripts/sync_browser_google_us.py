@@ -17,10 +17,13 @@ from pathlib import Path
 
 ACCEPT_LANGUAGES = "en-US,en"
 APP_LOCALE = "en-US"
+COUNTRY_ID_US = 244
 ENV_LOCALE = "en_US.UTF-8"
 NCR_URL = "https://www.google.com/ncr"
 SEARCH_URL = "https://www.google.com/search?q={searchTerms}&hl=en-US&gl=US&pws=0"
 SUGGEST_URL = "https://www.google.com/complete/search?client=chrome&q={searchTerms}&hl=en-US&gl=US"
+TRANSLATE_TARGET_LANGUAGE = "en"
+VARIATIONS_COUNTRY = "us"
 DEFAULT_TIMEZONE_ID = "America/Los_Angeles"
 DEFAULT_GEOLOCATION = {
     "latitude": 37.7749,
@@ -339,8 +342,11 @@ def sync_local_state(path: Path) -> bool:
     data = load_json_mapping(path)
     intl = mapping_section(data, "intl")
     changed = set_mapping_value(intl, "app_locale", APP_LOCALE)
-    changed |= set_mapping_value(data, "countryid_at_install", 244)
-    changed |= set_mapping_value(data, "variations_country", "us")
+    changed |= set_mapping_value(data, "countryid_at_install", COUNTRY_ID_US)
+    changed |= set_mapping_value(data, "variations_country", VARIATIONS_COUNTRY)
+    changed |= set_mapping_value(data, "variations_safe_seed_locale", APP_LOCALE)
+    changed |= set_mapping_value(data, "variations_safe_seed_permanent_consistency_country", VARIATIONS_COUNTRY)
+    changed |= set_mapping_value(data, "variations_safe_seed_session_consistency_country", VARIATIONS_COUNTRY)
     if changed:
         ensure_backup(path)
         write_json_atomic(path, data)
@@ -350,10 +356,18 @@ def sync_local_state(path: Path) -> bool:
 def sync_preferences(path: Path) -> bool:
     data = load_json_mapping(path)
     changed = False
+    changed |= set_mapping_value(data, "countryid_at_install", COUNTRY_ID_US)
 
     intl = mapping_section(data, "intl")
     changed |= set_mapping_value(intl, "accept_languages", ACCEPT_LANGUAGES)
     changed |= set_mapping_value(intl, "selected_languages", ACCEPT_LANGUAGES)
+    changed |= set_mapping_value(data, "translate_recent_target", TRANSLATE_TARGET_LANGUAGE)
+
+    account_values = mapping_section(data, "account_values")
+    account_intl = mapping_section(account_values, "intl")
+    changed |= set_mapping_value(account_intl, "accept_languages", ACCEPT_LANGUAGES)
+    changed |= set_mapping_value(account_intl, "selected_languages", ACCEPT_LANGUAGES)
+    changed |= set_mapping_value(account_values, "translate_recent_target", TRANSLATE_TARGET_LANGUAGE)
 
     spellcheck = mapping_section(data, "spellcheck")
     changed |= set_mapping_value(spellcheck, "dictionaries", ["en-US"])
@@ -382,6 +396,8 @@ def sync_preferences(path: Path) -> bool:
     content_settings = mapping_section(profile, "content_settings")
     exceptions = mapping_section(content_settings, "exceptions")
     changed |= set_mapping_value(exceptions, "geolocation", {})
+    changed |= set_mapping_value(exceptions, "geolocation_with_options", {})
+    changed |= set_mapping_value(exceptions, "reduced_accept_language", {})
 
     if changed:
         ensure_backup(path)
@@ -422,8 +438,21 @@ def audit_local_state(path: Path) -> dict:
         return record
 
     audit_expected_value(data, ("intl", "app_locale"), APP_LOCALE, record["mismatches"])
-    audit_expected_value(data, ("countryid_at_install",), 244, record["mismatches"])
-    audit_expected_value(data, ("variations_country",), "us", record["mismatches"])
+    audit_expected_value(data, ("countryid_at_install",), COUNTRY_ID_US, record["mismatches"])
+    audit_expected_value(data, ("variations_country",), VARIATIONS_COUNTRY, record["mismatches"])
+    audit_expected_value(data, ("variations_safe_seed_locale",), APP_LOCALE, record["mismatches"])
+    audit_expected_value(
+        data,
+        ("variations_safe_seed_permanent_consistency_country",),
+        VARIATIONS_COUNTRY,
+        record["mismatches"],
+    )
+    audit_expected_value(
+        data,
+        ("variations_safe_seed_session_consistency_country",),
+        VARIATIONS_COUNTRY,
+        record["mismatches"],
+    )
     record["ok"] = not record["mismatches"]
     return record
 
@@ -440,8 +469,13 @@ def audit_preferences(path: Path) -> dict:
         return record
 
     expected_values = [
+        (("countryid_at_install",), COUNTRY_ID_US),
         (("intl", "accept_languages"), ACCEPT_LANGUAGES),
         (("intl", "selected_languages"), ACCEPT_LANGUAGES),
+        (("account_values", "intl", "accept_languages"), ACCEPT_LANGUAGES),
+        (("account_values", "intl", "selected_languages"), ACCEPT_LANGUAGES),
+        (("translate_recent_target",), TRANSLATE_TARGET_LANGUAGE),
+        (("account_values", "translate_recent_target"), TRANSLATE_TARGET_LANGUAGE),
         (("spellcheck", "dictionaries"), ["en-US"]),
         (("spellcheck", "dictionary"), "en-US"),
         (("spellcheck", "use_spelling_service"), True),
@@ -455,6 +489,8 @@ def audit_preferences(path: Path) -> dict:
         (("webrtc", "nonproxied_udp_enabled"), False),
         (("profile", "default_content_setting_values", "geolocation"), BLOCK_CONTENT_SETTING),
         (("profile", "content_settings", "exceptions", "geolocation"), {}),
+        (("profile", "content_settings", "exceptions", "geolocation_with_options"), {}),
+        (("profile", "content_settings", "exceptions", "reduced_accept_language"), {}),
     ]
     for key_path, expected in expected_values:
         audit_expected_value(data, key_path, expected, record["mismatches"])
@@ -677,11 +713,24 @@ def verification_report_payload(
                 "app_locale": APP_LOCALE,
                 "accept_languages": ACCEPT_LANGUAGES,
                 "selected_languages": ACCEPT_LANGUAGES,
+                "account_accept_languages": ACCEPT_LANGUAGES,
+                "account_selected_languages": ACCEPT_LANGUAGES,
+                "reduced_accept_language_exceptions": {},
                 "environment_locale": ENV_LOCALE,
             },
             "local_state_country": {
-                "countryid_at_install": 244,
-                "variations_country": "us",
+                "countryid_at_install": COUNTRY_ID_US,
+                "variations_country": VARIATIONS_COUNTRY,
+                "variations_safe_seed_locale": APP_LOCALE,
+                "variations_safe_seed_permanent_consistency_country": VARIATIONS_COUNTRY,
+                "variations_safe_seed_session_consistency_country": VARIATIONS_COUNTRY,
+            },
+            "profile_country": {
+                "countryid_at_install": COUNTRY_ID_US,
+            },
+            "translate": {
+                "recent_target": TRANSLATE_TARGET_LANGUAGE,
+                "account_recent_target": TRANSLATE_TARGET_LANGUAGE,
             },
             "google": {
                 "ncr_url": NCR_URL,
@@ -699,6 +748,8 @@ def verification_report_payload(
             "geolocation": {
                 "regular_profile_content_setting": BLOCK_CONTENT_SETTING,
                 "regular_profile_policy": "block",
+                "regular_profile_exceptions": {},
+                "regular_profile_geolocation_with_options_exceptions": {},
                 "automation_geolocation": geolocation,
             },
             "automation": {

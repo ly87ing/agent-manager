@@ -35,20 +35,43 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         profile_dir.mkdir(parents=True)
         default_dir.mkdir(parents=True)
         (chrome_root / "Local State").write_text(
-            json.dumps({"profile": {"last_used": "Profile 1"}, "keep": "local-state"}),
+            json.dumps(
+                {
+                    "profile": {"last_used": "Profile 1"},
+                    "variations_safe_seed_locale": "zh-CN",
+                    "variations_safe_seed_permanent_consistency_country": "cn",
+                    "variations_safe_seed_session_consistency_country": "cn",
+                    "keep": "local-state",
+                }
+            ),
             encoding="utf-8",
         )
         for target_dir in (default_dir, profile_dir):
             (target_dir / "Preferences").write_text(
                 json.dumps(
                     {
+                        "countryid_at_install": 21843,
                         "intl": {"accept_languages": "zh-CN,zh"},
+                        "account_values": {
+                            "intl": {
+                                "accept_languages": "zh-CN,zh",
+                                "selected_languages": "zh-CN,zh",
+                            },
+                            "translate_recent_target": "zh-CN",
+                        },
                         "default_search_provider": {"name": "Old Google"},
+                        "translate_recent_target": "zh-CN",
                         "profile": {
                             "content_settings": {
                                 "exceptions": {
                                     "geolocation": {
                                         "https://example.test,*": {"setting": 1},
+                                    },
+                                    "geolocation_with_options": {
+                                        "https://maps.example.test,*": {"last_modified": "1"},
+                                    },
+                                    "reduced_accept_language": {
+                                        "https://search.example.test,*": {"setting": 1},
                                     },
                                 },
                             },
@@ -94,9 +117,17 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(local_state["intl"]["app_locale"], "en-US")
             self.assertEqual(local_state["countryid_at_install"], 244)
             self.assertEqual(local_state["variations_country"], "us")
+            self.assertEqual(local_state["variations_safe_seed_locale"], "en-US")
+            self.assertEqual(local_state["variations_safe_seed_permanent_consistency_country"], "us")
+            self.assertEqual(local_state["variations_safe_seed_session_consistency_country"], "us")
             self.assertEqual(local_state["keep"], "local-state")
+            self.assertEqual(preferences["countryid_at_install"], 244)
             self.assertEqual(preferences["intl"]["accept_languages"], "en-US,en")
             self.assertEqual(preferences["intl"]["selected_languages"], "en-US,en")
+            self.assertEqual(preferences["account_values"]["intl"]["accept_languages"], "en-US,en")
+            self.assertEqual(preferences["account_values"]["intl"]["selected_languages"], "en-US,en")
+            self.assertEqual(preferences["translate_recent_target"], "en")
+            self.assertEqual(preferences["account_values"]["translate_recent_target"], "en")
             self.assertEqual(preferences["spellcheck"]["dictionaries"], ["en-US"])
             self.assertEqual(preferences["spellcheck"]["dictionary"], "en-US")
             self.assertEqual(preferences["default_search_provider"]["name"], "Google US")
@@ -105,8 +136,11 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertFalse(preferences["webrtc"]["nonproxied_udp_enabled"])
             self.assertEqual(preferences["profile"]["default_content_setting_values"]["geolocation"], 2)
             self.assertEqual(preferences["profile"]["content_settings"]["exceptions"]["geolocation"], {})
+            self.assertEqual(preferences["profile"]["content_settings"]["exceptions"]["geolocation_with_options"], {})
+            self.assertEqual(preferences["profile"]["content_settings"]["exceptions"]["reduced_accept_language"], {})
             self.assertEqual(preferences["keep"], "Profile 1")
             self.assertEqual(default_preferences["intl"]["accept_languages"], "en-US,en")
+            self.assertEqual(default_preferences["account_values"]["intl"]["accept_languages"], "en-US,en")
             self.assertEqual(default_preferences["default_search_provider"]["name"], "Google US")
             self.assertEqual(default_preferences["profile"]["content_settings"]["exceptions"]["geolocation"], {})
             self.assertEqual(automation_context["browser_context"]["locale"], "en-US")
