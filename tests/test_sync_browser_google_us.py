@@ -21,32 +21,39 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
 
     def _write_chrome_profile(self, chrome_root: Path):
         profile_dir = chrome_root / "Profile 1"
+        default_dir = chrome_root / "Default"
         profile_dir.mkdir(parents=True)
+        default_dir.mkdir(parents=True)
         (chrome_root / "Local State").write_text(
             json.dumps({"profile": {"last_used": "Profile 1"}, "keep": "local-state"}),
             encoding="utf-8",
         )
-        (profile_dir / "Preferences").write_text(
-            json.dumps(
-                {
-                    "intl": {"accept_languages": "zh-CN,zh"},
-                    "default_search_provider": {"name": "Old Google"},
-                    "keep": "preferences",
-                }
-            ),
-            encoding="utf-8",
-        )
+        for target_dir in (default_dir, profile_dir):
+            (target_dir / "Preferences").write_text(
+                json.dumps(
+                    {
+                        "intl": {"accept_languages": "zh-CN,zh"},
+                        "default_search_provider": {"name": "Old Google"},
+                        "keep": target_dir.name,
+                    }
+                ),
+                encoding="utf-8",
+            )
         return profile_dir
 
-    def test_sync_updates_chrome_profile_for_google_us_preflight(self):
+    def test_sync_updates_chrome_profiles_for_google_us_preflight(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             chrome_root = Path(temp_dir) / "chrome"
+            config_dir = Path(temp_dir) / "config"
             profile_dir = self._write_chrome_profile(chrome_root)
 
             result = self._run(
                 "--chrome-user-data-dir",
                 str(chrome_root),
+                "--config-dir",
+                str(config_dir),
                 "--no-browser-open",
+                "--skip-exit-check",
             )
 
             combined = result.stdout + result.stderr
@@ -54,13 +61,24 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
 
             local_state = json.loads((chrome_root / "Local State").read_text(encoding="utf-8"))
             preferences = json.loads((profile_dir / "Preferences").read_text(encoding="utf-8"))
+            default_preferences = json.loads((chrome_root / "Default" / "Preferences").read_text(encoding="utf-8"))
+            automation_context = json.loads((config_dir / "browser-us-context.json").read_text(encoding="utf-8"))
 
             self.assertEqual(local_state["intl"]["app_locale"], "en-US")
             self.assertEqual(local_state["keep"], "local-state")
             self.assertEqual(preferences["intl"]["accept_languages"], "en-US,en")
+            self.assertEqual(preferences["intl"]["selected_languages"], "en-US,en")
             self.assertEqual(preferences["default_search_provider"]["name"], "Google US")
             self.assertIn("gl=US", preferences["default_search_provider"]["search_url"])
-            self.assertEqual(preferences["keep"], "preferences")
+            self.assertEqual(preferences["webrtc"]["ip_handling_policy"], "disable_non_proxied_udp")
+            self.assertFalse(preferences["webrtc"]["nonproxied_udp_enabled"])
+            self.assertEqual(preferences["keep"], "Profile 1")
+            self.assertEqual(default_preferences["intl"]["accept_languages"], "en-US,en")
+            self.assertEqual(default_preferences["default_search_provider"]["name"], "Google US")
+            self.assertEqual(automation_context["browser_context"]["locale"], "en-US")
+            self.assertEqual(automation_context["browser_context"]["timezone_id"], "America/Los_Angeles")
+            self.assertIn("--force-webrtc-ip-handling-policy=disable_non_proxied_udp", automation_context["chrome_launch"]["args"])
+            self.assertTrue((config_dir / "browser-us.env").exists())
             self.assertTrue((chrome_root / "Local State.agent-manager-before-google-us").exists())
             self.assertTrue((profile_dir / "Preferences.agent-manager-before-google-us").exists())
 
@@ -76,6 +94,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
                 str(chrome_root),
                 "--dry-run",
                 "--no-browser-open",
+                "--skip-exit-check",
             )
 
             combined = result.stdout + result.stderr
@@ -86,12 +105,16 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
     def test_missing_chrome_profile_is_warning_not_failure(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             chrome_root = Path(temp_dir) / "chrome"
+            config_dir = Path(temp_dir) / "config"
 
             result = self._run(
                 "--chrome-user-data-dir",
                 str(chrome_root),
+                "--config-dir",
+                str(config_dir),
                 "--no-browser-open",
+                "--skip-exit-check",
             )
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn("Chrome user data directory not found", result.stderr)
+            self.assertIn("browser user data directory not found", result.stderr)

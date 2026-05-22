@@ -62,6 +62,7 @@ class ManageScriptTests(unittest.TestCase):
         env["AGENT_MANAGER_LOG_PREFIX"] = str(self.log_prefix)
         env["AGENT_MANAGER_CHROME_USER_DATA_DIR"] = str(self.runtime_dir / "chrome-user-data")
         env["AGENT_MANAGER_BROWSER_US_NO_OPEN"] = "1"
+        env["AGENT_MANAGER_BROWSER_US_SKIP_EXIT_CHECK"] = "1"
         return env
 
     def _write_stub(self, path: Path, content: str):
