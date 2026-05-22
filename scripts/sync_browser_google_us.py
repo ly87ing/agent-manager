@@ -62,6 +62,17 @@ US_DESKTOP_NETWORK_INFORMATION = {
     "save_data": False,
     "type": None,
 }
+US_DESKTOP_PDF_PLUGIN_NAMES = (
+    "PDF Viewer",
+    "Chrome PDF Viewer",
+    "Chromium PDF Viewer",
+    "Microsoft Edge PDF Viewer",
+    "WebKit built-in PDF",
+)
+US_DESKTOP_PDF_MIME_TYPES = ("application/pdf", "text/pdf")
+US_DESKTOP_PDF_PLUGIN_FILENAME = "internal-pdf-viewer"
+US_DESKTOP_PDF_DESCRIPTION = "Portable Document Format"
+US_DESKTOP_PDF_SUFFIXES = "pdf"
 US_DESKTOP_WEBGL_VENDOR = "Intel Inc."
 US_DESKTOP_WEBGL_RENDERER = "Intel Iris OpenGL Engine"
 US_CANVAS_FONT_METRIC_FALLBACK_FAMILY = "Arial"
@@ -1450,6 +1461,8 @@ def verification_report_payload(
                 "runtime_screen_orientation_angle": US_DESKTOP_SCREEN_ORIENTATION_ANGLE,
                 "runtime_pdf_viewer_enabled": True,
                 "runtime_plugins_present": True,
+                "runtime_pdf_plugin_names": list(US_DESKTOP_PDF_PLUGIN_NAMES),
+                "runtime_pdf_mime_types": list(US_DESKTOP_PDF_MIME_TYPES),
                 "runtime_webdriver": False,
                 "runtime_geolocation_permission": "denied",
                 "runtime_notification_permission": "denied",
@@ -1512,6 +1525,8 @@ def verification_report_payload(
                 "automation_locale_timezones_include_current_timezone": True,
                 "automation_pdf_viewer_enabled": True,
                 "automation_plugins_present": True,
+                "automation_pdf_plugin_names": list(US_DESKTOP_PDF_PLUGIN_NAMES),
+                "automation_pdf_mime_types": list(US_DESKTOP_PDF_MIME_TYPES),
                 "automation_speech_synthesis_present": False,
                 "automation_local_font_access_present": False,
                 "automation_webgpu_adapter_available": False,
@@ -1723,6 +1738,14 @@ def runtime_probe_html() -> str:
         "pdfViewerEnabled:navigator.pdfViewerEnabled,"
         "pluginsLength:navigator.plugins.length,"
         "mimeTypesLength:navigator.mimeTypes.length,"
+        "plugins:Array.from(navigator.plugins||[]).map((plugin)=>({"
+        "name:plugin.name,filename:plugin.filename,description:plugin.description,length:plugin.length,"
+        "types:Array.from(plugin).map((mimeType)=>({type:mimeType.type,suffixes:mimeType.suffixes,"
+        "description:mimeType.description}))"
+        "})),"
+        "mimeTypes:Array.from(navigator.mimeTypes||[]).map((mimeType)=>({type:mimeType.type,"
+        "suffixes:mimeType.suffixes,description:mimeType.description,"
+        "enabledPlugin:mimeType.enabledPlugin?mimeType.enabledPlugin.name:null})),"
         "speechSynthesisPresent:'speechSynthesis' in window,"
         "localFontAccessPresent:'queryLocalFonts' in window,"
         "bluetoothPresent:'bluetooth' in navigator,"
@@ -1912,6 +1935,43 @@ def positive_integer(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
+def expected_pdf_plugin_entries() -> list[dict]:
+    mime_types = [
+        {
+            "description": US_DESKTOP_PDF_DESCRIPTION,
+            "suffixes": US_DESKTOP_PDF_SUFFIXES,
+            "type": mime_type,
+        }
+        for mime_type in US_DESKTOP_PDF_MIME_TYPES
+    ]
+    return [
+        {
+            "description": US_DESKTOP_PDF_DESCRIPTION,
+            "filename": US_DESKTOP_PDF_PLUGIN_FILENAME,
+            "length": len(US_DESKTOP_PDF_MIME_TYPES),
+            "name": plugin_name,
+            "types": [dict(mime_type) for mime_type in mime_types],
+        }
+        for plugin_name in US_DESKTOP_PDF_PLUGIN_NAMES
+    ]
+
+
+def expected_pdf_mime_type_entries() -> list[dict]:
+    return [
+        {
+            "description": US_DESKTOP_PDF_DESCRIPTION,
+            "enabledPlugin": US_DESKTOP_PDF_PLUGIN_NAMES[0],
+            "suffixes": US_DESKTOP_PDF_SUFFIXES,
+            "type": mime_type,
+        }
+        for mime_type in US_DESKTOP_PDF_MIME_TYPES
+    ]
+
+
+def pdf_plugin_surface_matches(observed: dict) -> bool:
+    return observed.get("plugins") == expected_pdf_plugin_entries() and observed.get("mimeTypes") == expected_pdf_mime_type_entries()
+
+
 def user_agent_high_entropy_matches_desktop_surface(
     high_entropy,
     user_agent: str,
@@ -1987,6 +2047,8 @@ def runtime_desktop_surface_mismatches(runtime_context: dict) -> tuple[str, ...]
         mismatches.append("runtime plugins")
     if not positive_integer(runtime_context.get("mimeTypesLength")):
         mismatches.append("runtime mime types")
+    if not pdf_plugin_surface_matches(runtime_context):
+        mismatches.append("runtime PDF plugin surface")
     if runtime_context.get("speechSynthesisPresent") is not False:
         mismatches.append("runtime speech synthesis")
     if runtime_context.get("localFontAccessPresent") is not False:
@@ -2525,6 +2587,8 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation plugins")
     if not positive_integer(observed.get("mimeTypesLength")):
         mismatches.append("automation mime types")
+    if not pdf_plugin_surface_matches(observed):
+        mismatches.append("automation PDF plugin surface")
     if observed.get("speechSynthesisPresent") is not False:
         mismatches.append("automation speech synthesis")
     if observed.get("localFontAccessPresent") is not False:
@@ -2736,6 +2800,23 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             pdfViewerEnabled: navigator.pdfViewerEnabled,
                             pluginsLength: navigator.plugins.length,
                             mimeTypesLength: navigator.mimeTypes.length,
+                            plugins: Array.from(navigator.plugins || []).map((plugin) => ({
+                              name: plugin.name,
+                              filename: plugin.filename,
+                              description: plugin.description,
+                              length: plugin.length,
+                              types: Array.from(plugin).map((mimeType) => ({
+                                type: mimeType.type,
+                                suffixes: mimeType.suffixes,
+                                description: mimeType.description,
+                              })),
+                            })),
+                            mimeTypes: Array.from(navigator.mimeTypes || []).map((mimeType) => ({
+                              type: mimeType.type,
+                              suffixes: mimeType.suffixes,
+                              description: mimeType.description,
+                              enabledPlugin: mimeType.enabledPlugin ? mimeType.enabledPlugin.name : null,
+                            })),
                             speechSynthesisPresent: 'speechSynthesis' in window,
                             localFontAccessPresent: 'queryLocalFonts' in window,
                             keyboardLayout: null,

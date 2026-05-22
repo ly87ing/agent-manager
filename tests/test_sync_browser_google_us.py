@@ -466,6 +466,20 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_screen_orientation_angle"], 0)
             self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_pdf_viewer_enabled"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_plugins_present"])
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["runtime_pdf_plugin_names"],
+                [
+                    "PDF Viewer",
+                    "Chrome PDF Viewer",
+                    "Chromium PDF Viewer",
+                    "Microsoft Edge PDF Viewer",
+                    "WebKit built-in PDF",
+                ],
+            )
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["runtime_pdf_mime_types"],
+                ["application/pdf", "text/pdf"],
+            )
             self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_webdriver"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_geolocation_permission"], "denied")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_notification_permission"], "denied")
@@ -582,6 +596,20 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             )
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_pdf_viewer_enabled"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_plugins_present"])
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["automation_pdf_plugin_names"],
+                [
+                    "PDF Viewer",
+                    "Chrome PDF Viewer",
+                    "Chromium PDF Viewer",
+                    "Microsoft Edge PDF Viewer",
+                    "WebKit built-in PDF",
+                ],
+            )
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["automation_pdf_mime_types"],
+                ["application/pdf", "text/pdf"],
+            )
             self.assertFalse(verification_report["enforced_features"]["automation"]["automation_speech_synthesis_present"])
             self.assertFalse(verification_report["enforced_features"]["automation"]["automation_local_font_access_present"])
             self.assertFalse(verification_report["enforced_features"]["automation"]["automation_webgpu_adapter_available"])
@@ -999,6 +1027,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
+        plugin_payload = json.dumps(module.expected_pdf_plugin_entries())
+        mime_type_payload = json.dumps(module.expected_pdf_mime_type_entries())
         payload = (
             "<html><head><script>document.write('AGENT_MANAGER_RUNTIME_JSON:'"
             "+JSON.stringify({language:navigator.language}));</script></head>"
@@ -1026,6 +1056,11 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             '"devicePixelRatio":1,"maxTouchPoints":0,"coarsePointer":false,'
             '"finePointer":true,"hoverHover":true,"lightColorScheme":true,"darkColorScheme":false,'
             '"pdfViewerEnabled":true,"pluginsLength":5,"mimeTypesLength":2,'
+            '"plugins":'
+            + plugin_payload
+            + ',"mimeTypes":'
+            + mime_type_payload
+            + ","
             '"speechSynthesisPresent":false,"localFontAccessPresent":false,'
             '"bluetoothPresent":false,"usbPresent":false,"hidPresent":false,"serialPresent":true,'
             '"xrPresent":false,"gamepadCount":0,'
@@ -1106,6 +1141,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertTrue(runtime_context["pdfViewerEnabled"])
         self.assertEqual(runtime_context["pluginsLength"], 5)
         self.assertEqual(runtime_context["mimeTypesLength"], 2)
+        self.assertEqual(runtime_context["plugins"], module.expected_pdf_plugin_entries())
+        self.assertEqual(runtime_context["mimeTypes"], module.expected_pdf_mime_type_entries())
         self.assertFalse(runtime_context["speechSynthesisPresent"])
         self.assertFalse(runtime_context["localFontAccessPresent"])
         self.assertFalse(runtime_context["bluetoothPresent"])
@@ -1309,6 +1346,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "pdfViewerEnabled": True,
             "pluginsLength": 5,
             "mimeTypesLength": 2,
+            "plugins": module.expected_pdf_plugin_entries(),
+            "mimeTypes": module.expected_pdf_mime_type_entries(),
             "speechSynthesisPresent": False,
             "localFontAccessPresent": False,
             "webGpuAdapterAvailable": False,
@@ -1473,6 +1512,23 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "metricMatches": {"PingFang SC": False, "MingLiU": True},
         }
         observed["pluginsLength"] = 0
+        observed["plugins"] = [
+            {
+                "description": "Portable Document Format",
+                "filename": "external-pdf-viewer",
+                "length": 1,
+                "name": "HK PDF Viewer",
+                "types": [{"description": "Portable Document Format", "suffixes": "pdf", "type": "application/pdf"}],
+            }
+        ]
+        observed["mimeTypes"] = [
+            {
+                "description": "Portable Document Format",
+                "enabledPlugin": "HK PDF Viewer",
+                "suffixes": "pdf",
+                "type": "application/pdf",
+            }
+        ]
         observed["speechSynthesisPresent"] = True
         observed["localFontAccessPresent"] = True
         observed["keyboardLayout"] = {"KeyQ": "a", "KeyZ": "w"}
@@ -1523,6 +1579,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertIn("automation blocked font: PingFang SC", mismatches)
         self.assertIn("automation blocked font metric: PingFang SC", mismatches)
         self.assertIn("automation plugins", mismatches)
+        self.assertIn("automation PDF plugin surface", mismatches)
         self.assertIn("automation speech synthesis", mismatches)
         self.assertIn("automation local font access", mismatches)
         self.assertIn("automation keyboard layout", mismatches)
@@ -1578,6 +1635,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "metricMatches": {"PingFang SC": True, "MingLiU": True},
         }
         observed["pluginsLength"] = 5
+        observed["plugins"] = module.expected_pdf_plugin_entries()
+        observed["mimeTypes"] = module.expected_pdf_mime_type_entries()
         observed["speechSynthesisPresent"] = False
         observed["localFontAccessPresent"] = False
         observed["keyboardLayout"] = {"KeyQ": "q", "KeyZ": "z"}
