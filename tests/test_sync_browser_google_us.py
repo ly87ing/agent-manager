@@ -85,6 +85,38 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             )
         return profile_dir
 
+    def _write_managed_profile_volatile_state(self, config_dir: Path) -> list[Path]:
+        managed_root = config_dir / "browser-us-profile"
+        file_relative_paths = [
+            "Default/Cookies",
+            "Default/Cookies-journal",
+            "Default/History",
+            "Default/History-journal",
+            "Default/Network/Cookies",
+            "Default/Network/Cookies-journal",
+        ]
+        directory_relative_paths = [
+            "Default/IndexedDB",
+            "Default/Local Storage",
+            "Default/Session Storage",
+            "Default/Service Worker",
+            "Default/Cache",
+            "Default/Code Cache",
+            "Default/GPUCache",
+        ]
+        volatile_targets = []
+        for relative_path in file_relative_paths:
+            target = managed_root / relative_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("sticky-region-state", encoding="utf-8")
+            volatile_targets.append(target)
+        for relative_path in directory_relative_paths:
+            target = managed_root / relative_path
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "marker").write_text("sticky-region-state", encoding="utf-8")
+            volatile_targets.append(target)
+        return volatile_targets
+
     def _write_exit_profile(self, root: Path, payload: dict) -> Path:
         profile_path = root / "exit-profile.json"
         profile_path.write_text(json.dumps(payload), encoding="utf-8")
@@ -95,6 +127,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             chrome_root = Path(temp_dir) / "chrome"
             config_dir = Path(temp_dir) / "config"
             profile_dir = self._write_chrome_profile(chrome_root)
+            volatile_state_paths = self._write_managed_profile_volatile_state(config_dir)
 
             result = self._run(
                 "--chrome-user-data-dir",
@@ -118,6 +151,11 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             managed_profile_root = config_dir / "browser-us-profile"
             managed_local_state = json.loads((managed_profile_root / "Local State").read_text(encoding="utf-8"))
             managed_preferences = json.loads((managed_profile_root / "Default" / "Preferences").read_text(encoding="utf-8"))
+            managed_audit = next(
+                root_record
+                for root_record in verification_report["browser_state_audit"]["roots"]
+                if root_record["name"] == "Agent Manager Browser US"
+            )
 
             self.assertEqual(local_state["intl"]["app_locale"], "en-US")
             self.assertEqual(local_state["countryid_at_install"], 244)
@@ -151,6 +189,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(managed_local_state["intl"]["app_locale"], "en-US")
             self.assertEqual(managed_preferences["countryid_at_install"], 244)
             self.assertEqual(managed_preferences["intl"]["accept_languages"], "en-US,en")
+            self.assertFalse(any(path.exists() or path.is_symlink() for path in volatile_state_paths))
             self.assertEqual(automation_context["browser_context"]["locale"], "en-US")
             self.assertEqual(automation_context["browser_context"]["timezone_id"], "America/Los_Angeles")
             self.assertEqual(automation_context["google"]["home_url"], "https://www.google.com/?hl=en-US&gl=US&pws=0")
@@ -171,7 +210,21 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
                 "Agent Manager Browser US",
                 {root["name"] for root in verification_report["browser_state_audit"]["roots"]},
             )
+            self.assertTrue(managed_audit["volatile_state"]["ok"])
+            self.assertFalse(any(path_record["exists"] for path_record in managed_audit["volatile_state"]["paths"]))
             self.assertEqual(verification_report["enforced_features"]["local_state_country"]["variations_country"], "us")
+            self.assertEqual(
+                verification_report["enforced_features"]["managed_profile_storage"]["volatile_state_policy"],
+                "cleared_on_every_sync",
+            )
+            self.assertIn(
+                "Default/Cookies",
+                verification_report["enforced_features"]["managed_profile_storage"]["cleared_relative_paths"],
+            )
+            self.assertIn(
+                "Default/Local Storage",
+                verification_report["enforced_features"]["managed_profile_storage"]["cleared_relative_paths"],
+            )
             self.assertEqual(verification_report["enforced_features"]["google"]["home_url"], "https://www.google.com/?hl=en-US&gl=US&pws=0")
             self.assertEqual(verification_report["enforced_features"]["google"]["search_gl"], "US")
             self.assertEqual(verification_report["enforced_features"]["google"]["browser_google_after_ncr"], "https://www.google.com/?hl=en-US&gl=US&pws=0")

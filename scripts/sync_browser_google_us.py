@@ -52,6 +52,21 @@ CHROME_ARGS = [
 BLOCK_CONTENT_SETTING = 2
 GOOGLE_HK_MARKERS = ("google.com.hk", "hong kong")
 SYSTEM_PROFILE_NAMES = {"System Profile", "Guest Profile"}
+MANAGED_PROFILE_VOLATILE_STATE_RELATIVE_PATHS = (
+    "Default/Cookies",
+    "Default/Cookies-journal",
+    "Default/History",
+    "Default/History-journal",
+    "Default/IndexedDB",
+    "Default/Local Storage",
+    "Default/Session Storage",
+    "Default/Service Worker",
+    "Default/Cache",
+    "Default/Code Cache",
+    "Default/GPUCache",
+    "Default/Network/Cookies",
+    "Default/Network/Cookies-journal",
+)
 
 
 @dataclass(frozen=True)
@@ -505,6 +520,33 @@ def sync_preferences(path: Path, enforce_install_country: bool = True) -> bool:
     return changed
 
 
+def managed_profile_volatile_state_targets(user_data_dir: Path) -> list[tuple[str, Path]]:
+    root = user_data_dir.resolve(strict=False)
+    targets = []
+    for relative_path in MANAGED_PROFILE_VOLATILE_STATE_RELATIVE_PATHS:
+        relative = Path(relative_path)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError(f"invalid managed profile volatile path: {relative_path}")
+        target = user_data_dir / relative
+        if not target.resolve(strict=False).is_relative_to(root):
+            raise ValueError(f"managed profile volatile path escapes profile root: {target}")
+        targets.append((relative_path, target))
+    return targets
+
+
+def clear_managed_profile_volatile_state(user_data_dir: Path) -> list[str]:
+    changed_paths = []
+    for _relative_path, target in managed_profile_volatile_state_targets(user_data_dir):
+        if not target.exists() and not target.is_symlink():
+            continue
+        if target.is_dir() and not target.is_symlink():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+        changed_paths.append(str(target))
+    return changed_paths
+
+
 def sync_managed_browser_us_profile(user_data_dir: Path) -> list[str]:
     changed_paths = []
     local_state_path = user_data_dir / "Local State"
@@ -513,6 +555,7 @@ def sync_managed_browser_us_profile(user_data_dir: Path) -> list[str]:
         changed_paths.append(str(local_state_path))
     if sync_preferences(preferences_path):
         changed_paths.append(str(preferences_path))
+    changed_paths.extend(clear_managed_profile_volatile_state(user_data_dir))
     return changed_paths
 
 
@@ -610,6 +653,25 @@ def audit_preferences(path: Path, enforce_install_country: bool = True) -> dict:
     return record
 
 
+def audit_managed_profile_volatile_state(user_data_dir: Path) -> dict:
+    records = []
+    for relative_path, target in managed_profile_volatile_state_targets(user_data_dir):
+        exists = target.exists() or target.is_symlink()
+        records.append(
+            {
+                "relative_path": relative_path,
+                "path": str(target),
+                "exists": exists,
+                "ok": not exists,
+            }
+        )
+    return {
+        "ok": all(record["ok"] for record in records),
+        "policy": "cleared_on_every_sync",
+        "paths": records,
+    }
+
+
 def audit_browser_state(
     browser_roots: list[BrowserRoot],
     explicit_profile: str | None,
@@ -626,6 +688,7 @@ def audit_browser_state(
             "exists": browser_root.user_data_dir.exists(),
             "local_state": None,
             "profiles": [],
+            "volatile_state": None,
             "warnings": [],
         }
         if not browser_root.user_data_dir.exists():
@@ -647,6 +710,11 @@ def audit_browser_state(
             if not profile_record["ok"]:
                 audit["overall_ok"] = False
             root_record["profiles"].append(profile_record)
+
+        if enforce_install_country:
+            root_record["volatile_state"] = audit_managed_profile_volatile_state(browser_root.user_data_dir)
+            if not root_record["volatile_state"]["ok"]:
+                audit["overall_ok"] = False
 
         audit["roots"].append(root_record)
     return audit
@@ -691,6 +759,7 @@ def automation_context_payload(exit_profile: ExitProfile | None, managed_user_da
         "limits": [
             "This config derives timezone and automation geolocation from the current US proxy exit IP when providers return those fields.",
             "This config cannot change proxy exit IP geolocation or override how remote sites classify the public IP.",
+            "Managed Browser US profile cookies, history, local storage, session storage, IndexedDB, service workers, and caches are cleared on every sync.",
             "Regular browser profiles block geolocation by default to avoid non-US OS/location leaks.",
             "Native Chrome timezone needs DevTools, automation context emulation, or launching through browser-us-chrome.sh.",
         ],
@@ -893,6 +962,10 @@ def verification_report_payload(
                 "managed_profile_countryid_at_install": COUNTRY_ID_US,
                 "regular_profile_countryid_at_install": "not forced; active Chrome may rewrite this volatile install-time field",
             },
+            "managed_profile_storage": {
+                "volatile_state_policy": "cleared_on_every_sync",
+                "cleared_relative_paths": list(MANAGED_PROFILE_VOLATILE_STATE_RELATIVE_PATHS),
+            },
             "translate": {
                 "recent_target": TRANSLATE_TARGET_LANGUAGE,
                 "account_recent_target": TRANSLATE_TARGET_LANGUAGE,
@@ -958,7 +1031,7 @@ def verification_report_payload(
         },
         "limits": [
             "Remote services can still classify the public VPN IP by their own IP reputation databases.",
-            "Google account history, existing cookies, installed extensions, fonts, GPU, canvas, and hardware fingerprints are outside this local sync script.",
+            "Regular browser profile Google account history, existing cookies, installed extensions, fonts, GPU, canvas, and hardware fingerprints are outside this local sync script.",
             "Native Chrome timezone changes require launching through browser-us-chrome.sh or an automation context that applies browser-us-context.json.",
         ],
     }
@@ -1838,6 +1911,7 @@ def print_dry_run(args: argparse.Namespace, browser_roots: list[BrowserRoot], co
     print(f"Would set accepted languages to {ACCEPT_LANGUAGES}")
     print(f"Would set default Google search URL to {SEARCH_URL}")
     print("Would set WebRTC policy to disable_non_proxied_udp")
+    print("Would clear managed Browser US cookies, history, storage, service workers, and caches")
     if args.post_sync_settle_seconds > 0:
         print(f"Would wait {args.post_sync_settle_seconds:g}s before the final browser profile read-back audit")
     if not args.offline and not args.skip_exit_check:
@@ -1898,6 +1972,14 @@ def print_browser_state_audit_errors(browser_state_audit: dict) -> None:
                     f"ERROR: {root_record['name']} Preferences mismatch: {mismatch}",
                     file=sys.stderr,
                 )
+        volatile_state = root_record.get("volatile_state")
+        if volatile_state and not volatile_state.get("ok"):
+            for path_record in volatile_state.get("paths", []):
+                if path_record.get("exists"):
+                    print(
+                        f"ERROR: {root_record['name']} volatile browser state still exists: {path_record['path']}",
+                        file=sys.stderr,
+                    )
 
 
 def exit_profile_summary(exit_profile: ExitProfile) -> str:
