@@ -68,7 +68,7 @@ BLOCKED_FONT_FAMILIES = (
 EXIT_PROFILE_GEOLOCATION_ACCURACY = 50000
 VERIFICATION_REPORT_VERSION = 1
 FALLBACK_CHROME_VERSION = "120.0.0.0"
-DISABLED_CHROME_FEATURES = ("ReduceAcceptLanguage",)
+DISABLED_CHROME_FEATURES = ("ReduceAcceptLanguage", "WebGPU")
 BASE_CHROME_ARGS = [
     "--lang=en-US",
     "--accept-lang=en-US,en",
@@ -1330,6 +1330,8 @@ def verification_report_payload(
                 "automation_pdf_viewer_enabled": True,
                 "automation_plugins_present": True,
                 "automation_speech_synthesis_present": False,
+                "automation_webgpu_adapter_available": False,
+                "automation_media_device_identity_exposed": False,
                 "automation_camera_permission_not_granted": True,
                 "automation_microphone_permission_not_granted": True,
                 "automation_notifications_permission_not_granted": True,
@@ -2170,6 +2172,14 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation mime types")
     if observed.get("speechSynthesisPresent") is not False:
         mismatches.append("automation speech synthesis")
+    if observed.get("webGpuProbeError"):
+        mismatches.append("automation WebGPU probe")
+    if observed.get("webGpuAdapterAvailable") is not False:
+        mismatches.append("automation WebGPU adapter")
+    if observed.get("mediaDeviceProbeError"):
+        mismatches.append("automation media device probe")
+    if observed.get("mediaDeviceIdentityExposed") is not False:
+        mismatches.append("automation media device identity")
     for permission_name in ("cameraPermission", "microphonePermission", "notificationsPermission"):
         if observed.get(permission_name) == "granted":
             mismatches.append(f"automation {permission_name}")
@@ -2298,6 +2308,11 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             pluginsLength: navigator.plugins.length,
                             mimeTypesLength: navigator.mimeTypes.length,
                             speechSynthesisPresent: 'speechSynthesis' in window,
+                            webGpuPresent: 'gpu' in navigator,
+                            webGpuAdapterAvailable: null,
+                            mediaDeviceCount: null,
+                            mediaDeviceKinds: [],
+                            mediaDeviceIdentityExposed: false,
                             cameraPermission: null,
                             microphonePermission: null,
                             notificationsPermission: null,
@@ -2384,6 +2399,38 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             }
                           } catch (error) {
                             observed.userAgentDataHighEntropyError = String(error && error.name || error);
+                          }
+                          try {
+                            if (navigator.gpu && navigator.gpu.requestAdapter) {
+                              const adapter = await Promise.race([
+                                navigator.gpu.requestAdapter(),
+                                new Promise((resolve) => setTimeout(() => resolve(null), 500)),
+                              ]);
+                              observed.webGpuAdapterAvailable = Boolean(adapter);
+                            } else {
+                              observed.webGpuAdapterAvailable = false;
+                            }
+                          } catch (error) {
+                            observed.webGpuProbeError = String(error && error.name || error);
+                          }
+                          try {
+                            if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+                              const devices = await Promise.race([
+                                navigator.mediaDevices.enumerateDevices(),
+                                new Promise((resolve) => setTimeout(() => resolve([]), 500)),
+                              ]);
+                              observed.mediaDeviceCount = devices.length;
+                              observed.mediaDeviceKinds = devices.map((device) => device.kind);
+                              observed.mediaDeviceIdentityExposed = devices.some(
+                                (device) => Boolean(device.label || device.deviceId || device.groupId)
+                              );
+                            } else {
+                              observed.mediaDeviceCount = 0;
+                              observed.mediaDeviceKinds = [];
+                              observed.mediaDeviceIdentityExposed = false;
+                            }
+                          } catch (error) {
+                            observed.mediaDeviceProbeError = String(error && error.name || error);
                           }
                           return observed;
                         }

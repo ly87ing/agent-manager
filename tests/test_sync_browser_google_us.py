@@ -288,7 +288,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertIn("--disable-extensions", automation_context["chrome_launch"]["args"])
             self.assertIn("--disable-speech-api", automation_context["chrome_launch"]["args"])
             self.assertIn("--deny-permission-prompts", automation_context["chrome_launch"]["args"])
-            self.assertIn("--disable-features=ReduceAcceptLanguage", automation_context["chrome_launch"]["args"])
+            self.assertIn("--disable-features=ReduceAcceptLanguage,WebGPU", automation_context["chrome_launch"]["args"])
             self.assertIn("--disable-blink-features=AutomationControlled", automation_context["chrome_launch"]["args"])
             self.assertIn("--force-webrtc-ip-handling-policy=disable_non_proxied_udp", automation_context["chrome_launch"]["args"])
             self.assertIn("--disable-quic", automation_context["chrome_launch"]["args"])
@@ -346,7 +346,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["automation"]["context_permissions"], ["geolocation"])
             self.assertEqual(
                 verification_report["enforced_features"]["locale"]["disabled_chrome_features"],
-                ["ReduceAcceptLanguage"],
+                ["ReduceAcceptLanguage", "WebGPU"],
             )
             self.assertEqual(
                 verification_report["enforced_features"]["device_permissions"][
@@ -492,6 +492,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_pdf_viewer_enabled"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_plugins_present"])
             self.assertFalse(verification_report["enforced_features"]["automation"]["automation_speech_synthesis_present"])
+            self.assertFalse(verification_report["enforced_features"]["automation"]["automation_webgpu_adapter_available"])
+            self.assertFalse(verification_report["enforced_features"]["automation"]["automation_media_device_identity_exposed"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_camera_permission_not_granted"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_microphone_permission_not_granted"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_notifications_permission_not_granted"])
@@ -517,7 +519,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertIn("--disable-extensions", launcher_content)
             self.assertIn("--disable-speech-api", launcher_content)
             self.assertIn("--deny-permission-prompts", launcher_content)
-            self.assertIn("--disable-features=ReduceAcceptLanguage", launcher_content)
+            self.assertIn("--disable-features=ReduceAcceptLanguage,WebGPU", launcher_content)
             self.assertIn("--disable-blink-features=AutomationControlled", launcher_content)
             self.assertIn("--disable-quic", launcher_content)
             self.assertIn("--dns-prefetch-disable", launcher_content)
@@ -1068,6 +1070,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "pluginsLength": 5,
             "mimeTypesLength": 2,
             "speechSynthesisPresent": False,
+            "webGpuAdapterAvailable": False,
+            "mediaDeviceIdentityExposed": False,
             "cameraPermission": "prompt",
             "microphonePermission": "prompt",
             "notificationsPermission": "prompt",
@@ -1167,6 +1171,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         }
         observed["pluginsLength"] = 0
         observed["speechSynthesisPresent"] = True
+        observed["webGpuAdapterAvailable"] = True
+        observed["mediaDeviceIdentityExposed"] = True
         mismatches = module.validate_automation_context_observation(observed, browser_context)
 
         self.assertIn("automation viewport width", mismatches)
@@ -1182,6 +1188,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertIn("automation blocked font metric: PingFang SC", mismatches)
         self.assertIn("automation plugins", mismatches)
         self.assertIn("automation speech synthesis", mismatches)
+        self.assertIn("automation WebGPU adapter", mismatches)
+        self.assertIn("automation media device identity", mismatches)
 
         observed["innerWidth"] = 1365
         observed["maxTouchPoints"] = 0
@@ -1198,6 +1206,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         }
         observed["pluginsLength"] = 5
         observed["speechSynthesisPresent"] = False
+        observed["webGpuAdapterAvailable"] = False
+        observed["mediaDeviceIdentityExposed"] = False
         observed["cameraPermission"] = "granted"
         observed["languages"] = ["en-US"]
         mismatches = module.validate_automation_context_observation(observed, browser_context)
