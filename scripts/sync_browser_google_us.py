@@ -1187,6 +1187,8 @@ def verification_report_payload(
                 "runtime_region_display_name": "United States",
                 "runtime_list_format": "A, B, and C",
                 "runtime_accept_language_header": "en-US,en;q=0.9",
+                "runtime_sec_ch_ua_platform": expected_client_hints_platform,
+                "runtime_sec_ch_ua_mobile": "?0",
                 "runtime_geolocation_permission": "denied",
                 "runtime_webrtc_supported": True,
                 "runtime_webrtc_local_ip_leak": False,
@@ -1195,6 +1197,8 @@ def verification_report_payload(
                 "extra_http_accept_language": "en-US,en;q=0.9",
                 "user_agent": user_agent,
                 "client_hints_platform": expected_client_hints_platform,
+                "automation_sec_ch_ua_platform": expected_client_hints_platform,
+                "automation_sec_ch_ua_mobile": "?0",
                 "navigator_platform": expected_navigator_platform,
                 "desktop_viewport": dict(US_DESKTOP_VIEWPORT),
                 "desktop_screen": dict(US_DESKTOP_SCREEN),
@@ -1726,6 +1730,12 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
     user_agent_data_platform = observed.get("userAgentDataPlatform")
     if user_agent_data_platform is not None and user_agent_data_platform != expected_client_hints_platform:
         mismatches.append("automation user agent platform")
+    sec_ch_ua_platform = observed.get("secChUaPlatform")
+    if sec_ch_ua_platform is not None and sec_ch_ua_platform.strip('"') != expected_client_hints_platform:
+        mismatches.append("automation Sec-CH-UA-Platform")
+    sec_ch_ua_mobile = observed.get("secChUaMobile")
+    if sec_ch_ua_mobile is not None and sec_ch_ua_mobile != "?0":
+        mismatches.append("automation Sec-CH-UA-Mobile")
     if observed.get("language") != APP_LOCALE:
         mismatches.append("automation navigator.language")
     languages = observed.get("languages")
@@ -1903,6 +1913,8 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
         return AutomationContextResolution(6, "automation_context_output_missing", process_state="output_missing")
     observed["acceptLanguageHeader"] = server.observed_headers.get("accept-language")
     observed["userAgentHeader"] = server.observed_headers.get("user-agent")
+    observed["secChUaPlatform"] = server.observed_headers.get("sec-ch-ua-platform")
+    observed["secChUaMobile"] = server.observed_headers.get("sec-ch-ua-mobile")
     mismatches = validate_automation_context_observation(observed, browser_context)
     if mismatches:
         return AutomationContextResolution(

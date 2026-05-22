@@ -308,6 +308,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_region_display_name"], "United States")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_list_format"], "A, B, and C")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_accept_language_header"], "en-US,en;q=0.9")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_sec_ch_ua_platform"], "macOS")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_sec_ch_ua_mobile"], "?0")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_geolocation_permission"], "denied")
             self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_webrtc_supported"])
             self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_webrtc_local_ip_leak"])
@@ -318,6 +320,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
                 automation_context["browser_context"]["user_agent"],
             )
             self.assertEqual(verification_report["enforced_features"]["automation"]["client_hints_platform"], "macOS")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["automation_sec_ch_ua_platform"], "macOS")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["automation_sec_ch_ua_mobile"], "?0")
             self.assertEqual(verification_report["enforced_features"]["automation"]["navigator_platform"], "MacIntel")
             self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_viewport"], {"width": 1365, "height": 768})
             self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_screen"], {"width": 1365, "height": 768})
@@ -783,6 +787,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "platform": "MacIntel",
             "userAgentDataMobile": False,
             "userAgentDataPlatform": "macOS",
+            "secChUaPlatform": '"macOS"',
+            "secChUaMobile": "?0",
             "language": "en-US",
             "languages": ["en-US", "en"],
             "timezone": "America/Los_Angeles",
@@ -827,6 +833,14 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertIn("automation navigator.platform", mismatches)
 
         observed["platform"] = "MacIntel"
+        observed["secChUaPlatform"] = '"Windows"'
+        observed["secChUaMobile"] = "?1"
+        mismatches = module.validate_automation_context_observation(observed, browser_context)
+        self.assertIn("automation Sec-CH-UA-Platform", mismatches)
+        self.assertIn("automation Sec-CH-UA-Mobile", mismatches)
+
+        observed["secChUaPlatform"] = '"macOS"'
+        observed["secChUaMobile"] = "?0"
         observed["innerWidth"] = 390
         observed["maxTouchPoints"] = 5
         observed["coarsePointer"] = True
