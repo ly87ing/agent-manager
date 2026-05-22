@@ -50,6 +50,7 @@ US_DESKTOP_COLOR_SCHEME = "light"
 EXIT_PROFILE_GEOLOCATION_ACCURACY = 50000
 VERIFICATION_REPORT_VERSION = 1
 FALLBACK_CHROME_VERSION = "120.0.0.0"
+DISABLED_CHROME_FEATURES = ("ReduceAcceptLanguage",)
 BASE_CHROME_ARGS = [
     "--lang=en-US",
     "--accept-lang=en-US,en",
@@ -62,6 +63,7 @@ BASE_CHROME_ARGS = [
     "--disable-search-engine-choice-screen",
     "--disable-sync",
     "--disable-extensions",
+    f"--disable-features={','.join(DISABLED_CHROME_FEATURES)}",
     "--disable-blink-features=AutomationControlled",
 ]
 BLOCK_CONTENT_SETTING = 2
@@ -1159,6 +1161,7 @@ def verification_report_payload(
                 "account_accept_languages": ACCEPT_LANGUAGES,
                 "account_selected_languages": ACCEPT_LANGUAGES,
                 "reduced_accept_language_exceptions": {},
+                "disabled_chrome_features": list(DISABLED_CHROME_FEATURES),
                 "environment_locale": ENV_LOCALE,
             },
             "local_state_country": {

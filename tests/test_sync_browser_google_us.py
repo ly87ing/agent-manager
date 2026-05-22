@@ -279,6 +279,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             )
             self.assertIn("--disable-sync", automation_context["chrome_launch"]["args"])
             self.assertIn("--disable-extensions", automation_context["chrome_launch"]["args"])
+            self.assertIn("--disable-features=ReduceAcceptLanguage", automation_context["chrome_launch"]["args"])
             self.assertIn("--disable-blink-features=AutomationControlled", automation_context["chrome_launch"]["args"])
             self.assertIn("--force-webrtc-ip-handling-policy=disable_non_proxied_udp", automation_context["chrome_launch"]["args"])
             self.assertIn("--disable-quic", automation_context["chrome_launch"]["args"])
@@ -334,6 +335,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
                 {"latitude": 37.7749, "longitude": -122.4194, "accuracy": 100},
             )
             self.assertEqual(verification_report["enforced_features"]["automation"]["context_permissions"], ["geolocation"])
+            self.assertEqual(
+                verification_report["enforced_features"]["locale"]["disabled_chrome_features"],
+                ["ReduceAcceptLanguage"],
+            )
             self.assertEqual(
                 verification_report["enforced_features"]["device_permissions"][
                     "managed_profile_camera_content_setting"
@@ -480,6 +485,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertIn('--user-data-dir="$BROWSER_US_USER_DATA_DIR"', launcher_content)
             self.assertIn("--disable-sync", launcher_content)
             self.assertIn("--disable-extensions", launcher_content)
+            self.assertIn("--disable-features=ReduceAcceptLanguage", launcher_content)
             self.assertIn("--disable-blink-features=AutomationControlled", launcher_content)
             self.assertIn("--disable-quic", launcher_content)
             self.assertIn("--dns-prefetch-disable", launcher_content)
