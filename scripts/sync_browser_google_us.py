@@ -56,6 +56,8 @@ BASE_CHROME_ARGS = [
     f"--window-size={US_DESKTOP_VIEWPORT['width']},{US_DESKTOP_VIEWPORT['height']}",
     f"--force-device-scale-factor={US_DESKTOP_DEVICE_SCALE_FACTOR}",
     "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+    "--disable-quic",
+    "--dns-prefetch-disable",
     "--no-first-run",
     "--disable-search-engine-choice-screen",
     "--disable-sync",
@@ -1156,6 +1158,11 @@ def verification_report_payload(
                 "chrome_launch_policy": "disable_non_proxied_udp",
                 "runtime_local_ip_leak": False,
                 "runtime_private_ip_candidate_count": 0,
+            },
+            "network_path": {
+                "quic_disabled": True,
+                "dns_prefetch_disabled": True,
+                "purpose": "reduce browser-side UDP and speculative DNS paths outside the selected proxy/VPN route",
             },
             "geolocation": {
                 "regular_profile_content_setting": BLOCK_CONTENT_SETTING,

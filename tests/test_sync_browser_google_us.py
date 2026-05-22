@@ -239,6 +239,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertIn("--disable-extensions", automation_context["chrome_launch"]["args"])
             self.assertIn("--disable-blink-features=AutomationControlled", automation_context["chrome_launch"]["args"])
             self.assertIn("--force-webrtc-ip-handling-policy=disable_non_proxied_udp", automation_context["chrome_launch"]["args"])
+            self.assertIn("--disable-quic", automation_context["chrome_launch"]["args"])
+            self.assertIn("--dns-prefetch-disable", automation_context["chrome_launch"]["args"])
             self.assertEqual(verification_report["overall_status"], "limited")
             self.assertEqual(verification_report["exit"]["verification_state"], "manually_skipped")
             self.assertEqual(verification_report["google_domain"]["verification_state"], "exit_check_skipped")
@@ -390,6 +392,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_plugins_present"])
             self.assertFalse(verification_report["enforced_features"]["webrtc"]["runtime_local_ip_leak"])
             self.assertEqual(verification_report["enforced_features"]["webrtc"]["runtime_private_ip_candidate_count"], 0)
+            self.assertTrue(verification_report["enforced_features"]["network_path"]["quic_disabled"])
+            self.assertTrue(verification_report["enforced_features"]["network_path"]["dns_prefetch_disabled"])
             self.assertEqual(
                 verification_report["enforced_features"]["automation"]["managed_user_data_dir"],
                 "$AGENT_MANAGER_BROWSER_US_USER_DATA_DIR",
@@ -407,6 +411,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertIn("--disable-sync", launcher_content)
             self.assertIn("--disable-extensions", launcher_content)
             self.assertIn("--disable-blink-features=AutomationControlled", launcher_content)
+            self.assertIn("--disable-quic", launcher_content)
+            self.assertIn("--dns-prefetch-disable", launcher_content)
             self.assertTrue((config_dir / "browser-us.env").exists())
             self.assertTrue((chrome_root / "Local State.agent-manager-before-google-us").exists())
             self.assertTrue((profile_dir / "Preferences.agent-manager-before-google-us").exists())
