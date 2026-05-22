@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import http.cookiejar
+import http.server
 import json
 import os
 import select
@@ -12,6 +13,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -368,6 +370,15 @@ def runtime_payload(runtime_resolution: RuntimeResolution) -> dict:
         "process_state": runtime_resolution.process_state,
         "errors": list(runtime_resolution.errors),
     }
+
+
+def accept_language_is_us(value) -> bool:
+    text = clean_string(value)
+    if text is None:
+        return False
+    lowered = text.lower()
+    first_range = lowered.split(",", 1)[0].split(";", 1)[0].strip()
+    return first_range == "en-us" and "zh" not in lowered and "hk" not in lowered
 
 
 def resolved_timezone_id(exit_profile: ExitProfile | None) -> str:
@@ -853,6 +864,10 @@ def verification_report_payload(
                 "runtime_language": APP_LOCALE,
                 "runtime_languages": ["en-US", "en"],
                 "runtime_intl_locale": APP_LOCALE,
+                "runtime_accept_language_header": "en-US,en;q=0.9",
+                "runtime_geolocation_permission": "denied",
+                "runtime_profile_webrtc_policy": "disable_non_proxied_udp",
+                "runtime_profile_geolocation_setting": BLOCK_CONTENT_SETTING,
                 "extra_http_accept_language": "en-US,en;q=0.9",
                 "chrome_launch_args": CHROME_ARGS,
                 "chrome_launcher": "$AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER",
@@ -979,20 +994,56 @@ def verify_google_domain_after_ncr(timeout: float) -> GoogleDomainResolution:
 RUNTIME_JSON_MARKER = "AGENT_MANAGER_RUNTIME_JSON:"
 
 
-def runtime_probe_data_url() -> str:
-    script = (
+def runtime_probe_html() -> str:
+    marker = json.dumps(RUNTIME_JSON_MARKER)
+    return (
+        "<!doctype html><html><head><meta charset=\"utf-8\"></head><body></body>"
         "<script>"
-        "document.write('"
-        + RUNTIME_JSON_MARKER
-        + "'+JSON.stringify({"
+        "(async()=>{"
+        "const observed={"
         "language:navigator.language,"
         "languages:Array.from(navigator.languages||[]),"
         "timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,"
-        "intlLocale:Intl.DateTimeFormat().resolvedOptions().locale"
-        "}));"
-        "</script>"
+        "intlLocale:Intl.DateTimeFormat().resolvedOptions().locale,"
+        "timezoneOffset:new Date().getTimezoneOffset(),"
+        "geolocationPermission:null"
+        "};"
+        "try{"
+        "if(navigator.permissions&&navigator.permissions.query){"
+        "observed.geolocationPermission=(await navigator.permissions.query({name:'geolocation'})).state;"
+        "}"
+        "}catch(error){"
+        "observed.geolocationPermissionError=String(error&&error.name||error);"
+        "}"
+        "document.body.textContent="
+        + marker
+        + "+JSON.stringify(observed);"
+        "})();"
+        "</script></html>"
     )
-    return "data:text/html;charset=utf-8," + urllib.parse.quote(script)
+
+
+class RuntimeProbeHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
+        self.server.observed_headers["accept-language"] = self.headers.get("Accept-Language")
+        body = runtime_probe_html().encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, _format: str, *_args) -> None:
+        return
+
+
+def start_runtime_probe_server() -> tuple[http.server.ThreadingHTTPServer, threading.Thread, str]:
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), RuntimeProbeHandler)
+    server.observed_headers = {}
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{server.server_port}/runtime-us-probe"
+    return server, thread, url
 
 
 def runtime_context_from_output(output: str) -> dict | None:
@@ -1019,7 +1070,29 @@ def validate_runtime_context(runtime_context: dict, timezone_id: str) -> tuple[s
         mismatches.append("Intl timezone")
     if runtime_context.get("intlLocale") != APP_LOCALE:
         mismatches.append("Intl locale")
+    if not accept_language_is_us(runtime_context.get("acceptLanguageHeader")):
+        mismatches.append("Accept-Language")
+    if runtime_context.get("geolocationPermission") != "denied":
+        mismatches.append("geolocation permission")
+    if runtime_context.get("profileWebrtcPolicy") != "disable_non_proxied_udp":
+        mismatches.append("profile WebRTC policy")
+    if runtime_context.get("profileWebrtcNonproxiedUdpEnabled") is not False:
+        mismatches.append("profile WebRTC nonproxied UDP")
+    if runtime_context.get("profileGeolocationSetting") != BLOCK_CONTENT_SETTING:
+        mismatches.append("profile geolocation setting")
     return tuple(mismatches)
+
+
+def runtime_profile_policy_snapshot(user_data_dir: Path) -> dict:
+    try:
+        preferences = load_json_mapping(user_data_dir / "Default" / "Preferences")
+    except ValueError:
+        preferences = {}
+    return {
+        "profileWebrtcPolicy": nested_value(preferences, ("webrtc", "ip_handling_policy")),
+        "profileWebrtcNonproxiedUdpEnabled": nested_value(preferences, ("webrtc", "nonproxied_udp_enabled")),
+        "profileGeolocationSetting": nested_value(preferences, ("profile", "default_content_setting_values", "geolocation")),
+    }
 
 
 def terminate_process_group(process: subprocess.Popen) -> None:
@@ -1101,33 +1174,45 @@ def verify_runtime_browser_context(launcher_path: Path, timezone_id: str, timeou
         prefix="agent-manager-browser-us-runtime-",
         ignore_cleanup_errors=True,
     ) as temp_user_data_dir:
+        temp_user_data_path = Path(temp_user_data_dir)
+        sync_managed_browser_us_profile(temp_user_data_path)
+        profile_policy = runtime_profile_policy_snapshot(temp_user_data_path)
+        server, thread, runtime_url = start_runtime_probe_server()
         command = [
             str(launcher_path),
             "--headless",
             "--disable-gpu",
             "--disable-background-networking",
+            "--virtual-time-budget=5000",
             "--dump-dom",
-            runtime_probe_data_url(),
+            runtime_url,
         ]
         env = os.environ.copy()
         env["AGENT_MANAGER_BROWSER_US_USER_DATA_DIR"] = temp_user_data_dir
-        process = subprocess.Popen(
-            command,
-            cwd=str(launcher_path.parent),
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        stdout, process_state = collect_runtime_stdout(process, timeout)
-        if process.poll() is None:
-            terminate_process_group(process)
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=str(launcher_path.parent),
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            stdout, process_state = collect_runtime_stdout(process, timeout)
+            if process.poll() is None:
+                terminate_process_group(process)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     runtime_context = runtime_context_from_output(stdout or "")
     if runtime_context is None:
         if process_state == "timed_out":
             process_state = "timed_out_without_output"
         return RuntimeResolution(5, "runtime_output_missing", process_state=process_state)
+    runtime_context["acceptLanguageHeader"] = server.observed_headers.get("accept-language")
+    runtime_context.update(profile_policy)
 
     mismatches = validate_runtime_context(runtime_context, timezone_id)
     if mismatches:
@@ -1466,7 +1551,9 @@ def resolve_runtime_context(args: argparse.Namespace, config_dir: Path, exit_res
             "Verified browser runtime: "
             f"language: {observed.get('language')}, "
             f"languages: {observed.get('languages')}, "
-            f"timezone: {observed.get('timezone')}"
+            f"timezone: {observed.get('timezone')}, "
+            f"Accept-Language: {observed.get('acceptLanguageHeader')}, "
+            f"geolocation permission: {observed.get('geolocationPermission')}"
         )
         return runtime_resolution
 
