@@ -268,6 +268,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertFalse(automation_context["browser_context"]["is_mobile"])
             self.assertFalse(automation_context["browser_context"]["has_touch"])
             self.assertEqual(automation_context["browser_context"]["color_scheme"], "light")
+            self.assertEqual(automation_context["browser_context"]["hardware_concurrency"], 8)
+            self.assertEqual(automation_context["browser_context"]["device_memory_gb"], 8)
             self.assertEqual(automation_context["google"]["home_url"], "https://www.google.com/?hl=en-US&gl=US&pws=0")
             self.assertEqual(automation_context["chrome_launch"]["launcher"], str(launcher_path))
             self.assertEqual(automation_context["chrome_launch"]["managed_user_data_dir"], str(managed_profile_root))
@@ -448,6 +450,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertFalse(verification_report["enforced_features"]["automation"]["desktop_is_mobile"])
             self.assertFalse(verification_report["enforced_features"]["automation"]["desktop_has_touch"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_color_scheme"], "light")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["automation_hardware_concurrency"], 8)
+            self.assertEqual(verification_report["enforced_features"]["automation"]["automation_device_memory_gb"], 8)
             self.assertEqual(
                 verification_report["enforced_features"]["automation"]["automation_locale_week_info"],
                 {"firstDay": 7, "weekend": [6, 7]},
@@ -971,6 +975,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "is_mobile": False,
             "has_touch": False,
             "color_scheme": "light",
+            "hardware_concurrency": 8,
+            "device_memory_gb": 8,
         }
         observed = {
             "userAgent": browser_context["user_agent"],
@@ -1023,6 +1029,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "hoverHover": True,
             "lightColorScheme": True,
             "darkColorScheme": False,
+            "hardwareConcurrency": 8,
+            "deviceMemory": 8,
             "pdfViewerEnabled": True,
             "pluginsLength": 5,
             "mimeTypesLength": 2,
@@ -1115,6 +1123,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         observed["coarsePointer"] = True
         observed["finePointer"] = False
         observed["hoverHover"] = False
+        observed["hardwareConcurrency"] = 2
+        observed["deviceMemory"] = 4
         observed["pluginsLength"] = 0
         mismatches = module.validate_automation_context_observation(observed, browser_context)
 
@@ -1123,6 +1133,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertIn("automation coarse pointer", mismatches)
         self.assertIn("automation fine pointer", mismatches)
         self.assertIn("automation hover", mismatches)
+        self.assertIn("automation hardware concurrency", mismatches)
+        self.assertIn("automation device memory", mismatches)
         self.assertIn("automation plugins", mismatches)
 
         observed["innerWidth"] = 1365
@@ -1130,6 +1142,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         observed["coarsePointer"] = False
         observed["finePointer"] = True
         observed["hoverHover"] = True
+        observed["hardwareConcurrency"] = 8
+        observed["deviceMemory"] = 8
         observed["pluginsLength"] = 5
         observed["cameraPermission"] = "granted"
         observed["languages"] = ["en-US"]

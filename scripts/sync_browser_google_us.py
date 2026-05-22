@@ -47,6 +47,8 @@ US_DESKTOP_DEVICE_SCALE_FACTOR = 1
 US_DESKTOP_IS_MOBILE = False
 US_DESKTOP_HAS_TOUCH = False
 US_DESKTOP_COLOR_SCHEME = "light"
+US_DESKTOP_HARDWARE_CONCURRENCY = 8
+US_DESKTOP_DEVICE_MEMORY_GB = 8
 EXIT_PROFILE_GEOLOCATION_ACCURACY = 50000
 VERIFICATION_REPORT_VERSION = 1
 FALLBACK_CHROME_VERSION = "120.0.0.0"
@@ -931,6 +933,8 @@ def automation_context_payload(exit_profile: ExitProfile | None, managed_user_da
             "is_mobile": US_DESKTOP_IS_MOBILE,
             "has_touch": US_DESKTOP_HAS_TOUCH,
             "color_scheme": US_DESKTOP_COLOR_SCHEME,
+            "hardware_concurrency": US_DESKTOP_HARDWARE_CONCURRENCY,
+            "device_memory_gb": US_DESKTOP_DEVICE_MEMORY_GB,
         },
         "chrome_launch": {
             "args": [
@@ -1289,6 +1293,8 @@ def verification_report_payload(
                 "desktop_is_mobile": US_DESKTOP_IS_MOBILE,
                 "desktop_has_touch": US_DESKTOP_HAS_TOUCH,
                 "desktop_color_scheme": US_DESKTOP_COLOR_SCHEME,
+                "automation_hardware_concurrency": US_DESKTOP_HARDWARE_CONCURRENCY,
+                "automation_device_memory_gb": US_DESKTOP_DEVICE_MEMORY_GB,
                 "automation_locale_week_info": {"firstDay": 7, "weekend": [6, 7]},
                 "automation_locale_text_info": {"direction": "ltr"},
                 "automation_locale_hour_cycles": ["h12"],
@@ -2102,6 +2108,10 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation webdriver")
     if observed.get("lightColorScheme") is not True or observed.get("darkColorScheme") is not False:
         mismatches.append("automation color scheme")
+    if observed.get("hardwareConcurrency") != browser_context.get("hardware_concurrency"):
+        mismatches.append("automation hardware concurrency")
+    if observed.get("deviceMemory") != browser_context.get("device_memory_gb"):
+        mismatches.append("automation device memory")
     if observed.get("pdfViewerEnabled") is not True:
         mismatches.append("automation pdf viewer")
     if not positive_integer(observed.get("pluginsLength")):
@@ -2227,6 +2237,8 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             hoverHover: window.matchMedia('(hover: hover)').matches,
                             lightColorScheme: window.matchMedia('(prefers-color-scheme: light)').matches,
                             darkColorScheme: window.matchMedia('(prefers-color-scheme: dark)').matches,
+                            hardwareConcurrency: navigator.hardwareConcurrency,
+                            deviceMemory: navigator.deviceMemory,
                             pdfViewerEnabled: navigator.pdfViewerEnabled,
                             pluginsLength: navigator.plugins.length,
                             mimeTypesLength: navigator.mimeTypes.length,
@@ -2341,6 +2353,30 @@ def new_us_playwright_context(browser, browser_context: dict):
         color_scheme=browser_context.get("color_scheme"),
     )
     navigator_languages = browser_context.get("navigator_languages")
+    hardware_concurrency = browser_context.get("hardware_concurrency")
+    device_memory_gb = browser_context.get("device_memory_gb")
+    if isinstance(hardware_concurrency, int) and not isinstance(hardware_concurrency, bool) and hardware_concurrency > 0:
+        context.add_init_script(
+            f"""
+            (() => {{
+              Object.defineProperty(Navigator.prototype, 'hardwareConcurrency', {{
+                configurable: true,
+                get: () => {hardware_concurrency},
+              }});
+            }})();
+            """
+        )
+    if isinstance(device_memory_gb, int) and not isinstance(device_memory_gb, bool) and device_memory_gb > 0:
+        context.add_init_script(
+            f"""
+            (() => {{
+              Object.defineProperty(Navigator.prototype, 'deviceMemory', {{
+                configurable: true,
+                get: () => {device_memory_gb},
+              }});
+            }})();
+            """
+        )
     if isinstance(navigator_languages, list) and navigator_languages:
         languages_json = json.dumps(navigator_languages)
         context.add_init_script(
