@@ -286,6 +286,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             )
             self.assertIn("--disable-sync", automation_context["chrome_launch"]["args"])
             self.assertIn("--disable-extensions", automation_context["chrome_launch"]["args"])
+            self.assertIn("--disable-speech-api", automation_context["chrome_launch"]["args"])
             self.assertIn("--deny-permission-prompts", automation_context["chrome_launch"]["args"])
             self.assertIn("--disable-features=ReduceAcceptLanguage", automation_context["chrome_launch"]["args"])
             self.assertIn("--disable-blink-features=AutomationControlled", automation_context["chrome_launch"]["args"])
@@ -422,6 +423,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_webdriver"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_geolocation_permission"], "denied")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_notification_permission"], "denied")
+            self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_speech_synthesis_present"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_webrtc_supported"])
             self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_webrtc_local_ip_leak"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_profile_webrtc_policy"], "disable_non_proxied_udp")
@@ -489,6 +491,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             )
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_pdf_viewer_enabled"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_plugins_present"])
+            self.assertFalse(verification_report["enforced_features"]["automation"]["automation_speech_synthesis_present"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_camera_permission_not_granted"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_microphone_permission_not_granted"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_notifications_permission_not_granted"])
@@ -512,6 +515,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertIn('--user-data-dir="$BROWSER_US_USER_DATA_DIR"', launcher_content)
             self.assertIn("--disable-sync", launcher_content)
             self.assertIn("--disable-extensions", launcher_content)
+            self.assertIn("--disable-speech-api", launcher_content)
             self.assertIn("--deny-permission-prompts", launcher_content)
             self.assertIn("--disable-features=ReduceAcceptLanguage", launcher_content)
             self.assertIn("--disable-blink-features=AutomationControlled", launcher_content)
@@ -875,7 +879,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             '"screenWidth":800,"screenHeight":600,"availWidth":800,"availHeight":600,'
             '"devicePixelRatio":1,"maxTouchPoints":0,"coarsePointer":false,'
             '"finePointer":true,"hoverHover":true,"lightColorScheme":true,"darkColorScheme":false,'
-            '"pdfViewerEnabled":true,"pluginsLength":5,"mimeTypesLength":2,'
+            '"pdfViewerEnabled":true,"pluginsLength":5,"mimeTypesLength":2,"speechSynthesisPresent":false,'
             '"timezone":"America/Los_Angeles","timezoneOffset":'
             + str(timezone_offset)
             + ',"intlLocale":"en-US",'
@@ -929,6 +933,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertTrue(runtime_context["pdfViewerEnabled"])
         self.assertEqual(runtime_context["pluginsLength"], 5)
         self.assertEqual(runtime_context["mimeTypesLength"], 2)
+        self.assertFalse(runtime_context["speechSynthesisPresent"])
         self.assertEqual(runtime_context["timezone"], "America/Los_Angeles")
         self.assertEqual(runtime_context["timezoneOffset"], timezone_offset)
         self.assertEqual(runtime_context["intlCalendar"], "gregory")
@@ -1062,6 +1067,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "pdfViewerEnabled": True,
             "pluginsLength": 5,
             "mimeTypesLength": 2,
+            "speechSynthesisPresent": False,
             "cameraPermission": "prompt",
             "microphonePermission": "prompt",
             "notificationsPermission": "prompt",
@@ -1160,6 +1166,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "metricMatches": {"PingFang SC": False, "MingLiU": True},
         }
         observed["pluginsLength"] = 0
+        observed["speechSynthesisPresent"] = True
         mismatches = module.validate_automation_context_observation(observed, browser_context)
 
         self.assertIn("automation viewport width", mismatches)
@@ -1174,6 +1181,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertIn("automation blocked font: PingFang SC", mismatches)
         self.assertIn("automation blocked font metric: PingFang SC", mismatches)
         self.assertIn("automation plugins", mismatches)
+        self.assertIn("automation speech synthesis", mismatches)
 
         observed["innerWidth"] = 1365
         observed["maxTouchPoints"] = 0
@@ -1189,6 +1197,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "metricMatches": {"PingFang SC": True, "MingLiU": True},
         }
         observed["pluginsLength"] = 5
+        observed["speechSynthesisPresent"] = False
         observed["cameraPermission"] = "granted"
         observed["languages"] = ["en-US"]
         mismatches = module.validate_automation_context_observation(observed, browser_context)

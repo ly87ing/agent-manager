@@ -81,6 +81,7 @@ BASE_CHROME_ARGS = [
     "--disable-search-engine-choice-screen",
     "--disable-sync",
     "--disable-extensions",
+    "--disable-speech-api",
     "--deny-permission-prompts",
     f"--disable-features={','.join(DISABLED_CHROME_FEATURES)}",
     "--disable-blink-features=AutomationControlled",
@@ -1290,6 +1291,7 @@ def verification_report_payload(
                 "runtime_webdriver": False,
                 "runtime_geolocation_permission": "denied",
                 "runtime_notification_permission": "denied",
+                "runtime_speech_synthesis_present": False,
                 "runtime_webrtc_supported": True,
                 "runtime_webrtc_local_ip_leak": False,
                 "runtime_profile_webrtc_policy": "disable_non_proxied_udp",
@@ -1327,6 +1329,7 @@ def verification_report_payload(
                 "automation_locale_timezones_include_current_timezone": True,
                 "automation_pdf_viewer_enabled": True,
                 "automation_plugins_present": True,
+                "automation_speech_synthesis_present": False,
                 "automation_camera_permission_not_granted": True,
                 "automation_microphone_permission_not_granted": True,
                 "automation_notifications_permission_not_granted": True,
@@ -1501,6 +1504,7 @@ def runtime_probe_html() -> str:
         "pdfViewerEnabled:navigator.pdfViewerEnabled,"
         "pluginsLength:navigator.plugins.length,"
         "mimeTypesLength:navigator.mimeTypes.length,"
+        "speechSynthesisPresent:'speechSynthesis' in window,"
         "timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,"
         "intlLocale:Intl.DateTimeFormat().resolvedOptions().locale,"
         "intlCalendar:Intl.DateTimeFormat().resolvedOptions().calendar,"
@@ -1717,6 +1721,8 @@ def runtime_desktop_surface_mismatches(runtime_context: dict) -> tuple[str, ...]
         mismatches.append("runtime plugins")
     if not positive_integer(runtime_context.get("mimeTypesLength")):
         mismatches.append("runtime mime types")
+    if runtime_context.get("speechSynthesisPresent") is not False:
+        mismatches.append("runtime speech synthesis")
     return tuple(mismatches)
 
 
@@ -2162,6 +2168,8 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation plugins")
     if not positive_integer(observed.get("mimeTypesLength")):
         mismatches.append("automation mime types")
+    if observed.get("speechSynthesisPresent") is not False:
+        mismatches.append("automation speech synthesis")
     for permission_name in ("cameraPermission", "microphonePermission", "notificationsPermission"):
         if observed.get(permission_name) == "granted":
             mismatches.append(f"automation {permission_name}")
@@ -2289,6 +2297,7 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             pdfViewerEnabled: navigator.pdfViewerEnabled,
                             pluginsLength: navigator.plugins.length,
                             mimeTypesLength: navigator.mimeTypes.length,
+                            speechSynthesisPresent: 'speechSynthesis' in window,
                             cameraPermission: null,
                             microphonePermission: null,
                             notificationsPermission: null,
