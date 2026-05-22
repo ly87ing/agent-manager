@@ -28,6 +28,7 @@ DEFAULT_GEOLOCATION = {
     "accuracy": 100,
 }
 EXIT_PROFILE_GEOLOCATION_ACCURACY = 50000
+VERIFICATION_REPORT_VERSION = 1
 CHROME_ARGS = [
     "--lang=en-US",
     "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
@@ -55,6 +56,14 @@ class ExitProfile:
 
     def is_us(self) -> bool:
         return self.country_code == "US"
+
+
+@dataclass(frozen=True)
+class ExitResolution:
+    return_code: int
+    exit_profile: ExitProfile | None
+    verification_state: str
+    errors: tuple[str, ...] = ()
 
 
 def load_json_mapping(path: Path) -> dict:
@@ -448,6 +457,90 @@ def sync_automation_context(config_dir: Path, exit_profile: ExitProfile | None) 
     return changed_paths
 
 
+def verification_report_payload(
+    browser_roots: list[BrowserRoot],
+    explicit_profile: str | None,
+    exit_profile: ExitProfile | None,
+    verification_state: str,
+) -> dict:
+    timezone_id = resolved_timezone_id(exit_profile)
+    geolocation = resolved_geolocation(exit_profile)
+    return {
+        "version": VERIFICATION_REPORT_VERSION,
+        "overall_status": "complete" if verification_state == "verified_us" else "limited",
+        "exit": {
+            "verification_state": verification_state,
+            "profile": exit_profile_payload(exit_profile),
+        },
+        "browser_roots": [
+            {
+                "name": browser_root.name,
+                "user_data_dir": str(browser_root.user_data_dir),
+                "profile_scope": explicit_profile or "all regular profiles",
+            }
+            for browser_root in browser_roots
+        ],
+        "enforced_features": {
+            "locale": {
+                "app_locale": APP_LOCALE,
+                "accept_languages": ACCEPT_LANGUAGES,
+                "selected_languages": ACCEPT_LANGUAGES,
+                "environment_locale": ENV_LOCALE,
+            },
+            "local_state_country": {
+                "countryid_at_install": 244,
+                "variations_country": "us",
+            },
+            "google": {
+                "ncr_url": NCR_URL,
+                "search_url": SEARCH_URL,
+                "suggest_url": SUGGEST_URL,
+                "search_gl": "US",
+                "search_hl": "en-US",
+            },
+            "webrtc": {
+                "ip_handling_policy": "disable_non_proxied_udp",
+                "multiple_routes_enabled": False,
+                "nonproxied_udp_enabled": False,
+                "chrome_launch_policy": "disable_non_proxied_udp",
+            },
+            "geolocation": {
+                "regular_profile_content_setting": BLOCK_CONTENT_SETTING,
+                "regular_profile_policy": "block",
+                "automation_geolocation": geolocation,
+            },
+            "automation": {
+                "locale": APP_LOCALE,
+                "timezone_id": timezone_id,
+                "extra_http_accept_language": "en-US,en;q=0.9",
+                "chrome_launch_args": CHROME_ARGS,
+            },
+        },
+        "limits": [
+            "Remote services can still classify the public VPN IP by their own IP reputation databases.",
+            "Google account history, existing cookies, installed extensions, fonts, GPU, canvas, and hardware fingerprints are outside this local sync script.",
+            "Native Chrome timezone changes require launching through browser-us.env or an automation context that applies browser-us-context.json.",
+        ],
+    }
+
+
+def sync_verification_report(
+    config_dir: Path,
+    browser_roots: list[BrowserRoot],
+    explicit_profile: str | None,
+    exit_profile: ExitProfile | None,
+    verification_state: str,
+) -> list[str]:
+    report_path = config_dir / "browser-us-verification.json"
+    payload = verification_report_payload(browser_roots, explicit_profile, exit_profile, verification_state)
+    previous_payload = load_json_mapping(report_path) if report_path.exists() else None
+    if previous_payload == payload:
+        return []
+    ensure_backup(report_path)
+    write_json_atomic(report_path, payload)
+    return [str(report_path)]
+
+
 def browser_open_command(platform_name: str, url: str) -> list[str] | None:
     if platform_name == "darwin":
         if Path("/Applications/Google Chrome.app").exists():
@@ -563,6 +656,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="warn instead of failing when the detected public exit country is not US",
     )
     parser.add_argument(
+        "--allow-unverified-exit",
+        action="store_true",
+        default=os.environ.get("AGENT_MANAGER_BROWSER_US_ALLOW_UNVERIFIED_EXIT") == "1",
+        help="warn instead of failing when the public exit profile cannot be verified",
+    )
+    parser.add_argument(
         "--exit-check-timeout",
         type=float,
         default=float(os.environ.get("AGENT_MANAGER_BROWSER_US_EXIT_CHECK_TIMEOUT", "5")),
@@ -589,7 +688,8 @@ def print_dry_run(args: argparse.Namespace, browser_roots: list[BrowserRoot], co
     print(f"Would set default Google search URL to {SEARCH_URL}")
     print("Would set WebRTC policy to disable_non_proxied_udp")
     if not args.offline and not args.skip_exit_check:
-        print("Would verify public proxy exit profile and fail if a non-US country is detected")
+        print("Would verify public proxy exit profile and fail unless a US country is detected")
+    print(f"Would write verification report under {config_dir}")
     if not args.offline and not args.no_browser_open:
         print(f"Would open {NCR_URL}")
 
@@ -635,36 +735,44 @@ def exit_profile_summary(exit_profile: ExitProfile) -> str:
     return ", ".join(parts)
 
 
-def resolve_exit_profile(args: argparse.Namespace) -> tuple[int, ExitProfile | None]:
+def resolve_exit_profile(args: argparse.Namespace) -> ExitResolution:
     if args.offline or args.skip_exit_check:
         if args.offline:
             print("Offline mode: skipped public exit-profile verification")
+            verification_state = "offline_skipped"
         else:
             print("Public exit-profile verification skipped")
-        return 0, None
+            verification_state = "manually_skipped"
+        return ExitResolution(0, None, verification_state)
 
     try:
         exit_profile, errors = detect_exit_profile(args.exit_check_timeout, args.exit_profile_json)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
-        return 2, None
+        return ExitResolution(2, None, "invalid_exit_profile", (str(exc),))
 
     if exit_profile is None:
-        print("WARN: could not verify public exit profile; Google may still classify by proxy IP", file=sys.stderr)
+        message = "could not verify public exit profile; cannot prove Google will see a US proxy IP"
+        if args.allow_unverified_exit:
+            print(f"WARN: {message}", file=sys.stderr)
+            for error in errors[:3]:
+                print(f"WARN: {error}", file=sys.stderr)
+            return ExitResolution(0, None, "unverified_allowed", tuple(errors))
+        print(f"ERROR: {message}", file=sys.stderr)
         for error in errors[:3]:
-            print(f"WARN: {error}", file=sys.stderr)
-        return 0, None
+            print(f"ERROR: {error}", file=sys.stderr)
+        return ExitResolution(2, None, "unverified_failed", tuple(errors))
 
     print(f"Detected public exit profile: {exit_profile_summary(exit_profile)} ({exit_profile.source})")
     if exit_profile.is_us():
-        return 0, exit_profile
+        return ExitResolution(0, exit_profile, "verified_us")
 
     message = f"Detected public exit country is {exit_profile.country_code}, not US"
     if args.allow_non_us_exit:
         print(f"WARN: {message}", file=sys.stderr)
-        return 0, exit_profile
+        return ExitResolution(0, exit_profile, "non_us_allowed")
     print(f"ERROR: {message}", file=sys.stderr)
-    return 2, exit_profile
+    return ExitResolution(2, exit_profile, "non_us_failed")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -677,13 +785,22 @@ def main(argv: list[str] | None = None) -> int:
         print_dry_run(args, browser_roots, config_dir)
         return 0
 
-    exit_status, exit_profile = resolve_exit_profile(args)
-    if exit_status != 0:
-        return exit_status
+    exit_resolution = resolve_exit_profile(args)
+    if exit_resolution.return_code != 0:
+        return exit_resolution.return_code
 
     changed_paths = []
     changed_paths.extend(sync_browser_roots(browser_roots, args.profile))
-    changed_paths.extend(sync_automation_context(config_dir, exit_profile))
+    changed_paths.extend(sync_automation_context(config_dir, exit_resolution.exit_profile))
+    changed_paths.extend(
+        sync_verification_report(
+            config_dir,
+            browser_roots,
+            args.profile,
+            exit_resolution.exit_profile,
+            exit_resolution.verification_state,
+        )
+    )
 
     opened_ncr = False
     if args.offline:

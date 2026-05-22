@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -75,6 +76,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             preferences = json.loads((profile_dir / "Preferences").read_text(encoding="utf-8"))
             default_preferences = json.loads((chrome_root / "Default" / "Preferences").read_text(encoding="utf-8"))
             automation_context = json.loads((config_dir / "browser-us-context.json").read_text(encoding="utf-8"))
+            verification_report = json.loads((config_dir / "browser-us-verification.json").read_text(encoding="utf-8"))
 
             self.assertEqual(local_state["intl"]["app_locale"], "en-US")
             self.assertEqual(local_state["countryid_at_install"], 244)
@@ -95,6 +97,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(automation_context["browser_context"]["locale"], "en-US")
             self.assertEqual(automation_context["browser_context"]["timezone_id"], "America/Los_Angeles")
             self.assertIn("--force-webrtc-ip-handling-policy=disable_non_proxied_udp", automation_context["chrome_launch"]["args"])
+            self.assertEqual(verification_report["overall_status"], "limited")
+            self.assertEqual(verification_report["exit"]["verification_state"], "manually_skipped")
+            self.assertEqual(verification_report["enforced_features"]["local_state_country"]["variations_country"], "us")
+            self.assertEqual(verification_report["enforced_features"]["google"]["search_gl"], "US")
             self.assertTrue((config_dir / "browser-us.env").exists())
             self.assertTrue((chrome_root / "Local State.agent-manager-before-google-us").exists())
             self.assertTrue((profile_dir / "Preferences.agent-manager-before-google-us").exists())
@@ -132,6 +138,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertIn("region: New York", first_result.stdout)
             self.assertIn("city: New York", first_result.stdout)
             automation_context = json.loads((config_dir / "browser-us-context.json").read_text(encoding="utf-8"))
+            verification_report = json.loads((config_dir / "browser-us-verification.json").read_text(encoding="utf-8"))
             env_content = (config_dir / "browser-us.env").read_text(encoding="utf-8")
             self.assertEqual(automation_context["browser_context"]["timezone_id"], "America/New_York")
             self.assertEqual(automation_context["browser_context"]["geolocation"]["latitude"], 40.7128)
@@ -140,6 +147,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(automation_context["environment"]["TZ"], "America/New_York")
             self.assertEqual(automation_context["exit_profile"]["ip"], "203.0.113.31")
             self.assertEqual(automation_context["exit_profile"]["country_code"], "US")
+            self.assertEqual(verification_report["overall_status"], "complete")
+            self.assertEqual(verification_report["exit"]["verification_state"], "verified_us")
+            self.assertEqual(verification_report["exit"]["profile"]["ip"], "203.0.113.31")
+            self.assertEqual(verification_report["enforced_features"]["automation"]["timezone_id"], "America/New_York")
             self.assertIn("export TZ=America/New_York", env_content)
             first_digest = self._tree_digest(root)
 
@@ -246,3 +257,51 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
             self.assertIn("Detected public exit country is HK, not US", result.stderr)
             self.assertFalse((config_dir / "browser-us-context.json").exists())
+            self.assertFalse((config_dir / "browser-us-verification.json").exists())
+
+    def test_unverified_exit_profile_fails_closed_by_default(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            chrome_root = root / "chrome"
+            config_dir = root / "config"
+            self._write_chrome_profile(chrome_root)
+            sitecustomize = root / "sitecustomize.py"
+            sitecustomize.write_text(
+                "\n".join(
+                    [
+                        "import urllib.error",
+                        "import urllib.request",
+                        "def fail(*args, **kwargs):",
+                        "    raise urllib.error.URLError('blocked')",
+                        "urllib.request.urlopen = fail",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(root)
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(SCRIPT),
+                    "--chrome-user-data-dir",
+                    str(chrome_root),
+                    "--config-dir",
+                    str(config_dir),
+                    "--no-browser-open",
+                    "--exit-check-timeout",
+                    "0.1",
+                ],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertIn("could not verify public exit profile", result.stderr)
+            self.assertFalse((config_dir / "browser-us-context.json").exists())
+            self.assertFalse((config_dir / "browser-us-verification.json").exists())
