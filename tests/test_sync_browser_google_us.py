@@ -334,6 +334,9 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
                     "runtime_user_agent_high_entropy_matches_desktop_surface"
                 ]
             )
+            self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_desktop_surface"])
+            self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_pdf_viewer_enabled"])
+            self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_plugins_present"])
             self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_webdriver"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_geolocation_permission"], "denied")
             self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_webrtc_supported"])
@@ -383,6 +386,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertTrue(
                 verification_report["enforced_features"]["automation"]["automation_locale_timezones_include_current_timezone"]
             )
+            self.assertTrue(verification_report["enforced_features"]["automation"]["automation_pdf_viewer_enabled"])
+            self.assertTrue(verification_report["enforced_features"]["automation"]["automation_plugins_present"])
             self.assertFalse(verification_report["enforced_features"]["webrtc"]["runtime_local_ip_leak"])
             self.assertEqual(verification_report["enforced_features"]["webrtc"]["runtime_private_ip_candidate_count"], 0)
             self.assertEqual(
@@ -756,6 +761,11 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             '"secChUaPlatform":"\\"macOS\\"","secChUaMobile":"?0",'
             '"webdriver":false,'
             '"language":"en-US","languages":["en-US","en"],'
+            '"innerWidth":1365,"innerHeight":629,"outerWidth":0,"outerHeight":0,'
+            '"screenWidth":800,"screenHeight":600,"availWidth":800,"availHeight":600,'
+            '"devicePixelRatio":1,"maxTouchPoints":0,"coarsePointer":false,'
+            '"finePointer":true,"hoverHover":true,"lightColorScheme":true,"darkColorScheme":false,'
+            '"pdfViewerEnabled":true,"pluginsLength":5,"mimeTypesLength":2,'
             '"timezone":"America/Los_Angeles","timezoneOffset":'
             + str(timezone_offset)
             + ',"intlLocale":"en-US",'
@@ -797,6 +807,14 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertFalse(runtime_context["webdriver"])
         self.assertEqual(runtime_context["language"], "en-US")
         self.assertEqual(runtime_context["languages"], ["en-US", "en"])
+        self.assertEqual(runtime_context["innerWidth"], 1365)
+        self.assertEqual(runtime_context["devicePixelRatio"], 1)
+        self.assertFalse(runtime_context["coarsePointer"])
+        self.assertTrue(runtime_context["finePointer"])
+        self.assertTrue(runtime_context["hoverHover"])
+        self.assertTrue(runtime_context["pdfViewerEnabled"])
+        self.assertEqual(runtime_context["pluginsLength"], 5)
+        self.assertEqual(runtime_context["mimeTypesLength"], 2)
         self.assertEqual(runtime_context["timezone"], "America/Los_Angeles")
         self.assertEqual(runtime_context["timezoneOffset"], timezone_offset)
         self.assertEqual(runtime_context["intlCalendar"], "gregory")
@@ -905,8 +923,13 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "devicePixelRatio": 1,
             "maxTouchPoints": 0,
             "coarsePointer": False,
+            "finePointer": True,
+            "hoverHover": True,
             "lightColorScheme": True,
             "darkColorScheme": False,
+            "pdfViewerEnabled": True,
+            "pluginsLength": 5,
+            "mimeTypesLength": 2,
             "geolocation": {"latitude": 34.0522, "longitude": -118.2437, "accuracy": 50000},
         }
 
@@ -990,15 +1013,24 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         observed["innerWidth"] = 390
         observed["maxTouchPoints"] = 5
         observed["coarsePointer"] = True
+        observed["finePointer"] = False
+        observed["hoverHover"] = False
+        observed["pluginsLength"] = 0
         mismatches = module.validate_automation_context_observation(observed, browser_context)
 
         self.assertIn("automation viewport width", mismatches)
         self.assertIn("automation touch points", mismatches)
         self.assertIn("automation coarse pointer", mismatches)
+        self.assertIn("automation fine pointer", mismatches)
+        self.assertIn("automation hover", mismatches)
+        self.assertIn("automation plugins", mismatches)
 
         observed["innerWidth"] = 1365
         observed["maxTouchPoints"] = 0
         observed["coarsePointer"] = False
+        observed["finePointer"] = True
+        observed["hoverHover"] = True
+        observed["pluginsLength"] = 5
         observed["languages"] = ["en-US"]
         mismatches = module.validate_automation_context_observation(observed, browser_context)
         self.assertIn("automation navigator.languages", mismatches)

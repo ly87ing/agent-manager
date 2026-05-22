@@ -1199,6 +1199,9 @@ def verification_report_payload(
                 "runtime_sec_ch_ua_mobile": "?0",
                 "runtime_user_agent_data_brands_match_chrome_major": True,
                 "runtime_user_agent_high_entropy_matches_desktop_surface": True,
+                "runtime_desktop_surface": True,
+                "runtime_pdf_viewer_enabled": True,
+                "runtime_plugins_present": True,
                 "runtime_webdriver": False,
                 "runtime_geolocation_permission": "denied",
                 "runtime_webrtc_supported": True,
@@ -1227,6 +1230,8 @@ def verification_report_payload(
                 "automation_locale_calendars": ["gregory"],
                 "automation_locale_numbering_systems": ["latn"],
                 "automation_locale_timezones_include_current_timezone": True,
+                "automation_pdf_viewer_enabled": True,
+                "automation_plugins_present": True,
                 "chrome_launch_args": browser_us_chrome_args(user_agent),
                 "chrome_launcher": "$AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER",
                 "managed_user_data_dir": "$AGENT_MANAGER_BROWSER_US_USER_DATA_DIR",
@@ -1380,6 +1385,24 @@ def runtime_probe_html() -> str:
         "webdriver:navigator.webdriver,"
         "language:navigator.language,"
         "languages:Array.from(navigator.languages||[]),"
+        "innerWidth:window.innerWidth,"
+        "innerHeight:window.innerHeight,"
+        "outerWidth:window.outerWidth,"
+        "outerHeight:window.outerHeight,"
+        "screenWidth:window.screen.width,"
+        "screenHeight:window.screen.height,"
+        "availWidth:window.screen.availWidth,"
+        "availHeight:window.screen.availHeight,"
+        "devicePixelRatio:window.devicePixelRatio,"
+        "maxTouchPoints:navigator.maxTouchPoints,"
+        "coarsePointer:window.matchMedia('(pointer: coarse)').matches,"
+        "finePointer:window.matchMedia('(pointer: fine)').matches,"
+        "hoverHover:window.matchMedia('(hover: hover)').matches,"
+        "lightColorScheme:window.matchMedia('(prefers-color-scheme: light)').matches,"
+        "darkColorScheme:window.matchMedia('(prefers-color-scheme: dark)').matches,"
+        "pdfViewerEnabled:navigator.pdfViewerEnabled,"
+        "pluginsLength:navigator.plugins.length,"
+        "mimeTypesLength:navigator.mimeTypes.length,"
         "timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,"
         "intlLocale:Intl.DateTimeFormat().resolvedOptions().locale,"
         "intlCalendar:Intl.DateTimeFormat().resolvedOptions().calendar,"
@@ -1534,6 +1557,10 @@ def sec_ch_ua_matches_chrome_major(value, user_agent: str) -> bool:
     return f'v="{major_version}"' in text and ('"Chromium"' in text or '"Google Chrome"' in text)
 
 
+def positive_integer(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
 def user_agent_high_entropy_matches_desktop_surface(
     high_entropy,
     user_agent: str,
@@ -1567,6 +1594,31 @@ def user_agent_high_entropy_matches_desktop_surface(
             return False
 
     return True
+
+
+def runtime_desktop_surface_mismatches(runtime_context: dict) -> tuple[str, ...]:
+    mismatches = []
+    if runtime_context.get("innerWidth") != US_DESKTOP_VIEWPORT["width"]:
+        mismatches.append("runtime viewport width")
+    if runtime_context.get("devicePixelRatio") != US_DESKTOP_DEVICE_SCALE_FACTOR:
+        mismatches.append("runtime device scale factor")
+    if runtime_context.get("maxTouchPoints") != 0:
+        mismatches.append("runtime touch points")
+    if runtime_context.get("coarsePointer") is not False:
+        mismatches.append("runtime coarse pointer")
+    if runtime_context.get("finePointer") is not True:
+        mismatches.append("runtime fine pointer")
+    if runtime_context.get("hoverHover") is not True:
+        mismatches.append("runtime hover")
+    if runtime_context.get("lightColorScheme") is not True or runtime_context.get("darkColorScheme") is not False:
+        mismatches.append("runtime color scheme")
+    if runtime_context.get("pdfViewerEnabled") is not True:
+        mismatches.append("runtime pdf viewer")
+    if not positive_integer(runtime_context.get("pluginsLength")):
+        mismatches.append("runtime plugins")
+    if not positive_integer(runtime_context.get("mimeTypesLength")):
+        mismatches.append("runtime mime types")
+    return tuple(mismatches)
 
 
 def validate_runtime_context(
@@ -1610,6 +1662,7 @@ def validate_runtime_context(
         mismatches.append("navigator.language")
     if runtime_context.get("languages") != ["en-US", "en"]:
         mismatches.append("navigator.languages")
+    mismatches.extend(runtime_desktop_surface_mismatches(runtime_context))
     if runtime_context.get("timezone") != timezone_id:
         mismatches.append("Intl timezone")
     expected_offset = expected_timezone_offset_minutes(timezone_id)
@@ -1950,12 +2003,22 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation touch points")
     if observed.get("coarsePointer") is not False:
         mismatches.append("automation coarse pointer")
+    if observed.get("finePointer") is not True:
+        mismatches.append("automation fine pointer")
+    if observed.get("hoverHover") is not True:
+        mismatches.append("automation hover")
     if observed.get("userAgentDataMobile") not in (False, None):
         mismatches.append("automation user agent mobile")
     if observed.get("webdriver") not in (False, None):
         mismatches.append("automation webdriver")
     if observed.get("lightColorScheme") is not True or observed.get("darkColorScheme") is not False:
         mismatches.append("automation color scheme")
+    if observed.get("pdfViewerEnabled") is not True:
+        mismatches.append("automation pdf viewer")
+    if not positive_integer(observed.get("pluginsLength")):
+        mismatches.append("automation plugins")
+    if not positive_integer(observed.get("mimeTypesLength")):
+        mismatches.append("automation mime types")
     if not isinstance(expected_geolocation, dict) or not isinstance(observed_geolocation, dict):
         mismatches.append("automation geolocation")
         return tuple(mismatches)
@@ -2068,8 +2131,13 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             devicePixelRatio: window.devicePixelRatio,
                             maxTouchPoints: navigator.maxTouchPoints,
                             coarsePointer: window.matchMedia('(pointer: coarse)').matches,
+                            finePointer: window.matchMedia('(pointer: fine)').matches,
+                            hoverHover: window.matchMedia('(hover: hover)').matches,
                             lightColorScheme: window.matchMedia('(prefers-color-scheme: light)').matches,
                             darkColorScheme: window.matchMedia('(prefers-color-scheme: dark)').matches,
+                            pdfViewerEnabled: navigator.pdfViewerEnabled,
+                            pluginsLength: navigator.plugins.length,
+                            mimeTypesLength: navigator.mimeTypes.length,
                             geolocation: position,
                           };
                           try {
