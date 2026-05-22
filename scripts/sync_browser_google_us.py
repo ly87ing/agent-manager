@@ -51,6 +51,7 @@ US_DESKTOP_HARDWARE_CONCURRENCY = 8
 US_DESKTOP_DEVICE_MEMORY_GB = 8
 US_DESKTOP_WEBGL_VENDOR = "Intel Inc."
 US_DESKTOP_WEBGL_RENDERER = "Intel Iris OpenGL Engine"
+US_CANVAS_FONT_METRIC_FALLBACK_FAMILY = "Arial"
 BLOCKED_FONT_FAMILIES = (
     "PingFang SC",
     "PingFang TC",
@@ -953,6 +954,7 @@ def automation_context_payload(exit_profile: ExitProfile | None, managed_user_da
             "webgl_vendor": US_DESKTOP_WEBGL_VENDOR,
             "webgl_renderer": US_DESKTOP_WEBGL_RENDERER,
             "blocked_font_families": list(BLOCKED_FONT_FAMILIES),
+            "font_metric_fallback_family": US_CANVAS_FONT_METRIC_FALLBACK_FAMILY,
         },
         "chrome_launch": {
             "args": [
@@ -1316,6 +1318,7 @@ def verification_report_payload(
                 "automation_webgl_vendor": US_DESKTOP_WEBGL_VENDOR,
                 "automation_webgl_renderer": US_DESKTOP_WEBGL_RENDERER,
                 "automation_blocked_font_families": list(BLOCKED_FONT_FAMILIES),
+                "automation_font_metric_fallback_family": US_CANVAS_FONT_METRIC_FALLBACK_FAMILY,
                 "automation_locale_week_info": {"firstDay": 7, "weekend": [6, 7]},
                 "automation_locale_text_info": {"direction": "ltr"},
                 "automation_locale_hour_cycles": ["h12"],
@@ -2139,6 +2142,7 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation WebGL renderer")
     expected_blocked_fonts = browser_context.get("blocked_font_families")
     observed_blocked_fonts = (observed.get("fontChecks") or {}).get("blocked")
+    observed_metric_matches = (observed.get("fontChecks") or {}).get("metricMatches")
     if isinstance(expected_blocked_fonts, list) and expected_blocked_fonts:
         if not isinstance(observed_blocked_fonts, dict):
             mismatches.append("automation blocked font checks")
@@ -2146,6 +2150,12 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
             for font_family in expected_blocked_fonts:
                 if observed_blocked_fonts.get(font_family) is not False:
                     mismatches.append(f"automation blocked font: {font_family}")
+        if not isinstance(observed_metric_matches, dict):
+            mismatches.append("automation blocked font metric checks")
+        else:
+            for font_family in expected_blocked_fonts:
+                if observed_metric_matches.get(font_family) is not True:
+                    mismatches.append(f"automation blocked font metric: {font_family}")
     if observed.get("pdfViewerEnabled") is not True:
         mismatches.append("automation pdf viewer")
     if not positive_integer(observed.get("pluginsLength")):
@@ -2275,7 +2285,7 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             deviceMemory: navigator.deviceMemory,
                             webglVendor: null,
                             webglRenderer: null,
-                            fontChecks: {blocked: {}},
+                            fontChecks: {blocked: {}, metricMatches: {}},
                             pdfViewerEnabled: navigator.pdfViewerEnabled,
                             pluginsLength: navigator.plugins.length,
                             mimeTypesLength: navigator.mimeTypes.length,
@@ -2313,9 +2323,25 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                           }
                           try {
                             const blockedFontFamilies = Array.from(window.__agentManagerBlockedFontFamilies || []);
+                            const fallbackFontFamily = window.__agentManagerFontMetricFallbackFamily || 'Arial';
+                            const metricSample = 'mmmmmmmmmmWWWWWWWWWWiiiiiiiiii中文测试';
+                            const canvas = document.createElement('canvas');
+                            const canvasContext = canvas.getContext('2d');
+                            const measureWidth = (fontFamily) => {
+                              if (!canvasContext) {
+                                return null;
+                              }
+                              canvasContext.font = '32px "' + fontFamily.replace(/"/g, '') + '", sans-serif';
+                              return canvasContext.measureText(metricSample).width;
+                            };
+                            const fallbackWidth = measureWidth(fallbackFontFamily);
                             for (const fontFamily of blockedFontFamilies) {
                               observed.fontChecks.blocked[fontFamily] = document.fonts && document.fonts.check
                                 ? document.fonts.check('12px "' + fontFamily.replace(/"/g, '') + '"')
+                                : null;
+                              const fontWidth = measureWidth(fontFamily);
+                              observed.fontChecks.metricMatches[fontFamily] = fallbackWidth !== null && fontWidth !== null
+                                ? Math.abs(fontWidth - fallbackWidth) < 0.001
                                 : null;
                             }
                           } catch (error) {
@@ -2416,6 +2442,7 @@ def new_us_playwright_context(browser, browser_context: dict):
     webgl_vendor = browser_context.get("webgl_vendor")
     webgl_renderer = browser_context.get("webgl_renderer")
     blocked_font_families = browser_context.get("blocked_font_families")
+    font_metric_fallback_family = browser_context.get("font_metric_fallback_family")
     if isinstance(hardware_concurrency, int) and not isinstance(hardware_concurrency, bool) and hardware_concurrency > 0:
         context.add_init_script(
             f"""
@@ -2471,20 +2498,43 @@ def new_us_playwright_context(browser, browser_context: dict):
         )
     if isinstance(blocked_font_families, list) and blocked_font_families:
         blocked_font_names = [font for font in blocked_font_families if isinstance(font, str) and font]
-        if blocked_font_names:
+        if blocked_font_names and isinstance(font_metric_fallback_family, str) and font_metric_fallback_family:
             blocked_font_names_json = json.dumps(blocked_font_names)
+            font_metric_fallback_family_json = json.dumps(font_metric_fallback_family)
             context.add_init_script(
                 f"""
                 (() => {{
                   const blockedFontFamilies = Object.freeze(Array.from({blocked_font_names_json}));
+                  const fontMetricFallbackFamily = {font_metric_fallback_family_json};
                   const blockedFontNeedles = blockedFontFamilies.map((font) => font.toLowerCase());
                   Object.defineProperty(window, '__agentManagerBlockedFontFamilies', {{
                     configurable: true,
                     value: blockedFontFamilies,
                   }});
+                  Object.defineProperty(window, '__agentManagerFontMetricFallbackFamily', {{
+                    configurable: true,
+                    value: fontMetricFallbackFamily,
+                  }});
                   const shouldBlockFont = (font) => {{
                     const fontText = String(font || '').toLowerCase();
                     return blockedFontNeedles.some((blockedFont) => fontText.includes(blockedFont));
+                  }};
+                  const escapeRegExp = (value) => String(value).replace(/[.*+?^${{}}()|[\\]\\\\]/g, '\\\\$&');
+                  const fallbackFontFor = (font) => {{
+                    let fallbackFont = String(font || '');
+                    for (const blockedFontFamily of blockedFontFamilies) {{
+                      const escapedFamily = escapeRegExp(blockedFontFamily);
+                      fallbackFont = fallbackFont.replace(
+                        new RegExp('"' + escapedFamily + '"', 'ig'),
+                        '"' + fontMetricFallbackFamily + '"'
+                      );
+                      fallbackFont = fallbackFont.replace(
+                        new RegExp("'" + escapedFamily + "'", 'ig'),
+                        '"' + fontMetricFallbackFamily + '"'
+                      );
+                      fallbackFont = fallbackFont.replace(new RegExp(escapedFamily, 'ig'), fontMetricFallbackFamily);
+                    }}
+                    return fallbackFont;
                   }};
                   const patchFontCheck = (target) => {{
                     if (!target || !target.check) {{
@@ -2501,12 +2551,38 @@ def new_us_playwright_context(browser, browser_context: dict):
                       }},
                     }});
                   }};
+                  const patchMeasureText = (target) => {{
+                    if (!target || !target.measureText) {{
+                      return;
+                    }}
+                    const originalMeasureText = target.measureText;
+                    Object.defineProperty(target, 'measureText', {{
+                      configurable: true,
+                      value(text) {{
+                        if (!shouldBlockFont(this && this.font)) {{
+                          return originalMeasureText.apply(this, arguments);
+                        }}
+                        const originalFont = this.font;
+                        try {{
+                          this.font = fallbackFontFor(originalFont);
+                          return originalMeasureText.apply(this, arguments);
+                        }} finally {{
+                          try {{
+                            this.font = originalFont;
+                          }} catch (error) {{
+                          }}
+                        }}
+                      }},
+                    }});
+                  }};
                   if (window.FontFaceSet && FontFaceSet.prototype) {{
                     patchFontCheck(FontFaceSet.prototype);
                   }}
                   if (document.fonts) {{
                     patchFontCheck(document.fonts);
                   }}
+                  patchMeasureText(window.CanvasRenderingContext2D && CanvasRenderingContext2D.prototype);
+                  patchMeasureText(window.OffscreenCanvasRenderingContext2D && OffscreenCanvasRenderingContext2D.prototype);
                 }})();
                 """
             )
