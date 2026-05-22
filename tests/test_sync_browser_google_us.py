@@ -192,10 +192,18 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertFalse(any(path.exists() or path.is_symlink() for path in volatile_state_paths))
             self.assertEqual(automation_context["browser_context"]["locale"], "en-US")
             self.assertEqual(automation_context["browser_context"]["timezone_id"], "America/Los_Angeles")
+            self.assertEqual(automation_context["browser_context"]["viewport"], {"width": 1365, "height": 768})
+            self.assertEqual(automation_context["browser_context"]["screen"], {"width": 1365, "height": 768})
+            self.assertEqual(automation_context["browser_context"]["device_scale_factor"], 1)
+            self.assertFalse(automation_context["browser_context"]["is_mobile"])
+            self.assertFalse(automation_context["browser_context"]["has_touch"])
+            self.assertEqual(automation_context["browser_context"]["color_scheme"], "light")
             self.assertEqual(automation_context["google"]["home_url"], "https://www.google.com/?hl=en-US&gl=US&pws=0")
             self.assertEqual(automation_context["chrome_launch"]["launcher"], str(launcher_path))
             self.assertEqual(automation_context["chrome_launch"]["managed_user_data_dir"], str(managed_profile_root))
             self.assertIn(f"--user-data-dir={managed_profile_root}", automation_context["chrome_launch"]["args"])
+            self.assertIn("--window-size=1365,768", automation_context["chrome_launch"]["args"])
+            self.assertIn("--force-device-scale-factor=1", automation_context["chrome_launch"]["args"])
             self.assertIn("--disable-sync", automation_context["chrome_launch"]["args"])
             self.assertIn("--disable-extensions", automation_context["chrome_launch"]["args"])
             self.assertIn("--force-webrtc-ip-handling-policy=disable_non_proxied_udp", automation_context["chrome_launch"]["args"])
@@ -257,6 +265,12 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_webrtc_local_ip_leak"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_profile_webrtc_policy"], "disable_non_proxied_udp")
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_profile_geolocation_setting"], 2)
+            self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_viewport"], {"width": 1365, "height": 768})
+            self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_screen"], {"width": 1365, "height": 768})
+            self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_device_scale_factor"], 1)
+            self.assertFalse(verification_report["enforced_features"]["automation"]["desktop_is_mobile"])
+            self.assertFalse(verification_report["enforced_features"]["automation"]["desktop_has_touch"])
+            self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_color_scheme"], "light")
             self.assertFalse(verification_report["enforced_features"]["webrtc"]["runtime_local_ip_leak"])
             self.assertEqual(verification_report["enforced_features"]["webrtc"]["runtime_private_ip_candidate_count"], 0)
             self.assertEqual(
@@ -268,6 +282,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertIn("AGENT_MANAGER_BROWSER_US_DEFAULT_URL=https://www.google.com/ncr", launcher_content)
             self.assertIn('if [ "$#" -eq 0 ]; then', launcher_content)
             self.assertIn("--lang=en-US", launcher_content)
+            self.assertIn("--window-size=1365,768", launcher_content)
+            self.assertIn("--force-device-scale-factor=1", launcher_content)
             self.assertIn('--user-data-dir="$BROWSER_US_USER_DATA_DIR"', launcher_content)
             self.assertIn("--disable-sync", launcher_content)
             self.assertIn("--disable-extensions", launcher_content)
@@ -672,6 +688,12 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "locale": "en-US",
             "timezone_id": "America/Los_Angeles",
             "geolocation": {"latitude": 34.0522, "longitude": -118.2437, "accuracy": 50000},
+            "viewport": {"width": 1365, "height": 768},
+            "screen": {"width": 1365, "height": 768},
+            "device_scale_factor": 1,
+            "is_mobile": False,
+            "has_touch": False,
+            "color_scheme": "light",
         }
         observed = {
             "language": "en-US",
@@ -685,6 +707,16 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "currencyFormat": "$1,234.56",
             "regionDisplayName": "United States",
             "acceptLanguageHeader": "en-US,en;q=0.9",
+            "innerWidth": 1365,
+            "innerHeight": 768,
+            "screenWidth": 1365,
+            "screenHeight": 768,
+            "devicePixelRatio": 1,
+            "maxTouchPoints": 0,
+            "coarsePointer": False,
+            "lightColorScheme": True,
+            "darkColorScheme": False,
+            "userAgentDataMobile": False,
             "geolocation": {"latitude": 34.0522, "longitude": -118.2437, "accuracy": 50000},
         }
 
@@ -697,6 +729,17 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertIn("automation timezone", mismatches)
         self.assertIn("automation geolocation latitude", mismatches)
         self.assertIn("automation geolocation longitude", mismatches)
+
+        observed["timezone"] = "America/Los_Angeles"
+        observed["geolocation"] = {"latitude": 34.0522, "longitude": -118.2437, "accuracy": 50000}
+        observed["innerWidth"] = 390
+        observed["maxTouchPoints"] = 5
+        observed["coarsePointer"] = True
+        mismatches = module.validate_automation_context_observation(observed, browser_context)
+
+        self.assertIn("automation viewport width", mismatches)
+        self.assertIn("automation touch points", mismatches)
+        self.assertIn("automation coarse pointer", mismatches)
 
     def test_browser_google_marker_detection_catches_hk_signals(self):
         spec = importlib.util.spec_from_file_location("sync_browser_google_us_test", SCRIPT)

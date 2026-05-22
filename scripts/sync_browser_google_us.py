@@ -38,11 +38,19 @@ DEFAULT_GEOLOCATION = {
     "longitude": -122.4194,
     "accuracy": 100,
 }
+US_DESKTOP_VIEWPORT = {"width": 1365, "height": 768}
+US_DESKTOP_SCREEN = {"width": 1365, "height": 768}
+US_DESKTOP_DEVICE_SCALE_FACTOR = 1
+US_DESKTOP_IS_MOBILE = False
+US_DESKTOP_HAS_TOUCH = False
+US_DESKTOP_COLOR_SCHEME = "light"
 EXIT_PROFILE_GEOLOCATION_ACCURACY = 50000
 VERIFICATION_REPORT_VERSION = 1
 CHROME_ARGS = [
     "--lang=en-US",
     "--accept-lang=en-US,en",
+    f"--window-size={US_DESKTOP_VIEWPORT['width']},{US_DESKTOP_VIEWPORT['height']}",
+    f"--force-device-scale-factor={US_DESKTOP_DEVICE_SCALE_FACTOR}",
     "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
     "--no-first-run",
     "--disable-search-engine-choice-screen",
@@ -733,6 +741,12 @@ def automation_context_payload(exit_profile: ExitProfile | None, managed_user_da
             "extra_http_headers": {
                 "Accept-Language": "en-US,en;q=0.9",
             },
+            "viewport": dict(US_DESKTOP_VIEWPORT),
+            "screen": dict(US_DESKTOP_SCREEN),
+            "device_scale_factor": US_DESKTOP_DEVICE_SCALE_FACTOR,
+            "is_mobile": US_DESKTOP_IS_MOBILE,
+            "has_touch": US_DESKTOP_HAS_TOUCH,
+            "color_scheme": US_DESKTOP_COLOR_SCHEME,
         },
         "chrome_launch": {
             "args": [
@@ -762,6 +776,7 @@ def automation_context_payload(exit_profile: ExitProfile | None, managed_user_da
             "Managed Browser US profile cookies, history, local storage, session storage, IndexedDB, service workers, and caches are cleared on every sync.",
             "Regular browser profiles block geolocation by default to avoid non-US OS/location leaks.",
             "Native Chrome timezone needs DevTools, automation context emulation, or launching through browser-us-chrome.sh.",
+            "Native Chrome screen geometry is launched as a stable US desktop profile when browser-us-chrome.sh is used.",
         ],
     }
 
@@ -1023,6 +1038,12 @@ def verification_report_payload(
                 "runtime_profile_webrtc_policy": "disable_non_proxied_udp",
                 "runtime_profile_geolocation_setting": BLOCK_CONTENT_SETTING,
                 "extra_http_accept_language": "en-US,en;q=0.9",
+                "desktop_viewport": dict(US_DESKTOP_VIEWPORT),
+                "desktop_screen": dict(US_DESKTOP_SCREEN),
+                "desktop_device_scale_factor": US_DESKTOP_DEVICE_SCALE_FACTOR,
+                "desktop_is_mobile": US_DESKTOP_IS_MOBILE,
+                "desktop_has_touch": US_DESKTOP_HAS_TOUCH,
+                "desktop_color_scheme": US_DESKTOP_COLOR_SCHEME,
                 "chrome_launch_args": CHROME_ARGS,
                 "chrome_launcher": "$AGENT_MANAGER_BROWSER_US_CHROME_LAUNCHER",
                 "managed_user_data_dir": "$AGENT_MANAGER_BROWSER_US_USER_DATA_DIR",
@@ -1487,6 +1508,8 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
     mismatches = []
     expected_geolocation = browser_context.get("geolocation") if isinstance(browser_context, dict) else None
     observed_geolocation = observed.get("geolocation") if isinstance(observed.get("geolocation"), dict) else None
+    expected_viewport = browser_context.get("viewport") if isinstance(browser_context.get("viewport"), dict) else None
+    expected_screen = browser_context.get("screen") if isinstance(browser_context.get("screen"), dict) else None
     if observed.get("language") != APP_LOCALE:
         mismatches.append("automation navigator.language")
     languages = observed.get("languages")
@@ -1510,6 +1533,30 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation Intl region display name")
     if not accept_language_is_us(observed.get("acceptLanguageHeader")):
         mismatches.append("automation Accept-Language")
+    if not isinstance(expected_viewport, dict):
+        mismatches.append("automation viewport config")
+    else:
+        if observed.get("innerWidth") != expected_viewport.get("width"):
+            mismatches.append("automation viewport width")
+        if observed.get("innerHeight") != expected_viewport.get("height"):
+            mismatches.append("automation viewport height")
+    if not isinstance(expected_screen, dict):
+        mismatches.append("automation screen config")
+    else:
+        if observed.get("screenWidth") != expected_screen.get("width"):
+            mismatches.append("automation screen width")
+        if observed.get("screenHeight") != expected_screen.get("height"):
+            mismatches.append("automation screen height")
+    if observed.get("devicePixelRatio") != browser_context.get("device_scale_factor"):
+        mismatches.append("automation device scale factor")
+    if observed.get("maxTouchPoints") != 0:
+        mismatches.append("automation touch points")
+    if observed.get("coarsePointer") is not False:
+        mismatches.append("automation coarse pointer")
+    if observed.get("userAgentDataMobile") not in (False, None):
+        mismatches.append("automation user agent mobile")
+    if observed.get("lightColorScheme") is not True or observed.get("darkColorScheme") is not False:
+        mismatches.append("automation color scheme")
     if not isinstance(expected_geolocation, dict) or not isinstance(observed_geolocation, dict):
         mismatches.append("automation geolocation")
         return tuple(mismatches)
@@ -1569,13 +1616,7 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                 **playwright_chrome_launch_options(platform_name),
             )
             try:
-                context = browser.new_context(
-                    locale=browser_context.get("locale"),
-                    timezone_id=browser_context.get("timezone_id"),
-                    geolocation=browser_context.get("geolocation"),
-                    permissions=browser_context.get("permissions") or [],
-                    extra_http_headers=browser_context.get("extra_http_headers") or {},
-                )
+                context = new_us_playwright_context(browser, browser_context)
                 try:
                     page = context.new_page()
                     page.goto(runtime_url, wait_until="load", timeout=max(1000, int(timeout * 1000)))
@@ -1604,6 +1645,16 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             dateFormat: Intl.DateTimeFormat(undefined, {dateStyle: 'short', timeZone: 'UTC'}).format(new Date(Date.UTC(2026, 4, 22))),
                             currencyFormat: Intl.NumberFormat(undefined, {style: 'currency', currency: 'USD'}).format(1234.56),
                             regionDisplayName: new Intl.DisplayNames(undefined, {type: 'region'}).of('US'),
+                            innerWidth: window.innerWidth,
+                            innerHeight: window.innerHeight,
+                            screenWidth: window.screen.width,
+                            screenHeight: window.screen.height,
+                            devicePixelRatio: window.devicePixelRatio,
+                            maxTouchPoints: navigator.maxTouchPoints,
+                            coarsePointer: window.matchMedia('(pointer: coarse)').matches,
+                            lightColorScheme: window.matchMedia('(prefers-color-scheme: light)').matches,
+                            darkColorScheme: window.matchMedia('(prefers-color-scheme: dark)').matches,
+                            userAgentDataMobile: navigator.userAgentData ? navigator.userAgentData.mobile : null,
                             geolocation: position,
                           };
                         }
@@ -1653,6 +1704,12 @@ def new_us_playwright_context(browser, browser_context: dict):
         geolocation=browser_context.get("geolocation"),
         permissions=browser_context.get("permissions") or [],
         extra_http_headers=browser_context.get("extra_http_headers") or {},
+        viewport=browser_context.get("viewport"),
+        screen=browser_context.get("screen"),
+        device_scale_factor=browser_context.get("device_scale_factor"),
+        is_mobile=browser_context.get("is_mobile"),
+        has_touch=browser_context.get("has_touch"),
+        color_scheme=browser_context.get("color_scheme"),
     )
 
 
