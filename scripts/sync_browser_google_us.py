@@ -49,6 +49,8 @@ US_DESKTOP_HAS_TOUCH = False
 US_DESKTOP_COLOR_SCHEME = "light"
 US_DESKTOP_HARDWARE_CONCURRENCY = 8
 US_DESKTOP_DEVICE_MEMORY_GB = 8
+US_DESKTOP_WEBGL_VENDOR = "Intel Inc."
+US_DESKTOP_WEBGL_RENDERER = "Intel Iris OpenGL Engine"
 EXIT_PROFILE_GEOLOCATION_ACCURACY = 50000
 VERIFICATION_REPORT_VERSION = 1
 FALLBACK_CHROME_VERSION = "120.0.0.0"
@@ -935,6 +937,8 @@ def automation_context_payload(exit_profile: ExitProfile | None, managed_user_da
             "color_scheme": US_DESKTOP_COLOR_SCHEME,
             "hardware_concurrency": US_DESKTOP_HARDWARE_CONCURRENCY,
             "device_memory_gb": US_DESKTOP_DEVICE_MEMORY_GB,
+            "webgl_vendor": US_DESKTOP_WEBGL_VENDOR,
+            "webgl_renderer": US_DESKTOP_WEBGL_RENDERER,
         },
         "chrome_launch": {
             "args": [
@@ -1295,6 +1299,8 @@ def verification_report_payload(
                 "desktop_color_scheme": US_DESKTOP_COLOR_SCHEME,
                 "automation_hardware_concurrency": US_DESKTOP_HARDWARE_CONCURRENCY,
                 "automation_device_memory_gb": US_DESKTOP_DEVICE_MEMORY_GB,
+                "automation_webgl_vendor": US_DESKTOP_WEBGL_VENDOR,
+                "automation_webgl_renderer": US_DESKTOP_WEBGL_RENDERER,
                 "automation_locale_week_info": {"firstDay": 7, "weekend": [6, 7]},
                 "automation_locale_text_info": {"direction": "ltr"},
                 "automation_locale_hour_cycles": ["h12"],
@@ -2112,6 +2118,10 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation hardware concurrency")
     if observed.get("deviceMemory") != browser_context.get("device_memory_gb"):
         mismatches.append("automation device memory")
+    if observed.get("webglVendor") != browser_context.get("webgl_vendor"):
+        mismatches.append("automation WebGL vendor")
+    if observed.get("webglRenderer") != browser_context.get("webgl_renderer"):
+        mismatches.append("automation WebGL renderer")
     if observed.get("pdfViewerEnabled") is not True:
         mismatches.append("automation pdf viewer")
     if not positive_integer(observed.get("pluginsLength")):
@@ -2239,6 +2249,8 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             darkColorScheme: window.matchMedia('(prefers-color-scheme: dark)').matches,
                             hardwareConcurrency: navigator.hardwareConcurrency,
                             deviceMemory: navigator.deviceMemory,
+                            webglVendor: null,
+                            webglRenderer: null,
                             pdfViewerEnabled: navigator.pdfViewerEnabled,
                             pluginsLength: navigator.plugins.length,
                             mimeTypesLength: navigator.mimeTypes.length,
@@ -2263,6 +2275,17 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                           observed.cameraPermission = await permissionState('camera');
                           observed.microphonePermission = await permissionState('microphone');
                           observed.notificationsPermission = await permissionState('notifications');
+                          try {
+                            const canvas = document.createElement('canvas');
+                            const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                            const debugInfo = gl ? gl.getExtension('WEBGL_debug_renderer_info') : null;
+                            if (gl && debugInfo) {
+                              observed.webglVendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+                              observed.webglRenderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                            }
+                          } catch (error) {
+                            observed.webglError = String(error && error.name || error);
+                          }
                           try {
                             const intlLocale = new Intl.Locale(observed.intlLocale);
                             observed.localeWeekInfo = intlLocale.getWeekInfo ? intlLocale.getWeekInfo() : null;
@@ -2355,6 +2378,8 @@ def new_us_playwright_context(browser, browser_context: dict):
     navigator_languages = browser_context.get("navigator_languages")
     hardware_concurrency = browser_context.get("hardware_concurrency")
     device_memory_gb = browser_context.get("device_memory_gb")
+    webgl_vendor = browser_context.get("webgl_vendor")
+    webgl_renderer = browser_context.get("webgl_renderer")
     if isinstance(hardware_concurrency, int) and not isinstance(hardware_concurrency, bool) and hardware_concurrency > 0:
         context.add_init_script(
             f"""
@@ -2374,6 +2399,37 @@ def new_us_playwright_context(browser, browser_context: dict):
                 configurable: true,
                 get: () => {device_memory_gb},
               }});
+            }})();
+            """
+        )
+    if isinstance(webgl_vendor, str) and webgl_vendor and isinstance(webgl_renderer, str) and webgl_renderer:
+        webgl_vendor_json = json.dumps(webgl_vendor)
+        webgl_renderer_json = json.dumps(webgl_renderer)
+        context.add_init_script(
+            f"""
+            (() => {{
+              const webglVendor = {webgl_vendor_json};
+              const webglRenderer = {webgl_renderer_json};
+              const patchGetParameter = (contextConstructor) => {{
+                if (!contextConstructor || !contextConstructor.prototype || !contextConstructor.prototype.getParameter) {{
+                  return;
+                }}
+                const originalGetParameter = contextConstructor.prototype.getParameter;
+                Object.defineProperty(contextConstructor.prototype, 'getParameter', {{
+                  configurable: true,
+                  value(parameter) {{
+                    if (parameter === 37445) {{
+                      return webglVendor;
+                    }}
+                    if (parameter === 37446) {{
+                      return webglRenderer;
+                    }}
+                    return originalGetParameter.apply(this, arguments);
+                  }},
+                }});
+              }};
+              patchGetParameter(window.WebGLRenderingContext);
+              patchGetParameter(window.WebGL2RenderingContext);
             }})();
             """
         )

@@ -270,6 +270,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(automation_context["browser_context"]["color_scheme"], "light")
             self.assertEqual(automation_context["browser_context"]["hardware_concurrency"], 8)
             self.assertEqual(automation_context["browser_context"]["device_memory_gb"], 8)
+            self.assertEqual(automation_context["browser_context"]["webgl_vendor"], "Intel Inc.")
+            self.assertEqual(automation_context["browser_context"]["webgl_renderer"], "Intel Iris OpenGL Engine")
             self.assertEqual(automation_context["google"]["home_url"], "https://www.google.com/?hl=en-US&gl=US&pws=0")
             self.assertEqual(automation_context["chrome_launch"]["launcher"], str(launcher_path))
             self.assertEqual(automation_context["chrome_launch"]["managed_user_data_dir"], str(managed_profile_root))
@@ -452,6 +454,11 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["automation"]["desktop_color_scheme"], "light")
             self.assertEqual(verification_report["enforced_features"]["automation"]["automation_hardware_concurrency"], 8)
             self.assertEqual(verification_report["enforced_features"]["automation"]["automation_device_memory_gb"], 8)
+            self.assertEqual(verification_report["enforced_features"]["automation"]["automation_webgl_vendor"], "Intel Inc.")
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["automation_webgl_renderer"],
+                "Intel Iris OpenGL Engine",
+            )
             self.assertEqual(
                 verification_report["enforced_features"]["automation"]["automation_locale_week_info"],
                 {"firstDay": 7, "weekend": [6, 7]},
@@ -977,6 +984,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "color_scheme": "light",
             "hardware_concurrency": 8,
             "device_memory_gb": 8,
+            "webgl_vendor": "Intel Inc.",
+            "webgl_renderer": "Intel Iris OpenGL Engine",
         }
         observed = {
             "userAgent": browser_context["user_agent"],
@@ -1031,6 +1040,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "darkColorScheme": False,
             "hardwareConcurrency": 8,
             "deviceMemory": 8,
+            "webglVendor": "Intel Inc.",
+            "webglRenderer": "Intel Iris OpenGL Engine",
             "pdfViewerEnabled": True,
             "pluginsLength": 5,
             "mimeTypesLength": 2,
@@ -1125,6 +1136,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         observed["hoverHover"] = False
         observed["hardwareConcurrency"] = 2
         observed["deviceMemory"] = 4
+        observed["webglVendor"] = "Google Inc. (Apple)"
+        observed["webglRenderer"] = "ANGLE Metal Renderer"
         observed["pluginsLength"] = 0
         mismatches = module.validate_automation_context_observation(observed, browser_context)
 
@@ -1135,6 +1148,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertIn("automation hover", mismatches)
         self.assertIn("automation hardware concurrency", mismatches)
         self.assertIn("automation device memory", mismatches)
+        self.assertIn("automation WebGL vendor", mismatches)
+        self.assertIn("automation WebGL renderer", mismatches)
         self.assertIn("automation plugins", mismatches)
 
         observed["innerWidth"] = 1365
@@ -1144,6 +1159,8 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         observed["hoverHover"] = True
         observed["hardwareConcurrency"] = 8
         observed["deviceMemory"] = 8
+        observed["webglVendor"] = "Intel Inc."
+        observed["webglRenderer"] = "Intel Iris OpenGL Engine"
         observed["pluginsLength"] = 5
         observed["cameraPermission"] = "granted"
         observed["languages"] = ["en-US"]
