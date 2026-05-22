@@ -96,7 +96,15 @@ BLOCKED_FONT_FAMILIES = (
 EXIT_PROFILE_GEOLOCATION_ACCURACY = 50000
 VERIFICATION_REPORT_VERSION = 1
 FALLBACK_CHROME_VERSION = "120.0.0.0"
-DISABLED_CHROME_FEATURES = ("ReduceAcceptLanguage", "WebGPU", "FontAccess")
+DISABLED_CHROME_FEATURES = (
+    "ReduceAcceptLanguage",
+    "WebGPU",
+    "FontAccess",
+    "WebBluetooth",
+    "WebUSB",
+    "WebHID",
+    "Serial",
+)
 BASE_CHROME_ARGS = [
     "--lang=en-US",
     "--accept-lang=en-US,en",
@@ -1322,6 +1330,9 @@ def verification_report_payload(
                 "runtime_notification_permission": "denied",
                 "runtime_speech_synthesis_present": False,
                 "runtime_local_font_access_present": False,
+                "runtime_bluetooth_api_present": False,
+                "runtime_usb_api_present": False,
+                "runtime_hid_api_present": False,
                 "runtime_webrtc_supported": True,
                 "runtime_webrtc_local_ip_leak": False,
                 "runtime_profile_webrtc_policy": "disable_non_proxied_udp",
@@ -1363,6 +1374,19 @@ def verification_report_payload(
                 "automation_speech_synthesis_present": False,
                 "automation_local_font_access_present": False,
                 "automation_webgpu_adapter_available": False,
+                "automation_hardware_device_apis": {
+                    "bluetooth": False,
+                    "usb": False,
+                    "hid": False,
+                    "serial": "present_without_authorized_ports",
+                },
+                "automation_hardware_device_counts": {
+                    "bluetooth": 0,
+                    "usb": 0,
+                    "hid": 0,
+                    "serial": 0,
+                },
+                "automation_hardware_device_identity_exposed": False,
                 "automation_media_device_identity_exposed": False,
                 "automation_camera_permission_not_granted": True,
                 "automation_microphone_permission_not_granted": True,
@@ -1540,6 +1564,10 @@ def runtime_probe_html() -> str:
         "mimeTypesLength:navigator.mimeTypes.length,"
         "speechSynthesisPresent:'speechSynthesis' in window,"
         "localFontAccessPresent:'queryLocalFonts' in window,"
+        "bluetoothPresent:'bluetooth' in navigator,"
+        "usbPresent:'usb' in navigator,"
+        "hidPresent:'hid' in navigator,"
+        "serialPresent:'serial' in navigator,"
         "timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,"
         "intlLocale:Intl.DateTimeFormat().resolvedOptions().locale,"
         "intlCalendar:Intl.DateTimeFormat().resolvedOptions().calendar,"
@@ -1760,6 +1788,12 @@ def runtime_desktop_surface_mismatches(runtime_context: dict) -> tuple[str, ...]
         mismatches.append("runtime speech synthesis")
     if runtime_context.get("localFontAccessPresent") is not False:
         mismatches.append("runtime local font access")
+    if runtime_context.get("bluetoothPresent") is not False:
+        mismatches.append("runtime Bluetooth API")
+    if runtime_context.get("usbPresent") is not False:
+        mismatches.append("runtime USB API")
+    if runtime_context.get("hidPresent") is not False:
+        mismatches.append("runtime HID API")
     return tuple(mismatches)
 
 
@@ -2220,6 +2254,27 @@ def validate_automation_context_observation(observed: dict, browser_context: dic
         mismatches.append("automation WebGPU probe")
     if observed.get("webGpuAdapterAvailable") is not False:
         mismatches.append("automation WebGPU adapter")
+    hardware_device_apis = observed.get("hardwareDeviceApis")
+    hardware_device_counts = observed.get("hardwareDeviceCounts")
+    hardware_device_errors = observed.get("hardwareDeviceProbeErrors")
+    if not isinstance(hardware_device_apis, dict):
+        mismatches.append("automation hardware device API checks")
+    else:
+        for api_name in ("bluetooth", "usb", "hid"):
+            if hardware_device_apis.get(api_name) is not False:
+                mismatches.append(f"automation {api_name} API")
+    if not isinstance(hardware_device_counts, dict):
+        mismatches.append("automation hardware device count checks")
+    else:
+        for api_name in ("bluetooth", "usb", "hid", "serial"):
+            if hardware_device_counts.get(api_name) != 0:
+                mismatches.append(f"automation {api_name} device count")
+    if isinstance(hardware_device_errors, dict) and hardware_device_errors:
+        mismatches.append("automation hardware device probe")
+    elif not isinstance(hardware_device_errors, dict):
+        mismatches.append("automation hardware device probe")
+    if observed.get("hardwareDeviceIdentityExposed") is not False:
+        mismatches.append("automation hardware device identity")
     if observed.get("mediaDeviceProbeError"):
         mismatches.append("automation media device probe")
     if observed.get("mediaDeviceIdentityExposed") is not False:
@@ -2356,6 +2411,20 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                             keyboardLayout: null,
                             webGpuPresent: 'gpu' in navigator,
                             webGpuAdapterAvailable: null,
+                            hardwareDeviceApis: {
+                              bluetooth: 'bluetooth' in navigator,
+                              usb: 'usb' in navigator,
+                              hid: 'hid' in navigator,
+                              serial: 'serial' in navigator,
+                            },
+                            hardwareDeviceCounts: {
+                              bluetooth: 0,
+                              usb: 0,
+                              hid: 0,
+                              serial: 0,
+                            },
+                            hardwareDeviceIdentityExposed: false,
+                            hardwareDeviceProbeErrors: {},
                             mediaDeviceCount: null,
                             mediaDeviceKinds: [],
                             mediaDeviceIdentityExposed: false,
@@ -2476,6 +2545,33 @@ def verify_automation_browser_context(config_dir: Path, timeout: float, platform
                           } catch (error) {
                             observed.webGpuProbeError = String(error && error.name || error);
                           }
+                          async function probeHardwareDeviceApi(apiName, methodName) {
+                            try {
+                              const api = navigator[apiName];
+                              if (!api || typeof api[methodName] !== 'function') {
+                                observed.hardwareDeviceCounts[apiName] = 0;
+                                return;
+                              }
+                              const devices = await Promise.race([
+                                api[methodName](),
+                                new Promise((resolve) => setTimeout(() => resolve('timeout'), 500)),
+                              ]);
+                              if (devices === 'timeout') {
+                                observed.hardwareDeviceProbeErrors[apiName] = 'timeout';
+                                return;
+                              }
+                              observed.hardwareDeviceCounts[apiName] = Array.isArray(devices) ? devices.length : 0;
+                              if (observed.hardwareDeviceCounts[apiName] > 0) {
+                                observed.hardwareDeviceIdentityExposed = true;
+                              }
+                            } catch (error) {
+                              observed.hardwareDeviceProbeErrors[apiName] = String(error && error.name || error);
+                            }
+                          }
+                          await probeHardwareDeviceApi('bluetooth', 'getDevices');
+                          await probeHardwareDeviceApi('usb', 'getDevices');
+                          await probeHardwareDeviceApi('hid', 'getDevices');
+                          await probeHardwareDeviceApi('serial', 'getPorts');
                           try {
                             if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
                               const devices = await Promise.race([

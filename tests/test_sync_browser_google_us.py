@@ -291,7 +291,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertIn("--disable-speech-api", automation_context["chrome_launch"]["args"])
             self.assertIn("--deny-permission-prompts", automation_context["chrome_launch"]["args"])
             self.assertIn(
-                "--disable-features=ReduceAcceptLanguage,WebGPU,FontAccess",
+                "--disable-features=ReduceAcceptLanguage,WebGPU,FontAccess,WebBluetooth,WebUSB,WebHID,Serial",
                 automation_context["chrome_launch"]["args"],
             )
             self.assertIn("--disable-blink-features=AutomationControlled", automation_context["chrome_launch"]["args"])
@@ -351,7 +351,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["automation"]["context_permissions"], ["geolocation"])
             self.assertEqual(
                 verification_report["enforced_features"]["locale"]["disabled_chrome_features"],
-                ["ReduceAcceptLanguage", "WebGPU", "FontAccess"],
+                ["ReduceAcceptLanguage", "WebGPU", "FontAccess", "WebBluetooth", "WebUSB", "WebHID", "Serial"],
             )
             self.assertEqual(
                 verification_report["enforced_features"]["device_permissions"][
@@ -430,6 +430,9 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_notification_permission"], "denied")
             self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_speech_synthesis_present"])
             self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_local_font_access_present"])
+            self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_bluetooth_api_present"])
+            self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_usb_api_present"])
+            self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_hid_api_present"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["runtime_webrtc_supported"])
             self.assertFalse(verification_report["enforced_features"]["automation"]["runtime_webrtc_local_ip_leak"])
             self.assertEqual(verification_report["enforced_features"]["automation"]["runtime_profile_webrtc_policy"], "disable_non_proxied_udp")
@@ -504,6 +507,22 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertFalse(verification_report["enforced_features"]["automation"]["automation_speech_synthesis_present"])
             self.assertFalse(verification_report["enforced_features"]["automation"]["automation_local_font_access_present"])
             self.assertFalse(verification_report["enforced_features"]["automation"]["automation_webgpu_adapter_available"])
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["automation_hardware_device_apis"],
+                {
+                    "bluetooth": False,
+                    "usb": False,
+                    "hid": False,
+                    "serial": "present_without_authorized_ports",
+                },
+            )
+            self.assertEqual(
+                verification_report["enforced_features"]["automation"]["automation_hardware_device_counts"],
+                {"bluetooth": 0, "usb": 0, "hid": 0, "serial": 0},
+            )
+            self.assertFalse(
+                verification_report["enforced_features"]["automation"]["automation_hardware_device_identity_exposed"]
+            )
             self.assertFalse(verification_report["enforced_features"]["automation"]["automation_media_device_identity_exposed"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_camera_permission_not_granted"])
             self.assertTrue(verification_report["enforced_features"]["automation"]["automation_microphone_permission_not_granted"])
@@ -530,7 +549,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             self.assertIn("--disable-extensions", launcher_content)
             self.assertIn("--disable-speech-api", launcher_content)
             self.assertIn("--deny-permission-prompts", launcher_content)
-            self.assertIn("--disable-features=ReduceAcceptLanguage,WebGPU,FontAccess", launcher_content)
+            self.assertIn(
+                "--disable-features=ReduceAcceptLanguage,WebGPU,FontAccess,WebBluetooth,WebUSB,WebHID,Serial",
+                launcher_content,
+            )
             self.assertIn("--disable-blink-features=AutomationControlled", launcher_content)
             self.assertIn("--disable-quic", launcher_content)
             self.assertIn("--dns-prefetch-disable", launcher_content)
@@ -894,6 +916,7 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             '"finePointer":true,"hoverHover":true,"lightColorScheme":true,"darkColorScheme":false,'
             '"pdfViewerEnabled":true,"pluginsLength":5,"mimeTypesLength":2,'
             '"speechSynthesisPresent":false,"localFontAccessPresent":false,'
+            '"bluetoothPresent":false,"usbPresent":false,"hidPresent":false,"serialPresent":true,'
             '"timezone":"America/Los_Angeles","timezoneOffset":'
             + str(timezone_offset)
             + ',"intlLocale":"en-US",'
@@ -949,6 +972,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertEqual(runtime_context["mimeTypesLength"], 2)
         self.assertFalse(runtime_context["speechSynthesisPresent"])
         self.assertFalse(runtime_context["localFontAccessPresent"])
+        self.assertFalse(runtime_context["bluetoothPresent"])
+        self.assertFalse(runtime_context["usbPresent"])
+        self.assertFalse(runtime_context["hidPresent"])
+        self.assertTrue(runtime_context["serialPresent"])
         self.assertEqual(runtime_context["timezone"], "America/Los_Angeles")
         self.assertEqual(runtime_context["timezoneOffset"], timezone_offset)
         self.assertEqual(runtime_context["intlCalendar"], "gregory")
@@ -1087,6 +1114,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
             "speechSynthesisPresent": False,
             "localFontAccessPresent": False,
             "webGpuAdapterAvailable": False,
+            "hardwareDeviceApis": {"bluetooth": False, "usb": False, "hid": False, "serial": True},
+            "hardwareDeviceCounts": {"bluetooth": 0, "usb": 0, "hid": 0, "serial": 0},
+            "hardwareDeviceIdentityExposed": False,
+            "hardwareDeviceProbeErrors": {},
             "mediaDeviceIdentityExposed": False,
             "cameraPermission": "prompt",
             "microphonePermission": "prompt",
@@ -1190,6 +1221,10 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         observed["localFontAccessPresent"] = True
         observed["keyboardLayout"] = {"KeyQ": "a", "KeyZ": "w"}
         observed["webGpuAdapterAvailable"] = True
+        observed["hardwareDeviceApis"] = {"bluetooth": True, "usb": True, "hid": True, "serial": True}
+        observed["hardwareDeviceCounts"] = {"bluetooth": 1, "usb": 1, "hid": 1, "serial": 1}
+        observed["hardwareDeviceIdentityExposed"] = True
+        observed["hardwareDeviceProbeErrors"] = {}
         observed["mediaDeviceIdentityExposed"] = True
         mismatches = module.validate_automation_context_observation(observed, browser_context)
 
@@ -1209,6 +1244,14 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertIn("automation local font access", mismatches)
         self.assertIn("automation keyboard layout", mismatches)
         self.assertIn("automation WebGPU adapter", mismatches)
+        self.assertIn("automation bluetooth API", mismatches)
+        self.assertIn("automation usb API", mismatches)
+        self.assertIn("automation hid API", mismatches)
+        self.assertIn("automation bluetooth device count", mismatches)
+        self.assertIn("automation usb device count", mismatches)
+        self.assertIn("automation hid device count", mismatches)
+        self.assertIn("automation serial device count", mismatches)
+        self.assertIn("automation hardware device identity", mismatches)
         self.assertIn("automation media device identity", mismatches)
 
         observed["innerWidth"] = 1365
@@ -1229,6 +1272,9 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         observed["localFontAccessPresent"] = False
         observed["keyboardLayout"] = {"KeyQ": "q", "KeyZ": "z"}
         observed["webGpuAdapterAvailable"] = False
+        observed["hardwareDeviceApis"] = {"bluetooth": False, "usb": False, "hid": False, "serial": True}
+        observed["hardwareDeviceCounts"] = {"bluetooth": 0, "usb": 0, "hid": 0, "serial": 0}
+        observed["hardwareDeviceIdentityExposed"] = False
         observed["mediaDeviceIdentityExposed"] = False
         observed["cameraPermission"] = "granted"
         observed["languages"] = ["en-US"]
