@@ -10,6 +10,7 @@
     "graphify": { "enabled": true, "auto_update": true },
     "auggie": { "enabled": true, "auto_update": true }
   },
+  "browser_us_sync": { "enabled": true },
   "skills": {
     "agent-skills": { "enabled": true },
     "oa-skill": { "enabled": true },

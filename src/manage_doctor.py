@@ -139,11 +139,21 @@ def get_unsupported_actions(provider_cfg: dict | None) -> set[str]:
 
 
 def validate_json_shape(data: dict, name: str) -> None:
+    def validate_browser_us_sync() -> None:
+        settings = data.get("browser_us_sync", {})
+        if settings is None:
+            return
+        if not isinstance(settings, dict):
+            raise ValueError(f"{name}.browser_us_sync 必须是对象")
+        if not isinstance(settings.get("enabled", True), bool):
+            raise ValueError(f"{name}.browser_us_sync.enabled 必须是布尔值")
+
     if name == "manager.json":
         get_typed_mapping_section(data, "agents", name, (dict,), "对象")
         get_typed_mapping_section(data, "tools", name, (dict,), "对象")
         get_typed_mapping_section(data, "skills", name, (dict,), "对象")
         get_typed_mapping_section(data, "mcp", name, (dict,), "对象")
+        validate_browser_us_sync()
     elif name == "tools.json":
         get_typed_mapping_section(data, "tools", name, (dict,), "对象")
     elif name == "skills.json":

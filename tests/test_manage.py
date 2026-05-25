@@ -1977,6 +1977,10 @@ class ManageScriptTests(unittest.TestCase):
                     "exit 0\n"
                 ),
             )
+            (temp_root / "config" / "manager.local.json").write_text(
+                '{\n  "browser_us_sync": { "enabled": true }\n}\n',
+                encoding="utf-8",
+            )
 
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "update"],
@@ -1990,6 +1994,48 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, combined)
             log_lines = call_log.read_text(encoding="utf-8").splitlines()
             self.assertTrue(any(line == "browser " for line in log_lines), log_lines)
+
+    def test_update_pipeline_skips_browser_google_us_sync_when_disabled(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            call_log = temp_root / "calls.log"
+            remove_path(temp_root / "secrets")
+
+            self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log, "True")
+            self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log, "True")
+            self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log, "True")
+            self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log, "True")
+            self._write_stub(
+                temp_root / "scripts" / "sync_browser_google_us.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(91)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
+                (
+                    "#!/usr/bin/env bash\n"
+                    f"printf '%s\\n' \"rules $*\" >> {str(call_log)!r}\n"
+                    "exit 0\n"
+                ),
+            )
+            (temp_root / "config" / "manager.local.json").write_text(
+                '{\n  "browser_us_sync": { "enabled": false }\n}\n',
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "update"],
+                cwd=temp_root,
+                env=self._managed_env(),
+                capture_output=True,
+                check=False,
+            )
+
+            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            self.assertEqual(result.returncode, 0, combined)
+            log_lines = call_log.read_text(encoding="utf-8").splitlines()
+            self.assertFalse(any(line.startswith("browser ") for line in log_lines), log_lines)
+            self.assertIn("浏览器 US 同步已禁用", combined)
 
     def test_self_update_only_runs_repo_pull(self):
         with tempfile.TemporaryDirectory() as temp_dir:

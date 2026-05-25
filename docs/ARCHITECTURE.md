@@ -38,6 +38,7 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `preferred_provider`: 首选安装来源
 - `manager.json`: 仓库提供的可审计默认值
 - `manager.local.json`: 不参与 Git 的本地覆盖层；`make ui` 默认写入这里
+- `browser_us_sync.enabled`: 是否在 `manage.sh` 的 `update` / `bootstrap` / `all` / `browser:sync` 入口执行浏览器 Google US 前置同步；缺省为启用，可用本地覆盖或 `AGENT_MANAGER_BROWSER_US_SYNC_ENABLED` 临时改写
 - `agent-manager` 不维护终端 dotfiles；用户级 shell/tmux/iTerm 配置不属于受管目标
 - `agents` 键使用稳定的机器可读 ID（如 `claude-code`, `codex`, `gemini-cli`），而不是面向用户的展示名
 

@@ -580,6 +580,15 @@ sys.path.insert(0, str(root))
 
 from src.json_config import ensure_mapping_value_types, get_typed_mapping_section, load_json_object_file
 
+def validate_browser_us_sync(data, name):
+    settings = data.get("browser_us_sync", {})
+    if settings is None:
+        return
+    if not isinstance(settings, dict):
+        raise ValueError(f"{name}.browser_us_sync 必须是对象")
+    if not isinstance(settings.get("enabled", True), bool):
+        raise ValueError(f"{name}.browser_us_sync.enabled 必须是布尔值")
+
 try:
     data = load_json_object_file(path, strict=True, missing_ok=False)
     name = path.name
@@ -588,6 +597,7 @@ try:
         get_typed_mapping_section(data, "tools", name, (dict,), "对象")
         get_typed_mapping_section(data, "skills", name, (dict,), "对象")
         get_typed_mapping_section(data, "mcp", name, (dict,), "对象")
+        validate_browser_us_sync(data, name)
     elif name == "tools.json":
         get_typed_mapping_section(data, "tools", name, (dict,), "对象")
     elif name == "skills.json":
@@ -882,7 +892,65 @@ function run_tools_sync_task() {
     run_task_in_dir "同步全局工具" "工具链同步完成" "工具失败" 600 "$ROOT_DIR/agent-tool" "$PYTHON_CMD" "${args[@]}"
 }
 
+function browser_us_sync_enabled() {
+    local override="${AGENT_MANAGER_BROWSER_US_SYNC_ENABLED:-}"
+    local normalized_override
+    normalized_override="$(printf '%s' "$override" | tr '[:upper:]' '[:lower:]')"
+    case "$normalized_override" in
+        "")
+            ;;
+        1|true|yes|on|enabled)
+            return 0
+            ;;
+        0|false|no|off|disabled)
+            return 1
+            ;;
+        *)
+            echo -e "${ERROR_RED}错误: AGENT_MANAGER_BROWSER_US_SYNC_ENABLED 必须是 true/false、1/0、yes/no 或 on/off${NC}" >&2
+            return 2
+            ;;
+    esac
+
+    "$PYTHON_CMD" - "$CONFIG_FILE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+try:
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+except Exception as exc:
+    print(f"manager.json 无效: {exc}", file=sys.stderr)
+    raise SystemExit(2)
+
+settings = data.get("browser_us_sync", {})
+if settings is None:
+    settings = {}
+if not isinstance(settings, dict):
+    print("manager.json.browser_us_sync 必须是对象", file=sys.stderr)
+    raise SystemExit(2)
+
+enabled = settings.get("enabled", True)
+if not isinstance(enabled, bool):
+    print("manager.json.browser_us_sync.enabled 必须是布尔值", file=sys.stderr)
+    raise SystemExit(2)
+
+raise SystemExit(0 if enabled else 1)
+PY
+}
+
 function run_browser_us_sync_task() {
+    if browser_us_sync_enabled; then
+        :
+    else
+        local status="$?"
+        if [ "$status" -eq 1 ]; then
+            status_line "SKIP" "浏览器 US 同步已禁用"
+            return 0
+        fi
+        return "$status"
+    fi
+
     local args=(scripts/sync_browser_google_us.py)
     if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
     if [ -n "$OFFLINE_FLAG" ]; then args+=("$OFFLINE_FLAG"); fi
@@ -1387,7 +1455,7 @@ case "$cmd" in
     tools:sync)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-tool" "$PYTHON_CMD" sync_tools.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/tools.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG $FORCE_REFRESH_FLAG ;;
     browser:sync)
-        run_supervised_command_in_dir 120 "$ROOT_DIR" "$PYTHON_CMD" "$ROOT_DIR/scripts/sync_browser_google_us.py" $DRY_RUN_FLAG $OFFLINE_FLAG ;;
+        run_browser_us_sync_task ;;
     fetch-models)
         args=()
         if [ "${#CMD_ARGS[@]}" -gt 0 ]; then

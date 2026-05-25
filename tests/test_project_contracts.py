@@ -291,6 +291,7 @@ class ProjectContractTests(unittest.TestCase):
     def test_readme_documents_local_override_and_terminal_boundary(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("manager.local.json", readme)
+        self.assertIn("browser_us_sync.enabled", readme)
         self.assertIn("不接管终端配置", readme)
 
     def test_readme_documents_rules_source_build_dist_flow(self):
@@ -508,6 +509,7 @@ class ProjectContractTests(unittest.TestCase):
     def test_architecture_documents_local_override_and_terminal_boundary(self):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
         self.assertIn("manager.local.json", architecture)
+        self.assertIn("browser_us_sync.enabled", architecture)
         self.assertIn("不接管终端配置", architecture)
 
     def test_architecture_documents_doctor_python_module(self):
