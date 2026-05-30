@@ -159,6 +159,9 @@ class RuleLayoutTests(unittest.TestCase):
             "Before edits that change behavior, touch shared code, or span multiple files, inspect the affected "
             "code and nearby tests first."
         )
+        anti_test_weakening_clause = (
+            "Never delete tests, make tests easier, loosen assertions, or skip/xfail failures just to make code pass"
+        )
         for target, filename in self.DIST_FILENAMES.items():
             content = (ROOT / "agent-rule" / "rules" / "dist" / target / filename).read_text(encoding="utf-8")
             self.assertIn(language_clause, content, target)
@@ -169,6 +172,7 @@ class RuleLayoutTests(unittest.TestCase):
             self.assertIn(explicit_verification_clause, content, target)
             self.assertNotIn("graphify-out/GRAPH_REPORT.md", content, target)
             self.assertIn(explicit_context_clause, content, target)
+            self.assertIn(anti_test_weakening_clause, content, target)
             self.assertIn("modules/artifact-hygiene.md", content, target)
 
     def test_built_outputs_stay_compact_and_omit_scaffolding_text(self):
