@@ -130,21 +130,20 @@ SECRETS_REPO_URL=https://example.com/your-secrets.git make update
 ./scripts/init-secrets.sh https://example.com/your-secrets.git
 ```
 
-## CC-Bridge Runtime 管理
+## CC-Bridge 运行说明（受控）
 
-- `make cc-bridge-install`: 同步本地 `secrets/` 后，按最新稳定 release 完成首次安装并启动。
-- `make cc-bridge-start`: 启动前会先检查最新稳定版本；如果发现新版本，会先升级再启动。
-- `make cc-bridge-stop`: 停止当前 `cc-bridge` 容器，但保留宿主机数据目录和状态文件。
-- `make cc-bridge-deploy`: 同步本地 `secrets/` 后，自动查询 `cc-bridge` 最新稳定 release tag，渲染宿主机运行目录并完成首次部署。
-- `make cc-bridge-update`: 每次执行都自动读取 GitHub `releases/latest`，将宿主机 bind mount 数据目录备份后升级到最新稳定版本；不需要手工查 tag。
-- `make cc-bridge-seed`: 从 `secrets/cc-bridge.accounts.json` 和 `secrets/cc-bridge.api-tokens.json` 导入账号池与网关 token。
-- `make cc-bridge-rollback`: 回滚到最近一次成功部署前记录的上一个 tag。
-- `make cc-bridge-status`: 输出当前 tag、最新稳定 tag、容器主进程 PID、访问 URL、端口、Docker 运行状态，以及 Claude Code 的接入环境变量示例。
-- `cc-bridge` 实际运行的不是裸上游镜像，而是基于显式 release tag 生成的美国化派生镜像，用来强制提供 `America/Los_Angeles` 时区和 `en_US.UTF-8` locale。
-- `cc-bridge` 只有在上游 tag、本地派生镜像构建上下文或本地派生镜像缓存发生变化时才会重新 build；没有变化时会直接复用现有派生镜像。
-- `cc-bridge` 运行时默认强制使用 `America/Los_Angeles` 时区和 `en_US.UTF-8` 美国英语 locale；如果容器内实际做不到这些设置，`install/start/update/rollback` 会直接失败。
-- `cc-bridge` 数据目录固定走宿主机挂载，不使用 Docker named volume；默认挂载目标是运行目录下的 `data/` 到容器 `/app/data`。
-- 具体文件布局、secret 格式和运行命令见 [docs/CC-BRIDGE-MANAGEMENT.md](./docs/CC-BRIDGE-MANAGEMENT.md)。
+出于最小公开原则，`cc-bridge` 的细节说明已从主文档收拢。以下仅保留受控入口与最小执行语义：
+
+- `make cc-bridge-install`
+- `make cc-bridge-start`
+- `make cc-bridge-stop`
+- `make cc-bridge-deploy`
+- `make cc-bridge-update`
+- `make cc-bridge-seed`
+- `make cc-bridge-status`
+- `make cc-bridge-rollback`
+
+运行约束与实施细节请使用内部参考：`docs/CC-BRIDGE-MANAGEMENT.md`（仅保留最小接入信息）。
 
 ## 许可证
 Apache-2.0
