@@ -21,18 +21,22 @@ class SkillExposureContractTests(unittest.TestCase):
             if repo["skill_count"] > 1:
                 self.assertIsNotNone(repo.get("agents"), f"{repo_name} must explicitly scope agents")
 
-    def test_multi_skill_repository_agent_scopes_stay_intentional(self):
+    def test_repository_agent_scopes_stay_intentional(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
         expected_scopes = {
             "agent-skills": ["claude-code", "codex"],
+            "anthropic-frontend-design-skill": ["claude-code"],
+            "playwright-best-practices-skill": ["claude-code", "codex"],
             "superpowers": ["claude-code", "gemini-cli", "codex"],
             "ui-ux-pro-max-skill": ["claude-code", "codex"],
         }
 
-        for repo_name, expected_agents in expected_scopes.items():
-            repo = skills_config["repositories"][repo_name]
-            self.assertGreater(repo["skill_count"], 1)
-            self.assertEqual(repo["agents"], expected_agents)
+        actual_scopes = {
+            repo_name: repo["agents"]
+            for repo_name, repo in skills_config["repositories"].items()
+            if "agents" in repo
+        }
+        self.assertEqual(actual_scopes, expected_scopes)
 
     def test_repository_agent_scopes_reference_declared_targets(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))

@@ -30,20 +30,22 @@ class SkillUsageMetricsTests(unittest.TestCase):
             for agent, paths in path_map.items()
         }
 
+    def _expected_available_skill_count_by_agent(self) -> dict[str, int]:
+        skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
+        counts = {agent_name: 0 for agent_name in sorted(skills_config["agents"])}
+        for repo in skills_config["repositories"].values():
+            target_agents = repo.get("agents") or list(counts)
+            for agent_name in target_agents:
+                counts[agent_name] += repo["skill_count"]
+        return counts
+
     def test_eval_reports_skill_exposure_and_instruction_budget_metrics(self):
         result = self._run_eval()
         combined = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, combined)
 
         summary = json.loads(result.stdout)
-        self.assertEqual(
-            summary["available_skill_count_by_agent"],
-            {
-                "claude-code": 27,
-                "codex": 26,
-                "gemini-cli": 15,
-            },
-        )
+        self.assertEqual(summary["available_skill_count_by_agent"], self._expected_available_skill_count_by_agent())
         self.assertEqual(summary["avg_triggered_skill_count"], 12 / 10)
         self.assertEqual(summary["always_on_instruction_tokens_by_agent"], self._expected_instruction_tokens_by_agent())
         self.assertEqual(

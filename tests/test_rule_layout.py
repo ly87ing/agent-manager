@@ -148,19 +148,23 @@ class RuleLayoutTests(unittest.TestCase):
             "Use Chinese (Simplified) for interactions and generated content. "
             "Use English terms only when clearer."
         )
-        explicit_web_search_clause = (
-            "For internet searches: strictly default to `web_search` and `web_fetch` (grok-search)."
-        )
-        explicit_verification_clause = (
-            "If you skip verification, cannot run it, or ran something that did not actually exercise "
-            "the change, say so explicitly."
-        )
-        explicit_context_clause = (
-            "Before edits that change behavior, touch shared code, or span multiple files, inspect the affected "
-            "code and nearby tests first."
-        )
-        anti_test_weakening_clause = (
-            "Never delete tests, make tests easier, loosen assertions, or skip/xfail failures just to make code pass"
+        required_clauses = (
+            "For internet searches: strictly default to `web_search` and `web_fetch` (grok-search).",
+            (
+                "If you skip verification, cannot run it, or ran something that did not actually exercise "
+                "the change, say so explicitly."
+            ),
+            (
+                "Before edits that change behavior, touch shared code, or span multiple files, inspect the affected "
+                "code and nearby tests first."
+            ),
+            "Never delete tests, make tests easier, loosen assertions, or skip/xfail failures just to make code pass",
+            (
+                "Prefer the simplest local change. No speculative features, abstractions, config, "
+                "or impossible-case handling."
+            ),
+            "Keep edits surgical: match local style, avoid unrelated cleanup, and remove only dead code made obsolete.",
+            "modules/artifact-hygiene.md",
         )
         for target, filename in self.DIST_FILENAMES.items():
             content = (ROOT / "agent-rule" / "rules" / "dist" / target / filename).read_text(encoding="utf-8")
@@ -168,12 +172,9 @@ class RuleLayoutTests(unittest.TestCase):
             self.assertNotIn("For codebase exploration:", content, target)
             self.assertNotIn("codebase-retrieval", content, target)
             self.assertNotIn("augment MCP", content, target)
-            self.assertIn(explicit_web_search_clause, content, target)
-            self.assertIn(explicit_verification_clause, content, target)
             self.assertNotIn("graphify-out/GRAPH_REPORT.md", content, target)
-            self.assertIn(explicit_context_clause, content, target)
-            self.assertIn(anti_test_weakening_clause, content, target)
-            self.assertIn("modules/artifact-hygiene.md", content, target)
+            for clause in required_clauses:
+                self.assertIn(clause, content, target)
 
     def test_built_outputs_stay_compact_and_omit_scaffolding_text(self):
         forbidden_fragments = (
