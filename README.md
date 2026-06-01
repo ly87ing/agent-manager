@@ -1,6 +1,6 @@
 # Agent Manager (Ultimate Edition)
 
-🚀 **AI 助手环境一键管理中枢**。通过单一入口，只对 `Claude Code`、`Codex`、`Gemini CLI` 做 Agent 生命周期、MCP、skills 和 rules 管理。退役 Agent 的旧路径只保留必要的清理/迁移逻辑，不再作为受管目标维护。
+🚀 **AI 助手环境一键管理中枢**。通过单一入口，只对 `Claude Code`、`Codex`、`Antigravity CLI` 做 Agent 生命周期、MCP、skills 和 rules 管理。退役 Agent 的旧路径只保留必要的清理/迁移逻辑，不再作为受管目标维护。
 
 ## 核心规范速查表 (Authoritative Spec)
 
@@ -11,7 +11,7 @@
    │ Agent 名称     │ 官方标准路径            │ 文件格式 │ 核心键名    │
    ├────────────────┼─────────────────────────┼──────────┼─────────────┤
    │ Claude Code    │ ~/.claude.json          │ JSON     │ mcpServers  │
-   │ Gemini CLI     │ ~/.gemini/settings.json │ JSON     │ mcpServers  │
+   │ Antigravity CLI │ ~/.gemini/antigravity-cli/mcp_config.json │ JSON │ mcpServers │
    │ Codex          │ ~/.codex/config.toml    │ TOML     │ mcp_servers │
    └────────────────┴─────────────────────────┴──────────┴─────────────┘
 ```
@@ -22,7 +22,7 @@
 
 - `chrome-devtools`
   - 用途：`Chrome DevTools` 调试、网络、性能分析。
-  - 启动：`npx -y chrome-devtools-mcp@latest --isolated`（避免不同 Agent 共用 profile 导致互相污染）。
+  - 启动：`npx -y chrome-devtools-mcp@latest --isolated`（避免多个 agent 共享同一个 browser profile 导致互相污染）。
 - `grok-search`
   - 用途：联网搜索与网页抓取。
   - 注意：真实 provider key 仅从 `secrets/` 注入。
@@ -33,16 +33,16 @@
 
 - `graphify`
   - 通过官方 PyPI 包 `graphifyy` 及 `uv tool` 安装。
-  - `/graphify` skill 会安装到 `Claude`、`Codex`、`Gemini` 的声明目标。
+  - `/graphify` skill 会安装到 `Claude`、`Codex`、`Antigravity` 的声明目标。
   - 按需使用，不会通过 shared rules 或 `Claude/Codex hooks` 默认提醒读取报告。
 - `chrome-devtools`（MCP）
   - 继续使用 `npx ...@latest` 运行时拉取上游最新能力。
 默认受管 skill 仓库当前包含 `agent-skills`、`oa-skill`、`anthropic-frontend-design-skill`、`playwright-best-practices-skill`、`superpowers` 和 `ui-ux-pro-max-skill`；它们在未显式声明 `commit` / `ref` 时，会在同步时跟随上游默认分支最新状态；其中 `agent-skills` 面向 `Claude Code` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 `safe-merge-review` 单个 skill 包，避免上游新增 skill 被默认带入；`oa-skill` 当前通过显式 `skill_paths` 默认接入仓库内唯一的 `xyai-manager` skill；`anthropic-frontend-design-skill` 仅面向 `Claude Code` 暴露，并通过显式 `skill_paths` 锁定 Anthropic 官方 `skills/frontend-design`。OpenAI 官方仓库当前最新主分支已不再提供 `frontend-skill`，因此默认清单不再引用该路径，避免 `make all` 在跟随上游最新状态时失败。
-默认自动安装的 Agent 当前只包含 `Claude Code`、`Codex` 和 `Gemini CLI`。
-`Claude Code` 当前默认走官方 native installer；`Codex` 与 `Gemini CLI` 默认走官方 npm 包。历史 `brew` 安装仅用于识别并提示迁移，不再作为这三个 CLI 的受管 provider。
+默认自动安装的 Agent 当前只包含 `Claude Code`、`Codex` 和 `Antigravity CLI`。
+`Claude Code` 与 `Antigravity CLI` 当前默认走官方 native installer；`Codex` 默认走官方 npm 包。历史 `brew` 安装仅用于识别并提示迁移，不再作为这些 CLI 的受管 provider。
 `Claude Code native` 当前已经补齐官方 uninstall 路径，因此 `install / update / uninstall` 都可继续走官方 installer 语义。
 `Claude Code` 仍保留 `npm` 作为 legacy-compatible 受管 provider；`Claude Code local install` 不纳入 `agent-manager` lifecycle 托管，因为它依赖 shell alias 暴露入口，当前探测链路不会越权接管。
-以上 lifecycle 口径统一按三个当前受管 Agent 的官方推荐方式维护。`Claude Code` 优先使用官方 native installer 和 `claude update`；`Codex` 使用官方 npm 包并通过 `npm install -g @openai/codex@latest` 升级；`Gemini CLI` 使用官方 npm stable 包并通过 `npm install -g @google/gemini-cli@latest` 升级。放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer。
+以上 lifecycle 口径统一按三个当前受管 Agent 的官方推荐方式维护。`Claude Code` 优先使用官方 native installer 和 `claude update`；`Codex` 使用官方 npm 包并通过 `npm install -g @openai/codex@latest` 升级；`Antigravity CLI` 使用官方 `curl -fsSL https://antigravity.google/cli/install.sh | bash` 安装到 `agy`，并依赖 CLI 自身运行时后台更新，不由 `agent-manager` 伪造 update 命令。放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer。
 
 ## Official CLI Lifecycle Policy
 
@@ -50,23 +50,24 @@
 | :--- | :--- | :--- | :--- | :--- |
 | `Claude Code` | `native` | `npm` | `brew` | 默认使用官方 installer；若已是 npm 版，可继续受管或按官方 `claude migrate-installer` 手工迁移；官方 uninstall 路径也已纳入托管。 |
 | `Codex` | `npm` | - | `brew` | 使用官方 npm 包；升级固定为 `npm install -g @openai/codex@latest`，历史 brew 安装只用于审计和迁移提示。 |
-| `Gemini CLI` | `npm` | - | `brew` | 使用官方 npm stable 包；升级固定为 `npm install -g @google/gemini-cli@latest`，brew 只做历史识别。 |
+| `Antigravity CLI` | `native` | - | - | 使用官方 installer 安装 `agy`；无显式受管 update，CLI 运行时自更新。 |
 
 ## Agent 安装源依据 (Official Channels Catalog)
 
-下表列出上游公开安装渠道，但不等于 `agent-manager` 会默认或继续托管这些渠道；对 `Claude Code`、`Codex`、`Gemini CLI` 的实际受管策略以上一节为准。
+下表列出上游公开安装渠道，但不等于 `agent-manager` 会默认或继续托管这些渠道；对 `Claude Code`、`Codex`、`Antigravity CLI` 的实际受管策略以上一节为准。
 
 | 助手名称 | 二进制标识 | 官方 npm / 安装器 | Homebrew 官方源 (macOS) | 备注 |
 | :--- | :--- | :--- | :--- | :--- |
 | **Claude Code** | `claude` | 官方 native installer / `@anthropic-ai/claude-code` | `cask: claude-code` | `brew` 仅保留 detect-only 语义。 |
 | **Codex** | `codex` | `@openai/codex` | `cask: codex` | 受管 lifecycle 默认走 npm。 |
-| **Gemini CLI** | `gemini` | `@google/gemini-cli` | `formula: gemini-cli` | 受管 lifecycle 默认走 npm stable。 |
+| **Antigravity CLI** | `agy` | 官方 native installer | - | 受管 lifecycle 默认走 `https://antigravity.google/cli/install.sh`。 |
 
 ## 核心健全性特性
 
 ### 1. 策略与定义分离 (Policy vs. Definition)
 - **仓库基线 (`manager.json`)**：保存可审计的默认策略。
 - **本地覆盖 (`manager.local.json`)**：运行时与 `manager.json` 深度合并；`make ui` 只写这一层，适合机器本地偏好与私有配置。
+- **浏览器前置开关**：`browser_us_sync.enabled` 控制 `update` / `bootstrap` / `all` / `browser:sync` 是否执行浏览器 Google US 前置同步。
 - **模块化定义 (`agents.json`等)**：保存官方指令细节，支持 Policy 的强制覆盖。
 
 ### 2. 事务级数据安全
@@ -78,7 +79,7 @@
 - **物理路径穿透**：即使包管理器未记录，探测器也能通过精准的 `PATH` 扫描与 `.app` 目录兜底识别出系统已有的残留环境，从而达成 10 倍以上的性能提升。
 
 ### 4. 环境自愈与清理
-- **一键大扫除 (Cleanup)**：精准回收受管备份、碎片及冗余日志；覆盖当前受管目标和 Gemini 临时 JSON 备份。
+- **一键大扫除 (Cleanup)**：精准回收受管备份、碎片及冗余日志；覆盖当前受管目标和历史 Gemini 临时 JSON 备份。
 - **失效洗刷 (Scrubbing)**：自动清理 Agent 目录中的死亡软链。
 
 ### 5. 安全默认值
@@ -90,15 +91,15 @@
 - **可编辑源码**：跨 Agent 的共享规则片段只维护在 `agent-rule/rules/src/`，这是仓库内唯一可编辑的 rule source。
 - **共享 core 职责**：`agent-rule/rules/src/shared/core.md` 只放所有 Agent 都应始终生效的短规则；这里优先约束“非平凡或有歧义任务先显式说明假设、优先最简单本地改动、保持 surgical edits、按 verification point 推进”。
 - **生成产物**：面向各 Agent 实际分发的规则文件只维护在 `agent-rule/rules/dist/`，由构建脚本生成；仓库内不再保留第二套 `rules/global/*` source tree。
-- **按 Agent 原生格式分发**：Codex 生成 `AGENTS.md`，Claude 生成 `CLAUDE.md`，Gemini 生成 `GEMINI.md`。
-- **原生 modules 位置**：全局文件旁边的 `modules/` 目录也会跟着落到原生同级位置，例如 `~/.codex/modules`、`~/.claude/modules`、`~/.gemini/modules`。
+- **按 Agent 原生格式分发**：Codex 生成 `AGENTS.md`，Claude 生成 `CLAUDE.md`，Antigravity 生成 `agent-manager` plugin 下的 rules 文件。
+- **原生 modules 位置**：全局文件旁边的 `modules/` 目录也会跟着落到原生同级位置，例如 `~/.codex/modules`、`~/.claude/modules`、`~/.gemini/antigravity-cli/plugins/agent-manager/modules`。
 - **Codex 路径特例**：由于 Codex 会把用户级规则合并进当前工作区指令视图，生成的 `~/.codex/AGENTS.md` 会直接引用 `config/rules-targets.list` 中 `codex_modules` 配置的目标路径（默认是 `~/.codex/modules/*.md`），避免把相对 `modules/` 误解析为仓库内路径。
 - **分层原则**：低频、专题或工具边界细节放 `agent-rule/rules/src/shared/modules/`；Agent 私有差异只放 `agent-rule/rules/src/agents/*/adapter.md`，不要把这些内容回灌进 shared core。
 - **迁移清理**：原生分发会清理旧的 `~/.<agent>/rules/global.md` 和旧 `rules/modules` 残留，避免新旧入口并存。
 - **Claude 记忆分层**：根目录 `CLAUDE.md` 只保留仓库级高频记忆，`agent-rule/CLAUDE.md` 和 `tests/CLAUDE.md` 承载目录级维护细节。
 - **Claude hooks**：`config/claude-hooks.json` 生成仓库级 `.claude/settings.json`，用 `make claude-hooks-sync` 刷新 deterministic hook 配置。
 - **Codex hooks**：`config/codex-hooks.json` 生成仓库级 `.codex/hooks.json`，用 `make codex-hooks-sync` 刷新 deterministic Codex hook 配置；当前包含 `PreToolUse` 的生成产物写保护和 `Stop` 的规则构建一致性校验。
-- **graphify 启用**：`config/tools.json` 中的 `graphify` 安装官方 `graphifyy` CLI，`scripts/setup-graphify.py` 将 skill 分发到 Claude、Codex、Gemini 目标；graphify 按需使用，不再通过 shared rules 或 Claude/Codex hooks 默认提示读取 graphify 报告。
+- **graphify 启用**：`config/tools.json` 中的 `graphify` 安装官方 `graphifyy` CLI，`scripts/setup-graphify.py` 将 skill 分发到 Claude、Codex、Antigravity 目标；graphify 按需使用，不再通过 shared rules 或 Claude/Codex hooks 默认提示读取 graphify 报告。
 - **指令质量评测**：`make eval-rules` 现在同时输出任务成功率、verification、skill exposure 和 always-on instruction budget 指标，并强制校验 `min_case_count`、`required_agents`、`success / verification 阈值`。
 - **分发清单**：`config/rules-targets.list` 只引用 `rules/dist/*` 产物，不直接引用源码片段。
 - **维护入口**：修改 `agent-rule/rules/src/` 后，先执行 `make rules-build`，再执行 `make rules:sync`。

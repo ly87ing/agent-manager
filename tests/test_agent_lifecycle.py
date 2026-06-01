@@ -61,7 +61,7 @@ class DetectAllProvidersTests(unittest.TestCase):
 
     def test_brew_managed_node_modules_path_is_not_misclassified_as_npm(self):
         command_outputs = {
-            ("brew", "list", "--formula", "-1"): (True, "gemini-cli\n"),
+            ("brew", "list", "--formula", "-1"): (True, "example-cli\n"),
             ("gh", "extension", "list"): (True, ""),
         }
 
@@ -69,12 +69,12 @@ class DetectAllProvidersTests(unittest.TestCase):
             run_cmd=lambda cmd, timeout=10: command_outputs.get(tuple(cmd), (False, "")),
             which=lambda binary: {
                 "brew": "/usr/local/bin/brew",
-                "gemini": "/usr/local/bin/gemini",
+                "example": "/usr/local/bin/example",
             }.get(binary),
             path_exists=lambda _path: False,
             realpath=lambda _path: posix_brew_cellar_module_path(
-                "gemini-cli",
-                "@google/gemini-cli",
+                "example-cli",
+                "example-package",
                 "dist/index.js",
                 prefix="/usr/local",
             ),
@@ -82,11 +82,11 @@ class DetectAllProvidersTests(unittest.TestCase):
 
         with mock.patch.object(sync_agents, "ProviderCache", return_value=inventory):
             providers = sync_agents.detect_all_providers(
-                "gemini",
+                "example",
                 {
                     "providers": {
                         "brew": {
-                            "install": "brew install gemini-cli",
+                            "install": "brew install example-cli",
                         }
                     }
                 },
@@ -378,12 +378,12 @@ class ReconcileAgentTests(unittest.TestCase):
 
     def test_npm_install_uses_extended_timeout(self):
         definition = {
-            "display_name": "Gemini CLI",
-            "bin": "gemini",
+            "display_name": "Codex",
+            "bin": "codex",
             "providers": {
                 "npm": {
                     "managed": True,
-                    "install": "npm install -g @google/gemini-cli",
+                    "install": "npm install -g @openai/codex",
                 }
             },
         }
@@ -394,22 +394,22 @@ class ReconcileAgentTests(unittest.TestCase):
             mock.patch.object(sync_agents, "is_agent_installed", return_value=False),
             mock.patch.object(sync_agents, "run_cmd", return_value=(True, "installed")) as run_cmd,
         ):
-            result = sync_agents.reconcile_agent("gemini-cli", definition, policy)
+            result = sync_agents.reconcile_agent("codex", definition, policy)
 
         self.assertTrue(result)
         run_cmd.assert_called_once_with(
-            "npm install -g @google/gemini-cli",
+            "npm install -g @openai/codex",
             timeout=sync_agents.INSTALL_CMD_TIMEOUT,
         )
 
     def test_async_install_enqueues_background_job(self):
         definition = {
-            "display_name": "Gemini CLI",
-            "bin": "gemini",
+            "display_name": "Codex",
+            "bin": "codex",
             "providers": {
                 "npm": {
                     "managed": True,
-                    "install": "npm install -g @google/gemini-cli",
+                    "install": "npm install -g @openai/codex",
                 }
             },
         }
@@ -420,27 +420,27 @@ class ReconcileAgentTests(unittest.TestCase):
             mock.patch.object(sync_agents, "schedule_async_action", return_value={"status": "queued"}) as schedule,
             mock.patch.object(sync_agents, "run_cmd") as run_cmd,
         ):
-            result = sync_agents.reconcile_agent("gemini-cli", definition, policy, async_actions=True)
+            result = sync_agents.reconcile_agent("codex", definition, policy, async_actions=True)
 
         self.assertTrue(result)
         run_cmd.assert_not_called()
         schedule.assert_called_once_with(
-            "gemini-cli",
+            "codex",
             definition,
-            "Gemini CLI",
+            "Codex",
             "install",
-            "npm install -g @google/gemini-cli",
+            "npm install -g @openai/codex",
             sync_agents.INSTALL_CMD_TIMEOUT,
         )
 
     def test_async_install_waits_for_background_job_when_requested(self):
         definition = {
-            "display_name": "Gemini CLI",
-            "bin": "gemini",
+            "display_name": "Codex",
+            "bin": "codex",
             "providers": {
                 "npm": {
                     "managed": True,
-                    "install": "npm install -g @google/gemini-cli",
+                    "install": "npm install -g @openai/codex",
                 }
             },
         }
@@ -452,7 +452,7 @@ class ReconcileAgentTests(unittest.TestCase):
             mock.patch.object(sync_agents, "wait_for_async_actions", return_value=True) as wait_for,
         ):
             result = sync_agents.reconcile_agent(
-                "gemini-cli",
+                "codex",
                 definition,
                 policy,
                 async_actions=True,
@@ -461,7 +461,7 @@ class ReconcileAgentTests(unittest.TestCase):
 
         self.assertTrue(result)
         schedule.assert_called_once()
-        wait_for.assert_called_once_with({"gemini-cli": "Gemini CLI"})
+        wait_for.assert_called_once_with({"codex": "Codex"})
 
     def test_upgrade_fails_when_platform_specific_command_is_unresolved(self):
         definition = {
@@ -535,12 +535,12 @@ class ReconcileAgentTests(unittest.TestCase):
 
     def test_brew_upgrade_skips_when_outdated_probe_is_empty(self):
         definition = {
-            "display_name": "Gemini CLI",
-            "bin": "gemini",
+            "display_name": "Example CLI",
+            "bin": "example",
             "providers": {
                 "brew": {
-                    "install": "brew install gemini-cli",
-                    "upgrade": "brew upgrade gemini-cli",
+                    "install": "brew install example-cli",
+                    "upgrade": "brew upgrade example-cli",
                 }
             },
         }
@@ -552,10 +552,10 @@ class ReconcileAgentTests(unittest.TestCase):
             mock.patch.object(sync_agents, "run_cmd", return_value=(True, "")) as run_cmd,
             self.assertLogs(level="INFO") as logs,
         ):
-            result = sync_agents.reconcile_agent("gemini-cli", definition, policy)
+            result = sync_agents.reconcile_agent("example-cli", definition, policy)
 
         self.assertTrue(result)
-        run_cmd.assert_called_once_with("brew outdated gemini-cli", timeout=60)
+        run_cmd.assert_called_once_with("brew outdated example-cli", timeout=60)
         self.assertTrue(any("未发现可用更新" in line for line in logs.output), logs.output)
 
     def test_brew_cask_upgrade_runs_outdated_probe_before_upgrade(self):
@@ -589,12 +589,12 @@ class ReconcileAgentTests(unittest.TestCase):
 
     def test_npm_upgrade_executes_upgrade_command_without_probe(self):
         definition = {
-            "display_name": "Gemini CLI",
-            "bin": "gemini",
+            "display_name": "Codex",
+            "bin": "codex",
             "providers": {
                 "npm": {
-                    "install": "npm install -g @google/gemini-cli",
-                    "upgrade": "npm install -g @google/gemini-cli@latest",
+                    "install": "npm install -g @openai/codex",
+                    "upgrade": "npm install -g @openai/codex@latest",
                 }
             },
         }
@@ -606,10 +606,10 @@ class ReconcileAgentTests(unittest.TestCase):
             mock.patch.object(sync_agents, "run_cmd", return_value=(True, "updated")) as run_cmd,
             self.assertLogs(level="INFO") as logs,
         ):
-            result = sync_agents.reconcile_agent("gemini-cli", definition, policy)
+            result = sync_agents.reconcile_agent("codex", definition, policy)
 
         self.assertTrue(result)
-        run_cmd.assert_called_once_with("npm install -g @google/gemini-cli@latest", timeout=300)
+        run_cmd.assert_called_once_with("npm install -g @openai/codex@latest", timeout=300)
         self.assertTrue(any("正在执行升级命令" in line for line in logs.output), logs.output)
 
     def test_native_upgrade_without_probe_logs_real_execution_state(self):
@@ -638,12 +638,12 @@ class ReconcileAgentTests(unittest.TestCase):
 
     def test_async_npm_upgrade_enqueues_background_job_without_probe(self):
         definition = {
-            "display_name": "Gemini CLI",
-            "bin": "gemini",
+            "display_name": "Codex",
+            "bin": "codex",
             "providers": {
                 "npm": {
-                    "install": "npm install -g @google/gemini-cli",
-                    "upgrade": "npm install -g @google/gemini-cli@latest",
+                    "install": "npm install -g @openai/codex",
+                    "upgrade": "npm install -g @openai/codex@latest",
                 }
             },
         }
@@ -655,16 +655,16 @@ class ReconcileAgentTests(unittest.TestCase):
             mock.patch.object(sync_agents, "schedule_async_action", return_value={"status": "queued"}) as schedule,
             mock.patch.object(sync_agents, "run_cmd") as run_cmd,
         ):
-            result = sync_agents.reconcile_agent("gemini-cli", definition, policy, async_actions=True)
+            result = sync_agents.reconcile_agent("codex", definition, policy, async_actions=True)
 
         self.assertTrue(result)
         run_cmd.assert_not_called()
         schedule.assert_called_once_with(
-            "gemini-cli",
+            "codex",
             definition,
-            "Gemini CLI",
+            "Codex",
             "update",
-            "npm install -g @google/gemini-cli@latest",
+            "npm install -g @openai/codex@latest",
             300,
         )
 
@@ -890,12 +890,12 @@ class ReconcileAgentTests(unittest.TestCase):
 
     def test_brew_probe_failure_skips_direct_upgrade(self):
         definition = {
-            "display_name": "Gemini CLI",
-            "bin": "gemini",
+            "display_name": "Example CLI",
+            "bin": "example",
             "providers": {
                 "brew": {
-                    "install": "brew install gemini-cli",
-                    "upgrade": "brew upgrade gemini-cli",
+                    "install": "brew install example-cli",
+                    "upgrade": "brew upgrade example-cli",
                 }
             },
         }
@@ -907,19 +907,19 @@ class ReconcileAgentTests(unittest.TestCase):
             mock.patch.object(sync_agents, "run_cmd", return_value=(False, "brew locked")) as run_cmd,
             self.assertLogs(level="WARNING") as logs,
         ):
-            result = sync_agents.reconcile_agent("gemini-cli", definition, policy)
+            result = sync_agents.reconcile_agent("example-cli", definition, policy)
 
         self.assertTrue(result)
-        run_cmd.assert_called_once_with("brew outdated gemini-cli", timeout=60)
+        run_cmd.assert_called_once_with("brew outdated example-cli", timeout=60)
         self.assertTrue(any("更新探测失败，跳过升级" in line for line in logs.output), logs.output)
 
     def test_direct_upgrade_network_failure_skips_upgrade(self):
         definition = {
-            "display_name": "Gemini CLI",
-            "bin": "gemini",
+            "display_name": "Codex",
+            "bin": "codex",
             "providers": {
                 "npm": {
-                    "upgrade": "npm install -g @google/gemini-cli@latest",
+                    "upgrade": "npm install -g @openai/codex@latest",
                 }
             },
         }
@@ -931,19 +931,19 @@ class ReconcileAgentTests(unittest.TestCase):
             mock.patch.object(sync_agents, "run_cmd", return_value=(False, "npm error code ENOTFOUND")) as run_cmd,
             self.assertLogs(level="WARNING") as logs,
         ):
-            result = sync_agents.reconcile_agent("gemini-cli", definition, policy)
+            result = sync_agents.reconcile_agent("codex", definition, policy)
 
         self.assertTrue(result)
-        run_cmd.assert_called_once_with("npm install -g @google/gemini-cli@latest", timeout=300)
+        run_cmd.assert_called_once_with("npm install -g @openai/codex@latest", timeout=300)
         self.assertTrue(any("升级遇到网络错误，跳过升级" in line for line in logs.output), logs.output)
 
     def test_direct_upgrade_non_network_failure_still_fails(self):
         definition = {
-            "display_name": "Gemini CLI",
-            "bin": "gemini",
+            "display_name": "Codex",
+            "bin": "codex",
             "providers": {
                 "npm": {
-                    "upgrade": "npm install -g @google/gemini-cli@latest",
+                    "upgrade": "npm install -g @openai/codex@latest",
                 }
             },
         }
@@ -955,10 +955,10 @@ class ReconcileAgentTests(unittest.TestCase):
             mock.patch.object(sync_agents, "run_cmd", return_value=(False, "permission denied")) as run_cmd,
             self.assertLogs(level="ERROR") as logs,
         ):
-            result = sync_agents.reconcile_agent("gemini-cli", definition, policy)
+            result = sync_agents.reconcile_agent("codex", definition, policy)
 
         self.assertFalse(result)
-        run_cmd.assert_called_once_with("npm install -g @google/gemini-cli@latest", timeout=300)
+        run_cmd.assert_called_once_with("npm install -g @openai/codex@latest", timeout=300)
         self.assertTrue(any("升级失败" in line for line in logs.output), logs.output)
 
 
@@ -1181,7 +1181,7 @@ class AgentIdConsistencyTests(unittest.TestCase):
         skill_targets = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))["agents"]
         mcp_agent_paths = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))["agent_paths"]
 
-        managed_agent_ids = {"claude-code", "gemini-cli", "codex"}
+        managed_agent_ids = {"claude-code", "antigravity-cli", "codex"}
 
         self.assertEqual(set(manager_agents), managed_agent_ids)
         self.assertEqual(set(lifecycle_agents), managed_agent_ids)
@@ -1194,19 +1194,19 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
         lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
 
-        self.assertEqual(set(manager["agents"]), {"claude-code", "gemini-cli", "codex"})
-        self.assertEqual(set(lifecycle_agents), {"claude-code", "gemini-cli", "codex"})
+        self.assertEqual(set(manager["agents"]), {"claude-code", "antigravity-cli", "codex"})
+        self.assertEqual(set(lifecycle_agents), {"claude-code", "antigravity-cli", "codex"})
 
         self.assertTrue(manager["agents"]["claude-code"]["enabled"])
         self.assertTrue(manager["agents"]["claude-code"]["auto_install"])
         self.assertTrue(manager["agents"]["claude-code"]["auto_update"])
         self.assertEqual(manager["agents"]["claude-code"]["preferred_provider"], "native")
         self.assertEqual(lifecycle_agents["claude-code"]["preferred_provider"], "native")
-        self.assertTrue(manager["agents"]["gemini-cli"]["enabled"])
-        self.assertTrue(manager["agents"]["gemini-cli"]["auto_install"])
-        self.assertTrue(manager["agents"]["gemini-cli"]["auto_update"])
-        self.assertEqual(manager["agents"]["gemini-cli"]["preferred_provider"], "npm")
-        self.assertEqual(lifecycle_agents["gemini-cli"]["preferred_provider"], "npm")
+        self.assertTrue(manager["agents"]["antigravity-cli"]["enabled"])
+        self.assertTrue(manager["agents"]["antigravity-cli"]["auto_install"])
+        self.assertFalse(manager["agents"]["antigravity-cli"]["auto_update"])
+        self.assertEqual(manager["agents"]["antigravity-cli"]["preferred_provider"], "native")
+        self.assertEqual(lifecycle_agents["antigravity-cli"]["preferred_provider"], "native")
         self.assertTrue(manager["agents"]["codex"]["enabled"])
         self.assertTrue(manager["agents"]["codex"]["auto_install"])
         self.assertTrue(manager["agents"]["codex"]["auto_update"])
@@ -1214,7 +1214,7 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         self.assertEqual(lifecycle_agents["codex"]["preferred_provider"], "npm")
 
         self.assertTrue(lifecycle_agents["claude-code"]["require_managed_provider"])
-        self.assertTrue(lifecycle_agents["gemini-cli"]["require_managed_provider"])
+        self.assertTrue(lifecycle_agents["antigravity-cli"]["require_managed_provider"])
         self.assertTrue(lifecycle_agents["codex"]["require_managed_provider"])
 
         claude_native = lifecycle_agents["claude-code"]["providers"]["native"]
@@ -1243,14 +1243,23 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         self.assertFalse(codex_brew["managed"])
         self.assertEqual(codex_brew["install"], "brew install --cask codex")
 
-        gemini_npm = lifecycle_agents["gemini-cli"]["providers"]["npm"]
-        self.assertTrue(gemini_npm["managed"])
-        self.assertEqual(gemini_npm["install"], "npm install -g @google/gemini-cli")
-        self.assertEqual(gemini_npm["uninstall"], "npm uninstall -g @google/gemini-cli")
-        self.assertEqual(gemini_npm["upgrade"], "npm install -g @google/gemini-cli@latest")
-
-        gemini_brew = lifecycle_agents["gemini-cli"]["providers"]["brew"]
-        self.assertFalse(gemini_brew["managed"])
+        antigravity_native = lifecycle_agents["antigravity-cli"]["providers"]["native"]
+        self.assertTrue(antigravity_native["managed"])
+        self.assertEqual(
+            antigravity_native["install"]["darwin"],
+            "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+        )
+        self.assertEqual(
+            antigravity_native["install"]["linux"],
+            "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+        )
+        self.assertEqual(
+            antigravity_native["install"]["windows"],
+            "curl -fsSL https://antigravity.google/cli/install.cmd -o install.cmd && install.cmd && del install.cmd",
+        )
+        self.assertEqual(antigravity_native["uninstall"]["posix"], "rm -f ~/.local/bin/agy")
+        self.assertEqual(antigravity_native["unsupported_actions"], ["update"])
+        self.assertEqual(antigravity_native["detect_paths"], ["~/.local/bin/agy"])
 
     def test_committed_agent_policy_uses_native_updaters_when_available(self):
         lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))

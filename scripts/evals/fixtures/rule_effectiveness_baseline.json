@@ -15,7 +15,7 @@
     },
     {
       "case_id": "doctor-flags-unmaterialized-rules",
-      "agent": "gemini-cli",
+      "agent": "antigravity-cli",
       "triggered_skills": [
         "verification-before-completion"
       ],

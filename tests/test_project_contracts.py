@@ -300,7 +300,7 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("agent-rule/rules/dist/", readme)
         self.assertIn("make rules-build", readme)
         self.assertIn("AGENTS.md", readme)
-        self.assertIn("GEMINI.md", readme)
+        self.assertIn("agent-manager` plugin", readme)
         self.assertIn("CLAUDE.md", readme)
 
     def test_readme_documents_shared_rule_design_principles(self):
@@ -351,25 +351,25 @@ class ProjectContractTests(unittest.TestCase):
     def test_readme_documents_official_cli_lifecycle_policy(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("按三个当前受管 Agent 的官方推荐方式维护", readme)
-        self.assertIn("`Claude Code`、`Codex`、`Gemini CLI`", readme)
+        self.assertIn("`Claude Code`、`Codex`、`Antigravity CLI`", readme)
         self.assertIn("仅用于识别并提示迁移", readme)
-        self.assertIn("默认自动安装的 Agent 当前只包含 `Claude Code`、`Codex` 和 `Gemini CLI`", readme)
-        self.assertIn("`Claude Code` 当前默认走官方 native installer", readme)
+        self.assertIn("默认自动安装的 Agent 当前只包含 `Claude Code`、`Codex` 和 `Antigravity CLI`", readme)
         self.assertIn(
             "`Claude Code native` 当前已经补齐官方 uninstall 路径，因此 `install / update / uninstall` 都可继续走官方 installer 语义。",
             readme,
         )
-        self.assertIn("`Codex` 与 `Gemini CLI` 默认走官方 npm 包", readme)
+        self.assertIn("`Claude Code` 与 `Antigravity CLI` 当前默认走官方 native installer", readme)
         self.assertIn("`Codex` 使用官方 npm 包并通过 `npm install -g @openai/codex@latest` 升级", readme)
-        self.assertIn("`Gemini CLI` 使用官方 npm stable 包并通过 `npm install -g @google/gemini-cli@latest` 升级", readme)
+        self.assertIn("`Antigravity CLI` 使用官方 `curl -fsSL https://antigravity.google/cli/install.sh | bash` 安装到 `agy`", readme)
+        self.assertIn("不由 `agent-manager` 伪造 update 命令", readme)
         self.assertIn("`Claude Code local install` 不纳入 `agent-manager` lifecycle 托管", readme)
         self.assertIn("放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer", readme)
 
     def test_readme_documents_current_agent_scope(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("只对 `Claude Code`、`Codex`、`Gemini CLI` 做 Agent 生命周期、MCP、skills 和 rules 管理", readme)
+        self.assertIn("只对 `Claude Code`、`Codex`、`Antigravity CLI` 做 Agent 生命周期、MCP、skills 和 rules 管理", readme)
         self.assertIn("│ Claude Code", readme)
-        self.assertIn("│ Gemini CLI", readme)
+        self.assertIn("│ Antigravity CLI", readme)
         self.assertIn("│ Codex", readme)
 
     def test_troubleshooting_documents_official_lifecycle_gap_guidance(self):
@@ -380,7 +380,7 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("官方生命周期动作缺口", section)
         self.assertIn("官方当前未提供受管 uninstall 动作", section)
         self.assertIn("fail-close", section)
-        self.assertIn("当前三个受管 Agent 的默认 provider 都已有明确 install / update / uninstall 路径", section)
+        self.assertIn("`Antigravity CLI` 没有显式受管 update 命令", section)
         self.assertIn("不会伪造删除命令", section)
 
     def test_readme_documents_agent_skills_scope_matches_config(self):
@@ -527,7 +527,7 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("{{REPO_ROOT}}", architecture)
         self.assertIn("dist/codex/AGENTS.md", architecture)
         self.assertIn("dist/claude/CLAUDE.md", architecture)
-        self.assertIn("dist/gemini/GEMINI.md", architecture)
+        self.assertIn("dist/antigravity/rules/agent-manager.md", architecture)
 
     def test_architecture_documents_instruction_quality_regression_target(self):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
@@ -548,8 +548,8 @@ class ProjectContractTests(unittest.TestCase):
 
     def test_architecture_documents_current_agent_scope(self):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
-        self.assertIn("只对 `Claude Code`、`Codex`、`Gemini CLI` 做 Agent 生命周期、MCP、skills 和 rules 管理", architecture)
-        self.assertIn("当前默认受管目标只包含 `Claude Code`、`Codex` 和 `Gemini CLI`", architecture)
+        self.assertIn("只对 `Claude Code`、`Codex`、`Antigravity CLI` 做 Agent 生命周期、MCP、skills 和 rules 管理", architecture)
+        self.assertIn("当前默认受管目标只包含 `Claude Code`、`Codex` 和 `Antigravity CLI`", architecture)
         self.assertIn("如需启用某类能力，再声明对应的 MCP / skills / rules target path", architecture)
         self.assertNotIn("新增 Agent 时必须同时声明 MCP / skills / rules 三类 target path", architecture)
 

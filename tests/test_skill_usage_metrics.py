@@ -23,7 +23,9 @@ class SkillUsageMetricsTests(unittest.TestCase):
         path_map = {
             "codex": [ROOT / "agent-rule" / "rules" / "dist" / "codex" / "AGENTS.md", ROOT / "AGENTS.md"],
             "claude-code": [ROOT / "agent-rule" / "rules" / "dist" / "claude" / "CLAUDE.md", ROOT / "CLAUDE.md"],
-            "gemini-cli": [ROOT / "agent-rule" / "rules" / "dist" / "gemini" / "GEMINI.md"],
+            "antigravity-cli": [
+                ROOT / "agent-rule" / "rules" / "dist" / "antigravity" / "rules" / "agent-manager.md"
+            ],
         }
         return {
             agent: sum(round(len(path.read_text(encoding="utf-8")) / 4) for path in paths)
@@ -53,7 +55,7 @@ class SkillUsageMetricsTests(unittest.TestCase):
             [
                 ("add-make-target", "codex", 1),
                 ("browser-tool-intent-boundary", "claude-code", 1),
-                ("doctor-flags-unmaterialized-rules", "gemini-cli", 1),
+                ("doctor-flags-unmaterialized-rules", "antigravity-cli", 1),
                 ("manifest-targets-dist-artifacts", "claude-code", 1),
                 ("prevent-dist-edit-drift", "claude-code", 1),
                 ("rule-budget-regression-guard", "claude-code", 2),

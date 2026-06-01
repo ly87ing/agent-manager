@@ -33,7 +33,7 @@ from src.toml_compat import load_tomllib
 PLACEHOLDER_PATTERN = re.compile(r"^\$\{[^}]+\}$")
 RULE_TARGET_PREFIX_TO_ID = {
     "claude": "claude-code",
-    "gemini": "gemini-cli",
+    "antigravity": "antigravity-cli",
     "codex": "codex",
 }
 REQUIRED_CONFIG_FILES = (

@@ -3534,7 +3534,7 @@ class ManageScriptTests(unittest.TestCase):
             os.utime(newer_backup, (1710936000, 1710936000))
 
             (temp_root / "config" / "mcp.json").write_text(
-                '{\n  "agent_paths": {\n    "claude-code": "%s",\n    "gemini-cli": "%s"\n  },\n  "servers": {}\n}\n'
+                '{\n  "agent_paths": {\n    "claude-code": "%s",\n    "antigravity-cli": "%s"\n  },\n  "servers": {}\n}\n'
                 % (older_target, newer_target),
                 encoding="utf-8",
             )

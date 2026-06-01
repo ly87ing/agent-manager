@@ -641,12 +641,20 @@ def manage_links(skill_name, source_path, targets, allowed_agents, is_enabled=Tr
     for agent_name, target_path in active_targets.items():
         target_base = Path(target_path).expanduser()
         link_path = target_base / skill_name
-        if agent_name != "codex" and not target_base.parent.exists() and is_enabled: continue
+        if agent_name not in {"codex", "antigravity-cli"} and not target_base.parent.exists() and is_enabled: continue
         if not is_enabled:
             if (link_path.exists() or is_link_entry(link_path)) and not dry_run:
                 remove_path(link_path)
             continue
         if not target_base.exists() and not dry_run: target_base.mkdir(parents=True, exist_ok=True)
+        if agent_name == "antigravity-cli" and not dry_run:
+            plugin_root = target_base.parent
+            marker_path = plugin_root / "plugin.json"
+            if not marker_path.exists():
+                marker_path.write_text(
+                    json.dumps({"name": plugin_root.name}, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
         if dry_run: logging.info(f"[AGENT: {agent_name}] (预览: 计划加载 {skill_name})"); continue
         create_link(source_path, link_path, dry_run)
 

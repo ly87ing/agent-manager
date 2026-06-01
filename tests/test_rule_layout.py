@@ -12,7 +12,7 @@ class RuleLayoutTests(unittest.TestCase):
     DIST_FILENAMES = {
         "codex": "AGENTS.md",
         "claude": "CLAUDE.md",
-        "gemini": "GEMINI.md",
+        "antigravity": "rules/agent-manager.md",
     }
 
     def _copy_repo(self, temp_dir: str) -> Path:
@@ -182,6 +182,7 @@ class RuleLayoutTests(unittest.TestCase):
             "# Agent Behavior Guidelines",
             "# Claude Adapter",
             "# Gemini Adapter",
+            "# Antigravity Adapter",
             "# IDE Adapter",
         )
         for target, filename in self.DIST_FILENAMES.items():

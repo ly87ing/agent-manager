@@ -44,6 +44,8 @@ agent_installed_for_target() {
   case "$expanded" in
     "$HOME"/.claude/*|"$HOME"/.claude)
       command -v claude >/dev/null 2>&1 ;;
+    "$HOME"/.gemini/antigravity-cli/*|"$HOME"/.gemini/antigravity-cli)
+      command -v agy >/dev/null 2>&1 ;;
     "$HOME"/.gemini/*|"$HOME"/.gemini)
       command -v gemini >/dev/null 2>&1 ;;
     "$HOME"/.codex/*|"$HOME"/.codex)
@@ -142,34 +144,36 @@ remove_target() {
 cleanup_legacy_target_paths() {
   local name="$1"
   local dst_abs="$2"
-  local legacy_path=""
+  local legacy_paths=("")
 
   case "$name" in
     codex_global)
       if [ "$dst_abs" = "$HOME/.codex/AGENTS.md" ]; then
-        legacy_path="$HOME/.codex/rules/global.md"
+        legacy_paths=("$HOME/.codex/rules/global.md")
       fi
       ;;
     claude_global)
-      legacy_path="$HOME/.claude/rules/global.md"
+      legacy_paths=("$HOME/.claude/rules/global.md")
       ;;
-    gemini_global)
-      legacy_path="$HOME/.gemini/rules/global.md"
+    antigravity_rules)
+      legacy_paths=("$HOME/.gemini/GEMINI.md" "$HOME/.gemini/rules/global.md")
       ;;
     codex_modules)
-      legacy_path="$HOME/.codex/rules/modules"
+      legacy_paths=("$HOME/.codex/rules/modules")
       ;;
     claude_modules)
-      legacy_path="$HOME/.claude/rules/modules"
+      legacy_paths=("$HOME/.claude/rules/modules")
       ;;
-    gemini_modules)
-      legacy_path="$HOME/.gemini/rules/modules"
+    antigravity_modules)
+      legacy_paths=("$HOME/.gemini/modules" "$HOME/.gemini/rules/modules")
       ;;
   esac
 
-  if [ -n "$legacy_path" ] && { [ -e "$legacy_path" ] || [ -L "$legacy_path" ]; }; then
-    remove_target "$legacy_path"
-  fi
+  for legacy_path in "${legacy_paths[@]}"; do
+    if [ -n "$legacy_path" ] && { [ -e "$legacy_path" ] || [ -L "$legacy_path" ]; }; then
+      remove_target "$legacy_path"
+    fi
+  done
 }
 
 cleanup_repo_native_backups() {

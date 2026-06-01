@@ -33,23 +33,25 @@
       }
     }
   },
-  "gemini-cli": {
-    "display_name": "Gemini CLI",
-    "bin": "gemini",
-    "preferred_provider": "npm",
+  "antigravity-cli": {
+    "display_name": "Antigravity CLI",
+    "bin": "agy",
+    "preferred_provider": "native",
     "require_managed_provider": true,
     "providers": {
-      "npm": {
+      "native": {
         "managed": true,
-        "install": "npm install -g @google/gemini-cli",
-        "uninstall": "npm uninstall -g @google/gemini-cli",
-        "upgrade": "npm install -g @google/gemini-cli@latest"
-      },
-      "brew": {
-        "managed": false,
-        "install": "brew install gemini-cli",
-        "uninstall": "brew uninstall gemini-cli",
-        "upgrade": "brew upgrade gemini-cli"
+        "install": {
+          "darwin": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+          "linux": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+          "windows": "curl -fsSL https://antigravity.google/cli/install.cmd -o install.cmd && install.cmd && del install.cmd"
+        },
+        "uninstall": {
+          "posix": "rm -f ~/.local/bin/agy",
+          "windows": "powershell -NoProfile -Command \"Remove-Item -Path \\\"$env:USERPROFILE\\\\AppData\\\\Local\\\\agy\\\\bin\\\\agy.exe\\\" -Force\""
+        },
+        "unsupported_actions": ["update"],
+        "detect_paths": ["~/.local/bin/agy"]
       }
     }
   },

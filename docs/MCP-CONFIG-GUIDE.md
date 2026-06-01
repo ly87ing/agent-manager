@@ -65,7 +65,7 @@ make sync
 | Agent | 配置文件路径 | 根键名 | command 格式 | 环境变量键 | 特殊要求 |
 |-------|-------------|--------|-------------|-----------|----------|
 | **Claude Code** | `~/.claude.json` | `mcpServers` | 字符串 + args 数组 | `env` | - |
-| **Gemini CLI** | `~/.gemini/settings.json` | `mcpServers` | 字符串 + args 数组 | `env` | 项目配置优先 |
+| **Antigravity CLI** | `~/.gemini/antigravity-cli/mcp_config.json` | `mcpServers` | 字符串 + args 数组 | `env` | workspace 配置 `.agents/mcp_config.json` 可补充 |
 | **Codex** | `~/.codex/config.toml` | `[mcp_servers.*]` | 字符串 + args 数组 | `[mcp_servers.*.env]` | TOML 字符串转义 |
 
 ---
@@ -94,9 +94,9 @@ make sync
 
 ---
 
-### Gemini CLI
+### Antigravity CLI
 
-**配置文件**: `~/.gemini/settings.json`（全局）或 `./.gemini/settings.json`（项目）
+**配置文件**: `~/.gemini/antigravity-cli/mcp_config.json`（全局）或 `./.agents/mcp_config.json`（workspace）
 
 ```json
 {
@@ -113,13 +113,14 @@ make sync
 ```
 
 **重要**:
-- **项目配置优先于全局配置**
-- 如果项目目录存在 `.gemini/settings.json`，会覆盖全局配置
-- "Disconnected" 状态是正常的，stdio MCP 按需启动
+- Antigravity CLI 使用独立的 sparse MCP 配置，不再复用旧 Gemini CLI 的 `settings.json`
+- workspace 本地配置放在 `.agents/mcp_config.json`
+- "Disconnected" 状态通常是正常的，stdio MCP 按需启动
 
 **验证命令**:
 ```bash
-gemini mcp list
+agy
+# 在 TUI 中输入 /mcp
 ```
 
 ---
@@ -266,26 +267,26 @@ git push origin main
 ┌─────────────┐     ┌──────────────────┐     ┌─────────────────────┐
 │   Agent     │────▶│  auggie (MCP)    │────▶│  codebase-retrieval │
 │  (Claude/   │◀────│  Server          │◀────│  Tool               │
-│   Gemini/   │     │                  │     │                     │
+│   Antigrav./│     │                  │     │                     │
 │   etc.)     │     │  env:            │     │                     │
 └─────────────┘     │  AUGMENT_SESSION │     └─────────────────────┘
                     │  _AUTH           │
                     └──────────────────┘
 ```
 
-### 为什么 Gemini CLI 显示 "Disconnected"
+### 为什么 Antigravity CLI 显示 "Disconnected"
 
 **这是正常行为！**
 
-Gemini CLI 的 stdio MCP 服务器采用**按需启动**策略：
-- `gemini mcp list` 显示 "Disconnected" 表示当前没有活跃连接
+Antigravity CLI 的 stdio MCP 服务器采用**按需启动**策略：
+- `/mcp` 显示 "Disconnected" 表示当前没有活跃连接
 - 实际使用 MCP 功能时（如调用 `codebase-retrieval`），服务器会自动启动
 - 使用后会自动关闭以节省资源
 
 **验证方法**:
 ```bash
 # 实际使用测试
-gemini -p "请用 codebase-retrieval 查看当前项目的结构"
+agy -p "请用 codebase-retrieval 查看当前项目的结构"
 ```
 
 ---
@@ -336,18 +337,18 @@ KEY = '{"nested":"value"}'
 
 ---
 
-### Q2: Gemini CLI 配置不生效
+### Q2: Antigravity CLI 配置不生效
 
-**原因**: 项目配置覆盖了全局配置
+**原因**: workspace 配置和全局配置不一致，或仍在维护旧 Gemini CLI 配置路径
 
 **解决**: 检查并更新项目配置：
 ```bash
 # 检查是否存在项目配置
-ls -la ./.gemini/settings.json
+ls -la ./.agents/mcp_config.json
 
 # 如果存在，需要同时更新项目配置
 # 或者删除项目配置使用全局配置
-rm ./.gemini/settings.json
+rm ./.agents/mcp_config.json
 ```
 
 ---
@@ -374,7 +375,7 @@ rm ./.gemini/settings.json
 
 4. **查看 Agent 日志**:
    - Claude Code: 检查对话错误信息
-   - Gemini CLI: `gemini debug mcp`
+   - Antigravity CLI: 在 TUI 中打开 `/mcp`
 
 ---
 
@@ -446,9 +447,9 @@ auggie --mcp --mcp-auto-workspace
 # Claude Code
 # 在对话中询问 MCP 状态
 
-# Gemini CLI
-gemini mcp list
-gemini debug mcp  # 需要登录
+# Antigravity CLI
+agy
+# 在 TUI 中输入 /mcp
 
 # Codex
 codex mcp list
@@ -471,7 +472,7 @@ PY
 | Agent | 日志位置 |
 |-------|---------|
 | Claude Code | 终端输出 |
-| Gemini CLI | `gemini debug mcp` |
+| Antigravity CLI | TUI `/mcp` 面板 |
 | Codex | 终端输出 |
 
 ---
@@ -487,7 +488,7 @@ PY
 3. 替换 ${VAR} 占位符；若真实执行时仍有未解析占位符，则直接失败
    ↓
 4. 根据各 Agent 格式生成配置
-   ├─ JSON 格式 (Claude/Gemini)
+   ├─ JSON 格式 (Claude/Antigravity)
    └─ TOML 格式 (Codex，带字符串转义)
    ↓
 5. 校验现有配置可解析、生成结果合法、且仅删除 _MANAGED_BY=agent-manager 的托管段

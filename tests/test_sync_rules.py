@@ -446,7 +446,20 @@ class SyncRulesTests(unittest.TestCase):
         manifest = (ROOT / "config" / "rules-targets.list").read_text(encoding="utf-8")
         self.assertIn("codex_global|global|rules/dist/codex/AGENTS.md|~/.codex/AGENTS.md", manifest)
         self.assertIn("claude_global|global|rules/dist/claude/CLAUDE.md|~/.claude/CLAUDE.md", manifest)
-        self.assertIn("gemini_global|global|rules/dist/gemini/GEMINI.md|~/.gemini/GEMINI.md", manifest)
+        self.assertIn(
+            "antigravity_plugin|global|rules/dist/antigravity/plugin.json|"
+            "~/.gemini/antigravity-cli/plugins/agent-manager/plugin.json",
+            manifest,
+        )
+        self.assertIn(
+            "antigravity_rules|global|rules/dist/antigravity/rules|"
+            "~/.gemini/antigravity-cli/plugins/agent-manager/rules",
+            manifest,
+        )
         self.assertIn("codex_modules|global|rules/dist/modules|~/.codex/modules", manifest)
         self.assertIn("claude_modules|global|rules/dist/modules|~/.claude/modules", manifest)
-        self.assertIn("gemini_modules|global|rules/dist/modules|~/.gemini/modules", manifest)
+        self.assertIn(
+            "antigravity_modules|global|rules/dist/modules|"
+            "~/.gemini/antigravity-cli/plugins/agent-manager/modules",
+            manifest,
+        )

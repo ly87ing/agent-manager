@@ -33,8 +33,6 @@ TOML_SERVER_HEADER_RE = re.compile(
     re.MULTILINE,
 )
 TOML_SERVER_INT_KEYS = ("startup_timeout_sec",)
-GEMINI_MCP_TIMEOUT_MS = 60000
-
 def atomic_write_json(path, data):
     """原子化写入 JSON"""
     path = Path(path).expanduser()
@@ -380,8 +378,6 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None
                 "args": parsed_args,
                 "env": srv_config.get("env", {})
             }
-            if agent_name == "gemini-cli":
-                active_settings["timeout"] = GEMINI_MCP_TIMEOUT_MS
             if file_format == "toml":
                 for key in TOML_SERVER_INT_KEYS:
                     if key in srv_config:

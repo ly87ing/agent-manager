@@ -6,7 +6,7 @@
       "env": {
         "AUGMENT_SESSION_AUTH": "${AUGMENT_SESSION_AUTH}"
       },
-      "agents": ["claude-code", "gemini-cli", "codex"]
+      "agents": ["claude-code", "antigravity-cli", "codex"]
     },
     "chrome-devtools": {
       "command": "npx",
@@ -37,7 +37,7 @@
   },
   "agent_paths": {
     "claude-code": "~/.claude.json",
-    "gemini-cli": "~/.gemini/settings.json",
+    "antigravity-cli": "~/.gemini/antigravity-cli/mcp_config.json",
     "codex": { "path": "~/.codex/config.toml", "format": "toml" }
   }
 }

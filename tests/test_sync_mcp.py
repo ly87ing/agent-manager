@@ -32,7 +32,7 @@ class SyncMcpTests(unittest.TestCase):
         definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
         self.assertEqual(
             set(definitions["agent_paths"].keys()),
-            {"claude-code", "gemini-cli", "codex"},
+            {"claude-code", "antigravity-cli", "codex"},
         )
 
     def test_committed_augment_context_engine_targets_only_managed_agents(self):
@@ -40,7 +40,7 @@ class SyncMcpTests(unittest.TestCase):
         agents = definitions["servers"]["augment-context-engine"]["agents"]
 
         self.assertIsInstance(agents, list)
-        self.assertEqual(set(agents), {"claude-code", "gemini-cli", "codex"})
+        self.assertEqual(set(agents), {"claude-code", "antigravity-cli", "codex"})
 
     def test_committed_mcp_policy_keeps_augment_context_engine_disabled_by_default(self):
         policy = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
@@ -156,14 +156,14 @@ class SyncMcpTests(unittest.TestCase):
                 "agent-manager",
             )
 
-    def test_gemini_json_receives_managed_mcp_timeout(self):
+    def test_antigravity_json_uses_standard_mcp_server_shape(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
-            gemini_config_path = temp_root / "settings.json"
+            antigravity_config_path = temp_root / "mcp_config.json"
 
             with mock.patch.object(sync_mcp, "is_agent_installed", return_value=True):
                 ok = sync_mcp.manage_mcp_config(
-                    {"gemini-cli": {"path": str(gemini_config_path), "format": "json"}},
+                    {"antigravity-cli": {"path": str(antigravity_config_path), "format": "json"}},
                     {
                         "augment-context-engine": {
                             "enabled": True,
@@ -174,15 +174,16 @@ class SyncMcpTests(unittest.TestCase):
                             "env": {"AUGMENT_SESSION_AUTH": "token"},
                         }
                     },
-                    agent_defs={"gemini-cli": {"bin": "gemini"}},
+                    agent_defs={"antigravity-cli": {"bin": "agy"}},
                 )
 
             self.assertTrue(ok)
-            updated = json.loads(gemini_config_path.read_text(encoding="utf-8"))
+            updated = json.loads(antigravity_config_path.read_text(encoding="utf-8"))
             self.assertEqual(
-                updated["mcpServers"]["augment-context-engine"]["timeout"],
-                60000,
+                updated["mcpServers"]["augment-context-engine"]["command"],
+                "auggie",
             )
+            self.assertNotIn("timeout", updated["mcpServers"]["augment-context-engine"])
 
     def test_clone_or_update_repo_skips_pull_when_probe_reports_latest(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -24,7 +24,7 @@ class GraphifyTarget(NamedTuple):
 SKILL_FILE_BY_AGENT = {
     "claude-code": "skill.md",
     "codex": "skill-codex.md",
-    "gemini-cli": "skill.md",
+    "antigravity-cli": "skill.md",
 }
 
 COPY_SKILLS_CODE = r"""
@@ -40,12 +40,26 @@ payload = json.loads(sys.stdin.read())
 package_dir = Path(graphify.__file__).parent
 package_version = version("graphifyy")
 
+def ensure_plugin_marker(destination):
+    skills_dir = destination.parent.parent
+    plugin_root = skills_dir.parent
+    if skills_dir.name != "skills" or plugin_root.parent.name != "plugins":
+        return
+    marker_path = plugin_root / "plugin.json"
+    if marker_path.exists():
+        return
+    marker_path.write_text(
+        json.dumps({"name": plugin_root.name}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
 for target in payload["targets"]:
     source = package_dir / target["skill_file"]
     if not source.exists():
         raise SystemExit(f"missing graphify skill file: {source}")
     destination = Path(target["path"]).expanduser()
     destination.parent.mkdir(parents=True, exist_ok=True)
+    ensure_plugin_marker(destination)
     shutil.copy(source, destination)
     (destination.parent / ".graphify_version").write_text(package_version, encoding="utf-8")
 

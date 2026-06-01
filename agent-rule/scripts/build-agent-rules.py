@@ -13,16 +13,17 @@ SRC_ROOT = ROOT / "rules" / "src"
 DIST_ROOT = ROOT / "rules" / "dist"
 MODULES_SRC = SRC_ROOT / "shared" / "modules"
 MODULES_DIST = DIST_ROOT / "modules"
-TARGETS = ("codex", "claude", "gemini")
+TARGETS = ("codex", "claude", "antigravity")
 MANIFEST_PATH = REPO_ROOT / "config" / "rules-targets.list"
 MODULE_REFERENCE_PATTERN = re.compile(r"`modules/([^`]+\.md)`")
 TARGET_SPECS = {
     "codex": {"adapter": "codex", "filename": "AGENTS.md"},
     "claude": {"adapter": "claude", "filename": "CLAUDE.md"},
-    "gemini": {"adapter": "gemini", "filename": "GEMINI.md"},
+    "antigravity": {"adapter": "antigravity", "filename": "rules/agent-manager.md"},
 }
 MODULE_MANIFEST_TARGETS = {
     "codex": "codex_modules",
+    "antigravity": "antigravity_modules",
 }
 
 
@@ -85,7 +86,15 @@ def build_target_file(target: str) -> None:
         [*spec.get("prefix_lines", []), render_target_content(target, core_lines, adapter_lines).rstrip()]
     ) + "\n"
     filename = spec["filename"]
-    (target_dir / filename).write_text(content, encoding="utf-8")
+    output_path = target_dir / filename
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(content, encoding="utf-8")
+
+
+def write_antigravity_plugin_manifest() -> None:
+    plugin_path = DIST_ROOT / "antigravity" / "plugin.json"
+    plugin_path.parent.mkdir(parents=True, exist_ok=True)
+    plugin_path.write_text('{\n  "name": "agent-manager"\n}\n', encoding="utf-8")
 
 
 def copy_modules() -> None:
@@ -100,6 +109,7 @@ def main() -> int:
     copy_modules()
     for target in TARGETS:
         build_target_file(target)
+    write_antigravity_plugin_manifest()
     return 0
 
 

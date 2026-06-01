@@ -4,7 +4,7 @@
     "required_agents": [
       "claude-code",
       "codex",
-      "gemini-cli"
+      "antigravity-cli"
     ],
     "min_success_rate": 1.0,
     "min_verification_rate": 1.0

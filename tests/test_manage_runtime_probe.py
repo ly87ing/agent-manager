@@ -67,7 +67,7 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
     def test_rule_target_agent_id_maps_current_prefixes(self):
         self.assertEqual(manage_runtime_probe.rule_target_agent_id("claude_global"), "claude-code")
-        self.assertEqual(manage_runtime_probe.rule_target_agent_id("gemini_modules"), "gemini-cli")
+        self.assertEqual(manage_runtime_probe.rule_target_agent_id("antigravity_modules"), "antigravity-cli")
         self.assertEqual(manage_runtime_probe.rule_target_agent_id("codex_global"), "codex")
 
     def test_detect_tool_readiness_requires_git_clone_for_repo_backed_tools(self):
@@ -606,7 +606,7 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
     def test_detect_all_providers_does_not_infer_npm_from_brew_managed_resolved_symlink(self):
         command_outputs = {
-            ("brew", "list", "--formula", "-1"): (True, "gemini-cli\n"),
+            ("brew", "list", "--formula", "-1"): (True, "example-cli\n"),
             ("gh", "extension", "list"): (True, ""),
         }
 
@@ -617,22 +617,22 @@ class ManageRuntimeProbeTests(unittest.TestCase):
             run_cmd=run_cmd,
             which=lambda binary: {
                 "brew": "/opt/homebrew/bin/brew",
-                "gemini": "/opt/homebrew/bin/gemini",
+                "example": "/opt/homebrew/bin/example",
             }.get(binary),
             path_exists=lambda _path: False,
             realpath=lambda _path: posix_brew_cellar_module_path(
-                "gemini-cli",
-                "@google/gemini-cli",
-                "bin/gemini.js",
+                "example-cli",
+                "example-package",
+                "bin/example.js",
             ),
         )
 
         providers = manage_runtime_probe.detect_all_providers(
-            "gemini",
+            "example",
             {
                 "providers": {
                     "brew": {
-                        "install": "brew install gemini-cli",
+                        "install": "brew install example-cli",
                     }
                 }
             },

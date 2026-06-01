@@ -13,9 +13,9 @@ RULE_TARGETS = ROOT / "config" / "rules-targets.list"
 
 
 RULE_TARGET_AGENT_IDS = {
+    "antigravity": "antigravity-cli",
     "claude": "claude-code",
     "codex": "codex",
-    "gemini": "gemini-cli",
 }
 
 
@@ -36,7 +36,7 @@ class RuleEffectivenessEvalTests(unittest.TestCase):
             if not line or line.startswith("#"):
                 continue
             target_name, _group, source, _target = line.split("|", 3)
-            if not target_name.endswith("_global"):
+            if not (target_name.endswith("_global") or target_name == "antigravity_rules"):
                 continue
             source_parts = Path(source).parts
             self.assertGreaterEqual(len(source_parts), 4, source)
@@ -66,7 +66,7 @@ class RuleEffectivenessEvalTests(unittest.TestCase):
         self.assertEqual(summary["avg_file_reads"], 41 / 10)
         self.assertEqual(summary["avg_tool_calls"], 61 / 10)
         self.assertEqual(summary["avg_triggered_skill_count"], 12 / 10)
-        self.assertEqual(summary["evaluated_agents"], ["claude-code", "codex", "gemini-cli"])
+        self.assertEqual(summary["evaluated_agents"], ["antigravity-cli", "claude-code", "codex"])
         self.assertEqual(
             [case["case_id"] for case in summary["cases"]],
             [

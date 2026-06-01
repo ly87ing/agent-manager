@@ -19,7 +19,7 @@ class SetupGraphifyTests(unittest.TestCase):
             "agents": {
                 "claude-code": "~/.claude/skills",
                 "codex": "~/.codex/skills",
-                "gemini-cli": "~/.gemini/skills",
+                "antigravity-cli": "~/.gemini/antigravity-cli/plugins/agent-manager/skills",
             }
         }
 
@@ -29,7 +29,15 @@ class SetupGraphifyTests(unittest.TestCase):
         self.assertIn(("claude-code", "skill", "~/.claude/skills/graphify/SKILL.md", "skill.md"), rendered)
         self.assertIn(("codex", "skill", "~/.codex/skills/graphify/SKILL.md", "skill-codex.md"), rendered)
         self.assertNotIn(("codex", "skill", "~/.agents/skills/graphify/SKILL.md", "skill-codex.md"), rendered)
-        self.assertIn(("gemini-cli", "skill", "~/.gemini/skills/graphify/SKILL.md", "skill.md"), rendered)
+        self.assertIn(
+            (
+                "antigravity-cli",
+                "skill",
+                "~/.gemini/antigravity-cli/plugins/agent-manager/skills/graphify/SKILL.md",
+                "skill.md",
+            ),
+            rendered,
+        )
         self.assertEqual(len(rendered), 3)
 
     def test_write_marker_records_installed_targets(self):

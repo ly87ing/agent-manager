@@ -47,6 +47,7 @@ NETWORK_ERROR_MARKERS = (
 OFFICIAL_NPM_REGISTRY = "https://registry.npmjs.org"
 OFFICIAL_INSTALLER_URL_MARKERS = (
     "https://claude.ai/install",
+    "https://antigravity.google/cli/install",
 )
 INSTALL_CMD_TIMEOUT = 900
 ASYNC_ACTION_ENV = "AGENT_MANAGER_AGENT_ASYNC_DIR"

@@ -8,9 +8,9 @@ AGENT_METADATA = {
         "display_name": "Claude Code",
         "aliases": ["Claude Code"],
     },
-    "gemini-cli": {
-        "display_name": "Gemini CLI",
-        "aliases": ["Gemini CLI"],
+    "antigravity-cli": {
+        "display_name": "Antigravity CLI",
+        "aliases": ["Antigravity CLI", "Antigravity"],
     },
     "codex": {
         "display_name": "Codex",
