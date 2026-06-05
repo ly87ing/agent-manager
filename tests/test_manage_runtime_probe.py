@@ -749,7 +749,7 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
     def test_check_tool_ready_supports_uv_tool_installation(self):
         command_outputs = {
-            ("uv", "tool", "list"): (True, "graphifyy v0.5.4\n- graphify\n"),
+            ("uv", "tool", "list"): (True, "sample-tool v0.5.4\n- sample-tool\n"),
         }
 
         def run_cmd(cmd, timeout=10):
@@ -760,7 +760,7 @@ class ManageRuntimeProbeTests(unittest.TestCase):
             which=lambda binary: "/opt/homebrew/bin/uv" if binary == "uv" else None,
         )
 
-        self.assertTrue(manage_runtime_probe.check_tool_ready("graphify", "uvtool:graphifyy", inventory=inventory))
+        self.assertTrue(manage_runtime_probe.check_tool_ready("sample-tool", "uvtool:sample-tool", inventory=inventory))
         self.assertFalse(manage_runtime_probe.check_tool_ready("missing", "uvtool:missing", inventory=inventory))
 
     def test_detect_all_providers_detects_uv_tool_installation_with_trailing_python_flag(self):

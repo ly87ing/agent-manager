@@ -144,28 +144,20 @@ class ClaudeHooksSyncTests(unittest.TestCase):
     def test_sync_strips_removed_signatures(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = self._copy_repo(temp_dir)
-            legacy_command = (
-                "CMD=$(python3 -c \"import json,sys; d=json.load(sys.stdin); "
-                "print(d.get('tool_input',d).get('command',''))\" 2>/dev/null || true); "
-                "case \"$CMD\" in *grep*|*rg\\ *|*ripgrep*) "
-                "[ -f graphify-out/graph.json ] && echo "
-                "'{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\","
-                "\"additionalContext\":\"graphify: Knowledge graph exists. "
-                "Read graphify-out/GRAPH_REPORT.md before searching raw files.\"}}' "
-                "|| true ;; esac"
-            )
-            graphify_hook_command = 'bash "$CLAUDE_PROJECT_DIR/agent-rule/hooks/graphify-context-hint.sh"'
+            subagent_stop_command = 'bash "$CLAUDE_PROJECT_DIR/agent-rule/hooks/check-rules-build.sh"'
+            block_dist_command = 'bash "$CLAUDE_PROJECT_DIR/agent-rule/hooks/block-dist-edits.sh"'
             unrelated_command = "echo keep me"
             settings_path = temp_root / ".claude" / "settings.json"
             current = json.loads(settings_path.read_text(encoding="utf-8"))
+            current["hooks"]["SubagentStop"] = [
+                {
+                    "hooks": [{"type": "command", "command": subagent_stop_command}],
+                }
+            ]
             current["hooks"]["PreToolUse"] = [
                 {
-                    "matcher": "Bash",
-                    "hooks": [{"type": "command", "command": legacy_command}],
-                },
-                {
-                    "matcher": "Bash",
-                    "hooks": [{"type": "command", "command": graphify_hook_command}],
+                    "matcher": "Edit|MultiEdit|Write",
+                    "hooks": [{"type": "command", "command": block_dist_command}],
                 },
                 {
                     "matcher": "Bash",
@@ -178,20 +170,20 @@ class ClaudeHooksSyncTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             settings = self._read_settings(temp_root)
+            self.assertFalse(
+                any(
+                    any(subagent_stop_command == hook.get("command") for hook in entry.get("hooks", []))
+                    for entry in settings["hooks"].get("SubagentStop", [])
+                ),
+                f"old SubagentStop hook should be stripped: {settings['hooks'].get('SubagentStop', [])}",
+            )
             pre_tool_hooks = settings["hooks"]["PreToolUse"]
             self.assertFalse(
                 any(
-                    any(legacy_command == hook.get("command") for hook in entry.get("hooks", []))
+                    any(block_dist_command == hook.get("command") for hook in entry.get("hooks", []))
                     for entry in pre_tool_hooks
                 ),
-                f"legacy inline hook should be stripped: {pre_tool_hooks}",
-            )
-            self.assertFalse(
-                any(
-                    any(graphify_hook_command == hook.get("command") for hook in entry.get("hooks", []))
-                    for entry in pre_tool_hooks
-                ),
-                f"graphify-context-hint.sh hook should be stripped: {pre_tool_hooks}",
+                f"old block-dist hook should be stripped: {pre_tool_hooks}",
             )
             self.assertTrue(
                 any(

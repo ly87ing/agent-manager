@@ -1257,7 +1257,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("--wait-agent-lifecycle", combined)
             self.assertFalse(call_log.exists(), combined)
 
-    def test_make_default_help_lists_cc_bridge_runtime_targets(self):
+    def test_make_default_help_does_not_list_cc_bridge_runtime_targets(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -1274,10 +1274,11 @@ class ManageScriptTests(unittest.TestCase):
 
             combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
-            self.assertIn("cc-bridge-install", combined)
-            self.assertIn("cc-bridge-start", combined)
-            self.assertIn("cc-bridge-stop", combined)
-            self.assertIn("cc-bridge-status", combined)
+            self.assertNotIn("CC-Bridge Runtime", combined)
+            self.assertNotIn("cc-bridge-install", combined)
+            self.assertNotIn("cc-bridge-start", combined)
+            self.assertNotIn("cc-bridge-stop", combined)
+            self.assertNotIn("cc-bridge-status", combined)
 
     def test_sync_refreshes_skills_and_mcp_without_agent_or_tool_lifecycle(self):
         with tempfile.TemporaryDirectory() as temp_dir:

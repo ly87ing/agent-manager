@@ -7,7 +7,6 @@
   "tools": {
     "playwright-cli": { "enabled": true, "auto_update": true },
     "agent-browser": { "enabled": true, "auto_update": true },
-    "graphify": { "enabled": true, "auto_update": true },
     "auggie": { "enabled": true, "auto_update": true }
   },
   "browser_us_sync": { "enabled": true },

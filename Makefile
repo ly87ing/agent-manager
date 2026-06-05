@@ -1,4 +1,4 @@
-.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\:list backups-gc backups\:gc restore backups\:restore logs rules-build rules\:build rules-sync rules\:sync skills-link skills\:link skills\:upgrade mcp-sync mcp\:sync mcp-prepare mcp\:prepare tools-sync tools\:sync browser-us-sync browser\:sync claude-hooks-sync claude\:hooks\:sync codex-hooks-sync codex\:hooks\:sync dry-run clean-logs offline eval-rules secrets-check secrets\:check instructions-check instructions\:check cc-bridge-install cc-bridge-start cc-bridge-stop cc-bridge-deploy cc-bridge-update cc-bridge-seed cc-bridge-rollback cc-bridge-status
+.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\:list backups-gc backups\:gc restore backups\:restore logs rules-build rules\:build rules-sync rules\:sync skills-link skills\:link skills\:upgrade mcp-sync mcp\:sync mcp-prepare mcp\:prepare tools-sync tools\:sync browser-us-sync browser\:sync claude-hooks-sync claude\:hooks\:sync codex-hooks-sync codex\:hooks\:sync dry-run clean-logs offline eval-rules secrets-check secrets\:check instructions-check instructions\:check
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -156,30 +156,6 @@ codex-hooks-sync:
 
 codex\:hooks\:sync:
 	@./manage.sh codex:hooks:sync
-
-cc-bridge-install:
-	@python3 ./scripts/cc-bridge/manage.py install
-
-cc-bridge-start:
-	@python3 ./scripts/cc-bridge/manage.py start
-
-cc-bridge-stop:
-	@python3 ./scripts/cc-bridge/manage.py stop
-
-cc-bridge-deploy:
-	@python3 ./scripts/cc-bridge/manage.py deploy
-
-cc-bridge-update:
-	@python3 ./scripts/cc-bridge/manage.py update
-
-cc-bridge-seed:
-	@python3 ./scripts/cc-bridge/manage.py seed
-
-cc-bridge-rollback:
-	@python3 ./scripts/cc-bridge/manage.py rollback
-
-cc-bridge-status:
-	@python3 ./scripts/cc-bridge/manage.py status
 
 # 预览模式 (仅输出计划动作，跳过远端副作用)
 dry-run:

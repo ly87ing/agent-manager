@@ -57,48 +57,10 @@ class ProjectContractTests(unittest.TestCase):
         )
         self.assertIn("\ninstructions\\:check: instructions-check\n", makefile)
 
-    def test_makefile_exposes_cc_bridge_runtime_targets(self):
+    def test_makefile_does_not_expose_cc_bridge_runtime_targets(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertIn("cc-bridge-install", makefile)
-        self.assertIn("cc-bridge-start", makefile)
-        self.assertIn("cc-bridge-stop", makefile)
-        self.assertIn("cc-bridge-deploy", makefile)
-        self.assertIn("cc-bridge-update", makefile)
-        self.assertIn("cc-bridge-seed", makefile)
-        self.assertIn("cc-bridge-rollback", makefile)
-        self.assertIn("cc-bridge-status", makefile)
-        self.assertIn(
-            "\ncc-bridge-install:\n\t@python3 ./scripts/cc-bridge/manage.py install\n",
-            makefile,
-        )
-        self.assertIn(
-            "\ncc-bridge-start:\n\t@python3 ./scripts/cc-bridge/manage.py start\n",
-            makefile,
-        )
-        self.assertIn(
-            "\ncc-bridge-stop:\n\t@python3 ./scripts/cc-bridge/manage.py stop\n",
-            makefile,
-        )
-        self.assertIn(
-            "\ncc-bridge-deploy:\n\t@python3 ./scripts/cc-bridge/manage.py deploy\n",
-            makefile,
-        )
-        self.assertIn(
-            "\ncc-bridge-update:\n\t@python3 ./scripts/cc-bridge/manage.py update\n",
-            makefile,
-        )
-        self.assertIn(
-            "\ncc-bridge-seed:\n\t@python3 ./scripts/cc-bridge/manage.py seed\n",
-            makefile,
-        )
-        self.assertIn(
-            "\ncc-bridge-rollback:\n\t@python3 ./scripts/cc-bridge/manage.py rollback\n",
-            makefile,
-        )
-        self.assertIn(
-            "\ncc-bridge-status:\n\t@python3 ./scripts/cc-bridge/manage.py status\n",
-            makefile,
-        )
+        self.assertNotIn("cc-bridge", makefile)
+        self.assertNotIn("scripts/cc-bridge", makefile)
 
     def test_makefile_supports_colon_manage_subcommands(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -155,48 +117,6 @@ class ProjectContractTests(unittest.TestCase):
                     "tools:sync",
                     "browser:sync",
                 ],
-            )
-
-    def test_makefile_cc_bridge_targets_dispatch_to_script(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir)
-            (temp_root / "Makefile").write_text((ROOT / "Makefile").read_text(encoding="utf-8"), encoding="utf-8")
-            call_log = temp_root / "calls.log"
-            script_dir = temp_root / "scripts" / "cc-bridge"
-            script_dir.mkdir(parents=True)
-            (script_dir / "manage.py").write_text(
-                (
-                    "#!/usr/bin/env python3\n"
-                    "import sys\n"
-                    f"open({str(call_log)!r}, 'a', encoding='utf-8').write(' '.join(sys.argv[1:]) + '\\n')\n"
-                    "sys.exit(0)\n"
-                ),
-                encoding="utf-8",
-            )
-            (script_dir / "manage.py").chmod(0o755)
-
-            for goal in (
-                "cc-bridge-install",
-                "cc-bridge-start",
-                "cc-bridge-stop",
-                "cc-bridge-deploy",
-                "cc-bridge-update",
-                "cc-bridge-seed",
-                "cc-bridge-rollback",
-                "cc-bridge-status",
-            ):
-                result = subprocess.run(
-                    ["make", goal],
-                    cwd=temp_root,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                self.assertEqual(result.returncode, 0, f"{goal}: {result.stdout}{result.stderr}")
-
-            self.assertEqual(
-                call_log.read_text(encoding="utf-8").splitlines(),
-                ["install", "start", "stop", "deploy", "update", "seed", "rollback", "status"],
             )
 
     def test_ci_smoke_script_exercises_safe_preview_flows(self):
@@ -324,10 +244,10 @@ class ProjectContractTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("make instructions:check", readme)
 
-    def test_readme_documents_graphify_as_on_demand_after_default_hint_removal(self):
+    def test_readme_does_not_document_graphify_as_default_managed_tool(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("按需使用", readme)
-        self.assertIn("不再通过 shared rules 或 Claude/Codex hooks 默认提示读取 graphify 报告", readme)
+        self.assertNotIn("graphify", readme)
+        self.assertNotIn("/graphify", readme)
         self.assertNotIn("本仓 rules 与 hooks 负责启用“有图先看图”的 always-on 提示", readme)
 
     def test_readme_documents_secret_scan_target(self):
@@ -403,41 +323,16 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("Anthropic 官方 `skills/frontend-design`", readme)
         self.assertIn("仅面向 `Claude Code` 暴露", readme)
 
-    def test_readme_documents_cc_bridge_runtime_workflow(self):
+    def test_readme_does_not_document_cc_bridge_runtime_workflow(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("make cc-bridge-install", readme)
-        self.assertIn("make cc-bridge-start", readme)
-        self.assertIn("make cc-bridge-stop", readme)
-        self.assertIn("make cc-bridge-deploy", readme)
-        self.assertIn("make cc-bridge-update", readme)
-        self.assertIn("make cc-bridge-rollback", readme)
-        self.assertIn("启动前会先检查最新稳定版本", readme)
-        self.assertIn("Claude Code 的接入环境变量示例", readme)
-        self.assertIn("America/Los_Angeles", readme)
-        self.assertIn("en_US.UTF-8", readme)
-        self.assertIn("美国化派生镜像", readme)
-        self.assertIn("只有在上游 tag、本地派生镜像构建上下文或本地派生镜像缓存发生变化时才会重新 build", readme)
-        self.assertIn("docs/CC-BRIDGE-MANAGEMENT.md", readme)
+        self.assertNotIn("cc-bridge", readme)
+        self.assertNotIn("CC-BRIDGE", readme)
+        self.assertNotIn("docs/CC-BRIDGE-MANAGEMENT.md", readme)
 
-    def test_cc_bridge_management_doc_covers_install_start_stop_and_auto_update_start(self):
-        doc = (ROOT / "docs" / "CC-BRIDGE-MANAGEMENT.md").read_text(encoding="utf-8")
-        self.assertIn("make cc-bridge-install", doc)
-        self.assertIn("make cc-bridge-start", doc)
-        self.assertIn("make cc-bridge-stop", doc)
-        self.assertIn("启动前会先检查最新稳定版本", doc)
-        self.assertIn("ANTHROPIC_BASE_URL", doc)
-        self.assertIn("ADMIN_PASSWORD", doc)
-        self.assertIn("TZ=America/Los_Angeles", doc)
-        self.assertIn("LANG=en_US.UTF-8", doc)
-        self.assertIn("美国化派生镜像", doc)
-        self.assertIn("只有在上游 tag、本地派生镜像构建上下文或本地派生镜像缓存发生变化时才会重新 build", doc)
-
-    def test_cc_bridge_managed_image_dockerfile_exists(self):
-        dockerfile = ROOT / "scripts" / "cc-bridge" / "image" / "Dockerfile"
-        self.assertTrue(dockerfile.exists())
-        rendered = dockerfile.read_text(encoding="utf-8")
-        self.assertIn("America/Los_Angeles", rendered)
-        self.assertIn("en_US.UTF-8", rendered)
+    def test_cc_bridge_runtime_artifacts_are_not_committed(self):
+        self.assertFalse((ROOT / "docs" / "CC-BRIDGE-MANAGEMENT.md").exists())
+        self.assertFalse((ROOT / "scripts" / "cc-bridge" / "manage.py").exists())
+        self.assertFalse((ROOT / "scripts" / "cc-bridge" / "image" / "Dockerfile").exists())
 
     def test_claude_code_credentials_are_left_to_cc_switch(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")

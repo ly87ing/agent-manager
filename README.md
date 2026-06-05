@@ -31,10 +31,6 @@
 
 ### 其他受管工具
 
-- `graphify`
-  - 通过官方 PyPI 包 `graphifyy` 及 `uv tool` 安装。
-  - `/graphify` skill 会安装到 `Claude`、`Codex`、`Antigravity` 的声明目标。
-  - 按需使用，不会通过 shared rules 或 `Claude/Codex hooks` 默认提醒读取报告。
 - `chrome-devtools`（MCP）
   - 继续使用 `npx ...@latest` 运行时拉取上游最新能力。
 默认受管 skill 仓库当前包含 `agent-skills`、`oa-skill`、`anthropic-frontend-design-skill`、`playwright-best-practices-skill`、`superpowers` 和 `ui-ux-pro-max-skill`；它们在未显式声明 `commit` / `ref` 时，会在同步时跟随上游默认分支最新状态；其中 `agent-skills` 面向 `Claude Code` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 `safe-merge-review` 单个 skill 包，避免上游新增 skill 被默认带入；`oa-skill` 当前通过显式 `skill_paths` 默认接入仓库内唯一的 `xyai-manager` skill；`anthropic-frontend-design-skill` 仅面向 `Claude Code` 暴露，并通过显式 `skill_paths` 锁定 Anthropic 官方 `skills/frontend-design`。OpenAI 官方仓库当前最新主分支已不再提供 `frontend-skill`，因此默认清单不再引用该路径，避免 `make all` 在跟随上游最新状态时失败。
@@ -99,7 +95,6 @@
 - **Claude 记忆分层**：根目录 `CLAUDE.md` 只保留仓库级高频记忆，`agent-rule/CLAUDE.md` 和 `tests/CLAUDE.md` 承载目录级维护细节。
 - **Claude hooks**：`config/claude-hooks.json` 生成仓库级 `.claude/settings.json`，用 `make claude-hooks-sync` 刷新 deterministic hook 配置。
 - **Codex hooks**：`config/codex-hooks.json` 生成仓库级 `.codex/hooks.json`，用 `make codex-hooks-sync` 刷新 deterministic Codex hook 配置；当前包含 `PreToolUse` 的生成产物写保护和 `Stop` 的规则构建一致性校验。
-- **graphify 启用**：`config/tools.json` 中的 `graphify` 安装官方 `graphifyy` CLI，`scripts/setup-graphify.py` 将 skill 分发到 Claude、Codex、Antigravity 目标；graphify 按需使用，不再通过 shared rules 或 Claude/Codex hooks 默认提示读取 graphify 报告。
 - **指令质量评测**：`make eval-rules` 现在同时输出任务成功率、verification、skill exposure 和 always-on instruction budget 指标，并强制校验 `min_case_count`、`required_agents`、`success / verification 阈值`。
 - **分发清单**：`config/rules-targets.list` 只引用 `rules/dist/*` 产物，不直接引用源码片段。
 - **维护入口**：修改 `agent-rule/rules/src/` 后，先执行 `make rules-build`，再执行 `make rules:sync`。
