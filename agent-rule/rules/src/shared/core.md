@@ -12,3 +12,4 @@
 - If code style, config, data contracts, or comments change, read `modules/style.md`.
 - If UI, flows, frontend validation, or browser automation change, read `modules/frontend.md`.
 - If Playwright, generators, generated artifacts, or debug output are involved, read `modules/artifact-hygiene.md`.
+- If you write reader-facing documents (plans, reports, proposals, specs, checklists, HTML decks), read `modules/writing.md`.

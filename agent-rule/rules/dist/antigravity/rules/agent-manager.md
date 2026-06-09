@@ -12,5 +12,6 @@
 - If code style, config, data contracts, or comments change, read `~/.gemini/antigravity-cli/plugins/agent-manager/modules/style.md`.
 - If UI, flows, frontend validation, or browser automation change, read `~/.gemini/antigravity-cli/plugins/agent-manager/modules/frontend.md`.
 - If Playwright, generators, generated artifacts, or debug output are involved, read `~/.gemini/antigravity-cli/plugins/agent-manager/modules/artifact-hygiene.md`.
+- If you write reader-facing documents (plans, reports, proposals, specs, checklists, HTML decks), read `~/.gemini/antigravity-cli/plugins/agent-manager/modules/writing.md`.
 - When the user asks for a plan, output the plan and wait for confirmation before modifying files.
 - Stage and commit git changes selectively; never run `git add .`, `git push`, or auto-commit without explicit per-action approval.
