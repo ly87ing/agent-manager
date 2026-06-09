@@ -3,9 +3,11 @@
     "agent-skills": {
       "url": "https://github.com/ly87ing/agent-skills.git",
       "skill_paths": [
-        "safe-merge-review"
+        "safe-merge-review",
+        "fix-ones-bug",
+        "qa-self-verify"
       ],
-      "skill_count": 1,
+      "skill_count": 3,
       "agents": ["claude-code", "codex"]
     },
     "oa-skill": {
