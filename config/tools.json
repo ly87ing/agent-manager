@@ -5,6 +5,7 @@
       "uninstall": "npm uninstall -g @playwright/cli",
       "upgrade": "npm install -g @playwright/cli@latest",
       "setup": "playwright-cli install-browser",
+      "setup_timeout_sec": 300,
       "ready_check": "bin:playwright-cli",
       "runtime_ready_globs_any": [
         "~/Library/Caches/ms-playwright/chromium-*",

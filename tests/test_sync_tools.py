@@ -45,6 +45,7 @@ class SyncToolsTests(unittest.TestCase):
         self.assertEqual(tool_defs["playwright-cli"]["install"], "npm install -g @playwright/cli@latest")
         self.assertEqual(tool_defs["playwright-cli"]["upgrade"], "npm install -g @playwright/cli@latest")
         self.assertEqual(tool_defs["playwright-cli"]["setup"], "playwright-cli install-browser")
+        self.assertEqual(tool_defs["playwright-cli"]["setup_timeout_sec"], 300)
         self.assertEqual(tool_defs["playwright-cli"]["ready_check"], "bin:playwright-cli")
         self.assertIn("~/Library/Caches/ms-playwright/chromium-*", tool_defs["playwright-cli"]["runtime_ready_globs_any"])
         self.assertEqual(tool_defs["agent-browser"]["install"], "npm install -g agent-browser@latest")
@@ -370,6 +371,42 @@ class SyncToolsTests(unittest.TestCase):
             self.assertFalse(ok)
             self.assertTrue((target_dir / sync_tools.TOOL_BROKEN_MARKER).exists())
             self.assertFalse((target_dir / sync_tools.TOOL_READY_MARKER).exists())
+
+    def test_install_based_tool_setup_uses_configured_timeout(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state = {"binary_ready": False}
+
+            def fake_run_cmd(cmd, cwd=None, timeout=None):
+                if cmd == "npm install -g @playwright/cli@latest":
+                    state["binary_ready"] = True
+                    return True, "installed"
+                if cmd == "playwright-cli install-browser":
+                    return True, "setup ok"
+                return True, ""
+
+            def fake_check_ready(name, ready_check):
+                return state["binary_ready"]
+
+            with mock.patch.object(sync_tools, "run_cmd", side_effect=fake_run_cmd) as run_cmd:
+                with mock.patch.object(sync_tools, "_check_ready", side_effect=fake_check_ready):
+                    with mock.patch.object(sync_tools, "detect_tool_readiness", return_value=True):
+                        ok = sync_tools.sync_tool(
+                            "playwright-cli",
+                            {
+                                "install": "npm install -g @playwright/cli@latest",
+                                "setup": "playwright-cli install-browser",
+                                "setup_timeout_sec": 120,
+                                "ready_check": "bin:playwright-cli",
+                            },
+                            {"enabled": True, "auto_update": False},
+                            Path(temp_dir),
+                        )
+
+            self.assertTrue(ok)
+            self.assertIn(
+                mock.call("playwright-cli install-browser", cwd=sync_tools.REPO_ROOT, timeout=120),
+                run_cmd.call_args_list,
+            )
 
     def test_install_based_tool_success_without_runtime_probe_marks_broken(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -977,6 +1014,43 @@ class SyncToolsTests(unittest.TestCase):
             setup_calls = [call for call in calls if call["cmd"] == "npm install && npx playwright install"]
             self.assertEqual(len(setup_calls), 1)
             self.assertIsNone(setup_calls[0]["timeout"])
+
+    def test_repo_backed_setup_command_uses_configured_timeout(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_dir = Path(temp_dir) / "playwright-cli"
+            calls = []
+
+            def fake_subprocess_run(
+                cmd,
+                cwd=None,
+                check=True,
+                capture_output=True,
+                text=True,
+                shell=False,
+                timeout=None,
+            ):
+                calls.append({"cmd": cmd, "cwd": cwd, "timeout": timeout, "shell": shell})
+                if isinstance(cmd, list) and cmd[:2] == ["git", "clone"]:
+                    target_dir.mkdir()
+                    (target_dir / ".git").mkdir()
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+
+            with mock.patch.object(sync_tools.subprocess, "run", side_effect=fake_subprocess_run):
+                with mock.patch.object(sync_tools, "apply_overrides"):
+                    sync_tools.sync_tool(
+                        "playwright-cli",
+                        {
+                            "url": "https://example.invalid/repo.git",
+                            "setup": "npm install && npx playwright install",
+                            "setup_timeout_sec": 120,
+                        },
+                        {"enabled": True, "auto_update": True},
+                        Path(temp_dir),
+                    )
+
+            setup_calls = [call for call in calls if call["cmd"] == "npm install && npx playwright install"]
+            self.assertEqual(len(setup_calls), 1)
+            self.assertEqual(setup_calls[0]["timeout"], 120)
 
     def test_sync_tool_applies_real_override_files_when_repo_is_safe_to_write(self):
         with tempfile.TemporaryDirectory() as temp_dir:

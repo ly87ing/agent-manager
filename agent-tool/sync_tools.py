@@ -368,6 +368,22 @@ def _check_ready(name: str, ready_check: str | None) -> bool:
     return check_tool_ready(name, ready_check)
 
 
+def _validate_setup_timeout(name: str, definition) -> int | None:
+    timeout = definition.get("setup_timeout_sec")
+    if timeout is None:
+        return None
+    if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
+        logging.error(f"[TOOL: {name}] setup_timeout_sec 必须是正整数秒。")
+        return None
+    return timeout
+
+
+def _setup_timeout_label(setup_timeout_sec: int | None) -> str:
+    if setup_timeout_sec is None:
+        return ""
+    return f" (超时 {setup_timeout_sec}s)"
+
+
 def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False, offline=False, force_refresh=False):
     # 合并策略
     enabled = policy.get("enabled", True)
@@ -393,6 +409,9 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False, of
     url = definition.get("url")
     install_cmd = definition.get("install")
     setup_cmd = definition.get("setup")
+    setup_timeout_sec = _validate_setup_timeout(name, definition)
+    if definition.get("setup_timeout_sec") is not None and setup_timeout_sec is None:
+        return False
     target_dir = Path(base_dir) / name
     needs_setup = force
     setup_failed = False
@@ -456,8 +475,8 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False, of
         
         if not dry_run and should_apply_overrides: apply_overrides(name, target_dir, dry_run)
         if setup_cmd and needs_setup and not dry_run:
-            logging.info(f"执行 {name} 初始化...")
-            ok, out = run_cmd(setup_cmd, cwd=target_dir)
+            logging.info(f"执行 {name} 初始化{_setup_timeout_label(setup_timeout_sec)}...")
+            ok, out = run_cmd(setup_cmd, cwd=target_dir, timeout=setup_timeout_sec)
             if not ok:
                 logging.error(f"[TOOL: {name}] 构建失败: {out}")
                 setup_failed = True
@@ -560,8 +579,8 @@ def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False, of
                 target_dir.mkdir(parents=True, exist_ok=True)
                 write_owner_marker(target_dir, name)
                 clear_tool_markers(target_dir)
-                logging.info(f"执行 {name} 初始化...")
-                ok, out = run_cmd(setup_cmd, cwd=REPO_ROOT)
+                logging.info(f"执行 {name} 初始化{_setup_timeout_label(setup_timeout_sec)}...")
+                ok, out = run_cmd(setup_cmd, cwd=REPO_ROOT, timeout=setup_timeout_sec)
                 if not ok:
                     logging.error(f"[TOOL: {name}] 初始化失败: {out}")
                     setup_failed = True
