@@ -9,8 +9,11 @@
       "ready_check": "bin:playwright-cli",
       "runtime_ready_globs_any": [
         "~/Library/Caches/ms-playwright/chromium-*",
+        "~/Library/Caches/ms-playwright/chromium_headless_shell-*",
         "~/.cache/ms-playwright/chromium-*",
-        "~/AppData/Local/ms-playwright/chromium-*"
+        "~/.cache/ms-playwright/chromium_headless_shell-*",
+        "~/AppData/Local/ms-playwright/chromium-*",
+        "~/AppData/Local/ms-playwright/chromium_headless_shell-*"
       ]
     },
     "agent-browser": {

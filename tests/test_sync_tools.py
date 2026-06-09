@@ -1,3 +1,4 @@
+import fnmatch
 import json
 import os
 import subprocess
@@ -54,6 +55,20 @@ class SyncToolsTests(unittest.TestCase):
         self.assertEqual(tool_defs["agent-browser"]["ready_check"], "bin:agent-browser")
         self.assertIn("app:/Applications/Google Chrome.app", tool_defs["agent-browser"]["runtime_ready_checks_any"])
         self.assertIn("~/Library/Caches/ms-playwright/chromium-*", tool_defs["agent-browser"]["runtime_ready_globs_any"])
+
+    def test_playwright_cli_readiness_globs_match_headless_shell_browser(self):
+        # `playwright-cli install-browser` installs the chrome headless shell, whose cache dir is
+        # named `chromium_headless_shell-<rev>` (underscore), not `chromium-<rev>`. The readiness
+        # globs must match it, otherwise doctor reports the tool as not ready even though the
+        # browser is installed.
+        tool_defs = json.loads((ROOT / "config" / "tools.json").read_text(encoding="utf-8"))["tools"]
+        globs = tool_defs["playwright-cli"]["runtime_ready_globs_any"]
+        installed_dir = "~/Library/Caches/ms-playwright/chromium_headless_shell-1208"
+
+        self.assertTrue(
+            any(fnmatch.fnmatch(installed_dir, pattern) for pattern in globs),
+            f"no readiness glob matches the headless-shell cache dir; globs={globs}",
+        )
 
     def test_committed_policy_does_not_manage_graphify(self):
         manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
