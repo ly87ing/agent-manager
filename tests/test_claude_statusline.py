@@ -28,13 +28,17 @@ class ClaudeStatuslineScriptTests(unittest.TestCase):
     transcript IO. Segments are ` · `-joined; missing fields drop their
     segment; it always exits 0."""
 
-    def _run_statusline(self, payload: dict) -> subprocess.CompletedProcess[str]:
+    def _run_statusline(
+        self, payload: dict, env: dict = None
+    ) -> subprocess.CompletedProcess[str]:
+        run_env = {**os.environ, **env} if env is not None else None
         return subprocess.run(
             ["bash", str(STATUSLINE)],
             input=json.dumps(payload),
             capture_output=True,
             text=True,
             check=False,
+            env=run_env,
         )
 
     def test_statusline_script_is_committed_and_executable(self):
@@ -117,6 +121,30 @@ class ClaudeStatuslineScriptTests(unittest.TestCase):
             self.assertIn("ctx 50%", out)
             self.assertIn("5h 18%", out)
             self.assertIn("7d 2%", out)
+            # 无 resets_at 时只显示百分比，不渲染 ↻ 重置时刻（也不 fork date）
+            self.assertNotIn("↻", out)
+
+    def test_statusline_shows_rate_limit_reset_countdown(self):
+        """rate_limits.*.resets_at（Unix epoch 秒，已在 stdin 内，无需 API）渲染为
+        各用量段后的「还剩多久重置」倒计时：5h 用 Xh Ym、7d 用 Xd Yh。脚本仅 fork
+        一次 date +%s 取当前时刻（两窗口共用）；这里用 CC_STATUSLINE_NOW 注入固定
+        now 以得到确定结果——now=1781058000 时 5h 差 3h0m、7d 差 5d12h40m。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self._run_statusline(
+                {
+                    "model": {"display_name": "Opus 4.8"},
+                    "cwd": temp_dir,
+                    "rate_limits": {
+                        "five_hour": {"used_percentage": 51, "resets_at": 1781068800},
+                        "seven_day": {"used_percentage": 5, "resets_at": 1781535600},
+                    },
+                },
+                env={"CC_STATUSLINE_NOW": "1781058000"},
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            out = _strip(result.stdout)
+            self.assertIn("5h 51% ↻3h0m", out)
+            self.assertIn("7d 5% ↻5d12h", out)
 
     def test_statusline_shows_lines_changed_and_cost(self):
         with tempfile.TemporaryDirectory() as temp_dir:
