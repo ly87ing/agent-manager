@@ -60,7 +60,7 @@ done
 
 # ---- 输出（printf 内建；仅当有 resets_at 时 fork 一次 date +%s 取 now） ----
 shown=0
-sep() { (( shown )) && printf ' \033[90m·\033[0m '; shown=1; }
+sep() { (( shown )) && printf ' · '; shown=1; }   # 分隔符用终端默认前景色（深/浅背景皆可读）
 
 # epoch 差（秒）-> 紧凑倒计时，结果写入 REPLY（纯 bash，无 $() 子shell）
 fmt_dur() {
@@ -83,8 +83,8 @@ fi
 
 [[ -n $effort ]] && { sep; printf '\033[35meffort:%s\033[0m' "$effort"; }
 
-if [[ -n $dir ]]; then                       # 目录（蓝）+ 分支（绿，括号内）
-  sep; printf '\033[34m%s\033[0m' "$dir"
+if [[ -n $dir ]]; then                       # 目录（加粗，背景无关）+ 分支（绿，括号内）
+  sep; printf '\033[1m%s\033[0m' "$dir"
   [[ -n $branch ]] && printf ' \033[32m(%s)\033[0m' "$branch"
 fi
 
@@ -97,21 +97,21 @@ if (( ${added:-0} > 0 || ${removed:-0} > 0 )); then   # 本会话行数增删
   sep; printf '\033[32m+%s\033[0m/\033[31m-%s\033[0m' "${added:-0}" "${removed:-0}"
 fi
 
-[[ -n $cost ]] && { sep; printf '\033[90m$%.2f\033[0m' "$cost"; }
+[[ -n $cost ]] && { sep; printf '$%.2f' "$cost"; }   # 成本用默认前景色
 
 if [[ -n $five ]]; then                      # 5 小时时限用量（+ 重置倒计时）
   c=32; (( five >= 60 )) && c=33; (( five >= 85 )) && c=31
   sep; printf '\033[%dm5h %s%%\033[0m' "$c" "$five"
-  if [[ -n $five_reset && -n $now ]]; then fmt_dur $(( five_reset - now )); printf ' \033[90m↻%s\033[0m' "$REPLY"; fi
+  if [[ -n $five_reset && -n $now ]]; then fmt_dur $(( five_reset - now )); printf ' ↻%s' "$REPLY"; fi
 fi
 
 if [[ -n $week ]]; then                      # 7 天周限用量（+ 重置倒计时）
   c=32; (( week >= 60 )) && c=33; (( week >= 85 )) && c=31
   sep; printf '\033[%dm7d %s%%\033[0m' "$c" "$week"
-  if [[ -n $week_reset && -n $now ]]; then fmt_dur $(( week_reset - now )); printf ' \033[90m↻%s\033[0m' "$REPLY"; fi
+  if [[ -n $week_reset && -n $now ]]; then fmt_dur $(( week_reset - now )); printf ' ↻%s' "$REPLY"; fi
 fi
 
 # 输出风格：仅非 default 时提示（罕见，平时不占位）
-[[ -n $ostyle && $ostyle != default ]] && { sep; printf '\033[90m[%s]\033[0m' "$ostyle"; }
+[[ -n $ostyle && $ostyle != default ]] && { sep; printf '[%s]' "$ostyle"; }
 
 exit 0   # statusline 始终以 0 退出（即使本行之前的 [[ ]] 为假）
