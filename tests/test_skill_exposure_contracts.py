@@ -27,8 +27,6 @@ class SkillExposureContractTests(unittest.TestCase):
             "agent-skills": ["claude-code", "antigravity-cli", "codex"],
             "anthropic-frontend-design-skill": ["claude-code"],
             "playwright-best-practices-skill": ["claude-code", "codex"],
-            "superpowers": ["claude-code", "antigravity-cli", "codex"],
-            "ui-ux-pro-max-skill": ["claude-code", "codex"],
         }
 
         actual_scopes = {

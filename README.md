@@ -33,7 +33,7 @@
 
 - `chrome-devtools`（MCP）
   - 继续使用 `npx ...@latest` 运行时拉取上游最新能力。
-默认受管 skill 仓库当前包含 `agent-skills`、`oa-skill`、`anthropic-frontend-design-skill`、`playwright-best-practices-skill`、`superpowers` 和 `ui-ux-pro-max-skill`；它们在未显式声明 `commit` / `ref` 时，会在同步时跟随上游默认分支最新状态；其中 `agent-skills` 面向 `Claude Code`、`Antigravity CLI` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 `safe-merge-review`、`fix-ones-bug`、`qa-self-verify`、`architecture-change-review`、`code-style-contracts`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing` 这 8 个 skill 包，避免上游新增 skill 被默认带入；`oa-skill` 当前通过显式 `skill_paths` 默认接入仓库内唯一的 `xyai-manager` skill；`anthropic-frontend-design-skill` 仅面向 `Claude Code` 暴露，并通过显式 `skill_paths` 锁定 Anthropic 官方 `skills/frontend-design`。OpenAI 官方仓库当前最新主分支已不再提供 `frontend-skill`，因此默认清单不再引用该路径，避免 `make all` 在跟随上游最新状态时失败。
+默认受管 skill 仓库当前包含 `agent-skills`、`anthropic-frontend-design-skill` 和 `playwright-best-practices-skill`；它们在未显式声明 `commit` / `ref` 时，会在同步时跟随上游默认分支最新状态；其中 `agent-skills` 面向 `Claude Code`、`Antigravity CLI` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 `safe-merge-review`、`fix-ones-bug`、`qa-self-verify`、`architecture-change-review`、`code-style-contracts`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing` 这 8 个 skill 包，避免上游新增 skill 被默认带入；`anthropic-frontend-design-skill` 仅面向 `Claude Code` 暴露，并通过显式 `skill_paths` 锁定 Anthropic 官方 `skills/frontend-design`。OpenAI 官方仓库当前最新主分支已不再提供 `frontend-skill`，因此默认清单不再引用该路径，避免 `make all` 在跟随上游最新状态时失败。
 默认自动安装的 Agent 当前只包含 `Claude Code`、`Codex` 和 `Antigravity CLI`。
 `Claude Code` 与 `Antigravity CLI` 当前默认走官方 native installer；`Codex` 默认走官方 npm 包。历史 `brew` 安装仅用于识别并提示迁移，不再作为这些 CLI 的受管 provider。
 `Claude Code native` 当前已经补齐官方 uninstall 路径，因此 `install / update / uninstall` 都可继续走官方 installer 语义。

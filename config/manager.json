@@ -12,11 +12,8 @@
   "browser_us_sync": { "enabled": true },
   "skills": {
     "agent-skills": { "enabled": true },
-    "oa-skill": { "enabled": true },
     "anthropic-frontend-design-skill": { "enabled": true },
-    "playwright-best-practices-skill": { "enabled": true },
-    "superpowers": { "enabled": false },
-    "ui-ux-pro-max-skill": { "enabled": false }
+    "playwright-best-practices-skill": { "enabled": true }
   },
   "mcp": {
     "augment-context-engine": { "enabled": false },

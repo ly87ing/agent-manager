@@ -15,11 +15,6 @@
       "skill_count": 8,
       "agents": ["claude-code", "antigravity-cli", "codex"]
     },
-    "oa-skill": {
-      "url": "https://github.com/ly87ing/oa-skill.git",
-      "skill_paths": ["skills/xyai-manager"],
-      "skill_count": 1
-    },
     "anthropic-frontend-design-skill": {
       "url": "https://github.com/anthropics/skills.git",
       "skill_paths": ["skills/frontend-design"],
@@ -29,16 +24,6 @@
     "playwright-best-practices-skill": {
       "url": "https://github.com/currents-dev/playwright-best-practices-skill.git",
       "skill_count": 1,
-      "agents": ["claude-code", "codex"]
-    },
-    "superpowers": {
-      "url": "https://github.com/obra/superpowers",
-      "skill_count": 14,
-      "agents": ["claude-code", "antigravity-cli", "codex"]
-    },
-    "ui-ux-pro-max-skill": {
-      "url": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill",
-      "skill_count": 7,
       "agents": ["claude-code", "codex"]
     }
   },

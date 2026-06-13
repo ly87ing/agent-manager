@@ -2269,17 +2269,6 @@ class LinkSkillsTests(unittest.TestCase):
 
         self.assertTrue(link_skills.is_path_within_base(managed_path, base_path))
 
-    def test_default_skill_catalog_includes_ui_ux_pro_max_repo_with_explicit_agents(self):
-        skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
-
-        repo = skills_config["repositories"].get("ui-ux-pro-max-skill")
-
-        self.assertIsNotNone(repo)
-        self.assertEqual(repo["url"], "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill")
-        self.assertEqual(repo["agents"], ["claude-code", "codex"])
-        self.assertNotIn("commit", repo)
-        self.assertNotIn("ref", repo)
-
     def test_default_skill_catalog_includes_agent_skills_repo_with_explicit_agents(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
 
@@ -2317,28 +2306,6 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertNotIn("commit", repo)
         self.assertNotIn("ref", repo)
 
-    def test_default_skill_catalog_includes_superpowers_for_all_supported_agents(self):
-        skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
-
-        repo = skills_config["repositories"].get("superpowers")
-
-        self.assertIsNotNone(repo)
-        self.assertEqual(repo["url"], "https://github.com/obra/superpowers")
-        self.assertEqual(
-            set(repo["agents"]),
-            {"claude-code", "antigravity-cli", "codex"},
-        )
-        self.assertNotIn("commit", repo)
-        self.assertNotIn("ref", repo)
-
-    def test_default_manager_policy_explicitly_enables_ui_ux_pro_max_repo(self):
-        manager_config = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
-
-        self.assertEqual(
-            manager_config["skills"].get("ui-ux-pro-max-skill"),
-            {"enabled": False},
-        )
-
     def test_default_manager_policy_explicitly_enables_agent_skills_repo(self):
         manager_config = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
 
@@ -2346,19 +2313,6 @@ class LinkSkillsTests(unittest.TestCase):
             manager_config["skills"].get("agent-skills"),
             {"enabled": True},
         )
-
-    def test_default_skill_catalog_includes_oa_skill_repo_with_explicit_skill_path(self):
-        skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
-
-        repo = skills_config["repositories"].get("oa-skill")
-
-        self.assertIsNotNone(repo)
-        self.assertEqual(repo["url"], "https://github.com/ly87ing/oa-skill.git")
-        self.assertEqual(repo["skill_paths"], ["skills/xyai-manager"])
-        self.assertEqual(repo["skill_count"], 1)
-        self.assertNotIn("agents", repo)
-        self.assertNotIn("commit", repo)
-        self.assertNotIn("ref", repo)
 
     def test_default_skill_catalog_does_not_reference_removed_openai_frontend_skill(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
@@ -2390,13 +2344,5 @@ class LinkSkillsTests(unittest.TestCase):
 
         self.assertEqual(
             manager_config["skills"].get("anthropic-frontend-design-skill"),
-            {"enabled": True},
-        )
-
-    def test_default_manager_policy_explicitly_enables_oa_skill_repo(self):
-        manager_config = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
-
-        self.assertEqual(
-            manager_config["skills"].get("oa-skill"),
             {"enabled": True},
         )

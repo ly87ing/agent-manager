@@ -309,11 +309,6 @@ class ProjectContractTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("`agent-skills` 面向 `Claude Code`、`Antigravity CLI` 与 `Codex` 暴露", readme)
 
-    def test_readme_documents_default_oa_skill_repo(self):
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("`oa-skill`", readme)
-        self.assertIn("`xyai-manager`", readme)
-
     def test_readme_documents_isolated_chrome_devtools_mcp(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("chrome-devtools-mcp@latest --isolated", readme)
