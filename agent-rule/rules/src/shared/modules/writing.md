@@ -19,4 +19,5 @@ Apply when writing documents meant to be read: plans, reports, proposals, specs,
 - **Give plans and action items a specific time and explicit done-criteria.** Use an absolute date when a deadline is committed; otherwise a concrete week or phase — never "now/later".
 - **Stay faithful to the source.** Use its wording and figures; don't invent names; verify uncertain terms or data first.
 - **Read top to bottom.** Don't hide content behind tabs or collapsibles; use a simple table only for multi-dimension comparison, never a complex grid.
+- **For interactive / HTML deliverables, set accessible, self-contained defaults up front.** Large readable type, single-file/offline, click→centered modal (not a scroll-away panel), one visual per flow, full clickable hit areas, and verify the rendered result before done — see `frontend.md`. Decide these before building to avoid redo rounds on font size, redundant visuals, or dead clicks.
 - **Revise before done.** Reread as the target reader: cut redundancy, verify facts, confirm each section leads with its takeaway.
