@@ -84,11 +84,33 @@ def get_managed_repo_base(base_dir):
     return Path(base_dir).resolve() / MANAGED_REPO_DIRNAME
 
 def write_owner_marker(repo_path, repo_name):
-    marker_path = Path(repo_path) / OWNER_MARKER
+    repo_path = Path(repo_path)
+    marker_path = repo_path / OWNER_MARKER
     marker_path.write_text(
         json.dumps({"managed_by": "agent-manager", "repository": repo_name}, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    ensure_local_git_exclude(repo_path, OWNER_MARKER)
+
+
+def ensure_local_git_exclude(repo_path, pattern):
+    exclude_path = Path(repo_path) / ".git" / "info" / "exclude"
+    if not exclude_path.parent.is_dir():
+        return
+    try:
+        existing = exclude_path.read_text(encoding="utf-8") if exclude_path.exists() else ""
+    except OSError as exc:
+        logging.warning(f"[{repo_path.name}] 读取本地 git ignore 失败: {exc}")
+        return
+    if pattern in {line.strip() for line in existing.splitlines()}:
+        return
+    try:
+        with exclude_path.open("a", encoding="utf-8") as handle:
+            if existing and not existing.endswith("\n"):
+                handle.write("\n")
+            handle.write(f"{pattern}\n")
+    except OSError as exc:
+        logging.warning(f"[{repo_path.name}] 写入本地 git ignore 失败: {exc}")
 
 def is_manager_owned_repo(repo_path):
     return (Path(repo_path) / OWNER_MARKER).is_file()

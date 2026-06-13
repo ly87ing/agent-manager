@@ -336,6 +336,30 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(run_cmd.call_args_list, [mock.call(["git", "pull", "--ff-only"], cwd=repo_path)])
 
+    def test_write_owner_marker_adds_marker_to_local_git_exclude(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_path = Path(temp_dir) / "repositories" / "demo-skill"
+            (repo_path / ".git" / "info").mkdir(parents=True)
+            (repo_path / ".git" / "info" / "exclude").write_text("# local excludes\n", encoding="utf-8")
+
+            link_skills.write_owner_marker(repo_path, "demo-skill")
+
+            marker = json.loads((repo_path / ".agent-manager-owned").read_text(encoding="utf-8"))
+            exclude_lines = (repo_path / ".git" / "info" / "exclude").read_text(encoding="utf-8").splitlines()
+            self.assertEqual(marker, {"managed_by": "agent-manager", "repository": "demo-skill"})
+            self.assertIn(".agent-manager-owned", exclude_lines)
+
+    def test_write_owner_marker_does_not_duplicate_local_git_exclude(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_path = Path(temp_dir) / "repositories" / "demo-skill"
+            (repo_path / ".git" / "info").mkdir(parents=True)
+
+            link_skills.write_owner_marker(repo_path, "demo-skill")
+            link_skills.write_owner_marker(repo_path, "demo-skill")
+
+            exclude_lines = (repo_path / ".git" / "info" / "exclude").read_text(encoding="utf-8").splitlines()
+            self.assertEqual(exclude_lines.count(".agent-manager-owned"), 1)
+
     def test_missing_policy_repository_is_ignored(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
