@@ -14,11 +14,11 @@ When frontend validation uses Playwright or browser automation, follow `artifact
 
 ## Interactive HTML / doc deliverables
 
-Set these as defaults up front. They are the lessons from delivering interactive docs; applying them on the first pass avoids rounds of "still too small" / "this is redundant" / "clicking does nothing".
+Defaults for HTML handed to readers (decks, dashboards, interactive docs). Decide them before building, not after feedback.
 
-- **Accessibility-first type.** Default base font ≥ 18px with generous line-height (~1.7) and padding; size for small screens and older / low-vision readers, not for a large desktop monitor. Never ship sub-14px body text. When unsure, go larger; add an A−/A+ control if the audience is broad.
-- **Self-contained & offline by default.** For enterprise / air-gapped / 信创 / 内网 audiences, ship a single file with zero external dependencies — no CDN, web fonts, or remote diagram libraries. Hand-draw diagrams as inline SVG/CSS, or bundle the library inline.
-- **Detail-on-demand = centered modal overlay.** When clicking an element reveals detail, pop a fixed centered overlay (dismiss via ×, backdrop click, and Esc; lock body scroll while open; don't auto-open on load). Do NOT dock the detail in a panel the user must scroll to — that defeats the click.
-- **One canonical visual per flow.** Show a given flow/sequence once; don't duplicate it as both a card row and a diagram. Make the single visual the interactive entry point.
-- **Make the whole target clickable.** Give clickable diagram elements a full hit area (e.g. a transparent full-width/row rect with `pointer-events:all`), not just a 1–2px line or a tiny glyph.
-- **Verify the rendered result before "done".** Load it headless (Chrome DevTools / Playwright): assert no console errors, key elements present, and review a screenshot. Never declare an HTML deliverable done from unrendered markup alone.
+- **Make text scale with the reader.** Use relative units (rem/em) and respect browser zoom and OS text-size; don't lock layout to px that can't scale. Pick a comfortable default for the audience — informational/doc decks lean larger, dense tools can be smaller — and don't ship cramped or sub-14px body text. Meet WCAG contrast and support 200% zoom without loss of content.
+- **Match dependency strategy to the deployment.** Bundler / CDN / design-system is right for normal web apps; for air-gapped / enterprise / 信创 / 内网 delivery, ship a single self-contained file with zero external dependencies (no CDN, web fonts, or remote diagram libs) — inline SVG/CSS or bundle the library.
+- **Surface click-triggered detail where the user is looking.** Don't make them scroll to find it. A centered modal, inline expansion, or a pane next to the trigger all work — choose by context. If you use a modal, trap focus, close on Esc and backdrop, restore focus on close, and label it (`role="dialog"` + `aria-modal`/`aria-label`).
+- **One canonical visual per flow.** Show a flow/sequence once; don't duplicate it as both a card row and a diagram. Make the single visual the interactive entry point. (Mirrors `writing.md` "One fact, one place".)
+- **Give interactive elements an adequate hit area.** Meet target-size guidance (WCAG 2.5.8); don't rely on a 1–2px line or a tiny glyph. For SVG, place a transparent full-row/area rect with `pointer-events:all` behind the visuals.
+- **Verify the rendered result before "done".** Load it headless (Chrome DevTools / Playwright): assert no console errors, key elements present, interactions actually work, and review a screenshot. Never declare an HTML deliverable done from unrendered markup alone.
