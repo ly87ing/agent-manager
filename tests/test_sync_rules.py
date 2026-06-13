@@ -184,10 +184,10 @@ class SyncRulesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            target_dir = temp_root / "tmp-target" / "modules"
+            target_dir = temp_root / "tmp-target" / "rules"
             self.assertFalse(target_dir.exists())
             (temp_root / "config" / "rules-targets.list").write_text(
-                f"test_modules|global|rules/dist/modules|{target_dir}\n",
+                f"test_rules|global|rules/dist/antigravity/rules|{target_dir}\n",
                 encoding="utf-8",
             )
 
@@ -206,13 +206,13 @@ class SyncRulesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            target_dir = temp_root / "tmp-target" / "modules"
-            source_dir = temp_root / "agent-rule" / "rules" / "dist" / "modules"
+            target_dir = temp_root / "tmp-target" / "rules"
+            source_dir = temp_root / "agent-rule" / "rules" / "dist" / "antigravity" / "rules"
             shutil.copytree(source_dir, target_dir)
             stale_file = target_dir / "stale.md"
             stale_file.write_text("stale\n", encoding="utf-8")
             (temp_root / "config" / "rules-targets.list").write_text(
-                f"test_modules|global|rules/dist/modules|{target_dir}\n",
+                f"test_rules|global|rules/dist/antigravity/rules|{target_dir}\n",
                 encoding="utf-8",
             )
 
@@ -231,13 +231,13 @@ class SyncRulesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            target_dir = temp_root / "tmp-target" / "modules"
-            source_dir = temp_root / "agent-rule" / "rules" / "dist" / "modules"
+            target_dir = temp_root / "tmp-target" / "rules"
+            source_dir = temp_root / "agent-rule" / "rules" / "dist" / "antigravity" / "rules"
             shutil.copytree(source_dir, target_dir)
-            stale_backup = target_dir / "frontend.md.bak.20260318123628"
+            stale_backup = target_dir / "agent-manager.md.bak.20260318123628"
             stale_backup.write_text("old backup\n", encoding="utf-8")
             (temp_root / "config" / "rules-targets.list").write_text(
-                f"test_modules|global|rules/dist/modules|{target_dir}\n",
+                f"test_rules|global|rules/dist/antigravity/rules|{target_dir}\n",
                 encoding="utf-8",
             )
 
@@ -258,11 +258,11 @@ class SyncRulesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            target_dir = temp_root / "tmp-target" / "modules"
+            target_dir = temp_root / "tmp-target" / "rules"
             target_dir.parent.mkdir(parents=True)
-            target_dir.symlink_to(temp_root / "missing-modules")
+            target_dir.symlink_to(temp_root / "missing-rules")
             (temp_root / "config" / "rules-targets.list").write_text(
-                f"test_modules|global|rules/dist/modules|{target_dir}\n",
+                f"test_rules|global|rules/dist/antigravity/rules|{target_dir}\n",
                 encoding="utf-8",
             )
 
@@ -277,8 +277,8 @@ class SyncRulesTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(target_dir.is_dir(), result.stdout + result.stderr)
             self.assertFalse(target_dir.is_symlink(), result.stdout + result.stderr)
-            self.assertTrue((target_dir / "architecture.md").exists(), result.stdout + result.stderr)
-            self.assertEqual(len(list(target_dir.parent.glob("modules.bak.*"))), 1)
+            self.assertTrue((target_dir / "agent-manager.md").exists(), result.stdout + result.stderr)
+            self.assertEqual(len(list(target_dir.parent.glob("rules.bak.*"))), 1)
 
     def test_copy_mode_replaces_live_directory_symlink_target(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -286,11 +286,11 @@ class SyncRulesTests(unittest.TestCase):
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             real_dir = temp_root / "elsewhere"
             real_dir.mkdir(parents=True)
-            target_dir = temp_root / "tmp-target" / "modules"
+            target_dir = temp_root / "tmp-target" / "rules"
             target_dir.parent.mkdir(parents=True)
             target_dir.symlink_to(real_dir)
             (temp_root / "config" / "rules-targets.list").write_text(
-                f"test_modules|global|rules/dist/modules|{target_dir}\n",
+                f"test_rules|global|rules/dist/antigravity/rules|{target_dir}\n",
                 encoding="utf-8",
             )
 
@@ -305,9 +305,9 @@ class SyncRulesTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(target_dir.is_dir(), result.stdout + result.stderr)
             self.assertFalse(target_dir.is_symlink(), result.stdout + result.stderr)
-            self.assertTrue((target_dir / "architecture.md").exists(), result.stdout + result.stderr)
+            self.assertTrue((target_dir / "agent-manager.md").exists(), result.stdout + result.stderr)
             self.assertEqual(list(real_dir.iterdir()), [], result.stdout + result.stderr)
-            self.assertEqual(len(list(target_dir.parent.glob("modules.bak.*"))), 1)
+            self.assertEqual(len(list(target_dir.parent.glob("rules.bak.*"))), 1)
 
     def test_symlink_mode_replaces_broken_symlink_target(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -389,8 +389,8 @@ class SyncRulesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            target_dir = temp_root / "tmp-target" / "modules"
-            source_dir = temp_root / "agent-rule" / "rules" / "dist" / "modules"
+            target_dir = temp_root / "tmp-target" / "rules"
+            source_dir = temp_root / "agent-rule" / "rules" / "dist" / "antigravity" / "rules"
             shutil.copytree(source_dir, target_dir)
             (target_dir / "stale.md").write_text("stale\n", encoding="utf-8")
 
@@ -415,7 +415,7 @@ class SyncRulesTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (temp_root / "config" / "rules-targets.list").write_text(
-                f"claude_modules|global|rules/dist/modules|{target_dir}\n",
+                f"claude_rules|global|rules/dist/antigravity/rules|{target_dir}\n",
                 encoding="utf-8",
             )
 
@@ -429,18 +429,19 @@ class SyncRulesTests(unittest.TestCase):
 
             combined = result.stdout + result.stderr
             self.assertNotEqual(result.returncode, 0, combined)
-            self.assertIn("claude_modules", combined)
+            self.assertIn("claude_rules", combined)
 
-    def test_claude_main_rule_points_to_relative_modules_path(self):
+    def test_claude_main_rule_routes_to_rule_derived_skills(self):
         content = (ROOT / "agent-rule" / "rules" / "dist" / "claude" / "CLAUDE.md").read_text(encoding="utf-8")
-        self.assertIn("read `modules/architecture.md`", content)
-        self.assertNotIn("~/.<agent>/modules/architecture.md", content)
+        self.assertIn("use the `architecture-change-review` skill", content)
+        self.assertIn("use the `artifact-hygiene` skill", content)
+        self.assertNotIn("modules/", content)
 
-    def test_codex_main_rule_points_to_manifest_modules_path(self):
+    def test_codex_main_rule_routes_to_rule_derived_skills(self):
         content = (ROOT / "agent-rule" / "rules" / "dist" / "codex" / "AGENTS.md").read_text(encoding="utf-8")
-        codex_modules_target = self._read_manifest_target("codex_modules").rstrip("/")
-        self.assertIn(f"read `{codex_modules_target}/architecture.md`", content)
-        self.assertNotIn("read `modules/architecture.md`", content)
+        self.assertIn("use the `frontend-verification` skill", content)
+        self.assertIn("use the `reader-facing-writing` skill", content)
+        self.assertNotIn("modules/", content)
 
     def test_manifest_targets_built_rule_outputs(self):
         manifest = (ROOT / "config" / "rules-targets.list").read_text(encoding="utf-8")
@@ -456,10 +457,5 @@ class SyncRulesTests(unittest.TestCase):
             "~/.gemini/antigravity-cli/plugins/agent-manager/rules",
             manifest,
         )
-        self.assertIn("codex_modules|global|rules/dist/modules|~/.codex/modules", manifest)
-        self.assertIn("claude_modules|global|rules/dist/modules|~/.claude/modules", manifest)
-        self.assertIn(
-            "antigravity_modules|global|rules/dist/modules|"
-            "~/.gemini/antigravity-cli/plugins/agent-manager/modules",
-            manifest,
-        )
+        self.assertNotIn("rules/dist/modules", manifest)
+        self.assertNotIn("_modules|", manifest)

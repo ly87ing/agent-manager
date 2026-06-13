@@ -3690,10 +3690,17 @@ class ManageScriptTests(unittest.TestCase):
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             temp_home.mkdir()
 
-            rule_target = temp_home / ".claude" / "rules" / "modules"
-            rule_backup = temp_home / ".claude" / "rules" / "modules.bak.20260318"
+            rule_target = temp_home / ".gemini" / "antigravity-cli" / "plugins" / "agent-manager" / "rules"
+            rule_backup = (
+                temp_home
+                / ".gemini"
+                / "antigravity-cli"
+                / "plugins"
+                / "agent-manager"
+                / "rules.bak.20260318"
+            )
             rule_backup.mkdir(parents=True)
-            (rule_backup / "style.md").write_text("# backup\n", encoding="utf-8")
+            (rule_backup / "agent-manager.md").write_text("# backup\n", encoding="utf-8")
 
             (temp_root / "config" / "mcp.json").write_text(
                 '{\n  "agent_paths": {},\n  "servers": {}\n}\n',
@@ -3704,7 +3711,7 @@ class ManageScriptTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (temp_root / "config" / "rules-targets.list").write_text(
-                "claude_modules|modules|rules/dist/modules|%s\n" % rule_target,
+                "antigravity_rules|global|rules/dist/antigravity/rules|%s\n" % rule_target,
                 encoding="utf-8",
             )
 

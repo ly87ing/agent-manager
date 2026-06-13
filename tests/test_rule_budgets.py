@@ -13,13 +13,18 @@ class RuleBudgetTests(unittest.TestCase):
 
     def test_shared_core_excludes_artifact_hygiene_detail(self):
         core = (ROOT / "agent-rule" / "rules" / "src" / "shared" / "core.md").read_text(encoding="utf-8")
-        artifact = (ROOT / "agent-rule" / "rules" / "src" / "shared" / "modules" / "artifact-hygiene.md").read_text(
-            encoding="utf-8"
-        )
+        artifact = (
+            ROOT
+            / "agent-skill"
+            / "repositories"
+            / "agent-skills"
+            / "artifact-hygiene"
+            / "SKILL.md"
+        ).read_text(encoding="utf-8")
 
         phrase = (
-            "Use project-local ignored output directories only for workflow-consumed artifacts already used by "
-            "repository workflows"
+            "Do not create or widen `.gitignore`, config conventions, or repository directories just to host "
+            "disposable outputs."
         )
         self.assertNotIn(phrase, core)
         self.assertIn(phrase, artifact)

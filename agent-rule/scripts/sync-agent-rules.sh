@@ -149,23 +149,19 @@ cleanup_legacy_target_paths() {
   case "$name" in
     codex_global)
       if [ "$dst_abs" = "$HOME/.codex/AGENTS.md" ]; then
-        legacy_paths=("$HOME/.codex/rules/global.md")
+        legacy_paths=("$HOME/.codex/rules/global.md" "$HOME/.codex/rules/modules")
       fi
       ;;
     claude_global)
-      legacy_paths=("$HOME/.claude/rules/global.md")
+      legacy_paths=("$HOME/.claude/rules/global.md" "$HOME/.claude/rules/modules")
       ;;
     antigravity_rules)
-      legacy_paths=("$HOME/.gemini/GEMINI.md" "$HOME/.gemini/rules/global.md")
-      ;;
-    codex_modules)
-      legacy_paths=("$HOME/.codex/rules/modules")
-      ;;
-    claude_modules)
-      legacy_paths=("$HOME/.claude/rules/modules")
-      ;;
-    antigravity_modules)
-      legacy_paths=("$HOME/.gemini/modules" "$HOME/.gemini/rules/modules")
+      legacy_paths=(
+        "$HOME/.gemini/GEMINI.md"
+        "$HOME/.gemini/rules/global.md"
+        "$HOME/.gemini/modules"
+        "$HOME/.gemini/rules/modules"
+      )
       ;;
   esac
 

@@ -2,31 +2,19 @@
 
 from __future__ import annotations
 
-import re
 import shutil
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
-REPO_ROOT = ROOT.parent
 SRC_ROOT = ROOT / "rules" / "src"
 DIST_ROOT = ROOT / "rules" / "dist"
-MODULES_SRC = SRC_ROOT / "shared" / "modules"
-MODULES_DIST = DIST_ROOT / "modules"
 TARGETS = ("codex", "claude", "antigravity")
-MANIFEST_PATH = REPO_ROOT / "config" / "rules-targets.list"
-MODULE_REFERENCE_PATTERN = re.compile(r"`modules/([^`]+\.md)`")
 TARGET_SPECS = {
     "codex": {"adapter": "codex", "filename": "AGENTS.md"},
     "claude": {"adapter": "claude", "filename": "CLAUDE.md"},
     "antigravity": {"adapter": "antigravity", "filename": "rules/agent-manager.md"},
 }
-MODULE_MANIFEST_TARGETS = {
-    "codex": "codex_modules",
-    "antigravity": "antigravity_modules",
-}
-
-
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
@@ -45,35 +33,8 @@ def write_dist_gitkeep() -> None:
     (DIST_ROOT / ".gitkeep").write_text("", encoding="utf-8")
 
 
-def read_manifest_target(name: str) -> str:
-    for raw_line in MANIFEST_PATH.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        entry_name, _group, _source, target = line.split("|", 3)
-        if entry_name == name:
-            return target
-    raise ValueError(f"missing manifest target: {name}")
-
-
-def render_instruction_path(target: str) -> str:
-    if target.startswith("{{REPO_ROOT}}"):
-        return target.replace("{{REPO_ROOT}}", str(REPO_ROOT), 1)
-    if target.startswith("{{HOME}}"):
-        return target.replace("{{HOME}}", "~", 1)
-    return target
-
-
 def render_target_content(target: str, core_lines: list[str], adapter_lines: list[str]) -> str:
-    content = "\n".join([*core_lines, *adapter_lines])
-    modules_target = MODULE_MANIFEST_TARGETS.get(target)
-    if modules_target:
-        modules_root = render_instruction_path(read_manifest_target(modules_target)).rstrip("/")
-        content = MODULE_REFERENCE_PATTERN.sub(
-            lambda match: f"`{modules_root}/{match.group(1)}`",
-            content,
-        )
-    return content + "\n"
+    return "\n".join([*core_lines, *adapter_lines]) + "\n"
 
 
 def build_target_file(target: str) -> None:
@@ -97,16 +58,9 @@ def write_antigravity_plugin_manifest() -> None:
     plugin_path.write_text('{\n  "name": "agent-manager"\n}\n', encoding="utf-8")
 
 
-def copy_modules() -> None:
-    reset_directory(MODULES_DIST)
-    for src in sorted(MODULES_SRC.glob("*.md")):
-        shutil.copy2(src, MODULES_DIST / src.name)
-
-
 def main() -> int:
     reset_directory(DIST_ROOT)
     write_dist_gitkeep()
-    copy_modules()
     for target in TARGETS:
         build_target_file(target)
     write_antigravity_plugin_manifest()

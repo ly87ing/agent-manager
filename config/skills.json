@@ -5,9 +5,14 @@
       "skill_paths": [
         "safe-merge-review",
         "fix-ones-bug",
-        "qa-self-verify"
+        "qa-self-verify",
+        "architecture-change-review",
+        "code-style-contracts",
+        "frontend-verification",
+        "artifact-hygiene",
+        "reader-facing-writing"
       ],
-      "skill_count": 3,
+      "skill_count": 8,
       "agents": ["claude-code", "codex"]
     },
     "oa-skill": {

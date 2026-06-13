@@ -8,10 +8,10 @@
 - Never delete tests, make tests easier, loosen assertions, or skip/xfail failures just to make code pass; change tests only when intended behavior changed, and state why the old expectation was wrong.
 - After every change, run the smallest relevant verification that could fail.
 - If you skip verification, cannot run it, or ran something that did not actually exercise the change, say so explicitly.
-- If architecture, interfaces, or dependency boundaries change, read `~/.gemini/antigravity-cli/plugins/agent-manager/modules/architecture.md`.
-- If code style, config, data contracts, or comments change, read `~/.gemini/antigravity-cli/plugins/agent-manager/modules/style.md`.
-- If UI, flows, frontend validation, or browser automation change, read `~/.gemini/antigravity-cli/plugins/agent-manager/modules/frontend.md`.
-- If Playwright, generators, generated artifacts, or debug output are involved, read `~/.gemini/antigravity-cli/plugins/agent-manager/modules/artifact-hygiene.md`.
-- If you write reader-facing documents (plans, reports, proposals, specs, checklists, HTML decks), read `~/.gemini/antigravity-cli/plugins/agent-manager/modules/writing.md`.
+- Architecture/interfaces/dependency boundaries: use the `architecture-change-review` skill.
+- Code style/config/data contracts/comments: use the `code-style-contracts` skill.
+- UI/flows/frontend/browser automation/HTML: use the `frontend-verification` skill.
+- Playwright/generators/artifacts/debug output/traces/screenshots/downloads: use the `artifact-hygiene` skill.
+- Reader-facing plans/reports/proposals/specs/checklists/Markdown/HTML: use the `reader-facing-writing` skill.
 - When the user asks for a plan, output the plan and wait for confirmation before modifying files.
 - Stage and commit git changes selectively; never run `git add .`, `git push`, or auto-commit without explicit per-action approval.

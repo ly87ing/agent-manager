@@ -58,7 +58,7 @@ class RuleLayoutTests(unittest.TestCase):
             )
             self.assertFalse((temp_root / "agent-rule" / "rules" / "dist" / "copilot").exists(), combined)
 
-    def test_build_copies_shared_modules(self):
+    def test_build_omits_shared_modules(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = self._copy_repo(temp_dir)
 
@@ -67,68 +67,22 @@ class RuleLayoutTests(unittest.TestCase):
             combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
             modules_dir = temp_root / "agent-rule" / "rules" / "dist" / "modules"
-            self.assertTrue((modules_dir / "architecture.md").exists(), combined)
-            self.assertTrue((modules_dir / "style.md").exists(), combined)
-            self.assertTrue((modules_dir / "frontend.md").exists(), combined)
-            self.assertTrue((modules_dir / "artifact-hygiene.md").exists(), combined)
+            self.assertFalse(modules_dir.exists(), combined)
 
-    def test_frontend_module_captures_browser_tool_boundaries(self):
-        frontend_module = (ROOT / "agent-rule" / "rules" / "dist" / "modules" / "frontend.md").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("Choose by Intent, Not Tool Availability", frontend_module)
-        self.assertIn("Use Playwright for reproducible assertions, regression coverage", frontend_module)
-        self.assertIn("Use Chrome DevTools for one-off visual inspection", frontend_module)
-        self.assertIn("Use `agent-browser` for persistent multi-step web tasks", frontend_module)
-        self.assertIn("Preserve Authenticated Context Deliberately", frontend_module)
-        self.assertIn("report the tool failure explicitly before falling back", frontend_module)
-
-    def test_codex_module_paths_follow_manifest_target(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = self._copy_repo(temp_dir)
-            manifest_path = temp_root / "config" / "rules-targets.list"
-            manifest = manifest_path.read_text(encoding="utf-8")
-            manifest_path.write_text(
-                manifest.replace(
-                    "codex_modules|global|rules/dist/modules|~/.codex/modules",
-                    "codex_modules|global|rules/dist/modules|~/.codex-alt/modules",
-                ),
-                encoding="utf-8",
-            )
-
-            result = self._run_builder(temp_root)
-
-            combined = result.stdout + result.stderr
-            self.assertEqual(result.returncode, 0, combined)
-            codex_rule = (temp_root / "agent-rule" / "rules" / "dist" / "codex" / "AGENTS.md").read_text(
-                encoding="utf-8"
-            )
-            self.assertIn("read `~/.codex-alt/modules/architecture.md`", codex_rule)
-            self.assertNotIn("read `~/.codex/modules/architecture.md`", codex_rule)
-
-    def test_codex_rewrites_new_shared_module_references(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = self._copy_repo(temp_dir)
-            core_path = temp_root / "agent-rule" / "rules" / "src" / "shared" / "core.md"
-            core_path.write_text(
-                core_path.read_text(encoding="utf-8")
-                + "- If custom verification rules change, read `modules/custom.md` before editing.\n",
-                encoding="utf-8",
-            )
-            (temp_root / "agent-rule" / "rules" / "src" / "shared" / "modules" / "custom.md").write_text(
-                "# Custom\n",
-                encoding="utf-8",
-            )
-
-            result = self._run_builder(temp_root)
-
-            combined = result.stdout + result.stderr
-            self.assertEqual(result.returncode, 0, combined)
-            codex_rule = (temp_root / "agent-rule" / "rules" / "dist" / "codex" / "AGENTS.md").read_text(
-                encoding="utf-8"
-            )
-            self.assertIn("read `~/.codex/modules/custom.md`", codex_rule)
-            self.assertNotIn("read `modules/custom.md`", codex_rule)
+    def test_frontend_verification_skill_captures_browser_tool_boundaries(self):
+        frontend_skill = (
+            ROOT
+            / "agent-skill"
+            / "repositories"
+            / "agent-skills"
+            / "frontend-verification"
+            / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Choose the browser tool by intent", frontend_skill)
+        self.assertIn("Use Playwright for reproducible assertions, regression coverage", frontend_skill)
+        self.assertIn("Use Chrome DevTools for one-off visual inspection", frontend_skill)
+        self.assertIn("Preserve authenticated context deliberately", frontend_skill)
+        self.assertIn("report that tool failure before falling back", frontend_skill)
 
     def test_build_removes_stale_dist_outputs(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -164,11 +118,16 @@ class RuleLayoutTests(unittest.TestCase):
                 "or impossible-case handling."
             ),
             "Keep edits surgical: match local style, avoid unrelated cleanup, and remove only dead code made obsolete.",
-            "modules/artifact-hygiene.md",
+            "`architecture-change-review` skill",
+            "`code-style-contracts` skill",
+            "`frontend-verification` skill",
+            "`artifact-hygiene` skill",
+            "`reader-facing-writing` skill",
         )
         for target, filename in self.DIST_FILENAMES.items():
             content = (ROOT / "agent-rule" / "rules" / "dist" / target / filename).read_text(encoding="utf-8")
             self.assertIn(language_clause, content, target)
+            self.assertNotIn("modules/", content, target)
             self.assertNotIn("For codebase exploration:", content, target)
             self.assertNotIn("codebase-retrieval", content, target)
             self.assertNotIn("augment MCP", content, target)

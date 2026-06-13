@@ -2,7 +2,7 @@
 
 ## Scope
 
-- 维护 `agent-rule/rules/src/` 下的共享 core、modules 和 agent adapters。
+- 维护 `agent-rule/rules/src/` 下的共享 core 和 agent adapters。
 - 将 `agent-rule/rules/dist/` 视为生成产物，不直接手改。
 
 ## Workflow

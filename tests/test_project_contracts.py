@@ -230,7 +230,9 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("最简单本地改动", readme)
         self.assertIn("surgical edits", readme)
         self.assertIn("verification point", readme)
-        self.assertIn("agent-rule/rules/src/shared/modules/", readme)
+        self.assertIn("低频专题进 skill", readme)
+        self.assertIn("architecture-change-review", readme)
+        self.assertIn("reader-facing-writing", readme)
         self.assertIn("agent-rule/rules/src/agents/*/adapter.md", readme)
 
     def test_readme_documents_scoped_claude_memory_layout(self):

@@ -2267,9 +2267,16 @@ class LinkSkillsTests(unittest.TestCase):
             repo["skill_paths"],
             [
                 "safe-merge-review",
+                "fix-ones-bug",
+                "qa-self-verify",
+                "architecture-change-review",
+                "code-style-contracts",
+                "frontend-verification",
+                "artifact-hygiene",
+                "reader-facing-writing",
             ],
         )
-        self.assertEqual(repo["skill_count"], 1)
+        self.assertEqual(repo["skill_count"], 8)
         self.assertEqual(repo["agents"], ["claude-code", "codex"])
         self.assertNotIn("ignored_skill_paths", repo)
         self.assertNotIn("commit", repo)

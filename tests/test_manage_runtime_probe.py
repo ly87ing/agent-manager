@@ -67,7 +67,7 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
     def test_rule_target_agent_id_maps_current_prefixes(self):
         self.assertEqual(manage_runtime_probe.rule_target_agent_id("claude_global"), "claude-code")
-        self.assertEqual(manage_runtime_probe.rule_target_agent_id("antigravity_modules"), "antigravity-cli")
+        self.assertEqual(manage_runtime_probe.rule_target_agent_id("antigravity_rules"), "antigravity-cli")
         self.assertEqual(manage_runtime_probe.rule_target_agent_id("codex_global"), "codex")
 
     def test_detect_tool_readiness_requires_git_clone_for_repo_backed_tools(self):
