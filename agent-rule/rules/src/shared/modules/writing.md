@@ -10,6 +10,7 @@ Apply when writing documents meant to be read: plans, reports, proposals, specs,
 - **Cut words.** Delete every word that doesn't change the meaning. Active voice, specific verbs, one idea per sentence, no ambiguous pronouns.
 - **Format for scanning.** Turn long sentences into lists; start numbered items with imperative verbs.
 - **Use plain language.** Define each term on first use and use it consistently. No marketing tone, no filler.
+- **Don't narrate the document itself.** Write the content, not remarks about the document — what version or section it is, or what it will cover. The reader already knows what they opened; state the point directly.
 - **Be concrete.** Replace vague quantifiers with specifics: counts, thresholds, names. Back key claims with data or a concrete example.
 - **Give plans and action items a specific time and explicit done-criteria.** Use an absolute date when a deadline is committed; otherwise a concrete week or phase — never "now/later".
 - **Stay faithful to the source.** Use its wording and figures; don't invent names; verify uncertain terms or data first.
