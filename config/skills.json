@@ -13,7 +13,7 @@
         "reader-facing-writing"
       ],
       "skill_count": 8,
-      "agents": ["claude-code", "codex"]
+      "agents": ["claude-code", "antigravity-cli", "codex"]
     },
     "oa-skill": {
       "url": "https://github.com/ly87ing/oa-skill.git",

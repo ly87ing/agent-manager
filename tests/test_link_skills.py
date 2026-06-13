@@ -2277,7 +2277,7 @@ class LinkSkillsTests(unittest.TestCase):
             ],
         )
         self.assertEqual(repo["skill_count"], 8)
-        self.assertEqual(repo["agents"], ["claude-code", "codex"])
+        self.assertEqual(repo["agents"], ["claude-code", "antigravity-cli", "codex"])
         self.assertNotIn("ignored_skill_paths", repo)
         self.assertNotIn("commit", repo)
         self.assertNotIn("ref", repo)
