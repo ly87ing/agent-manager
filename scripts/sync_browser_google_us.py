@@ -17,6 +17,7 @@ from browser_us.sync_audit import *  # noqa: E402,F401,F403
 from browser_us.chrome import *  # noqa: E402,F401,F403
 from browser_us.verify_report import *  # noqa: E402,F401,F403
 from browser_us.runtime_probe import *  # noqa: E402,F401,F403
+from browser_us.automation_validate import *  # noqa: E402,F401,F403
 from browser_us.automation import *  # noqa: E402,F401,F403
 from browser_us.cli import *  # noqa: E402,F401,F403
 
