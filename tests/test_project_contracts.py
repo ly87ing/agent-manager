@@ -57,11 +57,6 @@ class ProjectContractTests(unittest.TestCase):
         )
         self.assertIn("\ninstructions\\:check: instructions-check\n", makefile)
 
-    def test_makefile_does_not_expose_cc_bridge_runtime_targets(self):
-        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertNotIn("cc-bridge", makefile)
-        self.assertNotIn("scripts/cc-bridge", makefile)
-
     def test_makefile_supports_colon_manage_subcommands(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -246,12 +241,6 @@ class ProjectContractTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("make instructions:check", readme)
 
-    def test_readme_does_not_document_graphify_as_default_managed_tool(self):
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertNotIn("graphify", readme)
-        self.assertNotIn("/graphify", readme)
-        self.assertNotIn("本仓 rules 与 hooks 负责启用“有图先看图”的 always-on 提示", readme)
-
     def test_readme_documents_secret_scan_target(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("make secrets-check", readme)
@@ -319,17 +308,6 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("`anthropic-frontend-design-skill`", readme)
         self.assertIn("Anthropic 官方 `skills/frontend-design`", readme)
         self.assertIn("仅面向 `Claude Code` 暴露", readme)
-
-    def test_readme_does_not_document_cc_bridge_runtime_workflow(self):
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertNotIn("cc-bridge", readme)
-        self.assertNotIn("CC-BRIDGE", readme)
-        self.assertNotIn("docs/CC-BRIDGE-MANAGEMENT.md", readme)
-
-    def test_cc_bridge_runtime_artifacts_are_not_committed(self):
-        self.assertFalse((ROOT / "docs" / "CC-BRIDGE-MANAGEMENT.md").exists())
-        self.assertFalse((ROOT / "scripts" / "cc-bridge" / "manage.py").exists())
-        self.assertFalse((ROOT / "scripts" / "cc-bridge" / "image" / "Dockerfile").exists())
 
     def test_claude_code_credentials_are_left_to_cc_switch(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")

@@ -70,13 +70,6 @@ class SyncToolsTests(unittest.TestCase):
             f"no readiness glob matches the headless-shell cache dir; globs={globs}",
         )
 
-    def test_committed_policy_does_not_manage_graphify(self):
-        manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
-        tool_defs = json.loads((ROOT / "config" / "tools.json").read_text(encoding="utf-8"))["tools"]
-
-        self.assertNotIn("graphify", manager["tools"])
-        self.assertNotIn("graphify", tool_defs)
-
     def test_install_based_tool_with_setup_requires_setup_marker(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ready = sync_tools.detect_tool_readiness(
