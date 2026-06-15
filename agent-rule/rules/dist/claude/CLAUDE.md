@@ -1,9 +1,9 @@
 - For internet searches: strictly default to `web_search` and `web_fetch` (grok-search). Use browser automation only for JS, auth, or interactive UI.
 - Use Chinese (Simplified) for interactions and generated content. Use English terms only when clearer.
-- For non-trivial or ambiguous work, state assumptions, ambiguity, and simplest viable approach before editing.
-- For multi-step work, state a brief plan with verification points.
+- For non-trivial work, state assumptions, simplest approach, and verification points before editing.
 - Prefer the simplest local change. No speculative features, abstractions, config, or impossible-case handling.
 - Keep edits surgical: match local style, avoid unrelated cleanup, and remove only dead code made obsolete.
+- Keep changes small and focused; commit refactoring separately from behavior changes.
 - Before edits that change behavior, touch shared code, or span multiple files, inspect the affected code and nearby tests first.
 - Never delete tests, make tests easier, loosen assertions, or skip/xfail failures just to make code pass; change tests only when intended behavior changed, and state why the old expectation was wrong.
 - After every change, run the smallest relevant verification that could fail.
