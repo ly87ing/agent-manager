@@ -116,15 +116,16 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 **症状**：`doctor` 报告 `已弃用安装来源`，或 `update` / `bootstrap` 直接失败
 
 #### 处理建议：
-处理原则：当前只维护 `Claude Code`、`Codex` 和 `Antigravity CLI`。放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer；`Codex` 的 `npm` 和 `Antigravity CLI` 的官方 native installer 是当前合规默认路径。
+处理原则：当前只维护 `Claude Code`、`Codex` 和 `Antigravity CLI`。放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer；`Claude Code` 和 `Codex` 的 `npm` 固定版本、`Antigravity CLI` 的官方 native installer 是当前合规默认路径。
 
 1. `Claude Code`
-   - 手工卸载 brew 版本，再让 `agent-manager` 走官方 native installer
-   - 如果当前已经是 npm 版并希望切到 native，按官方 `claude migrate-installer` 迁移
+   - 手工卸载 brew 版本，再让 `agent-manager` 走官方 npm 包固定版本
+   - 如果当前已经是 native 版并希望回到默认固定版本路径，先按官方方式清理 native 安装，再执行 `./manage.sh bootstrap`
 2. `Codex`
    - 手工卸载 brew 版本，再执行 `npm install -g @openai/codex`
 3. `Antigravity CLI`
    - 不再托管旧 Gemini CLI 的 npm/brew 来源；如需 Antigravity CLI，执行 `curl -fsSL https://antigravity.google/cli/install.sh | bash`
+   - 如需阻止 `agy` 启动后触发官方后台自更新，按官方文档在 shell 环境设置 `AGY_CLI_DISABLE_AUTO_UPDATE=true`
 
 ### 问题：检测到外部安装但未纳入托管
 **症状**：`doctor` 报告 `检测到外部安装，未纳入 agent-manager 托管`
@@ -133,7 +134,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 1. 确认当前 PATH 中的 `claude` / `codex` / `agy` 是否来自官方受管来源
 2. 清理系统残留或自定义包装脚本，再重新执行 `./manage.sh doctor`
 3. 若希望继续由 `agent-manager` 管理，请回到官方受管 provider：
-   - `Claude Code`：官方 native installer（或保留已存在的 npm 受管安装）
+   - `Claude Code`：官方 npm 包 `@anthropic-ai/claude-code`
    - `Codex`：官方 npm 包 `@openai/codex`
    - `Antigravity CLI`：官方 native installer 安装的 `agy`
 
@@ -143,6 +144,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 #### 处理建议：
 1. 这表示某个 provider 存在官方动作缺口，不是本地配置漏写；`agent-manager` 会保持 fail-close。
 2. 当前默认 provider 必须明确声明生命周期动作边界；`Antigravity CLI` 没有显式受管 update 命令，因此默认关闭 `auto_update` 并依赖 CLI 自更新。
+3. 对 `Antigravity CLI`，agent-manager 不替换官方 installer 或写 shell profile；确定运行二进制版本应使用官方支持的 `AGY_CLI_DISABLE_AUTO_UPDATE=true`。
 3. 如需停用存在动作缺口的 provider，请先按官方流程自行卸载，再重新运行 `./manage.sh doctor` 确认状态；`agent-manager` 不会伪造删除命令。
 
 ### 问题：Rules 修改后没有分发到目标 Agent
@@ -316,8 +318,8 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 4. **`skills:upgrade` 没有实际升级任何仓库**
    - 检查：命令输出是否提示“未配置 `upgrade_strategy`，跳过显式升级”
    - 解决：
-     * 这是信息提示，不是失败；表示当前启用的 skill 仓库都被固定版本锁定，但没有声明 release/tag 跟踪策略
-     * 只有在 `config/skills.json` 的仓库定义里配置了 `upgrade_strategy`（如 `latest-tag` / `latest-release`）时，`make skills:upgrade` 才会实际尝试升级
+     * 这是信息提示，不是失败；表示当前启用的 skill 仓库没有声明可自动解析的跟踪策略
+     * 只有在 `config/skills.json` 的仓库定义里配置了 `upgrade_strategy`（如 `latest-branch` / `latest-tag` / `latest-release`）时，`make skills:upgrade` 才会实际尝试升级
 
 ### 问题：链接的 skill 无法被 Agent 识别
 **症状**：Skill 已链接但 Agent 未响应 skill 触发词或命令

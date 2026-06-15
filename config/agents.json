@@ -2,7 +2,7 @@
   "claude-code": {
     "display_name": "Claude Code",
     "bin": "claude",
-    "preferred_provider": "native",
+    "preferred_provider": "npm",
     "require_managed_provider": true,
     "providers": {
       "native": {
@@ -21,9 +21,17 @@
       },
       "npm": {
         "managed": true,
-        "install": "npm install -g @anthropic-ai/claude-code",
+        "install": "npm install -g @anthropic-ai/claude-code@2.1.177",
         "uninstall": "npm uninstall -g @anthropic-ai/claude-code",
-        "upgrade": "npm install -g @anthropic-ai/claude-code@latest"
+        "upgrade": "npm install -g @anthropic-ai/claude-code@2.1.177",
+        "version_lock": {
+          "type": "npm",
+          "package": "@anthropic-ai/claude-code",
+          "fields": {
+            "install": "npm install -g @anthropic-ai/claude-code@{version}",
+            "upgrade": "npm install -g @anthropic-ai/claude-code@{version}"
+          }
+        }
       },
       "brew": {
         "managed": false,
@@ -63,9 +71,17 @@
     "providers": {
       "npm": {
         "managed": true,
-        "install": "npm install -g @openai/codex",
+        "install": "npm install -g @openai/codex@0.139.0",
         "uninstall": "npm uninstall -g @openai/codex",
-        "upgrade": "npm install -g @openai/codex@latest"
+        "upgrade": "npm install -g @openai/codex@0.139.0",
+        "version_lock": {
+          "type": "npm",
+          "package": "@openai/codex",
+          "fields": {
+            "install": "npm install -g @openai/codex@{version}",
+            "upgrade": "npm install -g @openai/codex@{version}"
+          }
+        }
       },
       "brew": {
         "managed": false,

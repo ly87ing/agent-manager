@@ -36,6 +36,7 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `auto_install`: 是否自动安装
 - `auto_update`: 是否自动更新
 - `preferred_provider`: 首选安装来源
+- `version_lock`: 可刷新的固定版本元数据；`make update` 负责查询 npm 最新版本或 Git ref 最新 commit 并写回具体命令，运行时同步只消费固定版本
 - `manager.json`: 仓库提供的可审计默认值
 - `manager.local.json`: 不参与 Git 的本地覆盖层；`make ui` 默认写入这里
 - `browser_us_sync.enabled`: 是否在 `manage.sh` 的 `update` / `bootstrap` / `all` / `browser:sync` 入口执行浏览器 Google US 前置同步；缺省为启用，可用本地覆盖或 `AGENT_MANAGER_BROWSER_US_SYNC_ENABLED` 临时改写
@@ -50,11 +51,11 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `tools.json`: 工具安装和设置指令
 - `skills.json`: Skill仓库地址和Agent映射
 - `mcp.json`: MCP服务器定义和Agent路径映射
-- 浏览器自动化相关能力按上游官方分发模型分别托管：`playwright-cli` 与 `agent-browser` 在 `tools.json` 中通过 npm `@latest` 管理。`playwright-cli` 的 runtime setup 由 `playwright-cli install-browser` 完成，受 `setup_timeout_sec` 限制，并通过 Playwright cache 中的 Chromium payload 重新验证；`agent-browser` 的 readiness 先检查系统 Chrome/Chromium，再检查 Playwright cache 中可复用的 Chromium，只有这些 probe 都失败时才依赖受管 setup；`chrome-devtools` 在 `mcp.json` 中通过 `npx -y chrome-devtools-mcp@latest` 维护。
+- 浏览器自动化相关能力按上游官方分发模型分别托管：`playwright-cli` 与 `agent-browser` 在 `tools.json` 中通过 npm 固定版本管理，`make update` 负责刷新 `version_lock`。`playwright-cli` 的 runtime setup 由 `playwright-cli install-browser` 完成，受 `setup_timeout_sec` 限制，并通过 Playwright cache 中的 Chromium payload 重新验证；`agent-browser` 的 readiness 先检查系统 Chrome/Chromium，再检查 Playwright cache 中可复用的 Chromium，只有这些 probe 都失败时才依赖受管 setup；`chrome-devtools` 在 `mcp.json` 中通过 `npx -y chrome-devtools-mcp@<固定版本>` 维护。
 - Agent 定义中的 `display_name` 仅用于展示和日志；跨配置引用统一使用稳定 ID
 - `agents.json` 中的 `providers` 只声明 agent-manager 可托管的安装源；`system` 只是运行时探测信号，不是可配置的 provider key
 - `preferred_provider` 必须指向 `providers` 中真实存在的键，否则生命周期同步应直接失败
-- `skills.json` 中的 skill 仓库支持 `commit` / `ref` 版本约束；技能名来自仓库内 `SKILL.md` frontmatter 的 `name`
+- `skills.json` 中的 skill 仓库支持 `commit` / `ref` 版本约束；默认受管仓库固定到 `commit`，并由 `make update` 按 `upgrade_strategy` 刷新。技能名来自仓库内 `SKILL.md` frontmatter 的 `name`
 - 新增 Agent 时，如需启用某类能力，再声明对应的 MCP / skills / rules target path：`config/mcp.json` 的 `agent_paths`、`config/skills.json` 的 `agents` 映射、`config/rules-targets.list` 的规则与 modules 分发目标。当前默认受管目标只包含 `Claude Code`、`Codex` 和 `Antigravity CLI`
 
 ### 3. 同步引擎 (Sync Engines)
@@ -126,7 +127,7 @@ graph TD
 - **安全默认入口**：直接执行 `./manage.sh` 只显示帮助，不会隐式退化到 `all`。
 - **`--dry-run`**：只输出计划动作，跳过 secrets 初始化、仓库 clone/pull、依赖安装、构建，以及 `cleanup` / `unlock` / `backups:restore` / `clean-logs` 这类会修改本地状态的维护动作；允许保留只读探测和预览日志。若与 `self-update` 组合，只预览仓库自更新动作。
 - **`--offline`**：禁止任何远程拉取、下载和安装。生命周期、tools、skills、MCP 同步器都只能复用本地已存在仓库/配置；如果本地前置资源缺失，应显式报错而不是偷偷联网。
-- **命令分层**：`sync` 只做本地配置收敛；`update` 会补齐并刷新非 Agent 安装类资源，并只更新已安装 Agent；`bootstrap` / `all` 才负责缺失 Agent 的安装；`self-update` 只更新 agent-manager 仓库自身。
+- **命令分层**：`sync` 只做本地配置收敛；`update` 会先刷新受管 MCP / CLI / tool 的版本锁和 skill commit，再补齐并刷新非 Agent 安装类资源，并只更新已安装 Agent；`bootstrap` / `all` 才负责缺失 Agent 的安装；`self-update` 只更新 agent-manager 仓库自身。
 - **不接管终端配置**：`sync` / `update` / `bootstrap` 不会改写 `~/.zshrc`、`~/.tmux.conf`、iTerm2 动态配置等用户级终端文件；仓库也不提供 `terminal:sync` 入口。
 - **诊断双出口**：`doctor / status` 默认输出面向人的文本报告；追加 `--json` 时输出机器可读 JSON，不再需要从文本中抓取 warning 计数。
 - **最小 smoke 策略**：`scripts/ci-smoke.sh` 通过 `AGENT_MANAGER_BASE_CONFIG=config/manager.smoke.json` 运行安全预演，避免把默认全量策略带来的未物化提示项混进 CI 基线。
@@ -195,6 +196,7 @@ graph TD
    - command: 执行命令
    - args: 参数列表
    - env: 环境变量映射（支持${VAR}占位符）
+   - version_lock: 可选；对 npm 包或 Git ref 生成固定版本/commit，禁止把 `@latest` 或分支名直接分发到 Agent 运行配置
    - agents: 限定生效的Agent列表（null表示全部活跃 skill 目标；像 Codex 这类特殊目标只有显式声明时才会纳入）
 2. 系统将自动处理不同Agent的格式差异
 
@@ -202,7 +204,7 @@ graph TD
 1. 在 `config/skills.json` 的repositories中添加Git仓库
    - url: 仓库地址
    - commit / ref: 可选版本约束；`commit` 优先级高于 `ref`
-   - upgrade_strategy: 可选，显式升级命令使用的版本跟踪策略；当前支持 `latest-tag` 与 `latest-release`
+   - upgrade_strategy: 可选，显式升级命令使用的版本跟踪策略；当前支持 `latest-branch`、`latest-tag` 与 `latest-release`
    - skill_paths: 可选，相对仓库根目录的子路径列表；用于只暴露仓库中的指定 skill 目录或 skill 集合目录
    - agents: 限定生效的Agent列表（null表示全部）
 2. 仓库会被缓存到 `agent-skill/repositories/<repo-name>/`

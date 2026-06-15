@@ -47,13 +47,22 @@ class SyncMcpTests(unittest.TestCase):
 
         self.assertFalse(policy["mcp"]["augment-context-engine"]["enabled"])
 
-    def test_committed_mcp_policy_enables_chrome_devtools_latest(self):
+    def test_committed_mcp_policy_enables_chrome_devtools_fixed_version(self):
         definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
         policy = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
 
         chrome_devtools = definitions["servers"]["chrome-devtools"]
         self.assertEqual(chrome_devtools["command"], "npx")
-        self.assertEqual(chrome_devtools["args"], ["-y", "chrome-devtools-mcp@latest", "--isolated"])
+        self.assertRegex(chrome_devtools["args"][1], r"^chrome-devtools-mcp@\d")
+        self.assertNotIn("@latest", chrome_devtools["args"][1])
+        self.assertEqual(
+            chrome_devtools["version_lock"],
+            {
+                "type": "npm",
+                "package": "chrome-devtools-mcp",
+                "fields": {"args.1": "chrome-devtools-mcp@{version}"},
+            },
+        )
         self.assertEqual(chrome_devtools.get("env", {}), {})
         self.assertIsNone(chrome_devtools["agents"])
         self.assertTrue(policy["mcp"]["chrome-devtools"]["enabled"])
@@ -79,6 +88,17 @@ class SyncMcpTests(unittest.TestCase):
         self.assertEqual(env["FIRECRAWL_API_KEY"], "${FIRECRAWL_API_KEY}")
         self.assertEqual(env["FIRECRAWL_API_URL"], "${FIRECRAWL_API_URL}")
         self.assertEqual(env["GROK_MODEL"], "${GROK_MODEL}")
+
+    def test_committed_grok_search_definition_uses_fixed_git_commit(self):
+        definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
+        grok_search = definitions["servers"]["grok-search"]
+
+        self.assertRegex(
+            grok_search["args"][1],
+            r"^git\+https://github\.com/GuDaStudio/GrokSearch@[0-9a-f]{40}$",
+        )
+        self.assertEqual(grok_search["version_lock"]["type"], "git-ref")
+        self.assertEqual(grok_search["version_lock"]["ref"], "grok-with-tavily")
 
     def test_codex_toml_receives_startup_timeout_without_json_leak(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -138,7 +158,7 @@ class SyncMcpTests(unittest.TestCase):
             self.assertEqual(json_updated["mcpServers"]["chrome-devtools"]["command"], "npx")
             self.assertEqual(
                 json_updated["mcpServers"]["chrome-devtools"]["args"],
-                ["-y", "chrome-devtools-mcp@latest", "--isolated"],
+                chrome_devtools["args"],
             )
             self.assertEqual(
                 json_updated["mcpServers"]["chrome-devtools"]["env"]["_MANAGED_BY"],
@@ -149,7 +169,7 @@ class SyncMcpTests(unittest.TestCase):
             self.assertEqual(toml_updated["mcp_servers"]["chrome-devtools"]["command"], "npx")
             self.assertEqual(
                 toml_updated["mcp_servers"]["chrome-devtools"]["args"],
-                ["-y", "chrome-devtools-mcp@latest", "--isolated"],
+                chrome_devtools["args"],
             )
             self.assertEqual(
                 toml_updated["mcp_servers"]["chrome-devtools"]["env"]["_MANAGED_BY"],

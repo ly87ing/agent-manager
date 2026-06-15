@@ -2,6 +2,9 @@
   "repositories": {
     "agent-skills": {
       "url": "https://github.com/ly87ing/agent-skills.git",
+      "commit": "37d30c188f0a2d17b501ce02ab51af3f3b6456bd",
+      "upgrade_strategy": "latest-branch",
+      "upgrade_ref": "refs/heads/main",
       "skill_paths": [
         "safe-merge-review",
         "fix-ones-bug",
@@ -17,12 +20,18 @@
     },
     "anthropic-frontend-design-skill": {
       "url": "https://github.com/anthropics/skills.git",
+      "commit": "57546260929473d4e0d1c1bb75297be2fdfa1949",
+      "upgrade_strategy": "latest-branch",
+      "upgrade_ref": "refs/heads/main",
       "skill_paths": ["skills/frontend-design"],
       "skill_count": 1,
       "agents": ["claude-code"]
     },
     "playwright-best-practices-skill": {
       "url": "https://github.com/currents-dev/playwright-best-practices-skill.git",
+      "commit": "ef329e7e65149918e1ff0eed2cf7d2e6e6f9eb5b",
+      "upgrade_strategy": "latest-branch",
+      "upgrade_ref": "refs/heads/main",
       "skill_count": 1,
       "agents": ["claude-code", "codex"]
     }

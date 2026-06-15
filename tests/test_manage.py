@@ -64,6 +64,8 @@ class ManageScriptTests(unittest.TestCase):
         env["AGENT_MANAGER_BROWSER_US_CONFIG_DIR"] = str(self.runtime_dir / "browser-us-config")
         env["AGENT_MANAGER_BROWSER_US_NO_OPEN"] = "1"
         env["AGENT_MANAGER_BROWSER_US_SKIP_EXIT_CHECK"] = "1"
+        env["AGENT_MANAGER_SKIP_VERSION_PIN_UPDATE"] = "1"
+        env["AGENT_MANAGER_SKIP_SKILL_VERSION_UPDATE"] = "1"
         return env
 
     def _write_stub(self, path: Path, content: str):
@@ -1645,6 +1647,68 @@ class ManageScriptTests(unittest.TestCase):
             self.assertTrue(any(line.startswith("rules ") for line in log_lines), log_lines)
             self.assertTrue(any(line.startswith("skills ") for line in log_lines), log_lines)
             self.assertTrue(any(line.startswith("mcp ") and "--prepare-runtime" in line for line in log_lines), log_lines)
+
+    def test_update_refreshes_version_pins_before_runtime_sync(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            call_log = temp_root / "calls.log"
+            remove_path(temp_root / "secrets")
+
+            self._append_log_stub(
+                temp_root / "scripts" / "update_version_pins.py",
+                "versions",
+                call_log,
+                "'--config-dir' in sys.argv and '--offline' not in sys.argv and '--dry-run' not in sys.argv",
+            )
+            self._append_log_stub(
+                temp_root / "agent-skill" / "upgrade_skills.py",
+                "skill-versions",
+                call_log,
+                "'--config' in sys.argv and '--def-file' in sys.argv and '--offline' not in sys.argv",
+            )
+            self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log, "True")
+            self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log, "True")
+            self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log, "True")
+            self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log, "True")
+            self._write_stub(
+                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
+                (
+                    "#!/usr/bin/env bash\n"
+                    f"printf '%s\\n' \"rules $*\" >> {str(call_log)!r}\n"
+                    "exit 0\n"
+                ),
+            )
+            self._write_stub(
+                temp_root / "scripts" / "init-secrets.sh",
+                (
+                    "#!/usr/bin/env bash\n"
+                    "mkdir -p \"$PWD/../secrets/.git\"\n"
+                    f"printf '%s\\n' init-secrets >> {str(call_log)!r}\n"
+                    "exit 0\n"
+                ),
+            )
+
+            env = self._managed_env()
+            env.pop("AGENT_MANAGER_SKIP_VERSION_PIN_UPDATE", None)
+            env.pop("AGENT_MANAGER_SKIP_SKILL_VERSION_UPDATE", None)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "update"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                check=False,
+            )
+
+            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            self.assertEqual(result.returncode, 0, combined)
+            log_lines = call_log.read_text(encoding="utf-8").splitlines()
+            version_index = next(i for i, line in enumerate(log_lines) if line.startswith("versions "))
+            skill_version_index = next(i for i, line in enumerate(log_lines) if line.startswith("skill-versions "))
+            agent_index = next(i for i, line in enumerate(log_lines) if line.startswith("agents "))
+            skills_index = next(i for i, line in enumerate(log_lines) if line.startswith("skills "))
+            self.assertLess(version_index, agent_index, log_lines)
+            self.assertLess(skill_version_index, skills_index, log_lines)
 
     def test_update_force_refresh_propagates_to_tools_skills_and_mcp(self):
         with tempfile.TemporaryDirectory() as temp_dir:

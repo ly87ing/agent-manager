@@ -44,13 +44,14 @@ make sync
 | Server | 用途 | 受管命令 | 凭证 | 默认策略 |
 |--------|------|----------|------|----------|
 | `augment-context-engine` | 代码库检索、语义搜索、codebase-retrieval | `auggie --mcp --mcp-auto-workspace` | `AUGMENT_SESSION_AUTH` | 默认禁用 |
-| `chrome-devtools` | Chrome DevTools 浏览器调试、性能分析、network / console / screenshot | `npx -y chrome-devtools-mcp@latest` | 无 | 启用 |
-| `grok-search` | web_search / web_fetch 联网搜索与网页抓取 | `uvx --from git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily grok-search` | `GROK_API_URL`, `GROK_API_KEY`, `GROK_MODEL`, `TAVILY_ENABLED`, `TAVILY_API_KEY`, `TAVILY_API_URL`, `FIRECRAWL_API_KEY`, `FIRECRAWL_API_URL` | 启用 |
+| `chrome-devtools` | Chrome DevTools 浏览器调试、性能分析、network / console / screenshot | `npx -y chrome-devtools-mcp@<固定版本>` | 无 | 启用 |
+| `grok-search` | web_search / web_fetch 联网搜索与网页抓取 | `uvx --from git+https://github.com/GuDaStudio/GrokSearch@<固定commit> grok-search` | `GROK_API_URL`, `GROK_API_KEY`, `GROK_MODEL`, `TAVILY_ENABLED`, `TAVILY_API_KEY`, `TAVILY_API_URL`, `FIRECRAWL_API_KEY`, `FIRECRAWL_API_URL` | 启用 |
 
 **维护约定**:
-- `chrome-devtools` 跟随官方 `@latest`，source-of-truth 维护在 `config/mcp.json`，由 `sync_mcp.py` 统一分发到所有受支持 Agent。
-- 首次调用 `chrome-devtools` 时，`npx` 可能会下载最新包版本；需要本机有可用的 Node.js / npm 运行时。
-- `make doctor` 会在 `chrome-devtools` 处于启用状态时预检 `npx` 运行时是否可用；实际包版本仍以首次调用或缓存失效后的 `@latest` 解析结果为准。
+- 受管 MCP 的实际命令必须固定版本或固定 commit；`@latest`、分支名只允许出现在 `version_lock` 的查询元数据里。
+- `make update` / `make bootstrap` / `make all` 会先运行 `scripts/update_version_pins.py`，查询 npm 最新版本或 Git ref 最新 commit，再写回 `config/mcp.json`。
+- 首次调用 `chrome-devtools` 时，`npx` 可能会下载锁定版本的包；需要本机有可用的 Node.js / npm 运行时。
+- `make doctor` 会在 `chrome-devtools` 处于启用状态时预检 `npx` 运行时是否可用；实际包版本以 `config/mcp.json` 中的固定版本为准。
 - 如果后续需要统一增加 `--browserUrl`、`--headless`、`--isolated` 等参数，应修改 `config/mcp.json`，不要手改单个 Agent 的 MCP 配置文件。
 - 本项目不管理 GitHub Copilot，因此不会再向其配置目录注入托管 MCP，也不会再生成 Copilot 专属 repo-native rules 文件。
 
@@ -302,10 +303,10 @@ agy -p "请用 codebase-retrieval 查看当前项目的结构"
 本项目默认通过以下命令受管分发给所有支持 MCP 的 Agent：
 
 ```bash
-npx -y chrome-devtools-mcp@latest
+npx -y chrome-devtools-mcp@<固定版本>
 ```
 
-这样可以跟随 Chrome DevTools 官方 MCP server 的最新发布，而不需要在每个 Agent 的本地配置里分别升级版本。
+这样把版本查询集中在 `make update`，避免每个 Agent 在真正启动 MCP 时各自解析 `@latest`。
 
 ### 使用约束
 
@@ -483,19 +484,21 @@ PY
 默认模式（mcp:sync / make sync / make update / make bootstrap 中的 MCP 步骤）:
 1. 读取 config/mcp.json 获取服务器定义
    ↓
-2. 按固定优先级加载 MCP 凭证: root/.env → secrets/mcp.env → 系统环境变量回退
+2. `make update` / `make bootstrap` / `make all` 入口先刷新 version_lock；`sync` 只消费已固定的版本
    ↓
-3. 替换 ${VAR} 占位符；若真实执行时仍有未解析占位符，则直接失败
+3. 按固定优先级加载 MCP 凭证: root/.env → secrets/mcp.env → 系统环境变量回退
    ↓
-4. 根据各 Agent 格式生成配置
+4. 替换 ${VAR} 占位符；若真实执行时仍有未解析占位符，则直接失败
+   ↓
+5. 根据各 Agent 格式生成配置
    ├─ JSON 格式 (Claude/Antigravity)
    └─ TOML 格式 (Codex，带字符串转义)
    ↓
-5. 校验现有配置可解析、生成结果合法、且仅删除 _MANAGED_BY=agent-manager 的托管段
+6. 校验现有配置可解析、生成结果合法、且仅删除 _MANAGED_BY=agent-manager 的托管段
    ↓
-6. 原子写入各配置文件并记录 _MANAGED_BY = "agent-manager" 标记
-7. 同步本地 secrets Git 仓库（非 offline 且非 dry-run）
-8. clone/pull MCP repo，按需要执行 setup/build
+7. 原子写入各配置文件并记录 _MANAGED_BY = "agent-manager" 标记
+8. 同步本地 secrets Git 仓库（非 offline 且非 dry-run）
+9. clone/pull MCP repo，按需要执行 setup/build
 ```
 
 ---

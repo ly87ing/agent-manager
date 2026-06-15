@@ -141,6 +141,84 @@ class UpgradeSkillsTests(unittest.TestCase):
             self.assertEqual(repo["upgrade_strategy"], "latest-tag")
             self.assertNotIn("ref", repo)
 
+    def test_latest_branch_upgrade_writes_branch_head_commit(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            source_repo = temp_root / "source-repo"
+            source_repo.mkdir()
+            subprocess.run(["git", "init", "-b", "main"], cwd=source_repo, capture_output=True, text=True, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=source_repo, check=True)
+            subprocess.run(["git", "config", "user.name", "Test User"], cwd=source_repo, check=True)
+            skill_dir = source_repo / "tracked-skill"
+            skill_dir.mkdir()
+            skill_md = skill_dir / "SKILL.md"
+            skill_md.write_text(
+                "---\nname: tracked-skill\ndescription: Example\n---\n\n# v1\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "."], cwd=source_repo, check=True)
+            subprocess.run(["git", "commit", "-m", "v1"], cwd=source_repo, capture_output=True, text=True, check=True)
+            skill_md.write_text(
+                "---\nname: tracked-skill\ndescription: Example\n---\n\n# v2\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "."], cwd=source_repo, check=True)
+            subprocess.run(["git", "commit", "-m", "v2"], cwd=source_repo, capture_output=True, text=True, check=True)
+            commit_v2 = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=source_repo,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            config_path.write_text(
+                json.dumps({"skills": {"tracked-repo": {"enabled": True}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "tracked-repo": {
+                                "url": str(source_repo),
+                                "commit": "82d2c5b44ac234ec0f204f647562a4349d90ef43",
+                                "upgrade_strategy": "latest-branch",
+                                "upgrade_ref": "refs/heads/main",
+                                "agents": ["claude-code"],
+                            }
+                        },
+                        "agents": {"claude-code": str(temp_root / "targets" / "claude")},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            updated = json.loads(def_path.read_text(encoding="utf-8"))
+            repo = updated["repositories"]["tracked-repo"]
+            self.assertEqual(repo["commit"], commit_v2)
+            self.assertEqual(repo["upgrade_strategy"], "latest-branch")
+            self.assertEqual(repo["upgrade_ref"], "refs/heads/main")
+
     def test_latest_tag_upgrade_fails_without_tags_and_preserves_config(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

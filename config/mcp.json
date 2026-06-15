@@ -10,15 +10,22 @@
     },
     "chrome-devtools": {
       "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp@latest", "--isolated"],
+      "args": ["-y", "chrome-devtools-mcp@1.2.0", "--isolated"],
       "env": {},
+      "version_lock": {
+        "type": "npm",
+        "package": "chrome-devtools-mcp",
+        "fields": {
+          "args.1": "chrome-devtools-mcp@{version}"
+        }
+      },
       "agents": null
     },
     "grok-search": {
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily",
+        "git+https://github.com/GuDaStudio/GrokSearch@8f0ae3c7f25ec419631ade7e431fa2531503433e",
         "grok-search"
       ],
       "startup_timeout_sec": 120,
@@ -31,6 +38,14 @@
         "TAVILY_API_URL": "${TAVILY_API_URL}",
         "FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}",
         "FIRECRAWL_API_URL": "${FIRECRAWL_API_URL}"
+      },
+      "version_lock": {
+        "type": "git-ref",
+        "remote": "https://github.com/GuDaStudio/GrokSearch",
+        "ref": "grok-with-tavily",
+        "fields": {
+          "args.1": "git+https://github.com/GuDaStudio/GrokSearch@{version}"
+        }
       },
       "agents": null
     }

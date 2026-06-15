@@ -2292,7 +2292,9 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertEqual(repo["skill_count"], 8)
         self.assertEqual(repo["agents"], ["claude-code", "antigravity-cli", "codex"])
         self.assertNotIn("ignored_skill_paths", repo)
-        self.assertNotIn("commit", repo)
+        self.assertRegex(repo["commit"], r"^[0-9a-f]{40}$")
+        self.assertEqual(repo["upgrade_strategy"], "latest-branch")
+        self.assertEqual(repo["upgrade_ref"], "refs/heads/main")
         self.assertNotIn("ref", repo)
 
     def test_default_skill_catalog_includes_playwright_best_practices_repo_with_explicit_agents(self):
@@ -2303,7 +2305,9 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertIsNotNone(repo)
         self.assertEqual(repo["url"], "https://github.com/currents-dev/playwright-best-practices-skill.git")
         self.assertEqual(repo["agents"], ["claude-code", "codex"])
-        self.assertNotIn("commit", repo)
+        self.assertRegex(repo["commit"], r"^[0-9a-f]{40}$")
+        self.assertEqual(repo["upgrade_strategy"], "latest-branch")
+        self.assertEqual(repo["upgrade_ref"], "refs/heads/main")
         self.assertNotIn("ref", repo)
 
     def test_default_manager_policy_explicitly_enables_agent_skills_repo(self):
@@ -2331,7 +2335,9 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertEqual(repo["skill_paths"], ["skills/frontend-design"])
         self.assertEqual(repo["skill_count"], 1)
         self.assertEqual(repo["agents"], ["claude-code"])
-        self.assertNotIn("commit", repo)
+        self.assertRegex(repo["commit"], r"^[0-9a-f]{40}$")
+        self.assertEqual(repo["upgrade_strategy"], "latest-branch")
+        self.assertEqual(repo["upgrade_ref"], "refs/heads/main")
         self.assertNotIn("ref", repo)
 
     def test_default_manager_policy_does_not_enable_removed_openai_frontend_skill(self):

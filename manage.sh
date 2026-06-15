@@ -1037,6 +1037,22 @@ function run_skills_link_task() {
     run_task_in_dir "链接专业技能" "技能链接完成" "技能链接失败" 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" "${args[@]}"
 }
 
+function run_skills_upgrade_task() {
+    if [ "${AGENT_MANAGER_SKIP_SKILL_VERSION_UPDATE:-}" = "1" ]; then
+        status_line "SKIP" "Skill 版本刷新已通过环境变量跳过。"
+        return 0
+    fi
+    if [ -n "$OFFLINE_FLAG" ]; then
+        status_line "SKIP" "离线模式，跳过 Skill 版本刷新。"
+        return 0
+    fi
+
+    local args=(upgrade_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json")
+    if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
+
+    run_task_in_dir "刷新 Skill 版本" "Skill 版本刷新完成" "Skill 版本刷新失败" 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" "${args[@]}"
+}
+
 function run_mcp_sync_task() {
     local prepare_runtime="${1:-false}"
     local force_offline="${2:-false}"
@@ -1054,6 +1070,19 @@ function run_mcp_sync_task() {
     run_task_in_dir "$title" "MCP 注入完成" "MCP 失败" 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" "${args[@]}"
 }
 
+function run_version_pins_update_task() {
+    if [ "${AGENT_MANAGER_SKIP_VERSION_PIN_UPDATE:-}" = "1" ]; then
+        status_line "SKIP" "版本锁刷新已通过环境变量跳过。"
+        return 0
+    fi
+
+    local args=(update_version_pins.py --config-dir "$ROOT_DIR/config")
+    if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
+    if [ -n "$OFFLINE_FLAG" ]; then args+=("$OFFLINE_FLAG"); fi
+
+    run_task_in_dir "刷新版本锁定" "版本锁刷新完成" "版本锁刷新失败" 180 "$ROOT_DIR/scripts" "$PYTHON_CMD" "${args[@]}"
+}
+
 function run_sync_pipeline() {
     begin_workflow "🔄 Agent Manager 配置同步启动"
     begin_pipeline_execution
@@ -1069,6 +1098,8 @@ function run_update_pipeline() {
     begin_workflow "$title"
     maybe_init_secrets
     begin_pipeline_execution
+    run_pipeline_step run_version_pins_update_task
+    run_pipeline_step run_skills_upgrade_task
     run_pipeline_step run_agent_lifecycle_task "$agent_extra_flags"
     run_pipeline_step run_tools_sync_task
     run_pipeline_step run_browser_us_sync_task
@@ -1524,8 +1555,8 @@ case "$cmd" in
         echo -e "  ${PENDING_GOLD}-f, --force-refresh${NC} 更新探测失败时仍强制执行远端刷新；默认会跳过这些保守回退下载"
         echo -e "  ${PENDING_GOLD}--wait-agent-lifecycle${NC} 等待 Agent 生命周期后台安装/升级结束；all / bootstrap / update 默认已启用\n"
         echo -e "${BOLD}${HDR_BLUE}=== 日常入口 (Main Flows) ===${NC}"
-        echo -e "  ${SUCCESS_GREEN}sync${NC}            同步 rules，并将 skills / MCP 对齐到最新；不处理 Agent / Tool 生命周期"
-        echo -e "  ${SUCCESS_GREEN}update${NC}          更新远端资源并等待 Agent 生命周期完成，但不安装缺失 Agent"
+        echo -e "  ${SUCCESS_GREEN}sync${NC}            同步 rules，并按已锁定版本对齐 skills / MCP；不刷新版本锁或处理 Agent / Tool 生命周期"
+        echo -e "  ${SUCCESS_GREEN}update${NC}          刷新 CLI/MCP/tool 版本锁与 skill commit，更新远端资源并等待 Agent 生命周期完成，但不安装缺失 Agent"
         echo -e "  ${SUCCESS_GREEN}bootstrap${NC}       执行全量安装、更新与同步，适合新机器初始化"
         echo -e "  ${SUCCESS_GREEN}all${NC}             \`bootstrap\` 的兼容别名"
         echo -e "  ${SUCCESS_GREEN}plan${NC}            预演一次完整 \`bootstrap\`（dry-run）"

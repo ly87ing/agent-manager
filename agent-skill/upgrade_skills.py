@@ -159,6 +159,15 @@ def resolve_latest_commit_for_repository(repo_config, offline=False):
         raise SkillUpgradeError("缺少仓库 url。")
 
     strategy = repo_config.get("upgrade_strategy")
+    if strategy == "latest-branch":
+        upgrade_ref = str(repo_config.get("upgrade_ref", "HEAD")).strip()
+        if not upgrade_ref:
+            raise SkillUpgradeError("latest-branch 缺少 upgrade_ref。")
+        if upgrade_ref == "HEAD" or upgrade_ref.startswith("refs/"):
+            revision = upgrade_ref
+        else:
+            revision = f"refs/heads/{upgrade_ref}"
+        return resolve_remote_revision_to_commit(url, revision, offline=offline)
     if strategy == "latest-tag":
         tags = list_remote_tags(url, offline=offline)
         if not tags:

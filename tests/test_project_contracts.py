@@ -265,13 +265,12 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("`Claude Code`、`Codex`、`Antigravity CLI`", readme)
         self.assertIn("仅用于识别并提示迁移", readme)
         self.assertIn("默认自动安装的 Agent 当前只包含 `Claude Code`、`Codex` 和 `Antigravity CLI`", readme)
-        self.assertIn(
-            "`Claude Code native` 当前已经补齐官方 uninstall 路径，因此 `install / update / uninstall` 都可继续走官方 installer 语义。",
-            readme,
-        )
-        self.assertIn("`Claude Code` 与 `Antigravity CLI` 当前默认走官方 native installer", readme)
-        self.assertIn("`Codex` 使用官方 npm 包并通过 `npm install -g @openai/codex@latest` 升级", readme)
+        self.assertIn("`Claude Code` 与 `Codex` 默认走官方 npm 包，并使用 `config/agents.json` 中的固定版本", readme)
+        self.assertIn("`Claude Code native` 仍作为兼容 provider 保留官方 install / update / uninstall 语义", readme)
+        self.assertIn("`Claude Code` 和 `Codex` 的 npm provider 使用 `config/agents.json` 中的固定版本", readme)
         self.assertIn("`Antigravity CLI` 使用官方 `curl -fsSL https://antigravity.google/cli/install.sh | bash` 安装到 `agy`", readme)
+        self.assertIn("`AGY_CLI_DISABLE_AUTO_UPDATE=true`", readme)
+        self.assertIn("`agent-manager` 不改写用户 shell profile", readme)
         self.assertIn("不由 `agent-manager` 伪造 update 命令", readme)
         self.assertIn("`Claude Code local install` 不纳入 `agent-manager` lifecycle 托管", readme)
         self.assertIn("放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer", readme)
@@ -300,8 +299,13 @@ class ProjectContractTests(unittest.TestCase):
 
     def test_readme_documents_isolated_chrome_devtools_mcp(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("chrome-devtools-mcp@latest --isolated", readme)
+        self.assertIn("chrome-devtools-mcp@<固定版本> --isolated", readme)
         self.assertIn("避免多个 agent 共享同一个 browser profile", readme)
+
+    def test_committed_runtime_configs_do_not_use_dynamic_latest(self):
+        for rel_path in ("config/agents.json", "config/tools.json", "config/mcp.json"):
+            content = (ROOT / rel_path).read_text(encoding="utf-8")
+            self.assertNotIn("@latest", content, rel_path)
 
     def test_readme_documents_anthropic_frontend_design_skill_for_claude(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
