@@ -681,7 +681,7 @@ class ManageScriptTests(unittest.TestCase):
             temp_home.mkdir()
 
             (temp_root / "config" / "manager.json").write_text(
-                '{\n  "agents": {},\n  "tools": {},\n  "skills": {\n    "superpowers": { "enabled": true }\n  },\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {\n    "sample-skill": { "enabled": true }\n  },\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
                 encoding="utf-8",
             )
             (temp_root / "config" / "agents.json").write_text(
@@ -694,7 +694,7 @@ class ManageScriptTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (temp_root / "config" / "skills.json").write_text(
-                '{\n  "repositories": {\n    "superpowers": {\n      "url": "https://example.invalid/superpowers.git",\n      "agents": ["claude-code"]\n    }\n  },\n  "agents": {\n    "claude-code": "%s/.claude/skills"\n  }\n}\n'
+                '{\n  "repositories": {\n    "sample-skill": {\n      "url": "https://example.invalid/sample-skill.git",\n      "agents": ["claude-code"]\n    }\n  },\n  "agents": {\n    "claude-code": "%s/.claude/skills"\n  }\n}\n'
                 % temp_home,
                 encoding="utf-8",
             )
@@ -730,7 +730,7 @@ class ManageScriptTests(unittest.TestCase):
             temp_home.mkdir()
 
             (temp_root / "config" / "manager.json").write_text(
-                '{\n  "agents": {},\n  "tools": {\n    "optional-helper": { "enabled": true }\n  },\n  "skills": {\n    "superpowers": { "enabled": true }\n  },\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
+                '{\n  "agents": {},\n  "tools": {\n    "optional-helper": { "enabled": true }\n  },\n  "skills": {\n    "sample-skill": { "enabled": true }\n  },\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
                 encoding="utf-8",
             )
             self._write_optional_tool_definition(temp_root)
@@ -744,7 +744,7 @@ class ManageScriptTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (temp_root / "config" / "skills.json").write_text(
-                '{\n  "repositories": {\n    "superpowers": {\n      "url": "https://example.invalid/superpowers.git",\n      "agents": ["claude-code"]\n    }\n  },\n  "agents": {\n    "claude-code": "%s/.claude/skills"\n  }\n}\n'
+                '{\n  "repositories": {\n    "sample-skill": {\n      "url": "https://example.invalid/sample-skill.git",\n      "agents": ["claude-code"]\n    }\n  },\n  "agents": {\n    "claude-code": "%s/.claude/skills"\n  }\n}\n'
                 % temp_home,
                 encoding="utf-8",
             )
@@ -780,7 +780,7 @@ class ManageScriptTests(unittest.TestCase):
             temp_home.mkdir()
 
             (temp_root / "config" / "manager.json").write_text(
-                '{\n  "agents": {},\n  "tools": {\n    "optional-helper": { "enabled": true }\n  },\n  "skills": {\n    "superpowers": { "enabled": true }\n  },\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
+                '{\n  "agents": {},\n  "tools": {\n    "optional-helper": { "enabled": true }\n  },\n  "skills": {\n    "sample-skill": { "enabled": true }\n  },\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
                 encoding="utf-8",
             )
             self._write_optional_tool_definition(temp_root)
@@ -794,7 +794,7 @@ class ManageScriptTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (temp_root / "config" / "skills.json").write_text(
-                '{\n  "repositories": {\n    "superpowers": {\n      "url": "https://example.invalid/superpowers.git",\n      "agents": ["claude-code"]\n    }\n  },\n  "agents": {\n    "claude-code": "%s/.claude/skills"\n  }\n}\n'
+                '{\n  "repositories": {\n    "sample-skill": {\n      "url": "https://example.invalid/sample-skill.git",\n      "agents": ["claude-code"]\n    }\n  },\n  "agents": {\n    "claude-code": "%s/.claude/skills"\n  }\n}\n'
                 % temp_home,
                 encoding="utf-8",
             )
@@ -883,7 +883,7 @@ class ManageScriptTests(unittest.TestCase):
             temp_home.mkdir()
 
             (temp_root / "config" / "manager.json").write_text(
-                '{\n  "agents": {},\n  "tools": {},\n  "skills": {\n    "superpowers": { "enabled": true }\n  },\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {\n    "sample-skill": { "enabled": true }\n  },\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
                 encoding="utf-8",
             )
             (temp_root / "config" / "agents.json").write_text(
@@ -896,7 +896,7 @@ class ManageScriptTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (temp_root / "config" / "skills.json").write_text(
-                '{\n  "repositories": {\n    "superpowers": {\n      "url": "https://example.invalid/superpowers.git",\n      "agents": ["claude-code"]\n    }\n  },\n  "agents": {\n    "claude-code": "%s/.claude/skills"\n  }\n}\n'
+                '{\n  "repositories": {\n    "sample-skill": {\n      "url": "https://example.invalid/sample-skill.git",\n      "agents": ["claude-code"]\n    }\n  },\n  "agents": {\n    "claude-code": "%s/.claude/skills"\n  }\n}\n'
                 % temp_home,
                 encoding="utf-8",
             )
