@@ -34,7 +34,7 @@ TOML_SERVER_HEADER_RE = re.compile(
 )
 TOML_SERVER_INT_KEYS = ("startup_timeout_sec",)
 def atomic_write_json(path, data):
-    """原子化写入 JSON"""
+    """Atomically write JSON"""
     path = Path(path).expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temp_path = tempfile.mkstemp(dir=str(path.parent), prefix=f"{path.name}.tmp_")
@@ -48,7 +48,7 @@ def atomic_write_json(path, data):
         raise e
 
 def run_cmd(cmd, cwd=None, timeout=300):
-    """运行 shell 命令并返回结果"""
+    """Run a shell command and return the result"""
     try:
         result = run_command(cmd, cwd=cwd, check=True, capture_output=True, text=True, timeout=timeout)
         return True, result.stdout
@@ -66,7 +66,7 @@ def repo_head_is_detached(repo_path):
     return not success
 
 def clone_or_update_repo(name, url, base_dir, dry_run=False, offline=False, force_refresh=False):
-    """下载或更新 Git 仓库"""
+    """Clone or update a Git repository"""
     target_dir = Path(base_dir) / name
     if target_dir.exists():
         if (target_dir / ".git").exists():
@@ -114,7 +114,7 @@ def clone_or_update_repo(name, url, base_dir, dry_run=False, offline=False, forc
     return target_dir, success
 
 def install_dependencies_and_build(repo_path, config, dry_run=False, offline=False):
-    """根据仓库类型自动安装依赖和构建"""
+    """Automatically install dependencies and build based on the repository type"""
     if dry_run: return True
     if offline:
         logging.info(f"[{repo_path.name}] 离线模式，跳过依赖安装与构建。")
@@ -205,12 +205,12 @@ def load_existing_json_config(agent_name, config_path):
         return None
 
 def toml_quote(value):
-    """返回合法的 TOML basic string。"""
+    """Return a valid TOML basic string."""
     return json.dumps(value, ensure_ascii=False)
 
 
 def toml_key(value):
-    """返回 TOML bare key 或 quoted key。"""
+    """Return a TOML bare key or quoted key."""
     if TOML_BARE_KEY_RE.fullmatch(value):
         return value
     return json.dumps(value, ensure_ascii=False)
@@ -242,7 +242,7 @@ def merge_toml_chunks_by_server(chunks):
 
 
 def update_toml_config(agent_name, config_path, active_servers, all_managed_servers, preserved_servers, dry_run):
-    """原子化更新 TOML 配置"""
+    """Atomically update TOML configuration"""
     path = Path(config_path).expanduser()
     content = ""
     if path.exists():
@@ -317,7 +317,7 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
     return True
 
 def backup_config(path, dry_run=False, agent_name=None):
-    """5 代轮转备份"""
+    """5-generation rotating backup"""
     path = Path(path).expanduser()
     if not path.exists():
         return True
@@ -347,7 +347,7 @@ def should_sync_mcp_target(agent_name, agent_defs):
     return is_agent_installed(agent_name, agent_def)
 
 def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None):
-    """更新各个 Agent 的 MCP 配置文件"""
+    """Update the MCP configuration file for each Agent"""
     all_ok = True
     declared_managed_servers = {
         name for name, srv_config in mcp_servers.items() if srv_config.get("_declared_in_policy", True)
@@ -424,7 +424,7 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None
             all_ok = False
             continue
 
-        # OpenCode 使用 "mcp" 键，其他 Agent 使用 "mcpServers"
+        # OpenCode uses the "mcp" key, while other agents use "mcpServers"
         is_opencode = agent_name == "opencode"
         key_name = "mcp" if is_opencode else "mcpServers"
 
@@ -437,7 +437,7 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None
             for k in list(current_config[key_name].keys()):
                 srv = current_config[key_name][k]
                 if isinstance(srv, dict):
-                    # 检查 env 或 environment 中的 _MANAGED_BY
+                    # Check _MANAGED_BY in either env or environment
                     env_dict = (srv.get('env') or srv.get('environment') or {})
                     if env_dict.get('_MANAGED_BY') == 'agent-manager':
                         if k in preserved_failed_servers:
@@ -449,7 +449,7 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None
             # Inject
             for name, settings in active_mcp_settings.items():
                 if is_opencode:
-                    # OpenCode 特殊格式: command 是数组，environment 替代 env
+                    # OpenCode special format: command is an array, and environment replaces env
                     cmd_array = [settings["command"]] + settings.get("args", [])
                     env_dict = {**settings.get("env", {}), "_MANAGED_BY": "agent-manager"}
                     current_config[key_name][name] = {
@@ -458,7 +458,7 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None
                         "environment": env_dict
                     }
                 else:
-                    # 标准格式
+                    # Standard format
                     if "env" not in settings: settings["env"] = {}
                     settings["env"]["_MANAGED_BY"] = "agent-manager"
                     current_config[key_name][name] = settings
@@ -468,10 +468,10 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None
     return all_ok
 
 def sync_secrets_repo(secrets_path):
-    """Phase 0: 如果 secrets 目录是 Git 仓库，执行自动更新"""
+    """Phase 0: If the secrets directory is a Git repository, perform an automatic update"""
     if not secrets_path.exists(): return
     
-    # 检查 secrets 目录本身或其子目录
+    # Check the secrets directory itself and its subdirectories
     targets = [secrets_path] + [d for d in secrets_path.iterdir() if d.is_dir()]
     for target in targets:
         if (target / ".git").exists():
@@ -516,7 +516,7 @@ def main():
         logging.error(str(exc))
         sys.exit(1)
 
-    # 对齐职责：从 manager.json 读取策略，从 mcp.json 读取定义与路径
+    # Separation of concerns: read policy from manager.json, read definitions and paths from mcp.json
     try:
         definition_cfg = get_typed_mapping_section(full_def, "servers", Path(args.def_file).name, (dict,), "对象")
         agent_paths = get_typed_mapping_section(full_def, "agent_paths", Path(args.def_file).name, (str, dict), "字符串或对象")
@@ -525,14 +525,14 @@ def main():
         sys.exit(1)
     AGENT_TARGETS = canonicalize_agent_mapping(agent_paths)
 
-    # 递归合并策略开关
+    # Recursively merge policy toggles
     for name, s_def in definition_cfg.items():
         s_def["_declared_in_policy"] = name in policy_cfg
         if name in policy_cfg:
             s_def.update(policy_cfg[name])
         s_def["agents"] = canonicalize_agent_list(s_def.get("agents"))
 
-    # [凭证保护] Phase 0: 扫描并同步密钥池 (secrets/ 目录)
+    # [Credential protection] Phase 0: scan and sync the secret pool (secrets/ directory)
     env_vars = {}
     root_dir = Path(args.def_file).resolve().parent.parent
     secrets_dir = root_dir / "secrets"
@@ -542,11 +542,11 @@ def main():
     elif args.prepare_runtime and not args.dry_run:
         sync_secrets_repo(secrets_dir)
     
-    # 加载 MCP 专用凭证并进行占位符替换。不要扫描 secrets/*.env，
-    # 避免 terminal.env 等其他域的同名变量覆盖 MCP 专用 key。
+    # Load MCP-specific credentials and perform placeholder substitution. Do not scan secrets/*.env,
+    # to prevent same-named variables from other domains (e.g. terminal.env) overriding MCP-specific keys.
     env_vars.update(load_env_files([root_dir / ".env", secrets_dir / "mcp.env"]))
     
-    # 递归遍历 definition_cfg，进行注入
+    # Recursively walk definition_cfg and inject
     for srv_name, srv_def in definition_cfg.items():
         if "env" in srv_def:
             for k, v in srv_def["env"].items():

@@ -117,7 +117,7 @@ def is_network_error(output):
 
 
 def run_cmd(cmd, timeout=300):
-    """运行 shell 命令并返回结果"""
+    """Run a shell command and return the result."""
     cmd = _prepare_command(cmd)
     try:
         result = run_command(cmd, check=True, capture_output=True, text=True, timeout=timeout)
@@ -390,7 +390,7 @@ def print_async_status():
 
 
 def detect_all_providers(bin_name, config=None):
-    """委托共享 runtime probe 执行 Provider 探测，避免实现漂移。"""
+    """Delegate provider detection to the shared runtime probe to avoid implementation drift."""
     return detect_all_providers_runtime(bin_name, config, inventory=ProviderCache())
 
 def detect_provider_state(bin_name, definition):
@@ -506,7 +506,7 @@ def reconcile_agent(
     wait_async_actions=False,
 ):
     label = get_agent_display_name(agent_id, definition)
-    # 合并策略
+    # Merge policy
     enabled = policy.get("enabled", True)
     auto_install = policy.get("auto_install", True)
     auto_update = policy.get("auto_update", True)
@@ -780,7 +780,7 @@ def main():
             logging.info(f"[AGENT: {label}] 未声明策略，跳过。")
             continue
         policy = policy_cfg.get(agent_id, {})
-        # 离线模式下禁用 auto_update
+        # Disable auto_update in offline mode
         if args.offline:
             policy = {**policy, "auto_update": False}
         if not reconcile_agent(

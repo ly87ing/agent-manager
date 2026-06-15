@@ -28,14 +28,14 @@ def render_configuration_guide(base_uri, api_key, api_type, models):
 
 
 def fetch_models(base_uri, api_key):
-    # 处理 base_uri，移除结尾的斜杠和 /v1 以便拼接
+    # Normalize base_uri by stripping the trailing slash and /v1 so paths can be appended
     base_uri = base_uri.rstrip('/')
     if base_uri.endswith('/v1'):
         base_uri = base_uri[:-3]
     
     models = []
     
-    # 1. 尝试 OpenAI 格式
+    # 1. Try the OpenAI format
     openai_url = f"{base_uri}/v1/models"
     req_openai = urllib.request.Request(openai_url)
     req_openai.add_header('Authorization', f'Bearer {api_key}')
@@ -58,7 +58,7 @@ def fetch_models(base_uri, api_key):
     except Exception as e:
         openai_err = str(e)
         
-    # 2. 尝试 Anthropic 格式
+    # 2. Try the Anthropic format
     anthropic_url = f"{base_uri}/v1/models"
     req_anthropic = urllib.request.Request(anthropic_url)
     req_anthropic.add_header('x-api-key', api_key)

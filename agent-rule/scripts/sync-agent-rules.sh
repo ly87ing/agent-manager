@@ -35,8 +35,8 @@ command -v python3 >/dev/null 2>&1 || python_cmd="python"
 
 [ -f "$manifest_path" ] || { echo "Manifest not found: $manifest_path" >&2; exit 1; }
 
-# 根据目标路径前缀推断 agent，检查是否已安装
-# 返回 0 表示已安装（或无法推断，默认放行），返回 1 表示未安装
+# Infer the agent from the target path prefix and check whether it is installed
+# Returns 0 if installed (or cannot be inferred, allowed by default), returns 1 if not installed
 agent_installed_for_target() {
   local dst_pat="$1"
   local expanded
@@ -49,10 +49,10 @@ agent_installed_for_target() {
     "$HOME"/.gemini/*|"$HOME"/.gemini)
       command -v gemini >/dev/null 2>&1 ;;
     "$HOME"/.codex/*|"$HOME"/.codex)
-      # codex 无标准 bin，检查配置目录是否存在
+      # codex has no standard bin, so check whether the config directory exists
       [ -d "$HOME/.codex" ] ;;
     *)
-      # 无法推断，默认放行
+      # Cannot be inferred, allowed by default
       return 0 ;;
   esac
 }
@@ -265,7 +265,7 @@ sync_symlink() {
   fi
 }
 
-# --- 核心增强：路径冲突预检 ---
+# --- Core enhancement: path conflict pre-check ---
 MANIFEST_PATH="$manifest_path" WORKSPACE_ROOT="$workspace_root" HOME_DIR="$HOME" "$python_cmd" - <<'PY' || exit 1
 import os
 import sys
@@ -314,7 +314,7 @@ while IFS='|' read -r name group src_rel dst_pat; do
   validate_manifest_entry "$name" "$src_rel" "$dst_pat" || exit 1
 done < "$manifest_path"
 
-# --- 执行同步 ---
+# --- Execute the sync ---
 while IFS='|' read -r name group src_rel dst_pat; do
   # Trim whitespaces
   name=$(echo "$name" | awk '{$1=$1;print}')

@@ -453,8 +453,8 @@ class ProjectContractTests(unittest.TestCase):
 
     def test_claude_memory_matches_codex_lifecycle_policy(self):
         memory = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
-        self.assertIn("`codex` 纳入 Agent lifecycle 管理", memory)
-        self.assertNotIn("`codex` 只作为 MCP、Rules、Skills 的分发目标，不纳入生命周期管理。", memory)
+        self.assertIn("`codex` is under Agent lifecycle management", memory)
+        self.assertNotIn("`codex` is only a distribution target for MCP, Rules, and Skills and is not under lifecycle management.", memory)
 
     def test_root_claude_md_stays_concise_and_points_to_scoped_memory(self):
         memory = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")

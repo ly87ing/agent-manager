@@ -14,7 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
 from src.json_config import atomic_write_json_file, ensure_mapping_value_types, get_typed_mapping_section, load_json_object_file
 
-# 颜色定义
+# Color definitions
 ERROR_RED = "\033[0;31m"
 GREEN = "\033[0;32m"
 YELLOW = "\033[0;33m"
@@ -29,14 +29,14 @@ SUCCESS_GREEN = "\033[0;32m"
 PURPLE = "\033[0;35m"
 PENDING_GOLD = "\033[0;33m"
 
-# 全局同步标记
+# Global sync flag
 SYNC_REQUIRED = False
 
 def mark_sync_required():
     global SYNC_REQUIRED
     SYNC_REQUIRED = True
 
-# --- 基础工具 ---
+# --- Basic utilities ---
 
 def ask(prompt, default=None):
     if default is not None:
@@ -121,19 +121,19 @@ def merge_config(base, local):
         merged["agents"] = canonicalize_agent_mapping(merged.get("agents", {}))
     return merged
 
-def get_policy(): 
-    # 返回合并后的策略用于显示
+def get_policy():
+    # Return the merged policy for display
     return get_effective_config()
 
-def save_policy(data): 
-    # 只保存到用户侧覆盖文件
+def save_policy(data):
+    # Save only to the user-side override file
     local_path = get_config_root() / "config" / "manager.local.json"
     save_json(data, local_path)
 
-# --- 交互式界面 ---
+# --- Interactive interface ---
 
 def main():
-    # 确保本地配置文件存在
+    # Ensure the local config file exists
     local_path = get_config_root() / "config" / "manager.local.json"
     if not local_path.exists():
         save_json({}, local_path)
@@ -229,7 +229,7 @@ def edit_section(section_key, section_name, local_policy):
     print(f"当前有效值: {json.dumps(current_eff_val, indent=2, ensure_ascii=False)}")
     print(f"当前本地值: {json.dumps(current_loc_val, indent=2, ensure_ascii=False)}")
     
-    # 简单的键值编辑：根据 section_key 决定是否有构建类配置
+    # Simple key-value editing: decide whether build-type config applies based on section_key
     enabled = ask_yes_no(f"启用 {label}?", current_eff_val.get("enabled", True))
     
     new_val = copy.deepcopy(current_loc_val)

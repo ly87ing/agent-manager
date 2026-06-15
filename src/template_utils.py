@@ -6,9 +6,9 @@ from pathlib import Path
 
 
 def load_env_file(path: str | Path) -> dict[str, str]:
-    """解析 KEY=VALUE 格式的 env 文件，返回变量字典。
+    """Parse an env file in KEY=VALUE format and return a dict of variables.
 
-    忽略空行和 # 注释行。missing_ok 由调用方控制（文件不存在时返回空字典）。
+    Blank lines and # comment lines are ignored. missing_ok is controlled by the caller (returns an empty dict when the file does not exist).
     """
     env: dict[str, str] = {}
     env_path = Path(path)
@@ -23,7 +23,7 @@ def load_env_file(path: str | Path) -> dict[str, str]:
         key, _, value = line.partition("=")
         key = key.strip()
         value = value.strip()
-        # 去除可选引号
+        # Strip optional surrounding quotes
         if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
             value = value[1:-1]
         if key:
@@ -32,16 +32,16 @@ def load_env_file(path: str | Path) -> dict[str, str]:
 
 
 def render_template(tmpl_str: str, env: dict[str, str]) -> str:
-    """将模板字符串中的 ${VAR} 占位符替换为 env 中对应值。
+    """Replace ${VAR} placeholders in the template string with the corresponding values from env.
 
-    只替换 env 中存在的变量；未在 env 中声明的 ${VAR} 保持原样（pass-through），
-    以支持 zshrc 等包含 shell 自身变量语法的模板。
-    若 env 中声明的变量值为空字符串则正常替换（允许空值）。
+    Only variables present in env are substituted; ${VAR} placeholders not declared in env are left as-is (pass-through),
+    to support templates such as zshrc that contain shell's own variable syntax.
+    A variable declared in env with an empty-string value is substituted normally (empty values are allowed).
     """
     def replacer(match: re.Match) -> str:
         var_name = match.group(1)
         if var_name not in env:
-            return match.group(0)  # 保持原样
+            return match.group(0)  # keep as-is
         return env[var_name]
 
     result = re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", replacer, tmpl_str)

@@ -59,7 +59,7 @@ class SkillAgentScopeError(ValueError):
 
 
 def run_cmd(cmd, cwd=None, timeout=300):
-    """运行 shell 命令并返回结果"""
+    """Run a shell command and return the result."""
     try:
         result = run_command(
             cmd,
@@ -215,7 +215,7 @@ def read_skill_name(skill_md_path):
     return None
 
 def install_dependencies_and_build(repo_path, config, dry_run=False, offline=False):
-    """根据仓库内容执行依赖安装与初始化"""
+    """Install dependencies and run setup based on the repository contents."""
     if dry_run: return True
     if offline:
         logging.info(f"[{repo_path.name}] 离线模式，跳过依赖安装与初始化。")
@@ -261,7 +261,7 @@ def install_dependencies_and_build(repo_path, config, dry_run=False, offline=Fal
     return success_all
 
 def clone_or_update_repo(name, url, base_dir, dry_run=False, offline=False, auto_update=True, force_refresh=False):
-    """下载或更新 Git 仓库"""
+    """Clone or update a Git repository."""
     target_dir = Path(base_dir) / name
     if target_dir.exists() and (target_dir / ".git").exists():
         if dry_run:
@@ -712,13 +712,13 @@ def main():
         logging.error(str(exc))
         sys.exit(1)
 
-    # 对齐职责：合并策略
+    # Separation of concerns: merge policy
     REPOS = {name: dict(config) for name, config in repositories.items()}
     AGENT_TARGETS = canonicalize_agent_mapping(
         {k: (v if isinstance(v, str) else v.get("path")) for k, v in agent_targets.items()}
     )
 
-    # 区分全量 targets（用于清理旧链接）和活跃 targets（用于新建链接）
+    # Distinguish the full target set (for cleaning up old links) from the active targets (for creating new links)
     agent_defs = load_json_object_file(REPO_ROOT / "config" / "agents.json", strict=False, missing_ok=True) or {}
     installed_agents = {
         name for name, target_path in AGENT_TARGETS.items() if is_active_skill_target(name, target_path, agent_defs)
@@ -729,8 +729,8 @@ def main():
             logging.info(f"[AGENT: {name}] 不参与全局 skill 新建；仅在仓库显式声明 agents 时接收 skill 链接。")
             continue
         logging.info(f"[AGENT: {name}] 未安装，跳过新建 skill 链接（保留清理能力）。")
-    ALL_AGENT_TARGETS = AGENT_TARGETS  # 全量，用于清理旧链接
-    AGENT_TARGETS = {k: v for k, v in AGENT_TARGETS.items() if k in installed_agents}  # 活跃，用于新建链接
+    ALL_AGENT_TARGETS = AGENT_TARGETS  # full set, used for cleaning up old links
+    AGENT_TARGETS = {k: v for k, v in AGENT_TARGETS.items() if k in installed_agents}  # active set, used for creating new links
 
     for name, r_def in REPOS.items():
         if name in policy_cfg: r_def.update(policy_cfg[name])

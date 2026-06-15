@@ -56,7 +56,7 @@ def get_uv_tool_name(cmd: str | None) -> str | None:
         return None
     if tokens[1:3] != ["tool", "install"]:
         return None
-    # 只支持极少量明确的 flags 解析（fail-close），避免误把 flag value 当成 package。
+    # Parse only a small, explicit set of flags (fail-close) to avoid mistaking a flag value for the package.
     positional = []
     index = 3
     while index < len(tokens):
@@ -687,24 +687,24 @@ def detect_all_providers(bin_name, config=None, inventory=None):
 
 
 def check_tool_ready(name: str, ready_check: str | None, inventory=None) -> bool:
-    """根据 ready_check 字段判断工具是否已就绪。
+    """Determine whether a tool is ready based on the ready_check field.
 
-    支持四种前缀：
-      bin:<name>   — shutil.which 检查可执行文件
-      app:<path>   — os.path.exists 检查路径（支持 ~）
-      brew:<pkg>   — brew list 检查已安装的 formula/cask（跨架构通用）
-      uvtool:<pkg> — uv tool list 检查已安装的 uv tool
-    若 ready_check 为空则始终返回 False。
+    Four prefixes are supported:
+      bin:<name>   — check for an executable via shutil.which
+      app:<path>   — check for a path via os.path.exists (supports ~)
+      brew:<pkg>   — check for an installed formula/cask via brew list (architecture-agnostic)
+      uvtool:<pkg> — check for an installed uv tool via uv tool list
+    Always returns False when ready_check is empty.
     """
     active_inventory = inventory or ProviderInventory()
     return active_inventory.check_tool_ready(name, ready_check)
 
 
 def is_agent_installed(agent_name: str, agent_def: dict) -> bool:
-    """快速检查 agent 是否已安装。
+    """Quickly check whether an agent is installed.
 
-    优先检查 bin（shutil.which），其次检查 app_path（os.path.exists）。
-    两者均未配置时返回 False。
+    Checks bin first (shutil.which), then app_path (os.path.exists).
+    Returns False when neither is configured.
     """
     bin_name = agent_def.get("bin")
     if bin_name and shutil.which(bin_name):

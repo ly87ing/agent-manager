@@ -39,7 +39,7 @@ def _inject_npm_flags(cmd):
 
 
 def run_cmd(cmd, cwd=None, timeout=None):
-    """运行 shell 命令并返回结果"""
+    """Run a shell command and return the result."""
     cmd = _inject_npm_flags(cmd)
     try:
         result = run_command(cmd, cwd=cwd, check=True, capture_output=True, text=True, timeout=timeout)
@@ -55,7 +55,7 @@ def run_cmd(cmd, cwd=None, timeout=None):
 
 
 class GitStatusCache:
-    """缓存 git 仓库状态，避免重复执行慢速网络请求"""
+    """Cache git repository state to avoid repeating slow network requests."""
     _instance = None
     
     def __new__(cls):
@@ -65,7 +65,7 @@ class GitStatusCache:
         return cls._instance
     
     def probe_git_remote_state(self, cwd, timeout=5):
-        """检查 git 远端状态（带缓存和超时）"""
+        """Check git remote state (with caching and timeout)."""
         cwd_str = str(Path(cwd).resolve())
         if cwd_str in self._cache:
             return self._cache[cwd_str]
@@ -75,10 +75,10 @@ class GitStatusCache:
         return result
 
     def is_git_up_to_date(self, cwd, timeout=5):
-        """兼容旧调用方，只返回布尔最新状态。"""
+        """Compatibility shim for legacy callers; returns only the boolean up-to-date state."""
         return self.probe_git_remote_state(cwd, timeout=timeout)["status"] == "latest"
 
-# 实例化缓存
+# Instantiate the cache
 git_cache = GitStatusCache()
 
 
@@ -317,7 +317,7 @@ def is_manager_owned_tool_dir(target_dir: Path) -> bool:
 
 
 def apply_overrides(name, target_dir, dry_run=False):
-    """将本地补丁应用到目标工具目录"""
+    """Apply local patches to the target tool directory."""
     override_dir = Path(__file__).parent / "overrides" / name
     if not override_dir.exists(): return
     
@@ -339,7 +339,7 @@ def apply_overrides(name, target_dir, dry_run=False):
             logging.info(f"  已覆盖: {rel_path}")
 
 def prune_orphan_tools(base_dir, managed_names, dry_run=False, force_yes=False):
-    """清理不再受管理的工具目录"""
+    """Clean up tool directories that are no longer managed."""
     base_path = Path(base_dir).resolve()
     excluded = {"overrides", ".gitignore", "sync_tools.py", "__pycache__"}
     if not base_path.exists(): return
@@ -364,7 +364,7 @@ def prune_orphan_tools(base_dir, managed_names, dry_run=False, force_yes=False):
                 logging.info(f"  已成功清理: {item.name}")
 
 def _check_ready(name: str, ready_check: str | None) -> bool:
-    """根据 ready_check 字段判断工具是否已就绪。委托给 manage_runtime_probe.check_tool_ready。"""
+    """Determine whether a tool is ready based on the ready_check field. Delegates to manage_runtime_probe.check_tool_ready."""
     return check_tool_ready(name, ready_check)
 
 
@@ -385,7 +385,7 @@ def _setup_timeout_label(setup_timeout_sec: int | None) -> str:
 
 
 def sync_tool(name, definition, policy, base_dir, dry_run=False, force=False, offline=False, force_refresh=False):
-    # 合并策略
+    # Merge policy
     enabled = policy.get("enabled", True)
     auto_update = policy.get("auto_update", True)
     
@@ -634,7 +634,7 @@ def main():
         if name not in policy_cfg:
             logging.info(f"[TOOL: {name}] 未声明策略，跳过。")
             continue
-        # 检查前置依赖是否就绪
+        # Check whether prerequisite dependencies are ready
         requires = definition.get("requires", [])
         unmet = [
             req for req in requires
@@ -644,7 +644,7 @@ def main():
             logging.info(f"[TOOL: {name}] 前置依赖未就绪 {unmet}，跳过。")
             continue
         policy = policy_cfg.get(name, {})
-        # 离线模式下禁用 auto_update
+        # Disable auto_update in offline mode
         if args.offline:
             policy = {**policy, "auto_update": False}
         if not sync_tool(

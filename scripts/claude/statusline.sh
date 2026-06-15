@@ -1,21 +1,21 @@
 #!/bin/bash
-# Claude Code status line：model · effort · 目录 · git分支 · 上下文 · 行数增删 · 成本 · 5h/7d 用量+重置倒计时 · 输出风格。
-# 主体纯 bash 内建（read / [[ =~ ]] / printf / 参数展开），无 jq/git、无网络；仅在 5h/7d resets_at 存在时
-# fork 一次 date +%s 取当前时刻（两窗口共用，纯 bash 算倒计时），其余零 fork，约 6-9ms。
-# 数据全部来自 Claude Code 注入 stdin 的 JSON + 本地 .git/HEAD；任一字段缺失时对应段自动省略。
-# 兼容 macOS /bin/bash 3.2（不使用 4.x 语法）。由 scripts/claude/install_statusline.py 部署到 ~/.claude/。
+# Claude Code status line: model · effort · directory · git branch · context · line diff · cost · 5h/7d usage + reset countdown · output style.
+# The body is pure bash builtins (read / [[ =~ ]] / printf / parameter expansion), no jq/git, no network; only when 5h/7d resets_at is present does it
+# fork `date +%s` once to get the current time (shared by both windows, countdown computed in pure bash); zero forks otherwise, about 6-9ms.
+# All data comes from the JSON Claude Code injects on stdin + local .git/HEAD; any missing field causes its segment to be omitted automatically.
+# Compatible with macOS /bin/bash 3.2 (avoids 4.x syntax). Deployed to ~/.claude/ by scripts/claude/install_statusline.py.
 
-IFS= read -rd '' I   # 读全部 stdin（bash 内建）
+IFS= read -rd '' I   # Read all of stdin (bash builtin)
 
-# ---- 解析字段（bash 正则；[^}]* 不跨嵌套花括号） ----
+# ---- Parse fields (bash regex; [^}]* does not cross nested braces) ----
 model=""; effort=""; fast=""; cwd=""; ctx=""; added=""; removed=""; cost=""; five=""; week=""; ostyle=""
-five_reset=""; week_reset=""   # rate_limits.*.resets_at（Unix epoch 秒；用量重置时刻）
+five_reset=""; week_reset=""   # rate_limits.*.resets_at (Unix epoch seconds; usage reset time)
 
 re_model='"display_name"[[:space:]]*:[[:space:]]*"([^"]+)"'
 re_effort='"effort"[[:space:]]*:[[:space:]]*\{[^}]*"level"[[:space:]]*:[[:space:]]*"([^"]+)"'
 re_fast='"fast_mode"[[:space:]]*:[[:space:]]*true'
 re_cwd='"cwd"[[:space:]]*:[[:space:]]*"([^"]+)"'
-re_ctx='"used_percentage"[[:space:]]*:[[:space:]]*([0-9]+)[^}]*"remaining_percentage"'  # 仅 context_window 段后接 remaining_percentage
+re_ctx='"used_percentage"[[:space:]]*:[[:space:]]*([0-9]+)[^}]*"remaining_percentage"'  # only the context_window segment is followed by remaining_percentage
 re_added='"total_lines_added"[[:space:]]*:[[:space:]]*([0-9]+)'
 re_removed='"total_lines_removed"[[:space:]]*:[[:space:]]*([0-9]+)'
 re_cost='"total_cost_usd"[[:space:]]*:[[:space:]]*([0-9.eE+-]+)'
@@ -39,14 +39,14 @@ re_ostyle='"output_style"[[:space:]]*:[[:space:]]*\{[^}]*"name"[[:space:]]*:[[:s
 [[ $I =~ $re_week_reset ]] && week_reset=${BASH_REMATCH[1]}
 [[ $I =~ $re_ostyle  ]] && ostyle=${BASH_REMATCH[1]}
 
-# 精简模型名：去掉 "Claude " 前缀，"(1M context)" → "(1M)"
+# Shorten the model name: drop the "Claude " prefix, "(1M context)" → "(1M)"
 model=${model#Claude }
 model=${model/ (1M context)/ (1M)}
 
-# 目录末段
+# Last path segment of the directory
 dir=${cwd##*/}
 
-# git 分支：从 cwd 向上找 .git/HEAD，纯读文件（不 fork git）。.git 为文件(worktree)时跳过。
+# git branch: walk up from cwd to find .git/HEAD, reading the file directly (no git fork). Skip when .git is a file (worktree).
 branch=""
 d=$cwd
 while [[ -n $d ]]; do
@@ -58,11 +58,11 @@ while [[ -n $d ]]; do
   d=${d%/*}
 done
 
-# ---- 输出（printf 内建；仅当有 resets_at 时 fork 一次 date +%s 取 now） ----
+# ---- Output (printf builtin; fork `date +%s` once for now only when resets_at is present) ----
 shown=0
-sep() { (( shown )) && printf ' · '; shown=1; }   # 分隔符用终端默认前景色（深/浅背景皆可读）
+sep() { (( shown )) && printf ' · '; shown=1; }   # the separator uses the terminal's default foreground color (readable on dark/light backgrounds)
 
-# epoch 差（秒）-> 紧凑倒计时，结果写入 REPLY（纯 bash，无 $() 子shell）
+# epoch difference (seconds) -> compact countdown, result written to REPLY (pure bash, no $() subshell)
 fmt_dur() {
   local s=$1 d h m
   (( s < 0 )) && s=0
@@ -72,7 +72,7 @@ fmt_dur() {
   else                   printf -v REPLY '%dm' "$m"; fi
 }
 
-# 倒计时需当前时刻：仅当任一 resets_at 存在时 fork 一次 date +%s（两窗口共用；CC_STATUSLINE_NOW 供测试注入）
+# The countdown needs the current time: fork `date +%s` once only when either resets_at is present (shared by both windows; CC_STATUSLINE_NOW lets tests inject it)
 now=""
 if [[ -n $five_reset || -n $week_reset ]]; then now=${CC_STATUSLINE_NOW:-$(date +%s 2>/dev/null)}; fi
 
@@ -83,35 +83,35 @@ fi
 
 [[ -n $effort ]] && { sep; printf '\033[35meffort:%s\033[0m' "$effort"; }
 
-if [[ -n $dir ]]; then                       # 目录（加粗，背景无关）+ 分支（绿，括号内）
+if [[ -n $dir ]]; then                       # directory (bold, background-agnostic) + branch (green, in parentheses)
   sep; printf '\033[1m%s\033[0m' "$dir"
   [[ -n $branch ]] && printf ' \033[32m(%s)\033[0m' "$branch"
 fi
 
-if [[ -n $ctx ]]; then                       # 上下文占用：>=85 红 >=60 黄 否则绿
+if [[ -n $ctx ]]; then                       # context usage: >=85 red, >=60 yellow, otherwise green
   c=32; (( ctx >= 60 )) && c=33; (( ctx >= 85 )) && c=31
   sep; printf '\033[%dmctx %s%%\033[0m' "$c" "$ctx"
 fi
 
-if (( ${added:-0} > 0 || ${removed:-0} > 0 )); then   # 本会话行数增删
+if (( ${added:-0} > 0 || ${removed:-0} > 0 )); then   # lines added/removed this session
   sep; printf '\033[32m+%s\033[0m/\033[31m-%s\033[0m' "${added:-0}" "${removed:-0}"
 fi
 
-[[ -n $cost ]] && { sep; printf '$%.2f' "$cost"; }   # 成本用默认前景色
+[[ -n $cost ]] && { sep; printf '$%.2f' "$cost"; }   # cost uses the default foreground color
 
-if [[ -n $five ]]; then                      # 5 小时时限用量（+ 重置倒计时）
+if [[ -n $five ]]; then                      # 5-hour limit usage (+ reset countdown)
   c=32; (( five >= 60 )) && c=33; (( five >= 85 )) && c=31
   sep; printf '\033[%dm5h %s%%\033[0m' "$c" "$five"
   if [[ -n $five_reset && -n $now ]]; then fmt_dur $(( five_reset - now )); printf ' ↻%s' "$REPLY"; fi
 fi
 
-if [[ -n $week ]]; then                      # 7 天周限用量（+ 重置倒计时）
+if [[ -n $week ]]; then                      # 7-day weekly limit usage (+ reset countdown)
   c=32; (( week >= 60 )) && c=33; (( week >= 85 )) && c=31
   sep; printf '\033[%dm7d %s%%\033[0m' "$c" "$week"
   if [[ -n $week_reset && -n $now ]]; then fmt_dur $(( week_reset - now )); printf ' ↻%s' "$REPLY"; fi
 fi
 
-# 输出风格：仅非 default 时提示（罕见，平时不占位）
+# Output style: show only when not default (rare, takes no space normally)
 [[ -n $ostyle && $ostyle != default ]] && { sep; printf '[%s]' "$ostyle"; }
 
-exit 0   # statusline 始终以 0 退出（即使本行之前的 [[ ]] 为假）
+exit 0   # the statusline always exits with 0 (even if the [[ ]] on the previous line was false)

@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-# 颜色定义
+# Color definitions
 HDR_BLUE='\033[1;34m'   
 AGT_BLACK='\033[1;30m'  
 VAL_PURPLE='\033[0;35m' 
@@ -14,7 +14,7 @@ NC='\033[0m'
 BOLD='\033[1m'
 WHITE='\033[1;37m'
 
-# 获取脚本所在根目录绝对路径
+# Resolve the absolute path of the script's root directory
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 USER_NAME=$(whoami)
 RUN_ID="$(date +%Y%m%d%H%M%S)_$$"
@@ -25,9 +25,9 @@ LEGACY_LOG_PATH="${AGENT_MANAGER_LEGACY_LOG_PATH:-${LOG_PREFIX}.log}"
 LOCK_FILE="${AGENT_MANAGER_LOCK_FILE:-/tmp/agent_manager_${USER_NAME}.lock}"
 LOCK_DIR="${LOCK_FILE}.d"
 LOCK_PID_FILE="${LOCK_DIR}/pid"
-# 基线策略（仓库提供）
+# Baseline policy (provided by the repo)
 BASE_CONFIG="${AGENT_MANAGER_BASE_CONFIG:-$ROOT_DIR/config/manager.json}"
-# 本地覆盖（不参与 Git）
+# Local overrides (not tracked by Git)
 LOCAL_CONFIG="${AGENT_MANAGER_LOCAL_CONFIG:-$ROOT_DIR/config/manager.local.json}"
 LOCK_ACQUIRED="false"
 DRY_RUN_FLAG=""
@@ -43,7 +43,7 @@ ORIGINAL_ARGS=("$@")
 CMD_ARGS=()
 cmd=""
 
-# 如果本地覆盖文件存在，则读取并深度合并
+# If the local override file exists, read it and deep-merge
 if [ -f "$LOCAL_CONFIG" ]; then
     CONFIG_FILE="$(mktemp)"
     if ! python3 -c "
@@ -73,7 +73,7 @@ with open('$CONFIG_FILE', 'w', encoding='utf-8') as f:
         exit 1
     fi
 else
-    # 没有本地覆盖时直接使用基线
+    # Use the baseline directly when there is no local override
     CONFIG_FILE="$BASE_CONFIG"
 fi
 
@@ -168,7 +168,7 @@ function acquire_lock() {
     exit 1
 }
 
-# 原子锁检查
+# Atomic lock check
 if [[ "$cmd" != "help" && "$cmd" != "-h" && "$cmd" != "--help" && "$cmd" != "-help" && "$cmd" != "detect" && "$cmd" != "doctor" && "$cmd" != "status" && "$cmd" != "backups:list" && "$cmd" != "unlock" && "$cmd" != "logs" && "$cmd" != "fetch-models" && "$cmd" != "agent-status" && "$cmd" != "agents:status" ]]; then
     acquire_lock
 fi
@@ -203,10 +203,10 @@ trap cleanup_on_exit EXIT
 trap 'handle_signal_exit 143' TERM
 trap 'handle_signal_exit 130' INT
 
-# 确保执行权限
+# Ensure execute permissions
 chmod +x "$ROOT_DIR/agent-rule/scripts/"*.sh > /dev/null 2>&1 || true
 
-# 系统探测
+# System probe
 OS_TYPE="linux"
 if [[ "$OSTYPE" == "darwin"* ]]; then OS_TYPE="macos";
 elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then OS_TYPE="windows"; fi
