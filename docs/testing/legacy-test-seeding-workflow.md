@@ -46,6 +46,10 @@ CI gate 分阶段启用。初期只生成 report，不直接因覆盖率阻断�
 - pytest 的 flaky test 文档指出不稳定测试通常来自未隔离的系统状态、测试顺序依赖、过严断言、线程或并发问题；永久跳过、重跑、隔离失败测试不能替代修复不确定性。
 - Legacy code 社区实践强调先用 characterization / approval / golden master tests 锁定现有行为，再重构；snapshot 必须有稳定、可读、经过人工审核的输出，而不是机械更新。
 - Martin Fowler 关于 legacy seam 的说明强调 seam 可以帮助打断外部依赖，但引入 seam 本身会改变生产代码，因此必须作为单独审批动作处理。
+- Jest snapshot 官方文档强调 snapshot 要像代码一样提交和 review，CI 不应自动写入新 snapshot，包含时间、随机 ID 等非确定值时必须用 matcher、serializer 或 normalizer 控制。
+- Practical Test Pyramid 强调测试要按粒度分层，快速低层测试优先，高层 E2E 数量要少；发现高层失败时，应尽量补更低层的回归测试。
+- LLM 单测生成研究显示，AI 生成测试可能存在语法无效、缺少能触发缺陷的输入、缺陷检测能力不足等问题，因此“测试通过”本身不能证明测试有保护力。
+- Contract testing 实践强调跨服务 API / message 交互需要契约或集成验证；这类风险不能被普通 unit test 覆盖率替代。
 
 参考来源：
 
@@ -56,6 +60,11 @@ CI gate 分阶段启用。初期只生成 report，不直接因覆盖率阻断�
 - https://understandlegacycode.com/blog/characterization-tests-or-approval-tests/
 - https://martinfowler.com/bliki/LegacySeam.html
 - https://tdd.mooc.fi/4-legacy-code/
+- https://jestjs.io/docs/snapshot-testing
+- https://martinfowler.com/articles/practical-test-pyramid.html
+- https://arxiv.org/html/2406.18181v1
+- https://stryker-mutator.io/docs/General/faq/
+- https://microsoft.github.io/code-with-engineering-playbook/automated-testing/cdc-testing/
 
 ## 不做什么
 
@@ -81,6 +90,9 @@ CI gate 分阶段启用。初期只生成 report，不直接因覆盖率阻断�
 | flaky test | CI 信号失真，团队开始忽略失败 | 控制时间、随机、全局状态、并发、文件系统和测试顺序；不能控制就降级为 integration/smoke |
 | 为测试引入 seam | 可能改变 public API 或运行时行为 | 只记录需要的 seam，等待人工确认后作为单独任务处理 |
 | 顺手修 bug | characterization test 失去“锁当前行为”的作用 | 疑似 bug 写入 `suspicious-behavior.md`，不在同批修复 |
+| AI 生成测试假绿 | 测试能跑但没有真正触发业务逻辑或断言永远不会失败 | 接受前确认编译、执行真实目标路径、断言能在安全负向校验或 mutation 下失败 |
+| 混算测试类型 | 把 integration/E2E/contract 覆盖率当 unit coverage，误导重构风险 | `coverage-map` 中拆分 unit、integration、contract、smoke、E2E 证据 |
+| 跨服务风险被单测掩盖 | API/message 合同变化仍可能破坏消费者 | 记录 contract/integration gap，不把普通 unit test 写成已解决 |
 
 ## Phase 0：冻结当前基线
 
@@ -186,6 +198,8 @@ CI gate 分阶段启用。初期只生成 report，不直接因覆盖率阻断�
 - 引入大型依赖但没有明确收益。
 - 使用真实网络、真实外部服务或不可控测试数据。
 
+如果仓库只有一种测试命令，且该命令会启动数据库、浏览器、真实服务或部署环境，需要在 `current-baseline.md` 里记录“当前没有清晰 unit/integration/E2E 分层”。不要把这类 coverage 直接当成 unit coverage。
+
 ## Phase 3：编写 Characterization Tests
 
 目标是锁定当前行为，为后续重构提供安全网。
@@ -257,6 +271,8 @@ CI gate 分阶段启用。初期只生成 report，不直接因覆盖率阻断�
 - Customer coverage target:
 - Current meaningful coverage:
 - Current overall coverage:
+- Unit coverage:
+- Integration / contract / E2E evidence:
 - Measurement command:
 
 ## Covered
@@ -273,8 +289,17 @@ CI gate 分阶段启用。初期只生成 report，不直接因覆盖率阻断�
 ### Module
 - Missing cases:
 - Reason:
+- Required test layer:
 - Priority:
 ```
+
+AI 生成测试进入 coverage-map 前，要先做质量校验：
+
+- 测试能编译和运行。
+- 测试会执行真实目标逻辑，而不是只执行 mock、fixture 或 setup。
+- 测试有业务断言，不只是 framework mechanics。
+- 在安全可行时，通过临时改错 expected value、局部 mutation 或等价负向校验证明断言会失败；完成后必须还原临时改动。
+- 如果无法做负向校验，要在本批结果中说明原因。
 
 ## Phase 5：CI 保护策略
 
@@ -459,6 +484,7 @@ Phase 3:
 - 测试必须有真实断言。
 - 优先通过 public entry point 测业务状态、输出、错误和状态变化。
 - 避免测试里复刻生产逻辑、过度 mock 或添加不可审查的大 snapshot。
+- 如果 AI 生成测试，必须验证它编译、执行真实目标路径，并且断言能在安全负向校验下失败。
 
 Phase 4:
 - 运行最小相关测试命令。
@@ -466,6 +492,7 @@ Phase 4:
 - 更新 docs/testing/coverage-map.md。
 - 如发现疑似错误行为，只记录到 docs/testing/suspicious-behavior.md，不修复。
 - 做坑位检查：无低价值覆盖、无未审批生产代码变更、无 flaky 依赖、无机械 snapshot 更新。
+- 拆分 unit / integration / contract / E2E 证据，不混算 coverage。
 
 限制：
 - 禁止修改 production code，除非提前说明并获得人工确认。
