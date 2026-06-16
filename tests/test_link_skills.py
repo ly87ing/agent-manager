@@ -2380,11 +2380,12 @@ class LinkSkillsTests(unittest.TestCase):
                 "architecture-change-review",
                 "code-style-contracts",
                 "frontend-verification",
+                "legacy-unit-test",
                 "artifact-hygiene",
                 "reader-facing-writing",
             ],
         )
-        self.assertEqual(repo["skill_count"], 8)
+        self.assertEqual(repo["skill_count"], 9)
         self.assertEqual(repo["agents"], ["claude-code", "antigravity-cli", "codex"])
         self.assertNotIn("ignored_skill_paths", repo)
         self.assertRegex(repo["commit"], r"^[0-9a-f]{40}$")

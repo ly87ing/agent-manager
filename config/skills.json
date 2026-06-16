@@ -2,7 +2,7 @@
   "repositories": {
     "agent-skills": {
       "url": "https://github.com/ly87ing/agent-skills.git",
-      "commit": "d2d6ca2f381207f35a393fb1f40319f831cec7a4",
+      "commit": "2085f0429a53fc2eb90744207ea8e154bcb191c3",
       "upgrade_strategy": "latest-branch",
       "upgrade_ref": "refs/heads/main",
       "skill_paths": [
@@ -12,10 +12,11 @@
         "architecture-change-review",
         "code-style-contracts",
         "frontend-verification",
+        "legacy-unit-test",
         "artifact-hygiene",
         "reader-facing-writing"
       ],
-      "skill_count": 8,
+      "skill_count": 9,
       "agents": ["claude-code", "antigravity-cli", "codex"]
     },
     "anthropic-frontend-design-skill": {
