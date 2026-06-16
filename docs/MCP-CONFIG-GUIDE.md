@@ -49,9 +49,9 @@ make sync
 
 **维护约定**:
 - 受管 MCP 的实际命令必须固定版本或固定 commit；`@latest`、分支名只允许出现在 `version_lock` 的查询元数据里。
-- `make update` / `make bootstrap` / `make all` 会先运行 `scripts/update_version_pins.py`，查询 npm 最新版本或 Git ref 最新 commit，再写回 `config/mcp.json`。
+- `config/mcp.json` 保存服务器定义、命令模板和查询元数据；`make update` / `make bootstrap` / `make all` 会先运行 `scripts/update_version_pins.py`，查询 npm 最新版本或 Git ref 最新 commit，再写入本机 `config/version-pins.local.json`。
 - 首次调用 `chrome-devtools` 时，`npx` 可能会下载锁定版本的包；需要本机有可用的 Node.js / npm 运行时。
-- `make doctor` 会在 `chrome-devtools` 处于启用状态时预检 `npx` 运行时是否可用；实际包版本以 `config/mcp.json` 中的固定版本为准。
+- `make doctor` 会在 `chrome-devtools` 处于启用状态时预检 `npx` 运行时是否可用；实际包版本以 `config/mcp.json` 套用本地版本锁后的有效配置为准。
 - 如果后续需要统一增加 `--browserUrl`、`--headless`、`--isolated` 等参数，应修改 `config/mcp.json`，不要手改单个 Agent 的 MCP 配置文件。
 - 本项目不管理 GitHub Copilot，因此不会再向其配置目录注入托管 MCP，也不会再生成 Copilot 专属 repo-native rules 文件。
 
@@ -484,7 +484,7 @@ PY
 默认模式（mcp:sync / make sync / make update / make bootstrap 中的 MCP 步骤）:
 1. 读取 config/mcp.json 获取服务器定义
    ↓
-2. `make update` / `make bootstrap` / `make all` 入口先刷新 version_lock；`sync` 只消费已固定的版本
+2. `make update` / `make bootstrap` / `make all` 入口先刷新 config/version-pins.local.json；`sync` 只消费套用本地 lock 后的固定版本
    ↓
 3. 按固定优先级加载 MCP 凭证: root/.env → secrets/mcp.env → 系统环境变量回退
    ↓

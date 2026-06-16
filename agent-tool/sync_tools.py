@@ -17,6 +17,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.json_config import get_typed_mapping_section, load_json_object_file
+from src.version_pins import apply_local_version_pins
 from src.command_runner import run_command
 from src.git_remote_probe import probe_git_remote_state as probe_git_remote_repo_state
 from src.manage_runtime_probe import (
@@ -615,6 +616,7 @@ def main():
     try:
         policy_root = load_json_object_file(args.config, strict=True, missing_ok=False)
         def_root = load_json_object_file(args.def_file, strict=True, missing_ok=False)
+        def_root = apply_local_version_pins(def_root, args.def_file)
         policy_cfg = get_typed_mapping_section(policy_root, "tools", Path(args.config).name, (dict,), "对象")
         def_cfg = get_typed_mapping_section(def_root, "tools", Path(args.def_file).name, (dict,), "对象")
     except ValueError as exc:

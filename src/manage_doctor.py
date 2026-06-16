@@ -13,6 +13,7 @@ from pathlib import Path
 
 from src.agent_ids import canonicalize_agent_list, canonicalize_agent_mapping, get_agent_display_name
 from src.json_config import ensure_mapping_value_types, get_typed_mapping_section, load_json_object_file
+from src.version_pins import apply_local_version_pins
 from src.manage_runtime_probe import (
     ProviderInventory,
     canonical_provider_name,
@@ -216,27 +217,28 @@ def load_inputs(root_dir: Path, config_file: Path) -> dict:
     config["agents"] = canonicalize_agent_mapping(
         get_typed_mapping_section(config, "agents", "manager.json", (dict,), "对象")
     )
+    agent_defs_raw = load_json(root_dir / "config" / "agents.json", strict=True, missing_ok=False)
+    agent_defs_raw = apply_local_version_pins(agent_defs_raw, root_dir / "config" / "agents.json")
     agent_defs = canonicalize_agent_mapping(
-        ensure_mapping_value_types(
-            load_json(root_dir / "config" / "agents.json", strict=True, missing_ok=False),
-            "agents.json",
-            (dict,),
-            "对象",
-        )
+        ensure_mapping_value_types(agent_defs_raw, "agents.json", (dict,), "对象")
     )
+    tools_raw = load_json(root_dir / "config" / "tools.json", strict=True, missing_ok=False)
+    tools_raw = apply_local_version_pins(tools_raw, root_dir / "config" / "tools.json")
     tool_defs = get_typed_mapping_section(
-        load_json(root_dir / "config" / "tools.json", strict=True, missing_ok=False),
+        tools_raw,
         "tools",
         "tools.json",
         (dict,),
         "对象",
     )
     skill_cfg_raw = load_json(root_dir / "config" / "skills.json", strict=True, missing_ok=False)
+    skill_cfg_raw = apply_local_version_pins(skill_cfg_raw, root_dir / "config" / "skills.json")
     skill_cfg = {
         "repositories": get_typed_mapping_section(skill_cfg_raw, "repositories", "skills.json", (dict,), "对象"),
         "agents": get_typed_mapping_section(skill_cfg_raw, "agents", "skills.json", (str, dict), "字符串或对象"),
     }
     mcp_cfg_raw = load_json(root_dir / "config" / "mcp.json", strict=True, missing_ok=False)
+    mcp_cfg_raw = apply_local_version_pins(mcp_cfg_raw, root_dir / "config" / "mcp.json")
     mcp_cfg = {
         "servers": get_typed_mapping_section(mcp_cfg_raw, "servers", "mcp.json", (dict,), "对象"),
         "agent_paths": get_typed_mapping_section(mcp_cfg_raw, "agent_paths", "mcp.json", (str, dict), "字符串或对象"),

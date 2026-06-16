@@ -19,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
 from src.command_runner import run_command
 from src.json_config import ensure_mapping_value_types, get_typed_mapping_section, load_json_object_file
+from src.version_pins import apply_local_version_pins
 from src.manage_runtime_probe import (
     ProviderInventory as ProviderCache,
     canonical_provider_name,
@@ -759,6 +760,7 @@ def main():
     try:
         policy_root = load_json_object_file(args.config, strict=True, missing_ok=False)
         def_root = load_json_object_file(args.def_file, strict=True, missing_ok=False)
+        def_root = apply_local_version_pins(def_root, args.def_file)
         policy_cfg = canonicalize_agent_mapping(
             get_typed_mapping_section(policy_root, "agents", Path(args.config).name, (dict,), "对象")
         )

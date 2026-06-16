@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import copy
 import json
 import logging
 import re
@@ -14,8 +13,16 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.json_config import atomic_write_json_file, get_typed_mapping_section, load_json_object_file
+from src.json_config import get_typed_mapping_section, load_json_object_file
 from src.runtime_logging import configure_logging
+from src.version_pins import (
+    VersionPinsError,
+    default_version_pins_path,
+    get_skill_repository_pin,
+    load_version_pins,
+    set_skill_repository_pin,
+    write_version_pins,
+)
 
 configure_logging()
 
@@ -199,9 +206,11 @@ def collect_target_repositories(policy_cfg, repositories, requested_repos):
     return targets, skipped_missing_strategy
 
 
-def upgrade_repositories(config_path, def_path, requested_repos=None, dry_run=False, offline=False):
+def upgrade_repositories(config_path, def_path, requested_repos=None, dry_run=False, offline=False, pins_path=None):
     policy_root = load_json_object_file(config_path, strict=True, missing_ok=False)
     defs_root = load_json_object_file(def_path, strict=True, missing_ok=False)
+    pins_path = Path(pins_path) if pins_path else default_version_pins_path(Path(def_path).parent)
+    pins = load_version_pins(pins_path)
     policy_cfg = get_typed_mapping_section(policy_root, "skills", Path(config_path).name, (dict,), "对象")
     repositories = get_typed_mapping_section(defs_root, "repositories", Path(def_path).name, (dict,), "对象")
 
@@ -220,12 +229,11 @@ def upgrade_repositories(config_path, def_path, requested_repos=None, dry_run=Fa
             logging.info("当前策略未配置任何可升级 skill 仓库。")
         return 0
 
-    updated_defs = copy.deepcopy(defs_root)
     changed = False
     errors = []
 
     for repo_name in targets:
-        repo_config = updated_defs["repositories"][repo_name]
+        repo_config = repositories[repo_name]
         if not repo_config.get("upgrade_strategy"):
             errors.append(f"[{repo_name}] 缺少 upgrade_strategy。")
             continue
@@ -235,15 +243,26 @@ def upgrade_repositories(config_path, def_path, requested_repos=None, dry_run=Fa
             errors.append(f"[{repo_name}] {exc}")
             continue
 
-        current_commit = str(repo_config.get("commit", "")).strip()
-        if current_commit == latest_commit:
+        try:
+            pinned_commit = get_skill_repository_pin(pins, repo_name)
+        except VersionPinsError as exc:
+            errors.append(f"[{repo_name}] {exc}")
+            continue
+        current_commit = pinned_commit or str(repo_config.get("commit", "")).strip()
+        if current_commit == latest_commit and pinned_commit is not None:
             logging.info(f"[{repo_name}] 已是最新固定版本，无需更新。")
             continue
 
-        repo_config["commit"] = latest_commit
-        repo_config.pop("ref", None)
-        changed = True
-        if dry_run:
+        try:
+            changed = set_skill_repository_pin(pins, repo_name, latest_commit) or changed
+        except VersionPinsError as exc:
+            errors.append(f"[{repo_name}] {exc}")
+            continue
+        if current_commit == latest_commit and dry_run:
+            logging.info(f"[{repo_name}] (预览: 计划写入当前最新 commit -> {latest_commit})")
+        elif current_commit == latest_commit:
+            logging.info(f"[{repo_name}] 本地版本锁缺失，写入当前最新 commit -> {latest_commit}")
+        elif dry_run:
             logging.info(f"[{repo_name}] (预览: 计划更新 commit -> {latest_commit})")
         else:
             logging.info(f"[{repo_name}] 已解析最新版本 commit -> {latest_commit}")
@@ -251,7 +270,7 @@ def upgrade_repositories(config_path, def_path, requested_repos=None, dry_run=Fa
     if errors:
         for message in errors:
             logging.error(message)
-        logging.error("存在升级失败项，配置未写回。")
+        logging.error("存在升级失败项，本地版本锁未写回。")
         return 1
 
     if not changed:
@@ -259,11 +278,11 @@ def upgrade_repositories(config_path, def_path, requested_repos=None, dry_run=Fa
         return 0
 
     if dry_run:
-        logging.info("预览模式：已跳过 skills.json 写回。")
+        logging.info("预览模式：已跳过本地版本锁写回。")
         return 0
 
-    atomic_write_json_file(def_path, updated_defs)
-    logging.info("skills.json 已原子更新。")
+    write_version_pins(pins_path, pins)
+    logging.info(f"Skill 本地版本锁已写入 {pins_path}。")
     return 0
 
 
@@ -272,6 +291,7 @@ def main():
     parser.add_argument("--config", default=str(REPO_ROOT / "config" / "manager.json"), help="策略配置")
     parser.add_argument("--def-file", default=str(REPO_ROOT / "config" / "skills.json"), help="定义文件")
     parser.add_argument("--repo", action="append", dest="repos", help="只升级指定仓库，可重复")
+    parser.add_argument("--pins-file", help="本地版本锁文件，默认 config/version-pins.local.json")
     parser.add_argument("--dry-run", action="store_true", help="预览")
     parser.add_argument("--offline", action="store_true", help="离线模式")
     args = parser.parse_args()
@@ -284,6 +304,7 @@ def main():
                 requested_repos=args.repos,
                 dry_run=args.dry_run,
                 offline=args.offline,
+                pins_path=args.pins_file,
             )
         )
     except ValueError as exc:

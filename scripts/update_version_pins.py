@@ -13,12 +13,22 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.command_runner import run_command
 from src.runtime_logging import configure_logging
+from src.version_pins import (
+    VersionPinsError,
+    apply_version_lock_fields,
+    default_version_pins_path,
+    get_version_pin,
+    iter_version_lock_targets,
+    load_version_pins,
+    set_version_pin,
+    version_pin_key,
+    write_version_pins,
+)
 
 
 configure_logging()
 
 OFFICIAL_NPM_REGISTRY = "https://registry.npmjs.org"
-VERSION_LOCK_KEY = "version_lock"
 MANAGED_CONFIG_FILES = ("agents.json", "tools.json", "mcp.json")
 
 
@@ -33,10 +43,6 @@ def load_json_file(path: Path):
         raise VersionPinError(f"{path} 不存在") from exc
     except json.JSONDecodeError as exc:
         raise VersionPinError(f"{path} 不是合法 JSON: {exc}") from exc
-
-
-def write_json_file(path: Path, payload):
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def run_capture(cmd):
@@ -65,20 +71,6 @@ def fetch_git_ref_commit(remote: str, ref: str) -> str:
     return commit.lower()
 
 
-def iter_version_lock_targets(value, path=()):
-    if isinstance(value, dict):
-        lock = value.get(VERSION_LOCK_KEY)
-        if lock is not None:
-            yield path, value, lock
-        for key, child in value.items():
-            if key == VERSION_LOCK_KEY:
-                continue
-            yield from iter_version_lock_targets(child, path + (str(key),))
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
-            yield from iter_version_lock_targets(child, path + (str(index),))
-
-
 def resolve_version(lock):
     if not isinstance(lock, dict):
         raise VersionPinError("version_lock 必须是对象")
@@ -102,92 +94,47 @@ def resolve_version(lock):
     raise VersionPinError(f"不支持的 version_lock.type: {lock_type!r}")
 
 
-def parse_relative_path(path: str):
-    if not isinstance(path, str) or not path:
-        raise VersionPinError("version_lock.fields 的路径必须是非空字符串")
-    return path.split(".")
-
-
-def assign_path(root, path, value):
-    current = root
-    parts = parse_relative_path(path)
-    for part in parts[:-1]:
-        if isinstance(current, list):
-            try:
-                current = current[int(part)]
-            except (ValueError, IndexError) as exc:
-                raise VersionPinError(f"路径不存在: {path}") from exc
-            continue
-        if not isinstance(current, dict) or part not in current:
-            raise VersionPinError(f"路径不存在: {path}")
-        current = current[part]
-
-    leaf = parts[-1]
-    if isinstance(current, list):
-        try:
-            index = int(leaf)
-            changed = current[index] != value
-            current[index] = value
-            return changed
-        except (ValueError, IndexError) as exc:
-            raise VersionPinError(f"路径不存在: {path}") from exc
-    elif isinstance(current, dict) and leaf in current:
-        changed = current[leaf] != value
-        current[leaf] = value
-        return changed
-    else:
-        raise VersionPinError(f"路径不存在: {path}")
-
-
-def update_document_versions(document, file_label: str, dry_run: bool):
+def update_document_versions(document, file_label: str, pins: dict, dry_run: bool):
     changes = []
     for object_path, target, lock in iter_version_lock_targets(document):
-        fields = lock.get("fields") if isinstance(lock, dict) else None
-        if not isinstance(fields, dict) or not fields:
-            raise VersionPinError(f"{file_label}:{'.'.join(object_path)} version_lock.fields 必须是非空对象")
-
         if dry_run:
             changes.append((object_path, "<dry-run>", False))
             continue
 
         version = resolve_version(lock)
-        changed = False
-        for relative_path, template in fields.items():
-            if not isinstance(template, str) or "{version}" not in template:
-                raise VersionPinError(
-                    f"{file_label}:{'.'.join(object_path)} field {relative_path} 模板必须包含 {{version}}"
-                )
-            changed = assign_path(target, relative_path, template.format(version=version)) or changed
+        current_version = get_version_pin(pins, file_label, object_path)
+        changed = current_version != version
+        apply_version_lock_fields(target, lock, version, f"{file_label}:{version_pin_key(object_path)}")
+        set_version_pin(pins, file_label, object_path, version)
         changes.append((object_path, version, changed))
     return changes
 
 
-def update_config_file(path: Path, dry_run: bool):
+def update_config_file(path: Path, pins: dict, dry_run: bool):
     document = load_json_file(path)
-    changes = update_document_versions(document, path.name, dry_run)
-    if not changes:
-        return []
-    if not dry_run and any(changed for _, _, changed in changes):
-        write_json_file(path, document)
-    return changes
+    return update_document_versions(document, path.name, pins, dry_run)
 
 
-def update_config_dir(config_dir: Path, dry_run: bool = False):
+def update_config_dir(config_dir: Path, pins_path: Path | None = None, dry_run: bool = False):
+    pins_path = pins_path or default_version_pins_path(config_dir)
+    pins = load_version_pins(pins_path)
     all_changes = []
     for filename in MANAGED_CONFIG_FILES:
         path = config_dir / filename
-        changes = update_config_file(path, dry_run)
+        changes = update_config_file(path, pins, dry_run)
         all_changes.extend((filename, object_path, version, changed) for object_path, version, changed in changes)
+    if not dry_run and any(changed for _, _, _, changed in all_changes):
+        write_version_pins(pins_path, pins)
     return all_changes
 
 
-def main_with_args_for_test(config_dir: Path, dry_run: bool = False, offline: bool = False):
+def main_with_args_for_test(config_dir: Path, dry_run: bool = False, offline: bool = False, pins_path: Path | None = None):
     if offline:
         logging.info("离线模式，跳过版本锁刷新。")
         return 0
     try:
-        all_changes = update_config_dir(Path(config_dir), dry_run=dry_run)
-    except VersionPinError as exc:
+        all_changes = update_config_dir(Path(config_dir), pins_path=pins_path, dry_run=dry_run)
+    except (VersionPinError, VersionPinsError) as exc:
         logging.error(str(exc))
         return 1
 
@@ -203,17 +150,22 @@ def main_with_args_for_test(config_dir: Path, dry_run: bool = False, offline: bo
             logging.info(f"[{filename}] 已刷新版本锁 {label} -> {version}")
         else:
             logging.info(f"[{filename}] 版本锁已是最新 {label} -> {version}")
+    if not dry_run:
+        local_pins_path = pins_path or default_version_pins_path(Path(config_dir))
+        logging.info(f"本地版本锁已写入 {local_pins_path}")
     return 0
 
 
 def main():
     parser = argparse.ArgumentParser(description="更新受管 MCP / CLI 的固定版本锁")
     parser.add_argument("--config-dir", default=str(REPO_ROOT / "config"), help="配置目录")
+    parser.add_argument("--pins-file", help="本地版本锁文件，默认 config/version-pins.local.json")
     parser.add_argument("--dry-run", action="store_true", help="只预览，不联网查询也不写入")
     parser.add_argument("--offline", action="store_true", help="离线模式下跳过版本锁刷新")
     args = parser.parse_args()
 
-    return main_with_args_for_test(Path(args.config_dir), dry_run=args.dry_run, offline=args.offline)
+    pins_path = Path(args.pins_file) if args.pins_file else None
+    return main_with_args_for_test(Path(args.config_dir), dry_run=args.dry_run, offline=args.offline, pins_path=pins_path)
 
 
 if __name__ == "__main__":

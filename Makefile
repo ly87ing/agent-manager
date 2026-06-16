@@ -1,4 +1,4 @@
-.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\:list backups-gc backups\:gc restore backups\:restore logs rules-build rules\:build rules-sync rules\:sync skills-link skills\:link skills\:upgrade mcp-sync mcp\:sync mcp-prepare mcp\:prepare tools-sync tools\:sync browser-us-sync browser\:sync claude-hooks-sync claude\:hooks\:sync claude-statusline-install claude\:statusline\:install claude-statusline-wire claude\:statusline\:wire codex-hooks-sync codex\:hooks\:sync dry-run clean-logs offline eval-rules secrets-check secrets\:check instructions-check instructions\:check
+.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\:list backups-gc backups\:gc restore backups\:restore logs rules-build rules\:build rules-sync rules\:sync skills-link skills\:link skills\:upgrade mcp-sync mcp\:sync mcp-prepare mcp\:prepare tools-sync tools\:sync browser-us-sync browser\:sync claude-hooks-sync claude\:hooks\:sync claude-statusline-install claude\:statusline\:install claude-statusline-wire claude\:statusline\:wire codex-hooks-sync codex\:hooks\:sync dry-run clean-logs offline eval-rules secrets-check secrets\:check instructions-check instructions\:check install
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -10,6 +10,9 @@ all:
 # 新机器初始化或全量收敛
 bootstrap:
 	@./manage.sh bootstrap
+
+# 兼容安装入口：等价于 bootstrap
+install: bootstrap
 
 # 同步当前配置并收敛 skills / MCP 资源；不处理 Agent 安装
 sync:

@@ -32,13 +32,13 @@
 ### 其他受管工具
 
 - `chrome-devtools`（MCP）
-  - 由 `make update` 刷新 `config/mcp.json` 中的版本锁；各 Agent 实际运行时只消费固定版本。
-默认受管 skill 仓库当前包含 `agent-skills`、`anthropic-frontend-design-skill` 和 `playwright-best-practices-skill`；它们都在 `config/skills.json` 中固定到具体 commit，并由 `make update` 按 `latest-branch` 策略刷新 commit。运行时同步只检出固定 commit，不直接跟随默认分支。`agent-skills` 面向 `Claude Code`、`Antigravity CLI` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 `safe-merge-review`、`fix-ones-bug`、`qa-self-verify`、`architecture-change-review`、`code-style-contracts`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing` 这 8 个 skill 包，避免上游新增 skill 被默认带入；`anthropic-frontend-design-skill` 仅面向 `Claude Code` 暴露，并通过显式 `skill_paths` 锁定 Anthropic 官方 `skills/frontend-design`。OpenAI 官方仓库当前最新主分支已不再提供 `frontend-skill`，因此默认清单不再引用该路径，避免 `make all` 在刷新上游 commit 时失败。
+  - 由 `make update` 刷新本机 `config/version-pins.local.json` 中的版本锁；各 Agent 实际运行时只消费固定版本。
+默认受管 skill 仓库当前包含 `agent-skills`、`anthropic-frontend-design-skill` 和 `playwright-best-practices-skill`；它们的仓库、升级策略和初始 commit 保留在 `config/skills.json`，真实运行 commit 由 `config/version-pins.local.json` 的本地锁覆盖，并由 `make update` 按 `latest-branch` 策略刷新。运行时同步只检出固定 commit，不直接跟随默认分支。`agent-skills` 面向 `Claude Code`、`Antigravity CLI` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 `safe-merge-review`、`fix-ones-bug`、`qa-self-verify`、`architecture-change-review`、`code-style-contracts`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing` 这 8 个 skill 包，避免上游新增 skill 被默认带入；`anthropic-frontend-design-skill` 仅面向 `Claude Code` 暴露，并通过显式 `skill_paths` 锁定 Anthropic 官方 `skills/frontend-design`。OpenAI 官方仓库当前最新主分支已不再提供 `frontend-skill`，因此默认清单不再引用该路径，避免 `make all` 在刷新上游 commit 时失败。
 默认自动安装的 Agent 当前只包含 `Claude Code`、`Codex` 和 `Antigravity CLI`。
-`Claude Code` 与 `Codex` 默认走官方 npm 包，并使用 `config/agents.json` 中的固定版本；`Antigravity CLI` 当前默认走官方 native installer。历史 `brew` 安装仅用于识别并提示迁移，不再作为这些 CLI 的受管 provider。
+`Claude Code` 与 `Codex` 默认走官方 npm 包，并使用 `config/agents.json` 中的命令模板加本机版本锁；`Antigravity CLI` 当前默认走官方 native installer。历史 `brew` 安装仅用于识别并提示迁移，不再作为这些 CLI 的受管 provider。
 `Claude Code native` 仍作为兼容 provider 保留官方 install / update / uninstall 语义，但默认不再使用这条动态 updater 路径。
 `Claude Code local install` 不纳入 `agent-manager` lifecycle 托管，因为它依赖 shell alias 暴露入口，当前探测链路不会越权接管。
-以上 lifecycle 口径统一按三个当前受管 Agent 的官方推荐方式维护。`Claude Code` 和 `Codex` 的 npm provider 使用 `config/agents.json` 中的固定版本，并由 `make update` 刷新版本锁；`Antigravity CLI` 使用官方 `curl -fsSL https://antigravity.google/cli/install.sh | bash` 安装到 `agy`，不由 `agent-manager` 伪造 update 命令。若需要阻止 `agy` 启动后的官方后台自更新，按官方文档在 shell 环境设置 `AGY_CLI_DISABLE_AUTO_UPDATE=true`；`agent-manager` 不改写用户 shell profile。放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer。
+以上 lifecycle 口径统一按三个当前受管 Agent 的官方推荐方式维护。`Claude Code` 和 `Codex` 的 npm provider 使用 `config/agents.json` 中的命令模板，并由 `make update` 刷新本机 `config/version-pins.local.json`；`Antigravity CLI` 使用官方 `curl -fsSL https://antigravity.google/cli/install.sh | bash` 安装到 `agy`，不由 `agent-manager` 伪造 update 命令。若需要阻止 `agy` 启动后的官方后台自更新，按官方文档在 shell 环境设置 `AGY_CLI_DISABLE_AUTO_UPDATE=true`；`agent-manager` 不改写用户 shell profile。放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer。
 
 ## Official CLI Lifecycle Policy
 
@@ -63,7 +63,7 @@
 ### 1. 策略与定义分离 (Policy vs. Definition)
 - **仓库基线 (`manager.json`)**：保存可审计的默认策略。
 - **本地覆盖 (`manager.local.json`)**：运行时与 `manager.json` 深度合并；`make ui` 只写这一层，适合机器本地偏好与私有配置。
-- **版本锁 (`version_lock`) / skill commit**：`make update` 查询 npm / Git ref / skill 仓库分支的最新版本并写回 `config/agents.json`、`config/tools.json`、`config/mcp.json` 与 `config/skills.json`；同步到 Codex / Claude Code / Antigravity CLI 的实际运行配置不得使用 `@latest`、分支名或未固定的 skill 仓库。
+- **版本锁 (`version_lock`) / skill commit**：`config/agents.json`、`config/tools.json`、`config/mcp.json` 与 `config/skills.json` 保存命令模板、包名、仓库和升级策略；`make update` 查询 npm / Git ref / skill 仓库分支的最新版本并写入本机 `config/version-pins.local.json`。同步到 Codex / Claude Code / Antigravity CLI 的实际运行配置会先套用本地 lock，不得使用 `@latest`、分支名或未固定的 skill 仓库。
 - **浏览器前置开关**：`browser_us_sync.enabled` 控制 `update` / `bootstrap` / `all` / `browser:sync` 是否执行浏览器 Google US 前置同步。
 - **模块化定义 (`agents.json`等)**：保存官方指令细节，支持 Policy 的强制覆盖。
 
@@ -111,6 +111,7 @@
 - `make sync`: 同步当前配置到 rules，并按已锁定版本对齐 skills / MCP；不处理 Agent / Tool 生命周期，也不刷新版本锁。
 - `make update`: 刷新 CLI/MCP/tool 版本锁与 skill commit、更新远端资源并收敛本地环境，等待 Agent 生命周期更新完成，但不安装缺失 Agent。
 - `make bootstrap`: 执行全量安装、更新与同步，并等待 Agent 生命周期安装/升级完成，适合新机器初始化。
+- `make install`: `make bootstrap` 的兼容别名。
 - `make all`: `make bootstrap` 的兼容别名。
 - `make plan`: 预演一次完整 `bootstrap`。
 - `make self-update`: 仅更新 agent-manager 仓库自身逻辑。

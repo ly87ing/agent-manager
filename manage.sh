@@ -539,15 +539,33 @@ from src.manage_runtime_probe import (
     load_json,
     rule_target_agent_id,
 )
+from src.version_pins import apply_local_version_pins
 
 try:
     inventory = ProviderInventory()
     cfg = load_json('$CONFIG_FILE', strict=True, missing_ok=False)
     cfg['agents'] = canonicalize_agent_mapping(get_typed_mapping_section(cfg, 'agents', 'manager.json', (dict,), '对象'))
     def_a = canonicalize_agent_mapping(
-        ensure_mapping_value_types(load_json('$ROOT_DIR/config/agents.json', strict=True, missing_ok=False), 'agents.json', (dict,), '对象')
+        ensure_mapping_value_types(
+            apply_local_version_pins(
+                load_json('$ROOT_DIR/config/agents.json', strict=True, missing_ok=False),
+                '$ROOT_DIR/config/agents.json',
+            ),
+            'agents.json',
+            (dict,),
+            '对象',
+        )
     )
-    tool_defs = get_typed_mapping_section(load_json('$ROOT_DIR/config/tools.json', strict=True, missing_ok=False), 'tools', 'tools.json', (dict,), '对象')
+    tool_defs = get_typed_mapping_section(
+        apply_local_version_pins(
+            load_json('$ROOT_DIR/config/tools.json', strict=True, missing_ok=False),
+            '$ROOT_DIR/config/tools.json',
+        ),
+        'tools',
+        'tools.json',
+        (dict,),
+        '对象',
+    )
     for k, v in cfg.get('agents', {}).items():
         if not v.get('enabled', True): continue
         d = def_a.get(k, {})
@@ -974,16 +992,23 @@ from src.manage_runtime_probe import (
     load_json,
     rule_target_agent_id,
 )
+from src.version_pins import apply_local_version_pins
 
 try:
     cfg = load_json(config_path, strict=True, missing_ok=False)
     cfg["agents"] = canonicalize_agent_mapping(get_typed_mapping_section(cfg, "agents", "manager.json", (dict,), "对象"))
-    skill_cfg_raw = load_json(root / "config" / "skills.json", strict=True, missing_ok=False)
+    skill_cfg_raw = apply_local_version_pins(
+        load_json(root / "config" / "skills.json", strict=True, missing_ok=False),
+        root / "config" / "skills.json",
+    )
     skill_cfg = {
         "repositories": get_typed_mapping_section(skill_cfg_raw, "repositories", "skills.json", (dict,), "对象"),
         "agents": get_typed_mapping_section(skill_cfg_raw, "agents", "skills.json", (str, dict), "字符串或对象"),
     }
-    mcp_cfg_raw = load_json(root / "config" / "mcp.json", strict=True, missing_ok=False)
+    mcp_cfg_raw = apply_local_version_pins(
+        load_json(root / "config" / "mcp.json", strict=True, missing_ok=False),
+        root / "config" / "mcp.json",
+    )
     mcp_cfg = {
         "servers": get_typed_mapping_section(mcp_cfg_raw, "servers", "mcp.json", (dict,), "对象"),
         "agent_paths": get_typed_mapping_section(mcp_cfg_raw, "agent_paths", "mcp.json", (str, dict), "字符串或对象"),

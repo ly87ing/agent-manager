@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from copy import deepcopy
@@ -99,6 +100,59 @@ class SyncMcpTests(unittest.TestCase):
         )
         self.assertEqual(grok_search["version_lock"]["type"], "git-ref")
         self.assertEqual(grok_search["version_lock"]["ref"], "grok-with-tavily")
+
+    def test_main_applies_local_version_pins_to_server_args(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "manager.json"
+            def_path = temp_root / "mcp.json"
+            agent_config_path = temp_root / "agent.json"
+            config_path.write_text(
+                json.dumps({"mcp": {"demo": {"enabled": True}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "servers": {
+                            "demo": {
+                                "command": "npx",
+                                "args": ["-y", "demo-mcp@0.1.0"],
+                                "env": {},
+                                "version_lock": {
+                                    "type": "npm",
+                                    "package": "demo-mcp",
+                                    "fields": {"args.1": "demo-mcp@{version}"},
+                                },
+                                "agents": ["claude-code"],
+                            }
+                        },
+                        "agent_paths": {"claude-code": str(agent_config_path)},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (temp_root / "version-pins.local.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "version_locks": {"mcp.json": {"servers.demo": "4.5.6"}},
+                        "skill_repositories": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(
+                sys,
+                "argv",
+                ["sync_mcp.py", "--config", str(config_path), "--def-file", str(def_path), "--base-dir", str(temp_root / "mcp")],
+            ):
+                with mock.patch.object(sync_mcp, "is_agent_installed", return_value=True):
+                    sync_mcp.main()
+
+            updated = json.loads(agent_config_path.read_text(encoding="utf-8"))
+            self.assertEqual(updated["mcpServers"]["demo"]["args"], ["-y", "demo-mcp@4.5.6"])
 
     def test_codex_toml_receives_startup_timeout_without_json_leak(self):
         with tempfile.TemporaryDirectory() as temp_dir:

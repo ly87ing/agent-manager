@@ -1,6 +1,7 @@
 import fnmatch
 import json
 import os
+import sys
 import subprocess
 import shutil
 import tempfile
@@ -61,6 +62,60 @@ class SyncToolsTests(unittest.TestCase):
         self.assertEqual(tool_defs["agent-browser"]["ready_check"], "bin:agent-browser")
         self.assertIn("app:/Applications/Google Chrome.app", tool_defs["agent-browser"]["runtime_ready_checks_any"])
         self.assertIn("~/Library/Caches/ms-playwright/chromium-*", tool_defs["agent-browser"]["runtime_ready_globs_any"])
+
+    def test_main_applies_local_version_pins_to_install_commands(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "manager.json"
+            def_path = temp_root / "tools.json"
+            base_dir = temp_root / "tools"
+            config_path.write_text(
+                json.dumps({"tools": {"demo": {"enabled": True, "auto_update": False}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "tools": {
+                            "demo": {
+                                "install": "npm install -g demo@0.1.0",
+                                "ready_check": "bin:demo",
+                                "version_lock": {
+                                    "type": "npm",
+                                    "package": "demo",
+                                    "fields": {"install": "npm install -g demo@{version}"},
+                                },
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (temp_root / "version-pins.local.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "version_locks": {"tools.json": {"tools.demo": "9.9.9"}},
+                        "skill_repositories": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state = {"ready": False}
+
+            def fake_run_cmd(cmd, cwd=None, timeout=300):
+                if cmd == "npm install -g demo@9.9.9":
+                    state["ready"] = True
+                    return True, "installed"
+                return False, f"unexpected command: {cmd}"
+
+            with mock.patch.object(sys, "argv", ["sync_tools.py", "--config", str(config_path), "--def-file", str(def_path), "--base-dir", str(base_dir)]):
+                with mock.patch.object(sync_tools, "run_cmd", side_effect=fake_run_cmd) as run_cmd:
+                    with mock.patch.object(sync_tools, "_check_ready", side_effect=lambda name, ready_check: state["ready"]):
+                        with mock.patch.object(sync_tools, "detect_tool_readiness", side_effect=lambda name, definition, repo_root: state["ready"]):
+                            sync_tools.main()
+
+            self.assertEqual(run_cmd.call_args_list, [mock.call("npm install -g demo@9.9.9")])
 
     def test_playwright_cli_readiness_globs_match_headless_shell_browser(self):
         # `playwright-cli install-browser` installs the chrome headless shell, whose cache dir is

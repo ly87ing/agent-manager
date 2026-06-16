@@ -25,6 +25,11 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn(".PHONY: all bootstrap sync update plan self-update smoke", makefile)
         self.assertIn("\nsmoke:\n\t@./scripts/ci-smoke.sh\n", makefile)
 
+    def test_makefile_exposes_install_alias(self):
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertIn(" install", makefile)
+        self.assertIn("\ninstall: bootstrap\n", makefile)
+
     def test_makefile_exposes_secrets_check_target(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
         self.assertIn("secrets-check", makefile)
@@ -129,6 +134,7 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("./manage.sh plan", content)
         self.assertIn("./manage.sh self-update --dry-run", content)
         self.assertIn("make -n sync update bootstrap all plan self-update offline dry-run", content)
+        self.assertIn("make -n install", content)
         self.assertNotIn("./manage.sh bootstrap", content)
 
     def test_ci_workflow_runs_full_unittest_suite(self):
@@ -265,9 +271,9 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("`Claude Code`、`Codex`、`Antigravity CLI`", readme)
         self.assertIn("仅用于识别并提示迁移", readme)
         self.assertIn("默认自动安装的 Agent 当前只包含 `Claude Code`、`Codex` 和 `Antigravity CLI`", readme)
-        self.assertIn("`Claude Code` 与 `Codex` 默认走官方 npm 包，并使用 `config/agents.json` 中的固定版本", readme)
+        self.assertIn("`Claude Code` 与 `Codex` 默认走官方 npm 包，并使用 `config/agents.json` 中的命令模板加本机版本锁", readme)
         self.assertIn("`Claude Code native` 仍作为兼容 provider 保留官方 install / update / uninstall 语义", readme)
-        self.assertIn("`Claude Code` 和 `Codex` 的 npm provider 使用 `config/agents.json` 中的固定版本", readme)
+        self.assertIn("`Claude Code` 和 `Codex` 的 npm provider 使用 `config/agents.json` 中的命令模板", readme)
         self.assertIn("`Antigravity CLI` 使用官方 `curl -fsSL https://antigravity.google/cli/install.sh | bash` 安装到 `agy`", readme)
         self.assertIn("`AGY_CLI_DISABLE_AUTO_UPDATE=true`", readme)
         self.assertIn("`agent-manager` 不改写用户 shell profile", readme)

@@ -77,13 +77,22 @@ class UpdateVersionPinsTests(unittest.TestCase):
             self.assertEqual(result, 0)
             agents = json.loads((config_dir / "agents.json").read_text(encoding="utf-8"))
             npm_provider = agents["codex"]["providers"]["npm"]
-            self.assertEqual(npm_provider["install"], "npm install -g @openai/codex@1.2.3")
-            self.assertEqual(npm_provider["upgrade"], "npm install -g @openai/codex@1.2.3")
+            self.assertEqual(npm_provider["install"], "npm install -g @openai/codex@0.1.0")
+            self.assertEqual(npm_provider["upgrade"], "npm install -g @openai/codex@0.1.0")
 
             mcp = json.loads((config_dir / "mcp.json").read_text(encoding="utf-8"))
             self.assertEqual(
                 mcp["servers"]["demo"]["args"][1],
-                "git+https://example.invalid/repo@0123456789abcdef0123456789abcdef01234567",
+                "git+https://example.invalid/repo@oldref",
+            )
+            pins = json.loads((config_dir / "version-pins.local.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                pins["version_locks"]["agents.json"]["codex.providers.npm"],
+                "1.2.3",
+            )
+            self.assertEqual(
+                pins["version_locks"]["mcp.json"]["servers.demo"],
+                "0123456789abcdef0123456789abcdef01234567",
             )
 
     def test_dry_run_does_not_resolve_or_write(self):
@@ -111,6 +120,7 @@ class UpdateVersionPinsTests(unittest.TestCase):
             self.assertEqual(result, 0)
             fetch_version.assert_not_called()
             self.assertEqual(json.loads((config_dir / "tools.json").read_text(encoding="utf-8")), original)
+            self.assertFalse((config_dir / "version-pins.local.json").exists())
 
 
 if __name__ == "__main__":

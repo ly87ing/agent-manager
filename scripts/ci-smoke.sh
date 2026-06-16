@@ -31,3 +31,4 @@ run ./manage.sh update --dry-run
 run ./manage.sh plan
 run ./manage.sh self-update --dry-run
 run make -n sync update bootstrap all plan self-update offline dry-run
+run make -n install

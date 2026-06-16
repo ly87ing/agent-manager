@@ -62,7 +62,7 @@ class UpgradeSkillsTests(unittest.TestCase):
             self.assertIn("未配置 upgrade_strategy", combined)
             self.assertIn("没有可升级 skill 仓库", combined)
 
-    def test_latest_tag_upgrade_writes_new_commit_and_removes_ref(self):
+    def test_latest_tag_upgrade_writes_local_pin_and_preserves_definition(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             source_repo = temp_root / "source-repo"
@@ -117,6 +117,7 @@ class UpgradeSkillsTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            before = json.loads(def_path.read_text(encoding="utf-8"))
 
             result = subprocess.run(
                 [
@@ -135,13 +136,11 @@ class UpgradeSkillsTests(unittest.TestCase):
 
             combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
-            updated = json.loads(def_path.read_text(encoding="utf-8"))
-            repo = updated["repositories"]["tracked-repo"]
-            self.assertEqual(repo["commit"], commit_v2)
-            self.assertEqual(repo["upgrade_strategy"], "latest-tag")
-            self.assertNotIn("ref", repo)
+            self.assertEqual(json.loads(def_path.read_text(encoding="utf-8")), before)
+            pins = json.loads((temp_root / "version-pins.local.json").read_text(encoding="utf-8"))
+            self.assertEqual(pins["skill_repositories"]["tracked-repo"], commit_v2)
 
-    def test_latest_branch_upgrade_writes_branch_head_commit(self):
+    def test_latest_branch_upgrade_writes_branch_head_to_local_pin(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             source_repo = temp_root / "source-repo"
@@ -195,6 +194,7 @@ class UpgradeSkillsTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            before = json.loads(def_path.read_text(encoding="utf-8"))
 
             result = subprocess.run(
                 [
@@ -213,11 +213,9 @@ class UpgradeSkillsTests(unittest.TestCase):
 
             combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
-            updated = json.loads(def_path.read_text(encoding="utf-8"))
-            repo = updated["repositories"]["tracked-repo"]
-            self.assertEqual(repo["commit"], commit_v2)
-            self.assertEqual(repo["upgrade_strategy"], "latest-branch")
-            self.assertEqual(repo["upgrade_ref"], "refs/heads/main")
+            self.assertEqual(json.loads(def_path.read_text(encoding="utf-8")), before)
+            pins = json.loads((temp_root / "version-pins.local.json").read_text(encoding="utf-8"))
+            self.assertEqual(pins["skill_repositories"]["tracked-repo"], commit_v2)
 
     def test_latest_tag_upgrade_fails_without_tags_and_preserves_config(self):
         with tempfile.TemporaryDirectory() as temp_dir:
