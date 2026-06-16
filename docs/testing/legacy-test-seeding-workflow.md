@@ -36,6 +36,27 @@ TARGET_MEANINGFUL_COVERAGE = 客户约定的覆盖率目标
 
 CI gate 分阶段启用。初期只生成 report，不直接因覆盖率阻断合并；等核心测试稳定后，再逐步启用 coverage 不下降、新增代码必须有测试、客户目标 gate。
 
+## 最佳实践依据
+
+这套 workflow 的约束来自几类成熟实践：
+
+- Microsoft 的单元测试最佳实践强调测试应快速、隔离、可重复、自验证；覆盖率数字不能证明代码质量，过高或机械的覆盖率目标会产生反效果。
+- Google 的测试实践强调测试应通过 public API 观察行为，优先验证状态和输出而不是实现细节；测试代码要清晰、少逻辑，适度重复优于把关键细节藏进 helper。
+- Google 的 coverage 实践强调覆盖率是有损的间接指标，不应作为唯一真相；客户或团队的覆盖率目标应该由业务风险决定，并结合未覆盖高风险代码审查。
+- pytest 的 flaky test 文档指出不稳定测试通常来自未隔离的系统状态、测试顺序依赖、过严断言、线程或并发问题；永久跳过、重跑、隔离失败测试不能替代修复不确定性。
+- Legacy code 社区实践强调先用 characterization / approval / golden master tests 锁定现有行为，再重构；snapshot 必须有稳定、可读、经过人工审核的输出，而不是机械更新。
+- Martin Fowler 关于 legacy seam 的说明强调 seam 可以帮助打断外部依赖，但引入 seam 本身会改变生产代码，因此必须作为单独审批动作处理。
+
+参考来源：
+
+- https://learn.microsoft.com/en-us/dotnet/core/testing/unit-testing-best-practices
+- https://abseil.io/resources/swe-book/html/ch12.html
+- https://testing.googleblog.com/2020/08/code-coverage-best-practices.html
+- https://docs.pytest.org/en/stable/explanation/flaky.html
+- https://understandlegacycode.com/blog/characterization-tests-or-approval-tests/
+- https://martinfowler.com/bliki/LegacySeam.html
+- https://tdd.mooc.fi/4-legacy-code/
+
 ## 不做什么
 
 - 不为了 coverage 测试 DTO、getter/setter、简单 mapper 或框架 glue code。
@@ -44,6 +65,22 @@ CI gate 分阶段启用。初期只生成 report，不直接因覆盖率阻断�
 - 不为了让测试通过而降低断言、删除测试、跳过测试或放宽失败条件。
 - 不在测试建设任务中顺手修 bug。
 - 不一次性铺开全仓测试，避免 AI 在低价值文件上消耗时间。
+- 不用真实网络、真实外部服务、真实数据库、未冻结时间、随机数据或测试顺序依赖来冒充 unit test。
+- 不批量更新 snapshot / golden master 输出，除非已经人工审查行为变化。
+- 不用永久 skip、xfail、quarantine、retry 掩盖 flaky test。
+
+## 常见坑和规避方式
+
+| 坑 | 风险 | 规避方式 |
+| --- | --- | --- |
+| 只追 coverage 百分比 | AI 会挑 DTO、getter、简单 CRUD 刷数字 | 目标写成客户约定值，并要求 `coverage-map` 说明核心逻辑覆盖 |
+| 测试实现细节 | 重构时测试大量失败，但业务没坏 | 优先通过 public entry point 测状态、输出、错误和状态变化 |
+| 过度 mock | 测试验证调用顺序而不是业务结果，容易脆弱 | 只 mock 外部依赖；只有交互本身是合同才验证 mock 调用 |
+| 测试里复刻生产逻辑 | 生产代码和测试会以同样方式错 | expected value 显式写出，避免用循环、条件、复杂计算生成期望 |
+| snapshot 过大 | 变更时没人真正看 diff，只会机械 approve | 先做 printer / normalizer，去掉时间、随机 ID、路径、排序噪声，保持可人工审查 |
+| flaky test | CI 信号失真，团队开始忽略失败 | 控制时间、随机、全局状态、并发、文件系统和测试顺序；不能控制就降级为 integration/smoke |
+| 为测试引入 seam | 可能改变 public API 或运行时行为 | 只记录需要的 seam，等待人工确认后作为单独任务处理 |
+| 顺手修 bug | characterization test 失去“锁当前行为”的作用 | 疑似 bug 写入 `suspicious-behavior.md`，不在同批修复 |
 
 ## Phase 0：冻结当前基线
 
@@ -420,12 +457,15 @@ Phase 3:
 - 为它们添加 characterization unit tests。
 - 覆盖正常路径、边界值、异常路径和关键分支。
 - 测试必须有真实断言。
+- 优先通过 public entry point 测业务状态、输出、错误和状态变化。
+- 避免测试里复刻生产逻辑、过度 mock 或添加不可审查的大 snapshot。
 
 Phase 4:
 - 运行最小相关测试命令。
 - 运行 coverage 命令。
 - 更新 docs/testing/coverage-map.md。
 - 如发现疑似错误行为，只记录到 docs/testing/suspicious-behavior.md，不修复。
+- 做坑位检查：无低价值覆盖、无未审批生产代码变更、无 flaky 依赖、无机械 snapshot 更新。
 
 限制：
 - 禁止修改 production code，除非提前说明并获得人工确认。
