@@ -278,6 +278,98 @@ class UpgradeSkillsTests(unittest.TestCase):
             self.assertIn("未发现可用 tag", combined)
             self.assertEqual(def_path.read_text(encoding="utf-8"), before)
 
+    def test_reuses_existing_skill_pin_when_remote_resolution_fails(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            pinned_commit = "0123456789abcdef0123456789abcdef01234567"
+            config_path.write_text(
+                json.dumps({"skills": {"tracked-repo": {"enabled": True}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "tracked-repo": {
+                                "url": "https://example.invalid/repo.git",
+                                "commit": "82d2c5b44ac234ec0f204f647562a4349d90ef43",
+                                "upgrade_strategy": "latest-branch",
+                                "upgrade_ref": "main",
+                                "agents": ["claude-code"],
+                            }
+                        },
+                        "agents": {"claude-code": str(temp_root / "targets" / "claude")},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (temp_root / "version-pins.local.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "version_locks": {},
+                        "skill_repositories": {
+                            "tracked-repo": pinned_commit,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(
+                upgrade_skills,
+                "resolve_latest_commit_for_repository",
+                side_effect=upgrade_skills.SkillUpgradeError("network timeout"),
+            ):
+                with self.assertLogs(level="WARNING") as logs:
+                    result = upgrade_skills.upgrade_repositories(config_path, def_path)
+
+            self.assertEqual(result, 0)
+            self.assertTrue(any("复用本地 commit" in line for line in logs.output), logs.output)
+            pins = json.loads((temp_root / "version-pins.local.json").read_text(encoding="utf-8"))
+            self.assertEqual(pins["skill_repositories"]["tracked-repo"], pinned_commit)
+
+    def test_remote_resolution_failure_without_existing_skill_pin_fails(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            config_path.write_text(
+                json.dumps({"skills": {"tracked-repo": {"enabled": True}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "tracked-repo": {
+                                "url": "https://example.invalid/repo.git",
+                                "commit": "82d2c5b44ac234ec0f204f647562a4349d90ef43",
+                                "upgrade_strategy": "latest-branch",
+                                "upgrade_ref": "main",
+                                "agents": ["claude-code"],
+                            }
+                        },
+                        "agents": {"claude-code": str(temp_root / "targets" / "claude")},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(
+                upgrade_skills,
+                "resolve_latest_commit_for_repository",
+                side_effect=upgrade_skills.SkillUpgradeError("network timeout"),
+            ):
+                with self.assertLogs(level="ERROR") as logs:
+                    result = upgrade_skills.upgrade_repositories(config_path, def_path)
+
+            self.assertEqual(result, 1)
+            self.assertTrue(any("network timeout" in line for line in logs.output), logs.output)
+            self.assertFalse((temp_root / "version-pins.local.json").exists())
+
     def test_latest_release_strategy_uses_github_release_tag(self):
         with (
             mock.patch.object(upgrade_skills, "fetch_latest_github_release_tag", return_value="v2.1.0") as fetch_tag,

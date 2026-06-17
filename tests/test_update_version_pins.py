@@ -122,6 +122,99 @@ class UpdateVersionPinsTests(unittest.TestCase):
             self.assertEqual(json.loads((config_dir / "tools.json").read_text(encoding="utf-8")), original)
             self.assertFalse((config_dir / "version-pins.local.json").exists())
 
+    def test_reuses_existing_pin_when_refresh_fails(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_dir = Path(temp_dir)
+            pinned_commit = "0123456789abcdef0123456789abcdef01234567"
+            (config_dir / "agents.json").write_text("{}\n", encoding="utf-8")
+            (config_dir / "tools.json").write_text('{"tools": {}}\n', encoding="utf-8")
+            (config_dir / "mcp.json").write_text(
+                json.dumps(
+                    {
+                        "servers": {
+                            "demo": {
+                                "args": [
+                                    "--from",
+                                    "git+https://example.invalid/repo@oldref",
+                                    "demo",
+                                ],
+                                "version_lock": {
+                                    "type": "git-ref",
+                                    "remote": "https://example.invalid/repo",
+                                    "ref": "main",
+                                    "fields": {
+                                        "args.1": "git+https://example.invalid/repo@{version}",
+                                    },
+                                },
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (config_dir / "version-pins.local.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "version_locks": {
+                            "mcp.json": {
+                                "servers.demo": pinned_commit,
+                            }
+                        },
+                        "skill_repositories": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(
+                update_version_pins,
+                "fetch_git_ref_commit",
+                side_effect=update_version_pins.VersionPinError("network timeout"),
+            ):
+                with self.assertLogs(level="WARNING") as logs:
+                    result = update_version_pins.main_with_args_for_test(config_dir)
+
+            self.assertEqual(result, 0)
+            self.assertTrue(any("复用本地版本 servers.demo" in line for line in logs.output), logs.output)
+            pins = json.loads((config_dir / "version-pins.local.json").read_text(encoding="utf-8"))
+            self.assertEqual(pins["version_locks"]["mcp.json"]["servers.demo"], pinned_commit)
+
+    def test_refresh_failure_without_existing_pin_fails(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_dir = Path(temp_dir)
+            (config_dir / "agents.json").write_text("{}\n", encoding="utf-8")
+            (config_dir / "tools.json").write_text(
+                json.dumps(
+                    {
+                        "tools": {
+                            "demo": {
+                                "install": "npm install -g demo@0.1.0",
+                                "version_lock": {
+                                    "type": "npm",
+                                    "package": "demo",
+                                    "fields": {"install": "npm install -g demo@{version}"},
+                                },
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (config_dir / "mcp.json").write_text('{"servers": {}}\n', encoding="utf-8")
+
+            with mock.patch.object(
+                update_version_pins,
+                "fetch_npm_latest_version",
+                side_effect=update_version_pins.VersionPinError("registry timeout"),
+            ):
+                with self.assertLogs(level="ERROR") as logs:
+                    result = update_version_pins.main_with_args_for_test(config_dir)
+
+            self.assertEqual(result, 1)
+            self.assertTrue(any("registry timeout" in line for line in logs.output), logs.output)
+            self.assertFalse((config_dir / "version-pins.local.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -26,6 +26,8 @@ from src.version_pins import (
 
 configure_logging()
 
+REMOTE_GIT_QUERY_TIMEOUT = 60
+
 GITHUB_REPO_PATTERNS = (
     re.compile(r"^https://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?/?$"),
     re.compile(r"^git@github\.com:(?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?$"),
@@ -86,7 +88,7 @@ def resolve_remote_revision_to_commit(url, revision, offline=False):
         raise SkillUpgradeError("离线模式下无法解析远程 revision。")
 
     refs_to_query = [f"{revision}^{{}}", revision]
-    ok, out = run_cmd(["git", "ls-remote", url, *refs_to_query])
+    ok, out = run_cmd(["git", "ls-remote", url, *refs_to_query], timeout=REMOTE_GIT_QUERY_TIMEOUT)
     if not ok:
         raise SkillUpgradeError(f"解析远程 revision {revision} 失败: {out}")
 
@@ -112,7 +114,10 @@ def list_remote_tags(url, offline=False):
     if offline and not is_local_repository_url(url):
         raise SkillUpgradeError("离线模式下无法查询远程 tag。")
 
-    ok, out = run_cmd(["git", "ls-remote", "--tags", "--refs", "--sort=-version:refname", url])
+    ok, out = run_cmd(
+        ["git", "ls-remote", "--tags", "--refs", "--sort=-version:refname", url],
+        timeout=REMOTE_GIT_QUERY_TIMEOUT,
+    )
     if not ok:
         raise SkillUpgradeError(f"查询远程 tag 失败: {out}")
 
@@ -237,17 +242,22 @@ def upgrade_repositories(config_path, def_path, requested_repos=None, dry_run=Fa
         if not repo_config.get("upgrade_strategy"):
             errors.append(f"[{repo_name}] 缺少 upgrade_strategy。")
             continue
-        try:
-            latest_commit = resolve_latest_commit_for_repository(repo_config, offline=offline)
-        except SkillUpgradeError as exc:
-            errors.append(f"[{repo_name}] {exc}")
-            continue
 
         try:
             pinned_commit = get_skill_repository_pin(pins, repo_name)
         except VersionPinsError as exc:
             errors.append(f"[{repo_name}] {exc}")
             continue
+
+        try:
+            latest_commit = resolve_latest_commit_for_repository(repo_config, offline=offline)
+        except SkillUpgradeError as exc:
+            if pinned_commit is not None:
+                logging.warning(f"[{repo_name}] Skill 版本刷新失败，复用本地 commit -> {pinned_commit}: {exc}")
+                continue
+            errors.append(f"[{repo_name}] {exc}")
+            continue
+
         current_commit = pinned_commit or str(repo_config.get("commit", "")).strip()
         if current_commit == latest_commit and pinned_commit is not None:
             logging.info(f"[{repo_name}] 已是最新固定版本，无需更新。")

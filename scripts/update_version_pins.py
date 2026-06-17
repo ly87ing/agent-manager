@@ -98,15 +98,23 @@ def update_document_versions(document, file_label: str, pins: dict, dry_run: boo
     changes = []
     for object_path, target, lock in iter_version_lock_targets(document):
         if dry_run:
-            changes.append((object_path, "<dry-run>", False))
+            changes.append((object_path, "<dry-run>", False, None))
             continue
 
-        version = resolve_version(lock)
         current_version = get_version_pin(pins, file_label, object_path)
+        try:
+            version = resolve_version(lock)
+        except VersionPinError as exc:
+            if current_version is None:
+                raise
+            apply_version_lock_fields(target, lock, current_version, f"{file_label}:{version_pin_key(object_path)}")
+            changes.append((object_path, current_version, False, str(exc)))
+            continue
+
         changed = current_version != version
         apply_version_lock_fields(target, lock, version, f"{file_label}:{version_pin_key(object_path)}")
         set_version_pin(pins, file_label, object_path, version)
-        changes.append((object_path, version, changed))
+        changes.append((object_path, version, changed, None))
     return changes
 
 
@@ -122,8 +130,11 @@ def update_config_dir(config_dir: Path, pins_path: Path | None = None, dry_run: 
     for filename in MANAGED_CONFIG_FILES:
         path = config_dir / filename
         changes = update_config_file(path, pins, dry_run)
-        all_changes.extend((filename, object_path, version, changed) for object_path, version, changed in changes)
-    if not dry_run and any(changed for _, _, _, changed in all_changes):
+        all_changes.extend(
+            (filename, object_path, version, changed, error_message)
+            for object_path, version, changed, error_message in changes
+        )
+    if not dry_run and any(changed for _, _, _, changed, _ in all_changes):
         write_version_pins(pins_path, pins)
     return all_changes
 
@@ -142,10 +153,12 @@ def main_with_args_for_test(config_dir: Path, dry_run: bool = False, offline: bo
         logging.info("没有发现 version_lock 配置。")
         return 0
 
-    for filename, object_path, version, changed in all_changes:
+    for filename, object_path, version, changed, error_message in all_changes:
         label = ".".join(object_path)
         if dry_run:
             logging.info(f"[{filename}] 预览：计划刷新版本锁 {label}")
+        elif error_message:
+            logging.warning(f"[{filename}] 版本锁刷新失败，复用本地版本 {label} -> {version}: {error_message}")
         elif changed:
             logging.info(f"[{filename}] 已刷新版本锁 {label} -> {version}")
         else:
