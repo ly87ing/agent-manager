@@ -56,6 +56,7 @@ class SyncMcpTests(unittest.TestCase):
         self.assertEqual(chrome_devtools["command"], "npx")
         self.assertRegex(chrome_devtools["args"][1], r"^chrome-devtools-mcp@\d")
         self.assertNotIn("@latest", chrome_devtools["args"][1])
+        self.assertEqual(chrome_devtools["startup_timeout_sec"], 120)
         self.assertEqual(
             chrome_devtools["version_lock"],
             {
@@ -224,6 +225,10 @@ class SyncMcpTests(unittest.TestCase):
             self.assertEqual(
                 toml_updated["mcp_servers"]["chrome-devtools"]["args"],
                 chrome_devtools["args"],
+            )
+            self.assertEqual(
+                toml_updated["mcp_servers"]["chrome-devtools"]["startup_timeout_sec"],
+                120,
             )
             self.assertEqual(
                 toml_updated["mcp_servers"]["chrome-devtools"]["env"]["_MANAGED_BY"],
