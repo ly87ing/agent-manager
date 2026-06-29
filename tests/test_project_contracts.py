@@ -301,7 +301,13 @@ class ProjectContractTests(unittest.TestCase):
 
     def test_readme_documents_agent_skills_scope_matches_config(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
+        agent_skills = skills_config["repositories"]["agent-skills"]
+
         self.assertIn("`agent-skills` 面向 `Claude Code`、`Antigravity CLI` 与 `Codex` 暴露", readme)
+        for skill_path in agent_skills["skill_paths"]:
+            self.assertIn(f"`{skill_path}`", readme)
+        self.assertIn(f"这 {agent_skills['skill_count']} 个 skill 包", readme)
 
     def test_readme_documents_isolated_chrome_devtools_mcp(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")

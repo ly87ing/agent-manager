@@ -13,6 +13,12 @@ class SkillExposureContractTests(unittest.TestCase):
         for repo_name, repo in skills_config["repositories"].items():
             self.assertIsInstance(repo.get("skill_count"), int, f"{repo_name} must declare skill_count")
             self.assertGreater(repo["skill_count"], 0, f"{repo_name} skill_count must be positive")
+            if "skill_paths" in repo:
+                self.assertEqual(
+                    repo["skill_count"],
+                    len(repo["skill_paths"]),
+                    f"{repo_name} skill_count must match skill_paths",
+                )
 
     def test_multi_skill_repositories_require_explicit_agents(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
