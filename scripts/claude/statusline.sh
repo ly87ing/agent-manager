@@ -2,7 +2,7 @@
 # Claude Code status line: model · effort · directory · git branch · context · line diff · cost · 5h/7d usage + reset countdown · output style.
 # The body is pure bash builtins (read / [[ =~ ]] / printf / parameter expansion), no jq/git, no network; only when 5h/7d resets_at is present does it
 # fork `date +%s` once to get the current time (shared by both windows, countdown computed in pure bash); zero forks otherwise, about 6-9ms.
-# All data comes from the JSON Claude Code injects on stdin + local .git/HEAD; any missing field causes its segment to be omitted automatically.
+# All data comes from the JSON Claude Code injects on stdin + local git HEAD; any missing field causes its segment to be omitted automatically.
 # Compatible with macOS /bin/bash 3.2 (avoids 4.x syntax). Deployed to ~/.claude/ by scripts/claude/install_statusline.py.
 
 IFS= read -rd '' I   # Read all of stdin (bash builtin)
@@ -46,13 +46,23 @@ model=${model/ (1M context)/ (1M)}
 # Last path segment of the directory
 dir=${cwd##*/}
 
-# git branch: walk up from cwd to find .git/HEAD, reading the file directly (no git fork). Skip when .git is a file (worktree).
+# git branch: walk up from cwd to find HEAD, reading the file directly (no git fork).
+# Normal checkouts keep HEAD at .git/HEAD; worktrees keep .git as a "gitdir: <path>" file.
 branch=""
 d=$cwd
 while [[ -n $d ]]; do
   if [[ -r $d/.git/HEAD ]]; then
     read -r head < "$d/.git/HEAD"
     if [[ $head == ref:* ]]; then branch=${head#ref: refs/heads/}; else branch=${head:0:7}; fi
+    break
+  elif [[ -f $d/.git ]]; then
+    read -r gitdir < "$d/.git"
+    gitdir=${gitdir#gitdir: }
+    [[ $gitdir != /* ]] && gitdir=$d/$gitdir
+    if [[ -r $gitdir/HEAD ]]; then
+      read -r head < "$gitdir/HEAD"
+      if [[ $head == ref:* ]]; then branch=${head#ref: refs/heads/}; else branch=${head:0:7}; fi
+    fi
     break
   fi
   d=${d%/*}

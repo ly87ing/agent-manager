@@ -24,7 +24,7 @@ def _strip(text: str) -> str:
 
 class ClaudeStatuslineScriptTests(unittest.TestCase):
     """Contract of the lean pure-bash statusline. It derives everything from
-    stdin JSON (+ local .git/HEAD): no jq, no git fork, no network, no
+    stdin JSON (+ local git HEAD): no jq, no git fork, no network, no
     transcript IO. Segments are ` · `-joined; missing fields drop their
     segment; it always exits 0."""
 
@@ -67,6 +67,30 @@ class ClaudeStatuslineScriptTests(unittest.TestCase):
             self.assertIn("Opus 4.7", out)
             # 分支从 .git/HEAD 读出（不 fork git），目录后括号内
             self.assertIn("demo-repo (feature/x)", out)
+
+    def test_statusline_renders_branch_inside_git_worktree(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir) / "demo-repo"
+            repo.mkdir()
+            worktree = Path(temp_dir) / "linked-worktree"
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.email", "t@e.x"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
+            (repo / "README.md").write_text("seed\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "seed"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "worktree", "add", "-q", "-b", "feature/worktree", str(worktree)],
+                cwd=repo,
+                check=True,
+            )
+
+            result = self._run_statusline(
+                {"model": {"display_name": "Opus 4.7"}, "cwd": str(worktree)}
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("linked-worktree (feature/worktree)", _strip(result.stdout))
 
     def test_statusline_omits_branch_outside_git(self):
         with tempfile.TemporaryDirectory() as temp_dir:
