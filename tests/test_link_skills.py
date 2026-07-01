@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,16 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(link_skills)
 
 
+# Python 3.14's argparse colorizes --help output (respecting NO_COLOR/FORCE_COLOR),
+# which inserts SGR escapes between flag tokens. Strip them so text assertions test
+# the documented content, not the coloring.
+_ANSI_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text):
+    return _ANSI_SGR_RE.sub("", text)
+
+
 class LinkSkillsTests(unittest.TestCase):
     def test_help_lists_force_refresh_short_flag(self):
         result = subprocess.run(
@@ -29,7 +40,7 @@ class LinkSkillsTests(unittest.TestCase):
 
         combined = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, combined)
-        self.assertIn("-f, --force-refresh", combined)
+        self.assertIn("-f, --force-refresh", _strip_ansi(combined))
 
     def test_codex_is_globally_active_without_lifecycle_definition(self):
         self.assertTrue(link_skills.is_active_skill_target("codex", "/tmp/.codex/skills", {}))
