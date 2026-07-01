@@ -1,6 +1,7 @@
 import fnmatch
 import json
 import os
+import re
 import sys
 import subprocess
 import shutil
@@ -15,6 +16,16 @@ ROOT = Path(__file__).resolve().parent.parent
 MODULE_PATH = ROOT / "agent-tool" / "sync_tools.py"
 
 
+# Python 3.14's argparse colorizes --help output (respecting NO_COLOR/FORCE_COLOR),
+# which inserts SGR escapes between flag tokens. Strip them so text assertions test
+# the documented content, not the coloring.
+_ANSI_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text):
+    return _ANSI_SGR_RE.sub("", text)
+
+
 class SyncToolsTests(unittest.TestCase):
     def test_help_lists_force_refresh_short_flag(self):
         result = subprocess.run(
@@ -27,7 +38,7 @@ class SyncToolsTests(unittest.TestCase):
 
         combined = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, combined)
-        self.assertIn("-f, --force-refresh", combined)
+        self.assertIn("-f, --force-refresh", _strip_ansi(combined))
 
     def test_committed_auggie_policy_uses_fixed_version_lock(self):
         manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
