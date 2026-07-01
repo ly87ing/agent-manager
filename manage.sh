@@ -902,6 +902,12 @@ function run_agent_lifecycle_status_task() {
     run_supervised_command_in_dir 60 "$ROOT_DIR/agent-lifecycle" "$PYTHON_CMD" sync_agents.py --show-async-status
 }
 
+function run_shell_aliases_sync_task() {
+    local args=("$ROOT_DIR/scripts/claude/sync_shell_aliases.sh")
+    if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
+    run_task_in_dir "同步 Shell Alias" "Shell alias 同步完成" "Shell alias 同步失败" 60 "$ROOT_DIR" bash "${args[@]}"
+}
+
 function run_tools_sync_task() {
     local args=(sync_tools.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/tools.json" --yes)
     if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
@@ -1126,6 +1132,7 @@ function run_update_pipeline() {
     run_pipeline_step run_version_pins_update_task
     run_pipeline_step run_skills_upgrade_task
     run_pipeline_step run_agent_lifecycle_task "$agent_extra_flags"
+    run_pipeline_step run_shell_aliases_sync_task
     run_pipeline_step run_tools_sync_task
     run_pipeline_step run_browser_us_sync_task
     run_pipeline_step run_rules_sync_task
@@ -1487,6 +1494,8 @@ case "$cmd" in
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" ./scripts/sync-agent-rules.sh "${rule_args[@]}" $DRY_RUN_FLAG ;;
     claude:hooks:sync)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" "$PYTHON_CMD" ./scripts/sync-claude-hooks.py $DRY_RUN_FLAG ;;
+    claude:shell-aliases:sync)
+        run_supervised_command_in_dir 60 "$ROOT_DIR" bash "$ROOT_DIR/scripts/claude/sync_shell_aliases.sh" $DRY_RUN_FLAG ;;
     claude:statusline:install)
         run_supervised_command_in_dir 600 "$ROOT_DIR" "$PYTHON_CMD" ./scripts/claude/install_statusline.py $DRY_RUN_FLAG ;;
     claude:statusline:wire)

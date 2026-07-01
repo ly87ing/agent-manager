@@ -1,4 +1,4 @@
-.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\:list backups-gc backups\:gc restore backups\:restore logs rules-build rules\:build rules-sync rules\:sync skills-link skills\:link skills\:upgrade mcp-sync mcp\:sync mcp-prepare mcp\:prepare tools-sync tools\:sync browser-us-sync browser\:sync claude-hooks-sync claude\:hooks\:sync claude-statusline-install claude\:statusline\:install claude-statusline-wire claude\:statusline\:wire codex-hooks-sync codex\:hooks\:sync dry-run clean-logs offline eval-rules secrets-check secrets\:check instructions-check instructions\:check install
+.PHONY: all bootstrap sync update plan self-update smoke ui help doctor detect fetch-models status cleanup unlock backups-list backups\:list backups-gc backups\:gc restore backups\:restore logs rules-build rules\:build rules-sync rules\:sync skills-link skills\:link skills\:upgrade mcp-sync mcp\:sync mcp-prepare mcp\:prepare tools-sync tools\:sync browser-us-sync browser\:sync claude-hooks-sync claude\:hooks\:sync claude-shell-aliases-sync claude\:shell-aliases\:sync claude-statusline-install claude\:statusline\:install claude-statusline-wire claude\:statusline\:wire codex-hooks-sync codex\:hooks\:sync dry-run clean-logs offline eval-rules secrets-check secrets\:check instructions-check instructions\:check install
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -165,6 +165,12 @@ claude-statusline-wire:
 
 claude\:statusline\:wire:
 	@./manage.sh claude:statusline:wire
+
+claude-shell-aliases-sync:
+	@./manage.sh claude:shell-aliases:sync
+
+claude\:shell-aliases\:sync:
+	@./manage.sh claude:shell-aliases:sync
 
 codex-hooks-sync:
 	@./manage.sh codex:hooks:sync

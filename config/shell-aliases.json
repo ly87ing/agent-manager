@@ -1,0 +1,6 @@
+{
+  "_comment": "agent-manager 托管的 shell alias 定义。sync_shell_aliases.sh 会幂等地将这些 alias 写入 ~/.zshrc 的受管区块中。",
+  "aliases": {
+    "claude": "TZ=\"America/Los_Angeles\" claude"
+  }
+}
