@@ -11,5 +11,5 @@
 - Architecture/interfaces/dependency boundaries: use the `architecture-change-review` skill.
 - Code style/config/data contracts/comments: use the `code-style-contracts` skill.
 - UI/flows/frontend/browser automation/HTML: use the `frontend-verification` skill.
-- Playwright/generators/artifacts/debug output/traces/screenshots/downloads: use the `artifact-hygiene` skill.
+- Generated scripts/notes/reports/artifacts/debug output/downloads: use the `artifact-hygiene` skill.
 - Reader-facing plans/reports/proposals/specs/checklists/Markdown/HTML: use the `reader-facing-writing` skill.
