@@ -113,6 +113,32 @@ class SyncMcpTests(unittest.TestCase):
         self.assertEqual(grok_search["version_lock"]["type"], "git-ref")
         self.assertEqual(grok_search["version_lock"]["ref"], "grok-with-tavily")
 
+    def test_committed_serena_definition_uses_fixed_git_commit(self):
+        definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
+        serena = definitions["servers"]["serena"]
+
+        self.assertEqual(serena["command"], "uvx")
+        self.assertRegex(
+            serena["args"][1],
+            r"^git\+https://github\.com/oraios/serena@[0-9a-f]{40}$",
+        )
+        self.assertIn("start-mcp-server", serena["args"])
+        self.assertIn("ide-assistant", serena["args"])
+        self.assertEqual(serena.get("env", {}), {})
+        self.assertIsNone(serena["agents"])
+        self.assertEqual(serena["startup_timeout_sec"], 120)
+        self.assertEqual(serena["version_lock"]["type"], "git-ref")
+        self.assertEqual(serena["version_lock"]["ref"], "main")
+        self.assertEqual(
+            serena["version_lock"]["fields"],
+            {"args.1": "git+https://github.com/oraios/serena@{version}"},
+        )
+
+    def test_committed_mcp_policy_enables_serena(self):
+        policy = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
+
+        self.assertTrue(policy["mcp"]["serena"]["enabled"])
+
     def test_main_applies_local_version_pins_to_server_args(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

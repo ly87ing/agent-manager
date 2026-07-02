@@ -18,6 +18,7 @@
   "mcp": {
     "augment-context-engine": { "enabled": false },
     "chrome-devtools": { "enabled": true },
-    "grok-search": { "enabled": true }
+    "grok-search": { "enabled": true },
+    "serena": { "enabled": true }
   }
 }

@@ -46,6 +46,7 @@ make sync
 | `augment-context-engine` | 代码库检索、语义搜索、codebase-retrieval | `auggie --mcp --mcp-auto-workspace` | `AUGMENT_SESSION_AUTH` | 默认禁用 |
 | `chrome-devtools` | Chrome DevTools 浏览器调试、性能分析、network / console / screenshot | `npx -y chrome-devtools-mcp@<固定版本>` | 无 | 启用 |
 | `grok-search` | web_search / web_fetch 联网搜索与网页抓取 | `uvx --from git+https://github.com/GuDaStudio/GrokSearch@<固定commit> grok-search` | `GROK_API_URL`, `GROK_API_KEY`, `GROK_MODEL`, `TAVILY_ENABLED`, `TAVILY_API_KEY`, `TAVILY_API_URL`, `FIRECRAWL_API_KEY`, `FIRECRAWL_API_URL` | 启用 |
+| `serena` | JS/TS 语义级代码导航（LSP：find_symbol / 引用 / 符号概览） | `uvx --from git+https://github.com/oraios/serena@<固定commit> serena start-mcp-server --context ide-assistant` | 无 | 启用 |
 
 **维护约定**:
 - 受管 MCP 的实际命令必须固定版本或固定 commit；`@latest`、分支名只允许出现在 `version_lock` 的查询元数据里。
@@ -319,6 +320,33 @@ npx -y chrome-devtools-mcp@<固定版本>
 
 - Chrome 官方博客：<https://developer.chrome.com/blog/chrome-devtools-mcp>
 - 官方仓库：<https://github.com/mcp/chromedevtools/chrome-devtools-mcp>
+
+---
+
+## serena 专项说明
+
+### 什么是 serena
+
+`serena`（<https://github.com/oraios/serena>）是一个基于 LSP 的 MCP server，为 Agent 提供符号级代码理解与操作（`find_symbol`、`find_referencing_symbols`、`get_symbols_overview` 等），比 grep/read 更精确。stdio 按需拉起，不调用 Agent 工具时不启动，因此不引入常驻开销（这也是当年 graphify 常驻 hook 被移除的教训）。
+
+### 当前维护策略：仅用于 JS/TS
+
+本项目**仅把 serena 定位为 JS/TS 的语义导航工具**：
+
+- JS/TS 走 `typescript-language-server`（serena 按需自动管理），无版本坑，只需本机有 **Node.js 18+**。
+- serena 默认自带跑 server 的 JRE，首次用到某语言时自动下载对应语言服务器，需要一次联网。
+
+### 为什么 Java 不依赖 serena
+
+serena 的 Java 后端（solidlsp `eclipse_jdtls.py`）把 jdtls 的 `java.configuration.runtimes` **写死成单个 `JavaSE-21`（捆绑 JRE），不与用户配置合并、也没有暴露注册其它 JDK 的配置项**（上游 issue oraios/serena#1478，截至 2026 年中仍 open、未合并）。
+
+后果：Java 8 项目会被用 JDK 21 runtime 分析——导航/改代码可用，但**不会报"Java 8 里误用高版本 API"**。因此本仓不把 Java 语义分析托管给 serena，Java 仍走 grep/read + 本地 IDE；等上游 #1478 合并支持多 runtime 后再评估接入。
+
+### 使用约束
+
+- `serena` 不依赖额外 secrets，`env` 为空。
+- 命令固定 commit，版本波动通过 `version_lock`（`ref: main`）在 `make update` 时集中解析写入 `config/version-pins.local.json`。
+- 需要本机有可用的 `uvx`（uv）运行时；JS/TS 语义能力额外需要 Node.js。
 
 ---
 

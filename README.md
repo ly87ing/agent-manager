@@ -26,6 +26,9 @@
 - `grok-search`
   - 用途：联网搜索与网页抓取。
   - 注意：真实 provider key 仅从 `secrets/` 注入。
+- `serena`
+  - 用途：**仅用于 JS/TS** 的 LSP 语义导航（`find_symbol` / 引用 / 符号概览）；需本机有 `uvx` 与 Node.js。
+  - 注意：Java 不托管给它（上游 `oraios/serena#1478` 未支持按项目注册 JDK runtime，Java 8 会被 JDK21 runtime 分析）。详见 `docs/MCP-CONFIG-GUIDE.md`。
 - `augment-context-engine`
   - 定义仍保留；缺少 `AUGMENT_SESSION_AUTH` 时默认不启用。
 

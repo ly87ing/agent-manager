@@ -49,6 +49,28 @@
         }
       },
       "agents": null
+    },
+    "serena": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/oraios/serena@dcbd8ce064fd057858ba49c9f74b433b95d9f17a",
+        "serena",
+        "start-mcp-server",
+        "--context",
+        "ide-assistant"
+      ],
+      "startup_timeout_sec": 120,
+      "env": {},
+      "version_lock": {
+        "type": "git-ref",
+        "remote": "https://github.com/oraios/serena",
+        "ref": "main",
+        "fields": {
+          "args.1": "git+https://github.com/oraios/serena@{version}"
+        }
+      },
+      "agents": null
     }
   },
   "agent_paths": {
