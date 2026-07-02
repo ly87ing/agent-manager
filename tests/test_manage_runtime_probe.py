@@ -328,6 +328,49 @@ class ManageRuntimeProbeTests(unittest.TestCase):
         self.assertNotIn(("brew", "list", "--versions", "ripgrep"), calls)
         self.assertNotIn(("brew", "list", "--versions", "fd"), calls)
 
+    def _serena_inventory(self, *, uvx, node, node_version_out):
+        def which(binary):
+            if binary == "uvx":
+                return "/home/user/.local/bin/uvx" if uvx else None
+            if binary == "node":
+                return "/usr/local/bin/node" if node else None
+            return None
+
+        def run_cmd(cmd, timeout=10):
+            if tuple(cmd) == ("node", "--version"):
+                return (node_version_out is not None), (node_version_out or "")
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        return manage_runtime_probe.ProviderInventory(run_cmd=run_cmd, which=which)
+
+    def test_detect_serena_readiness_reports_uvx_present_and_node_major(self):
+        inventory = self._serena_inventory(uvx=True, node=True, node_version_out="v20.11.0\n")
+        self.assertEqual(
+            manage_runtime_probe.detect_serena_readiness(inventory=inventory),
+            (True, 20),
+        )
+
+    def test_detect_serena_readiness_flags_missing_uvx(self):
+        inventory = self._serena_inventory(uvx=False, node=True, node_version_out="v18.0.0\n")
+        self.assertEqual(
+            manage_runtime_probe.detect_serena_readiness(inventory=inventory),
+            (False, 18),
+        )
+
+    def test_detect_serena_readiness_returns_none_node_major_when_node_absent(self):
+        inventory = self._serena_inventory(uvx=True, node=False, node_version_out=None)
+        self.assertEqual(
+            manage_runtime_probe.detect_serena_readiness(inventory=inventory),
+            (True, None),
+        )
+
+    def test_detect_serena_readiness_returns_none_node_major_when_version_unparsable(self):
+        inventory = self._serena_inventory(uvx=True, node=True, node_version_out="not-a-version\n")
+        self.assertEqual(
+            manage_runtime_probe.detect_serena_readiness(inventory=inventory),
+            (True, None),
+        )
+
     def test_collect_required_runtime_commands_skips_node_for_empty_policy(self):
         required = manage_runtime_probe.collect_required_runtime_commands(
             {"agents": {}, "tools": {}, "skills": {}, "mcp": {}},

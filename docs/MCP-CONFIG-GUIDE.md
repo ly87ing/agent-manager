@@ -347,6 +347,7 @@ serena 的 Java 后端（solidlsp `eclipse_jdtls.py`）把 jdtls 的 `java.confi
 - `serena` 不依赖额外 secrets，`env` 为空。
 - 命令固定 commit，版本波动通过 `version_lock`（`ref: main`）在 `make update` 时集中解析写入 `config/version-pins.local.json`。
 - 需要本机有可用的 `uvx`（uv）运行时；JS/TS 语义能力额外需要 Node.js。
+- 各工作流启动前的「环境探测与健康自检」会打印一行 `serena (uvx:… / Node≥18:…)`，直接反映上述两个前置是否就绪（serena 是按需拉起的 MCP，不会在探测阶段真正启动 server）。
 
 ---
 

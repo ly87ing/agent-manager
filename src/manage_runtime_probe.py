@@ -187,6 +187,8 @@ def is_windows_platform(platform_name=None):
 
 TOOL_READY_MARKER = ".agent-manager-ready"
 TOOL_BROKEN_MARKER = ".agent-manager-broken"
+# serena 走 typescript-language-server 做 JS/TS 语义导航，需要本机 Node.js 主版本不低于此值。
+SERENA_MIN_NODE_MAJOR = 18
 RULE_TARGET_PREFIX_TO_ID = {
     "claude": "claude-code",
     "antigravity": "antigravity-cli",
@@ -680,6 +682,22 @@ class ProviderInventory:
         logging.warning(f"[TOOL: {name}] 未知 ready_check 格式: {ready_check}，视为未就绪")
         return False
 
+    def probe_serena_readiness(self):
+        """serena（JS/TS 语义导航 MCP）运行前置探测。
+
+        两个前置：uvx 可用（按需拉起 serena），Node.js 主版本（typescript-language-server 依赖）。
+        返回 (uvx_ok, node_major)；node_major 为 None 表示 node 缺失或版本号无法解析。
+        """
+        uvx_ok = self._which("uvx") is not None
+        node_major = None
+        if self._which("node"):
+            success, out = self._run_cmd(["node", "--version"], timeout=10)
+            if success:
+                match = re.match(r"\s*v?(\d+)", out or "")
+                if match:
+                    node_major = int(match.group(1))
+        return uvx_ok, node_major
+
 
 def detect_all_providers(bin_name, config=None, inventory=None):
     active_inventory = inventory or ProviderInventory()
@@ -698,6 +716,12 @@ def check_tool_ready(name: str, ready_check: str | None, inventory=None) -> bool
     """
     active_inventory = inventory or ProviderInventory()
     return active_inventory.check_tool_ready(name, ready_check)
+
+
+def detect_serena_readiness(inventory=None):
+    """探测 serena 运行前置，返回 (uvx_ok, node_major)。详见 ProviderInventory.probe_serena_readiness。"""
+    active_inventory = inventory or ProviderInventory()
+    return active_inventory.probe_serena_readiness()
 
 
 def is_agent_installed(agent_name: str, agent_def: dict) -> bool:

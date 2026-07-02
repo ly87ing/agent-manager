@@ -529,11 +529,13 @@ sys.path.insert(0, '$ROOT_DIR')
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
 from src.json_config import ensure_mapping_value_types, get_typed_mapping_section
 from src.manage_runtime_probe import (
+    SERENA_MIN_NODE_MAJOR,
     ProviderInventory,
     collect_active_mcp_target_agents,
     collect_active_rule_agents,
     collect_active_skill_target_agents,
     detect_all_providers,
+    detect_serena_readiness,
     detect_tool_readiness,
     is_agent_installed,
     load_json,
@@ -578,6 +580,13 @@ try:
             act = detect_tool_readiness(k, tool_defs.get(k, {}), '$ROOT_DIR', inventory=inventory)
             stat = '${SUCCESS_GREEN}⚒${NC}' if act else '${PENDING_GOLD}⚠${NC}'
             print(f'   {stat} {k:20} (工具就绪:{\"是\" if act else \"否\"})')
+    serena_policy = cfg.get('mcp', {}).get('serena')
+    if serena_policy and serena_policy.get('enabled', True):
+        uvx_ok, node_major = detect_serena_readiness(inventory=inventory)
+        node_ok = node_major is not None and node_major >= SERENA_MIN_NODE_MAJOR
+        stat = '${SUCCESS_GREEN}⚒${NC}' if (uvx_ok and node_ok) else '${PENDING_GOLD}⚠${NC}'
+        node_txt = f'是(v{node_major})' if node_ok else (f'否(v{node_major})' if node_major is not None else '否(未发现)')
+        print(f'   {stat} {\"serena\":20} (uvx:{\"是\" if uvx_ok else \"否\"} / Node≥{SERENA_MIN_NODE_MAJOR}:{node_txt})')
 except ValueError as exc:
     print(str(exc), file=sys.stderr)
     sys.exit(1)
