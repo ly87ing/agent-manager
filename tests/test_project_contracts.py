@@ -39,6 +39,8 @@ class ProjectContractTests(unittest.TestCase):
     def test_pull_pipeline_refreshes_resources_without_agent_or_tool_lifecycle(self):
         manage = (ROOT / "manage.sh").read_text(encoding="utf-8")
         body = self._extract_shell_function(manage, "run_pull_pipeline")
+        # pull 联网拉最新，需先刷新 secrets 仓库，否则新 MCP 配置会配不上新 key
+        self.assertIn("maybe_init_secrets", body, "pull 应在拉取前刷新 secrets 凭证")
         # pull 拉取远端最新资源并下发：版本锁 / skill 版本 / rules / skills-link / mcp
         for step in (
             "run_pipeline_step run_version_pins_update_task",

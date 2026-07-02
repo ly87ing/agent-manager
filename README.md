@@ -109,7 +109,7 @@
 
 - `./manage.sh`: 显示帮助；这是脚本的安全默认入口。
 - `make sync`: 同步当前配置到 rules，并按已锁定版本对齐 skills / MCP；不处理 Agent / Tool 生命周期，也不刷新版本锁。
-- `make pull`: 拉取远端最新版本锁 / skill / MCP 资源并下发到各 Agent；介于 `sync` 与 `update` 之间，不处理 Agent / Tool 生命周期（`./manage.sh pull --self-update` 额外先更新本仓库）。
+- `make pull`: 拉取远端最新凭证（secrets）/ 版本锁 / skill / MCP 资源并下发到各 Agent；介于 `sync` 与 `update` 之间，不处理 Agent / Tool 生命周期（`./manage.sh pull --self-update` 额外先更新本仓库）。
 - `make update`: 刷新 CLI/MCP/tool 版本锁与 skill commit、更新远端资源并收敛本地环境，等待 Agent 生命周期更新完成，但不安装缺失 Agent。
 - `make bootstrap`: 执行全量安装、更新与同步，并等待 Agent 生命周期安装/升级完成，适合新机器初始化。
 - `make install`: `make bootstrap` 的兼容别名。

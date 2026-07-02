@@ -1125,6 +1125,7 @@ function run_sync_pipeline() {
 
 function run_pull_pipeline() {
     begin_workflow "⬇️  Agent Manager 资源拉取启动"
+    maybe_init_secrets
     begin_pipeline_execution
     run_pipeline_step run_version_pins_update_task
     run_pipeline_step run_skills_upgrade_task
@@ -1612,7 +1613,7 @@ case "$cmd" in
         echo -e "  ${PENDING_GOLD}--wait-agent-lifecycle${NC} 等待 Agent 生命周期后台安装/升级结束；all / bootstrap / update 默认已启用\n"
         echo -e "${BOLD}${HDR_BLUE}=== 日常入口 (Main Flows) ===${NC}"
         echo -e "  ${SUCCESS_GREEN}sync${NC}            同步 rules，并按已锁定版本对齐 skills / MCP；不刷新版本锁或处理 Agent / Tool 生命周期"
-        echo -e "  ${SUCCESS_GREEN}pull${NC}            拉取远端最新版本锁 / skill / MCP 资源并下发到各 Agent；不处理 Agent / Tool 生命周期（--self-update 额外先更新本仓库）"
+        echo -e "  ${SUCCESS_GREEN}pull${NC}            拉取远端最新凭证 / 版本锁 / skill / MCP 资源并下发到各 Agent；不处理 Agent / Tool 生命周期（--self-update 额外先更新本仓库）"
         echo -e "  ${SUCCESS_GREEN}update${NC}          刷新 CLI/MCP/tool 版本锁与 skill commit，更新远端资源并等待 Agent 生命周期完成，但不安装缺失 Agent"
         echo -e "  ${SUCCESS_GREEN}bootstrap${NC}       执行全量安装、更新与同步，适合新机器初始化"
         echo -e "  ${SUCCESS_GREEN}all${NC}             \`bootstrap\` 的兼容别名"
