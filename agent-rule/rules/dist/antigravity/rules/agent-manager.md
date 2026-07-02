@@ -8,6 +8,7 @@
 - Never delete tests, make tests easier, loosen assertions, or skip/xfail failures just to make code pass; change tests only when intended behavior changed, and state why the old expectation was wrong.
 - After every change, run the smallest relevant verification that could fail.
 - If you skip verification, cannot run it, or ran something that did not actually exercise the change, say so explicitly.
+- After resolving a non-obvious failure, persist the lesson at the right grain (repo-specific to the repo's agent guide; cross-project habit to your global agent guide).
 - Architecture/interfaces/dependency boundaries: use the `architecture-change-review` skill.
 - Code style/config/data contracts/comments: use the `code-style-contracts` skill.
 - UI/flows/frontend/browser automation/HTML: use the `frontend-verification` skill.
