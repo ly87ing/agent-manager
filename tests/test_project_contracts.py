@@ -22,8 +22,49 @@ class ProjectContractTests(unittest.TestCase):
 
     def test_makefile_exposes_smoke_target(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertIn(".PHONY: all bootstrap sync update plan self-update smoke", makefile)
+        self.assertIn(".PHONY: all bootstrap sync update pull plan self-update smoke", makefile)
         self.assertIn("\nsmoke:\n\t@./scripts/ci-smoke.sh\n", makefile)
+
+    def test_makefile_exposes_pull_target(self):
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertIn(" pull ", makefile)
+        self.assertIn("\npull:\n\t@./manage.sh pull\n", makefile)
+
+    def _extract_shell_function(self, source: str, name: str) -> str:
+        header = f"function {name}() {{\n"
+        start = source.index(header)
+        end = source.index("\n}\n", start)
+        return source[start:end]
+
+    def test_pull_pipeline_refreshes_resources_without_agent_or_tool_lifecycle(self):
+        manage = (ROOT / "manage.sh").read_text(encoding="utf-8")
+        body = self._extract_shell_function(manage, "run_pull_pipeline")
+        # pull 拉取远端最新资源并下发：版本锁 / skill 版本 / rules / skills-link / mcp
+        for step in (
+            "run_pipeline_step run_version_pins_update_task",
+            "run_pipeline_step run_skills_upgrade_task",
+            "run_pipeline_step run_rules_sync_task",
+            "run_pipeline_step run_skills_link_task false",
+            "run_pipeline_step run_mcp_sync_task true false",
+        ):
+            self.assertIn(step, body, f"pull 缺少步骤: {step}")
+        # pull 明确不触碰 Agent / Tool / browser / shell 生命周期（那是 update 的职责）
+        for excluded in (
+            "run_agent_lifecycle_task",
+            "run_tools_sync_task",
+            "run_browser_us_sync_task",
+            "run_shell_aliases_sync_task",
+        ):
+            self.assertNotIn(excluded, body, f"pull 不应包含重活步骤: {excluded}")
+
+    def test_pull_command_is_wired_with_optional_self_update(self):
+        manage = (ROOT / "manage.sh").read_text(encoding="utf-8")
+        self.assertIn("    pull)\n", manage)
+        pull_case = manage[manage.index("    pull)\n"):]
+        pull_case = pull_case[: pull_case.index("\n        ;;\n")]
+        self.assertIn("run_pull_pipeline", pull_case)
+        self.assertIn("--self-update", pull_case)
+        self.assertIn("run_self_update", pull_case)
 
     def test_makefile_exposes_install_alias(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
@@ -130,10 +171,11 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("AGENT_MANAGER_LOCK_FILE", content)
         self.assertIn("AGENT_MANAGER_LOG_PREFIX", content)
         self.assertIn("./manage.sh sync --dry-run", content)
+        self.assertIn("./manage.sh pull --dry-run", content)
         self.assertIn("./manage.sh update --dry-run", content)
         self.assertIn("./manage.sh plan", content)
         self.assertIn("./manage.sh self-update --dry-run", content)
-        self.assertIn("make -n sync update bootstrap all plan self-update offline dry-run", content)
+        self.assertIn("make -n sync update pull bootstrap all plan self-update offline dry-run", content)
         self.assertIn("make -n install", content)
         self.assertNotIn("./manage.sh bootstrap", content)
 

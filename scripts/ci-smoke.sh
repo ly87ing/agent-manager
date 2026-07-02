@@ -27,8 +27,9 @@ cd "$ROOT_DIR"
 run make secrets-check
 run ./manage.sh help
 run ./manage.sh sync --dry-run
+run ./manage.sh pull --dry-run
 run ./manage.sh update --dry-run
 run ./manage.sh plan
 run ./manage.sh self-update --dry-run
-run make -n sync update bootstrap all plan self-update offline dry-run
+run make -n sync update pull bootstrap all plan self-update offline dry-run
 run make -n install
