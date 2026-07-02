@@ -1,8 +1,8 @@
 {
   "_comment": "agent-manager 托管的 shell alias 定义。sync_shell_aliases.sh 会幂等地将这些 alias 写入 ~/.zshrc 的受管区块中。",
   "aliases": {
-    "chrome": "TZ=\"America/Los_Angeles\" open -a \"Google Chrome\"",
     "claude": "TZ=\"America/Los_Angeles\" claude",
-    "codex": "TZ=\"America/Los_Angeles\" codex"
+    "codex": "TZ=\"America/Los_Angeles\" codex",
+    "agy": "TZ=\"America/Los_Angeles\" agy"
   }
 }
