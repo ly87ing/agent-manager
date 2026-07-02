@@ -96,7 +96,7 @@ class SyncRulesTests(unittest.TestCase):
                 (temp_root / "agent-rule" / "rules" / "dist" / "claude" / "CLAUDE.md").read_text(encoding="utf-8"),
             )
 
-    def test_repo_root_targets_replace_existing_files_with_backup(self):
+    def test_repo_root_targets_replace_existing_files_without_backup(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
@@ -118,7 +118,11 @@ class SyncRulesTests(unittest.TestCase):
             combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
             self.assertNotIn("old content", target_path.read_text(encoding="utf-8"))
-            self.assertEqual(len(list(temp_root.glob("CLAUDE.generated.md.bak.*"))), 1)
+            self.assertEqual(
+                len(list(temp_root.glob("CLAUDE.generated.md.bak.*"))),
+                0,
+                "overwrite is git-redundant, no .bak",
+            )
 
     def test_codex_sync_supports_native_agents_filename(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -278,7 +282,7 @@ class SyncRulesTests(unittest.TestCase):
             self.assertTrue(target_dir.is_dir(), result.stdout + result.stderr)
             self.assertFalse(target_dir.is_symlink(), result.stdout + result.stderr)
             self.assertTrue((target_dir / "agent-manager.md").exists(), result.stdout + result.stderr)
-            self.assertEqual(len(list(target_dir.parent.glob("rules.bak.*"))), 1)
+            self.assertEqual(len(list(target_dir.parent.glob("rules.bak.*"))), 0, "overwrite is git-redundant, no .bak")
 
     def test_copy_mode_replaces_live_directory_symlink_target(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -307,7 +311,7 @@ class SyncRulesTests(unittest.TestCase):
             self.assertFalse(target_dir.is_symlink(), result.stdout + result.stderr)
             self.assertTrue((target_dir / "agent-manager.md").exists(), result.stdout + result.stderr)
             self.assertEqual(list(real_dir.iterdir()), [], result.stdout + result.stderr)
-            self.assertEqual(len(list(target_dir.parent.glob("rules.bak.*"))), 1)
+            self.assertEqual(len(list(target_dir.parent.glob("rules.bak.*"))), 0, "overwrite is git-redundant, no .bak")
 
     def test_symlink_mode_replaces_broken_symlink_target(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -337,7 +341,7 @@ class SyncRulesTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(target_path.is_symlink(), result.stdout + result.stderr)
             self.assertEqual(target_path.resolve(), source_path.resolve())
-            self.assertEqual(len(list(target_path.parent.glob("main.md.bak.*"))), 1)
+            self.assertEqual(len(list(target_path.parent.glob("main.md.bak.*"))), 0, "overwrite is git-redundant, no .bak")
 
     def test_invalid_manifest_target_is_rejected_before_writes(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -185,14 +185,14 @@ cleanup_repo_native_backups() {
 }
 
 replace_existing_target() {
+  # Overwrite backups are redundant with git: the target is rewritten from a
+  # tracked dist artifact, so any prior state is recoverable from history.
+  # Replace in place without a .bak. (remove_target still backs up stale/legacy
+  # files before deletion — git cannot recover a file the tool stops managing.)
   local target="$1"
-  if [ "$backup_enabled" = "true" ]; then
-    backup_target "$target"
-  else
-    echo "remove(existing): $target"
-    if [ "$dry_run" = "false" ]; then
-      rm -rf "$target"
-    fi
+  echo "remove(existing): $target"
+  if [ "$dry_run" = "false" ]; then
+    rm -rf "$target"
   fi
 }
 
