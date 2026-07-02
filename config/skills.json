@@ -13,11 +13,10 @@
         "architecture-change-review",
         "code-style-contracts",
         "frontend-verification",
-        "legacy-unit-test",
         "artifact-hygiene",
         "reader-facing-writing"
       ],
-      "skill_count": 10,
+      "skill_count": 9,
       "agents": ["claude-code", "antigravity-cli", "codex"]
     },
     "anthropic-frontend-design-skill": {
