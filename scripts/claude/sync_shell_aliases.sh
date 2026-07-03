@@ -42,10 +42,11 @@ fi
 ALIAS_LINES="$(python3 - "$CONFIG_FILE" <<'PY'
 import json, sys
 cfg = json.loads(open(sys.argv[1], encoding="utf-8").read())
+timezone = cfg.get("timezone", "America/Los_Angeles")
 aliases = cfg.get("aliases", {})
 for name, value in sorted(aliases.items()):
-    # 输出完整的 alias 声明行
-    # value 中的双引号已经是转义好的（JSON 值本身）
+    # Replace timezone placeholder if present
+    value = value.replace("{timezone}", timezone)
     print(f"alias {name}='{value}'")
 PY
 )"
