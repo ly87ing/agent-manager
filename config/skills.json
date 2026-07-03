@@ -7,8 +7,6 @@
       "upgrade_ref": "refs/heads/main",
       "skill_paths": [
         "safe-merge-review",
-        "fix-ones-bug",
-        "qa-self-verify",
         "ones-manhour-fill",
         "architecture-change-review",
         "code-style-contracts",
@@ -16,7 +14,7 @@
         "artifact-hygiene",
         "reader-facing-writing"
       ],
-      "skill_count": 9,
+      "skill_count": 7,
       "agents": ["claude-code", "antigravity-cli", "codex"]
     },
     "anthropic-frontend-design-skill": {
