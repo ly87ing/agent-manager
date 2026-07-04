@@ -229,10 +229,10 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("agent_manager_sync_<user>.latest", troubleshooting)
         self.assertIn("agent_manager_sync_<user>_<runid>.log", troubleshooting)
         self.assertIn("agent-skill/repositories/", troubleshooting)
-        self.assertIn("find agent-skill/repositories/playwright-best-practices-skill -name SKILL.md", troubleshooting)
+        self.assertIn("find agent-skill/repositories/agent-skills -name SKILL.md", troubleshooting)
         self.assertNotIn("/tmp/agent_manager_sync_$(whoami).log*", troubleshooting)
         self.assertNotIn("agent-skill/<skill-name>", troubleshooting)
-        self.assertNotIn("agent-skill/repositories/playwright-best-practices-skill/SKILL.md", troubleshooting)
+        self.assertNotIn("agent-skill/repositories/agent-skills/SKILL.md", troubleshooting)
 
     def test_docs_explain_tomli_fallback_for_toml_validation(self):
         troubleshooting = (ROOT / "docs" / "TROUBLESHOOTING.md").read_text(encoding="utf-8")
@@ -276,7 +276,7 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("surgical edits", readme)
         self.assertIn("verification point", readme)
         self.assertIn("低频专题进 skill", readme)
-        self.assertIn("architecture-change-review", readme)
+        self.assertIn("change-discipline", readme)
         self.assertIn("reader-facing-writing", readme)
         self.assertIn("agent-rule/rules/src/agents/*/adapter.md", readme)
 
@@ -362,12 +362,6 @@ class ProjectContractTests(unittest.TestCase):
         for rel_path in ("config/agents.json", "config/tools.json", "config/mcp.json"):
             content = (ROOT / rel_path).read_text(encoding="utf-8")
             self.assertNotIn("@latest", content, rel_path)
-
-    def test_readme_documents_anthropic_frontend_design_skill_for_claude(self):
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("`anthropic-frontend-design-skill`", readme)
-        self.assertIn("Anthropic 官方 `skills/frontend-design`", readme)
-        self.assertIn("仅面向 `Claude Code` 暴露", readme)
 
     def test_claude_code_credentials_are_left_to_cc_switch(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")

@@ -11,9 +11,7 @@
   },
   "browser_us_sync": { "enabled": true },
   "skills": {
-    "agent-skills": { "enabled": true },
-    "anthropic-frontend-design-skill": { "enabled": true },
-    "playwright-best-practices-skill": { "enabled": true }
+    "agent-skills": { "enabled": true }
   },
   "mcp": {
     "augment-context-engine": { "enabled": false },

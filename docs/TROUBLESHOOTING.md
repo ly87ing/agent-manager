@@ -289,7 +289,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
    - 检查：查看 `agent-skill/repositories/` 目录中是否存在对应的 skill 仓库缓存
      ```bash
      ls -la agent-skill/repositories/
-     # 应该看到 agent-skills/、playwright-best-practices-skill/ 等仓库目录
+     # 应该看到 agent-skills/ 等仓库目录
      ```
    - 解决：
      * 验证网络连接和 Git 访问权限
@@ -337,7 +337,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 2. **Skill 未正确注册**
    - 检查：Skill 的 SKILL.md 文件是否包含正确的元数据
      ```bash
-     find agent-skill/repositories/playwright-best-practices-skill -name SKILL.md -maxdepth 6 | head -n 1
+     find agent-skill/repositories/agent-skills -name SKILL.md -maxdepth 6 | head -n 1
      # 应该看到 name:, description: 等元数据
      ```
    - 解决：确保 skill 仓库包含有效的 SKILL.md 文件

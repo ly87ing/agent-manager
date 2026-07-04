@@ -31,8 +31,6 @@ class SkillExposureContractTests(unittest.TestCase):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
         expected_scopes = {
             "agent-skills": ["claude-code", "antigravity-cli", "codex"],
-            "anthropic-frontend-design-skill": ["claude-code"],
-            "playwright-best-practices-skill": ["claude-code", "codex"],
         }
 
         actual_scopes = {

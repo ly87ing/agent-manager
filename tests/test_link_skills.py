@@ -2387,14 +2387,13 @@ class LinkSkillsTests(unittest.TestCase):
             [
                 "safe-merge-review",
                 "ones-manhour-fill",
-                "architecture-change-review",
-                "code-style-contracts",
+                "change-discipline",
                 "frontend-verification",
                 "artifact-hygiene",
                 "reader-facing-writing",
             ],
         )
-        self.assertEqual(repo["skill_count"], 7)
+        self.assertEqual(repo["skill_count"], 6)
         self.assertEqual(repo["agents"], ["claude-code", "antigravity-cli", "codex"])
         self.assertNotIn("ignored_skill_paths", repo)
         self.assertRegex(repo["commit"], r"^[0-9a-f]{40}$")
@@ -2402,18 +2401,10 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertEqual(repo["upgrade_ref"], "refs/heads/main")
         self.assertNotIn("ref", repo)
 
-    def test_default_skill_catalog_includes_playwright_best_practices_repo_with_explicit_agents(self):
+    def test_default_skill_catalog_does_not_reference_removed_playwright_skill(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
 
-        repo = skills_config["repositories"].get("playwright-best-practices-skill")
-
-        self.assertIsNotNone(repo)
-        self.assertEqual(repo["url"], "https://github.com/currents-dev/playwright-best-practices-skill.git")
-        self.assertEqual(repo["agents"], ["claude-code", "codex"])
-        self.assertRegex(repo["commit"], r"^[0-9a-f]{40}$")
-        self.assertEqual(repo["upgrade_strategy"], "latest-branch")
-        self.assertEqual(repo["upgrade_ref"], "refs/heads/main")
-        self.assertNotIn("ref", repo)
+        self.assertIsNone(skills_config["repositories"].get("playwright-best-practices-skill"))
 
     def test_default_manager_policy_explicitly_enables_agent_skills_repo(self):
         manager_config = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
@@ -2430,30 +2421,17 @@ class LinkSkillsTests(unittest.TestCase):
 
         self.assertIsNone(repo)
 
-    def test_default_skill_catalog_includes_anthropic_frontend_design_skill_for_claude_only(self):
+    def test_default_skill_catalog_does_not_reference_removed_anthropic_frontend_design_skill(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
 
-        repo = skills_config["repositories"].get("anthropic-frontend-design-skill")
-
-        self.assertIsNotNone(repo)
-        self.assertEqual(repo["url"], "https://github.com/anthropics/skills.git")
-        self.assertEqual(repo["skill_paths"], ["skills/frontend-design"])
-        self.assertEqual(repo["skill_count"], 1)
-        self.assertEqual(repo["agents"], ["claude-code"])
-        self.assertRegex(repo["commit"], r"^[0-9a-f]{40}$")
-        self.assertEqual(repo["upgrade_strategy"], "latest-branch")
-        self.assertEqual(repo["upgrade_ref"], "refs/heads/main")
-        self.assertNotIn("ref", repo)
+        self.assertIsNone(skills_config["repositories"].get("anthropic-frontend-design-skill"))
 
     def test_default_manager_policy_does_not_enable_removed_openai_frontend_skill(self):
         manager_config = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
 
         self.assertIsNone(manager_config["skills"].get("openai-frontend-skill"))
 
-    def test_default_manager_policy_explicitly_enables_anthropic_frontend_design_skill(self):
+    def test_default_manager_policy_does_not_enable_removed_anthropic_frontend_design_skill(self):
         manager_config = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
 
-        self.assertEqual(
-            manager_config["skills"].get("anthropic-frontend-design-skill"),
-            {"enabled": True},
-        )
+        self.assertIsNone(manager_config["skills"].get("anthropic-frontend-design-skill"))
