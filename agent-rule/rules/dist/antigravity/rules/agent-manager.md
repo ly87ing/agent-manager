@@ -9,8 +9,7 @@
 - After every change, run the smallest relevant verification that could fail.
 - If you skip verification, cannot run it, or ran something that did not actually exercise the change, say so explicitly.
 - After resolving a non-obvious failure, persist the lesson at the right grain (repo-specific to the repo's agent guide; cross-project habit to your global agent guide).
-- Architecture/interfaces/dependency boundaries: use the `architecture-change-review` skill.
-- Code style/config/data contracts/comments: use the `code-style-contracts` skill.
+- Editing existing code — architecture/interfaces/dependency boundaries, or code style/config/data contracts/naming/comments: use the `change-discipline` skill.
 - UI/flows/frontend/browser automation: use the `frontend-verification` skill.
 - Generated scripts/notes/reports/artifacts/debug output/downloads: use the `artifact-hygiene` skill.
 - Reader-facing plans/proposals/specs/checklists/Markdown/HTML: use the `reader-facing-writing` skill.

@@ -437,7 +437,7 @@ class SyncRulesTests(unittest.TestCase):
 
     def test_claude_main_rule_routes_to_rule_derived_skills(self):
         content = (ROOT / "agent-rule" / "rules" / "dist" / "claude" / "CLAUDE.md").read_text(encoding="utf-8")
-        self.assertIn("use the `architecture-change-review` skill", content)
+        self.assertIn("use the `change-discipline` skill", content)
         self.assertIn("use the `artifact-hygiene` skill", content)
         self.assertNotIn("modules/", content)
 

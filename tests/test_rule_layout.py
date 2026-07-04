@@ -1,3 +1,5 @@
+import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -118,8 +120,7 @@ class RuleLayoutTests(unittest.TestCase):
                 "or impossible-case handling."
             ),
             "Keep edits surgical: match local style, avoid unrelated cleanup, and remove only dead code made obsolete.",
-            "`architecture-change-review` skill",
-            "`code-style-contracts` skill",
+            "`change-discipline` skill",
             "`frontend-verification` skill",
             "`artifact-hygiene` skill",
             "`reader-facing-writing` skill",
@@ -134,6 +135,21 @@ class RuleLayoutTests(unittest.TestCase):
             self.assertNotIn("graphify-out/GRAPH_REPORT.md", content, target)
             for clause in required_clauses:
                 self.assertIn(clause, content, target)
+
+    def test_shared_core_routes_only_to_existing_skills(self):
+        core = (ROOT / "agent-rule" / "rules" / "src" / "shared" / "core.md").read_text(encoding="utf-8")
+        referenced = set(re.findall(r"use the `([a-z0-9-]+)` skill", core))
+        self.assertTrue(referenced, "shared core.md should route to at least one skill")
+
+        skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
+        available = set(skills_config["repositories"]["agent-skills"]["skill_paths"])
+
+        missing = sorted(referenced - available)
+        self.assertEqual(
+            missing,
+            [],
+            f"shared core.md routes to skills absent from agent-skills skill_paths: {missing}",
+        )
 
     def test_built_outputs_stay_compact_and_omit_scaffolding_text(self):
         forbidden_fragments = (
