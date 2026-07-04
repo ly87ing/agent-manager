@@ -1123,12 +1123,25 @@ function run_version_pins_update_task() {
     run_task_in_dir "刷新版本锁定" "版本锁刷新完成" "版本锁刷新失败" 180 "$ROOT_DIR/scripts" "$PYTHON_CMD" "${args[@]}"
 }
 
+function run_skill_reference_audit_warn() {
+    # 内容层失效引用检测(非致命):在结构收敛(软链/pin/规则分发)之外,提醒 rules 或
+    # SKILL.md 是否点名了不存在的 skill。只警告、不阻断收敛、不改写内容;dry-run 跳过
+    # 以免扰动 preview/smoke 契约。fail-close 由 instructions:check 的测试承担。
+    [ -n "$DRY_RUN_FLAG" ] && return 0
+    local out
+    if ! out="$("$PYTHON_CMD" "$ROOT_DIR/scripts/audit_skill_references.py" --root-dir "$ROOT_DIR" 2>&1)"; then
+        echo -e "${ERROR_RED}⚠️  skill 引用审计(仅警告,未阻断同步):${NC}"
+        printf '%s\n' "$out" | sed 's/^/    /'
+    fi
+}
+
 function run_sync_pipeline() {
     begin_workflow "🔄 Agent Manager 配置同步启动"
     begin_pipeline_execution
     run_pipeline_step run_rules_sync_task
     run_pipeline_step run_skills_link_task false
     run_pipeline_step run_mcp_sync_task true false
+    run_skill_reference_audit_warn
     finish_pipeline_execution
 }
 

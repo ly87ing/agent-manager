@@ -192,7 +192,7 @@ eval-rules:
 
 # 指令质量回归门 (共享指令 / skills exposure / managed hooks)
 instructions-check:
-	@python3 -m unittest tests.test_project_contracts tests.test_rule_budgets tests.test_rule_layout tests.test_skill_exposure_contracts tests.test_sync_rules tests.test_sync_claude_hooks tests.test_sync_codex_hooks tests.test_rule_effectiveness_eval tests.test_skill_usage_metrics -v
+	@python3 -m unittest tests.test_project_contracts tests.test_rule_budgets tests.test_rule_layout tests.test_skill_exposure_contracts tests.test_sync_rules tests.test_sync_claude_hooks tests.test_sync_codex_hooks tests.test_rule_effectiveness_eval tests.test_skill_usage_metrics tests.test_skill_reference_audit -v
 	@python3 ./scripts/evals/run_rule_effectiveness_eval.py --baseline ./scripts/evals/fixtures/rule_effectiveness_baseline.json
 
 instructions\:check: instructions-check
