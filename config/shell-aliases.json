@@ -1,10 +1,11 @@
 {
   "_comment": "agent-manager 托管的 shell alias 定义。sync_shell_aliases.sh 会幂等地将这些 alias 写入 ~/.zshrc 的受管区块中。",
   "timezone": "America/Los_Angeles",
+  "lang": "en_US.UTF-8",
   "aliases": {
-    "claude": "TZ=\"{timezone}\" LANG=\"en_US.UTF-8\" LC_ALL=\"en_US.UTF-8\" claude --dangerously-skip-permissions",
-    "codex": "TZ=\"{timezone}\" LANG=\"en_US.UTF-8\" LC_ALL=\"en_US.UTF-8\" codex",
-    "agy": "TZ=\"{timezone}\" LANG=\"en_US.UTF-8\" LC_ALL=\"en_US.UTF-8\" agy",
-    "chrome": "open --env TZ=\"{timezone}\" --env LANG=\"en_US.UTF-8\" --env LC_ALL=\"en_US.UTF-8\" -n -a \"Google Chrome\" --args --lang=en-US"
+    "claude": "TZ=\"{timezone}\" LANG=\"{lang}\" LC_ALL=\"{lang}\" claude --dangerously-skip-permissions",
+    "codex": "TZ=\"{timezone}\" LANG=\"{lang}\" LC_ALL=\"{lang}\" codex",
+    "agy": "TZ=\"{timezone}\" LANG=\"{lang}\" LC_ALL=\"{lang}\" agy",
+    "chrome": "open --env TZ=\"{timezone}\" --env LANG=\"{lang}\" --env LC_ALL=\"{lang}\" -n -a \"Google Chrome\" --args --lang=en-US"
   }
 }

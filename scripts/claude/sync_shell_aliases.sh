@@ -43,10 +43,12 @@ ALIAS_LINES="$(python3 - "$CONFIG_FILE" <<'PY'
 import json, sys
 cfg = json.loads(open(sys.argv[1], encoding="utf-8").read())
 timezone = cfg.get("timezone", "America/Los_Angeles")
+lang = cfg.get("lang", "en_US.UTF-8")
 aliases = cfg.get("aliases", {})
 for name, value in sorted(aliases.items()):
-    # Replace timezone placeholder if present
+    # Replace placeholders if present
     value = value.replace("{timezone}", timezone)
+    value = value.replace("{lang}", lang)
     print(f"alias {name}='{value}'")
 PY
 )"
