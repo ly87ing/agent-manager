@@ -1,25 +1,33 @@
 #!/usr/bin/env bash
-# sync_shell_aliases.sh — 幂等地将 agent-manager 托管的 shell alias 同步到 ~/.zshrc
+# sync_shell_aliases.sh — 幂等地将 agent-manager 托管的 shell alias 同步到
+# ~/.zshrc(interactive shell 读)和 ~/.zprofile(login shell 读)。
 #
-# 原理：
+# 为什么两个文件:
+#   ~/.zshrc 只在「交互式」zsh 里加载,别名放这里时,非交互的 login shell
+#   (如某些远程终端 / UU 远程 term)读不到,别名就失效。~/.zprofile 是
+#   login shell(含非交互 login)会读的文件,把同一份受管区块也写进去,
+#   非交互 login shell 也能用别名。
+#
+# 原理:
 #   1. 从 config/shell-aliases.json 读取 alias 定义
-#   2. 在 ~/.zshrc 中用标记注释圈定一个「受管区块」
-#   3. 每次执行时用声明的内容替换该区块（幂等）
+#   2. 在每个目标文件里用标记注释圈定一个「受管区块」
+#   3. 每次执行时用声明的内容替换该区块(幂等)
 #   4. 支持 --dry-run 模式
 #
-# 用法：
+# 用法:
 #   ./scripts/claude/sync_shell_aliases.sh [--dry-run]
 #
-# 安全保证：
-#   - 仅修改标记注释之间的内容，不触碰用户手写的其它行
+# 安全保证:
+#   - 仅修改标记注释之间的内容,不触碰用户手写的其它行
 #   - 首次运行时追加区块到文件末尾
-#   - 区块为空时自动清理标记
+#   - 每个目标文件独立幂等处理
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CONFIG_FILE="$ROOT_DIR/config/shell-aliases.json"
-RC_FILE="${HOME}/.zshrc"
+# .zshrc:交互式 shell;.zprofile:login shell(含非交互 login,如 UU 远程 term)
+RC_FILES=("${HOME}/.zshrc" "${HOME}/.zprofile")
 
 MARKER_BEGIN="# >>> agent-manager shell aliases >>>"
 MARKER_END="# <<< agent-manager shell aliases <<<"
@@ -34,11 +42,11 @@ done
 # ---------- 1. 读取声明式配置 ----------
 
 if [ ! -f "$CONFIG_FILE" ]; then
-    echo "⚠️  配置文件不存在: $CONFIG_FILE，跳过 shell alias 同步。"
+    echo "⚠️  配置文件不存在: $CONFIG_FILE,跳过 shell alias 同步。"
     exit 0
 fi
 
-# 用 python 解析 JSON，输出 alias 行（name<TAB>value 格式）
+# 用 python 解析 JSON,输出 alias 行(name<TAB>value 格式)
 ALIAS_LINES="$(python3 - "$CONFIG_FILE" <<'PY'
 import json, sys
 cfg = json.loads(open(sys.argv[1], encoding="utf-8").read())
@@ -63,25 +71,29 @@ $ALIAS_LINES
 $MARKER_END"
 fi
 
-# ---------- 3. 确保 RC 文件存在 ----------
+# ---------- 3. per-file 同步(幂等) ----------
 
-if [ ! -f "$RC_FILE" ]; then
-    if $DRY_RUN; then
-        echo "预览模式：计划创建 $RC_FILE 并写入受管 alias 区块。"
-        exit 0
+sync_managed_block_to_file() {
+    local rc_file="$1"
+    local current_content new_content
+
+    # 确保文件存在
+    if [ ! -f "$rc_file" ]; then
+        if [ -z "$MANAGED_BLOCK" ]; then
+            return 0
+        fi
+        if $DRY_RUN; then
+            echo "预览模式:计划创建 $rc_file 并写入受管 alias 区块。"
+            return 0
+        fi
+        touch "$rc_file"
     fi
-    touch "$RC_FILE"
-fi
 
-# ---------- 4. 读取当前文件内容 ----------
+    current_content="$(cat "$rc_file")"
 
-CURRENT_CONTENT="$(cat "$RC_FILE")"
-
-# ---------- 5. 计算新文件内容 ----------
-
-if echo "$CURRENT_CONTENT" | grep -qF "$MARKER_BEGIN"; then
-    # 区块已存在 → 替换
-    NEW_CONTENT="$(python3 - "$MARKER_BEGIN" "$MARKER_END" "$RC_FILE" <<PY
+    if echo "$current_content" | grep -qF "$MARKER_BEGIN"; then
+        # 区块已存在 → 替换
+        new_content="$(python3 - "$MARKER_BEGIN" "$MARKER_END" "$rc_file" <<PY
 import sys
 
 marker_begin = sys.argv[1]
@@ -113,42 +125,44 @@ for line in lines:
 print("".join(result), end="")
 PY
 )"
-else
-    # 区块不存在 → 追加
-    if [ -z "$MANAGED_BLOCK" ]; then
-        echo "✅ 无需同步（alias 列表为空且 RC 文件中无受管区块）。"
-        exit 0
-    fi
-    # 确保追加前有空行分隔
-    if [ -n "$CURRENT_CONTENT" ] && [ "$(echo "$CURRENT_CONTENT" | tail -c1)" != "" ]; then
-        NEW_CONTENT="$CURRENT_CONTENT
-
-$MANAGED_BLOCK
-"
     else
-        NEW_CONTENT="${CURRENT_CONTENT}
+        # 区块不存在 → 追加
+        if [ -z "$MANAGED_BLOCK" ]; then
+            echo "✅ $rc_file 无需同步(alias 列表为空且无受管区块)。"
+            return 0
+        fi
+        # 确保追加前有空行分隔
+        if [ -n "$current_content" ] && [ "$(echo "$current_content" | tail -c1)" != "" ]; then
+            new_content="$current_content
+
 $MANAGED_BLOCK
 "
+        else
+            new_content="${current_content}
+$MANAGED_BLOCK
+"
+        fi
     fi
-fi
 
-# ---------- 6. 幂等检查 ----------
+    # 幂等检查
+    if [ "$current_content" = "$(echo -n "$new_content")" ] || [ "$current_content
+" = "$new_content" ]; then
+        echo "✅ $rc_file 的 shell alias 已是最新,无需修改。"
+        return 0
+    fi
 
-if [ "$CURRENT_CONTENT" = "$(echo -n "$NEW_CONTENT")" ] || [ "$CURRENT_CONTENT
-" = "$NEW_CONTENT" ]; then
-    echo "✅ Shell alias 已是最新，无需修改。"
-    exit 0
-fi
+    if $DRY_RUN; then
+        echo "预览模式:计划更新 $rc_file 中的受管 alias 区块:"
+        echo "---"
+        echo "$MANAGED_BLOCK"
+        echo "---"
+        return 0
+    fi
 
-# ---------- 7. 写入 ----------
+    printf '%s' "$new_content" > "$rc_file"
+    echo "✅ 已同步 shell alias 到 $rc_file"
+}
 
-if $DRY_RUN; then
-    echo "预览模式：计划更新 $RC_FILE 中的受管 alias 区块："
-    echo "---"
-    echo "$MANAGED_BLOCK"
-    echo "---"
-    exit 0
-fi
-
-printf '%s' "$NEW_CONTENT" > "$RC_FILE"
-echo "✅ 已同步 shell alias 到 $RC_FILE"
+for rc in "${RC_FILES[@]}"; do
+    sync_managed_block_to_file "$rc"
+done

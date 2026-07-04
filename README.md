@@ -84,7 +84,7 @@
 
 ### 5. 安全默认值
 - **安全入口**：直接执行 `./manage.sh` 只显示帮助，不触发同步。
-- **不接管终端配置**：`agent-manager` 不再维护 `~/.zshrc`、`~/.tmux.conf`、iTerm2 动态配置等用户级终端文件，避免把机器/个人偏好写死后扩散到其他电脑。
+- **不接管终端配置**：除 shell alias 的受管区块（marker 圈定、只写区块内）会同步到 `~/.zshrc` 与 `~/.zprofile` 外，`agent-manager` 不维护 `~/.tmux.conf`、iTerm2 动态配置等用户级终端文件，避免把机器/个人偏好写死后扩散到其他电脑。
 - **主仓库禁存 secrets**：真实凭证只允许存在于独立的 `secrets/` 私有仓库或系统环境变量中；`make secrets-check`、`make smoke`、CI 与 `make doctor` 会扫描主仓库文件并阻止明文敏感信息落入 `agent-manager`。
 
 ### 6. Rules 源码与分发分层

@@ -49,6 +49,34 @@ class ShellAliasesContractTests(unittest.TestCase):
             result.stdout,
         )
 
+    def test_sync_writes_managed_block_to_both_zshrc_and_zprofile(self):
+        """别名必须同步到 .zshrc(interactive)与 .zprofile(login)两个文件——
+        后者是让非交互 login shell(如 UU 远程 term)也能加载别名的关键;
+        少写任何一个,该 shell 场景的别名就会失效。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                ["bash", str(SYNC)],
+                capture_output=True,
+                text=True,
+                check=False,
+                env={**os.environ, "HOME": tmp},
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for fn in (".zshrc", ".zprofile"):
+                content = (Path(tmp) / fn).read_text(encoding="utf-8")
+                self.assertIn("# >>> agent-manager shell aliases >>>", content, f"{fn} 缺受管区块")
+                self.assertIn("alias claude=", content, f"{fn} 缺 claude 别名")
+
+    def test_sync_is_idempotent_across_both_targets(self):
+        """两个目标文件都要各自幂等:第二次运行不得再改动任一文件。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {**os.environ, "HOME": tmp}
+            subprocess.run(["bash", str(SYNC)], capture_output=True, text=True, env=env, check=True)
+            first = {fn: (Path(tmp) / fn).read_text(encoding="utf-8") for fn in (".zshrc", ".zprofile")}
+            subprocess.run(["bash", str(SYNC)], capture_output=True, text=True, env=env, check=True)
+            for fn, before in first.items():
+                self.assertEqual(before, (Path(tmp) / fn).read_text(encoding="utf-8"), f"{fn} 非幂等")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,5 @@
 {
-  "_comment": "agent-manager 托管的 shell alias 定义。sync_shell_aliases.sh 会幂等地将这些 alias 写入 ~/.zshrc 的受管区块中。",
+  "_comment": "agent-manager 托管的 shell alias 定义。sync_shell_aliases.sh 会幂等地将这些 alias 写入 ~/.zshrc(interactive)与 ~/.zprofile(login)的受管区块中,后者让非交互 login shell(如 UU 远程 term)也能用别名。",
   "timezone": "America/Los_Angeles",
   "lang": "en_US.UTF-8",
   "aliases": {

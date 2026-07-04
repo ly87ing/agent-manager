@@ -128,7 +128,7 @@ graph TD
 - **`--dry-run`**：只输出计划动作，跳过 secrets 初始化、仓库 clone/pull、依赖安装、构建，以及 `sys:clean` / `sys:unlock` / `state:restore` / `sys:clean-logs` 这类会修改本地状态的维护动作；允许保留只读探测和预览日志。若与 `sys:upgrade` 组合，只预览仓库自更新动作。
 - **`--offline`**：禁止任何远程拉取、下载和安装。生命周期、tools、skills、MCP 同步器都只能复用本地已存在仓库/配置；如果本地前置资源缺失，应显式报错而不是偷偷联网。
 - **命令分层**：`apply` 把锁定态分发/收敛到本机（secrets 拉取、shell alias、tools、browser、rules 构建分发、skills 链接、mcp 注入），不升版本、不装 Agent；`bump` 只刷新受管 MCP / CLI / tool 的版本锁和 skill commit 等元数据，不分发、不改本机环境；`init` = `bump` + Agent 生命周期（安装缺失 Agent）+ `apply` + 失效引用审计；`agents:apply` 只跑 Agent 生命周期（`--no-install`）；`sys:upgrade` 只更新 agent-manager 仓库自身。
-- **不接管终端配置**：`apply` / `bump` / `init` 不会改写 `~/.zshrc`、`~/.tmux.conf`、iTerm2 动态配置等用户级终端文件；仓库也不提供 `terminal:apply` 入口。
+- **不接管终端配置**：除 shell alias 受管区块会写入 `~/.zshrc`（interactive）与 `~/.zprofile`（login，供非交互 login shell 如 UU 远程 term 加载别名）外，`apply` / `bump` / `init` 不改写 `~/.tmux.conf`、iTerm2 动态配置等用户级终端文件；仓库也不提供 `terminal:apply` 入口。
 - **诊断双出口**：`doctor / status` 默认输出面向人的文本报告；追加 `--json` 时输出机器可读 JSON，不再需要从文本中抓取 warning 计数。
 - **最小 smoke 策略**：`scripts/ci-smoke.sh` 通过 `AGENT_MANAGER_BASE_CONFIG=config/manager.smoke.json` 运行安全预演，避免把默认全量策略带来的未物化提示项混进 CI 基线。
 
@@ -279,7 +279,7 @@ agent-manager/
 ### 为什么不再维护终端配置？
 - `~/.zshrc`、`~/.tmux.conf` 和 iTerm2 动态配置属于高影响用户资产
 - 这些文件高度依赖个人机器、Shell 习惯、JDK/SDK 路径和本地密钥布局
-- 因此 agent-manager 只管理 Agent、tools、skills、rules 和 MCP，不再维护终端 dotfiles 的模板渲染或写入
+- 因此 agent-manager 只管理 Agent、tools、skills、rules 和 MCP，不做终端 dotfiles 的模板渲染或全量写入；唯一例外是 shell alias 的受管区块（marker 圈定、只动区块内、幂等），会同步到 `~/.zshrc` 与 `~/.zprofile`
 
 ---
 
