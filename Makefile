@@ -8,31 +8,31 @@ all:
 	@./manage.sh all
 
 # 新机器初始化或全量收敛
-bootstrap:
-	@./manage.sh bootstrap
+init bootstrap:
+	@./manage.sh init
 
 # 兼容安装入口：等价于 bootstrap
-install: bootstrap
+install: init
 
 # 同步当前配置并收敛 skills / MCP 资源；不处理 Agent 安装
-sync:
-	@./manage.sh sync
+apply sync:
+	@./manage.sh apply
 
 # 拉取远端最新 rules / skill / MCP 资源并下发；不处理 Agent / Tool 生命周期
 pull:
 	@./manage.sh pull
 
 # 更新远端资源并收敛本地环境，但不安装缺失 Agent
-update:
-	@./manage.sh update
+bump update:
+	@./manage.sh bump
 
 # 预演一次完整 bootstrap
 plan:
 	@./manage.sh plan
 
 # 仅更新 agent-manager 仓库自身逻辑
-self-update:
-	@./manage.sh self-update
+sys-upgrade sys\:upgrade self-update:
+	@./manage.sh sys:upgrade
 
 # 跨平台 smoke 验证（安全预演路径）
 smoke:
@@ -61,34 +61,28 @@ doctor:
 status: doctor
 
 # 全量大扫除 (清理备份、日志、残留)
-cleanup:
-	@./manage.sh cleanup
+sys-clean sys\:clean cleanup:
+	@./manage.sh sys:clean
 
 # 删除受管 Agent home 下超过 30 天的 .bak.* 文件
-backups-gc:
+state-clean state\:clean backups-gc:
 	@find ~/.claude ~/.codex ~/.gemini -maxdepth 2 -type f -name '*.bak.*' -mtime +30 -print -delete 2>/dev/null || true
 
 backups\:gc:
 	@$(MAKE) backups-gc
 
 # 强制解除资源锁
-unlock:
-	@./manage.sh unlock
+sys-unlock sys\:unlock unlock:
+	@./manage.sh sys:unlock
 
 # 历史配置备份清单
 
-backups-list:
-	@./manage.sh backups:list
-
-backups\:list:
-	@./manage.sh backups:list
+state-list state\:list backups-list backups\:list:
+	@./manage.sh state:list
 
 # 交互式备份恢复
-restore:
-	@./manage.sh backups:restore
-
-backups\:restore:
-	@./manage.sh backups:restore
+state-restore state\:restore restore backups\:restore:
+	@./manage.sh state:restore
 
 # 环境探测
 detect:
@@ -99,12 +93,12 @@ fetch-models:
 	@./manage.sh fetch-models $(url) $(key)
 
 # 查看最近同步日志
-logs:
-	@./manage.sh logs
+sys-logs sys\:logs logs:
+	@./manage.sh sys:logs
 
 # 清理日志
-clean-logs:
-	@./manage.sh clean-logs
+sys-clean-logs sys\:clean-logs clean-logs:
+	@./manage.sh sys:clean-logs
 
 # 独立同步任务
 rules-build:
@@ -113,56 +107,32 @@ rules-build:
 rules\:build:
 	@./manage.sh rules:build
 
-rules-sync:
-	@./manage.sh rules:sync
+rules-apply rules\:apply rules-sync rules\:sync:
+	@./manage.sh rules:apply
 
-rules\:sync:
-	@./manage.sh rules:sync
+skills-apply skills\:apply skills-link skills\:link:
+	@./manage.sh skills:apply
 
-skills-link:
-	@./manage.sh skills:link
+skills-bump skills\:bump skills\:upgrade:
+	@./manage.sh skills:bump
 
-skills\:link:
-	@./manage.sh skills:link
+mcp-apply mcp\:apply mcp-sync mcp\:sync:
+	@./manage.sh mcp:apply
 
-skills\:upgrade:
-	@./manage.sh skills:upgrade
+mcp-build mcp\:build mcp-prepare mcp\:prepare:
+	@./manage.sh mcp:build
 
-mcp-sync:
-	@./manage.sh mcp:sync
+tools-apply tools\:apply tools-sync tools\:sync:
+	@./manage.sh tools:apply
 
-mcp\:sync:
-	@./manage.sh mcp:sync
+browser-apply browser\:apply browser-us-sync browser\:sync:
+	@./manage.sh browser:apply
 
-mcp-prepare:
-	@./manage.sh mcp:prepare
+claude-hooks-apply claude\:hooks\:apply claude-hooks-sync claude\:hooks\:sync:
+	@./manage.sh claude:hooks:apply
 
-mcp\:prepare:
-	@./manage.sh mcp:prepare
-
-tools-sync:
-	@./manage.sh tools:sync
-
-tools\:sync:
-	@./manage.sh tools:sync
-
-browser-us-sync:
-	@./manage.sh browser:sync
-
-browser\:sync:
-	@./manage.sh browser:sync
-
-claude-hooks-sync:
-	@./manage.sh claude:hooks:sync
-
-claude\:hooks\:sync:
-	@./manage.sh claude:hooks:sync
-
-claude-statusline-install:
-	@./manage.sh claude:statusline:install
-
-claude\:statusline\:install:
-	@./manage.sh claude:statusline:install
+claude-statusline-apply claude\:statusline\:apply claude-statusline-install claude\:statusline\:install:
+	@./manage.sh claude:statusline:apply
 
 claude-statusline-wire:
 	@./manage.sh claude:statusline:wire
@@ -170,17 +140,11 @@ claude-statusline-wire:
 claude\:statusline\:wire:
 	@./manage.sh claude:statusline:wire
 
-claude-shell-aliases-sync:
-	@./manage.sh claude:shell-aliases:sync
+claude-shell-aliases-apply claude\:shell-aliases\:apply claude-shell-aliases-sync claude\:shell-aliases\:sync:
+	@./manage.sh claude:shell-aliases:apply
 
-claude\:shell-aliases\:sync:
-	@./manage.sh claude:shell-aliases:sync
-
-codex-hooks-sync:
-	@./manage.sh codex:hooks:sync
-
-codex\:hooks\:sync:
-	@./manage.sh codex:hooks:sync
+codex-hooks-apply codex\:hooks\:apply codex-hooks-sync codex\:hooks\:sync:
+	@./manage.sh codex:hooks:apply
 
 # 预览模式 (仅输出计划动作，跳过远端副作用)
 dry-run:

@@ -1412,19 +1412,19 @@ function is_dry_run_mode() {
 }
 
 case "$cmd" in
-    all|bootstrap)
+    all|bootstrap|init)
         if [ -z "$WAIT_AGENT_LIFECYCLE_FLAG" ]; then
             WAIT_AGENT_LIFECYCLE_FLAG="--wait-async-actions"
         fi
         run_update_pipeline "🚀 Agent Manager 全量同步启动" ""
         ;;
-    update)
+    bump|update)
         if [ -z "$WAIT_AGENT_LIFECYCLE_FLAG" ]; then
             WAIT_AGENT_LIFECYCLE_FLAG="--wait-async-actions"
         fi
         run_update_pipeline "🔄 Agent Manager 资源更新启动" "--no-install"
         ;;
-    sync)
+    apply|sync)
         run_sync_pipeline
         ;;
     pull)
@@ -1442,7 +1442,7 @@ case "$cmd" in
         DRY_RUN_FLAG="--dry-run"
         run_update_pipeline "🧭 Agent Manager 变更预演启动" ""
         ;;
-    self-update)
+    sys:upgrade|self-update)
         run_self_update
         ;;
     offline)
@@ -1463,14 +1463,14 @@ case "$cmd" in
         run_agent_lifecycle_status_task
         ;;
     detect) detect_agents ;;
-    unlock)
+    sys:unlock|unlock)
         if is_dry_run_mode; then
             echo "预览模式：计划清理原子锁目录与遗留锁文件。"
         else
             remove_lock_artifacts
             echo "锁已解除。"
         fi ;;
-    logs)
+    sys:logs|logs)
         if latest_log=$(resolve_latest_log_path); then
             if [ -t 1 ] && command -v less >/dev/null 2>&1; then
                 less -R "$latest_log"
@@ -1480,21 +1480,21 @@ case "$cmd" in
         else
             echo "暂无日志。"
         fi ;;
-    clean-logs)
+    sys:clean-logs|clean-logs)
         if is_dry_run_mode; then
             echo "预览模式：计划清理 latest 指针与所有按次运行日志。"
         else
             rm -f "${LOG_PREFIX}"*.log "$LATEST_LOG_POINTER"
             echo "日志已清理"
         fi ;;
-    backups:list)
+    state:list|backups:list)
         if ! backup_entries="$(list_managed_backup_entries)"; then
             exit 1
         fi
         if [ -n "$backup_entries" ]; then
             printf '%s\n' "$backup_entries" | head -n 20
         fi ;;
-    backups:restore) 
+    state:restore|backups:restore) 
         files=()
         if ! backup_entries="$(list_managed_backup_entries)"; then
             exit 1
@@ -1518,13 +1518,13 @@ case "$cmd" in
             fi
             break
         done < "$selection_input" ;;
-    mcp:sync)
+    mcp:apply|mcp:sync)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json" --prepare-runtime $DRY_RUN_FLAG $OFFLINE_FLAG $FORCE_REFRESH_FLAG ;;
-    mcp:prepare)
+    mcp:build|mcp:prepare)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json" --prepare-runtime $DRY_RUN_FLAG $OFFLINE_FLAG $FORCE_REFRESH_FLAG ;;
     rules:build)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" "$PYTHON_CMD" ./scripts/build-agent-rules.py ;;
-    rules:sync)
+    rules:apply|rules:sync)
         if ! target_names="$(list_active_rule_targets)"; then
             exit 1
         fi
@@ -1537,21 +1537,21 @@ case "$cmd" in
             [ -n "$target_name" ] && rule_args+=(--target "$target_name")
         done <<< "$target_names"
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" ./scripts/sync-agent-rules.sh "${rule_args[@]}" $DRY_RUN_FLAG ;;
-    claude:hooks:sync)
+    claude:hooks:apply|claude:hooks:sync)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" "$PYTHON_CMD" ./scripts/sync-claude-hooks.py $DRY_RUN_FLAG ;;
-    claude:shell-aliases:sync)
+    claude:shell-aliases:apply|claude:shell-aliases:sync)
         run_supervised_command_in_dir 60 "$ROOT_DIR" bash "$ROOT_DIR/scripts/claude/sync_shell_aliases.sh" $DRY_RUN_FLAG ;;
-    claude:statusline:install)
+    claude:statusline:apply|claude:statusline:install)
         run_supervised_command_in_dir 600 "$ROOT_DIR" "$PYTHON_CMD" ./scripts/claude/install_statusline.py $DRY_RUN_FLAG ;;
     claude:statusline:wire)
         run_supervised_command_in_dir 600 "$ROOT_DIR" "$PYTHON_CMD" ./scripts/claude/install_statusline.py \
             --apply-settings \
             $DRY_RUN_FLAG ;;
-    codex:hooks:sync)
+    codex:hooks:apply|codex:hooks:sync)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" "$PYTHON_CMD" ./scripts/sync-codex-hooks.py $DRY_RUN_FLAG ;;
-    skills:link)
+    skills:apply|skills:link)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" link_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG $FORCE_REFRESH_FLAG ;;
-    skills:upgrade)
+    skills:bump|skills:upgrade)
         upgrade_args=(upgrade_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json")
         if [ "${#CMD_ARGS[@]}" -gt 0 ]; then
             for repo_name in "${CMD_ARGS[@]}"; do
@@ -1561,9 +1561,9 @@ case "$cmd" in
         if [ -n "$DRY_RUN_FLAG" ]; then upgrade_args+=("$DRY_RUN_FLAG"); fi
         if [ -n "$OFFLINE_FLAG" ]; then upgrade_args+=("$OFFLINE_FLAG"); fi
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" "${upgrade_args[@]}" ;;
-    tools:sync)
+    tools:apply|tools:sync)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-tool" "$PYTHON_CMD" sync_tools.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/tools.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG $FORCE_REFRESH_FLAG ;;
-    browser:sync)
+    browser:apply|browser:sync)
         run_browser_us_sync_task ;;
     fetch-models)
         args=()
@@ -1580,7 +1580,7 @@ case "$cmd" in
             run_supervised_command_in_dir 600 "$ROOT_DIR" "$PYTHON_CMD" "$ROOT_DIR/scripts/fetch_models.py"
         fi
         ;;
-    cleanup)
+    sys:clean|cleanup)
         echo -e "${HDR_BLUE}正在执行全量环境大扫除...${NC}"
         if ! agents_paths="$(list_cleanup_target_paths)"; then
             exit 1
