@@ -137,7 +137,7 @@ graph TD
     B --> C[git add mcp.env]
     C --> D[git commit -m "描述更新内容"]
     D --> E[git push origin main]
-    E --> F[运行 make mcp-sync 或 ./manage.sh mcp:sync]
+    E --> F[运行 make mcp-apply 或 ./manage.sh mcp:apply]
     F --> G[系统重新读取凭证并更新配置]
 ```
 
@@ -204,7 +204,7 @@ git push origin main
 
 # 同步到Agent配置
 cd ..
-make mcp-sync
+make mcp-apply
 ```
 
 ### 查看凭证状态
@@ -231,7 +231,7 @@ git commit -m "Rotate credentials - $(date +%Y-%m-%d)"
 git push origin main
 # 4. 同步更新
 cd ..
-make mcp-sync
+make mcp-apply
 # 5. 验证服务正常工作
 # 6. 如需要，可保留旧凭证一段时间以确保平稳过渡
 ```
@@ -329,7 +329,7 @@ Agent Manager 会：
 6. 原子写入目标配置文件
 
 额外说明：
-- `./manage.sh mcp:sync` / `./manage.sh mcp:prepare` 默认都会准备 MCP 运行时，并在非 `--offline` 模式下同步本地 secrets Git 仓库
+- `./manage.sh mcp:apply` / `./manage.sh mcp:build` 默认都会准备 MCP 运行时，并在非 `--offline` 模式下同步本地 secrets Git 仓库
 - 如需只消费本地已有凭证，请显式追加 `--offline`
 - 真实写入模式下，如果占位符仍未解析，MCP 同步会直接失败，不会写入半成品配置
 

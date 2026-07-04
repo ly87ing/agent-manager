@@ -2,7 +2,7 @@
 """Detect content-level dead skill references in agent-manager-managed files.
 
 Structural cleanup (dead symlinks, orphan skill repos) is already handled by
-`skills:link` during `make apply`. This audit covers the *content* layer that
+`skills:apply` during `make apply`. This audit covers the *content* layer that
 sync does not touch: a rule or SKILL.md that names a skill which no longer
 exists (e.g. a rule routing to a removed/renamed skill).
 

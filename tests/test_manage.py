@@ -227,7 +227,7 @@ class ManageScriptTests(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "sync"],
+                [str(temp_root / "manage.sh"), "apply"],
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,
@@ -261,7 +261,7 @@ class ManageScriptTests(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "sync"],
+                [str(temp_root / "manage.sh"), "apply"],
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,
@@ -829,7 +829,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("skills", payload["sections"])
             self.assertIn("rules", payload["sections"])
 
-    def test_sync_preview_reports_health_caution_for_optional_tool_gaps(self):
+    def test_apply_preview_reports_health_caution_for_optional_tool_gaps(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
@@ -862,7 +862,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["HOME"] = str(temp_home)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "sync", "--dry-run"],
+                [str(temp_root / "manage.sh"), "apply", "--dry-run"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -1001,7 +1001,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertNotIn("--- Rules 内容/结构审计 ---\n  ✗", combined)
             self.assertIn("环境状态完美", combined)
 
-    def test_sync_empty_policy_skips_optional_subengines(self):
+    def test_apply_empty_policy_skips_optional_subengines(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
@@ -1015,7 +1015,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["HOME"] = str(temp_home)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "sync", "--dry-run"],
+                [str(temp_root / "manage.sh"), "apply", "--dry-run"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -1205,12 +1205,12 @@ class ManageScriptTests(unittest.TestCase):
             self.assertFalse(call_log.exists(), combined)
 
 
-    def test_sync_does_not_run_terminal_management(self):
+    def test_apply_does_not_run_terminal_management(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             call_log = temp_root / "calls.log"
-            # apply(sync 别名)会跑 maybe_init_secrets；不隔离会对 secrets/.git 真联网 git pull，
+            # apply 会跑 maybe_init_secrets；不隔离会对 secrets/.git 真联网 git pull，
             # 让本用例贴着超时上限抖动。移除 secrets 并 stub init-secrets 使其 hermetic。
             remove_path(temp_root / "secrets")
             self._write_init_secrets_stub(temp_root, call_log)
@@ -1246,7 +1246,7 @@ class ManageScriptTests(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "sync"],
+                [str(temp_root / "manage.sh"), "apply"],
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,
@@ -1730,7 +1730,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertFalse(any(line == "init-secrets" for line in log_lines), log_lines)
 
 
-    def test_bootstrap_allows_agent_install_and_waits_for_agent_lifecycle(self):
+    def test_init_allows_agent_install_and_waits_for_agent_lifecycle(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -1780,7 +1780,7 @@ class ManageScriptTests(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "bootstrap"],
+                [str(temp_root / "manage.sh"), "init"],
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,
@@ -1844,7 +1844,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertFalse(any(line.startswith("browser ") for line in log_lines), log_lines)
             self.assertIn("浏览器 US 同步已禁用", combined)
 
-    def test_self_update_only_runs_repo_pull(self):
+    def test_sys_upgrade_only_runs_repo_pull(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -1872,7 +1872,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["PATH"] = f"{fake_bin}:{env['PATH']}"
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "self-update"],
+                [str(temp_root / "manage.sh"), "sys:upgrade"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -1886,13 +1886,13 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn(f"git -C {temp_root.resolve()} status --porcelain", log_lines[0])
             self.assertIn(f"git -C {temp_root.resolve()} pull --ff-only", log_lines[1])
 
-    def test_self_update_status_termination_cleans_up_descendant_processes(self):
+    def test_sys_upgrade_status_termination_cleans_up_descendant_processes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
 
-            child_pid_file = Path(temp_dir) / "self-update-status-child.pid"
-            ready_file = Path(temp_dir) / "self-update-status-ready"
+            child_pid_file = Path(temp_dir) / "sys-upgrade-status-child.pid"
+            ready_file = Path(temp_dir) / "sys-upgrade-status-ready"
             fake_bin = temp_root / "fake-bin"
             fake_bin.mkdir()
 
@@ -1930,7 +1930,7 @@ class ManageScriptTests(unittest.TestCase):
             env["READY_FILE"] = str(ready_file)
 
             proc = subprocess.Popen(
-                [str(temp_root / "manage.sh"), "self-update"],
+                [str(temp_root / "manage.sh"), "sys:upgrade"],
                 cwd=temp_root,
                 env=env,
                 stdout=subprocess.PIPE,
@@ -1944,12 +1944,12 @@ class ManageScriptTests(unittest.TestCase):
                     proc,
                     child_pid_file,
                     ready_file,
-                    "self-update status 未按预期启动子进程",
+                    "sys-upgrade status 未按预期启动子进程",
                 )
                 self._assert_descendant_exits_after_parent_termination(
                     proc,
                     child_pid,
-                    f"self-update status 退出后子进程仍存活: {child_pid}",
+                    f"sys-upgrade status 退出后子进程仍存活: {child_pid}",
                 )
             finally:
                 if proc.poll() is None:
@@ -2099,7 +2099,7 @@ class ManageScriptTests(unittest.TestCase):
                     except OSError:
                         pass
 
-    def test_self_update_skips_dirty_worktree(self):
+    def test_sys_upgrade_skips_dirty_worktree(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -2123,7 +2123,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["PATH"] = f"{fake_bin}:{env['PATH']}"
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "self-update"],
+                [str(temp_root / "manage.sh"), "sys:upgrade"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -2137,13 +2137,13 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(len(log_lines), 1, log_lines)
             self.assertIn(f"git -C {temp_root.resolve()} status --porcelain", log_lines[0])
 
-    def test_self_update_termination_cleans_up_descendant_processes(self):
+    def test_sys_upgrade_termination_cleans_up_descendant_processes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
 
-            child_pid_file = Path(temp_dir) / "self-update-child.pid"
-            ready_file = Path(temp_dir) / "self-update-ready"
+            child_pid_file = Path(temp_dir) / "sys-upgrade-child.pid"
+            ready_file = Path(temp_dir) / "sys-upgrade-ready"
             fake_bin = temp_root / "fake-bin"
             fake_bin.mkdir()
 
@@ -2184,7 +2184,7 @@ class ManageScriptTests(unittest.TestCase):
             env["READY_FILE"] = str(ready_file)
 
             proc = subprocess.Popen(
-                [str(temp_root / "manage.sh"), "self-update"],
+                [str(temp_root / "manage.sh"), "sys:upgrade"],
                 cwd=temp_root,
                 env=env,
                 stdout=subprocess.PIPE,
@@ -2198,12 +2198,12 @@ class ManageScriptTests(unittest.TestCase):
                     proc,
                     child_pid_file,
                     ready_file,
-                    "self-update 未按预期启动子进程",
+                    "sys-upgrade 未按预期启动子进程",
                 )
                 self._assert_descendant_exits_after_parent_termination(
                     proc,
                     child_pid,
-                    f"self-update 退出后子进程仍存活: {child_pid}",
+                    f"sys-upgrade 退出后子进程仍存活: {child_pid}",
                 )
             finally:
                 if proc.poll() is None:
@@ -2884,7 +2884,7 @@ class ManageScriptTests(unittest.TestCase):
                     except OSError:
                         pass
 
-    def test_unlock_removes_atomic_lock_artifacts(self):
+    def test_sys_unlock_removes_atomic_lock_artifacts(self):
         lock_backup = move_aside(self.lock_path)
         lock_dir_backup = move_aside(self.lock_dir)
         try:
@@ -2892,7 +2892,7 @@ class ManageScriptTests(unittest.TestCase):
             self.lock_dir.mkdir(parents=True)
             (self.lock_dir / "pid").write_text("999999", encoding="utf-8")
             result = subprocess.run(
-                [str(MANAGE), "unlock"],
+                [str(MANAGE), "sys:unlock"],
                 cwd=ROOT,
                 env=self._managed_env(),
                 capture_output=True,
@@ -2906,7 +2906,7 @@ class ManageScriptTests(unittest.TestCase):
             restore_path(self.lock_path, lock_backup)
             restore_path(self.lock_dir, lock_dir_backup)
 
-    def test_unlock_dry_run_preserves_atomic_lock_artifacts(self):
+    def test_sys_unlock_dry_run_preserves_atomic_lock_artifacts(self):
         lock_backup = move_aside(self.lock_path)
         lock_dir_backup = move_aside(self.lock_dir)
         try:
@@ -2914,7 +2914,7 @@ class ManageScriptTests(unittest.TestCase):
             self.lock_dir.mkdir(parents=True)
             (self.lock_dir / "pid").write_text("999999", encoding="utf-8")
             result = subprocess.run(
-                [str(MANAGE), "--dry-run", "unlock"],
+                [str(MANAGE), "--dry-run", "sys:unlock"],
                 cwd=ROOT,
                 env=self._managed_env(),
                 capture_output=True,
@@ -2979,7 +2979,7 @@ class ManageScriptTests(unittest.TestCase):
             restore_path(LOCK_PATH, global_lock_backup)
             restore_path(LOCK_DIR, global_lock_dir_backup)
 
-    def test_logs_command_outputs_latest_run_log(self):
+    def test_sys_logs_command_outputs_latest_run_log(self):
         latest_backup = move_aside(self.latest_log_pointer)
         legacy_backup = move_aside(self.legacy_log_path)
         unique_log = self.runtime_dir / "latest.log"
@@ -2988,7 +2988,7 @@ class ManageScriptTests(unittest.TestCase):
             unique_log.write_text("hello latest log\n", encoding="utf-8")
             self.latest_log_pointer.write_text(str(unique_log), encoding="utf-8")
             result = subprocess.run(
-                [str(MANAGE), "logs"],
+                [str(MANAGE), "sys:logs"],
                 cwd=ROOT,
                 env=self._managed_env(),
                 capture_output=True,
@@ -3002,7 +3002,7 @@ class ManageScriptTests(unittest.TestCase):
             restore_path(self.legacy_log_path, legacy_backup)
             restore_path(unique_log, unique_backup)
 
-    def test_clean_logs_command_removes_log_files(self):
+    def test_sys_clean_logs_command_removes_log_files(self):
         latest_backup = move_aside(self.latest_log_pointer)
         legacy_backup = move_aside(self.legacy_log_path)
         unique_log = Path(f"{self.log_prefix}_cleanup.log")
@@ -3012,7 +3012,7 @@ class ManageScriptTests(unittest.TestCase):
             unique_log.write_text("hello unique log\n", encoding="utf-8")
             self.latest_log_pointer.write_text(str(unique_log), encoding="utf-8")
             result = subprocess.run(
-                [str(MANAGE), "clean-logs"],
+                [str(MANAGE), "sys:clean-logs"],
                 cwd=ROOT,
                 env=self._managed_env(),
                 capture_output=True,
@@ -3028,7 +3028,7 @@ class ManageScriptTests(unittest.TestCase):
             restore_path(self.legacy_log_path, legacy_backup)
             restore_path(unique_log, unique_backup)
 
-    def test_clean_logs_dry_run_preserves_log_files(self):
+    def test_sys_clean_logs_dry_run_preserves_log_files(self):
         latest_backup = move_aside(self.latest_log_pointer)
         legacy_backup = move_aside(self.legacy_log_path)
         unique_log = Path(f"{self.log_prefix}_cleanup.log")
@@ -3038,7 +3038,7 @@ class ManageScriptTests(unittest.TestCase):
             unique_log.write_text("hello unique log\n", encoding="utf-8")
             self.latest_log_pointer.write_text(str(unique_log), encoding="utf-8")
             result = subprocess.run(
-                [str(MANAGE), "--dry-run", "clean-logs"],
+                [str(MANAGE), "--dry-run", "sys:clean-logs"],
                 cwd=ROOT,
                 env=self._managed_env(),
                 capture_output=True,
@@ -3106,7 +3106,7 @@ class ManageScriptTests(unittest.TestCase):
             restore_path(self.latest_log_pointer, latest_backup)
             restore_path(self.legacy_log_path, legacy_backup)
 
-    def test_backups_restore_restores_directory_backup_with_spaces(self):
+    def test_state_restore_restores_directory_backup_with_spaces(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
@@ -3131,7 +3131,7 @@ class ManageScriptTests(unittest.TestCase):
             env["HOME"] = str(temp_home)
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "backups:restore"],
+                [str(temp_root / "manage.sh"), "state:restore"],
                 cwd=temp_root,
                 env=env,
                 input="1\n",
@@ -3145,7 +3145,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertTrue((target_dir / "rule.md").exists(), combined)
             self.assertEqual((target_dir / "rule.md").read_text(encoding="utf-8"), "# restored\n")
 
-    def test_backups_restore_restores_plain_bak_file(self):
+    def test_state_restore_restores_plain_bak_file(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
@@ -3165,7 +3165,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["HOME"] = str(temp_home)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "backups:restore"],
+                [str(temp_root / "manage.sh"), "state:restore"],
                 cwd=temp_root,
                 env=env,
                 input="1\n",
@@ -3178,7 +3178,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, combined)
             self.assertEqual(target_file.read_text(encoding="utf-8"), '{"restored": true}\n')
 
-    def test_backups_restore_dry_run_does_not_modify_target(self):
+    def test_state_restore_dry_run_does_not_modify_target(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
@@ -3199,7 +3199,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["HOME"] = str(temp_home)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "--dry-run", "backups:restore"],
+                [str(temp_root / "manage.sh"), "--dry-run", "state:restore"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -3213,7 +3213,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn(str(backup_file), combined)
             self.assertEqual(target_file.read_text(encoding="utf-8"), '{"current": true}\n')
 
-    def test_backups_restore_respects_global_lock(self):
+    def test_state_restore_respects_global_lock(self):
         lock_backup = move_aside(self.lock_path)
         lock_dir_backup = move_aside(self.lock_dir)
         holder = subprocess.Popen(["sleep", "60"])
@@ -3229,7 +3229,7 @@ class ManageScriptTests(unittest.TestCase):
                 env["HOME"] = str(temp_home)
 
                 result = subprocess.run(
-                    [str(MANAGE), "backups:restore"],
+                    [str(MANAGE), "state:restore"],
                     cwd=ROOT,
                     env=env,
                     input="1\n",
@@ -3247,7 +3247,7 @@ class ManageScriptTests(unittest.TestCase):
             restore_path(self.lock_path, lock_backup)
             restore_path(self.lock_dir, lock_dir_backup)
 
-    def test_backups_restore_returns_non_zero_when_restore_fails(self):
+    def test_state_restore_returns_non_zero_when_restore_fails(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
@@ -3270,7 +3270,7 @@ class ManageScriptTests(unittest.TestCase):
             temp_home.chmod(0o500)
             try:
                 result = subprocess.run(
-                    [str(temp_root / "manage.sh"), "backups:restore"],
+                    [str(temp_root / "manage.sh"), "state:restore"],
                     cwd=temp_root,
                     env=env,
                     input="1\n",
@@ -3286,7 +3286,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("恢复失败", combined)
             self.assertFalse(target_file.exists(), combined)
 
-    def test_backups_list_ignores_unmanaged_home_backups(self):
+    def test_state_list_ignores_unmanaged_home_backups(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
@@ -3310,7 +3310,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["HOME"] = str(temp_home)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "backups:list"],
+                [str(temp_root / "manage.sh"), "state:list"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -3323,7 +3323,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn(str(managed_backup), combined)
             self.assertNotIn(str(unrelated_backup), combined)
 
-    def test_backups_list_orders_newest_entries_first(self):
+    def test_state_list_orders_newest_entries_first(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
@@ -3350,7 +3350,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["HOME"] = str(temp_home)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "backups:list"],
+                [str(temp_root / "manage.sh"), "state:list"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -3365,7 +3365,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(lines[0], str(newer_backup), combined)
             self.assertEqual(lines[1], str(older_backup), combined)
 
-    def test_backups_list_fails_when_rules_manifest_is_missing(self):
+    def test_state_list_fails_when_rules_manifest_is_missing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
@@ -3376,7 +3376,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["HOME"] = str(temp_home)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "backups:list"],
+                [str(temp_root / "manage.sh"), "state:list"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -3388,7 +3388,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, combined)
             self.assertIn("rules-targets.list 缺失", combined)
 
-    def test_backups_restore_fails_when_managed_scope_enumeration_fails(self):
+    def test_state_restore_fails_when_managed_scope_enumeration_fails(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
@@ -3399,7 +3399,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["HOME"] = str(temp_home)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "backups:restore"],
+                [str(temp_root / "manage.sh"), "state:restore"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -3411,7 +3411,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, combined)
             self.assertIn("rules-targets.list 缺失", combined)
 
-    def test_cleanup_only_removes_target_scoped_temp_files(self):
+    def test_sys_clean_only_removes_target_scoped_temp_files(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
@@ -3441,7 +3441,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["HOME"] = str(temp_home)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "cleanup"],
+                [str(temp_root / "manage.sh"), "sys:clean"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -3453,7 +3453,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertFalse(managed_tmp.exists(), result.stdout + result.stderr)
             self.assertTrue(unrelated_tmp.exists(), result.stdout + result.stderr)
 
-    def test_cleanup_removes_plain_bak_for_managed_targets(self):
+    def test_sys_clean_removes_plain_bak_for_managed_targets(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
@@ -3478,7 +3478,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["HOME"] = str(temp_home)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "cleanup"],
+                [str(temp_root / "manage.sh"), "sys:clean"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -3489,7 +3489,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse(plain_backup.exists(), result.stdout + result.stderr)
 
-    def test_cleanup_removes_directory_backups_for_managed_rules_targets(self):
+    def test_sys_clean_removes_directory_backups_for_managed_rules_targets(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
@@ -3524,7 +3524,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["HOME"] = str(temp_home)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "cleanup"],
+                [str(temp_root / "manage.sh"), "sys:clean"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -3535,11 +3535,11 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse(rule_backup.exists(), result.stdout + result.stderr)
 
-    def test_cleanup_scope_has_no_repo_native_rule_targets_by_default(self):
+    def test_sys_clean_scope_has_no_repo_native_rule_targets_by_default(self):
         manifest = (ROOT / "config" / "rules-targets.list").read_text(encoding="utf-8")
         self.assertNotIn("{{REPO_ROOT}}", manifest)
 
-    def test_cleanup_removes_current_agent_legacy_rule_backups(self):
+    def test_sys_clean_removes_current_agent_legacy_rule_backups(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
@@ -3558,7 +3558,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["HOME"] = str(temp_home)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "cleanup"],
+                [str(temp_root / "manage.sh"), "sys:clean"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -3570,7 +3570,7 @@ class ManageScriptTests(unittest.TestCase):
             for backup in legacy_backups:
                 self.assertFalse(backup.exists(), result.stdout + result.stderr)
 
-    def test_cleanup_removes_gemini_invalid_json_tmp_backups(self):
+    def test_sys_clean_removes_gemini_invalid_json_tmp_backups(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
@@ -3590,7 +3590,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["HOME"] = str(temp_home)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "cleanup"],
+                [str(temp_root / "manage.sh"), "sys:clean"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -3601,7 +3601,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse(invalid_backup.exists(), result.stdout + result.stderr)
 
-    def test_cleanup_dry_run_preserves_managed_artifacts(self):
+    def test_sys_clean_dry_run_preserves_managed_artifacts(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
@@ -3635,7 +3635,7 @@ class ManageScriptTests(unittest.TestCase):
             env["AGENT_MANAGER_LOG_PREFIX"] = str(temp_home / "agent_manager_sync_test")
             env["AGENT_MANAGER_LATEST_LOG_POINTER"] = str(latest_log)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "--dry-run", "cleanup"],
+                [str(temp_root / "manage.sh"), "--dry-run", "sys:clean"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,

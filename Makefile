@@ -1,36 +1,30 @@
-.PHONY: all init bootstrap install apply sync bump update plan agents-apply agents\:apply agents-sync agents\:sync sys-upgrade sys\:upgrade self-update smoke ui help doctor status detect fetch-models offline dry-run eval-rules cleanup sys-clean sys\:clean state-clean state\:clean backups-gc backups\:gc unlock sys-unlock sys\:unlock logs sys-logs sys\:logs clean-logs sys-clean-logs sys\:clean-logs backups-list backups\:list state-list state\:list restore backups\:restore state-restore state\:restore rules-build rules\:build rules-apply rules\:apply rules-sync rules\:sync skills-apply skills\:apply skills-link skills\:link skills-bump skills\:bump skills\:upgrade mcp-apply mcp\:apply mcp-sync mcp\:sync mcp-build mcp\:build mcp-prepare mcp\:prepare tools-apply tools\:apply tools-sync tools\:sync browser-apply browser\:apply browser-us-sync browser\:sync claude-hooks-apply claude\:hooks\:apply claude-hooks-sync claude\:hooks\:sync claude-statusline-apply claude\:statusline\:apply claude-statusline-install claude\:statusline\:install claude-statusline-wire claude\:statusline\:wire claude-shell-aliases-apply claude\:shell-aliases\:apply claude-shell-aliases-sync claude\:shell-aliases\:sync codex-hooks-apply codex\:hooks\:apply codex-hooks-sync codex\:hooks\:sync secrets-check secrets\:check instructions-check instructions\:check
+.PHONY: init apply bump plan agents-apply agents\:apply sys-upgrade sys\:upgrade smoke ui help doctor status detect fetch-models offline dry-run eval-rules sys-clean sys\:clean state-clean state\:clean sys-unlock sys\:unlock sys-logs sys\:logs sys-clean-logs sys\:clean-logs state-list state\:list state-restore state\:restore rules-build rules\:build rules-apply rules\:apply skills-apply skills\:apply skills-bump skills\:bump mcp-apply mcp\:apply mcp-build mcp\:build tools-apply tools\:apply browser-apply browser\:apply claude-hooks-apply claude\:hooks\:apply claude-statusline-apply claude\:statusline\:apply claude-statusline-wire claude\:statusline\:wire claude-shell-aliases-apply claude\:shell-aliases\:apply codex-hooks-apply codex\:hooks\:apply secrets-check secrets\:check instructions-check instructions\:check
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
 
-# 全量执行（安装 + 更新 + 同步）
-all:
-	@./manage.sh all
-
 # 新机器初始化或全量收敛
-init bootstrap:
+init:
 	@./manage.sh init
 
-# 兼容安装入口：等价于 bootstrap
-install: init
-
-# 同步当前配置并收敛 skills / MCP 资源；不处理 Agent 安装
-apply sync:
+# apply：把锁定态分发/收敛到本机（rules/skills/mcp/tools/browser/alias）；不刷版本锁、不装 Agent
+apply:
 	@./manage.sh apply
 
 # 纯粹刷新版本锁与 skill commit（更新元数据到锁定文件），不执行本地环境应用
-bump update:
+bump:
 	@./manage.sh bump
 
-# 预演一次完整 bootstrap
+# 预演一次完整 init
 plan:
 	@./manage.sh plan
 
-# 仅更新 agent-manager 仓库自身逻辑
-agents-apply agents\:apply agents-sync agents\:sync:
+# 仅对齐已安装 Agent 的生命周期，不安装缺失 Agent
+agents-apply agents\:apply:
 	@./manage.sh agents:apply
 
-sys-upgrade sys\:upgrade self-update:
+# 仅更新 agent-manager 仓库自身逻辑
+sys-upgrade sys\:upgrade:
 	@./manage.sh sys:upgrade
 
 # 跨平台 smoke 验证（安全预演路径）
@@ -44,7 +38,7 @@ secrets-check:
 secrets\:check:
 	@python3 ./scripts/check_no_secrets.py
 
-# 兼容旧入口：离线本地同步
+# 离线模式执行 apply（等价 --offline apply）
 offline:
 	@./manage.sh offline
 
@@ -60,27 +54,24 @@ doctor:
 status: doctor
 
 # 全量大扫除 (清理备份、日志、残留)
-sys-clean sys\:clean cleanup:
+sys-clean sys\:clean:
 	@./manage.sh sys:clean
 
 # 删除受管 Agent home 下超过 30 天的 .bak.* 文件
-state-clean state\:clean backups-gc:
+state-clean state\:clean:
 	@find ~/.claude ~/.codex ~/.gemini -maxdepth 2 -type f -name '*.bak.*' -mtime +30 -print -delete 2>/dev/null || true
 
-backups\:gc:
-	@$(MAKE) backups-gc
-
 # 强制解除资源锁
-sys-unlock sys\:unlock unlock:
+sys-unlock sys\:unlock:
 	@./manage.sh sys:unlock
 
 # 历史配置备份清单
 
-state-list state\:list backups-list backups\:list:
+state-list state\:list:
 	@./manage.sh state:list
 
 # 交互式备份恢复
-state-restore state\:restore restore backups\:restore:
+state-restore state\:restore:
 	@./manage.sh state:restore
 
 # 环境探测
@@ -92,11 +83,11 @@ fetch-models:
 	@./manage.sh fetch-models $(url) $(key)
 
 # 查看最近同步日志
-sys-logs sys\:logs logs:
+sys-logs sys\:logs:
 	@./manage.sh sys:logs
 
 # 清理日志
-sys-clean-logs sys\:clean-logs clean-logs:
+sys-clean-logs sys\:clean-logs:
 	@./manage.sh sys:clean-logs
 
 # 独立同步任务
@@ -106,31 +97,31 @@ rules-build:
 rules\:build:
 	@./manage.sh rules:build
 
-rules-apply rules\:apply rules-sync rules\:sync:
+rules-apply rules\:apply:
 	@./manage.sh rules:apply
 
-skills-apply skills\:apply skills-link skills\:link:
+skills-apply skills\:apply:
 	@./manage.sh skills:apply
 
-skills-bump skills\:bump skills\:upgrade:
+skills-bump skills\:bump:
 	@./manage.sh skills:bump
 
-mcp-apply mcp\:apply mcp-sync mcp\:sync:
+mcp-apply mcp\:apply:
 	@./manage.sh mcp:apply
 
-mcp-build mcp\:build mcp-prepare mcp\:prepare:
+mcp-build mcp\:build:
 	@./manage.sh mcp:build
 
-tools-apply tools\:apply tools-sync tools\:sync:
+tools-apply tools\:apply:
 	@./manage.sh tools:apply
 
-browser-apply browser\:apply browser-us-sync browser\:sync:
+browser-apply browser\:apply:
 	@./manage.sh browser:apply
 
-claude-hooks-apply claude\:hooks\:apply claude-hooks-sync claude\:hooks\:sync:
+claude-hooks-apply claude\:hooks\:apply:
 	@./manage.sh claude:hooks:apply
 
-claude-statusline-apply claude\:statusline\:apply claude-statusline-install claude\:statusline\:install:
+claude-statusline-apply claude\:statusline\:apply:
 	@./manage.sh claude:statusline:apply
 
 claude-statusline-wire:
@@ -139,10 +130,10 @@ claude-statusline-wire:
 claude\:statusline\:wire:
 	@./manage.sh claude:statusline:wire
 
-claude-shell-aliases-apply claude\:shell-aliases\:apply claude-shell-aliases-sync claude\:shell-aliases\:sync:
+claude-shell-aliases-apply claude\:shell-aliases\:apply:
 	@./manage.sh claude:shell-aliases:apply
 
-codex-hooks-apply codex\:hooks\:apply codex-hooks-sync codex\:hooks\:sync:
+codex-hooks-apply codex\:hooks\:apply:
 	@./manage.sh codex:hooks:apply
 
 # 预览模式 (仅输出计划动作，跳过远端副作用)

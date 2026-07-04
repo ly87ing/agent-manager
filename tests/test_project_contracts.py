@@ -22,7 +22,7 @@ class ProjectContractTests(unittest.TestCase):
 
     def test_makefile_exposes_smoke_target(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertIn(".PHONY: all init bootstrap install apply sync bump update plan", makefile)
+        self.assertIn(".PHONY: init apply bump plan", makefile)
         self.assertIn("\nsmoke:\n\t@./scripts/ci-smoke.sh\n", makefile)
 
 
@@ -55,11 +55,6 @@ class ProjectContractTests(unittest.TestCase):
         ):
             self.assertNotIn(excluded, body, f"bump 不应包含重活步骤: {excluded}")
 
-
-    def test_makefile_exposes_install_alias(self):
-        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertIn(" install", makefile)
-        self.assertIn("install: init", makefile)
 
     def test_makefile_exposes_secrets_check_target(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
@@ -165,8 +160,7 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("./manage.sh agents:apply --dry-run", content)
         self.assertIn("./manage.sh plan", content)
         self.assertIn("./manage.sh sys:upgrade --dry-run", content)
-        self.assertIn("make -n apply bump agents-apply init all plan sys-upgrade offline dry-run", content)
-        self.assertIn("make -n install", content)
+        self.assertIn("make -n apply bump agents-apply init plan sys-upgrade offline dry-run", content)
         self.assertNotIn("./manage.sh bootstrap", content)
 
     def test_ci_workflow_runs_full_unittest_suite(self):
@@ -204,7 +198,7 @@ class ProjectContractTests(unittest.TestCase):
 
     def test_troubleshooting_log_level_guidance_matches_runtime(self):
         troubleshooting = (ROOT / "docs" / "TROUBLESHOOTING.md").read_text(encoding="utf-8")
-        self.assertIn("LOG_LEVEL=DEBUG ./manage.sh bootstrap", troubleshooting)
+        self.assertIn("LOG_LEVEL=DEBUG ./manage.sh init", troubleshooting)
         self.assertNotIn("永久修改 manage.sh 中的 logging.basicConfig level", troubleshooting)
 
     def test_troubleshooting_mentions_rules_manifest_and_policy_scoped_dependencies(self):
@@ -413,9 +407,9 @@ class ProjectContractTests(unittest.TestCase):
 
     def test_architecture_dry_run_contract_mentions_local_maintenance_writes(self):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
-        self.assertIn("cleanup", architecture)
-        self.assertIn("backups:restore", architecture)
-        self.assertIn("clean-logs", architecture)
+        self.assertIn("sys:clean", architecture)
+        self.assertIn("state:restore", architecture)
+        self.assertIn("sys:clean-logs", architecture)
         self.assertIn("会修改本地状态的维护动作", architecture)
 
     def test_architecture_documents_local_override_and_terminal_boundary(self):
@@ -456,7 +450,7 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("config/codex-hooks.json", architecture)
         self.assertIn("agent-rule/scripts/sync-codex-hooks.py", architecture)
         self.assertIn(".codex/hooks.json", architecture)
-        self.assertIn("make codex-hooks-sync", architecture)
+        self.assertIn("make codex-hooks-apply", architecture)
 
     def test_architecture_documents_current_agent_scope(self):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")

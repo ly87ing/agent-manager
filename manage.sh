@@ -103,7 +103,7 @@ while [ $# -gt 0 ]; do
 done
 if [ -z "$cmd" ]; then
     if [ -n "$DRY_RUN_FLAG" ] || [ -n "$OFFLINE_FLAG" ]; then
-        cmd="all"
+        cmd="init"
     else
         cmd="help"
     fi
@@ -135,7 +135,7 @@ function acquire_lock() {
         legacy_pid="$(cat "$LOCK_FILE" 2>/dev/null || true)"
         if [ -n "$legacy_pid" ] && [[ "$legacy_pid" != "$$" ]] && pid_is_alive "$legacy_pid"; then
             echo -e "${ERROR_RED}错误: 另一个管理任务 (PID: $legacy_pid) 正在运行。${NC}"
-            echo -e "\n${PENDING_GOLD}提示: 请运行 './manage.sh unlock' 手动强制解锁。${NC}"
+            echo -e "\n${PENDING_GOLD}提示: 请运行 './manage.sh sys:unlock' 手动强制解锁。${NC}"
             exit 1
         fi
         rm -f "$LOCK_FILE"
@@ -152,7 +152,7 @@ function acquire_lock() {
     old_pid="$(read_lock_pid)"
     if [ -n "$old_pid" ] && [[ "$old_pid" != "$$" ]] && pid_is_alive "$old_pid"; then
         echo -e "${ERROR_RED}错误: 另一个管理任务 (PID: $old_pid) 正在运行。${NC}"
-        echo -e "\n${PENDING_GOLD}提示: 请运行 './manage.sh unlock' 手动强制解锁。${NC}"
+        echo -e "\n${PENDING_GOLD}提示: 请运行 './manage.sh sys:unlock' 手动强制解锁。${NC}"
         exit 1
     fi
 
@@ -164,12 +164,12 @@ function acquire_lock() {
         return 0
     fi
 
-    echo -e "${ERROR_RED}错误: 无法获取运行锁，请稍后重试或执行 './manage.sh unlock'。${NC}"
+    echo -e "${ERROR_RED}错误: 无法获取运行锁，请稍后重试或执行 './manage.sh sys:unlock'。${NC}"
     exit 1
 }
 
 # Atomic lock check
-if [[ "$cmd" != "help" && "$cmd" != "-h" && "$cmd" != "--help" && "$cmd" != "-help" && "$cmd" != "detect" && "$cmd" != "doctor" && "$cmd" != "status" && "$cmd" != "backups:list" && "$cmd" != "unlock" && "$cmd" != "logs" && "$cmd" != "fetch-models" && "$cmd" != "agent-status" && "$cmd" != "agents:status" ]]; then
+if [[ "$cmd" != "help" && "$cmd" != "-h" && "$cmd" != "--help" && "$cmd" != "-help" && "$cmd" != "detect" && "$cmd" != "doctor" && "$cmd" != "status" && "$cmd" != "state:list" && "$cmd" != "sys:unlock" && "$cmd" != "sys:logs" && "$cmd" != "fetch-models" && "$cmd" != "agents:status" ]]; then
     acquire_lock
 fi
 
@@ -1424,32 +1424,32 @@ function is_dry_run_mode() {
 }
 
 case "$cmd" in
-    all|bootstrap|init)
+    init)
         if [ -z "$WAIT_AGENT_LIFECYCLE_FLAG" ]; then
             WAIT_AGENT_LIFECYCLE_FLAG="--wait-async-actions"
         fi
         run_init_pipeline
         ;;
-    bump|update)
+    bump)
         if [ -z "$WAIT_AGENT_LIFECYCLE_FLAG" ]; then
             WAIT_AGENT_LIFECYCLE_FLAG="--wait-async-actions"
         fi
         run_bump_pipeline
         ;;
-    apply|sync)
+    apply)
         run_apply_pipeline
         ;;
     plan)
         DRY_RUN_FLAG="--dry-run"
         run_init_pipeline
         ;;
-    agents:apply|agents:sync)
+    agents:apply)
         if [ -z "$WAIT_AGENT_LIFECYCLE_FLAG" ]; then
             WAIT_AGENT_LIFECYCLE_FLAG="--wait-async-actions"
         fi
         run_agents_pipeline "--no-install"
         ;;
-    sys:upgrade|self-update)
+    sys:upgrade)
         run_self_update
         ;;
     offline)
@@ -1466,18 +1466,18 @@ case "$cmd" in
             doctor_check
         fi
         ;;
-    agent-status|agents:status)
+    agents:status)
         run_agent_lifecycle_status_task
         ;;
     detect) detect_agents ;;
-    sys:unlock|unlock)
+    sys:unlock)
         if is_dry_run_mode; then
             echo "预览模式：计划清理原子锁目录与遗留锁文件。"
         else
             remove_lock_artifacts
             echo "锁已解除。"
         fi ;;
-    sys:logs|logs)
+    sys:logs)
         if latest_log=$(resolve_latest_log_path); then
             if [ -t 1 ] && command -v less >/dev/null 2>&1; then
                 less -R "$latest_log"
@@ -1487,21 +1487,21 @@ case "$cmd" in
         else
             echo "暂无日志。"
         fi ;;
-    sys:clean-logs|clean-logs)
+    sys:clean-logs)
         if is_dry_run_mode; then
             echo "预览模式：计划清理 latest 指针与所有按次运行日志。"
         else
             rm -f "${LOG_PREFIX}"*.log "$LATEST_LOG_POINTER"
             echo "日志已清理"
         fi ;;
-    state:list|backups:list)
+    state:list)
         if ! backup_entries="$(list_managed_backup_entries)"; then
             exit 1
         fi
         if [ -n "$backup_entries" ]; then
             printf '%s\n' "$backup_entries" | head -n 20
         fi ;;
-    state:restore|backups:restore) 
+    state:restore) 
         files=()
         if ! backup_entries="$(list_managed_backup_entries)"; then
             exit 1
@@ -1525,13 +1525,13 @@ case "$cmd" in
             fi
             break
         done < "$selection_input" ;;
-    mcp:apply|mcp:sync)
+    mcp:apply)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json" --prepare-runtime $DRY_RUN_FLAG $OFFLINE_FLAG $FORCE_REFRESH_FLAG ;;
-    mcp:build|mcp:prepare)
+    mcp:build)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json" --prepare-runtime $DRY_RUN_FLAG $OFFLINE_FLAG $FORCE_REFRESH_FLAG ;;
     rules:build)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" "$PYTHON_CMD" ./scripts/build-agent-rules.py ;;
-    rules:apply|rules:sync)
+    rules:apply)
         if ! target_names="$(list_active_rule_targets)"; then
             exit 1
         fi
@@ -1544,21 +1544,21 @@ case "$cmd" in
             [ -n "$target_name" ] && rule_args+=(--target "$target_name")
         done <<< "$target_names"
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" ./scripts/sync-agent-rules.sh "${rule_args[@]}" $DRY_RUN_FLAG ;;
-    claude:hooks:apply|claude:hooks:sync)
+    claude:hooks:apply)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" "$PYTHON_CMD" ./scripts/sync-claude-hooks.py $DRY_RUN_FLAG ;;
-    claude:shell-aliases:apply|claude:shell-aliases:sync)
+    claude:shell-aliases:apply)
         run_supervised_command_in_dir 60 "$ROOT_DIR" bash "$ROOT_DIR/scripts/claude/sync_shell_aliases.sh" $DRY_RUN_FLAG ;;
-    claude:statusline:apply|claude:statusline:install)
+    claude:statusline:apply)
         run_supervised_command_in_dir 600 "$ROOT_DIR" "$PYTHON_CMD" ./scripts/claude/install_statusline.py $DRY_RUN_FLAG ;;
     claude:statusline:wire)
         run_supervised_command_in_dir 600 "$ROOT_DIR" "$PYTHON_CMD" ./scripts/claude/install_statusline.py \
             --apply-settings \
             $DRY_RUN_FLAG ;;
-    codex:hooks:apply|codex:hooks:sync)
+    codex:hooks:apply)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" "$PYTHON_CMD" ./scripts/sync-codex-hooks.py $DRY_RUN_FLAG ;;
-    skills:apply|skills:link)
+    skills:apply)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" link_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG $FORCE_REFRESH_FLAG ;;
-    skills:bump|skills:upgrade)
+    skills:bump)
         upgrade_args=(upgrade_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json")
         if [ "${#CMD_ARGS[@]}" -gt 0 ]; then
             for repo_name in "${CMD_ARGS[@]}"; do
@@ -1568,9 +1568,9 @@ case "$cmd" in
         if [ -n "$DRY_RUN_FLAG" ]; then upgrade_args+=("$DRY_RUN_FLAG"); fi
         if [ -n "$OFFLINE_FLAG" ]; then upgrade_args+=("$OFFLINE_FLAG"); fi
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" "${upgrade_args[@]}" ;;
-    tools:apply|tools:sync)
+    tools:apply)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-tool" "$PYTHON_CMD" sync_tools.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/tools.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG $FORCE_REFRESH_FLAG ;;
-    browser:apply|browser:sync)
+    browser:apply)
         run_browser_us_sync_task ;;
     fetch-models)
         args=()
@@ -1587,7 +1587,7 @@ case "$cmd" in
             run_supervised_command_in_dir 600 "$ROOT_DIR" "$PYTHON_CMD" "$ROOT_DIR/scripts/fetch_models.py"
         fi
         ;;
-    sys:clean|cleanup)
+    sys:clean)
         echo -e "${HDR_BLUE}正在执行全量环境大扫除...${NC}"
         if ! agents_paths="$(list_cleanup_target_paths)"; then
             exit 1
@@ -1639,39 +1639,39 @@ case "$cmd" in
         echo -e "  ${PENDING_GOLD}--dry-run${NC}       空转模式，仅输出计划动作并跳过会修改本地或远端状态的副作用"
         echo -e "  ${PENDING_GOLD}--offline${NC}       离线模式，禁止远程拉取/安装；仅使用本地已存在仓库与配置\n"
         echo -e "  ${PENDING_GOLD}-f, --force-refresh${NC} 更新探测失败时仍强制执行远端刷新；默认会跳过这些保守回退下载"
-        echo -e "  ${PENDING_GOLD}--wait-agent-lifecycle${NC} 等待 Agent 生命周期后台安装/升级结束；all / bootstrap / update 默认已启用\n"
+        echo -e "  ${PENDING_GOLD}--wait-agent-lifecycle${NC} 等待 Agent 生命周期后台安装/升级结束；init / agents:apply 默认已启用\n"
         echo -e "${BOLD}${HDR_BLUE}=== 日常入口 (Main Flows) ===${NC}"
-        echo -e "  ${SUCCESS_GREEN}sync${NC}            同步 rules，并按已锁定版本对齐 skills / MCP；不刷新版本锁或处理 Agent / Tool 生命周期"
-        echo -e "  ${SUCCESS_GREEN}pull${NC}            拉取远端最新凭证 / 版本锁 / skill / MCP 资源并下发到各 Agent；不处理 Agent / Tool 生命周期（--self-update 额外先更新本仓库）"
-        echo -e "  ${SUCCESS_GREEN}update${NC}          刷新 CLI/MCP/tool 版本锁与 skill commit，更新远端资源并等待 Agent 生命周期完成，但不安装缺失 Agent"
-        echo -e "  ${SUCCESS_GREEN}bootstrap${NC}       执行全量安装、更新与同步，适合新机器初始化"
-        echo -e "  ${SUCCESS_GREEN}all${NC}             \`bootstrap\` 的兼容别名"
-        echo -e "  ${SUCCESS_GREEN}plan${NC}            预演一次完整 \`bootstrap\`（dry-run）"
-        echo -e "  ${SUCCESS_GREEN}self-update${NC}     仅更新 agent-manager 仓库自身逻辑"
-        echo -e "  ${SUCCESS_GREEN}ui${NC}              启动基于 Terminal 的交互式的可视化管理终端界面"
+        echo -e "  ${SUCCESS_GREEN}apply${NC}           把当前锁定态分发/收敛到本机：secrets 拉取、shell alias、tools、browser、rules 构建分发、skills 链接、mcp 注入；不刷新版本锁、不安装 Agent"
+        echo -e "  ${SUCCESS_GREEN}bump${NC}            只刷新元数据：CLI/MCP/tool 版本锁与 skill commit（联网）写入本机锁文件；不分发、不安装 Agent、不改本机环境"
+        echo -e "  ${SUCCESS_GREEN}init${NC}            新机器初始化或全量收敛：\`bump\` + Agent 生命周期（安装缺失 Agent）+ \`apply\` + 失效引用审计"
+        echo -e "  ${SUCCESS_GREEN}agents:apply${NC}    仅对齐已安装 Agent 的生命周期，不安装缺失 Agent"
+        echo -e "  ${SUCCESS_GREEN}plan${NC}            预演一次完整 \`init\`（dry-run）"
+        echo -e "  ${SUCCESS_GREEN}sys:upgrade${NC}     仅更新 agent-manager 仓库自身逻辑"
+        echo -e "  ${SUCCESS_GREEN}offline${NC}         离线模式下执行 \`apply\`（等价 \`--offline apply\`）"
+        echo -e "  ${SUCCESS_GREEN}ui${NC}              启动基于 Terminal 的交互式可视化管理界面"
         echo -e "  ${SUCCESS_GREEN}doctor / status${NC} 进行深度的资源校验、配置自检与环境排错诊断"
         echo -e "  ${SUCCESS_GREEN}detect${NC}          仅执行各 Agent 开发工具的环境探测与支持情况检测"
         echo -e "  ${SUCCESS_GREEN}fetch-models${NC}    探测并获取模型列表。用法: ./manage.sh fetch-models <url> <key>\n"
         echo -e "${BOLD}${HDR_BLUE}=== 运维排错 (Maintenance) ===${NC}"
-        echo -e "  ${VAL_PURPLE}cleanup${NC}         执行全量环境大扫除，深度清理临时文件、无用快照缓存及历史日志"
-        echo -e "  ${VAL_PURPLE}unlock${NC}          强制清除原子锁目录与遗留锁文件"
-        echo -e "  ${VAL_PURPLE}backups:list${NC}    查找并列出近期系统中可用的容灾备份配置快照，最多20个"
-        echo -e "  ${VAL_PURPLE}backups:restore${NC} 交互式快照选择，用于从特定备份快照中恢复配置"
-        echo -e "  ${VAL_PURPLE}logs${NC}            查看最近一次执行的完整全链路同步日志（latest 指针）"
-        echo -e "  ${VAL_PURPLE}clean-logs${NC}      清空 latest 指针与所有按次留存的运行日志文件\n"
+        echo -e "  ${VAL_PURPLE}sys:clean${NC}       执行全量环境大扫除，深度清理临时文件、无用快照缓存及历史日志"
+        echo -e "  ${VAL_PURPLE}sys:unlock${NC}      强制清除原子锁目录与遗留锁文件"
+        echo -e "  ${VAL_PURPLE}state:list${NC}      查找并列出近期系统中可用的容灾备份配置快照，最多20个"
+        echo -e "  ${VAL_PURPLE}state:restore${NC}   交互式快照选择，用于从特定备份快照中恢复配置"
+        echo -e "  ${VAL_PURPLE}sys:logs${NC}        查看最近一次执行的完整全链路同步日志（latest 指针）"
+        echo -e "  ${VAL_PURPLE}sys:clean-logs${NC}  清空 latest 指针与所有按次留存的运行日志文件\n"
         echo -e "${BOLD}${HDR_BLUE}=== 分步原子控制 (Atomic syncs) ===${NC}"
-        echo -e "  ${BORDER_GRAY}mcp:sync${NC}        准备并注入 MCP 配置（默认检查/拉取 repo、同步 secrets、setup/build）"
-        echo -e "  ${BORDER_GRAY}mcp:prepare${NC}     \`mcp:sync\` 的兼容别名；同样会准备 MCP 运行时"
+        echo -e "  ${BORDER_GRAY}mcp:apply${NC}       准备并注入 MCP 配置（默认检查/拉取 repo、同步 secrets、setup/build）"
+        echo -e "  ${BORDER_GRAY}mcp:build${NC}       仅准备 MCP 运行时（与 \`mcp:apply\` 的运行时准备等价）"
         echo -e "  ${BORDER_GRAY}rules:build${NC}     从 agent-rule/rules/src/ 生成可分发的 dist 规则产物"
-        echo -e "  ${BORDER_GRAY}rules:sync${NC}      独立执行规则与系统级 prompt 指令向各个 Agent 的拷贝或软链接分发"
-        echo -e "  ${BORDER_GRAY}claude:hooks:sync${NC} 独立刷新仓库级 Claude hooks 到 .claude/settings.json"
-        echo -e "  ${BORDER_GRAY}claude:statusline:install${NC} 安装精简 statusline 脚本到 ~/.claude/statusline.sh"
+        echo -e "  ${BORDER_GRAY}rules:apply${NC}     独立执行规则与系统级 prompt 指令向各个 Agent 的拷贝或软链接分发"
+        echo -e "  ${BORDER_GRAY}claude:hooks:apply${NC} 独立刷新仓库级 Claude hooks 到 .claude/settings.json"
+        echo -e "  ${BORDER_GRAY}claude:statusline:apply${NC} 安装精简 statusline 脚本到 ~/.claude/statusline.sh"
         echo -e "  ${BORDER_GRAY}claude:statusline:wire${NC}    将 statusline.sh 路径写入 ~/.claude/settings.json（仅作用于 Claude Code）"
-        echo -e "  ${BORDER_GRAY}codex:hooks:sync${NC} 独立刷新仓库级 Codex hooks 到 .codex/hooks.json"
-        echo -e "  ${BORDER_GRAY}skills:link${NC}     独立执行全局或系统级专业技能代码集到 Agent 沙盒空间的映射配置与软链接"
-        echo -e "  ${BORDER_GRAY}skills:upgrade${NC}  显式解析并回写 skill 仓库的最新可审计版本（仅 release/tag，失败即停止）"
-        echo -e "  ${BORDER_GRAY}tools:sync${NC}      独立同步或安装全局统一增强工具链条"
-        echo -e "  ${BORDER_GRAY}browser:sync${NC}    独立同步 Chrome 的 Google US 浏览器前置状态\n"
+        echo -e "  ${BORDER_GRAY}codex:hooks:apply${NC} 独立刷新仓库级 Codex hooks 到 .codex/hooks.json"
+        echo -e "  ${BORDER_GRAY}skills:apply${NC}    独立执行全局或系统级专业技能代码集到 Agent 沙盒空间的映射配置与软链接"
+        echo -e "  ${BORDER_GRAY}skills:bump${NC}     显式解析并回写 skill 仓库的最新可审计版本（仅 release/tag，失败即停止）"
+        echo -e "  ${BORDER_GRAY}tools:apply${NC}     独立同步或安装全局统一增强工具链条"
+        echo -e "  ${BORDER_GRAY}browser:apply${NC}   独立同步 Chrome 的 Google US 浏览器前置状态\n"
         echo "" ;;
     *) echo -e "${ERROR_RED}错误: 未知命令 '$cmd'${NC}"; exit 1 ;;
 esac

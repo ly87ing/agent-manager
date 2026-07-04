@@ -29,8 +29,8 @@ make init
 # 本地环境收敛（会更新受管 MCP 资源并准备运行时）
 make apply
 
-# 仅同步 MCP 配置
-./manage.sh mcp:sync
+# 仅收敛 MCP 配置到本机
+./manage.sh mcp:apply
 ```
 
 ### 手动配置
@@ -50,7 +50,7 @@ make apply
 
 **维护约定**:
 - 受管 MCP 的实际命令必须固定版本或固定 commit；`@latest`、分支名只允许出现在 `version_lock` 的查询元数据里。
-- `config/mcp.json` 保存服务器定义、命令模板和查询元数据；`make bump` / `make init` / `make all` 会先运行 `scripts/update_version_pins.py`，查询 npm 最新版本或 Git ref 最新 commit，再写入本机 `config/version-pins.local.json`。
+- `config/mcp.json` 保存服务器定义、命令模板和查询元数据；`make bump` / `make init` 会先运行 `scripts/update_version_pins.py`，查询 npm 最新版本或 Git ref 最新 commit，再写入本机 `config/version-pins.local.json`。
 - 首次调用 `chrome-devtools` 时，`npx` 可能会下载锁定版本的包；需要本机有可用的 Node.js / npm 运行时。
 - `chrome-devtools` 的 Codex 启动超时按 120 秒维护，覆盖默认 30 秒，避免 `npx` 冷启动或缓存失效时被误判为 MCP 启动失败。
 - `make doctor` 会在 `chrome-devtools` 处于启用状态时预检 `npx` 运行时是否可用；实际包版本以 `config/mcp.json` 套用本地版本锁后的有效配置为准。
@@ -227,7 +227,7 @@ make init
 
 **自动化流程**：
 - `make bump` / `make init` 会在顶层检查 `secrets/` 是否存在
-- `mcp:sync` 默认会准备 MCP 运行时：同步本地 secrets 仓库、按需 clone/pull MCP repo，并执行 setup/build
+- `mcp:apply` 默认会准备 MCP 运行时：同步本地 secrets 仓库、按需 clone/pull MCP repo，并执行 setup/build
 - 如需阻止联网拉取或安装，请追加 `--offline`
 
 #### 手动初始化
@@ -254,7 +254,7 @@ git push origin main
 
 **优势**：
 - ✅ 简单易用，无 submodule 复杂性
-- ✅ `mcp:sync` / `mcp:prepare` 默认都会把配置与运行时一起收敛，减少“配置已写入但运行时未准备”的半完成状态
+- ✅ `mcp:apply` / `mcp:build` 默认都会把配置与运行时一起收敛，减少“配置已写入但运行时未准备”的半完成状态
 - ✅ 凭证版本化、可审计
 - ✅ 权限分离（私有仓库）
 
@@ -426,9 +426,9 @@ rm ./.agents/mcp_config.json
    echo 'AUGMENT_SESSION_AUTH='\''{"accessToken":"new_token"}'\''' > secrets/mcp.env
    ```
 
-3. 重新同步配置:
+3. 重新收敛配置:
    ```bash
-   ./manage.sh mcp:sync
+   ./manage.sh mcp:apply
    # 或
    cd agent-mcp && python3 sync_mcp.py --config ../config/manager.json --def-file ../config/mcp.json --prepare-runtime
    ```
@@ -511,10 +511,10 @@ PY
 ## 附录：Agent Manager MCP 同步流程
 
 ```
-默认模式（mcp:sync / make apply / make bump / make init 中的 MCP 步骤）:
+默认模式（mcp:apply / make apply / make bump / make init 中的 MCP 步骤）:
 1. 读取 config/mcp.json 获取服务器定义
    ↓
-2. `make bump` / `make init` / `make all` 入口先刷新 config/version-pins.local.json；`sync` 只消费套用本地 lock 后的固定版本
+2. `make bump` / `make init` 入口先刷新 config/version-pins.local.json；`apply` 只消费套用本地 lock 后的固定版本
    ↓
 3. 按固定优先级加载 MCP 凭证: root/.env → secrets/mcp.env → 系统环境变量回退
    ↓

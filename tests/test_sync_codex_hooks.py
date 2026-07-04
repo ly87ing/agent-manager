@@ -125,12 +125,12 @@ class CodexHooksSyncTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue((temp_root / ".codex" / "hooks.json").exists(), result.stdout + result.stderr)
 
-    def test_make_target_syncs_project_codex_hooks(self):
+    def test_make_target_applies_project_codex_hooks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = self._copy_repo(temp_dir)
 
             result = subprocess.run(
-                ["make", "codex-hooks-sync"],
+                ["make", "codex-hooks-apply"],
                 cwd=temp_root,
                 capture_output=True,
                 text=True,
@@ -140,8 +140,8 @@ class CodexHooksSyncTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue((temp_root / ".codex" / "hooks.json").exists(), result.stdout + result.stderr)
 
-    def test_makefile_exposes_codex_hooks_sync_target(self):
+    def test_makefile_exposes_codex_hooks_apply_target(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertIn("codex-hooks-sync", makefile)
-        self.assertIn("codex\\:hooks\\:sync", makefile)
+        self.assertIn("codex-hooks-apply", makefile)
+        self.assertIn("codex\\:hooks\\:apply", makefile)
         self.assertIn("@./manage.sh codex:hooks:apply", makefile)

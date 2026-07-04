@@ -254,9 +254,9 @@ class ClaudeStatuslineInstallerTests(unittest.TestCase):
             self.assertFalse(target.exists())
             self.assertIn("预览", result.stdout + result.stderr)
 
-    def test_makefile_and_manage_expose_install_target(self):
+    def test_makefile_and_manage_expose_statusline_apply_target(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertIn("claude\\:statusline\\:install", makefile)
+        self.assertIn("claude\\:statusline\\:apply", makefile)
         manage = (ROOT / "manage.sh").read_text(encoding="utf-8")
         self.assertIn("claude:statusline:apply", manage)
         self.assertIn("install_statusline.py", manage)

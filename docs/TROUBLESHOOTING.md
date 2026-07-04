@@ -37,7 +37,7 @@
 ```bash
 make smoke
 ```
-这会串行执行 `sync/update/plan/self-update` 的安全预演路径，并通过 `config/manager.smoke.json` 切到最小策略，避免把默认全量策略下预期存在的未物化产物混入 smoke 基线。
+这会串行执行 `apply/bump/agents:apply/plan/sys:upgrade` 的安全预演路径，并通过 `config/manager.smoke.json` 切到最小策略，避免把默认全量策略下预期存在的未物化产物混入 smoke 基线。
 
 ### 2. 检查日志输出
 Agent Manager 使用标准化日志格式。最近的操作日志位于：
@@ -120,7 +120,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 
 1. `Claude Code`
    - 手工卸载 brew 版本，再让 `agent-manager` 走官方 npm 包固定版本
-   - 如果当前已经是 native 版并希望回到默认固定版本路径，先按官方方式清理 native 安装，再执行 `./manage.sh bootstrap`
+   - 如果当前已经是 native 版并希望回到默认固定版本路径，先按官方方式清理 native 安装，再执行 `./manage.sh init`
 2. `Codex`
    - 手工卸载 brew 版本，再执行 `npm install -g @openai/codex`
 3. `Antigravity CLI`
@@ -315,7 +315,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
      * 在 Windows 上，可能需要以管理员身份运行或开发者模式
      * 检查是否有现有的冲突文件或目录阻止链接创建
 
-4. **`skills:upgrade` 没有实际升级任何仓库**
+4. **`skills:bump` 没有实际升级任何仓库**
    - 检查：命令输出是否提示“未配置 `upgrade_strategy`，跳过显式升级”
    - 解决：
      * 这是信息提示，不是失败；表示当前启用的 skill 仓库没有声明可自动解析的跟踪策略
@@ -505,7 +505,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 ### 启用调试日志
 ```bash
 # 临时启用调试级别日志（所有 Python 同步引擎都会读取 LOG_LEVEL）
-LOG_LEVEL=DEBUG ./manage.sh bootstrap
+LOG_LEVEL=DEBUG ./manage.sh init
 
 # 也可以只调试某个子引擎
 LOG_LEVEL=DEBUG python3 agent-mcp/sync_mcp.py --config config/manager.json --def-file config/mcp.json --dry-run
@@ -569,7 +569,7 @@ rm -rf ~/.claude.json ~/.gemini/antigravity-cli/mcp_config.json ~/.codex/config.
 rm -rf ~/.claude/skills/* ~/.gemini/antigravity-cli/plugins/agent-manager/skills/* ~/.codex/skills/*
 
 # 3. 重新从 Agent Manager 同步
-./manage.sh bootstrap
+./manage.sh init
 
 # 4. 如需恢复 secrets，重新初始化
 ./scripts/init-secrets.sh https://example.com/your-secrets.git

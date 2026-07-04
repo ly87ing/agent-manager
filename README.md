@@ -36,7 +36,7 @@
 
 - `chrome-devtools`（MCP）
   - 由 `make bump` 刷新本机 `config/version-pins.local.json` 中的版本锁；各 Agent 实际运行时只消费固定版本。
-默认受管 skill 仓库当前只有 `agent-skills`；它的仓库、升级策略和初始 commit 保留在 `config/skills.json`，真实运行 commit 由 `config/version-pins.local.json` 的本地锁覆盖，并由 `make bump` 按 `latest-branch` 策略刷新。运行时同步只检出固定 commit，不直接跟随默认分支。`agent-skills` 面向 `Claude Code`、`Antigravity CLI` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 `safe-merge-review`、`ones-manhour-fill`、`change-discipline`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing` 这 6 个 skill 包，避免上游新增 skill 被默认带入。OpenAI 官方仓库当前最新主分支已不再提供 `frontend-skill`，因此默认清单不再引用该路径，避免 `make all` 在刷新上游 commit 时失败。
+默认受管 skill 仓库当前只有 `agent-skills`；它的仓库、升级策略和初始 commit 保留在 `config/skills.json`，真实运行 commit 由 `config/version-pins.local.json` 的本地锁覆盖，并由 `make bump` 按 `latest-branch` 策略刷新。运行时同步只检出固定 commit，不直接跟随默认分支。`agent-skills` 面向 `Claude Code`、`Antigravity CLI` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 `safe-merge-review`、`ones-manhour-fill`、`change-discipline`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing` 这 6 个 skill 包，避免上游新增 skill 被默认带入。OpenAI 官方仓库当前最新主分支已不再提供 `frontend-skill`，因此默认清单不再引用该路径，避免 `make init` 在刷新上游 commit 时失败。
 默认自动安装的 Agent 当前只包含 `Claude Code`、`Codex` 和 `Antigravity CLI`。
 `Claude Code` 与 `Codex` 默认走官方 npm 包，并使用 `config/agents.json` 中的命令模板加本机版本锁；`Antigravity CLI` 当前默认走官方 native installer。历史 `brew` 安装仅用于识别并提示迁移，不再作为这些 CLI 的受管 provider。
 `Claude Code native` 仍作为兼容 provider 保留官方 install / update / uninstall 语义，但默认不再使用这条动态 updater 路径。
@@ -67,7 +67,7 @@
 - **仓库基线 (`manager.json`)**：保存可审计的默认策略。
 - **本地覆盖 (`manager.local.json`)**：运行时与 `manager.json` 深度合并；`make ui` 只写这一层，适合机器本地偏好与私有配置。
 - **版本锁 (`version_lock`) / skill commit**：`config/agents.json`、`config/tools.json`、`config/mcp.json` 与 `config/skills.json` 保存命令模板、包名、仓库和升级策略；`make bump` 查询 npm / Git ref / skill 仓库分支的最新版本并写入本机 `config/version-pins.local.json`。同步到 Codex / Claude Code / Antigravity CLI 的实际运行配置会先套用本地 lock，不得使用 `@latest`、分支名或未固定的 skill 仓库。
-- **浏览器前置开关**：`browser_us_sync.enabled` 控制 `apply` / `bootstrap` / `all` / `browser:sync` 是否执行浏览器 Google US 前置同步。
+- **浏览器前置开关**：`browser_us_sync.enabled` 控制 `apply` / `init` / `browser:apply` 是否执行浏览器 Google US 前置同步。
 - **模块化定义 (`agents.json`等)**：保存官方指令细节，支持 Policy 的强制覆盖。
 
 ### 2. 事务级数据安全
@@ -111,14 +111,12 @@
 ## 管理指令集
 
 - `./manage.sh`: 显示帮助；这是脚本的安全默认入口。
-- `make apply`: 同步当前配置到 rules，并按已锁定版本对齐 skills / MCP；不处理 Agent / Tool 生命周期，也不刷新版本锁。
+- `make apply`: 把当前锁定态分发/收敛到本机（rules 构建分发、skills 链接、mcp 注入、tools、browser、shell alias、secrets 拉取）；不刷新版本锁、不安装 Agent。
 
 - `make bump`: 纯粹刷新版本锁与 skill commit（更新元数据到锁定文件），不执行本地环境应用。
 - `make agents:apply`: 对比并拉起或更新本地已安装 Agent 的软件版本与生命周期，不强制安装缺失 Agent。
-- `make init`: 执行全量安装、更新与同步，并等待 Agent 生命周期安装/升级完成，适合新机器初始化。
-- `make install`: `make init` 的兼容别名。
-- `make all`: `make init` 的兼容别名。
-- `make plan`: 预演一次完整 `bootstrap`。
+- `make init`: 执行全量安装、更新与同步（= `bump` + Agent 生命周期 + `apply` + 失效引用审计），并等待 Agent 生命周期安装/升级完成，适合新机器初始化。
+- `make plan`: 预演一次完整 `init`。
 - `make sys:upgrade`: 仅更新 agent-manager 仓库自身逻辑。
 - `make smoke`: 运行跨平台安全预演 smoke 校验，基于最小策略文件 `config/manager.smoke.json` 验证主入口命令的 dry-run / preview 契约。
 - `make secrets-check`: 扫描主仓库受控文件，拒绝真实 token / 私钥等明文敏感信息进入 `agent-manager`；`secrets/` 私有仓库和忽略缓存不在扫描范围内。

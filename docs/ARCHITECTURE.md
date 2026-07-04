@@ -39,7 +39,7 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `version_lock`: 可刷新的固定版本元数据；`make bump` 负责查询 npm 最新版本或 Git ref 最新 commit 并写回具体命令，运行时同步只消费固定版本
 - `manager.json`: 仓库提供的可审计默认值
 - `manager.local.json`: 不参与 Git 的本地覆盖层；`make ui` 默认写入这里
-- `browser_us_sync.enabled`: 是否在 `manage.sh` 的 `update` / `bootstrap` / `all` / `browser:sync` 入口执行浏览器 Google US 前置同步；缺省为启用，可用本地覆盖或 `AGENT_MANAGER_BROWSER_US_SYNC_ENABLED` 临时改写
+- `browser_us_sync.enabled`: 是否在 `manage.sh` 的 `apply` / `init` / `browser:apply` 入口执行浏览器 Google US 前置同步；缺省为启用，可用本地覆盖或 `AGENT_MANAGER_BROWSER_US_SYNC_ENABLED` 临时改写
 - `agent-manager` 不维护终端 dotfiles；用户级 shell/tmux/iTerm 配置不属于受管目标
 - `agents` 键使用稳定的机器可读 ID（如 `claude-code`, `codex`, `antigravity-cli`），而不是面向用户的展示名
 
@@ -121,14 +121,14 @@ graph TD
 
 `manage.sh` 是唯一的顶层编排入口，负责统一解释全局 flag 和运行时状态：
 
-- **原子锁**：需要写入或同步的命令会先抢占 `/tmp/agent_manager_<user>.lock.d`，并在其中写入持有者 PID；兼容保留 `/tmp/agent_manager_<user>.lock` 作为元数据。`unlock` 会同时清理目录锁和遗留锁文件。
-- **按次日志**：每次运行写入独立日志 `/tmp/agent_manager_sync_<user>_<runid>.log`，并更新 `/tmp/agent_manager_sync_<user>.latest` 指针；`logs` 读取 latest，`clean-logs` 清理 latest 与全部历史运行日志。
-- **`cleanup`**：清理当前受管目标旁的 `.bak` / `.tmp_*` / restore 临时文件，同时覆盖当前三类 Agent 的 legacy rules 备份路径和 Gemini `tmp` 下的 invalid-json 备份；不清理无受管历史证据的用户文件。
-- **安全默认入口**：直接执行 `./manage.sh` 只显示帮助，不会隐式退化到 `all`。
-- **`--dry-run`**：只输出计划动作，跳过 secrets 初始化、仓库 clone/pull、依赖安装、构建，以及 `cleanup` / `unlock` / `backups:restore` / `clean-logs` 这类会修改本地状态的维护动作；允许保留只读探测和预览日志。若与 `self-update` 组合，只预览仓库自更新动作。
+- **原子锁**：需要写入或同步的命令会先抢占 `/tmp/agent_manager_<user>.lock.d`，并在其中写入持有者 PID；兼容保留 `/tmp/agent_manager_<user>.lock` 作为元数据。`sys:unlock` 会同时清理目录锁和遗留锁文件。
+- **按次日志**：每次运行写入独立日志 `/tmp/agent_manager_sync_<user>_<runid>.log`，并更新 `/tmp/agent_manager_sync_<user>.latest` 指针；`sys:logs` 读取 latest，`sys:clean-logs` 清理 latest 与全部历史运行日志。
+- **`sys:clean`**：清理当前受管目标旁的 `.bak` / `.tmp_*` / restore 临时文件，同时覆盖当前三类 Agent 的 legacy rules 备份路径和 Gemini `tmp` 下的 invalid-json 备份；不清理无受管历史证据的用户文件。
+- **安全默认入口**：直接执行 `./manage.sh` 只显示帮助，不会隐式退化到 `init`。
+- **`--dry-run`**：只输出计划动作，跳过 secrets 初始化、仓库 clone/pull、依赖安装、构建，以及 `sys:clean` / `sys:unlock` / `state:restore` / `sys:clean-logs` 这类会修改本地状态的维护动作；允许保留只读探测和预览日志。若与 `sys:upgrade` 组合，只预览仓库自更新动作。
 - **`--offline`**：禁止任何远程拉取、下载和安装。生命周期、tools、skills、MCP 同步器都只能复用本地已存在仓库/配置；如果本地前置资源缺失，应显式报错而不是偷偷联网。
-- **命令分层**：`sync` 只做本地配置收敛；`update` 会先刷新受管 MCP / CLI / tool 的版本锁和 skill commit，再补齐并刷新非 Agent 安装类资源，并只更新已安装 Agent；`bootstrap` / `all` 才负责缺失 Agent 的安装；`self-update` 只更新 agent-manager 仓库自身。
-- **不接管终端配置**：`sync` / `update` / `bootstrap` 不会改写 `~/.zshrc`、`~/.tmux.conf`、iTerm2 动态配置等用户级终端文件；仓库也不提供 `terminal:sync` 入口。
+- **命令分层**：`apply` 把锁定态分发/收敛到本机（secrets 拉取、shell alias、tools、browser、rules 构建分发、skills 链接、mcp 注入），不升版本、不装 Agent；`bump` 只刷新受管 MCP / CLI / tool 的版本锁和 skill commit 等元数据，不分发、不改本机环境；`init` = `bump` + Agent 生命周期（安装缺失 Agent）+ `apply` + 失效引用审计；`agents:apply` 只跑 Agent 生命周期（`--no-install`）；`sys:upgrade` 只更新 agent-manager 仓库自身。
+- **不接管终端配置**：`apply` / `bump` / `init` 不会改写 `~/.zshrc`、`~/.tmux.conf`、iTerm2 动态配置等用户级终端文件；仓库也不提供 `terminal:apply` 入口。
 - **诊断双出口**：`doctor / status` 默认输出面向人的文本报告；追加 `--json` 时输出机器可读 JSON，不再需要从文本中抓取 warning 计数。
 - **最小 smoke 策略**：`scripts/ci-smoke.sh` 通过 `AGENT_MANAGER_BASE_CONFIG=config/manager.smoke.json` 运行安全预演，避免把默认全量策略带来的未物化提示项混进 CI 基线。
 
@@ -145,8 +145,8 @@ graph TD
 - `manage.sh rules:apply` / `make rules:apply` 用于把 `dist/` 产物同步到目标 Agent 目录与 repo-native 文件位置。
 - `config/claude-hooks.json` 定义仓库级 Claude hooks，`agent-rule/scripts/sync-claude-hooks.py` 会把它渲染到 `.claude/settings.json`。
 - `config/codex-hooks.json` 定义仓库级 Codex hooks，`agent-rule/scripts/sync-codex-hooks.py` 会把它渲染到 `.codex/hooks.json`；当前 Codex hooks 包含 `PreToolUse` 的生成产物写保护和 `Stop` 的规则构建一致性校验。
-- `manage.sh claude:hooks:sync` / `make claude-hooks-sync` 用于刷新项目内的 Claude hooks 配置。
-- `manage.sh codex:hooks:sync` / `make codex-hooks-sync` 用于刷新项目内的 Codex hooks 配置。
+- `manage.sh claude:hooks:apply` / `make claude-hooks-apply` 用于刷新项目内的 Claude hooks 配置。
+- `manage.sh codex:hooks:apply` / `make codex-hooks-apply` 用于刷新项目内的 Codex hooks 配置。
 - `scripts/evals/run_rule_effectiveness_eval.py` 读取 `scripts/evals/fixtures/` 中的离线 JSON fixture，校验题目与 run artifact schema，并强制执行 `min_case_count`、`required_agents`、`success / verification` 阈值等 suite requirements；`make eval-rules` 是其推荐入口。
 - `make instructions:check` 是修改共享指令、skills exposure 或 managed hooks 前的统一回归硬门禁；它串起 instruction-related project contracts、rules budget、layout、sync、Claude/Codex hook contract tests、eval schema/metric contract tests，以及 baseline 规则评测。
 
@@ -247,7 +247,7 @@ agent-manager/
 
 ### 工作流程
 1. 用户通过修改 `config/manager.json` 或 `config/manager.local.json` 表达意愿
-2. 选择入口：`make apply` 做本地配置环境收敛，`make bump` 纯刷新远端资源版本锁，`make agents:apply` 单独管理 Agent 软件生命周期，`make init` 做全量安装、更新与环境同步；`./manage.sh all` 仅作为兼容别名保留
+2. 选择入口：`make apply` 做本地配置环境收敛，`make bump` 纯刷新远端资源版本锁，`make agents:apply` 单独管理 Agent 软件生命周期，`make init` 做全量安装、更新与环境同步
 3. `manage.sh` 先解析 `dry-run` / `offline`，获取原子锁，并建立本次运行专属日志
 4. 各同步引擎读取策略和定义，检测当前状态
 5. 根据运行模式执行安装、更新或卸载操作
