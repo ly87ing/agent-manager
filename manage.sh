@@ -1568,6 +1568,19 @@ case "$cmd" in
         if [ -n "$DRY_RUN_FLAG" ]; then upgrade_args+=("$DRY_RUN_FLAG"); fi
         if [ -n "$OFFLINE_FLAG" ]; then upgrade_args+=("$OFFLINE_FLAG"); fi
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" "${upgrade_args[@]}" ;;
+    skill:disable|skill:enable)
+        skill_action="${cmd#skill:}"
+        skill_name="${CMD_ARGS[0]:-}"
+        if [ -z "$skill_name" ]; then
+            echo -e "${ERROR_RED}用法: ./manage.sh skill:${skill_action} <SKILL>${NC}" >&2
+            exit 1
+        fi
+        "$PYTHON_CMD" "$ROOT_DIR/agent-skill/skill_toggle.py" "$skill_action" "$skill_name" \
+            --def-file "$ROOT_DIR/config/skills.json" --local "$LOCAL_CONFIG" || exit 1
+        echo "已更新 ${LOCAL_CONFIG} ; 运行 'make apply'（或 './manage.sh skills:apply'）生效。" ;;
+    skill:list)
+        "$PYTHON_CMD" "$ROOT_DIR/agent-skill/skill_toggle.py" list \
+            --def-file "$ROOT_DIR/config/skills.json" --local "$LOCAL_CONFIG" ;;
     tools:apply)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-tool" "$PYTHON_CMD" sync_tools.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/tools.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG $FORCE_REFRESH_FLAG ;;
     browser:apply)
@@ -1670,6 +1683,9 @@ case "$cmd" in
         echo -e "  ${BORDER_GRAY}codex:hooks:apply${NC} 独立刷新仓库级 Codex hooks 到 .codex/hooks.json"
         echo -e "  ${BORDER_GRAY}skills:apply${NC}    独立执行全局或系统级专业技能代码集到 Agent 沙盒空间的映射配置与软链接"
         echo -e "  ${BORDER_GRAY}skills:bump${NC}     显式解析并回写 skill 仓库的最新可审计版本（仅 release/tag，失败即停止）"
+        echo -e "  ${BORDER_GRAY}skill:disable X${NC} 本机持久禁用某个 skill（写入 manager.local.json；配合 skills:apply 清链生效）"
+        echo -e "  ${BORDER_GRAY}skill:enable X${NC}  解除某个 skill 的本机禁用"
+        echo -e "  ${BORDER_GRAY}skill:list${NC}      列出各 skill 的启用/禁用状态"
         echo -e "  ${BORDER_GRAY}tools:apply${NC}     独立同步或安装全局统一增强工具链条"
         echo -e "  ${BORDER_GRAY}browser:apply${NC}   独立同步 Chrome 的 Google US 浏览器前置状态\n"
         echo "" ;;

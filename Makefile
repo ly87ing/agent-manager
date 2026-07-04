@@ -1,4 +1,4 @@
-.PHONY: init apply bump plan agents-apply agents\:apply sys-upgrade sys\:upgrade smoke ui help doctor status detect fetch-models offline dry-run eval-rules sys-clean sys\:clean state-clean state\:clean sys-unlock sys\:unlock sys-logs sys\:logs sys-clean-logs sys\:clean-logs state-list state\:list state-restore state\:restore rules-build rules\:build rules-apply rules\:apply skills-apply skills\:apply skills-bump skills\:bump mcp-apply mcp\:apply mcp-build mcp\:build tools-apply tools\:apply browser-apply browser\:apply claude-hooks-apply claude\:hooks\:apply claude-statusline-apply claude\:statusline\:apply claude-statusline-wire claude\:statusline\:wire claude-shell-aliases-apply claude\:shell-aliases\:apply codex-hooks-apply codex\:hooks\:apply secrets-check secrets\:check instructions-check instructions\:check
+.PHONY: init apply bump plan agents-apply agents\:apply sys-upgrade sys\:upgrade smoke ui help doctor status detect fetch-models offline dry-run eval-rules sys-clean sys\:clean state-clean state\:clean sys-unlock sys\:unlock sys-logs sys\:logs sys-clean-logs sys\:clean-logs state-list state\:list state-restore state\:restore rules-build rules\:build rules-apply rules\:apply skills-apply skills\:apply skills-bump skills\:bump skill-disable skill\:disable skill-enable skill\:enable skill-list skill\:list mcp-apply mcp\:apply mcp-build mcp\:build tools-apply tools\:apply browser-apply browser\:apply claude-hooks-apply claude\:hooks\:apply claude-statusline-apply claude\:statusline\:apply claude-statusline-wire claude\:statusline\:wire claude-shell-aliases-apply claude\:shell-aliases\:apply codex-hooks-apply codex\:hooks\:apply secrets-check secrets\:check instructions-check instructions\:check
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -105,6 +105,17 @@ skills-apply skills\:apply:
 
 skills-bump skills\:bump:
 	@./manage.sh skills:bump
+
+skill-disable skill\:disable:
+	@./manage.sh skill:disable $(SKILL)
+	@./manage.sh skills:apply
+
+skill-enable skill\:enable:
+	@./manage.sh skill:enable $(SKILL)
+	@./manage.sh skills:apply
+
+skill-list skill\:list:
+	@./manage.sh skill:list
 
 mcp-apply mcp\:apply:
 	@./manage.sh mcp:apply
