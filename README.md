@@ -67,7 +67,7 @@
 - **仓库基线 (`manager.json`)**：保存可审计的默认策略。
 - **本地覆盖 (`manager.local.json`)**：运行时与 `manager.json` 深度合并；`make ui` 只写这一层，适合机器本地偏好与私有配置。
 - **版本锁 (`version_lock`) / skill commit**：`config/agents.json`、`config/tools.json`、`config/mcp.json` 与 `config/skills.json` 保存命令模板、包名、仓库和升级策略；`make bump` 查询 npm / Git ref / skill 仓库分支的最新版本并写入本机 `config/version-pins.local.json`。同步到 Codex / Claude Code / Antigravity CLI 的实际运行配置会先套用本地 lock，不得使用 `@latest`、分支名或未固定的 skill 仓库。
-- **浏览器前置开关**：`browser_us_sync.enabled` 控制 `update` / `bootstrap` / `all` / `browser:sync` 是否执行浏览器 Google US 前置同步。
+- **浏览器前置开关**：`browser_us_sync.enabled` 控制 `apply` / `bootstrap` / `all` / `browser:sync` 是否执行浏览器 Google US 前置同步。
 - **模块化定义 (`agents.json`等)**：保存官方指令细节，支持 Policy 的强制覆盖。
 
 ### 2. 事务级数据安全
@@ -112,7 +112,7 @@
 
 - `./manage.sh`: 显示帮助；这是脚本的安全默认入口。
 - `make apply`: 同步当前配置到 rules，并按已锁定版本对齐 skills / MCP；不处理 Agent / Tool 生命周期，也不刷新版本锁。
-- `make pull`: 拉取远端最新凭证（secrets）/ 版本锁 / skill / MCP 资源并下发到各 Agent；介于 `sync` 与 `update` 之间，不处理 Agent / Tool 生命周期（`./manage.sh pull --self-update` 额外先更新本仓库）。
+
 - `make bump`: 纯粹刷新版本锁与 skill commit（更新元数据到锁定文件），不执行本地环境应用。
 - `make agents:apply`: 对比并拉起或更新本地已安装 Agent 的软件版本与生命周期，不强制安装缺失 Agent。
 - `make init`: 执行全量安装、更新与同步，并等待 Agent 生命周期安装/升级完成，适合新机器初始化。

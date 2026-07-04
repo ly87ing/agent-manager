@@ -32,28 +32,28 @@ class ProjectContractTests(unittest.TestCase):
         end = source.index("\n}\n", start)
         return source[start:end]
 
-    def test_pull_pipeline_refreshes_resources_without_agent_or_tool_lifecycle(self):
+    def test_bump_pipeline_refreshes_resources_without_agent_or_tool_lifecycle(self):
         manage = (ROOT / "manage.sh").read_text(encoding="utf-8")
-        body = self._extract_shell_function(manage, "run_pull_pipeline")
-        # pull 联网拉最新，需先刷新 secrets 仓库，否则新 MCP 配置会配不上新 key
-        self.assertIn("maybe_init_secrets", body, "pull 应在拉取前刷新 secrets 凭证")
-        # pull 拉取远端最新资源并下发：版本锁 / skill 版本 / rules / skills-link / mcp
+        body = self._extract_shell_function(manage, "run_bump_pipeline")
+        # bump 联网拉最新，需先刷新 secrets 仓库，否则新 MCP 配置会配不上新 key
+        self.assertIn("maybe_init_secrets", body, "bump 应在拉取前刷新 secrets 凭证")
+        # bump 拉取远端最新资源并下发：版本锁 / skill 版本
         for step in (
             "run_pipeline_step run_version_pins_update_task",
             "run_pipeline_step run_skills_upgrade_task",
-            "run_pipeline_step run_rules_sync_task",
-            "run_pipeline_step run_skills_link_task false",
-            "run_pipeline_step run_mcp_sync_task true false",
         ):
-            self.assertIn(step, body, f"pull 缺少步骤: {step}")
-        # pull 明确不触碰 Agent / Tool / browser / shell 生命周期（那是 update 的职责）
+            self.assertIn(step, body, f"bump 缺少步骤: {step}")
+        # bump 明确不触碰 Agent / Tool / browser / shell 生命周期等
         for excluded in (
             "run_agent_lifecycle_task",
             "run_tools_sync_task",
             "run_browser_us_sync_task",
             "run_shell_aliases_sync_task",
+            "run_rules_sync_task",
+            "run_skills_link_task",
+            "run_mcp_sync_task",
         ):
-            self.assertNotIn(excluded, body, f"pull 不应包含重活步骤: {excluded}")
+            self.assertNotIn(excluded, body, f"bump 不应包含重活步骤: {excluded}")
 
 
     def test_makefile_exposes_install_alias(self):
@@ -109,8 +109,8 @@ class ProjectContractTests(unittest.TestCase):
             (temp_root / "manage.sh").chmod(0o755)
 
             for goal in (
-                "backups:list",
-                "backups:restore",
+                "state:list",
+                "state:restore",
                 "rules:build",
                 "rules:apply",
                 "claude:hooks:apply",
@@ -118,7 +118,7 @@ class ProjectContractTests(unittest.TestCase):
                 "skills:apply",
                 "skills:bump",
                 "mcp:apply",
-                "mcp:prepare",
+                "mcp:build",
                 "tools:apply",
                 "browser:apply",
             ):
@@ -135,8 +135,8 @@ class ProjectContractTests(unittest.TestCase):
             self.assertEqual(
                 call_log.read_text(encoding="utf-8").splitlines(),
                 [
-                    "backups:list",
-                    "backups:restore",
+                    "state:list",
+                    "state:restore",
                     "rules:build",
                     "rules:apply",
                     "claude:hooks:apply",
@@ -144,7 +144,7 @@ class ProjectContractTests(unittest.TestCase):
                     "skills:apply",
                     "skills:bump",
                     "mcp:apply",
-                    "mcp:prepare",
+                    "mcp:build",
                     "tools:apply",
                     "browser:apply",
                 ],
@@ -160,12 +160,12 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("manager.smoke.json", content)
         self.assertIn("AGENT_MANAGER_LOCK_FILE", content)
         self.assertIn("AGENT_MANAGER_LOG_PREFIX", content)
-        self.assertIn("./manage.sh sync --dry-run", content)
-        self.assertIn("./manage.sh pull --dry-run", content)
-        self.assertIn("./manage.sh update --dry-run", content)
+        self.assertIn("./manage.sh apply --dry-run", content)
+        self.assertIn("./manage.sh bump --dry-run", content)
+        self.assertIn("./manage.sh agents:apply --dry-run", content)
         self.assertIn("./manage.sh plan", content)
-        self.assertIn("./manage.sh self-update --dry-run", content)
-        self.assertIn("make -n sync update pull bootstrap all plan self-update offline dry-run", content)
+        self.assertIn("./manage.sh sys:upgrade --dry-run", content)
+        self.assertIn("make -n apply bump agents-apply init all plan sys-upgrade offline dry-run", content)
         self.assertIn("make -n install", content)
         self.assertNotIn("./manage.sh bootstrap", content)
 

@@ -176,8 +176,7 @@ def main():
         elif choice == "6":
             save_policy(local_policy)
             print(
-                f"{SUCCESS_GREEN}配置已保存到用户侧覆盖文件，请运行 ./manage.sh update 以应用更改；"
-                f"若需安装缺失 Agent，请改用 ./manage.sh bootstrap。{NC}"
+                f"{SUCCESS_GREEN}配置已保存到用户侧覆盖文件，请运行 ./manage.sh apply 以应用环境；若需安装缺失 Agent，请执行 ./manage.sh init。{NC}"
             )
             break
         elif choice == "7":

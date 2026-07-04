@@ -188,8 +188,8 @@ class InteractiveWorkflowTests(unittest.TestCase):
                     interactive.main()
 
         rendered = output.getvalue()
-        self.assertIn("./manage.sh update", rendered)
-        self.assertIn("./manage.sh bootstrap", rendered)
+        self.assertIn("./manage.sh apply", rendered)
+        self.assertIn("./manage.sh init", rendered)
         self.assertNotIn("请运行 ./manage.sh all 以应用更改", rendered)
 
     def test_save_policy_uses_atomic_json_write(self):

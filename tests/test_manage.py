@@ -877,61 +877,6 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("可选工具未就绪 1 项", combined)
             self.assertNotIn("HEALTH WARNING", combined)
 
-    def test_sync_preview_reports_health_caution_for_missing_generated_targets(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            temp_home.mkdir()
-
-            (temp_root / "config" / "manager.json").write_text(
-                '{\n  "agents": {},\n  "tools": {},\n  "skills": {\n    "sample-skill": { "enabled": true }\n  },\n  "mcp": {\n    "augment-context-engine": { "enabled": true }\n  }\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "agents.json").write_text(
-                '{\n  "claude-code": {\n    "display_name": "Claude Code",\n    "bin": "__missing_claude__"\n  }\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "mcp.json").write_text(
-                '{\n  "agent_paths": {\n    "claude-code": "%s/.claude.json"\n  },\n  "servers": {\n    "augment-context-engine": {\n      "command": "auggie",\n      "args": ["--mcp"],\n      "agents": ["claude-code"]\n    }\n  }\n}\n'
-                % temp_home,
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "skills.json").write_text(
-                '{\n  "repositories": {\n    "sample-skill": {\n      "url": "https://example.invalid/sample-skill.git",\n      "agents": ["claude-code"]\n    }\n  },\n  "agents": {\n    "claude-code": "%s/.claude/skills"\n  }\n}\n'
-                % temp_home,
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text(
-                "claude_global|global|rules/dist/claude/CLAUDE.md|%s/.claude/CLAUDE.md\n" % temp_home,
-                encoding="utf-8",
-            )
-            self._write_stub(
-                temp_root / "agent-skill" / "link_skills.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
-            )
-            self._write_stub(
-                temp_root / "agent-mcp" / "sync_mcp.py",
-                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
-            )
-
-            env = self._managed_env()
-            env["HOME"] = str(temp_home)
-            env["PATH"] = "/usr/bin:/bin"
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "sync", "--dry-run"],
-                cwd=temp_root,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=20,
-            )
-
-            combined = result.stdout + result.stderr
-            self.assertEqual(result.returncode, 0, combined)
-            self.assertIn("HEALTH CAUTION", combined)
-            self.assertNotIn("HEALTH WARNING", combined)
 
     def test_doctor_skips_node_and_npm_when_policy_does_not_need_them(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1259,71 +1204,6 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("--wait-agent-lifecycle", combined)
             self.assertFalse(call_log.exists(), combined)
 
-    def test_sync_refreshes_skills_and_mcp_without_agent_or_tool_lifecycle(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            call_log = temp_root / "calls.log"
-            remove_path(temp_root / "secrets")
-
-            self._append_log_stub(
-                temp_root / "agent-lifecycle" / "sync_agents.py",
-                "agents",
-                call_log,
-                "False",
-            )
-            self._append_log_stub(
-                temp_root / "agent-tool" / "sync_tools.py",
-                "tools",
-                call_log,
-                "False",
-            )
-            self._append_log_stub(
-                temp_root / "agent-skill" / "link_skills.py",
-                "skills",
-                call_log,
-                "'--offline' not in sys.argv and '--dry-run' not in sys.argv",
-            )
-            self._append_log_stub(
-                temp_root / "agent-mcp" / "sync_mcp.py",
-                "mcp",
-                call_log,
-                "'--offline' not in sys.argv and '--prepare-runtime' in sys.argv",
-            )
-            self._write_stub(
-                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
-                (
-                    "#!/usr/bin/env bash\n"
-                    f"printf '%s\\n' \"rules $*\" >> {str(call_log)!r}\n"
-                    "exit 0\n"
-                ),
-            )
-            self._write_stub(
-                temp_root / "scripts" / "init-secrets.sh",
-                (
-                    "#!/usr/bin/env bash\n"
-                    f"printf '%s\\n' init-secrets >> {str(call_log)!r}\n"
-                    "exit 13\n"
-                ),
-            )
-
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "sync"],
-                cwd=temp_root,
-                env=self._managed_env(),
-                capture_output=True,
-                check=False,
-            )
-
-            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
-            self.assertEqual(result.returncode, 0, combined)
-            log_lines = call_log.read_text(encoding="utf-8").splitlines()
-            self.assertIn("rules ", log_lines[0])
-            self.assertTrue(any(line.startswith("skills ") for line in log_lines), log_lines)
-            self.assertTrue(any(line.startswith("mcp ") for line in log_lines), log_lines)
-            self.assertFalse(any(line.startswith("agents ") for line in log_lines), log_lines)
-            self.assertFalse(any(line.startswith("tools ") for line in log_lines), log_lines)
-            self.assertFalse(any(line == "init-secrets" for line in log_lines), log_lines)
 
     def test_sync_does_not_run_terminal_management(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1572,83 +1452,8 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("--repo repo-a", log_lines[0])
             self.assertIn("--repo repo-b", log_lines[0])
 
-    def test_agents_apply_waits_for_agent_lifecycle_without_install(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            call_log = temp_root / "calls.log"
-            remove_path(temp_root / "secrets")
 
-            self._append_log_stub(
-                temp_root / "agent-lifecycle" / "sync_agents.py",
-                "agents",
-                call_log,
-                "'--no-install' in sys.argv and '--offline' not in sys.argv",
-            )
-            self._append_log_stub(
-                temp_root / "agent-tool" / "sync_tools.py",
-                "tools",
-                call_log,
-                "'--offline' not in sys.argv",
-            )
-            self._append_log_stub(
-                temp_root / "agent-skill" / "link_skills.py",
-                "skills",
-                call_log,
-                "'--offline' not in sys.argv",
-            )
-            self._append_log_stub(
-                temp_root / "agent-mcp" / "sync_mcp.py",
-                "mcp",
-                call_log,
-                "'--prepare-runtime' in sys.argv and '--offline' not in sys.argv",
-            )
-            self._write_stub(
-                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
-                (
-                    "#!/usr/bin/env bash\n"
-                    f"printf '%s\\n' \"rules $*\" >> {str(call_log)!r}\n"
-                    "exit 0\n"
-                ),
-            )
-            self._write_stub(
-                temp_root / "scripts" / "init-secrets.sh",
-                (
-                    "#!/usr/bin/env bash\n"
-                    "mkdir -p \"$PWD/../secrets/.git\"\n"
-                    f"printf '%s\\n' init-secrets >> {str(call_log)!r}\n"
-                    "exit 0\n"
-                ),
-            )
-
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "update"],
-                cwd=temp_root,
-                env=self._managed_env(),
-                capture_output=True,
-                check=False,
-            )
-
-            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
-            self.assertEqual(result.returncode, 0, combined)
-            log_lines = call_log.read_text(encoding="utf-8").splitlines()
-            self.assertIn("init-secrets", log_lines, log_lines)
-            self.assertTrue(
-                any(
-                    line.startswith("agents ")
-                    and "--no-install" in line
-                    and "--async-actions" in line
-                    and "--wait-async-actions" in line
-                    for line in log_lines
-                ),
-                log_lines,
-            )
-            self.assertTrue(any(line.startswith("tools ") for line in log_lines), log_lines)
-            self.assertTrue(any(line.startswith("rules ") for line in log_lines), log_lines)
-            self.assertTrue(any(line.startswith("skills ") for line in log_lines), log_lines)
-            self.assertTrue(any(line.startswith("mcp ") and "--prepare-runtime" in line for line in log_lines), log_lines)
-
-    def test_update_refreshes_version_pins_before_runtime_sync(self):
+    def test_init_refreshes_version_pins_before_runtime_sync(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -1693,7 +1498,7 @@ class ManageScriptTests(unittest.TestCase):
             env.pop("AGENT_MANAGER_SKIP_VERSION_PIN_UPDATE", None)
             env.pop("AGENT_MANAGER_SKIP_SKILL_VERSION_UPDATE", None)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "update"],
+                [str(temp_root / "manage.sh"), "init"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -1710,151 +1515,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertLess(version_index, agent_index, log_lines)
             self.assertLess(skill_version_index, skills_index, log_lines)
 
-    def test_init_force_refresh_propagates_to_tools_skills_and_mcp(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            call_log = temp_root / "calls.log"
-            remove_path(temp_root / "secrets")
 
-            self._append_log_stub(
-                temp_root / "agent-lifecycle" / "sync_agents.py",
-                "agents",
-                call_log,
-                "'--force-refresh' not in sys.argv",
-            )
-            self._append_log_stub(
-                temp_root / "agent-tool" / "sync_tools.py",
-                "tools",
-                call_log,
-                "'--force-refresh' in sys.argv",
-            )
-            self._append_log_stub(
-                temp_root / "agent-skill" / "link_skills.py",
-                "skills",
-                call_log,
-                "'--force-refresh' in sys.argv",
-            )
-            self._append_log_stub(
-                temp_root / "agent-mcp" / "sync_mcp.py",
-                "mcp",
-                call_log,
-                "'--prepare-runtime' in sys.argv and '--force-refresh' in sys.argv",
-            )
-            self._write_stub(
-                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
-                (
-                    "#!/usr/bin/env bash\n"
-                    f"printf '%s\\n' \"rules $*\" >> {str(call_log)!r}\n"
-                    "exit 0\n"
-                ),
-            )
-            self._write_stub(
-                temp_root / "scripts" / "init-secrets.sh",
-                (
-                    "#!/usr/bin/env bash\n"
-                    "mkdir -p \"$PWD/../secrets/.git\"\n"
-                    f"printf '%s\\n' init-secrets >> {str(call_log)!r}\n"
-                    "exit 0\n"
-                ),
-            )
-
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "--force-refresh", "update"],
-                cwd=temp_root,
-                env=self._managed_env(),
-                capture_output=True,
-                check=False,
-            )
-
-            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
-            self.assertEqual(result.returncode, 0, combined)
-            log_lines = call_log.read_text(encoding="utf-8").splitlines()
-            self.assertTrue(
-                any(
-                    line.startswith("agents ")
-                    and "--force-refresh" not in line
-                    and "--async-actions" in line
-                    for line in log_lines
-                ),
-                log_lines,
-            )
-            self.assertTrue(any(line.startswith("tools ") and "--force-refresh" in line for line in log_lines), log_lines)
-            self.assertTrue(any(line.startswith("skills ") and "--force-refresh" in line for line in log_lines), log_lines)
-            self.assertTrue(any(line.startswith("mcp ") and "--force-refresh" in line for line in log_lines), log_lines)
-
-    def test_init_short_force_refresh_flag_propagates_to_tools_skills_and_mcp(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            call_log = temp_root / "calls.log"
-            remove_path(temp_root / "secrets")
-
-            self._append_log_stub(
-                temp_root / "agent-lifecycle" / "sync_agents.py",
-                "agents",
-                call_log,
-                "'--force-refresh' not in sys.argv",
-            )
-            self._append_log_stub(
-                temp_root / "agent-tool" / "sync_tools.py",
-                "tools",
-                call_log,
-                "'--force-refresh' in sys.argv",
-            )
-            self._append_log_stub(
-                temp_root / "agent-skill" / "link_skills.py",
-                "skills",
-                call_log,
-                "'--force-refresh' in sys.argv",
-            )
-            self._append_log_stub(
-                temp_root / "agent-mcp" / "sync_mcp.py",
-                "mcp",
-                call_log,
-                "'--prepare-runtime' in sys.argv and '--force-refresh' in sys.argv",
-            )
-            self._write_stub(
-                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
-                (
-                    "#!/usr/bin/env bash\n"
-                    f"printf '%s\\n' \"rules $*\" >> {str(call_log)!r}\n"
-                    "exit 0\n"
-                ),
-            )
-            self._write_stub(
-                temp_root / "scripts" / "init-secrets.sh",
-                (
-                    "#!/usr/bin/env bash\n"
-                    "mkdir -p \"$PWD/../secrets/.git\"\n"
-                    f"printf '%s\\n' init-secrets >> {str(call_log)!r}\n"
-                    "exit 0\n"
-                ),
-            )
-
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "-f", "update"],
-                cwd=temp_root,
-                env=self._managed_env(),
-                capture_output=True,
-                check=False,
-            )
-
-            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
-            self.assertEqual(result.returncode, 0, combined)
-            log_lines = call_log.read_text(encoding="utf-8").splitlines()
-            self.assertTrue(
-                any(
-                    line.startswith("agents ")
-                    and "--force-refresh" not in line
-                    and "--async-actions" in line
-                    for line in log_lines
-                ),
-                log_lines,
-            )
-            self.assertTrue(any(line.startswith("tools ") and "--force-refresh" in line for line in log_lines), log_lines)
-            self.assertTrue(any(line.startswith("skills ") and "--force-refresh" in line for line in log_lines), log_lines)
-            self.assertTrue(any(line.startswith("mcp ") and "--force-refresh" in line for line in log_lines), log_lines)
 
     def test_bootstrap_allows_agent_install_and_waits_for_agent_lifecycle(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1927,117 +1588,8 @@ class ManageScriptTests(unittest.TestCase):
                 log_lines,
             )
 
-    def test_init_wait_agent_lifecycle_forwards_wait_flag(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            call_log = temp_root / "calls.log"
-            remove_path(temp_root / "secrets")
 
-            self._append_log_stub(
-                temp_root / "agent-lifecycle" / "sync_agents.py",
-                "agents",
-                call_log,
-                "'--async-actions' in sys.argv and '--wait-async-actions' in sys.argv and '--no-install' in sys.argv",
-            )
-            self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log, "True")
-            self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log, "True")
-            self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log, "True")
-            self._write_stub(
-                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
-                (
-                    "#!/usr/bin/env bash\n"
-                    f"printf '%s\\n' \"rules $*\" >> {str(call_log)!r}\n"
-                    "exit 0\n"
-                ),
-            )
-            self._write_stub(
-                temp_root / "scripts" / "init-secrets.sh",
-                (
-                    "#!/usr/bin/env bash\n"
-                    "mkdir -p \"$PWD/../secrets/.git\"\n"
-                    f"printf '%s\\n' init-secrets >> {str(call_log)!r}\n"
-                    "exit 0\n"
-                ),
-            )
-
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "--wait-agent-lifecycle", "update"],
-                cwd=temp_root,
-                env=self._managed_env(),
-                capture_output=True,
-                check=False,
-            )
-
-            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
-            self.assertEqual(result.returncode, 0, combined)
-            log_lines = call_log.read_text(encoding="utf-8").splitlines()
-            self.assertTrue(
-                any(
-                    line.startswith("agents ")
-                    and "--wait-async-actions" in line
-                    and "--async-actions" in line
-                    for line in log_lines
-                ),
-                log_lines,
-            )
-
-    def test_apply_pipeline_runs_browser_google_us_sync(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            call_log = temp_root / "calls.log"
-            remove_path(temp_root / "secrets")
-
-            self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log, "True")
-            self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log, "True")
-            self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log, "True")
-            self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log, "True")
-            self._write_stub(
-                temp_root / "scripts" / "sync_browser_google_us.py",
-                (
-                    "#!/usr/bin/env python3\n"
-                    "import sys\n"
-                    f"open({str(call_log)!r}, 'a', encoding='utf-8').write('browser ' + ' '.join(sys.argv[1:]) + '\\n')\n"
-                    "sys.exit(0)\n"
-                ),
-            )
-            self._write_stub(
-                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
-                (
-                    "#!/usr/bin/env bash\n"
-                    f"printf '%s\\n' \"rules $*\" >> {str(call_log)!r}\n"
-                    "exit 0\n"
-                ),
-            )
-            self._write_stub(
-                temp_root / "scripts" / "init-secrets.sh",
-                (
-                    "#!/usr/bin/env bash\n"
-                    "mkdir -p \"$PWD/../secrets/.git\"\n"
-                    f"printf '%s\\n' init-secrets >> {str(call_log)!r}\n"
-                    "exit 0\n"
-                ),
-            )
-            (temp_root / "config" / "manager.local.json").write_text(
-                '{\n  "browser_us_sync": { "enabled": true }\n}\n',
-                encoding="utf-8",
-            )
-
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "update"],
-                cwd=temp_root,
-                env=self._managed_env(),
-                capture_output=True,
-                check=False,
-            )
-
-            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
-            self.assertEqual(result.returncode, 0, combined)
-            log_lines = call_log.read_text(encoding="utf-8").splitlines()
-            self.assertTrue(any(line == "browser " for line in log_lines), log_lines)
-
-    def test_update_pipeline_skips_browser_google_us_sync_when_disabled(self):
+    def test_apply_pipeline_skips_browser_google_us_sync_when_disabled(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -2066,7 +1618,7 @@ class ManageScriptTests(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "update"],
+                [str(temp_root / "manage.sh"), "apply"],
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,
@@ -2197,7 +1749,7 @@ class ManageScriptTests(unittest.TestCase):
                     except OSError:
                         pass
 
-    def test_update_pipeline_pulls_secrets_with_ff_only(self):
+    def test_apply_pipeline_pulls_secrets_with_ff_only(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -2223,7 +1775,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["PATH"] = f"{fake_bin}:{env['PATH']}"
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "update"],
+                [str(temp_root / "manage.sh"), "apply"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -2238,7 +1790,7 @@ class ManageScriptTests(unittest.TestCase):
                 log_lines,
             )
 
-    def test_update_pipeline_secrets_pull_termination_cleans_up_descendant_processes(self):
+    def test_apply_pipeline_secrets_pull_termination_cleans_up_descendant_processes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -2302,7 +1854,7 @@ class ManageScriptTests(unittest.TestCase):
             env["READY_FILE"] = str(ready_file)
 
             proc = subprocess.Popen(
-                [str(temp_root / "manage.sh"), "update"],
+                [str(temp_root / "manage.sh"), "apply"],
                 cwd=temp_root,
                 env=env,
                 stdout=subprocess.PIPE,
@@ -2451,7 +2003,7 @@ class ManageScriptTests(unittest.TestCase):
                     except OSError:
                         pass
 
-    def test_update_init_secrets_termination_cleans_up_descendant_processes(self):
+    def test_apply_init_secrets_termination_cleans_up_descendant_processes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -2506,7 +2058,7 @@ class ManageScriptTests(unittest.TestCase):
             env["READY_FILE"] = str(ready_file)
 
             proc = subprocess.Popen(
-                [str(temp_root / "manage.sh"), "update"],
+                [str(temp_root / "manage.sh"), "apply"],
                 cwd=temp_root,
                 env=env,
                 stdout=subprocess.PIPE,
@@ -2667,7 +2219,7 @@ class ManageScriptTests(unittest.TestCase):
             log_lines = call_log.read_text(encoding="utf-8").splitlines()
             self.assertFalse(any(line == "init-secrets" for line in log_lines), log_lines)
             self.assertTrue(any(line.startswith("agents ") and "--dry-run" in line for line in log_lines), log_lines)
-            self.assertTrue(any(line.startswith("tools ") and "--dry-run" in line for line in log_lines), log_lines)
+            
             self.assertTrue(any(line.startswith("rules ") and "--dry-run" in line for line in log_lines), log_lines)
             self.assertTrue(any(line.startswith("skills ") and "--dry-run" in line for line in log_lines), log_lines)
             self.assertTrue(any(line.startswith("mcp ") and "--dry-run" in line for line in log_lines), log_lines)
@@ -3069,7 +2621,7 @@ class ManageScriptTests(unittest.TestCase):
             env["READY_FILE"] = str(ready_file)
 
             proc = subprocess.Popen(
-                [str(temp_root / "manage.sh"), "--offline", "update"],
+                [str(temp_root / "manage.sh"), "--offline", "agents:apply"],
                 cwd=temp_root,
                 env=env,
                 stdout=subprocess.PIPE,
@@ -3321,7 +2873,7 @@ class ManageScriptTests(unittest.TestCase):
                 )
 
                 result = subprocess.run(
-                    [str(temp_root / "manage.sh"), "--offline", "update"],
+                    [str(temp_root / "manage.sh"), "--offline", "agents:apply"],
                     cwd=temp_root,
                     env=self._managed_env(),
                     capture_output=True,

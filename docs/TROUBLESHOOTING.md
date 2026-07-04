@@ -357,7 +357,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 
 1. **secrets/ 目录未初始化**
    - 检查：`ls -la secrets/` 是否显示为 Git 仓库
-   - 解决：运行 `SECRETS_REPO_URL=https://example.com/your-secrets.git ./manage.sh update`、`SECRETS_REPO_URL=https://example.com/your-secrets.git ./manage.sh bootstrap`，或执行 `./scripts/init-secrets.sh https://example.com/your-secrets.git`
+   - 解决：运行 `SECRETS_REPO_URL=https://example.com/your-secrets.git ./manage.sh bump`、`SECRETS_REPO_URL=https://example.com/your-secrets.git ./manage.sh init`，或执行 `./scripts/init-secrets.sh https://example.com/your-secrets.git`
 
 2. **凭证文件格式错误**
    - 检查：`secrets/mcp.env` 是否为有效的 KEY=VALUE 格式
