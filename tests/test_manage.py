@@ -1507,7 +1507,7 @@ class ManageScriptTests(unittest.TestCase):
         manifest = (ROOT / "config" / "rules-targets.list").read_text(encoding="utf-8")
         self.assertNotIn("{{REPO_ROOT}}", manifest)
 
-    def test_skills_upgrade_dispatches_upgrade_script(self):
+    def test_skills:bump_dispatches_upgrade_script(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -1540,7 +1540,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("--def-file", log_lines[0])
             self.assertIn("--dry-run", log_lines[0])
 
-    def test_skills_upgrade_forwards_requested_repositories(self):
+    def test_skills:bump_forwards_requested_repositories(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))

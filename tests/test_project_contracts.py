@@ -11,8 +11,8 @@ ROOT = Path(__file__).resolve().parent.parent
 class ProjectContractTests(unittest.TestCase):
     def test_init_secrets_guidance_uses_update_or_bootstrap(self):
         script = (ROOT / "scripts" / "init-secrets.sh").read_text(encoding="utf-8")
-        self.assertIn("make update", script)
-        self.assertIn("make bootstrap", script)
+        self.assertIn("make bump", script)
+        self.assertIn("make init", script)
         self.assertNotIn("初始化完成！现在可以运行：make all", script)
 
     def test_init_secrets_requires_explicit_repo_configuration(self):
@@ -44,7 +44,7 @@ class ProjectContractTests(unittest.TestCase):
         # pull 拉取远端最新资源并下发：版本锁 / skill 版本 / rules / skills-link / mcp
         for step in (
             "run_pipeline_step run_version_pins_update_task",
-            "run_pipeline_step run_skills_upgrade_task",
+            "run_pipeline_step run_skills:bump_task",
             "run_pipeline_step run_rules_sync_task",
             "run_pipeline_step run_skills_link_task false",
             "run_pipeline_step run_mcp_sync_task true false",
@@ -400,7 +400,7 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("agent-rule/rules/src/", agents)
         self.assertIn("agent-rule/rules/dist/", agents)
         self.assertIn("make rules-build", agents)
-        self.assertIn("make rules:sync", agents)
+        self.assertIn("make rules:apply", agents)
         self.assertNotIn("python3 -m unittest discover -s tests -p 'test*.py' -v", agents)
         self.assertNotIn("## Setup", agents)
         self.assertNotIn("## Test commands", agents)
@@ -492,7 +492,7 @@ class ProjectContractTests(unittest.TestCase):
         memory = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertLessEqual(len(memory.splitlines()), 80)
         self.assertIn("make smoke", memory)
-        self.assertIn("make sync", memory)
+        self.assertIn("make apply", memory)
         self.assertIn("make doctor", memory)
         self.assertIn("agent-rule/CLAUDE.md", memory)
         self.assertIn("tests/CLAUDE.md", memory)
@@ -504,7 +504,7 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("agent-rule/rules/src/", memory)
         self.assertIn("agent-rule/rules/dist/", memory)
         self.assertIn("make rules-build", memory)
-        self.assertIn("make rules:sync", memory)
+        self.assertIn("make rules:apply", memory)
         self.assertNotIn("python3 -m unittest discover -s tests -p 'test*.py' -v", memory)
         self.assertNotIn("make smoke", memory)
         self.assertNotIn("manage.sh 是唯一顶层编排入口", memory)

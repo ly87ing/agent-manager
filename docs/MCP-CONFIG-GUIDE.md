@@ -24,10 +24,10 @@
 
 ```bash
 # 全量同步（包含 Agent 安装、资源更新和 MCP 配置）
-make bootstrap
+make init
 
 # 本地环境收敛（会更新受管 MCP 资源并准备运行时）
-make sync
+make apply
 
 # 仅同步 MCP 配置
 ./manage.sh mcp:sync
@@ -50,7 +50,7 @@ make sync
 
 **维护约定**:
 - 受管 MCP 的实际命令必须固定版本或固定 commit；`@latest`、分支名只允许出现在 `version_lock` 的查询元数据里。
-- `config/mcp.json` 保存服务器定义、命令模板和查询元数据；`make update` / `make bootstrap` / `make all` 会先运行 `scripts/update_version_pins.py`，查询 npm 最新版本或 Git ref 最新 commit，再写入本机 `config/version-pins.local.json`。
+- `config/mcp.json` 保存服务器定义、命令模板和查询元数据；`make bump` / `make init` / `make all` 会先运行 `scripts/update_version_pins.py`，查询 npm 最新版本或 Git ref 最新 commit，再写入本机 `config/version-pins.local.json`。
 - 首次调用 `chrome-devtools` 时，`npx` 可能会下载锁定版本的包；需要本机有可用的 Node.js / npm 运行时。
 - `chrome-devtools` 的 Codex 启动超时按 120 秒维护，覆盖默认 30 秒，避免 `npx` 冷启动或缓存失效时被误判为 MCP 启动失败。
 - `make doctor` 会在 `chrome-devtools` 处于启用状态时预检 `npx` 运行时是否可用；实际包版本以 `config/mcp.json` 套用本地版本锁后的有效配置为准。
@@ -221,12 +221,12 @@ FIRECRAWL_API_URL='https://api.firecrawl.dev/v2'
 git clone https://github.com/ly87ing/agent-manager.git
 cd agent-manager
 
-# 2. 运行 make bootstrap
-make bootstrap
+# 2. 运行 make init
+make init
 ```
 
 **自动化流程**：
-- `make update` / `make bootstrap` 会在顶层检查 `secrets/` 是否存在
+- `make bump` / `make init` 会在顶层检查 `secrets/` 是否存在
 - `mcp:sync` 默认会准备 MCP 运行时：同步本地 secrets 仓库、按需 clone/pull MCP repo，并执行 setup/build
 - 如需阻止联网拉取或安装，请追加 `--offline`
 
@@ -308,7 +308,7 @@ agy -p "请用 codebase-retrieval 查看当前项目的结构"
 npx -y chrome-devtools-mcp@<固定版本>
 ```
 
-这样把版本查询集中在 `make update`，避免每个 Agent 在真正启动 MCP 时各自解析 `@latest`。
+这样把版本查询集中在 `make bump`，避免每个 Agent 在真正启动 MCP 时各自解析 `@latest`。
 
 ### 使用约束
 
@@ -345,7 +345,7 @@ serena 的 Java 后端（solidlsp `eclipse_jdtls.py`）把 jdtls 的 `java.confi
 ### 使用约束
 
 - `serena` 不依赖额外 secrets，`env` 为空。
-- 命令固定 commit，版本波动通过 `version_lock`（`ref: main`）在 `make update` 时集中解析写入 `config/version-pins.local.json`。
+- 命令固定 commit，版本波动通过 `version_lock`（`ref: main`）在 `make bump` 时集中解析写入 `config/version-pins.local.json`。
 - 需要本机有可用的 `uvx`（uv）运行时；JS/TS 语义能力额外需要 Node.js。
 - 各工作流启动前的「环境探测与健康自检」会打印一行 `serena (uvx:… / Node≥18:…)`，直接反映上述两个前置是否就绪（serena 是按需拉起的 MCP，不会在探测阶段真正启动 server）。
 
@@ -443,7 +443,7 @@ rm ./.agents/mcp_config.json
 
 ```bash
 # 方法 1: 自动初始化（推荐）
-SECRETS_REPO_URL=https://example.com/your-secrets.git make update
+SECRETS_REPO_URL=https://example.com/your-secrets.git make bump
 # 会自动检测并克隆 secrets 仓库
 
 # 方法 2: 手动运行初始化脚本
@@ -511,10 +511,10 @@ PY
 ## 附录：Agent Manager MCP 同步流程
 
 ```
-默认模式（mcp:sync / make sync / make update / make bootstrap 中的 MCP 步骤）:
+默认模式（mcp:sync / make apply / make bump / make init 中的 MCP 步骤）:
 1. 读取 config/mcp.json 获取服务器定义
    ↓
-2. `make update` / `make bootstrap` / `make all` 入口先刷新 config/version-pins.local.json；`sync` 只消费套用本地 lock 后的固定版本
+2. `make bump` / `make init` / `make all` 入口先刷新 config/version-pins.local.json；`sync` 只消费套用本地 lock 后的固定版本
    ↓
 3. 按固定优先级加载 MCP 凭证: root/.env → secrets/mcp.env → 系统环境变量回退
    ↓

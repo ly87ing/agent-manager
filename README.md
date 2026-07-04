@@ -35,13 +35,13 @@
 ### 其他受管工具
 
 - `chrome-devtools`（MCP）
-  - 由 `make update` 刷新本机 `config/version-pins.local.json` 中的版本锁；各 Agent 实际运行时只消费固定版本。
-默认受管 skill 仓库当前只有 `agent-skills`；它的仓库、升级策略和初始 commit 保留在 `config/skills.json`，真实运行 commit 由 `config/version-pins.local.json` 的本地锁覆盖，并由 `make update` 按 `latest-branch` 策略刷新。运行时同步只检出固定 commit，不直接跟随默认分支。`agent-skills` 面向 `Claude Code`、`Antigravity CLI` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 `safe-merge-review`、`ones-manhour-fill`、`change-discipline`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing` 这 6 个 skill 包，避免上游新增 skill 被默认带入。OpenAI 官方仓库当前最新主分支已不再提供 `frontend-skill`，因此默认清单不再引用该路径，避免 `make all` 在刷新上游 commit 时失败。
+  - 由 `make bump` 刷新本机 `config/version-pins.local.json` 中的版本锁；各 Agent 实际运行时只消费固定版本。
+默认受管 skill 仓库当前只有 `agent-skills`；它的仓库、升级策略和初始 commit 保留在 `config/skills.json`，真实运行 commit 由 `config/version-pins.local.json` 的本地锁覆盖，并由 `make bump` 按 `latest-branch` 策略刷新。运行时同步只检出固定 commit，不直接跟随默认分支。`agent-skills` 面向 `Claude Code`、`Antigravity CLI` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 `safe-merge-review`、`ones-manhour-fill`、`change-discipline`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing` 这 6 个 skill 包，避免上游新增 skill 被默认带入。OpenAI 官方仓库当前最新主分支已不再提供 `frontend-skill`，因此默认清单不再引用该路径，避免 `make all` 在刷新上游 commit 时失败。
 默认自动安装的 Agent 当前只包含 `Claude Code`、`Codex` 和 `Antigravity CLI`。
 `Claude Code` 与 `Codex` 默认走官方 npm 包，并使用 `config/agents.json` 中的命令模板加本机版本锁；`Antigravity CLI` 当前默认走官方 native installer。历史 `brew` 安装仅用于识别并提示迁移，不再作为这些 CLI 的受管 provider。
 `Claude Code native` 仍作为兼容 provider 保留官方 install / update / uninstall 语义，但默认不再使用这条动态 updater 路径。
 `Claude Code local install` 不纳入 `agent-manager` lifecycle 托管，因为它依赖 shell alias 暴露入口，当前探测链路不会越权接管。
-以上 lifecycle 口径统一按三个当前受管 Agent 的官方推荐方式维护。`Claude Code` 和 `Codex` 的 npm provider 使用 `config/agents.json` 中的命令模板，并由 `make update` 刷新本机 `config/version-pins.local.json`；`Antigravity CLI` 使用官方 `curl -fsSL https://antigravity.google/cli/install.sh | bash` 安装到 `agy`，不由 `agent-manager` 伪造 update 命令。若需要阻止 `agy` 启动后的官方后台自更新，按官方文档在 shell 环境设置 `AGY_CLI_DISABLE_AUTO_UPDATE=true`；`agent-manager` 不改写用户 shell profile。放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer。
+以上 lifecycle 口径统一按三个当前受管 Agent 的官方推荐方式维护。`Claude Code` 和 `Codex` 的 npm provider 使用 `config/agents.json` 中的命令模板，并由 `make bump` 刷新本机 `config/version-pins.local.json`；`Antigravity CLI` 使用官方 `curl -fsSL https://antigravity.google/cli/install.sh | bash` 安装到 `agy`，不由 `agent-manager` 伪造 update 命令。若需要阻止 `agy` 启动后的官方后台自更新，按官方文档在 shell 环境设置 `AGY_CLI_DISABLE_AUTO_UPDATE=true`；`agent-manager` 不改写用户 shell profile。放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer。
 
 ## Official CLI Lifecycle Policy
 
@@ -66,7 +66,7 @@
 ### 1. 策略与定义分离 (Policy vs. Definition)
 - **仓库基线 (`manager.json`)**：保存可审计的默认策略。
 - **本地覆盖 (`manager.local.json`)**：运行时与 `manager.json` 深度合并；`make ui` 只写这一层，适合机器本地偏好与私有配置。
-- **版本锁 (`version_lock`) / skill commit**：`config/agents.json`、`config/tools.json`、`config/mcp.json` 与 `config/skills.json` 保存命令模板、包名、仓库和升级策略；`make update` 查询 npm / Git ref / skill 仓库分支的最新版本并写入本机 `config/version-pins.local.json`。同步到 Codex / Claude Code / Antigravity CLI 的实际运行配置会先套用本地 lock，不得使用 `@latest`、分支名或未固定的 skill 仓库。
+- **版本锁 (`version_lock`) / skill commit**：`config/agents.json`、`config/tools.json`、`config/mcp.json` 与 `config/skills.json` 保存命令模板、包名、仓库和升级策略；`make bump` 查询 npm / Git ref / skill 仓库分支的最新版本并写入本机 `config/version-pins.local.json`。同步到 Codex / Claude Code / Antigravity CLI 的实际运行配置会先套用本地 lock，不得使用 `@latest`、分支名或未固定的 skill 仓库。
 - **浏览器前置开关**：`browser_us_sync.enabled` 控制 `update` / `bootstrap` / `all` / `browser:sync` 是否执行浏览器 Google US 前置同步。
 - **模块化定义 (`agents.json`等)**：保存官方指令细节，支持 Policy 的强制覆盖。
 
@@ -100,7 +100,7 @@
 - **Codex hooks**：`config/codex-hooks.json` 生成仓库级 `.codex/hooks.json`，用 `make codex-hooks-sync` 刷新 deterministic Codex hook 配置；当前包含 `PreToolUse` 的生成产物写保护和 `Stop` 的规则构建一致性校验。
 - **指令质量评测**：`make eval-rules` 现在同时输出任务成功率、verification、skill exposure 和 always-on instruction budget 指标，并强制校验 `min_case_count`、`required_agents`、`success / verification 阈值`。
 - **分发清单**：`config/rules-targets.list` 只引用 `rules/dist/*` 产物，不直接引用源码片段。
-- **维护入口**：修改 `agent-rule/rules/src/` 后，先执行 `make rules-build`，再执行 `make rules:sync`。
+- **维护入口**：修改 `agent-rule/rules/src/` 后，先执行 `make rules-build`，再执行 `make rules:apply`。
 
 ## 平台支持 (Platform Support)
 
@@ -111,21 +111,21 @@
 ## 管理指令集
 
 - `./manage.sh`: 显示帮助；这是脚本的安全默认入口。
-- `make sync`: 同步当前配置到 rules，并按已锁定版本对齐 skills / MCP；不处理 Agent / Tool 生命周期，也不刷新版本锁。
+- `make apply`: 同步当前配置到 rules，并按已锁定版本对齐 skills / MCP；不处理 Agent / Tool 生命周期，也不刷新版本锁。
 - `make pull`: 拉取远端最新凭证（secrets）/ 版本锁 / skill / MCP 资源并下发到各 Agent；介于 `sync` 与 `update` 之间，不处理 Agent / Tool 生命周期（`./manage.sh pull --self-update` 额外先更新本仓库）。
-- `make update`: 刷新 CLI/MCP/tool 版本锁与 skill commit、更新远端资源并收敛本地环境，等待 Agent 生命周期更新完成，但不安装缺失 Agent。
-- `make bootstrap`: 执行全量安装、更新与同步，并等待 Agent 生命周期安装/升级完成，适合新机器初始化。
-- `make install`: `make bootstrap` 的兼容别名。
-- `make all`: `make bootstrap` 的兼容别名。
+- `make bump`: 刷新 CLI/MCP/tool 版本锁与 skill commit、更新远端资源并收敛本地环境，等待 Agent 生命周期更新完成，但不安装缺失 Agent。
+- `make init`: 执行全量安装、更新与同步，并等待 Agent 生命周期安装/升级完成，适合新机器初始化。
+- `make install`: `make init` 的兼容别名。
+- `make all`: `make init` 的兼容别名。
 - `make plan`: 预演一次完整 `bootstrap`。
-- `make self-update`: 仅更新 agent-manager 仓库自身逻辑。
+- `make sys:upgrade`: 仅更新 agent-manager 仓库自身逻辑。
 - `make smoke`: 运行跨平台安全预演 smoke 校验，基于最小策略文件 `config/manager.smoke.json` 验证主入口命令的 dry-run / preview 契约。
 - `make secrets-check`: 扫描主仓库受控文件，拒绝真实 token / 私钥等明文敏感信息进入 `agent-manager`；`secrets/` 私有仓库和忽略缓存不在扫描范围内。
 - `make eval-rules`: 运行离线规则效果评测，读取 `scripts/evals/fixtures/` 中的固定 JSON 样例并输出稳定的机器可读摘要。
 - `make instructions:check`: 共享指令、skills exposure 和项目内 hooks 变更前的统一回归门（硬门禁）；会串行跑 instruction-related project contracts、rules budget/layout、skill exposure、rules sync / Claude/Codex managed hooks 契约、eval schema/metric 契约，以及 baseline 规则评测。
 - `make doctor` / `make status`: 执行全系统深度体检，并把 warning 细分为 `可选工具未就绪` 与 `托管产物尚未生成` 两类提示项；同时扫描主仓库中是否存在疑似明文敏感信息。追加 `--json` 可输出机器可读诊断报告。
 - `make rules-build`: 从 `agent-rule/rules/src/` 生成 `agent-rule/rules/dist/` 下的可分发规则产物。
-- `make rules:sync`: 将 `agent-rule/rules/dist/` 中的规则产物分发到各 Agent 原生入口。
+- `make rules:apply`: 将 `agent-rule/rules/dist/` 中的规则产物分发到各 Agent 原生入口。
 - `make codex-hooks-sync`: 刷新仓库级 `.codex/hooks.json`。
 - `make fetch-models`: 探测并获取 API 端点支持的模型列表 (支持 OpenAI / Anthropic 格式)。
 - `make restore`: 交互式回滚历史快照。
@@ -144,7 +144,7 @@
 - 需要通过环境变量 `SECRETS_REPO_URL` 或脚本参数显式提供仓库地址，例如：
 
 ```bash
-SECRETS_REPO_URL=https://example.com/your-secrets.git make update
+SECRETS_REPO_URL=https://example.com/your-secrets.git make bump
 # 或
 ./scripts/init-secrets.sh https://example.com/your-secrets.git
 ```

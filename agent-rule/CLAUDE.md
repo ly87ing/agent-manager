@@ -8,7 +8,7 @@
 ## Workflow
 
 - After changing rules, run `make rules-build` first.
-- Run `make rules:sync` when distribution is needed.
+- Run `make rules:apply` when distribution is needed.
 - When adjusting target paths or filenames, also check `config/rules-targets.list`.
 
 ## Guardrails

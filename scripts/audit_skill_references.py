@@ -2,7 +2,7 @@
 """Detect content-level dead skill references in agent-manager-managed files.
 
 Structural cleanup (dead symlinks, orphan skill repos) is already handled by
-`skills:link` during `make sync`. This audit covers the *content* layer that
+`skills:link` during `make apply`. This audit covers the *content* layer that
 sync does not touch: a rule or SKILL.md that names a skill which no longer
 exists (e.g. a rule routing to a removed/renamed skill).
 
@@ -18,7 +18,7 @@ Scope and limits, on purpose:
   reference is a human decision, so the audit reports and exits non-zero instead.
 
 Exit code: 0 clean, 1 dead references found, 2 on config error. Callers choose
-severity: `make sync` treats a non-zero exit as a non-fatal warning; the test
+severity: `make apply` treats a non-zero exit as a non-fatal warning; the test
 suite / `make instructions:check` treat it as fail-close.
 """
 import argparse

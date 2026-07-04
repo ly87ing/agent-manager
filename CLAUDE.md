@@ -6,13 +6,13 @@ This file keeps repo-level memory for Claude Code in this repository.
 
 - `python3 -m unittest discover -s tests -p 'test*.py' -v`
 - `make smoke`
-- `make sync`
+- `make apply`
 - `make doctor`
 
 ## Key facts
 
 - `manage.sh` is the single top-level orchestration entry point; it centrally interprets `--dry-run`, `--offline`, the lock, and logging.
-- `manage.sh` 命令分三层 `sync ⊂ pull ⊂ update`:`sync`=纯离线本地分发(rules 构建+分发、skills 链接、mcp 注入),**永远刷不了 skill 内容**(只有 update/pull 里的 `skills_upgrade` 联网能);`pull`=联网刷新 rules/skills/mcp **和 secrets** 再分发,不动 agent/tools/browser;`update`=`pull` + agent/tools/browser 生命周期。三者刻意**非交互**(`--yes` 自动确认、`make plan` 给 per-agent 升级预览),让 CI/bootstrap 不卡 stdin;`bootstrap`/`all` 走 `run_update_pipeline` 但不带 `--no-install`,会装缺失 agent。改 grok/MCP 凭证跑 `make sync` 就够(顺带刷 rules+skills)。
+- `manage.sh` 命令分三层 `sync ⊂ pull ⊂ update`:`sync`=纯离线本地分发(rules 构建+分发、skills 链接、mcp 注入),**永远刷不了 skill 内容**(只有 update/pull 里的 `skills:bump` 联网能);`pull`=联网刷新 rules/skills/mcp **和 secrets** 再分发,不动 agent/tools/browser;`update`=`pull` + agent/tools/browser 生命周期。三者刻意**非交互**(`--yes` 自动确认、`make plan` 给 per-agent 升级预览),让 CI/bootstrap 不卡 stdin;`bootstrap`/`all` 走 `run_update_pipeline` 但不带 `--no-install`,会装缺失 agent。改 grok/MCP 凭证跑 `make apply` 就够(顺带刷 rules+skills)。
 - `config/manager.json` is the repo baseline; `config/manager.local.json` is the per-machine override.
 - `agent-rule/rules/src/` holds the editable rule sources; `agent-rule/rules/dist/` holds the generated artifacts.
 - `config/rules-targets.list` maps each built rule artifact to its per-agent target path.

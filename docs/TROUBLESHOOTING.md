@@ -157,7 +157,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
    ```
 2. 再执行规则同步
    ```bash
-   make rules:sync
+   make rules:apply
    ```
 3. 如需确认产物是否存在，检查：
    ```bash
@@ -319,7 +319,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
    - 检查：命令输出是否提示“未配置 `upgrade_strategy`，跳过显式升级”
    - 解决：
      * 这是信息提示，不是失败；表示当前启用的 skill 仓库没有声明可自动解析的跟踪策略
-     * 只有在 `config/skills.json` 的仓库定义里配置了 `upgrade_strategy`（如 `latest-branch` / `latest-tag` / `latest-release`）时，`make skills:upgrade` 才会实际尝试升级
+     * 只有在 `config/skills.json` 的仓库定义里配置了 `upgrade_strategy`（如 `latest-branch` / `latest-tag` / `latest-release`）时，`make skills:bump` 才会实际尝试升级
 
 ### 问题：链接的 skill 无法被 Agent 识别
 **症状**：Skill 已链接但 Agent 未响应 skill 触发词或命令
@@ -397,7 +397,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 
 ## 同步失败问题
 
-### 问题：make update / make bootstrap 或对应的 manage.sh 命令执行失败
+### 问题：make bump / make init 或对应的 manage.sh 命令执行失败
 **症状**：同步过程在某个阶段中止并返回错误码
 
 #### 常见原因和解决方案：
@@ -449,7 +449,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 ## 性能问题
 
 ### 问题：同步过程异常缓慢
-**症状**：`make update` / `make bootstrap` 执行时间异常长（正常应在几分钟内完成）
+**症状**：`make bump` / `make init` 执行时间异常长（正常应在几分钟内完成）
 
 #### 常见原因和解决方案：
 

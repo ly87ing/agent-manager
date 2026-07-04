@@ -36,7 +36,7 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `auto_install`: 是否自动安装
 - `auto_update`: 是否自动更新
 - `preferred_provider`: 首选安装来源
-- `version_lock`: 可刷新的固定版本元数据；`make update` 负责查询 npm 最新版本或 Git ref 最新 commit 并写回具体命令，运行时同步只消费固定版本
+- `version_lock`: 可刷新的固定版本元数据；`make bump` 负责查询 npm 最新版本或 Git ref 最新 commit 并写回具体命令，运行时同步只消费固定版本
 - `manager.json`: 仓库提供的可审计默认值
 - `manager.local.json`: 不参与 Git 的本地覆盖层；`make ui` 默认写入这里
 - `browser_us_sync.enabled`: 是否在 `manage.sh` 的 `update` / `bootstrap` / `all` / `browser:sync` 入口执行浏览器 Google US 前置同步；缺省为启用，可用本地覆盖或 `AGENT_MANAGER_BROWSER_US_SYNC_ENABLED` 临时改写
@@ -51,11 +51,11 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `tools.json`: 工具安装和设置指令
 - `skills.json`: Skill仓库地址和Agent映射
 - `mcp.json`: MCP服务器定义和Agent路径映射
-- 浏览器自动化相关能力按上游官方分发模型分别托管：`playwright-cli` 与 `agent-browser` 在 `tools.json` 中通过 npm 固定版本管理，`make update` 负责刷新 `version_lock`。`playwright-cli` 的 runtime setup 由 `playwright-cli install-browser` 完成，受 `setup_timeout_sec` 限制，并通过 Playwright cache 中的 Chromium payload 重新验证；`agent-browser` 的 readiness 先检查系统 Chrome/Chromium，再检查 Playwright cache 中可复用的 Chromium，只有这些 probe 都失败时才依赖受管 setup；`chrome-devtools` 在 `mcp.json` 中通过 `npx -y chrome-devtools-mcp@<固定版本>` 维护。
+- 浏览器自动化相关能力按上游官方分发模型分别托管：`playwright-cli` 与 `agent-browser` 在 `tools.json` 中通过 npm 固定版本管理，`make bump` 负责刷新 `version_lock`。`playwright-cli` 的 runtime setup 由 `playwright-cli install-browser` 完成，受 `setup_timeout_sec` 限制，并通过 Playwright cache 中的 Chromium payload 重新验证；`agent-browser` 的 readiness 先检查系统 Chrome/Chromium，再检查 Playwright cache 中可复用的 Chromium，只有这些 probe 都失败时才依赖受管 setup；`chrome-devtools` 在 `mcp.json` 中通过 `npx -y chrome-devtools-mcp@<固定版本>` 维护。
 - Agent 定义中的 `display_name` 仅用于展示和日志；跨配置引用统一使用稳定 ID
 - `agents.json` 中的 `providers` 只声明 agent-manager 可托管的安装源；`system` 只是运行时探测信号，不是可配置的 provider key
 - `preferred_provider` 必须指向 `providers` 中真实存在的键，否则生命周期同步应直接失败
-- `skills.json` 中的 skill 仓库支持 `commit` / `ref` 版本约束；默认受管仓库固定到 `commit`，并由 `make update` 按 `upgrade_strategy` 刷新。技能名来自仓库内 `SKILL.md` frontmatter 的 `name`
+- `skills.json` 中的 skill 仓库支持 `commit` / `ref` 版本约束；默认受管仓库固定到 `commit`，并由 `make bump` 按 `upgrade_strategy` 刷新。技能名来自仓库内 `SKILL.md` frontmatter 的 `name`
 - 新增 Agent 时，如需启用某类能力，再声明对应的 MCP / skills / rules target path：`config/mcp.json` 的 `agent_paths`、`config/skills.json` 的 `agents` 映射、`config/rules-targets.list` 的规则与 modules 分发目标。当前默认受管目标只包含 `Claude Code`、`Codex` 和 `Antigravity CLI`
 
 ### 3. 同步引擎 (Sync Engines)
@@ -142,7 +142,7 @@ graph TD
 - manifest 支持家目录 target 和 `{{REPO_ROOT}}` repo-native target；当前受管 rules 只使用 Claude、Codex、Antigravity 的家目录目标。
 - 规则同步会清理历史遗留的 `~/.<agent>/rules/global.md` 和旧 `rules/modules` 目录，避免新旧入口并存。
 - `manage.sh rules:build` / `make rules-build` 用于刷新 `dist/`。
-- `manage.sh rules:sync` / `make rules:sync` 用于把 `dist/` 产物同步到目标 Agent 目录与 repo-native 文件位置。
+- `manage.sh rules:apply` / `make rules:apply` 用于把 `dist/` 产物同步到目标 Agent 目录与 repo-native 文件位置。
 - `config/claude-hooks.json` 定义仓库级 Claude hooks，`agent-rule/scripts/sync-claude-hooks.py` 会把它渲染到 `.claude/settings.json`。
 - `config/codex-hooks.json` 定义仓库级 Codex hooks，`agent-rule/scripts/sync-codex-hooks.py` 会把它渲染到 `.codex/hooks.json`；当前 Codex hooks 包含 `PreToolUse` 的生成产物写保护和 `Stop` 的规则构建一致性校验。
 - `manage.sh claude:hooks:sync` / `make claude-hooks-sync` 用于刷新项目内的 Claude hooks 配置。
@@ -247,7 +247,7 @@ agent-manager/
 
 ### 工作流程
 1. 用户通过修改 `config/manager.json` 或 `config/manager.local.json` 表达意愿
-2. 选择入口：`make sync` 做本地配置收敛，`make update` 刷新远端资源，`make bootstrap` 做全量安装、更新与同步；`./manage.sh all` 仅作为兼容别名保留
+2. 选择入口：`make apply` 做本地配置收敛，`make bump` 刷新远端资源，`make init` 做全量安装、更新与同步；`./manage.sh all` 仅作为兼容别名保留
 3. `manage.sh` 先解析 `dry-run` / `offline`，获取原子锁，并建立本次运行专属日志
 4. 各同步引擎读取策略和定义，检测当前状态
 5. 根据运行模式执行安装、更新或卸载操作

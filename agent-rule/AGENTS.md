@@ -6,7 +6,7 @@
 
 ## Workflow
 - After changing `rules/src/`, run `make rules-build`.
-- If the new output needs to be distributed, run `make rules:sync`.
+- If the new output needs to be distributed, run `make rules:apply`.
 
 ## Boundaries
 - Never hand-edit files in `agent-rule/rules/dist/`.
