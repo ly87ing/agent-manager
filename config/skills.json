@@ -2,29 +2,36 @@
   "repositories": {
     "agent-skills": {
       "url": "https://github.com/ly87ing/agent-skills.git",
-      "commit": "8e6272c5ee4bfc620c401b7c4da13019cd69d453",
+      "commit": "ac09c47c219779565b06d115c976cb81c8ab1c40",
       "upgrade_strategy": "latest-branch",
       "upgrade_ref": "refs/heads/main",
       "skill_paths": [
         "safe-merge-review",
         "ones-manhour-fill",
-        "architecture-change-review",
-        "code-style-contracts",
+        "change-discipline",
         "frontend-verification",
         "artifact-hygiene",
         "reader-facing-writing"
       ],
-      "skill_count": 7,
-      "agents": ["claude-code", "antigravity-cli", "codex"]
+      "skill_count": 6,
+      "agents": [
+        "claude-code",
+        "antigravity-cli",
+        "codex"
+      ]
     },
     "anthropic-frontend-design-skill": {
       "url": "https://github.com/anthropics/skills.git",
       "commit": "57546260929473d4e0d1c1bb75297be2fdfa1949",
       "upgrade_strategy": "latest-branch",
       "upgrade_ref": "refs/heads/main",
-      "skill_paths": ["skills/frontend-design"],
+      "skill_paths": [
+        "skills/frontend-design"
+      ],
       "skill_count": 1,
-      "agents": ["claude-code"]
+      "agents": [
+        "claude-code"
+      ]
     },
     "playwright-best-practices-skill": {
       "url": "https://github.com/currents-dev/playwright-best-practices-skill.git",
@@ -32,7 +39,10 @@
       "upgrade_strategy": "latest-branch",
       "upgrade_ref": "refs/heads/main",
       "skill_count": 1,
-      "agents": ["claude-code", "codex"]
+      "agents": [
+        "claude-code",
+        "codex"
+      ]
     }
   },
   "agents": {
