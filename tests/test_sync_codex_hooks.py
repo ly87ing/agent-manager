@@ -115,7 +115,7 @@ class CodexHooksSyncTests(unittest.TestCase):
             temp_root = self._copy_repo(temp_dir)
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "codex:hooks:sync"],
+                [str(temp_root / "manage.sh"), "codex:hooks:apply"],
                 cwd=temp_root,
                 capture_output=True,
                 text=True,
@@ -144,4 +144,4 @@ class CodexHooksSyncTests(unittest.TestCase):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
         self.assertIn("codex-hooks-sync", makefile)
         self.assertIn("codex\\:hooks\\:sync", makefile)
-        self.assertIn("\ncodex-hooks-sync:\n\t@./manage.sh codex:hooks:sync\n", makefile)
+        self.assertIn("@./manage.sh codex:hooks:apply", makefile)

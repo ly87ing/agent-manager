@@ -18,11 +18,7 @@ install: init
 apply sync:
 	@./manage.sh apply
 
-# 拉取远端最新 rules / skill / MCP 资源并下发；不处理 Agent / Tool 生命周期
-pull:
-	@./manage.sh pull
-
-# 更新远端资源并收敛本地环境，但不安装缺失 Agent
+# 纯粹刷新版本锁与 skill commit（更新元数据到锁定文件），不执行本地环境应用
 bump update:
 	@./manage.sh bump
 
@@ -31,6 +27,9 @@ plan:
 	@./manage.sh plan
 
 # 仅更新 agent-manager 仓库自身逻辑
+agents-apply agents\:apply agents-sync agents\:sync:
+	@./manage.sh agents:apply
+
 sys-upgrade sys\:upgrade self-update:
 	@./manage.sh sys:upgrade
 

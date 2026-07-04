@@ -409,7 +409,7 @@ class ClaudeHooksSyncTests(unittest.TestCase):
             temp_root = self._copy_repo(temp_dir)
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "claude:hooks:sync"],
+                [str(temp_root / "manage.sh"), "claude:hooks:apply"],
                 cwd=temp_root,
                 capture_output=True,
                 text=True,
@@ -438,4 +438,4 @@ class ClaudeHooksSyncTests(unittest.TestCase):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
         self.assertIn("claude-hooks-sync", makefile)
         self.assertIn("claude\\:hooks\\:sync", makefile)
-        self.assertIn("\nclaude-hooks-sync:\n\t@./manage.sh claude:hooks:sync\n", makefile)
+        self.assertIn("@./manage.sh claude:hooks:apply", makefile)

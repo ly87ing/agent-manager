@@ -1426,7 +1426,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["HOME"] = str(temp_home)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "rules:sync"],
+                [str(temp_root / "manage.sh"), "rules:apply"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -1490,7 +1490,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["HOME"] = str(temp_home)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "rules:sync"],
+                [str(temp_root / "manage.sh"), "rules:apply"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -1507,7 +1507,7 @@ class ManageScriptTests(unittest.TestCase):
         manifest = (ROOT / "config" / "rules-targets.list").read_text(encoding="utf-8")
         self.assertNotIn("{{REPO_ROOT}}", manifest)
 
-    def test_skills:bump_dispatches_upgrade_script(self):
+    def test_skills_upgrade_dispatches_upgrade_script(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -1524,7 +1524,7 @@ class ManageScriptTests(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "--dry-run", "skills:upgrade"],
+                [str(temp_root / "manage.sh"), "--dry-run", "skills:bump"],
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,
@@ -1540,7 +1540,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("--def-file", log_lines[0])
             self.assertIn("--dry-run", log_lines[0])
 
-    def test_skills:bump_forwards_requested_repositories(self):
+    def test_skills_upgrade_forwards_requested_repositories(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -1558,7 +1558,7 @@ class ManageScriptTests(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "skills:upgrade", "repo-a", "repo-b"],
+                [str(temp_root / "manage.sh"), "skills:bump", "repo-a", "repo-b"],
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,
@@ -1572,7 +1572,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("--repo repo-a", log_lines[0])
             self.assertIn("--repo repo-b", log_lines[0])
 
-    def test_update_refreshes_resources_without_agent_install_and_waits_for_agent_lifecycle(self):
+    def test_agents_apply_waits_for_agent_lifecycle_without_install(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -1710,7 +1710,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertLess(version_index, agent_index, log_lines)
             self.assertLess(skill_version_index, skills_index, log_lines)
 
-    def test_update_force_refresh_propagates_to_tools_skills_and_mcp(self):
+    def test_init_force_refresh_propagates_to_tools_skills_and_mcp(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -1783,7 +1783,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertTrue(any(line.startswith("skills ") and "--force-refresh" in line for line in log_lines), log_lines)
             self.assertTrue(any(line.startswith("mcp ") and "--force-refresh" in line for line in log_lines), log_lines)
 
-    def test_update_short_force_refresh_flag_propagates_to_tools_skills_and_mcp(self):
+    def test_init_short_force_refresh_flag_propagates_to_tools_skills_and_mcp(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -1927,7 +1927,7 @@ class ManageScriptTests(unittest.TestCase):
                 log_lines,
             )
 
-    def test_update_wait_agent_lifecycle_forwards_wait_flag(self):
+    def test_init_wait_agent_lifecycle_forwards_wait_flag(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -1982,7 +1982,7 @@ class ManageScriptTests(unittest.TestCase):
                 log_lines,
             )
 
-    def test_update_pipeline_runs_browser_google_us_sync(self):
+    def test_apply_pipeline_runs_browser_google_us_sync(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -3903,7 +3903,7 @@ class ManageScriptTests(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "mcp:sync"],
+                [str(temp_root / "manage.sh"), "mcp:apply"],
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,
@@ -3950,7 +3950,7 @@ class ManageScriptTests(unittest.TestCase):
             env["READY_FILE"] = str(ready_file)
 
             proc = subprocess.Popen(
-                [str(temp_root / "manage.sh"), "--offline", "mcp:sync"],
+                [str(temp_root / "manage.sh"), "--offline", "mcp:apply"],
                 cwd=temp_root,
                 env=env,
                 stdout=subprocess.PIPE,
@@ -3969,7 +3969,7 @@ class ManageScriptTests(unittest.TestCase):
                         break
                     time.sleep(0.1)
 
-                self.assertIsNotNone(child_pid, "mcp:sync 未按预期启动子进程")
+                self.assertIsNotNone(child_pid, "mcp:apply 未按预期启动子进程")
                 os.kill(child_pid, 0)
 
                 proc.terminate()
@@ -3987,7 +3987,7 @@ class ManageScriptTests(unittest.TestCase):
                         break
                     time.sleep(0.1)
 
-                self.assertFalse(child_alive, f"mcp:sync 退出后子进程仍存活: {child_pid}")
+                self.assertFalse(child_alive, f"mcp:apply 退出后子进程仍存活: {child_pid}")
             finally:
                 if proc.poll() is None:
                     proc.kill()

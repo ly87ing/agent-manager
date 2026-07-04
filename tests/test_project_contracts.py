@@ -25,10 +25,6 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn(".PHONY: all bootstrap sync update pull plan self-update smoke", makefile)
         self.assertIn("\nsmoke:\n\t@./scripts/ci-smoke.sh\n", makefile)
 
-    def test_makefile_exposes_pull_target(self):
-        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertIn(" pull ", makefile)
-        self.assertIn("\npull:\n\t@./manage.sh pull\n", makefile)
 
     def _extract_shell_function(self, source: str, name: str) -> str:
         header = f"function {name}() {{\n"
@@ -44,7 +40,7 @@ class ProjectContractTests(unittest.TestCase):
         # pull 拉取远端最新资源并下发：版本锁 / skill 版本 / rules / skills-link / mcp
         for step in (
             "run_pipeline_step run_version_pins_update_task",
-            "run_pipeline_step run_skills:bump_task",
+            "run_pipeline_step run_skills_upgrade_task",
             "run_pipeline_step run_rules_sync_task",
             "run_pipeline_step run_skills_link_task false",
             "run_pipeline_step run_mcp_sync_task true false",
@@ -59,19 +55,11 @@ class ProjectContractTests(unittest.TestCase):
         ):
             self.assertNotIn(excluded, body, f"pull 不应包含重活步骤: {excluded}")
 
-    def test_pull_command_is_wired_with_optional_self_update(self):
-        manage = (ROOT / "manage.sh").read_text(encoding="utf-8")
-        self.assertIn("    pull)\n", manage)
-        pull_case = manage[manage.index("    pull)\n"):]
-        pull_case = pull_case[: pull_case.index("\n        ;;\n")]
-        self.assertIn("run_pull_pipeline", pull_case)
-        self.assertIn("--self-update", pull_case)
-        self.assertIn("run_self_update", pull_case)
 
     def test_makefile_exposes_install_alias(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
         self.assertIn(" install", makefile)
-        self.assertIn("\ninstall: bootstrap\n", makefile)
+        self.assertIn("install: init", makefile)
 
     def test_makefile_exposes_secrets_check_target(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
@@ -124,15 +112,15 @@ class ProjectContractTests(unittest.TestCase):
                 "backups:list",
                 "backups:restore",
                 "rules:build",
-                "rules:sync",
-                "claude:hooks:sync",
-                "codex:hooks:sync",
-                "skills:link",
-                "skills:upgrade",
-                "mcp:sync",
+                "rules:apply",
+                "claude:hooks:apply",
+                "codex:hooks:apply",
+                "skills:apply",
+                "skills:bump",
+                "mcp:apply",
                 "mcp:prepare",
-                "tools:sync",
-                "browser:sync",
+                "tools:apply",
+                "browser:apply",
             ):
                 result = subprocess.run(
                     ["make", goal],
@@ -150,15 +138,15 @@ class ProjectContractTests(unittest.TestCase):
                     "backups:list",
                     "backups:restore",
                     "rules:build",
-                    "rules:sync",
-                    "claude:hooks:sync",
-                    "codex:hooks:sync",
-                    "skills:link",
-                    "skills:upgrade",
-                    "mcp:sync",
+                    "rules:apply",
+                    "claude:hooks:apply",
+                    "codex:hooks:apply",
+                    "skills:apply",
+                    "skills:bump",
+                    "mcp:apply",
                     "mcp:prepare",
-                    "tools:sync",
-                    "browser:sync",
+                    "tools:apply",
+                    "browser:apply",
                 ],
             )
 

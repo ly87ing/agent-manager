@@ -258,7 +258,7 @@ class ClaudeStatuslineInstallerTests(unittest.TestCase):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
         self.assertIn("claude\\:statusline\\:install", makefile)
         manage = (ROOT / "manage.sh").read_text(encoding="utf-8")
-        self.assertIn("claude:statusline:install", manage)
+        self.assertIn("claude:statusline:apply", manage)
         self.assertIn("install_statusline.py", manage)
 
 

@@ -1135,9 +1135,13 @@ function run_skill_reference_audit_warn() {
     fi
 }
 
-function run_sync_pipeline() {
-    begin_workflow "🔄 Agent Manager 配置同步启动"
+function run_apply_pipeline() {
+    begin_workflow "🔄 Agent Manager 环境应用启动"
+    maybe_init_secrets
     begin_pipeline_execution
+    run_pipeline_step run_shell_aliases_sync_task
+    run_pipeline_step run_tools_sync_task
+    run_pipeline_step run_browser_us_sync_task
     run_pipeline_step run_rules_sync_task
     run_pipeline_step run_skills_link_task false
     run_pipeline_step run_mcp_sync_task true false
@@ -1145,35 +1149,43 @@ function run_sync_pipeline() {
     finish_pipeline_execution
 }
 
-function run_pull_pipeline() {
-    begin_workflow "⬇️  Agent Manager 资源拉取启动"
+
+function run_bump_pipeline() {
+    begin_workflow "⬇️  Agent Manager 配置升版启动"
     maybe_init_secrets
     begin_pipeline_execution
     run_pipeline_step run_version_pins_update_task
     run_pipeline_step run_skills_upgrade_task
-    run_pipeline_step run_rules_sync_task
-    run_pipeline_step run_skills_link_task false
-    run_pipeline_step run_mcp_sync_task true false
     finish_pipeline_execution
 }
 
-function run_update_pipeline() {
-    local title="$1"
-    local agent_extra_flags="$2"
-    begin_workflow "$title"
+function run_agents_pipeline() {
+    local agent_extra_flags="$1"
+    begin_workflow "🔄 Agent Manager 环境对齐启动"
+    begin_pipeline_execution
+    run_pipeline_step run_agent_lifecycle_task "$agent_extra_flags"
+    finish_pipeline_execution
+}
+
+function run_init_pipeline() {
+    begin_workflow "🚀 Agent Manager 全量初始化启动"
     maybe_init_secrets
     begin_pipeline_execution
     run_pipeline_step run_version_pins_update_task
     run_pipeline_step run_skills_upgrade_task
-    run_pipeline_step run_agent_lifecycle_task "$agent_extra_flags"
+    run_pipeline_step run_agent_lifecycle_task ""
     run_pipeline_step run_shell_aliases_sync_task
     run_pipeline_step run_tools_sync_task
     run_pipeline_step run_browser_us_sync_task
     run_pipeline_step run_rules_sync_task
     run_pipeline_step run_skills_link_task false
     run_pipeline_step run_mcp_sync_task true false
+    run_skill_reference_audit_warn
     finish_pipeline_execution
 }
+
+
+
 
 function run_self_update() {
     local repo_status
@@ -1416,38 +1428,33 @@ case "$cmd" in
         if [ -z "$WAIT_AGENT_LIFECYCLE_FLAG" ]; then
             WAIT_AGENT_LIFECYCLE_FLAG="--wait-async-actions"
         fi
-        run_update_pipeline "🚀 Agent Manager 全量同步启动" ""
+        run_init_pipeline
         ;;
     bump|update)
         if [ -z "$WAIT_AGENT_LIFECYCLE_FLAG" ]; then
             WAIT_AGENT_LIFECYCLE_FLAG="--wait-async-actions"
         fi
-        run_update_pipeline "🔄 Agent Manager 资源更新启动" "--no-install"
+        run_bump_pipeline
         ;;
     apply|sync)
-        run_sync_pipeline
-        ;;
-    pull)
-        if [ "${#CMD_ARGS[@]}" -gt 0 ]; then
-            for arg in "${CMD_ARGS[@]}"; do
-                if [ "$arg" = "--self-update" ]; then
-                    run_self_update
-                    break
-                fi
-            done
-        fi
-        run_pull_pipeline
+        run_apply_pipeline
         ;;
     plan)
         DRY_RUN_FLAG="--dry-run"
-        run_update_pipeline "🧭 Agent Manager 变更预演启动" ""
+        run_init_pipeline
+        ;;
+    agents:apply|agents:sync)
+        if [ -z "$WAIT_AGENT_LIFECYCLE_FLAG" ]; then
+            WAIT_AGENT_LIFECYCLE_FLAG="--wait-async-actions"
+        fi
+        run_agents_pipeline "--no-install"
         ;;
     sys:upgrade|self-update)
         run_self_update
         ;;
     offline)
         OFFLINE_FLAG="--offline"
-        run_sync_pipeline
+        run_apply_pipeline
         ;;
     ui)
         run_supervised_interactive_command_in_dir 0 "$ROOT_DIR" "$PYTHON_CMD" -m src.interactive

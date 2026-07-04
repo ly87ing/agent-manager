@@ -41,7 +41,7 @@
 `Claude Code` 与 `Codex` 默认走官方 npm 包，并使用 `config/agents.json` 中的命令模板加本机版本锁；`Antigravity CLI` 当前默认走官方 native installer。历史 `brew` 安装仅用于识别并提示迁移，不再作为这些 CLI 的受管 provider。
 `Claude Code native` 仍作为兼容 provider 保留官方 install / update / uninstall 语义，但默认不再使用这条动态 updater 路径。
 `Claude Code local install` 不纳入 `agent-manager` lifecycle 托管，因为它依赖 shell alias 暴露入口，当前探测链路不会越权接管。
-以上 lifecycle 口径统一按三个当前受管 Agent 的官方推荐方式维护。`Claude Code` 和 `Codex` 的 npm provider 使用 `config/agents.json` 中的命令模板，并由 `make bump` 刷新本机 `config/version-pins.local.json`；`Antigravity CLI` 使用官方 `curl -fsSL https://antigravity.google/cli/install.sh | bash` 安装到 `agy`，不由 `agent-manager` 伪造 update 命令。若需要阻止 `agy` 启动后的官方后台自更新，按官方文档在 shell 环境设置 `AGY_CLI_DISABLE_AUTO_UPDATE=true`；`agent-manager` 不改写用户 shell profile。放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer。
+以上 lifecycle 口径统一按三个当前受管 Agent 的官方推荐方式维护。`Claude Code` 和 `Codex` 的 npm provider 使用 `config/agents.json` 中的命令模板，并由 `make bump` 刷新本机 `config/version-pins.local.json`（然后由 `make agents:apply` 或 `make init` 负责更新软件）；`Antigravity CLI` 使用官方 `curl -fsSL https://antigravity.google/cli/install.sh | bash` 安装到 `agy`，不由 `agent-manager` 伪造 update 命令。若需要阻止 `agy` 启动后的官方后台自更新，按官方文档在 shell 环境设置 `AGY_CLI_DISABLE_AUTO_UPDATE=true`；`agent-manager` 不改写用户 shell profile。放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer。
 
 ## Official CLI Lifecycle Policy
 
@@ -113,7 +113,8 @@
 - `./manage.sh`: 显示帮助；这是脚本的安全默认入口。
 - `make apply`: 同步当前配置到 rules，并按已锁定版本对齐 skills / MCP；不处理 Agent / Tool 生命周期，也不刷新版本锁。
 - `make pull`: 拉取远端最新凭证（secrets）/ 版本锁 / skill / MCP 资源并下发到各 Agent；介于 `sync` 与 `update` 之间，不处理 Agent / Tool 生命周期（`./manage.sh pull --self-update` 额外先更新本仓库）。
-- `make bump`: 刷新 CLI/MCP/tool 版本锁与 skill commit、更新远端资源并收敛本地环境，等待 Agent 生命周期更新完成，但不安装缺失 Agent。
+- `make bump`: 纯粹刷新版本锁与 skill commit（更新元数据到锁定文件），不执行本地环境应用。
+- `make agents:apply`: 对比并拉起或更新本地已安装 Agent 的软件版本与生命周期，不强制安装缺失 Agent。
 - `make init`: 执行全量安装、更新与同步，并等待 Agent 生命周期安装/升级完成，适合新机器初始化。
 - `make install`: `make init` 的兼容别名。
 - `make all`: `make init` 的兼容别名。
