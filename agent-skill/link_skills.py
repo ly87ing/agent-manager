@@ -395,6 +395,34 @@ def validate_repo_skill_count(repo_name, config):
     if not isinstance(skill_count, int) or isinstance(skill_count, bool) or skill_count <= 0:
         raise ValueError(f"{repo_name}: skill_count 必须是正整数")
 
+
+def validate_repo_disabled(repo_name, config):
+    # 本机 per-skill 禁用名单，来自 policy（manager.json / manager.local.json 的 skills.<repo>.disabled）。
+    # 形状 fail-close：缺省表示不禁用；给了就必须是非空字符串数组。
+    raw = config.get("disabled")
+    if raw is None:
+        return
+    if not isinstance(raw, list) or any(
+        not isinstance(item, str) or not item.strip() for item in raw
+    ):
+        raise ValueError(f"{repo_name}: skills.{repo_name}.disabled 必须是非空字符串数组")
+
+
+def partition_disabled_skills(repo_name, config, skills):
+    """按本机策略 config.disabled 过滤 skills，返回 (保留的 skills, 实际被禁用的名字集)。
+    形状由 validate_repo_disabled 保证；含未知/已移除的名字仅告警忽略（不阻断同步）。"""
+    requested = {name.strip() for name in (config.get("disabled") or [])}
+    if not requested:
+        return skills, set()
+    unknown = requested - set(skills)
+    if unknown:
+        logging.warning(
+            f"[{repo_name}] disabled 含未知或已移除的 skill（忽略）: {', '.join(sorted(unknown))}"
+        )
+    active = requested & set(skills)
+    kept = {name: path for name, path in skills.items() if name not in active}
+    return kept, active
+
 def create_link(source, link, dry_run=False):
     if dry_run: return
     source, link = Path(source).resolve(), Path(link)
@@ -738,6 +766,7 @@ def main():
         if name in policy_cfg: r_def.update(policy_cfg[name])
         r_def["agents"] = canonicalize_agent_list(r_def.get("agents"))
         validate_repo_skill_count(name, r_def)
+        validate_repo_disabled(name, r_def)
         unknown_agents = [agent_name for agent_name in (r_def["agents"] or []) if agent_name not in ALL_AGENT_TARGETS]
         if unknown_agents:
             raise ValueError(f"{name}: agents 包含未声明的 target: {', '.join(sorted(unknown_agents))}")
@@ -802,6 +831,11 @@ def main():
             all_success = False
         try:
             skills = find_configured_skills(repo_path, config)
+            skills, disabled_active = partition_disabled_skills(repo_name, config, skills)
+            if disabled_active:
+                logging.info(
+                    f"[{repo_name}] 本机禁用 skill（跳过新建并清理旧链）: {', '.join(sorted(disabled_active))}"
+                )
             validate_repo_agent_scope(repo_name, config, skills)
         except DuplicateSkillNameError as exc:
             logging.error(f"[{repo_name}] {exc}")

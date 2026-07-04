@@ -529,6 +529,100 @@ class LinkSkillsTests(unittest.TestCase):
             self.assertIn("未声明策略，跳过", combined)
             self.assertIn("移除来自失效仓库的 skill 链接: my-skill", combined)
 
+    def test_validate_repo_disabled_rejects_non_list(self):
+        with self.assertRaises(ValueError):
+            link_skills.validate_repo_disabled("demo", {"disabled": "safe-merge-review"})
+        with self.assertRaises(ValueError):
+            link_skills.validate_repo_disabled("demo", {"disabled": ["", "ok"]})
+        # 缺省与合法数组都不报错
+        link_skills.validate_repo_disabled("demo", {})
+        link_skills.validate_repo_disabled("demo", {"disabled": ["a", "b"]})
+
+    def test_partition_disabled_skills_filters_named_skill(self):
+        skills = {"keep": Path("/x/keep"), "drop": Path("/x/drop")}
+        kept, active = link_skills.partition_disabled_skills(
+            "demo", {"disabled": ["drop"]}, skills
+        )
+        self.assertEqual(set(kept), {"keep"})
+        self.assertEqual(active, {"drop"})
+
+    def test_partition_disabled_skills_absent_keeps_all(self):
+        skills = {"a": Path("/x/a"), "b": Path("/x/b")}
+        kept, active = link_skills.partition_disabled_skills("demo", {}, skills)
+        self.assertEqual(kept, skills)
+        self.assertEqual(active, set())
+
+    def test_partition_disabled_skills_unknown_name_is_ignored(self):
+        skills = {"a": Path("/x/a")}
+        kept, active = link_skills.partition_disabled_skills(
+            "demo", {"disabled": ["ghost"]}, skills
+        )
+        self.assertEqual(kept, skills)
+        self.assertEqual(active, set())
+
+    def test_disabled_skill_removes_existing_link_and_keeps_others(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "config.json"
+            def_path = temp_root / "defs.json"
+            base_dir = temp_root / "skills"
+            repo_path = base_dir / "repositories" / "demo"
+            agent_target = temp_root / "targets" / "claude"
+            (repo_path / ".git").mkdir(parents=True)
+            for name in ("skill-keep", "skill-drop"):
+                (repo_path / name).mkdir()
+                (repo_path / name / "SKILL.md").write_text(
+                    f"---\nname: {name}\ndescription: demo\n---\n", encoding="utf-8"
+                )
+            agent_target.mkdir(parents=True)
+            # 预置旧链：两个都曾被链接，本次把 skill-drop 禁用
+            os.symlink(repo_path / "skill-drop", agent_target / "skill-drop")
+            config_path.write_text(
+                json.dumps(
+                    {"skills": {"demo": {"enabled": True, "disabled": ["skill-drop"]}}}
+                ),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "demo": {
+                                "url": "https://invalid.example.invalid/nope.git",
+                                "agents": ["claude-code"],
+                            }
+                        },
+                        "agents": {"claude-code": str(agent_target)},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config_path),
+                    "--def-file",
+                    str(def_path),
+                    "--base-dir",
+                    str(base_dir),
+                    "--offline",
+                    "--yes",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertTrue((agent_target / "skill-keep").is_symlink(), combined)
+            self.assertFalse((agent_target / "skill-drop").exists(), combined)
+            self.assertIn("本机禁用 skill", combined)
+
     def test_missing_policy_repository_preserves_unmanaged_alias_link(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
