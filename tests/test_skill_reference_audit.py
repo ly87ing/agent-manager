@@ -18,7 +18,7 @@ def _run(root: Path) -> subprocess.CompletedProcess:
     )
 
 
-def _write_min_root(tmp: str, skill_paths, core_body: str, installed=None) -> Path:
+def _write_min_root(tmp: str, skill_paths, core_body: str, installed=None, retired=None) -> Path:
     root = Path(tmp)
     (root / "config").mkdir()
     agents = {}
@@ -32,6 +32,10 @@ def _write_min_root(tmp: str, skill_paths, core_body: str, installed=None) -> Pa
         json.dumps({"repositories": {"agent-skills": {"skill_paths": skill_paths}}, "agents": agents}),
         encoding="utf-8",
     )
+    if retired is not None:
+        (root / "config" / "retired-skills.json").write_text(
+            json.dumps({"retired": retired}), encoding="utf-8"
+        )
     shared = root / "agent-rule" / "rules" / "src" / "shared"
     shared.mkdir(parents=True)
     (shared / "core.md").write_text(core_body, encoding="utf-8")
@@ -63,6 +67,20 @@ class SkillReferenceAuditTests(unittest.TestCase):
                 core_body="- use the `change-discipline` skill.\n",
             )
             self.assertEqual(_run(root).returncode, 0)
+
+    def test_detects_bare_retired_name(self):
+        # A retired name in a table cell / prose (no `<name>` skill form) is still caught
+        # via the retired-skills blacklist.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _write_min_root(
+                tmp,
+                skill_paths=["change-discipline"],
+                core_body="| Fix defects | fix-ones-bug |\n",
+                retired=["fix-ones-bug"],
+            )
+            result = _run(root)
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("fix-ones-bug", result.stdout)
 
     def test_installed_external_skill_is_not_flagged(self):
         # A cross-source skill (installed via another provider, absent from skill_paths)

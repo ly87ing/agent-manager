@@ -69,16 +69,38 @@ def build_universe(root: Path) -> set[str]:
     return universe
 
 
+def load_retired_names(root: Path) -> list[str]:
+    # Retired/renamed skill names that must not appear as references in managed content.
+    # Catches bare names (prose/table cells) that the `<name>` skill form misses.
+    path = root / "config" / "retired-skills.json"
+    if not path.is_file():
+        return []
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return [str(name) for name in data.get("retired", [])]
+
+
 def audit(root: Path):
     universe = build_universe(root)
-    findings = []
+    retired = load_retired_names(root)
+    retired_patterns = [
+        (name, re.compile(rf"(?<![\w-]){re.escape(name)}(?![\w-])")) for name in retired
+    ]
+    # keyed by (rel, lineno, name) so a retired name in `<name>` skill form is not double-reported;
+    # "retired" wins over "unknown" as the more specific, actionable reason.
+    found: dict[tuple, str] = {}
     for path in managed_content_files(root):
+        rel = path.relative_to(root)
         for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             for match in REFERENCE_RE.finditer(line):
                 name = match.group(1)
                 if name not in universe:
-                    findings.append((path.relative_to(root), lineno, name))
-    return findings, universe
+                    found.setdefault((rel, lineno, name), "unknown")
+            for name, pattern in retired_patterns:
+                if pattern.search(line):
+                    found[(rel, lineno, name)] = "retired"
+    findings = [(rel, lineno, name, kind) for (rel, lineno, name), kind in found.items()]
+    findings.sort(key=lambda item: (str(item[0]), item[1], item[2]))
+    return findings, universe, retired
 
 
 def main() -> int:
@@ -88,18 +110,26 @@ def main() -> int:
     root = Path(args.root_dir)
 
     try:
-        findings, universe = audit(root)
+        findings, universe, retired = audit(root)
     except (OSError, ValueError) as exc:
         print(f"skill-reference audit: 配置读取失败: {exc}", file=sys.stderr)
         return 2
 
     if not findings:
-        print(f"skill-reference audit: OK(无失效引用;已知 skill 全集 {len(universe)} 个)")
+        print(
+            f"skill-reference audit: OK(无失效引用;已知 skill 全集 {len(universe)} 个,"
+            f"退役黑名单 {len(retired)} 个)"
+        )
         return 0
 
-    print("skill-reference audit: 发现失效 skill 引用(内容点名了未安装/未声明的 skill):")
-    for rel, lineno, name in findings:
-        print(f"  {rel}:{lineno}: `{name}` skill — 不在已知 skill 全集内")
+    print("skill-reference audit: 发现失效 skill 引用(内容点名了不存在的 skill):")
+    for rel, lineno, name, kind in findings:
+        reason = (
+            "已退役/改名(见 config/retired-skills.json)"
+            if kind == "retired"
+            else "不在已知 skill 全集内(未安装/未声明)"
+        )
+        print(f"  {rel}:{lineno}: {name} — {reason}")
     print("修复:把引用改指向真实 skill,或安装被引用的 skill;本审计不改写内容。")
     return 1
 
