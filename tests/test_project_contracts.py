@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class ProjectContractTests(unittest.TestCase):
-    def test_init_secrets_guidance_uses_update_or_bootstrap(self):
+    def test_init_secrets_guidance_uses_bump_or_init(self):
         script = (ROOT / "scripts" / "init-secrets.sh").read_text(encoding="utf-8")
         self.assertIn("make bump", script)
         self.assertIn("make init", script)
@@ -22,7 +22,7 @@ class ProjectContractTests(unittest.TestCase):
 
     def test_makefile_exposes_smoke_target(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertIn(".PHONY: all bootstrap sync update pull plan self-update smoke", makefile)
+        self.assertIn(".PHONY: all init bootstrap install apply sync bump update plan", makefile)
         self.assertIn("\nsmoke:\n\t@./scripts/ci-smoke.sh\n", makefile)
 
 

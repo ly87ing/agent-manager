@@ -1210,6 +1210,10 @@ class ManageScriptTests(unittest.TestCase):
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             call_log = temp_root / "calls.log"
+            # apply(sync 别名)会跑 maybe_init_secrets；不隔离会对 secrets/.git 真联网 git pull，
+            # 让本用例贴着超时上限抖动。移除 secrets 并 stub init-secrets 使其 hermetic。
+            remove_path(temp_root / "secrets")
+            self._write_init_secrets_stub(temp_root, call_log)
 
             (temp_root / "config" / "manager.json").write_text(
                 '{\n'
@@ -1248,7 +1252,9 @@ class ManageScriptTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=10,
+                # sync 现走完整 apply 链路(aliases/tools/browser/rules/skills/mcp),基线 5-7s；
+                # 上限用于抓挂死而非性能门禁，给足满负载余量。
+                timeout=60,
             )
 
             combined = result.stdout + result.stderr
@@ -1515,6 +1521,213 @@ class ManageScriptTests(unittest.TestCase):
             self.assertLess(version_index, agent_index, log_lines)
             self.assertLess(skill_version_index, skills_index, log_lines)
 
+    def _write_rules_stub(self, temp_root, call_log):
+        self._write_stub(
+            temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
+            (
+                "#!/usr/bin/env bash\n"
+                f"printf '%s\\n' \"rules $*\" >> {str(call_log)!r}\n"
+                "exit 0\n"
+            ),
+        )
+
+    def _write_browser_stub(self, temp_root, call_log):
+        self._write_stub(
+            temp_root / "scripts" / "sync_browser_google_us.py",
+            (
+                "#!/usr/bin/env python3\n"
+                "import sys\n"
+                f"open({str(call_log)!r}, 'a', encoding='utf-8').write('browser ' + ' '.join(sys.argv[1:]) + '\\n')\n"
+                "sys.exit(0)\n"
+            ),
+        )
+
+    def _write_init_secrets_stub(self, temp_root, call_log):
+        self._write_stub(
+            temp_root / "scripts" / "init-secrets.sh",
+            (
+                "#!/usr/bin/env bash\n"
+                f"printf '%s\\n' init-secrets >> {str(call_log)!r}\n"
+                "exit 0\n"
+            ),
+        )
+
+    def test_bump_only_refreshes_metadata_without_distribution_or_agents(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            call_log = temp_root / "calls.log"
+            remove_path(temp_root / "secrets")
+
+            self._append_log_stub(temp_root / "scripts" / "update_version_pins.py", "versions", call_log)
+            self._append_log_stub(temp_root / "agent-skill" / "upgrade_skills.py", "skill-versions", call_log)
+            self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log)
+            self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log)
+            self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log)
+            self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log)
+            self._write_rules_stub(temp_root, call_log)
+            self._write_browser_stub(temp_root, call_log)
+            self._write_init_secrets_stub(temp_root, call_log)
+
+            env = self._managed_env()
+            env.pop("AGENT_MANAGER_SKIP_VERSION_PIN_UPDATE", None)
+            env.pop("AGENT_MANAGER_SKIP_SKILL_VERSION_UPDATE", None)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "bump"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                check=False,
+            )
+
+            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            self.assertEqual(result.returncode, 0, combined)
+            log_lines = call_log.read_text(encoding="utf-8").splitlines()
+            self.assertTrue(any(line.startswith("versions ") for line in log_lines), log_lines)
+            self.assertTrue(any(line.startswith("skill-versions ") for line in log_lines), log_lines)
+            for forbidden in ("agents ", "tools ", "skills ", "mcp ", "rules ", "browser "):
+                self.assertFalse(
+                    any(line.startswith(forbidden) for line in log_lines),
+                    (forbidden, log_lines),
+                )
+
+    def test_apply_syncs_runtime_without_version_bump_or_agents(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            call_log = temp_root / "calls.log"
+            remove_path(temp_root / "secrets")
+
+            self._append_log_stub(temp_root / "scripts" / "update_version_pins.py", "versions", call_log)
+            self._append_log_stub(temp_root / "agent-skill" / "upgrade_skills.py", "skill-versions", call_log)
+            self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log)
+            self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log)
+            self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log)
+            self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log)
+            self._write_rules_stub(temp_root, call_log)
+            self._write_browser_stub(temp_root, call_log)
+            self._write_init_secrets_stub(temp_root, call_log)
+
+            env = self._managed_env()
+            env.pop("AGENT_MANAGER_SKIP_VERSION_PIN_UPDATE", None)
+            env.pop("AGENT_MANAGER_SKIP_SKILL_VERSION_UPDATE", None)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "apply"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                check=False,
+            )
+
+            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            self.assertEqual(result.returncode, 0, combined)
+            log_lines = call_log.read_text(encoding="utf-8").splitlines()
+            for expected in ("tools ", "skills ", "mcp ", "rules "):
+                self.assertTrue(
+                    any(line.startswith(expected) for line in log_lines),
+                    (expected, log_lines),
+                )
+            for forbidden in ("versions ", "skill-versions ", "agents "):
+                self.assertFalse(
+                    any(line.startswith(forbidden) for line in log_lines),
+                    (forbidden, log_lines),
+                )
+
+    def test_apply_force_refresh_propagates_to_tools_skills_and_mcp(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            call_log = temp_root / "calls.log"
+            remove_path(temp_root / "secrets")
+
+            self._append_log_stub(
+                temp_root / "agent-tool" / "sync_tools.py",
+                "tools",
+                call_log,
+                "'--force-refresh' in sys.argv",
+            )
+            self._append_log_stub(
+                temp_root / "agent-skill" / "link_skills.py",
+                "skills",
+                call_log,
+                "'--force-refresh' in sys.argv",
+            )
+            self._append_log_stub(
+                temp_root / "agent-mcp" / "sync_mcp.py",
+                "mcp",
+                call_log,
+                "'--prepare-runtime' in sys.argv and '--force-refresh' in sys.argv",
+            )
+            self._write_rules_stub(temp_root, call_log)
+            self._write_browser_stub(temp_root, call_log)
+            self._write_init_secrets_stub(temp_root, call_log)
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "--force-refresh", "apply"],
+                cwd=temp_root,
+                env=self._managed_env(),
+                capture_output=True,
+                check=False,
+            )
+
+            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            self.assertEqual(result.returncode, 0, combined)
+            log_lines = call_log.read_text(encoding="utf-8").splitlines()
+            self.assertTrue(any(line.startswith("tools ") and "--force-refresh" in line for line in log_lines), log_lines)
+            self.assertTrue(any(line.startswith("skills ") and "--force-refresh" in line for line in log_lines), log_lines)
+            self.assertTrue(any(line.startswith("mcp ") and "--force-refresh" in line for line in log_lines), log_lines)
+
+    def test_agents_apply_runs_agent_lifecycle_only_without_distribution(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            call_log = temp_root / "calls.log"
+            remove_path(temp_root / "secrets")
+
+            self._append_log_stub(temp_root / "scripts" / "update_version_pins.py", "versions", call_log)
+            self._append_log_stub(temp_root / "agent-skill" / "upgrade_skills.py", "skill-versions", call_log)
+            self._append_log_stub(
+                temp_root / "agent-lifecycle" / "sync_agents.py",
+                "agents",
+                call_log,
+                "'--no-install' in sys.argv and '--async-actions' in sys.argv and '--wait-async-actions' in sys.argv",
+            )
+            self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log)
+            self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log)
+            self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log)
+            self._write_rules_stub(temp_root, call_log)
+            self._write_browser_stub(temp_root, call_log)
+            self._write_init_secrets_stub(temp_root, call_log)
+
+            env = self._managed_env()
+            env.pop("AGENT_MANAGER_SKIP_VERSION_PIN_UPDATE", None)
+            env.pop("AGENT_MANAGER_SKIP_SKILL_VERSION_UPDATE", None)
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "agents:apply"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                check=False,
+            )
+
+            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            self.assertEqual(result.returncode, 0, combined)
+            log_lines = call_log.read_text(encoding="utf-8").splitlines()
+            self.assertTrue(
+                any(
+                    line.startswith("agents ")
+                    and "--no-install" in line
+                    and "--wait-async-actions" in line
+                    for line in log_lines
+                ),
+                log_lines,
+            )
+            for forbidden in ("versions ", "skill-versions ", "tools ", "skills ", "mcp ", "rules ", "browser "):
+                self.assertFalse(
+                    any(line.startswith(forbidden) for line in log_lines),
+                    (forbidden, log_lines),
+                )
+            self.assertFalse(any(line == "init-secrets" for line in log_lines), log_lines)
 
 
     def test_bootstrap_allows_agent_install_and_waits_for_agent_lifecycle(self):
@@ -2219,7 +2432,7 @@ class ManageScriptTests(unittest.TestCase):
             log_lines = call_log.read_text(encoding="utf-8").splitlines()
             self.assertFalse(any(line == "init-secrets" for line in log_lines), log_lines)
             self.assertTrue(any(line.startswith("agents ") and "--dry-run" in line for line in log_lines), log_lines)
-            
+            self.assertTrue(any(line.startswith("tools ") and "--dry-run" in line for line in log_lines), log_lines)
             self.assertTrue(any(line.startswith("rules ") and "--dry-run" in line for line in log_lines), log_lines)
             self.assertTrue(any(line.startswith("skills ") and "--dry-run" in line for line in log_lines), log_lines)
             self.assertTrue(any(line.startswith("mcp ") and "--dry-run" in line for line in log_lines), log_lines)
