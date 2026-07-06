@@ -9,7 +9,7 @@ class RuleBudgetTests(unittest.TestCase):
     def test_shared_core_stays_within_budget(self):
         content = (ROOT / "agent-rule" / "rules" / "src" / "shared" / "core.md").read_text(encoding="utf-8")
         approx_tokens = round(len(content) / 4)
-        self.assertLessEqual(approx_tokens, 460, f"shared core too large: ~{approx_tokens} tokens")
+        self.assertLessEqual(approx_tokens, 420, f"shared core too large: ~{approx_tokens} tokens")
 
     def test_shared_core_excludes_artifact_hygiene_detail(self):
         core = (ROOT / "agent-rule" / "rules" / "src" / "shared" / "core.md").read_text(encoding="utf-8")
