@@ -1559,6 +1559,11 @@ case "$cmd" in
         if [ -n "$DRY_RUN_FLAG" ]; then uninstall_args+=("$DRY_RUN_FLAG"); fi
         if [ "${#CMD_ARGS[@]}" -gt 0 ]; then uninstall_args+=("${CMD_ARGS[@]}"); fi
         run_supervised_command_in_dir 120 "$ROOT_DIR" "${uninstall_args[@]}" ;;
+    claude:clean)
+        clean_args=(bash "$ROOT_DIR/scripts/claude/clean.sh")
+        if [ -n "$DRY_RUN_FLAG" ]; then clean_args+=("$DRY_RUN_FLAG"); fi
+        if [ "${#CMD_ARGS[@]}" -gt 0 ]; then clean_args+=("${CMD_ARGS[@]}"); fi
+        run_supervised_command_in_dir 120 "$ROOT_DIR" "${clean_args[@]}" ;;
     codex:hooks:apply)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" "$PYTHON_CMD" ./scripts/sync-codex-hooks.py $DRY_RUN_FLAG ;;
     skills:apply)
@@ -1686,6 +1691,7 @@ case "$cmd" in
         echo -e "  ${BORDER_GRAY}claude:statusline:apply${NC} 安装精简 statusline 脚本到 ~/.claude/statusline.sh"
         echo -e "  ${BORDER_GRAY}claude:statusline:wire${NC}    将 statusline.sh 路径写入 ~/.claude/settings.json（仅作用于 Claude Code）"
         echo -e "  ${BORDER_GRAY}claude:uninstall${NC}    完整卸载本机 Claude Code 全局痕迹（默认预览；--yes 才真删，可加 --backup-memory）"
+        echo -e "  ${BORDER_GRAY}claude:clean${NC}        清理会话/历史/缓存等可删除数据，保留配置·记忆·技能（默认预览；--yes 才删，自动护当前会话）"
         echo -e "  ${BORDER_GRAY}codex:hooks:apply${NC} 独立刷新仓库级 Codex hooks 到 .codex/hooks.json"
         echo -e "  ${BORDER_GRAY}skills:apply${NC}    独立执行全局或系统级专业技能代码集到 Agent 沙盒空间的映射配置与软链接"
         echo -e "  ${BORDER_GRAY}skills:bump${NC}     显式解析并回写 skill 仓库的最新可审计版本（仅 release/tag，失败即停止）"
