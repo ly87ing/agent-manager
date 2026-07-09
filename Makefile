@@ -1,4 +1,4 @@
-.PHONY: init apply bump plan agents-apply agents\:apply sys-upgrade sys\:upgrade smoke ui help doctor status detect fetch-models offline dry-run eval-rules sys-clean sys\:clean state-clean state\:clean sys-unlock sys\:unlock sys-logs sys\:logs sys-clean-logs sys\:clean-logs state-list state\:list state-restore state\:restore rules-build rules\:build rules-apply rules\:apply skills-apply skills\:apply skills-bump skills\:bump skill-disable skill\:disable skill-enable skill\:enable skill-list skill\:list mcp-apply mcp\:apply mcp-build mcp\:build tools-apply tools\:apply browser-apply browser\:apply claude-hooks-apply claude\:hooks\:apply claude-statusline-apply claude\:statusline\:apply claude-statusline-wire claude\:statusline\:wire claude-shell-aliases-apply claude\:shell-aliases\:apply codex-hooks-apply codex\:hooks\:apply secrets-check secrets\:check instructions-check instructions\:check
+.PHONY: init apply bump plan agents-apply agents\:apply agents-status agents\:status sys-upgrade sys\:upgrade smoke ui help doctor status detect fetch-models offline dry-run eval-rules sys-clean sys\:clean state-clean state\:clean sys-unlock sys\:unlock sys-logs sys\:logs sys-clean-logs sys\:clean-logs state-list state\:list state-restore state\:restore rules-build rules\:build rules-apply rules\:apply skills-apply skills\:apply skills-bump skills\:bump skill-disable skill\:disable skill-enable skill\:enable skill-list skill\:list mcp-apply mcp\:apply mcp-build mcp\:build tools-apply tools\:apply browser-apply browser\:apply claude-hooks-apply claude\:hooks\:apply claude-statusline-apply claude\:statusline\:apply claude-statusline-wire claude\:statusline\:wire claude-shell-aliases-apply claude\:shell-aliases\:apply claude-uninstall claude\:uninstall claude-clean claude\:clean codex-hooks-apply codex\:hooks\:apply secrets-check secrets\:check instructions-check instructions\:check
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -22,6 +22,10 @@ plan:
 # 仅对齐已安装 Agent 的生命周期，不安装缺失 Agent
 agents-apply agents\:apply:
 	@./manage.sh agents:apply
+
+# 查看已安装 Agent 的生命周期状态
+agents-status agents\:status:
+	@./manage.sh agents:status
 
 # 仅更新 agent-manager 仓库自身逻辑
 sys-upgrade sys\:upgrade:
@@ -143,6 +147,14 @@ claude\:statusline\:wire:
 
 claude-shell-aliases-apply claude\:shell-aliases\:apply:
 	@./manage.sh claude:shell-aliases:apply
+
+# 完整卸载 Claude Code 全局痕迹（默认预览；ARGS=--yes 才真删，可加 --backup-memory）
+claude-uninstall claude\:uninstall:
+	@./manage.sh claude:uninstall $(ARGS)
+
+# 清理会话/历史/缓存等可删除数据，保留配置·记忆·技能（默认预览；ARGS=--yes 才删）
+claude-clean claude\:clean:
+	@./manage.sh claude:clean $(ARGS)
 
 codex-hooks-apply codex\:hooks\:apply:
 	@./manage.sh codex:hooks:apply
