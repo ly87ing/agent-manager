@@ -5,6 +5,7 @@
   "aliases": {
     "claude": "TZ=\"{timezone}\" LANG=\"{lang}\" LC_ALL=\"{lang}\" claude --dangerously-skip-permissions",
     "codex": "TZ=\"{timezone}\" LANG=\"{lang}\" LC_ALL=\"{lang}\" codex",
+    "grok": "TZ=\"{timezone}\" LANG=\"{lang}\" LC_ALL=\"{lang}\" grok",
     "agy": "TZ=\"{timezone}\" LANG=\"{lang}\" LC_ALL=\"{lang}\" agy",
     "chrome": "open --env TZ=\"{timezone}\" --env LANG=\"{lang}\" --env LC_ALL=\"{lang}\" -n -a \"Google Chrome\" --args --lang=en-US"
   }
