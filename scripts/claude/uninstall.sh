@@ -2,8 +2,10 @@
 # uninstall.sh — 完整卸载本机的 Claude Code(原生安装器版）及其全部「全局安装痕迹」。
 #
 # 覆盖范围(逐条为本机实测确认,均属全局安装痕迹):
-#   本体      ~/.local/share/claude、软链 ~/.local/bin/claude
-#   数据      ~/.claude、配置 ~/.claude.json(+ *.bak)
+#   本体      ~/.local/{share,state}/claude、软链 ~/.local/bin/claude
+#   数据      ${CLAUDE_CONFIG_DIR:-~/.claude}、配置 ~/.claude.json(+ *.bak)
+#   旧/XDG    ~/.claude-code、~/.config/claude*、~/.cache/claude*(本机通常无,存在才删)
+#   桌面版    ~/Library/Application Support/Claude(整目录;含 Claude 桌面版应用数据)
 #   CLI 缓存  ~/Library/Caches/claude-cli-nodejs
 #   桌面版残留 ~/Library/HTTPStorages/com.anthropic.claudefordesktop
 #   临时目录  /private/tmp/claude-<uid>
@@ -52,6 +54,9 @@ done
 EXECUTE=false
 if [ "$ASSUME_YES" = true ] && [ "$DRY_RUN" = false ]; then EXECUTE=true; fi
 
+# 尊重 CLAUDE_CONFIG_DIR:用户可能把配置目录从默认 ~/.claude 迁走,硬编码会漏删。
+CFG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+
 step() { echo; echo "$1"; }
 
 # 删除若干路径(glob 由调用处展开);仅对真实存在的目标动手/打印。
@@ -76,7 +81,7 @@ echo "==================================================================="
 # ①* 可选:删除 ~/.claude 前先备份各项目 memory
 if [ "$BACKUP_MEMORY" = true ]; then
     step "①* 备份各项目 memory 到 ~/Desktop"
-    PROJ="$HOME/.claude/projects"
+    PROJ="$CFG_DIR/projects"
     if [ -d "$PROJ" ]; then
         mems=()
         while IFS= read -r d; do mems+=("${d#"$PROJ"/}"); done \
@@ -106,13 +111,20 @@ else
 fi
 
 step "③ 删除本体 / 数据 / 配置 / 缓存 / 临时目录 / URL 处理器"
-do_rm "$HOME/.local/share/claude" "$HOME/.local/bin/claude"
-do_rm "$HOME/.claude" "$HOME/.claude.json"
+do_rm "$HOME/.local/share/claude" "$HOME/.local/state/claude" "$HOME/.local/bin/claude"
+do_rm "$CFG_DIR" "$HOME/.claude.json"
 do_rm "$HOME"/.claude.json.bak.*
 do_rm "$HOME/Library/Caches/claude-cli-nodejs"
 do_rm "$HOME/Library/HTTPStorages/com.anthropic.claudefordesktop"
 do_rm "/private/tmp/claude-$(id -u)"
 do_rm "$HOME/Applications/Claude Code URL Handler.app"
+# 旧版 / XDG 残留(本机通常无,do_rm 存在才删)。
+do_rm "$HOME/.claude-code"
+do_rm "$HOME/.config/claude"*
+do_rm "$HOME/.cache/claude"*
+# Claude 桌面版应用数据目录:按明确要求整目录清理。注意——此目录属 Claude Desktop,
+# 若该机装有 Claude 桌面版,会一并删除其应用数据(聊天/会话等);本机未装,仅残留。
+do_rm "$HOME/Library/Application Support/Claude"
 LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 if [ "$EXECUTE" = true ]; then
     [ -x "$LSREG" ] && "$LSREG" -kill -r -domain local -domain system -domain user >/dev/null 2>&1
