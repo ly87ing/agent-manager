@@ -4,10 +4,10 @@
 # 清理(会自动重建,或已随会话结束而失效):
 #   会话记录  projects/<proj>/*.jsonl 及会话 UUID 子目录
 #   撤销快照  file-history/<session>
-#   任务/作业 tasks/<session>、jobs/<session>
+#   任务/作业/待办 tasks/<session>、jobs/<session>、todos/<session>
 #   会话运行态 session-env/*、sessions/*、shell-snapshots/*
-#   缓存      cache、image-cache、paste-cache、stats-cache.json、mcp-needs-auth-cache.json
-#   备份/日志 backups、daemon + daemon.log、history.jsonl、telemetry、downloads、ide、plans
+#   缓存      cache、image-cache、paste-cache、statsig、stats-cache.json、mcp-needs-auth-cache.json
+#   备份/日志 backups、daemon + daemon.log、history.jsonl、telemetry、downloads、ide、plans、logs、debug、feedback-bundles
 #   状态标记  .last-update-result.json、.last-cleanup
 #
 # 保留(绝不动):
@@ -91,13 +91,13 @@ echo " 保护会话: ${KEEP_IDS:-（无,靠近期保护）}   近期保护: ${RE
 echo "==============================================================="
 
 echo; echo "[1] 缓存 / 日志 / 状态(整体删除)"
-for x in backups cache daemon downloads ide plans telemetry; do rm_path "$CLA/$x"; done
+for x in backups cache daemon debug downloads feedback-bundles ide logs plans statsig telemetry; do rm_path "$CLA/$x"; done
 for x in daemon.log history.jsonl mcp-needs-auth-cache.json stats-cache.json .last-update-result.json .last-cleanup; do
     rm_path "$CLA/$x"
 done
 
 echo; echo "[2] 会话键目录(保护当前/活动会话)"
-for d in file-history tasks jobs session-env shell-snapshots sessions paste-cache image-cache; do
+for d in file-history tasks jobs todos session-env shell-snapshots sessions paste-cache image-cache; do
     prune_dir "$CLA/$d"
 done
 

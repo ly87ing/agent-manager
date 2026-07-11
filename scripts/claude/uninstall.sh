@@ -5,20 +5,23 @@
 #   本体      ~/.local/{share,state}/claude、软链 ~/.local/bin/claude
 #   数据      ${CLAUDE_CONFIG_DIR:-~/.claude}、配置 ~/.claude.json(+ *.bak)
 #   旧/XDG    ~/.claude-code、~/.config/claude*、~/.cache/claude*(本机通常无,存在才删)
-#   桌面版    ~/Library/Application Support/Claude(整目录;含 Claude 桌面版应用数据)
+#   桌面版    com.anthropic.claudefordesktop 整套 bundle:~/Library 下 Application Support/Claude、
+#             Caches、HTTPStorages、Preferences plist、Saved Application State、WebKit、Cookies、Logs/Claude
 #   CLI 缓存  ~/Library/Caches/claude-cli-nodejs
-#   桌面版残留 ~/Library/HTTPStorages/com.anthropic.claudefordesktop
 #   临时目录  /private/tmp/claude-<uid>
 #   URL 处理器 ~/Applications/Claude Code URL Handler.app  + 重置 LaunchServices
 #   JetBrains  …/IntelliJIdea*/plugins/claude-code-jetbrains-plugin(+ 任务残留)
 #   Keychain   Claude Code-credentials(acct=当前用户)、Claude Safe Storage(acct=Claude Key)
 #   shell 别名 ~/.zshrc / ~/.zprofile 里的 alias claude=…
 #   IDE 设置   VS Code / Antigravity settings.json 里的 claudeCode 孤儿项
+#   浏览器桥接 各浏览器 NativeMessagingHosts/com.anthropic.claude*_browser_extension.json(原生消息宿主 manifest)
 #
 # 明确不动(边界):
 #   ~/.local/bin 目录、PATH、~/.local/bin/env(uv 等工具共用)
 #   项目内 .claude/ 与 CLAUDE.md(各仓库内容)
 #   第三方 session-viewer;用户自建 com.xiaoyu.skills.update 定时任务(末尾仅提示)
+#   'Claude for Chrome' 浏览器扩展(经浏览器管理页卸载,强删目录会损坏 profile)、
+#     claude.ai/claude.com 网站数据(cookie/IndexedDB/登录态,属正常浏览内容)——末尾仅提示
 #
 # 用法:
 #   ./scripts/claude/uninstall.sh --dry-run                 预览计划,零改动
@@ -115,16 +118,22 @@ do_rm "$HOME/.local/share/claude" "$HOME/.local/state/claude" "$HOME/.local/bin/
 do_rm "$CFG_DIR" "$HOME/.claude.json"
 do_rm "$HOME"/.claude.json.bak.*
 do_rm "$HOME/Library/Caches/claude-cli-nodejs"
-do_rm "$HOME/Library/HTTPStorages/com.anthropic.claudefordesktop"
 do_rm "/private/tmp/claude-$(id -u)"
 do_rm "$HOME/Applications/Claude Code URL Handler.app"
 # 旧版 / XDG 残留(本机通常无,do_rm 存在才删)。
 do_rm "$HOME/.claude-code"
 do_rm "$HOME/.config/claude"*
 do_rm "$HOME/.cache/claude"*
-# Claude 桌面版应用数据目录:按明确要求整目录清理。注意——此目录属 Claude Desktop,
-# 若该机装有 Claude 桌面版,会一并删除其应用数据(聊天/会话等);本机未装,仅残留。
+# Claude 桌面版(com.anthropic.claudefordesktop)整套 bundle 痕迹:按明确要求整目录清理。
+# 注意——含桌面版应用数据(聊天/会话等);本机未装桌面版,通常仅残留少数缓存,do_rm 存在才删。
 do_rm "$HOME/Library/Application Support/Claude"
+do_rm "$HOME/Library/Caches/com.anthropic.claudefordesktop"
+do_rm "$HOME/Library/HTTPStorages/com.anthropic.claudefordesktop"
+do_rm "$HOME/Library/Preferences/com.anthropic.claudefordesktop.plist"
+do_rm "$HOME/Library/Saved Application State/com.anthropic.claudefordesktop.savedState"
+do_rm "$HOME/Library/WebKit/com.anthropic.claudefordesktop"
+do_rm "$HOME/Library/Cookies/com.anthropic.claudefordesktop.binarycookies"
+do_rm "$HOME/Library/Logs/Claude"
 LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 if [ "$EXECUTE" = true ]; then
     [ -x "$LSREG" ] && "$LSREG" -kill -r -domain local -domain system -domain user >/dev/null 2>&1
@@ -169,6 +178,17 @@ for s in "$HOME/Library/Application Support/Code/User/settings.json" \
     fi
 done
 
+step "⑧ 清理浏览器原生消息宿主 manifest(Claude 浏览器扩展的 native messaging 桥接)"
+# 仅删 Anthropic 自有文件名的指针 JSON——安全(非 HMAC 签名,删掉不会损坏浏览器 profile);
+# 任意深度扫(如 Arc 在 …/Arc/User Data/NativeMessagingHosts/)。浏览器扩展本体不强删,见末尾。
+nmh_found=false
+while IFS= read -r nmh; do
+    nmh_found=true; do_rm "$nmh"
+done < <(find "$HOME/Library/Application Support" -type f \
+    \( -name 'com.anthropic.claude_browser_extension.json' \
+       -o -name 'com.anthropic.claude_code_browser_extension.json' \) 2>/dev/null)
+[ "$nmh_found" = false ] && echo "   未发现 Claude 原生消息宿主 manifest(本机未用过浏览器连接、未装桌面版)"
+
 echo
 echo "-------------------------------------------------------------------"
 echo "【需你手动决定,脚本不动】"
@@ -178,6 +198,10 @@ echo "      launchctl unload ~/Library/LaunchAgents/com.xiaoyu.skills.update.pli
 echo "      rm ~/Library/LaunchAgents/com.xiaoyu.skills.update.plist"
 echo "  • 项目内 .claude/ 与 CLAUDE.md、第三方 session-viewer —— 均保留"
 echo "  • ~/.local/bin、PATH、.local/bin/env —— uv 等共用,保留"
+echo "  • 'Claude for Chrome' 浏览器扩展(若装过):请在浏览器扩展管理页卸载。"
+echo "    脚本不强删——Chrome 扩展状态 HMAC 签在 Secure Preferences,直接删目录会"
+echo "    留悬挂项/'扩展已损坏',且可能被账号同步重装。(已扫本机 9 款浏览器×全 profile,当前未装)"
+echo "  • claude.ai / claude.com 的网站数据(cookie、IndexedDB、登录态)—— 属正常浏览内容,非安装痕迹,保留"
 echo "-------------------------------------------------------------------"
 
 echo
