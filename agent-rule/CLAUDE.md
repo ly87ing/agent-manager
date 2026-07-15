@@ -26,7 +26,7 @@
 
 ## 编辑 core.md 的隐形护栏(改前先看,否则门禁莫名报红)
 
-- **预算硬门禁** `tests/test_rule_budgets.py`:`round(len(core.md)/4) ≤ 420`。长期贴上限跑(2026-07 时为 410,余量仅 ~10 token),任何净增字符都会破门——路由行改写须**字符中性或负增**,想加内容先压缩现有措辞腾位。
+- **预算硬门禁** `tests/test_rule_budgets.py`:`round(len(core.md)/4) ≤ 440`。长期贴上限跑(2026-07 时为 430,余量仅 ~10 token),任何净增字符都会破门——路由行改写须**字符中性或负增**,想加内容先压缩现有措辞腾位。上限只在**新增 always-on 边界**这类预期行为变更时才抬(如 460→420 是下线条目后收紧,420→440 是新增「未经同意不得上传远端」),不为让门禁变绿而抬。
 - **短语断言** `tests/test_sync_rules.py` 逐字断言四条 `` use the `change-discipline` skill ``/`` `artifact-hygiene` ``/`` `frontend-verification` ``/`` `reader-facing-writing` ``,`test_rule_layout.py` 按 ``re.findall(r"use the `([a-z0-9-]+)` skill")`` 提取——**skill 改名要同步测试**;但短语左侧的触发关键词不被断言,可自由改写。
 - **反向断言** `test_rule_layout.py` 禁止分发规则出现探索/工具督促类子句(`codebase-retrieval`、`augment MCP`、`graphify-out/GRAPH_REPORT.md`、`For codebase exploration:`)。
 
