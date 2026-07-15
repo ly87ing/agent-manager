@@ -26,7 +26,8 @@
 
 ## 编辑 core.md 的隐形护栏(改前先看,否则门禁莫名报红)
 
-- **预算硬门禁** `tests/test_rule_budgets.py`:`round(len(core.md)/4) ≤ 440`。长期贴上限跑(2026-07 时为 430,余量仅 ~10 token),任何净增字符都会破门——路由行改写须**字符中性或负增**,想加内容先压缩现有措辞腾位。上限只在**新增 always-on 边界**这类预期行为变更时才抬(如 460→420 是下线条目后收紧,420→440 是新增「未经同意不得上传远端」),不为让门禁变绿而抬。
+- **预算硬门禁** `tests/test_rule_budgets.py`:`round(len(core.md)/4)` 有硬上限(**数字以该测试的常量为准,别在这儿抄第二份**)。core 长期贴着上限跑,任何净增字符都可能破门——**改前先跑该测试看实测余量**;路由行改写须**字符中性或负增**,想加内容先压缩现有措辞腾位。
+- **抬上限的判据是 delete-test,不是「我加的是 always-on 边界」**——后者恰恰是 bd139d5 对自己的定性:它新增常驻条目并抬 420→460,三个 commit 后 6dd67bb 判定该行(core.md 第 11 行)是低频条件性 when-X-do-Y、过不了 delete-test,遂删行并**对称回退** 460→420,明写"恢复「净增即破门」的强制函数"。规矩:先用 delete-test(删了它 agent 会不会犯错)证明该行配占常驻槽位再抬,且**抬升与该行同生共死**——行下线时上限一并回退;绝不为让门禁变绿而抬。
 - **短语断言** `tests/test_sync_rules.py` 逐字断言四条 `` use the `change-discipline` skill ``/`` `artifact-hygiene` ``/`` `frontend-verification` ``/`` `reader-facing-writing` ``,`test_rule_layout.py` 按 ``re.findall(r"use the `([a-z0-9-]+)` skill")`` 提取——**skill 改名要同步测试**;但短语左侧的触发关键词不被断言,可自由改写。
 - **反向断言** `test_rule_layout.py` 禁止分发规则出现探索/工具督促类子句(`codebase-retrieval`、`augment MCP`、`graphify-out/GRAPH_REPORT.md`、`For codebase exploration:`)。
 

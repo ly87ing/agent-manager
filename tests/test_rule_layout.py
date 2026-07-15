@@ -120,6 +120,7 @@ class RuleLayoutTests(unittest.TestCase):
                 "or impossible-case handling."
             ),
             "Keep edits surgical: match local style, avoid unrelated cleanup, and remove only dead code made obsolete.",
+            "Never publish work product to a remote or shared location without explicit user consent.",
             "`change-discipline` skill",
             "`frontend-verification` skill",
             "`artifact-hygiene` skill",
