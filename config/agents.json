@@ -69,6 +69,18 @@
     "preferred_provider": "npm",
     "require_managed_provider": true,
     "providers": {
+      "native": {
+        "managed": true,
+        "install": {
+          "darwin": "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh",
+          "linux": "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh"
+        },
+        "uninstall": {
+          "posix": "rm -f ~/.local/bin/codex ~/.local/bin/codex-code-mode-host && rm -rf ~/.codex/packages"
+        },
+        "upgrade": "codex update",
+        "detect_paths": ["~/.local/bin/codex"]
+      },
       "npm": {
         "managed": true,
         "install": "npm install -g @openai/codex@0.139.0",
