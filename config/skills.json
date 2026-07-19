@@ -11,9 +11,10 @@
         "change-discipline",
         "frontend-verification",
         "artifact-hygiene",
-        "reader-facing-writing"
+        "reader-facing-writing",
+        "session-mining"
       ],
-      "skill_count": 6,
+      "skill_count": 7,
       "agents": [
         "claude-code",
         "antigravity-cli",
