@@ -120,7 +120,13 @@ class RuleLayoutTests(unittest.TestCase):
                 "or impossible-case handling."
             ),
             "Keep edits surgical: match local style, avoid unrelated cleanup, and remove only dead code made obsolete.",
-            "Never publish work product to a remote or shared location without explicit user consent.",
+            # 2026-07-19 该行按用户拍板扩写（交付动作需明确指令 + 里程碑后主动提议 push），断言随行文更新。
+            "Never publish work product to a remote or shared location without explicit user consent;",
+            "Never add AI attribution (Co-Authored-By etc.) to commits or MR descriptions.",
+            (
+                "Verify load-bearing conclusions against primary sources (code, origin, live systems); "
+                'treat search summaries, other AIs\' analyses, and "already done" claims as leads, not facts.'
+            ),
             "`change-discipline` skill",
             "`frontend-verification` skill",
             "`artifact-hygiene` skill",
