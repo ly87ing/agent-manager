@@ -464,8 +464,18 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None
                     settings["env"]["_MANAGED_BY"] = "agent-manager"
                     current_config[key_name][name] = settings
                 logging.info(f"[AGENT: {agent_name}] 更新 MCP: {name}")
-            
-            atomic_write_json(config_path, current_config)
+
+            # atomic_write_json re-raises, and this loop covers every agent in
+            # turn, so an unwrapped failure here (ENOSPC, EPERM, read-only home)
+            # aborts the whole pass: the agents after this one in AGENT_TARGETS
+            # silently get nothing this run. Account for it per agent instead,
+            # the way the TOML branch above already does.
+            try:
+                atomic_write_json(config_path, current_config)
+            except Exception as exc:
+                logging.error(f"[AGENT: {agent_name}] JSON 配置写入失败，跳过该端: {exc}")
+                all_ok = False
+                continue
     return all_ok
 
 def sync_secrets_repo(secrets_path):

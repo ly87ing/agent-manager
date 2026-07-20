@@ -1480,3 +1480,36 @@ class SyncMcpTests(unittest.TestCase):
                 updated["mcp_servers"]['augment "beta".engine']["env"]["AUGMENT_SESSION_AUTH"],
                 'token "quoted"',
             )
+
+
+class JsonWriteFailureIsolationTests(unittest.TestCase):
+    """atomic_write_json re-raises, and manage_mcp_config loops over every agent in
+    turn. An unwrapped failure on the first agent therefore aborted the whole pass,
+    so the agents after it in AGENT_TARGETS silently got nothing that run — while the
+    TOML branch had always accounted for its own failures per agent."""
+
+    def test_one_agents_write_failure_does_not_skip_the_rest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            first = Path(tmp) / "first.json"
+            second = Path(tmp) / "second.json"
+            first.write_text("{}", encoding="utf-8")
+            second.write_text("{}", encoding="utf-8")
+            targets = {"claude-code": str(first), "antigravity-cli": str(second)}
+            servers = {"demo": {"command": "demo", "args": [], "enabled": True}}
+            written = []
+
+            real_write = sync_mcp.atomic_write_json
+
+            def flaky_write(path, data):
+                if str(path) == str(first):
+                    raise OSError("no space left on device")
+                written.append(str(path))
+                return real_write(path, data)
+
+            with mock.patch.object(sync_mcp, "atomic_write_json", flaky_write), \
+                 mock.patch.object(sync_mcp, "should_sync_mcp_target", lambda *a, **k: True), \
+                 mock.patch.object(sync_mcp, "backup_config", lambda *a, **k: True):
+                ok = sync_mcp.manage_mcp_config(targets, servers)
+
+            self.assertFalse(ok, "a failed write must be reported, not swallowed")
+            self.assertIn(str(second), written, "the next agent must still be written")
