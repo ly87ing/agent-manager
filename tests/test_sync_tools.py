@@ -1154,3 +1154,21 @@ class SyncToolsTests(unittest.TestCase):
                 )
 
             self.assertEqual((target_dir / "config.txt").read_text(encoding="utf-8"), "override\n")
+
+
+class ExtractNpmPackageNameTests(unittest.TestCase):
+    """An unversioned scoped package used to parse to "", which is falsy: the npm
+    probe branch was then skipped, the update state came back "unknown", and the
+    tool silently stopped updating. Masked today only because every tools.json
+    entry pins an explicit @version."""
+
+    def test_scoped_names_survive_with_and_without_a_version(self):
+        cases = {
+            "npm install -g @augmentcode/auggie": "@augmentcode/auggie",
+            "npm install -g @playwright/cli@0.1.15": "@playwright/cli",
+            "npm install -g @scope/pkg@1.2.3-beta.1": "@scope/pkg",
+            "npm install -g agent-browser@0.31.1": "agent-browser",
+            "npm install -g plain-pkg": "plain-pkg",
+        }
+        for command, expected in cases.items():
+            self.assertEqual(sync_tools._extract_npm_package_name(command), expected, command)

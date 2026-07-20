@@ -99,8 +99,13 @@ def _extract_npm_package_name(command):
     for token in tokens[2:]:
         if token.startswith("-"):
             continue
-        if token.startswith("@") and "@" in token[1:]:
-            return token.rsplit("@", 1)[0]
+        # A scoped name starts with "@", so the leading character is part of the
+        # name, not a version separator. Splitting on the first "@" returns ""
+        # for an unversioned scoped package, and "" is falsy — the npm probe
+        # branch is then skipped, the state comes back "unknown", and the tool
+        # silently stops updating. Only a second "@" delimits a version.
+        if token.startswith("@"):
+            return token.rsplit("@", 1)[0] if "@" in token[1:] else token
         if "@" in token:
             return token.split("@", 1)[0]
         return token
