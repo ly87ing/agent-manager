@@ -727,8 +727,14 @@ def detect_serena_readiness(inventory=None):
 def is_agent_installed(agent_name: str, agent_def: dict) -> bool:
     """Quickly check whether an agent is installed.
 
-    Checks bin first (shutil.which), then app_path (os.path.exists).
-    Returns False when neither is configured.
+    Checks bin (shutil.which), then app_path, then each provider's detect_paths.
+
+    detect_paths matters because a "not installed" verdict is destructive, not
+    neutral: sync_mcp treats it as "agent removed" and deletes every server it
+    manages from that agent's config. PATH is not proof of absence — under
+    launchd, cron, CI, or an IDE task runner, ~/.local/bin is routinely missing
+    from PATH while the binary the native installer put there is still present.
+    Consulting detect_paths turns that case back into a positive.
     """
     bin_name = agent_def.get("bin")
     if bin_name and shutil.which(bin_name):
@@ -736,4 +742,10 @@ def is_agent_installed(agent_name: str, agent_def: dict) -> bool:
     app_path = agent_def.get("app_path")
     if app_path and os.path.exists(os.path.expanduser(app_path)):
         return True
+    for provider in (agent_def.get("providers") or {}).values():
+        if not isinstance(provider, dict):
+            continue
+        for detect_path in provider.get("detect_paths") or []:
+            if os.path.exists(os.path.expanduser(detect_path)):
+                return True
     return False

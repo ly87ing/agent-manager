@@ -888,3 +888,30 @@ class ManageRuntimeProbeTests(unittest.TestCase):
         self.assertEqual(inventory.get_brew_formulae(), {"claude-code"})
 
         run_cmd.assert_called_once_with(["brew", "list", "--formula", "-1"], timeout=10)
+
+
+class IsAgentInstalledTests(unittest.TestCase):
+    """A "not installed" verdict is destructive, not neutral: sync_mcp reads it as
+    "agent removed" and deletes every server it manages from that agent's config.
+    PATH alone is not proof of absence — under launchd, cron, CI, or an IDE task
+    runner, ~/.local/bin is routinely absent from PATH while the binary the native
+    installer put there is still present."""
+
+    DEFINITION = {
+        "bin": "agent-manager-absent-binary",
+        "providers": {"native": {"detect_paths": ["~/.agent-manager-test/agy"]}},
+    }
+
+    def test_detect_path_counts_as_installed_when_bin_is_off_path(self):
+        with mock.patch.object(manage_runtime_probe.os.path, "exists", lambda path: True):
+            self.assertTrue(manage_runtime_probe.is_agent_installed("antigravity-cli", self.DEFINITION))
+
+    def test_absent_everywhere_is_still_not_installed(self):
+        with mock.patch.object(manage_runtime_probe.os.path, "exists", lambda path: False):
+            self.assertFalse(manage_runtime_probe.is_agent_installed("antigravity-cli", self.DEFINITION))
+
+    def test_malformed_providers_do_not_raise(self):
+        for providers in ({"native": "not-a-dict"}, {}, None):
+            definition = {"bin": "agent-manager-absent-binary", "providers": providers}
+            with mock.patch.object(manage_runtime_probe.os.path, "exists", lambda path: False):
+                self.assertFalse(manage_runtime_probe.is_agent_installed("x", definition))
