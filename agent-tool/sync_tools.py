@@ -39,8 +39,16 @@ def _inject_npm_flags(cmd):
     return cmd
 
 
-def run_cmd(cmd, cwd=None, timeout=None):
-    """Run a shell command and return the result."""
+def run_cmd(cmd, cwd=None, timeout=600):
+    """Run a shell command and return the result.
+
+    Bounded by default, unlike the previous timeout=None: git clone/pull, install,
+    upgrade, uninstall and any setup without its own setup_timeout_sec all ran
+    unbounded here, while sync_mcp and sync_agents have always defaulted to 300.
+    600 is manage.sh's own supervisor ceiling for tools:apply, so nothing that
+    currently succeeds starts failing — a hang that the supervisor would have
+    killed anyway now ends as a clean per-command timeout instead.
+    """
     cmd = _inject_npm_flags(cmd)
     try:
         result = run_command(cmd, cwd=cwd, check=True, capture_output=True, text=True, timeout=timeout)
