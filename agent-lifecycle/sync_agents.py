@@ -286,11 +286,41 @@ def run_async_job(payload_path_str):
     return 0 if ok else 1
 
 
+def async_worker_is_alive(state):
+    """Whether the process recorded in an active state file still exists.
+
+    An active status is a claim, not proof. A detached worker that dies after
+    writing RUNNING but before a terminal status — OOM kill, a crash reading a
+    truncated payload, a reboot mid-run — leaves the file saying "running"
+    forever. Without this check the next run refuses to resubmit and then waits
+    on a worker that will never report, so every later apply burns the whole
+    supervisor timeout and only a manual delete under $TMPDIR clears it.
+    """
+    pid = state.get("pid")
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Owned by another user: it exists, which is all this needs to know.
+        return True
+    except OSError:
+        return False
+    return True
+
+
 def schedule_async_action(agent_id, definition, label, action, command, timeout):
     existing = load_async_state(agent_id)
     if existing and existing.get("status") in ASYNC_ACTIVE_STATUSES:
-        logging.info(f"[AGENT: {label}] 已有后台{action_label(action)}任务在执行，跳过重复提交。")
-        return existing
+        if async_worker_is_alive(existing):
+            logging.info(f"[AGENT: {label}] 已有后台{action_label(action)}任务在执行，跳过重复提交。")
+            return existing
+        logging.warning(
+            f"[AGENT: {label}] 后台{action_label(action)}任务的进程已消失（pid={existing.get('pid')}），"
+            "判定为死任务并重新提交。"
+        )
 
     state_path = get_async_state_path(agent_id)
     payload_path = get_async_payload_path(agent_id)

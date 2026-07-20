@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import os
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -1350,3 +1351,17 @@ class CommittedAgentPolicyTests(unittest.TestCase):
             lifecycle_agents["codex"]["providers"]["npm"]["upgrade"],
             r"^npm install -g @openai/codex@\d",
         )
+
+
+class AsyncWorkerLivenessTests(unittest.TestCase):
+    """An active status is a claim, not proof. A worker that dies after writing
+    RUNNING but before a terminal status leaves the file saying "running" forever;
+    without a liveness check the next run refuses to resubmit and then waits on a
+    worker that will never report, burning the supervisor timeout on every apply."""
+
+    def test_live_pid_is_alive(self):
+        self.assertTrue(sync_agents.async_worker_is_alive({"pid": os.getpid()}))
+
+    def test_dead_or_malformed_pid_is_not_alive(self):
+        for state in ({"pid": 999999}, {}, {"pid": "123"}, {"pid": 0}, {"pid": -5}):
+            self.assertFalse(sync_agents.async_worker_is_alive(state), state)
