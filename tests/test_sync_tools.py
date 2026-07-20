@@ -1172,3 +1172,28 @@ class ExtractNpmPackageNameTests(unittest.TestCase):
         }
         for command, expected in cases.items():
             self.assertEqual(sync_tools._extract_npm_package_name(command), expected, command)
+
+
+class PruneOrphanToolFailureTests(unittest.TestCase):
+    """prune runs after the tools were already synced, and an orphan directory can be
+    a full git clone rather than a marker file. An unhandled rmtree error aborted the
+    whole pass with a traceback and lost that work."""
+
+    def test_rmtree_failure_is_reported_and_does_not_abort_the_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            for name in ("orphan-a", "orphan-b"):
+                (base / name).mkdir()
+            attempted = []
+
+            def flaky_rmtree(path):
+                attempted.append(Path(path).name)
+                if Path(path).name == "orphan-a":
+                    raise PermissionError("locked")
+
+            with mock.patch.object(sync_tools.shutil, "rmtree", flaky_rmtree), \
+                 mock.patch.object(sync_tools, "is_manager_owned_tool_dir", lambda item: True):
+                sync_tools.prune_orphan_tools(str(base), managed_names=set(), force_yes=True)
+
+            self.assertEqual(sorted(attempted), ["orphan-a", "orphan-b"],
+                             "a failure on one orphan must not stop the next")

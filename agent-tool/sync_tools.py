@@ -374,7 +374,16 @@ def prune_orphan_tools(base_dir, managed_names, dry_run=False, force_yes=False):
                 except EOFError: should_delete = False
             
             if should_delete:
-                shutil.rmtree(item)
+                # An orphan directory can be a full git clone with its own upstream
+                # source, not just a marker file, and this runs after the tools were
+                # already synced. An unhandled permission or lock error here would
+                # abort the pass with a traceback and lose that work; report it and
+                # keep going instead.
+                try:
+                    shutil.rmtree(item)
+                except OSError as exc:
+                    logging.error(f"  清理失败，保留目录: {item.name}: {exc}")
+                    continue
                 logging.info(f"  已成功清理: {item.name}")
 
 def _check_ready(name: str, ready_check: str | None) -> bool:
