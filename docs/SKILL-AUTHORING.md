@@ -40,6 +40,15 @@ safe-merge-review 曾宣告 "a merge request link" 而正文与 references 零�
 ones-manhour-fill 曾写 "safe add-only writes",字面读作不做删改,反而把删除请求
 引导绕开正文里"删前读回并核对 UTC+8 日期"那条护栏。
 
+**改一个描述不是局部操作:同一目录里所有 skill 在竞争同一次选择。** 2026-07-19 实证:
+给 frontend-verification 描述补上"投屏全屏"后,reader-facing-writing#19(深色会场大屏
+欢迎页)由通过转为失败,被 fv 拿走 —— 这条用例本身没动过。修法不是把词删掉,而是按
+**动词**划分归属:设计意图归 reader-facing-writing,"检查已建页面在会场全屏下的渲染"
+归 frontend-verification。
+
+推论:补完某个 skill 的描述后,复测范围必须包含**相邻 skill 的用例**,不能只测自己那
+几条。只测自己会看到"修好了",同时把邻居推下水而不自知。
+
 **扩描述前先核两道预算,都是硬上限:**
 
 1. 单个 description ≤ 1024 字符(官方规范,`quick_validate.py` 会拒)。2026-07-19
