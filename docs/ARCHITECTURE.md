@@ -247,7 +247,7 @@ agent-manager/
 
 ### 工作流程
 1. 用户通过修改 `config/manager.json` 或 `config/manager.local.json` 表达意愿
-2. 选择入口：`make update` 日常把本机更新并收敛到最新（= `bump` + `apply`），`make apply` 做本地配置环境收敛，`make bump` 纯刷新远端资源版本锁，`make agents:apply` 单独管理 Agent 软件生命周期，`make init` 做全量安装、更新与环境同步
+2. 选择入口：`make update` 日常把本机更新并收敛到最新（= `bump` + `apply`），`make apply` 做本地配置环境收敛，`make bump` 纯刷新远端资源版本锁，`make agents:apply` 按当前版本锁单独升级/修复已装 Agent（自身不刷锁，升到最新需先 `bump`），`make init` 做全量安装、更新与环境同步
 3. `manage.sh` 先解析 `dry-run` / `offline`，获取原子锁，并建立本次运行专属日志
 4. 各同步引擎读取策略和定义，检测当前状态
 5. 根据运行模式执行安装、更新或卸载操作

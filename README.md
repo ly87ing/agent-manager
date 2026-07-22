@@ -115,7 +115,7 @@
 - `make apply`: 把当前锁定态分发/收敛到本机（rules 构建分发、skills 链接、mcp 注入、tools、browser、shell alias、secrets 拉取）；不刷新版本锁、不安装 Agent。
 
 - `make bump`: 纯粹刷新版本锁与 skill commit（更新元数据到锁定文件），不执行本地环境应用。
-- `make agents:apply`: 对比并拉起或更新本地已安装 Agent 的软件版本与生命周期，不强制安装缺失 Agent。
+- `make agents:apply`: 按 `config/version-pins.local.json` 里的**当前版本锁**升级/修复本地已安装 Agent，不强制安装缺失 Agent。它自身**不刷新版本锁**，所以锁没变时通常是幂等空转；要升到上游最新，先跑 `make bump`（或 `make update`）刷锁再跑本命令，或直接用 `make init` 一步到位。
 - `make init`: 执行全量安装、更新与同步（= `bump` + Agent 生命周期 + `apply` + 失效引用审计），并等待 Agent 生命周期安装/升级完成，适合新机器初始化。
 - `make plan`: 预演一次完整 `init`。
 - `make sys:upgrade`: 仅更新 agent-manager 仓库自身逻辑。
