@@ -234,7 +234,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
    - 解决：
      * 确保 secrets/ 目录存在并为有效的 Git 仓库
      * 验证 secrets/mcp.env 包含所需的键值对
-     * 运行 `make mcp-sync` 重新同步凭证
+     * 运行 `make mcp:apply` 重新同步凭证
      * 检查日志中是否有"正在从凭证源加载"的消息
 
 3. **命令不可用**

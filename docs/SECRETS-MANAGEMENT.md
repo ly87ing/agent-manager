@@ -118,7 +118,7 @@ Claude Code 凭证不再由 agent-manager 注入，也不再维护 `ANTHROPIC_AU
 ### 自动化流程（推荐）
 ```mermaid
 graph TD
-    A[运行 make bump / make init] --> B{secrets/ 目录存在吗?}
+    A[运行 make bump / make update / make init] --> B{secrets/ 目录存在吗?}
     B -->|否| C[从 SECRETS_REPO_URL 或脚本参数读取私有仓库地址]
     B -->|是| D[更新现有 secrets 仓库]
     C --> E[读取 secrets/mcp.env]

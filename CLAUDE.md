@@ -6,6 +6,7 @@ This file keeps repo-level memory for Claude Code in this repository.
 
 - `python3 -m unittest discover -s tests -p 'test*.py' -v`
 - `make smoke`
+- `make update`
 - `make apply`
 - `make doctor`
 
@@ -17,7 +18,7 @@ This file keeps repo-level memory for Claude Code in this repository.
 - `agent-rule/rules/src/` holds the editable rule sources; `agent-rule/rules/dist/` holds the generated artifacts.
 - `config/rules-targets.list` maps each built rule artifact to its per-agent target path.
 - `codex` is under Agent lifecycle management, defaults to the npm provider, and is upgraded with `codex update`; it also receives MCP, Rules, and Skills distribution.
-- The Claude Code statusline is maintained by `scripts/claude/statusline.sh` (pure bash, no jq/git/network/transcript IO; the 5h/7d usage is followed by a "reset countdown" that forks `date +%s` once for `now` only when `resets_at` is present, shared by both windows, with the duration computed in pure bash and zero forks otherwise). `make claude:statusline:install` installs it to `~/.claude/statusline.sh`; `make claude:statusline:wire` writes it into settings.json (preserving any existing theme/effortLevel, without forcing a theme). 配色要在深/浅背景都可读:非语义段(分隔符、成本、倒计时、输出风格)用终端默认前景色或加粗,**不用** `90m`(亮黑/暗灰,深背景近隐形)或 `34m`(深蓝,深背景偏暗);仅语义处用标准 16 色阈值色(红/黄/绿),终端会按主题重映射成可读值——"看不清 statusline"的真实根因常是低对比度专用色而非渲染故障。
+- The Claude Code statusline is maintained by `scripts/claude/statusline.sh` (pure bash, no jq/git/network/transcript IO; the 5h/7d usage is followed by a "reset countdown" that forks `date +%s` once for `now` only when `resets_at` is present, shared by both windows, with the duration computed in pure bash and zero forks otherwise). `make claude:statusline:apply` installs it to `~/.claude/statusline.sh`; `make claude:statusline:wire` writes it into settings.json (preserving any existing theme/effortLevel, without forcing a theme). 配色要在深/浅背景都可读:非语义段(分隔符、成本、倒计时、输出风格)用终端默认前景色或加粗,**不用** `90m`(亮黑/暗灰,深背景近隐形)或 `34m`(深蓝,深背景偏暗);仅语义处用标准 16 色阈值色(红/黄/绿),终端会按主题重映射成可读值——"看不清 statusline"的真实根因常是低对比度专用色而非渲染故障。
 - Tests under `tests/` are mainly on-disk contract/integration tests; when iterating, run the narrowest unittest target first.
 - Terminal dotfiles management is no longer maintained; do not let agent-manager rewrite `~/.tmux.conf` or iTerm2 config. **例外**:shell alias 的受管区块(marker 圈定、幂等、只动区块内)由 `sync_shell_aliases.sh` 同步到 `~/.zshrc`(interactive shell 读)与 `~/.zprofile`(login shell 读);写 `.zprofile` 是刻意为之——让非交互 login shell(如 UU 远程 term)也能加载别名。除这个 alias 区块外,不改任何终端 dotfile。
 

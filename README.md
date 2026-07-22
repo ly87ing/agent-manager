@@ -83,7 +83,7 @@
 - **失效洗刷 (Scrubbing)**：自动清理 Agent 目录中的死亡软链。
 
 ### 5. 安全默认值
-- **安全入口**：直接执行 `./manage.sh` 只显示帮助，不触发同步。
+- **安全入口**：直接执行 `./manage.sh` 只显示帮助，不触发同步；只给全局 flag 不给命令（如 `./manage.sh --offline`）会报错退出，不会隐式跑 `init`。
 - **不接管终端配置**：除 shell alias 的受管区块（marker 圈定、只写区块内）会同步到 `~/.zshrc` 与 `~/.zprofile` 外，`agent-manager` 不维护 `~/.tmux.conf`、iTerm2 动态配置等用户级终端文件，避免把机器/个人偏好写死后扩散到其他电脑。
 - **主仓库禁存 secrets**：真实凭证只允许存在于独立的 `secrets/` 私有仓库或系统环境变量中；`make secrets-check`、`make smoke`、CI 与 `make doctor` 会扫描主仓库文件并阻止明文敏感信息落入 `agent-manager`。
 
@@ -96,8 +96,8 @@
 - **分层原则**：always-on 规则只保留触发条件、协作边界和最小行为约束；执行步骤、检查清单、失败边界和验证细节进入 skill；Agent 私有差异只放 `agent-rule/rules/src/agents/*/adapter.md`，不要把这些内容回灌进 shared core。
 - **迁移清理**：原生分发会清理旧的 `~/.<agent>/rules/global.md` 和旧 `rules/modules` 残留，避免新旧入口并存。
 - **Claude 记忆分层**：根目录 `CLAUDE.md` 只保留仓库级高频记忆，`agent-rule/CLAUDE.md` 和 `tests/CLAUDE.md` 承载目录级维护细节。
-- **Claude hooks**：`config/claude-hooks.json` 生成仓库级 `.claude/settings.json`，用 `make claude-hooks-sync` 刷新 deterministic hook 配置。
-- **Codex hooks**：`config/codex-hooks.json` 生成仓库级 `.codex/hooks.json`，用 `make codex-hooks-sync` 刷新 deterministic Codex hook 配置；当前包含 `PreToolUse` 的生成产物写保护和 `Stop` 的规则构建一致性校验。
+- **Claude hooks**：`config/claude-hooks.json` 生成仓库级 `.claude/settings.json`，用 `make claude:hooks:apply` 刷新 deterministic hook 配置。
+- **Codex hooks**：`config/codex-hooks.json` 生成仓库级 `.codex/hooks.json`，用 `make codex:hooks:apply` 刷新 deterministic Codex hook 配置；当前包含 `PreToolUse` 的生成产物写保护和 `Stop` 的规则构建一致性校验。
 - **指令质量评测**：`make eval-rules` 现在同时输出任务成功率、verification、skill exposure 和 always-on instruction budget 指标，并强制校验 `min_case_count`、`required_agents`、`success / verification 阈值`。
 - **分发清单**：`config/rules-targets.list` 只引用 `rules/dist/*` 产物，不直接引用源码片段。
 - **维护入口**：修改 `agent-rule/rules/src/` 后，先执行 `make rules-build`，再执行 `make rules:apply`。
@@ -126,9 +126,9 @@
 - `make doctor` / `make status`: 执行全系统深度体检，并把 warning 细分为 `可选工具未就绪` 与 `托管产物尚未生成` 两类提示项；同时扫描主仓库中是否存在疑似明文敏感信息。追加 `--json` 可输出机器可读诊断报告。
 - `make rules-build`: 从 `agent-rule/rules/src/` 生成 `agent-rule/rules/dist/` 下的可分发规则产物。
 - `make rules:apply`: 将 `agent-rule/rules/dist/` 中的规则产物分发到各 Agent 原生入口。
-- `make codex-hooks-sync`: 刷新仓库级 `.codex/hooks.json`。
+- `make codex:hooks:apply`: 刷新仓库级 `.codex/hooks.json`。
 - `make fetch-models`: 探测并获取 API 端点支持的模型列表 (支持 OpenAI / Anthropic 格式)。
-- `make restore`: 交互式回滚历史快照。
+- `make state:restore`: 交互式回滚历史快照。
 - `make ui`: 启动交互式配置管理中心。
 
 ## Repo-native Guidance

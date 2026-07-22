@@ -50,7 +50,7 @@ make apply
 
 **维护约定**:
 - 受管 MCP 的实际命令必须固定版本或固定 commit；`@latest`、分支名只允许出现在 `version_lock` 的查询元数据里。
-- `config/mcp.json` 保存服务器定义、命令模板和查询元数据；`make bump` / `make init` 会先运行 `scripts/update_version_pins.py`，查询 npm 最新版本或 Git ref 最新 commit，再写入本机 `config/version-pins.local.json`。
+- `config/mcp.json` 保存服务器定义、命令模板和查询元数据；`make bump` / `make update` / `make init` 会先运行 `scripts/update_version_pins.py`，查询 npm 最新版本或 Git ref 最新 commit，再写入本机 `config/version-pins.local.json`。
 - 首次调用 `chrome-devtools` 时，`npx` 可能会下载锁定版本的包；需要本机有可用的 Node.js / npm 运行时。
 - `chrome-devtools` 的 Codex 启动超时按 120 秒维护，覆盖默认 30 秒，避免 `npx` 冷启动或缓存失效时被误判为 MCP 启动失败。
 - `make doctor` 会在 `chrome-devtools` 处于启用状态时预检 `npx` 运行时是否可用；实际包版本以 `config/mcp.json` 套用本地版本锁后的有效配置为准。
@@ -226,7 +226,7 @@ make init
 ```
 
 **自动化流程**：
-- `make bump` / `make init` 会在顶层检查 `secrets/` 是否存在
+- `make bump` / `make update` / `make init` 会在顶层检查 `secrets/` 是否存在
 - `mcp:apply` 默认会准备 MCP 运行时：同步本地 secrets 仓库、按需 clone/pull MCP repo，并执行 setup/build
 - 如需阻止联网拉取或安装，请追加 `--offline`
 
