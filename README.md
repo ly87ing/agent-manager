@@ -110,7 +110,8 @@
 
 ## 管理指令集
 
-- `./manage.sh`: 显示帮助；这是脚本的安全默认入口。
+- `./manage.sh`: 显示帮助（只列日常入口 + 进阶原语）；这是脚本的安全默认入口。完整命令清单执行 `./manage.sh help:all` 或 `make help:all`。
+- `make update`: 日常最常用。把本机更新并收敛到最新（= `bump` + `apply`，secrets 只拉一次）；不安装缺失 Agent。
 - `make apply`: 把当前锁定态分发/收敛到本机（rules 构建分发、skills 链接、mcp 注入、tools、browser、shell alias、secrets 拉取）；不刷新版本锁、不安装 Agent。
 
 - `make bump`: 纯粹刷新版本锁与 skill commit（更新元数据到锁定文件），不执行本地环境应用。

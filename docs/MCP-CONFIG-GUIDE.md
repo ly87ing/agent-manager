@@ -254,7 +254,7 @@ git push origin main
 
 **优势**：
 - ✅ 简单易用，无 submodule 复杂性
-- ✅ `mcp:apply` / `mcp:build` 默认都会把配置与运行时一起收敛，减少“配置已写入但运行时未准备”的半完成状态
+- ✅ `mcp:apply` 默认会把配置与运行时一起收敛，减少“配置已写入但运行时未准备”的半完成状态
 - ✅ 凭证版本化、可审计
 - ✅ 权限分离（私有仓库）
 
@@ -511,7 +511,7 @@ PY
 ## 附录：Agent Manager MCP 同步流程
 
 ```
-默认模式（mcp:apply / make apply / make bump / make init 中的 MCP 步骤）:
+默认模式（mcp:apply / make apply / make update / make bump / make init 中的 MCP 步骤）:
 1. 读取 config/mcp.json 获取服务器定义
    ↓
 2. `make bump` / `make init` 入口先刷新 config/version-pins.local.json；`apply` 只消费套用本地 lock 后的固定版本

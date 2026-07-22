@@ -329,7 +329,7 @@ Agent Manager 会：
 6. 原子写入目标配置文件
 
 额外说明：
-- `./manage.sh mcp:apply` / `./manage.sh mcp:build` 默认都会准备 MCP 运行时，并在非 `--offline` 模式下同步本地 secrets Git 仓库
+- `./manage.sh mcp:apply` 默认会准备 MCP 运行时，并在非 `--offline` 模式下同步本地 secrets Git 仓库
 - 如需只消费本地已有凭证，请显式追加 `--offline`
 - 真实写入模式下，如果占位符仍未解析，MCP 同步会直接失败，不会写入半成品配置
 
