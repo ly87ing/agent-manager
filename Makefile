@@ -1,4 +1,4 @@
-.PHONY: init apply bump plan agents-apply agents\:apply agents-status agents\:status sys-upgrade sys\:upgrade smoke ui help doctor status detect fetch-models offline dry-run eval-rules sys-clean sys\:clean state-clean state\:clean sys-unlock sys\:unlock sys-logs sys\:logs sys-clean-logs sys\:clean-logs state-list state\:list state-restore state\:restore rules-build rules\:build rules-apply rules\:apply skills-apply skills\:apply skills-bump skills\:bump skill-disable skill\:disable skill-enable skill\:enable skill-list skill\:list mcp-apply mcp\:apply mcp-build mcp\:build tools-apply tools\:apply browser-apply browser\:apply claude-hooks-apply claude\:hooks\:apply claude-statusline-apply claude\:statusline\:apply claude-statusline-wire claude\:statusline\:wire claude-shell-aliases-apply claude\:shell-aliases\:apply claude-uninstall claude\:uninstall claude-clean claude\:clean codex-hooks-apply codex\:hooks\:apply secrets-check secrets\:check instructions-check instructions\:check
+.PHONY: init apply bump update plan agents-apply agents\:apply agents-status agents\:status sys-upgrade sys\:upgrade smoke ui help help-all help\:all doctor status detect fetch-models eval-rules sys-clean sys\:clean state-clean state\:clean sys-unlock sys\:unlock sys-logs sys\:logs sys-clean-logs sys\:clean-logs state-list state\:list state-restore state\:restore rules-build rules\:build rules-apply rules\:apply skills-apply skills\:apply skills-bump skills\:bump skill-disable skill\:disable skill-enable skill\:enable skill-list skill\:list mcp-apply mcp\:apply tools-apply tools\:apply browser-apply browser\:apply claude-hooks-apply claude\:hooks\:apply claude-statusline-apply claude\:statusline\:apply claude-statusline-wire claude\:statusline\:wire claude-shell-aliases-apply claude\:shell-aliases\:apply claude-uninstall claude\:uninstall claude-clean claude\:clean codex-hooks-apply codex\:hooks\:apply secrets-check secrets\:check instructions-check instructions\:check
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -14,6 +14,10 @@ apply:
 # 纯粹刷新版本锁与 skill commit（更新元数据到锁定文件），不执行本地环境应用
 bump:
 	@./manage.sh bump
+
+# update：日常最常用。刷新元数据后再分发/收敛到本机（= bump + apply），不安装缺失 Agent
+update:
+	@./manage.sh update
 
 # 预演一次完整 init
 plan:
@@ -41,10 +45,6 @@ secrets-check:
 
 secrets\:check:
 	@python3 ./scripts/check_no_secrets.py
-
-# 离线模式执行 apply（等价 --offline apply）
-offline:
-	@./manage.sh offline
 
 # 启动交互式管理界面
 ui:
@@ -124,9 +124,6 @@ skill-list skill\:list:
 mcp-apply mcp\:apply:
 	@./manage.sh mcp:apply
 
-mcp-build mcp\:build:
-	@./manage.sh mcp:build
-
 tools-apply tools\:apply:
 	@./manage.sh tools:apply
 
@@ -159,10 +156,6 @@ claude-clean claude\:clean:
 codex-hooks-apply codex\:hooks\:apply:
 	@./manage.sh codex:hooks:apply
 
-# 预览模式 (仅输出计划动作，跳过远端副作用)
-dry-run:
-	@./manage.sh plan
-
 # 离线规则效果评测 (读取本地 fixtures 并输出稳定 JSON 摘要)
 eval-rules:
 	@python3 ./scripts/evals/run_rule_effectiveness_eval.py
@@ -176,3 +169,7 @@ instructions\:check: instructions-check
 
 help:
 	@./manage.sh help
+
+# 完整命令清单（日常 help 只显示日常入口 + 进阶原语）
+help-all help\:all:
+	@./manage.sh help:all

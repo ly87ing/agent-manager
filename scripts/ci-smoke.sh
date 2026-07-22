@@ -28,7 +28,8 @@ run make secrets-check
 run ./manage.sh help
 run ./manage.sh apply --dry-run
 run ./manage.sh bump --dry-run
+run ./manage.sh update --dry-run
 run ./manage.sh agents:apply --dry-run
 run ./manage.sh plan
 run ./manage.sh sys:upgrade --dry-run
-run make -n apply bump agents-apply init plan sys-upgrade offline dry-run
+run make -n apply bump update agents-apply init plan sys-upgrade help-all

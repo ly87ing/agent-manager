@@ -22,7 +22,7 @@ class ProjectContractTests(unittest.TestCase):
 
     def test_makefile_exposes_smoke_target(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertIn(".PHONY: init apply bump plan", makefile)
+        self.assertIn(".PHONY: init apply bump update plan", makefile)
         self.assertIn("\nsmoke:\n\t@./scripts/ci-smoke.sh\n", makefile)
 
 
@@ -113,7 +113,6 @@ class ProjectContractTests(unittest.TestCase):
                 "skills:apply",
                 "skills:bump",
                 "mcp:apply",
-                "mcp:build",
                 "tools:apply",
                 "browser:apply",
             ):
@@ -139,7 +138,6 @@ class ProjectContractTests(unittest.TestCase):
                     "skills:apply",
                     "skills:bump",
                     "mcp:apply",
-                    "mcp:build",
                     "tools:apply",
                     "browser:apply",
                 ],
@@ -157,10 +155,11 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("AGENT_MANAGER_LOG_PREFIX", content)
         self.assertIn("./manage.sh apply --dry-run", content)
         self.assertIn("./manage.sh bump --dry-run", content)
+        self.assertIn("./manage.sh update --dry-run", content)
         self.assertIn("./manage.sh agents:apply --dry-run", content)
         self.assertIn("./manage.sh plan", content)
         self.assertIn("./manage.sh sys:upgrade --dry-run", content)
-        self.assertIn("make -n apply bump agents-apply init plan sys-upgrade offline dry-run", content)
+        self.assertIn("make -n apply bump update agents-apply init plan sys-upgrade help-all", content)
         self.assertNotIn("./manage.sh bootstrap", content)
 
     def test_ci_workflow_runs_full_unittest_suite(self):
