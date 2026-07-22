@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 import tempfile
 import unittest
@@ -32,9 +33,18 @@ class ProjectContractTests(unittest.TestCase):
         end = source.index("\n}\n", start)
         return source[start:end]
 
+    def _expand_pipeline_body(self, source: str, name: str) -> str:
+        """展开管线函数：apply/bump/update/init 只组合 run_bump_steps / run_apply_steps，
+        断言步骤集合前需要把这两个组合函数的函数体内联回来。"""
+        body = self._extract_shell_function(source, name)
+        for helper_name in ("run_bump_steps", "run_apply_steps"):
+            if helper_name in body:
+                body = body.replace(helper_name, self._extract_shell_function(source, helper_name))
+        return body
+
     def test_bump_pipeline_refreshes_resources_without_agent_or_tool_lifecycle(self):
         manage = (ROOT / "manage.sh").read_text(encoding="utf-8")
-        body = self._extract_shell_function(manage, "run_bump_pipeline")
+        body = self._expand_pipeline_body(manage, "run_bump_pipeline")
         # bump 联网拉最新，需先刷新 secrets 仓库，否则新 MCP 配置会配不上新 key
         self.assertIn("maybe_init_secrets", body, "bump 应在拉取前刷新 secrets 凭证")
         # bump 拉取远端最新资源并下发：版本锁 / skill 版本
@@ -115,6 +125,7 @@ class ProjectContractTests(unittest.TestCase):
                 "mcp:apply",
                 "tools:apply",
                 "browser:apply",
+                "help:all",
             ):
                 result = subprocess.run(
                     ["make", goal],
@@ -140,6 +151,7 @@ class ProjectContractTests(unittest.TestCase):
                     "mcp:apply",
                     "tools:apply",
                     "browser:apply",
+                    "help:all",
                 ],
             )
 
@@ -153,6 +165,7 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("manager.smoke.json", content)
         self.assertIn("AGENT_MANAGER_LOCK_FILE", content)
         self.assertIn("AGENT_MANAGER_LOG_PREFIX", content)
+        self.assertIn("run ./manage.sh help:all", content)
         self.assertIn("./manage.sh apply --dry-run", content)
         self.assertIn("./manage.sh bump --dry-run", content)
         self.assertIn("./manage.sh update --dry-run", content)
@@ -288,7 +301,7 @@ class ProjectContractTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("config/codex-hooks.json", readme)
         self.assertIn(".codex/hooks.json", readme)
-        self.assertIn("make codex-hooks-sync", readme)
+        self.assertIn("make codex:hooks:apply", readme)
 
     def test_readme_documents_official_cli_lifecycle_policy(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -499,3 +512,64 @@ class ProjectContractTests(unittest.TestCase):
         self.assertNotIn("make rules-build", memory)
         self.assertNotIn("make smoke", memory)
         self.assertNotIn("manage.sh 是唯一顶层编排入口", memory)
+
+    def test_every_manage_command_is_documented_in_help_or_help_all(self):
+        # help:all 自称「完整命令」。新增 case 分支若不登记，用户就无处可查——
+        # agents:status 与 claude:shell-aliases:apply 曾经两层都查不到。
+        manage = (ROOT / "manage.sh").read_text(encoding="utf-8")
+        case_body = manage.split('case "$cmd" in', 1)[1].split("\nesac", 1)[0]
+
+        commands = set()
+        for line in case_body.splitlines():
+            stripped = line.strip()
+            if not stripped.endswith(")") or stripped.startswith("#"):
+                continue
+            label = stripped[:-1]
+            if "(" in label or " " in label:
+                continue
+            for token in label.split("|"):
+                if token and token != "*" and not token.startswith("-"):
+                    commands.add(token)
+
+        self.assertIn("update", commands)
+        self.assertIn("help:all", commands)
+
+        help_text = subprocess.run(
+            [str(ROOT / "manage.sh"), "help"], cwd=ROOT, capture_output=True, text=True, check=True
+        ).stdout
+        help_all_text = subprocess.run(
+            [str(ROOT / "manage.sh"), "help:all"], cwd=ROOT, capture_output=True, text=True, check=True
+        ).stdout
+        documented = help_text + help_all_text
+
+        missing = sorted(command for command in commands if command not in documented)
+        self.assertEqual(missing, [], f"这些命令在 help 与 help:all 里都查不到: {missing}")
+
+    def test_documented_make_targets_all_exist_in_makefile(self):
+        # 文档里推荐过的 make 目标必须真实存在。README 曾长期推荐
+        # make claude-hooks-sync / codex-hooks-sync / restore 三个不存在的目标。
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        targets = set()
+        for line in makefile.splitlines():
+            if line.startswith("\t") or not line.strip() or line.lstrip().startswith("#"):
+                continue
+            head, sep, _ = line.replace("\\:", "\x00").partition(":")
+            if not sep:
+                continue
+            for name in head.replace("\x00", ":").split():
+                if name != ".PHONY":
+                    targets.add(name)
+        for name in makefile.split(".PHONY:", 1)[1].splitlines()[0].replace("\\:", ":").split():
+            targets.add(name)
+
+        documented = {}
+        for path in [ROOT / "README.md", ROOT / "CLAUDE.md", *sorted((ROOT / "docs").glob("*.md"))]:
+            for match in re.finditer(r"make ([a-z][a-z0-9:_-]*)", path.read_text(encoding="utf-8")):
+                documented.setdefault(match.group(1), path.relative_to(ROOT).as_posix())
+
+        missing = sorted((name, where) for name, where in documented.items() if name not in targets)
+        self.assertEqual(missing, [], f"文档推荐了 Makefile 里不存在的目标: {missing}")
+
+
+if __name__ == "__main__":
+    unittest.main()

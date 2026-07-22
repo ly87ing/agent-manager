@@ -192,7 +192,7 @@ class ManageScriptTests(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "--dry-run", "--offline"],
+                [str(temp_root / "manage.sh"), "--dry-run", "--offline", "init"],
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,
@@ -1204,6 +1204,33 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("--wait-agent-lifecycle", combined)
             self.assertFalse(call_log.exists(), combined)
 
+    def test_global_flags_without_command_refuse_to_run_a_pipeline(self):
+        # 全局 flag 只修饰命令。裸 `--offline` / `--dry-run` 曾默认落到 init（含安装缺失 Agent），
+        # 与 `--offline` 对应的 apply 语义不符，必须显式报错而不是隐式跑全量管线。
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            call_log = temp_root / "calls.log"
+
+            self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log, "True")
+
+            for flags in (["--offline"], ["--dry-run"], ["--dry-run", "--offline"]):
+                with self.subTest(flags=flags):
+                    result = subprocess.run(
+                        [str(temp_root / "manage.sh"), *flags],
+                        cwd=temp_root,
+                        env=self._managed_env(),
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=5,
+                    )
+
+                    combined = result.stdout + result.stderr
+                    self.assertNotEqual(result.returncode, 0, combined)
+                    self.assertIn("只提供了全局参数", combined)
+                    self.assertIn("./manage.sh plan", combined)
+                    self.assertFalse(call_log.exists(), combined)
 
     def test_apply_does_not_run_terminal_management(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1628,6 +1655,91 @@ class ManageScriptTests(unittest.TestCase):
                     (expected, log_lines),
                 )
             for forbidden in ("versions ", "skill-versions ", "agents "):
+                self.assertFalse(
+                    any(line.startswith(forbidden) for line in log_lines),
+                    (forbidden, log_lines),
+                )
+
+    def _stub_all_pipeline_scripts(self, temp_root: Path, call_log: Path, version_pins_condition: str = "True"):
+        self._append_log_stub(
+            temp_root / "scripts" / "update_version_pins.py", "versions", call_log, version_pins_condition
+        )
+        self._append_log_stub(temp_root / "agent-skill" / "upgrade_skills.py", "skill-versions", call_log)
+        self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log)
+        self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log)
+        self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log)
+        self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log)
+        self._write_rules_stub(temp_root, call_log)
+        self._write_browser_stub(temp_root, call_log)
+        self._write_init_secrets_stub(temp_root, call_log)
+
+    def _pipeline_env(self):
+        env = self._managed_env()
+        env.pop("AGENT_MANAGER_SKIP_VERSION_PIN_UPDATE", None)
+        env.pop("AGENT_MANAGER_SKIP_SKILL_VERSION_UPDATE", None)
+        return env
+
+    def test_update_refreshes_metadata_then_distributes_without_agents(self):
+        # update = bump + apply：两段都跑，且始终不碰 Agent 生命周期（不装、不升级已装 Agent）。
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            call_log = temp_root / "calls.log"
+            remove_path(temp_root / "secrets")
+            self._stub_all_pipeline_scripts(temp_root, call_log)
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "update"],
+                cwd=temp_root,
+                env=self._pipeline_env(),
+                capture_output=True,
+                check=False,
+            )
+
+            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            self.assertEqual(result.returncode, 0, combined)
+            log_lines = call_log.read_text(encoding="utf-8").splitlines()
+            for expected in ("versions ", "skill-versions ", "tools ", "skills ", "mcp ", "rules "):
+                self.assertTrue(
+                    any(line.startswith(expected) for line in log_lines),
+                    (expected, log_lines),
+                )
+            self.assertFalse(
+                any(line.startswith("agents ") for line in log_lines),
+                log_lines,
+            )
+            # 元数据必须先于分发，否则分发的是刷新前的旧锁定态。
+            first_versions = next(i for i, line in enumerate(log_lines) if line.startswith("versions "))
+            first_distribution = next(
+                i
+                for i, line in enumerate(log_lines)
+                if line.startswith(("tools ", "skills ", "mcp ", "rules "))
+            )
+            self.assertLess(first_versions, first_distribution, log_lines)
+
+    def test_update_aborts_distribution_when_metadata_refresh_fails(self):
+        # bump 段失败时必须中止，否则会把未刷新的旧锁定态分发到本机，
+        # 而用户只看到失败退出码，以为本机没被改动。
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            call_log = temp_root / "calls.log"
+            remove_path(temp_root / "secrets")
+            self._stub_all_pipeline_scripts(temp_root, call_log, version_pins_condition="False")
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "update"],
+                cwd=temp_root,
+                env=self._pipeline_env(),
+                capture_output=True,
+                check=False,
+            )
+
+            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            self.assertNotEqual(result.returncode, 0, combined)
+            log_lines = call_log.read_text(encoding="utf-8").splitlines()
+            self.assertTrue(any(line.startswith("versions ") for line in log_lines), log_lines)
+            for forbidden in ("tools ", "skills ", "mcp ", "rules ", "browser ", "agents "):
                 self.assertFalse(
                     any(line.startswith(forbidden) for line in log_lines),
                     (forbidden, log_lines),
@@ -2482,7 +2594,7 @@ class ManageScriptTests(unittest.TestCase):
             env["PATH"] = f"{fake_bin}:{env['PATH']}"
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "--dry-run"],
+                [str(temp_root / "manage.sh"), "--dry-run", "init"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -2542,7 +2654,7 @@ class ManageScriptTests(unittest.TestCase):
             env["PATH"] = f"{fake_bin}:{env['PATH']}"
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "--dry-run", "--offline"],
+                [str(temp_root / "manage.sh"), "--dry-run", "--offline", "init"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -2587,7 +2699,7 @@ class ManageScriptTests(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "--offline"],
+                [str(temp_root / "manage.sh"), "--offline", "init"],
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,
@@ -2627,7 +2739,7 @@ class ManageScriptTests(unittest.TestCase):
             self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 0\n")
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "--offline"],
+                [str(temp_root / "manage.sh"), "--offline", "init"],
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,
@@ -2668,7 +2780,7 @@ class ManageScriptTests(unittest.TestCase):
             self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 0\n")
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "--offline"],
+                [str(temp_root / "manage.sh"), "--offline", "init"],
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,
@@ -2709,7 +2821,7 @@ class ManageScriptTests(unittest.TestCase):
             self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 0\n")
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "--offline"],
+                [str(temp_root / "manage.sh"), "--offline", "init"],
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,
@@ -2750,7 +2862,7 @@ class ManageScriptTests(unittest.TestCase):
             self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 0\n")
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "--offline"],
+                [str(temp_root / "manage.sh"), "--offline", "init"],
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,
@@ -2769,7 +2881,7 @@ class ManageScriptTests(unittest.TestCase):
             self.lock_dir.mkdir(parents=True)
             (self.lock_dir / "pid").write_text(str(holder.pid), encoding="utf-8")
             result = subprocess.run(
-                [str(MANAGE), "--dry-run", "--offline"],
+                [str(MANAGE), "--dry-run", "--offline", "apply"],
                 cwd=ROOT,
                 env=self._managed_env(),
                 capture_output=True,
@@ -2779,6 +2891,41 @@ class ManageScriptTests(unittest.TestCase):
             combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
             self.assertNotEqual(result.returncode, 0, combined)
             self.assertIn("另一个管理任务", combined)
+        finally:
+            holder.terminate()
+            holder.wait(timeout=5)
+            restore_path(self.lock_path, lock_backup)
+            restore_path(self.lock_dir, lock_dir_backup)
+
+    def test_help_commands_stay_readable_while_another_run_holds_the_lock(self):
+        lock_backup = move_aside(self.lock_path)
+        lock_dir_backup = move_aside(self.lock_dir)
+        holder = subprocess.Popen(["sleep", "60"])
+        try:
+            self.lock_dir.mkdir(parents=True)
+            (self.lock_dir / "pid").write_text(str(holder.pid), encoding="utf-8")
+            for command in ("help", "help:all"):
+                with self.subTest(command=command):
+                    result = subprocess.run(
+                        [str(MANAGE), command],
+                        cwd=ROOT,
+                        env=self._managed_env(),
+                        capture_output=True,
+                        check=False,
+                    )
+
+                    combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+                    self.assertEqual(result.returncode, 0, combined)
+                    self.assertNotIn("另一个管理任务", combined)
+            # sys:unlock 只出现在 help:all 里，而它恰好是被锁挡住时最需要查的命令。
+            unlock_help = subprocess.run(
+                [str(MANAGE), "help:all"],
+                cwd=ROOT,
+                env=self._managed_env(),
+                capture_output=True,
+                check=False,
+            )
+            self.assertIn("sys:unlock", unlock_help.stdout.decode("utf-8", errors="replace"))
         finally:
             holder.terminate()
             holder.wait(timeout=5)
@@ -2963,7 +3110,7 @@ class ManageScriptTests(unittest.TestCase):
                 )
 
                 result = subprocess.run(
-                    [str(temp_root / "manage.sh"), "--dry-run", "--offline"],
+                    [str(temp_root / "manage.sh"), "--dry-run", "--offline", "init"],
                     cwd=temp_root,
                     env=self._managed_env(),
                     capture_output=True,

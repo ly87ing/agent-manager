@@ -26,6 +26,7 @@ cd "$ROOT_DIR"
 
 run make secrets-check
 run ./manage.sh help
+run ./manage.sh help:all
 run ./manage.sh apply --dry-run
 run ./manage.sh bump --dry-run
 run ./manage.sh update --dry-run

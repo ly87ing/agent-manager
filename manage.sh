@@ -102,11 +102,15 @@ while [ $# -gt 0 ]; do
     shift
 done
 if [ -z "$cmd" ]; then
-    if [ -n "$DRY_RUN_FLAG" ] || [ -n "$OFFLINE_FLAG" ]; then
-        cmd="init"
-    else
-        cmd="help"
+    # 全局 flag 只修饰命令，自身不构成命令。这里过去默认跑 init(含安装缺失 Agent),
+    # 与 `--offline` 曾经对应的 offline(=apply) 语义不符,一个裸 flag 就可能误触全量安装。
+    if [ -n "$DRY_RUN_FLAG" ] || [ -n "$OFFLINE_FLAG" ] || [ -n "$FORCE_REFRESH_FLAG" ] || [ -n "$WAIT_AGENT_LIFECYCLE_FLAG" ]; then
+        echo -e "${ERROR_RED}错误: 只提供了全局参数，没有指定命令。${NC}" >&2
+        echo -e "  预演完整 init: ${BOLD}./manage.sh plan${NC}   离线分发: ${BOLD}./manage.sh --offline apply${NC}" >&2
+        echo -e "  命令清单: ${BOLD}./manage.sh help${NC} / ${BOLD}./manage.sh help:all${NC}" >&2
+        exit 1
     fi
+    cmd="help"
 fi
 
 function read_lock_pid() {
@@ -169,7 +173,7 @@ function acquire_lock() {
 }
 
 # Atomic lock check
-if [[ "$cmd" != "help" && "$cmd" != "-h" && "$cmd" != "--help" && "$cmd" != "-help" && "$cmd" != "detect" && "$cmd" != "doctor" && "$cmd" != "status" && "$cmd" != "state:list" && "$cmd" != "sys:unlock" && "$cmd" != "sys:logs" && "$cmd" != "fetch-models" && "$cmd" != "agents:status" ]]; then
+if [[ "$cmd" != "help" && "$cmd" != "help:all" && "$cmd" != "-h" && "$cmd" != "--help" && "$cmd" != "-help" && "$cmd" != "detect" && "$cmd" != "doctor" && "$cmd" != "status" && "$cmd" != "state:list" && "$cmd" != "sys:unlock" && "$cmd" != "sys:logs" && "$cmd" != "fetch-models" && "$cmd" != "agents:status" ]]; then
     acquire_lock
 fi
 
@@ -867,6 +871,16 @@ function finish_pipeline_execution() {
     [ "$TASK_FAILURES" -eq 0 ] || exit 1
 }
 
+# 在管线中途设一道闸：前一段失败就地收尾退出，不再执行后续步骤。
+# 用于 update 这类「A + B」复合管线，保证失败语义与顺序执行 A && B 一致。
+function abort_pipeline_if_failed() {
+    local reason="$1"
+    if [ "$TASK_FAILURES" -ne 0 ]; then
+        status_line "ERROR" "$reason"
+        finish_pipeline_execution
+    fi
+}
+
 function maybe_init_secrets() {
     echo -e "${HDR_BLUE}${BOLD}1. 凭证仓库检查 (Secrets Check)${NC}"
     if [ -d "$ROOT_DIR/secrets/.git" ]; then
@@ -1135,10 +1149,16 @@ function run_skill_reference_audit_warn() {
     fi
 }
 
-function run_apply_pipeline() {
-    begin_workflow "🔄 Agent Manager 环境应用启动"
-    maybe_init_secrets
-    begin_pipeline_execution
+# 两段可组合的步骤序列。apply/bump/update/init 四条管线只负责组合它们，
+# 避免同一串步骤在仓库里各写一份后逐渐漂移（往 apply 加一步却漏改 update 是最典型的失误）。
+# bump 段：只刷元数据，写本机锁文件，不碰本机环境。
+function run_bump_steps() {
+    run_pipeline_step run_version_pins_update_task
+    run_pipeline_step run_skills_upgrade_task
+}
+
+# apply 段：把当前锁定态分发/收敛到本机。
+function run_apply_steps() {
     run_pipeline_step run_shell_aliases_sync_task
     run_pipeline_step run_tools_sync_task
     run_pipeline_step run_browser_us_sync_task
@@ -1146,6 +1166,13 @@ function run_apply_pipeline() {
     run_pipeline_step run_skills_link_task false
     run_pipeline_step run_mcp_sync_task true false
     run_skill_reference_audit_warn
+}
+
+function run_apply_pipeline() {
+    begin_workflow "🔄 Agent Manager 环境应用启动"
+    maybe_init_secrets
+    begin_pipeline_execution
+    run_apply_steps
     finish_pipeline_execution
 }
 
@@ -1154,26 +1181,21 @@ function run_bump_pipeline() {
     begin_workflow "⬇️  Agent Manager 配置升版启动"
     maybe_init_secrets
     begin_pipeline_execution
-    run_pipeline_step run_version_pins_update_task
-    run_pipeline_step run_skills_upgrade_task
+    run_bump_steps
     finish_pipeline_execution
 }
 
 # update = bump + apply:先刷元数据(version pins + skill commit),再把锁定态分发/收敛到本机;
 # secrets 只初始化一次。等价于 init 去掉「安装缺失 Agent」这一步,是日常「把本机弄成最新」的主入口。
+# bump 段失败即中止,与顺序执行 `bump && apply` 的失败语义保持一致——否则会把未刷新的旧锁定态
+# 实打实分发到本机,而用户只看到一个失败退出码,以为什么都没发生。
 function run_update_pipeline() {
     begin_workflow "🔄 Agent Manager 更新并收敛启动"
     maybe_init_secrets
     begin_pipeline_execution
-    run_pipeline_step run_version_pins_update_task
-    run_pipeline_step run_skills_upgrade_task
-    run_pipeline_step run_shell_aliases_sync_task
-    run_pipeline_step run_tools_sync_task
-    run_pipeline_step run_browser_us_sync_task
-    run_pipeline_step run_rules_sync_task
-    run_pipeline_step run_skills_link_task false
-    run_pipeline_step run_mcp_sync_task true false
-    run_skill_reference_audit_warn
+    run_bump_steps
+    abort_pipeline_if_failed "元数据刷新失败，已中止分发（本机未被改动）。修复后重跑 make update。"
+    run_apply_steps
     finish_pipeline_execution
 }
 
@@ -1185,20 +1207,16 @@ function run_agents_pipeline() {
     finish_pipeline_execution
 }
 
+# init = bump + Agent 生命周期(装缺失 + 升级已装) + apply。
+# 与 update 的差别只有中间这一步；这里刻意不套 abort_pipeline_if_failed——
+# 新机器 bootstrap 时即使元数据刷新失败，也应尽量把已有锁定态装起来，再由退出码报告失败。
 function run_init_pipeline() {
     begin_workflow "🚀 Agent Manager 全量初始化启动"
     maybe_init_secrets
     begin_pipeline_execution
-    run_pipeline_step run_version_pins_update_task
-    run_pipeline_step run_skills_upgrade_task
+    run_bump_steps
     run_pipeline_step run_agent_lifecycle_task ""
-    run_pipeline_step run_shell_aliases_sync_task
-    run_pipeline_step run_tools_sync_task
-    run_pipeline_step run_browser_us_sync_task
-    run_pipeline_step run_rules_sync_task
-    run_pipeline_step run_skills_link_task false
-    run_pipeline_step run_mcp_sync_task true false
-    run_skill_reference_audit_warn
+    run_apply_steps
     finish_pipeline_execution
 }
 
@@ -1441,46 +1459,51 @@ function is_dry_run_mode() {
     [ -n "$DRY_RUN_FLAG" ]
 }
 
-# 完整命令清单(./manage.sh help:all)。默认 help 只显示日常入口 + 进阶原语,其余收进这里。
+# 完整命令清单（./manage.sh help:all）。默认 help 只显示日常入口 + 进阶原语，其余收进这里。
+# 这里是唯一自称「完整」的清单：新增 case 分支必须同时在此登记，否则用户无处可查。
 function print_help_all() {
     echo -e "${HDR_BLUE}${BOLD}Agent Manager 帮助手册 · 完整命令${NC}\n"
     echo -e "${BOLD}${HDR_BLUE}=== 全局参数 (Flags) ===${NC}"
-    echo -e "  ${PENDING_GOLD}--dry-run${NC}       空转模式,仅输出计划动作并跳过会修改本地或远端状态的副作用"
-    echo -e "  ${PENDING_GOLD}--offline${NC}       离线模式,禁止远程拉取/安装;仅使用本地已存在仓库与配置(如 ${BOLD}--offline apply${NC})"
-    echo -e "  ${PENDING_GOLD}-f, --force-refresh${NC} 更新探测失败时仍强制执行远端刷新;默认会跳过这些保守回退下载"
-    echo -e "  ${PENDING_GOLD}--wait-agent-lifecycle${NC} 等待 Agent 生命周期后台安装/升级结束;init / agents:apply 默认已启用\n"
+    echo -e "  ${PENDING_GOLD}--dry-run${NC}       空转模式，仅输出计划动作并跳过会修改本地或远端状态的副作用"
+    echo -e "  ${PENDING_GOLD}--offline${NC}       离线模式，禁止远程拉取/安装；仅使用本地已存在仓库与配置（如 ${BOLD}--offline apply${NC}）"
+    echo -e "  ${PENDING_GOLD}-f, --force-refresh${NC} 更新探测失败时仍强制执行远端刷新；默认会跳过这些保守回退下载"
+    echo -e "  ${PENDING_GOLD}--wait-agent-lifecycle${NC} 等待 Agent 生命周期后台安装/升级结束；init / agents:apply 默认已启用"
+    echo -e "  ${BORDER_GRAY}全局参数只修饰命令，必须搭配命令使用（裸 flag 会报错，不会隐式跑 init）${NC}\n"
     echo -e "${BOLD}${HDR_BLUE}=== 日常入口 (Main Flows) ===${NC}"
-    echo -e "  ${SUCCESS_GREEN}update${NC}          日常最常用:把本机更新并收敛到最新(= \`bump\` + \`apply\`,secrets 只拉一次);不安装缺失 Agent"
-    echo -e "  ${SUCCESS_GREEN}init${NC}            新机器初始化或全量收敛:\`bump\` + Agent 生命周期(安装缺失 Agent)+ \`apply\` + 失效引用审计"
-    echo -e "  ${SUCCESS_GREEN}apply${NC}           把当前锁定态分发/收敛到本机:secrets 拉取、shell alias、tools、browser、rules 构建分发、skills 链接、mcp 注入;不刷新版本锁、不安装 Agent"
-    echo -e "  ${SUCCESS_GREEN}bump${NC}            只刷新元数据:CLI/MCP/tool 版本锁与 skill commit(联网)写入本机锁文件;不分发、不安装 Agent、不改本机环境"
-    echo -e "  ${SUCCESS_GREEN}agents:apply${NC}    按${BOLD}当前版本锁${NC}升级/修复已装 Agent;自身不刷锁、不安装缺失 Agent(要升到上游最新,先跑 \`bump\` 刷锁)"
-    echo -e "  ${SUCCESS_GREEN}plan${NC}            预演一次完整 \`init\`(dry-run)"
+    echo -e "  ${SUCCESS_GREEN}update${NC}          日常最常用：刷新元数据后把锁定态分发/收敛到本机（= \`bump\` + \`apply\`，secrets 只拉一次）；${BOLD}不安装、也不升级 Agent 软件${NC}（升级见 \`agents:apply\`）"
+    echo -e "  ${SUCCESS_GREEN}init${NC}            新机器初始化或全量收敛：\`bump\` + Agent 生命周期（安装缺失 Agent + 升级已装 Agent）+ \`apply\` + 失效引用审计"
+    echo -e "  ${SUCCESS_GREEN}apply${NC}           把当前锁定态分发/收敛到本机：secrets 拉取、shell alias、tools、browser、rules 构建分发、skills 链接、mcp 注入；不刷新版本锁、不安装 Agent"
+    echo -e "  ${SUCCESS_GREEN}bump${NC}            只刷新元数据：CLI/MCP/tool 版本锁与 skill commit（联网）写入本机锁文件；不分发、不安装 Agent、不改本机环境"
+    echo -e "  ${SUCCESS_GREEN}agents:apply${NC}    按${BOLD}当前版本锁${NC}升级/修复已装 Agent；自身不刷锁、不安装缺失 Agent（要升到上游最新，先跑 \`bump\` 刷锁）"
+    echo -e "  ${SUCCESS_GREEN}agents:status${NC}   只读列出各 Agent 的安装来源与生命周期状态，不改动本机、不加运行锁"
+    echo -e "  ${SUCCESS_GREEN}plan${NC}            预演一次完整 \`init\`（dry-run）"
     echo -e "  ${SUCCESS_GREEN}sys:upgrade${NC}     仅更新 agent-manager 仓库自身逻辑"
     echo -e "  ${SUCCESS_GREEN}ui${NC}              启动基于 Terminal 的交互式可视化管理界面"
     echo -e "  ${SUCCESS_GREEN}doctor / status${NC} 进行深度的资源校验、配置自检与环境排错诊断"
     echo -e "  ${SUCCESS_GREEN}detect${NC}          仅执行各 Agent 开发工具的环境探测与支持情况检测"
-    echo -e "  ${SUCCESS_GREEN}fetch-models${NC}    探测并获取模型列表。用法: ./manage.sh fetch-models <url> <key>\n"
+    echo -e "  ${SUCCESS_GREEN}fetch-models${NC}    探测并获取模型列表。用法：./manage.sh fetch-models <url> <key>"
+    echo -e "  ${SUCCESS_GREEN}help / help:all${NC} 分别显示日常帮助与本完整清单；两者都不加运行锁，同步任务运行时也可查\n"
     echo -e "${BOLD}${HDR_BLUE}=== 运维排错 (Maintenance) ===${NC}"
-    echo -e "  ${VAL_PURPLE}sys:clean${NC}       执行全量环境大扫除,深度清理临时文件、无用快照缓存及历史日志"
+    echo -e "  ${VAL_PURPLE}sys:clean${NC}       执行全量环境大扫除，深度清理临时文件、无用快照缓存及历史日志"
     echo -e "  ${VAL_PURPLE}sys:unlock${NC}      强制清除原子锁目录与遗留锁文件"
-    echo -e "  ${VAL_PURPLE}state:list${NC}      查找并列出近期系统中可用的容灾备份配置快照,最多20个"
-    echo -e "  ${VAL_PURPLE}state:restore${NC}   交互式快照选择,用于从特定备份快照中恢复配置"
-    echo -e "  ${VAL_PURPLE}sys:logs${NC}        查看最近一次执行的完整全链路同步日志(latest 指针)"
+    echo -e "  ${VAL_PURPLE}state:list${NC}      查找并列出近期系统中可用的容灾备份配置快照，最多 20 个"
+    echo -e "  ${VAL_PURPLE}state:restore${NC}   交互式快照选择，用于从特定备份快照中恢复配置"
+    echo -e "  ${VAL_PURPLE}sys:logs${NC}        查看最近一次执行的完整全链路同步日志（latest 指针）"
     echo -e "  ${VAL_PURPLE}sys:clean-logs${NC}  清空 latest 指针与所有按次留存的运行日志文件\n"
     echo -e "${BOLD}${HDR_BLUE}=== 分步原子控制 (Atomic syncs) ===${NC}"
-    echo -e "  ${BORDER_GRAY}mcp:apply${NC}       准备并注入 MCP 配置(默认检查/拉取 repo、同步 secrets、setup/build)"
+    echo -e "  ${BORDER_GRAY}mcp:apply${NC}       准备并注入 MCP 配置（默认检查/拉取 repo、同步 secrets、setup/build）"
     echo -e "  ${BORDER_GRAY}rules:build${NC}     从 agent-rule/rules/src/ 生成可分发的 dist 规则产物"
     echo -e "  ${BORDER_GRAY}rules:apply${NC}     独立执行规则与系统级 prompt 指令向各个 Agent 的拷贝或软链接分发"
     echo -e "  ${BORDER_GRAY}claude:hooks:apply${NC} 独立刷新仓库级 Claude hooks 到 .claude/settings.json"
     echo -e "  ${BORDER_GRAY}claude:statusline:apply${NC} 安装精简 statusline 脚本到 ~/.claude/statusline.sh"
-    echo -e "  ${BORDER_GRAY}claude:statusline:wire${NC}    将 statusline.sh 路径写入 ~/.claude/settings.json(仅作用于 Claude Code)"
-    echo -e "  ${BORDER_GRAY}claude:uninstall${NC}    完整卸载本机 Claude Code 全局痕迹(默认预览;--yes 才真删,可加 --backup-memory)"
-    echo -e "  ${BORDER_GRAY}claude:clean${NC}        清理会话/历史/缓存等可删除数据,保留配置·记忆·技能(默认预览;--yes 才删,自动护当前会话)"
+    echo -e "  ${BORDER_GRAY}claude:statusline:wire${NC}    将 statusline.sh 路径写入 ~/.claude/settings.json（仅作用于 Claude Code）"
+    echo -e "  ${BORDER_GRAY}claude:shell-aliases:apply${NC} 独立同步受管 shell alias 区块到 ~/.zshrc 与 ~/.zprofile"
+    echo -e "  ${BORDER_GRAY}claude:uninstall${NC}    完整卸载本机 Claude Code 全局痕迹（默认预览；--yes 才真删，可加 --backup-memory）"
+    echo -e "  ${BORDER_GRAY}claude:clean${NC}        清理会话/历史/缓存等可删除数据，保留配置·记忆·技能（默认预览；--yes 才删，自动护当前会话）"
     echo -e "  ${BORDER_GRAY}codex:hooks:apply${NC} 独立刷新仓库级 Codex hooks 到 .codex/hooks.json"
     echo -e "  ${BORDER_GRAY}skills:apply${NC}    独立执行全局或系统级专业技能代码集到 Agent 沙盒空间的映射配置与软链接"
-    echo -e "  ${BORDER_GRAY}skills:bump${NC}     显式解析并回写 skill 仓库的最新可审计版本(仅 release/tag,失败即停止)"
-    echo -e "  ${BORDER_GRAY}skill:disable X${NC} 本机持久禁用某个 skill(写入 manager.local.json;配合 skills:apply 清链生效)"
+    echo -e "  ${BORDER_GRAY}skills:bump${NC}     显式解析并回写 skill 仓库的最新可审计版本（仅 release/tag，失败即停止）"
+    echo -e "  ${BORDER_GRAY}skill:disable X${NC} 本机持久禁用某个 skill（写入 manager.local.json；配合 skills:apply 清链生效）"
     echo -e "  ${BORDER_GRAY}skill:enable X${NC}  解除某个 skill 的本机禁用"
     echo -e "  ${BORDER_GRAY}skill:list${NC}      列出各 skill 的启用/禁用状态"
     echo -e "  ${BORDER_GRAY}tools:apply${NC}     独立同步或安装全局统一增强工具链条"
@@ -1726,7 +1749,7 @@ case "$cmd" in
         echo -e "  ${PENDING_GOLD}--wait-agent-lifecycle${NC} 等待 Agent 生命周期后台安装/升级结束\n"
         echo -e "${BOLD}${HDR_BLUE}=== 日常入口 (Main Flows) ===${NC}"
         echo -e "  ${SUCCESS_GREEN}init${NC}      新机器初始化 / 全量收敛：装缺失 Agent + 刷新元数据 + 分发到本机"
-        echo -e "  ${SUCCESS_GREEN}update${NC}    ${BOLD}日常最常用${NC}：把本机更新并收敛到最新（= \`bump\` + \`apply\`，不装 Agent）"
+        echo -e "  ${SUCCESS_GREEN}update${NC}    ${BOLD}日常最常用${NC}：刷新元数据并分发到本机（= \`bump\` + \`apply\`）；不装、也不升级 Agent 软件"
         echo -e "  ${SUCCESS_GREEN}plan${NC}      预演一次完整 \`init\`（dry-run）"
         echo -e "  ${SUCCESS_GREEN}doctor${NC}    深度资源校验、配置自检与环境排错（= \`status\`）"
         echo -e "  ${SUCCESS_GREEN}ui${NC}        启动交互式可视化管理界面\n"
