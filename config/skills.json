@@ -7,14 +7,12 @@
       "upgrade_ref": "refs/heads/main",
       "skill_paths": [
         "safe-merge-review",
-        "ones-manhour-fill",
         "change-discipline",
         "frontend-verification",
         "artifact-hygiene",
-        "reader-facing-writing",
-        "session-mining"
+        "reader-facing-writing"
       ],
-      "skill_count": 7,
+      "skill_count": 5,
       "agents": [
         "claude-code",
         "antigravity-cli",
