@@ -32,7 +32,7 @@
 - `python3 tests/run_rule_behaviour_evals.py --rule <id> --runs-per-case 3` — 实测该行的 lift:`with`=完整 core.md,`without`=删掉该行的 core.md,判官打分。`without` 已过 = delete-test 正在触发。用例写在 `agent-rule/rules/evals/core.json`,`anchor` 必须唯一命中 core.md 一行(命中 0 或多行直接报错,防止静默测错行);**改写行文须同步 anchor**。
 - **隔离是必须的,不是可选项**:规则已分发到 `~/.claude/CLAUDE.md`,直接跑 `claude -p` 两臂都读得到,测出来恒为 0。runner 用临时 HOME(拷 `~/.claude.json` + 软链 `~/Library/Keychains`,否则报 Not logged in)。`--system-prompt` 挡不住 CLAUDE.md,`--bare` 不读 OAuth 登录不了——两条路都实测否决过,别重走。
 - 与 `make eval-rules`(`scripts/evals/run_rule_effectiveness_eval.py`)分工:那个是离线确定性覆盖矩阵、进 CI;这个真调模型、慢且有噪声,**手动跑**,别塞进 CI。
-- 读数遵循既有纪律:不用最便宜的模型定罪,N≥9,比 Wilson 区间而非点估计。
+- 读数纪律与已否定的候选**不在这里重复一份**:唯一出处是 `agent-skill/repositories/agent-skills/README.md` 的 "rules for reading trigger-eval results" 与 "Already-tested dead ends" 两节(判官模型、N≥9、比 Wilson 区间、哪些 description 候选与拆分实验已实测否决)。规则层与 skill 层共用同一套读数规则,改了那里即可,本节只留规则层特有的部分。
 
 ## 编辑 core.md 的隐形护栏(改前先看,否则门禁莫名报红)
 
