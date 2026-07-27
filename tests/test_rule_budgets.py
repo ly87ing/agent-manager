@@ -64,6 +64,17 @@ class RuleBudgetTests(unittest.TestCase):
         #
         # If the gates are ever restored to Antigravity's shipped defaults, re-run
         # the delete test on both lines rather than keeping them out of habit.
+        #
+        # The claude/codex emptiness assertion is a dated claim, not an invariant.
+        # "Their built-in prompts already cover this ground" was measured against the
+        # prompts those runtimes shipped in 2026-04; Anthropic has since removed over
+        # 80% of Claude Code's system prompt for the Claude 5 generation, so the
+        # covered surface has SHRUNK. The direction of a future correction is
+        # therefore more likely to be "claude adapter needs a line back" than "core
+        # can absorb one more". Do not read a green run here as evidence that the
+        # coverage claim was re-checked — nothing in this file re-checks it. Measure
+        # it with tests/run_rule_behaviour_evals.py against the runtime in question,
+        # and record the date here when you do.
         adapter = (ROOT / "agent-rule" / "rules" / "src" / "agents" / "antigravity" / "adapter.md").read_text(
             encoding="utf-8"
         )

@@ -24,6 +24,16 @@
 - **绝不把一个 skill 的多路分类压成规则里的二分法**——那是有损压缩,等于在 always-on 层立一条会被 skill 纠正的简化规则,是负分不是中性。路由行只保留 `` 遇到 X → use the `<skill>` skill `` 的指针,分类正文留给 skill。
 - 触发词要点名**当前漏掉的高频具体场景**,既不搞 catch-all(稀释触发信号)也别太窄(漏触发)。
 
+## delete-test 现在可以量,别再只靠判断
+
+判据"删了它 agent 会不会犯错"缺两个主语:**哪个 runtime 上的哪一代模型**、**截至何时**。两者都在动(Anthropic 已删掉 Claude Code 出厂系统提示 80%+,被覆盖的面在缩小),所以一次性证明会过期,而字符预算门禁只防新增、永远不会为「存量变冗余」报警。
+
+- `make rules:audit` — 只读报告,列出 core.md 每行的引入日期与 behaviour eval 覆盖情况。**不是门禁**(过期是日历函数,写进 unittest 就是会自己变红的坏测试)。
+- `python3 tests/run_rule_behaviour_evals.py --rule <id> --runs-per-case 3` — 实测该行的 lift:`with`=完整 core.md,`without`=删掉该行的 core.md,判官打分。`without` 已过 = delete-test 正在触发。用例写在 `agent-rule/rules/evals/core.json`,`anchor` 必须唯一命中 core.md 一行(命中 0 或多行直接报错,防止静默测错行);**改写行文须同步 anchor**。
+- **隔离是必须的,不是可选项**:规则已分发到 `~/.claude/CLAUDE.md`,直接跑 `claude -p` 两臂都读得到,测出来恒为 0。runner 用临时 HOME(拷 `~/.claude.json` + 软链 `~/Library/Keychains`,否则报 Not logged in)。`--system-prompt` 挡不住 CLAUDE.md,`--bare` 不读 OAuth 登录不了——两条路都实测否决过,别重走。
+- 与 `make eval-rules`(`scripts/evals/run_rule_effectiveness_eval.py`)分工:那个是离线确定性覆盖矩阵、进 CI;这个真调模型、慢且有噪声,**手动跑**,别塞进 CI。
+- 读数遵循既有纪律:不用最便宜的模型定罪,N≥9,比 Wilson 区间而非点估计。
+
 ## 编辑 core.md 的隐形护栏(改前先看,否则门禁莫名报红)
 
 - **预算硬门禁** `tests/test_rule_budgets.py`:`round(len(core.md)/4)` 有硬上限(**数字以该测试的常量为准,别在这儿抄第二份**)。core 长期贴着上限跑,任何净增字符都可能破门——**改前先跑该测试看实测余量**;路由行改写须**字符中性或负增**,想加内容先压缩现有措辞腾位。
