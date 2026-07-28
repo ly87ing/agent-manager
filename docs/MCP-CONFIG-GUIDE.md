@@ -68,7 +68,7 @@ make apply
 | Agent | 配置文件路径 | 根键名 | command 格式 | 环境变量键 | 特殊要求 |
 |-------|-------------|--------|-------------|-----------|----------|
 | **Claude Code** | `~/.claude.json` | `mcpServers` | 字符串 + args 数组 | `env` | - |
-| **Antigravity CLI** | `~/.gemini/antigravity-cli/mcp_config.json` | `mcpServers` | 字符串 + args 数组 | `env` | workspace 配置 `.agents/mcp_config.json` 可补充 |
+| **Antigravity CLI** | `~/.gemini/config/mcp_config.json` | `mcpServers` | 字符串 + args 数组 | `env` | workspace 配置 `.agents/mcp_config.json` 可补充 |
 | **Codex** | `~/.codex/config.toml` | `[mcp_servers.*]` | 字符串 + args 数组 | `[mcp_servers.*.env]` | TOML 字符串转义 |
 
 ---
@@ -99,7 +99,9 @@ make apply
 
 ### Antigravity CLI
 
-**配置文件**: `~/.gemini/antigravity-cli/mcp_config.json`（全局）或 `./.agents/mcp_config.json`（workspace）
+**配置文件**: `~/.gemini/config/mcp_config.json`（全局）或 `./.agents/mcp_config.json`（workspace）
+
+> **不要写 `~/.gemini/antigravity-cli/mcp_config.json`**。`~/.gemini/antigravity-cli/` 是 agy 的 app data 目录（settings.json、conversations、log 都在那儿），唯独 MCP 全局配置不在。2026-06-01 至 2026-07-27 期间受管路径误指向该目录，结果 Antigravity 一直读不到受管配置、跑的是更早遗留的未固定版本命令。判定方法：两份配置的服务器差集挑一个（当时是 `serena`），跑 `agy --print`，用 `pgrep` 看它拉起哪些 MCP 子进程即可确认实际读取源。
 
 ```json
 {

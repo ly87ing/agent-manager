@@ -78,7 +78,7 @@
   },
   "agent_paths": {
     "claude-code": "~/.claude.json",
-    "antigravity-cli": "~/.gemini/antigravity-cli/mcp_config.json",
+    "antigravity-cli": "~/.gemini/config/mcp_config.json",
     "codex": { "path": "~/.codex/config.toml", "format": "toml" }
   }
 }

@@ -229,7 +229,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
      cat secrets/mcp.env  # 注意：这会显示凭证！
      
      # 检查占位符是否被正确替换
-     grep -r "AUGMENT_SESSION_AUTH" ~/.claude.json ~/.gemini/antigravity-cli/mcp_config.json ~/.codex/config.toml
+     grep -r "AUGMENT_SESSION_AUTH" ~/.claude.json ~/.gemini/config/mcp_config.json ~/.codex/config.toml
      ```
    - 解决：
      * 确保 secrets/ 目录存在并为有效的 Git 仓库
@@ -565,7 +565,7 @@ done
 ```bash
 # 1. 停止所有正在运行的 Agent 实例
 # 2. 删除管理的配置和链接
-rm -rf ~/.claude.json ~/.gemini/antigravity-cli/mcp_config.json ~/.codex/config.toml
+rm -rf ~/.claude.json ~/.gemini/config/mcp_config.json ~/.codex/config.toml
 rm -rf ~/.claude/skills/* ~/.gemini/antigravity-cli/plugins/agent-manager/skills/* ~/.codex/skills/*
 
 # 3. 重新从 Agent Manager 同步
@@ -583,7 +583,7 @@ rm -rf ~/.claude/skills/* ~/.gemini/antigravity-cli/plugins/agent-manager/skills
 # 1. 停止所有 Agent 实例
 # 2. 恢复配置
 cp -r ~/agent-manager-backup/claude.json ~/.claude.json
-cp -r ~/agent-manager-backup/antigravity/mcp_config.json ~/.gemini/antigravity-cli/mcp_config.json
+cp -r ~/agent-manager-backup/antigravity/mcp_config.json ~/.gemini/config/mcp_config.json
 # ... 依次恢复所有配置
 # 3. 恢复技能链接（如果备份了）
 cp -r ~/agent-manager-backup/claude/skills/* ~/.claude/skills/

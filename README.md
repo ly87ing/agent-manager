@@ -11,7 +11,7 @@
    │ Agent 名称     │ 官方标准路径            │ 文件格式 │ 核心键名    │
    ├────────────────┼─────────────────────────┼──────────┼─────────────┤
    │ Claude Code    │ ~/.claude.json          │ JSON     │ mcpServers  │
-   │ Antigravity CLI │ ~/.gemini/antigravity-cli/mcp_config.json │ JSON │ mcpServers │
+   │ Antigravity CLI │ ~/.gemini/config/mcp_config.json │ JSON │ mcpServers │
    │ Codex          │ ~/.codex/config.toml    │ TOML     │ mcp_servers │
    └────────────────┴─────────────────────────┴──────────┴─────────────┘
 ```
