@@ -184,6 +184,46 @@ class SyncRulesTests(unittest.TestCase):
             self.assertFalse(legacy_path.exists(), combined)
             self.assertEqual(len(list(legacy_path.parent.glob("global.md.bak.*"))), 1, combined)
 
+    def test_antigravity_sync_removes_the_module_tree_left_beside_the_plugin(self):
+        # The module layout stopped being built in 35bfe9b, but copies distributed
+        # next to the Antigravity plugin's rules/ were in no cleanup list and were
+        # still on disk months later. Deletion goes through the backup path, so a
+        # file the tool stops managing is recoverable.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            temp_home = Path(temp_dir) / "home"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            plugin_dir = temp_home / ".gemini" / "antigravity-cli" / "plugins" / "agent-manager"
+            legacy_modules = plugin_dir / "modules"
+            legacy_modules.mkdir(parents=True)
+            (legacy_modules / "style.md").write_text("# Style Guidelines\n", encoding="utf-8")
+            target_path = plugin_dir / "rules"
+            (temp_root / "config" / "rules-targets.list").write_text(
+                f"antigravity_rules|global|rules/dist/antigravity/rules|{target_path}\n",
+                encoding="utf-8",
+            )
+
+            env = os.environ.copy()
+            env["HOME"] = str(temp_home)
+            result = subprocess.run(
+                [
+                    str(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh"),
+                    "--target",
+                    "antigravity_rules",
+                ],
+                cwd=temp_root / "agent-rule",
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertTrue((target_path / "agent-manager.md").exists(), combined)
+            self.assertFalse(legacy_modules.exists(), combined)
+            self.assertEqual(len(list(plugin_dir.glob("modules.bak.*"))), 1, combined)
+
     def test_dry_run_does_not_create_directory_targets(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"

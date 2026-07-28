@@ -156,11 +156,17 @@ cleanup_legacy_target_paths() {
       legacy_paths=("$HOME/.claude/rules/global.md" "$HOME/.claude/rules/modules")
       ;;
     antigravity_rules)
+      # The first four are Gemini-CLI-era paths. The fifth is the leftover this
+      # tool made itself: the module tree stopped being built in 35bfe9b, but the
+      # copies already distributed next to the plugin's `rules/` were never in any
+      # cleanup list, so they outlived the layout by months. It is derived from the
+      # target rather than hardcoded so a plugin-path change carries it along.
       legacy_paths=(
         "$HOME/.gemini/GEMINI.md"
         "$HOME/.gemini/rules/global.md"
         "$HOME/.gemini/modules"
         "$HOME/.gemini/rules/modules"
+        "$(dirname "$dst_abs")/modules"
       )
       ;;
   esac
