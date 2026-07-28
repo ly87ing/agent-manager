@@ -1,13 +1,5 @@
 {
   "servers": {
-    "augment-context-engine": {
-      "command": "auggie",
-      "args": ["--mcp", "--mcp-auto-workspace"],
-      "env": {
-        "AUGMENT_SESSION_AUTH": "${AUGMENT_SESSION_AUTH}"
-      },
-      "agents": ["claude-code", "antigravity-cli", "codex"]
-    },
     "chrome-devtools": {
       "command": "npx",
       "args": ["-y", "chrome-devtools-mcp@1.2.0", "--isolated"],

@@ -51,7 +51,7 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `tools.json`: 工具安装和设置指令
 - `skills.json`: Skill仓库地址和Agent映射
 - `mcp.json`: MCP服务器定义和Agent路径映射
-- 浏览器自动化相关能力按上游官方分发模型分别托管：`playwright-cli` 与 `agent-browser` 在 `tools.json` 中通过 npm 固定版本管理，`make bump` 负责刷新 `version_lock`。`playwright-cli` 的 runtime setup 由 `playwright-cli install-browser` 完成，受 `setup_timeout_sec` 限制，并通过 Playwright cache 中的 Chromium payload 重新验证；`agent-browser` 的 readiness 先检查系统 Chrome/Chromium，再检查 Playwright cache 中可复用的 Chromium，只有这些 probe 都失败时才依赖受管 setup；`chrome-devtools` 在 `mcp.json` 中通过 `npx -y chrome-devtools-mcp@<固定版本>` 维护。
+- 浏览器自动化相关能力按上游官方分发模型分别托管：`playwright-cli` 在 `tools.json` 中通过 npm 固定版本管理，`make bump` 负责刷新 `version_lock`；它的 runtime setup 由 `playwright-cli install-browser` 完成，受 `setup_timeout_sec` 限制，并通过 Playwright cache 中的 Chromium payload 重新验证。`chrome-devtools` 在 `mcp.json` 中通过 `npx -y chrome-devtools-mcp@<固定版本>` 维护。
 - Agent 定义中的 `display_name` 仅用于展示和日志；跨配置引用统一使用稳定 ID
 - `agents.json` 中的 `providers` 只声明 agent-manager 可托管的安装源；`system` 只是运行时探测信号，不是可配置的 provider key
 - `preferred_provider` 必须指向 `providers` 中真实存在的键，否则生命周期同步应直接失败

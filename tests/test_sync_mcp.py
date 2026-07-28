@@ -47,18 +47,6 @@ class SyncMcpTests(unittest.TestCase):
             {"claude-code", "antigravity-cli", "codex"},
         )
 
-    def test_committed_augment_context_engine_targets_only_managed_agents(self):
-        definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
-        agents = definitions["servers"]["augment-context-engine"]["agents"]
-
-        self.assertIsInstance(agents, list)
-        self.assertEqual(set(agents), {"claude-code", "antigravity-cli", "codex"})
-
-    def test_committed_mcp_policy_keeps_augment_context_engine_disabled_by_default(self):
-        policy = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
-
-        self.assertFalse(policy["mcp"]["augment-context-engine"]["enabled"])
-
     def test_committed_mcp_policy_enables_chrome_devtools_fixed_version(self):
         definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
         policy = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))

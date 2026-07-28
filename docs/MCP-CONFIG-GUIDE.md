@@ -9,10 +9,11 @@
 1. [快速开始](#快速开始)
 2. [各 Agent 的 MCP 配置格式](#各-agent-的-mcp-配置格式)
 3. [当前仓库默认受管 MCP 服务器](#当前仓库默认受管-mcp-服务器)
-4. [augment-context-engine 专项说明](#augment-context-engine-专项说明)
-5. [chrome-devtools 专项说明](#chrome-devtools-专项说明)
-6. [常见问题与解决方案](#常见问题与解决方案)
-7. [调试技巧](#调试技巧)
+4. [凭证管理](#凭证管理)
+5. [为什么 Antigravity CLI 显示 "Disconnected"](#为什么-antigravity-cli-显示-disconnected)
+6. [chrome-devtools 专项说明](#chrome-devtools-专项说明)
+7. [常见问题与解决方案](#常见问题与解决方案)
+8. [调试技巧](#调试技巧)
 
 ---
 
@@ -43,7 +44,6 @@ make apply
 
 | Server | 用途 | 受管命令 | 凭证 | 默认策略 |
 |--------|------|----------|------|----------|
-| `augment-context-engine` | 代码库检索、语义搜索、codebase-retrieval | `auggie --mcp --mcp-auto-workspace` | `AUGMENT_SESSION_AUTH` | 默认禁用 |
 | `chrome-devtools` | Chrome DevTools 浏览器调试、性能分析、network / console / screenshot | `npx -y chrome-devtools-mcp@<固定版本>` | 无 | 启用 |
 | `grok-search` | web_search / web_fetch 联网搜索与网页抓取 | `uvx --from git+https://github.com/GuDaStudio/GrokSearch@<固定commit> grok-search` | `GROK_API_URL`, `GROK_API_KEY`, `GROK_MODEL`, `TAVILY_ENABLED`, `TAVILY_API_KEY`, `TAVILY_API_URL`, `FIRECRAWL_API_KEY`, `FIRECRAWL_API_URL` | 启用 |
 | `serena` | JS/TS 语义级代码导航（LSP：find_symbol / 引用 / 符号概览） | `uvx --from git+https://github.com/oraios/serena@<固定commit> serena start-mcp-server --context ide-assistant` | 无 | 启用 |
@@ -80,11 +80,12 @@ make apply
 ```json
 {
   "mcpServers": {
-    "augment-context-engine": {
-      "command": "auggie",
-      "args": ["--mcp", "--mcp-auto-workspace"],
+    "grok-search": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/GuDaStudio/GrokSearch@<固定commit>", "grok-search"],
       "env": {
-        "AUGMENT_SESSION_AUTH": "{\"accessToken\":\"...\",\"tenantURL\":\"...\",\"scopes\":[]}"
+        "GROK_API_URL": "https://...",
+        "GROK_API_KEY": "sk-..."
       }
     }
   }
@@ -106,11 +107,12 @@ make apply
 ```json
 {
   "mcpServers": {
-    "augment-context-engine": {
-      "command": "auggie",
-      "args": ["--mcp", "--mcp-auto-workspace"],
+    "grok-search": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/GuDaStudio/GrokSearch@<固定commit>", "grok-search"],
       "env": {
-        "AUGMENT_SESSION_AUTH": "{\"accessToken\":\"...\",\"tenantURL\":\"...\",\"scopes\":[]}"
+        "GROK_API_URL": "https://...",
+        "GROK_API_KEY": "sk-..."
       }
     }
   }
@@ -135,13 +137,13 @@ agy
 **配置文件**: `~/.codex/config.toml`
 
 ```toml
-[mcp_servers.augment-context-engine]
-command = "auggie"
-args = ["--mcp", "--mcp-auto-workspace"]
+[mcp_servers.grok-search]
+command = "uvx"
+args = ["--from", "git+https://github.com/GuDaStudio/GrokSearch@<固定commit>", "grok-search"]
 startup_timeout_sec = 120
 
-[mcp_servers.augment-context-engine.env]
-AUGMENT_SESSION_AUTH = '{"accessToken":"...","tenantURL":"...","scopes":[]}'
+[mcp_servers.grok-search.env]
+GROK_API_KEY = 'sk-...'
 _MANAGED_BY = "agent-manager"
 ```
 
@@ -153,10 +155,10 @@ _MANAGED_BY = "agent-manager"
 **常见错误**:
 ```toml
 # ❌ 错误：双引号未转义
-AUGMENT_SESSION_AUTH = "{"accessToken":"..."}"
+SOME_JSON_CONFIG = "{"key":"value"}"
 
 # ✅ 正确：使用单引号
-AUGMENT_SESSION_AUTH = '{"accessToken":"..."}'
+SOME_JSON_CONFIG = '{"key":"value"}'
 ```
 
 **验证命令**:
@@ -166,46 +168,12 @@ codex mcp list
 
 ---
 
-## augment-context-engine 专项说明
-
-### 什么是 augment-context-engine
-
-`augment-context-engine` 是一个 MCP 服务器，提供代码库检索（codebase-retrieval）工具。它通过 `auggie` 命令行工具运行。
-
-### 认证方式演进
-
-历史上有两种认证方式：
-
-#### 旧方式（已废弃）
-```json
-{
-  "env": {
-    "AUGMENT_API_TOKEN": "ace_...",
-    "AUGMENT_API_URL": "https://..."
-  }
-}
-```
-
-#### 新方式（当前使用）
-```json
-{
-  "env": {
-    "AUGMENT_SESSION_AUTH": "{\"accessToken\":\"ace_...\",\"tenantURL\":\"...\",\"scopes\":[]}"
-  }
-}
-```
-
-**区别**:
-- 旧方式使用 API Token，需要单独的 URL
-- 新方式使用完整的 Session Auth JSON，包含 accessToken、tenantURL 和 scopes
-
-### 凭证管理
+## 凭证管理
 
 凭证存储在 **独立的私有 git 仓库** `secrets/mcp.env`：
 
 ```bash
 # secrets/mcp.env
-AUGMENT_SESSION_AUTH='{"accessToken":"ace_...","tenantURL":"...","scopes":[]}'
 GROK_API_URL='YOUR_GROK_API_URL'
 GROK_API_KEY='YOUR_GROK_API_KEY'
 GROK_MODEL='grok-4-fast'
@@ -266,32 +234,21 @@ git push origin main
 3. ✅ 限制访问人员
 4. ❌ 不要将凭证提交到主仓库
 
-### 工作原理
+---
 
-```
-┌─────────────┐     ┌──────────────────┐     ┌─────────────────────┐
-│   Agent     │────▶│  auggie (MCP)    │────▶│  codebase-retrieval │
-│  (Claude/   │◀────│  Server          │◀────│  Tool               │
-│   Antigrav./│     │                  │     │                     │
-│   etc.)     │     │  env:            │     │                     │
-└─────────────┘     │  AUGMENT_SESSION │     └─────────────────────┘
-                    │  _AUTH           │
-                    └──────────────────┘
-```
-
-### 为什么 Antigravity CLI 显示 "Disconnected"
+## 为什么 Antigravity CLI 显示 "Disconnected"
 
 **这是正常行为！**
 
 Antigravity CLI 的 stdio MCP 服务器采用**按需启动**策略：
 - `/mcp` 显示 "Disconnected" 表示当前没有活跃连接
-- 实际使用 MCP 功能时（如调用 `codebase-retrieval`），服务器会自动启动
+- 实际使用 MCP 功能时（如调用 `web_search`），服务器会自动启动
 - 使用后会自动关闭以节省资源
 
 **验证方法**:
 ```bash
 # 实际使用测试
-agy -p "请用 codebase-retrieval 查看当前项目的结构"
+agy -p "请用 web_search 查一下今天的日期"
 ```
 
 ---
@@ -395,14 +352,14 @@ rm ./.agents/mcp_config.json
 
 1. **检查命令是否可用**:
    ```bash
-   which auggie
-   auggie --version
+   which uvx npx
+   uvx --version
    ```
 
 2. **手动测试命令**:
    ```bash
-   AUGMENT_SESSION_AUTH='{"accessToken":"..."}' \
-     auggie --mcp --mcp-auto-workspace
+   GROK_API_KEY='...' \
+     uvx --from git+https://github.com/GuDaStudio/GrokSearch@<固定commit> grok-search
    ```
 
 3. **检查环境变量是否正确传递**:
@@ -428,7 +385,7 @@ rm ./.agents/mcp_config.json
    vim secrets/mcp.env
    
    # 或使用 echo
-   echo 'AUGMENT_SESSION_AUTH='\''{"accessToken":"new_token"}'\''' > secrets/mcp.env
+   echo 'GROK_API_KEY='\''new_token'\''' > secrets/mcp.env
    ```
 
 3. 重新收敛配置:
@@ -473,8 +430,8 @@ python3 -m json.tool ~/.claude.json > /dev/null && echo "JSON 有效"
 python3 -c "import json; d=json.load(open('~/.claude.json')); print(json.dumps(d.get('mcpServers'), indent=2))"
 
 # 3. 手动启动 MCP 服务器测试
-export AUGMENT_SESSION_AUTH='{"accessToken":"..."}'
-auggie --mcp --mcp-auto-workspace
+export GROK_API_KEY='...'
+uvx --from git+https://github.com/GuDaStudio/GrokSearch@<固定commit> grok-search
 ```
 
 ### 各 Agent 专用调试

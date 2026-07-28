@@ -40,23 +40,11 @@ class SyncToolsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, combined)
         self.assertIn("-f, --force-refresh", _strip_ansi(combined))
 
-    def test_committed_auggie_policy_uses_fixed_version_lock(self):
-        manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
-        tool_defs = json.loads((ROOT / "config" / "tools.json").read_text(encoding="utf-8"))["tools"]
-
-        self.assertTrue(manager["tools"]["auggie"]["enabled"])
-        self.assertTrue(manager["tools"]["auggie"]["auto_update"])
-        self.assertRegex(tool_defs["auggie"]["install"], r"^npm install -g @augmentcode/auggie@\d")
-        self.assertEqual(tool_defs["auggie"]["install"], tool_defs["auggie"]["upgrade"])
-        self.assertNotIn("@latest", tool_defs["auggie"]["install"])
-        self.assertEqual(tool_defs["auggie"]["version_lock"]["package"], "@augmentcode/auggie")
-
-    def test_committed_browser_tool_policy_uses_fixed_version_locks(self):
+    def test_committed_playwright_cli_policy_uses_fixed_version_lock(self):
         manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
         tool_defs = json.loads((ROOT / "config" / "tools.json").read_text(encoding="utf-8"))["tools"]
 
         self.assertTrue(manager["tools"]["playwright-cli"]["enabled"])
-        self.assertTrue(manager["tools"]["agent-browser"]["enabled"])
         self.assertRegex(tool_defs["playwright-cli"]["install"], r"^npm install -g @playwright/cli@\d")
         self.assertEqual(tool_defs["playwright-cli"]["install"], tool_defs["playwright-cli"]["upgrade"])
         self.assertNotIn("@latest", tool_defs["playwright-cli"]["install"])
@@ -65,14 +53,6 @@ class SyncToolsTests(unittest.TestCase):
         self.assertEqual(tool_defs["playwright-cli"]["setup_timeout_sec"], 300)
         self.assertEqual(tool_defs["playwright-cli"]["ready_check"], "bin:playwright-cli")
         self.assertIn("~/Library/Caches/ms-playwright/chromium-*", tool_defs["playwright-cli"]["runtime_ready_globs_any"])
-        self.assertRegex(tool_defs["agent-browser"]["install"], r"^npm install -g agent-browser@\d")
-        self.assertEqual(tool_defs["agent-browser"]["install"], tool_defs["agent-browser"]["upgrade"])
-        self.assertNotIn("@latest", tool_defs["agent-browser"]["install"])
-        self.assertEqual(tool_defs["agent-browser"]["version_lock"]["package"], "agent-browser")
-        self.assertEqual(tool_defs["agent-browser"]["setup"], "agent-browser install")
-        self.assertEqual(tool_defs["agent-browser"]["ready_check"], "bin:agent-browser")
-        self.assertIn("app:/Applications/Google Chrome.app", tool_defs["agent-browser"]["runtime_ready_checks_any"])
-        self.assertIn("~/Library/Caches/ms-playwright/chromium-*", tool_defs["agent-browser"]["runtime_ready_globs_any"])
 
     def test_global_npm_install_is_forced_onto_the_official_registry(self):
         hardened = sync_tools._inject_npm_flags("npm install -g agent-browser@0.33.0")

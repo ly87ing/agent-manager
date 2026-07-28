@@ -30,8 +30,6 @@
   - 用途：**仅用于 JS/TS** 的 LSP 语义导航（`find_symbol` / 引用 / 符号概览）；需本机有 `uvx` 与 Node.js。
   - 配置：`make init`、`make apply` 和 `./manage.sh mcp:apply` 会把每个项目的 Serena 数据目录对齐到系统临时目录，避免在仓库内生成 `.serena/`；换机后重新执行即可生效。
   - 注意：Java 不托管给它（上游 `oraios/serena#1478` 未支持按项目注册 JDK runtime，Java 8 会被 JDK21 runtime 分析）。详见 `docs/MCP-CONFIG-GUIDE.md`。
-- `augment-context-engine`
-  - 定义仍保留；缺少 `AUGMENT_SESSION_AUTH` 时默认不启用。
 
 ### 其他受管工具
 

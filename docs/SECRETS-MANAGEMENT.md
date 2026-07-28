@@ -46,7 +46,7 @@ secrets/
 凭证文件采用标准的 `KEY=VALUE` 格式，每行一个键值对：
 ```bash
 # secrets/mcp.env
-AUGMENT_SESSION_AUTH='{"accessToken":"ace_...","tenantURL":"...","scopes":[]}'
+GROK_API_KEY='sk-abc123...'
 ANOTHER_API_KEY="sk-abc123..."
 ```
 
@@ -70,10 +70,7 @@ ANOTHER_API_KEY="sk-abc123..."
 目前 Agent Manager 主要处理以下类型的凭证：
 
 ### 1. MCP服务器凭证
-用于augment-context-engine等MCP服务器的认证：
-- `AUGMENT_SESSION_AUTH`: 新方式的完整会话认证JSON
-- `AUGMENT_API_TOKEN`: 旧方式的API Token（已废弃但可能仍被部分系统使用）
-- `AUGMENT_API_URL`: API端点URL（旧方式需要）
+用于受管 MCP 服务器的认证：
 - `GROK_API_URL`: grok-search MCP 使用的 Grok API 入口
 - `GROK_API_KEY`: grok-search MCP 使用的 Grok API Key
 - `GROK_MODEL`: grok-search MCP 默认模型，例如 `grok-4-fast`
@@ -108,7 +105,7 @@ Claude Code 凭证不再由 agent-manager 注入，也不再维护 `ANTHROPIC_AU
 ### 凭�命名约定
 建议使用以下命名约定：
 - 全大写，下划线分隔
-- 前缀表示服务来源：`AUGMENT_`, `GITHUB_`, `OPENAI_` 等
+- 前缀表示服务来源：`GROK_`, `TAVILY_`, `FIRECRAWL_` 等
 - 描述性后缀：`_TOKEN`, `_KEY`, `_URL`, `_AUTH`
 
 ---
@@ -195,7 +192,7 @@ cd secrets
 # 编辑凭证文件
 vim mcp.env
 # 或使用echo更新特定值
-echo 'AUGMENT_SESSION_AUTH='\''{"accessToken":"new_value"}'\'' > mcp.env
+echo 'GROK_API_KEY='\''new_value'\'' > mcp.env
 
 # 提交变更
 git add mcp.env
@@ -309,11 +306,11 @@ make mcp-apply
 ```json
 {
   "servers": {
-    "augment-context-engine": {
-      "command": "auggie",
-      "args": ["--mcp", "--mcp-auto-workspace"],
+    "grok-search": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/GuDaStudio/GrokSearch@<固定commit>", "grok-search"],
       "env": {
-        "AUGMENT_SESSION_AUTH": "${AUGMENT_SESSION_AUTH}"
+        "GROK_API_KEY": "${GROK_API_KEY}"
       }
     }
   }
@@ -324,7 +321,7 @@ Agent Manager 会：
 1. 先读取仓库根目录的 `.env`
 2. 再读取 `secrets/*.env`（按文件名排序，后者覆盖前者）
 3. 若占位符仍未命中，再回退到系统环境变量
-4. 替换配置中的 `${AUGMENT_SESSION_AUTH}` 占位符
+4. 替换配置中的 `${GROK_API_KEY}` 占位符
 5. 生成 Agent 特定的配置格式
 6. 原子写入目标配置文件
 

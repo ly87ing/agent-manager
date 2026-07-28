@@ -5,16 +5,13 @@
     "codex": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "npm" }
   },
   "tools": {
-    "playwright-cli": { "enabled": true, "auto_update": true },
-    "agent-browser": { "enabled": true, "auto_update": true },
-    "auggie": { "enabled": true, "auto_update": true }
+    "playwright-cli": { "enabled": true, "auto_update": true }
   },
   "browser_us_sync": { "enabled": true },
   "skills": {
     "agent-skills": { "enabled": true }
   },
   "mcp": {
-    "augment-context-engine": { "enabled": false },
     "chrome-devtools": { "enabled": true },
     "grok-search": { "enabled": true },
     "serena": { "enabled": true }

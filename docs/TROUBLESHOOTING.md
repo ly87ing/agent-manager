@@ -229,7 +229,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
      cat secrets/mcp.env  # 注意：这会显示凭证！
      
      # 检查占位符是否被正确替换
-     grep -r "AUGMENT_SESSION_AUTH" ~/.claude.json ~/.gemini/config/mcp_config.json ~/.codex/config.toml
+     grep -r "GROK_API_KEY" ~/.claude.json ~/.gemini/config/mcp_config.json ~/.codex/config.toml
      ```
    - 解决：
      * 确保 secrets/ 目录存在并为有效的 Git 仓库
@@ -238,23 +238,19 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
      * 检查日志中是否有"正在从凭证源加载"的消息
 
 3. **命令不可用**
-   - 检查：确保 auggie 命令可用并在 PATH 中
+   - 检查：确保受管 MCP 的启动命令在 PATH 中（`grok-search` 与 `serena` 用 `uvx`，`chrome-devtools` 用 `npx`）
      ```bash
-     which auggie
-     auggie --version  # 应显示版本信息
+     which uvx npx
+     uvx --version
      ```
-   - 解决：安装或更新 auggie
-     ```bash
-     npm install -g @augmentcode/auggie
-     # 或如果通过其他方式安装
-     ```
+   - 解决：安装缺失的运行时（`uv` 提供 `uvx`，Node.js 提供 `npx`）
 
 4. **环境变量传递问题**
    - 检查：手动测试 MCP 服务器命令
      ```bash
-     # 设置测试环境变量
-     export AUGMENT_SESSION_AUTH='{"accessToken":"test","tenantURL":"test","scopes":[]}'
-     auggie --mcp --mcp-auto-workspace
+     # 用占位凭证起一次,只验证进程能拉起
+     export GROK_API_KEY='test' GROK_API_URL='https://example.invalid'
+     uvx --from git+https://github.com/GuDaStudio/GrokSearch@<固定commit> grok-search
      # 应该看到服务器启动并等待连接（用 Ctrl+C 停止）
      ```
    - 解决：检查 Agent Manager 是否正确将凭证注入到环境变量中
@@ -481,7 +477,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 #### 常见原因和解决方案：
 
 1. **MCP 服务器性能**
-   - 检查：auggie 或其他 MCP 服务器的响应时间
+   - 检查：各 MCP 服务器的响应时间
    - 解决：
      * 优化服务器查询（如减少 codebase-retrieval 范围）
      * 检查服务器日志寻找性能瓶颈
@@ -624,7 +620,7 @@ cp -r ~/agent-manager-backup/claude/skills/* ~/.claude/skills/
 |----------|----------|----------|
 | `Unexpected key or value` (Codex) | TOML 格式错误，通常是 JSON 字符串未正确转义 | 使用单引号包裹包含双引号的值：`KEY = '{"json":"value"}'` |
 | `Disconnected` (Antigravity CLI) | 通常是正常的按需启动行为 | 实际使用 MCP 功能时服务器会自动启动；使用 `/mcp` 检查 |
-| `Command not found: auggie` | auggie 未安装或不在 PATH 中 | 安装：`npm install -g @augmentcode/auggie` 或检查安装路径 |
+| `Command not found: uvx` / `npx` | MCP 启动命令依赖的运行时未安装或不在 PATH 中 | 安装 `uv`（提供 `uvx`）或 Node.js（提供 `npx`），再重跑 `make apply` |
 | `Authentication failed` | 凭证无效或过期 | 更新 secrets/mcp.env 中的凭证并重新同步 |
 
 ---

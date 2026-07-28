@@ -23,49 +23,6 @@
         "~/AppData/Local/ms-playwright/chromium-*",
         "~/AppData/Local/ms-playwright/chromium_headless_shell-*"
       ]
-    },
-    "agent-browser": {
-      "install": "npm install -g agent-browser@0.27.3",
-      "uninstall": "npm uninstall -g agent-browser",
-      "upgrade": "npm install -g agent-browser@0.27.3",
-      "version_lock": {
-        "type": "npm",
-        "package": "agent-browser",
-        "fields": {
-          "install": "npm install -g agent-browser@{version}",
-          "upgrade": "npm install -g agent-browser@{version}"
-        }
-      },
-      "setup": "agent-browser install",
-      "ready_check": "bin:agent-browser",
-      "runtime_ready_checks_any": [
-        "app:/Applications/Google Chrome.app",
-        "app:/Applications/Chromium.app",
-        "app:C:/Program Files/Google/Chrome/Application/chrome.exe",
-        "app:C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
-        "bin:google-chrome",
-        "bin:google-chrome-stable",
-        "bin:chromium",
-        "bin:chromium-browser"
-      ],
-      "runtime_ready_globs_any": [
-        "~/Library/Caches/ms-playwright/chromium-*",
-        "~/.cache/ms-playwright/chromium-*",
-        "~/AppData/Local/ms-playwright/chromium-*"
-      ]
-    },
-    "auggie": {
-      "install": "npm install -g @augmentcode/auggie@0.29.0",
-      "upgrade": "npm install -g @augmentcode/auggie@0.29.0",
-      "version_lock": {
-        "type": "npm",
-        "package": "@augmentcode/auggie",
-        "fields": {
-          "install": "npm install -g @augmentcode/auggie@{version}",
-          "upgrade": "npm install -g @augmentcode/auggie@{version}"
-        }
-      },
-      "ready_check": "bin:auggie"
     }
   }
 }
