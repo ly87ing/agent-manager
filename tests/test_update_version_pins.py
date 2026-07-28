@@ -180,6 +180,74 @@ class UpdateVersionPinsTests(unittest.TestCase):
             pins = json.loads((config_dir / "version-pins.local.json").read_text(encoding="utf-8"))
             self.assertEqual(pins["version_locks"]["mcp.json"]["servers.demo"], pinned_commit)
 
+    def test_pin_for_removed_component_is_pruned(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_dir = Path(temp_dir)
+            (config_dir / "agents.json").write_text("{}\n", encoding="utf-8")
+            (config_dir / "mcp.json").write_text('{"servers": {}}\n', encoding="utf-8")
+            (config_dir / "tools.json").write_text(
+                json.dumps(
+                    {
+                        "tools": {
+                            "kept": {
+                                "install": "npm install -g kept@0.1.0",
+                                "version_lock": {
+                                    "type": "npm",
+                                    "package": "kept",
+                                    "fields": {"install": "npm install -g kept@{version}"},
+                                },
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (config_dir / "version-pins.local.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "version_locks": {
+                            "tools.json": {
+                                "tools.kept": "0.1.0",
+                                "tools.removed": "9.9.9",
+                            }
+                        },
+                        "skill_repositories": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(update_version_pins, "fetch_npm_latest_version", return_value="0.2.0"):
+                result = update_version_pins.main_with_args_for_test(config_dir)
+
+            self.assertEqual(result, 0)
+            pins = json.loads((config_dir / "version-pins.local.json").read_text(encoding="utf-8"))
+            self.assertEqual(pins["version_locks"]["tools.json"], {"tools.kept": "0.2.0"})
+
+    def test_dry_run_does_not_prune_pin_for_removed_component(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_dir = Path(temp_dir)
+            (config_dir / "agents.json").write_text("{}\n", encoding="utf-8")
+            (config_dir / "mcp.json").write_text('{"servers": {}}\n', encoding="utf-8")
+            (config_dir / "tools.json").write_text('{"tools": {}}\n', encoding="utf-8")
+            (config_dir / "version-pins.local.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "version_locks": {"tools.json": {"tools.removed": "9.9.9"}},
+                        "skill_repositories": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = update_version_pins.main_with_args_for_test(config_dir, dry_run=True)
+
+            self.assertEqual(result, 0)
+            pins = json.loads((config_dir / "version-pins.local.json").read_text(encoding="utf-8"))
+            self.assertEqual(pins["version_locks"]["tools.json"], {"tools.removed": "9.9.9"})
+
     def test_refresh_failure_without_existing_pin_fails(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             config_dir = Path(temp_dir)

@@ -20,6 +20,7 @@ from src.version_pins import (
     get_version_pin,
     iter_version_lock_targets,
     load_version_pins,
+    prune_version_pins,
     set_version_pin,
     version_pin_key,
     write_version_pins,
@@ -127,16 +128,19 @@ def update_config_dir(config_dir: Path, pins_path: Path | None = None, dry_run: 
     pins_path = pins_path or default_version_pins_path(config_dir)
     pins = load_version_pins(pins_path)
     all_changes = []
+    removed_pins = []
     for filename in MANAGED_CONFIG_FILES:
         path = config_dir / filename
         changes = update_config_file(path, pins, dry_run)
+        live_keys = [version_pin_key(object_path) for object_path, _, _, _ in changes]
+        removed_pins.extend((filename, key) for key in prune_version_pins(pins, filename, live_keys))
         all_changes.extend(
             (filename, object_path, version, changed, error_message)
             for object_path, version, changed, error_message in changes
         )
-    if not dry_run and any(changed for _, _, _, changed, _ in all_changes):
+    if not dry_run and (removed_pins or any(changed for _, _, _, changed, _ in all_changes)):
         write_version_pins(pins_path, pins)
-    return all_changes
+    return all_changes, removed_pins
 
 
 def main_with_args_for_test(config_dir: Path, dry_run: bool = False, offline: bool = False, pins_path: Path | None = None):
@@ -144,10 +148,14 @@ def main_with_args_for_test(config_dir: Path, dry_run: bool = False, offline: bo
         logging.info("离线模式，跳过版本锁刷新。")
         return 0
     try:
-        all_changes = update_config_dir(Path(config_dir), pins_path=pins_path, dry_run=dry_run)
+        all_changes, removed_pins = update_config_dir(Path(config_dir), pins_path=pins_path, dry_run=dry_run)
     except (VersionPinError, VersionPinsError) as exc:
         logging.error(str(exc))
         return 1
+
+    for filename, key in removed_pins:
+        prefix = "预览：计划清理" if dry_run else "已清理"
+        logging.info(f"[{filename}] {prefix}失效版本锁 {key}")
 
     if not all_changes:
         logging.info("没有发现 version_lock 配置。")

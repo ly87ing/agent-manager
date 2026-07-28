@@ -107,6 +107,24 @@ def set_version_pin(payload: dict, file_label: str, object_path, version: str) -
     return changed
 
 
+def prune_version_pins(payload: dict, file_label: str, live_keys) -> list[str]:
+    """删除某个配置文件下已不存在的 version_lock 目标所对应的锁。
+
+    刷新是合并写入的,组件从配置里摘掉后它的锁会永久滞留;等到该组件某天被加回来,
+    这条陈旧的锁会在 bump 之前就被直接套用。返回被删除的键,按字典序。
+    """
+    version_locks = _ensure_mapping(payload.get(VERSION_LOCKS_SECTION), VERSION_LOCKS_SECTION)
+    file_locks = version_locks.get(file_label)
+    if not isinstance(file_locks, dict):
+        return []
+
+    live = set(live_keys)
+    removed = sorted(key for key in file_locks if key not in live)
+    for key in removed:
+        del file_locks[key]
+    return removed
+
+
 def validate_git_commit(value: str, label: str) -> str:
     if not isinstance(value, str) or len(value) != 40:
         raise VersionPinsError(f"{label} 必须是 40 位 git commit")
