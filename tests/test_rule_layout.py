@@ -60,6 +60,39 @@ class RuleLayoutTests(unittest.TestCase):
             )
             self.assertFalse((temp_root / "agent-rule" / "rules" / "dist" / "copilot").exists(), combined)
 
+    def test_rules_carry_no_comment_content_anywhere(self):
+        # Standing rule: nothing comment-shaped ships in a rule file, source or built.
+        # A provenance header was added here on 2026-07-27 and removed the same day.
+        # It was free on Claude Code, which strips block HTML comments before injection
+        # (measured, single-line and multi-line alike) — but only there: Codex and
+        # Antigravity have no such stripping and would pay for it every turn, and even
+        # on Claude it costs the moment an agent opens the file with the Read tool.
+        # A per-runtime exemption is not worth maintaining, so the ban is flat.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = self._copy_repo(temp_dir)
+
+            result = self._run_builder(temp_root)
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            rule_files = [
+                temp_root / "agent-rule" / "rules" / "dist" / target / filename
+                for target, filename in self.DIST_FILENAMES.items()
+            ]
+            rule_files.append(temp_root / "agent-rule" / "rules" / "src" / "shared" / "core.md")
+            rule_files.extend(
+                (temp_root / "agent-rule" / "rules" / "src" / "agents" / target / "adapter.md")
+                for target in self.DIST_FILENAMES
+            )
+            for path in rule_files:
+                content = path.read_text(encoding="utf-8")
+                self.assertNotIn("<!--", content, f"{path.name} ships comment content")
+                for line in content.splitlines():
+                    self.assertFalse(
+                        line.lstrip().startswith(("//", "#")),
+                        f"{path.name} ships a comment line: {line!r}",
+                    )
+
     def test_build_omits_shared_modules(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = self._copy_repo(temp_dir)
