@@ -104,20 +104,16 @@ class RuleLayoutTests(unittest.TestCase):
             modules_dir = temp_root / "agent-rule" / "rules" / "dist" / "modules"
             self.assertFalse(modules_dir.exists(), combined)
 
-    def test_frontend_verification_skill_captures_browser_tool_boundaries(self):
-        frontend_skill = (
-            ROOT
-            / "agent-skill"
-            / "repositories"
-            / "agent-skills"
-            / "frontend-verification"
-            / "SKILL.md"
-        ).read_text(encoding="utf-8")
-        self.assertIn("Choose the browser tool by intent", frontend_skill)
-        self.assertIn("Use Playwright for reproducible assertions, regression coverage", frontend_skill)
-        self.assertIn("Use Chrome DevTools for one-off visual inspection", frontend_skill)
-        self.assertIn("Preserve authenticated context deliberately", frontend_skill)
-        self.assertIn("report that tool failure before falling back", frontend_skill)
+    def test_frontend_verification_rule_routes_to_owned_skill_contract(self):
+        core = (ROOT / "agent-rule" / "rules" / "src" / "shared" / "core.md").read_text(encoding="utf-8")
+        skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
+        available = set(skills_config["repositories"]["agent-skills"]["skill_paths"])
+
+        # Detailed browser boundaries belong to the independently versioned skill
+        # repository and are tested there. This repository owns the route and the
+        # catalog declaration that make that contract reachable.
+        self.assertIn("`frontend-verification` skill", core)
+        self.assertIn("frontend-verification", available)
 
     def test_build_removes_stale_dist_outputs(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -22,21 +22,16 @@ class RuleBudgetTests(unittest.TestCase):
 
     def test_shared_core_excludes_artifact_hygiene_detail(self):
         core = (ROOT / "agent-rule" / "rules" / "src" / "shared" / "core.md").read_text(encoding="utf-8")
-        artifact = (
-            ROOT
-            / "agent-skill"
-            / "repositories"
-            / "agent-skills"
-            / "artifact-hygiene"
-            / "SKILL.md"
-        ).read_text(encoding="utf-8")
-
         phrase = (
             "Do not create or widen `.gitignore`, config conventions, or repository directories just to host "
             "disposable outputs."
         )
+
+        # The independently versioned skill repository owns the detailed clause;
+        # this repository owns keeping it out of the always-on core while retaining
+        # the route that loads it on demand.
         self.assertNotIn(phrase, core)
-        self.assertIn(phrase, artifact)
+        self.assertIn("`artifact-hygiene` skill", core)
 
     def test_agent_adapters_stay_within_budget(self):
         for target in ("codex", "claude", "antigravity"):
