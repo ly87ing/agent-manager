@@ -62,6 +62,46 @@ def run_cmd(cmd, cwd=None, timeout=300):
     except Exception as e:
         return False, f"Unexpected error executing '{cmd}': {e}"
 
+
+def configure_serena_project_folder(config, dry_run=False, offline=False):
+    """Keep Serena's per-project data outside project worktrees."""
+    location = config.get("project_serena_folder_location")
+    if not location:
+        return True
+
+    command = config.get("command")
+    args = config.get("args") or []
+    if not command or len(args) < 2 or args[0] != "--from":
+        logging.error("[serena] 无法从受管命令解析固定版本，未更新项目数据目录。")
+        return False
+
+    if dry_run:
+        logging.info(f"[serena] (预览: 将项目数据目录设为 {location})")
+        return True
+
+    sync_script = (
+        "import sys; "
+        "from serena.config.serena_config import SerenaConfig; "
+        "config = SerenaConfig.from_config_file(); "
+        "desired = sys.argv[1]; "
+        "changed = config.project_serena_folder_location != desired; "
+        "config.project_serena_folder_location = desired; "
+        "config._save() if changed else None"
+    )
+    sync_command = [command]
+    if offline:
+        sync_command.append("--offline")
+    sync_command.extend(["--from", args[1], "python", "-c", sync_script, location])
+
+    ok, output = run_cmd(sync_command, timeout=120)
+    if not ok:
+        logging.error(f"[serena] 项目数据目录配置失败: {output}")
+        return False
+
+    logging.info(f"[serena] 项目数据目录已对齐: {location}")
+    return True
+
+
 def repo_head_is_detached(repo_path):
     success, _ = run_cmd(["git", "symbolic-ref", "-q", "HEAD"], cwd=repo_path)
     return not success
@@ -598,6 +638,18 @@ def main():
         url = srv_config.get("url")
         if not url:
             srv_config["_repo_path"] = ""
+            if (
+                args.prepare_runtime
+                and srv_name == "serena"
+                and srv_config["_sync_ready"]
+                and not configure_serena_project_folder(
+                    srv_config,
+                    dry_run=args.dry_run,
+                    offline=args.offline,
+                )
+            ):
+                all_build_success = False
+                srv_config["_sync_ready"] = False
         else:
             target_dir = Path(base_dir) / srv_name
             srv_config["_repo_path"] = str(target_dir)

@@ -346,6 +346,9 @@ serena 的 Java 后端（solidlsp `eclipse_jdtls.py`）把 jdtls 的 `java.confi
 
 - `serena` 不依赖额外 secrets，`env` 为空。
 - 命令固定 commit，版本波动通过 `version_lock`（`ref: main`）在 `make bump` 时集中解析写入 `config/version-pins.local.json`。
+- `make init`、`make apply` 和 `./manage.sh mcp:apply` 会复用该固定版本的 Serena 配置加载器，生成或更新 `~/.serena/serena_config.yml`，并把 `project_serena_folder_location` 对齐为 `/tmp/serena$projectDir/.serena`。重复执行只在值变化时保存，并保留其他 Serena 配置；换机后重新运行任一命令即可恢复该策略。
+- 例如项目根目录为 `/YOUR_WORKSPACE/YOUR_PROJECT` 时，Serena 数据会写入 `/tmp/serena/YOUR_WORKSPACE/YOUR_PROJECT/.serena`。`/tmp` 可能被系统清理，因此索引、缓存和 Serena memories 不保证持久保留。
+- Serena 为兼容旧项目，会在临时目标尚不存在时回退到仓库内已有的 `.serena/`。自动配置不迁移旧数据；已有项目如需切换，应先把旧目录迁到对应临时路径或确认无需保留后再移除。
 - 需要本机有可用的 `uvx`（uv）运行时；JS/TS 语义能力额外需要 Node.js。
 - 各工作流启动前的「环境探测与健康自检」会打印一行 `serena (uvx:… / Node≥18:…)`，直接反映上述两个前置是否就绪（serena 是按需拉起的 MCP，不会在探测阶段真正启动 server）。
 

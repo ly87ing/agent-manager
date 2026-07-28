@@ -64,6 +64,7 @@
       ],
       "startup_timeout_sec": 120,
       "env": {},
+      "project_serena_folder_location": "/tmp/serena$projectDir/.serena",
       "version_lock": {
         "type": "git-ref",
         "remote": "https://github.com/oraios/serena",

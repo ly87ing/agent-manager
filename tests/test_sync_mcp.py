@@ -125,6 +125,10 @@ class SyncMcpTests(unittest.TestCase):
         self.assertIn("start-mcp-server", serena["args"])
         self.assertIn("ide-assistant", serena["args"])
         self.assertEqual(serena.get("env", {}), {})
+        self.assertEqual(
+            serena["project_serena_folder_location"],
+            "/tmp/serena$projectDir/.serena",
+        )
         self.assertIsNone(serena["agents"])
         self.assertEqual(serena["startup_timeout_sec"], 120)
         self.assertEqual(serena["version_lock"]["type"], "git-ref")
@@ -132,6 +136,94 @@ class SyncMcpTests(unittest.TestCase):
         self.assertEqual(
             serena["version_lock"]["fields"],
             {"args.1": "git+https://github.com/oraios/serena@{version}"},
+        )
+
+    def test_configure_serena_project_folder_uses_pinned_runtime_and_saves_only_changes(self):
+        definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
+        serena = definitions["servers"]["serena"]
+
+        with mock.patch.object(sync_mcp, "run_cmd", return_value=(True, "")) as run_cmd:
+            ok = sync_mcp.configure_serena_project_folder(serena)
+
+        self.assertTrue(ok)
+        command = run_cmd.call_args.args[0]
+        self.assertEqual(command[:4], ["uvx", "--from", serena["args"][1], "python"])
+        self.assertEqual(command[4], "-c")
+        self.assertIn(
+            "changed = config.project_serena_folder_location != desired",
+            command[-2],
+        )
+        self.assertIn("config._save() if changed else None", command[-2])
+        self.assertEqual(command[-1], "/tmp/serena$projectDir/.serena")
+        self.assertEqual(run_cmd.call_args.kwargs, {"timeout": 120})
+
+    def test_prepare_runtime_applies_serena_project_folder_policy(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path = temp_root / "manager.json"
+            def_path = temp_root / "mcp.json"
+            config_path.write_text(
+                json.dumps({"mcp": {"serena": {"enabled": True}}}),
+                encoding="utf-8",
+            )
+            def_path.write_text(
+                json.dumps(
+                    {
+                        "servers": {
+                            "serena": {
+                                "command": "uvx",
+                                "args": [
+                                    "--from",
+                                    "git+https://github.com/oraios/serena@" + "a" * 40,
+                                    "serena",
+                                    "start-mcp-server",
+                                ],
+                                "env": {},
+                                "project_serena_folder_location": (
+                                    "/tmp/serena$projectDir/.serena"
+                                ),
+                                "agents": None,
+                            }
+                        },
+                        "agent_paths": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with (
+                mock.patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "sync_mcp.py",
+                        "--config",
+                        str(config_path),
+                        "--def-file",
+                        str(def_path),
+                        "--base-dir",
+                        str(temp_root / "mcp"),
+                        "--prepare-runtime",
+                    ],
+                ),
+                mock.patch.object(
+                    sync_mcp,
+                    "configure_serena_project_folder",
+                    return_value=True,
+                ) as configure_serena,
+                mock.patch.object(sync_mcp, "manage_mcp_config", return_value=True),
+            ):
+                sync_mcp.main()
+
+        configure_serena.assert_called_once()
+        configured_server = configure_serena.call_args.args[0]
+        self.assertEqual(
+            configured_server["project_serena_folder_location"],
+            "/tmp/serena$projectDir/.serena",
+        )
+        self.assertEqual(
+            configure_serena.call_args.kwargs,
+            {"dry_run": False, "offline": False},
         )
 
     def test_committed_mcp_policy_enables_serena(self):
