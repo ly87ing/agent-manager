@@ -46,6 +46,18 @@ The same probe under that HOME answers NO, so the arm sees exactly the rule text
 runner put there and nothing else. Writing the arm's text to `~/.claude/CLAUDE.md`
 also means both arms exercise the real injection path rather than a prompt prefix.
 
+Both arms also get the maintained skill catalog symlinked into `~/.claude/skills/`,
+because the machine these rules ship to always has it. Isolating the rule from the
+skill layer measures a world that does not exist: every skill's description sits in
+the system prompt of every real session, so a rule line competes with it for the same
+behaviour. A line can show lift against a bare model and still be dead weight next to
+a skill that already claims the same ground — the question the four routing lines
+exist to answer, since their whole job is to point at a skill that is already
+installed. Measured that way on 2026-07-27 (sonnet, N=18 each), the two lines split:
+`route-change-discipline` 18/18 vs 15/18, `route-artifact-hygiene` 18/18 vs 18/18.
+Pass `--no-skills` to reproduce the older bare-model arm; results from the two modes
+are not comparable.
+
 Grading is a model call and therefore noisy. Read the Wilson interval, not the point
 rate, and do not compare a number here against one from an earlier run. Do not judge
 a line on the cheapest model: a haiku judge has manufactured failures that a larger
@@ -56,7 +68,10 @@ Usage:
   python3 tests/run_rule_behaviour_evals.py --rule surgical-edits --runs-per-case 3
   python3 tests/run_rule_behaviour_evals.py --all --model sonnet
 
-Cost: 3 model calls per case per run (with, without, grade). Start narrow.
+Cost: 4 model calls per case per run — both arms answer, and each answer is graded.
+The arms run with `--strict-mcp-config`, so a call costs seconds rather than the
+minutes it took while every arm was starting the machine's MCP servers; N=18 for one
+rule is now an ordinary run rather than an afternoon.
 Exit code: 0 when every selected rule shows positive lift, 1 otherwise.
 """
 
@@ -74,6 +89,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CORE = ROOT / "agent-rule" / "rules" / "src" / "shared" / "core.md"
 EVALS = ROOT / "agent-rule" / "rules" / "evals" / "core.json"
+SKILLS = ROOT / "agent-skill" / "repositories" / "agent-skills"
 
 ANSWER_TIMEOUT_SECONDS = 300
 GRADE_TIMEOUT_SECONDS = 180
@@ -134,12 +150,25 @@ def core_without(substring: str) -> str:
 class IsolatedHome:
     """A throwaway HOME carrying auth but none of the machine's own rules."""
 
-    def __init__(self) -> None:
+    def __init__(self, with_skills: bool = True) -> None:
         self.path = Path(tempfile.mkdtemp(prefix="rule-eval-home-"))
         shutil.copy(Path.home() / ".claude.json", self.path / ".claude.json")
         (self.path / "Library").mkdir()
         (self.path / "Library" / "Keychains").symlink_to(Path.home() / "Library" / "Keychains")
         (self.path / ".claude").mkdir()
+        self.skills = self._install_skills() if with_skills else []
+
+    def _install_skills(self) -> list[str]:
+        """Mirror the machine's skill catalog, which is present in every real session."""
+        target = self.path / ".claude" / "skills"
+        target.mkdir()
+        installed = []
+        for skill in sorted(SKILLS.iterdir()):
+            if not (skill / "SKILL.md").exists():
+                continue
+            (target / skill.name).symlink_to(skill)
+            installed.append(skill.name)
+        return installed
 
     def set_rules(self, text: str | None) -> None:
         target = self.path / ".claude" / "CLAUDE.md"
@@ -156,9 +185,17 @@ def run_claude(home: IsolatedHome, prompt: str, model: str, timeout: int) -> str
     env = os.environ.copy()
     env["HOME"] = str(home.path)
     # Run outside the repo so no project CLAUDE.md is discovered either.
+    #
+    # `--strict-mcp-config` with no `--mcp-config` leaves the arm with zero MCP
+    # servers. The copied `~/.claude.json` carries the machine's server list, and
+    # without this every single call paid an npx install and server startup — the
+    # arms were observed launching chrome-devtools-mcp per call, which is most of
+    # why this runner felt unusably slow. The cost of the flag: a rule about which
+    # TOOL to reach for cannot be measured here, because no MCP tool exists in the
+    # arm. Rules about what the model does with the repo are unaffected.
     try:
         result = subprocess.run(
-            ["claude", "-p", prompt, "--model", model],
+            ["claude", "-p", prompt, "--model", model, "--strict-mcp-config"],
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -198,6 +235,11 @@ def main() -> int:
     parser.add_argument("--all", action="store_true", help="measure every rule in the eval file")
     parser.add_argument("--runs-per-case", type=int, default=1, help="repeat each case N times (default: 1)")
     parser.add_argument("--model", default="sonnet", help="model under test and grader (default: sonnet)")
+    parser.add_argument(
+        "--no-skills",
+        action="store_true",
+        help="leave the arms' skill catalog empty (the older bare-model arm; not comparable)",
+    )
     args = parser.parse_args()
 
     if shutil.which("claude") is None:
@@ -215,7 +257,8 @@ def main() -> int:
 
     full = CORE.read_text(encoding="utf-8")
     runs = max(1, args.runs_per_case)
-    home = IsolatedHome()
+    home = IsolatedHome(with_skills=not args.no_skills)
+    print(f"skills in both arms: {', '.join(home.skills) if home.skills else '(none)'}")
     all_positive = True
     try:
         for rule in rules:
@@ -265,7 +308,7 @@ def main() -> int:
     finally:
         home.cleanup()
 
-    print(f"\n(model={args.model}, runs-per-case={runs})")
+    print(f"\n(model={args.model}, runs-per-case={runs}, skills={'off' if args.no_skills else 'on'})")
     return 0 if all_positive else 1
 
 
