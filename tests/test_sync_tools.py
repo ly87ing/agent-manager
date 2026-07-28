@@ -74,6 +74,21 @@ class SyncToolsTests(unittest.TestCase):
         self.assertIn("app:/Applications/Google Chrome.app", tool_defs["agent-browser"]["runtime_ready_checks_any"])
         self.assertIn("~/Library/Caches/ms-playwright/chromium-*", tool_defs["agent-browser"]["runtime_ready_globs_any"])
 
+    def test_global_npm_install_is_forced_onto_the_official_registry(self):
+        hardened = sync_tools._inject_npm_flags("npm install -g agent-browser@0.33.0")
+
+        self.assertIn("--registry https://registry.npmjs.org", hardened)
+
+    def test_global_npm_install_keeps_an_explicitly_requested_registry(self):
+        hardened = sync_tools._inject_npm_flags(
+            "npm install -g agent-browser@0.33.0 --registry https://registry.example.com"
+        )
+
+        self.assertNotIn("https://registry.npmjs.org", hardened)
+
+    def test_non_install_npm_command_is_left_alone(self):
+        self.assertEqual(sync_tools._inject_npm_flags("npm ls -g"), "npm ls -g")
+
     def test_main_applies_local_version_pins_to_install_commands(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -236,7 +251,14 @@ class SyncToolsTests(unittest.TestCase):
         def fake_run_cmd(cmd, cwd=None, timeout=300):
             if cmd == ["npm", "list", "-g", "@augmentcode/auggie", "--depth=0", "--json"]:
                 return True, json.dumps({"dependencies": {"@augmentcode/auggie": {"version": "0.24.0"}}})
-            if cmd == ["npm", "view", "@augmentcode/auggie", "version"]:
+            if cmd == [
+                "npm",
+                "view",
+                "@augmentcode/auggie",
+                "version",
+                "--registry",
+                "https://registry.npmjs.org",
+            ]:
                 return True, "0.24.0\n"
             raise AssertionError(f"unexpected command: {cmd}")
 

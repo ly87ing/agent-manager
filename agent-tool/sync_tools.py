@@ -32,11 +32,17 @@ from src.runtime_logging import configure_logging
 configure_logging()
 
 OWNER_MARKER = ".agent-manager-owned"
+OFFICIAL_NPM_REGISTRY = "https://registry.npmjs.org"
 
 def _inject_npm_flags(cmd):
-    if isinstance(cmd, str) and cmd.strip().startswith("npm install -g"):
-        return cmd.strip() + " --no-audit --no-fund"
-    return cmd
+    if not isinstance(cmd, str) or not cmd.strip().startswith("npm install -g"):
+        return cmd
+    hardened = cmd.strip()
+    if "--registry " not in hardened and "--registry=" not in hardened:
+        # 版本锁按官方 registry 写入,安装必须回到同一个源:本机 registry 若是滞后的镜像,
+        # 锁到的新版本在那里还不存在,npm install 会直接 ETARGET。sync_agents 同理。
+        hardened = f"{hardened} --registry {OFFICIAL_NPM_REGISTRY}"
+    return f"{hardened} --no-audit --no-fund"
 
 
 def run_cmd(cmd, cwd=None, timeout=600):
@@ -259,7 +265,10 @@ def probe_package_update_state(name, definition):
             local_version = parsed["dependencies"][npm_package]["version"]
         except (KeyError, TypeError, ValueError):
             return "unknown"
-        ok, out = run_cmd(["npm", "view", npm_package, "version"], timeout=60)
+        ok, out = run_cmd(
+            ["npm", "view", npm_package, "version", "--registry", OFFICIAL_NPM_REGISTRY],
+            timeout=60,
+        )
         if not ok:
             return "unknown"
         remote_version = out.strip()
