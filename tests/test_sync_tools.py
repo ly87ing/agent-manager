@@ -54,20 +54,18 @@ class SyncToolsTests(unittest.TestCase):
         self.assertEqual(tool_defs["playwright-cli"]["ready_check"], "bin:playwright-cli")
         self.assertIn("~/Library/Caches/ms-playwright/chromium-*", tool_defs["playwright-cli"]["runtime_ready_globs_any"])
 
-    def test_global_npm_install_is_forced_onto_the_official_registry(self):
-        hardened = sync_tools._inject_npm_flags("npm install -g agent-browser@0.33.0")
+    def test_run_cmd_applies_shared_npm_hardening_to_global_installs(self):
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="ok", stderr="")
 
-        self.assertIn("--registry https://registry.npmjs.org", hardened)
+        with mock.patch.object(sync_tools, "run_command", return_value=completed) as run_command:
+            ok, output = sync_tools.run_cmd("npm install -g @playwright/cli@0.1.17")
 
-    def test_global_npm_install_keeps_an_explicitly_requested_registry(self):
-        hardened = sync_tools._inject_npm_flags(
-            "npm install -g agent-browser@0.33.0 --registry https://registry.example.com"
-        )
-
-        self.assertNotIn("https://registry.npmjs.org", hardened)
-
-    def test_non_install_npm_command_is_left_alone(self):
-        self.assertEqual(sync_tools._inject_npm_flags("npm ls -g"), "npm ls -g")
+        self.assertTrue(ok)
+        self.assertEqual(output, "ok")
+        invoked = run_command.call_args.args[0]
+        self.assertIn("--registry https://registry.npmjs.org", invoked)
+        self.assertIn("--fetch-retries 2", invoked)
+        self.assertIn("--no-audit", invoked)
 
     def test_main_applies_local_version_pins_to_install_commands(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -17,6 +17,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.json_config import get_typed_mapping_section, load_json_object_file
+from src.npm_flags import OFFICIAL_NPM_REGISTRY, inject_npm_flags
 from src.version_pins import apply_local_version_pins
 from src.command_runner import run_command
 from src.git_remote_probe import probe_git_remote_state as probe_git_remote_repo_state
@@ -32,17 +33,6 @@ from src.runtime_logging import configure_logging
 configure_logging()
 
 OWNER_MARKER = ".agent-manager-owned"
-OFFICIAL_NPM_REGISTRY = "https://registry.npmjs.org"
-
-def _inject_npm_flags(cmd):
-    if not isinstance(cmd, str) or not cmd.strip().startswith("npm install -g"):
-        return cmd
-    hardened = cmd.strip()
-    if "--registry " not in hardened and "--registry=" not in hardened:
-        # 版本锁按官方 registry 写入,安装必须回到同一个源:本机 registry 若是滞后的镜像,
-        # 锁到的新版本在那里还不存在,npm install 会直接 ETARGET。sync_agents 同理。
-        hardened = f"{hardened} --registry {OFFICIAL_NPM_REGISTRY}"
-    return f"{hardened} --no-audit --no-fund"
 
 
 def run_cmd(cmd, cwd=None, timeout=600):
@@ -55,7 +45,7 @@ def run_cmd(cmd, cwd=None, timeout=600):
     currently succeeds starts failing — a hang that the supervisor would have
     killed anyway now ends as a clean per-command timeout instead.
     """
-    cmd = _inject_npm_flags(cmd)
+    cmd = inject_npm_flags(cmd)
     try:
         result = run_command(cmd, cwd=cwd, check=True, capture_output=True, text=True, timeout=timeout)
         return True, result.stdout

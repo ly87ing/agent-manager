@@ -19,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
 from src.command_runner import run_command
 from src.json_config import ensure_mapping_value_types, get_typed_mapping_section, load_json_object_file
+from src.npm_flags import inject_npm_flags
 from src.version_pins import apply_local_version_pins
 from src.manage_runtime_probe import (
     ProviderInventory as ProviderCache,
@@ -45,7 +46,6 @@ NETWORK_ERROR_MARKERS = (
     "getaddrinfo",
     "network connectivity",
 )
-OFFICIAL_NPM_REGISTRY = "https://registry.npmjs.org"
 OFFICIAL_INSTALLER_URL_MARKERS = (
     "https://claude.ai/install",
     "https://antigravity.google/cli/install",
@@ -60,34 +60,6 @@ ASYNC_STATUS_FAILED = "failed"
 ASYNC_ACTIVE_STATUSES = {ASYNC_STATUS_QUEUED, ASYNC_STATUS_RUNNING}
 ASYNC_FINAL_STATUSES = {ASYNC_STATUS_SUCCEEDED, ASYNC_STATUS_SKIPPED, ASYNC_STATUS_FAILED}
 ASYNC_POLL_INTERVAL_SECONDS = 0.2
-
-
-def _inject_npm_flags(cmd):
-    if not isinstance(cmd, str):
-        return cmd
-
-    stripped = cmd.strip()
-    if not stripped.startswith("npm install -g"):
-        return stripped
-
-    hardened = stripped
-    npm_flags = (
-        ("--registry", OFFICIAL_NPM_REGISTRY),
-        ("--fetch-retries", "2"),
-        ("--fetch-retry-factor", "2"),
-        ("--fetch-retry-mintimeout", "10000"),
-        ("--fetch-retry-maxtimeout", "60000"),
-        ("--fetch-timeout", "120000"),
-    )
-    for flag, value in npm_flags:
-        if f"{flag} " in hardened or f"{flag}=" in hardened:
-            continue
-        hardened = f"{hardened} {flag} {value}"
-    if "--no-audit" not in hardened:
-        hardened = f"{hardened} --no-audit"
-    if "--no-fund" not in hardened:
-        hardened = f"{hardened} --no-fund"
-    return hardened
 
 
 def _inject_curl_retry_flags(cmd):
@@ -109,7 +81,7 @@ def _inject_curl_retry_flags(cmd):
 
 
 def _prepare_command(cmd):
-    prepared = _inject_npm_flags(cmd)
+    prepared = inject_npm_flags(cmd)
     return _inject_curl_retry_flags(prepared)
 
 
