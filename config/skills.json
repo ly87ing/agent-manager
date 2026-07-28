@@ -2,7 +2,7 @@
   "repositories": {
     "agent-skills": {
       "url": "https://github.com/ly87ing/agent-skills.git",
-      "commit": "27914cfdf19a57c8963d4407423b4134367d49ab",
+      "commit": "8ea5b20e13b86b0304fa99a1ce68cee6e053cb45",
       "upgrade_strategy": "latest-branch",
       "upgrade_ref": "refs/heads/main",
       "skill_paths": [
