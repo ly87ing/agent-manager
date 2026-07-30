@@ -33,7 +33,7 @@ def write_dist_gitkeep() -> None:
     (DIST_ROOT / ".gitkeep").write_text("", encoding="utf-8")
 
 
-def render_target_content(target: str, core_lines: list[str], adapter_lines: list[str]) -> str:
+def render_target_content(core_lines: list[str], adapter_lines: list[str]) -> str:
     return "\n".join([*core_lines, *adapter_lines]) + "\n"
 
 
@@ -43,9 +43,7 @@ def build_target_file(target: str) -> None:
     core_lines = compact_lines(read_text(SRC_ROOT / "shared" / "core.md"))
     spec = TARGET_SPECS[target]
     adapter_lines = compact_lines(read_text(SRC_ROOT / "agents" / spec["adapter"] / "adapter.md"))
-    content = "\n".join(
-        [*spec.get("prefix_lines", []), render_target_content(target, core_lines, adapter_lines).rstrip()]
-    ) + "\n"
+    content = render_target_content(core_lines, adapter_lines)
     filename = spec["filename"]
     output_path = target_dir / filename
     output_path.parent.mkdir(parents=True, exist_ok=True)
