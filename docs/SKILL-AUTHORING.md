@@ -1,7 +1,7 @@
 # Skill 编写标准
 
 适用于 `agent-skills` 仓库(ly87ing/agent-skills)所有受管 skill。硬性形态契约(命名、frontmatter、
-英文正文、`agents/` 四件套、≤500 行、evals)已由该仓库 `tests/test_skill_contracts.py` 编码,此处不重复;
+英文正文、`agents/openai.yaml` 单文件、≤500 行且 ≤16000 字符、evals)已由该仓库 `tests/test_skill_contracts.py` 编码,此处不重复;
 本文只收录测试无法编码的编写判断标准。
 
 依据:Anthropic Agent Skills 官方最佳实践(docs.claude.com → Agent Skills best practices)、
@@ -51,12 +51,12 @@ ones-manhour-fill 曾写 "safe add-only writes",字面读作不做删改,反而�
 
 **扩描述前先核两道预算,都是硬上限:**
 
-1. 单个 description ≤ 1024 字符(官方规范,`quick_validate.py` 会拒)。2026-07-19
-   补完缺口后本仓已有四个逼近上限(1007/1012/1001/1000),再加须先腾空间。
+1. 单个 description ≤ 1024 字符(官方规范,`tests/test_skill_contracts.py` 会拒)。2026-07-30
+   实测本仓 5 个中三个逼近上限(1008/1014/1006),再加须先腾空间。
 2. 全部已安装 skill 的 name+description 总量。社区实测 Claude Code 按字符预算截断,
    **超出的 skill 被静默丢弃且无任何告警**,而 system prompt 又禁止使用未列出的 skill。
-   本轮补完后本仓 7 个占 6694 字符,连同 9 个邻居合计约 10451,对社区所述约 15000
-   的默认预算余量约 4549。改描述前跑一次总量统计,别把别的 skill 挤下车。
+   2026-07-30 实测本机 11 个已装 skill 合计 8003 字符(本仓 5 个 description 占 4816),
+   对社区所述约 15000 的默认预算余量约 7000。改描述前跑一次总量统计,别把别的 skill 挤下车。
 
 补完描述缺口后必须复测,命中率不是 100%。2026-07-19 四处按此法所做的修复,复测
 (N=5,完整目录,串行)结果:artifact-hygiene#12 与 safe-merge-review#9 均由 0.00 升到
