@@ -1268,6 +1268,34 @@ class SyncMcpTests(unittest.TestCase):
                 "agent-manager",
             )
 
+    def test_update_toml_config_logs_per_server_update_for_summary(self):
+        # manage.sh 的最终汇总用 grep "更新 MCP" 摘取各端注入行,TOML 分支必须逐 server 打这一行,否则 codex 在汇总里消失。
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            agent_config_path = temp_root / "config.toml"
+
+            with self.assertLogs(level="INFO") as captured:
+                ok = sync_mcp.update_toml_config(
+                    "codex",
+                    agent_config_path,
+                    {
+                        "demo-mcp": {
+                            "command": "echo",
+                            "args": [],
+                            "env": {},
+                        }
+                    },
+                    {"demo-mcp"},
+                    set(),
+                    dry_run=False,
+                )
+
+            self.assertTrue(ok)
+            self.assertTrue(
+                any("[AGENT: codex] 更新 MCP: demo-mcp" in line for line in captured.output),
+                captured.output,
+            )
+
     def test_sync_failure_preserves_existing_managed_mcp_entry(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

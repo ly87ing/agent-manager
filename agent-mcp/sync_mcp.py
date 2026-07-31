@@ -336,6 +336,8 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
         for k, v in env.items():
             block += f"{toml_key(k)} = {toml_quote(v)}\n"
         new_blocks.append(block)
+        if not dry_run:
+            logging.info(f"[AGENT: {agent_name}] 更新 MCP: {name}")
     
     full_content = base_content + "".join(new_blocks)
     try:
