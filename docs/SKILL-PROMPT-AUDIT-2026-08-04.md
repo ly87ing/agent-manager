@@ -53,13 +53,24 @@ code-submit：已落地（见下），在审计稿基础上保留了 "including 
 2. **reader-facing-writing 去重**（agent-skills 仓库）：9 处编辑，16060→15150 字节。demote 规则收敛到 L37 单一出处；prose-style/revision-pass/visuals 三个指针段砍半（触发条件保留在 SKILL.md，遵守 README 2026-07-29 实测警示：reference-only 规则不保证生效）；文档集/命名实体/组织逻辑三条长 bullet 删内部复述。离线 23 项契约测试通过；行为评测未跑（改动未触碰 description 与规则本体，触发评测不受影响）。
 3. **xiaoyu-code-submit**（xiaoyu-dev 仓库）：description 843→约 600 字符去压力化；删除 §9 Final self-check（13 项逐一核实在 SKILL.md/其余章节均有原生出处）；同步清理目录行与 SKILL.md:69 引用。`make check` 全部通过。
 
-## 待办（按优先级）
+## 第二批执行（2026-08-04，原待办 1–5 全部完成）
 
-1. safe-merge-review 三份字段表单源化 + checklist§6 删除（−9KB，漂移风险最高）
-2. bug-loop description 改写落地（常驻省 ~180 tokens/请求）+ 正文三/四重复述收敛
-3. security-review 78KB 证据文件移出，包内留摘要
-4. generate-api-detail / monitoring-gen 门禁双写收敛
-5. playwright-essentials 砍通用知识（−2.5KB）；change-discipline 合并 L25–27（−1.5KB）
-6. 可选：agent-rule/CLAUDE.md 过程叙事砍半（−1.5KB）；bug-loop 如长期不用可加 `.default-off` 免除常驻描述
+三个并行编辑代理执行、合并态复验后按 skill 粒度提交推送（agent-skills e7db98e..46b9d71 四提交；xiaoyu-dev 16dd2ba..39b49e1 四提交；~/.xiaoyu-dev 已同步）：
+
+- **safe-merge-review**：字段表单源化（脚本为骨架权威、SKILL.md 为语义唯一出处）、checklist§6/§7 删除改指向、AI-provenance 收敛、workflow 纯概念释义删净（节内字节 −20%，未达字面 40% 因余量均为保留清单内容）
+- **bug-loop**：description 换稿落地；SKILL.md 43.1→36.1KB（−16%），相对迭代解析收敛至 D11 单源、空范围门收敛至 G10、Loop controls 移仓库 README；mode-fix −2.2KB（案例复盘压缩、Experience distilled 压 2 行）；known-pitfalls Z2/Z7 合并、D11 测量表压为原则；mode-verify 转述改引用
+- **security-review**：78KB 证据底稿 git mv 至 docs/ 保全历史，包内留 13.6KB 摘要（分布/趋势表+代表案例+教训段）；description 340→165 字符；"只报新引入"收敛
+- **generate-api-detail**：确认关口收敛至步骤 5 单源、🔴 删净、迁移史压一句、日期示例改占位符（−0.9KB）
+- **monitoring-gen**：铁律与 Phase 双写收敛、Phase 4 循环替换为 validate.py 无 FAIL 单一判据（保留"不得为全绿删检查项"安全门）（−1.0KB）
+- **playwright-essentials** −33%（三块经验性内容整体保留故未达 50%）；**change-discipline** L26/27 合并+案例每规则一例；**artifact-hygiene** 三连述压缩；**visuals-and-decks** 与 frontend-verification 投影规则收敛
+
+验证：agent-skills 23 项契约测试、xiaoyu-dev make check 均在合并终态全绿；安全门/硬约束抽查（⛔×5、G10、Z7 无残留、monitoring 安全门）通过。
+
+## 剩余可选项
+
+- agent-rule/CLAUDE.md 过程叙事砍半（−1.5KB）
+- bug-loop 如长期不用可加 `.default-off` 免除常驻描述（触发频率见上，9 天 0 次）
+- safe-merge-review description 的评测候选改写（须先跑触发评测）
+- 行为评测复跑（run_behaviour_evals.py 与 xiaoyu 的 output-quality 评测，需调模型）确认压缩无行为回退
 
 执行约定：agent-skills 仓库改动过其评测（tests/ + run_trigger_evals）；xiaoyu-dev 一次只改一个 skill，git 保留旧文案便于回退。保留清单（勿删）：ONES 状态机与 ⛔ 安全门、G1–G10、秘密扫描/AI provenance 剥离、known-pitfalls 环境契约、agent-rule/core.md 全部、frontend-verification 的经验性失败模式。
