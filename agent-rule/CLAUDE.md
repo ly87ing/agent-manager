@@ -31,7 +31,7 @@
 - `make rules:audit` — 只读报告,列出 core.md 每行的引入日期与 behaviour eval 覆盖情况。**不是门禁**(过期是日历函数,写进 unittest 就是会自己变红的坏测试)。
 - `python3 tests/run_rule_behaviour_evals.py --rule <id> --runs-per-case 3` — 实测该行的 lift:`with`=完整 core.md,`without`=删掉该行的 core.md,判官打分。`without` 已过 = delete-test 正在触发。用例写在 `agent-rule/rules/evals/core.json`,`anchor` 必须唯一命中 core.md 一行(命中 0 或多行直接报错,防止静默测错行);**改写行文须同步 anchor**。
 - **两臂默认都装着 skill 目录,这是修 bug 不是加功能**:规则要去的真机上,5 个 skill 的 description 永远在系统提示里。把规则单独拎到空环境里测,量的是一个不存在的世界——裸模型下有 lift 的行,挨着一个已经认领同一片地的 skill 时可能就是冗余;路由表四行正是这个问题的主场(它们的全部工作就是指向一个**已经装好**的 skill),实测结果见下面「别用 hook 替代路由表」一节。`--no-skills` 可复现旧的裸模型臂,**两种模式的数字不可比**,2026-07-27 之前记录的所有 lift 都出自裸模型臂。
-- **别把 Claude 上的 no-lift 直接读成「可以删」**:core.md 是三家共享的,而这个 runner 只测 Claude Code。一条在 Claude 上冗余的行,在内置提示更薄的 Antigravity/Codex 上可能仍然承重;"从 core 删掉、往两个 adapter 各抄一份"要维护两份、只省 Claude 十来个 token,是负收益。**只有当替代它的机制本身跨端存在**(路由行的替代品是 skill 自己的 description,三家都装了 skill)**,Claude 上的结论才可外推**。
+- **别把 Claude 上的 no-lift 直接读成「可以删」**:core.md 由 Claude Code 与 Codex 共享,而这个 runner 只测 Claude Code。一条在 Claude 上冗余的行,在 Codex 上仍可能承重。**只有当替代它的机制本身跨端存在**(例如两端都安装的 skill description),Claude 上的结论才可外推。
 - **隔离是必须的,不是可选项**:规则已分发到 `~/.claude/CLAUDE.md`,直接跑 `claude -p` 两臂都读得到,测出来恒为 0。runner 用临时 HOME(拷 `~/.claude.json` + 软链 `~/Library/Keychains`,否则报 Not logged in)。`--system-prompt` 挡不住 CLAUDE.md,`--bare` 不读 OAuth 登录不了——两条路都实测否决过,别重走。拷进来的 `.claude.json` 同时带着整台机器的 MCP 列表,所以两臂都加 `--strict-mcp-config`:不加的话每次调用都要重新拉起一遍 MCP(实测进程表里 chrome-devtools-mcp 跑在临时 HOME 下),单次从 5 秒涨到几分钟,N=18 就得跑一下午;代价是「该优先用哪个工具」这类规则在这个 runner 里测不了——臂里根本没有 MCP 工具。
 - 与 `make eval-rules`(`scripts/evals/run_rule_effectiveness_eval.py`)分工:那个是离线确定性覆盖矩阵、进 CI;这个真调模型、慢且有噪声,**手动跑**,别塞进 CI。
 - 读数纪律与已否定的候选**不在这里重复一份**:唯一出处是 `agent-skill/repositories/agent-skills/README.md` 的 "rules for reading trigger-eval results" 与 "Already-tested dead ends" 两节(判官模型、N≥9、比 Wilson 区间、哪些 description 候选与拆分实验已实测否决)。规则层与 skill 层共用同一套读数规则,改了那里即可,本节只留规则层特有的部分。
@@ -46,13 +46,13 @@
 ## 规则与 skill 里一律不放注释(用户 2026-07-27 拍板,别再拿"这家免费"来复议)
 
 - **门禁**:`tests/test_rule_layout.test_rules_carry_no_comment_content_anywhere` 覆盖 `core.md`、三份 adapter 与三份 dist 产物;skill 侧对应 `agent-skills/tests/test_skill_contracts.test_skill_content_carries_no_comments`(SKILL.md + references,代码围栏内豁免)。给维护者看的话写进仓库文档,那是运行时不加载的地方。
-- **"某家会剥离所以免费"不是理由,这条已经试过并被推翻**:同一份文件发给三家。Claude Code 注入 CLAUDE.md 前确实会剥掉块级 HTML 注释(实测 CLI 2.1.220,单行与跨行都剥,`~/.claude/rules/*.md` 也一样),但 Codex/Antigravity 没有同等行为、每一轮都要计费,而且即便在 Claude 上,只要有 agent 用 Read 打开该文件,注释就照样进上下文。为一家的豁免维护一套例外,不值。
+- **"某家会剥离所以免费"不是理由,这条已经试过并被推翻**:同一份文件发给两家。Claude Code 注入 CLAUDE.md 前确实会剥掉块级 HTML 注释(实测 CLI 2.1.220,单行与跨行都剥,`~/.claude/rules/*.md` 也一样),但 Codex 没有同等行为、每一轮都要计费,而且即便在 Claude 上,只要有 agent 用 Read 打开该文件,注释就照样进上下文。为一家的豁免维护一套例外,不值。
 - 这条同时封掉了"用注释给分发产物自报家门"的做法:`~/.claude/CLAUDE.md` 被工具整体接管、覆盖写不留 `.bak` 这件事,只能靠仓库文档和分发目标本身的选择解决,不能靠往产物里塞注释。
 
 ## 别用 hook 替代路由表,别加常驻规则去"推"工具
 
 - **路由表 2026-07-27 第一次被实测,两条行结论不同**(sonnet,每行 2 用例 × 9 次 = N=18,两臂都装着 skill):`route-change-discipline` with 18/18 / without 15/18(+0.17,区间重叠);`route-artifact-hygiene` with 18/18 / **without 18/18**——裸臂一次没错过,delete-test 按仓库自己的判据是**触发了**的。
 - **但 delete-test 触发不等于该删,这是对既有判据的修正**:留着一行路由的代价是每会话约 28 token,删错的代价是 artifact-hygiene 那类边界(产物落位、密钥进日志)在边缘措辞上不再被认领。**代价不对称时,证据要求也应该不对称**——两个用例、一次会话的 null 不足以换掉一条按设计承重的行。想真正结掉这个问题,需要的是更边缘的措辞用例(不是更多次重复)、以及另外两条路由行(`frontend-verification`/`reader-facing-writing`)也各自测一遍;在那之前四行都留着,四条逐字断言也别动。
-- 那张常驻 skill 路由表是**唯一跨活跃端**生效的强制机制:hooks 是 Claude Code harness 专属,够不到同样每天在用的 Antigravity(codex 休眠)——把守门 skill 搬进 hook、砍掉 core 路由表会让路由在 Antigravity 上失效。
+- 那张常驻 skill 路由表是**唯一跨两端**生效的强制机制:hooks 是 Claude Code harness 专属,够不到 Codex——把守门 skill 搬进 hook、砍掉 core 路由表会让路由在 Codex 上失效。
 - MCP 工具(serena 等)自动暴露、相关时 agent 自会调用;**别加常驻规则或 hook 去督促工具使用**(重蹈已删除的 graphify 上下文膨胀覆辙,`test_rule_layout` 反向断言正是为此)。用得不够,唯一 graphify-safe 的补法是按需 skill,绝不是常驻规则。
 - 路由行按**动词/动作**分流(Validate vs Write)而非共享名词,避免 `HTML`/`reports` 这类名词被两行同时认领而削弱触发确定性。

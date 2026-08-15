@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 
 from src.agent_ids import canonicalize_agent_list, canonicalize_agent_mapping, get_agent_display_name
-from src.json_config import ensure_mapping_value_types, get_typed_mapping_section, load_json_object_file
+from src.json_config import ensure_mapping_value_types, get_object_section, get_typed_mapping_section, load_json_object_file
 from src.mcp_config import resolve_mcp_server_args
 from src.version_pins import apply_local_version_pins
 from src.manage_runtime_probe import (
@@ -35,7 +35,6 @@ from src.toml_compat import load_tomllib
 PLACEHOLDER_PATTERN = re.compile(r"^\$\{[^}]+\}$")
 RULE_TARGET_PREFIX_TO_ID = {
     "claude": "claude-code",
-    "antigravity": "antigravity-cli",
     "codex": "codex",
 }
 REQUIRED_CONFIG_FILES = (
@@ -44,6 +43,7 @@ REQUIRED_CONFIG_FILES = (
     "config/tools.json",
     "config/skills.json",
     "config/mcp.json",
+    "config/herdr.json",
     "config/rules-targets.list",
 )
 SUPPORTED_UNSUPPORTED_ACTIONS = {"install", "update", "uninstall", "repair"}
@@ -155,6 +155,7 @@ def validate_json_shape(data: dict, name: str) -> None:
         get_typed_mapping_section(data, "tools", name, (dict,), "对象")
         get_typed_mapping_section(data, "skills", name, (dict,), "对象")
         get_typed_mapping_section(data, "mcp", name, (dict,), "对象")
+        get_object_section(data, "herdr", name)
         validate_browser_us_sync()
     elif name == "tools.json":
         get_typed_mapping_section(data, "tools", name, (dict,), "对象")
@@ -166,6 +167,9 @@ def validate_json_shape(data: dict, name: str) -> None:
         get_typed_mapping_section(data, "agent_paths", name, (str, dict), "字符串或对象")
     elif name == "agents.json":
         ensure_mapping_value_types(data, name, (dict,), "对象")
+    elif name == "herdr.json":
+        get_object_section(data, "binary", name)
+        get_typed_mapping_section(data, "integrations", name, (dict,), "对象")
 
 
 def command_exists(command: str) -> bool:

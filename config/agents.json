@@ -41,28 +41,6 @@
       }
     }
   },
-  "antigravity-cli": {
-    "display_name": "Antigravity CLI",
-    "bin": "agy",
-    "preferred_provider": "native",
-    "require_managed_provider": true,
-    "providers": {
-      "native": {
-        "managed": true,
-        "install": {
-          "darwin": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
-          "linux": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
-          "windows": "curl -fsSL https://antigravity.google/cli/install.cmd -o install.cmd && install.cmd && del install.cmd"
-        },
-        "uninstall": {
-          "posix": "rm -f ~/.local/bin/agy",
-          "windows": "powershell -NoProfile -Command \"Remove-Item -Path \\\"$env:USERPROFILE\\\\AppData\\\\Local\\\\agy\\\\bin\\\\agy.exe\\\" -Force\""
-        },
-        "unsupported_actions": ["update"],
-        "detect_paths": ["~/.local/bin/agy"]
-      }
-    }
-  },
   "codex": {
     "display_name": "Codex",
     "bin": "codex",

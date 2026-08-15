@@ -34,32 +34,14 @@ class RuleBudgetTests(unittest.TestCase):
         self.assertIn("`artifact-hygiene` skill", core)
 
     def test_agent_adapters_stay_within_budget(self):
-        for target in ("codex", "claude", "antigravity"):
+        for target in ("codex", "claude"):
             content = (ROOT / "agent-rule" / "rules" / "src" / "agents" / target / "adapter.md").read_text(
                 encoding="utf-8"
             )
             approx_tokens = round(len(content) / 4)
             self.assertLessEqual(approx_tokens, 220, f"{target} adapter too large: ~{approx_tokens} tokens")
 
-    def test_antigravity_adapter_keeps_its_verified_reversed_defaults(self):
-        # An adapter may only carry a rule that reverses THAT agent's own default;
-        # anything true of every agent belongs in shared core. claude/codex stay
-        # empty because their built-in prompts already cover this ground (3a5f110).
-        #
-        # Provenance, re-established 2026-07-19: these two lines were written for
-        # Gemini CLI against gemini-cli#7432 and #24725, then carried to Antigravity
-        # by a 100%-similarity rename (bc9604f) that preserved the text while
-        # silently voiding its evidence. Re-verified against Antigravity itself:
-        # plan-first is NOT its default (opt-in `--mode=plan`; the docs list
-        # "request an implementation plan" as a user practice), and this machine
-        # sets toolPermission/artifactReviewPolicy to always-proceed, disabling the
-        # request-review gates that would otherwise make both lines redundant.
-        # Local Antigravity session records show `git add . && git commit && git push`
-        # run as one command with no approval recorded. Both lines therefore stay.
-        #
-        # If the gates are ever restored to Antigravity's shipped defaults, re-run
-        # the delete test on both lines rather than keeping them out of habit.
-        #
+    def test_current_agent_adapters_stay_empty_until_a_reversed_default_is_proven(self):
         # The claude/codex emptiness assertion is a dated claim, not an invariant.
         # "Their built-in prompts already cover this ground" was measured against the
         # prompts those runtimes shipped in 2026-04; Anthropic has since removed over
@@ -70,11 +52,6 @@ class RuleBudgetTests(unittest.TestCase):
         # coverage claim was re-checked — nothing in this file re-checks it. Measure
         # it with tests/run_rule_behaviour_evals.py against the runtime in question,
         # and record the date here when you do.
-        adapter = (ROOT / "agent-rule" / "rules" / "src" / "agents" / "antigravity" / "adapter.md").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("wait for confirmation before modifying files", adapter)
-        self.assertIn("never run `git add .`", adapter)
         for empty_target in ("claude", "codex"):
             other = (ROOT / "agent-rule" / "rules" / "src" / "agents" / empty_target / "adapter.md").read_text(
                 encoding="utf-8"

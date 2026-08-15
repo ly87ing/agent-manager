@@ -45,27 +45,6 @@ class LinkSkillsTests(unittest.TestCase):
     def test_codex_is_globally_active_without_lifecycle_definition(self):
         self.assertTrue(link_skills.is_active_skill_target("codex", "/tmp/.codex/skills", {}))
 
-    def test_antigravity_skill_link_creates_plugin_marker(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir)
-            source = temp_root / "source-skill"
-            source.mkdir()
-            (source / "SKILL.md").write_text("---\nname: demo\n---\n", encoding="utf-8")
-            target_base = temp_root / ".gemini" / "antigravity-cli" / "plugins" / "agent-manager" / "skills"
-
-            link_skills.manage_links(
-                "demo",
-                source,
-                {"antigravity-cli": str(target_base)},
-                allowed_agents=None,
-                is_enabled=True,
-                dry_run=False,
-            )
-
-            marker = json.loads((target_base.parent / "plugin.json").read_text(encoding="utf-8"))
-            self.assertEqual(marker, {"name": "agent-manager"})
-            self.assertTrue((target_base / "demo").exists() or (target_base / "demo").is_symlink())
-
     def test_main_allows_scoped_repo_targets_that_are_declared_but_inactive(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -74,12 +53,12 @@ class LinkSkillsTests(unittest.TestCase):
                 "repositories": {
                     "scoped-repo": {
                         "url": "https://example.invalid/repo.git",
-                        "agents": ["claude-code", "antigravity-cli"],
+                        "agents": ["claude-code", "codex"],
                     }
                 },
                 "agents": {
                     "claude-code": str(temp_root / "targets" / "claude"),
-                    "antigravity-cli": str(temp_root / "targets" / "antigravity"),
+                    "codex": str(temp_root / "targets" / "codex"),
                 },
             }
 
@@ -87,7 +66,7 @@ class LinkSkillsTests(unittest.TestCase):
                 mock.patch.object(
                     link_skills,
                     "load_json_object_file",
-                    side_effect=[policy_root, full_def, {"claude-code": {}, "antigravity-cli": {}}],
+                    side_effect=[policy_root, full_def, {"claude-code": {}, "codex": {}}],
                 ),
                 mock.patch.object(
                     link_skills,
@@ -2487,7 +2466,7 @@ class LinkSkillsTests(unittest.TestCase):
             ],
         )
         self.assertEqual(repo["skill_count"], 5)
-        self.assertEqual(repo["agents"], ["claude-code", "antigravity-cli", "codex"])
+        self.assertEqual(repo["agents"], ["claude-code", "codex"])
         self.assertNotIn("ignored_skill_paths", repo)
         self.assertRegex(repo["commit"], r"^[0-9a-f]{40}$")
         self.assertEqual(repo["upgrade_strategy"], "latest-branch")

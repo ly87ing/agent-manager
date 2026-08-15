@@ -8,10 +8,6 @@ AGENT_METADATA = {
         "display_name": "Claude Code",
         "aliases": ["Claude Code"],
     },
-    "antigravity-cli": {
-        "display_name": "Antigravity CLI",
-        "aliases": ["Antigravity CLI", "Antigravity"],
-    },
     "codex": {
         "display_name": "Codex",
         "aliases": ["Codex"],

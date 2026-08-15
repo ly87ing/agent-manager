@@ -458,7 +458,6 @@ class ClaudeStatuslineWireTargetTests(unittest.TestCase):
         self.assertIn("install_statusline.py", wire_block)
         self.assertIn("--apply-settings", wire_block)
         self.assertNotIn(".codex", wire_block)
-        self.assertNotIn(".gemini", wire_block)
         # Must not pass --settings-path (which could redirect elsewhere)
         self.assertNotIn("--settings-path", wire_block)
 

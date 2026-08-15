@@ -13,7 +13,7 @@
 #   JetBrains  …/IntelliJIdea*/plugins/claude-code-jetbrains-plugin(+ 任务残留)
 #   Keychain   Claude Code-credentials(acct=当前用户)、Claude Safe Storage(acct=Claude Key)
 #   shell 别名 ~/.zshrc / ~/.zprofile 里的 alias claude=…
-#   IDE 设置   VS Code / Antigravity settings.json 里的 claudeCode 孤儿项
+#   IDE 设置   VS Code settings.json 里的 claudeCode 孤儿项
 #   浏览器桥接 各浏览器 NativeMessagingHosts/com.anthropic.claude*_browser_extension.json(原生消息宿主 manifest)
 #
 # 明确不动(边界):
@@ -170,8 +170,7 @@ done
 echo "   注意:未改动 PATH / .local/bin/env 等共享配置。"
 
 step "⑦ 清理 IDE 里残留的 claudeCode 设置(改动前备份)"
-for s in "$HOME/Library/Application Support/Code/User/settings.json" \
-         "$HOME/Library/Application Support/Antigravity/User/settings.json"; do
+for s in "$HOME/Library/Application Support/Code/User/settings.json"; do
     if [ -f "$s" ] && grep -q 'claudeCode' "$s"; then
         if [ "$EXECUTE" = true ]; then sed -i.claude-bak '/claudeCode/d' "$s" && echo "   已清 $s(备份 $s.claude-bak)"
         else echo "   [预览] 从 $s 删除 claudeCode 设置行"; fi

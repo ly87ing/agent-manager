@@ -10,10 +10,9 @@
 2. [各 Agent 的 MCP 配置格式](#各-agent-的-mcp-配置格式)
 3. [当前仓库默认受管 MCP 服务器](#当前仓库默认受管-mcp-服务器)
 4. [凭证管理](#凭证管理)
-5. [为什么 Antigravity CLI 显示 "Disconnected"](#为什么-antigravity-cli-显示-disconnected)
-6. [chrome-devtools 专项说明](#chrome-devtools-专项说明)
-7. [常见问题与解决方案](#常见问题与解决方案)
-8. [调试技巧](#调试技巧)
+5. [chrome-devtools 专项说明](#chrome-devtools-专项说明)
+6. [常见问题与解决方案](#常见问题与解决方案)
+7. [调试技巧](#调试技巧)
 
 ---
 
@@ -68,7 +67,6 @@ make apply
 | Agent | 配置文件路径 | 根键名 | command 格式 | 环境变量键 | 特殊要求 |
 |-------|-------------|--------|-------------|-----------|----------|
 | **Claude Code** | `~/.claude.json` | `mcpServers` | 字符串 + args 数组 | `env` | - |
-| **Antigravity CLI** | `~/.gemini/config/mcp_config.json` | `mcpServers` | 字符串 + args 数组 | `env` | workspace 配置 `.agents/mcp_config.json` 可补充 |
 | **Codex** | `~/.codex/config.toml` | `[mcp_servers.*]` | 字符串 + args 数组 | `[mcp_servers.*.env]` | TOML 字符串转义 |
 
 ---
@@ -95,40 +93,6 @@ make apply
 **注意事项**:
 - JSON 中的 JSON 字符串需要正确转义双引号
 - 支持全局配置和项目配置
-
----
-
-### Antigravity CLI
-
-**配置文件**: `~/.gemini/config/mcp_config.json`（全局）或 `./.agents/mcp_config.json`（workspace）
-
-> **不要写 `~/.gemini/antigravity-cli/mcp_config.json`**。`~/.gemini/antigravity-cli/` 是 agy 的 app data 目录（settings.json、conversations、log 都在那儿），唯独 MCP 全局配置不在。2026-06-01 至 2026-07-27 期间受管路径误指向该目录，结果 Antigravity 一直读不到受管配置、跑的是更早遗留的未固定版本命令。判定方法：两份配置的服务器差集挑一个（当时是 `serena`），跑 `agy --print`，用 `pgrep` 看它拉起哪些 MCP 子进程即可确认实际读取源。
-
-```json
-{
-  "mcpServers": {
-    "grok-search": {
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/GuDaStudio/GrokSearch@<固定commit>", "grok-search"],
-      "env": {
-        "GROK_API_URL": "https://...",
-        "GROK_API_KEY": "sk-..."
-      }
-    }
-  }
-}
-```
-
-**重要**:
-- Antigravity CLI 使用独立的 sparse MCP 配置，不再复用旧 Gemini CLI 的 `settings.json`
-- workspace 本地配置放在 `.agents/mcp_config.json`
-- "Disconnected" 状态通常是正常的，stdio MCP 按需启动
-
-**验证命令**:
-```bash
-agy
-# 在 TUI 中输入 /mcp
-```
 
 ---
 
@@ -236,23 +200,6 @@ git push origin main
 
 ---
 
-## 为什么 Antigravity CLI 显示 "Disconnected"
-
-**这是正常行为！**
-
-Antigravity CLI 的 stdio MCP 服务器采用**按需启动**策略：
-- `/mcp` 显示 "Disconnected" 表示当前没有活跃连接
-- 实际使用 MCP 功能时（如调用 `web_search`），服务器会自动启动
-- 使用后会自动关闭以节省资源
-
-**验证方法**:
-```bash
-# 实际使用测试
-agy -p "请用 web_search 查一下今天的日期"
-```
-
----
-
 ## chrome-devtools 专项说明
 
 ### 什么是 chrome-devtools
@@ -310,7 +257,6 @@ serena 的 Java 后端（solidlsp `eclipse_jdtls.py`）把 jdtls 的 `java.confi
   |--------|----------|
   | Claude Code | `--context claude-code --project-from-cwd` |
   | Codex | `--context codex --project-from-cwd` |
-  | Antigravity | `--context antigravity` |
 
 - 命令固定 commit，版本波动通过 `version_lock`（`ref: main`）在 `make bump` 时集中解析写入 `config/version-pins.local.json`。
 - `make init`、`make apply` 和 `./manage.sh mcp:apply` 会复用该固定版本的 Serena 配置加载器，生成或更新 `~/.serena/serena_config.yml`，并把 `project_serena_folder_location` 对齐为 `/tmp/serena$projectDir/.serena`。重复执行只在值变化时保存，并保留其他 Serena 配置；换机后重新运行任一命令即可恢复该策略。
@@ -336,25 +282,7 @@ KEY = "{"nested":"value"}"
 KEY = '{"nested":"value"}'
 ```
 
----
-
-### Q2: Antigravity CLI 配置不生效
-
-**原因**: workspace 配置和全局配置不一致，或仍在维护旧 Gemini CLI 配置路径
-
-**解决**: 检查并更新项目配置：
-```bash
-# 检查是否存在项目配置
-ls -la ./.agents/mcp_config.json
-
-# 如果存在，需要同时更新项目配置
-# 或者删除项目配置使用全局配置
-rm ./.agents/mcp_config.json
-```
-
----
-
-### Q3: MCP 服务器无法启动
+### Q2: MCP 服务器无法启动
 
 **排查步骤**:
 
@@ -376,11 +304,11 @@ rm ./.agents/mcp_config.json
 
 4. **查看 Agent 日志**:
    - Claude Code: 检查对话错误信息
-   - Antigravity CLI: 在 TUI 中打开 `/mcp`
+   - Codex: 检查终端输出或运行 `codex mcp list`
 
 ---
 
-### Q4: 凭证过期/失效
+### Q3: 凭证过期/失效
 
 **症状**: MCP 服务器启动失败，提示认证错误
 
@@ -448,10 +376,6 @@ uvx --from git+https://github.com/GuDaStudio/GrokSearch@<固定commit> grok-sear
 # Claude Code
 # 在对话中询问 MCP 状态
 
-# Antigravity CLI
-agy
-# 在 TUI 中输入 /mcp
-
 # Codex
 codex mcp list
 # 检查 TOML 语法
@@ -473,7 +397,6 @@ PY
 | Agent | 日志位置 |
 |-------|---------|
 | Claude Code | 终端输出 |
-| Antigravity CLI | TUI `/mcp` 面板 |
 | Codex | 终端输出 |
 
 ---
@@ -491,7 +414,7 @@ PY
 4. 替换 ${VAR} 占位符；若真实执行时仍有未解析占位符，则直接失败
    ↓
 5. 根据各 Agent 格式生成配置
-   ├─ JSON 格式 (Claude/Antigravity)
+   ├─ JSON 格式 (Claude Code)
    └─ TOML 格式 (Codex，带字符串转义)
    ↓
 6. 校验现有配置可解析、生成结果合法、且仅删除 _MANAGED_BY=agent-manager 的托管段

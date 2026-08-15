@@ -51,7 +51,7 @@ code-submit：已落地（见下），在审计稿基础上保留了 "including 
 
 1. **同步安装库**：~/.xiaoyu-dev `git pull --ff-only` 追平 origin（3936f25），4 处漂移文件对齐，`diff -rq` 零差异。注意：本次源库新改动需 commit+push 后再 pull 一次才会到达安装库。
 2. **reader-facing-writing 去重**（agent-skills 仓库）：9 处编辑，16060→15150 字节。demote 规则收敛到 L37 单一出处；prose-style/revision-pass/visuals 三个指针段砍半（触发条件保留在 SKILL.md，遵守 README 2026-07-29 实测警示：reference-only 规则不保证生效）；文档集/命名实体/组织逻辑三条长 bullet 删内部复述。离线 23 项契约测试通过；行为评测未跑（改动未触碰 description 与规则本体，触发评测不受影响）。
-3. **xiaoyu-code-submit**（xiaoyu-dev 仓库）：description 843→约 600 字符去压力化；删除 §9 Final self-check（13 项逐一核实在 SKILL.md/其余章节均有原生出处）；同步清理目录行与 SKILL.md:69 引用。`make check` 全部通过。
+3. **xiaoyu-code-submit**（xiaoyu-dev 仓库）：description 843→约 600 字符去压力化；删除 §9 Final self-check（13 项逐一核实在 SKILL.md/其余章节均有原生出处）；同步清理目录行与 SKILL.md:69 引用。该仓库的检查目标全部通过。
 
 ## 第二批执行（2026-08-04，原待办 1–5 全部完成）
 
@@ -64,7 +64,7 @@ code-submit：已落地（见下），在审计稿基础上保留了 "including 
 - **monitoring-gen**：铁律与 Phase 双写收敛、Phase 4 循环替换为 validate.py 无 FAIL 单一判据（保留"不得为全绿删检查项"安全门）（−1.0KB）
 - **playwright-essentials** −33%（三块经验性内容整体保留故未达 50%）；**change-discipline** L26/27 合并+案例每规则一例；**artifact-hygiene** 三连述压缩；**visuals-and-decks** 与 frontend-verification 投影规则收敛
 
-验证：agent-skills 23 项契约测试、xiaoyu-dev make check 均在合并终态全绿；安全门/硬约束抽查（⛔×5、G10、Z7 无残留、monitoring 安全门）通过。
+验证：agent-skills 23 项契约测试、xiaoyu-dev 仓库检查均在合并终态全绿；安全门/硬约束抽查（⛔×5、G10、Z7 无残留、monitoring 安全门）通过。
 
 ## 剩余可选项
 

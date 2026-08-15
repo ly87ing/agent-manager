@@ -337,7 +337,7 @@ Agent Manager 会：
 
 ### 凭证注入位置
 不同Agent的凭�注入位置有所不同：
-- JSON格式 Agents (Claude Code, Antigravity CLI): 在 `env` 对象中
+- JSON 格式的 Claude Code：在 `env` 对象中
 - Codex (TOML): 在 `[mcp_servers.*.env]` 节下
 
 ---

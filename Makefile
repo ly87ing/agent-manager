@@ -1,4 +1,4 @@
-.PHONY: init apply bump update plan agents-apply agents\:apply agents-status agents\:status sys-upgrade sys\:upgrade smoke ui help help-all help\:all doctor status detect fetch-models eval-rules sys-clean sys\:clean state-clean state\:clean sys-unlock sys\:unlock sys-logs sys\:logs sys-clean-logs sys\:clean-logs state-list state\:list state-restore state\:restore rules-build rules\:build rules-apply rules\:apply rules-audit rules\:audit skills-apply skills\:apply skills-bump skills\:bump skill-disable skill\:disable skill-enable skill\:enable skill-list skill\:list mcp-apply mcp\:apply tools-apply tools\:apply browser-apply browser\:apply claude-hooks-apply claude\:hooks\:apply claude-statusline-apply claude\:statusline\:apply claude-statusline-wire claude\:statusline\:wire claude-shell-aliases-apply claude\:shell-aliases\:apply claude-uninstall claude\:uninstall claude-clean claude\:clean codex-hooks-apply codex\:hooks\:apply secrets-check secrets\:check instructions-check instructions\:check
+.PHONY: init apply bump update plan agents-apply agents\:apply agents-status agents\:status sys-upgrade sys\:upgrade smoke ui help help-all help\:all doctor status detect fetch-models eval-rules sys-clean sys\:clean state-clean state\:clean sys-unlock sys\:unlock sys-logs sys\:logs sys-clean-logs sys\:clean-logs state-list state\:list state-restore state\:restore rules-build rules\:build rules-apply rules\:apply rules-audit rules\:audit skills-apply skills\:apply skills-bump skills\:bump skill-disable skill\:disable skill-enable skill\:enable skill-list skill\:list mcp-apply mcp\:apply tools-apply tools\:apply herdr-apply herdr\:apply browser-apply browser\:apply claude-hooks-apply claude\:hooks\:apply claude-statusline-apply claude\:statusline\:apply claude-statusline-wire claude\:statusline\:wire claude-shell-aliases-apply claude\:shell-aliases\:apply claude-uninstall claude\:uninstall claude-clean claude\:clean codex-hooks-apply codex\:hooks\:apply secrets-check secrets\:check instructions-check instructions\:check
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -7,7 +7,7 @@
 init:
 	@./manage.sh init
 
-# apply：把锁定态分发/收敛到本机（rules/skills/mcp/tools/browser/alias）；不刷版本锁、不装 Agent
+# apply：把锁定态分发/收敛到本机（rules/skills/mcp/tools/herdr/browser/alias）；不刷版本锁、不装 Agent
 apply:
 	@./manage.sh apply
 
@@ -63,7 +63,7 @@ sys-clean sys\:clean:
 
 # 删除受管 Agent home 下超过 30 天的 .bak.* 文件
 state-clean state\:clean:
-	@find ~/.claude ~/.codex ~/.gemini -maxdepth 2 -type f -name '*.bak.*' -mtime +30 -print -delete 2>/dev/null || true
+	@find ~/.claude ~/.codex -maxdepth 2 -type f -name '*.bak.*' -mtime +30 -print -delete 2>/dev/null || true
 
 # 强制解除资源锁
 sys-unlock sys\:unlock:
@@ -130,6 +130,9 @@ mcp-apply mcp\:apply:
 
 tools-apply tools\:apply:
 	@./manage.sh tools:apply
+
+herdr-apply herdr\:apply:
+	@./manage.sh herdr:apply
 
 browser-apply browser\:apply:
 	@./manage.sh browser:apply

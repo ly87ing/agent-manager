@@ -1256,7 +1256,7 @@ class AgentIdConsistencyTests(unittest.TestCase):
         skill_targets = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))["agents"]
         mcp_agent_paths = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))["agent_paths"]
 
-        managed_agent_ids = {"claude-code", "antigravity-cli", "codex"}
+        managed_agent_ids = {"claude-code", "codex"}
 
         self.assertEqual(set(manager_agents), managed_agent_ids)
         self.assertEqual(set(lifecycle_agents), managed_agent_ids)
@@ -1269,19 +1269,14 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
         lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
 
-        self.assertEqual(set(manager["agents"]), {"claude-code", "antigravity-cli", "codex"})
-        self.assertEqual(set(lifecycle_agents), {"claude-code", "antigravity-cli", "codex"})
+        self.assertEqual(set(manager["agents"]), {"claude-code", "codex"})
+        self.assertEqual(set(lifecycle_agents), {"claude-code", "codex"})
 
         self.assertTrue(manager["agents"]["claude-code"]["enabled"])
         self.assertTrue(manager["agents"]["claude-code"]["auto_install"])
         self.assertTrue(manager["agents"]["claude-code"]["auto_update"])
         self.assertEqual(manager["agents"]["claude-code"]["preferred_provider"], "npm")
         self.assertEqual(lifecycle_agents["claude-code"]["preferred_provider"], "npm")
-        self.assertTrue(manager["agents"]["antigravity-cli"]["enabled"])
-        self.assertTrue(manager["agents"]["antigravity-cli"]["auto_install"])
-        self.assertFalse(manager["agents"]["antigravity-cli"]["auto_update"])
-        self.assertEqual(manager["agents"]["antigravity-cli"]["preferred_provider"], "native")
-        self.assertEqual(lifecycle_agents["antigravity-cli"]["preferred_provider"], "native")
         self.assertTrue(manager["agents"]["codex"]["enabled"])
         self.assertTrue(manager["agents"]["codex"]["auto_install"])
         self.assertTrue(manager["agents"]["codex"]["auto_update"])
@@ -1289,7 +1284,6 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         self.assertEqual(lifecycle_agents["codex"]["preferred_provider"], "npm")
 
         self.assertTrue(lifecycle_agents["claude-code"]["require_managed_provider"])
-        self.assertTrue(lifecycle_agents["antigravity-cli"]["require_managed_provider"])
         self.assertTrue(lifecycle_agents["codex"]["require_managed_provider"])
 
         claude_native = lifecycle_agents["claude-code"]["providers"]["native"]
@@ -1324,24 +1318,6 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         codex_brew = lifecycle_agents["codex"]["providers"]["brew"]
         self.assertFalse(codex_brew["managed"])
         self.assertEqual(codex_brew["install"], "brew install --cask codex")
-
-        antigravity_native = lifecycle_agents["antigravity-cli"]["providers"]["native"]
-        self.assertTrue(antigravity_native["managed"])
-        self.assertEqual(
-            antigravity_native["install"]["darwin"],
-            "curl -fsSL https://antigravity.google/cli/install.sh | bash",
-        )
-        self.assertEqual(
-            antigravity_native["install"]["linux"],
-            "curl -fsSL https://antigravity.google/cli/install.sh | bash",
-        )
-        self.assertEqual(
-            antigravity_native["install"]["windows"],
-            "curl -fsSL https://antigravity.google/cli/install.cmd -o install.cmd && install.cmd && del install.cmd",
-        )
-        self.assertEqual(antigravity_native["uninstall"]["posix"], "rm -f ~/.local/bin/agy")
-        self.assertEqual(antigravity_native["unsupported_actions"], ["update"])
-        self.assertEqual(antigravity_native["detect_paths"], ["~/.local/bin/agy"])
 
     def test_committed_agent_policy_keeps_native_updater_compatibility(self):
         lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))

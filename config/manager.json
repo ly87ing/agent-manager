@@ -1,7 +1,6 @@
 {
   "agents": {
     "claude-code": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "npm" },
-    "antigravity-cli": { "enabled": true, "auto_install": true, "auto_update": false, "preferred_provider": "native" },
     "codex": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "npm" }
   },
   "tools": {
@@ -9,7 +8,16 @@
   },
   "browser_us_sync": { "enabled": true },
   "skills": {
-    "agent-skills": { "enabled": true }
+    "agent-skills": { "enabled": true },
+    "herdr": { "enabled": true }
+  },
+  "herdr": {
+    "enabled": true,
+    "auto_install": true,
+    "integrations": {
+      "claude-code": { "enabled": true },
+      "codex": { "enabled": true }
+    }
   },
   "mcp": {
     "chrome-devtools": { "enabled": true },

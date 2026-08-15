@@ -1,6 +1,6 @@
 # Agent Manager (Ultimate Edition)
 
-🚀 **AI 助手环境一键管理中枢**。通过单一入口，只对 `Claude Code`、`Codex`、`Antigravity CLI` 做 Agent 生命周期、MCP、skills 和 rules 管理。退役 Agent 的旧路径只保留必要的清理/迁移逻辑，不再作为受管目标维护。
+🚀 **AI 助手环境一键管理中枢**。通过单一入口，只对 `Claude Code` 与 `Codex` 做 Agent 生命周期、MCP、skills 和 rules 管理。退役 Agent 不再保留受管路径或分发逻辑。
 
 ## 核心规范速查表 (Authoritative Spec)
 
@@ -11,7 +11,6 @@
    │ Agent 名称     │ 官方标准路径            │ 文件格式 │ 核心键名    │
    ├────────────────┼─────────────────────────┼──────────┼─────────────┤
    │ Claude Code    │ ~/.claude.json          │ JSON     │ mcpServers  │
-   │ Antigravity CLI │ ~/.gemini/config/mcp_config.json │ JSON │ mcpServers │
    │ Codex          │ ~/.codex/config.toml    │ TOML     │ mcp_servers │
    └────────────────┴─────────────────────────┴──────────┴─────────────┘
 ```
@@ -35,12 +34,18 @@
 
 - `chrome-devtools`（MCP）
   - 由 `make bump` 刷新本机 `config/version-pins.local.json` 中的版本锁；各 Agent 实际运行时只消费固定版本。
-默认受管 skill 仓库当前只有 `agent-skills`；它的仓库、升级策略和初始 commit 保留在 `config/skills.json`，真实运行 commit 由 `config/version-pins.local.json` 的本地锁覆盖，并由 `make bump` 按 `latest-branch` 策略刷新。运行时同步只检出固定 commit，不直接跟随默认分支。`agent-skills` 面向 `Claude Code`、`Antigravity CLI` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 `safe-merge-review`、`change-discipline`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing` 这 5 个 skill 包，避免上游新增 skill 被默认带入。OpenAI 官方仓库当前最新主分支已不再提供 `frontend-skill`，因此默认清单不再引用该路径，避免 `make init` 在刷新上游 commit 时失败。
-默认自动安装的 Agent 当前只包含 `Claude Code`、`Codex` 和 `Antigravity CLI`。
-`Claude Code` 与 `Codex` 默认走官方 npm 包，并使用 `config/agents.json` 中的命令模板加本机版本锁；`Antigravity CLI` 当前默认走官方 native installer。历史 `brew` 安装仅用于识别并提示迁移，不再作为这些 CLI 的受管 provider。
+默认受管 skill 仓库包括 `agent-skills` 与 `herdr`；仓库、升级策略和初始 commit 保留在 `config/skills.json`，真实运行 commit 由 `config/version-pins.local.json` 的本地锁覆盖。运行时同步只检出固定 commit，不直接跟随默认分支或动态 release。`agent-skills` 由 `make bump` 按 `latest-branch` 刷新；`agent-skills` 面向 `Claude Code` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 `safe-merge-review`、`change-discipline`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing` 这 5 个 skill 包。`herdr` 按 `latest-release` 刷新，只向 `Claude Code` 与 `Codex` 暴露官方 `skills/herdr`。两者都不会因为上游新增 skill 而自动扩大安装范围。
+默认自动安装的 Agent 当前只包含 `Claude Code` 与 `Codex`。
+`Claude Code` 与 `Codex` 默认走官方 npm 包，并使用 `config/agents.json` 中的命令模板加本机版本锁。历史 `brew` 安装仅用于识别并提示迁移，不再作为这些 CLI 的受管 provider。
 `Claude Code native` 仍作为兼容 provider 保留官方 install / update / uninstall 语义，但默认不再使用这条动态 updater 路径。
 `Claude Code local install` 不纳入 `agent-manager` lifecycle 托管，因为它依赖 shell alias 暴露入口，当前探测链路不会越权接管。
-以上 lifecycle 口径统一按三个当前受管 Agent 的官方推荐方式维护。`Claude Code` 和 `Codex` 的 npm provider 使用 `config/agents.json` 中的命令模板，并由 `make bump` 刷新本机 `config/version-pins.local.json`（然后由 `make agents:apply` 或 `make init` 负责更新软件）；`Antigravity CLI` 使用官方 `curl -fsSL https://antigravity.google/cli/install.sh | bash` 安装到 `agy`，不由 `agent-manager` 伪造 update 命令。若需要阻止 `agy` 启动后的官方后台自更新，按官方文档在 shell 环境设置 `AGY_CLI_DISABLE_AUTO_UPDATE=true`；`agent-manager` 不改写用户 shell profile。放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer。
+以上 lifecycle 口径统一按两个当前受管 Agent 的官方推荐方式维护。`Claude Code` 和 `Codex` 的 npm provider 使用 `config/agents.json` 中的命令模板，并由 `make bump` 刷新本机 `config/version-pins.local.json`（然后由 `make agents:apply` 或 `make init` 负责更新软件）。`agent-manager` 不改写用户 shell profile。
+
+### Herdr 会话管理
+
+`config/herdr.json` 保存 [Herdr 官方安装器](https://herdr.dev/install.sh)与集成目标，`config/manager.json` 保存默认启用策略。`apply` / `init` 缺少 Herdr CLI 时才调用官方安装器；已有 CLI 不会被静默升级。随后通过 `herdr integration install claude|codex` 幂等收敛官方会话集成，并由状态回读确认版本为 `current`。`agent-manager` 不会自动启动或停止 Herdr 服务，也不改写 Herdr 自身运行参数。
+
+官方 Herdr Skill 固定到已发布 release 的 commit，并继续使用本机当前 Codex 实际读取的 `~/.codex/skills`；Claude Code 使用 `~/.claude/skills`。可单独运行 `make herdr:apply` 收敛 CLI 与集成，再运行 `make skills:apply` 收敛 Skill。已打开的 Agent 进程不会被追溯注入，需从 Herdr 发起新会话后使用。
 
 ## Official CLI Lifecycle Policy
 
@@ -48,24 +53,23 @@
 | :--- | :--- | :--- | :--- | :--- |
 | `Claude Code` | `npm` | `native` | `brew` | 默认使用官方 npm 包固定版本；native installer 仅作为兼容 provider 保留。 |
 | `Codex` | `npm` | - | `brew` | 使用官方 npm 包；安装和升级命令固定到 `config/agents.json` 的版本锁，历史 brew 安装只用于审计和迁移提示。 |
-| `Antigravity CLI` | `native` | - | - | 使用官方 installer 安装 `agy`；无显式受管 update。确定二进制运行版本依赖官方 `AGY_CLI_DISABLE_AUTO_UPDATE=true` 环境变量。 |
 
 ## Agent 安装源依据 (Official Channels Catalog)
 
-下表列出上游公开安装渠道，但不等于 `agent-manager` 会默认或继续托管这些渠道；对 `Claude Code`、`Codex`、`Antigravity CLI` 的实际受管策略以上一节为准。
+下表列出上游公开安装渠道，但不等于 `agent-manager` 会默认或继续托管这些渠道；对 `Claude Code` 与 `Codex` 的实际受管策略以上一节为准。
 
 | 助手名称 | 二进制标识 | 官方 npm / 安装器 | Homebrew 官方源 (macOS) | 备注 |
 | :--- | :--- | :--- | :--- | :--- |
 | **Claude Code** | `claude` | `@anthropic-ai/claude-code` / 官方 native installer | `cask: claude-code` | 受管 lifecycle 默认走 npm 固定版本；`brew` 仅保留 detect-only 语义。 |
 | **Codex** | `codex` | `@openai/codex` | `cask: codex` | 受管 lifecycle 默认走 npm。 |
-| **Antigravity CLI** | `agy` | 官方 native installer | - | 受管 lifecycle 默认走 `https://antigravity.google/cli/install.sh`。 |
 
 ## 核心健全性特性
 
 ### 1. 策略与定义分离 (Policy vs. Definition)
 - **仓库基线 (`manager.json`)**：保存可审计的默认策略。
 - **本地覆盖 (`manager.local.json`)**：运行时与 `manager.json` 深度合并；`make ui` 只写这一层，适合机器本地偏好与私有配置。
-- **版本锁 (`version_lock`) / skill commit**：`config/agents.json`、`config/tools.json`、`config/mcp.json` 与 `config/skills.json` 保存命令模板、包名、仓库和升级策略；`make bump` 查询 npm / Git ref / skill 仓库分支的最新版本并写入本机 `config/version-pins.local.json`。同步到 Codex / Claude Code / Antigravity CLI 的实际运行配置会先套用本地 lock，不得使用 `@latest`、分支名或未固定的 skill 仓库。
+- **版本锁 (`version_lock`) / skill commit**：`config/agents.json`、`config/tools.json`、`config/mcp.json` 与 `config/skills.json` 保存命令模板、包名、仓库和升级策略；`make bump` 查询 npm / Git ref / skill 仓库分支的最新版本并写入本机 `config/version-pins.local.json`。同步到 Codex / Claude Code 的实际运行配置会先套用本地 lock，不得使用 `@latest`、分支名或未固定的 skill 仓库。
+- **Herdr 默认策略**：`herdr.enabled`、`herdr.auto_install` 与 `herdr.integrations` 控制 CLI 缺失安装和 Claude Code / Codex 官方集成；禁用策略不会擅自卸载用户已有集成。
 - **浏览器前置开关**：`browser_us_sync.enabled` 控制 `apply` / `init` / `browser:apply` 是否执行浏览器 Google US 前置同步。
 - **模块化定义 (`agents.json`等)**：保存官方指令细节，支持 Policy 的强制覆盖。
 
@@ -78,7 +82,7 @@
 - **物理路径穿透**：即使包管理器未记录，探测器也能通过精准的 `PATH` 扫描与 `.app` 目录兜底识别出系统已有的残留环境，从而达成 10 倍以上的性能提升。
 
 ### 4. 环境自愈与清理
-- **一键大扫除 (Cleanup)**：精准回收受管备份、碎片及冗余日志；覆盖当前受管目标和历史 Gemini 临时 JSON 备份。
+- **一键大扫除 (Cleanup)**：精准回收受管备份、碎片及冗余日志，仅覆盖当前声明的 Claude Code 与 Codex 目标。
 - **失效洗刷 (Scrubbing)**：自动清理 Agent 目录中的死亡软链。
 
 ### 5. 安全默认值
@@ -90,7 +94,7 @@
 - **可编辑源码**：跨 Agent 的共享规则片段只维护在 `agent-rule/rules/src/`，这是仓库内唯一可编辑的 rule source。
 - **共享 core 职责**：`agent-rule/rules/src/shared/core.md` 只放所有 Agent 都应始终生效的短规则；这里优先约束“非平凡或有歧义任务先显式说明假设、优先最简单本地改动、保持 surgical edits、按 verification point 推进”。
 - **生成产物**：面向各 Agent 实际分发的规则文件只维护在 `agent-rule/rules/dist/`，由构建脚本生成；仓库内不再保留第二套 `rules/global/*` source tree。
-- **按 Agent 原生格式分发**：Codex 生成 `AGENTS.md`，Claude 生成 `CLAUDE.md`，Antigravity 生成 `agent-manager` plugin 下的 rules 文件。
+- **按 Agent 原生格式分发**：Codex 生成 `AGENTS.md`，Claude 生成 `CLAUDE.md`。
 - **低频专题进 skill**：原 `architecture`、`style`、`frontend`、`artifact-hygiene`、`writing` 等低频专题细节不再通过 `modules/` 分发，而是在 `agent-skills` 中维护为 `change-discipline`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing`。
 - **分层原则**：always-on 规则只保留触发条件、协作边界和最小行为约束；执行步骤、检查清单、失败边界和验证细节进入 skill；Agent 私有差异只放 `agent-rule/rules/src/agents/*/adapter.md`，不要把这些内容回灌进 shared core。
 - **迁移清理**：原生分发会清理旧的 `~/.<agent>/rules/global.md` 和旧 `rules/modules` 残留，避免新旧入口并存。
@@ -111,7 +115,7 @@
 
 - `./manage.sh`: 显示帮助（只列日常入口 + 进阶原语）；这是脚本的安全默认入口。完整命令清单执行 `./manage.sh help:all` 或 `make help:all`。
 - `make update`: 日常最常用。把本机更新并收敛到最新（= `bump` + `apply`，secrets 只拉一次）；不安装缺失 Agent。
-- `make apply`: 把当前锁定态分发/收敛到本机（rules 构建分发、skills 链接、mcp 注入、tools、browser、shell alias、secrets 拉取）；不刷新版本锁、不安装 Agent。
+- `make apply`: 把当前锁定态分发/收敛到本机（rules 构建分发、skills 链接、mcp 注入、tools、Herdr、browser、shell alias、secrets 拉取）；不刷新版本锁、不安装 Agent。
 
 - `make bump`: 纯粹刷新版本锁与 skill commit（更新元数据到锁定文件），不执行本地环境应用。
 - `make agents:apply`: 按 `config/version-pins.local.json` 里的**当前版本锁**升级/修复本地已安装 Agent，不强制安装缺失 Agent。它自身**不刷新版本锁**，所以锁没变时通常是幂等空转；要升到上游最新，先跑 `make bump`（或 `make update`）刷锁再跑本命令，或直接用 `make init` 一步到位。
@@ -125,6 +129,7 @@
 - `make doctor` / `make status`: 执行全系统深度体检，并把 warning 细分为 `可选工具未就绪` 与 `托管产物尚未生成` 两类提示项；同时扫描主仓库中是否存在疑似明文敏感信息。追加 `--json` 可输出机器可读诊断报告。
 - `make rules-build`: 从 `agent-rule/rules/src/` 生成 `agent-rule/rules/dist/` 下的可分发规则产物。
 - `make rules:apply`: 将 `agent-rule/rules/dist/` 中的规则产物分发到各 Agent 原生入口。
+- `make herdr:apply`: 缺失时安装 Herdr CLI，并幂等收敛 Claude Code / Codex 官方会话集成；不自动升级已有 CLI，不启动服务。
 - `make codex:hooks:apply`: 刷新仓库级 `.codex/hooks.json`。
 - `make fetch-models`: 探测并获取 API 端点支持的模型列表 (支持 OpenAI / Anthropic 格式)。
 - `make state:restore`: 交互式回滚历史快照。

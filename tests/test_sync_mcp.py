@@ -44,7 +44,7 @@ class SyncMcpTests(unittest.TestCase):
         definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
         self.assertEqual(
             set(definitions["agent_paths"].keys()),
-            {"claude-code", "antigravity-cli", "codex"},
+            {"claude-code", "codex"},
         )
 
     def test_committed_mcp_policy_enables_chrome_devtools_fixed_version(self):
@@ -117,7 +117,6 @@ class SyncMcpTests(unittest.TestCase):
             {
                 "claude-code": ["--context", "claude-code", "--project-from-cwd"],
                 "codex": ["--context", "codex", "--project-from-cwd"],
-                "antigravity-cli": ["--context", "antigravity"],
             },
         )
         self.assertNotIn("ide-assistant", json.dumps(serena))
@@ -375,13 +374,11 @@ class SyncMcpTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             claude_path = temp_root / "claude.json"
-            antigravity_path = temp_root / "antigravity.json"
             codex_path = temp_root / "config.toml"
 
             ok = sync_mcp.manage_mcp_config(
                 {
                     "claude-code": str(claude_path),
-                    "antigravity-cli": str(antigravity_path),
                     "codex": {"path": str(codex_path), "format": "toml"},
                 },
                 {"serena": serena},
@@ -391,9 +388,6 @@ class SyncMcpTests(unittest.TestCase):
             claude_args = json.loads(claude_path.read_text(encoding="utf-8"))[
                 "mcpServers"
             ]["serena"]["args"]
-            antigravity_args = json.loads(
-                antigravity_path.read_text(encoding="utf-8")
-            )["mcpServers"]["serena"]["args"]
             codex_args = tomllib.loads(codex_path.read_text(encoding="utf-8"))[
                 "mcp_servers"
             ]["serena"]["args"]
@@ -406,8 +400,6 @@ class SyncMcpTests(unittest.TestCase):
                 codex_args[-3:],
                 ["--context", "codex", "--project-from-cwd"],
             )
-            self.assertEqual(antigravity_args[-2:], ["--context", "antigravity"])
-            self.assertNotIn("--project-from-cwd", antigravity_args)
 
     def test_invalid_agent_specific_args_preserve_existing_managed_entry(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -446,14 +438,14 @@ class SyncMcpTests(unittest.TestCase):
                 "\n".join(captured.output),
             )
 
-    def test_antigravity_json_uses_standard_mcp_server_shape(self):
+    def test_claude_json_uses_standard_mcp_server_shape(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
-            antigravity_config_path = temp_root / "mcp_config.json"
+            claude_config_path = temp_root / "claude.json"
 
             with mock.patch.object(sync_mcp, "is_agent_installed", return_value=True):
                 ok = sync_mcp.manage_mcp_config(
-                    {"antigravity-cli": {"path": str(antigravity_config_path), "format": "json"}},
+                    {"claude-code": {"path": str(claude_config_path), "format": "json"}},
                     {
                         "augment-context-engine": {
                             "enabled": True,
@@ -464,11 +456,11 @@ class SyncMcpTests(unittest.TestCase):
                             "env": {"AUGMENT_SESSION_AUTH": "token"},
                         }
                     },
-                    agent_defs={"antigravity-cli": {"bin": "agy"}},
+                    agent_defs={"claude-code": {"bin": "claude"}},
                 )
 
             self.assertTrue(ok)
-            updated = json.loads(antigravity_config_path.read_text(encoding="utf-8"))
+            updated = json.loads(claude_config_path.read_text(encoding="utf-8"))
             self.assertEqual(
                 updated["mcpServers"]["augment-context-engine"]["command"],
                 "auggie",
@@ -1696,7 +1688,7 @@ class JsonWriteFailureIsolationTests(unittest.TestCase):
             second = Path(tmp) / "second.json"
             first.write_text("{}", encoding="utf-8")
             second.write_text("{}", encoding="utf-8")
-            targets = {"claude-code": str(first), "antigravity-cli": str(second)}
+            targets = {"claude-code": str(first), "codex": str(second)}
             servers = {"demo": {"command": "demo", "args": [], "enabled": True}}
             written = []
 

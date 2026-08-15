@@ -15,14 +15,25 @@
       "skill_count": 5,
       "agents": [
         "claude-code",
-        "antigravity-cli",
+        "codex"
+      ]
+    },
+    "herdr": {
+      "url": "https://github.com/herdrdev/herdr.git",
+      "commit": "346411fa21afd297f5ed3b3fa56f9e3fbf7654b7",
+      "upgrade_strategy": "latest-release",
+      "skill_paths": [
+        "skills/herdr"
+      ],
+      "skill_count": 1,
+      "agents": [
+        "claude-code",
         "codex"
       ]
     }
   },
   "agents": {
     "claude-code": "~/.claude/skills",
-    "antigravity-cli": "~/.gemini/antigravity-cli/plugins/agent-manager/skills",
     "codex": "~/.codex/skills"
   }
 }

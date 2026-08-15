@@ -9,11 +9,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = ROOT / "rules" / "src"
 DIST_ROOT = ROOT / "rules" / "dist"
-TARGETS = ("codex", "claude", "antigravity")
+TARGETS = ("codex", "claude")
 TARGET_SPECS = {
     "codex": {"adapter": "codex", "filename": "AGENTS.md"},
     "claude": {"adapter": "claude", "filename": "CLAUDE.md"},
-    "antigravity": {"adapter": "antigravity", "filename": "rules/agent-manager.md"},
 }
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
@@ -50,18 +49,11 @@ def build_target_file(target: str) -> None:
     output_path.write_text(content, encoding="utf-8")
 
 
-def write_antigravity_plugin_manifest() -> None:
-    plugin_path = DIST_ROOT / "antigravity" / "plugin.json"
-    plugin_path.parent.mkdir(parents=True, exist_ok=True)
-    plugin_path.write_text('{\n  "name": "agent-manager"\n}\n', encoding="utf-8")
-
-
 def main() -> int:
     reset_directory(DIST_ROOT)
     write_dist_gitkeep()
     for target in TARGETS:
         build_target_file(target)
-    write_antigravity_plugin_manifest()
     return 0
 
 

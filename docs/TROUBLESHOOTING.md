@@ -89,7 +89,6 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
    - 解决：确保对应的包管理器已安装和可用
      - 对于 `Claude Code` 官方 native provider：确认 `curl`、`bash` 和官方安装目录在 PATH 中
      - 对于 `Codex` 的 npm provider：`npm config get prefix` 应返回可写目录
-     - 对于 `Antigravity CLI` 的 native provider：确认 `curl`、`bash` 和 `~/.local/bin` 在 PATH 中
      - 对于 gh provider：`gh auth status` 检查 GitHub 认证
 
 2. **网络或权限问题**
@@ -116,36 +115,30 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 **症状**：`doctor` 报告 `已弃用安装来源`，或 `update` / `bootstrap` 直接失败
 
 #### 处理建议：
-处理原则：当前只维护 `Claude Code`、`Codex` 和 `Antigravity CLI`。放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer；`Claude Code` 和 `Codex` 的 `npm` 固定版本、`Antigravity CLI` 的官方 native installer 是当前合规默认路径。
+处理原则：当前只维护 `Claude Code` 和 `Codex`，默认均使用 npm 固定版本；native provider 仅作为显式选择保留。
 
 1. `Claude Code`
    - 手工卸载 brew 版本，再让 `agent-manager` 走官方 npm 包固定版本
    - 如果当前已经是 native 版并希望回到默认固定版本路径，先按官方方式清理 native 安装，再执行 `./manage.sh init`
 2. `Codex`
    - 手工卸载 brew 版本，再执行 `npm install -g @openai/codex`
-3. `Antigravity CLI`
-   - 不再托管旧 Gemini CLI 的 npm/brew 来源；如需 Antigravity CLI，执行 `curl -fsSL https://antigravity.google/cli/install.sh | bash`
-   - 如需阻止 `agy` 启动后触发官方后台自更新，按官方文档在 shell 环境设置 `AGY_CLI_DISABLE_AUTO_UPDATE=true`
 
 ### 问题：检测到外部安装但未纳入托管
 **症状**：`doctor` 报告 `检测到外部安装，未纳入 agent-manager 托管`
 
 #### 处理建议：
-1. 确认当前 PATH 中的 `claude` / `codex` / `agy` 是否来自官方受管来源
+1. 确认当前 PATH 中的 `claude` / `codex` 是否来自官方受管来源
 2. 清理系统残留或自定义包装脚本，再重新执行 `./manage.sh doctor`
 3. 若希望继续由 `agent-manager` 管理，请回到官方受管 provider：
    - `Claude Code`：官方 npm 包 `@anthropic-ai/claude-code`
    - `Codex`：官方 npm 包 `@openai/codex`
-   - `Antigravity CLI`：官方 native installer 安装的 `agy`
 
 ### 问题：检测到官方生命周期动作缺口
 **症状**：`doctor` 报告 `官方生命周期动作缺口`，或某个 Agent 条目提示 `官方当前未提供受管 uninstall 动作`
 
 #### 处理建议：
 1. 这表示某个 provider 存在官方动作缺口，不是本地配置漏写；`agent-manager` 会保持 fail-close。
-2. 当前默认 provider 必须明确声明生命周期动作边界；`Antigravity CLI` 没有显式受管 update 命令，因此默认关闭 `auto_update` 并依赖 CLI 自更新。
-3. 对 `Antigravity CLI`，agent-manager 不替换官方 installer 或写 shell profile；确定运行二进制版本应使用官方支持的 `AGY_CLI_DISABLE_AUTO_UPDATE=true`。
-3. 如需停用存在动作缺口的 provider，请先按官方流程自行卸载，再重新运行 `./manage.sh doctor` 确认状态；`agent-manager` 不会伪造删除命令。
+2. 如需停用存在动作缺口的 provider，请先按官方流程自行卸载，再重新运行 `./manage.sh doctor` 确认状态；`agent-manager` 不会伪造删除命令。
 
 ### 问题：Rules 修改后没有分发到目标 Agent
 **症状**：已经修改 `agent-rule/rules/src/`，但目标 Agent 目录里的规则仍然是旧内容
@@ -174,7 +167,6 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
      ```bash
      claude --version    # Claude Code
      codex --version     # Codex
-     agy --version       # Antigravity CLI
      ```
    - 解决：参考官方文档升级到兼容版本
 
@@ -218,7 +210,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
    - 检查：参考 MCP-CONFIG-GUIDE.md 中的格式对比表验证配置
    - 常见错误：
      * Codex：TOML 中 JSON 字符串未用单引号包裹
-     * Claude Code / Antigravity CLI：根键应为 `mcpServers`，环境变量键应为 `env`
+     * Claude Code：根键应为 `mcpServers`，环境变量键应为 `env`
    - 解决：根据具体 Agent 类型修正配置格式
 
 2. **凭证未正确注入**
@@ -226,10 +218,10 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
      ```bash
      # 检查 secrets 是否存在并包含所需值
      ls -la secrets/
-     cat secrets/mcp.env  # 注意：这会显示凭证！
+     test -s secrets/mcp.env && echo "凭证文件存在且非空"
      
      # 检查占位符是否被正确替换
-     grep -r "GROK_API_KEY" ~/.claude.json ~/.gemini/config/mcp_config.json ~/.codex/config.toml
+     grep -r "GROK_API_KEY" ~/.claude.json ~/.codex/config.toml
      ```
    - 解决：
      * 确保 secrets/ 目录存在并为有效的 Git 仓库
@@ -415,7 +407,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 
 3. **权限问题**
    - 检查：尝试操作的目录是否可写
-   - 解决：确保对所有目标目录（如 ~/.claude/, ~/.gemini/ 等）有写入权限
+   - 解决：确保对所有目标目录（如 `~/.claude/`、`~/.codex/`）有写入权限
 
 4. **依赖冲突或缺失**
    - 检查：查看具体组件的错误日志寻找依赖相关错误
@@ -541,7 +533,7 @@ done
 ### 验证符号链接完整性
 ```bash
 # 检查所有技能链接是否有效
-find ~/.claude/skills ~/.gemini/antigravity-cli/plugins/agent-manager/skills ~/.codex/skills -type l 2>/dev/null | while read link; do
+find ~/.claude/skills ~/.codex/skills -type l 2>/dev/null | while read link; do
   if [ -e "$link" ]; then
     echo "OK: $link -> $(readlink $link)"
   else
@@ -560,9 +552,8 @@ done
 
 ```bash
 # 1. 停止所有正在运行的 Agent 实例
-# 2. 删除管理的配置和链接
-rm -rf ~/.claude.json ~/.gemini/config/mcp_config.json ~/.codex/config.toml
-rm -rf ~/.claude/skills/* ~/.gemini/antigravity-cli/plugins/agent-manager/skills/* ~/.codex/skills/*
+# 2. 只清理 agent-manager 能识别的受管状态
+./manage.sh sys:clean
 
 # 3. 重新从 Agent Manager 同步
 ./manage.sh init
@@ -579,7 +570,7 @@ rm -rf ~/.claude/skills/* ~/.gemini/antigravity-cli/plugins/agent-manager/skills
 # 1. 停止所有 Agent 实例
 # 2. 恢复配置
 cp -r ~/agent-manager-backup/claude.json ~/.claude.json
-cp -r ~/agent-manager-backup/antigravity/mcp_config.json ~/.gemini/config/mcp_config.json
+cp -r ~/agent-manager-backup/codex/config.toml ~/.codex/config.toml
 # ... 依次恢复所有配置
 # 3. 恢复技能链接（如果备份了）
 cp -r ~/agent-manager-backup/claude/skills/* ~/.claude/skills/
@@ -619,7 +610,6 @@ cp -r ~/agent-manager-backup/claude/skills/* ~/.claude/skills/
 | 错误消息 | 可能原因 | 解决方案 |
 |----------|----------|----------|
 | `Unexpected key or value` (Codex) | TOML 格式错误，通常是 JSON 字符串未正确转义 | 使用单引号包裹包含双引号的值：`KEY = '{"json":"value"}'` |
-| `Disconnected` (Antigravity CLI) | 通常是正常的按需启动行为 | 实际使用 MCP 功能时服务器会自动启动；使用 `/mcp` 检查 |
 | `Command not found: uvx` / `npx` | MCP 启动命令依赖的运行时未安装或不在 PATH 中 | 安装 `uv`（提供 `uvx`）或 Node.js（提供 `npx`），再重跑 `make apply` |
 | `Authentication failed` | 凭证无效或过期 | 更新 secrets/mcp.env 中的凭证并重新同步 |
 

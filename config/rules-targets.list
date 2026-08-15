@@ -1,5 +1,3 @@
 # name|group|source|target
 codex_global|global|rules/dist/codex/AGENTS.md|~/.codex/AGENTS.md
 claude_global|global|rules/dist/claude/CLAUDE.md|~/.claude/CLAUDE.md
-antigravity_plugin|global|rules/dist/antigravity/plugin.json|~/.gemini/antigravity-cli/plugins/agent-manager/plugin.json
-antigravity_rules|global|rules/dist/antigravity/rules|~/.gemini/antigravity-cli/plugins/agent-manager/rules

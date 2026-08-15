@@ -3488,7 +3488,7 @@ class ManageScriptTests(unittest.TestCase):
             os.utime(newer_backup, (1710936000, 1710936000))
 
             (temp_root / "config" / "mcp.json").write_text(
-                '{\n  "agent_paths": {\n    "claude-code": "%s",\n    "antigravity-cli": "%s"\n  },\n  "servers": {}\n}\n'
+                '{\n  "agent_paths": {\n    "claude-code": "%s",\n    "codex": "%s"\n  },\n  "servers": {}\n}\n'
                 % (older_target, newer_target),
                 encoding="utf-8",
             )
@@ -3643,15 +3643,8 @@ class ManageScriptTests(unittest.TestCase):
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             temp_home.mkdir()
 
-            rule_target = temp_home / ".gemini" / "antigravity-cli" / "plugins" / "agent-manager" / "rules"
-            rule_backup = (
-                temp_home
-                / ".gemini"
-                / "antigravity-cli"
-                / "plugins"
-                / "agent-manager"
-                / "rules.bak.20260318"
-            )
+            rule_target = temp_home / ".managed-agent" / "rules"
+            rule_backup = temp_home / ".managed-agent" / "rules.bak.20260318"
             rule_backup.mkdir(parents=True)
             (rule_backup / "agent-manager.md").write_text("# backup\n", encoding="utf-8")
 
@@ -3664,7 +3657,7 @@ class ManageScriptTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (temp_root / "config" / "rules-targets.list").write_text(
-                "antigravity_rules|global|rules/dist/antigravity/rules|%s\n" % rule_target,
+                "managed_rules|global|rules/dist/codex|%s\n" % rule_target,
                 encoding="utf-8",
             )
 
@@ -3696,7 +3689,6 @@ class ManageScriptTests(unittest.TestCase):
             legacy_backups = [
                 temp_home / ".codex" / "rules" / "global.md.bak.20260329",
                 temp_home / ".claude" / "rules" / "modules.bak.20260329",
-                temp_home / ".gemini" / "rules" / "global.md.bak.20260329",
             ]
             for backup in legacy_backups:
                 backup.parent.mkdir(parents=True, exist_ok=True)
@@ -3716,37 +3708,6 @@ class ManageScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             for backup in legacy_backups:
                 self.assertFalse(backup.exists(), result.stdout + result.stderr)
-
-    def test_sys_clean_removes_gemini_invalid_json_tmp_backups(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            temp_home.mkdir()
-
-            invalid_backup = (
-                temp_home
-                / ".gemini"
-                / "tmp"
-                / "session"
-                / "logs.json.invalid_json.1766550378705.bak"
-            )
-            invalid_backup.parent.mkdir(parents=True)
-            invalid_backup.write_text("{invalid\n", encoding="utf-8")
-
-            env = self._managed_env()
-            env["HOME"] = str(temp_home)
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "sys:clean"],
-                cwd=temp_root,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertFalse(invalid_backup.exists(), result.stdout + result.stderr)
 
     def test_sys_clean_dry_run_preserves_managed_artifacts(self):
         with tempfile.TemporaryDirectory() as temp_dir:

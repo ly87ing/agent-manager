@@ -62,10 +62,6 @@
           "--context",
           "codex",
           "--project-from-cwd"
-        ],
-        "antigravity-cli": [
-          "--context",
-          "antigravity"
         ]
       },
       "startup_timeout_sec": 120,
@@ -84,7 +80,6 @@
   },
   "agent_paths": {
     "claude-code": "~/.claude.json",
-    "antigravity-cli": "~/.gemini/config/mcp_config.json",
     "codex": { "path": "~/.codex/config.toml", "format": "toml" }
   }
 }

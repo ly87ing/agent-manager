@@ -191,7 +191,6 @@ TOOL_BROKEN_MARKER = ".agent-manager-broken"
 SERENA_MIN_NODE_MAJOR = 18
 RULE_TARGET_PREFIX_TO_ID = {
     "claude": "claude-code",
-    "antigravity": "antigravity-cli",
     "codex": "codex",
 }
 ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")

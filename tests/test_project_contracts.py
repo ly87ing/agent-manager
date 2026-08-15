@@ -57,6 +57,7 @@ class ProjectContractTests(unittest.TestCase):
         for excluded in (
             "run_agent_lifecycle_task",
             "run_tools_sync_task",
+            "run_herdr_sync_task",
             "run_browser_us_sync_task",
             "run_shell_aliases_sync_task",
             "run_rules_sync_task",
@@ -124,6 +125,7 @@ class ProjectContractTests(unittest.TestCase):
                 "skills:bump",
                 "mcp:apply",
                 "tools:apply",
+                "herdr:apply",
                 "browser:apply",
                 "help:all",
             ):
@@ -150,6 +152,7 @@ class ProjectContractTests(unittest.TestCase):
                     "skills:bump",
                     "mcp:apply",
                     "tools:apply",
+                    "herdr:apply",
                     "browser:apply",
                     "help:all",
                 ],
@@ -201,6 +204,7 @@ class ProjectContractTests(unittest.TestCase):
         for rel_path in (
             "agent-lifecycle/sync_agents.py",
             "agent-tool/sync_tools.py",
+            "agent-herdr/sync_herdr.py",
             "agent-skill/link_skills.py",
             "agent-mcp/sync_mcp.py",
         ):
@@ -259,7 +263,6 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("agent-rule/rules/dist/", readme)
         self.assertIn("make rules-build", readme)
         self.assertIn("AGENTS.md", readme)
-        self.assertIn("agent-manager` plugin", readme)
         self.assertIn("CLAUDE.md", readme)
 
     def test_readme_documents_shared_rule_design_principles(self):
@@ -305,25 +308,19 @@ class ProjectContractTests(unittest.TestCase):
 
     def test_readme_documents_official_cli_lifecycle_policy(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("按三个当前受管 Agent 的官方推荐方式维护", readme)
-        self.assertIn("`Claude Code`、`Codex`、`Antigravity CLI`", readme)
+        self.assertIn("按两个当前受管 Agent 的官方推荐方式维护", readme)
         self.assertIn("仅用于识别并提示迁移", readme)
-        self.assertIn("默认自动安装的 Agent 当前只包含 `Claude Code`、`Codex` 和 `Antigravity CLI`", readme)
+        self.assertIn("默认自动安装的 Agent 当前只包含 `Claude Code` 与 `Codex`", readme)
         self.assertIn("`Claude Code` 与 `Codex` 默认走官方 npm 包，并使用 `config/agents.json` 中的命令模板加本机版本锁", readme)
         self.assertIn("`Claude Code native` 仍作为兼容 provider 保留官方 install / update / uninstall 语义", readme)
         self.assertIn("`Claude Code` 和 `Codex` 的 npm provider 使用 `config/agents.json` 中的命令模板", readme)
-        self.assertIn("`Antigravity CLI` 使用官方 `curl -fsSL https://antigravity.google/cli/install.sh | bash` 安装到 `agy`", readme)
-        self.assertIn("`AGY_CLI_DISABLE_AUTO_UPDATE=true`", readme)
         self.assertIn("`agent-manager` 不改写用户 shell profile", readme)
-        self.assertIn("不由 `agent-manager` 伪造 update 命令", readme)
         self.assertIn("`Claude Code local install` 不纳入 `agent-manager` lifecycle 托管", readme)
-        self.assertIn("放弃 `brew` 或不用 `brew` 不等于所有 agent 都必须 native installer", readme)
 
     def test_readme_documents_current_agent_scope(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("只对 `Claude Code`、`Codex`、`Antigravity CLI` 做 Agent 生命周期、MCP、skills 和 rules 管理", readme)
+        self.assertIn("只对 `Claude Code` 与 `Codex` 做 Agent 生命周期、MCP、skills 和 rules 管理", readme)
         self.assertIn("│ Claude Code", readme)
-        self.assertIn("│ Antigravity CLI", readme)
         self.assertIn("│ Codex", readme)
 
     def test_troubleshooting_documents_official_lifecycle_gap_guidance(self):
@@ -334,7 +331,6 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("官方生命周期动作缺口", section)
         self.assertIn("官方当前未提供受管 uninstall 动作", section)
         self.assertIn("fail-close", section)
-        self.assertIn("`Antigravity CLI` 没有显式受管 update 命令", section)
         self.assertIn("不会伪造删除命令", section)
 
     def test_readme_documents_agent_skills_scope_matches_config(self):
@@ -342,10 +338,18 @@ class ProjectContractTests(unittest.TestCase):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
         agent_skills = skills_config["repositories"]["agent-skills"]
 
-        self.assertIn("`agent-skills` 面向 `Claude Code`、`Antigravity CLI` 与 `Codex` 暴露", readme)
+        self.assertIn("`agent-skills` 面向 `Claude Code` 与 `Codex` 暴露", readme)
         for skill_path in agent_skills["skill_paths"]:
             self.assertIn(f"`{skill_path}`", readme)
         self.assertIn(f"这 {agent_skills['skill_count']} 个 skill 包", readme)
+
+    def test_readme_documents_herdr_default_management(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("config/herdr.json", readme)
+        self.assertIn("make herdr:apply", readme)
+        self.assertIn("`Claude Code` 与 `Codex`", readme)
+        self.assertIn("不会自动启动或停止 Herdr 服务", readme)
 
     def test_readme_documents_isolated_chrome_devtools_mcp(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -445,7 +449,6 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("{{REPO_ROOT}}", architecture)
         self.assertIn("dist/codex/AGENTS.md", architecture)
         self.assertIn("dist/claude/CLAUDE.md", architecture)
-        self.assertIn("dist/antigravity/rules/agent-manager.md", architecture)
 
     def test_architecture_documents_instruction_quality_regression_target(self):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
@@ -466,8 +469,8 @@ class ProjectContractTests(unittest.TestCase):
 
     def test_architecture_documents_current_agent_scope(self):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
-        self.assertIn("只对 `Claude Code`、`Codex`、`Antigravity CLI` 做 Agent 生命周期、MCP、skills 和 rules 管理", architecture)
-        self.assertIn("当前默认受管目标只包含 `Claude Code`、`Codex` 和 `Antigravity CLI`", architecture)
+        self.assertIn("只对 `Claude Code` 与 `Codex` 做 Agent 生命周期、MCP、skills 和 rules 管理", architecture)
+        self.assertIn("当前默认受管目标只包含 `Claude Code` 与 `Codex`", architecture)
         self.assertIn("如需启用某类能力，再声明对应的 MCP / skills / rules target path", architecture)
         self.assertNotIn("新增 Agent 时必须同时声明 MCP / skills / rules 三类 target path", architecture)
 

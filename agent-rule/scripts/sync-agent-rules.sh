@@ -44,10 +44,6 @@ agent_installed_for_target() {
   case "$expanded" in
     "$HOME"/.claude/*|"$HOME"/.claude)
       command -v claude >/dev/null 2>&1 ;;
-    "$HOME"/.gemini/antigravity-cli/*|"$HOME"/.gemini/antigravity-cli)
-      command -v agy >/dev/null 2>&1 ;;
-    "$HOME"/.gemini/*|"$HOME"/.gemini)
-      command -v gemini >/dev/null 2>&1 ;;
     "$HOME"/.codex/*|"$HOME"/.codex)
       # codex has no standard bin, so check whether the config directory exists
       [ -d "$HOME/.codex" ] ;;
@@ -155,20 +151,6 @@ cleanup_legacy_target_paths() {
     claude_global)
       legacy_paths=("$HOME/.claude/rules/global.md" "$HOME/.claude/rules/modules")
       ;;
-    antigravity_rules)
-      # The first four are Gemini-CLI-era paths. The fifth is the leftover this
-      # tool made itself: the module tree stopped being built in 35bfe9b, but the
-      # copies already distributed next to the plugin's `rules/` were never in any
-      # cleanup list, so they outlived the layout by months. It is derived from the
-      # target rather than hardcoded so a plugin-path change carries it along.
-      legacy_paths=(
-        "$HOME/.gemini/GEMINI.md"
-        "$HOME/.gemini/rules/global.md"
-        "$HOME/.gemini/modules"
-        "$HOME/.gemini/rules/modules"
-        "$(dirname "$dst_abs")/modules"
-      )
-      ;;
   esac
 
   for legacy_path in "${legacy_paths[@]}"; do
@@ -211,7 +193,7 @@ is_ephemeral_artifact() {
 is_repo_native_target() {
   local target="$1"
   case "$target" in
-    "$workspace_root"/.github/*|"$workspace_root"/AGENTS.md|"$workspace_root"/CLAUDE.md|"$workspace_root"/GEMINI.md)
+    "$workspace_root"/.github/*|"$workspace_root"/AGENTS.md|"$workspace_root"/CLAUDE.md)
       return 0
       ;;
     *)

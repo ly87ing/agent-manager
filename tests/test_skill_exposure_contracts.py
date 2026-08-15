@@ -30,7 +30,8 @@ class SkillExposureContractTests(unittest.TestCase):
     def test_repository_agent_scopes_stay_intentional(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
         expected_scopes = {
-            "agent-skills": ["claude-code", "antigravity-cli", "codex"],
+            "agent-skills": ["claude-code", "codex"],
+            "herdr": ["claude-code", "codex"],
         }
 
         actual_scopes = {
@@ -39,6 +40,15 @@ class SkillExposureContractTests(unittest.TestCase):
             if "agents" in repo
         }
         self.assertEqual(actual_scopes, expected_scopes)
+
+    def test_herdr_skill_tracks_latest_stable_release_from_a_fixed_commit(self):
+        skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
+        herdr = skills_config["repositories"]["herdr"]
+
+        self.assertEqual(herdr["url"], "https://github.com/herdrdev/herdr.git")
+        self.assertEqual(herdr["upgrade_strategy"], "latest-release")
+        self.assertRegex(herdr["commit"], r"^[0-9a-f]{40}$")
+        self.assertEqual(herdr["skill_paths"], ["skills/herdr"])
 
     def test_repository_agent_scopes_reference_declared_targets(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))

@@ -609,7 +609,7 @@ root = Path(os.environ["ROOT_DIR"])
 path = Path(os.environ["FILE_PATH"])
 sys.path.insert(0, str(root))
 
-from src.json_config import ensure_mapping_value_types, get_typed_mapping_section, load_json_object_file
+from src.json_config import ensure_mapping_value_types, get_object_section, get_typed_mapping_section, load_json_object_file
 
 def validate_browser_us_sync(data, name):
     settings = data.get("browser_us_sync", {})
@@ -628,6 +628,7 @@ try:
         get_typed_mapping_section(data, "tools", name, (dict,), "对象")
         get_typed_mapping_section(data, "skills", name, (dict,), "对象")
         get_typed_mapping_section(data, "mcp", name, (dict,), "对象")
+        get_object_section(data, "herdr", name)
         validate_browser_us_sync(data, name)
     elif name == "tools.json":
         get_typed_mapping_section(data, "tools", name, (dict,), "对象")
@@ -639,6 +640,9 @@ try:
         get_typed_mapping_section(data, "agent_paths", name, (str, dict), "字符串或对象")
     elif name == "agents.json":
         ensure_mapping_value_types(data, name, (dict,), "对象")
+    elif name == "herdr.json":
+        get_object_section(data, "binary", name)
+        get_typed_mapping_section(data, "integrations", name, (dict,), "对象")
 except ValueError as exc:
     print(str(exc), file=sys.stderr)
     sys.exit(1)
@@ -939,6 +943,13 @@ function run_tools_sync_task() {
     run_task_in_dir "同步全局工具" "工具链同步完成" "工具失败" 600 "$ROOT_DIR/agent-tool" "$PYTHON_CMD" "${args[@]}"
 }
 
+function run_herdr_sync_task() {
+    local args=(sync_herdr.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/herdr.json")
+    if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
+    if [ -n "$OFFLINE_FLAG" ]; then args+=("$OFFLINE_FLAG"); fi
+    run_task_in_dir "同步 Herdr 集成" "Herdr 集成同步完成" "Herdr 集成失败" 600 "$ROOT_DIR/agent-herdr" "$PYTHON_CMD" "${args[@]}"
+}
+
 function browser_us_sync_enabled() {
     local override="${AGENT_MANAGER_BROWSER_US_SYNC_ENABLED:-}"
     local normalized_override
@@ -1161,6 +1172,7 @@ function run_bump_steps() {
 function run_apply_steps() {
     run_pipeline_step run_shell_aliases_sync_task
     run_pipeline_step run_tools_sync_task
+    run_pipeline_step run_herdr_sync_task
     run_pipeline_step run_browser_us_sync_task
     run_pipeline_step run_rules_sync_task
     run_pipeline_step run_skills_link_task false
@@ -1326,8 +1338,6 @@ legacy_targets = [
     "~/.codex/rules/modules",
     "~/.claude/rules/global.md",
     "~/.claude/rules/modules",
-    "~/.gemini/rules/global.md",
-    "~/.gemini/rules/modules",
 ]
 for target in legacy_targets:
     targets.add(str(Path(target).expanduser()))
@@ -1335,13 +1345,6 @@ for target in legacy_targets:
 for target in sorted(targets):
     print(target)
 PY
-}
-
-function list_cleanup_extra_artifacts() {
-    local gemini_tmp="$HOME/.gemini/tmp"
-    if [ -d "$gemini_tmp" ]; then
-        find "$gemini_tmp" -type f -name "*.invalid_json.*.bak" -print 2>/dev/null
-    fi
 }
 
 function list_managed_backup_entries() {
@@ -1472,7 +1475,7 @@ function print_help_all() {
     echo -e "${BOLD}${HDR_BLUE}=== 日常入口 (Main Flows) ===${NC}"
     echo -e "  ${SUCCESS_GREEN}update${NC}          日常最常用：刷新元数据后把锁定态分发/收敛到本机（= \`bump\` + \`apply\`，secrets 只拉一次）；${BOLD}不安装、也不升级 Agent 软件${NC}（升级见 \`agents:apply\`）"
     echo -e "  ${SUCCESS_GREEN}init${NC}            新机器初始化或全量收敛：\`bump\` + Agent 生命周期（安装缺失 Agent + 升级已装 Agent）+ \`apply\` + 失效引用审计"
-    echo -e "  ${SUCCESS_GREEN}apply${NC}           把当前锁定态分发/收敛到本机：secrets 拉取、shell alias、tools、browser、rules 构建分发、skills 链接、mcp 注入；不刷新版本锁、不安装 Agent"
+    echo -e "  ${SUCCESS_GREEN}apply${NC}           把当前锁定态分发/收敛到本机：secrets 拉取、shell alias、tools、Herdr、browser、rules 构建分发、skills 链接、mcp 注入；不刷新版本锁、不安装 Agent"
     echo -e "  ${SUCCESS_GREEN}bump${NC}            只刷新元数据：CLI/MCP/tool 版本锁与 skill commit（联网）写入本机锁文件；不分发、不安装 Agent、不改本机环境"
     echo -e "  ${SUCCESS_GREEN}agents:apply${NC}    按${BOLD}当前版本锁${NC}升级/修复已装 Agent；自身不刷锁、不安装缺失 Agent（要升到上游最新，先跑 \`bump\` 刷锁）"
     echo -e "  ${SUCCESS_GREEN}agents:status${NC}   只读列出各 Agent 的安装来源与生命周期状态，不改动本机、不加运行锁"
@@ -1507,6 +1510,7 @@ function print_help_all() {
     echo -e "  ${BORDER_GRAY}skill:enable X${NC}  解除某个 skill 的本机禁用"
     echo -e "  ${BORDER_GRAY}skill:list${NC}      列出各 skill 的启用/禁用状态"
     echo -e "  ${BORDER_GRAY}tools:apply${NC}     独立同步或安装全局统一增强工具链条"
+    echo -e "  ${BORDER_GRAY}herdr:apply${NC}     独立安装 Herdr CLI（缺失时）并收敛 Claude Code / Codex 官方集成"
     echo -e "  ${BORDER_GRAY}browser:apply${NC}   独立同步 Chrome 的 Google US 浏览器前置状态\n"
 }
 
@@ -1677,6 +1681,8 @@ case "$cmd" in
             --def-file "$ROOT_DIR/config/skills.json" --local "$LOCAL_CONFIG" ;;
     tools:apply)
         run_supervised_command_in_dir 600 "$ROOT_DIR/agent-tool" "$PYTHON_CMD" sync_tools.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/tools.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG $FORCE_REFRESH_FLAG ;;
+    herdr:apply)
+        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-herdr" "$PYTHON_CMD" sync_herdr.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/herdr.json" $DRY_RUN_FLAG $OFFLINE_FLAG ;;
     browser:apply)
         run_browser_us_sync_task ;;
     fetch-models)
@@ -1717,17 +1723,6 @@ case "$cmd" in
                 fi
             fi
         done
-        if cleanup_extra="$(list_cleanup_extra_artifacts)"; then
-            echo "$cleanup_extra" | while read -r candidate; do
-                if [ -n "$candidate" ]; then
-                    if is_dry_run_mode; then
-                        echo "  - $candidate"
-                    else
-                        rm -rf "$candidate"
-                    fi
-                fi
-            done
-        fi
         if is_dry_run_mode; then
             for log_candidate in "${LOG_PREFIX}"*.log "$LATEST_LOG_POINTER"; do
                 if [ -e "$log_candidate" ] || [ -L "$log_candidate" ]; then
@@ -1758,7 +1753,7 @@ case "$cmd" in
         echo -e "  ${SUCCESS_GREEN}bump${NC}      只刷新版本锁与 skill commit（联网）；不分发、不装 Agent"
         echo -e "  ${SUCCESS_GREEN}agents:apply${NC}  按${BOLD}当前版本锁${NC}升级/修复已装 Agent；自身不刷锁、不装缺失（升到最新需先 \`bump\`）"
         echo -e "  ${SUCCESS_GREEN}sys:upgrade${NC}   只更新 agent-manager 仓库自身逻辑\n"
-        echo -e "更多命令（detect / fetch-models / 运维排错 / 分步原子控制 mcp·rules·skills·tools·browser·claude·codex）："
+        echo -e "更多命令（detect / fetch-models / 运维排错 / 分步原子控制 mcp·rules·skills·tools·herdr·browser·claude·codex）："
         echo -e "  ${BOLD}./manage.sh help:all${NC}   或   ${BOLD}make help:all${NC}\n"
         echo "" ;;
     help:all)

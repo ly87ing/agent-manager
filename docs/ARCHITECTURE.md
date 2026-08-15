@@ -15,7 +15,7 @@
 
 ## 系统概览
 
-Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单一入口，只对 `Claude Code`、`Codex`、`Antigravity CLI` 做 Agent 生命周期、MCP、skills 和 rules 管理。系统采用模块化设计，将策略意愿与具体实现分离，确保配置的精准与安全。
+Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单一入口，只对 `Claude Code` 与 `Codex` 做 Agent 生命周期、MCP、skills 和 rules 管理。系统采用模块化设计，将策略意愿与具体实现分离，确保配置的精准与安全。
 
 核心设计原则：
 - **策略与定义分离**：仓库基线策略（`manager.json`）与机器本地覆盖（`manager.local.json`）在运行时合并，再与技术细节定义（`agents.json`等）配合生效
@@ -40,8 +40,9 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `manager.json`: 仓库提供的可审计默认值
 - `manager.local.json`: 不参与 Git 的本地覆盖层；`make ui` 默认写入这里
 - `browser_us_sync.enabled`: 是否在 `manage.sh` 的 `apply` / `init` / `browser:apply` 入口执行浏览器 Google US 前置同步；缺省为启用，可用本地覆盖或 `AGENT_MANAGER_BROWSER_US_SYNC_ENABLED` 临时改写
+- `herdr.enabled` / `herdr.auto_install` / `herdr.integrations`: 是否管理 Herdr CLI 缺失安装，以及 Claude Code / Codex 官方会话集成
 - `agent-manager` 不维护终端 dotfiles；用户级 shell/tmux/iTerm 配置不属于受管目标
-- `agents` 键使用稳定的机器可读 ID（如 `claude-code`, `codex`, `antigravity-cli`），而不是面向用户的展示名
+- `agents` 键使用稳定的机器可读 ID（如 `claude-code`, `codex`），而不是面向用户的展示名
 
 ### 2. 定义层 (Definition Layer)
 **文件位置**: `config/*.json`
@@ -51,12 +52,13 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `tools.json`: 工具安装和设置指令
 - `skills.json`: Skill仓库地址和Agent映射
 - `mcp.json`: MCP服务器定义和Agent路径映射
+- `herdr.json`: Herdr 官方安装器、二进制探测路径和集成目标
 - 浏览器自动化相关能力按上游官方分发模型分别托管：`playwright-cli` 在 `tools.json` 中通过 npm 固定版本管理，`make bump` 负责刷新 `version_lock`；它的 runtime setup 由 `playwright-cli install-browser` 完成，受 `setup_timeout_sec` 限制，并通过 Playwright cache 中的 Chromium payload 重新验证。`chrome-devtools` 在 `mcp.json` 中通过 `npx -y chrome-devtools-mcp@<固定版本>` 维护。
 - Agent 定义中的 `display_name` 仅用于展示和日志；跨配置引用统一使用稳定 ID
 - `agents.json` 中的 `providers` 只声明 agent-manager 可托管的安装源；`system` 只是运行时探测信号，不是可配置的 provider key
 - `preferred_provider` 必须指向 `providers` 中真实存在的键，否则生命周期同步应直接失败
 - `skills.json` 中的 skill 仓库支持 `commit` / `ref` 版本约束；默认受管仓库固定到 `commit`，并由 `make bump` 按 `upgrade_strategy` 刷新。技能名来自仓库内 `SKILL.md` frontmatter 的 `name`
-- 新增 Agent 时，如需启用某类能力，再声明对应的 MCP / skills / rules target path：`config/mcp.json` 的 `agent_paths`、`config/skills.json` 的 `agents` 映射、`config/rules-targets.list` 的规则与 modules 分发目标。当前默认受管目标只包含 `Claude Code`、`Codex` 和 `Antigravity CLI`
+- 新增 Agent 时，如需启用某类能力，再声明对应的 MCP / skills / rules target path：`config/mcp.json` 的 `agent_paths`、`config/skills.json` 的 `agents` 映射、`config/rules-targets.list` 的规则分发目标。当前默认受管目标只包含 `Claude Code` 与 `Codex`
 
 ### 3. 同步引擎 (Sync Engines)
 **文件位置**: 各agent-*目录下的sync_*.py脚本
@@ -64,6 +66,7 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 负责将策略转换为实际操作：
 - `agent-lifecycle/sync_agents.py`: Agent生命周期管理
 - `agent-tool/sync_tools.py`: 工具链管理
+- `agent-herdr/sync_herdr.py`: Herdr CLI 缺失安装与官方 Agent 集成收敛
 - `agent-skill/link_skills.py`: Skill链接管理
 - `agent-mcp/sync_mcp.py`: MCP配置注入
 - `agent-rule/scripts/build-agent-rules.py`: Rules 源码片段构建为可分发产物
@@ -123,11 +126,12 @@ graph TD
 
 - **原子锁**：需要写入或同步的命令会先抢占 `/tmp/agent_manager_<user>.lock.d`，并在其中写入持有者 PID；兼容保留 `/tmp/agent_manager_<user>.lock` 作为元数据。`sys:unlock` 会同时清理目录锁和遗留锁文件。
 - **按次日志**：每次运行写入独立日志 `/tmp/agent_manager_sync_<user>_<runid>.log`，并更新 `/tmp/agent_manager_sync_<user>.latest` 指针；`sys:logs` 读取 latest，`sys:clean-logs` 清理 latest 与全部历史运行日志。
-- **`sys:clean`**：清理当前受管目标旁的 `.bak` / `.tmp_*` / restore 临时文件，同时覆盖当前三类 Agent 的 legacy rules 备份路径和 Gemini `tmp` 下的 invalid-json 备份；不清理无受管历史证据的用户文件。
+- **`sys:clean`**：清理当前受管目标旁的 `.bak` / `.tmp_*` / restore 临时文件，并覆盖 Claude Code / Codex 的 legacy rules 备份路径；不清理无受管历史证据的用户文件。
 - **安全默认入口**：直接执行 `./manage.sh` 只显示帮助，不会隐式退化到 `init`；只给全局 flag 而不给命令（如 `./manage.sh --offline`）会直接报错退出，同样不会隐式跑管线。
 - **`--dry-run`**：只输出计划动作，跳过 secrets 初始化、仓库 clone/pull、依赖安装、构建，以及 `sys:clean` / `sys:unlock` / `state:restore` / `sys:clean-logs` 这类会修改本地状态的维护动作；允许保留只读探测和预览日志。若与 `sys:upgrade` 组合，只预览仓库自更新动作。
 - **`--offline`**：禁止任何远程拉取、下载和安装。生命周期、tools、skills、MCP 同步器都只能复用本地已存在仓库/配置；如果本地前置资源缺失，应显式报错而不是偷偷联网。
-- **命令分层**：`apply` 把锁定态分发/收敛到本机（secrets 拉取、shell alias、tools、browser、rules 构建分发、skills 链接、mcp 注入），不升版本、不装 Agent；`bump` 只刷新受管 MCP / CLI / tool 的版本锁和 skill commit 等元数据，不分发、不改本机环境；`update` = `bump` + `apply`（bump 段失败即中止，不分发旧锁定态），不碰 Agent 生命周期；`init` = `bump` + Agent 生命周期（安装缺失 Agent + 升级已装 Agent）+ `apply` + 失效引用审计；`agents:apply` 只跑 Agent 生命周期（`--no-install`），按当前版本锁升级/修复已装 Agent；`sys:upgrade` 只更新 agent-manager 仓库自身。
+- **命令分层**：`apply` 把锁定态分发/收敛到本机（secrets 拉取、shell alias、tools、Herdr、browser、rules 构建分发、skills 链接、mcp 注入），不升版本、不装 Agent；Herdr 是独立运行组件，缺失时按显式 `auto_install` 策略安装，不属于 Agent 生命周期。`bump` 只刷新受管 MCP / CLI / tool 的版本锁和 skill commit 等元数据，不分发、不改本机环境；`update` = `bump` + `apply`（bump 段失败即中止，不分发旧锁定态），不碰 Agent 生命周期；`init` = `bump` + Agent 生命周期（安装缺失 Agent + 升级已装 Agent）+ `apply` + 失效引用审计；`agents:apply` 只跑 Agent 生命周期（`--no-install`），按当前版本锁升级/修复已装 Agent；`sys:upgrade` 只更新 agent-manager 仓库自身。
+- **Herdr 边界**：同步器只在 CLI 缺失时调用官方安装器，并用 `herdr integration install` 及状态回读收敛 Claude Code / Codex 集成；不自动升级已有 CLI，不启停服务，禁用策略也不自动卸载已有用户集成。官方 Skill 仍由 `config/skills.json` 的固定 release commit 和通用 Skill 链接器管理。
 - **不接管终端配置**：除 shell alias 受管区块会写入 `~/.zshrc`（interactive）与 `~/.zprofile`（login，供非交互 login shell 如 UU 远程 term 加载别名）外，`apply` / `bump` / `init` 不改写 `~/.tmux.conf`、iTerm2 动态配置等用户级终端文件；仓库也不提供 `terminal:apply` 入口。
 - **诊断双出口**：`doctor / status` 默认输出面向人的文本报告；追加 `--json` 时输出机器可读 JSON，不再需要从文本中抓取 warning 计数。
 - **最小 smoke 策略**：`scripts/ci-smoke.sh` 通过 `AGENT_MANAGER_BASE_CONFIG=config/manager.smoke.json` 运行安全预演，避免把默认全量策略带来的未物化提示项混进 CI 基线。
@@ -137,9 +141,9 @@ graph TD
 - `agent-rule/rules/src/` 保存可编辑的共享 core、共享 modules 和 agent adapters。
 - `agent-rule/scripts/build-agent-rules.py` 负责把 `src/` 片段生成到 `agent-rule/rules/dist/`。
 - 仓库内不再保留第二条平行的规则文本流；`agent-rule/rules/global/*` 已退出仓库 source-of-truth。
-- `agent-rule/rules/dist/codex/AGENTS.md`、`dist/claude/CLAUDE.md`、`dist/antigravity/rules/agent-manager.md` 分别对应各 agent 的原生入口格式。
+- `agent-rule/rules/dist/codex/AGENTS.md` 与 `dist/claude/CLAUDE.md` 分别对应两个 agent 的原生入口格式。
 - `config/rules-targets.list` 只声明 `agent-rule/rules/dist/` 下的可分发产物到各 Agent 目标路径的映射。
-- manifest 支持家目录 target 和 `{{REPO_ROOT}}` repo-native target；当前受管 rules 只使用 Claude、Codex、Antigravity 的家目录目标。
+- manifest 支持家目录 target 和 `{{REPO_ROOT}}` repo-native target；当前受管 rules 只使用 Claude 与 Codex 的家目录目标。
 - 规则同步会清理历史遗留的 `~/.<agent>/rules/global.md` 和旧 `rules/modules` 目录，避免新旧入口并存。
 - `manage.sh rules:build` / `make rules-build` 用于刷新 `dist/`。
 - `manage.sh rules:apply` / `make rules:apply` 用于把 `dist/` 产物同步到目标 Agent 目录与 repo-native 文件位置。
@@ -230,9 +234,11 @@ agent-manager/
 │   ├── agents.json           # Agent定义
 │   ├── tools.json            # 工具定义
 │   ├── skills.json           # Skill定义
+│   ├── herdr.json            # Herdr安装与集成定义
 │   └── mcp.json              # MCP定义
 ├── agent-lifecycle/          # Agent生命周期管理
 ├── agent-tool/               # 工具管理
+├── agent-herdr/              # Herdr集成管理
 ├── agent-skill/              # Skill管理
 │   └── repositories/         # Skill 仓库托管缓存（owner-marked）
 ├── agent-mcp/                # MCP管理

@@ -67,7 +67,6 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
     def test_rule_target_agent_id_maps_current_prefixes(self):
         self.assertEqual(manage_runtime_probe.rule_target_agent_id("claude_global"), "claude-code")
-        self.assertEqual(manage_runtime_probe.rule_target_agent_id("antigravity_rules"), "antigravity-cli")
         self.assertEqual(manage_runtime_probe.rule_target_agent_id("codex_global"), "codex")
 
     def test_detect_tool_readiness_requires_git_clone_for_repo_backed_tools(self):
@@ -899,16 +898,16 @@ class IsAgentInstalledTests(unittest.TestCase):
 
     DEFINITION = {
         "bin": "agent-manager-absent-binary",
-        "providers": {"native": {"detect_paths": ["~/.agent-manager-test/agy"]}},
+        "providers": {"native": {"detect_paths": ["~/.agent-manager-test/sample-agent"]}},
     }
 
     def test_detect_path_counts_as_installed_when_bin_is_off_path(self):
         with mock.patch.object(manage_runtime_probe.os.path, "exists", lambda path: True):
-            self.assertTrue(manage_runtime_probe.is_agent_installed("antigravity-cli", self.DEFINITION))
+            self.assertTrue(manage_runtime_probe.is_agent_installed("sample-agent", self.DEFINITION))
 
     def test_absent_everywhere_is_still_not_installed(self):
         with mock.patch.object(manage_runtime_probe.os.path, "exists", lambda path: False):
-            self.assertFalse(manage_runtime_probe.is_agent_installed("antigravity-cli", self.DEFINITION))
+            self.assertFalse(manage_runtime_probe.is_agent_installed("sample-agent", self.DEFINITION))
 
     def test_malformed_providers_do_not_raise(self):
         for providers in ({"native": "not-a-dict"}, {}, None):
