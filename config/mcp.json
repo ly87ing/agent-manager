@@ -49,11 +49,25 @@
         "git+https://github.com/oraios/serena@dcbd8ce064fd057858ba49c9f74b433b95d9f17a",
         "serena",
         "start-mcp-server",
-        "--context",
-        "ide-assistant",
         "--open-web-dashboard",
         "false"
       ],
+      "extra_args_by_agent": {
+        "claude-code": [
+          "--context",
+          "claude-code",
+          "--project-from-cwd"
+        ],
+        "codex": [
+          "--context",
+          "codex",
+          "--project-from-cwd"
+        ],
+        "antigravity-cli": [
+          "--context",
+          "antigravity"
+        ]
+      },
       "startup_timeout_sec": 120,
       "env": {},
       "project_serena_folder_location": "/tmp/serena$projectDir/.serena",

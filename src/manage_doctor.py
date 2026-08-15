@@ -13,6 +13,7 @@ from pathlib import Path
 
 from src.agent_ids import canonicalize_agent_list, canonicalize_agent_mapping, get_agent_display_name
 from src.json_config import ensure_mapping_value_types, get_typed_mapping_section, load_json_object_file
+from src.mcp_config import resolve_mcp_server_args
 from src.version_pins import apply_local_version_pins
 from src.manage_runtime_probe import (
     ProviderInventory,
@@ -328,13 +329,17 @@ def _managed_mcp_matches(expected: dict[str, object], actual: dict[str, object])
 def _normalize_expected_mcp_definition(
     settings: dict,
     *,
+    agent_id: str,
     root_dir: Path | None = None,
     server_name: str | None = None,
 ) -> dict[str, object]:
     env_dict = settings.get("env", {})
     if not isinstance(env_dict, dict):
         env_dict = {}
-    args = _normalize_mcp_args(settings.get("args"))
+    try:
+        args = tuple(resolve_mcp_server_args(settings, agent_id))
+    except ValueError:
+        args = None
     if args is not None and root_dir is not None and server_name and settings.get("url"):
         repo_path = str((root_dir / "agent-mcp" / server_name).resolve())
         args = tuple(arg.replace("{repo_path}", repo_path) for arg in args)
@@ -382,6 +387,7 @@ def expected_managed_mcp_servers(
         if targeted_agents is None or agent_id in targeted_agents:
             expected[server_name] = _normalize_expected_mcp_definition(
                 merged,
+                agent_id=agent_id,
                 root_dir=root_dir,
                 server_name=server_name,
             )

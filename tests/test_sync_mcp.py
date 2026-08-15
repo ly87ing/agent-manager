@@ -111,7 +111,16 @@ class SyncMcpTests(unittest.TestCase):
             r"^git\+https://github\.com/oraios/serena@[0-9a-f]{40}$",
         )
         self.assertIn("start-mcp-server", serena["args"])
-        self.assertIn("ide-assistant", serena["args"])
+        self.assertNotIn("--context", serena["args"])
+        self.assertEqual(
+            serena["extra_args_by_agent"],
+            {
+                "claude-code": ["--context", "claude-code", "--project-from-cwd"],
+                "codex": ["--context", "codex", "--project-from-cwd"],
+                "antigravity-cli": ["--context", "antigravity"],
+            },
+        )
+        self.assertNotIn("ide-assistant", json.dumps(serena))
         self.assertEqual(serena.get("env", {}), {})
         self.assertEqual(
             serena["project_serena_folder_location"],
@@ -350,6 +359,91 @@ class SyncMcpTests(unittest.TestCase):
             self.assertEqual(
                 toml_updated["mcp_servers"]["chrome-devtools"]["env"]["_MANAGED_BY"],
                 "agent-manager",
+            )
+
+    def test_committed_serena_definition_syncs_client_specific_context_args(self):
+        definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
+        serena = deepcopy(definitions["servers"]["serena"])
+        serena.update(
+            {
+                "enabled": True,
+                "_declared_in_policy": True,
+                "_sync_ready": True,
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            claude_path = temp_root / "claude.json"
+            antigravity_path = temp_root / "antigravity.json"
+            codex_path = temp_root / "config.toml"
+
+            ok = sync_mcp.manage_mcp_config(
+                {
+                    "claude-code": str(claude_path),
+                    "antigravity-cli": str(antigravity_path),
+                    "codex": {"path": str(codex_path), "format": "toml"},
+                },
+                {"serena": serena},
+            )
+
+            self.assertTrue(ok)
+            claude_args = json.loads(claude_path.read_text(encoding="utf-8"))[
+                "mcpServers"
+            ]["serena"]["args"]
+            antigravity_args = json.loads(
+                antigravity_path.read_text(encoding="utf-8")
+            )["mcpServers"]["serena"]["args"]
+            codex_args = tomllib.loads(codex_path.read_text(encoding="utf-8"))[
+                "mcp_servers"
+            ]["serena"]["args"]
+
+            self.assertEqual(
+                claude_args[-3:],
+                ["--context", "claude-code", "--project-from-cwd"],
+            )
+            self.assertEqual(
+                codex_args[-3:],
+                ["--context", "codex", "--project-from-cwd"],
+            )
+            self.assertEqual(antigravity_args[-2:], ["--context", "antigravity"])
+            self.assertNotIn("--project-from-cwd", antigravity_args)
+
+    def test_invalid_agent_specific_args_preserve_existing_managed_entry(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "agent.json"
+            existing = {
+                "mcpServers": {
+                    "serena": {
+                        "command": "uvx",
+                        "args": ["old"],
+                        "env": {"_MANAGED_BY": "agent-manager"},
+                    }
+                }
+            }
+            config_path.write_text(json.dumps(existing), encoding="utf-8")
+
+            with self.assertLogs(level="ERROR") as captured:
+                ok = sync_mcp.manage_mcp_config(
+                    {"claude-code": str(config_path)},
+                    {
+                        "serena": {
+                            "enabled": True,
+                            "command": "uvx",
+                            "args": [],
+                            "extra_args_by_agent": {
+                                "claude-code": "--context claude-code"
+                            },
+                            "env": {},
+                        }
+                    },
+                )
+
+            self.assertFalse(ok)
+            self.assertEqual(json.loads(config_path.read_text(encoding="utf-8")), existing)
+            self.assertIn(
+                "extra_args_by_agent.claude-code 必须是字符串数组",
+                "\n".join(captured.output),
             )
 
     def test_antigravity_json_uses_standard_mcp_server_shape(self):

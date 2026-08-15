@@ -46,7 +46,7 @@ make apply
 |--------|------|----------|------|----------|
 | `chrome-devtools` | Chrome DevTools 浏览器调试、性能分析、network / console / screenshot | `npx -y chrome-devtools-mcp@<固定版本>` | 无 | 启用 |
 | `grok-search` | web_search / web_fetch 联网搜索与网页抓取 | `uvx --from git+https://github.com/GuDaStudio/GrokSearch@<固定commit> grok-search` | `GROK_API_URL`, `GROK_API_KEY`, `GROK_MODEL`, `TAVILY_ENABLED`, `TAVILY_API_KEY`, `TAVILY_API_URL`, `FIRECRAWL_API_KEY`, `FIRECRAWL_API_URL` | 启用 |
-| `serena` | JS/TS 语义级代码导航（LSP：find_symbol / 引用 / 符号概览） | `uvx --from git+https://github.com/oraios/serena@<固定commit> serena start-mcp-server --context ide-assistant` | 无 | 启用 |
+| `serena` | JS/TS 语义级代码导航（LSP：find_symbol / 引用 / 符号概览） | `uvx --from git+https://github.com/oraios/serena@<固定commit> serena start-mcp-server`，按客户端追加 context 参数 | 无 | 启用 |
 
 **维护约定**:
 - 受管 MCP 的实际命令必须固定版本或固定 commit；`@latest`、分支名只允许出现在 `version_lock` 的查询元数据里。
@@ -304,6 +304,14 @@ serena 的 Java 后端（solidlsp `eclipse_jdtls.py`）把 jdtls 的 `java.confi
 ### 使用约束
 
 - `serena` 不依赖额外 secrets，`env` 为空。
+- Serena 的 context 会改变系统提示词和可用工具，必须与客户端匹配。公共启动参数由 `args` 维护，`extra_args_by_agent` 再按客户端追加以下参数；同步器与 doctor 使用同一套解析规则：
+
+  | 客户端 | 追加参数 |
+  |--------|----------|
+  | Claude Code | `--context claude-code --project-from-cwd` |
+  | Codex | `--context codex --project-from-cwd` |
+  | Antigravity | `--context antigravity` |
+
 - 命令固定 commit，版本波动通过 `version_lock`（`ref: main`）在 `make bump` 时集中解析写入 `config/version-pins.local.json`。
 - `make init`、`make apply` 和 `./manage.sh mcp:apply` 会复用该固定版本的 Serena 配置加载器，生成或更新 `~/.serena/serena_config.yml`，并把 `project_serena_folder_location` 对齐为 `/tmp/serena$projectDir/.serena`。重复执行只在值变化时保存，并保留其他 Serena 配置；换机后重新运行任一命令即可恢复该策略。
 - 例如项目根目录为 `/YOUR_WORKSPACE/YOUR_PROJECT` 时，Serena 数据会写入 `/tmp/serena/YOUR_WORKSPACE/YOUR_PROJECT/.serena`。`/tmp` 可能被系统清理，因此索引、缓存和 Serena memories 不保证持久保留。

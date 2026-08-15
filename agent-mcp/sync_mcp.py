@@ -21,6 +21,7 @@ from src.command_runner import run_command
 from src.git_remote_probe import probe_git_remote_state
 from src.json_config import get_typed_mapping_section, load_json_object_file
 from src.manage_runtime_probe import is_agent_installed
+from src.mcp_config import resolve_mcp_server_args
 from src.runtime_logging import configure_logging
 from src.version_pins import apply_local_version_pins
 from src.toml_compat import tomllib
@@ -412,9 +413,17 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None
                 preserved_failed_servers.add(name)
                 continue
             
+            try:
+                effective_args = resolve_mcp_server_args(srv_config, agent_name)
+            except ValueError as exc:
+                logging.error(f"[AGENT: {agent_name}] MCP {name} 参数无效: {exc}")
+                all_ok = False
+                preserved_failed_servers.add(name)
+                continue
+
             repo_path_str = srv_config.get("_repo_path", "")
             repo_path = Path(repo_path_str).resolve() if repo_path_str else ""
-            parsed_args = [arg.replace("{repo_path}", str(repo_path)) for arg in srv_config.get("args", [])]
+            parsed_args = [arg.replace("{repo_path}", str(repo_path)) for arg in effective_args]
             
             active_settings = {
                 "command": srv_config.get("command"),

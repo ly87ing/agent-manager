@@ -6,13 +6,57 @@ import os
 from pathlib import Path
 from unittest import mock
 
-from src.manage_doctor import actual_skill_targets, build_report, render_text
+from src.manage_doctor import (
+    actual_skill_targets,
+    build_report,
+    expected_managed_mcp_servers,
+    render_text,
+)
 
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 class ManageDoctorReportTests(unittest.TestCase):
+    def test_expected_mcp_servers_resolve_agent_specific_args(self):
+        config = {"mcp": {"serena": {"enabled": True}}}
+        mcp_config = {
+            "servers": {
+                "serena": {
+                    "command": "uvx",
+                    "args": ["serena", "start-mcp-server"],
+                    "extra_args_by_agent": {
+                        "claude-code": ["--context", "claude-code"],
+                        "codex": ["--context", "codex"],
+                    },
+                    "env": {},
+                    "agents": None,
+                }
+            }
+        }
+
+        codex_servers = expected_managed_mcp_servers(
+            ROOT,
+            config,
+            mcp_config,
+            "codex",
+        )
+        claude_servers = expected_managed_mcp_servers(
+            ROOT,
+            config,
+            mcp_config,
+            "claude-code",
+        )
+
+        self.assertEqual(
+            codex_servers["serena"]["args"],
+            ("serena", "start-mcp-server", "--context", "codex"),
+        )
+        self.assertEqual(
+            claude_servers["serena"]["args"],
+            ("serena", "start-mcp-server", "--context", "claude-code"),
+        )
+
     def test_actual_skill_targets_includes_windows_junctions(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             target_dir = Path(temp_dir) / "targets"
