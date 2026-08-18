@@ -1,6 +1,6 @@
 # Agent Manager (Ultimate Edition)
 
-🚀 **AI 助手环境一键管理中枢**。通过单一入口，只对 `Claude Code` 与 `Codex` 做 Agent 生命周期、MCP、skills 和 rules 管理。退役 Agent 不再保留受管路径或分发逻辑。
+🚀 **AI 助手环境一键管理中枢**。通过单一入口，对 `Claude Code` 与 `Codex` 做 Agent 生命周期、MCP、skills 和 rules 管理，并对 `Kimi Code` 做 MCP 与 skills 管理（不接管其生命周期与 rules）。退役 Agent 不再保留受管路径或分发逻辑。
 
 ## 核心规范速查表 (Authoritative Spec)
 
@@ -12,6 +12,7 @@
    ├────────────────┼─────────────────────────┼──────────┼─────────────┤
    │ Claude Code    │ ~/.claude.json          │ JSON     │ mcpServers  │
    │ Codex          │ ~/.codex/config.toml    │ TOML     │ mcp_servers │
+   │ Kimi Code      │ ~/.kimi-code/mcp.json   │ JSON     │ mcpServers  │
    └────────────────┴─────────────────────────┴──────────┴─────────────┘
 ```
 
@@ -34,7 +35,7 @@
 
 - `chrome-devtools`（MCP）
   - 由 `make bump` 刷新本机 `config/version-pins.local.json` 中的版本锁；各 Agent 实际运行时只消费固定版本。
-默认受管 skill 仓库包括 `agent-skills` 与 `herdr`；仓库、升级策略和初始 commit 保留在 `config/skills.json`，真实运行 commit 由 `config/version-pins.local.json` 的本地锁覆盖。运行时同步只检出固定 commit，不直接跟随默认分支或动态 release。`agent-skills` 由 `make bump` 按 `latest-branch` 刷新；`agent-skills` 面向 `Claude Code` 与 `Codex` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 `safe-merge-review`、`change-discipline`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing` 这 5 个 skill 包。`herdr` 按 `latest-release` 刷新，只向 `Claude Code` 与 `Codex` 暴露官方 `skills/herdr`。两者都不会因为上游新增 skill 而自动扩大安装范围。
+默认受管 skill 仓库包括 `agent-skills` 与 `herdr`；仓库、升级策略和初始 commit 保留在 `config/skills.json`，真实运行 commit 由 `config/version-pins.local.json` 的本地锁覆盖。运行时同步只检出固定 commit，不直接跟随默认分支或动态 release。`agent-skills` 由 `make bump` 按 `latest-branch` 刷新；`agent-skills` 面向 `Claude Code`、`Codex` 与 `Kimi Code` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 `safe-merge-review`、`change-discipline`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing` 这 5 个 skill 包。`herdr` 按 `latest-release` 刷新，向 `Claude Code`、`Codex` 与 `Kimi Code` 暴露官方 `skills/herdr`。两者都不会因为上游新增 skill 而自动扩大安装范围。
 默认自动安装的 Agent 当前只包含 `Claude Code` 与 `Codex`。
 `Claude Code` 与 `Codex` 默认走官方 npm 包，并使用 `config/agents.json` 中的命令模板加本机版本锁。历史 `brew` 安装仅用于识别并提示迁移，不再作为这些 CLI 的受管 provider。
 `Claude Code native` 仍作为兼容 provider 保留官方 install / update / uninstall 语义，但默认不再使用这条动态 updater 路径。
@@ -45,7 +46,7 @@
 
 `config/herdr.json` 保存 [Herdr 官方安装器](https://herdr.dev/install.sh)与集成目标，`config/manager.json` 保存默认启用策略。`apply` / `init` 缺少 Herdr CLI 时才调用官方安装器；已有 CLI 不会被静默升级。随后通过 `herdr integration install claude|codex` 幂等收敛官方会话集成，并由状态回读确认版本为 `current`。`agent-manager` 不会自动启动或停止 Herdr 服务，也不改写 Herdr 自身运行参数。
 
-官方 Herdr Skill 固定到已发布 release 的 commit，并继续使用本机当前 Codex 实际读取的 `~/.codex/skills`；Claude Code 使用 `~/.claude/skills`。可单独运行 `make herdr:apply` 收敛 CLI 与集成，再运行 `make skills:apply` 收敛 Skill。已打开的 Agent 进程不会被追溯注入，需从 Herdr 发起新会话后使用。
+官方 Herdr Skill 固定到已发布 release 的 commit，并继续使用本机当前 Codex 实际读取的 `~/.codex/skills`；Claude Code 使用 `~/.claude/skills`，Kimi Code 使用 `~/.kimi-code/skills`（Kimi Code 仅作 skills / MCP target，不经 `agent-manager` 安装或升级）。可单独运行 `make herdr:apply` 收敛 CLI 与集成，再运行 `make skills:apply` 收敛 Skill。已打开的 Agent 进程不会被追溯注入，需从 Herdr 发起新会话后使用。
 
 ## Official CLI Lifecycle Policy
 

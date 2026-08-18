@@ -15,7 +15,8 @@
       "skill_count": 5,
       "agents": [
         "claude-code",
-        "codex"
+        "codex",
+        "kimi-code"
       ]
     },
     "herdr": {
@@ -28,12 +29,14 @@
       "skill_count": 1,
       "agents": [
         "claude-code",
-        "codex"
+        "codex",
+        "kimi-code"
       ]
     }
   },
   "agents": {
     "claude-code": "~/.claude/skills",
-    "codex": "~/.codex/skills"
+    "codex": "~/.codex/skills",
+    "kimi-code": "~/.kimi-code/skills"
   }
 }

@@ -44,8 +44,10 @@ class SyncMcpTests(unittest.TestCase):
         definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
         self.assertEqual(
             set(definitions["agent_paths"].keys()),
-            {"claude-code", "codex"},
+            {"claude-code", "codex", "kimi-code"},
         )
+        # kimi-code 走原生 mcpServers JSON 结构的用户级配置文件
+        self.assertEqual(definitions["agent_paths"]["kimi-code"], "~/.kimi-code/mcp.json")
 
     def test_committed_mcp_policy_enables_chrome_devtools_fixed_version(self):
         definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))

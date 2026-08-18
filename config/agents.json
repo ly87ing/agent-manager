@@ -41,6 +41,16 @@
       }
     }
   },
+  "kimi-code": {
+    "display_name": "Kimi Code",
+    "bin": "kimi",
+    "providers": {
+      "native": {
+        "managed": false,
+        "detect_paths": ["~/.kimi-code/bin/kimi"]
+      }
+    }
+  },
   "codex": {
     "display_name": "Codex",
     "bin": "codex",

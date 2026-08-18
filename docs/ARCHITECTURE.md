@@ -15,7 +15,7 @@
 
 ## 系统概览
 
-Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单一入口，只对 `Claude Code` 与 `Codex` 做 Agent 生命周期、MCP、skills 和 rules 管理。系统采用模块化设计，将策略意愿与具体实现分离，确保配置的精准与安全。
+Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单一入口，对 `Claude Code` 与 `Codex` 做 Agent 生命周期、MCP、skills 和 rules 管理，并对 `Kimi Code` 做 MCP 与 skills 管理（不接管其生命周期与 rules）。系统采用模块化设计，将策略意愿与具体实现分离，确保配置的精准与安全。
 
 核心设计原则：
 - **策略与定义分离**：仓库基线策略（`manager.json`）与机器本地覆盖（`manager.local.json`）在运行时合并，再与技术细节定义（`agents.json`等）配合生效
@@ -58,7 +58,7 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `agents.json` 中的 `providers` 只声明 agent-manager 可托管的安装源；`system` 只是运行时探测信号，不是可配置的 provider key
 - `preferred_provider` 必须指向 `providers` 中真实存在的键，否则生命周期同步应直接失败
 - `skills.json` 中的 skill 仓库支持 `commit` / `ref` 版本约束；默认受管仓库固定到 `commit`，并由 `make bump` 按 `upgrade_strategy` 刷新。技能名来自仓库内 `SKILL.md` frontmatter 的 `name`
-- 新增 Agent 时，如需启用某类能力，再声明对应的 MCP / skills / rules target path：`config/mcp.json` 的 `agent_paths`、`config/skills.json` 的 `agents` 映射、`config/rules-targets.list` 的规则分发目标。当前默认受管目标只包含 `Claude Code` 与 `Codex`
+- 新增 Agent 时，如需启用某类能力，再声明对应的 MCP / skills / rules target path：`config/mcp.json` 的 `agent_paths`、`config/skills.json` 的 `agents` 映射、`config/rules-targets.list` 的规则分发目标。当前默认受管目标：生命周期与 rules 只包含 `Claude Code` 与 `Codex`；MCP 与 skills target 额外包含 `Kimi Code`（config-managed only，在 `config/agents.json` 中仅有探测定义，不进入 `manager.json` 的 agents 策略段，因此不会被安装/升级/卸载）
 
 ### 3. 同步引擎 (Sync Engines)
 **文件位置**: 各agent-*目录下的sync_*.py脚本

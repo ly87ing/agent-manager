@@ -80,6 +80,7 @@
   },
   "agent_paths": {
     "claude-code": "~/.claude.json",
-    "codex": { "path": "~/.codex/config.toml", "format": "toml" }
+    "codex": { "path": "~/.codex/config.toml", "format": "toml" },
+    "kimi-code": "~/.kimi-code/mcp.json"
   }
 }

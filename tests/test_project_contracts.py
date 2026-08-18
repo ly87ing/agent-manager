@@ -319,9 +319,10 @@ class ProjectContractTests(unittest.TestCase):
 
     def test_readme_documents_current_agent_scope(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("只对 `Claude Code` 与 `Codex` 做 Agent 生命周期、MCP、skills 和 rules 管理", readme)
+        self.assertIn("对 `Claude Code` 与 `Codex` 做 Agent 生命周期、MCP、skills 和 rules 管理，并对 `Kimi Code` 做 MCP 与 skills 管理（不接管其生命周期与 rules）", readme)
         self.assertIn("│ Claude Code", readme)
         self.assertIn("│ Codex", readme)
+        self.assertIn("│ Kimi Code", readme)
 
     def test_troubleshooting_documents_official_lifecycle_gap_guidance(self):
         troubleshooting = (ROOT / "docs" / "TROUBLESHOOTING.md").read_text(encoding="utf-8")
@@ -338,7 +339,7 @@ class ProjectContractTests(unittest.TestCase):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
         agent_skills = skills_config["repositories"]["agent-skills"]
 
-        self.assertIn("`agent-skills` 面向 `Claude Code` 与 `Codex` 暴露", readme)
+        self.assertIn("`agent-skills` 面向 `Claude Code`、`Codex` 与 `Kimi Code` 暴露", readme)
         for skill_path in agent_skills["skill_paths"]:
             self.assertIn(f"`{skill_path}`", readme)
         self.assertIn(f"这 {agent_skills['skill_count']} 个 skill 包", readme)
@@ -469,8 +470,8 @@ class ProjectContractTests(unittest.TestCase):
 
     def test_architecture_documents_current_agent_scope(self):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
-        self.assertIn("只对 `Claude Code` 与 `Codex` 做 Agent 生命周期、MCP、skills 和 rules 管理", architecture)
-        self.assertIn("当前默认受管目标只包含 `Claude Code` 与 `Codex`", architecture)
+        self.assertIn("对 `Claude Code` 与 `Codex` 做 Agent 生命周期、MCP、skills 和 rules 管理，并对 `Kimi Code` 做 MCP 与 skills 管理（不接管其生命周期与 rules）", architecture)
+        self.assertIn("当前默认受管目标：生命周期与 rules 只包含 `Claude Code` 与 `Codex`；MCP 与 skills target 额外包含 `Kimi Code`", architecture)
         self.assertIn("如需启用某类能力，再声明对应的 MCP / skills / rules target path", architecture)
         self.assertNotIn("新增 Agent 时必须同时声明 MCP / skills / rules 三类 target path", architecture)
 

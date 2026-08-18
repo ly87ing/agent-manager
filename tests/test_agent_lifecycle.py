@@ -1256,12 +1256,29 @@ class AgentIdConsistencyTests(unittest.TestCase):
         skill_targets = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))["agents"]
         mcp_agent_paths = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))["agent_paths"]
 
-        managed_agent_ids = {"claude-code", "codex"}
+        lifecycle_policy_ids = {"claude-code", "codex"}
+        config_target_ids = {"claude-code", "codex", "kimi-code"}
 
-        self.assertEqual(set(manager_agents), managed_agent_ids)
-        self.assertEqual(set(lifecycle_agents), managed_agent_ids)
-        self.assertEqual(set(skill_targets), managed_agent_ids)
-        self.assertEqual(set(mcp_agent_paths), managed_agent_ids)
+        # 生命周期(安装/升级/卸载)只纳管 claude-code 与 codex;kimi-code 是
+        # config-managed only:有 agents.json 探测定义和 skills/MCP target,
+        # 但绝不能进入 manager.json 的 agents 策略段,否则 sync_agents 会对它动手。
+        self.assertEqual(set(manager_agents), lifecycle_policy_ids)
+        self.assertEqual(set(lifecycle_agents), config_target_ids)
+        self.assertEqual(set(skill_targets), config_target_ids)
+        self.assertEqual(set(mcp_agent_paths), config_target_ids)
+
+    def test_kimi_code_is_config_managed_only_without_lifecycle_policy(self):
+        manager_agents = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))["agents"]
+        lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
+
+        self.assertNotIn("kimi-code", manager_agents)
+        kimi = lifecycle_agents["kimi-code"]
+        self.assertEqual(kimi["bin"], "kimi")
+        # 仅探测定义:不允许携带 install/upgrade/uninstall 命令
+        for provider in kimi.get("providers", {}).values():
+            self.assertNotIn("install", provider)
+            self.assertNotIn("upgrade", provider)
+            self.assertNotIn("uninstall", provider)
 
 
 class CommittedAgentPolicyTests(unittest.TestCase):
@@ -1270,7 +1287,9 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
 
         self.assertEqual(set(manager["agents"]), {"claude-code", "codex"})
-        self.assertEqual(set(lifecycle_agents), {"claude-code", "codex"})
+        # agents.json 额外包含 kimi-code 的仅探测定义(config-managed only);
+        # 生命周期默认值锁定仍只针对 claude-code 与 codex。
+        self.assertEqual(set(lifecycle_agents), {"claude-code", "codex", "kimi-code"})
 
         self.assertTrue(manager["agents"]["claude-code"]["enabled"])
         self.assertTrue(manager["agents"]["claude-code"]["auto_install"])

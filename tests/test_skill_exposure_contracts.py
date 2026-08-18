@@ -30,8 +30,8 @@ class SkillExposureContractTests(unittest.TestCase):
     def test_repository_agent_scopes_stay_intentional(self):
         skills_config = json.loads((ROOT / "config" / "skills.json").read_text(encoding="utf-8"))
         expected_scopes = {
-            "agent-skills": ["claude-code", "codex"],
-            "herdr": ["claude-code", "codex"],
+            "agent-skills": ["claude-code", "codex", "kimi-code"],
+            "herdr": ["claude-code", "codex", "kimi-code"],
         }
 
         actual_scopes = {

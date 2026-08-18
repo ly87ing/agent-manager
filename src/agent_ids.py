@@ -12,6 +12,10 @@ AGENT_METADATA = {
         "display_name": "Codex",
         "aliases": ["Codex"],
     },
+    "kimi-code": {
+        "display_name": "Kimi Code",
+        "aliases": ["Kimi Code"],
+    },
 }
 
 
