@@ -35,7 +35,7 @@
 
 - `chrome-devtools`（MCP）
   - 由 `make bump` 刷新本机 `config/version-pins.local.json` 中的版本锁；各 Agent 实际运行时只消费固定版本。
-默认受管 skill 仓库包括 `agent-skills` 与 `herdr`；仓库、升级策略和初始 commit 保留在 `config/skills.json`，真实运行 commit 由 `config/version-pins.local.json` 的本地锁覆盖。运行时同步只检出固定 commit，不直接跟随默认分支或动态 release。`agent-skills` 由 `make bump` 按 `latest-branch` 刷新；`agent-skills` 面向 `Claude Code`、`Codex` 与 `Kimi Code` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 `safe-merge-review`、`change-discipline`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing` 这 5 个 skill 包。`herdr` 按 `latest-release` 刷新，向 `Claude Code`、`Codex` 与 `Kimi Code` 暴露官方 `skills/herdr`。两者都不会因为上游新增 skill 而自动扩大安装范围。
+默认受管 skill 仓库包括 `agent-skills` 与 `herdr`；仓库、升级策略和初始 commit 保留在 `config/skills.json`，真实运行 commit 由 `config/version-pins.local.json` 的本地锁覆盖。运行时同步只检出固定 commit，不直接跟随默认分支或动态 release。`agent-skills` 由 `make bump` 按 `latest-branch` 刷新；`agent-skills` 面向 `Claude Code`、`Codex` 与 `Kimi Code` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 `safe-merge-review`、`change-discipline`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing`、`technical-diagramming` 这 6 个 skill 包。`herdr` 按 `latest-release` 刷新，向 `Claude Code`、`Codex` 与 `Kimi Code` 暴露官方 `skills/herdr`。两者都不会因为上游新增 skill 而自动扩大安装范围。
 默认自动安装的 Agent 当前只包含 `Claude Code` 与 `Codex`。
 `Claude Code` 与 `Codex` 默认走官方 npm 包，并使用 `config/agents.json` 中的命令模板加本机版本锁。历史 `brew` 安装仅用于识别并提示迁移，不再作为这些 CLI 的受管 provider。
 `Claude Code native` 仍作为兼容 provider 保留官方 install / update / uninstall 语义，但默认不再使用这条动态 updater 路径。
@@ -96,7 +96,7 @@
 - **共享 core 职责**：`agent-rule/rules/src/shared/core.md` 只放所有 Agent 都应始终生效的短规则；这里优先约束“非平凡或有歧义任务先显式说明假设、优先最简单本地改动、保持 surgical edits、按 verification point 推进”。
 - **生成产物**：面向各 Agent 实际分发的规则文件只维护在 `agent-rule/rules/dist/`，由构建脚本生成；仓库内不再保留第二套 `rules/global/*` source tree。
 - **按 Agent 原生格式分发**：Codex 生成 `AGENTS.md`，Claude 生成 `CLAUDE.md`。
-- **低频专题进 skill**：原 `architecture`、`style`、`frontend`、`artifact-hygiene`、`writing` 等低频专题细节不再通过 `modules/` 分发，而是在 `agent-skills` 中维护为 `change-discipline`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing`。
+- **低频专题进 skill**：原 `architecture`、`style`、`frontend`、`artifact-hygiene`、`writing` 等低频专题细节不再通过 `modules/` 分发，而是在 `agent-skills` 中维护为 `change-discipline`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing`；技术图的建模与交付由 `technical-diagramming` 单独负责。
 - **分层原则**：always-on 规则只保留触发条件、协作边界和最小行为约束；执行步骤、检查清单、失败边界和验证细节进入 skill；Agent 私有差异只放 `agent-rule/rules/src/agents/*/adapter.md`，不要把这些内容回灌进 shared core。
 - **迁移清理**：原生分发会清理旧的 `~/.<agent>/rules/global.md` 和旧 `rules/modules` 残留，避免新旧入口并存。
 - **Claude 记忆分层**：根目录 `CLAUDE.md` 只保留仓库级高频记忆，`agent-rule/CLAUDE.md` 和 `tests/CLAUDE.md` 承载目录级维护细节。
