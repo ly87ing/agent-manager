@@ -40,7 +40,6 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `manager.json`: 仓库提供的可审计默认值
 - `manager.local.json`: 不参与 Git 的本地覆盖层；`make ui` 默认写入这里
 - `browser_us_sync.enabled`: 是否在 `manage.sh` 的 `apply` / `init` / `browser:apply` 入口执行浏览器 Google US 前置同步；缺省为启用，可用本地覆盖或 `AGENT_MANAGER_BROWSER_US_SYNC_ENABLED` 临时改写
-- `herdr.enabled` / `herdr.auto_install` / `herdr.integrations`: 是否管理 Herdr CLI 缺失安装，以及 Claude Code / Codex 官方会话集成
 - `agent-manager` 不维护终端 dotfiles；用户级 shell/tmux/iTerm 配置不属于受管目标
 - `agents` 键使用稳定的机器可读 ID（如 `claude-code`, `codex`），而不是面向用户的展示名
 
@@ -52,7 +51,6 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `tools.json`: 工具安装和设置指令
 - `skills.json`: Skill仓库地址和Agent映射
 - `mcp.json`: MCP服务器定义和Agent路径映射
-- `herdr.json`: Herdr 官方安装器、二进制探测路径和集成目标
 - 浏览器自动化相关能力按上游官方分发模型分别托管：`playwright-cli` 在 `tools.json` 中通过 npm 固定版本管理，`make bump` 负责刷新 `version_lock`；它的 runtime setup 由 `playwright-cli install-browser` 完成，受 `setup_timeout_sec` 限制，并通过 Playwright cache 中的 Chromium payload 重新验证。`chrome-devtools` 在 `mcp.json` 中通过 `npx -y chrome-devtools-mcp@<固定版本>` 维护。
 - Agent 定义中的 `display_name` 仅用于展示和日志；跨配置引用统一使用稳定 ID
 - `agents.json` 中的 `providers` 只声明 agent-manager 可托管的安装源；`system` 只是运行时探测信号，不是可配置的 provider key
@@ -66,7 +64,6 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 负责将策略转换为实际操作：
 - `agent-lifecycle/sync_agents.py`: Agent生命周期管理
 - `agent-tool/sync_tools.py`: 工具链管理
-- `agent-herdr/sync_herdr.py`: Herdr CLI 缺失安装与官方 Agent 集成收敛
 - `agent-skill/link_skills.py`: Skill链接管理
 - `agent-mcp/sync_mcp.py`: MCP配置注入
 - `agent-rule/scripts/build-agent-rules.py`: Rules 源码片段构建为可分发产物
@@ -130,8 +127,7 @@ graph TD
 - **安全默认入口**：直接执行 `./manage.sh` 只显示帮助，不会隐式退化到 `init`；只给全局 flag 而不给命令（如 `./manage.sh --offline`）会直接报错退出，同样不会隐式跑管线。
 - **`--dry-run`**：只输出计划动作，跳过 secrets 初始化、仓库 clone/pull、依赖安装、构建，以及 `sys:clean` / `sys:unlock` / `state:restore` / `sys:clean-logs` 这类会修改本地状态的维护动作；允许保留只读探测和预览日志。若与 `sys:upgrade` 组合，只预览仓库自更新动作。
 - **`--offline`**：禁止任何远程拉取、下载和安装。生命周期、tools、skills、MCP 同步器都只能复用本地已存在仓库/配置；如果本地前置资源缺失，应显式报错而不是偷偷联网。
-- **命令分层**：`apply` 把锁定态分发/收敛到本机（secrets 拉取、shell alias、tools、Herdr、browser、rules 构建分发、skills 链接、mcp 注入），不升版本、不装 Agent；Herdr 是独立运行组件，缺失时按显式 `auto_install` 策略安装，不属于 Agent 生命周期。`bump` 只刷新受管 MCP / CLI / tool 的版本锁和 skill commit 等元数据，不分发、不改本机环境；`update` = `bump` + `apply`（bump 段失败即中止，不分发旧锁定态），不碰 Agent 生命周期；`init` = `bump` + Agent 生命周期（安装缺失 Agent + 升级已装 Agent）+ `apply` + 失效引用审计；`agents:apply` 只跑 Agent 生命周期（`--no-install`），按当前版本锁升级/修复已装 Agent；`sys:upgrade` 只更新 agent-manager 仓库自身。
-- **Herdr 边界**：同步器只在 CLI 缺失时调用官方安装器，并用 `herdr integration install` 及状态回读收敛 Claude Code / Codex 集成；不自动升级已有 CLI，不启停服务，禁用策略也不自动卸载已有用户集成。官方 Skill 仍由 `config/skills.json` 的固定 release commit 和通用 Skill 链接器管理。
+- **命令分层**：`apply` 把锁定态分发/收敛到本机（secrets 拉取、shell alias、tools、browser、rules 构建分发、skills 链接、mcp 注入），不升版本、不装 Agent。`bump` 只刷新受管 MCP / CLI / tool 的版本锁和 skill commit 等元数据，不分发、不改本机环境；`update` = `bump` + `apply`（bump 段失败即中止，不分发旧锁定态），不碰 Agent 生命周期；`init` = `bump` + Agent 生命周期（安装缺失 Agent + 升级已装 Agent）+ `apply` + 失效引用审计；`agents:apply` 只跑 Agent 生命周期（`--no-install`），按当前版本锁升级/修复已装 Agent；`sys:upgrade` 只更新 agent-manager 仓库自身。
 - **不接管终端配置**：除 shell alias 受管区块会写入 `~/.zshrc`（interactive）与 `~/.zprofile`（login，供非交互 login shell 如 UU 远程 term 加载别名）外，`apply` / `bump` / `init` 不改写 `~/.tmux.conf`、iTerm2 动态配置等用户级终端文件；仓库也不提供 `terminal:apply` 入口。
 - **诊断双出口**：`doctor / status` 默认输出面向人的文本报告；追加 `--json` 时输出机器可读 JSON，不再需要从文本中抓取 warning 计数。
 - **最小 smoke 策略**：`scripts/ci-smoke.sh` 通过 `AGENT_MANAGER_BASE_CONFIG=config/manager.smoke.json` 运行安全预演，避免把默认全量策略带来的未物化提示项混进 CI 基线。
@@ -234,11 +230,9 @@ agent-manager/
 │   ├── agents.json           # Agent定义
 │   ├── tools.json            # 工具定义
 │   ├── skills.json           # Skill定义
-│   ├── herdr.json            # Herdr安装与集成定义
 │   └── mcp.json              # MCP定义
 ├── agent-lifecycle/          # Agent生命周期管理
 ├── agent-tool/               # 工具管理
-├── agent-herdr/              # Herdr集成管理
 ├── agent-skill/              # Skill管理
 │   └── repositories/         # Skill 仓库托管缓存（owner-marked）
 ├── agent-mcp/                # MCP管理

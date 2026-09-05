@@ -35,18 +35,12 @@
 
 - `chrome-devtools`（MCP）
   - 由 `make bump` 刷新本机 `config/version-pins.local.json` 中的版本锁；各 Agent 实际运行时只消费固定版本。
-默认受管 skill 仓库包括 `agent-skills` 与 `herdr`；仓库、升级策略和初始 commit 保留在 `config/skills.json`，真实运行 commit 由 `config/version-pins.local.json` 的本地锁覆盖。运行时同步只检出固定 commit，不直接跟随默认分支或动态 release。`agent-skills` 由 `make bump` 按 `latest-branch` 刷新；`agent-skills` 面向 `Claude Code`、`Codex` 与 `Kimi Code` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 `safe-merge-review`、`change-discipline`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing`、`technical-diagramming` 这 6 个 skill 包。`herdr` 按 `latest-release` 刷新，向 `Claude Code`、`Codex` 与 `Kimi Code` 暴露官方 `skills/herdr`。两者都不会因为上游新增 skill 而自动扩大安装范围。
+默认受管 skill 仓库为 `agent-skills`；仓库、升级策略和初始 commit 保留在 `config/skills.json`，真实运行 commit 由 `config/version-pins.local.json` 的本地锁覆盖。运行时同步只检出固定 commit，不直接跟随默认分支或动态 release。`agent-skills` 由 `make bump` 按 `latest-branch` 刷新；`agent-skills` 面向 `Claude Code`、`Codex` 与 `Kimi Code` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 `safe-merge-review`、`change-discipline`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing`、`technical-diagramming` 这 6 个 skill 包，不会因为上游新增 skill 而自动扩大安装范围。
 默认自动安装的 Agent 当前只包含 `Claude Code` 与 `Codex`。
 `Claude Code` 与 `Codex` 默认走官方 npm 包，并使用 `config/agents.json` 中的命令模板加本机版本锁。历史 `brew` 安装仅用于识别并提示迁移，不再作为这些 CLI 的受管 provider。
 `Claude Code native` 仍作为兼容 provider 保留官方 install / update / uninstall 语义，但默认不再使用这条动态 updater 路径。
 `Claude Code local install` 不纳入 `agent-manager` lifecycle 托管，因为它依赖 shell alias 暴露入口，当前探测链路不会越权接管。
 以上 lifecycle 口径统一按两个当前受管 Agent 的官方推荐方式维护。`Claude Code` 和 `Codex` 的 npm provider 使用 `config/agents.json` 中的命令模板，并由 `make bump` 刷新本机 `config/version-pins.local.json`（然后由 `make agents:apply` 或 `make init` 负责更新软件）。`agent-manager` 不改写用户 shell profile。
-
-### Herdr 会话管理
-
-`config/herdr.json` 保存 [Herdr 官方安装器](https://herdr.dev/install.sh)与集成目标，`config/manager.json` 保存默认启用策略。`apply` / `init` 缺少 Herdr CLI 时才调用官方安装器；已有 CLI 不会被静默升级。随后通过 `herdr integration install claude|codex` 幂等收敛官方会话集成，并由状态回读确认版本为 `current`。`agent-manager` 不会自动启动或停止 Herdr 服务，也不改写 Herdr 自身运行参数。
-
-官方 Herdr Skill 固定到已发布 release 的 commit，并继续使用本机当前 Codex 实际读取的 `~/.codex/skills`；Claude Code 使用 `~/.claude/skills`，Kimi Code 使用 `~/.kimi-code/skills`（Kimi Code 仅作 skills / MCP target，不经 `agent-manager` 安装或升级）。可单独运行 `make herdr:apply` 收敛 CLI 与集成，再运行 `make skills:apply` 收敛 Skill。已打开的 Agent 进程不会被追溯注入，需从 Herdr 发起新会话后使用。
 
 ## Official CLI Lifecycle Policy
 
@@ -70,7 +64,6 @@
 - **仓库基线 (`manager.json`)**：保存可审计的默认策略。
 - **本地覆盖 (`manager.local.json`)**：运行时与 `manager.json` 深度合并；`make ui` 只写这一层，适合机器本地偏好与私有配置。
 - **版本锁 (`version_lock`) / skill commit**：`config/agents.json`、`config/tools.json`、`config/mcp.json` 与 `config/skills.json` 保存命令模板、包名、仓库和升级策略；`make bump` 查询 npm / Git ref / skill 仓库分支的最新版本并写入本机 `config/version-pins.local.json`。同步到 Codex / Claude Code 的实际运行配置会先套用本地 lock，不得使用 `@latest`、分支名或未固定的 skill 仓库。
-- **Herdr 默认策略**：`herdr.enabled`、`herdr.auto_install` 与 `herdr.integrations` 控制 CLI 缺失安装和 Claude Code / Codex 官方集成；禁用策略不会擅自卸载用户已有集成。
 - **浏览器前置开关**：`browser_us_sync.enabled` 控制 `apply` / `init` / `browser:apply` 是否执行浏览器 Google US 前置同步。
 - **模块化定义 (`agents.json`等)**：保存官方指令细节，支持 Policy 的强制覆盖。
 
@@ -116,7 +109,7 @@
 
 - `./manage.sh`: 显示帮助（只列日常入口 + 进阶原语）；这是脚本的安全默认入口。完整命令清单执行 `./manage.sh help:all` 或 `make help:all`。
 - `make update`: 日常最常用。把本机更新并收敛到最新（= `bump` + `apply`，secrets 只拉一次）；不安装缺失 Agent。
-- `make apply`: 把当前锁定态分发/收敛到本机（rules 构建分发、skills 链接、mcp 注入、tools、Herdr、browser、shell alias、secrets 拉取）；不刷新版本锁、不安装 Agent。
+- `make apply`: 把当前锁定态分发/收敛到本机（rules 构建分发、skills 链接、mcp 注入、tools、browser、shell alias、secrets 拉取）；不刷新版本锁、不安装 Agent。
 
 - `make bump`: 纯粹刷新版本锁与 skill commit（更新元数据到锁定文件），不执行本地环境应用。
 - `make agents:apply`: 按 `config/version-pins.local.json` 里的**当前版本锁**升级/修复本地已安装 Agent，不强制安装缺失 Agent。它自身**不刷新版本锁**，所以锁没变时通常是幂等空转；要升到上游最新，先跑 `make bump`（或 `make update`）刷锁再跑本命令，或直接用 `make init` 一步到位。
@@ -130,7 +123,6 @@
 - `make doctor` / `make status`: 执行全系统深度体检，并把 warning 细分为 `可选工具未就绪` 与 `托管产物尚未生成` 两类提示项；同时扫描主仓库中是否存在疑似明文敏感信息。追加 `--json` 可输出机器可读诊断报告。
 - `make rules-build`: 从 `agent-rule/rules/src/` 生成 `agent-rule/rules/dist/` 下的可分发规则产物。
 - `make rules:apply`: 将 `agent-rule/rules/dist/` 中的规则产物分发到各 Agent 原生入口。
-- `make herdr:apply`: 缺失时安装 Herdr CLI，并幂等收敛 Claude Code / Codex 官方会话集成；不自动升级已有 CLI，不启动服务。
 - `make codex:hooks:apply`: 刷新仓库级 `.codex/hooks.json`。
 - `make fetch-models`: 探测并获取 API 端点支持的模型列表 (支持 OpenAI / Anthropic 格式)。
 - `make state:restore`: 交互式回滚历史快照。

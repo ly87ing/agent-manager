@@ -57,7 +57,6 @@ class ProjectContractTests(unittest.TestCase):
         for excluded in (
             "run_agent_lifecycle_task",
             "run_tools_sync_task",
-            "run_herdr_sync_task",
             "run_browser_us_sync_task",
             "run_shell_aliases_sync_task",
             "run_rules_sync_task",
@@ -125,7 +124,6 @@ class ProjectContractTests(unittest.TestCase):
                 "skills:bump",
                 "mcp:apply",
                 "tools:apply",
-                "herdr:apply",
                 "browser:apply",
                 "help:all",
             ):
@@ -152,7 +150,6 @@ class ProjectContractTests(unittest.TestCase):
                     "skills:bump",
                     "mcp:apply",
                     "tools:apply",
-                    "herdr:apply",
                     "browser:apply",
                     "help:all",
                 ],
@@ -204,7 +201,6 @@ class ProjectContractTests(unittest.TestCase):
         for rel_path in (
             "agent-lifecycle/sync_agents.py",
             "agent-tool/sync_tools.py",
-            "agent-herdr/sync_herdr.py",
             "agent-skill/link_skills.py",
             "agent-mcp/sync_mcp.py",
         ):
@@ -343,14 +339,6 @@ class ProjectContractTests(unittest.TestCase):
         for skill_path in agent_skills["skill_paths"]:
             self.assertIn(f"`{skill_path}`", readme)
         self.assertIn(f"这 {agent_skills['skill_count']} 个 skill 包", readme)
-
-    def test_readme_documents_herdr_default_management(self):
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-
-        self.assertIn("config/herdr.json", readme)
-        self.assertIn("make herdr:apply", readme)
-        self.assertIn("`Claude Code` 与 `Codex`", readme)
-        self.assertIn("不会自动启动或停止 Herdr 服务", readme)
 
     def test_readme_documents_isolated_chrome_devtools_mcp(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")

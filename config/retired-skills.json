@@ -6,6 +6,7 @@
     "fix-ones-bug",
     "qa-self-verify",
     "playwright-best-practices",
-    "frontend-design"
+    "frontend-design",
+    "herdr"
   ]
 }
