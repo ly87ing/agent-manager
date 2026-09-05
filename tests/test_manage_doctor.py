@@ -10,6 +10,7 @@ from src.manage_doctor import (
     actual_skill_targets,
     build_report,
     expected_managed_mcp_servers,
+    npm_global_package_version,
     render_text,
 )
 
@@ -941,3 +942,106 @@ class ManageDoctorReportTests(unittest.TestCase):
             self.assertEqual(report["status"], "healthy")
             mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
             self.assertEqual(mcp_names["Codex"]["status"], "ok")
+
+    def test_report_marks_runtime_pulled_mcp_server_as_notice(self):
+        # uvx git 分支源：doctor 只观测供给模型与缓存刷新入口，不在此处检查版本
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {\n    "serena": { "enabled": true }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                json.dumps(
+                    {
+                        "agent_paths": {},
+                        "servers": {
+                            "serena": {
+                                "command": "uvx",
+                                "args": ["--from", "git+https://example.invalid/serena.git@main", "serena"],
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{"repositories": {}, "agents": {}}',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            # uvx 必需命令检查走 command_exists；CI 机器没有 uvx 时不能让它提前终止报告
+            with mock.patch("src.manage_doctor.command_exists", return_value=True):
+                report = build_report(
+                    root_dir=temp_root,
+                    config_file=temp_root / "config" / "manager.json",
+                    python_cmd="python3",
+                )
+
+            mcp_entries = {entry["name"]: entry for entry in report["sections"]["mcp"]}
+            runtime_entry = mcp_entries["serena 运行时"]
+            self.assertEqual(runtime_entry["status"], "notice")
+            self.assertIn("运行时拉取（uvx · git+https://example.invalid/serena.git@main）", runtime_entry["message"])
+            self.assertIn("make update", runtime_entry["message"])
+
+    def test_report_shows_managed_mcp_binary_version(self):
+        # tools.json 纳管的直连二进制（chrome-devtools-mcp）：doctor 报告实装版本
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {\n    "chrome-devtools": { "enabled": true }\n  }\n}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "mcp.json").write_text(
+                json.dumps(
+                    {
+                        "agent_paths": {},
+                        "servers": {
+                            "chrome-devtools": {
+                                "command": "chrome-devtools-mcp",
+                                "args": ["--isolated"],
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "skills.json").write_text(
+                '{"repositories": {}, "agents": {}}',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+
+            with (
+                mock.patch("src.manage_doctor.command_exists", return_value=True),
+                mock.patch("src.manage_doctor.npm_global_package_version", return_value="1.2.3"),
+            ):
+                report = build_report(
+                    root_dir=temp_root,
+                    config_file=temp_root / "config" / "manager.json",
+                    python_cmd="python3",
+                )
+
+            mcp_entries = {entry["name"]: entry for entry in report["sections"]["mcp"]}
+            runtime_entry = mcp_entries["chrome-devtools 运行时"]
+            self.assertEqual(runtime_entry["status"], "ok")
+            self.assertIn("chrome-devtools-mcp（1.2.3）", runtime_entry["message"])
+
+    def test_npm_global_package_version_queries_local_npm_only(self):
+        payload = json.dumps({"dependencies": {"chrome-devtools-mcp": {"version": "0.9.1"}}})
+        with mock.patch("src.manage_doctor.subprocess.run") as run_mock:
+            run_mock.return_value = mock.Mock(stdout=payload)
+            version = npm_global_package_version("npm install -g chrome-devtools-mcp")
+
+        self.assertEqual(version, "0.9.1")
+        run_mock.assert_called_once_with(
+            ["npm", "list", "-g", "chrome-devtools-mcp", "--depth=0", "--json"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        # 非 npm install 命令不触发任何子进程
+        self.assertIsNone(npm_global_package_version("brew install --cask foo"))

@@ -4,7 +4,8 @@
     "codex": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "npm" }
   },
   "tools": {
-    "playwright-cli": { "enabled": true, "auto_update": true }
+    "playwright-cli": { "enabled": true, "auto_update": true },
+    "chrome-devtools-mcp": { "enabled": true, "auto_update": true }
   },
   "browser_us_sync": { "enabled": true },
   "skills": {

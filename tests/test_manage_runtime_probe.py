@@ -392,7 +392,32 @@ class ManageRuntimeProbeTests(unittest.TestCase):
 
         self.assertEqual(required, [])
 
-    def test_collect_required_runtime_commands_includes_npx_for_active_chrome_devtools_mcp(self):
+    def test_collect_required_runtime_commands_includes_uvx_for_runtime_pulled_mcp(self):
+        required = manage_runtime_probe.collect_required_runtime_commands(
+            {
+                "agents": {},
+                "tools": {},
+                "skills": {},
+                "mcp": {"serena": {"enabled": True}},
+            },
+            {},
+            {},
+            {"repositories": {}},
+            {
+                "servers": {
+                    "serena": {
+                        "command": "uvx",
+                        "args": ["--from", "git+https://example.invalid/serena.git@main", "serena"],
+                    }
+                }
+            },
+        )
+
+        self.assertEqual(required, ["uvx"])
+
+    def test_collect_required_runtime_commands_skips_direct_binary_mcp_server(self):
+        # 直连二进制型 server（如 chrome-devtools-mcp）由 tools.json 纳管安装，
+        # 其就绪归 tools 就绪审计，不再占用 runtime 必需命令位
         required = manage_runtime_probe.collect_required_runtime_commands(
             {
                 "agents": {},
@@ -406,14 +431,14 @@ class ManageRuntimeProbeTests(unittest.TestCase):
             {
                 "servers": {
                     "chrome-devtools": {
-                        "command": "npx",
-                        "args": ["-y", "chrome-devtools-mcp@latest", "--isolated"],
+                        "command": "chrome-devtools-mcp",
+                        "args": ["--isolated"],
                     }
                 }
             },
         )
 
-        self.assertEqual(required, ["npx"])
+        self.assertEqual(required, [])
 
     def test_collect_required_runtime_commands_skips_unmanaged_agent_providers_and_resolves_commands(self):
         required = manage_runtime_probe.collect_required_runtime_commands(

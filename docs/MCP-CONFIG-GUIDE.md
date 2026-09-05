@@ -40,16 +40,16 @@ make update
 
 | Server | 用途 | 受管命令 | 凭证 | 默认策略 |
 |--------|------|----------|------|----------|
-| `chrome-devtools` | Chrome DevTools 浏览器调试、性能分析、network / console / screenshot | `npx -y chrome-devtools-mcp`（无版本号，跟随上游最新） | 无 | 启用 |
+| `chrome-devtools` | Chrome DevTools 浏览器调试、性能分析、network / console / screenshot | `chrome-devtools-mcp`（运行时由 `tools.json` 纳管，npm 全局安装、不锁版本） | 无 | 启用 |
 | `grok-search` | web_search / web_fetch 联网搜索与网页抓取 | `uvx --from git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily grok-search` | `GROK_API_URL`, `GROK_API_KEY`, `GROK_MODEL`, `TAVILY_ENABLED`, `TAVILY_API_KEY`, `TAVILY_API_URL`, `FIRECRAWL_API_KEY`, `FIRECRAWL_API_URL` | 启用 |
 | `serena` | JS/TS 语义级代码导航（LSP：find_symbol / 引用 / 符号概览） | `uvx --from git+https://github.com/oraios/serena@main serena start-mcp-server`，按客户端追加 context 参数 | 无 | 启用 |
 
 **维护约定**:
-- 受管 MCP 的实际命令不锁版本：npm 包命令不带版本号，git 依赖跟踪上游分支（`grok-search` 为 `grok-with-tavily`，`serena` 为 `main`），跟随上游最新。
-- `config/mcp.json` 保存服务器定义与命令模板；`make update` / `make init` 直接按其中的定义收敛本机配置，版本波动视为上游变更。
-- 首次调用 `chrome-devtools` 时，`npx` 可能会联网下载最新版本的包；需要本机有可用的 Node.js / npm 运行时。
-- `chrome-devtools` 的 Codex 启动超时按 120 秒维护，覆盖默认 30 秒，避免 `npx` 冷启动或缓存失效时被误判为 MCP 启动失败。
-- `make doctor` 会在 `chrome-devtools` 处于启用状态时预检 `npx` 运行时是否可用；实际命令以 `config/mcp.json` 中的定义为准。
+- 受管 MCP 不锁版本，但版本生命周期按运行时类型各有归属：`chrome-devtools` 的二进制 `chrome-devtools-mcp` 由 `config/tools.json` 纳管为 npm 全局工具，`make update` 在 tools 同步步骤中探测 npm 上游并升级；`grok-search` / `serena` 为 uvx git 分支源（`grok-with-tavily` / `main`），`make update` 的 MCP 步骤以 `uvx --refresh` 预热缓存对齐分支头。
+- `config/mcp.json` 只保存接线定义（命令、参数、凭证占位符、agent 差异），`make update` / `make init` 按其中的定义收敛本机配置；版本波动视为上游变更。
+- `chrome-devtools` 需要本机有可用的 Node.js / npm 运行时（供 tools 同步安装 `chrome-devtools-mcp`）；未安装时 doctor 的 Tools 就绪审计会报错。
+- `chrome-devtools` 的 Codex 启动超时按 120 秒维护，覆盖默认 30 秒，避免冷启动时被误判为 MCP 启动失败。
+- `make doctor` 会报告各启用中 MCP server 的运行时供给状态：`chrome-devtools` 显示实装版本，uvx git 型显示所跟踪分支与缓存刷新入口；实际命令以 `config/mcp.json` 中的定义为准。
 - 如果后续需要统一增加 `--browserUrl`、`--headless`、`--isolated` 等参数，应修改 `config/mcp.json`，不要手改单个 Agent 的 MCP 配置文件。
 - 本项目不管理 GitHub Copilot，因此不会再向其配置目录注入托管 MCP，也不会再生成 Copilot 专属 repo-native rules 文件。
 
@@ -205,18 +205,18 @@ git push origin main
 
 ### 当前维护策略
 
-本项目默认通过以下命令受管分发给所有支持 MCP 的 Agent：
+`chrome-devtools` 的运行时二进制 `chrome-devtools-mcp` 由 `config/tools.json` 纳管为 npm 全局工具（安装/升级命令不锁版本），`config/mcp.json` 只保留接线定义，直连已安装的二进制：
 
 ```bash
-npx -y chrome-devtools-mcp
+chrome-devtools-mcp --isolated --no-usage-statistics
 ```
 
-命令不带版本号、跟随上游最新；每个 Agent 在真正启动 MCP 时由 `npx` 解析当前上游版本。
+版本生命周期归 `agent-tool/sync_tools.py`：`make update` / `make init` 时用 `npm list -g` 对比 npm 上游版本，落后才执行 `npm install -g chrome-devtools-mcp` 升级；探测失败默认跳过，可用 `--force-refresh` 强制。这样 MCP 版本升级有明确入口、doctor 可观测实装版本，且 Agent 启动 MCP 不再依赖 npx 运行时解析缓存。
 
 ### 使用约束
 
 - `chrome-devtools` 不依赖额外 secrets，占位符注入链不会为它加载专用凭证。
-- `npx` 会在首次运行或本地缓存失效时解析并下载最新版本，因此应将版本波动视为上游变更，而不是本仓库内的 drift。
+- 版本升级由 tools 同步显式完成，因此应将版本波动视为上游变更，而不是本仓库内的 drift。
 - 如果需要连接已运行的 Chrome、统一打开 headless、接受自签名证书或追加其他浏览器参数，应在 `config/mcp.json` 的 `args` 中集中维护，而不是在各 Agent 侧手工追加。
 
 ### 官方参考
@@ -285,7 +285,7 @@ KEY = '{"nested":"value"}'
 
 1. **检查命令是否可用**:
    ```bash
-   which uvx npx
+   which uvx chrome-devtools-mcp
    uvx --version
    ```
 

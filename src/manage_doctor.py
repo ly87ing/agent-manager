@@ -6,6 +6,7 @@ import json
 import ntpath
 import os
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -186,6 +187,38 @@ def command_version(command: str) -> str:
     if not output:
         return "可用"
     return output.splitlines()[0]
+
+
+def npm_global_package_version(install_cmd: str) -> str | None:
+    """从 `npm install -g <pkg>` 形式的安装命令反查全局已装版本（纯本地查询，不联网）。
+
+    与 sync_tools._extract_npm_package_name 的口径保持一致：npm install 命令里
+    首个非 flag token 即包名；版本查询失败时返回 None，由调用方决定回退展示。
+    """
+    try:
+        tokens = shlex.split(install_cmd or "")
+    except ValueError:
+        tokens = (install_cmd or "").split()
+    if len(tokens) < 3 or tokens[0] != "npm" or tokens[1] != "install":
+        return None
+    package = next((token for token in tokens[2:] if not token.startswith("-")), None)
+    if not package:
+        return None
+    try:
+        result = subprocess.run(
+            ["npm", "list", "-g", package, "--depth=0", "--json"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    try:
+        parsed = json.loads(result.stdout or "{}")
+        version = parsed.get("dependencies", {}).get(package, {}).get("version")
+    except (TypeError, ValueError):
+        return None
+    return version if isinstance(version, str) and version else None
 
 
 def git_version_info(root_dir: Path) -> dict[str, str] | None:
@@ -927,7 +960,9 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
             continue
         severity = definition.get("doctor_severity", "error")
         if detect_tool_readiness(tool_name, definition, root_dir, inventory=inventory):
-            append_entry(report, "tools", make_entry(tool_name, "ok", "已就绪"))
+            version = npm_global_package_version(definition.get("install"))
+            message = f"已就绪 (v{version})" if version else "已就绪"
+            append_entry(report, "tools", make_entry(tool_name, "ok", message))
             continue
         if severity == "warning":
             append_entry(
@@ -1014,6 +1049,42 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
             else:
                 message = "Agent 未安装，未生成 MCP 配置"
                 append_entry(report, "mcp", make_entry(label, "warning", message, category="unmaterialized"))
+
+    # MCP 运行时供给观测：运行时拉取型（uvx/npx 启动时解析）只报告供给模型与缓存
+    # 刷新入口；直连二进制型（tools.json 纳管）报告实装版本，缺失由 tools 审计兜底
+    for server_name, policy in config.get("mcp", {}).items():
+        if not policy.get("enabled", True):
+            continue
+        definition = mcp_cfg.get("servers", {}).get(server_name)
+        if not definition:
+            continue
+        command = definition.get("command")
+        if not isinstance(command, str) or not command:
+            continue
+        entry_name = f"{server_name} 运行时"
+        if command in ("npx", "uvx"):
+            args_list = definition.get("args") or []
+            source = next(
+                (arg for arg in args_list if isinstance(arg, str) and "git+" in arg),
+                None,
+            )
+            detail = f"运行时拉取（{command}" + (f" · {source}" if source else "") + "）；make update 管线刷新其缓存"
+            append_entry(report, "mcp", make_entry(entry_name, "notice", detail))
+            continue
+        tool_def = next(
+            (d for d in tool_defs.values() if d.get("ready_check") == f"bin:{command}"),
+            None,
+        )
+        if tool_def is None:
+            # 未纳管的直连二进制不属于本仓库供给面（如 augment-context-engine 的 auggie），不观测
+            continue
+        if not command_exists(command):
+            append_entry(report, "mcp", make_entry(entry_name, "notice", f"运行时 {command} 未安装；由 Tools 就绪审计负责收敛"))
+            continue
+        version = npm_global_package_version(tool_def.get("install"))
+        if not version:
+            version = command_version(command)
+        append_entry(report, "mcp", make_entry(entry_name, "ok", f"{command}（{version}）"))
 
     for agent_id, agent_path in canonicalize_agent_mapping(skill_cfg.get("agents", {})).items():
         if agent_id not in active_skill_agents:

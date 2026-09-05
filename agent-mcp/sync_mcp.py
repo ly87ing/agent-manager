@@ -102,6 +102,45 @@ def configure_serena_project_folder(config, dry_run=False, offline=False):
     return True
 
 
+UVX_RUNTIME_WARMUP_TIMEOUT = 240
+
+
+def uvx_git_runtime_target(config):
+    """识别 uvx --from git+... 形式的运行时拉取 server，返回 (source, package)。"""
+    if config.get("command") != "uvx":
+        return None
+    args = config.get("args") or []
+    if len(args) >= 3 and args[0] == "--from" and "git+" in args[1]:
+        return args[1], args[2]
+    return None
+
+
+def warmup_uvx_runtime(name, config, dry_run=False, offline=False):
+    """刷新 uvx git 分支源的缓存：--refresh 强制重取分支头并重建环境，使后续
+    Agent 启动 MCP 时落到上游最新。预热不启动 server 本体（复用 python -c 空跑），
+    失败仅警告、不阻断配置注入——缓存仍是旧版时功能不受影响。
+    """
+    target = uvx_git_runtime_target(config)
+    if target is None:
+        return True
+    source, _package = target
+    if dry_run:
+        logging.info(f"[{name}] (预览: 将刷新 uvx 运行时缓存 {source})")
+        return True
+    if offline:
+        logging.info(f"[{name}] 离线模式，跳过 uvx 运行时刷新。")
+        return True
+    ok, output = run_cmd(
+        ["uvx", "--refresh", "--from", source, "python", "-c", "pass"],
+        timeout=UVX_RUNTIME_WARMUP_TIMEOUT,
+    )
+    if not ok:
+        logging.warning(f"[{name}] uvx 运行时刷新失败（保留现有缓存，不影响配置注入）: {output}")
+        return False
+    logging.info(f"[{name}] uvx 运行时已对齐上游分支最新。")
+    return True
+
+
 def repo_head_is_detached(repo_path):
     success, _ = run_cmd(["git", "symbolic-ref", "-q", "HEAD"], cwd=repo_path)
     return not success
@@ -565,7 +604,7 @@ def main():
     parser.add_argument("--base-dir", default=str(Path(__file__).resolve().parent), help="基础目录")
     parser.add_argument("--dry-run", action="store_true", help="预览")
     parser.add_argument("--offline", action="store_true", help="离线模式 (跳过远程仓库与 secrets 更新)")
-    parser.add_argument("--prepare-runtime", action="store_true", help="显式准备 repo/runtime（clone、pull、setup、build）")
+    parser.add_argument("--prepare-runtime", action="store_true", help="显式准备 repo/runtime（clone、pull、setup、build、uvx 缓存刷新）")
     parser.add_argument("-f", "--force-refresh", action="store_true", help="更新探测失败时仍强制执行远端刷新")
     args = parser.parse_args()
     
@@ -647,6 +686,9 @@ def main():
         url = srv_config.get("url")
         if not url:
             srv_config["_repo_path"] = ""
+            # uvx git 分支源先刷新缓存，serena 随后的项目目录配置即可复用最新环境
+            if args.prepare_runtime and srv_config["_sync_ready"]:
+                warmup_uvx_runtime(srv_name, srv_config, dry_run=args.dry_run, offline=args.offline)
             if (
                 args.prepare_runtime
                 and srv_name == "serena"

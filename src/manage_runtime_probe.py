@@ -388,8 +388,10 @@ def collect_required_runtime_commands(config, agent_defs, tool_defs, skill_cfg, 
         policy = config.get("mcp", {}).get(server_name)
         if policy is None or not policy.get("enabled", True):
             continue
-        if server_def.get("command") == "npx":
-            add("npx")
+        # 运行时拉取型 server（npx/uvx 启动时解析包）依赖对应执行器存在；
+        # 直连二进制型 server（如 chrome-devtools-mcp）的就绪由 tools 就绪审计覆盖
+        if server_def.get("command") in ("npx", "uvx"):
+            add(server_def["command"])
         if server_def.get("url"):
             add("git")
 

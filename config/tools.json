@@ -1,5 +1,11 @@
 {
   "tools": {
+    "chrome-devtools-mcp": {
+      "install": "npm install -g chrome-devtools-mcp",
+      "uninstall": "npm uninstall -g chrome-devtools-mcp",
+      "upgrade": "npm install -g chrome-devtools-mcp",
+      "ready_check": "bin:chrome-devtools-mcp"
+    },
     "playwright-cli": {
       "install": "npm install -g @playwright/cli",
       "uninstall": "npm uninstall -g @playwright/cli",

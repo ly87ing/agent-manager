@@ -54,16 +54,30 @@ class SyncMcpTests(unittest.TestCase):
         policy = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
 
         chrome_devtools = definitions["servers"]["chrome-devtools"]
-        self.assertEqual(chrome_devtools["command"], "npx")
+        self.assertEqual(chrome_devtools["command"], "chrome-devtools-mcp")
         self.assertEqual(
             chrome_devtools["args"],
-            ["-y", "chrome-devtools-mcp", "--isolated", "--no-usage-statistics"],
+            ["--isolated", "--no-usage-statistics"],
         )
         self.assertNotIn("version_lock", chrome_devtools)
         self.assertEqual(chrome_devtools["startup_timeout_sec"], 120)
         self.assertEqual(chrome_devtools.get("env", {}), {})
         self.assertIsNone(chrome_devtools["agents"])
         self.assertTrue(policy["mcp"]["chrome-devtools"]["enabled"])
+
+    def test_committed_chrome_devtools_runtime_is_a_managed_tool(self):
+        # 运行时二进制归 tools.json 纳管（npm 全局、不锁版本），mcp.json 只保留接线
+        tool_defs = json.loads((ROOT / "config" / "tools.json").read_text(encoding="utf-8"))["tools"]
+        policy = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
+
+        tool = tool_defs["chrome-devtools-mcp"]
+        self.assertEqual(tool["install"], "npm install -g chrome-devtools-mcp")
+        self.assertEqual(tool["install"], tool["upgrade"])
+        self.assertNotIn("@latest", tool["install"])
+        self.assertEqual(tool["ready_check"], "bin:chrome-devtools-mcp")
+        self.assertEqual(tool["uninstall"], "npm uninstall -g chrome-devtools-mcp")
+        self.assertTrue(policy["tools"]["chrome-devtools-mcp"]["enabled"])
+        self.assertTrue(policy["tools"]["chrome-devtools-mcp"]["auto_update"])
 
     def test_committed_grok_search_definition_sets_codex_startup_timeout(self):
         definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
@@ -270,7 +284,7 @@ class SyncMcpTests(unittest.TestCase):
 
             self.assertTrue(ok)
             json_updated = json.loads(json_config_path.read_text(encoding="utf-8"))
-            self.assertEqual(json_updated["mcpServers"]["chrome-devtools"]["command"], "npx")
+            self.assertEqual(json_updated["mcpServers"]["chrome-devtools"]["command"], "chrome-devtools-mcp")
             self.assertEqual(
                 json_updated["mcpServers"]["chrome-devtools"]["args"],
                 chrome_devtools["args"],
@@ -281,7 +295,7 @@ class SyncMcpTests(unittest.TestCase):
             )
 
             toml_updated = tomllib.loads(toml_config_path.read_text(encoding="utf-8"))
-            self.assertEqual(toml_updated["mcp_servers"]["chrome-devtools"]["command"], "npx")
+            self.assertEqual(toml_updated["mcp_servers"]["chrome-devtools"]["command"], "chrome-devtools-mcp")
             self.assertEqual(
                 toml_updated["mcp_servers"]["chrome-devtools"]["args"],
                 chrome_devtools["args"],
@@ -294,6 +308,48 @@ class SyncMcpTests(unittest.TestCase):
                 toml_updated["mcp_servers"]["chrome-devtools"]["env"]["_MANAGED_BY"],
                 "agent-manager",
             )
+
+    def test_uvx_warmup_refreshes_git_branch_runtime_cache(self):
+        config = {
+            "command": "uvx",
+            "args": ["--from", "git+https://github.com/oraios/serena@main", "serena", "start-mcp-server"],
+        }
+        with mock.patch.object(sync_mcp, "run_cmd", return_value=(True, "")) as run_mock:
+            ok = sync_mcp.warmup_uvx_runtime("serena", config)
+
+        self.assertTrue(ok)
+        run_mock.assert_called_once_with(
+            ["uvx", "--refresh", "--from", "git+https://github.com/oraios/serena@main", "python", "-c", "pass"],
+            timeout=sync_mcp.UVX_RUNTIME_WARMUP_TIMEOUT,
+        )
+
+    def test_uvx_warmup_failure_does_not_block_config_injection(self):
+        config = {
+            "command": "uvx",
+            "args": ["--from", "git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily", "grok-search"],
+        }
+        with mock.patch.object(sync_mcp, "run_cmd", return_value=(False, "boom")):
+            ok = sync_mcp.warmup_uvx_runtime("grok-search", config)
+
+        self.assertFalse(ok)
+
+    def test_uvx_warmup_skips_offline_and_dry_run(self):
+        config = {
+            "command": "uvx",
+            "args": ["--from", "git+https://github.com/oraios/serena@main", "serena"],
+        }
+        with mock.patch.object(sync_mcp, "run_cmd") as run_mock:
+            self.assertTrue(sync_mcp.warmup_uvx_runtime("serena", config, offline=True))
+            self.assertTrue(sync_mcp.warmup_uvx_runtime("serena", config, dry_run=True))
+
+        run_mock.assert_not_called()
+
+    def test_uvx_warmup_ignores_direct_binary_servers(self):
+        config = {"command": "chrome-devtools-mcp", "args": ["--isolated"]}
+        with mock.patch.object(sync_mcp, "run_cmd") as run_mock:
+            self.assertTrue(sync_mcp.warmup_uvx_runtime("chrome-devtools", config))
+
+        run_mock.assert_not_called()
 
     def test_committed_serena_definition_syncs_client_specific_context_args(self):
         definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))

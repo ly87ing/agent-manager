@@ -10,7 +10,7 @@ help:
 init:
 	@./manage.sh init
 
-# 日常最常用：把所有受管组件收敛到本机（不安装、也不升级 Agent 软件）
+# 日常最常用：除 Agent 本体外全部收敛到最新（含工具与 MCP 运行时；不安装、不升级 Agent 软件）
 update:
 	@./manage.sh update
 

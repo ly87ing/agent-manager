@@ -918,7 +918,7 @@ function run_mcp_sync_task() {
     if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
     if [ -n "$FORCE_REFRESH_FLAG" ]; then args+=("$FORCE_REFRESH_FLAG"); fi
 
-    run_task_in_dir "$title" "MCP 注入完成" "MCP 失败" 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" "${args[@]}"
+    run_task_in_dir "$title" "MCP 注入完成" "MCP 失败" 900 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" "${args[@]}"
 }
 
 function run_skill_reference_audit_warn() {
@@ -995,7 +995,7 @@ function print_help() {
     echo -e "  ${PENDING_GOLD}-f, --force-refresh${NC} 探测失败时仍强制远端刷新"
     echo -e "  ${PENDING_GOLD}--wait-agent-lifecycle${NC} 等待 Agent 生命周期后台安装/升级结束\n"
     echo -e "${BOLD}${HDR_BLUE}=== 命令 (Commands) ===${NC}"
-    echo -e "  ${SUCCESS_GREEN}update${NC}         ${BOLD}日常最常用${NC}：把所有受管组件收敛到本机（secrets、shell alias、tools、browser、rules、skills、MCP、hooks）；不安装、也不升级 Agent 软件"
+    echo -e "  ${SUCCESS_GREEN}update${NC}         ${BOLD}日常最常用${NC}：除 Agent 本体外全部收敛到最新（secrets、shell alias、tools、browser、rules、skills、MCP 运行时与配置、hooks）；不安装、也不升级 Agent 软件"
     echo -e "  ${SUCCESS_GREEN}init${NC}           新机器初始化或全量收敛：安装缺失 Agent + 升级已装 Agent + \`update\`"
     echo -e "  ${SUCCESS_GREEN}agents:update${NC}  升级/修复已装 Agent 到上游最新（agents.json 不锁版本）；不安装缺失 Agent"
     echo -e "  ${SUCCESS_GREEN}doctor${NC}         深度资源校验、配置自检与环境排错（追加 --json 输出机器可读报告）"

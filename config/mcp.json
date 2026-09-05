@@ -1,8 +1,8 @@
 {
   "servers": {
     "chrome-devtools": {
-      "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp", "--isolated", "--no-usage-statistics"],
+      "command": "chrome-devtools-mcp",
+      "args": ["--isolated", "--no-usage-statistics"],
       "startup_timeout_sec": 120,
       "env": {},
       "agents": null
