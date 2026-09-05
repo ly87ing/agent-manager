@@ -135,7 +135,15 @@ Stop：Windows 方案若在本机无法验证，据实报告已验证范围与�
 
 | Phase | 状态 | 验收证据 | commit |
 |---|---|---|---|
-| Phase 0 契约与 JSON 化 | 未开始 | — | — |
+| Phase 0 契约与 JSON 化 | 已完成 | discover 592 项全绿、make smoke 通过、check_no_secrets 通过；8 域 status + 7 域 plan + system:audit + system:refresh-upstream 全命令真实机过双 schema | 3db6be4 / 6efbfec / ad2ab60 / 49cae4e / 63dea53 / c4b9fad |
 | Phase 1 Tauri 只读视图 | 未开始 | — | — |
 | Phase 2 写操作与同步 | 未开始 | — | — |
 | Phase 3 平台与 Rust 切片 | 未开始 | — | — |
+
+### Phase 0 实施备注
+
+- 提交方式：工作区含他人进行中改动，本任务全部经临时索引精确提交（共享文件 manage.sh 只提交"HEAD+本任务 diff"，他人暂存内容原样保留）。
+- skills v2 触发判据：policy 含 `skills` 或 `new_skill_default` 任一键即进矩阵模式；config/skills.json 未迁移（旧式升格等价，逐字节证据在 63dea53）。
+- uvx git 源 MCP 的本地 commit 不可读，freshness 诚实报 unknown（待上游缓存元数据契约稳定后升级）。
+- system:audit 的 data 沿用 doctor 报告结构，未单独契约化（contract 冻结规则下留待 v2）。
+- README.md / docs/ARCHITECTURE.md 有他人暂存改动，新命令族的文档登记暂缓至其入库后（集成备注，不阻塞）。
