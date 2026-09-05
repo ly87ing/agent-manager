@@ -1,0 +1,46 @@
+{
+  "description": "Engine Contract v1 plan action entry (docs/GUI-ARCHITECTURE-PROPOSAL.md section 2.4). One entry per write action a '<domain>.plan' command would perform; 'apply' executes exactly the listed actions. Fields whose value may be absent are required but nullable so the shape is uniform across ops: digest pair and backup_path exist only for file-touching ops, cmd only for 'run-cmd', target only for path-touching ops, note only when the engine has extra context.",
+  "type": "object",
+  "required": ["op", "element", "target", "risk", "before_digest", "after_digest", "backup_path", "cmd", "note"],
+  "additionalProperties": false,
+  "properties": {
+    "op": {
+      "description": "Operation kind.",
+      "type": "string",
+      "enum": ["write-file", "run-cmd", "symlink", "unlink", "install", "uninstall", "git-pull", "render"]
+    },
+    "element": {
+      "description": "Element id this action belongs to, e.g. 'mcp:grok-search'.",
+      "type": "string"
+    },
+    "target": {
+      "description": "Path the action touches, e.g. '~/.claude.json', or null for pure 'run-cmd' actions.",
+      "type": ["string", "null"]
+    },
+    "risk": {
+      "description": "Risk level (proposal section 2.4): read = pure probe, write-local = home-dir config write (backupable), exec-local = local command (build, link), network = fetch/download (forbidden in offline mode), install-remove = software install/uninstall (highest confirmation level).",
+      "type": "string",
+      "enum": ["read", "write-local", "exec-local", "network", "install-remove"]
+    },
+    "before_digest": {
+      "description": "sha256 digest of the current target content ('sha256:...'), or null when the target does not exist or the op has no file target.",
+      "type": ["string", "null"]
+    },
+    "after_digest": {
+      "description": "sha256 digest of the content the plan would write, or null when the op removes or does not touch file content.",
+      "type": ["string", "null"]
+    },
+    "backup_path": {
+      "description": "Snapshot path the current content is backed up to before the write, or null when nothing is overwritten.",
+      "type": ["string", "null"]
+    },
+    "cmd": {
+      "description": "Command line for 'run-cmd' ops, or null otherwise.",
+      "type": ["string", "null"]
+    },
+    "note": {
+      "description": "Human-readable context, e.g. how many env placeholders resolved, or null.",
+      "type": ["string", "null"]
+    }
+  }
+}

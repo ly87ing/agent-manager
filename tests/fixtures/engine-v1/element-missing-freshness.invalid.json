@@ -1,0 +1,9 @@
+{
+  "id": "mcp:grok-search",
+  "domain": "mcp",
+  "spec": {},
+  "policy": {},
+  "observed": {},
+  "state": "managed-ok",
+  "actions": []
+}

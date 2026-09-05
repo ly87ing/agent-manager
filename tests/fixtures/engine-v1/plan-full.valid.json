@@ -1,0 +1,50 @@
+{
+  "domain": "skills",
+  "actions": [
+    {
+      "op": "git-pull",
+      "element": "skill:agent-skills/safe-merge-review",
+      "target": "agent-skill/repositories/agent-skills",
+      "risk": "network",
+      "before_digest": null,
+      "after_digest": null,
+      "backup_path": null,
+      "cmd": null,
+      "note": "a1b2c3d -> e4f5g6h"
+    },
+    {
+      "op": "symlink",
+      "element": "skill:agent-skills/safe-merge-review",
+      "target": "~/.claude/skills/safe-merge-review",
+      "risk": "write-local",
+      "before_digest": null,
+      "after_digest": null,
+      "backup_path": null,
+      "cmd": null,
+      "note": null
+    },
+    {
+      "op": "run-cmd",
+      "element": "skill:agent-skills/safe-merge-review",
+      "target": null,
+      "risk": "exec-local",
+      "before_digest": null,
+      "after_digest": null,
+      "backup_path": null,
+      "cmd": "python3 agent-skill/link_skills.py --apply",
+      "note": "re-link enabled skill matrix"
+    },
+    {
+      "op": "install",
+      "element": "tools:playwright-cli",
+      "target": null,
+      "risk": "install-remove",
+      "before_digest": null,
+      "after_digest": null,
+      "backup_path": null,
+      "cmd": "npm install -g @playwright/cli",
+      "note": "highest confirmation level"
+    }
+  ],
+  "summary": {"read": 0, "write-local": 1, "exec-local": 1, "network": 1, "install-remove": 1}
+}

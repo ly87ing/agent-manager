@@ -1,0 +1,99 @@
+{
+  "description": "Engine Contract v1 element model (docs/GUI-ARCHITECTURE-PROPOSAL.md section 3). Every managed object (agent, MCP server, skill, rules target, hooks, tool, alias) is exposed as one element carrying two independent state axes: the convergence axis 'state' (local vs desired, section 3.1) and the upstream axis 'freshness' (local vs upstream latest, section 3.3).",
+  "type": "object",
+  "required": ["id", "domain", "spec", "policy", "observed", "state", "freshness", "actions"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "description": "Element id, e.g. 'agents:claude-code', 'mcp:grok-search', 'skill:<collection>/<skill-name>', 'rules:claude_global', 'tools:playwright-cli'.",
+      "type": "string"
+    },
+    "domain": {
+      "description": "Owning domain, e.g. 'agents', 'mcp', 'skills', 'rules', 'hooks', 'tools', 'aliases', 'secrets', 'profile'.",
+      "type": "string"
+    },
+    "spec": {
+      "description": "Definition layer: the desired shape sourced from config/*.json. Free-form per domain.",
+      "type": "object"
+    },
+    "policy": {
+      "description": "Merged three-layer policy result for this element (manager.json + manager.synced.json + manager.local.json, proposal section 7.2). Free-form per domain.",
+      "type": "object"
+    },
+    "observed": {
+      "description": "Physical state probed at runtime. Free-form per domain.",
+      "type": "object"
+    },
+    "state": {
+      "description": "Convergence axis state (proposal section 3.1).",
+      "type": "string",
+      "enum": ["managed-ok", "drifted", "missing", "not-materialized", "unmanaged-detected", "unsupported", "disabled"]
+    },
+    "freshness": {"$ref": "#/$defs/freshness"},
+    "actions": {
+      "description": "Actions the engine offers for this element; the GUI renders buttons from this list only.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/action"}
+    }
+  },
+  "$defs": {
+    "freshness": {
+      "description": "Upstream axis block (proposal section 3.3). Value fields are required but nullable: 'not-applicable' and never-probed 'unknown' elements carry nulls. 'status' commands read only the probe cache and never hit the network; 'system.refresh-upstream' is the only writer of fresh values.",
+      "type": "object",
+      "required": ["state", "current", "upstream", "checked_at", "probe", "cache_age_sec"],
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "description": "Upstream axis state. 'unknown' is a first-class state: probes that failed or never ran; convergence conservatively skips downloads in this state.",
+          "type": "string",
+          "enum": ["current", "behind", "ahead", "unknown", "not-applicable"]
+        },
+        "current": {
+          "description": "Locally observed version/commit, or null.",
+          "type": ["string", "null"]
+        },
+        "upstream": {
+          "description": "Upstream latest version/commit as of 'checked_at', or null.",
+          "type": ["string", "null"]
+        },
+        "checked_at": {
+          "description": "ISO-8601 timestamp of the last upstream probe, or null when never probed.",
+          "type": ["string", "null"]
+        },
+        "probe": {
+          "description": "Probe mechanism that produced the upstream value, e.g. 'npm-view' or 'git-ls-remote', or null.",
+          "type": ["string", "null"]
+        },
+        "cache_age_sec": {
+          "description": "Age of the cached probe result in seconds at render time, or null when there is no cached result.",
+          "type": ["integer", "null"]
+        }
+      }
+    },
+    "action": {
+      "description": "One element-level action offered by the engine.",
+      "type": "object",
+      "required": ["id", "risk", "needs_lock", "offline_ok"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Action id, e.g. 'apply' or 'refresh-upstream'.",
+          "type": "string"
+        },
+        "risk": {
+          "description": "Risk level (proposal section 2.4): read < write-local < exec-local < network < install-remove.",
+          "type": "string",
+          "enum": ["read", "write-local", "exec-local", "network", "install-remove"]
+        },
+        "needs_lock": {
+          "description": "true when executing this action requires the engine lock.",
+          "type": "boolean"
+        },
+        "offline_ok": {
+          "description": "true when this action is allowed in offline mode.",
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

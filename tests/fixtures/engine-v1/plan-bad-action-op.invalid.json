@@ -1,0 +1,17 @@
+{
+  "domain": "mcp",
+  "actions": [
+    {
+      "op": "delete",
+      "element": "mcp:grok-search",
+      "target": "~/.claude.json",
+      "risk": "write-local",
+      "before_digest": null,
+      "after_digest": null,
+      "backup_path": null,
+      "cmd": null,
+      "note": null
+    }
+  ],
+  "summary": {"read": 0, "write-local": 1, "exec-local": 0, "network": 0, "install-remove": 0}
+}

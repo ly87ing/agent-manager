@@ -1,0 +1,11 @@
+{
+  "op": "run-cmd",
+  "element": "rules:claude_global",
+  "target": null,
+  "risk": "exec-local",
+  "before_digest": "sha256:b5d4045c3f466fa91fe2cc6abe79232a1a57cdf104f7a26e716e0a1e2789df78",
+  "after_digest": "sha256:2c624232cdd221771294dfbb310aca000a0df6ac8b66b696d90ef06fdef64cba",
+  "backup_path": "snapshots/20260905T103000Z/rules/claude_global",
+  "cmd": "python3 agent-rule/scripts/build-agent-rules.py",
+  "note": "rebuild rules dist from rules/src, then distribute"
+}

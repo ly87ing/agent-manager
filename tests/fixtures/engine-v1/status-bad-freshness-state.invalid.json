@@ -1,0 +1,22 @@
+{
+  "domain": "mcp",
+  "elements": [
+    {
+      "id": "mcp:grok-search",
+      "domain": "mcp",
+      "spec": {},
+      "policy": {},
+      "observed": {},
+      "state": "managed-ok",
+      "freshness": {
+        "state": "stale",
+        "current": "1.2.3",
+        "upstream": "1.2.3",
+        "checked_at": "2026-09-04T10:20:00Z",
+        "probe": "npm-view",
+        "cache_age_sec": 90000
+      },
+      "actions": []
+    }
+  ]
+}
