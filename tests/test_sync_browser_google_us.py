@@ -1199,6 +1199,31 @@ class SyncBrowserGoogleUsTests(unittest.TestCase):
         self.assertEqual(runtime_context["profileNotificationsSetting"], 2)
         self.assertEqual(mismatches, ())
 
+    def test_runtime_probe_compensates_headless_window_delta_and_forces_light_scheme(self):
+        # 运行时探针以 --headless + --disable-blink-features=AutomationControlled 启动,
+        # 该组合让 headless Chrome 模拟 143px 伪窗口装饰,直接复用有头模式的 1365x907
+        # 会观测到 712 而非模板的 768;同时宿主 macOS 深色模式会把 prefers-color-scheme
+        # 渗透进指纹面,因此基础参数必须强制 light。
+        spec = importlib.util.spec_from_file_location("sync_browser_google_us_probe_contract", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.modules.pop(spec.name, None)
+
+        self.assertIn("--blink-settings=preferredColorScheme=1", module.BASE_CHROME_ARGS)
+        self.assertEqual(
+            module.US_DESKTOP_HEADLESS_PROBE_WINDOW,
+            {
+                "width": module.US_DESKTOP_VIEWPORT["width"],
+                "height": module.US_DESKTOP_VIEWPORT["height"] + 143,
+            },
+        )
+        probe_source = (ROOT / "scripts" / "browser_us" / "runtime_probe.py").read_text(encoding="utf-8")
+        probe_command = probe_source.split("command = [", 1)[1].split("]", 1)[0]
+        self.assertIn("US_DESKTOP_HEADLESS_PROBE_WINDOW", probe_command)
+
     def test_automation_context_validator_rejects_non_us_context_drift(self):
         spec = importlib.util.spec_from_file_location("sync_browser_google_us_test", SCRIPT)
         module = importlib.util.module_from_spec(spec)

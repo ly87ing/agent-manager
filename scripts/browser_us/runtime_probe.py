@@ -667,6 +667,10 @@ def verify_runtime_browser_context(
             "--headless",
             "--disable-gpu",
             "--disable-background-networking",
+            # 探针是无头模式，--window-size 即视口（且本版 Chrome headless 会再扣 87px
+            # 伪窗口高度）；launcher 里的 1365x907 是有头模式为抵消窗口装饰用的，
+            # 这里以后出现的同名 flag 覆盖为无头探针所需尺寸。
+            f"--window-size={US_DESKTOP_HEADLESS_PROBE_WINDOW['width']},{US_DESKTOP_HEADLESS_PROBE_WINDOW['height']}",
             "--virtual-time-budget=5000",
             "--dump-dom",
             runtime_url,

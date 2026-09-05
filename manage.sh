@@ -287,21 +287,21 @@ def terminate_group(sig, grace_seconds=1.0):
         return
     try:
         os.killpg(child.pid, sig)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
         return
 
     deadline = time.time() + grace_seconds
     while time.time() < deadline:
         try:
             os.killpg(child.pid, 0)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             return
         time.sleep(0.05)
 
     if sig != signal.SIGKILL:
         try:
             os.killpg(child.pid, signal.SIGKILL)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             pass
 
 

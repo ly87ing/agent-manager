@@ -23,6 +23,13 @@ DEFAULT_GEOLOCATION = {
 US_TIMEZONE_PROBE_UTC = datetime.datetime(2026, 5, 22, 12, 0, 0, tzinfo=datetime.timezone.utc)
 US_DESKTOP_VIEWPORT = {"width": 1365, "height": 768}
 US_DESKTOP_CHROME_WINDOW = {"width": 1365, "height": 907}
+# headless 探针没有窗口装饰；探针命令带 --disable-blink-features=AutomationControlled，
+# 该 flag 会让 headless Chrome 额外模拟 143px 的窗口装饰高度，所以要观测到 768 的
+# 视口，探针窗口高度需用 768 + 143（与有头模式的 907 常数不同，勿合并）。
+US_DESKTOP_HEADLESS_PROBE_WINDOW = {
+    "width": US_DESKTOP_VIEWPORT["width"],
+    "height": US_DESKTOP_VIEWPORT["height"] + 143,
+}
 US_DESKTOP_SCREEN = {"width": 1365, "height": 768}
 US_DESKTOP_SCREEN_INFO = f"{US_DESKTOP_SCREEN['width']}x{US_DESKTOP_SCREEN['height']}"
 US_DESKTOP_SCREEN_COLOR_DEPTH = 24
@@ -112,6 +119,9 @@ DISABLED_CHROME_FEATURES = (
 BASE_CHROME_ARGS = [
     "--lang=en-US",
     "--accept-lang=en-US,en",
+    # 模板要求 light 配色；宿主机处于深色模式时 prefers-color-scheme 会跟随 OS，
+    # 这里强制 light，保证有头/无头与探针观测到的指纹面一致。
+    "--blink-settings=preferredColorScheme=1",
     f"--window-size={US_DESKTOP_CHROME_WINDOW['width']},{US_DESKTOP_CHROME_WINDOW['height']}",
     f"--screen-info={{{US_DESKTOP_SCREEN_INFO}}}",
     f"--force-device-scale-factor={US_DESKTOP_DEVICE_SCALE_FACTOR}",
