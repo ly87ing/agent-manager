@@ -1,12 +1,13 @@
 import { useQueries } from "@tanstack/react-query";
 import { useState } from "react";
-import { Loader2, RefreshCw, WifiOff } from "lucide-react";
+import { Loader2, PlayCircle, RefreshCw, WifiOff } from "lucide-react";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { FreshnessBadge } from "../components/FreshnessBadge";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import type { AuditData, EngineElement, FreshnessState, StatusData } from "../lib/contract";
 import { runEngine, toDiagnostic } from "../lib/engine";
 import { engineKeys, useEngineQuery, useRefreshUpstream } from "../lib/queries";
+import { useExecuteApply, usePlanPreview } from "../lib/usePlanPreview";
 import { cn, formatCheckedAt, humanizeCacheAge, isCacheStale } from "../lib/utils";
 
 /** 提案 §4.12：behind → unknown → current → ahead；not-applicable 无上游概念，不进表。 */
@@ -51,6 +52,8 @@ export default function UpdatesPage() {
   const refreshAll = useRefreshUpstream();
   const refreshOne = useRefreshUpstream();
   const [pendingRowId, setPendingRowId] = useState<string | null>(null);
+  const preview = usePlanPreview();
+  const executeApply = useExecuteApply();
 
   const anyPending = auditQuery.isPending || statusResults.every((result) => result.isPending);
   if (anyPending) return <PageLoading />;
@@ -63,6 +66,32 @@ export default function UpdatesPage() {
   const elements = sortByFreshness(
     statusResults.flatMap((result) => (result.data ? result.data.data.elements : [])),
   );
+  const behindElements = elements.filter((element) => element.freshness.state === "behind");
+
+  /** 行内收敛：域 plan 过滤到本元素 → 域级 apply。 */
+  const openRowApply = (element: EngineElement) => {
+    preview.open({
+      title: `收敛 ${element.id}`,
+      subtitle: `预览为 ${element.domain}:plan 过滤到本元素的动作；确认执行 ${element.domain}:apply 域级收敛（执行前自动快照）。`,
+      planCommands: [`${element.domain}:plan`],
+      filterElement: element.id,
+      requireConfirmText: element.domain === "agents" || element.domain === "tools" ? element.id : undefined,
+      confirmLabel: "收敛此项",
+      execute: executeApply({ command: `${element.domain}:apply`, label: `收敛 ${element.id}` }),
+    });
+  };
+
+  /** 顶部聚合收敛：全部落后元素的 plan 聚合预览 → system:converge（= update 管线语义）。 */
+  const openConvergeAll = () => {
+    preview.open({
+      title: "收敛全部落后项",
+      subtitle: "预览聚合了各域落后元素的动作；确认执行的是 system:converge 全管线收敛（语义 = update），非 dry-run 前自动快照。",
+      planCommands: DOMAINS.map((domain) => `${domain.key}:plan`),
+      filterElements: new Set(behindElements.map((element) => element.id)),
+      confirmLabel: "收敛全部落后项",
+      execute: executeApply({ command: "system:converge", label: "收敛全部落后项" }),
+    });
+  };
 
   return (
     <div className="space-y-4">
@@ -91,7 +120,20 @@ export default function UpdatesPage() {
         ) : null,
       )}
 
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          data-testid="converge-all-button"
+          disabled={behindElements.length === 0}
+          onClick={openConvergeAll}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white transition-colors",
+            behindElements.length === 0 ? "cursor-not-allowed bg-slate-300" : "bg-emerald-600 hover:bg-emerald-700",
+          )}
+        >
+          <PlayCircle className="h-4 w-4" aria-hidden />
+          收敛全部落后项（{behindElements.length}）
+        </button>
         <button
           type="button"
           data-testid="refresh-all-button"
@@ -145,23 +187,46 @@ export default function UpdatesPage() {
                   </td>
                   <td className="py-2 pr-4 font-mono text-xs text-slate-500">{element.freshness.probe ?? "—"}</td>
                   <td className="py-2">
-                    <button
-                      type="button"
-                      data-testid={`reprobe-${element.id}`}
-                      disabled={offline || refreshOne.isPending}
-                      onClick={() => {
-                        setPendingRowId(element.id);
-                        refreshOne.mutate(element.id, { onSettled: () => setPendingRowId(null) });
-                      }}
-                      className={cn(
-                        "rounded border px-2 py-1 text-xs",
-                        offline || refreshOne.isPending
-                          ? "cursor-not-allowed border-slate-200 text-slate-300"
-                          : "border-indigo-200 text-indigo-600 hover:bg-indigo-50",
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        data-testid={`reprobe-${element.id}`}
+                        disabled={offline || refreshOne.isPending}
+                        onClick={() => {
+                          setPendingRowId(element.id);
+                          refreshOne.mutate(element.id, { onSettled: () => setPendingRowId(null) });
+                        }}
+                        className={cn(
+                          "rounded border px-2 py-1 text-xs",
+                          offline || refreshOne.isPending
+                            ? "cursor-not-allowed border-slate-200 text-slate-300"
+                            : "border-indigo-200 text-indigo-600 hover:bg-indigo-50",
+                        )}
+                      >
+                        {rowPending ? "探测中…" : "重新探测"}
+                      </button>
+                      {(element.freshness.state === "behind" || element.freshness.state === "unknown") && (
+                        <button
+                          type="button"
+                          data-testid={`converge-${element.id}`}
+                          disabled={offline && (element.domain === "agents" || element.domain === "tools")}
+                          title={
+                            offline && (element.domain === "agents" || element.domain === "tools")
+                              ? "offline 模式下禁用（升级/安装需联网）"
+                              : "收敛此项（域级 apply，先 plan 预览）"
+                          }
+                          onClick={() => openRowApply(element)}
+                          className={cn(
+                            "rounded border px-2 py-1 text-xs",
+                            offline && (element.domain === "agents" || element.domain === "tools")
+                              ? "cursor-not-allowed border-slate-200 text-slate-300"
+                              : "border-emerald-200 text-emerald-700 hover:bg-emerald-50",
+                          )}
+                        >
+                          收敛此项
+                        </button>
                       )}
-                    >
-                      {rowPending ? "探测中…" : "重新探测"}
-                    </button>
+                    </div>
                   </td>
                 </tr>
               );
@@ -170,6 +235,8 @@ export default function UpdatesPage() {
         </table>
         {elements.length === 0 && <p className="py-4 text-center text-sm text-slate-400">没有可探测上游的元素</p>}
       </section>
+
+      {preview.modal}
     </div>
   );
 }

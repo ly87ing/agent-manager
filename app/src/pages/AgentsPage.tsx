@@ -1,15 +1,22 @@
 import { useState } from "react";
-import { Check, ChevronDown, ChevronRight, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Download, RefreshCw, Trash2, X } from "lucide-react";
 import { DriftExplanationPanel } from "../components/DriftExplanationPanel";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { FreshnessBadge } from "../components/FreshnessBadge";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { StateBadge } from "../components/StateBadge";
-import type { EngineElement } from "../lib/contract";
+import type { ElementAction, EngineElement, StatusData } from "../lib/contract";
 import type { AgentsObserved, AgentsPolicy, AgentsSpec } from "../lib/observed";
-import { useEngineQuery } from "../lib/queries";
+import { useEngineQuery, useOfflineMode } from "../lib/queries";
+import { useExecuteApply, usePlanPreview } from "../lib/usePlanPreview";
 import { cn } from "../lib/utils";
-import type { StatusData } from "../lib/contract";
+
+/** agents 动作按钮文案/样式（离线可用性由 actions[].offline_ok 驱动，引擎是事实源）。 */
+const ACTION_META: Record<string, { label: string; icon: typeof Download; className: string }> = {
+  install: { label: "安装", icon: Download, className: "border-indigo-200 text-indigo-600 hover:bg-indigo-50" },
+  upgrade: { label: "升级", icon: RefreshCw, className: "border-amber-200 text-amber-700 hover:bg-amber-50" },
+  uninstall: { label: "卸载", icon: Trash2, className: "border-red-200 text-red-600 hover:bg-red-50" },
+};
 
 /** provider 分类徽标（observed.classified 四桶 → 只读徽标）。 */
 const PROVIDER_BUCKETS = ["managed", "deprecated", "system_only", "unsupported"] as const;
@@ -37,19 +44,41 @@ function PolicyChip({ label, value }: { label: string; value: boolean | undefine
 
 function AgentCard({ element }: { element: EngineElement }) {
   const [expanded, setExpanded] = useState(false);
+  const offline = useOfflineMode();
+  const preview = usePlanPreview();
+  const executeApply = useExecuteApply();
   const spec = element.spec as AgentsSpec;
   const policy = element.policy as AgentsPolicy;
   const observed = element.observed as AgentsObserved;
   const classified = observed.classified ?? {};
   const installed = observed.installed ?? false;
   const version = installed ? (element.freshness.current ?? "已安装（版本未探测）") : "未安装";
+  const name = spec.display_name ?? element.id;
+
+  /** 动作 → plan 预览（过滤到本元素）→ agents:apply（域级收敛；含卸载时引擎要求 --allow-uninstall）。 */
+  const openAction = (action: ElementAction) => {
+    const isDestructive = action.id === "uninstall" || action.id === "install";
+    preview.open({
+      title: `${ACTION_META[action.id]?.label ?? action.id} ${name}`,
+      subtitle: `预览只显示本元素相关动作；确认执行的是 agents:apply 全域收敛（引擎单写者，执行前自动快照）。`,
+      planCommands: ["agents:plan"],
+      filterElement: element.id,
+      requireConfirmText: isDestructive ? element.id : undefined,
+      confirmLabel: `${ACTION_META[action.id]?.label ?? action.id}（域级收敛）`,
+      execute: executeApply({
+        command: "agents:apply",
+        label: `${ACTION_META[action.id]?.label ?? action.id} ${name}`,
+        extraArgs: isDestructive ? ["--allow-uninstall"] : [],
+      }),
+    });
+  };
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="text-base font-semibold text-slate-800">
-            {spec.display_name ?? element.id}
+            {name}
             <span className="ml-2 font-mono text-xs font-normal text-slate-400">{spec.bin}</span>
           </h3>
           <p className="mt-0.5 text-sm text-slate-500">已装版本：{version}</p>
@@ -95,23 +124,65 @@ function AgentCard({ element }: { element: EngineElement }) {
       </div>
 
       {element.state === "unmanaged-detected" && (
-        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          检测到未托管安装（不在受管 provider 列表内）。建议迁移到受管 provider
-          {spec.preferred_provider ? `（偏好 ${spec.preferred_provider}）` : ""}
-          ，由引擎统一升级/卸载；迁移执行将在 Phase 2 提供，当前仅提示。
-        </p>
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <p>
+            检测到未托管安装（不在受管 provider 列表内）。建议迁移到受管 provider
+            {spec.preferred_provider ? `（偏好 ${spec.preferred_provider}）` : ""}，由引擎统一管理。
+          </p>
+          <button
+            type="button"
+            data-testid={`migrate-${element.id}`}
+            disabled={offline}
+            onClick={() =>
+              openAction({ id: "install", risk: "install-remove", needs_lock: true, offline_ok: false })
+            }
+            className={cn(
+              "mt-2 inline-flex items-center gap-1 rounded border px-2 py-1",
+              offline ? "cursor-not-allowed border-slate-200 text-slate-400" : "border-amber-300 text-amber-800 hover:bg-amber-100",
+            )}
+          >
+            迁移到受管 provider（经 plan 预览）
+          </button>
+          {offline && <span className="ml-2 text-xs text-amber-600">offline 下不可用（network 级）</span>}
+        </div>
       )}
 
-      <button
-        type="button"
-        onClick={() => setExpanded((value) => !value)}
-        className="mt-3 inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800"
-        aria-expanded={expanded}
-      >
-        {expanded ? <ChevronDown className="h-3.5 w-3.5" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden />}
-        {expanded ? "收起漂移解释" : "展开漂移解释"}
-      </button>
+      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+        {element.actions.map((action) => {
+          const meta = ACTION_META[action.id];
+          if (!meta) return null;
+          const Icon = meta.icon;
+          const disabled = offline && !action.offline_ok;
+          return (
+            <button
+              key={action.id}
+              type="button"
+              data-testid={`action-${action.id}-${element.id}`}
+              disabled={disabled}
+              title={disabled ? "offline 模式下禁用（network/install-remove 级需联网）" : `${meta.label}（${action.risk} 级，先 plan 预览）`}
+              onClick={() => openAction(action)}
+              className={cn(
+                "inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs",
+                disabled ? "cursor-not-allowed border-slate-200 text-slate-300" : meta.className,
+              )}
+            >
+              <Icon className="h-3 w-3" aria-hidden />
+              {meta.label}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          className="ml-auto inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800"
+          aria-expanded={expanded}
+        >
+          {expanded ? <ChevronDown className="h-3.5 w-3.5" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden />}
+          {expanded ? "收起漂移解释" : "展开漂移解释"}
+        </button>
+      </div>
       {expanded && <div className="mt-2"><DriftExplanationPanel element={element} planCommand="agents:plan" /></div>}
+      {preview.modal}
     </section>
   );
 }

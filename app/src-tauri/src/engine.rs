@@ -101,15 +101,16 @@ pub fn parse_envelope(stdout: &str) -> Result<Envelope, EngineError> {
 // ---------- 命令面白名单 ----------
 
 /// 支持 status + plan 的域（secrets 只有 status；system 只有 audit / refresh-upstream）。
-const STATUS_PLAN_DOMAINS: &[&str] = &["agents", "mcp", "skills", "rules", "hooks", "tools", "aliases"];
-/// 附加参数白名单：`--only <element-id>`（system:refresh-upstream 单元素刷新）。
-const ALLOWED_FLAGS: &[&str] = &["--only"];
+/// 支持 status/plan/apply 的域（对齐引擎 APPLY_DOMAINS；secrets 只读、profile 单列）。
+const READ_WRITE_DOMAINS: &[&str] = &["agents", "mcp", "skills", "rules", "hooks", "tools", "aliases"];
 
 pub fn validate_command(command: &str) -> Result<(), EngineError> {
     let rejected = || {
         EngineError::new(
             "unknown_command",
-            format!("命令 '{command}' 不在契约命令面内（允许 <domain>:status / <domain>:plan / system:audit / system:refresh-upstream）"),
+            format!(
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|plan|apply / system:audit|refresh-upstream|converge / snapshots:* / runs:* / policy:* / profile:*）"
+            ),
         )
     };
     let Some((domain, verb)) = command.split_once(':') else {
@@ -119,15 +120,67 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         return Err(rejected());
     }
     let allowed = match (domain, verb) {
-        ("system", "audit") | ("system", "refresh-upstream") => true,
+        ("system", "audit" | "refresh-upstream" | "converge") => true,
         ("secrets", "status") => true,
-        (d, "status" | "plan") => STATUS_PLAN_DOMAINS.contains(&d),
+        ("snapshots", "list" | "restore") => true,
+        ("runs", "list" | "get") => true,
+        ("policy", "get" | "set") => true,
+        ("profile", "status" | "pull" | "push") => true,
+        (d, "status" | "plan" | "apply") => READ_WRITE_DOMAINS.contains(&d),
         _ => false,
     };
     if allowed { Ok(()) } else { Err(rejected()) }
 }
 
-fn validate_arg_value(value: &str) -> Result<(), EngineError> {
+/// 参数取值类型（按类型校验；不经 shell，argv 直传引擎）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArgValueKind {
+    /// 纯开关（--dry-run / --allow-uninstall），不带值。
+    Flag,
+    /// 元素 id，如 mcp:grok-search / skill:agent-skills/find-skills。
+    ElementId,
+    /// 运行 id（runs:get / snapshots:restore 的 --run），字母数字与 _/-。
+    RunId,
+    /// runs:get 的 --lines，非负整数。
+    Lines,
+    /// policy:set 落点层。
+    PolicyLayer,
+    /// policy:set 点分键路径（对齐引擎 key 段规则：字母/数字/_/-）。
+    DotKey,
+    /// policy:set 的 JSON 值——合法性即 JSON 可解析。
+    JsonValue,
+}
+
+/// 每个命令允许的 flag 集合（命令感知白名单）。
+fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
+    let (domain, verb) = command.split_once(':').unwrap_or(("", ""));
+    let mut specs: Vec<(&'static str, ArgValueKind)> = Vec::new();
+    match (domain, verb) {
+        ("system", "refresh-upstream") => specs.push(("--only", ArgValueKind::ElementId)),
+        ("runs", "get") => {
+            specs.push(("--run", ArgValueKind::RunId));
+            specs.push(("--lines", ArgValueKind::Lines));
+        }
+        ("snapshots", "restore") => specs.push(("--run", ArgValueKind::RunId)),
+        ("policy", "set") => {
+            specs.push(("--layer", ArgValueKind::PolicyLayer));
+            specs.push(("--key", ArgValueKind::DotKey));
+            specs.push(("--value", ArgValueKind::JsonValue));
+        }
+        (_, "apply") => {
+            specs.push(("--dry-run", ArgValueKind::Flag));
+            if domain == "agents" {
+                specs.push(("--allow-uninstall", ArgValueKind::Flag));
+            }
+        }
+        ("system", "converge") => specs.push(("--dry-run", ArgValueKind::Flag)),
+        ("profile", "push") => specs.push(("--dry-run", ArgValueKind::Flag)),
+        _ => {}
+    }
+    specs
+}
+
+fn validate_element_id(value: &str) -> Result<(), EngineError> {
     let valid = !value.is_empty()
         && value
             .chars()
@@ -139,25 +192,82 @@ fn validate_arg_value(value: &str) -> Result<(), EngineError> {
     if valid {
         Ok(())
     } else {
-        Err(EngineError::new("invalid_args", format!("非法参数值 '{value}'")))
+        Err(EngineError::new("invalid_args", format!("非法元素 id '{value}'")))
     }
 }
 
-pub fn validate_args(args: &[String]) -> Result<(), EngineError> {
+/// 前端生成的 run id 字符集（透传 AGENT_MANAGER_RUN_ID）。
+pub fn validate_run_id(value: &str) -> Result<(), EngineError> {
+    let valid = !value.is_empty()
+        && value.len() <= 64
+        && value.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    if valid {
+        Ok(())
+    } else {
+        Err(EngineError::new("invalid_args", format!("非法 run id '{value}'")))
+    }
+}
+
+fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError> {
+    match kind {
+        ArgValueKind::Flag => Ok(()),
+        ArgValueKind::ElementId => validate_element_id(value),
+        ArgValueKind::RunId => validate_run_id(value),
+        ArgValueKind::Lines => {
+            let ok = !value.is_empty()
+                && value.bytes().all(|b| b.is_ascii_digit())
+                && value.parse::<u32>().is_ok_and(|n| n <= 100_000);
+            if ok {
+                Ok(())
+            } else {
+                Err(EngineError::new("invalid_args", format!("非法行数 '{value}'")))
+            }
+        }
+        ArgValueKind::PolicyLayer => {
+            if value == "synced" || value == "local" {
+                Ok(())
+            } else {
+                Err(EngineError::new(
+                    "invalid_args",
+                    format!("非法策略层 '{value}'（仅 synced|local；baseline 只读）"),
+                ))
+            }
+        }
+        ArgValueKind::DotKey => {
+            let ok = !value.is_empty()
+                && value
+                    .split('.')
+                    .all(|seg| !seg.is_empty() && seg.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'));
+            if ok {
+                Ok(())
+            } else {
+                Err(EngineError::new("invalid_args", format!("非法 key 路径 '{value}'")))
+            }
+        }
+        ArgValueKind::JsonValue => serde_json::from_str::<serde_json::Value>(value)
+            .map(|_| ())
+            .map_err(|err| EngineError::new("invalid_args", format!("--value 不是合法 JSON: {err}"))),
+    }
+}
+
+pub fn validate_args(command: &str, args: &[String]) -> Result<(), EngineError> {
+    let specs = allowed_arg_specs(command);
     let mut index = 0;
     while index < args.len() {
         let arg = &args[index];
-        if arg.starts_with('-') {
-            if !ALLOWED_FLAGS.contains(&arg.as_str()) {
-                return Err(EngineError::new("invalid_args", format!("不允许的参数 '{arg}'")));
-            }
+        let Some((_, kind)) = specs.iter().find(|(flag, _)| flag == &arg.as_str()) else {
+            return Err(EngineError::new(
+                "invalid_args",
+                format!("命令 '{command}' 不允许参数 '{arg}'"),
+            ));
+        };
+        if *kind != ArgValueKind::Flag {
             index += 1;
             let Some(value) = args.get(index) else {
                 return Err(EngineError::new("invalid_args", format!("参数 '{arg}' 缺少取值")));
             };
-            validate_arg_value(value)?;
-        } else {
-            validate_arg_value(arg)?;
+            validate_arg_value(*kind, value)?;
         }
         index += 1;
     }
@@ -238,9 +348,19 @@ fn terminate_process(pid: u32) {
 
 /// 经 manage.sh 运行引擎命令，返回校验过的 envelope。
 /// 退出码 0/1/2 都可能有合法 envelope（契约语义），只有 stdout 无法解析时才报错。
-pub fn run_engine(root: &Path, command: &str, args: &[String]) -> Result<Envelope, EngineError> {
+/// run_id 非空时经 AGENT_MANAGER_RUN_ID 透传（manage.sh 优先采用外部 RUN_ID），
+/// 使 GUI 发起的写路径能在执行中心按 run_id 追踪按次日志。
+pub fn run_engine(
+    root: &Path,
+    command: &str,
+    args: &[String],
+    run_id: Option<&str>,
+) -> Result<Envelope, EngineError> {
     validate_command(command)?;
-    validate_args(args)?;
+    validate_args(command, args)?;
+    if let Some(run_id) = run_id {
+        validate_run_id(run_id)?;
+    }
 
     let script = root.join("manage.sh");
     if !script.is_file() {
@@ -259,6 +379,9 @@ pub fn run_engine(root: &Path, command: &str, args: &[String]) -> Result<Envelop
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if let Some(run_id) = run_id {
+        cmd.env("AGENT_MANAGER_RUN_ID", run_id);
+    }
 
     let child = cmd.spawn().map_err(|err| {
         EngineError::new("spawn_failed", format!("无法启动 manage.sh: {err}"))
@@ -298,11 +421,11 @@ pub fn run_engine(root: &Path, command: &str, args: &[String]) -> Result<Envelop
 // ---------- Tauri command ----------
 
 #[tauri::command]
-pub async fn engine_invoke(command: String, args: Option<Vec<String>>) -> Result<Envelope, EngineError> {
+pub async fn engine_invoke(command: String, args: Option<Vec<String>>, run_id: Option<String>) -> Result<Envelope, EngineError> {
     let args = args.unwrap_or_default();
     tauri::async_runtime::spawn_blocking(move || {
         let root = resolve_root()?;
-        run_engine(&root, &command, &args)
+        run_engine(&root, &command, &args, run_id.as_deref())
     })
     .await
     .map_err(|err| EngineError::new("internal", format!("bridge 任务调度失败: {err}")))?
@@ -402,9 +525,12 @@ mod tests {
     #[test]
     fn command_whitelist_allows_contract_surface() {
         for command in [
-            "agents:status", "agents:plan", "mcp:status", "mcp:plan", "skills:status",
-            "rules:plan", "hooks:plan", "tools:status", "aliases:plan", "secrets:status",
-            "system:audit", "system:refresh-upstream",
+            "agents:status", "agents:plan", "agents:apply", "mcp:status", "mcp:plan", "mcp:apply",
+            "skills:status", "skills:apply", "rules:plan", "rules:apply", "hooks:plan", "hooks:apply",
+            "tools:status", "tools:apply", "aliases:plan", "aliases:apply", "secrets:status",
+            "system:audit", "system:refresh-upstream", "system:converge",
+            "snapshots:list", "snapshots:restore", "runs:list", "runs:get",
+            "policy:get", "policy:set", "profile:status", "profile:pull", "profile:push",
         ] {
             validate_command(command).unwrap_or_else(|err| panic!("{command} should pass: {}", err.message));
         }
@@ -413,9 +539,12 @@ mod tests {
     #[test]
     fn command_whitelist_rejects_non_contract_commands() {
         for command in [
-            "system:converge", // Phase 2 才存在
             "agents:update",   // manage.sh 管线命令，不是契约命令
             "secrets:plan",    // secrets 只读
+            "secrets:apply",
+            "policy:delete",
+            "profile:init",
+            "runs:delete",
             "update",
             "mcp:",
             ":status",
@@ -426,26 +555,81 @@ mod tests {
         }
     }
 
-    // ---- validate_args ----
+    // ---- validate_args（命令感知白名单） ----
 
     #[test]
     fn args_allow_only_flag_with_element_id() {
-        validate_args(&[]).unwrap();
-        validate_args(&["--only".into(), "mcp:grok-search".into()]).unwrap();
-        validate_args(&["skill:agent-skills/find-skills".into()]).unwrap();
+        validate_args("system:refresh-upstream", &[]).unwrap();
+        validate_args("system:refresh-upstream", &["--only".into(), "mcp:grok-search".into()]).unwrap();
+        validate_args("system:refresh-upstream", &["--only".into(), "skill:agent-skills/find-skills".into()]).unwrap();
     }
 
     #[test]
     fn args_reject_flags_outside_whitelist_and_shellish_values() {
-        for args in [
-            vec!["--config".to_string(), "/etc/passwd".to_string()],
-            vec!["--only".to_string()],
-            vec!["--only".to_string(), "-rf".to_string()],
-            vec!["; rm -rf /".to_string()],
-            vec!["$(reboot)".to_string()],
-            vec!["mcp:status --offline".to_string()],
+        for (command, args) in [
+            ("mcp:status", vec!["--config".to_string(), "/etc/passwd".to_string()]),
+            ("system:refresh-upstream", vec!["--only".to_string()]),
+            ("system:refresh-upstream", vec!["--only".to_string(), "-rf".to_string()]),
+            ("mcp:status", vec!["; rm -rf /".to_string()]),
+            ("mcp:status", vec!["$(reboot)".to_string()]),
+            ("mcp:status", vec!["mcp:status --offline".to_string()]),
+            // 命令感知的边界：--allow-uninstall 只允许 agents:apply
+            ("mcp:apply", vec!["--allow-uninstall".to_string()]),
+            // 只读命令一律无参数
+            ("policy:get", vec!["--dry-run".to_string()]),
+            ("runs:list", vec!["--run".to_string(), "r1".to_string()]),
         ] {
-            assert!(validate_args(&args).is_err(), "{args:?} should be rejected");
+            assert!(validate_args(command, &args).is_err(), "{command} {args:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn args_apply_dry_run_and_agents_allow_uninstall() {
+        validate_args("mcp:apply", &["--dry-run".into()]).unwrap();
+        validate_args("agents:apply", &["--allow-uninstall".into(), "--dry-run".into()]).unwrap();
+        validate_args("system:converge", &["--dry-run".into()]).unwrap();
+        validate_args("profile:push", &["--dry-run".into()]).unwrap();
+    }
+
+    #[test]
+    fn args_runs_get_and_restore_run_id_validation() {
+        validate_args("runs:get", &["--run".into(), "gui-20260906T010203Z-ab12cd".into(), "--lines".into(), "200".into()]).unwrap();
+        validate_args("snapshots:restore", &["--run".into(), "20260905103000_12345".into()]).unwrap();
+        for bad in [
+            vec!["--run".to_string(), "../etc".to_string()],
+            vec!["--run".to_string(), "a b".to_string()],
+            vec!["--lines".to_string(), "abc".to_string()],
+            vec!["--lines".to_string(), "100001".to_string()],
+        ] {
+            assert!(validate_args("runs:get", &bad).is_err(), "runs:get {bad:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn args_policy_set_layer_key_value_validation() {
+        validate_args(
+            "policy:set",
+            &["--layer".into(), "synced".into(), "--key".into(), "skills.repo.skills.name.agents.claude-code".into(), "--value".into(), "true".into()],
+        )
+        .unwrap();
+        validate_args("policy:set", &["--layer".into(), "local".into(), "--key".into(), "mcp.grok-search.enabled".into(), "--value".into(), "{\"a\": 1}".into()]).unwrap();
+        for bad in [
+            vec!["--layer".to_string(), "baseline".to_string()], // baseline 只读
+            vec!["--key".to_string(), "a..b".to_string()],
+            vec!["--key".to_string(), "a b".to_string()],
+            vec!["--value".to_string(), "{not json".to_string()],
+            vec!["--value".to_string(), "".to_string()],
+        ] {
+            assert!(validate_args("policy:set", &bad).is_err(), "policy:set {bad:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn run_id_charset_validation() {
+        validate_run_id("gui-20260906T010203Z-ab12cd").unwrap();
+        validate_run_id("20260905103000_12345").unwrap();
+        for bad in ["", "with space", "slash/inside", "-leading-dash", "$(evil)", "中文标识"] {
+            assert!(validate_run_id(bad).is_err(), "{bad} should be rejected");
         }
     }
 
@@ -503,7 +687,7 @@ mod tests {
     fn run_engine_parses_envelope_from_manage_sh_stdout() {
         let root = temp_dir("run-ok");
         write_manage_sh(&root, &format!("cat <<'EOF'\n{VALID_ENVELOPE}\nEOF"));
-        let envelope = run_engine(&root, "mcp:status", &[]).expect("envelope from script");
+        let envelope = run_engine(&root, "mcp:status", &[], None).expect("envelope from script");
         assert!(envelope.ok);
         assert_eq!(envelope.command, "mcp.status");
     }
@@ -512,7 +696,7 @@ mod tests {
     fn run_engine_accepts_error_envelope_with_nonzero_exit() {
         let root = temp_dir("run-errors");
         write_manage_sh(&root, &format!("cat <<'EOF'\n{ERROR_ENVELOPE}\nEOF\nexit 1"));
-        let envelope = run_engine(&root, "system:audit", &[]).expect("exit 1 with envelope is still Ok");
+        let envelope = run_engine(&root, "system:audit", &[], None).expect("exit 1 with envelope is still Ok");
         assert!(!envelope.ok);
         assert_eq!(envelope.errors[0].code, "AUDIT_ERRORS");
     }
@@ -521,7 +705,7 @@ mod tests {
     fn run_engine_reports_invalid_output_with_exit_code_and_stderr() {
         let root = temp_dir("run-garbage");
         write_manage_sh(&root, "echo 'boom: config missing' >&2\nexit 2");
-        let err = run_engine(&root, "mcp:status", &[]).expect_err("garbage stdout must fail");
+        let err = run_engine(&root, "mcp:status", &[], None).expect_err("garbage stdout must fail");
         assert_eq!(err.kind, "invalid_output");
         assert_eq!(err.exit_code, Some(2));
         assert!(err.stderr.as_deref().unwrap_or_default().contains("boom: config missing"));
@@ -531,15 +715,30 @@ mod tests {
     fn run_engine_rejects_command_outside_whitelist_before_spawn() {
         let root = temp_dir("run-reject");
         write_manage_sh(&root, "echo SHOULD_NOT_RUN");
-        let err = run_engine(&root, "system:converge", &[]).expect_err("non-contract command must fail");
+        let err = run_engine(&root, "policy:delete", &[], None).expect_err("non-contract command must fail");
         assert_eq!(err.kind, "unknown_command");
     }
 
     #[test]
     fn run_engine_reports_missing_manage_sh() {
         let root = temp_dir("run-missing");
-        let err = run_engine(&root, "mcp:status", &[]).expect_err("missing script must fail");
+        let err = run_engine(&root, "mcp:status", &[], None).expect_err("missing script must fail");
         assert_eq!(err.kind, "root_not_found");
+    }
+
+    #[test]
+    fn run_engine_passes_run_id_via_env() {
+        // 沙盒证明透传：假 manage.sh 把 $AGENT_MANAGER_RUN_ID 回显到 envelope.run_id。
+        let root = temp_dir("run-id-env");
+        let script = r#"cat <<EOF
+{"contract":"agent-manager/engine/v1","run_id":"${AGENT_MANAGER_RUN_ID:-none}","command":"mcp.status","mode":{"dry_run":false,"offline":false},"lock":{"held":false,"pid":null},"log_file":null,"ok":true,"data":{},"warnings":[],"errors":[]}
+EOF"#;
+        write_manage_sh(&root, script);
+        let envelope = run_engine(&root, "mcp:status", &[], Some("gui-testrun-01")).expect("envelope");
+        assert_eq!(envelope.run_id, "gui-testrun-01");
+        // 非法 run id 在 spawn 前被拒
+        let err = run_engine(&root, "mcp:status", &[], Some("bad id")).expect_err("bad run id must fail");
+        assert_eq!(err.kind, "invalid_args");
     }
 
     // ---- 真实联调冒烟（手动运行） ----
@@ -551,16 +750,20 @@ mod tests {
     #[ignore = "real engine smoke; requires AGENT_MANAGER_ROOT"]
     fn real_manage_sh_mcp_status_returns_ok() {
         let root = std::env::var("AGENT_MANAGER_ROOT").expect("AGENT_MANAGER_ROOT must be set");
-        let envelope = run_engine(Path::new(&root), "mcp:status", &[]).expect("real mcp:status envelope");
+        // 指定 run_id：证明 manage.sh 的 AGENT_MANAGER_RUN_ID 透传（RUN_ID 外部指定）生效。
+        let envelope = run_engine(Path::new(&root), "mcp:status", &[], Some("gui-smoke-p2c-01"))
+            .expect("real mcp:status envelope");
         println!(
-            "smoke: command={} ok={} elements={} contract={}",
+            "smoke: command={} ok={} elements={} contract={} run_id={}",
             envelope.command,
             envelope.ok,
             envelope.data["elements"].as_array().map_or(-1, |els| els.len() as i64),
             envelope.contract,
+            envelope.run_id,
         );
         assert_eq!(envelope.contract, CONTRACT_ID);
         assert_eq!(envelope.command, "mcp.status");
         assert!(envelope.ok, "mcp:status should report ok:true, errors: {:?}", envelope.errors);
+        assert_eq!(envelope.run_id, "gui-smoke-p2c-01", "manage.sh 应透传外部指定的 RUN_ID");
     }
 }

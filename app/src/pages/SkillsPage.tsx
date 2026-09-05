@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Inbox } from "lucide-react";
+import { toast } from "sonner";
 import { DriftExplanationPanel } from "../components/DriftExplanationPanel";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { FreshnessBadge } from "../components/FreshnessBadge";
 import { MatrixCell } from "../components/MatrixCell";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { StateBadge } from "../components/StateBadge";
-import type { EngineElement, StatusData } from "../lib/contract";
+import type { EngineElement, PolicyData, StatusData } from "../lib/contract";
+import { runEngine } from "../lib/engine";
 import {
   agentCellsOf,
   type SkillCollectionObserved,
@@ -14,7 +16,9 @@ import {
   type SkillObserved,
   type SkillSpec,
 } from "../lib/observed";
+import { getDefaultPolicyLayer } from "../lib/policyLayer";
 import { useEngineQuery } from "../lib/queries";
+import { useExecuteApply, usePlanPreview } from "../lib/usePlanPreview";
 import { cn } from "../lib/utils";
 
 function isCollection(element: EngineElement): boolean {
@@ -97,6 +101,8 @@ function CollectionCard({ element, inboxCount }: { element: EngineElement; inbox
 export default function SkillsPage() {
   const query = useEngineQuery<StatusData>("skills:status");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const preview = usePlanPreview();
+  const executeApply = useExecuteApply();
 
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="skills:status 调用失败" error={query.error} />;
@@ -110,11 +116,64 @@ export default function SkillsPage() {
     new Set(matrixSkills.flatMap((element) => Object.keys(agentCellsOf(element)))),
   ).sort();
 
+  /** 策略写入 + plan 预览编排的公共尾部：skills:plan 过滤到本 skill → skills:apply。 */
+  const openApplyPreview = (skill: EngineElement, label: string) => {
+    preview.open({
+      title: label,
+      subtitle: "预览为 skills:plan 过滤到本 skill 的动作；确认执行 skills:apply 全域收敛（执行前自动快照）。",
+      planCommands: ["skills:plan"],
+      filterElement: skill.id,
+      confirmLabel: "应用（域级 apply）",
+      execute: executeApply({ command: "skills:apply", label }),
+    });
+  };
+
+  /** 矩阵点击切换：policy.set（skills.<repo>.skills.<name>.agents.<agent> bool）→ plan 预览 → apply。 */
+  const toggleSkillCell = async (skill: EngineElement, agent: string, currentState: string) => {
+    const spec = skill.spec as SkillSpec;
+    const next = currentState === "disabled";
+    const layer = getDefaultPolicyLayer();
+    const key = `skills.${spec.collection}.skills.${spec.name}.agents.${agent}`;
+    let envelope;
+    try {
+      envelope = await runEngine<PolicyData>("policy:set", ["--layer", layer, "--key", key, "--value", next ? "true" : "false"]);
+    } catch (err) {
+      toast.error(`策略写入失败：${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    if (!envelope.ok) {
+      toast.error(`策略写入被引擎拒绝：${envelope.errors[0]?.message ?? "未知错误"}`);
+      return;
+    }
+    toast.success(`已${next ? "启用" : "停用"} ${spec.name} @ ${agent}（写入${layer === "synced" ? "共享层" : "仅本机层"}）`);
+    openApplyPreview(skill, `${next ? "启用" : "停用"} ${spec.name} @ ${agent}`);
+  };
+
+  /** 收件箱启用：agents 置 null = 跟随集合目标集（引擎 resolve_skill_agent_switch 语义）。 */
+  const enableInboxSkill = async (skill: EngineElement) => {
+    const spec = skill.spec as SkillSpec;
+    const layer = getDefaultPolicyLayer();
+    const key = `skills.${spec.collection}.skills.${spec.name}.agents`;
+    let envelope;
+    try {
+      envelope = await runEngine<PolicyData>("policy:set", ["--layer", layer, "--key", key, "--value", "null"]);
+    } catch (err) {
+      toast.error(`策略写入失败：${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    if (!envelope.ok) {
+      toast.error(`策略写入被引擎拒绝：${envelope.errors[0]?.message ?? "未知错误"}`);
+      return;
+    }
+    toast.success(`已把 ${spec.name} 从收件箱启用（跟随集合目标集，写入${layer === "synced" ? "共享层" : "仅本机层"}）`);
+    openApplyPreview(skill, `启用 ${spec.name}`);
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Skills"
-        description="集合 / 发现收件箱 / 启用矩阵三级视图（只读）。上游新增 skill 只进收件箱，显式启用才分发；矩阵点击切换在 Phase 2 开放。"
+        description="集合 / 发现收件箱 / 启用矩阵三级视图。矩阵点击 = policy.set 切换 + plan 预览 + 域级 apply；收件箱显式启用才分发。"
       />
       {query.data.errors.length > 0 && <ErrorPanel title="skills:status 错误" errors={query.data.errors} />}
 
@@ -144,7 +203,8 @@ export default function SkillsPage() {
               <tr className="border-b border-slate-200 text-xs text-slate-500">
                 <th className="py-2 pr-4 font-medium">名称</th>
                 <th className="py-2 pr-4 font-medium">来源</th>
-                <th className="py-2 font-medium">状态说明</th>
+                <th className="py-2 pr-4 font-medium">状态说明</th>
+                <th className="py-2 font-medium">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -154,7 +214,17 @@ export default function SkillsPage() {
                   <tr key={skill.id} className="border-b border-slate-100 last:border-0">
                     <td className="py-2 pr-4 font-mono text-xs text-slate-700">{spec.name ?? skill.id}</td>
                     <td className="py-2 pr-4 font-mono text-xs break-all text-slate-500">{spec.source_path ?? spec.collection}</td>
-                    <td className="py-2 text-xs text-slate-600">上游集合新出现；显式启用才分发（new_skill_default=disabled）</td>
+                    <td className="py-2 pr-4 text-xs text-slate-600">上游集合新出现；显式启用才分发（new_skill_default=disabled）</td>
+                    <td className="py-2">
+                      <button
+                        type="button"
+                        data-testid={`enable-inbox-${skill.id}`}
+                        onClick={() => void enableInboxSkill(skill)}
+                        className="rounded border border-indigo-200 px-2 py-0.5 text-xs text-indigo-600 hover:bg-indigo-50"
+                      >
+                        启用
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
@@ -191,6 +261,7 @@ export default function SkillsPage() {
                   agentColumns={agentColumns}
                   isExpanded={isExpanded}
                   onToggle={() => setExpandedId(isExpanded ? null : skill.id)}
+                  onToggleCell={(agent, state) => void toggleSkillCell(skill, agent, state)}
                 />
               );
             })}
@@ -198,6 +269,8 @@ export default function SkillsPage() {
         </table>
         {matrixSkills.length === 0 && <p className="py-4 text-center text-sm text-slate-400">无已声明 skill</p>}
       </section>
+
+      {preview.modal}
     </div>
   );
 }
@@ -209,6 +282,7 @@ function FragmentRow({
   agentColumns,
   isExpanded,
   onToggle,
+  onToggleCell,
 }: {
   skill: EngineElement;
   name: string;
@@ -216,6 +290,7 @@ function FragmentRow({
   agentColumns: string[];
   isExpanded: boolean;
   onToggle: () => void;
+  onToggleCell: (agent: string, currentState: string) => void;
 }) {
   return (
     <>
@@ -236,7 +311,15 @@ function FragmentRow({
           return (
             <td key={agent} className="py-2 pr-4">
               {cell ? (
-                <MatrixCell state={cell.state} kind="skills" title={`${agent}: ${cell.state}`} />
+                <button
+                  type="button"
+                  data-testid={`skill-cell-${skill.id}-${agent}`}
+                  onClick={() => onToggleCell(agent, cell.state)}
+                  title="点击切换启用（policy.set → plan 预览 → apply）"
+                  className="cursor-pointer rounded hover:ring-2 hover:ring-indigo-300"
+                >
+                  <MatrixCell state={cell.state} kind="skills" title={`${agent}: ${cell.state}`} />
+                </button>
               ) : (
                 <span className="text-xs text-slate-300">—</span>
               )}

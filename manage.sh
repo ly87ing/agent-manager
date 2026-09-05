@@ -17,7 +17,7 @@ WHITE='\033[1;37m'
 # Resolve the absolute path of the script's root directory
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 USER_NAME=$(whoami)
-RUN_ID="$(date +%Y%m%d%H%M%S)_$$"
+RUN_ID="${AGENT_MANAGER_RUN_ID:-$(date +%Y%m%d%H%M%S)_$$}"
 LOG_PREFIX="${AGENT_MANAGER_LOG_PREFIX:-/tmp/agent_manager_sync_${USER_NAME}}"
 TEMP_LOG="${LOG_PREFIX}_${RUN_ID}.log"
 LATEST_LOG_POINTER="${AGENT_MANAGER_LATEST_LOG_POINTER:-${LOG_PREFIX}.latest}"

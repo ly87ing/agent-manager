@@ -1,6 +1,6 @@
-import type { Envelope } from "../lib/contract";
+import type { Envelope, ProfileData, RunEntry, SnapshotEntry } from "../lib/contract";
 import { EngineBridgeError, type EngineClient } from "../lib/engine";
-import { makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode } from "./fixtures";
+import { makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makeProfileData, makeRunEntry, makeSnapshotEntry } from "./fixtures";
 
 /**
  * dev-only mock 引擎（?mock=1 / ?mock=offline，仅在 import.meta.env.DEV 下经
@@ -541,10 +541,218 @@ function demoEnvelopes(): Record<string, Envelope> {
 
 export function createMockEngineClient(options: { offline?: boolean } = {}): EngineClient {
   const routes = demoEnvelopes();
+
+  // ---- 有状态的写路径演示数据（内存态，仅 DEV mock） ----
+  const policyLayers: { baseline: Record<string, unknown>; synced: Record<string, unknown> | null; local: Record<string, unknown> | null } = {
+    baseline: {
+      agents: { "claude-code": { enabled: true, auto_update: true } },
+      mcp: { "grok-search": { enabled: true } },
+      skills: { "agent-skills": { enabled: true, new_skill_default: "disabled" } },
+    },
+    synced: { skills: { "agent-skills": { skills: { "dead-one": { agents: { codex: false } } } } } },
+    local: { browser_us_sync: { enabled: false } },
+  };
+  const runs: RunEntry[] = [
+    makeRunEntry({ run_id: "20260905T235900Z-legacy1", mtime: "2026-09-05T23:59:00Z", is_latest: true, size_bytes: 7270 }),
+  ];
+  const runLogs = new Map<string, string>([
+    ["20260905T235900Z-legacy1", "2026-09-05 23:59 [INFO] [grok-search] 注入凭证: TAVILY_API_KEY (来源: secrets 池)\n2026-09-05 23:59 [INFO] 同步完成\n"],
+  ]);
+  const snapshots: SnapshotEntry[] = [
+    makeSnapshotEntry({ run_id: "20260905T230000Z-mock00", command: "mcp.apply", file_count: 3, link_count: 0 }),
+    makeSnapshotEntry({ run_id: "20260905T235000Z-mock01", command: "system.converge", file_count: 8, link_count: 2, created_at: "2026-09-05T23:50:00Z" }),
+  ];
+
+  const deepMerge = (base: Record<string, unknown>, overlay: Record<string, unknown>): Record<string, unknown> => {
+    const out: Record<string, unknown> = { ...base };
+    for (const [key, value] of Object.entries(overlay)) {
+      const existing = out[key];
+      out[key] =
+        value !== null && typeof value === "object" && !Array.isArray(value) && existing !== null && typeof existing === "object" && !Array.isArray(existing)
+          ? deepMerge(existing as Record<string, unknown>, value as Record<string, unknown>)
+          : value;
+    }
+    return out;
+  };
+
+  const policyGet = (): Envelope => {
+    let effective: Record<string, unknown> = { ...policyLayers.baseline };
+    let attribution: Record<string, string> = Object.fromEntries(Object.keys(policyLayers.baseline).map((key) => [key, "baseline"]));
+    for (const layerName of ["synced", "local"] as const) {
+      const layer = policyLayers[layerName];
+      if (!layer) continue;
+      effective = deepMerge(effective, layer);
+      attribution = { ...attribution, ...Object.fromEntries(Object.keys(layer).map((key) => [key, layerName])) };
+    }
+    return makeEnvelope(
+      { layers: { ...policyLayers }, effective, attribution, layer: null, key: null, value: null, path: null },
+      { command: "policy.get" },
+    );
+  };
+
+  const policySet = (args: string[]): Envelope => {
+    const layer = args[args.indexOf("--layer") + 1];
+    const key = args[args.indexOf("--key") + 1];
+    const rawValue = args[args.indexOf("--value") + 1];
+    if (layer !== "synced" && layer !== "local") {
+      return makeEnvelope({}, { command: "policy.set", ok: false, errors: [{ code: "USAGE_ERROR", element: null, message: "--layer 只能是 synced/local" }] });
+    }
+    let value: unknown;
+    try {
+      value = JSON.parse(rawValue ?? "");
+    } catch {
+      return makeEnvelope({}, { command: "policy.set", ok: false, errors: [{ code: "USAGE_ERROR", element: null, message: "--value 不是合法 JSON" }] });
+    }
+    // 门禁演示：值含 demo-secret 字样即视为疑似明文
+    if (typeof value === "string" && value.includes("demo-secret")) {
+      return makeEnvelope({}, { command: "policy.set", ok: false, errors: [{ code: "POLICY_SECRET_GATE", element: null, message: "疑似明文敏感信息（demo_secret），拒绝写入策略层" }] });
+    }
+    const target = (policyLayers[layer] ?? {}) as Record<string, unknown>;
+    if (policyLayers[layer] === null) policyLayers[layer] = target;
+    const segments = key.split(".");
+    let cursor = target;
+    for (const segment of segments.slice(0, -1)) {
+      if (typeof cursor[segment] !== "object" || cursor[segment] === null) cursor[segment] = {};
+      cursor = cursor[segment] as Record<string, unknown>;
+    }
+    cursor[segments[segments.length - 1]] = value;
+    return makeEnvelope(
+      { layers: null, effective: null, attribution: null, layer, key, value, path: `/repo/config/manager.${layer}.json` },
+      { command: "policy.set" },
+    );
+  };
+
+  const applyStepNames: Record<string, string> = {
+    agents: "agent-lifecycle",
+    mcp: "mcp-sync",
+    skills: "skills-link",
+    rules: "rules-sync",
+    hooks: "hooks-sync",
+    tools: "tools-sync",
+    aliases: "shell-aliases",
+  };
+
+  const recordRun = (runId: string, command: string, dryRun: boolean): void => {
+    runs.unshift(makeRunEntry({ run_id: runId, mtime: new Date().toISOString(), is_latest: false, size_bytes: 512 }));
+    runLogs.set(
+      runId,
+      `=== engine step: ${command} ===\nmock 执行 ${command}${dryRun ? "（dry-run）" : ""}\n步骤完成 exit=0\n`,
+    );
+  };
+
+  const applyEnvelope = (domain: string, args: string[], runId: string): Envelope => {
+    const dryRun = args.includes("--dry-run");
+    recordRun(runId, `${domain}.apply`, dryRun);
+    const snapshot = dryRun
+      ? null
+      : { run_id: runId, path: `/tmp/mock-snapshots/${runId}`, file_count: 2, link_count: 1 };
+    if (snapshot) {
+      snapshots.unshift(makeSnapshotEntry({ run_id: runId, command: `${domain}.apply`, created_at: new Date().toISOString(), file_count: 2, link_count: 1 }));
+    }
+    return makeEnvelope(
+      {
+        domain,
+        dry_run: dryRun,
+        steps: [{ name: applyStepNames[domain] ?? `${domain}-sync`, ok: true, exit_code: 0 }],
+        snapshot,
+        skipped: [],
+      },
+      { command: `${domain}.apply`, run_id: runId },
+    );
+  };
+
+  const convergeEnvelope = (args: string[], runId: string): Envelope => {
+    const dryRun = args.includes("--dry-run");
+    recordRun(runId, "system.converge", dryRun);
+    const snapshot = dryRun ? null : { run_id: runId, path: `/tmp/mock-snapshots/${runId}`, file_count: 9, link_count: 2 };
+    if (snapshot) {
+      snapshots.unshift(makeSnapshotEntry({ run_id: runId, command: "system.converge", created_at: new Date().toISOString(), file_count: 9, link_count: 2 }));
+    }
+    return makeEnvelope(
+      {
+        pipeline: "update",
+        dry_run: dryRun,
+        steps: ["shell-aliases", "tools-sync", "rules-sync", "skills-link", "mcp-sync", "hooks-sync"].map((name) => ({ name, ok: true, exit_code: 0 })),
+        snapshot,
+        skipped: [],
+      },
+      { command: "system.converge", run_id: runId },
+    );
+  };
+
+  const profileData = (verb: "status" | "pull" | "push", extra: Partial<ProfileData> = {}): Envelope =>
+    makeEnvelope(
+      makeProfileData({
+        verb,
+        state: verb === "status" ? "clean" : verb === "pull" ? "clean" : "clean",
+        published: verb === "push" ? true : null,
+        gate: verb === "push" ? { scanned: true, findings: 0 } : null,
+        snapshot: verb === "status" ? null : { run_id: "20260906T020000Z-mock02", path: "/tmp/mock-snapshots/20260906T020000Z-mock02" },
+        ...extra,
+      }),
+      { command: `profile.${verb}` },
+    );
+
   return {
-    async run(command, args = []) {
+    async run(command, args = [], runOptions = {}) {
       // 模拟进程耗时，让加载/进行中的 UI 状态可见
       await new Promise((resolve) => setTimeout(resolve, 120));
+      const runId = runOptions.runId ?? "20260906T020000Z-mockrun";
+
+      // ---- 写路径与有状态命令 ----
+      if (command === "policy:get") return policyGet();
+      if (command === "policy:set") return policySet(args);
+      if (command === "runs:list") {
+        return makeEnvelope({ runs, tail: null, lines: null }, { command: "runs.list" });
+      }
+      if (command === "runs:get") {
+        const id = args[args.indexOf("--run") + 1];
+        const lines = Number(args[args.indexOf("--lines") + 1] ?? "200");
+        const tail = runLogs.get(id) ?? "（mock：该运行无日志）";
+        const entry = runs.find((run) => run.run_id === id) ?? makeRunEntry({ run_id: id });
+        return makeEnvelope({ runs: [entry], tail, lines }, { command: "runs.get" });
+      }
+      if (command === "snapshots:list") {
+        return makeEnvelope({ snapshots, restore: null }, { command: "snapshots.list" });
+      }
+      if (command === "snapshots:restore") {
+        const id = args[args.indexOf("--run") + 1];
+        const resnapshot = `resnap-${id}`;
+        snapshots.unshift(makeSnapshotEntry({ run_id: resnapshot, command: "snapshots.restore", created_at: new Date().toISOString() }));
+        return makeEnvelope(
+          { snapshots: null, restore: { restored_run: id, files_restored: 3, files_deleted: 1, links_restored: 1, skipped: [], resnapshot_run_id: resnapshot } },
+          { command: "snapshots.restore", run_id: runId },
+        );
+      }
+      if (command === "system:converge") return convergeEnvelope(args, runId);
+      if (command === "profile:status") {
+        return options.offline ? profileData("status", { state: "local-only", ahead: null, behind: null }) : profileData("status");
+      }
+      if (command === "profile:pull" || command === "profile:push") {
+        if (options.offline) {
+          return makeEnvelope(
+            {},
+            { command: `profile.${command === "profile:pull" ? "pull" : "push"}`, ok: false, errors: [{ code: "OFFLINE_NETWORK_DENIED", element: null, message: "offline 模式下拒绝 network 动作" }] },
+          );
+        }
+        const verb = command === "profile:pull" ? "pull" : "push";
+        recordRun(runId, `profile.${verb}`, args.includes("--dry-run"));
+        return profileData(verb, {
+          conflicts: verb === "pull" ? [
+            {
+              key: "mcp.grok-search.enabled",
+              base: { type: "boolean", digest: "sha256:base00aa11bb22cc33dd44" },
+              local: { type: "boolean", digest: "sha256:local0aa11bb22cc33dd4" },
+              remote: { type: "boolean", digest: "sha256:remoteaa11bb22cc33dd4" },
+            },
+          ] : [],
+        });
+      }
+      if (command.endsWith(":apply")) {
+        return applyEnvelope(command.split(":")[0], args, runId);
+      }
+
+      // ---- 只读命令 ----
       const envelope = routes[command];
       if (!envelope) {
         throw new EngineBridgeError({ kind: "unknown_command", message: `mock 未覆盖命令: ${command}` });

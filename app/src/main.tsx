@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { Toaster } from "sonner";
 import App from "./App";
 import { initEngineClient } from "./lib/engine";
+import { ExecutionProvider } from "./lib/execution";
 import { createQueryClient } from "./lib/queries";
 import "./index.css";
 
@@ -15,8 +16,10 @@ async function bootstrap() {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>
-        <App />
-        <Toaster richColors position="top-right" />
+        <ExecutionProvider>
+          <App />
+          <Toaster richColors position="top-right" />
+        </ExecutionProvider>
       </QueryClientProvider>
     </StrictMode>,
   );

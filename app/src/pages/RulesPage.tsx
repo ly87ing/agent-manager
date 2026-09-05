@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, PlayCircle } from "lucide-react";
 import { DriftExplanationPanel } from "../components/DriftExplanationPanel";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
@@ -7,6 +7,7 @@ import { StateBadge } from "../components/StateBadge";
 import type { EngineElement, StatusData } from "../lib/contract";
 import type { RulesObserved, RulesSpec } from "../lib/observed";
 import { useEngineQuery } from "../lib/queries";
+import { useExecuteApply, usePlanPreview } from "../lib/usePlanPreview";
 import { cn } from "../lib/utils";
 
 /** rules:dist 构建新鲜度卡（收敛轴：src→dist 构建是否落后）。 */
@@ -57,6 +58,8 @@ function DistFreshnessCard({ element }: { element: EngineElement }) {
 export default function RulesPage() {
   const query = useEngineQuery<StatusData>("rules:status");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const preview = usePlanPreview();
+  const executeApply = useExecuteApply();
 
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="rules:status 调用失败" error={query.error} />;
@@ -67,14 +70,32 @@ export default function RulesPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Rules" description="rules-targets.list 目标清单与 dist 构建新鲜度（只读；rules 无上游轴）。" />
+      <PageHeader title="Rules" description="rules-targets.list 目标清单与 dist 构建新鲜度（rules 无上游轴；收敛 = 构建 + 分发）。" />
       {query.data.errors.length > 0 && <ErrorPanel title="rules:status 错误" errors={query.data.errors} />}
+
+      <div className="flex justify-end">
+        <button
+          type="button"
+          data-testid="apply-rules-button"
+          onClick={() =>
+            preview.open({
+              title: "收敛 Rules 域",
+              subtitle: "rules:apply = src→dist 构建 + 目标分发（执行前自动快照）。",
+              planCommands: ["rules:plan"],
+              confirmLabel: "收敛 Rules",
+              execute: executeApply({ command: "rules:apply", label: "收敛 Rules 域" }),
+            })
+          }
+          className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+        >
+          <PlayCircle className="h-4 w-4" aria-hidden /> 收敛此域
+        </button>
+      </div>
 
       {dist && <DistFreshnessCard element={dist} />}
 
       <section className="overflow-x-auto rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <table className="w-full text-left text-sm">
-          <thead>
+        <table className="w-full text-left text-sm"><thead>
             <tr className="border-b border-slate-200 text-xs text-slate-500">
               <th className="py-2 pr-4 font-medium">目标</th>
               <th className="py-2 pr-4 font-medium">源</th>
@@ -104,6 +125,8 @@ export default function RulesPage() {
           </tbody>
         </table>
       </section>
+
+      {preview.modal}
     </div>
   );
 }

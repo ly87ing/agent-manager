@@ -45,8 +45,13 @@ export class EngineBridgeError extends Error {
   }
 }
 
+export interface EngineRunOptions {
+  /** GUI 生成的 run id（写路径必传），经 AGENT_MANAGER_RUN_ID 透传到引擎按次日志。 */
+  runId?: string;
+}
+
 export interface EngineClient {
-  run(command: string, args?: string[]): Promise<Envelope>;
+  run(command: string, args?: string[], options?: EngineRunOptions): Promise<Envelope>;
 }
 
 function isBridgeErrorPayload(value: unknown): value is { kind?: string; message: string; exit_code?: number | null; stderr?: string | null } {
@@ -54,10 +59,10 @@ function isBridgeErrorPayload(value: unknown): value is { kind?: string; message
 }
 
 const tauriEngineClient: EngineClient = {
-  async run(command, args = []) {
+  async run(command, args = [], options = {}) {
     let raw: unknown;
     try {
-      raw = await invoke<unknown>("engine_invoke", { command, args });
+      raw = await invoke<unknown>("engine_invoke", { command, args, runId: options.runId ?? null });
     } catch (err) {
       if (isBridgeErrorPayload(err)) {
         throw new EngineBridgeError(err);
@@ -90,8 +95,8 @@ export function setEngineClient(client: EngineClient | null): void {
   activeClient = client ?? tauriEngineClient;
 }
 
-export function runEngine<T>(command: string, args?: string[]): Promise<Envelope<T>> {
-  return getEngineClient().run(command, args) as unknown as Promise<Envelope<T>>;
+export function runEngine<T>(command: string, args?: string[], options?: EngineRunOptions): Promise<Envelope<T>> {
+  return getEngineClient().run(command, args, options) as unknown as Promise<Envelope<T>>;
 }
 
 export function engineErrorMessage(err: unknown): string {

@@ -158,7 +158,6 @@ export interface AuditData {
 }
 
 // ---------- system:refresh-upstream ----------
-
 export type ProbeState = Exclude<FreshnessState, "not-applicable">;
 
 export interface RefreshUpstreamEntry {
@@ -184,4 +183,144 @@ export interface RefreshUpstreamData {
   cache_file: string;
   elements: RefreshUpstreamEntry[];
   summary: RefreshUpstreamSummary;
+}
+
+// ---------- <domain>:apply / system:converge（apply-result / converge schema） ----------
+
+export interface ApplyStep {
+  name: string;
+  ok: boolean;
+  exit_code: number;
+}
+
+export interface SnapshotEcho {
+  run_id: string;
+  path: string;
+  file_count: number;
+  link_count: number;
+}
+
+export interface ApplyResultData {
+  domain: string;
+  dry_run: boolean;
+  steps: ApplyStep[];
+  snapshot: SnapshotEcho | null;
+  skipped: string[];
+}
+
+export interface ConvergeData {
+  pipeline: "update";
+  dry_run: boolean;
+  steps: ApplyStep[];
+  snapshot: SnapshotEcho | null;
+  skipped: string[];
+}
+
+// ---------- runs:list / runs:get ----------
+
+export interface RunEntry {
+  run_id: string;
+  log_file: string;
+  size_bytes: number;
+  mtime: string;
+  is_latest: boolean;
+}
+
+export interface RunsData {
+  runs: RunEntry[];
+  tail: string | null;
+  lines: number | null;
+}
+
+// ---------- snapshots:list / snapshots:restore ----------
+
+export interface SnapshotEntry {
+  run_id: string;
+  path: string;
+  created_at: string | null;
+  command: string | null;
+  file_count: number;
+  link_count: number;
+}
+
+export interface RestoreResultData {
+  restored_run: string;
+  files_restored: number;
+  files_deleted: number;
+  links_restored: number;
+  skipped: string[];
+  resnapshot_run_id: string;
+}
+
+export interface SnapshotsData {
+  snapshots: SnapshotEntry[] | null;
+  restore: RestoreResultData | null;
+}
+
+// ---------- policy:get / policy:set ----------
+
+export type PolicyLayer = "synced" | "local";
+export type PolicyLayerName = "baseline" | PolicyLayer;
+
+export interface PolicyLayers {
+  baseline: Record<string, unknown> | null;
+  synced: Record<string, unknown> | null;
+  local: Record<string, unknown> | null;
+}
+
+/** 一个 schema 同时服务 get/set，不适用的字段 nullable-required。 */
+export interface PolicyData {
+  layers: PolicyLayers | null;
+  effective: Record<string, unknown> | null;
+  attribution: Record<string, PolicyLayerName> | null;
+  layer: PolicyLayer | null;
+  key: string | null;
+  value: unknown;
+  path: string | null;
+}
+
+// ---------- profile:status / pull / push ----------
+
+export type ProfileSyncState =
+  | "clean"
+  | "ahead"
+  | "behind"
+  | "diverged"
+  | "uninitialized"
+  | "local-only";
+
+export interface ProfileBackend {
+  type: string | null;
+  url: string | null;
+  configured: boolean;
+}
+
+export interface ProfileValueSummary {
+  /** JSON 类型名，或 'absent'。 */
+  type: string;
+  digest: string | null;
+}
+
+export interface ProfileConflict {
+  key: string;
+  base: ProfileValueSummary;
+  local: ProfileValueSummary;
+  remote: ProfileValueSummary;
+}
+
+export interface ProfileData {
+  verb: "status" | "pull" | "push";
+  state: ProfileSyncState | null;
+  backend: ProfileBackend;
+  machine_id: string;
+  local: { path: string; exists: boolean; key_count: number };
+  base: { exists: boolean };
+  ahead: number | null;
+  behind: number | null;
+  last_sync: string | null;
+  /** 双侧摘要只有 type+digest，原始值永不进 payload（引擎语义）。 */
+  conflicts: ProfileConflict[];
+  snapshot: { run_id: string; path: string } | null;
+  published: boolean | null;
+  gate: { scanned: boolean; findings: number } | null;
 }

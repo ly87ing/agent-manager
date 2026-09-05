@@ -9,7 +9,11 @@ import { StateBadge } from "../components/StateBadge";
 import type { EngineElement, StatusData } from "../lib/contract";
 import { agentCellsOf, type McpObserved, type McpSpec } from "../lib/observed";
 import { useEngineQuery } from "../lib/queries";
+import { useExecuteApply, usePlanPreview } from "../lib/usePlanPreview";
 import { cn } from "../lib/utils";
+
+/** 可点击收敛的单元格态（managed-ok/absent/agent-disabled 无动作）。 */
+const ACTIONABLE_CELL_STATES = new Set(["drifted", "missing", "not-materialized", "leftover"]);
 
 function EnvResolutionList({ element }: { element: EngineElement }) {
   const observed = element.observed as McpObserved;
@@ -104,6 +108,8 @@ function ServerDetail({ element }: { element: EngineElement }) {
 export default function McpPage() {
   const query = useEngineQuery<StatusData>("mcp:status");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const preview = usePlanPreview();
+  const executeApply = useExecuteApply();
 
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="mcp:status 调用失败" error={query.error} />;
@@ -114,11 +120,23 @@ export default function McpPage() {
   ).sort();
   const selected = elements.find((element) => element.id === selectedId) ?? null;
 
+  /** 单元格点击：该 server 的 plan 过滤预览 → 域级 mcp:apply（提案 §4.3 单元素 = 预览过滤 + 域 apply）。 */
+  const openCellApply = (element: EngineElement) => {
+    preview.open({
+      title: `收敛 ${element.id}`,
+      subtitle: "预览只显示本 server 的动作；确认执行的是 mcp:apply 全域收敛（执行前自动快照）。",
+      planCommands: ["mcp:plan"],
+      filterElement: element.id,
+      confirmLabel: "收敛（域级 apply）",
+      execute: executeApply({ command: "mcp:apply", label: `收敛 ${element.id}` }),
+    });
+  };
+
   return (
     <div className="space-y-4">
       <PageHeader
         title="MCP"
-        description="server × agent 注入矩阵（只读）。单元格点击切换属单元素 apply，Phase 2 开放。"
+        description="server × agent 注入矩阵。点击可动作的单元格（漂移/未注入/未物化/遗留）→ plan 预览 → 域级收敛。"
       />
       {query.data.errors.length > 0 && <ErrorPanel title="mcp:status 错误" errors={query.data.errors} />}
 
@@ -156,10 +174,20 @@ export default function McpPage() {
                   </td>
                   {agentColumns.map((agent) => {
                     const cell = cells[agent];
+                    const actionable = cell !== undefined && ACTIONABLE_CELL_STATES.has(cell.state);
                     return (
                       <td key={agent} className="py-2 pr-4">
                         {cell ? (
-                          <MatrixCell state={cell.state} kind="mcp" title={`${agent}: ${cell.state}`} />
+                          <button
+                            type="button"
+                            disabled={!actionable}
+                            onClick={() => openCellApply(element)}
+                            data-testid={`mcp-cell-${element.id}-${agent}`}
+                            title={actionable ? `点击收敛 ${element.id}（plan 预览 → 域级 apply）` : undefined}
+                            className={cn("rounded", actionable ? "cursor-pointer hover:ring-2 hover:ring-indigo-300" : "cursor-default")}
+                          >
+                            <MatrixCell state={cell.state} kind="mcp" title={`${agent}: ${cell.state}`} />
+                          </button>
                         ) : (
                           <span className="text-xs text-slate-300">—</span>
                         )}
@@ -182,6 +210,8 @@ export default function McpPage() {
       ) : (
         <p className="text-xs text-slate-400">点击矩阵中的 server id 展开详情（命令/env 解析/目标文件/漂移解释）。</p>
       )}
+
+      {preview.modal}
     </div>
   );
 }
