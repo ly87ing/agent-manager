@@ -30,7 +30,7 @@ PLAN_SCHEMA = load_schema(CONTRACT_DIR / "plan.schema.json")
 ALPHA_SECRET = "engine-test-fake-alpha-secret-001"
 LIVE_SECRET = "engine-test-fake-live-secret-002"
 
-COPY_IGNORE = shutil.ignore_patterns("repositories", ".git", "__pycache__", "secrets", ".env", "app", "node_modules")
+COPY_IGNORE = shutil.ignore_patterns("repositories", ".git", "__pycache__", "secrets", ".env", "app", "node_modules", "engine-rs")
 
 
 class EngineCliTests(unittest.TestCase):
@@ -450,6 +450,60 @@ class EngineCliTests(unittest.TestCase):
         result = self._run_manage("frobnicate")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("未知命令 'frobnicate'", result.stdout + result.stderr)
+
+    # ------------------------------------------------- rust slice routing (Phase 3)
+
+    RUST_BIN = ROOT / "engine-rs" / "target" / "debug" / "agent-manager-engine"
+
+    def test_mcp_routes_to_python_fallback_when_no_rust_binary(self):
+        # 沙盒拷贝排除 engine-rs → 无 binary 可路由，必须落回 Python（deprecated 内核）。
+        result = self._run_manage("mcp:status", "--json", env_extra={"ENGINE_TEST_ALPHA_KEY": LIVE_SECRET})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("[engine] rust:", result.stderr)
+        payload = json.loads(result.stdout)
+        self._assert_envelope(payload)
+        self.assertEqual(payload["data"]["domain"], "mcp")
+
+    @unittest.skipUnless(RUST_BIN.exists(), "engine-rs 未构建（cargo build）时跳过")
+    def test_mcp_routes_to_rust_binary_via_env_override(self):
+        result = self._run_manage(
+            "mcp:status", "--json",
+            env_extra={"ENGINE_TEST_ALPHA_KEY": LIVE_SECRET, "AGENT_MANAGER_ENGINE_RS": str(self.RUST_BIN)},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[engine] rust:", result.stderr)
+        payload = json.loads(result.stdout)
+        self._assert_envelope(payload)
+        elements = {e["id"]: e["state"] for e in payload["data"]["elements"]}
+        self.assertEqual(elements["mcp:alpha"], "managed-ok")
+        self.assertEqual(elements["mcp:zeta"], "drifted")
+
+    def test_rust_route_env_override_accepts_custom_binary(self):
+        # env 指定的自定义 binary 优先于仓库 target/（含假 binary 直通验证）。
+        canned = {
+            "contract": "agent-manager/engine/v1",
+            "run_id": "routing-test",
+            "command": "mcp.status",
+            "mode": {"dry_run": False, "offline": False},
+            "lock": {"held": False, "pid": None},
+            "log_file": None,
+            "ok": True,
+            "data": {"domain": "mcp", "elements": []},
+            "warnings": [],
+            "errors": [],
+        }
+        fake_bin = self.temp_dir / "fake-engine.sh"
+        fake_bin.write_text(
+            "#!/bin/sh\ncat <<'JSON'\n%s\nJSON\n" % json.dumps(canned), encoding="utf-8"
+        )
+        fake_bin.chmod(0o755)
+        result = self._run_manage(
+            "mcp:status", "--json", env_extra={"AGENT_MANAGER_ENGINE_RS": str(fake_bin)}
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[engine] rust:", result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["run_id"], "routing-test")
 
 
 class EngineDomainSliceTests(unittest.TestCase):

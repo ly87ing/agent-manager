@@ -1,0 +1,13 @@
+[package]
+name = "agent-manager-engine"
+version = "0.1.0"
+edition = "2021"
+description = "Agent Manager engine (contract v1) — Rust slice, dual implementation of the Python engine (src/engine_v1.py)"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+toml = "0.8"
+sha2 = "0.10"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+anyhow = "1"

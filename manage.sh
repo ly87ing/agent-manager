@@ -1097,11 +1097,29 @@ case "$cmd" in
         if [ "${#CMD_ARGS[@]}" -gt 0 ]; then
             engine_args+=("${CMD_ARGS[@]}")
         fi
+        # Rust 切片路由（Phase 3）：mcp 域优先走 engine-rs（Python 内核保留作
+        # fallback；退役待 Phase 3 末 CI 全绿）。AGENT_MANAGER_ENGINE_RS 可显式指定 binary。
+        engine_cmd=("$PYTHON_CMD" "$ROOT_DIR/src/engine_v1.py")
+        if [[ "$cmd" == "mcp:status" || "$cmd" == "mcp:plan" ]]; then
+            rust_engine=""
+            if [ -n "${AGENT_MANAGER_ENGINE_RS:-}" ] && [ -x "${AGENT_MANAGER_ENGINE_RS}" ]; then
+                rust_engine="$AGENT_MANAGER_ENGINE_RS"
+            elif [ -x "$ROOT_DIR/engine-rs/target/release/agent-manager-engine" ]; then
+                rust_engine="$ROOT_DIR/engine-rs/target/release/agent-manager-engine"
+            elif [ -x "$ROOT_DIR/engine-rs/target/debug/agent-manager-engine" ]; then
+                rust_engine="$ROOT_DIR/engine-rs/target/debug/agent-manager-engine"
+            fi
+            if [ -n "$rust_engine" ]; then
+                engine_cmd=("$rust_engine")
+                echo -e "${BORDER_GRAY}[engine] rust: $rust_engine${NC}" >&2
+            fi
+        fi
         AGENT_MANAGER_RUN_ID="$RUN_ID" \
         AGENT_MANAGER_LOG_FILE="$TEMP_LOG" \
         AGENT_MANAGER_LOCK_HELD="$LOCK_ACQUIRED" \
         AGENT_MANAGER_LOCK_PID="$$" \
-            "$PYTHON_CMD" "$ROOT_DIR/src/engine_v1.py" "${engine_args[@]}"
+        AGENT_MANAGER_ROOT_DIR="$ROOT_DIR" \
+            "${engine_cmd[@]}" "${engine_args[@]}"
         ;;
     help|-h|--help|-help)
         print_help ;;
