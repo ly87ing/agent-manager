@@ -1,0 +1,23 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`FreshnessBadge 五态 > current：渲染绿色「已是最新」 1`] = `
+<div>
+  <span
+    class="inline-flex flex-col items-start gap-0.5"
+  >
+    <span
+      class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap border-emerald-200 bg-emerald-50 text-emerald-700"
+      title="状态: current · 探测源: npm-view · 上次检查: 2026/9/5 18:00:00"
+    >
+      已是最新
+    </span>
+    <span
+      class="text-xs text-slate-400"
+      data-testid="freshness-cache-age"
+    >
+      2 分钟前
+      检查
+    </span>
+  </span>
+</div>
+`;

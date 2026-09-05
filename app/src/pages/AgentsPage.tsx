@@ -1,0 +1,136 @@
+import { useState } from "react";
+import { Check, ChevronDown, ChevronRight, X } from "lucide-react";
+import { DriftExplanationPanel } from "../components/DriftExplanationPanel";
+import { ErrorPanel } from "../components/ErrorPanel";
+import { FreshnessBadge } from "../components/FreshnessBadge";
+import { PageError, PageHeader, PageLoading } from "../components/PageState";
+import { StateBadge } from "../components/StateBadge";
+import type { EngineElement } from "../lib/contract";
+import type { AgentsObserved, AgentsPolicy, AgentsSpec } from "../lib/observed";
+import { useEngineQuery } from "../lib/queries";
+import { cn } from "../lib/utils";
+import type { StatusData } from "../lib/contract";
+
+/** provider 分类徽标（observed.classified 四桶 → 只读徽标）。 */
+const PROVIDER_BUCKETS = ["managed", "deprecated", "system_only", "unsupported"] as const;
+type ProviderBucket = (typeof PROVIDER_BUCKETS)[number];
+
+const PROVIDER_CLASS_META: Record<ProviderBucket, { label: string; className: string }> = {
+  managed: { label: "托管", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+  deprecated: { label: "已弃用", className: "border-amber-200 bg-amber-50 text-amber-700" },
+  system_only: { label: "仅系统", className: "border-sky-200 bg-sky-50 text-sky-700" },
+  unsupported: { label: "不支持", className: "border-zinc-200 bg-zinc-100 text-zinc-500" },
+};
+
+function PolicyChip({ label, value }: { label: string; value: boolean | undefined }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-xs text-slate-600">
+      {value ? (
+        <Check className="h-3 w-3 text-emerald-600" aria-hidden />
+      ) : (
+        <X className="h-3 w-3 text-slate-300" aria-hidden />
+      )}
+      {label}
+    </span>
+  );
+}
+
+function AgentCard({ element }: { element: EngineElement }) {
+  const [expanded, setExpanded] = useState(false);
+  const spec = element.spec as AgentsSpec;
+  const policy = element.policy as AgentsPolicy;
+  const observed = element.observed as AgentsObserved;
+  const classified = observed.classified ?? {};
+  const installed = observed.installed ?? false;
+  const version = installed ? (element.freshness.current ?? "已安装（版本未探测）") : "未安装";
+
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold text-slate-800">
+            {spec.display_name ?? element.id}
+            <span className="ml-2 font-mono text-xs font-normal text-slate-400">{spec.bin}</span>
+          </h3>
+          <p className="mt-0.5 text-sm text-slate-500">已装版本：{version}</p>
+        </div>
+        <div className="flex flex-col items-end gap-1.5">
+          <StateBadge state={element.state} />
+          <FreshnessBadge freshness={element.freshness} className="items-end" />
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
+        {PROVIDER_BUCKETS.flatMap((bucket) =>
+          (classified[bucket] ?? []).map((provider) => (
+            <span
+              key={`${bucket}-${provider}`}
+              className={cn("rounded border px-1.5 py-0.5", PROVIDER_CLASS_META[bucket].className)}
+              title={`${provider}（${PROVIDER_CLASS_META[bucket].label}）`}
+            >
+              {provider}·{PROVIDER_CLASS_META[bucket].label}
+            </span>
+          )),
+        )}
+        {spec.preferred_provider && (
+          <span
+            className={cn(
+              "rounded border px-1.5 py-0.5",
+              observed.preferred_active
+                ? "border-indigo-200 bg-indigo-50 text-indigo-700"
+                : "border-slate-200 bg-slate-50 text-slate-500",
+            )}
+            title={observed.preferred_active ? "偏好 provider 生效中" : "当前安装非偏好 provider"}
+          >
+            偏好 {spec.preferred_provider}
+            {observed.preferred_active ? "·生效" : "·未生效"}
+          </span>
+        )}
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-1.5 border-t border-slate-100 pt-3">
+        <PolicyChip label="enabled" value={policy.enabled} />
+        <PolicyChip label="auto_install" value={policy.auto_install} />
+        <PolicyChip label="auto_update" value={policy.auto_update} />
+      </div>
+
+      {element.state === "unmanaged-detected" && (
+        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          检测到未托管安装（不在受管 provider 列表内）。建议迁移到受管 provider
+          {spec.preferred_provider ? `（偏好 ${spec.preferred_provider}）` : ""}
+          ，由引擎统一升级/卸载；迁移执行将在 Phase 2 提供，当前仅提示。
+        </p>
+      )}
+
+      <button
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        className="mt-3 inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800"
+        aria-expanded={expanded}
+      >
+        {expanded ? <ChevronDown className="h-3.5 w-3.5" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden />}
+        {expanded ? "收起漂移解释" : "展开漂移解释"}
+      </button>
+      {expanded && <div className="mt-2"><DriftExplanationPanel element={element} planCommand="agents:plan" /></div>}
+    </section>
+  );
+}
+
+export default function AgentsPage() {
+  const query = useEngineQuery<StatusData>("agents:status");
+  if (query.isPending) return <PageLoading />;
+  if (query.isError) return <PageError title="agents:status 调用失败" error={query.error} />;
+
+  const elements = query.data.data.elements;
+  return (
+    <div className="space-y-4">
+      <PageHeader title="Agents" description="安装源分类、版本与上游新鲜度、policy 开关（只读）。升级/迁移属 network / install-remove 动作，Phase 2 开放。" />
+      {query.data.errors.length > 0 && <ErrorPanel title="agents:status 错误" errors={query.data.errors} />}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        {elements.map((element) => (
+          <AgentCard key={element.id} element={element} />
+        ))}
+      </div>
+    </div>
+  );
+}

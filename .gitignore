@@ -41,3 +41,9 @@ secrets/
 config/manager.local.json
 config/manager.synced.json
 config/version-pins.local.json
+
+# Desktop app (app/)
+app/node_modules/
+app/dist/
+app/src-tauri/target/
+app/src-tauri/gen/
