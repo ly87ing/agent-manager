@@ -1,0 +1,23 @@
+{
+  "verb": "status",
+  "state": "local-only",
+  "backend": {
+    "type": "git",
+    "url": "***@example.com:YOUR_ORG/YOUR_PROFILE_REPO.git",
+    "configured": true
+  },
+  "machine_id": "your-machine",
+  "local": {
+    "path": "/YOUR_HOME/agent-manager/config/manager.synced.json",
+    "exists": true,
+    "key_count": 2
+  },
+  "base": {"exists": false},
+  "ahead": null,
+  "behind": null,
+  "last_sync": null,
+  "conflicts": [],
+  "snapshot": null,
+  "published": null,
+  "gate": null
+}

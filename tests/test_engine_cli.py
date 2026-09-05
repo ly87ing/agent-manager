@@ -361,11 +361,11 @@ class EngineCliTests(unittest.TestCase):
         self.assertIn("--json", result.stderr)
 
     def test_unimplemented_domains_and_verbs_return_domain_not_implemented(self):
-        # 全域 status 已接线；secrets 只读无 plan；profile/runs 属后续 Phase
-        # （runs 的 :list/:get 动词不在 manage.sh 路由内，走未知命令路径）。
+        # 全域 status 已接线；secrets 只读无 plan；profile:status/pull/push 已由
+        # Phase 2b 接到 agent-profile/sync_profile.py（不再走引擎内核），
+        # profile:plan 仍属后续 Phase。
         for argv in (
             ("secrets:plan", "--json"),
-            ("profile:status", "--json"),
             ("profile:plan", "--json"),
         ):
             with self.subTest(argv=argv):

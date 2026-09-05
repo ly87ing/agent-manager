@@ -1019,6 +1019,9 @@ function print_help() {
     echo -e "  ${SUCCESS_GREEN}snapshots:list${NC} / ${SUCCESS_GREEN}snapshots:restore --run <id>${NC} 运行快照清单与回滚（restore 前会再快照当前态）"
     echo -e "  ${SUCCESS_GREEN}runs:list${NC} / ${SUCCESS_GREEN}runs:get --run <id>${NC} 执行历史与按次日志读取（--lines 调尾部行数）"
     echo -e "  ${SUCCESS_GREEN}policy:get${NC} / ${SUCCESS_GREEN}policy:set${NC} 三层策略视图（baseline⊕synced⊕local 原文+effective+层归属）与分层写入（仅 synced/local，疑似明文门禁）"
+    echo -e "  ${SUCCESS_GREEN}profile:status${NC} 个性化配置同步状态（共享层本地状态 + 远端比对 clean/ahead/behind/diverged/uninitialized；须追加 --json；--offline 只报本地）"
+    echo -e "  ${SUCCESS_GREEN}profile:pull${NC}   拉取远端共享层并三向合并写回 synced 层（network 级，offline 拒绝；冲突保留本地值并按 key 报告）"
+    echo -e "  ${SUCCESS_GREEN}profile:push${NC}   发布本地共享层到同步后端（push 前疑似明文扫描硬门禁；--dry-run 只出计划不推送；后端地址只经 PROFILE_SYNC_REPO_URL 或 manager.local.json 提供）"
     echo -e "  ${SUCCESS_GREEN}help${NC}           显示本帮助\n"
 }
 
@@ -1044,6 +1047,26 @@ case "$cmd" in
         else
             doctor_check
         fi
+        ;;
+    profile:status|profile:pull|profile:push)
+        # 个性化配置同步引擎（§7.2，git 后端，agent-profile/sync_profile.py）；
+        # 契约与退出码同引擎命令族。profile:status 经 *:status 通配已享锁豁免，
+        # pull/push 持锁（network 级写动作）。
+        profile_args=("$cmd" --synced-config "$SYNCED_CONFIG" --local-config "$LOCAL_CONFIG")
+        if [ -n "$DRY_RUN_FLAG" ]; then
+            profile_args+=(--dry-run)
+        fi
+        if [ -n "$OFFLINE_FLAG" ]; then
+            profile_args+=(--offline)
+        fi
+        if [ "${#CMD_ARGS[@]}" -gt 0 ]; then
+            profile_args+=("${CMD_ARGS[@]}")
+        fi
+        AGENT_MANAGER_RUN_ID="$RUN_ID" \
+        AGENT_MANAGER_LOG_FILE="$TEMP_LOG" \
+        AGENT_MANAGER_LOCK_HELD="$LOCK_ACQUIRED" \
+        AGENT_MANAGER_LOCK_PID="$$" \
+            "$PYTHON_CMD" "$ROOT_DIR/agent-profile/sync_profile.py" "${profile_args[@]}"
         ;;
     *:status|*:plan|*:apply|system:audit|system:refresh-upstream|system:converge|snapshots:list|snapshots:restore|runs:list|runs:get|policy:get|policy:set)
         # 引擎契约命令族（contract/engine-v1）：envelope JSON 走 stdout，退出码 0/1/2 由引擎决定。

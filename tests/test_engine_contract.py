@@ -42,9 +42,10 @@ SCHEMA_FILES = {
     "runs": "runs.schema.json",
     "snapshots": "snapshots.schema.json",
     "policy": "policy.schema.json",
+    "profile": "profile.schema.json",
 }
 
-FIXTURE_NAME_RE = re.compile(r"^(envelope|element|plan-action|apply-result|status|plan|converge|runs|snapshots|policy)-.+\.(valid|invalid)\.json$")
+FIXTURE_NAME_RE = re.compile(r"^(envelope|element|plan-action|apply-result|status|plan|converge|runs|snapshots|policy|profile)-.+\.(valid|invalid)\.json$")
 
 # Every *.invalid.json fixture maps to the exact JSON path it must fail at.
 # Missing required properties are reported at the containing object; type/enum
@@ -73,6 +74,9 @@ EXPECTED_INVALID_PATHS = {
     "snapshots-restore-missing-resnapshot.invalid.json": "$.restore",
     "policy-missing-attribution.invalid.json": "$",
     "policy-bad-layer-type.invalid.json": "$.layers.baseline",
+    "profile-bad-state.invalid.json": "$.state",
+    "profile-missing-backend.invalid.json": "$",
+    "profile-bad-conflict-key.invalid.json": "$.conflicts[0].key",
 }
 
 

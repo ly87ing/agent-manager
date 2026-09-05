@@ -40,6 +40,7 @@ agent-tool/*
 secrets/
 config/manager.local.json
 config/manager.synced.json
+config/manager.synced.base.json
 config/version-pins.local.json
 
 # Desktop app (app/)
