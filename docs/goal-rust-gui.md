@@ -136,8 +136,8 @@ Stop：Windows 方案若在本机无法验证，据实报告已验证范围与�
 | Phase | 状态 | 验收证据 | commit |
 |---|---|---|---|
 | Phase 0 契约与 JSON 化 | 已完成 | discover 592 项全绿、make smoke 通过、check_no_secrets 通过；8 域 status + 7 域 plan + system:audit + system:refresh-upstream 全命令真实机过双 schema | 3db6be4 / 6efbfec / ad2ab60 / 49cae4e / 63dea53 / c4b9fad |
-| Phase 1 Tauri 只读视图 | 未开始 | — | — |
-| Phase 2 写操作与同步 | 未开始 | — | — |
+| Phase 1 Tauri 只读视图 | 已完成 | vitest 31 绿、cargo 19+1、typecheck/build 绿、`pnpm tauri build` 产出 .app、真实引擎冒烟 mcp:status ok=true、浏览器全页面渲染验证；python discover 592 绿 | 53bf60d / c0d6442 |
+| Phase 2 写操作与同步 | 已完成 | **converge ≡ update 逐字节对账 diff 为空**（含篡改反例）；双机 git 同步 + 按 key 冲突解决（test_sync_profile 12 项）；push 门禁反例零推送；policy 只写 synced/local 且 baseline 逐字节不变断言；vitest 50 绿、cargo 24+1；discover 626 绿、smoke/secrets 绿 | 7248410 / 81a83c3 / fc8228b / 980d2f4 |
 | Phase 3 平台与 Rust 切片 | 未开始 | — | — |
 
 ### Phase 0 实施备注
