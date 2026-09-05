@@ -2357,8 +2357,12 @@ def _snapshot_targets_for(root_dir, domains, config_file, def_files):
     return files, links
 
 
-def _apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd):
-    """Step specs [(name, cmd, cwd, timeout, fatal)] mirroring manage.sh args."""
+def _apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd, build_stale_rules=True):
+    """Step specs [(name, cmd, cwd, timeout, fatal)] mirroring manage.sh args.
+
+    build_stale_rules=False（system:converge 用）：update 管线从不构建 dist，
+    converge 必须逐字节等价，故禁用构建增强；rules:apply（域命令，提案 §2.3
+    「构建+分发」）保留 build-if-stale。"""
     root_dir = Path(root_dir)
     dry = mode["dry_run"]
     offline = mode["offline"]
@@ -2387,7 +2391,7 @@ def _apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd
     elif domain == "rules":
         status, _warnings, _errors = build_rules_status(root_dir, config_file, def_files)
         dist = next((e for e in status["elements"] if e["id"] == "rules:dist"), None)
-        if dist is not None and dist["state"] in ("drifted", "not-materialized") and not dry:
+        if build_stale_rules and dist is not None and dist["state"] in ("drifted", "not-materialized") and not dry:
             # 对齐 plan：dist 构建落后/缺失时先构建再分发。
             steps.append(
                 ("rules-build", [python_cmd, "scripts/build-agent-rules.py"], root_dir / "agent-rule", 600, True)
@@ -2523,7 +2527,7 @@ def _converge_step_specs(root_dir, config_file, mode, python_cmd):
         elif domain == "rules":
             def_files = [root_dir / "config" / "rules-targets.list"]
         before = len(steps)
-        steps.extend(_apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd))
+        steps.extend(_apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd, build_stale_rules=False))
         if domain == "rules" and len(steps) == before:
             skipped.append("rules-sync")
         if domain == "tools" and _browser_us_enabled(config_file):

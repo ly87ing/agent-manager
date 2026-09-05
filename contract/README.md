@@ -14,6 +14,12 @@ contract/
     plan-action.schema.json
     status.schema.json
     plan.schema.json
+    apply-result.schema.json
+    converge.schema.json
+    runs.schema.json
+    snapshots.schema.json
+    policy.schema.json
+    profile.schema.json
 ```
 
 - 版本号锚点有二：目录名（`engine-v1`）与 envelope 的 `contract` 常量
@@ -33,6 +39,12 @@ contract/
 | `plan-action.schema.json` | plan 动作条目：op/element/target/risk/摘要字段 | §2.4 |
 | `status.schema.json` | `<domain>.status` 的 data：`{domain, elements[]}` | §2.2/§2.3 |
 | `plan.schema.json` | `<domain>.plan` 的 data：`{domain, actions[], summary}` | §2.2/§2.4 |
+| `apply-result.schema.json` | `<domain>.apply` 的 data：`{domain, dry_run, steps[], snapshot, skipped[]}`（复用既有同步器，写前快照） | §2.3/§4.10 |
+| `converge.schema.json` | `system.converge` 的 data：`{pipeline, dry_run, steps[], snapshot, skipped[]}`（update 管线等价） | §2.3 |
+| `runs.schema.json` | `runs.list` / `runs.get` 的 data：`{runs[], tail, lines}`（get 时 runs 为单元素数组） | §2.3/§4.8 |
+| `snapshots.schema.json` | `snapshots.list` / `snapshots.restore` 的 data：`{snapshots[] \| restore}`（restore 前先再快照当前态） | §4.10 |
+| `policy.schema.json` | `policy.get` / `policy.set` 的 data：三层原文 + effective + 层归属 / 写入回执（baseline 只读） | §7.2/§4.9 |
+| `profile.schema.json` | `profile.status/pull/push` 的 data：后端状态/ahead/behind/冲突/门禁回执 | §7.2/§4.11 |
 
 ## 关键字白名单（子集）
 

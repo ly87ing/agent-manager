@@ -402,6 +402,7 @@ class EngineWritePathTests(unittest.TestCase):
     # ------------------------------------------------------------------ policy
 
     def test_policy_set_writes_layer_and_get_shows_attribution(self):
+        baseline_before = (self.repo / "config" / "manager.json").read_bytes()
         payload = self._payload(
             "policy:set", "--json", "--layer", "local", "--key", "mcp.alpha.enabled", "--value", "false"
         )
@@ -412,6 +413,8 @@ class EngineWritePathTests(unittest.TestCase):
         self.assertEqual(oct(local_path.stat().st_mode & 0o777), "0o600")
         written = json.loads(local_path.read_text(encoding="utf-8"))
         self.assertEqual(written, {"mcp": {"alpha": {"enabled": False}}})
+        # 基线层逐字节零改动（只读可审计）。
+        self.assertEqual((self.repo / "config" / "manager.json").read_bytes(), baseline_before)
 
         payload = self._payload("policy:get", "--json")
         self._assert_schema(POLICY_SCHEMA, payload["data"])
