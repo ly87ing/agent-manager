@@ -10,8 +10,11 @@ Scope and limits, on purpose:
 - Only the well-defined reference form ```<name>` skill`` is checked. Bare
   names in prose or table cells have no consistent syntax and are left to
   per-skill evals / human review, not a fragile catch-all regex.
-- The "known skill universe" is the declared agent-skills ``skill_paths`` plus
-  every skill actually installed under the agent skill dirs. That lets a valid
+- The "known skill universe" is the discovery result of each declared collection
+  (``skill_paths`` is the in-repo discovery scope; a skill's identity is the
+  ``SKILL.md`` frontmatter ``name``), falling back to the declared ``skill_paths``
+  basenames when the local repo cache is absent (cold CI checkout), plus every
+  skill actually installed under the agent skill dirs. That lets a valid
   cross-source reference (e.g. an installed ``xiaoyu-bug-loop``) pass while a
   reference to a retired skill fails.
 - Detection only. It never rewrites content: the correct replacement for a dead
@@ -23,6 +26,7 @@ the test suite treats it as fail-close.
 """
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -53,10 +57,70 @@ def _resolve_agent_dir(target: str) -> Path:
     return Path(target).expanduser()
 
 
+EXCLUDED_DISCOVERY_DIRS = {".git", "node_modules", "__pycache__", "venv", ".venv"}
+SKILL_FILE = "SKILL.md"
+
+
+def _read_frontmatter_name(skill_md: Path) -> str | None:
+    try:
+        lines = skill_md.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    if not lines or lines[0].strip() != "---":
+        return None
+    for line in lines[1:]:
+        stripped = line.strip()
+        if stripped == "---":
+            break
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        if key.strip() == "name":
+            name = value.strip().strip("'\"")
+            return name or None
+    return None
+
+
+def _discover_repo_skill_names(root: Path, repo_name: str, repo: dict) -> set[str] | None:
+    """按发现语义枚举 collection 的 skill 名（frontmatter name，解析失败回退目录名）。
+
+    ``skill_paths`` 是仓库内的发现范围；本地缓存缺失（如 CI 冷启动）时返回 None，
+    由调用方回退到声明的 basename —— 旧格式下两者等价。
+    """
+    cache = (root / "agent-skill" / "repositories" / repo_name).resolve()
+    if not cache.is_dir():
+        return None
+    raw_paths = repo.get("skill_paths")
+    if raw_paths is None:
+        search_roots = [cache]
+    else:
+        search_roots = []
+        for raw_path in raw_paths:
+            candidate = (cache / raw_path).resolve(strict=False)
+            if candidate != cache and cache not in candidate.parents:
+                continue
+            search_roots.append(candidate)
+    names: set[str] = set()
+    for search_root in search_roots:
+        if not search_root.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(search_root):
+            dirnames[:] = sorted(d for d in dirnames if d not in EXCLUDED_DISCOVERY_DIRS)
+            if SKILL_FILE not in filenames:
+                continue
+            skill_dir = Path(dirpath)
+            names.add(_read_frontmatter_name(skill_dir / SKILL_FILE) or skill_dir.name)
+    return names
+
+
 def build_universe(root: Path) -> set[str]:
     skills_cfg = json.loads((root / "config" / "skills.json").read_text(encoding="utf-8"))
     universe: set[str] = set()
-    for repo in skills_cfg.get("repositories", {}).values():
+    for repo_name, repo in skills_cfg.get("repositories", {}).items():
+        discovered = _discover_repo_skill_names(root, repo_name, repo)
+        if discovered is not None:
+            universe.update(discovered)
+            continue
         for skill_path in repo.get("skill_paths", []):
             universe.add(Path(skill_path).name)
     for target in skills_cfg.get("agents", {}).values():

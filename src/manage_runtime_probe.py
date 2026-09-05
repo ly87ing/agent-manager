@@ -388,10 +388,8 @@ def collect_required_runtime_commands(config, agent_defs, tool_defs, skill_cfg, 
         policy = config.get("mcp", {}).get(server_name)
         if policy is None or not policy.get("enabled", True):
             continue
-        # 运行时拉取型 server（npx/uvx 启动时解析包）依赖对应执行器存在；
-        # 直连二进制型 server（如 chrome-devtools-mcp）的就绪由 tools 就绪审计覆盖
-        if server_def.get("command") in ("npx", "uvx"):
-            add(server_def["command"])
+        if server_def.get("command") == "npx":
+            add("npx")
         if server_def.get("url"):
             add("git")
 
@@ -420,6 +418,114 @@ def collect_active_skill_target_agents(config, skill_cfg):
         merged.update(policy)
         active.update(expand_targeted_agents(merged.get("agents"), agent_targets.keys()))
     return active
+
+
+class SkillPolicyMatrixError(ValueError):
+    """skills v2 启用矩阵（skills.<repo>.skills）语义错误的 fail-close 信号。"""
+
+
+NEW_SKILL_DEFAULT_CHOICES = ("disabled", "enabled")
+
+
+def repo_skill_matrix_mode(repo_config):
+    """v2 矩阵模式判据：合并后的仓库配置出现 ``skills`` 或 ``new_skill_default`` 任一键。
+
+    两键都缺省 = 旧式定义（skill_paths 发现范围 + agents 目标集），调用方走
+    升格等价路径，行为与 v1 逐比特一致。
+    """
+    return "skills" in repo_config or "new_skill_default" in repo_config
+
+
+def validate_repo_new_skill_default(repo_name, repo_config):
+    # 形状 fail-close（对齐 validate_repo_disabled 风格）：缺省 = disabled；
+    # 给了就必须是 "disabled" 或 "enabled"。
+    raw = repo_config.get("new_skill_default")
+    if raw is None:
+        return
+    if raw not in NEW_SKILL_DEFAULT_CHOICES:
+        raise ValueError(
+            f'{repo_name}: skills.{repo_name}.new_skill_default 必须是 "disabled" 或 "enabled"'
+        )
+
+
+def validate_repo_skill_matrix(repo_name, repo_config, collection_agents, declared_target_ids):
+    """启用矩阵形状的 fail-close 校验（对齐 validate_repo_disabled 风格）。
+
+    矩阵只收敛不扩张：agent 键（按别名规整后）必须是已声明的 target，且不得
+    越出 collection 的 agents 目标集。
+    """
+    raw = repo_config.get("skills")
+    if raw is None:
+        return
+    if not isinstance(raw, dict):
+        raise ValueError(f"{repo_name}: skills.{repo_name}.skills 必须是对象")
+    collection_scope = None if collection_agents is None else set(collection_agents)
+    for skill_name, entry in raw.items():
+        if not isinstance(skill_name, str) or not skill_name.strip():
+            raise ValueError(f"{repo_name}: skills.{repo_name}.skills 的键必须是非空字符串")
+        if not isinstance(entry, dict):
+            raise ValueError(f"{repo_name}: skills.{repo_name}.skills.{skill_name} 必须是对象")
+        unknown_keys = sorted(set(entry) - {"agents"})
+        if unknown_keys:
+            raise ValueError(
+                f"{repo_name}: skills.{repo_name}.skills.{skill_name} 含未知键: {', '.join(unknown_keys)}"
+            )
+        if "agents" not in entry:
+            continue
+        agents_spec = entry["agents"]
+        if agents_spec is None:
+            continue
+        if not isinstance(agents_spec, dict):
+            raise ValueError(
+                f"{repo_name}: skills.{repo_name}.skills.{skill_name}.agents 必须是 null 或对象"
+            )
+        for agent_key, switch in agents_spec.items():
+            if not isinstance(switch, bool):
+                raise ValueError(
+                    f"{repo_name}: skills.{repo_name}.skills.{skill_name}.agents.{agent_key} 必须是布尔值"
+                )
+            agent_id = canonicalize_agent_id(agent_key)
+            if agent_id not in declared_target_ids:
+                raise ValueError(
+                    f"{repo_name}: skills.{repo_name}.skills.{skill_name}.agents 包含未声明的 target: {agent_key}"
+                )
+            if collection_scope is not None and agent_id not in collection_scope:
+                raise ValueError(
+                    f"{repo_name}: skills.{repo_name}.skills.{skill_name}.agents 越出 collection agents 范围: {agent_key}"
+                )
+
+
+def resolve_skill_agent_switch(repo_config, skill_name):
+    """矩阵模式下某 skill 的启用 agent 集。
+
+    返回 ``None`` = 跟随 collection 目标集；返回集合 = 显式收敛结果，空集即
+    "收件箱"语义（已发现但不向任何 agent 分发）。形状由 validate_repo_skill_matrix
+    保证，本函数不再复查。
+    """
+    entry = (repo_config.get("skills") or {}).get(skill_name) or {}
+    if "agents" not in entry:
+        if repo_config.get("new_skill_default", "disabled") == "enabled":
+            return None
+        return set()
+    agents_spec = entry["agents"]
+    if agents_spec is None:
+        return None
+    return {canonicalize_agent_id(agent_key) for agent_key, on in agents_spec.items() if on}
+
+
+def resolve_repo_skill_agent_overrides(repo_name, repo_config, discovered_skill_names):
+    """矩阵模式下解析整个仓库的 per-skill 启用集；矩阵引用未发现的 skill 时 fail-close。
+
+    返回 {skill_name: None | set(agent_id)}，覆盖 discovered_skill_names 的每一项。
+    """
+    matrix = repo_config.get("skills") or {}
+    unknown = sorted(name for name in matrix if name not in discovered_skill_names)
+    if unknown:
+        raise SkillPolicyMatrixError(f"skills.{repo_name}.skills 含未发现的 skill: {', '.join(unknown)}")
+    return {
+        skill_name: resolve_skill_agent_switch(repo_config, skill_name)
+        for skill_name in discovered_skill_names
+    }
 
 
 def collect_active_mcp_target_agents(config, mcp_cfg):

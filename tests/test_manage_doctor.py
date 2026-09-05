@@ -10,7 +10,6 @@ from src.manage_doctor import (
     actual_skill_targets,
     build_report,
     expected_managed_mcp_servers,
-    npm_global_package_version,
     render_text,
 )
 
@@ -943,105 +942,211 @@ class ManageDoctorReportTests(unittest.TestCase):
             mcp_names = {entry["name"]: entry for entry in report["sections"]["mcp"]}
             self.assertEqual(mcp_names["Codex"]["status"], "ok")
 
-    def test_report_marks_runtime_pulled_mcp_server_as_notice(self):
-        # uvx git 分支源：doctor 只观测供给模型与缓存刷新入口，不在此处检查版本
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
-            (temp_root / "config" / "manager.json").write_text(
-                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {\n    "serena": { "enabled": true }\n  }\n}\n',
-                encoding="utf-8",
+
+from src.manage_doctor import collect_skill_discovery_inbox  # noqa: E402
+
+
+class ManageDoctorSkillMatrixTests(unittest.TestCase):
+    """skills v2（提案 §7.1）下 doctor 的矩阵感知期望集与发现收件箱。
+
+    旧式定义必须走升格等价路径：doctor 既有行为逐比特不变。
+    """
+
+    @staticmethod
+    def _named_skills(*names):
+        return {f"bundle/{name}": name for name in names}
+
+    def _write_doctor_fixture(self, temp_root, repo_skills, policy, *, repo_agents=("claude-code", "codex"), seeded_links=None):
+        temp_root = Path(temp_root) / "repo"
+        shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+        managed_repo = temp_root / "agent-skill" / "repositories" / "demo-repo"
+        (managed_repo / ".git").mkdir(parents=True)
+        (managed_repo / ".agent-manager-owned").write_text("true\n", encoding="utf-8")
+        for rel_dir, skill_name in repo_skills.items():
+            skill_dir = managed_repo / rel_dir
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                f"---\nname: {skill_name}\ndescription: demo\n---\n", encoding="utf-8"
             )
-            (temp_root / "config" / "mcp.json").write_text(
-                json.dumps(
-                    {
-                        "agent_paths": {},
-                        "servers": {
-                            "serena": {
-                                "command": "uvx",
-                                "args": ["--from", "git+https://example.invalid/serena.git@main", "serena"],
-                            }
-                        },
-                    }
-                ),
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "skills.json").write_text(
-                '{"repositories": {}, "agents": {}}',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
-
-            # uvx 必需命令检查走 command_exists；CI 机器没有 uvx 时不能让它提前终止报告
-            with mock.patch("src.manage_doctor.command_exists", return_value=True):
-                report = build_report(
-                    root_dir=temp_root,
-                    config_file=temp_root / "config" / "manager.json",
-                    python_cmd="python3",
-                )
-
-            mcp_entries = {entry["name"]: entry for entry in report["sections"]["mcp"]}
-            runtime_entry = mcp_entries["serena 运行时"]
-            self.assertEqual(runtime_entry["status"], "notice")
-            self.assertIn("运行时拉取（uvx · git+https://example.invalid/serena.git@main）", runtime_entry["message"])
-            self.assertIn("make update", runtime_entry["message"])
-
-    def test_report_shows_managed_mcp_binary_version(self):
-        # tools.json 纳管的直连二进制（chrome-devtools-mcp）：doctor 报告实装版本
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
-            (temp_root / "config" / "manager.json").write_text(
-                '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {\n    "chrome-devtools": { "enabled": true }\n  }\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "mcp.json").write_text(
-                json.dumps(
-                    {
-                        "agent_paths": {},
-                        "servers": {
-                            "chrome-devtools": {
-                                "command": "chrome-devtools-mcp",
-                                "args": ["--isolated"],
-                            }
-                        },
-                    }
-                ),
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "skills.json").write_text(
-                '{"repositories": {}, "agents": {}}',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
-
-            with (
-                mock.patch("src.manage_doctor.command_exists", return_value=True),
-                mock.patch("src.manage_doctor.npm_global_package_version", return_value="1.2.3"),
-            ):
-                report = build_report(
-                    root_dir=temp_root,
-                    config_file=temp_root / "config" / "manager.json",
-                    python_cmd="python3",
-                )
-
-            mcp_entries = {entry["name"]: entry for entry in report["sections"]["mcp"]}
-            runtime_entry = mcp_entries["chrome-devtools 运行时"]
-            self.assertEqual(runtime_entry["status"], "ok")
-            self.assertIn("chrome-devtools-mcp（1.2.3）", runtime_entry["message"])
-
-    def test_npm_global_package_version_queries_local_npm_only(self):
-        payload = json.dumps({"dependencies": {"chrome-devtools-mcp": {"version": "0.9.1"}}})
-        with mock.patch("src.manage_doctor.subprocess.run") as run_mock:
-            run_mock.return_value = mock.Mock(stdout=payload)
-            version = npm_global_package_version("npm install -g chrome-devtools-mcp")
-
-        self.assertEqual(version, "0.9.1")
-        run_mock.assert_called_once_with(
-            ["npm", "list", "-g", "chrome-devtools-mcp", "--depth=0", "--json"],
-            check=False,
-            capture_output=True,
-            text=True,
+        targets = {
+            "claude-code": str(temp_root / "targets" / "claude"),
+            "codex": str(temp_root / "targets" / "codex"),
+        }
+        for agent_name in repo_agents:
+            Path(targets[agent_name]).mkdir(parents=True)
+        for agent_name, links in (seeded_links or {}).items():
+            for link_name, rel_dir in links.items():
+                (Path(targets[agent_name]) / link_name).symlink_to(managed_repo / rel_dir)
+        config = {"agents": {}, "tools": {}, "skills": {"demo-repo": policy}, "mcp": {}}
+        skill_cfg = {
+            "repositories": {
+                "demo-repo": {
+                    "url": "https://example.invalid/repo.git",
+                    "agents": list(repo_agents),
+                }
+            },
+            "agents": targets,
+        }
+        (temp_root / "config" / "manager.json").write_text(json.dumps(config), encoding="utf-8")
+        (temp_root / "config" / "skills.json").write_text(json.dumps(skill_cfg), encoding="utf-8")
+        (temp_root / "config" / "mcp.json").write_text(
+            '{"servers": {}, "agent_paths": {}}', encoding="utf-8"
         )
-        # 非 npm install 命令不触发任何子进程
-        self.assertIsNone(npm_global_package_version("brew install --cask foo"))
+        (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
+        return temp_root, config, skill_cfg
+
+    def _build(self, temp_root):
+        return build_report(
+            root_dir=temp_root,
+            config_file=temp_root / "config" / "manager.json",
+            python_cmd="python3",
+        )
+
+    def test_matrix_mode_expected_set_respects_per_agent_switches(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root, _config, _skill_cfg = self._write_doctor_fixture(
+                temp_dir,
+                self._named_skills("alpha", "beta"),
+                {
+                    "enabled": True,
+                    "skills": {
+                        "alpha": {"agents": {"claude-code": True, "codex": False}},
+                        "beta": {"agents": None},
+                    },
+                },
+                seeded_links={
+                    "claude-code": {"alpha": "bundle/alpha", "beta": "bundle/beta"},
+                    "codex": {"alpha": "bundle/alpha", "beta": "bundle/beta"},
+                },
+            )
+
+            report = self._build(temp_root)
+
+            skill_entries = {entry["name"]: entry for entry in report["sections"]["skills"]}
+            self.assertEqual(skill_entries["Claude Code"]["status"], "ok")
+            self.assertEqual(skill_entries["Claude Code"]["message"], "2 个受管链接")
+            self.assertEqual(skill_entries["Codex"]["status"], "error")
+            self.assertIn("存在额外受管 skill 链接", skill_entries["Codex"]["message"])
+            self.assertIn("alpha", skill_entries["Codex"]["message"])
+
+    def test_matrix_mode_inbox_notice_lists_unlisted_skills(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root, _config, _skill_cfg = self._write_doctor_fixture(
+                temp_dir,
+                self._named_skills("alpha", "beta"),
+                {"enabled": True, "new_skill_default": "disabled", "skills": {"alpha": {"agents": None}}},
+                seeded_links={
+                    "claude-code": {"alpha": "bundle/alpha"},
+                    "codex": {"alpha": "bundle/alpha"},
+                },
+            )
+
+            report = self._build(temp_root)
+
+            skill_entries = {entry["name"]: entry for entry in report["sections"]["skills"]}
+            self.assertEqual(skill_entries["Claude Code"]["status"], "ok")
+            self.assertEqual(skill_entries["Claude Code"]["message"], "1 个受管链接")
+            self.assertEqual(skill_entries["Codex"]["status"], "ok")
+            inbox_entry = skill_entries.get("demo-repo 收件箱")
+            self.assertIsNotNone(inbox_entry, report["sections"]["skills"])
+            self.assertEqual(inbox_entry["status"], "notice")
+            self.assertIn("1 个新发现 skill 待显式启用", inbox_entry["message"])
+            self.assertIn("beta", inbox_entry["message"])
+            # 收件箱里的 skill 不构成任何 agent 的期望链接
+            for entry in report["sections"]["skills"]:
+                self.assertNotIn("缺失", entry["message"])
+
+    def test_legacy_policy_doctor_output_matches_explicit_matrix_policy(self):
+        # 升格等价：旧式定义与"范围内全部 skill 对 collection agents 启用"的显式矩阵
+        # 必须产出逐字节相同的 skills 段。
+        sections = []
+        for policy in (
+            {"enabled": True},
+            {"enabled": True, "skills": {"alpha": {"agents": None}, "beta": {"agents": None}}},
+        ):
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_root, _config, _skill_cfg = self._write_doctor_fixture(
+                    temp_dir,
+                    self._named_skills("alpha", "beta"),
+                    policy,
+                    seeded_links={
+                        "claude-code": {"alpha": "bundle/alpha", "beta": "bundle/beta"},
+                        "codex": {"alpha": "bundle/alpha", "beta": "bundle/beta"},
+                    },
+                )
+                report = self._build(temp_root)
+                sections.append(report["sections"]["skills"])
+
+        self.assertEqual(sections[0], sections[1])
+
+    def test_matrix_unknown_skill_name_surfaces_resolution_error(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root, _config, _skill_cfg = self._write_doctor_fixture(
+                temp_dir,
+                self._named_skills("alpha"),
+                {"enabled": True, "skills": {"ghost": {"agents": None}}},
+            )
+
+            report = self._build(temp_root)
+
+            skill_entries = {entry["name"]: entry for entry in report["sections"]["skills"]}
+            for label in ("Claude Code", "Codex"):
+                self.assertEqual(skill_entries[label]["status"], "error")
+                self.assertIn("技能托管目标解析失败", skill_entries[label]["message"])
+                self.assertIn("ghost", skill_entries[label]["message"])
+
+    def test_matrix_mode_honors_disabled_list_over_matrix(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root, _config, _skill_cfg = self._write_doctor_fixture(
+                temp_dir,
+                self._named_skills("alpha", "beta"),
+                {
+                    "enabled": True,
+                    "disabled": ["alpha"],
+                    "skills": {"alpha": {"agents": None}, "beta": {"agents": None}},
+                },
+                seeded_links={"claude-code": {"alpha": "bundle/alpha", "beta": "bundle/beta"}},
+            )
+
+            report = self._build(temp_root)
+
+            skill_entries = {entry["name"]: entry for entry in report["sections"]["skills"]}
+            self.assertEqual(skill_entries["Claude Code"]["status"], "error")
+            self.assertIn("存在额外受管 skill 链接", skill_entries["Claude Code"]["message"])
+            self.assertIn("alpha", skill_entries["Claude Code"]["message"])
+
+    def test_legacy_policy_expectation_ignores_disabled_list(self):
+        # 升格等价护栏：旧式定义下 doctor 期望集保持 v1 语义（disabled 名单只由链接侧
+        # 收敛），证明矩阵/disabled 感知没有泄漏进旧路径。
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root, _config, _skill_cfg = self._write_doctor_fixture(
+                temp_dir,
+                self._named_skills("alpha", "beta"),
+                {"enabled": True, "disabled": ["alpha"]},
+                seeded_links={"claude-code": {"beta": "bundle/beta"}},
+            )
+
+            report = self._build(temp_root)
+
+            skill_entries = {entry["name"]: entry for entry in report["sections"]["skills"]}
+            self.assertEqual(skill_entries["Claude Code"]["status"], "error")
+            self.assertIn("skill 链接缺失", skill_entries["Claude Code"]["message"])
+            self.assertIn("alpha", skill_entries["Claude Code"]["message"])
+
+    def test_discovery_inbox_excludes_disabled_listed_skills(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root, config, skill_cfg = self._write_doctor_fixture(
+                temp_dir,
+                self._named_skills("alpha", "beta", "gamma"),
+                {
+                    "enabled": True,
+                    "new_skill_default": "disabled",
+                    "disabled": ["gamma"],
+                    "skills": {"alpha": {"agents": None}},
+                },
+            )
+
+            inbox = collect_skill_discovery_inbox(temp_root, config, skill_cfg)
+
+            # gamma 在 disabled 名单里（已有显式决定），不属于"新发现待启用"
+            self.assertEqual(inbox, {"demo-repo": ["beta"]})

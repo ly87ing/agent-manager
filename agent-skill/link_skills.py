@@ -19,7 +19,14 @@ from src.agent_ids import canonicalize_agent_id, canonicalize_agent_list, canoni
 from src.command_runner import run_command
 from src.git_remote_probe import probe_git_remote_state
 from src.json_config import get_typed_mapping_section, load_json_object_file
-from src.manage_runtime_probe import is_agent_installed
+from src.manage_runtime_probe import (
+    SkillPolicyMatrixError,
+    is_agent_installed,
+    repo_skill_matrix_mode,
+    resolve_repo_skill_agent_overrides,
+    validate_repo_new_skill_default,
+    validate_repo_skill_matrix,
+)
 from src.runtime_logging import configure_logging
 
 configure_logging()
@@ -684,6 +691,23 @@ def remove_skill_links(skill_name, targets, allowed_agents=None, dry_run=False):
             continue
         remove_path(link_path)
 
+
+def remove_matrix_disabled_skill_links(repo_path, skill_name, targets, agent_names, dry_run=False):
+    """矩阵停用收敛：只解除指向本仓库缓存的托管链接，不碰用户手工放置的内容。"""
+    repo_path = Path(repo_path).resolve()
+    for agent_name in agent_names:
+        target_path = targets.get(agent_name)
+        if target_path is None:
+            continue
+        link_path = Path(target_path).expanduser() / skill_name
+        if not is_link_entry(link_path):
+            continue
+        if not link_points_within_base(link_path, repo_path):
+            continue
+        logging.info(f"[AGENT: {agent_name}] 策略矩阵停用 skill（移除托管链接）: {skill_name}")
+        if not dry_run:
+            remove_path(link_path)
+
 def manage_links(skill_name, source_path, targets, allowed_agents, is_enabled=True, dry_run=False):
     active_targets = targets
     if allowed_agents is not None:
@@ -702,13 +726,15 @@ def manage_links(skill_name, source_path, targets, allowed_agents, is_enabled=Tr
 
 
 def collect_current_managed_skill_names_by_agent(pending_links, duplicate_skill_names):
+    # pending_links 的第二元素是 per-skill 目标映射 {skill_name: {agent: path}}；
+    # 旧式定义下每个 skill 的映射都是同一份 repo_targets（升格等价）。
     managed_skill_names_by_agent = {}
-    for _repo_name, repo_targets, skills in pending_links:
-        active_skill_names = {skill_name for skill_name in skills if skill_name not in duplicate_skill_names}
-        if not active_skill_names:
-            continue
-        for agent_name in repo_targets:
-            managed_skill_names_by_agent.setdefault(agent_name, set()).update(active_skill_names)
+    for _repo_name, skill_targets_by_name, skills in pending_links:
+        for skill_name in skills:
+            if skill_name in duplicate_skill_names:
+                continue
+            for agent_name in skill_targets_by_name[skill_name]:
+                managed_skill_names_by_agent.setdefault(agent_name, set()).add(skill_name)
     return managed_skill_names_by_agent
 
 def main():
@@ -757,6 +783,8 @@ def main():
         r_def["agents"] = canonicalize_agent_list(r_def.get("agents"))
         validate_repo_skill_count(name, r_def)
         validate_repo_disabled(name, r_def)
+        validate_repo_new_skill_default(name, r_def)
+        validate_repo_skill_matrix(name, r_def, r_def["agents"], set(ALL_AGENT_TARGETS))
         unknown_agents = [agent_name for agent_name in (r_def["agents"] or []) if agent_name not in ALL_AGENT_TARGETS]
         if unknown_agents:
             raise ValueError(f"{name}: agents 包含未声明的 target: {', '.join(sorted(unknown_agents))}")
@@ -821,6 +849,11 @@ def main():
             all_success = False
         try:
             skills = find_configured_skills(repo_path, config)
+            skill_agent_overrides = None
+            if repo_skill_matrix_mode(config):
+                # 矩阵未知名 fail-close；disabled 名单里的 skill 仍是已发现 skill，
+                # 矩阵可以引用它（最终 disabled 名单优先，见下方 partition）。
+                skill_agent_overrides = resolve_repo_skill_agent_overrides(repo_name, config, set(skills))
             skills, disabled_active = partition_disabled_skills(repo_name, config, skills)
             if disabled_active:
                 logging.info(
@@ -845,7 +878,7 @@ def main():
             )
             all_success = False
             continue
-        except (SkillPathSelectionError, SkillAgentScopeError) as exc:
+        except (SkillPathSelectionError, SkillAgentScopeError, SkillPolicyMatrixError) as exc:
             logging.error(f"[{repo_name}] {exc}")
             remove_repo_skill_links(
                 repo_path,
@@ -877,11 +910,40 @@ def main():
                 args.dry_run,
                 unconfigured_skill_names,
             )
-        pending_links.append((repo_name, repo_targets, skills))
+        if skill_agent_overrides is None:
+            # 旧式定义的升格等价路径：发现范围内全部 skill 跟随 repo 目标集，
+            # 每个 skill 的目标映射就是同一份 repo_targets，行为与 v1 逐比特一致。
+            skill_targets_by_name = {s_name: repo_targets for s_name in skills}
+        else:
+            skill_targets_by_name = {}
+            inbox_names = []
+            for s_name in skills:
+                override = skill_agent_overrides[s_name]
+                if override is None:
+                    skill_targets_by_name[s_name] = repo_targets
+                    continue
+                per_skill_targets = resolve_repo_link_targets(AGENT_TARGETS, ALL_AGENT_TARGETS, sorted(override))
+                deactivated_agents = sorted(set(repo_targets) - set(per_skill_targets))
+                if deactivated_agents:
+                    remove_matrix_disabled_skill_links(
+                        repo_path, s_name, ALL_AGENT_TARGETS, deactivated_agents, args.dry_run
+                    )
+                if not override:
+                    inbox_names.append(s_name)
+                skill_targets_by_name[s_name] = per_skill_targets
+            if inbox_names:
+                logging.info(
+                    f"[{repo_name}] 新发现 skill 进入收件箱（未显式启用，不分发）: {', '.join(sorted(inbox_names))}"
+                )
+        pending_links.append((repo_name, skill_targets_by_name, skills))
         for s_name, s_path in skills.items():
+            record_agents = allowed_agents
+            if skill_agent_overrides is not None:
+                override = skill_agent_overrides[s_name]
+                record_agents = allowed_agents if override is None else sorted(override)
             existing = global_skill_registry.get(s_name)
             if existing is None:
-                global_skill_registry[s_name] = (repo_name, s_path, allowed_agents)
+                global_skill_registry[s_name] = (repo_name, s_path, record_agents)
                 continue
             duplicate_skill_names.add(s_name)
             all_success = False
@@ -894,7 +956,7 @@ def main():
             record_duplicate_link_target(
                 duplicate_link_targets,
                 s_name,
-                allowed_agents,
+                record_agents,
             )
             logging.error(
                 f"发现跨仓库重复 skill name: {s_name} ({existing_repo}:{existing_path} / {repo_name}:{s_path})"
@@ -903,12 +965,12 @@ def main():
     for s_name, allowed_agents in duplicate_link_targets.items():
         remove_skill_links(s_name, ALL_AGENT_TARGETS, allowed_agents, args.dry_run)
 
-    for repo_name, repo_targets, skills in pending_links:
+    for repo_name, skill_targets_by_name, skills in pending_links:
         for s_name, s_path in skills.items():
             if s_name in duplicate_skill_names:
                 logging.error(f"[{repo_name}] 跳过重复 skill name: {s_name}")
                 continue
-            manage_links(s_name, s_path, repo_targets, None, True, args.dry_run)
+            manage_links(s_name, s_path, skill_targets_by_name[s_name], None, True, args.dry_run)
 
     managed_skill_names_by_agent = collect_current_managed_skill_names_by_agent(
         pending_links,

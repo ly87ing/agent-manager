@@ -6,7 +6,6 @@ import json
 import ntpath
 import os
 import re
-import shlex
 import shutil
 import stat
 import subprocess
@@ -27,7 +26,11 @@ from src.manage_runtime_probe import (
     detect_tool_readiness,
     is_agent_installed,
     load_json,
+    repo_skill_matrix_mode,
+    resolve_repo_skill_agent_overrides,
     rule_target_agent_id,
+    validate_repo_new_skill_default,
+    validate_repo_skill_matrix,
 )
 from src.secret_scan import scan_repo_for_secrets, scan_text_for_secrets
 from src.toml_compat import load_tomllib
@@ -187,38 +190,6 @@ def command_version(command: str) -> str:
     if not output:
         return "可用"
     return output.splitlines()[0]
-
-
-def npm_global_package_version(install_cmd: str) -> str | None:
-    """从 `npm install -g <pkg>` 形式的安装命令反查全局已装版本（纯本地查询，不联网）。
-
-    与 sync_tools._extract_npm_package_name 的口径保持一致：npm install 命令里
-    首个非 flag token 即包名；版本查询失败时返回 None，由调用方决定回退展示。
-    """
-    try:
-        tokens = shlex.split(install_cmd or "")
-    except ValueError:
-        tokens = (install_cmd or "").split()
-    if len(tokens) < 3 or tokens[0] != "npm" or tokens[1] != "install":
-        return None
-    package = next((token for token in tokens[2:] if not token.startswith("-")), None)
-    if not package:
-        return None
-    try:
-        result = subprocess.run(
-            ["npm", "list", "-g", package, "--depth=0", "--json"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except OSError:
-        return None
-    try:
-        parsed = json.loads(result.stdout or "{}")
-        version = parsed.get("dependencies", {}).get(package, {}).get("version")
-    except (TypeError, ValueError):
-        return None
-    return version if isinstance(version, str) and version else None
 
 
 def git_version_info(root_dir: Path) -> dict[str, str] | None:
@@ -516,12 +487,34 @@ def resolve_skill_search_paths(repo_path: Path, config: dict) -> list[Path]:
     return search_paths
 
 
+def _discover_repo_skill_targets(search_paths: list[Path], excluded_dirs: set[str]) -> tuple[dict[str, str], set[str]]:
+    repo_targets: dict[str, str] = {}
+    duplicate_names: set[str] = set()
+    for search_path in search_paths:
+        for walk_root, dirs, files in os.walk(search_path):
+            dirs[:] = sorted(d for d in dirs if d not in excluded_dirs)
+            if "SKILL.md" not in files:
+                continue
+            skill_dir = Path(walk_root).resolve()
+            skill_name = read_skill_name(skill_dir / "SKILL.md")
+            if not skill_name:
+                continue
+            rendered_path = str(skill_dir)
+            existing = repo_targets.get(skill_name)
+            if existing is not None and existing != rendered_path:
+                duplicate_names.add(skill_name)
+                continue
+            repo_targets[skill_name] = rendered_path
+    return repo_targets, duplicate_names
+
+
 def expected_managed_skill_targets(root_dir: Path, config: dict, skill_cfg: dict, agent_id: str) -> tuple[dict[str, str], list[str]]:
     expected: dict[str, str] = {}
     problems: list[str] = []
     repo_base = root_dir / "agent-skill" / "repositories"
     repositories = skill_cfg.get("repositories", {})
     excluded_dirs = {".git", "node_modules", "__pycache__", "venv", ".venv"}
+    declared_target_ids = set(canonicalize_agent_mapping(skill_cfg.get("agents", {})))
 
     for repo_name, policy in config.get("skills", {}).items():
         if not policy.get("enabled", True):
@@ -545,27 +538,27 @@ def expected_managed_skill_targets(root_dir: Path, config: dict, skill_cfg: dict
             problems.append(f"{repo_name}: {exc}")
             continue
 
-        repo_targets: dict[str, str] = {}
-        duplicate_names: set[str] = set()
-        for search_path in search_paths:
-            for walk_root, dirs, files in os.walk(search_path):
-                dirs[:] = sorted(d for d in dirs if d not in excluded_dirs)
-                if "SKILL.md" not in files:
-                    continue
-                skill_dir = Path(walk_root).resolve()
-                skill_name = read_skill_name(skill_dir / "SKILL.md")
-                if not skill_name:
-                    continue
-                rendered_path = str(skill_dir)
-                existing = repo_targets.get(skill_name)
-                if existing is not None and existing != rendered_path:
-                    duplicate_names.add(skill_name)
-                    continue
-                repo_targets[skill_name] = rendered_path
+        repo_targets, duplicate_names = _discover_repo_skill_targets(search_paths, excluded_dirs)
 
         if duplicate_names:
             problems.append(f"{repo_name}: 重复 skill name: {', '.join(sorted(duplicate_names))}")
             continue
+
+        if repo_skill_matrix_mode(merged):
+            # v2：期望集 = 发现 ∩ 启用矩阵；矩阵非法按既有问题通道上报。
+            try:
+                validate_repo_new_skill_default(repo_name, merged)
+                validate_repo_skill_matrix(repo_name, merged, targeted_agents, declared_target_ids)
+                skill_agent_overrides = resolve_repo_skill_agent_overrides(repo_name, merged, set(repo_targets))
+            except ValueError as exc:
+                problems.append(f"{repo_name}: {exc}")
+                continue
+            # disabled 名单等价于全 agent 禁用，优先于矩阵。
+            disabled_names = {name.strip() for name in merged.get("disabled") or []}
+            for skill_name in list(repo_targets):
+                override = skill_agent_overrides[skill_name]
+                if skill_name in disabled_names or (override is not None and agent_id not in override):
+                    del repo_targets[skill_name]
 
         for skill_name, rendered_path in repo_targets.items():
             existing = expected.get(skill_name)
@@ -574,6 +567,58 @@ def expected_managed_skill_targets(root_dir: Path, config: dict, skill_cfg: dict
                 continue
             expected[skill_name] = rendered_path
     return expected, problems
+
+
+def collect_skill_discovery_inbox(root_dir: Path, config: dict, skill_cfg: dict) -> dict[str, list[str]]:
+    """v2 矩阵模式下各 collection 的发现收件箱：已发现但对所有 agent 都未启用的 skill。
+
+    旧式定义（无 skills / new_skill_default 键）升格等价于范围内全部启用，收件箱恒为空；
+    矩阵非法或发现失败的仓库由 expected_managed_skill_targets 的问题通道上报，这里跳过。
+    """
+    inbox: dict[str, list[str]] = {}
+    repo_base = root_dir / "agent-skill" / "repositories"
+    repositories = skill_cfg.get("repositories", {})
+    excluded_dirs = {".git", "node_modules", "__pycache__", "venv", ".venv"}
+    declared_target_ids = set(canonicalize_agent_mapping(skill_cfg.get("agents", {})))
+
+    for repo_name, policy in config.get("skills", {}).items():
+        if not policy.get("enabled", True):
+            continue
+        definition = repositories.get(repo_name)
+        if not definition:
+            continue
+        merged = dict(definition)
+        merged.update(policy)
+        if not repo_skill_matrix_mode(merged):
+            continue
+        repo_path = (repo_base / repo_name).resolve()
+        if not repo_path.exists():
+            continue
+        try:
+            search_paths = resolve_skill_search_paths(repo_path, merged)
+        except ValueError:
+            continue
+        repo_targets, duplicate_names = _discover_repo_skill_targets(search_paths, excluded_dirs)
+        if duplicate_names:
+            continue
+        try:
+            validate_repo_new_skill_default(repo_name, merged)
+            validate_repo_skill_matrix(
+                repo_name, merged, canonicalize_agent_list(merged.get("agents")), declared_target_ids
+            )
+            skill_agent_overrides = resolve_repo_skill_agent_overrides(repo_name, merged, set(repo_targets))
+        except ValueError:
+            continue
+        # disabled 名单是已做出的显式停用决定，不属于"新发现待启用"。
+        disabled_names = {name.strip() for name in merged.get("disabled") or []}
+        pending = sorted(
+            skill_name
+            for skill_name, override in skill_agent_overrides.items()
+            if override is not None and not override and skill_name not in disabled_names
+        )
+        if pending:
+            inbox[repo_name] = pending
+    return inbox
 
 
 def actual_skill_targets(target_path: str) -> tuple[dict[str, str], set[str]]:
@@ -960,9 +1005,7 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
             continue
         severity = definition.get("doctor_severity", "error")
         if detect_tool_readiness(tool_name, definition, root_dir, inventory=inventory):
-            version = npm_global_package_version(definition.get("install"))
-            message = f"已就绪 (v{version})" if version else "已就绪"
-            append_entry(report, "tools", make_entry(tool_name, "ok", message))
+            append_entry(report, "tools", make_entry(tool_name, "ok", "已就绪"))
             continue
         if severity == "warning":
             append_entry(
@@ -1050,42 +1093,6 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
                 message = "Agent 未安装，未生成 MCP 配置"
                 append_entry(report, "mcp", make_entry(label, "warning", message, category="unmaterialized"))
 
-    # MCP 运行时供给观测：运行时拉取型（uvx/npx 启动时解析）只报告供给模型与缓存
-    # 刷新入口；直连二进制型（tools.json 纳管）报告实装版本，缺失由 tools 审计兜底
-    for server_name, policy in config.get("mcp", {}).items():
-        if not policy.get("enabled", True):
-            continue
-        definition = mcp_cfg.get("servers", {}).get(server_name)
-        if not definition:
-            continue
-        command = definition.get("command")
-        if not isinstance(command, str) or not command:
-            continue
-        entry_name = f"{server_name} 运行时"
-        if command in ("npx", "uvx"):
-            args_list = definition.get("args") or []
-            source = next(
-                (arg for arg in args_list if isinstance(arg, str) and "git+" in arg),
-                None,
-            )
-            detail = f"运行时拉取（{command}" + (f" · {source}" if source else "") + "）；make update 管线刷新其缓存"
-            append_entry(report, "mcp", make_entry(entry_name, "notice", detail))
-            continue
-        tool_def = next(
-            (d for d in tool_defs.values() if d.get("ready_check") == f"bin:{command}"),
-            None,
-        )
-        if tool_def is None:
-            # 未纳管的直连二进制不属于本仓库供给面（如 augment-context-engine 的 auggie），不观测
-            continue
-        if not command_exists(command):
-            append_entry(report, "mcp", make_entry(entry_name, "notice", f"运行时 {command} 未安装；由 Tools 就绪审计负责收敛"))
-            continue
-        version = npm_global_package_version(tool_def.get("install"))
-        if not version:
-            version = command_version(command)
-        append_entry(report, "mcp", make_entry(entry_name, "ok", f"{command}（{version}）"))
-
     for agent_id, agent_path in canonicalize_agent_mapping(skill_cfg.get("agents", {})).items():
         if agent_id not in active_skill_agents:
             continue
@@ -1161,6 +1168,17 @@ def build_report(*, root_dir: Path | str, config_file: Path | str, python_cmd: s
             else:
                 message = "Agent 未安装，未建立 skills 目录"
             append_entry(report, "skills", make_entry(label, "warning", message, category="unmaterialized"))
+
+    for repo_name, pending_names in collect_skill_discovery_inbox(root_dir, config, skill_cfg).items():
+        append_entry(
+            report,
+            "skills",
+            make_entry(
+                f"{repo_name} 收件箱",
+                "notice",
+                f"{len(pending_names)} 个新发现 skill 待显式启用: {', '.join(pending_names)}",
+            ),
+        )
 
     manifest_path = root_dir / "config" / "rules-targets.list"
     if manifest_path.exists():

@@ -17,6 +17,8 @@ link_skills = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(link_skills)
 
+from src import manage_runtime_probe
+
 
 # Python 3.14's argparse colorizes --help output (respecting NO_COLOR/FORCE_COLOR),
 # which inserts SGR escapes between flag tokens. Strip them so text assertions test
@@ -2411,3 +2413,440 @@ class LinkSkillsTests(unittest.TestCase):
         manager_config = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
 
         self.assertIsNone(manager_config["skills"].get("anthropic-frontend-design-skill"))
+
+
+_LOG_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} ", flags=re.M)
+
+
+class SkillPolicyMatrixTests(unittest.TestCase):
+    """skills Spec/Policy v2（提案 §7.1）：skill_paths=发现范围 +
+    skills.<repo>.skills 的 per-skill × per-agent 启用矩阵 + new_skill_default。"""
+
+    def _build_fixture(self, temp_root, skills, policy, *, repo_agents=("claude-code", "codex"), def_extra=None):
+        """skills: {repo 内相对目录: frontmatter name}；目标目录按 repo_agents 预建。"""
+        temp_root = Path(temp_root)
+        base_dir = temp_root / "skills"
+        repo_dir = base_dir / "repositories" / "demo"
+        (repo_dir / ".git").mkdir(parents=True)
+        (repo_dir / ".agent-manager-owned").write_text("true\n", encoding="utf-8")
+        for rel_dir, skill_name in skills.items():
+            skill_dir = repo_dir / rel_dir
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                f"---\nname: {skill_name}\ndescription: demo\n---\n", encoding="utf-8"
+            )
+        targets = {
+            "claude-code": str(temp_root / "targets" / "claude"),
+            "codex": str(temp_root / "targets" / "codex"),
+        }
+        for agent_name in repo_agents:
+            Path(targets[agent_name]).mkdir(parents=True)
+        repo_def = {
+            "url": "https://invalid.example.invalid/nope.git",
+            "auto_update": False,
+            "agents": list(repo_agents),
+        }
+        if def_extra:
+            repo_def.update(def_extra)
+        config_path = temp_root / "config.json"
+        def_path = temp_root / "defs.json"
+        config_path.write_text(json.dumps({"skills": {"demo": policy}}), encoding="utf-8")
+        def_path.write_text(
+            json.dumps({"repositories": {"demo": repo_def}, "agents": targets}),
+            encoding="utf-8",
+        )
+        return config_path, def_path, base_dir, repo_dir, targets
+
+    @staticmethod
+    def _named_skills(*names):
+        return {f"bundle/{name}": name for name in names}
+
+    def _run(self, config_path, def_path, base_dir, *extra_args):
+        return subprocess.run(
+            [
+                "python3",
+                str(MODULE_PATH),
+                "--config",
+                str(config_path),
+                "--def-file",
+                str(def_path),
+                "--base-dir",
+                str(base_dir),
+                "--offline",
+                "--yes",
+                *extra_args,
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def _snapshot_targets(self, temp_root, targets):
+        real_root = os.path.realpath(str(temp_root))
+        snapshot = {}
+        for agent_name, target in sorted(targets.items()):
+            entries = {}
+            for item in sorted(Path(target).iterdir()):
+                if item.is_symlink():
+                    resolved = str(item.resolve()).replace(str(temp_root), "<T>").replace(real_root, "<T>")
+                    entries[item.name] = resolved
+                else:
+                    entries[item.name] = "<dir>"
+            snapshot[agent_name] = entries
+        return snapshot
+
+    def _normalized_output(self, temp_root, result):
+        real_root = os.path.realpath(str(temp_root))
+        combined = result.stdout + result.stderr
+        combined = combined.replace(str(temp_root), "<T>").replace(real_root, "<T>")
+        return _LOG_TIMESTAMP_RE.sub("", combined)
+
+    def test_matrix_disables_skill_for_single_agent(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path, def_path, base_dir, repo_dir, targets = self._build_fixture(
+                temp_root,
+                self._named_skills("alpha", "beta"),
+                {
+                    "enabled": True,
+                    "skills": {
+                        "alpha": {"agents": {"claude-code": True, "codex": False}},
+                        "beta": {"agents": None},
+                    },
+                },
+            )
+            stale_link = Path(targets["codex"]) / "alpha"
+            stale_link.symlink_to(repo_dir / "bundle" / "alpha")
+
+            result = self._run(config_path, def_path, base_dir)
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertTrue((Path(targets["claude-code"]) / "alpha").is_symlink(), combined)
+            self.assertTrue((Path(targets["claude-code"]) / "beta").is_symlink(), combined)
+            self.assertTrue((Path(targets["codex"]) / "beta").is_symlink(), combined)
+            self.assertFalse((Path(targets["codex"]) / "alpha").exists(), combined)
+            self.assertFalse(stale_link.is_symlink(), combined)
+            self.assertIn("策略矩阵停用 skill（移除托管链接）: alpha", combined)
+
+    def test_explicit_agents_map_leaves_unlisted_agents_off(self):
+        # 显式 map 是逐格开关：未出现在 map 里的 agent 不启用（fail-closed）。
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path, def_path, base_dir, _repo_dir, targets = self._build_fixture(
+                temp_root,
+                self._named_skills("alpha"),
+                {"enabled": True, "skills": {"alpha": {"agents": {"claude-code": True}}}},
+            )
+
+            result = self._run(config_path, def_path, base_dir)
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertTrue((Path(targets["claude-code"]) / "alpha").is_symlink(), combined)
+            self.assertFalse((Path(targets["codex"]) / "alpha").exists(), combined)
+
+    def test_new_skill_default_disabled_sends_unlisted_skills_to_inbox(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path, def_path, base_dir, _repo_dir, targets = self._build_fixture(
+                temp_root,
+                self._named_skills("alpha", "beta", "gamma"),
+                {"enabled": True, "new_skill_default": "disabled", "skills": {"alpha": {"agents": None}}},
+            )
+
+            result = self._run(config_path, def_path, base_dir)
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            for target in targets.values():
+                self.assertTrue((Path(target) / "alpha").is_symlink(), combined)
+                self.assertFalse((Path(target) / "beta").exists(), combined)
+                self.assertFalse((Path(target) / "gamma").exists(), combined)
+            inbox_lines = [line for line in combined.splitlines() if "收件箱" in line]
+            self.assertTrue(inbox_lines, combined)
+            self.assertIn("beta", inbox_lines[0])
+            self.assertIn("gamma", inbox_lines[0])
+            self.assertNotIn("alpha", inbox_lines[0])
+
+    def test_new_skill_default_enabled_links_unlisted_skills(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path, def_path, base_dir, _repo_dir, targets = self._build_fixture(
+                temp_root,
+                self._named_skills("alpha", "beta", "gamma"),
+                {
+                    "enabled": True,
+                    "new_skill_default": "enabled",
+                    "skills": {"alpha": {"agents": {"claude-code": True, "codex": False}}},
+                },
+            )
+
+            result = self._run(config_path, def_path, base_dir)
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertTrue((Path(targets["claude-code"]) / "alpha").is_symlink(), combined)
+            self.assertFalse((Path(targets["codex"]) / "alpha").exists(), combined)
+            for target in targets.values():
+                self.assertTrue((Path(target) / "beta").is_symlink(), combined)
+                self.assertTrue((Path(target) / "gamma").is_symlink(), combined)
+
+    def test_matrix_unknown_skill_name_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path, def_path, base_dir, repo_dir, targets = self._build_fixture(
+                temp_root,
+                self._named_skills("alpha"),
+                {"enabled": True, "skills": {"ghost-skill": {"agents": None}}},
+            )
+            managed_link = Path(targets["claude-code"]) / "alpha"
+            managed_link.symlink_to(repo_dir / "bundle" / "alpha")
+
+            result = self._run(config_path, def_path, base_dir)
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("含未发现的 skill", combined)
+            self.assertIn("ghost-skill", combined)
+            # 与 SkillAgentScopeError 等兄弟错误路径一致：fail-close 并清理本仓库托管链接
+            self.assertFalse(managed_link.exists(), combined)
+
+    def test_matrix_unknown_agent_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path, def_path, base_dir, _repo_dir, _targets = self._build_fixture(
+                temp_root,
+                self._named_skills("alpha"),
+                {"enabled": True, "skills": {"alpha": {"agents": {"ghost-agent": True}}}},
+            )
+
+            result = self._run(config_path, def_path, base_dir)
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("未声明的 target", combined)
+            self.assertIn("ghost-agent", combined)
+
+    def test_matrix_agent_beyond_collection_scope_fails_closed(self):
+        # 矩阵只收敛不扩张：不能启用 collection agents 之外的 agent
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path, def_path, base_dir, _repo_dir, _targets = self._build_fixture(
+                temp_root,
+                self._named_skills("alpha"),
+                {"enabled": True, "skills": {"alpha": {"agents": {"codex": True}}}},
+                repo_agents=("claude-code",),
+            )
+
+            result = self._run(config_path, def_path, base_dir)
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("越出 collection agents 范围", combined)
+
+    def test_disabled_list_takes_precedence_over_matrix(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path, def_path, base_dir, repo_dir, targets = self._build_fixture(
+                temp_root,
+                self._named_skills("alpha", "beta"),
+                {
+                    "enabled": True,
+                    "disabled": ["alpha"],
+                    "skills": {"alpha": {"agents": None}, "beta": {"agents": None}},
+                },
+            )
+            stale_link = Path(targets["claude-code"]) / "alpha"
+            stale_link.symlink_to(repo_dir / "bundle" / "alpha")
+
+            result = self._run(config_path, def_path, base_dir)
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertFalse((Path(targets["claude-code"]) / "alpha").exists(), combined)
+            self.assertFalse((Path(targets["codex"]) / "alpha").exists(), combined)
+            self.assertTrue((Path(targets["claude-code"]) / "beta").is_symlink(), combined)
+            self.assertTrue((Path(targets["codex"]) / "beta").is_symlink(), combined)
+            self.assertIn("本机禁用 skill", combined)
+
+    def test_legacy_policy_and_explicit_matrix_policy_produce_identical_links_and_logs(self):
+        # 升格等价：旧式定义 ≡ 发现范围内全部 skill 对 collection agents 启用。
+        # 同一 fixture 下两种策略形态必须产出同一批链接与同一份日志形状。
+        outcomes = []
+        for policy in (
+            {"enabled": True},
+            {"enabled": True, "skills": {"alpha": {"agents": None}, "beta": {"agents": None}}},
+        ):
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_root = Path(temp_dir)
+                config_path, def_path, base_dir, _repo_dir, targets = self._build_fixture(
+                    temp_root, self._named_skills("alpha", "beta"), policy
+                )
+                result = self._run(config_path, def_path, base_dir)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                outcomes.append(
+                    (
+                        self._snapshot_targets(temp_root, targets),
+                        self._normalized_output(temp_root, result),
+                    )
+                )
+
+        self.assertEqual(outcomes[0][0], outcomes[1][0])
+        self.assertEqual(outcomes[0][1], outcomes[1][1])
+
+    def test_matrix_deactivation_only_removes_links_pointing_into_repo_cache(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path, def_path, base_dir, repo_dir, targets = self._build_fixture(
+                temp_root,
+                self._named_skills("alpha", "beta", "gamma"),
+                {
+                    "enabled": True,
+                    "skills": {
+                        "alpha": {"agents": {"claude-code": True, "codex": False}},
+                        "beta": {"agents": {"claude-code": True, "codex": False}},
+                        "gamma": {"agents": {"claude-code": True, "codex": False}},
+                    },
+                },
+            )
+            codex_dir = Path(targets["codex"])
+            foreign_dir = temp_root / "foreign-skill"
+            foreign_dir.mkdir()
+            foreign_link = codex_dir / "alpha"
+            foreign_link.symlink_to(foreign_dir)
+            managed_link = codex_dir / "beta"
+            managed_link.symlink_to(repo_dir / "bundle" / "beta")
+            user_dir = codex_dir / "gamma"
+            user_dir.mkdir()
+            (user_dir / "local.txt").write_text("keep\n", encoding="utf-8")
+
+            result = self._run(config_path, def_path, base_dir)
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertTrue(foreign_link.is_symlink(), combined)
+            self.assertEqual(foreign_link.resolve(), foreign_dir.resolve(), combined)
+            self.assertFalse(managed_link.exists(), combined)
+            self.assertTrue(user_dir.is_dir(), combined)
+            self.assertTrue((user_dir / "local.txt").exists(), combined)
+            claude_dir = Path(targets["claude-code"])
+            for name in ("alpha", "beta", "gamma"):
+                self.assertTrue((claude_dir / name).is_symlink(), combined)
+
+    def test_matrix_deactivation_removes_dead_managed_link_but_preserves_foreign_dead_link(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path, def_path, base_dir, repo_dir, targets = self._build_fixture(
+                temp_root,
+                self._named_skills("alpha", "beta"),
+                {
+                    "enabled": True,
+                    "skills": {
+                        "alpha": {"agents": {"claude-code": True, "codex": False}},
+                        "beta": {"agents": {"claude-code": True, "codex": False}},
+                    },
+                },
+            )
+            codex_dir = Path(targets["codex"])
+            dead_managed_link = codex_dir / "alpha"
+            dead_managed_link.symlink_to(repo_dir / "bundle" / "removed-skill")
+            dead_foreign_link = codex_dir / "beta"
+            dead_foreign_link.symlink_to(temp_root / "foreign-missing")
+
+            result = self._run(config_path, def_path, base_dir)
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertFalse(dead_managed_link.is_symlink(), combined)
+            self.assertTrue(dead_foreign_link.is_symlink(), combined)
+
+    def test_skill_paths_remain_discovery_scope_in_matrix_mode(self):
+        # skill_paths 仍是发现范围：范围外 skill 即使在矩阵模式下也不参与分发，
+        # 其既有托管链接按 unconfigured 清理。
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            config_path, def_path, base_dir, repo_dir, targets = self._build_fixture(
+                temp_root,
+                {"bundle/scoped": "scoped-skill", "stray/stray": "stray-skill"},
+                {"enabled": True, "new_skill_default": "enabled"},
+                def_extra={"skill_paths": ["bundle"]},
+            )
+            stale_stray = Path(targets["codex"]) / "stray-skill"
+            stale_stray.symlink_to(repo_dir / "stray" / "stray")
+
+            result = self._run(config_path, def_path, base_dir)
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            for target in targets.values():
+                self.assertTrue((Path(target) / "scoped-skill").is_symlink(), combined)
+                self.assertFalse((Path(target) / "stray-skill").exists(), combined)
+            self.assertIn("移除来自失效仓库的 skill 链接: stray-skill", combined)
+
+    def test_repo_skill_matrix_mode_triggers_only_on_v2_keys(self):
+        self.assertFalse(manage_runtime_probe.repo_skill_matrix_mode({"enabled": True, "agents": ["claude-code"]}))
+        self.assertFalse(manage_runtime_probe.repo_skill_matrix_mode({}))
+        self.assertTrue(manage_runtime_probe.repo_skill_matrix_mode({"skills": {}}))
+        self.assertTrue(manage_runtime_probe.repo_skill_matrix_mode({"new_skill_default": "enabled"}))
+
+    def test_resolve_skill_agent_switch_semantics(self):
+        resolve = manage_runtime_probe.resolve_skill_agent_switch
+        # 未列出 / 空条目 = 按 new_skill_default（缺省 disabled）
+        self.assertEqual(resolve({}, "x"), set())
+        self.assertEqual(resolve({"new_skill_default": "enabled"}, "x"), None)
+        self.assertEqual(resolve({"skills": {"x": {}}}, "x"), set())
+        # agents: null = 跟随 collection 目标集
+        self.assertEqual(resolve({"skills": {"x": {"agents": None}}}, "x"), None)
+        # 显式 map = 每 agent 独立开关；值为 true 的 agent 才启用；别名规整
+        self.assertEqual(
+            resolve({"skills": {"x": {"agents": {"claude-code": True, "codex": False}}}}, "x"),
+            {"claude-code"},
+        )
+        self.assertEqual(resolve({"skills": {"x": {"agents": {"Claude Code": True}}}}, "x"), {"claude-code"})
+        # 显式空 map 仍按显式处理（fail-closed），不回落到 new_skill_default
+        self.assertEqual(
+            resolve({"new_skill_default": "enabled", "skills": {"x": {"agents": {}}}}, "x"),
+            set(),
+        )
+
+    def test_validate_repo_new_skill_default_rejects_bad_value(self):
+        validate = manage_runtime_probe.validate_repo_new_skill_default
+        validate("demo", {})
+        validate("demo", {"new_skill_default": "disabled"})
+        validate("demo", {"new_skill_default": "enabled"})
+        with self.assertRaises(ValueError):
+            validate("demo", {"new_skill_default": "auto"})
+
+    def test_validate_repo_skill_matrix_rejects_malformed_shapes(self):
+        validate = manage_runtime_probe.validate_repo_skill_matrix
+        declared = {"claude-code", "codex"}
+        validate("demo", {}, ["claude-code"], declared)
+        validate("demo", {"skills": {}}, ["claude-code"], declared)
+        validate("demo", {"skills": {"a": {"agents": None}}}, ["claude-code"], declared)
+        validate("demo", {"skills": {"a": {"agents": {"claude-code": True}}}}, ["claude-code"], declared)
+        with self.assertRaises(ValueError):
+            validate("demo", {"skills": ["a"]}, ["claude-code"], declared)
+        with self.assertRaises(ValueError):
+            validate("demo", {"skills": {"a": "all"}}, ["claude-code"], declared)
+        with self.assertRaises(ValueError):
+            validate("demo", {"skills": {"a": {"agent": {"claude-code": True}}}}, ["claude-code"], declared)
+        with self.assertRaises(ValueError):
+            validate("demo", {"skills": {"a": {"agents": ["claude-code"]}}}, ["claude-code"], declared)
+        with self.assertRaises(ValueError):
+            validate("demo", {"skills": {"a": {"agents": {"claude-code": "yes"}}}}, ["claude-code"], declared)
+        with self.assertRaises(ValueError):
+            validate("demo", {"skills": {"a": {"agents": {"ghost": True}}}}, ["claude-code"], declared)
+        with self.assertRaises(ValueError):
+            validate("demo", {"skills": {"a": {"agents": {"codex": True}}}}, ["claude-code"], declared)
+
+    def test_resolve_repo_skill_agent_overrides_covers_discovery_and_rejects_unknown(self):
+        overrides = manage_runtime_probe.resolve_repo_skill_agent_overrides(
+            "demo", {"skills": {"a": {"agents": None}}}, {"a", "b"}
+        )
+        self.assertEqual(overrides, {"a": None, "b": set()})
+        with self.assertRaises(manage_runtime_probe.SkillPolicyMatrixError):
+            manage_runtime_probe.resolve_repo_skill_agent_overrides(
+                "demo", {"skills": {"ghost": {"agents": None}}}, {"a"}
+            )
