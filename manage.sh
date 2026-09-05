@@ -182,8 +182,8 @@ function acquire_lock() {
     exit 1
 }
 
-# Atomic lock check
-if [[ "$cmd" != "help" && "$cmd" != "-h" && "$cmd" != "--help" && "$cmd" != "-help" && "$cmd" != "doctor" ]]; then
+# Atomic lock check（只读命令豁免：help/doctor、引擎契约的 *:status / *:plan / system:audit）
+if [[ "$cmd" != "help" && "$cmd" != "-h" && "$cmd" != "--help" && "$cmd" != "-help" && "$cmd" != "doctor" && "$cmd" != *:status && "$cmd" != *:plan && "$cmd" != "system:audit" ]]; then
     acquire_lock
 fi
 
@@ -1009,6 +1009,11 @@ function print_help() {
     echo -e "  ${SUCCESS_GREEN}init${NC}           新机器初始化或全量收敛：安装缺失 Agent + 升级已装 Agent + \`update\`"
     echo -e "  ${SUCCESS_GREEN}agents:update${NC}  升级/修复已装 Agent 到上游最新（agents.json 不锁版本）；不安装缺失 Agent"
     echo -e "  ${SUCCESS_GREEN}doctor${NC}         深度资源校验、配置自检与环境排错（追加 --json 输出机器可读报告）"
+    echo -e "  ${SUCCESS_GREEN}mcp:status${NC}     MCP server × agent 注入状态（引擎契约 envelope，须追加 --json；--dry-run/--offline 透传为 mode）"
+    echo -e "  ${SUCCESS_GREEN}*:status${NC}       域状态命令族占位：agents/skills/rules/hooks/tools/aliases 等域后续切片落地（当前返回契约错误）"
+    echo -e "  ${SUCCESS_GREEN}*:plan${NC}         域收敛计划预览（契约占位，尚未实现）"
+    echo -e "  ${SUCCESS_GREEN}system:audit${NC}   全系统体检的契约形态（占位，尚未实现；现阶段请用 doctor）"
+    echo -e "  ${SUCCESS_GREEN}system:refresh-upstream${NC} 上游新鲜度探测并写探测缓存（占位，尚未实现）"
     echo -e "  ${SUCCESS_GREEN}help${NC}           显示本帮助\n"
 }
 
@@ -1034,6 +1039,39 @@ case "$cmd" in
         else
             doctor_check
         fi
+        ;;
+    *:status|*:plan|system:audit|system:refresh-upstream)
+        # 引擎契约命令族（contract/engine-v1）：envelope JSON 走 stdout，退出码 0/1/2 由引擎决定。
+        engine_args=("$cmd" --config "$CONFIG_FILE" --python-cmd "$PYTHON_CMD")
+        if [[ "$cmd" == mcp:* ]]; then
+            engine_args+=(--def-file "$ROOT_DIR/config/mcp.json")
+        elif [[ "$cmd" == agents:* ]]; then
+            engine_args+=(--def-file "$ROOT_DIR/config/agents.json")
+        elif [[ "$cmd" == tools:* ]]; then
+            engine_args+=(--def-file "$ROOT_DIR/config/tools.json")
+        elif [[ "$cmd" == rules:* ]]; then
+            engine_args+=(--def-file "$ROOT_DIR/config/rules-targets.list")
+        elif [[ "$cmd" == hooks:* ]]; then
+            engine_args+=(--def-file "$ROOT_DIR/config/claude-hooks.json" --def-file "$ROOT_DIR/config/codex-hooks.json")
+        elif [[ "$cmd" == aliases:* ]]; then
+            engine_args+=(--def-file "$ROOT_DIR/config/shell-aliases.json")
+        elif [[ "$cmd" == secrets:* ]]; then
+            engine_args+=(--def-file "$ROOT_DIR/config/mcp.json")
+        fi
+        if [ -n "$DRY_RUN_FLAG" ]; then
+            engine_args+=(--dry-run)
+        fi
+        if [ -n "$OFFLINE_FLAG" ]; then
+            engine_args+=(--offline)
+        fi
+        if [ "${#CMD_ARGS[@]}" -gt 0 ]; then
+            engine_args+=("${CMD_ARGS[@]}")
+        fi
+        AGENT_MANAGER_RUN_ID="$RUN_ID" \
+        AGENT_MANAGER_LOG_FILE="$TEMP_LOG" \
+        AGENT_MANAGER_LOCK_HELD="$LOCK_ACQUIRED" \
+        AGENT_MANAGER_LOCK_PID="$$" \
+            "$PYTHON_CMD" "$ROOT_DIR/src/engine_v1.py" "${engine_args[@]}"
         ;;
     help|-h|--help|-help)
         print_help ;;
