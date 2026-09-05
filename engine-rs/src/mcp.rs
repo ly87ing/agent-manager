@@ -535,6 +535,11 @@ fn classify_mcp_probe(merged: &Map<String, Value>) -> Option<(String, Vec<String
     None
 }
 
+/// Freshness block for elements with no upstream axis (all nulls).
+pub(crate) fn freshness_not_applicable() -> Value {
+    freshness_block("skill:_", false, &Map::new(), None, &mut Vec::new())
+}
+
 pub(crate) fn freshness_block(
     element_id: &str,
     probeable: bool,

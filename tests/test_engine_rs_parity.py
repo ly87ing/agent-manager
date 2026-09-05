@@ -633,5 +633,290 @@ class EngineRsAgentsParityTests(unittest.TestCase):
         self.assertTrue(any("installed" in diff for diff in diffs), "比较器必须红: %s" % diffs)
 
 
+@unittest.skipUnless(CARGO, "cargo 不可用，跳过 rust parity")
+class EngineRsSkillsParityTests(unittest.TestCase):
+    """skills 域双实现对齐：v2 矩阵、链接拓扑、收件箱、freshness、plan 翻译。"""
+
+    @classmethod
+    def setUpClass(cls):
+        build = subprocess.run(
+            ["cargo", "build", "--quiet"], cwd=ENGINE_RS, capture_output=True, text=True, check=False
+        )
+        if build.returncode != 0:
+            raise unittest.SkipTest("cargo build 失败: %s" % build.stderr[-500:])
+        if not DEBUG_BIN.exists():
+            raise unittest.SkipTest("rust binary 缺失: %s" % DEBUG_BIN)
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="agent_manager_rs_skills_parity_"))
+        self.addCleanup(shutil.rmtree, self.temp_dir, ignore_errors=True)
+        self.repo = self.temp_dir / "repo"
+        self.home = self.temp_dir / "home"
+        self.home.mkdir()
+        shutil.copytree(ROOT, self.repo, ignore=COPY_IGNORE)
+        (self.repo / "config" / "manager.local.json").unlink(missing_ok=True)
+        (self.repo / "config" / "manager.synced.json").unlink(missing_ok=True)
+        self.claude_skills = self.home / ".claude" / "skills"
+        self.codex_skills = self.home / ".codex" / "skills"
+        self.claude_skills.mkdir(parents=True)
+        self.codex_skills.mkdir(parents=True)
+        self._write_corpus()
+
+    def _make_skill_repo(self, repo_name, skill_names):
+        repo = self.repo / "agent-skill" / "repositories" / repo_name
+        for name in skill_names:
+            skill_dir = repo / name
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: %s\ndescription: rs parity\n---\n" % name, encoding="utf-8"
+            )
+        (repo / ".agent-manager-owned").write_text("{}\n", encoding="utf-8")
+        return repo
+
+    def _write_config(self, name, obj):
+        (self.repo / "config" / name).write_text(json.dumps(obj, indent=2) + "\n", encoding="utf-8")
+
+    def _write_corpus(self, coll_policy=None):
+        """coll 矩阵集合（skill-a 双 agent、skill-b 仅 claude、skill-c 收件箱）
+        + legacy 旧式集合（skill-x，升格等价=范围内启用）。"""
+        self.coll = self._make_skill_repo("coll", ("skill-a", "skill-b", "skill-c"))
+        self.legacy = self._make_skill_repo("legacy", ("skill-x",))
+        self._write_config("skills.json", {
+            "repositories": {
+                "coll": {"url": "https://example.invalid/coll.git", "agents": ["claude-code", "codex"]},
+                "legacy": {"url": "https://example.invalid/legacy.git", "agents": ["claude-code"]},
+            },
+            "agents": {"claude-code": str(self.claude_skills), "codex": str(self.codex_skills)},
+        })
+        self._write_config("manager.json", {
+            "agents": {}, "tools": {},
+            "skills": {
+                "coll": coll_policy
+                or {
+                    "enabled": True,
+                    "skills": {
+                        "skill-a": {"agents": {"claude-code": True, "codex": True}},
+                        "skill-b": {"agents": {"claude-code": True, "codex": False}},
+                        "skill-c": {},
+                    },
+                },
+                "legacy": {"enabled": True},
+            },
+            "mcp": {},
+        })
+
+    def _link_corpus(self):
+        os.symlink(str(self.coll / "skill-a"), str(self.claude_skills / "skill-a"))  # linked
+        os.symlink(str(self.coll / "skill-gone"), str(self.codex_skills / "skill-a"))  # dead-link
+        os.symlink(str(self.coll / "skill-a"), str(self.claude_skills / "skill-z"))  # 额外受管链接
+
+    def _env(self, extra=None):
+        env = os.environ.copy()
+        env["HOME"] = str(self.home)
+        env["AGENT_MANAGER_RUN_ID"] = "parity-run-skills"
+        env["AGENT_MANAGER_LOG_FILE"] = str(self.temp_dir / "parity.log")
+        env["AGENT_MANAGER_LOCK_HELD"] = "false"
+        env["AGENT_MANAGER_ROOT_DIR"] = str(self.repo)
+        env["AGENT_MANAGER_UPSTREAM_CACHE"] = str(self.temp_dir / "upstream-cache.json")
+        if extra:
+            env.update(extra)
+        return env
+
+    def _run_python(self, *argv):
+        return subprocess.run(
+            ["python3", str(self.repo / "src" / "engine_v1.py"), *argv],
+            cwd=self.repo, env=self._env(), capture_output=True, text=True, check=False, timeout=60,
+        )
+
+    def _run_rust(self, *argv, binary=None):
+        return subprocess.run(
+            [str(binary or DEBUG_BIN), *argv],
+            cwd=self.repo, env=self._env(), capture_output=True, text=True, check=False, timeout=60,
+        )
+
+    def _assert_parity(self, *argv):
+        py = self._run_python(*argv)
+        rs = self._run_rust(*argv)
+        self.assertEqual(
+            py.returncode, rs.returncode,
+            "exit 码不一致: python=%d rust=%d\npy stderr: %s\nrs stderr: %s"
+            % (py.returncode, rs.returncode, py.stderr[-500:], rs.stderr[-500:]),
+        )
+        diffs = deep_diff(normalize_envelope(json.loads(py.stdout)), normalize_envelope(json.loads(rs.stdout)))
+        self.assertEqual(diffs, [], "envelope 不一致:\n%s" % "\n".join(diffs))
+        return json.loads(py.stdout)
+
+    def _status_argv(self):
+        return ("skills:status", "--config", "config/manager.json", "--def-file", "config/skills.json", "--json")
+
+    def test_skills_status_parity_matrix_corpus(self):
+        self._link_corpus()
+        payload = self._assert_parity(*self._status_argv())
+        elements = {e["id"]: e for e in payload["data"]["elements"]}
+        self.assertEqual(elements["skill:coll"]["state"], "drifted")
+        self.assertEqual(elements["skill:coll"]["observed"]["discovery_inbox"], ["skill-c"])
+        self.assertEqual(elements["skill:coll"]["observed"]["extra_links"][0]["name"], "skill-z")
+        self.assertEqual(elements["skill:coll/skill-a"]["state"], "drifted")
+        self.assertEqual(
+            elements["skill:coll/skill-a"]["observed"]["agents"]["codex"]["state"], "dead-link"
+        )
+        self.assertEqual(elements["skill:coll/skill-b"]["state"], "missing")
+        self.assertEqual(
+            elements["skill:coll/skill-b"]["policy"]["agents"], {"claude-code": True, "codex": False}
+        )
+        self.assertEqual(elements["skill:coll/skill-c"]["state"], "disabled")
+        self.assertTrue(elements["skill:coll/skill-c"]["observed"]["discovery_inbox"])
+        self.assertEqual(elements["skill:legacy"]["state"], "managed-ok")
+        self.assertFalse(elements["skill:legacy"]["spec"]["matrix_mode"])
+        # 旧式升格：skill-x 对 claude-code 默认启用。
+        self.assertEqual(
+            elements["skill:legacy/skill-x"]["policy"]["agents"], {"claude-code": True}
+        )
+        self.assertEqual(elements["skill:legacy/skill-x"]["state"], "missing")
+
+    def test_skills_status_parity_new_skill_default_enabled(self):
+        self._write_corpus(coll_policy={"enabled": True, "new_skill_default": "enabled"})
+        payload = self._assert_parity(*self._status_argv())
+        elements = {e["id"]: e for e in payload["data"]["elements"]}
+        # 新默认 enabled：未列矩阵的 skill 跟随 collection 目标集 → 全部缺链。
+        self.assertEqual(elements["skill:coll/skill-c"]["state"], "missing")
+        self.assertEqual(elements["skill:coll"]["observed"]["discovery_inbox"], [])
+        self.assertEqual(
+            elements["skill:coll/skill-c"]["policy"]["agents"], {"claude-code": True, "codex": True}
+        )
+
+    def test_skills_status_parity_missing_cache(self):
+        self._write_config("skills.json", {
+            "repositories": {"gone": {"url": "https://example.invalid/gone.git", "agents": ["claude-code"]}},
+            "agents": {"claude-code": str(self.claude_skills)},
+        })
+        self._write_config("manager.json", {"agents": {}, "tools": {}, "skills": {"gone": {"enabled": True}}, "mcp": {}})
+        payload = self._assert_parity(*self._status_argv())
+        gone = {e["id"]: e for e in payload["data"]["elements"]}["skill:gone"]
+        self.assertEqual(gone["state"], "not-materialized")
+        self.assertFalse(gone["observed"]["repo_cached"])
+        self.assertIn("SKILL_REPO_CACHE_MISSING", [w["code"] for w in payload["warnings"]])
+
+    def test_skills_status_parity_invalid_matrix_fails_closed(self):
+        self._write_corpus(coll_policy={"enabled": True, "skills": {"ghost-skill": {"agents": {"claude-code": True}}}})
+        payload = self._assert_parity(*self._status_argv())
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["errors"][0]["code"], "SKILL_CONFIG_INVALID")
+        self.assertEqual(payload["errors"][0]["element"], "skill:coll")
+
+    def test_skills_status_parity_duplicate_name_across_collections(self):
+        self._make_skill_repo("coll-b", ("skill-a",))
+        defs = json.loads((self.repo / "config" / "skills.json").read_text(encoding="utf-8"))
+        defs["repositories"]["coll-b"] = {"url": "https://example.invalid/b.git", "agents": ["claude-code"]}
+        self._write_config("skills.json", defs)
+        manager = json.loads((self.repo / "config" / "manager.json").read_text(encoding="utf-8"))
+        manager["skills"]["coll-b"] = {"enabled": True}
+        self._write_config("manager.json", manager)
+        payload = self._assert_parity(*self._status_argv())
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["errors"][0]["code"], "SKILL_DUPLICATE_NAME")
+        self.assertEqual(payload["errors"][0]["element"], "skill:coll-b/skill-a")
+
+    def test_skills_status_parity_unmaterialized_when_target_dirs_absent(self):
+        self._make_skill_repo("fresh", ("skill-y",))
+        self._write_config("skills.json", {
+            "repositories": {"fresh": {"url": "https://example.invalid/fresh.git", "agents": ["claude-code"]}},
+            "agents": {"claude-code": str(self.home / ".claude" / "skills")},
+        })
+        self._write_config("manager.json", {"agents": {}, "tools": {}, "skills": {"fresh": {"enabled": True}}, "mcp": {}})
+        shutil.rmtree(self.claude_skills.parent)  # .claude 整目录不存在
+        payload = self._assert_parity(*self._status_argv())
+        skill_y = {e["id"]: e for e in payload["data"]["elements"]}["skill:fresh/skill-y"]
+        self.assertEqual(skill_y["state"], "not-materialized")
+
+    def test_skills_status_parity_freshness_cache(self):
+        (self.temp_dir / "upstream-cache.json").write_text(
+            json.dumps({
+                "version": 1,
+                "entries": {
+                    "skill:coll": {
+                        "state": "behind", "current": "aaa111", "upstream": "bbb222",
+                        "checked_at": "2099-01-01T00:00:00Z", "probe": "git-ls-remote",
+                    }
+                },
+            }),
+            encoding="utf-8",
+        )
+        payload = self._assert_parity(*self._status_argv())
+        freshness = {e["id"]: e["freshness"] for e in payload["data"]["elements"]}
+        self.assertEqual(freshness["skill:coll"]["state"], "behind")
+        self.assertEqual(freshness["skill:coll"]["upstream"], "bbb222")
+        self.assertEqual(freshness["skill:legacy"]["state"], "unknown")
+        self.assertEqual(freshness["skill:coll/skill-a"]["state"], "not-applicable")
+
+    def test_skills_plan_parity_ordering_and_types(self):
+        self._link_corpus()
+        (self.temp_dir / "upstream-cache.json").write_text(
+            json.dumps({
+                "version": 1,
+                "entries": {
+                    "skill:coll": {
+                        "state": "behind", "current": "aaa111", "upstream": "bbb222",
+                        "checked_at": "2099-01-01T00:00:00Z", "probe": "git-ls-remote",
+                    }
+                },
+            }),
+            encoding="utf-8",
+        )
+        payload = self._assert_parity(
+            "skills:plan", "--config", "config/manager.json", "--def-file", "config/skills.json", "--json"
+        )
+        actions = payload["data"]["actions"]
+        # 集合动作（git-pull + 额外链接 unlink）排在 skill 动作之前。
+        self.assertEqual(actions[0]["op"], "git-pull")
+        self.assertEqual(actions[0]["element"], "skill:coll")
+        self.assertEqual(actions[0]["risk"], "network")
+        self.assertIn("bbb222", actions[0]["note"])
+        ops = [(a["element"], a["op"]) for a in actions]
+        self.assertIn(("skill:coll", "unlink"), ops)  # 额外链接 skill-z
+        self.assertIn(("skill:coll/skill-a", "unlink"), ops)  # codex 死链
+        self.assertIn(("skill:coll/skill-b", "symlink"), ops)  # claude 缺链
+        self.assertIn(("skill:legacy/skill-x", "symlink"), ops)
+        self.assertNotIn(("skill:coll/skill-c", "symlink"), ops)  # 收件箱无动作
+        summary = payload["data"]["summary"]
+        self.assertEqual(summary["network"], 1)
+        self.assertEqual(summary["exec-local"], len(actions) - 1)
+
+    def test_skills_plan_parity_cache_missing_clone(self):
+        self._write_config("skills.json", {
+            "repositories": {"gone": {"url": "https://example.invalid/gone.git", "agents": ["claude-code"]}},
+            "agents": {"claude-code": str(self.claude_skills)},
+        })
+        self._write_config("manager.json", {"agents": {}, "tools": {}, "skills": {"gone": {"enabled": True}}, "mcp": {}})
+        payload = self._assert_parity(
+            "skills:plan", "--config", "config/manager.json", "--def-file", "config/skills.json", "--json"
+        )
+        actions = payload["data"]["actions"]
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["op"], "git-pull")
+        self.assertIn("https://example.invalid/gone.git", actions[0]["note"])
+
+    def test_skills_harness_goes_red_when_rust_diverges(self):
+        self._link_corpus()
+        wrapper = self.temp_dir / "mutating-engine.sh"
+        wrapper.write_text(
+            "#!/bin/sh\n"
+            "%s \"$@\" | python3 -c \"\n"
+            "import json, sys\n"
+            "p = json.load(sys.stdin)\n"
+            "els = p.get('data', {}).get('elements', [])\n"
+            "if els:\n"
+            "    els[0]['observed']['repo_cached'] = not els[0]['observed']['repo_cached']\n"
+            "print(json.dumps(p, indent=2, ensure_ascii=False))\n"
+            "\"\n" % DEBUG_BIN,
+            encoding="utf-8",
+        )
+        wrapper.chmod(0o755)
+        py = self._run_python(*self._status_argv())
+        mutated = self._run_rust(*self._status_argv(), binary=wrapper)
+        diffs = deep_diff(normalize_envelope(json.loads(py.stdout)), normalize_envelope(json.loads(mutated.stdout)))
+        self.assertTrue(any("repo_cached" in diff for diff in diffs), "比较器必须红: %s" % diffs)
+
+
 if __name__ == "__main__":
     unittest.main()

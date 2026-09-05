@@ -12,6 +12,7 @@ mod envelope;
 mod ids;
 mod mcp;
 mod providers;
+mod skills;
 mod upstream;
 
 use envelope::{diagnostic, Envelope, Lock, Mode};
@@ -230,7 +231,7 @@ fn run() -> i32 {
         );
     }
 
-    let implemented = (domain == "mcp" || domain == "agents") && (verb == "status" || verb == "plan");
+    let implemented = (domain == "mcp" || domain == "agents" || domain == "skills") && (verb == "status" || verb == "plan");
     if !implemented {
         Envelope::new(
             dotted.clone(),
@@ -248,7 +249,7 @@ fn run() -> i32 {
         )
         .emit();
         eprintln!(
-            "提示: '{}' 尚未实现（后续切片落地）；Rust 切片当前可用: mcp/agents 的 status/plan",
+            "提示: '{}' 尚未实现（后续切片落地）；Rust 切片当前可用: mcp/agents/skills 的 status/plan",
             dotted
         );
         return 2;
@@ -306,6 +307,8 @@ fn run() -> i32 {
         ("mcp", "plan") => mcp::build_mcp_plan(&root_dir, &config_file, &def_file),
         ("agents", "status") => agents::build_agents_status(&root_dir, &config_file, &def_files),
         ("agents", "plan") => agents::build_agents_plan(&root_dir, &config_file, &def_files),
+        ("skills", "status") => skills::build_skills_status(&root_dir, &config_file, &def_files),
+        ("skills", "plan") => skills::build_skills_plan(&root_dir, &config_file, &def_files),
         _ => unreachable!("dispatch guard above"),
     };
     match result {

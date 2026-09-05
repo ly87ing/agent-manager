@@ -1097,11 +1097,11 @@ case "$cmd" in
         if [ "${#CMD_ARGS[@]}" -gt 0 ]; then
             engine_args+=("${CMD_ARGS[@]}")
         fi
-        # Rust 切片路由（Phase 3）：mcp/agents 域的 status/plan 优先走 engine-rs
-        # （Python 内核保留作 fallback；退役待 Phase 3 末 CI 全绿）。
+        # Rust 切片路由（Phase 3）：mcp/agents/skills 域的 status/plan 优先走
+        # engine-rs（Python 内核保留作 fallback；退役待 Phase 3 末 CI 全绿）。
         # AGENT_MANAGER_ENGINE_RS 可显式指定 binary。
         engine_cmd=("$PYTHON_CMD" "$ROOT_DIR/src/engine_v1.py")
-        if [[ "$cmd" == "mcp:status" || "$cmd" == "mcp:plan" || "$cmd" == "agents:status" || "$cmd" == "agents:plan" ]]; then
+        if [[ "$cmd" == "mcp:status" || "$cmd" == "mcp:plan" || "$cmd" == "agents:status" || "$cmd" == "agents:plan" || "$cmd" == "skills:status" || "$cmd" == "skills:plan" ]]; then
             rust_engine=""
             if [ -n "${AGENT_MANAGER_ENGINE_RS:-}" ] && [ -x "${AGENT_MANAGER_ENGINE_RS}" ]; then
                 rust_engine="$AGENT_MANAGER_ENGINE_RS"
