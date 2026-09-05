@@ -364,5 +364,274 @@ class EngineRsParityTests(unittest.TestCase):
         self.assertTrue(any("state" in diff for diff in diffs), "比较器必须红: %s" % diffs)
 
 
+@unittest.skipUnless(CARGO, "cargo 不可用，跳过 rust parity")
+class EngineRsAgentsParityTests(unittest.TestCase):
+    """agents 域双实现对齐：探测层（PATH stub + brew stub）与状态映射全覆盖。"""
+
+    @classmethod
+    def setUpClass(cls):
+        build = subprocess.run(
+            ["cargo", "build", "--quiet"], cwd=ENGINE_RS, capture_output=True, text=True, check=False
+        )
+        if build.returncode != 0:
+            raise unittest.SkipTest("cargo build 失败: %s" % build.stderr[-500:])
+        if not DEBUG_BIN.exists():
+            raise unittest.SkipTest("rust binary 缺失: %s" % DEBUG_BIN)
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="agent_manager_rs_agents_parity_"))
+        self.addCleanup(shutil.rmtree, self.temp_dir, ignore_errors=True)
+        self.repo = self.temp_dir / "repo"
+        self.home = self.temp_dir / "home"
+        self.home.mkdir()
+        shutil.copytree(ROOT, self.repo, ignore=COPY_IGNORE)
+        (self.repo / "config" / "manager.local.json").unlink(missing_ok=True)
+        (self.repo / "config" / "manager.synced.json").unlink(missing_ok=True)
+        self.bindir = self.temp_dir / "bin"
+        self.bindir.mkdir()
+        self._write_corpus()
+
+    def _make_bin(self, name, body="#!/bin/sh\nexit 0\n", subdir=""):
+        target_dir = self.bindir / subdir if subdir else self.bindir
+        target_dir.mkdir(parents=True, exist_ok=True)
+        path = target_dir / name
+        path.write_text(body, encoding="utf-8")
+        path.chmod(0o755)
+        return path
+
+    def _write_corpus(self):
+        """fake-ok managed-ok / fake-missing missing / fake-disabled disabled /
+        fake-leftover drifted(禁用仍装) / fake-undeclared unmanaged-detected /
+        fake-external unmanaged-detected(system+require_managed) /
+        fake-deprecated drifted(brew-cask) / fake-pref managed-ok(偏好偏离) /
+        fake-gap drifted+AGENT_OFFICIAL_GAP（禁用仍装且官方无 uninstall）。"""
+        self._write_config("manager.json", {
+            "agents": {
+                "fake-ok": {"enabled": True},
+                "fake-missing": {"enabled": True},
+                "fake-disabled": {"enabled": False},
+                "fake-leftover": {"enabled": False},
+                "fake-external": {"enabled": True},
+                "fake-deprecated": {"enabled": True},
+                "fake-pref": {"enabled": True, "preferred_provider": "npm"},
+                "fake-gap": {"enabled": False},
+            },
+            "tools": {}, "skills": {}, "mcp": {},
+        })
+        defs = {
+            "fake-ok": {"bin": "fake-ok-bin", "providers": {"npm": {"managed": True, "install": "npm install -g @fake/ok", "detect_paths": [str(self.bindir / "fake-ok-bin")]}}},
+            "fake-missing": {"bin": "fake-missing-bin", "providers": {"npm": {"managed": True, "install": "npm install -g @fake/missing"}}},
+            "fake-disabled": {"bin": "fake-disabled-bin", "providers": {"npm": {"managed": True, "install": "npm install -g @fake/disabled"}}},
+            "fake-leftover": {"bin": "fake-leftover-bin", "providers": {"npm": {"managed": True, "install": "npm install -g @fake/leftover", "detect_paths": [str(self.bindir / "fake-leftover-bin")]}}},
+            "fake-undeclared": {"bin": "fake-undeclared-bin", "providers": {"native": {"managed": False, "detect_paths": [str(self.bindir / "fake-undeclared-bin")]}}},
+            "fake-external": {"bin": "fake-external-bin", "require_managed_provider": True, "providers": {"npm": {"managed": True, "install": "npm install -g @fake/ext"}}},
+            "fake-deprecated": {"bin": "fake-dep-bin", "providers": {"brew": {"managed": False, "install": "brew install --cask fake-dep"}}},
+            "fake-pref": {
+                "bin": "fake-pref-bin",
+                "preferred_provider": "npm",
+                "providers": {
+                    "native": {"managed": True, "install": "true", "detect_paths": [str(self.bindir / "fake-pref-bin")]},
+                    "npm": {"managed": True, "install": "npm install -g @fake/pref"},
+                },
+            },
+            "fake-gap": {
+                "bin": "fake-gap-bin",
+                "providers": {
+                    "npm": {
+                        "managed": True,
+                        "install": "npm install -g @fake/gap",
+                        "uninstall": "npm uninstall -g @fake/gap",
+                        "unsupported_actions": ["uninstall"],
+                        "detect_paths": [str(self.bindir / "fake-gap-bin")],
+                    }
+                },
+            },
+        }
+        self._write_config("agents.json", defs)
+        self._make_bin("fake-ok-bin", "#!/bin/sh\necho 1.0.0\n")
+        for name in ("fake-leftover-bin", "fake-undeclared-bin", "fake-external-bin", "fake-pref-bin", "fake-gap-bin"):
+            self._make_bin(name)
+        # brew stub：formula 列表为空，cask 列表含 fake-dep。
+        self._make_bin("brew", "#!/bin/sh\nif [ \"$2\" = \"--cask\" ]; then echo fake-dep; fi\nexit 0\n")
+
+    def _write_config(self, name, obj):
+        (self.repo / "config" / name).write_text(json.dumps(obj, indent=2) + "\n", encoding="utf-8")
+
+    def _env(self, extra=None):
+        env = os.environ.copy()
+        env["HOME"] = str(self.home)
+        # bindir 优先（探测 hermetic），保留真实 PATH 其余部分：受限 PATH 会让
+        # python 落到 /usr/bin/python3 (3.9)，sync_tools 在那里不可导入，Python
+        # 引擎的探测源分类随之降级——两侧须都在完整能力下对齐。
+        env["PATH"] = "%s:%s" % (self.bindir, env.get("PATH", ""))
+        env["AGENT_MANAGER_RUN_ID"] = "parity-run-agents"
+        env["AGENT_MANAGER_LOG_FILE"] = str(self.temp_dir / "parity.log")
+        env["AGENT_MANAGER_LOCK_HELD"] = "false"
+        env["AGENT_MANAGER_ROOT_DIR"] = str(self.repo)
+        env["AGENT_MANAGER_UPSTREAM_CACHE"] = str(self.temp_dir / "upstream-cache.json")
+        if extra:
+            env.update(extra)
+        return env
+
+    def _run_python(self, *argv, env_extra=None):
+        return subprocess.run(
+            ["python3", str(self.repo / "src" / "engine_v1.py"), *argv],
+            cwd=self.repo, env=self._env(env_extra), capture_output=True, text=True, check=False, timeout=60,
+        )
+
+    def _run_rust(self, *argv, env_extra=None, binary=None):
+        return subprocess.run(
+            [str(binary or DEBUG_BIN), *argv],
+            cwd=self.repo, env=self._env(env_extra), capture_output=True, text=True, check=False, timeout=60,
+        )
+
+    def _assert_parity(self, *argv, env_extra=None):
+        py = self._run_python(*argv, env_extra=env_extra)
+        rs = self._run_rust(*argv, env_extra=env_extra)
+        self.assertEqual(
+            py.returncode, rs.returncode,
+            "exit 码不一致: python=%d rust=%d\npy stderr: %s\nrs stderr: %s"
+            % (py.returncode, rs.returncode, py.stderr[-500:], rs.stderr[-500:]),
+        )
+        diffs = deep_diff(normalize_envelope(json.loads(py.stdout)), normalize_envelope(json.loads(rs.stdout)))
+        self.assertEqual(diffs, [], "envelope 不一致:\n%s" % "\n".join(diffs))
+        return json.loads(py.stdout)
+
+    def test_agents_status_parity_full_state_matrix(self):
+        payload = self._assert_parity(
+            "agents:status", "--config", "config/manager.json", "--def-file", "config/agents.json", "--json"
+        )
+        elements = {e["id"]: e for e in payload["data"]["elements"]}
+        self.assertEqual(elements["agents:fake-ok"]["state"], "managed-ok")
+        self.assertEqual(elements["agents:fake-missing"]["state"], "missing")
+        self.assertEqual(elements["agents:fake-disabled"]["state"], "disabled")
+        self.assertEqual(elements["agents:fake-leftover"]["state"], "drifted")
+        self.assertEqual(elements["agents:fake-undeclared"]["state"], "unmanaged-detected")
+        self.assertEqual(elements["agents:fake-external"]["state"], "unmanaged-detected")
+        self.assertEqual(elements["agents:fake-deprecated"]["state"], "drifted")
+        self.assertEqual(elements["agents:fake-pref"]["state"], "managed-ok")
+        self.assertFalse(elements["agents:fake-pref"]["observed"]["preferred_active"])
+        self.assertEqual(elements["agents:fake-gap"]["state"], "drifted")
+        self.assertIn("AGENT_OFFICIAL_GAP", [w["code"] for w in payload["warnings"]])
+        # 本地版本探测（bin --version 输出解析）两侧一致。
+        self.assertEqual(elements["agents:fake-ok"]["freshness"]["current"], "1.0.0")
+        self.assertEqual(elements["agents:fake-ok"]["freshness"]["state"], "unknown")
+
+    def test_agents_status_parity_unsupported_is_error_exit_1(self):
+        self._make_bin("fake-unsupported-bin", subdir="node_modules/.bin")
+        defs = json.loads((self.repo / "config" / "agents.json").read_text(encoding="utf-8"))
+        defs["fake-unsupported"] = {
+            "bin": "fake-unsupported-bin",
+            "providers": {"native": {"managed": True, "install": "true"}},
+        }
+        self._write_config("agents.json", defs)
+        manager = json.loads((self.repo / "config" / "manager.json").read_text(encoding="utf-8"))
+        manager["agents"]["fake-unsupported"] = {"enabled": True}
+        self._write_config("manager.json", manager)
+        npm_path = "%s:%s:%s" % (
+            self.bindir / "node_modules" / ".bin",
+            self.bindir,
+            os.environ.get("PATH", ""),
+        )
+        payload = self._assert_parity(
+            "agents:status", "--config", "config/manager.json", "--def-file", "config/agents.json", "--json",
+            env_extra={"PATH": npm_path},
+        )
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["errors"][0]["code"], "AGENT_PROVIDER_UNSUPPORTED")
+        elements = {e["id"]: e for e in payload["data"]["elements"]}
+        self.assertEqual(elements["agents:fake-unsupported"]["state"], "unsupported")
+
+    def test_agents_status_parity_freshness_cache_fill(self):
+        (self.temp_dir / "upstream-cache.json").write_text(
+            json.dumps({
+                "version": 1,
+                "entries": {
+                    "agents:fake-ok": {
+                        "state": "behind", "current": "1.0.0", "upstream": "2.0.0",
+                        "checked_at": "2099-01-01T00:00:00Z", "probe": "npm-view",
+                    }
+                },
+            }),
+            encoding="utf-8",
+        )
+        payload = self._assert_parity(
+            "agents:status", "--config", "config/manager.json", "--def-file", "config/agents.json", "--json"
+        )
+        freshness = {e["id"]: e["freshness"] for e in payload["data"]["elements"]}
+        self.assertEqual(freshness["agents:fake-ok"]["state"], "behind")
+        self.assertEqual(freshness["agents:fake-ok"]["upstream"], "2.0.0")
+        self.assertEqual(freshness["agents:fake-missing"]["state"], "unknown")
+
+    def test_agents_plan_parity_install_actions(self):
+        payload = self._assert_parity(
+            "agents:plan", "--config", "config/manager.json", "--def-file", "config/agents.json", "--json"
+        )
+        actions = payload["data"]["actions"]
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["element"], "agents:fake-missing")
+        self.assertEqual(actions[0]["op"], "install")
+        self.assertEqual(actions[0]["cmd"], "npm install -g @fake/missing")
+        self.assertEqual(actions[0]["risk"], "install-remove")
+        self.assertEqual(payload["data"]["summary"]["install-remove"], 1)
+
+    def test_agents_plan_parity_policy_gates(self):
+        manager = json.loads((self.repo / "config" / "manager.json").read_text(encoding="utf-8"))
+        manager["agents"]["fake-missing"]["auto_install"] = False
+        self._write_config("manager.json", manager)
+        payload = self._assert_parity(
+            "agents:plan", "--config", "config/manager.json", "--def-file", "config/agents.json", "--json"
+        )
+        self.assertEqual(payload["data"]["actions"], [])
+        self.assertIn("AGENT_INSTALL_DISABLED_BY_POLICY", [w["code"] for w in payload["warnings"]])
+
+    def test_agents_plan_parity_platform_command_resolution(self):
+        # 平台映射：darwin 键优先，缺失则 posix→default；全无 → AGENT_INSTALL_UNAVAILABLE。
+        defs = json.loads((self.repo / "config" / "agents.json").read_text(encoding="utf-8"))
+        defs["fake-missing"]["providers"]["npm"]["install"] = {
+            "windows": "win-install", "posix": "posix-install", "default": "default-install"
+        }
+        defs["fake-missing-2"] = {
+            "bin": "fake-missing-2-bin",
+            "providers": {"npm": {"managed": True, "install": {"windows": "only-windows"}}},
+        }
+        self._write_config("agents.json", defs)
+        manager = json.loads((self.repo / "config" / "manager.json").read_text(encoding="utf-8"))
+        manager["agents"]["fake-missing-2"] = {"enabled": True}
+        self._write_config("manager.json", manager)
+        payload = self._assert_parity(
+            "agents:plan", "--config", "config/manager.json", "--def-file", "config/agents.json", "--json"
+        )
+        by_element = {a["element"]: a for a in payload["data"]["actions"]}
+        self.assertEqual(by_element["agents:fake-missing"]["cmd"], "posix-install")
+        self.assertNotIn("agents:fake-missing-2", by_element)
+        self.assertIn("AGENT_INSTALL_UNAVAILABLE", [w["code"] for w in payload["warnings"]])
+
+    def test_agents_harness_goes_red_when_rust_diverges(self):
+        wrapper = self.temp_dir / "mutating-engine.sh"
+        wrapper.write_text(
+            "#!/bin/sh\n"
+            "%s \"$@\" | python3 -c \"\n"
+            "import json, sys\n"
+            "p = json.load(sys.stdin)\n"
+            "els = p.get('data', {}).get('elements', [])\n"
+            "if els:\n"
+            "    els[0]['observed']['installed'] = not els[0]['observed']['installed']\n"
+            "print(json.dumps(p, indent=2, ensure_ascii=False))\n"
+            "\"\n" % DEBUG_BIN,
+            encoding="utf-8",
+        )
+        wrapper.chmod(0o755)
+        py = self._run_python(
+            "agents:status", "--config", "config/manager.json", "--def-file", "config/agents.json", "--json"
+        )
+        mutated = self._run_rust(
+            "agents:status", "--config", "config/manager.json", "--def-file", "config/agents.json", "--json",
+            binary=wrapper,
+        )
+        diffs = deep_diff(normalize_envelope(json.loads(py.stdout)), normalize_envelope(json.loads(mutated.stdout)))
+        self.assertTrue(any("installed" in diff for diff in diffs), "比较器必须红: %s" % diffs)
+
+
 if __name__ == "__main__":
     unittest.main()

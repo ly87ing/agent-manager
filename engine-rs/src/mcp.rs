@@ -23,7 +23,7 @@ impl std::fmt::Display for ConfigInvalid {
     }
 }
 
-fn load_json_object(path: &Path) -> Result<Map<String, Value>, ConfigInvalid> {
+pub(crate) fn load_json_object(path: &Path) -> Result<Map<String, Value>, ConfigInvalid> {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -39,7 +39,7 @@ fn load_json_object(path: &Path) -> Result<Map<String, Value>, ConfigInvalid> {
 }
 
 /// get_typed_mapping_section semantics: missing/null → {}; wrong type → error.
-fn typed_mapping(
+pub(crate) fn typed_mapping(
     data: &Map<String, Value>,
     key: &str,
     source: &str,
@@ -535,7 +535,7 @@ fn classify_mcp_probe(merged: &Map<String, Value>) -> Option<(String, Vec<String
     None
 }
 
-fn freshness_block(
+pub(crate) fn freshness_block(
     element_id: &str,
     probeable: bool,
     cache: &Map<String, Value>,

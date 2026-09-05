@@ -6,10 +6,12 @@
 //! landed. Exit codes: 0 = ok (warnings allowed), 1 = errors non-empty,
 //! 2 = contract/usage error.
 
+mod agents;
 mod canon;
 mod envelope;
 mod ids;
 mod mcp;
+mod providers;
 mod upstream;
 
 use envelope::{diagnostic, Envelope, Lock, Mode};
@@ -228,7 +230,7 @@ fn run() -> i32 {
         );
     }
 
-    let implemented = domain == "mcp" && (verb == "status" || verb == "plan");
+    let implemented = (domain == "mcp" || domain == "agents") && (verb == "status" || verb == "plan");
     if !implemented {
         Envelope::new(
             dotted.clone(),
@@ -246,7 +248,7 @@ fn run() -> i32 {
         )
         .emit();
         eprintln!(
-            "提示: '{}' 尚未实现（后续切片落地）；Rust 切片当前可用: mcp:status / mcp:plan",
+            "提示: '{}' 尚未实现（后续切片落地）；Rust 切片当前可用: mcp/agents 的 status/plan",
             dotted
         );
         return 2;
@@ -286,13 +288,27 @@ fn run() -> i32 {
     } else {
         std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(def_file)
     };
+    let def_files: Vec<PathBuf> = args
+        .def_files
+        .iter()
+        .map(|raw| {
+            let path = PathBuf::from(raw);
+            if path.is_absolute() {
+                path
+            } else {
+                std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(path)
+            }
+        })
+        .collect();
 
-    let kernel = if verb == "status" {
-        mcp::build_mcp_status
-    } else {
-        mcp::build_mcp_plan
+    let result = match (domain, verb) {
+        ("mcp", "status") => mcp::build_mcp_status(&root_dir, &config_file, &def_file),
+        ("mcp", "plan") => mcp::build_mcp_plan(&root_dir, &config_file, &def_file),
+        ("agents", "status") => agents::build_agents_status(&root_dir, &config_file, &def_files),
+        ("agents", "plan") => agents::build_agents_plan(&root_dir, &config_file, &def_files),
+        _ => unreachable!("dispatch guard above"),
     };
-    match kernel(&root_dir, &config_file, &def_file) {
+    match result {
         Ok((data, warnings, errors)) => {
             let error_count = errors.len();
             Envelope::new(

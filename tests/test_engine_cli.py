@@ -505,6 +505,23 @@ class EngineCliTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["run_id"], "routing-test")
 
+    @unittest.skipUnless(RUST_BIN.exists(), "engine-rs 未构建（cargo build）时跳过")
+    def test_agents_routes_to_rust_binary_via_env_override(self):
+        result = self._run_manage(
+            "agents:status", "--json", env_extra={"AGENT_MANAGER_ENGINE_RS": str(self.RUST_BIN)},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[engine] rust:", result.stderr)
+        payload = json.loads(result.stdout)
+        self._assert_envelope(payload)
+        self.assertEqual(payload["data"]["domain"], "agents")
+
+    def test_agents_falls_back_to_python_when_no_rust_binary(self):
+        result = self._run_manage("agents:status", "--json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("[engine] rust:", result.stderr)
+        self.assertEqual(json.loads(result.stdout)["data"]["domain"], "agents")
+
 
 class EngineDomainSliceTests(unittest.TestCase):
     """Slice C2a: status+plan for agents/tools/rules/hooks/aliases, secrets
