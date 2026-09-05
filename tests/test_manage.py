@@ -143,7 +143,7 @@ class ManageScriptTests(unittest.TestCase):
                 temp_root = Path(temp_dir) / "repo"
                 temp_home = Path(temp_dir) / "home"
                 temp_home.mkdir()
-                shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+                shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
                 (temp_root / "config" / "manager.json").write_text(
                     '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
                     encoding="utf-8",
@@ -182,7 +182,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_failed_task_reports_error_and_returns_non_zero(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             failing_script = temp_root / "agent-tool" / "sync_tools.py"
             failing_script.write_text(
                 "#!/usr/bin/env python3\nimport sys\nsys.exit(7)\n",
@@ -207,7 +207,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_invalid_local_override_aborts_before_running_tasks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             call_log = temp_root / "calls.log"
             (temp_root / "config" / "manager.local.json").write_text("{ invalid json\n", encoding="utf-8")
 
@@ -241,7 +241,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_non_object_local_override_aborts_before_running_tasks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             call_log = temp_root / "calls.log"
             (temp_root / "config" / "manager.local.json").write_text("[]\n", encoding="utf-8")
 
@@ -275,7 +275,7 @@ class ManageScriptTests(unittest.TestCase):
 
     def _prepare_merge_capture_repo(self, temp_dir):
         temp_root = Path(temp_dir) / "repo"
-        shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+        shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
         call_log = temp_root / "calls.log"
         # update 会跑 maybe_init_secrets；移除 secrets 并 stub init-secrets 保持 hermetic。
         remove_path(temp_root / "secrets")
@@ -409,7 +409,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_invalid_synced_layer_aborts_before_running_tasks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             call_log = temp_root / "calls.log"
             (temp_root / "config" / "manager.local.json").unlink(missing_ok=True)
             (temp_root / "config" / "manager.synced.json").write_text("{ invalid json\n", encoding="utf-8")
@@ -446,7 +446,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_doctor_stops_after_config_syntax_errors(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             (temp_root / "config" / "agents.json").write_text("{ invalid json\n", encoding="utf-8")
 
             result = subprocess.run(
@@ -467,7 +467,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_doctor_stops_after_config_shape_errors(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             (temp_root / "config" / "tools.json").write_text('{"tools": []}\n', encoding="utf-8")
 
             result = subprocess.run(
@@ -490,7 +490,7 @@ class ManageScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             temp_home.mkdir()
             (temp_root / "config" / "tools.json").unlink()
             (temp_root / "config" / "manager.json").write_text(
@@ -527,7 +527,7 @@ class ManageScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             temp_home.mkdir()
             (temp_root / "config" / "rules-targets.list").unlink()
             (temp_root / "config" / "manager.json").write_text(
@@ -563,7 +563,7 @@ class ManageScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             temp_home.mkdir()
 
             (temp_root / "config" / "manager.json").write_text(
@@ -603,7 +603,7 @@ class ManageScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             temp_home.mkdir()
 
             (temp_root / "config" / "manager.json").write_text(
@@ -655,7 +655,7 @@ class ManageScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             temp_home.mkdir()
 
             (temp_root / "config" / "manager.json").write_text(
@@ -694,7 +694,7 @@ class ManageScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             temp_home.mkdir()
 
             (temp_root / "config" / "manager.json").write_text(
@@ -743,7 +743,7 @@ class ManageScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             temp_home.mkdir()
 
             (temp_root / "config" / "manager.json").write_text(
@@ -793,7 +793,7 @@ class ManageScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             temp_home.mkdir()
 
             (temp_root / "config" / "manager.json").write_text(
@@ -848,7 +848,7 @@ class ManageScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             temp_home.mkdir()
 
             (temp_root / "config" / "manager.json").write_text(
@@ -897,7 +897,7 @@ class ManageScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             temp_home.mkdir()
 
             (temp_root / "config" / "manager.json").write_text(
@@ -935,7 +935,7 @@ class ManageScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             temp_home.mkdir()
             (temp_root / "config" / "manager.json").write_text(
                 '{\n  "agents": {},\n  "tools": {"playwright-cli": {"enabled": true, "auto_update": false}},\n  "skills": {},\n  "mcp": {}\n}\n',
@@ -990,7 +990,7 @@ class ManageScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             temp_home.mkdir()
             (temp_root / "config" / "manager.json").write_text(
                 '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
@@ -1020,7 +1020,7 @@ class ManageScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             temp_home.mkdir()
             (temp_root / "config" / "manager.json").write_text(
                 '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
@@ -1049,7 +1049,7 @@ class ManageScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             temp_home.mkdir()
 
             managed_target = temp_home / ".claude.json"
@@ -1094,7 +1094,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_manage_without_command_shows_help_and_does_not_run_pipeline(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             call_log = temp_root / "calls.log"
 
             self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log, "True")
@@ -1140,7 +1140,7 @@ class ManageScriptTests(unittest.TestCase):
         # 与 `--offline` 对应的 update 语义不符，必须显式报错而不是隐式跑全量管线。
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             call_log = temp_root / "calls.log"
 
             self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log, "True")
@@ -1168,7 +1168,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_update_does_not_run_terminal_management(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             call_log = temp_root / "calls.log"
             # update 会跑 maybe_init_secrets；不隔离会对 secrets/.git 真联网 git pull，
             # 让本用例贴着超时上限抖动。移除 secrets 并 stub init-secrets 使其 hermetic。
@@ -1228,7 +1228,7 @@ class ManageScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             (temp_home / ".codex").mkdir(parents=True)
 
             call_log = temp_root / "calls.log"
@@ -1299,7 +1299,7 @@ class ManageScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", "app", "node_modules"))
             (temp_home / ".claude").mkdir(parents=True, exist_ok=True)
             (temp_home / ".codex").mkdir(parents=True, exist_ok=True)
 
@@ -1406,7 +1406,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_update_syncs_runtime_without_version_bump_or_agents(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             call_log = temp_root / "calls.log"
             remove_path(temp_root / "secrets")
             self._stub_all_pipeline_scripts(temp_root, call_log)
@@ -1453,7 +1453,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_update_force_refresh_propagates_to_tools_skills_and_mcp(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             call_log = temp_root / "calls.log"
             remove_path(temp_root / "secrets")
 
@@ -1497,7 +1497,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_agents_update_runs_agent_lifecycle_only_without_distribution(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             call_log = temp_root / "calls.log"
             remove_path(temp_root / "secrets")
 
@@ -1545,7 +1545,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_init_allows_agent_install_and_waits_for_agent_lifecycle(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             call_log = temp_root / "calls.log"
             remove_path(temp_root / "secrets")
 
@@ -1617,7 +1617,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_update_pipeline_skips_browser_google_us_sync_when_disabled(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             call_log = temp_root / "calls.log"
             remove_path(temp_root / "secrets")
 
@@ -1659,7 +1659,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_update_pipeline_pulls_secrets_with_ff_only(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             call_log = temp_root / "calls.log"
             fake_bin = temp_root / "fake-bin"
             fake_bin.mkdir()
@@ -1700,7 +1700,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_update_pipeline_secrets_pull_termination_cleans_up_descendant_processes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
 
             child_pid_file = Path(temp_dir) / "secrets-pull-child.pid"
             ready_file = Path(temp_dir) / "secrets-pull-ready"
@@ -1796,7 +1796,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_update_init_secrets_termination_cleans_up_descendant_processes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
 
             child_pid_file = Path(temp_dir) / "init-secrets-child.pid"
             ready_file = Path(temp_dir) / "init-secrets-ready"
@@ -1883,7 +1883,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_dry_run_skips_secrets_bootstrap_and_git_pull(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             call_log = temp_root / "calls.log"
             fake_bin = temp_root / "fake-bin"
             fake_bin.mkdir()
@@ -1946,7 +1946,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_dry_run_offline_combination_respects_offline_flag(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             call_log = temp_root / "calls.log"
             fake_bin = temp_root / "fake-bin"
             fake_bin.mkdir()
@@ -2006,7 +2006,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_offline_is_forwarded_to_networked_subtasks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
 
             self._write_stub(
                 temp_root / "agent-lifecycle" / "sync_agents.py",
@@ -2043,7 +2043,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_progress_output_preserves_utf8_log_lines(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
 
             self._write_stub(
                 temp_root / "agent-lifecycle" / "sync_agents.py",
@@ -2084,7 +2084,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_progress_output_reports_elapsed_time_for_long_running_task(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
 
             self._write_stub(
                 temp_root / "agent-lifecycle" / "sync_agents.py",
@@ -2125,7 +2125,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_progress_output_does_not_reuse_previous_task_log_lines(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
 
             self._write_stub(
                 temp_root / "agent-lifecycle" / "sync_agents.py",
@@ -2166,7 +2166,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_progress_output_does_not_redraw_identical_message_every_poll(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
 
             self._write_stub(
                 temp_root / "agent-lifecycle" / "sync_agents.py",
@@ -2257,7 +2257,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_termination_cleans_up_descendant_processes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
 
             child_pid_file = Path(temp_dir) / "child.pid"
             ready_file = Path(temp_dir) / "ready"
@@ -2363,7 +2363,7 @@ class ManageScriptTests(unittest.TestCase):
 
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_root = Path(temp_dir) / "repo"
-                shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+                shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
                 self._write_stub(
                     temp_root / "agent-lifecycle" / "sync_agents.py",
                     "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
@@ -2408,7 +2408,7 @@ class ManageScriptTests(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_root = Path(temp_dir) / "repo"
-                shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+                shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
 
                 self._write_stub(
                     temp_root / "agent-lifecycle" / "sync_agents.py",
@@ -2455,7 +2455,7 @@ class ManageScriptTests(unittest.TestCase):
     def test_mcp_sync_prepares_runtime_by_default(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories', "app", "node_modules"))
             call_log = temp_root / "calls.log"
             # update 会跑完整收敛链路；这里只验证 MCP 步骤的参数约定，
             # 其余步骤全部 stub，避免真实安装/克隆/写本机。

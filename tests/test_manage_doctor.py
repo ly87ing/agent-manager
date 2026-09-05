@@ -119,7 +119,7 @@ class ManageDoctorReportTests(unittest.TestCase):
     def test_report_flags_enabled_agent_when_provider_exists_but_runtime_entrypoint_is_missing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", "app", "node_modules"))
 
             (temp_root / "config" / "manager.json").write_text(
                 '{\n  "agents": {\n    "claude-code": { "enabled": true, "auto_install": true, "auto_update": true }\n  },\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
@@ -157,7 +157,7 @@ class ManageDoctorReportTests(unittest.TestCase):
     def test_report_flags_deprecated_provider_as_error(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", "app", "node_modules"))
 
             (temp_root / "config" / "manager.json").write_text(
                 '{\n  "agents": {\n    "claude-code": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "native" }\n  },\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
@@ -195,7 +195,7 @@ class ManageDoctorReportTests(unittest.TestCase):
     def test_report_flags_system_only_provider_when_managed_provider_is_required(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", "app", "node_modules"))
 
             (temp_root / "config" / "manager.json").write_text(
                 '{\n  "agents": {\n    "codex": { "enabled": true, "auto_install": true, "auto_update": true, "preferred_provider": "npm" }\n  },\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
@@ -233,7 +233,7 @@ class ManageDoctorReportTests(unittest.TestCase):
     def test_report_flags_invalid_unsupported_actions_in_doctor_as_error(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", "app", "node_modules"))
 
             (temp_root / "config" / "manager.json").write_text(
                 '{\n  "agents": {\n    "codex": { "enabled": false, "auto_install": false, "auto_update": false, "preferred_provider": "npm" }\n  },\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
@@ -275,7 +275,7 @@ class ManageDoctorReportTests(unittest.TestCase):
     def test_report_flags_repo_secret_outside_secrets_directory(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", "app", "node_modules"))
             openai_key = "sk-proj-" + "abcdefghijklmnopqrstuvwxyz12"
             (temp_root / "config" / "manager.json").write_text(
                 '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
@@ -309,7 +309,7 @@ class ManageDoctorReportTests(unittest.TestCase):
     def test_report_repo_secret_scan_ignores_placeholder_examples(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", "app", "node_modules"))
             (temp_root / "config" / "manager.json").write_text(
                 '{\n  "agents": {},\n  "tools": {},\n  "skills": {},\n  "mcp": {}\n}\n',
                 encoding="utf-8",
@@ -342,7 +342,7 @@ class ManageDoctorReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", "app", "node_modules"))
             temp_home.mkdir()
 
             (temp_root / "config" / "manager.json").write_text(
@@ -379,7 +379,7 @@ class ManageDoctorReportTests(unittest.TestCase):
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
             codex_config = temp_home / ".codex" / "config.toml"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", "app", "node_modules"))
             codex_config.parent.mkdir(parents=True)
             codex_config.write_text("[mcp_servers.user-owned]\ncommand = \"echo\"\n", encoding="utf-8")
 
@@ -415,7 +415,7 @@ class ManageDoctorReportTests(unittest.TestCase):
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
             codex_config = temp_home / ".codex" / "config.toml"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", "app", "node_modules"))
             codex_config.parent.mkdir(parents=True)
             codex_config.write_text(
                 "\n".join(
@@ -462,7 +462,7 @@ class ManageDoctorReportTests(unittest.TestCase):
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
             codex_config = temp_home / ".codex" / "config.toml"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", "app", "node_modules"))
             codex_config.parent.mkdir(parents=True)
             codex_config.write_text(
                 "\n".join(
@@ -512,7 +512,7 @@ class ManageDoctorReportTests(unittest.TestCase):
             managed_repo = temp_root / "agent-skill" / "repositories" / "demo-repo"
             managed_skill = managed_repo / "bundle" / "managed-skill"
             external_skill = Path(temp_dir) / "external" / "user-skill"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", "app", "node_modules"))
             target_dir.mkdir(parents=True)
             managed_skill.mkdir(parents=True)
             (managed_repo / ".git").mkdir()
@@ -568,7 +568,7 @@ class ManageDoctorReportTests(unittest.TestCase):
             managed_repo = temp_root / "agent-skill" / "repositories" / "demo-repo"
             managed_skill = managed_repo / "bundle" / "managed-skill"
             external_skill = Path(temp_dir) / "external" / "user-skill"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", "app", "node_modules"))
             target_dir.mkdir(parents=True)
             managed_skill.mkdir(parents=True)
             (managed_repo / ".git").mkdir()
@@ -625,7 +625,7 @@ class ManageDoctorReportTests(unittest.TestCase):
             managed_skill = managed_repo / "bundle" / "managed-skill"
             extra_repo = temp_root / "agent-skill" / "repositories" / "old-repo"
             extra_skill = extra_repo / "bundle" / "other-skill"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", "app", "node_modules"))
             target_dir.mkdir(parents=True)
             managed_skill.mkdir(parents=True)
             extra_skill.mkdir(parents=True)
@@ -688,7 +688,7 @@ class ManageDoctorReportTests(unittest.TestCase):
             managed_repo = temp_root / "agent-skill" / "repositories" / "demo-repo"
             managed_skill = managed_repo / "bundle" / "managed-skill"
             missing_skill = Path(temp_dir) / "external" / "missing-skill"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", "app", "node_modules"))
             target_dir.mkdir(parents=True)
             managed_skill.mkdir(parents=True)
             (managed_repo / ".git").mkdir()
@@ -742,7 +742,7 @@ class ManageDoctorReportTests(unittest.TestCase):
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
             codex_config = temp_home / ".codex" / "config.toml"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", "app", "node_modules"))
             codex_config.parent.mkdir(parents=True)
             codex_config.write_text(
                 "\n".join(
@@ -791,7 +791,7 @@ class ManageDoctorReportTests(unittest.TestCase):
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
             codex_config = temp_home / ".codex" / "config.toml"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", "app", "node_modules"))
             codex_config.parent.mkdir(parents=True)
             codex_config.write_text(
                 "\n".join(
@@ -838,7 +838,7 @@ class ManageDoctorReportTests(unittest.TestCase):
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
             codex_config = temp_home / ".codex" / "config.toml"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", "app", "node_modules"))
             codex_config.parent.mkdir(parents=True)
             codex_config.write_text(
                 "\n".join(
@@ -887,7 +887,7 @@ class ManageDoctorReportTests(unittest.TestCase):
             temp_home = Path(temp_dir) / "home"
             codex_config = temp_home / ".codex" / "config.toml"
             literal_value = "prefix-${USER}-suffix"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", "app", "node_modules"))
             codex_config.parent.mkdir(parents=True)
             codex_config.write_text(
                 "\n".join(
@@ -958,7 +958,7 @@ class ManageDoctorSkillMatrixTests(unittest.TestCase):
 
     def _write_doctor_fixture(self, temp_root, repo_skills, policy, *, repo_agents=("claude-code", "codex"), seeded_links=None):
         temp_root = Path(temp_root) / "repo"
-        shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
+        shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", "app", "node_modules"))
         managed_repo = temp_root / "agent-skill" / "repositories" / "demo-repo"
         (managed_repo / ".git").mkdir(parents=True)
         (managed_repo / ".agent-manager-owned").write_text("true\n", encoding="utf-8")

@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 class ClaudeHooksSyncTests(unittest.TestCase):
     def _copy_repo(self, temp_dir: str) -> Path:
         temp_root = Path(temp_dir) / "repo"
-        shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", ".git", ".worktrees"))
+        shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", ".git", ".worktrees", "app", "node_modules"))
         return temp_root
 
     def _run_sync(self, temp_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
