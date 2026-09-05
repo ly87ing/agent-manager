@@ -6,9 +6,12 @@ and docs/GUI-ARCHITECTURE-PROPOSAL.md section 2 (envelope, exit codes) and
 section 3 (dual-axis element model: convergence 'state' + upstream 'freshness').
 
 Slices so far: status+plan for agents/mcp/tools/rules/hooks/aliases, read-only
-secrets status, and system.audit (thin wrapper over doctor's build_report).
-Skills commands deliberately answer DOMAIN_NOT_IMPLEMENTED (parallel slice owns
-the skills v2 semantics); profile/policy/runs land in later phases.
+secrets status, system.audit (thin wrapper over doctor's build_report), and
+system.refresh-upstream — the only writer of the upstream probe cache
+(src/upstream_cache.py); status commands read that cache for the freshness axis
+and stay zero-network. Skills commands deliberately answer
+DOMAIN_NOT_IMPLEMENTED (parallel slice owns the skills v2 semantics);
+profile/policy/runs land in later phases.
 
 Rules enforced here:
 - stdout carries exactly one envelope JSON payload (indent=2, ensure_ascii=False);
@@ -29,6 +32,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -37,11 +41,19 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.agent_ids import canonicalize_agent_list, canonicalize_agent_mapping
+from src.command_runner import run_command
+from src.git_remote_probe import (
+    GIT_REMOTE_STATE_LATEST,
+    GIT_REMOTE_STATE_STALE,
+    probe_git_remote_state,
+)
 from src.json_config import get_typed_mapping_section, load_json_object_file
 from src.manage_doctor import (
     _managed_mcp_matches,
     build_report,
     build_tree_signature,
+    command_exists,
+    command_version,
     expected_managed_mcp_servers,
     get_unsupported_actions,
     managed_mcp_servers,
@@ -55,9 +67,12 @@ from src.manage_runtime_probe import (
     detect_all_providers,
     detect_tool_readiness,
     is_agent_installed,
+    resolve_managed_tool_dir,
     resolve_provider_command,
     rule_target_agent_id,
 )
+from src.npm_flags import OFFICIAL_NPM_REGISTRY
+from src import upstream_cache
 
 CONTRACT_ID = "agent-manager/engine/v1"
 
@@ -166,6 +181,20 @@ _sync_claude_hooks = _load_module_from_path(
 _sync_codex_hooks = _load_module_from_path(
     "agent-rule/scripts/sync-codex-hooks.py", "agent_manager_sync_codex_hooks"
 )
+
+# sync_tools.py 在工作区演进中出现过 py3.9 不兼容形态；引擎只在探测编排时惰性
+# 加载它，加载失败只降级上游探测能力（freshness 变 not-applicable + refresh 给
+# 提示），绝不拖垮 status 主路径。
+_SYNC_TOOLS_UNAVAILABLE = None
+
+
+def _load_sync_tools():
+    global _SYNC_TOOLS_UNAVAILABLE
+    try:
+        return _load_module_from_path("agent-tool/sync_tools.py", "agent_manager_sync_tools")
+    except Exception as exc:
+        _SYNC_TOOLS_UNAVAILABLE = exc
+        return None
 
 
 def diagnostic(code, element, message):
@@ -328,6 +357,7 @@ def build_mcp_status(root_dir, config_file, def_file):
 
     # Same credential sources as agent-mcp/sync_mcp.py, minus the network sync.
     secrets_env = load_env_files([root_dir / ".env", root_dir / "secrets" / "mcp.env"])
+    cache = upstream_cache.load_cache()
 
     probes, probe_errors = _probe_mcp_agent_targets(config, mcp_cfg)
     errors.extend(probe_errors)
@@ -391,6 +421,17 @@ def build_mcp_status(root_dir, config_file, def_file):
 
         spec = {key: value for key, value in definition.items() if key != "env"}
         spec["env"] = _redact_env_for_spec(raw_env)
+        probe_kind = _classify_mcp_probe(merged) if enabled else None
+        local_current = None
+        if probe_kind is not None and probe_kind[0] == "npm-npx":
+            local_current = _npx_cached_version(probe_kind[1])
+        freshness = _freshness_from_cache(
+            "mcp:%s" % server_name,
+            probeable=probe_kind is not None,
+            cache=cache,
+            local_current=local_current,
+            warnings=warnings,
+        )
         elements.append(
             {
                 "id": "mcp:%s" % server_name,
@@ -406,7 +447,7 @@ def build_mcp_status(root_dir, config_file, def_file):
                     "env": env_status,
                 },
                 "state": state,
-                "freshness": dict(FRESHNESS_NOT_APPLICABLE),
+                "freshness": freshness,
                 "actions": [dict(MCP_APPLY_ACTION)],
             }
         )
@@ -466,7 +507,7 @@ def _rendered_json_digest(payload):
     return _sha256_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
 
 
-def _make_element(element_id, domain, spec, policy, observed, state, actions):
+def _make_element(element_id, domain, spec, policy, observed, state, actions, freshness=None):
     return {
         "id": element_id,
         "domain": domain,
@@ -474,9 +515,189 @@ def _make_element(element_id, domain, spec, policy, observed, state, actions):
         "policy": policy,
         "observed": observed,
         "state": state,
-        "freshness": dict(FRESHNESS_NOT_APPLICABLE),
+        "freshness": dict(freshness) if freshness is not None else dict(FRESHNESS_NOT_APPLICABLE),
         "actions": [dict(action) for action in actions],
     }
+
+
+# ---------------------------------------------------------------------------
+# freshness axis: local (zero-network) current probes + cache-backed fill
+# ---------------------------------------------------------------------------
+
+_VERSION_RE = re.compile(r"\d+(?:\.\d+)+")
+
+
+def _extract_version_token(text):
+    match = _VERSION_RE.search(text or "")
+    return match.group(0) if match else None
+
+
+def _version_tuple(text):
+    token = _extract_version_token(text)
+    if token is None:
+        return None
+    return tuple(int(part) for part in token.split("."))
+
+
+def _compare_freshness(current, upstream):
+    """Map (current, upstream) onto the freshness state enum."""
+    if not upstream or not current:
+        return "unknown"
+    if current == upstream:
+        return "current"
+    current_key = _version_tuple(current)
+    upstream_key = _version_tuple(upstream)
+    if current_key and upstream_key:
+        width = max(len(current_key), len(upstream_key))
+        current_key += (0,) * (width - len(current_key))
+        upstream_key += (0,) * (width - len(upstream_key))
+        if current_key == upstream_key:
+            return "current"
+        return "ahead" if current_key > upstream_key else "behind"
+    # Unorderable values (e.g. commit hashes): any difference reads as behind;
+    # ahead is only asserted when versions can be ordered.
+    return "behind"
+
+
+def _run_probe_cmd(cmd, cwd=None, timeout=30):
+    try:
+        result = run_command(cmd, cwd=cwd, check=True, capture_output=True, text=True, timeout=timeout)
+        return True, result.stdout
+    except Exception:
+        return False, ""
+
+
+def _agent_local_version(definition):
+    """Local bin --version probe (read-only, no network; doctor precedent)."""
+    bin_name = definition.get("bin")
+    if not bin_name or not command_exists(bin_name):
+        return None
+    return _extract_version_token(command_version(bin_name))
+
+
+def _npx_cached_version(package):
+    """Best-effort read of the npx cache (~/.npm/_npx); None when absent."""
+    if not package:
+        return None
+    cache_base = os.path.expanduser(os.path.join("~", ".npm", "_npx"))
+    try:
+        entries = os.listdir(cache_base)
+    except OSError:
+        return None
+    package_json_rel = os.path.join("node_modules", *package.split("/"), "package.json")
+    for entry in sorted(entries):
+        package_json = os.path.join(cache_base, entry, package_json_rel)
+        try:
+            with open(package_json, encoding="utf-8") as handle:
+                version = json.load(handle).get("version")
+            if isinstance(version, str) and version.strip():
+                return version.strip()
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _local_git_head(repo_dir):
+    ok, out = _run_probe_cmd(["git", "rev-parse", "HEAD"], cwd=repo_dir)
+    if not ok:
+        return None
+    head = out.strip().splitlines()
+    return head[0].strip() if head and head[0].strip() else None
+
+
+def _freshness_from_cache(element_id, probeable, cache, local_current, warnings):
+    """Fill the freshness block for one element (status path, zero network).
+
+    Not probeable (no upstream concept) -> not-applicable, but 'current' still
+    carries the locally observed version for visibility (proposal section 3.3,
+    detect-only row). Probeable but never refreshed -> unknown with nulls.
+    Stale entries render last-known values plus a prompt-level warning.
+    """
+    if not probeable:
+        freshness = dict(FRESHNESS_NOT_APPLICABLE)
+        freshness["current"] = local_current
+        return freshness
+    entry = upstream_cache.get_entry(cache, element_id)
+    if entry is None:
+        return {
+            "state": "unknown",
+            "current": local_current,
+            "upstream": None,
+            "checked_at": None,
+            "probe": None,
+            "cache_age_sec": None,
+        }
+    if upstream_cache.is_stale(entry):
+        warnings.append(
+            diagnostic(
+                "UPSTREAM_PROBE_STALE",
+                element_id,
+                "上游探测缓存超过 TTL，展示 last-known 值；显式 system:refresh-upstream 刷新",
+            )
+        )
+    return {
+        "state": entry.get("state", "unknown"),
+        "current": entry.get("current") or local_current,
+        "upstream": entry.get("upstream"),
+        "checked_at": entry.get("checked_at"),
+        "probe": entry.get("probe"),
+        "cache_age_sec": upstream_cache.cache_age_sec(entry),
+    }
+
+
+def _classify_agent_probe(definition, policy):
+    """Return ('npm', package) when the preferred provider is npm, else None."""
+    sync_tools = _load_sync_tools()
+    if sync_tools is None:
+        return None
+    preferred = (policy or {}).get("preferred_provider") or definition.get("preferred_provider", "npm")
+    provider_cfg = definition.get("providers", {}).get(preferred, {})
+    install_cmd = resolve_provider_command(provider_cfg.get("install"))
+    package = sync_tools._extract_npm_package_name(install_cmd) if install_cmd else None
+    return ("npm", package) if package else None
+
+
+def _classify_tool_probe(root_dir, name, definition):
+    """Proposal section 3.3 matrix for tools: npm / git repo / uv(pypi) / brew."""
+    if definition.get("url"):
+        return ("git-repo", resolve_managed_tool_dir(str(root_dir), name))
+    sync_tools = _load_sync_tools()
+    if sync_tools is None:
+        return None
+    install_cmd = definition.get("install")
+    package = sync_tools._extract_npm_package_name(install_cmd)
+    if package:
+        return ("npm", package)
+    uv_name = sync_tools._extract_uv_tool_name(install_cmd)
+    if uv_name:
+        return ("pypi", uv_name)
+    brew_probe = sync_tools._build_brew_outdated_probe(install_cmd)
+    if brew_probe:
+        return ("brew", brew_probe[-1])
+    return None
+
+
+def _classify_mcp_probe(merged_definition):
+    """npx packages probe npm; uvx 'git+…@branch' sources probe git ls-remote."""
+    command = merged_definition.get("command")
+    args = merged_definition.get("args") or []
+    if not isinstance(args, list):
+        return None
+    if command == "npx":
+        for arg in args:
+            if isinstance(arg, str) and not arg.startswith("-"):
+                return ("npm-npx", arg)
+        return None
+    if command == "uvx":
+        for arg in args:
+            if not isinstance(arg, str) or not arg.startswith("git+"):
+                continue
+            repo_and_branch = arg[len("git+"):]
+            if "@" not in repo_and_branch:
+                return None
+            repo, branch = repo_and_branch.rsplit("@", 1)
+            return ("git-ls-remote", repo, branch)
+    return None
 
 
 def _load_policy_section(config_file, section):
@@ -559,6 +780,7 @@ def build_agents_status(root_dir, config_file, def_files):
         load_json_object_file(def_files[0], strict=True, missing_ok=False)
     )
     inventory = ProviderInventory()
+    cache = upstream_cache.load_cache()
     elements = []
     for agent_id in sorted(agent_defs):
         definition = agent_defs[agent_id]
@@ -577,6 +799,14 @@ def build_agents_status(root_dir, config_file, def_files):
         )
         state = _agent_element_state(
             agent_id, definition, policy, declared, enabled, providers, classified, installed, diagnostics
+        )
+        probe = _classify_agent_probe(definition, policy) if enabled else None
+        freshness = _freshness_from_cache(
+            "agents:%s" % agent_id,
+            probeable=probe is not None,
+            cache=cache,
+            local_current=_agent_local_version(definition),
+            warnings=warnings,
         )
         elements.append(
             _make_element(
@@ -598,6 +828,7 @@ def build_agents_status(root_dir, config_file, def_files):
                 },
                 state,
                 _agent_actions_for_state(state),
+                freshness=freshness,
             )
         )
     return {"domain": "agents", "elements": elements}, warnings, errors
@@ -666,6 +897,7 @@ def build_tools_status(root_dir, config_file, def_files):
         "对象",
     )
     inventory = ProviderInventory()
+    cache = upstream_cache.load_cache()
     elements = []
     for name in sorted(set(tool_defs) | set(tools_policy)):
         definition = tool_defs.get(name)
@@ -706,6 +938,17 @@ def build_tools_status(root_dir, config_file, def_files):
             actions = [TOOL_INSTALL_ACTION]
         elif state == "managed-ok":
             actions = [TOOL_UPGRADE_ACTION]
+        probe = _classify_tool_probe(root_dir, name, definition) if enabled else None
+        local_current = None
+        if probe is not None and probe[0] == "git-repo":
+            local_current = _local_git_head(probe[1])
+        freshness = _freshness_from_cache(
+            "tools:%s" % name,
+            probeable=probe is not None,
+            cache=cache,
+            local_current=local_current,
+            warnings=warnings,
+        )
         elements.append(
             _make_element(
                 "tools:%s" % name,
@@ -719,6 +962,7 @@ def build_tools_status(root_dir, config_file, def_files):
                 {"ready": ready, "doctor_severity": definition.get("doctor_severity", "error")},
                 state,
                 actions,
+                freshness=freshness,
             )
         )
     return {"domain": "tools", "elements": elements}, warnings, errors
@@ -1386,6 +1630,301 @@ def build_system_audit(root_dir, config_file, python_cmd="python3"):
     return report, warnings, errors
 
 
+# ---------------------------------------------------------------------------
+# system.refresh-upstream: the only writer of the upstream probe cache
+# (proposal section 3.3). Network is allowed here — this is the explicit
+# refresh action; status commands never call into this machinery.
+# ---------------------------------------------------------------------------
+
+
+class RefreshUsageError(ValueError):
+    """Raised for refresh-time usage errors (e.g. unknown --only element)."""
+
+
+def _pypi_latest_impl(package):
+    sync_tools = _load_sync_tools()
+    if sync_tools is None:
+        return None
+    return sync_tools.fetch_pypi_latest_version(package)
+
+
+def _default_net():
+    """Real probe implementations; tests inject fakes for every key."""
+    return {
+        "npm_view": lambda package: _npm_view_impl(package),
+        "npm_global_version": lambda package: _npm_global_version_impl(package),
+        "git_remote_state": lambda repo_dir: probe_git_remote_state(_run_probe_cmd, repo_dir, timeout=15),
+        "git_ls_remote": lambda repo, branch: _git_ls_remote_impl(repo, branch),
+        "pypi_latest": lambda package: _pypi_latest_impl(package),
+        "command_version": lambda bin_name: command_version(bin_name),
+        "brew_outdated": lambda package: _brew_outdated_impl(package),
+    }
+
+
+def _npm_view_impl(package):
+    ok, out = _run_probe_cmd(
+        ["npm", "view", package, "version", "--registry", OFFICIAL_NPM_REGISTRY], timeout=60
+    )
+    if not ok:
+        return None
+    line = out.strip().splitlines()
+    return line[0].strip() if line and line[0].strip() else None
+
+
+def _npm_global_version_impl(package):
+    ok, out = _run_probe_cmd(["npm", "ls", "-g", package, "--json"], timeout=60)
+    if not ok or not out.strip():
+        return None
+    try:
+        data = json.loads(out)
+    except ValueError:
+        return None
+    version = data.get("dependencies", {}).get(package, {}).get("version")
+    return version if isinstance(version, str) and version else None
+
+
+def _git_ls_remote_impl(repo, branch):
+    ok, out = _run_probe_cmd(["git", "ls-remote", repo, branch], timeout=30)
+    if not ok:
+        return None
+    lines = out.strip().splitlines()
+    if not lines:
+        return None
+    fields = lines[0].split()
+    return fields[0] if fields and fields[0] else None
+
+
+def _brew_outdated_impl(package):
+    ok, out = _run_probe_cmd(["brew", "outdated", package], timeout=30)
+    if not ok:
+        return None
+    # Empty output = not outdated = current; a line means a newer version exists.
+    return "" if not out.strip() else out.strip().splitlines()[0]
+
+
+def _probe_target(target, net):
+    """Run one probe-matrix row; failures become unknown+error (first-class)."""
+    kind = target["kind"]
+    entry = {"state": "unknown", "current": None, "upstream": None, "probe": None, "error": None}
+    if kind == "npm":
+        current = _extract_version_token(net["command_version"](target["bin"]) or "") if target.get("bin") else None
+        upstream = net["npm_view"](target["package"])
+        entry.update(current=current, upstream=upstream, probe="npm-view")
+        if upstream is None:
+            entry["error"] = "npm view %s 失败" % target["package"]
+        else:
+            entry["state"] = _compare_freshness(current, upstream)
+            if current is None:
+                entry["error"] = "本地版本未探测到（bin 不可用）"
+    elif kind == "npm-tool":
+        current = net["npm_global_version"](target["package"])
+        upstream = net["npm_view"](target["package"])
+        entry.update(current=current, upstream=upstream, probe="npm-view")
+        if upstream is None:
+            entry["error"] = "npm view %s 失败" % target["package"]
+        else:
+            entry["state"] = _compare_freshness(current, upstream)
+    elif kind == "npm-npx":
+        current = _npx_cached_version(target["package"])
+        upstream = net["npm_view"](target["package"])
+        entry.update(current=current, upstream=upstream, probe="npm-view")
+        if upstream is None:
+            entry["error"] = "npm view %s 失败" % target["package"]
+        elif current is None:
+            entry["state"] = "unknown"
+            entry["error"] = "npx 缓存中未找到已解析版本"
+        else:
+            entry["state"] = _compare_freshness(current, upstream)
+    elif kind == "git-ls-remote":
+        upstream = net["git_ls_remote"](target["repo"], target["branch"])
+        entry.update(upstream=upstream, probe="git-ls-remote")
+        if upstream is None:
+            entry["error"] = "git ls-remote %s %s 失败" % (target["repo"], target["branch"])
+        else:
+            # uvx 本地缓存 commit 暂不可读（后续 slice）；上游值仍入库供展示。
+            entry["state"] = "unknown"
+            entry["error"] = "uvx 本地缓存 commit 探测未实现"
+    elif kind == "git-repo":
+        result = net["git_remote_state"](target["repo_dir"])
+        entry.update(current=result.get("local_head"), upstream=result.get("remote_head"), probe="git-ls-remote")
+        if result.get("status") == GIT_REMOTE_STATE_LATEST:
+            entry["state"] = "current"
+        elif result.get("status") == GIT_REMOTE_STATE_STALE:
+            entry["state"] = "behind"
+        else:
+            entry["error"] = "git 远端探测失败（本地仓库缺失或 ls-remote 失败）"
+    elif kind == "pypi":
+        upstream = net["pypi_latest"](target["package"])
+        entry.update(upstream=upstream, probe="pypi-json")
+        if upstream is None:
+            entry["error"] = "pypi %s 探测失败" % target["package"]
+        else:
+            entry["state"] = _compare_freshness(entry["current"], upstream)
+    elif kind == "brew":
+        outdated = net["brew_outdated"](target["package"])
+        entry.update(probe="brew-outdated")
+        if outdated is None:
+            entry["error"] = "brew outdated %s 失败" % target["package"]
+        else:
+            entry["state"] = "current" if outdated == "" else "behind"
+            entry["upstream"] = outdated or None
+    return entry
+
+
+def _collect_refresh_targets(root_dir, config_file):
+    """The probeable element universe: enabled agents/tools/MCP servers with a
+    recognizable upstream source, plus enabled skill collection repos."""
+    root_dir = Path(root_dir)
+    config_name = Path(config_file).name
+    config = load_json_object_file(config_file, strict=True, missing_ok=False)
+    agents_policy = canonicalize_agent_mapping(
+        get_typed_mapping_section(config, "agents", config_name, (dict,), "对象")
+    )
+    tools_policy = get_typed_mapping_section(config, "tools", config_name, (dict,), "对象")
+    mcp_policy = get_typed_mapping_section(config, "mcp", config_name, (dict,), "对象")
+    skills_policy = get_typed_mapping_section(config, "skills", config_name, (dict,), "对象")
+
+    targets = []
+    agent_defs = canonicalize_agent_mapping(
+        load_json_object_file(root_dir / "config" / "agents.json", strict=True, missing_ok=False)
+    )
+    for agent_id in sorted(agent_defs):
+        policy = agents_policy.get(agent_id)
+        if not isinstance(policy, dict) or not policy.get("enabled", True):
+            continue
+        probe = _classify_agent_probe(agent_defs[agent_id], policy)
+        if probe is None:
+            continue
+        targets.append(
+            {"id": "agents:%s" % agent_id, "kind": "npm", "package": probe[1], "bin": agent_defs[agent_id].get("bin")}
+        )
+
+    tool_defs = get_typed_mapping_section(
+        load_json_object_file(root_dir / "config" / "tools.json", strict=True, missing_ok=False),
+        "tools", "tools.json", (dict,), "对象",
+    )
+    for name in sorted(tool_defs):
+        policy = tools_policy.get(name)
+        if not isinstance(policy, dict) or not policy.get("enabled", True):
+            continue
+        probe = _classify_tool_probe(root_dir, name, tool_defs[name])
+        if probe is None:
+            continue
+        kind, value = probe
+        if kind == "git-repo":
+            targets.append({"id": "tools:%s" % name, "kind": "git-repo", "repo_dir": value})
+        elif kind == "npm":
+            targets.append({"id": "tools:%s" % name, "kind": "npm-tool", "package": value})
+        elif kind == "pypi":
+            targets.append({"id": "tools:%s" % name, "kind": "pypi", "package": value})
+        elif kind == "brew":
+            targets.append({"id": "tools:%s" % name, "kind": "brew", "package": value})
+
+    mcp_defs = get_typed_mapping_section(
+        load_json_object_file(root_dir / "config" / "mcp.json", strict=True, missing_ok=False),
+        "servers", "mcp.json", (dict,), "对象",
+    )
+    for server_name in sorted(mcp_defs):
+        policy = mcp_policy.get(server_name)
+        if not isinstance(policy, dict) or not policy.get("enabled", True):
+            continue
+        merged = dict(mcp_defs[server_name])
+        merged.update(policy)
+        probe = _classify_mcp_probe(merged)
+        if probe is None:
+            continue
+        if probe[0] == "npm-npx":
+            targets.append({"id": "mcp:%s" % server_name, "kind": "npm-npx", "package": probe[1]})
+        else:
+            targets.append(
+                {"id": "mcp:%s" % server_name, "kind": "git-ls-remote", "repo": probe[1], "branch": probe[2]}
+            )
+
+    skill_defs = get_typed_mapping_section(
+        load_json_object_file(root_dir / "config" / "skills.json", strict=True, missing_ok=False),
+        "repositories", "skills.json", (dict,), "对象",
+    )
+    for repo_name in sorted(skill_defs):
+        policy = skills_policy.get(repo_name)
+        if not isinstance(policy, dict) or not policy.get("enabled", True):
+            continue
+        targets.append(
+            {
+                "id": "skill:%s" % repo_name,
+                "kind": "git-repo",
+                "repo_dir": str(root_dir / "agent-skill" / "repositories" / repo_name),
+            }
+        )
+    return targets
+
+
+def build_system_refresh_upstream(root_dir, config_file, only=None, net=None):
+    """Probe every upstream source and write the cache (explicit, networked)."""
+    net = net or _default_net()
+    targets = _collect_refresh_targets(root_dir, config_file)
+    warnings = []
+    if _SYNC_TOOLS_UNAVAILABLE is not None:
+        warnings.append(
+            diagnostic(
+                "UPSTREAM_PROBE_EXTRACTORS_UNAVAILABLE",
+                None,
+                "agent-tool/sync_tools.py 不可导入（%s），npm/pypi/brew 探测源降级" % _SYNC_TOOLS_UNAVAILABLE,
+            )
+        )
+    if only is not None:
+        targets = [target for target in targets if target["id"] == only]
+        if not targets:
+            raise RefreshUsageError("--only 指定的元素不可探测或不存在: %s" % only)
+
+    moment = upstream_cache.now_utc()
+    checked_at = upstream_cache.to_iso(moment)
+    updates = {}
+    results = []
+    counts = {"current": 0, "behind": 0, "ahead": 0, "unknown": 0}
+    for target in targets:
+        try:
+            entry = _probe_target(target, net)
+        except Exception as exc:
+            # 单元素探测异常不拖垮整批：unknown 是一等状态（提案 §3.3）。
+            entry = {"state": "unknown", "current": None, "upstream": None, "probe": None, "error": str(exc)}
+        entry["checked_at"] = checked_at
+        updates[target["id"]] = {key: value for key, value in entry.items() if value is not None}
+        counts[entry["state"]] = counts.get(entry["state"], 0) + 1
+        if entry["state"] == "unknown":
+            warnings.append(
+                diagnostic(
+                    "UPSTREAM_PROBE_UNKNOWN",
+                    target["id"],
+                    entry["error"] or "上游探测失败",
+                )
+            )
+        results.append(
+            {
+                "id": target["id"],
+                "probe": entry["probe"],
+                "state": entry["state"],
+                "current": entry["current"],
+                "upstream": entry["upstream"],
+                "error": entry["error"],
+            }
+        )
+    upstream_cache.write_entries(updates)
+    data = {
+        "domain": "system",
+        "verb": "refresh-upstream",
+        "cache_file": str(upstream_cache.cache_path()),
+        "elements": results,
+        "summary": {
+            "probed": len(results),
+            "current": counts.get("current", 0),
+            "behind": counts.get("behind", 0),
+            "ahead": counts.get("ahead", 0),
+            "unknown": counts.get("unknown", 0),
+        },
+    }
+    return data, warnings, []
+
+
 # Kernel registry. Every kernel takes (root_dir, config_file, def_files) and
 # returns (data, warnings, errors). skills is intentionally absent (parallel
 # slice owns its v2 semantics); profile/policy/runs land in later phases.
@@ -1421,6 +1960,7 @@ def _build_parser():
         help="domain definition file; repeatable (hooks takes claude-hooks.json then codex-hooks.json)",
     )
     parser.add_argument("--python-cmd", default="python3", help="python command for system.audit probes")
+    parser.add_argument("--only", help="system:refresh-upstream 只刷新指定元素 id")
     parser.add_argument("--json", action="store_true", help="required: selects the envelope machine interface")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--offline", action="store_true")
@@ -1534,7 +2074,7 @@ def main(argv=None):
         )
         emit_envelope(payload)
         print(
-            "提示: '%s' 尚未实现（后续切片落地）；当前可用域: %s（外加 system:audit）"
+            "提示: '%s' 尚未实现（后续切片落地）；当前可用域: %s（外加 system:audit / system:refresh-upstream）"
             % (dotted, ", ".join(sorted(STATUS_KERNELS))),
             file=sys.stderr,
         )
@@ -1548,6 +2088,9 @@ def main(argv=None):
         kernel = PLAN_KERNELS[domain]
     elif domain == "system" and verb == "audit":
         kernel = "audit"
+        kernel_needs_def_file = False
+    elif domain == "system" and verb == "refresh-upstream":
+        kernel = "refresh"
         kernel_needs_def_file = False
     else:
         return not_implemented()
@@ -1565,11 +2108,37 @@ def main(argv=None):
             "错误: hooks 域需要重复两次 --def-file",
         )
 
+    if kernel == "refresh" and mode["offline"]:
+        # network 级动作在 offline 下显式拒绝（提案 §5 控制原则 3）。
+        payload = envelope(
+            command=dotted,
+            mode=mode,
+            lock=lock,
+            run_id=run_id,
+            log_file=log_file,
+            data={},
+            warnings=[],
+            errors=[
+                diagnostic(
+                    "OFFLINE_NETWORK_DENIED",
+                    None,
+                    "system:refresh-upstream 需要网络探测，offline 模式下拒绝执行",
+                )
+            ],
+        )
+        emit_envelope(payload)
+        print("错误: offline 模式下禁止上游探测（network 动作）", file=sys.stderr)
+        return 1
+
     try:
         if kernel == "audit":
             data, warnings, errors = build_system_audit(REPO_ROOT, args.config, python_cmd=args.python_cmd)
+        elif kernel == "refresh":
+            data, warnings, errors = build_system_refresh_upstream(REPO_ROOT, args.config, only=args.only)
         else:
             data, warnings, errors = kernel(REPO_ROOT, args.config, args.def_file)
+    except RefreshUsageError as exc:
+        return usage_error("USAGE_ERROR", str(exc), "错误: %s" % exc)
     except ValueError as exc:
         payload = envelope(
             command=dotted,

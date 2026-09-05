@@ -1013,7 +1013,7 @@ function print_help() {
     echo -e "  ${SUCCESS_GREEN}*:status${NC}       域状态命令族占位：agents/skills/rules/hooks/tools/aliases 等域后续切片落地（当前返回契约错误）"
     echo -e "  ${SUCCESS_GREEN}*:plan${NC}         域收敛计划预览（契约占位，尚未实现）"
     echo -e "  ${SUCCESS_GREEN}system:audit${NC}   全系统体检的契约形态（占位，尚未实现；现阶段请用 doctor）"
-    echo -e "  ${SUCCESS_GREEN}system:refresh-upstream${NC} 上游新鲜度探测并写探测缓存（占位，尚未实现）"
+    echo -e "  ${SUCCESS_GREEN}system:refresh-upstream${NC} 上游新鲜度探测并写探测缓存（network 级，offline 拒绝；--only <元素id> 单元素刷新；status 命令只读缓存、零网络）"
     echo -e "  ${SUCCESS_GREEN}help${NC}           显示本帮助\n"
 }
 

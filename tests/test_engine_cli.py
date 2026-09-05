@@ -367,7 +367,6 @@ class EngineCliTests(unittest.TestCase):
             ("skills:plan", "--json"),
             ("secrets:plan", "--json"),
             ("profile:status", "--json"),
-            ("system:refresh-upstream", "--json"),
         ):
             with self.subTest(argv=argv):
                 result = self._run_manage(*argv)
@@ -499,7 +498,7 @@ class EngineDomainSliceTests(unittest.TestCase):
         path.chmod(0o755)
         return path
 
-    def _env(self, extra=None, restricted_path=False):
+    def _env(self, extra=None, restricted_path=False, prepend_path=False):
         env = os.environ.copy()
         env.pop("ENGINE_TEST_ALPHA_KEY", None)
         env["HOME"] = str(self.home)
@@ -507,15 +506,19 @@ class EngineDomainSliceTests(unittest.TestCase):
         env["AGENT_MANAGER_LOG_PREFIX"] = str(self.log_prefix)
         if restricted_path:
             env["PATH"] = "%s:/usr/bin:/bin" % self.bindir
+        elif prepend_path:
+            # stub bin 优先于真实 PATH（探测 hermetic），但保留真实 python3 —
+            # sync_tools.py 的探测源提取器在 /usr/bin/python3 (3.9) 下不可导入。
+            env["PATH"] = "%s:%s" % (self.bindir, env.get("PATH", ""))
         if extra:
             env.update(extra)
         return env
 
-    def _run(self, *argv, env_extra=None, restricted_path=False):
+    def _run(self, *argv, env_extra=None, restricted_path=False, prepend_path=False):
         return subprocess.run(
             [str(self.repo / "manage.sh"), *argv],
             cwd=self.repo,
-            env=self._env(env_extra, restricted_path),
+            env=self._env(env_extra, restricted_path, prepend_path),
             capture_output=True,
             text=True,
             check=False,
@@ -1090,6 +1093,137 @@ class EngineDomainSliceTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["data"]["status"], "warning")
         self.assertEqual([w["code"] for w in payload["warnings"]], ["OPTIONAL_TOOLS"])
+
+    # ------------------------------------------------- upstream freshness (Slice D)
+
+    def _freshness_fixture(self, npm_view_version="2.0.0"):
+        """One npm-probed agent + recording stubs for npm/git (zero-network proof)."""
+        self._make_bin("fake-agent-bin", ).write_text("#!/bin/sh\necho 1.0.0\n", encoding="utf-8")
+        calls = self.temp_dir / "probe-calls.log"
+        self._make_bin("npm").write_text(
+            "#!/bin/sh\necho \"npm $*\" >> %s\nif [ \"$1\" = \"view\" ]; then echo %s; fi\nexit 0\n"
+            % (calls, npm_view_version),
+            encoding="utf-8",
+        )
+        self._make_bin("git").write_text(
+            "#!/bin/sh\necho \"git $*\" >> %s\nexit 0\n" % calls,
+            encoding="utf-8",
+        )
+        self._write_config(
+            "agents.json",
+            {
+                "fake-agent": {
+                    "bin": "fake-agent-bin",
+                    "providers": {"npm": {"managed": True, "install": "npm install -g @fake/agent"}},
+                }
+            },
+        )
+        self._manager(agents={"fake-agent": {"enabled": True}})
+        cache_file = self.temp_dir / "upstream-cache.json"
+        env_extra = {
+            "AGENT_MANAGER_UPSTREAM_CACHE": str(cache_file),
+            "ENGINE_TEST_CALLS": str(calls),
+        }
+        return cache_file, calls, env_extra
+
+    def test_refresh_writes_cache_and_status_fills_freshness(self):
+        cache_file, calls, env_extra = self._freshness_fixture()
+        result = self._run("system:refresh-upstream", "--json", env_extra=env_extra, prepend_path=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        payload = json.loads(result.stdout)
+        errors = validate(ENVELOPE_SCHEMA, payload)
+        self.assertEqual(errors, [], [str(e) for e in errors])
+        # 写者路径持锁（refresh 不在锁豁免清单）。
+        self.assertEqual(payload["lock"]["held"], True)
+        self.assertIsInstance(payload["lock"]["pid"], int)
+        self.assertEqual(payload["data"]["summary"], {"probed": 1, "current": 0, "behind": 1, "ahead": 0, "unknown": 0})
+
+        cache = json.loads(cache_file.read_text(encoding="utf-8"))
+        entry = cache["entries"]["agents:fake-agent"]
+        self.assertEqual(entry["state"], "behind")
+        self.assertEqual(entry["current"], "1.0.0")
+        self.assertEqual(entry["upstream"], "2.0.0")
+
+        # status 读缓存填充 freshness，且自身零网络（探测 stub 不再被调用）。
+        calls.unlink()
+        payload = self._payload("agents:status", "--json", env_extra=env_extra, prepend_path=True)
+        self._assert_status_data(payload)
+        freshness = self._by_id(payload)["agents:fake-agent"]["freshness"]
+        self.assertEqual(freshness["state"], "behind")
+        self.assertEqual(freshness["current"], "1.0.0")
+        self.assertEqual(freshness["upstream"], "2.0.0")
+        self.assertIsNotNone(freshness["checked_at"])
+        self.assertIsInstance(freshness["cache_age_sec"], int)
+        self.assertFalse(calls.exists(), "status 不得触发任何探测命令（零网络）")
+
+    def test_status_without_cache_is_unknown_and_never_probes(self):
+        cache_file, calls, env_extra = self._freshness_fixture()
+        payload = self._payload("agents:status", "--json", env_extra=env_extra, prepend_path=True)
+        freshness = self._by_id(payload)["agents:fake-agent"]["freshness"]
+        self.assertEqual(freshness["state"], "unknown")
+        self.assertIsNone(freshness["checked_at"])
+        self.assertIsNone(freshness["upstream"])
+        # 本地 current 仍可观测（bin --version 是本地只读探测）。
+        self.assertEqual(freshness["current"], "1.0.0")
+        self.assertFalse(cache_file.exists())
+        self.assertFalse(calls.exists(), "status 不得触发任何探测命令（零网络）")
+
+    def test_refresh_offline_is_denied_and_writes_nothing(self):
+        cache_file, calls, env_extra = self._freshness_fixture()
+        result = self._run(
+            "--offline", "system:refresh-upstream", "--json", env_extra=env_extra, prepend_path=True
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        payload = json.loads(result.stdout)
+        errors = validate(ENVELOPE_SCHEMA, payload)
+        self.assertEqual(errors, [], [str(e) for e in errors])
+        self.assertEqual(payload["errors"][0]["code"], "OFFLINE_NETWORK_DENIED")
+        self.assertFalse(cache_file.exists(), "offline 拒绝时不得写缓存")
+        self.assertFalse(calls.exists(), "offline 拒绝时不得执行任何探测")
+
+    def test_refresh_only_single_element_and_unknown_element_rejected(self):
+        cache_file, calls, env_extra = self._freshness_fixture()
+        defs = json.loads((self.repo / "config" / "agents.json").read_text(encoding="utf-8"))
+        defs["fake-agent-2"] = {
+            "bin": "fake-agent-2-bin",
+            "providers": {"npm": {"managed": True, "install": "npm install -g @fake/agent2"}},
+        }
+        self._write_config("agents.json", defs)
+        manager = json.loads((self.repo / "config" / "manager.json").read_text(encoding="utf-8"))
+        manager["agents"]["fake-agent-2"] = {"enabled": True}
+        self._write_config("manager.json", manager)
+
+        payload = self._payload(
+            "system:refresh-upstream", "--json", "--only", "agents:fake-agent-2",
+            env_extra=env_extra, prepend_path=True,
+        )
+        self.assertEqual([e["id"] for e in payload["data"]["elements"]], ["agents:fake-agent-2"])
+        cache = json.loads(cache_file.read_text(encoding="utf-8"))
+        self.assertEqual(sorted(cache["entries"]), ["agents:fake-agent-2"])
+
+        result = self._run(
+            "system:refresh-upstream", "--json", "--only", "agents:bogus",
+            env_extra=env_extra, prepend_path=True,
+        )
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["errors"][0]["code"], "USAGE_ERROR")
+
+    def test_status_stale_cache_shows_last_known_with_warning(self):
+        cache_file, calls, env_extra = self._freshness_fixture()
+        self._run("system:refresh-upstream", "--json", env_extra=env_extra, prepend_path=True)
+        calls.unlink()  # refresh 的探测记录清零；随后 status 不得再产生任何探测
+        cache = json.loads(cache_file.read_text(encoding="utf-8"))
+        cache["entries"]["agents:fake-agent"]["checked_at"] = "2000-01-01T00:00:00Z"
+        cache_file.write_text(json.dumps(cache), encoding="utf-8")
+
+        payload = self._payload("agents:status", "--json", env_extra=env_extra, prepend_path=True)
+        freshness = self._by_id(payload)["agents:fake-agent"]["freshness"]
+        self.assertEqual(freshness["state"], "behind", "超 TTL 仍展示 last-known")
+        self.assertGreater(freshness["cache_age_sec"], 365 * 24 * 3600)
+        stale = [w for w in payload["warnings"] if w["code"] == "UPSTREAM_PROBE_STALE"]
+        self.assertEqual([w["element"] for w in stale], ["agents:fake-agent"])
+        self.assertFalse(calls.exists(), "status 不得因缓存 stale 而重新探测")
 
 
 if __name__ == "__main__":
