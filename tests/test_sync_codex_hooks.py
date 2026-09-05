@@ -110,38 +110,8 @@ class CodexHooksSyncTests(unittest.TestCase):
             self.assertTrue(custom_hooks.exists(), result.stdout + result.stderr)
             self.assertFalse(default_hooks.exists(), result.stdout + result.stderr)
 
-    def test_manage_command_syncs_project_codex_hooks(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = self._copy_repo(temp_dir)
-
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "codex:hooks:apply"],
-                cwd=temp_root,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertTrue((temp_root / ".codex" / "hooks.json").exists(), result.stdout + result.stderr)
-
-    def test_make_target_applies_project_codex_hooks(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = self._copy_repo(temp_dir)
-
-            result = subprocess.run(
-                ["make", "codex-hooks-apply"],
-                cwd=temp_root,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertTrue((temp_root / ".codex" / "hooks.json").exists(), result.stdout + result.stderr)
-
-    def test_makefile_exposes_codex_hooks_apply_target(self):
-        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertIn("codex-hooks-apply", makefile)
-        self.assertIn("codex\\:hooks\\:apply", makefile)
-        self.assertIn("@./manage.sh codex:hooks:apply", makefile)
+    def test_update_pipeline_syncs_project_codex_hooks(self):
+        manage_sh = (ROOT / "manage.sh").read_text(encoding="utf-8")
+        apply_steps = manage_sh.split("function run_apply_steps()", 1)[1].split("}", 1)[0]
+        self.assertIn("run_codex_hooks_sync_task", apply_steps)
+        self.assertIn("sync-codex-hooks.py", manage_sh)

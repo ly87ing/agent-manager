@@ -23,7 +23,6 @@ from src.json_config import get_typed_mapping_section, load_json_object_file
 from src.manage_runtime_probe import is_agent_installed
 from src.mcp_config import resolve_mcp_server_args
 from src.runtime_logging import configure_logging
-from src.version_pins import apply_local_version_pins
 from src.toml_compat import tomllib
 
 configure_logging()
@@ -573,7 +572,6 @@ def main():
     try:
         policy_root = load_json_object_file(args.config, strict=True, missing_ok=False)
         full_def = load_json_object_file(args.def_file, strict=True, missing_ok=False)
-        full_def = apply_local_version_pins(full_def, args.def_file)
         policy_cfg = get_typed_mapping_section(policy_root, "mcp", Path(args.config).name, (dict,), "对象")
     except ValueError as exc:
         logging.error(str(exc))

@@ -37,7 +37,7 @@
 ```bash
 make smoke
 ```
-这会串行执行 `apply/bump/agents:apply/plan/sys:upgrade` 的安全预演路径，并通过 `config/manager.smoke.json` 切到最小策略，避免把默认全量策略下预期存在的未物化产物混入 smoke 基线。
+这会运行 `scripts/check_no_secrets.py` 明文敏感信息扫描，并串行执行 `help` 与 `update` / `agents:update` / `init` 的 `--dry-run` 安全预演路径，通过 `config/manager.smoke.json` 切到最小策略，避免把默认全量策略下预期存在的未物化产物混入 smoke 基线。
 
 ### 2. 检查日志输出
 Agent Manager 使用标准化日志格式。最近的操作日志位于：
@@ -80,12 +80,12 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 ## Agent 安装问题
 
 ### 问题：Agent 未安装或无法执行
-**症状**：`manage.sh doctor` 或 `./manage.sh detect` 显示 Agent 状态为 ○ 或 未发现
+**症状**：`./manage.sh doctor` 显示 Agent 状态为 ○ 或 未发现
 
 #### 常见原因和解决方案：
 
 1. **安装来源不可用**
-   - 检查：`./manage.sh detect` 显示具体哪些安装来源失败
+   - 检查：`./manage.sh doctor` 或 `make update` / `make init` 开头的「环境探测与健康自检」会显示具体哪些安装来源失败
    - 解决：确保对应的包管理器已安装和可用
      - 对于 `Claude Code` 官方 native provider：确认 `curl`、`bash` 和官方安装目录在 PATH 中
      - 对于 `Codex` 的 npm provider：`npm config get prefix` 应返回可写目录
@@ -100,7 +100,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
    - 解决：解决网络连接问题或使用 sudo（如果需要且安全）
 
 3. **冲突的安装来源**
-   - 检查：`manage.sh detect` 显示多源安装冲突 (如 brew 和 npm / native 同时安装)
+   - 检查：`./manage.sh doctor` 显示多源安装冲突 (如 brew 和 npm / native 同时安装)
    - 解决：保留当前受管 provider，并移除历史或冲突来源
      ```bash
      # 例如，Claude Code 已切到 native 时，先卸载历史 brew 版本
@@ -112,14 +112,14 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
    - 解决：重新启动终端或执行 `hash -r` 重新加载命令路径缓存
 
 ### 问题：历史 brew 安装被判定为不合规
-**症状**：`doctor` 报告 `已弃用安装来源`，或 `update` / `bootstrap` 直接失败
+**症状**：`doctor` 报告 `已弃用安装来源`，或 `update` / `init` 直接失败
 
 #### 处理建议：
-处理原则：当前只维护 `Claude Code` 和 `Codex`，默认均使用 npm 固定版本；native provider 仅作为显式选择保留。
+处理原则：当前只维护 `Claude Code` 和 `Codex`，默认均使用官方 npm 包（不锁版本，跟随上游最新）；native provider 仅作为显式选择保留。
 
 1. `Claude Code`
-   - 手工卸载 brew 版本，再让 `agent-manager` 走官方 npm 包固定版本
-   - 如果当前已经是 native 版并希望回到默认固定版本路径，先按官方方式清理 native 安装，再执行 `./manage.sh init`
+   - 手工卸载 brew 版本，再让 `agent-manager` 走官方 npm 包（不锁版本）
+   - 如果当前已经是 native 版并希望回到默认 npm provider 路径，先按官方方式清理 native 安装，再执行 `./manage.sh init`
 2. `Codex`
    - 手工卸载 brew 版本，再执行 `npm install -g @openai/codex`
 
@@ -144,15 +144,8 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 **症状**：已经修改 `agent-rule/rules/src/`，但目标 Agent 目录里的规则仍然是旧内容
 
 #### 检查与解决：
-1. 先重建分发产物
-   ```bash
-   make rules-build
-   ```
-2. 再执行规则同步
-   ```bash
-   make rules:apply
-   ```
-3. 如需确认产物是否存在，检查：
+1. 修改 `agent-rule/rules/src/` 后运行 `make update`，规则构建（`agent-rule/scripts/build-agent-rules.py`）与分发随管线自动完成
+2. 如需确认产物是否存在，检查：
    ```bash
    find agent-rule/rules/dist -maxdepth 2 -type f | sort
    ```
@@ -226,7 +219,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
    - 解决：
      * 确保 secrets/ 目录存在并为有效的 Git 仓库
      * 验证 secrets/mcp.env 包含所需的键值对
-     * 运行 `make mcp:apply` 重新同步凭证
+     * 运行 `make update` 重新同步凭证
      * 检查日志中是否有"正在从凭证源加载"的消息
 
 3. **命令不可用**
@@ -242,7 +235,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
      ```bash
      # 用占位凭证起一次,只验证进程能拉起
      export GROK_API_KEY='test' GROK_API_URL='https://example.invalid'
-     uvx --from git+https://github.com/GuDaStudio/GrokSearch@<固定commit> grok-search
+     uvx --from git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily grok-search
      # 应该看到服务器启动并等待连接（用 Ctrl+C 停止）
      ```
    - 解决：检查 Agent Manager 是否正确将凭证注入到环境变量中
@@ -303,11 +296,11 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
      * 在 Windows 上，可能需要以管理员身份运行或开发者模式
      * 检查是否有现有的冲突文件或目录阻止链接创建
 
-4. **`skills:bump` 没有实际升级任何仓库**
-   - 检查：命令输出是否提示“未配置 `upgrade_strategy`，跳过显式升级”
+4. **Skill 仓库内容没有更新到上游最新**
+   - 检查：`agent-skill/repositories/` 中对应仓库的 `git log` 是否落后于上游默认分支
    - 解决：
-     * 这是信息提示，不是失败；表示当前启用的 skill 仓库没有声明可自动解析的跟踪策略
-     * 只有在 `config/skills.json` 的仓库定义里配置了 `upgrade_strategy`（如 `latest-branch` / `latest-tag` / `latest-release`）时，`make skills:bump` 才会实际尝试升级
+     * skill 仓库跟随上游默认分支最新，`config/skills.json` 不再声明 commit 或升级策略
+     * 运行 `make update` 会 clone/pull 受管 skill 仓库并重新链接；`--offline` 模式下只使用本地缓存
 
 ### 问题：链接的 skill 无法被 Agent 识别
 **症状**：Skill 已链接但 Agent 未响应 skill 触发词或命令
@@ -345,7 +338,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 
 1. **secrets/ 目录未初始化**
    - 检查：`ls -la secrets/` 是否显示为 Git 仓库
-   - 解决：运行 `SECRETS_REPO_URL=https://example.com/your-secrets.git ./manage.sh bump`、`SECRETS_REPO_URL=https://example.com/your-secrets.git ./manage.sh init`，或执行 `./scripts/init-secrets.sh https://example.com/your-secrets.git`
+   - 解决：运行 `SECRETS_REPO_URL=https://example.com/your-secrets.git ./manage.sh update`、`SECRETS_REPO_URL=https://example.com/your-secrets.git ./manage.sh init`，或执行 `./scripts/init-secrets.sh https://example.com/your-secrets.git`
 
 2. **凭证文件格式错误**
    - 检查：`secrets/mcp.env` 是否为有效的 KEY=VALUE 格式
@@ -385,7 +378,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 
 ## 同步失败问题
 
-### 问题：make bump / make init 或对应的 manage.sh 命令执行失败
+### 问题：make update / make init 或对应的 manage.sh 命令执行失败
 **症状**：同步过程在某个阶段中止并返回错误码
 
 #### 常见原因和解决方案：
@@ -437,7 +430,7 @@ test -d agent-rule/rules/dist && echo "rules dist: 存在"
 ## 性能问题
 
 ### 问题：同步过程异常缓慢
-**症状**：`make bump` / `make init` 执行时间异常长（正常应在几分钟内完成）
+**症状**：`make update` / `make init` 执行时间异常长（正常应在几分钟内完成）
 
 #### 常见原因和解决方案：
 
@@ -515,7 +508,7 @@ watch -n 0.1 "ls -la ~/.claude/ | grep tmp"
 ### 模拟同步而不实际修改
 ```bash
 # 使用 --dry-run 标志预览将要执行的操作
-./manage.sh plan
+./manage.sh update --dry-run
 cd agent-mcp && python3 sync_mcp.py --config ../config/manager.json --def-file ../config/mcp.json --dry-run
 # 等效的 dry-run 标志适用于所有同步引擎
 ```
@@ -552,8 +545,7 @@ done
 
 ```bash
 # 1. 停止所有正在运行的 Agent 实例
-# 2. 只清理 agent-manager 能识别的受管状态
-./manage.sh sys:clean
+# 2. 手动移除 agent-manager 写入的受管配置段与符号链接（仓库已不再提供托管清理命令）
 
 # 3. 重新从 Agent Manager 同步
 ./manage.sh init
@@ -610,7 +602,7 @@ cp -r ~/agent-manager-backup/claude/skills/* ~/.claude/skills/
 | 错误消息 | 可能原因 | 解决方案 |
 |----------|----------|----------|
 | `Unexpected key or value` (Codex) | TOML 格式错误，通常是 JSON 字符串未正确转义 | 使用单引号包裹包含双引号的值：`KEY = '{"json":"value"}'` |
-| `Command not found: uvx` / `npx` | MCP 启动命令依赖的运行时未安装或不在 PATH 中 | 安装 `uv`（提供 `uvx`）或 Node.js（提供 `npx`），再重跑 `make apply` |
+| `Command not found: uvx` / `npx` | MCP 启动命令依赖的运行时未安装或不在 PATH 中 | 安装 `uv`（提供 `uvx`）或 Node.js（提供 `npx`），再重跑 `make update` |
 | `Authentication failed` | 凭证无效或过期 | 更新 secrets/mcp.env 中的凭证并重新同步 |
 
 ---
@@ -623,7 +615,7 @@ cp -r ~/agent-manager-backup/claude/skills/* ~/.claude/skills/
 1. 总是从 `./manage.sh doctor` 开始进行一般诊断
 2. 检查日志以获取具体错误信息
 3. 逐个组件隔离问题
-4. 如不确定，使用 `./manage.sh plan` 或 `--dry-run` 先预览操作
+4. 如不确定，先加 `--dry-run`（如 `./manage.sh update --dry-run`）预览操作
 5. 定期备份重要配置和凭证
 6. 保持系统和依赖的更新
 

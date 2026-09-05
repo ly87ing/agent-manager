@@ -10,9 +10,9 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class ProjectContractTests(unittest.TestCase):
-    def test_init_secrets_guidance_uses_bump_or_init(self):
+    def test_init_secrets_guidance_uses_update_or_init(self):
         script = (ROOT / "scripts" / "init-secrets.sh").read_text(encoding="utf-8")
-        self.assertIn("make bump", script)
+        self.assertIn("make update", script)
         self.assertIn("make init", script)
         self.assertNotIn("初始化完成！现在可以运行：make all", script)
 
@@ -23,80 +23,9 @@ class ProjectContractTests(unittest.TestCase):
 
     def test_makefile_exposes_smoke_target(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertIn(".PHONY: init apply bump update plan", makefile)
+        self.assertIn(".PHONY: help init update agents-update agents\\:update doctor smoke", makefile)
         self.assertIn("\nsmoke:\n\t@./scripts/ci-smoke.sh\n", makefile)
 
-
-    def _extract_shell_function(self, source: str, name: str) -> str:
-        header = f"function {name}() {{\n"
-        start = source.index(header)
-        end = source.index("\n}\n", start)
-        return source[start:end]
-
-    def _expand_pipeline_body(self, source: str, name: str) -> str:
-        """展开管线函数：apply/bump/update/init 只组合 run_bump_steps / run_apply_steps，
-        断言步骤集合前需要把这两个组合函数的函数体内联回来。"""
-        body = self._extract_shell_function(source, name)
-        for helper_name in ("run_bump_steps", "run_apply_steps"):
-            if helper_name in body:
-                body = body.replace(helper_name, self._extract_shell_function(source, helper_name))
-        return body
-
-    def test_bump_pipeline_refreshes_resources_without_agent_or_tool_lifecycle(self):
-        manage = (ROOT / "manage.sh").read_text(encoding="utf-8")
-        body = self._expand_pipeline_body(manage, "run_bump_pipeline")
-        # bump 联网拉最新，需先刷新 secrets 仓库，否则新 MCP 配置会配不上新 key
-        self.assertIn("maybe_init_secrets", body, "bump 应在拉取前刷新 secrets 凭证")
-        # bump 拉取远端最新资源并下发：版本锁 / skill 版本
-        for step in (
-            "run_pipeline_step run_version_pins_update_task",
-            "run_pipeline_step run_skills_upgrade_task",
-        ):
-            self.assertIn(step, body, f"bump 缺少步骤: {step}")
-        # bump 明确不触碰 Agent / Tool / browser / shell 生命周期等
-        for excluded in (
-            "run_agent_lifecycle_task",
-            "run_tools_sync_task",
-            "run_browser_us_sync_task",
-            "run_shell_aliases_sync_task",
-            "run_rules_sync_task",
-            "run_skills_link_task",
-            "run_mcp_sync_task",
-        ):
-            self.assertNotIn(excluded, body, f"bump 不应包含重活步骤: {excluded}")
-
-
-    def test_makefile_exposes_secrets_check_target(self):
-        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertIn("secrets-check", makefile)
-        self.assertIn("secrets\\:check", makefile)
-        self.assertIn("\nsecrets-check:\n\t@python3 ./scripts/check_no_secrets.py\n", makefile)
-
-    def test_makefile_exposes_rules_build_target(self):
-        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertIn("rules-build", makefile)
-        self.assertIn("rules\\:build", makefile)
-        self.assertIn("\nrules-build:\n\t@./manage.sh rules:build\n", makefile)
-
-    def test_makefile_exposes_instruction_quality_target(self):
-        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertIn("instructions-check", makefile)
-        self.assertIn("instructions\\:check", makefile)
-        self.assertIn("\ninstructions-check:\n", makefile)
-        self.assertIn("tests.test_project_contracts", makefile)
-        self.assertIn("tests.test_rule_budgets", makefile)
-        self.assertIn("tests.test_rule_layout", makefile)
-        self.assertIn("tests.test_skill_exposure_contracts", makefile)
-        self.assertIn("tests.test_sync_rules", makefile)
-        self.assertIn("tests.test_sync_claude_hooks", makefile)
-        self.assertIn("tests.test_sync_codex_hooks", makefile)
-        self.assertIn("tests.test_rule_effectiveness_eval", makefile)
-        self.assertIn("tests.test_skill_usage_metrics", makefile)
-        self.assertIn(
-            "run_rule_effectiveness_eval.py --baseline ./scripts/evals/fixtures/rule_effectiveness_baseline.json",
-            makefile,
-        )
-        self.assertIn("\ninstructions\\:check: instructions-check\n", makefile)
 
     def test_makefile_supports_colon_manage_subcommands(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -113,20 +42,7 @@ class ProjectContractTests(unittest.TestCase):
             )
             (temp_root / "manage.sh").chmod(0o755)
 
-            for goal in (
-                "state:list",
-                "state:restore",
-                "rules:build",
-                "rules:apply",
-                "claude:hooks:apply",
-                "codex:hooks:apply",
-                "skills:apply",
-                "skills:bump",
-                "mcp:apply",
-                "tools:apply",
-                "browser:apply",
-                "help:all",
-            ):
+            for goal in ("agents:update",):
                 result = subprocess.run(
                     ["make", goal],
                     cwd=temp_root,
@@ -139,20 +55,7 @@ class ProjectContractTests(unittest.TestCase):
 
             self.assertEqual(
                 call_log.read_text(encoding="utf-8").splitlines(),
-                [
-                    "state:list",
-                    "state:restore",
-                    "rules:build",
-                    "rules:apply",
-                    "claude:hooks:apply",
-                    "codex:hooks:apply",
-                    "skills:apply",
-                    "skills:bump",
-                    "mcp:apply",
-                    "tools:apply",
-                    "browser:apply",
-                    "help:all",
-                ],
+                ["agents:update"],
             )
 
     def test_ci_smoke_script_exercises_safe_preview_flows(self):
@@ -160,19 +63,16 @@ class ProjectContractTests(unittest.TestCase):
         self.assertTrue(smoke_script.exists(), "missing ci smoke script")
 
         content = smoke_script.read_text(encoding="utf-8")
-        self.assertIn("run make secrets-check", content)
+        self.assertIn("run python3 ./scripts/check_no_secrets.py", content)
         self.assertIn("AGENT_MANAGER_BASE_CONFIG", content)
         self.assertIn("manager.smoke.json", content)
         self.assertIn("AGENT_MANAGER_LOCK_FILE", content)
         self.assertIn("AGENT_MANAGER_LOG_PREFIX", content)
-        self.assertIn("run ./manage.sh help:all", content)
-        self.assertIn("./manage.sh apply --dry-run", content)
-        self.assertIn("./manage.sh bump --dry-run", content)
+        self.assertIn("run ./manage.sh help", content)
         self.assertIn("./manage.sh update --dry-run", content)
-        self.assertIn("./manage.sh agents:apply --dry-run", content)
-        self.assertIn("./manage.sh plan", content)
-        self.assertIn("./manage.sh sys:upgrade --dry-run", content)
-        self.assertIn("make -n apply bump update agents-apply init plan sys-upgrade help-all", content)
+        self.assertIn("./manage.sh agents:update --dry-run", content)
+        self.assertIn("./manage.sh init --dry-run", content)
+        self.assertIn("make -n help init update agents-update doctor smoke", content)
         self.assertNotIn("./manage.sh bootstrap", content)
 
     def test_ci_workflow_runs_full_unittest_suite(self):
@@ -192,7 +92,7 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("matrix.python-version != '3.11'", content)
         self.assertIn("python3 -m pip install tomli", content)
         self.assertIn("Run tracked secret scan", content)
-        self.assertIn("make secrets-check", content)
+        self.assertIn("python3 ./scripts/check_no_secrets.py", content)
         self.assertIn("python3 -m unittest discover -s tests -p 'test*.py' -v", content)
         self.assertIn("Run smoke validation", content)
         self.assertTrue("make smoke" in content or "./scripts/ci-smoke.sh" in content)
@@ -257,7 +157,7 @@ class ProjectContractTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("agent-rule/rules/src/", readme)
         self.assertIn("agent-rule/rules/dist/", readme)
-        self.assertIn("make rules-build", readme)
+        self.assertIn("agent-rule/scripts/build-agent-rules.py", readme)
         self.assertIn("AGENTS.md", readme)
         self.assertIn("CLAUDE.md", readme)
 
@@ -280,27 +180,17 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("tests/CLAUDE.md", readme)
         self.assertIn("仓库级高频记忆", readme)
 
-    def test_readme_documents_instruction_quality_regression_target(self):
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("make instructions:check", readme)
-
     def test_readme_documents_secret_scan_target(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("make secrets-check", readme)
+        self.assertIn("scripts/check_no_secrets.py", readme)
         self.assertIn("主仓库禁存 secrets", readme)
         self.assertIn("疑似明文敏感信息", readme)
-        self.assertIn("共享指令", readme)
-        self.assertIn("hooks", readme)
-        self.assertIn("回归门", readme)
-        self.assertIn("硬门禁", readme)
-        self.assertIn("required_agents", readme)
-        self.assertIn("success / verification 阈值", readme)
 
     def test_readme_documents_codex_hooks_workflow(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("config/codex-hooks.json", readme)
         self.assertIn(".codex/hooks.json", readme)
-        self.assertIn("make codex:hooks:apply", readme)
+        self.assertIn("随 `make update` 刷新", readme)
 
     def test_readme_documents_official_cli_lifecycle_policy(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -342,7 +232,7 @@ class ProjectContractTests(unittest.TestCase):
 
     def test_readme_documents_isolated_chrome_devtools_mcp(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("chrome-devtools-mcp@<固定版本> --isolated", readme)
+        self.assertIn("chrome-devtools-mcp --isolated", readme)
         self.assertIn("避免多个 agent 共享同一个 browser profile", readme)
 
     def test_committed_runtime_configs_do_not_use_dynamic_latest(self):
@@ -386,8 +276,8 @@ class ProjectContractTests(unittest.TestCase):
         agents = (ROOT / "agent-rule" / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("agent-rule/rules/src/", agents)
         self.assertIn("agent-rule/rules/dist/", agents)
-        self.assertIn("make rules-build", agents)
-        self.assertIn("make rules:apply", agents)
+        self.assertIn("make update", agents)
+        self.assertIn("agent-rule/scripts/build-agent-rules.py", agents)
         self.assertNotIn("python3 -m unittest discover -s tests -p 'test*.py' -v", agents)
         self.assertNotIn("## Setup", agents)
         self.assertNotIn("## Test commands", agents)
@@ -410,12 +300,10 @@ class ProjectContractTests(unittest.TestCase):
         self.assertNotIn("No generated file was hand-edited.", agents)
         self.assertNotIn("make smoke", agents)
 
-    def test_architecture_dry_run_contract_mentions_local_maintenance_writes(self):
+    def test_architecture_documents_dry_run_contract(self):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
-        self.assertIn("sys:clean", architecture)
-        self.assertIn("state:restore", architecture)
-        self.assertIn("sys:clean-logs", architecture)
-        self.assertIn("会修改本地状态的维护动作", architecture)
+        self.assertIn("--dry-run", architecture)
+        self.assertIn("只输出计划动作", architecture)
 
     def test_architecture_documents_local_override_and_terminal_boundary(self):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
@@ -439,22 +327,12 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("dist/codex/AGENTS.md", architecture)
         self.assertIn("dist/claude/CLAUDE.md", architecture)
 
-    def test_architecture_documents_instruction_quality_regression_target(self):
-        architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
-        self.assertIn("make instructions:check", architecture)
-        self.assertIn("共享指令", architecture)
-        self.assertIn("skills exposure", architecture)
-        self.assertIn("managed hooks", architecture)
-        self.assertIn("硬门禁", architecture)
-        self.assertIn("required_agents", architecture)
-        self.assertIn("success / verification", architecture)
-
     def test_architecture_documents_codex_hooks_pipeline(self):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
         self.assertIn("config/codex-hooks.json", architecture)
         self.assertIn("agent-rule/scripts/sync-codex-hooks.py", architecture)
         self.assertIn(".codex/hooks.json", architecture)
-        self.assertIn("make codex-hooks-apply", architecture)
+        self.assertIn("随 `make update` 管线同步", architecture)
 
     def test_architecture_documents_current_agent_scope(self):
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
@@ -478,7 +356,7 @@ class ProjectContractTests(unittest.TestCase):
         memory = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertLessEqual(len(memory.splitlines()), 80)
         self.assertIn("make smoke", memory)
-        self.assertIn("make apply", memory)
+        self.assertIn("make update", memory)
         self.assertIn("make doctor", memory)
         self.assertIn("agent-rule/CLAUDE.md", memory)
         self.assertIn("tests/CLAUDE.md", memory)
@@ -489,8 +367,7 @@ class ProjectContractTests(unittest.TestCase):
         memory = (ROOT / "agent-rule" / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertIn("agent-rule/rules/src/", memory)
         self.assertIn("agent-rule/rules/dist/", memory)
-        self.assertIn("make rules-build", memory)
-        self.assertIn("make rules:apply", memory)
+        self.assertIn("make update", memory)
         self.assertNotIn("python3 -m unittest discover -s tests -p 'test*.py' -v", memory)
         self.assertNotIn("make smoke", memory)
         self.assertNotIn("manage.sh 是唯一顶层编排入口", memory)
@@ -505,9 +382,8 @@ class ProjectContractTests(unittest.TestCase):
         self.assertNotIn("make smoke", memory)
         self.assertNotIn("manage.sh 是唯一顶层编排入口", memory)
 
-    def test_every_manage_command_is_documented_in_help_or_help_all(self):
-        # help:all 自称「完整命令」。新增 case 分支若不登记，用户就无处可查——
-        # agents:status 与 claude:shell-aliases:apply 曾经两层都查不到。
+    def test_every_manage_command_is_documented_in_help(self):
+        # help 自称完整命令清单。新增 case 分支若不登记，用户就无处可查。
         manage = (ROOT / "manage.sh").read_text(encoding="utf-8")
         case_body = manage.split('case "$cmd" in', 1)[1].split("\nesac", 1)[0]
 
@@ -524,18 +400,14 @@ class ProjectContractTests(unittest.TestCase):
                     commands.add(token)
 
         self.assertIn("update", commands)
-        self.assertIn("help:all", commands)
+        self.assertIn("agents:update", commands)
 
         help_text = subprocess.run(
             [str(ROOT / "manage.sh"), "help"], cwd=ROOT, capture_output=True, text=True, check=True
         ).stdout
-        help_all_text = subprocess.run(
-            [str(ROOT / "manage.sh"), "help:all"], cwd=ROOT, capture_output=True, text=True, check=True
-        ).stdout
-        documented = help_text + help_all_text
 
-        missing = sorted(command for command in commands if command not in documented)
-        self.assertEqual(missing, [], f"这些命令在 help 与 help:all 里都查不到: {missing}")
+        missing = sorted(command for command in commands if command not in help_text)
+        self.assertEqual(missing, [], f"这些命令在 help 里查不到: {missing}")
 
     def test_documented_make_targets_all_exist_in_makefile(self):
         # 文档里推荐过的 make 目标必须真实存在。README 曾长期推荐

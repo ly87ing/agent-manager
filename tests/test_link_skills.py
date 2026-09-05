@@ -1444,101 +1444,6 @@ class LinkSkillsTests(unittest.TestCase):
             self.assertEqual(head, commit_v1)
             self.assertTrue((agent_target / "pinned-skill").is_symlink())
 
-    def test_local_skill_repository_pin_is_honored_in_managed_cache(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir)
-            source_repo = temp_root / "source-repo"
-            source_repo.mkdir()
-            subprocess.run(["git", "init"], cwd=source_repo, capture_output=True, text=True, check=True)
-            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=source_repo, check=True)
-            subprocess.run(["git", "config", "user.name", "Test User"], cwd=source_repo, check=True)
-            skill_dir = source_repo / "pinned-skill"
-            skill_dir.mkdir()
-            skill_md = skill_dir / "SKILL.md"
-            skill_md.write_text(
-                "---\nname: pinned-skill\ndescription: Example\n---\n\n# v1\n",
-                encoding="utf-8",
-            )
-            subprocess.run(["git", "add", "."], cwd=source_repo, check=True)
-            subprocess.run(["git", "commit", "-m", "v1"], cwd=source_repo, capture_output=True, text=True, check=True)
-            commit_v1 = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=source_repo,
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout.strip()
-            skill_md.write_text(
-                "---\nname: pinned-skill\ndescription: Example\n---\n\n# v2\n",
-                encoding="utf-8",
-            )
-            subprocess.run(["git", "add", "."], cwd=source_repo, check=True)
-            subprocess.run(["git", "commit", "-m", "v2"], cwd=source_repo, capture_output=True, text=True, check=True)
-
-            config_path = temp_root / "config.json"
-            def_path = temp_root / "skills.json"
-            agent_target = temp_root / "targets" / "claude"
-            agent_target.parent.mkdir(parents=True)
-            config_path.write_text(
-                json.dumps({"skills": {"pinned-repo": {"enabled": True}}}),
-                encoding="utf-8",
-            )
-            def_path.write_text(
-                json.dumps(
-                    {
-                        "repositories": {
-                            "pinned-repo": {
-                                "url": str(source_repo),
-                                "agents": ["claude-code"],
-                            }
-                        },
-                        "agents": {
-                            "claude-code": str(agent_target),
-                        },
-                    }
-                ),
-                encoding="utf-8",
-            )
-            (temp_root / "version-pins.local.json").write_text(
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "version_locks": {},
-                        "skill_repositories": {"pinned-repo": commit_v1},
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            result = subprocess.run(
-                [
-                    "python3",
-                    str(MODULE_PATH),
-                    "--config",
-                    str(config_path),
-                    "--def-file",
-                    str(def_path),
-                    "--base-dir",
-                    str(temp_root / "skills"),
-                ],
-                cwd=ROOT,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            managed_repo = temp_root / "skills" / "repositories" / "pinned-repo"
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            head = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=managed_repo,
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout.strip()
-            self.assertEqual(head, commit_v1)
-            self.assertTrue((agent_target / "pinned-skill").is_symlink())
-
     def test_detached_managed_repo_uses_fetch_instead_of_pull(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -2469,9 +2374,7 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertEqual(repo["skill_count"], 6)
         self.assertEqual(repo["agents"], ["claude-code", "codex", "kimi-code"])
         self.assertNotIn("ignored_skill_paths", repo)
-        self.assertRegex(repo["commit"], r"^[0-9a-f]{40}$")
-        self.assertEqual(repo["upgrade_strategy"], "latest-branch")
-        self.assertEqual(repo["upgrade_ref"], "refs/heads/main")
+        self.assertNotIn("commit", repo)
         self.assertNotIn("ref", repo)
 
     def test_default_skill_catalog_does_not_reference_removed_playwright_skill(self):

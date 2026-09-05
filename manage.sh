@@ -106,8 +106,8 @@ if [ -z "$cmd" ]; then
     # 与 `--offline` 曾经对应的 offline(=apply) 语义不符,一个裸 flag 就可能误触全量安装。
     if [ -n "$DRY_RUN_FLAG" ] || [ -n "$OFFLINE_FLAG" ] || [ -n "$FORCE_REFRESH_FLAG" ] || [ -n "$WAIT_AGENT_LIFECYCLE_FLAG" ]; then
         echo -e "${ERROR_RED}错误: 只提供了全局参数，没有指定命令。${NC}" >&2
-        echo -e "  预演完整 init: ${BOLD}./manage.sh plan${NC}   离线分发: ${BOLD}./manage.sh --offline apply${NC}" >&2
-        echo -e "  命令清单: ${BOLD}./manage.sh help${NC} / ${BOLD}./manage.sh help:all${NC}" >&2
+        echo -e "  预演完整 init: ${BOLD}./manage.sh init --dry-run${NC}   离线分发: ${BOLD}./manage.sh --offline update${NC}" >&2
+        echo -e "  命令清单: ${BOLD}./manage.sh help${NC}" >&2
         exit 1
     fi
     cmd="help"
@@ -139,7 +139,7 @@ function acquire_lock() {
         legacy_pid="$(cat "$LOCK_FILE" 2>/dev/null || true)"
         if [ -n "$legacy_pid" ] && [[ "$legacy_pid" != "$$" ]] && pid_is_alive "$legacy_pid"; then
             echo -e "${ERROR_RED}错误: 另一个管理任务 (PID: $legacy_pid) 正在运行。${NC}"
-            echo -e "\n${PENDING_GOLD}提示: 请运行 './manage.sh sys:unlock' 手动强制解锁。${NC}"
+            echo -e "\n${PENDING_GOLD}提示: 确认无任务运行后，可手动删除锁文件 $LOCK_FILE 与锁目录 $LOCK_DIR。${NC}"
             exit 1
         fi
         rm -f "$LOCK_FILE"
@@ -156,7 +156,7 @@ function acquire_lock() {
     old_pid="$(read_lock_pid)"
     if [ -n "$old_pid" ] && [[ "$old_pid" != "$$" ]] && pid_is_alive "$old_pid"; then
         echo -e "${ERROR_RED}错误: 另一个管理任务 (PID: $old_pid) 正在运行。${NC}"
-        echo -e "\n${PENDING_GOLD}提示: 请运行 './manage.sh sys:unlock' 手动强制解锁。${NC}"
+        echo -e "\n${PENDING_GOLD}提示: 确认无任务运行后，可手动删除锁文件 $LOCK_FILE 与锁目录 $LOCK_DIR。${NC}"
         exit 1
     fi
 
@@ -168,12 +168,12 @@ function acquire_lock() {
         return 0
     fi
 
-    echo -e "${ERROR_RED}错误: 无法获取运行锁，请稍后重试或执行 './manage.sh sys:unlock'。${NC}"
+    echo -e "${ERROR_RED}错误: 无法获取运行锁，请稍后重试。${NC}"
     exit 1
 }
 
 # Atomic lock check
-if [[ "$cmd" != "help" && "$cmd" != "help:all" && "$cmd" != "-h" && "$cmd" != "--help" && "$cmd" != "-help" && "$cmd" != "detect" && "$cmd" != "doctor" && "$cmd" != "status" && "$cmd" != "state:list" && "$cmd" != "sys:unlock" && "$cmd" != "sys:logs" && "$cmd" != "fetch-models" && "$cmd" != "agents:status" ]]; then
+if [[ "$cmd" != "help" && "$cmd" != "-h" && "$cmd" != "--help" && "$cmd" != "-help" && "$cmd" != "doctor" ]]; then
     acquire_lock
 fi
 
@@ -395,134 +395,12 @@ function run_supervised_capture_command_in_dir() {
     return "$exit_code"
 }
 
-function run_supervised_interactive_command_in_dir() {
-    local timeout_seconds="$1"
-    local workdir="$2"
-    shift 2
-
-    local command_str
-    local python_code
-    command_str="$(shell_join "$@")"
-    python_code="$(cat <<'PY'
-import os
-import shutil
-import signal
-import subprocess
-import sys
-import time
-
-timeout_seconds = int(sys.argv[1])
-workdir = sys.argv[2]
-command_str = sys.argv[3]
-lock_file = sys.argv[4]
-lock_dir = sys.argv[5]
-config_file = sys.argv[6]
-base_config = sys.argv[7]
-child = None
-
-
-def cleanup_local_artifacts():
-    try:
-        with open(lock_file, "r", encoding="utf-8") as handle:
-            if handle.read().strip() == str(os.getpid()):
-                try:
-                    os.remove(lock_file)
-                except FileNotFoundError:
-                    pass
-                shutil.rmtree(lock_dir, ignore_errors=True)
-    except FileNotFoundError:
-        pass
-    except OSError:
-        pass
-
-    if config_file and config_file != base_config:
-        try:
-            os.remove(config_file)
-        except FileNotFoundError:
-            pass
-        except OSError:
-            pass
-
-
-def terminate_group(sig, grace_seconds=1.0):
-    if child is None:
-        return
-    try:
-        os.killpg(child.pid, sig)
-    except ProcessLookupError:
-        return
-
-    deadline = time.time() + grace_seconds
-    while time.time() < deadline:
-        try:
-            os.killpg(child.pid, 0)
-        except ProcessLookupError:
-            return
-        time.sleep(0.05)
-
-    if sig != signal.SIGKILL:
-        try:
-            os.killpg(child.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-
-
-def handle_signal(signum, _frame):
-    terminate_group(signal.SIGTERM)
-    cleanup_local_artifacts()
-    sys.exit(128 + signum)
-
-
-signal.signal(signal.SIGTERM, handle_signal)
-signal.signal(signal.SIGINT, handle_signal)
-
-child = subprocess.Popen(
-    ["bash", "-c", command_str],
-    cwd=workdir,
-    preexec_fn=os.setsid,
-)
-
-try:
-    if timeout_seconds > 0:
-        return_code = child.wait(timeout=timeout_seconds)
-    else:
-        return_code = child.wait()
-except subprocess.TimeoutExpired:
-    terminate_group(signal.SIGTERM)
-    cleanup_local_artifacts()
-    sys.exit(124)
-
-terminate_group(signal.SIGTERM, grace_seconds=0.5)
-cleanup_local_artifacts()
-sys.exit(return_code)
-PY
-)"
-
-    exec "$PYTHON_CMD" -c "$python_code" "$timeout_seconds" "$workdir" "$command_str" "$LOCK_FILE" "$LOCK_DIR" "${CONFIG_FILE:-}" "$BASE_CONFIG"
-}
-
 function update_latest_log_pointer() {
     mkdir -p "$(dirname "$TEMP_LOG")"
     : > "$TEMP_LOG"
     printf '%s\n' "$TEMP_LOG" > "$LATEST_LOG_POINTER"
     chmod 600 "$TEMP_LOG" "$LATEST_LOG_POINTER" 2>/dev/null || true
     ln -sfn "$TEMP_LOG" "$LEGACY_LOG_PATH" 2>/dev/null || true
-}
-
-function resolve_latest_log_path() {
-    if [ -f "$LATEST_LOG_POINTER" ]; then
-        local candidate
-        candidate="$(cat "$LATEST_LOG_POINTER" 2>/dev/null || true)"
-        if [ -n "$candidate" ] && [ -f "$candidate" ]; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-    fi
-    if [ -f "$LEGACY_LOG_PATH" ] || [ -L "$LEGACY_LOG_PATH" ]; then
-        printf '%s\n' "$LEGACY_LOG_PATH"
-        return 0
-    fi
-    return 1
 }
 
 function detect_agents() {
@@ -545,7 +423,6 @@ from src.manage_runtime_probe import (
     load_json,
     rule_target_agent_id,
 )
-from src.version_pins import apply_local_version_pins
 
 try:
     inventory = ProviderInventory()
@@ -553,20 +430,14 @@ try:
     cfg['agents'] = canonicalize_agent_mapping(get_typed_mapping_section(cfg, 'agents', 'manager.json', (dict,), '对象'))
     def_a = canonicalize_agent_mapping(
         ensure_mapping_value_types(
-            apply_local_version_pins(
-                load_json('$ROOT_DIR/config/agents.json', strict=True, missing_ok=False),
-                '$ROOT_DIR/config/agents.json',
-            ),
+            load_json('$ROOT_DIR/config/agents.json', strict=True, missing_ok=False),
             'agents.json',
             (dict,),
             '对象',
         )
     )
     tool_defs = get_typed_mapping_section(
-        apply_local_version_pins(
-            load_json('$ROOT_DIR/config/tools.json', strict=True, missing_ok=False),
-            '$ROOT_DIR/config/tools.json',
-        ),
+        load_json('$ROOT_DIR/config/tools.json', strict=True, missing_ok=False),
         'tools',
         'tools.json',
         (dict,),
@@ -596,53 +467,6 @@ except ValueError as exc:
     sys.exit(1)
 "
     echo ""
-}
-
-function validate_json_shape() {
-    local file_path="$1"
-    ROOT_DIR="$ROOT_DIR" FILE_PATH="$file_path" "$PYTHON_CMD" - <<'PY'
-import os
-import sys
-from pathlib import Path
-
-root = Path(os.environ["ROOT_DIR"])
-path = Path(os.environ["FILE_PATH"])
-sys.path.insert(0, str(root))
-
-from src.json_config import ensure_mapping_value_types, get_typed_mapping_section, load_json_object_file
-
-def validate_browser_us_sync(data, name):
-    settings = data.get("browser_us_sync", {})
-    if settings is None:
-        return
-    if not isinstance(settings, dict):
-        raise ValueError(f"{name}.browser_us_sync 必须是对象")
-    if not isinstance(settings.get("enabled", True), bool):
-        raise ValueError(f"{name}.browser_us_sync.enabled 必须是布尔值")
-
-try:
-    data = load_json_object_file(path, strict=True, missing_ok=False)
-    name = path.name
-    if name == "manager.json":
-        get_typed_mapping_section(data, "agents", name, (dict,), "对象")
-        get_typed_mapping_section(data, "tools", name, (dict,), "对象")
-        get_typed_mapping_section(data, "skills", name, (dict,), "对象")
-        get_typed_mapping_section(data, "mcp", name, (dict,), "对象")
-        validate_browser_us_sync(data, name)
-    elif name == "tools.json":
-        get_typed_mapping_section(data, "tools", name, (dict,), "对象")
-    elif name == "skills.json":
-        get_typed_mapping_section(data, "repositories", name, (dict,), "对象")
-        get_typed_mapping_section(data, "agents", name, (str, dict), "字符串或对象")
-    elif name == "mcp.json":
-        get_typed_mapping_section(data, "servers", name, (dict,), "对象")
-        get_typed_mapping_section(data, "agent_paths", name, (str, dict), "字符串或对象")
-    elif name == "agents.json":
-        ensure_mapping_value_types(data, name, (dict,), "对象")
-except ValueError as exc:
-    print(str(exc), file=sys.stderr)
-    sys.exit(1)
-PY
 }
 
 function doctor_check() {
@@ -921,10 +745,6 @@ function run_agent_lifecycle_task() {
     run_task_in_dir "对齐 Agent 生命周期" "生命周期对齐完成" "生命周期失败" 600 "$ROOT_DIR/agent-lifecycle" "$PYTHON_CMD" "${args[@]}"
 }
 
-function run_agent_lifecycle_status_task() {
-    run_supervised_command_in_dir 60 "$ROOT_DIR/agent-lifecycle" "$PYTHON_CMD" sync_agents.py --show-async-status
-}
-
 function run_shell_aliases_sync_task() {
     local args=("$ROOT_DIR/scripts/claude/sync_shell_aliases.sh")
     if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
@@ -1021,23 +841,16 @@ from src.manage_runtime_probe import (
     load_json,
     rule_target_agent_id,
 )
-from src.version_pins import apply_local_version_pins
 
 try:
     cfg = load_json(config_path, strict=True, missing_ok=False)
     cfg["agents"] = canonicalize_agent_mapping(get_typed_mapping_section(cfg, "agents", "manager.json", (dict,), "对象"))
-    skill_cfg_raw = apply_local_version_pins(
-        load_json(root / "config" / "skills.json", strict=True, missing_ok=False),
-        root / "config" / "skills.json",
-    )
+    skill_cfg_raw = load_json(root / "config" / "skills.json", strict=True, missing_ok=False)
     skill_cfg = {
         "repositories": get_typed_mapping_section(skill_cfg_raw, "repositories", "skills.json", (dict,), "对象"),
         "agents": get_typed_mapping_section(skill_cfg_raw, "agents", "skills.json", (str, dict), "字符串或对象"),
     }
-    mcp_cfg_raw = apply_local_version_pins(
-        load_json(root / "config" / "mcp.json", strict=True, missing_ok=False),
-        root / "config" / "mcp.json",
-    )
+    mcp_cfg_raw = load_json(root / "config" / "mcp.json", strict=True, missing_ok=False)
     mcp_cfg = {
         "servers": get_typed_mapping_section(mcp_cfg_raw, "servers", "mcp.json", (dict,), "对象"),
         "agent_paths": get_typed_mapping_section(mcp_cfg_raw, "agent_paths", "mcp.json", (str, dict), "字符串或对象"),
@@ -1091,22 +904,6 @@ function run_skills_link_task() {
     run_task_in_dir "链接专业技能" "技能链接完成" "技能链接失败" 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" "${args[@]}"
 }
 
-function run_skills_upgrade_task() {
-    if [ "${AGENT_MANAGER_SKIP_SKILL_VERSION_UPDATE:-}" = "1" ]; then
-        status_line "SKIP" "Skill 版本刷新已通过环境变量跳过。"
-        return 0
-    fi
-    if [ -n "$OFFLINE_FLAG" ]; then
-        status_line "SKIP" "离线模式，跳过 Skill 版本刷新。"
-        return 0
-    fi
-
-    local args=(upgrade_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json")
-    if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
-
-    run_task_in_dir "刷新 Skill 版本" "Skill 版本刷新完成" "Skill 版本刷新失败" 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" "${args[@]}"
-}
-
 function run_mcp_sync_task() {
     local prepare_runtime="${1:-false}"
     local force_offline="${2:-false}"
@@ -1124,19 +921,6 @@ function run_mcp_sync_task() {
     run_task_in_dir "$title" "MCP 注入完成" "MCP 失败" 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" "${args[@]}"
 }
 
-function run_version_pins_update_task() {
-    if [ "${AGENT_MANAGER_SKIP_VERSION_PIN_UPDATE:-}" = "1" ]; then
-        status_line "SKIP" "版本锁刷新已通过环境变量跳过。"
-        return 0
-    fi
-
-    local args=(update_version_pins.py --config-dir "$ROOT_DIR/config")
-    if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
-    if [ -n "$OFFLINE_FLAG" ]; then args+=("$OFFLINE_FLAG"); fi
-
-    run_task_in_dir "刷新版本锁定" "版本锁刷新完成" "版本锁刷新失败" 180 "$ROOT_DIR/scripts" "$PYTHON_CMD" "${args[@]}"
-}
-
 function run_skill_reference_audit_warn() {
     # 内容层失效引用检测(非致命):在结构收敛(软链/pin/规则分发)之外,提醒 rules 或
     # SKILL.md 是否点名了不存在的 skill。只警告、不阻断收敛、不改写内容;dry-run 跳过
@@ -1149,15 +933,20 @@ function run_skill_reference_audit_warn() {
     fi
 }
 
-# 两段可组合的步骤序列。apply/bump/update/init 四条管线只负责组合它们，
-# 避免同一串步骤在仓库里各写一份后逐渐漂移（往 apply 加一步却漏改 update 是最典型的失误）。
-# bump 段：只刷元数据，写本机锁文件，不碰本机环境。
-function run_bump_steps() {
-    run_pipeline_step run_version_pins_update_task
-    run_pipeline_step run_skills_upgrade_task
+function run_claude_hooks_sync_task() {
+    local args=(./scripts/sync-claude-hooks.py)
+    if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
+    run_task_in_dir "同步 Claude hooks" "Claude hooks 同步完成" "Claude hooks 同步失败" 600 "$ROOT_DIR/agent-rule" "$PYTHON_CMD" "${args[@]}"
 }
 
-# apply 段：把当前锁定态分发/收敛到本机。
+function run_codex_hooks_sync_task() {
+    local args=(./scripts/sync-codex-hooks.py)
+    if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
+    run_task_in_dir "同步 Codex hooks" "Codex hooks 同步完成" "Codex hooks 同步失败" 600 "$ROOT_DIR/agent-rule" "$PYTHON_CMD" "${args[@]}"
+}
+
+# 受管组件的收敛步骤序列。update / init 两条管线只负责组合它们，
+# 避免同一串步骤在仓库里各写一份后逐渐漂移。
 function run_apply_steps() {
     run_pipeline_step run_shell_aliases_sync_task
     run_pipeline_step run_tools_sync_task
@@ -1165,36 +954,16 @@ function run_apply_steps() {
     run_pipeline_step run_rules_sync_task
     run_pipeline_step run_skills_link_task false
     run_pipeline_step run_mcp_sync_task true false
+    run_pipeline_step run_claude_hooks_sync_task
+    run_pipeline_step run_codex_hooks_sync_task
     run_skill_reference_audit_warn
 }
 
-function run_apply_pipeline() {
-    begin_workflow "🔄 Agent Manager 环境应用启动"
-    maybe_init_secrets
-    begin_pipeline_execution
-    run_apply_steps
-    finish_pipeline_execution
-}
-
-
-function run_bump_pipeline() {
-    begin_workflow "⬇️  Agent Manager 配置升版启动"
-    maybe_init_secrets
-    begin_pipeline_execution
-    run_bump_steps
-    finish_pipeline_execution
-}
-
-# update = bump + apply:先刷元数据(version pins + skill commit),再把锁定态分发/收敛到本机;
-# secrets 只初始化一次。等价于 init 去掉「安装缺失 Agent」这一步,是日常「把本机弄成最新」的主入口。
-# bump 段失败即中止,与顺序执行 `bump && apply` 的失败语义保持一致——否则会把未刷新的旧锁定态
-# 实打实分发到本机,而用户只看到一个失败退出码,以为什么都没发生。
+# update：把所有受管组件分发/收敛到本机；不安装、也不升级 Agent 软件。
 function run_update_pipeline() {
     begin_workflow "🔄 Agent Manager 更新并收敛启动"
     maybe_init_secrets
     begin_pipeline_execution
-    run_bump_steps
-    abort_pipeline_if_failed "元数据刷新失败，已中止分发（本机未被改动）。修复后重跑 make update。"
     run_apply_steps
     finish_pipeline_execution
 }
@@ -1207,298 +976,30 @@ function run_agents_pipeline() {
     finish_pipeline_execution
 }
 
-# init = bump + Agent 生命周期(装缺失 + 升级已装) + apply。
-# 与 update 的差别只有中间这一步；这里刻意不套 abort_pipeline_if_failed——
-# 新机器 bootstrap 时即使元数据刷新失败，也应尽量把已有锁定态装起来，再由退出码报告失败。
+# init = Agent 生命周期(装缺失 + 升级已装) + update 的全量分发。
 function run_init_pipeline() {
     begin_workflow "🚀 Agent Manager 全量初始化启动"
     maybe_init_secrets
     begin_pipeline_execution
-    run_bump_steps
     run_pipeline_step run_agent_lifecycle_task ""
     run_apply_steps
     finish_pipeline_execution
 }
 
-
-
-
-function run_self_update() {
-    local repo_status
-    if [ -n "$OFFLINE_FLAG" ]; then
-        echo "离线模式，跳过 agent-manager 自更新。"
-        return 0
-    fi
-    if [ -n "$DRY_RUN_FLAG" ]; then
-        echo "预览模式：计划执行 agent-manager 仓库更新。"
-        return 0
-    fi
-    if [ ! -d "$ROOT_DIR/.git" ]; then
-        echo "当前目录不是 Git 仓库，跳过自更新。"
-        return 0
-    fi
-    if ! run_supervised_capture_command_in_dir repo_status 600 "$ROOT_DIR" git -C "$ROOT_DIR" status --porcelain; then
-        echo "无法检查仓库状态，跳过自更新。"
-        return 1
-    fi
-    if [ -n "$repo_status" ]; then
-        echo "检测到本地未提交更改，跳过自更新以保护工作区。"
-        return 0
-    fi
-    run_supervised_command_in_dir 600 "$ROOT_DIR" git -C "$ROOT_DIR" pull --ff-only
-}
-
-function list_managed_target_paths() {
-    local include_skills="${1:-false}"
-    ROOT_DIR="$ROOT_DIR" INCLUDE_SKILLS="$include_skills" HOME="$HOME" "$PYTHON_CMD" - <<'PY'
-import json
-import os
-import sys
-from pathlib import Path
-
-root = Path(os.environ["ROOT_DIR"])
-include_skills = os.environ.get("INCLUDE_SKILLS") == "true"
-targets = set()
-sys.path.insert(0, str(root))
-
-from src.json_config import get_typed_mapping_section, load_json_object_file
-
-def add_target(value):
-    if isinstance(value, dict):
-        value = value.get("path")
-    if not value:
-        return
-    expanded = str(value).replace("{{HOME}}", str(Path.home())).replace("{{REPO_ROOT}}", str(root))
-    targets.add(str(Path(expanded).expanduser()))
-
-try:
-    mcp_cfg = load_json_object_file(root / "config" / "mcp.json", strict=True, missing_ok=False)
-    mcp_agent_paths = get_typed_mapping_section(mcp_cfg, "agent_paths", "mcp.json", (str, dict), "字符串或对象")
-except ValueError as exc:
-    print(str(exc), file=sys.stderr)
-    sys.exit(1)
-
-for value in mcp_agent_paths.values():
-    add_target(value)
-
-if include_skills:
-    try:
-        skills_cfg = load_json_object_file(root / "config" / "skills.json", strict=True, missing_ok=False)
-        skill_agents = get_typed_mapping_section(skills_cfg, "agents", "skills.json", (str, dict), "字符串或对象")
-    except ValueError as exc:
-        print(str(exc), file=sys.stderr)
-        sys.exit(1)
-    for value in skill_agents.values():
-        add_target(value)
-
-manifest_path = root / "config" / "rules-targets.list"
-if not manifest_path.exists():
-    print("rules-targets.list 缺失", file=sys.stderr)
-    sys.exit(1)
-for raw_line in manifest_path.read_text(encoding="utf-8").splitlines():
-    line = raw_line.strip()
-    if not line or line.startswith("#"):
-        continue
-    parts = [part.strip() for part in line.split("|")]
-    if len(parts) < 4:
-        print(f"rules-targets.list 非法条目: {raw_line}", file=sys.stderr)
-        sys.exit(1)
-    add_target(parts[3])
-
-for target in sorted(targets):
-    print(target)
-PY
-}
-
-function list_cleanup_target_paths() {
-    local targets_output
-    if ! targets_output="$(list_managed_target_paths true)"; then
-        return 1
-    fi
-
-    TARGETS_OUTPUT="$targets_output" HOME="$HOME" "$PYTHON_CMD" - <<'PY'
-import os
-from pathlib import Path
-
-targets = {line for line in os.environ.get("TARGETS_OUTPUT", "").splitlines() if line.strip()}
-legacy_targets = [
-    "~/.codex/rules/global.md",
-    "~/.codex/rules/modules",
-    "~/.claude/rules/global.md",
-    "~/.claude/rules/modules",
-]
-for target in legacy_targets:
-    targets.add(str(Path(target).expanduser()))
-
-for target in sorted(targets):
-    print(target)
-PY
-}
-
-function list_managed_backup_entries() {
-    local targets_output
-    if ! targets_output="$(list_managed_target_paths false)"; then
-        return 1
-    fi
-
-    TARGETS_OUTPUT="$targets_output" "$PYTHON_CMD" - <<'PY'
-import os
-import sys
-
-targets = [line for line in os.environ.get("TARGETS_OUTPUT", "").splitlines() if line.strip()]
-entries = {}
-
-for target in targets:
-    target_dir = os.path.dirname(target)
-    target_name = os.path.basename(target)
-    try:
-        names = os.listdir(target_dir)
-    except OSError:
-        continue
-
-    for name in names:
-        if name != f"{target_name}.bak" and not name.startswith(f"{target_name}.bak."):
-            continue
-        path = os.path.join(target_dir, name)
-        try:
-            mtime = os.path.getmtime(path)
-        except OSError:
-            continue
-        entries[path] = max(entries.get(path, float("-inf")), mtime)
-
-for path, _mtime in sorted(entries.items(), key=lambda item: (-item[1], item[0])):
-    print(path)
-PY
-}
-
-function backup_restore_target_path() {
-    local backup_path="$1"
-    if [[ "$backup_path" == *.bak.* ]]; then
-        printf '%s\n' "${backup_path%.bak.*}"
-        return
-    fi
-    if [[ "$backup_path" == *.bak ]]; then
-        printf '%s\n' "${backup_path%.bak}"
-        return
-    fi
-    return 1
-}
-
-function copy_backup_payload() {
-    local backup_path="$1"
-    local destination_path="$2"
-    if [ -d "$backup_path" ] && [ ! -L "$backup_path" ]; then
-        cp -pR "$backup_path" "$destination_path"
-    else
-        cp -pP "$backup_path" "$destination_path"
-    fi
-}
-
-function restore_backup_entry() {
-    local backup_path="$1"
-    local target_path
-    if ! target_path="$(backup_restore_target_path "$backup_path")"; then
-        echo "无法推导备份目标: $backup_path"
-        return 1
-    fi
-
-    local target_parent target_name staging_path rollback_path
-    target_parent="$(dirname "$target_path")"
-    target_name="$(basename "$target_path")"
-    staging_path="$target_parent/.${target_name}.restore_tmp_${RUN_ID}"
-    rollback_path="$target_parent/.${target_name}.restore_old_${RUN_ID}"
-
-    mkdir -p "$target_parent" || return 1
-    rm -rf "$staging_path" "$rollback_path"
-
-    if ! copy_backup_payload "$backup_path" "$staging_path"; then
-        rm -rf "$staging_path"
-        echo "恢复失败：无法读取备份 $backup_path"
-        return 1
-    fi
-
-    if [ -e "$target_path" ] || [ -L "$target_path" ]; then
-        if ! mv "$target_path" "$rollback_path"; then
-            rm -rf "$staging_path"
-            echo "恢复失败：无法暂存现有目标 $target_path"
-            return 1
-        fi
-    fi
-
-    if mv "$staging_path" "$target_path"; then
-        rm -rf "$rollback_path"
-        return 0
-    fi
-
-    echo "恢复失败：无法写入目标 $target_path"
-    rm -rf "$staging_path"
-    if [ -e "$rollback_path" ] || [ -L "$rollback_path" ]; then
-        mv "$rollback_path" "$target_path" 2>/dev/null || true
-    fi
-    return 1
-}
-
-function restore_backup_selection_input() {
-    if [ -t 0 ] && [ -r /dev/tty ]; then
-        printf '/dev/tty'
-    else
-        printf '/dev/stdin'
-    fi
-}
-
-function is_dry_run_mode() {
-    [ -n "$DRY_RUN_FLAG" ]
-}
-
-# 完整命令清单（./manage.sh help:all）。默认 help 只显示日常入口 + 进阶原语，其余收进这里。
-# 这里是唯一自称「完整」的清单：新增 case 分支必须同时在此登记，否则用户无处可查。
-function print_help_all() {
-    echo -e "${HDR_BLUE}${BOLD}Agent Manager 帮助手册 · 完整命令${NC}\n"
+function print_help() {
+    echo -e "${HDR_BLUE}${BOLD}Agent Manager 帮助手册${NC}\n"
+    echo -e "直接执行 ${BOLD}./manage.sh${NC} 时默认显示本帮助，不会触发同步。\n"
     echo -e "${BOLD}${HDR_BLUE}=== 全局参数 (Flags) ===${NC}"
-    echo -e "  ${PENDING_GOLD}--dry-run${NC}       空转模式，仅输出计划动作并跳过会修改本地或远端状态的副作用"
-    echo -e "  ${PENDING_GOLD}--offline${NC}       离线模式，禁止远程拉取/安装；仅使用本地已存在仓库与配置（如 ${BOLD}--offline apply${NC}）"
-    echo -e "  ${PENDING_GOLD}-f, --force-refresh${NC} 更新探测失败时仍强制执行远端刷新；默认会跳过这些保守回退下载"
-    echo -e "  ${PENDING_GOLD}--wait-agent-lifecycle${NC} 等待 Agent 生命周期后台安装/升级结束；init / agents:apply 默认已启用"
-    echo -e "  ${BORDER_GRAY}全局参数只修饰命令，必须搭配命令使用（裸 flag 会报错，不会隐式跑 init）${NC}\n"
-    echo -e "${BOLD}${HDR_BLUE}=== 日常入口 (Main Flows) ===${NC}"
-    echo -e "  ${SUCCESS_GREEN}update${NC}          日常最常用：刷新元数据后把锁定态分发/收敛到本机（= \`bump\` + \`apply\`，secrets 只拉一次）；${BOLD}不安装、也不升级 Agent 软件${NC}（升级见 \`agents:apply\`）"
-    echo -e "  ${SUCCESS_GREEN}init${NC}            新机器初始化或全量收敛：\`bump\` + Agent 生命周期（安装缺失 Agent + 升级已装 Agent）+ \`apply\` + 失效引用审计"
-    echo -e "  ${SUCCESS_GREEN}apply${NC}           把当前锁定态分发/收敛到本机：secrets 拉取、shell alias、tools、browser、rules 构建分发、skills 链接、mcp 注入；不刷新版本锁、不安装 Agent"
-    echo -e "  ${SUCCESS_GREEN}bump${NC}            只刷新元数据：CLI/MCP/tool 版本锁与 skill commit（联网）写入本机锁文件；不分发、不安装 Agent、不改本机环境"
-    echo -e "  ${SUCCESS_GREEN}agents:apply${NC}    升级/修复已装 Agent 到上游最新（agents.json 的 npm 命令不锁版本）；不安装缺失 Agent"
-    echo -e "  ${SUCCESS_GREEN}agents:status${NC}   只读列出各 Agent 的安装来源与生命周期状态，不改动本机、不加运行锁"
-    echo -e "  ${SUCCESS_GREEN}plan${NC}            预演一次完整 \`init\`（dry-run）"
-    echo -e "  ${SUCCESS_GREEN}sys:upgrade${NC}     仅更新 agent-manager 仓库自身逻辑"
-    echo -e "  ${SUCCESS_GREEN}ui${NC}              启动基于 Terminal 的交互式可视化管理界面"
-    echo -e "  ${SUCCESS_GREEN}doctor / status${NC} 进行深度的资源校验、配置自检与环境排错诊断"
-    echo -e "  ${SUCCESS_GREEN}detect${NC}          仅执行各 Agent 开发工具的环境探测与支持情况检测"
-    echo -e "  ${SUCCESS_GREEN}fetch-models${NC}    探测并获取模型列表。用法：./manage.sh fetch-models <url> <key>"
-    echo -e "  ${SUCCESS_GREEN}help / help:all${NC} 分别显示日常帮助与本完整清单；两者都不加运行锁，同步任务运行时也可查\n"
-    echo -e "${BOLD}${HDR_BLUE}=== 运维排错 (Maintenance) ===${NC}"
-    echo -e "  ${VAL_PURPLE}sys:clean${NC}       执行全量环境大扫除，深度清理临时文件、无用快照缓存及历史日志"
-    echo -e "  ${VAL_PURPLE}sys:unlock${NC}      强制清除原子锁目录与遗留锁文件"
-    echo -e "  ${VAL_PURPLE}state:list${NC}      查找并列出近期系统中可用的容灾备份配置快照，最多 20 个"
-    echo -e "  ${VAL_PURPLE}state:restore${NC}   交互式快照选择，用于从特定备份快照中恢复配置"
-    echo -e "  ${VAL_PURPLE}sys:logs${NC}        查看最近一次执行的完整全链路同步日志（latest 指针）"
-    echo -e "  ${VAL_PURPLE}sys:clean-logs${NC}  清空 latest 指针与所有按次留存的运行日志文件\n"
-    echo -e "${BOLD}${HDR_BLUE}=== 分步原子控制 (Atomic syncs) ===${NC}"
-    echo -e "  ${BORDER_GRAY}mcp:apply${NC}       准备并注入 MCP 配置（默认检查/拉取 repo、同步 secrets、setup/build）"
-    echo -e "  ${BORDER_GRAY}rules:build${NC}     从 agent-rule/rules/src/ 生成可分发的 dist 规则产物"
-    echo -e "  ${BORDER_GRAY}rules:apply${NC}     独立执行规则与系统级 prompt 指令向各个 Agent 的拷贝或软链接分发"
-    echo -e "  ${BORDER_GRAY}claude:hooks:apply${NC} 独立刷新仓库级 Claude hooks 到 .claude/settings.json"
-    echo -e "  ${BORDER_GRAY}claude:statusline:apply${NC} 安装精简 statusline 脚本到 ~/.claude/statusline.sh"
-    echo -e "  ${BORDER_GRAY}claude:statusline:wire${NC}    将 statusline.sh 路径写入 ~/.claude/settings.json（仅作用于 Claude Code）"
-    echo -e "  ${BORDER_GRAY}claude:shell-aliases:apply${NC} 独立同步受管 shell alias 区块到 ~/.zshrc 与 ~/.zprofile"
-    echo -e "  ${BORDER_GRAY}claude:uninstall${NC}    完整卸载本机 Claude Code 全局痕迹（默认预览；--yes 才真删，可加 --backup-memory）"
-    echo -e "  ${BORDER_GRAY}claude:clean${NC}        清理会话/历史/缓存等可删除数据，保留配置·记忆·技能（默认预览；--yes 才删，自动护当前会话）"
-    echo -e "  ${BORDER_GRAY}codex:hooks:apply${NC} 独立刷新仓库级 Codex hooks 到 .codex/hooks.json"
-    echo -e "  ${BORDER_GRAY}skills:apply${NC}    独立执行全局或系统级专业技能代码集到 Agent 沙盒空间的映射配置与软链接"
-    echo -e "  ${BORDER_GRAY}skills:bump${NC}     显式解析并回写 skill 仓库的最新可审计版本（仅 release/tag，失败即停止）"
-    echo -e "  ${BORDER_GRAY}skill:disable X${NC} 本机持久禁用某个 skill（写入 manager.local.json；配合 skills:apply 清链生效）"
-    echo -e "  ${BORDER_GRAY}skill:enable X${NC}  解除某个 skill 的本机禁用"
-    echo -e "  ${BORDER_GRAY}skill:list${NC}      列出各 skill 的启用/禁用状态"
-    echo -e "  ${BORDER_GRAY}tools:apply${NC}     独立同步或安装全局统一增强工具链条"
-    echo -e "  ${BORDER_GRAY}browser:apply${NC}   独立同步 Chrome 的 Google US 浏览器前置状态\n"
+    echo -e "  ${PENDING_GOLD}--dry-run${NC}       空转预览，仅输出计划动作，不改本地/远端状态"
+    echo -e "  ${PENDING_GOLD}--offline${NC}       离线模式，禁止远程拉取/安装（如 ${BOLD}--offline update${NC}）"
+    echo -e "  ${PENDING_GOLD}-f, --force-refresh${NC} 探测失败时仍强制远端刷新"
+    echo -e "  ${PENDING_GOLD}--wait-agent-lifecycle${NC} 等待 Agent 生命周期后台安装/升级结束\n"
+    echo -e "${BOLD}${HDR_BLUE}=== 命令 (Commands) ===${NC}"
+    echo -e "  ${SUCCESS_GREEN}update${NC}         ${BOLD}日常最常用${NC}：把所有受管组件收敛到本机（secrets、shell alias、tools、browser、rules、skills、MCP、hooks）；不安装、也不升级 Agent 软件"
+    echo -e "  ${SUCCESS_GREEN}init${NC}           新机器初始化或全量收敛：安装缺失 Agent + 升级已装 Agent + \`update\`"
+    echo -e "  ${SUCCESS_GREEN}agents:update${NC}  升级/修复已装 Agent 到上游最新（agents.json 不锁版本）；不安装缺失 Agent"
+    echo -e "  ${SUCCESS_GREEN}doctor${NC}         深度资源校验、配置自检与环境排错（追加 --json 输出机器可读报告）"
+    echo -e "  ${SUCCESS_GREEN}help${NC}           显示本帮助\n"
 }
 
 case "$cmd" in
@@ -1508,240 +1009,23 @@ case "$cmd" in
         fi
         run_init_pipeline
         ;;
-    bump)
-        if [ -z "$WAIT_AGENT_LIFECYCLE_FLAG" ]; then
-            WAIT_AGENT_LIFECYCLE_FLAG="--wait-async-actions"
-        fi
-        run_bump_pipeline
-        ;;
-    apply)
-        run_apply_pipeline
-        ;;
     update)
         run_update_pipeline
         ;;
-    plan)
-        DRY_RUN_FLAG="--dry-run"
-        run_init_pipeline
-        ;;
-    agents:apply)
+    agents:update)
         if [ -z "$WAIT_AGENT_LIFECYCLE_FLAG" ]; then
             WAIT_AGENT_LIFECYCLE_FLAG="--wait-async-actions"
         fi
         run_agents_pipeline "--no-install"
         ;;
-    sys:upgrade)
-        run_self_update
-        ;;
-    ui)
-        run_supervised_interactive_command_in_dir 0 "$ROOT_DIR" "$PYTHON_CMD" -m src.interactive
-        ;;
-    doctor|status)
+    doctor)
         if [ "${CMD_ARGS[0]:-}" = "--json" ]; then
             doctor_check json
         else
             doctor_check
         fi
         ;;
-    agents:status)
-        run_agent_lifecycle_status_task
-        ;;
-    detect) detect_agents ;;
-    sys:unlock)
-        if is_dry_run_mode; then
-            echo "预览模式：计划清理原子锁目录与遗留锁文件。"
-        else
-            remove_lock_artifacts
-            echo "锁已解除。"
-        fi ;;
-    sys:logs)
-        if latest_log=$(resolve_latest_log_path); then
-            if [ -t 1 ] && command -v less >/dev/null 2>&1; then
-                less -R "$latest_log"
-            else
-                cat "$latest_log"
-            fi
-        else
-            echo "暂无日志。"
-        fi ;;
-    sys:clean-logs)
-        if is_dry_run_mode; then
-            echo "预览模式：计划清理 latest 指针与所有按次运行日志。"
-        else
-            rm -f "${LOG_PREFIX}"*.log "$LATEST_LOG_POINTER"
-            echo "日志已清理"
-        fi ;;
-    state:list)
-        if ! backup_entries="$(list_managed_backup_entries)"; then
-            exit 1
-        fi
-        if [ -n "$backup_entries" ]; then
-            printf '%s\n' "$backup_entries" | head -n 20
-        fi ;;
-    state:restore) 
-        files=()
-        if ! backup_entries="$(list_managed_backup_entries)"; then
-            exit 1
-        fi
-        while IFS= read -r line; do
-            files+=("$line")
-        done <<< "$(printf '%s\n' "$backup_entries" | head -n 10)"
-        if [ "${#files[@]}" -eq 0 ]; then echo "未发现备份。"; exit 0; fi
-        if is_dry_run_mode; then
-            echo "预览模式：以下备份可用于恢复（最多10个），实际恢复已跳过："
-            printf '%s\n' "${files[@]}"
-            exit 0
-        fi
-        selection_input="$(restore_backup_selection_input)"
-        select f in "${files[@]}"; do
-            [ -n "${f:-}" ] || { echo "无效选择。"; continue; }
-            if restore_backup_entry "$f"; then
-                echo "已恢复。"
-            else
-                exit 1
-            fi
-            break
-        done < "$selection_input" ;;
-    mcp:apply)
-        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" sync_mcp.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/mcp.json" --prepare-runtime $DRY_RUN_FLAG $OFFLINE_FLAG $FORCE_REFRESH_FLAG ;;
-    rules:build)
-        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" "$PYTHON_CMD" ./scripts/build-agent-rules.py ;;
-    rules:apply)
-        if ! target_names="$(list_active_rule_targets)"; then
-            exit 1
-        fi
-        if [ -z "$target_names" ]; then
-            echo "当前策略未启用任何 Rules 目标。"
-            exit 0
-        fi
-        rule_args=()
-        while IFS= read -r target_name; do
-            [ -n "$target_name" ] && rule_args+=(--target "$target_name")
-        done <<< "$target_names"
-        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" ./scripts/sync-agent-rules.sh "${rule_args[@]}" $DRY_RUN_FLAG ;;
-    claude:hooks:apply)
-        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" "$PYTHON_CMD" ./scripts/sync-claude-hooks.py $DRY_RUN_FLAG ;;
-    claude:shell-aliases:apply)
-        run_supervised_command_in_dir 60 "$ROOT_DIR" bash "$ROOT_DIR/scripts/claude/sync_shell_aliases.sh" $DRY_RUN_FLAG ;;
-    claude:statusline:apply)
-        run_supervised_command_in_dir 600 "$ROOT_DIR" "$PYTHON_CMD" ./scripts/claude/install_statusline.py $DRY_RUN_FLAG ;;
-    claude:statusline:wire)
-        run_supervised_command_in_dir 600 "$ROOT_DIR" "$PYTHON_CMD" ./scripts/claude/install_statusline.py \
-            --apply-settings \
-            $DRY_RUN_FLAG ;;
-    claude:uninstall)
-        uninstall_args=(bash "$ROOT_DIR/scripts/claude/uninstall.sh")
-        if [ -n "$DRY_RUN_FLAG" ]; then uninstall_args+=("$DRY_RUN_FLAG"); fi
-        if [ "${#CMD_ARGS[@]}" -gt 0 ]; then uninstall_args+=("${CMD_ARGS[@]}"); fi
-        run_supervised_command_in_dir 120 "$ROOT_DIR" "${uninstall_args[@]}" ;;
-    claude:clean)
-        clean_args=(bash "$ROOT_DIR/scripts/claude/clean.sh")
-        if [ -n "$DRY_RUN_FLAG" ]; then clean_args+=("$DRY_RUN_FLAG"); fi
-        if [ "${#CMD_ARGS[@]}" -gt 0 ]; then clean_args+=("${CMD_ARGS[@]}"); fi
-        run_supervised_command_in_dir 120 "$ROOT_DIR" "${clean_args[@]}" ;;
-    codex:hooks:apply)
-        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-rule" "$PYTHON_CMD" ./scripts/sync-codex-hooks.py $DRY_RUN_FLAG ;;
-    skills:apply)
-        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" link_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG $FORCE_REFRESH_FLAG ;;
-    skills:bump)
-        upgrade_args=(upgrade_skills.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/skills.json")
-        if [ "${#CMD_ARGS[@]}" -gt 0 ]; then
-            for repo_name in "${CMD_ARGS[@]}"; do
-                upgrade_args+=(--repo "$repo_name")
-            done
-        fi
-        if [ -n "$DRY_RUN_FLAG" ]; then upgrade_args+=("$DRY_RUN_FLAG"); fi
-        if [ -n "$OFFLINE_FLAG" ]; then upgrade_args+=("$OFFLINE_FLAG"); fi
-        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-skill" "$PYTHON_CMD" "${upgrade_args[@]}" ;;
-    skill:disable|skill:enable)
-        skill_action="${cmd#skill:}"
-        skill_name="${CMD_ARGS[0]:-}"
-        if [ -z "$skill_name" ]; then
-            echo -e "${ERROR_RED}用法: ./manage.sh skill:${skill_action} <SKILL>${NC}" >&2
-            exit 1
-        fi
-        "$PYTHON_CMD" "$ROOT_DIR/agent-skill/skill_toggle.py" "$skill_action" "$skill_name" \
-            --def-file "$ROOT_DIR/config/skills.json" --local "$LOCAL_CONFIG" || exit 1
-        echo "已更新 ${LOCAL_CONFIG} ; 运行 'make apply'（或 './manage.sh skills:apply'）生效。" ;;
-    skill:list)
-        "$PYTHON_CMD" "$ROOT_DIR/agent-skill/skill_toggle.py" list \
-            --def-file "$ROOT_DIR/config/skills.json" --local "$LOCAL_CONFIG" ;;
-    tools:apply)
-        run_supervised_command_in_dir 600 "$ROOT_DIR/agent-tool" "$PYTHON_CMD" sync_tools.py --config "$CONFIG_FILE" --def-file "$ROOT_DIR/config/tools.json" --yes $DRY_RUN_FLAG $OFFLINE_FLAG $FORCE_REFRESH_FLAG ;;
-    browser:apply)
-        run_browser_us_sync_task ;;
-    fetch-models)
-        args=()
-        if [ "${#CMD_ARGS[@]}" -gt 0 ]; then
-            args=("${CMD_ARGS[@]}")
-        fi
-        if [ "${#args[@]}" -eq 1 ]; then
-            echo -e "${ERROR_RED}用法: ./manage.sh fetch-models [base_uri api_key]${NC}"
-            exit 1
-        fi
-        if [ "${#args[@]}" -ge 2 ]; then
-            run_supervised_command_in_dir 600 "$ROOT_DIR" "$PYTHON_CMD" "$ROOT_DIR/scripts/fetch_models.py" "${args[0]}" "${args[1]}"
-        else
-            run_supervised_command_in_dir 600 "$ROOT_DIR" "$PYTHON_CMD" "$ROOT_DIR/scripts/fetch_models.py"
-        fi
-        ;;
-    sys:clean)
-        echo -e "${HDR_BLUE}正在执行全量环境大扫除...${NC}"
-        if ! agents_paths="$(list_cleanup_target_paths)"; then
-            exit 1
-        fi
-        if is_dry_run_mode; then
-            echo "预览模式：计划清理以下受管备份、临时文件与运行日志。"
-        fi
-        echo "$agents_paths" | while read -r p; do
-            if [ -n "$p" ]; then
-                d=$(dirname "$p")
-                b=$(basename "$p")
-                if [ -d "$d" ]; then
-                    find "$d" -maxdepth 1 \( -name "${b}.bak" -o -name "${b}.bak.*" -o -name "${b}.tmp_*" -o -name ".${b}.restore_tmp_*" -o -name ".${b}.restore_old_*" \) -print0 2>/dev/null | while IFS= read -r -d '' candidate; do
-                        if is_dry_run_mode; then
-                            echo "  - $candidate"
-                        else
-                            rm -rf "$candidate"
-                        fi
-                    done
-                fi
-            fi
-        done
-        if is_dry_run_mode; then
-            for log_candidate in "${LOG_PREFIX}"*.log "$LATEST_LOG_POINTER"; do
-                if [ -e "$log_candidate" ] || [ -L "$log_candidate" ]; then
-                    echo "  - $log_candidate"
-                fi
-            done
-            echo -e "${SUCCESS_GREEN}全量清理预演完成。${NC}"
-        else
-            rm -f "${LOG_PREFIX}"*.log "$LATEST_LOG_POINTER"
-            echo -e "${SUCCESS_GREEN}全量清理完成。${NC}"
-        fi ;;
     help|-h|--help|-help)
-        echo -e "${HDR_BLUE}${BOLD}Agent Manager 帮助手册${NC}\n"
-        echo -e "直接执行 ${BOLD}./manage.sh${NC} 时默认显示本帮助，不会触发同步。\n"
-        echo -e "${BOLD}${HDR_BLUE}=== 全局参数 (Flags) ===${NC}"
-        echo -e "  ${PENDING_GOLD}--dry-run${NC}       空转预览，仅输出计划动作，不改本地/远端状态"
-        echo -e "  ${PENDING_GOLD}--offline${NC}       离线模式，禁止远程拉取/安装（如 ${BOLD}--offline apply${NC}）"
-        echo -e "  ${PENDING_GOLD}-f, --force-refresh${NC} 探测失败时仍强制远端刷新"
-        echo -e "  ${PENDING_GOLD}--wait-agent-lifecycle${NC} 等待 Agent 生命周期后台安装/升级结束\n"
-        echo -e "${BOLD}${HDR_BLUE}=== 日常入口 (Main Flows) ===${NC}"
-        echo -e "  ${SUCCESS_GREEN}init${NC}      新机器初始化 / 全量收敛：装缺失 Agent + 刷新元数据 + 分发到本机"
-        echo -e "  ${SUCCESS_GREEN}update${NC}    ${BOLD}日常最常用${NC}：刷新元数据并分发到本机（= \`bump\` + \`apply\`）；不装、也不升级 Agent 软件"
-        echo -e "  ${SUCCESS_GREEN}plan${NC}      预演一次完整 \`init\`（dry-run）"
-        echo -e "  ${SUCCESS_GREEN}doctor${NC}    深度资源校验、配置自检与环境排错（= \`status\`）"
-        echo -e "  ${SUCCESS_GREEN}ui${NC}        启动交互式可视化管理界面\n"
-        echo -e "${BOLD}${HDR_BLUE}=== 进阶原语 (GitOps 拆分) ===${NC}"
-        echo -e "  ${SUCCESS_GREEN}apply${NC}     只把锁定态分发/收敛到本机；不刷版本锁、不装 Agent"
-        echo -e "  ${SUCCESS_GREEN}bump${NC}      只刷新版本锁与 skill commit（联网）；不分发、不装 Agent"
-        echo -e "  ${SUCCESS_GREEN}agents:apply${NC}  升级/修复已装 Agent 到上游最新（agents.json 不锁版本）；不装缺失"
-        echo -e "  ${SUCCESS_GREEN}sys:upgrade${NC}   只更新 agent-manager 仓库自身逻辑\n"
-        echo -e "更多命令（detect / fetch-models / 运维排错 / 分步原子控制 mcp·rules·skills·tools·browser·claude·codex）："
-        echo -e "  ${BOLD}./manage.sh help:all${NC}   或   ${BOLD}make help:all${NC}\n"
-        echo "" ;;
-    help:all)
-        print_help_all ;;
+        print_help ;;
     *) echo -e "${ERROR_RED}错误: 未知命令 '$cmd'${NC}"; exit 1 ;;
 esac

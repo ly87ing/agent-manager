@@ -2,23 +2,16 @@
   "servers": {
     "chrome-devtools": {
       "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp@1.8.0", "--isolated", "--no-usage-statistics"],
+      "args": ["-y", "chrome-devtools-mcp", "--isolated", "--no-usage-statistics"],
       "startup_timeout_sec": 120,
       "env": {},
-      "version_lock": {
-        "type": "npm",
-        "package": "chrome-devtools-mcp",
-        "fields": {
-          "args.1": "chrome-devtools-mcp@{version}"
-        }
-      },
       "agents": null
     },
     "grok-search": {
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/GuDaStudio/GrokSearch@8f0ae3c7f25ec419631ade7e431fa2531503433e",
+        "git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily",
         "grok-search"
       ],
       "startup_timeout_sec": 120,
@@ -32,21 +25,13 @@
         "FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}",
         "FIRECRAWL_API_URL": "${FIRECRAWL_API_URL}"
       },
-      "version_lock": {
-        "type": "git-ref",
-        "remote": "https://github.com/GuDaStudio/GrokSearch",
-        "ref": "grok-with-tavily",
-        "fields": {
-          "args.1": "git+https://github.com/GuDaStudio/GrokSearch@{version}"
-        }
-      },
       "agents": null
     },
     "serena": {
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/oraios/serena@949a27ef1e5fda1a6e7b561e777bcece345c6ffd",
+        "git+https://github.com/oraios/serena@main",
         "serena",
         "start-mcp-server",
         "--open-web-dashboard",
@@ -67,14 +52,6 @@
       "startup_timeout_sec": 120,
       "env": {},
       "project_serena_folder_location": "/tmp/serena$projectDir/.serena",
-      "version_lock": {
-        "type": "git-ref",
-        "remote": "https://github.com/oraios/serena",
-        "ref": "main",
-        "fields": {
-          "args.1": "git+https://github.com/oraios/serena@{version}"
-        }
-      },
       "agents": null
     }
   },

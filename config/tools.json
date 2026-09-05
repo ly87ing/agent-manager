@@ -1,17 +1,9 @@
 {
   "tools": {
     "playwright-cli": {
-      "install": "npm install -g @playwright/cli@0.1.19",
+      "install": "npm install -g @playwright/cli",
       "uninstall": "npm uninstall -g @playwright/cli",
-      "upgrade": "npm install -g @playwright/cli@0.1.19",
-      "version_lock": {
-        "type": "npm",
-        "package": "@playwright/cli",
-        "fields": {
-          "install": "npm install -g @playwright/cli@{version}",
-          "upgrade": "npm install -g @playwright/cli@{version}"
-        }
-      },
+      "upgrade": "npm install -g @playwright/cli",
       "setup": "playwright-cli install-browser",
       "setup_timeout_sec": 300,
       "ready_check": "bin:playwright-cli",

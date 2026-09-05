@@ -42,8 +42,8 @@ def file_targets_dist(file_path: str | None) -> bool:
 def command_writes_dist(command: str | None) -> bool:
     # Conservative heuristic: deny only when the command both mentions the dist
     # tree AND contains a write/destructive shell operator. Legitimate workflows
-    # like `make rules-build` invoke the build script without naming the dist
-    # path in the bash command itself, so they fall through unblocked.
+    # like running build-agent-rules.py invoke the build script without naming
+    # the dist path in the bash command itself, so they fall through unblocked.
     if not command or "agent-rule/rules/dist" not in command:
         return False
     if re.search(r"^\*\*\* (Add|Update|Delete) File: .*/?agent-rule/rules/dist/", command, re.MULTILINE):
@@ -62,7 +62,7 @@ if file_targets_dist(tool_input.get("file_path")) or command_writes_dist(tool_in
                 "permissionDecision": "deny",
                 "permissionDecisionReason": (
                     "agent-rule/rules/dist/ is generated output. "
-                    "Edit agent-rule/rules/src/ and run make rules-build instead."
+                    "Edit agent-rule/rules/src/ and rebuild via build-agent-rules.py (or run make update) instead."
                 ),
             }
         },

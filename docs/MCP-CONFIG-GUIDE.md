@@ -26,11 +26,8 @@
 # 全量同步（包含 Agent 安装、资源更新和 MCP 配置）
 make init
 
-# 本地环境收敛（会更新受管 MCP 资源并准备运行时）
-make apply
-
-# 仅收敛 MCP 配置到本机
-./manage.sh mcp:apply
+# 本地环境收敛（会更新受管 MCP 资源并准备运行时，MCP 注入随该管线执行）
+make update
 ```
 
 ### 手动配置
@@ -43,16 +40,16 @@ make apply
 
 | Server | 用途 | 受管命令 | 凭证 | 默认策略 |
 |--------|------|----------|------|----------|
-| `chrome-devtools` | Chrome DevTools 浏览器调试、性能分析、network / console / screenshot | `npx -y chrome-devtools-mcp@<固定版本>` | 无 | 启用 |
-| `grok-search` | web_search / web_fetch 联网搜索与网页抓取 | `uvx --from git+https://github.com/GuDaStudio/GrokSearch@<固定commit> grok-search` | `GROK_API_URL`, `GROK_API_KEY`, `GROK_MODEL`, `TAVILY_ENABLED`, `TAVILY_API_KEY`, `TAVILY_API_URL`, `FIRECRAWL_API_KEY`, `FIRECRAWL_API_URL` | 启用 |
-| `serena` | JS/TS 语义级代码导航（LSP：find_symbol / 引用 / 符号概览） | `uvx --from git+https://github.com/oraios/serena@<固定commit> serena start-mcp-server`，按客户端追加 context 参数 | 无 | 启用 |
+| `chrome-devtools` | Chrome DevTools 浏览器调试、性能分析、network / console / screenshot | `npx -y chrome-devtools-mcp`（无版本号，跟随上游最新） | 无 | 启用 |
+| `grok-search` | web_search / web_fetch 联网搜索与网页抓取 | `uvx --from git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily grok-search` | `GROK_API_URL`, `GROK_API_KEY`, `GROK_MODEL`, `TAVILY_ENABLED`, `TAVILY_API_KEY`, `TAVILY_API_URL`, `FIRECRAWL_API_KEY`, `FIRECRAWL_API_URL` | 启用 |
+| `serena` | JS/TS 语义级代码导航（LSP：find_symbol / 引用 / 符号概览） | `uvx --from git+https://github.com/oraios/serena@main serena start-mcp-server`，按客户端追加 context 参数 | 无 | 启用 |
 
 **维护约定**:
-- 受管 MCP 的实际命令必须固定版本或固定 commit；`@latest`、分支名只允许出现在 `version_lock` 的查询元数据里。
-- `config/mcp.json` 保存服务器定义、命令模板和查询元数据；`make bump` / `make update` / `make init` 会先运行 `scripts/update_version_pins.py`，查询 npm 最新版本或 Git ref 最新 commit，再写入本机 `config/version-pins.local.json`。
-- 首次调用 `chrome-devtools` 时，`npx` 可能会下载锁定版本的包；需要本机有可用的 Node.js / npm 运行时。
+- 受管 MCP 的实际命令不锁版本：npm 包命令不带版本号，git 依赖跟踪上游分支（`grok-search` 为 `grok-with-tavily`，`serena` 为 `main`），跟随上游最新。
+- `config/mcp.json` 保存服务器定义与命令模板；`make update` / `make init` 直接按其中的定义收敛本机配置，版本波动视为上游变更。
+- 首次调用 `chrome-devtools` 时，`npx` 可能会联网下载最新版本的包；需要本机有可用的 Node.js / npm 运行时。
 - `chrome-devtools` 的 Codex 启动超时按 120 秒维护，覆盖默认 30 秒，避免 `npx` 冷启动或缓存失效时被误判为 MCP 启动失败。
-- `make doctor` 会在 `chrome-devtools` 处于启用状态时预检 `npx` 运行时是否可用；实际包版本以 `config/mcp.json` 套用本地版本锁后的有效配置为准。
+- `make doctor` 会在 `chrome-devtools` 处于启用状态时预检 `npx` 运行时是否可用；实际命令以 `config/mcp.json` 中的定义为准。
 - 如果后续需要统一增加 `--browserUrl`、`--headless`、`--isolated` 等参数，应修改 `config/mcp.json`，不要手改单个 Agent 的 MCP 配置文件。
 - 本项目不管理 GitHub Copilot，因此不会再向其配置目录注入托管 MCP，也不会再生成 Copilot 专属 repo-native rules 文件。
 
@@ -80,7 +77,7 @@ make apply
   "mcpServers": {
     "grok-search": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/GuDaStudio/GrokSearch@<固定commit>", "grok-search"],
+      "args": ["--from", "git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily", "grok-search"],
       "env": {
         "GROK_API_URL": "https://...",
         "GROK_API_KEY": "sk-..."
@@ -103,7 +100,7 @@ make apply
 ```toml
 [mcp_servers.grok-search]
 command = "uvx"
-args = ["--from", "git+https://github.com/GuDaStudio/GrokSearch@<固定commit>", "grok-search"]
+args = ["--from", "git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily", "grok-search"]
 startup_timeout_sec = 120
 
 [mcp_servers.grok-search.env]
@@ -160,8 +157,8 @@ make init
 ```
 
 **自动化流程**：
-- `make bump` / `make update` / `make init` 会在顶层检查 `secrets/` 是否存在
-- `mcp:apply` 默认会准备 MCP 运行时：同步本地 secrets 仓库、按需 clone/pull MCP repo，并执行 setup/build
+- `make update` / `make init` 会在顶层检查 `secrets/` 是否存在
+- MCP 注入随 `make update` 管线执行，默认会准备 MCP 运行时：同步本地 secrets 仓库、按需 clone/pull MCP repo，并执行 setup/build
 - 如需阻止联网拉取或安装，请追加 `--offline`
 
 #### 手动初始化
@@ -188,7 +185,7 @@ git push origin main
 
 **优势**：
 - ✅ 简单易用，无 submodule 复杂性
-- ✅ `mcp:apply` 默认会把配置与运行时一起收敛，减少“配置已写入但运行时未准备”的半完成状态
+- ✅ `make update` 默认会把配置与运行时一起收敛，减少“配置已写入但运行时未准备”的半完成状态
 - ✅ 凭证版本化、可审计
 - ✅ 权限分离（私有仓库）
 
@@ -211,10 +208,10 @@ git push origin main
 本项目默认通过以下命令受管分发给所有支持 MCP 的 Agent：
 
 ```bash
-npx -y chrome-devtools-mcp@<固定版本>
+npx -y chrome-devtools-mcp
 ```
 
-这样把版本查询集中在 `make bump`，避免每个 Agent 在真正启动 MCP 时各自解析 `@latest`。
+命令不带版本号、跟随上游最新；每个 Agent 在真正启动 MCP 时由 `npx` 解析当前上游版本。
 
 ### 使用约束
 
@@ -258,8 +255,8 @@ serena 的 Java 后端（solidlsp `eclipse_jdtls.py`）把 jdtls 的 `java.confi
   | Claude Code | `--context claude-code --project-from-cwd` |
   | Codex | `--context codex --project-from-cwd` |
 
-- 命令固定 commit，版本波动通过 `version_lock`（`ref: main`）在 `make bump` 时集中解析写入 `config/version-pins.local.json`。
-- `make init`、`make apply` 和 `./manage.sh mcp:apply` 会复用该固定版本的 Serena 配置加载器，生成或更新 `~/.serena/serena_config.yml`，并把 `project_serena_folder_location` 对齐为 `/tmp/serena$projectDir/.serena`。重复执行只在值变化时保存，并保留其他 Serena 配置；换机后重新运行任一命令即可恢复该策略。
+- 命令跟踪上游 `main` 分支最新（`git+https://github.com/oraios/serena@main`），不固定 commit。
+- `make init` 和 `make update` 会复用 Serena 配置加载器，生成或更新 `~/.serena/serena_config.yml`，并把 `project_serena_folder_location` 对齐为 `/tmp/serena$projectDir/.serena`。重复执行只在值变化时保存，并保留其他 Serena 配置；换机后重新运行任一命令即可恢复该策略。
 - 例如项目根目录为 `/YOUR_WORKSPACE/YOUR_PROJECT` 时，Serena 数据会写入 `/tmp/serena/YOUR_WORKSPACE/YOUR_PROJECT/.serena`。`/tmp` 可能被系统清理，因此索引、缓存和 Serena memories 不保证持久保留。
 - Serena 为兼容旧项目，会在临时目标尚不存在时回退到仓库内已有的 `.serena/`。自动配置不迁移旧数据；已有项目如需切换，应先把旧目录迁到对应临时路径或确认无需保留后再移除。
 - 需要本机有可用的 `uvx`（uv）运行时；JS/TS 语义能力额外需要 Node.js。
@@ -295,7 +292,7 @@ KEY = '{"nested":"value"}'
 2. **手动测试命令**:
    ```bash
    GROK_API_KEY='...' \
-     uvx --from git+https://github.com/GuDaStudio/GrokSearch@<固定commit> grok-search
+     uvx --from git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily grok-search
    ```
 
 3. **检查环境变量是否正确传递**:
@@ -326,7 +323,7 @@ KEY = '{"nested":"value"}'
 
 3. 重新收敛配置:
    ```bash
-   ./manage.sh mcp:apply
+   make update
    # 或
    cd agent-mcp && python3 sync_mcp.py --config ../config/manager.json --def-file ../config/mcp.json --prepare-runtime
    ```
@@ -341,7 +338,7 @@ KEY = '{"nested":"value"}'
 
 ```bash
 # 方法 1: 自动初始化（推荐）
-SECRETS_REPO_URL=https://example.com/your-secrets.git make bump
+SECRETS_REPO_URL=https://example.com/your-secrets.git make update
 # 会自动检测并克隆 secrets 仓库
 
 # 方法 2: 手动运行初始化脚本
@@ -367,7 +364,7 @@ python3 -c "import json; d=json.load(open('~/.claude.json')); print(json.dumps(d
 
 # 3. 手动启动 MCP 服务器测试
 export GROK_API_KEY='...'
-uvx --from git+https://github.com/GuDaStudio/GrokSearch@<固定commit> grok-search
+uvx --from git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily grok-search
 ```
 
 ### 各 Agent 专用调试
@@ -404,24 +401,22 @@ PY
 ## 附录：Agent Manager MCP 同步流程
 
 ```
-默认模式（mcp:apply / make apply / make update / make bump / make init 中的 MCP 步骤）:
-1. 读取 config/mcp.json 获取服务器定义
+默认模式（make update / make init 中的 MCP 步骤）:
+1. 读取 config/mcp.json 获取服务器定义（命令不锁版本，跟随上游最新）
    ↓
-2. `make bump` / `make init` 入口先刷新 config/version-pins.local.json；`apply` 只消费套用本地 lock 后的固定版本
+2. 按固定优先级加载 MCP 凭证: root/.env → secrets/mcp.env → 系统环境变量回退
    ↓
-3. 按固定优先级加载 MCP 凭证: root/.env → secrets/mcp.env → 系统环境变量回退
+3. 替换 ${VAR} 占位符；若真实执行时仍有未解析占位符，则直接失败
    ↓
-4. 替换 ${VAR} 占位符；若真实执行时仍有未解析占位符，则直接失败
-   ↓
-5. 根据各 Agent 格式生成配置
+4. 根据各 Agent 格式生成配置
    ├─ JSON 格式 (Claude Code)
    └─ TOML 格式 (Codex，带字符串转义)
    ↓
-6. 校验现有配置可解析、生成结果合法、且仅删除 _MANAGED_BY=agent-manager 的托管段
+5. 校验现有配置可解析、生成结果合法、且仅删除 _MANAGED_BY=agent-manager 的托管段
    ↓
-7. 原子写入各配置文件并记录 _MANAGED_BY = "agent-manager" 标记
-8. 同步本地 secrets Git 仓库（非 offline 且非 dry-run）
-9. clone/pull MCP repo，按需要执行 setup/build
+6. 原子写入各配置文件并记录 _MANAGED_BY = "agent-manager" 标记
+7. 同步本地 secrets Git 仓库（非 offline 且非 dry-run）
+8. clone/pull MCP repo，按需要执行 setup/build
 ```
 
 ---

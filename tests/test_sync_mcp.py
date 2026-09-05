@@ -49,23 +49,18 @@ class SyncMcpTests(unittest.TestCase):
         # kimi-code 走原生 mcpServers JSON 结构的用户级配置文件
         self.assertEqual(definitions["agent_paths"]["kimi-code"], "~/.kimi-code/mcp.json")
 
-    def test_committed_mcp_policy_enables_chrome_devtools_fixed_version(self):
+    def test_committed_mcp_policy_enables_chrome_devtools_unpinned(self):
         definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
         policy = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
 
         chrome_devtools = definitions["servers"]["chrome-devtools"]
         self.assertEqual(chrome_devtools["command"], "npx")
-        self.assertRegex(chrome_devtools["args"][1], r"^chrome-devtools-mcp@\d")
-        self.assertNotIn("@latest", chrome_devtools["args"][1])
-        self.assertEqual(chrome_devtools["startup_timeout_sec"], 120)
         self.assertEqual(
-            chrome_devtools["version_lock"],
-            {
-                "type": "npm",
-                "package": "chrome-devtools-mcp",
-                "fields": {"args.1": "chrome-devtools-mcp@{version}"},
-            },
+            chrome_devtools["args"],
+            ["-y", "chrome-devtools-mcp", "--isolated", "--no-usage-statistics"],
         )
+        self.assertNotIn("version_lock", chrome_devtools)
+        self.assertEqual(chrome_devtools["startup_timeout_sec"], 120)
         self.assertEqual(chrome_devtools.get("env", {}), {})
         self.assertIsNone(chrome_devtools["agents"])
         self.assertTrue(policy["mcp"]["chrome-devtools"]["enabled"])
@@ -92,26 +87,22 @@ class SyncMcpTests(unittest.TestCase):
         self.assertEqual(env["FIRECRAWL_API_URL"], "${FIRECRAWL_API_URL}")
         self.assertEqual(env["GROK_MODEL"], "${GROK_MODEL}")
 
-    def test_committed_grok_search_definition_uses_fixed_git_commit(self):
+    def test_committed_grok_search_definition_tracks_feature_branch(self):
         definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
         grok_search = definitions["servers"]["grok-search"]
 
-        self.assertRegex(
+        self.assertEqual(
             grok_search["args"][1],
-            r"^git\+https://github\.com/GuDaStudio/GrokSearch@[0-9a-f]{40}$",
+            "git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily",
         )
-        self.assertEqual(grok_search["version_lock"]["type"], "git-ref")
-        self.assertEqual(grok_search["version_lock"]["ref"], "grok-with-tavily")
+        self.assertNotIn("version_lock", grok_search)
 
-    def test_committed_serena_definition_uses_fixed_git_commit(self):
+    def test_committed_serena_definition_tracks_main_branch(self):
         definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
         serena = definitions["servers"]["serena"]
 
         self.assertEqual(serena["command"], "uvx")
-        self.assertRegex(
-            serena["args"][1],
-            r"^git\+https://github\.com/oraios/serena@[0-9a-f]{40}$",
-        )
+        self.assertEqual(serena["args"][1], "git+https://github.com/oraios/serena@main")
         self.assertIn("start-mcp-server", serena["args"])
         self.assertNotIn("--context", serena["args"])
         self.assertEqual(
@@ -129,12 +120,7 @@ class SyncMcpTests(unittest.TestCase):
         )
         self.assertIsNone(serena["agents"])
         self.assertEqual(serena["startup_timeout_sec"], 120)
-        self.assertEqual(serena["version_lock"]["type"], "git-ref")
-        self.assertEqual(serena["version_lock"]["ref"], "main")
-        self.assertEqual(
-            serena["version_lock"]["fields"],
-            {"args.1": "git+https://github.com/oraios/serena@{version}"},
-        )
+        self.assertNotIn("version_lock", serena)
 
     def test_configure_serena_project_folder_uses_pinned_runtime_and_saves_only_changes(self):
         definitions = json.loads((ROOT / "config" / "mcp.json").read_text(encoding="utf-8"))
@@ -228,59 +214,6 @@ class SyncMcpTests(unittest.TestCase):
         policy = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
 
         self.assertTrue(policy["mcp"]["serena"]["enabled"])
-
-    def test_main_applies_local_version_pins_to_server_args(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir)
-            config_path = temp_root / "manager.json"
-            def_path = temp_root / "mcp.json"
-            agent_config_path = temp_root / "agent.json"
-            config_path.write_text(
-                json.dumps({"mcp": {"demo": {"enabled": True}}}),
-                encoding="utf-8",
-            )
-            def_path.write_text(
-                json.dumps(
-                    {
-                        "servers": {
-                            "demo": {
-                                "command": "npx",
-                                "args": ["-y", "demo-mcp@0.1.0"],
-                                "env": {},
-                                "version_lock": {
-                                    "type": "npm",
-                                    "package": "demo-mcp",
-                                    "fields": {"args.1": "demo-mcp@{version}"},
-                                },
-                                "agents": ["claude-code"],
-                            }
-                        },
-                        "agent_paths": {"claude-code": str(agent_config_path)},
-                    }
-                ),
-                encoding="utf-8",
-            )
-            (temp_root / "version-pins.local.json").write_text(
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "version_locks": {"mcp.json": {"servers.demo": "4.5.6"}},
-                        "skill_repositories": {},
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            with mock.patch.object(
-                sys,
-                "argv",
-                ["sync_mcp.py", "--config", str(config_path), "--def-file", str(def_path), "--base-dir", str(temp_root / "mcp")],
-            ):
-                with mock.patch.object(sync_mcp, "is_agent_installed", return_value=True):
-                    sync_mcp.main()
-
-            updated = json.loads(agent_config_path.read_text(encoding="utf-8"))
-            self.assertEqual(updated["mcpServers"]["demo"]["args"], ["-y", "demo-mcp@4.5.6"])
 
     def test_codex_toml_receives_startup_timeout_without_json_leak(self):
         with tempfile.TemporaryDirectory() as temp_dir:

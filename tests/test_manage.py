@@ -64,8 +64,6 @@ class ManageScriptTests(unittest.TestCase):
         env["AGENT_MANAGER_BROWSER_US_CONFIG_DIR"] = str(self.runtime_dir / "browser-us-config")
         env["AGENT_MANAGER_BROWSER_US_NO_OPEN"] = "1"
         env["AGENT_MANAGER_BROWSER_US_SKIP_EXIT_CHECK"] = "1"
-        env["AGENT_MANAGER_SKIP_VERSION_PIN_UPDATE"] = "1"
-        env["AGENT_MANAGER_SKIP_SKILL_VERSION_UPDATE"] = "1"
         return env
 
     def _write_stub(self, path: Path, content: str):
@@ -227,7 +225,7 @@ class ManageScriptTests(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "apply"],
+                [str(temp_root / "manage.sh"), "update"],
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,
@@ -261,7 +259,7 @@ class ManageScriptTests(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "apply"],
+                [str(temp_root / "manage.sh"), "update"],
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,
@@ -274,159 +272,6 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("本地覆盖配置无效", combined)
             self.assertIn("manager.local.json 顶层必须是对象", combined)
             self.assertFalse(call_log.exists(), combined)
-
-    def test_detect_fails_on_invalid_agent_definitions(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            (temp_root / "config" / "agents.json").write_text("{ invalid json\n", encoding="utf-8")
-
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "detect"],
-                cwd=temp_root,
-                env=self._managed_env(),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            combined = result.stdout + result.stderr
-            self.assertNotEqual(result.returncode, 0, combined)
-            self.assertIn("agents.json", combined)
-            self.assertIn("无效", combined)
-
-    def test_detect_fails_on_non_object_agent_definition_entry(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            (temp_root / "config" / "agents.json").write_text('{"claude-code": []}\n', encoding="utf-8")
-
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "detect"],
-                cwd=temp_root,
-                env=self._managed_env(),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            combined = result.stdout + result.stderr
-            self.assertNotEqual(result.returncode, 0, combined)
-            self.assertIn("agents.json.claude-code", combined)
-            self.assertIn("必须是对象", combined)
-
-    def test_detect_fails_on_non_object_tool_definitions(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            (temp_root / "config" / "tools.json").write_text('{"tools": []}\n', encoding="utf-8")
-
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "detect"],
-                cwd=temp_root,
-                env=self._managed_env(),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            combined = result.stdout + result.stderr
-            self.assertNotEqual(result.returncode, 0, combined)
-            self.assertIn("tools.json.tools", combined)
-            self.assertIn("必须是对象", combined)
-
-    def test_detect_repo_backed_tool_requires_managed_git_repo(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            temp_home.mkdir()
-            (temp_root / "config" / "manager.json").write_text(
-                '{\n'
-                '  "agents": {},\n'
-                '  "tools": {"playwright-cli": {"enabled": true, "auto_update": true}},\n'
-                '  "skills": {},\n'
-                '  "mcp": {}\n'
-                '}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "tools.json").write_text(
-                '{\n'
-                '  "tools": {\n'
-                '    "playwright-cli": {\n'
-                '      "url": "https://github.com/microsoft/playwright-cli.git",\n'
-                '      "setup": "npm install && npx playwright install",\n'
-                '      "ready_paths": ["node_modules"]\n'
-                '    }\n'
-                '  }\n'
-                '}\n',
-                encoding="utf-8",
-            )
-            repo_tool_dir = temp_root / "agent-tool" / "playwright-cli"
-            remove_path(repo_tool_dir)
-            repo_tool_dir.mkdir(parents=True, exist_ok=True)
-
-            env = self._managed_env()
-            env["HOME"] = str(temp_home)
-            env["PATH"] = "/usr/bin:/bin"
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "detect"],
-                cwd=temp_root,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            combined = result.stdout + result.stderr
-            self.assertEqual(result.returncode, 0, combined)
-            self.assertRegex(combined, r"playwright-cli\s+\(工具就绪:否\)")
-
-    def test_detect_repo_backed_tool_requires_readiness_artifacts_after_clone(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            temp_home.mkdir()
-            (temp_root / "config" / "manager.json").write_text(
-                '{\n'
-                '  "agents": {},\n'
-                '  "tools": {"playwright-cli": {"enabled": true, "auto_update": true}},\n'
-                '  "skills": {},\n'
-                '  "mcp": {}\n'
-                '}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "tools.json").write_text(
-                '{\n'
-                '  "tools": {\n'
-                '    "playwright-cli": {\n'
-                '      "url": "https://github.com/microsoft/playwright-cli.git",\n'
-                '      "setup": "npm install && npx playwright install",\n'
-                '      "ready_paths": ["node_modules"]\n'
-                '    }\n'
-                '  }\n'
-                '}\n',
-                encoding="utf-8",
-            )
-            repo_tool_dir = temp_root / "agent-tool" / "playwright-cli"
-            remove_path(repo_tool_dir)
-            (repo_tool_dir / ".git").mkdir(parents=True, exist_ok=True)
-
-            env = self._managed_env()
-            env["HOME"] = str(temp_home)
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "detect"],
-                cwd=temp_root,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            combined = result.stdout + result.stderr
-            self.assertEqual(result.returncode, 0, combined)
-            self.assertRegex(combined, r"playwright-cli\s+\(工具就绪:否\)")
 
     def test_doctor_stops_after_config_syntax_errors(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -829,7 +674,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("skills", payload["sections"])
             self.assertIn("rules", payload["sections"])
 
-    def test_apply_preview_reports_health_caution_for_optional_tool_gaps(self):
+    def test_update_preview_reports_health_caution_for_optional_tool_gaps(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
@@ -862,7 +707,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["HOME"] = str(temp_home)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "apply", "--dry-run"],
+                [str(temp_root / "manage.sh"), "update", "--dry-run"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -1001,7 +846,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertNotIn("--- Rules 内容/结构审计 ---\n  ✗", combined)
             self.assertIn("环境状态完美", combined)
 
-    def test_apply_empty_policy_skips_optional_subengines(self):
+    def test_update_empty_policy_skips_optional_subengines(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             temp_home = Path(temp_dir) / "home"
@@ -1015,7 +860,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["HOME"] = str(temp_home)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "apply", "--dry-run"],
+                [str(temp_root / "manage.sh"), "update", "--dry-run"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -1076,90 +921,6 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("有效历史快照: 1 个", combined)
             self.assertNotIn("有效历史快照: 2 个", combined)
 
-    def test_ui_command_launches_interactive_menu(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "ui"],
-                cwd=temp_root,
-                env=self._managed_env(),
-                input="7\n",
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            combined = result.stdout + result.stderr
-            self.assertEqual(result.returncode, 0, combined)
-            self.assertIn("Agent Manager 交互式配置中心", combined)
-            self.assertIn("7. 退出", combined)
-
-    def test_ui_termination_cleans_up_descendant_processes(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-
-            child_pid_file = Path(temp_dir) / "ui-child.pid"
-            ready_file = Path(temp_dir) / "ui-ready"
-
-            self._write_stub(
-                temp_root / "src" / "interactive.py",
-                (
-                    "#!/usr/bin/env python3\n"
-                    "import os\n"
-                    "import signal\n"
-                    "import subprocess\n"
-                    "import sys\n"
-                    "import time\n"
-                    "from pathlib import Path\n"
-                    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
-                    "Path(os.environ['CHILD_PID_FILE']).write_text(str(child.pid), encoding='utf-8')\n"
-                    "Path(os.environ['READY_FILE']).write_text('ready\\n', encoding='utf-8')\n"
-                    "signal.signal(signal.SIGTERM, lambda *_args: sys.exit(143))\n"
-                    "while True:\n"
-                    "    time.sleep(1)\n"
-                ),
-            )
-
-            env = self._managed_env()
-            env["CHILD_PID_FILE"] = str(child_pid_file)
-            env["READY_FILE"] = str(ready_file)
-
-            proc = subprocess.Popen(
-                [str(temp_root / "manage.sh"), "ui"],
-                cwd=temp_root,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-
-            child_pid = None
-            try:
-                child_pid = self._await_probe_child_pid(
-                    proc,
-                    child_pid_file,
-                    ready_file,
-                    "ui 未按预期启动子进程",
-                )
-                self._assert_descendant_exits_after_parent_termination(
-                    proc,
-                    child_pid,
-                    f"ui 退出后子进程仍存活: {child_pid}",
-                )
-            finally:
-                if proc.poll() is None:
-                    proc.kill()
-                    proc.wait(timeout=5)
-                self._close_process_pipes(proc)
-                if child_pid is not None:
-                    try:
-                        os.kill(child_pid, signal.SIGKILL)
-                    except OSError:
-                        pass
-
     def test_manage_without_command_shows_help_and_does_not_run_pipeline(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
@@ -1206,7 +967,7 @@ class ManageScriptTests(unittest.TestCase):
 
     def test_global_flags_without_command_refuse_to_run_a_pipeline(self):
         # 全局 flag 只修饰命令。裸 `--offline` / `--dry-run` 曾默认落到 init（含安装缺失 Agent），
-        # 与 `--offline` 对应的 apply 语义不符，必须显式报错而不是隐式跑全量管线。
+        # 与 `--offline` 对应的 update 语义不符，必须显式报错而不是隐式跑全量管线。
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -1229,15 +990,17 @@ class ManageScriptTests(unittest.TestCase):
                     combined = result.stdout + result.stderr
                     self.assertNotEqual(result.returncode, 0, combined)
                     self.assertIn("只提供了全局参数", combined)
-                    self.assertIn("./manage.sh plan", combined)
+                    self.assertIn("./manage.sh init --dry-run", combined)
+                    self.assertIn("./manage.sh --offline update", combined)
+                    self.assertIn("./manage.sh help", combined)
                     self.assertFalse(call_log.exists(), combined)
 
-    def test_apply_does_not_run_terminal_management(self):
+    def test_update_does_not_run_terminal_management(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             call_log = temp_root / "calls.log"
-            # apply 会跑 maybe_init_secrets；不隔离会对 secrets/.git 真联网 git pull，
+            # update 会跑 maybe_init_secrets；不隔离会对 secrets/.git 真联网 git pull，
             # 让本用例贴着超时上限抖动。移除 secrets 并 stub init-secrets 使其 hermetic。
             remove_path(temp_root / "secrets")
             self._write_init_secrets_stub(temp_root, call_log)
@@ -1273,13 +1036,13 @@ class ManageScriptTests(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "apply"],
+                [str(temp_root / "manage.sh"), "update"],
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,
                 text=True,
                 check=False,
-                # sync 现走完整 apply 链路(aliases/tools/browser/rules/skills/mcp),基线 5-7s；
+                # sync 现走完整 update 链路(aliases/tools/browser/rules/skills/mcp/hooks),基线 5-7s；
                 # 上限用于抓挂死而非性能门禁，给足满负载余量。
                 timeout=60,
             )
@@ -1297,6 +1060,16 @@ class ManageScriptTests(unittest.TestCase):
             temp_home = Path(temp_dir) / "home"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             (temp_home / ".codex").mkdir(parents=True)
+
+            call_log = temp_root / "calls.log"
+            # update 会跑完整收敛链路：移除 secrets 并 stub init-secrets/skills 链接，
+            # 避免对 secrets 仓库与 example.invalid 真联网；rules 同步仍走真实脚本。
+            remove_path(temp_root / "secrets")
+            self._write_init_secrets_stub(temp_root, call_log)
+            self._write_stub(
+                temp_root / "agent-skill" / "link_skills.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
 
             (temp_root / "config" / "manager.json").write_text(
                 '{\n'
@@ -1339,7 +1112,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["HOME"] = str(temp_home)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "rules:apply"],
+                [str(temp_root / "manage.sh"), "update"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -1359,6 +1132,15 @@ class ManageScriptTests(unittest.TestCase):
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories"))
             (temp_home / ".claude").mkdir(parents=True, exist_ok=True)
             (temp_home / ".codex").mkdir(parents=True, exist_ok=True)
+
+            call_log = temp_root / "calls.log"
+            # 同上：update 跑完整链路，stub init-secrets/skills 链接保持 hermetic。
+            remove_path(temp_root / "secrets")
+            self._write_init_secrets_stub(temp_root, call_log)
+            self._write_stub(
+                temp_root / "agent-skill" / "link_skills.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
 
             (temp_root / "config" / "manager.json").write_text(
                 '{\n'
@@ -1403,7 +1185,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["HOME"] = str(temp_home)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "rules:apply"],
+                [str(temp_root / "manage.sh"), "update"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -1419,134 +1201,6 @@ class ManageScriptTests(unittest.TestCase):
     def test_rules_manifest_has_no_repo_root_targets_by_default(self):
         manifest = (ROOT / "config" / "rules-targets.list").read_text(encoding="utf-8")
         self.assertNotIn("{{REPO_ROOT}}", manifest)
-
-    def test_skills_upgrade_dispatches_upgrade_script(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            call_log = temp_root / "calls.log"
-
-            self._write_stub(
-                temp_root / "agent-skill" / "upgrade_skills.py",
-                (
-                    "#!/usr/bin/env python3\n"
-                    "import sys\n"
-                    f"open({str(call_log)!r}, 'a', encoding='utf-8').write('upgrade ' + ' '.join(sys.argv[1:]) + '\\n')\n"
-                    "sys.exit(0 if '--config' in sys.argv and '--def-file' in sys.argv and '--dry-run' in sys.argv else 92)\n"
-                ),
-            )
-
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "--dry-run", "skills:bump"],
-                cwd=temp_root,
-                env=self._managed_env(),
-                capture_output=True,
-                check=False,
-            )
-
-            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
-            self.assertEqual(result.returncode, 0, combined)
-            log_lines = call_log.read_text(encoding="utf-8").splitlines()
-            self.assertEqual(len(log_lines), 1, log_lines)
-            self.assertTrue(log_lines[0].startswith("upgrade "), log_lines)
-            self.assertIn("--config", log_lines[0])
-            self.assertIn("--def-file", log_lines[0])
-            self.assertIn("--dry-run", log_lines[0])
-
-    def test_skills_upgrade_forwards_requested_repositories(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            call_log = temp_root / "calls.log"
-
-            self._write_stub(
-                temp_root / "agent-skill" / "upgrade_skills.py",
-                (
-                    "#!/usr/bin/env python3\n"
-                    "import sys\n"
-                    f"open({str(call_log)!r}, 'a', encoding='utf-8').write('upgrade ' + ' '.join(sys.argv[1:]) + '\\n')\n"
-                    "expected = ['--repo', 'repo-a', '--repo', 'repo-b']\n"
-                    "sys.exit(0 if all(item in sys.argv for item in expected) else 93)\n"
-                ),
-            )
-
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "skills:bump", "repo-a", "repo-b"],
-                cwd=temp_root,
-                env=self._managed_env(),
-                capture_output=True,
-                check=False,
-            )
-
-            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
-            self.assertEqual(result.returncode, 0, combined)
-            log_lines = call_log.read_text(encoding="utf-8").splitlines()
-            self.assertEqual(len(log_lines), 1, log_lines)
-            self.assertIn("--repo repo-a", log_lines[0])
-            self.assertIn("--repo repo-b", log_lines[0])
-
-
-    def test_init_refreshes_version_pins_before_runtime_sync(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            call_log = temp_root / "calls.log"
-            remove_path(temp_root / "secrets")
-
-            self._append_log_stub(
-                temp_root / "scripts" / "update_version_pins.py",
-                "versions",
-                call_log,
-                "'--config-dir' in sys.argv and '--offline' not in sys.argv and '--dry-run' not in sys.argv",
-            )
-            self._append_log_stub(
-                temp_root / "agent-skill" / "upgrade_skills.py",
-                "skill-versions",
-                call_log,
-                "'--config' in sys.argv and '--def-file' in sys.argv and '--offline' not in sys.argv",
-            )
-            self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log, "True")
-            self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log, "True")
-            self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log, "True")
-            self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log, "True")
-            self._write_stub(
-                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
-                (
-                    "#!/usr/bin/env bash\n"
-                    f"printf '%s\\n' \"rules $*\" >> {str(call_log)!r}\n"
-                    "exit 0\n"
-                ),
-            )
-            self._write_stub(
-                temp_root / "scripts" / "init-secrets.sh",
-                (
-                    "#!/usr/bin/env bash\n"
-                    "mkdir -p \"$PWD/../secrets/.git\"\n"
-                    f"printf '%s\\n' init-secrets >> {str(call_log)!r}\n"
-                    "exit 0\n"
-                ),
-            )
-
-            env = self._managed_env()
-            env.pop("AGENT_MANAGER_SKIP_VERSION_PIN_UPDATE", None)
-            env.pop("AGENT_MANAGER_SKIP_SKILL_VERSION_UPDATE", None)
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "init"],
-                cwd=temp_root,
-                env=env,
-                capture_output=True,
-                check=False,
-            )
-
-            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
-            self.assertEqual(result.returncode, 0, combined)
-            log_lines = call_log.read_text(encoding="utf-8").splitlines()
-            version_index = next(i for i, line in enumerate(log_lines) if line.startswith("versions "))
-            skill_version_index = next(i for i, line in enumerate(log_lines) if line.startswith("skill-versions "))
-            agent_index = next(i for i, line in enumerate(log_lines) if line.startswith("agents "))
-            skills_index = next(i for i, line in enumerate(log_lines) if line.startswith("skills "))
-            self.assertLess(version_index, agent_index, log_lines)
-            self.assertLess(skill_version_index, skills_index, log_lines)
 
     def _write_rules_stub(self, temp_root, call_log):
         self._write_stub(
@@ -1579,108 +1233,7 @@ class ManageScriptTests(unittest.TestCase):
             ),
         )
 
-    def test_bump_only_refreshes_metadata_without_distribution_or_agents(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            call_log = temp_root / "calls.log"
-            remove_path(temp_root / "secrets")
-
-            self._append_log_stub(temp_root / "scripts" / "update_version_pins.py", "versions", call_log)
-            self._append_log_stub(temp_root / "agent-skill" / "upgrade_skills.py", "skill-versions", call_log)
-            self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log)
-            self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log)
-            self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log)
-            self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log)
-            self._write_rules_stub(temp_root, call_log)
-            self._write_browser_stub(temp_root, call_log)
-            self._write_init_secrets_stub(temp_root, call_log)
-
-            env = self._managed_env()
-            env.pop("AGENT_MANAGER_SKIP_VERSION_PIN_UPDATE", None)
-            env.pop("AGENT_MANAGER_SKIP_SKILL_VERSION_UPDATE", None)
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "bump"],
-                cwd=temp_root,
-                env=env,
-                capture_output=True,
-                check=False,
-            )
-
-            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
-            self.assertEqual(result.returncode, 0, combined)
-            log_lines = call_log.read_text(encoding="utf-8").splitlines()
-            self.assertTrue(any(line.startswith("versions ") for line in log_lines), log_lines)
-            self.assertTrue(any(line.startswith("skill-versions ") for line in log_lines), log_lines)
-            for forbidden in ("agents ", "tools ", "skills ", "mcp ", "rules ", "browser "):
-                self.assertFalse(
-                    any(line.startswith(forbidden) for line in log_lines),
-                    (forbidden, log_lines),
-                )
-
-    def test_apply_syncs_runtime_without_version_bump_or_agents(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            call_log = temp_root / "calls.log"
-            remove_path(temp_root / "secrets")
-
-            self._append_log_stub(temp_root / "scripts" / "update_version_pins.py", "versions", call_log)
-            self._append_log_stub(temp_root / "agent-skill" / "upgrade_skills.py", "skill-versions", call_log)
-            self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log)
-            self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log)
-            self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log)
-            self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log)
-            self._write_rules_stub(temp_root, call_log)
-            self._write_browser_stub(temp_root, call_log)
-            self._write_init_secrets_stub(temp_root, call_log)
-
-            env = self._managed_env()
-            env.pop("AGENT_MANAGER_SKIP_VERSION_PIN_UPDATE", None)
-            env.pop("AGENT_MANAGER_SKIP_SKILL_VERSION_UPDATE", None)
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "apply"],
-                cwd=temp_root,
-                env=env,
-                capture_output=True,
-                check=False,
-            )
-
-            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
-            self.assertEqual(result.returncode, 0, combined)
-            log_lines = call_log.read_text(encoding="utf-8").splitlines()
-            for expected in ("tools ", "skills ", "mcp ", "rules "):
-                self.assertTrue(
-                    any(line.startswith(expected) for line in log_lines),
-                    (expected, log_lines),
-                )
-            for forbidden in ("versions ", "skill-versions ", "agents "):
-                self.assertFalse(
-                    any(line.startswith(forbidden) for line in log_lines),
-                    (forbidden, log_lines),
-                )
-
-    def _stub_all_pipeline_scripts(self, temp_root: Path, call_log: Path, version_pins_condition: str = "True"):
-        self._append_log_stub(
-            temp_root / "scripts" / "update_version_pins.py", "versions", call_log, version_pins_condition
-        )
-        self._append_log_stub(temp_root / "agent-skill" / "upgrade_skills.py", "skill-versions", call_log)
-        self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log)
-        self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log)
-        self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log)
-        self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log)
-        self._write_rules_stub(temp_root, call_log)
-        self._write_browser_stub(temp_root, call_log)
-        self._write_init_secrets_stub(temp_root, call_log)
-
-    def _pipeline_env(self):
-        env = self._managed_env()
-        env.pop("AGENT_MANAGER_SKIP_VERSION_PIN_UPDATE", None)
-        env.pop("AGENT_MANAGER_SKIP_SKILL_VERSION_UPDATE", None)
-        return env
-
-    def test_update_refreshes_metadata_then_distributes_without_agents(self):
-        # update = bump + apply：两段都跑，且始终不碰 Agent 生命周期（不装、不升级已装 Agent）。
+    def test_update_syncs_runtime_without_version_bump_or_agents(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -1691,7 +1244,7 @@ class ManageScriptTests(unittest.TestCase):
             result = subprocess.run(
                 [str(temp_root / "manage.sh"), "update"],
                 cwd=temp_root,
-                env=self._pipeline_env(),
+                env=self._managed_env(),
                 capture_output=True,
                 check=False,
             )
@@ -1699,53 +1252,35 @@ class ManageScriptTests(unittest.TestCase):
             combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
             self.assertEqual(result.returncode, 0, combined)
             log_lines = call_log.read_text(encoding="utf-8").splitlines()
-            for expected in ("versions ", "skill-versions ", "tools ", "skills ", "mcp ", "rules "):
+            for expected in ("tools ", "skills ", "mcp ", "rules ", "claude-hooks ", "codex-hooks "):
                 self.assertTrue(
                     any(line.startswith(expected) for line in log_lines),
                     (expected, log_lines),
                 )
-            self.assertFalse(
-                any(line.startswith("agents ") for line in log_lines),
-                log_lines,
-            )
-            # 元数据必须先于分发，否则分发的是刷新前的旧锁定态。
-            first_versions = next(i for i, line in enumerate(log_lines) if line.startswith("versions "))
-            first_distribution = next(
-                i
-                for i, line in enumerate(log_lines)
-                if line.startswith(("tools ", "skills ", "mcp ", "rules "))
-            )
-            self.assertLess(first_versions, first_distribution, log_lines)
-
-    def test_update_aborts_distribution_when_metadata_refresh_fails(self):
-        # bump 段失败时必须中止，否则会把未刷新的旧锁定态分发到本机，
-        # 而用户只看到失败退出码，以为本机没被改动。
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            call_log = temp_root / "calls.log"
-            remove_path(temp_root / "secrets")
-            self._stub_all_pipeline_scripts(temp_root, call_log, version_pins_condition="False")
-
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "update"],
-                cwd=temp_root,
-                env=self._pipeline_env(),
-                capture_output=True,
-                check=False,
-            )
-
-            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
-            self.assertNotEqual(result.returncode, 0, combined)
-            log_lines = call_log.read_text(encoding="utf-8").splitlines()
-            self.assertTrue(any(line.startswith("versions ") for line in log_lines), log_lines)
-            for forbidden in ("tools ", "skills ", "mcp ", "rules ", "browser ", "agents "):
+            for forbidden in ("versions ", "skill-versions ", "agents "):
                 self.assertFalse(
                     any(line.startswith(forbidden) for line in log_lines),
                     (forbidden, log_lines),
                 )
+            # 两个 hooks 同步步骤位于 MCP 注入之后、skill 引用审计之前。
+            mcp_index = next(i for i, line in enumerate(log_lines) if line.startswith("mcp "))
+            claude_hooks_index = next(i for i, line in enumerate(log_lines) if line.startswith("claude-hooks "))
+            codex_hooks_index = next(i for i, line in enumerate(log_lines) if line.startswith("codex-hooks "))
+            self.assertLess(mcp_index, claude_hooks_index, log_lines)
+            self.assertLess(claude_hooks_index, codex_hooks_index, log_lines)
 
-    def test_apply_force_refresh_propagates_to_tools_skills_and_mcp(self):
+    def _stub_all_pipeline_scripts(self, temp_root: Path, call_log: Path):
+        self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log)
+        self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log)
+        self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log)
+        self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log)
+        self._append_log_stub(temp_root / "agent-rule" / "scripts" / "sync-claude-hooks.py", "claude-hooks", call_log)
+        self._append_log_stub(temp_root / "agent-rule" / "scripts" / "sync-codex-hooks.py", "codex-hooks", call_log)
+        self._write_rules_stub(temp_root, call_log)
+        self._write_browser_stub(temp_root, call_log)
+        self._write_init_secrets_stub(temp_root, call_log)
+
+    def test_update_force_refresh_propagates_to_tools_skills_and_mcp(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -1775,7 +1310,7 @@ class ManageScriptTests(unittest.TestCase):
             self._write_init_secrets_stub(temp_root, call_log)
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "--force-refresh", "apply"],
+                [str(temp_root / "manage.sh"), "--force-refresh", "update"],
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,
@@ -1789,15 +1324,13 @@ class ManageScriptTests(unittest.TestCase):
             self.assertTrue(any(line.startswith("skills ") and "--force-refresh" in line for line in log_lines), log_lines)
             self.assertTrue(any(line.startswith("mcp ") and "--force-refresh" in line for line in log_lines), log_lines)
 
-    def test_agents_apply_runs_agent_lifecycle_only_without_distribution(self):
+    def test_agents_update_runs_agent_lifecycle_only_without_distribution(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             call_log = temp_root / "calls.log"
             remove_path(temp_root / "secrets")
 
-            self._append_log_stub(temp_root / "scripts" / "update_version_pins.py", "versions", call_log)
-            self._append_log_stub(temp_root / "agent-skill" / "upgrade_skills.py", "skill-versions", call_log)
             self._append_log_stub(
                 temp_root / "agent-lifecycle" / "sync_agents.py",
                 "agents",
@@ -1811,13 +1344,10 @@ class ManageScriptTests(unittest.TestCase):
             self._write_browser_stub(temp_root, call_log)
             self._write_init_secrets_stub(temp_root, call_log)
 
-            env = self._managed_env()
-            env.pop("AGENT_MANAGER_SKIP_VERSION_PIN_UPDATE", None)
-            env.pop("AGENT_MANAGER_SKIP_SKILL_VERSION_UPDATE", None)
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "agents:apply"],
+                [str(temp_root / "manage.sh"), "agents:update"],
                 cwd=temp_root,
-                env=env,
+                env=self._managed_env(),
                 capture_output=True,
                 check=False,
             )
@@ -1834,7 +1364,7 @@ class ManageScriptTests(unittest.TestCase):
                 ),
                 log_lines,
             )
-            for forbidden in ("versions ", "skill-versions ", "tools ", "skills ", "mcp ", "rules ", "browser "):
+            for forbidden in ("tools ", "skills ", "mcp ", "rules ", "browser "):
                 self.assertFalse(
                     any(line.startswith(forbidden) for line in log_lines),
                     (forbidden, log_lines),
@@ -1914,7 +1444,7 @@ class ManageScriptTests(unittest.TestCase):
             )
 
 
-    def test_apply_pipeline_skips_browser_google_us_sync_when_disabled(self):
+    def test_update_pipeline_skips_browser_google_us_sync_when_disabled(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -1943,7 +1473,7 @@ class ManageScriptTests(unittest.TestCase):
             )
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "apply"],
+                [str(temp_root / "manage.sh"), "update"],
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,
@@ -1956,125 +1486,7 @@ class ManageScriptTests(unittest.TestCase):
             self.assertFalse(any(line.startswith("browser ") for line in log_lines), log_lines)
             self.assertIn("浏览器 US 同步已禁用", combined)
 
-    def test_sys_upgrade_only_runs_repo_pull(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            call_log = temp_root / "calls.log"
-            fake_bin = temp_root / "fake-bin"
-            fake_bin.mkdir()
-            self._write_stub(
-                fake_bin / "git",
-                (
-                    "#!/usr/bin/env bash\n"
-                    f"printf '%s\\n' \"git $*\" >> {str(call_log)!r}\n"
-                    "if [ \"$3\" = \"status\" ] && [ \"$4\" = \"--porcelain\" ]; then\n"
-                    "  exit 0\n"
-                    "fi\n"
-                    "echo 'Already up to date'\n"
-                    "exit 0\n"
-                ),
-            )
-            self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log, "False")
-            self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log, "False")
-            self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log, "False")
-            self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log, "False")
-            self._write_stub(temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh", "#!/usr/bin/env bash\nexit 99\n")
-
-            env = self._managed_env()
-            env["PATH"] = f"{fake_bin}:{env['PATH']}"
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "sys:upgrade"],
-                cwd=temp_root,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            log_lines = call_log.read_text(encoding="utf-8").splitlines()
-            self.assertEqual(len(log_lines), 2, log_lines)
-            self.assertIn(f"git -C {temp_root.resolve()} status --porcelain", log_lines[0])
-            self.assertIn(f"git -C {temp_root.resolve()} pull --ff-only", log_lines[1])
-
-    def test_sys_upgrade_status_termination_cleans_up_descendant_processes(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-
-            child_pid_file = Path(temp_dir) / "sys-upgrade-status-child.pid"
-            ready_file = Path(temp_dir) / "sys-upgrade-status-ready"
-            fake_bin = temp_root / "fake-bin"
-            fake_bin.mkdir()
-
-            self._write_stub(
-                fake_bin / "git",
-                (
-                    "#!/usr/bin/env bash\n"
-                    "if [ \"$1\" = \"-C\" ]; then\n"
-                    "  shift 2\n"
-                    "fi\n"
-                    "if [ \"$1\" = \"status\" ] && [ \"$2\" = \"--porcelain\" ]; then\n"
-                    "  python3 - <<'PY'\n"
-                    "import os\n"
-                    "import signal\n"
-                    "import subprocess\n"
-                    "import sys\n"
-                    "import time\n"
-                    "from pathlib import Path\n"
-                    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
-                    "Path(os.environ['CHILD_PID_FILE']).write_text(str(child.pid), encoding='utf-8')\n"
-                    "Path(os.environ['READY_FILE']).write_text('ready\\n', encoding='utf-8')\n"
-                    "signal.signal(signal.SIGTERM, lambda *_args: sys.exit(143))\n"
-                    "while True:\n"
-                    "    time.sleep(1)\n"
-                    "PY\n"
-                    "fi\n"
-                    "echo \"unexpected git args: $*\" >&2\n"
-                    "exit 2\n"
-                ),
-            )
-
-            env = self._managed_env()
-            env["PATH"] = f"{fake_bin}:{env['PATH']}"
-            env["CHILD_PID_FILE"] = str(child_pid_file)
-            env["READY_FILE"] = str(ready_file)
-
-            proc = subprocess.Popen(
-                [str(temp_root / "manage.sh"), "sys:upgrade"],
-                cwd=temp_root,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-
-            child_pid = None
-            try:
-                child_pid = self._await_probe_child_pid(
-                    proc,
-                    child_pid_file,
-                    ready_file,
-                    "sys-upgrade status 未按预期启动子进程",
-                )
-                self._assert_descendant_exits_after_parent_termination(
-                    proc,
-                    child_pid,
-                    f"sys-upgrade status 退出后子进程仍存活: {child_pid}",
-                )
-            finally:
-                if proc.poll() is None:
-                    proc.kill()
-                    proc.wait(timeout=5)
-                self._close_process_pipes(proc)
-                if child_pid is not None:
-                    try:
-                        os.kill(child_pid, signal.SIGKILL)
-                    except OSError:
-                        pass
-
-    def test_apply_pipeline_pulls_secrets_with_ff_only(self):
+    def test_update_pipeline_pulls_secrets_with_ff_only(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -2100,7 +1512,7 @@ class ManageScriptTests(unittest.TestCase):
             env = self._managed_env()
             env["PATH"] = f"{fake_bin}:{env['PATH']}"
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "apply"],
+                [str(temp_root / "manage.sh"), "update"],
                 cwd=temp_root,
                 env=env,
                 capture_output=True,
@@ -2115,7 +1527,7 @@ class ManageScriptTests(unittest.TestCase):
                 log_lines,
             )
 
-    def test_apply_pipeline_secrets_pull_termination_cleans_up_descendant_processes(self):
+    def test_update_pipeline_secrets_pull_termination_cleans_up_descendant_processes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -2179,7 +1591,7 @@ class ManageScriptTests(unittest.TestCase):
             env["READY_FILE"] = str(ready_file)
 
             proc = subprocess.Popen(
-                [str(temp_root / "manage.sh"), "apply"],
+                [str(temp_root / "manage.sh"), "update"],
                 cwd=temp_root,
                 env=env,
                 stdout=subprocess.PIPE,
@@ -2211,124 +1623,7 @@ class ManageScriptTests(unittest.TestCase):
                     except OSError:
                         pass
 
-    def test_sys_upgrade_skips_dirty_worktree(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            call_log = temp_root / "calls.log"
-            fake_bin = temp_root / "fake-bin"
-            fake_bin.mkdir()
-            self._write_stub(
-                fake_bin / "git",
-                (
-                    "#!/usr/bin/env bash\n"
-                    f"printf '%s\\n' \"git $*\" >> {str(call_log)!r}\n"
-                    "if [ \"$3\" = \"status\" ] && [ \"$4\" = \"--porcelain\" ]; then\n"
-                    "  printf ' M manage.sh\\n'\n"
-                    "  exit 0\n"
-                    "fi\n"
-                    "echo 'pull should not run'\n"
-                    "exit 0\n"
-                ),
-            )
-
-            env = self._managed_env()
-            env["PATH"] = f"{fake_bin}:{env['PATH']}"
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "sys:upgrade"],
-                cwd=temp_root,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn("跳过自更新以保护工作区", result.stdout + result.stderr)
-            log_lines = call_log.read_text(encoding="utf-8").splitlines()
-            self.assertEqual(len(log_lines), 1, log_lines)
-            self.assertIn(f"git -C {temp_root.resolve()} status --porcelain", log_lines[0])
-
-    def test_sys_upgrade_termination_cleans_up_descendant_processes(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-
-            child_pid_file = Path(temp_dir) / "sys-upgrade-child.pid"
-            ready_file = Path(temp_dir) / "sys-upgrade-ready"
-            fake_bin = temp_root / "fake-bin"
-            fake_bin.mkdir()
-
-            self._write_stub(
-                fake_bin / "git",
-                (
-                    "#!/usr/bin/env bash\n"
-                    "if [ \"$1\" = \"-C\" ]; then\n"
-                    "  shift 2\n"
-                    "fi\n"
-                    "if [ \"$1\" = \"status\" ] && [ \"$2\" = \"--porcelain\" ]; then\n"
-                    "  exit 0\n"
-                    "fi\n"
-                    "if [ \"$1\" = \"pull\" ] && [ \"$2\" = \"--ff-only\" ]; then\n"
-                    "  python3 - <<'PY'\n"
-                    "import os\n"
-                    "import signal\n"
-                    "import subprocess\n"
-                    "import sys\n"
-                    "import time\n"
-                    "from pathlib import Path\n"
-                    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
-                    "Path(os.environ['CHILD_PID_FILE']).write_text(str(child.pid), encoding='utf-8')\n"
-                    "Path(os.environ['READY_FILE']).write_text('ready\\n', encoding='utf-8')\n"
-                    "signal.signal(signal.SIGTERM, lambda *_args: sys.exit(143))\n"
-                    "while True:\n"
-                    "    time.sleep(1)\n"
-                    "PY\n"
-                    "fi\n"
-                    "echo \"unexpected git args: $*\" >&2\n"
-                    "exit 2\n"
-                ),
-            )
-
-            env = self._managed_env()
-            env["PATH"] = f"{fake_bin}:{env['PATH']}"
-            env["CHILD_PID_FILE"] = str(child_pid_file)
-            env["READY_FILE"] = str(ready_file)
-
-            proc = subprocess.Popen(
-                [str(temp_root / "manage.sh"), "sys:upgrade"],
-                cwd=temp_root,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-
-            child_pid = None
-            try:
-                child_pid = self._await_probe_child_pid(
-                    proc,
-                    child_pid_file,
-                    ready_file,
-                    "sys-upgrade 未按预期启动子进程",
-                )
-                self._assert_descendant_exits_after_parent_termination(
-                    proc,
-                    child_pid,
-                    f"sys-upgrade 退出后子进程仍存活: {child_pid}",
-                )
-            finally:
-                if proc.poll() is None:
-                    proc.kill()
-                    proc.wait(timeout=5)
-                self._close_process_pipes(proc)
-                if child_pid is not None:
-                    try:
-                        os.kill(child_pid, signal.SIGKILL)
-                    except OSError:
-                        pass
-
-    def test_apply_init_secrets_termination_cleans_up_descendant_processes(self):
+    def test_update_init_secrets_termination_cleans_up_descendant_processes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
@@ -2383,7 +1678,7 @@ class ManageScriptTests(unittest.TestCase):
             env["READY_FILE"] = str(ready_file)
 
             proc = subprocess.Popen(
-                [str(temp_root / "manage.sh"), "apply"],
+                [str(temp_root / "manage.sh"), "update"],
                 cwd=temp_root,
                 env=env,
                 stdout=subprocess.PIPE,
@@ -2414,140 +1709,6 @@ class ManageScriptTests(unittest.TestCase):
                         os.kill(child_pid, signal.SIGKILL)
                     except OSError:
                         pass
-
-    def test_fetch_models_termination_cleans_up_descendant_processes(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-
-            child_pid_file = Path(temp_dir) / "fetch-models-child.pid"
-            ready_file = Path(temp_dir) / "fetch-models-ready"
-
-            self._write_stub(
-                temp_root / "scripts" / "fetch_models.py",
-                (
-                    "#!/usr/bin/env python3\n"
-                    "import os\n"
-                    "import signal\n"
-                    "import subprocess\n"
-                    "import sys\n"
-                    "import time\n"
-                    "from pathlib import Path\n"
-                    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
-                    "Path(os.environ['CHILD_PID_FILE']).write_text(str(child.pid), encoding='utf-8')\n"
-                    "Path(os.environ['READY_FILE']).write_text('ready\\n', encoding='utf-8')\n"
-                    "signal.signal(signal.SIGTERM, lambda *_args: sys.exit(143))\n"
-                    "while True:\n"
-                    "    time.sleep(1)\n"
-                ),
-            )
-
-            env = self._managed_env()
-            env["CHILD_PID_FILE"] = str(child_pid_file)
-            env["READY_FILE"] = str(ready_file)
-
-            proc = subprocess.Popen(
-                [str(temp_root / "manage.sh"), "fetch-models"],
-                cwd=temp_root,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-
-            child_pid = None
-            try:
-                child_pid = self._await_probe_child_pid(
-                    proc,
-                    child_pid_file,
-                    ready_file,
-                    "fetch-models 未按预期启动子进程",
-                )
-                self._assert_descendant_exits_after_parent_termination(
-                    proc,
-                    child_pid,
-                    f"fetch-models 退出后子进程仍存活: {child_pid}",
-                )
-            finally:
-                if proc.poll() is None:
-                    proc.kill()
-                    proc.wait(timeout=5)
-                self._close_process_pipes(proc)
-                if child_pid is not None:
-                    try:
-                        os.kill(child_pid, signal.SIGKILL)
-                    except OSError:
-                        pass
-
-    def test_plan_runs_bootstrap_pipeline_in_dry_run_mode(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            call_log = temp_root / "calls.log"
-            remove_path(temp_root / "secrets")
-
-            self._append_log_stub(
-                temp_root / "agent-lifecycle" / "sync_agents.py",
-                "agents",
-                call_log,
-                "'--no-install' not in sys.argv and '--dry-run' in sys.argv",
-            )
-            self._append_log_stub(
-                temp_root / "agent-tool" / "sync_tools.py",
-                "tools",
-                call_log,
-                "'--dry-run' in sys.argv",
-            )
-            self._append_log_stub(
-                temp_root / "agent-skill" / "link_skills.py",
-                "skills",
-                call_log,
-                "'--dry-run' in sys.argv and '--offline' not in sys.argv",
-            )
-            self._append_log_stub(
-                temp_root / "agent-mcp" / "sync_mcp.py",
-                "mcp",
-                call_log,
-                "'--prepare-runtime' in sys.argv and '--dry-run' in sys.argv",
-            )
-            self._write_stub(
-                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
-                (
-                    "#!/usr/bin/env bash\n"
-                    f"printf '%s\\n' \"rules $*\" >> {str(call_log)!r}\n"
-                    "case \"$*\" in\n"
-                    "  *--dry-run*) exit 0 ;;\n"
-                    "  *) exit 23 ;;\n"
-                    "esac\n"
-                ),
-            )
-            self._write_stub(
-                temp_root / "scripts" / "init-secrets.sh",
-                (
-                    "#!/usr/bin/env bash\n"
-                    f"printf '%s\\n' init-secrets >> {str(call_log)!r}\n"
-                    "exit 17\n"
-                ),
-            )
-
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "plan"],
-                cwd=temp_root,
-                env=self._managed_env(),
-                capture_output=True,
-                check=False,
-            )
-
-            combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
-            self.assertEqual(result.returncode, 0, combined)
-            self.assertIn("空转模式，跳过 secrets 检查", combined)
-            log_lines = call_log.read_text(encoding="utf-8").splitlines()
-            self.assertFalse(any(line == "init-secrets" for line in log_lines), log_lines)
-            self.assertTrue(any(line.startswith("agents ") and "--dry-run" in line for line in log_lines), log_lines)
-            self.assertTrue(any(line.startswith("tools ") and "--dry-run" in line for line in log_lines), log_lines)
-            self.assertTrue(any(line.startswith("rules ") and "--dry-run" in line for line in log_lines), log_lines)
-            self.assertTrue(any(line.startswith("skills ") and "--dry-run" in line for line in log_lines), log_lines)
-            self.assertTrue(any(line.startswith("mcp ") and "--dry-run" in line for line in log_lines), log_lines)
 
     def test_dry_run_skips_secrets_bootstrap_and_git_pull(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2881,7 +2042,7 @@ class ManageScriptTests(unittest.TestCase):
             self.lock_dir.mkdir(parents=True)
             (self.lock_dir / "pid").write_text(str(holder.pid), encoding="utf-8")
             result = subprocess.run(
-                [str(MANAGE), "--dry-run", "--offline", "apply"],
+                [str(MANAGE), "--dry-run", "--offline", "update"],
                 cwd=ROOT,
                 env=self._managed_env(),
                 capture_output=True,
@@ -2904,7 +2065,7 @@ class ManageScriptTests(unittest.TestCase):
         try:
             self.lock_dir.mkdir(parents=True)
             (self.lock_dir / "pid").write_text(str(holder.pid), encoding="utf-8")
-            for command in ("help", "help:all"):
+            for command in ("help", "-h", "--help", "-help"):
                 with self.subTest(command=command):
                     result = subprocess.run(
                         [str(MANAGE), command],
@@ -2917,15 +2078,6 @@ class ManageScriptTests(unittest.TestCase):
                     combined = (result.stdout + result.stderr).decode("utf-8", errors="replace")
                     self.assertEqual(result.returncode, 0, combined)
                     self.assertNotIn("另一个管理任务", combined)
-            # sys:unlock 只出现在 help:all 里，而它恰好是被锁挡住时最需要查的命令。
-            unlock_help = subprocess.run(
-                [str(MANAGE), "help:all"],
-                cwd=ROOT,
-                env=self._managed_env(),
-                capture_output=True,
-                check=False,
-            )
-            self.assertIn("sys:unlock", unlock_help.stdout.decode("utf-8", errors="replace"))
         finally:
             holder.terminate()
             holder.wait(timeout=5)
@@ -2981,7 +2133,7 @@ class ManageScriptTests(unittest.TestCase):
             env["READY_FILE"] = str(ready_file)
 
             proc = subprocess.Popen(
-                [str(temp_root / "manage.sh"), "--offline", "agents:apply"],
+                [str(temp_root / "manage.sh"), "--offline", "agents:update"],
                 cwd=temp_root,
                 env=env,
                 stdout=subprocess.PIPE,
@@ -3030,52 +2182,6 @@ class ManageScriptTests(unittest.TestCase):
                         os.kill(child_pid, signal.SIGKILL)
                     except OSError:
                         pass
-
-    def test_sys_unlock_removes_atomic_lock_artifacts(self):
-        lock_backup = move_aside(self.lock_path)
-        lock_dir_backup = move_aside(self.lock_dir)
-        try:
-            self.lock_path.write_text("999999", encoding="utf-8")
-            self.lock_dir.mkdir(parents=True)
-            (self.lock_dir / "pid").write_text("999999", encoding="utf-8")
-            result = subprocess.run(
-                [str(MANAGE), "sys:unlock"],
-                cwd=ROOT,
-                env=self._managed_env(),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertFalse(self.lock_path.exists())
-            self.assertFalse(self.lock_dir.exists())
-        finally:
-            restore_path(self.lock_path, lock_backup)
-            restore_path(self.lock_dir, lock_dir_backup)
-
-    def test_sys_unlock_dry_run_preserves_atomic_lock_artifacts(self):
-        lock_backup = move_aside(self.lock_path)
-        lock_dir_backup = move_aside(self.lock_dir)
-        try:
-            self.lock_path.write_text("999999", encoding="utf-8")
-            self.lock_dir.mkdir(parents=True)
-            (self.lock_dir / "pid").write_text("999999", encoding="utf-8")
-            result = subprocess.run(
-                [str(MANAGE), "--dry-run", "sys:unlock"],
-                cwd=ROOT,
-                env=self._managed_env(),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            combined = result.stdout + result.stderr
-            self.assertEqual(result.returncode, 0, combined)
-            self.assertIn("计划清理原子锁目录与遗留锁文件", combined)
-            self.assertTrue(self.lock_path.exists(), combined)
-            self.assertTrue(self.lock_dir.exists(), combined)
-        finally:
-            restore_path(self.lock_path, lock_backup)
-            restore_path(self.lock_dir, lock_dir_backup)
 
     def test_custom_lock_env_ignores_default_global_lock(self):
         global_lock_backup = move_aside(LOCK_PATH)
@@ -3126,83 +2232,6 @@ class ManageScriptTests(unittest.TestCase):
             restore_path(LOCK_PATH, global_lock_backup)
             restore_path(LOCK_DIR, global_lock_dir_backup)
 
-    def test_sys_logs_command_outputs_latest_run_log(self):
-        latest_backup = move_aside(self.latest_log_pointer)
-        legacy_backup = move_aside(self.legacy_log_path)
-        unique_log = self.runtime_dir / "latest.log"
-        unique_backup = move_aside(unique_log)
-        try:
-            unique_log.write_text("hello latest log\n", encoding="utf-8")
-            self.latest_log_pointer.write_text(str(unique_log), encoding="utf-8")
-            result = subprocess.run(
-                [str(MANAGE), "sys:logs"],
-                cwd=ROOT,
-                env=self._managed_env(),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn("hello latest log", result.stdout)
-        finally:
-            restore_path(self.latest_log_pointer, latest_backup)
-            restore_path(self.legacy_log_path, legacy_backup)
-            restore_path(unique_log, unique_backup)
-
-    def test_sys_clean_logs_command_removes_log_files(self):
-        latest_backup = move_aside(self.latest_log_pointer)
-        legacy_backup = move_aside(self.legacy_log_path)
-        unique_log = Path(f"{self.log_prefix}_cleanup.log")
-        unique_backup = move_aside(unique_log)
-        try:
-            self.legacy_log_path.write_text("hello legacy log\n", encoding="utf-8")
-            unique_log.write_text("hello unique log\n", encoding="utf-8")
-            self.latest_log_pointer.write_text(str(unique_log), encoding="utf-8")
-            result = subprocess.run(
-                [str(MANAGE), "sys:clean-logs"],
-                cwd=ROOT,
-                env=self._managed_env(),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertFalse(self.legacy_log_path.exists())
-            self.assertFalse(unique_log.exists())
-            self.assertFalse(self.latest_log_pointer.exists())
-        finally:
-            restore_path(self.latest_log_pointer, latest_backup)
-            restore_path(self.legacy_log_path, legacy_backup)
-            restore_path(unique_log, unique_backup)
-
-    def test_sys_clean_logs_dry_run_preserves_log_files(self):
-        latest_backup = move_aside(self.latest_log_pointer)
-        legacy_backup = move_aside(self.legacy_log_path)
-        unique_log = Path(f"{self.log_prefix}_cleanup.log")
-        unique_backup = move_aside(unique_log)
-        try:
-            self.legacy_log_path.write_text("hello legacy log\n", encoding="utf-8")
-            unique_log.write_text("hello unique log\n", encoding="utf-8")
-            self.latest_log_pointer.write_text(str(unique_log), encoding="utf-8")
-            result = subprocess.run(
-                [str(MANAGE), "--dry-run", "sys:clean-logs"],
-                cwd=ROOT,
-                env=self._managed_env(),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            combined = result.stdout + result.stderr
-            self.assertEqual(result.returncode, 0, combined)
-            self.assertIn("计划清理 latest 指针与所有按次运行日志", combined)
-            self.assertTrue(self.legacy_log_path.exists(), combined)
-            self.assertTrue(unique_log.exists(), combined)
-            self.assertTrue(self.latest_log_pointer.exists(), combined)
-        finally:
-            restore_path(self.latest_log_pointer, latest_backup)
-            restore_path(self.legacy_log_path, legacy_backup)
-            restore_path(unique_log, unique_backup)
-
     def test_pipeline_logs_use_owner_only_permissions(self):
         latest_backup = move_aside(self.latest_log_pointer)
         legacy_backup = move_aside(self.legacy_log_path)
@@ -3233,7 +2262,7 @@ class ManageScriptTests(unittest.TestCase):
                 )
 
                 result = subprocess.run(
-                    [str(temp_root / "manage.sh"), "--offline", "agents:apply"],
+                    [str(temp_root / "manage.sh"), "--offline", "agents:update"],
                     cwd=temp_root,
                     env=self._managed_env(),
                     capture_output=True,
@@ -3253,516 +2282,14 @@ class ManageScriptTests(unittest.TestCase):
             restore_path(self.latest_log_pointer, latest_backup)
             restore_path(self.legacy_log_path, legacy_backup)
 
-    def test_state_restore_restores_directory_backup_with_spaces(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            temp_home.mkdir()
-
-            backup_dir = temp_home / "Library" / "Application Support" / "Agent Rules.bak.20260318"
-            target_dir = temp_home / "Library" / "Application Support" / "Agent Rules"
-            backup_dir.mkdir(parents=True)
-            (backup_dir / "rule.md").write_text("# restored\n", encoding="utf-8")
-
-            (temp_root / "config" / "mcp.json").write_text(
-                '{\n  "agent_paths": {},\n  "servers": {}\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text(
-                "claude|copy|global|%s\n" % target_dir,
-                encoding="utf-8",
-            )
-
-            env = self._managed_env()
-            env["HOME"] = str(temp_home)
-
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "state:restore"],
-                cwd=temp_root,
-                env=env,
-                input="1\n",
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            combined = result.stdout + result.stderr
-            self.assertEqual(result.returncode, 0, combined)
-            self.assertTrue((target_dir / "rule.md").exists(), combined)
-            self.assertEqual((target_dir / "rule.md").read_text(encoding="utf-8"), "# restored\n")
-
-    def test_state_restore_restores_plain_bak_file(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            temp_home.mkdir()
-
-            target_file = temp_home / ".claude.json"
-            backup_file = temp_home / ".claude.json.bak"
-            backup_file.write_text('{"restored": true}\n', encoding="utf-8")
-            (temp_root / "config" / "mcp.json").write_text(
-                '{\n  "agent_paths": {\n    "claude-code": "%s"\n  },\n  "servers": {}\n}\n'
-                % target_file,
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
-
-            env = self._managed_env()
-            env["HOME"] = str(temp_home)
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "state:restore"],
-                cwd=temp_root,
-                env=env,
-                input="1\n",
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            combined = result.stdout + result.stderr
-            self.assertEqual(result.returncode, 0, combined)
-            self.assertEqual(target_file.read_text(encoding="utf-8"), '{"restored": true}\n')
-
-    def test_state_restore_dry_run_does_not_modify_target(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            temp_home.mkdir()
-
-            target_file = temp_home / ".claude.json"
-            target_file.write_text('{"current": true}\n', encoding="utf-8")
-            backup_file = temp_home / ".claude.json.bak"
-            backup_file.write_text('{"restored": true}\n', encoding="utf-8")
-            (temp_root / "config" / "mcp.json").write_text(
-                '{\n  "agent_paths": {\n    "claude-code": "%s"\n  },\n  "servers": {}\n}\n'
-                % target_file,
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
-
-            env = self._managed_env()
-            env["HOME"] = str(temp_home)
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "--dry-run", "state:restore"],
-                cwd=temp_root,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            combined = result.stdout + result.stderr
-            self.assertEqual(result.returncode, 0, combined)
-            self.assertIn("以下备份可用于恢复", combined)
-            self.assertIn(str(backup_file), combined)
-            self.assertEqual(target_file.read_text(encoding="utf-8"), '{"current": true}\n')
-
-    def test_state_restore_respects_global_lock(self):
-        lock_backup = move_aside(self.lock_path)
-        lock_dir_backup = move_aside(self.lock_dir)
-        holder = subprocess.Popen(["sleep", "60"])
-        try:
-            self.lock_dir.mkdir(parents=True)
-            (self.lock_dir / "pid").write_text(str(holder.pid), encoding="utf-8")
-            with tempfile.TemporaryDirectory() as temp_dir:
-                temp_home = Path(temp_dir) / "home"
-                backup_file = temp_home / "config.json.bak.20260318"
-                backup_file.parent.mkdir(parents=True)
-                backup_file.write_text("{}", encoding="utf-8")
-                env = self._managed_env()
-                env["HOME"] = str(temp_home)
-
-                result = subprocess.run(
-                    [str(MANAGE), "state:restore"],
-                    cwd=ROOT,
-                    env=env,
-                    input="1\n",
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-
-                combined = result.stdout + result.stderr
-                self.assertNotEqual(result.returncode, 0, combined)
-                self.assertIn("另一个管理任务", combined)
-        finally:
-            holder.terminate()
-            holder.wait(timeout=5)
-            restore_path(self.lock_path, lock_backup)
-            restore_path(self.lock_dir, lock_dir_backup)
-
-    def test_state_restore_returns_non_zero_when_restore_fails(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            temp_home.mkdir()
-
-            target_file = temp_home / ".claude.json"
-            backup_file = temp_home / ".claude.json.bak"
-            backup_file.write_text('{"restored": true}\n', encoding="utf-8")
-            (temp_root / "config" / "mcp.json").write_text(
-                '{\n  "agent_paths": {\n    "claude-code": "%s"\n  },\n  "servers": {}\n}\n'
-                % target_file,
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
-
-            env = self._managed_env()
-            env["HOME"] = str(temp_home)
-
-            temp_home.chmod(0o500)
-            try:
-                result = subprocess.run(
-                    [str(temp_root / "manage.sh"), "state:restore"],
-                    cwd=temp_root,
-                    env=env,
-                    input="1\n",
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-            finally:
-                temp_home.chmod(0o700)
-
-            combined = result.stdout + result.stderr
-            self.assertNotEqual(result.returncode, 0, combined)
-            self.assertIn("恢复失败", combined)
-            self.assertFalse(target_file.exists(), combined)
-
-    def test_state_list_ignores_unmanaged_home_backups(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            temp_home.mkdir()
-
-            managed_target = temp_home / ".claude.json"
-            managed_backup = temp_home / ".claude.json.bak.20260318"
-            unrelated_backup = temp_home / "Documents" / "report.txt.bak.20260318"
-            unrelated_backup.parent.mkdir(parents=True)
-            managed_backup.write_text("{}", encoding="utf-8")
-            unrelated_backup.write_text("private\n", encoding="utf-8")
-
-            (temp_root / "config" / "mcp.json").write_text(
-                '{\n  "agent_paths": {\n    "claude-code": "%s"\n  },\n  "servers": {}\n}\n'
-                % managed_target,
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
-
-            env = self._managed_env()
-            env["HOME"] = str(temp_home)
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "state:list"],
-                cwd=temp_root,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            combined = result.stdout + result.stderr
-            self.assertEqual(result.returncode, 0, combined)
-            self.assertIn(str(managed_backup), combined)
-            self.assertNotIn(str(unrelated_backup), combined)
-
-    def test_state_list_orders_newest_entries_first(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            (temp_home / "A").mkdir(parents=True)
-            (temp_home / "Z").mkdir(parents=True)
-
-            older_target = temp_home / "Z" / "zeta.json"
-            newer_target = temp_home / "A" / "alpha.json"
-            older_backup = temp_home / "Z" / "zeta.json.bak.202603181200"
-            newer_backup = temp_home / "A" / "alpha.json.bak.202603201200"
-            older_backup.write_text("older\n", encoding="utf-8")
-            newer_backup.write_text("newer\n", encoding="utf-8")
-            os.utime(older_backup, (1710763200, 1710763200))
-            os.utime(newer_backup, (1710936000, 1710936000))
-
-            (temp_root / "config" / "mcp.json").write_text(
-                '{\n  "agent_paths": {\n    "claude-code": "%s",\n    "codex": "%s"\n  },\n  "servers": {}\n}\n'
-                % (older_target, newer_target),
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
-
-            env = self._managed_env()
-            env["HOME"] = str(temp_home)
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "state:list"],
-                cwd=temp_root,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            combined = result.stdout + result.stderr
-            self.assertEqual(result.returncode, 0, combined)
-            lines = [line for line in result.stdout.splitlines() if line.strip()]
-            self.assertGreaterEqual(len(lines), 2, combined)
-            self.assertEqual(lines[0], str(newer_backup), combined)
-            self.assertEqual(lines[1], str(older_backup), combined)
-
-    def test_state_list_fails_when_rules_manifest_is_missing(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            temp_home.mkdir()
-            (temp_root / "config" / "rules-targets.list").unlink()
-
-            env = self._managed_env()
-            env["HOME"] = str(temp_home)
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "state:list"],
-                cwd=temp_root,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            combined = result.stdout + result.stderr
-            self.assertNotEqual(result.returncode, 0, combined)
-            self.assertIn("rules-targets.list 缺失", combined)
-
-    def test_state_restore_fails_when_managed_scope_enumeration_fails(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            temp_home.mkdir()
-            (temp_root / "config" / "rules-targets.list").unlink()
-
-            env = self._managed_env()
-            env["HOME"] = str(temp_home)
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "state:restore"],
-                cwd=temp_root,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            combined = result.stdout + result.stderr
-            self.assertNotEqual(result.returncode, 0, combined)
-            self.assertIn("rules-targets.list 缺失", combined)
-
-    def test_sys_clean_only_removes_target_scoped_temp_files(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            temp_home.mkdir()
-
-            target_dir = temp_home / ".claude"
-            target_dir.mkdir(parents=True)
-            managed_target = target_dir / "settings.json"
-            managed_target.write_text("{}", encoding="utf-8")
-            managed_tmp = target_dir / "settings.json.tmp_123"
-            unrelated_tmp = target_dir / "other.tmp_keep"
-            managed_tmp.write_text("tmp", encoding="utf-8")
-            unrelated_tmp.write_text("keep", encoding="utf-8")
-
-            (temp_root / "config" / "mcp.json").write_text(
-                '{\n  "agent_paths": {\n    "claude-code": "%s"\n  },\n  "servers": {}\n}\n'
-                % managed_target,
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "skills.json").write_text(
-                '{\n  "repositories": {},\n  "agents": {}\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
-
-            env = self._managed_env()
-            env["HOME"] = str(temp_home)
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "sys:clean"],
-                cwd=temp_root,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertFalse(managed_tmp.exists(), result.stdout + result.stderr)
-            self.assertTrue(unrelated_tmp.exists(), result.stdout + result.stderr)
-
-    def test_sys_clean_removes_plain_bak_for_managed_targets(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            temp_home.mkdir()
-
-            managed_target = temp_home / ".claude.json"
-            plain_backup = temp_home / ".claude.json.bak"
-            plain_backup.write_text("{}", encoding="utf-8")
-
-            (temp_root / "config" / "mcp.json").write_text(
-                '{\n  "agent_paths": {\n    "claude-code": "%s"\n  },\n  "servers": {}\n}\n'
-                % managed_target,
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "skills.json").write_text(
-                '{\n  "repositories": {},\n  "agents": {}\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
-
-            env = self._managed_env()
-            env["HOME"] = str(temp_home)
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "sys:clean"],
-                cwd=temp_root,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertFalse(plain_backup.exists(), result.stdout + result.stderr)
-
-    def test_sys_clean_removes_directory_backups_for_managed_rules_targets(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            temp_home.mkdir()
-
-            rule_target = temp_home / ".managed-agent" / "rules"
-            rule_backup = temp_home / ".managed-agent" / "rules.bak.20260318"
-            rule_backup.mkdir(parents=True)
-            (rule_backup / "agent-manager.md").write_text("# backup\n", encoding="utf-8")
-
-            (temp_root / "config" / "mcp.json").write_text(
-                '{\n  "agent_paths": {},\n  "servers": {}\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "skills.json").write_text(
-                '{\n  "repositories": {},\n  "agents": {}\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text(
-                "managed_rules|global|rules/dist/codex|%s\n" % rule_target,
-                encoding="utf-8",
-            )
-
-            env = self._managed_env()
-            env["HOME"] = str(temp_home)
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "sys:clean"],
-                cwd=temp_root,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertFalse(rule_backup.exists(), result.stdout + result.stderr)
-
-    def test_sys_clean_scope_has_no_repo_native_rule_targets_by_default(self):
-        manifest = (ROOT / "config" / "rules-targets.list").read_text(encoding="utf-8")
-        self.assertNotIn("{{REPO_ROOT}}", manifest)
-
-    def test_sys_clean_removes_current_agent_legacy_rule_backups(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            temp_home.mkdir()
-
-            legacy_backups = [
-                temp_home / ".codex" / "rules" / "global.md.bak.20260329",
-                temp_home / ".claude" / "rules" / "modules.bak.20260329",
-            ]
-            for backup in legacy_backups:
-                backup.parent.mkdir(parents=True, exist_ok=True)
-                backup.write_text("old managed backup\n", encoding="utf-8")
-
-            env = self._managed_env()
-            env["HOME"] = str(temp_home)
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "sys:clean"],
-                cwd=temp_root,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            for backup in legacy_backups:
-                self.assertFalse(backup.exists(), result.stdout + result.stderr)
-
-    def test_sys_clean_dry_run_preserves_managed_artifacts(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            temp_home = Path(temp_dir) / "home"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-            temp_home.mkdir()
-
-            target_dir = temp_home / ".claude"
-            target_dir.mkdir(parents=True)
-            managed_target = target_dir / "settings.json"
-            managed_target.write_text("{}", encoding="utf-8")
-            managed_tmp = target_dir / "settings.json.tmp_123"
-            managed_backup = target_dir / "settings.json.bak.20260318"
-            managed_tmp.write_text("tmp", encoding="utf-8")
-            managed_backup.write_text("bak", encoding="utf-8")
-            latest_log = temp_home / "latest.log"
-            latest_log.write_text("log\n", encoding="utf-8")
-
-            (temp_root / "config" / "mcp.json").write_text(
-                '{\n  "agent_paths": {\n    "claude-code": "%s"\n  },\n  "servers": {}\n}\n'
-                % managed_target,
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "skills.json").write_text(
-                '{\n  "repositories": {},\n  "agents": {}\n}\n',
-                encoding="utf-8",
-            )
-            (temp_root / "config" / "rules-targets.list").write_text("", encoding="utf-8")
-
-            env = self._managed_env()
-            env["HOME"] = str(temp_home)
-            env["AGENT_MANAGER_LOG_PREFIX"] = str(temp_home / "agent_manager_sync_test")
-            env["AGENT_MANAGER_LATEST_LOG_POINTER"] = str(latest_log)
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "--dry-run", "sys:clean"],
-                cwd=temp_root,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            combined = result.stdout + result.stderr
-            self.assertEqual(result.returncode, 0, combined)
-            self.assertIn("计划清理以下受管备份、临时文件与运行日志", combined)
-            self.assertTrue(managed_tmp.exists(), combined)
-            self.assertTrue(managed_backup.exists(), combined)
-            self.assertTrue(latest_log.exists(), combined)
-
     def test_mcp_sync_prepares_runtime_by_default(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"
             shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
             call_log = temp_root / "calls.log"
+            # update 会跑完整收敛链路；这里只验证 MCP 步骤的参数约定，
+            # 其余步骤全部 stub，避免真实安装/克隆/写本机。
+            remove_path(temp_root / "secrets")
 
             self._write_stub(
                 temp_root / "agent-mcp" / "sync_mcp.py",
@@ -3770,13 +2297,32 @@ class ManageScriptTests(unittest.TestCase):
                     "#!/usr/bin/env python3\n"
                     "import sys\n"
                     "from pathlib import Path\n"
-                    f"Path({str(call_log)!r}).write_text(' '.join(sys.argv[1:]) + '\\n', encoding='utf-8')\n"
+                    f"Path({str(call_log)!r}).write_text('mcp ' + ' '.join(sys.argv[1:]) + '\\n', encoding='utf-8')\n"
                     "sys.exit(0 if '--prepare-runtime' in sys.argv and '--offline' not in sys.argv else 91)\n"
                 ),
             )
+            self._write_stub(
+                temp_root / "agent-tool" / "sync_tools.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-skill" / "link_skills.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-rule" / "scripts" / "sync-claude-hooks.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_stub(
+                temp_root / "agent-rule" / "scripts" / "sync-codex-hooks.py",
+                "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
+            )
+            self._write_rules_stub(temp_root, call_log)
+            self._write_browser_stub(temp_root, call_log)
+            self._write_init_secrets_stub(temp_root, call_log)
 
             result = subprocess.run(
-                [str(temp_root / "manage.sh"), "mcp:apply"],
+                [str(temp_root / "manage.sh"), "update"],
                 cwd=temp_root,
                 env=self._managed_env(),
                 capture_output=True,
@@ -3786,92 +2332,9 @@ class ManageScriptTests(unittest.TestCase):
 
             combined = result.stdout + result.stderr
             self.assertEqual(result.returncode, 0, combined)
-            logged = call_log.read_text(encoding="utf-8")
-            self.assertIn("--prepare-runtime", logged)
-            self.assertNotIn("--offline", logged)
+            logged_lines = call_log.read_text(encoding="utf-8").splitlines()
+            mcp_lines = [line for line in logged_lines if line.startswith("mcp ")]
+            self.assertEqual(len(mcp_lines), 1, logged_lines)
+            self.assertIn("--prepare-runtime", mcp_lines[0])
+            self.assertNotIn("--offline", mcp_lines[0])
 
-    def test_atomic_mcp_sync_termination_cleans_up_descendant_processes(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir) / "repo"
-            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
-
-            child_pid_file = Path(temp_dir) / "mcp-child.pid"
-            ready_file = Path(temp_dir) / "mcp-ready"
-
-            self._write_stub(
-                temp_root / "agent-mcp" / "sync_mcp.py",
-                (
-                    "#!/usr/bin/env python3\n"
-                    "import os\n"
-                    "import signal\n"
-                    "import subprocess\n"
-                    "import sys\n"
-                    "import time\n"
-                    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
-                    "with open(os.environ['CHILD_PID_FILE'], 'w', encoding='utf-8') as fh:\n"
-                    "    fh.write(str(child.pid))\n"
-                    "Path = __import__('pathlib').Path\n"
-                    "Path(os.environ['READY_FILE']).write_text('ready\\n', encoding='utf-8')\n"
-                    "signal.signal(signal.SIGTERM, lambda *_args: sys.exit(143))\n"
-                    "while True:\n"
-                    "    time.sleep(1)\n"
-                ),
-            )
-
-            env = self._managed_env()
-            env["CHILD_PID_FILE"] = str(child_pid_file)
-            env["READY_FILE"] = str(ready_file)
-
-            proc = subprocess.Popen(
-                [str(temp_root / "manage.sh"), "--offline", "mcp:apply"],
-                cwd=temp_root,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-
-            child_pid = None
-            try:
-                deadline = time.time() + 10
-                while time.time() < deadline:
-                    if ready_file.exists() and child_pid_file.exists():
-                        child_pid = int(child_pid_file.read_text(encoding="utf-8").strip())
-                        break
-                    if proc.poll() is not None:
-                        break
-                    time.sleep(0.1)
-
-                self.assertIsNotNone(child_pid, "mcp:apply 未按预期启动子进程")
-                os.kill(child_pid, 0)
-
-                proc.terminate()
-                proc.wait(timeout=10)
-                proc.stdout.close()
-                proc.stderr.close()
-
-                deadline = time.time() + 3
-                child_alive = True
-                while time.time() < deadline:
-                    try:
-                        os.kill(child_pid, 0)
-                    except OSError:
-                        child_alive = False
-                        break
-                    time.sleep(0.1)
-
-                self.assertFalse(child_alive, f"mcp:apply 退出后子进程仍存活: {child_pid}")
-            finally:
-                if proc.poll() is None:
-                    proc.kill()
-                    proc.wait(timeout=5)
-                    proc.stdout.close()
-                    proc.stderr.close()
-                else:
-                    proc.stdout.close()
-                    proc.stderr.close()
-                if child_pid is not None:
-                    try:
-                        os.kill(child_pid, signal.SIGKILL)
-                    except OSError:
-                        pass

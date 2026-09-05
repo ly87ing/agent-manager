@@ -61,7 +61,7 @@ if not src_root.exists() or not dist_root.exists() or not builder.exists():
 if not manifest_path.exists():
     emit_block(
         "Managed rules manifest is missing: config/rules-targets.list. "
-        "Run make rules-build and restore the manifest before stopping."
+        "Rebuild via agent-rule/scripts/build-agent-rules.py and restore the manifest before stopping."
     )
 
 
@@ -94,18 +94,18 @@ try:
         if build.returncode != 0:
             emit_block(
                 "Managed rules could not be rebuilt for verification. "
-                "Run make rules-build and fix the build before stopping."
+                "Run agent-rule/scripts/build-agent-rules.py and fix the build before stopping."
             )
         fresh_dist = snapshot(temp_root / "agent-rule" / "rules" / "dist")
 except OSError as exc:
     emit_block(
         "Managed rules verification inputs are unreadable "
-        f"({manifest_path.name}: {exc}). Run make rules-build and fix the managed rules files before stopping."
+        f"({manifest_path.name}: {exc}). Run agent-rule/scripts/build-agent-rules.py and fix the managed rules files before stopping."
     )
 
 if snapshot(dist_root) != fresh_dist:
     emit_block(
         "Rules dist is out of sync with the current source/build logic. "
-        "Run make rules-build before stopping."
+        "Run agent-rule/scripts/build-agent-rules.py (or make update) before stopping."
     )
 PY

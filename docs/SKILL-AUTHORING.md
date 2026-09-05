@@ -102,5 +102,5 @@ safe-merge-review#14 纹丝不动,仍以 5/5 输给 change-discipline。
 ## 变更流程
 
 dev 仓库(`~/Documents/github/agent-skills`)修改 → 增补 eval 用例 → 跑仓库契约测试 →
-按仓库惯例 commit(不带 AI 署名)→ 经用户同意 push → agent-manager `make bump` + apply →
+按仓库惯例 commit(不带 AI 署名)→ 经用户同意 push → agent-manager `make update` →
 抽验各 agent 实际加载。

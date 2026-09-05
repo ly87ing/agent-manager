@@ -21,7 +21,6 @@ from src.git_remote_probe import probe_git_remote_state
 from src.json_config import get_typed_mapping_section, load_json_object_file
 from src.manage_runtime_probe import is_agent_installed
 from src.runtime_logging import configure_logging
-from src.version_pins import apply_local_version_pins
 
 configure_logging()
 
@@ -726,7 +725,6 @@ def main():
     try:
         policy_root = load_json_object_file(args.config, strict=True, missing_ok=False)
         full_def = load_json_object_file(args.def_file, strict=True, missing_ok=False)
-        full_def = apply_local_version_pins(full_def, args.def_file)
         policy_cfg = get_typed_mapping_section(policy_root, "skills", Path(args.config).name, (dict,), "对象")
         repositories = get_typed_mapping_section(full_def, "repositories", Path(args.def_file).name, (dict,), "对象")
         agent_targets = get_typed_mapping_section(full_def, "agents", Path(args.def_file).name, (str, dict), "字符串或对象")

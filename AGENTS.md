@@ -2,7 +2,7 @@
 
 ## Setup
 - Python 3 and make are enough for the repo checks; no extra bootstrap is needed for doc or contract edits.
-- If you touch rules, edit `agent-rule/rules/src/` and rebuild with `make rules-build`.
+- If you touch rules, edit `agent-rule/rules/src/` and rebuild + distribute with `make update`（构建脚本为 `agent-rule/scripts/build-agent-rules.py`）。
 
 ## Test commands
 - `python3 -m unittest discover -s tests -p 'test*.py' -v`

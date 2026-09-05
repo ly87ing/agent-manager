@@ -285,13 +285,13 @@ class ClaudeHooksSyncTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(result.stdout.strip(), "", "read of dist should not deny")
 
-    def test_block_dist_edits_hook_allows_make_rules_build(self):
+    def test_block_dist_edits_hook_allows_rules_build_script(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = self._copy_repo(temp_dir)
 
             result = self._run_block_dist_edits(
                 temp_root,
-                {"tool_input": {"command": "make rules-build"}},
+                {"tool_input": {"command": "python3 agent-rule/scripts/build-agent-rules.py"}},
             )
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -329,7 +329,7 @@ class ClaudeHooksSyncTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             response = json.loads(result.stdout)
             self.assertEqual(response["decision"], "block")
-            self.assertIn("make rules-build", response["reason"])
+            self.assertIn("build-agent-rules.py", response["reason"])
 
     def test_check_rules_build_hook_allows_stop_after_dist_changes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -381,7 +381,7 @@ class ClaudeHooksSyncTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             response = json.loads(result.stdout)
             self.assertEqual(response["decision"], "block")
-            self.assertIn("make rules-build", response["reason"])
+            self.assertIn("build-agent-rules.py", response["reason"])
 
     def test_check_rules_build_hook_blocks_when_manifest_is_missing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -404,38 +404,8 @@ class ClaudeHooksSyncTests(unittest.TestCase):
             self.assertEqual(response["decision"], "block")
             self.assertIn("rules-targets.list", response["reason"])
 
-    def test_manage_command_syncs_project_claude_hooks(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = self._copy_repo(temp_dir)
-
-            result = subprocess.run(
-                [str(temp_root / "manage.sh"), "claude:hooks:apply"],
-                cwd=temp_root,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertTrue((temp_root / ".claude" / "settings.json").exists(), result.stdout + result.stderr)
-
-    def test_make_target_applies_project_claude_hooks(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = self._copy_repo(temp_dir)
-
-            result = subprocess.run(
-                ["make", "claude-hooks-apply"],
-                cwd=temp_root,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertTrue((temp_root / ".claude" / "settings.json").exists(), result.stdout + result.stderr)
-
-    def test_makefile_exposes_claude_hooks_apply_target(self):
-        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertIn("claude-hooks-apply", makefile)
-        self.assertIn("claude\\:hooks\\:apply", makefile)
-        self.assertIn("@./manage.sh claude:hooks:apply", makefile)
+    def test_update_pipeline_syncs_project_claude_hooks(self):
+        manage_sh = (ROOT / "manage.sh").read_text(encoding="utf-8")
+        apply_steps = manage_sh.split("function run_apply_steps()", 1)[1].split("}", 1)[0]
+        self.assertIn("run_claude_hooks_sync_task", apply_steps)
+        self.assertIn("sync-claude-hooks.py", manage_sh)

@@ -5,8 +5,7 @@
 - Treat `agent-rule/rules/dist/` as generated output only.
 
 ## Workflow
-- After changing `rules/src/`, run `make rules-build`.
-- If the new output needs to be distributed, run `make rules:apply`.
+- After changing `rules/src/`, run `make update`（规则构建 `agent-rule/scripts/build-agent-rules.py` 与分发随管线完成）。
 
 ## Boundaries
 - Never hand-edit files in `agent-rule/rules/dist/`.

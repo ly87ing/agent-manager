@@ -40,15 +40,15 @@ class SyncToolsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, combined)
         self.assertIn("-f, --force-refresh", _strip_ansi(combined))
 
-    def test_committed_playwright_cli_policy_uses_fixed_version_lock(self):
+    def test_committed_playwright_cli_policy_is_unpinned(self):
         manager = json.loads((ROOT / "config" / "manager.json").read_text(encoding="utf-8"))
         tool_defs = json.loads((ROOT / "config" / "tools.json").read_text(encoding="utf-8"))["tools"]
 
         self.assertTrue(manager["tools"]["playwright-cli"]["enabled"])
-        self.assertRegex(tool_defs["playwright-cli"]["install"], r"^npm install -g @playwright/cli@\d")
+        self.assertEqual(tool_defs["playwright-cli"]["install"], "npm install -g @playwright/cli")
         self.assertEqual(tool_defs["playwright-cli"]["install"], tool_defs["playwright-cli"]["upgrade"])
         self.assertNotIn("@latest", tool_defs["playwright-cli"]["install"])
-        self.assertEqual(tool_defs["playwright-cli"]["version_lock"]["package"], "@playwright/cli")
+        self.assertNotIn("version_lock", tool_defs["playwright-cli"])
         self.assertEqual(tool_defs["playwright-cli"]["setup"], "playwright-cli install-browser")
         self.assertEqual(tool_defs["playwright-cli"]["setup_timeout_sec"], 300)
         self.assertEqual(tool_defs["playwright-cli"]["ready_check"], "bin:playwright-cli")
@@ -66,60 +66,6 @@ class SyncToolsTests(unittest.TestCase):
         self.assertIn("--registry https://registry.npmjs.org", invoked)
         self.assertIn("--fetch-retries 2", invoked)
         self.assertIn("--no-audit", invoked)
-
-    def test_main_applies_local_version_pins_to_install_commands(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_root = Path(temp_dir)
-            config_path = temp_root / "manager.json"
-            def_path = temp_root / "tools.json"
-            base_dir = temp_root / "tools"
-            config_path.write_text(
-                json.dumps({"tools": {"demo": {"enabled": True, "auto_update": False}}}),
-                encoding="utf-8",
-            )
-            def_path.write_text(
-                json.dumps(
-                    {
-                        "tools": {
-                            "demo": {
-                                "install": "npm install -g demo@0.1.0",
-                                "ready_check": "bin:demo",
-                                "version_lock": {
-                                    "type": "npm",
-                                    "package": "demo",
-                                    "fields": {"install": "npm install -g demo@{version}"},
-                                },
-                            }
-                        }
-                    }
-                ),
-                encoding="utf-8",
-            )
-            (temp_root / "version-pins.local.json").write_text(
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "version_locks": {"tools.json": {"tools.demo": "9.9.9"}},
-                        "skill_repositories": {},
-                    }
-                ),
-                encoding="utf-8",
-            )
-            state = {"ready": False}
-
-            def fake_run_cmd(cmd, cwd=None, timeout=300):
-                if cmd == "npm install -g demo@9.9.9":
-                    state["ready"] = True
-                    return True, "installed"
-                return False, f"unexpected command: {cmd}"
-
-            with mock.patch.object(sys, "argv", ["sync_tools.py", "--config", str(config_path), "--def-file", str(def_path), "--base-dir", str(base_dir)]):
-                with mock.patch.object(sync_tools, "run_cmd", side_effect=fake_run_cmd) as run_cmd:
-                    with mock.patch.object(sync_tools, "_check_ready", side_effect=lambda name, ready_check: state["ready"]):
-                        with mock.patch.object(sync_tools, "detect_tool_readiness", side_effect=lambda name, definition, repo_root: state["ready"]):
-                            sync_tools.main()
-
-            self.assertEqual(run_cmd.call_args_list, [mock.call("npm install -g demo@9.9.9")])
 
     def test_playwright_cli_readiness_globs_match_headless_shell_browser(self):
         # `playwright-cli install-browser` installs the chrome headless shell, whose cache dir is

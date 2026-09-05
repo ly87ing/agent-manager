@@ -39,7 +39,7 @@ jobs:
         run: python3 -m pip install tomli
 
       - name: Run tracked secret scan
-        run: make secrets-check
+        run: python3 ./scripts/check_no_secrets.py
 
       - name: Run unit tests
         run: python3 -m unittest discover -s tests -p 'test*.py' -v

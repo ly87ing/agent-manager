@@ -36,7 +36,7 @@ if [ -z "$REPO_URL" ]; then
     echo "❌ 未配置 secrets 仓库地址"
     echo ""
     echo "请通过以下任一方式提供："
-    echo "  SECRETS_REPO_URL=https://example.com/your-secrets.git make bump"
+    echo "  SECRETS_REPO_URL=https://example.com/your-secrets.git make update"
     echo "  ./scripts/init-secrets.sh <your-secrets-repo-url>"
     exit 1
 fi
@@ -52,7 +52,7 @@ if git clone "$REPO_URL" secrets 2>&1; then
     ls -la "$SECRETS_DIR"/*.env 2>/dev/null || echo "  (暂无 .env 文件)"
     echo ""
     echo "=========================================="
-    echo "  初始化完成！现在可以运行：make bump"
+    echo "  初始化完成！现在可以运行：make update"
     echo "  若需安装缺失 Agent，请改用：make init"
     echo "=========================================="
     exit 0

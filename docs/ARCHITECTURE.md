@@ -36,10 +36,10 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `auto_install`: 是否自动安装
 - `auto_update`: 是否自动更新
 - `preferred_provider`: 首选安装来源
-- `version_lock`: 可刷新的固定版本元数据；`make bump` 负责查询 npm 最新版本或 Git ref 最新 commit 并写回具体命令，运行时同步只消费固定版本
+- 不锁版本：所有受管组件跟随上游最新（npm 命令不带版本号、git 依赖跟踪分支头、skill 仓库跟随默认分支），`make update` 即把本机收敛到上游当前状态
 - `manager.json`: 仓库提供的可审计默认值
-- `manager.local.json`: 不参与 Git 的本地覆盖层；`make ui` 默认写入这里
-- `browser_us_sync.enabled`: 是否在 `manage.sh` 的 `apply` / `init` / `browser:apply` 入口执行浏览器 Google US 前置同步；缺省为启用，可用本地覆盖或 `AGENT_MANAGER_BROWSER_US_SYNC_ENABLED` 临时改写
+- `manager.local.json`: 不参与 Git 的本地覆盖层（手工编辑维护）
+- `browser_us_sync.enabled`: 是否在 `manage.sh` 的 `update` / `init` 入口执行浏览器 Google US 前置同步；缺省为启用，可用本地覆盖或 `AGENT_MANAGER_BROWSER_US_SYNC_ENABLED` 临时改写
 - `agent-manager` 不维护终端 dotfiles；用户级 shell/tmux/iTerm 配置不属于受管目标
 - `agents` 键使用稳定的机器可读 ID（如 `claude-code`, `codex`），而不是面向用户的展示名
 
@@ -51,11 +51,11 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - `tools.json`: 工具安装和设置指令
 - `skills.json`: Skill仓库地址和Agent映射
 - `mcp.json`: MCP服务器定义和Agent路径映射
-- 浏览器自动化相关能力按上游官方分发模型分别托管：`playwright-cli` 在 `tools.json` 中通过 npm 固定版本管理，`make bump` 负责刷新 `version_lock`；它的 runtime setup 由 `playwright-cli install-browser` 完成，受 `setup_timeout_sec` 限制，并通过 Playwright cache 中的 Chromium payload 重新验证。`chrome-devtools` 在 `mcp.json` 中通过 `npx -y chrome-devtools-mcp@<固定版本>` 维护。
+- 浏览器自动化相关能力按上游官方分发模型分别托管：`playwright-cli` 在 `tools.json` 中通过 npm 包管理（不锁版本）；它的 runtime setup 由 `playwright-cli install-browser` 完成，受 `setup_timeout_sec` 限制，并通过 Playwright cache 中的 Chromium payload 重新验证。`chrome-devtools` 在 `mcp.json` 中通过 `npx -y chrome-devtools-mcp` 维护（不锁版本）。
 - Agent 定义中的 `display_name` 仅用于展示和日志；跨配置引用统一使用稳定 ID
 - `agents.json` 中的 `providers` 只声明 agent-manager 可托管的安装源；`system` 只是运行时探测信号，不是可配置的 provider key
 - `preferred_provider` 必须指向 `providers` 中真实存在的键，否则生命周期同步应直接失败
-- `skills.json` 中的 skill 仓库支持 `commit` / `ref` 版本约束；默认受管仓库固定到 `commit`，并由 `make bump` 按 `upgrade_strategy` 刷新。技能名来自仓库内 `SKILL.md` frontmatter 的 `name`
+- `skills.json` 中的 skill 仓库跟随默认分支最新（不固定 commit），由 `make update` 同步 clone/pull。技能名来自仓库内 `SKILL.md` frontmatter 的 `name`
 - 新增 Agent 时，如需启用某类能力，再声明对应的 MCP / skills / rules target path：`config/mcp.json` 的 `agent_paths`、`config/skills.json` 的 `agents` 映射、`config/rules-targets.list` 的规则分发目标。当前默认受管目标：生命周期与 rules 只包含 `Claude Code` 与 `Codex`；MCP 与 skills target 额外包含 `Kimi Code`（config-managed only，在 `config/agents.json` 中仅有探测定义，不进入 `manager.json` 的 agents 策略段，因此不会被安装/升级/卸载）
 
 ### 3. 同步引擎 (Sync Engines)
@@ -83,7 +83,7 @@ Agent Manager 是一个统一的 AI 助手环境管理平台，旨在通过单�
 - 环境依赖检查
 - 安全风险扫描
 - 对尚未物化的 MCP / skills / rules 目标给出提示级告警，而不是与真实漂移混为一谈
-- `doctor / status --json` 会输出同一份结构化诊断报告，供 CI 或外部脚本消费
+- `doctor --json` 会输出同一份结构化诊断报告，供 CI 或外部脚本消费
 - 主仓库敏感信息扫描默认排除 `secrets/` 私有仓库与忽略缓存，只针对 `agent-manager` 自身受控文件判定泄露风险
 
 ---
@@ -121,15 +121,14 @@ graph TD
 
 `manage.sh` 是唯一的顶层编排入口，负责统一解释全局 flag 和运行时状态：
 
-- **原子锁**：需要写入或同步的命令会先抢占 `/tmp/agent_manager_<user>.lock.d`，并在其中写入持有者 PID；兼容保留 `/tmp/agent_manager_<user>.lock` 作为元数据。`sys:unlock` 会同时清理目录锁和遗留锁文件。
-- **按次日志**：每次运行写入独立日志 `/tmp/agent_manager_sync_<user>_<runid>.log`，并更新 `/tmp/agent_manager_sync_<user>.latest` 指针；`sys:logs` 读取 latest，`sys:clean-logs` 清理 latest 与全部历史运行日志。
-- **`sys:clean`**：清理当前受管目标旁的 `.bak` / `.tmp_*` / restore 临时文件，并覆盖 Claude Code / Codex 的 legacy rules 备份路径；不清理无受管历史证据的用户文件。
+- **原子锁**：需要写入或同步的命令会先抢占 `/tmp/agent_manager_<user>.lock.d`，并在其中写入持有者 PID；兼容保留 `/tmp/agent_manager_<user>.lock` 作为元数据。
+- **按次日志**：每次运行写入独立日志 `/tmp/agent_manager_sync_<user>_<runid>.log`，并更新 `/tmp/agent_manager_sync_<user>.latest` 指针。
 - **安全默认入口**：直接执行 `./manage.sh` 只显示帮助，不会隐式退化到 `init`；只给全局 flag 而不给命令（如 `./manage.sh --offline`）会直接报错退出，同样不会隐式跑管线。
-- **`--dry-run`**：只输出计划动作，跳过 secrets 初始化、仓库 clone/pull、依赖安装、构建，以及 `sys:clean` / `sys:unlock` / `state:restore` / `sys:clean-logs` 这类会修改本地状态的维护动作；允许保留只读探测和预览日志。若与 `sys:upgrade` 组合，只预览仓库自更新动作。
+- **`--dry-run`**：只输出计划动作，跳过 secrets 初始化、仓库 clone/pull、依赖安装与构建；允许保留只读探测和预览日志。
 - **`--offline`**：禁止任何远程拉取、下载和安装。生命周期、tools、skills、MCP 同步器都只能复用本地已存在仓库/配置；如果本地前置资源缺失，应显式报错而不是偷偷联网。
-- **命令分层**：`apply` 把锁定态分发/收敛到本机（secrets 拉取、shell alias、tools、browser、rules 构建分发、skills 链接、mcp 注入），不升版本、不装 Agent。`bump` 只刷新受管 MCP / CLI / tool 的版本锁和 skill commit 等元数据，不分发、不改本机环境；`update` = `bump` + `apply`（bump 段失败即中止，不分发旧锁定态），不碰 Agent 生命周期；`init` = `bump` + Agent 生命周期（安装缺失 Agent + 升级已装 Agent）+ `apply` + 失效引用审计；`agents:apply` 只跑 Agent 生命周期（`--no-install`），升级/修复已装 Agent 到上游最新（`agents.json` 的 npm 命令不锁版本）；`sys:upgrade` 只更新 agent-manager 仓库自身。
-- **不接管终端配置**：除 shell alias 受管区块会写入 `~/.zshrc`（interactive）与 `~/.zprofile`（login，供非交互 login shell 如 UU 远程 term 加载别名）外，`apply` / `bump` / `init` 不改写 `~/.tmux.conf`、iTerm2 动态配置等用户级终端文件；仓库也不提供 `terminal:apply` 入口。
-- **诊断双出口**：`doctor / status` 默认输出面向人的文本报告；追加 `--json` 时输出机器可读 JSON，不再需要从文本中抓取 warning 计数。
+- **命令分层**：`update` 把所有受管组件分发/收敛到本机（secrets 拉取、shell alias、tools、browser、rules 构建分发、skills 链接、MCP 注入、Claude/Codex hooks 同步），不装、也不升级 Agent 软件；`init` = Agent 生命周期（安装缺失 Agent + 升级已装 Agent）+ `update`；`agents:update` 只跑 Agent 生命周期（`--no-install`），升级/修复已装 Agent 到上游最新（`agents.json` 不锁版本）。
+- **不接管终端配置**：除 shell alias 受管区块会写入 `~/.zshrc`（interactive）与 `~/.zprofile`（login，供非交互 login shell 如 UU 远程 term 加载别名）外，`update` / `init` 不改写 `~/.tmux.conf`、iTerm2 动态配置等用户级终端文件。
+- **诊断双出口**：`doctor` 默认输出面向人的文本报告；追加 `--json` 时输出机器可读 JSON，不再需要从文本中抓取 warning 计数。
 - **最小 smoke 策略**：`scripts/ci-smoke.sh` 通过 `AGENT_MANAGER_BASE_CONFIG=config/manager.smoke.json` 运行安全预演，避免把默认全量策略带来的未物化提示项混进 CI 基线。
 
 ### Rules 构建与分发流程
@@ -141,14 +140,9 @@ graph TD
 - `config/rules-targets.list` 只声明 `agent-rule/rules/dist/` 下的可分发产物到各 Agent 目标路径的映射。
 - manifest 支持家目录 target 和 `{{REPO_ROOT}}` repo-native target；当前受管 rules 只使用 Claude 与 Codex 的家目录目标。
 - 规则同步会清理历史遗留的 `~/.<agent>/rules/global.md` 和旧 `rules/modules` 目录，避免新旧入口并存。
-- `manage.sh rules:build` / `make rules-build` 用于刷新 `dist/`。
-- `manage.sh rules:apply` / `make rules:apply` 用于把 `dist/` 产物同步到目标 Agent 目录与 repo-native 文件位置。
-- `config/claude-hooks.json` 定义仓库级 Claude hooks，`agent-rule/scripts/sync-claude-hooks.py` 会把它渲染到 `.claude/settings.json`。
-- `config/codex-hooks.json` 定义仓库级 Codex hooks，`agent-rule/scripts/sync-codex-hooks.py` 会把它渲染到 `.codex/hooks.json`；当前 Codex hooks 包含 `PreToolUse` 的生成产物写保护和 `Stop` 的规则构建一致性校验。
-- `manage.sh claude:hooks:apply` / `make claude-hooks-apply` 用于刷新项目内的 Claude hooks 配置。
-- `manage.sh codex:hooks:apply` / `make codex-hooks-apply` 用于刷新项目内的 Codex hooks 配置。
-- `scripts/evals/run_rule_effectiveness_eval.py` 读取 `scripts/evals/fixtures/` 中的离线 JSON fixture，校验题目与 run artifact schema，并强制执行 `min_case_count`、`required_agents`、`success / verification` 阈值等 suite requirements；`make eval-rules` 是其推荐入口。
-- `make instructions:check` 是修改共享指令、skills exposure 或 managed hooks 前的统一回归硬门禁；它串起 instruction-related project contracts、rules budget、layout、sync、Claude/Codex hook contract tests、eval schema/metric contract tests，以及 baseline 规则评测。
+- 规则构建（`agent-rule/scripts/build-agent-rules.py` 刷新 `dist/`）与分发随 `make update` 管线自动完成，无独立命令。
+- `config/claude-hooks.json` 定义仓库级 Claude hooks，`agent-rule/scripts/sync-claude-hooks.py` 会把它渲染到 `.claude/settings.json`，随 `make update` 管线同步。
+- `config/codex-hooks.json` 定义仓库级 Codex hooks，`agent-rule/scripts/sync-codex-hooks.py` 会把它渲染到 `.codex/hooks.json`，随 `make update` 管线同步；当前 Codex hooks 包含 `PreToolUse` 的生成产物写保护和 `Stop` 的规则构建一致性校验。
 
 ---
 
@@ -168,7 +162,7 @@ graph TD
 - 使用环境变量占位符替换
 - 支持凭证轮换和审计
 - `--offline` 下不会同步 secrets 仓库，只会消费本地已有 secrets 内容
-- `make secrets-check`、CI smoke 和 `doctor` 会拦截主仓库中的疑似明文 secrets，防止真实凭证混入 `agent-manager`
+- `scripts/check_no_secrets.py`（CI 与 smoke 直接调用）和 `doctor` 会拦截主仓库中的疑似明文 secrets，防止真实凭证混入 `agent-manager`
 
 ### 3. 权限最小化
 - 配置文件默认权限为 600 (仅所有者可读写)
@@ -196,15 +190,12 @@ graph TD
    - command: 执行命令
    - args: 参数列表
    - env: 环境变量映射（支持${VAR}占位符）
-   - version_lock: 可选；对 npm 包或 Git ref 生成固定版本/commit，禁止把 `@latest` 或分支名直接分发到 Agent 运行配置
    - agents: 限定生效的Agent列表（null表示全部活跃 skill 目标；像 Codex 这类特殊目标只有显式声明时才会纳入）
 2. 系统将自动处理不同Agent的格式差异
 
 ### 添加新Skill
 1. 在 `config/skills.json` 的repositories中添加Git仓库
-   - url: 仓库地址
-   - commit / ref: 可选版本约束；`commit` 优先级高于 `ref`
-   - upgrade_strategy: 可选，显式升级命令使用的版本跟踪策略；当前支持 `latest-branch`、`latest-tag` 与 `latest-release`
+   - url: 仓库地址（跟随默认分支最新，不固定 commit）
    - skill_paths: 可选，相对仓库根目录的子路径列表；用于只暴露仓库中的指定 skill 目录或 skill 集合目录
    - agents: 限定生效的Agent列表（null表示全部）
 2. 仓库会被缓存到 `agent-skill/repositories/<repo-name>/`
@@ -247,7 +238,7 @@ agent-manager/
 
 ### 工作流程
 1. 用户通过修改 `config/manager.json` 或 `config/manager.local.json` 表达意愿
-2. 选择入口：`make update` 日常把本机更新并收敛到最新（= `bump` + `apply`），`make apply` 做本地配置环境收敛，`make bump` 纯刷新远端资源版本锁，`make agents:apply` / `make agents:update` 单独升级/修复已装 Agent 到上游最新（`agents.json` 不锁版本），`make init` 做全量安装、更新与环境同步
+2. 选择入口：`make update` 日常把本机收敛到上游最新（所有受管组件分发到本机），`make agents:update` 单独升级/修复已装 Agent 到上游最新，`make init` 做全量安装、更新与环境同步，`make doctor` 体检
 3. `manage.sh` 先解析 `dry-run` / `offline`，获取原子锁，并建立本次运行专属日志
 4. 各同步引擎读取策略和定义，检测当前状态
 5. 根据运行模式执行安装、更新或卸载操作
