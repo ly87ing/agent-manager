@@ -22,7 +22,7 @@
 
 - `chrome-devtools`
   - 用途：`Chrome DevTools` 调试、网络、性能分析。
-  - 启动：`npx -y chrome-devtools-mcp@<固定版本> --isolated`（避免多个 agent 共享同一个 browser profile 导致互相污染）。
+  - 启动：`npx -y chrome-devtools-mcp@<固定版本> --isolated --no-usage-statistics`（`--isolated` 避免多个 agent 共享同一个 browser profile 导致互相污染；`--no-usage-statistics` 关闭上游自 1.7.0 起默认开启的使用统计上报）。
 - `grok-search`
   - 用途：联网搜索与网页抓取。
   - 注意：真实 provider key 仅从 `secrets/` 注入。
@@ -37,17 +37,17 @@
   - 由 `make bump` 刷新本机 `config/version-pins.local.json` 中的版本锁；各 Agent 实际运行时只消费固定版本。
 默认受管 skill 仓库为 `agent-skills`；仓库、升级策略和初始 commit 保留在 `config/skills.json`，真实运行 commit 由 `config/version-pins.local.json` 的本地锁覆盖。运行时同步只检出固定 commit，不直接跟随默认分支或动态 release。`agent-skills` 由 `make bump` 按 `latest-branch` 刷新；`agent-skills` 面向 `Claude Code`、`Codex` 与 `Kimi Code` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 `safe-merge-review`、`change-discipline`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing`、`technical-diagramming` 这 6 个 skill 包，不会因为上游新增 skill 而自动扩大安装范围。
 默认自动安装的 Agent 当前只包含 `Claude Code` 与 `Codex`。
-`Claude Code` 与 `Codex` 默认走官方 npm 包，并使用 `config/agents.json` 中的命令模板加本机版本锁。历史 `brew` 安装仅用于识别并提示迁移，不再作为这些 CLI 的受管 provider。
+`Claude Code` 与 `Codex` 默认走官方 npm 包，`config/agents.json` 中的安装/升级命令刻意不锁版本，`make agents:update`（即 `agents:apply`）每次都升级到上游最新。历史 `brew` 安装仅用于识别并提示迁移，不再作为这些 CLI 的受管 provider。
 `Claude Code native` 仍作为兼容 provider 保留官方 install / update / uninstall 语义，但默认不再使用这条动态 updater 路径。
 `Claude Code local install` 不纳入 `agent-manager` lifecycle 托管，因为它依赖 shell alias 暴露入口，当前探测链路不会越权接管。
-以上 lifecycle 口径统一按两个当前受管 Agent 的官方推荐方式维护。`Claude Code` 和 `Codex` 的 npm provider 使用 `config/agents.json` 中的命令模板，并由 `make bump` 刷新本机 `config/version-pins.local.json`（然后由 `make agents:apply` 或 `make init` 负责更新软件）。`agent-manager` 不改写用户 shell profile。
+以上 lifecycle 口径统一按两个当前受管 Agent 的官方推荐方式维护。`Claude Code` 和 `Codex` 的 npm provider 使用 `config/agents.json` 中的命令模板（不锁版本），由 `make agents:apply` / `make agents:update` 或 `make init` 直接升级到上游最新，不经过 `config/version-pins.local.json`。`agent-manager` 不改写用户 shell profile。
 
 ## Official CLI Lifecycle Policy
 
 | CLI | 默认受管 provider | 兼容受管 provider | detect-only 历史来源 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
-| `Claude Code` | `npm` | `native` | `brew` | 默认使用官方 npm 包固定版本；native installer 仅作为兼容 provider 保留。 |
-| `Codex` | `npm` | - | `brew` | 使用官方 npm 包；安装和升级命令固定到 `config/agents.json` 的版本锁，历史 brew 安装只用于审计和迁移提示。 |
+| `Claude Code` | `npm` | `native` | `brew` | 默认使用官方 npm 包（不锁版本，随升级命令取上游最新）；native installer 仅作为兼容 provider 保留。 |
+| `Codex` | `npm` | - | `brew` | 使用官方 npm 包；安装和升级命令不锁版本、始终取上游最新，历史 brew 安装只用于审计和迁移提示。 |
 
 ## Agent 安装源依据 (Official Channels Catalog)
 
@@ -55,7 +55,7 @@
 
 | 助手名称 | 二进制标识 | 官方 npm / 安装器 | Homebrew 官方源 (macOS) | 备注 |
 | :--- | :--- | :--- | :--- | :--- |
-| **Claude Code** | `claude` | `@anthropic-ai/claude-code` / 官方 native installer | `cask: claude-code` | 受管 lifecycle 默认走 npm 固定版本；`brew` 仅保留 detect-only 语义。 |
+| **Claude Code** | `claude` | `@anthropic-ai/claude-code` / 官方 native installer | `cask: claude-code` | 受管 lifecycle 默认走 npm（不锁版本）；`brew` 仅保留 detect-only 语义。 |
 | **Codex** | `codex` | `@openai/codex` | `cask: codex` | 受管 lifecycle 默认走 npm。 |
 
 ## 核心健全性特性
@@ -63,7 +63,7 @@
 ### 1. 策略与定义分离 (Policy vs. Definition)
 - **仓库基线 (`manager.json`)**：保存可审计的默认策略。
 - **本地覆盖 (`manager.local.json`)**：运行时与 `manager.json` 深度合并；`make ui` 只写这一层，适合机器本地偏好与私有配置。
-- **版本锁 (`version_lock`) / skill commit**：`config/agents.json`、`config/tools.json`、`config/mcp.json` 与 `config/skills.json` 保存命令模板、包名、仓库和升级策略；`make bump` 查询 npm / Git ref / skill 仓库分支的最新版本并写入本机 `config/version-pins.local.json`。同步到 Codex / Claude Code 的实际运行配置会先套用本地 lock，不得使用 `@latest`、分支名或未固定的 skill 仓库。
+- **版本锁 (`version_lock`) / skill commit**：`config/tools.json`、`config/mcp.json` 与 `config/skills.json` 保存命令模板、包名、仓库和升级策略；`make bump` 查询 npm / Git ref / skill 仓库分支的最新版本并写入本机 `config/version-pins.local.json`。同步到 Codex / Claude Code 的实际运行配置会先套用本地 lock，不得使用 `@latest`、分支名或未固定的 skill 仓库。`config/agents.json` 是刻意例外：两个受管 Agent 的 npm 安装/升级命令不锁版本，始终跟随上游最新。
 - **浏览器前置开关**：`browser_us_sync.enabled` 控制 `apply` / `init` / `browser:apply` 是否执行浏览器 Google US 前置同步。
 - **模块化定义 (`agents.json`等)**：保存官方指令细节，支持 Policy 的强制覆盖。
 
@@ -112,7 +112,7 @@
 - `make apply`: 把当前锁定态分发/收敛到本机（rules 构建分发、skills 链接、mcp 注入、tools、browser、shell alias、secrets 拉取）；不刷新版本锁、不安装 Agent。
 
 - `make bump`: 纯粹刷新版本锁与 skill commit（更新元数据到锁定文件），不执行本地环境应用。
-- `make agents:apply`: 按 `config/version-pins.local.json` 里的**当前版本锁**升级/修复本地已安装 Agent，不强制安装缺失 Agent。它自身**不刷新版本锁**，所以锁没变时通常是幂等空转；要升到上游最新，先跑 `make bump`（或 `make update`）刷锁再跑本命令，或直接用 `make init` 一步到位。
+- `make agents:apply` / `make agents:update`: 升级/修复本地已安装 Agent 到上游最新（`config/agents.json` 的 npm 命令不锁版本，每次执行都取上游最新版），不强制安装缺失 Agent；也可用 `make init` 一步到位。
 - `make init`: 执行全量安装、更新与同步（= `bump` + Agent 生命周期 + `apply` + 失效引用审计），并等待 Agent 生命周期安装/升级完成，适合新机器初始化。
 - `make plan`: 预演一次完整 `init`。
 - `make sys:upgrade`: 仅更新 agent-manager 仓库自身逻辑。

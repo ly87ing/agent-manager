@@ -1,4 +1,4 @@
-.PHONY: init apply bump update plan agents-apply agents\:apply agents-status agents\:status sys-upgrade sys\:upgrade smoke ui help help-all help\:all doctor status detect fetch-models eval-rules sys-clean sys\:clean state-clean state\:clean sys-unlock sys\:unlock sys-logs sys\:logs sys-clean-logs sys\:clean-logs state-list state\:list state-restore state\:restore rules-build rules\:build rules-apply rules\:apply rules-audit rules\:audit skills-apply skills\:apply skills-bump skills\:bump skill-disable skill\:disable skill-enable skill\:enable skill-list skill\:list mcp-apply mcp\:apply tools-apply tools\:apply browser-apply browser\:apply claude-hooks-apply claude\:hooks\:apply claude-statusline-apply claude\:statusline\:apply claude-statusline-wire claude\:statusline\:wire claude-shell-aliases-apply claude\:shell-aliases\:apply claude-uninstall claude\:uninstall claude-clean claude\:clean codex-hooks-apply codex\:hooks\:apply secrets-check secrets\:check instructions-check instructions\:check
+.PHONY: init apply bump update plan agents-apply agents\:apply agents-status agents\:status agents-update agents\:update agent-update agent\:update sys-upgrade sys\:upgrade smoke ui help help-all help\:all doctor status detect fetch-models eval-rules sys-clean sys\:clean state-clean state\:clean sys-unlock sys\:unlock sys-logs sys\:logs sys-clean-logs sys\:clean-logs state-list state\:list state-restore state\:restore rules-build rules\:build rules-apply rules\:apply rules-audit rules\:audit skills-apply skills\:apply skills-bump skills\:bump skill-disable skill\:disable skill-enable skill\:enable skill-list skill\:list mcp-apply mcp\:apply tools-apply tools\:apply browser-apply browser\:apply claude-hooks-apply claude\:hooks\:apply claude-statusline-apply claude\:statusline\:apply claude-statusline-wire claude\:statusline\:wire claude-shell-aliases-apply claude\:shell-aliases\:apply claude-uninstall claude\:uninstall claude-clean claude\:clean codex-hooks-apply codex\:hooks\:apply secrets-check secrets\:check instructions-check instructions\:check
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
@@ -30,6 +30,10 @@ agents-apply agents\:apply:
 # 查看已安装 Agent 的生命周期状态
 agents-status agents\:status:
 	@./manage.sh agents:status
+
+# 升级已装 Agent 到上游最新（agents.json 的 npm 命令不锁版本；agents:update 是 agents:apply 的便捷别名）
+agents-update agents\:update agent-update agent\:update:
+	@./manage.sh agents:apply
 
 # 仅更新 agent-manager 仓库自身逻辑
 sys-upgrade sys\:upgrade:

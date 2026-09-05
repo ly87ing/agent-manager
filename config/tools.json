@@ -1,9 +1,9 @@
 {
   "tools": {
     "playwright-cli": {
-      "install": "npm install -g @playwright/cli@0.1.14",
+      "install": "npm install -g @playwright/cli@0.1.19",
       "uninstall": "npm uninstall -g @playwright/cli",
-      "upgrade": "npm install -g @playwright/cli@0.1.14",
+      "upgrade": "npm install -g @playwright/cli@0.1.19",
       "version_lock": {
         "type": "npm",
         "package": "@playwright/cli",

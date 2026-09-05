@@ -127,7 +127,7 @@ graph TD
 - **安全默认入口**：直接执行 `./manage.sh` 只显示帮助，不会隐式退化到 `init`；只给全局 flag 而不给命令（如 `./manage.sh --offline`）会直接报错退出，同样不会隐式跑管线。
 - **`--dry-run`**：只输出计划动作，跳过 secrets 初始化、仓库 clone/pull、依赖安装、构建，以及 `sys:clean` / `sys:unlock` / `state:restore` / `sys:clean-logs` 这类会修改本地状态的维护动作；允许保留只读探测和预览日志。若与 `sys:upgrade` 组合，只预览仓库自更新动作。
 - **`--offline`**：禁止任何远程拉取、下载和安装。生命周期、tools、skills、MCP 同步器都只能复用本地已存在仓库/配置；如果本地前置资源缺失，应显式报错而不是偷偷联网。
-- **命令分层**：`apply` 把锁定态分发/收敛到本机（secrets 拉取、shell alias、tools、browser、rules 构建分发、skills 链接、mcp 注入），不升版本、不装 Agent。`bump` 只刷新受管 MCP / CLI / tool 的版本锁和 skill commit 等元数据，不分发、不改本机环境；`update` = `bump` + `apply`（bump 段失败即中止，不分发旧锁定态），不碰 Agent 生命周期；`init` = `bump` + Agent 生命周期（安装缺失 Agent + 升级已装 Agent）+ `apply` + 失效引用审计；`agents:apply` 只跑 Agent 生命周期（`--no-install`），按当前版本锁升级/修复已装 Agent；`sys:upgrade` 只更新 agent-manager 仓库自身。
+- **命令分层**：`apply` 把锁定态分发/收敛到本机（secrets 拉取、shell alias、tools、browser、rules 构建分发、skills 链接、mcp 注入），不升版本、不装 Agent。`bump` 只刷新受管 MCP / CLI / tool 的版本锁和 skill commit 等元数据，不分发、不改本机环境；`update` = `bump` + `apply`（bump 段失败即中止，不分发旧锁定态），不碰 Agent 生命周期；`init` = `bump` + Agent 生命周期（安装缺失 Agent + 升级已装 Agent）+ `apply` + 失效引用审计；`agents:apply` 只跑 Agent 生命周期（`--no-install`），升级/修复已装 Agent 到上游最新（`agents.json` 的 npm 命令不锁版本）；`sys:upgrade` 只更新 agent-manager 仓库自身。
 - **不接管终端配置**：除 shell alias 受管区块会写入 `~/.zshrc`（interactive）与 `~/.zprofile`（login，供非交互 login shell 如 UU 远程 term 加载别名）外，`apply` / `bump` / `init` 不改写 `~/.tmux.conf`、iTerm2 动态配置等用户级终端文件；仓库也不提供 `terminal:apply` 入口。
 - **诊断双出口**：`doctor / status` 默认输出面向人的文本报告；追加 `--json` 时输出机器可读 JSON，不再需要从文本中抓取 warning 计数。
 - **最小 smoke 策略**：`scripts/ci-smoke.sh` 通过 `AGENT_MANAGER_BASE_CONFIG=config/manager.smoke.json` 运行安全预演，避免把默认全量策略带来的未物化提示项混进 CI 基线。
@@ -247,7 +247,7 @@ agent-manager/
 
 ### 工作流程
 1. 用户通过修改 `config/manager.json` 或 `config/manager.local.json` 表达意愿
-2. 选择入口：`make update` 日常把本机更新并收敛到最新（= `bump` + `apply`），`make apply` 做本地配置环境收敛，`make bump` 纯刷新远端资源版本锁，`make agents:apply` 按当前版本锁单独升级/修复已装 Agent（自身不刷锁，升到最新需先 `bump`），`make init` 做全量安装、更新与环境同步
+2. 选择入口：`make update` 日常把本机更新并收敛到最新（= `bump` + `apply`），`make apply` 做本地配置环境收敛，`make bump` 纯刷新远端资源版本锁，`make agents:apply` / `make agents:update` 单独升级/修复已装 Agent 到上游最新（`agents.json` 不锁版本），`make init` 做全量安装、更新与环境同步
 3. `manage.sh` 先解析 `dry-run` / `offline`，获取原子锁，并建立本次运行专属日志
 4. 各同步引擎读取策略和定义，检测当前状态
 5. 根据运行模式执行安装、更新或卸载操作

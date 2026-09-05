@@ -1321,18 +1321,18 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         self.assertEqual(claude_native["detect_paths"], ["~/.local/bin/claude"])
         self.assertFalse(lifecycle_agents["claude-code"]["providers"]["brew"]["managed"])
         claude_npm = lifecycle_agents["claude-code"]["providers"]["npm"]
-        self.assertRegex(claude_npm["install"], r"^npm install -g @anthropic-ai/claude-code@\d")
+        self.assertEqual(claude_npm["install"], "npm install -g @anthropic-ai/claude-code")
         self.assertEqual(claude_npm["install"], claude_npm["upgrade"])
         self.assertNotIn("@latest", claude_npm["install"])
-        self.assertEqual(claude_npm["version_lock"]["package"], "@anthropic-ai/claude-code")
+        self.assertNotIn("version_lock", claude_npm)
 
         codex_npm = lifecycle_agents["codex"]["providers"]["npm"]
         self.assertTrue(codex_npm["managed"])
-        self.assertRegex(codex_npm["install"], r"^npm install -g @openai/codex@\d")
+        self.assertEqual(codex_npm["install"], "npm install -g @openai/codex")
         self.assertEqual(codex_npm["uninstall"], "npm uninstall -g @openai/codex")
         self.assertEqual(codex_npm["install"], codex_npm["upgrade"])
         self.assertNotIn("@latest", codex_npm["upgrade"])
-        self.assertEqual(codex_npm["version_lock"]["package"], "@openai/codex")
+        self.assertNotIn("version_lock", codex_npm)
 
         codex_brew = lifecycle_agents["codex"]["providers"]["brew"]
         self.assertFalse(codex_brew["managed"])
@@ -1342,9 +1342,9 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
 
         self.assertEqual(lifecycle_agents["claude-code"]["providers"]["native"]["upgrade"], "claude update")
-        self.assertRegex(
+        self.assertEqual(
             lifecycle_agents["codex"]["providers"]["npm"]["upgrade"],
-            r"^npm install -g @openai/codex@\d",
+            "npm install -g @openai/codex",
         )
 
 

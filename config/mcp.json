@@ -2,7 +2,7 @@
   "servers": {
     "chrome-devtools": {
       "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp@1.2.0", "--isolated"],
+      "args": ["-y", "chrome-devtools-mcp@1.8.0", "--isolated", "--no-usage-statistics"],
       "startup_timeout_sec": 120,
       "env": {},
       "version_lock": {
@@ -46,7 +46,7 @@
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/oraios/serena@dcbd8ce064fd057858ba49c9f74b433b95d9f17a",
+        "git+https://github.com/oraios/serena@949a27ef1e5fda1a6e7b561e777bcece345c6ffd",
         "serena",
         "start-mcp-server",
         "--open-web-dashboard",
