@@ -39,4 +39,5 @@ agent-tool/*
 # Secrets (independent git repository)
 secrets/
 config/manager.local.json
+config/manager.synced.json
 config/version-pins.local.json

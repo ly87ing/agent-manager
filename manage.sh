@@ -27,6 +27,8 @@ LOCK_DIR="${LOCK_FILE}.d"
 LOCK_PID_FILE="${LOCK_DIR}/pid"
 # Baseline policy (provided by the repo)
 BASE_CONFIG="${AGENT_MANAGER_BASE_CONFIG:-$ROOT_DIR/config/manager.json}"
+# Synced shared layer (managed by the profile sync engine, not tracked by Git)
+SYNCED_CONFIG="${AGENT_MANAGER_SYNCED_CONFIG:-$ROOT_DIR/config/manager.synced.json}"
 # Local overrides (not tracked by Git)
 LOCAL_CONFIG="${AGENT_MANAGER_LOCAL_CONFIG:-$ROOT_DIR/config/manager.local.json}"
 LOCK_ACQUIRED="false"
@@ -43,27 +45,35 @@ ORIGINAL_ARGS=("$@")
 CMD_ARGS=()
 cmd=""
 
-# If the local override file exists, read it and deep-merge
-if [ -f "$LOCAL_CONFIG" ]; then
+# If the synced shared layer or the local override file exists, read them and deep-merge
+if [ -f "$SYNCED_CONFIG" ] || [ -f "$LOCAL_CONFIG" ]; then
     CONFIG_FILE="$(mktemp)"
     if ! python3 -c "
-import json, sys
+import json, os, sys
 sys.path.insert(0, '$ROOT_DIR')
 from src.agent_ids import canonicalize_agent_mapping
 from src.json_config import load_json_object_file
 base = load_json_object_file('$BASE_CONFIG', strict=True, missing_ok=False)
-try:
-    local = load_json_object_file('$LOCAL_CONFIG', strict=True, missing_ok=False)
-except ValueError as e:
-    print(f'本地覆盖配置无效: {e}', file=sys.stderr)
-    sys.exit(2)
 def deep_update(dst, src):
     for k, v in src.items():
         if isinstance(v, dict) and isinstance(dst.get(k), dict):
             deep_update(dst[k], v)
         else:
             dst[k] = v
-deep_update(base, local)
+if os.path.isfile('$SYNCED_CONFIG'):
+    try:
+        synced = load_json_object_file('$SYNCED_CONFIG', strict=True, missing_ok=False)
+    except ValueError as e:
+        print(f'共享层配置无效: {e}', file=sys.stderr)
+        sys.exit(2)
+    deep_update(base, synced)
+if os.path.isfile('$LOCAL_CONFIG'):
+    try:
+        local = load_json_object_file('$LOCAL_CONFIG', strict=True, missing_ok=False)
+    except ValueError as e:
+        print(f'本地覆盖配置无效: {e}', file=sys.stderr)
+        sys.exit(2)
+    deep_update(base, local)
 if 'agents' in base:
     base['agents'] = canonicalize_agent_mapping(base.get('agents', {}))
 with open('$CONFIG_FILE', 'w', encoding='utf-8') as f:
@@ -73,7 +83,7 @@ with open('$CONFIG_FILE', 'w', encoding='utf-8') as f:
         exit 1
     fi
 else
-    # Use the baseline directly when there is no local override
+    # Use the baseline directly when there is no synced or local override
     CONFIG_FILE="$BASE_CONFIG"
 fi
 
@@ -287,21 +297,21 @@ def terminate_group(sig, grace_seconds=1.0):
         return
     try:
         os.killpg(child.pid, sig)
-    except (ProcessLookupError, PermissionError):
+    except ProcessLookupError:
         return
 
     deadline = time.time() + grace_seconds
     while time.time() < deadline:
         try:
             os.killpg(child.pid, 0)
-        except (ProcessLookupError, PermissionError):
+        except ProcessLookupError:
             return
         time.sleep(0.05)
 
     if sig != signal.SIGKILL:
         try:
             os.killpg(child.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
+        except ProcessLookupError:
             pass
 
 
@@ -918,7 +928,7 @@ function run_mcp_sync_task() {
     if [ -n "$DRY_RUN_FLAG" ]; then args+=("$DRY_RUN_FLAG"); fi
     if [ -n "$FORCE_REFRESH_FLAG" ]; then args+=("$FORCE_REFRESH_FLAG"); fi
 
-    run_task_in_dir "$title" "MCP 注入完成" "MCP 失败" 900 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" "${args[@]}"
+    run_task_in_dir "$title" "MCP 注入完成" "MCP 失败" 600 "$ROOT_DIR/agent-mcp" "$PYTHON_CMD" "${args[@]}"
 }
 
 function run_skill_reference_audit_warn() {
@@ -995,7 +1005,7 @@ function print_help() {
     echo -e "  ${PENDING_GOLD}-f, --force-refresh${NC} 探测失败时仍强制远端刷新"
     echo -e "  ${PENDING_GOLD}--wait-agent-lifecycle${NC} 等待 Agent 生命周期后台安装/升级结束\n"
     echo -e "${BOLD}${HDR_BLUE}=== 命令 (Commands) ===${NC}"
-    echo -e "  ${SUCCESS_GREEN}update${NC}         ${BOLD}日常最常用${NC}：除 Agent 本体外全部收敛到最新（secrets、shell alias、tools、browser、rules、skills、MCP 运行时与配置、hooks）；不安装、也不升级 Agent 软件"
+    echo -e "  ${SUCCESS_GREEN}update${NC}         ${BOLD}日常最常用${NC}：把所有受管组件收敛到本机（secrets、shell alias、tools、browser、rules、skills、MCP、hooks）；不安装、也不升级 Agent 软件"
     echo -e "  ${SUCCESS_GREEN}init${NC}           新机器初始化或全量收敛：安装缺失 Agent + 升级已装 Agent + \`update\`"
     echo -e "  ${SUCCESS_GREEN}agents:update${NC}  升级/修复已装 Agent 到上游最新（agents.json 不锁版本）；不安装缺失 Agent"
     echo -e "  ${SUCCESS_GREEN}doctor${NC}         深度资源校验、配置自检与环境排错（追加 --json 输出机器可读报告）"

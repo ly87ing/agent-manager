@@ -273,6 +273,176 @@ class ManageScriptTests(unittest.TestCase):
             self.assertIn("manager.local.json 顶层必须是对象", combined)
             self.assertFalse(call_log.exists(), combined)
 
+    def _prepare_merge_capture_repo(self, temp_dir):
+        temp_root = Path(temp_dir) / "repo"
+        shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+        call_log = temp_root / "calls.log"
+        # update 会跑 maybe_init_secrets；移除 secrets 并 stub init-secrets 保持 hermetic。
+        remove_path(temp_root / "secrets")
+        self._stub_all_pipeline_scripts(temp_root, call_log)
+        capture_path = temp_root / "captured-config.json"
+        # tools 是 update 管线里第一个拿到 --config 的步骤，借它把合并产物落盘供断言。
+        self._write_stub(
+            temp_root / "agent-tool" / "sync_tools.py",
+            (
+                "#!/usr/bin/env python3\n"
+                "import shutil\n"
+                "import sys\n"
+                f"shutil.copyfile(sys.argv[sys.argv.index('--config') + 1], {str(capture_path)!r})\n"
+                "sys.exit(0)\n"
+            ),
+        )
+        return temp_root, call_log, capture_path
+
+    def _run_update_and_capture_merged_config(self, temp_root):
+        result = subprocess.run(
+            [str(temp_root / "manage.sh"), "update", "--dry-run"],
+            cwd=temp_root,
+            env=self._managed_env(),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return result
+
+    def test_synced_layer_merges_into_config_when_local_is_missing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root, _call_log, capture_path = self._prepare_merge_capture_repo(temp_dir)
+            (temp_root / "config" / "manager.local.json").unlink(missing_ok=True)
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n'
+                '  "agents": {},\n'
+                '  "tools": {},\n'
+                '  "skills": {},\n'
+                '  "mcp": {},\n'
+                '  "probe_base": "base",\n'
+                '  "probe_shared": { "base_only": "base", "shared": "base" }\n'
+                '}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "manager.synced.json").write_text(
+                '{\n'
+                '  "probe_synced": "synced",\n'
+                '  "probe_shared": { "shared": "synced", "synced_only": "synced" }\n'
+                '}\n',
+                encoding="utf-8",
+            )
+
+            self._run_update_and_capture_merged_config(temp_root)
+
+            merged = json.loads(capture_path.read_text(encoding="utf-8"))
+            self.assertEqual(merged["probe_base"], "base")
+            self.assertEqual(merged["probe_synced"], "synced")
+            self.assertEqual(
+                merged["probe_shared"],
+                {"base_only": "base", "shared": "synced", "synced_only": "synced"},
+            )
+
+    def test_local_layer_overrides_synced_layer_overrides_base(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root, _call_log, capture_path = self._prepare_merge_capture_repo(temp_dir)
+            (temp_root / "config" / "manager.json").write_text(
+                '{\n'
+                '  "agents": {},\n'
+                '  "tools": {},\n'
+                '  "skills": {},\n'
+                '  "mcp": {},\n'
+                '  "probe_base": "base",\n'
+                '  "probe_priority": "base",\n'
+                '  "probe_nested": { "base_only": "base", "all_three": "base" }\n'
+                '}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "manager.synced.json").write_text(
+                '{\n'
+                '  "probe_synced": "synced",\n'
+                '  "probe_priority": "synced",\n'
+                '  "probe_nested": { "synced_only": "synced", "all_three": "synced" }\n'
+                '}\n',
+                encoding="utf-8",
+            )
+            (temp_root / "config" / "manager.local.json").write_text(
+                '{\n'
+                '  "probe_local": "local",\n'
+                '  "probe_priority": "local",\n'
+                '  "probe_nested": { "local_only": "local", "all_three": "local" }\n'
+                '}\n',
+                encoding="utf-8",
+            )
+
+            self._run_update_and_capture_merged_config(temp_root)
+
+            merged = json.loads(capture_path.read_text(encoding="utf-8"))
+            self.assertEqual(merged["probe_base"], "base")
+            self.assertEqual(merged["probe_synced"], "synced")
+            self.assertEqual(merged["probe_local"], "local")
+            self.assertEqual(merged["probe_priority"], "local")
+            self.assertEqual(
+                merged["probe_nested"],
+                {
+                    "base_only": "base",
+                    "synced_only": "synced",
+                    "local_only": "local",
+                    "all_three": "local",
+                },
+            )
+
+    def test_missing_synced_and_local_layers_use_baseline_config_directly(self):
+        # 反例：synced 与 local 都缺失时不写临时合并文件，CONFIG_FILE 就是基线本身，
+        # 与仅 base 的现状逐字节一致（合并产物若经 json.dump 重排格式即破坏该等式）。
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root, _call_log, capture_path = self._prepare_merge_capture_repo(temp_dir)
+            (temp_root / "config" / "manager.synced.json").unlink(missing_ok=True)
+            (temp_root / "config" / "manager.local.json").unlink(missing_ok=True)
+            manager_json = temp_root / "config" / "manager.json"
+            manager_json.write_text(
+                '{"agents": {}, "tools": {}, "skills": {}, "mcp": {}}\n',
+                encoding="utf-8",
+            )
+
+            self._run_update_and_capture_merged_config(temp_root)
+
+            self.assertEqual(capture_path.read_bytes(), manager_json.read_bytes())
+
+    def test_invalid_synced_layer_aborts_before_running_tasks(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir) / "repo"
+            shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns('repositories'))
+            call_log = temp_root / "calls.log"
+            (temp_root / "config" / "manager.local.json").unlink(missing_ok=True)
+            (temp_root / "config" / "manager.synced.json").write_text("{ invalid json\n", encoding="utf-8")
+
+            self._append_log_stub(temp_root / "agent-lifecycle" / "sync_agents.py", "agents", call_log, "True")
+            self._append_log_stub(temp_root / "agent-tool" / "sync_tools.py", "tools", call_log, "True")
+            self._append_log_stub(temp_root / "agent-skill" / "link_skills.py", "skills", call_log, "True")
+            self._append_log_stub(temp_root / "agent-mcp" / "sync_mcp.py", "mcp", call_log, "True")
+            self._write_stub(
+                temp_root / "agent-rule" / "scripts" / "sync-agent-rules.sh",
+                (
+                    "#!/usr/bin/env bash\n"
+                    f"printf '%s\\n' rules >> {str(call_log)!r}\n"
+                    "exit 0\n"
+                ),
+            )
+
+            result = subprocess.run(
+                [str(temp_root / "manage.sh"), "update"],
+                cwd=temp_root,
+                env=self._managed_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=60,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, combined)
+            self.assertIn("共享层配置无效", combined)
+            self.assertIn("manager.synced.json", combined)
+            self.assertFalse(call_log.exists(), combined)
+
     def test_doctor_stops_after_config_syntax_errors(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir) / "repo"

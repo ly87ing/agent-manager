@@ -15,6 +15,7 @@ mkdir -p "$HOME"
 export AGENT_MANAGER_LOCK_FILE="$RUNTIME_DIR/agent-manager.lock"
 export AGENT_MANAGER_LOG_PREFIX="$RUNTIME_DIR/agent-manager-sync"
 export AGENT_MANAGER_BASE_CONFIG="$ROOT_DIR/config/manager.smoke.json"
+export AGENT_MANAGER_SYNCED_CONFIG="$RUNTIME_DIR/manager.synced.json"
 export AGENT_MANAGER_LOCAL_CONFIG="$RUNTIME_DIR/manager.local.json"
 
 run() {
