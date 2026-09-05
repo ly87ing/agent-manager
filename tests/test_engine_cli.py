@@ -361,12 +361,12 @@ class EngineCliTests(unittest.TestCase):
         self.assertIn("--json", result.stderr)
 
     def test_unimplemented_domains_and_verbs_return_domain_not_implemented(self):
-        # skills 由并行 slice 演进；secrets 只读无 plan；refresh-upstream 属探测缓存切片。
+        # 全域 status 已接线；secrets 只读无 plan；profile/runs 属后续 Phase
+        # （runs 的 :list/:get 动词不在 manage.sh 路由内，走未知命令路径）。
         for argv in (
-            ("skills:status", "--json"),
-            ("skills:plan", "--json"),
             ("secrets:plan", "--json"),
             ("profile:status", "--json"),
+            ("profile:plan", "--json"),
         ):
             with self.subTest(argv=argv):
                 result = self._run_manage(*argv)
@@ -1224,6 +1224,243 @@ class EngineDomainSliceTests(unittest.TestCase):
         stale = [w for w in payload["warnings"] if w["code"] == "UPSTREAM_PROBE_STALE"]
         self.assertEqual([w["element"] for w in stale], ["agents:fake-agent"])
         self.assertFalse(calls.exists(), "status 不得因缓存 stale 而重新探测")
+
+    # ------------------------------------------------------------------ skills
+
+    def _make_skill_repo(self, repo_name, skill_names):
+        repo = self.repo / "agent-skill" / "repositories" / repo_name
+        for name in skill_names:
+            skill_dir = repo / name
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: %s\ndescription: engine test\n---\n" % name, encoding="utf-8"
+            )
+        (repo / ".agent-manager-owned").write_text("{}\n", encoding="utf-8")
+        return repo
+
+    def _skills_fixture(self):
+        """矩阵集合 coll（skill-a 双 agent、skill-b 仅 claude、skill-c 收件箱）
+        + 旧式集合 legacy（skill-x 升格等价=范围内启用）。"""
+        coll = self._make_skill_repo("coll", ("skill-a", "skill-b", "skill-c"))
+        legacy = self._make_skill_repo("legacy", ("skill-x",))
+        claude_skills = self.home / ".claude" / "skills"
+        codex_skills = self.home / ".codex" / "skills"
+        claude_skills.mkdir(parents=True)
+        codex_skills.mkdir(parents=True)
+
+        self._write_config(
+            "skills.json",
+            {
+                "repositories": {
+                    "coll": {"url": "https://example.invalid/coll.git", "agents": ["claude-code", "codex"]},
+                    "legacy": {"url": "https://example.invalid/legacy.git", "agents": ["claude-code"]},
+                },
+                "agents": {"claude-code": str(claude_skills), "codex": str(codex_skills)},
+            },
+        )
+        self._manager(
+            skills={
+                "coll": {
+                    "enabled": True,
+                    "skills": {
+                        "skill-a": {"agents": {"claude-code": True, "codex": True}},
+                        "skill-b": {"agents": {"claude-code": True, "codex": False}},
+                        "skill-c": {},
+                    },
+                },
+                "legacy": {"enabled": True},
+            }
+        )
+        return coll, legacy, claude_skills, codex_skills
+
+    def test_skills_status_matrix_cells_and_element_aggregation(self):
+        coll, _legacy, claude_skills, codex_skills = self._skills_fixture()
+        os.symlink(str(coll / "skill-a"), str(claude_skills / "skill-a"))  # linked
+        os.symlink(str(coll / "skill-gone"), str(codex_skills / "skill-a"))  # dead-link
+        os.symlink(str(coll / "skill-a"), str(claude_skills / "skill-z"))  # 额外受管链接
+
+        payload = self._payload("skills:status", "--json")
+        self._assert_status_data(payload)
+        elements = self._by_id(payload)
+
+        coll_el = elements["skill:coll"]
+        self.assertEqual(coll_el["state"], "drifted", "额外受管链接应让集合偏离")
+        self.assertEqual(coll_el["spec"]["matrix_mode"], True)
+        self.assertEqual(coll_el["observed"]["discovered"], ["skill-a", "skill-b", "skill-c"])
+        self.assertEqual(coll_el["observed"]["discovery_inbox"], ["skill-c"])
+        self.assertEqual(coll_el["observed"]["extra_links"][0]["name"], "skill-z")
+        self.assertTrue(coll_el["observed"]["owner_marked"])
+        self.assertEqual(coll_el["freshness"]["state"], "unknown", "无缓存条目 → unknown")
+
+        skill_a = elements["skill:coll/skill-a"]
+        self.assertEqual(skill_a["observed"]["agents"]["claude-code"]["state"], "linked")
+        self.assertEqual(skill_a["observed"]["agents"]["codex"]["state"], "dead-link")
+        self.assertEqual(skill_a["state"], "drifted")
+
+        skill_b = elements["skill:coll/skill-b"]
+        self.assertEqual(skill_b["observed"]["agents"]["claude-code"]["state"], "missing-link")
+        self.assertEqual(skill_b["observed"]["agents"]["codex"]["state"], "disabled")
+        self.assertEqual(skill_b["state"], "missing")
+        self.assertEqual(skill_b["policy"]["agents"], {"claude-code": True, "codex": False})
+
+        skill_c = elements["skill:coll/skill-c"]
+        self.assertEqual(skill_c["state"], "disabled")
+        self.assertTrue(skill_c["observed"]["discovery_inbox"])
+        self.assertEqual(
+            skill_c["policy"]["agents"], {"claude-code": False, "codex": False}
+        )
+
+        legacy_el = elements["skill:legacy"]
+        self.assertEqual(legacy_el["state"], "managed-ok")
+        self.assertEqual(legacy_el["spec"]["matrix_mode"], False)
+        skill_x = elements["skill:legacy/skill-x"]
+        # 旧式定义升格：范围内 agent 默认启用。
+        self.assertEqual(skill_x["policy"]["agents"], {"claude-code": True})
+        self.assertEqual(skill_x["observed"]["agents"]["claude-code"]["state"], "missing-link")
+        self.assertEqual(skill_x["state"], "missing")
+        self.assertEqual(payload["errors"], [])
+
+    def test_skills_status_unmaterialized_when_target_dirs_absent(self):
+        self._make_skill_repo("fresh", ("skill-y",))
+        self._write_config(
+            "skills.json",
+            {
+                "repositories": {"fresh": {"url": "https://example.invalid/fresh.git", "agents": ["claude-code"]}},
+                "agents": {"claude-code": str(self.home / ".claude" / "skills")},
+            },
+        )
+        self._manager(skills={"fresh": {"enabled": True}})
+        payload = self._payload("skills:status", "--json")
+        self._assert_status_data(payload)
+        skill_y = self._by_id(payload)["skill:fresh/skill-y"]
+        self.assertEqual(skill_y["state"], "not-materialized")
+        self.assertEqual(skill_y["observed"]["agents"]["claude-code"]["state"], "missing-link")
+
+    def test_skills_status_invalid_matrix_fails_closed(self):
+        # 反例：矩阵引用未发现的 skill → fail-close（对齐 v2 校验语义）。
+        self._make_skill_repo("coll", ("skill-a",))
+        (self.home / ".claude" / "skills").mkdir(parents=True)
+        self._write_config(
+            "skills.json",
+            {
+                "repositories": {"coll": {"url": "https://example.invalid/coll.git", "agents": ["claude-code"]}},
+                "agents": {"claude-code": str(self.home / ".claude" / "skills")},
+            },
+        )
+        self._manager(
+            skills={"coll": {"enabled": True, "skills": {"ghost-skill": {"agents": {"claude-code": True}}}}}
+        )
+        payload = self._payload("skills:status", "--json", expect_exit=1)
+        self.assertEqual(payload["errors"][0]["code"], "SKILL_CONFIG_INVALID")
+        self.assertEqual(payload["errors"][0]["element"], "skill:coll")
+        self.assertEqual(self._by_id(payload)["skill:coll"]["state"], "unsupported")
+
+    def test_skills_status_missing_repo_cache_is_not_materialized(self):
+        self._write_config(
+            "skills.json",
+            {
+                "repositories": {"gone": {"url": "https://example.invalid/gone.git", "agents": ["claude-code"]}},
+                "agents": {"claude-code": str(self.home / ".claude" / "skills")},
+            },
+        )
+        self._manager(skills={"gone": {"enabled": True}})
+        payload = self._payload("skills:status", "--json")
+        self._assert_status_data(payload)
+        gone = self._by_id(payload)["skill:gone"]
+        self.assertEqual(gone["state"], "not-materialized")
+        self.assertFalse(gone["observed"]["repo_cached"])
+        self.assertEqual([w["code"] for w in payload["warnings"]], ["SKILL_REPO_CACHE_MISSING"])
+
+    def test_skills_status_cross_collection_duplicate_name_is_error(self):
+        # 反例：两个集合发现同名 skill 是 spec 层冲突，不得静默（doctor 同语义）。
+        self._make_skill_repo("coll-a", ("dup-skill",))
+        self._make_skill_repo("coll-b", ("dup-skill",))
+        skills_dir = self.home / ".claude" / "skills"
+        skills_dir.mkdir(parents=True)
+        self._write_config(
+            "skills.json",
+            {
+                "repositories": {
+                    "coll-a": {"url": "https://example.invalid/a.git", "agents": ["claude-code"]},
+                    "coll-b": {"url": "https://example.invalid/b.git", "agents": ["claude-code"]},
+                },
+                "agents": {"claude-code": str(skills_dir)},
+            },
+        )
+        self._manager(skills={"coll-a": {"enabled": True}, "coll-b": {"enabled": True}})
+        payload = self._payload("skills:status", "--json", expect_exit=1)
+        self.assertEqual(payload["errors"][0]["code"], "SKILL_DUPLICATE_NAME")
+        self.assertEqual(payload["errors"][0]["element"], "skill:coll-b/dup-skill")
+
+    def test_skills_plan_translates_matrix_actions(self):
+        coll, _legacy, claude_skills, codex_skills = self._skills_fixture()
+        os.symlink(str(coll / "skill-a"), str(claude_skills / "skill-a"))
+        os.symlink(str(coll / "skill-gone"), str(codex_skills / "skill-a"))
+        os.symlink(str(coll / "skill-a"), str(claude_skills / "skill-z"))
+
+        payload = self._payload("skills:plan", "--json")
+        self._assert_plan_data(payload)
+        actions = payload["data"]["actions"]
+        by_note_target = {(a["element"], a["op"], a["target"]): a for a in actions}
+
+        # 死链 → unlink；启用缺链 → symlink；额外链接 → unlink（挂集合）；收件箱 → 无动作。
+        dead = [a for a in actions if a["element"] == "skill:coll/skill-a" and a["op"] == "unlink"]
+        self.assertEqual(len(dead), 1)
+        self.assertEqual(dead[0]["risk"], "exec-local")
+        self.assertIn("死链", dead[0]["note"])
+        link_b = [a for a in actions if a["element"] == "skill:coll/skill-b"]
+        self.assertEqual(len(link_b), 1)
+        self.assertEqual(link_b[0]["op"], "symlink")
+        self.assertTrue(link_b[0]["target"].endswith(".claude/skills/skill-b"))
+        extra = [a for a in actions if a["element"] == "skill:coll" and a["op"] == "unlink"]
+        self.assertEqual(len(extra), 1)
+        self.assertIn("skill-z", extra[0]["note"])
+        self.assertFalse(any(a["element"] == "skill:coll/skill-c" for a in actions))
+        self.assertFalse(any(a["element"] == "skill:legacy" for a in actions))
+        self.assertEqual(payload["data"]["summary"]["exec-local"], len(actions))
+
+        # status↔plan 一致：missing/drifted 元素必有动作，disabled/managed-ok 没有。
+        status_payload = self._payload("skills:status", "--json")
+        states = {e["id"]: e["state"] for e in status_payload["data"]["elements"]}
+        acted = {a["element"] for a in actions}
+        for element_id, state in states.items():
+            if state in ("missing", "drifted"):
+                self.assertIn(element_id, acted, element_id)
+            elif state in ("managed-ok", "disabled"):
+                self.assertNotIn(element_id, acted, element_id)
+
+    def test_skills_plan_git_pull_when_collection_cache_behind_upstream(self):
+        coll, _legacy, _claude_skills, _codex_skills = self._skills_fixture()
+        cache_file = self.temp_dir / "upstream.json"
+        cache_file.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "entries": {
+                        "skill:coll": {
+                            "state": "behind",
+                            "current": "aaa111",
+                            "upstream": "bbb222",
+                            "checked_at": "2099-01-01T00:00:00Z",
+                            "probe": "git-ls-remote",
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        env_extra = {"AGENT_MANAGER_UPSTREAM_CACHE": str(cache_file)}
+        status_payload = self._payload("skills:status", "--json", env_extra=env_extra)
+        freshness = self._by_id(status_payload)["skill:coll"]["freshness"]
+        self.assertEqual(freshness["state"], "behind")
+        self.assertEqual(freshness["upstream"], "bbb222")
+
+        payload = self._payload("skills:plan", "--json", env_extra=env_extra)
+        pulls = [a for a in payload["data"]["actions"] if a["op"] == "git-pull"]
+        self.assertEqual([a["element"] for a in pulls], ["skill:coll"])
+        self.assertEqual(pulls[0]["risk"], "network")
+        self.assertIn("bbb222", pulls[0]["note"])
+        self.assertEqual(payload["data"]["summary"]["network"], 1)
 
 
 if __name__ == "__main__":

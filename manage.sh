@@ -1010,8 +1010,8 @@ function print_help() {
     echo -e "  ${SUCCESS_GREEN}agents:update${NC}  升级/修复已装 Agent 到上游最新（agents.json 不锁版本）；不安装缺失 Agent"
     echo -e "  ${SUCCESS_GREEN}doctor${NC}         深度资源校验、配置自检与环境排错（追加 --json 输出机器可读报告）"
     echo -e "  ${SUCCESS_GREEN}mcp:status${NC}     MCP server × agent 注入状态（引擎契约 envelope，须追加 --json；--dry-run/--offline 透传为 mode）"
-    echo -e "  ${SUCCESS_GREEN}*:status${NC}       域状态命令族占位：agents/skills/rules/hooks/tools/aliases 等域后续切片落地（当前返回契约错误）"
-    echo -e "  ${SUCCESS_GREEN}*:plan${NC}         域收敛计划预览（契约占位，尚未实现）"
+    echo -e "  ${SUCCESS_GREEN}*:status${NC}       域状态命令族：agents/mcp/skills/rules/hooks/tools/aliases/secrets（引擎契约 envelope，须追加 --json）"
+    echo -e "  ${SUCCESS_GREEN}*:plan${NC}         域收敛计划预览（agents/mcp/skills/rules/hooks/tools/aliases；secrets 只读无 plan）"
     echo -e "  ${SUCCESS_GREEN}system:audit${NC}   全系统体检的契约形态（占位，尚未实现；现阶段请用 doctor）"
     echo -e "  ${SUCCESS_GREEN}system:refresh-upstream${NC} 上游新鲜度探测并写探测缓存（network 级，offline 拒绝；--only <元素id> 单元素刷新；status 命令只读缓存、零网络）"
     echo -e "  ${SUCCESS_GREEN}help${NC}           显示本帮助\n"
@@ -1055,6 +1055,8 @@ case "$cmd" in
             engine_args+=(--def-file "$ROOT_DIR/config/claude-hooks.json" --def-file "$ROOT_DIR/config/codex-hooks.json")
         elif [[ "$cmd" == aliases:* ]]; then
             engine_args+=(--def-file "$ROOT_DIR/config/shell-aliases.json")
+        elif [[ "$cmd" == skills:* ]]; then
+            engine_args+=(--def-file "$ROOT_DIR/config/skills.json")
         elif [[ "$cmd" == secrets:* ]]; then
             engine_args+=(--def-file "$ROOT_DIR/config/mcp.json")
         fi

@@ -5,13 +5,11 @@ Contract source of truth: contract/engine-v1/*.schema.json (see contract/README.
 and docs/GUI-ARCHITECTURE-PROPOSAL.md section 2 (envelope, exit codes) and
 section 3 (dual-axis element model: convergence 'state' + upstream 'freshness').
 
-Slices so far: status+plan for agents/mcp/tools/rules/hooks/aliases, read-only
-secrets status, system.audit (thin wrapper over doctor's build_report), and
-system.refresh-upstream — the only writer of the upstream probe cache
-(src/upstream_cache.py); status commands read that cache for the freshness axis
-and stay zero-network. Skills commands deliberately answer
-DOMAIN_NOT_IMPLEMENTED (parallel slice owns the skills v2 semantics);
-profile/policy/runs land in later phases.
+Slices so far: status+plan for agents/mcp/tools/rules/hooks/aliases/skills,
+read-only secrets status, system.audit (thin wrapper over doctor's
+build_report), and system.refresh-upstream — the only writer of the upstream
+probe cache (src/upstream_cache.py); status commands read that cache for the
+freshness axis and stay zero-network. profile/policy/runs land in later phases.
 
 Rules enforced here:
 - stdout carries exactly one envelope JSON payload (indent=2, ensure_ascii=False);
@@ -50,13 +48,20 @@ from src.git_remote_probe import (
 from src.json_config import get_typed_mapping_section, load_json_object_file
 from src.manage_doctor import (
     _managed_mcp_matches,
+    _discover_repo_skill_targets,
+    _paths_match,
+    actual_skill_targets,
     build_report,
     build_tree_signature,
+    collect_skill_discovery_inbox,
     command_exists,
     command_version,
     expected_managed_mcp_servers,
+    expected_managed_skill_targets,
     get_unsupported_actions,
+    is_managed_skill_target_path,
     managed_mcp_servers,
+    resolve_skill_search_paths,
     rules_match,
 )
 from src.manage_runtime_probe import (
@@ -67,9 +72,13 @@ from src.manage_runtime_probe import (
     detect_all_providers,
     detect_tool_readiness,
     is_agent_installed,
+    repo_skill_matrix_mode,
     resolve_managed_tool_dir,
     resolve_provider_command,
+    resolve_repo_skill_agent_overrides,
     rule_target_agent_id,
+    validate_repo_new_skill_default,
+    validate_repo_skill_matrix,
 )
 from src.npm_flags import OFFICIAL_NPM_REGISTRY
 from src import upstream_cache
@@ -123,6 +132,18 @@ SECRETS_PULL_ACTION = {
     "risk": "network",
     "needs_lock": True,
     "offline_ok": False,
+}
+SKILL_REPO_PULL_ACTION = {
+    "id": "pull",
+    "risk": "network",
+    "needs_lock": True,
+    "offline_ok": False,
+}
+SKILL_APPLY_ACTION = {
+    "id": "apply",
+    "risk": "exec-local",
+    "needs_lock": True,
+    "offline_ok": True,
 }
 AGENT_INSTALL_ACTION = {
     "id": "install",
@@ -181,6 +202,7 @@ _sync_claude_hooks = _load_module_from_path(
 _sync_codex_hooks = _load_module_from_path(
     "agent-rule/scripts/sync-codex-hooks.py", "agent_manager_sync_codex_hooks"
 )
+_link_skills = _load_module_from_path("agent-skill/link_skills.py", "agent_manager_link_skills")
 
 # sync_tools.py 在工作区演进中出现过 py3.9 不兼容形态；引擎只在探测编排时惰性
 # 加载它，加载失败只降级上游探测能力（freshness 变 not-applicable + refresh 给
@@ -1925,9 +1947,352 @@ def build_system_refresh_upstream(root_dir, config_file, only=None, net=None):
     return data, warnings, []
 
 
+# ---------------------------------------------------------------------------
+# skills domain (proposal section 7.1: per-skill x per-agent matrix; freshness
+# rides the collection element). Cell vocabulary: linked / missing-link /
+# dead-link / drifted / extra-link / disabled; the element axis aggregates to
+# the shared seven states.
+# ---------------------------------------------------------------------------
+
+_SKILL_DISCOVERY_EXCLUDED_DIRS = {".git", "node_modules", "__pycache__", "venv", ".venv"}
+
+
+def _skill_cell_state(skill_name, agent_id, expected_by_agent, actual_by_agent, broken_by_agent, repo_base):
+    expected = expected_by_agent.get(agent_id, {})
+    actual = actual_by_agent.get(agent_id, {})
+    broken = broken_by_agent.get(agent_id, set())
+    if skill_name in expected:
+        if skill_name not in actual:
+            return "missing-link"
+        if skill_name in broken:
+            return "dead-link"
+        if _paths_match(actual[skill_name], expected[skill_name]):
+            return "linked"
+        return "drifted"
+    if skill_name not in actual:
+        return "disabled"
+    if skill_name in broken:
+        # 只有指向托管缓存仓库的死链才算我们的清理对象。
+        return "dead-link" if is_managed_skill_target_path(actual[skill_name], repo_base) else "disabled"
+    if is_managed_skill_target_path(actual[skill_name], repo_base):
+        return "extra-link"
+    return "disabled"
+
+
+def _aggregate_skill_state(cell_states):
+    if any(state in ("dead-link", "drifted", "extra-link") for state in cell_states):
+        return "drifted"
+    if "missing-link" in cell_states:
+        return "missing"
+    if cell_states and all(state == "disabled" for state in cell_states):
+        return "disabled"
+    if "linked" in cell_states:
+        return "managed-ok"
+    return "disabled"
+
+
+def build_skills_status(root_dir, config_file, def_files):
+    warnings = []
+    errors = []
+    config = load_json_object_file(config_file, strict=True, missing_ok=False)
+    config_name = Path(config_file).name
+    skills_policy = get_typed_mapping_section(config, "skills", config_name, (dict,), "对象")
+    def_data = load_json_object_file(def_files[0], strict=True, missing_ok=False)
+    def_name = Path(def_files[0]).name
+    repositories = get_typed_mapping_section(def_data, "repositories", def_name, (dict,), "对象")
+    agent_targets = canonicalize_agent_mapping(
+        get_typed_mapping_section(def_data, "agents", def_name, (str, dict), "字符串或对象")
+    )
+    skill_cfg = {"repositories": repositories, "agents": agent_targets}
+    repo_base = (Path(root_dir) / "agent-skill" / "repositories").resolve()
+    declared_target_ids = set(agent_targets)
+    cache = upstream_cache.load_cache()
+
+    # Per-agent expected/actual once — doctor 的矩阵感知语义原样复用。
+    expected_by_agent = {}
+    actual_by_agent = {}
+    broken_by_agent = {}
+    target_path_by_agent = {}
+    target_exists_by_agent = {}
+    for agent_id, target_cfg in agent_targets.items():
+        target_path = target_cfg if isinstance(target_cfg, str) else target_cfg.get("path", "")
+        target_path = os.path.expanduser(target_path)
+        target_path_by_agent[agent_id] = target_path
+        target_exists_by_agent[agent_id] = os.path.isdir(target_path)
+        expected, _problems = expected_managed_skill_targets(Path(root_dir), config, skill_cfg, agent_id)
+        expected_by_agent[agent_id] = expected
+        if target_exists_by_agent[agent_id]:
+            actual, broken = actual_skill_targets(target_path)
+        else:
+            actual, broken = {}, set()
+        actual_by_agent[agent_id] = actual
+        broken_by_agent[agent_id] = broken
+
+    inbox = collect_skill_discovery_inbox(Path(root_dir), config, skill_cfg)
+
+    # 额外受管链接：未被任何启用集合期望、但指向某集合的托管缓存仓库
+    # （doctor 的「存在额外受管 skill 链接」语义），挂在属主集合元素上。
+    extras_by_repo = {}
+    for agent_id in sorted(agent_targets):
+        expected_names = set(expected_by_agent.get(agent_id, {}))
+        for name, target in sorted(actual_by_agent.get(agent_id, {}).items()):
+            if name in expected_names or not is_managed_skill_target_path(target, repo_base):
+                continue
+            for candidate in repositories:
+                if is_managed_skill_target_path(target, (repo_base / candidate).resolve()):
+                    extras_by_repo.setdefault(candidate, []).append(
+                        {"agent": agent_id, "name": name, "link_path": os.path.join(target_path_by_agent[agent_id], name)}
+                    )
+                    break
+
+    elements = []
+    seen_skill_names = {}
+    for repo_name in sorted(repositories):
+        definition = repositories[repo_name]
+        policy = skills_policy.get(repo_name)
+        declared = isinstance(policy, dict)
+        enabled = declared and bool(policy.get("enabled", True))
+        merged = dict(definition)
+        if declared:
+            merged.update(policy)
+        matrix_mode = repo_skill_matrix_mode(merged)
+        targeted_agents = canonicalize_agent_list(merged.get("agents"))
+        repo_path = repo_base / repo_name
+        repo_cached = repo_path.exists()
+        owner_marked = _link_skills.is_manager_owned_repo(repo_path) if repo_cached else False
+
+        # Collection 级 spec/policy 校验与发现（与 doctor 的问题通道同语义，但不依赖 agent 维度）。
+        discovered = {}
+        config_error = None
+        if enabled and repo_cached:
+            try:
+                validate_repo_new_skill_default(repo_name, merged)
+                if matrix_mode:
+                    validate_repo_skill_matrix(repo_name, merged, targeted_agents, declared_target_ids)
+                search_paths = resolve_skill_search_paths(repo_path.resolve(), merged)
+                discovered, duplicate_names = _discover_repo_skill_targets(
+                    search_paths, _SKILL_DISCOVERY_EXCLUDED_DIRS
+                )
+                if duplicate_names:
+                    raise ValueError("重复 skill name: %s" % ", ".join(sorted(duplicate_names)))
+                if matrix_mode:
+                    resolve_repo_skill_agent_overrides(repo_name, merged, set(discovered))
+            except ValueError as exc:
+                config_error = str(exc)
+                errors.append(
+                    diagnostic("SKILL_CONFIG_INVALID", "skill:%s" % repo_name, config_error)
+                )
+            for skill_name in discovered:
+                # 跨集合重名 = spec 层冲突（doctor 的「重复 skill name」问题通道）。
+                first_repo = seen_skill_names.get(skill_name)
+                if first_repo is not None and first_repo != repo_name:
+                    errors.append(
+                        diagnostic(
+                            "SKILL_DUPLICATE_NAME",
+                            "skill:%s/%s" % (repo_name, skill_name),
+                            "skill 名 '%s' 同时由集合 %s 与 %s 提供" % (skill_name, first_repo, repo_name),
+                        )
+                    )
+                else:
+                    seen_skill_names[skill_name] = repo_name
+
+        if not enabled:
+            collection_state = "disabled"
+        elif not repo_cached:
+            collection_state = "not-materialized"
+            warnings.append(
+                diagnostic(
+                    "SKILL_REPO_CACHE_MISSING",
+                    "skill:%s" % repo_name,
+                    "集合仓库缓存缺失（需 skills:apply / update 拉取）",
+                )
+            )
+        elif config_error is not None:
+            collection_state = "unsupported"
+        else:
+            collection_state = "managed-ok"
+        extra_links = extras_by_repo.get(repo_name, [])
+        if extra_links and collection_state in ("managed-ok", "disabled"):
+            collection_state = "drifted"
+
+        freshness = _freshness_from_cache(
+            "skill:%s" % repo_name,
+            probeable=enabled,
+            cache=cache,
+            local_current=_local_git_head(str(repo_path)) if repo_cached else None,
+            warnings=warnings,
+        )
+        elements.append(
+            _make_element(
+                "skill:%s" % repo_name,
+                "skills",
+                {
+                    "url": definition.get("url"),
+                    "skill_paths": merged.get("skill_paths"),
+                    "agents": targeted_agents,
+                    "matrix_mode": matrix_mode,
+                    "new_skill_default": merged.get("new_skill_default", "disabled"),
+                },
+                {"enabled": enabled, "declared_in_policy": declared},
+                {
+                    "repo_cache": str(repo_path),
+                    "repo_cached": repo_cached,
+                    "owner_marked": owner_marked,
+                    "discovered": sorted(discovered),
+                    "discovery_inbox": inbox.get(repo_name, []),
+                    "extra_links": extra_links,
+                },
+                collection_state,
+                [SKILL_REPO_PULL_ACTION] if enabled else [],
+                freshness=freshness,
+            )
+        )
+
+        if not (enabled and repo_cached) or config_error is not None:
+            continue
+        in_scope_agents = [
+            agent_id
+            for agent_id in sorted(agent_targets)
+            if targeted_agents is None or agent_id in targeted_agents
+        ]
+        for skill_name in sorted(discovered):
+            cells = {}
+            for agent_id in in_scope_agents:
+                cells[agent_id] = {
+                    "state": _skill_cell_state(
+                        skill_name, agent_id, expected_by_agent, actual_by_agent, broken_by_agent, repo_base
+                    ),
+                    "link_path": os.path.join(target_path_by_agent[agent_id], skill_name),
+                    "target_dir_exists": target_exists_by_agent[agent_id],
+                }
+            cell_states = [cell["state"] for cell in cells.values()]
+            state = _aggregate_skill_state(cell_states)
+            # 全部启用格都缺链且所有目标目录尚未建立 → 提示级 not-materialized。
+            if (
+                state == "missing"
+                and cells
+                and all(
+                    cell["state"] in ("missing-link", "disabled") for cell in cells.values()
+                )
+                and not any(cell["target_dir_exists"] for cell in cells.values())
+            ):
+                state = "not-materialized"
+            in_inbox = skill_name in inbox.get(repo_name, [])
+            if in_inbox:
+                state = "disabled"
+            elements.append(
+                _make_element(
+                    "skill:%s/%s" % (repo_name, skill_name),
+                    "skills",
+                    {"collection": repo_name, "name": skill_name, "source_path": discovered[skill_name]},
+                    {
+                        "enabled": any(cell["state"] != "disabled" for cell in cells.values()),
+                        "agents": {
+                            agent_id: skill_name in expected_by_agent.get(agent_id, {})
+                            for agent_id in in_scope_agents
+                        },
+                    },
+                    {
+                        "agents": cells,
+                        "discovery_inbox": in_inbox,
+                    },
+                    state,
+                    [SKILL_APPLY_ACTION],
+                )
+            )
+    return {"domain": "skills", "elements": elements}, warnings, errors
+
+
+def build_skills_plan(root_dir, config_file, def_files):
+    status, warnings, errors = build_skills_status(root_dir, config_file, def_files)
+    actions = []
+    # 集合仓库动作先行：链接目标都在缓存仓库里。
+    for element in status["elements"]:
+        if "/" in element["id"]:
+            continue
+        if element["state"] == "not-materialized":
+            actions.append(
+                plan_action(
+                    "git-pull",
+                    element["id"],
+                    element["observed"]["repo_cache"],
+                    "network",
+                    note="拉取/克隆集合仓库缓存（url: %s）" % (element["spec"].get("url") or "?"),
+                )
+            )
+        elif element["freshness"]["state"] == "behind":
+            actions.append(
+                plan_action(
+                    "git-pull",
+                    element["id"],
+                    element["observed"]["repo_cache"],
+                    "network",
+                    note="集合仓库落后上游（%s → %s）"
+                    % ((element["freshness"]["current"] or "?")[:12], (element["freshness"]["upstream"] or "?")[:12]),
+                )
+            )
+        for extra in element["observed"].get("extra_links", []):
+            actions.append(
+                plan_action(
+                    "unlink",
+                    element["id"],
+                    extra["link_path"],
+                    "exec-local",
+                    note="移除额外受管链接 %s@%s（策略未启用）" % (extra["name"], extra["agent"]),
+                )
+            )
+    for element in status["elements"]:
+        if "/" not in element["id"]:
+            continue
+        source_path = element["spec"]["source_path"]
+        for agent_id, cell in sorted(element["observed"]["agents"].items()):
+            cell_state = cell["state"]
+            link_path = cell["link_path"]
+            if cell_state == "missing-link":
+                actions.append(
+                    plan_action(
+                        "symlink",
+                        element["id"],
+                        link_path,
+                        "exec-local",
+                        note="启用并链接到 %s" % source_path,
+                    )
+                )
+            elif cell_state == "dead-link":
+                actions.append(
+                    plan_action(
+                        "unlink",
+                        element["id"],
+                        link_path,
+                        "exec-local",
+                        note="死链清理（链接目标已不存在）",
+                    )
+                )
+            elif cell_state == "extra-link":
+                actions.append(
+                    plan_action(
+                        "unlink",
+                        element["id"],
+                        link_path,
+                        "exec-local",
+                        note="移除额外受管链接（策略未启用 %s@%s）" % (element["spec"]["name"], agent_id),
+                    )
+                )
+            elif cell_state == "drifted":
+                actions.append(
+                    plan_action(
+                        "symlink",
+                        element["id"],
+                        link_path,
+                        "exec-local",
+                        note="链接重定向到 %s" % source_path,
+                    )
+                )
+    return plan_data("skills", actions), warnings, errors
+
+
 # Kernel registry. Every kernel takes (root_dir, config_file, def_files) and
-# returns (data, warnings, errors). skills is intentionally absent (parallel
-# slice owns its v2 semantics); profile/policy/runs land in later phases.
+# returns (data, warnings, errors). profile/policy/runs land in later phases.
 STATUS_KERNELS = {
     "agents": build_agents_status,
     "aliases": build_aliases_status,
@@ -1935,6 +2300,7 @@ STATUS_KERNELS = {
     "mcp": lambda root_dir, config_file, def_files: build_mcp_status(root_dir, config_file, def_files[0]),
     "rules": build_rules_status,
     "secrets": build_secrets_status,
+    "skills": build_skills_status,
     "tools": build_tools_status,
 }
 PLAN_KERNELS = {
@@ -1943,6 +2309,7 @@ PLAN_KERNELS = {
     "hooks": build_hooks_plan,
     "mcp": build_mcp_plan,
     "rules": build_rules_plan,
+    "skills": build_skills_plan,
     "tools": build_tools_plan,
 }
 
