@@ -1,0 +1,25 @@
+{
+  "domain": "mcp",
+  "dry_run": false,
+  "steps": [
+    {
+      "name": "mcp-sync",
+      "ok": true,
+      "exit_code": 0
+    },
+    {
+      "name": "mcp-sync-2",
+      "ok": false,
+      "exit_code": 1
+    }
+  ],
+  "snapshot": {
+    "run_id": "20260906T010203Z-a1b2c3",
+    "path": "/tmp/agent_manager_snapshots_YOUR_USER/20260906T010203Z-a1b2c3",
+    "file_count": 2,
+    "link_count": 1
+  },
+  "skipped": [
+    "browser-us"
+  ]
+}

@@ -30,7 +30,7 @@ PLAN_SCHEMA = load_schema(CONTRACT_DIR / "plan.schema.json")
 ALPHA_SECRET = "engine-test-fake-alpha-secret-001"
 LIVE_SECRET = "engine-test-fake-live-secret-002"
 
-COPY_IGNORE = shutil.ignore_patterns("repositories", ".git", "__pycache__", "secrets", ".env")
+COPY_IGNORE = shutil.ignore_patterns("repositories", ".git", "__pycache__", "secrets", ".env", "app", "node_modules")
 
 
 class EngineCliTests(unittest.TestCase):

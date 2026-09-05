@@ -1,0 +1,52 @@
+{
+  "description": "Data payload shape of 'system.converge' (envelope.data) — the update-pipeline equivalent (docs/GUI-ARCHITECTURE-PROPOSAL.md section 2.3). Steps replay manage.sh's run_apply_steps order; non-fatal steps (secrets pull) degrade to warnings.",
+  "type": "object",
+  "required": ["pipeline", "dry_run", "steps", "snapshot", "skipped"],
+  "additionalProperties": false,
+  "properties": {
+    "pipeline": {
+      "description": "Pipeline identity; 'update' for system.converge.",
+      "type": "string",
+      "enum": ["update"]
+    },
+    "dry_run": {
+      "description": "true when the run only previewed changes.",
+      "type": "boolean"
+    },
+    "steps": {
+      "description": "Per-step execution results, in pipeline order.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/step"}
+    },
+    "snapshot": {
+      "description": "Pre-write snapshot echo covering all converged domains, or null in dry-run mode.",
+      "type": ["object", "null"],
+      "required": ["run_id", "path", "file_count", "link_count"],
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {"description": "Snapshot directory name (the run's id).", "type": "string"},
+        "path": {"description": "Absolute snapshot directory path.", "type": "string"},
+        "file_count": {"description": "Regular files captured.", "type": "integer"},
+        "link_count": {"description": "Symlink entries recorded in the manifest.", "type": "integer"}
+      }
+    },
+    "skipped": {
+      "description": "Steps the pipeline skipped by policy (names only), always present.",
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  },
+  "$defs": {
+    "step": {
+      "description": "One pipeline step result.",
+      "type": "object",
+      "required": ["name", "ok", "exit_code"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"description": "Step name, e.g. 'skills-link'.", "type": "string"},
+        "ok": {"description": "true iff exit_code is 0.", "type": "boolean"},
+        "exit_code": {"description": "Process exit code (124 = timeout, 127 = spawn failure).", "type": "integer"}
+      }
+    }
+  }
+}

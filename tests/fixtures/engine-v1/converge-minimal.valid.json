@@ -1,0 +1,7 @@
+{
+  "pipeline": "update",
+  "dry_run": true,
+  "steps": [],
+  "snapshot": null,
+  "skipped": []
+}

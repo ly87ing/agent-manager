@@ -1,0 +1,13 @@
+{
+  "snapshots": [
+    {
+      "run_id": "r1",
+      "path": "/tmp/x",
+      "created_at": null,
+      "command": null,
+      "file_count": "2",
+      "link_count": 0
+    }
+  ],
+  "restore": null
+}

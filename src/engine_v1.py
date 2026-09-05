@@ -7,9 +7,12 @@ section 3 (dual-axis element model: convergence 'state' + upstream 'freshness').
 
 Slices so far: status+plan for agents/mcp/tools/rules/hooks/aliases/skills,
 read-only secrets status, system.audit (thin wrapper over doctor's
-build_report), and system.refresh-upstream — the only writer of the upstream
-probe cache (src/upstream_cache.py); status commands read that cache for the
-freshness axis and stay zero-network. profile/policy/runs land in later phases.
+build_report), system.refresh-upstream (only writer of src/upstream_cache.py),
+and the Phase 2a write path: '<domain>:apply' (delegating to the existing
+syncer scripts, pre-write snapshots via src/engine_apply.py),
+system.converge (update-pipeline equivalent), snapshots:list/restore,
+runs:list/get, and policy.get/set (three-layer stack via src/policy_layers.py).
+profile lands in a later phase.
 
 Rules enforced here:
 - stdout carries exactly one envelope JSON payload (indent=2, ensure_ascii=False);
@@ -32,6 +35,7 @@ import json
 import os
 import re
 import sys
+from getpass import getuser
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -81,7 +85,7 @@ from src.manage_runtime_probe import (
     validate_repo_skill_matrix,
 )
 from src.npm_flags import OFFICIAL_NPM_REGISTRY
-from src import upstream_cache
+from src import engine_apply, policy_layers, upstream_cache
 
 CONTRACT_ID = "agent-manager/engine/v1"
 
@@ -101,6 +105,7 @@ KNOWN_DOMAINS = (
     "policy",
     "system",
     "runs",
+    "snapshots",
 )
 
 # Proposal section 3.3: until the upstream probe cache exists, every element
@@ -2291,8 +2296,394 @@ def build_skills_plan(root_dir, config_file, def_files):
     return plan_data("skills", actions), warnings, errors
 
 
+# ---------------------------------------------------------------------------
+# Write path (Phase 2a): '<domain>:apply' delegates to the existing syncer
+# scripts with manage.sh's exact argument assembly; 'system:converge' replays
+# the update pipeline step order. A snapshot of the domain's target files is
+# taken before any non-dry-run write (proposal section 4.10).
+# ---------------------------------------------------------------------------
+
+
+class ApplyGateError(ValueError):
+    """Missing explicit confirmation (e.g. --allow-uninstall); usage error."""
+
+
+def _snapshot_targets_for(root_dir, domains, config_file, def_files):
+    """(files, links) covered by a snapshot for the given domain set."""
+    root_dir = Path(root_dir)
+    files = []
+    links = []
+    if "mcp" in domains:
+        def_path = def_files[0] if def_files else root_dir / "config" / "mcp.json"
+        mcp_data = load_json_object_file(def_path, strict=True, missing_ok=False)
+        agent_paths = get_typed_mapping_section(
+            mcp_data, "agent_paths", Path(def_path).name, (str, dict), "字符串或对象"
+        )
+        for path_config in canonicalize_agent_mapping(agent_paths).values():
+            target = path_config if isinstance(path_config, str) else path_config.get("path", "")
+            files.append(os.path.expanduser(target))
+    if "hooks" in domains:
+        files.append(str(_sync_claude_hooks.build_managed_hooks(root_dir / "config" / "claude-hooks.json")[0]))
+        files.append(str(_sync_codex_hooks.build_managed_hooks(root_dir / "config" / "codex-hooks.json")[0]))
+    if "aliases" in domains:
+        files.append(os.path.expanduser("~/.zshrc"))
+        files.append(os.path.expanduser("~/.zprofile"))
+    if "rules" in domains:
+        manifest_path = def_files[0] if def_files else root_dir / "config" / "rules-targets.list"
+        entries, _problems = _parse_rules_manifest(manifest_path)
+        home = os.path.expanduser("~")
+        for entry in entries:
+            files.append(
+                os.path.expanduser(
+                    entry["target"].replace("{{HOME}}", home).replace("{{REPO_ROOT}}", str(root_dir))
+                )
+            )
+    if "skills" in domains:
+        def_path = def_files[0] if def_files else root_dir / "config" / "skills.json"
+        skills_data = load_json_object_file(def_path, strict=True, missing_ok=False)
+        agent_targets = canonicalize_agent_mapping(
+            get_typed_mapping_section(skills_data, "agents", Path(def_path).name, (str, dict), "字符串或对象")
+        )
+        repo_base = (root_dir / "agent-skill" / "repositories").resolve()
+        for target_cfg in agent_targets.values():
+            target_dir = target_cfg if isinstance(target_cfg, str) else target_cfg.get("path", "")
+            target_dir = os.path.expanduser(target_dir)
+            if not os.path.isdir(target_dir):
+                continue
+            actual, _broken = actual_skill_targets(target_dir)
+            for name, target in actual.items():
+                if is_managed_skill_target_path(target, repo_base):
+                    links.append({"path": os.path.join(target_dir, name), "target": target})
+    return files, links
+
+
+def _apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd):
+    """Step specs [(name, cmd, cwd, timeout, fatal)] mirroring manage.sh args."""
+    root_dir = Path(root_dir)
+    dry = mode["dry_run"]
+    offline = mode["offline"]
+    steps = []
+    if domain == "mcp":
+        cmd = [python_cmd, "sync_mcp.py", "--config", str(config_file), "--def-file", str(def_files[0]), "--prepare-runtime"]
+        if offline:
+            cmd.append("--offline")
+        if dry:
+            cmd.append("--dry-run")
+        steps.append(("mcp-sync", cmd, root_dir / "agent-mcp", 600, True))
+    elif domain == "skills":
+        cmd = [python_cmd, "link_skills.py", "--config", str(config_file), "--def-file", str(def_files[0]), "--yes"]
+        if offline:
+            cmd.append("--offline")
+        if dry:
+            cmd.append("--dry-run")
+        steps.append(("skills-link", cmd, root_dir / "agent-skill", 600, True))
+    elif domain == "tools":
+        cmd = [python_cmd, "sync_tools.py", "--config", str(config_file), "--def-file", str(def_files[0]), "--yes"]
+        if offline:
+            cmd.append("--offline")
+        if dry:
+            cmd.append("--dry-run")
+        steps.append(("tools-sync", cmd, root_dir / "agent-tool", 600, True))
+    elif domain == "rules":
+        status, _warnings, _errors = build_rules_status(root_dir, config_file, def_files)
+        dist = next((e for e in status["elements"] if e["id"] == "rules:dist"), None)
+        if dist is not None and dist["state"] in ("drifted", "not-materialized") and not dry:
+            # 对齐 plan：dist 构建落后/缺失时先构建再分发。
+            steps.append(
+                ("rules-build", [python_cmd, "scripts/build-agent-rules.py"], root_dir / "agent-rule", 600, True)
+            )
+        targets = [
+            e["spec"]["name"]
+            for e in status["elements"]
+            if e["id"] != "rules:dist" and e["policy"]["enabled"]
+        ]
+        if targets:
+            cmd = ["bash", "./scripts/sync-agent-rules.sh"]
+            for name in targets:
+                cmd += ["--target", name]
+            if dry:
+                cmd.append("--dry-run")
+            steps.append(("rules-sync", cmd, root_dir / "agent-rule", 600, True))
+    elif domain == "hooks":
+        for script, name in (
+            ("./scripts/sync-claude-hooks.py", "claude-hooks"),
+            ("./scripts/sync-codex-hooks.py", "codex-hooks"),
+        ):
+            cmd = [python_cmd, script]
+            if dry:
+                cmd.append("--dry-run")
+            steps.append((name, cmd, root_dir / "agent-rule", 600, True))
+    elif domain == "aliases":
+        cmd = ["bash", str(root_dir / "scripts" / "claude" / "sync_shell_aliases.sh")]
+        if dry:
+            cmd.append("--dry-run")
+        steps.append(("shell-aliases", cmd, root_dir, 60, True))
+    elif domain == "agents":
+        cmd = [python_cmd, "sync_agents.py", "--config", str(config_file), "--def-file", str(def_files[0]), "--yes"]
+        if offline:
+            cmd.append("--offline")
+        if dry:
+            cmd.append("--dry-run")
+        # 引擎 apply 前台执行（envelope 等待结果），不投递 manage.sh 的后台异步任务。
+        steps.append(("agents-lifecycle", cmd, root_dir / "agent-lifecycle", 600, True))
+    return steps
+
+
+def _agents_apply_gate(root_dir, config_file, def_files, allow_uninstall):
+    """卸载是 install-remove 级二次确认：禁用但仍有受管安装时须显式放行。"""
+    if allow_uninstall:
+        return
+    status, _warnings, _errors = build_agents_status(root_dir, config_file, def_files)
+    pending = [
+        element["id"]
+        for element in status["elements"]
+        if element["state"] == "drifted"
+        and not element["policy"]["enabled"]
+        and element["observed"]["classified"]["managed"]
+    ]
+    if pending:
+        raise ApplyGateError(
+            "以下 Agent 的禁用将触发卸载（install-remove 级），须显式追加 --allow-uninstall: %s"
+            % ", ".join(pending)
+        )
+
+
+def build_domain_apply(domain, root_dir, config_file, def_files, mode, run_id, log_file, python_cmd, allow_uninstall=False):
+    """'<domain>:apply': snapshot -> run syncer steps -> step summary."""
+    warnings = []
+    errors = []
+    if domain == "agents":
+        _agents_apply_gate(root_dir, config_file, def_files, allow_uninstall)
+    snapshot = None
+    if not mode["dry_run"]:
+        files, links = _snapshot_targets_for(root_dir, {domain}, config_file, def_files)
+        manifest = engine_apply.create_snapshot(run_id, "%s.apply" % domain, files, links)
+        snapshot = {
+            "run_id": manifest["run_id"],
+            "path": str(engine_apply.snapshot_root() / run_id),
+            "file_count": len(manifest["files"]),
+            "link_count": len(manifest["links"]),
+        }
+    steps = _apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd)
+    results = []
+    for name, cmd, cwd, timeout, fatal in steps:
+        result = engine_apply.run_step(name, cmd, cwd, log_file if not mode["dry_run"] else None, timeout)
+        results.append({"name": result["name"], "ok": result["ok"], "exit_code": result["exit_code"]})
+        if not result["ok"] and fatal:
+            errors.append(
+                diagnostic("APPLY_STEP_FAILED", None, "步骤 %s 失败（exit %d，详见日志）" % (name, result["exit_code"]))
+            )
+    data = {
+        "domain": domain,
+        "dry_run": mode["dry_run"],
+        "steps": results,
+        "snapshot": snapshot,
+        "skipped": [],
+    }
+    return data, warnings, errors
+
+
+def _browser_us_enabled(config_file):
+    """manage.sh browser_us_sync_enabled 的同语义判定（env 覆盖优先）。"""
+    override = os.environ.get("AGENT_MANAGER_BROWSER_US_SYNC_ENABLED", "").strip().lower()
+    if override in ("1", "true", "yes", "on", "enabled"):
+        return True
+    if override in ("0", "false", "no", "off", "disabled"):
+        return False
+    data = load_json_object_file(config_file, strict=True, missing_ok=False)
+    settings = data.get("browser_us_sync")
+    if not isinstance(settings, dict):
+        settings = {}
+    return bool(settings.get("enabled", True))
+
+
+def _converge_step_specs(root_dir, config_file, mode, python_cmd):
+    """run_apply_steps 的同序重放（update 管线语义）；secrets 拉取仅在已有
+    仓库时进行且非致命（对齐 manage.sh maybe_init_secrets 的失败继续语义），
+    交互式初始化永远不做；browser_us 步骤遵循其独立开关。
+    返回 (steps, skipped)。"""
+    root_dir = Path(root_dir)
+    dry = mode["dry_run"]
+    steps = []
+    skipped = []
+    if (root_dir / "secrets" / ".git").is_dir() and not mode["offline"]:
+        cmd = ["git", "-C", str(root_dir / "secrets"), "pull", "--ff-only"]
+        if not dry:
+            steps.append(("secrets-pull", cmd, root_dir, 600, False))
+    if not _browser_us_enabled(config_file):
+        skipped.append("browser-us")
+    for domain in ("aliases", "tools", "rules", "skills", "mcp", "hooks"):
+        def_files = None
+        if domain == "mcp":
+            def_files = [root_dir / "config" / "mcp.json"]
+        elif domain == "skills":
+            def_files = [root_dir / "config" / "skills.json"]
+        elif domain == "tools":
+            def_files = [root_dir / "config" / "tools.json"]
+        elif domain == "rules":
+            def_files = [root_dir / "config" / "rules-targets.list"]
+        before = len(steps)
+        steps.extend(_apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd))
+        if domain == "rules" and len(steps) == before:
+            skipped.append("rules-sync")
+        if domain == "tools" and _browser_us_enabled(config_file):
+            cmd = [python_cmd, "scripts/sync_browser_google_us.py"]
+            if dry:
+                cmd.append("--dry-run")
+            if mode["offline"]:
+                cmd.append("--offline")
+            steps.append(("browser-us", cmd, root_dir, 120, True))
+    return steps, skipped
+
+
+def build_system_converge(root_dir, config_file, mode, run_id, log_file, python_cmd):
+    """'system:converge': update 管线等价物（提案 §2.3）。浏览器 US 同步步骤与
+    skill 引用审计按 manage.sh 语义处理（前者有独立开关，后者仅警告）。"""
+    warnings = []
+    errors = []
+    snapshot = None
+    if not mode["dry_run"]:
+        files, links = _snapshot_targets_for(
+            root_dir, {"mcp", "hooks", "aliases", "rules", "skills"}, config_file, None
+        )
+        manifest = engine_apply.create_snapshot(run_id, "system.converge", files, links)
+        snapshot = {
+            "run_id": manifest["run_id"],
+            "path": str(engine_apply.snapshot_root() / run_id),
+            "file_count": len(manifest["files"]),
+            "link_count": len(manifest["links"]),
+        }
+    steps, skipped = _converge_step_specs(root_dir, config_file, mode, python_cmd)
+    results = []
+    for name, cmd, cwd, timeout, fatal in steps:
+        result = engine_apply.run_step(name, cmd, cwd, log_file if not mode["dry_run"] else None, timeout)
+        results.append({"name": result["name"], "ok": result["ok"], "exit_code": result["exit_code"]})
+        if not result["ok"]:
+            if fatal:
+                errors.append(
+                    diagnostic(
+                        "CONVERGE_STEP_FAILED", None, "步骤 %s 失败（exit %d，详见日志）" % (name, result["exit_code"])
+                    )
+                )
+            else:
+                warnings.append(
+                    diagnostic(
+                        "CONVERGE_STEP_SOFT_FAILED", None, "步骤 %s 失败但不致命（exit %d）" % (name, result["exit_code"])
+                    )
+                )
+    data = {
+        "pipeline": "update",
+        "dry_run": mode["dry_run"],
+        "steps": results,
+        "snapshot": snapshot,
+        "skipped": skipped,
+    }
+    return data, warnings, errors
+
+
+# ---------------------------------------------------------------------------
+# runs / snapshots / policy domains
+# ---------------------------------------------------------------------------
+
+
+def _log_prefix():
+    return os.environ.get("AGENT_MANAGER_LOG_PREFIX") or "/tmp/agent_manager_sync_%s" % getuser()
+
+
+def _run_entry(path, latest_target):
+    stat = path.stat()
+    prefix_name = Path(_log_prefix()).name
+    run_id = path.name[len(prefix_name) + 1 : -len(".log")]
+    return {
+        "run_id": run_id,
+        "log_file": str(path),
+        "size_bytes": stat.st_size,
+        "mtime": datetime.datetime.fromtimestamp(stat.st_mtime, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "is_latest": str(path) == latest_target,
+    }
+
+
+class RunNotFoundError(ValueError):
+    """runs:get 指定的 run_id 无对应日志文件。"""
+
+
+def build_runs_list(root_dir, config_file):
+    prefix = Path(_log_prefix())
+    latest_target = None
+    try:
+        latest_target = (prefix.parent / (prefix.name + ".latest")).read_text(encoding="utf-8").strip()
+    except OSError:
+        pass
+    runs = []
+    for path in sorted(prefix.parent.glob(prefix.name + "_*.log"), key=lambda p: p.name, reverse=True):
+        runs.append(_run_entry(path, latest_target))
+    return {"runs": runs, "tail": None, "lines": None}, [], []
+
+
+def build_runs_get(root_dir, config_file, run_id, lines):
+    prefix = Path(_log_prefix())
+    path = prefix.parent / ("%s_%s.log" % (prefix.name, run_id))
+    if not path.is_file():
+        raise RunNotFoundError("运行日志不存在: %s" % run_id)
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        all_lines = handle.read().splitlines()
+    tail = all_lines[-lines:] if lines > 0 else all_lines
+    latest_target = None
+    try:
+        latest_target = (prefix.parent / (prefix.name + ".latest")).read_text(encoding="utf-8").strip()
+    except OSError:
+        pass
+    data = {
+        "runs": [_run_entry(path, latest_target)],
+        "tail": "\n".join(tail) + ("\n" if tail else ""),
+        "lines": len(tail),
+    }
+    return data, [], []
+
+
+def build_snapshots_list(root_dir, config_file):
+    return {"snapshots": engine_apply.list_snapshots(), "restore": None}, [], []
+
+
+def build_snapshots_restore(root_dir, config_file, run_id, resnapshot_run_id):
+    restore = engine_apply.restore_snapshot(run_id, resnapshot_run_id=resnapshot_run_id)
+    return {"snapshots": None, "restore": restore}, [], []
+
+
+def build_policy_get(root_dir, config_file):
+    layers = policy_layers.load_layers(root_dir)
+    data = {
+        "layers": layers,
+        "effective": policy_layers.effective_config(layers),
+        "attribution": policy_layers.attribute_top_level_keys(layers),
+        "layer": None,
+        "key": None,
+        "value": None,
+        "path": None,
+    }
+    return data, [], []
+
+
+def build_policy_set(root_dir, config_file, layer, key, raw_value):
+    try:
+        value = json.loads(raw_value)
+    except ValueError as exc:
+        raise policy_layers.PolicySetError("--value 不是合法 JSON: %s" % exc)
+    path = policy_layers.set_policy_value(root_dir, layer, key, value)
+    data = {
+        "layers": None,
+        "effective": None,
+        "attribution": None,
+        "layer": layer,
+        "key": key,
+        "value": value,
+        "path": str(path),
+    }
+    return data, [], []
+
+
 # Kernel registry. Every kernel takes (root_dir, config_file, def_files) and
-# returns (data, warnings, errors). profile/policy/runs land in later phases.
+# returns (data, warnings, errors). profile lands in a later phase.
 STATUS_KERNELS = {
     "agents": build_agents_status,
     "aliases": build_aliases_status,
@@ -2312,6 +2703,8 @@ PLAN_KERNELS = {
     "skills": build_skills_plan,
     "tools": build_tools_plan,
 }
+# apply 复用既有同步器（引擎不重实现写逻辑）；secrets 只读，profile 后续阶段。
+APPLY_DOMAINS = ("agents", "aliases", "hooks", "mcp", "rules", "skills", "tools")
 
 
 def _build_parser():
@@ -2328,6 +2721,12 @@ def _build_parser():
     )
     parser.add_argument("--python-cmd", default="python3", help="python command for system.audit probes")
     parser.add_argument("--only", help="system:refresh-upstream 只刷新指定元素 id")
+    parser.add_argument("--allow-uninstall", action="store_true", help="agents:apply 显式放行卸载（install-remove 级二次确认）")
+    parser.add_argument("--run", help="runs:get / snapshots:restore 的 run_id")
+    parser.add_argument("--lines", type=int, default=2000, help="runs:get 日志尾部行数（默认 2000；0=全部）")
+    parser.add_argument("--layer", help="policy:set 的落点层（synced|local）")
+    parser.add_argument("--key", help="policy:set 的点分键路径")
+    parser.add_argument("--value", help="policy:set 的 JSON 值")
     parser.add_argument("--json", action="store_true", help="required: selects the envelope machine interface")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--offline", action="store_true")
@@ -2365,6 +2764,11 @@ def main(argv=None):
 
     mode["dry_run"] = bool(args.dry_run)
     mode["offline"] = bool(args.offline)
+    # 同步器步骤在子目录里执行（cwd=agent-*/），配置路径一律绝对化。
+    if args.config:
+        args.config = str(Path(args.config).resolve())
+    if args.def_file:
+        args.def_file = [str(Path(p).resolve()) for p in args.def_file]
     raw_command = (args.command or "").strip()
     dotted = raw_command.replace(":", ".", 1)
 
@@ -2453,11 +2857,25 @@ def main(argv=None):
         kernel = STATUS_KERNELS[domain]
     elif verb == "plan" and domain in PLAN_KERNELS:
         kernel = PLAN_KERNELS[domain]
+    elif verb == "apply" and domain in APPLY_DOMAINS:
+        kernel = "apply"
     elif domain == "system" and verb == "audit":
         kernel = "audit"
         kernel_needs_def_file = False
     elif domain == "system" and verb == "refresh-upstream":
         kernel = "refresh"
+        kernel_needs_def_file = False
+    elif domain == "system" and verb == "converge":
+        kernel = "converge"
+        kernel_needs_def_file = False
+    elif domain == "runs" and verb in ("list", "get"):
+        kernel = "runs:%s" % verb
+        kernel_needs_def_file = False
+    elif domain == "snapshots" and verb in ("list", "restore"):
+        kernel = "snapshots:%s" % verb
+        kernel_needs_def_file = False
+    elif domain == "policy" and verb in ("get", "set"):
+        kernel = "policy:%s" % verb
         kernel_needs_def_file = False
     else:
         return not_implemented()
@@ -2473,6 +2891,18 @@ def main(argv=None):
             "USAGE_ERROR",
             "hooks 域需要两个 --def-file（claude-hooks.json 与 codex-hooks.json）",
             "错误: hooks 域需要重复两次 --def-file",
+        )
+    if kernel in ("runs:get", "snapshots:restore") and not args.run:
+        return usage_error(
+            "USAGE_ERROR",
+            "%s 需要 --run <run_id>" % dotted,
+            "错误: 缺少 --run 参数",
+        )
+    if kernel == "policy:set" and (not args.layer or not args.key or args.value is None):
+        return usage_error(
+            "USAGE_ERROR",
+            "policy:set 需要 --layer synced|local --key <dot.path> --value <json>",
+            "错误: policy:set 参数不完整（--layer/--key/--value 缺一不可）",
         )
 
     if kernel == "refresh" and mode["offline"]:
@@ -2502,10 +2932,65 @@ def main(argv=None):
             data, warnings, errors = build_system_audit(REPO_ROOT, args.config, python_cmd=args.python_cmd)
         elif kernel == "refresh":
             data, warnings, errors = build_system_refresh_upstream(REPO_ROOT, args.config, only=args.only)
+        elif kernel == "apply":
+            data, warnings, errors = build_domain_apply(
+                domain, REPO_ROOT, args.config, args.def_file, mode, run_id, log_file,
+                args.python_cmd, allow_uninstall=args.allow_uninstall,
+            )
+        elif kernel == "converge":
+            data, warnings, errors = build_system_converge(
+                REPO_ROOT, args.config, mode, run_id, log_file, args.python_cmd
+            )
+        elif kernel == "runs:list":
+            data, warnings, errors = build_runs_list(REPO_ROOT, args.config)
+        elif kernel == "runs:get":
+            data, warnings, errors = build_runs_get(REPO_ROOT, args.config, args.run, args.lines)
+        elif kernel == "snapshots:list":
+            data, warnings, errors = build_snapshots_list(REPO_ROOT, args.config)
+        elif kernel == "snapshots:restore":
+            data, warnings, errors = build_snapshots_restore(
+                REPO_ROOT, args.config, args.run, resnapshot_run_id="%s-re-%s" % (args.run, run_id)
+            )
+        elif kernel == "policy:get":
+            data, warnings, errors = build_policy_get(REPO_ROOT, args.config)
+        elif kernel == "policy:set":
+            data, warnings, errors = build_policy_set(REPO_ROOT, args.config, args.layer, args.key, args.value)
         else:
             data, warnings, errors = kernel(REPO_ROOT, args.config, args.def_file)
     except RefreshUsageError as exc:
         return usage_error("USAGE_ERROR", str(exc), "错误: %s" % exc)
+    except ApplyGateError as exc:
+        return usage_error("UNINSTALL_REQUIRES_FLAG", str(exc), "错误: %s" % exc)
+    except policy_layers.PolicySecretGateError as exc:
+        payload = envelope(
+            command=dotted,
+            mode=mode,
+            lock=lock,
+            run_id=run_id,
+            log_file=log_file,
+            data={},
+            warnings=[],
+            errors=[diagnostic("POLICY_SECRET_DENIED", None, str(exc))],
+        )
+        emit_envelope(payload)
+        print("错误: %s" % exc, file=sys.stderr)
+        return 1
+    except policy_layers.PolicySetError as exc:
+        return usage_error("USAGE_ERROR", str(exc), "错误: %s" % exc)
+    except RunNotFoundError as exc:
+        payload = envelope(
+            command=dotted,
+            mode=mode,
+            lock=lock,
+            run_id=run_id,
+            log_file=log_file,
+            data={},
+            warnings=[],
+            errors=[diagnostic("RUN_NOT_FOUND", None, str(exc))],
+        )
+        emit_envelope(payload)
+        print("错误: %s" % exc, file=sys.stderr)
+        return 1
     except ValueError as exc:
         payload = envelope(
             command=dotted,

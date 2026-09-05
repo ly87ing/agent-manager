@@ -182,8 +182,8 @@ function acquire_lock() {
     exit 1
 }
 
-# Atomic lock check（只读命令豁免：help/doctor、引擎契约的 *:status / *:plan / system:audit）
-if [[ "$cmd" != "help" && "$cmd" != "-h" && "$cmd" != "--help" && "$cmd" != "-help" && "$cmd" != "doctor" && "$cmd" != *:status && "$cmd" != *:plan && "$cmd" != "system:audit" ]]; then
+# Atomic lock check（只读命令豁免：help/doctor、引擎契约的只读族 *:status / *:plan / system:audit / runs / snapshots:list / policy:get）
+if [[ "$cmd" != "help" && "$cmd" != "-h" && "$cmd" != "--help" && "$cmd" != "-help" && "$cmd" != "doctor" && "$cmd" != *:status && "$cmd" != *:plan && "$cmd" != "system:audit" && "$cmd" != "runs:list" && "$cmd" != "runs:get" && "$cmd" != "snapshots:list" && "$cmd" != "policy:get" ]]; then
     acquire_lock
 fi
 
@@ -1012,8 +1012,13 @@ function print_help() {
     echo -e "  ${SUCCESS_GREEN}mcp:status${NC}     MCP server × agent 注入状态（引擎契约 envelope，须追加 --json；--dry-run/--offline 透传为 mode）"
     echo -e "  ${SUCCESS_GREEN}*:status${NC}       域状态命令族：agents/mcp/skills/rules/hooks/tools/aliases/secrets（引擎契约 envelope，须追加 --json）"
     echo -e "  ${SUCCESS_GREEN}*:plan${NC}         域收敛计划预览（agents/mcp/skills/rules/hooks/tools/aliases；secrets 只读无 plan）"
-    echo -e "  ${SUCCESS_GREEN}system:audit${NC}   全系统体检的契约形态（占位，尚未实现；现阶段请用 doctor）"
+    echo -e "  ${SUCCESS_GREEN}*:apply${NC}        域收敛写路径（agents/mcp/skills/rules/hooks/tools/aliases；复用既有同步器；非 dry-run 前自动快照；agents 卸载须显式 --allow-uninstall）"
+    echo -e "  ${SUCCESS_GREEN}system:converge${NC} 全管线收敛（= update 管线语义；--dry-run 预演）"
+    echo -e "  ${SUCCESS_GREEN}system:audit${NC}   全系统体检的契约形态（doctor --json 的 envelope 版）"
     echo -e "  ${SUCCESS_GREEN}system:refresh-upstream${NC} 上游新鲜度探测并写探测缓存（network 级，offline 拒绝；--only <元素id> 单元素刷新；status 命令只读缓存、零网络）"
+    echo -e "  ${SUCCESS_GREEN}snapshots:list${NC} / ${SUCCESS_GREEN}snapshots:restore --run <id>${NC} 运行快照清单与回滚（restore 前会再快照当前态）"
+    echo -e "  ${SUCCESS_GREEN}runs:list${NC} / ${SUCCESS_GREEN}runs:get --run <id>${NC} 执行历史与按次日志读取（--lines 调尾部行数）"
+    echo -e "  ${SUCCESS_GREEN}policy:get${NC} / ${SUCCESS_GREEN}policy:set${NC} 三层策略视图（baseline⊕synced⊕local 原文+effective+层归属）与分层写入（仅 synced/local，疑似明文门禁）"
     echo -e "  ${SUCCESS_GREEN}help${NC}           显示本帮助\n"
 }
 
@@ -1040,7 +1045,7 @@ case "$cmd" in
             doctor_check
         fi
         ;;
-    *:status|*:plan|system:audit|system:refresh-upstream)
+    *:status|*:plan|*:apply|system:audit|system:refresh-upstream|system:converge|snapshots:list|snapshots:restore|runs:list|runs:get|policy:get|policy:set)
         # 引擎契约命令族（contract/engine-v1）：envelope JSON 走 stdout，退出码 0/1/2 由引擎决定。
         engine_args=("$cmd" --config "$CONFIG_FILE" --python-cmd "$PYTHON_CMD")
         if [[ "$cmd" == mcp:* ]]; then
