@@ -32,8 +32,10 @@ import datetime
 import hashlib
 import importlib.util
 import json
+import ntpath
 import os
 import re
+import stat
 import sys
 from getpass import getuser
 from pathlib import Path
@@ -53,7 +55,6 @@ from src.json_config import get_typed_mapping_section, load_json_object_file
 from src.manage_doctor import (
     _managed_mcp_matches,
     _discover_repo_skill_targets,
-    actual_skill_targets,
     build_report,
     build_tree_signature,
     collect_skill_discovery_inbox,
@@ -2016,6 +2017,73 @@ def _engine_paths_match(left, right):
     return _engine_normalize_path(left) == _engine_normalize_path(right)
 
 
+def _engine_is_windows_directory_link(path):
+    """doctor._is_windows_directory_link port：isjunction 优先，旧解释器退回 lstat 属性位。"""
+    checker = getattr(os.path, "isjunction", None)
+    if checker is not None:
+        try:
+            if checker(path):
+                return True
+        except OSError:
+            return False
+    try:
+        stat_result = os.lstat(path)
+    except OSError:
+        return False
+    file_attrs = getattr(stat_result, "st_file_attributes", 0)
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    directory_flag = getattr(stat, "FILE_ATTRIBUTE_DIRECTORY", 0)
+    return bool(reparse_flag and directory_flag and file_attrs & reparse_flag and file_attrs & directory_flag)
+
+
+def _engine_resolve_skill_link_target(link_path):
+    """版本稳定的链接目标解析（= doctor 在 py3.13+ 的行为）。
+
+    doctor 的 _resolve_skill_link_target 在 py<=3.12 上被 ntpath.isabs 劫持：
+    POSIX 绝对目标走 ntpath.normpath 被折叠成反斜杠串（'\\var\\folders\\...'），
+    比较链路随之失真。引擎自管解析，三平台解释器行为一致：
+    - Windows 设备前缀（\\\\?\\、\\??\\）剥离；
+    - Windows 绝对路径（盘符或 \\\\ 开头）→ ntpath.normpath；
+    - 其余（POSIX）→ expanduser 后绝对化（相对路径拼到链接所在目录）再 resolve。
+    """
+    raw = os.fspath(os.readlink(link_path))
+    for prefix, replacement in (
+        ("\\\\?\\UNC\\", "\\\\"),
+        ("\\??\\UNC\\", "\\\\"),
+        ("\\\\?\\", ""),
+        ("\\??\\", ""),
+    ):
+        if raw.startswith(prefix):
+            raw = replacement + raw[len(prefix):]
+            break
+    is_windows_abs = raw.startswith("\\\\") or (len(raw) > 2 and raw[1] == ":" and raw[0].isalpha())
+    if is_windows_abs:
+        return ntpath.normpath(raw)
+    resolved = Path(raw).expanduser()
+    if not resolved.is_absolute():
+        resolved = Path(link_path).parent / resolved
+    return str(resolved.resolve(strict=False))
+
+
+def _engine_actual_skill_targets(target_path):
+    """actual_skill_targets 的版本稳定替代（doctor 的返回值在 py<=3.12 会被
+    ntpath.normpath 折叠反斜杠，引擎需要解释器无关的链接拓扑）。"""
+    actual = {}
+    broken = set()
+    for name in os.listdir(target_path):
+        link_path = Path(target_path) / name
+        if not (link_path.is_symlink() or _engine_is_windows_directory_link(link_path)):
+            continue
+        try:
+            actual[name] = _engine_resolve_skill_link_target(link_path)
+            if not link_path.exists():
+                broken.add(name)
+        except OSError:
+            actual[name] = "<broken>"
+            broken.add(name)
+    return actual, broken
+
+
 def _engine_is_managed_skill_path(target_path, repo_base):
     """链接指向托管缓存仓库（物理路径包含，版本稳定）。"""
     if target_path == "<broken>":
@@ -2090,7 +2158,7 @@ def build_skills_status(root_dir, config_file, def_files):
         expected, _problems = expected_managed_skill_targets(Path(root_dir), config, skill_cfg, agent_id)
         expected_by_agent[agent_id] = expected
         if target_exists_by_agent[agent_id]:
-            actual, broken = actual_skill_targets(target_path)
+            actual, broken = _engine_actual_skill_targets(target_path)
         else:
             actual, broken = {}, set()
         actual_by_agent[agent_id] = actual
@@ -2413,7 +2481,7 @@ def _snapshot_targets_for(root_dir, domains, config_file, def_files):
             target_dir = os.path.expanduser(target_dir)
             if not os.path.isdir(target_dir):
                 continue
-            actual, _broken = actual_skill_targets(target_dir)
+            actual, _broken = _engine_actual_skill_targets(target_dir)
             for name, target in actual.items():
                 if _engine_is_managed_skill_path(target, repo_base):
                     links.append({"path": os.path.join(target_dir, name), "target": target})

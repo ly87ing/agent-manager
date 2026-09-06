@@ -125,11 +125,15 @@ jobs:
         working-directory: app
         run: pnpm test:unit run
 
-      # "app" bundle target only exists on macOS; on Linux tauri compiles the
-      # binary and skips bundling, which is still a full compile+link check.
+      # bundle target 按平台选择："app" 仅 macOS 存在；Linux 用 deb、Windows 用 nsis。
       - name: Build app bundle
         working-directory: app
-        run: pnpm tauri build --bundles app
+        run: |
+          case "${{ runner.os }}" in
+            macOS) pnpm tauri build --bundles app ;;
+            Linux) pnpm tauri build --bundles deb ;;
+            *) echo "unsupported runner os: ${{ runner.os }}"; exit 1 ;;
+          esac
 
   app-windows:
     name: windows-latest / app (experimental)
@@ -191,7 +195,7 @@ jobs:
         working-directory: app
         run: pnpm test:unit run
 
-      # --bundles app 跳过 nsis/wix 安装器，仅做编译链接验证（实验性）。
+      # Windows 最小安装器为 nsis（tauri CLI 自动下载工具链）；实验性 job 允许失败。
       - name: Build app bundle
         working-directory: app
-        run: pnpm tauri build --bundles app
+        run: pnpm tauri build --bundles nsis
