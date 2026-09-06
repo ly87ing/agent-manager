@@ -774,6 +774,28 @@ class EngineRsSkillsParityTests(unittest.TestCase):
         )
         self.assertEqual(elements["skill:legacy/skill-x"]["state"], "missing")
 
+    def test_skills_status_parity_links_through_symlinked_prefix(self):
+        # 常驻混合布局场景：链接经软链别名前缀指向托管缓存（CI mac 实案的
+        # 版本无关形态）——双侧都必须按物理路径判 linked 且检出额外链接。
+        self._write_corpus()
+        alias_repo = self.temp_dir / "alias-repo"
+        os.symlink(str(self.repo), str(alias_repo))
+        os.symlink(
+            str(alias_repo / "agent-skill" / "repositories" / "coll" / "skill-a"),
+            str(self.claude_skills / "skill-a"),
+        )
+        os.symlink(
+            str(alias_repo / "agent-skill" / "repositories" / "coll" / "skill-a"),
+            str(self.claude_skills / "skill-z"),
+        )
+        payload = self._assert_parity(*self._status_argv())
+        elements = {e["id"]: e for e in payload["data"]["elements"]}
+        self.assertEqual(
+            elements["skill:coll/skill-a"]["observed"]["agents"]["claude-code"]["state"], "linked"
+        )
+        self.assertEqual(elements["skill:coll"]["state"], "drifted")
+        self.assertEqual(elements["skill:coll"]["observed"]["extra_links"][0]["name"], "skill-z")
+
     def test_skills_status_parity_new_skill_default_enabled(self):
         self._write_corpus(coll_policy={"enabled": True, "new_skill_default": "enabled"})
         payload = self._assert_parity(*self._status_argv())

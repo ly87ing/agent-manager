@@ -53,7 +53,6 @@ from src.json_config import get_typed_mapping_section, load_json_object_file
 from src.manage_doctor import (
     _managed_mcp_matches,
     _discover_repo_skill_targets,
-    _paths_match,
     actual_skill_targets,
     build_report,
     build_tree_signature,
@@ -63,7 +62,6 @@ from src.manage_doctor import (
     expected_managed_mcp_servers,
     expected_managed_skill_targets,
     get_unsupported_actions,
-    is_managed_skill_target_path,
     managed_mcp_servers,
     resolve_skill_search_paths,
     rules_match,
@@ -2001,6 +1999,32 @@ def build_system_refresh_upstream(root_dir, config_file, only=None, net=None):
 _SKILL_DISCOVERY_EXCLUDED_DIRS = {".git", "node_modules", "__pycache__", "venv", ".venv"}
 
 
+def _engine_normalize_path(path):
+    """版本稳定的路径归一：resolve 软链 + normcase（Windows 折叠大小写）。
+
+    doctor 的 _normalize_comparable_path 在 py<=3.12 上因 ntpath.isabs 把
+    POSIX 绝对路径劫持进 windows 分支（只 normpath 不 resolve），导致混合前缀
+    布局（/var 软链 vs 已解析前缀）下比较失真；引擎的收敛语义必须与解释器
+    版本无关，故引擎自带实现（同物理路径判定）。
+    """
+    return os.path.normcase(str(Path(path).expanduser().resolve(strict=False)))
+
+
+def _engine_paths_match(left, right):
+    if left is None or right is None:
+        return left == right
+    return _engine_normalize_path(left) == _engine_normalize_path(right)
+
+
+def _engine_is_managed_skill_path(target_path, repo_base):
+    """链接指向托管缓存仓库（物理路径包含，版本稳定）。"""
+    if target_path == "<broken>":
+        return False
+    normalized = _engine_normalize_path(target_path)
+    base = _engine_normalize_path(str(repo_base))
+    return normalized == base or normalized.startswith(base + os.sep)
+
+
 def _skill_cell_state(skill_name, agent_id, expected_by_agent, actual_by_agent, broken_by_agent, repo_base):
     expected = expected_by_agent.get(agent_id, {})
     actual = actual_by_agent.get(agent_id, {})
@@ -2010,15 +2034,15 @@ def _skill_cell_state(skill_name, agent_id, expected_by_agent, actual_by_agent, 
             return "missing-link"
         if skill_name in broken:
             return "dead-link"
-        if _paths_match(actual[skill_name], expected[skill_name]):
+        if _engine_paths_match(actual[skill_name], expected[skill_name]):
             return "linked"
         return "drifted"
     if skill_name not in actual:
         return "disabled"
     if skill_name in broken:
         # 只有指向托管缓存仓库的死链才算我们的清理对象。
-        return "dead-link" if is_managed_skill_target_path(actual[skill_name], repo_base) else "disabled"
-    if is_managed_skill_target_path(actual[skill_name], repo_base):
+        return "dead-link" if _engine_is_managed_skill_path(actual[skill_name], repo_base) else "disabled"
+    if _engine_is_managed_skill_path(actual[skill_name], repo_base):
         return "extra-link"
     return "disabled"
 
@@ -2080,10 +2104,10 @@ def build_skills_status(root_dir, config_file, def_files):
     for agent_id in sorted(agent_targets):
         expected_names = set(expected_by_agent.get(agent_id, {}))
         for name, target in sorted(actual_by_agent.get(agent_id, {}).items()):
-            if name in expected_names or not is_managed_skill_target_path(target, repo_base):
+            if name in expected_names or not _engine_is_managed_skill_path(target, repo_base):
                 continue
             for candidate in repositories:
-                if is_managed_skill_target_path(target, (repo_base / candidate).resolve()):
+                if _engine_is_managed_skill_path(target, (repo_base / candidate).resolve()):
                     extras_by_repo.setdefault(candidate, []).append(
                         {"agent": agent_id, "name": name, "link_path": os.path.join(target_path_by_agent[agent_id], name)}
                     )
@@ -2391,7 +2415,7 @@ def _snapshot_targets_for(root_dir, domains, config_file, def_files):
                 continue
             actual, _broken = actual_skill_targets(target_dir)
             for name, target in actual.items():
-                if is_managed_skill_target_path(target, repo_base):
+                if _engine_is_managed_skill_path(target, repo_base):
                     links.append({"path": os.path.join(target_dir, name), "target": target})
     return files, links
 

@@ -1518,6 +1518,31 @@ class EngineDomainSliceTests(unittest.TestCase):
         self.assertEqual(payload["errors"][0]["code"], "SKILL_DUPLICATE_NAME")
         self.assertEqual(payload["errors"][0]["element"], "skill:coll-b/dup-skill")
 
+    def test_skills_status_links_through_symlinked_prefix(self):
+        # 回归（CI mac 实案）：链接经软链前缀指向托管缓存时，比较必须按物理路径
+        # 归一——旧链路经 doctor 的 ntpath 分支在 py<=3.12 下会误判 drifted/漏检。
+        coll, _legacy, claude_skills, _codex_skills = self._skills_fixture()
+        alias_repo = self.temp_dir / "alias-repo"
+        os.symlink(str(self.repo), str(alias_repo))
+        os.symlink(
+            str(alias_repo / "agent-skill" / "repositories" / "coll" / "skill-a"),
+            str(claude_skills / "skill-a"),
+        )
+        os.symlink(
+            str(alias_repo / "agent-skill" / "repositories" / "coll" / "skill-a"),
+            str(claude_skills / "skill-z"),
+        )
+        payload = self._payload("skills:status", "--json")
+        self._assert_status_data(payload)
+        elements = self._by_id(payload)
+        self.assertEqual(
+            elements["skill:coll/skill-a"]["observed"]["agents"]["claude-code"]["state"], "linked",
+            "经软链前缀的链接必须判 linked（物理路径归一）",
+        )
+        coll_el = elements["skill:coll"]
+        self.assertEqual(coll_el["state"], "drifted", "经软链前缀的额外受管链接也必须检出")
+        self.assertEqual(coll_el["observed"]["extra_links"][0]["name"], "skill-z")
+
     def test_skills_plan_translates_matrix_actions(self):
         coll, _legacy, claude_skills, codex_skills = self._skills_fixture()
         os.symlink(str(coll / "skill-a"), str(claude_skills / "skill-a"))
