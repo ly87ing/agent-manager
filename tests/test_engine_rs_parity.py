@@ -28,7 +28,7 @@ COPY_IGNORE = shutil.ignore_patterns("repositories", ".git", "__pycache__", "sec
 
 VOLATILE_KEYS = {"run_id", "log_file", "cache_age_sec"}
 # 解析器诊断文本随实现语言而异；契约只对齐 code/element。
-MESSAGE_MASKED_CODES = {"MCP_TARGET_PARSE_ERROR"}
+MESSAGE_MASKED_CODES = {"MCP_TARGET_PARSE_ERROR", "HOOKS_TARGET_PARSE_ERROR"}
 
 
 def normalize(node):
@@ -916,6 +916,301 @@ class EngineRsSkillsParityTests(unittest.TestCase):
         mutated = self._run_rust(*self._status_argv(), binary=wrapper)
         diffs = deep_diff(normalize_envelope(json.loads(py.stdout)), normalize_envelope(json.loads(mutated.stdout)))
         self.assertTrue(any("repo_cached" in diff for diff in diffs), "比较器必须红: %s" % diffs)
+
+
+@unittest.skipUnless(CARGO, "cargo 不可用，跳过 rust parity")
+class EngineRsRenderParityTests(unittest.TestCase):
+    """rules/hooks/aliases 三域（模板/渲染类）双实现对齐。"""
+
+    @classmethod
+    def setUpClass(cls):
+        build = subprocess.run(
+            ["cargo", "build", "--quiet"], cwd=ENGINE_RS, capture_output=True, text=True, check=False
+        )
+        if build.returncode != 0:
+            raise unittest.SkipTest("cargo build 失败: %s" % build.stderr[-500:])
+        if not DEBUG_BIN.exists():
+            raise unittest.SkipTest("rust binary 缺失: %s" % DEBUG_BIN)
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="agent_manager_rs_render_parity_"))
+        self.addCleanup(shutil.rmtree, self.temp_dir, ignore_errors=True)
+        self.repo = self.temp_dir / "repo"
+        self.home = self.temp_dir / "home"
+        self.home.mkdir()
+        shutil.copytree(ROOT, self.repo, ignore=COPY_IGNORE)
+        (self.repo / "config" / "manager.local.json").unlink(missing_ok=True)
+        (self.repo / "config" / "manager.synced.json").unlink(missing_ok=True)
+
+    def _write_config(self, name, obj):
+        (self.repo / "config" / name).write_text(json.dumps(obj, indent=2) + "\n", encoding="utf-8")
+
+    def _env(self):
+        env = os.environ.copy()
+        env["HOME"] = str(self.home)
+        env["AGENT_MANAGER_RUN_ID"] = "parity-run-render"
+        env["AGENT_MANAGER_LOG_FILE"] = str(self.temp_dir / "parity.log")
+        env["AGENT_MANAGER_LOCK_HELD"] = "false"
+        env["AGENT_MANAGER_ROOT_DIR"] = str(self.repo)
+        env["AGENT_MANAGER_UPSTREAM_CACHE"] = str(self.temp_dir / "upstream-cache.json")
+        return env
+
+    def _run_python(self, *argv):
+        return subprocess.run(
+            ["python3", str(self.repo / "src" / "engine_v1.py"), *argv],
+            cwd=self.repo, env=self._env(), capture_output=True, text=True, check=False, timeout=60,
+        )
+
+    def _run_rust(self, *argv, binary=None):
+        return subprocess.run(
+            [str(binary or DEBUG_BIN), *argv],
+            cwd=self.repo, env=self._env(), capture_output=True, text=True, check=False, timeout=60,
+        )
+
+    def _assert_parity(self, *argv):
+        py = self._run_python(*argv)
+        rs = self._run_rust(*argv)
+        self.assertEqual(
+            py.returncode, rs.returncode,
+            "exit 码不一致: python=%d rust=%d\npy stderr: %s\nrs stderr: %s"
+            % (py.returncode, rs.returncode, py.stderr[-500:], rs.stderr[-500:]),
+        )
+        diffs = deep_diff(normalize_envelope(json.loads(py.stdout)), normalize_envelope(json.loads(rs.stdout)))
+        self.assertEqual(diffs, [], "envelope 不一致:\n%s" % "\n".join(diffs))
+        return json.loads(py.stdout)
+
+    # ------------------------------------------------------------------ rules
+
+    def _rules_fixture(self):
+        (self.repo / "config" / "rules-targets.list").write_text(
+            "claude_global|global|rules/dist/claude/CLAUDE.md|{{HOME}}/.claude/CLAUDE.md\n"
+            "claude_drift|global|rules/dist/claude/CLAUDE.md|{{HOME}}/.claude/DRIFT.md\n"
+            "claude_missing|global|rules/dist/claude/CLAUDE.md|{{HOME}}/.claude/MISSING.md\n"
+            "codex_global|global|rules/dist/codex/AGENTS.md|{{HOME}}/.codex/AGENTS.md\n",
+            encoding="utf-8",
+        )
+        self._write_config("manager.json", {
+            "agents": {"claude-code": {"enabled": True}, "codex": {"enabled": False}},
+            "tools": {}, "skills": {}, "mcp": {},
+        })
+        dist_src = self.repo / "agent-rule" / "rules" / "dist" / "claude" / "CLAUDE.md"
+        ok_target = self.home / ".claude" / "CLAUDE.md"
+        ok_target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(dist_src, ok_target)
+        (self.home / ".claude" / "DRIFT.md").write_text("drifted content\n", encoding="utf-8")
+
+    def _rules_argv(self):
+        return ("rules:status", "--config", "config/manager.json", "--def-file", "config/rules-targets.list", "--json")
+
+    def test_rules_status_parity_convergence_and_scope(self):
+        self._rules_fixture()
+        payload = self._assert_parity(*self._rules_argv())
+        elements = {e["id"]: e for e in payload["data"]["elements"]}
+        self.assertEqual(elements["rules:claude_global"]["state"], "managed-ok")
+        self.assertEqual(elements["rules:claude_drift"]["state"], "drifted")
+        self.assertEqual(elements["rules:claude_missing"]["state"], "not-materialized")
+        self.assertEqual(elements["rules:codex_global"]["state"], "disabled")
+        self.assertEqual(elements["rules:dist"]["state"], "managed-ok")
+
+    def test_rules_status_parity_stale_dist_and_manifest_error(self):
+        self._rules_fixture()
+        src_core = self.repo / "agent-rule" / "rules" / "src" / "shared" / "core.md"
+        future = os.path.getmtime(self.repo / "agent-rule" / "rules" / "dist" / "claude" / "CLAUDE.md") + 100
+        os.utime(src_core, (future, future))
+        payload = self._assert_parity(*self._rules_argv())
+        elements = {e["id"]: e for e in payload["data"]["elements"]}
+        self.assertEqual(elements["rules:dist"]["state"], "drifted")
+        self.assertIn("RULE_BUILD_STALE", [w["code"] for w in payload["warnings"]])
+        # mtime 是浮点观测值，两侧各自读取同一文件系统 → 必须相等（不归一化）。
+        self.assertIsNotNone(elements["rules:dist"]["observed"]["src_latest_mtime"])
+
+    def test_rules_plan_parity_build_before_distribute(self):
+        self._rules_fixture()
+        src_core = self.repo / "agent-rule" / "rules" / "src" / "shared" / "core.md"
+        future = os.path.getmtime(self.repo / "agent-rule" / "rules" / "dist" / "claude" / "CLAUDE.md") + 100
+        os.utime(src_core, (future, future))
+        payload = self._assert_parity(
+            "rules:plan", "--config", "config/manager.json", "--def-file", "config/rules-targets.list", "--json"
+        )
+        actions = payload["data"]["actions"]
+        self.assertEqual(actions[0]["op"], "run-cmd")
+        self.assertEqual(actions[0]["element"], "rules:dist")
+        self.assertIn("build-agent-rules.py", actions[0]["cmd"])
+        by_element = {a["element"]: a for a in actions}
+        # write-file 的 digest 对两侧必须逐字节相等（同一 sha256 约定）。
+        self.assertNotEqual(
+            by_element["rules:claude_drift"]["before_digest"],
+            by_element["rules:claude_drift"]["after_digest"],
+        )
+        self.assertIsNone(by_element["rules:claude_missing"]["before_digest"])
+        self.assertNotIn("rules:codex_global", by_element)
+
+    def test_rules_manifest_bad_line_parity(self):
+        (self.repo / "config" / "rules-targets.list").write_text("broken-line-without-columns\n", encoding="utf-8")
+        self._write_config("manager.json", {"agents": {}, "tools": {}, "skills": {}, "mcp": {}})
+        payload = self._assert_parity(*self._rules_argv())
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["errors"][0]["code"], "RULES_MANIFEST_INVALID")
+
+    # ------------------------------------------------------------------ hooks
+
+    CLAUDE_HOOKS_CFG = {
+        "settings_path": "../.claude/settings.json",
+        "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo parity-claude"}]}]},
+    }
+    CODEX_HOOKS_CFG = {
+        "hooks_path": "../.codex/hooks.json",
+        "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "echo parity-codex"}]}]},
+    }
+
+    def _hooks_fixture(self):
+        (self.repo / ".claude" / "settings.json").unlink(missing_ok=True)
+        (self.repo / ".codex" / "hooks.json").unlink(missing_ok=True)
+        self._write_config("claude-hooks.json", self.CLAUDE_HOOKS_CFG)
+        self._write_config("codex-hooks.json", self.CODEX_HOOKS_CFG)
+        self._write_config("manager.json", {"agents": {}, "tools": {}, "skills": {}, "mcp": {}})
+
+    def _hooks_argv(self):
+        return (
+            "hooks:status", "--config", "config/manager.json",
+            "--def-file", "config/claude-hooks.json", "--def-file", "config/codex-hooks.json", "--json",
+        )
+
+    def test_hooks_status_parity_not_materialized_then_ok_then_drift(self):
+        self._hooks_fixture()
+        payload = self._assert_parity(*self._hooks_argv())
+        elements = {e["id"]: e for e in payload["data"]["elements"]}
+        self.assertEqual(elements["hooks:claude"]["state"], "not-materialized")
+        self.assertEqual(elements["hooks:codex"]["state"], "not-materialized")
+
+        (self.repo / ".claude").mkdir(exist_ok=True)
+        (self.repo / ".claude" / "settings.json").write_text(
+            json.dumps({"other": True, "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo parity-claude"}]}]}}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        (self.repo / ".codex").mkdir(exist_ok=True)
+        (self.repo / ".codex" / "hooks.json").write_text(
+            json.dumps({"hooks": self.CODEX_HOOKS_CFG["hooks"]}, indent=2) + "\n", encoding="utf-8"
+        )
+        payload = self._assert_parity(*self._hooks_argv())
+        elements = {e["id"]: e for e in payload["data"]["elements"]}
+        self.assertEqual(elements["hooks:claude"]["state"], "managed-ok")
+        self.assertEqual(elements["hooks:codex"]["state"], "managed-ok")
+
+        (self.repo / ".claude" / "settings.json").write_text(json.dumps({"other": True, "hooks": {}}) + "\n", encoding="utf-8")
+        (self.repo / ".codex" / "hooks.json").write_text(json.dumps({"hooks": {}}) + "\n", encoding="utf-8")
+        payload = self._assert_parity(*self._hooks_argv())
+        elements = {e["id"]: e for e in payload["data"]["elements"]}
+        self.assertEqual(elements["hooks:claude"]["state"], "drifted")
+        self.assertEqual(elements["hooks:claude"]["observed"]["missing_signatures"], 1)
+        self.assertEqual(elements["hooks:codex"]["state"], "drifted")
+
+    def test_hooks_status_parity_parse_error(self):
+        self._hooks_fixture()
+        (self.repo / ".codex").mkdir(exist_ok=True)
+        (self.repo / ".codex" / "hooks.json").write_text("{ invalid\n", encoding="utf-8")
+        payload = self._assert_parity(*self._hooks_argv())
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["errors"][0]["code"], "HOOKS_TARGET_PARSE_ERROR")
+        self.assertEqual(payload["errors"][0]["element"], "hooks:codex")
+
+    def test_hooks_plan_parity_render_digests_byte_identical(self):
+        self._hooks_fixture()
+        (self.repo / ".claude").mkdir(exist_ok=True)
+        (self.repo / ".claude" / "settings.json").write_text(json.dumps({"other": True, "hooks": {}}, indent=2) + "\n", encoding="utf-8")
+        payload = self._assert_parity(
+            "hooks:plan", "--config", "config/manager.json",
+            "--def-file", "config/claude-hooks.json", "--def-file", "config/codex-hooks.json", "--json",
+        )
+        actions = payload["data"]["actions"]
+        self.assertEqual({a["element"] for a in actions}, {"hooks:claude", "hooks:codex"})
+        for action in actions:
+            self.assertTrue(action["after_digest"].startswith("sha256:"))
+        # after_digest 逐字节相等已由 _assert_parity 证明；这里再确认语义字段。
+        claude_action = [a for a in actions if a["element"] == "hooks:claude"][0]
+        self.assertIn("签名集合", claude_action["note"])
+
+    # ------------------------------------------------------------------ aliases
+
+    def _aliases_fixture(self, aliases=None):
+        self._write_config(
+            "shell-aliases.json",
+            {"timezone": "UTC", "lang": "C", "aliases": aliases if aliases is not None else {"ll": "ls -l", "gs": "git status"}},
+        )
+        self._write_config("manager.json", {"agents": {}, "tools": {}, "skills": {}, "mcp": {}})
+
+    def _alias_block(self):
+        lines = ["alias gs='git status'", "alias ll='ls -l'"]
+        return "# >>> agent-manager shell aliases >>>\n" + "\n".join(lines) + "\n# <<< agent-manager shell aliases <<<"
+
+    def _aliases_argv(self):
+        return ("aliases:status", "--config", "config/manager.json", "--def-file", "config/shell-aliases.json", "--json")
+
+    def test_aliases_status_parity_block_states(self):
+        self._aliases_fixture()
+        (self.home / ".zshrc").write_text("# user\n\n" + self._alias_block() + "\n", encoding="utf-8")
+        payload = self._assert_parity(*self._aliases_argv())
+        elements = {e["id"]: e for e in payload["data"]["elements"]}
+        self.assertEqual(elements["aliases:zshrc"]["state"], "managed-ok")
+        self.assertEqual(elements["aliases:zprofile"]["state"], "not-materialized")
+
+        (self.home / ".zprofile").write_text(
+            "# >>> agent-manager shell aliases >>>\nalias stale='old'\n# <<< agent-manager shell aliases <<<\n",
+            encoding="utf-8",
+        )
+        payload = self._assert_parity(*self._aliases_argv())
+        elements = {e["id"]: e for e in payload["data"]["elements"]}
+        self.assertEqual(elements["aliases:zprofile"]["state"], "drifted")
+
+    def test_aliases_status_parity_missing_block_and_empty_alias_list(self):
+        self._aliases_fixture()
+        (self.home / ".zshrc").write_text("# user only\n", encoding="utf-8")
+        payload = self._assert_parity(*self._aliases_argv())
+        self.assertEqual({e["id"]: e for e in payload["data"]["elements"]}["aliases:zshrc"]["state"], "missing")
+
+        self._aliases_fixture(aliases={})
+        payload = self._assert_parity(*self._aliases_argv())
+        elements = {e["id"]: e for e in payload["data"]["elements"]}
+        self.assertEqual(elements["aliases:zshrc"]["state"], "managed-ok")
+        self.assertEqual(elements["aliases:zprofile"]["state"], "managed-ok")
+
+    def test_aliases_plan_parity_block_digests(self):
+        self._aliases_fixture()
+        (self.home / ".zprofile").write_text(
+            "# >>> agent-manager shell aliases >>>\nalias stale='old'\n# <<< agent-manager shell aliases <<<\n",
+            encoding="utf-8",
+        )
+        payload = self._assert_parity(
+            "aliases:plan", "--config", "config/manager.json", "--def-file", "config/shell-aliases.json", "--json"
+        )
+        by_element = {a["element"]: a for a in payload["data"]["actions"]}
+        self.assertEqual(set(by_element), {"aliases:zshrc", "aliases:zprofile"})
+        self.assertNotEqual(
+            by_element["aliases:zprofile"]["before_digest"],
+            by_element["aliases:zprofile"]["after_digest"],
+        )
+        self.assertIsNone(by_element["aliases:zshrc"]["before_digest"])
+
+    def test_render_harness_goes_red_when_rust_diverges(self):
+        self._aliases_fixture()
+        wrapper = self.temp_dir / "mutating-engine.sh"
+        wrapper.write_text(
+            "#!/bin/sh\n"
+            "%s \"$@\" | python3 -c \"\n"
+            "import json, sys\n"
+            "p = json.load(sys.stdin)\n"
+            "els = p.get('data', {}).get('elements', [])\n"
+            "if els:\n"
+            "    els[0]['state'] = 'drifted'\n"
+            "print(json.dumps(p, indent=2, ensure_ascii=False))\n"
+            "\"\n" % DEBUG_BIN,
+            encoding="utf-8",
+        )
+        wrapper.chmod(0o755)
+        py = self._run_python(*self._aliases_argv())
+        mutated = self._run_rust(*self._aliases_argv(), binary=wrapper)
+        diffs = deep_diff(normalize_envelope(json.loads(py.stdout)), normalize_envelope(json.loads(mutated.stdout)))
+        self.assertTrue(any("state" in diff for diff in diffs), "比较器必须红: %s" % diffs)
 
 
 if __name__ == "__main__":

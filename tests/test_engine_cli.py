@@ -537,6 +537,33 @@ class EngineCliTests(unittest.TestCase):
         self.assertNotIn("[engine] rust:", result.stderr)
         self.assertEqual(json.loads(result.stdout)["data"]["domain"], "skills")
 
+    @unittest.skipUnless(RUST_BIN.exists(), "engine-rs 未构建（cargo build）时跳过")
+    def test_rules_hooks_aliases_route_to_rust_via_env_override(self):
+        for argv, domain in (
+            (("rules:status", "--json"), "rules"),
+            (("hooks:status", "--json"), "hooks"),
+            (("aliases:status", "--json"), "aliases"),
+        ):
+            with self.subTest(domain=domain):
+                result = self._run_manage(
+                    *argv, env_extra={"AGENT_MANAGER_ENGINE_RS": str(self.RUST_BIN)}
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("[engine] rust:", result.stderr)
+                self.assertEqual(json.loads(result.stdout)["data"]["domain"], domain)
+
+    def test_rules_hooks_aliases_fall_back_to_python_without_binary(self):
+        for argv, domain in (
+            (("rules:status", "--json"), "rules"),
+            (("hooks:status", "--json"), "hooks"),
+            (("aliases:status", "--json"), "aliases"),
+        ):
+            with self.subTest(domain=domain):
+                result = self._run_manage(*argv)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotIn("[engine] rust:", result.stderr)
+                self.assertEqual(json.loads(result.stdout)["data"]["domain"], domain)
+
 
 class EngineDomainSliceTests(unittest.TestCase):
     """Slice C2a: status+plan for agents/tools/rules/hooks/aliases, secrets

@@ -1097,11 +1097,12 @@ case "$cmd" in
         if [ "${#CMD_ARGS[@]}" -gt 0 ]; then
             engine_args+=("${CMD_ARGS[@]}")
         fi
-        # Rust 切片路由（Phase 3）：mcp/agents/skills 域的 status/plan 优先走
-        # engine-rs（Python 内核保留作 fallback；退役待 Phase 3 末 CI 全绿）。
-        # AGENT_MANAGER_ENGINE_RS 可显式指定 binary。
+        # Rust 切片路由（Phase 3）：mcp/agents/skills/rules/hooks/aliases 域的
+        # status/plan 优先走 engine-rs（Python 内核保留作 fallback；退役待
+        # Phase 3 末 CI 全绿）。AGENT_MANAGER_ENGINE_RS 可显式指定 binary。
+        # secrets/tools 域保持 Python（前者涉 secrets 仓库边界，后者归 lifecycle 线）。
         engine_cmd=("$PYTHON_CMD" "$ROOT_DIR/src/engine_v1.py")
-        if [[ "$cmd" == "mcp:status" || "$cmd" == "mcp:plan" || "$cmd" == "agents:status" || "$cmd" == "agents:plan" || "$cmd" == "skills:status" || "$cmd" == "skills:plan" ]]; then
+        if [[ "$cmd" == "mcp:status" || "$cmd" == "mcp:plan" || "$cmd" == "agents:status" || "$cmd" == "agents:plan" || "$cmd" == "skills:status" || "$cmd" == "skills:plan" || "$cmd" == "rules:status" || "$cmd" == "rules:plan" || "$cmd" == "hooks:status" || "$cmd" == "hooks:plan" || "$cmd" == "aliases:status" || "$cmd" == "aliases:plan" ]]; then
             rust_engine=""
             if [ -n "${AGENT_MANAGER_ENGINE_RS:-}" ] && [ -x "${AGENT_MANAGER_ENGINE_RS}" ]; then
                 rust_engine="$AGENT_MANAGER_ENGINE_RS"

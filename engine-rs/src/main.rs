@@ -7,11 +7,14 @@
 //! 2 = contract/usage error.
 
 mod agents;
+mod aliases;
 mod canon;
 mod envelope;
 mod ids;
 mod mcp;
+mod hooks;
 mod providers;
+mod rules;
 mod skills;
 mod upstream;
 
@@ -231,7 +234,7 @@ fn run() -> i32 {
         );
     }
 
-    let implemented = (domain == "mcp" || domain == "agents" || domain == "skills") && (verb == "status" || verb == "plan");
+    let implemented = (domain == "mcp" || domain == "agents" || domain == "skills" || domain == "rules" || domain == "hooks" || domain == "aliases") && (verb == "status" || verb == "plan");
     if !implemented {
         Envelope::new(
             dotted.clone(),
@@ -249,7 +252,7 @@ fn run() -> i32 {
         )
         .emit();
         eprintln!(
-            "提示: '{}' 尚未实现（后续切片落地）；Rust 切片当前可用: mcp/agents/skills 的 status/plan",
+            "提示: '{}' 尚未实现（后续切片落地）；Rust 切片当前可用: mcp/agents/skills/rules/hooks/aliases 的 status/plan",
             dotted
         );
         return 2;
@@ -265,8 +268,8 @@ fn run() -> i32 {
         );
     }
 
-    // Python 引擎的 root 由脚本位置推导；共享二进制的 root 由 manage.sh 经
-    // AGENT_MANAGER_ROOT_DIR 注入（直接调用时回落到 crate 的父目录）。
+    // Python 引擎的 root 由脚本位置推导（Path(__file__).resolve()，会解析符号
+    // 链接）；共享二进制由 manage.sh 经 AGENT_MANAGER_ROOT_DIR 注入，须同样解析。
     let root_dir = std::env::var("AGENT_MANAGER_ROOT_DIR")
         .ok()
         .filter(|value| !value.is_empty())
@@ -277,6 +280,7 @@ fn run() -> i32 {
                 .expect("engine-rs lives at <repo>/engine-rs")
                 .to_path_buf()
         });
+    let root_dir = std::fs::canonicalize(&root_dir).unwrap_or(root_dir);
     let config_file = PathBuf::from(args.config.clone().unwrap());
     let config_file = if config_file.is_absolute() {
         config_file
@@ -309,6 +313,12 @@ fn run() -> i32 {
         ("agents", "plan") => agents::build_agents_plan(&root_dir, &config_file, &def_files),
         ("skills", "status") => skills::build_skills_status(&root_dir, &config_file, &def_files),
         ("skills", "plan") => skills::build_skills_plan(&root_dir, &config_file, &def_files),
+        ("rules", "status") => rules::build_rules_status(&root_dir, &config_file, &def_files),
+        ("rules", "plan") => rules::build_rules_plan(&root_dir, &config_file, &def_files),
+        ("hooks", "status") => hooks::build_hooks_status(&root_dir, &config_file, &def_files),
+        ("hooks", "plan") => hooks::build_hooks_plan(&root_dir, &config_file, &def_files),
+        ("aliases", "status") => aliases::build_aliases_status(&root_dir, &config_file, &def_files),
+        ("aliases", "plan") => aliases::build_aliases_plan(&root_dir, &config_file, &def_files),
         _ => unreachable!("dispatch guard above"),
     };
     match result {

@@ -2,7 +2,7 @@
 //! helpers and contract-style JSON equality (tests/contract_validator.py
 //! semantics: booleans never equal numbers, 1 equals 1.0).
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
 /// Serialize a string exactly like Python's json.dumps(ensure_ascii=False):
@@ -121,6 +121,54 @@ pub fn json_equal(left: &Value, right: &Value) -> bool {
         }
         _ => left == right,
     }
+}
+
+/// Contract plan-action entry (contract/engine-v1/plan-action.schema.json);
+/// all nine fields explicit, nullable where the schema allows null.
+#[allow(clippy::too_many_arguments)]
+pub fn plan_action(
+    op: &str,
+    element: &str,
+    target: Value,
+    risk: &str,
+    before_digest: Option<String>,
+    after_digest: Option<String>,
+    cmd: Option<String>,
+    note: Option<String>,
+) -> Value {
+    let mut action = Map::new();
+    action.insert("op".to_string(), Value::String(op.to_string()));
+    action.insert("element".to_string(), Value::String(element.to_string()));
+    action.insert("target".to_string(), target);
+    action.insert("risk".to_string(), Value::String(risk.to_string()));
+    action.insert(
+        "before_digest".to_string(),
+        before_digest.map_or(Value::Null, Value::String),
+    );
+    action.insert(
+        "after_digest".to_string(),
+        after_digest.map_or(Value::Null, Value::String),
+    );
+    action.insert("backup_path".to_string(), Value::Null);
+    action.insert("cmd".to_string(), cmd.map_or(Value::Null, Value::String));
+    action.insert("note".to_string(), note.map_or(Value::Null, Value::String));
+    Value::Object(action)
+}
+
+/// Plan summary counters in contract order.
+pub fn plan_summary(actions: &[Value]) -> Value {
+    let mut summary = Map::new();
+    for key in ["read", "write-local", "exec-local", "network", "install-remove"] {
+        summary.insert(key.to_string(), Value::Number(0.into()));
+    }
+    for action in actions {
+        if let Some(risk) = action.get("risk").and_then(Value::as_str) {
+            if let Some(current) = summary.get(risk).and_then(Value::as_i64) {
+                summary.insert(risk.to_string(), Value::Number((current + 1).into()));
+            }
+        }
+    }
+    Value::Object(summary)
 }
 
 #[cfg(test)]
