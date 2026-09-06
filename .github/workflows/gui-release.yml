@@ -1,0 +1,102 @@
+name: GUI Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: "${{ matrix.os }} / release installer"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            bundles: "app,dmg"
+          - os: ubuntu-latest
+            bundles: "appimage,deb"
+          - os: windows-latest
+            bundles: "nsis,msi"
+
+    # 密钥只经 GitHub Secrets 注入，主仓库不落任何真实密钥（见
+    # docs/GUI-PLATFORM-STATUS.md 的 updater 接线说明）。
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Tauri system dependencies (Linux)
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        shell: bash
+        working-directory: app
+        run: echo "store_path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.store_path }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('app/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-store-
+
+      - name: Install app dependencies
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache rustup and cargo artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.rustup
+            ~/.cargo/registry
+            ~/.cargo/git
+            app/src-tauri/target
+          key: ${{ runner.os }}-app-cargo-${{ hashFiles('app/src-tauri/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-app-cargo-
+
+      # 仅当 TAURI_SIGNING_PRIVATE_KEY secret 存在时启用 updater 产物：
+      # tauri-action 检测到签名密钥 + updater 产物后会自动签名并生成
+      # latest.json 上传到该 tag 的 release；secret 不存在时本步骤跳过，
+      # 构建继续但不产出 latest.json（不签名）。
+      - name: Enable updater artifacts when signing key is present
+        if: ${{ env.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        working-directory: app
+        run: >
+          node -e "const fs=require('fs');const p='src-tauri/tauri.conf.json';
+          const c=JSON.parse(fs.readFileSync(p,'utf8'));
+          c.bundle.createUpdaterArtifacts=true;
+          fs.writeFileSync(p, JSON.stringify(c,null,2)+'\n');"
+
+      - name: Build and upload release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --bundles ${{ matrix.bundles }}

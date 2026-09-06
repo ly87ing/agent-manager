@@ -1,0 +1,197 @@
+name: GUI CI
+
+on:
+  push:
+    branches:
+      - main
+      - rust
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  engine-rs:
+    name: "${{ matrix.os }} / engine-rs (cargo + python parity)"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache rustup and cargo artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.rustup
+            ~/.cargo/registry
+            ~/.cargo/git
+            engine-rs/target
+          key: ${{ runner.os }}-engine-cargo-${{ hashFiles('engine-rs/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-engine-cargo-
+
+      - name: Run cargo tests
+        run: cargo test --manifest-path engine-rs/Cargo.toml
+
+      - name: Build engine release binary
+        run: cargo build --release --manifest-path engine-rs/Cargo.toml
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run engine parity tests (python double-run vs rust)
+        run: python3 -m unittest tests.test_engine_rs_parity tests.test_engine_cli -v
+
+  app:
+    name: "${{ matrix.os }} / app (typecheck + vitest + tauri build)"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Tauri 2 Linux system dependencies per official docs
+      # (https://v2.tauri.app/start/prerequisites/#linux)
+      - name: Install Tauri system dependencies (Linux)
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        shell: bash
+        working-directory: app
+        run: echo "store_path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.store_path }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('app/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-store-
+
+      - name: Install app dependencies
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache rustup and cargo artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.rustup
+            ~/.cargo/registry
+            ~/.cargo/git
+            app/src-tauri/target
+          key: ${{ runner.os }}-app-cargo-${{ hashFiles('app/src-tauri/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-app-cargo-
+
+      - name: Typecheck
+        working-directory: app
+        run: pnpm typecheck
+
+      - name: Run unit tests
+        working-directory: app
+        run: pnpm test:unit run
+
+      # "app" bundle target only exists on macOS; on Linux tauri compiles the
+      # binary and skips bundling, which is still a full compile+link check.
+      - name: Build app bundle
+        working-directory: app
+        run: pnpm tauri build --bundles app
+
+  app-windows:
+    name: windows-latest / app (experimental)
+    runs-on: windows-latest
+    # 实验性：按 goal 任务书（docs/goal-rust-gui.md Phase 3）允许据实报告，
+    # Windows 本机未实测，此 job 失败不阻塞整体 CI。
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        shell: bash
+        working-directory: app
+        run: echo "store_path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.store_path }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('app/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-store-
+
+      - name: Install app dependencies
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache rustup and cargo artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.rustup
+            ~/.cargo/registry
+            ~/.cargo/git
+            app/src-tauri/target
+          key: ${{ runner.os }}-app-cargo-${{ hashFiles('app/src-tauri/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-app-cargo-
+
+      - name: Typecheck
+        working-directory: app
+        run: pnpm typecheck
+
+      - name: Run unit tests
+        working-directory: app
+        run: pnpm test:unit run
+
+      # --bundles app 跳过 nsis/wix 安装器，仅做编译链接验证（实验性）。
+      - name: Build app bundle
+        working-directory: app
+        run: pnpm tauri build --bundles app

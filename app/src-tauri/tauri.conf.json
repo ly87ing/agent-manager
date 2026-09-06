@@ -24,6 +24,14 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/ly87ing/agent-manager/releases/latest/download/latest.json"
+      ],
+      "pubkey": "YOUR_UPDATER_PUBKEY"
+    }
+  },
   "bundle": {
     "active": true,
     "targets": [

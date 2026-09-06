@@ -434,6 +434,76 @@ class ProjectContractTests(unittest.TestCase):
         missing = sorted((name, where) for name, where in documented.items() if name not in targets)
         self.assertEqual(missing, [], f"文档推荐了 Makefile 里不存在的目标: {missing}")
 
+    def test_gui_ci_workflow_covers_engine_app_and_experimental_windows(self):
+        workflow = ROOT / ".github" / "workflows" / "gui-ci.yml"
+        self.assertTrue(workflow.exists(), "missing GUI CI workflow")
+
+        content = workflow.read_text(encoding="utf-8")
+        self.assertIn("engine-rs:", content)
+        self.assertIn("app:", content)
+        self.assertIn("app-windows:", content)
+        self.assertIn("ubuntu-latest", content)
+        self.assertIn("macos-latest", content)
+        self.assertIn("windows-latest", content)
+        self.assertIn("dtolnay/rust-toolchain@stable", content)
+        self.assertIn("actions/cache@v4", content)
+        self.assertIn("python3 -m unittest tests.test_engine_rs_parity tests.test_engine_cli -v", content)
+        self.assertIn("pnpm typecheck", content)
+        self.assertIn("pnpm test:unit run", content)
+        self.assertIn("pnpm tauri build --bundles app", content)
+        windows_body = content.split("app-windows:", 1)[1]
+        self.assertIn("continue-on-error: true", windows_body)
+        # 反例：CI 工作流不得引用任何签名密钥 secret（签名只属于 release 管线）。
+        self.assertNotIn("TAURI_SIGNING_PRIVATE_KEY", content)
+
+    def test_gui_release_workflow_gates_signing_on_secret_presence(self):
+        workflow = ROOT / ".github" / "workflows" / "gui-release.yml"
+        self.assertTrue(workflow.exists(), "missing GUI release workflow")
+
+        content = workflow.read_text(encoding="utf-8")
+        self.assertIn('tags:', content)
+        self.assertIn('"v*"', content)
+        self.assertIn("tauri-apps/tauri-action@v0", content)
+        self.assertIn("secrets.TAURI_SIGNING_PRIVATE_KEY", content)
+        self.assertIn("if: ${{ env.TAURI_SIGNING_PRIVATE_KEY != '' }}", content)
+        self.assertIn("createUpdaterArtifacts", content)
+        self.assertIn("latest.json", content)
+        # 反例：工作流只引用 secret 名称，不得包含任何密钥材料或占位公钥。
+        self.assertNotIn("-----BEGIN", content)
+        self.assertNotIn("YOUR_UPDATER_PUBKEY", content)
+
+    def test_updater_config_uses_placeholder_pubkey_and_github_endpoint(self):
+        config = json.loads((ROOT / "app" / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
+        updater = config["plugins"]["updater"]
+        self.assertEqual(
+            updater["endpoints"],
+            ["https://github.com/ly87ing/agent-manager/releases/latest/download/latest.json"],
+        )
+        # 反例：pubkey 必须是占位符，不允许出现真实公钥材料。
+        self.assertEqual(updater["pubkey"], "YOUR_UPDATER_PUBKEY")
+
+        capabilities = (ROOT / "app" / "src-tauri" / "capabilities" / "default.json").read_text(encoding="utf-8")
+        self.assertIn("updater:default", capabilities)
+        main_rs = (ROOT / "app" / "src-tauri" / "src" / "main.rs").read_text(encoding="utf-8")
+        self.assertIn("tauri_plugin_updater::Builder::new().build()", main_rs)
+        cargo_toml = (ROOT / "app" / "src-tauri" / "Cargo.toml").read_text(encoding="utf-8")
+        self.assertIn('tauri-plugin-updater = "2"', cargo_toml)
+
+    def test_gui_platform_status_reports_unverified_platforms_honestly(self):
+        status = ROOT / "docs" / "GUI-PLATFORM-STATUS.md"
+        self.assertTrue(status.exists(), "missing GUI platform status doc")
+
+        content = status.read_text(encoding="utf-8")
+        self.assertIn("全量实测通过", content)
+        self.assertIn("实验性，不宣称可用", content)
+        self.assertIn("python-build-standalone", content)
+        self.assertIn("continue-on-error: true", content)
+        self.assertIn("YOUR_UPDATER_PUBKEY", content)
+        self.assertIn("TAURI_SIGNING_PRIVATE_KEY", content)
+        self.assertIn("SyncPage", content)
+        # 反例：状态报告不得宣称 Windows 已完成验证。
+        self.assertNotIn("Windows 全量实测", content)
+
 
 if __name__ == "__main__":
     unittest.main()
