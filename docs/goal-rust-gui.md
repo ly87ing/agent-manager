@@ -138,7 +138,7 @@ Stop：Windows 方案若在本机无法验证，据实报告已验证范围与�
 | Phase 0 契约与 JSON 化 | 已完成 | discover 592 项全绿、make smoke 通过、check_no_secrets 通过；8 域 status + 7 域 plan + system:audit + system:refresh-upstream 全命令真实机过双 schema | 3db6be4 / 6efbfec / ad2ab60 / 49cae4e / 63dea53 / c4b9fad |
 | Phase 1 Tauri 只读视图 | 已完成 | vitest 31 绿、cargo 19+1、typecheck/build 绿、`pnpm tauri build` 产出 .app、真实引擎冒烟 mcp:status ok=true、浏览器全页面渲染验证；python discover 592 绿 | 53bf60d / c0d6442 |
 | Phase 2 写操作与同步 | 已完成 | **converge ≡ update 逐字节对账 diff 为空**（含篡改反例）；双机 git 同步 + 按 key 冲突解决（test_sync_profile 12 项）；push 门禁反例零推送；policy 只写 synced/local 且 baseline 逐字节不变断言；vitest 50 绿、cargo 24+1；discover 626 绿、smoke/secrets 绿 | 7248410 / 81a83c3 / fc8228b / 980d2f4 |
-| Phase 3 平台与 Rust 切片 | 未开始 | — | — |
+| Phase 3 平台与 Rust 切片 | 已完成 | 六只读域 Rust 双实现 parity 38/38→39/39（含反例）；cargo 38/38；discover 681 绿；真实机双路径 diff 全空；**GUI CI 第四轮五 job 全绿**（run 34008157126：engine-rs parity × ubuntu/macos、app 构建 × ubuntu/macos、windows 实验性含 nsis）；CI 抓出并修复三个真实缺陷（rules:dist mtime 假阳性→内容比对、FreshnessBadge 时区依赖、skills 链接读取 py≤3.12 反斜杠折叠）；gui-release 管线 + updater 占位接线；平台结论见 docs/GUI-PLATFORM-STATUS.md（Windows 运行时未实测不宣称） | 0248134 / 8f48e98 / ab1a709 / ad3db15 / 4982ebe / 019f102 / 6114cba / add6f2e |
 
 ### Phase 0 实施备注
 
@@ -147,3 +147,10 @@ Stop：Windows 方案若在本机无法验证，据实报告已验证范围与�
 - uvx git 源 MCP 的本地 commit 不可读，freshness 诚实报 unknown（待上游缓存元数据契约稳定后升级）。
 - system:audit 的 data 沿用 doctor 报告结构，未单独契约化（contract 冻结规则下留待 v2）。
 - README.md / docs/ARCHITECTURE.md 有他人暂存改动，新命令族的文档登记暂缓至其入库后（集成备注，不阻塞）。
+
+### Phase 3 实施备注
+
+- **退役策略的据实调整**：任务书原文为"每片通过契约测试后退役对应 Python 模块"。落地形态改为"路由优先 Rust（binary 存在时），Python 内核保留作 fallback 并标注 deprecated"——根因是 AGENTS.md 的"Python 3 + make 即可跑仓库检查"承诺与无 cargo 环境的 CI/本地兼容性；硬删除留待 rust 工具链成为硬性前置后再执行。六只读域已全部双实现且 parity 钉住等价；secrets/tools/apply/converge 等写路径与 lifecycle 域按提案允许长期保留 Python。
+- rules 目录目标的树签名在 Rust 侧用 sha256（md5 不在依赖白名单）；判定语义不变，目录目标的 plan digest 双实现不逐字节一致（当前 manifest 无目录目标，无实际发散面）。
+- DMG/nsis 等安装器打包在 dev 默认配置中收窄为 app（c0d6442），全量安装器由 gui-release.yml 的 tag 管线负责；updater 需按 docs/GUI-PLATFORM-STATUS.md 的 5 步接线密钥后真正启用。
+- uvx git 源 MCP 本地 commit 探测两侧一致 unknown（上游缓存元数据无稳定契约）。
