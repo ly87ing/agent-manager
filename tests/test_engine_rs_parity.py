@@ -1015,8 +1015,8 @@ class EngineRsRenderParityTests(unittest.TestCase):
     def test_rules_status_parity_stale_dist_and_manifest_error(self):
         self._rules_fixture()
         src_core = self.repo / "agent-rule" / "rules" / "src" / "shared" / "core.md"
-        future = os.path.getmtime(self.repo / "agent-rule" / "rules" / "dist" / "claude" / "CLAUDE.md") + 100
-        os.utime(src_core, (future, future))
+        # 内容语义：src 改了未重建 → 双侧 drifted（mtime 不驱动判定）。
+        src_core.write_text(src_core.read_text(encoding="utf-8") + "\nengine test drift line\n", encoding="utf-8")
         payload = self._assert_parity(*self._rules_argv())
         elements = {e["id"]: e for e in payload["data"]["elements"]}
         self.assertEqual(elements["rules:dist"]["state"], "drifted")
@@ -1024,11 +1024,21 @@ class EngineRsRenderParityTests(unittest.TestCase):
         # mtime 是浮点观测值，两侧各自读取同一文件系统 → 必须相等（不归一化）。
         self.assertIsNotNone(elements["rules:dist"]["observed"]["src_latest_mtime"])
 
-    def test_rules_plan_parity_build_before_distribute(self):
+    def test_rules_status_parity_mtime_inversion_is_not_stale(self):
+        # CI 全新 checkout 回归反例：mtime 倒置（src 新于 dist）双侧仍 managed-ok。
         self._rules_fixture()
         src_core = self.repo / "agent-rule" / "rules" / "src" / "shared" / "core.md"
         future = os.path.getmtime(self.repo / "agent-rule" / "rules" / "dist" / "claude" / "CLAUDE.md") + 100
         os.utime(src_core, (future, future))
+        payload = self._assert_parity(*self._rules_argv())
+        elements = {e["id"]: e for e in payload["data"]["elements"]}
+        self.assertEqual(elements["rules:dist"]["state"], "managed-ok")
+        self.assertEqual(elements["rules:claude_global"]["state"], "managed-ok")
+
+    def test_rules_plan_parity_build_before_distribute(self):
+        self._rules_fixture()
+        src_core = self.repo / "agent-rule" / "rules" / "src" / "shared" / "core.md"
+        src_core.write_text(src_core.read_text(encoding="utf-8") + "\nengine test drift line\n", encoding="utf-8")
         payload = self._assert_parity(
             "rules:plan", "--config", "config/manager.json", "--def-file", "config/rules-targets.list", "--json"
         )

@@ -919,8 +919,8 @@ class EngineDomainSliceTests(unittest.TestCase):
     def test_rules_status_flags_stale_dist_build(self):
         self._rules_fixture()
         src_core = self.repo / "agent-rule" / "rules" / "src" / "shared" / "core.md"
-        future = os.path.getmtime(self.repo / "agent-rule" / "rules" / "dist" / "claude" / "CLAUDE.md") + 100
-        os.utime(src_core, (future, future))
+        # 内容语义：src 改了未重建 → stale（mtime 不再驱动判定）。
+        src_core.write_text(src_core.read_text(encoding="utf-8") + "\nengine test drift line\n", encoding="utf-8")
         payload = self._payload("rules:status", "--json")
         self._assert_status_data(payload)
         elements = self._by_id(payload)
@@ -929,11 +929,24 @@ class EngineDomainSliceTests(unittest.TestCase):
         self.assertTrue(elements["rules:claude_global"]["observed"]["build_stale"])
         self.assertIn("RULE_BUILD_STALE", [w["code"] for w in payload["warnings"]])
 
-    def test_rules_plan_orders_build_before_distribution(self):
+    def test_rules_status_mtime_inversion_alone_is_not_stale(self):
+        # CI 全新 checkout 回归反例：mtime 次序（src 比 dist 新）不再构成 stale。
         self._rules_fixture()
         src_core = self.repo / "agent-rule" / "rules" / "src" / "shared" / "core.md"
         future = os.path.getmtime(self.repo / "agent-rule" / "rules" / "dist" / "claude" / "CLAUDE.md") + 100
         os.utime(src_core, (future, future))
+        payload = self._payload("rules:status", "--json")
+        elements = self._by_id(payload)
+        self.assertEqual(elements["rules:dist"]["state"], "managed-ok")
+        self.assertEqual(elements["rules:dist"]["observed"]["stale_products"], [])
+        self.assertNotIn("RULE_BUILD_STALE", [w["code"] for w in payload["warnings"]])
+        # mtime 仍作观测字段保留。
+        self.assertIsNotNone(elements["rules:dist"]["observed"]["src_latest_mtime"])
+
+    def test_rules_plan_orders_build_before_distribution(self):
+        self._rules_fixture()
+        src_core = self.repo / "agent-rule" / "rules" / "src" / "shared" / "core.md"
+        src_core.write_text(src_core.read_text(encoding="utf-8") + "\nengine test drift line\n", encoding="utf-8")
         payload = self._payload("rules:plan", "--json")
         self._assert_plan_data(payload)
         actions = payload["data"]["actions"]

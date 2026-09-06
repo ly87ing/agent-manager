@@ -208,6 +208,9 @@ _sync_codex_hooks = _load_module_from_path(
     "agent-rule/scripts/sync-codex-hooks.py", "agent_manager_sync_codex_hooks"
 )
 _link_skills = _load_module_from_path("agent-skill/link_skills.py", "agent_manager_link_skills")
+# 只读复用构建器的纯渲染函数（TARGET_SPECS/compact_lines/render_target_content）；
+# 其模块级 ROOT 常量不参与引擎调用（引擎按自身 root 读 src）。
+_build_rules = _load_module_from_path("agent-rule/scripts/build-agent-rules.py", "agent_manager_build_rules")
 
 # sync_tools.py 在工作区演进中出现过 py3.9 不兼容形态；引擎只在探测编排时惰性
 # 加载它，加载失败只降级上游探测能力（freshness 变 not-applicable + refresh 给
@@ -1052,6 +1055,38 @@ def _latest_mtime(root):
     return latest
 
 
+def _read_text_or_none(path):
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _rules_dist_expected_content(root_dir, source_rel):
+    """dist 新鲜度的内容语义：用当前 src 渲染出的期望内容与 dist 现有内容比对。
+
+    构建器（build-agent-rules.py，只读复用其渲染原语）的拼装规则：
+    dist/<target>/<filename> = compact_lines(shared/core.md) + compact_lines(
+    agents/<adapter>/adapter.md)，join("\n") + 尾部换行。无法渲染（产物不在
+    TARGET_SPECS 映射内 / src 文件缺失）→ None（不参与 stale 判定）。
+    """
+    parts = source_rel.split("/")
+    if len(parts) != 4 or parts[0] != "rules" or parts[1] != "dist":
+        return None
+    spec = _build_rules.TARGET_SPECS.get(parts[2])
+    if not spec or spec["filename"] != parts[3]:
+        return None
+    src_root = Path(root_dir) / "agent-rule" / "rules" / "src"
+    try:
+        core_lines = _build_rules.compact_lines((src_root / "shared" / "core.md").read_text(encoding="utf-8"))
+        adapter_lines = _build_rules.compact_lines(
+            (src_root / "agents" / spec["adapter"] / "adapter.md").read_text(encoding="utf-8")
+        )
+    except OSError:
+        return None
+    return _build_rules.render_target_content(core_lines, adapter_lines)
+
+
 def _rules_active_agents(root_dir, config):
     """Same scope rule as doctor: enabled agents plus skill/mcp target agents."""
     def _load_cfg(rel_name, sections):
@@ -1098,9 +1133,13 @@ def build_rules_status(root_dir, config_file, def_files):
             seen_sources.append(entry["source"])
         source_exists = os.path.exists(src)
         target_exists = os.path.exists(dst)
-        dist_mtime = os.path.getmtime(src) if source_exists else None
+        # dist 新鲜度 = 内容语义：当前 src 渲染期望 ≠ dist 现有内容 → 落后。
+        # mtime 只作观测（全新 checkout 的文件时间戳全是 checkout 时刻，不能驱动状态）。
+        expected_content = _rules_dist_expected_content(root_dir, entry["source"])
         build_stale = (
-            src_latest_mtime is not None and dist_mtime is not None and src_latest_mtime > dist_mtime
+            expected_content is not None
+            and source_exists
+            and _read_text_or_none(src) != expected_content
         )
         if not source_exists:
             missing_products.append(entry["source"])

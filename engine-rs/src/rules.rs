@@ -148,7 +148,8 @@ fn collect_active_rule_agents(
     Ok(active)
 }
 
-/// _latest_mtime port：目录树最新 mtime（目录不存在 → None）。
+/// _latest_mtime port：目录树最新 mtime（目录不存在 → None）。仅作观测字段，
+/// 不再驱动状态（mtime 在全新 checkout 上不可信）。
 fn latest_mtime(root: &Path) -> Option<f64> {
     if !root.is_dir() {
         return None;
@@ -262,6 +263,52 @@ fn make_element(id: String, spec: Value, policy: Value, observed: Value, state: 
     Value::Object(element)
 }
 
+/// build-agent-rules.py 渲染原语移植：compact_lines（右裁剪、去空行）。
+fn compact_lines(text: &str) -> Vec<String> {
+    text.lines()
+        .map(|line| line.trim_end().to_string())
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+/// render_target_content port：core + adapter 拼接，尾部换行。
+fn render_target_content(core_lines: &[String], adapter_lines: &[String]) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    lines.extend(core_lines.iter().cloned());
+    lines.extend(adapter_lines.iter().cloned());
+    format!("{}\n", lines.join("\n"))
+}
+
+/// TARGET_SPECS 与 build-agent-rules.py 的静态表一致（跨语言内联拷贝）。
+fn target_spec(dir_name: &str) -> Option<(&'static str, &'static str)> {
+    match dir_name {
+        "codex" => Some(("codex", "AGENTS.md")),
+        "claude" => Some(("claude", "CLAUDE.md")),
+        _ => None,
+    }
+}
+
+/// _rules_dist_expected_content port：rules/dist/<target>/<filename> 形态的产物
+/// 才参与渲染比对；未知产物或 src 缺失 → None（不参与 stale 判定）。
+fn rules_dist_expected_content(root_dir: &Path, source_rel: &str) -> Option<String> {
+    let parts: Vec<&str> = source_rel.split('/').collect();
+    if parts.len() != 4 || parts[0] != "rules" || parts[1] != "dist" {
+        return None;
+    }
+    let (adapter, filename) = target_spec(parts[2])?;
+    if filename != parts[3] {
+        return None;
+    }
+    let src_root = root_dir.join("agent-rule").join("rules").join("src");
+    let core = std::fs::read_to_string(src_root.join("shared").join("core.md")).ok()?;
+    let adapter_text =
+        std::fs::read_to_string(src_root.join("agents").join(adapter).join("adapter.md")).ok()?;
+    Some(render_target_content(
+        &compact_lines(&core),
+        &compact_lines(&adapter_text),
+    ))
+}
+
 /// build_rules_status port。
 pub fn build_rules_status(
     root_dir: &Path,
@@ -304,16 +351,14 @@ pub fn build_rules_status(
         }
         let source_exists = src.exists();
         let target_exists = Path::new(&dst).exists();
-        let dist_mtime = if source_exists {
-            std::fs::metadata(&src)
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs_f64())
-        } else {
-            None
+        // dist 新鲜度 = 内容语义：当前 src 渲染期望 ≠ dist 现有内容 → 落后。
+        let expected_content = rules_dist_expected_content(root_dir, &entry.source);
+        let build_stale = match (&expected_content, source_exists) {
+            (Some(expected), true) => {
+                std::fs::read_to_string(&src).ok().as_deref() != Some(expected.as_str())
+            }
+            _ => false,
         };
-        let build_stale = matches!((src_latest_mtime, dist_mtime), (Some(latest), Some(dist)) if latest > dist);
         if !source_exists {
             missing_products.push(entry.source.clone());
         } else if build_stale {
@@ -491,6 +536,18 @@ pub fn build_rules_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn render_matches_python_builder() {
+        // python3 -c 对齐 build-agent-rules.py 的 compact_lines/render_target_content:
+        // core "a\n\n b \n" → ["a","b"]; adapter "c\n" → ["c"]; render → "a\nb\nc\n"
+        // compact_lines 对齐 Python line.rstrip()：只裁右端，左端空白保留。
+        assert_eq!(compact_lines("a\n\n b \n"), vec!["a", " b"]);
+        assert_eq!(render_target_content(&["x".to_string()], &["y".to_string()]), "x\ny\n");
+        let core = compact_lines("core line\n\nsecond\n");
+        let adapter = compact_lines("adapter\n");
+        assert_eq!(render_target_content(&core, &adapter), "core line\nsecond\nadapter\n");
+    }
 
     #[test]
     fn manifest_parsing_collects_problems() {
