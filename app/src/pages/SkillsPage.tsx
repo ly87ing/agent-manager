@@ -1,12 +1,14 @@
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Inbox } from "lucide-react";
+import { ChevronDown, ChevronRight, Inbox, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { DriftExplanationPanel } from "../components/DriftExplanationPanel";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { FreshnessBadge } from "../components/FreshnessBadge";
 import { MatrixCell } from "../components/MatrixCell";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
+import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDialog";
 import { StateBadge } from "../components/StateBadge";
+import { Switch } from "../components/Switch";
 import type { EngineElement, PolicyData, StatusData } from "../lib/contract";
 import { runEngine } from "../lib/engine";
 import {
@@ -17,6 +19,9 @@ import {
   type SkillSpec,
 } from "../lib/observed";
 import { getDefaultPolicyLayer } from "../lib/policyLayer";
+import { useDefinitionOps } from "../lib/useDefinitionOps";
+import { useElementToggle } from "../lib/useElementToggle";
+import { OVERLAY_COPY } from "../lib/ui-copy";
 import { useEngineQuery } from "../lib/queries";
 import { useExecuteApply, usePlanPreview } from "../lib/usePlanPreview";
 import { cn } from "../lib/utils";
@@ -30,10 +35,21 @@ function shortCommit(value: string | null): string {
   return value.length > 12 ? value.slice(0, 7) : value;
 }
 
-function CollectionCard({ element, inboxCount }: { element: EngineElement; inboxCount: number }) {
+function CollectionCard({
+  element,
+  inboxCount,
+  onToggle,
+  onRemove,
+}: {
+  element: EngineElement;
+  inboxCount: number;
+  onToggle: () => void;
+  onRemove: () => void;
+}) {
   const spec = element.spec as SkillCollectionSpec;
   const observed = element.observed as SkillCollectionObserved;
   const name = element.id.replace(/^skill:/, "");
+  const enabled = (element.policy as { enabled?: boolean }).enabled !== false;
   return (
     <section data-testid={`collection-card-${name}`} className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-3">
@@ -41,7 +57,24 @@ function CollectionCard({ element, inboxCount }: { element: EngineElement; inbox
           <h3 className="text-base font-semibold text-slate-800">{name}</h3>
           <p className="mt-0.5 font-mono text-xs break-all text-slate-400">{spec.url ?? "（无 url）"}</p>
         </div>
-        <StateBadge state={element.state} />
+        <div className="flex items-center gap-2">
+          <Switch
+            checked={enabled}
+            testId={`toggle-${element.id}`}
+            label={`${enabled ? "停用" : "启用"}集合 ${name}`}
+            onChange={onToggle}
+          />
+          <StateBadge state={element.state} />
+          <button
+            type="button"
+            data-testid={`remove-collection-${name}`}
+            onClick={onRemove}
+            title={OVERLAY_COPY.removeCollection}
+            className="rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-500"
+          >
+            <Trash2 className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        </div>
       </div>
 
       <div className="mt-3 flex flex-wrap gap-1.5 text-xs">
@@ -100,9 +133,13 @@ function CollectionCard({ element, inboxCount }: { element: EngineElement; inbox
 
 export default function SkillsPage() {
   const query = useEngineQuery<StatusData>("skills:status");
+  const policyQuery = useEngineQuery<PolicyData>("policy:get");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
   const preview = usePlanPreview();
   const executeApply = useExecuteApply();
+  const elementToggle = useElementToggle();
+  const definitionOps = useDefinitionOps({ section: "skills", domain: "skills" });
 
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="skills:status 调用失败" error={query.error} />;
@@ -115,6 +152,7 @@ export default function SkillsPage() {
   const agentColumns = Array.from(
     new Set(matrixSkills.flatMap((element) => Object.keys(agentCellsOf(element)))),
   ).sort();
+  const layers = policyQuery.data?.data.layers ?? null;
 
   /** 策略写入 + plan 预览编排的公共尾部：skills:plan 过滤到本 skill → skills:apply。 */
   const openApplyPreview = (skill: EngineElement, label: string) => {
@@ -177,12 +215,34 @@ export default function SkillsPage() {
       />
       {query.data.errors.length > 0 && <ErrorPanel title="skills:status 错误" errors={query.data.errors} />}
 
+      <div className="flex justify-end">
+        <button
+          type="button"
+          data-testid="add-collection-button"
+          onClick={() => setShowAddForm(true)}
+          className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+        >
+          <Plus className="h-4 w-4" aria-hidden /> {OVERLAY_COPY.addCollection}
+        </button>
+      </div>
+
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {collections.map((collection) => (
           <CollectionCard
             key={collection.id}
             element={collection}
             inboxCount={(collection.observed as SkillCollectionObserved).discovery_inbox?.length ?? 0}
+            onToggle={() => {
+              const repo = collection.id.replace(/^skill:/, "");
+              void elementToggle.toggle({
+                elementId: collection.id,
+                enabledKey: `skills.${repo}.enabled`,
+                enabled: (collection.policy as { enabled?: boolean }).enabled !== false,
+                domain: "skills",
+                name: `集合 ${repo}`,
+              });
+            }}
+            onRemove={() => definitionOps.requestRemove(collection.id.replace(/^skill:/, ""), layers)}
           />
         ))}
       </div>
@@ -270,7 +330,20 @@ export default function SkillsPage() {
         {matrixSkills.length === 0 && <p className="py-4 text-center text-sm text-slate-400">无已声明 skill</p>}
       </section>
 
+      {showAddForm && (
+        <SkillCollectionFormDialog
+          agentIds={agentColumns}
+          onClose={() => setShowAddForm(false)}
+          onSubmit={(name, definition) => {
+            setShowAddForm(false);
+            void definitionOps.saveAndApply({ name, definition, isNew: true, elementId: `skill:${name}` });
+          }}
+        />
+      )}
+
       {preview.modal}
+      {elementToggle.modal}
+      {definitionOps.modals}
     </div>
   );
 }

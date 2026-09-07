@@ -5,9 +5,11 @@ import { ErrorPanel } from "../components/ErrorPanel";
 import { FreshnessBadge } from "../components/FreshnessBadge";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { StateBadge } from "../components/StateBadge";
+import { Switch } from "../components/Switch";
 import type { ElementAction, EngineElement, StatusData } from "../lib/contract";
 import type { AgentsObserved, AgentsPolicy, AgentsSpec } from "../lib/observed";
 import { useEngineQuery, useOfflineMode } from "../lib/queries";
+import { useElementToggle } from "../lib/useElementToggle";
 import { useExecuteApply, usePlanPreview } from "../lib/usePlanPreview";
 import { cn } from "../lib/utils";
 
@@ -47,6 +49,7 @@ function AgentCard({ element }: { element: EngineElement }) {
   const offline = useOfflineMode();
   const preview = usePlanPreview();
   const executeApply = useExecuteApply();
+  const elementToggle = useElementToggle();
   const spec = element.spec as AgentsSpec;
   const policy = element.policy as AgentsPolicy;
   const observed = element.observed as AgentsObserved;
@@ -117,10 +120,26 @@ function AgentCard({ element }: { element: EngineElement }) {
         )}
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-1.5 border-t border-slate-100 pt-3">
-        <PolicyChip label="enabled" value={policy.enabled} />
+      <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-3">
         <PolicyChip label="auto_install" value={policy.auto_install} />
         <PolicyChip label="auto_update" value={policy.auto_update} />
+        <span className="ml-auto inline-flex items-center gap-2 text-xs text-slate-500">
+          {policy.enabled === false ? "已停用" : "已启用"}
+          <Switch
+            checked={policy.enabled !== false}
+            testId={`toggle-${element.id}`}
+            label={`${policy.enabled !== false ? "停用" : "启用"} ${name}`}
+            onChange={() =>
+              void elementToggle.toggle({
+                elementId: element.id,
+                enabledKey: `agents.${element.id.replace(/^agents:/, "")}.enabled`,
+                enabled: policy.enabled !== false,
+                domain: "agents",
+                name,
+              })
+            }
+          />
+        </span>
       </div>
 
       {element.state === "unmanaged-detected" && (
@@ -183,6 +202,7 @@ function AgentCard({ element }: { element: EngineElement }) {
       </div>
       {expanded && <div className="mt-2"><DriftExplanationPanel element={element} planCommand="agents:plan" /></div>}
       {preview.modal}
+      {elementToggle.modal}
     </section>
   );
 }

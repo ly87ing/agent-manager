@@ -42,8 +42,10 @@ pnpm dev        # 打开 http://localhost:1420/?mock=1       （内置 fixture �
 - 命令面白名单：`<domain>:status|plan|apply`（secrets 仅 status）、
   `system:audit|refresh-upstream|converge`、`snapshots:list|restore`、`runs:list|get`、
   `policy:get|set`、`profile:status|pull|push`。
-- 参数命令感知白名单：`--only <元素id>`、`--dry-run`、`--allow-uninstall`（仅 agents:apply）、
-  `--run <id>`、`--lines <n>`、`--layer synced|local`、`--key <dot.path>`、`--value <json>`。
+- 参数命令感知白名单：`--only <元素id>`（refresh-upstream）/ `--only <顶层键>`（profile:pull）、
+  `--dry-run`、`--allow-uninstall`（仅 agents:apply）、`--run <id>`、`--lines <n>`、
+  `--layer synced|local`、`--key <dot.path>`、`--value <json>`、`--accept-remote`（仅 profile:pull）、
+  `--force`（仅 profile:push）；policy:delete 仅 --layer/--key。
 - run_id 经 `AGENT_MANAGER_RUN_ID` 透传（manage.sh 的 `RUN_ID="${AGENT_MANAGER_RUN_ID:-…}"`
   优先采用外部值），按次日志机制不变。
 - 默认超时 600s，可用 `AGENT_MANAGER_ENGINE_TIMEOUT_SEC` 覆盖。
@@ -60,8 +62,12 @@ pnpm dev        # 打开 http://localhost:1420/?mock=1       （内置 fixture �
 - 策略编辑器（PolicyPage）：policy:get 三层视图（baseline 灰只读 / synced 蓝 / local 橙）+
   任意键编辑（落点 synced/local）+ 默认落点层选择（skills 矩阵快捷写入用）。
 - 备份回滚（SnapshotsPage）：snapshots:list + restore 二次确认（输入 run_id）。
-- 配置同步（SyncPage）：profile:status 卡 + pull/push（network 级确认，offline 禁用）+
-  冲突只读展示（引擎保留本地；「以远端为准」引导到策略编辑器手动对齐）。
+- 配置同步（SyncPage）：profile:status 卡 + 逐项差异表（diff：仅本机改/仅远端改/两边都改/一致，
+  只显示类型与 12 位内容指纹）+ 四个方向按钮（拉取合并 / 以远端覆盖本地（二次确认）/ 推送 /
+  强制推送（仅分叉时可用，二次确认））+ 键级「以远端为准」（pull --accept-remote --only）；
+  offline 全部禁用并标注。
+- 元素启停：Agents 卡片 / MCP 矩阵行 / Tools 行 / Skills 集合卡均有开关（policy.set 写默认策略层，
+  toast 给「立即同步」动作）；MCP 服务与 Skills 集合支持新增/编辑/移除（覆盖层语义）。
 - 设置：占位页。
 
 ## 前端结构
@@ -75,8 +81,13 @@ pnpm dev        # 打开 http://localhost:1420/?mock=1       （内置 fixture �
   `useOfflineMode`。
 - `src/lib/execution.tsx`：写路径执行记录（run_id 生成与透传、状态机、toast、失效刷新）。
 - `src/lib/usePlanPreview.tsx`：「先 plan 后 apply」编排 hook。
+- `src/lib/ui-copy.ts`：界面文案唯一事实源（工程术语 → 用户语言对照；tooltip 保留原值对照）。
+- `src/lib/useElementToggle.tsx`：元素启停开关编排（policy.set enabled 键 → toast「立即同步」→ plan 预览 → apply）。
+- `src/lib/definitionOverlay.ts` + `useDefinitionOps.tsx`：定义覆盖层（mcp.definitions / skills.repositories）
+  的新增·编辑·移除（覆盖层条目 policy:delete；基线条目 tombstone {"_delete": true}）。
 - `src/components/`：StateBadge、FreshnessBadge、MatrixCell、DriftExplanationPanel、ElementTable、
-  ErrorPanel、ModeBanner、AppLayout、PlanPreviewModal、ConfirmModal、PageState。
+  ErrorPanel、ModeBanner、AppLayout、PlanPreviewModal、ConfirmModal、PageState、Switch、
+  McpServerFormDialog、SkillCollectionFormDialog。
 - `src/test/mock-client.ts`：dev-only 有状态 mock 引擎（policy.set 会真实改写内存层、
   apply/converge 产生 run 与快照记录），fixture 覆盖 freshness 五态与收敛七态。
 

@@ -64,7 +64,7 @@ export default function App() {
         <DomainApplyPage domain="hooks" title="Hooks" description="助手钩子脚本的生成与写入状态。" />
       )}
       {activePage === "tools" && (
-        <DomainApplyPage domain="tools" title="Tools" description="全局命令行工具的安装状态（安装/卸载会先预览并二次确认）。" />
+        <DomainApplyPage domain="tools" title="Tools" description="全局命令行工具的安装状态（安装/卸载会先预览并二次确认）。" enableToggles />
       )}
       {activePage === "aliases" && (
         <DomainApplyPage domain="aliases" title="Aliases" description="终端快捷命令（alias）的同步状态，只改受管区块、不动其它内容。" />

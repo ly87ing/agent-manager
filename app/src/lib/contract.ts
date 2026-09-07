@@ -289,6 +289,17 @@ export type ProfileSyncState =
   | "uninitialized"
   | "local-only";
 
+/** profile:status 的 per 顶层键差异项（contract errata：可选字段，offline/无 base 时缺省）。 */
+export interface ProfileDiffEntry {
+  key: string;
+  change: "local" | "remote" | "both" | "none";
+  local_type: string;
+  remote_type: string;
+  /** sha256 前 12 位；absent 侧为 null。值永不出现。 */
+  local_digest: string | null;
+  remote_digest: string | null;
+}
+
 export interface ProfileBackend {
   type: string | null;
   url: string | null;
@@ -323,4 +334,6 @@ export interface ProfileData {
   snapshot: { run_id: string; path: string } | null;
   published: boolean | null;
   gate: { scanned: boolean; findings: number } | null;
+  /** 差异对比（contract errata 可选字段）：仅远端已初始化且有合并基准且非 offline 时出现。 */
+  diff?: ProfileDiffEntry[];
 }

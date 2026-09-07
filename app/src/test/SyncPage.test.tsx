@@ -33,13 +33,13 @@ describe("配置同步页", () => {
 
     const conflicts = screen.getByTestId("profile-conflicts");
     expect(conflicts).toHaveTextContent("mcp.grok-search.enabled");
-    expect(conflicts).toHaveTextContent("sha256:…");
-    // digest 截断形式（shortDigest：前 7 字符含 "sha256:" 前缀 + 后 6 位）
-    expect(conflicts).toHaveTextContent(/sha256:…44ee55/);
-    expect(conflicts).toHaveTextContent(/sha256:…dd44ee/);
+    expect(conflicts).toHaveTextContent("sha256…");
+    // digest 截断形式（shortDigest：前 6 + 后 4 位）
+    expect(conflicts).toHaveTextContent(/sha256…ee55/);
+    expect(conflicts).toHaveTextContent(/sha256…44ee/);
     // 只读语义：保留本地说明 + 策略编辑器引导，无任何解决按钮
     expect(conflicts).toHaveTextContent(/保留这台电脑的值/);
-    expect(conflicts).toHaveTextContent(/「个性化配置」页/);
+    expect(conflicts).toHaveTextContent(/以远端为准/);
     expect(conflicts.querySelector("button")).toBeNull();
   });
 

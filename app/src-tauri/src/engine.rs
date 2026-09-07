@@ -124,7 +124,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("secrets", "status") => true,
         ("snapshots", "list" | "restore") => true,
         ("runs", "list" | "get") => true,
-        ("policy", "get" | "set") => true,
+        ("policy", "get" | "set" | "delete") => true,
         ("profile", "status" | "pull" | "push") => true,
         (d, "status" | "plan" | "apply") => READ_WRITE_DOMAINS.contains(&d),
         _ => false,
@@ -167,6 +167,19 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--key", ArgValueKind::DotKey));
             specs.push(("--value", ArgValueKind::JsonValue));
         }
+        ("policy", "delete") => {
+            specs.push(("--layer", ArgValueKind::PolicyLayer));
+            specs.push(("--key", ArgValueKind::DotKey));
+        }
+        ("profile", "pull") => {
+            specs.push(("--accept-remote", ArgValueKind::Flag));
+            // 键级以远端为准：--only <顶层键>（点分键字符集，与 policy key 同规则）
+            specs.push(("--only", ArgValueKind::DotKey));
+        }
+        ("profile", "push") => {
+            specs.push(("--dry-run", ArgValueKind::Flag));
+            specs.push(("--force", ArgValueKind::Flag));
+        }
         (_, "apply") => {
             specs.push(("--dry-run", ArgValueKind::Flag));
             if domain == "agents" {
@@ -174,7 +187,6 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             }
         }
         ("system", "converge") => specs.push(("--dry-run", ArgValueKind::Flag)),
-        ("profile", "push") => specs.push(("--dry-run", ArgValueKind::Flag)),
         _ => {}
     }
     specs
@@ -530,7 +542,7 @@ mod tests {
             "tools:status", "tools:apply", "aliases:plan", "aliases:apply", "secrets:status",
             "system:audit", "system:refresh-upstream", "system:converge",
             "snapshots:list", "snapshots:restore", "runs:list", "runs:get",
-            "policy:get", "policy:set", "profile:status", "profile:pull", "profile:push",
+            "policy:get", "policy:set", "policy:delete", "profile:status", "profile:pull", "profile:push",
         ] {
             validate_command(command).unwrap_or_else(|err| panic!("{command} should pass: {}", err.message));
         }
@@ -542,7 +554,7 @@ mod tests {
             "agents:update",   // manage.sh 管线命令，不是契约命令
             "secrets:plan",    // secrets 只读
             "secrets:apply",
-            "policy:delete",
+            "policy:drop",     // policy 只有 get/set/delete
             "profile:init",
             "runs:delete",
             "update",
@@ -621,6 +633,37 @@ mod tests {
             vec!["--value".to_string(), "".to_string()],
         ] {
             assert!(validate_args("policy:set", &bad).is_err(), "policy:set {bad:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn args_policy_delete_layer_and_key() {
+        validate_args("policy:delete", &["--layer".into(), "local".into(), "--key".into(), "mcp.definitions.demo".into()]).unwrap();
+        for bad in [
+            vec!["--layer".to_string(), "baseline".to_string(), "--key".to_string(), "a.b".to_string()],
+            vec!["--layer".to_string(), "local".to_string(), "--key".to_string(), "a..b".to_string()],
+            vec!["--value".to_string(), "1".to_string()], // delete 无 --value
+        ] {
+            assert!(validate_args("policy:delete", &bad).is_err(), "policy:delete {bad:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn args_profile_direction_controls() {
+        validate_args("profile:pull", &[]).unwrap();
+        validate_args("profile:pull", &["--accept-remote".into()]).unwrap();
+        validate_args("profile:pull", &["--accept-remote".into(), "--only".into(), "mcp".into()]).unwrap();
+        validate_args("profile:push", &["--force".into()]).unwrap();
+        validate_args("profile:push", &["--dry-run".into(), "--force".into()]).unwrap();
+        // 方向参数不串命令：--accept-remote/--only 不许进 push，--force 不许进 pull
+        for (command, args) in [
+            ("profile:push", vec!["--accept-remote".to_string()]),
+            ("profile:push", vec!["--only".to_string(), "mcp".to_string()]),
+            ("profile:pull", vec!["--force".to_string()]),
+            ("profile:pull", vec!["--only".to_string(), "bad key".to_string()]),
+            ("profile:status", vec!["--force".to_string()]),
+        ] {
+            assert!(validate_args(command, &args).is_err(), "{command} {args:?} should be rejected");
         }
     }
 
@@ -715,7 +758,7 @@ mod tests {
     fn run_engine_rejects_command_outside_whitelist_before_spawn() {
         let root = temp_dir("run-reject");
         write_manage_sh(&root, "echo SHOULD_NOT_RUN");
-        let err = run_engine(&root, "policy:delete", &[], None).expect_err("non-contract command must fail");
+        let err = run_engine(&root, "policy:drop", &[], None).expect_err("non-contract command must fail");
         assert_eq!(err.kind, "unknown_command");
     }
 

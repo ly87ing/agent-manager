@@ -60,7 +60,14 @@ export function usePlanPreview() {
           }
           plans.push({ domain: envelope.data.domain, actions });
         }
-        setState((prev) => (prev ? { ...prev, plans } : prev));
+        // install-remove 级且调用方未指定确认文本时，回退用被过滤元素 id（如「停用助手→卸载」场景）
+        const allActions = plans.flatMap((plan) => plan.actions);
+        const hasInstallRemove = allActions.some((action) => action.risk === "install-remove");
+        const fallbackConfirmText =
+          options.requireConfirmText ?? (hasInstallRemove ? (options.filterElement ?? "确认执行") : undefined);
+        setState((prev) =>
+          prev ? { ...prev, plans, options: { ...prev.options, requireConfirmText: fallbackConfirmText } } : prev,
+        );
       } catch (err) {
         setState((prev) => (prev ? { ...prev, planError: engineErrorMessage(err) } : prev));
       }

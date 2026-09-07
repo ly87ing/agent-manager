@@ -1,9 +1,11 @@
 import { PlayCircle } from "lucide-react";
 import { ElementTable } from "../components/ElementTable";
+import { Switch } from "../components/Switch";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import type { StatusData } from "../lib/contract";
 import { useEngineQuery } from "../lib/queries";
+import { useElementToggle } from "../lib/useElementToggle";
 import { useExecuteApply, usePlanPreview } from "../lib/usePlanPreview";
 
 /**
@@ -15,14 +17,18 @@ export default function DomainApplyPage({
   domain,
   title,
   description,
+  enableToggles = false,
 }: {
   domain: string;
   title: string;
   description: string;
+  /** true 时每行渲染启停开关（policy key <domain>.<元素短名>.enabled，写默认策略层）。 */
+  enableToggles?: boolean;
 }) {
   const query = useEngineQuery<StatusData>(`${domain}:status`);
   const preview = usePlanPreview();
   const executeApply = useExecuteApply();
+  const elementToggle = useElementToggle();
 
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title={`${domain}:status 调用失败`} error={query.error} />;
@@ -54,10 +60,37 @@ export default function DomainApplyPage({
       </div>
 
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <ElementTable elements={elements} />
+        <ElementTable
+          elements={elements}
+          renderActions={
+            enableToggles
+              ? (element) => {
+                  const shortName = element.id.replace(`${domain}:`, "");
+                  const enabled = (element.policy as { enabled?: boolean }).enabled !== false;
+                  return (
+                    <Switch
+                      checked={enabled}
+                      testId={`toggle-${element.id}`}
+                      label={`${enabled ? "停用" : "启用"} ${shortName}`}
+                      onChange={() =>
+                        void elementToggle.toggle({
+                          elementId: element.id,
+                          enabledKey: `${domain}.${shortName}.enabled`,
+                          enabled,
+                          domain,
+                          name: shortName,
+                        })
+                      }
+                    />
+                  );
+                }
+              : undefined
+          }
+        />
       </section>
 
       {preview.modal}
+      {elementToggle.modal}
     </div>
   );
 }

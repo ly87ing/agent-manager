@@ -161,6 +161,22 @@ function demoEnvelopes(): Record<string, Envelope> {
           freshness: makeFreshness({ state: "unknown", current: null, upstream: "8f0ae3c7f25ec419631ade7e431fa2531503433e", checked_at: CHECKED_AT, probe: "git-ls-remote", cache_age_sec: 4000 }),
         }),
         makeElement({
+          id: "mcp:my-proxy",
+          domain: "mcp",
+          spec: { command: "npx", args: ["-y", "my-proxy-mcp"], startup_timeout_sec: 60, agents: null, env: { MY_PROXY_TOKEN: "${MY_PROXY_TOKEN}" } },
+          policy: { enabled: true, agents: null },
+          observed: {
+            agents: {
+              "claude-code": { state: "managed-ok", target: "/Users/demo/.claude.json", target_exists: true },
+              codex: { state: "missing", target: "/Users/demo/.codex/config.toml", target_exists: true },
+              "kimi-code": { state: "missing", target: "/Users/demo/.kimi-code/mcp.json", target_exists: true },
+            },
+            env: { MY_PROXY_TOKEN: { placeholder: "MY_PROXY_TOKEN", resolved: true } },
+          },
+          state: "managed-ok",
+          freshness: makeFreshness({ state: "current", current: "0.3.1", upstream: "0.3.1", checked_at: CHECKED_AT, probe: "npm-view", cache_age_sec: 60 }),
+        }),
+        makeElement({
           id: "mcp:serena",
           domain: "mcp",
           spec: {
@@ -550,7 +566,13 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
       skills: { "agent-skills": { enabled: true, new_skill_default: "disabled" } },
     },
     synced: { skills: { "agent-skills": { skills: { "dead-one": { agents: { codex: false } } } } } },
-    local: { browser_us_sync: { enabled: false } },
+    local: {
+      browser_us_sync: { enabled: false },
+      mcp: {
+        definitions: { "my-proxy": { command: "npx", args: ["-y", "my-proxy-mcp"], startup_timeout_sec: 60, agents: null, env: { MY_PROXY_TOKEN: "${MY_PROXY_TOKEN}" } } },
+        "my-proxy": { enabled: true },
+      },
+    },
   };
   const runs: RunEntry[] = [
     makeRunEntry({ run_id: "20260905T235900Z-legacy1", mtime: "2026-09-05T23:59:00Z", is_latest: true, size_bytes: 7270 }),
@@ -619,6 +641,31 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
     return makeEnvelope(
       { layers: null, effective: null, attribution: null, layer, key, value, path: `/repo/config/manager.${layer}.json` },
       { command: "policy.set" },
+    );
+  };
+
+  const policyDelete = (args: string[]): Envelope => {
+    const layer = args[args.indexOf("--layer") + 1];
+    const key = args[args.indexOf("--key") + 1];
+    if (layer !== "synced" && layer !== "local") {
+      return makeEnvelope({}, { command: "policy.delete", ok: false, errors: [{ code: "USAGE_ERROR", element: null, message: "--layer 只能是 synced/local" }] });
+    }
+    const target = policyLayers[layer];
+    const segments = key.split(".");
+    let cursor: Record<string, unknown> | undefined = target ?? undefined;
+    for (const segment of segments.slice(0, -1)) {
+      const next = cursor?.[segment];
+      if (typeof next !== "object" || next === null) { cursor = undefined; break; }
+      cursor = next as Record<string, unknown>;
+    }
+    const leaf = segments[segments.length - 1];
+    if (!cursor || !(leaf in cursor)) {
+      return makeEnvelope({}, { command: "policy.delete", ok: false, errors: [{ code: "POLICY_KEY_NOT_FOUND", element: null, message: `键不存在:${key}` }] });
+    }
+    delete cursor[leaf];
+    return makeEnvelope(
+      { layers: null, effective: null, attribution: null, layer, key, value: null, path: `/repo/config/manager.${layer}.json` },
+      { command: "policy.delete" },
     );
   };
 
@@ -702,6 +749,7 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
       // ---- 写路径与有状态命令 ----
       if (command === "policy:get") return policyGet();
       if (command === "policy:set") return policySet(args);
+      if (command === "policy:delete") return policyDelete(args);
       if (command === "runs:list") {
         return makeEnvelope({ runs, tail: null, lines: null }, { command: "runs.list" });
       }
@@ -726,7 +774,18 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
       }
       if (command === "system:converge") return convergeEnvelope(args, runId);
       if (command === "profile:status") {
-        return options.offline ? profileData("status", { state: "local-only", ahead: null, behind: null }) : profileData("status");
+        if (options.offline) return profileData("status", { state: "local-only", ahead: null, behind: null });
+        return profileData("status", {
+          state: "diverged",
+          ahead: 1,
+          behind: 1,
+          diff: [
+            { key: "agents", change: "none", local_type: "object", remote_type: "object", local_digest: "aa11bb22cc33", remote_digest: "aa11bb22cc33" },
+            { key: "mcp", change: "both", local_type: "object", remote_type: "object", local_digest: "dd44ee55ff66", remote_digest: "001122334455" },
+            { key: "skills", change: "local", local_type: "object", remote_type: "absent", local_digest: "66778899aabb", remote_digest: null },
+            { key: "browser_us_sync", change: "remote", local_type: "absent", remote_type: "object", local_digest: null, remote_digest: "cc33dd44ee55" },
+          ],
+        });
       }
       if (command === "profile:pull" || command === "profile:push") {
         if (options.offline) {
@@ -736,6 +795,7 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
           );
         }
         const verb = command === "profile:pull" ? "pull" : "push";
+        // --accept-remote [--only k] / --force 由 args 携带，mock 直接成功并回显状态
         recordRun(runId, `profile.${verb}`, args.includes("--dry-run"));
         return profileData(verb, {
           conflicts: verb === "pull" ? [

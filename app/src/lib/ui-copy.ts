@@ -3,7 +3,7 @@
  * 原则：按钮/标题/徽章用「动作/结果」语言；工程原值（state 枚举、命令名）
  * 只保留在 tooltip/详情里做对照。引擎 envelope 的 code/note 属契约内容，不在此列。
  */
-import type { ElementState, Freshness, PlanAction, PolicyLayerName, ProfileSyncState, RiskLevel } from "./contract";
+import type { ElementState, Freshness, PlanAction, PolicyLayerName, ProfileDiffEntry, ProfileSyncState, RiskLevel } from "./contract";
 
 // ---------- 同步状态（收敛轴七态） ----------
 
@@ -142,4 +142,41 @@ export const COPY = {
   expandDetail: "展开同步详情",
   collapseDetail: "收起同步详情",
   driftExplanation: "不一致说明",
+} as const;
+
+// ---------- 同步差异（profile diff） ----------
+
+export const PROFILE_CHANGE_COPY: Record<ProfileDiffEntry["change"], { label: string; className: string }> = {
+  local: { label: "仅本机改", className: "border-sky-200 bg-sky-50 text-sky-700" },
+  remote: { label: "仅远端改", className: "border-amber-200 bg-amber-50 text-amber-700" },
+  both: { label: "两边都改", className: "border-red-200 bg-red-50 text-red-700" },
+  none: { label: "一致", className: "border-slate-200 bg-slate-50 text-slate-500" },
+};
+
+// ---------- 元素启停开关 ----------
+
+export const TOGGLE_COPY = {
+  /** policy.set 成功后的 toast 文案（action 按钮文案是「立即同步」）。 */
+  savedAskApply: (what: string, layerLabel: string) => `已${what}（保存到「${layerLabel}」）。要立即同步生效吗？`,
+  applyNow: "立即同步",
+  enabled: "已启用",
+  disabled: "已停用",
+  saveFailed: "保存配置失败",
+  saveRejected: "保存被拒绝",
+} as const;
+
+// ---------- 定义覆盖层（MCP 服务 / 技能集合的新增·编辑·移除） ----------
+
+export const OVERLAY_COPY = {
+  addServer: "新增服务",
+  editServer: "编辑",
+  removeServer: "移除",
+  addCollection: "新增集合",
+  removeCollection: "移除",
+  /** 编辑基线条目时表单内提示。 */
+  editBaselineNote: "该条目由仓库默认值提供；你的修改会写入覆盖层，仓库默认值不受影响。",
+  /** 移除基线条目时确认文案（tombstone 语义）。 */
+  removeBaselineNote: "该条目由仓库默认值提供；移除实际是写入一个「移除标记」——之后删除该标记即可恢复。",
+  /** 移除覆盖层条目时确认文案（policy:delete 语义）。 */
+  removeOverlayNote: "该条目定义在覆盖层里；移除会直接删除这段定义。",
 } as const;
