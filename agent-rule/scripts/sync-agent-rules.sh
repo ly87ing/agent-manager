@@ -30,8 +30,11 @@ done
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 workspace_root="$(cd "$repo_root/.." && pwd -P)"
 manifest_path="$repo_root/../config/rules-targets.list"
-python_cmd="python3"
-command -v python3 >/dev/null 2>&1 || python_cmd="python"
+python_cmd="${AGENT_MANAGER_PYTHON_CMD:-}"
+if [ -z "$python_cmd" ]; then
+  python_cmd="python3"
+  command -v python3 >/dev/null 2>&1 || python_cmd="python"
+fi
 
 [ -f "$manifest_path" ] || { echo "Manifest not found: $manifest_path" >&2; exit 1; }
 

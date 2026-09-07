@@ -24,6 +24,8 @@ yarn-error.log*
 
 # macOS
 .DS_Store
+app/src-tauri/resources/
+app/.standalone-build/
 .claude/scheduled_tasks.lock
 
 # Agent Rule backups

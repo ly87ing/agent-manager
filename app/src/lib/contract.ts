@@ -152,7 +152,7 @@ export interface AuditData {
   version: {
     commit: string;
     date: string;
-  };
+  } | null;
   sections: Record<string, AuditEntry[]>;
   summary: AuditSummary;
 }

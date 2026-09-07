@@ -17,6 +17,18 @@ WHITE='\033[1;37m'
 # Resolve the absolute path of the script's root directory
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 USER_NAME=$(whoami)
+# The release bridge injects the packaged interpreter here.  Keep the fallback
+# only for source-tree development; a release never silently uses host Python.
+PYTHON_CMD="${AGENT_MANAGER_PYTHON_CMD:-}"
+if [ -z "$PYTHON_CMD" ]; then
+    PYTHON_CMD="python3"
+    command -v python3 >/dev/null 2>&1 || PYTHON_CMD="python"
+fi
+if ! command -v "$PYTHON_CMD" >/dev/null 2>&1 && [ ! -x "$PYTHON_CMD" ]; then
+    echo "错误: Python 运行时不可用: $PYTHON_CMD" >&2
+    exit 2
+fi
+export AGENT_MANAGER_PYTHON_CMD="$PYTHON_CMD"
 RUN_ID="${AGENT_MANAGER_RUN_ID:-$(date +%Y%m%d%H%M%S)_$$}"
 LOG_PREFIX="${AGENT_MANAGER_LOG_PREFIX:-/tmp/agent_manager_sync_${USER_NAME}}"
 TEMP_LOG="${LOG_PREFIX}_${RUN_ID}.log"
@@ -48,7 +60,7 @@ cmd=""
 # If the synced shared layer or the local override file exists, read them and deep-merge
 if [ -f "$SYNCED_CONFIG" ] || [ -f "$LOCAL_CONFIG" ]; then
     CONFIG_FILE="$(mktemp)"
-    if ! python3 -c "
+    if ! "$PYTHON_CMD" -c "
 import json, os, sys
 sys.path.insert(0, '$ROOT_DIR')
 from src.agent_ids import canonicalize_agent_mapping
@@ -224,9 +236,6 @@ chmod +x "$ROOT_DIR/agent-rule/scripts/"*.sh > /dev/null 2>&1 || true
 OS_TYPE="linux"
 if [[ "$OSTYPE" == "darwin"* ]]; then OS_TYPE="macos";
 elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then OS_TYPE="windows"; fi
-
-PYTHON_CMD="python3"
-command -v python3 >/dev/null 2>&1 || PYTHON_CMD="python"
 
 function status_line() {
     local status="$1" message="$2"

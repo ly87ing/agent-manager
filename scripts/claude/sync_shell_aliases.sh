@@ -73,7 +73,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
 fi
 
 # 用 python 解析 JSON,输出 alias 行(name<TAB>value 格式)
-ALIAS_LINES="$(python3 - "$CONFIG_FILE" <<'PY'
+ALIAS_LINES="$("${AGENT_MANAGER_PYTHON_CMD:-python3}" - "$CONFIG_FILE" <<'PY'
 import json, sys
 cfg = json.loads(open(sys.argv[1], encoding="utf-8").read())
 timezone = cfg.get("timezone", "America/Los_Angeles")
@@ -119,7 +119,7 @@ sync_managed_block_to_file() {
 
     if echo "$current_content" | grep -qF "$MARKER_BEGIN"; then
         # 区块已存在 → 替换
-        new_content="$(python3 - "$MARKER_BEGIN" "$MARKER_END" "$rc_file" <<PY
+        new_content="$("${AGENT_MANAGER_PYTHON_CMD:-python3}" - "$MARKER_BEGIN" "$MARKER_END" "$rc_file" <<PY
 import sys
 
 marker_begin = sys.argv[1]

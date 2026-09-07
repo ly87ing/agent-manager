@@ -8,16 +8,22 @@
 //! - 桥只允许契约命令面内的只读/刷新命令，args 仅放行 `--only <element-id>`。
 
 use serde::{Deserialize, Serialize};
+use tauri::Manager;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
+use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 pub const CONTRACT_ID: &str = "agent-manager/engine/v1";
 const DEFAULT_TIMEOUT_SEC: u64 = 600;
 const STDERR_SUMMARY_LIMIT: usize = 2000;
+const RESOURCE_ROOT: &str = "resources/engine";
+static STANDALONE_INIT: OnceLock<Mutex<()>> = OnceLock::new();
 
 /// 序列化后经 invoke 返回给前端的结构化错误。
 #[derive(Debug, Clone, Serialize)]
@@ -308,6 +314,116 @@ pub fn resolve_root() -> Result<PathBuf, EngineError> {
     )
 }
 
+#[derive(Debug, Deserialize)]
+struct StandaloneManifest {
+    schema: u32,
+    managed_files: Vec<String>,
+    #[serde(default)]
+    managed_content_sha256: String,
+}
+
+struct RuntimeLayout {
+    root: PathBuf,
+    python: Option<PathBuf>,
+    rust_engine: Option<PathBuf>,
+    production: bool,
+}
+
+fn standalone_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, EngineError> {
+    if let Ok(raw) = std::env::var("AGENT_MANAGER_DATA_DIR") {
+        if !raw.trim().is_empty() {
+            return Ok(PathBuf::from(raw));
+        }
+    }
+    app.path().app_data_dir().map_err(|err| {
+        EngineError::new("data_dir_unavailable", format!("无法定位应用数据目录: {err}"))
+    })
+}
+
+fn valid_relative(path: &str) -> bool {
+    let candidate = Path::new(path);
+    !candidate.is_absolute() && candidate.components().all(|c| matches!(c, Component::Normal(_)))
+}
+
+fn executable(path: &Path) -> bool {
+    if !path.is_file() { return false; }
+    #[cfg(unix)]
+    { return path.metadata().map(|m| m.permissions().mode() & 0o111 != 0).unwrap_or(false); }
+    #[cfg(not(unix))]
+    { true }
+}
+
+fn copy_standalone_resources(resource_root: &Path, data_root: &Path) -> Result<PathBuf, EngineError> {
+    let manifest_path = resource_root.join("standalone-manifest.json");
+    let manifest_bytes = std::fs::read(&manifest_path).map_err(|err| {
+            EngineError::new("installation_incomplete", format!("缺少内置引擎清单: {err}"))
+        })?;
+    let manifest: StandaloneManifest = serde_json::from_slice(&manifest_bytes)
+    .map_err(|err| EngineError::new("installation_incomplete", format!("内置引擎清单无效: {err}")))?;
+    if manifest.schema != 1 || manifest.managed_files.is_empty() {
+        return Err(EngineError::new("installation_incomplete", "内置引擎清单版本或内容无效"));
+    }
+    // Validate the complete read-only package before creating or changing the
+    // user data root. This keeps a broken upgrade from leaving a partial tree.
+    for relative in &manifest.managed_files {
+        if !valid_relative(relative) || !resource_root.join(relative).is_file() {
+            return Err(EngineError::new("installation_incomplete", format!("内置资源缺失或路径非法: {relative}")));
+        }
+    }
+    let python = resource_root.join("runtime/python/bin/python3");
+    let rust_engine = resource_root.join("bin/agent-manager-engine");
+    if !executable(&python) || !executable(&rust_engine) {
+        return Err(EngineError::new("installation_incomplete", "缺少内置便携 Python 运行时"));
+    }
+    let _guard = STANDALONE_INIT.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let marker = data_root.join(".standalone-install.json");
+    if data_root.join("manage.sh").is_file()
+        && std::fs::read(&marker).ok().as_deref() == Some(manifest_bytes.as_slice())
+    {
+        return Ok(data_root.to_path_buf());
+    }
+    std::fs::create_dir_all(data_root).map_err(|err| {
+        EngineError::new("data_dir_unavailable", format!("无法创建应用数据目录: {err}"))
+    })?;
+    for relative in manifest.managed_files {
+        let source = resource_root.join(&relative);
+        let target = data_root.join(&relative);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|err| {
+                EngineError::new("data_dir_unavailable", format!("无法创建引擎运行目录: {err}"))
+            })?;
+        }
+        let temp = target.with_extension(format!("tmp.{}", std::process::id()));
+        std::fs::copy(&source, &temp).map_err(|err| {
+            EngineError::new("data_dir_unavailable", format!("无法更新引擎程序文件 {relative}: {err}"))
+        })?;
+        std::fs::rename(&temp, &target).map_err(|err| {
+            EngineError::new("data_dir_unavailable", format!("无法原子替换引擎程序文件 {relative}: {err}"))
+        })?;
+    }
+    if let Some(parent) = marker.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| EngineError::new("data_dir_unavailable", format!("无法创建安装标记目录: {err}")))?;
+    }
+    let marker_temp = marker.with_extension(format!("tmp.{}", std::process::id()));
+    std::fs::copy(&manifest_path, &marker_temp).map_err(|err| EngineError::new("data_dir_unavailable", format!("无法写入安装标记: {err}")))?;
+    std::fs::rename(marker_temp, marker).map_err(|err| EngineError::new("data_dir_unavailable", format!("无法原子更新安装标记: {err}")))?;
+    Ok(data_root.to_path_buf())
+}
+
+fn resolve_runtime_layout(_app: &tauri::AppHandle) -> Result<RuntimeLayout, EngineError> {
+    #[cfg(debug_assertions)]
+    {
+        let root = resolve_root()?;
+        return Ok(RuntimeLayout { root, python: None, rust_engine: None, production: false });
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        let resource_root = _app.path().resource_dir().map_err(|err| EngineError::new("installation_incomplete", format!("无法定位应用资源目录: {err}")))?.join(RESOURCE_ROOT);
+        let root = copy_standalone_resources(&resource_root, &standalone_data_dir(_app)?.join("engine"))?;
+        Ok(RuntimeLayout { root, python: Some(resource_root.join("runtime/python/bin/python3")), rust_engine: Some(resource_root.join("bin/agent-manager-engine")), production: true })
+    }
+}
+
 fn ensure_manage_sh(dir: &Path) -> Result<PathBuf, EngineError> {
     if dir.join("manage.sh").is_file() {
         Ok(dir.to_path_buf())
@@ -378,12 +494,25 @@ pub fn run_engine(
     args: &[String],
     run_id: Option<&str>,
 ) -> Result<Envelope, EngineError> {
+    let python = root.join("runtime/python/bin/python3");
+    let rust = root.join("bin/agent-manager-engine");
+    run_engine_with_layout(root, Some(&python).filter(|p| p.is_file()).map(|p| p.as_path()), Some(&rust).filter(|p| p.is_file()).map(|p| p.as_path()), false, command, args, run_id)
+}
+
+fn run_engine_with_layout(
+    root: &Path,
+    python_override: Option<&Path>,
+    rust_override: Option<&Path>,
+    production: bool,
+    command: &str,
+    args: &[String],
+    run_id: Option<&str>,
+) -> Result<Envelope, EngineError> {
     validate_command(command)?;
     validate_args(command, args)?;
     if let Some(run_id) = run_id {
         validate_run_id(run_id)?;
     }
-
     let script = root.join("manage.sh");
     if !script.is_file() {
         return Err(EngineError::new(
@@ -403,6 +532,37 @@ pub fn run_engine(
         .stderr(Stdio::piped());
     if let Some(run_id) = run_id {
         cmd.env("AGENT_MANAGER_RUN_ID", run_id);
+    }
+    if let Some(python) = python_override {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let mut paths = vec![python.parent().unwrap().to_path_buf()];
+        paths.extend(std::env::split_paths(&path));
+        if let Ok(joined) = std::env::join_paths(paths) {
+            cmd.env("PATH", joined);
+        }
+        cmd.env("AGENT_MANAGER_PYTHON_CMD", python);
+    } else if production {
+        return Err(EngineError::new("installation_incomplete", "发行包缺少内置 Python 运行时"));
+    }
+    cmd.env("AGENT_MANAGER_ROOT_DIR", root);
+    cmd.env("AGENT_MANAGER_BASE_CONFIG", root.join("config/manager.json"));
+    cmd.env("AGENT_MANAGER_SYNCED_CONFIG", root.join("config/manager.synced.json"));
+    cmd.env("AGENT_MANAGER_LOCAL_CONFIG", root.join("config/manager.local.json"));
+    if let Some(packaged_engine) = rust_override {
+        cmd.env("AGENT_MANAGER_ENGINE_RS", packaged_engine);
+    } else if production {
+        return Err(EngineError::new("installation_incomplete", "发行包缺少 Rust 引擎运行体"));
+    }
+    let state = root.to_path_buf();
+    cmd.env("AGENT_MANAGER_LOG_PREFIX", state.join("logs/agent_manager_sync"));
+    cmd.env("AGENT_MANAGER_LATEST_LOG_POINTER", state.join("logs/agent_manager_sync.latest"));
+    cmd.env("AGENT_MANAGER_LEGACY_LOG_PATH", state.join("logs/agent_manager_sync.log"));
+    cmd.env("AGENT_MANAGER_LOCK_FILE", state.join("state/agent_manager.lock"));
+    cmd.env("AGENT_MANAGER_SNAPSHOT_DIR", state.join("snapshots"));
+    cmd.env("AGENT_MANAGER_UPSTREAM_CACHE", state.join("cache/upstream.json"));
+    cmd.env("AGENT_MANAGER_PROFILE_CACHE", state.join("cache/profile"));
+    for directory in [state.join("logs"), state.join("state"), state.join("snapshots"), state.join("cache/profile")] {
+        std::fs::create_dir_all(&directory).map_err(|err| EngineError::new("data_dir_unavailable", format!("无法创建运行目录 {}: {err}", directory.display())))?;
     }
 
     let child = cmd.spawn().map_err(|err| {
@@ -443,11 +603,12 @@ pub fn run_engine(
 // ---------- Tauri command ----------
 
 #[tauri::command]
-pub async fn engine_invoke(command: String, args: Option<Vec<String>>, run_id: Option<String>) -> Result<Envelope, EngineError> {
+pub async fn engine_invoke(app: tauri::AppHandle, command: String, args: Option<Vec<String>>, run_id: Option<String>) -> Result<Envelope, EngineError> {
     let args = args.unwrap_or_default();
+    let app_handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let root = resolve_root()?;
-        run_engine(&root, &command, &args, run_id.as_deref())
+        let layout = resolve_runtime_layout(&app_handle)?;
+        run_engine_with_layout(&layout.root, layout.python.as_deref(), layout.rust_engine.as_deref(), layout.production, &command, &args, run_id.as_deref())
     })
     .await
     .map_err(|err| EngineError::new("internal", format!("bridge 任务调度失败: {err}")))?
@@ -741,6 +902,126 @@ mod tests {
         let err = resolve_root_from(None, None, Path::new("/nonexistent/src-tauri"))
             .expect_err("nothing to resolve must fail");
         assert_eq!(err.kind, "root_not_found");
+    }
+
+    #[test]
+    fn standalone_resource_copy_preserves_user_state_and_rejects_bad_paths() {
+        let resource = temp_dir("standalone-resource");
+        let data = temp_dir("standalone-data");
+        fs::create_dir_all(resource.join("runtime/python/bin")).unwrap();
+        fs::create_dir_all(resource.join("bin")).unwrap();
+        fs::write(resource.join("runtime/python/bin/python3"), b"python").unwrap();
+        fs::write(resource.join("bin/agent-manager-engine"), b"rust").unwrap();
+        fs::set_permissions(resource.join("runtime/python/bin/python3"), fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(resource.join("bin/agent-manager-engine"), fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(resource.join("manage.sh"), b"v1").unwrap();
+        fs::write(resource.join("standalone-manifest.json"), br#"{"schema":1,"managed_files":["manage.sh"],"managed_content_sha256":"hash-v1"}"#).unwrap();
+        let root = copy_standalone_resources(&resource, &data).unwrap();
+        fs::create_dir_all(root.join("config")).unwrap();
+        fs::write(root.join("config/manager.local.json"), b"user overlay").unwrap();
+        fs::write(resource.join("manage.sh"), b"v2").unwrap();
+        fs::write(resource.join("standalone-manifest.json"), br#"{"schema":1,"managed_files":["manage.sh"],"managed_content_sha256":"hash-v2"}"#).unwrap();
+        copy_standalone_resources(&resource, &data).unwrap();
+        assert_eq!(fs::read(root.join("manage.sh")).unwrap(), b"v2");
+        assert_eq!(fs::read(root.join("config/manager.local.json")).unwrap(), b"user overlay");
+        fs::write(resource.join("standalone-manifest.json"), br#"{"schema":1,"managed_files":["/escape"]}"#).unwrap();
+        assert_eq!(copy_standalone_resources(&resource, &data).unwrap_err().kind, "installation_incomplete");
+    }
+
+    #[test]
+    fn standalone_same_manifest_does_not_rewrite_seed() {
+        let resource = temp_dir("standalone-mtime-resource");
+        let data = temp_dir("standalone-mtime-data");
+        fs::create_dir_all(resource.join("runtime/python/bin")).unwrap();
+        fs::create_dir_all(resource.join("bin")).unwrap();
+        for (path, bytes) in [("runtime/python/bin/python3", b"python".as_slice()), ("bin/agent-manager-engine", b"rust".as_slice())] {
+            fs::write(resource.join(path), bytes).unwrap();
+            fs::set_permissions(resource.join(path), fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        fs::write(resource.join("manage.sh"), b"v1").unwrap();
+        fs::write(resource.join("standalone-manifest.json"), br#"{"schema":1,"managed_files":["manage.sh"],"managed_content_sha256":"hash-v1"}"#).unwrap();
+        let root = copy_standalone_resources(&resource, &data).unwrap();
+        let before = fs::metadata(root.join("manage.sh")).unwrap().modified().unwrap();
+        copy_standalone_resources(&resource, &data).unwrap();
+        assert_eq!(before, fs::metadata(root.join("manage.sh")).unwrap().modified().unwrap());
+    }
+
+    #[test]
+    fn standalone_missing_runtime_does_not_create_data_root() {
+        let resource = temp_dir("standalone-no-runtime");
+        let data = temp_dir("standalone-no-runtime-data").join("new-userdata/engine");
+        fs::create_dir_all(resource.join("bin")).unwrap();
+        fs::create_dir_all(resource.join("runtime/python/bin")).unwrap();
+        fs::write(resource.join("bin/agent-manager-engine"), b"rust").unwrap();
+        fs::set_permissions(resource.join("bin/agent-manager-engine"), fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(resource.join("manage.sh"), b"v1").unwrap();
+        fs::write(resource.join("standalone-manifest.json"), br#"{"schema":1,"managed_files":["manage.sh"],"managed_content_sha256":"hash"}"#).unwrap();
+        assert_eq!(copy_standalone_resources(&resource, &data).unwrap_err().kind, "installation_incomplete");
+        assert!(!data.join("manage.sh").exists());
+        fs::write(resource.join("runtime/python/bin/python3"), b"python").unwrap();
+        assert_eq!(copy_standalone_resources(&resource, &data).unwrap_err().kind, "installation_incomplete");
+    }
+
+    #[test]
+    fn fake_script_bridge_receives_runtime_paths() {
+        let root = temp_dir("standalone production root with spaces");
+        fs::create_dir_all(root.join("runtime/python/bin")).unwrap();
+        fs::create_dir_all(root.join("bin")).unwrap();
+        fs::write(root.join("runtime/python/bin/python3"), b"python").unwrap();
+        fs::write(root.join("bin/agent-manager-engine"), b"rust").unwrap();
+        fs::set_permissions(root.join("runtime/python/bin/python3"), fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(root.join("bin/agent-manager-engine"), fs::Permissions::from_mode(0o755)).unwrap();
+        let expected_python = root.join("runtime/python/bin/python3");
+        let expected_rust = root.join("bin/agent-manager-engine");
+        let body = format!("[ \"$AGENT_MANAGER_PYTHON_CMD\" = '{}' ] || exit 3\n[ \"$AGENT_MANAGER_ENGINE_RS\" = '{}' ] || exit 4\ncat <<'EOF'\n{VALID_ENVELOPE}\nEOF", expected_python.display(), expected_rust.display());
+        write_manage_sh(&root, &body);
+        let result = run_engine_with_layout(&root, Some(&root.join("runtime/python/bin/python3")), Some(&root.join("bin/agent-manager-engine")), true, "mcp:status", &[], Some("production-space-01"));
+        assert!(result.is_ok(), "production bridge failed: {:?}", result.err());
+    }
+
+    #[test]
+    fn standalone_concurrent_initialization_is_serialized() {
+        let resource = temp_dir("standalone-concurrent-resource");
+        let data = temp_dir("standalone-concurrent-data").join("engine");
+        fs::create_dir_all(resource.join("runtime/python/bin")).unwrap();
+        fs::create_dir_all(resource.join("bin")).unwrap();
+        for (path, bytes) in [("runtime/python/bin/python3", b"python".as_slice()), ("bin/agent-manager-engine", b"rust".as_slice())] {
+            fs::write(resource.join(path), bytes).unwrap();
+            fs::set_permissions(resource.join(path), fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        fs::write(resource.join("manage.sh"), b"v1").unwrap();
+        fs::write(resource.join("standalone-manifest.json"), br#"{"schema":1,"managed_files":["manage.sh"],"managed_content_sha256":"hash"}"#).unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let mut joins = Vec::new();
+        for _ in 0..8 {
+            let barrier = barrier.clone(); let resource = resource.clone(); let data = data.clone();
+            joins.push(std::thread::spawn(move || { barrier.wait(); copy_standalone_resources(&resource, &data).unwrap(); }));
+        }
+        for join in joins { join.join().unwrap(); }
+        assert_eq!(fs::read(data.join("manage.sh")).unwrap(), b"v1");
+    }
+
+    #[test]
+    #[ignore = "real packaged resources; run explicitly on the worker-built macOS resource tree"]
+    fn real_packaged_resources_status_and_plan() {
+        let resource = std::env::var_os("AGENT_MANAGER_TEST_RESOURCE_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/engine"));
+        let data = temp_dir("real packaged data with spaces").join("engine");
+        assert!(resource.join("manage.sh").is_file());
+        assert!(resource.join("runtime/python/bin/python3").is_file());
+        assert!(resource.join("bin/agent-manager-engine").is_file());
+        copy_standalone_resources(&resource, &data).expect("real package initializes");
+        let python = resource.join("runtime/python/bin/python3");
+        let rust = resource.join("bin/agent-manager-engine");
+        let status = run_engine_with_layout(&data, Some(&python), Some(&rust), true, "mcp:status", &[], Some("packaged-status-01"));
+        let status = status.expect("packaged status process");
+        assert!(status.ok);
+        assert_eq!(status.command, "mcp.status");
+        let plan = run_engine_with_layout(&data, Some(&python), Some(&rust), true, "mcp:plan", &[], Some("packaged-plan-01"));
+        let plan = plan.expect("packaged plan process");
+        assert!(plan.ok);
+        assert_eq!(plan.command, "mcp.plan");
     }
 
     // ---- run_engine（假 manage.sh 脚本端到端） ----

@@ -131,6 +131,9 @@ export default function DashboardPage() {
   const audit = auditQuery.data;
   if (!audit) return null;
   const auditData = audit.data;
+  const versionLabel = auditData.version
+    ? `${auditData.version.commit}（${auditData.version.date}）`
+    : "信息不可用";
   const statusMeta = AUDIT_STATUS_META[auditData.status] ?? AUDIT_STATUS_META.error;
   const StatusIcon = statusMeta.icon;
 
@@ -155,7 +158,7 @@ export default function DashboardPage() {
         <div>
           <h2 className="text-xl font-semibold tracking-tight">总览</h2>
           <p className="mt-1 text-xs text-slate-400">
-            运行 {audit.run_id} · 版本 {auditData.version.commit}（{auditData.version.date}）
+            运行 {audit.run_id} · 版本 {versionLabel}
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
@@ -276,10 +279,10 @@ export default function DashboardPage() {
           <Card key={section} title={SECTION_LABELS[section] ?? section} testId={`audit-section-${section}`}>
             <ul className="space-y-1.5">
               {entries.map((entry) => (
-                <li key={entry.name} className="flex items-baseline gap-3 text-sm">
+                <li key={entry.name} className="flex min-w-0 items-baseline gap-3 text-sm">
                   <AuditEntryBadge status={entry.status} />
-                  <span className="shrink-0 font-medium text-slate-700">{entry.name}</span>
-                  <span className="text-slate-500">{entry.message}</span>
+                  <span className="min-w-0 [overflow-wrap:anywhere] font-medium text-slate-700">{entry.name}</span>
+                  <span className="min-w-0 [overflow-wrap:anywhere] text-slate-500">{entry.message}</span>
                 </li>
               ))}
             </ul>

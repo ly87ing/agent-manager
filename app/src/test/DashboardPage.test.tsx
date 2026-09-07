@@ -140,6 +140,15 @@ function okRoutes(): Record<string, EngineRoute> {
 }
 
 describe("DashboardPage", () => {
+  it("Git 版本信息为空时仍渲染总览并显示不可用提示", async () => {
+    const routes = okRoutes();
+    routes["system:audit"] = makeEnvelope(makeAuditData({ version: null }), { command: "system.audit" });
+    renderDashboard(routes);
+
+    expect(await screen.findByTestId("audit-status-card")).toBeInTheDocument();
+    expect(screen.getByText(/版本 信息不可用/)).toBeInTheDocument();
+  });
+
   it("渲染总状态卡、警告分类与 freshness 聚合卡（计数正确，not-applicable 不计入）", async () => {
     renderDashboard(okRoutes());
 

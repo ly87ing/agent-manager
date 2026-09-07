@@ -17,11 +17,47 @@ pnpm tauri dev    # 桌面壳（需要 Rust 工具链）
 cd src-tauri && cargo check && cargo test
 ```
 
-真实引擎冒烟（需要本仓库）：
+## 独立运行（B 阶段）
+
+发行态从 Tauri 的包资源目录 `resources/engine` 读取程序种子、内置 Python 和 Rust 引擎，
+首次启动将程序种子初始化到稳定的用户数据目录 `engine/`。包内资源只读；用户数据目录保存
+运行时配置、缓存、日志和快照。发行态不依赖源码仓库、系统 Python 或 Homebrew。
+
+开发态可通过 `AGENT_MANAGER_ROOT=YOUR_AGENT_MANAGER_ROOT` 显式指定源码根；这只用于开发和
+测试，不能作为发行包的资源回退路径。
+
+从仓库根构建独立资源（自动按真实 host 选择固定目标，下载官方
+`python-build-standalone` 归档并校验 SHA256，同时构建 release Rust 引擎）：
 
 ```bash
-AGENT_MANAGER_ROOT=/path/to/agent-manager cargo test --manifest-path src-tauri/Cargo.toml -- --ignored --nocapture
+python3 scripts/build-standalone-resources.py
 ```
+
+构建依赖（Rust、Node、pnpm、Linux Tauri 系统库）只用于构建，不会被当作发行包运行时；
+业务运行时依赖（外部 Agent、Node/git、远程仓库和用户凭据）仍由状态页明确显示，应用不会
+隐式安装或同步它们。构建缓存和生成资源位于已忽略的 `app/.standalone-build/` 与
+`app/src-tauri/resources/`。
+
+资源侧单项契约测试（使用临时目录和 mock 下载，不启动真实 Agent）：
+
+```bash
+TEST_HOME="$(mktemp -d "${TMPDIR:-/tmp}/agent-manager-test.XXXXXX")"
+HOME="$TEST_HOME" PATH="$(dirname "$(command -v python3)"):/usr/bin:/bin" \
+  python3 -m unittest tests.test_standalone_resources -v
+```
+
+上述测试证明资源构建边界；它不替代将安装包复制到独立位置、清除源码根后的实际运行验收。
+
+真实引擎冒烟（开发态，需要源码根）：
+
+```bash
+TEST_HOME="$(mktemp -d "${TMPDIR:-/tmp}/agent-manager-engine-test.XXXXXX")"
+HOME="$TEST_HOME" PATH="$(dirname "$(command -v cargo)"):/usr/bin:/bin" \
+  AGENT_MANAGER_ROOT=YOUR_AGENT_MANAGER_ROOT \
+  cargo test --manifest-path src-tauri/Cargo.toml real_manage_sh_mcp_status_returns_ok -- --ignored --nocapture
+```
+
+该命令只运行指定的真实引擎冒烟用例；临时 HOME 和显式 PATH 用于隔离用户配置与外部命令发现。
 
 dev-only 可视化验证（纯浏览器，不触引擎）：
 
