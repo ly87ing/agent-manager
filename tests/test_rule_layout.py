@@ -18,7 +18,7 @@ class RuleLayoutTests(unittest.TestCase):
 
     def _copy_repo(self, temp_dir: str) -> Path:
         temp_root = Path(temp_dir) / "repo"
-        shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", ".git", ".worktrees", "app", "node_modules"))
+        shutil.copytree(ROOT, temp_root, ignore=shutil.ignore_patterns("repositories", ".git", ".worktrees", "__pycache__", "secrets", ".env", "app", "node_modules", "target", "manager.local.json", "manager.synced.json"))
         return temp_root
 
     def _run_builder(self, temp_root: Path) -> subprocess.CompletedProcess[str]:

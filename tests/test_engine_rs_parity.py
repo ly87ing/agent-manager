@@ -24,7 +24,9 @@ CARGO = shutil.which("cargo")
 ENGINE_RS = ROOT / "engine-rs"
 DEBUG_BIN = ENGINE_RS / "target" / "debug" / "agent-manager-engine"
 
-COPY_IGNORE = shutil.ignore_patterns("repositories", ".git", "__pycache__", "secrets", ".env", "app", "node_modules", "engine-rs")
+COPY_IGNORE = shutil.ignore_patterns(
+    "repositories", ".git", "__pycache__", "secrets", ".env", "app", "node_modules", "engine-rs", "manager.local.json", "manager.synced.json"
+)
 
 VOLATILE_KEYS = {"run_id", "log_file", "cache_age_sec"}
 # 解析器诊断文本随实现语言而异；契约只对齐 code/element。

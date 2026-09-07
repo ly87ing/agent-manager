@@ -17,7 +17,9 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-COPY_IGNORE = shutil.ignore_patterns("repositories", ".git", "__pycache__", "secrets", ".env", "app", "node_modules")
+COPY_IGNORE = shutil.ignore_patterns(
+    "repositories", ".git", "__pycache__", "secrets", ".env", "app", "node_modules", "target", "manager.local.json", "manager.synced.json"
+)
 
 
 def _normalized_payload(path, replacements):
@@ -85,6 +87,15 @@ class ConvergeParityTests(unittest.TestCase):
         (home / ".claude").mkdir()
         (home / ".codex").mkdir()
         shutil.copytree(ROOT, root, ignore=COPY_IGNORE)
+        for candidate in (
+            ROOT / "engine-rs" / "target" / "release" / "agent-manager-engine",
+            ROOT / "engine-rs" / "target" / "debug" / "agent-manager-engine",
+        ):
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                dst = root / "engine-rs" / "target" / candidate.parent.name / "agent-manager-engine"
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(candidate, dst)
+                break
         for name in ("manager.local.json", "manager.synced.json"):
             (root / "config" / name).unlink(missing_ok=True)
 

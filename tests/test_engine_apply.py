@@ -24,7 +24,9 @@ RUNS_SCHEMA = load_schema(CONTRACT_DIR / "runs.schema.json")
 SNAPSHOTS_SCHEMA = load_schema(CONTRACT_DIR / "snapshots.schema.json")
 POLICY_SCHEMA = load_schema(CONTRACT_DIR / "policy.schema.json")
 
-COPY_IGNORE = shutil.ignore_patterns("repositories", ".git", "__pycache__", "secrets", ".env", "app", "node_modules")
+COPY_IGNORE = shutil.ignore_patterns(
+    "repositories", ".git", "__pycache__", "secrets", ".env", "app", "node_modules", "target", "manager.local.json", "manager.synced.json"
+)
 
 
 class EngineWritePathTests(unittest.TestCase):
@@ -35,6 +37,16 @@ class EngineWritePathTests(unittest.TestCase):
         self.home = self.temp_dir / "home"
         self.home.mkdir()
         shutil.copytree(ROOT, self.repo, ignore=COPY_IGNORE)
+        if os.environ.get("ENGINE_RS"):
+            for candidate in (
+                ROOT / "engine-rs" / "target" / "release" / "agent-manager-engine",
+                ROOT / "engine-rs" / "target" / "debug" / "agent-manager-engine",
+            ):
+                if candidate.is_file() and os.access(candidate, os.X_OK):
+                    dst = self.repo / "engine-rs" / "target" / candidate.parent.name / "agent-manager-engine"
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(candidate, dst)
+                    break
         for name in ("manager.local.json", "manager.synced.json"):
             (self.repo / "config" / name).unlink(missing_ok=True)
         self.bindir = self.temp_dir / "bin"
