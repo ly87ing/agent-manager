@@ -7,6 +7,39 @@ import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { setEngineClient } from "../lib/engine";
 
+// ---- jsdom 交互 API 缺口的最小 shim（带守卫，不覆盖已存在实现；仅测试环境生效） ----
+// user-event 的 pointer 交互会调 Element.setPointerCapture（jsdom 未实现，
+// 在 forks pool 下表现为 unhandled error 而非单测失败——CI 因此红）。
+if (typeof Element !== "undefined") {
+  if (typeof Element.prototype.setPointerCapture !== "function") {
+    Element.prototype.setPointerCapture = () => {};
+  }
+  if (typeof Element.prototype.hasPointerCapture !== "function") {
+    Element.prototype.hasPointerCapture = () => false;
+  }
+  if (typeof Element.prototype.releasePointerCapture !== "function") {
+    Element.prototype.releasePointerCapture = () => {};
+  }
+  // 组件滚日志/到底部用 scrollTo(scrollTop)；个别库会调 scrollIntoView
+  if (typeof Element.prototype.scrollIntoView !== "function") {
+    Element.prototype.scrollIntoView = () => {};
+  }
+}
+if (typeof window !== "undefined") {
+  // sonner 等库在测量尺寸时依赖 ResizeObserver
+  if (typeof window.ResizeObserver !== "function") {
+    window.ResizeObserver = class ResizeObserverStub {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+  }
+  // user-event 派发 PointerEvent；jsdom 缺时退化为 MouseEvent（指针属性测试不依赖）
+  if (typeof window.PointerEvent !== "function") {
+    window.PointerEvent = window.MouseEvent as unknown as typeof PointerEvent;
+  }
+}
+
 afterEach(() => {
   cleanup();
   setEngineClient(null);
