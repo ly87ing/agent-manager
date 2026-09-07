@@ -316,6 +316,24 @@ fn json_classified(classified: &providers::Classified) -> Value {
     Value::Object(map)
 }
 
+/// 升级动作的 freshness 说明（_upgrade_note port）。
+fn upgrade_note(kind_label: &str, provider_key: Option<&str>, freshness: &Value) -> String {
+    let provider_part = provider_key
+        .map(|key| format!("（provider: {}）", key))
+        .unwrap_or_default();
+    match freshness.get("state").and_then(Value::as_str) {
+        Some("behind") => format!(
+            "升级{}{}：当前 {} → 最新 {}",
+            kind_label,
+            provider_part,
+            freshness.get("current").and_then(Value::as_str).unwrap_or("?"),
+            freshness.get("upstream").and_then(Value::as_str).unwrap_or("?"),
+        ),
+        Some("unknown") => format!("升级{}{}：上游未检查或探测失败（unknown）", kind_label, provider_part),
+        _ => format!("升级{}{}：无上游探测源，跟随同步器升级语义", kind_label, provider_part),
+    }
+}
+
 /// build_agents_plan port：missing + auto_install → install 动作；其余 warning 跳过。
 pub fn build_agents_plan(
     root_dir: &Path,
@@ -335,11 +353,96 @@ pub fn build_agents_plan(
         .cloned()
         .unwrap_or_default();
     for element in elements {
-        if element.get("state").and_then(Value::as_str) != Some("missing") {
-            continue;
-        }
         let element_id = element.get("id").and_then(Value::as_str).unwrap_or("").to_string();
         let agent_id = element_id.splitn(2, ':').nth(1).unwrap_or("").to_string();
+        let state = element.get("state").and_then(Value::as_str).unwrap_or("");
+        if state != "missing" {
+            // 升级动作（同步器语义：enabled+installed+受管 provider 激活+auto_update
+            // → 无条件跑激活 provider 的 upgrade 命令；current 不产出）。
+            if state != "managed-ok" {
+                continue;
+            }
+            let observed = element.get("observed").cloned().unwrap_or(Value::Null);
+            let installed = observed.get("installed").and_then(Value::as_bool).unwrap_or(false);
+            let managed_active: Vec<String> = observed
+                .get("classified")
+                .and_then(|c| c.get("managed"))
+                .and_then(Value::as_array)
+                .map(|items| items.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                .unwrap_or_default();
+            if !installed || managed_active.is_empty() {
+                continue;
+            }
+            let auto_update = element
+                .get("policy")
+                .and_then(|p| p.get("auto_update"))
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            if !auto_update {
+                warnings.push(diagnostic(
+                    "AGENT_UPDATE_DISABLED_BY_POLICY",
+                    Some(element_id.clone()),
+                    "策略 auto_update=false，plan 不生成升级动作".to_string(),
+                ));
+                continue;
+            }
+            let preferred = element
+                .get("policy")
+                .and_then(|p| p.get("preferred_provider"))
+                .and_then(Value::as_str)
+                .unwrap_or("npm")
+                .to_string();
+            let canonical_managed: Vec<&str> = managed_active
+                .iter()
+                .map(|name| providers::canonical_provider_name(name))
+                .collect();
+            let preferred_canonical = providers::canonical_provider_name(&preferred);
+            let active_key = if canonical_managed.contains(&preferred_canonical) {
+                preferred_canonical.to_string()
+            } else {
+                canonical_managed[0].to_string()
+            };
+            let provider_cfg = agent_defs
+                .get(&agent_id)
+                .and_then(Value::as_object)
+                .and_then(|def| def.get("providers"))
+                .and_then(Value::as_object)
+                .and_then(|providers| providers.get(&active_key))
+                .cloned();
+            let upgrade_cmd = provider_cfg
+                .as_ref()
+                .and_then(|cfg| cfg.get("upgrade"))
+                .and_then(providers::resolve_provider_command);
+            if let Some(ref cfg) = provider_cfg {
+                if cfg.get("upgrade").is_some() && upgrade_cmd.is_none() {
+                    warnings.push(diagnostic(
+                        "AGENT_UPGRADE_UNAVAILABLE",
+                        Some(element_id.clone()),
+                        format!("provider '{}' 未提供当前平台的 upgrade 命令", active_key),
+                    ));
+                    continue;
+                }
+            }
+            let upgrade_cmd = match upgrade_cmd {
+                Some(cmd) => cmd,
+                None => continue,
+            };
+            let freshness = element.get("freshness").cloned().unwrap_or(Value::Null);
+            if freshness.get("state").and_then(Value::as_str) == Some("current") {
+                continue;
+            }
+            actions.push(crate::canon::plan_action(
+                "run-cmd",
+                &element_id,
+                Value::Null,
+                "network",
+                None,
+                None,
+                Some(upgrade_cmd),
+                Some(upgrade_note("Agent", Some(&active_key), &freshness)),
+            ));
+            continue;
+        }
         let auto_install = element
             .get("policy")
             .and_then(|p| p.get("auto_install"))

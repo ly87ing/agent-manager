@@ -1351,6 +1351,152 @@ class EngineDomainSliceTests(unittest.TestCase):
         self.assertEqual([w["element"] for w in stale], ["agents:fake-agent"])
         self.assertFalse(calls.exists(), "status 不得因缓存 stale 而重新探测")
 
+    # ------------------------------------------------- plan 升级动作（用户实案修复）
+
+    def _upgrade_fixture(self):
+        """fake-up 已装 managed-ok（npm provider 带 upgrade 命令）。"""
+        self._make_bin("fake-up-bin").write_text("#!/bin/sh\necho 1.0.0\n", encoding="utf-8")
+        self._write_config(
+            "agents.json",
+            {
+                "fake-up": {
+                    "bin": "fake-up-bin",
+                    "providers": {
+                        "npm": {
+                            "managed": True,
+                            "install": "npm install -g @fake/up",
+                            "upgrade": "npm install -g @fake/up",
+                            "detect_paths": [str(self.bindir / "fake-up-bin")],
+                        }
+                    },
+                }
+            },
+        )
+        self._manager(agents={"fake-up": {"enabled": True}})
+
+    def _write_agent_cache(self, state, current="1.0.0", upstream="2.0.0"):
+        cache_file = self.temp_dir / "upstream.json"
+        cache_file.write_text(
+            json.dumps({
+                "version": 1,
+                "entries": {
+                    "agents:fake-up": {
+                        "state": state, "current": current, "upstream": upstream,
+                        "checked_at": "2099-01-01T00:00:00Z", "probe": "npm-view",
+                    }
+                },
+            }),
+            encoding="utf-8",
+        )
+        return {"AGENT_MANAGER_UPSTREAM_CACHE": str(cache_file)}
+
+    def test_agents_plan_upgrade_action_when_behind(self):
+        self._upgrade_fixture()
+        env_extra = self._write_agent_cache("behind")
+        payload = self._payload("agents:plan", "--json", env_extra=env_extra, prepend_path=True)
+        self._assert_plan_data(payload)
+        actions = payload["data"]["actions"]
+        self.assertEqual(len(actions), 1)
+        action = actions[0]
+        self.assertEqual(action["op"], "run-cmd")
+        self.assertEqual(action["risk"], "network")
+        self.assertEqual(action["element"], "agents:fake-up")
+        self.assertEqual(action["cmd"], "npm install -g @fake/up")
+        self.assertIn("当前 1.0.0 → 最新 2.0.0", action["note"])
+
+    def test_agents_plan_no_upgrade_action_when_current(self):
+        self._upgrade_fixture()
+        env_extra = self._write_agent_cache("current", current="2.0.0", upstream="2.0.0")
+        payload = self._payload("agents:plan", "--json", env_extra=env_extra, prepend_path=True)
+        self.assertEqual(payload["data"]["actions"], [])
+
+    def test_agents_plan_upgrade_action_with_unknown_upstream(self):
+        self._upgrade_fixture()
+        # 无缓存条目 → unknown：照样产出动作，note 说明未检查（plan 是计划不是执行）。
+        payload = self._payload("agents:plan", "--json", prepend_path=True)
+        actions = payload["data"]["actions"]
+        self.assertEqual(len(actions), 1)
+        self.assertIn("unknown", actions[0]["note"])
+
+    def test_agents_plan_upgrade_in_offline_plan_mode(self):
+        # --offline 下 plan 仍产出 upgrade（offline 拒绝的是执行期的 network 动作）。
+        self._upgrade_fixture()
+        env_extra = self._write_agent_cache("behind")
+        payload = self._payload("--offline", "agents:plan", "--json", env_extra=env_extra, prepend_path=True)
+        self.assertEqual(payload["mode"]["offline"], True)
+        self.assertEqual(len(payload["data"]["actions"]), 1)
+
+    def test_agents_plan_auto_update_false_warns_and_skips(self):
+        self._upgrade_fixture()
+        self._manager(agents={"fake-up": {"enabled": True, "auto_update": False}})
+        env_extra = self._write_agent_cache("behind")
+        payload = self._payload("agents:plan", "--json", env_extra=env_extra, prepend_path=True)
+        self.assertEqual(payload["data"]["actions"], [])
+        self.assertEqual(payload["warnings"][0]["code"], "AGENT_UPDATE_DISABLED_BY_POLICY")
+
+    def test_tools_plan_upgrade_action_when_behind(self):
+        self._make_bin("fake-tool-bin")
+        self._write_config(
+            "tools.json",
+            {"tools": {"fake-tool": {
+                "install": "npm install -g @fake/tool",
+                "upgrade": "npm install -g @fake/tool",
+                "ready_check": "bin:fake-tool-bin",
+            }}},
+        )
+        self._manager(tools={"fake-tool": {"enabled": True}})
+        cache_file = self.temp_dir / "upstream.json"
+        cache_file.write_text(
+            json.dumps({"version": 1, "entries": {"tools:fake-tool": {
+                "state": "behind", "current": "1.0.0", "upstream": "2.0.0",
+                "checked_at": "2099-01-01T00:00:00Z", "probe": "npm-view"}}}),
+            encoding="utf-8",
+        )
+        payload = self._payload(
+            "tools:plan", "--json",
+            env_extra={"AGENT_MANAGER_UPSTREAM_CACHE": str(cache_file)}, prepend_path=True,
+        )
+        actions = payload["data"]["actions"]
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["op"], "run-cmd")
+        self.assertEqual(actions[0]["risk"], "install-remove")
+        self.assertEqual(actions[0]["cmd"], "npm install -g @fake/tool")
+        self.assertIn("当前 1.0.0 → 最新 2.0.0", actions[0]["note"])
+
+    def test_tools_plan_no_upgrade_when_current_or_disabled(self):
+        self._make_bin("fake-tool-bin")
+        self._write_config(
+            "tools.json",
+            {"tools": {"fake-tool": {
+                "install": "npm install -g @fake/tool",
+                "upgrade": "npm install -g @fake/tool",
+                "ready_check": "bin:fake-tool-bin",
+            }}},
+        )
+        # current → 无动作
+        self._manager(tools={"fake-tool": {"enabled": True}})
+        cache_file = self.temp_dir / "upstream.json"
+        cache_file.write_text(
+            json.dumps({"version": 1, "entries": {"tools:fake-tool": {
+                "state": "current", "current": "2.0.0", "upstream": "2.0.0",
+                "checked_at": "2099-01-01T00:00:00Z", "probe": "npm-view"}}}),
+            encoding="utf-8",
+        )
+        env_extra = {"AGENT_MANAGER_UPSTREAM_CACHE": str(cache_file)}
+        payload = self._payload("tools:plan", "--json", env_extra=env_extra, prepend_path=True)
+        self.assertEqual(payload["data"]["actions"], [])
+        # auto_update=false → warning 闸门
+        self._manager(tools={"fake-tool": {"enabled": True, "auto_update": False}})
+        cache_file.write_text(
+            json.dumps({"version": 1, "entries": {"tools:fake-tool": {
+                "state": "behind", "current": "1.0.0", "upstream": "2.0.0",
+                "checked_at": "2099-01-01T00:00:00Z", "probe": "npm-view"}}}),
+            encoding="utf-8",
+        )
+        payload = self._payload("tools:plan", "--json", env_extra=env_extra, prepend_path=True)
+        self.assertEqual(payload["data"]["actions"], [])
+        self.assertEqual(payload["warnings"][0]["code"], "TOOL_UPDATE_DISABLED_BY_POLICY")
+
     # ------------------------------------------------------------------ skills
 
     def _make_skill_repo(self, repo_name, skill_names):

@@ -870,41 +870,107 @@ def build_agents_plan(root_dir, config_file, def_files):
     )
     actions = []
     for element in status["elements"]:
-        if element["state"] != "missing":
-            continue
         agent_id = element["id"].split(":", 1)[1]
-        if not element["policy"]["auto_install"]:
-            warnings.append(
-                diagnostic(
-                    "AGENT_INSTALL_DISABLED_BY_POLICY",
+        if element["state"] == "missing":
+            if not element["policy"]["auto_install"]:
+                warnings.append(
+                    diagnostic(
+                        "AGENT_INSTALL_DISABLED_BY_POLICY",
+                        element["id"],
+                        "策略 auto_install=false，plan 不生成安装动作",
+                    )
+                )
+                continue
+            preferred = element["policy"]["preferred_provider"]
+            provider_cfg = agent_defs.get(agent_id, {}).get("providers", {}).get(preferred, {})
+            install_cmd = resolve_provider_command(provider_cfg.get("install"))
+            if not install_cmd:
+                warnings.append(
+                    diagnostic(
+                        "AGENT_INSTALL_UNAVAILABLE",
+                        element["id"],
+                        "provider '%s' 未提供当前平台的 install 命令" % preferred,
+                    )
+                )
+                continue
+            actions.append(
+                plan_action(
+                    "install",
                     element["id"],
-                    "策略 auto_install=false，plan 不生成安装动作",
+                    None,
+                    "install-remove",
+                    cmd=install_cmd,
+                    note="安装缺失 Agent（provider: %s）" % preferred,
                 )
             )
             continue
-        preferred = element["policy"]["preferred_provider"]
-        provider_cfg = agent_defs.get(agent_id, {}).get("providers", {}).get(preferred, {})
-        install_cmd = resolve_provider_command(provider_cfg.get("install"))
-        if not install_cmd:
+        # 升级动作：同步器语义（enabled+installed+受管 provider 激活+auto_update
+        # → 无条件跑激活 provider 的 upgrade 命令）。freshness=current 时不产出
+        # （同步器空跑无副作用，GUI 也不需要噪音按钮）。
+        if element["state"] != "managed-ok":
+            continue
+        policy = element["policy"]
+        observed = element["observed"]
+        if not observed["installed"] or not observed["classified"]["managed"]:
+            continue
+        if not policy["auto_update"]:
             warnings.append(
                 diagnostic(
-                    "AGENT_INSTALL_UNAVAILABLE",
+                    "AGENT_UPDATE_DISABLED_BY_POLICY",
                     element["id"],
-                    "provider '%s' 未提供当前平台的 install 命令" % preferred,
+                    "策略 auto_update=false，plan 不生成升级动作",
                 )
             )
             continue
+        preferred = policy["preferred_provider"]
+        managed_active = [canonical_provider_name(name) for name in observed["classified"]["managed"]]
+        preferred_canonical = canonical_provider_name(preferred)
+        active_key = preferred_canonical if preferred_canonical in managed_active else managed_active[0]
+        provider_cfg = agent_defs.get(agent_id, {}).get("providers", {}).get(active_key, {})
+        upgrade_cmd = resolve_provider_command(provider_cfg.get("upgrade"))
+        if provider_cfg and "upgrade" in provider_cfg and not upgrade_cmd:
+            warnings.append(
+                diagnostic(
+                    "AGENT_UPGRADE_UNAVAILABLE",
+                    element["id"],
+                    "provider '%s' 未提供当前平台的 upgrade 命令" % active_key,
+                )
+            )
+            continue
+        if not upgrade_cmd:
+            continue
+        freshness = element["freshness"]
+        if freshness["state"] == "current":
+            continue
+        note = _upgrade_note("Agent", active_key, freshness)
         actions.append(
             plan_action(
-                "install",
+                "run-cmd",
                 element["id"],
                 None,
-                "install-remove",
-                cmd=install_cmd,
-                note="安装缺失 Agent（provider: %s）" % preferred,
+                "network",
+                cmd=upgrade_cmd,
+                note=note,
             )
         )
     return plan_data("agents", actions), warnings, errors
+
+
+def _upgrade_note(kind_label, provider_key, freshness):
+    """升级动作的 freshness 说明：behind 带版本箭头；unknown 说明未检查；
+    not-applicable 说明无上游探测源（升级语义跟随同步器）。"""
+    provider_part = "（provider: %s）" % provider_key if provider_key else ""
+    state = freshness.get("state")
+    if state == "behind":
+        return "升级%s%s：当前 %s → 最新 %s" % (
+            kind_label,
+            provider_part,
+            freshness.get("current") or "?",
+            freshness.get("upstream") or "?",
+        )
+    if state == "unknown":
+        return "升级%s%s：上游未检查或探测失败（unknown）" % (kind_label, provider_part)
+    return "升级%s%s：无上游探测源，跟随同步器升级语义" % (kind_label, provider_part)
 
 
 # ---------------------------------------------------------------------------
@@ -1001,23 +1067,56 @@ def build_tools_plan(root_dir, config_file, def_files):
     status, warnings, errors = build_tools_status(root_dir, config_file, def_files)
     actions = []
     for element in status["elements"]:
-        if element["state"] != "missing":
+        if element["state"] == "missing":
+            definition = element["spec"]
+            install_cmd = definition.get("install")
+            if not install_cmd and definition.get("url"):
+                install_cmd = "git clone %s" % definition["url"]
+            setup_cmd = definition.get("setup")
+            note_parts = ["安装并初始化工具"]
+            if setup_cmd:
+                note_parts.append("随后执行 setup: %s" % setup_cmd)
+            actions.append(
+                plan_action(
+                    "install",
+                    element["id"],
+                    None,
+                    "install-remove",
+                    cmd=install_cmd,
+                    note="；".join(note_parts),
+                )
+            )
+            continue
+        # 升级动作（对齐同步器：就绪+auto_update → 跟随 upgrade 命令）；
+        # freshness=current 时不产出（噪音控制），behind/unknown/not-applicable 产出。
+        if element["state"] != "managed-ok":
+            continue
+        if not element["policy"]["auto_update"]:
+            warnings.append(
+                diagnostic(
+                    "TOOL_UPDATE_DISABLED_BY_POLICY",
+                    element["id"],
+                    "策略 auto_update=false，plan 不生成升级动作",
+                )
+            )
             continue
         definition = element["spec"]
-        install_cmd = definition.get("install")
-        if not install_cmd and definition.get("url"):
-            install_cmd = "git clone %s" % definition["url"]
-        setup_cmd = definition.get("setup")
-        note_parts = ["安装并初始化工具"]
-        if setup_cmd:
-            note_parts.append("随后执行 setup: %s" % setup_cmd)
+        upgrade_cmd = definition.get("upgrade")
+        if not upgrade_cmd:
+            continue
+        freshness = element["freshness"]
+        if freshness["state"] == "current":
+            continue
+        note_parts = [_upgrade_note("工具", None, freshness)]
+        if definition.get("setup"):
+            note_parts.append("升级后按需重跑 setup: %s" % definition["setup"])
         actions.append(
             plan_action(
-                "install",
+                "run-cmd",
                 element["id"],
                 None,
                 "install-remove",
-                cmd=install_cmd,
+                cmd=upgrade_cmd,
                 note="；".join(note_parts),
             )
         )

@@ -419,7 +419,7 @@ class EngineRsAgentsParityTests(unittest.TestCase):
             "tools": {}, "skills": {}, "mcp": {},
         })
         defs = {
-            "fake-ok": {"bin": "fake-ok-bin", "providers": {"npm": {"managed": True, "install": "npm install -g @fake/ok", "detect_paths": [str(self.bindir / "fake-ok-bin")]}}},
+            "fake-ok": {"bin": "fake-ok-bin", "providers": {"npm": {"managed": True, "install": "npm install -g @fake/ok", "upgrade": "npm install -g @fake/ok", "detect_paths": [str(self.bindir / "fake-ok-bin")]}}},
             "fake-missing": {"bin": "fake-missing-bin", "providers": {"npm": {"managed": True, "install": "npm install -g @fake/missing"}}},
             "fake-disabled": {"bin": "fake-disabled-bin", "providers": {"npm": {"managed": True, "install": "npm install -g @fake/disabled"}}},
             "fake-leftover": {"bin": "fake-leftover-bin", "providers": {"npm": {"managed": True, "install": "npm install -g @fake/leftover", "detect_paths": [str(self.bindir / "fake-leftover-bin")]}}},
@@ -568,22 +568,74 @@ class EngineRsAgentsParityTests(unittest.TestCase):
             "agents:plan", "--config", "config/manager.json", "--def-file", "config/agents.json", "--json"
         )
         actions = payload["data"]["actions"]
-        self.assertEqual(len(actions), 1)
-        self.assertEqual(actions[0]["element"], "agents:fake-missing")
-        self.assertEqual(actions[0]["op"], "install")
-        self.assertEqual(actions[0]["cmd"], "npm install -g @fake/missing")
-        self.assertEqual(actions[0]["risk"], "install-remove")
+        # install(fake-missing) + upgrade(fake-ok，无缓存=unknown 也产动作）。
+        self.assertEqual(len(actions), 2)
+        install = [a for a in actions if a["op"] == "install"]
+        upgrade = [a for a in actions if a["op"] == "run-cmd"]
+        self.assertEqual(install[0]["element"], "agents:fake-missing")
+        self.assertEqual(install[0]["cmd"], "npm install -g @fake/missing")
+        self.assertEqual(install[0]["risk"], "install-remove")
+        self.assertEqual(upgrade[0]["element"], "agents:fake-ok")
+        self.assertEqual(upgrade[0]["cmd"], "npm install -g @fake/ok")
+        self.assertEqual(upgrade[0]["risk"], "network")
+        self.assertIn("unknown", upgrade[0]["note"])
         self.assertEqual(payload["data"]["summary"]["install-remove"], 1)
+        self.assertEqual(payload["data"]["summary"]["network"], 1)
+
+    def test_agents_plan_parity_upgrade_behind_and_current(self):
+        cache = self.temp_dir / "upstream-cache.json"
+        cache.write_text(
+            json.dumps({
+                "version": 1,
+                "entries": {
+                    "agents:fake-ok": {
+                        "state": "behind", "current": "1.0.0", "upstream": "2.0.0",
+                        "checked_at": "2099-01-01T00:00:00Z", "probe": "npm-view",
+                    }
+                },
+            }),
+            encoding="utf-8",
+        )
+        payload = self._assert_parity(
+            "agents:plan", "--config", "config/manager.json", "--def-file", "config/agents.json", "--json"
+        )
+        upgrade = [a for a in payload["data"]["actions"] if a["op"] == "run-cmd"]
+        self.assertEqual(len(upgrade), 1)
+        self.assertIn("当前 1.0.0 → 最新 2.0.0", upgrade[0]["note"])
+
+        # current → 不产出升级动作（噪音控制）。
+        cache.write_text(
+            json.dumps({
+                "version": 1,
+                "entries": {
+                    "agents:fake-ok": {
+                        "state": "current", "current": "2.0.0", "upstream": "2.0.0",
+                        "checked_at": "2099-01-01T00:00:00Z", "probe": "npm-view",
+                    }
+                },
+            }),
+            encoding="utf-8",
+        )
+        payload = self._assert_parity(
+            "agents:plan", "--config", "config/manager.json", "--def-file", "config/agents.json", "--json"
+        )
+        self.assertEqual(
+            [a["op"] for a in payload["data"]["actions"]], ["install"],
+            "current 时只剩 fake-missing 的 install",
+        )
 
     def test_agents_plan_parity_policy_gates(self):
         manager = json.loads((self.repo / "config" / "manager.json").read_text(encoding="utf-8"))
         manager["agents"]["fake-missing"]["auto_install"] = False
+        manager["agents"]["fake-ok"]["auto_update"] = False
         self._write_config("manager.json", manager)
         payload = self._assert_parity(
             "agents:plan", "--config", "config/manager.json", "--def-file", "config/agents.json", "--json"
         )
         self.assertEqual(payload["data"]["actions"], [])
-        self.assertIn("AGENT_INSTALL_DISABLED_BY_POLICY", [w["code"] for w in payload["warnings"]])
+        codes = [w["code"] for w in payload["warnings"]]
+        self.assertIn("AGENT_INSTALL_DISABLED_BY_POLICY", codes)
+        self.assertIn("AGENT_UPDATE_DISABLED_BY_POLICY", codes)
 
     def test_agents_plan_parity_platform_command_resolution(self):
         # 平台映射：darwin 键优先，缺失则 posix→default；全无 → AGENT_INSTALL_UNAVAILABLE。
