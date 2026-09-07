@@ -32,20 +32,20 @@ import SyncPage from "./pages/SyncPage";
 import UpdatesPage from "./pages/UpdatesPage";
 
 const NAV: NavItem[] = [
-  { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { key: "agents", label: "Agents", icon: Bot },
-  { key: "mcp", label: "MCP", icon: Server },
-  { key: "skills", label: "Skills", icon: Sparkles },
-  { key: "rules", label: "Rules", icon: ScrollText },
+  { key: "dashboard", label: "总览", icon: LayoutDashboard },
+  { key: "agents", label: "助手", icon: Bot },
+  { key: "mcp", label: "MCP 服务", icon: Server },
+  { key: "skills", label: "技能", icon: Sparkles },
+  { key: "rules", label: "规则", icon: ScrollText },
   { key: "hooks", label: "Hooks", icon: Webhook },
   { key: "tools", label: "Tools", icon: Wrench },
   { key: "aliases", label: "Aliases", icon: Link2 },
-  { key: "secrets", label: "Secrets", icon: KeyRound },
-  { key: "updates", label: "更新中心", icon: RefreshCw },
-  { key: "runs", label: "执行中心", icon: Activity },
-  { key: "policy", label: "策略编辑器", icon: SlidersHorizontal },
-  { key: "sync", label: "配置同步", icon: CloudUpload },
-  { key: "snapshots", label: "备份回滚", icon: DatabaseBackup },
+  { key: "secrets", label: "密钥状态", icon: KeyRound },
+  { key: "updates", label: "更新", icon: RefreshCw },
+  { key: "runs", label: "任务记录", icon: Activity },
+  { key: "policy", label: "个性化配置", icon: SlidersHorizontal },
+  { key: "sync", label: "多设备同步", icon: CloudUpload },
+  { key: "snapshots", label: "备份与恢复", icon: DatabaseBackup },
   { key: "settings", label: "设置", icon: Settings },
 ];
 
@@ -61,13 +61,13 @@ export default function App() {
       {activePage === "skills" && <SkillsPage />}
       {activePage === "rules" && <RulesPage />}
       {activePage === "hooks" && (
-        <DomainApplyPage domain="hooks" title="Hooks" description="claude-hooks.json / codex-hooks.json 渲染结果（hooks 无上游轴；收敛 = 渲染到仓级配置）。" />
+        <DomainApplyPage domain="hooks" title="Hooks" description="助手钩子脚本的生成与写入状态。" />
       )}
       {activePage === "tools" && (
-        <DomainApplyPage domain="tools" title="Tools" description="全局工具链（安装/升级属 install-remove 级，预览含此类动作时须二次确认）。" />
+        <DomainApplyPage domain="tools" title="Tools" description="全局命令行工具的安装状态（安装/卸载会先预览并二次确认）。" />
       )}
       {activePage === "aliases" && (
-        <DomainApplyPage domain="aliases" title="Aliases" description="受管 shell alias 区块（收敛 = 写入 zshrc/zprofile 受管区块，区块外不动）。" />
+        <DomainApplyPage domain="aliases" title="Aliases" description="终端快捷命令（alias）的同步状态，只改受管区块、不动其它内容。" />
       )}
       {activePage === "secrets" && <SecretsPage />}
       {activePage === "updates" && <UpdatesPage />}

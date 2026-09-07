@@ -20,20 +20,20 @@ function EnvResolutionList({ element }: { element: EngineElement }) {
   const env = observed.env ?? {};
   const entries = Object.entries(env);
   if (entries.length === 0) {
-    return <p className="text-xs text-slate-400">无 env 占位符。</p>;
+    return <p className="text-xs text-slate-400">不需要环境变量。</p>;
   }
   return (
     <ul className="space-y-1">
       {entries.map(([name, resolution]) => (
         <li key={name} className="flex items-center gap-2 text-xs">
           {resolution.resolved ? (
-            <Check className="h-3.5 w-3.5 text-emerald-600" aria-label="已解析" />
+            <Check className="h-3.5 w-3.5 text-emerald-600" aria-label="已配置" />
           ) : (
-            <X className="h-3.5 w-3.5 text-red-500" aria-label="未解析" />
+            <X className="h-3.5 w-3.5 text-red-500" aria-label="未配置" />
           )}
           <span className="font-mono text-slate-700">{name}</span>
           <span className={resolution.resolved ? "text-emerald-600" : "text-red-600"}>
-            {resolution.resolved ? "已解析" : "未解析（渲染为占位符名）"}
+            {resolution.resolved ? "已配置" : "未配置（运行时会显示变量名）"}
           </span>
         </li>
       ))}
@@ -61,14 +61,14 @@ function ServerDetail({ element }: { element: EngineElement }) {
           {spec.command} {(spec.args ?? []).join(" ")}
         </code>
         <p className="mt-1 text-xs text-slate-400">
-          startup_timeout_sec: {spec.startup_timeout_sec ?? "—"} · 目标 agent:{" "}
-          {spec.agents === null || spec.agents === undefined ? "全部" : spec.agents.join(", ")}
+          启动超时 {spec.startup_timeout_sec ?? "—"} 秒 · 应用到:{" "}
+          {spec.agents === null || spec.agents === undefined ? "全部助手" : spec.agents.join(", ")}
         </p>
       </div>
 
       {Object.keys(extraArgs).length > 0 && (
         <div>
-          <h4 className="mb-1 text-xs font-semibold text-slate-500">per-agent extra_args</h4>
+          <h4 className="mb-1 text-xs font-semibold text-slate-500">各助手附加参数</h4>
           <ul className="space-y-1">
             {Object.entries(extraArgs).map(([agent, args]) => (
               <li key={agent} className="text-xs">
@@ -81,19 +81,19 @@ function ServerDetail({ element }: { element: EngineElement }) {
       )}
 
       <div>
-        <h4 className="mb-1 text-xs font-semibold text-slate-500">env 占位符解析（值永不显示）</h4>
+        <h4 className="mb-1 text-xs font-semibold text-slate-500">密钥变量（只显示是否已配置，永不显示值）</h4>
         <EnvResolutionList element={element} />
       </div>
 
       <div>
-        <h4 className="mb-1 text-xs font-semibold text-slate-500">目标配置文件</h4>
+        <h4 className="mb-1 text-xs font-semibold text-slate-500">写入位置</h4>
         <ul className="space-y-1">
           {Object.entries(cells).map(([agent, cell]) => (
             <li key={agent} className="flex flex-wrap items-center gap-2 text-xs">
               <span className="font-mono text-slate-500">{agent}</span>
               <code className="font-mono break-all text-slate-700">{cell.target ?? "—"}</code>
               <span className={cell.target_exists ? "text-emerald-600" : "text-slate-400"}>
-                {cell.target_exists ? "存在" : "未生成"}
+                {cell.target_exists ? "已存在" : "未生成"}
               </span>
             </li>
           ))}
@@ -123,12 +123,12 @@ export default function McpPage() {
   /** 单元格点击：该 server 的 plan 过滤预览 → 域级 mcp:apply（提案 §4.3 单元素 = 预览过滤 + 域 apply）。 */
   const openCellApply = (element: EngineElement) => {
     preview.open({
-      title: `收敛 ${element.id}`,
-      subtitle: "预览只显示本 server 的动作；确认执行的是 mcp:apply 全域收敛（执行前自动快照）。",
+      title: `同步 ${element.id}`,
+      subtitle: "预览只显示这个服务的相关操作；实际执行会同步全部 MCP 服务配置（执行前自动备份）。",
       planCommands: ["mcp:plan"],
       filterElement: element.id,
-      confirmLabel: "收敛（域级 apply）",
-      execute: executeApply({ command: "mcp:apply", label: `收敛 ${element.id}` }),
+      confirmLabel: "立即同步",
+      execute: executeApply({ command: "mcp:apply", label: `同步 ${element.id}` }),
     });
   };
 
@@ -136,7 +136,7 @@ export default function McpPage() {
     <div className="space-y-4">
       <PageHeader
         title="MCP"
-        description="server × agent 注入矩阵。点击可动作的单元格（漂移/未注入/未物化/遗留）→ plan 预览 → 域级收敛。"
+        description="每个 MCP 服务配置进了哪些助手。点有颜色的格子可以先预览再同步。"
       />
       {query.data.errors.length > 0 && <ErrorPanel title="mcp:status 错误" errors={query.data.errors} />}
 
@@ -150,7 +150,7 @@ export default function McpPage() {
                   {agent}
                 </th>
               ))}
-              <th className="py-2 font-medium">上游状态</th>
+              <th className="py-2 font-medium">最新版本</th>
             </tr>
           </thead>
           <tbody>
@@ -183,7 +183,7 @@ export default function McpPage() {
                             disabled={!actionable}
                             onClick={() => openCellApply(element)}
                             data-testid={`mcp-cell-${element.id}-${agent}`}
-                            title={actionable ? `点击收敛 ${element.id}（plan 预览 → 域级 apply）` : undefined}
+                            title={actionable ? `点击同步 ${element.id}（先预览再执行）` : undefined}
                             className={cn("rounded", actionable ? "cursor-pointer hover:ring-2 hover:ring-indigo-300" : "cursor-default")}
                           >
                             <MatrixCell state={cell.state} kind="mcp" title={`${agent}: ${cell.state}`} />
@@ -208,7 +208,7 @@ export default function McpPage() {
       {selected ? (
         <ServerDetail element={selected} />
       ) : (
-        <p className="text-xs text-slate-400">点击矩阵中的 server id 展开详情（命令/env 解析/目标文件/漂移解释）。</p>
+        <p className="text-xs text-slate-400">点击左侧服务名展开详情（启动命令 / 密钥变量 / 写入位置 / 同步详情）。</p>
       )}
 
       {preview.modal}

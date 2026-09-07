@@ -26,7 +26,6 @@ export function AppLayout({
       <aside className="flex w-56 shrink-0 flex-col border-r border-slate-200 bg-white">
         <div className="border-b border-slate-100 px-5 py-4">
           <h1 className="text-base font-semibold tracking-tight">Agent Manager</h1>
-          <p className="mt-0.5 text-xs text-slate-400">Contract v1</p>
         </div>
         <nav className="flex-1 space-y-0.5 overflow-y-auto p-2">
           {nav.map((item) => {

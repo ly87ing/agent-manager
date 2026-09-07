@@ -20,9 +20,9 @@ describe("策略编辑器", () => {
     renderWithEngine(<PolicyPage />, routes());
     // 顶层键归属：browser_us_sync 来自 local 层
     const row = (await screen.findByTestId("edit-browser_us_sync.enabled")).closest("tr")!;
-    expect(row).toHaveTextContent("仅本机");
+    expect(row).toHaveTextContent("仅这台电脑");
     const agentsRow = screen.getByTestId("edit-agents.claude-code.enabled").closest("tr")!;
-    expect(agentsRow).toHaveTextContent("基线层");
+    expect(agentsRow).toHaveTextContent("仓库默认值");
     // 三层原文卡 + baseline 只读
     const baselineCard = screen.getByTestId("layer-card-baseline");
     expect(baselineCard).toHaveTextContent("只读");

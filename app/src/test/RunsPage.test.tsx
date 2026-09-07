@@ -94,7 +94,7 @@ describe("执行中心", () => {
     await userEvent.click(await screen.findByTestId("trigger-execute"));
 
     // 进行中可见（apply 挂起期间）
-    expect(await screen.findByText("进行中")).toBeInTheDocument();
+    expect(await screen.findByText("正在执行…")).toBeInTheDocument();
     const statusChip = document.querySelector(`[data-testid^="execution-status-"]`)!;
     const runId = statusChip.getAttribute("data-testid")!.replace("execution-status-", "");
     expect(runId).toMatch(/^gui-/);
@@ -108,7 +108,7 @@ describe("执行中心", () => {
     expect(await screen.findByText("失败")).toBeInTheDocument();
     expect(screen.getByText("mcp-sync")).toBeInTheDocument();
     expect(screen.getByText("hooks-sync")).toBeInTheDocument();
-    expect(screen.getByText(/持锁 pid 4242/)).toBeInTheDocument();
+    expect(screen.getByText(/独占执行 · pid 4242/)).toBeInTheDocument();
     expect(screen.getByText("STEP_FAILED")).toBeInTheDocument();
 
     // 完成后失效重拉 runs:list

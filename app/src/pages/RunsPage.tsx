@@ -34,7 +34,7 @@ function ExecutionCard({ record, onSelectLog }: { record: ExecutionRecord; onSel
         <span className="text-sm font-medium text-slate-800">{record.label}</span>
         <code className="font-mono text-xs text-slate-400">{record.command}</code>
         <code className="font-mono text-xs text-indigo-500">{record.runId}</code>
-        {record.dryRun && <span className="rounded bg-sky-100 px-1.5 py-0.5 text-xs text-sky-700">dry-run</span>}
+        {record.dryRun && <span className="rounded bg-sky-100 px-1.5 py-0.5 text-xs text-sky-700">演练</span>}
         <span
           data-testid={`execution-status-${record.runId}`}
           className={cn(
@@ -42,13 +42,13 @@ function ExecutionCard({ record, onSelectLog }: { record: ExecutionRecord; onSel
             running ? "bg-indigo-100 text-indigo-700" : record.status === "ok" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700",
           )}
         >
-          {running ? "进行中" : record.status === "ok" ? "成功" : "失败"}
+          {running ? "正在执行…" : record.status === "ok" ? "成功" : "失败"}
         </span>
         <span className="ml-auto flex items-center gap-2 text-xs text-slate-400">
           {lock && (
-            <span className="inline-flex items-center gap-1" title="引擎运行锁（envelope.lock）">
+            <span className="inline-flex items-center gap-1" title="任务互斥：运行期间另一个任务无法同时执行（引擎锁 envelope.lock）">
               <Lock className="h-3 w-3" aria-hidden />
-              {lock.held ? `持锁 pid ${lock.pid ?? "?"}` : "未持锁"}
+              {lock.held ? `独占执行 · pid ${lock.pid ?? "?"}` : "只读任务"}
             </span>
           )}
           {new Date(record.startedAt).toLocaleTimeString("zh-CN", { hour12: false })}
@@ -86,7 +86,7 @@ function ExecutionCard({ record, onSelectLog }: { record: ExecutionRecord; onSel
       )}
       {snapshot && (
         <p className="mt-2 text-xs text-slate-500">
-          快照 <code className="font-mono">{snapshot.run_id}</code>：{snapshot.file_count} 文件 / {snapshot.link_count} 链接
+          已自动备份 <code className="font-mono">{snapshot.run_id}</code>（{snapshot.file_count} 个文件 / {snapshot.link_count} 个链接）
         </p>
       )}
     </section>
@@ -127,11 +127,11 @@ export default function RunsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="执行中心" description="运行历史（5s 轮询）与按次日志。GUI 发起的动作带 gui- 前缀 run_id，运行中 2s 轮询日志尾部。" />
+      <PageHeader title="任务记录" description="每次同步/安装/检查的记录与日志。本应用发起的操作带 gui- 前缀编号；执行中的任务每 2 秒刷新日志。" />
 
       {executions.length > 0 && (
         <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-slate-700">本次会话的执行</h3>
+          <h3 className="text-sm font-semibold text-slate-700">本次会话的任务</h3>
           {executions.map((record) => (
             <ExecutionCard key={record.runId} record={record} onSelectLog={setSelectedRun} />
           ))}
@@ -143,7 +143,7 @@ export default function RunsPage() {
           <div className="mb-2 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-slate-700">
               日志尾部 <code className="font-mono text-xs text-indigo-500">{selectedRun}</code>
-              {selectedIsRunning && <span className="ml-2 text-xs text-indigo-500">（运行中，2s 轮询）</span>}
+              {selectedIsRunning && <span className="ml-2 text-xs text-indigo-500">（执行中，每 2 秒刷新）</span>}
             </h3>
             <button type="button" onClick={() => setSelectedRun(null)} className="text-xs text-slate-400 hover:text-slate-600">
               关闭
@@ -152,7 +152,7 @@ export default function RunsPage() {
           {logQuery.isPending ? (
             <p className="text-xs text-slate-400">日志加载中…</p>
           ) : logQuery.isError ? (
-            <p className="text-xs text-red-600">日志读取失败（该运行可能不写日志，如纯 status 调用）</p>
+            <p className="text-xs text-red-600">日志读取失败（只读检查通常不写日志）</p>
           ) : (
             <pre
               ref={logRef}
@@ -166,11 +166,11 @@ export default function RunsPage() {
       )}
 
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 className="mb-3 text-sm font-semibold text-slate-700">运行历史</h3>
+        <h3 className="mb-3 text-sm font-semibold text-slate-700">历史任务</h3>
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-slate-200 text-xs text-slate-500">
-              <th className="py-2 pr-4 font-medium">run_id</th>
+              <th className="py-2 pr-4 font-medium">编号</th>
               <th className="py-2 pr-4 font-medium">时间</th>
               <th className="py-2 pr-4 font-medium">日志大小</th>
               <th className="py-2 font-medium">操作</th>
@@ -200,7 +200,7 @@ export default function RunsPage() {
             ))}
           </tbody>
         </table>
-        {runs.length === 0 && <p className="py-4 text-center text-sm text-slate-400">暂无运行记录</p>}
+        {runs.length === 0 && <p className="py-4 text-center text-sm text-slate-400">还没有任务记录</p>}
       </section>
     </div>
   );

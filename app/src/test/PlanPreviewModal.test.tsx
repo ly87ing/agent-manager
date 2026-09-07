@@ -27,10 +27,10 @@ describe("PlanPreviewModal", () => {
       makePlanAction({ op: "run-cmd", risk: "network", element: "agents:b", target: null, cmd: "npm i -g b", note: "升级 b" }),
       makePlanAction({ op: "symlink", risk: "exec-local", element: "skill:c/d", target: "/tmp/d" }),
     ]);
-    expect(screen.getByTestId("plan-summary-write-local")).toHaveTextContent("写本地 1");
-    expect(screen.getByTestId("plan-summary-network")).toHaveTextContent("网络 1");
-    expect(screen.getByTestId("plan-summary-exec-local")).toHaveTextContent("本地执行 1");
-    expect(screen.getByTestId("plan-summary-install-remove")).toHaveTextContent("安装/卸载 0");
+    expect(screen.getByTestId("plan-summary-write-local")).toHaveTextContent("修改配置文件 1");
+    expect(screen.getByTestId("plan-summary-network")).toHaveTextContent("需要联网 1");
+    expect(screen.getByTestId("plan-summary-exec-local")).toHaveTextContent("运行本地命令 1");
+    expect(screen.getByTestId("plan-summary-install-remove")).toHaveTextContent("安装/卸载软件 0");
     expect(screen.getByText("注入 mcp:a")).toBeInTheDocument();
     expect(screen.getByText("npm i -g b")).toBeInTheDocument();
   });
@@ -69,16 +69,16 @@ describe("PlanPreviewModal", () => {
     expect(onConfirm).toHaveBeenCalledWith(false);
   });
 
-  it("dry-run 开关：确认回调携带 dryRun=true", async () => {
+  it("演练开关：确认回调携带 dryRun=true", async () => {
     const { onConfirm } = renderModal([makePlanAction({})]);
-    await userEvent.click(screen.getByLabelText(/仅预演/));
+    await userEvent.click(screen.getByLabelText(/演练模式/));
     await userEvent.click(screen.getByTestId("plan-confirm-button"));
     expect(onConfirm).toHaveBeenCalledWith(true);
   });
 
-  it("plan 为空时禁用确认", () => {
+  it("没有操作时禁用确认", () => {
     renderModal([]);
-    expect(screen.getByText(/plan 为空/)).toBeInTheDocument();
+    expect(screen.getByText(/没有需要执行的操作/)).toBeInTheDocument();
     expect(screen.getByTestId("plan-confirm-button")).toBeDisabled();
   });
 });

@@ -13,8 +13,8 @@ export function ElementTable({ elements }: { elements: EngineElement[] }) {
         <thead>
           <tr className="border-b border-slate-200 text-xs text-slate-500">
             <th className="py-2 pr-4 font-medium">元素</th>
-            <th className="py-2 pr-4 font-medium">收敛状态</th>
-            <th className="py-2 font-medium">上游状态</th>
+            <th className="py-2 pr-4 font-medium">同步状态</th>
+            <th className="py-2 font-medium">最新版本</th>
           </tr>
         </thead>
         <tbody>

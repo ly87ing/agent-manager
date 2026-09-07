@@ -1,9 +1,10 @@
 import { FlaskConical, WifiOff } from "lucide-react";
 import { useEngineQuery } from "../lib/queries";
 import type { AuditData } from "../lib/contract";
+import { COPY } from "../lib/ui-copy";
 
 /**
- * 全局模式横幅：引擎以 offline / dry-run 运行时给出醒目标注。
+ * 全局模式横幅：离线 / 演练（dry-run）时给出醒目标注。
  * 复用 system:audit 的 react-query 缓存，不额外发请求。
  */
 export function ModeBanner() {
@@ -21,7 +22,7 @@ export function ModeBanner() {
         >
           <WifiOff className="h-4 w-4 shrink-0" aria-hidden />
           <span>
-            <strong>离线模式</strong>：引擎未联网，上游状态为上次检查的缓存值；联网探测（刷新上游状态）已禁用。
+            <strong>离线模式</strong>：{COPY.offlineBannerBody}
           </span>
         </div>
       )}
@@ -32,7 +33,7 @@ export function ModeBanner() {
         >
           <FlaskConical className="h-4 w-4 shrink-0" aria-hidden />
           <span>
-            <strong>演练模式（dry-run）</strong>：引擎输出为空转预览，未写入任何变更。
+            <strong>演练模式</strong>：{COPY.dryRunBannerBody}
           </span>
         </div>
       )}

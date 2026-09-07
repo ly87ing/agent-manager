@@ -28,7 +28,7 @@ export default function SnapshotsPage() {
     const envelope = await execute({
       command: "snapshots:restore",
       args: ["--run", restoring],
-      label: `回滚到快照 ${restoring}`,
+      label: `恢复到备份 ${restoring}`,
     });
     setExecuting(false);
     if (envelope && !envelope.ok) {
@@ -39,7 +39,7 @@ export default function SnapshotsPage() {
       const restore = (envelope.data as SnapshotsData).restore;
       if (restore) {
         toast.success(
-          `回滚完成：恢复 ${restore.files_restored} 文件 / ${restore.links_restored} 链接，删除 ${restore.files_deleted}；当前态已再快照为 ${restore.resnapshot_run_id}`,
+          `恢复完成:${restore.files_restored} 个文件 / ${restore.links_restored} 个链接已还原，删除 ${restore.files_deleted} 个；当前状态已另存为备份 ${restore.resnapshot_run_id}`,
         );
       }
     }
@@ -49,17 +49,17 @@ export default function SnapshotsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="备份与回滚" description="每次非 dry-run 写操作前的自动快照（按 run_id 组织）。回滚会先对当前态再快照，可再次回滚。" />
+      <PageHeader title="备份与恢复" description="每次实际修改前都会自动备份。恢复前会把当前状态再备份一次，所以恢复本身也能撤销。" />
       {query.data.errors.length > 0 && <ErrorPanel title="snapshots:list 错误" errors={query.data.errors} />}
 
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-slate-200 text-xs text-slate-500">
-              <th className="py-2 pr-4 font-medium">run_id</th>
+              <th className="py-2 pr-4 font-medium">备份编号</th>
               <th className="py-2 pr-4 font-medium">创建时间</th>
-              <th className="py-2 pr-4 font-medium">来源命令</th>
-              <th className="py-2 pr-4 font-medium">文件 / 链接</th>
+              <th className="py-2 pr-4 font-medium">来源操作</th>
+              <th className="py-2 pr-4 font-medium">文件 / 链接数</th>
               <th className="py-2 font-medium">操作</th>
             </tr>
           </thead>
@@ -82,23 +82,23 @@ export default function SnapshotsPage() {
                     }}
                     className="inline-flex items-center gap-1 rounded border border-red-200 px-2 py-0.5 text-xs text-red-600 hover:bg-red-50"
                   >
-                    <RotateCcw className="h-3 w-3" aria-hidden /> 回滚
+                    <RotateCcw className="h-3 w-3" aria-hidden /> 恢复
                   </button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        {snapshots.length === 0 && <p className="py-4 text-center text-sm text-slate-400">暂无快照（首次非 dry-run 写操作前自动创建）</p>}
+        {snapshots.length === 0 && <p className="py-4 text-center text-sm text-slate-400">还没有备份（首次实际修改前会自动创建）</p>}
       </section>
 
       {restoring && (
         <ConfirmModal
-          title={`回滚到快照 ${restoring}`}
-          description="将按快照清单恢复目标文件/链接，并先对当前状态再快照一次（回滚本身可撤销）。快照之外的文件不受影响。"
+          title={`恢复到备份 ${restoring}`}
+          description="将按备份清单还原文件和链接，并先把当前状态再备份一次（所以恢复本身也能撤销）。备份之外的文件不受影响。"
           risk="write-local"
           requireText={restoring}
-          confirmLabel="确认回滚"
+          confirmLabel="确认恢复"
           executing={executing}
           resultErrors={resultErrors}
           onConfirm={() => void doRestore()}

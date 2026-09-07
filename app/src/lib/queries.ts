@@ -35,8 +35,8 @@ export function useEngineQuery<T>(command: string, args?: string[]): UseQueryRes
 }
 
 /**
- * 「刷新上游状态」——本阶段唯一主动作（system:refresh-upstream，network 级探测缓存，不写配置）。
- * 传 only 时单元素重探（--only <element-id>）。成功后全部引擎查询失效重拉。
+ * 「检查更新」——刷新各组件的官方最新版本（system:refresh-upstream，需要联网，
+ * 只更新本地检查记录，不改配置）。传 only 时只重新检查一个元素（--only <元素id>）。
  */
 export function useRefreshUpstream() {
   const queryClient = useQueryClient();
@@ -50,21 +50,21 @@ export function useRefreshUpstream() {
           const entry = envelope.data.elements.find((item) => item.id === only);
           toast.success(
             entry
-              ? `已重新探测 ${only}：${entry.state}${entry.upstream ? `（上游 ${entry.upstream}）` : ""}`
-              : `已重新探测 ${only}`,
+              ? `已重新检查 ${only}${entry.upstream ? `：官方最新 ${entry.upstream}` : ""}`
+              : `已重新检查 ${only}`,
           );
         } else {
           toast.success(
-            `上游探测完成：已是最新 ${summary.current} · 落后 ${summary.behind} · 领先 ${summary.ahead} · 未知 ${summary.unknown}`,
+            `检查更新完成：已是最新 ${summary.current} · 可更新 ${summary.behind} · 比官方新 ${summary.ahead} · 未检查 ${summary.unknown}`,
           );
         }
       } else {
-        toast.error(envelope.errors[0]?.message ?? "上游探测失败");
+        toast.error(envelope.errors[0]?.message ?? "检查更新失败");
       }
       void queryClient.invalidateQueries({ queryKey: engineKeys.all });
     },
     onError: (err) => {
-      toast.error(`上游探测调用失败：${engineErrorMessage(err)}`);
+      toast.error(`检查更新调用失败：${engineErrorMessage(err)}`);
     },
   });
 }

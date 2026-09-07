@@ -55,7 +55,7 @@ function mcpRoutes(): Record<string, ReturnType<typeof makeEnvelope>> {
 }
 
 describe("McpPage 注入矩阵", () => {
-  it("渲染 server × agent 单元格：已注入/漂移/未注入/遗留/未物化", async () => {
+  it("渲染 server × agent 单元格：已配置/不一致/未配置/残留/尚未生成", async () => {
     renderWithEngine(<McpPage />, mcpRoutes());
 
     // 矩阵行出现
@@ -64,30 +64,30 @@ describe("McpPage 注入矩阵", () => {
 
     // chrome-devtools: codex 已注入、claude-code 漂移（漂移格琥珀色）
     const injected = screen.getByTitle("codex: managed-ok");
-    expect(injected).toHaveTextContent("已注入");
+    expect(injected).toHaveTextContent("已配置");
     const drifted = screen.getByTitle("claude-code: drifted");
-    expect(drifted).toHaveTextContent("漂移");
+    expect(drifted).toHaveTextContent("不一致");
     expect(drifted.className).toContain("amber");
 
     // serena: leftover 遗留 / not-materialized 未物化
-    expect(screen.getByTitle("claude-code: leftover")).toHaveTextContent("遗留");
-    expect(screen.getByTitle("codex: not-materialized")).toHaveTextContent("未物化");
+    expect(screen.getByTitle("claude-code: leftover")).toHaveTextContent("残留");
+    expect(screen.getByTitle("codex: not-materialized")).toHaveTextContent("尚未生成");
 
     // freshness 徽章在行尾
     expect(screen.getByText(/可更新 1\.2\.0 → 1\.8\.0/)).toBeInTheDocument();
   });
 
-  it("点击 server 展开详情：命令、env 占位符解析（不含值）、extra_args、目标路径", async () => {
+  it("点击 server 展开详情：命令、密钥变量配置状态（不含值）、附加参数、写入位置", async () => {
     renderWithEngine(<McpPage />, mcpRoutes());
     await userEvent.click(await screen.findByText("mcp:serena"));
 
     const detail = await screen.findByTestId("mcp-detail-mcp:serena");
     expect(detail).toHaveTextContent("uvx --from git+https://example.com/serena@main serena");
-    expect(detail).toHaveTextContent("startup_timeout_sec: 60");
+    expect(detail).toHaveTextContent("启动超时 60 秒");
     expect(detail).toHaveTextContent("--context codex");
     // env 占位符：变量名 + 未解析标注，永不出现值
     expect(detail).toHaveTextContent("SERENA_KEY");
-    expect(detail).toHaveTextContent("未解析");
+    expect(detail).toHaveTextContent("未配置");
     expect(detail).toHaveTextContent("/tmp/demo/.codex/config.toml");
   });
 });

@@ -22,7 +22,7 @@ export function isCacheStale(ageSec: number | null): boolean {
 }
 
 export function formatCheckedAt(iso: string | null): string {
-  if (!iso) return "从未探测";
+  if (!iso) return "从未检查";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
   return date.toLocaleString("zh-CN", { hour12: false });

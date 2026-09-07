@@ -29,24 +29,24 @@ describe("FreshnessBadge 五态", () => {
     expect(badge.className).toContain("amber");
   });
 
-  it("ahead：蓝色「领先上游」", () => {
+  it("ahead：蓝色「比官方版还新」", () => {
     render(
       <FreshnessBadge freshness={makeFreshness({ state: "ahead", current: "e4f5g6h", upstream: "a1b2c3d" })} />,
     );
-    const badge = screen.getByText(/领先上游/);
+    const badge = screen.getByText(/比官方版还新/);
     expect(badge.textContent).toContain("e4f5g6h");
     expect(badge.className).toContain("sky");
   });
 
-  it("unknown：灰显「未知」", () => {
+  it("unknown：灰显「未检查」", () => {
     render(<FreshnessBadge freshness={makeFreshness({ state: "unknown", checked_at: "2026-09-05T08:00:00Z" })} />);
-    const badge = screen.getByText("未知");
+    const badge = screen.getByText("未检查");
     expect(badge.className).toContain("slate");
   });
 
-  it("unknown 且从未探测：标注「未知·未探测」", () => {
+  it("unknown 且从未探测过：仍标注「未检查」", () => {
     render(<FreshnessBadge freshness={makeFreshness({ state: "unknown" })} />);
-    expect(screen.getByText("未知·未探测")).toBeInTheDocument();
+    expect(screen.getByText("未检查")).toBeInTheDocument();
   });
 
   it("not-applicable：不渲染徽章", () => {
@@ -59,10 +59,10 @@ describe("FreshnessBadge 五态", () => {
     expect(screen.getByTestId("freshness-cache-age")).toHaveTextContent("30 分钟前检查");
   });
 
-  it("超过 24h TTL 的缓存标记 stale（缓存陈旧）", () => {
+  it("超过 24h TTL 的缓存标记「检查结果较旧」", () => {
     render(<FreshnessBadge freshness={makeFreshness({ state: "current", cache_age_sec: 90000 })} />);
     const age = screen.getByTestId("freshness-cache-age");
-    expect(age).toHaveTextContent("缓存陈旧");
+    expect(age).toHaveTextContent("检查结果较旧");
     expect(age.className).toContain("amber");
   });
 });

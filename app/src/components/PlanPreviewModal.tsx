@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowDownToLine,
   Download,
@@ -12,11 +12,11 @@ import {
   X,
 } from "lucide-react";
 import type { Diagnostic, PlanAction, RiskLevel } from "../lib/contract";
+import { COPY, planSummaryPhrase, RISK_COPY, RISK_ORDER } from "../lib/ui-copy";
 import { cn } from "../lib/utils";
 import { ErrorPanel } from "./ErrorPanel";
 
-/** 风险级驱动确认形态（提案 §5 控制原则 2）：read < write-local < exec-local < network < install-remove。 */
-export const RISK_ORDER: RiskLevel[] = ["read", "write-local", "exec-local", "network", "install-remove"];
+export { RISK_ORDER };
 
 export function maxRiskOf(actions: PlanAction[]): RiskLevel {
   return actions.reduce<RiskLevel>(
@@ -24,14 +24,6 @@ export function maxRiskOf(actions: PlanAction[]): RiskLevel {
     "read",
   );
 }
-
-const RISK_META: Record<RiskLevel, { label: string; className: string }> = {
-  read: { label: "读取", className: "border-slate-200 bg-slate-50 text-slate-500" },
-  "write-local": { label: "写本地", className: "border-sky-200 bg-sky-50 text-sky-700" },
-  "exec-local": { label: "本地执行", className: "border-amber-200 bg-amber-50 text-amber-700" },
-  network: { label: "网络", className: "border-orange-200 bg-orange-50 text-orange-700" },
-  "install-remove": { label: "安装/卸载", className: "border-red-200 bg-red-50 text-red-700" },
-};
 
 const OP_ICONS: Record<string, typeof FileText> = {
   "write-file": FileText,
@@ -45,17 +37,20 @@ const OP_ICONS: Record<string, typeof FileText> = {
 };
 
 export function RiskBadge({ risk }: { risk: RiskLevel }) {
-  const meta = RISK_META[risk];
+  const copy = RISK_COPY[risk];
   return (
-    <span className={cn("inline-flex rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap", meta.className)}>
-      {meta.label}
+    <span
+      title={risk}
+      className={cn("inline-flex rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap", copy.className)}
+    >
+      {copy.label}
     </span>
   );
 }
 
 export function PlanActionList({ actions }: { actions: PlanAction[] }) {
   if (actions.length === 0) {
-    return <p className="py-6 text-center text-sm text-slate-400">plan 为空：没有需要执行的动作。</p>;
+    return <p className="py-6 text-center text-sm text-slate-400">没有需要执行的操作。</p>;
   }
   return (
     <ul className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
@@ -85,6 +80,10 @@ export function PlanActionList({ actions }: { actions: PlanAction[] }) {
   );
 }
 
+/**
+ * 「将要执行的操作」预览弹窗（提案 §5：先 plan 后 apply）。
+ * 风险级驱动确认形态：安装/卸载软件 → 输入元素名二次确认；需要联网 → 知情勾选；其余普通确认。
+ */
 export default function PlanPreviewModal({
   title,
   subtitle,
@@ -97,16 +96,17 @@ export default function PlanPreviewModal({
   onConfirm,
   onClose,
 }: {
+  /** 动作名（如「同步 MCP 服务」），显示在固定标题下方。 */
   title: string;
   subtitle?: string;
-  /** null = plan 加载中 */
+  /** null = 正在计算预览 */
   plans: { domain: string; actions: PlanAction[] }[] | null;
   planError?: string | null;
-  /** install-remove 级二次确认：须输入此文本（元素 id）才能确认。 */
+  /** 安装/卸载级二次确认：须输入此文本（元素 id）才能确认。 */
   requireConfirmText?: string;
   confirmLabel?: string;
   executing: boolean;
-  /** 执行后引擎返回的 errors（ok:false 时留在弹窗内展示）。 */
+  /** 执行后引擎返回的 errors（失败时留在弹窗内展示）。 */
   resultErrors?: Diagnostic[] | null;
   onConfirm: (dryRun: boolean) => void;
   onClose: () => void;
@@ -114,7 +114,6 @@ export default function PlanPreviewModal({
   const [dryRun, setDryRun] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [networkAck, setNetworkAck] = useState(false);
-  const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -141,15 +140,15 @@ export default function PlanPreviewModal({
       }}
     >
       <div
-        ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-label={`${COPY.planPreviewTitle}：${title}`}
         className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-5 shadow-xl"
       >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 className="text-base font-semibold text-slate-800">{title}</h3>
+            <h3 className="text-base font-semibold text-slate-800">{COPY.planPreviewTitle}</h3>
+            <p className="mt-0.5 text-sm font-medium text-indigo-700">{title}</p>
             {subtitle && <p className="mt-0.5 text-xs text-slate-400">{subtitle}</p>}
           </div>
           <button
@@ -165,13 +164,18 @@ export default function PlanPreviewModal({
 
         <div className="mt-4 space-y-3">
           {planError ? (
-            <ErrorPanel title="plan 加载失败" errors={[{ code: "PLAN_FAILED", element: null, message: planError }]} />
+            <ErrorPanel title="预览加载失败" errors={[{ code: "PLAN_FAILED", element: null, message: planError }]} />
           ) : plans === null ? (
             <p className="flex items-center gap-2 py-6 text-sm text-slate-400">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> 正在计算 plan 预览…
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> 正在计算将要执行的操作…
             </p>
           ) : (
             <>
+              {actions.length > 0 && (
+                <p data-testid="plan-phrase" className="text-sm text-slate-600">
+                  {planSummaryPhrase(actions)}
+                </p>
+              )}
               <div className="flex flex-wrap gap-1.5" data-testid="plan-summary">
                 {summary.map(({ risk, count }) => (
                   <span
@@ -179,10 +183,10 @@ export default function PlanPreviewModal({
                     data-testid={`plan-summary-${risk}`}
                     className={cn(
                       "rounded-full border px-2 py-0.5 text-xs",
-                      count > 0 ? RISK_META[risk].className : "border-slate-100 bg-slate-50 text-slate-300",
+                      count > 0 ? RISK_COPY[risk].className : "border-slate-100 bg-slate-50 text-slate-300",
                     )}
                   >
-                    {RISK_META[risk].label} {count}
+                    {RISK_COPY[risk].label} {count}
                   </span>
                 ))}
               </div>
@@ -204,13 +208,13 @@ export default function PlanPreviewModal({
               disabled={executing}
               className="h-3.5 w-3.5"
             />
-            仅预演（dry-run）：输出计划动作但不写入任何变更
+            {COPY.dryRunToggle}
           </label>
 
           {plans !== null && maxRisk === "install-remove" && (
             <div className="rounded-md border border-red-200 bg-red-50 p-3">
               <p className="text-xs text-red-700">
-                包含安装/卸载级动作（install-remove）。二次确认：请输入{" "}
+                包含安装/卸载软件的操作。二次确认：请输入{" "}
                 <code className="font-mono font-semibold">{requireConfirmText}</code> 以确认。
               </p>
               <input
@@ -234,7 +238,7 @@ export default function PlanPreviewModal({
                 className="h-3.5 w-3.5"
                 data-testid="network-ack-checkbox"
               />
-              包含联网动作（network）：我已知晓将从上游拉取/下载。
+              包含需要联网的操作：我已知晓将从官方渠道拉取/下载。
             </label>
           )}
 
@@ -258,7 +262,7 @@ export default function PlanPreviewModal({
               )}
             >
               {executing && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-              {dryRun ? "预演执行（dry-run）" : confirmLabel}
+              {dryRun ? "开始演练" : confirmLabel}
             </button>
           </div>
         </div>

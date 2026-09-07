@@ -24,20 +24,20 @@ export default function SecretsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Secrets" description="secrets 仓库状态与 MCP env 占位符解析矩阵（只读）。" />
+      <PageHeader title="密钥状态" description="密钥仓库与 MCP 服务所需变量的配置状态（只显示是否已配置，永不显示值）。" />
       {query.data.errors.length > 0 && <ErrorPanel title="secrets:status 错误" errors={query.data.errors} />}
 
       <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-100 px-4 py-2.5 text-xs text-slate-600">
         <EyeOff className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
         <p>
-          本页只展示占位符解析状态，变量值永不显示。secrets 仓库由独立 git 仓库管理，编辑请走该仓库本身的流程。
+          本页只显示变量是否已配置，值永不显示。密钥仓库是独立的 git 仓库，修改请走该仓库本身的流程。
         </p>
       </div>
 
       {repo && (
         <section data-testid="secrets-repo-card" className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-slate-700">secrets 仓库</h3>
+            <h3 className="text-sm font-semibold text-slate-700">密钥仓库</h3>
             <StateBadge state={repo.state} />
           </div>
           <dl className="mt-3 space-y-1.5 text-xs text-slate-600">
@@ -46,15 +46,15 @@ export default function SecretsPage() {
               <dd className="font-mono break-all">{repoObserved.path ?? "—"}</dd>
             </div>
             <div className="flex gap-2">
-              <dt className="text-slate-400">存在</dt>
+              <dt className="text-slate-400">已就位</dt>
               <dd>{repoObserved.exists ? "是" : "否"}</dd>
             </div>
             <div className="flex gap-2">
-              <dt className="text-slate-400">git 仓库</dt>
+              <dt className="text-slate-400">独立 git 仓库</dt>
               <dd>{repoObserved.is_git ? "是" : "否"}</dd>
             </div>
             <div className="flex gap-2">
-              <dt className="text-slate-400">env 文件</dt>
+              <dt className="text-slate-400">变量文件</dt>
               <dd className="flex flex-wrap gap-1">
                 {(repoObserved.env_files ?? []).map((file) => (
                   <code key={file} className="rounded bg-slate-100 px-1.5 py-0.5 font-mono">
@@ -70,7 +70,7 @@ export default function SecretsPage() {
       {mcpEnv && (
         <section data-testid="secrets-env-matrix" className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-slate-700">MCP env 占位符解析矩阵</h3>
+            <h3 className="text-sm font-semibold text-slate-700">MCP 服务所需变量</h3>
             <span
               data-testid="env-unresolved-summary"
               className={cn(
@@ -78,15 +78,15 @@ export default function SecretsPage() {
                 unresolved > 0 ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700",
               )}
             >
-              {unresolved > 0 ? `${unresolved} 个占位符未解析` : `全部 ${variables.length} 个占位符已解析`}
+              {unresolved > 0 ? `${unresolved} 个变量未配置` : `全部 ${variables.length} 个变量已配置`}
             </span>
           </div>
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-xs text-slate-500">
                 <th className="py-2 pr-4 font-medium">Server</th>
-                <th className="py-2 pr-4 font-medium">变量（占位符名）</th>
-                <th className="py-2 font-medium">解析</th>
+                <th className="py-2 pr-4 font-medium">变量名</th>
+                <th className="py-2 font-medium">配置状态</th>
               </tr>
             </thead>
             <tbody>
@@ -103,11 +103,11 @@ export default function SecretsPage() {
                     <td className="py-2">
                       {item.resolved ? (
                         <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
-                          <Check className="h-3.5 w-3.5" aria-hidden /> 已解析
+                          <Check className="h-3.5 w-3.5" aria-hidden /> 已配置
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-xs text-red-600">
-                          <X className="h-3.5 w-3.5" aria-hidden /> 未解析
+                          <X className="h-3.5 w-3.5" aria-hidden /> 未配置
                         </span>
                       )}
                     </td>
@@ -116,7 +116,7 @@ export default function SecretsPage() {
               })}
             </tbody>
           </table>
-          {variables.length === 0 && <p className="py-4 text-center text-sm text-slate-400">无 env 占位符</p>}
+          {variables.length === 0 && <p className="py-4 text-center text-sm text-slate-400">没有需要配置的变量</p>}
         </section>
       )}
     </div>

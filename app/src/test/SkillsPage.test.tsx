@@ -88,27 +88,27 @@ describe("SkillsPage 三级视图", () => {
   it("集合卡片：模式/默认姿态/缓存/收件箱计数徽标", async () => {
     renderWithEngine(<SkillsPage />, skillsRoutes());
     const card = await screen.findByTestId("collection-card-agent-skills");
-    expect(within(card).getByText("矩阵模式")).toBeInTheDocument();
-    expect(within(card).getByText(/new_skill_default: disabled/)).toBeInTheDocument();
-    expect(within(card).getByText("仓库已缓存")).toBeInTheDocument();
+    expect(within(card).getByText("按助手逐个授权")).toBeInTheDocument();
+    expect(within(card).getByText(/新技能默认:不启用/)).toBeInTheDocument();
+    expect(within(card).getByText("已下载到本地")).toBeInTheDocument();
     expect(within(card).getByText("自研")).toBeInTheDocument();
-    expect(within(card).getByTestId("inbox-count-agent-skills")).toHaveTextContent("收件箱 2");
+    expect(within(card).getByTestId("inbox-count-agent-skills")).toHaveTextContent("新发现 2");
   });
 
-  it("发现收件箱：列出 disabled+discovery_inbox 的 skill 与状态说明", async () => {
+  it("新发现的技能区：列出 disabled+discovery_inbox 的 skill 与说明", async () => {
     renderWithEngine(<SkillsPage />, skillsRoutes());
     const inbox = await screen.findByTestId("discovery-inbox");
     expect(within(inbox).getByTestId("inbox-total")).toHaveTextContent("2");
     expect(within(inbox).getByText("inbox-one")).toBeInTheDocument();
     expect(within(inbox).getByText("inbox-two")).toBeInTheDocument();
-    expect(within(inbox).getAllByText(/显式启用才分发/)).toHaveLength(2);
+    expect(within(inbox).getAllByText(/启用后才会分发到助手/)).toHaveLength(2);
   });
 
   it("启用矩阵：单元格态 已链接/死链/未链接/已停用，收件箱 skill 不进矩阵", async () => {
     renderWithEngine(<SkillsPage />, skillsRoutes());
-    expect(await screen.findByTitle("claude-code: linked")).toHaveTextContent("已链接");
-    expect(screen.getByTitle("codex: dead-link")).toHaveTextContent("死链");
-    expect(screen.getByTitle("claude-code: missing-link")).toHaveTextContent("未链接");
+    expect(await screen.findByTitle("claude-code: linked")).toHaveTextContent("已启用");
+    expect(screen.getByTitle("codex: dead-link")).toHaveTextContent("失效链接");
+    expect(screen.getByTitle("claude-code: missing-link")).toHaveTextContent("未生效");
     const disabled = screen.getByTitle("codex: disabled");
     expect(disabled).toHaveTextContent("已停用");
     expect(disabled.className).toContain("zinc");

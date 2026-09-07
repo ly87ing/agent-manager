@@ -40,16 +40,16 @@ export default function DomainApplyPage({
           data-testid={`apply-${domain}-button`}
           onClick={() =>
             preview.open({
-              title: `收敛 ${title} 域`,
-              subtitle: `执行 ${domain}:apply；预览为 ${domain}:plan 的完整动作清单。非 dry-run 前引擎自动快照。`,
+              title: `同步${title}`,
+              subtitle: "先预览将要执行的操作；实际执行前会自动备份。",
               planCommands: [`${domain}:plan`],
-              confirmLabel: `收敛 ${title}`,
-              execute: executeApply({ command: `${domain}:apply`, label: `收敛 ${title} 域` }),
+              confirmLabel: "立即同步",
+              execute: executeApply({ command: `${domain}:apply`, label: `同步${title}` }),
             })
           }
           className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
         >
-          <PlayCircle className="h-4 w-4" aria-hidden /> 收敛此域
+          <PlayCircle className="h-4 w-4" aria-hidden /> 立即同步
         </button>
       </div>
 

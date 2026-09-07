@@ -71,33 +71,33 @@ export default function UpdatesPage() {
   /** 行内收敛：域 plan 过滤到本元素 → 域级 apply。 */
   const openRowApply = (element: EngineElement) => {
     preview.open({
-      title: `收敛 ${element.id}`,
-      subtitle: `预览为 ${element.domain}:plan 过滤到本元素的动作；确认执行 ${element.domain}:apply 域级收敛（执行前自动快照）。`,
+      title: `更新 ${element.id}`,
+      subtitle: "预览只显示这个组件的相关操作；实际执行会同步该域全部组件（执行前自动备份）。",
       planCommands: [`${element.domain}:plan`],
       filterElement: element.id,
       requireConfirmText: element.domain === "agents" || element.domain === "tools" ? element.id : undefined,
-      confirmLabel: "收敛此项",
-      execute: executeApply({ command: `${element.domain}:apply`, label: `收敛 ${element.id}` }),
+      confirmLabel: "更新此项",
+      execute: executeApply({ command: `${element.domain}:apply`, label: `更新 ${element.id}` }),
     });
   };
 
   /** 顶部聚合收敛：全部落后元素的 plan 聚合预览 → system:converge（= update 管线语义）。 */
   const openConvergeAll = () => {
     preview.open({
-      title: "收敛全部落后项",
-      subtitle: "预览聚合了各域落后元素的动作；确认执行的是 system:converge 全管线收敛（语义 = update），非 dry-run 前自动快照。",
+      title: "全部更新",
+      subtitle: "预览聚合了各域可更新组件的操作；实际执行是一次全量同步（执行前自动备份）。",
       planCommands: DOMAINS.map((domain) => `${domain.key}:plan`),
       filterElements: new Set(behindElements.map((element) => element.id)),
-      confirmLabel: "收敛全部落后项",
-      execute: executeApply({ command: "system:converge", label: "收敛全部落后项" }),
+      confirmLabel: "全部更新",
+      execute: executeApply({ command: "system:converge", label: "全部更新" }),
     });
   };
 
   return (
     <div className="space-y-4">
       <PageHeader
-        title="更新中心"
-        description="全组件上游新鲜度总表（agents / tools / mcp / skills，按 落后 → 未知 → 已是最新 → 领先 排序）。探测只写缓存，收敛动作 Phase 2 开放。"
+        title="更新"
+        description="各组件与官方最新版本的对比（按 可更新 → 未检查 → 已是最新 → 比官方新 排序）。平时只读本地检查记录；点「检查更新」才联网。"
       />
 
       {offline && (
@@ -106,7 +106,7 @@ export default function UpdatesPage() {
           className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800"
         >
           <WifiOff className="h-4 w-4 shrink-0" aria-hidden />
-          离线模式：整表为上次检查的缓存值（只读），刷新与重新探测已禁用。
+          离线模式：显示的是上次检查的结果（只读），检查更新已禁用。
         </div>
       )}
 
@@ -132,7 +132,7 @@ export default function UpdatesPage() {
           )}
         >
           <PlayCircle className="h-4 w-4" aria-hidden />
-          收敛全部落后项（{behindElements.length}）
+          全部更新（{behindElements.length}）
         </button>
         <button
           type="button"
@@ -149,7 +149,7 @@ export default function UpdatesPage() {
           ) : (
             <RefreshCw className="h-4 w-4" aria-hidden />
           )}
-          全部刷新上游状态
+          检查全部更新
         </button>
       </div>
 
@@ -158,11 +158,11 @@ export default function UpdatesPage() {
           <thead>
             <tr className="border-b border-slate-200 text-xs text-slate-500">
               <th className="py-2 pr-4 font-medium">元素</th>
-              <th className="py-2 pr-4 font-medium">current → upstream</th>
+              <th className="py-2 pr-4 font-medium">当前 → 最新</th>
               <th className="py-2 pr-4 font-medium">状态</th>
               <th className="py-2 pr-4 font-medium">上次检查</th>
-              <th className="py-2 pr-4 font-medium">缓存年龄</th>
-              <th className="py-2 pr-4 font-medium">探测源</th>
+              <th className="py-2 pr-4 font-medium">检查结果时间</th>
+              <th className="py-2 pr-4 font-medium">检查方式</th>
               <th className="py-2 font-medium">操作</th>
             </tr>
           </thead>
@@ -180,10 +180,11 @@ export default function UpdatesPage() {
                     <FreshnessBadge freshness={element.freshness} />
                   </td>
                   <td className="py-2 pr-4 text-xs text-slate-500">{formatCheckedAt(element.freshness.checked_at)}</td>
-                  <td className={cn("py-2 pr-4 text-xs", stale ? "text-amber-600" : "text-slate-500")}>
-                    {element.freshness.cache_age_sec !== null
-                      ? `${humanizeCacheAge(element.freshness.cache_age_sec)}${stale ? "（陈旧）" : ""}`
-                      : "—"}
+                  <td
+                    className={cn("py-2 pr-4 text-xs", stale ? "text-amber-600" : "text-slate-500")}
+                    title={stale ? "检查结果较旧（超过 24 小时），建议重新检查" : undefined}
+                  >
+                    {element.freshness.cache_age_sec !== null ? humanizeCacheAge(element.freshness.cache_age_sec) : "—"}
                   </td>
                   <td className="py-2 pr-4 font-mono text-xs text-slate-500">{element.freshness.probe ?? "—"}</td>
                   <td className="py-2">
@@ -203,7 +204,7 @@ export default function UpdatesPage() {
                             : "border-indigo-200 text-indigo-600 hover:bg-indigo-50",
                         )}
                       >
-                        {rowPending ? "探测中…" : "重新探测"}
+                        {rowPending ? "检查中…" : "重新检查"}
                       </button>
                       {(element.freshness.state === "behind" || element.freshness.state === "unknown") && (
                         <button
@@ -212,8 +213,8 @@ export default function UpdatesPage() {
                           disabled={offline && (element.domain === "agents" || element.domain === "tools")}
                           title={
                             offline && (element.domain === "agents" || element.domain === "tools")
-                              ? "offline 模式下禁用（升级/安装需联网）"
-                              : "收敛此项（域级 apply，先 plan 预览）"
+                              ? "离线模式下不可用（升级/安装需要联网）"
+                              : "更新此项（会先预览将要执行的操作）"
                           }
                           onClick={() => openRowApply(element)}
                           className={cn(
@@ -223,7 +224,7 @@ export default function UpdatesPage() {
                               : "border-emerald-200 text-emerald-700 hover:bg-emerald-50",
                           )}
                         >
-                          收敛此项
+                          更新此项
                         </button>
                       )}
                     </div>
@@ -233,7 +234,7 @@ export default function UpdatesPage() {
             })}
           </tbody>
         </table>
-        {elements.length === 0 && <p className="py-4 text-center text-sm text-slate-400">没有可探测上游的元素</p>}
+        {elements.length === 0 && <p className="py-4 text-center text-sm text-slate-400">没有需要检查更新的组件</p>}
       </section>
 
       {preview.modal}

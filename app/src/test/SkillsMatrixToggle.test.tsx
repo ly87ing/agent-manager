@@ -95,7 +95,7 @@ describe("Skills 矩阵点击切换", () => {
     const { calls } = renderWithEngine(<SkillsPage />, rejected);
 
     await userEvent.click(await screen.findByTestId("skill-cell-skill:agent-skills/alpha-codex"));
-    expect(await screen.findByText(/策略写入被引擎拒绝/)).toBeInTheDocument();
+    expect(await screen.findByText(/保存被拒绝/)).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
   });

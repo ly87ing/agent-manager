@@ -1,8 +1,9 @@
 import { cva } from "class-variance-authority";
 import type { ElementState } from "../lib/contract";
+import { ELEMENT_STATE_COPY } from "../lib/ui-copy";
 import { cn } from "../lib/utils";
 
-/** 收敛轴七态徽章（提案 §3.1）。 */
+/** 同步状态徽章（收敛轴七态，提案 §3.1；用户文案见 lib/ui-copy.ts，tooltip 保留工程原值对照）。 */
 const stateBadgeVariants = cva(
   "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap",
   {
@@ -20,20 +21,11 @@ const stateBadgeVariants = cva(
   },
 );
 
-const STATE_LABELS: Record<ElementState, string> = {
-  "managed-ok": "已收敛",
-  drifted: "已漂移",
-  missing: "缺失",
-  "not-materialized": "未生成",
-  "unmanaged-detected": "未托管",
-  unsupported: "不支持",
-  disabled: "已停用",
-};
-
 export function StateBadge({ state, className }: { state: ElementState; className?: string }) {
+  const copy = ELEMENT_STATE_COPY[state];
   return (
-    <span className={cn(stateBadgeVariants({ state }), className)} title={state}>
-      {STATE_LABELS[state]}
+    <span className={cn(stateBadgeVariants({ state }), className)} title={`${state}（${copy.hint}）`}>
+      {copy.label}
     </span>
   );
 }

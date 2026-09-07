@@ -23,10 +23,10 @@ const PROVIDER_BUCKETS = ["managed", "deprecated", "system_only", "unsupported"]
 type ProviderBucket = (typeof PROVIDER_BUCKETS)[number];
 
 const PROVIDER_CLASS_META: Record<ProviderBucket, { label: string; className: string }> = {
-  managed: { label: "托管", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+  managed: { label: "由此工具管理", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
   deprecated: { label: "已弃用", className: "border-amber-200 bg-amber-50 text-amber-700" },
-  system_only: { label: "仅系统", className: "border-sky-200 bg-sky-50 text-sky-700" },
-  unsupported: { label: "不支持", className: "border-zinc-200 bg-zinc-100 text-zinc-500" },
+  system_only: { label: "仅系统检测到", className: "border-sky-200 bg-sky-50 text-sky-700" },
+  unsupported: { label: "不可接管", className: "border-zinc-200 bg-zinc-100 text-zinc-500" },
 };
 
 function PolicyChip({ label, value }: { label: string; value: boolean | undefined }) {
@@ -52,7 +52,7 @@ function AgentCard({ element }: { element: EngineElement }) {
   const observed = element.observed as AgentsObserved;
   const classified = observed.classified ?? {};
   const installed = observed.installed ?? false;
-  const version = installed ? (element.freshness.current ?? "已安装（版本未探测）") : "未安装";
+  const version = installed ? (element.freshness.current ?? "已安装（还没检查过版本）") : "未安装";
   const name = spec.display_name ?? element.id;
 
   /** 动作 → plan 预览（过滤到本元素）→ agents:apply（域级收敛；含卸载时引擎要求 --allow-uninstall）。 */
@@ -60,11 +60,11 @@ function AgentCard({ element }: { element: EngineElement }) {
     const isDestructive = action.id === "uninstall" || action.id === "install";
     preview.open({
       title: `${ACTION_META[action.id]?.label ?? action.id} ${name}`,
-      subtitle: `预览只显示本元素相关动作；确认执行的是 agents:apply 全域收敛（引擎单写者，执行前自动快照）。`,
+      subtitle: `预览只显示这个助手的相关操作；实际执行会同步全部助手配置（执行前自动备份）。`,
       planCommands: ["agents:plan"],
       filterElement: element.id,
       requireConfirmText: isDestructive ? element.id : undefined,
-      confirmLabel: `${ACTION_META[action.id]?.label ?? action.id}（域级收敛）`,
+      confirmLabel: `${ACTION_META[action.id]?.label ?? action.id}`,
       execute: executeApply({
         command: "agents:apply",
         label: `${ACTION_META[action.id]?.label ?? action.id} ${name}`,
@@ -81,7 +81,7 @@ function AgentCard({ element }: { element: EngineElement }) {
             {name}
             <span className="ml-2 font-mono text-xs font-normal text-slate-400">{spec.bin}</span>
           </h3>
-          <p className="mt-0.5 text-sm text-slate-500">已装版本：{version}</p>
+          <p className="mt-0.5 text-sm text-slate-500">当前版本:{version}</p>
         </div>
         <div className="flex flex-col items-end gap-1.5">
           <StateBadge state={element.state} />
@@ -109,10 +109,10 @@ function AgentCard({ element }: { element: EngineElement }) {
                 ? "border-indigo-200 bg-indigo-50 text-indigo-700"
                 : "border-slate-200 bg-slate-50 text-slate-500",
             )}
-            title={observed.preferred_active ? "偏好 provider 生效中" : "当前安装非偏好 provider"}
+            title={observed.preferred_active ? "推荐渠道生效中" : "当前安装不走推荐渠道"}
           >
-            偏好 {spec.preferred_provider}
-            {observed.preferred_active ? "·生效" : "·未生效"}
+            推荐渠道 {spec.preferred_provider}
+            {observed.preferred_active ? "·生效中" : "·未生效"}
           </span>
         )}
       </div>
@@ -126,8 +126,8 @@ function AgentCard({ element }: { element: EngineElement }) {
       {element.state === "unmanaged-detected" && (
         <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           <p>
-            检测到未托管安装（不在受管 provider 列表内）。建议迁移到受管 provider
-            {spec.preferred_provider ? `（偏好 ${spec.preferred_provider}）` : ""}，由引擎统一管理。
+            检测到用 {(observed.classified?.unsupported ?? [])[0] ?? "其它渠道"} 安装的旧版，建议迁移到官方
+            {spec.preferred_provider ? `${spec.preferred_provider} ` : ""}渠道，之后就能用本工具统一升级和卸载。
           </p>
           <button
             type="button"
@@ -141,9 +141,9 @@ function AgentCard({ element }: { element: EngineElement }) {
               offline ? "cursor-not-allowed border-slate-200 text-slate-400" : "border-amber-300 text-amber-800 hover:bg-amber-100",
             )}
           >
-            迁移到受管 provider（经 plan 预览）
+            迁移到官方渠道
           </button>
-          {offline && <span className="ml-2 text-xs text-amber-600">offline 下不可用（network 级）</span>}
+          {offline && <span className="ml-2 text-xs text-amber-600">离线模式下不可用（需要联网）</span>}
         </div>
       )}
 
@@ -159,7 +159,7 @@ function AgentCard({ element }: { element: EngineElement }) {
               type="button"
               data-testid={`action-${action.id}-${element.id}`}
               disabled={disabled}
-              title={disabled ? "offline 模式下禁用（network/install-remove 级需联网）" : `${meta.label}（${action.risk} 级，先 plan 预览）`}
+              title={disabled ? "离线模式下不可用（需要联网）" : `${meta.label}（会先预览将要执行的操作）`}
               onClick={() => openAction(action)}
               className={cn(
                 "inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs",
@@ -178,7 +178,7 @@ function AgentCard({ element }: { element: EngineElement }) {
           aria-expanded={expanded}
         >
           {expanded ? <ChevronDown className="h-3.5 w-3.5" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden />}
-          {expanded ? "收起漂移解释" : "展开漂移解释"}
+          {expanded ? "收起同步详情" : "展开同步详情"}
         </button>
       </div>
       {expanded && <div className="mt-2"><DriftExplanationPanel element={element} planCommand="agents:plan" /></div>}
@@ -195,7 +195,7 @@ export default function AgentsPage() {
   const elements = query.data.data.elements;
   return (
     <div className="space-y-4">
-      <PageHeader title="Agents" description="安装源分类、版本与上游新鲜度、policy 开关（只读）。升级/迁移属 network / install-remove 动作，Phase 2 开放。" />
+      <PageHeader title="助手" description="各 AI 助手的安装渠道、版本与官方最新版对比。安装/升级/卸载都会先预览再执行。" />
       {query.data.errors.length > 0 && <ErrorPanel title="agents:status 错误" errors={query.data.errors} />}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {elements.map((element) => (

@@ -2,21 +2,14 @@ import { useEngineQuery } from "../lib/queries";
 import type { EngineElement, PlanAction, PlanData } from "../lib/contract";
 import { agentCellsOf } from "../lib/observed";
 import { engineErrorMessage } from "../lib/engine";
+import { COPY, RISK_COPY } from "../lib/ui-copy";
 import { MatrixCell } from "./MatrixCell";
 
 /**
- * 结构化漂移解释视图（只读）。引擎 Phase 1 不提供 before/after 文本 diff，
- * 本面板从现有 status/plan payload 组合：目标路径、per-agent 单元格状态、
- * plan 动作清单（op/risk/target/before/after digest/note）。
+ * 结构化「不一致」解释视图（只读）。引擎不提供 before/after 文本 diff，
+ * 本面板从现有 status/plan payload 组合：目标位置、各助手状态、
+ * 将要执行的操作清单（op/类型/位置/改动前后内容指纹/说明）。
  */
-
-const RISK_LABELS: Record<string, string> = {
-  read: "读取",
-  "write-local": "写本地",
-  "exec-local": "本地执行",
-  network: "网络",
-  "install-remove": "安装/卸载",
-};
 
 export function shortenDigest(digest: string | null): string {
   if (!digest) return "—";
@@ -31,9 +24,9 @@ function PlanActionTable({ actions }: { actions: PlanAction[] }) {
         <thead>
           <tr className="border-b border-slate-200 text-slate-500">
             <th className="py-1.5 pr-3 font-medium">操作</th>
-            <th className="py-1.5 pr-3 font-medium">风险级</th>
-            <th className="py-1.5 pr-3 font-medium">目标</th>
-            <th className="py-1.5 pr-3 font-medium">before → after</th>
+            <th className="py-1.5 pr-3 font-medium">类型</th>
+            <th className="py-1.5 pr-3 font-medium">位置</th>
+            <th className="py-1.5 pr-3 font-medium">内容指纹（前 → 后）</th>
             <th className="py-1.5 font-medium">说明</th>
           </tr>
         </thead>
@@ -41,7 +34,7 @@ function PlanActionTable({ actions }: { actions: PlanAction[] }) {
           {actions.map((action, index) => (
             <tr key={`${action.op}-${action.target ?? action.cmd ?? index}`} className="border-b border-slate-100 last:border-0">
               <td className="py-1.5 pr-3 font-mono">{action.op}</td>
-              <td className="py-1.5 pr-3">{RISK_LABELS[action.risk] ?? action.risk}</td>
+              <td className="py-1.5 pr-3">{RISK_COPY[action.risk]?.label ?? action.risk}</td>
               <td className="max-w-56 truncate py-1.5 pr-3 font-mono" title={action.target ?? undefined}>
                 {action.target ?? action.cmd ?? "—"}
               </td>
@@ -86,7 +79,7 @@ export function DriftExplanationPanel({
   return (
     <div data-testid="drift-panel" className="space-y-4 rounded-md border border-slate-200 bg-slate-50 p-4">
       <div>
-        <h4 className="mb-1.5 text-xs font-semibold text-slate-500">目标路径</h4>
+        <h4 className="mb-1.5 text-xs font-semibold text-slate-500">目标位置</h4>
         {targets.length > 0 ? (
           <ul className="space-y-0.5">
             {targets.map((target) => (
@@ -96,13 +89,13 @@ export function DriftExplanationPanel({
             ))}
           </ul>
         ) : (
-          <p className="text-xs text-slate-400">（本元素不涉及文件目标）</p>
+          <p className="text-xs text-slate-400">（本元素不涉及文件）</p>
         )}
       </div>
 
       {cellEntries.length > 0 && (
         <div>
-          <h4 className="mb-1.5 text-xs font-semibold text-slate-500">per-agent 单元格状态</h4>
+          <h4 className="mb-1.5 text-xs font-semibold text-slate-500">各助手状态</h4>
           <table className="w-full text-left text-xs">
             <tbody>
               {cellEntries.map(([agent, cell]) => (
@@ -127,16 +120,16 @@ export function DriftExplanationPanel({
 
       <div>
         <h4 className="mb-1.5 text-xs font-semibold text-slate-500">
-          plan 动作清单（来自 {planCommand}，只读预览——引擎不锁版本，apply 将在 Phase 2 提供）
+          {COPY.planPreviewTitle}（来自 {planCommand} 的预览，只读）
         </h4>
         {planQuery.isPending ? (
-          <p className="text-xs text-slate-400">plan 加载中…</p>
+          <p className="text-xs text-slate-400">正在计算将要执行的操作…</p>
         ) : planQuery.isError ? (
-          <p className="text-xs text-red-600">plan 加载失败:{engineErrorMessage(planQuery.error)}</p>
+          <p className="text-xs text-red-600">预览加载失败:{engineErrorMessage(planQuery.error)}</p>
         ) : actions.length > 0 ? (
           <PlanActionTable actions={actions} />
         ) : (
-          <p className="text-xs text-slate-400">plan 为空：该元素当前无需收敛动作。</p>
+          <p className="text-xs text-slate-400">没有需要执行的操作。</p>
         )}
       </div>
     </div>

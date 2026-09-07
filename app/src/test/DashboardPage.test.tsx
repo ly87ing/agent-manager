@@ -217,7 +217,7 @@ describe("DashboardPage", () => {
     expect(button).toBeEnabled();
     await userEvent.click(button);
 
-    expect(await screen.findByText(/上游探测完成/)).toBeInTheDocument();
+    expect(await screen.findByText(/检查更新完成/)).toBeInTheDocument();
     // 刷新完成后缓存失效重新拉取：agents:status 至少被调用过
     await waitFor(() => expect(screen.getByTestId("freshness-count-agents-behind")).toHaveTextContent("1"));
   });

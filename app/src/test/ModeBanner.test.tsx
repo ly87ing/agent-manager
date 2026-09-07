@@ -30,7 +30,7 @@ describe("ModeBanner", () => {
   it("offline 模式：渲染离线标注", async () => {
     renderBanner({ offline: true, dry_run: false });
     expect(await screen.findByText(/离线模式/)).toBeInTheDocument();
-    expect(screen.getByText(/缓存值/)).toBeInTheDocument();
+    expect(screen.getByText(/上次检查的结果/)).toBeInTheDocument();
   });
 
   it("dry-run 模式：渲染演练标注", async () => {

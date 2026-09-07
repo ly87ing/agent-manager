@@ -29,7 +29,7 @@ describe("配置同步页", () => {
     renderWithEngine(<SyncPage />, routes());
     const card = await screen.findByTestId("profile-status-card");
     expect(card).toHaveTextContent("git.example.com");
-    expect(screen.getByTestId("profile-state")).toHaveTextContent("一致");
+    expect(screen.getByTestId("profile-state")).toHaveTextContent("已同步");
 
     const conflicts = screen.getByTestId("profile-conflicts");
     expect(conflicts).toHaveTextContent("mcp.grok-search.enabled");
@@ -38,8 +38,8 @@ describe("配置同步页", () => {
     expect(conflicts).toHaveTextContent(/sha256:…44ee55/);
     expect(conflicts).toHaveTextContent(/sha256:…dd44ee/);
     // 只读语义：保留本地说明 + 策略编辑器引导，无任何解决按钮
-    expect(conflicts).toHaveTextContent(/保留本地值/);
-    expect(conflicts).toHaveTextContent(/以远端为准，请到策略编辑器/);
+    expect(conflicts).toHaveTextContent(/保留这台电脑的值/);
+    expect(conflicts).toHaveTextContent(/「个性化配置」页/);
     expect(conflicts.querySelector("button")).toBeNull();
   });
 
@@ -51,8 +51,8 @@ describe("配置同步页", () => {
 
     expect(await screen.findByTestId("profile-pull-button")).toBeDisabled();
     expect(screen.getByTestId("profile-push-button")).toBeDisabled();
-    expect(screen.getByText(/offline 模式：network 级动作已禁用/)).toBeInTheDocument();
-    expect(screen.getByTestId("profile-state")).toHaveTextContent("仅本地");
+    expect(screen.getByText(/离线模式：需要联网的操作已禁用/)).toBeInTheDocument();
+    expect(screen.getByTestId("profile-state")).toHaveTextContent("仅本机（离线）");
   });
 
   it("后端未配置：展示配置引导卡", async () => {
@@ -64,7 +64,7 @@ describe("配置同步页", () => {
       }),
     });
     renderWithEngine(<SyncPage />, unconfigured);
-    expect(await screen.findByText("未配置同步后端")).toBeInTheDocument();
+    expect(await screen.findByText("还没有配置同步后端")).toBeInTheDocument();
     expect(screen.getByText(/PROFILE_SYNC_REPO_URL/)).toBeInTheDocument();
     expect(screen.queryByTestId("profile-pull-button")).toBeNull();
   });

@@ -72,7 +72,7 @@ describe("UpdatesPage 更新中心", () => {
     expect(screen.queryByTestId("update-row-mcp:x-na")).toBeNull();
     // 列内容：版本对比、缓存年龄（stale 标注）、探测源
     expect(screen.getByText("1.0.0 → 2.0.0")).toBeInTheDocument();
-    expect(screen.getByText(/1 天前（陈旧）/)).toBeInTheDocument();
+    expect(screen.getByText("1 天前")).toBeInTheDocument();
     expect(screen.getAllByText("npm-view").length).toBeGreaterThan(0);
   });
 
@@ -97,10 +97,10 @@ describe("UpdatesPage 更新中心", () => {
 
     await userEvent.click(button);
     expect(button).toBeDisabled();
-    expect(button).toHaveTextContent("全部刷新上游状态");
+    expect(button).toHaveTextContent("检查全部更新");
 
     release!();
-    expect(await screen.findByText(/上游探测完成/)).toBeInTheDocument();
+    expect(await screen.findByText(/检查更新完成/)).toBeInTheDocument();
     expect(screen.getByTestId("refresh-all-button")).toBeEnabled();
   });
 
@@ -109,7 +109,7 @@ describe("UpdatesPage 更新中心", () => {
     routes["system:audit"] = makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode({ offline: true }) });
     renderWithEngine(<UpdatesPage />, routes);
 
-    expect(await screen.findByText(/离线模式：整表为上次检查的缓存值/)).toBeInTheDocument();
+    expect(await screen.findByText(/离线模式：显示的是上次检查的结果/)).toBeInTheDocument();
     expect(screen.getByTestId("refresh-all-button")).toBeDisabled();
     expect(screen.getByTestId("reprobe-agents:a-behind")).toBeDisabled();
   });

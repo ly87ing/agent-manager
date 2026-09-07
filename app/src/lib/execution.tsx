@@ -78,9 +78,9 @@ export function ExecutionProvider({ children }: { children: ReactNode }) {
       patch({ status: ok ? "ok" : "failed", finishedAt: Date.now(), envelope });
       const firstError: Diagnostic | undefined = envelope.errors[0];
       if (ok) {
-        toast.success(`${request.label}${request.dryRun ? "（dry-run 预演）" : ""}完成`);
+        toast.success(`${request.label}${request.dryRun ? "（演练）" : ""}完成`);
       } else {
-        toast.error(`${request.label} 失败：${firstError?.message ?? "见执行中心"}`);
+        toast.error(`${request.label} 失败：${firstError?.message ?? "详见任务记录"}`);
       }
       void queryClient.invalidateQueries({ queryKey: engineKeys.all });
       return envelope;

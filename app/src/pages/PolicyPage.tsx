@@ -7,14 +7,11 @@ import type { Diagnostic, Envelope, PolicyData, PolicyLayer, PolicyLayerName } f
 import { engineErrorMessage, runEngine } from "../lib/engine";
 import { getDefaultPolicyLayer, useDefaultPolicyLayer } from "../lib/policyLayer";
 import { useEngineQuery } from "../lib/queries";
+import { POLICY_LAYER_COPY } from "../lib/ui-copy";
 import { cn } from "../lib/utils";
 
 /** 层归属徽标配色（提案 §4.9：baseline 灰显只读、synced 蓝标、local 橙标）。 */
-const LAYER_META: Record<PolicyLayerName, { label: string; className: string }> = {
-  baseline: { label: "基线层", className: "border-slate-200 bg-slate-100 text-slate-500" },
-  synced: { label: "共享层", className: "border-sky-200 bg-sky-50 text-sky-700" },
-  local: { label: "仅本机", className: "border-orange-200 bg-orange-50 text-orange-700" },
-};
+const LAYER_META = POLICY_LAYER_COPY;
 
 function LayerBadge({ layer }: { layer: PolicyLayerName }) {
   const meta = LAYER_META[layer];
@@ -105,17 +102,17 @@ function EditDialog({
       setErrors(envelope.errors);
       return;
     }
-    toast.success(`已写入 ${LAYER_META[layer].label}：${key}`);
+    toast.success(`已保存到「${LAYER_META[layer].label}」:${key}`);
     onSaved(envelope.data);
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div role="dialog" aria-modal="true" aria-label="编辑策略键" className="w-full max-w-xl rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
-        <h3 className="text-base font-semibold text-slate-800">编辑策略键</h3>
+      <div role="dialog" aria-modal="true" aria-label="编辑配置项" className="w-full max-w-xl rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
+        <h3 className="text-base font-semibold text-slate-800">编辑配置项</h3>
         <div className="mt-4 space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">键（点分路径）</label>
+            <label className="mb-1 block text-xs font-medium text-slate-500">配置项（点分路径）</label>
             <input
               type="text"
               value={key}
@@ -125,7 +122,7 @@ function EditDialog({
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">值（JSON）</label>
+            <label className="mb-1 block text-xs font-medium text-slate-500">值（JSON 格式）</label>
             <textarea
               value={rawValue}
               onChange={(event) => setRawValue(event.target.value)}
@@ -135,7 +132,7 @@ function EditDialog({
             />
           </div>
           <fieldset>
-            <legend className="mb-1 text-xs font-medium text-slate-500">落点（baseline 基线层只读，改动走正常 git 流程）</legend>
+            <legend className="mb-1 text-xs font-medium text-slate-500">保存到哪里（仓库默认值只读，要改它请走仓库的 git 流程）</legend>
             <div className="flex gap-3">
               {(["synced", "local"] as const).map((candidate) => (
                 <label key={candidate} className="flex items-center gap-1.5 text-xs text-slate-700">
@@ -147,13 +144,13 @@ function EditDialog({
                     data-testid={`policy-layer-${candidate}`}
                   />
                   <LayerBadge layer={candidate} />
-                  {candidate === "synced" ? "（随配置同步走）" : "（只影响本机）"}
+                  {candidate === "synced" ? "（同步到其它电脑）" : "（只影响这台电脑）"}
                 </label>
               ))}
             </div>
           </fieldset>
           {clientError && <p className="text-xs text-red-600">{clientError}</p>}
-          {errors && errors.length > 0 && <ErrorPanel title="policy:set 被引擎拒绝" errors={errors} />}
+          {errors && errors.length > 0 && <ErrorPanel title="保存被拒绝" errors={errors} />}
         </div>
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" onClick={onClose} disabled={submitting} className="rounded-md border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-40">
@@ -196,13 +193,13 @@ export default function PolicyPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="策略编辑器"
-        description="三层栈 manager.json（基线）⊕ manager.synced.json（共享）⊕ manager.local.json（仅本机）。写入只落 synced/local 层，疑似明文有引擎硬门禁。"
+        title="个性化配置"
+        description="查看和调整本工具的配置。改动只写入「多设备共享」或「仅这台电脑」两层；仓库默认值只读。疑似密钥的内容会被自动拒绝。"
       />
       {query.data.errors.length > 0 && <ErrorPanel title="policy:get 错误" errors={query.data.errors} />}
 
       <section className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <span className="text-xs text-slate-500">快捷写路径（如 Skills 矩阵点击）的默认落点：</span>
+        <span className="text-xs text-slate-500">快捷修改（如技能矩阵的开关）默认保存到：</span>
         {(["local", "synced"] as const).map((candidate) => (
           <label key={candidate} className="flex items-center gap-1.5 text-xs text-slate-700">
             <input
@@ -220,18 +217,18 @@ export default function PolicyPage() {
           onClick={() => setEditing({ key: "", value: undefined })}
           className="ml-auto inline-flex items-center gap-1 rounded-md border border-indigo-200 px-3 py-1.5 text-xs text-indigo-600 hover:bg-indigo-50"
         >
-          <Plus className="h-3.5 w-3.5" aria-hidden /> 新建键
+          <Plus className="h-3.5 w-3.5" aria-hidden /> 新增配置项
         </button>
       </section>
 
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 className="mb-3 text-sm font-semibold text-slate-700">生效配置（合并视图）</h3>
+        <h3 className="mb-3 text-sm font-semibold text-slate-700">当前生效的配置</h3>
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-slate-200 text-xs text-slate-500">
-              <th className="py-2 pr-4 font-medium">键</th>
-              <th className="py-2 pr-4 font-medium">值（摘要）</th>
-              <th className="py-2 pr-4 font-medium">层归属</th>
+              <th className="py-2 pr-4 font-medium">配置项</th>
+              <th className="py-2 pr-4 font-medium">值</th>
+              <th className="py-2 pr-4 font-medium">来源</th>
               <th className="py-2 font-medium">操作</th>
             </tr>
           </thead>
@@ -257,7 +254,7 @@ export default function PolicyPage() {
             ))}
           </tbody>
         </table>
-        {rows.length === 0 && <p className="py-4 text-center text-sm text-slate-400">配置为空</p>}
+        {rows.length === 0 && <p className="py-4 text-center text-sm text-slate-400">暂无配置</p>}
       </section>
 
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">

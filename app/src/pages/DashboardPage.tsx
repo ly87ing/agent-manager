@@ -153,7 +153,7 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight">Dashboard</h2>
+          <h2 className="text-xl font-semibold tracking-tight">总览</h2>
           <p className="mt-1 text-xs text-slate-400">
             运行 {audit.run_id} · 版本 {auditData.version.commit}（{auditData.version.date}）
           </p>
@@ -176,9 +176,9 @@ export default function DashboardPage() {
             ) : (
               <RefreshCw className="h-4 w-4" aria-hidden />
             )}
-            刷新上游状态
+            检查更新
           </button>
-          {offline && <p className="text-xs text-amber-600">offline 模式下禁用（network 级探测）</p>}
+          {offline && <p className="text-xs text-amber-600">离线模式下不可用（需要联网检查）</p>}
         </div>
       </div>
 
@@ -205,7 +205,7 @@ export default function DashboardPage() {
             {(
               [
                 ["optional_tools", "可选工具未就绪"],
-                ["unmaterialized", "托管产物尚未生成"],
+                ["unmaterialized", "应生成的文件还没生成"],
                 ["official_gaps", "官方缺口"],
               ] as const
             ).map(([key, label]) => (
@@ -221,7 +221,7 @@ export default function DashboardPage() {
       </div>
 
       <div>
-        <h3 className="mb-3 text-sm font-semibold text-slate-700">上游新鲜度（仅读探测缓存，status 零网络）</h3>
+        <h3 className="mb-3 text-sm font-semibold text-slate-700">最新版本检查（只读本地记录，不联网）</h3>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {freshnessCards.map((card) => (
             <Card key={card.key} title={card.label} testId={`freshness-card-${card.key}`}>
@@ -233,9 +233,9 @@ export default function DashboardPage() {
                     {(
                       [
                         ["current", "已是最新"],
-                        ["behind", "落后"],
-                        ["ahead", "领先"],
-                        ["unknown", "未知"],
+                        ["behind", "可更新"],
+                        ["ahead", "比官方新"],
+                        ["unknown", "未检查"],
                       ] as const
                     ).map(([state, label]) => (
                       <li key={state} className="flex items-center justify-between">
@@ -265,13 +265,13 @@ export default function DashboardPage() {
       </div>
 
       {staleElements.length > 0 && (
-        <Card title={`落后 / 未知元素（${staleElements.length}）`} testId="stale-elements">
+        <Card title={`可更新 / 未检查的元素（${staleElements.length}）`} testId="stale-elements">
           <ElementTable elements={staleElements} />
         </Card>
       )}
 
       <div className="space-y-4">
-        <h3 className="text-sm font-semibold text-slate-700">审计明细</h3>
+        <h3 className="text-sm font-semibold text-slate-700">体检明细</h3>
         {Object.entries(auditData.sections).map(([section, entries]) => (
           <Card key={section} title={SECTION_LABELS[section] ?? section} testId={`audit-section-${section}`}>
             <ul className="space-y-1.5">

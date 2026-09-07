@@ -1,13 +1,14 @@
 import { cva } from "class-variance-authority";
 import { ArrowRight } from "lucide-react";
 import type { Freshness } from "../lib/contract";
+import { FRESHNESS_STALE_NOTE, freshnessLabel } from "../lib/ui-copy";
 import { cn, formatCheckedAt, humanizeCacheAge, isCacheStale } from "../lib/utils";
 
 /**
- * 上游轴五态徽章（提案 §3.3）。
- * - not-applicable：无上游概念，不渲染徽章；
- * - unknown：一等状态，灰显，不用红色制造焦虑；
- * - 缓存超过 TTL（24h）标 stale 样式，不自动联网。
+ * 最新版本徽章（上游轴五态，提案 §3.3；用户文案见 lib/ui-copy.ts）。
+ * - not-applicable：该元素没有「官方最新版」概念，不渲染徽章；
+ * - unknown（未检查）：一等状态，灰显，不用红色制造焦虑；
+ * - 检查结果超过 TTL（24h）标「检查结果较旧」，不自动联网。
  */
 const freshnessBadgeVariants = cva(
   "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap",
@@ -24,36 +25,16 @@ const freshnessBadgeVariants = cva(
   },
 );
 
-function shortVersion(value: string | null): string {
-  if (!value) return "?";
-  // git commit 全 hash 只显示短形（对齐提案 §4.3 短 hash 约定）
-  return /^[0-9a-f]{20,}$/i.test(value) ? value.slice(0, 7) : value;
-}
-
-function freshnessLabel(freshness: Freshness): string {
-  switch (freshness.state) {
-    case "current":
-      return "已是最新";
-    case "behind":
-      return `可更新 ${shortVersion(freshness.current)} → ${shortVersion(freshness.upstream)}`;
-    case "ahead":
-      return freshness.current ? `领先上游 ${freshness.current}` : "领先上游";
-    case "unknown":
-      return freshness.checked_at ? "未知" : "未知·未探测";
-    case "not-applicable":
-      return "";
-  }
-}
-
 export function FreshnessBadge({ freshness, className }: { freshness: Freshness; className?: string }) {
   if (freshness.state === "not-applicable") {
     return null;
   }
   const stale = isCacheStale(freshness.cache_age_sec);
+  // tooltip 保留工程对照（state 原值/探测方式/检查时间）
   const tooltip = [
     `状态: ${freshness.state}`,
-    freshness.probe ? `探测源: ${freshness.probe}` : null,
-    freshness.checked_at ? `上次检查: ${formatCheckedAt(freshness.checked_at)}` : "从未探测",
+    freshness.probe ? `检查方式: ${freshness.probe}` : null,
+    freshness.checked_at ? `上次检查: ${formatCheckedAt(freshness.checked_at)}` : "从未检查",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -70,7 +51,7 @@ export function FreshnessBadge({ freshness, className }: { freshness: Freshness;
           data-testid="freshness-cache-age"
         >
           {humanizeCacheAge(freshness.cache_age_sec)}检查
-          {stale && "（缓存陈旧）"}
+          {stale && `（${FRESHNESS_STALE_NOTE}）`}
         </span>
       )}
     </span>

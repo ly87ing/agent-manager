@@ -48,7 +48,7 @@ const plan = makeEnvelope(
 );
 
 describe("DriftExplanationPanel", () => {
-  it("渲染目标路径、per-agent 单元格状态表与过滤后的 plan 动作清单", async () => {
+  it("渲染目标位置、各助手状态表与过滤后的操作清单", async () => {
     renderWithEngine(<DriftExplanationPanel element={drifted} planCommand="mcp:plan" cellKind="mcp" />, {
       "mcp:plan": plan,
     });
@@ -56,13 +56,13 @@ describe("DriftExplanationPanel", () => {
     const panel = await screen.findByTestId("drift-panel");
     // plan 为异步查询：先等动作清单就位
     await screen.findByText("注入/收敛 mcp:chrome-devtools 到 agent 'claude-code'");
-    // 目标路径（cell targets）
+    // 目标位置（cell targets）
     expect(panel).toHaveTextContent("/tmp/demo/.claude.json");
     expect(panel).toHaveTextContent("/tmp/demo/.codex/config.toml");
     // per-agent 单元格状态
     expect(panel).toHaveTextContent("claude-code");
-    expect(screen.getByTitle("drifted")).toHaveTextContent("漂移");
-    expect(screen.getByTitle("managed-ok")).toHaveTextContent("已注入");
+    expect(screen.getByTitle("drifted")).toHaveTextContent("不一致");
+    expect(screen.getByTitle("managed-ok")).toHaveTextContent("已配置");
     // plan 动作清单：只含本元素的 1 条（mcp:other-server 被过滤）
     expect(panel).toHaveTextContent("write-file");
     expect(panel).not.toHaveTextContent("其它元素的动作");
@@ -78,7 +78,7 @@ describe("DriftExplanationPanel", () => {
         { command: "mcp.plan" },
       ),
     });
-    expect(await screen.findByText(/plan 为空/)).toBeInTheDocument();
+    expect(await screen.findByText(/没有需要执行的操作/)).toBeInTheDocument();
   });
 
   it("shortenDigest：长 digest 截断、null 占位", () => {
