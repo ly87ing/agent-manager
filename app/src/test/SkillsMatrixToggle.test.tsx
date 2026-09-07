@@ -75,7 +75,7 @@ describe("Skills 矩阵点击切换", () => {
     await userEvent.click(screen.getByTestId("plan-confirm-button"));
     const applyCall = calls.find((call) => call.command === "skills:apply");
     expect(applyCall).toBeDefined();
-    expect(applyCall!.args).toEqual([]);
+    expect(applyCall!.args).toEqual(["--only", "skill:agent-skills/alpha", "--agent", "codex"]);
     expect(applyCall!.options?.runId).toMatch(/^gui-/);
 
     // 链路顺序：policy:set → skills:plan → skills:apply

@@ -658,7 +658,7 @@ def collect_repo_skill_names_for_cleanup(repo_path, config=None):
 
 def remove_repo_skill_links(repo_path, targets, allowed_agents=None, dry_run=False, skill_names=None):
     repo_path = Path(repo_path).resolve()
-    managed_skill_names = set(skill_names or [])
+    managed_skill_names = set(skill_names) if skill_names is not None else None
     active_targets = targets
     if allowed_agents is not None:
         active_targets = {k: v for k, v in targets.items() if k in allowed_agents}
@@ -669,7 +669,7 @@ def remove_repo_skill_links(repo_path, targets, allowed_agents=None, dry_run=Fal
         for item in target_base.iterdir():
             if not is_link_entry(item):
                 continue
-            if item.name not in managed_skill_names:
+            if managed_skill_names is not None and item.name not in managed_skill_names:
                 continue
             if not link_points_within_base(item, repo_path):
                 continue
@@ -746,6 +746,8 @@ def main():
     parser.add_argument("--offline", action="store_true", help="离线模式 (跳过远程仓库更新与依赖安装)")
     parser.add_argument("-f", "--force-refresh", action="store_true", help="更新探测失败时仍强制执行远端刷新")
     parser.add_argument("--yes", action="store_true", help="自动清理")
+    parser.add_argument("--only", action="append", default=[], help="仅针对指定 skill 或 collection（可重复；支持 skill:<id> 或 <id>）")
+    parser.add_argument("--agent", help="仅针对指定 agent（如 codex）")
     args = parser.parse_args()
     
     try:
@@ -789,6 +791,42 @@ def main():
         logging.info(f"[AGENT: {name}] 未安装，跳过新建 skill 链接（保留清理能力）。")
     ALL_AGENT_TARGETS = AGENT_TARGETS  # full set, used for cleaning up old links
     AGENT_TARGETS = {k: v for k, v in AGENT_TARGETS.items() if k in installed_agents}  # active set, used for creating new links
+    DECLARED_AGENT_TARGETS = dict(ALL_AGENT_TARGETS)
+
+    if args.agent:
+        if args.agent not in ALL_AGENT_TARGETS:
+            logging.error(f"未知 agent: {args.agent}")
+            sys.exit(2)
+        ALL_AGENT_TARGETS = {args.agent: ALL_AGENT_TARGETS[args.agent]}
+        AGENT_TARGETS = {k: v for k, v in AGENT_TARGETS.items() if k == args.agent}
+
+    base_dir = Path(args.base_dir).resolve()
+    repo_base_dir = get_managed_repo_base(base_dir)
+
+    only_repos = set()
+    only_skills = set()
+    if args.only:
+        known_repos = set(REPOS.keys()) | set(repositories.keys())
+        if repo_base_dir.exists():
+            for d in repo_base_dir.iterdir():
+                if d.is_dir():
+                    known_repos.add(d.name)
+        for item in args.only:
+            if ":" in item and not item.startswith("skill:"):
+                logging.error(f"跨域元素 scope 拒绝: {item}")
+                sys.exit(2)
+            norm = item[6:] if item.startswith("skill:") else item
+            if "/" in norm:
+                r_name, s_name = norm.split("/", 1)
+                if r_name not in known_repos:
+                    logging.error(f"未知 skill 集合: {r_name}")
+                    sys.exit(2)
+                only_skills.add((r_name, s_name))
+            else:
+                if norm not in known_repos:
+                    logging.error(f"未知 skill 或集合: {norm}")
+                    sys.exit(2)
+                only_repos.add(norm)
 
     for name, r_def in REPOS.items():
         if name in policy_cfg: r_def.update(policy_cfg[name])
@@ -796,53 +834,92 @@ def main():
         validate_repo_skill_count(name, r_def)
         validate_repo_disabled(name, r_def)
         validate_repo_new_skill_default(name, r_def)
-        validate_repo_skill_matrix(name, r_def, r_def["agents"], set(ALL_AGENT_TARGETS))
-        unknown_agents = [agent_name for agent_name in (r_def["agents"] or []) if agent_name not in ALL_AGENT_TARGETS]
+        validate_repo_skill_matrix(name, r_def, r_def["agents"], set(DECLARED_AGENT_TARGETS))
+        unknown_agents = [agent_name for agent_name in (r_def["agents"] or []) if agent_name not in DECLARED_AGENT_TARGETS]
         if unknown_agents:
             raise ValueError(f"{name}: agents 包含未声明的 target: {', '.join(sorted(unknown_agents))}")
 
-    base_dir = Path(args.base_dir).resolve()
-    repo_base_dir = get_managed_repo_base(base_dir)
     if not base_dir.exists() and not args.dry_run: base_dir.mkdir(parents=True, exist_ok=True)
     if not repo_base_dir.exists() and not args.dry_run: repo_base_dir.mkdir(parents=True, exist_ok=True)
-    logging.info("执行环境洗刷...")
-    if not args.dry_run:
-        scrub_dead_links(ALL_AGENT_TARGETS, repo_base_dir, False)
+    if not (args.only or args.agent):
+        logging.info("执行环境洗刷...")
+        if not args.dry_run:
+            scrub_dead_links(ALL_AGENT_TARGETS, repo_base_dir, False)
 
     all_success = True
     duplicate_skill_names = set()
     duplicate_link_targets = {}
     pending_links = []
     global_skill_registry = {}
+    targeted_repos = set(only_repos) | {r for r, _ in only_skills}
+    deleted_targeted_repos = targeted_repos - set(REPOS.keys())
+    for repo_name in sorted(deleted_targeted_repos):
+        repo_path = repo_base_dir / repo_name
+        repo_skills_filter = None
+        if only_skills:
+            matched = {s for r, s in only_skills if r == repo_name}
+            if matched and repo_name not in only_repos:
+                repo_skills_filter = matched
+        cleanup_skills = collect_repo_skill_names_for_cleanup(repo_path) if repo_path.exists() else set()
+        if repo_skills_filter is not None:
+            cleanup_skills = cleanup_skills & repo_skills_filter
+        remove_repo_skill_links(
+            repo_path,
+            ALL_AGENT_TARGETS,
+            None,
+            args.dry_run,
+            cleanup_skills if repo_skills_filter is not None else (cleanup_skills or None),
+        )
+
     for repo_name, config in REPOS.items():
+        if only_repos or only_skills:
+            repo_matches = repo_name in only_repos or any(r == repo_name for r, _ in only_skills)
+            if not repo_matches:
+                continue
+
+        repo_skills_filter = None
+        if only_skills:
+            matched = {s for r, s in only_skills if r == repo_name}
+            if matched and repo_name not in only_repos:
+                repo_skills_filter = matched
+
         repo_path = repo_base_dir / repo_name
         if repo_name not in policy_cfg:
             logging.info(f"[{repo_name}] 未声明策略，跳过。")
+            cleanup_skills = collect_repo_skill_names_for_cleanup(repo_path, config)
+            if repo_skills_filter is not None:
+                cleanup_skills = cleanup_skills & repo_skills_filter
             remove_repo_skill_links(
                 repo_path,
                 ALL_AGENT_TARGETS,
                 config.get("agents"),
                 args.dry_run,
-                collect_repo_skill_names_for_cleanup(repo_path, config),
+                cleanup_skills,
             )
             continue
         if not config.get("enabled", True):
             logging.info(f"[{repo_name}] (策略已禁用，跳过)")
+            cleanup_skills = collect_repo_skill_names_for_cleanup(repo_path, config)
+            if repo_skills_filter is not None:
+                cleanup_skills = cleanup_skills & repo_skills_filter
             remove_repo_skill_links(
                 repo_path,
                 ALL_AGENT_TARGETS,
                 config.get("agents"),
                 args.dry_run,
-                collect_repo_skill_names_for_cleanup(repo_path, config),
+                cleanup_skills,
             )
             continue
+        should_update_repo = config.get("auto_update", True)
+        if repo_skills_filter is not None and repo_path.exists():
+            should_update_repo = False
         repo_path, repo_ok = clone_or_update_repo(
             repo_name,
             config.get("url"),
             repo_base_dir,
             args.dry_run,
             args.offline,
-            config.get("auto_update", True),
+            should_update_repo,
             args.force_refresh,
         )
         if not repo_ok:
@@ -867,6 +944,13 @@ def main():
                 # 矩阵可以引用它（最终 disabled 名单优先，见下方 partition）。
                 skill_agent_overrides = resolve_repo_skill_agent_overrides(repo_name, config, set(skills))
             skills, disabled_active = partition_disabled_skills(repo_name, config, skills)
+            if repo_skills_filter is not None:
+                missing_skills = repo_skills_filter - (set(skills.keys()) | set(disabled_active) | set(collect_repo_skill_names_for_cleanup(repo_path)))
+                if missing_skills:
+                    logging.error(f"[{repo_name}] 未知 skill: {', '.join(sorted(missing_skills))}")
+                    sys.exit(2)
+                skills = {k: v for k, v in skills.items() if k in repo_skills_filter}
+                disabled_active = disabled_active & repo_skills_filter
             if disabled_active:
                 logging.info(
                     f"[{repo_name}] 本机禁用 skill（跳过新建并清理旧链）: {', '.join(sorted(disabled_active))}"
@@ -881,23 +965,29 @@ def main():
                     skill_name,
                     config.get("agents"),
                 )
+            cleanup_skills = collect_repo_skill_names_for_cleanup(repo_path, config)
+            if repo_skills_filter is not None:
+                cleanup_skills = cleanup_skills & repo_skills_filter
             remove_repo_skill_links(
                 repo_path,
                 ALL_AGENT_TARGETS,
                 config.get("agents"),
                 args.dry_run,
-                collect_repo_skill_names_for_cleanup(repo_path, config),
+                cleanup_skills,
             )
             all_success = False
             continue
         except (SkillPathSelectionError, SkillAgentScopeError, SkillPolicyMatrixError) as exc:
             logging.error(f"[{repo_name}] {exc}")
+            cleanup_skills = collect_repo_skill_names_for_cleanup(repo_path, config)
+            if repo_skills_filter is not None:
+                cleanup_skills = cleanup_skills & repo_skills_filter
             remove_repo_skill_links(
                 repo_path,
                 ALL_AGENT_TARGETS,
                 config.get("agents"),
                 args.dry_run,
-                collect_repo_skill_names_for_cleanup(repo_path, config),
+                cleanup_skills,
             )
             all_success = False
             continue
@@ -914,6 +1004,8 @@ def main():
             )
         all_repo_skill_names = collect_repo_skill_names_for_cleanup(repo_path)
         unconfigured_skill_names = all_repo_skill_names - set(skills.keys())
+        if repo_skills_filter is not None:
+            unconfigured_skill_names = unconfigured_skill_names & repo_skills_filter
         if unconfigured_skill_names:
             remove_repo_skill_links(
                 repo_path,
@@ -988,14 +1080,15 @@ def main():
         pending_links,
         duplicate_skill_names,
     )
-    planned_removed_repo_paths = prune_orphan_repos(repo_base_dir, REPOS.keys(), args.dry_run, args.yes)
-    scrub_dead_links(
-        ALL_AGENT_TARGETS,
-        repo_base_dir,
-        args.dry_run,
-        managed_skill_names_by_agent,
-        planned_removed_repo_paths,
-    )
+    if not (args.only or args.agent):
+        planned_removed_repo_paths = prune_orphan_repos(repo_base_dir, REPOS.keys(), args.dry_run, args.yes)
+        scrub_dead_links(
+            ALL_AGENT_TARGETS,
+            repo_base_dir,
+            args.dry_run,
+            managed_skill_names_by_agent,
+            planned_removed_repo_paths,
+        )
     if not all_success: sys.exit(1)
     logging.info("技能同步完成！")
 

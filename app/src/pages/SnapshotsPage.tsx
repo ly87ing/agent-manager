@@ -95,7 +95,7 @@ export default function SnapshotsPage() {
       {restoring && (
         <ConfirmModal
           title={`恢复到备份 ${restoring}`}
-          description="将按备份清单还原文件和链接，并先把当前状态再备份一次（所以恢复本身也能撤销）。备份之外的文件不受影响。"
+          description="将按备份清单还原文件和链接，并先把当前状态再备份一次（所以恢复本身也能撤销）。注意：对 MCP/Alias 等共享配置文件，恢复将覆盖整个配置文件及其实际生效的全部条目，而非仅还原单个选定元素；备份清单之外的文件不受影响。"
           risk="write-local"
           requireText={restoring}
           confirmLabel="确认恢复"

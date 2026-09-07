@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import UpdatesPage from "../pages/UpdatesPage";
-import { makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode } from "./fixtures";
+import { makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePlanAction } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 import type { Envelope } from "../lib/contract";
 
@@ -112,5 +112,134 @@ describe("UpdatesPage 更新中心", () => {
     expect(await screen.findByText(/离线模式：显示的是上次检查的结果/)).toBeInTheDocument();
     expect(screen.getByTestId("refresh-all-button")).toBeDisabled();
     expect(screen.getByTestId("reprobe-agents:a-behind")).toBeDisabled();
+  });
+
+  it("全部更新：聚合多域落后项 plan 并预览，确认后按域顺序执行 apply", async () => {
+    const routes: Record<string, Envelope> = {
+      ...statusRoutes(),
+      "skills:status": makeEnvelope(
+        {
+          domain: "skills",
+          elements: [
+            makeElement({
+              id: "skill:agent-skills/behind-skill",
+              domain: "skills",
+              freshness: makeFreshness({ state: "behind", current: "1.0.0", upstream: "2.0.0" }),
+            }),
+          ],
+        },
+        { command: "skills.status" },
+      ),
+      "mcp:status": makeEnvelope(
+        {
+          domain: "mcp",
+          elements: [
+            makeElement({
+              id: "mcp:mcp-behind",
+              domain: "mcp",
+              freshness: makeFreshness({ state: "behind", current: "0.1.0", upstream: "0.2.0" }),
+            }),
+          ],
+        },
+        { command: "mcp.status" },
+      ),
+      "agents:plan": makeEnvelope(
+        { domain: "agents", actions: [makePlanAction({ element: "agents:a-behind" })], summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 } },
+        { command: "agents.plan" },
+      ),
+      "mcp:plan": makeEnvelope(
+        { domain: "mcp", actions: [makePlanAction({ element: "mcp:mcp-behind" })], summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 } },
+        { command: "mcp.plan" },
+      ),
+      "skills:plan": makeEnvelope(
+        { domain: "skills", actions: [makePlanAction({ element: "skill:agent-skills/behind-skill" })], summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 } },
+        { command: "skills.plan" },
+      ),
+      "agents:apply": makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }),
+      "mcp:apply": makeEnvelope(makeApplyResult({ domain: "mcp" }), { command: "mcp.apply" }),
+      "skills:apply": makeEnvelope(makeApplyResult({ domain: "skills" }), { command: "skills.apply" }),
+    };
+
+    const { calls } = renderWithEngine(<UpdatesPage />, routes);
+    const convergeBtn = await screen.findByTestId("converge-all-button");
+    expect(convergeBtn).toHaveTextContent("全部更新（3）");
+
+    await userEvent.click(convergeBtn);
+    await screen.findByRole("dialog", { name: /全部更新/ });
+
+    const planCalls = calls.filter((c) => c.command.endsWith(":plan"));
+    expect(planCalls.map((c) => c.command)).toEqual(["agents:plan", "mcp:plan", "skills:plan"]);
+    expect(planCalls[0].args).toEqual(["--only", "agents:a-behind"]);
+    expect(planCalls[1].args).toEqual(["--only", "mcp:mcp-behind"]);
+    expect(planCalls[2].args).toEqual(["--only", "skill:agent-skills/behind-skill"]);
+
+    await userEvent.click(screen.getByTestId("plan-confirm-button"));
+
+    const applyCalls = calls.filter((c) => c.command.endsWith(":apply"));
+    expect(applyCalls.map((c) => c.command)).toEqual(["agents:apply", "mcp:apply", "skills:apply"]);
+    expect(applyCalls[0].args).toEqual(["--only", "agents:a-behind"]);
+    expect(applyCalls[1].args).toEqual(["--only", "mcp:mcp-behind"]);
+    expect(applyCalls[2].args).toEqual(["--only", "skill:agent-skills/behind-skill"]);
+  });
+
+  it("全部更新：第二域执行失败时中断，不执行第三域", async () => {
+    const routes: Record<string, Envelope> = {
+      ...statusRoutes(),
+      "skills:status": makeEnvelope(
+        {
+          domain: "skills",
+          elements: [
+            makeElement({
+              id: "skill:agent-skills/behind-skill",
+              domain: "skills",
+              freshness: makeFreshness({ state: "behind", current: "1.0.0", upstream: "2.0.0" }),
+            }),
+          ],
+        },
+        { command: "skills.status" },
+      ),
+      "mcp:status": makeEnvelope(
+        {
+          domain: "mcp",
+          elements: [
+            makeElement({
+              id: "mcp:mcp-behind",
+              domain: "mcp",
+              freshness: makeFreshness({ state: "behind", current: "0.1.0", upstream: "0.2.0" }),
+            }),
+          ],
+        },
+        { command: "mcp.status" },
+      ),
+      "agents:plan": makeEnvelope(
+        { domain: "agents", actions: [makePlanAction({ element: "agents:a-behind" })], summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 } },
+        { command: "agents.plan" },
+      ),
+      "mcp:plan": makeEnvelope(
+        { domain: "mcp", actions: [makePlanAction({ element: "mcp:mcp-behind" })], summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 } },
+        { command: "mcp.plan" },
+      ),
+      "skills:plan": makeEnvelope(
+        { domain: "skills", actions: [makePlanAction({ element: "skill:agent-skills/behind-skill" })], summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 } },
+        { command: "skills.plan" },
+      ),
+      "agents:apply": makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }),
+      "mcp:apply": makeEnvelope(makeApplyResult({ domain: "mcp" }), {
+        command: "mcp.apply",
+        ok: false,
+        errors: [{ code: "MCP_APPLY_FAILED", element: null, message: "mcp update failed" }],
+      }),
+      "skills:apply": makeEnvelope(makeApplyResult({ domain: "skills" }), { command: "skills.apply" }),
+    };
+
+    const { calls } = renderWithEngine(<UpdatesPage />, routes);
+    const convergeBtn = await screen.findByTestId("converge-all-button");
+    await userEvent.click(convergeBtn);
+    await screen.findByRole("dialog", { name: /全部更新/ });
+
+    await userEvent.click(screen.getByTestId("plan-confirm-button"));
+
+    const applyCalls = calls.filter((c) => c.command.endsWith(":apply"));
+    expect(applyCalls.map((c) => c.command)).toEqual(["agents:apply", "mcp:apply"]);
   });
 });

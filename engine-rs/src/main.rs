@@ -28,7 +28,7 @@ const KNOWN_DOMAINS: &[&str] = &[
 ];
 
 const VALUE_FLAGS: &[&str] = &[
-    "--config", "--def-file", "--python-cmd", "--only", "--run", "--lines", "--layer", "--key",
+    "--config", "--def-file", "--python-cmd", "--only", "--agent", "--run", "--lines", "--layer", "--key",
     "--value",
 ];
 const BOOL_FLAGS: &[&str] = &["--json", "--dry-run", "--offline", "--allow-uninstall"];
@@ -37,6 +37,8 @@ struct Args {
     command: Option<String>,
     config: Option<String>,
     def_files: Vec<String>,
+    only: Vec<String>,
+    agent: Option<String>,
     json: bool,
     dry_run: bool,
     offline: bool,
@@ -48,6 +50,8 @@ fn parse_args(argv: &[String]) -> Result<Args, ()> {
         command: None,
         config: None,
         def_files: Vec::new(),
+        only: Vec::new(),
+        agent: None,
         json: false,
         dry_run: false,
         offline: false,
@@ -74,6 +78,8 @@ fn parse_args(argv: &[String]) -> Result<Args, ()> {
             match token.as_str() {
                 "--config" => args.config = Some(value),
                 "--def-file" => args.def_files.push(value),
+                "--only" => args.only.push(value),
+                "--agent" => args.agent = Some(value),
                 _ => {} // accepted for argv parity with the Python engine; unused here
             }
             index += 2;
@@ -158,6 +164,8 @@ fn run() -> i32 {
                 command: None,
                 config: None,
                 def_files: vec![],
+                only: vec![],
+                agent: None,
                 json: false,
                 dry_run: false,
                 offline: false,
@@ -307,19 +315,50 @@ fn run() -> i32 {
         })
         .collect();
 
+    // 跨域元素与非法范围预检
+    let domain_prefix = match domain {
+        "mcp" => "mcp:",
+        "agents" => "agents:",
+        "skills" => "skill:",
+        "rules" => "rules:",
+        "hooks" => "hooks:",
+        "aliases" => "aliases:",
+        _ => "",
+    };
+    for item in &args.only {
+        if !domain_prefix.is_empty() && !item.starts_with(domain_prefix) {
+            return usage_error(
+                &ctx,
+                &dotted,
+                "CROSS_DOMAIN_SCOPE",
+                &format!("跨域元素 '{}' 不属于域 '{}'", item, domain),
+                &format!("错误: 跨域元素 '{}' 不属于域 '{}'", item, domain),
+            );
+        }
+    }
+    if args.agent.is_some() && domain != "skills" {
+        return usage_error(
+            &ctx,
+            &dotted,
+            "USAGE_ERROR",
+            "--agent 参数仅适用于 skills 域",
+            "错误: --agent 参数仅适用于 skills 域",
+        );
+    }
+
     let result = match (domain, verb) {
         ("mcp", "status") => mcp::build_mcp_status(&root_dir, &config_file, &def_file),
-        ("mcp", "plan") => mcp::build_mcp_plan(&root_dir, &config_file, &def_file),
+        ("mcp", "plan") => mcp::build_mcp_plan(&root_dir, &config_file, &def_file, &args.only),
         ("agents", "status") => agents::build_agents_status(&root_dir, &config_file, &def_files),
-        ("agents", "plan") => agents::build_agents_plan(&root_dir, &config_file, &def_files),
+        ("agents", "plan") => agents::build_agents_plan(&root_dir, &config_file, &def_files, &args.only),
         ("skills", "status") => skills::build_skills_status(&root_dir, &config_file, &def_files),
-        ("skills", "plan") => skills::build_skills_plan(&root_dir, &config_file, &def_files),
+        ("skills", "plan") => skills::build_skills_plan(&root_dir, &config_file, &def_files, &args.only, args.agent.as_deref()),
         ("rules", "status") => rules::build_rules_status(&root_dir, &config_file, &def_files),
-        ("rules", "plan") => rules::build_rules_plan(&root_dir, &config_file, &def_files),
+        ("rules", "plan") => rules::build_rules_plan(&root_dir, &config_file, &def_files, &args.only),
         ("hooks", "status") => hooks::build_hooks_status(&root_dir, &config_file, &def_files),
-        ("hooks", "plan") => hooks::build_hooks_plan(&root_dir, &config_file, &def_files),
+        ("hooks", "plan") => hooks::build_hooks_plan(&root_dir, &config_file, &def_files, &args.only),
         ("aliases", "status") => aliases::build_aliases_status(&root_dir, &config_file, &def_files),
-        ("aliases", "plan") => aliases::build_aliases_plan(&root_dir, &config_file, &def_files),
+        ("aliases", "plan") => aliases::build_aliases_plan(&root_dir, &config_file, &def_files, &args.only),
         _ => unreachable!("dispatch guard above"),
     };
     match result {

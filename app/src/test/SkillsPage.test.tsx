@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { fireEvent } from "@testing-library/react";
 import SkillsPage from "../pages/SkillsPage";
-import { makeElement, makeEnvelope } from "./fixtures";
-import { renderWithEngine, screen, within } from "./render-with-engine";
+import { makeApplyResult, makeElement, makeEnvelope, makePlanAction, makePolicyData } from "./fixtures";
+import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 
 function skillsRoutes() {
   return {
@@ -78,9 +79,28 @@ function skillsRoutes() {
       { command: "skills.status" },
     ),
     "skills:plan": makeEnvelope(
-      { domain: "skills", actions: [], summary: { read: 0, "write-local": 0, "exec-local": 0, network: 0, "install-remove": 0 } },
+      {
+        domain: "skills",
+        actions: [makePlanAction({ op: "unlink", element: "skill:agent-skills", risk: "write-local", note: "清理链接" })],
+        summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 },
+      },
       { command: "skills.plan" },
     ),
+    "policy:get": makeEnvelope(
+      makePolicyData({
+        layers: {
+          baseline: { skills: { "agent-skills": { url: "https://github.com/example/agent-skills.git" } } },
+          synced: null,
+          local: null,
+        },
+      }),
+      { command: "policy.get" },
+    ),
+    "policy:set": makeEnvelope(
+      makePolicyData({ layers: null, effective: null, attribution: null, layer: "local", key: "skills.definitions.agent-skills", value: null, path: "/repo/config/manager.local.json" }),
+      { command: "policy.set" },
+    ),
+    "skills:apply": makeEnvelope(makeApplyResult({ domain: "skills" }), { command: "skills.apply" }),
   };
 }
 
@@ -114,5 +134,26 @@ describe("SkillsPage 三级视图", () => {
     expect(disabled.className).toContain("zinc");
     // 收件箱元素不出现在矩阵行中（只在收件箱区）
     expect(screen.queryByText("inbox-one", { selector: "button" })).toBeNull();
+  });
+
+  it("移除集合：确认后执行 skills:plan 和 skills:apply 并携带 --only skill:<name>", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
+    const removeBtn = await screen.findByTestId("remove-collection-agent-skills");
+    await userEvent.click(removeBtn);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("移除 agent-skills");
+    fireEvent.change(screen.getByTestId("confirm-modal-input"), { target: { value: "agent-skills" } });
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+
+    await screen.findByRole("dialog", { name: /将要执行的操作/ });
+    const planCall = calls.find((c) => c.command === "skills:plan");
+    expect(planCall).toBeDefined();
+    expect(planCall!.args).toEqual(["--only", "skill:agent-skills"]);
+
+    await userEvent.click(screen.getByTestId("plan-confirm-button"));
+    const applyCall = calls.find((c) => c.command === "skills:apply");
+    expect(applyCall).toBeDefined();
+    expect(applyCall!.args).toEqual(["--only", "skill:agent-skills"]);
   });
 });

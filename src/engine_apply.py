@@ -67,9 +67,17 @@ def create_snapshot(run_id, command, files, links):
             os.chmod(fd_path, 0o600)
             os.replace(fd_path, slot)
         file_entries.append(entry)
-    link_entries = [
-        {"path": str(link["path"]), "target": str(link["target"])} for link in links
-    ]
+    link_entries = []
+    for link in links:
+        path = Path(link["path"])
+        existed = link.get("existed")
+        if existed is None:
+            existed = path.is_symlink()
+        link_entries.append({
+            "path": str(link["path"]),
+            "target": str(link.get("target") or ""),
+            "existed": bool(existed),
+        })
     manifest = {
         "run_id": run_id,
         "command": command,
@@ -99,7 +107,15 @@ def read_manifest(snap_dir):
         elif isinstance(entry, dict) and isinstance(entry.get("path"), str):
             normalized_files.append({"path": entry["path"], "existed": bool(entry.get("existed", True))})
     manifest["files"] = normalized_files
-    manifest.setdefault("links", [])
+    normalized_links = []
+    for entry in manifest.get("links", []):
+        if isinstance(entry, dict) and isinstance(entry.get("path"), str):
+            normalized_links.append({
+                "path": entry["path"],
+                "target": str(entry.get("target") or ""),
+                "existed": bool(entry.get("existed", True)),
+            })
+    manifest["links"] = normalized_links
     return manifest
 
 
@@ -151,9 +167,11 @@ def restore_snapshot(run_id, *, resnapshot_run_id):
         path = Path(link["path"])
         if path.is_symlink():
             try:
-                current_links.append({"path": link["path"], "target": os.readlink(path)})
+                current_links.append({"path": link["path"], "target": os.readlink(path), "existed": True})
             except OSError:
                 pass
+        else:
+            current_links.append({"path": link["path"], "target": "", "existed": False})
     create_snapshot(resnapshot_run_id, "snapshots:restore(pre-%s)" % run_id, current_files, current_links)
 
     files_restored = 0
@@ -175,6 +193,12 @@ def restore_snapshot(run_id, *, resnapshot_run_id):
     skipped = []
     for link in manifest["links"]:
         path = Path(link["path"])
+        if not link.get("existed", True):
+            # 快照时不存在的链接 = 该次运行新建的产物；回滚即删除。
+            if path.is_symlink() or path.is_file():
+                path.unlink()
+                files_deleted += 1
+            continue
         if path.exists() and not path.is_symlink():
             skipped.append(link["path"])
             continue

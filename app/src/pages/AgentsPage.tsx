@@ -58,20 +58,19 @@ function AgentCard({ element }: { element: EngineElement }) {
   const version = installed ? (element.freshness.current ?? "已安装（还没检查过版本）") : "未安装";
   const name = spec.display_name ?? element.id;
 
-  /** 动作 → plan 预览（过滤到本元素）→ agents:apply（域级收敛；含卸载时引擎要求 --allow-uninstall）。 */
+  /** 动作 → plan 预览（按元素范围）→ agents:apply（按元素范围；含卸载时引擎要求 --allow-uninstall）。 */
   const openAction = (action: ElementAction) => {
     const isDestructive = action.id === "uninstall" || action.id === "install";
     preview.open({
       title: `${ACTION_META[action.id]?.label ?? action.id} ${name}`,
-      subtitle: `预览只显示这个助手的相关操作；实际执行会同步全部助手配置（执行前自动备份）。`,
-      planCommands: ["agents:plan"],
-      filterElement: element.id,
+      subtitle: `仅针对此助手执行操作（执行前自动备份）。`,
+      planCommands: [{ command: "agents:plan", args: ["--only", element.id] }],
       requireConfirmText: isDestructive ? element.id : undefined,
       confirmLabel: `${ACTION_META[action.id]?.label ?? action.id}`,
       execute: executeApply({
         command: "agents:apply",
         label: `${ACTION_META[action.id]?.label ?? action.id} ${name}`,
-        extraArgs: isDestructive ? ["--allow-uninstall"] : [],
+        extraArgs: ["--only", element.id, ...(isDestructive ? ["--allow-uninstall"] : [])],
       }),
     });
   };

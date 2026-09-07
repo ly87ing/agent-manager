@@ -180,10 +180,20 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--dry-run", ArgValueKind::Flag));
             specs.push(("--force", ArgValueKind::Flag));
         }
+        (_, "plan") => {
+            specs.push(("--only", ArgValueKind::ElementId));
+            if domain == "skills" {
+                specs.push(("--agent", ArgValueKind::ElementId));
+            }
+        }
         (_, "apply") => {
             specs.push(("--dry-run", ArgValueKind::Flag));
+            specs.push(("--only", ArgValueKind::ElementId));
             if domain == "agents" {
                 specs.push(("--allow-uninstall", ArgValueKind::Flag));
+            }
+            if domain == "skills" {
+                specs.push(("--agent", ArgValueKind::ElementId));
             }
         }
         ("system", "converge") => specs.push(("--dry-run", ArgValueKind::Flag)),
@@ -574,6 +584,12 @@ mod tests {
         validate_args("system:refresh-upstream", &[]).unwrap();
         validate_args("system:refresh-upstream", &["--only".into(), "mcp:grok-search".into()]).unwrap();
         validate_args("system:refresh-upstream", &["--only".into(), "skill:agent-skills/find-skills".into()]).unwrap();
+        // 范围控制贯穿 plan 与 apply
+        validate_args("mcp:plan", &["--only".into(), "mcp:grok-search".into()]).unwrap();
+        validate_args("mcp:apply", &["--only".into(), "mcp:grok-search".into(), "--dry-run".into()]).unwrap();
+        validate_args("agents:apply", &["--only".into(), "agents:codex".into(), "--allow-uninstall".into()]).unwrap();
+        validate_args("skills:plan", &["--only".into(), "skill:agent-skills/find-skills".into(), "--agent".into(), "codex".into()]).unwrap();
+        validate_args("skills:apply", &["--only".into(), "skill:agent-skills/find-skills".into(), "--agent".into(), "codex".into()]).unwrap();
     }
 
     #[test]
@@ -587,6 +603,9 @@ mod tests {
             ("mcp:status", vec!["mcp:status --offline".to_string()]),
             // 命令感知的边界：--allow-uninstall 只允许 agents:apply
             ("mcp:apply", vec!["--allow-uninstall".to_string()]),
+            // --agent 只允许 skills 域
+            ("mcp:plan", vec!["--agent".to_string(), "codex".to_string()]),
+            ("agents:apply", vec!["--agent".to_string(), "codex".to_string()]),
             // 只读命令一律无参数
             ("policy:get", vec!["--dry-run".to_string()]),
             ("runs:list", vec!["--run".to_string(), "r1".to_string()]),

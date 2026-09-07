@@ -282,7 +282,7 @@ def merge_toml_chunks_by_server(chunks):
     return merged_chunks
 
 
-def update_toml_config(agent_name, config_path, active_servers, all_managed_servers, preserved_servers, dry_run):
+def update_toml_config(agent_name, config_path, active_servers, all_managed_servers, preserved_servers, dry_run, only_servers=None):
     """Atomically update TOML configuration"""
     path = Path(config_path).expanduser()
     content = ""
@@ -305,6 +305,9 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
     for chunk in chunks:
         srv_name = extract_toml_mcp_server_name(chunk)
         if srv_name:
+            if only_servers is not None and srv_name not in only_servers:
+                new_chunks.append(chunk)
+                continue
             if srv_name in preserved_names:
                 new_chunks.append(chunk)
                 continue
@@ -320,6 +323,8 @@ def update_toml_config(agent_name, config_path, active_servers, all_managed_serv
     base_content = "".join(new_chunks).strip()
     new_blocks = []
     for name, settings in active_servers.items():
+        if only_servers is not None and name not in only_servers:
+            continue
         quoted_name = toml_key(name)
         block = f"\n\n[mcp_servers.{quoted_name}]\ncommand = {toml_quote(settings['command'])}\n"
         block += f"args = {json.dumps(settings['args'], ensure_ascii=False)}\n"
@@ -389,7 +394,7 @@ def should_sync_mcp_target(agent_name, agent_defs):
         return canonicalize_agent_id(agent_name) == "codex"
     return is_agent_installed(agent_name, agent_def)
 
-def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None):
+def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None, only_servers=None):
     """Update the MCP configuration file for each Agent"""
     all_ok = True
     declared_managed_servers = {
@@ -400,6 +405,47 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None
         config_path_str = agent_meta if isinstance(agent_meta, str) else agent_meta.get("path")
         file_format = "json" if isinstance(agent_meta, str) else agent_meta.get("format", "json")
         config_path = Path(config_path_str).expanduser()
+
+        if only_servers is not None:
+            agent_relevant = False
+            for s_name in only_servers:
+                s_cfg = mcp_servers.get(s_name)
+                if s_cfg is not None:
+                    s_agents = s_cfg.get("agents")
+                    if s_agents is None or agent_name in s_agents:
+                        agent_relevant = True
+                        break
+            if not agent_relevant and config_path.exists():
+                if file_format == "json":
+                    try:
+                        with open(config_path, "r", encoding="utf-8") as f:
+                            raw_doc = json.load(f)
+                        servers_dict = raw_doc.get("mcp" if agent_name == "opencode" else "mcpServers") or {}
+                        if any(s in servers_dict for s in only_servers):
+                            agent_relevant = True
+                    except Exception:
+                        pass
+                elif file_format == "toml":
+                    try:
+                        toml_text = config_path.read_text(encoding="utf-8")
+                        existing_names = set()
+                        if tomllib is not None:
+                            try:
+                                parsed = tomllib.loads(toml_text)
+                                if isinstance(parsed, dict) and isinstance(parsed.get("mcp_servers"), dict):
+                                    existing_names = set(parsed["mcp_servers"].keys())
+                            except Exception:
+                                pass
+                        if not existing_names:
+                            for m in TOML_SERVER_HEADER_RE.finditer(toml_text):
+                                k = m.group("key")
+                                existing_names.add(json.loads(k) if k.startswith('"') else k)
+                        if any(s in existing_names for s in only_servers):
+                            agent_relevant = True
+                    except Exception:
+                        pass
+            if not agent_relevant:
+                continue
 
         active_mcp_settings = {}
         preserved_failed_servers = set()
@@ -446,13 +492,16 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None
             continue
 
         if not config_path.parent.exists():
-            logging.info(f"[AGENT: {agent_name}] Agent 目录缺失，自动创建以确保后续配置注入。")
-            try:
-                config_path.parent.mkdir(parents=True, exist_ok=True)
-            except Exception as e:
-                logging.error(f"无法创建配置目录 {config_path.parent}: {e}")
-                all_ok = False
-                continue
+            if not dry_run:
+                logging.info(f"[AGENT: {agent_name}] Agent 目录缺失，自动创建以确保后续配置注入。")
+                try:
+                    config_path.parent.mkdir(parents=True, exist_ok=True)
+                except Exception as e:
+                    logging.error(f"无法创建配置目录 {config_path.parent}: {e}")
+                    all_ok = False
+                    continue
+            else:
+                logging.info(f"[AGENT: {agent_name}] Agent 目录缺失，演练模式跳过目录创建。")
 
         if not dry_run and not backup_config(config_path, dry_run, agent_name=agent_name):
             all_ok = False
@@ -466,6 +515,7 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None
                 declared_managed_servers,
                 preserved_failed_servers,
                 dry_run,
+                only_servers=only_servers,
             ):
                 all_ok = False
             continue
@@ -486,6 +536,8 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None
             
             # Orphan Removal
             for k in list(current_config[key_name].keys()):
+                if only_servers is not None and k not in only_servers:
+                    continue
                 srv = current_config[key_name][k]
                 if isinstance(srv, dict):
                     # Check _MANAGED_BY in either env or environment
@@ -499,6 +551,8 @@ def manage_mcp_config(agents_config, mcp_servers, dry_run=False, agent_defs=None
             
             # Inject
             for name, settings in active_mcp_settings.items():
+                if only_servers is not None and name not in only_servers:
+                    continue
                 if is_opencode:
                     # OpenCode special format: command is an array, and environment replaces env
                     cmd_array = [settings["command"]] + settings.get("args", [])
@@ -567,6 +621,7 @@ def main():
     parser.add_argument("--offline", action="store_true", help="离线模式 (跳过远程仓库与 secrets 更新)")
     parser.add_argument("--prepare-runtime", action="store_true", help="显式准备 repo/runtime（clone、pull、setup、build）")
     parser.add_argument("-f", "--force-refresh", action="store_true", help="更新探测失败时仍强制执行远端刷新")
+    parser.add_argument("--only", action="append", default=[], help="仅针对指定 MCP server（可重复；支持 mcp:<name> 或 <name>）")
     args = parser.parse_args()
     
     try:
@@ -606,6 +661,52 @@ def main():
             s_def.update(policy_cfg[name])
         s_def["agents"] = canonicalize_agent_list(s_def.get("agents"))
 
+    only_servers = None
+    if args.only:
+        only_servers = set()
+        for item in args.only:
+            if ":" in item and not item.startswith("mcp:"):
+                logging.error(f"跨域元素 scope 拒绝: {item}")
+                sys.exit(2)
+            norm = item.split(":", 1)[1] if item.startswith("mcp:") else item
+            only_servers.add(norm)
+
+        # Evidence of known servers: active definitions, base definitions, or observed managed in agent configs
+        known_servers = set(definition_cfg.keys()) | set(full_def.get("servers", {}).keys())
+        for agent_name, agent_meta in AGENT_TARGETS.items():
+            config_path_str = agent_meta if isinstance(agent_meta, str) else agent_meta.get("path")
+            file_format = "json" if isinstance(agent_meta, str) else agent_meta.get("format", "json")
+            config_path = Path(config_path_str).expanduser()
+            if not config_path.exists():
+                continue
+            if file_format == "json":
+                try:
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    for key in ("mcpServers", "mcp"):
+                        for srv_k, srv_v in data.get(key, {}).items():
+                            if isinstance(srv_v, dict):
+                                env_d = srv_v.get("env") or srv_v.get("environment") or {}
+                                if env_d.get("_MANAGED_BY") == "agent-manager":
+                                    known_servers.add(srv_k)
+                except Exception:
+                    pass
+            elif file_format == "toml":
+                try:
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    for chunk in re.split(r'(?=\n\[mcp_servers\.)', content):
+                        if '_MANAGED_BY = "agent-manager"' in chunk:
+                            name = extract_toml_mcp_server_name(chunk)
+                            if name:
+                                known_servers.add(name)
+                except Exception:
+                    pass
+        unknown = sorted(only_servers - known_servers)
+        if unknown:
+            logging.error(f"未知 MCP server: {', '.join(unknown)}")
+            sys.exit(2)
+
     # [Credential protection] Phase 0: scan and sync the secret pool (secrets/ directory)
     env_vars = {}
     root_dir = Path(args.def_file).resolve().parent.parent
@@ -613,6 +714,8 @@ def main():
     
     if args.offline:
         logging.info("离线模式，跳过 secrets 仓库同步。")
+    elif only_servers is not None:
+        logging.info("指定 scope 模式，仅使用已有凭证，跳过共享 secrets 仓库拉取。")
     elif args.prepare_runtime and not args.dry_run:
         sync_secrets_repo(secrets_dir)
     
@@ -635,6 +738,8 @@ def main():
 
     unresolved = []
     for srv_name, srv_def in definition_cfg.items():
+        if only_servers is not None and srv_name not in only_servers:
+            continue
         if not srv_def.get("_declared_in_policy"):
             continue
         if not srv_def.get("enabled", True):
@@ -656,6 +761,8 @@ def main():
 
     all_build_success = True
     for srv_name, srv_config in definition_cfg.items():
+        if only_servers is not None and srv_name not in only_servers:
+            continue
         srv_config["_sync_ready"] = srv_config.get("_declared_in_policy", False) and srv_config.get("enabled", True)
         url = srv_config.get("url")
         if not url:
@@ -715,7 +822,7 @@ def main():
                         srv_config["_sync_ready"] = False
 
     agent_defs = load_json_object_file(REPO_ROOT / "config" / "agents.json", strict=False, missing_ok=True) or {}
-    if not manage_mcp_config(AGENT_TARGETS, definition_cfg, dry_run=args.dry_run, agent_defs=agent_defs):
+    if not manage_mcp_config(AGENT_TARGETS, definition_cfg, dry_run=args.dry_run, agent_defs=agent_defs, only_servers=only_servers):
         all_build_success = False
     if not all_build_success: sys.exit(1)
     logging.info("任务完成！")

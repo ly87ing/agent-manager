@@ -59,6 +59,7 @@ describe("Agents 页写动作", () => {
 
     const applyCall = calls.find((call) => call.command === "agents:apply");
     expect(applyCall).toBeDefined();
+    expect(applyCall!.args).toEqual(["--only", "agents:claude-code"]);
     expect(applyCall!.options?.runId).toMatch(/^gui-/);
   });
 

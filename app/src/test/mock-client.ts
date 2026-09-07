@@ -704,7 +704,7 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
         snapshot,
         skipped: [],
       },
-      { command: `${domain}.apply`, run_id: runId },
+      { command: `${domain}.apply`, run_id: runId, lock: { held: !dryRun, pid: dryRun ? null : 4242 } },
     );
   };
 
@@ -723,7 +723,7 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
         snapshot,
         skipped: [],
       },
-      { command: "system.converge", run_id: runId },
+      { command: "system.converge", run_id: runId, lock: { held: !dryRun, pid: dryRun ? null : 4242 } },
     );
   };
 
@@ -826,6 +826,47 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
           cloned.errors = [
             { code: "OFFLINE_NETWORK_DENIED", element: null, message: "system:refresh-upstream 需要网络探测，offline 模式下拒绝执行" },
           ];
+        }
+      }
+      if (command.endsWith(":plan")) {
+        const onlyList: string[] = [];
+        for (let i = 0; i < args.length; i++) {
+          if (args[i] === "--only" && i + 1 < args.length) {
+            onlyList.push(args[i + 1]);
+          }
+        }
+        const agentIdx = args.indexOf("--agent");
+        const agent = agentIdx !== -1 ? args[agentIdx + 1] : null;
+
+        if (onlyList.length > 0 || agent) {
+          const data = cloned.data as { actions?: Array<Record<string, unknown>>; summary?: Record<string, number> };
+          if (data && Array.isArray(data.actions)) {
+            if (onlyList.length > 0) {
+              data.actions = data.actions.filter((act) =>
+                onlyList.some((o) => {
+                  const el = act.element as string;
+                  if (el === o) return true;
+                  if (typeof el === "string") {
+                    if (el.endsWith(`:${o}`) || el.startsWith(`${o}/`) || el.replace(/^[^:]+:/, "") === o) return true;
+                  }
+                  return false;
+                })
+              );
+            }
+            if (agent && command === "skills:plan") {
+              data.actions = data.actions.filter((act) =>
+                typeof act.target === "string" ? act.target.includes(agent) : (typeof act.note === "string" && act.note.includes(agent))
+              );
+            }
+            if (data.summary) {
+              const summary: Record<string, number> = { read: 0, "write-local": 0, "exec-local": 0, network: 0, "install-remove": 0 };
+              for (const act of data.actions) {
+                const risk = act.risk as string;
+                if (risk in summary) summary[risk]++;
+              }
+              data.summary = summary;
+            }
+          }
         }
       }
       if (command === "system:refresh-upstream" && args[0] === "--only" && typeof args[1] === "string") {

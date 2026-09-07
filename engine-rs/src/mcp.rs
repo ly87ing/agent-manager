@@ -687,12 +687,25 @@ pub fn build_mcp_status(
     }
 
     let mut elements = Vec::new();
-    // Python 按 sorted(servers) 迭代；preserve_order 下 Map 是文件顺序，须显式排序。
-    let mut server_names: Vec<&String> = servers.keys().collect();
-    server_names.sort();
-    for server_name in server_names {
-        let definition = servers[server_name].as_object().cloned().unwrap_or_default();
-        let policy = policy_cfg.get(server_name).and_then(Value::as_object).cloned();
+    let base_servers = def_data.get("servers").and_then(Value::as_object);
+    let mut all_server_names: std::collections::BTreeSet<String> = servers.keys().cloned().collect();
+    for probe in probes.values() {
+        for srv in probe.servers.keys() {
+            all_server_names.insert(srv.clone());
+        }
+    }
+    for server_name in &all_server_names {
+        let is_defined = servers.contains_key(server_name);
+        let definition = if is_defined {
+            servers[server_name].as_object().cloned().unwrap_or_default()
+        } else {
+            base_servers.and_then(|b| b.get(server_name)).and_then(Value::as_object).cloned().unwrap_or_default()
+        };
+        let policy = if is_defined {
+            policy_cfg.get(server_name).and_then(Value::as_object).cloned()
+        } else {
+            None
+        };
         let declared = policy.is_some();
         let enabled = declared
             && policy
@@ -706,7 +719,11 @@ pub fn build_mcp_status(
                 merged.insert(key.clone(), value.clone());
             }
         }
-        let targeted_agents = canonicalize_agent_list(merged.get("agents").unwrap_or(&Value::Null));
+        let targeted_agents = if is_defined {
+            canonicalize_agent_list(merged.get("agents").unwrap_or(&Value::Null))
+        } else {
+            None
+        };
         let raw_env = definition
             .get("env")
             .and_then(Value::as_object)
@@ -740,7 +757,13 @@ pub fn build_mcp_status(
             cells.insert(agent_id.clone(), Value::Object(cell));
         }
 
-        let state: &str = if !enabled {
+        let state: &str = if !is_defined {
+            let has_leftover = cells.values().any(|cell| cell.get("state").and_then(Value::as_str) == Some("leftover"));
+            if !has_leftover {
+                continue;
+            }
+            "drifted"
+        } else if !enabled {
             let has_leftover = cells.values().any(|cell| cell.get("state").and_then(Value::as_str) == Some("leftover"));
             if has_leftover {
                 "drifted"
@@ -781,17 +804,21 @@ pub fn build_mcp_status(
 
         let mut spec = definition.clone();
         spec.insert("env".to_string(), Value::Object(redact_env_for_spec(&raw_env)));
-        let probe_kind = if enabled {
-            classify_mcp_probe(&merged)
-        } else {
-            None
-        };
-        let local_current = match &probe_kind {
-            Some((kind, params)) if kind == "npm-npx" => upstream::npx_cached_version(&params[0]),
-            _ => None,
-        };
         let element_id = format!("mcp:{}", server_name);
-        let freshness = freshness_block(&element_id, probe_kind.is_some(), &cache, local_current, &mut warnings);
+        let freshness = if is_defined {
+            let probe_kind = if enabled {
+                classify_mcp_probe(&merged)
+            } else {
+                None
+            };
+            let local_current = match &probe_kind {
+                Some((kind, params)) if kind == "npm-npx" => upstream::npx_cached_version(&params[0]),
+                _ => None,
+            };
+            freshness_block(&element_id, probe_kind.is_some(), &cache, local_current, &mut warnings)
+        } else {
+            freshness_not_applicable()
+        };
 
         let mut policy_block = Map::new();
         policy_block.insert("enabled".to_string(), Value::Bool(enabled));
@@ -833,6 +860,7 @@ pub fn build_mcp_plan(
     root_dir: &Path,
     config_file: &Path,
     def_file: &Path,
+    only: &[String],
 ) -> Result<(Value, Vec<Diagnostic>, Vec<Diagnostic>), ConfigInvalid> {
     let (status, warnings, errors) = build_mcp_status(root_dir, config_file, def_file)?;
     let mut actions = Vec::new();
@@ -841,9 +869,101 @@ pub fn build_mcp_plan(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    if !only.is_empty() {
+        for target in only {
+            if !elements.iter().any(|e| e.get("id").and_then(Value::as_str) == Some(target.as_str())) {
+                return Err(ConfigInvalid(format!("元素 '{}' 在域 'mcp' 中不存在", target)));
+            }
+        }
+    }
+    if only.is_empty() {
+        let secrets_dir = root_dir.join("secrets");
+        if secrets_dir.join(".git").exists() {
+            let mut action = Map::new();
+            action.insert("op".to_string(), Value::String("git-pull".to_string()));
+            action.insert("element".to_string(), Value::String("mcp:secrets".to_string()));
+            action.insert("target".to_string(), Value::String(secrets_dir.to_string_lossy().to_string()));
+            action.insert("risk".to_string(), Value::String("network".to_string()));
+            action.insert("before_digest".to_string(), Value::Null);
+            action.insert("after_digest".to_string(), Value::Null);
+            action.insert("backup_path".to_string(), Value::Null);
+            action.insert("cmd".to_string(), Value::Null);
+            action.insert("note".to_string(), Value::String("拉取并同步共享凭证仓库 (secrets)".to_string()));
+            actions.push(Value::Object(action));
+        }
+    }
     for element in elements {
         let element_id = element.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+        if !only.is_empty() && !only.contains(&element_id) {
+            let server_part = element_id.strip_prefix("mcp:").unwrap_or(&element_id);
+            if !only.iter().any(|o| o == server_part) {
+                continue;
+            }
+        }
         let spec = element.get("spec").cloned().unwrap_or(Value::Null);
+        let server_name = element_id.strip_prefix("mcp:").unwrap_or(&element_id);
+        let enabled = element
+            .get("policy")
+            .and_then(|p| p.get("enabled"))
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        if enabled {
+            if let Some(url) = spec.get("url").and_then(Value::as_str) {
+                let repo_dir = root_dir.join("agent-mcp").join(server_name);
+                let mut action = Map::new();
+                action.insert("op".to_string(), Value::String("git-pull".to_string()));
+                action.insert("element".to_string(), Value::String(element_id.clone()));
+                action.insert("target".to_string(), Value::String(repo_dir.to_string_lossy().to_string()));
+                action.insert("risk".to_string(), Value::String("network".to_string()));
+                action.insert("before_digest".to_string(), Value::Null);
+                action.insert("after_digest".to_string(), Value::Null);
+                action.insert("backup_path".to_string(), Value::Null);
+                action.insert("cmd".to_string(), Value::Null);
+                action.insert("note".to_string(), Value::String(format!("准备/更新本地源码仓库及依赖构建（url: {}）", url)));
+                actions.push(Value::Object(action));
+
+                if let Some(setup_cmd) = spec.get("setup").and_then(Value::as_str) {
+                    let mut cmd_act = Map::new();
+                    cmd_act.insert("op".to_string(), Value::String("run-cmd".to_string()));
+                    cmd_act.insert("element".to_string(), Value::String(element_id.clone()));
+                    cmd_act.insert("target".to_string(), Value::String(repo_dir.to_string_lossy().to_string()));
+                    cmd_act.insert("risk".to_string(), Value::String("exec-local".to_string()));
+                    cmd_act.insert("before_digest".to_string(), Value::Null);
+                    cmd_act.insert("after_digest".to_string(), Value::Null);
+                    cmd_act.insert("backup_path".to_string(), Value::Null);
+                    cmd_act.insert("cmd".to_string(), Value::String(setup_cmd.to_string()));
+                    cmd_act.insert("note".to_string(), Value::String(format!("执行自定义初始化: {}", setup_cmd)));
+                    actions.push(Value::Object(cmd_act));
+                }
+                if repo_dir.join("package.json").exists() {
+                    let mut cmd_act = Map::new();
+                    cmd_act.insert("op".to_string(), Value::String("run-cmd".to_string()));
+                    cmd_act.insert("element".to_string(), Value::String(element_id.clone()));
+                    cmd_act.insert("target".to_string(), Value::String(repo_dir.to_string_lossy().to_string()));
+                    cmd_act.insert("risk".to_string(), Value::String("network".to_string()));
+                    cmd_act.insert("before_digest".to_string(), Value::Null);
+                    cmd_act.insert("after_digest".to_string(), Value::Null);
+                    cmd_act.insert("backup_path".to_string(), Value::Null);
+                    cmd_act.insert("cmd".to_string(), Value::Null);
+                    cmd_act.insert("note".to_string(), Value::String("安装 Node.js 依赖并构建".to_string()));
+                    actions.push(Value::Object(cmd_act));
+                }
+            } else if server_name == "serena" {
+                if let Some(loc) = spec.get("project_serena_folder_location").and_then(Value::as_str) {
+                    let mut action = Map::new();
+                    action.insert("op".to_string(), Value::String("run-cmd".to_string()));
+                    action.insert("element".to_string(), Value::String(element_id.clone()));
+                    action.insert("target".to_string(), Value::Null);
+                    action.insert("risk".to_string(), Value::String("exec-local".to_string()));
+                    action.insert("before_digest".to_string(), Value::Null);
+                    action.insert("after_digest".to_string(), Value::Null);
+                    action.insert("backup_path".to_string(), Value::Null);
+                    action.insert("cmd".to_string(), Value::Null);
+                    action.insert("note".to_string(), Value::String(format!("配置 Serena 项目数据目录 ({})", loc)));
+                    actions.push(Value::Object(action));
+                }
+            }
+        }
         let agents = element
             .get("observed")
             .and_then(|o| o.get("agents"))
@@ -975,5 +1095,18 @@ mod tests {
         );
         let local = json!({"command": "alpha-cmd", "args": []});
         assert_eq!(classify_mcp_probe(local.as_object().unwrap()), None);
+    }
+
+    #[test]
+    fn plan_scope_unknown_element_fails() {
+        let temp = std::env::temp_dir().join(format!("test-mcp-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp);
+        let config = temp.join("manager.json");
+        let def = temp.join("mcp.json");
+        std::fs::write(&config, "{\"mcp\": {}}").unwrap();
+        std::fs::write(&def, "{\"servers\": {}, \"agent_paths\": {}}").unwrap();
+        let err = build_mcp_plan(&temp, &config, &def, &["mcp:nonexistent".to_string()]).unwrap_err();
+        assert!(err.0.contains("不存在"));
+        let _ = std::fs::remove_dir_all(&temp);
     }
 }

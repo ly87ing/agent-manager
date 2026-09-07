@@ -149,15 +149,18 @@ export default function McpPage() {
   const selected = elements.find((element) => element.id === selectedId) ?? null;
   const layers = policyQuery.data?.data.layers ?? null;
 
-  /** 单元格点击：该 server 的 plan 过滤预览 → 域级 mcp:apply（提案 §4.3 单元素 = 预览过滤 + 域 apply）。 */
+  /** 单元格点击：仅针对该 server 执行 plan 与 apply（阶段 A 真实范围控制）。 */
   const openCellApply = (element: EngineElement) => {
     preview.open({
       title: `同步 ${element.id}`,
-      subtitle: "预览只显示这个服务的相关操作；实际执行会同步全部 MCP 服务配置（执行前自动备份）。",
-      planCommands: ["mcp:plan"],
-      filterElement: element.id,
+      subtitle: "仅同步此服务配置（执行前自动备份）。",
+      planCommands: [{ command: "mcp:plan", args: ["--only", element.id] }],
       confirmLabel: "立即同步",
-      execute: executeApply({ command: "mcp:apply", label: `同步 ${element.id}` }),
+      execute: executeApply({
+        command: "mcp:apply",
+        label: `同步 ${element.id}`,
+        extraArgs: ["--only", element.id],
+      }),
     });
   };
 

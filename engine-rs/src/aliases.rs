@@ -149,6 +149,7 @@ pub fn build_aliases_plan(
     root_dir: &std::path::Path,
     config_file: &std::path::Path,
     def_files: &[PathBuf],
+    only: &[String],
 ) -> Result<(Value, Vec<Diagnostic>, Vec<Diagnostic>), ConfigInvalid> {
     let (status, warnings, errors) = build_aliases_status(root_dir, config_file, def_files)?;
     let cfg = crate::mcp::load_json_object(&def_files[0])?;
@@ -160,12 +161,22 @@ pub fn build_aliases_plan(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    if !only.is_empty() {
+        for target in only {
+            if !elements.iter().any(|e| e.get("id").and_then(Value::as_str) == Some(target.as_str())) {
+                return Err(ConfigInvalid(format!("元素 '{}' 在域 'aliases' 中不存在", target)));
+            }
+        }
+    }
     for element in &elements {
+        let element_id = element.get("id").and_then(Value::as_str).unwrap_or("");
+        if !only.is_empty() && !only.contains(&element_id.to_string()) {
+            continue;
+        }
         let state = element.get("state").and_then(Value::as_str).unwrap_or("");
         if !matches!(state, "drifted" | "missing" | "not-materialized") {
             continue;
         }
-        let element_id = element.get("id").and_then(Value::as_str).unwrap_or("");
         let target = element
             .get("observed")
             .and_then(|o| o.get("target"))

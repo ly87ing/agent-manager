@@ -70,10 +70,13 @@ export function useDefinitionOps({
     preview.open({
       title: label,
       subtitle: "定义已写入覆盖层；预览将要执行的操作，确认后同步生效（执行前自动备份）。",
-      planCommands: [`${domain}:plan`],
-      filterElement: input.elementId,
+      planCommands: [{ command: `${domain}:plan`, args: ["--only", input.elementId] }],
       confirmLabel: TOGGLE_COPY.applyNow,
-      execute: executeApply({ command: `${domain}:apply`, label }),
+      execute: executeApply({
+        command: `${domain}:apply`,
+        label,
+        extraArgs: ["--only", input.elementId],
+      }),
     });
   };
 
@@ -96,12 +99,18 @@ export function useDefinitionOps({
     setRemoval(null);
     void queryClient.invalidateQueries({ queryKey: engineKeys.all });
     toast.success(`已移除 ${name}`);
+    const prefix = domain === "skills" ? "skill" : domain;
+    const elementId = `${prefix}:${name}`;
     preview.open({
       title: `移除 ${name}`,
-      subtitle: plan.kind === "tombstone" ? OVERLAY_COPY.removeBaselineNote : "移除已写入覆盖层；预览将要执行的操作，确认后同步生效。",
-      planCommands: [`${domain}:plan`],
+      subtitle: plan.kind === "tombstone" ? OVERLAY_COPY.removeBaselineNote : "移除已写入覆盖层；预览将要执行的操作，确认后同步生效（执行前自动备份）。",
+      planCommands: [{ command: `${domain}:plan`, args: ["--only", elementId] }],
       confirmLabel: TOGGLE_COPY.applyNow,
-      execute: executeApply({ command: `${domain}:apply`, label: `移除 ${name}` }),
+      execute: executeApply({
+        command: `${domain}:apply`,
+        label: `移除 ${name}`,
+        extraArgs: ["--only", elementId],
+      }),
     });
   };
 

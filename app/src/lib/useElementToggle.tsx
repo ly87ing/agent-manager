@@ -47,18 +47,22 @@ export function useElementToggle() {
       return;
     }
     const label = `${next ? "启用" : "停用"} ${input.name}`;
-    const applyLabel = `同步${input.name}所在域`;
+    const applyLabel = `同步 ${input.name}`;
     toast.success(TOGGLE_COPY.savedAskApply(next ? "启用" : "停用", POLICY_LAYER_COPY[layer].label), {
       action: {
         label: TOGGLE_COPY.applyNow,
         onClick: () =>
           preview.open({
             title: label,
-            subtitle: "预览只显示相关操作；实际执行会同步该域全部配置（执行前自动备份）。",
-            planCommands: [`${input.domain}:plan`],
-            filterElement: input.elementId,
+            subtitle: "仅同步此组件配置（执行前自动备份）。",
+            planCommands: [{ command: `${input.domain}:plan`, args: ["--only", input.elementId] }],
+            requireConfirmText: input.domain === "agents" ? input.elementId : undefined,
             confirmLabel: TOGGLE_COPY.applyNow,
-            execute: executeApply({ command: `${input.domain}:apply`, label: applyLabel }),
+            execute: executeApply({
+              command: `${input.domain}:apply`,
+              label: applyLabel,
+              extraArgs: ["--only", input.elementId],
+            }),
           }),
       },
     });

@@ -339,6 +339,7 @@ pub fn build_agents_plan(
     root_dir: &Path,
     config_file: &Path,
     def_files: &[PathBuf],
+    only: &[String],
 ) -> Result<(Value, Vec<Diagnostic>, Vec<Diagnostic>), ConfigInvalid> {
     let (status, mut warnings, errors) = build_agents_status(root_dir, config_file, def_files)?;
     let agent_defs = canonicalize_agent_mapping(&Value::Object(
@@ -352,8 +353,18 @@ pub fn build_agents_plan(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    if !only.is_empty() {
+        for target in only {
+            if !elements.iter().any(|e| e.get("id").and_then(Value::as_str) == Some(target.as_str())) {
+                return Err(ConfigInvalid(format!("元素 '{}' 在域 'agents' 中不存在", target)));
+            }
+        }
+    }
     for element in elements {
         let element_id = element.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+        if !only.is_empty() && !only.contains(&element_id) {
+            continue;
+        }
         let agent_id = element_id.splitn(2, ':').nth(1).unwrap_or("").to_string();
         let state = element.get("state").and_then(Value::as_str).unwrap_or("");
         if state != "missing" {

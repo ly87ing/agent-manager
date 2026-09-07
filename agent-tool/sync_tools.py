@@ -350,7 +350,7 @@ def apply_overrides(name, target_dir, dry_run=False):
             shutil.copy2(src, dst)
             logging.info(f"  已覆盖: {rel_path}")
 
-def prune_orphan_tools(base_dir, managed_names, dry_run=False, force_yes=False):
+def prune_orphan_tools(base_dir, managed_names, dry_run=False, force_yes=False, only_names=None):
     """Clean up tool directories that are no longer managed."""
     base_path = Path(base_dir).resolve()
     excluded = {"overrides", ".gitignore", "sync_tools.py", "__pycache__"}
@@ -358,6 +358,8 @@ def prune_orphan_tools(base_dir, managed_names, dry_run=False, force_yes=False):
 
     for item in base_path.iterdir():
         if item.is_dir() and item.name not in managed_names and item.name not in excluded:
+            if only_names is not None and item.name not in only_names:
+                continue
             if not is_manager_owned_tool_dir(item):
                 logging.info(f"跳过非托管工具目录: {item.name}")
                 continue
@@ -631,6 +633,7 @@ def main():
     parser.add_argument("-f", "--force-refresh", action="store_true", help="更新探测失败时仍强制执行远端刷新")
     parser.add_argument("--yes", action="store_true", help="自动清理")
     parser.add_argument("--offline", action="store_true", help="离线模式 (跳过网络操作)")
+    parser.add_argument("--only", action="append", default=[], help="仅针对指定工具（可重复；支持 tools:<id> 或 <id>）")
     args = parser.parse_args()
 
     try:
@@ -641,6 +644,28 @@ def main():
     except ValueError as exc:
         logging.error(str(exc))
         sys.exit(1)
+
+    all_managed_tools = set(def_cfg.keys())
+    target_tools = None
+    if args.only:
+        target_tools = set()
+        for item in args.only:
+            if ":" in item and not item.startswith("tools:"):
+                logging.error(f"跨域元素 scope 拒绝: {item}")
+                sys.exit(2)
+            norm = item.split(":", 1)[1] if item.startswith("tools:") else item
+            target_tools.add(norm)
+        base_dir_early = Path(args.base_dir).resolve()
+        known_tools = set(all_managed_tools)
+        if base_dir_early.exists():
+            for item in base_dir_early.iterdir():
+                if item.is_dir() and is_manager_owned_tool_dir(item):
+                    known_tools.add(item.name)
+        unknown = sorted(target_tools - known_tools)
+        if unknown:
+            logging.error(f"未知工具: {', '.join(unknown)}")
+            sys.exit(2)
+        def_cfg = {k: v for k, v in def_cfg.items() if k in target_tools}
 
     base_dir = Path(args.base_dir).resolve()
     if not base_dir.exists() and not args.dry_run:
@@ -680,7 +705,13 @@ def main():
         ):
             all_ok = False
     
-    if not args.dry_run: prune_orphan_tools(base_dir, def_cfg.keys(), args.dry_run, args.yes)
+    if not args.dry_run:
+        if target_tools is not None:
+            orphan_targets = target_tools - all_managed_tools
+            if orphan_targets:
+                prune_orphan_tools(base_dir, all_managed_tools, args.dry_run, args.yes, only_names=orphan_targets)
+        else:
+            prune_orphan_tools(base_dir, all_managed_tools, args.dry_run, args.yes)
     if not all_ok: sys.exit(1)
     logging.info("工具同步任务完成！")
 

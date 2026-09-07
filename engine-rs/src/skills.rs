@@ -811,6 +811,18 @@ pub fn build_skills_status(
 
     // 额外受管链接：未被任何启用集合期望、但指向某集合的托管缓存仓库。
     let mut extras_by_repo: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+    let mut candidates: BTreeSet<String> = repositories.keys().cloned().collect();
+    if repo_base.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&repo_base) {
+            for entry in entries.flatten() {
+                if entry.path().is_dir() {
+                    if let Some(name) = entry.file_name().to_str() {
+                        candidates.insert(name.to_string());
+                    }
+                }
+            }
+        }
+    }
     for agent_id in agent_targets.keys() {
         let expected_names: BTreeSet<String> = expected_by_agent
             .get(agent_id.as_str())
@@ -821,7 +833,7 @@ pub fn build_skills_status(
             if expected_names.contains(&name) || !is_managed_skill_target_path(&target, &repo_base) {
                 continue;
             }
-            for candidate in repositories.keys() {
+            for candidate in &candidates {
                 let candidate_base = PathBuf::from(resolve_loose(&repo_base.join(candidate)));
                 if is_managed_skill_target_path(&target, &candidate_base) {
                     let mut extra = Map::new();
@@ -854,9 +866,45 @@ pub fn build_skills_status(
 
     let mut elements = Vec::new();
     let mut seen_skill_names: BTreeMap<String, String> = BTreeMap::new();
-    let mut repo_names: Vec<&String> = repositories.keys().collect();
-    repo_names.sort();
-    for repo_name in repo_names {
+    let mut all_repo_names: BTreeSet<String> = repositories.keys().cloned().collect();
+    for r in extras_by_repo.keys() {
+        all_repo_names.insert(r.clone());
+    }
+    for repo_name in &all_repo_names {
+        if !repositories.contains_key(repo_name) {
+            let repo_path = repo_base.join(repo_name);
+            let repo_cached = repo_path.exists();
+            let owner_marked = if repo_cached { is_manager_owned_repo(&repo_path) } else { false };
+            let extra_links = extras_by_repo.get(repo_name).cloned().unwrap_or_default();
+            let state = if !extra_links.is_empty() { "drifted" } else { "disabled" };
+            let mut el = Map::new();
+            el.insert("id".to_string(), Value::String(format!("skill:{}", repo_name)));
+            el.insert("domain".to_string(), Value::String("skills".to_string()));
+            let mut spec = Map::new();
+            spec.insert("url".to_string(), Value::Null);
+            spec.insert("skill_paths".to_string(), Value::Null);
+            spec.insert("agents".to_string(), Value::Null);
+            spec.insert("matrix_mode".to_string(), Value::Bool(false));
+            spec.insert("new_skill_default".to_string(), Value::String("disabled".to_string()));
+            el.insert("spec".to_string(), Value::Object(spec));
+            let mut pol = Map::new();
+            pol.insert("enabled".to_string(), Value::Bool(false));
+            pol.insert("declared_in_policy".to_string(), Value::Bool(false));
+            el.insert("policy".to_string(), Value::Object(pol));
+            let mut obs = Map::new();
+            obs.insert("repo_cache".to_string(), Value::String(repo_path.to_string_lossy().to_string()));
+            obs.insert("repo_cached".to_string(), Value::Bool(repo_cached));
+            obs.insert("owner_marked".to_string(), Value::Bool(owner_marked));
+            obs.insert("discovered".to_string(), Value::Array(Vec::new()));
+            obs.insert("discovery_inbox".to_string(), Value::Array(Vec::new()));
+            obs.insert("extra_links".to_string(), Value::Array(extra_links));
+            el.insert("observed".to_string(), Value::Object(obs));
+            el.insert("state".to_string(), Value::String(state.to_string()));
+            el.insert("actions".to_string(), Value::Array(Vec::new()));
+            el.insert("freshness".to_string(), crate::mcp::freshness_not_applicable());
+            elements.push(Value::Object(el));
+            continue;
+        }
         let definition = repositories[repo_name].as_object().cloned().unwrap_or_default();
         let policy = skills_policy.get(repo_name).and_then(Value::as_object).cloned();
         let declared = policy.is_some();
@@ -1153,14 +1201,34 @@ pub fn build_skills_plan(
     root_dir: &Path,
     config_file: &Path,
     def_files: &[PathBuf],
+    only: &[String],
+    agent: Option<&str>,
 ) -> Result<(Value, Vec<Diagnostic>, Vec<Diagnostic>), ConfigInvalid> {
     let (status, warnings, errors) = build_skills_status(root_dir, config_file, def_files)?;
+    let def_data = crate::mcp::load_json_object(&def_files[0])?;
+    let agent_targets = canonicalize_agent_mapping(
+        def_data.get("agents").unwrap_or(&Value::Null)
+    ).map_err(ConfigInvalid)?;
+
     let mut actions = Vec::new();
     let elements = status
         .get("elements")
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+
+    if !only.is_empty() {
+        for target in only {
+            if !elements.iter().any(|e| e.get("id").and_then(Value::as_str) == Some(target.as_str())) {
+                return Err(ConfigInvalid(format!("元素 '{}' 在域 'skills' 中不存在", target)));
+            }
+        }
+    }
+    if let Some(agent_name) = agent {
+        if !agent_targets.contains_key(agent_name) {
+            return Err(ConfigInvalid(format!("未知 agent '{}'", agent_name)));
+        }
+    }
 
     let mut push_action = |op: &str, element: &str, target: Value, risk: &str, note: String| {
         let mut action = Map::new();
@@ -1180,6 +1248,18 @@ pub fn build_skills_plan(
         let element_id = element.get("id").and_then(Value::as_str).unwrap_or("");
         if element_id.contains('/') {
             continue;
+        }
+        let mut collection_in_only = false;
+        if !only.is_empty() {
+            let repo_name = element_id.strip_prefix("skill:").unwrap_or(element_id);
+            collection_in_only = only.iter().any(|o| o == element_id || o == repo_name);
+            let skill_in_only = only.iter().any(|s| {
+                s.starts_with(&format!("skill:{}/", repo_name)) || s.starts_with(&format!("{}/", repo_name))
+            });
+            let state = element.get("state").and_then(Value::as_str).unwrap_or("");
+            if !collection_in_only && !(skill_in_only && state == "not-materialized") {
+                continue;
+            }
         }
         let state = element.get("state").and_then(Value::as_str).unwrap_or("");
         let repo_cache = element
@@ -1228,6 +1308,31 @@ pub fn build_skills_plan(
                 "network",
                 format!("集合仓库落后上游（{} → {}）", current, upstream_value),
             );
+        } else if collection_in_only
+            && element
+                .get("spec")
+                .and_then(|s| s.get("auto_update"))
+                .and_then(Value::as_bool)
+                .unwrap_or(true)
+            && element.get("spec").and_then(|s| s.get("url")).is_some()
+            && element
+                .get("policy")
+                .and_then(|p| p.get("enabled"))
+                .and_then(Value::as_bool)
+                .unwrap_or(true)
+        {
+            let url = element
+                .get("spec")
+                .and_then(|s| s.get("url"))
+                .and_then(Value::as_str)
+                .unwrap_or("?");
+            push_action(
+                "git-pull",
+                element_id,
+                repo_cache.clone(),
+                "network",
+                format!("探测远端上游更新集合仓库缓存（url: {}）", url),
+            );
         }
         let extras = element
             .get("observed")
@@ -1237,13 +1342,18 @@ pub fn build_skills_plan(
             .unwrap_or_default();
         for extra in extras {
             let name = extra.get("name").and_then(Value::as_str).unwrap_or("");
-            let agent = extra.get("agent").and_then(Value::as_str).unwrap_or("");
+            let target_agent = extra.get("agent").and_then(Value::as_str).unwrap_or("");
+            if let Some(a) = agent {
+                if target_agent != a {
+                    continue;
+                }
+            }
             push_action(
                 "unlink",
                 element_id,
                 extra.get("link_path").cloned().unwrap_or(Value::Null),
                 "exec-local",
-                format!("移除额外受管链接 {}@{}（策略未启用）", name, agent),
+                format!("移除额外受管链接 {}@{}（策略未启用）", name, target_agent),
             );
         }
     }
@@ -1251,6 +1361,17 @@ pub fn build_skills_plan(
         let element_id = element.get("id").and_then(Value::as_str).unwrap_or("");
         if !element_id.contains('/') {
             continue;
+        }
+        if !only.is_empty() {
+            let collection_name = element.get("spec").and_then(|s| s.get("collection")).and_then(Value::as_str).unwrap_or("");
+            let collection_id = format!("skill:{}", collection_name);
+            let item_name = element_id.strip_prefix("skill:").unwrap_or(element_id);
+            let in_only = only.iter().any(|o| {
+                o == element_id || o == item_name || o == &collection_id || o == collection_name
+            });
+            if !in_only {
+                continue;
+            }
         }
         let source_path = element
             .get("spec")
@@ -1271,6 +1392,11 @@ pub fn build_skills_plan(
             .cloned()
             .unwrap_or_default();
         for (agent_id, cell) in &agents {
+            if let Some(target_agent) = agent {
+                if agent_id != target_agent {
+                    continue;
+                }
+            }
             let cell_state = cell.get("state").and_then(Value::as_str).unwrap_or("");
             let link_path = cell.get("link_path").cloned().unwrap_or(Value::Null);
             match cell_state {

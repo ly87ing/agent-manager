@@ -749,6 +749,7 @@ def main():
     parser.add_argument("--wait-async-actions", action="store_true", help="等待后台安装/升级任务结束")
     parser.add_argument("--show-async-status", action="store_true", help="显示后台任务状态")
     parser.add_argument("--run-async-job", help=argparse.SUPPRESS)
+    parser.add_argument("--only", action="append", default=[], help="仅针对指定 Agent（可重复；支持 agents:<id> 或 <id>）")
     args = parser.parse_args()
 
     if args.run_async_job:
@@ -769,6 +770,20 @@ def main():
     except ValueError as exc:
         logging.error(str(exc))
         sys.exit(1)
+
+    if args.only:
+        target_agents = set()
+        for item in args.only:
+            if ":" in item and not item.startswith("agents:"):
+                logging.error(f"跨域元素 scope 拒绝: {item}")
+                sys.exit(2)
+            norm = item.split(":", 1)[1] if item.startswith("agents:") else item
+            target_agents.add(norm)
+        unknown = sorted(target_agents - set(def_cfg.keys()))
+        if unknown:
+            logging.error(f"未知 Agent: {', '.join(unknown)}")
+            sys.exit(2)
+        def_cfg = {k: v for k, v in def_cfg.items() if k in target_agents}
 
     if args.offline:
         logging.info("离线模式：跳过更新检查")

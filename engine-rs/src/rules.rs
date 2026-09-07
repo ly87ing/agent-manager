@@ -467,6 +467,7 @@ pub fn build_rules_plan(
     root_dir: &Path,
     config_file: &Path,
     def_files: &[PathBuf],
+    only: &[String],
 ) -> Result<(Value, Vec<Diagnostic>, Vec<Diagnostic>), ConfigInvalid> {
     let (status, warnings, errors) = build_rules_status(root_dir, config_file, def_files)?;
     let elements = status
@@ -474,6 +475,13 @@ pub fn build_rules_plan(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    if !only.is_empty() {
+        for target in only {
+            if !elements.iter().any(|e| e.get("id").and_then(Value::as_str) == Some(target.as_str())) {
+                return Err(ConfigInvalid(format!("元素 '{}' 在域 'rules' 中不存在", target)));
+            }
+        }
+    }
     let mut ordered: Vec<&Value> = elements.iter().filter(|e| e.get("id").and_then(Value::as_str) == Some("rules:dist")).collect();
     ordered.extend(elements.iter().filter(|e| e.get("id").and_then(Value::as_str) != Some("rules:dist")));
 
@@ -482,7 +490,9 @@ pub fn build_rules_plan(
         let element_id = element.get("id").and_then(Value::as_str).unwrap_or("").to_string();
         let state = element.get("state").and_then(Value::as_str).unwrap_or("");
         if element_id == "rules:dist" {
-            if state == "drifted" || state == "not-materialized" {
+            let dist_in_only = only.contains(&"rules:dist".to_string());
+            let any_other_rule_in_only = only.iter().any(|id| id != "rules:dist");
+            if (only.is_empty() || dist_in_only || any_other_rule_in_only) && (state == "drifted" || state == "not-materialized") {
                 actions.push(crate::canon::plan_action(
                     "run-cmd",
                     &element_id,
@@ -494,6 +504,9 @@ pub fn build_rules_plan(
                     Some("先重建 dist，再分发（构建落后/产物缺失）".to_string()),
                 ));
             }
+            continue;
+        }
+        if !only.is_empty() && !only.contains(&element_id) {
             continue;
         }
         if !matches!(state, "drifted" | "missing" | "not-materialized") {

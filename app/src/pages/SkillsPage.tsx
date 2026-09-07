@@ -154,15 +154,15 @@ export default function SkillsPage() {
   ).sort();
   const layers = policyQuery.data?.data.layers ?? null;
 
-  /** 策略写入 + plan 预览编排的公共尾部：skills:plan 过滤到本 skill → skills:apply。 */
-  const openApplyPreview = (skill: EngineElement, label: string) => {
+  /** 策略写入 + plan 预览编排的公共尾部：skills:plan 过滤到本 skill 及 agent → skills:apply。 */
+  const openApplyPreview = (skill: EngineElement, label: string, agent?: string) => {
+    const args = agent ? ["--only", skill.id, "--agent", agent] : ["--only", skill.id];
     preview.open({
       title: label,
-      subtitle: "预览只显示这个技能的相关操作；实际执行会同步全部技能链接（执行前自动备份）。",
-      planCommands: ["skills:plan"],
-      filterElement: skill.id,
+      subtitle: "仅同步此技能链接（执行前自动备份）。",
+      planCommands: [{ command: "skills:plan", args }],
       confirmLabel: "立即同步",
-      execute: executeApply({ command: "skills:apply", label }),
+      execute: executeApply({ command: "skills:apply", label, extraArgs: args }),
     });
   };
 
@@ -184,7 +184,7 @@ export default function SkillsPage() {
       return;
     }
     toast.success(`已${next ? "启用" : "停用"} ${spec.name} @ ${agent}（写入${layer === "synced" ? "共享层" : "仅本机层"}）`);
-    openApplyPreview(skill, `${next ? "启用" : "停用"} ${spec.name} @ ${agent}`);
+    openApplyPreview(skill, `${next ? "启用" : "停用"} ${spec.name} @ ${agent}`, agent);
   };
 
   /** 收件箱启用：agents 置 null = 跟随集合目标集（引擎 resolve_skill_agent_switch 语义）。 */

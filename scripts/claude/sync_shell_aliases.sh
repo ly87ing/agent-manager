@@ -33,11 +33,37 @@ MARKER_BEGIN="# >>> agent-manager shell aliases >>>"
 MARKER_END="# <<< agent-manager shell aliases <<<"
 
 DRY_RUN=false
-for arg in "$@"; do
-    case "$arg" in
-        --dry-run) DRY_RUN=true ;;
+TARGETS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run) DRY_RUN=true; shift ;;
+        --target)
+            TARGETS+=("$2"); shift 2 ;;
+        --only)
+            TARGETS+=("$2"); shift 2 ;;
+        *)
+            echo "未知参数: $1" >&2
+            exit 2 ;;
     esac
 done
+
+if [[ ${#TARGETS[@]} -gt 0 ]]; then
+    RC_FILES=()
+    for t in "${TARGETS[@]}"; do
+        if [[ "$t" == *":"* && "$t" != "aliases:"* ]]; then
+            echo "跨域元素 scope 拒绝: $t" >&2
+            exit 2
+        fi
+        norm="${t#aliases:}"
+        case "$norm" in
+            zshrc) RC_FILES+=("${HOME}/.zshrc") ;;
+            zprofile) RC_FILES+=("${HOME}/.zprofile") ;;
+            *)
+                echo "未知 alias 目标: $norm" >&2
+                exit 2 ;;
+        esac
+    done
+fi
 
 # ---------- 1. 读取声明式配置 ----------
 

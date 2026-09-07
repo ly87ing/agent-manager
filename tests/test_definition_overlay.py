@@ -15,7 +15,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MANAGE = ROOT / "manage.sh"
-COPY_IGNORE = shutil.ignore_patterns("repositories", ".git", "__pycache__", "secrets", ".env", "app", "node_modules", "engine-rs")
+COPY_IGNORE = shutil.ignore_patterns(
+    "repositories", ".git", "__pycache__", "secrets", ".env", "app", "node_modules", "engine-rs", "manager.local.json", "manager.synced.json"
+)
 
 
 class DefinitionOverlayTests(unittest.TestCase):
@@ -128,24 +130,43 @@ class DefinitionOverlayTests(unittest.TestCase):
         self.assertEqual(elements["mcp:alpha"]["state"], "drifted", "生效定义=基线⊕覆盖，旧注入应判漂移")
 
     def test_mcp_overlay_tombstone_removes_baseline_server(self):
-        # tombstone：status 不再出现元素；sync 后目标文件无该 server；doctor 不误报。
-        self.agent_a.write_text(
-            json.dumps({"mcpServers": {
+        # tombstone：删除定义后目标文件保留可验证残留时，status 呈现为 drifted/disabled policy，
+        # 且仅生成该元素的清理计划；通过 --only 离线清理后，目标文件移除该 server、status 不再出现、doctor 正常。
+        before_target_cfg = {
+            "mcpServers": {
                 "alpha": {"command": "alpha-cmd", "args": ["--x"], "env": {"_MANAGED_BY": "agent-manager"}},
                 "gamma": {"command": "gamma-cmd", "args": [], "env": {"_MANAGED_BY": "agent-manager"}},
-            }}) + "\n",
+            }
+        }
+        self.agent_a.write_text(
+            json.dumps(before_target_cfg) + "\n",
             encoding="utf-8",
         )
+        alpha_before = json.loads(json.dumps(before_target_cfg["mcpServers"]["alpha"]))
         self._write_overlay("local", {"mcp": {"definitions": {"gamma": {"_delete": True}}}})
         _payload, elements = self._status_elements("mcp:status", "--json")
-        self.assertNotIn("mcp:gamma", elements)
+        self.assertIn("mcp:gamma", elements, "清理前保留可验证受管残留供精确清理")
+        self.assertEqual(elements["mcp:gamma"]["state"], "drifted")
+        self.assertFalse(elements["mcp:gamma"]["policy"]["enabled"])
+        self.assertFalse(elements["mcp:gamma"]["policy"]["declared_in_policy"])
         self.assertIn("mcp:alpha", elements)
 
-        apply_result = self._run("mcp:apply", "--json", "--offline")
+        plan_res = self._run("mcp:plan", "--json", "--offline", "--only", "mcp:gamma")
+        self.assertEqual(plan_res.returncode, 0, plan_res.stdout + plan_res.stderr)
+        plan_data = json.loads(plan_res.stdout)["data"]
+        self.assertTrue(plan_data["actions"], "应生成 gamma 的清理动作")
+        self.assertEqual({a["element"] for a in plan_data["actions"]}, {"mcp:gamma"})
+
+        apply_result = self._run("mcp:apply", "--json", "--offline", "--only", "mcp:gamma")
         self.assertEqual(apply_result.returncode, 0, apply_result.stdout + apply_result.stderr)
         injected = json.loads(self.agent_a.read_text(encoding="utf-8"))
         self.assertNotIn("gamma", injected["mcpServers"])
         self.assertIn("alpha", injected["mcpServers"])
+        self.assertEqual(injected["mcpServers"]["alpha"], alpha_before, "未选对象 alpha 完整对象（含 env 及其他字段）原样保留")
+
+        _payload_after, elements_after = self._status_elements("mcp:status", "--json")
+        self.assertNotIn("mcp:gamma", elements_after, "清理后元素彻底消失")
+        self.assertIn("mcp:alpha", elements_after)
 
         doctor = self._run("doctor", "--json")
         self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)

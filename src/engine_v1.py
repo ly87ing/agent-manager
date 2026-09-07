@@ -401,16 +401,21 @@ def build_mcp_status(root_dir, config_file, def_file):
         if probe["agent_enabled"] and probe["parse_error"] is None:
             expected_by_agent[agent_id] = expected_managed_mcp_servers(root_dir, config, mcp_cfg, agent_id)
 
+    all_server_names = set(servers)
+    for probe in probes.values():
+        all_server_names.update(probe["servers"])
+
     elements = []
-    for server_name in sorted(servers):
-        definition = servers[server_name]
-        policy = policy_cfg.get(server_name)
-        declared = isinstance(policy, dict)
-        enabled = declared and bool(policy.get("enabled", True))
+    for server_name in sorted(all_server_names):
+        is_defined = server_name in servers
+        definition = servers[server_name] if is_defined else {}
+        policy = policy_cfg.get(server_name) if is_defined else None
+        declared = isinstance(policy, dict) if is_defined else False
+        enabled = declared and bool(policy.get("enabled", True)) if is_defined else False
         merged = dict(definition)
         if declared:
             merged.update(policy)
-        targeted_agents = canonicalize_agent_list(merged.get("agents"))
+        targeted_agents = canonicalize_agent_list(merged.get("agents")) if is_defined else None
         raw_env = definition.get("env", {})
         if not isinstance(raw_env, dict):
             raw_env = {}
@@ -430,7 +435,12 @@ def build_mcp_status(root_dir, config_file, def_file):
                 "target_exists": probe["target_exists"],
             }
 
-        if not enabled:
+        if not is_defined:
+            has_leftover = any(cell["state"] == "leftover" for cell in cells.values())
+            if not has_leftover:
+                continue
+            state = "drifted"
+        elif not enabled:
             # 禁用/未声明元素：无残留即收敛于 disabled；有残留则偏离为 drifted。
             if any(cell["state"] == "leftover" for cell in cells.values()):
                 state = "drifted"
@@ -456,17 +466,20 @@ def build_mcp_status(root_dir, config_file, def_file):
 
         spec = {key: value for key, value in definition.items() if key != "env"}
         spec["env"] = _redact_env_for_spec(raw_env)
-        probe_kind = _classify_mcp_probe(merged) if enabled else None
-        local_current = None
-        if probe_kind is not None and probe_kind[0] == "npm-npx":
-            local_current = _npx_cached_version(probe_kind[1])
-        freshness = _freshness_from_cache(
-            "mcp:%s" % server_name,
-            probeable=probe_kind is not None,
-            cache=cache,
-            local_current=local_current,
-            warnings=warnings,
-        )
+        if is_defined:
+            probe_kind = _classify_mcp_probe(merged) if enabled else None
+            local_current = None
+            if probe_kind is not None and probe_kind[0] == "npm-npx":
+                local_current = _npx_cached_version(probe_kind[1])
+            freshness = _freshness_from_cache(
+                "mcp:%s" % server_name,
+                probeable=probe_kind is not None,
+                cache=cache,
+                local_current=local_current,
+                warnings=warnings,
+            )
+        else:
+            freshness = dict(FRESHNESS_NOT_APPLICABLE)
         elements.append(
             {
                 "id": "mcp:%s" % server_name,
@@ -869,13 +882,15 @@ def build_agents_status(root_dir, config_file, def_files):
     return {"domain": "agents", "elements": elements}, warnings, errors
 
 
-def build_agents_plan(root_dir, config_file, def_files):
+def build_agents_plan(root_dir, config_file, def_files, only=None, agent=None):
     status, warnings, errors = build_agents_status(root_dir, config_file, def_files)
     agent_defs = canonicalize_agent_mapping(
         load_json_object_file(def_files[0], strict=True, missing_ok=False)
     )
     actions = []
     for element in status["elements"]:
+        if only is not None and element["id"] not in only:
+            continue
         agent_id = element["id"].split(":", 1)[1]
         if element["state"] == "missing":
             if not element["policy"]["auto_install"]:
@@ -1069,10 +1084,12 @@ def build_tools_status(root_dir, config_file, def_files):
     return {"domain": "tools", "elements": elements}, warnings, errors
 
 
-def build_tools_plan(root_dir, config_file, def_files):
+def build_tools_plan(root_dir, config_file, def_files, only=None, agent=None):
     status, warnings, errors = build_tools_status(root_dir, config_file, def_files)
     actions = []
     for element in status["elements"]:
+        if only is not None and element["id"] not in only:
+            continue
         if element["state"] == "missing":
             definition = element["spec"]
             install_cmd = definition.get("install")
@@ -1319,11 +1336,23 @@ def build_rules_status(root_dir, config_file, def_files):
     return {"domain": "rules", "elements": elements}, warnings, errors
 
 
-def build_rules_plan(root_dir, config_file, def_files):
+def build_rules_plan(root_dir, config_file, def_files, only=None, agent=None):
     status, warnings, errors = build_rules_status(root_dir, config_file, def_files)
     # dist 构建必须先于任何分发动作（write-file 依赖构建产物）。
     ordered = [e for e in status["elements"] if e["id"] == "rules:dist"]
     ordered += [e for e in status["elements"] if e["id"] != "rules:dist"]
+    if only is not None:
+        dist_is_target = "rules:dist" in only or "dist" in only
+        dist = next((e for e in status["elements"] if e["id"] == "rules:dist"), None)
+        dist_drifted = dist is not None and dist["state"] in ("drifted", "not-materialized")
+        target_elements = [e for e in status["elements"] if e["id"] != "rules:dist" and (e["id"] in only or e["id"].split(":", 1)[1] in only)]
+        dist_needed_as_prereq = len(target_elements) > 0 and dist_drifted
+        keep_ids = set(only) | {("rules:%s" % x if not x.startswith("rules:") else x) for x in only}
+        if dist_is_target or dist_needed_as_prereq:
+            keep_ids.add("rules:dist")
+        else:
+            keep_ids.discard("rules:dist")
+        ordered = [e for e in ordered if e["id"] in keep_ids]
     actions = []
     for element in ordered:
         if element["id"] == "rules:dist":
@@ -1518,10 +1547,12 @@ def build_hooks_status(root_dir, config_file, def_files):
     return {"domain": "hooks", "elements": elements}, warnings, errors
 
 
-def build_hooks_plan(root_dir, config_file, def_files):
+def build_hooks_plan(root_dir, config_file, def_files, only=None, agent=None):
     status, warnings, errors = build_hooks_status(root_dir, config_file, def_files)
     actions = []
     for element in status["elements"]:
+        if only is not None and element["id"] not in only and element["id"].split(":", 1)[1] not in only:
+            continue
         if element["state"] not in ("drifted", "missing", "not-materialized"):
             continue
         target = element["observed"]["target"]
@@ -1622,13 +1653,15 @@ def build_aliases_status(root_dir, config_file, def_files):
     return {"domain": "aliases", "elements": elements}, warnings, errors
 
 
-def build_aliases_plan(root_dir, config_file, def_files):
+def build_aliases_plan(root_dir, config_file, def_files, only=None, agent=None):
     status, warnings, errors = build_aliases_status(root_dir, config_file, def_files)
     cfg = load_json_object_file(def_files[0], strict=True, missing_ok=False)
     alias_lines = _render_alias_lines(cfg)
     expected_inner = "\n".join(alias_lines)
     actions = []
     for element in status["elements"]:
+        if only is not None and element["id"] not in only and element["id"].split(":", 1)[1] not in only:
+            continue
         if element["state"] not in ("drifted", "missing", "not-materialized"):
             continue
         target = element["observed"]["target"]
@@ -1742,10 +1775,78 @@ def build_secrets_status(root_dir, config_file, def_files):
 # ---------------------------------------------------------------------------
 
 
-def build_mcp_plan(root_dir, config_file, def_files):
+def build_mcp_plan(root_dir, config_file, def_files, only=None, agent=None):
     status, warnings, errors = build_mcp_status(root_dir, config_file, def_files[0])
     actions = []
+    root_path = Path(root_dir)
+
+    if only is None:
+        secrets_dir = root_path / "secrets"
+        if secrets_dir.is_dir() and (secrets_dir / ".git").exists():
+            actions.append(
+                plan_action(
+                    "git-pull",
+                    "mcp:secrets",
+                    str(secrets_dir),
+                    "network",
+                    note="拉取并同步共享凭证仓库 (secrets)",
+                )
+            )
+
     for element in status["elements"]:
+        if only is not None and element["id"] not in only and element["id"].split(":", 1)[1] not in only:
+            continue
+        server_name = element["id"].split(":", 1)[1]
+        enabled = element.get("policy", {}).get("enabled", True)
+        spec = element.get("spec", {})
+        if enabled:
+            url = spec.get("url")
+            if url:
+                repo_dir = root_path / "agent-mcp" / server_name
+                actions.append(
+                    plan_action(
+                        "git-pull",
+                        element["id"],
+                        str(repo_dir),
+                        "network",
+                        note="准备/更新本地源码仓库及依赖构建（url: %s）" % url,
+                    )
+                )
+                setup_cmd = spec.get("setup")
+                if setup_cmd:
+                    actions.append(
+                        plan_action(
+                            "run-cmd",
+                            element["id"],
+                            str(repo_dir),
+                            "exec-local",
+                            cmd=setup_cmd,
+                            note="执行自定义初始化: %s" % setup_cmd,
+                        )
+                    )
+                if (repo_dir / "package.json").exists():
+                    actions.append(
+                        plan_action(
+                            "run-cmd",
+                            element["id"],
+                            str(repo_dir),
+                            "network",
+                            note="安装 Node.js 依赖并构建",
+                        )
+                    )
+            elif server_name == "serena":
+                serena_folder = spec.get("project_serena_folder_location")
+                if serena_folder:
+                    actions.append(
+                        plan_action(
+                            "run-cmd",
+                            element["id"],
+                            None,
+                            "exec-local",
+                            note="配置 Serena 项目数据目录 (%s)" % serena_folder,
+                        )
+                    )
+
         for agent_id, cell in sorted(element["observed"]["agents"].items()):
             cell_state = cell["state"]
             if cell_state in ("managed-ok", "agent-disabled", "absent", "probe-error"):
@@ -2042,9 +2143,15 @@ def build_system_refresh_upstream(root_dir, config_file, only=None, net=None):
             )
         )
     if only is not None:
-        targets = [target for target in targets if target["id"] == only]
-        if not targets:
-            raise RefreshUsageError("--only 指定的元素不可探测或不存在: %s" % only)
+        if isinstance(only, str):
+            only_set = {only}
+        else:
+            only_set = set(only)
+        targets = [target for target in targets if target["id"] in only_set]
+        found_ids = {t["id"] for t in targets}
+        missing = only_set - found_ids
+        if missing:
+            raise RefreshUsageError("--only 指定的元素不可探测或不存在: %s" % ", ".join(sorted(missing)))
 
     moment = upstream_cache.now_utc()
     checked_at = upstream_cache.to_iso(moment)
@@ -2279,13 +2386,18 @@ def build_skills_status(root_dir, config_file, def_files):
 
     # 额外受管链接：未被任何启用集合期望、但指向某集合的托管缓存仓库
     # （doctor 的「存在额外受管 skill 链接」语义），挂在属主集合元素上。
+    candidates = set(repositories)
+    if repo_base.exists():
+        for d in repo_base.iterdir():
+            if d.is_dir():
+                candidates.add(d.name)
     extras_by_repo = {}
     for agent_id in sorted(agent_targets):
         expected_names = set(expected_by_agent.get(agent_id, {}))
         for name, target in sorted(actual_by_agent.get(agent_id, {}).items()):
             if name in expected_names or not _engine_is_managed_skill_path(target, repo_base):
                 continue
-            for candidate in repositories:
+            for candidate in sorted(candidates):
                 if _engine_is_managed_skill_path(target, (repo_base / candidate).resolve()):
                     extras_by_repo.setdefault(candidate, []).append(
                         {"agent": agent_id, "name": name, "link_path": os.path.join(target_path_by_agent[agent_id], name)}
@@ -2294,7 +2406,39 @@ def build_skills_status(root_dir, config_file, def_files):
 
     elements = []
     seen_skill_names = {}
-    for repo_name in sorted(repositories):
+    all_repo_names = sorted(set(repositories) | set(extras_by_repo))
+    for repo_name in all_repo_names:
+        if repo_name not in repositories:
+            repo_path = repo_base / repo_name
+            repo_cached = repo_path.exists()
+            owner_marked = _link_skills.is_manager_owned_repo(repo_path) if repo_cached else False
+            extra_links = extras_by_repo.get(repo_name, [])
+            elements.append(
+                _make_element(
+                    "skill:%s" % repo_name,
+                    "skills",
+                    {
+                        "url": None,
+                        "skill_paths": None,
+                        "agents": None,
+                        "matrix_mode": False,
+                        "new_skill_default": "disabled",
+                    },
+                    {"enabled": False, "declared_in_policy": False},
+                    {
+                        "repo_cache": str(repo_path),
+                        "repo_cached": repo_cached,
+                        "owner_marked": owner_marked,
+                        "discovered": [],
+                        "discovery_inbox": [],
+                        "extra_links": extra_links,
+                    },
+                    "drifted" if extra_links else "disabled",
+                    [],
+                    freshness=dict(FRESHNESS_NOT_APPLICABLE),
+                )
+            )
+            continue
         definition = repositories[repo_name]
         policy = skills_policy.get(repo_name)
         declared = isinstance(policy, dict)
@@ -2450,13 +2594,25 @@ def build_skills_status(root_dir, config_file, def_files):
     return {"domain": "skills", "elements": elements}, warnings, errors
 
 
-def build_skills_plan(root_dir, config_file, def_files):
+def build_skills_plan(root_dir, config_file, def_files, only=None, agent=None):
     status, warnings, errors = build_skills_status(root_dir, config_file, def_files)
     actions = []
     # 集合仓库动作先行：链接目标都在缓存仓库里。
     for element in status["elements"]:
         if "/" in element["id"]:
             continue
+        collection_in_only = False
+        if only is not None:
+            collection_id = element["id"]
+            repo_name = element["id"].split(":", 1)[1]
+            collection_in_only = collection_id in only or repo_name in only
+            skill_in_only = any(
+                o.startswith(f"{collection_id}/") or o.startswith(f"{repo_name}/")
+                for o in only
+            )
+            state = element["state"]
+            if not collection_in_only and not (skill_in_only and state == "not-materialized"):
+                continue
         if element["state"] == "not-materialized":
             actions.append(
                 plan_action(
@@ -2478,7 +2634,19 @@ def build_skills_plan(root_dir, config_file, def_files):
                     % ((element["freshness"]["current"] or "?")[:12], (element["freshness"]["upstream"] or "?")[:12]),
                 )
             )
+        elif collection_in_only and element["spec"].get("auto_update", True) and element["spec"].get("url") and element["policy"].get("enabled", True):
+            actions.append(
+                plan_action(
+                    "git-pull",
+                    element["id"],
+                    element["observed"]["repo_cache"],
+                    "network",
+                    note="探测远端上游更新集合仓库缓存（url: %s）" % (element["spec"].get("url") or "?"),
+                )
+            )
         for extra in element["observed"].get("extra_links", []):
+            if agent is not None and extra["agent"] != agent:
+                continue
             actions.append(
                 plan_action(
                     "unlink",
@@ -2491,8 +2659,21 @@ def build_skills_plan(root_dir, config_file, def_files):
     for element in status["elements"]:
         if "/" not in element["id"]:
             continue
+        if only is not None:
+            collection_id = "skill:%s" % element["spec"]["collection"]
+            collection_name = element["spec"]["collection"]
+            item_name = element["id"].split(":", 1)[1]
+            if (
+                element["id"] not in only
+                and item_name not in only
+                and collection_id not in only
+                and collection_name not in only
+            ):
+                continue
         source_path = element["spec"]["source_path"]
         for agent_id, cell in sorted(element["observed"]["agents"].items()):
+            if agent is not None and agent_id != agent:
+                continue
             cell_state = cell["state"]
             link_path = cell["link_path"]
             if cell_state == "missing-link":
@@ -2550,7 +2731,7 @@ class ApplyGateError(ValueError):
     """Missing explicit confirmation (e.g. --allow-uninstall); usage error."""
 
 
-def _snapshot_targets_for(root_dir, domains, config_file, def_files):
+def _snapshot_targets_for(root_dir, domains, config_file, def_files, only=None, agent=None):
     """(files, links) covered by a snapshot for the given domain set."""
     root_dir = Path(root_dir)
     files = []
@@ -2558,23 +2739,104 @@ def _snapshot_targets_for(root_dir, domains, config_file, def_files):
     if "mcp" in domains:
         def_path = def_files[0] if def_files else root_dir / "config" / "mcp.json"
         mcp_data = load_json_object_file(def_path, strict=True, missing_ok=False)
+        servers = get_typed_mapping_section(mcp_data, "servers", Path(def_path).name, (dict,), "对象")
+        config = load_json_object_file(config_file, strict=True, missing_ok=True)
+        servers, _ = policy_layers.apply_definition_overlays(
+            servers, policy_layers.overlay_definitions(config, "mcp"), domain="mcp"
+        )
         agent_paths = get_typed_mapping_section(
             mcp_data, "agent_paths", Path(def_path).name, (str, dict), "字符串或对象"
         )
-        for path_config in canonicalize_agent_mapping(agent_paths).values():
-            target = path_config if isinstance(path_config, str) else path_config.get("path", "")
-            files.append(os.path.expanduser(target))
+        only_servers = set()
+        if only:
+            for item in only:
+                s = item.split(":", 1)[1] if item.startswith("mcp:") else item
+                only_servers.add(s)
+
+        for agent_id, path_config in canonicalize_agent_mapping(agent_paths).items():
+            target_str = path_config if isinstance(path_config, str) else path_config.get("path", "")
+            target_path = Path(os.path.expanduser(target_str))
+            file_format = "json" if isinstance(path_config, str) else path_config.get("format", "json")
+            if only:
+                relevant = False
+                for s_name in only_servers:
+                    s_cfg = servers.get(s_name)
+                    if s_cfg is not None:
+                        s_agents = s_cfg.get("agents")
+                        if s_agents is None or agent_id in s_agents:
+                            relevant = True
+                            break
+                if not relevant and target_path.exists():
+                    if file_format == "json":
+                        try:
+                            with open(target_path, "r", encoding="utf-8") as f:
+                                doc = json.load(f)
+                            sec = doc.get("mcp" if agent_id == "opencode" else "mcpServers") or {}
+                            if any(s in sec for s in only_servers):
+                                relevant = True
+                        except Exception:
+                            pass
+                    elif file_format == "toml":
+                        try:
+                            txt = target_path.read_text(encoding="utf-8")
+                            names = set()
+                            try:
+                                from src.toml_compat import tomllib
+                            except ImportError:
+                                tomllib = None
+                            if tomllib is not None:
+                                try:
+                                    doc = tomllib.loads(txt)
+                                    if isinstance(doc, dict):
+                                        sec = doc.get("mcp_servers")
+                                        if isinstance(sec, dict):
+                                            names = set(sec.keys())
+                                except Exception:
+                                    pass
+                            if not names:
+                                for m in re.finditer(r'^\s*\[\s*mcp_servers\.(?P<key>"(?:\\.|[^"\\])*"|[A-Za-z0-9_-]+)', txt, re.MULTILINE):
+                                    k = m.group("key")
+                                    names.add(json.loads(k) if k.startswith('"') else k)
+                            if any(s in names for s in only_servers):
+                                relevant = True
+                        except Exception:
+                            pass
+                if not relevant:
+                    continue
+            files.append(str(target_path))
     if "hooks" in domains:
-        files.append(str(_sync_claude_hooks.build_managed_hooks(root_dir / "config" / "claude-hooks.json")[0]))
-        files.append(str(_sync_codex_hooks.build_managed_hooks(root_dir / "config" / "codex-hooks.json")[0]))
+        claude_hook = str(_sync_claude_hooks.build_managed_hooks(root_dir / "config" / "claude-hooks.json")[0])
+        codex_hook = str(_sync_codex_hooks.build_managed_hooks(root_dir / "config" / "codex-hooks.json")[0])
+        if only:
+            for item in only:
+                norm = item.split(":", 1)[1] if item.startswith("hooks:") else item
+                if "claude" in norm:
+                    files.append(claude_hook)
+                elif "codex" in norm:
+                    files.append(codex_hook)
+        else:
+            files.append(claude_hook)
+            files.append(codex_hook)
     if "aliases" in domains:
-        files.append(os.path.expanduser("~/.zshrc"))
-        files.append(os.path.expanduser("~/.zprofile"))
+        targets = []
+        if only:
+            for item in only:
+                norm = item.split(":", 1)[1] if item.startswith("aliases:") else item
+                if norm == "zshrc":
+                    targets.append(os.path.expanduser("~/.zshrc"))
+                elif norm == "zprofile":
+                    targets.append(os.path.expanduser("~/.zprofile"))
+        else:
+            targets = [os.path.expanduser("~/.zshrc"), os.path.expanduser("~/.zprofile")]
+        files.extend(targets)
     if "rules" in domains:
         manifest_path = def_files[0] if def_files else root_dir / "config" / "rules-targets.list"
         entries, _problems = _parse_rules_manifest(manifest_path)
         home = os.path.expanduser("~")
         for entry in entries:
+            target_name = entry.get("name", "")
+            if only and not any(o == target_name or o == f"rules:{target_name}" for o in only):
+                continue
             files.append(
                 os.path.expanduser(
                     entry["target"].replace("{{HOME}}", home).replace("{{REPO_ROOT}}", str(root_dir))
@@ -2583,23 +2845,73 @@ def _snapshot_targets_for(root_dir, domains, config_file, def_files):
     if "skills" in domains:
         def_path = def_files[0] if def_files else root_dir / "config" / "skills.json"
         skills_data = load_json_object_file(def_path, strict=True, missing_ok=False)
+        raw_repos = get_typed_mapping_section(skills_data, "repositories", Path(def_path).name, (dict,), "对象")
+        config = load_json_object_file(config_file, strict=True, missing_ok=True)
+        repositories, _ = policy_layers.apply_definition_overlays(
+            raw_repos, policy_layers.overlay_definitions(config, "skills"), domain="skills"
+        )
         agent_targets = canonicalize_agent_mapping(
             get_typed_mapping_section(skills_data, "agents", Path(def_path).name, (str, dict), "字符串或对象")
         )
+        skill_cfg = {"repositories": repositories, "agents": agent_targets}
         repo_base = (root_dir / "agent-skill" / "repositories").resolve()
-        for target_cfg in agent_targets.values():
+
+        target_collections = set()
+        target_skills = set()
+        if only:
+            for item in only:
+                norm = item.split(":", 1)[1] if item.startswith("skill:") else item
+                if "/" in norm:
+                    c, s = norm.split("/", 1)
+                    target_skills.add((c, s))
+                else:
+                    target_collections.add(norm)
+
+        for agent_id, target_cfg in agent_targets.items():
+            if agent is not None and agent_id != agent:
+                continue
             target_dir = target_cfg if isinstance(target_cfg, str) else target_cfg.get("path", "")
             target_dir = os.path.expanduser(target_dir)
-            if not os.path.isdir(target_dir):
-                continue
-            actual, _broken = _engine_actual_skill_targets(target_dir)
-            for name, target in actual.items():
-                if _engine_is_managed_skill_path(target, repo_base):
-                    links.append({"path": os.path.join(target_dir, name), "target": target})
+
+            expected, _ = expected_managed_skill_targets(root_dir, config, skill_cfg, agent_id)
+            actual, _ = _engine_actual_skill_targets(target_dir) if os.path.isdir(target_dir) else ({}, set())
+
+            seen_paths = set()
+            for s_name, src_path in expected.items():
+                try:
+                    rel = Path(src_path).resolve().relative_to(repo_base)
+                    coll = rel.parts[0]
+                except (ValueError, IndexError):
+                    coll = ""
+                if only:
+                    if coll not in target_collections and (coll, s_name) not in target_skills:
+                        continue
+                link_path = os.path.join(target_dir, s_name)
+                seen_paths.add(link_path)
+                if os.path.islink(link_path):
+                    links.append({"path": link_path, "target": os.readlink(link_path), "existed": True})
+                else:
+                    links.append({"path": link_path, "target": "", "existed": False})
+
+            for s_name, tgt in actual.items():
+                link_path = os.path.join(target_dir, s_name)
+                if link_path in seen_paths:
+                    continue
+                if not _engine_is_managed_skill_path(tgt, repo_base):
+                    continue
+                try:
+                    rel = Path(tgt).resolve().relative_to(repo_base)
+                    coll = rel.parts[0]
+                except (ValueError, IndexError):
+                    coll = ""
+                if only:
+                    if coll not in target_collections and (coll, s_name) not in target_skills:
+                        continue
+                links.append({"path": link_path, "target": tgt, "existed": True})
     return files, links
 
 
-def _apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd, build_stale_rules=True):
+def _apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd, build_stale_rules=True, only=None, agent=None):
     """Step specs [(name, cmd, cwd, timeout, fatal)] mirroring manage.sh args.
 
     build_stale_rules=False（system:converge 用）：update 管线从不构建 dist，
@@ -2611,6 +2923,10 @@ def _apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd
     steps = []
     if domain == "mcp":
         cmd = [python_cmd, "sync_mcp.py", "--config", str(config_file), "--def-file", str(def_files[0]), "--prepare-runtime"]
+        if only:
+            for s in only:
+                srv = s.split(":", 1)[1] if s.startswith("mcp:") else s
+                cmd.extend(["--only", srv])
         if offline:
             cmd.append("--offline")
         if dry:
@@ -2618,6 +2934,11 @@ def _apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd
         steps.append(("mcp-sync", cmd, root_dir / "agent-mcp", 600, True))
     elif domain == "skills":
         cmd = [python_cmd, "link_skills.py", "--config", str(config_file), "--def-file", str(def_files[0]), "--yes"]
+        if only:
+            for s in only:
+                cmd.extend(["--only", s])
+        if agent:
+            cmd.extend(["--agent", agent])
         if offline:
             cmd.append("--offline")
         if dry:
@@ -2625,6 +2946,10 @@ def _apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd
         steps.append(("skills-link", cmd, root_dir / "agent-skill", 600, True))
     elif domain == "tools":
         cmd = [python_cmd, "sync_tools.py", "--config", str(config_file), "--def-file", str(def_files[0]), "--yes"]
+        if only:
+            for s in only:
+                tool_name = s.split(":", 1)[1] if s.startswith("tools:") else s
+                cmd.extend(["--only", tool_name])
         if offline:
             cmd.append("--offline")
         if dry:
@@ -2633,16 +2958,26 @@ def _apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd
     elif domain == "rules":
         status, _warnings, _errors = build_rules_status(root_dir, config_file, def_files)
         dist = next((e for e in status["elements"] if e["id"] == "rules:dist"), None)
-        if build_stale_rules and dist is not None and dist["state"] in ("drifted", "not-materialized") and not dry:
-            # 对齐 plan：dist 构建落后/缺失时先构建再分发。
-            steps.append(
-                ("rules-build", [python_cmd, "scripts/build-agent-rules.py"], root_dir / "agent-rule", 600, True)
-            )
         targets = [
             e["spec"]["name"]
             for e in status["elements"]
             if e["id"] != "rules:dist" and e["policy"]["enabled"]
         ]
+        if only is not None:
+            targets = [
+                name for name in targets
+                if ("rules:%s" % name) in only or name in only
+            ]
+        dist_is_target = only is not None and ("rules:dist" in only or "dist" in only)
+        dist_drifted = dist is not None and dist["state"] in ("drifted", "not-materialized")
+        dist_needed_as_prereq = len(targets) > 0 and dist_drifted
+        should_build_dist = build_stale_rules and (
+            (only is None and dist_drifted) or dist_is_target or dist_needed_as_prereq
+        ) and not dry
+        if should_build_dist:
+            steps.append(
+                ("rules-build", [python_cmd, "scripts/build-agent-rules.py"], root_dir / "agent-rule", 600, True)
+            )
         if targets:
             cmd = ["bash", "./scripts/sync-agent-rules.sh"]
             for name in targets:
@@ -2651,21 +2986,31 @@ def _apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd
                 cmd.append("--dry-run")
             steps.append(("rules-sync", cmd, root_dir / "agent-rule", 600, True))
     elif domain == "hooks":
-        for script, name in (
-            ("./scripts/sync-claude-hooks.py", "claude-hooks"),
-            ("./scripts/sync-codex-hooks.py", "codex-hooks"),
+        for script, name, element_id in (
+            ("./scripts/sync-claude-hooks.py", "claude-hooks", "hooks:claude"),
+            ("./scripts/sync-codex-hooks.py", "codex-hooks", "hooks:codex"),
         ):
+            if only is not None and element_id not in only and element_id.split(":", 1)[1] not in only:
+                continue
             cmd = [python_cmd, script]
             if dry:
                 cmd.append("--dry-run")
             steps.append((name, cmd, root_dir / "agent-rule", 600, True))
     elif domain == "aliases":
         cmd = ["bash", str(root_dir / "scripts" / "claude" / "sync_shell_aliases.sh")]
+        if only:
+            for s in only:
+                norm = s.split(":", 1)[1] if s.startswith("aliases:") else s
+                cmd.extend(["--target", norm])
         if dry:
             cmd.append("--dry-run")
         steps.append(("shell-aliases", cmd, root_dir, 60, True))
     elif domain == "agents":
         cmd = [python_cmd, "sync_agents.py", "--config", str(config_file), "--def-file", str(def_files[0]), "--yes"]
+        if only:
+            for s in only:
+                agent_name = s.split(":", 1)[1] if s.startswith("agents:") else s
+                cmd.extend(["--only", agent_name])
         if offline:
             cmd.append("--offline")
         if dry:
@@ -2675,7 +3020,7 @@ def _apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd
     return steps
 
 
-def _agents_apply_gate(root_dir, config_file, def_files, allow_uninstall):
+def _agents_apply_gate(root_dir, config_file, def_files, allow_uninstall, only=None):
     """卸载是 install-remove 级二次确认：禁用但仍有受管安装时须显式放行。"""
     if allow_uninstall:
         return
@@ -2687,6 +3032,8 @@ def _agents_apply_gate(root_dir, config_file, def_files, allow_uninstall):
         and not element["policy"]["enabled"]
         and element["observed"]["classified"]["managed"]
     ]
+    if only is not None:
+        pending = [p for p in pending if p in only or p.split(":", 1)[1] in only]
     if pending:
         raise ApplyGateError(
             "以下 Agent 的禁用将触发卸载（install-remove 级），须显式追加 --allow-uninstall: %s"
@@ -2694,15 +3041,15 @@ def _agents_apply_gate(root_dir, config_file, def_files, allow_uninstall):
         )
 
 
-def build_domain_apply(domain, root_dir, config_file, def_files, mode, run_id, log_file, python_cmd, allow_uninstall=False):
+def build_domain_apply(domain, root_dir, config_file, def_files, mode, run_id, log_file, python_cmd, allow_uninstall=False, only=None, agent=None):
     """'<domain>:apply': snapshot -> run syncer steps -> step summary."""
     warnings = []
     errors = []
     if domain == "agents":
-        _agents_apply_gate(root_dir, config_file, def_files, allow_uninstall)
+        _agents_apply_gate(root_dir, config_file, def_files, allow_uninstall, only=only)
     snapshot = None
     if not mode["dry_run"]:
-        files, links = _snapshot_targets_for(root_dir, {domain}, config_file, def_files)
+        files, links = _snapshot_targets_for(root_dir, {domain}, config_file, def_files, only=only, agent=agent)
         manifest = engine_apply.create_snapshot(run_id, "%s.apply" % domain, files, links)
         snapshot = {
             "run_id": manifest["run_id"],
@@ -2710,7 +3057,7 @@ def build_domain_apply(domain, root_dir, config_file, def_files, mode, run_id, l
             "file_count": len(manifest["files"]),
             "link_count": len(manifest["links"]),
         }
-    steps = _apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd)
+    steps = _apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd, only=only, agent=agent)
     results = []
     for name, cmd, cwd, timeout, fatal in steps:
         result = engine_apply.run_step(name, cmd, cwd, log_file if not mode["dry_run"] else None, timeout)
@@ -2995,7 +3342,16 @@ def _build_parser():
         help="domain definition file; repeatable (hooks takes claude-hooks.json then codex-hooks.json)",
     )
     parser.add_argument("--python-cmd", default="python3", help="python command for system.audit probes")
-    parser.add_argument("--only", help="system:refresh-upstream 只刷新指定元素 id")
+    parser.add_argument(
+        "--only",
+        action="append",
+        default=[],
+        help="范围控制：只针对指定元素 id（如 mcp:fetch；可重复）；system:refresh-upstream 亦可用",
+    )
+    parser.add_argument(
+        "--agent",
+        help="skills 域专属范围控制：仅针对指定 agent id（如 codex）",
+    )
     parser.add_argument("--allow-uninstall", action="store_true", help="agents:apply 显式放行卸载（install-remove 级二次确认）")
     parser.add_argument("--run", help="runs:get / snapshots:restore 的 run_id")
     parser.add_argument("--lines", type=int, default=2000, help="runs:get 日志尾部行数（默认 2000；0=全部）")
@@ -3186,6 +3542,72 @@ def main(argv=None):
             "错误: policy:delete 参数不完整（--layer/--key 缺一不可）",
         )
 
+    if args.agent:
+        if domain != "skills":
+            return usage_error("USAGE_ERROR", "--agent 仅对 skills 域有效", "错误: --agent 参数只允许用于 skills 域")
+        if verb in ("plan", "apply"):
+            skills_def = (
+                args.def_file[0]
+                if (args.def_file and len(args.def_file) > 0)
+                else str(Path(REPO_ROOT) / "config" / "skills.json")
+            )
+            if os.path.exists(skills_def):
+                skills_data = load_json_object_file(skills_def, strict=False, missing_ok=True) or {}
+                agent_targets = canonicalize_agent_mapping(
+                    get_typed_mapping_section(skills_data, "agents", Path(skills_def).name, (str, dict), "字符串或对象")
+                )
+                if args.agent not in agent_targets:
+                    return usage_error(
+                        "USAGE_ERROR",
+                        f"未知 agent '{args.agent}'",
+                        f"错误: agent '{args.agent}' 未在 skills 定义中声明",
+                    )
+
+    DOMAIN_PREFIXES = {
+        "agents": "agents:",
+        "aliases": "aliases:",
+        "hooks": "hooks:",
+        "mcp": "mcp:",
+        "rules": "rules:",
+        "skills": "skill:",
+        "tools": "tools:",
+    }
+    if args.only and verb in ("plan", "apply"):
+        expected_prefix = DOMAIN_PREFIXES.get(domain)
+        for item in args.only:
+            if not expected_prefix or not item.startswith(expected_prefix):
+                return usage_error(
+                    "CROSS_DOMAIN_SCOPE",
+                    f"元素 '{item}' 不属于域 '{domain}'（期望前缀 '{expected_prefix}'）",
+                    f"错误: 跨域范围控制 '{item}' 拒绝",
+                )
+        status_kernel = STATUS_KERNELS.get(domain)
+        if status_kernel:
+            try:
+                status_data, _sw, _se = status_kernel(REPO_ROOT, args.config, args.def_file)
+                if _se:
+                    return usage_error(
+                        "CONFIG_INVALID",
+                        f"配置验证失败: {'; '.join(e.get('message', '') for e in _se)}",
+                        f"错误: 域 '{domain}' 配置验证失败",
+                    )
+                existing_ids = {e["id"] for e in status_data.get("elements", [])}
+                for item in args.only:
+                    if item not in existing_ids:
+                        return usage_error(
+                            "USAGE_ERROR",
+                            f"未知元素 '{item}'",
+                            f"错误: 元素 '{item}' 在域 '{domain}' 中不存在",
+                        )
+            except Exception as exc:
+                if isinstance(exc, (RefreshUsageError, ApplyGateError)):
+                    raise
+                return usage_error(
+                    "CONFIG_INVALID",
+                    f"无法验证范围 '{', '.join(args.only)}': {exc}",
+                    f"错误: 域 '{domain}' 状态读取失败: {exc}",
+                )
+
     if kernel == "refresh" and mode["offline"]:
         # network 级动作在 offline 下显式拒绝（提案 §5 控制原则 3）。
         payload = envelope(
@@ -3212,11 +3634,12 @@ def main(argv=None):
         if kernel == "audit":
             data, warnings, errors = build_system_audit(REPO_ROOT, args.config, python_cmd=args.python_cmd)
         elif kernel == "refresh":
-            data, warnings, errors = build_system_refresh_upstream(REPO_ROOT, args.config, only=args.only)
+            data, warnings, errors = build_system_refresh_upstream(REPO_ROOT, args.config, only=args.only if args.only else None)
         elif kernel == "apply":
             data, warnings, errors = build_domain_apply(
                 domain, REPO_ROOT, args.config, args.def_file, mode, run_id, log_file,
                 args.python_cmd, allow_uninstall=args.allow_uninstall,
+                only=args.only if args.only else None, agent=args.agent,
             )
         elif kernel == "converge":
             data, warnings, errors = build_system_converge(
@@ -3239,7 +3662,13 @@ def main(argv=None):
         elif kernel == "policy:delete":
             data, warnings, errors = build_policy_delete(REPO_ROOT, args.config, args.layer, args.key, run_id)
         else:
-            data, warnings, errors = kernel(REPO_ROOT, args.config, args.def_file)
+            if verb == "plan":
+                data, warnings, errors = kernel(
+                    REPO_ROOT, args.config, args.def_file,
+                    only=args.only if args.only else None, agent=args.agent,
+                )
+            else:
+                data, warnings, errors = kernel(REPO_ROOT, args.config, args.def_file)
     except RefreshUsageError as exc:
         return usage_error("USAGE_ERROR", str(exc), "错误: %s" % exc)
     except ApplyGateError as exc:

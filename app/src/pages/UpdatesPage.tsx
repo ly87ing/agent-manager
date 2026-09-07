@@ -4,9 +4,10 @@ import { Loader2, PlayCircle, RefreshCw, WifiOff } from "lucide-react";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { FreshnessBadge } from "../components/FreshnessBadge";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
-import type { AuditData, EngineElement, FreshnessState, StatusData } from "../lib/contract";
+import type { AuditData, EngineElement, Envelope, FreshnessState, StatusData } from "../lib/contract";
 import { runEngine, toDiagnostic } from "../lib/engine";
 import { engineKeys, useEngineQuery, useRefreshUpstream } from "../lib/queries";
+import { useExecutions } from "../lib/execution";
 import { useExecuteApply, usePlanPreview } from "../lib/usePlanPreview";
 import { cn, formatCheckedAt, humanizeCacheAge, isCacheStale } from "../lib/utils";
 
@@ -54,6 +55,7 @@ export default function UpdatesPage() {
   const [pendingRowId, setPendingRowId] = useState<string | null>(null);
   const preview = usePlanPreview();
   const executeApply = useExecuteApply();
+  const { execute } = useExecutions();
 
   const anyPending = auditQuery.isPending || statusResults.every((result) => result.isPending);
   if (anyPending) return <PageLoading />;
@@ -68,28 +70,60 @@ export default function UpdatesPage() {
   );
   const behindElements = elements.filter((element) => element.freshness.state === "behind");
 
-  /** 行内收敛：域 plan 过滤到本元素 → 域级 apply。 */
+  /** 行内收敛：仅针对选定元素执行 plan 与 apply（阶段 A 真实范围控制）。 */
   const openRowApply = (element: EngineElement) => {
     preview.open({
       title: `更新 ${element.id}`,
-      subtitle: "预览只显示这个组件的相关操作；实际执行会同步该域全部组件（执行前自动备份）。",
-      planCommands: [`${element.domain}:plan`],
-      filterElement: element.id,
+      subtitle: "仅更新此组件（执行前自动备份）。",
+      planCommands: [{ command: `${element.domain}:plan`, args: ["--only", element.id] }],
       requireConfirmText: element.domain === "agents" || element.domain === "tools" ? element.id : undefined,
       confirmLabel: "更新此项",
-      execute: executeApply({ command: `${element.domain}:apply`, label: `更新 ${element.id}` }),
+      execute: executeApply({
+        command: `${element.domain}:apply`,
+        label: `更新 ${element.id}`,
+        extraArgs: ["--only", element.id],
+      }),
     });
   };
 
-  /** 顶部聚合收敛：全部落后元素的 plan 聚合预览 → system:converge（= update 管线语义）。 */
+  /** 顶部聚合收敛：按域收集全部落后组件的 --only plan 聚合预览 → 顺序执行各域 scoped apply。 */
   const openConvergeAll = () => {
+    const domainGroups = DOMAINS.map((domain) => {
+      const items = behindElements.filter((el) => el.domain === domain.key);
+      return {
+        key: domain.key,
+        label: domain.label,
+        items,
+        ids: items.map((el) => el.id),
+      };
+    }).filter((g) => g.items.length > 0);
+
+    const planCommands = domainGroups.map((g) => ({
+      command: `${g.key}:plan`,
+      args: g.ids.flatMap((id) => ["--only", id]),
+    }));
+
     preview.open({
       title: "全部更新",
-      subtitle: "预览聚合了各域可更新组件的操作；实际执行是一次全量同步（执行前自动备份）。",
-      planCommands: DOMAINS.map((domain) => `${domain.key}:plan`),
-      filterElements: new Set(behindElements.map((element) => element.id)),
+      subtitle: "预览聚合了各域可更新组件的操作；实际执行将按域逐个更新各落后组件（执行前自动备份）。",
+      planCommands,
       confirmLabel: "全部更新",
-      execute: executeApply({ command: "system:converge", label: "全部更新" }),
+      execute: async (dryRun: boolean): Promise<Envelope | null> => {
+        let lastEnvelope: Envelope | null = null;
+        for (const group of domainGroups) {
+          const envelope = await execute({
+            command: `${group.key}:apply`,
+            args: [...group.ids.flatMap((id) => ["--only", id]), ...(dryRun ? ["--dry-run"] : [])],
+            label: `更新 ${group.label}`,
+            dryRun,
+          });
+          if (!envelope || !envelope.ok) {
+            return envelope;
+          }
+          lastEnvelope = envelope;
+        }
+        return lastEnvelope;
+      },
     });
   };
 
