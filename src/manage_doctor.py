@@ -371,6 +371,15 @@ def expected_managed_mcp_servers(
     mcp_cfg: dict,
     agent_id: str,
 ) -> dict[str, dict[str, object]]:
+    from src.policy_layers import apply_definition_overlays, overlay_definitions
+
+    overlay = overlay_definitions(config, "mcp")
+    if overlay:
+        effective_servers, _overlay_warnings = apply_definition_overlays(
+            mcp_cfg.get("servers", {}), overlay, domain="mcp"
+        )
+        mcp_cfg = dict(mcp_cfg)
+        mcp_cfg["servers"] = effective_servers
     expected = {}
     servers = mcp_cfg.get("servers", {})
     for server_name, policy in config.get("mcp", {}).items():
@@ -509,6 +518,15 @@ def _discover_repo_skill_targets(search_paths: list[Path], excluded_dirs: set[st
 
 
 def expected_managed_skill_targets(root_dir: Path, config: dict, skill_cfg: dict, agent_id: str) -> tuple[dict[str, str], list[str]]:
+    from src.policy_layers import apply_definition_overlays, overlay_definitions
+
+    overlay = overlay_definitions(config, "skills")
+    if overlay:
+        effective_repos, _overlay_warnings = apply_definition_overlays(
+            skill_cfg.get("repositories", {}), overlay, domain="skills"
+        )
+        skill_cfg = dict(skill_cfg)
+        skill_cfg["repositories"] = effective_repos
     expected: dict[str, str] = {}
     problems: list[str] = []
     repo_base = root_dir / "agent-skill" / "repositories"
@@ -575,6 +593,15 @@ def collect_skill_discovery_inbox(root_dir: Path, config: dict, skill_cfg: dict)
     旧式定义（无 skills / new_skill_default 键）升格等价于范围内全部启用，收件箱恒为空；
     矩阵非法或发现失败的仓库由 expected_managed_skill_targets 的问题通道上报，这里跳过。
     """
+    from src.policy_layers import apply_definition_overlays, overlay_definitions
+
+    overlay = overlay_definitions(config, "skills")
+    if overlay:
+        effective_repos, _overlay_warnings = apply_definition_overlays(
+            skill_cfg.get("repositories", {}), overlay, domain="skills"
+        )
+        skill_cfg = dict(skill_cfg)
+        skill_cfg["repositories"] = effective_repos
     inbox: dict[str, list[str]] = {}
     repo_base = root_dir / "agent-skill" / "repositories"
     repositories = skill_cfg.get("repositories", {})

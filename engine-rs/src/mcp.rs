@@ -653,6 +653,15 @@ pub fn build_mcp_status(
     let policy_cfg = typed_mapping(&config, "mcp", &config_name, false)?;
     let def_data = load_json_object(def_file)?;
     let servers = typed_mapping(&def_data, "servers", &def_name, false)?;
+    // 定义覆盖层：merged 策略里的 mcp.definitions 片段深合并到 mcp.json 之上。
+    let (servers, overlay_warnings) = crate::overlay::apply_definition_overlays(
+        &servers,
+        &crate::overlay::overlay_definitions(&config, "mcp"),
+        "mcp",
+    ).map_err(ConfigInvalid)?;
+    for overlay_warning in overlay_warnings {
+        warnings.push(diagnostic("DEFINITION_OVERLAY_UNKNOWN_KEYS", None, overlay_warning));
+    }
     let agent_paths = typed_mapping(&def_data, "agent_paths", &def_name, true)?;
 
     let agents_policy_raw = config.get("agents").and_then(Value::as_object).cloned().unwrap_or_default();

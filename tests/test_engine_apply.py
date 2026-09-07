@@ -465,6 +465,46 @@ class EngineWritePathTests(unittest.TestCase):
         payload = self._payload("policy:set", "--json", "--layer", "local", expect_exit=2)
         self.assertEqual(payload["errors"][0]["code"], "USAGE_ERROR")
 
+    # ------------------------------------------------------------------ policy:delete
+
+    def test_policy_delete_removes_key_and_snapshots(self):
+        self._payload(
+            "policy:set", "--json", "--layer", "local", "--key", "mcp.alpha.enabled", "--value", "false"
+        )
+        payload = self._payload("policy:delete", "--json", "--layer", "local", "--key", "mcp.alpha.enabled")
+        self._assert_schema(POLICY_SCHEMA, payload["data"])
+        self.assertEqual(payload["data"]["layer"], "local")
+        self.assertIsNone(payload["data"]["value"])
+        written = json.loads((self.temp_dir / "manager.local.json").read_text(encoding="utf-8"))
+        self.assertEqual(written, {"mcp": {"alpha": {}}})
+        # 写前快照可见（snapshots:list 语义复用）。
+        listing = self._payload("snapshots:list", "--json")
+        commands = [entry["command"] for entry in listing["data"]["snapshots"]]
+        self.assertIn("policy.delete", commands)
+
+    def test_policy_delete_baseline_rejected(self):
+        payload = self._payload(
+            "policy:delete", "--json", "--layer", "baseline", "--key", "mcp.alpha", expect_exit=2
+        )
+        self.assertEqual(payload["errors"][0]["code"], "USAGE_ERROR")
+        self.assertIn("baseline", payload["errors"][0]["message"])
+
+    def test_policy_delete_missing_key_is_error_without_snapshot(self):
+        payload = self._payload(
+            "policy:delete", "--json", "--layer", "local", "--key", "mcp.ghost.enabled", expect_exit=1
+        )
+        self.assertEqual(payload["errors"][0]["code"], "POLICY_KEY_NOT_FOUND")
+        self.assertFalse(self.snapshot_dir.exists(), "键不存在时不得产生快照（空跑不留痕）")
+
+    def test_policy_delete_synced_layer_via_env_override(self):
+        self._payload(
+            "policy:set", "--json", "--layer", "synced", "--key", "skills.coll.new_skill_default", "--value", '"enabled"'
+        )
+        payload = self._payload("policy:delete", "--json", "--layer", "synced", "--key", "skills.coll.new_skill_default")
+        self.assertEqual(payload["data"]["layer"], "synced")
+        synced = json.loads((self.temp_dir / "manager.synced.json").read_text(encoding="utf-8"))
+        self.assertEqual(synced, {"skills": {"coll": {}}})
+
 
 if __name__ == "__main__":
     unittest.main()

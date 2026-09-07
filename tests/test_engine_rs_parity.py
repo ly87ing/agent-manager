@@ -336,6 +336,45 @@ class EngineRsParityTests(unittest.TestCase):
             with self.subTest(argv=argv):
                 self._assert_parity(*argv)
 
+    def test_mcp_overlay_parity_add_edit_tombstone(self):
+        """定义覆盖层三态：新增（仅策略层定义）/ 编辑（覆盖 args 保留基线键）/
+        tombstone（移除基线条目）——双侧逐字段一致。"""
+        manager_path = self.repo / "config" / "manager.json"
+        manager = json.loads(manager_path.read_text(encoding="utf-8"))
+        manager["mcp"]["definitions"] = {
+            "alpha": {"args": ["--edited"]},
+            "gamma": {"_delete": True},
+            "local-srv": {"command": "local-cmd", "args": ["--local"], "agents": ["agent-a"]},
+        }
+        manager["mcp"]["local-srv"] = {"enabled": True}
+        manager_path.write_text(json.dumps(manager, indent=2) + "\n", encoding="utf-8")
+        payload = self._assert_parity(
+            "mcp:status", "--config", "config/manager.json", "--def-file", "config/mcp.json", "--json",
+            env_extra={"ENGINE_TEST_ALPHA_KEY": "x"},
+        )
+        elements = {e["id"]: e for e in payload["data"]["elements"]}
+        self.assertEqual(elements["mcp:alpha"]["spec"]["args"], ["--edited"])
+        self.assertEqual(elements["mcp:alpha"]["spec"]["command"], "alpha-cmd")
+        self.assertNotIn("mcp:gamma", elements)
+        self.assertEqual(elements["mcp:local-srv"]["state"], "missing")
+        # plan 双侧同样一致（tombstone/新增后的动作清单）。
+        plan = self._assert_parity(
+            "mcp:plan", "--config", "config/manager.json", "--def-file", "config/mcp.json", "--json",
+            env_extra={"ENGINE_TEST_ALPHA_KEY": "x"},
+        )
+        self.assertIn("mcp:local-srv", [a["element"] for a in plan["data"]["actions"]])
+
+    def test_mcp_overlay_shape_fail_close_parity(self):
+        manager_path = self.repo / "config" / "manager.json"
+        manager = json.loads(manager_path.read_text(encoding="utf-8"))
+        manager["mcp"]["definitions"] = {"bad": {"args": []}}
+        manager_path.write_text(json.dumps(manager, indent=2) + "\n", encoding="utf-8")
+        payload = self._assert_parity(
+            "mcp:status", "--config", "config/manager.json", "--def-file", "config/mcp.json", "--json"
+        )
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["errors"][0]["code"], "CONFIG_INVALID")
+
     def test_harness_goes_red_when_one_side_diverges(self):
         # 反例：包装 binary 翻转一个元素状态，比较器必须发现。
         wrapper = self.temp_dir / "mutating-engine.sh"
@@ -847,6 +886,41 @@ class EngineRsSkillsParityTests(unittest.TestCase):
         )
         self.assertEqual(elements["skill:coll"]["state"], "drifted")
         self.assertEqual(elements["skill:coll"]["observed"]["extra_links"][0]["name"], "skill-z")
+
+    def test_skills_status_parity_overlay_add_edit_tombstone(self):
+        """定义覆盖层三态（skills.repositories）：新增集合 / 编辑保留基线键 /
+        tombstone 移除基线集合——双侧逐字段一致。"""
+        self._write_corpus()
+        # 新增集合：策略层定义 + 缓存目录手工放置（等价于已拉取）。
+        local_coll = self.repo / "agent-skill" / "repositories" / "local-coll"
+        (local_coll / "skill-l").mkdir(parents=True)
+        (local_coll / "skill-l" / "SKILL.md").write_text(
+            "---\nname: skill-l\ndescription: t\n---\n", encoding="utf-8"
+        )
+        (local_coll / ".agent-manager-owned").write_text("{}\n", encoding="utf-8")
+        manager_path = self.repo / "config" / "manager.json"
+        manager = json.loads(manager_path.read_text(encoding="utf-8"))
+        manager["skills"]["repositories"] = {
+            "local-coll": {"url": "https://example.invalid/local.git", "agents": ["claude-code"]},
+            "legacy": {"_delete": True},
+        }
+        manager["skills"]["local-coll"] = {"enabled": True}
+        manager_path.write_text(json.dumps(manager, indent=2) + "\n", encoding="utf-8")
+        payload = self._assert_parity(*self._status_argv())
+        elements = {e["id"]: e for e in payload["data"]["elements"]}
+        self.assertIn("skill:local-coll", elements)
+        self.assertIn("skill:local-coll/skill-l", elements)
+        self.assertNotIn("skill:legacy", elements, "tombstone 后集合元素不再出现")
+        self.assertNotIn("skill:legacy/skill-x", elements)
+        # 编辑：覆盖 coll 的 agents 键，基线 url 保留。
+        manager["skills"]["repositories"] = {"coll": {"agents": ["codex"]}}
+        manager_path.write_text(json.dumps(manager, indent=2) + "\n", encoding="utf-8")
+        payload = self._assert_parity(*self._status_argv())
+        elements = {e["id"]: e for e in payload["data"]["elements"]}
+        self.assertEqual(elements["skill:coll"]["spec"]["agents"], ["codex"], "覆盖层 agents 生效")
+        self.assertEqual(
+            elements["skill:coll"]["spec"]["url"], "https://example.invalid/coll.git", "基线 url 保留"
+        )
 
     def test_skills_status_parity_new_skill_default_enabled(self):
         self._write_corpus(coll_policy={"enabled": True, "new_skill_default": "enabled"})

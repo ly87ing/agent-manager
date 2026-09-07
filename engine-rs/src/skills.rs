@@ -761,6 +761,15 @@ pub fn build_skills_status(
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
     let repositories = crate::mcp::typed_mapping(&def_data, "repositories", &def_name, false)?;
+    // 定义覆盖层：merged 策略里的 skills.repositories 片段深合并到 skills.json 之上。
+    let (repositories, overlay_warnings) = crate::overlay::apply_definition_overlays(
+        &repositories,
+        &crate::overlay::overlay_definitions(&config, "skills"),
+        "skills",
+    ).map_err(ConfigInvalid)?;
+    for overlay_warning in overlay_warnings {
+        warnings.push(diagnostic("DEFINITION_OVERLAY_UNKNOWN_KEYS", None, overlay_warning));
+    }
     let agent_targets = canonicalize_agent_mapping(&Value::Object(
         crate::mcp::typed_mapping(&def_data, "agents", &def_name, true)?,
     ))

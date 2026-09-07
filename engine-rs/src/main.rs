@@ -12,6 +12,7 @@ mod canon;
 mod envelope;
 mod ids;
 mod mcp;
+mod overlay;
 mod hooks;
 mod providers;
 mod rules;

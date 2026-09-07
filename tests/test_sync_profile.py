@@ -347,6 +347,129 @@ class SyncProfileTests(unittest.TestCase):
         payload = self._payload("status", env, via_manage=True)
         self.assertEqual(payload["data"]["local"]["path"], str(machine_dir / "manager.synced.json"))
         self.assertFalse((ROOT / "config" / "manager.synced.base.json").exists())
+    # ------------------------------------------------------------------ direction control (P4a)
+
+    def test_pull_accept_remote_full_override(self):
+        """远端完全覆盖本地：本地键消失、远端键落地、base 推进。"""
+        dir_a = self._machine_dir("a")
+        dir_b = self._machine_dir("b")
+        self._write_json(dir_a / "manager.synced.json", {"ui": {"theme": "dark"}})
+        env_a = self._env(dir_a, "machine-a")
+        env_b = self._env(dir_b, "machine-b")
+        self._payload("push", env_a)
+
+        # B 本地分叉：删 ui、加本地独有键
+        self._write_json(dir_b / "manager.synced.json", {"local_only": {"x": 1}})
+        self._payload("pull", env_b)  # 正常合并建立 base
+        self.assertIn("local_only", self._read_synced(dir_b))
+
+        pull = self._payload("pull", env_b, "--accept-remote")
+        self._assert_profile_schema(pull)
+        self.assertEqual(self._read_synced(dir_b), {"ui": {"theme": "dark"}}, "远端完全覆盖：本地键消失")
+        self.assertEqual(self._read_base(dir_b), {"ui": {"theme": "dark"}}, "base 推进到远端")
+        self.assertEqual(pull["data"]["state"], "clean")
+        self.assertIsNotNone(pull["data"]["snapshot"])
+
+    def test_pull_only_key_scoped_remote_wins(self):
+        """--only：指定键以远端为准，其余键仍三向合并。"""
+        dir_a = self._machine_dir("a")
+        dir_b = self._machine_dir("b")
+        self._write_json(dir_a / "manager.synced.json", {"ui": {"theme": "dark"}, "skills": {"x": {"enabled": True}}})
+        env_a = self._env(dir_a, "machine-a")
+        env_b = self._env(dir_b, "machine-b")
+        self._payload("push", env_a)
+
+        # B 本地：ui 改成 light（与远端冲突），另加 local_extra
+        self._write_json(dir_b / "manager.synced.json", {"ui": {"theme": "light"}, "local_extra": {"y": 2}})
+        self._payload("pull", env_b)  # 建立 base（含冲突保留本地）
+        self.assertEqual(self._read_synced(dir_b)["ui"], {"theme": "light"})
+
+        # A 远端再改 skills；B pull --only ui → 只有 ui 以远端为准
+        self._write_json(dir_a / "manager.synced.json", {"ui": {"theme": "dark"}, "skills": {"x": {"enabled": False}}})
+        self._payload("push", env_a)
+        pull = self._payload("pull", env_b, "--only", "ui")
+        merged = self._read_synced(dir_b)
+        self.assertEqual(merged["ui"], {"theme": "dark"}, "--only 键以远端为准")
+        self.assertEqual(merged["local_extra"], {"y": 2}, "其余本地独有键保留")
+        self.assertEqual(merged["skills"], {"x": {"enabled": False}}, "其余键走三向合并（远端推进）")
+
+    def test_pull_only_rejects_non_top_level_key(self):
+        dir_a = self._machine_dir("a")
+        env = self._env(dir_a, "machine-a")
+        payload = self._payload("pull", env, "--only", "mcp.alpha", expect_exit=2)
+        self.assertEqual(payload["errors"][0]["code"], "USAGE_ERROR")
+
+    def test_push_force_overrides_diverged_remote(self):
+        """diverged 时 --force 以本地覆盖远端；门禁照跑。"""
+        dir_a = self._machine_dir("a")
+        dir_b = self._machine_dir("b")
+        self._write_json(dir_a / "manager.synced.json", {"ui": {"theme": "dark"}})
+        env_a = self._env(dir_a, "machine-a")
+        env_b = self._env(dir_b, "machine-b")
+        self._payload("push", env_a)
+        self._payload("pull", env_b)
+
+        # 双侧分叉：A 推 v2，B 本地改 v3
+        self._write_json(dir_a / "manager.synced.json", {"ui": {"theme": "solarized"}})
+        self._payload("push", env_a)
+        self._write_json(dir_b / "manager.synced.json", {"ui": {"theme": "light"}})
+
+        blocked = self._payload("push", env_b, expect_exit=1)
+        self.assertEqual(blocked["errors"][0]["code"], "PROFILE_DIVERGED")
+        forced = self._payload("push", env_b, "--force")
+        self._assert_profile_schema(forced)
+        self.assertTrue(forced["data"]["published"])
+        self.assertEqual(self._remote_json("profile.json"), {"ui": {"theme": "light"}}, "force 以本地覆盖远端")
+
+    def test_push_force_still_runs_secret_gate(self):
+        """反例：--force 不豁免疑似明文门禁。"""
+        dir_a = self._machine_dir("a")
+        self._write_json(dir_a / "manager.synced.json", {"api_key": "sk-ant-" + "x" * 24})
+        env = self._env(dir_a, "machine-a")
+        payload = self._payload("push", env, "--force", expect_exit=1)
+        self.assertEqual(payload["errors"][0]["code"], "SECRET_GATE_BLOCKED")
+        self.assertIsNone(self._remote_json("profile.json"), "门禁命中时远端零写入")
+
+    def test_status_diff_three_change_shapes(self):
+        """diff 数组：local/remote/both 三种 change 形态 + digest 截断 + 值不出现。"""
+        dir_a = self._machine_dir("a")
+        dir_b = self._machine_dir("b")
+        self._write_json(dir_a / "manager.synced.json", {"same": {"v": 1}, "base_key": {"v": 0}})
+        env_a = self._env(dir_a, "machine-a")
+        env_b = self._env(dir_b, "machine-b")
+        self._payload("push", env_a)
+        self._payload("pull", env_b)  # B 建立 base
+
+        # A 远端改 same；b 本地改 base_key → B 视角：same=remote、base_key=local
+        self._write_json(dir_a / "manager.synced.json", {"same": {"v": 2}, "base_key": {"v": 0}})
+        self._payload("push", env_a)
+        self._write_json(dir_b / "manager.synced.json", {"same": {"v": 1}, "base_key": {"v": 9}, "b_only": {"v": 3}})
+
+        status = self._payload("status", env_b)
+        self._assert_profile_schema(status)
+        diff = {entry["key"]: entry for entry in status["data"]["diff"]}
+        self.assertEqual(diff["same"]["change"], "remote")
+        self.assertEqual(diff["base_key"]["change"], "local")
+        self.assertEqual(diff["b_only"]["change"], "local")
+        self.assertEqual(diff["b_only"]["remote_type"], "absent")
+        self.assertIsNone(diff["b_only"]["remote_digest"])
+        self.assertEqual(len(diff["same"]["remote_digest"]), 12)
+        # 值永不进 payload
+        self.assertNotIn('"v": 9', status["data"]["diff"].__str__())
+        # 双侧都改：A 也改 base_key → both
+        self._write_json(dir_a / "manager.synced.json", {"same": {"v": 2}, "base_key": {"v": 5}})
+        self._payload("push", env_a)
+        status = self._payload("status", env_b)
+        diff = {entry["key"]: entry for entry in status["data"]["diff"]}
+        self.assertEqual(diff["base_key"]["change"], "both")
+
+    def test_status_diff_empty_when_uninitialized_or_offline(self):
+        dir_a = self._machine_dir("a")
+        env = self._env(dir_a, "machine-a")
+        status = self._payload("status", env)
+        self.assertEqual(status["data"]["diff"], [], "uninitialized → diff 空数组")
+        status = self._payload("status", env, "--offline")
+        self.assertEqual(status["data"]["diff"], [], "offline/local-only → diff 空数组")
 
 
 if __name__ == "__main__":

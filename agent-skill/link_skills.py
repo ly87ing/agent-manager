@@ -759,6 +759,18 @@ def main():
         sys.exit(1)
 
     # Separation of concerns: merge policy
+    # 定义覆盖层：merged 策略里的 skills.repositories 片段深合并到 skills.json
+    # 之上（tombstone `_delete: true` 移除条目；形状 fail-close；未知键告警不拒绝）。
+    from src.policy_layers import apply_definition_overlays, overlay_definitions
+    try:
+        repositories, overlay_warnings = apply_definition_overlays(
+            repositories, overlay_definitions(policy_root, "skills"), domain="skills"
+        )
+    except ValueError as exc:
+        logging.error(str(exc))
+        sys.exit(1)
+    for overlay_warning in overlay_warnings:
+        logging.warning(overlay_warning)
     REPOS = {name: dict(config) for name, config in repositories.items()}
     AGENT_TARGETS = canonicalize_agent_mapping(
         {k: (v if isinstance(v, str) else v.get("path")) for k, v in agent_targets.items()}

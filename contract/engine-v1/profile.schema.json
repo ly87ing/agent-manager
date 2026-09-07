@@ -89,6 +89,11 @@
         "scanned": {"type": "boolean"},
         "findings": {"description": "Number of suspected-plaintext hits (payloads with findings > 0 never reach this field).", "type": "integer"}
       }
+    },
+    "diff": {
+      "description": "status only (additive optional field, see contract/README.md errata): per-top-level-key divergence entries when remote is initialized AND a base snapshot exists AND the run is not offline; absent (or empty) otherwise. Values never enter the payload — digests are the first 12 hex chars of sha256 over canonical JSON.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/diff_entry"}
     }
   },
   "$defs": {
@@ -112,6 +117,20 @@
       "properties": {
         "type": {"description": "JSON type name of the value, or 'absent'.", "type": "string"},
         "digest": {"description": "sha256 of the canonical JSON rendering; null when absent.", "type": ["string", "null"]}
+      }
+    },
+    "diff_entry": {
+      "description": "One top-level key's divergence entry in profile.status diff. change: 'local' (only local changed vs base) / 'remote' (only remote changed) / 'both' (both changed differently) / 'none'.",
+      "type": "object",
+      "required": ["key", "change", "local_type", "remote_type", "local_digest", "remote_digest"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {"description": "Top-level key name.", "type": "string"},
+        "change": {"type": "string", "enum": ["local", "remote", "both", "none"]},
+        "local_type": {"description": "JSON type name of the local value, or 'absent'.", "type": "string"},
+        "remote_type": {"description": "JSON type name of the remote value, or 'absent'.", "type": "string"},
+        "local_digest": {"description": "First 12 hex chars of sha256 over canonical JSON; null when absent.", "type": ["string", "null"]},
+        "remote_digest": {"description": "First 12 hex chars of sha256 over canonical JSON; null when absent.", "type": ["string", "null"]}
       }
     }
   }

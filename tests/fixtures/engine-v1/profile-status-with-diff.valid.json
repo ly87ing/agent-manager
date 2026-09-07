@@ -1,0 +1,51 @@
+{
+  "verb": "status",
+  "state": "diverged",
+  "backend": {
+    "type": "git",
+    "url": "https://***@example.com/YOUR_ORG/YOUR_PROFILE_REPO.git",
+    "configured": true
+  },
+  "machine_id": "your-laptop",
+  "local": {
+    "path": "/YOUR_HOME/agent-manager/config/manager.synced.json",
+    "exists": true,
+    "key_count": 3
+  },
+  "base": {
+    "exists": true
+  },
+  "ahead": 1,
+  "behind": 0,
+  "last_sync": "2026-09-06T01:02:03Z",
+  "conflicts": [],
+  "snapshot": null,
+  "published": null,
+  "gate": null,
+  "diff": [
+    {
+      "key": "mcp",
+      "change": "both",
+      "local_type": "object",
+      "remote_type": "object",
+      "local_digest": "7b9365c5e132",
+      "remote_digest": "19cf8829bdd7"
+    },
+    {
+      "key": "skills",
+      "change": "local",
+      "local_type": "object",
+      "remote_type": "absent",
+      "local_digest": "f5d816091d37",
+      "remote_digest": null
+    },
+    {
+      "key": "tools",
+      "change": "none",
+      "local_type": "object",
+      "remote_type": "object",
+      "local_digest": "0c4e6f8a2b1d",
+      "remote_digest": "0c4e6f8a2b1d"
+    }
+  ]
+}

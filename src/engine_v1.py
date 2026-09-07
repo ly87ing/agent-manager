@@ -381,6 +381,12 @@ def build_mcp_status(root_dir, config_file, def_file):
     policy_cfg = get_typed_mapping_section(config, "mcp", config_name, (dict,), "对象")
     def_data = load_json_object_file(def_file, strict=True, missing_ok=False)
     servers = get_typed_mapping_section(def_data, "servers", def_name, (dict,), "对象")
+    # 定义覆盖层：merged 策略里的 mcp.definitions 片段深合并到 mcp.json 之上。
+    servers, overlay_warnings = policy_layers.apply_definition_overlays(
+        servers, policy_layers.overlay_definitions(config, "mcp"), domain="mcp"
+    )
+    for overlay_warning in overlay_warnings:
+        warnings.append(diagnostic("DEFINITION_OVERLAY_UNKNOWN_KEYS", None, overlay_warning))
     agent_paths = get_typed_mapping_section(def_data, "agent_paths", def_name, (str, dict), "字符串或对象")
     mcp_cfg = {"servers": servers, "agent_paths": agent_paths}
 
@@ -2235,6 +2241,12 @@ def build_skills_status(root_dir, config_file, def_files):
     def_data = load_json_object_file(def_files[0], strict=True, missing_ok=False)
     def_name = Path(def_files[0]).name
     repositories = get_typed_mapping_section(def_data, "repositories", def_name, (dict,), "对象")
+    # 定义覆盖层：merged 策略里的 skills.repositories 片段深合并到 skills.json 之上。
+    repositories, overlay_warnings = policy_layers.apply_definition_overlays(
+        repositories, policy_layers.overlay_definitions(config, "skills"), domain="skills"
+    )
+    for overlay_warning in overlay_warnings:
+        warnings.append(diagnostic("DEFINITION_OVERLAY_UNKNOWN_KEYS", None, overlay_warning))
     agent_targets = canonicalize_agent_mapping(
         get_typed_mapping_section(def_data, "agents", def_name, (str, dict), "字符串或对象")
     )
@@ -2916,6 +2928,35 @@ def build_policy_set(root_dir, config_file, layer, key, raw_value):
     return data, [], []
 
 
+def build_policy_delete(root_dir, config_file, layer, key, run_id):
+    """policy:delete：从 synced/local 层删除键；写前快照（复用运行快照机制）。"""
+    if layer not in policy_layers.WRITABLE_LAYERS:
+        raise policy_layers.PolicySetError(
+            "baseline 层只读；--layer 只能是 %s" % " / ".join(policy_layers.WRITABLE_LAYERS)
+        )
+    path = policy_layers.layer_paths(root_dir)[layer]
+    # 先只读探测键存在性（让 PolicyKeyNotFoundError 先于快照触发，空跑不留快照）。
+    probe = load_json_object_file(path, strict=False, missing_ok=True)
+    cursor = probe
+    for segment in key.split("."):
+        if not isinstance(cursor, dict) or segment not in cursor:
+            raise policy_layers.PolicyKeyNotFoundError("键不存在: %s" % key)
+        cursor = cursor[segment]
+    if path.is_file():
+        engine_apply.create_snapshot(run_id, "policy.delete", [str(path)], [])
+    written = policy_layers.delete_policy_value(root_dir, layer, key)
+    data = {
+        "layers": None,
+        "effective": None,
+        "attribution": None,
+        "layer": layer,
+        "key": key,
+        "value": None,
+        "path": str(written),
+    }
+    return data, [], []
+
+
 # Kernel registry. Every kernel takes (root_dir, config_file, def_files) and
 # returns (data, warnings, errors). profile lands in a later phase.
 STATUS_KERNELS = {
@@ -3108,7 +3149,7 @@ def main(argv=None):
     elif domain == "snapshots" and verb in ("list", "restore"):
         kernel = "snapshots:%s" % verb
         kernel_needs_def_file = False
-    elif domain == "policy" and verb in ("get", "set"):
+    elif domain == "policy" and verb in ("get", "set", "delete"):
         kernel = "policy:%s" % verb
         kernel_needs_def_file = False
     else:
@@ -3137,6 +3178,12 @@ def main(argv=None):
             "USAGE_ERROR",
             "policy:set 需要 --layer synced|local --key <dot.path> --value <json>",
             "错误: policy:set 参数不完整（--layer/--key/--value 缺一不可）",
+        )
+    if kernel == "policy:delete" and (not args.layer or not args.key):
+        return usage_error(
+            "USAGE_ERROR",
+            "policy:delete 需要 --layer synced|local --key <dot.path>",
+            "错误: policy:delete 参数不完整（--layer/--key 缺一不可）",
         )
 
     if kernel == "refresh" and mode["offline"]:
@@ -3189,6 +3236,8 @@ def main(argv=None):
             data, warnings, errors = build_policy_get(REPO_ROOT, args.config)
         elif kernel == "policy:set":
             data, warnings, errors = build_policy_set(REPO_ROOT, args.config, args.layer, args.key, args.value)
+        elif kernel == "policy:delete":
+            data, warnings, errors = build_policy_delete(REPO_ROOT, args.config, args.layer, args.key, run_id)
         else:
             data, warnings, errors = kernel(REPO_ROOT, args.config, args.def_file)
     except RefreshUsageError as exc:
@@ -3205,6 +3254,20 @@ def main(argv=None):
             data={},
             warnings=[],
             errors=[diagnostic("POLICY_SECRET_DENIED", None, str(exc))],
+        )
+        emit_envelope(payload)
+        print("错误: %s" % exc, file=sys.stderr)
+        return 1
+    except policy_layers.PolicyKeyNotFoundError as exc:
+        payload = envelope(
+            command=dotted,
+            mode=mode,
+            lock=lock,
+            run_id=run_id,
+            log_file=log_file,
+            data={},
+            warnings=[],
+            errors=[diagnostic("POLICY_KEY_NOT_FOUND", None, str(exc))],
         )
         emit_envelope(payload)
         print("错误: %s" % exc, file=sys.stderr)

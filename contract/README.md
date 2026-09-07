@@ -27,6 +27,11 @@ contract/
 - **冻结规则**：在第一个引擎命令（Phase 0 的 `<domain>:status`）落地之前，v1 允许
   就地修订；落地之后 v1 冻结，除勘误（不改语义的 description 修订）外一律通过
   新增 `engine-v2/` 目录演进，新旧目录并存，客户端按 `contract` 常量识别版本。
+
+  **勘误（2026-09-07，P4a）**：冻结针对既有字段的语义；**向后兼容的 additive
+  可选字段允许**——即只新增不出现在 `required` 里的字段、且 `additionalProperties`
+  形状不放宽。首例：`profile.schema.json` 新增可选 `diff` 数组（profile:status
+  的 per 顶层键分叉视图；旧客户端忽略该键即可，义务不变）。
 - envelope 的 `data` 在信封层只要求 object；具体形状由各域 schema 细化：
   `status.schema.json` / `plan.schema.json` 校验的是 **envelope.data** 而非整个信封。
 

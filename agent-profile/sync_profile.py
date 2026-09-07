@@ -393,6 +393,51 @@ def classify_state(base, local, initialized, remote):
     return "behind", 0, len(behind)
 
 
+def _short_digest(value, present=True):
+    """sha256 前 12 位（值永不进 payload）；absent → (null, 'absent')。"""
+    if not present:
+        return None, "absent"
+    canonical = json.dumps(value, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12], _json_type_name(value)
+
+
+def compute_diff(base, local, remote):
+    """profile:status 的 diff 数组：per 顶层键的变更归属与双侧 digest。
+
+    change 分类（相对三向合并 base 快照）：只本地改 → local；只远端改 →
+    remote；两侧都改且不同 → both；都没改 → none。digest 为 sha256 前 12 位，
+    值永不进 payload；某侧无此键 → digest=null + type='absent'。
+    """
+    diff = []
+    for key in sorted(set(base) | set(local) | set(remote)):
+        b = base.get(key, _ABSENT)
+        l = local.get(key, _ABSENT)
+        r = remote.get(key, _ABSENT)
+        local_changed = l != b
+        remote_changed = r != b
+        if local_changed and remote_changed and l != r:
+            change = "both"
+        elif local_changed:
+            change = "local"
+        elif remote_changed:
+            change = "remote"
+        else:
+            change = "none"
+        local_digest, local_type = _short_digest(l, l is not _ABSENT)
+        remote_digest, remote_type = _short_digest(r, r is not _ABSENT)
+        diff.append(
+            {
+                "key": key,
+                "change": change,
+                "local_type": local_type,
+                "remote_type": remote_type,
+                "local_digest": local_digest,
+                "remote_digest": remote_digest,
+            }
+        )
+    return diff
+
+
 # ---------------------------------------------------------------------------
 # command kernels
 # ---------------------------------------------------------------------------
@@ -431,6 +476,7 @@ def _base_data(verb, backend, machine, synced_path, local_exists, local_content,
         "snapshot": None,
         "published": None,
         "gate": None,
+        "diff": [],
     }
 
 
@@ -469,10 +515,13 @@ def run_status(paths, backend, mode, machine, warnings):
         behind=behind,
         last_sync=_machine_last_sync(snapshot["meta"], machine),
     )
+    # diff 需要三方齐全：远端已初始化 + 本地有 base 快照（上次成功同步的远端内容）。
+    if base_exists:
+        data["diff"] = compute_diff(base, local, snapshot["profile"])
     return data
 
 
-def run_pull(paths, backend, mode, machine, run_id, warnings):
+def run_pull(paths, backend, mode, machine, run_id, warnings, accept_remote=False, only=None):
     synced_path, base_path = paths["synced"], paths["base"]
     local_exists, local = _load_layer(synced_path)
     base_exists, base = _load_layer(base_path)
@@ -490,6 +539,18 @@ def run_pull(paths, backend, mode, machine, run_id, warnings):
         return data
     remote = snapshot["profile"]
     merged, conflicts = three_way_merge(base, local, remote)
+    if accept_remote and only is None:
+        # 远端完全覆盖本地（含 base 推进）；本地键消失、远端键落地。
+        merged = dict(remote)
+        conflicts = []
+    elif only is not None:
+        # 键级「以远端为准」：指定顶层键取远端（远端无此键 = 本地删除），
+        # 其余键仍走三向合并。
+        if only in remote:
+            merged[only] = remote[only]
+        else:
+            merged.pop(only, None)
+        conflicts = [entry for entry in conflicts if entry["key"] != only and not entry["key"].startswith(only + ".")]
     if conflicts:
         warnings.append(
             diagnostic(
@@ -522,7 +583,7 @@ def run_pull(paths, backend, mode, machine, run_id, warnings):
     return data
 
 
-def run_push(paths, backend, mode, machine, run_id, warnings):
+def run_push(paths, backend, mode, machine, run_id, warnings, force=False):
     synced_path, base_path = paths["synced"], paths["base"]
     local_exists, local = _load_layer(synced_path)
     base_exists, base = _load_layer(base_path)
@@ -536,7 +597,7 @@ def run_push(paths, backend, mode, machine, run_id, warnings):
     gate = {"scanned": True, "findings": 0}
 
     snapshot = backend.fetch()
-    if snapshot["initialized"] and snapshot["profile"] != base:
+    if snapshot["initialized"] and snapshot["profile"] != base and not force:
         raise DivergedError(
             "远端内容相对上次同步已变化（behind/diverged），直接 push 会丢失远端键；"
             "请先 profile:pull 合并后再 push"
@@ -589,6 +650,9 @@ def _build_parser():
     parser.add_argument("--json", action="store_true", help="required: selects the envelope machine interface")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--offline", action="store_true")
+    parser.add_argument("--accept-remote", action="store_true", help="profile:pull 远端完全覆盖本地共享层")
+    parser.add_argument("--only", help="profile:pull 只让指定顶层键以远端为准（键级覆盖）")
+    parser.add_argument("--force", action="store_true", help="profile:push 分叉时强制以本地覆盖远端")
     return parser
 
 
@@ -702,15 +766,40 @@ def main(argv=None):
             "profile:%s 是 network 级动作，offline 模式下拒绝执行" % verb,
         )
 
+    if (args.accept_remote or args.only) and verb != "pull":
+        return usage_error(
+            "USAGE_ERROR",
+            "--accept-remote/--only 仅适用于 profile:pull",
+            "错误: --accept-remote/--only 仅适用于 profile:pull",
+        )
+    if args.force and verb != "push":
+        return usage_error(
+            "USAGE_ERROR",
+            "--force 仅适用于 profile:push",
+            "错误: --force 仅适用于 profile:push",
+        )
+    if args.only is not None:
+        from src.policy_layers import _KEY_SEGMENT_RE
+
+        if not _KEY_SEGMENT_RE.match(args.only):
+            return usage_error(
+                "USAGE_ERROR",
+                "--only 只接受顶层键名（字母/数字/_/-）: %s" % args.only,
+                "错误: --only 只接受顶层键名（字母/数字/_/-）",
+            )
+
     machine = machine_id()
     warnings = []
     try:
         if verb == "status":
             data = run_status(paths, backend, mode, machine, warnings)
         elif verb == "pull":
-            data = run_pull(paths, backend, mode, machine, run_id, warnings)
+            data = run_pull(
+                paths, backend, mode, machine, run_id, warnings,
+                accept_remote=bool(args.accept_remote), only=args.only,
+            )
         else:
-            data = run_push(paths, backend, mode, machine, run_id, warnings)
+            data = run_push(paths, backend, mode, machine, run_id, warnings, force=bool(args.force))
     except SecretGateError as exc:
         return runtime_error("SECRET_GATE_BLOCKED", str(exc))
     except DivergedError as exc:
