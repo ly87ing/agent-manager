@@ -54,14 +54,102 @@ DOCTOR_STATUS="healthy"
 DOCTOR_WARNING_OPTIONAL_TOOLS=0
 DOCTOR_WARNING_UNMATERIALIZED=0
 TEMP_ARTIFACTS=()
+function register_temp_artifact() {
+    TEMP_ARTIFACTS+=("$1")
+}
+function unregister_temp_artifact() {
+    local target="$1"
+    local remaining=()
+    local artifact
+    for artifact in "${TEMP_ARTIFACTS[@]}"; do
+        if [ "$artifact" != "$target" ]; then
+            remaining+=("$artifact")
+        fi
+    done
+    if [ "${#remaining[@]}" -gt 0 ]; then
+        TEMP_ARTIFACTS=("${remaining[@]}")
+    else
+        TEMP_ARTIFACTS=()
+    fi
+}
 ORIGINAL_ARGS=("$@")
 CMD_ARGS=()
 cmd=""
 
-# If the synced shared layer or the local override file exists, read them and deep-merge
-if [ -f "$SYNCED_CONFIG" ] || [ -f "$LOCAL_CONFIG" ]; then
-    CONFIG_FILE="$(mktemp)"
-    if ! "$PYTHON_CMD" -c "
+function resolve_config_file() {
+    if [[ "$cmd" == "help" || "$cmd" == "-h" || "$cmd" == "--help" || "$cmd" == "-help" ]]; then
+        return
+    fi
+
+    # SQLite 激活只认已存在的 manager.db；仅有 AGENT_MANAGER_DATA_DIR 环境变量
+    # （GUI 未初始化场景）绝不触发连接空库，继续走旧三层有效配置。
+    local db_exists="false"
+    if AGENT_MANAGER_ENGINE_ROOT="$ROOT_DIR" "$PYTHON_CMD" -c "
+import os, sys
+sys.path.insert(0, os.environ['AGENT_MANAGER_ENGINE_ROOT'])
+from src.storage import get_db_path
+p = get_db_path(data_dir=os.environ.get('AGENT_MANAGER_DATA_DIR'))
+sys.exit(0 if p.is_file() else 1)
+" 2>/dev/null; then
+        db_exists="true"
+    fi
+
+    # 只读/预演命令（help/status/plan/--dry-run/policy:get/db:status）绝不创建或迁移 DB；
+    # 仅写操作或显式 db:migrate 允许初始化。
+    local can_migrate="false"
+    if [ -z "$DRY_RUN_FLAG" ]; then
+        if [[ "$cmd" == "db:migrate" || "$cmd" == "update" || "$cmd" == "init" || "$cmd" == "agents:update" || "$cmd" == *:apply || "$cmd" == policy:set || "$cmd" == policy:delete ]]; then
+            can_migrate="true"
+        fi
+    fi
+
+    if [ "$db_exists" = "true" ]; then
+        CONFIG_FILE="$(mktemp)"
+        register_temp_artifact "$CONFIG_FILE"
+        if ! AGENT_MANAGER_ENGINE_ROOT="$ROOT_DIR" \
+             AGENT_MANAGER_OUTPUT_CONFIG="$CONFIG_FILE" \
+             "$PYTHON_CMD" -c "
+import os, sys
+sys.path.insert(0, os.environ['AGENT_MANAGER_ENGINE_ROOT'])
+from src.storage import get_db_path, write_projected_config
+try:
+    target_db = get_db_path(os.environ.get('AGENT_MANAGER_DATA_DIR'))
+    write_projected_config(target_db, os.environ['AGENT_MANAGER_OUTPUT_CONFIG'])
+except Exception as exc:
+    print(f'错误: {exc}', file=sys.stderr)
+    sys.exit(1)
+"; then
+            rm -f "$CONFIG_FILE"
+            echo -e "${ERROR_RED}错误: SQLite 数据库投影生成失败${NC}" >&2
+            exit 1
+        fi
+    elif [ "$can_migrate" = "true" ]; then
+        CONFIG_FILE="$(mktemp)"
+        register_temp_artifact "$CONFIG_FILE"
+        if ! AGENT_MANAGER_ENGINE_ROOT="$ROOT_DIR" \
+             AGENT_MANAGER_OUTPUT_CONFIG="$CONFIG_FILE" \
+             "$PYTHON_CMD" -c "
+import os, sys
+sys.path.insert(0, os.environ['AGENT_MANAGER_ENGINE_ROOT'])
+from src.storage import migrate_if_needed, write_projected_config
+try:
+    target_db = migrate_if_needed(
+        os.environ['AGENT_MANAGER_ENGINE_ROOT'],
+        data_dir=os.environ.get('AGENT_MANAGER_DATA_DIR'),
+    )
+    write_projected_config(target_db, os.environ['AGENT_MANAGER_OUTPUT_CONFIG'])
+except Exception as exc:
+    # 保留迁移诊断原文（如 共享层配置无效/本地覆盖配置无效），避免大段 traceback
+    print(f'错误: {exc}', file=sys.stderr)
+    sys.exit(1)
+"; then
+            rm -f "$CONFIG_FILE"
+            echo -e "${ERROR_RED}错误: SQLite 数据库迁移或投影生成失败${NC}" >&2
+            exit 1
+        fi
+    elif [ -f "$SYNCED_CONFIG" ] || [ -f "$LOCAL_CONFIG" ]; then
+        CONFIG_FILE="$(mktemp)"
+        if ! "$PYTHON_CMD" -c "
 import json, os, sys
 sys.path.insert(0, '$ROOT_DIR')
 from src.agent_ids import canonicalize_agent_mapping
@@ -92,13 +180,13 @@ if 'agents' in base:
 with open('$CONFIG_FILE', 'w', encoding='utf-8') as f:
     json.dump(base, f, indent=2, ensure_ascii=False)
 "; then
-        rm -f "$CONFIG_FILE"
-        exit 1
+            rm -f "$CONFIG_FILE"
+            exit 1
+        fi
+    else
+        CONFIG_FILE="$BASE_CONFIG"
     fi
-else
-    # Use the baseline directly when there is no synced or local override
-    CONFIG_FILE="$BASE_CONFIG"
-fi
+}
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -195,8 +283,8 @@ function acquire_lock() {
     exit 1
 }
 
-# Atomic lock check（只读命令豁免：help/doctor、引擎契约的只读族 *:status / *:plan / system:audit / runs / snapshots:list / policy:get）
-if [[ "$cmd" != "help" && "$cmd" != "-h" && "$cmd" != "--help" && "$cmd" != "-help" && "$cmd" != "doctor" && "$cmd" != *:status && "$cmd" != *:plan && "$cmd" != "system:audit" && "$cmd" != "runs:list" && "$cmd" != "runs:get" && "$cmd" != "snapshots:list" && "$cmd" != "policy:get" && "$cmd" != "sources:get" ]]; then
+# Atomic lock check（只读命令豁免：help/doctor、引擎契约的只读族 *:status / *:plan / system:audit / runs / snapshots:list / policy:get / db:status）
+if [[ "$cmd" != "help" && "$cmd" != "-h" && "$cmd" != "--help" && "$cmd" != "-help" && "$cmd" != "doctor" && "$cmd" != *:status && "$cmd" != *:plan && "$cmd" != "system:audit" && "$cmd" != "runs:list" && "$cmd" != "runs:get" && "$cmd" != "snapshots:list" && "$cmd" != "policy:get" && "$cmd" != "sources:get" && "$cmd" != "db:status" ]]; then
     acquire_lock
 fi
 
@@ -229,6 +317,10 @@ function handle_signal_exit() {
 trap cleanup_on_exit EXIT
 trap 'handle_signal_exit 143' TERM
 trap 'handle_signal_exit 130' INT
+
+# trap 与锁（如需）均已装好后再解析有效配置：mktemp 投影/迁移产物注册进
+# TEMP_ARTIFACTS，失败或信号退出不留临时文件，并发下投影由同一把锁串行化。
+resolve_config_file
 
 # Ensure execute permissions
 chmod +x "$ROOT_DIR/agent-rule/scripts/"*.sh > /dev/null 2>&1 || true
@@ -363,26 +455,6 @@ function run_supervised_command_in_dir() {
     run_supervised_task "$timeout_seconds" "$workdir" "$command_str" &
     local pid=$!
     wait "$pid"
-}
-
-function register_temp_artifact() {
-    TEMP_ARTIFACTS+=("$1")
-}
-
-function unregister_temp_artifact() {
-    local target="$1"
-    local remaining=()
-    local artifact
-    for artifact in "${TEMP_ARTIFACTS[@]}"; do
-        if [ "$artifact" != "$target" ]; then
-            remaining+=("$artifact")
-        fi
-    done
-    if [ "${#remaining[@]}" -gt 0 ]; then
-        TEMP_ARTIFACTS=("${remaining[@]}")
-    else
-        TEMP_ARTIFACTS=()
-    fi
 }
 
 function run_supervised_capture_command_in_dir() {
@@ -1033,6 +1105,7 @@ function print_help() {
     echo -e "  ${SUCCESS_GREEN}profile:status${NC} 个性化配置同步状态（共享层本地状态 + 远端比对 clean/ahead/behind/diverged/uninitialized；须追加 --json；--offline 只报本地）"
     echo -e "  ${SUCCESS_GREEN}profile:pull${NC}   拉取远端共享层并三向合并写回 synced 层（network 级，offline 拒绝；冲突保留本地值并按 key 报告；--accept-remote 远端完全覆盖本地；--only <键> 仅该键以远端为准）"
     echo -e "  ${SUCCESS_GREEN}profile:push${NC}   发布本地共享层到同步后端（push 前疑似明文扫描硬门禁；--dry-run 只出计划不推送；--force 分叉时强制以本地覆盖远端；后端地址只经 PROFILE_SYNC_REPO_URL 或 manager.local.json 提供）"
+    echo -e "  ${SUCCESS_GREEN}db:status${NC} / ${SUCCESS_GREEN}db:migrate${NC} SQLite 存储状态与原子初始化迁移（Phase 1A 本地存储，须追加 --json）"
     echo -e "  ${SUCCESS_GREEN}help${NC}           显示本帮助\n"
 }
 
@@ -1079,7 +1152,7 @@ case "$cmd" in
         AGENT_MANAGER_LOCK_PID="$$" \
             "$PYTHON_CMD" "$ROOT_DIR/agent-profile/sync_profile.py" "${profile_args[@]}"
         ;;
-    *:status|*:plan|*:apply|system:audit|system:refresh-upstream|system:converge|snapshots:list|snapshots:restore|runs:list|runs:get|policy:get|policy:set|policy:delete|sources:get|sources:set)
+    *:status|*:plan|*:apply|system:audit|system:refresh-upstream|system:converge|snapshots:list|snapshots:restore|runs:list|runs:get|policy:get|policy:set|policy:delete|sources:get|sources:set|db:status|db:migrate)
         # 引擎契约命令族（contract/engine-v1）：envelope JSON 走 stdout，退出码 0/1/2 由引擎决定。
         engine_args=("$cmd" --config "$CONFIG_FILE" --python-cmd "$PYTHON_CMD")
         if [[ "$cmd" == mcp:* ]]; then

@@ -276,12 +276,14 @@ export interface SnapshotsData {
 // ---------- policy:get / policy:set ----------
 
 export type PolicyLayer = "synced" | "local";
-export type PolicyLayerName = "baseline" | PolicyLayer;
+export type PolicyLayerName = "baseline" | PolicyLayer | "sqlite";
 
 export interface PolicyLayers {
   baseline: Record<string, unknown> | null;
   synced: Record<string, unknown> | null;
   local: Record<string, unknown> | null;
+  /** SQLite 存储激活时（Phase 1A）由 manager.db 投影的有效状态；此时 baseline/synced/local 均为 null。 */
+  sqlite?: Record<string, unknown> | null;
 }
 
 /** 一个 schema 同时服务 get/set，不适用的字段 nullable-required。 */

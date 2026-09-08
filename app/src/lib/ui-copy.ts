@@ -101,6 +101,7 @@ export const POLICY_LAYER_COPY: Record<PolicyLayerName, { label: string; classNa
   baseline: { label: "仓库默认值", className: "border-slate-200 bg-slate-100 text-slate-500" },
   synced: { label: "多设备共享", className: "border-sky-200 bg-sky-50 text-sky-700" },
   local: { label: "仅这台电脑", className: "border-orange-200 bg-orange-50 text-orange-700" },
+  sqlite: { label: "本地数据库", className: "border-violet-200 bg-violet-50 text-violet-700" },
 };
 
 // ---------- 多设备同步状态 ----------

@@ -133,6 +133,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("policy", "get" | "set" | "delete") => true,
         ("sources", "get" | "set") => true,
         ("profile", "status" | "pull" | "push") => true,
+        ("db", "status" | "migrate") => true,
         (d, "status" | "plan" | "apply") => READ_WRITE_DOMAINS.contains(&d),
         _ => false,
     };
@@ -537,6 +538,20 @@ fn run_engine_with_preferences(
     run_id: Option<&str>,
     preferences: Option<&crate::settings::SettingsPreferences>,
 ) -> Result<Envelope, EngineError> {
+    run_engine_full(root, python_override, rust_override, production, command, args, run_id, preferences, None)
+}
+
+fn run_engine_full(
+    root: &Path,
+    python_override: Option<&Path>,
+    rust_override: Option<&Path>,
+    production: bool,
+    command: &str,
+    args: &[String],
+    run_id: Option<&str>,
+    preferences: Option<&crate::settings::SettingsPreferences>,
+    data_dir_override: Option<&Path>,
+) -> Result<Envelope, EngineError> {
     validate_command(command)?;
     validate_args(command, args)?;
     if let Some(run_id) = run_id {
@@ -579,6 +594,9 @@ fn run_engine_with_preferences(
         return Err(EngineError::new("installation_incomplete", "发行包缺少内置 Python 运行时"));
     }
     cmd.env("AGENT_MANAGER_ROOT_DIR", root);
+    if let Some(data_dir) = data_dir_override {
+        cmd.env("AGENT_MANAGER_DATA_DIR", data_dir);
+    }
     cmd.env("AGENT_MANAGER_BASE_CONFIG", root.join("config/manager.json"));
     cmd.env("AGENT_MANAGER_SYNCED_CONFIG", root.join("config/manager.synced.json"));
     cmd.env("AGENT_MANAGER_LOCAL_CONFIG", root.join("config/manager.local.json"));
@@ -646,7 +664,8 @@ pub async fn engine_invoke(app: tauri::AppHandle, command: String, args: Option<
     tauri::async_runtime::spawn_blocking(move || {
         let layout = resolve_runtime_layout(&app_handle)?;
         let preferences = crate::settings::current_preferences(&app_handle).map_err(|message| EngineError::new("settings_invalid", message))?;
-        run_engine_with_preferences(&layout.root, layout.python.as_deref(), layout.rust_engine.as_deref(), layout.production, &command, &args, run_id.as_deref(), Some(&preferences))
+        let data_dir = standalone_data_dir(&app_handle)?;
+        run_engine_full(&layout.root, layout.python.as_deref(), layout.rust_engine.as_deref(), layout.production, &command, &args, run_id.as_deref(), Some(&preferences), Some(&data_dir))
     })
     .await
     .map_err(|err| EngineError::new("internal", format!("bridge 任务调度失败: {err}")))?
@@ -752,6 +771,7 @@ mod tests {
             "system:audit", "system:refresh-upstream", "system:converge",
             "snapshots:list", "snapshots:restore", "runs:list", "runs:get",
             "policy:get", "policy:set", "policy:delete", "profile:status", "profile:pull", "profile:push",
+            "db:status", "db:migrate",
         ] {
             validate_command(command).unwrap_or_else(|err| panic!("{command} should pass: {}", err.message));
         }
@@ -764,6 +784,7 @@ mod tests {
             "secrets:plan",    // secrets 只读
             "secrets:apply",
             "policy:drop",     // policy 只有 get/set/delete
+            "db:drop",
             "profile:init",
             "runs:delete",
             "update",

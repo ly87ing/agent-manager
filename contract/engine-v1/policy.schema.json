@@ -12,7 +12,8 @@
       "properties": {
         "baseline": {"description": "config/manager.json content.", "type": ["object", "null"]},
         "synced": {"description": "config/manager.synced.json content.", "type": ["object", "null"]},
-        "local": {"description": "config/manager.local.json content.", "type": ["object", "null"]}
+        "local": {"description": "config/manager.local.json content.", "type": ["object", "null"]},
+        "sqlite": {"description": "Effective state projected from manager.db when SQLite storage is active (Phase 1A); baseline/synced/local are null in that mode. Absent or null otherwise.", "type": ["object", "null"]}
       }
     },
     "effective": {

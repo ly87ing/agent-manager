@@ -745,6 +745,19 @@ def main(argv=None):
             "错误: 未知命令 '%s'" % raw_command,
         )
 
+    # 阶段 1A 兼容边界：SQLite 本地存储激活后，legacy 共享层不再是真实状态源，
+    # pull/push 旧文件会假成功/推送旧数据 —— 明确拒绝，且在后端构建之前返回，
+    # 绝不连接网络或写旧文件。status 保持只读并标注 legacy。
+    from src.storage import is_sqlite_active
+
+    sqlite_active = is_sqlite_active(REPO_ROOT)
+    if sqlite_active and verb in ("pull", "push"):
+        return runtime_error(
+            "PROFILE_SQLITE_ACTIVE",
+            "SQLite 本地存储已激活：profile:%s 的 legacy 共享层同步暂不支持，已拒绝"
+            "（未连接网络、未写旧文件）；云端同步接入待后续阶段" % verb,
+        )
+
     defaults = layer_paths(REPO_ROOT)
     synced_path = Path(args.synced_config).expanduser() if args.synced_config else defaults["synced"]
     local_config_path = Path(args.local_config).expanduser() if args.local_config else defaults["local"]
@@ -790,6 +803,11 @@ def main(argv=None):
 
     machine = machine_id()
     warnings = []
+    if sqlite_active and verb == "status":
+        warnings.append(diagnostic(
+            "PROFILE_SQLITE_ACTIVE", None,
+            "SQLite 本地存储已激活：以下 status 反映 legacy 共享层文件，仅供只读参考",
+        ))
     try:
         if verb == "status":
             data = run_status(paths, backend, mode, machine, warnings)

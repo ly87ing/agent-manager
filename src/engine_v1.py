@@ -84,7 +84,7 @@ from src.manage_runtime_probe import (
     validate_repo_skill_matrix,
 )
 from src.npm_flags import OFFICIAL_NPM_REGISTRY
-from src import engine_apply, policy_layers, source_definitions, upstream_cache
+from src import engine_apply, policy_layers, source_definitions, storage, upstream_cache
 
 CONTRACT_ID = "agent-manager/engine/v1"
 
@@ -106,6 +106,7 @@ KNOWN_DOMAINS = (
     "runs",
     "snapshots",
     "sources",
+    "db",
 )
 
 # Proposal section 3.3: until the upstream probe cache exists, every element
@@ -3250,6 +3251,9 @@ def build_snapshots_restore(root_dir, config_file, run_id, resnapshot_run_id):
 
 
 def build_policy_get(root_dir, config_file):
+    if storage.is_sqlite_active(root_dir):
+        db_path = storage.get_db_path()
+        return storage.policy_get_db(db_path), [], []
     layers = policy_layers.load_layers(root_dir)
     data = {
         "layers": layers,
@@ -3263,11 +3267,41 @@ def build_policy_get(root_dir, config_file):
     return data, [], []
 
 
-def build_policy_set(root_dir, config_file, layer, key, raw_value):
+def build_policy_set(root_dir, config_file, layer, key, raw_value, run_id=None, dry_run=False):
+    if layer not in policy_layers.WRITABLE_LAYERS:
+        raise policy_layers.PolicySetError(
+            "baseline 层只读；--layer 只能是 %s" % " / ".join(policy_layers.WRITABLE_LAYERS)
+        )
     try:
         value = json.loads(raw_value)
     except ValueError as exc:
         raise policy_layers.PolicySetError("--value 不是合法 JSON: %s" % exc)
+    if dry_run:
+        # 显式 --dry-run：只校验，不写入任何后端（SQLite 或旧层文件）。
+        data = {
+            "layers": None,
+            "effective": None,
+            "attribution": None,
+            "layer": layer,
+            "key": key,
+            "value": value,
+            "path": None,
+        }
+        warnings = [diagnostic("DRY_RUN", None, "dry-run：未写入 %s" % key)]
+        return data, warnings, []
+    if storage.is_sqlite_active(root_dir):
+        db_path = storage.get_db_path()
+        path = storage.policy_set_db(db_path, key, value, run_id=run_id)
+        data = {
+            "layers": None,
+            "effective": None,
+            "attribution": None,
+            "layer": layer,
+            "key": key,
+            "value": value,
+            "path": str(path),
+        }
+        return data, [], []
     path = policy_layers.set_policy_value(root_dir, layer, key, value)
     data = {
         "layers": None,
@@ -3281,12 +3315,38 @@ def build_policy_set(root_dir, config_file, layer, key, raw_value):
     return data, [], []
 
 
-def build_policy_delete(root_dir, config_file, layer, key, run_id):
+def build_policy_delete(root_dir, config_file, layer, key, run_id, dry_run=False):
     """policy:delete：从 synced/local 层删除键；写前快照（复用运行快照机制）。"""
     if layer not in policy_layers.WRITABLE_LAYERS:
         raise policy_layers.PolicySetError(
             "baseline 层只读；--layer 只能是 %s" % " / ".join(policy_layers.WRITABLE_LAYERS)
         )
+    if dry_run:
+        # 显式 --dry-run：不删除、不写任何后端（SQLite 或旧层文件）。
+        data = {
+            "layers": None,
+            "effective": None,
+            "attribution": None,
+            "layer": layer,
+            "key": key,
+            "value": None,
+            "path": None,
+        }
+        warnings = [diagnostic("DRY_RUN", None, "dry-run：未删除 %s" % key)]
+        return data, warnings, []
+    if storage.is_sqlite_active(root_dir):
+        db_path = storage.get_db_path()
+        path = storage.policy_delete_db(db_path, key, run_id=run_id)
+        data = {
+            "layers": None,
+            "effective": None,
+            "attribution": None,
+            "layer": layer,
+            "key": key,
+            "value": None,
+            "path": str(path),
+        }
+        return data, [], []
     path = policy_layers.layer_paths(root_dir)[layer]
     # 先只读探测键存在性（让 PolicyKeyNotFoundError 先于快照触发，空跑不留快照）。
     probe = load_json_object_file(path, strict=False, missing_ok=True)
@@ -3308,6 +3368,53 @@ def build_policy_delete(root_dir, config_file, layer, key, run_id):
         "path": str(written),
     }
     return data, [], []
+
+
+def build_db_status(root_dir, config_file):
+    db_path = storage.get_db_path()
+    exists = db_path.is_file()
+    summary = {}
+    ready = False
+    if exists:
+        conn = storage.connect_db(db_path, read_only=True)
+        try:
+            storage.ensure_db_ready(conn, db_path)
+            ready = True
+            for row in conn.execute("SELECT key, value FROM schema_meta").fetchall():
+                summary[row["key"]] = row["value"]
+            summary["counts"] = {
+                "agents": conn.execute("SELECT COUNT(*) FROM definitions WHERE domain = 'agent' AND deleted = 0").fetchone()[0],
+                "tools": conn.execute("SELECT COUNT(*) FROM definitions WHERE domain = 'tool' AND deleted = 0").fetchone()[0],
+                "mcp": conn.execute("SELECT COUNT(*) FROM definitions WHERE domain = 'mcp' AND deleted = 0").fetchone()[0],
+                "skills": conn.execute("SELECT COUNT(*) FROM definitions WHERE domain = 'skill' AND deleted = 0").fetchone()[0],
+                "policies": conn.execute("SELECT COUNT(*) FROM policy_entries").fetchone()[0],
+            }
+        except Exception as exc:
+            # 损坏/外来/未来版本的库：status 如实报告不就绪，绝不尝试修复或写入。
+            summary["error"] = str(exc)
+        finally:
+            conn.close()
+    data = {
+        "active": storage.is_sqlite_active(root_dir),
+        "ready": ready,
+        "data_dir": str(storage.get_data_dir()),
+        "db_path": str(db_path),
+        "exists": exists,
+        "meta": summary,
+    }
+    return data, [], []
+
+
+def build_db_migrate(root_dir, config_file, dry_run=False):
+    if dry_run:
+        # 显式 --dry-run：绝不创建/迁移 DB，仅报告当前状态。
+        data, warnings, errors = build_db_status(root_dir, config_file)
+        data["dry_run"] = True
+        data["would_migrate"] = not data["exists"]
+        warnings.append({"code": "DRY_RUN", "element": None, "message": "dry-run：未执行迁移，manager.db 状态未改变"})
+        return data, warnings, errors
+    storage.migrate_if_needed(root_dir)
+    return build_db_status(root_dir, config_file)
 
 
 # Kernel registry. Every kernel takes (root_dir, config_file, def_files) and
@@ -3517,6 +3624,9 @@ def main(argv=None):
     elif domain == "sources" and verb in ("get", "set"):
         kernel = "sources:%s" % verb
         kernel_needs_def_file = False
+    elif domain == "db" and verb in ("status", "migrate"):
+        kernel = "db:%s" % verb
+        kernel_needs_def_file = False
     else:
         return not_implemented()
 
@@ -3678,9 +3788,13 @@ def main(argv=None):
         elif kernel == "policy:get":
             data, warnings, errors = build_policy_get(REPO_ROOT, args.config)
         elif kernel == "policy:set":
-            data, warnings, errors = build_policy_set(REPO_ROOT, args.config, args.layer, args.key, args.value)
+            data, warnings, errors = build_policy_set(REPO_ROOT, args.config, args.layer, args.key, args.value, run_id=run_id, dry_run=mode["dry_run"])
         elif kernel == "policy:delete":
-            data, warnings, errors = build_policy_delete(REPO_ROOT, args.config, args.layer, args.key, run_id)
+            data, warnings, errors = build_policy_delete(REPO_ROOT, args.config, args.layer, args.key, run_id, dry_run=mode["dry_run"])
+        elif kernel == "db:status":
+            data, warnings, errors = build_db_status(REPO_ROOT, args.config)
+        elif kernel == "db:migrate":
+            data, warnings, errors = build_db_migrate(REPO_ROOT, args.config, dry_run=mode["dry_run"])
         else:
             if verb == "plan":
                 data, warnings, errors = kernel(

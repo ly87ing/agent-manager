@@ -65,9 +65,12 @@ Windows 平台支持：`Claude Code` 支持原生 Windows（PowerShell / CMD）�
 
 ## 核心健全性特性
 
-### 1. 策略与定义分离 (Policy vs. Definition)
-- **仓库基线 (`manager.json`)**：保存可审计的默认策略。
-- **本地覆盖 (`manager.local.json`)**：运行时与 `manager.json` 深度合并，适合机器本地偏好与私有配置（手工编辑维护）。
+### 1. 本地数据与内置定义
+- **本地数据库 (`manager.db`)**：GUI 与 CLI 共用应用数据目录；macOS 默认位于 `~/Library/Application Support/com.agentmanager.dev/`，可用 `AGENT_MANAGER_DATA_DIR` 指定目录。设备偏好继续使用 `settings.json`。
+- **首次迁移**：`./manage.sh db:migrate --json` 显式导入旧配置；首次策略写入、`update`、`init` 或域级 `apply` 也会初始化。导入包含 baseline/synced/local 的有效策略、定义及删除标记，不执行安装或重新启用。迁移使用临时数据库，校验后原子切换；损坏或不支持版本的已有数据库会被拒绝。
+- **只读与预演**：`help`、状态、计划、`policy:get` 和 `--dry-run` 不创建数据库。未初始化时仍读取旧配置；数据库激活后，策略写入只更新 SQLite，适配器读取临时生成的配置。
+- **旧文件保留**：迁移不删除 `manager.json`、`manager.synced.json` 和 `manager.local.json`，之后编辑旧策略文件不再影响数据库。规则、Hooks 与 alias 正文当前仍走原有源文件编辑链路，尚未全部迁入数据库；旧 profile 拉取、推送在数据库激活后禁用，避免同步过期状态。
+- **回退边界**：旧版本只认识旧文件。回退程序前应保留数据库，核对迁移后的修改；直接运行旧版本不会把这些新修改自动还原到旧 JSON。当前没有自动反向迁移。
 - **不锁版本**：所有受管组件（Agent、tools、MCP、skills）都跟随上游最新——npm 包命令不带版本号、git 依赖跟踪分支头、skill 仓库跟随默认分支；`make update` 即把本机收敛到上游当前状态。
 - **浏览器前置开关**：`browser_us_sync.enabled` 控制 `update` / `init` 是否执行浏览器 Google US 前置同步。
 - **模块化定义 (`agents.json`等)**：保存官方指令细节，支持 Policy 的强制覆盖。

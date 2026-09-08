@@ -141,6 +141,7 @@ class EngineCliTests(unittest.TestCase):
         env = os.environ.copy()
         env.pop("ENGINE_TEST_ALPHA_KEY", None)
         env["HOME"] = str(self.home)
+        env["AGENT_MANAGER_DATA_DIR"] = str(self.home / "data")
         env["AGENT_MANAGER_LOCK_FILE"] = str(self.lock_path)
         env["AGENT_MANAGER_LOG_PREFIX"] = str(self.log_prefix)
         if extra:
@@ -617,6 +618,7 @@ class EngineDomainSliceTests(unittest.TestCase):
         env = os.environ.copy()
         env.pop("ENGINE_TEST_ALPHA_KEY", None)
         env["HOME"] = str(self.home)
+        env["AGENT_MANAGER_DATA_DIR"] = str(self.home / "data")
         env["AGENT_MANAGER_LOCK_FILE"] = str(self.lock_path)
         env["AGENT_MANAGER_LOG_PREFIX"] = str(self.log_prefix)
         if restricted_path:

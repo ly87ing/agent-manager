@@ -78,6 +78,8 @@ class ManageScriptTests(unittest.TestCase):
         env = dict(base_env or os.environ.copy())
         env["AGENT_MANAGER_LOCK_FILE"] = str(self.lock_path)
         env["AGENT_MANAGER_LOG_PREFIX"] = str(self.log_prefix)
+        # SQLite 数据目录必须随每测试隔离，绝不继承外部环境（防误写真实数据目录）。
+        env["AGENT_MANAGER_DATA_DIR"] = str(self.runtime_dir / "data")
         env["AGENT_MANAGER_CHROME_USER_DATA_DIR"] = str(self.runtime_dir / "chrome-user-data")
         env["AGENT_MANAGER_BROWSER_US_CONFIG_DIR"] = str(self.runtime_dir / "browser-us-config")
         env["AGENT_MANAGER_BROWSER_US_NO_OPEN"] = "1"
