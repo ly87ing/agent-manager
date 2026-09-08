@@ -37,26 +37,27 @@
   - 不锁版本；各 Agent 启动时由 npx 解析上游最新。
 默认受管 skill 仓库为 `agent-skills`，跟随上游 `main` 分支最新（不固定 commit），由 `make update` 同步 clone/pull。`agent-skills` 面向 `Claude Code`、`Codex` 与 `Kimi Code` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 `safe-merge-review`、`change-discipline`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing`、`technical-diagramming` 这 6 个 skill 包，不会因为上游新增 skill 而自动扩大安装范围。
 默认自动安装的 Agent 当前只包含 `Claude Code` 与 `Codex`。
-`Claude Code` 与 `Codex` 默认走官方 npm 包，`config/agents.json` 中的安装/升级命令刻意不锁版本，`make agents:update` 每次都升级到上游最新。历史 `brew` 安装仅用于识别并提示迁移，不再作为这些 CLI 的受管 provider。
-`Claude Code native` 仍作为兼容 provider 保留官方 install / update / uninstall 语义，但默认不再使用这条动态 updater 路径。
+`Claude Code` 与 `Codex` 默认走官方原生独立安装器（`native`）。`Claude Code` 原生安装器支持后台自动更新与 `claude update`；`Codex` 使用官方独立安装脚本进行安装与升级。
+已有 `npm` 或 `brew` 来源沿用升级，不进行隐式迁移或删除既有安装。
+Windows 平台支持：`Claude Code` 支持原生 Windows（PowerShell / CMD）；`Codex` 不声明未核实的 Windows 原生独立安装支持。
 `Claude Code local install` 不纳入 `agent-manager` lifecycle 托管，因为它依赖 shell alias 暴露入口，当前探测链路不会越权接管。
-以上 lifecycle 口径统一按两个当前受管 Agent 的官方推荐方式维护。`Claude Code` 和 `Codex` 的 npm provider 使用 `config/agents.json` 中的命令模板（不锁版本），由 `make agents:update` 或 `make init` 直接升级到上游最新。`agent-manager` 不改写用户 shell profile。
+以上 lifecycle 口径统一按两个当前受管 Agent 的官方推荐方式维护。`Claude Code` 和 `Codex` 的 npm/brew provider 保留受管升级命令模板。`agent-manager` 不改写用户 shell profile。
 
 ## Official CLI Lifecycle Policy
 
-| CLI | 默认受管 provider | 兼容受管 provider | detect-only 历史来源 | 说明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `Claude Code` | `npm` | `native` | `brew` | 默认使用官方 npm 包（不锁版本，随升级命令取上游最新）；native installer 仅作为兼容 provider 保留。 |
-| `Codex` | `npm` | - | `brew` | 使用官方 npm 包；安装和升级命令不锁版本、始终取上游最新，历史 brew 安装只用于审计和迁移提示。 |
+| CLI | 默认受管 provider | 兼容受管 provider | 说明 |
+| :--- | :--- | :--- | :--- |
+| `Claude Code` | `native` | `npm`, `brew` | 新安装默认使用官方原生安装器（`curl -fsSL https://claude.ai/install.sh \| bash`，Windows 支持 PowerShell/CMD）；已有 `npm` 或 `brew` 来源沿用升级，不隐式迁移。 |
+| `Codex` | `native` | `npm`, `brew` | 新安装默认使用官方独立安装脚本（`curl -fsSL https://chatgpt.com/codex/install.sh \| sh`）；升级采用官方更新脚本；已有 `npm` 或 `brew` 来源沿用升级，不隐式迁移。Windows 不声明未核实支持。 |
 
 ## Agent 安装源依据 (Official Channels Catalog)
 
-下表列出上游公开安装渠道，但不等于 `agent-manager` 会默认或继续托管这些渠道；对 `Claude Code` 与 `Codex` 的实际受管策略以上一节为准。
+下表列出上游公开安装渠道，对 `Claude Code` 与 `Codex` 的实际受管策略以上一节为准。
 
-| 助手名称 | 二进制标识 | 官方 npm / 安装器 | Homebrew 官方源 (macOS) | 备注 |
-| :--- | :--- | :--- | :--- | :--- |
-| **Claude Code** | `claude` | `@anthropic-ai/claude-code` / 官方 native installer | `cask: claude-code` | 受管 lifecycle 默认走 npm（不锁版本）；`brew` 仅保留 detect-only 语义。 |
-| **Codex** | `codex` | `@openai/codex` | `cask: codex` | 受管 lifecycle 默认走 npm。 |
+| 助手名称 | 二进制标识 | 官方 native 安装器 / 升级 | 官方 npm | Homebrew 官方源 (macOS) | 备注 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Claude Code** | `claude` | `curl -fsSL https://claude.ai/install.sh \| bash` / `claude update` | `@anthropic-ai/claude-code` | `cask: claude-code` | 默认走官方 native 安装器；已有 npm/brew 安装沿用升级。 |
+| **Codex** | `codex` | `curl -fsSL https://chatgpt.com/codex/install.sh \| sh` / 官方安装脚本升级 | `@openai/codex` | `cask: codex` | 默认走官方 native 独立脚本；已有 npm/brew 安装沿用升级；Windows 不声明未核实支持。 |
 
 ## 核心健全性特性
 

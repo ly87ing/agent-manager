@@ -963,6 +963,87 @@ class ReconcileAgentTests(unittest.TestCase):
         run_cmd.assert_called_once_with("npm install -g @openai/codex@latest", timeout=300)
         self.assertTrue(any("升级失败" in line for line in logs.output), logs.output)
 
+    def test_default_native_provider_used_for_missing_agent_install(self):
+        lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
+        definition = lifecycle_agents["codex"]
+        policy = {"enabled": True, "auto_install": True}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", side_effect=[[], ["native"]]),
+            mock.patch.object(sync_agents, "run_cmd", return_value=(True, "installed successfully")) as run_cmd,
+            mock.patch("src.manage_runtime_probe.sys.platform", "darwin"),
+        ):
+            result = sync_agents.reconcile_agent("codex", definition, policy)
+
+        self.assertTrue(result)
+        run_cmd.assert_called_once_with(
+            "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh",
+            timeout=900,
+        )
+
+    def test_existing_npm_installation_upgrades_in_place_without_migrating_to_native(self):
+        lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
+        definition = lifecycle_agents["claude-code"]
+        # Policy does not specify preferred_provider, defaults to definition ("native")
+        policy = {"enabled": True, "auto_update": True}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", return_value=["npm"]),
+            mock.patch.object(sync_agents, "is_agent_installed", return_value=True),
+            mock.patch.object(sync_agents, "run_cmd", return_value=(True, "updated")) as run_cmd,
+        ):
+            result = sync_agents.reconcile_agent("claude-code", definition, policy)
+
+        self.assertTrue(result)
+        # Upgrades in-place via npm; does not call native installer or uninstall npm
+        run_cmd.assert_called_once_with("npm install -g @anthropic-ai/claude-code", timeout=300)
+
+    def test_existing_brew_installation_upgrades_in_place_without_migrating_to_native(self):
+        lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
+        definition = lifecycle_agents["codex"]
+        # Policy defaults to definition ("native")
+        policy = {"enabled": True, "auto_update": True}
+
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", return_value=["brew-cask"]),
+            mock.patch.object(sync_agents, "is_agent_installed", return_value=True),
+            mock.patch.object(sync_agents, "run_cmd", side_effect=[
+                (True, "codex 0.144.1 < 0.145.0"),  # outdated probe
+                (True, "brew upgraded"),             # upgrade cmd
+            ]) as run_cmd,
+        ):
+            result = sync_agents.reconcile_agent("codex", definition, policy)
+
+        self.assertTrue(result)
+        self.assertEqual(
+            run_cmd.mock_calls,
+            [
+                mock.call("brew outdated --cask codex", timeout=60),
+                mock.call("brew upgrade --cask codex", timeout=300),
+            ],
+        )
+
+    def test_codex_native_fails_closed_on_windows_without_unverified_script(self):
+        lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
+        codex_native = lifecycle_agents["codex"]["providers"]["native"]
+        # Verify Windows support is not claimed for codex native standalone
+        self.assertIsNone(sync_agents.resolve_provider_command(codex_native["install"], platform_name="windows"))
+        self.assertIsNone(sync_agents.resolve_provider_command(codex_native["upgrade"], platform_name="windows"))
+
+        policy = {"enabled": True, "auto_install": True, "preferred_provider": "native"}
+        with (
+            mock.patch.object(sync_agents, "detect_all_providers", return_value=[]),
+            mock.patch.object(sync_agents, "is_agent_installed", return_value=False),
+            mock.patch.object(sync_agents, "run_cmd") as run_cmd,
+            mock.patch("src.manage_runtime_probe.sys.platform", "win32"),
+            self.assertLogs(level="ERROR") as logs,
+        ):
+            result = sync_agents.reconcile_agent("codex", lifecycle_agents["codex"], policy)
+
+        self.assertFalse(result)
+        run_cmd.assert_not_called()
+        self.assertTrue(any("缺少 install 命令" in line for line in logs.output), logs.output)
+
 
 class PolicyOwnershipTests(unittest.TestCase):
     def test_direct_invocation_uses_repo_root_default_paths(self):
@@ -1221,13 +1302,14 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         self.assertTrue(manager["agents"]["claude-code"]["enabled"])
         self.assertTrue(manager["agents"]["claude-code"]["auto_install"])
         self.assertTrue(manager["agents"]["claude-code"]["auto_update"])
-        self.assertEqual(manager["agents"]["claude-code"]["preferred_provider"], "npm")
-        self.assertEqual(lifecycle_agents["claude-code"]["preferred_provider"], "npm")
+        # preferred_provider defaults to native per official CLI installer redesign
+        self.assertEqual(manager["agents"]["claude-code"]["preferred_provider"], "native")
+        self.assertEqual(lifecycle_agents["claude-code"]["preferred_provider"], "native")
         self.assertTrue(manager["agents"]["codex"]["enabled"])
         self.assertTrue(manager["agents"]["codex"]["auto_install"])
         self.assertTrue(manager["agents"]["codex"]["auto_update"])
-        self.assertEqual(manager["agents"]["codex"]["preferred_provider"], "npm")
-        self.assertEqual(lifecycle_agents["codex"]["preferred_provider"], "npm")
+        self.assertEqual(manager["agents"]["codex"]["preferred_provider"], "native")
+        self.assertEqual(lifecycle_agents["codex"]["preferred_provider"], "native")
 
         self.assertTrue(lifecycle_agents["claude-code"]["require_managed_provider"])
         self.assertTrue(lifecycle_agents["codex"]["require_managed_provider"])
@@ -1246,7 +1328,7 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         )
         self.assertEqual(claude_native["upgrade"], "claude update")
         self.assertEqual(claude_native["detect_paths"], ["~/.local/bin/claude"])
-        self.assertFalse(lifecycle_agents["claude-code"]["providers"]["brew"]["managed"])
+        self.assertTrue(lifecycle_agents["claude-code"]["providers"]["brew"]["managed"])
         claude_npm = lifecycle_agents["claude-code"]["providers"]["npm"]
         self.assertEqual(claude_npm["install"], "npm install -g @anthropic-ai/claude-code")
         self.assertEqual(claude_npm["install"], claude_npm["upgrade"])
@@ -1262,13 +1344,22 @@ class CommittedAgentPolicyTests(unittest.TestCase):
         self.assertNotIn("version_lock", codex_npm)
 
         codex_brew = lifecycle_agents["codex"]["providers"]["brew"]
-        self.assertFalse(codex_brew["managed"])
+        self.assertTrue(codex_brew["managed"])
         self.assertEqual(codex_brew["install"], "brew install --cask codex")
+        self.assertEqual(codex_brew["uninstall"], "brew uninstall --cask codex")
+        self.assertEqual(codex_brew["upgrade"], "brew upgrade --cask codex")
 
     def test_committed_agent_policy_keeps_native_updater_compatibility(self):
         lifecycle_agents = json.loads((ROOT / "config" / "agents.json").read_text(encoding="utf-8"))
 
         self.assertEqual(lifecycle_agents["claude-code"]["providers"]["native"]["upgrade"], "claude update")
+        self.assertEqual(
+            lifecycle_agents["codex"]["providers"]["native"]["upgrade"],
+            {
+                "darwin": "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh",
+                "linux": "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh",
+            },
+        )
         self.assertEqual(
             lifecycle_agents["codex"]["providers"]["npm"]["upgrade"],
             "npm install -g @openai/codex",

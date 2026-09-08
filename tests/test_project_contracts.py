@@ -195,11 +195,9 @@ class ProjectContractTests(unittest.TestCase):
     def test_readme_documents_official_cli_lifecycle_policy(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("按两个当前受管 Agent 的官方推荐方式维护", readme)
-        self.assertIn("仅用于识别并提示迁移", readme)
         self.assertIn("默认自动安装的 Agent 当前只包含 `Claude Code` 与 `Codex`", readme)
-        self.assertIn("`Claude Code` 与 `Codex` 默认走官方 npm 包，`config/agents.json` 中的安装/升级命令刻意不锁版本", readme)
-        self.assertIn("`Claude Code native` 仍作为兼容 provider 保留官方 install / update / uninstall 语义", readme)
-        self.assertIn("`Claude Code` 和 `Codex` 的 npm provider 使用 `config/agents.json` 中的命令模板", readme)
+        self.assertIn("`Claude Code` 与 `Codex` 默认走官方原生独立安装器（`native`）", readme)
+        self.assertIn("已有 `npm` 或 `brew` 来源沿用升级", readme)
         self.assertIn("`agent-manager` 不改写用户 shell profile", readme)
         self.assertIn("`Claude Code local install` 不纳入 `agent-manager` lifecycle 托管", readme)
 

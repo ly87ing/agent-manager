@@ -2,7 +2,7 @@
   "claude-code": {
     "display_name": "Claude Code",
     "bin": "claude",
-    "preferred_provider": "npm",
+    "preferred_provider": "native",
     "require_managed_provider": true,
     "providers": {
       "native": {
@@ -26,7 +26,7 @@
         "upgrade": "npm install -g @anthropic-ai/claude-code"
       },
       "brew": {
-        "managed": false,
+        "managed": true,
         "install": "brew install --cask claude-code",
         "uninstall": "brew uninstall --cask claude-code",
         "upgrade": "brew upgrade --cask claude-code"
@@ -46,7 +46,7 @@
   "codex": {
     "display_name": "Codex",
     "bin": "codex",
-    "preferred_provider": "npm",
+    "preferred_provider": "native",
     "require_managed_provider": true,
     "providers": {
       "native": {
@@ -58,7 +58,10 @@
         "uninstall": {
           "posix": "rm -f ~/.local/bin/codex ~/.local/bin/codex-code-mode-host && rm -rf ~/.codex/packages"
         },
-        "upgrade": "codex update",
+        "upgrade": {
+          "darwin": "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh",
+          "linux": "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh"
+        },
         "detect_paths": ["~/.local/bin/codex"]
       },
       "npm": {
@@ -68,8 +71,10 @@
         "upgrade": "npm install -g @openai/codex"
       },
       "brew": {
-        "managed": false,
-        "install": "brew install --cask codex"
+        "managed": true,
+        "install": "brew install --cask codex",
+        "uninstall": "brew uninstall --cask codex",
+        "upgrade": "brew upgrade --cask codex"
       }
     }
   }
