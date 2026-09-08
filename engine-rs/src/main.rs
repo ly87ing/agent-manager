@@ -24,7 +24,7 @@ use std::path::PathBuf;
 
 const KNOWN_DOMAINS: &[&str] = &[
     "agents", "mcp", "skills", "rules", "hooks", "tools", "aliases", "secrets", "profile", "policy",
-    "system", "runs", "snapshots", "sources",
+    "system", "runs", "snapshots", "sources", "db",
 ];
 
 const VALUE_FLAGS: &[&str] = &[
