@@ -35,6 +35,9 @@ from src.runtime_logging import configure_logging
 configure_logging()
 
 SUPPORTED_UNSUPPORTED_ACTIONS = {"install", "update", "uninstall", "repair"}
+EXPLICIT_ACTIONS = ("install", "upgrade", "uninstall")
+# 显式动作名 → unsupported_actions 定义中使用的内部动作名
+_EXPLICIT_ACTION_INTERNAL = {"install": "install", "upgrade": "update", "uninstall": "uninstall"}
 NETWORK_ERROR_MARKERS = (
     "ENOTFOUND",
     "ECONNREFUSED",
@@ -167,7 +170,7 @@ def list_async_states():
 
 
 def action_label(action):
-    return {"install": "安装", "update": "升级"}.get(action, action)
+    return {"install": "安装", "update": "升级", "uninstall": "卸载"}.get(action, action)
 
 
 def build_async_state(agent_id, label, action, command, log_path, payload_path, status, message, **extra):
@@ -497,6 +500,140 @@ def resolve_active_provider_variant(managed_actual, provider_key):
             return provider_name
     return provider_key
 
+
+def resolve_explicit_action(agent_id, definition, action, state=None):
+    """解析显式生命周期动作的实际 provider 与命令；计划与执行共用同一解析规则。
+
+    规则：安装只对未安装（不变相升级为 update）；升级/卸载只对唯一已检测的受管
+    实际来源（沿用来源，不按 preferred_provider 迁移）；多源或无受管来源拒绝；
+    缺命令或官方声明不支持（unsupported_actions）拒绝。显式动作不读 auto_install /
+    auto_update 策略，也不写 enabled。
+
+    state：调用方本次已探测的 classify 结果（含 all/managed 等键），传入则不再重复
+    探测；缺省自行探测（CLI/apply 路径）。不缓存跨请求状态。
+
+    返回 (provider, command)；不满足条件抛 ValueError。
+    """
+    if action not in _EXPLICIT_ACTION_INTERNAL:
+        raise ValueError(f"未知显式动作: {action!r}（可选值: {', '.join(EXPLICIT_ACTIONS)}）")
+    label = get_agent_display_name(agent_id, definition)
+    providers = definition.get("providers") or {}
+    if state is None:
+        state = detect_provider_state(definition.get("bin"), definition)
+    managed_actual = state["managed"]
+    is_installed = len(state["all"]) > 0
+
+    if action == "install":
+        if is_installed:
+            raise ValueError(
+                f"[AGENT: {label}] 已检测到安装（来源: {', '.join(state['all'])}），"
+                "显式安装拒绝执行且不会变为升级；如需升级请使用 upgrade。"
+            )
+        preferred = definition.get("preferred_provider")
+        if preferred:
+            if preferred not in providers:
+                raise ValueError(
+                    f"[AGENT: {label}] invalid preferred_provider='{preferred}'，可选值: {', '.join(sorted(providers)) or '无'}"
+                )
+            p_key = preferred
+        elif len(providers) == 1:
+            p_key = next(iter(providers))
+        else:
+            raise ValueError(
+                f"[AGENT: {label}] 未声明 preferred_provider 且存在多个 provider，无法确定安装方式。"
+            )
+        p_cfg = providers.get(p_key) or {}
+        unsupported_actions = get_unsupported_actions(p_cfg)
+        if action_is_officially_unsupported(p_cfg, "install", unsupported_actions):
+            raise ValueError(f"[AGENT: {label}] Provider '{p_key}' 官方当前未提供受管 install 动作。")
+        command = resolve_provider_command(p_cfg.get("install"))
+        if not command:
+            raise ValueError(f"[AGENT: {label}] Provider '{p_key}' 缺少 install 命令。")
+        return p_key, command
+
+    internal_action = _EXPLICIT_ACTION_INTERNAL[action]
+    if not is_installed:
+        raise ValueError(f"[AGENT: {label}] 未检测到安装，显式 {action} 拒绝执行。")
+    # 唯一来源要求覆盖全部检测桶：managed 之外再混有 system/unsupported/deprecated
+    # 同样是来源冲突，不能在冲突下执行升级/卸载。
+    if len(state["all"]) > 1:
+        raise ValueError(
+            f"[AGENT: {label}] 检测到多个安装来源（{', '.join(state['all'])}），"
+            f"显式 {action} 拒绝执行；请先选定唯一管理对象。"
+        )
+    if not managed_actual:
+        raise ValueError(
+            f"[AGENT: {label}] 检测到外部安装（来源: {', '.join(state['all'])}），"
+            f"无受管 Provider，显式 {action} 拒绝执行。"
+        )
+    provider = managed_actual[0]
+    p_key = canonical_provider_name(provider)
+    p_cfg = providers.get(p_key)
+    if p_cfg is None:
+        raise ValueError(f"[AGENT: {label}] Provider '{provider}' 未在定义中声明。")
+    unsupported_actions = get_unsupported_actions(p_cfg)
+    if action_is_officially_unsupported(p_cfg, internal_action, unsupported_actions):
+        raise ValueError(f"[AGENT: {label}] Provider '{provider}' 官方当前未提供受管 {internal_action} 动作。")
+    field = "upgrade" if action == "upgrade" else "uninstall"
+    command = resolve_provider_command(p_cfg.get(field))
+    if not command:
+        raise ValueError(f"[AGENT: {label}] Provider '{provider}' 缺少 {field} 命令。")
+    return provider, command
+
+
+def run_explicit_action(
+    agent_id,
+    definition,
+    action,
+    provider,
+    command,
+    *,
+    dry_run=False,
+    offline=False,
+    allow_uninstall=False,
+):
+    """执行 resolve_explicit_action 解析出的显式动作；dry-run 只解析不执行。"""
+    label = get_agent_display_name(agent_id, definition)
+    if action == "uninstall" and not allow_uninstall:
+        logging.error(f"[AGENT: {label}] 卸载是破坏性动作，需要 --allow-uninstall 确认。")
+        return False
+    if offline and action in ("install", "upgrade"):
+        if dry_run:
+            logging.info(f"[AGENT: {label}] (预览: 离线模式会阻止实际{action_label(_EXPLICIT_ACTION_INTERNAL[action])})")
+            return True
+        logging.error(f"[AGENT: {label}] 离线模式禁止实际{action_label(_EXPLICIT_ACTION_INTERNAL[action])}。")
+        return False
+    if dry_run:
+        logging.info(f"[AGENT: {label}] (预览: 计划通过 {provider} 执行 {command})")
+        return True
+
+    if action in ("install", "upgrade"):
+        timeout = INSTALL_CMD_TIMEOUT if action == "install" else 300
+        success, message, level = execute_managed_action(
+            agent_id,
+            definition,
+            label,
+            _EXPLICIT_ACTION_INTERNAL[action],
+            command,
+            timeout,
+        )
+        getattr(logging, level)(message)
+        return success
+
+    # uninstall：执行后复核受管来源必须消失；脚本退出 0 但安装仍存在判失败
+    success, out = run_cmd(command)
+    if not success:
+        logging.error(f"[AGENT: {label}] 从 {provider} 卸载失败: {out}")
+        return False
+    post_state = detect_provider_state(definition.get("bin"), definition)
+    if post_state["managed"]:
+        logging.error(
+            f"[AGENT: {label}] 卸载后复核失败：仍检测到受管 Provider: {', '.join(post_state['managed'])}。"
+        )
+        return False
+    logging.info(f"[AGENT: {label}] 从 {provider} 卸载成功。")
+    return True
+
 def reconcile_agent(
     agent_id,
     definition,
@@ -751,6 +888,8 @@ def main():
     parser.add_argument("--show-async-status", action="store_true", help="显示后台任务状态")
     parser.add_argument("--run-async-job", help=argparse.SUPPRESS)
     parser.add_argument("--only", action="append", default=[], help="仅针对指定 Agent（可重复；支持 agents:<id> 或 <id>）")
+    parser.add_argument("--action", choices=EXPLICIT_ACTIONS, help="显式生命周期动作：必须配合 --only 指定恰好一个 Agent；不受 auto_install/auto_update 限制，不写 enabled")
+    parser.add_argument("--allow-uninstall", action="store_true", help="确认允许 --action uninstall 的破坏性卸载")
     args = parser.parse_args()
 
     if args.run_async_job:
@@ -788,6 +927,33 @@ def main():
             logging.error(f"未知 Agent: {', '.join(unknown)}")
             sys.exit(2)
         def_cfg = {k: v for k, v in def_cfg.items() if k in target_agents}
+
+    if args.action:
+        # 显式动作分支：不进入旧收敛循环，不读 auto_* 策略，不写 enabled
+        if not args.only or len(def_cfg) != 1:
+            logging.error("显式动作必须用 --only 指定恰好一个已定义 Agent。")
+            sys.exit(2)
+        agent_id, definition = next(iter(def_cfg.items()))
+        # effective 策略的 preferred_provider 优先于定义默认值（engine 也可合成后传入）
+        policy = policy_cfg.get(agent_id, {})
+        if policy.get("preferred_provider"):
+            definition = {**definition, "preferred_provider": policy["preferred_provider"]}
+        try:
+            provider, command = resolve_explicit_action(agent_id, definition, args.action)
+        except ValueError as exc:
+            logging.error(str(exc))
+            sys.exit(1)
+        ok = run_explicit_action(
+            agent_id,
+            definition,
+            args.action,
+            provider,
+            command,
+            dry_run=args.dry_run,
+            offline=args.offline,
+            allow_uninstall=args.allow_uninstall,
+        )
+        sys.exit(0 if ok else 1)
 
     if args.offline:
         logging.info("离线模式：跳过更新检查")

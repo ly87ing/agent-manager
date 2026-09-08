@@ -1186,7 +1186,15 @@ case "$cmd" in
         # Phase 3 末 CI 全绿）。AGENT_MANAGER_ENGINE_RS 可显式指定 binary。
         # secrets/tools 域保持 Python（前者涉 secrets 仓库边界，后者归 lifecycle 线）。
         engine_cmd=("$PYTHON_CMD" "$ROOT_DIR/src/engine_v1.py")
-        if [[ "$cmd" == "mcp:status" || "$cmd" == "mcp:plan" || "$cmd" == "agents:status" || "$cmd" == "agents:plan" || "$cmd" == "skills:status" || "$cmd" == "skills:plan" || "$cmd" == "rules:status" || "$cmd" == "rules:plan" || "$cmd" == "hooks:status" || "$cmd" == "hooks:plan" || "$cmd" == "aliases:status" || "$cmd" == "aliases:plan" ]]; then
+        # --action 显式生命周期动作只有 Python 引擎实现；带 --action 的 agents:plan/apply 强制 Python 路由
+        has_explicit_action=false
+        for cmd_arg in ${CMD_ARGS[@]+"${CMD_ARGS[@]}"}; do
+            if [[ "$cmd_arg" == "--action" ]]; then
+                has_explicit_action=true
+                break
+            fi
+        done
+        if [[ "$has_explicit_action" == false && ( "$cmd" == "mcp:status" || "$cmd" == "mcp:plan" || "$cmd" == "agents:status" || "$cmd" == "agents:plan" || "$cmd" == "skills:status" || "$cmd" == "skills:plan" || "$cmd" == "rules:status" || "$cmd" == "rules:plan" || "$cmd" == "hooks:status" || "$cmd" == "hooks:plan" || "$cmd" == "aliases:status" || "$cmd" == "aliases:plan" ) ]]; then
             rust_engine=""
             if [ -n "${AGENT_MANAGER_ENGINE_RS:-}" ] && [ -x "${AGENT_MANAGER_ENGINE_RS}" ]; then
                 rust_engine="$AGENT_MANAGER_ENGINE_RS"

@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -740,9 +741,21 @@ class EngineDomainSliceTests(unittest.TestCase):
         ok = elements["agents:fake-ok"]
         self.assertEqual(ok["observed"]["providers"], ["npm"])
         self.assertTrue(ok["observed"]["installed"])
-        self.assertEqual([a["id"] for a in ok["actions"]], ["upgrade", "uninstall"])
+        # 动作按可执行性产生（与 resolve_explicit_action 同一规则）：fake-ok 的 npm provider
+        # 只有 install/detect_paths，没有当前平台有效的 upgrade/uninstall 命令，旧期望
+        # ["upgrade", "uninstall"] 展示了实际不可执行的动作，是错误契约。
+        self.assertEqual(ok["actions"], [])
         self.assertEqual([a["id"] for a in elements["agents:fake-missing"]["actions"]], ["install"])
-        self.assertEqual(elements["agents:fake-disabled"]["actions"], [])
+        # 已停用且未安装、但有有效 install 命令：显式安装不依赖 enabled，应提供 install
+        #（旧期望 [] 让保存后的新定义/已停用定义没有任何安装入口）。
+        self.assertEqual(
+            [a["id"] for a in elements["agents:fake-disabled"]["actions"]], ["install"]
+        )
+        # drifted（禁用但仍安装）来源无 upgrade/uninstall 命令 → 不提供不可执行动作。
+        self.assertEqual(elements["agents:fake-leftover"]["actions"], [])
+        # 未声明来源（deprecated/外部）不受管 → 无任何显式动作。
+        self.assertEqual(elements["agents:fake-undeclared"]["actions"], [])
+        self.assertEqual(elements["agents:fake-external"]["actions"], [])
         self.assertEqual(ok["policy"]["preferred_provider"], "npm")
         self.assertTrue(ok["policy"]["declared_in_policy"])
         self.assertFalse(elements["agents:fake-undeclared"]["policy"]["declared_in_policy"])
@@ -1762,6 +1775,389 @@ class EngineDomainSliceTests(unittest.TestCase):
         self.assertEqual(pulls[0]["risk"], "network")
         self.assertIn("bbb222", pulls[0]["note"])
         self.assertEqual(payload["data"]["summary"]["network"], 1)
+
+
+class EngineExplicitActionTests(unittest.TestCase):
+    """agents:plan/apply --action 显式生命周期动作（Python 引擎直调，全隔离 env）。
+
+    不走 manage.sh 的 repo 复制沙盒：直接以临时 config/def-file 调用 src/engine_v1.py，
+    HOME/PATH/数据目录/本地策略层/快照/上游缓存全部指向临时目录。
+    """
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="agent_manager_explicit_action_test_"))
+        self.addCleanup(shutil.rmtree, self.temp_dir, ignore_errors=True)
+        self.bindir = self.temp_dir / "bin"
+        self.bindir.mkdir()
+        self.bin_path = self.bindir / "engagent"
+        self.marker_install = self.temp_dir / "install.ran"
+        self.marker_upgrade = self.temp_dir / "upgrade.ran"
+        self.marker_uninstall = self.temp_dir / "uninstall.ran"
+        self.local_config = self.temp_dir / "manager.local.json"
+        self.data_dir = self.temp_dir / "data"
+
+        self._write_script(
+            "install.sh",
+            "printf '#!/bin/sh\\necho 1.0.0\\n' > %s\nchmod +x %s\ntouch %s"
+            % (self.bin_path, self.bin_path, self.marker_install),
+        )
+        self._write_script("upgrade.sh", "touch %s" % self.marker_upgrade)
+        self._write_script("uninstall.sh", "rm -f %s\ntouch %s" % (self.bin_path, self.marker_uninstall))
+
+        self.def_data = {
+            "engagent": {
+                "display_name": "Engine Agent",
+                "bin": "engagent",
+                "preferred_provider": "custom",
+                "providers": {
+                    "custom": {
+                        "managed": True,
+                        "install": str(self.temp_dir / "install.sh"),
+                        "upgrade": str(self.temp_dir / "upgrade.sh"),
+                        "uninstall": str(self.temp_dir / "uninstall.sh"),
+                    }
+                },
+            },
+            "otheragent": {
+                "display_name": "Other Agent",
+                "bin": "otheragent",
+                "preferred_provider": "custom",
+                "providers": {"custom": {"managed": True, "install": "true"}},
+            },
+        }
+        self.def_file = self.temp_dir / "agents.json"
+        self.def_file.write_text(json.dumps(self.def_data), encoding="utf-8")
+        self.config_file = self.temp_dir / "manager.json"
+        self.config_file.write_text(json.dumps({"agents": {}}), encoding="utf-8")
+
+    def _write_script(self, name, body):
+        path = self.temp_dir / name
+        path.write_text("#!/bin/sh\n%s\n" % body, encoding="utf-8")
+        path.chmod(0o755)
+
+    def _env(self):
+        env = os.environ.copy()
+        env["HOME"] = str(self.temp_dir)
+        env["PATH"] = os.pathsep.join([str(self.bindir), "/usr/bin", "/bin"])
+        env["AGENT_MANAGER_LOCAL_CONFIG"] = str(self.local_config)
+        env["AGENT_MANAGER_SYNCED_CONFIG"] = str(self.temp_dir / "manager.synced.json")
+        env["AGENT_MANAGER_DATA_DIR"] = str(self.data_dir)
+        env["AGENT_MANAGER_SNAPSHOT_DIR"] = str(self.temp_dir / "snapshots")
+        env["AGENT_MANAGER_UPSTREAM_CACHE"] = str(self.temp_dir / "upstream-cache.json")
+        return env
+
+    def _run(self, *args):
+        return subprocess.run(
+            [sys.executable, str(ROOT / "src" / "engine_v1.py"), *args, "--json",
+             "--config", str(self.config_file), "--def-file", str(self.def_file),
+             # 同步器子进程沿用当前已知可用 runtime，不依赖窄 PATH 里的系统 python3
+             "--python-cmd", sys.executable],
+            env=self._env(),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+    def _payload(self, *args, expect_exit=0):
+        result = self._run(*args)
+        self.assertEqual(result.returncode, expect_exit, result.stdout + result.stderr)
+        return json.loads(result.stdout)
+
+    def _read_local_policy(self):
+        if not self.local_config.exists():
+            return {}
+        return json.loads(self.local_config.read_text(encoding="utf-8"))
+
+    def test_plan_install_returns_real_command_and_writes_nothing(self):
+        payload = self._payload("agents:plan", "--only", "agents:engagent", "--action", "install")
+        actions = payload["data"]["actions"]
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["op"], "install")
+        self.assertEqual(actions[0]["cmd"], str(self.temp_dir / "install.sh"))
+        self.assertEqual(actions[0]["risk"], "install-remove")
+        # plan 零策略写入、零 DB
+        self.assertFalse(self.local_config.exists())
+        self.assertFalse((self.data_dir / "manager.db").exists())
+
+    def test_apply_dry_run_zero_shell_zero_policy_zero_db(self):
+        payload = self._payload(
+            "agents:apply", "--only", "agents:engagent", "--action", "install", "--dry-run"
+        )
+        self.assertTrue(payload["data"]["dry_run"])
+        self.assertFalse(self.bin_path.exists())
+        self.assertFalse(self.marker_install.exists())
+        self.assertFalse(self.local_config.exists())
+        self.assertFalse((self.data_dir / "manager.db").exists())
+
+    def test_apply_install_saves_enabled_only_after_verified_success(self):
+        payload = self._payload("agents:apply", "--only", "agents:engagent", "--action", "install")
+        self.assertTrue(payload["data"]["steps"][0]["ok"])
+        self.assertTrue(self.bin_path.exists())
+        policy = self._read_local_policy()
+        self.assertEqual(policy.get("agents", {}).get("engagent", {}).get("enabled"), True)
+        # 另一 Agent 不受影响
+        self.assertNotIn("otheragent", policy.get("agents", {}))
+
+    def test_apply_upgrade_does_not_touch_enabled(self):
+        self._payload("agents:apply", "--only", "agents:engagent", "--action", "install")
+        self._payload("agents:apply", "--only", "agents:engagent", "--action", "upgrade")
+        self.assertTrue(self.marker_upgrade.exists())
+        self.assertFalse(self.marker_uninstall.exists())
+        policy = self._read_local_policy()
+        self.assertEqual(policy["agents"]["engagent"]["enabled"], True)
+
+    def test_apply_uninstall_requires_flag_then_saves_enabled_false(self):
+        self._payload("agents:apply", "--only", "agents:engagent", "--action", "install")
+
+        denied = self._run("agents:apply", "--only", "agents:engagent", "--action", "uninstall")
+        self.assertEqual(denied.returncode, 2, denied.stdout + denied.stderr)
+        self.assertIn("--allow-uninstall", denied.stderr)
+        self.assertTrue(self.bin_path.exists())
+
+        self._payload(
+            "agents:apply", "--only", "agents:engagent", "--action", "uninstall", "--allow-uninstall"
+        )
+        self.assertFalse(self.bin_path.exists())
+        policy = self._read_local_policy()
+        self.assertEqual(policy["agents"]["engagent"]["enabled"], False)
+
+    def test_failed_install_does_not_save_enabled(self):
+        self._write_script("install.sh", "echo boom >&2\nexit 1")
+        result = self._run("agents:apply", "--only", "agents:engagent", "--action", "install")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertFalse(self.bin_path.exists())
+        self.assertNotIn("engagent", self._read_local_policy().get("agents", {}))
+
+    def test_status_actions_follow_executability(self):
+        # 未声明 policy 的新定义：未安装 → 只有 install
+        payload = self._payload("agents:status")
+        element = next(e for e in payload["data"]["elements"] if e["id"] == "agents:engagent")
+        self.assertEqual([a["id"] for a in element["actions"]], ["install"])
+
+        # 唯一受管来源已安装 → upgrade + uninstall，无 install
+        self._payload("agents:apply", "--only", "agents:engagent", "--action", "install")
+        payload = self._payload("agents:status")
+        element = next(e for e in payload["data"]["elements"] if e["id"] == "agents:engagent")
+        self.assertEqual([a["id"] for a in element["actions"]], ["upgrade", "uninstall"])
+
+        # 缺卸载命令 → 不提供可执行卸载
+        self.def_data["engagent"]["providers"]["custom"].pop("uninstall")
+        self.def_file.write_text(json.dumps(self.def_data), encoding="utf-8")
+        payload = self._payload("agents:status")
+        element = next(e for e in payload["data"]["elements"] if e["id"] == "agents:engagent")
+        self.assertEqual([a["id"] for a in element["actions"]], ["upgrade"])
+
+    def test_action_rejects_multi_only_and_unknown_agent(self):
+        multi = self._run("agents:plan", "--only", "agents:engagent", "--only", "agents:otheragent", "--action", "install")
+        self.assertEqual(multi.returncode, 2, multi.stdout + multi.stderr)
+        unknown = self._run("agents:plan", "--only", "agents:ghost", "--action", "install")
+        self.assertEqual(unknown.returncode, 2, unknown.stdout + unknown.stderr)
+        wrong_domain = self._run("mcp:plan", "--only", "mcp:x", "--action", "install")
+        self.assertEqual(wrong_domain.returncode, 2, wrong_domain.stdout + wrong_domain.stderr)
+
+
+class ManageExplicitActionTests(unittest.TestCase):
+    """manage.sh 真实链路：agents:plan/apply --action（含 SQLite 激活后的 enabled 保存）。
+
+    沙盒复制仓库（同 EngineCliTests），HOME/数据目录/锁/日志全部隔离；
+    PATH 以 stub bin + 当前已知可用 Python 优先（窄 PATH 的系统 python3 有已知 WAL bug）。
+    """
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="agent_manager_manage_action_test_"))
+        self.addCleanup(shutil.rmtree, self.temp_dir, ignore_errors=True)
+        self.repo = self.temp_dir / "repo"
+        self.home = self.temp_dir / "home"
+        self.home.mkdir()
+        shutil.copytree(ROOT, self.repo, ignore=COPY_IGNORE)
+        for name in ("manager.local.json", "manager.synced.json"):
+            (self.repo / "config" / name).unlink(missing_ok=True)
+        self.bindir = self.temp_dir / "bin"
+        self.bindir.mkdir()
+        self.bin_path = self.bindir / "engagent"
+        self.marker_install = self.temp_dir / "install.ran"
+        self.marker_upgrade = self.temp_dir / "upgrade.ran"
+        self.marker_uninstall = self.temp_dir / "uninstall.ran"
+        self.db_path = self.home / "data" / "manager.db"
+        self.local_config = self.repo / "config" / "manager.local.json"
+        self._write_configs()
+
+    # ------------------------------------------------------------------ helpers
+
+    def _write_script(self, name, body):
+        path = self.temp_dir / name
+        path.write_text("#!/bin/sh\n%s\n" % body, encoding="utf-8")
+        path.chmod(0o755)
+
+    def _write_configs(self):
+        self._write_script(
+            "install.sh",
+            "printf '#!/bin/sh\\necho 1.0.0\\n' > %s\nchmod +x %s\ntouch %s"
+            % (self.bin_path, self.bin_path, self.marker_install),
+        )
+        self._write_script("upgrade.sh", "touch %s" % self.marker_upgrade)
+        self._write_script("uninstall.sh", "rm -f %s\ntouch %s" % (self.bin_path, self.marker_uninstall))
+        agents_def = {
+            "engagent": {
+                "display_name": "Engine Agent",
+                "bin": "engagent",
+                "preferred_provider": "custom",
+                "providers": {
+                    "custom": {
+                        "managed": True,
+                        "install": str(self.temp_dir / "install.sh"),
+                        "upgrade": str(self.temp_dir / "upgrade.sh"),
+                        "uninstall": str(self.temp_dir / "uninstall.sh"),
+                    }
+                },
+            },
+            "otheragent": {
+                "display_name": "Other Agent",
+                "bin": "otheragent",
+                "preferred_provider": "custom",
+                "providers": {"custom": {"managed": True, "install": "true"}},
+            },
+        }
+        (self.repo / "config" / "agents.json").write_text(json.dumps(agents_def), encoding="utf-8")
+        (self.repo / "config" / "manager.json").write_text(
+            json.dumps({"agents": {}, "tools": {}, "skills": {}, "mcp": {}}), encoding="utf-8"
+        )
+        (self.repo / "config" / "mcp.json").write_text(
+            json.dumps({"servers": {}, "agent_paths": {}}), encoding="utf-8"
+        )
+
+    def _env(self):
+        env = os.environ.copy()
+        env["HOME"] = str(self.home)
+        env["AGENT_MANAGER_DATA_DIR"] = str(self.home / "data")
+        env["AGENT_MANAGER_LOCK_FILE"] = str(self.temp_dir / "agent_manager.lock")
+        env["AGENT_MANAGER_LOG_PREFIX"] = str(self.temp_dir / "agent_manager_sync")
+        env["AGENT_MANAGER_SNAPSHOT_DIR"] = str(self.temp_dir / "snapshots")
+        env["AGENT_MANAGER_UPSTREAM_CACHE"] = str(self.temp_dir / "upstream-cache.json")
+        # stub bin + 当前 runtime 的 python3 优先，避开窄 PATH 系统 Python 的已知 WAL bug
+        env["PATH"] = os.pathsep.join(
+            [str(self.bindir), str(Path(sys.executable).parent), "/usr/bin", "/bin"]
+        )
+        return env
+
+    def _run(self, *argv):
+        return subprocess.run(
+            [str(self.repo / "manage.sh"), *argv],
+            cwd=self.repo,
+            env=self._env(),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=180,
+        )
+
+    def _payload(self, *argv, expect_exit=0):
+        result = self._run(*argv)
+        self.assertEqual(result.returncode, expect_exit, result.stdout + result.stderr)
+        return json.loads(result.stdout)
+
+    def _db_enabled(self, agent_id):
+        import sqlite3
+
+        conn = sqlite3.connect(str(self.db_path))
+        try:
+            row = conn.execute(
+                "SELECT value_json FROM policy_entries WHERE key = ?", ("agents",)
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        doc = json.loads(row[0])
+        return doc.get(agent_id, {}).get("enabled")
+
+    def _db_dump(self):
+        import sqlite3
+
+        conn = sqlite3.connect(str(self.db_path))
+        try:
+            return "\n".join(conn.iterdump())
+        finally:
+            conn.close()
+
+    # ------------------------------------------------------------------ tests
+
+    def test_plan_and_apply_dry_run_create_no_db_no_policy_no_shell(self):
+        payload = self._payload("agents:plan", "--json", "--only", "agents:engagent", "--action", "install")
+        actions = payload["data"]["actions"]
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["op"], "install")
+        self.assertEqual(actions[0]["cmd"], str(self.temp_dir / "install.sh"))
+        self.assertFalse(self.db_path.exists())
+        self.assertFalse(self.local_config.exists())
+
+        self._payload("agents:apply", "--json", "--only", "agents:engagent", "--action", "install", "--dry-run")
+        self.assertFalse(self.db_path.exists())
+        self.assertFalse(self.local_config.exists())
+        self.assertFalse(self.bin_path.exists())
+        self.assertFalse(self.marker_install.exists())
+
+    def test_manage_routes_action_plan_to_python_not_rust_stub(self):
+        stub = self.repo / "engine-rs" / "target" / "debug" / "agent-manager-engine"
+        stub.parent.mkdir(parents=True, exist_ok=True)
+        stub.write_text("#!/bin/sh\necho STUB-RUST-ENGINE >&2\nexit 3\n", encoding="utf-8")
+        stub.chmod(0o755)
+
+        plain = self._run("agents:plan", "--json", "--only", "agents:engagent")
+        self.assertIn("STUB-RUST-ENGINE", plain.stderr)
+
+        explicit = self._run("agents:plan", "--json", "--only", "agents:engagent", "--action", "install")
+        self.assertNotIn("STUB-RUST-ENGINE", explicit.stderr)
+        self.assertEqual(explicit.returncode, 0, explicit.stdout + explicit.stderr)
+
+    def test_real_actions_with_db_enabled_lifecycle(self):
+        manager_bytes = (self.repo / "config" / "manager.json").read_bytes()
+        self._payload("db:migrate", "--json")
+        self.assertTrue(self.db_path.exists())
+
+        # install → 复核通过后 DB enabled=true；原 JSON 逐字节不变；不落 local 层文件
+        self._payload("agents:apply", "--json", "--only", "agents:engagent", "--action", "install")
+        self.assertTrue(self.bin_path.exists())
+        self.assertEqual(self._db_enabled("engagent"), True)
+        self.assertIsNone(self._db_enabled("otheragent"))
+        self.assertEqual((self.repo / "config" / "manager.json").read_bytes(), manager_bytes)
+        self.assertFalse(self.local_config.exists())
+
+        # upgrade → enabled 不变
+        self._payload("agents:apply", "--json", "--only", "agents:engagent", "--action", "upgrade")
+        self.assertTrue(self.marker_upgrade.exists())
+        self.assertEqual(self._db_enabled("engagent"), True)
+
+        # uninstall 缺 --allow-uninstall → 拒绝且 bin 保留
+        denied = self._run("agents:apply", "--json", "--only", "agents:engagent", "--action", "uninstall")
+        self.assertEqual(denied.returncode, 2, denied.stdout + denied.stderr)
+        self.assertTrue(self.bin_path.exists())
+
+        # uninstall → DB enabled=false
+        self._payload(
+            "agents:apply", "--json", "--only", "agents:engagent", "--action", "uninstall", "--allow-uninstall"
+        )
+        self.assertFalse(self.bin_path.exists())
+        self.assertEqual(self._db_enabled("engagent"), False)
+
+    def test_failed_install_keeps_db_and_dry_run_dump_stable(self):
+        self._payload("db:migrate", "--json")
+        # 预置 enabled=true，随后 install 失败必须保持原值
+        self._payload(
+            "policy:set", "--json", "--layer", "local", "--key", "agents.engagent.enabled", "--value", "true"
+        )
+        self._write_script("install.sh", "echo boom >&2\nexit 1")
+        failed = self._run("agents:apply", "--json", "--only", "agents:engagent", "--action", "install")
+        self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+        self.assertEqual(self._db_enabled("engagent"), True)
+        self.assertFalse(self.bin_path.exists())
+
+        # 已有库上的 dry-run：整库 iterdump 逐字节不变
+        before = self._db_dump()
+        self._payload(
+            "agents:apply", "--json", "--only", "agents:engagent", "--action", "install", "--dry-run"
+        )
+        self.assertEqual(self._db_dump(), before)
 
 
 if __name__ == "__main__":

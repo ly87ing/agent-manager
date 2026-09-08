@@ -47,6 +47,8 @@ Windows 平台支持：`Claude Code` 支持原生 Windows（PowerShell / CMD）�
 
 桌面端“添加助手”可直接填写名称、命令路径、安装和升级命令，卸载命令可选；高级选项支持分别编辑各系统命令。已有助手通过“编辑命令”修改，保存不会自动安装或升级，取消表单不写配置。助手列表区分当前与默认安装方式；安装、升级、卸载使用明确动作按钮。
 
+显式动作使用 `./manage.sh agents:plan --only agents:YOUR_AGENT --action install --json` 预览，将 `plan` 换为 `apply` 执行；动作可选 `install`、`upgrade`、`uninstall`，卸载还需 `--allow-uninstall`。`--dry-run` 不运行安装脚本或修改策略。安装只用于未安装的助手；升级和卸载要求唯一、受管的实际来源及有效命令，不会把安装请求自动变成升级。成功安装或卸载并复核后才保存启用状态，失败不预先改策略；升级保留原启用状态。外部安装、多个来源或缺少对应命令时不提供不可执行的按钮。
+
 ## Official CLI Lifecycle Policy
 
 | CLI | 默认受管 provider | 兼容受管 provider | 说明 |

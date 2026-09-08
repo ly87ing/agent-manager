@@ -22,13 +22,79 @@ fn action_json(template: &str) -> Value {
     serde_json::from_str(template).unwrap()
 }
 
-fn actions_for_state(state: &str) -> Vec<Value> {
-    match state {
-        "missing" => vec![action_json(AGENT_INSTALL_ACTION)],
-        "managed-ok" | "drifted" => vec![action_json(AGENT_UPGRADE_ACTION), action_json(AGENT_UNINSTALL_ACTION)],
-        "unmanaged-detected" => vec![action_json(AGENT_INSTALL_ACTION), action_json(AGENT_UNINSTALL_ACTION)],
-        _ => vec![],
+/// 显式动作可用性：与 sync_agents.resolve_explicit_action 同一判定规则（可执行才展示）。
+/// install 仅未安装且 preferred/唯一 provider 有当前平台有效命令；upgrade/uninstall
+/// 仅唯一已检测来源且受管，缺命令或官方声明不支持不显示。
+fn available_actions(
+    definition: &Map<String, Value>,
+    policy_preferred: Option<&str>,
+    detected: &[String],
+    classified: &providers::Classified,
+) -> Vec<Value> {
+    let mut actions = Vec::new();
+    let provider_defs = definition.get("providers").and_then(Value::as_object);
+
+    if detected.is_empty() {
+        let installable = (|| {
+            let defs = provider_defs?;
+            let effective_preferred =
+                policy_preferred.or_else(|| definition.get("preferred_provider").and_then(Value::as_str));
+            let key = match effective_preferred {
+                Some(name) => {
+                    if !defs.contains_key(name) {
+                        return None;
+                    }
+                    name
+                }
+                None => {
+                    if defs.len() == 1 {
+                        defs.keys().next().map(String::as_str)?
+                    } else {
+                        return None;
+                    }
+                }
+            };
+            let cfg = defs.get(key)?;
+            let unsupported = providers::get_unsupported_actions(Some(cfg)).ok()?;
+            if unsupported.contains("install") {
+                return None;
+            }
+            providers::resolve_provider_command(cfg.get("install")?)
+        })();
+        if installable.is_some() {
+            actions.push(action_json(AGENT_INSTALL_ACTION));
+        }
     }
+
+    if detected.len() == 1 && classified.managed.len() == 1 {
+        let key = providers::canonical_provider_name(&classified.managed[0]);
+        if let Some(cfg) = provider_defs.and_then(|defs| defs.get(key)) {
+            // fail-closed：unsupported_actions 配置非法时视为全部不支持（与 Python resolve 抛错一致）
+            let unsupported = match providers::get_unsupported_actions(Some(cfg)) {
+                Ok(actions) => actions,
+                Err(_) => return actions,
+            };
+            // upgrade 对应 unsupported_actions 的内部动作名 update（与 Python 侧一致）
+            if !unsupported.contains("update")
+                && cfg
+                    .get("upgrade")
+                    .and_then(|v| providers::resolve_provider_command(v))
+                    .is_some()
+            {
+                actions.push(action_json(AGENT_UPGRADE_ACTION));
+            }
+            if !unsupported.contains("uninstall")
+                && cfg
+                    .get("uninstall")
+                    .and_then(|v| providers::resolve_provider_command(v))
+                    .is_some()
+            {
+                actions.push(action_json(AGENT_UNINSTALL_ACTION));
+            }
+        }
+    }
+
+    actions
 }
 
 struct Diagnostics<'a> {
@@ -283,6 +349,16 @@ pub fn build_agents_status(
         observed.insert("installed".to_string(), Value::Bool(installed));
         observed.insert("preferred_active".to_string(), Value::Bool(preferred_active));
 
+        let actions = available_actions(
+            &definition,
+            policy
+                .as_ref()
+                .and_then(|p| p.get("preferred_provider"))
+                .and_then(Value::as_str),
+            &detected,
+            &classified,
+        );
+
         let mut element = Map::new();
         element.insert("id".to_string(), Value::String(element_id));
         element.insert("domain".to_string(), Value::String("agents".to_string()));
@@ -291,10 +367,7 @@ pub fn build_agents_status(
         element.insert("observed".to_string(), Value::Object(observed));
         element.insert("state".to_string(), Value::String(state.to_string()));
         element.insert("freshness".to_string(), freshness);
-        element.insert(
-            "actions".to_string(),
-            Value::Array(actions_for_state(state)),
-        );
+        element.insert("actions".to_string(), Value::Array(actions));
         elements.push(Value::Object(element));
     }
 
@@ -593,5 +666,98 @@ mod tests {
         assert_eq!(state, "unsupported");
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].code, "AGENT_PROVIDER_UNSUPPORTED");
+    }
+
+    // ---- available_actions（与 sync_agents.resolve_explicit_action 同一判定规则） ----
+
+    fn action_ids(actions: &[Value]) -> Vec<String> {
+        actions.iter().map(|a| a["id"].as_str().unwrap().to_string()).collect()
+    }
+
+    fn custom_definition() -> serde_json::Map<String, Value> {
+        json!({
+            "bin": "myagent",
+            "preferred_provider": "custom",
+            "providers": {"custom": {"managed": true, "install": "install.sh", "upgrade": "upgrade.sh", "uninstall": "uninstall.sh"}}
+        })
+        .as_object()
+        .unwrap()
+        .clone()
+    }
+
+    #[test]
+    fn available_actions_install_only_when_not_installed_and_resolvable() {
+        let def = custom_definition();
+        let none_detected: Vec<String> = vec![];
+        let empty = providers::Classified::default();
+        // 未安装 + 有效 install 命令（未声明 policy）→ install
+        assert_eq!(action_ids(&available_actions(&def, None, &none_detected, &empty)), vec!["install"]);
+
+        // 已安装（唯一受管来源）→ 无 install，有 upgrade/uninstall
+        let detected = vec!["custom".to_string()];
+        let managed = providers::Classified { managed: detected.clone(), ..Default::default() };
+        assert_eq!(
+            action_ids(&available_actions(&def, None, &detected, &managed)),
+            vec!["upgrade", "uninstall"]
+        );
+
+        // preferred 指向未声明 provider → 无 install
+        let mut bad = custom_definition();
+        bad.insert("preferred_provider".to_string(), json!("ghost"));
+        assert!(available_actions(&bad, None, &none_detected, &empty).is_empty());
+    }
+
+    #[test]
+    fn available_actions_hide_uninstall_without_command_and_refuse_multi_source() {
+        let mut def = custom_definition();
+        def["providers"]["custom"].as_object_mut().unwrap().remove("uninstall");
+        let detected = vec!["custom".to_string()];
+        let managed = providers::Classified { managed: detected.clone(), ..Default::default() };
+        assert_eq!(action_ids(&available_actions(&def, None, &detected, &managed)), vec!["upgrade"]);
+
+        // managed + system 混合来源冲突 → 全部不可执行
+        let mixed = vec!["custom".to_string(), "system".to_string()];
+        let mixed_classified = providers::Classified {
+            managed: vec!["custom".to_string()],
+            system_only: vec!["system".to_string()],
+            ..Default::default()
+        };
+        assert!(available_actions(&custom_definition(), None, &mixed, &mixed_classified).is_empty());
+
+        // 纯外部来源 → 无动作
+        let external = vec!["system".to_string()];
+        let system_only = providers::Classified { system_only: external.clone(), ..Default::default() };
+        assert!(available_actions(&custom_definition(), None, &external, &system_only).is_empty());
+    }
+
+    #[test]
+    fn available_actions_fail_closed_on_invalid_unsupported_actions() {
+        let mut def = custom_definition();
+        def["providers"]["custom"]
+            .as_object_mut()
+            .unwrap()
+            .insert("unsupported_actions".to_string(), json!("not-a-list"));
+        let detected = vec!["custom".to_string()];
+        let managed = providers::Classified { managed: detected.clone(), ..Default::default() };
+        assert!(available_actions(&def, None, &detected, &managed).is_empty());
+    }
+
+    #[test]
+    fn available_actions_respect_policy_preferred_override() {
+        let def = json!({
+            "bin": "myagent",
+            "preferred_provider": "custom",
+            "providers": {
+                "custom": {"managed": true, "install": "install-a.sh"},
+                "custom2": {"managed": true, "install": "install-b.sh"}
+            }
+        });
+        let def = def.as_object().unwrap();
+        let none_detected: Vec<String> = vec![];
+        let empty = providers::Classified::default();
+        // 定义默认指向 custom；策略覆盖为 ghost（未声明）→ 无 install
+        assert!(available_actions(&def, Some("ghost"), &none_detected, &empty).is_empty());
+        // 策略覆盖为 custom2 → install 可用
+        assert_eq!(action_ids(&available_actions(&def, Some("custom2"), &none_detected, &empty)), vec!["install"]);
     }
 }

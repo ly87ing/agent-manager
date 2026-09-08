@@ -12,9 +12,6 @@ import type { AgentsObserved, AgentsPolicy, AgentsSpec } from "../lib/observed";
 import { useEngineQuery, useOfflineMode } from "../lib/queries";
 import { useExecuteApply, usePlanPreview } from "../lib/usePlanPreview";
 import { cn } from "../lib/utils";
-import { runEngine } from "../lib/engine";
-import { getDefaultPolicyLayer } from "../lib/policyLayer";
-import { toast } from "sonner";
 
 /** agents 动作按钮文案/样式（离线可用性由 actions[].offline_ok 驱动，引擎是事实源）。 */
 const ACTION_META: Record<string, { label: string; icon: typeof Download; className: string }> = {
@@ -60,25 +57,20 @@ function AgentCard({ element, onEdit, onRemove }: { element: EngineElement; onEd
   const version = installed ? (element.freshness.current ?? "已安装（还没检查过版本）") : "未安装";
   const name = spec.display_name ?? element.id;
 
-  /** 动作 → plan 预览（按元素范围）→ agents:apply（按元素范围；含卸载时引擎要求 --allow-uninstall）。 */
-  const openAction = async (action: ElementAction) => {
+  /** 显式动作 → plan 预览（带 --action）→ agents:apply；预览/取消零策略写入。 */
+  const openAction = (action: ElementAction) => {
     const isDestructive = action.id === "uninstall" || action.id === "install";
-    if (isDestructive) {
-      try {
-        const result = await runEngine("policy:set", ["--layer", getDefaultPolicyLayer(), "--key", `agents.${element.id.replace(/^agents:/, "")}.enabled`, "--value", action.id === "uninstall" ? "false" : "true"]);
-        if (!result.ok) throw new Error(result.errors[0]?.message ?? "保存失败");
-      } catch (err) { toast.error(String(err)); return; }
-    }
+    const label = ACTION_META[action.id]?.label ?? action.id;
     preview.open({
-      title: `${ACTION_META[action.id]?.label ?? action.id} ${name}`,
-      subtitle: `仅针对此助手执行操作（执行前自动备份）。`,
-      planCommands: [{ command: "agents:plan", args: ["--only", element.id] }],
+      title: `${label} ${name}`,
+      subtitle: "仅针对此助手执行操作；命令以你的权限运行，结果不能自动撤销。",
+      planCommands: [{ command: "agents:plan", args: ["--only", element.id, "--action", action.id] }],
       requireConfirmText: isDestructive ? element.id : undefined,
-      confirmLabel: `${ACTION_META[action.id]?.label ?? action.id}`,
+      confirmLabel: label,
       execute: executeApply({
         command: "agents:apply",
-        label: `${ACTION_META[action.id]?.label ?? action.id} ${name}`,
-        extraArgs: ["--only", element.id, ...(isDestructive ? ["--allow-uninstall"] : [])],
+        label: `${label} ${name}`,
+        extraArgs: ["--only", element.id, "--action", action.id, ...(action.id === "uninstall" ? ["--allow-uninstall"] : [])],
       }),
     });
   };
@@ -146,25 +138,9 @@ function AgentCard({ element, onEdit, onRemove }: { element: EngineElement; onEd
       {element.state === "unmanaged-detected" && (
         <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           <p>
-            检测到用 {(observed.classified?.unsupported ?? [])[0] ?? "其它渠道"} 安装的版本
-            {spec.preferred_provider ? `，可更换为定义中的 ${spec.preferred_provider} 方式，之后由本工具统一升级和卸载` : "，可更换安装方式后由本工具管理"}
-            。更换会执行新的安装命令，不会自动卸载或迁移现有安装。
+            检测到用 {(observed.classified?.unsupported ?? [])[0] ?? "其它渠道"} 安装的版本，该来源不在本工具管理范围内。
+            当前不支持自动迁移安装方式；如需由本工具管理，请先自行卸载现有安装，再使用「安装」。
           </p>
-          <button
-            type="button"
-            data-testid={`migrate-${element.id}`}
-            disabled={offline}
-            onClick={() =>
-              openAction({ id: "install", risk: "install-remove", needs_lock: true, offline_ok: false })
-            }
-            className={cn(
-              "mt-2 inline-flex items-center gap-1 rounded border px-2 py-1",
-              offline ? "cursor-not-allowed border-slate-200 text-slate-400" : "border-amber-300 text-amber-800 hover:bg-amber-100",
-            )}
-          >
-            更换安装方式
-          </button>
-          {offline && <span className="ml-2 text-xs text-amber-600">离线模式下不可用（需要联网）</span>}
         </div>
       )}
 

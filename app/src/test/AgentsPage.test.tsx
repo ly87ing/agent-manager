@@ -43,13 +43,18 @@ function routes(offline: boolean): Record<string, Envelope> {
 }
 
 describe("Agents 页写动作", () => {
-  it("升级按钮 → plan 预览（过滤到本元素）→ network 知情勾选 → agents:apply 带 run_id", async () => {
+  it("升级按钮 → plan 预览（带 --action upgrade）→ network 知情勾选 → agents:apply 带 action 与 run_id", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes(false));
     await userEvent.click(await screen.findByTestId("action-upgrade-agents:claude-code"));
 
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("升级 Claude Code");
     expect(dialog).toHaveTextContent("npm install -g @anthropic-ai/claude-code");
+
+    // 预览请求带显式动作
+    const planCall = calls.find((call) => call.command === "agents:plan");
+    expect(planCall!.args).toEqual(["--only", "agents:claude-code", "--action", "upgrade"]);
+
     // network 级：须勾选
     const confirm = screen.getByTestId("plan-confirm-button");
     expect(confirm).toBeDisabled();
@@ -59,8 +64,53 @@ describe("Agents 页写动作", () => {
 
     const applyCall = calls.find((call) => call.command === "agents:apply");
     expect(applyCall).toBeDefined();
-    expect(applyCall!.args).toEqual(["--only", "agents:claude-code"]);
+    expect(applyCall!.args).toEqual(["--only", "agents:claude-code", "--action", "upgrade"]);
     expect(applyCall!.options?.runId).toMatch(/^gui-/);
+  });
+
+  it("卸载：预览到确认全程零 policy:set，apply 带 --action uninstall 与 --allow-uninstall", async () => {
+    const uninstallRoutes = routes(false);
+    uninstallRoutes["agents:plan"] = makeEnvelope(
+      {
+        domain: "agents",
+        actions: [
+          makePlanAction({ op: "uninstall", element: "agents:claude-code", target: null, risk: "install-remove", cmd: "npm uninstall -g @anthropic-ai/claude-code", note: "显式卸载（provider: npm）" }),
+        ],
+        summary: { read: 0, "write-local": 0, "exec-local": 0, network: 0, "install-remove": 1 },
+      },
+      { command: "agents.plan" },
+    );
+    const { calls } = renderWithEngine(<AgentsPage />, uninstallRoutes);
+    await userEvent.click(await screen.findByTestId("action-uninstall-agents:claude-code"));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("卸载 Claude Code");
+    expect(dialog).toHaveTextContent(/不能自动撤销/);
+
+    const planCall = calls.find((call) => call.command === "agents:plan");
+    expect(planCall!.args).toEqual(["--only", "agents:claude-code", "--action", "uninstall"]);
+
+    // install-remove 级：需输入元素 id 确认
+    const confirm = screen.getByTestId("plan-confirm-button");
+    expect(confirm).toBeDisabled();
+    await userEvent.type(screen.getByTestId("install-remove-confirm-input"), "agents:claude-code");
+    expect(confirm).toBeEnabled();
+    await userEvent.click(confirm);
+
+    const applyCall = calls.find((call) => call.command === "agents:apply");
+    expect(applyCall!.args).toEqual(["--only", "agents:claude-code", "--action", "uninstall", "--allow-uninstall"]);
+    // 不再有任何 policy 预写
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+  });
+
+  it("取消预览：不写策略、不执行", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routes(false));
+    await userEvent.click(await screen.findByTestId("action-uninstall-agents:claude-code"));
+    await screen.findByRole("dialog");
+    await userEvent.click(screen.getByRole("button", { name: "取消" }));
+
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    expect(calls.some((call) => call.command === "agents:apply")).toBe(false);
   });
 
   it("offline：network/install-remove 按钮全部禁用", async () => {
@@ -100,7 +150,7 @@ describe("Agents 页文案", () => {
     expect(screen.getByRole("button", { name: "编辑命令" })).toBeInTheDocument();
   });
 
-  it("未知来源安装：提供更换安装方式，不承诺迁移到官方渠道", async () => {
+  it("未知来源安装：说明管理限制，不提供误导性的更换安装方式按钮", async () => {
     const unmanagedRoutes = routes(false);
     unmanagedRoutes["agents:status"] = makeEnvelope(
       {
@@ -123,10 +173,11 @@ describe("Agents 页文案", () => {
 
     renderWithEngine(<AgentsPage />, unmanagedRoutes);
 
-    const migrate = await screen.findByTestId("migrate-agents:codex");
-    expect(migrate).toHaveTextContent("更换安装方式");
+    await screen.findByText(/不在本工具管理范围内/);
+    // 不支持自动迁移：不用 install 按钮假装支持
+    expect(screen.queryByTestId("migrate-agents:codex")).toBeNull();
     expect(screen.queryByText(/迁移到官方/)).toBeNull();
-    // 不承诺自动迁移现有安装
-    expect(screen.getByText(/不会自动卸载或迁移现有安装/)).toBeInTheDocument();
+    expect(screen.queryByText(/更换安装方式/)).toBeNull();
+    expect(screen.getByText(/请先自行卸载现有安装/)).toBeInTheDocument();
   });
 });

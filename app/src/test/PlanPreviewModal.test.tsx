@@ -1,5 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import PlanPreviewModal from "../components/PlanPreviewModal";
 import { makePlanAction } from "./fixtures";
@@ -88,5 +89,81 @@ describe("PlanPreviewModal", () => {
     renderModal([]);
     expect(screen.getByText(/没有需要执行的操作/)).toBeInTheDocument();
     expect(screen.getByTestId("plan-confirm-button")).toBeDisabled();
+  });
+
+  it("小视口布局：弹窗限高且底部操作固定在弹窗内（正文滚动）", () => {
+    renderModal([makePlanAction({})]);
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.className).toContain("max-h-[90vh]");
+    expect(dialog.className).toContain("flex-col");
+    // 固定底部操作条存在且包含取消/确认按钮
+    const confirm = screen.getByTestId("plan-confirm-button");
+    const footer = confirm.parentElement!;
+    expect(footer.className).toContain("flex-shrink-0");
+    expect(footer).toContainElement(screen.getByRole("button", { name: "取消" }));
+  });
+
+  it("焦点环：打开时焦点进入弹窗，Tab 在弹窗内循环，不逃到背景", async () => {
+    render(
+      <div>
+        <button type="button">背景按钮</button>
+        <PlanPreviewModal
+          title="测试预览"
+          plans={[{ domain: "mcp", actions: [makePlanAction({})] }]}
+          executing={false}
+          onConfirm={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </div>,
+    );
+    const dialog = screen.getByRole("dialog");
+    // 打开后焦点已在弹窗内（关闭按钮）
+    const closeButton = screen.getByRole("button", { name: "关闭" });
+    expect(document.activeElement).toBe(closeButton);
+    // 第一个可聚焦元素上 Shift+Tab → 循环到末尾（确认按钮）
+    fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(screen.getByTestId("plan-confirm-button"));
+    // 末尾 Tab → 循环回第一个
+    fireEvent.keyDown(dialog, { key: "Tab" });
+    expect(document.activeElement).toBe(closeButton);
+    expect(document.activeElement).not.toBe(screen.getByText("背景按钮"));
+  });
+
+  it("Escape 仅在非执行中关闭；执行中不可关", async () => {
+    const { onClose } = renderModal([makePlanAction({})]);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    const busy = renderModal([makePlanAction({})], { executing: true });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(busy.onClose).not.toHaveBeenCalled();
+  });
+
+  it("关闭后焦点恢复到触发按钮", async () => {
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <div>
+          <button type="button" onClick={() => setOpen(true)}>打开预览</button>
+          {open && (
+            <PlanPreviewModal
+              title="测试预览"
+              plans={[{ domain: "mcp", actions: [makePlanAction({})] }]}
+              executing={false}
+              onConfirm={vi.fn()}
+              onClose={() => setOpen(false)}
+            />
+          )}
+        </div>
+      );
+    }
+    render(<Harness />);
+    const trigger = screen.getByRole("button", { name: "打开预览" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
   });
 });

@@ -811,14 +811,31 @@ def _agent_element_state(agent_id, definition, policy, declared, enabled, provid
     return "disabled"
 
 
-def _agent_actions_for_state(state):
-    if state == "missing":
-        return [AGENT_INSTALL_ACTION]
-    if state in ("managed-ok", "drifted"):
-        return [AGENT_UPGRADE_ACTION, AGENT_UNINSTALL_ACTION]
-    if state == "unmanaged-detected":
-        return [AGENT_INSTALL_ACTION, AGENT_UNINSTALL_ACTION]
-    return []
+def _agent_available_actions(agent_id, definition, policy, state):
+    """按真实安装状态/唯一受管来源/当前平台有效命令产生显式动作。
+
+    可用性判定复用 sync_agents.resolve_explicit_action 同一解析规则（可执行才展示）：
+    新定义未声明 policy 但有有效 install 命令时仍提供安装；已停用/未安装可安装；
+    升级/卸载仅当唯一已检测来源受管且该来源有当前平台有效命令；缺卸载命令不显示卸载。
+    state 复用 status 本次探测结果，不二次探测。
+    """
+    effective = dict(definition)
+    preferred = (policy or {}).get("preferred_provider")
+    if preferred:
+        effective["preferred_provider"] = preferred
+    sync_agents = _load_sync_agents()
+    actions = []
+    for action_name, template in (
+        ("install", AGENT_INSTALL_ACTION),
+        ("upgrade", AGENT_UPGRADE_ACTION),
+        ("uninstall", AGENT_UNINSTALL_ACTION),
+    ):
+        try:
+            sync_agents.resolve_explicit_action(agent_id, effective, action_name, state=state)
+        except ValueError:
+            continue
+        actions.append(dict(template))
+    return actions
 
 
 def build_agents_status(root_dir, config_file, def_files):
@@ -879,14 +896,74 @@ def build_agents_status(root_dir, config_file, def_files):
                     "preferred_active": preferred_active,
                 },
                 state,
-                _agent_actions_for_state(state),
+                _agent_available_actions(agent_id, definition, policy, {"all": providers, **classified}),
                 freshness=freshness,
             )
         )
     return {"domain": "agents", "elements": elements}, warnings, errors
 
 
-def build_agents_plan(root_dir, config_file, def_files, only=None, agent=None):
+_SYNC_AGENTS_MODULE = None
+
+
+def _load_sync_agents():
+    """惰性加载 agent-lifecycle/sync_agents.py（目录名含连字符，不能常规 import）。
+
+    显式生命周期动作的解析规则（resolve_explicit_action）由 sync_agents 持有，
+    引擎 plan 与 apply 复用同一规则，避免两处语义漂移。
+    """
+    global _SYNC_AGENTS_MODULE
+    if _SYNC_AGENTS_MODULE is None:
+        spec = importlib.util.spec_from_file_location(
+            "sync_agents", REPO_ROOT / "agent-lifecycle" / "sync_agents.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _SYNC_AGENTS_MODULE = module
+    return _SYNC_AGENTS_MODULE
+
+
+_EXPLICIT_ACTION_PLAN_OPS = {"install": "install", "upgrade": "run-cmd", "uninstall": "uninstall"}
+
+
+def _build_agents_explicit_plan(root_dir, config_file, def_files, only, action):
+    """agents:plan --action install|upgrade|uninstall：解析真实命令，不写策略/DB。"""
+    status, warnings, errors = build_agents_status(root_dir, config_file, def_files)
+    if errors:
+        return plan_data("agents", []), warnings, errors
+    element_id = only[0]
+    element = next((item for item in status["elements"] if item["id"] == element_id), None)
+    if element is None:
+        return plan_data("agents", []), warnings, [
+            diagnostic("USAGE_ERROR", None, "未知元素 '%s'" % element_id)
+        ]
+    agent_id = element_id.split(":", 1)[1]
+    definition = dict(element["spec"])
+    # effective 策略的默认安装方式优先于定义默认值
+    policy_preferred = element["policy"].get("preferred_provider")
+    if policy_preferred:
+        definition["preferred_provider"] = policy_preferred
+    sync_agents = _load_sync_agents()
+    plan_state = {"all": element["observed"]["providers"], **element["observed"]["classified"]}
+    try:
+        provider, command = sync_agents.resolve_explicit_action(agent_id, definition, action, state=plan_state)
+    except ValueError as exc:
+        return plan_data("agents", []), warnings, [
+            diagnostic("AGENT_ACTION_UNAVAILABLE", element_id, str(exc))
+        ]
+    risk = "network" if action == "upgrade" else "install-remove"
+    note = {
+        "install": "显式安装（provider: %s）" % provider,
+        "upgrade": "显式升级（沿用实际来源: %s）" % provider,
+        "uninstall": "显式卸载（provider: %s）" % provider,
+    }[action]
+    actions = [plan_action(_EXPLICIT_ACTION_PLAN_OPS[action], element_id, None, risk, cmd=command, note=note)]
+    return plan_data("agents", actions), warnings, errors
+
+
+def build_agents_plan(root_dir, config_file, def_files, only=None, agent=None, action=None):
+    if action is not None:
+        return _build_agents_explicit_plan(root_dir, config_file, def_files, only, action)
     status, warnings, errors = build_agents_status(root_dir, config_file, def_files)
     agent_defs = {element["id"].split(":", 1)[1]: element["spec"] for element in status["elements"]}
     actions = []
@@ -2918,7 +2995,7 @@ def _snapshot_targets_for(root_dir, domains, config_file, def_files, only=None, 
     return files, links
 
 
-def _apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd, build_stale_rules=True, only=None, agent=None):
+def _apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd, build_stale_rules=True, only=None, agent=None, action=None):
     """Step specs [(name, cmd, cwd, timeout, fatal)] mirroring manage.sh args.
 
     build_stale_rules=False（system:converge 用）：update 管线从不构建 dist，
@@ -3018,6 +3095,12 @@ def _apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd
             for s in only:
                 agent_name = s.split(":", 1)[1] if s.startswith("agents:") else s
                 cmd.extend(["--only", agent_name])
+        if action:
+            # 显式生命周期动作：同一解析规则已在 agents:plan --action 预览过
+            cmd.extend(["--action", action])
+            if action == "uninstall":
+                # 引擎侧已用 --allow-uninstall 二次确认，透传给 sync_agents 的同名门槛
+                cmd.append("--allow-uninstall")
         if offline:
             cmd.append("--offline")
         if dry:
@@ -3048,12 +3131,14 @@ def _agents_apply_gate(root_dir, config_file, def_files, allow_uninstall, only=N
         )
 
 
-def build_domain_apply(domain, root_dir, config_file, def_files, mode, run_id, log_file, python_cmd, allow_uninstall=False, only=None, agent=None):
+def build_domain_apply(domain, root_dir, config_file, def_files, mode, run_id, log_file, python_cmd, allow_uninstall=False, only=None, agent=None, action=None):
     """'<domain>:apply': snapshot -> run syncer steps -> step summary."""
     warnings = []
     errors = []
-    if domain == "agents":
+    if domain == "agents" and action is None:
         _agents_apply_gate(root_dir, config_file, def_files, allow_uninstall, only=only)
+    if domain == "agents" and action == "uninstall" and not allow_uninstall:
+        raise ApplyGateError("显式卸载（install-remove 级）须显式追加 --allow-uninstall")
     snapshot = None
     if not mode["dry_run"]:
         files, links = _snapshot_targets_for(root_dir, {domain}, config_file, def_files, only=only, agent=agent)
@@ -3064,7 +3149,7 @@ def build_domain_apply(domain, root_dir, config_file, def_files, mode, run_id, l
             "file_count": len(manifest["files"]),
             "link_count": len(manifest["links"]),
         }
-    steps = _apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd, only=only, agent=agent)
+    steps = _apply_step_specs(domain, root_dir, config_file, def_files, mode, python_cmd, only=only, agent=agent, action=action)
     results = []
     for name, cmd, cwd, timeout, fatal in steps:
         result = engine_apply.run_step(name, cmd, cwd, log_file if not mode["dry_run"] else None, timeout)
@@ -3072,6 +3157,30 @@ def build_domain_apply(domain, root_dir, config_file, def_files, mode, run_id, l
         if not result["ok"] and fatal:
             errors.append(
                 diagnostic("APPLY_STEP_FAILED", None, "步骤 %s 失败（exit %d，详见日志）" % (name, result["exit_code"]))
+            )
+    # 显式 install/uninstall 成功（sync_agents 已做装后/卸后复核）后才保存 enabled，
+    # 防止下一次自动收敛把卸载重新安装/把新安装卸载；失败不写任何策略。
+    if (
+        domain == "agents"
+        and action in ("install", "uninstall")
+        and not mode["dry_run"]
+        and not errors
+        and results
+        and all(step["ok"] for step in results)
+    ):
+        agent_id = only[0].split(":", 1)[1] if only and ":" in only[0] else (only[0] if only else None)
+        enabled_value = "true" if action == "install" else "false"
+        try:
+            build_policy_set(
+                root_dir, config_file, "local", "agents.%s.enabled" % agent_id, enabled_value, run_id=run_id
+            )
+        except Exception as exc:
+            errors.append(
+                diagnostic("POLICY_SAVE_FAILED", only[0] if only else None, "动作已执行但 enabled 策略保存失败: %s" % exc)
+            )
+        else:
+            warnings.append(
+                diagnostic("POLICY_SAVED", only[0] if only else None, "已保存 agents.%s.enabled=%s" % (agent_id, enabled_value))
             )
     data = {
         "domain": domain,
@@ -3466,6 +3575,7 @@ def _build_parser():
         help="skills 域专属范围控制：仅针对指定 agent id（如 codex）",
     )
     parser.add_argument("--allow-uninstall", action="store_true", help="agents:apply 显式放行卸载（install-remove 级二次确认）")
+    parser.add_argument("--action", choices=("install", "upgrade", "uninstall"), help="agents:plan/apply 显式生命周期动作；必须配合 --only 恰好一个 Agent")
     parser.add_argument("--run", help="runs:get / snapshots:restore 的 run_id")
     parser.add_argument("--lines", type=int, default=2000, help="runs:get 日志尾部行数（默认 2000；0=全部）")
     parser.add_argument("--layer", help="policy:set 的落点层（synced|local）")
@@ -3727,6 +3837,20 @@ def main(argv=None):
                     f"错误: 域 '{domain}' 状态读取失败: {exc}",
                 )
 
+    if args.action:
+        if domain != "agents" or verb not in ("plan", "apply"):
+            return usage_error(
+                "USAGE_ERROR",
+                "--action 仅允许 agents:plan / agents:apply",
+                "错误: --action 只允许用于 agents:plan 或 agents:apply",
+            )
+        if len(args.only or []) != 1:
+            return usage_error(
+                "USAGE_ERROR",
+                "--action 必须用 --only 指定恰好一个 Agent",
+                "错误: --action 需要 --only agents:<id> 且恰好一个",
+            )
+
     if kernel == "refresh" and mode["offline"]:
         # network 级动作在 offline 下显式拒绝（提案 §5 控制原则 3）。
         payload = envelope(
@@ -3759,6 +3883,7 @@ def main(argv=None):
                 domain, REPO_ROOT, args.config, args.def_file, mode, run_id, log_file,
                 args.python_cmd, allow_uninstall=args.allow_uninstall,
                 only=args.only if args.only else None, agent=args.agent,
+                action=args.action,
             )
         elif kernel == "converge":
             data, warnings, errors = build_system_converge(
@@ -3800,6 +3925,7 @@ def main(argv=None):
                 data, warnings, errors = kernel(
                     REPO_ROOT, args.config, args.def_file,
                     only=args.only if args.only else None, agent=args.agent,
+                    **({"action": args.action} if domain == "agents" else {}),
                 )
             else:
                 data, warnings, errors = kernel(REPO_ROOT, args.config, args.def_file)

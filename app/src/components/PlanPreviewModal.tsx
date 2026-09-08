@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ArrowDownToLine,
   Download,
@@ -117,6 +117,28 @@ export default function PlanPreviewModal({
   const [dryRun, setDryRun] = useState(defaultDryRun);
   const [confirmText, setConfirmText] = useState("");
   const [networkAck, setNetworkAck] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  // 渲染期捕获触发元素：自动聚焦在提交阶段发生，effect 里再读已晚
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+  if (restoreFocusRef.current === null && typeof document !== "undefined") {
+    const active = document.activeElement;
+    restoreFocusRef.current = active instanceof HTMLElement && active !== document.body ? active : null;
+  }
+
+  // 打开时主动把焦点移入弹窗一次（plans 刷新不重抢）；清理在节点移除前执行，焦点恢复不被重置
+  useLayoutEffect(() => {
+    const previous = restoreFocusRef.current;
+    const root = dialogRef.current;
+    if (root && !root.contains(document.activeElement)) {
+      const first = root.querySelector<HTMLElement>(
+        'button, [href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])'
+      );
+      (first ?? root).focus();
+    }
+    return () => {
+      if (previous && previous.isConnected) previous.focus();
+    };
+  }, []);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -125,6 +147,29 @@ export default function PlanPreviewModal({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [executing, onClose]);
+
+  // 焦点环：Tab/Shift+Tab 在弹窗内循环，不逃到背景
+  const onTabKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key !== "Tab") return;
+    const root = dialogRef.current;
+    if (!root) return;
+    const focusables = Array.from(
+      root.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])'
+      )
+    ).filter((el) => !el.hasAttribute("disabled"));
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || !root.contains(active))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && (active === last || !root.contains(active))) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   const actions = (plans ?? []).flatMap((plan) => plan.actions);
   const maxRisk = maxRiskOf(actions);
@@ -143,12 +188,15 @@ export default function PlanPreviewModal({
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={`${COPY.planPreviewTitle}：${title}`}
-        className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-5 shadow-xl"
+        tabIndex={-1}
+        onKeyDown={onTabKeyDown}
+        className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl"
       >
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-shrink-0 items-start justify-between gap-3 px-5 pt-5">
           <div>
             <h3 className="text-base font-semibold text-slate-800">{COPY.planPreviewTitle}</h3>
             <p className="mt-0.5 text-sm font-medium text-indigo-700">{title}</p>
@@ -165,7 +213,7 @@ export default function PlanPreviewModal({
           </button>
         </div>
 
-        <div className="mt-4 space-y-3">
+        <div className="mt-4 flex-1 space-y-3 overflow-y-auto px-5">
           {planError ? (
             <ErrorPanel title="预览加载失败" errors={[{ code: "PLAN_FAILED", element: null, message: planError }]} />
           ) : plans === null ? (
@@ -200,9 +248,7 @@ export default function PlanPreviewModal({
           {resultErrors && resultErrors.length > 0 && (
             <ErrorPanel title="执行失败" errors={resultErrors} />
           )}
-        </div>
 
-        <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
           <label className="flex items-center gap-2 text-xs text-slate-600">
             <input
               type="checkbox"
@@ -244,8 +290,9 @@ export default function PlanPreviewModal({
               包含需要联网的操作：我已知晓将从官方渠道拉取/下载。
             </label>
           )}
+        </div>
 
-          <div className="flex items-center justify-end gap-2">
+        <div className="flex flex-shrink-0 items-center justify-end gap-2 border-t border-slate-100 px-5 py-4">
             <button
               type="button"
               onClick={onClose}
@@ -267,7 +314,6 @@ export default function PlanPreviewModal({
               {executing && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
               {dryRun ? "开始演练" : confirmLabel}
             </button>
-          </div>
         </div>
       </div>
     </div>

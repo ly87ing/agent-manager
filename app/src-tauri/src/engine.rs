@@ -157,6 +157,8 @@ enum ArgValueKind {
     DotKey,
     /// policy:set 的 JSON 值——合法性即 JSON 可解析。
     JsonValue,
+    /// agents:plan/apply 的显式生命周期动作：仅 install/upgrade/uninstall。
+    AgentAction,
 }
 
 /// 每个命令允许的 flag 集合（命令感知白名单）。
@@ -196,6 +198,9 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         }
         (_, "plan") => {
             specs.push(("--only", ArgValueKind::ElementId));
+            if domain == "agents" {
+                specs.push(("--action", ArgValueKind::AgentAction));
+            }
             if domain == "skills" {
                 specs.push(("--agent", ArgValueKind::ElementId));
             }
@@ -205,6 +210,7 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--only", ArgValueKind::ElementId));
             if domain == "agents" {
                 specs.push(("--allow-uninstall", ArgValueKind::Flag));
+                specs.push(("--action", ArgValueKind::AgentAction));
             }
             if domain == "skills" {
                 specs.push(("--agent", ArgValueKind::ElementId));
@@ -284,6 +290,13 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
         ArgValueKind::JsonValue => serde_json::from_str::<serde_json::Value>(value)
             .map(|_| ())
             .map_err(|err| EngineError::new("invalid_args", format!("--value 不是合法 JSON: {err}"))),
+        ArgValueKind::AgentAction => match value {
+            "install" | "upgrade" | "uninstall" => Ok(()),
+            _ => Err(EngineError::new(
+                "invalid_args",
+                format!("非法动作 '{value}'（仅 install|upgrade|uninstall）"),
+            )),
+        },
     }
 }
 
@@ -840,6 +853,31 @@ mod tests {
         validate_args("agents:apply", &["--allow-uninstall".into(), "--dry-run".into()]).unwrap();
         validate_args("system:converge", &["--dry-run".into()]).unwrap();
         validate_args("profile:push", &["--dry-run".into()]).unwrap();
+    }
+
+    #[test]
+    fn args_agents_explicit_action_whitelist() {
+        for action in ["install", "upgrade", "uninstall"] {
+            validate_args("agents:plan", &["--only".into(), "agents:codex".into(), "--action".into(), action.into()]).unwrap();
+            validate_args("agents:apply", &["--only".into(), "agents:codex".into(), "--action".into(), action.into()]).unwrap();
+        }
+        validate_args(
+            "agents:apply",
+            &["--only".into(), "agents:codex".into(), "--action".into(), "uninstall".into(), "--allow-uninstall".into()],
+        )
+        .unwrap();
+        for (command, args) in [
+            // --action 只允许 agents plan/apply
+            ("mcp:plan", vec!["--action".to_string(), "install".to_string()]),
+            ("agents:status", vec!["--action".to_string(), "install".to_string()]),
+            ("skills:apply", vec!["--action".to_string(), "install".to_string()]),
+            // 动作值严格三选一，不允许 reinstall / 注入
+            ("agents:plan", vec!["--action".to_string(), "reinstall".to_string()]),
+            ("agents:apply", vec!["--action".to_string(), "install; rm -rf /".to_string()]),
+            ("agents:apply", vec!["--action".to_string(), "INSTALL".to_string()]),
+        ] {
+            assert!(validate_args(command, &args).is_err(), "{command} {args:?} should be rejected");
+        }
     }
 
     #[test]
