@@ -46,7 +46,7 @@ function EnvResolutionList({ element }: { element: EngineElement }) {
   );
 }
 
-function ServerDetail({ element, onEdit, onRemove }: { element: EngineElement; onEdit: () => void; onRemove: () => void }) {
+function ServerDetail({ element, onEdit, onRemove, onUpdate }: { element: EngineElement; onEdit: () => void; onRemove: () => void; onUpdate: () => void }) {
   const spec = element.spec as McpSpec;
   const cells = agentCellsOf(element);
   const extraArgs = spec.extra_args_by_agent ?? {};
@@ -106,6 +106,7 @@ function ServerDetail({ element, onEdit, onRemove }: { element: EngineElement; o
       </div>
 
       <div className="flex gap-2 border-t border-slate-100 pt-3">
+        <button type="button" onClick={onUpdate} className="rounded border border-indigo-200 px-2.5 py-1 text-xs text-indigo-600">更新并同步</button>
         <button
           type="button"
           data-testid={`edit-server-${element.id}`}
@@ -266,6 +267,7 @@ export default function McpPage() {
 
       {selected ? (
         <ServerDetail
+          onUpdate={() => openCellApply(selected)}
           element={selected}
           onEdit={() => setFormState({ editing: selected })}
           onRemove={() => definitionOps.requestRemove(selected.id.replace(/^mcp:/, ""), layers)}

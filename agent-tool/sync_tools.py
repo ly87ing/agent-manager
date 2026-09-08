@@ -17,6 +17,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.json_config import get_typed_mapping_section, load_json_object_file
+from src.policy_layers import apply_definition_overlays, overlay_definitions
 from src.npm_flags import OFFICIAL_NPM_REGISTRY, inject_npm_flags
 from src.command_runner import run_command
 from src.git_remote_probe import probe_git_remote_state as probe_git_remote_repo_state
@@ -641,6 +642,9 @@ def main():
         def_root = load_json_object_file(args.def_file, strict=True, missing_ok=False)
         policy_cfg = get_typed_mapping_section(policy_root, "tools", Path(args.config).name, (dict,), "对象")
         def_cfg = get_typed_mapping_section(def_root, "tools", Path(args.def_file).name, (dict,), "对象")
+        def_cfg, overlay_warnings = apply_definition_overlays(def_cfg, overlay_definitions(policy_root, "tools"), domain="tools")
+        for warning in overlay_warnings:
+            logging.warning(warning)
     except ValueError as exc:
         logging.error(str(exc))
         sys.exit(1)

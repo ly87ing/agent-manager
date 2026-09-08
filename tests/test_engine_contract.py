@@ -43,14 +43,17 @@ SCHEMA_FILES = {
     "snapshots": "snapshots.schema.json",
     "policy": "policy.schema.json",
     "profile": "profile.schema.json",
+    "sources": "sources.schema.json",
 }
 
-FIXTURE_NAME_RE = re.compile(r"^(envelope|element|plan-action|apply-result|status|plan|converge|runs|snapshots|policy|profile)-.+\.(valid|invalid)\.json$")
+FIXTURE_NAME_RE = re.compile(r"^(envelope|element|plan-action|apply-result|status|plan|converge|runs|snapshots|policy|profile|sources)-.+\.(valid|invalid)\.json$")
 
 # Every *.invalid.json fixture maps to the exact JSON path it must fail at.
 # Missing required properties are reported at the containing object; type/enum
 # violations at the offending value; extra keys at the key itself.
 EXPECTED_INVALID_PATHS = {
+    "sources-missing-revision.invalid.json": "$.sources[0]",
+    "sources-bad-format.invalid.json": "$.sources[0].format",
     "envelope-missing-ok.invalid.json": "$",
     "envelope-bad-contract.invalid.json": "$.contract",
     "envelope-extra-property.invalid.json": "$.unexpected",

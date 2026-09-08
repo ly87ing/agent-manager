@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, PlayCircle } from "lucide-react";
 import { DriftExplanationPanel } from "../components/DriftExplanationPanel";
+import { SourceDefinitionsPanel } from "../components/SourceDefinitionsPanel";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { StateBadge } from "../components/StateBadge";
@@ -72,6 +73,7 @@ export default function RulesPage() {
     <div className="space-y-4">
       <PageHeader title="规则" description="各助手的规则文件清单与生成状态（规则没有官方版本概念；同步 = 生成 + 分发）。" />
       {query.data.errors.length > 0 && <ErrorPanel title="rules:status 错误" errors={query.data.errors} />}
+      <SourceDefinitionsPanel domain="rules" />
 
       <div className="flex justify-end">
         <button

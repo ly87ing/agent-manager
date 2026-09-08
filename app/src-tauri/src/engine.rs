@@ -131,6 +131,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("snapshots", "list" | "restore") => true,
         ("runs", "list" | "get") => true,
         ("policy", "get" | "set" | "delete") => true,
+        ("sources", "get" | "set") => true,
         ("profile", "status" | "pull" | "push") => true,
         (d, "status" | "plan" | "apply") => READ_WRITE_DOMAINS.contains(&d),
         _ => false,
@@ -162,6 +163,12 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
     let (domain, verb) = command.split_once(':').unwrap_or(("", ""));
     let mut specs: Vec<(&'static str, ArgValueKind)> = Vec::new();
     match (domain, verb) {
+        ("sources", "get") => specs.push(("--key", ArgValueKind::DotKey)),
+        ("sources", "set") => {
+            specs.push(("--key", ArgValueKind::DotKey));
+            specs.push(("--value", ArgValueKind::JsonValue));
+            specs.push(("--dry-run", ArgValueKind::Flag));
+        }
         ("system", "refresh-upstream") => specs.push(("--only", ArgValueKind::ElementId)),
         ("runs", "get") => {
             specs.push(("--run", ArgValueKind::RunId));
@@ -385,9 +392,18 @@ fn copy_standalone_resources(resource_root: &Path, data_root: &Path) -> Result<P
     std::fs::create_dir_all(data_root).map_err(|err| {
         EngineError::new("data_dir_unavailable", format!("无法创建应用数据目录: {err}"))
     })?;
+    let local_path = std::env::var_os("AGENT_MANAGER_LOCAL_CONFIG").map(PathBuf::from)
+        .unwrap_or_else(|| data_root.join("config/manager.local.json"));
+    let local: serde_json::Value = std::fs::read(local_path).ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default();
+    let edited_sources = local.get("source_edits").and_then(serde_json::Value::as_array);
     for relative in manifest.managed_files {
         let source = resource_root.join(&relative);
         let target = data_root.join(&relative);
+        let editable = matches!(relative.as_str(), "config/claude-hooks.json" | "config/codex-hooks.json" | "config/shell-aliases.json" | "agent-rule/rules/src/shared/core.md" | "agent-rule/rules/src/agents/claude/adapter.md" | "agent-rule/rules/src/agents/codex/adapter.md");
+        if editable && target.is_file() && edited_sources.is_some_and(|paths| paths.iter().any(|path| path.as_str() == Some(relative.as_str()))) {
+            continue;
+        }
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(|err| {
                 EngineError::new("data_dir_unavailable", format!("无法创建引擎运行目录: {err}"))
@@ -829,6 +845,16 @@ mod tests {
     }
 
     #[test]
+    fn args_source_edit_only_allows_key_json_and_dry_run() {
+        validate_command("sources:get").unwrap();
+        validate_command("sources:set").unwrap();
+        validate_args("sources:get", &["--key".into(), "rules".into()]).unwrap();
+        validate_args("sources:set", &["--key".into(), "rules.shared".into(), "--value".into(), "{}".into(), "--dry-run".into()]).unwrap();
+        assert!(validate_args("sources:set", &["--key".into(), "../../secrets".into()]).is_err());
+        assert!(validate_args("sources:set", &["--def-file".into(), "elsewhere".into()]).is_err());
+    }
+
+    #[test]
     fn args_profile_direction_controls() {
         validate_args("profile:pull", &[]).unwrap();
         validate_args("profile:pull", &["--accept-remote".into()]).unwrap();
@@ -926,6 +952,33 @@ mod tests {
         assert_eq!(fs::read(root.join("config/manager.local.json")).unwrap(), b"user overlay");
         fs::write(resource.join("standalone-manifest.json"), br#"{"schema":1,"managed_files":["/escape"]}"#).unwrap();
         assert_eq!(copy_standalone_resources(&resource, &data).unwrap_err().kind, "installation_incomplete");
+    }
+
+    #[test]
+    fn standalone_upgrade_preserves_edited_source_but_updates_programs() {
+        let resource = temp_dir("source-resource");
+        let data = temp_dir("source-data");
+        fs::create_dir_all(resource.join("runtime/python/bin")).unwrap();
+        fs::create_dir_all(resource.join("bin")).unwrap();
+        fs::create_dir_all(resource.join("config")).unwrap();
+        for relative in ["runtime/python/bin/python3", "bin/agent-manager-engine"] {
+            let path = resource.join(relative);
+            fs::write(&path, b"executable").unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        fs::write(resource.join("manage.sh"), b"v1").unwrap();
+        fs::write(resource.join("config/claude-hooks.json"), br#"{"hooks":{}}"#).unwrap();
+        fs::write(resource.join("standalone-manifest.json"), br#"{"schema":1,"managed_files":["manage.sh","config/claude-hooks.json"],"managed_content_sha256":"v1"}"#).unwrap();
+        copy_standalone_resources(&resource, &data).unwrap();
+        fs::write(data.join("config/manager.local.json"), br#"{"source_edits":["config/claude-hooks.json","manage.sh"]}"#).unwrap();
+        fs::write(data.join("config/claude-hooks.json"), b"user definition").unwrap();
+        fs::write(resource.join("manage.sh"), b"v2").unwrap();
+        fs::write(resource.join("standalone-manifest.json"), br#"{"schema":1,"managed_files":["manage.sh","config/claude-hooks.json"],"managed_content_sha256":"v2"}"#).unwrap();
+        copy_standalone_resources(&resource, &data).unwrap();
+        assert_eq!(fs::read(data.join("config/claude-hooks.json")).unwrap(), b"user definition");
+        assert_eq!(fs::read(data.join("manage.sh")).unwrap(), b"v2");
+        let _ = fs::remove_dir_all(resource);
+        let _ = fs::remove_dir_all(data);
     }
 
     #[test]

@@ -2,19 +2,19 @@ import type { PolicyLayer, PolicyLayers } from "./contract";
 
 /**
  * 定义覆盖层（引擎 P4a）：mcp.definitions.<name> 覆盖 config/mcp.json，
- * skills.repositories.<name> 覆盖 skills.json。基线条目的移除 = tombstone
- * （{"_delete": true}）；覆盖层条目的移除 = policy:delete。
+ * skills.repositories.<name> 覆盖 skills.json。移除用 tombstone 遮蔽同名定义。
  */
 
-export type DefinitionSection = "mcp" | "skills";
+export type DefinitionSection = "mcp" | "skills" | "agents" | "tools";
 
 export function definitionKeyPrefix(section: DefinitionSection): string {
+  if (section === "agents") return "agent_definitions";
+  if (section === "tools") return "tool_definitions";
   return section === "mcp" ? "mcp.definitions" : "skills.repositories";
 }
 
 export interface DefinitionRemovalPlan {
-  /** overlay = policy:delete；tombstone = policy:set {"_delete": true}。 */
-  kind: "overlay" | "tombstone";
+  kind: "tombstone";
   /** 目标层。 */
   layer: PolicyLayer;
   /** policy key（…/<name>）。 */
@@ -23,6 +23,10 @@ export interface DefinitionRemovalPlan {
 
 function layerHasDefinition(layer: Record<string, unknown> | null, section: DefinitionSection, name: string): boolean {
   if (!layer) return false;
+  if (section === "agents" || section === "tools") {
+    const defs = layer[definitionKeyPrefix(section)];
+    return typeof defs === "object" && defs !== null && name in defs;
+  }
   const root = layer[section];
   if (typeof root !== "object" || root === null) return false;
   const defs = (root as Record<string, unknown>)[section === "mcp" ? "definitions" : "repositories"];
@@ -31,9 +35,8 @@ function layerHasDefinition(layer: Record<string, unknown> | null, section: Defi
 }
 
 /**
- * 移除决策：定义在 local 层 → 从 local 删除；其次 synced；两层都没有
- * （基线/未定义）→ 往默认可写层写 tombstone。同名定义横跨两层时只删 local
- * （local 优先于 synced 生效，删掉它后 synced 片段会浮现——属刻意保守，界面注明）。
+ * 移除写 tombstone，避免删除覆盖片段后下层同名定义重新生效。
+ * 已有 local 覆盖时必须在 local 层遮蔽；其余使用用户选择的默认层。
  */
 export function planDefinitionRemoval(
   layers: PolicyLayers | null,
@@ -43,10 +46,7 @@ export function planDefinitionRemoval(
 ): DefinitionRemovalPlan {
   const key = `${definitionKeyPrefix(section)}.${name}`;
   if (layerHasDefinition(layers?.local ?? null, section, name)) {
-    return { kind: "overlay", layer: "local", key };
-  }
-  if (layerHasDefinition(layers?.synced ?? null, section, name)) {
-    return { kind: "overlay", layer: "synced", key };
+    return { kind: "tombstone", layer: "local", key };
   }
   return { kind: "tombstone", layer: defaultLayer, key };
 }

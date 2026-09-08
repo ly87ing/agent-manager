@@ -176,7 +176,6 @@ export const OVERLAY_COPY = {
   /** 编辑基线条目时表单内提示。 */
   editBaselineNote: "该条目由仓库默认值提供；你的修改会写入覆盖层，仓库默认值不受影响。",
   /** 移除基线条目时确认文案（tombstone 语义）。 */
-  removeBaselineNote: "该条目由仓库默认值提供；移除实际是写入一个「移除标记」——之后删除该标记即可恢复。",
+  removeBaselineNote: "写入移除标记，使该条目停止生效；删除标记即可恢复下层定义。确认同步后清理本工具管理的配置或链接。",
   /** 移除覆盖层条目时确认文案（policy:delete 语义）。 */
-  removeOverlayNote: "该条目定义在覆盖层里；移除会直接删除这段定义。",
 } as const;

@@ -88,6 +88,53 @@ class DefinitionOverlayTests(unittest.TestCase):
 
     # ------------------------------------------------------------------ mcp 新增/编辑/tombstone
 
+    def test_source_commands_save_readback_and_reject_stale_revision(self):
+        self._write_config("shell-aliases.json", {"aliases": {"old": "echo old"}, "timezone": "UTC"})
+        result = self._run("sources:get", "--key", "aliases", "--json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        source = json.loads(result.stdout)["data"]["sources"][0]
+        value = json.dumps({"revision": source["revision"], "value": {"new": "echo new"}})
+        saved = self._run("sources:set", "--key", "aliases.shell", "--value", value, "--json")
+        self.assertEqual(saved.returncode, 0, saved.stdout + saved.stderr)
+        self.assertTrue(json.loads(saved.stdout)["ok"])
+        document = json.loads((self.repo / "config/shell-aliases.json").read_text())
+        self.assertEqual(document, {"aliases": {"new": "echo new"}, "timezone": "UTC"})
+        stale = self._run("sources:set", "--key", "aliases.shell", "--value", value, "--json")
+        self.assertNotEqual(stale.returncode, 0)
+        self.assertIn("重新加载", json.loads(stale.stdout)["errors"][0]["message"])
+
+    def test_agent_definition_add_edit_remove_uses_effective_install_command(self):
+        definition = {"bin": "__missing_custom_agent__", "providers": {"npm": {"managed": True, "install": "echo install-custom", "upgrade": "echo upgrade-custom"}}}
+        self._write_overlay("local", {"agent_definitions": {"custom": definition}, "agents": {"custom": {"enabled": True}}})
+        _, elements = self._status_elements("agents:status", "--json")
+        self.assertEqual(elements["agents:custom"]["spec"]["bin"], "__missing_custom_agent__")
+        plan = self._run("agents:plan", "--only", "agents:custom", "--json")
+        self.assertEqual(plan.returncode, 0, plan.stderr)
+        self.assertIn("echo install-custom", json.dumps(json.loads(plan.stdout)["data"]["actions"]))
+        self._write_overlay("local", {"agent_definitions": {"custom": {"_delete": True}}, "agents": {"custom": {"enabled": True}}})
+        _, elements = self._status_elements("agents:status", "--json")
+        self.assertNotIn("agents:custom", elements)
+
+    def test_agent_full_definition_replaces_lower_provider_keys_and_rejects_invalid_save(self):
+        self._write_overlay("synced", {"agent_definitions": {"custom": {"bin": "__missing_custom__", "providers": {"native": {"install": "echo old"}}}}})
+        self._write_overlay("local", {"agent_definitions": {"custom": {"_replace": True, "bin": "__missing_custom__", "providers": {"npm": {"install": "echo new"}}}}})
+        _, elements = self._status_elements("agents:status", "--json")
+        self.assertEqual(elements["agents:custom"]["spec"]["providers"], {"npm": {"install": "echo new"}})
+        before = (self.temp_dir / "manager.local.json").read_bytes()
+        result = self._run("policy:set", "--layer", "local", "--key", "agent_definitions.invalid", "--value", '{"bin":""}', "--json")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.temp_dir / "manager.local.json").read_bytes(), before)
+
+    def test_tool_definition_add_remove_has_no_phantom_policy_error(self):
+        self._write_config("tools.json", {"tools": {}})
+        self._write_overlay("local", {"tool_definitions": {"custom": {"install": "echo install-tool", "bin": "__missing_custom_tool__"}}, "tools": {"custom": {"enabled": True}}})
+        _, elements = self._status_elements("tools:status", "--json")
+        self.assertIn("tools:custom", elements)
+        self._write_overlay("local", {"tool_definitions": {"custom": {"_delete": True}}, "tools": {"custom": {"enabled": True}}})
+        payload, elements = self._status_elements("tools:status", "--json")
+        self.assertNotIn("tools:custom", elements)
+        self.assertEqual(payload["errors"], [])
+
     def test_mcp_overlay_add_new_server_end_to_end(self):
         # 仅本机层定义出新 server + 策略启用 → status 出现元素 + plan 有注入动作 +
         # 真跑 sync_mcp 后沙盒目标文件被注入。

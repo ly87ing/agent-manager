@@ -1,17 +1,22 @@
 import { useState } from "react";
 import { Check, ChevronDown, ChevronRight, Download, RefreshCw, Trash2, X } from "lucide-react";
 import { DriftExplanationPanel } from "../components/DriftExplanationPanel";
+import { DefinitionFormDialog } from "../components/DefinitionFormDialog";
+import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { FreshnessBadge } from "../components/FreshnessBadge";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { StateBadge } from "../components/StateBadge";
 import { Switch } from "../components/Switch";
-import type { ElementAction, EngineElement, StatusData } from "../lib/contract";
+import type { ElementAction, EngineElement, PolicyData, StatusData } from "../lib/contract";
 import type { AgentsObserved, AgentsPolicy, AgentsSpec } from "../lib/observed";
 import { useEngineQuery, useOfflineMode } from "../lib/queries";
 import { useElementToggle } from "../lib/useElementToggle";
 import { useExecuteApply, usePlanPreview } from "../lib/usePlanPreview";
 import { cn } from "../lib/utils";
+import { runEngine } from "../lib/engine";
+import { getDefaultPolicyLayer } from "../lib/policyLayer";
+import { toast } from "sonner";
 
 /** agents 动作按钮文案/样式（离线可用性由 actions[].offline_ok 驱动，引擎是事实源）。 */
 const ACTION_META: Record<string, { label: string; icon: typeof Download; className: string }> = {
@@ -44,7 +49,7 @@ function PolicyChip({ label, value }: { label: string; value: boolean | undefine
   );
 }
 
-function AgentCard({ element }: { element: EngineElement }) {
+function AgentCard({ element, onEdit, onRemove }: { element: EngineElement; onEdit: () => void; onRemove: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const offline = useOfflineMode();
   const preview = usePlanPreview();
@@ -59,8 +64,14 @@ function AgentCard({ element }: { element: EngineElement }) {
   const name = spec.display_name ?? element.id;
 
   /** 动作 → plan 预览（按元素范围）→ agents:apply（按元素范围；含卸载时引擎要求 --allow-uninstall）。 */
-  const openAction = (action: ElementAction) => {
+  const openAction = async (action: ElementAction) => {
     const isDestructive = action.id === "uninstall" || action.id === "install";
+    if (isDestructive) {
+      try {
+        const result = await runEngine("policy:set", ["--layer", getDefaultPolicyLayer(), "--key", `agents.${element.id.replace(/^agents:/, "")}.enabled`, "--value", action.id === "uninstall" ? "false" : "true"]);
+        if (!result.ok) throw new Error(result.errors[0]?.message ?? "保存失败");
+      } catch (err) { toast.error(String(err)); return; }
+    }
     preview.open({
       title: `${ACTION_META[action.id]?.label ?? action.id} ${name}`,
       subtitle: `仅针对此助手执行操作（执行前自动备份）。`,
@@ -166,6 +177,8 @@ function AgentCard({ element }: { element: EngineElement }) {
       )}
 
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+        <button type="button" onClick={onEdit} className="rounded border px-2.5 py-1 text-xs">编辑</button>
+        <button type="button" onClick={onRemove} className="rounded border border-red-200 px-2.5 py-1 text-xs text-red-600">移除管理</button>
         {element.actions.map((action) => {
           const meta = ACTION_META[action.id];
           if (!meta) return null;
@@ -208,6 +221,9 @@ function AgentCard({ element }: { element: EngineElement }) {
 
 export default function AgentsPage() {
   const query = useEngineQuery<StatusData>("agents:status");
+  const policyQuery = useEngineQuery<PolicyData>("policy:get");
+  const definitionOps = useDefinitionOps({ section: "agents", domain: "agents" });
+  const [form, setForm] = useState<EngineElement | "new" | null>(null);
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="agents:status 调用失败" error={query.error} />;
 
@@ -216,11 +232,14 @@ export default function AgentsPage() {
     <div className="space-y-4">
       <PageHeader title="助手" description="各 AI 助手的安装渠道、版本与官方最新版对比。安装/升级/卸载都会先预览再执行。" />
       {query.data.errors.length > 0 && <ErrorPanel title="agents:status 错误" errors={query.data.errors} />}
+      <div className="flex justify-end"><button type="button" onClick={() => setForm("new")} className="rounded-md bg-indigo-600 px-4 py-2 text-sm text-white">添加助手</button></div>
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {elements.map((element) => (
-          <AgentCard key={element.id} element={element} />
+          <AgentCard key={element.id} element={element} onEdit={() => setForm(element)} onRemove={() => definitionOps.requestRemove(element.id.replace(/^agents:/, ""), policyQuery.data?.data.layers ?? null)} />
         ))}
       </div>
+      {form && <DefinitionFormDialog domain="agents" existingNames={elements.map((element) => element.id.replace(/^agents:/, ""))} initial={form === "new" ? undefined : { name: form.id.replace(/^agents:/, ""), definition: form.spec }} onClose={() => setForm(null)} onSubmit={(name, definition) => { setForm(null); void definitionOps.saveAndApply({ name, definition, isNew: form === "new", elementId: `agents:${name}` }); }} />}
+      {definitionOps.modals}
     </div>
   );
 }

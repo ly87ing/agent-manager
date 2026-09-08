@@ -11,18 +11,16 @@ import { OVERLAY_COPY, TOGGLE_COPY } from "./ui-copy";
 import { useExecuteApply, usePlanPreview } from "./usePlanPreview";
 
 /**
- * 定义覆盖层编排（MCP 服务 / Skills 集合的新增·编辑·移除）。
- * 新增 = policy.set <覆盖键> <定义> + policy.set <启用键> true；编辑基线条目 = 同键写覆盖片段；
- * 移除 = 覆盖层条目 policy:delete / 基线条目 tombstone（{"_delete": true}）。
- * 全部写操作后接 plan 预览 → 域级 apply（引擎单写者）。
+ * 定义覆盖层的新增、编辑与移除；Agent/Tools 移除仅停止管理，
+ * MCP/Skills 移除后继续预览清理目标配置与链接。
  */
 export function useDefinitionOps({
   section,
   domain,
 }: {
   section: DefinitionSection;
-  /** 生效域（mcp / skills），plan/apply 命令按它推导。 */
-  domain: "mcp" | "skills";
+  /** plan/apply 命令按生效域推导。 */
+  domain: DefinitionSection;
 }) {
   const queryClient = useQueryClient();
   const preview = usePlanPreview();
@@ -30,8 +28,7 @@ export function useDefinitionOps({
   const [removal, setRemoval] = useState<{ name: string; layers: PolicyLayers | null } | null>(null);
   const [removalExecuting, setRemovalExecuting] = useState(false);
 
-  /** policy.set / policy:delete 的公共调用；失败 toast 并返回 false。 */
-  const writePolicy = async (command: "policy:set" | "policy:delete", args: string[]): Promise<boolean> => {
+  const writePolicy = async (command: "policy:set", args: string[]): Promise<boolean> => {
     let envelope;
     try {
       envelope = await runEngine<PolicyData>(command, args);
@@ -57,7 +54,7 @@ export function useDefinitionOps({
   }): Promise<void> => {
     const layer = getDefaultPolicyLayer();
     const defKey = `${definitionKeyPrefix(section)}.${input.name}`;
-    if (!(await writePolicy("policy:set", ["--layer", layer, "--key", defKey, "--value", JSON.stringify(input.definition)]))) {
+    if (!(await writePolicy("policy:set", ["--layer", layer, "--key", defKey, "--value", JSON.stringify({ ...input.definition, _delete: false, ...(domain === "agents" || domain === "tools" ? { _replace: true } : {}) })]))) {
       return;
     }
     if (input.isNew) {
@@ -80,7 +77,7 @@ export function useDefinitionOps({
     });
   };
 
-  /** 移除：弹确认（install-remove 语义，输入条目名）；确认后 delete/tombstone → plan 预览。 */
+  /** 移除确认后写遮蔽标记。 */
   const requestRemove = (name: string, layers: PolicyLayers | null) => {
     setRemoval({ name, layers });
   };
@@ -89,21 +86,19 @@ export function useDefinitionOps({
     if (!removal) return;
     setRemovalExecuting(true);
     const plan = planDefinitionRemoval(removal.layers, section, removal.name, getDefaultPolicyLayer());
-    const ok =
-      plan.kind === "overlay"
-        ? await writePolicy("policy:delete", ["--layer", plan.layer, "--key", plan.key])
-        : await writePolicy("policy:set", ["--layer", plan.layer, "--key", plan.key, "--value", '{"_delete": true}']);
+    const ok = await writePolicy("policy:set", ["--layer", plan.layer, "--key", plan.key, "--value", '{"_delete": true}']);
     setRemovalExecuting(false);
     if (!ok) return;
     const name = removal.name;
     setRemoval(null);
     void queryClient.invalidateQueries({ queryKey: engineKeys.all });
     toast.success(`已移除 ${name}`);
+    if (domain === "agents" || domain === "tools") return;
     const prefix = domain === "skills" ? "skill" : domain;
     const elementId = `${prefix}:${name}`;
     preview.open({
       title: `移除 ${name}`,
-      subtitle: plan.kind === "tombstone" ? OVERLAY_COPY.removeBaselineNote : "移除已写入覆盖层；预览将要执行的操作，确认后同步生效（执行前自动备份）。",
+      subtitle: OVERLAY_COPY.removeBaselineNote,
       planCommands: [{ command: `${domain}:plan`, args: ["--only", elementId] }],
       confirmLabel: TOGGLE_COPY.applyNow,
       execute: executeApply({
@@ -118,7 +113,7 @@ export function useDefinitionOps({
   const removalModal = removal && removalPlan ? (
     <ConfirmModal
       title={`移除 ${removal.name}`}
-      description={removalPlan.kind === "tombstone" ? OVERLAY_COPY.removeBaselineNote : OVERLAY_COPY.removeOverlayNote}
+      description={domain === "agents" || domain === "tools" ? "停止管理该定义，不自动卸载系统包。后续同步仍会清理本工具拥有的孤立缓存目录。" : OVERLAY_COPY.removeBaselineNote}
       risk="install-remove"
       requireText={removal.name}
       confirmLabel="确认移除"

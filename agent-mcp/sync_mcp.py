@@ -822,6 +822,7 @@ def main():
                         srv_config["_sync_ready"] = False
 
     agent_defs = load_json_object_file(REPO_ROOT / "config" / "agents.json", strict=False, missing_ok=True) or {}
+    agent_defs, _ = apply_definition_overlays(agent_defs, overlay_definitions(policy_root, "agents"), domain="agents")
     if not manage_mcp_config(AGENT_TARGETS, definition_cfg, dry_run=args.dry_run, agent_defs=agent_defs, only_servers=only_servers):
         all_build_success = False
     if not all_build_success: sys.exit(1)

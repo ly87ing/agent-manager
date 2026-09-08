@@ -59,7 +59,7 @@ def load_layers(root_dir):
 def deep_merge(dst, src):
     """manage.sh inline merge 的同语义实现：dict⊕dict 递归，其余覆盖。"""
     for key, value in src.items():
-        if isinstance(value, dict) and isinstance(dst.get(key), dict):
+        if isinstance(value, dict) and value.get("_replace") is not True and isinstance(dst.get(key), dict):
             deep_merge(dst[key], value)
         else:
             dst[key] = value
@@ -118,6 +118,14 @@ def set_policy_value(root_dir, layer, key, value):
             cursor[segment] = nxt
         cursor = nxt
     cursor[segments[-1]] = value
+    definition_domains = {"agent_definitions": ("agents", "agents.json", None), "tool_definitions": ("tools", "tools.json", "tools")}
+    if segments[0] in definition_domains:
+        domain, filename, field = definition_domains[segments[0]]
+        layers = load_layers(root_dir)
+        layers[layer] = data
+        effective = effective_config(layers)
+        base = load_json_object_file(Path(root_dir) / "config" / filename, strict=True)
+        apply_definition_overlays(base.get(field, {}) if field else base, overlay_definitions(effective, domain), domain=domain)
     atomic_write_json_file(path, data, chmod=0o600)
     return path
 
@@ -162,6 +170,16 @@ def delete_policy_value(root_dir, layer, key):
 
 # 各定义域的合法键与必填键（形状校验 fail-close 用；未知键告警不拒绝）。
 DEFINITION_OVERLAY_RULES = {
+    "agents": {
+        "overlay_key": "agent_definitions",
+        "required_key": "bin",
+        "known_keys": {"display_name", "bin", "app_path", "preferred_provider", "require_managed_provider", "providers", "_delete"},
+    },
+    "tools": {
+        "overlay_key": "tool_definitions",
+        "required_key": None,
+        "known_keys": {"bin", "url", "install", "upgrade", "setup", "doctor_severity", "detect", "_delete"},
+    },
     "mcp": {
         "overlay_key": "definitions",
         "required_key": "command",
@@ -212,13 +230,15 @@ def apply_definition_overlays(base_defs, overlay_defs, *, domain):
         if fragment.get("_delete") is True:
             merged.pop(name, None)
             continue
-        unknown = sorted(set(fragment) - known_keys)
+        unknown = sorted(set(fragment) - known_keys - {"_replace"})
         if unknown:
             warnings.append(
                 "%s 覆盖层片段 %s 含未知键（忽略生效语义之外的影响）: %s"
                 % (domain, name, ", ".join(unknown))
             )
-        fragment = {key: value for key, value in fragment.items() if key != "_delete"}
+        if fragment.get("_replace") is True:
+            merged.pop(name, None)
+        fragment = {key: value for key, value in fragment.items() if key not in ("_delete", "_replace")}
         if name in merged and isinstance(merged[name], dict):
             deep_merge(merged[name], fragment)
         else:
@@ -226,6 +246,10 @@ def apply_definition_overlays(base_defs, overlay_defs, *, domain):
     for name, definition in merged.items():
         if not isinstance(definition, dict):
             raise ValueError("%s 定义 %s 必须是对象" % (domain, name))
+        if domain == "agents" and name not in (overlay_defs or {}):
+            continue
+        if required_key is None:
+            continue
         value = definition.get(required_key)
         if not isinstance(value, str) or not value.strip():
             raise ValueError(
@@ -238,6 +262,11 @@ def apply_definition_overlays(base_defs, overlay_defs, *, domain):
 def overlay_definitions(config, domain):
     """从合并后策略配置取覆盖层片段（config.<domain>.<overlay_key>，缺省 {}）。"""
     rules = DEFINITION_OVERLAY_RULES[domain]
+    if domain in ("agents", "tools"):
+        overlay = config.get(rules["overlay_key"], {})
+        if not isinstance(overlay, dict):
+            raise ValueError("%s 必须是对象" % rules["overlay_key"])
+        return overlay
     section = config.get(domain, {})
     if not isinstance(section, dict):
         return {}

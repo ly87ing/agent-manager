@@ -216,6 +216,7 @@ def git_version_info(root_dir: Path) -> dict[str, str] | None:
 
 
 def load_inputs(root_dir: Path, config_file: Path) -> dict:
+    from src.policy_layers import apply_definition_overlays, overlay_definitions
     config = load_json(config_file, strict=True, missing_ok=False)
     config["agents"] = canonicalize_agent_mapping(
         get_typed_mapping_section(config, "agents", "manager.json", (dict,), "对象")
@@ -233,6 +234,8 @@ def load_inputs(root_dir: Path, config_file: Path) -> dict:
         "对象",
     )
     skill_cfg_raw = load_json(root_dir / "config" / "skills.json", strict=True, missing_ok=False)
+    agent_defs, _ = apply_definition_overlays(agent_defs, overlay_definitions(config, "agents"), domain="agents")
+    tool_defs, _ = apply_definition_overlays(tool_defs, overlay_definitions(config, "tools"), domain="tools")
     skill_cfg = {
         "repositories": get_typed_mapping_section(skill_cfg_raw, "repositories", "skills.json", (dict,), "对象"),
         "agents": get_typed_mapping_section(skill_cfg_raw, "agents", "skills.json", (str, dict), "字符串或对象"),

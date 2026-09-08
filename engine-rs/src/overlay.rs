@@ -13,6 +13,11 @@ struct OverlayRule {
 
 fn rule_for(domain: &str) -> OverlayRule {
     match domain {
+        "agents" => OverlayRule {
+            overlay_key: "agent_definitions",
+            required_key: "bin",
+            known_keys: &["display_name", "bin", "app_path", "preferred_provider", "require_managed_provider", "providers", "_delete"],
+        },
         "mcp" => OverlayRule {
             overlay_key: "definitions",
             required_key: "command",
@@ -53,6 +58,9 @@ fn deep_merge(dst: &mut Map<String, Value>, src: &Map<String, Value>) {
 /// overlay_definitions port：合并后策略 config.<domain>.<overlay_key>，缺省 {}。
 pub fn overlay_definitions(config: &Map<String, Value>, domain: &str) -> Map<String, Value> {
     let rule = rule_for(domain);
+    if domain == "agents" {
+        return config.get(rule.overlay_key).and_then(Value::as_object).cloned().unwrap_or_default();
+    }
     config
         .get(domain)
         .and_then(Value::as_object)
@@ -82,7 +90,7 @@ pub fn apply_definition_overlays(
         }
         let unknown: Vec<&String> = fragment
             .keys()
-            .filter(|key| !rule.known_keys.contains(&key.as_str()))
+            .filter(|key| key.as_str() != "_replace" && !rule.known_keys.contains(&key.as_str()))
             .collect();
         if !unknown.is_empty() {
             warnings.push(format!(
@@ -92,9 +100,12 @@ pub fn apply_definition_overlays(
                 unknown.iter().map(|k| k.as_str()).collect::<Vec<_>>().join(", ")
             ));
         }
+        if fragment.get("_replace").and_then(Value::as_bool) == Some(true) {
+            merged.remove(name);
+        }
         let fragment: Map<String, Value> = fragment
             .iter()
-            .filter(|(key, _)| key.as_str() != "_delete")
+            .filter(|(key, _)| key.as_str() != "_delete" && key.as_str() != "_replace")
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect();
         match merged.get_mut(name) {
@@ -109,6 +120,9 @@ pub fn apply_definition_overlays(
             Some(map) => map,
             None => return Err(format!("{} 定义 {} 必须是对象", domain, name)),
         };
+        if domain == "agents" && !overlay_defs.contains_key(name) {
+            continue;
+        }
         let valid = definition
             .get(rule.required_key)
             .and_then(Value::as_str)

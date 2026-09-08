@@ -168,6 +168,15 @@ pub fn build_agents_status(
     .map_err(ConfigInvalid)?;
 
     let mut inventory = Inventory::new();
+    if config.get("agent_definitions").is_some_and(|value| !value.is_object()) {
+        return Err(ConfigInvalid("agent_definitions 必须是对象".into()));
+    }
+    let (agent_defs, overlay_warnings) = crate::overlay::apply_definition_overlays(
+        &agent_defs, &crate::overlay::overlay_definitions(&config, "agents"), "agents",
+    ).map_err(ConfigInvalid)?;
+    for warning in overlay_warnings {
+        warnings.push(diagnostic("DEFINITION_OVERLAY_UNKNOWN_KEYS", None, warning));
+    }
     let cache = upstream::load_cache();
     let mut elements = Vec::new();
     let mut def_names: Vec<&String> = agent_defs.keys().collect();
@@ -342,10 +351,9 @@ pub fn build_agents_plan(
     only: &[String],
 ) -> Result<(Value, Vec<Diagnostic>, Vec<Diagnostic>), ConfigInvalid> {
     let (status, mut warnings, errors) = build_agents_status(root_dir, config_file, def_files)?;
-    let agent_defs = canonicalize_agent_mapping(&Value::Object(
-        crate::mcp::load_json_object(&def_files[0])?,
-    ))
-    .map_err(ConfigInvalid)?;
+    let agent_defs: Map<String, Value> = status["elements"].as_array().unwrap().iter()
+        .map(|element| (element["id"].as_str().unwrap().trim_start_matches("agents:").to_string(), element["spec"].clone()))
+        .collect();
 
     let mut actions = Vec::new();
     let elements = status

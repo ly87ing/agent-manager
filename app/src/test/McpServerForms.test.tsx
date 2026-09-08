@@ -81,6 +81,7 @@ describe("MCP 服务定义覆盖层", () => {
     expect(setCalls[0].args[3]).toBe("mcp.definitions.demo-srv");
     const definition = JSON.parse(setCalls[0].args[5]);
     expect(definition).toEqual({
+      _delete: false,
       command: "npx",
       args: ["-y", "demo-srv-mcp"],
       startup_timeout_sec: 90,
@@ -115,18 +116,18 @@ describe("MCP 服务定义覆盖层", () => {
     expect(JSON.parse(setCalls[0].args[5]).startup_timeout_sec).toBe(99);
   });
 
-  it("移除覆盖层条目 → policy:delete local 层；移除基线条目 → tombstone", async () => {
+  it("移除覆盖层和基线条目均写标记，避免下层定义重新出现", async () => {
     const { calls } = renderWithEngine(<McpPage />, routes());
 
     // overlay：my-proxy 定义在 local 层
     await userEvent.click(await screen.findByText("mcp:my-proxy"));
     await userEvent.click(await screen.findByTestId("remove-server-mcp:my-proxy"));
     let dialog = await screen.findByRole("dialog");
-    expect(dialog).toHaveTextContent("会直接删除这段定义");
+    expect(dialog).toHaveTextContent("移除标记");
     fireEvent.change(screen.getByTestId("confirm-modal-input"), { target: { value: "my-proxy" } });
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
-    const deleteCall = calls.find((call) => call.command === "policy:delete");
-    expect(deleteCall!.args).toEqual(["--layer", "local", "--key", "mcp.definitions.my-proxy"]);
+    const deleteCall = calls.find((call) => call.command === "policy:set");
+    expect(deleteCall!.args).toEqual(["--layer", "local", "--key", "mcp.definitions.my-proxy", "--value", '{"_delete": true}']);
 
     // 移除后会打开「将要执行的操作」预览——关掉它再进行下一次移除
     await screen.findByRole("dialog", { name: /将要执行的操作/ });
@@ -137,7 +138,7 @@ describe("MCP 服务定义覆盖层", () => {
     await userEvent.click(await screen.findByTestId("remove-server-mcp:chrome-devtools"));
     dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("移除标记");
-    expect(dialog).toHaveTextContent("删除该标记即可恢复");
+    expect(dialog).toHaveTextContent("删除标记即可恢复");
     fireEvent.change(screen.getByTestId("confirm-modal-input"), { target: { value: "chrome-devtools" } });
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
     const tombstone = calls.filter((call) => call.command === "policy:set").pop();

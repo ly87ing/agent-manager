@@ -77,7 +77,7 @@ pnpm dev        # 打开 http://localhost:1420/?mock=1       （内置 fixture �
   只有 stdout 无法解析时才返回结构化 `EngineError`（含退出码与 stderr 摘要）。
 - 命令面白名单：`<domain>:status|plan|apply`（secrets 仅 status）、
   `system:audit|refresh-upstream|converge`、`snapshots:list|restore`、`runs:list|get`、
-  `policy:get|set`、`profile:status|pull|push`。
+  `policy:get|set`、`sources:get|set`、`profile:status|pull|push`。
 - 参数命令感知白名单：`--only <元素id>`（refresh-upstream）/ `--only <顶层键>`（profile:pull）、
   `--dry-run`、`--allow-uninstall`（仅 agents:apply）、`--run <id>`、`--lines <n>`、
   `--layer synced|local`、`--key <dot.path>`、`--value <json>`、`--accept-remote`（仅 profile:pull）、
@@ -103,7 +103,8 @@ pnpm dev        # 打开 http://localhost:1420/?mock=1       （内置 fixture �
   强制推送（仅分叉时可用，二次确认））+ 键级「以远端为准」（pull --accept-remote --only）；
   offline 全部禁用并标注。
 - 元素启停：Agents 卡片 / MCP 矩阵行 / Tools 行 / Skills 集合卡均有开关（policy.set 写默认策略层，
-  toast 给「立即同步」动作）；MCP 服务与 Skills 集合支持新增/编辑/移除（覆盖层语义）。
+  toast 给「立即同步」动作）；Agent、Tools、MCP 服务与 Skills 集合支持新增/编辑/移除（覆盖层语义）。Agent/Tools 使用 JSON 定义表单，Skills 集合支持编辑来源、发现范围、目标助手和单独更新。
+- Rules / Hooks / Aliases 的「管理定义」入口直接编辑源码或来源 JSON，支持增删内容；保存带读取版本校验与快照，之后预览域级同步。规则生成文件不直接编辑。来源保存属于配置写入，预览中的演练开关只控制后续同步。
 - 设置：占位页。
 
 ## 前端结构

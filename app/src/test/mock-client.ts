@@ -747,6 +747,12 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
       const runId = runOptions.runId ?? "20260906T020000Z-mockrun";
 
       // ---- 写路径与有状态命令 ----
+      if (command === "sources:get") {
+        const domain = args[args.indexOf("--key") + 1];
+        const suffix = domain === "rules" ? "shared" : domain === "hooks" ? "claude" : "shell";
+        return makeEnvelope({ sources: [{ key: `${domain}.${suffix}`, label: domain === "rules" ? "共享规则" : domain === "hooks" ? "Claude Hooks" : "Shell aliases", value: domain === "rules" ? "使用简体中文回答。\n" : {}, revision: "demo-revision", format: domain === "rules" ? "text" : "json" }] }, { command: "sources.get" });
+      }
+      if (command === "sources:set") return makeEnvelope({}, { command: "sources.set" });
       if (command === "policy:get") return policyGet();
       if (command === "policy:set") return policySet(args);
       if (command === "policy:delete") return policyDelete(args);

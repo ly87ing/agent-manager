@@ -50,6 +50,15 @@ contract/
 | `snapshots.schema.json` | `snapshots.list` / `snapshots.restore` 的 data：`{snapshots[] \| restore}`（restore 前先再快照当前态） | §4.10 |
 | `policy.schema.json` | `policy.get` / `policy.set` 的 data：三层原文 + effective + 层归属 / 写入回执（baseline 只读） | §7.2/§4.9 |
 | `profile.schema.json` | `profile.status/pull/push` 的 data：后端状态/ahead/behind/冲突/门禁回执 | §7.2/§4.11 |
+| `sources.schema.json` | `sources.get/set` 的 data：来源键、内容、读取版本、格式；set 返回保存后读回的来源 | 来源编辑 |
+
+`sources:get --key rules|hooks|aliases` 只读返回来源清单；省略 key 返回全部。
+`sources:set --key <来源键> --value '{"revision":"YOUR_REVISION","value":{}}'` 保存来源，
+value 对规则为字符串，对 Hooks/aliases 为 JSON 对象。来源键仅接受固定的三组规则源码、
+两组 Hooks 和 shell aliases，不接受文件路径。set 持写锁、检查 revision、扫描明文敏感信息，
+快照来源及本地保留标记后原子写入；`--dry-run` 仅验证，返回原内容，不创建快照。
+来源保存不会执行其中的命令，后续调用对应域的 plan/apply。来源保留标记写入本地策略的
+`source_edits`，独立客户端更新时据此保留已编辑文件。
 
 ## 关键字白名单（子集）
 

@@ -780,6 +780,7 @@ def main():
 
     # Distinguish the full target set (for cleaning up old links) from the active targets (for creating new links)
     agent_defs = load_json_object_file(REPO_ROOT / "config" / "agents.json", strict=False, missing_ok=True) or {}
+    agent_defs, _ = apply_definition_overlays(agent_defs, overlay_definitions(policy_root, "agents"), domain="agents")
     installed_agents = {
         name for name, target_path in AGENT_TARGETS.items() if is_active_skill_target(name, target_path, agent_defs)
     }

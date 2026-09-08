@@ -84,7 +84,7 @@ from src.manage_runtime_probe import (
     validate_repo_skill_matrix,
 )
 from src.npm_flags import OFFICIAL_NPM_REGISTRY
-from src import engine_apply, policy_layers, upstream_cache
+from src import engine_apply, policy_layers, source_definitions, upstream_cache
 
 CONTRACT_ID = "agent-manager/engine/v1"
 
@@ -105,6 +105,7 @@ KNOWN_DOMAINS = (
     "system",
     "runs",
     "snapshots",
+    "sources",
 )
 
 # Proposal section 3.3: until the upstream probe cache exists, every element
@@ -827,6 +828,8 @@ def build_agents_status(root_dir, config_file, def_files):
     agent_defs = canonicalize_agent_mapping(
         load_json_object_file(def_files[0], strict=True, missing_ok=False)
     )
+    agent_defs, overlay_warnings = policy_layers.apply_definition_overlays(agent_defs, policy_layers.overlay_definitions(config, "agents"), domain="agents")
+    warnings.extend(diagnostic("DEFINITION_OVERLAY_UNKNOWN_KEYS", None, item) for item in overlay_warnings)
     inventory = ProviderInventory()
     cache = upstream_cache.load_cache()
     elements = []
@@ -884,9 +887,7 @@ def build_agents_status(root_dir, config_file, def_files):
 
 def build_agents_plan(root_dir, config_file, def_files, only=None, agent=None):
     status, warnings, errors = build_agents_status(root_dir, config_file, def_files)
-    agent_defs = canonicalize_agent_mapping(
-        load_json_object_file(def_files[0], strict=True, missing_ok=False)
-    )
+    agent_defs = {element["id"].split(":", 1)[1]: element["spec"] for element in status["elements"]}
     actions = []
     for element in status["elements"]:
         if only is not None and element["id"] not in only:
@@ -1015,7 +1016,10 @@ def build_tools_status(root_dir, config_file, def_files):
     inventory = ProviderInventory()
     cache = upstream_cache.load_cache()
     elements = []
-    for name in sorted(set(tool_defs) | set(tools_policy)):
+    tool_defs, overlay_warnings = policy_layers.apply_definition_overlays(tool_defs, policy_layers.overlay_definitions(config, "tools"), domain="tools")
+    warnings.extend(diagnostic("DEFINITION_OVERLAY_UNKNOWN_KEYS", None, item) for item in overlay_warnings)
+    removed = {name for name, fragment in policy_layers.overlay_definitions(config, "tools").items() if fragment.get("_delete") is True}
+    for name in sorted((set(tool_defs) | set(tools_policy)) - removed):
         definition = tool_defs.get(name)
         policy = tools_policy.get(name)
         declared = isinstance(policy, dict)
@@ -2059,6 +2063,7 @@ def _collect_refresh_targets(root_dir, config_file):
     agent_defs = canonicalize_agent_mapping(
         load_json_object_file(root_dir / "config" / "agents.json", strict=True, missing_ok=False)
     )
+    agent_defs, _ = policy_layers.apply_definition_overlays(agent_defs, policy_layers.overlay_definitions(config, "agents"), domain="agents")
     for agent_id in sorted(agent_defs):
         policy = agents_policy.get(agent_id)
         if not isinstance(policy, dict) or not policy.get("enabled", True):
@@ -2074,6 +2079,7 @@ def _collect_refresh_targets(root_dir, config_file):
         load_json_object_file(root_dir / "config" / "tools.json", strict=True, missing_ok=False),
         "tools", "tools.json", (dict,), "对象",
     )
+    tool_defs, _ = policy_layers.apply_definition_overlays(tool_defs, policy_layers.overlay_definitions(config, "tools"), domain="tools")
     for name in sorted(tool_defs):
         policy = tools_policy.get(name)
         if not isinstance(policy, dict) or not policy.get("enabled", True):
@@ -3508,6 +3514,9 @@ def main(argv=None):
     elif domain == "policy" and verb in ("get", "set", "delete"):
         kernel = "policy:%s" % verb
         kernel_needs_def_file = False
+    elif domain == "sources" and verb in ("get", "set"):
+        kernel = "sources:%s" % verb
+        kernel_needs_def_file = False
     else:
         return not_implemented()
 
@@ -3655,6 +3664,17 @@ def main(argv=None):
             data, warnings, errors = build_snapshots_restore(
                 REPO_ROOT, args.config, args.run, resnapshot_run_id="%s-re-%s" % (args.run, run_id)
             )
+        elif kernel == "sources:get":
+            if args.key and args.key not in ("rules", "hooks", "aliases"):
+                raise ValueError("--key 只支持 rules、hooks 或 aliases")
+            data = {"sources": [source_definitions.get_source(REPO_ROOT, key) for key in source_definitions.SOURCES if not args.key or key.startswith(args.key + ".")]}
+            warnings, errors = [], []
+        elif kernel == "sources:set":
+            source = source_definitions.set_source(REPO_ROOT, args.key, json.loads(args.value or "null"),
+                snapshot=lambda paths: engine_apply.create_snapshot(run_id, "sources.set", paths, []),
+                validate_hooks=_sync_claude_hooks._validate_hooks_map, dry_run=mode["dry_run"])
+            data = {"sources": [source]}
+            warnings, errors = [], []
         elif kernel == "policy:get":
             data, warnings, errors = build_policy_get(REPO_ROOT, args.config)
         elif kernel == "policy:set":

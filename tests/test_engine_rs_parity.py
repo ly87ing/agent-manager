@@ -558,6 +558,23 @@ class EngineRsAgentsParityTests(unittest.TestCase):
         self.assertEqual(elements["agents:fake-ok"]["freshness"]["current"], "1.0.0")
         self.assertEqual(elements["agents:fake-ok"]["freshness"]["state"], "unknown")
 
+    def test_agent_overlay_add_edit_remove_status_and_plan_parity(self):
+        manager = json.loads((self.repo / "config/manager.json").read_text())
+        manager["agent_definitions"] = {
+            "fake-disabled": {"_delete": True},
+            "fake-missing": {"display_name": "Edited agent"},
+            "custom": {"bin": "__custom_missing__", "providers": {"npm": {"managed": True, "install": "echo custom"}}},
+        }
+        manager["agents"]["custom"] = {"enabled": True}
+        self._write_config("manager.json", manager)
+        for verb in ("status", "plan"):
+            payload = self._assert_parity(f"agents:{verb}", "--config", "config/manager.json", "--def-file", "config/agents.json", "--json")
+            if verb == "status":
+                elements = {element["id"]: element for element in payload["data"]["elements"]}
+                self.assertIn("agents:custom", elements)
+                self.assertNotIn("agents:fake-disabled", elements)
+                self.assertEqual(elements["agents:fake-missing"]["spec"]["display_name"], "Edited agent")
+
     def test_agents_status_parity_unsupported_is_error_exit_1(self):
         self._make_bin("fake-unsupported-bin", subdir="node_modules/.bin")
         defs = json.loads((self.repo / "config" / "agents.json").read_text(encoding="utf-8"))

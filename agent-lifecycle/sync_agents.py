@@ -19,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
 from src.agent_ids import canonicalize_agent_mapping, get_agent_display_name
 from src.command_runner import run_command
 from src.json_config import ensure_mapping_value_types, get_typed_mapping_section, load_json_object_file
+from src.policy_layers import apply_definition_overlays, overlay_definitions
 from src.npm_flags import inject_npm_flags
 from src.manage_runtime_probe import (
     ProviderInventory as ProviderCache,
@@ -767,6 +768,9 @@ def main():
         def_cfg = canonicalize_agent_mapping(
             ensure_mapping_value_types(def_root, Path(args.def_file).name, (dict,), "对象")
         )
+        def_cfg, overlay_warnings = apply_definition_overlays(def_cfg, overlay_definitions(policy_root, "agents"), domain="agents")
+        for warning in overlay_warnings:
+            logging.warning(warning)
     except ValueError as exc:
         logging.error(str(exc))
         sys.exit(1)

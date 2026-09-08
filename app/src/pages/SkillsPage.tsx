@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Inbox, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Inbox, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { DriftExplanationPanel } from "../components/DriftExplanationPanel";
 import { ErrorPanel } from "../components/ErrorPanel";
@@ -40,11 +40,15 @@ function CollectionCard({
   inboxCount,
   onToggle,
   onRemove,
+  onEdit,
+  onUpdate,
 }: {
   element: EngineElement;
   inboxCount: number;
   onToggle: () => void;
   onRemove: () => void;
+  onEdit: () => void;
+  onUpdate: () => void;
 }) {
   const spec = element.spec as SkillCollectionSpec;
   const observed = element.observed as SkillCollectionObserved;
@@ -122,6 +126,10 @@ function CollectionCard({
         </span>
         <FreshnessBadge freshness={element.freshness} className="items-end" />
       </div>
+      <div className="mt-3 flex gap-2">
+        <button type="button" onClick={onEdit} data-testid={`edit-collection-${name}`} className="inline-flex items-center gap-1 rounded border px-3 py-2 text-xs text-slate-600"><Pencil className="h-3.5 w-3.5" aria-hidden />编辑集合</button>
+        <button type="button" onClick={onUpdate} data-testid={`update-collection-${name}`} className="inline-flex items-center gap-1 rounded border px-3 py-2 text-xs text-indigo-600"><RefreshCw className="h-3.5 w-3.5" aria-hidden />更新集合</button>
+      </div>
       {(observed.extra_links?.length ?? 0) > 0 && (
         <p className="mt-2 text-xs text-amber-700">
           发现计划外的链接:{observed.extra_links!.join(", ")}
@@ -136,6 +144,7 @@ export default function SkillsPage() {
   const policyQuery = useEngineQuery<PolicyData>("policy:get");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editing, setEditing] = useState<EngineElement | null>(null);
   const preview = usePlanPreview();
   const executeApply = useExecuteApply();
   const elementToggle = useElementToggle();
@@ -243,6 +252,8 @@ export default function SkillsPage() {
               });
             }}
             onRemove={() => definitionOps.requestRemove(collection.id.replace(/^skill:/, ""), layers)}
+            onEdit={() => setEditing(collection)}
+            onUpdate={() => openApplyPreview(collection, `更新 ${collection.id.replace(/^skill:/, "")}`)}
           />
         ))}
       </div>
@@ -330,13 +341,15 @@ export default function SkillsPage() {
         {matrixSkills.length === 0 && <p className="py-4 text-center text-sm text-slate-400">无已声明 skill</p>}
       </section>
 
-      {showAddForm && (
+      {(showAddForm || editing) && (
         <SkillCollectionFormDialog
           agentIds={agentColumns}
-          onClose={() => setShowAddForm(false)}
+          initial={editing ? { name: editing.id.replace(/^skill:/, ""), definition: editing.spec } : undefined}
+          onClose={() => { setShowAddForm(false); setEditing(null); }}
           onSubmit={(name, definition) => {
             setShowAddForm(false);
-            void definitionOps.saveAndApply({ name, definition, isNew: true, elementId: `skill:${name}` });
+            setEditing(null);
+            void definitionOps.saveAndApply({ name, definition, isNew: !editing, elementId: `skill:${name}` });
           }}
         />
       )}

@@ -14,14 +14,14 @@ describe("定义覆盖层移除决策", () => {
     expect(definitionKeyPrefix("skills")).toBe("skills.repositories");
   });
 
-  it("定义在 local → 从 local policy:delete", () => {
+  it("定义在 local → 写入移除标记，防止下层定义恢复", () => {
     const plan = planDefinitionRemoval(layers, "mcp", "my-proxy", "local");
-    expect(plan).toEqual({ kind: "overlay", layer: "local", key: "mcp.definitions.my-proxy" });
+    expect(plan).toEqual({ kind: "tombstone", layer: "local", key: "mcp.definitions.my-proxy" });
   });
 
-  it("定义在 synced → 从 synced policy:delete", () => {
+  it("定义在 synced → 在默认 local 层遮蔽", () => {
     const plan = planDefinitionRemoval(layers, "mcp", "synced-srv", "local");
-    expect(plan).toEqual({ kind: "overlay", layer: "synced", key: "mcp.definitions.synced-srv" });
+    expect(plan).toEqual({ kind: "tombstone", layer: "local", key: "mcp.definitions.synced-srv" });
   });
 
   it("两层都没有（基线条目）→ 往默认层写 tombstone", () => {

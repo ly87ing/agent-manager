@@ -105,6 +105,25 @@ function skillsRoutes() {
 }
 
 describe("SkillsPage 三级视图", () => {
+  it("编辑集合可清空发现范围，并只预览当前集合", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
+    await userEvent.click(await screen.findByTestId("edit-collection-agent-skills"));
+    expect(screen.getByTestId("collection-name-input")).toBeDisabled();
+    expect(screen.getByTestId("collection-url-input")).toHaveValue("https://github.com/example/agent-skills.git");
+    fireEvent.change(screen.getByTestId("collection-paths-input"), { target: { value: "" } });
+    await userEvent.click(screen.getByTestId("collection-form-submit"));
+    await screen.findByRole("dialog", { name: /将要执行的操作/ });
+    const write = calls.find((call) => call.command === "policy:set")!;
+    expect(JSON.parse(write.args[write.args.indexOf("--value") + 1])).toMatchObject({ skill_paths: null, _delete: false });
+    expect(calls.find((call) => call.command === "skills:plan")?.args).toEqual(["--only", "skill:agent-skills"]);
+  });
+
+  it("更新集合预览限定在所选集合", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
+    await userEvent.click(await screen.findByTestId("update-collection-agent-skills"));
+    await screen.findByRole("dialog", { name: /将要执行的操作/ });
+    expect(calls.find((call) => call.command === "skills:plan")?.args).toEqual(["--only", "skill:agent-skills"]);
+  });
   it("集合卡片：模式/默认姿态/缓存/收件箱计数徽标", async () => {
     renderWithEngine(<SkillsPage />, skillsRoutes());
     const card = await screen.findByTestId("collection-card-agent-skills");
