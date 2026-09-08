@@ -1,6 +1,6 @@
 # Agent Manager 本地管理重设计
 
-状态：2026-09-08 分阶段实施中。官方安装默认值及已有来源原地升级已通过验收；SQLite、命令表单及其余资源管理仍在实施。本文替代旧 GUI 提案中的产品模型、存储方案和实施顺序；当前已实现行为仍以代码、README 和 ARCHITECTURE 为准。
+状态：2026-09-08 分阶段实施中。官方安装默认值、必要命令表单、助手显式动作、SQLite 策略与定义迁移，以及 Skill 不可变版本与分配适配器已通过对应验收并推送。Skill 统一引擎和页面、MCP 与其余资源管理尚未完成；后续候选未通过验收，保留在本地工作区，未提交。尚未完成新版完整桌面验收。本文替代旧 GUI 提案中的产品模型、存储方案和实施顺序；当前已实现行为仍以代码、README 和 ARCHITECTURE 为准。
 
 用户在一个本地应用里添加 Agent、Skill、MCP 和规则，选择哪些 Agent 使用，执行安装或更新，看到实际结果。本机调整存入 SQLite；日常操作无需理解 Git、策略层、覆盖定义或同步命令。
 
@@ -54,7 +54,7 @@ SQLite 管理集合、资源和分配关系，约束重复记录并事务化修�
 | Codex | 当前官方 CLI 页面首先提供的独立安装器 | 当前页面的 Update Codex 使用同一安装脚本，模板遵循该方式 |
 | 自定义 Agent | 用户填写的安装命令 | 用户填写的升级命令 |
 
-macOS/Linux 官方命令分别为 `curl -fsSL https://claude.ai/install.sh | bash` 和 `curl -fsSL https://chatgpt.com/codex/install.sh | sh`。Windows 模板分别配置官方 PowerShell/CMD 方案，不能复用 POSIX Shell 字符串。以上仅核对，未在本次执行。[Claude 官方安装与更新说明](https://code.claude.com/docs/en/setup)、[Codex 官方 CLI 说明](https://developers.openai.com/codex/cli)，2026-09-08 核对。
+macOS/Linux 官方命令分别为 `curl -fsSL https://claude.ai/install.sh | bash` 和 `curl -fsSL https://chatgpt.com/codex/install.sh | sh`。Windows 不能复用 POSIX Shell 字符串；Claude 模板采用官方平台命令，Codex 的 Windows 原生安装尚未核实，当前不提供该默认动作。以上安装命令仅核对，未在本机执行。[Claude 官方安装与更新说明](https://code.claude.com/docs/en/setup)、[Codex 官方 CLI 说明](https://developers.openai.com/codex/cli)，2026-09-08 核对。
 
 Homebrew 并非一概不受官方支持；两家的资料都提供该渠道。产品区分“官方推荐”“官方支持”“用户自定义”，不把项目维护者偏好标成官方推荐。模板记录官方链接、核对日期、平台和命令。
 
@@ -166,6 +166,18 @@ GUI 和 CLI 经同一引擎访问数据库并串行化写操作。过渡期旧 P
 | 3：Skill | 集合/资源/分配、版本隔离、五种操作 | 单 Agent 更新/禁用/删除互不影响；集合暂停恢复保留选择 |
 | 4：MCP 与其他配置 | 服务版本、逐 Agent 分配、规则和 Hooks | 两个 Agent 配置独立；非受管内容保留；配置与连接分别回读 |
 | 5：桌面交互 | 导航、动作文案、失败处理、可访问性 | 真实交互通过，文案与文件/数据库结果一致 |
+
+### 当前待完成的验收
+
+已推送的基础能力不能代表下列流程已经完成。恢复实施时先修复本地候选，再接入页面和实际应用入口。
+
+| 范围 | 当前缺口与验收要求 |
+| --- | --- |
+| 资源表单 | 最新候选的 21 项针对性测试有 2 项因缺少 `waitFor` 导入失败，类型检查另有编辑对象可能为空的问题；修复后验证首次迁移、未展示字段保留、脱敏值不写回、清空字段不复活和取消零写入 |
+| Skills 集合与分配 | 统一引擎和页面尚未接入；集合删除必须事务化保存删除标记和分配记录，启停与失败恢复不能覆盖其他集合或外部修改 |
+| MCP 分配 | 五种动作的外部修改保护与删除后重新添加正在修复，尚未完成最终回归；统一引擎和页面入口未接入 |
+| 规则、Hooks 与 aliases | 存储基础候选的 47 项针对性测试通过，但首次编辑的版本摘要保护、坏数据拒绝和实际应用读取数据库投影仍需完成；保存成功不能代替应用成功 |
+| 桌面流程 | 简化导航、助手内的资源管理入口，以及新版完整交互与发行包验收尚未完成 |
 
 每阶段先跑对应最小测试，再跑相关完整测试。复用 `tests/test_definition_overlay.py`、`test_agent_lifecycle.py`、`test_link_skills.py`、`test_sync_mcp.py` 等现有保护；迁移相关旧期望注明行为变化原因，不删除、跳过或放松断言来通过。
 
