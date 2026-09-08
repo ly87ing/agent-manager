@@ -286,14 +286,47 @@ def migrate_if_needed(
             tmp_conn.execute("INSERT INTO schema_meta (key, value) VALUES ('migration_completed_at', ?)", (now_str,))
             tmp_conn.execute("INSERT INTO schema_meta (key, value) VALUES ('migration_summary', ?)", (json.dumps(summary),))
 
-            # 9. Integrity check
+            # 9. Commit, checkpoint, and switch journal mode to DELETE so the temporary DB
+            # file is completely self-contained before atomic swap.
+            # In macOS system SQLite (3.43.2) and others, a DB created in WAL mode leaves
+            # companion -wal/-shm files after close; renaming only the main file leaves
+            # it dependent on a missing WAL file when subsequent read-only connections
+            # (mode=ro) open it. Switching to DELETE journal mode flushes and truncates
+            # WAL back into the main database file.
+            tmp_conn.commit()
+
+            # Ensure checkpoint succeeds with zero busy status
+            cp = tmp_conn.execute("PRAGMA wal_checkpoint(TRUNCATE);").fetchone()
+            if not cp or cp[0] != 0:
+                raise MigrationError(f"WAL checkpoint 未能完成 (busy={cp[0] if cp else 'unknown'})")
+
+            # Ensure journal_mode switch actually transitions to delete
+            jm = tmp_conn.execute("PRAGMA journal_mode = DELETE;").fetchone()
+            if not jm or str(jm[0]).lower() != "delete":
+                raise MigrationError(f"未能将数据库切回 DELETE 日志模式 (当前为 {jm[0] if jm else 'unknown'})")
+
             check = tmp_conn.execute("PRAGMA integrity_check;").fetchall()
             if not check or check[0][0] != "ok":
                 raise MigrationError("数据库完整性校验失败")
 
-            tmp_conn.commit()
             tmp_conn.close()
             tmp_conn = None
+
+            # Self-contained verification: ensure the published file can be opened
+            # read-only without companion WAL files before renaming.
+            verify_conn = connect_db(tmp_db, read_only=True)
+            try:
+                ensure_db_ready(verify_conn, tmp_db)
+            finally:
+                verify_conn.close()
+
+            # Clean up any leftover temporary companion files (-wal, -shm)
+            for stray in (Path(f"{tmp_db}-wal"), Path(f"{tmp_db}-shm")):
+                if stray.is_file():
+                    try:
+                        stray.unlink()
+                    except OSError:
+                        pass
 
             enforce_db_permissions(tmp_db)
 

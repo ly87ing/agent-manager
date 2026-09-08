@@ -795,6 +795,123 @@ class SqliteStorageTests(unittest.TestCase):
 
         self.assertEqual(self.db_path.read_bytes(), frozen, "manage.sh must not modify a rejected DB")
 
+    def test_migration_published_db_is_self_contained_for_read_only_connections(self):
+        """Regression: ensure manager.db is published in a self-contained state.
+
+        On SQLite implementations (e.g. macOS system SQLite 3.43.2), closing a
+        WAL database can leave companion -wal/-shm files. If the temporary DB is
+        renamed while depending on WAL mode, subsequent mode=ro read-only connections
+        fail with OperationalError('unable to open database file'). Migration must
+        checkpoint and switch journal mode to DELETE prior to atomic swap, guaranteeing
+        immediate read_only accessibility without WAL files.
+        """
+        target = migrate_if_needed(self.repo_root, data_dir=self.data_dir)
+        self.assertEqual(target, self.db_path)
+        self.assertTrue(self.db_path.is_file())
+
+        # Verify no stray temporary companion files remain in data_dir
+        stray_tmp = list(self.data_dir.glob("*.tmp*"))
+        self.assertEqual(stray_tmp, [], "temporary migration files must be cleaned up")
+
+        # Explicitly ensure target_db can be opened read-only even when no -wal file exists
+        wal_file = Path(f"{self.db_path}-wal")
+        self.assertFalse(wal_file.exists(), "freshly migrated DB must not leave orphaned -wal")
+
+        ro_conn = connect_db(self.db_path, read_only=True)
+        try:
+            row = ro_conn.execute("SELECT count(*) FROM definitions").fetchone()
+            self.assertGreater(row[0], 0)
+            meta = {r["key"]: r["value"] for r in ro_conn.execute("SELECT key, value FROM schema_meta")}
+            self.assertIn("migration_completed_at", meta)
+        finally:
+            ro_conn.close()
+
+        # project_config_from_db uses read_only=True internally and must succeed
+        projected = project_config_from_db(self.db_path)
+        self.assertIn("agents", projected)
+
+        # Subsequent write must switch cleanly back to WAL and function normally
+        policy_set_db(self.db_path, "agents.claude-code.enabled", False)
+        updated = project_config_from_db(self.db_path)
+        self.assertFalse(updated["agents"]["claude-code"]["enabled"])
+
+    def test_isolated_runtime_migrate_project_policy_lifecycle(self):
+        """Verify full lifecycle (migrate -> project -> policy read/write -> repeated startup)
+
+        Runs under isolated HOME and AGENT_MANAGER_DATA_DIR using synthesized configs.
+        Tests under sys.executable, and if /usr/bin/python3 exists and is distinct,
+        also verifies against system python.
+        """
+        import sys
+        pythons_to_test = [sys.executable]
+        system_python = "/usr/bin/python3"
+        if Path(system_python).is_file() and os.access(system_python, os.X_OK) and system_python != sys.executable:
+            pythons_to_test.append(system_python)
+
+        for py_cmd in pythons_to_test:
+            with self.subTest(python=py_cmd):
+                sub_temp = Path(tempfile.mkdtemp(prefix="agent_mgr_lifecycle_"))
+                try:
+                    sub_home = sub_temp / "home"
+                    sub_home.mkdir()
+                    sub_data = sub_temp / "data"
+                    sub_data.mkdir()
+                    sub_repo = sub_temp / "repo"
+                    shutil.copytree(self.repo_root, sub_repo)
+
+                    sub_env = os.environ.copy()
+                    sub_env["HOME"] = str(sub_home)
+                    sub_env["AGENT_MANAGER_DATA_DIR"] = str(sub_data)
+                    sub_env["AGENT_MANAGER_LOCAL_CONFIG"] = str(sub_temp / "manager.local.json")
+                    sub_env["AGENT_MANAGER_SYNCED_CONFIG"] = str(sub_temp / "manager.synced.json")
+                    sub_env["PYTHONPATH"] = str(ROOT)
+
+                    code = """
+import os, sys, json
+from pathlib import Path
+from src.storage import migrate_if_needed, project_config_from_db, policy_set_db, policy_delete_db, policy_get_db
+
+repo = Path(sys.argv[1])
+data_dir = Path(os.environ['AGENT_MANAGER_DATA_DIR'])
+
+# 1. migrate_if_needed
+target_db = migrate_if_needed(repo, data_dir=data_dir)
+assert target_db.is_file(), 'manager.db missing'
+
+# 2. project immediately via read-only mode
+cfg = project_config_from_db(target_db)
+assert 'agents' in cfg, 'missing agents in projection'
+
+# 3. policy:get
+p_get = policy_get_db(target_db)
+assert p_get['attribution']['agents'] == 'sqlite'
+
+# 4. policy:set
+policy_set_db(target_db, 'agents.claude-code.enabled', False)
+cfg_after = project_config_from_db(target_db)
+assert cfg_after['agents']['claude-code']['enabled'] is False
+
+# 5. policy:delete
+policy_delete_db(target_db, 'agents.claude-code.enabled')
+
+# 6. repeated startup (no-op re-migration)
+target_db2 = migrate_if_needed(repo, data_dir=data_dir)
+assert target_db2 == target_db
+print('LIFECYCLE_OK')
+"""
+                    res = subprocess.run(
+                        [py_cmd, "-c", code, str(sub_repo)],
+                        cwd=ROOT,
+                        env=sub_env,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(res.returncode, 0, f"{py_cmd} failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}")
+                    self.assertIn("LIFECYCLE_OK", res.stdout)
+                finally:
+                    shutil.rmtree(sub_temp, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

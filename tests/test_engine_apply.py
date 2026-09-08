@@ -8,6 +8,7 @@ every assertion about writes is paired with a dry-run zero-write counterpart.
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 import unittest
@@ -31,11 +32,14 @@ COPY_IGNORE = shutil.ignore_patterns(
 
 class EngineWritePathTests(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = Path(tempfile.mkdtemp(prefix="agent_manager_apply_test_"))
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="agent_manager_apply_test_")).resolve()
         self.addCleanup(shutil.rmtree, self.temp_dir, ignore_errors=True)
         self.repo = self.temp_dir / "repo"
         self.home = self.temp_dir / "home"
         self.home.mkdir()
+        self.data_dir = self.temp_dir / "data"
+        self.data_dir.mkdir()
+        self.db_path = self.data_dir / "manager.db"
         shutil.copytree(ROOT, self.repo, ignore=COPY_IGNORE)
         if os.environ.get("ENGINE_RS"):
             for candidate in (
@@ -71,6 +75,7 @@ class EngineWritePathTests(unittest.TestCase):
     def _env(self, extra=None):
         env = os.environ.copy()
         env["HOME"] = str(self.home)
+        env["AGENT_MANAGER_DATA_DIR"] = str(self.data_dir)
         env["AGENT_MANAGER_LOCK_FILE"] = str(self.temp_dir / "agent_manager.lock")
         env["AGENT_MANAGER_LOG_PREFIX"] = str(self.log_prefix)
         env["AGENT_MANAGER_SNAPSHOT_DIR"] = str(self.snapshot_dir)
@@ -415,33 +420,103 @@ class EngineWritePathTests(unittest.TestCase):
 
     def test_policy_set_writes_layer_and_get_shows_attribution(self):
         baseline_before = (self.repo / "config" / "manager.json").read_bytes()
+        local_file = self.temp_dir / "manager.local.json"
+        legacy_content = json.dumps({"tools": {"legacy_tool": {"enabled": True}}}, indent=2) + "\n"
+        local_file.write_text(legacy_content, encoding="utf-8")
+
         payload = self._payload(
             "policy:set", "--json", "--layer", "local", "--key", "mcp.alpha.enabled", "--value", "false"
         )
         self._assert_schema(POLICY_SCHEMA, payload["data"])
         self.assertEqual(payload["data"]["layer"], "local")
         self.assertEqual(payload["data"]["value"], False)
-        local_path = Path(payload["data"]["path"])
-        self.assertEqual(oct(local_path.stat().st_mode & 0o777), "0o600")
-        written = json.loads(local_path.read_text(encoding="utf-8"))
-        self.assertEqual(written, {"mcp": {"alpha": {"enabled": False}}})
+        db_path = Path(payload["data"]["path"])
+        self.assertEqual(db_path.resolve(), self.db_path.resolve())
+        self.assertEqual(oct(db_path.stat().st_mode & 0o777), "0o600")
+
+        # 旧 JSON 文件保留且零改动（不会被反向覆写）
+        self.assertEqual(local_file.read_text(encoding="utf-8"), legacy_content)
+
+        # 直接检查 DB 行与审计记录
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute("SELECT value_json FROM policy_entries WHERE key = 'mcp'").fetchone()
+            self.assertIsNotNone(row)
+            written = json.loads(row["value_json"])
+            self.assertEqual(written, {"alpha": {"enabled": False}})
+
+            row_tools = conn.execute("SELECT value_json FROM policy_entries WHERE key = 'tools'").fetchone()
+            self.assertIsNotNone(row_tools)
+            self.assertEqual(json.loads(row_tools["value_json"]), {"legacy_tool": {"enabled": True}})
+
+            op = conn.execute(
+                "SELECT operation_type, target, detail_json FROM operation_logs WHERE target = 'mcp.alpha.enabled'"
+            ).fetchone()
+            self.assertIsNotNone(op)
+            self.assertEqual(op["operation_type"], "policy:set")
+            self.assertEqual(json.loads(op["detail_json"])["value"], False)
+        finally:
+            conn.close()
+
         # 基线层逐字节零改动（只读可审计）。
         self.assertEqual((self.repo / "config" / "manager.json").read_bytes(), baseline_before)
 
+        # policy:get 归因 sqlite 及重复进程持久化
         payload = self._payload("policy:get", "--json")
         self._assert_schema(POLICY_SCHEMA, payload["data"])
-        self.assertEqual(payload["data"]["layers"]["local"], {"mcp": {"alpha": {"enabled": False}}})
-        self.assertEqual(payload["data"]["attribution"]["mcp"], "local")
+        self.assertIsNone(payload["data"]["layers"]["local"])
+        self.assertIsNone(payload["data"]["layers"]["synced"])
+        self.assertIsNone(payload["data"]["layers"]["baseline"])
+        self.assertEqual(payload["data"]["layers"]["sqlite"]["mcp"]["alpha"]["enabled"], False)
+        self.assertEqual(payload["data"]["attribution"]["mcp"], "sqlite")
+        self.assertEqual(payload["data"]["attribution"]["agents"], "sqlite")
         self.assertEqual(payload["data"]["effective"]["mcp"]["alpha"]["enabled"], False)
-        self.assertEqual(payload["data"]["attribution"]["agents"], "baseline")
+        self.assertEqual(payload["data"]["effective"]["tools"]["legacy_tool"]["enabled"], True)
 
     def test_policy_set_synced_layer_via_env_override(self):
+        synced_file = self.temp_dir / "manager.synced.json"
+        legacy_content = json.dumps({"skills": {"existing": {"enabled": True}}}, indent=2) + "\n"
+        synced_file.write_text(legacy_content, encoding="utf-8")
+
         payload = self._payload(
             "policy:set", "--json", "--layer", "synced", "--key", "skills.coll.new_skill_default", "--value", '"disabled"'
         )
+        self._assert_schema(POLICY_SCHEMA, payload["data"])
         self.assertEqual(payload["data"]["layer"], "synced")
-        synced = json.loads((self.temp_dir / "manager.synced.json").read_text(encoding="utf-8"))
-        self.assertEqual(synced, {"skills": {"coll": {"new_skill_default": "disabled"}}})
+        self.assertEqual(payload["data"]["value"], "disabled")
+        db_path = Path(payload["data"]["path"])
+        self.assertEqual(db_path.resolve(), self.db_path.resolve())
+        self.assertEqual(oct(db_path.stat().st_mode & 0o777), "0o600")
+
+        # 旧 JSON 文件保留且零改动
+        self.assertEqual(synced_file.read_text(encoding="utf-8"), legacy_content)
+
+        # 直接检查 DB 行与审计记录：旧键仍在 DB，新键成功设置
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute("SELECT value_json FROM policy_entries WHERE key = 'skills'").fetchone()
+            self.assertIsNotNone(row)
+            skills_val = json.loads(row["value_json"])
+            self.assertEqual(skills_val, {"existing": {"enabled": True}, "coll": {"new_skill_default": "disabled"}})
+
+            op = conn.execute(
+                "SELECT operation_type, target, detail_json FROM operation_logs WHERE target = 'skills.coll.new_skill_default'"
+            ).fetchone()
+            self.assertIsNotNone(op)
+            self.assertEqual(op["operation_type"], "policy:set")
+            self.assertEqual(json.loads(op["detail_json"])["value"], "disabled")
+        finally:
+            conn.close()
+
+        # 重复进程持久化与 policy:get 归因
+        get_payload = self._payload("policy:get", "--json")
+        self._assert_schema(POLICY_SCHEMA, get_payload["data"])
+        self.assertEqual(get_payload["data"]["attribution"]["skills"], "sqlite")
+        self.assertEqual(get_payload["data"]["effective"]["skills"]["existing"]["enabled"], True)
+        self.assertEqual(get_payload["data"]["effective"]["skills"]["coll"]["new_skill_default"], "disabled")
+        self.assertEqual(get_payload["data"]["layers"]["sqlite"]["skills"]["coll"]["new_skill_default"], "disabled")
 
     def test_policy_set_rejects_baseline_layer(self):
         payload = self._payload(
@@ -480,6 +555,10 @@ class EngineWritePathTests(unittest.TestCase):
     # ------------------------------------------------------------------ policy:delete
 
     def test_policy_delete_removes_key_and_snapshots(self):
+        local_file = self.temp_dir / "manager.local.json"
+        legacy_content = json.dumps({"mcp": {"pre_existing": {"enabled": True}}}, indent=2) + "\n"
+        local_file.write_text(legacy_content, encoding="utf-8")
+
         self._payload(
             "policy:set", "--json", "--layer", "local", "--key", "mcp.alpha.enabled", "--value", "false"
         )
@@ -487,12 +566,39 @@ class EngineWritePathTests(unittest.TestCase):
         self._assert_schema(POLICY_SCHEMA, payload["data"])
         self.assertEqual(payload["data"]["layer"], "local")
         self.assertIsNone(payload["data"]["value"])
-        written = json.loads((self.temp_dir / "manager.local.json").read_text(encoding="utf-8"))
-        self.assertEqual(written, {"mcp": {"alpha": {}}})
-        # 写前快照可见（snapshots:list 语义复用）。
-        listing = self._payload("snapshots:list", "--json")
-        commands = [entry["command"] for entry in listing["data"]["snapshots"]]
-        self.assertIn("policy.delete", commands)
+        db_path = Path(payload["data"]["path"])
+        self.assertEqual(db_path.resolve(), self.db_path.resolve())
+        self.assertEqual(oct(db_path.stat().st_mode & 0o777), "0o600")
+
+        # 旧 JSON 文件严格保留且零改动（SQLite 不会回写旧层文件）
+        self.assertEqual(local_file.read_text(encoding="utf-8"), legacy_content)
+
+        # 直接检查 DB 行与审计记录：
+        # SQLite 统一存储下 policy:delete 在事务内更新 DB 并记入 operation_logs 审计表；
+        # 不生成旧物理文件快照（旧 snapshots:list 断言仅针对旧 JSON 文件备份）。
+        # 此处精确验证目标字段删除且未被删的旧键完整保留。
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute("SELECT value_json FROM policy_entries WHERE key = 'mcp'").fetchone()
+            self.assertIsNotNone(row)
+            mcp_doc = json.loads(row["value_json"])
+            self.assertEqual(mcp_doc, {"pre_existing": {"enabled": True}, "alpha": {}})
+
+            op = conn.execute(
+                "SELECT operation_type, target FROM operation_logs WHERE target = 'mcp.alpha.enabled' ORDER BY created_at DESC"
+            ).fetchone()
+            self.assertIsNotNone(op)
+            self.assertEqual(op["operation_type"], "policy:delete")
+        finally:
+            conn.close()
+
+        # 重复进程持久化验证：通过 policy:get 验证 sqlite 归因、旧键保留及目标键删除
+        get_payload = self._payload("policy:get", "--json")
+        self._assert_schema(POLICY_SCHEMA, get_payload["data"])
+        self.assertEqual(get_payload["data"]["attribution"]["mcp"], "sqlite")
+        self.assertEqual(get_payload["data"]["effective"]["mcp"]["pre_existing"]["enabled"], True)
+        self.assertEqual(get_payload["data"]["effective"]["mcp"]["alpha"], {})
 
     def test_policy_delete_baseline_rejected(self):
         payload = self._payload(
@@ -509,13 +615,47 @@ class EngineWritePathTests(unittest.TestCase):
         self.assertFalse(self.snapshot_dir.exists(), "键不存在时不得产生快照（空跑不留痕）")
 
     def test_policy_delete_synced_layer_via_env_override(self):
+        synced_file = self.temp_dir / "manager.synced.json"
+        legacy_content = json.dumps({"skills": {"legacy": {"enabled": True}}}, indent=2) + "\n"
+        synced_file.write_text(legacy_content, encoding="utf-8")
+
         self._payload(
             "policy:set", "--json", "--layer", "synced", "--key", "skills.coll.new_skill_default", "--value", '"enabled"'
         )
         payload = self._payload("policy:delete", "--json", "--layer", "synced", "--key", "skills.coll.new_skill_default")
+        self._assert_schema(POLICY_SCHEMA, payload["data"])
         self.assertEqual(payload["data"]["layer"], "synced")
-        synced = json.loads((self.temp_dir / "manager.synced.json").read_text(encoding="utf-8"))
-        self.assertEqual(synced, {"skills": {"coll": {}}})
+        self.assertIsNone(payload["data"]["value"])
+        db_path = Path(payload["data"]["path"])
+        self.assertEqual(db_path.resolve(), self.db_path.resolve())
+        self.assertEqual(oct(db_path.stat().st_mode & 0o777), "0o600")
+
+        # 旧 JSON 保留
+        self.assertEqual(synced_file.read_text(encoding="utf-8"), legacy_content)
+
+        # 直接检查 DB 行与审计记录：旧键仍在 DB，仅本次键被删除
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute("SELECT value_json FROM policy_entries WHERE key = 'skills'").fetchone()
+            self.assertIsNotNone(row)
+            skills_doc = json.loads(row["value_json"])
+            self.assertEqual(skills_doc, {"legacy": {"enabled": True}, "coll": {}})
+
+            op = conn.execute(
+                "SELECT operation_type, target FROM operation_logs WHERE target = 'skills.coll.new_skill_default' ORDER BY created_at DESC"
+            ).fetchone()
+            self.assertIsNotNone(op)
+            self.assertEqual(op["operation_type"], "policy:delete")
+        finally:
+            conn.close()
+
+        # 重复进程持久化验证
+        get_payload = self._payload("policy:get", "--json")
+        self._assert_schema(POLICY_SCHEMA, get_payload["data"])
+        self.assertEqual(get_payload["data"]["attribution"]["skills"], "sqlite")
+        self.assertEqual(get_payload["data"]["effective"]["skills"]["legacy"]["enabled"], True)
+        self.assertEqual(get_payload["data"]["effective"]["skills"]["coll"], {})
 
 
 if __name__ == "__main__":
