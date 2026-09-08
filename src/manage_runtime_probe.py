@@ -751,7 +751,11 @@ class ProviderInventory:
         app_path = config.get("app_path")
         if (app_path and self._path_exists(app_path)) or bin_path:
             if not found:
-                add_found("system")
+                custom_cfg = config.get("providers", {}).get("custom")
+                if bin_path and isinstance(custom_cfg, dict) and custom_cfg.get("managed") is True:
+                    add_found("custom")
+                else:
+                    add_found("system")
 
         return found
 

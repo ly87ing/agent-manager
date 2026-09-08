@@ -43,6 +43,8 @@ Windows 平台支持：`Claude Code` 支持原生 Windows（PowerShell / CMD）�
 `Claude Code local install` 不纳入 `agent-manager` lifecycle 托管，因为它依赖 shell alias 暴露入口，当前探测链路不会越权接管。
 以上 lifecycle 口径统一按两个当前受管 Agent 的官方推荐方式维护。`Claude Code` 和 `Codex` 的 npm/brew provider 保留受管升级命令模板。`agent-manager` 不改写用户 shell profile。
 
+自定义 Agent 的生命周期定义使用 `providers.custom`，显式设置 `managed: true`，并填写 `bin` 与安装、升级命令。只有该可执行文件存在且没有识别出其他安装来源时，才归为自定义管理；已有 npm、brew 等来源保持原分类。安装和升级执行后重新探测，脚本成功但未找到程序仍判为失败。卸载命令可选，未填写时拒绝自动卸载。
+
 ## Official CLI Lifecycle Policy
 
 | CLI | 默认受管 provider | 兼容受管 provider | 说明 |

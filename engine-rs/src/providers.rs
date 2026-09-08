@@ -498,7 +498,18 @@ impl Inventory {
             .map(|p| Path::new(&expanduser(p)).exists())
             .unwrap_or(false);
         if (app_path_exists || bin_path.is_some()) && found.is_empty() {
-            add_found(&mut found, "system");
+            let custom_managed = config
+                .get("providers")
+                .and_then(Value::as_object)
+                .and_then(|providers| providers.get("custom"))
+                .and_then(|custom| custom.get("managed"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if bin_path.is_some() && custom_managed {
+                add_found(&mut found, "custom");
+            } else {
+                add_found(&mut found, "system");
+            }
         }
 
         found
@@ -705,5 +716,99 @@ mod tests {
         assert!(get_unsupported_actions(Some(&json!({"unsupported_actions": ["uninstall"]}))).unwrap().contains("uninstall"));
         assert!(get_unsupported_actions(Some(&json!({"unsupported_actions": "uninstall"}))).is_err());
         assert!(get_unsupported_actions(Some(&json!({"unsupported_actions": ["bogus"]}))).is_err());
+    }
+
+    // detect_all_providers 走真实 PATH 扫描；改 PATH 的用例必须串行。
+    static PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct PathGuard {
+        original: String,
+    }
+
+    impl PathGuard {
+        fn prepend(dir: &Path) -> Self {
+            let original = std::env::var("PATH").unwrap_or_default();
+            std::env::set_var("PATH", format!("{}:{}", dir.display(), original));
+            PathGuard { original }
+        }
+    }
+
+    impl Drop for PathGuard {
+        fn drop(&mut self) {
+            std::env::set_var("PATH", &self.original);
+        }
+    }
+
+    fn write_executable(dir: &Path, name: &str) {
+        let path = dir.join(name);
+        std::fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    fn custom_config(managed: Value) -> Map<String, Value> {
+        json!({
+            "providers": {
+                "custom": {
+                    "managed": managed,
+                    "install": "placeholder",
+                    "upgrade": "placeholder",
+                    "uninstall": "placeholder"
+                }
+            }
+        })
+        .as_object()
+        .unwrap()
+        .clone()
+    }
+
+    #[test]
+    fn custom_managed_with_executable_bin_is_classified_custom() {
+        let _lock = PATH_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!("providers-rs-custom-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin_name = "custom-agent-rs-test";
+        write_executable(&dir, bin_name);
+        let _path = PathGuard::prepend(&dir);
+
+        let mut inventory = Inventory::new();
+        let found = inventory.detect_all_providers(bin_name, &custom_config(json!(true)));
+        assert_eq!(found, vec!["custom".to_string()]);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn custom_managed_false_or_missing_falls_back_to_system() {
+        let _lock = PATH_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!("providers-rs-custom-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin_name = "custom-agent-rs-test";
+        write_executable(&dir, bin_name);
+        let _path = PathGuard::prepend(&dir);
+
+        let mut inventory = Inventory::new();
+        let found = inventory.detect_all_providers(bin_name, &custom_config(json!(false)));
+        assert_eq!(found, vec!["system".to_string()]);
+
+        let config = json!({"providers": {"custom": {"install": "placeholder"}}});
+        let mut inventory = Inventory::new();
+        let found = inventory.detect_all_providers(bin_name, config.as_object().unwrap());
+        assert_eq!(found, vec!["system".to_string()]);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn custom_managed_without_bin_detects_nothing() {
+        let mut inventory = Inventory::new();
+        let found = inventory.detect_all_providers(
+            "custom-agent-rs-test-definitely-missing",
+            &custom_config(json!(true)),
+        );
+        assert!(found.is_empty());
     }
 }
