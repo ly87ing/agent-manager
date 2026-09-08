@@ -524,6 +524,19 @@ fn run_engine_with_layout(
     args: &[String],
     run_id: Option<&str>,
 ) -> Result<Envelope, EngineError> {
+    run_engine_with_preferences(root, python_override, rust_override, production, command, args, run_id, None)
+}
+
+fn run_engine_with_preferences(
+    root: &Path,
+    python_override: Option<&Path>,
+    rust_override: Option<&Path>,
+    production: bool,
+    command: &str,
+    args: &[String],
+    run_id: Option<&str>,
+    preferences: Option<&crate::settings::SettingsPreferences>,
+) -> Result<Envelope, EngineError> {
     validate_command(command)?;
     validate_args(command, args)?;
     if let Some(run_id) = run_id {
@@ -538,14 +551,19 @@ fn run_engine_with_layout(
     }
 
     let mut cmd = Command::new("bash");
+    let mut effective_args = args.to_vec();
+    if preferences.is_some_and(|p| p.offline) && !effective_args.iter().any(|arg| arg == "--offline") {
+        effective_args.push("--offline".into());
+    }
     cmd.arg(&script)
         .arg(command)
         .arg("--json")
-        .args(args)
+        .args(&effective_args)
         .current_dir(root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    cmd.env("PYTHONDONTWRITEBYTECODE", "1");
     if let Some(run_id) = run_id {
         cmd.env("AGENT_MANAGER_RUN_ID", run_id);
     }
@@ -564,6 +582,9 @@ fn run_engine_with_layout(
     cmd.env("AGENT_MANAGER_BASE_CONFIG", root.join("config/manager.json"));
     cmd.env("AGENT_MANAGER_SYNCED_CONFIG", root.join("config/manager.synced.json"));
     cmd.env("AGENT_MANAGER_LOCAL_CONFIG", root.join("config/manager.local.json"));
+    if let Some(prefs) = preferences {
+        cmd.env("AGENT_MANAGER_UPSTREAM_TTL_SEC", prefs.upstream_ttl_sec.to_string());
+    }
     if let Some(packaged_engine) = rust_override {
         cmd.env("AGENT_MANAGER_ENGINE_RS", packaged_engine);
     } else if production {
@@ -624,7 +645,8 @@ pub async fn engine_invoke(app: tauri::AppHandle, command: String, args: Option<
     let app_handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let layout = resolve_runtime_layout(&app_handle)?;
-        run_engine_with_layout(&layout.root, layout.python.as_deref(), layout.rust_engine.as_deref(), layout.production, &command, &args, run_id.as_deref())
+        let preferences = crate::settings::current_preferences(&app_handle).map_err(|message| EngineError::new("settings_invalid", message))?;
+        run_engine_with_preferences(&layout.root, layout.python.as_deref(), layout.rust_engine.as_deref(), layout.production, &command, &args, run_id.as_deref(), Some(&preferences))
     })
     .await
     .map_err(|err| EngineError::new("internal", format!("bridge 任务调度失败: {err}")))?
@@ -1054,27 +1076,620 @@ mod tests {
         assert_eq!(fs::read(data.join("manage.sh")).unwrap(), b"v1");
     }
 
+    #[derive(Debug, PartialEq, Eq)]
+    struct ResourceSnapshotItem {
+        rel_path: PathBuf,
+        is_dir: bool,
+        is_symlink: bool,
+        #[cfg(unix)]
+        mode: u32,
+        #[cfg(not(unix))]
+        readonly: bool,
+        link_target: Option<PathBuf>,
+        content: Option<Vec<u8>>,
+    }
+
+    fn collect_tree_snapshots(dir: &Path) -> Vec<ResourceSnapshotItem> {
+        let mut results = Vec::new();
+        fn scan(current: &Path, base: &Path, acc: &mut Vec<ResourceSnapshotItem>) {
+            let entries = fs::read_dir(current).expect("read_dir must succeed");
+            let mut entries: Vec<_> = entries.map(|e| e.expect("entry must succeed")).collect();
+            entries.sort_by_key(|e| e.path());
+            for entry in entries {
+                let path = entry.path();
+                let rel = path.strip_prefix(base).unwrap().to_path_buf();
+                let symlink_meta = fs::symlink_metadata(&path).expect("symlink_metadata must succeed");
+                let is_symlink = symlink_meta.file_type().is_symlink();
+                let is_dir = symlink_meta.is_dir();
+                #[cfg(unix)]
+                let mode = symlink_meta.permissions().mode();
+                #[cfg(not(unix))]
+                let readonly = symlink_meta.permissions().readonly();
+
+                if is_symlink {
+                    let link_target = fs::read_link(&path).expect("read_link must succeed");
+                    acc.push(ResourceSnapshotItem {
+                        rel_path: rel,
+                        is_dir: false,
+                        is_symlink: true,
+                        #[cfg(unix)]
+                        mode,
+                        #[cfg(not(unix))]
+                        readonly,
+                        link_target: Some(link_target),
+                        content: None,
+                    });
+                } else if is_dir {
+                    acc.push(ResourceSnapshotItem {
+                        rel_path: rel,
+                        is_dir: true,
+                        is_symlink: false,
+                        #[cfg(unix)]
+                        mode,
+                        #[cfg(not(unix))]
+                        readonly,
+                        link_target: None,
+                        content: None,
+                    });
+                    scan(&path, base, acc);
+                } else if path.is_file() {
+                    let bytes = fs::read(&path).expect("read file must succeed");
+                    acc.push(ResourceSnapshotItem {
+                        rel_path: rel,
+                        is_dir: false,
+                        is_symlink: false,
+                        #[cfg(unix)]
+                        mode,
+                        #[cfg(not(unix))]
+                        readonly,
+                        link_target: None,
+                        content: Some(bytes),
+                    });
+                }
+            }
+        }
+        scan(dir, dir, &mut results);
+        results
+    }
+
+    fn count_matches(dir: &Path, pattern: &str) -> usize {
+        let mut count = 0;
+        fn scan(current: &Path, pattern: &str, count: &mut usize) {
+            if let Ok(entries) = fs::read_dir(current) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        if path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n == pattern) {
+                            *count += 1;
+                        }
+                        scan(&path, pattern, count);
+                    } else if path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(pattern)) {
+                        *count += 1;
+                    }
+                }
+            }
+        }
+        scan(dir, pattern, &mut count);
+        count
+    }
+
+    static TEST_SERIAL_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
     #[test]
-    #[ignore = "real packaged resources; run explicitly on the worker-built macOS resource tree"]
+    #[ignore = "real packaged resources; run explicitly on the worker-built resource tree"]
     fn real_packaged_resources_status_and_plan() {
+        let _guard = TEST_SERIAL_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap_or_else(|e| e.into_inner());
         let resource = std::env::var_os("AGENT_MANAGER_TEST_RESOURCE_ROOT")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/engine"));
-        let data = temp_dir("real packaged data with spaces").join("engine");
+        let sandbox = temp_dir("pkg-status-plan-sandbox");
+        let home = sandbox.join("home");
+        let data = sandbox.join("data/engine");
+        fs::create_dir_all(&home).unwrap();
+
+        let old_home = std::env::var_os("HOME");
+        let old_cf = std::env::var_os("CFFIXED_USER_HOME");
+        let old_pyc = std::env::var_os("PYTHONDONTWRITEBYTECODE");
+        std::env::remove_var("PYTHONDONTWRITEBYTECODE");
+        std::env::set_var("HOME", &home);
+        std::env::set_var("CFFIXED_USER_HOME", &home);
+
         assert!(resource.join("manage.sh").is_file());
         assert!(resource.join("runtime/python/bin/python3").is_file());
         assert!(resource.join("bin/agent-manager-engine").is_file());
+
+        let before_snapshots = collect_tree_snapshots(&resource);
+        assert_eq!(count_matches(&resource, ".pyc"), 0);
+        assert_eq!(count_matches(&resource, ".env"), 0);
+
         copy_standalone_resources(&resource, &data).expect("real package initializes");
         let python = resource.join("runtime/python/bin/python3");
         let rust = resource.join("bin/agent-manager-engine");
-        let status = run_engine_with_layout(&data, Some(&python), Some(&rust), true, "mcp:status", &[], Some("packaged-status-01"));
-        let status = status.expect("packaged status process");
+
+        let status = run_engine_with_layout(&data, Some(&python), Some(&rust), true, "mcp:status", &[], Some("pkg-status-01"))
+            .expect("packaged status process");
         assert!(status.ok);
         assert_eq!(status.command, "mcp.status");
-        let plan = run_engine_with_layout(&data, Some(&python), Some(&rust), true, "mcp:plan", &[], Some("packaged-plan-01"));
-        let plan = plan.expect("packaged plan process");
+        assert_eq!(status.contract, CONTRACT_ID);
+
+        let plan = run_engine_with_layout(&data, Some(&python), Some(&rust), true, "mcp:plan", &[], Some("pkg-plan-01"))
+            .expect("packaged plan process");
         assert!(plan.ok);
         assert_eq!(plan.command, "mcp.plan");
+
+        let runs = run_engine_with_layout(&data, Some(&python), Some(&rust), true, "runs:list", &[], Some("pkg-runs-01"))
+            .expect("packaged runs:list process");
+        assert!(runs.ok);
+
+        let snaps = run_engine_with_layout(&data, Some(&python), Some(&rust), true, "snapshots:list", &[], Some("pkg-snaps-01"))
+            .expect("packaged snapshots:list process");
+        assert!(snaps.ok);
+
+        assert_eq!(count_matches(&resource, ".pyc"), 0, "no pyc in resources after status/plan");
+        assert_eq!(count_matches(&data, ".pyc"), 0, "no pyc in data root after status/plan");
+
+        let after_snapshots = collect_tree_snapshots(&resource);
+        assert_eq!(before_snapshots, after_snapshots, "package resources must be identical (mode, symlinks, bytes)");
+
+        if let Some(h) = old_home { std::env::set_var("HOME", h); } else { std::env::remove_var("HOME"); }
+        if let Some(cf) = old_cf { std::env::set_var("CFFIXED_USER_HOME", cf); } else { std::env::remove_var("CFFIXED_USER_HOME"); }
+        if let Some(pyc) = old_pyc { std::env::set_var("PYTHONDONTWRITEBYTECODE", pyc); }
+    }
+
+    #[test]
+    #[ignore = "real packaged resources; run explicitly on the worker-built resource tree"]
+    fn real_packaged_resources_selective_apply_and_isolation() {
+        let _guard = TEST_SERIAL_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap_or_else(|e| e.into_inner());
+        let resource = std::env::var_os("AGENT_MANAGER_TEST_RESOURCE_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/engine"));
+        let sandbox = temp_dir("pkg-selective-apply-sandbox");
+        let home = sandbox.join("home");
+        let data = sandbox.join("data/engine");
+        fs::create_dir_all(&home).unwrap();
+
+        let old_home = std::env::var_os("HOME");
+        let old_cf = std::env::var_os("CFFIXED_USER_HOME");
+        let old_pyc = std::env::var_os("PYTHONDONTWRITEBYTECODE");
+        let old_path = std::env::var_os("PATH");
+        std::env::remove_var("PYTHONDONTWRITEBYTECODE");
+        std::env::set_var("HOME", &home);
+        std::env::set_var("CFFIXED_USER_HOME", &home);
+
+        // Isolated fake bin with business command runners (node, npm, npx, git, curl) and fake agent executors (claude)
+        // Ensure test relies ONLY on fake_bin and /usr/bin:/bin, without leaking host Node/npm/npx/git or system Python.
+        let fake_bin = sandbox.join("fake_bin");
+        fs::create_dir_all(&fake_bin).unwrap();
+        for cmd_name in ["claude", "node", "npm", "npx", "git", "curl"] {
+            let script = "#!/bin/sh\nexit 0\n";
+            let script_path = fake_bin.join(cmd_name);
+            fs::write(&script_path, script).unwrap();
+            #[cfg(unix)]
+            fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let local_claude = home.join(".local/bin/claude");
+        fs::create_dir_all(local_claude.parent().unwrap()).unwrap();
+        fs::write(&local_claude, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        fs::set_permissions(&local_claude, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let test_paths = vec![fake_bin.clone(), PathBuf::from("/usr/bin"), PathBuf::from("/bin")];
+        let test_path = std::env::join_paths(test_paths).unwrap();
+        std::env::set_var("PATH", &test_path);
+
+        let before_snapshots = collect_tree_snapshots(&resource);
+
+        copy_standalone_resources(&resource, &data).expect("real package initializes");
+        let python = resource.join("runtime/python/bin/python3");
+        let rust = resource.join("bin/agent-manager-engine");
+
+        let claude_config = home.join(".claude.json");
+        let initial_json = serde_json::json!({
+            "mcpServers": {
+                "YOUR_SERVER_A": {
+                    "command": "npx",
+                    "args": ["-y", "YOUR_PKG_A", "--old-a"],
+                    "env": {"_MANAGED_BY": "agent-manager"}
+                },
+                "YOUR_SERVER_B": {
+                    "command": "echo",
+                    "args": ["--old-b"],
+                    "env": {"_MANAGED_BY": "agent-manager"}
+                }
+            }
+        });
+        fs::write(&claude_config, serde_json::to_string_pretty(&initial_json).unwrap()).unwrap();
+        let initial_bytes = fs::read(&claude_config).unwrap();
+
+        let mcp_cfg = serde_json::json!({
+            "servers": {
+                "YOUR_SERVER_A": {
+                    "command": "npx",
+                    "args": ["-y", "YOUR_PKG_A", "--new-a"],
+                    "env": {},
+                    "agents": ["claude-code"]
+                },
+                "YOUR_SERVER_B": {
+                    "command": "echo",
+                    "args": ["--new-b"],
+                    "env": {},
+                    "agents": ["claude-code"]
+                }
+            },
+            "agent_paths": {
+                "claude-code": "~/.claude.json"
+            }
+        });
+        fs::write(data.join("config/mcp.json"), serde_json::to_string_pretty(&mcp_cfg).unwrap()).unwrap();
+
+        let local_cfg = serde_json::json!({
+            "mcp": {
+                "YOUR_SERVER_A": {"enabled": true},
+                "YOUR_SERVER_B": {"enabled": true}
+            }
+        });
+        fs::write(data.join("config/manager.local.json"), serde_json::to_string_pretty(&local_cfg).unwrap()).unwrap();
+
+        // 1. Dryrun with --only: zero writes, full target byte identity
+        let dryrun = run_engine_with_layout(
+            &data, Some(&python), Some(&rust), true,
+            "mcp:apply",
+            &["--dry-run".into(), "--only".into(), "mcp:YOUR_SERVER_A".into()],
+            Some("pkg-dryrun-01")
+        ).expect("mcp:apply dryrun");
+        assert!(dryrun.ok);
+        assert!(dryrun.mode.dry_run);
+        assert_eq!(fs::read(&claude_config).unwrap(), initial_bytes, "dry-run must leave target file byte-for-byte identical");
+
+        // 2. Reject illegal and cross-domain/unknown scopes before write, full target byte identity
+        // 2a. Bridge-level rejection of illegal element_id characters (e.g. spaces/shell chars)
+        let bad_char = run_engine_with_layout(
+            &data, Some(&python), Some(&rust), true,
+            "mcp:apply",
+            &["--only".into(), "bad scope with spaces".into()],
+            Some("pkg-bad-char-01")
+        );
+        assert!(bad_char.is_err(), "illegal element_id characters must be rejected by bridge before spawn");
+        assert_eq!(fs::read(&claude_config).unwrap(), initial_bytes, "rejected illegal element ID must leave target file byte-for-byte identical");
+
+        // 2b. Engine-level rejection of cross-domain scope
+        let cross_domain = run_engine_with_layout(
+            &data, Some(&python), Some(&rust), true,
+            "mcp:apply",
+            &["--only".into(), "tools:some_tool".into()],
+            Some("pkg-cross-scope-01")
+        ).expect("cross domain returns error envelope");
+        assert!(!cross_domain.ok);
+        assert_eq!(cross_domain.errors[0].code, "CROSS_DOMAIN_SCOPE");
+        assert_eq!(fs::read(&claude_config).unwrap(), initial_bytes, "cross domain scope rejection must leave target file byte-for-byte identical");
+
+        // 2c. Engine-level rejection of unknown nonexistent element
+        let unknown_scope = run_engine_with_layout(
+            &data, Some(&python), Some(&rust), true,
+            "mcp:apply",
+            &["--only".into(), "mcp:YOUR_NONEXISTENT_SERVER".into()],
+            Some("pkg-unknown-scope-01")
+        ).expect("unknown scope returns error envelope");
+        assert!(!unknown_scope.ok);
+        assert_eq!(unknown_scope.errors[0].code, "USAGE_ERROR");
+        assert_eq!(fs::read(&claude_config).unwrap(), initial_bytes, "unknown scope rejection must leave target file byte-for-byte identical");
+
+        // 3. Selective apply: only A updated, full B object preserved
+        let apply = run_engine_with_layout(
+            &data, Some(&python), Some(&rust), true,
+            "mcp:apply",
+            &["--only".into(), "mcp:YOUR_SERVER_A".into()],
+            Some("pkg-apply-a-01")
+        ).expect("mcp:apply only A");
+        assert!(apply.ok);
+        let target_after_apply: serde_json::Value = serde_json::from_slice(&fs::read(&claude_config).unwrap()).unwrap();
+        assert_eq!(target_after_apply["mcpServers"]["YOUR_SERVER_A"]["args"], serde_json::json!(["-y", "YOUR_PKG_A", "--new-a"]), "A must be updated");
+        assert_eq!(target_after_apply["mcpServers"]["YOUR_SERVER_B"], initial_json["mcpServers"]["YOUR_SERVER_B"], "full B server object must be exactly preserved when only applying A");
+
+        // 4. Lifecycle execution check: tools:apply calling tool_a while tool_b lifecycle has 0 calls
+        let tool_lifecycle_log = sandbox.join("tool_lifecycle.log");
+        let tool_a_ready = sandbox.join("tool_a_ready");
+        let tool_b_ready = sandbox.join("tool_b_ready");
+        let tools_path = data.join("config/tools.json");
+        let mut tools_cfg: serde_json::Value = if tools_path.exists() {
+            serde_json::from_slice(&fs::read(&tools_path).unwrap()).unwrap()
+        } else {
+            serde_json::json!({"tools": {}})
+        };
+        tools_cfg["tools"]["tool_a"] = serde_json::json!({
+            "ready_check": format!("app:{}", tool_a_ready.display()),
+            "install": format!("sh -c 'echo tool_a >> \"{}\" && touch \"{}\"'", tool_lifecycle_log.display(), tool_a_ready.display())
+        });
+        tools_cfg["tools"]["tool_b"] = serde_json::json!({
+            "ready_check": format!("app:{}", tool_b_ready.display()),
+            "install": format!("sh -c 'echo tool_b >> \"{}\" && touch \"{}\"'", tool_lifecycle_log.display(), tool_b_ready.display())
+        });
+        fs::write(&tools_path, serde_json::to_string_pretty(&tools_cfg).unwrap()).unwrap();
+        let mut local_with_tools = local_cfg.clone();
+        local_with_tools["tools"] = serde_json::json!({
+            "tool_a": {"enabled": true},
+            "tool_b": {"enabled": true}
+        });
+        fs::write(data.join("config/manager.local.json"), serde_json::to_string_pretty(&local_with_tools).unwrap()).unwrap();
+
+        let tool_apply = run_engine_with_layout(
+            &data, Some(&python), Some(&rust), true,
+            "tools:apply",
+            &["--only".into(), "tools:tool_a".into()],
+            Some("pkg-tool-apply-a-01")
+        ).expect("tools:apply only tool_a");
+        assert!(tool_apply.ok, "tools:apply should succeed: {:?}", tool_apply.errors);
+        assert!(tool_a_ready.is_file(), "tool_a install must have executed and created ready marker");
+        assert!(!tool_b_ready.exists(), "tool_b install must not execute when only tool_a is selected");
+        let tool_log_content = fs::read_to_string(&tool_lifecycle_log).unwrap_or_default();
+        assert!(tool_log_content.contains("tool_a"), "tool_a lifecycle must be called");
+        assert!(!tool_log_content.contains("tool_b"), "tool_b lifecycle must have 0 calls");
+
+        // 5. Selective apply log readability
+        let log_file = data.join("logs/agent_manager_sync_pkg-apply-a-01.log");
+        assert!(log_file.is_file(), "sync log must exist: {}", log_file.display());
+        let log_text = fs::read_to_string(&log_file).unwrap();
+        assert!(!log_text.is_empty(), "sync log must not be empty");
+
+        // 6. Snapshot restore recovery: returns claude_config to exact pre-apply bytes
+        let restore = run_engine_with_layout(
+            &data, Some(&python), Some(&rust), true,
+            "snapshots:restore",
+            &["--run".into(), "pkg-apply-a-01".into()],
+            Some("pkg-restore-01")
+        ).expect("snapshots:restore");
+        assert!(restore.ok);
+        assert_eq!(fs::read(&claude_config).unwrap(), initial_bytes, "restore returns target file to exact pre-apply bytes");
+
+        // 7. Offline network gate with fake git/curl/npm logging plus refusing network-grade profile:pull
+        let net_log = sandbox.join("network_calls.log");
+        for cmd_name in ["git", "curl", "npm"] {
+            let script = format!("#!/bin/sh\necho \"{} $@\" >> \"{}\"\nexit 1\n", cmd_name, net_log.display());
+            let script_path = fake_bin.join(cmd_name);
+            fs::write(&script_path, script).unwrap();
+            #[cfg(unix)]
+            fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let prefs_offline = crate::settings::SettingsPreferences { offline: true, default_dry_run: false, upstream_ttl_sec: 3600 };
+        let offline_plan = run_engine_with_preferences(
+            &data, Some(&python), Some(&rust), true,
+            "mcp:plan",
+            &[],
+            Some("pkg-offline-01"),
+            Some(&prefs_offline)
+        ).expect("offline plan");
+        assert!(offline_plan.ok);
+        assert!(offline_plan.mode.offline, "offline mode must be active");
+
+        // Profile sync with configured repo URL: profile:pull must be refused under offline
+        let mut local_with_profile = local_with_tools.clone();
+        local_with_profile["profile_sync"] = serde_json::json!({
+            "repo_url": "git@YOUR_HOST:YOUR_PROFILE_REPO.git"
+        });
+        fs::write(data.join("config/manager.local.json"), serde_json::to_string_pretty(&local_with_profile).unwrap()).unwrap();
+
+        let pull_offline = run_engine_with_preferences(
+            &data, Some(&python), Some(&rust), true,
+            "profile:pull",
+            &[],
+            Some("pkg-offline-pull-01"),
+            Some(&prefs_offline)
+        ).expect("profile:pull envelope");
+        assert!(!pull_offline.ok, "network-grade profile:pull must be refused in offline mode");
+        assert_eq!(pull_offline.errors[0].code, "OFFLINE_NETWORK_DENIED");
+        assert!(!net_log.exists() || fs::read_to_string(&net_log).unwrap().is_empty(), "offline operations must make zero network calls to git/curl/npm");
+
+        for cmd_name in ["git", "curl", "npm"] {
+            let script_path = fake_bin.join(cmd_name);
+            fs::write(&script_path, "#!/bin/sh\nexit 0\n").unwrap();
+            #[cfg(unix)]
+            fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        // 8. TTL testing: real fresh vs stale difference via UPSTREAM_PROBE_STALE warning
+        let now_epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        let checked_time_60s_ago = {
+            let ts = now_epoch - 60;
+            let output = std::process::Command::new(&python)
+                .arg("-B")
+                .args(["-c", &format!("import datetime; print(datetime.datetime.fromtimestamp({ts}, datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))")])
+                .output().expect("format timestamp via packaged python");
+            assert!(output.status.success(), "timestamp generator via packaged python must succeed: {}", String::from_utf8_lossy(&output.stderr));
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        };
+        let upstream_cache_content = serde_json::json!({
+            "entries": {
+                "mcp:YOUR_SERVER_A": {
+                    "state": "latest",
+                    "current": "1.0.0",
+                    "upstream": "1.0.0",
+                    "checked_at": checked_time_60s_ago
+                }
+            }
+        });
+        fs::create_dir_all(data.join("cache")).unwrap();
+        fs::write(data.join("cache/upstream.json"), serde_json::to_string_pretty(&upstream_cache_content).unwrap()).unwrap();
+
+        // Fresh TTL (3600s): cache age is 60s <= 3600s, no UPSTREAM_PROBE_STALE warning
+        let prefs_fresh = crate::settings::SettingsPreferences { offline: true, default_dry_run: false, upstream_ttl_sec: 3600 };
+        let status_fresh = run_engine_with_preferences(
+            &data, Some(&python), Some(&rust), true,
+            "mcp:status",
+            &[],
+            Some("pkg-ttl-fresh-01"),
+            Some(&prefs_fresh)
+        ).expect("fresh status");
+        assert!(status_fresh.ok);
+        assert!(!status_fresh.warnings.iter().any(|w| w.code == "UPSTREAM_PROBE_STALE"), "fresh cache entry must not produce UPSTREAM_PROBE_STALE warning");
+
+        // Stale TTL (10s): cache age is 60s > 10s, UPSTREAM_PROBE_STALE warning emitted
+        let prefs_stale = crate::settings::SettingsPreferences { offline: true, default_dry_run: false, upstream_ttl_sec: 10 };
+        let status_stale = run_engine_with_preferences(
+            &data, Some(&python), Some(&rust), true,
+            "mcp:status",
+            &[],
+            Some("pkg-ttl-stale-01"),
+            Some(&prefs_stale)
+        ).expect("stale status");
+        assert!(status_stale.ok);
+        assert!(status_stale.warnings.iter().any(|w| w.code == "UPSTREAM_PROBE_STALE"), "stale cache entry must produce UPSTREAM_PROBE_STALE warning");
+
+        // 9. Assert zero pyc generated and package immutability (mode, symlinks, byte content)
+        assert_eq!(count_matches(&resource, ".pyc"), 0, "no pyc in resources after test");
+        assert_eq!(count_matches(&data, ".pyc"), 0, "no pyc in data root after test");
+        let after_snapshots = collect_tree_snapshots(&resource);
+        assert_eq!(before_snapshots, after_snapshots, "package resources byte-for-byte, mode-for-mode, link-for-link identical");
+
+        if let Some(h) = old_home { std::env::set_var("HOME", h); } else { std::env::remove_var("HOME"); }
+        if let Some(cf) = old_cf { std::env::set_var("CFFIXED_USER_HOME", cf); } else { std::env::remove_var("CFFIXED_USER_HOME"); }
+        if let Some(pyc) = old_pyc { std::env::set_var("PYTHONDONTWRITEBYTECODE", pyc); }
+        if let Some(p) = old_path { std::env::set_var("PATH", p); } else { std::env::remove_var("PATH"); }
+    }
+
+    #[test]
+    #[ignore = "real packaged resources; run explicitly on the worker-built resource tree"]
+    fn real_packaged_resources_idempotency_and_upgrade() {
+        let _guard = TEST_SERIAL_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap_or_else(|e| e.into_inner());
+        let resource = std::env::var_os("AGENT_MANAGER_TEST_RESOURCE_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/engine"));
+        let sandbox = temp_dir("pkg-upgrade-sandbox");
+        let home = sandbox.join("home");
+        let data = sandbox.join("data/engine");
+        fs::create_dir_all(&home).unwrap();
+
+        let old_home = std::env::var_os("HOME");
+        let old_cf = std::env::var_os("CFFIXED_USER_HOME");
+        std::env::set_var("HOME", &home);
+        std::env::set_var("CFFIXED_USER_HOME", &home);
+
+        copy_standalone_resources(&resource, &data).expect("first init");
+        let manage_mtime_1 = fs::metadata(data.join("manage.sh")).unwrap().modified().unwrap();
+
+        copy_standalone_resources(&resource, &data).expect("restart copy");
+        let manage_mtime_2 = fs::metadata(data.join("manage.sh")).unwrap().modified().unwrap();
+        assert_eq!(manage_mtime_1, manage_mtime_2, "restart must not rewrite seed files");
+
+        // 1. User configurations and profile base (per agent-profile/sync_profile.py:122, base is config/manager.synced.base.json alongside manager.synced.json)
+        fs::write(data.join("config/manager.local.json"), br#"{"source_edits":["config/claude-hooks.json"],"user_local":"saved"}"#).unwrap();
+        fs::write(data.join("config/manager.synced.json"), br#"{"user_synced":"saved"}"#).unwrap();
+        fs::write(data.join("config/claude-hooks.json"), br#"{"user_custom_hooks":true}"#).unwrap();
+        fs::write(data.join("config/manager.synced.base.json"), br#"{"synced_base_key":"YOUR_SYNCED_BASE_VAL"}"#).unwrap();
+
+        // 2. Caches: upstream MCP cache, GitBackend cache (cache/profile/repo per sync_profile.py:172), tool & skill caches, legacy profile base
+        fs::create_dir_all(data.join("cache/tools")).unwrap();
+        fs::write(data.join("cache/tools/cache.json"), br#"{"tool_cache":"saved"}"#).unwrap();
+        fs::create_dir_all(data.join("cache/skills")).unwrap();
+        fs::write(data.join("cache/skills/cache.json"), br#"{"skill_cache":"saved"}"#).unwrap();
+        fs::create_dir_all(data.join("cache/profile/repo")).unwrap();
+        fs::write(data.join("cache/profile/repo/HEAD"), b"ref: refs/heads/YOUR_BRANCH\n").unwrap();
+        fs::write(data.join("cache/profile/repo/sentinel.txt"), b"YOUR_GIT_BACKEND_CACHE_SENTINEL").unwrap();
+        fs::write(data.join("cache/profile/synced.base.json"), br#"{"profile_base":"saved"}"#).unwrap(); // preserved for backward-compatibility test
+        fs::write(data.join("cache/upstream.json"), br#"{"cached_upstream":"YOUR_UPSTREAM_CACHED_VALUE"}"#).unwrap();
+        fs::write(data.join("cache/profile/base.json"), br#"{"cached_profile":"saved"}"#).unwrap();
+
+        // 3. Real working directories in data root:
+        //    - MCP working dir: agent-mcp/<server> per src/engine_v1.py:1809
+        //    - Tool working dir: agent-tool/<name> per src/manage_runtime_probe.py:595
+        //    - Skill working dir: agent-skill/repositories/<name> per src/engine_v1.py:2132
+        fs::create_dir_all(data.join("agent-mcp/YOUR_MCP_SERVER")).unwrap();
+        fs::write(data.join("agent-mcp/YOUR_MCP_SERVER/sentinel.txt"), b"YOUR_MCP_WORK_DIR_SENTINEL").unwrap();
+        fs::create_dir_all(data.join("agent-tool/YOUR_TOOL")).unwrap();
+        fs::write(data.join("agent-tool/YOUR_TOOL/sentinel.txt"), b"YOUR_TOOL_WORK_DIR_SENTINEL").unwrap();
+        let skill_target_in_data = data.join("agent-skill/repositories/YOUR_SKILL_REPO/skills/YOUR_SKILL/SKILL.md");
+        fs::create_dir_all(skill_target_in_data.parent().unwrap()).unwrap();
+        fs::write(&skill_target_in_data, b"---\nname: YOUR_SKILL\ndescription: YOUR_SKILL sentinel\n---\nYOUR_SKILL_CONTENT\n").unwrap();
+
+        // 4. Assistant skill symlink in isolated HOME pointing to data repository:
+        //    Assistants in user HOME link to the stable skill cache in data root (home -> data)
+        let home_assistant_skill = home.join(".claude/skills/YOUR_SKILL/SKILL.md");
+        fs::create_dir_all(home_assistant_skill.parent().unwrap()).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&skill_target_in_data, &home_assistant_skill).unwrap();
+
+        // Also retain legacy link (data -> home) to preserve existing assertion
+        let target_skill = home.join("my_existing_skill");
+        fs::create_dir_all(&target_skill).unwrap();
+        fs::create_dir_all(data.join("agent-skill")).unwrap();
+        let link_path = data.join("agent-skill/my_existing_skill");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target_skill, &link_path).unwrap();
+
+        // 5. User logs and snapshots
+        fs::create_dir_all(data.join("logs")).unwrap();
+        fs::write(data.join("logs/user_session.log"), b"audit log").unwrap();
+        fs::create_dir_all(data.join("snapshots/user_snap")).unwrap();
+        fs::write(data.join("snapshots/user_snap/manifest.json"), br#"{"snapshot":"saved"}"#).unwrap();
+
+        let upgrade_resource = sandbox.join("upgrade_resource");
+        fs::create_dir_all(upgrade_resource.join("runtime")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(resource.join("runtime/python"), upgrade_resource.join("runtime/python")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(resource.join("bin"), upgrade_resource.join("bin")).unwrap();
+
+        let manifest_bytes = fs::read(resource.join("standalone-manifest.json")).unwrap();
+        let manifest: StandaloneManifest = serde_json::from_slice(&manifest_bytes).unwrap();
+        for rel in &manifest.managed_files {
+            let src = resource.join(rel);
+            let dst = upgrade_resource.join(rel);
+            if let Some(parent) = dst.parent() { fs::create_dir_all(parent).unwrap(); }
+            fs::copy(&src, &dst).unwrap();
+        }
+
+        let mut manage_content = fs::read(upgrade_resource.join("manage.sh")).unwrap();
+        manage_content.extend_from_slice(b"\n# UPGRADE_MARKER_V2\n");
+        fs::write(upgrade_resource.join("manage.sh"), &manage_content).unwrap();
+
+        let mut manifest_val: serde_json::Value = serde_json::from_slice(&manifest_bytes).unwrap();
+        manifest_val["managed_content_sha256"] = serde_json::json!("simulated_upgrade_sha256_v2");
+        fs::write(upgrade_resource.join("standalone-manifest.json"), serde_json::to_string_pretty(&manifest_val).unwrap()).unwrap();
+
+        copy_standalone_resources(&upgrade_resource, &data).expect("upgrade copy");
+
+        let updated_manage = fs::read_to_string(data.join("manage.sh")).unwrap();
+        assert!(updated_manage.contains("UPGRADE_MARKER_V2"), "manage.sh must be updated by upgrade");
+
+        // Run engine in upgraded data directory to verify post-upgrade execution
+        let python = resource.join("runtime/python/bin/python3");
+        let rust = resource.join("bin/agent-manager-engine");
+        let status = run_engine_with_layout(&data, Some(&python), Some(&rust), true, "mcp:status", &[], Some("pkg-upgrade-status-01"))
+            .expect("engine runs successfully in upgraded data directory");
+        assert!(status.ok);
+        assert_eq!(status.command, "mcp.status");
+
+        // Verify all sentinels, caches, base config, and working directories are byte-for-byte preserved after upgrade and status run
+        assert_eq!(fs::read(data.join("config/manager.local.json")).unwrap(), br#"{"source_edits":["config/claude-hooks.json"],"user_local":"saved"}"#);
+        assert_eq!(fs::read(data.join("config/manager.synced.json")).unwrap(), br#"{"user_synced":"saved"}"#);
+        assert_eq!(fs::read(data.join("config/claude-hooks.json")).unwrap(), br#"{"user_custom_hooks":true}"#, "source_edits edited file must be preserved");
+        assert_eq!(fs::read(data.join("config/manager.synced.base.json")).unwrap(), br#"{"synced_base_key":"YOUR_SYNCED_BASE_VAL"}"#, "config/manager.synced.base.json must be preserved");
+        assert_eq!(fs::read(data.join("cache/tools/cache.json")).unwrap(), br#"{"tool_cache":"saved"}"#);
+        assert_eq!(fs::read(data.join("cache/skills/cache.json")).unwrap(), br#"{"skill_cache":"saved"}"#);
+        assert_eq!(fs::read(data.join("cache/profile/synced.base.json")).unwrap(), br#"{"profile_base":"saved"}"#);
+        assert_eq!(fs::read(data.join("cache/upstream.json")).unwrap(), br#"{"cached_upstream":"YOUR_UPSTREAM_CACHED_VALUE"}"#);
+        assert_eq!(fs::read(data.join("cache/profile/base.json")).unwrap(), br#"{"cached_profile":"saved"}"#);
+        assert_eq!(fs::read(data.join("cache/profile/repo/HEAD")).unwrap(), b"ref: refs/heads/YOUR_BRANCH\n", "GitBackend repo cache HEAD must be preserved");
+        assert_eq!(fs::read(data.join("cache/profile/repo/sentinel.txt")).unwrap(), b"YOUR_GIT_BACKEND_CACHE_SENTINEL", "GitBackend repo cache sentinel must be preserved");
+        assert_eq!(fs::read(data.join("agent-mcp/YOUR_MCP_SERVER/sentinel.txt")).unwrap(), b"YOUR_MCP_WORK_DIR_SENTINEL", "real MCP working directory must be preserved");
+        assert_eq!(fs::read(data.join("agent-tool/YOUR_TOOL/sentinel.txt")).unwrap(), b"YOUR_TOOL_WORK_DIR_SENTINEL", "real Tool working directory must be preserved");
+        assert_eq!(fs::read(&skill_target_in_data).unwrap(), b"---\nname: YOUR_SKILL\ndescription: YOUR_SKILL sentinel\n---\nYOUR_SKILL_CONTENT\n", "real Skill repository content must be preserved");
+
+        // Verify HOME assistant skill symlink: links home -> data, target preserved, content readable
+        #[cfg(unix)]
+        {
+            assert!(home_assistant_skill.is_symlink(), "assistant skill link in HOME must be a symlink");
+            assert_eq!(fs::read_link(&home_assistant_skill).unwrap(), skill_target_in_data, "assistant skill link must point to stable data repository");
+            assert_eq!(fs::read(&home_assistant_skill).unwrap(), b"---\nname: YOUR_SKILL\ndescription: YOUR_SKILL sentinel\n---\nYOUR_SKILL_CONTENT\n", "assistant skill content must be readable through symlink");
+        }
+
+        assert_eq!(fs::read(data.join("logs/user_session.log")).unwrap(), b"audit log");
+        assert_eq!(fs::read(data.join("snapshots/user_snap/manifest.json")).unwrap(), br#"{"snapshot":"saved"}"#);
+        #[cfg(unix)]
+        assert!(link_path.is_symlink(), "existing skill link must be preserved");
+
+        if let Some(h) = old_home { std::env::set_var("HOME", h); } else { std::env::remove_var("HOME"); }
+        if let Some(cf) = old_cf { std::env::set_var("CFFIXED_USER_HOME", cf); } else { std::env::remove_var("CFFIXED_USER_HOME"); }
     }
 
     // ---- run_engine（假 manage.sh 脚本端到端） ----
@@ -1135,6 +1750,17 @@ EOF"#;
         // 非法 run id 在 spawn 前被拒
         let err = run_engine(&root, "mcp:status", &[], Some("bad id")).expect_err("bad run id must fail");
         assert_eq!(err.kind, "invalid_args");
+    }
+
+    #[test]
+    fn settings_preferences_reach_child_without_forcing_dry_run() {
+        let root = temp_dir("settings-child");
+        let body = format!("[ \"$AGENT_MANAGER_UPSTREAM_TTL_SEC\" = 17 ] || exit 7\n[ \"$3\" = --offline ] || exit 8\nfor arg in \"$@\"; do [ \"$arg\" = --dry-run ] && exit 9; done\ncat <<'EOF'\n{VALID_ENVELOPE}\nEOF");
+        write_manage_sh(&root, &body);
+        let prefs = crate::settings::SettingsPreferences { offline: true, default_dry_run: true, upstream_ttl_sec: 17 };
+        let result = run_engine_with_preferences(&root, None, None, false, "mcp:status", &[], Some("settings-child-01"), Some(&prefs)).unwrap();
+        assert!(result.ok);
+        assert!(!result.mode.dry_run, "defaultDryRun only affects UI confirmation");
     }
 
     // ---- 真实联调冒烟（手动运行） ----

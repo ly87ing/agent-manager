@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing v* tag to build and upload"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -21,29 +26,72 @@ jobs:
             bundles: "app,dmg"
           - os: ubuntu-latest
             bundles: "appimage,deb"
-          - os: windows-latest
-            bundles: "nsis,msi"
 
     # 密钥只经 GitHub Secrets 注入，主仓库不落任何真实密钥（见
     # docs/GUI-PLATFORM-STATUS.md 的 updater 接线说明）。
     env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Validate release tag, checkout, and version consistency
+        env:
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+        shell: bash
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "release tag must match vX.Y.Z" >&2
+            exit 1
+          }
+          tag_commit="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          head_commit="$(git rev-parse HEAD)"
+          [[ "$tag_commit" == "$head_commit" ]] || {
+            echo "checked out commit does not match release tag $RELEASE_TAG" >&2
+            exit 1
+          }
+          version="${RELEASE_TAG#v}"
+          pkg_ver="$(node -p 'require("./app/package.json").version')"
+          tauri_ver="$(node -p 'require("./app/src-tauri/tauri.conf.json").version')"
+          cargo_ver="$(python3 -c '
+          try:
+              import tomllib
+              print(tomllib.load(open("app/src-tauri/Cargo.toml", "rb"))["package"]["version"])
+          except ModuleNotFoundError:
+              try:
+                  import tomli as tomllib
+                  print(tomllib.load(open("app/src-tauri/Cargo.toml", "rb"))["package"]["version"])
+              except ModuleNotFoundError:
+                  import re
+                  txt = open("app/src-tauri/Cargo.toml", encoding="utf-8").read()
+                  pkg = re.search(r"\[package\](.*?)(?=\n\[|\Z)", txt, re.S)
+                  print(re.search(r"^version\s*=\s*[\"\x27]([^\x22\x27]+)[\"\x27]", pkg.group(1), re.M).group(1))
+          ')"
+          if [[ "$pkg_ver" != "$version" || "$tauri_ver" != "$version" || "$cargo_ver" != "$version" ]]; then
+            echo "Version mismatch: tag=$version, package.json=$pkg_ver, tauri.conf.json=$tauri_ver, Cargo.toml=$cargo_ver" >&2
+            exit 1
+          fi
 
       - name: Install Tauri system dependencies (Linux)
         if: ${{ runner.os == 'Linux' }}
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -78,7 +126,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             app/src-tauri/target
-          key: ${{ runner.os }}-app-cargo-${{ hashFiles('app/src-tauri/Cargo.lock') }}
+            engine-rs/target
+          key: ${{ runner.os }}-app-cargo-${{ hashFiles('app/src-tauri/Cargo.lock', 'engine-rs/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-app-cargo-
 
       # 仅当 TAURI_SIGNING_PRIVATE_KEY secret 存在时启用 updater 产物：
@@ -94,9 +143,17 @@ jobs:
           c.bundle.createUpdaterArtifacts=true;
           fs.writeFileSync(p, JSON.stringify(c,null,2)+'\n');"
 
+      - name: Configure rust path remapping
+        shell: bash
+        run: |
+          echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }--remap-path-prefix=$HOME=/YOUR_BUILD_HOME --remap-path-prefix=$GITHUB_WORKSPACE=/YOUR_SOURCE_ROOT" >> "$GITHUB_ENV"
+
       - name: Build and upload release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          projectPath: app
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: Agent Manager ${{ env.RELEASE_TAG }}
           args: --bundles ${{ matrix.bundles }}

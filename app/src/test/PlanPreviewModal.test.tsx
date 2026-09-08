@@ -76,6 +76,14 @@ describe("PlanPreviewModal", () => {
     expect(onConfirm).toHaveBeenCalledWith(true);
   });
 
+  it("打开时采用演练默认值，仍可单次切换", async () => {
+    const { onConfirm } = renderModal([makePlanAction({})], { defaultDryRun: true });
+    expect(screen.getByLabelText(/演练模式/)).toBeChecked();
+    await userEvent.click(screen.getByLabelText(/演练模式/));
+    await userEvent.click(screen.getByTestId("plan-confirm-button"));
+    expect(onConfirm).toHaveBeenCalledWith(false);
+  });
+
   it("没有操作时禁用确认", () => {
     renderModal([]);
     expect(screen.getByText(/没有需要执行的操作/)).toBeInTheDocument();

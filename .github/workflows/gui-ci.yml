@@ -43,6 +43,11 @@ jobs:
       - name: Run cargo tests
         run: cargo test --manifest-path engine-rs/Cargo.toml
 
+      - name: Configure rust path remapping
+        shell: bash
+        run: |
+          echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }--remap-path-prefix=$HOME=/YOUR_BUILD_HOME --remap-path-prefix=$GITHUB_WORKSPACE=/YOUR_SOURCE_ROOT" >> "$GITHUB_ENV"
+
       - name: Build engine release binary
         run: cargo build --release --manifest-path engine-rs/Cargo.toml
 
@@ -125,6 +130,11 @@ jobs:
         working-directory: app
         run: pnpm test:unit run
 
+      - name: Configure rust path remapping
+        shell: bash
+        run: |
+          echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }--remap-path-prefix=$HOME=/YOUR_BUILD_HOME --remap-path-prefix=$GITHUB_WORKSPACE=/YOUR_SOURCE_ROOT" >> "$GITHUB_ENV"
+
       # bundle target 按平台选择："app" 仅 macOS 存在；Linux 用 deb、Windows 用 nsis。
       - name: Build app bundle
         working-directory: app
@@ -195,7 +205,4 @@ jobs:
         working-directory: app
         run: pnpm test:unit run
 
-      # Windows 最小安装器为 nsis（tauri CLI 自动下载工具链）；实验性 job 允许失败。
-      - name: Build app bundle
-        working-directory: app
-        run: pnpm tauri build --bundles nsis
+      # Windows 独立运行链尚未验收；仅保留静态检查与单测，不产出或宣称安装器。

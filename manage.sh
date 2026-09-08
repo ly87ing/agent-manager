@@ -29,6 +29,7 @@ if ! command -v "$PYTHON_CMD" >/dev/null 2>&1 && [ ! -x "$PYTHON_CMD" ]; then
     exit 2
 fi
 export AGENT_MANAGER_PYTHON_CMD="$PYTHON_CMD"
+export PYTHONDONTWRITEBYTECODE=1
 RUN_ID="${AGENT_MANAGER_RUN_ID:-$(date +%Y%m%d%H%M%S)_$$}"
 LOG_PREFIX="${AGENT_MANAGER_LOG_PREFIX:-/tmp/agent_manager_sync_${USER_NAME}}"
 TEMP_LOG="${LOG_PREFIX}_${RUN_ID}.log"

@@ -106,9 +106,10 @@ class StandaloneResourceTests(unittest.TestCase):
             def run(command, **kwargs):
                 if command == ["rustc", "-vV"]:
                     return type("Result", (), {"stdout": f"host: {target}\n"})()
-                binary.parent.mkdir(parents=True)
+                binary.parent.mkdir(parents=True, exist_ok=True)
                 binary.write_bytes(b"engine")
                 self.assertEqual(command[-2:], ["--target-dir", str(BUILD.ROOT / "engine-rs" / "target")])
+                self.assertIn("--remap-path-prefix=", kwargs["env"]["RUSTFLAGS"])
                 return type("Result", (), {})()
 
             try:
@@ -116,6 +117,70 @@ class StandaloneResourceTests(unittest.TestCase):
                     self.assertEqual(BUILD._build_engine(), binary)
             finally:
                 BUILD.ROOT = old_root
+
+    def test_clean_bytecode_removes_pyc_and_pycache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pycache = root / "pkg" / "__pycache__"
+            pycache.mkdir(parents=True)
+            (pycache / "mod.cpython-313.pyc").write_bytes(b"pyc")
+            (root / "pkg" / "loose.pyc").write_bytes(b"loose")
+            (root / "pkg" / "loose.pyo").write_bytes(b"loose")
+            source = root / "pkg" / "mod.py"
+            source.write_text("print(1)")
+
+            BUILD._clean_bytecode(root)
+
+            self.assertTrue(source.is_file())
+            self.assertFalse(pycache.exists())
+            self.assertFalse((root / "pkg" / "loose.pyc").exists())
+            self.assertFalse((root / "pkg" / "loose.pyo").exists())
+            self.assertEqual(list(root.rglob("*.py[co]")), [])
+
+    def test_validate_runtime_completeness_rejects_bytecode_and_missing_artifacts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime"
+            (runtime / "bin").mkdir(parents=True)
+            (runtime / "bin/python3.13").write_bytes(b"python")
+            (runtime / "bin/python3").symlink_to("python3.13")
+            stdlib = runtime / "lib" / "python3.13"
+            stdlib.mkdir(parents=True)
+            for mod in ("json", "ssl.py", "tomllib", "subprocess.py"):
+                (stdlib / mod).write_bytes(b"dummy")
+            (runtime / "lib" / "libpython3.13.dylib").write_bytes(b"dynlib")
+            (stdlib / "LICENSE.txt").write_text("license")
+
+            # Complete runtime passes
+            BUILD._validate_runtime_completeness(runtime)
+
+            # Presence of pyc is rejected
+            pyc = stdlib / "test.pyc"
+            pyc.write_bytes(b"pyc")
+            with self.assertRaisesRegex(RuntimeError, "contains bytecode files"):
+                BUILD._validate_runtime_completeness(runtime)
+            pyc.unlink()
+
+            # Missing license is rejected
+            (stdlib / "LICENSE.txt").unlink()
+            with self.assertRaisesRegex(RuntimeError, "license file missing"):
+                BUILD._validate_runtime_completeness(runtime)
+            (stdlib / "LICENSE.txt").write_text("license")
+
+            # Missing dynamic lib is rejected
+            (runtime / "lib" / "libpython3.13.dylib").unlink()
+            with self.assertRaisesRegex(RuntimeError, "dynamic library missing"):
+                BUILD._validate_runtime_completeness(runtime)
+
+    def test_packaged_resources_cleanliness_and_completeness(self):
+        if not BUILD.OUT.exists():
+            self.skipTest("packaged resources not built")
+        pyc_files = list(BUILD.OUT.rglob("*.py[co]")) + [p for p in BUILD.OUT.rglob("__pycache__") if p.is_dir()]
+        rel_pyc = [p.relative_to(BUILD.OUT).as_posix() for p in pyc_files]
+        self.assertEqual(rel_pyc, [], f"found bytecode in package: {rel_pyc}")
+        env_files = list(BUILD.OUT.rglob("*.env*"))
+        rel_env = [p.relative_to(BUILD.OUT).as_posix() for p in env_files]
+        self.assertEqual(rel_env, [], f"found .env in package: {rel_env}")
+        BUILD._validate_runtime_completeness(BUILD.OUT / "runtime" / "python")
 
 
 if __name__ == "__main__":

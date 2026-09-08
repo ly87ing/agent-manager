@@ -21,7 +21,6 @@ import AgentsPage from "./pages/AgentsPage";
 import DashboardPage from "./pages/DashboardPage";
 import DomainApplyPage from "./pages/DomainApplyPage";
 import McpPage from "./pages/McpPage";
-import { PlaceholderPage } from "./pages/PlaceholderPage";
 import PolicyPage from "./pages/PolicyPage";
 import RulesPage from "./pages/RulesPage";
 import RunsPage from "./pages/RunsPage";
@@ -30,6 +29,9 @@ import SkillsPage from "./pages/SkillsPage";
 import SnapshotsPage from "./pages/SnapshotsPage";
 import SyncPage from "./pages/SyncPage";
 import UpdatesPage from "./pages/UpdatesPage";
+import SettingsPage from "./pages/SettingsPage";
+import { useSettings } from "./lib/settings";
+import { PageError, PageLoading } from "./components/PageState";
 
 const NAV: NavItem[] = [
   { key: "dashboard", label: "总览", icon: LayoutDashboard },
@@ -50,9 +52,11 @@ const NAV: NavItem[] = [
 ];
 
 export default function App() {
+  // 预加载本机偏好，确保首次打开任意预览时已有默认演练值。
+  const settings = useSettings();
   const [activePage, setActivePage] = useState<string>("dashboard");
-  const activeLabel = NAV.find((item) => item.key === activePage)?.label ?? activePage;
-
+  if (settings.isPending) return <PageLoading text="正在读取应用设置…" />;
+  if (settings.isError) return <PageError title="应用设置加载失败" error={settings.error} />;
   return (
     <AppLayout nav={NAV} active={activePage} onNavigate={setActivePage}>
       {activePage === "dashboard" && <DashboardPage />}
@@ -75,7 +79,7 @@ export default function App() {
       {activePage === "policy" && <PolicyPage />}
       {activePage === "sync" && <SyncPage />}
       {activePage === "snapshots" && <SnapshotsPage />}
-      {activePage === "settings" && <PlaceholderPage title={activeLabel} />}
+      {activePage === "settings" && <SettingsPage />}
     </AppLayout>
   );
 }

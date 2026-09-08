@@ -37,6 +37,22 @@ export interface Envelope<T = unknown> {
   errors: Diagnostic[];
 }
 
+export interface SettingsPreferences {
+  offline: boolean;
+  defaultDryRun: boolean;
+  upstreamTtlSec: number;
+}
+
+export interface SettingsData {
+  preferences: SettingsPreferences;
+  appVersion: string;
+  contractVersion: string;
+  resourceDir: string;
+  dataDir: string;
+  logDir: string;
+  updaterConfigured: boolean;
+}
+
 // ---------- element（双轴模型：收敛轴 state + 上游轴 freshness） ----------
 
 export type ElementState =

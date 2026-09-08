@@ -494,15 +494,30 @@ class ProjectContractTests(unittest.TestCase):
         self.assertTrue(status.exists(), "missing GUI platform status doc")
 
         content = status.read_text(encoding="utf-8")
-        self.assertIn("全量实测通过", content)
+        # macOS: 明确记录本机范围且属于本地候选/未发布范围
+        self.assertIn("Darwin x86_64", content)
+        self.assertIn("standalone", content)
+        self.assertIn("本地候选", content)
+        self.assertIn("未发布", content)
+        # Linux: 明确桌面环境未验证
+        self.assertIn("未在真实 Linux 桌面环境运行验证", content)
+        self.assertIn("构建/引擎证据不等于桌面运行验收", content)
+        # Windows: 明确 Bash 依赖限制与实验性门控
+        self.assertIn("不支持独立 Bash 运行链，未进行桌面运行验收", content)
         self.assertIn("实验性，不宣称可用", content)
         self.assertIn("python-build-standalone", content)
         self.assertIn("continue-on-error: true", content)
+        # 签名与自更新：明确未配置签名与占位符
+        self.assertIn("当前未进行签名发布", content)
         self.assertIn("YOUR_UPDATER_PUBKEY", content)
         self.assertIn("TAURI_SIGNING_PRIVATE_KEY", content)
+        self.assertIn("secret 不存在时跳过签名，只产未签名安装器", content)
         self.assertIn("SyncPage", content)
-        # 反例：状态报告不得宣称 Windows 已完成验证。
+        # 强反例：状态报告不得宣称 Windows 完成验证，亦不得宣称全量实测通过或 CI 本轮已跑/全绿
         self.assertNotIn("Windows 全量实测", content)
+        self.assertNotIn("全量实测通过", content)
+        self.assertNotIn("CI本轮已跑", content)
+        self.assertNotIn("C全绿", content)
 
 
 if __name__ == "__main__":

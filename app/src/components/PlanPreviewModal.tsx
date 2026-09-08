@@ -91,6 +91,7 @@ export default function PlanPreviewModal({
   planError,
   requireConfirmText,
   confirmLabel = "确认执行",
+  defaultDryRun = false,
   executing,
   resultErrors,
   onConfirm,
@@ -105,13 +106,15 @@ export default function PlanPreviewModal({
   /** 安装/卸载级二次确认：须输入此文本（元素 id）才能确认。 */
   requireConfirmText?: string;
   confirmLabel?: string;
+  /** 打开弹窗时的演练默认值；用户修改后由弹窗自己的状态接管。 */
+  defaultDryRun?: boolean;
   executing: boolean;
   /** 执行后引擎返回的 errors（失败时留在弹窗内展示）。 */
   resultErrors?: Diagnostic[] | null;
   onConfirm: (dryRun: boolean) => void;
   onClose: () => void;
 }) {
-  const [dryRun, setDryRun] = useState(false);
+  const [dryRun, setDryRun] = useState(defaultDryRun);
   const [confirmText, setConfirmText] = useState("");
   const [networkAck, setNetworkAck] = useState(false);
 

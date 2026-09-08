@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import PlanPreviewModal from "../components/PlanPreviewModal";
-import type { Diagnostic, Envelope, PlanData } from "../lib/contract";
+import type { Diagnostic, Envelope, PlanData, SettingsData } from "../lib/contract";
 import { engineErrorMessage, runEngine } from "../lib/engine";
 import { useExecutions } from "../lib/execution";
 import { engineKeys } from "../lib/queries";
+import { fetchSettings, settingsKey } from "./settings";
 
 export type PlanCommandSpec = string | { command: string; args?: string[] };
 
@@ -20,6 +21,7 @@ export interface OpenPreviewOptions {
   /** install-remove 二次确认文本（通常元素 id）。 */
   requireConfirmText?: string;
   confirmLabel?: string;
+  defaultDryRun?: boolean;
   /** 确认后执行（经 useExecutions.execute 走 run_id 追踪）。返回 envelope；null = 桥层失败。 */
   execute: (dryRun: boolean) => Promise<Envelope | null>;
 }
@@ -38,14 +40,17 @@ interface PreviewState {
  */
 export function usePlanPreview() {
   const queryClient = useQueryClient();
+  const settings = queryClient.getQueryData<SettingsData>(settingsKey);
   const [state, setState] = useState<PreviewState | null>(null);
 
   const open = (options: OpenPreviewOptions) => {
-    setState({ options, plans: null, planError: null, executing: false, resultErrors: null });
     void (async () => {
       try {
+        const settingsData = await queryClient.ensureQueryData({ queryKey: settingsKey, queryFn: fetchSettings, staleTime: 30_000 });
+        const resolvedOptions = { ...options, defaultDryRun: options.defaultDryRun ?? settingsData.preferences.defaultDryRun };
+        setState({ options: resolvedOptions, plans: null, planError: null, executing: false, resultErrors: null });
         const plans: { domain: string; actions: PlanData["actions"] }[] = [];
-        for (const spec of options.planCommands) {
+        for (const spec of resolvedOptions.planCommands) {
           const command = typeof spec === "string" ? spec : spec.command;
           const args = typeof spec === "string" ? undefined : spec.args;
           const envelope = await queryClient.fetchQuery({
@@ -59,10 +64,10 @@ export function usePlanPreview() {
           let actions = envelope.data.actions;
           const hasEngineScope = args && args.includes("--only");
           if (!hasEngineScope) {
-            if (options.filterElement) {
-              actions = actions.filter((action) => action.element === options.filterElement);
-            } else if (options.filterElements) {
-              actions = actions.filter((action) => options.filterElements!.has(action.element));
+            if (resolvedOptions.filterElement) {
+              actions = actions.filter((action) => action.element === resolvedOptions.filterElement);
+            } else if (resolvedOptions.filterElements) {
+              actions = actions.filter((action) => resolvedOptions.filterElements!.has(action.element));
             }
           }
           plans.push({ domain: envelope.data.domain, actions });
@@ -72,13 +77,13 @@ export function usePlanPreview() {
         const hasInstallRemove = allActions.some((action) => action.risk === "install-remove");
         const firstInstallRemoveElement = allActions.find((action) => action.risk === "install-remove")?.element;
         const fallbackConfirmText =
-          options.requireConfirmText ??
-          (hasInstallRemove ? (options.filterElement ?? firstInstallRemoveElement ?? "确认执行") : undefined);
+          resolvedOptions.requireConfirmText ??
+          (hasInstallRemove ? (resolvedOptions.filterElement ?? firstInstallRemoveElement ?? "确认执行") : undefined);
         setState((prev) =>
           prev ? { ...prev, plans, options: { ...prev.options, requireConfirmText: fallbackConfirmText } } : prev,
         );
       } catch (err) {
-        setState((prev) => (prev ? { ...prev, planError: engineErrorMessage(err) } : prev));
+        setState({ options, plans: null, planError: engineErrorMessage(err), executing: false, resultErrors: null });
       }
     })();
   };
@@ -105,6 +110,7 @@ export function usePlanPreview() {
       planError={state.planError}
       requireConfirmText={state.options.requireConfirmText}
       confirmLabel={state.options.confirmLabel}
+      defaultDryRun={state.options.defaultDryRun ?? settings?.preferences.defaultDryRun ?? false}
       executing={state.executing}
       resultErrors={state.resultErrors}
       onConfirm={confirm}

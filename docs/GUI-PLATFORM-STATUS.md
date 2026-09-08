@@ -7,9 +7,9 @@
 
 | 平台 | 构建验证 | 引擎契约验证 | 运行时验证 | 状态 |
 |---|---|---|---|---|
-| macOS (本机 arm64) | `pnpm tauri build --bundles app` 产出 .app（实测） | engine-rs `cargo test` + `tests.test_engine_rs_parity` / `tests.test_engine_cli` python 双跑 parity（实测） | GUI `system.converge` ≡ `make update` 产物逐字节 diff 为空（Phase 2 真实机验收） | **全量实测通过** |
-| Linux (ubuntu-latest) | CI 构建：typecheck + vitest + `pnpm tauri build --bundles deb`（run 34008157126 绿）；安装器 appimage/deb 由 `gui-release.yml` 构建 | CI 回归：engine-rs `cargo test` / `cargo build --release` + python parity 双跑（同 run 绿） | **未在真实 Linux 桌面环境运行验证** | CI 回归通过，运行时未实测 |
-| Windows (windows-latest) | CI 实验性 job（`continue-on-error: true`，按 goal 任务书 Phase 3「据实报告」条款）：typecheck + vitest + `pnpm tauri build --bundles nsis`（run 34008157126 绿，含 nsis 安装器产出） | 未在 CI 跑 parity（python sidecar 路径未验证） | **未实测**：引擎 sidecar 进程编排、路径处理在 Windows 上的运行时行为均未验证；既定过渡方案为 sidecar 捆绑 python-build-standalone（提案 §6.3 Phase 3 第 1 条），尚未实施 | **实验性，不宣称可用**（构建与单测 CI 绿、含 nsis 安装器产出；运行时未实测） |
+| macOS（本机 Darwin x86_64，2026-09-08） | 已在 canonical 临时路径构建并启动 `.app`，资源脚本自动获取固定 SHA256 Python；Rust/Python 资源自测通过 | 总览、MCP 预览、演练可用；包内资源选择性 apply、日志、restore 通过；设置持久化与真实 Aliases 演练/apply/恢复通过 | 隔离 HOME/PATH 且禁止读取源码根；重启后 overlay/mtime 保留 | **standalone 已完成本地候选验收范围（未发布）** |
+| Linux (ubuntu-latest) | 已配置 CI typecheck + vitest + Tauri 构建；本轮未运行 Linux 构建 | 已配置 engine-rs CI 回归；本轮未运行 | **未在真实 Linux 桌面环境运行验证** | 构建/引擎证据不等于桌面运行验收 |
+| Windows (windows-latest) | CI 实验性 job（`continue-on-error: true`）：仅 typecheck + vitest；不产出安装器 | 未跑 parity | **不支持独立 Bash 运行链，未进行桌面运行验收**；过渡方案需捆绑 `python-build-standalone`，尚未实施 | **实验性，不宣称可用** |
 
 ## CI 工作流结构
 
@@ -17,13 +17,15 @@
 - `.github/workflows/gui-ci.yml`（新增，push 到 main/rust、PR、手动触发）：
   - `engine-rs`（ubuntu + macos）：rust toolchain、`cargo test`、`cargo build --release`、python parity（`tests.test_engine_rs_parity` + `tests.test_engine_cli`）。
   - `app`（ubuntu + macos）：pnpm install、typecheck、vitest、`pnpm tauri build --bundles` 按平台分派（macos→app、ubuntu→deb）；ubuntu 前置安装 tauri 官方 Linux 系统依赖（webkit2gtk-4.1 等）。
-  - `app-windows`（windows，`continue-on-error: true`，实验性）：同上，`--bundles nsis`。
+  - `app-windows`（windows，`continue-on-error: true`，实验性）：仅 typecheck + vitest，不产出安装器。
   - 缓存：rustup/cargo（`~/.rustup`、`~/.cargo/registry`、`~/.cargo/git`、target 目录）与 pnpm store，均走 `actions/cache@v4`。
-- `.github/workflows/gui-release.yml`（新增，tag `v*` 触发）：tauri-action 矩阵（macos → app/dmg，ubuntu → appimage/deb，windows → nsis/msi），产全量安装器并上传到该 tag 的 release。
+- `.github/workflows/gui-release.yml`（新增，push 到已有 `v*` tag 或手动输入明确 tag）：先校验 `vX.Y.Z`、精确 tag 解析及 checkout 提交一致，再运行 tauri-action 矩阵（macos → app/dmg，ubuntu → appimage/deb），`projectPath: app`，Node 24，产物上传到指定 tag 的 release。Windows 尚未具备独立运行能力，因此不进入正式 release 矩阵。
+
+本机当前为 Darwin x86_64（2026-09-08）；本轮 standalone 资源已完成构建脚本与定向契约测试，并通过严格隔离 3 项包测试（source deny、系统 Python deny、Homebrew deny、网络 deny、最小 PATH）。真实 `.app` 已在独立 HOME/data 与禁止源码读取的环境下启动，验证设置持久化（离线=true、默认演练=true、TTL=1177秒）及 Aliases 演练、apply、日志与恢复。最终本地回归：Python 751 项、Rust 引擎 42 项、Tauri 37 项及额外 4 项显式集成检查、前端 137 项通过；parity/CLI 112 项、类型检查、生产构建、smoke 和敏感信息扫描通过。当前属于本地候选未发布范围，当前未进行签名发布，未在远程 CI 运行本轮矩阵，不作全量发布可用性宣称。
 
 ## 自更新（tauri-plugin-updater）接线说明
 
-当前状态：**骨架已接好，密钥为占位符，不会真正执行更新**。
+当前状态：**设置持久化和手动更新确认流程已接好；未配置真实公钥或签名发布材料时不会发起更新检查，当前未进行签名发布**。
 `app/src-tauri/tauri.conf.json` 的 `plugins.updater` 段：
 
 - `endpoints`：`https://github.com/ly87ing/agent-manager/releases/latest/download/latest.json`

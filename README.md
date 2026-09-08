@@ -22,10 +22,9 @@
 
 - `chrome-devtools`
   - 用途：`Chrome DevTools` 调试、网络、性能分析。
-  - 启动：`chrome-devtools-mcp --isolated --no-usage-statistics`（运行时二进制由 `tools.json` 纳管、npm 全局安装且不锁版本，`make update` 探测并升级到上游最新；`--isolated` 避免多个 agent 共享同一个 browser profile 导致互相污染；`--no-usage-statistics` 关闭上游默认开启的使用统计上报）。
+  - 启动：`npx -y chrome-devtools-mcp --isolated --no-usage-statistics`（不锁版本，随 npx 解析上游最新；`--isolated` 避免多个 agent 共享同一个 browser profile 导致互相污染；`--no-usage-statistics` 关闭上游默认开启的使用统计上报）。
 - `grok-search`
   - 用途：联网搜索与网页抓取。
-  - 运行时：`uvx --from git+...@grok-with-tavily` 跟踪上游分支，`make update` 以 `uvx --refresh` 预热缓存使其对齐最新。
   - 注意：真实 provider key 仅从 `secrets/` 注入。
 - `serena`
   - 用途：**仅用于 JS/TS** 的 LSP 语义导航（`find_symbol` / 引用 / 符号概览）；需本机有 `uvx` 与 Node.js。
@@ -34,10 +33,8 @@
 
 ### 其他受管工具
 
-- `chrome-devtools-mcp`（chrome-devtools MCP 的运行时二进制）
-  - 不锁版本；由 `tools.json` 纳管为 npm 全局工具，`make update` 探测 npm 上游并升级（探测失败默认跳过，可 `--force-refresh` 强制）。
-- `playwright-cli`
-  - 不锁版本；同为 `tools.json` 纳管的 npm 全局工具，浏览器运行时由 `playwright-cli install-browser` 初始化。
+- `chrome-devtools`（MCP）
+  - 不锁版本；各 Agent 启动时由 npx 解析上游最新。
 默认受管 skill 仓库为 `agent-skills`，跟随上游 `main` 分支最新（不固定 commit），由 `make update` 同步 clone/pull。`agent-skills` 面向 `Claude Code`、`Codex` 与 `Kimi Code` 暴露，并通过显式 `skill_paths` 锁定为当前声明的 `safe-merge-review`、`change-discipline`、`frontend-verification`、`artifact-hygiene`、`reader-facing-writing`、`technical-diagramming` 这 6 个 skill 包，不会因为上游新增 skill 而自动扩大安装范围。
 默认自动安装的 Agent 当前只包含 `Claude Code` 与 `Codex`。
 `Claude Code` 与 `Codex` 默认走官方 npm 包，`config/agents.json` 中的安装/升级命令刻意不锁版本，`make agents:update` 每次都升级到上游最新。历史 `brew` 安装仅用于识别并提示迁移，不再作为这些 CLI 的受管 provider。
@@ -66,7 +63,7 @@
 ### 1. 策略与定义分离 (Policy vs. Definition)
 - **仓库基线 (`manager.json`)**：保存可审计的默认策略。
 - **本地覆盖 (`manager.local.json`)**：运行时与 `manager.json` 深度合并，适合机器本地偏好与私有配置（手工编辑维护）。
-- **不锁版本**：所有受管组件（Agent、tools、MCP、skills）都跟随上游最新——npm 包命令不带版本号、git 依赖跟踪分支头、skill 仓库跟随默认分支；`make update` 即把本机收敛到上游当前状态（MCP 中 npm 型运行时由 tools 纳管升级，git 分支型由管线 `uvx --refresh` 预热缓存）。
+- **不锁版本**：所有受管组件（Agent、tools、MCP、skills）都跟随上游最新——npm 包命令不带版本号、git 依赖跟踪分支头、skill 仓库跟随默认分支；`make update` 即把本机收敛到上游当前状态。
 - **浏览器前置开关**：`browser_us_sync.enabled` 控制 `update` / `init` 是否执行浏览器 Google US 前置同步。
 - **模块化定义 (`agents.json`等)**：保存官方指令细节，支持 Policy 的强制覆盖。
 
@@ -103,9 +100,16 @@
 
 ## 平台支持 (Platform Support)
 
+桌面客户端已有 macOS 本地候选包（2026-09-08，Darwin x86_64），已在隔离用户目录、最小 PATH 和禁止读取源码的环境下完成实际应用验收。内置 Python/Rust 运行时随包交付；业务所需的 Agent、Node/git 仍需另行准备。设置可持久保存离线模式、预览默认演练和缓存 TTL。当前未签名发布，真实签名自更新尚未验收。
+
+桌面包的平台范围与发布条件见 [GUI 平台状态](docs/GUI-PLATFORM-STATUS.md)，本地构建和复跑入口见 [应用说明](app/README.md)。Linux 桌面尚待验证；Windows 桌面包不支持独立 Bash 运行链，以下 POSIX 兼容层说明仅针对脚本使用，不代表 Windows 安装器已可用。
+
 - 本项目当前以 **macOS** 为主要验证平台；**Linux** 路径保持 POSIX 兼容设计，但仍建议在目标环境自行回归验证。  
-- 在 **Windows** 上，建议使用 **WSL2、Git‑Bash 或 Cygwin** 等提供 POSIX 兼容层的环境，以获得完整功能。  
+- 在 **Windows** 上，脚本运行需要 **WSL2、Git‑Bash 或 Cygwin** 等 POSIX 兼容环境，具体命令仍须在目标环境验证。
 - 若希望在原生 PowerShell 或 CMD 中直接使用，需要对脚本进行额外的跨平台改造（将外部命令替换为 PowerShell 等价实现），此工作尚未完成。
+
+## 管理指令集
+
 桌面客户端支持以下基本操作。修改定义后先保存，再预览安装或同步；取消预览不会撤销已保存的定义。
 
 | 元素 | 添加、修改、移除 | 更新 |
@@ -121,11 +125,8 @@ Agent 和 tools 的自定义定义分别写入 `agent_definitions`、`tool_defin
 
 规则、Hooks 和 aliases 的来源编辑通过 `sources:get/set` 完成。保存时检查读取版本、扫描明文敏感信息并创建快照；失败会保留错误供处理。独立客户端升级会保留通过该入口编辑过的来源。可从「备份与恢复」恢复修改前内容，然后重新同步。
 
-
-## 管理指令集
-
 - `./manage.sh`: 显示帮助；这是脚本的安全默认入口，不会触发任何同步。
-- `make update`: 日常最常用。除 Agent 本体外全部收敛到最新（secrets 拉取、shell alias、tools 安装/升级、browser、rules 构建分发、skills 链接、MCP 运行时刷新与配置注入、Claude/Codex hooks 同步）；不安装、也不升级 Agent 软件。
+- `make update`: 日常最常用。把所有受管组件收敛到本机（secrets 拉取、shell alias、tools、browser、rules 构建分发、skills 链接、MCP 注入、Claude/Codex hooks 同步）；不安装、也不升级 Agent 软件。
 - `make init`: 新机器初始化或全量收敛（= Agent 生命周期（安装缺失 Agent + 升级已装 Agent）+ `update`），并等待 Agent 生命周期安装/升级完成。
 - `make agents:update`: 升级/修复本地已安装 Agent 到上游最新（`config/agents.json` 不锁版本），不强制安装缺失 Agent。
 - `make doctor`: 执行全系统深度体检，并把 warning 细分为 `可选工具未就绪` 与 `托管产物尚未生成` 两类提示项；同时扫描主仓库中是否存在疑似明文敏感信息。追加 `--json` 可输出机器可读诊断报告。

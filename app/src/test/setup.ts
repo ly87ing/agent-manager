@@ -6,6 +6,13 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { setEngineClient } from "../lib/engine";
+import { setSettingsClient, type SettingsClient } from "../lib/settings";
+
+const defaultSettingsClient: SettingsClient = {
+  get: async () => ({ preferences: { offline: false, defaultDryRun: false, upstreamTtlSec: 86400 }, appVersion: "test", contractVersion: "agent-manager/engine/v1", resourceDir: "/resources", dataDir: "/data", logDir: "/logs", updaterConfigured: false }),
+  save: async (preferences) => ({ preferences, appVersion: "test", contractVersion: "agent-manager/engine/v1", resourceDir: "/resources", dataDir: "/data", logDir: "/logs", updaterConfigured: false }),
+};
+setSettingsClient(defaultSettingsClient);
 
 // ---- jsdom 交互 API 缺口的最小 shim（带守卫，不覆盖已存在实现；仅测试环境生效） ----
 // user-event 的 pointer 交互会调 Element.setPointerCapture（jsdom 未实现，
@@ -43,4 +50,5 @@ if (typeof window !== "undefined") {
 afterEach(() => {
   cleanup();
   setEngineClient(null);
+  setSettingsClient(defaultSettingsClient);
 });
