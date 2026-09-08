@@ -1,54 +1,63 @@
 import { describe, expect, it } from "vitest";
-import AgentsPage from "../pages/AgentsPage";
+import McpPage from "../pages/McpPage";
 import { makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makePlanAction, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 import type { Envelope } from "../lib/contract";
 
-/** 元素启停开关链路：Switch → policy.set enabled 键 → toast「立即同步」→ plan 预览 → apply。 */
+/**
+ * 元素启停开关链路：Switch → policy.set enabled 键 → toast「立即同步」→ plan 预览 → apply。
+ * Agents 页的普通 enabled 快捷开关已按设计移除（其实会触发卸载语义），
+ * 本链路改经仍保留开关的 MCP 页验证；agents 安装/卸载仍由明确动作按钮覆盖。
+ */
 function routes(): Record<string, Envelope> {
   return {
     "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit" }),
-    "agents:status": makeEnvelope(
+    "mcp:status": makeEnvelope(
       {
-        domain: "agents",
+        domain: "mcp",
         elements: [
           makeElement({
-            id: "agents:claude-code",
-            domain: "agents",
-            spec: { display_name: "Claude Code", bin: "claude", preferred_provider: "npm", providers: { npm: { managed: true } } },
-            policy: { enabled: true, auto_install: true, auto_update: true, preferred_provider: "npm" },
-            observed: { providers: ["npm"], classified: { managed: ["npm"], deprecated: [], system_only: [], unsupported: [] }, installed: true, preferred_active: true },
+            id: "mcp:chrome-devtools",
+            domain: "mcp",
+            spec: { command: "npx", args: ["-y", "chrome-devtools-mcp"], startup_timeout_sec: 120, agents: null, env: {} },
+            policy: { enabled: true },
+            observed: {
+              agents: {
+                "claude-code": { state: "managed-ok", target: "/tmp/demo/.claude.json", target_exists: true },
+              },
+              env: {},
+            },
             state: "managed-ok",
-            freshness: makeFreshness({ state: "current", current: "2.1.3", upstream: "2.1.3", checked_at: "2026-09-06T00:00:00Z", probe: "npm-view", cache_age_sec: 60 }),
+            freshness: makeFreshness({ state: "current", current: "1.8.0", upstream: "1.8.0", checked_at: "2026-09-06T00:00:00Z", probe: "npm-view", cache_age_sec: 60 }),
           }),
         ],
       },
-      { command: "agents.status" },
+      { command: "mcp.status" },
     ),
-    "policy:set": makeEnvelope(makePolicyData({ layers: null, effective: null, attribution: null, layer: "local", key: "agents.claude-code.enabled", value: false, path: "/repo/config/manager.local.json" }), { command: "policy.set" }),
-    "agents:plan": makeEnvelope(
+    "policy:set": makeEnvelope(makePolicyData({ layers: null, effective: null, attribution: null, layer: "local", key: "mcp.chrome-devtools.enabled", value: false, path: "/repo/config/manager.local.json" }), { command: "policy.set" }),
+    "mcp:plan": makeEnvelope(
       {
-        domain: "agents",
-        actions: [makePlanAction({ op: "write-file", element: "agents:claude-code", target: "/tmp/demo.json", risk: "write-local", note: "停用标记" })],
+        domain: "mcp",
+        actions: [makePlanAction({ op: "write-file", element: "mcp:chrome-devtools", target: "/tmp/demo.json", risk: "write-local", note: "停用标记" })],
         summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 },
       },
-      { command: "agents.plan" },
+      { command: "mcp.plan" },
     ),
-    "agents:apply": makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }),
+    "mcp:apply": makeEnvelope(makeApplyResult({ domain: "mcp" }), { command: "mcp.apply" }),
   };
 }
 
 describe("元素启停开关", () => {
-  it("关 → policy.set enabled=false（默认层）→ toast 带「立即同步」→ 预览 → agents:apply", async () => {
-    const { calls } = renderWithEngine(<AgentsPage />, routes());
+  it("关 → policy.set enabled=false（默认层）→ toast 带「立即同步」→ 预览 → mcp:apply", async () => {
+    const { calls } = renderWithEngine(<McpPage />, routes());
 
-    const toggle = await screen.findByTestId("toggle-agents:claude-code");
+    const toggle = await screen.findByTestId("toggle-mcp:chrome-devtools");
     expect(toggle).toHaveAttribute("aria-checked", "true");
     await userEvent.click(toggle);
 
     // policy.set 参数正确（默认仅这台电脑层）
     const setCall = calls.find((call) => call.command === "policy:set");
-    expect(setCall!.args).toEqual(["--layer", "local", "--key", "agents.claude-code.enabled", "--value", "false"]);
+    expect(setCall!.args).toEqual(["--layer", "local", "--key", "mcp.chrome-devtools.enabled", "--value", "false"]);
 
     // toast 出现且带「立即同步」动作
     const toastAction = await screen.findByText("立即同步");
@@ -56,16 +65,16 @@ describe("元素启停开关", () => {
 
     // plan 预览打开（过滤到本元素），确认后触发 apply
     const dialog = await screen.findByRole("dialog");
-    expect(dialog).toHaveTextContent("停用 Claude Code");
+    expect(dialog).toHaveTextContent("停用 mcp:chrome-devtools");
     expect(dialog).toHaveTextContent("/tmp/demo.json");
     await userEvent.click(screen.getByTestId("plan-confirm-button"));
 
-    const applyCall = calls.find((call) => call.command === "agents:apply");
+    const applyCall = calls.find((call) => call.command === "mcp:apply");
     expect(applyCall).toBeDefined();
-    expect(applyCall!.args).toEqual(["--only", "agents:claude-code"]);
+    expect(applyCall!.args).toEqual(["--only", "mcp:chrome-devtools"]);
     expect(applyCall!.options?.runId).toMatch(/^gui-/);
 
-    const order = ["policy:set", "agents:plan", "agents:apply"].map((cmd) => calls.findIndex((call) => call.command === cmd));
+    const order = ["policy:set", "mcp:plan", "mcp:apply"].map((cmd) => calls.findIndex((call) => call.command === cmd));
     expect(order[0]).toBeLessThan(order[1]);
     expect(order[1]).toBeLessThan(order[2]);
   });
@@ -77,10 +86,10 @@ describe("元素启停开关", () => {
       ok: false,
       errors: [{ code: "POLICY_SECRET_GATE", element: null, message: "疑似密钥，拒绝写入" }],
     });
-    const { calls } = renderWithEngine(<AgentsPage />, rejected);
-    await userEvent.click(await screen.findByTestId("toggle-agents:claude-code"));
+    const { calls } = renderWithEngine(<McpPage />, rejected);
+    await userEvent.click(await screen.findByTestId("toggle-mcp:chrome-devtools"));
     expect(await screen.findByText(/保存被拒绝/)).toBeInTheDocument();
     expect(screen.queryByText("立即同步")).toBeNull();
-    expect(calls.some((call) => call.command === "agents:apply")).toBe(false);
+    expect(calls.some((call) => call.command === "mcp:apply")).toBe(false);
   });
 });

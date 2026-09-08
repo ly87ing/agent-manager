@@ -57,6 +57,12 @@ export function useDefinitionOps({
     if (!(await writePolicy("policy:set", ["--layer", layer, "--key", defKey, "--value", JSON.stringify({ ...input.definition, _delete: false, ...(domain === "agents" || domain === "tools" ? { _replace: true } : {}) })]))) {
       return;
     }
+    // Agent 表单提交语义为“保存定义”：只保存定义，不写新启用键、不 plan/apply，不触发安装。
+    if (domain === "agents") {
+      void queryClient.invalidateQueries({ queryKey: engineKeys.all });
+      toast.success(`已保存定义 ${input.name}（不会自动安装）`);
+      return;
+    }
     if (input.isNew) {
       if (!(await writePolicy("policy:set", ["--layer", layer, "--key", `${section}.${input.name}.enabled`, "--value", "true"]))) {
         return;

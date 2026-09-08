@@ -71,3 +71,62 @@ describe("Agents 页写动作", () => {
     expect(screen.getByTestId("action-uninstall-agents:claude-code")).toBeDisabled();
   });
 });
+
+describe("Agents 页文案", () => {
+  it("中文动作与安装方式措辞：无误导性 enabled 开关、无官方/推荐断言", async () => {
+    renderWithEngine(<AgentsPage />, routes(false));
+
+    await screen.findByTestId("action-upgrade-agents:claude-code");
+
+    // auto_install/auto_update 中文化
+    expect(screen.getByText("自动安装")).toBeInTheDocument();
+    expect(screen.getByText("自动更新")).toBeInTheDocument();
+    expect(screen.queryByText("auto_install")).toBeNull();
+    expect(screen.queryByText("auto_update")).toBeNull();
+
+    // preferred_provider 只称默认安装方式；实际来源称当前安装方式；无官方/推荐措辞
+    expect(screen.getByText(/默认安装方式 npm/)).toBeInTheDocument();
+    expect(screen.getByText(/当前安装方式 npm/)).toBeInTheDocument();
+    expect(screen.queryByText(/推荐渠道/)).toBeNull();
+    expect(screen.queryByText(/官方渠道/)).toBeNull();
+
+    // 普通 enabled 快捷开关已移除（实际会触发卸载语义），状态仅展示
+    expect(screen.queryByTestId("toggle-agents:claude-code")).toBeNull();
+    expect(screen.getByText("已启用")).toBeInTheDocument();
+
+    // 明确的安装/升级/卸载与编辑命令入口保留
+    expect(screen.getByTestId("action-upgrade-agents:claude-code")).toBeInTheDocument();
+    expect(screen.getByTestId("action-uninstall-agents:claude-code")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "编辑命令" })).toBeInTheDocument();
+  });
+
+  it("未知来源安装：提供更换安装方式，不承诺迁移到官方渠道", async () => {
+    const unmanagedRoutes = routes(false);
+    unmanagedRoutes["agents:status"] = makeEnvelope(
+      {
+        domain: "agents",
+        elements: [
+          makeElement({
+            id: "agents:codex",
+            domain: "agents",
+            spec: { display_name: "Codex", bin: "codex", preferred_provider: "native", providers: { native: { managed: true } } },
+            policy: { enabled: true },
+            observed: { providers: ["unknown-source"], classified: { managed: [], deprecated: [], system_only: [], unsupported: ["unknown-source"] }, installed: true, preferred_active: false },
+            state: "unmanaged-detected",
+            freshness: makeFreshness(),
+            actions: [{ id: "install", risk: "install-remove", needs_lock: true, offline_ok: false }],
+          }),
+        ],
+      },
+      { command: "agents.status" },
+    );
+
+    renderWithEngine(<AgentsPage />, unmanagedRoutes);
+
+    const migrate = await screen.findByTestId("migrate-agents:codex");
+    expect(migrate).toHaveTextContent("更换安装方式");
+    expect(screen.queryByText(/迁移到官方/)).toBeNull();
+    // 不承诺自动迁移现有安装
+    expect(screen.getByText(/不会自动卸载或迁移现有安装/)).toBeInTheDocument();
+  });
+});

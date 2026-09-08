@@ -7,11 +7,9 @@ import { ErrorPanel } from "../components/ErrorPanel";
 import { FreshnessBadge } from "../components/FreshnessBadge";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { StateBadge } from "../components/StateBadge";
-import { Switch } from "../components/Switch";
 import type { ElementAction, EngineElement, PolicyData, StatusData } from "../lib/contract";
 import type { AgentsObserved, AgentsPolicy, AgentsSpec } from "../lib/observed";
 import { useEngineQuery, useOfflineMode } from "../lib/queries";
-import { useElementToggle } from "../lib/useElementToggle";
 import { useExecuteApply, usePlanPreview } from "../lib/usePlanPreview";
 import { cn } from "../lib/utils";
 import { runEngine } from "../lib/engine";
@@ -54,7 +52,6 @@ function AgentCard({ element, onEdit, onRemove }: { element: EngineElement; onEd
   const offline = useOfflineMode();
   const preview = usePlanPreview();
   const executeApply = useExecuteApply();
-  const elementToggle = useElementToggle();
   const spec = element.spec as AgentsSpec;
   const policy = element.policy as AgentsPolicy;
   const observed = element.observed as AgentsObserved;
@@ -114,6 +111,14 @@ function AgentCard({ element, onEdit, onRemove }: { element: EngineElement; onEd
             </span>
           )),
         )}
+        {(observed.providers ?? []).length > 0 && (
+          <span
+            className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-slate-600"
+            title="系统实际检测到的安装来源"
+          >
+            当前安装方式 {(observed.providers ?? []).join("、")}
+          </span>
+        )}
         {spec.preferred_provider && (
           <span
             className={cn(
@@ -122,41 +127,28 @@ function AgentCard({ element, onEdit, onRemove }: { element: EngineElement; onEd
                 ? "border-indigo-200 bg-indigo-50 text-indigo-700"
                 : "border-slate-200 bg-slate-50 text-slate-500",
             )}
-            title={observed.preferred_active ? "推荐渠道生效中" : "当前安装不走推荐渠道"}
+            title={observed.preferred_active ? "当前安装与默认安装方式一致" : "当前安装与默认安装方式不一致"}
           >
-            推荐渠道 {spec.preferred_provider}
+            默认安装方式 {spec.preferred_provider}
             {observed.preferred_active ? "·生效中" : "·未生效"}
           </span>
         )}
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-3">
-        <PolicyChip label="auto_install" value={policy.auto_install} />
-        <PolicyChip label="auto_update" value={policy.auto_update} />
-        <span className="ml-auto inline-flex items-center gap-2 text-xs text-slate-500">
+        <PolicyChip label="自动安装" value={policy.auto_install} />
+        <PolicyChip label="自动更新" value={policy.auto_update} />
+        <span className="ml-auto text-xs text-slate-500">
           {policy.enabled === false ? "已停用" : "已启用"}
-          <Switch
-            checked={policy.enabled !== false}
-            testId={`toggle-${element.id}`}
-            label={`${policy.enabled !== false ? "停用" : "启用"} ${name}`}
-            onChange={() =>
-              void elementToggle.toggle({
-                elementId: element.id,
-                enabledKey: `agents.${element.id.replace(/^agents:/, "")}.enabled`,
-                enabled: policy.enabled !== false,
-                domain: "agents",
-                name,
-              })
-            }
-          />
         </span>
       </div>
 
       {element.state === "unmanaged-detected" && (
         <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           <p>
-            检测到用 {(observed.classified?.unsupported ?? [])[0] ?? "其它渠道"} 安装的旧版，建议迁移到官方
-            {spec.preferred_provider ? `${spec.preferred_provider} ` : ""}渠道，之后就能用本工具统一升级和卸载。
+            检测到用 {(observed.classified?.unsupported ?? [])[0] ?? "其它渠道"} 安装的版本
+            {spec.preferred_provider ? `，可更换为定义中的 ${spec.preferred_provider} 方式，之后由本工具统一升级和卸载` : "，可更换安装方式后由本工具管理"}
+            。更换会执行新的安装命令，不会自动卸载或迁移现有安装。
           </p>
           <button
             type="button"
@@ -170,14 +162,14 @@ function AgentCard({ element, onEdit, onRemove }: { element: EngineElement; onEd
               offline ? "cursor-not-allowed border-slate-200 text-slate-400" : "border-amber-300 text-amber-800 hover:bg-amber-100",
             )}
           >
-            迁移到官方渠道
+            更换安装方式
           </button>
           {offline && <span className="ml-2 text-xs text-amber-600">离线模式下不可用（需要联网）</span>}
         </div>
       )}
 
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
-        <button type="button" onClick={onEdit} className="rounded border px-2.5 py-1 text-xs">编辑</button>
+        <button type="button" onClick={onEdit} className="rounded border px-2.5 py-1 text-xs">编辑命令</button>
         <button type="button" onClick={onRemove} className="rounded border border-red-200 px-2.5 py-1 text-xs text-red-600">移除管理</button>
         {element.actions.map((action) => {
           const meta = ACTION_META[action.id];
@@ -214,7 +206,6 @@ function AgentCard({ element, onEdit, onRemove }: { element: EngineElement; onEd
       </div>
       {expanded && <div className="mt-2"><DriftExplanationPanel element={element} planCommand="agents:plan" /></div>}
       {preview.modal}
-      {elementToggle.modal}
     </section>
   );
 }
