@@ -71,9 +71,25 @@ Windows 平台支持：`Claude Code` 支持原生 Windows（PowerShell / CMD）�
 - **只读与预演**：`help`、状态、计划、`policy:get` 和 `--dry-run` 不创建数据库。未初始化时仍读取旧配置；数据库激活后，策略写入只更新 SQLite，适配器读取临时生成的配置。
 - **旧文件保留**：迁移不删除 `manager.json`、`manager.synced.json` 和 `manager.local.json`，之后编辑旧策略文件不再影响数据库。规则、Hooks 与 alias 正文当前仍走原有源文件编辑链路，尚未全部迁入数据库；旧 profile 拉取、推送在数据库激活后禁用，避免同步过期状态。
 - **回退边界**：旧版本只认识旧文件。回退程序前应保留数据库，核对迁移后的修改；直接运行旧版本不会把这些新修改自动还原到旧 JSON。当前没有自动反向迁移。
-- **不锁版本**：所有受管组件（Agent、tools、MCP、skills）都跟随上游最新——npm 包命令不带版本号、git 依赖跟踪分支头、skill 仓库跟随默认分支；`make update` 即把本机收敛到上游当前状态。
+- **资源更新与使用版本分开**：Agent、tools 与 MCP 程序沿用各自上游更新方式。Skill 仓库缓存跟踪分支头；SQLite 模式下，已分配的 Skill 使用内容摘要标识的不可变版本，更新集合不自动更新各 Agent 的使用版本。
 - **浏览器前置开关**：`browser_us_sync.enabled` 控制 `update` / `init` 是否执行浏览器 Google US 前置同步。
 - **模块化定义 (`agents.json`等)**：保存官方指令细节，支持 Policy 的强制覆盖。
+
+### Skill 分配适配器（SQLite 模式）
+
+Skill 分配保存集合、技能、Agent、版本及启用状态，正文快照位于应用数据目录的 `skill-versions/`。首次同步会在刷新仓库前固定已有受管链接的内容；新发现的技能只进入资源库，不自动分配。禁用集合后再启用会保留各 Agent 原来的开关，上游删除技能也不删除已选版本。
+
+`agent-skill/link_skills.py` 提供以下独立动作，必须指定 `--agent YOUR_AGENT` 和单个 `--only skill:YOUR_COLLECTION/YOUR_SKILL`，并使用已初始化的数据库：
+
+| 参数 | 效果 |
+| --- | --- |
+| `--add-assignment` | 添加分配，默认启用；已有分配需使用更新动作 |
+| `--update-version` | 采用当前资源库内容，只更新指定 Agent；禁用的分配保持禁用 |
+| `--enable-assignment` | 恢复已选版本的入口 |
+| `--disable-assignment` | 撤下入口，保留分配和版本 |
+| `--remove-assignment` | 移除分配及其入口，普通同步不会重新添加 |
+
+适配器仍接收引擎生成的 `--config`、`--def-file` 与缓存 `--base-dir`；不要把旧策略 JSON 当作数据库的可编辑副本。`--dry-run` 完成校验但不写数据库、快照或链接。共享物理目录不支持单 Agent 隔离操作；外部内容冲突会被拒绝，失败恢复也不覆盖外部新增内容。当前这五个动作已在适配器实现，统一引擎命令与新版页面仍在接入；现有页面状态尚不能作为不可变分配的完整验收入口。
 
 ### 2. 事务级数据安全
 - **原子化写入 (Atomic Write)**：配置文件采用“临时文件原子替换”模式；规则同步中的单文件分发同样使用原子替换，目录型 rules 则采用收敛式同步。
