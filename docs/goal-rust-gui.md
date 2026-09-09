@@ -14,6 +14,7 @@
 - 根仓库 Python 与旧 `manage.sh` 入口清理。
 - Runs 列表与详情使用 SQLite `operation_logs`。
 - Agent 原生定义、安装来源探测、生命周期 plan/apply、跨进程锁、结果核验与操作记录。
+- Skills 原生域接线与完整闭环：内置集合只读默认，首次本地写入 `native-manager.db` 后本地优先；集合与 Skill×Agent 独立更新/启停/移除；内容寻址快照与安全软连接落地及回滚保护；status/plan/dry-run 零写保证；真实 apply 跨进程锁与操作审计。
 
 ## 契约要求
 
@@ -21,6 +22,6 @@ Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 必须支持新增、�
 
 ## 尚未完成
 
-MCP/Skills 原生域尚未接入 dispatcher，未跟踪草稿不算完成。Rules、Hooks、独立安装包真实 E2E、跨平台发布签名和更新验证仍待完成。
+MCP 原生域尚未接入 dispatcher。Rules/Hooks 统一编辑与端侧落地、日志自动保留清理（TTL）与手动清理、独立安装包真实 E2E、跨平台发布签名和更新验证仍待完成。
 
 验证：`cargo fmt --manifest-path engine-rs/Cargo.toml -- --check`、两套 Cargo test/check，以及 `cd app && pnpm test:unit run && pnpm typecheck && pnpm build`。

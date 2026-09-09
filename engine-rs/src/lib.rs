@@ -13,6 +13,7 @@
 pub mod envelope;
 pub mod native;
 pub mod native_agents;
+pub mod native_skills;
 pub mod store;
 
 pub use envelope::{diagnostic, Diagnostic, Envelope, Lock, Mode, CONTRACT_ID};

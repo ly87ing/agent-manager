@@ -80,7 +80,26 @@ pub const BUILTIN_POLICY_JSON: &str = r#"{
       }
     },
   "mcp": {"definitions": {}},
-  "skills": {"repositories": {}}
+  "skills": {
+    "agent-skills": {"enabled": true},
+    "repositories": {
+      "agent-skills": {
+        "url": "https://github.com/ly87ing/agent-skills.git",
+        "skill_paths": [
+          "safe-merge-review",
+          "change-discipline",
+          "frontend-verification",
+          "artifact-hygiene",
+          "reader-facing-writing",
+          "technical-diagramming"
+        ],
+        "agents": [
+          "claude-code",
+          "codex"
+        ]
+      }
+    }
+  }
 }"#;
 
 pub fn builtin_policy() -> Value {

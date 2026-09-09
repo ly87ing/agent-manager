@@ -114,7 +114,7 @@ struct ApplyLock {
     _file: std::fs::File,
 }
 
-fn acquire_agent_apply_lock(ctx: &Context) -> Result<ApplyLock> {
+fn acquire_apply_lock(ctx: &Context, domain: &str) -> Result<ApplyLock> {
     std::fs::create_dir_all(&ctx.data_dir)?;
     let path = ctx.data_dir.join("agent-manager.apply.lock");
     let file = OpenOptions::new()
@@ -123,7 +123,7 @@ fn acquire_agent_apply_lock(ctx: &Context) -> Result<ApplyLock> {
         .write(true)
         .open(path)?;
     file.try_lock_exclusive()
-        .map_err(|err| anyhow::anyhow!("Agent apply 正在执行，拒绝并发动作：{err}"))?;
+        .map_err(|err| anyhow::anyhow!("{domain} apply 正在执行，拒绝并发动作：{err}"))?;
     Ok(ApplyLock { _file: file })
 }
 
@@ -131,9 +131,10 @@ fn acquire_agent_apply_lock(ctx: &Context) -> Result<ApplyLock> {
 /// codes here (CLI maps errors to exit codes); status/plan never write the DB.
 pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     let is_agent_apply = request.command.replace('.', ":") == "agents:apply";
-    let needs_agent_lock = if is_agent_apply {
+    let is_skill_apply = request.command.replace('.', ":") == "skills:apply";
+    let (needs_lock, domain_label, diag_code) = if is_agent_apply {
         match crate::native_agents::preflight_apply(ctx, request) {
-            Ok(real_apply) => real_apply,
+            Ok(real_apply) => (real_apply, "Agent", "AGENT_ERROR"),
             Err(err) => {
                 return Envelope::new(
                     request.command.replacen(':', ".", 1),
@@ -150,11 +151,30 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
                 );
             }
         }
+    } else if is_skill_apply {
+        match crate::native_skills::preflight_apply(ctx, request) {
+            Ok(real_apply) => (real_apply, "Skill", "SKILL_ERROR"),
+            Err(err) => {
+                return Envelope::new(
+                    request.command.replacen(':', ".", 1),
+                    mode_of(request),
+                    Lock {
+                        held: false,
+                        pid: None,
+                    },
+                    request.run_id.clone(),
+                    log_file_from_env(),
+                    Value::Object(Map::new()),
+                    vec![],
+                    vec![diagnostic("SKILL_ERROR", None, format!("{err:#}"))],
+                );
+            }
+        }
     } else {
-        false
+        (false, "", "")
     };
-    let apply_lock = if needs_agent_lock {
-        match acquire_agent_apply_lock(ctx) {
+    let apply_lock = if needs_lock {
+        match acquire_apply_lock(ctx, domain_label) {
             Ok(lock) => Some(lock),
             Err(err) => {
                 return Envelope::new(
@@ -168,7 +188,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
                     log_file_from_env(),
                     Value::Object(Map::new()),
                     vec![],
-                    vec![diagnostic("AGENT_ERROR", None, format!("{err:#}"))],
+                    vec![diagnostic(diag_code, None, format!("{err:#}"))],
                 );
             }
         }
@@ -260,6 +280,9 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("agents", "status" | "plan" | "apply") => crate::native_agents::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}"))),
+        ("skills", "status" | "plan" | "apply") => crate::native_skills::handle(ctx, request)
+            .map(|data| (data, vec![]))
+            .map_err(|err| DispatchError::new("SKILL_ERROR", format!("{err:#}"))),
         ("policy", "get") => policy_get(ctx),
         ("policy", "set") => policy_set(ctx, request),
         ("policy", "delete") => policy_delete(ctx, request),

@@ -45,7 +45,7 @@ Policy UI 只显示 `builtin` 和 `sqlite`。编辑请求固定使用 `--layer l
 3. 用户确认后才会调用 `apply`。
 4. 查看页面错误详情和 operation log；不要手动拼接旧命令。
 
-Agent 原生域已接线；实际安装来源不可管理、Agent 已禁用、offline 阻断或动作不适用时，引擎不会提供或执行对应 action。MCP/Skills 原生域仍未接线，相关页面出现“未提供 action”属于已知实现边界。Rules、Hooks 和独立安装包真实 E2E 仍待完成。
+Agent 与 Skills 原生域已接线；实际安装来源不可管理、Agent 已禁用、offline 阻断或动作不适用时，引擎不会提供或执行对应 action。Skills 集合与技能分配通过内容快照与安全软连接落地，status 与 plan 保证零写，遇外部非受管内容或冲突时 fail-closed 拒绝覆盖。MCP 原生域仍未接线，相关页面出现“未提供 action”属于已知实现边界。Rules/Hooks 统一编辑与端侧落地、日志自动保留与手动清理、独立安装包真实 E2E 仍待完成。
 
 ## 安装渠道
 

@@ -171,6 +171,23 @@ export function useDefinitionOps({
 
   const confirmRemove = async () => {
     if (!removal) return;
+    if (domain === "skills") {
+      const name = removal.name;
+      setRemoval(null);
+      const elementId = `skill:${name}`;
+      preview.open({
+        title: `移除 ${name}`,
+        subtitle: OVERLAY_COPY.removeDefinitionNote,
+        planCommands: [{ command: "skills:plan", args: ["--only", elementId, "--action", "remove"] }],
+        confirmLabel: TOGGLE_COPY.applyNow,
+        execute: executeApply({
+          command: "skills:apply",
+          label: `移除 ${name}`,
+          extraArgs: ["--only", elementId, "--action", "remove"],
+        }),
+      });
+      return;
+    }
     setRemovalExecuting(true);
     const plan = planDefinitionRemoval(removal.layers, section, removal.name);
     const ok = await writePolicy("policy:set", ["--layer", plan.layer, "--key", plan.key, "--value", '{"_delete": true}']);
@@ -181,7 +198,7 @@ export function useDefinitionOps({
     void queryClient.invalidateQueries({ queryKey: engineKeys.all });
     toast.success(`已移除 ${name}`);
     if (domain === "agents" || domain === "tools") return;
-    const prefix = domain === "skills" ? "skill" : domain;
+    const prefix = domain;
     const elementId = `${prefix}:${name}`;
     preview.open({
       title: `移除 ${name}`,
