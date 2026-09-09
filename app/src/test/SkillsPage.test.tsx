@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fireEvent } from "@testing-library/react";
 import SkillsPage from "../pages/SkillsPage";
+import type { Envelope } from "../lib/contract";
 import { makeApplyResult, makeElement, makeEnvelope, makePlanAction, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 
@@ -92,6 +93,19 @@ function skillsRoutes() {
           baseline: { skills: { "agent-skills": { url: "https://github.com/example/agent-skills.git" } } },
           synced: null,
           local: null,
+          // sqlite 有效定义是完整定义：含表单未展示的自定义字段 branch
+          sqlite: {
+            skills: {
+              repositories: {
+                "agent-skills": {
+                  url: "https://github.com/example/agent-skills.git",
+                  skill_paths: ["alpha", "beta"],
+                  agents: ["claude-code", "codex"],
+                  branch: "release",
+                },
+              },
+            },
+          },
         },
       }),
       { command: "policy.get" },
@@ -105,17 +119,74 @@ function skillsRoutes() {
 }
 
 describe("SkillsPage 三级视图", () => {
-  it("编辑集合可清空发现范围，并只预览当前集合", async () => {
+  it("编辑集合：以 sqlite 完整定义整条替换保存，清空发现范围不复活，未展示字段不丢，不预览/同步", async () => {
     const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
     await userEvent.click(await screen.findByTestId("edit-collection-agent-skills"));
     expect(screen.getByTestId("collection-name-input")).toBeDisabled();
     expect(screen.getByTestId("collection-url-input")).toHaveValue("https://github.com/example/agent-skills.git");
     fireEvent.change(screen.getByTestId("collection-paths-input"), { target: { value: "" } });
     await userEvent.click(screen.getByTestId("collection-form-submit"));
-    await screen.findByRole("dialog", { name: /将要执行的操作/ });
-    const write = calls.find((call) => call.command === "policy:set")!;
-    expect(JSON.parse(write.args[write.args.indexOf("--value") + 1])).toMatchObject({ skill_paths: null, _delete: false });
-    expect(calls.find((call) => call.command === "skills:plan")?.args).toEqual(["--only", "skill:agent-skills"]);
+
+    // 唯一一次 policy:set，完整定义整条替换；无需迁移（sqlite 定义已在）
+    const setCalls = calls.filter((call) => call.command === "policy:set");
+    expect(setCalls).toHaveLength(1);
+    expect(calls.some((call) => call.command === "db:migrate")).toBe(false);
+    const write = setCalls[0];
+    expect(write.args[write.args.indexOf("--key") + 1]).toBe("skills.repositories.agent-skills");
+    const definition = JSON.parse(write.args[write.args.indexOf("--value") + 1]);
+    expect(definition).toMatchObject({
+      url: "https://github.com/example/agent-skills.git",
+      skill_paths: null,
+      agents: ["claude-code", "codex"],
+      _delete: false,
+      _replace: true,
+    });
+    // 反例断言：完整原定义里的自定义字段 branch 必须保留，不能只验证新 payload
+    expect(definition.branch).toBe("release");
+    // 不写启用键、不 plan/apply
+    expect(calls.some((call) => call.command === "policy:set" && call.args[3] === "skills.agent-skills.enabled")).toBe(false);
+    expect(calls.some((call) => call.command === "skills:plan")).toBe(false);
+    expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
+    expect(screen.queryByRole("dialog", { name: /将要执行的操作/ })).toBeNull();
+  });
+
+  it("编辑集合（无 DB 旧存储）：迁移后仍取不到完整定义则停止保存，零写入", async () => {
+    const legacyRoutes: Record<string, Envelope> = {
+      ...skillsRoutes(),
+      "db:migrate": makeEnvelope({ migrated: true }, { command: "db.migrate" }),
+    };
+    // 旧存储：policy:get 始终返回无 sqlite 的 JSON 层，迁移后仍取不到完整定义
+    legacyRoutes["policy:get"] = makeEnvelope(
+      makePolicyData({
+        layers: {
+          baseline: { skills: { "agent-skills": { url: "https://github.com/example/agent-skills.git" } } },
+          synced: null,
+          local: null,
+        },
+      }),
+      { command: "policy.get" },
+    );
+    const { calls } = renderWithEngine(<SkillsPage />, legacyRoutes);
+    await userEvent.click(await screen.findByTestId("edit-collection-agent-skills"));
+    fireEvent.change(screen.getByTestId("collection-paths-input"), { target: { value: "" } });
+    await userEvent.click(screen.getByTestId("collection-form-submit"));
+
+    await screen.findByText(/已停止保存/);
+    expect(calls.filter((call) => call.command === "db:migrate")).toHaveLength(1);
+    expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(0);
+  });
+
+  it("新增集合表单点取消：零写入且绝不迁移", async () => {
+    const cancelRoutes = { ...skillsRoutes(), "db:migrate": makeEnvelope({ migrated: true }, { command: "db.migrate" }) };
+    const { calls } = renderWithEngine(<SkillsPage />, cancelRoutes);
+    await userEvent.click(await screen.findByTestId("add-collection-button"));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByTestId("collection-name-input"), { target: { value: "my-skills" } });
+    fireEvent.change(within(dialog).getByTestId("collection-url-input"), { target: { value: "https://github.com/example/my-skills.git" } });
+    await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(0);
+    expect(calls.filter((call) => call.command === "db:migrate")).toHaveLength(0);
   });
 
   it("更新集合预览限定在所选集合", async () => {

@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { fireEvent } from "@testing-library/react";
+import { fireEvent, waitFor } from "@testing-library/react";
 import McpPage from "../pages/McpPage";
 import { makeApplyResult, makeElement, makeEnvelope, makeFreshness, makePlanAction, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 import type { Envelope } from "../lib/contract";
 
 /**
- * MCP 定义覆盖层：新增（两键写入）、编辑基线（覆盖片段）、移除（overlay=policy:delete /
- * 基线=tombstone {"_delete": true}）。
+ * MCP 定义覆盖层：新增/编辑只保存整条定义（_replace，不写 enabled、不 plan/apply）、
+ * 取消零写入、移除（overlay=policy:delete / 基线=tombstone {"_delete": true}）。
  */
 
 const CHECKED = "2026-09-06T00:00:00Z";
@@ -16,7 +16,16 @@ function mcpElement(id: string, state: string): ReturnType<typeof makeElement> {
   return makeElement({
     id,
     domain: "mcp",
-    spec: { command: "npx", args: ["-y", `${id.replace("mcp:", "")}-pkg`], startup_timeout_sec: 120, agents: null, env: {} },
+    spec: {
+      command: "npx",
+      args: ["-y", `${id.replace("mcp:", "")}-pkg`],
+      startup_timeout_sec: 120,
+      agents: null,
+      // spec.env 是脱敏视图：${REF} 占位引用原样保留，普通字面值被掩码为 <literal>
+      env: { GROK_API_KEY: "${SECRETS_GROK_API_KEY}", PLAIN_TOKEN: "<literal>" },
+      // 表单未展示的定义字段，整条替换后必须保留
+      extra_args_by_agent: { "claude-code": ["--verbose"] },
+    },
     policy: { enabled: true, agents: null },
     observed: {
       agents: { "claude-code": { state: "managed-ok", target: "/tmp/demo/.claude.json", target_exists: true } },
@@ -27,19 +36,33 @@ function mcpElement(id: string, state: string): ReturnType<typeof makeElement> {
   });
 }
 
+/** sqlite 有效定义：完整定义，env 为真实值（含合成的非 secret 字面值），含未知字段 custom_flag。 */
+function fullDefinitionOf(name: string): Record<string, unknown> {
+  return {
+    command: "npx",
+    args: ["-y", `${name}-pkg`],
+    startup_timeout_sec: 120,
+    agents: null,
+    env: { GROK_API_KEY: "${SECRETS_GROK_API_KEY}", PLAIN_TOKEN: "synthetic-plain-value" },
+    extra_args_by_agent: { "claude-code": ["--verbose"] },
+    custom_flag: "keep-me",
+  };
+}
+
 function routes(): Record<string, Envelope> {
   return {
     "mcp:status": makeEnvelope(
       { domain: "mcp", elements: [mcpElement("mcp:chrome-devtools", "managed-ok"), mcpElement("mcp:my-proxy", "managed-ok")] },
       { command: "mcp.status" },
     ),
-    // my-proxy 定义在 local 覆盖层；chrome-devtools 只在基线
+    // my-proxy 定义在 local 覆盖层；chrome-devtools 只在基线；sqlite 投影完整有效定义
     "policy:get": makeEnvelope(
       makePolicyData({
         layers: {
           baseline: { mcp: { "chrome-devtools": { enabled: true } } },
           synced: null,
           local: { mcp: { definitions: { "my-proxy": { command: "npx", args: ["-y", "my-proxy-pkg"] } }, "my-proxy": { enabled: true } } },
+          sqlite: { mcp: { definitions: { "chrome-devtools": fullDefinitionOf("chrome-devtools"), "my-proxy": fullDefinitionOf("my-proxy") } } },
         },
       }),
       { command: "policy.get" },
@@ -62,7 +85,7 @@ function routes(): Record<string, Envelope> {
 }
 
 describe("MCP 服务定义覆盖层", () => {
-  it("新增服务：policy.set 写两键（definitions 片段 + enabled true）→ 预览 → apply", async () => {
+  it("新增服务：只保存整条定义到资源库（_replace），不写 enabled、不 plan/apply", async () => {
     const { calls } = renderWithEngine(<McpPage />, routes());
 
     await userEvent.click(await screen.findByTestId("add-server-button"));
@@ -76,28 +99,28 @@ describe("MCP 服务定义覆盖层", () => {
     await userEvent.click(within(dialog).getByTestId("server-form-submit"));
 
     const setCalls = calls.filter((call) => call.command === "policy:set");
-    expect(setCalls).toHaveLength(2);
+    expect(setCalls).toHaveLength(1);
     expect(setCalls[0].args[1]).toBe("local");
     expect(setCalls[0].args[3]).toBe("mcp.definitions.demo-srv");
     const definition = JSON.parse(setCalls[0].args[5]);
     expect(definition).toEqual({
       _delete: false,
+      _replace: true,
       command: "npx",
       args: ["-y", "demo-srv-mcp"],
       startup_timeout_sec: 90,
       agents: ["claude-code"],
       env: { DEMO_TOKEN: "${DEMO_TOKEN}" },
     });
-    expect(setCalls[1].args[3]).toBe("mcp.demo-srv.enabled");
-    expect(setCalls[1].args[5]).toBe("true");
 
-    // 预览（过滤到 mcp:demo-srv）→ 确认 → mcp:apply
-    await screen.findByRole("dialog", { name: /将要执行的操作/ });
-    await userEvent.click(screen.getByTestId("plan-confirm-button"));
-    expect(calls.some((call) => call.command === "mcp:apply")).toBe(true);
+    // 零额外写入：无 enabled 键，无预览/同步
+    expect(calls.some((call) => call.command === "policy:set" && call.args[3] === "mcp.demo-srv.enabled")).toBe(false);
+    expect(calls.some((call) => call.command === "mcp:plan")).toBe(false);
+    expect(calls.some((call) => call.command === "mcp:apply")).toBe(false);
+    expect(screen.queryByRole("dialog", { name: /将要执行的操作/ })).toBeNull();
   });
 
-  it("编辑基线条目：写覆盖片段（含改动字段），表单注明仓库默认值不受影响", async () => {
+  it("编辑基线条目：以 sqlite 完整定义整条替换，未展示字段与 env 真实值保留", async () => {
     const { calls } = renderWithEngine(<McpPage />, routes());
     await userEvent.click(await screen.findByText("mcp:chrome-devtools"));
     await userEvent.click(await screen.findByTestId("edit-server-mcp:chrome-devtools"));
@@ -106,14 +129,157 @@ describe("MCP 服务定义覆盖层", () => {
     expect(within(dialog).getByTestId("baseline-overlay-note")).toHaveTextContent("仓库默认值不受影响");
     // 名称不可改
     expect(within(dialog).getByTestId("server-name-input")).toBeDisabled();
+    // env 初始列出完整定义的全部变量名
+    expect(within(dialog).getByTestId("server-env-input")).toHaveValue("GROK_API_KEY\nPLAIN_TOKEN");
     fireEvent.change(within(dialog).getByTestId("server-timeout-input"), { target: { value: "99" } });
+    // 清空参数：整条 replacement 语义下保存后不应从基线复活
+    fireEvent.change(within(dialog).getByTestId("server-args-input"), { target: { value: "" } });
+    const callsBeforeSubmit = calls.length;
+    await userEvent.click(within(dialog).getByTestId("server-form-submit"));
+
+    const submitCalls = calls.slice(callsBeforeSubmit);
+    const setCalls = submitCalls.filter((call) => call.command === "policy:set");
+    // 编辑只写定义片段，不动 enabled 键；完整定义已在，无需迁移
+    expect(setCalls).toHaveLength(1);
+    expect(submitCalls.some((call) => call.command === "db:migrate")).toBe(false);
+    expect(setCalls[0].args[3]).toBe("mcp.definitions.chrome-devtools");
+    const definition = JSON.parse(setCalls[0].args[5]);
+    expect(definition.startup_timeout_sec).toBe(99);
+    expect(definition._replace).toBe(true);
+    expect(definition.args).toEqual([]);
+    // 反例断言：未展示字段保留；${REF} 引用原样；spec 中被掩码为 <literal> 的字面值
+    // 用完整定义真实值重建，不允许 <literal> 落盘
+    expect(definition.extra_args_by_agent).toEqual({ "claude-code": ["--verbose"] });
+    expect(definition.custom_flag).toBe("keep-me");
+    expect(definition.env).toEqual({ GROK_API_KEY: "${SECRETS_GROK_API_KEY}", PLAIN_TOKEN: "synthetic-plain-value" });
+    expect(JSON.stringify(definition)).not.toContain("<literal>");
+    // 保存不触发定向预览/同步（DriftExplanationPanel 的无参只读 plan 查询不算保存动作）
+    expect(submitCalls.some((call) => call.command === "mcp:plan" && call.args.includes("--only"))).toBe(false);
+    expect(submitCalls.some((call) => call.command === "mcp:apply")).toBe(false);
+    expect(screen.queryByRole("dialog", { name: /将要执行的操作/ })).toBeNull();
+  });
+
+  it("编辑删除 env 变量：保存后该键不复活", async () => {
+    const { calls } = renderWithEngine(<McpPage />, routes());
+    await userEvent.click(await screen.findByText("mcp:my-proxy"));
+    await userEvent.click(await screen.findByTestId("edit-server-mcp:my-proxy"));
+
+    const dialog = await screen.findByRole("dialog");
+    // 表单初始带出完整定义的两个变量名，清空后提交
+    expect(within(dialog).getByTestId("server-env-input")).toHaveValue("GROK_API_KEY\nPLAIN_TOKEN");
+    fireEvent.change(within(dialog).getByTestId("server-env-input"), { target: { value: "" } });
     await userEvent.click(within(dialog).getByTestId("server-form-submit"));
 
     const setCalls = calls.filter((call) => call.command === "policy:set");
-    // 编辑只写定义片段，不动 enabled 键
     expect(setCalls).toHaveLength(1);
-    expect(setCalls[0].args[3]).toBe("mcp.definitions.chrome-devtools");
-    expect(JSON.parse(setCalls[0].args[5]).startup_timeout_sec).toBe(99);
+    const definition = JSON.parse(setCalls[0].args[5]);
+    expect(definition._replace).toBe(true);
+    expect(definition.env).toEqual({});
+    expect(definition.extra_args_by_agent).toEqual({ "claude-code": ["--verbose"] });
+    expect(definition.custom_flag).toBe("keep-me");
+  });
+
+  /** 无 DB 旧存储：policy:get 在 db:migrate 前无 sqlite 层，迁移后返回完整有效定义。 */
+  function legacyRoutes(): Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> {
+    let migrated = false;
+    const base = routes();
+    return {
+      ...base,
+      "db:migrate": async () => {
+        migrated = true;
+        return makeEnvelope({ migrated: true }, { command: "db.migrate" });
+      },
+      "policy:get": async () =>
+        makeEnvelope(
+          makePolicyData({
+            layers: migrated
+              ? {
+                  baseline: null,
+                  synced: null,
+                  local: null,
+                  sqlite: { mcp: { definitions: { "chrome-devtools": fullDefinitionOf("chrome-devtools") } } },
+                }
+              : {
+                  baseline: { mcp: { "chrome-devtools": { enabled: true } } },
+                  synced: null,
+                  local: null,
+                },
+          }),
+          { command: "policy.get" },
+        ),
+    };
+  }
+
+  it("首次无 DB 编辑：先 db:migrate 再取完整定义整条替换，未知字段与 env 原值保留", async () => {
+    const { calls } = renderWithEngine(<McpPage />, legacyRoutes());
+    await userEvent.click(await screen.findByText("mcp:chrome-devtools"));
+    await userEvent.click(await screen.findByTestId("edit-server-mcp:chrome-devtools"));
+
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByTestId("server-timeout-input"), { target: { value: "77" } });
+    await userEvent.click(within(dialog).getByTestId("server-form-submit"));
+
+    await waitFor(() => {
+      expect(calls.some((call) => call.command === "policy:set")).toBe(true);
+    });
+    const migrateIndex = calls.findIndex((call) => call.command === "db:migrate");
+    const setCalls = calls.filter((call) => call.command === "policy:set");
+    expect(migrateIndex).toBeGreaterThanOrEqual(0);
+    expect(setCalls).toHaveLength(1);
+    expect(calls.indexOf(setCalls[0])).toBeGreaterThan(migrateIndex);
+
+    const definition = JSON.parse(setCalls[0].args[5]);
+    expect(definition._replace).toBe(true);
+    expect(definition.startup_timeout_sec).toBe(77);
+    // 未知字段与表单未展示字段从迁移后的完整定义保留
+    expect(definition.custom_flag).toBe("keep-me");
+    expect(definition.extra_args_by_agent).toEqual({ "claude-code": ["--verbose"] });
+    // env：占位引用原样、被掩码字面值重建为完整定义真实值
+    expect(definition.env).toEqual({ GROK_API_KEY: "${SECRETS_GROK_API_KEY}", PLAIN_TOKEN: "synthetic-plain-value" });
+    expect(JSON.stringify(definition)).not.toContain("<literal>");
+    expect(calls.some((call) => call.command === "mcp:apply")).toBe(false);
+  });
+
+  it("首次无 DB 编辑删除 env 变量：迁移合并后该键不复活", async () => {
+    const { calls } = renderWithEngine(<McpPage />, legacyRoutes());
+    await userEvent.click(await screen.findByText("mcp:chrome-devtools"));
+    await userEvent.click(await screen.findByTestId("edit-server-mcp:chrome-devtools"));
+
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByTestId("server-env-input"), { target: { value: "" } });
+    await userEvent.click(within(dialog).getByTestId("server-form-submit"));
+
+    await waitFor(() => {
+      expect(calls.some((call) => call.command === "policy:set")).toBe(true);
+    });
+    const setCalls = calls.filter((call) => call.command === "policy:set");
+    expect(setCalls).toHaveLength(1);
+    const definition = JSON.parse(setCalls[0].args[5]);
+    expect(definition._replace).toBe(true);
+    expect(definition.env).toEqual({});
+    expect(definition.custom_flag).toBe("keep-me");
+  });
+
+  it("新增/编辑表单点取消：零写入", async () => {
+    const { calls } = renderWithEngine(<McpPage />, routes());
+
+    // 新增 → 取消
+    await userEvent.click(await screen.findByTestId("add-server-button"));
+    let dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByTestId("server-name-input"), { target: { value: "cancelled-srv" } });
+    fireEvent.change(within(dialog).getByTestId("server-command-input"), { target: { value: "npx" } });
+    await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    // 编辑 → 取消
+    await userEvent.click(await screen.findByText("mcp:my-proxy"));
+    await userEvent.click(await screen.findByTestId("edit-server-mcp:my-proxy"));
+    dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByTestId("server-timeout-input"), { target: { value: "42" } });
+    await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(0);
   });
 
   it("移除覆盖层和基线条目均写标记，避免下层定义重新出现", async () => {

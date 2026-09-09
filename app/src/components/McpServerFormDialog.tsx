@@ -8,26 +8,34 @@ import { OVERLAY_COPY } from "../lib/ui-copy";
 /**
  * MCP 服务新增/编辑表单。写入的是定义覆盖层片段（mcp.definitions.<name>）；
  * 编辑基线条目时整段写覆盖片段并注明「仓库默认值不受影响」。
+ * status 的 spec.env 是脱敏视图（普通字面值被掩码为 <literal>），不能当完整原定义：
+ * 编辑时以 fullDefinition（policy:get 的 sqlite 有效定义）为基底，只覆盖表单负责字段，
+ * 表单未展示的定义字段（如 url、extra_args_by_agent）与已有密钥取值原样保留；
+ * 拿不到完整原定义（无 DB 旧存储）时只提交表单负责字段，由保存方迁移后取完整定义合并。
  */
 export function McpServerFormDialog({
   agentIds,
   /** 编辑时传入既有元素；新增传 null。 */
   editing,
   layers,
+  /** 完整原定义（policy:get 的 sqlite 有效定义），整条替换基底；新增或无 DB 旧存储为 null。 */
+  fullDefinition,
   onSubmit,
   onClose,
 }: {
   agentIds: string[];
   editing: EngineElement | null;
   layers: PolicyLayers | null;
-  onSubmit: (name: string, definition: Record<string, unknown>, isNew: boolean) => void;
+  fullDefinition?: Record<string, unknown> | null;
+  /** complete=false 表示 definition 只是表单负责字段，需由保存方迁移后取完整定义合并。 */
+  onSubmit: (name: string, definition: Record<string, unknown>, isNew: boolean, complete: boolean) => void;
   onClose: () => void;
 }) {
   const editingSpec = editing ? (editing.spec as McpSpec) : null;
   const [name, setName] = useState(editing ? editing.id.replace(/^mcp:/, "") : "");
   const [command, setCommand] = useState(editingSpec?.command ?? "");
   const [argsText, setArgsText] = useState((editingSpec?.args ?? []).join("\n"));
-  const [envText, setEnvText] = useState(Object.keys(editingSpec?.env ?? {}).join("\n"));
+  const [envText, setEnvText] = useState(Object.keys((fullDefinition?.env as Record<string, unknown> | undefined) ?? editingSpec?.env ?? {}).join("\n"));
   const [timeoutText, setTimeoutText] = useState(String(editingSpec?.startup_timeout_sec ?? 120));
   const [selectedAgents, setSelectedAgents] = useState<string[]>(editingSpec?.agents ?? []);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +58,10 @@ export function McpServerFormDialog({
       return;
     }
     const args = argsText.split("\n").map((line) => line.trim()).filter(Boolean);
+    // 密钥变量只编辑变量名清单。取值优先用完整原定义的真实值；只有脱敏 spec 时，
+    // ${REF} 占位引用原样保留，被掩码为 <literal> 的字面值原样带出，由保存方用完整定义重建。
+    const fullEnv = (fullDefinition?.env ?? null) as Record<string, unknown> | null;
+    const specEnv = editingSpec?.env ?? {};
     const env: Record<string, string> = {};
     for (const line of envText.split("\n").map((item) => item.trim()).filter(Boolean)) {
       const varName = line.split("=")[0].trim();
@@ -57,16 +69,22 @@ export function McpServerFormDialog({
         setError(`非法变量名:${line}`);
         return;
       }
-      env[varName] = `\${${varName}}`;
+      const fromFull = typeof fullEnv?.[varName] === "string" ? (fullEnv[varName] as string) : null;
+      const fromSpec = typeof specEnv[varName] === "string" ? specEnv[varName] : null;
+      env[varName] = fromFull ?? fromSpec ?? `\${${varName}}`;
     }
-    const definition: Record<string, unknown> = {
+    // 表单负责字段（可选字段显式给出）；编辑且有完整原定义时以其为基底，
+    // 未展示字段原样保留；否则只提交这些字段，由保存方迁移后合并完整定义。
+    const owned: Record<string, unknown> = {
       command: command.trim(),
       args,
       startup_timeout_sec: timeout,
       agents: selectedAgents.length > 0 ? selectedAgents : null,
       env,
     };
-    onSubmit(name, definition, isNew);
+    const complete = isNew || fullDefinition != null;
+    const definition = !isNew && fullDefinition ? { ...fullDefinition, ...owned } : owned;
+    onSubmit(name, definition, isNew, complete);
   };
 
   return (
@@ -130,7 +148,8 @@ export function McpServerFormDialog({
             />
           </div>
           <div>
-            <span className="mb-1 block text-xs font-medium text-slate-500">应用到哪些助手（都不勾 = 全部）</span>
+            <span className="mb-1 block text-xs font-medium text-slate-500">允许分配的助手（不选则不限）</span>
+            <p className="mb-1.5 text-xs text-slate-400">这里只保存允许范围，保存后再为各助手分别添加。</p>
             <div className="flex flex-wrap gap-3">
               {agentIds.map((agent) => (
                 <label key={agent} className="flex items-center gap-1.5 text-xs text-slate-700">
@@ -159,7 +178,8 @@ export function McpServerFormDialog({
           {error && <p className="text-xs text-red-600">{error}</p>}
         </div>
 
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="mt-5 flex items-center justify-end gap-2">
+          <span className="mr-auto text-xs text-slate-500">只保存到本地资源库，不会自动安装或同步</span>
           <button type="button" onClick={onClose} className="rounded-md border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">
             取消
           </button>
@@ -169,7 +189,7 @@ export function McpServerFormDialog({
             data-testid="server-form-submit"
             className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
           >
-            {isNew ? "保存并预览同步" : "保存修改并预览"}
+            保存到资源库
           </button>
         </div>
       </div>

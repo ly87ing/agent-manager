@@ -2,17 +2,24 @@ import { useState } from "react";
 import { X } from "lucide-react";
 
 /**
- * 技能集合定义表单。未编辑的目标授权保持原配置语义。
+ * 技能集合定义表单。保存只把定义写入本地资源库，不自动安装或同步。
+ * 编辑时若有完整原定义（fullDefinition，来自 policy:get 的 sqlite 有效定义），
+ * 以它为基底只覆盖表单负责字段，整条替换保存，表单未展示的字段（如 branch）不丢；
+ * 拿不到完整原定义（无 DB 旧存储）时只提交表单负责字段，由保存方迁移后取完整定义合并再整条替换。
  */
 export function SkillCollectionFormDialog({
   agentIds,
   initial,
+  fullDefinition,
   onSubmit,
   onClose,
 }: {
   agentIds: string[];
   initial?: { name: string; definition: Record<string, unknown> };
-  onSubmit: (name: string, definition: Record<string, unknown>) => void;
+  /** 完整原定义（整条替换基底）；新增或未传入时为 null/缺省。 */
+  fullDefinition?: Record<string, unknown> | null;
+  /** complete=false 表示 definition 只是表单负责字段，需由保存方迁移后取完整定义合并再整条替换。 */
+  onSubmit: (name: string, definition: Record<string, unknown>, complete: boolean) => void;
   onClose: () => void;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
@@ -31,11 +38,12 @@ export function SkillCollectionFormDialog({
       return;
     }
     const skillPaths = pathsText.split("\n").map((line) => line.trim()).filter(Boolean);
-    const definition: Record<string, unknown> = { url: url.trim(), skill_paths: skillPaths.length ? skillPaths : null, agents: selectedAgents.length ? selectedAgents : null };
-    if (initial && JSON.stringify(selectedAgents) === JSON.stringify(initial.definition.agents ?? [])) {
-      delete definition.agents;
-    }
-    onSubmit(name, definition);
+    // 表单负责字段（可选字段显式给出，null 表示清空）；编辑且有完整原定义时以其为基底，
+    // 未展示字段原样保留；否则只提交这些字段做片段合并。
+    const owned: Record<string, unknown> = { url: url.trim(), skill_paths: skillPaths.length ? skillPaths : null, agents: selectedAgents.length ? selectedAgents : null };
+    const complete = !initial || fullDefinition != null;
+    const definition = initial && fullDefinition ? { ...fullDefinition, ...owned } : owned;
+    onSubmit(name, definition, complete);
   };
 
   return (
@@ -61,7 +69,8 @@ export function SkillCollectionFormDialog({
             <textarea value={pathsText} onChange={(e) => setPathsText(e.target.value)} rows={3} data-testid="collection-paths-input" className="w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-xs" placeholder={"safe-merge-review\nreader-facing-writing"} />
           </div>
           <div>
-            <span className="mb-1 block text-xs font-medium text-slate-500">分发给哪些助手（都不勾 = 全部）</span>
+            <span className="mb-1 block text-xs font-medium text-slate-500">允许分配的助手（不选则不限）</span>
+            <p className="mb-1.5 text-xs text-slate-400">这里只保存允许范围，保存后再为各助手分别添加。</p>
             <div className="flex flex-wrap gap-3">
               {agentIds.map((agent) => (
                 <label key={agent} className="flex items-center gap-1.5 text-xs text-slate-700">
@@ -78,12 +87,13 @@ export function SkillCollectionFormDialog({
           </div>
           {error && <p className="text-xs text-red-600">{error}</p>}
         </div>
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="mt-5 flex items-center justify-end gap-2">
+          <span className="mr-auto text-xs text-slate-500">只保存到本地资源库，不会自动安装或同步</span>
           <button type="button" onClick={onClose} className="rounded-md border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">
             取消
           </button>
           <button type="button" onClick={submit} data-testid="collection-form-submit" className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">
-            保存并预览同步
+            保存到资源库
           </button>
         </div>
       </div>

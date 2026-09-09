@@ -8,7 +8,7 @@ import { MatrixCell } from "../components/MatrixCell";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { StateBadge } from "../components/StateBadge";
 import { Switch } from "../components/Switch";
-import type { EngineElement, PolicyData, StatusData } from "../lib/contract";
+import type { EngineElement, PolicyData, PolicyLayers, StatusData } from "../lib/contract";
 import { agentCellsOf, type McpObserved, type McpSpec } from "../lib/observed";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { useElementToggle } from "../lib/useElementToggle";
@@ -19,6 +19,13 @@ import { cn } from "../lib/utils";
 
 /** 可点击收敛的单元格态（managed-ok/absent/agent-disabled 无动作）。 */
 const ACTIONABLE_CELL_STATES = new Set(["drifted", "missing", "not-materialized", "leftover"]);
+
+/** 从 policy:get 的 sqlite 有效定义中取服务完整定义；无 DB 旧存储返回 null（调用方走迁移后取完整定义）。 */
+function fullMcpDefinition(layers: PolicyLayers | null, name: string): Record<string, unknown> | null {
+  const definitions = (layers?.sqlite as { mcp?: { definitions?: Record<string, unknown> } } | null | undefined)?.mcp?.definitions;
+  const definition = definitions?.[name];
+  return typeof definition === "object" && definition !== null ? (definition as Record<string, unknown>) : null;
+}
 
 function EnvResolutionList({ element }: { element: EngineElement }) {
   const observed = element.observed as McpObserved;
@@ -134,7 +141,7 @@ export default function McpPage() {
   const query = useEngineQuery<StatusData>("mcp:status");
   const policyQuery = useEngineQuery<PolicyData>("policy:get");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [formState, setFormState] = useState<{ editing: EngineElement | null } | "new" | null>(null);
+  const [formState, setFormState] = useState<{ editing: EngineElement } | "new" | null>(null);
   const preview = usePlanPreview();
   const executeApply = useExecuteApply();
   const elementToggle = useElementToggle();
@@ -281,10 +288,11 @@ export default function McpPage() {
           agentIds={agentColumns}
           editing={formState === "new" ? null : formState.editing}
           layers={layers}
+          fullDefinition={formState === "new" || !formState.editing ? null : fullMcpDefinition(layers, formState.editing.id.replace(/^mcp:/, ""))}
           onClose={() => setFormState(null)}
-          onSubmit={(name, definition, isNew) => {
+          onSubmit={(name, definition, isNew, complete) => {
             setFormState(null);
-            void definitionOps.saveAndApply({ name, definition, isNew, elementId: `mcp:${name}` });
+            void definitionOps.saveAndApply({ name, definition, isNew, elementId: `mcp:${name}`, complete });
           }}
         />
       )}

@@ -9,7 +9,7 @@ import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDialog";
 import { StateBadge } from "../components/StateBadge";
 import { Switch } from "../components/Switch";
-import type { EngineElement, PolicyData, StatusData } from "../lib/contract";
+import type { EngineElement, PolicyData, PolicyLayers, StatusData } from "../lib/contract";
 import { runEngine } from "../lib/engine";
 import {
   agentCellsOf,
@@ -28,6 +28,13 @@ import { cn } from "../lib/utils";
 
 function isCollection(element: EngineElement): boolean {
   return element.id.startsWith("skill:") && !element.id.includes("/");
+}
+
+/** 从 policy:get 的 sqlite 有效定义中取集合完整定义；无 DB 旧存储返回 null（调用方退化为片段合并）。 */
+function fullSkillDefinition(layers: PolicyLayers | null, name: string): Record<string, unknown> | null {
+  const repositories = (layers?.sqlite as { skills?: { repositories?: Record<string, unknown> } } | null | undefined)?.skills?.repositories;
+  const definition = repositories?.[name];
+  return typeof definition === "object" && definition !== null ? (definition as Record<string, unknown>) : null;
 }
 
 function shortCommit(value: string | null): string {
@@ -345,11 +352,12 @@ export default function SkillsPage() {
         <SkillCollectionFormDialog
           agentIds={agentColumns}
           initial={editing ? { name: editing.id.replace(/^skill:/, ""), definition: editing.spec } : undefined}
+          fullDefinition={editing ? fullSkillDefinition(layers, editing.id.replace(/^skill:/, "")) : null}
           onClose={() => { setShowAddForm(false); setEditing(null); }}
-          onSubmit={(name, definition) => {
+          onSubmit={(name, definition, complete) => {
             setShowAddForm(false);
             setEditing(null);
-            void definitionOps.saveAndApply({ name, definition, isNew: !editing, elementId: `skill:${name}` });
+            void definitionOps.saveAndApply({ name, definition, isNew: !editing, elementId: `skill:${name}`, complete });
           }}
         />
       )}
