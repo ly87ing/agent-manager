@@ -46,7 +46,7 @@ export class EngineBridgeError extends Error {
 }
 
 export interface EngineRunOptions {
-  /** GUI 生成的 run id（写路径必传），经 AGENT_MANAGER_RUN_ID 透传到引擎按次日志。 */
+  /** GUI 生成的 run id（写路径必传），经 AGENT_MANAGER_RUN_ID 透传到引擎操作记录。 */
   runId?: string;
 }
 

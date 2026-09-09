@@ -8,6 +8,6 @@ Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 都要求新增、编�
 
 Claude Code 和 Codex 的内置默认渠道均为官方 `native` 命令；brew 只在 observed 检测结果中展示，不是默认。
 
-SQLite 核心、Tauri bridge、设置与 Policy 页面、主要资源页面布局和 Python 清理已完成。Agent/MCP/Skills 原生域尚未接线，未跟踪草稿不算完成；Runs 页面仍需迁移到 SQLite 操作记录；Rules、Hooks 和独立包真实 E2E 待完成。
+SQLite 核心、Tauri bridge、设置与 Policy 页面、主要资源页面布局、Runs SQLite 操作记录和 Python 清理已完成。Agent/MCP/Skills 原生域尚未接线，未跟踪草稿不算完成；Rules、Hooks 和独立包真实 E2E 待完成。
 
 详见 [当前架构](ARCHITECTURE.md)、[平台状态](GUI-PLATFORM-STATUS.md) 和 [Engine Contract](../contract/README.md)。

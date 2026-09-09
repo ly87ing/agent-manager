@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { CheckCircle2, Loader2, Lock, XCircle } from "lucide-react";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
-import type { ApplyResultData, RunEntry, RunsData } from "../lib/contract";
+import type { ApplyResultData, RunDetailData, RunEntry, RunsListData } from "../lib/contract";
 import { runEngine } from "../lib/engine";
 import { useExecutions, type ExecutionRecord } from "../lib/execution";
 import { engineKeys } from "../lib/queries";
@@ -14,7 +14,7 @@ const STEP_STATUS = {
   failed: { icon: XCircle, className: "text-red-600" },
 } as const;
 
-function ExecutionCard({ record, onSelectLog }: { record: ExecutionRecord; onSelectLog: (runId: string) => void }) {
+function ExecutionCard({ record, onSelectRun }: { record: ExecutionRecord; onSelectRun: (runId: string) => void }) {
   const running = record.status === "running";
   const data = record.envelope?.data as Partial<ApplyResultData> | undefined;
   const steps = Array.isArray(data?.steps) ? data.steps : [];
@@ -55,10 +55,10 @@ function ExecutionCard({ record, onSelectLog }: { record: ExecutionRecord; onSel
         </span>
         <button
           type="button"
-          onClick={() => onSelectLog(record.runId)}
+          onClick={() => onSelectRun(record.runId)}
           className="rounded border border-indigo-200 px-2 py-0.5 text-xs text-indigo-600 hover:bg-indigo-50"
         >
-          日志
+          详情
         </button>
       </div>
 
@@ -92,6 +92,24 @@ function ExecutionCard({ record, onSelectLog }: { record: ExecutionRecord; onSel
     </section>
   );
 }
+function OperationDetail({ data }: { data: RunDetailData }) {
+  return (
+    <div className="space-y-2">
+      {data.operations.map((operation) => (
+        <article key={operation.id} className="rounded border border-slate-200 p-3">
+          <div className="flex flex-wrap items-center gap-3 text-xs">
+            <code className="font-mono font-medium text-slate-700">{operation.operation_type}</code>
+            <span className="text-slate-600">{operation.target ?? "—"}</span>
+            <time className="text-slate-400">{formatCheckedAt(operation.created_at)}</time>
+          </div>
+          <pre className="mt-2 overflow-x-auto rounded bg-slate-50 p-2 font-mono text-xs text-slate-600">
+            {JSON.stringify(operation.detail, null, 2)}
+          </pre>
+        </article>
+      ))}
+    </div>
+  );
+}
 
 export default function RunsPage() {
   const { executions } = useExecutions();
@@ -99,26 +117,17 @@ export default function RunsPage() {
 
   const listQuery = useQuery({
     queryKey: engineKeys.command("runs:list"),
-    queryFn: () => runEngine<RunsData>("runs:list"),
+    queryFn: () => runEngine<RunsListData>("runs:list"),
     refetchInterval: 5000,
   });
 
-  const selectedIsRunning = executions.some((record) => record.runId === selectedRun && record.status === "running");
-  const logQuery = useQuery({
+  const detailQuery = useQuery({
     queryKey: [...engineKeys.command("runs:get"), selectedRun],
-    queryFn: () => runEngine<RunsData>("runs:get", ["--run", selectedRun!, "--lines", "200"]),
+    queryFn: () => runEngine<RunDetailData>("runs:get", ["--run", selectedRun!]),
     enabled: selectedRun !== null,
-    // 运行中 2s 轮询日志尾；历史运行只拉一次
-    refetchInterval: selectedIsRunning ? 2000 : false,
+    refetchInterval: executions.some((record) => record.runId === selectedRun && record.status === "running") ? 2000 : false,
     staleTime: 0,
   });
-
-  const logRef = useRef<HTMLPreElement>(null);
-  useEffect(() => {
-    // jsdom 无 scrollTo；scrollTop 赋值两端皆可
-    const node = logRef.current;
-    if (node) node.scrollTop = node.scrollHeight;
-  }, [logQuery.data?.data.tail]);
 
   if (listQuery.isPending) return <PageLoading />;
   if (listQuery.isError) return <PageError title="runs:list 调用失败" error={listQuery.error} />;
@@ -127,40 +136,33 @@ export default function RunsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="任务记录" description="每次同步/安装/检查的记录与日志。本应用发起的操作带 gui- 前缀编号；执行中的任务每 2 秒刷新日志。" />
+      <PageHeader title="任务记录" description="查看本工具通过 native-manager.db 记录的运行与操作详情。" />
 
       {executions.length > 0 && (
         <div className="space-y-2">
           <h3 className="text-sm font-semibold text-slate-700">本次会话的任务</h3>
           {executions.map((record) => (
-            <ExecutionCard key={record.runId} record={record} onSelectLog={setSelectedRun} />
+            <ExecutionCard key={record.runId} record={record} onSelectRun={setSelectedRun} />
           ))}
         </div>
       )}
 
       {selectedRun && (
         <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-2 flex items-center justify-between">
+          <div className="mb-3 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-slate-700">
-              日志尾部 <code className="font-mono text-xs text-indigo-500">{selectedRun}</code>
-              {selectedIsRunning && <span className="ml-2 text-xs text-indigo-500">（执行中，每 2 秒刷新）</span>}
+              操作详情 <code className="font-mono text-xs text-indigo-500">{selectedRun}</code>
             </h3>
             <button type="button" onClick={() => setSelectedRun(null)} className="text-xs text-slate-400 hover:text-slate-600">
               关闭
             </button>
           </div>
-          {logQuery.isPending ? (
-            <p className="text-xs text-slate-400">日志加载中…</p>
-          ) : logQuery.isError ? (
-            <p className="text-xs text-red-600">日志读取失败（只读检查通常不写日志）</p>
+          {detailQuery.isPending ? (
+            <p className="text-xs text-slate-400">详情加载中…</p>
+          ) : detailQuery.isError ? (
+            <p className="text-xs text-red-600">操作详情读取失败</p>
           ) : (
-            <pre
-              ref={logRef}
-              data-testid="run-log-tail"
-              className="max-h-72 overflow-y-auto rounded bg-slate-900 p-3 font-mono text-xs whitespace-pre-wrap break-all text-slate-100"
-            >
-              {logQuery.data.data.tail || "（日志为空）"}
-            </pre>
+            <OperationDetail data={detailQuery.data.data} />
           )}
         </section>
       )}
@@ -170,30 +172,21 @@ export default function RunsPage() {
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-slate-200 text-xs text-slate-500">
-              <th className="py-2 pr-4 font-medium">编号</th>
-              <th className="py-2 pr-4 font-medium">时间</th>
-              <th className="py-2 pr-4 font-medium">日志大小</th>
+              <th className="py-2 pr-4 font-medium">运行 ID</th>
+              <th className="py-2 pr-4 font-medium">操作数</th>
+              <th className="py-2 pr-4 font-medium">最后时间</th>
               <th className="py-2 font-medium">操作</th>
             </tr>
           </thead>
           <tbody>
             {runs.map((run) => (
               <tr key={run.run_id} data-testid={`run-row-${run.run_id}`} className="border-b border-slate-100 last:border-0">
-                <td className="py-2 pr-4 font-mono text-xs text-slate-700">
-                  {run.run_id}
-                  {run.is_latest && (
-                    <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-xs text-emerald-700">latest</span>
-                  )}
-                </td>
-                <td className="py-2 pr-4 text-xs text-slate-500">{formatCheckedAt(run.mtime)}</td>
-                <td className="py-2 pr-4 text-xs text-slate-500">{(run.size_bytes / 1024).toFixed(1)} KB</td>
+                <td className="py-2 pr-4 font-mono text-xs text-slate-700">{run.run_id}</td>
+                <td className="py-2 pr-4 text-xs text-slate-500">{run.operations}</td>
+                <td className="py-2 pr-4 text-xs text-slate-500">{formatCheckedAt(run.last_at)}</td>
                 <td className="py-2">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedRun(run.run_id)}
-                    className="rounded border border-indigo-200 px-2 py-0.5 text-xs text-indigo-600 hover:bg-indigo-50"
-                  >
-                    日志
+                  <button type="button" onClick={() => setSelectedRun(run.run_id)} className="rounded border border-indigo-200 px-2 py-0.5 text-xs text-indigo-600 hover:bg-indigo-50">
+                    详情
                   </button>
                 </td>
               </tr>

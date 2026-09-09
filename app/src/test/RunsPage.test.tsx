@@ -17,13 +17,18 @@ function Trigger({ command, label }: { command: string; label: string }) {
 function routes(): Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> {
   return {
     "runs:list": makeEnvelope(
-      { runs: [makeRunEntry({ run_id: "20260905T235900Z-legacy1", is_latest: true })], tail: null, lines: null },
+      { runs: [makeRunEntry({ run_id: "20260905T235900Z-legacy1", operations: 2, last_at: "2026-09-05T23:59:00Z" })] },
       { command: "runs.list" },
     ),
     "runs:get": async (args: string[]) => {
       const id = args[args.indexOf("--run") + 1];
       return makeEnvelope(
-        { runs: [makeRunEntry({ run_id: id })], tail: `=== engine step: mcp-sync ===\n[mock log for ${id}]\n步骤完成 exit=0\n`, lines: 200 },
+        {
+          run_id: id,
+          operations: [
+            { id: "op-1", operation_type: "mcp:apply", target: "mcp:grok-search", detail: { dry_run: false, result: "ok" }, created_at: "2026-09-05T23:59:00Z" },
+          ],
+        },
         { command: "runs.get" },
       );
     },
@@ -46,18 +51,25 @@ function routes(): Record<string, Envelope | ((args: string[]) => Promise<Envelo
 }
 
 describe("执行中心", () => {
-  it("历史列表渲染 + 点击查看日志尾（runs:get --run --lines 200）", async () => {
+  it("历史列表展示运行 ID、操作数、最后时间，并查看结构化操作详情", async () => {
     const { calls } = renderWithEngine(<RunsPage />, routes());
     const row = await screen.findByTestId("run-row-20260905T235900Z-legacy1");
-    expect(row).toHaveTextContent("latest");
-    await userEvent.click(row.querySelector("button")!);
-    const tail = await screen.findByTestId("run-log-tail");
-    expect(tail).toHaveTextContent("mock log for 20260905T235900Z-legacy1");
+    expect(row).toHaveTextContent("20260905T235900Z-legacy1");
+    expect(row).toHaveTextContent("2");
+    expect(row).toHaveTextContent("2026");
+    expect(row).not.toHaveTextContent("latest");
+    expect(row).not.toHaveTextContent("日志");
+
+    await userEvent.click(within(row).getByText("详情"));
+    expect(screen.getAllByText("mcp:apply")).toHaveLength(1);
+    expect(screen.getByText("mcp:grok-search")).toBeInTheDocument();
+    expect(screen.getByText(/"result": "ok"/)).toBeInTheDocument();
+
     const getCall = calls.find((call) => call.command === "runs:get");
-    expect(getCall!.args).toEqual(["--run", "20260905T235900Z-legacy1", "--lines", "200"]);
+    expect(getCall?.args).toEqual(["--run", "20260905T235900Z-legacy1"]);
   });
 
-  it("执行状态机：running → 完成（envelope ok:false → 失败），渲染步骤摘要与锁状态，并失效重拉 runs:list", async () => {
+  it("执行状态机完成后可查看该 run 的结构化操作，并失效重拉 runs:list", async () => {
     let releaseApply: (() => void) | null = null;
     const gated = routes();
     gated["mcp:apply"] = () =>
@@ -92,18 +104,14 @@ describe("执行中心", () => {
     const listCallsBefore = calls.filter((call) => call.command === "runs:list").length;
 
     await userEvent.click(await screen.findByTestId("trigger-execute"));
-
-    // 进行中可见（apply 挂起期间）
     expect(await screen.findByText("正在执行…")).toBeInTheDocument();
     const statusChip = document.querySelector(`[data-testid^="execution-status-"]`)!;
     const runId = statusChip.getAttribute("data-testid")!.replace("execution-status-", "");
     expect(runId).toMatch(/^gui-/);
 
-    // run_id 透传到引擎调用
     const applyCall = calls.find((call) => call.command === "mcp:apply");
     expect(applyCall!.options?.runId).toBe(runId);
 
-    // 释放 → 完成：失败态 + 步骤摘要 + 锁状态 + 引擎 errors
     releaseApply!();
     expect(await screen.findByText("失败")).toBeInTheDocument();
     expect(screen.getByText("mcp-sync")).toBeInTheDocument();
@@ -111,14 +119,13 @@ describe("执行中心", () => {
     expect(screen.getByText(/独占执行 · pid 4242/)).toBeInTheDocument();
     expect(screen.getByText("STEP_FAILED")).toBeInTheDocument();
 
-    // 完成后失效重拉 runs:list
     const listCallsAfter = calls.filter((call) => call.command === "runs:list").length;
     expect(listCallsAfter).toBeGreaterThan(listCallsBefore);
 
-    // 执行卡 → 日志按该 run_id 拉取
     const card = screen.getByTestId(`execution-${runId}`);
-    await userEvent.click(within(card).getByText("日志"));
-    const tail = await screen.findByTestId("run-log-tail");
-    expect(tail).toHaveTextContent(`mock log for ${runId}`);
+    await userEvent.click(within(card).getByText("详情"));
+    expect(screen.getAllByText("mcp:apply")).toHaveLength(2);
+    const getCall = calls.find((call) => call.command === "runs:get");
+    expect(getCall?.args).toEqual(["--run", runId]);
   });
 });

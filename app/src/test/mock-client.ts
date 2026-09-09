@@ -572,11 +572,8 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
       },
   };
   const runs: RunEntry[] = [
-    makeRunEntry({ run_id: "20260905T235900Z-legacy1", mtime: "2026-09-05T23:59:00Z", is_latest: true, size_bytes: 7270 }),
+    makeRunEntry({ run_id: "20260905T235900Z-legacy1", last_at: "2026-09-05T23:59:00Z", operations: 2 }),
   ];
-  const runLogs = new Map<string, string>([
-    ["20260905T235900Z-legacy1", "2026-09-05 23:59 [INFO] [grok-search] 注入凭证: TAVILY_API_KEY (来源: secrets 池)\n2026-09-05 23:59 [INFO] 同步完成\n"],
-  ]);
   const snapshots: SnapshotEntry[] = [
     makeSnapshotEntry({ run_id: "20260905T230000Z-mock00", command: "mcp.apply", file_count: 3, link_count: 0 }),
     makeSnapshotEntry({ run_id: "20260905T235000Z-mock01", command: "system.converge", file_count: 8, link_count: 2, created_at: "2026-09-05T23:50:00Z" }),
@@ -672,12 +669,8 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
     aliases: "shell-aliases",
   };
 
-  const recordRun = (runId: string, command: string, dryRun: boolean): void => {
-    runs.unshift(makeRunEntry({ run_id: runId, mtime: new Date().toISOString(), is_latest: false, size_bytes: 512 }));
-    runLogs.set(
-      runId,
-      `=== engine step: ${command} ===\nmock 执行 ${command}${dryRun ? "（dry-run）" : ""}\n步骤完成 exit=0\n`,
-    );
+  const recordRun = (runId: string, _command: string, dryRun: boolean): void => {
+    runs.unshift(makeRunEntry({ run_id: runId, last_at: new Date().toISOString(), operations: dryRun ? 1 : 2 }));
   };
 
   const applyEnvelope = (domain: string, args: string[], runId: string): Envelope => {
@@ -737,14 +730,14 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
       if (command === "policy:set") return policySet(args);
       if (command === "policy:delete") return policyDelete(args);
       if (command === "runs:list") {
-        return makeEnvelope({ runs, tail: null, lines: null }, { command: "runs.list" });
+        return makeEnvelope({ runs }, { command: "runs.list" });
       }
       if (command === "runs:get") {
         const id = args[args.indexOf("--run") + 1];
-        const lines = Number(args[args.indexOf("--lines") + 1] ?? "200");
-        const tail = runLogs.get(id) ?? "（mock：该运行无日志）";
-        const entry = runs.find((run) => run.run_id === id) ?? makeRunEntry({ run_id: id });
-        return makeEnvelope({ runs: [entry], tail, lines }, { command: "runs.get" });
+        return makeEnvelope(
+          { run_id: id, operations: [{ id: "op-mock", operation_type: "mcp:apply", target: "mcp:grok-search", detail: { dry_run: false }, created_at: "2026-09-05T23:59:00Z" }] },
+          { command: "runs.get" },
+        );
       }
       if (command === "snapshots:list") {
         return makeEnvelope({ snapshots, restore: null }, { command: "snapshots.list" });

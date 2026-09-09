@@ -92,10 +92,8 @@ export function makeApplyResult(overrides: Partial<ApplyResultData> = {}): Apply
 export function makeRunEntry(overrides: Partial<RunEntry> = {}): RunEntry {
   return {
     run_id: "20260906T010000Z-mock01",
-    log_file: "/tmp/agent_manager_sync_mock_20260906T010000Z-mock01.log",
-    size_bytes: 2048,
-    mtime: "2026-09-06T01:00:00Z",
-    is_latest: false,
+    operations: 1,
+    last_at: "2026-09-06T01:00:00Z",
     ...overrides,
   };
 }

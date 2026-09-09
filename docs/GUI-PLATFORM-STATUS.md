@@ -9,7 +9,7 @@
 | Tauri bridge / React 基础 | 已完成：原生桥接、设置与 policy 页面、主要资源页面布局和 plan/apply 交互 |
 | Python 清理 | 已完成：根仓库不再依赖 Python 或 `manage.sh` |
 | Agent/MCP/Skills 原生域 | 未完成：草稿尚未注册 dispatcher |
-| Runs 操作记录 | 未完成：Rust 核心已读 SQLite `operation_logs`，页面与 schema 仍是待退役的文件日志模型 |
+| Runs 操作记录 | 已完成：列表与详情均读取 SQLite `operation_logs` |
 | Rules/Hooks | 未完成 |
 | 独立包真实 E2E | 未完成 |
 | 跨平台发布、签名、更新 | 未完成 |

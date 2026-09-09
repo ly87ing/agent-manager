@@ -29,4 +29,4 @@ Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 的契约动作均要�
 
 Claude Code 和 Codex 的内置默认都是官方 `native` 命令；brew 只作为实际检测来源，不改变默认。
 
-SQLite 核心、Tauri bridge、设置与 Policy 页面、主要资源页面布局和 Python 清理已完成。Agent/MCP/Skills 原生域尚未接线；Runs 页面仍需从文件日志模型切换到 SQLite `operation_logs`；Rules/Hooks 和独立包真实 E2E 待完成。详见 [契约](../contract/README.md) 与 [平台状态](GUI-PLATFORM-STATUS.md)。
+SQLite 核心、Tauri bridge、设置与 Policy 页面、主要资源页面布局、Runs SQLite `operation_logs` 和 Python 清理已完成。Agent/MCP/Skills 原生域尚未接线；Rules/Hooks 和独立包真实 E2E 待完成。详见 [契约](../contract/README.md) 与 [平台状态](GUI-PLATFORM-STATUS.md)。

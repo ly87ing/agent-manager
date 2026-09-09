@@ -236,16 +236,25 @@ export interface ConvergeData {
 
 export interface RunEntry {
   run_id: string;
-  log_file: string;
-  size_bytes: number;
-  mtime: string;
-  is_latest: boolean;
+  operations: number;
+  last_at: string;
 }
 
-export interface RunsData {
+export interface RunOperation {
+  id: string;
+  operation_type: string;
+  target: string | null;
+  detail: unknown;
+  created_at: string;
+}
+
+export interface RunsListData {
   runs: RunEntry[];
-  tail: string | null;
-  lines: number | null;
+}
+
+export interface RunDetailData {
+  run_id: string;
+  operations: RunOperation[];
 }
 
 // ---------- snapshots:list / snapshots:restore ----------

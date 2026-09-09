@@ -8,7 +8,7 @@ import { newRunId } from "./runId";
 
 /**
  * GUI 发起的写路径执行记录（执行中心数据源）。
- * run_id 由前端生成并透传引擎，按次日志据此可追踪（runs:get --run <id>）。
+ * run_id 由前端生成并透传引擎，按次操作记录据此可追踪（runs:get --run <id>）。
  */
 export interface ExecutionRecord {
   runId: string;

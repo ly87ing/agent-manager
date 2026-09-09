@@ -12,6 +12,7 @@
 - Policy 的 builtin/sqlite 来源和固定 `--layer local` 写入。
 - Claude Code、Codex 官方 `native` 默认渠道；brew 只按实际检测来源处理。
 - 根仓库 Python 与旧 `manage.sh` 入口清理。
+- Runs 列表与详情使用 SQLite `operation_logs`。
 
 ## 契约要求
 
@@ -19,6 +20,6 @@ Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 必须支持新增、�
 
 ## 尚未完成
 
-Agent/MCP/Skills 原生域尚未接入 dispatcher，未跟踪草稿不算完成。Runs 页面与 schema 仍需从文件日志模型迁移到 SQLite `operation_logs`。Rules、Hooks、独立安装包真实 E2E、跨平台发布签名和更新验证仍待完成。
+Agent/MCP/Skills 原生域尚未接入 dispatcher，未跟踪草稿不算完成。Rules、Hooks、独立安装包真实 E2E、跨平台发布签名和更新验证仍待完成。
 
 验证：`cargo fmt --manifest-path engine-rs/Cargo.toml -- --check`、两套 Cargo test/check，以及 `cd app && pnpm test:unit run && pnpm typecheck && pnpm build`。

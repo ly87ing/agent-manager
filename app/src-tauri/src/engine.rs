@@ -75,8 +75,6 @@ enum ArgValueKind {
     ElementId,
     /// 运行 id（runs:get / snapshots:restore 的 --run），字母数字与 _/-。
     RunId,
-    /// runs:get 的 --lines，非负整数。
-    Lines,
     /// policy:set 落点层。
     PolicyLayer,
     /// policy:set 点分键路径（对齐引擎 key 段规则：字母/数字/_/-）。
@@ -102,7 +100,6 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         ("system", "refresh-upstream") => specs.push(("--only", ArgValueKind::ElementId)),
         ("runs", "get") => {
             specs.push(("--run", ArgValueKind::RunId));
-            specs.push(("--lines", ArgValueKind::Lines));
         }
         ("snapshots", "restore") => specs.push(("--run", ArgValueKind::RunId)),
         ("policy", "set") => {
@@ -188,19 +185,6 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
         ArgValueKind::Flag => Ok(()),
         ArgValueKind::ElementId => validate_element_id(value),
         ArgValueKind::RunId => validate_run_id(value),
-        ArgValueKind::Lines => {
-            let ok = !value.is_empty()
-                && value.bytes().all(|b| b.is_ascii_digit())
-                && value.parse::<u32>().is_ok_and(|n| n <= 100_000);
-            if ok {
-                Ok(())
-            } else {
-                Err(EngineError::new(
-                    "invalid_args",
-                    format!("非法行数 '{value}'"),
-                ))
-            }
-        }
         ArgValueKind::PolicyLayer => {
             if value == "local" {
                 Ok(())
@@ -478,12 +462,7 @@ mod tests {
             ("system:converge", vec!["--dry-run".into()]),
             (
                 "runs:get",
-                vec![
-                    "--run".into(),
-                    "gui-20260906T010203Z-ab12cd".into(),
-                    "--lines".into(),
-                    "200".into(),
-                ],
+                vec!["--run".into(), "gui-20260906T010203Z-ab12cd".into()],
             ),
             (
                 "snapshots:restore",
@@ -538,10 +517,17 @@ mod tests {
             ("policy:get", vec!["--dry-run".into()]),
             ("sources:set", vec!["--def-file".into(), "elsewhere".into()]),
             ("system:refresh-upstream", vec!["--only".into()]),
-            ("runs:get", vec!["--lines".into()]),
             ("snapshots:restore", vec!["--run".into(), "../etc".into()]),
-            ("runs:get", vec!["--lines".into(), "abc".into()]),
-            ("runs:get", vec!["--lines".into(), "100001".into()]),
+            ("runs:get", vec!["--run".into()]),
+            (
+                "runs:get",
+                vec![
+                    "--run".into(),
+                    "r1".into(),
+                    "--unexpected".into(),
+                    "value".into(),
+                ],
+            ),
             ("sources:set", vec!["--key".into(), "../../secrets".into()]),
             ("sources:set", vec!["--key".into(), "a..b".into()]),
             ("sources:set", vec!["--value".into(), "{not json".into()]),

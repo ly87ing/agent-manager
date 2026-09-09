@@ -1,35 +1,53 @@
 {
-  "description": "Data payload shape of 'runs.list' and 'runs.get' (envelope.data). runs.list fills 'runs' with every per-run log (newest first) and nulls tail/lines; runs.get returns a single-entry 'runs' plus the log tail. Log discovery follows the AGENT_MANAGER_LOG_PREFIX convention (/tmp/agent_manager_sync_<user>_<runid>.log + .latest pointer).",
-  "type": "object",
-  "required": ["runs", "tail", "lines"],
-  "additionalProperties": false,
-  "properties": {
-    "runs": {
-      "description": "Run entries: all runs for runs.list, exactly one for runs.get.",
-      "type": "array",
-      "items": {"$ref": "#/$defs/run_entry"}
-    },
-    "tail": {
-      "description": "Log tail text for runs.get, or null for runs.list.",
-      "type": ["string", "null"]
-    },
-    "lines": {
-      "description": "Number of tail lines returned by runs.get, or null for runs.list.",
-      "type": ["integer", "null"]
-    }
-  },
-  "$defs": {
-    "run_entry": {
-      "description": "One recorded engine run.",
+  "description": "Data payload shape of runs:list and runs:get. Both responses are read-only views over native-manager.db operation_logs.",
+  "oneOf": [
+    {
+      "title": "runs:list",
       "type": "object",
-      "required": ["run_id", "log_file", "size_bytes", "mtime", "is_latest"],
+      "required": ["runs"],
       "additionalProperties": false,
       "properties": {
-        "run_id": {"description": "Run id, e.g. '20260905T103000Z-a1b2c3' or the shell form '20260905103000_12345'.", "type": "string"},
-        "log_file": {"description": "Absolute path of the per-run log.", "type": "string"},
-        "size_bytes": {"description": "Log file size in bytes.", "type": "integer"},
-        "mtime": {"description": "ISO-8601 UTC mtime of the log file.", "type": "string"},
-        "is_latest": {"description": "true when the .latest pointer names this log.", "type": "boolean"}
+        "runs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/run_summary" }
+        }
+      }
+    },
+    {
+      "title": "runs:get",
+      "type": "object",
+      "required": ["run_id", "operations"],
+      "additionalProperties": false,
+      "properties": {
+        "run_id": { "type": "string" },
+        "operations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/operation" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "run_summary": {
+      "type": "object",
+      "required": ["run_id", "operations", "last_at"],
+      "additionalProperties": false,
+      "properties": {
+        "run_id": { "type": "string" },
+        "operations": { "type": "integer", "minimum": 0 },
+        "last_at": { "type": "string" }
+      }
+    },
+    "operation": {
+      "type": "object",
+      "required": ["id", "operation_type", "target", "detail", "created_at"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "operation_type": { "type": "string" },
+        "target": { "type": ["string", "null"] },
+        "detail": {},
+        "created_at": { "type": "string" }
       }
     }
   }

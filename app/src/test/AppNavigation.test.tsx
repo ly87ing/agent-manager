@@ -22,7 +22,7 @@ function routes() {
     "skills:status": makeEnvelope({ domain: "skills", elements: [] }, { command: "skills.status" }),
     "mcp:status": makeEnvelope({ domain: "mcp", elements: [] }, { command: "mcp.status" }),
     "rules:status": makeEnvelope({ domain: "rules", elements: [] }, { command: "rules.status" }),
-    "runs:list": makeEnvelope([], { command: "runs.list" }),
+    "runs:list": makeEnvelope({ runs: [] }, { command: "runs.list" }),
     "policy:get": makeEnvelope({ layers: { sqlite: null } }, { command: "policy.get" }),
   };
 }
