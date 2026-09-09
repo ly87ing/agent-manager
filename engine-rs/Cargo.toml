@@ -2,7 +2,11 @@
 name = "agent-manager-engine"
 version = "0.1.0"
 edition = "2021"
-description = "Agent Manager engine (contract v1) — Rust slice, dual implementation of the Python engine (src/engine_v1.py)"
+description = "Agent Manager native Rust engine (contract v1)"
+
+[lib]
+name = "agent_manager_engine"
+path = "src/lib.rs"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -11,3 +15,5 @@ toml = "0.8"
 sha2 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 anyhow = "1"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+regex = "1"

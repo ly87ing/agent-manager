@@ -1,0 +1,18 @@
+//! agent-manager-engine library entry: the same native core backs the CLI
+//! (src/main.rs) and the Tauri bridge (app/src-tauri) — no manage.sh, no
+//! runtime Python, no resource-directory copying.
+//!
+//! Public surface (frozen by design review):
+//! - `native::{Context, Request, execute}` — dispatcher entry point.
+//! - `store` — SQLite (native-manager.db) connection helpers + policy access.
+//! - `envelope` — Contract v1 envelope types.
+//!
+//! Resource domains not yet implemented return an explicit
+//! `DOMAIN_NOT_IMPLEMENTED` error; this core never fabricates success.
+
+pub mod envelope;
+pub mod native;
+pub mod store;
+
+pub use envelope::{diagnostic, Diagnostic, Envelope, Lock, Mode, CONTRACT_ID};
+pub use native::{execute, Context, Request};
