@@ -22,3 +22,15 @@ cargo check --manifest-path src-tauri/Cargo.toml --all-targets
 ```
 
 CLI 查询在仓库根目录运行。测试数据库使用临时 `AGENT_MANAGER_DATA_DIR`，不覆盖 HOME。
+
+### macOS 打包与独立验收（限定 Darwin x86_64）
+
+```sh
+pnpm run build:macos
+# 产物生成在 src-tauri/target/release/bundle/dmg/，可直接运行验证脚本或使用 npm script：
+pnpm run verify:macos
+# 或显式指定 DMG 路径：
+../scripts/verify-macos-dmg.sh src-tauri/target/release/bundle/dmg/Agent\ Manager_0.1.0_x64.dmg
+```
+
+打包脚本自动配置 `--remap-path-prefix` 剥离本机构建 HOME 与源码根路径。验收脚本完成只读挂载、脱离仓库隔离复制、无 Python 动态与静态依赖检查、脱敏校验，以及在 `/` 下使用最小 PATH 与隔离目录的存活、源码零引用和退出检测。2026-09-09 已在 Darwin x86_64 实机构建 DMG 并通过上述独立运行验收；Apple 签名、公证和其他平台仍需发布环境验证。

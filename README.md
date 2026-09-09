@@ -23,6 +23,11 @@ make smoke
 
 直接验证可用 `cargo test --manifest-path engine-rs/Cargo.toml`、`cargo test --manifest-path app/src-tauri/Cargo.toml`，以及 `cd app && pnpm test:unit run && pnpm typecheck && pnpm build`。隔离写入请设置临时 `AGENT_MANAGER_DATA_DIR`，不要覆盖 HOME。
 
+macOS 打包与独立包验收（当前环境限定 Darwin x86_64，构建自动启用源码根目录与主目录路径脱敏重映射）：
+
+- 打包 app 与 dmg：`pnpm --dir app run build:macos`（产物位于 `app/src-tauri/target/release/bundle/dmg/`）
+- 独立包运行验收：`pnpm --dir app run verify:macos` 或 `./scripts/verify-macos-dmg.sh app/src-tauri/target/release/bundle/dmg/Agent\ Manager_0.1.0_x64.dmg`（只读挂载、隔离复制、元数据/架构/无 Python 依赖校验、源码路径脱敏校验、从 `/` 隔离目录存活运行验收）
+
 ## 目录
 
 - [engine-rs](engine-rs/)：CLI/Tauri 共用 Rust 库和 SQLite 存储。

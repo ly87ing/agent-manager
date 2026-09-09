@@ -22,6 +22,6 @@ Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 必须支持新增、�
 
 ## 尚未完成
 
-MCP 原生域尚未接入 dispatcher。Rules/Hooks 统一编辑与端侧落地、独立安装包真实 E2E、跨平台发布签名和更新验证仍待完成。
+MCP 原生域尚未接入 dispatcher。Rules/Hooks 统一编辑与端侧落地仍待完成。macOS 独立安装包已具备 `pnpm --dir app run build:macos` 构建入口与 `scripts/verify-macos-dmg.sh` 校验脚本；2026-09-09 已在 Darwin x86_64 实机构建 DMG，并通过仓库外、最小环境、运行期源码零引用的独立启动验收。Apple 签名、公证、arm64、Linux、Windows 和更新发布验证仍待完成。
 
-验证：`cargo fmt --manifest-path engine-rs/Cargo.toml -- --check`、两套 Cargo test/check，以及 `cd app && pnpm test:unit run && pnpm typecheck && pnpm build`。
+验证：`cargo fmt --manifest-path engine-rs/Cargo.toml -- --check`、两套 Cargo test/check，以及 `cd app && pnpm test:unit run && pnpm typecheck && pnpm build`。打包与独立包验收使用 `pnpm --dir app run build:macos` 与 `./scripts/verify-macos-dmg.sh <path-to-dmg>`。

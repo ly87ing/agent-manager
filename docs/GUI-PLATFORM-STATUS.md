@@ -14,9 +14,9 @@
 | 本地结构化诊断日志与清理 | 已完成：`data_dir/logs/agent-manager-YYYY-MM-DD.jsonl` 日切写入；仅记录脱敏元数据；Unix 权限 0700/0600；只读与演练零写；诊断日志写入后及应用启动时按 `log_retention_days` 清理过期文件；提供 `logs:clear` 原生命令并在设置页支持二次确认手动清空（不碰 SQLite 任务记录） |
 | MCP 原生域 | 未完成：尚未接入 dispatcher |
 | Rules/Hooks 统一编辑与端侧落地 | 未完成 |
-| 独立包真实 E2E | 未完成 |
+| 独立包真实 E2E | 部分完成：2026-09-09 已在 Darwin x86_64 实机构建 DMG，并通过只读挂载、仓库外复制、元数据/架构/无 Python/路径脱敏检查，以及从 `/` 使用隔离 HOME、独立数据目录、最小 PATH、运行期源码零引用的 5 秒启动验收；Apple 签名、公证、arm64、Linux、Windows 尚未验证 |
 | 跨平台发布、签名、更新 | 未完成 |
 
 缺库读取不建库，保存才初始化数据库；设置在 `app_settings` 表。policy 持久化来源为 `sqlite`，写入参数固定 `--layer local`。Claude Code 与 Codex 默认均为官方 `native` 命令，brew 仅按实际检测来源处理。
 
-验证入口：`cargo test --manifest-path engine-rs/Cargo.toml`、`cargo test --manifest-path app/src-tauri/Cargo.toml`，以及 `cd app && pnpm test:unit run && pnpm typecheck && pnpm build`。这些不替代未完成域和发布包 E2E。
+验证入口：`cargo test --manifest-path engine-rs/Cargo.toml`、`cargo test --manifest-path app/src-tauri/Cargo.toml`，以及 `cd app && pnpm test:unit run && pnpm typecheck && pnpm build`。macOS 打包与独立包验收使用 `pnpm --dir app run build:macos` 与 `./scripts/verify-macos-dmg.sh <path-to-dmg>`。本机验收允许如实报告未签名状态，不代表 Apple 签名或公证通过，也不替代其他平台和未完成域的 E2E。
