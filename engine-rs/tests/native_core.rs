@@ -168,16 +168,75 @@ fn replace_semantics_and_delete_roundtrip() {
     // delete 存在的键成功、再删报错
     let env = execute(
         &ctx,
-        &request("policy:delete", &["--key", "mcp.definitions.srv"]),
+        &request(
+            "policy:delete",
+            &["--layer", "local", "--key", "mcp.definitions.srv"],
+        ),
     );
     assert!(env.ok, "{:?}", env.errors);
     let env = execute(
         &ctx,
-        &request("policy:delete", &["--key", "mcp.definitions.srv"]),
+        &request(
+            "policy:delete",
+            &["--layer", "local", "--key", "mcp.definitions.srv"],
+        ),
     );
     assert!(!env.ok);
     assert_eq!(env.errors[0].code, "POLICY_KEY_NOT_FOUND");
     let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn delete_requires_local_layer_without_touching_store() {
+    let (base, ctx) = temp_ctx("delete-layer");
+    for args in [
+        vec!["--key", "agents.missing"],
+        vec!["--layer", "synced", "--key", "agents.missing"],
+    ] {
+        let env = execute(&ctx, &request("policy:delete", &args));
+        assert!(!env.ok);
+        assert_eq!(env.errors[0].code, "USAGE_ERROR");
+    }
+    assert!(!store::db_path(&ctx).exists());
+    assert!(!ctx.data_dir.exists());
+
+    let set = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "agents.keep",
+                "--value",
+                "true",
+            ],
+        ),
+    );
+    assert!(set.ok, "{:?}", set.errors);
+    let before = store::effective_policy(&ctx).unwrap();
+    let count_before: i64 = store::open_readonly(&ctx)
+        .unwrap()
+        .unwrap()
+        .query_row("SELECT count(*) FROM operation_logs", [], |row| row.get(0))
+        .unwrap();
+    for args in [
+        vec!["--key", "agents.keep"],
+        vec!["--layer", "synced", "--key", "agents.keep"],
+    ] {
+        let env = execute(&ctx, &request("policy:delete", &args));
+        assert!(!env.ok);
+        assert_eq!(env.errors[0].code, "USAGE_ERROR");
+    }
+    assert_eq!(store::effective_policy(&ctx).unwrap(), before);
+    let count_after: i64 = store::open_readonly(&ctx)
+        .unwrap()
+        .unwrap()
+        .query_row("SELECT count(*) FROM operation_logs", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count_after, count_before);
+    let _ = std::fs::remove_dir_all(base);
 }
 
 #[test]

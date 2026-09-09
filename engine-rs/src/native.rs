@@ -529,6 +529,12 @@ fn policy_set(ctx: &Context, request: &Request) -> DispatchResult {
 }
 
 fn policy_delete(ctx: &Context, request: &Request) -> DispatchResult {
+    if request.value("--layer") != Some("local") {
+        return Err(DispatchError::new(
+            "USAGE_ERROR",
+            "policy:delete 仅支持 --layer local",
+        ));
+    }
     let key = request
         .value("--key")
         .ok_or_else(|| DispatchError::new("USAGE_ERROR", "policy:delete 需要 --key <dot.path>"))?;
