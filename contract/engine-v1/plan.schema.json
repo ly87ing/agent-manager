@@ -1,5 +1,5 @@
 {
-  "description": "Data payload shape of '<domain>.plan' commands, i.e. the 'data' member of the envelope (docs/GUI-ARCHITECTURE-PROPOSAL.md section 2.2/2.4). Cross-file $ref is not allowed in this contract, so '$defs.plan_action' below is a verbatim inline copy of plan-action.schema.json; tests/test_engine_contract.py enforces that the copy stays equal. See contract/README.md.",
+  "description": "Data payload shape of '<domain>.plan' commands. The inline action definition keeps this schema self-contained; see contract/README.md.",
   "type": "object",
   "required": ["domain", "actions", "summary"],
   "additionalProperties": false,
@@ -29,7 +29,7 @@
   },
   "$defs": {
     "plan_action": {
-      "description": "Engine Contract v1 plan action entry (docs/GUI-ARCHITECTURE-PROPOSAL.md section 2.4). One entry per write action a '<domain>.plan' command would perform; 'apply' executes exactly the listed actions. Fields whose value may be absent are required but nullable so the shape is uniform across ops: digest pair and backup_path exist only for file-touching ops, cmd only for 'run-cmd', target only for path-touching ops, note only when the engine has extra context.",
+      "description": "Engine Contract v1 plan action entry. One entry describes an action a '<domain>.plan' command would perform; 'apply' executes the confirmed actions. Fields that may be absent remain required but nullable.",
       "type": "object",
       "required": ["op", "element", "target", "risk", "before_digest", "after_digest", "backup_path", "cmd", "note"],
       "additionalProperties": false,
@@ -48,7 +48,7 @@
           "type": ["string", "null"]
         },
         "risk": {
-          "description": "Risk level (proposal section 2.4): read = pure probe, write-local = home-dir config write (backupable), exec-local = local command (build, link), network = fetch/download (forbidden in offline mode), install-remove = software install/uninstall (highest confirmation level).",
+          "description": "Risk level: read = pure probe, write-local = home-dir config write (backupable), exec-local = local command (build, link), network = fetch/download (forbidden in offline mode), install-remove = software install/uninstall (highest confirmation level).",
           "type": "string",
           "enum": ["read", "write-local", "exec-local", "network", "install-remove"]
         },

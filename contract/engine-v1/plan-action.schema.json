@@ -1,5 +1,5 @@
 {
-  "description": "Engine Contract v1 plan action entry (docs/GUI-ARCHITECTURE-PROPOSAL.md section 2.4). One entry per write action a '<domain>.plan' command would perform; 'apply' executes exactly the listed actions. Fields whose value may be absent are required but nullable so the shape is uniform across ops: digest pair and backup_path exist only for file-touching ops, cmd only for 'run-cmd', target only for path-touching ops, note only when the engine has extra context.",
+  "description": "Engine Contract v1 plan action entry. One entry describes an action a '<domain>.plan' command would perform; 'apply' executes the confirmed actions. Fields that may be absent remain required but nullable.",
   "type": "object",
   "required": ["op", "element", "target", "risk", "before_digest", "after_digest", "backup_path", "cmd", "note"],
   "additionalProperties": false,
@@ -18,7 +18,7 @@
       "type": ["string", "null"]
     },
     "risk": {
-      "description": "Risk level (proposal section 2.4): read = pure probe, write-local = home-dir config write (backupable), exec-local = local command (build, link), network = fetch/download (forbidden in offline mode), install-remove = software install/uninstall (highest confirmation level).",
+      "description": "Risk level: read, write-local, exec-local, network, or install-remove. Higher-risk actions require stronger confirmation.",
       "type": "string",
       "enum": ["read", "write-local", "exec-local", "network", "install-remove"]
     },

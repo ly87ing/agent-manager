@@ -1,5 +1,5 @@
 {
-  "description": "Data payload shape of 'system.converge' (envelope.data) — the update-pipeline equivalent (docs/GUI-ARCHITECTURE-PROPOSAL.md section 2.3). Steps replay manage.sh's run_apply_steps order; non-fatal steps (secrets pull) degrade to warnings.",
+  "description": "Data payload shape of 'system.converge' (envelope.data). It describes an ordered native action pipeline; this domain remains pending native wiring.",
   "type": "object",
   "required": ["pipeline", "dry_run", "steps", "snapshot", "skipped"],
   "additionalProperties": false,

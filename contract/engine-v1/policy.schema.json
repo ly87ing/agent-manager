@@ -1,31 +1,28 @@
 {
-  "description": "Data payload shape of 'policy.get' and 'policy.set' (envelope.data) — the three-layer policy stack (docs/GUI-ARCHITECTURE-PROPOSAL.md section 7.2). policy.get fills layers/effective/attribution and nulls layer/key/value/path; policy.set does the inverse. baseline is never writable.",
+  "description": "Data payload shape of 'policy.get' and 'policy.set' (envelope.data). policy.get reports the SQLite layer, effective values and attribution; policy.set reports the SQLite write. Builtin defaults supply effective values before the database exists; the local request argument is not a second storage layer.",
   "type": "object",
   "required": ["layers", "effective", "attribution", "layer", "key", "value", "path"],
   "additionalProperties": false,
   "properties": {
     "layers": {
-      "description": "Raw per-layer file content for policy.get (null layer = file absent), or null for policy.set.",
+      "description": "SQLite policy content for policy.get, or null for policy.set.",
       "type": ["object", "null"],
-      "required": ["baseline", "synced", "local"],
+      "required": ["sqlite"],
       "additionalProperties": false,
       "properties": {
-        "baseline": {"description": "config/manager.json content.", "type": ["object", "null"]},
-        "synced": {"description": "config/manager.synced.json content.", "type": ["object", "null"]},
-        "local": {"description": "config/manager.local.json content.", "type": ["object", "null"]},
-        "sqlite": {"description": "Effective state projected from manager.db when SQLite storage is active (Phase 1A); baseline/synced/local are null in that mode. Absent or null otherwise.", "type": ["object", "null"]}
+        "sqlite": {"description": "Persisted policy content from native-manager.db, or null when the database has no policy entry." , "type": ["object", "null"]}
       }
     },
     "effective": {
-      "description": "Merged result (baseline + synced + local, agent ids canonicalized) for policy.get, or null for policy.set. Free-form object.",
+      "description": "Effective result of builtin defaults plus SQLite policy for policy.get, or null for policy.set. Free-form object.",
       "type": ["object", "null"]
     },
     "attribution": {
-      "description": "Top-level key -> last defining layer ('baseline'|'synced'|'local'), for policy.get; null for policy.set. Free-form object.",
+      "description": "Top-level key -> defining source ('builtin'|'sqlite') for policy.get; null for policy.set. Free-form object.",
       "type": ["object", "null"]
     },
     "layer": {
-      "description": "Layer written by policy.set ('synced'|'local'), or null for policy.get.",
+      "description": "Persisted source returned by policy.set ('sqlite'), or null for policy.get. The request still uses '--layer local'.",
       "type": ["string", "null"]
     },
     "key": {
@@ -36,7 +33,7 @@
       "description": "Value written by policy.set (any JSON), or null for policy.get. Untyped by design: the policy tree is free-form below top level."
     },
     "path": {
-      "description": "Layer file written by policy.set, or null for policy.get.",
+      "description": "SQLite database destination written by policy.set, or null for policy.get.",
       "type": ["string", "null"]
     }
   }

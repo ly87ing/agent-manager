@@ -1,5 +1,5 @@
 {
-  "description": "Data payload shape of '<domain>.apply' commands (envelope.data). apply delegates to the existing syncer scripts with manage.sh's argument assembly; a snapshot of the domain's target files is taken before any non-dry-run write (docs/GUI-ARCHITECTURE-PROPOSAL.md section 4.10).",
+  "description": "Data payload shape of '<domain>.apply' commands (envelope.data). apply executes the actions returned by the native engine after plan and user confirmation; a snapshot may be taken before a non-dry-run write.",
   "type": "object",
   "required": ["domain", "dry_run", "steps", "snapshot", "skipped"],
   "additionalProperties": false,
@@ -13,7 +13,7 @@
       "type": "boolean"
     },
     "steps": {
-      "description": "Per-syncer-step execution results, in pipeline order.",
+      "description": "Per-action execution results, in engine order.",
       "type": "array",
       "items": {"$ref": "#/$defs/step"}
     },
@@ -37,7 +37,7 @@
   },
   "$defs": {
     "step": {
-      "description": "One syncer step result; failures surface as envelope errors as well.",
+      "description": "One native action result; failures surface as envelope errors as well.",
       "type": "object",
       "required": ["name", "ok", "exit_code"],
       "additionalProperties": false,

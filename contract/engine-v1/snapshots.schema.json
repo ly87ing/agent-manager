@@ -1,5 +1,5 @@
 {
-  "description": "Data payload shape of 'snapshots.list' and 'snapshots.restore' (envelope.data). snapshots.list fills 'snapshots' (newest first) and nulls 'restore'; snapshots.restore nulls 'snapshots' and fills 'restore' (docs/GUI-ARCHITECTURE-PROPOSAL.md section 4.10).",
+  "description": "Data payload shape of 'snapshots.list' and 'snapshots.restore' (envelope.data). snapshots.list fills 'snapshots'; snapshots.restore fills 'restore'.",
   "type": "object",
   "required": ["snapshots", "restore"],
   "additionalProperties": false,

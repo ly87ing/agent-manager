@@ -1,5 +1,5 @@
 {
-  "description": "Engine Contract v1 envelope (docs/GUI-ARCHITECTURE-PROPOSAL.md section 2.2). Every engine command writes exactly one payload of this shape to stdout; human-readable text only goes to stderr. The 'data' member is refined per command by the domain schemas (status.schema.json, plan.schema.json); at the envelope level it stays a generic object. Exit code semantics: 0 = ok (warnings allowed), 1 = errors non-empty, 2 = contract/usage error.",
+  "description": "Engine Contract v1 envelope. Every engine command writes exactly one payload of this shape to stdout; human-readable text only goes to stderr. The data member is refined per command by the domain schemas. Exit code semantics: 0 = ok (warnings allowed), 1 = errors non-empty, 2 = contract/usage error.",
   "type": "object",
   "required": ["contract", "run_id", "command", "mode", "lock", "log_file", "ok", "data", "warnings", "errors"],
   "additionalProperties": false,
@@ -18,7 +18,7 @@
       "type": "string"
     },
     "mode": {
-      "description": "Runtime mode flags (proposal section 2.1.3); interpreted uniformly by the engine, never as per-subcommand branches.",
+      "description": "Runtime mode flags interpreted uniformly by the native engine.",
       "type": "object",
       "required": ["dry_run", "offline"],
       "additionalProperties": false,
@@ -34,7 +34,7 @@
       }
     },
     "lock": {
-      "description": "Run-lock visibility for clients (proposal section 2.1.4).",
+      "description": "Run-lock visibility for clients.",
       "type": "object",
       "required": ["held", "pid"],
       "additionalProperties": false,

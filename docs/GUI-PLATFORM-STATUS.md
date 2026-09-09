@@ -1,21 +1,19 @@
-# Rust 原生桌面平台验收状态
+# GUI 平台状态
 
-本表只描述新版 Rust 原生路线。旧的 Python/Rust 混合运行包有过本地候选验收，但该证据不能证明新版通过。总体要求见[任务书](goal-rust-gui.md)。
+本页以当前分支的真实 Rust/Tauri 实现为基准；只有已接线并经过对应验证的能力才标记为完成。
 
-| 范围 | 当前证据与缺口 | 交付要求 |
-| --- | --- | --- |
-| macOS | 此前 Darwin x86_64 的旧 standalone 包属于未发布本地候选；新版原生完整桌面尚未验收 | 首个交付平台；最终包在无 Python、无源码环境真实操作并重启读回 |
-| Linux | 新版未在真实 Linux 桌面环境运行验证；构建/引擎证据不等于桌面运行验收 | 独立构建和桌面交互分别取得证据 |
-| Windows | 新版未验收，不宣称可用；不得延续捆绑 Bash/Python 的旧方案 | 使用平台适配命令；缺支持明确说明，不用 POSIX 字符串冒充 |
-| CI | 当前工作流仍含 Python 和双实现对照入口，待退役 | Rust 测试、前端测试、包构建与安全检查有真实退出码 |
-| 签名与更新 | 新版当前未进行签名发布；未取得真实更新验收 | 更新未配置、取消、失败、安装及重启提示分别验证 |
+| 范围 | 状态 |
+| --- | --- |
+| SQLite 核心 | 已完成：`native-manager.db`、settings、policy、runs 和读写边界 |
+| CLI / Tauri 共用库 | 已完成：两者调用同一 `engine-rs` |
+| Tauri bridge / React 基础 | 已完成：原生桥接、设置与 policy 页面、主要资源页面布局和 plan/apply 交互 |
+| Python 清理 | 已完成：根仓库不再依赖 Python 或 `manage.sh` |
+| Agent/MCP/Skills 原生域 | 未完成：草稿尚未注册 dispatcher |
+| Runs 操作记录 | 未完成：Rust 核心已读 SQLite `operation_logs`，页面与 schema 仍是待退役的文件日志模型 |
+| Rules/Hooks | 未完成 |
+| 独立包真实 E2E | 未完成 |
+| 跨平台发布、签名、更新 | 未完成 |
 
-## 验收记录要求
+缺库读取不建库，保存才初始化数据库；设置在 `app_settings` 表。policy 持久化来源为 `sqlite`，写入参数固定 `--layer local`。Claude Code 与 Codex 默认均为官方 `native` 命令，brew 仅按实际检测来源处理。
 
-每次记录候选提交、系统与架构、构建方式、隔离条件、实际操作及结果、未验证项。只有与最终提交对应的证据可以标为通过；出现实现变更后，不沿用失效证据。
-
-程序包只包含编译产物、界面及通用只读资源，不包含 Python、旧适配器、机器配置、凭据或会话。应用数据目录与安装目录分离，升级不覆盖本机定义和分配。
-
-## 发布边界
-
-当前授权覆盖开发分支提交与推送，不包含创建 tag、Release 或发布安装包。签名私钥和密码只允许在外部私有 secrets 存储；仓库保留 `YOUR_UPDATER_PUBKEY` 等占位符。真实发布配置和验收准备好后再处理发布授权。
+验证入口：`cargo test --manifest-path engine-rs/Cargo.toml`、`cargo test --manifest-path app/src-tauri/Cargo.toml`，以及 `cd app && pnpm test:unit run && pnpm typecheck && pnpm build`。这些不替代未完成域和发布包 E2E。

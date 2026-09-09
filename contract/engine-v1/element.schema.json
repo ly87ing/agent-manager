@@ -1,5 +1,5 @@
 {
-  "description": "Engine Contract v1 element model (docs/GUI-ARCHITECTURE-PROPOSAL.md section 3). Every managed object (agent, MCP server, skill, rules target, hooks, tool, alias) is exposed as one element carrying two independent state axes: the convergence axis 'state' (local vs desired, section 3.1) and the upstream axis 'freshness' (local vs upstream latest, section 3.3).",
+  "description": "Engine Contract v1 element model. Each managed object is exposed with observed state, freshness and the actions currently offered by the engine.",
   "type": "object",
   "required": ["id", "domain", "spec", "policy", "observed", "state", "freshness", "actions"],
   "additionalProperties": false,
@@ -9,15 +9,15 @@
       "type": "string"
     },
     "domain": {
-      "description": "Owning domain, e.g. 'agents', 'mcp', 'skills', 'rules', 'hooks', 'tools', 'aliases', 'secrets', 'profile'.",
+      "description": "Owning domain, e.g. 'agents', 'mcp', 'skills', 'rules', 'hooks', 'tools', 'aliases' or 'secrets'.",
       "type": "string"
     },
     "spec": {
-      "description": "Definition layer: the desired shape sourced from config/*.json. Free-form per domain.",
+      "description": "Definition shape held by the native manager. Free-form per domain.",
       "type": "object"
     },
     "policy": {
-      "description": "Merged three-layer policy result for this element (manager.json + manager.synced.json + manager.local.json, proposal section 7.2). Free-form per domain.",
+      "description": "Effective policy result from builtin defaults and SQLite. Free-form per domain.",
       "type": "object"
     },
     "observed": {
@@ -25,7 +25,7 @@
       "type": "object"
     },
     "state": {
-      "description": "Convergence axis state (proposal section 3.1).",
+      "description": "Convergence state derived from desired and observed values.",
       "type": "string",
       "enum": ["managed-ok", "drifted", "missing", "not-materialized", "unmanaged-detected", "unsupported", "disabled"]
     },
@@ -38,7 +38,7 @@
   },
   "$defs": {
     "freshness": {
-      "description": "Upstream axis block (proposal section 3.3). Value fields are required but nullable: 'not-applicable' and never-probed 'unknown' elements carry nulls. 'status' commands read only the probe cache and never hit the network; 'system.refresh-upstream' is the only writer of fresh values.",
+      "description": "Upstream freshness block. Value fields are required but nullable: 'not-applicable' and never-probed 'unknown' elements carry nulls. Status commands read only cached probe data and never hit the network; system.refresh-upstream is the only writer of fresh values.",
       "type": "object",
       "required": ["state", "current", "upstream", "checked_at", "probe", "cache_age_sec"],
       "additionalProperties": false,
@@ -81,7 +81,7 @@
           "type": "string"
         },
         "risk": {
-          "description": "Risk level (proposal section 2.4): read < write-local < exec-local < network < install-remove.",
+          "description": "Risk level: read < write-local < exec-local < network < install-remove.",
           "type": "string",
           "enum": ["read", "write-local", "exec-local", "network", "install-remove"]
         },

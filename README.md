@@ -1,71 +1,31 @@
 # Agent Manager
 
-Agent Manager 的目标是一个独立运行的本地桌面管理工具：Tauri 2 界面与 Rust 原生后端共同管理助手安装、Skills、MCP、规则与 Hooks。本机调整保存在 SQLite，日常操作无需修改项目 JSON 或执行同步脚本。
+Agent Manager 是 Rust 原生引擎、Tauri 2 和 React 组成的本机管理工具。CLI 与 Tauri 共享 `engine-rs` 库；Python 已从根仓库清除。
 
-**当前处于原生重设计实施阶段，完整桌面流程尚未验收。** 现有界面和 Rust 候选不代表全部功能可用；此前包含 Python 的本地候选包及其测试属于旧路线，不能作为新版交付证据。
+## 当前事实源
 
-## 目标与要求
+`native-manager.db` 是本工具定义、分配和偏好的唯一事实源，位于应用数据目录。设置保存在数据库 `app_settings` 表。缺库读取只返回 Rust 内置只读默认值，不创建文件；首次保存才初始化数据库。policy 可编辑写入固定使用 `--layer local`，持久化来源为 `sqlite`。
 
-| 范围 | 必须实现的行为 |
-| --- | --- |
-| 本地数据 | 定义、用户命令、应用偏好、资源、版本、分配和操作记录由同一 Rust 库访问 SQLite；重启保留修改 |
-| 助手 | 内置命令依据官方推荐并标明来源；支持编辑安装、升级、卸载和版本命令；自定义助手无需改代码 |
-| Skills | 集合与每个助手内的技能分别支持添加、删除、更新、启用、禁用；更新资源库不自动改变助手已选版本 |
-| MCP、规则与 Hooks | 资源库与助手分配分开管理；每种资源提供明确的五种操作；保存定义不执行脚本 |
-| 操作结果 | 保存与应用分开；预览和取消零写入；执行后核对实际结果；错误不能显示成功 |
-| 独立运行 | 安装包不依赖 Python、旧 Shell 引擎或源码目录；应用数据不写回安装目录 |
+Claude Code 与 Codex 的内置默认渠道都是官方 `native` 命令。brew 只表示实际检测到的来源，不改变默认渠道。
 
-添加助手时只需填写所要管理的生命周期命令。接入 Skills 或 MCP 还需指定发现目录、配置格式或已支持的适配方式，不能假设任意助手格式都能自动识别。缺少升级或卸载命令时明确显示不支持该动作。
+定义保存与执行动作分开：保存只写数据库；按钮只按引擎返回的 actions，遵循 plan → 用户确认 → apply。Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 都要求新增、编辑/更新、启用、禁用、删除；移除管理与卸载是不同动作。
 
-新安装默认按官方推荐方式；已有安装按实际来源管理，不自动迁移或卸载其他版本。官方推荐、官方支持和用户自定义应分别标明，不把 Homebrew 统一作为默认安装方式。具体来源与核对依据见[重设计方案](docs/GUI-REDESIGN.md)。
+SQLite 核心、Tauri 桥、设置与 Policy 页面、主要资源页面布局和 Python 清理已完成。Agent/MCP/Skills 原生域尚未接线，未跟踪草稿不算完成；Runs 页面仍需切换到 SQLite 操作记录；Rules/Hooks 和独立包真实 E2E 待完成。
 
-## 数据与安全边界
+## 开发
 
-- 新原生库为应用数据目录中的 `native-manager.db`；应用偏好也保存在库内的设置表，Skill 正文保存为不可变版本文件。
-- `native-manager.db` 是 Agent Manager 本机配置的唯一事实源，不再保留项目自己的 `settings.json`。Agent 官方配置文件仍按各自格式写入受管范围。
-- 内置模板只读；用户编辑、删除和开关不会因应用升级被覆盖或复活。
-- 新版不自动导入旧 `manager.db` 或项目配置，不维护两套可写状态。
-- 每次应用限定资源与助手范围，保留其他助手和非受管内容；外部修改、共享目标和未知格式必须明确处理。
-- 凭据只保存引用，真实敏感信息只允许在外部私有 `secrets/` 仓库；代码、数据库、日志和示例不得收集明文凭据。
-- 文件写入需校验、原子替换和回读；失败恢复不能覆盖随后发生的外部修改。任意安装脚本不承诺自动撤销。
-
-## 实施顺序与完成条件
-
-1. Rust 存储及 CLI 闭环，再接入 Tauri 直接调用。
-2. 助手安装、升级、卸载和命令编辑。
-3. Skills 集合、不可变版本及逐助手五种操作。
-4. MCP、规则与 Hooks 的资源库和分配管理。
-5. 删除退役 Python、旧入口、打包依赖及专属测试，替换仍适用的安全检查。
-6. 从最终提交构建独立桌面包，在隔离环境完成真实界面与文件、数据库核对。
-
-每个闭环先定向验证，再做相关回归与独立验收，通过后分批提交并推送 `rust` 分支。生成文件不能手改；规则正文仍在 `agent-rule/rules/src/` 维护，`agent-rule/rules/dist/` 是生成产物。
-
-Python 已停止作为维护目标；清理前留存未提交修改，清理不删除用户的助手安装、会话、凭据或有效资源正文。不为旧实现维持双实现一致性测试，也不能借退役删除仍适用的数据保护要求。
-
-## 开发与验收入口
-
-使用 Rust 工具链、Node.js 与 pnpm。当前仓库仍含待退役构建接线；下列检查是开发入口，**并不表示当前候选已全部通过**：
-
-```bash
-cargo test --manifest-path engine-rs/Cargo.toml
-cargo test --manifest-path app/src-tauri/Cargo.toml
+```sh
+make test
+make check
+make build
+make smoke
 ```
 
-在 `app/` 内运行：
+直接验证可用 `cargo test --manifest-path engine-rs/Cargo.toml`、`cargo test --manifest-path app/src-tauri/Cargo.toml`，以及 `cd app && pnpm test:unit run && pnpm typecheck && pnpm build`。隔离写入请设置临时 `AGENT_MANAGER_DATA_DIR`，不要覆盖 HOME。
 
-```bash
-pnpm install
-pnpm test:unit run
-pnpm build
-```
+## 目录
 
-Tauri 构建入口去除旧 Python 资源脚本之前，不把现有打包命令生成的产物称为新版独立包。正常开发和验收使用隔离数据目录，不能对真实助手目录执行测试安装或清理。
-
-## 项目文档
-
-- [产品重设计](docs/GUI-REDESIGN.md)：资源语义、数据模型与功能要求。
-- [当前任务书](docs/goal-rust-gui.md)：实施顺序、协作方式、提交和验收标准。
-- [架构边界](docs/ARCHITECTURE.md)：Rust 原生目标与旧实现的区别。
-- [桌面开发说明](app/README.md)：界面调用、测试和打包要求。
-- [平台验收状态](docs/GUI-PLATFORM-STATUS.md)：分别记录各平台已证明的范围。
-- [协作要求](AGENTS.md)：实现、清理、生成文件和敏感信息边界。
+- [engine-rs](engine-rs/)：CLI/Tauri 共用 Rust 库和 SQLite 存储。
+- [app](app/)：Tauri 桌面应用和 React 前端。
+- [contract](contract/)：Engine Contract v1 schema。
+- [当前架构](docs/ARCHITECTURE.md) · [平台状态](docs/GUI-PLATFORM-STATUS.md)。
