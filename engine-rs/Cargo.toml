@@ -13,5 +13,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 anyhow = "1"
+fs2 = "0.4"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 regex = "1"

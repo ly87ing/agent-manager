@@ -10,7 +10,7 @@ Claude Code 与 Codex 的内置默认渠道都是官方 `native` 命令。brew �
 
 定义保存与执行动作分开：保存只写数据库；按钮只按引擎返回的 actions，遵循 plan → 用户确认 → apply。Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 都要求新增、编辑/更新、启用、禁用、删除；移除管理与卸载是不同动作。
 
-SQLite 核心、Tauri 桥、设置与 Policy 页面、主要资源页面布局、Runs SQLite 操作记录和 Python 清理已完成。Agent/MCP/Skills 原生域尚未接线，未跟踪草稿不算完成；Rules/Hooks 和独立包真实 E2E 待完成。
+SQLite 核心、Tauri 桥、设置与 Policy 页面、主要资源页面布局、Runs SQLite 操作记录、Agent 原生生命周期和 Python 清理已完成。MCP/Skills 原生域尚未接线，未跟踪草稿不算完成；Rules/Hooks 和独立包真实 E2E 待完成。
 
 ## 开发
 

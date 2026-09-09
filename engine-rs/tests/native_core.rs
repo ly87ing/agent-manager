@@ -1,4 +1,7 @@
 use agent_manager_engine::{execute, store, Context, Request};
+use fs2::FileExt;
+use serde_json::json;
+use std::fs::OpenOptions;
 use std::path::PathBuf;
 
 fn temp_ctx(tag: &str) -> (PathBuf, Context) {
@@ -17,6 +20,35 @@ fn request(command: &str, args: &[&str]) -> Request {
         args: args.iter().map(|s| s.to_string()).collect(),
         run_id: "test-run-1".to_string(),
     }
+}
+
+fn set_agent(ctx: &Context, id: &str, bin: &str, install: &str) {
+    let value = json!({
+        "display_name": id,
+        "bin": bin,
+        "preferred_provider": "local-test",
+        "providers": {"local-test": {"install": install}}
+    });
+    set_agent_definition(ctx, id, value);
+}
+
+fn set_agent_definition(ctx: &Context, id: &str, value: serde_json::Value) {
+    let raw = serde_json::to_string(&value).unwrap();
+    let env = execute(
+        ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                &format!("agents.definitions.{id}"),
+                "--value",
+                &raw,
+            ],
+        ),
+    );
+    assert!(env.ok, "{:?}", env.errors);
 }
 
 #[test]
@@ -295,12 +327,336 @@ fn runs_list_and_get_reflect_audit_trail() {
 fn unimplemented_domains_answer_clearly_and_unknown_rejected() {
     let (base, ctx) = temp_ctx("unimplemented");
     let env = execute(&ctx, &request("agents:status", &[]));
-    assert!(!env.ok);
-    assert_eq!(env.errors[0].code, "DOMAIN_NOT_IMPLEMENTED");
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(env.data["domain"], "agents");
+    let claude = env.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|element| element["id"] == "agents:claude-code")
+        .unwrap();
+    assert_eq!(claude["observed"]["definition_origin"], "builtin");
+    assert_eq!(claude["observed"]["command_sources"]["install"], "builtin");
+    assert_eq!(claude["spec"]["preferred_provider"], "native");
+    assert!(claude["spec"]["providers"]["native"].is_object());
+    assert!(!claude.to_string().contains("brew"));
     let env = execute(&ctx, &request("bogus:status", &[]));
     assert!(!env.ok);
     assert_eq!(env.errors[0].code, "UNKNOWN_DOMAIN");
     let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn agents_native_plan_dry_run_apply_and_audit() {
+    let (base, ctx) = temp_ctx("agents-native");
+    set_agent(&ctx, "local-agent", "agent-test-bin", "mkdir -p \"$HOME/.local/bin\"; printf '#!/bin/sh\\n' > \"$HOME/.local/bin/agent-test-bin\"; chmod +x \"$HOME/.local/bin/agent-test-bin\"");
+    set_agent(&ctx, "broken-agent", "broken-test-bin", "exit 7");
+
+    let plan = execute(
+        &ctx,
+        &request(
+            "agents:plan",
+            &["--only", "agents:local-agent", "--action", "install"],
+        ),
+    );
+    assert!(plan.ok, "{:?}", plan.errors);
+    assert_eq!(plan.data["actions"][0]["cmd"], "mkdir -p \"$HOME/.local/bin\"; printf '#!/bin/sh\\n' > \"$HOME/.local/bin/agent-test-bin\"; chmod +x \"$HOME/.local/bin/agent-test-bin\"");
+
+    let before = execute(&ctx, &request("runs:list", &[]));
+    let dry = execute(
+        &ctx,
+        &request(
+            "agents:apply",
+            &[
+                "--only",
+                "agents:local-agent",
+                "--action",
+                "install",
+                "--dry-run",
+            ],
+        ),
+    );
+    assert!(dry.ok, "{:?}", dry.errors);
+    assert_eq!(dry.data["dry_run"], true);
+    let after = execute(&ctx, &request("runs:list", &[]));
+    assert_eq!(before.data, after.data);
+    assert!(!ctx.data_dir.join("agent-manager.apply.lock").exists());
+    assert!(!ctx.home_dir.join(".local/bin/agent-test-bin").exists());
+
+    let offline = execute(
+        &ctx,
+        &request(
+            "agents:apply",
+            &[
+                "--only",
+                "agents:local-agent",
+                "--action",
+                "install",
+                "--offline",
+            ],
+        ),
+    );
+    assert!(!offline.ok);
+    assert_eq!(offline.errors[0].code, "AGENT_ERROR");
+    assert_eq!(before.data, execute(&ctx, &request("runs:list", &[])).data);
+    assert!(!ctx.home_dir.join(".local/bin/agent-test-bin").exists());
+    assert!(!ctx.data_dir.join("agent-manager.apply.lock").exists());
+
+    let disabled_value = serde_json::to_string(&false).unwrap();
+    let disabled = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "agents.local-agent.enabled",
+                "--value",
+                &disabled_value,
+            ],
+        ),
+    );
+    assert!(disabled.ok, "{:?}", disabled.errors);
+    let status = execute(&ctx, &request("agents:status", &[]));
+    let local = status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|element| element["id"] == "agents:local-agent")
+        .unwrap();
+    assert_eq!(local["policy"]["enabled"], false);
+    assert_eq!(local["state"], "disabled");
+    assert!(local["actions"].as_array().unwrap().is_empty());
+    let blocked = execute(
+        &ctx,
+        &request(
+            "agents:plan",
+            &["--only", "agents:local-agent", "--action", "install"],
+        ),
+    );
+    assert!(!blocked.ok);
+    assert_eq!(blocked.errors[0].code, "AGENT_ERROR");
+
+    let enabled_value = serde_json::to_string(&true).unwrap();
+    let enabled = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "agents.local-agent.enabled",
+                "--value",
+                &enabled_value,
+            ],
+        ),
+    );
+    assert!(enabled.ok, "{:?}", enabled.errors);
+
+    let applied = execute(
+        &ctx,
+        &request(
+            "agents:apply",
+            &["--only", "agents:local-agent", "--action", "install"],
+        ),
+    );
+    assert!(applied.ok, "{:?}", applied.errors);
+    assert!(applied.lock.held);
+    let runs = execute(&ctx, &request("runs:get", &["--run", "test-run-1"]));
+    assert!(runs.data["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|op| op["operation_type"] == "agents:install"));
+
+    let failed = execute(
+        &ctx,
+        &Request {
+            command: "agents:apply".into(),
+            args: vec![
+                "--only".into(),
+                "agents:broken-agent".into(),
+                "--action".into(),
+                "install".into(),
+            ],
+            run_id: "failed-agent".into(),
+        },
+    );
+    assert!(!failed.ok);
+    assert_eq!(failed.errors[0].code, "AGENT_ERROR");
+    assert!(!failed.errors[0].message.contains("exit 7"));
+    let failed_run = execute(
+        &ctx,
+        &request_with_run("runs:get", &["--run", "failed-agent"], "failed-agent"),
+    );
+    assert!(failed_run.data["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|op| op["operation_type"] == "agents:install"));
+
+    let invalid = execute(
+        &ctx,
+        &request(
+            "agents:plan",
+            &["--only", "agents:local-agent", "--action", "version"],
+        ),
+    );
+    assert!(!invalid.ok);
+    assert_eq!(invalid.errors[0].code, "AGENT_ERROR");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn agent_apply_rejects_contended_lock_without_execution_or_log() {
+    let (base, ctx) = temp_ctx("agents-lock");
+    set_agent(
+        &ctx,
+        "locked-agent",
+        "locked-test-bin",
+        "printf executed > \"$HOME/contended-marker\"; exit 0",
+    );
+    let lock_path = ctx.data_dir.join("agent-manager.apply.lock");
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .unwrap();
+    lock_file.lock_exclusive().unwrap();
+
+    let worker_ctx = Context {
+        data_dir: ctx.data_dir.clone(),
+        home_dir: ctx.home_dir.clone(),
+    };
+    let worker = std::thread::spawn(move || {
+        execute(
+            &worker_ctx,
+            &request_with_run(
+                "agents.apply",
+                &["--only", "agents:locked-agent", "--action", "install"],
+                "contended-agent",
+            ),
+        )
+    });
+    let env = worker.join().unwrap();
+    assert!(!env.ok);
+    assert_eq!(env.errors[0].code, "AGENT_ERROR");
+    assert!(!env.lock.held);
+    assert!(!ctx.home_dir.join("contended-marker").exists());
+    let runs = execute(
+        &ctx,
+        &request_with_run("runs:get", &["--run", "contended-agent"], "contended-agent"),
+    );
+    assert!(!runs.ok);
+    assert_eq!(runs.errors[0].code, "RUN_NOT_FOUND");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn agent_dry_run_without_database_does_not_create_lock_file() {
+    let (base, ctx) = temp_ctx("agents-dry-run-no-db");
+    let env = execute(
+        &ctx,
+        &request(
+            "agents.apply",
+            &[
+                "--only",
+                "agents:not-in-database",
+                "--action",
+                "install",
+                "--dry-run",
+            ],
+        ),
+    );
+    assert!(!env.ok);
+    assert_eq!(env.errors[0].code, "AGENT_ERROR");
+    assert!(!ctx.data_dir.exists());
+    assert!(!ctx.data_dir.join("agent-manager.apply.lock").exists());
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn agent_status_classifies_unsupported_install_and_skips_tombstones() {
+    let (base, ctx) = temp_ctx("agents-source");
+    let brew_bin = base
+        .join("Cellar")
+        .join("demo")
+        .join("bin")
+        .join("demo-agent");
+    std::fs::create_dir_all(brew_bin.parent().unwrap()).unwrap();
+    std::fs::write(&brew_bin, "#!/bin/sh\n").unwrap();
+    set_agent_definition(
+        &ctx,
+        "brew-agent",
+        json!({
+            "display_name": "Brew Agent",
+            "bin": brew_bin,
+            "preferred_provider": "native",
+            "providers": {"native": {
+                "managed": true,
+                "install": "printf install > \"$HOME/brew-marker\"",
+                "upgrade": "printf upgrade > \"$HOME/brew-marker\"",
+                "uninstall": "printf uninstall > \"$HOME/brew-marker\""
+            }}
+        }),
+    );
+    set_agent_definition(&ctx, "removed-agent", json!({"_delete": true}));
+    let status = execute(&ctx, &request("agents:status", &[]));
+    assert!(status.ok, "{:?}", status.errors);
+    let brew = status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|element| element["id"] == "agents:brew-agent")
+        .unwrap();
+    assert_eq!(brew["state"], "unmanaged-detected");
+    assert!(brew["actions"].as_array().unwrap().is_empty());
+    assert_eq!(brew["observed"]["providers"][0], "brew");
+    assert_eq!(brew["observed"]["classified"]["unsupported"][0], "brew");
+    assert_eq!(brew["observed"]["preferred_active"], false);
+    for command in ["agents:plan", "agents.apply"] {
+        let request_args = ["--only", "agents:brew-agent", "--action", "upgrade"];
+        let result = execute(
+            &ctx,
+            &request_with_run(command, &request_args, "brew-direct-apply"),
+        );
+        assert!(!result.ok);
+        assert_eq!(result.errors[0].code, "AGENT_ERROR");
+        assert!(!result.lock.held);
+    }
+    let apply = execute(
+        &ctx,
+        &request_with_run(
+            "agents:apply",
+            &["--only", "agents:brew-agent", "--action", "upgrade"],
+            "brew-apply",
+        ),
+    );
+    assert!(!apply.ok);
+    assert!(!ctx.home_dir.join("brew-marker").exists());
+    let brew_run = execute(
+        &ctx,
+        &request_with_run("runs:get", &["--run", "brew-apply"], "brew-apply"),
+    );
+    assert!(!brew_run.ok);
+    assert_eq!(brew_run.errors[0].code, "RUN_NOT_FOUND");
+    assert!(status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|element| element["id"] != "agents:removed-agent"));
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+fn request_with_run(command: &str, args: &[&str], run_id: &str) -> Request {
+    Request {
+        command: command.into(),
+        args: args.iter().map(|s| (*s).into()).collect(),
+        run_id: run_id.into(),
+    }
 }
 
 #[test]

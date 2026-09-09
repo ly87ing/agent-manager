@@ -5,9 +5,11 @@
 //! with signature `fn handle(&Context, &Request) -> anyhow::Result<Value>`;
 //! until registered they answer DOMAIN_NOT_IMPLEMENTED (never fake success).
 
+use std::fs::OpenOptions;
 use std::path::PathBuf;
 
 use anyhow::Result;
+use fs2::FileExt;
 use rusqlite::TransactionBehavior;
 use serde_json::{json, Map, Value};
 
@@ -108,39 +110,100 @@ fn log_file_from_env() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn make_envelope(
-    request: &Request,
-    data: Value,
-    warnings: Vec<Diagnostic>,
-    errors: Vec<Diagnostic>,
-) -> Envelope {
-    Envelope::new(
-        request.command.replacen(':', ".", 1),
-        mode_of(request),
-        lock_from_env(),
-        request.run_id.clone(),
-        log_file_from_env(),
-        data,
-        warnings,
-        errors,
-    )
+struct ApplyLock {
+    _file: std::fs::File,
 }
 
-fn error_envelope(request: &Request, code: &str, message: String) -> Envelope {
-    make_envelope(
-        request,
-        Value::Object(Map::new()),
-        vec![],
-        vec![diagnostic(code, None, message)],
-    )
+fn acquire_agent_apply_lock(ctx: &Context) -> Result<ApplyLock> {
+    std::fs::create_dir_all(&ctx.data_dir)?;
+    let path = ctx.data_dir.join("agent-manager.apply.lock");
+    let file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(path)?;
+    file.try_lock_exclusive()
+        .map_err(|err| anyhow::anyhow!("Agent apply 正在执行，拒绝并发动作：{err}"))?;
+    Ok(ApplyLock { _file: file })
 }
 
 /// The single native entry point. Pure with respect to process state: no exit
 /// codes here (CLI maps errors to exit codes); status/plan never write the DB.
 pub fn execute(ctx: &Context, request: &Request) -> Envelope {
+    let is_agent_apply = request.command.replace('.', ":") == "agents:apply";
+    let needs_agent_lock = if is_agent_apply {
+        match crate::native_agents::preflight_apply(ctx, request) {
+            Ok(real_apply) => real_apply,
+            Err(err) => {
+                return Envelope::new(
+                    request.command.replacen(':', ".", 1),
+                    mode_of(request),
+                    Lock {
+                        held: false,
+                        pid: None,
+                    },
+                    request.run_id.clone(),
+                    log_file_from_env(),
+                    Value::Object(Map::new()),
+                    vec![],
+                    vec![diagnostic("AGENT_ERROR", None, format!("{err:#}"))],
+                );
+            }
+        }
+    } else {
+        false
+    };
+    let apply_lock = if needs_agent_lock {
+        match acquire_agent_apply_lock(ctx) {
+            Ok(lock) => Some(lock),
+            Err(err) => {
+                return Envelope::new(
+                    request.command.replacen(':', ".", 1),
+                    mode_of(request),
+                    Lock {
+                        held: false,
+                        pid: None,
+                    },
+                    request.run_id.clone(),
+                    log_file_from_env(),
+                    Value::Object(Map::new()),
+                    vec![],
+                    vec![diagnostic("AGENT_ERROR", None, format!("{err:#}"))],
+                );
+            }
+        }
+    } else {
+        None
+    };
+    let lock = if apply_lock.is_some() {
+        Lock {
+            held: true,
+            pid: Some(std::process::id() as i64),
+        }
+    } else {
+        lock_from_env()
+    };
     match dispatch(ctx, request) {
-        Ok((data, warnings)) => make_envelope(request, data, warnings, vec![]),
-        Err(DispatchError { code, message }) => error_envelope(request, code, message),
+        Ok((data, warnings)) => Envelope::new(
+            request.command.replacen(':', ".", 1),
+            mode_of(request),
+            lock,
+            request.run_id.clone(),
+            log_file_from_env(),
+            data,
+            warnings,
+            vec![],
+        ),
+        Err(DispatchError { code, message }) => Envelope::new(
+            request.command.replacen(':', ".", 1),
+            mode_of(request),
+            lock,
+            request.run_id.clone(),
+            log_file_from_env(),
+            Value::Object(Map::new()),
+            vec![],
+            vec![diagnostic(code, None, message)],
+        ),
     }
 }
 
@@ -194,6 +257,9 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ));
     }
     match (domain, verb) {
+        ("agents", "status" | "plan" | "apply") => crate::native_agents::handle(ctx, request)
+            .map(|data| (data, vec![]))
+            .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}"))),
         ("policy", "get") => policy_get(ctx),
         ("policy", "set") => policy_set(ctx, request),
         ("policy", "delete") => policy_delete(ctx, request),
