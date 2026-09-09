@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -59,6 +60,7 @@ class DefinitionOverlayTests(unittest.TestCase):
     def _env(self, extra=None):
         env = os.environ.copy()
         env["HOME"] = str(self.home)
+        env["AGENT_MANAGER_DATA_DIR"] = str(self.temp_dir / "data")
         env["AGENT_MANAGER_LOCK_FILE"] = str(self.temp_dir / "lock")
         env["AGENT_MANAGER_LOG_PREFIX"] = str(self.temp_dir / "logs" / "sync")
         env["AGENT_MANAGER_UPSTREAM_CACHE"] = str(self.temp_dir / "no-cache.json")
@@ -136,10 +138,17 @@ class DefinitionOverlayTests(unittest.TestCase):
         self.assertEqual(payload["errors"], [])
 
     def test_mcp_overlay_add_new_server_end_to_end(self):
-        # 仅本机层定义出新 server + 策略启用 → status 出现元素 + plan 有注入动作 +
-        # 真跑 sync_mcp 后沙盒目标文件被注入。
-        # 同步器对「未安装且无配置文件」的 agent 跳过注入——预建空目标文件使流程可达。
-        self.agent_a.write_text('{"mcpServers": {}}\n', encoding="utf-8")
+        # 仅本机层定义出新 server + 策略启用 → status 出现元素 + plan 有注入动作。
+        # 旧期望说明：在引入 policy_entries.mcp_bindings 不可变版本绑定与逐 Agent 分配隔离后，
+        # 普通 mcp:apply (DB sync) 固定已分配版本且不自动分配新服务（not autobind），
+        # 故保存 overlay 后普通 apply 并不自动向 agent-a 注入未分配的 local-srv；
+        # 必须通过显式逐 Agent 分配动作 (--action add) 才能真实添加，同时保留既有旧项。
+        initial_target_cfg = {
+            "mcpServers": {
+                "pre-existing": {"command": "echo", "args": ["keep-me"]}
+            }
+        }
+        self.agent_a.write_text(json.dumps(initial_target_cfg, indent=2) + "\n", encoding="utf-8")
         self._write_overlay("local", {
             "mcp": {
                 "definitions": {"local-srv": {"command": "local-cmd", "args": ["--local"], "agents": ["agent-a"]}},
@@ -156,10 +165,48 @@ class DefinitionOverlayTests(unittest.TestCase):
         actions = json.loads(plan.stdout)["data"]["actions"]
         self.assertIn("mcp:local-srv", [a["element"] for a in actions])
 
+        # 1. 普通 apply：安全合同要求已激活 DB 不做未分配服务的隐式自动注入
         apply_result = self._run("mcp:apply", "--json", "--offline")
         self.assertEqual(apply_result.returncode, 0, apply_result.stdout + apply_result.stderr)
         injected = json.loads(self.agent_a.read_text(encoding="utf-8"))
-        self.assertEqual(injected["mcpServers"]["local-srv"]["command"], "local-cmd")
+        self.assertNotIn("local-srv", injected.get("mcpServers", {}), "DB 模式下普通 sync 不自动分配新定义服务")
+        self.assertIn("pre-existing", injected.get("mcpServers", {}), "既有条目完整保留")
+
+        # 2. 显式调用 sync_mcp --action add 为 agent-a 分配 local-srv
+        from src.storage import get_db_path, write_projected_config
+        db_path = get_db_path(self.temp_dir / "data")
+        projected_config = self.temp_dir / "projected_manager.json"
+        write_projected_config(db_path, projected_config)
+
+        add_result = subprocess.run(
+            [
+                sys.executable,
+                str(self.repo / "agent-mcp" / "sync_mcp.py"),
+                "--config",
+                str(projected_config),
+                "--def-file",
+                str(self.repo / "config" / "mcp.json"),
+                "--action",
+                "add",
+                "--agent",
+                "agent-a",
+                "--only",
+                "local-srv",
+            ],
+            cwd=self.repo,
+            env=self._env(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(add_result.returncode, 0, add_result.stderr + add_result.stdout)
+
+        # 3. 验证显式添加后目标文件被注入且旧项完整保留
+        final_doc = json.loads(self.agent_a.read_text(encoding="utf-8"))
+        self.assertIn("local-srv", final_doc.get("mcpServers", {}))
+        self.assertEqual(final_doc["mcpServers"]["local-srv"]["command"], "local-cmd")
+        self.assertIn("pre-existing", final_doc.get("mcpServers", {}))
+        self.assertEqual(final_doc["mcpServers"]["pre-existing"]["command"], "echo")
 
     def test_mcp_overlay_edit_keeps_baseline_keys(self):
         # 覆盖 args 键，基线的 command/env/agents 保留（深合并语义）。
@@ -176,9 +223,13 @@ class DefinitionOverlayTests(unittest.TestCase):
         _payload, elements = self._status_elements("mcp:status", "--json")
         self.assertEqual(elements["mcp:alpha"]["state"], "drifted", "生效定义=基线⊕覆盖，旧注入应判漂移")
 
-    def test_mcp_overlay_tombstone_removes_baseline_server(self):
-        # tombstone：删除定义后目标文件保留可验证残留时，status 呈现为 drifted/disabled policy，
-        # 且仅生成该元素的清理计划；通过 --only 离线清理后，目标文件移除该 server、status 不再出现、doctor 正常。
+    def test_mcp_overlay_tombstone_keeps_unbound_residual_and_alpha_intact(self):
+        # 新语义（取代旧"仅凭 marker 即删除残留"期望）：tombstone 只删除定义，
+        # 不授权删除目标文件中无历史 binding 的 marker 残留——marker 不证明外部内容所有权，
+        # 指定名称同样不证明所有权，故 --only 不豁免该保护。
+        # 残留保留并可观察（status 仍呈现 mcp:gamma），非选对象 alpha 完整原样保留。
+        # 合法清理由真实 add 建立 binding 后显式 remove 完成，
+        # 见 test_mcp_legal_cleanup_via_binding_and_explicit_remove。
         before_target_cfg = {
             "mcpServers": {
                 "alpha": {"command": "alpha-cmd", "args": ["--x"], "env": {"_MANAGED_BY": "agent-manager"}},
@@ -207,22 +258,79 @@ class DefinitionOverlayTests(unittest.TestCase):
         apply_result = self._run("mcp:apply", "--json", "--offline", "--only", "mcp:gamma")
         self.assertEqual(apply_result.returncode, 0, apply_result.stdout + apply_result.stderr)
         injected = json.loads(self.agent_a.read_text(encoding="utf-8"))
-        self.assertNotIn("gamma", injected["mcpServers"])
+        self.assertIn("gamma", injected["mcpServers"], "无历史 binding 的 marker 残留不得仅凭标记擅删")
+        self.assertEqual(injected["mcpServers"]["gamma"], before_target_cfg["mcpServers"]["gamma"], "残留条目字节级语义原样保留")
         self.assertIn("alpha", injected["mcpServers"])
         self.assertEqual(injected["mcpServers"]["alpha"], alpha_before, "未选对象 alpha 完整对象（含 env 及其他字段）原样保留")
 
         _payload_after, elements_after = self._status_elements("mcp:status", "--json")
-        self.assertNotIn("mcp:gamma", elements_after, "清理后元素彻底消失")
+        self.assertIn("mcp:gamma", elements_after, "残留保持可观察，不允许静默消失")
+        self.assertEqual(elements_after["mcp:gamma"]["state"], "drifted")
         self.assertIn("mcp:alpha", elements_after)
 
+        # 新语义下 doctor 必须真实报错：tombstone 只删定义，目标文件保留的无绑定 marker
+        # 残留使托管集合漂移（期望仅 alpha，实际 alpha+gamma）。该残留未经验证所有权，
+        # 需人工核对，故 doctor 以 rc=1 / status=error 显式呈现，不允许静默通过。
         doctor = self._run("doctor", "--json")
-        self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
+        self.assertEqual(doctor.returncode, 1, doctor.stdout + doctor.stderr)
         report = json.loads(doctor.stdout)
+        self.assertEqual(report["status"], "error")
         mcp_entries = report["sections"]["mcp"]
+        mcp_errors = [e for e in mcp_entries if e["status"] == "error"]
+        self.assertEqual(len(mcp_errors), 1, "mcp 域应仅报告集合漂移一个错误: %s" % mcp_entries)
+        self.assertIn("托管服务集合漂移", mcp_errors[0]["message"])
+        self.assertIn("gamma", mcp_errors[0]["message"], "漂移错误必须准确指向 gamma 残留")
         self.assertFalse(
-            any(e["status"] == "error" for e in mcp_entries),
-            "doctor 不得对 tombstone 后的集合误报漂移: %s" % mcp_entries,
+            any(e["status"] == "error" and "gamma" not in e["message"] for e in mcp_entries),
+            "alpha 等其余条目不得被误报: %s" % mcp_entries,
         )
+
+    def test_mcp_legal_cleanup_via_binding_and_explicit_remove(self):
+        # 合法清理路径（与 tombstone 残留保护互补）：真实 --action add 建立 binding
+        # （含 applied_digest 所有权证据）→ 显式 --action remove 撤下文件项并落墓碑；
+        # 外部非受管条目字节原样保留。
+        self.agent_a.write_text(
+            json.dumps({"mcpServers": {"ext-srv": {"command": "ext-cmd", "args": ["--keep"]}}}) + "\n",
+            encoding="utf-8",
+        )
+        # setUp 不建库：先真实 db:migrate 建库再投影，不手造绑定。
+        migrate = self._run("db:migrate", "--json")
+        self.assertEqual(migrate.returncode, 0, migrate.stdout + migrate.stderr)
+        from src.storage import get_db_path, write_projected_config
+        db_path = get_db_path(self.temp_dir / "data")
+        projected_config = self.temp_dir / "projected_manager.json"
+        write_projected_config(db_path, projected_config)
+
+        def _sync_mcp_action(action):
+            return subprocess.run(
+                [
+                    sys.executable,
+                    str(self.repo / "agent-mcp" / "sync_mcp.py"),
+                    "--config", str(projected_config),
+                    "--def-file", str(self.repo / "config" / "mcp.json"),
+                    "--action", action,
+                    "--agent", "agent-a",
+                    "--only", "gamma",
+                ],
+                cwd=self.repo, env=self._env(), capture_output=True, text=True, check=False, timeout=60,
+            )
+
+        add_result = _sync_mcp_action("add")
+        self.assertEqual(add_result.returncode, 0, add_result.stderr + add_result.stdout)
+        doc_after_add = json.loads(self.agent_a.read_text(encoding="utf-8"))
+        self.assertIn("gamma", doc_after_add["mcpServers"])
+        self.assertEqual(doc_after_add["mcpServers"]["ext-srv"], {"command": "ext-cmd", "args": ["--keep"]})
+
+        remove_result = _sync_mcp_action("remove")
+        self.assertEqual(remove_result.returncode, 0, remove_result.stderr + remove_result.stdout)
+        doc_after_remove = json.loads(self.agent_a.read_text(encoding="utf-8"))
+        self.assertNotIn("gamma", doc_after_remove["mcpServers"], "有 binding 的条目允许显式 remove 清理")
+        self.assertEqual(doc_after_remove["mcpServers"]["ext-srv"], {"command": "ext-cmd", "args": ["--keep"]}, "外部条目原样保留")
+
+        from src.mcp_bindings import get_binding, load_mcp_bindings
+        binding = get_binding(load_mcp_bindings(db_path), "gamma", "agent-a")
+        self.assertIsNotNone(binding)
+        self.assertFalse(binding["assigned"], "remove 后落 assigned=False 墓碑")
 
     def test_mcp_overlay_shape_fail_close(self):
         # 反例：非 tombstone 片段缺必填键 command → fail-close。
