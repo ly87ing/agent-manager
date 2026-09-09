@@ -324,6 +324,74 @@ fn runs_list_and_get_reflect_audit_trail() {
 }
 
 #[test]
+fn runs_clear_clears_logs_without_side_effects() {
+    let (base_empty, ctx_empty) = temp_ctx("runs-clear-empty");
+    let env = execute(&ctx_empty, &request("runs:clear", &[]));
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(env.data["deleted"], 0);
+    assert_eq!(env.data["domain"], "runs");
+    assert!(!ctx_empty.data_dir.exists(), "无库时不应创建 data_dir");
+    let _ = std::fs::remove_dir_all(&base_empty);
+
+    let (base, ctx) = temp_ctx("runs-clear-populated");
+    let conn = store::open_write(&ctx).unwrap();
+    let mut custom_settings = store::default_settings();
+    custom_settings.offline = true;
+    custom_settings.log_retention_days = 45;
+    store::write_settings(&conn, &custom_settings).unwrap();
+    drop(conn);
+
+    execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "agents.codex.enabled",
+                "--value",
+                "false",
+            ],
+        ),
+    );
+    let list_before = execute(&ctx, &request("runs:list", &[]));
+    assert!(list_before.ok);
+    let runs_before = list_before.data["runs"].as_array().unwrap();
+    assert!(!runs_before.is_empty(), "清空前应有任务记录");
+
+    let clear_env = execute(&ctx, &request("runs:clear", &[]));
+    assert!(clear_env.ok, "{:?}", clear_env.errors);
+    let deleted = clear_env.data["deleted"].as_i64().unwrap();
+    assert!(deleted > 0, "应报告已删除的记录条数");
+
+    let list_after = execute(&ctx, &request("runs:list", &[]));
+    assert!(list_after.ok);
+    let runs_after = list_after.data["runs"].as_array().unwrap();
+    assert_eq!(runs_after.len(), 0, "清空后任务记录列表应为空");
+
+    let settings_after = store::effective_settings(&ctx).unwrap();
+    assert_eq!(settings_after.offline, true, "app_settings 偏好应保留");
+    assert_eq!(
+        settings_after.log_retention_days, 45,
+        "app_settings 保留天数应保留"
+    );
+
+    let policy_env = execute(&ctx, &request("policy:get", &[]));
+    assert!(policy_env.ok);
+    assert_eq!(
+        policy_env.data["effective"]["agents"]["codex"]["enabled"],
+        false
+    );
+
+    let clear_again = execute(&ctx, &request("runs:clear", &[]));
+    assert!(clear_again.ok);
+    assert_eq!(clear_again.data["deleted"], 0);
+
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
 fn unimplemented_domains_answer_clearly_and_unknown_rejected() {
     let (base, ctx) = temp_ctx("unimplemented");
     let env = execute(&ctx, &request("agents:status", &[]));

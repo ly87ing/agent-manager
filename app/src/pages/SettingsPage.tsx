@@ -79,7 +79,13 @@ const ADVANCED_ENTRIES = [
 ];
 
 function initialPreferences(data?: SettingsData): SettingsPreferences {
-  return data?.preferences ?? { offline: false, defaultDryRun: false, upstreamTtlSec: 86400 };
+  const p = data?.preferences;
+  return {
+    offline: p?.offline ?? false,
+    defaultDryRun: p?.defaultDryRun ?? false,
+    upstreamTtlSec: p?.upstreamTtlSec ?? 86400,
+    logRetentionDays: p?.logRetentionDays ?? 30,
+  };
 }
 
 export default function SettingsPage() {
@@ -120,8 +126,15 @@ export default function SettingsPage() {
   const data = settings.data;
   const changed = JSON.stringify(preferences) !== JSON.stringify(data.preferences);
 
+  const isTtlValid = Number.isInteger(preferences.upstreamTtlSec) && preferences.upstreamTtlSec >= 0;
+  const isRetentionValid =
+    Number.isInteger(preferences.logRetentionDays) &&
+    preferences.logRetentionDays >= 0 &&
+    preferences.logRetentionDays <= 3650;
+  const isFormValid = isTtlValid && isRetentionValid;
+
   const savePreferences = () => {
-    if (!Number.isInteger(preferences.upstreamTtlSec) || preferences.upstreamTtlSec < 0) return;
+    if (!isFormValid) return;
     setSaveStatus(null);
     save.mutate(preferences, {
       onSuccess: () => {
@@ -260,8 +273,22 @@ export default function SettingsPage() {
         <div className="mt-4 space-y-4 text-sm">
           <label className="flex items-center gap-2"><input type="checkbox" checked={preferences.offline} onChange={(e) => setPreferences({ ...preferences, offline: e.target.checked })} />离线模式</label>
           <label className="flex items-center gap-2"><input type="checkbox" checked={preferences.defaultDryRun} onChange={(e) => setPreferences({ ...preferences, defaultDryRun: e.target.checked })} />预览弹窗默认使用演练</label>
-          <label className="flex items-center gap-3"><span>官方缓存 TTL（秒）</span><input aria-label="官方缓存 TTL（秒）" type="number" min={0} step={1} value={preferences.upstreamTtlSec} onChange={(e) => setPreferences({ ...preferences, upstreamTtlSec: Number(e.target.value) })} className="w-32 rounded border border-slate-200 px-2 py-1" /></label>
-          <button type="button" onClick={savePreferences} disabled={!changed || save.isPending || !Number.isInteger(preferences.upstreamTtlSec) || preferences.upstreamTtlSec < 0} className={cn("inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-white", !changed || save.isPending ? "bg-slate-300" : "bg-indigo-600 hover:bg-indigo-700")}><Save className="h-4 w-4" aria-hidden />保存设置</button>
+          <label className="flex items-center gap-3"><span>官方缓存 TTL（秒）</span><input aria-label="官方缓存 TTL（秒）" type="number" min={0} step={1} value={Number.isNaN(preferences.upstreamTtlSec) ? "" : preferences.upstreamTtlSec} onChange={(e) => setPreferences({ ...preferences, upstreamTtlSec: e.target.value === "" ? NaN : Number(e.target.value) })} className="w-32 rounded border border-slate-200 px-2 py-1" /></label>
+          <label className="flex items-center gap-3">
+            <span>任务日志保留天数</span>
+            <input
+              aria-label="任务日志保留天数"
+              type="number"
+              min={0}
+              max={3650}
+              step={1}
+              value={Number.isNaN(preferences.logRetentionDays) ? "" : preferences.logRetentionDays}
+              onChange={(e) => setPreferences({ ...preferences, logRetentionDays: e.target.value === "" ? NaN : Number(e.target.value) })}
+              className="w-32 rounded border border-slate-200 px-2 py-1"
+            />
+            <span className="text-xs text-slate-400">（0 为不自动清理，最大 3650 天）</span>
+          </label>
+          <button type="button" onClick={savePreferences} disabled={!changed || save.isPending || !isFormValid} className={cn("inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-white", !changed || save.isPending || !isFormValid ? "bg-slate-300" : "bg-indigo-600 hover:bg-indigo-700")}><Save className="h-4 w-4" aria-hidden />保存设置</button>
           {saveStatus && <p role={saveStatus.startsWith("设置保存失败") ? "alert" : "status"} className={saveStatus.startsWith("设置保存失败") ? "text-sm text-red-600" : "text-sm text-emerald-700"}>{saveStatus}</p>}
         </div>
       </section>

@@ -13,6 +13,7 @@ export function ConfirmModal({
   title,
   description,
   risk,
+  riskLabel,
   requireText,
   confirmLabel = "确认执行",
   executing,
@@ -23,6 +24,7 @@ export function ConfirmModal({
   title: string;
   description: string;
   risk: RiskLevel;
+  riskLabel?: string;
   requireText?: string;
   confirmLabel?: string;
   executing: boolean;
@@ -54,7 +56,7 @@ export function ConfirmModal({
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
             <h3 className="text-base font-semibold text-slate-800">{title}</h3>
-            <RiskBadge risk={risk} />
+            <RiskBadge risk={risk} label={riskLabel} />
           </div>
           <button type="button" onClick={onClose} disabled={executing} aria-label="关闭" className="rounded p-1 text-slate-400 hover:bg-slate-100 disabled:opacity-40">
             <X className="h-4 w-4" aria-hidden />

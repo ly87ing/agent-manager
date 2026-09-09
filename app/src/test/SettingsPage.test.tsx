@@ -13,7 +13,7 @@ vi.mock("@tauri-apps/plugin-updater", () => ({ check: vi.fn() }));
 import { setSettingsClient } from "../lib/settings";
 
 const settings: SettingsData = {
-  preferences: { offline: false, defaultDryRun: true, upstreamTtlSec: 86400 },
+  preferences: { offline: false, defaultDryRun: true, upstreamTtlSec: 86400, logRetentionDays: 30 },
   appVersion: "1.2.3",
   contractVersion: "agent-manager/engine/v1",
   resourceDir: "/resources",
@@ -445,5 +445,40 @@ describe("SettingsPage", () => {
     // 重新回到基础设置页
     expect(await screen.findByRole("heading", { name: "高级管理" })).toBeInTheDocument();
     expect(screen.queryByTestId("back-to-settings-button")).toBeNull();
+  });
+
+  it("显示任务日志保留天数并校验合法范围 (0..=3650)", async () => {
+    let savedPreferences = settings.preferences;
+    setSettingsClient({
+      get: async () => ({ ...settings, preferences: savedPreferences }),
+      save: async (preferences) => {
+        savedPreferences = preferences;
+        return { ...settings, preferences: savedPreferences };
+      },
+    });
+    renderWithEngine(<SettingsPage />, {});
+    const input = await screen.findByLabelText("任务日志保留天数");
+    expect(input).toHaveValue(30);
+    expect(screen.getByText("（0 为不自动清理，最大 3650 天）")).toBeInTheDocument();
+
+    const saveBtn = screen.getByRole("button", { name: "保存设置" });
+
+    // 超出范围 3651：禁用保存
+    await userEvent.clear(input);
+    await userEvent.type(input, "3651");
+    expect(saveBtn).toBeDisabled();
+
+    // 负数：禁用保存
+    await userEvent.clear(input);
+    await userEvent.type(input, "-1");
+    expect(saveBtn).toBeDisabled();
+
+    // 合法修改为 0（不自动清理）：保存成功
+    await userEvent.clear(input);
+    await userEvent.type(input, "0");
+    expect(saveBtn).not.toBeDisabled();
+    await userEvent.click(saveBtn);
+    expect(await screen.findByText("设置已保存")).toBeInTheDocument();
+    expect(savedPreferences.logRetentionDays).toBe(0);
   });
 });

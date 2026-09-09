@@ -36,14 +36,14 @@ const OP_ICONS: Record<string, typeof FileText> = {
   render: FileCog,
 };
 
-export function RiskBadge({ risk }: { risk: RiskLevel }) {
+export function RiskBadge({ risk, label }: { risk: RiskLevel; label?: string }) {
   const copy = RISK_COPY[risk];
   return (
     <span
       title={risk}
       className={cn("inline-flex rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap", copy.className)}
     >
-      {copy.label}
+      {label ?? copy.label}
     </span>
   );
 }

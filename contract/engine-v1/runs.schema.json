@@ -1,5 +1,5 @@
 {
-  "description": "Data payload shape of runs:list and runs:get. Both responses are read-only views over native-manager.db operation_logs.",
+  "description": "Data payload shape of runs:list, runs:get, and runs:clear. list/get are read-only views over native-manager.db operation_logs; clear empties operation_logs.",
   "oneOf": [
     {
       "title": "runs:list",
@@ -24,6 +24,16 @@
           "type": "array",
           "items": { "$ref": "#/$defs/operation" }
         }
+      }
+    },
+    {
+      "title": "runs:clear",
+      "type": "object",
+      "required": ["domain", "deleted"],
+      "additionalProperties": false,
+      "properties": {
+        "domain": { "type": "string", "const": "runs" },
+        "deleted": { "type": "integer", "minimum": 0 }
       }
     }
   ],

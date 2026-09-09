@@ -12,7 +12,7 @@ const dummySettings: SettingsData = {
   dataDir: "/tmp/data",
   logDir: "/tmp/logs",
   updaterConfigured: false,
-  preferences: { offline: false, defaultDryRun: false, upstreamTtlSec: 86400 },
+  preferences: { offline: false, defaultDryRun: false, upstreamTtlSec: 86400, logRetentionDays: 30 },
 };
 
 function routes() {

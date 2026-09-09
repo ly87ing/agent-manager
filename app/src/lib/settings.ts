@@ -6,7 +6,7 @@ import type { SettingsData, SettingsPreferences } from "./contract";
 export const settingsKey = ["settings"] as const;
 
 const settingsSchema = z.object({
-  preferences: z.object({ offline: z.boolean(), defaultDryRun: z.boolean(), upstreamTtlSec: z.number().int().min(0) }).strict(),
+  preferences: z.object({ offline: z.boolean(), defaultDryRun: z.boolean(), upstreamTtlSec: z.number().int().min(0), logRetentionDays: z.number().int().min(0).max(3650) }).strict(),
   appVersion: z.string(), contractVersion: z.string(), resourceDir: z.string(), dataDir: z.string(), logDir: z.string(), updaterConfigured: z.boolean(),
 }).strict();
 
@@ -21,7 +21,7 @@ export function getSettingsClient(): SettingsClient { return activeSettingsClien
 
 let devMockValue: SettingsData | null = null;
 function devMockClient(): SettingsClient {
-  if (!devMockValue) devMockValue = { preferences: { offline: new URLSearchParams(window.location.search).get("mock") === "offline", defaultDryRun: true, upstreamTtlSec: 86400 }, appVersion: "0.1.0-demo", contractVersion: "agent-manager/engine/v1", resourceDir: "/Applications/Agent Manager.app/Contents/Resources", dataDir: "/Users/demo/Library/Application Support/Agent Manager", logDir: "/Users/demo/Library/Logs/Agent Manager", updaterConfigured: false };
+  if (!devMockValue) devMockValue = { preferences: { offline: new URLSearchParams(window.location.search).get("mock") === "offline", defaultDryRun: true, upstreamTtlSec: 86400, logRetentionDays: 30 }, appVersion: "0.1.0-demo", contractVersion: "agent-manager/engine/v1", resourceDir: "/Applications/Agent Manager.app/Contents/Resources", dataDir: "/Users/demo/Library/Application Support/Agent Manager", logDir: "/Users/demo/Library/Logs/Agent Manager", updaterConfigured: false };
   return { get: async () => devMockValue!, save: async (preferences) => (devMockValue = { ...devMockValue!, preferences }) };
 }
 function devMockEnabled(): boolean {

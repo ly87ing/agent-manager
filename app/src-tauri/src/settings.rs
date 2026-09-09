@@ -12,6 +12,7 @@ pub struct SettingsPreferences {
     pub offline: bool,
     pub default_dry_run: bool,
     pub upstream_ttl_sec: u32,
+    pub log_retention_days: u32,
 }
 impl From<AppSettings> for SettingsPreferences {
     fn from(v: AppSettings) -> Self {
@@ -19,6 +20,7 @@ impl From<AppSettings> for SettingsPreferences {
             offline: v.offline,
             default_dry_run: v.default_dry_run,
             upstream_ttl_sec: v.upstream_ttl_sec,
+            log_retention_days: v.log_retention_days,
         }
     }
 }
@@ -28,6 +30,7 @@ impl From<SettingsPreferences> for AppSettings {
             offline: v.offline,
             default_dry_run: v.default_dry_run,
             upstream_ttl_sec: v.upstream_ttl_sec,
+            log_retention_days: v.log_retention_days,
         }
     }
 }
@@ -149,6 +152,12 @@ mod tests {
                 .upstream_ttl_sec,
             86400
         );
+        assert_eq!(
+            read_preferences_data_dir(&root.join("data"), &root)
+                .unwrap()
+                .log_retention_days,
+            30
+        );
         assert!(!root.join("data").exists());
         let _ = std::fs::remove_dir_all(root);
     }
@@ -162,15 +171,20 @@ mod tests {
             offline: true,
             default_dry_run: true,
             upstream_ttl_sec: 7,
+            log_retention_days: 14,
         };
         save_preferences_data_dir(&data, &home, value.clone()).unwrap();
         assert_eq!(read_preferences_data_dir(&data, &home).unwrap(), value);
         assert!(serde_json::from_str::<SettingsPreferences>(
-            r#"{"offline":false,"defaultDryRun":false,"upstreamTtlSec":-1}"#
+            r#"{"offline":false,"defaultDryRun":false,"upstreamTtlSec":-1,"logRetentionDays":30}"#
         )
         .is_err());
         assert!(serde_json::from_str::<SettingsPreferences>(
-            r#"{"offline":false,"defaultDryRun":false,"upstreamTtlSec":1,"extra":true}"#
+            r#"{"offline":false,"defaultDryRun":false,"upstreamTtlSec":1,"logRetentionDays":-1}"#
+        )
+        .is_err());
+        assert!(serde_json::from_str::<SettingsPreferences>(
+            r#"{"offline":false,"defaultDryRun":false,"upstreamTtlSec":1,"logRetentionDays":30,"extra":true}"#
         )
         .is_err());
         let _ = std::fs::remove_dir_all(root);

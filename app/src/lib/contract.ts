@@ -41,6 +41,7 @@ export interface SettingsPreferences {
   offline: boolean;
   defaultDryRun: boolean;
   upstreamTtlSec: number;
+  logRetentionDays: number;
 }
 
 export interface SettingsData {
@@ -255,6 +256,11 @@ export interface RunsListData {
 export interface RunDetailData {
   run_id: string;
   operations: RunOperation[];
+}
+
+export interface RunsClearData {
+  domain: "runs";
+  deleted: number;
 }
 
 // ---------- snapshots:list / snapshots:restore ----------

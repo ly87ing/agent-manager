@@ -227,13 +227,13 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     }
 }
 
-struct DispatchError {
-    code: &'static str,
-    message: String,
+pub(crate) struct DispatchError {
+    pub(crate) code: &'static str,
+    pub(crate) message: String,
 }
 
 impl DispatchError {
-    fn new(code: &'static str, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: &'static str, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),
@@ -253,7 +253,7 @@ impl From<rusqlite::Error> for DispatchError {
     }
 }
 
-type DispatchResult = Result<(Value, Vec<Diagnostic>), DispatchError>;
+pub(crate) type DispatchResult = Result<(Value, Vec<Diagnostic>), DispatchError>;
 
 fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
     let dotted = request.command.replacen(':', ".", 1);
@@ -288,8 +288,9 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("policy", "delete") => policy_delete(ctx, request),
         ("db", "status") => db_status(ctx),
         ("db", "migrate") => db_migrate(ctx, request),
-        ("runs", "list") => runs_list(ctx),
-        ("runs", "get") => runs_get(ctx, request),
+        ("runs", "list") => crate::native_runs::runs_list(ctx),
+        ("runs", "get") => crate::native_runs::runs_get(ctx, request),
+        ("runs", "clear") => crate::native_runs::runs_clear(ctx),
         _ => Err(DispatchError::new(
             "DOMAIN_NOT_IMPLEMENTED",
             format!(
@@ -736,77 +737,4 @@ fn db_migrate(ctx: &Context, request: &Request) -> DispatchResult {
     }
     store::open_write(ctx).map_err(DispatchError::from)?;
     db_status(ctx)
-}
-
-// ---------------------------------------------------------------------------
-// runs domain (native audit trail in operation_logs)
-// ---------------------------------------------------------------------------
-
-fn runs_list(ctx: &Context) -> DispatchResult {
-    let mut runs: Vec<Value> = Vec::new();
-    if let Some(conn) = store::open_readonly(ctx).map_err(DispatchError::from)? {
-        let mut stmt = conn.prepare(
-            "SELECT run_id, COUNT(*) AS ops, MAX(created_at) AS last_at
-             FROM operation_logs WHERE run_id IS NOT NULL
-             GROUP BY run_id ORDER BY last_at DESC",
-        )?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })
-            .map_err(|err| DispatchError::new("INTERNAL", err.to_string()))?;
-        for row in rows {
-            let (run_id, ops, last_at) = row?;
-            runs.push(json!({ "run_id": run_id, "operations": ops, "last_at": last_at }));
-        }
-    }
-    Ok((json!({ "runs": runs }), vec![]))
-}
-
-fn runs_get(ctx: &Context, request: &Request) -> DispatchResult {
-    let run_id = request
-        .value("--run")
-        .ok_or_else(|| DispatchError::new("USAGE_ERROR", "runs:get 需要 --run <run_id>"))?;
-    let mut operations: Vec<Value> = Vec::new();
-    if let Some(conn) = store::open_readonly(ctx).map_err(DispatchError::from)? {
-        let mut stmt = conn.prepare(
-            "SELECT id, operation_type, target, detail_json, created_at
-             FROM operation_logs WHERE run_id = ?1 ORDER BY created_at ASC",
-        )?;
-        let rows = stmt
-            .query_map([run_id], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, String>(4)?,
-                ))
-            })
-            .map_err(|err| DispatchError::new("INTERNAL", err.to_string()))?;
-        for row in rows {
-            let (id, operation_type, target, detail_json, created_at) = row?;
-            operations.push(json!({
-                "id": id,
-                "operation_type": operation_type,
-                "target": target,
-                "detail": detail_json.and_then(|raw| serde_json::from_str::<Value>(&raw).ok()),
-                "created_at": created_at,
-            }));
-        }
-    }
-    if operations.is_empty() {
-        return Err(DispatchError::new(
-            "RUN_NOT_FOUND",
-            format!("未找到运行记录: {run_id}"),
-        ));
-    }
-    Ok((
-        json!({ "run_id": run_id, "operations": operations }),
-        vec![],
-    ))
 }

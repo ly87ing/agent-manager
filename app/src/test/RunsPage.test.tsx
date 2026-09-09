@@ -128,4 +128,49 @@ describe("执行中心", () => {
     const getCall = calls.find((call) => call.command === "runs:get");
     expect(getCall?.args).toEqual(["--run", runId]);
   });
+
+  it("清空任务记录：二次确认弹窗、执行 runs:clear、刷新列表并关闭操作详情", async () => {
+    const r = routes();
+    r["runs:clear"] = makeEnvelope({ domain: "runs", deleted: 1 }, { command: "runs.clear" });
+    const { calls } = renderWithEngine(<RunsPage />, r);
+
+    const row = await screen.findByTestId("run-row-20260905T235900Z-legacy1");
+    await userEvent.click(within(row).getByText("详情"));
+    expect(await screen.findByText("mcp:grok-search")).toBeInTheDocument();
+
+    const clearBtn = screen.getByTestId("clear-runs-button");
+    await userEvent.click(clearBtn);
+
+    const confirmDialog = await screen.findByRole("dialog", { name: "清空任务记录" });
+    expect(confirmDialog).toBeInTheDocument();
+    expect(within(confirmDialog).getByText("清理本地记录")).toBeInTheDocument();
+    expect(within(confirmDialog).queryByText("修改配置文件")).toBeNull();
+    expect(screen.getByText(/此操作不可恢复/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog", { name: "清空任务记录" })).toBeNull();
+    expect(calls.some((c) => c.command === "runs:clear")).toBe(false);
+
+    await userEvent.click(clearBtn);
+    const reopenDialog = await screen.findByRole("dialog", { name: "清空任务记录" });
+    await userEvent.click(within(reopenDialog).getByRole("button", { name: "确认清空" }));
+
+    expect(calls.some((c) => c.command === "runs:clear")).toBe(true);
+    expect(screen.queryByText("mcp:grok-search")).toBeNull();
+    expect(await screen.findByRole("status")).toHaveTextContent("任务记录已清空");
+  });
+
+  it("清空任务记录失败时展示错误反馈横幅", async () => {
+    const r = routes();
+    r["runs:clear"] = () => Promise.reject(new Error("SQLite busy"));
+    renderWithEngine(<RunsPage />, r);
+
+    const clearBtn = await screen.findByTestId("clear-runs-button");
+    await userEvent.click(clearBtn);
+
+    const confirmDialog = await screen.findByRole("dialog", { name: "清空任务记录" });
+    await userEvent.click(within(confirmDialog).getByRole("button", { name: "确认清空" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("清空任务记录失败：SQLite busy");
+  });
 });

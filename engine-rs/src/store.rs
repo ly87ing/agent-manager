@@ -28,6 +28,12 @@ use crate::native::Context;
 
 pub const DB_FILE_NAME: &str = "native-manager.db";
 pub const SCHEMA_VERSION: i64 = 1;
+pub const DEFAULT_LOG_RETENTION_DAYS: u32 = 30;
+pub const MAX_LOG_RETENTION_DAYS: u32 = 3650;
+
+fn default_log_retention_days() -> u32 {
+    DEFAULT_LOG_RETENTION_DAYS
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -35,6 +41,8 @@ pub struct AppSettings {
     pub offline: bool,
     pub default_dry_run: bool,
     pub upstream_ttl_sec: u32,
+    #[serde(default = "default_log_retention_days")]
+    pub log_retention_days: u32,
 }
 
 impl Default for AppSettings {
@@ -43,6 +51,7 @@ impl Default for AppSettings {
             offline: false,
             default_dry_run: false,
             upstream_ttl_sec: 86_400,
+            log_retention_days: DEFAULT_LOG_RETENTION_DAYS,
         }
     }
 }
@@ -305,6 +314,12 @@ pub fn effective_settings(ctx: &Context) -> Result<AppSettings> {
 }
 
 pub fn write_settings(conn: &Connection, settings: &AppSettings) -> Result<()> {
+    if settings.log_retention_days > MAX_LOG_RETENTION_DAYS {
+        bail!(
+            "日志保留天数超出允许范围 (0..={MAX_LOG_RETENTION_DAYS}): {}",
+            settings.log_retention_days
+        );
+    }
     let object = serde_json::to_value(settings)?
         .as_object()
         .cloned()
@@ -396,8 +411,26 @@ pub fn uuid_v4() -> String {
     )
 }
 
+pub fn prune_operation_logs(conn: &Connection) -> Result<usize> {
+    let settings = settings_from_connection(conn)?;
+    if settings.log_retention_days == 0 {
+        return Ok(0);
+    }
+    let modifier = format!("-{} days", settings.log_retention_days);
+    let deleted = conn.execute(
+        "DELETE FROM operation_logs WHERE datetime(created_at) < datetime('now', ?1)",
+        rusqlite::params![modifier],
+    )?;
+    Ok(deleted)
+}
+
+pub fn clear_operation_logs(conn: &Connection) -> Result<usize> {
+    let deleted = conn.execute("DELETE FROM operation_logs", [])?;
+    Ok(deleted)
+}
+
 /// Append one audit entry. Never stores secret-bearing payloads for sources;
-/// callers choose the detail.
+/// callers choose the detail. Automatically prunes logs older than retention threshold.
 pub fn record_operation(
     conn: &Connection,
     run_id: Option<&str>,
@@ -405,20 +438,36 @@ pub fn record_operation(
     target: Option<&str>,
     detail: Option<&Value>,
 ) -> Result<()> {
-    let detail_json = detail.map(serde_json::to_string).transpose()?;
-    conn.execute(
-        "INSERT INTO operation_logs (id, run_id, operation_type, target, detail_json, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        rusqlite::params![
-            uuid_v4(),
-            run_id,
-            operation_type,
-            target,
-            detail_json,
-            now_iso()
-        ],
-    )?;
-    Ok(())
+    conn.execute_batch("SAVEPOINT am_record_op;")?;
+    let run = || -> Result<()> {
+        let detail_json = detail.map(serde_json::to_string).transpose()?;
+        conn.execute(
+            "INSERT INTO operation_logs (id, run_id, operation_type, target, detail_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                uuid_v4(),
+                run_id,
+                operation_type,
+                target,
+                detail_json,
+                now_iso()
+            ],
+        )?;
+        prune_operation_logs(conn)?;
+        Ok(())
+    };
+    match run() {
+        Ok(()) => {
+            conn.execute_batch("RELEASE SAVEPOINT am_record_op;")?;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = conn.execute_batch(
+                "ROLLBACK TO SAVEPOINT am_record_op; RELEASE SAVEPOINT am_record_op;",
+            );
+            Err(e)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -447,6 +496,7 @@ mod tests {
             AppSettings::default()
         );
         assert_eq!(AppSettings::default().upstream_ttl_sec, 86400);
+        assert_eq!(AppSettings::default().log_retention_days, 30);
         assert!(!context.data_dir.exists());
         let _ = std::fs::remove_dir_all(root);
     }
@@ -459,6 +509,7 @@ mod tests {
             offline: true,
             default_dry_run: true,
             upstream_ttl_sec: 123,
+            log_retention_days: 14,
         };
         let tx = conn.unchecked_transaction().unwrap();
         write_settings(&tx, &settings).unwrap();
@@ -477,9 +528,20 @@ mod tests {
             r#"{"offline":"yes","default_dry_run":false,"upstream_ttl_sec":1}"#,
             r#"{"offline":false,"default_dry_run":false,"upstream_ttl_sec":-1}"#,
             r#"{"offline":false,"default_dry_run":false,"upstream_ttl_sec":1,"extra":true}"#,
+            r#"{"offline":false,"default_dry_run":false,"upstream_ttl_sec":1,"log_retention_days":-1}"#,
         ] {
             assert!(serde_json::from_str::<AppSettings>(raw).is_err());
         }
+        let parsed_snake: AppSettings = serde_json::from_str(
+            r#"{"offline":false,"default_dry_run":false,"upstream_ttl_sec":1,"log_retention_days":20}"#,
+        )
+        .unwrap();
+        assert_eq!(parsed_snake.log_retention_days, 20);
+
+        let mut invalid = settings.clone();
+        invalid.log_retention_days = 3651;
+        assert!(write_settings(&conn, &invalid).is_err());
+
         let after: String = conn
             .query_row(
                 "SELECT group_concat(key || '=' || value_json, ',') FROM app_settings",
@@ -488,6 +550,131 @@ mod tests {
             )
             .unwrap();
         assert_eq!(before, after);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn auto_retention_pruning_and_manual_clear() {
+        let (root, context) = ctx("retention");
+        let conn = open_write(&context).unwrap();
+        let mut settings = default_settings();
+        settings.log_retention_days = 10;
+        write_settings(&conn, &settings).unwrap();
+
+        // 插入粗粒度过期记录（15天前）和有效记录（2天前）
+        conn.execute(
+            "INSERT INTO operation_logs (id, run_id, operation_type, created_at)
+             VALUES ('old-1', 'run-old', 'test:old', datetime('now', '-15 days'))",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO operation_logs (id, run_id, operation_type, created_at)
+             VALUES ('recent-1', 'run-recent', 'test:recent', datetime('now', '-2 days'))",
+            [],
+        )
+        .unwrap();
+
+        // 插入精确秒级边界记录：10天阈值外 1 秒（删除）与阈值内 1 秒（保留）
+        conn.execute(
+            "INSERT INTO operation_logs (id, run_id, operation_type, created_at)
+             VALUES ('boundary-expired', 'run-boundary', 'test:expired', datetime('now', '-10 days', '-1 second'))",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO operation_logs (id, run_id, operation_type, created_at)
+             VALUES ('boundary-retained', 'run-boundary', 'test:retained', datetime('now', '-10 days', '+1 second'))",
+            [],
+        )
+        .unwrap();
+
+        // 写入新记录触发自动清理
+        record_operation(&conn, Some("run-new"), "test:new", None, None).unwrap();
+
+        let count_old: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM operation_logs WHERE id = 'old-1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count_old, 0, "15天前的记录应已被自动清理");
+        let count_recent: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM operation_logs WHERE id = 'recent-1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count_recent, 1, "2天前的记录应保留");
+
+        let count_expired: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM operation_logs WHERE id = 'boundary-expired'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count_expired, 0, "阈值外 1 秒的记录应已被自动清理");
+
+        let count_retained: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM operation_logs WHERE id = 'boundary-retained'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count_retained, 1, "阈值内 1 秒的记录应被保留");
+
+        // 设置为 0：不自动清理
+        settings.log_retention_days = 0;
+        write_settings(&conn, &settings).unwrap();
+        conn.execute(
+            "INSERT INTO operation_logs (id, run_id, operation_type, created_at)
+             VALUES ('old-2', 'run-old-2', 'test:old2', datetime('now', '-100 days'))",
+            [],
+        )
+        .unwrap();
+        record_operation(&conn, Some("run-new-2"), "test:new2", None, None).unwrap();
+        let count_old2: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM operation_logs WHERE id = 'old-2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count_old2, 1, "0 保留天数时不应自动清理过期记录");
+
+        // 验证清理失败导致写入事务失败（fail-closed）
+        settings.log_retention_days = 5;
+        write_settings(&conn, &settings).unwrap();
+        conn.execute(
+            "CREATE TRIGGER fail_prune BEFORE DELETE ON operation_logs
+             BEGIN SELECT RAISE(ABORT, 'trigger blocked delete'); END;",
+            [],
+        )
+        .unwrap();
+        let err = record_operation(&conn, Some("run-fail"), "test:fail", None, None);
+        assert!(err.is_err(), "清理失败须导致当前写入失败");
+        let count_fail: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM operation_logs WHERE run_id = 'run-fail'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count_fail, 0, "写入失败不得遗留记录");
+        conn.execute("DROP TRIGGER fail_prune", []).unwrap();
+
+        // 验证 clear_operation_logs
+        let cleared = clear_operation_logs(&conn).unwrap();
+        assert!(cleared > 0, "应清空现有记录");
+        let total_count: i64 = conn
+            .query_row("SELECT count(*) FROM operation_logs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(total_count, 0, "operation_logs 应全空");
+
         let _ = std::fs::remove_dir_all(root);
     }
 }

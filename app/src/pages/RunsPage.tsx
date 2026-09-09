@@ -1,10 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { CheckCircle2, Loader2, Lock, XCircle } from "lucide-react";
+import { CheckCircle2, Loader2, Lock, Trash2, XCircle } from "lucide-react";
+import { toast } from "sonner";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
-import type { ApplyResultData, RunDetailData, RunEntry, RunsListData } from "../lib/contract";
-import { runEngine } from "../lib/engine";
+import type { ApplyResultData, RunDetailData, RunEntry, RunsClearData, RunsListData } from "../lib/contract";
+import { engineErrorMessage, runEngine } from "../lib/engine";
 import { useExecutions, type ExecutionRecord } from "../lib/execution";
 import { engineKeys } from "../lib/queries";
 import { cn, formatCheckedAt } from "../lib/utils";
@@ -112,8 +114,12 @@ function OperationDetail({ data }: { data: RunDetailData }) {
 }
 
 export default function RunsPage() {
+  const queryClient = useQueryClient();
   const { executions } = useExecutions();
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
+  const [clearStatus, setClearStatus] = useState<string | null>(null);
 
   const listQuery = useQuery({
     queryKey: engineKeys.command("runs:list"),
@@ -129,6 +135,27 @@ export default function RunsPage() {
     staleTime: 0,
   });
 
+  const handleClear = async () => {
+    setIsClearing(true);
+    setClearStatus(null);
+    try {
+      const res = await runEngine<RunsClearData>("runs:clear");
+      setSelectedRun(null);
+      await queryClient.invalidateQueries({ queryKey: engineKeys.command("runs:list") });
+      setShowClearConfirm(false);
+      const count = res.data?.deleted ?? 0;
+      const msg = `任务记录已清空（共清理 ${count} 条记录）`;
+      setClearStatus(msg);
+      toast.success(msg);
+    } catch (err) {
+      const msg = `清空任务记录失败：${engineErrorMessage(err)}`;
+      setClearStatus(msg);
+      toast.error(msg);
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
   if (listQuery.isPending) return <PageLoading />;
   if (listQuery.isError) return <PageError title="runs:list 调用失败" error={listQuery.error} />;
 
@@ -136,7 +163,28 @@ export default function RunsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="任务记录" description="查看本工具通过 native-manager.db 记录的运行与操作详情。" />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <PageHeader title="任务记录" description="查看本工具通过 native-manager.db 记录的运行与操作详情。" />
+        <button
+          type="button"
+          data-testid="clear-runs-button"
+          onClick={() => setShowClearConfirm(true)}
+          disabled={isClearing}
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50"
+        >
+          <Trash2 className="h-3.5 w-3.5 text-slate-500" aria-hidden />
+          清空任务记录
+        </button>
+      </div>
+
+      {clearStatus && (
+        <p
+          role={clearStatus.startsWith("清空任务记录失败") ? "alert" : "status"}
+          className={cn("text-xs", clearStatus.startsWith("清空任务记录失败") ? "text-red-600" : "text-emerald-700")}
+        >
+          {clearStatus}
+        </p>
+      )}
 
       {executions.length > 0 && (
         <div className="space-y-2">
@@ -195,6 +243,19 @@ export default function RunsPage() {
         </table>
         {runs.length === 0 && <p className="py-4 text-center text-sm text-slate-400">还没有任务记录</p>}
       </section>
+
+      {showClearConfirm && (
+        <ConfirmModal
+          title="清空任务记录"
+          description="将清空本地所有历史任务与操作记录，此操作不可恢复。助手定义、个性化配置及数据结构不会受到影响。"
+          risk="write-local"
+          riskLabel="清理本地记录"
+          confirmLabel="确认清空"
+          executing={isClearing}
+          onConfirm={() => void handleClear()}
+          onClose={() => setShowClearConfirm(false)}
+        />
+      )}
     </div>
   );
 }
