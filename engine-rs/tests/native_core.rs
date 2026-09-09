@@ -247,8 +247,7 @@ fn delete_requires_local_layer_without_touching_store() {
         assert!(!env.ok);
         assert_eq!(env.errors[0].code, "USAGE_ERROR");
     }
-    assert!(!store::db_path(&ctx).exists());
-    assert!(!ctx.data_dir.exists());
+    assert!(!store::db_path(&ctx).exists(), "非法写参数不应初始化数据库");
 
     let set = execute(
         &ctx,
@@ -330,7 +329,7 @@ fn runs_clear_clears_logs_without_side_effects() {
     assert!(env.ok, "{:?}", env.errors);
     assert_eq!(env.data["deleted"], 0);
     assert_eq!(env.data["domain"], "runs");
-    assert!(!ctx_empty.data_dir.exists(), "无库时不应创建 data_dir");
+    assert!(!store::db_path(&ctx_empty).exists(), "无库时不应创建数据库");
     let _ = std::fs::remove_dir_all(&base_empty);
 
     let (base, ctx) = temp_ctx("runs-clear-populated");
@@ -755,7 +754,10 @@ fn secret_rules_and_no_write_guarantee() {
         );
         assert_eq!(env.errors[0].code, "SECRET_INPUT_REJECTED");
     }
-    assert!(!ctx.data_dir.exists());
+    assert!(
+        !store::db_path(&ctx).exists(),
+        "拒绝明文写动作不应初始化数据库"
+    );
     for value in ["${ENV_NAME}", "YOUR_TOKEN", "secrets://openai/key"] {
         let env = execute(
             &ctx,
@@ -864,7 +866,10 @@ fn dry_run_and_invalid_input_do_not_initialize_store() {
         ),
     );
     assert!(!invalid.ok);
-    assert!(!context.data_dir.exists());
+    assert!(
+        !store::db_path(&context).exists(),
+        "非法写参数不应初始化数据库"
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 

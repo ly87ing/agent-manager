@@ -8,7 +8,7 @@ Claude Code 与 Codex 的内置默认渠道是官方 `native` 命令。Homebrew 
 
 保存定义不执行安装或链接。执行按钮来自引擎 actions，写操作遵循 plan → 确认 → apply。管理删除（移除定义）与卸载软件是不同动作。
 
-Agent、MCP、Skills 页面已按目标交互组织；Agent 与 Skills 生命周期已接入 Rust 原生域。Skills 支持集合与单技能更新、启停与移除，采用内容快照与安全软连接落地，status/plan 保持零写。SQLite 核心、Tauri bridge、设置与 Policy 页面、Runs SQLite 操作记录与清理（保留天数自动清理与二次确认手动清空；当前 `data/logs` 无写出器，不虚构文件日志压缩）和 Python 清理已完成。MCP 原生域、Rules/Hooks 统一编辑与端侧落地及独立包真实 E2E 待完成。
+Agent、MCP、Skills 页面已按目标交互组织；Agent 与 Skills 生命周期已接入 Rust 原生域。Skills 支持集合与单技能更新、启停与移除，采用内容快照与安全软连接落地，status/plan 保持零写。SQLite 核心、Tauri bridge、设置与 Policy 页面、Runs SQLite 操作记录与清理、本地 JSONL 结构化诊断日志与清理（按日滚动、严格脱敏、Unix 0700/0600；`log_retention_days` 统一控制两类日志保留期；Runs 页二次确认清空任务记录，设置页二次确认清理诊断日志，两类清理边界分明）和 Python 清理已完成。MCP 原生域、Rules/Hooks 统一编辑与端侧落地及独立包真实 E2E 待完成。
 
 ## 本地开发
 

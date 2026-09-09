@@ -12,7 +12,7 @@
 - Policy 的 builtin/sqlite 来源和固定 `--layer local` 写入。
 - Claude Code、Codex 官方 `native` 默认渠道；brew 只按实际检测来源处理。
 - 根仓库 Python 与旧 `manage.sh` 入口清理。
-- Runs 列表与详情使用 SQLite `operation_logs`；支持基于设置（`log_retention_days`，0 为不清理）的写入时自动清理，以及 `runs:clear` 二次确认手动清空（清空自身零审计且不删库改配置；当前 `data/logs` 无写出器，不虚构文件日志压缩）。
+- Runs 列表与详情使用 SQLite `operation_logs`，新增操作记录时清理过期记录；本地结构化诊断日志基于 `data_dir/logs/agent-manager-YYYY-MM-DD.jsonl` 日切写入（严格脱敏、Unix 0700/0600、只读零写、拒随软链接），在诊断日志写入后及应用启动时清理过期文件。两者共用 `log_retention_days`（0 禁用自动清理）；执行中心支持 `runs:clear` 二次确认清空任务记录，设置页支持 `logs:clear` 二次确认清理诊断日志，两类清理互不影响。
 - Agent 原生定义、安装来源探测、生命周期 plan/apply、跨进程锁、结果核验与操作记录。
 - Skills 原生域接线与完整闭环：内置集合只读默认，首次本地写入 `native-manager.db` 后本地优先；集合与 Skill×Agent 独立更新/启停/移除；内容寻址快照与安全软连接落地及回滚保护；status/plan/dry-run 零写保证；真实 apply 跨进程锁与操作审计。
 

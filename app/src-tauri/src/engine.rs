@@ -53,6 +53,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("secrets", "status") => true,
         ("snapshots", "list" | "restore") => true,
         ("runs", "list" | "get" | "clear") => true,
+        ("logs", "clear") => true,
         ("policy", "get" | "set" | "delete") => true,
         ("sources", "get" | "set") => true,
         ("db", "status" | "migrate") => true,
@@ -312,6 +313,24 @@ pub async fn engine_invoke(
     .await
     .map_err(|e| EngineError::new("execution_failed", e.to_string()))?
 }
+
+pub fn maintenance_cleanup(app: &tauri::AppHandle) {
+    let data_dir = std::env::var_os("AGENT_MANAGER_DATA_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(|| app.path().app_data_dir().ok());
+    let home_dir = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    if let (Some(data_dir), Some(home_dir)) = (data_dir, home_dir) {
+        let ctx = agent_manager_engine::Context { data_dir, home_dir };
+        if let Err(err) = agent_manager_engine::native_logs::startup_maintenance(&ctx) {
+            let sanitized =
+                agent_manager_engine::native_logs::sanitize_diagnostic_message(&err.to_string());
+            crate::settings::set_startup_maintenance_warning(Some(format!(
+                "启动维护清理失败：{sanitized}"
+            )));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -349,6 +368,7 @@ mod tests {
             "runs:list",
             "runs:get",
             "runs:clear",
+            "logs:clear",
             "policy:get",
             "policy:set",
             "policy:delete",

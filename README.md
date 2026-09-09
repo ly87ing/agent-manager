@@ -10,7 +10,7 @@ Claude Code 与 Codex 的内置默认渠道都是官方 `native` 命令。brew �
 
 定义保存与执行动作分开：保存只写数据库；按钮只按引擎返回的 actions，遵循 plan → 用户确认 → apply。Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 都要求新增、编辑/更新、启用、禁用、删除；移除管理与卸载是不同动作。
 
-SQLite 核心、Tauri 桥、设置与 Policy 页面、主要资源页面布局、Runs SQLite 操作记录与清理、Agent 原生生命周期、Skills 原生域及 Python 清理已完成。Skills 内置集合只读默认，首次本地写入 `native-manager.db` 后本地优先；集合与 Skill×Agent 均支持更新、启停与移除，启用状态通过内容快照与安全软连接落地，status/plan 保持零写，真实 apply 具备进程锁与操作审计。任务记录基于 `operation_logs` 实现了自动保留天数清理（TTL，0 为不清理）与二次确认手动清空（清空自身零审计且不删库改配置；当前 `data/logs` 无写出器，不虚构文件日志压缩）。MCP 原生域、Rules/Hooks 统一编辑与端侧落地、独立包真实 E2E 仍待完成。
+SQLite 核心、Tauri 桥、设置与 Policy 页面、主要资源页面布局、Agent 原生生命周期、Skills 原生域、Runs SQLite 操作记录、结构化诊断日志及 Python 清理已完成。Skills 内置集合只读默认，首次本地写入 `native-manager.db` 后本地优先；集合与 Skill×Agent 均支持更新、启停与移除，启用状态通过内容快照与安全软连接落地，status/plan 保持零写，真实 apply 具备进程锁与操作审计。两类日志协同运作：SQLite `operation_logs` 记录可审计任务历史，并在新增操作记录时清理过期记录；`data_dir/logs/agent-manager-YYYY-MM-DD.jsonl` 记录结构化诊断元数据（严格脱敏、Unix 0700/0600、只读零写、拒随软链接），并在诊断日志写入后及应用启动时清理过期文件。两类日志共用 `log_retention_days`（0 禁用自动清理）；执行中心支持 `runs:clear` 二次确认清空任务记录，设置页支持 `logs:clear` 二次确认清理诊断日志，两类手动清理互不影响。MCP 原生域、Rules/Hooks 统一编辑与端侧落地、独立包真实 E2E 仍待完成。
 
 ## 开发
 
