@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { usePlanPreview } from "../lib/usePlanPreview";
-import { makeEnvelope, makePlanAction } from "./fixtures";
+import { makeAuditData, makeEnvelope, makeMode, makePlanAction } from "./fixtures";
 import { useState, type ReactNode } from "react";
 import { check } from "@tauri-apps/plugin-updater";
 import SettingsPage from "../pages/SettingsPage";
@@ -395,5 +395,54 @@ describe("SettingsPage", () => {
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
     const toggle = screen.getByLabelText(/演练模式/); expect(toggle).toBeChecked();
     await userEvent.click(toggle); expect(toggle).not.toBeChecked();
+  });
+
+  it("渲染高级管理区块包含 8 个非日常功能入口，点击可下钻，常驻返回设置按钮可返回", async () => {
+    setSettingsClient({
+      get: async () => settings,
+      save: async (preferences) => ({ ...settings, preferences }),
+    });
+
+    renderWithEngine(<SettingsPage />, {
+      "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode() }),
+      "agents:status": makeEnvelope({ domain: "agents", elements: [] }, { command: "agents.status" }),
+      "tools:status": makeEnvelope({ domain: "tools", elements: [] }, { command: "tools.status" }),
+      "mcp:status": makeEnvelope({ domain: "mcp", elements: [] }, { command: "mcp.status" }),
+      "skills:status": makeEnvelope({ domain: "skills", elements: [] }, { command: "skills.status" }),
+      "git:status": makeEnvelope({ clean: true, branch: "main", ahead: 0, behind: 0, remote_configured: false }, { command: "git.status" }),
+      "system:version": makeEnvelope({ version: "0.1.0" }, { command: "system.version" }),
+    });
+
+    expect(await screen.findByRole("heading", { name: "高级管理" })).toBeInTheDocument();
+
+    const expectedKeys = [
+      "dashboard",
+      "tools",
+      "aliases",
+      "secrets",
+      "updates",
+      "policy",
+      "sync",
+      "snapshots",
+    ];
+
+    for (const key of expectedKeys) {
+      expect(screen.getByTestId(`advanced-entry-${key}`)).toBeInTheDocument();
+    }
+
+    // 点击总览与诊断下钻
+    await userEvent.click(screen.getByTestId("advanced-entry-dashboard"));
+
+    // 常驻返回设置按钮出现，且在面包屑中展示
+    const backButton = await screen.findByTestId("back-to-settings-button");
+    expect(backButton).toBeInTheDocument();
+    expect(screen.getByText(/高级管理 \/ 总览与诊断/)).toBeInTheDocument();
+
+    // 点击返回设置
+    await userEvent.click(backButton);
+
+    // 重新回到基础设置页
+    expect(await screen.findByRole("heading", { name: "高级管理" })).toBeInTheDocument();
+    expect(screen.queryByTestId("back-to-settings-button")).toBeNull();
   });
 });

@@ -1,5 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { RefreshCw, Save } from "lucide-react";
+import {
+  ArrowLeft,
+  CloudUpload,
+  DatabaseBackup,
+  KeyRound,
+  LayoutDashboard,
+  Link2,
+  RefreshCw,
+  Save,
+  SlidersHorizontal,
+  Wrench,
+} from "lucide-react";
 import { toast } from "sonner";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { ConfirmModal } from "../components/ConfirmModal";
@@ -8,6 +19,13 @@ import type { SettingsData, SettingsPreferences } from "../lib/contract";
 import { useSaveSettings, useSettings } from "../lib/settings";
 import { cn } from "../lib/utils";
 import { check } from "@tauri-apps/plugin-updater";
+import DashboardPage from "./DashboardPage";
+import DomainApplyPage from "./DomainApplyPage";
+import SecretsPage from "./SecretsPage";
+import UpdatesPage from "./UpdatesPage";
+import PolicyPage from "./PolicyPage";
+import SyncPage from "./SyncPage";
+import SnapshotsPage from "./SnapshotsPage";
 
 interface AvailableUpdate {
   version: string;
@@ -17,6 +35,57 @@ interface AvailableUpdate {
   close: () => Promise<void>;
 }
 
+const ADVANCED_ENTRIES = [
+  {
+    key: "dashboard",
+    title: "总览与诊断",
+    description: "系统总览、运行状态与环境诊断。",
+    icon: LayoutDashboard,
+  },
+  {
+    key: "tools",
+    title: "全局工具",
+    description: "全局命令行工具的安装与启停管理。",
+    icon: Wrench,
+  },
+  {
+    key: "aliases",
+    title: "终端快捷命令",
+    description: "终端快捷别名配置与同步。",
+    icon: Link2,
+  },
+  {
+    key: "secrets",
+    title: "密钥状态",
+    description: "环境变量与密钥配置状态检测。",
+    icon: KeyRound,
+  },
+  {
+    key: "updates",
+    title: "更新中心",
+    description: "各组件版本检查与更新对比。",
+    icon: RefreshCw,
+  },
+  {
+    key: "policy",
+    title: "个性化配置",
+    description: "多层配置原文查看与编辑。",
+    icon: SlidersHorizontal,
+  },
+  {
+    key: "sync",
+    title: "多设备同步",
+    description: "跨设备配置同步与差异对比。",
+    icon: CloudUpload,
+  },
+  {
+    key: "snapshots",
+    title: "备份与恢复",
+    description: "系统状态备份记录与版本恢复。",
+    icon: DatabaseBackup,
+  },
+];
+
 function initialPreferences(data?: SettingsData): SettingsPreferences {
   return data?.preferences ?? { offline: false, defaultDryRun: false, upstreamTtlSec: 86400 };
 }
@@ -25,6 +94,7 @@ export default function SettingsPage() {
   const settings = useSettings();
   const save = useSaveSettings();
   const [preferences, setPreferences] = useState<SettingsPreferences>(() => initialPreferences());
+  const [activeAdvanced, setActiveAdvanced] = useState<string | null>(null);
   const [update, setUpdate] = useState<AvailableUpdate | null>(null);
   const [updateState, setUpdateState] = useState<"idle" | "checking" | "installing">("idle");
   const [updateError, setUpdateError] = useState<string | null>(null);
@@ -151,6 +221,38 @@ export default function SettingsPage() {
     }
   };
 
+  if (activeAdvanced !== null) {
+    const currentEntry = ADVANCED_ENTRIES.find((entry) => entry.key === activeAdvanced);
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-3 border-b border-slate-200 pb-3">
+          <button
+            type="button"
+            data-testid="back-to-settings-button"
+            onClick={() => setActiveAdvanced(null)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
+            返回设置
+          </button>
+          <span className="text-xs text-slate-400">/ 高级管理 / {currentEntry?.title}</span>
+        </div>
+        {activeAdvanced === "dashboard" && <DashboardPage />}
+        {activeAdvanced === "tools" && (
+          <DomainApplyPage domain="tools" title="Tools" description="全局命令行工具的安装状态（安装/卸载会先预览并二次确认）。" enableToggles />
+        )}
+        {activeAdvanced === "aliases" && (
+          <DomainApplyPage domain="aliases" title="Aliases" description="终端快捷命令（alias）的同步状态，只改对应配置区块、不动其它内容。" />
+        )}
+        {activeAdvanced === "secrets" && <SecretsPage />}
+        {activeAdvanced === "updates" && <UpdatesPage />}
+        {activeAdvanced === "policy" && <PolicyPage />}
+        {activeAdvanced === "sync" && <SyncPage />}
+        {activeAdvanced === "snapshots" && <SnapshotsPage />}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader title="设置" description="查看应用契约与运行路径，调整本机运行偏好。" />
@@ -190,6 +292,34 @@ export default function SettingsPage() {
           </div>
         )}
         {update && <div className="mt-3 rounded-md border border-indigo-100 bg-indigo-50 p-3 text-sm"><p className="font-medium text-indigo-900">发现新版本 {update.version}</p>{update.date && <p className="mt-1 text-xs text-indigo-700">发布时间：{update.date}</p>}{update.body && <p className="mt-2 whitespace-pre-wrap text-xs text-indigo-800">{update.body}</p>}<button type="button" onClick={() => setConfirmUpdate(true)} disabled={updateState !== "idle"} className="mt-3 inline-flex items-center gap-2 rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white disabled:bg-slate-300">下载并安装</button></div>}
+      </section>
+      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-800">高级管理</h2>
+          <p className="mt-1 text-xs text-slate-500">保留的系统诊断、环境工具与同步备份管理入口。</p>
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {ADVANCED_ENTRIES.map((entry) => {
+            const Icon = entry.icon;
+            return (
+              <button
+                key={entry.key}
+                type="button"
+                data-testid={`advanced-entry-${entry.key}`}
+                onClick={() => setActiveAdvanced(entry.key)}
+                className="flex flex-col items-start rounded-lg border border-slate-200 bg-slate-50/50 p-3.5 text-left transition-all hover:border-indigo-300 hover:bg-indigo-50/40 hover:shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+              >
+                <div className="flex w-full items-center justify-between gap-2">
+                  <span className="flex items-center gap-2 text-xs font-semibold text-slate-800">
+                    <Icon className="h-4 w-4 text-indigo-600" aria-hidden />
+                    {entry.title}
+                  </span>
+                </div>
+                <p className="mt-1.5 text-xs text-slate-500 line-clamp-2">{entry.description}</p>
+              </button>
+            );
+          })}
+        </div>
       </section>
       {confirmUpdate && update && <ConfirmModal title="安装应用更新" description={`将下载并安装版本 ${update.version}，完成后请重启应用。`} risk="network" confirmLabel="确认下载并安装" executing={updateState === "installing"} onConfirm={() => void installUpdate()} onClose={() => setConfirmUpdate(false)} />}
     </div>
