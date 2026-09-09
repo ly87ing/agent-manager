@@ -332,7 +332,7 @@ describe("SkillsPage 三级视图", () => {
                   link_path: null,
                   target_dir_exists: false,
                   actions: [], // 无 actions
-                  blocked_reason: "环境缺少 Python 运行时",
+                  blocked_reason: "Rust 原生引擎暂未提供此操作",
                 },
               },
               discovery_inbox: false,
@@ -365,6 +365,6 @@ describe("SkillsPage 三级视图", () => {
     // codex: actions 为空，不推测动作，展示「当前引擎未提供操作」
     expect(screen.getByText("当前引擎未提供操作")).toBeInTheDocument();
     // codex: 展示明确阻断原因
-    expect(screen.getByText("环境缺少 Python 运行时")).toBeInTheDocument();
+    expect(screen.getByText("Rust 原生引擎暂未提供此操作")).toBeInTheDocument();
   });
 });

@@ -16,7 +16,7 @@ function demoEnvelopes(): Record<string, Envelope> {
       status: "warning",
       sections: {
         config: [{ name: "manager.json", status: "ok", message: "格式正确" }],
-        runtime: [{ name: "python3", status: "ok", message: "Python 3.14.7" }],
+        runtime: [{ name: "engine-rs", status: "ok", message: "Rust 原生引擎" }],
         agents: [{ name: "Old Agent", status: "notice", message: "未声明策略（已忽略）" }],
         tools: [{ name: "demo-cli", status: "warning", message: "可选工具未就绪", category: "optional_tool" }],
         mcp: [{ name: "Kimi Code", status: "warning", message: "托管产物尚未生成", category: "unmaterialized" }],

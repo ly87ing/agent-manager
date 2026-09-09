@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   engine-rs:
-    name: "${{ matrix.os }} / engine-rs (cargo + python parity)"
+    name: "${{ matrix.os }} / engine-rs (cargo)"
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -43,6 +43,11 @@ jobs:
       - name: Run cargo tests
         run: cargo test --manifest-path engine-rs/Cargo.toml
 
+      - name: Run cargo checks
+        run: |
+          cargo fmt --manifest-path engine-rs/Cargo.toml -- --check
+          cargo check --manifest-path engine-rs/Cargo.toml --all-targets
+
       - name: Configure rust path remapping
         shell: bash
         run: |
@@ -50,14 +55,6 @@ jobs:
 
       - name: Build engine release binary
         run: cargo build --release --manifest-path engine-rs/Cargo.toml
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Run engine parity tests (python double-run vs rust)
-        run: python3 -m unittest tests.test_engine_rs_parity tests.test_engine_cli -v
 
   app:
     name: "${{ matrix.os }} / app (typecheck + vitest + tauri build)"
@@ -129,6 +126,11 @@ jobs:
       - name: Run unit tests
         working-directory: app
         run: pnpm test:unit run
+
+      - name: Run Tauri tests and checks
+        run: |
+          cargo test --manifest-path app/src-tauri/Cargo.toml
+          cargo check --manifest-path app/src-tauri/Cargo.toml --all-targets
 
       - name: Configure rust path remapping
         shell: bash

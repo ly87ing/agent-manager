@@ -1,5 +1,0 @@
-{
-  "domain": "mcp",
-  "actions": [],
-  "summary": {"read": 0, "write-local": 0, "exec-local": 0, "install-remove": 0}
-}

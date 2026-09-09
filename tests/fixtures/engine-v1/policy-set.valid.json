@@ -1,9 +1,0 @@
-{
-  "layers": null,
-  "effective": null,
-  "attribution": null,
-  "layer": "local",
-  "key": "mcp.YOUR_SERVER.enabled",
-  "value": false,
-  "path": "/tmp/manager.local.json"
-}

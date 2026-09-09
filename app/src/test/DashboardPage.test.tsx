@@ -201,11 +201,11 @@ describe("DashboardPage", () => {
 
   it("桥错误（非 envelope）时展示结构化错误码", async () => {
     const routes = okRoutes();
-    routes["system:audit"] = { status: 500, body: { kind: "spawn_failed", message: "找不到 manage.sh" } };
+    routes["system:audit"] = { status: 500, body: { kind: "spawn_failed", message: "Rust 原生引擎不可用" } };
     renderDashboard(routes);
 
     expect(await screen.findByText("SPAWN_FAILED")).toBeInTheDocument();
-    expect(screen.getByText(/找不到 manage\.sh/)).toBeInTheDocument();
+    expect(screen.getByText(/Rust 原生引擎不可用/)).toBeInTheDocument();
   });
 
   it("「刷新上游状态」按钮：调用 system:refresh-upstream 并 toast 汇总计数", async () => {

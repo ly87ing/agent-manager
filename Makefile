@@ -1,26 +1,28 @@
-.PHONY: help init update agents-update agents\:update doctor smoke
+.PHONY: help engine-test app-test test check build smoke
 
 # 默认目标：显示帮助，不执行任何同步操作
 .DEFAULT_GOAL := help
 
 help:
-	@./manage.sh help
+	@printf '%s\n' '开发入口:' '  make test       engine-rs 与 Tauri 单测' '  make check      Rust all-targets check 与前端 typecheck' '  make build      前端生产构建'
 
-# 新机器初始化或全量收敛（安装缺失 Agent + 升级已装 Agent + 全量分发）
-init:
-	@./manage.sh init
+engine-test:
+	cargo test --manifest-path engine-rs/Cargo.toml
 
-# 日常最常用：除 Agent 本体外全部收敛到最新（含工具与 MCP 运行时；不安装、不升级 Agent 软件）
-update:
-	@./manage.sh update
+app-test:
+	cargo test --manifest-path app/src-tauri/Cargo.toml
+	cd app && pnpm test:unit run
 
-# 升级/修复已装 Agent 到上游最新（agents.json 不锁版本）
-agents-update agents\:update:
-	@./manage.sh agents:update
+test: engine-test app-test
 
-# 系统健康深度诊断
-doctor:
-	@./manage.sh doctor
+check:
+	cargo fmt --manifest-path engine-rs/Cargo.toml -- --check
+	cargo check --manifest-path engine-rs/Cargo.toml --all-targets
+	cargo check --manifest-path app/src-tauri/Cargo.toml --all-targets
+	cd app && pnpm typecheck
+
+build:
+	cd app && pnpm build
 
 # 跨平台 smoke 验证（安全预演路径）
 smoke:

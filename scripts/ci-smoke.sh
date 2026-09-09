@@ -10,13 +10,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-export HOME="$RUNTIME_DIR/home"
-mkdir -p "$HOME"
-export AGENT_MANAGER_LOCK_FILE="$RUNTIME_DIR/agent-manager.lock"
-export AGENT_MANAGER_LOG_PREFIX="$RUNTIME_DIR/agent-manager-sync"
-export AGENT_MANAGER_BASE_CONFIG="$ROOT_DIR/config/manager.smoke.json"
-export AGENT_MANAGER_SYNCED_CONFIG="$RUNTIME_DIR/manager.synced.json"
-export AGENT_MANAGER_LOCAL_CONFIG="$RUNTIME_DIR/manager.local.json"
+export AGENT_MANAGER_DATA_DIR="$RUNTIME_DIR/data"
 
 run() {
     printf '==> %s\n' "$*"
@@ -25,9 +19,6 @@ run() {
 
 cd "$ROOT_DIR"
 
-run python3 ./scripts/check_no_secrets.py
-run ./manage.sh help
-run ./manage.sh update --dry-run
-run ./manage.sh agents:update --dry-run
-run ./manage.sh init --dry-run
-run make -n help init update agents-update doctor smoke
+run cargo run --manifest-path engine-rs/Cargo.toml -- db:status --json
+run cargo run --manifest-path engine-rs/Cargo.toml -- policy:get --json
+run cargo run --manifest-path engine-rs/Cargo.toml -- policy:set --layer local --key agents.codex.enabled --value false --dry-run --json

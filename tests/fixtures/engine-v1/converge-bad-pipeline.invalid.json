@@ -1,7 +1,0 @@
-{
-  "pipeline": "init",
-  "dry_run": false,
-  "steps": [],
-  "snapshot": null,
-  "skipped": []
-}
