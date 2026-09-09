@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, ChevronDown, ChevronRight, Download, RefreshCw, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Download, RefreshCw, Sparkles, Trash2, X } from "lucide-react";
 import { DriftExplanationPanel } from "../components/DriftExplanationPanel";
 import { DefinitionFormDialog } from "../components/DefinitionFormDialog";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
@@ -44,7 +44,17 @@ function PolicyChip({ label, value }: { label: string; value: boolean | undefine
   );
 }
 
-function AgentCard({ element, onEdit, onRemove }: { element: EngineElement; onEdit: () => void; onRemove: () => void }) {
+function AgentCard({
+  element,
+  onEdit,
+  onRemove,
+  onManageSkills,
+}: {
+  element: EngineElement;
+  onEdit: () => void;
+  onRemove: () => void;
+  onManageSkills?: (agentId: string) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const offline = useOfflineMode();
   const preview = usePlanPreview();
@@ -147,6 +157,14 @@ function AgentCard({ element, onEdit, onRemove }: { element: EngineElement; onEd
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
         <button type="button" onClick={onEdit} className="rounded border px-2.5 py-1 text-xs">编辑命令</button>
         <button type="button" onClick={onRemove} className="rounded border border-red-200 px-2.5 py-1 text-xs text-red-600">移除管理</button>
+        <button
+          type="button"
+          data-testid={`manage-skills-${element.id}`}
+          onClick={() => onManageSkills?.(element.id.replace(/^agents:/, ""))}
+          className="inline-flex items-center gap-1 rounded border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs text-indigo-700 hover:bg-indigo-100"
+        >
+          <Sparkles className="h-3 w-3" aria-hidden /> 管理技能
+        </button>
         {element.actions.map((action) => {
           const meta = ACTION_META[action.id];
           if (!meta) return null;
@@ -186,7 +204,11 @@ function AgentCard({ element, onEdit, onRemove }: { element: EngineElement; onEd
   );
 }
 
-export default function AgentsPage() {
+export default function AgentsPage({
+  onManageSkills,
+}: {
+  onManageSkills?: (agentId: string) => void;
+} = {}) {
   const query = useEngineQuery<StatusData>("agents:status");
   const policyQuery = useEngineQuery<PolicyData>("policy:get");
   const definitionOps = useDefinitionOps({ section: "agents", domain: "agents" });
@@ -202,7 +224,13 @@ export default function AgentsPage() {
       <div className="flex justify-end"><button type="button" onClick={() => setForm("new")} className="rounded-md bg-indigo-600 px-4 py-2 text-sm text-white">添加助手</button></div>
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {elements.map((element) => (
-          <AgentCard key={element.id} element={element} onEdit={() => setForm(element)} onRemove={() => definitionOps.requestRemove(element.id.replace(/^agents:/, ""), policyQuery.data?.data.layers ?? null)} />
+          <AgentCard
+            key={element.id}
+            element={element}
+            onEdit={() => setForm(element)}
+            onRemove={() => definitionOps.requestRemove(element.id.replace(/^agents:/, ""), policyQuery.data?.data.layers ?? null)}
+            onManageSkills={onManageSkills}
+          />
         ))}
       </div>
       {form && <DefinitionFormDialog domain="agents" existingNames={elements.map((element) => element.id.replace(/^agents:/, ""))} initial={form === "new" ? undefined : { name: form.id.replace(/^agents:/, ""), definition: form.spec }} onClose={() => setForm(null)} onSubmit={(name, definition) => { setForm(null); void definitionOps.saveAndApply({ name, definition, isNew: form === "new", elementId: `agents:${name}` }); }} />}

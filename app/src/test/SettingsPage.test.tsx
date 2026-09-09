@@ -397,7 +397,7 @@ describe("SettingsPage", () => {
     await userEvent.click(toggle); expect(toggle).not.toBeChecked();
   });
 
-  it("渲染高级管理区块包含 8 个非日常功能入口，点击可下钻，常驻返回设置按钮可返回", async () => {
+  it("渲染高级管理区块包含保留的非日常功能入口，点击可下钻，常驻返回设置按钮可返回", async () => {
     setSettingsClient({
       get: async () => settings,
       save: async (preferences) => ({ ...settings, preferences }),
@@ -422,13 +422,14 @@ describe("SettingsPage", () => {
       "secrets",
       "updates",
       "policy",
-      "sync",
       "snapshots",
     ];
 
     for (const key of expectedKeys) {
       expect(screen.getByTestId(`advanced-entry-${key}`)).toBeInTheDocument();
     }
+    expect(screen.queryByTestId("advanced-entry-sync")).toBeNull();
+    expect(screen.queryByText("多设备同步")).toBeNull();
 
     // 点击总览与诊断下钻
     await userEvent.click(screen.getByTestId("advanced-entry-dashboard"));

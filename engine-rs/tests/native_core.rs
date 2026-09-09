@@ -49,6 +49,17 @@ fn status_queries_never_create_db() {
     assert!(!ctx.data_dir.exists());
     let env = execute(&ctx, &request("policy:get", &[]));
     assert!(env.ok);
+    assert_eq!(env.data["layers"].as_object().unwrap().len(), 1);
+    assert!(env.data["layers"]
+        .as_object()
+        .unwrap()
+        .contains_key("sqlite"));
+    assert!(env.data["layers"]["sqlite"].is_null());
+    assert!(env.data["attribution"]
+        .as_object()
+        .unwrap()
+        .values()
+        .all(|value| value == "builtin"));
     assert!(!store::db_path(&ctx).exists());
     let _ = std::fs::remove_dir_all(&base);
 }
@@ -101,6 +112,13 @@ fn first_set_initializes_db_and_freezes_builtin() {
     // 只读重开（等价重启进程）仍是新值
     let env = execute(&ctx, &request("policy:get", &[]));
     assert_eq!(env.data["effective"]["agents"]["codex"]["enabled"], false);
+    assert_eq!(env.data["layers"].as_object().unwrap().len(), 1);
+    assert!(env.data["layers"]["sqlite"].is_object());
+    assert!(env.data["attribution"]
+        .as_object()
+        .unwrap()
+        .values()
+        .all(|value| value == "sqlite"));
     let _ = std::fs::remove_dir_all(&base);
 }
 

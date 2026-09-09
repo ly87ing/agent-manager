@@ -1,6 +1,6 @@
-import type { Envelope, ProfileData, RunEntry, SnapshotEntry } from "../lib/contract";
+import type { Envelope, RunEntry, SnapshotEntry } from "../lib/contract";
 import { EngineBridgeError, type EngineClient } from "../lib/engine";
-import { makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makeProfileData, makeRunEntry, makeSnapshotEntry } from "./fixtures";
+import { makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makeRunEntry, makeSnapshotEntry } from "./fixtures";
 
 /**
  * dev-only mock 引擎（?mock=1 / ?mock=offline，仅在 import.meta.env.DEV 下经
@@ -41,28 +41,28 @@ function demoEnvelopes(): Record<string, Envelope> {
           spec: {
             display_name: "Claude Code",
             bin: "claude",
-            preferred_provider: "npm",
-            providers: { npm: { managed: true }, native: { managed: true }, brew: { managed: false } },
+            preferred_provider: "native",
+            providers: { native: { managed: true }, brew: { managed: false } },
           },
-          policy: { enabled: true, auto_install: true, auto_update: true, preferred_provider: "npm" },
+          policy: { enabled: true, auto_install: true, auto_update: true, preferred_provider: "native" },
           observed: {
-            providers: ["npm"],
-            classified: { managed: ["npm"], deprecated: [], system_only: [], unsupported: [] },
+            providers: ["native"],
+            classified: { managed: ["native"], deprecated: [], system_only: [], unsupported: [] },
             installed: true,
             preferred_active: true,
           },
           state: "managed-ok",
-          freshness: makeFreshness({ state: "behind", current: "2.0.0", upstream: "2.1.3", checked_at: CHECKED_AT, probe: "npm-view", cache_age_sec: 300 }),
+          freshness: makeFreshness({ state: "behind", current: "2.0.0", upstream: "2.1.3", checked_at: CHECKED_AT, probe: "native", cache_age_sec: 300 }),
           actions: [{ id: "upgrade", risk: "network", needs_lock: true, offline_ok: false }],
         }),
         makeElement({
           id: "agents:codex",
           domain: "agents",
-          spec: { display_name: "Codex", bin: "codex", preferred_provider: "npm", providers: { npm: { managed: true } } },
-          policy: { enabled: true, auto_install: true, auto_update: true, preferred_provider: "npm" },
-          observed: { providers: ["npm"], classified: { managed: ["npm"], deprecated: [], system_only: [], unsupported: [] }, installed: true, preferred_active: true },
+          spec: { display_name: "Codex", bin: "codex", preferred_provider: "native", providers: { native: { managed: true } } },
+          policy: { enabled: true, auto_install: true, auto_update: true, preferred_provider: "native" },
+          observed: { providers: ["native"], classified: { managed: ["native"], deprecated: [], system_only: [], unsupported: [] }, installed: true, preferred_active: true },
           state: "managed-ok",
-          freshness: makeFreshness({ state: "current", current: "0.42.0", upstream: "0.42.0", checked_at: CHECKED_AT, probe: "npm-view", cache_age_sec: 300 }),
+          freshness: makeFreshness({ state: "current", current: "0.42.0", upstream: "0.42.0", checked_at: CHECKED_AT, probe: "native", cache_age_sec: 300 }),
         }),
         makeElement({
           id: "agents:kimi-code",
@@ -497,7 +497,7 @@ function demoEnvelopes(): Record<string, Envelope> {
           before_digest: null,
           after_digest: null,
           backup_path: null,
-          cmd: "npm install -g @anthropic-ai/claude-code",
+          cmd: "claude update",
           note: "升级到上游最新 2.1.3（不锁版本）",
         },
         {
@@ -546,7 +546,7 @@ function demoEnvelopes(): Record<string, Envelope> {
         verb: "refresh-upstream",
         cache_file: "/tmp/mock-upstream-cache.json",
         elements: [
-          { id: "agents:claude-code", probe: "npm-view", state: "behind", current: "2.0.0", upstream: "2.1.3", error: null },
+          { id: "agents:claude-code", probe: "native", state: "behind", current: "2.0.0", upstream: "2.1.3", error: null },
         ],
         summary: { probed: 6, current: 2, behind: 2, ahead: 1, unknown: 1 },
       },
@@ -559,20 +559,17 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
   const routes = demoEnvelopes();
 
   // ---- 有状态的写路径演示数据（内存态，仅 DEV mock） ----
-  const policyLayers: { baseline: Record<string, unknown>; synced: Record<string, unknown> | null; local: Record<string, unknown> | null } = {
-    baseline: {
+  const builtinPolicy: Record<string, unknown> = {
       agents: { "claude-code": { enabled: true, auto_update: true } },
       mcp: { "grok-search": { enabled: true } },
       skills: { "agent-skills": { enabled: true, new_skill_default: "disabled" } },
-    },
-    synced: { skills: { "agent-skills": { skills: { "dead-one": { agents: { codex: false } } } } } },
-    local: {
+  };
+  const sqlitePolicy: Record<string, unknown> = {
       browser_us_sync: { enabled: false },
       mcp: {
         definitions: { "my-proxy": { command: "npx", args: ["-y", "my-proxy-mcp"], startup_timeout_sec: 60, agents: null, env: { MY_PROXY_TOKEN: "${MY_PROXY_TOKEN}" } } },
         "my-proxy": { enabled: true },
       },
-    },
   };
   const runs: RunEntry[] = [
     makeRunEntry({ run_id: "20260905T235900Z-legacy1", mtime: "2026-09-05T23:59:00Z", is_latest: true, size_bytes: 7270 }),
@@ -598,16 +595,13 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
   };
 
   const policyGet = (): Envelope => {
-    let effective: Record<string, unknown> = { ...policyLayers.baseline };
-    let attribution: Record<string, string> = Object.fromEntries(Object.keys(policyLayers.baseline).map((key) => [key, "baseline"]));
-    for (const layerName of ["synced", "local"] as const) {
-      const layer = policyLayers[layerName];
-      if (!layer) continue;
-      effective = deepMerge(effective, layer);
-      attribution = { ...attribution, ...Object.fromEntries(Object.keys(layer).map((key) => [key, layerName])) };
-    }
+    const effective = deepMerge(builtinPolicy, sqlitePolicy);
+    const attribution: Record<string, string> = {
+      ...Object.fromEntries(Object.keys(builtinPolicy).map((key) => [key, "builtin"])),
+      ...Object.fromEntries(Object.keys(sqlitePolicy).map((key) => [key, "sqlite"])),
+    };
     return makeEnvelope(
-      { layers: { ...policyLayers }, effective, attribution, layer: null, key: null, value: null, path: null },
+      { layers: { sqlite: sqlitePolicy }, effective, attribution, layer: null, key: null, value: null, path: null },
       { command: "policy.get" },
     );
   };
@@ -616,8 +610,8 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
     const layer = args[args.indexOf("--layer") + 1];
     const key = args[args.indexOf("--key") + 1];
     const rawValue = args[args.indexOf("--value") + 1];
-    if (layer !== "synced" && layer !== "local") {
-      return makeEnvelope({}, { command: "policy.set", ok: false, errors: [{ code: "USAGE_ERROR", element: null, message: "--layer 只能是 synced/local" }] });
+    if (layer !== "local") {
+      return makeEnvelope({}, { command: "policy.set", ok: false, errors: [{ code: "USAGE_ERROR", element: null, message: "--layer 只能是 local" }] });
     }
     let value: unknown;
     try {
@@ -627,10 +621,9 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
     }
     // 门禁演示：值含 demo-secret 字样即视为疑似明文
     if (typeof value === "string" && value.includes("demo-secret")) {
-      return makeEnvelope({}, { command: "policy.set", ok: false, errors: [{ code: "POLICY_SECRET_GATE", element: null, message: "疑似明文敏感信息（demo_secret），拒绝写入策略层" }] });
+      return makeEnvelope({}, { command: "policy.set", ok: false, errors: [{ code: "POLICY_SECRET_GATE", element: null, message: "疑似明文敏感信息（demo_secret），拒绝写入本地数据库" }] });
     }
-    const target = (policyLayers[layer] ?? {}) as Record<string, unknown>;
-    if (policyLayers[layer] === null) policyLayers[layer] = target;
+    const target = sqlitePolicy;
     const segments = key.split(".");
     let cursor = target;
     for (const segment of segments.slice(0, -1)) {
@@ -639,7 +632,7 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
     }
     cursor[segments[segments.length - 1]] = value;
     return makeEnvelope(
-      { layers: null, effective: null, attribution: null, layer, key, value, path: `/repo/config/manager.${layer}.json` },
+      { layers: null, effective: null, attribution: null, layer: "sqlite", key, value, path: "/native-manager.db" },
       { command: "policy.set" },
     );
   };
@@ -647,10 +640,10 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
   const policyDelete = (args: string[]): Envelope => {
     const layer = args[args.indexOf("--layer") + 1];
     const key = args[args.indexOf("--key") + 1];
-    if (layer !== "synced" && layer !== "local") {
-      return makeEnvelope({}, { command: "policy.delete", ok: false, errors: [{ code: "USAGE_ERROR", element: null, message: "--layer 只能是 synced/local" }] });
+    if (layer !== "local") {
+      return makeEnvelope({}, { command: "policy.delete", ok: false, errors: [{ code: "USAGE_ERROR", element: null, message: "--layer 只能是 local" }] });
     }
-    const target = policyLayers[layer];
+    const target = sqlitePolicy;
     const segments = key.split(".");
     let cursor: Record<string, unknown> | undefined = target ?? undefined;
     for (const segment of segments.slice(0, -1)) {
@@ -664,7 +657,7 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
     }
     delete cursor[leaf];
     return makeEnvelope(
-      { layers: null, effective: null, attribution: null, layer, key, value: null, path: `/repo/config/manager.${layer}.json` },
+      { layers: null, effective: null, attribution: null, layer: "sqlite", key, value: null, path: "/native-manager.db" },
       { command: "policy.delete" },
     );
   };
@@ -727,19 +720,6 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
     );
   };
 
-  const profileData = (verb: "status" | "pull" | "push", extra: Partial<ProfileData> = {}): Envelope =>
-    makeEnvelope(
-      makeProfileData({
-        verb,
-        state: verb === "status" ? "clean" : verb === "pull" ? "clean" : "clean",
-        published: verb === "push" ? true : null,
-        gate: verb === "push" ? { scanned: true, findings: 0 } : null,
-        snapshot: verb === "status" ? null : { run_id: "20260906T020000Z-mock02", path: "/tmp/mock-snapshots/20260906T020000Z-mock02" },
-        ...extra,
-      }),
-      { command: `profile.${verb}` },
-    );
-
   return {
     async run(command, args = [], runOptions = {}) {
       // 模拟进程耗时，让加载/进行中的 UI 状态可见
@@ -779,41 +759,6 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
         );
       }
       if (command === "system:converge") return convergeEnvelope(args, runId);
-      if (command === "profile:status") {
-        if (options.offline) return profileData("status", { state: "local-only", ahead: null, behind: null });
-        return profileData("status", {
-          state: "diverged",
-          ahead: 1,
-          behind: 1,
-          diff: [
-            { key: "agents", change: "none", local_type: "object", remote_type: "object", local_digest: "aa11bb22cc33", remote_digest: "aa11bb22cc33" },
-            { key: "mcp", change: "both", local_type: "object", remote_type: "object", local_digest: "dd44ee55ff66", remote_digest: "001122334455" },
-            { key: "skills", change: "local", local_type: "object", remote_type: "absent", local_digest: "66778899aabb", remote_digest: null },
-            { key: "browser_us_sync", change: "remote", local_type: "absent", remote_type: "object", local_digest: null, remote_digest: "cc33dd44ee55" },
-          ],
-        });
-      }
-      if (command === "profile:pull" || command === "profile:push") {
-        if (options.offline) {
-          return makeEnvelope(
-            {},
-            { command: `profile.${command === "profile:pull" ? "pull" : "push"}`, ok: false, errors: [{ code: "OFFLINE_NETWORK_DENIED", element: null, message: "offline 模式下拒绝 network 动作" }] },
-          );
-        }
-        const verb = command === "profile:pull" ? "pull" : "push";
-        // --accept-remote [--only k] / --force 由 args 携带，mock 直接成功并回显状态
-        recordRun(runId, `profile.${verb}`, args.includes("--dry-run"));
-        return profileData(verb, {
-          conflicts: verb === "pull" ? [
-            {
-              key: "mcp.grok-search.enabled",
-              base: { type: "boolean", digest: "sha256:base00aa11bb22cc33dd44" },
-              local: { type: "boolean", digest: "sha256:local0aa11bb22cc33dd4" },
-              remote: { type: "boolean", digest: "sha256:remoteaa11bb22cc33dd4" },
-            },
-          ] : [],
-        });
-      }
       if (command.endsWith(":apply")) {
         return applyEnvelope(command.split(":")[0], args, runId);
       }

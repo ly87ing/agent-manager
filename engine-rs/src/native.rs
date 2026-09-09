@@ -440,9 +440,6 @@ fn policy_get(ctx: &Context) -> DispatchResult {
         .map(Value::Object)
         .unwrap_or(Value::Null);
     let mut layers = Map::new();
-    layers.insert("baseline".into(), Value::Null);
-    layers.insert("synced".into(), Value::Null);
-    layers.insert("local".into(), Value::Null);
     layers.insert(
         "sqlite".into(),
         if exists {

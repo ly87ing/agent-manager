@@ -3,8 +3,8 @@ import { z } from "zod";
 import { CONTRACT_ID, type Envelope } from "./contract";
 
 /**
- * 引擎客户端抽象：生产环境走 Tauri command `engine_invoke`（Rust sidecar 桥，
- * 经 manage.sh 调引擎）；测试经 setEngineClient 注入 fake。
+ * 引擎客户端抽象：生产环境走 Tauri command `engine_invoke`；测试经
+ * setEngineClient 注入 fake。
  */
 
 const diagnosticSchema = z

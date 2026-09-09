@@ -1,4 +1,4 @@
-import type { PolicyLayer, PolicyLayers } from "./contract";
+import type { PolicyLayers } from "./contract";
 
 /**
  * 定义覆盖层（引擎 P4a）：mcp.definitions.<name> 覆盖 config/mcp.json，
@@ -15,8 +15,8 @@ export function definitionKeyPrefix(section: DefinitionSection): string {
 
 export interface DefinitionRemovalPlan {
   kind: "tombstone";
-  /** 目标层。 */
-  layer: PolicyLayer;
+  /** SQLite 中的本地策略写入层。 */
+  layer: "local";
   /** policy key（…/<name>）。 */
   key: string;
 }
@@ -36,19 +36,15 @@ function layerHasDefinition(layer: Record<string, unknown> | null, section: Defi
 
 /**
  * 移除写 tombstone，避免删除覆盖片段后下层同名定义重新生效。
- * 已有 local 覆盖时必须在 local 层遮蔽；其余使用用户选择的默认层。
+ * 所有 tombstone 都写入 local，避免删除定义后下层同名定义重新生效。
  */
 export function planDefinitionRemoval(
-  layers: PolicyLayers | null,
+  _layers: PolicyLayers | null,
   section: DefinitionSection,
   name: string,
-  defaultLayer: PolicyLayer,
 ): DefinitionRemovalPlan {
   const key = `${definitionKeyPrefix(section)}.${name}`;
-  if (layerHasDefinition(layers?.local ?? null, section, name)) {
-    return { kind: "tombstone", layer: "local", key };
-  }
-  return { kind: "tombstone", layer: defaultLayer, key };
+  return { kind: "tombstone", layer: "local", key };
 }
 
 /** 条目的定义来源（用于 UI 注明「仓库默认值不受影响」）。 */
@@ -56,8 +52,6 @@ export function definitionOrigin(
   layers: PolicyLayers | null,
   section: DefinitionSection,
   name: string,
-): "baseline" | "local" | "synced" {
-  if (layerHasDefinition(layers?.local ?? null, section, name)) return "local";
-  if (layerHasDefinition(layers?.synced ?? null, section, name)) return "synced";
-  return "baseline";
+): "builtin" | "sqlite" {
+  return layerHasDefinition(layers?.sqlite ?? null, section, name) ? "sqlite" : "builtin";
 }

@@ -1,13 +1,12 @@
 import { toast } from "sonner";
 import type { PolicyData } from "./contract";
 import { runEngine } from "./engine";
-import { getDefaultPolicyLayer } from "./policyLayer";
 import { POLICY_LAYER_COPY, TOGGLE_COPY } from "./ui-copy";
 import { useExecuteApply, usePlanPreview } from "./usePlanPreview";
 
 /**
  * 元素启停开关编排（Agents/Tools/MCP/Skills 集合共用）：
- * policy.set <enabledKey> <bool>（落策略编辑器当前默认层）→ toast 给「立即同步」动作
+ * policy.set <enabledKey> <bool>（固定写入 local）→ toast 给「立即同步」动作
  * → 点开即 plan 预览（含 install-remove 二次确认语义）→ 域级 apply。
  */
 export function useElementToggle() {
@@ -27,12 +26,11 @@ export function useElementToggle() {
     name: string;
   }) => {
     const next = !input.enabled;
-    const layer = getDefaultPolicyLayer();
     let envelope;
     try {
       envelope = await runEngine<PolicyData>("policy:set", [
         "--layer",
-        layer,
+        "local",
         "--key",
         input.enabledKey,
         "--value",
@@ -48,7 +46,7 @@ export function useElementToggle() {
     }
     const label = `${next ? "启用" : "停用"} ${input.name}`;
     const applyLabel = `同步 ${input.name}`;
-    toast.success(TOGGLE_COPY.savedAskApply(next ? "启用" : "停用", POLICY_LAYER_COPY[layer].label), {
+    toast.success(TOGGLE_COPY.savedAskApply(next ? "启用" : "停用", POLICY_LAYER_COPY.sqlite.label), {
       action: {
         label: TOGGLE_COPY.applyNow,
         onClick: () =>

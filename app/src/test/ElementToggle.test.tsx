@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import McpPage from "../pages/McpPage";
-import { makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makePlanAction, makePolicyData } from "./fixtures";
+import { makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makePlanAction } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 import type { Envelope } from "../lib/contract";
 
 /**
- * 元素启停开关链路：Switch → policy.set enabled 键 → toast「立即同步」→ plan 预览 → apply。
- * Agents 页的普通 enabled 快捷开关已按设计移除（其实会触发卸载语义），
- * 本链路改经仍保留开关的 MCP 页验证；agents 安装/卸载仍由明确动作按钮覆盖。
+ * MCP 库级启停链路：服务卡片按钮（按 observed.actions 提供）→ mcp:plan（--only/--action，
+ * 无 agent）→ 预览确认 → mcp:apply 同参。旧「Switch → policy.set 预写 enabled」链路已按
+ * 新契约移除：启停不再有任何 policy:set 预写，动作完全由 plan/apply 的 --action 表达。
  */
 function routes(): Record<string, Envelope> {
   return {
@@ -23,9 +23,10 @@ function routes(): Record<string, Envelope> {
             policy: { enabled: true },
             observed: {
               agents: {
-                "claude-code": { state: "managed-ok", target: "/tmp/demo/.claude.json", target_exists: true },
+                "claude-code": { state: "managed-ok", target: "/tmp/demo/.claude.json", target_exists: true, assigned: true, enabled: true },
               },
               env: {},
+              actions: ["enable", "disable", "remove"],
             },
             state: "managed-ok",
             freshness: makeFreshness({ state: "current", current: "1.8.0", upstream: "1.8.0", checked_at: "2026-09-06T00:00:00Z", probe: "npm-view", cache_age_sec: 60 }),
@@ -34,11 +35,10 @@ function routes(): Record<string, Envelope> {
       },
       { command: "mcp.status" },
     ),
-    "policy:set": makeEnvelope(makePolicyData({ layers: null, effective: null, attribution: null, layer: "local", key: "mcp.chrome-devtools.enabled", value: false, path: "/repo/config/manager.local.json" }), { command: "policy.set" }),
     "mcp:plan": makeEnvelope(
       {
         domain: "mcp",
-        actions: [makePlanAction({ op: "write-file", element: "mcp:chrome-devtools", target: "/tmp/demo.json", risk: "write-local", note: "停用标记" })],
+        actions: [makePlanAction({ op: "write-file", element: "mcp:chrome-devtools", target: "/tmp/demo.json", risk: "write-local", note: "撤下助手入口" })],
         summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 },
       },
       { command: "mcp.plan" },
@@ -47,49 +47,51 @@ function routes(): Record<string, Envelope> {
   };
 }
 
-describe("元素启停开关", () => {
-  it("关 → policy.set enabled=false（默认层）→ toast 带「立即同步」→ 预览 → mcp:apply", async () => {
+describe("MCP 库级启停", () => {
+  it("已启用服务显示「停用」→ mcp:plan --action disable（无 agent）→ 确认 → mcp:apply 同参，全程零 policy:set", async () => {
     const { calls } = renderWithEngine(<McpPage />, routes());
 
-    const toggle = await screen.findByTestId("toggle-mcp:chrome-devtools");
-    expect(toggle).toHaveAttribute("aria-checked", "true");
-    await userEvent.click(toggle);
+    // 已启用：只提供「停用」，不渲染「启用」
+    expect(await screen.findByTestId("disable-server-mcp:chrome-devtools")).toBeInTheDocument();
+    expect(screen.queryByTestId("enable-server-mcp:chrome-devtools")).toBeNull();
+    await userEvent.click(screen.getByTestId("disable-server-mcp:chrome-devtools"));
 
-    // policy.set 参数正确（默认仅这台电脑层）
-    const setCall = calls.find((call) => call.command === "policy:set");
-    expect(setCall!.args).toEqual(["--layer", "local", "--key", "mcp.chrome-devtools.enabled", "--value", "false"]);
-
-    // toast 出现且带「立即同步」动作
-    const toastAction = await screen.findByText("立即同步");
-    await userEvent.click(toastAction);
-
-    // plan 预览打开（过滤到本元素），确认后触发 apply
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog).toHaveTextContent("停用 mcp:chrome-devtools");
+    // plan 预览打开（限定本服务、无 agent），零 policy:set 预写
+    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
+    expect(dialog).toHaveTextContent("停用服务 chrome-devtools");
+    expect(dialog).toHaveTextContent("撤下已配置的助手入口");
     expect(dialog).toHaveTextContent("/tmp/demo.json");
-    await userEvent.click(screen.getByTestId("plan-confirm-button"));
+    const planCall = calls.find((call) => call.command === "mcp:plan");
+    expect(planCall!.args).toEqual(["--only", "mcp:chrome-devtools", "--action", "disable"]);
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
 
+    await userEvent.click(screen.getByTestId("plan-confirm-button"));
     const applyCall = calls.find((call) => call.command === "mcp:apply");
     expect(applyCall).toBeDefined();
-    expect(applyCall!.args).toEqual(["--only", "mcp:chrome-devtools"]);
+    expect(applyCall!.args).toEqual(["--only", "mcp:chrome-devtools", "--action", "disable"]);
     expect(applyCall!.options?.runId).toMatch(/^gui-/);
 
-    const order = ["policy:set", "mcp:plan", "mcp:apply"].map((cmd) => calls.findIndex((call) => call.command === cmd));
+    const order = ["mcp:plan", "mcp:apply"].map((cmd) => calls.findIndex((call) => call.command === cmd));
     expect(order[0]).toBeLessThan(order[1]);
-    expect(order[1]).toBeLessThan(order[2]);
   });
 
-  it("policy.set 被拒绝时不出现「立即同步」动作", async () => {
+  it("plan 被引擎拒绝时预览内展示错误且确认不可用，零写入", async () => {
     const rejected = routes();
-    rejected["policy:set"] = makeEnvelope({}, {
-      command: "policy.set",
-      ok: false,
-      errors: [{ code: "POLICY_SECRET_GATE", element: null, message: "疑似密钥，拒绝写入" }],
-    });
+    rejected["mcp:plan"] = makeEnvelope(
+      {},
+      {
+        command: "mcp.plan",
+        ok: false,
+        errors: [{ code: "PLAN_FAILED", element: null, message: "引擎拒绝生成计划" }],
+      },
+    );
     const { calls } = renderWithEngine(<McpPage />, rejected);
-    await userEvent.click(await screen.findByTestId("toggle-mcp:chrome-devtools"));
-    expect(await screen.findByText(/保存被拒绝/)).toBeInTheDocument();
-    expect(screen.queryByText("立即同步")).toBeNull();
+
+    await userEvent.click(await screen.findByTestId("disable-server-mcp:chrome-devtools"));
+    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
+    expect(dialog).toHaveTextContent("引擎拒绝生成计划");
+    expect(screen.getByTestId("plan-confirm-button")).toBeDisabled();
     expect(calls.some((call) => call.command === "mcp:apply")).toBe(false);
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
   });
 });

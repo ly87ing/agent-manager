@@ -180,4 +180,15 @@ describe("Agents 页文案", () => {
     expect(screen.queryByText(/更换安装方式/)).toBeNull();
     expect(screen.getByText(/请先自行卸载现有安装/)).toBeInTheDocument();
   });
+
+  it("点击管理技能按钮调用 onManageSkills 回调并传递 agentId", async () => {
+    let selectedAgent = "";
+    renderWithEngine(<AgentsPage onManageSkills={(id) => { selectedAgent = id; }} />, routes(false));
+
+    const manageBtn = await screen.findByTestId("manage-skills-agents:claude-code");
+    expect(manageBtn).toBeInTheDocument();
+    await userEvent.click(manageBtn);
+
+    expect(selectedAgent).toBe("claude-code");
+  });
 });

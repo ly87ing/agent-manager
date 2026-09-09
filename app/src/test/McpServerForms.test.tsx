@@ -28,8 +28,9 @@ function mcpElement(id: string, state: string): ReturnType<typeof makeElement> {
     },
     policy: { enabled: true, agents: null },
     observed: {
-      agents: { "claude-code": { state: "managed-ok", target: "/tmp/demo/.claude.json", target_exists: true } },
+      agents: { "claude-code": { state: "managed-ok", target: "/tmp/demo/.claude.json", target_exists: true, assigned: true, enabled: true } },
       env: {},
+      actions: ["enable", "disable", "remove"],
     },
     state: state as never,
     freshness: makeFreshness({ state: "current", current: "1.0.0", upstream: "1.0.0", checked_at: CHECKED, probe: "npm-view", cache_age_sec: 60 }),
@@ -55,20 +56,17 @@ function routes(): Record<string, Envelope> {
       { domain: "mcp", elements: [mcpElement("mcp:chrome-devtools", "managed-ok"), mcpElement("mcp:my-proxy", "managed-ok")] },
       { command: "mcp.status" },
     ),
-    // my-proxy 定义在 local 覆盖层；chrome-devtools 只在基线；sqlite 投影完整有效定义
+    // 定义来源统一由 SQLite 投影提供；缺失时显示 builtin。
     "policy:get": makeEnvelope(
       makePolicyData({
         layers: {
-          baseline: { mcp: { "chrome-devtools": { enabled: true } } },
-          synced: null,
-          local: { mcp: { definitions: { "my-proxy": { command: "npx", args: ["-y", "my-proxy-pkg"] } }, "my-proxy": { enabled: true } } },
           sqlite: { mcp: { definitions: { "chrome-devtools": fullDefinitionOf("chrome-devtools"), "my-proxy": fullDefinitionOf("my-proxy") } } },
         },
       }),
       { command: "policy.get" },
     ),
-    "policy:set": makeEnvelope(makePolicyData({ layers: null, effective: null, attribution: null, layer: "local", key: "mcp.definitions.x", value: null, path: "/repo/config/manager.local.json" }), { command: "policy.set" }),
-    "policy:delete": makeEnvelope(makePolicyData({ layers: null, effective: null, attribution: null, layer: "local", key: "mcp.definitions.my-proxy", value: null, path: "/repo/config/manager.local.json" }), { command: "policy.delete" }),
+    "policy:set": makeEnvelope(makePolicyData({ layers: null, effective: null, attribution: null, layer: "sqlite", key: "mcp.definitions.x", value: null, path: "/native-manager.db" }), { command: "policy.set" }),
+    "policy:delete": makeEnvelope(makePolicyData({ layers: null, effective: null, attribution: null, layer: "sqlite", key: "mcp.definitions.my-proxy", value: null, path: "/native-manager.db" }), { command: "policy.delete" }),
     "mcp:plan": makeEnvelope(
       {
         domain: "mcp",
@@ -120,13 +118,13 @@ describe("MCP 服务定义覆盖层", () => {
     expect(screen.queryByRole("dialog", { name: /将要执行的操作/ })).toBeNull();
   });
 
-  it("编辑基线条目：以 sqlite 完整定义整条替换，未展示字段与 env 真实值保留", async () => {
+  it("编辑 sqlite 条目：以完整定义整条替换，未展示字段与 env 真实值保留", async () => {
     const { calls } = renderWithEngine(<McpPage />, routes());
     await userEvent.click(await screen.findByText("mcp:chrome-devtools"));
     await userEvent.click(await screen.findByTestId("edit-server-mcp:chrome-devtools"));
 
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByTestId("baseline-overlay-note")).toHaveTextContent("仓库默认值不受影响");
+    expect(within(dialog).queryByTestId("builtin-overlay-note")).toBeNull();
     // 名称不可改
     expect(within(dialog).getByTestId("server-name-input")).toBeDisabled();
     // env 初始列出完整定义的全部变量名
@@ -194,15 +192,10 @@ describe("MCP 服务定义覆盖层", () => {
           makePolicyData({
             layers: migrated
               ? {
-                  baseline: null,
-                  synced: null,
-                  local: null,
                   sqlite: { mcp: { definitions: { "chrome-devtools": fullDefinitionOf("chrome-devtools") } } },
                 }
               : {
-                  baseline: { mcp: { "chrome-devtools": { enabled: true } } },
-                  synced: null,
-                  local: null,
+                  sqlite: null,
                 },
           }),
           { command: "policy.get" },
@@ -282,33 +275,30 @@ describe("MCP 服务定义覆盖层", () => {
     expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(0);
   });
 
-  it("移除覆盖层和基线条目均写标记，避免下层定义重新出现", async () => {
+  it("移除服务：单级预览确认（无前置确认弹窗、无墓碑写入），plan/apply 携带 --only mcp:<name> --action remove", async () => {
     const { calls } = renderWithEngine(<McpPage />, routes());
 
-    // overlay：my-proxy 定义在 local 层
-    await userEvent.click(await screen.findByText("mcp:my-proxy"));
+    // overlay 条目：my-proxy 定义在 local 层——同一流程，不再区分覆盖层/基线写墓碑
     await userEvent.click(await screen.findByTestId("remove-server-mcp:my-proxy"));
-    let dialog = await screen.findByRole("dialog");
-    expect(dialog).toHaveTextContent("移除标记");
-    fireEvent.change(screen.getByTestId("confirm-modal-input"), { target: { value: "my-proxy" } });
-    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
-    const deleteCall = calls.find((call) => call.command === "policy:set");
-    expect(deleteCall!.args).toEqual(["--layer", "local", "--key", "mcp.definitions.my-proxy", "--value", '{"_delete": true}']);
+    let dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
+    expect(screen.queryByTestId("confirm-modal-input")).toBeNull();
+    expect(dialog).toHaveTextContent("清理 1 条受影响的助手配置");
+    let planCall = calls.find((call) => call.command === "mcp:plan");
+    expect(planCall!.args).toEqual(["--only", "mcp:my-proxy", "--action", "remove"]);
+    await userEvent.click(screen.getByTestId("plan-confirm-button"));
+    const applyCall = calls.find((call) => call.command === "mcp:apply");
+    expect(applyCall).toBeDefined();
+    expect(applyCall!.args).toEqual(["--only", "mcp:my-proxy", "--action", "remove"]);
 
-    // 移除后会打开「将要执行的操作」预览——关掉它再进行下一次移除
-    await screen.findByRole("dialog", { name: /将要执行的操作/ });
-    await userEvent.click(screen.getByText("取消"));
-
-    // 基线：chrome-devtools 只在基线 → tombstone
-    await userEvent.click(await screen.findByText("mcp:chrome-devtools"));
+    // 基线条目：chrome-devtools 只在基线——同样只走 plan 预览；取消零写
     await userEvent.click(await screen.findByTestId("remove-server-mcp:chrome-devtools"));
-    dialog = await screen.findByRole("dialog");
-    expect(dialog).toHaveTextContent("移除标记");
-    expect(dialog).toHaveTextContent("删除标记即可恢复");
-    fireEvent.change(screen.getByTestId("confirm-modal-input"), { target: { value: "chrome-devtools" } });
-    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
-    const tombstone = calls.filter((call) => call.command === "policy:set").pop();
-    expect(tombstone!.args[3]).toBe("mcp.definitions.chrome-devtools");
-    expect(JSON.parse(tombstone!.args[5])).toEqual({ _delete: true });
+    dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
+    planCall = calls.filter((call) => call.command === "mcp:plan").pop();
+    expect(planCall!.args).toEqual(["--only", "mcp:chrome-devtools", "--action", "remove"]);
+    await userEvent.click(screen.getByRole("button", { name: "取消" }));
+
+    // 全程无 policy:set 墓碑/覆盖写入
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    expect(calls.filter((call) => call.command === "mcp:apply")).toHaveLength(1);
   });
 });

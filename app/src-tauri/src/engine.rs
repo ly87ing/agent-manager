@@ -28,7 +28,7 @@ impl EngineError {
 // ---------- 命令面白名单 ----------
 
 /// 支持 status + plan 的域（secrets 只有 status；system 只有 audit / refresh-upstream）。
-/// 支持 status/plan/apply 的域（对齐引擎 APPLY_DOMAINS；secrets 只读、profile 单列）。
+/// 支持 status/plan/apply 的域（对齐引擎 APPLY_DOMAINS；secrets 只读）。
 const READ_WRITE_DOMAINS: &[&str] = &[
     "agents", "mcp", "skills", "rules", "hooks", "tools", "aliases",
 ];
@@ -38,7 +38,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|plan|apply / system:audit|refresh-upstream|converge / snapshots:* / runs:* / policy:* / profile:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|plan|apply / system:audit|refresh-upstream|converge / snapshots:* / runs:* / policy:* / sources:* / db:*）"
             ),
         )
     };
@@ -55,7 +55,6 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("runs", "list" | "get") => true,
         ("policy", "get" | "set" | "delete") => true,
         ("sources", "get" | "set") => true,
-        ("profile", "status" | "pull" | "push") => true,
         ("db", "status" | "migrate") => true,
         (d, "status" | "plan" | "apply") => READ_WRITE_DOMAINS.contains(&d),
         _ => false,
@@ -115,15 +114,6 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         ("policy", "delete") => {
             specs.push(("--layer", ArgValueKind::PolicyLayer));
             specs.push(("--key", ArgValueKind::DotKey));
-        }
-        ("profile", "pull") => {
-            specs.push(("--accept-remote", ArgValueKind::Flag));
-            // 键级以远端为准：--only <顶层键>（点分键字符集，与 policy key 同规则）
-            specs.push(("--only", ArgValueKind::DotKey));
-        }
-        ("profile", "push") => {
-            specs.push(("--dry-run", ArgValueKind::Flag));
-            specs.push(("--force", ArgValueKind::Flag));
         }
         (_, "plan") => {
             specs.push(("--only", ArgValueKind::ElementId));
@@ -379,9 +369,6 @@ mod tests {
             "policy:delete",
             "sources:get",
             "sources:set",
-            "profile:status",
-            "profile:pull",
-            "profile:push",
             "db:status",
             "db:migrate",
         ] {
@@ -398,6 +385,9 @@ mod tests {
             "policy:drop",
             "sources:delete",
             "profile:init",
+            "profile:status",
+            "profile:pull",
+            "profile:push",
             "db:drop",
             "bad:status",
             "unknown:apply",
@@ -531,11 +521,6 @@ mod tests {
                     "--dry-run".into(),
                 ],
             ),
-            (
-                "profile:pull",
-                vec!["--accept-remote".into(), "--only".into(), "mcp".into()],
-            ),
-            ("profile:push", vec!["--dry-run".into(), "--force".into()]),
         ] {
             assert!(
                 validate_args(command, &args).is_ok(),
@@ -549,8 +534,6 @@ mod tests {
             ("mcp:plan", vec!["--agent".into(), "codex".into()]),
             ("agents:status", vec!["--action".into(), "install".into()]),
             ("skills:apply", vec!["--action".into(), "install".into()]),
-            ("profile:push", vec!["--accept-remote".into()]),
-            ("profile:pull", vec!["--force".into()]),
             ("runs:list", vec!["--run".into(), "r1".into()]),
             ("policy:get", vec!["--dry-run".into()]),
             ("sources:set", vec!["--def-file".into(), "elsewhere".into()]),

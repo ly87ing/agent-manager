@@ -7,7 +7,7 @@ import { OVERLAY_COPY } from "../lib/ui-copy";
 
 /**
  * MCP 服务新增/编辑表单。写入的是定义覆盖层片段（mcp.definitions.<name>）；
- * 编辑基线条目时整段写覆盖片段并注明「仓库默认值不受影响」。
+ * 编辑内置条目时整段写覆盖片段并注明「内置默认值不受影响」。
  * status 的 spec.env 是脱敏视图（普通字面值被掩码为 <literal>），不能当完整原定义：
  * 编辑时以 fullDefinition（policy:get 的 sqlite 有效定义）为基底，只覆盖表单负责字段，
  * 表单未展示的定义字段（如 url、extra_args_by_agent）与已有密钥取值原样保留；
@@ -97,9 +97,9 @@ export function McpServerFormDialog({
           </button>
         </div>
 
-        {!isNew && origin === "baseline" && (
-          <p data-testid="baseline-overlay-note" className="mt-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
-            {OVERLAY_COPY.editBaselineNote}
+        {!isNew && origin === "builtin" && (
+          <p data-testid="builtin-overlay-note" className="mt-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+            {OVERLAY_COPY.editBuiltinNote}
           </p>
         )}
 

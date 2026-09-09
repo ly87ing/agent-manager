@@ -5,7 +5,6 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import type { PolicyData, PolicyLayers } from "./contract";
 import { definitionKeyPrefix, planDefinitionRemoval, type DefinitionSection } from "./definitionOverlay";
 import { engineErrorMessage, runEngine } from "./engine";
-import { getDefaultPolicyLayer } from "./policyLayer";
 import { engineKeys } from "./queries";
 import { OVERLAY_COPY, TOGGLE_COPY } from "./ui-copy";
 import { useExecuteApply, usePlanPreview } from "./usePlanPreview";
@@ -95,7 +94,6 @@ export function useDefinitionOps({
      * sqlite 有效定义则传完整定义（complete 可缺省），拿不到完整原定义必须显式传 false。 */
     complete?: boolean;
   }): Promise<void> => {
-    const layer = getDefaultPolicyLayer();
     const defKey = `${definitionKeyPrefix(section)}.${input.name}`;
     let definition = input.definition;
     if (domain !== "agents" && domain !== "tools" && !input.isNew && input.complete === false) {
@@ -132,7 +130,7 @@ export function useDefinitionOps({
         }
       }
     }
-    if (!(await writePolicy("policy:set", ["--layer", layer, "--key", defKey, "--value", JSON.stringify({ ...definition, _delete: false, _replace: true })]))) {
+    if (!(await writePolicy("policy:set", ["--layer", "local", "--key", defKey, "--value", JSON.stringify({ ...definition, _delete: false, _replace: true })]))) {
       return;
     }
     // Agent 与资源定义（MCP/技能集合）表单提交语义为「保存定义」：只保存定义，
@@ -147,7 +145,7 @@ export function useDefinitionOps({
       return;
     }
     if (input.isNew) {
-      if (!(await writePolicy("policy:set", ["--layer", layer, "--key", `${section}.${input.name}.enabled`, "--value", "true"]))) {
+      if (!(await writePolicy("policy:set", ["--layer", "local", "--key", `${section}.${input.name}.enabled`, "--value", "true"]))) {
         return;
       }
     }
@@ -155,7 +153,7 @@ export function useDefinitionOps({
     const label = `${input.isNew ? "新增" : "修改"} ${input.name}`;
     preview.open({
       title: label,
-      subtitle: "定义已写入覆盖层；预览将要执行的操作，确认后同步生效（执行前自动备份）。",
+      subtitle: "定义已写入本地数据库；预览将要执行的操作，确认后同步生效（执行前自动备份）。",
       planCommands: [{ command: `${domain}:plan`, args: ["--only", input.elementId] }],
       confirmLabel: TOGGLE_COPY.applyNow,
       execute: executeApply({
@@ -174,7 +172,7 @@ export function useDefinitionOps({
   const confirmRemove = async () => {
     if (!removal) return;
     setRemovalExecuting(true);
-    const plan = planDefinitionRemoval(removal.layers, section, removal.name, getDefaultPolicyLayer());
+    const plan = planDefinitionRemoval(removal.layers, section, removal.name);
     const ok = await writePolicy("policy:set", ["--layer", plan.layer, "--key", plan.key, "--value", '{"_delete": true}']);
     setRemovalExecuting(false);
     if (!ok) return;
@@ -187,7 +185,7 @@ export function useDefinitionOps({
     const elementId = `${prefix}:${name}`;
     preview.open({
       title: `移除 ${name}`,
-      subtitle: OVERLAY_COPY.removeBaselineNote,
+      subtitle: OVERLAY_COPY.removeDefinitionNote,
       planCommands: [{ command: `${domain}:plan`, args: ["--only", elementId] }],
       confirmLabel: TOGGLE_COPY.applyNow,
       execute: executeApply({
@@ -198,11 +196,11 @@ export function useDefinitionOps({
     });
   };
 
-  const removalPlan = removal ? planDefinitionRemoval(removal.layers, section, removal.name, getDefaultPolicyLayer()) : null;
+  const removalPlan = removal ? planDefinitionRemoval(removal.layers, section, removal.name) : null;
   const removalModal = removal && removalPlan ? (
     <ConfirmModal
       title={`移除 ${removal.name}`}
-      description={domain === "agents" || domain === "tools" ? "停止管理该定义，不自动卸载系统包。后续同步仍会清理本工具拥有的孤立缓存目录。" : OVERLAY_COPY.removeBaselineNote}
+      description={domain === "agents" || domain === "tools" ? "停止管理该定义，不自动卸载系统包。后续同步仍会清理本工具拥有的孤立缓存目录。" : OVERLAY_COPY.removeDefinitionNote}
       risk="install-remove"
       requireText={removal.name}
       confirmLabel="确认移除"

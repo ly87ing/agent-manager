@@ -30,12 +30,34 @@ export default function App() {
   // 预加载本机偏好，确保首次打开任意预览时已有默认演练值。
   const settings = useSettings();
   const [activePage, setActivePage] = useState<string>("agents");
+  const [selectedSkillAgent, setSelectedSkillAgent] = useState<string | null>(null);
+
   if (settings.isPending) return <PageLoading text="正在读取应用设置…" />;
   if (settings.isError) return <PageError title="应用设置加载失败" error={settings.error} />;
+
+  const handleNavigate = (page: string) => {
+    if (page === "skills") {
+      setSelectedSkillAgent(null);
+    }
+    setActivePage(page);
+  };
+
   return (
-    <AppLayout nav={NAV} active={activePage} onNavigate={setActivePage}>
-      {activePage === "agents" && <AgentsPage />}
-      {activePage === "skills" && <SkillsPage />}
+    <AppLayout nav={NAV} active={activePage} onNavigate={handleNavigate}>
+      {activePage === "agents" && (
+        <AgentsPage
+          onManageSkills={(agentId) => {
+            setSelectedSkillAgent(agentId);
+            setActivePage("skills");
+          }}
+        />
+      )}
+      {activePage === "skills" && (
+        <SkillsPage
+          initialAgent={selectedSkillAgent}
+          onResetAgent={() => setSelectedSkillAgent(null)}
+        />
+      )}
       {activePage === "mcp" && <McpPage />}
       {activePage === "rules-hooks" && <RulesHooksPage />}
       {activePage === "runs" && <RunsPage />}

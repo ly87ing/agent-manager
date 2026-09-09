@@ -15,7 +15,7 @@ function routes() {
       { command: "hooks.status" },
     ),
     "policy:get": makeEnvelope(
-      { layers: { baseline: null, synced: null, local: null } },
+      { layers: { sqlite: null } },
       { command: "policy.get" },
     ),
   };

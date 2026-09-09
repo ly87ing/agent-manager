@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
-  CloudUpload,
   DatabaseBackup,
   KeyRound,
   LayoutDashboard,
@@ -24,7 +23,6 @@ import DomainApplyPage from "./DomainApplyPage";
 import SecretsPage from "./SecretsPage";
 import UpdatesPage from "./UpdatesPage";
 import PolicyPage from "./PolicyPage";
-import SyncPage from "./SyncPage";
 import SnapshotsPage from "./SnapshotsPage";
 
 interface AvailableUpdate {
@@ -69,14 +67,8 @@ const ADVANCED_ENTRIES = [
   {
     key: "policy",
     title: "个性化配置",
-    description: "多层配置原文查看与编辑。",
+    description: "SQLite 本机配置原文查看与编辑。",
     icon: SlidersHorizontal,
-  },
-  {
-    key: "sync",
-    title: "多设备同步",
-    description: "跨设备配置同步与差异对比。",
-    icon: CloudUpload,
   },
   {
     key: "snapshots",
@@ -247,7 +239,6 @@ export default function SettingsPage() {
         {activeAdvanced === "secrets" && <SecretsPage />}
         {activeAdvanced === "updates" && <UpdatesPage />}
         {activeAdvanced === "policy" && <PolicyPage />}
-        {activeAdvanced === "sync" && <SyncPage />}
         {activeAdvanced === "snapshots" && <SnapshotsPage />}
       </div>
     );

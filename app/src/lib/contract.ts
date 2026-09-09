@@ -275,15 +275,11 @@ export interface SnapshotsData {
 
 // ---------- policy:get / policy:set ----------
 
-export type PolicyLayer = "synced" | "local";
-export type PolicyLayerName = "baseline" | PolicyLayer | "sqlite";
+export type PolicyLayer = "local";
+export type PolicyLayerName = "builtin" | "sqlite";
 
 export interface PolicyLayers {
-  baseline: Record<string, unknown> | null;
-  synced: Record<string, unknown> | null;
-  local: Record<string, unknown> | null;
-  /** SQLite 存储激活时（Phase 1A）由 manager.db 投影的有效状态；此时 baseline/synced/local 均为 null。 */
-  sqlite?: Record<string, unknown> | null;
+  sqlite: Record<string, unknown> | null;
 }
 
 /** 一个 schema 同时服务 get/set，不适用的字段 nullable-required。 */
@@ -291,67 +287,8 @@ export interface PolicyData {
   layers: PolicyLayers | null;
   effective: Record<string, unknown> | null;
   attribution: Record<string, PolicyLayerName> | null;
-  layer: PolicyLayer | null;
+  layer: PolicyLayerName | null;
   key: string | null;
   value: unknown;
   path: string | null;
-}
-
-// ---------- profile:status / pull / push ----------
-
-export type ProfileSyncState =
-  | "clean"
-  | "ahead"
-  | "behind"
-  | "diverged"
-  | "uninitialized"
-  | "local-only";
-
-/** profile:status 的 per 顶层键差异项（contract errata：可选字段，offline/无 base 时缺省）。 */
-export interface ProfileDiffEntry {
-  key: string;
-  change: "local" | "remote" | "both" | "none";
-  local_type: string;
-  remote_type: string;
-  /** sha256 前 12 位；absent 侧为 null。值永不出现。 */
-  local_digest: string | null;
-  remote_digest: string | null;
-}
-
-export interface ProfileBackend {
-  type: string | null;
-  url: string | null;
-  configured: boolean;
-}
-
-export interface ProfileValueSummary {
-  /** JSON 类型名，或 'absent'。 */
-  type: string;
-  digest: string | null;
-}
-
-export interface ProfileConflict {
-  key: string;
-  base: ProfileValueSummary;
-  local: ProfileValueSummary;
-  remote: ProfileValueSummary;
-}
-
-export interface ProfileData {
-  verb: "status" | "pull" | "push";
-  state: ProfileSyncState | null;
-  backend: ProfileBackend;
-  machine_id: string;
-  local: { path: string; exists: boolean; key_count: number };
-  base: { exists: boolean };
-  ahead: number | null;
-  behind: number | null;
-  last_sync: string | null;
-  /** 双侧摘要只有 type+digest，原始值永不进 payload（引擎语义）。 */
-  conflicts: ProfileConflict[];
-  snapshot: { run_id: string; path: string } | null;
-  published: boolean | null;
-  gate: { scanned: boolean; findings: number } | null;
-  /** 差异对比（contract errata 可选字段）：仅远端已初始化且有合并基准且非 offline 时出现。 */
-  diff?: ProfileDiffEntry[];
 }

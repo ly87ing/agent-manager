@@ -1,26 +1,20 @@
-import { useState } from "react";
-import { ChevronDown, ChevronRight, Inbox, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { ArrowLeft, Plus } from "lucide-react";
 import { toast } from "sonner";
-import { DriftExplanationPanel } from "../components/DriftExplanationPanel";
 import { ErrorPanel } from "../components/ErrorPanel";
-import { FreshnessBadge } from "../components/FreshnessBadge";
-import { MatrixCell } from "../components/MatrixCell";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
+import { SkillAssignmentRow } from "../components/SkillAssignmentRow";
+import { SkillCollectionCard, SkillDiscoveryInbox } from "../components/SkillCollectionCard";
 import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDialog";
-import { StateBadge } from "../components/StateBadge";
-import { Switch } from "../components/Switch";
 import type { EngineElement, PolicyData, PolicyLayers, StatusData } from "../lib/contract";
-import { runEngine } from "../lib/engine";
 import {
   agentCellsOf,
-  type SkillCollectionObserved,
+  type SkillAgentCell,
   type SkillCollectionSpec,
   type SkillObserved,
   type SkillSpec,
 } from "../lib/observed";
-import { getDefaultPolicyLayer } from "../lib/policyLayer";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
-import { useElementToggle } from "../lib/useElementToggle";
 import { OVERLAY_COPY } from "../lib/ui-copy";
 import { useEngineQuery } from "../lib/queries";
 import { useExecuteApply, usePlanPreview } from "../lib/usePlanPreview";
@@ -30,132 +24,69 @@ function isCollection(element: EngineElement): boolean {
   return element.id.startsWith("skill:") && !element.id.includes("/");
 }
 
-/** 从 policy:get 的 sqlite 有效定义中取集合完整定义；无 DB 旧存储返回 null（调用方退化为片段合并）。 */
 function fullSkillDefinition(layers: PolicyLayers | null, name: string): Record<string, unknown> | null {
   const repositories = (layers?.sqlite as { skills?: { repositories?: Record<string, unknown> } } | null | undefined)?.skills?.repositories;
   const definition = repositories?.[name];
   return typeof definition === "object" && definition !== null ? (definition as Record<string, unknown>) : null;
 }
 
-function shortCommit(value: string | null): string {
-  if (!value) return "?";
-  return value.length > 12 ? value.slice(0, 7) : value;
-}
-
-function CollectionCard({
-  element,
-  inboxCount,
-  onToggle,
-  onRemove,
-  onEdit,
-  onUpdate,
+export default function SkillsPage({
+  initialAgent,
+  onResetAgent,
 }: {
-  element: EngineElement;
-  inboxCount: number;
-  onToggle: () => void;
-  onRemove: () => void;
-  onEdit: () => void;
-  onUpdate: () => void;
-}) {
-  const spec = element.spec as SkillCollectionSpec;
-  const observed = element.observed as SkillCollectionObserved;
-  const name = element.id.replace(/^skill:/, "");
-  const enabled = (element.policy as { enabled?: boolean }).enabled !== false;
-  return (
-    <section data-testid={`collection-card-${name}`} className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold text-slate-800">{name}</h3>
-          <p className="mt-0.5 font-mono text-xs break-all text-slate-400">{spec.url ?? "（无 url）"}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Switch
-            checked={enabled}
-            testId={`toggle-${element.id}`}
-            label={`${enabled ? "停用" : "启用"}集合 ${name}`}
-            onChange={onToggle}
-          />
-          <StateBadge state={element.state} />
-          <button
-            type="button"
-            data-testid={`remove-collection-${name}`}
-            onClick={onRemove}
-            title={OVERLAY_COPY.removeCollection}
-            className="rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-500"
-          >
-            <Trash2 className="h-3.5 w-3.5" aria-hidden />
-          </button>
-        </div>
-      </div>
-
-      <div className="mt-3 flex flex-wrap gap-1.5 text-xs">
-        <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-slate-600">
-          {spec.matrix_mode ? "按助手逐个授权" : "整包分发"}
-        </span>
-        <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-slate-600">
-          新技能默认:{spec.new_skill_default === "enabled" ? "启用" : "不启用"}
-        </span>
-        <span
-          className={cn(
-            "rounded border px-1.5 py-0.5",
-            observed.owner_marked
-              ? "border-indigo-200 bg-indigo-50 text-indigo-700"
-              : "border-slate-200 bg-slate-50 text-slate-500",
-          )}
-        >
-          {observed.owner_marked ? "自研" : "第三方"}
-        </span>
-        <span
-          className={cn(
-            "rounded border px-1.5 py-0.5",
-            observed.repo_cached
-              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-              : "border-amber-200 bg-amber-50 text-amber-700",
-          )}
-          title={observed.repo_cache}
-        >
-          {observed.repo_cached ? "已下载到本地" : "尚未下载"}
-        </span>
-        {inboxCount > 0 && (
-          <span
-            data-testid={`inbox-count-${name}`}
-            className="rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 font-medium text-sky-700"
-          >
-            新发现 {inboxCount}
-          </span>
-        )}
-      </div>
-
-      <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500">
-        <span>
-          已收录 {observed.discovered?.length ?? 0} 个技能 · 官方最新提交{" "}
-          <code className="font-mono">{shortCommit(element.freshness.upstream)}</code>
-        </span>
-        <FreshnessBadge freshness={element.freshness} className="items-end" />
-      </div>
-      <div className="mt-3 flex gap-2">
-        <button type="button" onClick={onEdit} data-testid={`edit-collection-${name}`} className="inline-flex items-center gap-1 rounded border px-3 py-2 text-xs text-slate-600"><Pencil className="h-3.5 w-3.5" aria-hidden />编辑集合</button>
-        <button type="button" onClick={onUpdate} data-testid={`update-collection-${name}`} className="inline-flex items-center gap-1 rounded border px-3 py-2 text-xs text-indigo-600"><RefreshCw className="h-3.5 w-3.5" aria-hidden />更新集合</button>
-      </div>
-      {(observed.extra_links?.length ?? 0) > 0 && (
-        <p className="mt-2 text-xs text-amber-700">
-          发现计划外的链接:{observed.extra_links!.join(", ")}
-        </p>
-      )}
-    </section>
-  );
-}
-
-export default function SkillsPage() {
+  initialAgent?: string | null;
+  onResetAgent?: () => void;
+} = {}) {
   const query = useEngineQuery<StatusData>("skills:status");
+  const agentsQuery = useEngineQuery<StatusData>("agents:status");
   const policyQuery = useEngineQuery<PolicyData>("policy:get");
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"collections" | "skills">(() => (initialAgent ? "skills" : "collections"));
+  const [collectionFilter, setCollectionFilter] = useState<string>("all");
+  const [agentFilter, setAgentFilter] = useState<string>(() => initialAgent ?? "all");
   const [showAddForm, setShowAddForm] = useState(false);
   const [editing, setEditing] = useState<EngineElement | null>(null);
+
   const preview = usePlanPreview();
   const executeApply = useExecuteApply();
-  const elementToggle = useElementToggle();
   const definitionOps = useDefinitionOps({ section: "skills", domain: "skills" });
+
+  const tabRefs = useRef<Record<"collections" | "skills", HTMLButtonElement | null>>({
+    collections: null,
+    skills: null,
+  });
+
+  const handleTabKeyDown = (e: KeyboardEvent<HTMLButtonElement>, tab: "collections" | "skills") => {
+    const tabs: ("collections" | "skills")[] = ["collections", "skills"];
+    const index = tabs.indexOf(tab);
+    let nextIndex = -1;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      nextIndex = (index + 1) % tabs.length;
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      nextIndex = (index - 1 + tabs.length) % tabs.length;
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      nextIndex = 0;
+    } else if (e.key === "End") {
+      e.preventDefault();
+      nextIndex = tabs.length - 1;
+    }
+    if (nextIndex >= 0) {
+      const nextTab = tabs[nextIndex];
+      setActiveTab(nextTab);
+      tabRefs.current[nextTab]?.focus();
+    }
+  };
+
+  useEffect(() => {
+    if (initialAgent) {
+      setAgentFilter(initialAgent);
+      setActiveTab("skills");
+    } else {
+      setAgentFilter("all");
+    }
+  }, [initialAgent]);
 
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="skills:status 调用失败" error={query.error} />;
@@ -164,273 +95,303 @@ export default function SkillsPage() {
   const collections = elements.filter(isCollection);
   const skills = elements.filter((element) => !isCollection(element));
   const inboxSkills = skills.filter((element) => (element.observed as SkillObserved).discovery_inbox === true);
-  const matrixSkills = skills.filter((element) => (element.observed as SkillObserved).discovery_inbox !== true);
-  const agentColumns = Array.from(
-    new Set(matrixSkills.flatMap((element) => Object.keys(agentCellsOf(element)))),
-  ).sort();
+
   const layers = policyQuery.data?.data.layers ?? null;
 
-  /** 策略写入 + plan 预览编排的公共尾部：skills:plan 过滤到本 skill 及 agent → skills:apply。 */
-  const openApplyPreview = (skill: EngineElement, label: string, agent?: string) => {
-    const args = agent ? ["--only", skill.id, "--agent", agent] : ["--only", skill.id];
+  // 助手列来源：agents:status、集合声明的 agents、技能已报告的 cell。
+  // 不取 policy 层的 agents 结构——其中混有 definitions 等保留字段，不能当助手 ID 列表。
+  const statusAgents = (agentsQuery.data?.data?.elements ?? []).map((el) => el.id.replace(/^agents:/, ""));
+  const collectionAgents = collections.flatMap((col) => (col.spec as SkillCollectionSpec).agents ?? []);
+  const skillAgents = skills.flatMap((element) => Object.keys(agentCellsOf(element)));
+
+  const agentColumns = Array.from(new Set([...statusAgents, ...collectionAgents, ...skillAgents]))
+    .filter(Boolean)
+    .sort();
+
+  const collName = (collection: EngineElement) => collection.id.replace(/^skill:/, "");
+
+  const openCollectionAction = (
+    collection: EngineElement,
+    action: "update" | "enable" | "disable" | "remove",
+    title: string,
+    subtitle: string,
+    confirmLabel: string,
+  ) => {
+    const args = ["--only", collection.id, "--action", action];
+    preview.open({
+      title,
+      subtitle,
+      planCommands: [{ command: "skills:plan", args }],
+      confirmLabel,
+      // 删除集合是单级确认：install-remove 风险时须在预览里输入集合名
+      requireConfirmText: action === "remove" ? collName(collection) : undefined,
+      execute: executeApply({ command: "skills:apply", label: title, extraArgs: args }),
+    });
+  };
+
+  const handleUpdateCollection = (c: EngineElement) =>
+    openCollectionAction(c, "update", `更新集合 ${collName(c)}`, "更新集合资源库中的技能定义，不会改动助手当前已安装的版本。", "立即更新");
+
+  const handleToggleCollection = (c: EngineElement, action: "enable" | "disable") =>
+    openCollectionAction(
+      c,
+      action,
+      `${action === "enable" ? "启用" : "停用"}集合 ${collName(c)}`,
+      action === "enable" ? "启用集合，恢复原来已启用的分配。" : "停用集合，撤下已分配入口。",
+      "立即执行",
+    );
+
+  const handleRemoveCollection = (c: EngineElement) => {
+    // 预览说明里给出受影响分配数（仅 assigned=true）与源目录保留语义，单级确认（无前置弹窗）
+    const affected = skills
+      .filter((skill) => (skill.spec as SkillSpec).collection === collName(c))
+      .reduce((count, skill) => count + Object.values(agentCellsOf(skill)).filter((cell) => (cell as SkillAgentCell).assigned === true).length, 0);
+    openCollectionAction(
+      c,
+      "remove",
+      `删除集合 ${collName(c)}`,
+      `从配置中移除集合，并清理 ${affected} 条受影响的助手分配；集合源目录保留在本地，不会被删除。`,
+      "立即删除",
+    );
+  };
+
+  const handleSkillAction = (skill: EngineElement, agent: string, action: string) => {
+    const spec = skill.spec as SkillSpec;
+    const skillName = spec.name ?? skill.id;
+    const args = ["--only", skill.id, "--action", action, "--agent", agent];
+    const labelMap: Record<string, string> = {
+      add: "添加分配",
+      update: "更新",
+      enable: "启用",
+      disable: "停用",
+      remove: "删除分配",
+    };
+    const actionLabel = labelMap[action] ?? action;
+    const label = `${actionLabel} ${skillName} @ ${agent}`;
     preview.open({
       title: label,
-      subtitle: "仅同步此技能链接（执行前自动备份）。",
+      subtitle: "仅同步此技能在对应助手中的配置与文件链接。",
       planCommands: [{ command: "skills:plan", args }],
-      confirmLabel: "立即同步",
+      confirmLabel: "立即执行",
       execute: executeApply({ command: "skills:apply", label, extraArgs: args }),
     });
   };
 
-  /** 矩阵点击切换：policy.set（skills.<repo>.skills.<name>.agents.<agent> bool）→ plan 预览 → apply。 */
-  const toggleSkillCell = async (skill: EngineElement, agent: string, currentState: string) => {
+  const filteredSkills = skills.filter((skill) => {
     const spec = skill.spec as SkillSpec;
-    const next = currentState === "disabled";
-    const layer = getDefaultPolicyLayer();
-    const key = `skills.${spec.collection}.skills.${spec.name}.agents.${agent}`;
-    let envelope;
-    try {
-      envelope = await runEngine<PolicyData>("policy:set", ["--layer", layer, "--key", key, "--value", next ? "true" : "false"]);
-    } catch (err) {
-      toast.error(`保存配置失败:${err instanceof Error ? err.message : String(err)}`);
-      return;
-    }
-    if (!envelope.ok) {
-      toast.error(`保存被拒绝:${envelope.errors[0]?.message ?? "未知错误"}`);
-      return;
-    }
-    toast.success(`已${next ? "启用" : "停用"} ${spec.name} @ ${agent}（写入${layer === "synced" ? "共享层" : "仅本机层"}）`);
-    openApplyPreview(skill, `${next ? "启用" : "停用"} ${spec.name} @ ${agent}`, agent);
-  };
+    if (collectionFilter !== "all" && spec.collection !== collectionFilter) return false;
+    return true;
+  });
 
-  /** 收件箱启用：agents 置 null = 跟随集合目标集（引擎 resolve_skill_agent_switch 语义）。 */
-  const enableInboxSkill = async (skill: EngineElement) => {
+  const relevantAgents = agentFilter === "all" ? agentColumns : [agentFilter];
+  const assignmentRows = filteredSkills.flatMap((skill) => {
     const spec = skill.spec as SkillSpec;
-    const layer = getDefaultPolicyLayer();
-    const key = `skills.${spec.collection}.skills.${spec.name}.agents`;
-    let envelope;
-    try {
-      envelope = await runEngine<PolicyData>("policy:set", ["--layer", layer, "--key", key, "--value", "null"]);
-    } catch (err) {
-      toast.error(`保存配置失败:${err instanceof Error ? err.message : String(err)}`);
-      return;
-    }
-    if (!envelope.ok) {
-      toast.error(`保存被拒绝:${envelope.errors[0]?.message ?? "未知错误"}`);
-      return;
-    }
-    toast.success(`已启用新技能 ${spec.name}（将分发给集合内全部助手，保存到「${layer === "synced" ? "多设备共享" : "仅这台电脑"}」）`);
-    openApplyPreview(skill, `启用 ${spec.name}`);
-  };
+    const cells = (skill.observed as SkillObserved)?.agents ?? {};
+    // cell 缺失 = 引擎未报告此助手的分配路径：不伪造可执行 cell，行内明确显示未配置
+    return relevantAgents.map((agent) => ({
+      key: `${skill.id}-${agent}`,
+      skill,
+      skillName: spec.name ?? skill.id,
+      collection: spec.collection ?? "",
+      agent,
+      cell: cells[agent] ?? null,
+    }));
+  });
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Skills"
-        description="技能集合、新发现的技能、以及每个技能在各助手中的启用状态。矩阵里点格子即可开关（会先预览再执行）。"
-      />
+      <PageHeader title="技能" description="管理技能集合与技能分发。支持查看集合资源库状态，并在全部技能列表中按集合与助手筛选操作。" />
+
       {query.data.errors.length > 0 && <ErrorPanel title="skills:status 错误" errors={query.data.errors} />}
 
-      <div className="flex justify-end">
-        <button
-          type="button"
-          data-testid="add-collection-button"
-          onClick={() => setShowAddForm(true)}
-          className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-        >
-          <Plus className="h-4 w-4" aria-hidden /> {OVERLAY_COPY.addCollection}
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        {collections.map((collection) => (
-          <CollectionCard
-            key={collection.id}
-            element={collection}
-            inboxCount={(collection.observed as SkillCollectionObserved).discovery_inbox?.length ?? 0}
-            onToggle={() => {
-              const repo = collection.id.replace(/^skill:/, "");
-              void elementToggle.toggle({
-                elementId: collection.id,
-                enabledKey: `skills.${repo}.enabled`,
-                enabled: (collection.policy as { enabled?: boolean }).enabled !== false,
-                domain: "skills",
-                name: `集合 ${repo}`,
-              });
+      <div role="tablist" aria-label="技能管理视图" className="flex border-b border-slate-200">
+        {(["collections", "skills"] as const).map((tab) => (
+          <button
+            key={tab}
+            ref={(el) => {
+              tabRefs.current[tab] = el;
             }}
-            onRemove={() => definitionOps.requestRemove(collection.id.replace(/^skill:/, ""), layers)}
-            onEdit={() => setEditing(collection)}
-            onUpdate={() => openApplyPreview(collection, `更新 ${collection.id.replace(/^skill:/, "")}`)}
-          />
+            type="button"
+            role="tab"
+            id={`tab-${tab}`}
+            aria-controls={`panel-${tab}`}
+            aria-selected={activeTab === tab}
+            tabIndex={activeTab === tab ? 0 : -1}
+            onClick={() => setActiveTab(tab)}
+            onKeyDown={(e) => handleTabKeyDown(e, tab)}
+            className={cn(
+              "border-b-2 px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500",
+              activeTab === tab
+                ? "border-indigo-600 font-semibold text-indigo-600"
+                : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700",
+            )}
+          >
+            {tab === "collections" ? "集合列表" : "全部技能"}
+          </button>
         ))}
       </div>
 
-      <section data-testid="discovery-inbox" className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
-          <Inbox className="h-4 w-4 text-sky-600" aria-hidden />
-          新发现的技能
-          <span data-testid="inbox-total" className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700">
-            {inboxSkills.length}
-          </span>
-        </h3>
-        {inboxSkills.length === 0 ? (
-          <p className="text-sm text-slate-400">集合里没有新发现的技能。</p>
-        ) : (
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-xs text-slate-500">
-                <th className="py-2 pr-4 font-medium">名称</th>
-                <th className="py-2 pr-4 font-medium">来源</th>
-                <th className="py-2 pr-4 font-medium">说明</th>
-                <th className="py-2 font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {inboxSkills.map((skill) => {
-                const spec = skill.spec as SkillSpec;
-                return (
-                  <tr key={skill.id} className="border-b border-slate-100 last:border-0">
-                    <td className="py-2 pr-4 font-mono text-xs text-slate-700">{spec.name ?? skill.id}</td>
-                    <td className="py-2 pr-4 font-mono text-xs break-all text-slate-500">{spec.source_path ?? spec.collection}</td>
-                    <td className="py-2 pr-4 text-xs text-slate-600">集合里新出现的技能；启用后才会分发到助手</td>
-                    <td className="py-2">
-                      <button
-                        type="button"
-                        data-testid={`enable-inbox-${skill.id}`}
-                        onClick={() => void enableInboxSkill(skill)}
-                        className="rounded border border-indigo-200 px-2 py-0.5 text-xs text-indigo-600 hover:bg-indigo-50"
-                      >
-                        启用
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </section>
+      {activeTab === "collections" && (
+        <div id="panel-collections" role="tabpanel" aria-labelledby="tab-collections" className="space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-slate-500">共 {collections.length} 个技能集合</span>
+            <button
+              type="button"
+              data-testid="add-collection-button"
+              onClick={() => setShowAddForm(true)}
+              className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+            >
+              <Plus className="h-4 w-4" aria-hidden /> {OVERLAY_COPY.addCollection}
+            </button>
+          </div>
 
-      <section className="overflow-x-auto rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 className="mb-3 text-sm font-semibold text-slate-700">每个技能 × 每个助手</h3>
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-slate-200 text-xs text-slate-500">
-              <th className="py-2 pr-4 font-medium">Skill</th>
-              {agentColumns.map((agent) => (
-                <th key={agent} className="py-2 pr-4 font-mono font-medium">
-                  {agent}
-                </th>
-              ))}
-              <th className="py-2 font-medium">同步状态</th>
-            </tr>
-          </thead>
-          <tbody>
-            {matrixSkills.map((skill) => {
-              const spec = skill.spec as SkillSpec;
-              const cells = agentCellsOf(skill);
-              const isExpanded = skill.id === expandedId;
-              return (
-                <FragmentRow
-                  key={skill.id}
-                  skill={skill}
-                  name={spec.name ?? skill.id}
-                  cells={cells}
-                  agentColumns={agentColumns}
-                  isExpanded={isExpanded}
-                  onToggle={() => setExpandedId(isExpanded ? null : skill.id)}
-                  onToggleCell={(agent, state) => void toggleSkillCell(skill, agent, state)}
-                />
-              );
-            })}
-          </tbody>
-        </table>
-        {matrixSkills.length === 0 && <p className="py-4 text-center text-sm text-slate-400">无已声明 skill</p>}
-      </section>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            {collections.map((collection) => (
+              <SkillCollectionCard
+                key={collection.id}
+                collection={collection}
+                onDrilldown={(name) => {
+                  setCollectionFilter(name);
+                  setActiveTab("skills");
+                }}
+                onEdit={setEditing}
+                onUpdate={handleUpdateCollection}
+                onToggle={handleToggleCollection}
+                onRemove={handleRemoveCollection}
+              />
+            ))}
+          </div>
+
+          <SkillDiscoveryInbox skills={inboxSkills} />
+        </div>
+      )}
+
+      {activeTab === "skills" && (
+        <div id="panel-skills" role="tabpanel" aria-labelledby="tab-skills" className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center gap-4">
+              <label className="flex items-center gap-2 text-xs font-medium text-slate-700">
+                <span>集合筛选:</span>
+                <select
+                  aria-label="集合筛选"
+                  data-testid="filter-collection-select"
+                  value={collectionFilter}
+                  onChange={(e) => setCollectionFilter(e.target.value)}
+                  className="rounded border border-slate-300 bg-white px-2 py-1 font-mono text-xs text-slate-700"
+                >
+                  <option value="all">全部集合 ({collections.length})</option>
+                  {collections.map((col) => (
+                    <option key={col.id} value={collName(col)}>
+                      {collName(col)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="flex items-center gap-2 text-xs font-medium text-slate-700">
+                <span>助手筛选:</span>
+                <select
+                  aria-label="助手筛选"
+                  data-testid="filter-agent-select"
+                  value={agentFilter}
+                  onChange={(e) => setAgentFilter(e.target.value)}
+                  className="rounded border border-slate-300 bg-white px-2 py-1 font-mono text-xs text-slate-700"
+                >
+                  <option value="all">全部助手 ({agentColumns.length})</option>
+                  {agentColumns.map((ag) => (
+                    <option key={ag} value={ag}>
+                      {ag}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {(collectionFilter !== "all" || agentFilter !== "all") && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCollectionFilter("all");
+                    setAgentFilter("all");
+                    onResetAgent?.();
+                  }}
+                  className="inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                >
+                  <ArrowLeft className="h-3 w-3" aria-hidden /> 清除筛选
+                </button>
+              )}
+            </div>
+
+            <span className="text-xs text-slate-500">当前展示 {assignmentRows.length} 条分配记录</span>
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-xs text-slate-500">
+                  <th className="py-2.5 pr-4 font-medium">技能名</th>
+                  <th className="py-2.5 pr-4 font-medium">所属集合</th>
+                  <th className="py-2.5 pr-4 font-medium">助手</th>
+                  <th className="py-2.5 pr-4 font-medium">资源库版本</th>
+                  <th className="py-2.5 pr-4 font-medium">当前分配版本</th>
+                  <th className="py-2.5 pr-4 font-medium">状态</th>
+                  <th className="py-2.5 font-medium">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {assignmentRows.map(({ key, skill, skillName, collection, agent, cell }) => (
+                  <SkillAssignmentRow
+                    key={key}
+                    skill={skill}
+                    skillName={skillName}
+                    collection={collection}
+                    agent={agent}
+                    cell={cell}
+                    onFilterCollection={setCollectionFilter}
+                    onFilterAgent={setAgentFilter}
+                    onAction={handleSkillAction}
+                  />
+                ))}
+              </tbody>
+            </table>
+            {assignmentRows.length === 0 && (
+              <p className="py-8 text-center text-sm text-slate-400">无符合筛选条件的技能分配</p>
+            )}
+          </div>
+        </div>
+      )}
 
       {(showAddForm || editing) && (
         <SkillCollectionFormDialog
           agentIds={agentColumns}
           initial={editing ? { name: editing.id.replace(/^skill:/, ""), definition: editing.spec } : undefined}
           fullDefinition={editing ? fullSkillDefinition(layers, editing.id.replace(/^skill:/, "")) : null}
-          onClose={() => { setShowAddForm(false); setEditing(null); }}
+          onClose={() => {
+            setShowAddForm(false);
+            setEditing(null);
+          }}
           onSubmit={(name, definition, complete) => {
             setShowAddForm(false);
             setEditing(null);
-            void definitionOps.saveAndApply({ name, definition, isNew: !editing, elementId: `skill:${name}`, complete });
+            const isNew = !editing;
+            void definitionOps
+              .saveAndApply({
+                name,
+                definition,
+                isNew,
+                elementId: `skill:${name}`,
+                complete,
+              })
+              .then(() => {
+                if (isNew) {
+                  toast.info(`集合 ${name} 定义已保存，请点击「更新资源库」以拉取最新技能。`);
+                }
+              });
           }}
         />
       )}
 
       {preview.modal}
-      {elementToggle.modal}
       {definitionOps.modals}
     </div>
-  );
-}
-
-function FragmentRow({
-  skill,
-  name,
-  cells,
-  agentColumns,
-  isExpanded,
-  onToggle,
-  onToggleCell,
-}: {
-  skill: EngineElement;
-  name: string;
-  cells: Record<string, { state: string }>;
-  agentColumns: string[];
-  isExpanded: boolean;
-  onToggle: () => void;
-  onToggleCell: (agent: string, currentState: string) => void;
-}) {
-  return (
-    <>
-      <tr className={cn("border-b border-slate-100", !isExpanded && "last:border-0")}>
-        <td className="py-2 pr-4">
-          <button
-            type="button"
-            onClick={onToggle}
-            aria-expanded={isExpanded}
-            className="inline-flex items-center gap-1 font-mono text-xs text-indigo-600 hover:text-indigo-800"
-          >
-            {isExpanded ? <ChevronDown className="h-3 w-3" aria-hidden /> : <ChevronRight className="h-3 w-3" aria-hidden />}
-            {name}
-          </button>
-        </td>
-        {agentColumns.map((agent) => {
-          const cell = cells[agent];
-          return (
-            <td key={agent} className="py-2 pr-4">
-              {cell ? (
-                <button
-                  type="button"
-                  data-testid={`skill-cell-${skill.id}-${agent}`}
-                  onClick={() => onToggleCell(agent, cell.state)}
-                  title="点击切换启用（会先预览再执行）"
-                  className="cursor-pointer rounded hover:ring-2 hover:ring-indigo-300"
-                >
-                  <MatrixCell state={cell.state} kind="skills" title={`${agent}: ${cell.state}`} />
-                </button>
-              ) : (
-                <span className="text-xs text-slate-300">—</span>
-              )}
-            </td>
-          );
-        })}
-        <td className="py-2">
-          <StateBadge state={skill.state} />
-        </td>
-      </tr>
-      {isExpanded && (
-        <tr className="border-b border-slate-100 last:border-0">
-          <td colSpan={agentColumns.length + 2} className="py-3">
-            <DriftExplanationPanel element={skill} planCommand="skills:plan" cellKind="skills" />
-          </td>
-        </tr>
-      )}
-    </>
   );
 }

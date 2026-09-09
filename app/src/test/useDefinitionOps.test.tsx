@@ -55,6 +55,7 @@ describe("useDefinitionOps 保存语义", () => {
 
     const policySets = calls.filter((c) => c.command === "policy:set");
     expect(policySets).toHaveLength(1);
+    expect(policySets[0].args[1]).toBe("local");
     expect(policySets[0].args[3]).toBe("agent_definitions.demo");
     // 不写启用键
     expect(policySets.some((c) => c.args[3] === "agents.demo.enabled")).toBe(false);
@@ -77,6 +78,7 @@ describe("useDefinitionOps 保存语义", () => {
 
     const policySets = calls.filter((c) => c.command === "policy:set");
     expect(policySets).toHaveLength(1);
+    expect(policySets[0].args[1]).toBe("local");
     expect(policySets[0].args[3]).toBe("mcp.definitions.demo");
     const definition = JSON.parse(policySets[0].args[5]);
     expect(definition._replace).toBe(true);
@@ -102,6 +104,7 @@ describe("useDefinitionOps 保存语义", () => {
 
     const policySets = calls.filter((c) => c.command === "policy:set");
     expect(policySets).toHaveLength(1);
+    expect(policySets[0].args[1]).toBe("local");
     expect(policySets[0].args[3]).toBe("skills.repositories.demo");
     const definition = JSON.parse(policySets[0].args[5]);
     expect(definition._replace).toBe(true);
@@ -119,9 +122,6 @@ describe("useDefinitionOps 保存语义", () => {
       "policy:get": makeEnvelope(
         makePolicyData({
           layers: {
-            baseline: null,
-            synced: null,
-            local: null,
             sqlite: {
               skills: {
                 repositories: {
@@ -201,9 +201,6 @@ describe("useDefinitionOps 保存语义", () => {
         "policy:get": makeEnvelope(
           makePolicyData({
             layers: {
-              baseline: null,
-              synced: null,
-              local: null,
               sqlite: {
                 mcp: {
                   definitions: {

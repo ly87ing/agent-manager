@@ -79,7 +79,16 @@ export interface SkillAgentCell {
   state: SkillCellState | string;
   link_path?: string;
   target_dir_exists?: boolean;
+  assigned?: boolean;
+  enabled?: boolean;
+  version?: string | null;
+  available_version?: string | null;
+  actions?: string[];
+  blocked_reason?: string | null;
+  target?: string | null;
 }
+
+export type SkillAgentObserved = SkillAgentCell;
 
 export interface SkillCollectionSpec {
   url?: string;
@@ -96,6 +105,8 @@ export interface SkillCollectionObserved {
   discovered?: string[];
   discovery_inbox?: string[];
   extra_links?: string[];
+  actions?: string[];
+  blocked_reason?: string | null;
 }
 
 export interface SkillSpec {

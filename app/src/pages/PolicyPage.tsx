@@ -3,14 +3,13 @@ import { Loader2, Pencil, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
-import type { Diagnostic, Envelope, PolicyData, PolicyLayer, PolicyLayerName } from "../lib/contract";
+import type { Diagnostic, Envelope, PolicyData, PolicyLayerName } from "../lib/contract";
 import { engineErrorMessage, runEngine } from "../lib/engine";
-import { getDefaultPolicyLayer, useDefaultPolicyLayer } from "../lib/policyLayer";
 import { useEngineQuery } from "../lib/queries";
 import { POLICY_LAYER_COPY } from "../lib/ui-copy";
 import { cn } from "../lib/utils";
 
-/** 层归属徽标配色（提案 §4.9：baseline 灰显只读、synced 蓝标、local 橙标）。 */
+/** 配置来源徽标。 */
 const LAYER_META = POLICY_LAYER_COPY;
 
 function LayerBadge({ layer }: { layer: PolicyLayerName }) {
@@ -53,7 +52,7 @@ function shortValue(value: unknown): string {
 /** 顶层键的层归属 = attribution；更深层沿顶层归属展示（引擎只提供顶层归属）。 */
 function layerOfTopKey(attribution: Record<string, PolicyLayerName> | null, path: string): PolicyLayerName {
   const top = path.split(".")[0];
-  return attribution?.[top] ?? "baseline";
+  return attribution?.[top] ?? "builtin";
 }
 
 function EditDialog({
@@ -69,7 +68,6 @@ function EditDialog({
 }) {
   const [key, setKey] = useState(initialKey);
   const [rawValue, setRawValue] = useState(() => (initialValue === undefined ? "" : JSON.stringify(initialValue, null, 2)));
-  const [layer, setLayer] = useState<PolicyLayer>(getDefaultPolicyLayer());
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Diagnostic[] | null>(null);
   const [clientError, setClientError] = useState<string | null>(null);
@@ -90,7 +88,7 @@ function EditDialog({
     setSubmitting(true);
     let envelope: Envelope<PolicyData>;
     try {
-      envelope = await runEngine<PolicyData>("policy:set", ["--layer", layer, "--key", key, "--value", rawValue]);
+      envelope = await runEngine<PolicyData>("policy:set", ["--layer", "local", "--key", key, "--value", rawValue]);
     } catch (err) {
       setSubmitting(false);
       setErrors([{ code: "BRIDGE", element: null, message: engineErrorMessage(err) }]);
@@ -102,7 +100,7 @@ function EditDialog({
       setErrors(envelope.errors);
       return;
     }
-    toast.success(`已保存到「${LAYER_META[layer].label}」:${key}`);
+    toast.success(`已保存到本地数据库:${key}`);
     onSaved(envelope.data);
   };
 
@@ -131,24 +129,7 @@ function EditDialog({
               className="w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-xs"
             />
           </div>
-          <fieldset>
-            <legend className="mb-1 text-xs font-medium text-slate-500">保存到哪里（仓库默认值只读，要改它请走仓库的 git 流程）</legend>
-            <div className="flex gap-3">
-              {(["synced", "local"] as const).map((candidate) => (
-                <label key={candidate} className="flex items-center gap-1.5 text-xs text-slate-700">
-                  <input
-                    type="radio"
-                    name="policy-layer"
-                    checked={layer === candidate}
-                    onChange={() => setLayer(candidate)}
-                    data-testid={`policy-layer-${candidate}`}
-                  />
-                  <LayerBadge layer={candidate} />
-                  {candidate === "synced" ? "（同步到其它电脑）" : "（只影响这台电脑）"}
-                </label>
-              ))}
-            </div>
-          </fieldset>
+          <p className="text-xs text-slate-500">提交会写入 native-manager.db 的本地配置记录；内置默认值只读。</p>
           {clientError && <p className="text-xs text-red-600">{clientError}</p>}
           {errors && errors.length > 0 && <ErrorPanel title="保存被拒绝" errors={errors} />}
         </div>
@@ -175,11 +156,8 @@ function EditDialog({
   );
 }
 
-// 模块内读取默认层（避免 hook 顺序约束；dialog 打开时取当前值）
-
 export default function PolicyPage() {
   const query = useEngineQuery<PolicyData>("policy:get");
-  const [defaultLayer, setDefaultLayer] = useDefaultPolicyLayer();
   const [editing, setEditing] = useState<{ key: string; value: unknown } | null>(null);
 
   if (query.isPending) return <PageLoading />;
@@ -194,24 +172,12 @@ export default function PolicyPage() {
     <div className="space-y-4">
       <PageHeader
         title="个性化配置"
-        description="查看和调整本工具的配置。改动只写入「多设备共享」或「仅这台电脑」两层；仓库默认值只读。疑似密钥的内容会被自动拒绝。"
+        description="查看和调整本工具的配置。native-manager.db 是唯一事实源；内置默认值只读，疑似密钥的内容会被自动拒绝。"
       />
       {query.data.errors.length > 0 && <ErrorPanel title="policy:get 错误" errors={query.data.errors} />}
 
       <section className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <span className="text-xs text-slate-500">快捷修改（如技能矩阵的开关）默认保存到：</span>
-        {(["local", "synced"] as const).map((candidate) => (
-          <label key={candidate} className="flex items-center gap-1.5 text-xs text-slate-700">
-            <input
-              type="radio"
-              name="default-policy-layer"
-              checked={defaultLayer === candidate}
-              onChange={() => setDefaultLayer(candidate)}
-              data-testid={`default-layer-${candidate}`}
-            />
-            <LayerBadge layer={candidate} />
-          </label>
-        ))}
+        <p className="text-xs text-slate-600">数据库状态：native-manager.db 是配置的唯一事实源，所有改动保存在本机数据库。</p>
         <button
           type="button"
           onClick={() => setEditing({ key: "", value: undefined })}
@@ -257,18 +223,14 @@ export default function PolicyPage() {
         {rows.length === 0 && <p className="py-4 text-center text-sm text-slate-400">暂无配置</p>}
       </section>
 
-      <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {(["baseline", "synced", "local"] as const).map((layer) => (
-          <div key={layer} data-testid={`layer-card-${layer}`} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="mb-2 flex items-center justify-between">
-              <LayerBadge layer={layer} />
-              {layer === "baseline" && <span className="text-xs text-slate-400">只读</span>}
-            </div>
-            <pre className="max-h-64 overflow-auto rounded bg-slate-50 p-2 font-mono text-xs text-slate-600">
-              {data.layers?.[layer] ? JSON.stringify(data.layers[layer], null, 2) : "（文件不存在）"}
-            </pre>
-          </div>
-        ))}
+      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-700">本地数据库内容</h3>
+          <LayerBadge layer="sqlite" />
+        </div>
+        <pre data-testid="layer-card-sqlite" className="max-h-64 overflow-auto rounded bg-slate-50 p-2 font-mono text-xs text-slate-600">
+          {data.layers?.sqlite ? JSON.stringify(data.layers.sqlite, null, 2) : "数据库尚未写入本地配置"}
+        </pre>
       </section>
 
       {editing && (

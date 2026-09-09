@@ -1,24 +1,17 @@
-import { useState } from "react";
-import { Pencil, Plus, Trash2, Check, X } from "lucide-react";
-import { DriftExplanationPanel } from "../components/DriftExplanationPanel";
-import { McpServerFormDialog } from "../components/McpServerFormDialog";
+import { useRef, useState, type KeyboardEvent } from "react";
+import { ArrowLeft, Plus } from "lucide-react";
 import { ErrorPanel } from "../components/ErrorPanel";
-import { FreshnessBadge } from "../components/FreshnessBadge";
-import { MatrixCell } from "../components/MatrixCell";
+import { McpAssignmentRow, type McpAgentCellView } from "../components/McpAssignmentRow";
+import { McpServerCard, McpServerDetail } from "../components/McpServerCard";
+import { McpServerFormDialog } from "../components/McpServerFormDialog";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
-import { StateBadge } from "../components/StateBadge";
-import { Switch } from "../components/Switch";
 import type { EngineElement, PolicyData, PolicyLayers, StatusData } from "../lib/contract";
 import { agentCellsOf, type McpObserved, type McpSpec } from "../lib/observed";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
-import { useElementToggle } from "../lib/useElementToggle";
-import { useEngineQuery } from "../lib/queries";
 import { OVERLAY_COPY } from "../lib/ui-copy";
+import { useEngineQuery } from "../lib/queries";
 import { useExecuteApply, usePlanPreview } from "../lib/usePlanPreview";
 import { cn } from "../lib/utils";
-
-/** 可点击收敛的单元格态（managed-ok/absent/agent-disabled 无动作）。 */
-const ACTIONABLE_CELL_STATES = new Set(["drifted", "missing", "not-materialized", "leftover"]);
 
 /** 从 policy:get 的 sqlite 有效定义中取服务完整定义；无 DB 旧存储返回 null（调用方走迁移后取完整定义）。 */
 function fullMcpDefinition(layers: PolicyLayers | null, name: string): Record<string, unknown> | null {
@@ -27,260 +20,263 @@ function fullMcpDefinition(layers: PolicyLayers | null, name: string): Record<st
   return typeof definition === "object" && definition !== null ? (definition as Record<string, unknown>) : null;
 }
 
-function EnvResolutionList({ element }: { element: EngineElement }) {
-  const observed = element.observed as McpObserved;
-  const env = observed.env ?? {};
-  const entries = Object.entries(env);
-  if (entries.length === 0) {
-    return <p className="text-xs text-slate-400">不需要环境变量。</p>;
-  }
-  return (
-    <ul className="space-y-1">
-      {entries.map(([name, resolution]) => (
-        <li key={name} className="flex items-center gap-2 text-xs">
-          {resolution.resolved ? (
-            <Check className="h-3.5 w-3.5 text-emerald-600" aria-label="已配置" />
-          ) : (
-            <X className="h-3.5 w-3.5 text-red-500" aria-label="未配置" />
-          )}
-          <span className="font-mono text-slate-700">{name}</span>
-          <span className={resolution.resolved ? "text-emerald-600" : "text-red-600"}>
-            {resolution.resolved ? "已配置" : "未配置（运行时会显示变量名）"}
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function ServerDetail({ element, onEdit, onRemove, onUpdate }: { element: EngineElement; onEdit: () => void; onRemove: () => void; onUpdate: () => void }) {
-  const spec = element.spec as McpSpec;
-  const cells = agentCellsOf(element);
-  const extraArgs = spec.extra_args_by_agent ?? {};
-  return (
-    <section data-testid={`mcp-detail-${element.id}`} className="space-y-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-base font-semibold text-slate-800">{element.id}</h3>
-        <div className="flex items-center gap-2">
-          <StateBadge state={element.state} />
-          <FreshnessBadge freshness={element.freshness} className="items-end" />
-        </div>
-      </div>
-
-      <div>
-        <h4 className="mb-1 text-xs font-semibold text-slate-500">启动命令</h4>
-        <code className="block overflow-x-auto rounded bg-slate-900 px-3 py-2 font-mono text-xs break-all text-slate-100">
-          {spec.command} {(spec.args ?? []).join(" ")}
-        </code>
-        <p className="mt-1 text-xs text-slate-400">
-          启动超时 {spec.startup_timeout_sec ?? "—"} 秒 · 应用到:{" "}
-          {spec.agents === null || spec.agents === undefined ? "全部助手" : spec.agents.join(", ")}
-        </p>
-      </div>
-
-      {Object.keys(extraArgs).length > 0 && (
-        <div>
-          <h4 className="mb-1 text-xs font-semibold text-slate-500">各助手附加参数</h4>
-          <ul className="space-y-1">
-            {Object.entries(extraArgs).map(([agent, args]) => (
-              <li key={agent} className="text-xs">
-                <span className="font-mono text-slate-500">{agent}: </span>
-                <code className="font-mono text-slate-700">{args.join(" ")}</code>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <div>
-        <h4 className="mb-1 text-xs font-semibold text-slate-500">密钥变量（只显示是否已配置，永不显示值）</h4>
-        <EnvResolutionList element={element} />
-      </div>
-
-      <div>
-        <h4 className="mb-1 text-xs font-semibold text-slate-500">写入位置</h4>
-        <ul className="space-y-1">
-          {Object.entries(cells).map(([agent, cell]) => (
-            <li key={agent} className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="font-mono text-slate-500">{agent}</span>
-              <code className="font-mono break-all text-slate-700">{cell.target ?? "—"}</code>
-              <span className={cell.target_exists ? "text-emerald-600" : "text-slate-400"}>
-                {cell.target_exists ? "已存在" : "未生成"}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <div className="flex gap-2 border-t border-slate-100 pt-3">
-        <button type="button" onClick={onUpdate} className="rounded border border-indigo-200 px-2.5 py-1 text-xs text-indigo-600">更新并同步</button>
-        <button
-          type="button"
-          data-testid={`edit-server-${element.id}`}
-          onClick={onEdit}
-          className="inline-flex items-center gap-1 rounded border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50"
-        >
-          <Pencil className="h-3 w-3" aria-hidden /> {OVERLAY_COPY.editServer}
-        </button>
-        <button
-          type="button"
-          data-testid={`remove-server-${element.id}`}
-          onClick={onRemove}
-          className="inline-flex items-center gap-1 rounded border border-red-200 px-2.5 py-1 text-xs text-red-600 hover:bg-red-50"
-        >
-          <Trash2 className="h-3 w-3" aria-hidden /> {OVERLAY_COPY.removeServer}
-        </button>
-      </div>
-
-      <DriftExplanationPanel element={element} planCommand="mcp:plan" cellKind="mcp" />
-    </section>
-  );
-}
-
 export default function McpPage() {
   const query = useEngineQuery<StatusData>("mcp:status");
+  const agentsQuery = useEngineQuery<StatusData>("agents:status");
   const policyQuery = useEngineQuery<PolicyData>("policy:get");
+  const [activeTab, setActiveTab] = useState<"library" | "agents">("library");
+  const [agentFilter, setAgentFilter] = useState<string>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [formState, setFormState] = useState<{ editing: EngineElement } | "new" | null>(null);
+
   const preview = usePlanPreview();
   const executeApply = useExecuteApply();
-  const elementToggle = useElementToggle();
   const definitionOps = useDefinitionOps({ section: "mcp", domain: "mcp" });
+
+  const tabRefs = useRef<Record<"library" | "agents", HTMLButtonElement | null>>({ library: null, agents: null });
+
+  const handleTabKeyDown = (e: KeyboardEvent<HTMLButtonElement>, tab: "library" | "agents") => {
+    const tabs: ("library" | "agents")[] = ["library", "agents"];
+    const index = tabs.indexOf(tab);
+    let nextIndex = -1;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      nextIndex = (index + 1) % tabs.length;
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      nextIndex = (index - 1 + tabs.length) % tabs.length;
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      nextIndex = 0;
+    } else if (e.key === "End") {
+      e.preventDefault();
+      nextIndex = tabs.length - 1;
+    }
+    if (nextIndex >= 0) {
+      setActiveTab(tabs[nextIndex]);
+      tabRefs.current[tabs[nextIndex]]?.focus();
+    }
+  };
 
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="mcp:status 调用失败" error={query.error} />;
 
   const elements = query.data.data.elements;
-  const agentColumns = Array.from(
-    new Set(elements.flatMap((element) => Object.keys(agentCellsOf(element)))),
-  ).sort();
-  const selected = elements.find((element) => element.id === selectedId) ?? null;
   const layers = policyQuery.data?.data.layers ?? null;
+  const selected = elements.find((element) => element.id === selectedId) ?? null;
 
-  /** 单元格点击：仅针对该 server 执行 plan 与 apply（阶段 A 真实范围控制）。 */
-  const openCellApply = (element: EngineElement) => {
+  // 助手列来源：agents:status、服务声明的 agents、已报告的 cell。
+  // 不取 policy 层的 agents 结构——其中混有 definitions 等保留字段，不能当助手 ID 列表。
+  const statusAgents = (agentsQuery.data?.data?.elements ?? []).map((el) => el.id.replace(/^agents:/, ""));
+  const specAgents = elements.flatMap((element) => (element.spec as McpSpec).agents ?? []);
+  const cellAgents = elements.flatMap((element) => Object.keys(agentCellsOf(element)));
+  const agentColumns = Array.from(new Set([...statusAgents, ...specAgents, ...cellAgents]))
+    .filter(Boolean)
+    .sort();
+
+  /** 所有写操作统一走 plan 预览 → 确认 apply；取消零 policy:set、零 apply。 */
+  const openAction = (
+    title: string,
+    subtitle: string,
+    args: string[],
+    options?: { confirmLabel?: string; requireConfirmText?: string },
+  ) => {
     preview.open({
-      title: `同步 ${element.id}`,
-      subtitle: "仅同步此服务配置（执行前自动备份）。",
-      planCommands: [{ command: "mcp:plan", args: ["--only", element.id] }],
-      confirmLabel: "立即同步",
-      execute: executeApply({
-        command: "mcp:apply",
-        label: `同步 ${element.id}`,
-        extraArgs: ["--only", element.id],
-      }),
+      title,
+      subtitle,
+      planCommands: [{ command: "mcp:plan", args }],
+      confirmLabel: options?.confirmLabel ?? "立即执行",
+      requireConfirmText: options?.requireConfirmText,
+      execute: executeApply({ command: "mcp:apply", label: title, extraArgs: args }),
     });
   };
 
+  /** 库级操作：仅按 observed.actions 提供的 enable/disable/remove，无 agent 参数。 */
+  const handleServerAction = (element: EngineElement, action: "enable" | "disable" | "remove") => {
+    const name = element.id.replace(/^mcp:/, "");
+    const args = ["--only", element.id, "--action", action];
+    if (action === "enable") {
+      openAction(`启用服务 ${name}`, "启用服务，恢复原来已启用的助手配置。", args);
+    } else if (action === "disable") {
+      openAction(`停用服务 ${name}`, "停用服务，撤下已配置的助手入口。", args);
+    } else {
+      const affected = Object.values(agentCellsOf(element)).filter(
+        (cell) => (cell as McpAgentCellView).assigned === true,
+      ).length;
+      openAction(
+        `删除服务 ${name}`,
+        `从配置中移除服务，并清理 ${affected} 条受影响的助手配置；不会卸载已安装的软件包。`,
+        args,
+        { confirmLabel: "立即删除", requireConfirmText: name },
+      );
+    }
+  };
+
+  /** 服务 × 助手 操作：按钮来自 cell.actions，plan/apply 携带精确 --only/--agent/--action。 */
+  const handleCellAction = (element: EngineElement, agent: string, action: string) => {
+    const args = ["--only", element.id, "--agent", agent, "--action", action];
+    const labelMap: Record<string, string> = {
+      add: "添加",
+      update: "更新",
+      enable: "启用",
+      disable: "禁用",
+      remove: "从此助手删除",
+    };
+    openAction(`${labelMap[action] ?? action} ${element.id} @ ${agent}`, "仅同步此服务在对应助手中的配置。", args);
+  };
+
+  const relevantAgents = agentFilter === "all" ? agentColumns : [agentFilter];
+  const assignmentRows = elements.flatMap((element) => {
+    const cells = (element.observed as McpObserved)?.agents ?? {};
+    // cell 缺失 = 引擎未报告此助手的配置路径：不伪造可执行 cell，行内明确显示未配置
+    return relevantAgents.map((agent) => ({
+      key: `${element.id}-${agent}`,
+      element,
+      agent,
+      cell: (cells[agent] as McpAgentCellView | undefined) ?? null,
+    }));
+  });
+
   return (
-    <div className="space-y-4">
-      <PageHeader
-        title="MCP"
-        description="每个 MCP 服务配置进了哪些助手。点有颜色的格子可以先预览再同步。"
-      />
+    <div className="space-y-6">
+      <PageHeader title="MCP" description="服务库管理 MCP 服务定义；「助手中的服务」按助手查看并操作每个服务的配置。" />
+
       {query.data.errors.length > 0 && <ErrorPanel title="mcp:status 错误" errors={query.data.errors} />}
 
-      <div className="flex justify-end">
-        <button
-          type="button"
-          data-testid="add-server-button"
-          onClick={() => setFormState("new")}
-          className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-        >
-          <Plus className="h-4 w-4" aria-hidden /> {OVERLAY_COPY.addServer}
-        </button>
+      <div role="tablist" aria-label="MCP 管理视图" className="flex border-b border-slate-200">
+        {(["library", "agents"] as const).map((tab) => (
+          <button
+            key={tab}
+            ref={(el) => {
+              tabRefs.current[tab] = el;
+            }}
+            type="button"
+            role="tab"
+            id={`tab-${tab}`}
+            aria-controls={`panel-${tab}`}
+            aria-selected={activeTab === tab}
+            tabIndex={activeTab === tab ? 0 : -1}
+            onClick={() => setActiveTab(tab)}
+            onKeyDown={(e) => handleTabKeyDown(e, tab)}
+            className={cn(
+              "border-b-2 px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500",
+              activeTab === tab
+                ? "border-indigo-600 font-semibold text-indigo-600"
+                : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700",
+            )}
+          >
+            {tab === "library" ? "服务库" : "助手中的服务"}
+          </button>
+        ))}
       </div>
 
-      <section className="overflow-x-auto rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-slate-200 text-xs text-slate-500">
-              <th className="py-2 pr-4 font-medium">Server</th>
-              {agentColumns.map((agent) => (
-                <th key={agent} className="py-2 pr-4 font-mono font-medium">
-                  {agent}
-                </th>
-              ))}
-              <th className="py-2 font-medium">最新版本</th>
-            </tr>
-          </thead>
-          <tbody>
-            {elements.map((element) => {
-              const cells = agentCellsOf(element);
-              const isSelected = element.id === selectedId;
-              return (
-                <tr
-                  key={element.id}
-                  className={cn("border-b border-slate-100 last:border-0", isSelected && "bg-indigo-50/40")}
-                >
-                  <td className="py-2 pr-4">
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        checked={(element.policy as { enabled?: boolean }).enabled !== false}
-                        testId={`toggle-${element.id}`}
-                        label={`${(element.policy as { enabled?: boolean }).enabled !== false ? "停用" : "启用"} ${element.id}`}
-                        onChange={() =>
-                          void elementToggle.toggle({
-                            elementId: element.id,
-                            enabledKey: `mcp.${element.id.replace(/^mcp:/, "")}.enabled`,
-                            enabled: (element.policy as { enabled?: boolean }).enabled !== false,
-                            domain: "mcp",
-                            name: element.id,
-                          })
-                        }
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setSelectedId(isSelected ? null : element.id)}
-                        aria-expanded={isSelected}
-                        className="font-mono text-xs text-indigo-600 hover:text-indigo-800"
-                      >
-                        {element.id}
-                      </button>
-                    </div>
-                  </td>
-                  {agentColumns.map((agent) => {
-                    const cell = cells[agent];
-                    const actionable = cell !== undefined && ACTIONABLE_CELL_STATES.has(cell.state);
-                    return (
-                      <td key={agent} className="py-2 pr-4">
-                        {cell ? (
-                          <button
-                            type="button"
-                            disabled={!actionable}
-                            onClick={() => openCellApply(element)}
-                            data-testid={`mcp-cell-${element.id}-${agent}`}
-                            title={actionable ? `点击同步 ${element.id}（先预览再执行）` : undefined}
-                            className={cn("rounded", actionable ? "cursor-pointer hover:ring-2 hover:ring-indigo-300" : "cursor-default")}
-                          >
-                            <MatrixCell state={cell.state} kind="mcp" title={`${agent}: ${cell.state}`} />
-                          </button>
-                        ) : (
-                          <span className="text-xs text-slate-300">—</span>
-                        )}
-                      </td>
-                    );
-                  })}
-                  <td className="py-2">
-                    <FreshnessBadge freshness={element.freshness} />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        {elements.length === 0 && <p className="py-4 text-center text-sm text-slate-400">无 MCP server 定义</p>}
-      </section>
+      {activeTab === "library" && (
+        <div id="panel-library" role="tabpanel" aria-labelledby="tab-library" className="space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-slate-500">共 {elements.length} 个服务</span>
+            <button
+              type="button"
+              data-testid="add-server-button"
+              onClick={() => setFormState("new")}
+              className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+            >
+              <Plus className="h-4 w-4" aria-hidden /> {OVERLAY_COPY.addServer}
+            </button>
+          </div>
 
-      {selected ? (
-        <ServerDetail
-          onUpdate={() => openCellApply(selected)}
-          element={selected}
-          onEdit={() => setFormState({ editing: selected })}
-          onRemove={() => definitionOps.requestRemove(selected.id.replace(/^mcp:/, ""), layers)}
-        />
-      ) : (
-        <p className="text-xs text-slate-400">点击左侧服务名展开详情（启动命令 / 密钥变量 / 写入位置 / 同步详情）。</p>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            {elements.map((element) => (
+              <McpServerCard
+                key={element.id}
+                element={element}
+                selected={selectedId === element.id}
+                onSelect={setSelectedId}
+                onEdit={(el) => setFormState({ editing: el })}
+                onAction={handleServerAction}
+              />
+            ))}
+          </div>
+          {elements.length === 0 && <p className="py-4 text-center text-sm text-slate-400">无 MCP server 定义</p>}
+
+          {selected ? (
+            <McpServerDetail element={selected} />
+          ) : (
+            elements.length > 0 && (
+              <p className="text-xs text-slate-400">点击服务名展开详情（启动命令 / 密钥变量 / 写入位置 / 同步详情）。</p>
+            )
+          )}
+        </div>
+      )}
+
+      {activeTab === "agents" && (
+        <div id="panel-agents" role="tabpanel" aria-labelledby="tab-agents" className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center gap-4">
+              <label className="flex items-center gap-2 text-xs font-medium text-slate-700">
+                <span>助手筛选:</span>
+                <select
+                  aria-label="助手筛选"
+                  data-testid="filter-agent-select"
+                  value={agentFilter}
+                  onChange={(e) => setAgentFilter(e.target.value)}
+                  className="rounded border border-slate-300 bg-white px-2 py-1 font-mono text-xs text-slate-700"
+                >
+                  <option value="all">全部助手 ({agentColumns.length})</option>
+                  {agentColumns.map((ag) => (
+                    <option key={ag} value={ag}>
+                      {ag}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {agentFilter !== "all" && (
+                <button
+                  type="button"
+                  onClick={() => setAgentFilter("all")}
+                  className="inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                >
+                  <ArrowLeft className="h-3 w-3" aria-hidden /> 清除筛选
+                </button>
+              )}
+            </div>
+
+            <span className="text-xs text-slate-500">当前展示 {assignmentRows.length} 条配置记录</span>
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-xs text-slate-500">
+                  <th className="py-2.5 pr-4 font-medium">服务</th>
+                  <th className="py-2.5 pr-4 font-medium">助手</th>
+                  <th className="py-2.5 pr-4 font-medium">最新版本</th>
+                  <th className="py-2.5 pr-4 font-medium">当前配置版本</th>
+                  <th className="py-2.5 pr-4 font-medium">状态</th>
+                  <th className="py-2.5 font-medium">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {assignmentRows.map(({ key, element, agent, cell }) => (
+                  <McpAssignmentRow
+                    key={key}
+                    element={element}
+                    agent={agent}
+                    cell={cell}
+                    onOpenDetail={(id) => {
+                      setSelectedId(id);
+                      setActiveTab("library");
+                    }}
+                    onAction={handleCellAction}
+                  />
+                ))}
+              </tbody>
+            </table>
+            {assignmentRows.length === 0 && (
+              <p className="py-8 text-center text-sm text-slate-400">无符合筛选条件的服务配置</p>
+            )}
+          </div>
+        </div>
       )}
 
       {formState && (
@@ -298,7 +294,6 @@ export default function McpPage() {
       )}
 
       {preview.modal}
-      {elementToggle.modal}
       {definitionOps.modals}
     </div>
   );

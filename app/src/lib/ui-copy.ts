@@ -3,7 +3,7 @@
  * 原则：按钮/标题/徽章用「动作/结果」语言；工程原值（state 枚举、命令名）
  * 只保留在 tooltip/详情里做对照。引擎 envelope 的 code/note 属契约内容，不在此列。
  */
-import type { ElementState, Freshness, PlanAction, PolicyLayerName, ProfileDiffEntry, ProfileSyncState, RiskLevel } from "./contract";
+import type { ElementState, Freshness, PlanAction, PolicyLayerName, RiskLevel } from "./contract";
 
 // ---------- 同步状态（收敛轴七态） ----------
 
@@ -95,24 +95,11 @@ export function planSummaryPhrase(actions: PlanAction[]): string {
   return parts.length > 0 ? parts.join(" · ") : "没有实际改动";
 }
 
-// ---------- 个性化配置三层 ----------
+// ---------- 个性化配置来源 ----------
 
 export const POLICY_LAYER_COPY: Record<PolicyLayerName, { label: string; className: string }> = {
-  baseline: { label: "仓库默认值", className: "border-slate-200 bg-slate-100 text-slate-500" },
-  synced: { label: "多设备共享", className: "border-sky-200 bg-sky-50 text-sky-700" },
-  local: { label: "仅这台电脑", className: "border-orange-200 bg-orange-50 text-orange-700" },
+  builtin: { label: "内置默认值", className: "border-slate-200 bg-slate-100 text-slate-500" },
   sqlite: { label: "本地数据库", className: "border-violet-200 bg-violet-50 text-violet-700" },
-};
-
-// ---------- 多设备同步状态 ----------
-
-export const PROFILE_STATE_COPY: Record<ProfileSyncState, { label: string; className: string }> = {
-  clean: { label: "已同步", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
-  ahead: { label: "有未推送的改动", className: "border-sky-200 bg-sky-50 text-sky-700" },
-  behind: { label: "有未拉取的改动", className: "border-amber-200 bg-amber-50 text-amber-700" },
-  diverged: { label: "两边都有改动", className: "border-red-200 bg-red-50 text-red-700" },
-  uninitialized: { label: "远端还是空的", className: "border-zinc-200 bg-zinc-100 text-zinc-500" },
-  "local-only": { label: "仅本机（离线）", className: "border-slate-200 bg-slate-100 text-slate-500" },
 };
 
 // ---------- 通用动作/状态短语 ----------
@@ -145,15 +132,6 @@ export const COPY = {
   driftExplanation: "不一致说明",
 } as const;
 
-// ---------- 同步差异（profile diff） ----------
-
-export const PROFILE_CHANGE_COPY: Record<ProfileDiffEntry["change"], { label: string; className: string }> = {
-  local: { label: "仅本机改", className: "border-sky-200 bg-sky-50 text-sky-700" },
-  remote: { label: "仅远端改", className: "border-amber-200 bg-amber-50 text-amber-700" },
-  both: { label: "两边都改", className: "border-red-200 bg-red-50 text-red-700" },
-  none: { label: "一致", className: "border-slate-200 bg-slate-50 text-slate-500" },
-};
-
 // ---------- 元素启停开关 ----------
 
 export const TOGGLE_COPY = {
@@ -174,9 +152,9 @@ export const OVERLAY_COPY = {
   removeServer: "移除",
   addCollection: "新增集合",
   removeCollection: "移除",
-  /** 编辑基线条目时表单内提示。 */
-  editBaselineNote: "该条目由仓库默认值提供；你的修改会写入覆盖层，仓库默认值不受影响。",
-  /** 移除基线条目时确认文案（tombstone 语义）。 */
-  removeBaselineNote: "写入移除标记，使该条目停止生效；删除标记即可恢复下层定义。确认同步后清理本工具管理的配置或链接。",
+  /** 编辑内置条目时表单内提示。 */
+  editBuiltinNote: "该条目由内置默认值提供；你的修改会写入本地数据库，内置默认值不受影响。",
+  /** 移除定义时确认文案（tombstone 语义）。 */
+  removeDefinitionNote: "写入移除标记，使该条目停止生效；删除标记即可恢复定义。确认同步后清理本工具管理的配置或链接。",
   /** 移除覆盖层条目时确认文案（policy:delete 语义）。 */
 } as const;

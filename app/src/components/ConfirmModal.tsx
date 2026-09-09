@@ -6,7 +6,7 @@ import { ErrorPanel } from "./ErrorPanel";
 import { RiskBadge } from "./PlanPreviewModal";
 
 /**
- * 非 plan 类动作的确认弹窗（snapshots:restore / profile:pull|push）。
+ * 非 plan 类动作的确认弹窗（例如 snapshots:restore）。
  * 风险级驱动：install-remove 级须输入 requireText 二次确认；其余单次确认。
  */
 export function ConfirmModal({

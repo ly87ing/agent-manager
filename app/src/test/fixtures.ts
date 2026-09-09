@@ -8,7 +8,6 @@ import {
   type Mode,
   type PlanAction,
   type PolicyData,
-  type ProfileData,
   type RunEntry,
   type SnapshotEntry,
 } from "../lib/contract";
@@ -115,40 +114,17 @@ export function makeSnapshotEntry(overrides: Partial<SnapshotEntry> = {}): Snaps
 
 export function makePolicyData(overrides: Partial<PolicyData> = {}): PolicyData {
   return {
-    layers: {
-      baseline: { agents: { "claude-code": { enabled: true } }, mcp: { "grok-search": { enabled: true } } },
-      synced: null,
-      local: { browser_us_sync: { enabled: false } },
-    },
+    layers: { sqlite: { browser_us_sync: { enabled: false } } },
     effective: {
       agents: { "claude-code": { enabled: true } },
       mcp: { "grok-search": { enabled: true } },
       browser_us_sync: { enabled: false },
     },
-    attribution: { agents: "baseline", mcp: "baseline", browser_us_sync: "local" },
+    attribution: { agents: "builtin", mcp: "builtin", browser_us_sync: "sqlite" },
     layer: null,
     key: null,
     value: null,
     path: null,
-    ...overrides,
-  };
-}
-
-export function makeProfileData(overrides: Partial<ProfileData> = {}): ProfileData {
-  return {
-    verb: "status",
-    state: "clean",
-    backend: { type: "git", url: "https://***@git.example.com/demo/profile-sync.git", configured: true },
-    machine_id: "demo-mac",
-    local: { path: "/repo/config/manager.synced.json", exists: true, key_count: 2 },
-    base: { exists: true },
-    ahead: 0,
-    behind: 0,
-    last_sync: "2026-09-05T12:00:00Z",
-    conflicts: [],
-    snapshot: null,
-    published: null,
-    gate: null,
     ...overrides,
   };
 }
