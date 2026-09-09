@@ -1,24 +1,37 @@
 # AGENTS.md
 
-## Setup
-- Python 3 and make are enough for the repo checks; no extra bootstrap is needed for doc or contract edits.
-- If you touch rules, edit `agent-rule/rules/src/` and rebuild + distribute with `make update`（构建脚本为 `agent-rule/scripts/build-agent-rules.py`）。
+## 当前目标
+- 实现 Tauri 2 界面与 Rust 原生后端；产品与数据语义见 `docs/GUI-REDESIGN.md`，实施与验收见 `docs/goal-rust-gui.md`。
+- 桌面和 CLI 复用同一 Rust 库。新版不依赖 Python、`manage.sh`、旧适配器或源码目录。
+- Python 不再维护，用户已授权清理；不新增 Python 功能、投影兼容层或双实现对照义务。
+- 当前目标不等于已实现状态。未通过编译、实际操作和独立验收的候选不得称为完成。
 
-## Test commands
-- `python3 -m unittest discover -s tests -p 'test*.py' -v`
-- `python3 -m unittest tests.test_project_contracts -v`
-- `make smoke`
+## 实施协作
+- 主审负责设计、范围裁决、代码审查与独立验收；产品代码和测试由实施标签页完成。
+- 实施者按 agy YOLO → kimi-ly YOLO → Codex Luna 的顺序选择，前者明确额度耗尽时才切换；Luna 使用 `gpt-5.6-luna`。
+- 先交付一个小闭环再扩大范围。共享接口只有一个负责人；向实施者交代文件范围、输入输出和验证反例。
+- 用户已授权在 `rust` 分支分批提交、推送通过验收的改动。提交由主审执行，核对整个待推送范围及远程提交；不混入无关修改。此授权不包含创建 Release、打 tag 或发布安装包。
 
-## done-when
-- The targeted test passes first, then the relevant broader test command passes.
-- README and docs match the implemented behavior.
-- No generated file was hand-edited.
+## 开发与验证
+- Rust 工具链、Node.js 与 pnpm 是原生版本的开发工具；不要再把 Python 和旧 make 管线作为新版前置条件。
+- 修改行为或共享接口前读历史、调用方和邻近测试，使用 `change-discipline`；界面验收使用 `frontend-verification`；文档使用 `reader-facing-writing`；临时产物使用 `artifact-hygiene`。
+- 先运行最小相关检查，再运行对应完整检查：`cargo test --manifest-path engine-rs/Cargo.toml`、`cargo test --manifest-path app/src-tauri/Cargo.toml`；前端在 `app/` 运行 `pnpm test:unit run` 和 `pnpm build`。
+- 文档改动检查链接、命令和目标一致性，不为旧文案断言补回已废弃要求。没有运行或没有真正覆盖的验证必须说明。
+- 不删测、降断言或跳过来掩盖有效失败。旧 Python 专属测试随退役实现清理；仍适用的数据安全、范围隔离和反例迁入 Rust。
+- 真实验收使用隔离 HOME、数据目录及测试助手路径；不得以 mock、退出码或实施者自报替代实际结果回读。
 
-## generated-file boundaries
-- Treat `agent-rule/rules/dist/` as generated output only.
-- Rebuild from `agent-rule/rules/src/` and sync from the build output instead of editing dist files directly.
+## 数据与清理边界
+- SQLite 是本机定义和分配的唯一写入来源；查询、预览、取消和演练不得写入状态。
+- 保存定义不执行安装或资源应用。逐助手动作不能影响其他助手；不覆盖外部修改。
+- 清理旧实现前清点调用、CI、打包、文档及测试引用，对未提交修改留存本地补丁；不批量 reset/clean，不删除用户会话、真实配置、凭据或外部仓库。
+- 代码清理与行为变更分别提交，不重写历史。
 
-## secrets boundaries
+## 生成文件
+- 规则正文编辑 `agent-rule/rules/src/`；`agent-rule/rules/dist/` 仅为生成产物，禁止手改。
+- 规则构建和分发也需转为原生路径。替代入口尚未完成时，不修改正文后假称已生成，不为退役 Python 构建器增加新功能。
+- README、任务书与实际验收状态一致；没有生成、运行或回读的结果不得声明通过。
+
+## 敏感信息
 - 真实敏感信息只允许存放在外部私有 `secrets/` 仓库，不允许写入当前仓库的代码、文档、示例、计划、HTML、README 或生成产物。
-- `Tailscale` / `SSH` / 远程访问场景中的真实用户名、设备名、`.ts.net` 域名、Tailscale IP、SSH Host 配置、公钥内容和可推导内网拓扑的组合信息都按敏感信息处理。
-- 当前仓库只能保留占位符、模板、注入逻辑和通用说明；需要举例时统一使用 `YOUR_*` 占位符。
+- Tailscale / SSH / 远程访问场景中的真实用户名、设备名、`.ts.net` 域名、Tailscale IP、SSH Host 配置、公钥内容和可推导内网拓扑的组合信息都按敏感信息处理。
+- 当前仓库只能保留占位符、模板、注入逻辑和通用说明；示例统一使用 `YOUR_*`。数据库和日志不保存明文凭据。

@@ -1,8 +1,10 @@
 # contract/ — 引擎契约（Engine Contract）
 
-契约是整个项目最重要的产物：**一份语言中立的 JSON Schema**，Python 与 Rust 实现
-都受同一份契约测试检验，GUI / CLI / CI 只依赖契约、不依赖实现
-（见 `docs/GUI-ARCHITECTURE-PROPOSAL.md` §2 与 `docs/goal-rust-gui.md` 已决清单）。
+当前目标为 GUI 和 CLI 复用 Rust 原生引擎，接口仍应显式校验。产品语义见 [GUI 重设计](../docs/GUI-REDESIGN.md)，验收见[当前任务书](../docs/goal-rust-gui.md)。Python 已退役，不再要求双实现输出一致。
+
+**本目录 schema 与下文清单包含旧命令的历史契约。** envelope、状态、计划、结果等仍被前端消费的结构继续检查；profile、converge、旧来源编辑及 Python 校验器的历史说明不代表新版已支持或必须兼容。退役命令需同步清理调用方、文档和专属测试；仍适用的校验与正反例转入 Rust，不能静默放宽现有前端实际消费的结构。本次仅调整文档要求，未修改 schema 或宣称契约迁移完成。
+
+## 历史契约清单与约定
 
 ## 目录布局与版本化
 

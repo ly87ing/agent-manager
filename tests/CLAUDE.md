@@ -2,8 +2,8 @@
 
 ## Scope
 
-- Prefer the narrowest unittest target, e.g. `python3 -m unittest tests.test_project_contracts -v`.
-- When changing a single contract, narrow further to the specific test method.
+- 本目录测试适用范围与迁移要求见 [AGENTS.md](AGENTS.md)：Python 专属测试随实现退役，仍适用的安全反例迁入 Rust。
+- 原生功能与界面分别使用 `engine-rs/`、`app/src/test/` 的最小相关测试。旧文案断言不能覆盖用户已确定的新目标。
 
 ## Fixture discipline
 
