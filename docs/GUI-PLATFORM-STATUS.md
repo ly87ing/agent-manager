@@ -12,11 +12,14 @@
 | Skills 原生域 | 已完成：已接入 dispatcher；内置默认只读、写入进 SQLite；集合与单技能支持更新/启停/移除；内容快照与安全软连接；零写预览与 apply 排他锁/审计 |
 | Runs 操作记录与清理 | 已完成：列表与详情读取 SQLite `operation_logs`；新增操作记录时按设置（`log_retention_days`，0 为不清理）删除过期记录；提供 `runs:clear` 二次确认手动清空（清空自身零审计且不删库改配置） |
 | 本地结构化诊断日志与清理 | 已完成：`data_dir/logs/agent-manager-YYYY-MM-DD.jsonl` 日切写入；仅记录脱敏元数据；Unix 权限 0700/0600；只读与演练零写；诊断日志写入后及应用启动时按 `log_retention_days` 清理过期文件；提供 `logs:clear` 原生命令并在设置页支持二次确认手动清空（不碰 SQLite 任务记录） |
-| MCP 原生域 | 未完成：尚未接入 dispatcher |
-| Rules/Hooks 统一编辑与端侧落地 | 未完成 |
-| 独立包真实 E2E | 部分完成：2026-09-09 已在 Darwin x86_64 实机构建 DMG，并通过只读挂载、仓库外复制、元数据/架构/无 Python/路径脱敏检查，以及从 `/` 使用隔离 HOME、独立数据目录、最小 PATH、运行期源码零引用的 5 秒启动验收；Apple 签名、公证、arm64、Linux、Windows 尚未验证 |
-| 跨平台发布、签名、更新 | 未完成 |
+| MCP 原生域 | 已完成：Rust dispatcher 已接入本地 stdio `mcp:status` / `mcp:plan` / `mcp:apply`；定义与分配存 SQLite；支持 Claude JSON、Codex TOML、OpenCode JSON（需配置对应 Agent target）；逐助手 add/update/enable/disable/remove，库级 enable/disable/remove；status/plan/dry-run 零写；apply 具备锁、审计、CAS/回滚；env 在 SQLite definition/binding 中只持久化字面量 `${VAR}` 形式的环境变量引用；status、plan、诊断与操作日志不展示或保存解析后的真实值；真实 apply 执行时从进程环境解析，并按目标 codec 写入 Claude、Codex 或 OpenCode 的目标客户端配置，目标文件的明文由文件权限与客户端安全边界保护 |
+| Rules/Hooks 原生域 | 未完成：原生 `status/plan/apply` 与 `sources:get/set` 尚未接线 |
+| 设置页高级管理 | 未完成/待产品裁决：总览、Tools、Aliases、Secrets、更新中心和快照页面虽可达，但 `system:audit`、`system:refresh-upstream`、`system:converge`、`tools:status/plan/apply`、`aliases:status/plan/apply`、`secrets:status`、`snapshots:list/restore` 均未接入 Rust dispatcher；UI 入口不等同后端实现 |
+| 独立包真实业务 E2E | 未完成：2026-09-09 Darwin x86_64 DMG 已通过只读挂载、仓库外复制、无 Python、路径脱敏和从 `/` 隔离环境 5 秒启动验收；该包早于当前 MCP 实现，不能证明当前 MCP GUI 业务闭环 |
+| 跨平台发布、签名、更新 | 未完成：签名、公证、arm64、Linux、Windows 和更新发布仍未验证 |
 
 缺库读取不建库，保存才初始化数据库；设置在 `app_settings` 表。policy 持久化来源为 `sqlite`，写入参数固定 `--layer local`。Claude Code 与 Codex 默认均为官方 `native` 命令，brew 仅按实际检测来源处理。
+
+MCP 仅支持本地 stdio；远程 HTTP MCP 尚未实现。OpenCode 使用 OpenCode JSON codec，必须为对应 Agent 配置 `mcp_config` 目标。
 
 验证入口：`cargo test --manifest-path engine-rs/Cargo.toml`、`cargo test --manifest-path app/src-tauri/Cargo.toml`，以及 `cd app && pnpm test:unit run && pnpm typecheck && pnpm build`。macOS 打包与独立包验收使用 `pnpm --dir app run build:macos` 与 `./scripts/verify-macos-dmg.sh <path-to-dmg>`。本机验收允许如实报告未签名状态，不代表 Apple 签名或公证通过，也不替代其他平台和未完成域的 E2E。
