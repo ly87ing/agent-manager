@@ -14,6 +14,7 @@ pub mod envelope;
 pub mod native;
 pub mod native_agents;
 pub mod native_logs;
+pub mod native_mcp;
 pub(crate) mod native_runs;
 pub mod native_skills;
 pub mod store;

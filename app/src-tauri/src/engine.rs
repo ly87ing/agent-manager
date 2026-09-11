@@ -85,6 +85,7 @@ enum ArgValueKind {
     /// agents:plan/apply 的显式生命周期动作：仅 install/upgrade/uninstall。
     AgentAction,
     SkillAction,
+    McpAction,
 }
 
 /// 每个命令允许的 flag 集合（命令感知白名单）。
@@ -122,6 +123,10 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
                 specs.push(("--agent", ArgValueKind::ElementId));
                 specs.push(("--action", ArgValueKind::SkillAction));
             }
+            if domain == "mcp" {
+                specs.push(("--agent", ArgValueKind::ElementId));
+                specs.push(("--action", ArgValueKind::McpAction));
+            }
         }
         (_, "apply") => {
             specs.push(("--dry-run", ArgValueKind::Flag));
@@ -133,6 +138,10 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             if domain == "skills" {
                 specs.push(("--agent", ArgValueKind::ElementId));
                 specs.push(("--action", ArgValueKind::SkillAction));
+            }
+            if domain == "mcp" {
+                specs.push(("--agent", ArgValueKind::ElementId));
+                specs.push(("--action", ArgValueKind::McpAction));
             }
         }
         ("system", "converge") => specs.push(("--dry-run", ArgValueKind::Flag)),
@@ -228,6 +237,13 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
         ArgValueKind::SkillAction => match value {
             "add" | "update" | "enable" | "disable" | "remove" => Ok(()),
             _ => Err(EngineError::new("invalid_args", "非法 skills action")),
+        },
+        ArgValueKind::McpAction => match value {
+            "add" | "update" | "enable" | "disable" | "remove" => Ok(()),
+            _ => Err(EngineError::new(
+                "invalid_args",
+                format!("非法 mcp action '{value}'（仅 add|update|enable|disable|remove）"),
+            )),
         },
     }
 }
@@ -469,10 +485,23 @@ mod tests {
             ),
             ("mcp:plan", vec!["--only".into(), "mcp:grok-search".into()]),
             (
+                "mcp:plan",
+                vec![
+                    "--only".into(),
+                    "mcp:grok-search".into(),
+                    "--agent".into(),
+                    "codex".into(),
+                    "--action".into(),
+                    "update".into(),
+                ],
+            ),
+            (
                 "mcp:apply",
                 vec![
                     "--only".into(),
                     "mcp:grok-search".into(),
+                    "--action".into(),
+                    "disable".into(),
                     "--dry-run".into(),
                 ],
             ),
@@ -531,7 +560,7 @@ mod tests {
         for (command, args) in [
             ("mcp:status", vec!["--dry-run".into()]),
             ("mcp:apply", vec!["--allow-uninstall".into()]),
-            ("mcp:plan", vec!["--agent".into(), "codex".into()]),
+            ("mcp:plan", vec!["--unexpected".into(), "codex".into()]),
             ("agents:status", vec!["--action".into(), "install".into()]),
             ("skills:apply", vec!["--action".into(), "install".into()]),
             ("runs:list", vec!["--run".into(), "r1".into()]),
@@ -588,6 +617,40 @@ mod tests {
                 "{command} {args:?} should fail"
             );
         }
+
+        for action in ["add", "update", "enable", "disable", "remove"] {
+            assert!(
+                validate_args(
+                    "mcp:apply",
+                    &[
+                        "--only".into(),
+                        "mcp:s1".into(),
+                        "--agent".into(),
+                        "claude-code".into(),
+                        "--action".into(),
+                        action.into(),
+                    ]
+                )
+                .is_ok(),
+                "mcp:apply with action {action} should pass"
+            );
+        }
+        let bad_action_err = validate_args(
+            "mcp:apply",
+            &[
+                "--only".into(),
+                "mcp:s1".into(),
+                "--action".into(),
+                "install".into(),
+            ],
+        )
+        .unwrap_err();
+        assert!(
+            bad_action_err.message.contains("非法 mcp action"),
+            "MCP action error must mention mcp action, got: {}",
+            bad_action_err.message
+        );
+        assert!(!bad_action_err.message.contains("skills"));
     }
 
     #[test]

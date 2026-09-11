@@ -195,6 +195,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     let start_time = std::time::Instant::now();
     let is_agent_apply = request.command.replace('.', ":") == "agents:apply";
     let is_skill_apply = request.command.replace('.', ":") == "skills:apply";
+    let is_mcp_apply = request.command.replace('.', ":") == "mcp:apply";
     let (needs_lock, domain_label, diag_code) = if is_agent_apply {
         match crate::native_agents::preflight_apply(ctx, request) {
             Ok(real_apply) => (real_apply, "Agent", "AGENT_ERROR"),
@@ -237,6 +238,31 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
                     vec![],
                     vec![diagnostic(
                         "SKILL_ERROR",
+                        None,
+                        crate::native_logs::sanitize_diagnostic_message(&format!("{err:#}")),
+                    )],
+                );
+                record_diagnostic_log_if_needed(ctx, request, &mut env, start_time);
+                return env;
+            }
+        }
+    } else if is_mcp_apply {
+        match crate::native_mcp::preflight_apply(ctx, request) {
+            Ok(real_apply) => (real_apply, "MCP", "MCP_ERROR"),
+            Err(err) => {
+                let mut env = Envelope::new(
+                    request.command.replacen(':', ".", 1),
+                    mode_of(request),
+                    Lock {
+                        held: false,
+                        pid: None,
+                    },
+                    request.run_id.clone(),
+                    None,
+                    Value::Object(Map::new()),
+                    vec![],
+                    vec![diagnostic(
+                        "MCP_ERROR",
                         None,
                         crate::native_logs::sanitize_diagnostic_message(&format!("{err:#}")),
                     )],
@@ -379,6 +405,9 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("skills", "status" | "plan" | "apply") => crate::native_skills::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("SKILL_ERROR", format!("{err:#}"))),
+        ("mcp", "status" | "plan" | "apply") => crate::native_mcp::handle(ctx, request)
+            .map(|data| (data, vec![]))
+            .map_err(|err| DispatchError::new("MCP_ERROR", format!("{err:#}"))),
         ("policy", "get") => policy_get(ctx),
         ("policy", "set") => policy_set(ctx, request),
         ("policy", "delete") => policy_delete(ctx, request),
@@ -649,6 +678,44 @@ fn policy_get(ctx: &Context) -> DispatchResult {
     Ok((data, vec![]))
 }
 
+fn validate_mcp_policy_candidate(key: &str, policy: &Value) -> Result<(), DispatchError> {
+    let prefix = "mcp.definitions";
+    if key != prefix && !key.starts_with("mcp.definitions.") {
+        return Ok(());
+    }
+    let Some(mcp) = policy.get("mcp").and_then(Value::as_object) else {
+        return Ok(());
+    };
+    let Some(defs) = mcp.get("definitions").and_then(Value::as_object) else {
+        return Ok(());
+    };
+
+    if let Some(rest) = key.strip_prefix("mcp.definitions.") {
+        let server_name = rest.split('.').next().unwrap_or("");
+        if !server_name.is_empty() {
+            if let Some(def) = defs.get(server_name) {
+                if let Err(e) = crate::native_mcp::policy_view::validate_definition_env(def) {
+                    return Err(DispatchError::new("USAGE_ERROR", e.to_string()));
+                }
+                if let Err(e) = crate::native_mcp::policy_view::allowed_agents(def) {
+                    return Err(DispatchError::new("USAGE_ERROR", e.to_string()));
+                }
+            }
+            return Ok(());
+        }
+    }
+
+    for (_server, def) in defs {
+        if let Err(e) = crate::native_mcp::policy_view::validate_definition_env(def) {
+            return Err(DispatchError::new("USAGE_ERROR", e.to_string()));
+        }
+        if let Err(e) = crate::native_mcp::policy_view::allowed_agents(def) {
+            return Err(DispatchError::new("USAGE_ERROR", e.to_string()));
+        }
+    }
+    Ok(())
+}
+
 fn policy_set(ctx: &Context, request: &Request) -> DispatchResult {
     if request.value("--layer") != Some("local") {
         return Err(DispatchError::new(
@@ -673,6 +740,11 @@ fn policy_set(ctx: &Context, request: &Request) -> DispatchResult {
     })?;
     let segments = validate_key(key)?;
     reject_secrets(key, &value)?;
+
+    let mut candidate_policy = store::effective_policy(ctx).map_err(DispatchError::from)?;
+    set_dot_path(&mut candidate_policy, &segments, value.clone())?;
+    validate_mcp_policy_candidate(key, &candidate_policy)?;
+
     if request.flag("--dry-run") {
         let data = policy_data(Some("sqlite"), Some(key), Some(value), None, None, None);
         return Ok((
@@ -691,6 +763,7 @@ fn policy_set(ctx: &Context, request: &Request) -> DispatchResult {
         .map_err(DispatchError::from)?;
     let mut policy = store::policy_from_connection(&tx).map_err(DispatchError::from)?;
     set_dot_path(&mut policy, &segments, value.clone())?;
+    validate_mcp_policy_candidate(key, &policy)?;
     store::write_policy(&tx, &policy).map_err(DispatchError::from)?;
     store::record_operation(
         &tx,
