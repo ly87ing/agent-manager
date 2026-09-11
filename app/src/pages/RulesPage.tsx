@@ -64,6 +64,14 @@ export default function RulesPage() {
 
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="rules:status 调用失败" error={query.error} />;
+  if (!query.data.ok) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="规则" description="各助手的规则文件清单与生成状态（规则没有官方版本概念；同步 = 生成 + 分发）。" />
+        <ErrorPanel title="rules:status 错误" errors={query.data.errors} />
+      </div>
+    );
+  }
 
   const elements = query.data.data.elements;
   const dist = elements.find((element) => element.id === "rules:dist") ?? null;

@@ -90,4 +90,52 @@ describe("RulesHooksPage 规则与 Hooks 切换容器", () => {
     expect(rulesTab).toHaveFocus();
     expect(rulesTab).toHaveAttribute("aria-selected", "true");
   });
+
+  it("rules:status 与 hooks:status 返回 ok:false 且 data:{} 时，两 Tab 均显示 DOMAIN_NOT_IMPLEMENTED 且不抛异常", async () => {
+    const notImplementedRoutes = {
+      "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode() }),
+      "rules:status": makeEnvelope(
+        {} as unknown as { domain: string; elements: [] },
+        {
+          command: "rules.status",
+          ok: false,
+          errors: [{ code: "DOMAIN_NOT_IMPLEMENTED", element: null, message: "Rules 域尚未实现" }],
+        },
+      ),
+      "hooks:status": makeEnvelope(
+        {} as unknown as { domain: string; elements: [] },
+        {
+          command: "hooks.status",
+          ok: false,
+          errors: [{ code: "DOMAIN_NOT_IMPLEMENTED", element: null, message: "Hooks 域尚未实现" }],
+        },
+      ),
+      "policy:get": makeEnvelope(
+        { layers: { sqlite: null } },
+        { command: "policy.get" },
+      ),
+    };
+
+    renderWithEngine(<RulesHooksPage />, notImplementedRoutes);
+
+    // 默认 Rules Tab: 展示 DOMAIN_NOT_IMPLEMENTED 与错误消息，不抛异常
+    expect(await screen.findByRole("heading", { name: "规则" })).toBeInTheDocument();
+    expect(screen.getByText("DOMAIN_NOT_IMPLEMENTED")).toBeInTheDocument();
+    expect(screen.getByText("Rules 域尚未实现")).toBeInTheDocument();
+
+    // 切换到 Hooks Tab: 不抛异常，展示 DOMAIN_NOT_IMPLEMENTED 与对应错误消息
+    const hooksTab = screen.getByRole("tab", { name: "Hooks" });
+    await userEvent.click(hooksTab);
+    expect(hooksTab).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("heading", { name: "Hooks" })).toBeInTheDocument();
+    expect(screen.getByText("DOMAIN_NOT_IMPLEMENTED")).toBeInTheDocument();
+    expect(screen.getByText("Hooks 域尚未实现")).toBeInTheDocument();
+
+    // 切回 Rules Tab: 依然正常
+    const rulesTab = screen.getByRole("tab", { name: "规则" });
+    await userEvent.click(rulesTab);
+    expect(rulesTab).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("heading", { name: "规则" })).toBeInTheDocument();
+    expect(screen.getByText("Rules 域尚未实现")).toBeInTheDocument();
+  });
 });

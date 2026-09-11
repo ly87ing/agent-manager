@@ -60,6 +60,14 @@ export default function McpPage() {
 
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="mcp:status 调用失败" error={query.error} />;
+  if (!query.data.ok) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="MCP" description="服务库管理 MCP 服务定义；「助手中的服务」按助手查看并操作每个服务的配置。" />
+        <ErrorPanel title="mcp:status 错误" errors={query.data.errors} />
+      </div>
+    );
+  }
 
   const elements = query.data.data.elements;
   const layers = policyQuery.data?.data.layers ?? null;

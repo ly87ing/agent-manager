@@ -39,6 +39,14 @@ export default function DomainApplyPage({
 
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title={`${domain}:status 调用失败`} error={query.error} />;
+  if (!query.data.ok) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title={title} description={description} />
+        <ErrorPanel title={`${domain}:status 错误`} errors={query.data.errors} />
+      </div>
+    );
+  }
 
   const elements = query.data.data.elements;
 

@@ -151,4 +151,78 @@ describe("App 顶层导航收敛为日常六项", () => {
     await userEvent.click(skillsNav);
     expect(agentSelect.value).toBe("all");
   }, 15000);
+
+  it("未实现的 mcp/rules/hooks status 返回 ok:false 与 data:{} 时，页面展示错误，顶层导航仍在且可切回助手", async () => {
+    setSettingsClient({
+      get: async () => dummySettings,
+      save: async (preferences) => ({ ...dummySettings, preferences }),
+    });
+
+    const notImplementedRoutes = {
+      ...routes(),
+      "mcp:status": makeEnvelope(
+        {} as unknown as { domain: string; elements: [] },
+        {
+          command: "mcp.status",
+          ok: false,
+          errors: [{ code: "DOMAIN_NOT_IMPLEMENTED", element: null, message: "MCP 域尚未实现" }],
+        },
+      ),
+      "rules:status": makeEnvelope(
+        {} as unknown as { domain: string; elements: [] },
+        {
+          command: "rules.status",
+          ok: false,
+          errors: [{ code: "DOMAIN_NOT_IMPLEMENTED", element: null, message: "Rules 域尚未实现" }],
+        },
+      ),
+      "hooks:status": makeEnvelope(
+        {} as unknown as { domain: string; elements: [] },
+        {
+          command: "hooks.status",
+          ok: false,
+          errors: [{ code: "DOMAIN_NOT_IMPLEMENTED", element: null, message: "Hooks 域尚未实现" }],
+        },
+      ),
+    };
+
+    renderWithEngine(<App />, notImplementedRoutes);
+
+    const nav = await screen.findByRole("navigation");
+
+    // 切换至 MCP 页：展示错误码与消息，无白屏
+    const mcpNav = within(nav).getByRole("button", { name: "MCP" });
+    await userEvent.click(mcpNav);
+    expect(mcpNav).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("heading", { name: "MCP" })).toBeInTheDocument();
+    expect(screen.getByText("DOMAIN_NOT_IMPLEMENTED")).toBeInTheDocument();
+    expect(screen.getByText("MCP 域尚未实现")).toBeInTheDocument();
+
+    // 顶层导航仍在，切回助手
+    const agentsNav = within(nav).getByRole("button", { name: "助手" });
+    await userEvent.click(agentsNav);
+    expect(agentsNav).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("heading", { name: "助手" })).toBeInTheDocument();
+
+    // 切换至规则与 Hooks 页：展示 Rules 错误
+    const rulesHooksNav = within(nav).getByRole("button", { name: "规则与 Hooks" });
+    await userEvent.click(rulesHooksNav);
+    expect(rulesHooksNav).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("heading", { name: "规则" })).toBeInTheDocument();
+    expect(screen.getByText("DOMAIN_NOT_IMPLEMENTED")).toBeInTheDocument();
+    expect(screen.getByText("Rules 域尚未实现")).toBeInTheDocument();
+
+    // 切换至 Hooks Tab：不抛异常，展示 Hooks 错误
+    const hooksTab = screen.getByRole("tab", { name: "Hooks" });
+    await userEvent.click(hooksTab);
+    expect(hooksTab).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("heading", { name: "Hooks" })).toBeInTheDocument();
+    expect(screen.getByText("DOMAIN_NOT_IMPLEMENTED")).toBeInTheDocument();
+    expect(screen.getByText("Hooks 域尚未实现")).toBeInTheDocument();
+
+    // 顶层导航仍在，再次切回助手
+    await userEvent.click(agentsNav);
+    expect(agentsNav).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("heading", { name: "助手" })).toBeInTheDocument();
+  }, 15000);
 });

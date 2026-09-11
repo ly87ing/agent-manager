@@ -159,4 +159,23 @@ describe("McpPage 服务库 + 助手中的服务", () => {
     expect(calls.some((call) => call.command === "mcp:apply")).toBe(false);
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
   });
+
+  it("mcp:status 返回 ok:false 且 data:{} 时显示 DOMAIN_NOT_IMPLEMENTED 错误结构，不白屏", async () => {
+    const errorRoutes = {
+      "mcp:status": makeEnvelope(
+        {} as unknown as StatusData,
+        {
+          command: "mcp.status",
+          ok: false,
+          errors: [{ code: "DOMAIN_NOT_IMPLEMENTED", element: null, message: "MCP 域尚未实现" }],
+        },
+      ),
+    };
+    renderWithEngine(<McpPage />, errorRoutes);
+
+    expect(await screen.findByRole("heading", { name: "MCP" })).toBeInTheDocument();
+    expect(screen.getByText("DOMAIN_NOT_IMPLEMENTED")).toBeInTheDocument();
+    expect(screen.getByText("MCP 域尚未实现")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "服务库" })).toBeNull();
+  });
 });
