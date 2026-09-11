@@ -52,19 +52,26 @@ function PlanActionTable({ actions }: { actions: PlanAction[] }) {
   );
 }
 
+export interface DriftPlanRequest {
+  command: string;
+  args: string[];
+}
+
 export function DriftExplanationPanel({
   element,
-  planCommand,
+  planRequest,
   cellKind,
 }: {
   element: EngineElement;
-  /** 对应域的 plan 命令（如 "mcp:plan"）；面板取其动作清单并过滤到本元素。 */
-  planCommand: string;
+  /** 明确的、已限定元素和动作的 plan 请求；null 表示没有安全的自动预览动作。 */
+  planRequest: DriftPlanRequest | null;
   /** per-agent 单元格词汇表；不传则纯文本渲染 state。 */
   cellKind?: "mcp" | "skills";
 }) {
-  const planQuery = useEngineQuery<PlanData>(planCommand);
-  const allActions = planQuery.data?.data.actions ?? [];
+  const planQuery = useEngineQuery<PlanData>(planRequest?.command ?? "", planRequest?.args, {
+    enabled: planRequest !== null,
+  });
+  const allActions = planRequest ? planQuery.data?.data.actions ?? [] : [];
   const actions = allActions.filter((action) => action.element === element.id);
 
   const cells = agentCellsOf(element);
@@ -120,9 +127,12 @@ export function DriftExplanationPanel({
 
       <div>
         <h4 className="mb-1.5 text-xs font-semibold text-slate-500">
-          {COPY.planPreviewTitle}（来自 {planCommand} 的预览，只读）
+          {COPY.planPreviewTitle}
+          {planRequest ? `（来自 ${planRequest.command} 的预览，只读）` : "（当前没有可安全预览的同步动作）"}
         </h4>
-        {planQuery.isPending ? (
+        {!planRequest ? (
+          <p className="text-xs text-slate-400">当前没有可安全预览的同步动作。</p>
+        ) : planQuery.isPending ? (
           <p className="text-xs text-slate-400">正在计算将要执行的操作…</p>
         ) : planQuery.isError ? (
           <p className="text-xs text-red-600">预览加载失败:{engineErrorMessage(planQuery.error)}</p>

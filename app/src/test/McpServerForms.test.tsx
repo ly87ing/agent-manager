@@ -151,7 +151,7 @@ describe("MCP 服务定义覆盖层", () => {
     expect(definition.custom_flag).toBe("keep-me");
     expect(definition.env).toEqual({ GROK_API_KEY: "${SECRETS_GROK_API_KEY}", PLAIN_TOKEN: "synthetic-plain-value" });
     expect(JSON.stringify(definition)).not.toContain("<literal>");
-    // 保存不触发定向预览/同步（DriftExplanationPanel 的无参只读 plan 查询不算保存动作）
+    // 保存不触发定向预览/同步；详情 plan 必须始终带元素和动作参数。
     expect(submitCalls.some((call) => call.command === "mcp:plan" && call.args.includes("--only"))).toBe(false);
     expect(submitCalls.some((call) => call.command === "mcp:apply")).toBe(false);
     expect(screen.queryByRole("dialog", { name: /将要执行的操作/ })).toBeNull();

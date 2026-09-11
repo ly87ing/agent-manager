@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Check, ChevronDown, ChevronRight, Download, RefreshCw, Sparkles, Trash2, X } from "lucide-react";
 import { DriftExplanationPanel } from "../components/DriftExplanationPanel";
+import type { DriftPlanRequest } from "../components/DriftExplanationPanel";
 import { DefinitionFormDialog } from "../components/DefinitionFormDialog";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { ErrorPanel } from "../components/ErrorPanel";
@@ -30,6 +31,13 @@ const PROVIDER_CLASS_META: Record<ProviderBucket, { label: string; className: st
   system_only: { label: "仅系统检测到", className: "border-sky-200 bg-sky-50 text-sky-700" },
   unsupported: { label: "不可接管", className: "border-zinc-200 bg-zinc-100 text-zinc-500" },
 };
+
+function detailPlanRequest(element: EngineElement): DriftPlanRequest | null {
+  const action = ["upgrade", "install"].find((id) => element.actions.some((item) => item.id === id));
+  return action
+    ? { command: "agents:plan", args: ["--only", element.id, "--action", action] }
+    : null;
+}
 
 function PolicyChip({ label, value }: { label: string; value: boolean | undefined }) {
   return (
@@ -198,7 +206,7 @@ function AgentCard({
           {expanded ? "收起同步详情" : "展开同步详情"}
         </button>
       </div>
-      {expanded && <div className="mt-2"><DriftExplanationPanel element={element} planCommand="agents:plan" /></div>}
+      {expanded && <div className="mt-2"><DriftExplanationPanel element={element} planRequest={detailPlanRequest(element)} /></div>}
       {preview.modal}
     </section>
   );

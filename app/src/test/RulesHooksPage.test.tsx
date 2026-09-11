@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import RulesHooksPage from "../pages/RulesHooksPage";
-import { makeAuditData, makeEnvelope, makeMode } from "./fixtures";
+import RulesPage from "../pages/RulesPage";
+import { makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode } from "./fixtures";
+import type { Envelope } from "../lib/contract";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 
 function routes() {
@@ -89,6 +91,29 @@ describe("RulesHooksPage 规则与 Hooks 切换容器", () => {
     await userEvent.keyboard("{Home}");
     expect(rulesTab).toHaveFocus();
     expect(rulesTab).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("规则详情没有原生动作契约时不发起 rules:plan", async () => {
+    const detailRoutes: Record<string, Envelope> = routes();
+    detailRoutes["rules:status"] = makeEnvelope({
+      domain: "rules",
+      elements: [
+        makeElement({
+          id: "rules:claude-code",
+          domain: "rules",
+          spec: { name: "Claude Code 规则", source: "/tmp/rules.md" },
+          observed: { target: "/tmp/.claude/CLAUDE.md", target_exists: true },
+          state: "drifted",
+          freshness: makeFreshness(),
+        }),
+      ],
+    }, { command: "rules.status" });
+    detailRoutes["sources:get"] = makeEnvelope({ sources: [] }, { command: "sources.get" });
+    const { calls } = renderWithEngine(<RulesPage />, detailRoutes);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Claude Code 规则" }));
+    await screen.findByTestId("drift-panel");
+    expect(calls.some((call) => call.command === "rules:plan")).toBe(false);
   });
 
   it("rules:status 与 hooks:status 返回 ok:false 且 data:{} 时，两 Tab 均显示 DOMAIN_NOT_IMPLEMENTED 且不抛异常", async () => {

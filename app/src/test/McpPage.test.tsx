@@ -73,8 +73,51 @@ function mcpRoutes(): Record<string, ReturnType<typeof makeEnvelope>> {
 }
 
 describe("McpPage 服务库 + 助手中的服务", () => {
+  it("服务详情优先选择 update，并在同动作中按 Agent key 升序选择", async () => {
+    const priorityRoutes = mcpRoutes();
+    priorityRoutes["mcp:status"] = makeEnvelope(
+      {
+        domain: "mcp",
+        elements: [
+          makeElement({
+            id: "mcp:priority",
+            domain: "mcp",
+            spec: { command: "npx", args: ["priority-mcp"], agents: null, env: {} },
+            policy: { enabled: true },
+            observed: {
+              agents: {
+                "zeta-agent": { state: "drifted", target: "/tmp/zeta.json", target_exists: true, actions: ["update"] },
+                "codex": { state: "missing", target: "/tmp/codex.json", target_exists: false, actions: ["add"] },
+                "alpha-agent": { state: "drifted", target: "/tmp/alpha.json", target_exists: true, actions: ["update"] },
+              },
+              env: {},
+              actions: [],
+            },
+            state: "drifted",
+            freshness: makeFreshness(),
+          }),
+        ],
+      },
+      { command: "mcp.status" },
+    );
+    const { calls } = renderWithEngine(<McpPage />, priorityRoutes);
+
+    await userEvent.click(await screen.findByRole("button", { name: "mcp:priority" }));
+    await screen.findByTestId("mcp-detail-mcp:priority");
+
+    expect(calls.filter((call) => call.command === "mcp:plan")).toHaveLength(1);
+    expect(calls.find((call) => call.command === "mcp:plan")?.args).toEqual([
+      "--only",
+      "mcp:priority",
+      "--agent",
+      "alpha-agent",
+      "--action",
+      "update",
+    ]);
+  });
+
   it("默认服务库：卡片渲染与 freshness；点击服务名展开详情（命令/密钥状态/附加参数/写入位置，不含密钥值）", async () => {
-    renderWithEngine(<McpPage />, mcpRoutes());
+    const { calls } = renderWithEngine(<McpPage />, mcpRoutes());
 
     // 默认进入服务库
     expect(await screen.findByRole("tab", { name: "服务库" })).toHaveAttribute("aria-selected", "true");
@@ -91,6 +134,23 @@ describe("McpPage 服务库 + 助手中的服务", () => {
     expect(detail).toHaveTextContent("SERENA_KEY");
     expect(detail).toHaveTextContent("未配置");
     expect(detail).toHaveTextContent("/tmp/demo/.codex/config.toml");
+    // 只有 update/enable/add 才能自动预览；serena 只有 remove，不发起 plan。
+    expect(calls.some((call) => call.command === "mcp:plan")).toBe(false);
+  });
+
+  it("服务详情按 update→enable→add 与稳定助手名选择动作，并携带精确参数", async () => {
+    const { calls } = renderWithEngine(<McpPage />, mcpRoutes());
+    await userEvent.click(await screen.findByRole("button", { name: "mcp:chrome-devtools" }));
+    await screen.findByText("更新 claude-code 配置");
+
+    expect(calls.find((call) => call.command === "mcp:plan")?.args).toEqual([
+      "--only",
+      "mcp:chrome-devtools",
+      "--agent",
+      "claude-code",
+      "--action",
+      "update",
+    ]);
   });
 
   it("助手中的服务：单元格态 已配置/不一致/残留/尚未生成，版本短摘要 title 存完整值", async () => {

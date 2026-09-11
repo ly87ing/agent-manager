@@ -48,6 +48,53 @@ function routes(): Record<string, Envelope> {
 }
 
 describe("MCP 库级启停", () => {
+  it("已停用服务启用对话框明确保留分配与配置文件，不恢复或重写配置", async () => {
+    const disabledRoutes = routes();
+    disabledRoutes["mcp:status"] = makeEnvelope(
+      {
+        domain: "mcp",
+        elements: [
+          makeElement({
+            id: "mcp:chrome-devtools",
+            domain: "mcp",
+            spec: { command: "npx", args: ["chrome-devtools-mcp"], agents: null, env: {} },
+            policy: { enabled: false },
+            observed: {
+              agents: {
+                "claude-code": {
+                  state: "agent-disabled",
+                  target: "/tmp/demo.json",
+                  target_exists: true,
+                  assigned: true,
+                  enabled: false,
+                },
+              },
+              env: {},
+              actions: ["enable", "remove"],
+            },
+            state: "disabled",
+            freshness: makeFreshness(),
+          }),
+        ],
+      },
+      { command: "mcp.status" },
+    );
+    const { calls } = renderWithEngine(<McpPage />, disabledRoutes);
+
+    await userEvent.click(await screen.findByTestId("enable-server-mcp:chrome-devtools"));
+    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
+    expect(dialog).toHaveTextContent("仅切换服务库开关");
+    expect(dialog).toHaveTextContent("保留各助手分配与配置文件");
+    expect(dialog).toHaveTextContent("不恢复或重写助手配置");
+    expect(dialog).not.toHaveTextContent("恢复原来已启用的助手配置");
+    expect(calls.find((call) => call.command === "mcp:plan")?.args).toEqual([
+      "--only",
+      "mcp:chrome-devtools",
+      "--action",
+      "enable",
+    ]);
+  });
+
   it("已启用服务显示「停用」→ mcp:plan --action disable（无 agent）→ 确认 → mcp:apply 同参，全程零 policy:set", async () => {
     const { calls } = renderWithEngine(<McpPage />, routes());
 
@@ -59,7 +106,8 @@ describe("MCP 库级启停", () => {
     // plan 预览打开（限定本服务、无 agent），零 policy:set 预写
     const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
     expect(dialog).toHaveTextContent("停用服务 chrome-devtools");
-    expect(dialog).toHaveTextContent("撤下已配置的助手入口");
+    expect(dialog).toHaveTextContent("保留各助手分配与配置文件");
+    expect(dialog).toHaveTextContent("不撤下助手配置");
     expect(dialog).toHaveTextContent("/tmp/demo.json");
     const planCall = calls.find((call) => call.command === "mcp:plan");
     expect(planCall!.args).toEqual(["--only", "mcp:chrome-devtools", "--action", "disable"]);

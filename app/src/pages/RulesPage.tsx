@@ -184,7 +184,7 @@ function FragmentRow({
       {isExpanded && (
         <tr className="border-b border-slate-100 last:border-0">
           <td colSpan={5} className="py-3">
-            <DriftExplanationPanel element={element} planCommand="rules:plan" />
+            <DriftExplanationPanel element={element} planRequest={null} />
           </td>
         </tr>
       )}

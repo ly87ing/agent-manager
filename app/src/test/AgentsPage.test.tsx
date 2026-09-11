@@ -43,6 +43,49 @@ function routes(offline: boolean): Record<string, Envelope> {
 }
 
 describe("Agents 页写动作", () => {
+  it("仅有 uninstall 动作的助手详情显示无安全预览且零 agents:plan", async () => {
+    const uninstallOnlyRoutes = routes(false);
+    uninstallOnlyRoutes["agents:status"] = makeEnvelope(
+      {
+        domain: "agents",
+        elements: [
+          makeElement({
+            id: "agents:codex",
+            domain: "agents",
+            spec: { display_name: "Codex", bin: "codex" },
+            policy: { enabled: true },
+            observed: { installed: true, providers: ["native"] },
+            state: "managed-ok",
+            actions: [{ id: "uninstall", risk: "install-remove", needs_lock: true, offline_ok: false }],
+          }),
+        ],
+      },
+      { command: "agents.status" },
+    );
+    const { calls } = renderWithEngine(<AgentsPage />, uninstallOnlyRoutes);
+
+    await screen.findByTestId("action-uninstall-agents:codex");
+    await userEvent.click(screen.getByRole("button", { name: "展开同步详情" }));
+
+    expect(await screen.findByText("当前没有可安全预览的同步动作。")).toBeInTheDocument();
+    expect(calls.filter((call) => call.command === "agents:plan")).toHaveLength(0);
+  });
+
+  it("详情只为 upgrade/install 生成带元素与动作参数的 plan，不自动预览 uninstall", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routes(false));
+    await screen.findByTestId("action-upgrade-agents:claude-code");
+
+    await userEvent.click(screen.getByRole("button", { name: "展开同步详情" }));
+    await screen.findByTestId("drift-panel");
+    expect(calls.find((call) => call.command === "agents:plan")?.args).toEqual([
+      "--only",
+      "agents:claude-code",
+      "--action",
+      "upgrade",
+    ]);
+    expect(calls.find((call) => call.command === "agents:plan")?.args).not.toContain("uninstall");
+  });
+
   it("升级按钮 → plan 预览（带 --action upgrade）→ network 知情勾选 → agents:apply 带 action 与 run_id", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes(false));
     await userEvent.click(await screen.findByTestId("action-upgrade-agents:claude-code"));

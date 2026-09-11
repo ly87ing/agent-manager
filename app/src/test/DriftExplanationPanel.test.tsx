@@ -49,9 +49,16 @@ const plan = makeEnvelope(
 
 describe("DriftExplanationPanel", () => {
   it("渲染目标位置、各助手状态表与过滤后的操作清单", async () => {
-    renderWithEngine(<DriftExplanationPanel element={drifted} planCommand="mcp:plan" cellKind="mcp" />, {
-      "mcp:plan": plan,
-    });
+    const { calls } = renderWithEngine(
+      <DriftExplanationPanel
+        element={drifted}
+        planRequest={{ command: "mcp:plan", args: ["--only", "mcp:chrome-devtools", "--agent", "claude-code", "--action", "update"] }}
+        cellKind="mcp"
+      />,
+      {
+        "mcp:plan": plan,
+      },
+    );
 
     const panel = await screen.findByTestId("drift-panel");
     // plan 为异步查询：先等动作清单就位
@@ -66,19 +73,38 @@ describe("DriftExplanationPanel", () => {
     // plan 动作清单：只含本元素的 1 条（mcp:other-server 被过滤）
     expect(panel).toHaveTextContent("write-file");
     expect(panel).not.toHaveTextContent("其它元素的动作");
+    expect(calls.find((call) => call.command === "mcp:plan")?.args).toEqual([
+      "--only",
+      "mcp:chrome-devtools",
+      "--agent",
+      "claude-code",
+      "--action",
+      "update",
+    ]);
     // before/after digest 截断渲染
     expect(panel).toHaveTextContent("sha256:dd9d3c8ae…de12a2");
     expect(panel).toHaveTextContent("sha256:89b4b5c13…b40c36");
   });
 
   it("plan 无本元素动作时显示空态文案", async () => {
-    renderWithEngine(<DriftExplanationPanel element={drifted} planCommand="mcp:plan" />, {
+    renderWithEngine(<DriftExplanationPanel element={drifted} planRequest={{ command: "mcp:plan", args: ["--only", drifted.id, "--agent", "claude-code", "--action", "update"] }} />, {
       "mcp:plan": makeEnvelope(
         { domain: "mcp", actions: [], summary: { read: 0, "write-local": 0, "exec-local": 0, network: 0, "install-remove": 0 } },
         { command: "mcp.plan" },
       ),
     });
     expect(await screen.findByText(/没有需要执行的操作/)).toBeInTheDocument();
+  });
+
+  it("没有安全动作时不发起无参 plan，仍保留目标与状态展示", async () => {
+    const { calls } = renderWithEngine(<DriftExplanationPanel element={drifted} planRequest={null} cellKind="mcp" />, {
+      "mcp:plan": plan,
+    });
+
+    const panel = await screen.findByTestId("drift-panel");
+    expect(panel).toHaveTextContent("/tmp/demo/.claude.json");
+    expect(panel).toHaveTextContent("当前没有可安全预览的同步动作。");
+    expect(calls.some((call) => call.command === "mcp:plan")).toBe(false);
   });
 
   it("shortenDigest：长 digest 截断、null 占位", () => {

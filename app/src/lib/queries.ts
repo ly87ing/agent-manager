@@ -6,6 +6,7 @@ import type { AuditData, Envelope, RefreshUpstreamData } from "./contract";
 export const engineKeys = {
   all: ["engine"] as const,
   command: (command: string) => ["engine", command] as const,
+  request: (command: string, args: readonly string[] = []) => ["engine", command, ...args] as const,
 };
 
 export function createQueryClient(options?: { retry?: number | false }) {
@@ -27,10 +28,16 @@ export function useOfflineMode(): boolean {
 }
 
 /** 以引擎命令为 key 的只读查询（status/audit 均为 read 级、零网络）。 */
-export function useEngineQuery<T>(command: string, args?: string[]): UseQueryResult<Envelope<T>> {
+export function useEngineQuery<T>(
+  command: string,
+  args?: string[],
+  options?: { enabled?: boolean },
+): UseQueryResult<Envelope<T>> {
+  const normalizedArgs = args ? [...args] : [];
   return useQuery({
-    queryKey: engineKeys.command(command),
-    queryFn: () => runEngine<T>(command, args),
+    queryKey: engineKeys.request(command, normalizedArgs),
+    queryFn: () => runEngine<T>(command, normalizedArgs),
+    enabled: options?.enabled ?? true,
   });
 }
 

@@ -104,9 +104,9 @@ export default function McpPage() {
     const name = element.id.replace(/^mcp:/, "");
     const args = ["--only", element.id, "--action", action];
     if (action === "enable") {
-      openAction(`启用服务 ${name}`, "启用服务，恢复原来已启用的助手配置。", args);
+      openAction(`启用服务 ${name}`, "仅切换服务库开关；保留各助手分配与配置文件，不恢复或重写助手配置。", args);
     } else if (action === "disable") {
-      openAction(`停用服务 ${name}`, "停用服务，撤下已配置的助手入口。", args);
+      openAction(`停用服务 ${name}`, "仅切换服务库开关；保留各助手分配与配置文件，不撤下助手配置。", args);
     } else {
       const affected = Object.values(agentCellsOf(element)).filter(
         (cell) => (cell as McpAgentCellView).assigned === true,
