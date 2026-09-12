@@ -250,6 +250,9 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
 
 pub fn validate_args(command: &str, args: &[String]) -> Result<(), EngineError> {
     let specs = allowed_arg_specs(command);
+    // sources 与 native 严格参数保持一致：拒绝重复 flag。
+    let reject_duplicates = matches!(command, "sources:get" | "sources:set");
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let mut index = 0;
     while index < args.len() {
         let arg = &args[index];
@@ -259,6 +262,12 @@ pub fn validate_args(command: &str, args: &[String]) -> Result<(), EngineError> 
                 format!("命令 '{command}' 不允许参数 '{arg}'"),
             ));
         };
+        if reject_duplicates && !seen.insert(arg.as_str()) {
+            return Err(EngineError::new(
+                "invalid_args",
+                format!("命令 '{command}' 重复提供参数 '{arg}'"),
+            ));
+        }
         if *kind != ArgValueKind::Flag {
             index += 1;
             let Some(value) = args.get(index) else {
@@ -290,7 +299,12 @@ fn dispatch_native(
     validate_command(&command)?;
     validate_args(&command, &args)?;
     validate_run_id(&run_id)?;
-    let args = effective_args(args, offline);
+    // sources 只读写本地 SQLite 且 native 严格参数拒绝 --offline，不做离线注入。
+    let args = if command.starts_with("sources:") {
+        args
+    } else {
+        effective_args(args, offline)
+    };
     Ok(agent_manager_engine::execute(
         &ctx,
         &agent_manager_engine::Request {
@@ -698,6 +712,86 @@ mod tests {
             effective_args(vec!["--offline".into()], false),
             vec!["--offline"]
         );
+    }
+
+    #[test]
+    fn sources_args_match_native_strictness_and_skip_offline_injection() {
+        assert!(validate_args("sources:get", &["--key".into(), "rules".into()]).is_ok());
+        assert!(validate_args(
+            "sources:set",
+            &[
+                "--key".into(),
+                "rules.shared".into(),
+                "--value".into(),
+                "{\"revision\":\"r\",\"value\":\"v\"}".into(),
+                "--dry-run".into(),
+            ]
+        )
+        .is_ok());
+        // 重复 flag 与 native 严格参数一致拒绝
+        for (command, args) in [
+            (
+                "sources:get",
+                vec![
+                    "--key".into(),
+                    "rules".into(),
+                    "--key".into(),
+                    "rules".into(),
+                ],
+            ),
+            (
+                "sources:set",
+                vec![
+                    "--key".into(),
+                    "rules.shared".into(),
+                    "--value".into(),
+                    "{}".into(),
+                    "--value".into(),
+                    "{}".into(),
+                ],
+            ),
+            (
+                "sources:set",
+                vec![
+                    "--key".into(),
+                    "rules.shared".into(),
+                    "--value".into(),
+                    "{}".into(),
+                    "--dry-run".into(),
+                    "--dry-run".into(),
+                ],
+            ),
+        ] {
+            let err = validate_args(command, &args).unwrap_err();
+            assert!(
+                err.message.contains("重复"),
+                "{command} {args:?} should mention duplicate, got: {}",
+                err.message
+            );
+        }
+        assert!(validate_args("sources:get", &["--offline".into()]).is_err());
+        assert!(validate_args("sources:set", &["positional".into()]).is_err());
+
+        // dispatch_native 对 sources 不注入 --offline：离线偏好下仍直连成功且零写
+        let root = std::env::temp_dir().join(format!("am-sources-bridge-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let c = || agent_manager_engine::Context {
+            data_dir: root.join("data"),
+            home_dir: root.join("home"),
+        };
+        let env = dispatch_native(
+            c(),
+            "sources:get".into(),
+            vec!["--key".into(), "rules".into()],
+            "sources-offline".into(),
+            true,
+        )
+        .unwrap();
+        assert!(env.ok, "{:?}", env.errors);
+        assert!(!env.mode.offline, "sources 不注入 --offline");
+        assert_eq!(env.data["sources"].as_array().unwrap().len(), 3);
+        assert!(!root.join("data").exists(), "sources:get 零写");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

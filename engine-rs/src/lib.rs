@@ -17,6 +17,7 @@ pub mod native_logs;
 pub mod native_mcp;
 pub(crate) mod native_runs;
 pub mod native_skills;
+pub mod native_sources;
 pub mod store;
 
 pub use envelope::{diagnostic, Diagnostic, Envelope, Lock, Mode, CONTRACT_ID};

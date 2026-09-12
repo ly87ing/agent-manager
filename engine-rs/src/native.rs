@@ -408,6 +408,8 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("mcp", "status" | "plan" | "apply") => crate::native_mcp::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("MCP_ERROR", format!("{err:#}"))),
+        ("sources", "get") => crate::native_sources::get(ctx, request),
+        ("sources", "set") => crate::native_sources::set(ctx, request),
         ("policy", "get") => policy_get(ctx),
         ("policy", "set") => policy_set(ctx, request),
         ("policy", "delete") => policy_delete(ctx, request),
@@ -547,7 +549,7 @@ fn delete_dot_path(root: &mut Value, segments: &[&str]) -> Result<(), DispatchEr
     Ok(())
 }
 
-fn reject_secret_text(text: &str) -> Option<&'static str> {
+pub(crate) fn reject_secret_text(text: &str) -> Option<&'static str> {
     use std::sync::OnceLock;
     static RULES: OnceLock<Vec<(&'static str, regex::Regex)>> = OnceLock::new();
     let rules = RULES.get_or_init(|| {
