@@ -224,6 +224,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     let is_mcp_apply = request.command.replace('.', ":") == "mcp:apply";
     let is_rule_apply = request.command.replace('.', ":") == "rules:apply";
     let is_hook_apply = request.command.replace('.', ":") == "hooks:apply";
+    let is_alias_apply = request.command.replace('.', ":") == "aliases:apply";
     let (needs_lock, domain_label, diag_code) = if is_agent_apply {
         match crate::native_agents::preflight_apply(ctx, request) {
             Ok(real_apply) => (real_apply, "Agent", "AGENT_ERROR"),
@@ -341,6 +342,31 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
                     vec![],
                     vec![diagnostic(
                         "HOOK_ERROR",
+                        None,
+                        crate::native_logs::sanitize_diagnostic_message(&format!("{err:#}")),
+                    )],
+                );
+                record_diagnostic_log_if_needed(ctx, request, &mut env, start_time);
+                return env;
+            }
+        }
+    } else if is_alias_apply {
+        match crate::native_aliases::preflight_apply(ctx, request) {
+            Ok(real_apply) => (real_apply, "Aliases", "ALIAS_ERROR"),
+            Err(err) => {
+                let mut env = Envelope::new(
+                    request.command.replacen(':', ".", 1),
+                    mode_of(request),
+                    Lock {
+                        held: false,
+                        pid: None,
+                    },
+                    request.run_id.clone(),
+                    None,
+                    Value::Object(Map::new()),
+                    vec![],
+                    vec![diagnostic(
+                        crate::native_aliases::error_code(&err),
                         None,
                         crate::native_logs::sanitize_diagnostic_message(&format!("{err:#}")),
                     )],
@@ -492,6 +518,11 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("hooks", "status" | "plan" | "apply") => crate::native_hooks::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("HOOK_ERROR", format!("{err:#}"))),
+        ("aliases", "status" | "plan" | "apply") => crate::native_aliases::handle(ctx, request)
+            .map(|data| (data, vec![]))
+            .map_err(|err| {
+                DispatchError::new(crate::native_aliases::error_code(&err), format!("{err:#}"))
+            }),
         ("secrets", "status") => crate::native_secrets::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("SECRET_ERROR", format!("{err:#}"))),

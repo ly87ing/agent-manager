@@ -42,7 +42,7 @@ fn section<'a>(env: &'a agent_manager_engine::Envelope, name: &str) -> &'a [Valu
         .unwrap_or_else(|| panic!("section '{name}' 必须存在且为数组: {}", env.data))
 }
 
-// A. fresh 隔离 Context：结构完整、三项未接线域带来 warning、零写。
+// A. fresh 隔离 Context：结构完整、tools 未接线域带来 warning、零写。
 #[test]
 fn fresh_context_audit_is_complete_warning_and_zero_write() {
     let (base, ctx) = temp_ctx("fresh");
@@ -60,11 +60,18 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
     ] {
         section(&env, name);
     }
-    for name in ["tools", "aliases"] {
-        let entries = section(&env, name);
-        assert_eq!(entries.len(), 1, "{name}");
-        assert_eq!(entries[0]["status"], "warning", "{name}");
-        assert!(entries[0].get("category").is_none(), "{name} 不得计入分类");
+    // tools 仍是固定未接线 warning（单条、无 category）
+    let tools = section(&env, "tools");
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["status"], "warning");
+    assert!(tools[0].get("category").is_none());
+    // aliases 已接线：fresh 上下文两目标均 not-materialized → warning(unmaterialized)
+    let aliases = section(&env, "aliases");
+    assert_eq!(aliases.len(), 2);
+    for (idx, id) in ["aliases:zshrc", "aliases:zprofile"].iter().enumerate() {
+        assert_eq!(aliases[idx]["name"], *id);
+        assert_eq!(aliases[idx]["status"], "warning");
+        assert_eq!(aliases[idx]["category"], "unmaterialized");
     }
     // secrets 已接线：fresh 上下文无已启用定义 → 单条 ok（managed-ok 映射）
     let secrets = section(&env, "secrets");
@@ -85,7 +92,10 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
             .count() as u64
     })
     .sum();
-    assert!(total_warnings >= 2, "两项未接线域至少带来 2 个 warning");
+    assert!(
+        total_warnings >= 3,
+        "未接线 tools + 两 aliases 目标至少带来 3 个 warning"
+    );
     assert_eq!(summary["warnings"].as_u64().unwrap(), total_warnings);
     assert_eq!(summary["warning_categories"]["optional_tools"], 0);
     assert_eq!(summary["warning_categories"]["official_gaps"], 0);
@@ -286,9 +296,10 @@ fn wired_domain_elements_map_into_sections() {
 }
 
 // secrets 已接线：真实未解析占位符 → secrets section 映射为
-// warning(unmaterialized)；tools/aliases 仍是固定未接线 warning。
+// warning(unmaterialized)；tools 仍是固定未接线 warning；aliases 已接线，
+// fresh 上下文两目标 not-materialized → warning(unmaterialized)。
 #[test]
-fn audit_maps_real_secrets_state_and_keeps_two_unwired_warnings() {
+fn audit_maps_real_secrets_state_and_keeps_one_unwired_warning() {
     let (base, ctx) = temp_ctx("secrets-wired");
     std::env::remove_var("AM_AUDIT_UNRESOLVED_VAR");
     let mut policy = store::builtin_policy();
@@ -306,15 +317,13 @@ fn audit_maps_real_secrets_state_and_keeps_two_unwired_warnings() {
     assert_eq!(secrets[0]["name"], "secrets:mcp-env");
     assert_eq!(secrets[0]["status"], "warning");
     assert_eq!(secrets[0]["category"], "unmaterialized");
-    for name in ["tools", "aliases"] {
-        let entries = section(&env, name);
-        assert_eq!(entries.len(), 1, "{name}");
-        assert_eq!(entries[0]["status"], "warning", "{name}");
-        assert_eq!(
-            entries[0]["message"], "Rust 原生域尚未接线，暂未纳入审计",
-            "{name} 仍是固定未接线 warning"
-        );
-        assert!(entries[0].get("category").is_none(), "{name} 不得计入分类");
-    }
+    let tools = section(&env, "tools");
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["status"], "warning");
+    assert_eq!(
+        tools[0]["message"], "Rust 原生域尚未接线，暂未纳入审计",
+        "tools 仍是固定未接线 warning"
+    );
+    assert!(tools[0].get("category").is_none(), "tools 不得计入分类");
     let _ = std::fs::remove_dir_all(&base);
 }
