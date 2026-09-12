@@ -55,23 +55,63 @@ function EnvResolutionList({ element }: { element: EngineElement }) {
   );
 }
 
-/** 服务详情：启动命令 / 附加参数 / 密钥变量（只显示是否已配置，永不显示值）/ 写入位置 / 同步详情。 */
+/** 远程 headers 占位符解析列表（与 EnvResolutionList 平行：只显示是否已配置，永不显示值）。 */
+function HeaderResolutionList({ element }: { element: EngineElement }) {
+  const observed = element.observed as McpObserved;
+  const headers = observed.headers ?? {};
+  const entries = Object.entries(headers);
+  if (entries.length === 0) {
+    return <p className="text-xs text-slate-400">不需要请求头。</p>;
+  }
+  return (
+    <ul className="space-y-1">
+      {entries.map(([name, resolution]) => (
+        <li key={name} className="flex items-center gap-2 text-xs" data-testid="mcp-header-resolution">
+          {resolution.resolved ? (
+            <Check className="h-3.5 w-3.5 text-emerald-600" aria-label="已配置" />
+          ) : (
+            <X className="h-3.5 w-3.5 text-red-500" aria-label="未配置" />
+          )}
+          <span className="font-mono text-slate-700">{name}</span>
+          <span className={resolution.resolved ? "text-emerald-600" : "text-red-600"}>
+            {resolution.resolved ? "已配置" : "未配置（运行时会显示变量名）"}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** 服务详情：远程为 服务地址 / 请求头占位符；stdio 为 启动命令 / 附加参数 / 密钥变量（只显示是否已配置，永不显示值）/ 写入位置 / 同步详情。 */
 export function McpServerDetail({ element }: { element: EngineElement }) {
   const spec = element.spec as McpSpec;
   const cells = agentCellsOf(element);
   const extraArgs = spec.extra_args_by_agent ?? {};
+  const isRemote = typeof spec.url === "string" && spec.url.length > 0;
   return (
     <section data-testid={`mcp-detail-${element.id}`} className="space-y-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-      <div>
-        <h4 className="mb-1 text-xs font-semibold text-slate-500">启动命令</h4>
-        <code className="block overflow-x-auto rounded bg-slate-900 px-3 py-2 font-mono text-xs break-all text-slate-100">
-          {spec.command} {(spec.args ?? []).join(" ")}
-        </code>
-        <p className="mt-1 text-xs text-slate-400">
-          启动超时 {spec.startup_timeout_sec ?? "—"} 秒 · 应用到:{" "}
-          {spec.agents === null || spec.agents === undefined ? "全部助手" : spec.agents.join(", ")}
-        </p>
-      </div>
+      {isRemote ? (
+        <div>
+          <h4 className="mb-1 text-xs font-semibold text-slate-500">服务地址（远程 HTTP）</h4>
+          <code className="block overflow-x-auto rounded bg-slate-900 px-3 py-2 font-mono text-xs break-all text-slate-100">
+            {spec.url}
+          </code>
+          <p className="mt-1 text-xs text-slate-400">
+            应用到: {spec.agents === null || spec.agents === undefined ? "全部助手" : spec.agents.join(", ")}
+          </p>
+        </div>
+      ) : (
+        <div>
+          <h4 className="mb-1 text-xs font-semibold text-slate-500">启动命令</h4>
+          <code className="block overflow-x-auto rounded bg-slate-900 px-3 py-2 font-mono text-xs break-all text-slate-100">
+            {spec.command} {(spec.args ?? []).join(" ")}
+          </code>
+          <p className="mt-1 text-xs text-slate-400">
+            启动超时 {spec.startup_timeout_sec ?? "—"} 秒 · 应用到:{" "}
+            {spec.agents === null || spec.agents === undefined ? "全部助手" : spec.agents.join(", ")}
+          </p>
+        </div>
+      )}
 
       {Object.keys(extraArgs).length > 0 && (
         <div>
@@ -87,10 +127,17 @@ export function McpServerDetail({ element }: { element: EngineElement }) {
         </div>
       )}
 
-      <div>
-        <h4 className="mb-1 text-xs font-semibold text-slate-500">密钥变量（只显示是否已配置，永不显示值）</h4>
-        <EnvResolutionList element={element} />
-      </div>
+      {isRemote ? (
+        <div>
+          <h4 className="mb-1 text-xs font-semibold text-slate-500">请求头变量（只显示是否已配置，永不显示值）</h4>
+          <HeaderResolutionList element={element} />
+        </div>
+      ) : (
+        <div>
+          <h4 className="mb-1 text-xs font-semibold text-slate-500">密钥变量（只显示是否已配置，永不显示值）</h4>
+          <EnvResolutionList element={element} />
+        </div>
+      )}
 
       <div>
         <h4 className="mb-1 text-xs font-semibold text-slate-500">写入位置</h4>
@@ -134,8 +181,11 @@ export function McpServerCard({
   const observed = element.observed as McpServerObserved;
   const actions = observed.actions ?? [];
   const isEnabled = (element.policy as { enabled?: boolean }).enabled !== false;
+  const isRemote = typeof spec.url === "string" && spec.url.length > 0;
   const envEntries = Object.entries(observed.env ?? {});
-  const envResolved = envEntries.filter(([, resolution]) => resolution.resolved).length;
+  const headerEntries = Object.entries(observed.headers ?? {});
+  const secretEntries = [...envEntries, ...headerEntries];
+  const envResolved = secretEntries.filter(([, resolution]) => resolution.resolved).length;
 
   return (
     <section
@@ -154,7 +204,7 @@ export function McpServerCard({
             {element.id}
           </button>
           <p className="mt-1 font-mono text-xs break-all text-slate-400">
-            {spec.command} {(spec.args ?? []).join(" ")}
+            {isRemote ? spec.url : `${spec.command ?? ""} ${(spec.args ?? []).join(" ")}`}
           </p>
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
@@ -167,15 +217,18 @@ export function McpServerCard({
         <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-slate-600">
           {spec.agents === null || spec.agents === undefined ? "全部助手" : `限定 ${spec.agents.length} 个助手`}
         </span>
+        {isRemote && (
+          <span className="rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-sky-700">远程 HTTP</span>
+        )}
         <span
           className={cn(
             "rounded border px-1.5 py-0.5",
-            envEntries.length === 0 || envResolved === envEntries.length
+            secretEntries.length === 0 || envResolved === secretEntries.length
               ? "border-slate-200 bg-slate-50 text-slate-600"
               : "border-amber-200 bg-amber-50 text-amber-700",
           )}
         >
-          密钥变量 {envResolved}/{envEntries.length} 已配置
+          {isRemote ? `请求头 ${envResolved}/${secretEntries.length} 已配置` : `密钥变量 ${envResolved}/${secretEntries.length} 已配置`}
         </span>
       </div>
 

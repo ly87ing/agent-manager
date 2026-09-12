@@ -4161,21 +4161,15 @@ fn mcp_test_fail_closed_codecs_corrupt_entries() {
 fn mcp_test_cleanup_remote_or_missing_command_not_blocked() {
     let (root, ctx) = temp_ctx("remote-cleanup");
 
-    // 1. 配置一个 remote 类型的 server 定义，以及一个正常 stdio server 定义
-    execute(
-        &ctx,
-        &request(
-            "policy:set",
-            &[
-                "--layer",
-                "local",
-                "--key",
-                "mcp.definitions.srv-rem",
-                "--value",
-                r#"{"type":"remote","url":"https://example.com/mcp","agents":["claude-code"]}"#,
-            ],
-        ),
-    );
+    // 1. 直写库模拟历史遗留的非法 remote 定义（缺 url；保存期校验上线前的存量数据），
+    //    以及一个正常 stdio server 定义
+    let mut policy = store::builtin_policy();
+    policy["mcp"]["definitions"] = serde_json::json!({
+        "srv-rem": {"type": "remote", "agents": ["claude-code"]}
+    });
+    let conn = store::open_write(&ctx).unwrap();
+    store::write_policy(&conn, &policy).unwrap();
+    drop(conn);
     execute(
         &ctx,
         &request(
@@ -4364,21 +4358,14 @@ fn mcp_test_cleanup_remote_or_missing_command_not_blocked() {
 #[test]
 fn mcp_test_invalid_definition_exposes_safe_library_remove() {
     let (root, ctx) = temp_ctx("invalid-definition-remove");
-    let set_res = execute(
-        &ctx,
-        &request(
-            "policy:set",
-            &[
-                "--layer",
-                "local",
-                "--key",
-                "mcp.definitions.remote-only",
-                "--value",
-                r#"{"type":"remote","url":"https://example.com/mcp"}"#,
-            ],
-        ),
-    );
-    assert!(set_res.ok, "设置无效定义必须成功: {:?}", set_res.errors);
+    // 直写库模拟历史遗留的非法远程定义（http 非本机回环，保存期校验上线前的存量）
+    let mut policy = store::builtin_policy();
+    policy["mcp"]["definitions"] = serde_json::json!({
+        "remote-only": {"type": "remote", "url": "http://example.com/mcp"}
+    });
+    let conn = store::open_write(&ctx).unwrap();
+    store::write_policy(&conn, &policy).unwrap();
+    drop(conn);
 
     let status = execute(&ctx, &request("mcp:status", &[]));
     assert!(status.ok, "无效定义 status 必须可读: {:?}", status.errors);
@@ -4623,9 +4610,111 @@ fn mcp_test_validate_definition_stdio_fail_closed() {
     )
     .is_err());
 
-    // 5. remote 定义在 stdio 校验下必须被拒绝
+    // 5. stdio 校验器对远程形态定义 fail-closed（含 url 或遗留 type=="remote"），
+    //    以及 stdio 定义携带远程专用 headers 字段必须被拒绝
     assert!(validate_definition_stdio(&json!({"type": "remote"}), "s1").is_err());
     assert!(validate_definition_stdio(&json!({"url": "https://example.com"}), "s1").is_err());
+    assert!(validate_definition_stdio(
+        &json!({"command": "node", "headers": {"X-A": "${B}"}}),
+        "s1"
+    )
+    .is_err());
+}
+
+#[test]
+fn mcp_test_validate_definition_remote_matrix() {
+    use agent_manager_engine::native_mcp::policy_view::validate_definition;
+    use serde_json::json;
+
+    // 1. 合法远程定义：https 任意主机 / 本机回环 http（可带端口与路径），headers 可选
+    for def in [
+        json!({"url": "https://example.com/mcp"}),
+        json!({"url": "https://example.com:8443/mcp?x=1"}),
+        json!({"url": "http://localhost/mcp"}),
+        json!({"url": "http://localhost:8080/mcp"}),
+        json!({"url": "http://127.0.0.1:3000/sse"}),
+        json!({"url": "https://example.com/mcp", "headers": {"Authorization": "${A_TOKEN}", "X-Custom-1": "${B_TOKEN}"}}),
+        json!({"url": "https://example.com/mcp", "agents": ["claude-code"]}),
+    ] {
+        assert!(validate_definition(&def, "s1").is_ok(), "应合法: {def}");
+    }
+
+    // 2. url 白名单：非 https 且非本机回环一律拒绝，且错误消息不回显 url 正文
+    for (def, url_body) in [
+        (
+            json!({"url": "http://example.com/mcp"}),
+            "http://example.com/mcp",
+        ),
+        (
+            json!({"url": "http://localhost.evil.com/mcp"}),
+            "http://localhost.evil.com/mcp",
+        ),
+        (
+            json!({"url": "http://192.168.1.1/mcp"}),
+            "http://192.168.1.1/mcp",
+        ),
+        (
+            json!({"url": "ftp://example.com/mcp"}),
+            "ftp://example.com/mcp",
+        ),
+        (json!({"url": "file:///etc/passwd"}), "file:///etc/passwd"),
+        (json!({"url": "https://"}), "https://"),
+        (
+            json!({"url": "https://user@example.com/mcp"}),
+            "user@example.com",
+        ),
+        (
+            json!({"url": " https://example.com/mcp "}),
+            " https://example.com/mcp ",
+        ),
+    ] {
+        let err = validate_definition(&def, "s1").expect_err(&format!("应拒绝: {def}"));
+        let msg = err.to_string();
+        assert!(msg.contains("url"), "错误消息应指出 url 字段: {msg}");
+        assert!(!msg.contains(url_body), "错误消息不得回显 url 正文: {msg}");
+    }
+
+    // 3. url 缺失/非字符串、遗留 type=="remote" 缺 url
+    for def in [
+        json!({"type": "remote"}),
+        json!({"url": 123}),
+        json!({"url": null}),
+    ] {
+        let err = validate_definition(&def, "s1").expect_err(&format!("应拒绝: {def}"));
+        assert!(err.to_string().contains("url"), "错误消息应指出 url: {err}");
+    }
+
+    // 4. 远程与 stdio 字段互斥：command/args/env/startup_timeout_sec 任一出现即拒绝
+    for def in [
+        json!({"url": "https://example.com/mcp", "command": "node"}),
+        json!({"url": "https://example.com/mcp", "args": ["a"]}),
+        json!({"url": "https://example.com/mcp", "env": {}}),
+        json!({"url": "https://example.com/mcp", "startup_timeout_sec": 30}),
+    ] {
+        assert!(
+            validate_definition(&def, "s1").is_err(),
+            "混给应拒绝: {def}"
+        );
+    }
+
+    // 5. headers 反例：非对象、值非 ${VAR}（含明文 token 形）、非法 header 名、超上限
+    for def in [
+        json!({"url": "https://example.com/mcp", "headers": "not-object"}),
+        json!({"url": "https://example.com/mcp", "headers": {"Authorization": "Bearer plain-token"}}),
+        json!({"url": "https://example.com/mcp", "headers": {"Authorization": "A_TOKEN"}}),
+        json!({"url": "https://example.com/mcp", "headers": {"Bad Header": "${A}"}}),
+        json!({"url": "https://example.com/mcp", "headers": {"": "${A}"}}),
+        json!({"url": "https://example.com/mcp", "headers": (0..21).map(|i| (format!("X-H-{i}"), json!("${A}"))).collect::<serde_json::Map<String, serde_json::Value>>()}),
+    ] {
+        assert!(
+            validate_definition(&def, "s1").is_err(),
+            "headers 反例应拒绝: {def}"
+        );
+    }
+
+    // 6. stdio 定义照旧（无 url 无 type==remote 即 stdio 校验）
+    assert!(validate_definition(&json!({"command": "node"}), "s1").is_ok());
+    assert!(validate_definition(&json!({"command": "node", "url": null}), "s1").is_err());
 }
 
 #[test]
@@ -5560,6 +5649,1318 @@ fn mcp_test_direct_invalid_apply_does_not_initialize_fresh_context() {
     assert!(!ctx.home_dir.exists(), "无效 dry-run 不得创建 HOME 目录");
     assert!(!ctx.data_dir.exists(), "无效 dry-run 不得创建 data_dir");
     assert!(!store::db_path(&ctx).exists(), "无效 dry-run 不得创建 DB");
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+// ---------- 远程 HTTP MCP ----------
+
+/// 为远程测试准备三 codec 环境（含 OpenCode agent 定义）与远程服务定义。
+fn setup_remote_ctx(tag: &str, def_value: &str) -> (PathBuf, Context) {
+    let (root, ctx) = temp_ctx(tag);
+    let set_opencode = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "agents.definitions.opencode",
+                "--value",
+                r#"{"display_name":"OpenCode","mcp_config":{"path":"~/.config/opencode/opencode.json","format":"opencode"}}"#,
+            ],
+        ),
+    );
+    assert!(set_opencode.ok, "{:?}", set_opencode.errors);
+    let set_def = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions.remote-srv",
+                "--value",
+                def_value,
+            ],
+        ),
+    );
+    assert!(set_def.ok, "远程定义写入必须成功: {:?}", set_def.errors);
+    (root, ctx)
+}
+
+fn find_element<'v>(st: &'v agent_manager_engine::Envelope, id: &str) -> &'v serde_json::Value {
+    assert!(st.ok, "status 必须成功: {:?}", st.errors);
+    st.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == id)
+        .unwrap_or_else(|| panic!("必须找到元素 {id}: {}", st.data))
+}
+
+#[test]
+fn mcp_test_remote_roundtrip_all_codecs() {
+    std::env::set_var("AM_TEST_REMOTE_TOKEN", "SENTINEL-REMOTE-TOKEN-3f9a");
+    std::env::set_var("AM_TEST_REMOTE_TEAM", "SENTINEL-REMOTE-TEAM-7c21");
+    let (root, ctx) = setup_remote_ctx(
+        "remote-roundtrip",
+        r#"{"url":"https://mcp.example.com/endpoint","headers":{"Authorization":"${AM_TEST_REMOTE_TOKEN}","X-Team":"${AM_TEST_REMOTE_TEAM}"},"agents":["claude-code","codex","opencode"]}"#,
+    );
+    let claude_path = ctx.home_dir.join(".claude.json");
+    let codex_path = ctx.home_dir.join(".codex/config.toml");
+    let opencode_path = ctx.home_dir.join(".config/opencode/opencode.json");
+
+    // 1. apply 前 status：三 cell 暴露 add；freshness 恒 not-applicable；
+    //    spec.headers 保留 ${VAR} 占位符；observed.headers 只含占位符与布尔。
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    let el = find_element(&st, "mcp:remote-srv");
+    assert_eq!(
+        el["freshness"]["state"], "not-applicable",
+        "远程定义不参与上游探测"
+    );
+    assert_eq!(el["spec"]["url"], "https://mcp.example.com/endpoint");
+    assert_eq!(
+        el["spec"]["headers"]["Authorization"],
+        "${AM_TEST_REMOTE_TOKEN}"
+    );
+    assert!(
+        el["spec"].get("command").is_none(),
+        "远程 spec 不得含 command"
+    );
+    assert_eq!(
+        el["spec"].get("type").map(|v| v.as_str()),
+        None,
+        "定义不持久化 type"
+    );
+    let headers_obs = &el["observed"]["headers"];
+    assert_eq!(
+        headers_obs["Authorization"],
+        serde_json::json!({"placeholder": "${AM_TEST_REMOTE_TOKEN}", "resolved": true})
+    );
+    assert_eq!(
+        headers_obs["X-Team"],
+        serde_json::json!({"placeholder": "${AM_TEST_REMOTE_TEAM}", "resolved": true})
+    );
+    for agent in ["claude-code", "codex", "opencode"] {
+        let cell = &el["observed"]["agents"][agent];
+        assert!(
+            cell["actions"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("add")),
+            "apply 前 {agent} 必须暴露 add: {cell:?}"
+        );
+    }
+
+    // 2. apply add 三 codec
+    for agent in ["claude-code", "codex", "opencode"] {
+        let res = execute(
+            &ctx,
+            &request(
+                "mcp:apply",
+                &[
+                    "--only",
+                    "mcp:remote-srv",
+                    "--action",
+                    "add",
+                    "--agent",
+                    agent,
+                ],
+            ),
+        );
+        assert!(res.ok, "远程 add {agent} 必须成功: {:?}", res.errors);
+    }
+
+    // 3. Claude JSON：type "http" + url + 字面量 ${VAR} headers + 条目级 marker；零明文
+    let claude_content: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&claude_path).unwrap()).unwrap();
+    let claude_srv = &claude_content["mcpServers"]["remote-srv"];
+    assert_eq!(claude_srv["type"], "http");
+    assert_eq!(claude_srv["url"], "https://mcp.example.com/endpoint");
+    assert_eq!(
+        claude_srv["headers"]["Authorization"],
+        "${AM_TEST_REMOTE_TOKEN}"
+    );
+    assert_eq!(claude_srv["headers"]["X-Team"], "${AM_TEST_REMOTE_TEAM}");
+    assert_eq!(claude_srv["_MANAGED_BY"], "agent-manager");
+    for key in ["command", "args", "env"] {
+        assert!(claude_srv.get(key).is_none(), "Claude 远程条目不得含 {key}");
+    }
+    let claude_raw = std::fs::read_to_string(&claude_path).unwrap();
+    for sentinel in ["SENTINEL-REMOTE-TOKEN-3f9a", "SENTINEL-REMOTE-TEAM-7c21"] {
+        assert!(
+            !claude_raw.contains(sentinel),
+            "Claude 目标文件零明文: {sentinel}"
+        );
+    }
+
+    // 4. Codex TOML：url 键即远程 + env_http_headers（header 名 → 变量名）+ 条目级 marker
+    let toml_raw = std::fs::read_to_string(&codex_path).unwrap();
+    assert!(toml_raw.contains("[mcp_servers.remote-srv]"), "{toml_raw}");
+    assert!(
+        toml_raw.contains("url = \"https://mcp.example.com/endpoint\""),
+        "{toml_raw}"
+    );
+    assert!(
+        toml_raw.contains("_MANAGED_BY = \"agent-manager\""),
+        "{toml_raw}"
+    );
+    assert!(
+        toml_raw.contains("[mcp_servers.remote-srv.env_http_headers]"),
+        "{toml_raw}"
+    );
+    assert!(
+        toml_raw.contains("Authorization = \"AM_TEST_REMOTE_TOKEN\""),
+        "{toml_raw}"
+    );
+    assert!(
+        toml_raw.contains("X-Team = \"AM_TEST_REMOTE_TEAM\""),
+        "{toml_raw}"
+    );
+    assert!(
+        !toml_raw.contains("command"),
+        "Codex 远程条目不得含 command: {toml_raw}"
+    );
+    for sentinel in ["SENTINEL-REMOTE-TOKEN-3f9a", "SENTINEL-REMOTE-TEAM-7c21"] {
+        assert!(
+            !toml_raw.contains(sentinel),
+            "Codex 目标文件零明文: {sentinel}"
+        );
+    }
+
+    // 5. OpenCode JSON：type "remote" + {env:VAR} 插值 headers + 固定 oauth:false + 条目级 marker
+    let opencode_content: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&opencode_path).unwrap()).unwrap();
+    let oc_srv = &opencode_content["mcp"]["remote-srv"];
+    assert_eq!(oc_srv["type"], "remote");
+    assert_eq!(oc_srv["url"], "https://mcp.example.com/endpoint");
+    assert_eq!(
+        oc_srv["headers"]["Authorization"],
+        "{env:AM_TEST_REMOTE_TOKEN}"
+    );
+    assert_eq!(oc_srv["headers"]["X-Team"], "{env:AM_TEST_REMOTE_TEAM}");
+    assert_eq!(oc_srv["oauth"], false);
+    assert_eq!(oc_srv["_MANAGED_BY"], "agent-manager");
+    let oc_raw = std::fs::read_to_string(&opencode_path).unwrap();
+    for sentinel in ["SENTINEL-REMOTE-TOKEN-3f9a", "SENTINEL-REMOTE-TEAM-7c21"] {
+        assert!(
+            !oc_raw.contains(sentinel),
+            "OpenCode 目标文件零明文: {sentinel}"
+        );
+    }
+
+    // 6. 回读往返：extract_entry 从条目级识别 marker，digest 一致 → managed-ok
+    for (path, format) in [
+        (&claude_path, Format::ClaudeJson),
+        (&codex_path, Format::CodexToml),
+        (&opencode_path, Format::OpenCodeJson),
+    ] {
+        let (entry, managed) = extract_entry(path, format, "remote-srv").unwrap();
+        assert!(managed, "条目级 marker 必须被识别: {}", path.display());
+        assert!(entry.is_some());
+    }
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    let el = find_element(&st, "mcp:remote-srv");
+    for agent in ["claude-code", "codex", "opencode"] {
+        assert_eq!(
+            el["observed"]["agents"][agent]["state"], "managed-ok",
+            "{agent} 回读往返后必须 managed-ok"
+        );
+    }
+    assert_eq!(el["state"], "managed-ok");
+
+    // 7. update：定义加 header 后收敛
+    let set_def = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions.remote-srv",
+                "--value",
+                r#"{"url":"https://mcp.example.com/endpoint","headers":{"Authorization":"${AM_TEST_REMOTE_TOKEN}","X-Team":"${AM_TEST_REMOTE_TEAM}","X-New":"${AM_TEST_REMOTE_TOKEN}"},"agents":["claude-code","codex","opencode"]}"#,
+            ],
+        ),
+    );
+    assert!(set_def.ok, "{:?}", set_def.errors);
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    let el = find_element(&st, "mcp:remote-srv");
+    assert!(
+        el["observed"]["agents"]["codex"]["actions"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("update")),
+        "定义变更后必须暴露 update"
+    );
+    let upd = execute(
+        &ctx,
+        &request(
+            "mcp:apply",
+            &[
+                "--only",
+                "mcp:remote-srv",
+                "--action",
+                "update",
+                "--agent",
+                "codex",
+            ],
+        ),
+    );
+    assert!(upd.ok, "远程 update 必须成功: {:?}", upd.errors);
+    let toml_raw = std::fs::read_to_string(&codex_path).unwrap();
+    assert!(
+        toml_raw.contains("X-New = \"AM_TEST_REMOTE_TOKEN\""),
+        "{toml_raw}"
+    );
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    let el = find_element(&st, "mcp:remote-srv");
+    assert_eq!(el["observed"]["agents"]["codex"]["state"], "managed-ok");
+
+    // 8. disable → 条目撤下；enable → 重新写入；remove → 彻底清理
+    let dis = execute(
+        &ctx,
+        &request(
+            "mcp:apply",
+            &[
+                "--only",
+                "mcp:remote-srv",
+                "--action",
+                "disable",
+                "--agent",
+                "opencode",
+            ],
+        ),
+    );
+    assert!(dis.ok, "{:?}", dis.errors);
+    let opencode_content: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&opencode_path).unwrap()).unwrap();
+    assert!(opencode_content["mcp"].get("remote-srv").is_none());
+    let en = execute(
+        &ctx,
+        &request(
+            "mcp:apply",
+            &[
+                "--only",
+                "mcp:remote-srv",
+                "--action",
+                "enable",
+                "--agent",
+                "opencode",
+            ],
+        ),
+    );
+    assert!(en.ok, "{:?}", en.errors);
+    let opencode_content: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&opencode_path).unwrap()).unwrap();
+    assert_eq!(opencode_content["mcp"]["remote-srv"]["type"], "remote");
+
+    for agent in ["claude-code", "codex", "opencode"] {
+        let rm = execute(
+            &ctx,
+            &request(
+                "mcp:apply",
+                &[
+                    "--only",
+                    "mcp:remote-srv",
+                    "--action",
+                    "remove",
+                    "--agent",
+                    agent,
+                ],
+            ),
+        );
+        assert!(rm.ok, "远程 remove {agent} 必须成功: {:?}", rm.errors);
+    }
+    let claude_content: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&claude_path).unwrap()).unwrap();
+    assert!(claude_content["mcpServers"].get("remote-srv").is_none());
+    let toml_raw = std::fs::read_to_string(&codex_path).unwrap();
+    assert!(!toml_raw.contains("remote-srv"), "{toml_raw}");
+    let opencode_content: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&opencode_path).unwrap()).unwrap();
+    assert!(opencode_content["mcp"].get("remote-srv").is_none());
+
+    std::env::remove_var("AM_TEST_REMOTE_TOKEN");
+    std::env::remove_var("AM_TEST_REMOTE_TEAM");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn mcp_test_remote_legacy_type_remote_equivalent() {
+    std::env::set_var("AM_TEST_REMOTE_LEGACY", "x");
+    // 历史遗留 type:"remote" + url 输入与仅含 url 等同处理；type 不持久化进目标
+    let (root, ctx) = setup_remote_ctx(
+        "remote-legacy-type",
+        r#"{"type":"remote","url":"https://legacy.example.com/mcp","headers":{"X-Legacy":"${AM_TEST_REMOTE_LEGACY}"},"agents":["claude-code"]}"#,
+    );
+    let add = execute(
+        &ctx,
+        &request(
+            "mcp:apply",
+            &[
+                "--only",
+                "mcp:remote-srv",
+                "--action",
+                "add",
+                "--agent",
+                "claude-code",
+            ],
+        ),
+    );
+    assert!(add.ok, "遗留 type:remote 定义必须可用: {:?}", add.errors);
+    let claude_content: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(ctx.home_dir.join(".claude.json")).unwrap())
+            .unwrap();
+    let srv = &claude_content["mcpServers"]["remote-srv"];
+    assert_eq!(srv["type"], "http", "codec 推导 Claude type 常量");
+    assert_eq!(srv["url"], "https://legacy.example.com/mcp");
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    let el = find_element(&st, "mcp:remote-srv");
+    assert_eq!(
+        el["observed"]["agents"]["claude-code"]["state"],
+        "managed-ok"
+    );
+    std::env::remove_var("AM_TEST_REMOTE_LEGACY");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn mcp_test_remote_headers_rejected_at_policy_set_and_preflight() {
+    let (root, ctx) = temp_ctx("remote-headers-reject");
+
+    // 1. policy:set：headers 值非 ${VAR}（含明文 token 形）一律拒绝，消息不回显值
+    for (value, leaked) in [
+        ("Bearer plain-token-xyz", "plain-token-xyz"),
+        ("AM_TEST_ANY_TOKEN", "AM_TEST_ANY_TOKEN"),
+        ("", ""),
+    ] {
+        let def = format!(
+            r#"{{"url":"https://example.com/mcp","headers":{{"Authorization":"{value}"}}}}"#
+        );
+        let res = execute(
+            &ctx,
+            &request(
+                "policy:set",
+                &[
+                    "--layer",
+                    "local",
+                    "--key",
+                    "mcp.definitions.hdr-bad",
+                    "--value",
+                    &def,
+                ],
+            ),
+        );
+        assert!(!res.ok, "headers 值 '{value}' 必须被拒绝");
+        assert_eq!(res.errors[0].code, "USAGE_ERROR");
+        let msg = &res.errors[0].message;
+        assert!(msg.contains("Authorization"), "消息应指出 header 名: {msg}");
+        if !leaked.is_empty() {
+            assert!(!msg.contains(leaked), "消息不得回显字面值: {msg}");
+        }
+    }
+    // headers 非对象 / 非法 header 名 / 超上限同样拒绝
+    for def in [
+        r#"{"url":"https://example.com/mcp","headers":"not-object"}"#.to_string(),
+        r#"{"url":"https://example.com/mcp","headers":{"Bad Header":"${A}"}}"#.to_string(),
+        format!(
+            r#"{{"url":"https://example.com/mcp","headers":{{{}}}}}"#,
+            (0..21)
+                .map(|i| format!(r#""X-H-{i}":"${{A}}""#))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+    ] {
+        let res = execute(
+            &ctx,
+            &request(
+                "policy:set",
+                &[
+                    "--layer",
+                    "local",
+                    "--key",
+                    "mcp.definitions.hdr-bad",
+                    "--value",
+                    &def,
+                ],
+            ),
+        );
+        assert!(!res.ok, "非法 headers 必须被拒绝: {def}");
+    }
+
+    // 2. 疑似凭据被 reject_secrets 拦截（SECRET_INPUT_REJECTED 先于 headers 校验）
+    let res = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions.hdr-secret",
+                "--value",
+                r#"{"url":"https://example.com/mcp","headers":{"Authorization":"ghp_0123456789abcdefABCDEF"}}"#,
+            ],
+        ),
+    );
+    assert!(!res.ok, "疑似凭据必须被拒绝");
+    assert_eq!(res.errors[0].code, "SECRET_INPUT_REJECTED");
+    assert!(!res.errors[0].message.contains("ghp_"), "不得回显凭据正文");
+
+    // 3. preflight：绕过 policy:set 直写库中的明文 header 定义，plan/apply 必须 fail-closed
+    let mut policy = store::builtin_policy();
+    policy["mcp"]["definitions"] = serde_json::json!({
+        "hdr-literal": {"url": "https://example.com/mcp", "headers": {"X-Key": "literal-value-9f2c"}}
+    });
+    let conn = store::open_write(&ctx).unwrap();
+    store::write_policy(&conn, &policy).unwrap();
+    drop(conn);
+    for cmd in ["mcp:plan", "mcp:apply"] {
+        let res = execute(
+            &ctx,
+            &request(
+                cmd,
+                &[
+                    "--only",
+                    "mcp:hdr-literal",
+                    "--action",
+                    "add",
+                    "--agent",
+                    "claude-code",
+                ],
+            ),
+        );
+        assert!(!res.ok, "{cmd} 对明文 header 定义必须 fail-closed");
+        let msgs = error_messages(&res);
+        assert!(
+            !msgs.contains("literal-value-9f2c"),
+            "{cmd} 不得回显字面值: {msgs}"
+        );
+    }
+    // status 中该定义 unsupported 且 spec.headers 掩码 <literal>
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    let el = find_element(&st, "mcp:hdr-literal");
+    assert_eq!(el["state"], "unsupported");
+    assert_eq!(
+        el["spec"]["headers"]["X-Key"], "<literal>",
+        "字面值必须掩码"
+    );
+    let serialized = serde_json::to_string(&st.data).unwrap();
+    assert!(
+        !serialized.contains("literal-value-9f2c"),
+        "status 不得泄露字面值"
+    );
+    assert!(
+        !ctx.home_dir.join(".claude.json").exists(),
+        "失败链路不得创建目标文件"
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn mcp_test_remote_url_whitelist_and_mixed_fields_integration() {
+    let (root, ctx) = temp_ctx("remote-url-whitelist");
+
+    // 1a. url 非白名单：policy:set 保存期直接拒绝，消息不回显 url 正文/主机
+    let bad_url = "http://internal.example.com/mcp";
+    let set_res = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions.bad-url",
+                "--value",
+                &format!(r#"{{"url":"{bad_url}","agents":["claude-code"]}}"#),
+            ],
+        ),
+    );
+    assert!(!set_res.ok, "非法 url 必须在保存期拒绝");
+    assert_eq!(set_res.errors[0].code, "USAGE_ERROR");
+    let msg = &set_res.errors[0].message;
+    assert!(!msg.contains(bad_url), "保存期消息不得回显 url 正文: {msg}");
+    assert!(
+        !msg.contains("internal.example.com"),
+        "保存期消息不得回显主机: {msg}"
+    );
+    assert!(
+        !store::db_path(&ctx).exists(),
+        "被拒绝的保存不得初始化数据库"
+    );
+
+    // 1b. 历史遗留非法定义（直写库模拟存量）：status unsupported、plan/apply fail-closed 且不回显
+    let mut policy = store::builtin_policy();
+    policy["mcp"]["definitions"] = serde_json::json!({
+        "bad-url": {"url": bad_url, "agents": ["claude-code"]}
+    });
+    let conn = store::open_write(&ctx).unwrap();
+    store::write_policy(&conn, &policy).unwrap();
+    drop(conn);
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    let el = find_element(&st, "mcp:bad-url");
+    assert_eq!(el["state"], "unsupported");
+    assert!(el["observed"]["agents"]["claude-code"]["actions"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    for cmd in ["mcp:plan", "mcp:apply"] {
+        let res = execute(
+            &ctx,
+            &request(
+                cmd,
+                &[
+                    "--only",
+                    "mcp:bad-url",
+                    "--action",
+                    "add",
+                    "--agent",
+                    "claude-code",
+                ],
+            ),
+        );
+        assert!(!res.ok, "{cmd} 必须拒绝非法 url");
+        let msgs = error_messages(&res);
+        assert!(
+            !msgs.contains(bad_url),
+            "{cmd} 消息不得回显 url 正文: {msgs}"
+        );
+        assert!(
+            !msgs.contains("internal.example.com"),
+            "{cmd} 消息不得回显主机: {msgs}"
+        );
+    }
+
+    // 2a. 远程与 stdio 字段混给（url+command / url+env / url+startup_timeout_sec / url+args）
+    //     → policy:set 保存期拒绝，消息说明互斥
+    for (name, def) in [
+        (
+            "mix-command",
+            r#"{"url":"https://example.com/mcp","command":"node"}"#,
+        ),
+        (
+            "mix-env",
+            r#"{"url":"https://example.com/mcp","env":{"A":"${B}"}}"#,
+        ),
+        (
+            "mix-timeout",
+            r#"{"url":"https://example.com/mcp","startup_timeout_sec":30}"#,
+        ),
+        (
+            "mix-args",
+            r#"{"url":"https://example.com/mcp","args":["a"]}"#,
+        ),
+    ] {
+        let set_res = execute(
+            &ctx,
+            &request(
+                "policy:set",
+                &[
+                    "--layer",
+                    "local",
+                    "--key",
+                    &format!("mcp.definitions.{name}"),
+                    "--value",
+                    def,
+                ],
+            ),
+        );
+        assert!(!set_res.ok, "{name} 混给必须在保存期拒绝");
+        assert_eq!(set_res.errors[0].code, "USAGE_ERROR");
+        let msg = &set_res.errors[0].message;
+        assert!(msg.contains("互斥"), "{name} 消息应说明字段互斥: {msg}");
+    }
+
+    // 2b. 历史遗留混给定义（直写库模拟存量）：status unsupported、plan fail-closed
+    let mut policy = store::builtin_policy();
+    policy["mcp"]["definitions"] = serde_json::json!({
+        "mix-legacy": {"url": "https://example.com/mcp", "command": "node", "agents": ["claude-code"]}
+    });
+    let conn = store::open_write(&ctx).unwrap();
+    store::write_policy(&conn, &policy).unwrap();
+    drop(conn);
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    let el = find_element(&st, "mcp:mix-legacy");
+    assert_eq!(el["state"], "unsupported", "存量混给定义必须 unsupported");
+    let plan = execute(
+        &ctx,
+        &request(
+            "mcp:plan",
+            &[
+                "--only",
+                "mcp:mix-legacy",
+                "--action",
+                "add",
+                "--agent",
+                "claude-code",
+            ],
+        ),
+    );
+    assert!(!plan.ok, "存量混给定义 plan 必须 fail-closed");
+    assert!(error_messages(&plan).contains("互斥"));
+
+    // 3. 本机回环 http 白名单正向：http://localhost:8080 可全链路 apply
+    let (root2, ctx2) = temp_ctx("remote-url-loopback");
+    let set_res = execute(
+        &ctx2,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions.loop-srv",
+                "--value",
+                r#"{"url":"http://localhost:8080/mcp","agents":["claude-code"]}"#,
+            ],
+        ),
+    );
+    assert!(set_res.ok, "{:?}", set_res.errors);
+    let add = execute(
+        &ctx2,
+        &request(
+            "mcp:apply",
+            &[
+                "--only",
+                "mcp:loop-srv",
+                "--action",
+                "add",
+                "--agent",
+                "claude-code",
+            ],
+        ),
+    );
+    assert!(add.ok, "本机回环 http 必须可用: {:?}", add.errors);
+    let claude_content: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(ctx2.home_dir.join(".claude.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        claude_content["mcpServers"]["loop-srv"]["url"],
+        "http://localhost:8080/mcp"
+    );
+    assert_eq!(claude_content["mcpServers"]["loop-srv"]["type"], "http");
+
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(root2);
+}
+
+#[test]
+fn mcp_test_remote_status_masking_missing_vars_and_secrets_kind() {
+    std::env::set_var("AM_TEST_REMOTE_PRESENT", "x");
+    std::env::remove_var("AM_TEST_REMOTE_ABSENT");
+    let (root, ctx) = setup_remote_ctx(
+        "remote-masking",
+        r#"{"url":"https://example.com/mcp","headers":{"X-Present":"${AM_TEST_REMOTE_PRESENT}","X-Absent":"${AM_TEST_REMOTE_ABSENT}"},"agents":["claude-code"]}"#,
+    );
+
+    // 1. status：observed.headers 只含占位符与布尔；缺失变量进入 blocked_reason 且不暴露 add
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    let el = find_element(&st, "mcp:remote-srv");
+    let headers = &el["observed"]["headers"];
+    assert_eq!(headers["X-Present"]["resolved"], true);
+    assert_eq!(headers["X-Absent"]["resolved"], false);
+    assert_eq!(
+        headers["X-Absent"]["placeholder"],
+        "${AM_TEST_REMOTE_ABSENT}"
+    );
+    let cell = &el["observed"]["agents"]["claude-code"];
+    assert!(
+        cell["blocked_reason"]
+            .as_str()
+            .unwrap()
+            .contains("AM_TEST_REMOTE_ABSENT"),
+        "缺失 header 变量必须出现在 blocked_reason: {cell:?}"
+    );
+    assert!(
+        !cell["actions"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("add")),
+        "缺失 header 变量时不得暴露 add"
+    );
+
+    // 2. plan/apply 同样被缺失变量 fail-closed 拦截（与 env 同级）
+    for cmd in ["mcp:plan", "mcp:apply"] {
+        let res = execute(
+            &ctx,
+            &request(
+                cmd,
+                &[
+                    "--only",
+                    "mcp:remote-srv",
+                    "--action",
+                    "add",
+                    "--agent",
+                    "claude-code",
+                ],
+            ),
+        );
+        assert!(!res.ok, "{cmd} 必须被缺失 header 变量拦截");
+        assert!(error_messages(&res).contains("AM_TEST_REMOTE_ABSENT"));
+    }
+    assert!(!ctx.home_dir.join(".claude.json").exists(), "拦截后零写");
+
+    // 3. 变量补齐后 add 成功（与 env 同级语义）
+    std::env::set_var("AM_TEST_REMOTE_ABSENT", "SENTINEL-ABSENT-VALUE-51de");
+    let add = execute(
+        &ctx,
+        &request(
+            "mcp:apply",
+            &[
+                "--only",
+                "mcp:remote-srv",
+                "--action",
+                "add",
+                "--agent",
+                "claude-code",
+            ],
+        ),
+    );
+    assert!(add.ok, "变量补齐后 add 必须成功: {:?}", add.errors);
+
+    // 4. secrets:status：headers 占位符纳入且带 kind 字段；变量值绝不外泄
+    let sec = execute(&ctx, &request("secrets:status", &[]));
+    assert!(sec.ok, "{:?}", sec.errors);
+    let variables = sec.data["elements"][0]["observed"]["variables"]
+        .as_array()
+        .unwrap();
+    let header_rows: Vec<_> = variables.iter().filter(|v| v["kind"] == "header").collect();
+    assert_eq!(
+        header_rows.len(),
+        2,
+        "headers 必须纳入 secrets:status: {variables:?}"
+    );
+    assert!(header_rows.iter().all(|v| v["server"] == "remote-srv"));
+    assert!(header_rows
+        .iter()
+        .any(|v| v["env_key"] == "X-Present" && v["resolved"] == true));
+    let serialized = serde_json::to_string(&sec.data).unwrap();
+    assert!(
+        !serialized.contains("SENTINEL-ABSENT-VALUE-51de"),
+        "secrets:status 不得外泄变量值: {serialized}"
+    );
+
+    std::env::remove_var("AM_TEST_REMOTE_PRESENT");
+    std::env::remove_var("AM_TEST_REMOTE_ABSENT");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn mcp_test_remote_external_modification_fail_closed() {
+    std::env::set_var("AM_TEST_REMOTE_DRIFT", "x");
+    let (root, ctx) = setup_remote_ctx(
+        "remote-drift",
+        r#"{"url":"https://drift.example.com/mcp","headers":{"X-Key":"${AM_TEST_REMOTE_DRIFT}"},"agents":["claude-code","codex","opencode"]}"#,
+    );
+    let claude_path = ctx.home_dir.join(".claude.json");
+    let codex_path = ctx.home_dir.join(".codex/config.toml");
+    let opencode_path = ctx.home_dir.join(".config/opencode/opencode.json");
+    for agent in ["claude-code", "codex", "opencode"] {
+        let res = execute(
+            &ctx,
+            &request(
+                "mcp:apply",
+                &[
+                    "--only",
+                    "mcp:remote-srv",
+                    "--action",
+                    "add",
+                    "--agent",
+                    agent,
+                ],
+            ),
+        );
+        assert!(res.ok, "{:?}", res.errors);
+    }
+
+    // 1. 外部修改 url → drifted 且暴露 update（digest 涵盖 url）
+    let mut doc: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&claude_path).unwrap()).unwrap();
+    doc["mcpServers"]["remote-srv"]["url"] = serde_json::json!("https://evil.example.com/x");
+    std::fs::write(&claude_path, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    let el = find_element(&st, "mcp:remote-srv");
+    let cell = &el["observed"]["agents"]["claude-code"];
+    assert_eq!(cell["state"], "drifted");
+    assert!(cell["actions"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("update")));
+
+    // 2. 外部新增未受管字段（OpenCode oauth 属期望集，用 custom_field 反例）→ fail-closed
+    let mut doc: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&opencode_path).unwrap()).unwrap();
+    doc["mcp"]["remote-srv"]["custom_field"] = serde_json::json!(1);
+    std::fs::write(&opencode_path, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    let el = find_element(&st, "mcp:remote-srv");
+    let cell = &el["observed"]["agents"]["opencode"];
+    assert_eq!(cell["state"], "drifted");
+    assert!(
+        cell["blocked_reason"]
+            .as_str()
+            .unwrap()
+            .contains("未受管外部属性"),
+        "{cell:?}"
+    );
+    let oc_bytes = std::fs::read(&opencode_path).unwrap();
+    for cmd in ["mcp:plan", "mcp:apply"] {
+        let res = execute(
+            &ctx,
+            &request(
+                cmd,
+                &[
+                    "--only",
+                    "mcp:remote-srv",
+                    "--action",
+                    "update",
+                    "--agent",
+                    "opencode",
+                ],
+            ),
+        );
+        assert!(!res.ok, "{cmd} 对未受管外部属性必须 fail-closed");
+    }
+    assert_eq!(
+        std::fs::read(&opencode_path).unwrap(),
+        oc_bytes,
+        "fail-closed 后文件不变"
+    );
+
+    // 3. marker 缺失即非受管（Codex 删除条目级 marker 行）→ 拒绝覆盖
+    let toml_raw = std::fs::read_to_string(&codex_path).unwrap();
+    let stripped: String = toml_raw
+        .lines()
+        .filter(|line| !line.starts_with("_MANAGED_BY"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&codex_path, format!("{stripped}\n")).unwrap();
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    let el = find_element(&st, "mcp:remote-srv");
+    let cell = &el["observed"]["agents"]["codex"];
+    assert_eq!(cell["state"], "drifted");
+    assert!(
+        cell["blocked_reason"]
+            .as_str()
+            .unwrap()
+            .contains("非受管同名条目"),
+        "{cell:?}"
+    );
+    assert!(
+        cell["actions"].as_array().unwrap().is_empty(),
+        "非受管冲突不得暴露动作"
+    );
+    let codex_bytes = std::fs::read(&codex_path).unwrap();
+    for cmd in ["mcp:plan", "mcp:apply"] {
+        for action in ["update", "disable", "remove"] {
+            let res = execute(
+                &ctx,
+                &request(
+                    cmd,
+                    &[
+                        "--only",
+                        "mcp:remote-srv",
+                        "--action",
+                        action,
+                        "--agent",
+                        "codex",
+                    ],
+                ),
+            );
+            assert!(!res.ok, "{cmd} {action} 对非受管条目必须 fail-closed");
+        }
+    }
+    assert_eq!(
+        std::fs::read(&codex_path).unwrap(),
+        codex_bytes,
+        "fail-closed 后文件不变"
+    );
+
+    // 4. headers 值被外部改成明文 → digest 漂移 + 回读仅作 digest 输入，status 输出不含明文
+    let mut doc: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&claude_path).unwrap()).unwrap();
+    doc["mcpServers"]["remote-srv"]["headers"]["X-Key"] =
+        serde_json::json!("PLAINTEXT-EXTERNAL-8e4b");
+    std::fs::write(&claude_path, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    assert!(st.ok);
+    let el = find_element(&st, "mcp:remote-srv");
+    assert_eq!(el["observed"]["agents"]["claude-code"]["state"], "drifted");
+    let serialized = serde_json::to_string(&st.data).unwrap();
+    assert!(
+        !serialized.contains("PLAINTEXT-EXTERNAL-8e4b"),
+        "status 不得回显目标文件明文"
+    );
+
+    std::env::remove_var("AM_TEST_REMOTE_DRIFT");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn mcp_test_remote_zero_write_and_unmanaged_marker_conflict() {
+    std::env::set_var("AM_TEST_REMOTE_ZW", "x");
+    let (root, ctx) = setup_remote_ctx(
+        "remote-zero-write",
+        r#"{"url":"https://zw.example.com/mcp","headers":{"X-Key":"${AM_TEST_REMOTE_ZW}"},"agents":["claude-code"]}"#,
+    );
+    let db_bytes = std::fs::read(store::db_path(&ctx)).unwrap();
+    let claude_path = ctx.home_dir.join(".claude.json");
+
+    // 1. status / plan / dry-run 零写：DB 字节不变、不创建目标文件、不创建 lock
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    assert!(st.ok);
+    let plan = execute(
+        &ctx,
+        &request(
+            "mcp:plan",
+            &[
+                "--only",
+                "mcp:remote-srv",
+                "--action",
+                "add",
+                "--agent",
+                "claude-code",
+            ],
+        ),
+    );
+    assert!(plan.ok, "远程 plan 必须成功: {:?}", plan.errors);
+    assert!(!plan.data["actions"].as_array().unwrap().is_empty());
+    let dry = execute(
+        &ctx,
+        &request(
+            "mcp:apply",
+            &[
+                "--only",
+                "mcp:remote-srv",
+                "--action",
+                "add",
+                "--agent",
+                "claude-code",
+                "--dry-run",
+            ],
+        ),
+    );
+    assert!(dry.ok, "{:?}", dry.errors);
+    assert_eq!(dry.data["dry_run"], true);
+    assert!(
+        !claude_path.exists(),
+        "status/plan/dry-run 不得创建目标文件"
+    );
+    assert!(
+        !ctx.data_dir.join("agent-manager.apply.lock").exists(),
+        "不得创建 lock"
+    );
+    assert_eq!(
+        std::fs::read(store::db_path(&ctx)).unwrap(),
+        db_bytes,
+        "status/plan/dry-run 不得改变数据库字节"
+    );
+
+    // 2. 外部非受管同名远程条目（无 marker）→ add fail-closed
+    std::fs::create_dir_all(&ctx.home_dir).unwrap();
+    std::fs::write(
+        &claude_path,
+        r#"{"mcpServers":{"remote-srv":{"type":"http","url":"https://zw.example.com/mcp"}}}"#,
+    )
+    .unwrap();
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    let el = find_element(&st, "mcp:remote-srv");
+    let cell = &el["observed"]["agents"]["claude-code"];
+    assert_eq!(cell["state"], "drifted");
+    assert!(cell["blocked_reason"]
+        .as_str()
+        .unwrap()
+        .contains("非受管同名条目"));
+    let external_bytes = std::fs::read(&claude_path).unwrap();
+    let add = execute(
+        &ctx,
+        &request(
+            "mcp:apply",
+            &[
+                "--only",
+                "mcp:remote-srv",
+                "--action",
+                "add",
+                "--agent",
+                "claude-code",
+            ],
+        ),
+    );
+    assert!(!add.ok, "外部非受管同名远程条目必须拒绝覆盖");
+    assert_eq!(
+        std::fs::read(&claude_path).unwrap(),
+        external_bytes,
+        "外部条目必须原样保留"
+    );
+
+    std::env::remove_var("AM_TEST_REMOTE_ZW");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn mcp_test_remote_opencode_type_shape_mismatch_probe_error() {
+    let (root, ctx) = setup_remote_ctx(
+        "remote-oc-type",
+        r#"{"url":"https://oc.example.com/mcp","agents":["opencode"]}"#,
+    );
+    let opencode_path = ctx.home_dir.join(".config/opencode/opencode.json");
+    std::fs::create_dir_all(opencode_path.parent().unwrap()).unwrap();
+
+    // 1. type "local" + url（形态不匹配）→ probe-error
+    std::fs::write(
+        &opencode_path,
+        r#"{"mcp":{"remote-srv":{"type":"local","url":"https://oc.example.com/mcp"}}}"#,
+    )
+    .unwrap();
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    let el = find_element(&st, "mcp:remote-srv");
+    let cell = &el["observed"]["agents"]["opencode"];
+    assert_eq!(cell["state"], "probe-error");
+    assert!(cell["blocked_reason"].as_str().unwrap().contains("type"));
+
+    // 2. type "remote" 无 url（走 stdio 形态校验）→ probe-error
+    std::fs::write(
+        &opencode_path,
+        r#"{"mcp":{"remote-srv":{"type":"remote","command":["echo"]}}}"#,
+    )
+    .unwrap();
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    let el = find_element(&st, "mcp:remote-srv");
+    let cell = &el["observed"]["agents"]["opencode"];
+    assert_eq!(cell["state"], "probe-error");
+    assert!(cell["blocked_reason"].as_str().unwrap().contains("type"));
+
+    // 3. headers 值非字符串 → probe-error
+    std::fs::write(
+        &opencode_path,
+        r#"{"mcp":{"remote-srv":{"type":"remote","url":"https://oc.example.com/mcp","headers":{"X-K":123},"_MANAGED_BY":"agent-manager","oauth":false}}}"#,
+    )
+    .unwrap();
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    let el = find_element(&st, "mcp:remote-srv");
+    let cell = &el["observed"]["agents"]["opencode"];
+    assert_eq!(cell["state"], "probe-error");
+    assert!(cell["blocked_reason"].as_str().unwrap().contains("headers"));
+
+    // 4. 远程条目带 stdio 旧位置 env 内 marker 也被识别（兼容）
+    std::fs::write(
+        &opencode_path,
+        r#"{"mcp":{"remote-srv":{"type":"remote","url":"https://oc.example.com/mcp","oauth":false,"environment":{"_MANAGED_BY":"agent-manager"}}}}"#,
+    )
+    .unwrap();
+    let (_entry, managed) =
+        extract_entry(&opencode_path, Format::OpenCodeJson, "remote-srv").unwrap();
+    assert!(managed, "stdio 旧位置 env 内 marker 必须继续兼容");
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn mcp_test_policy_set_validates_full_definition_shape() {
+    let (root, ctx) = temp_ctx("policy-set-shape");
+
+    // 1. policy:set 直接拒绝：http 非回环 url、url+command 混给、headers 明文值、
+    //    遗留 type:remote 缺 url（消息不回显正文）
+    for (name, def, leaked) in [
+        (
+            "shape-http",
+            r#"{"url":"http://evil.example.com/x"}"#,
+            "evil.example.com",
+        ),
+        (
+            "shape-mixed",
+            r#"{"url":"https://example.com/mcp","command":"npx"}"#,
+            "https://example.com/mcp",
+        ),
+        (
+            "shape-hdr",
+            r#"{"url":"https://example.com/mcp","headers":{"X-Key":"plain-header-value-2b7d"}}"#,
+            "plain-header-value-2b7d",
+        ),
+        ("shape-no-url", r#"{"type":"remote"}"#, ""),
+    ] {
+        let res = execute(
+            &ctx,
+            &request(
+                "policy:set",
+                &[
+                    "--layer",
+                    "local",
+                    "--key",
+                    &format!("mcp.definitions.{name}"),
+                    "--value",
+                    def,
+                ],
+            ),
+        );
+        assert!(!res.ok, "{name} 必须在保存期拒绝: {def}");
+        assert_eq!(res.errors[0].code, "USAGE_ERROR", "{name}");
+        if !leaked.is_empty() {
+            assert!(
+                !res.errors[0].message.contains(leaked),
+                "{name} 消息不得回显正文: {}",
+                res.errors[0].message
+            );
+        }
+        let st = execute(&ctx, &request("mcp:status", &[]));
+        assert!(st.ok);
+        assert!(
+            st.data["elements"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|e| e["id"] != format!("mcp:{name}")),
+            "{name} 被拒绝后不得出现在 status"
+        );
+    }
+    assert!(!store::db_path(&ctx).exists(), "全部被拒后不得初始化数据库");
+
+    // 2. 合法远程定义保存通过且只写库（零动作：不创建目标文件、不产生 binding）
+    let set_ok = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions.shape-ok",
+                "--value",
+                r#"{"url":"https://example.com/mcp","headers":{"Authorization":"${AM_TEST_SHAPE_TOKEN}"},"agents":["claude-code"]}"#,
+            ],
+        ),
+    );
+    assert!(set_ok.ok, "合法远程定义必须保存成功: {:?}", set_ok.errors);
+    assert!(
+        !ctx.home_dir.join(".claude.json").exists(),
+        "保存定义不得写目标配置文件"
+    );
+    let conn = store::open_readonly(&ctx).unwrap().unwrap();
+    let has_table: bool = conn
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='mcp_bindings'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|c| c > 0)
+        .unwrap_or(false);
+    if has_table {
+        let rows: i64 = conn
+            .query_row("SELECT count(*) FROM mcp_bindings", [], |r| r.get(0))
+            .unwrap_or(0);
+        assert_eq!(rows, 0, "保存定义不得产生分配绑定");
+    }
+    drop(conn);
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    let el = find_element(&st, "mcp:shape-ok");
+    assert_ne!(el["state"], "unsupported", "合法远程定义必须可用");
+
+    // 3. 子字段 patch（deep-merge 粒度）不误伤：对现存定义写 startup_timeout_sec
+    //    子键（即便值非法）仍按既有语义保存，由 status/preflight 层拦截
+    let set_stdio = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions.shape-stdio",
+                "--value",
+                r#"{"command":"node","args":["s.js"]}"#,
+            ],
+        ),
+    );
+    assert!(set_stdio.ok, "{:?}", set_stdio.errors);
+    let set_subkey = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions.shape-stdio.startup_timeout_sec",
+                "--value",
+                "\"ten\"",
+            ],
+        ),
+    );
+    assert!(
+        set_subkey.ok,
+        "子字段 patch 保持既有粒度不被误伤: {:?}",
+        set_subkey.errors
+    );
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    let el = find_element(&st, "mcp:shape-stdio");
+    assert_eq!(el["state"], "unsupported", "非法子字段由 status 层标记");
+
+    // 4. _delete 删除型 patch 不被误伤
+    let del = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions.shape-ok",
+                "--value",
+                r#"{"_delete": true}"#,
+            ],
+        ),
+    );
+    assert!(del.ok, "_delete patch 必须成功: {:?}", del.errors);
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    assert!(st.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|e| e["id"] != "mcp:shape-ok"));
+
+    // 5. 整表写入：合法远程定义通过；混入非法定义整条拒绝
+    let set_map_ok = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions",
+                "--value",
+                r#"{"_replace":true,"map-remote":{"url":"https://example.com/mcp"},"map-stdio":{"command":"node"}}"#,
+            ],
+        ),
+    );
+    assert!(
+        set_map_ok.ok,
+        "整表合法写入必须成功: {:?}",
+        set_map_ok.errors
+    );
+    let set_map_bad = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions",
+                "--value",
+                r#"{"_replace":true,"map-bad":{"url":"http://evil.example.com/x"}}"#,
+            ],
+        ),
+    );
+    assert!(!set_map_bad.ok, "整表含非法定义必须拒绝");
+    assert!(!set_map_bad.errors[0].message.contains("evil.example.com"));
 
     let _ = std::fs::remove_dir_all(root);
 }

@@ -784,7 +784,18 @@ fn policy_get(ctx: &Context) -> DispatchResult {
     Ok((data, vec![]))
 }
 
-fn validate_mcp_policy_candidate(key: &str, policy: &Value) -> Result<(), DispatchError> {
+/// MCP 定义候选校验（policy:set 保存期）。env/headers 占位符与 agents 允许列表
+/// 对 merge 后候选策略树中的定义生效；当本次写入的值是完整定义对象时
+/// （`mcp.definitions` 整表中的条目，或 `mcp.definitions.<name>` 整条定义），
+/// 对 merge 后的完整定义追加完整形态校验（远程 url 白名单、stdio/远程字段互斥，
+/// 错误消息不回显 url/正文）。`_delete` 删除型 patch 与更深层子字段 patch
+/// （deep-merge 语义，如 mcp.definitions.<name>.startup_timeout_sec）不触发
+/// 形态校验，保持既有粒度。
+fn validate_mcp_policy_candidate(
+    key: &str,
+    value: &Value,
+    policy: &Value,
+) -> Result<(), DispatchError> {
     let prefix = "mcp.definitions";
     if key != prefix && !key.starts_with("mcp.definitions.") {
         return Ok(());
@@ -796,27 +807,59 @@ fn validate_mcp_policy_candidate(key: &str, policy: &Value) -> Result<(), Dispat
         return Ok(());
     };
 
-    if let Some(rest) = key.strip_prefix("mcp.definitions.") {
-        let server_name = rest.split('.').next().unwrap_or("");
-        if !server_name.is_empty() {
-            if let Some(def) = defs.get(server_name) {
-                if let Err(e) = crate::native_mcp::policy_view::validate_definition_env(def) {
-                    return Err(DispatchError::new("USAGE_ERROR", e.to_string()));
-                }
-                if let Err(e) = crate::native_mcp::policy_view::allowed_agents(def) {
-                    return Err(DispatchError::new("USAGE_ERROR", e.to_string()));
-                }
-            }
-            return Ok(());
-        }
-    }
-
-    for (_server, def) in defs {
+    fn validate_common(def: &Value) -> Result<(), DispatchError> {
         if let Err(e) = crate::native_mcp::policy_view::validate_definition_env(def) {
+            return Err(DispatchError::new("USAGE_ERROR", e.to_string()));
+        }
+        if let Err(e) = crate::native_mcp::policy_view::validate_definition_headers(def) {
             return Err(DispatchError::new("USAGE_ERROR", e.to_string()));
         }
         if let Err(e) = crate::native_mcp::policy_view::allowed_agents(def) {
             return Err(DispatchError::new("USAGE_ERROR", e.to_string()));
+        }
+        Ok(())
+    }
+
+    fn validate_shape(server: &str, def: &Value) -> Result<(), DispatchError> {
+        // _delete 删除型 patch：仅标记删除，不校验形态
+        if def.get("_delete").and_then(Value::as_bool) == Some(true) {
+            return Ok(());
+        }
+        if let Err(e) = crate::native_mcp::policy_view::validate_definition(def, server) {
+            return Err(DispatchError::new("USAGE_ERROR", e.to_string()));
+        }
+        Ok(())
+    }
+
+    if key == prefix {
+        // 整表写入：形态校验只覆盖本次值中的完整定义对象，历史遗留定义不牵连
+        if let Value::Object(incoming) = value {
+            for name in incoming.keys() {
+                if name.starts_with('_') {
+                    continue;
+                }
+                if let Some(def) = defs.get(name) {
+                    validate_shape(name, def)?;
+                }
+            }
+        }
+        for def in defs.values() {
+            validate_common(def)?;
+        }
+        return Ok(());
+    }
+
+    if let Some(rest) = key.strip_prefix("mcp.definitions.") {
+        let server_name = rest.split('.').next().unwrap_or("");
+        if !server_name.is_empty() {
+            if let Some(def) = defs.get(server_name) {
+                validate_common(def)?;
+                // 仅 mcp.definitions.<name> 整条位置且写入值为对象时跑形态校验；
+                // 子字段 patch（更深 key）不触发
+                if !rest.contains('.') && value.is_object() {
+                    validate_shape(server_name, def)?;
+                }
+            }
         }
     }
     Ok(())
@@ -849,7 +892,7 @@ fn policy_set(ctx: &Context, request: &Request) -> DispatchResult {
 
     let mut candidate_policy = store::effective_policy(ctx).map_err(DispatchError::from)?;
     set_dot_path(&mut candidate_policy, &segments, value.clone())?;
-    validate_mcp_policy_candidate(key, &candidate_policy)?;
+    validate_mcp_policy_candidate(key, &value, &candidate_policy)?;
 
     if request.flag("--dry-run") {
         let data = policy_data(Some("sqlite"), Some(key), Some(value), None, None, None);
@@ -869,7 +912,7 @@ fn policy_set(ctx: &Context, request: &Request) -> DispatchResult {
         .map_err(DispatchError::from)?;
     let mut policy = store::policy_from_connection(&tx).map_err(DispatchError::from)?;
     set_dot_path(&mut policy, &segments, value.clone())?;
-    validate_mcp_policy_candidate(key, &policy)?;
+    validate_mcp_policy_candidate(key, &value, &policy)?;
     store::write_policy(&tx, &policy).map_err(DispatchError::from)?;
     store::record_operation(
         &tx,

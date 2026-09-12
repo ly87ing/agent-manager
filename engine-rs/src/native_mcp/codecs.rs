@@ -84,24 +84,28 @@ pub fn extract_entry(path: &Path, format: Format, server: &str) -> Result<(Optio
                     path.display()
                 ),
             };
+            let remote = srv.get("url").is_some();
             if format == Format::OpenCodeJson {
                 match srv.get("type") {
                     None => {}
-                    Some(Value::String(kind)) if kind == "local" => {}
+                    Some(Value::String(kind)) if kind == "local" && !remote => {}
+                    Some(Value::String(kind)) if kind == "remote" && remote => {}
                     Some(Value::String(kind)) => bail!(
-                        "OpenCode JSON 中 server '{}' 的 type 必须是 local，当前为 '{}': {}",
+                        "OpenCode JSON 中 server '{}' 的 type 与条目形态不匹配（local 需 command，remote 需 url），当前为 '{}': {}",
                         server,
                         kind,
                         path.display()
                     ),
                     Some(_) => bail!(
-                        "OpenCode JSON 中 server '{}' 的 type 必须是字符串 local: {}",
+                        "OpenCode JSON 中 server '{}' 的 type 必须是字符串: {}",
                         server,
                         path.display()
                     ),
                 }
             }
-            let managed = env_map.get(MARKER_KEY).and_then(Value::as_str) == Some(MARKER_VALUE);
+            // 受管标记：远程条目统一在条目级；stdio 旧位置 env 内标记继续兼容
+            let managed = srv.get(MARKER_KEY).and_then(Value::as_str) == Some(MARKER_VALUE)
+                || env_map.get(MARKER_KEY).and_then(Value::as_str) == Some(MARKER_VALUE);
             let mut env = Map::new();
             for (k, v) in &env_map {
                 if k == MARKER_KEY {
@@ -120,7 +124,30 @@ pub fn extract_entry(path: &Path, format: Format, server: &str) -> Result<(Optio
                     ),
                 }
             }
-            let (command, args) = if format == Format::OpenCodeJson {
+            let (command, args) = if remote {
+                if let Some(headers_val) = srv.get("headers") {
+                    match headers_val {
+                        Value::Object(map) => {
+                            for (hk, hv) in map {
+                                if !hv.is_string() {
+                                    bail!(
+                                        "配置文件中 server '{}' 的 headers.{} 必须是字符串，拒绝覆盖: {}",
+                                        server,
+                                        hk,
+                                        path.display()
+                                    );
+                                }
+                            }
+                        }
+                        _ => bail!(
+                            "配置文件中 server '{}' 的 headers 不是对象，拒绝覆盖: {}",
+                            server,
+                            path.display()
+                        ),
+                    }
+                }
+                (String::new(), Vec::new())
+            } else if format == Format::OpenCodeJson {
                 match srv.get("command") {
                     Some(Value::Array(arr)) => {
                         if arr.is_empty() {
@@ -264,8 +291,10 @@ pub fn extract_entry(path: &Path, format: Format, server: &str) -> Result<(Optio
                     path.display()
                 ),
             };
-            let managed =
-                env_table.get(MARKER_KEY).and_then(toml::Value::as_str) == Some(MARKER_VALUE);
+            let remote = table.get("url").is_some();
+            // 受管标记：远程条目统一在条目表级；stdio 旧位置 env 表内标记继续兼容
+            let managed = table.get(MARKER_KEY).and_then(toml::Value::as_str) == Some(MARKER_VALUE)
+                || env_table.get(MARKER_KEY).and_then(toml::Value::as_str) == Some(MARKER_VALUE);
             let mut env = Map::new();
             for (key, value) in &env_table {
                 if key == MARKER_KEY {
@@ -283,46 +312,75 @@ pub fn extract_entry(path: &Path, format: Format, server: &str) -> Result<(Optio
                     ),
                 }
             }
-            let command = match table.get("command") {
-                Some(toml::Value::String(s)) if !s.trim().is_empty() => s.clone(),
-                Some(toml::Value::String(_)) => bail!(
-                    "Codex TOML 中 server '{}' 的 command 不能为空字符串: {}",
-                    server,
-                    path.display()
-                ),
-                Some(_) => bail!(
-                    "Codex TOML 中 server '{}' 的 command 必须是字符串: {}",
-                    server,
-                    path.display()
-                ),
-                None => bail!(
-                    "Codex TOML 中 server '{}' 缺少 command 字段: {}",
-                    server,
-                    path.display()
-                ),
-            };
-            let args = match table.get("args") {
-                None => Vec::new(),
-                Some(toml::Value::Array(arr)) => {
-                    let mut res = Vec::with_capacity(arr.len());
-                    for (idx, item) in arr.iter().enumerate() {
-                        match item.as_str() {
-                            Some(s) => res.push(s.to_string()),
-                            None => bail!(
-                                "Codex TOML 中 server '{}' 的 args[{}] 必须是字符串: {}",
-                                server,
-                                idx,
-                                path.display()
-                            ),
+            if let Some(headers_val) = table.get("env_http_headers") {
+                match headers_val {
+                    toml::Value::Table(t) => {
+                        for (hk, hv) in t {
+                            if hv.as_str().is_none() {
+                                bail!(
+                                    "Codex TOML 中 server '{}' 的 env_http_headers.{} 必须是字符串: {}",
+                                    server,
+                                    hk,
+                                    path.display()
+                                );
+                            }
                         }
                     }
-                    res
+                    _ => bail!(
+                        "Codex TOML 中 server '{}' 的 env_http_headers 必须是 table: {}",
+                        server,
+                        path.display()
+                    ),
                 }
-                Some(_) => bail!(
-                    "Codex TOML 中 server '{}' 的 args 必须是数组: {}",
-                    server,
-                    path.display()
-                ),
+            }
+            let command = if remote {
+                String::new()
+            } else {
+                match table.get("command") {
+                    Some(toml::Value::String(s)) if !s.trim().is_empty() => s.clone(),
+                    Some(toml::Value::String(_)) => bail!(
+                        "Codex TOML 中 server '{}' 的 command 不能为空字符串: {}",
+                        server,
+                        path.display()
+                    ),
+                    Some(_) => bail!(
+                        "Codex TOML 中 server '{}' 的 command 必须是字符串: {}",
+                        server,
+                        path.display()
+                    ),
+                    None => bail!(
+                        "Codex TOML 中 server '{}' 缺少 command 字段: {}",
+                        server,
+                        path.display()
+                    ),
+                }
+            };
+            let args = if remote {
+                Vec::new()
+            } else {
+                match table.get("args") {
+                    None => Vec::new(),
+                    Some(toml::Value::Array(arr)) => {
+                        let mut res = Vec::with_capacity(arr.len());
+                        for (idx, item) in arr.iter().enumerate() {
+                            match item.as_str() {
+                                Some(s) => res.push(s.to_string()),
+                                None => bail!(
+                                    "Codex TOML 中 server '{}' 的 args[{}] 必须是字符串: {}",
+                                    server,
+                                    idx,
+                                    path.display()
+                                ),
+                            }
+                        }
+                        res
+                    }
+                    Some(_) => bail!(
+                        "Codex TOML 中 server '{}' 的 args 必须是数组: {}",
+                        server,
+                        path.display()
+                    ),
+                }
             };
             let mut extra = Map::new();
             for (key, val) in table {
@@ -388,6 +446,39 @@ pub fn toml_key(key: &str) -> String {
 }
 
 pub fn render_entry_toml(server: &str, entry: &Entry) -> String {
+    if let Some(Value::String(url)) = entry.extra.get("url") {
+        // 远程条目：条目表内 url + 条目级受管标记；headers 以
+        // env_http_headers（header 名 → 变量名）引用形式写入，零明文。
+        let mut out = format!(
+            "\n# [agent-manager:managed]\n[mcp_servers.{}]\nurl = {}\n",
+            toml_key(server),
+            toml_basic_string(url)
+        );
+        out.push_str(&format!(
+            "{} = {}\n",
+            MARKER_KEY,
+            toml_basic_string(MARKER_VALUE)
+        ));
+        if let Some(Value::Object(headers)) = entry.extra.get("env_http_headers") {
+            if !headers.is_empty() {
+                out.push_str(&format!(
+                    "[mcp_servers.{}.env_http_headers]\n",
+                    toml_key(server)
+                ));
+                let mut keys: Vec<&String> = headers.keys().collect();
+                keys.sort();
+                for key in keys {
+                    let value = headers[key].as_str().unwrap_or_default();
+                    out.push_str(&format!(
+                        "{} = {}\n",
+                        toml_key(key),
+                        toml_basic_string(value)
+                    ));
+                }
+            }
+        }
+        return out;
+    }
     let mut out = format!(
         "\n# [agent-manager:managed]\n[mcp_servers.{}]\ncommand = {}\n",
         toml_key(server),
@@ -469,6 +560,23 @@ pub fn json_set_entry(doc: &mut Map<String, Value>, format: Format, server: &str
         *container = Value::Object(Map::new());
     }
     let map = container.as_object_mut().unwrap();
+    if entry.extra.contains_key("url") {
+        // 远程条目：codec 推导 type 常量（Claude "http" / OpenCode "remote"），
+        // url/headers 引用形式来自 entry.extra，受管标记统一条目级。
+        let mut obj = Map::new();
+        let kind = if format == Format::OpenCodeJson {
+            "remote"
+        } else {
+            "http"
+        };
+        obj.insert("type".into(), Value::String(kind.into()));
+        for (k, v) in &entry.extra {
+            obj.insert(k.clone(), v.clone());
+        }
+        obj.insert(MARKER_KEY.into(), Value::String(MARKER_VALUE.into()));
+        map.insert(server.to_string(), Value::Object(obj));
+        return;
+    }
     if format == Format::OpenCodeJson {
         let mut cmd_array = vec![Value::String(entry.command.clone())];
         cmd_array.extend(entry.args.iter().cloned().map(Value::String));

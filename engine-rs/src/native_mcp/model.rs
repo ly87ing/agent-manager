@@ -227,12 +227,15 @@ pub fn mask_definition_for_status(definition: &Value) -> Value {
         Value::Object(map) => map,
         other => return other,
     };
-    if let Some(env_val) = obj.get_mut("env") {
-        if let Some(env_map) = env_val.as_object_mut() {
-            for (_, v) in env_map.iter_mut() {
-                let is_ph = v.as_str().map_or(false, is_env_placeholder);
-                if !is_ph {
-                    *v = Value::String("<literal>".to_string());
+    // env（stdio）与 headers（远程）同级掩码：非 ${VAR} 占位符的值掩码为 <literal>
+    for field in ["env", "headers"] {
+        if let Some(map_val) = obj.get_mut(field) {
+            if let Some(map) = map_val.as_object_mut() {
+                for (_, v) in map.iter_mut() {
+                    let is_ph = v.as_str().map_or(false, is_env_placeholder);
+                    if !is_ph {
+                        *v = Value::String("<literal>".to_string());
+                    }
                 }
             }
         }

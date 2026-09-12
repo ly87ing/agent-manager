@@ -58,6 +58,10 @@ export interface McpSpec {
   agents?: string[] | null;
   env?: Record<string, string>;
   extra_args_by_agent?: Record<string, string[]>;
+  /** 远程 HTTP 定义：含 url 即远程（与 command 互斥）；type 为历史遗留输入，不持久化。 */
+  url?: string;
+  headers?: Record<string, string>;
+  type?: string;
 }
 
 export interface McpEnvResolution {
@@ -68,6 +72,8 @@ export interface McpEnvResolution {
 export interface McpObserved {
   agents?: Record<string, McpAgentCell>;
   env?: Record<string, McpEnvResolution>;
+  /** 远程 headers 占位符解析块（与 env 同级：只输出占位符与布尔）。 */
+  headers?: Record<string, McpEnvResolution>;
 }
 
 // ---------- skills ----------
@@ -152,6 +158,8 @@ export interface SecretsEnvVariable {
   env_key?: string;
   placeholder?: string;
   resolved?: boolean;
+  /** "env"（stdio 环境变量）或 "header"（远程 HTTP header 占位符）。 */
+  kind?: "env" | "header" | string;
 }
 
 export interface SecretsMcpEnvObserved {

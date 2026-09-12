@@ -9,8 +9,8 @@ use super::model::{
 };
 use super::persistence::load_bindings_readonly;
 use super::policy_view::{
-    allowed_agents, expected_extra_fields, inspect_env, is_allowed, library_enabled, library_view,
-    validate_definition_env, validate_definition_stdio,
+    allowed_agents, expected_extra_fields, inspect_env, inspect_headers, is_allowed,
+    library_enabled, library_view, validate_definition, validate_definition_env,
 };
 use super::targets::{
     agent_targets, extract_entry, validate_target_path, AgentTarget, Entry, Format,
@@ -53,6 +53,7 @@ fn make_element(
     enabled: bool,
     agents: Value,
     env: Map<String, Value>,
+    headers: Map<String, Value>,
     agent_cells: Map<String, Value>,
     obs_actions: Vec<&str>,
     blocked_reason: Option<String>,
@@ -67,6 +68,7 @@ fn make_element(
         "policy": { "enabled": enabled, "agents": agents },
         "observed": {
             "env": env,
+            "headers": headers,
             "agents": agent_cells,
             "actions": obs_actions,
             "blocked_reason": blocked_reason.map(Value::String).unwrap_or(Value::Null)
@@ -196,6 +198,7 @@ fn build_orphan_element(
         mask_definition_with_agents_for_status(&def),
         false,
         Value::Null,
+        Map::new(),
         Map::new(),
         agent_cells,
         obs_actions,
@@ -355,7 +358,7 @@ pub fn status(ctx: &Context) -> Result<Value> {
         };
 
         let name_valid = is_valid_server_name(server);
-        let stdio_res = validate_definition_stdio(def, server);
+        let def_shape_res = validate_definition(def, server);
         let env_res = validate_definition_env(def);
         let allowed_res = allowed_agents(def);
 
@@ -364,7 +367,7 @@ pub fn status(ctx: &Context) -> Result<Value> {
                 "服务标识 '{}' 非法: 仅支持字母、数字、短横线与下划线",
                 server
             ))
-        } else if let Err(e) = stdio_res {
+        } else if let Err(e) = def_shape_res {
             Some(e.to_string())
         } else if let Err(e) = env_res {
             Some(e.to_string())
@@ -378,7 +381,13 @@ pub fn status(ctx: &Context) -> Result<Value> {
         let lib_version = compute_definition_version(def);
         let lib_version_val = Value::String(lib_version.clone());
         let allowed = allowed_res.ok().flatten();
-        let (observed_env, missing_vars) = inspect_env(def);
+        let (observed_env, missing_env_vars) = inspect_env(def);
+        let (observed_headers, missing_header_vars) = inspect_headers(def);
+
+        let mut missing_vars = missing_env_vars;
+        missing_vars.extend(missing_header_vars);
+        missing_vars.sort();
+        missing_vars.dedup();
 
         let missing_reason = if missing_vars.is_empty() {
             None
@@ -537,6 +546,7 @@ pub fn status(ctx: &Context) -> Result<Value> {
             lib_enabled,
             def.get("agents").cloned().unwrap_or(Value::Null),
             observed_env,
+            observed_headers,
             agent_cells,
             lib_actions,
             def_error,

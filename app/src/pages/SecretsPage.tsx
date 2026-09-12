@@ -57,13 +57,18 @@ export default function SecretsPage() {
               {servers.map((server) => {
                 const rows = variables.filter((item) => (item.server ?? "?") === server);
                 return rows.map((item, index) => (
-                  <tr key={`${server}-${item.env_key}`} className="border-b border-slate-100 last:border-0">
+                  <tr key={`${server}-${item.env_key}-${item.kind ?? "env"}`} className="border-b border-slate-100 last:border-0">
                     {index === 0 && (
                       <td rowSpan={rows.length} className="py-2 pr-4 align-top font-mono text-xs text-slate-600">
                         {server}
                       </td>
                     )}
-                    <td className="py-2 pr-4 font-mono text-xs text-slate-700">{item.placeholder ?? item.env_key}</td>
+                    <td className="py-2 pr-4 font-mono text-xs text-slate-700">
+                      {item.placeholder ?? item.env_key}
+                      {item.kind === "header" && (
+                        <span className="ml-1.5 rounded border border-sky-200 bg-sky-50 px-1 py-0.5 text-[10px] text-sky-700">header</span>
+                      )}
+                    </td>
                     <td className="py-2">
                       {item.resolved ? (
                         <span className="inline-flex items-center gap-1 text-xs text-emerald-600">

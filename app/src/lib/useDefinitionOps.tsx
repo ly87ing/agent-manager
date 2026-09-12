@@ -101,32 +101,51 @@ export function useDefinitionOps({
       if (!full) return;
       definition = { ...full, ...definition };
       if (domain === "mcp") {
-        // spec.env 是脱敏视图：普通字面值被掩码为 <literal>。表单只有脱敏片段时会带出
-        // <literal>，这里用完整定义的真实值重建保留变量，不让 <literal> 覆盖真实值。
-        // 若在完整 DB 原定义找不到对应 string，必须 toast 失败并停止保存，绝不把脱敏占位符存回 DB。
-        const fullEnv = (full.env ?? {}) as Record<string, unknown>;
-        const ownedEnv = (definition.env ?? {}) as Record<string, unknown>;
-        const env: Record<string, unknown> = {};
-        for (const [key, value] of Object.entries(ownedEnv)) {
-          if (value === "<literal>") {
-            const raw = fullEnv[key];
-            if (typeof raw !== "string") {
-              toast.error(`保存定义 ${input.name} 失败:环境变量 ${key} 无法在原定义中还原真实值，已停止保存`);
-              return;
-            }
-            env[key] = raw;
-          } else {
-            env[key] = value;
-          }
+        // 传输互斥剥离：以表单提交的 owned 片段判定目标传输（远程含 url），
+        // 合并后 full 中遗留的对方传输字段必须剥掉，避免混合定义被引擎拒绝。
+        // type 为历史遗留输入，定义不持久化，两种形态保存时一律剥离。
+        const remoteIntent = typeof input.definition.url === "string";
+        const stripKeys = remoteIntent
+          ? ["command", "args", "env", "startup_timeout_sec", "extra_args_by_agent", "type"]
+          : ["url", "headers", "type"];
+        for (const key of stripKeys) {
+          delete definition[key];
         }
-        definition = { ...definition, env };
+        // spec.env / spec.headers 是脱敏视图：普通字面值被掩码为 <literal>。表单只有脱敏
+        // 片段时会带出 <literal>，这里用完整定义的真实值重建保留变量，不让 <literal> 覆盖
+        // 真实值。若在完整 DB 原定义找不到对应 string，必须 toast 失败并停止保存，
+        // 绝不把脱敏占位符存回 DB。env（stdio）与 headers（远程）同级处理。
+        for (const field of ["env", "headers"] as const) {
+          if (!(field in definition)) continue;
+          const fullMap = (full[field] ?? {}) as Record<string, unknown>;
+          const ownedMap = (definition[field] ?? {}) as Record<string, unknown>;
+          const rebuilt: Record<string, unknown> = {};
+          for (const [key, value] of Object.entries(ownedMap)) {
+            if (value === "<literal>") {
+              const raw = fullMap[key];
+              if (typeof raw !== "string") {
+                toast.error(`保存定义 ${input.name} 失败:${field === "env" ? "环境变量" : "请求头"} ${key} 无法在原定义中还原真实值，已停止保存`);
+                return;
+              }
+              rebuilt[key] = raw;
+            } else {
+              rebuilt[key] = value;
+            }
+          }
+          definition = { ...definition, [field]: rebuilt };
+        }
       }
     }
-    if (domain === "mcp" && definition.env && typeof definition.env === "object") {
-      for (const [key, value] of Object.entries(definition.env as Record<string, unknown>)) {
-        if (value === "<literal>") {
-          toast.error(`保存定义 ${input.name} 失败:环境变量 ${key} 仍为脱敏值，已停止保存`);
-          return;
+    if (domain === "mcp") {
+      for (const field of ["env", "headers"] as const) {
+        const map = definition[field];
+        if (map && typeof map === "object") {
+          for (const [key, value] of Object.entries(map as Record<string, unknown>)) {
+            if (value === "<literal>") {
+              toast.error(`保存定义 ${input.name} 失败:${field === "env" ? "环境变量" : "请求头"} ${key} 仍为脱敏值，已停止保存`);
+              return;
+            }
+          }
         }
       }
     }

@@ -233,4 +233,112 @@ describe("useDefinitionOps 保存语义", () => {
     // 零写入 policy:set，绝对不能把脱敏占位符存回 DB
     expect(calls.some((c) => c.command === "policy:set")).toBe(false);
   });
+
+  it("mcp 域：远程 headers 的 <literal> 在完整原定义找不到对应 string 时同样停止保存（零写入）", async () => {
+    const toastErrorSpy = vi.spyOn(toast, "error");
+    const { calls } = renderWithEngine(
+      <Harness
+        domain="mcp"
+        isNew={false}
+        complete={false}
+        definition={{
+          url: "https://demo.example.com/mcp",
+          headers: {
+            Authorization: "<literal>",
+          },
+        }}
+      />,
+      {
+        "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode({ offline: false }) }),
+        "policy:set": policySetRoute,
+        "db:migrate": makeEnvelope({ migrated: true }, { command: "db.migrate" }),
+        "policy:get": makeEnvelope(
+          makePolicyData({
+            layers: {
+              sqlite: {
+                mcp: {
+                  definitions: {
+                    demo: {
+                      url: "https://demo.example.com/mcp",
+                      headers: {},
+                    },
+                  },
+                },
+              },
+            },
+          }),
+          { command: "policy.get" },
+        ),
+      },
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(calls.some((c) => c.command === "db:migrate")).toBe(true);
+      expect(calls.some((c) => c.command === "policy:get")).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(toastErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Authorization"));
+    });
+
+    // 零写入 policy:set，绝对不能把脱敏占位符存回 DB
+    expect(calls.some((c) => c.command === "policy:set")).toBe(false);
+  });
+
+  it("mcp 域：远程编辑迁移合并后剥离 stdio 遗留字段（传输互斥）", async () => {
+    const { calls } = renderWithEngine(
+      <Harness
+        domain="mcp"
+        isNew={false}
+        complete={false}
+        definition={{
+          url: "https://demo.example.com/mcp",
+          headers: { Authorization: "${DEMO_TOKEN}" },
+          agents: null,
+        }}
+      />,
+      {
+        "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode({ offline: false }) }),
+        "policy:set": policySetRoute,
+        "db:migrate": makeEnvelope({ migrated: true }, { command: "db.migrate" }),
+        // 旧存储是 stdio 定义：迁移合并后 command/args/env/startup_timeout_sec 必须被剥离
+        "policy:get": makeEnvelope(
+          makePolicyData({
+            layers: {
+              sqlite: {
+                mcp: {
+                  definitions: {
+                    demo: {
+                      command: "npx",
+                      args: ["-y", "demo"],
+                      startup_timeout_sec: 60,
+                      env: { LEGACY: "${LEGACY}" },
+                      type: "stdio",
+                    },
+                  },
+                },
+              },
+            },
+          }),
+          { command: "policy.get" },
+        ),
+      },
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(calls.some((c) => c.command === "policy:set")).toBe(true);
+    });
+    const policySets = calls.filter((c) => c.command === "policy:set");
+    expect(policySets).toHaveLength(1);
+    const definition = JSON.parse(policySets[0].args[5]);
+    expect(definition.url).toBe("https://demo.example.com/mcp");
+    expect(definition.headers).toEqual({ Authorization: "${DEMO_TOKEN}" });
+    for (const key of ["command", "args", "env", "startup_timeout_sec", "type"]) {
+      expect(definition, `合并后不得残留 ${key}`).not.toHaveProperty(key);
+    }
+  });
 });

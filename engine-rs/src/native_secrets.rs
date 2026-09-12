@@ -1,11 +1,12 @@
 //! Rust 原生 secrets 域：只读 secrets:status。
 //!
 //! 唯一元素 secrets:mcp-env：事实源为 store::effective_policy 与原生 MCP
-//! 定义，仅纳入已启用定义；对每个合法 ${VAR} 占位符输出确定性行
-//! {server, env_key, placeholder, resolved}，resolved 仅判断当前进程环境
-//! 是否包含 VAR（存在性），不保存、不序列化、不输出变量值。外部私有密钥
+//! 定义，仅纳入已启用定义；对每个合法 ${VAR} 占位符（stdio env 与远程
+//! headers 同级）输出确定性行 {server, env_key, placeholder, resolved, kind}，
+//! kind 为 "env" 或 "header"；resolved 仅判断当前进程环境是否包含 VAR
+//! （存在性），不保存、不序列化、不输出变量值。外部私有密钥
 //! 仓库在 Agent Manager 之外注入进程环境：不扫描、不定位、不克隆、不探测
-//! git、不读取或暴露任何仓库/路径/env 文件。历史畸形已启用 env 定义
+//! git、不读取或暴露任何仓库/路径/env 文件。历史畸形已启用 env/headers 定义
 //! fail-closed，固定脱敏错误，不回显存储字面量/server/key/路径。
 
 use anyhow::{bail, Result};
@@ -26,36 +27,41 @@ fn status(ctx: &Context) -> Result<Value> {
         if !policy_view::library_enabled(&view, server) {
             continue;
         }
-        let Some(env_value) = definition.get("env") else {
-            continue;
-        };
-        let Some(env) = env_value.as_object() else {
-            bail!("{MALFORMED_MSG}");
-        };
-        for (env_key, value) in env {
-            let Some(placeholder) = policy_view::placeholder_name(value) else {
+        for (kind, field) in [("env", "env"), ("header", "headers")] {
+            let Some(map_value) = definition.get(field) else {
+                continue;
+            };
+            let Some(map) = map_value.as_object() else {
                 bail!("{MALFORMED_MSG}");
             };
-            let resolved = std::env::var_os(&placeholder).is_some();
-            if !resolved {
-                unresolved += 1;
+            for (key, value) in map {
+                let Some(placeholder) = policy_view::placeholder_name(value) else {
+                    bail!("{MALFORMED_MSG}");
+                };
+                let resolved = std::env::var_os(&placeholder).is_some();
+                if !resolved {
+                    unresolved += 1;
+                }
+                variables.push(json!({
+                    "server": server,
+                    "env_key": key,
+                    "placeholder": placeholder,
+                    "resolved": resolved,
+                    "kind": kind,
+                }));
             }
-            variables.push(json!({
-                "server": server,
-                "env_key": env_key,
-                "placeholder": placeholder,
-                "resolved": resolved,
-            }));
         }
     }
     variables.sort_by(|a, b| {
         (
             a["server"].as_str().unwrap_or(""),
             a["env_key"].as_str().unwrap_or(""),
+            a["kind"].as_str().unwrap_or(""),
         )
             .cmp(&(
                 b["server"].as_str().unwrap_or(""),
                 b["env_key"].as_str().unwrap_or(""),
+                b["kind"].as_str().unwrap_or(""),
             ))
     });
     let state = if unresolved == 0 {

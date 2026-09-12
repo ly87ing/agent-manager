@@ -187,6 +187,22 @@ function demoEnvelopes(): Record<string, Envelope> {
           freshness: makeFreshness({ state: "not-applicable" }),
         }),
         makeElement({
+          id: "mcp:remote-api",
+          domain: "mcp",
+          spec: { url: "https://mcp.demo.example.com/endpoint", headers: { Authorization: "${DEMO_REMOTE_TOKEN}" }, agents: null },
+          policy: { enabled: true, agents: null },
+          observed: {
+            agents: {
+              "claude-code": { state: "managed-ok", target: "/Users/demo/.claude.json", target_exists: true },
+              codex: { state: "missing", target: "/Users/demo/.codex/config.toml", target_exists: true },
+            },
+            env: {},
+            headers: { Authorization: { placeholder: "${DEMO_REMOTE_TOKEN}", resolved: true } },
+          },
+          state: "managed-ok",
+          freshness: makeFreshness({ state: "not-applicable" }),
+        }),
+        makeElement({
           id: "mcp:legacy-server",
           domain: "mcp",
           spec: { command: "legacy-mcp", args: [], startup_timeout_sec: 60, agents: null, env: {} },
@@ -355,9 +371,10 @@ function demoEnvelopes(): Record<string, Envelope> {
           policy: { enabled: true },
           observed: {
             variables: [
-              { server: "grok-search", env_key: "FIRECRAWL_API_KEY", placeholder: "FIRECRAWL_API_KEY", resolved: false },
-              { server: "grok-search", env_key: "GROK_API_KEY", placeholder: "GROK_API_KEY", resolved: true },
-              { server: "grok-search", env_key: "TAVILY_API_KEY", placeholder: "TAVILY_API_KEY", resolved: false },
+              { server: "grok-search", env_key: "FIRECRAWL_API_KEY", placeholder: "FIRECRAWL_API_KEY", resolved: false, kind: "env" },
+              { server: "grok-search", env_key: "GROK_API_KEY", placeholder: "GROK_API_KEY", resolved: true, kind: "env" },
+              { server: "grok-search", env_key: "TAVILY_API_KEY", placeholder: "TAVILY_API_KEY", resolved: false, kind: "env" },
+              { server: "remote-api", env_key: "Authorization", placeholder: "DEMO_REMOTE_TOKEN", resolved: true, kind: "header" },
             ],
             unresolved: 2,
           },

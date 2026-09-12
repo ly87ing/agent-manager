@@ -12,7 +12,7 @@ use super::model::{
 use super::persistence::load_bindings_readonly;
 use super::policy_view::{
     allowed_agents, expected_extra_fields, is_allowed, library_enabled, library_view, resolve_env,
-    validate_definition_env, validate_definition_stdio,
+    resolve_header_vars, validate_definition, validate_definition_env,
 };
 use super::targets::{
     agent_targets, check_shared_targets, check_symlink_metadata, extract_entry,
@@ -182,7 +182,7 @@ pub fn preflight_check_state(
         match parsed.action.as_str() {
             "add" => {
                 let def = def_opt.ok_or_else(|| anyhow!("服务定义 '{}' 不存在", parsed.server))?;
-                validate_definition_stdio(def, &parsed.server)?;
+                validate_definition(def, &parsed.server)?;
                 validate_definition_env(def)?;
                 let allowed = allowed_agents(def)?;
                 if !is_allowed(&allowed, a) {
@@ -203,10 +203,11 @@ pub fn preflight_check_state(
                     );
                 }
                 resolve_env(def, &parsed.server)?;
+                resolve_header_vars(def, &parsed.server)?;
             }
             "update" => {
                 let def = def_opt.ok_or_else(|| anyhow!("服务定义 '{}' 不存在", parsed.server))?;
-                validate_definition_stdio(def, &parsed.server)?;
+                validate_definition(def, &parsed.server)?;
                 validate_definition_env(def)?;
                 let allowed = allowed_agents(def)?;
                 if !is_allowed(&allowed, a) {
@@ -220,6 +221,7 @@ pub fn preflight_check_state(
                     );
                 }
                 resolve_env(def, &parsed.server)?;
+                resolve_header_vars(def, &parsed.server)?;
             }
             "enable" => {
                 let b = binding.filter(|b| b.assigned).ok_or_else(|| {
@@ -243,7 +245,7 @@ pub fn preflight_check_state(
                     );
                 }
                 let def = def_opt.unwrap_or(&b.definition);
-                validate_definition_stdio(def, &parsed.server)?;
+                validate_definition(def, &parsed.server)?;
                 validate_definition_env(def)?;
                 let allowed = allowed_agents(def)?;
                 if !is_allowed(&allowed, a) {
@@ -254,6 +256,7 @@ pub fn preflight_check_state(
                     );
                 }
                 resolve_env(&b.definition, &parsed.server)?;
+                resolve_header_vars(&b.definition, &parsed.server)?;
             }
             "disable" => {
                 let b = binding.filter(|b| b.assigned).ok_or_else(|| {

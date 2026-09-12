@@ -302,3 +302,156 @@ describe("MCP 服务定义覆盖层", () => {
     expect(calls.filter((call) => call.command === "mcp:apply")).toHaveLength(1);
   });
 });
+
+describe("MCP 远程 HTTP 服务", () => {
+  /** 远程元素：spec 含 url/headers（占位引用保留、字面值掩码 <literal>），无 command。 */
+  function remoteElement(id: string): ReturnType<typeof makeElement> {
+    return makeElement({
+      id,
+      domain: "mcp",
+      spec: {
+        url: "https://mcp.demo.example.com/endpoint",
+        headers: { Authorization: "${DEMO_REMOTE_TOKEN}", "X-Plain": "<literal>" },
+        agents: null,
+      },
+      policy: { enabled: true, agents: null },
+      observed: {
+        agents: { "claude-code": { state: "managed-ok", target: "/tmp/demo/.claude.json", target_exists: true, assigned: true, enabled: true } },
+        env: {},
+        headers: { Authorization: { placeholder: "${DEMO_REMOTE_TOKEN}", resolved: true } },
+        actions: ["enable", "disable", "remove"],
+      },
+      state: "managed-ok" as never,
+      freshness: makeFreshness({ state: "not-applicable" }),
+    });
+  }
+
+  function remoteFullDefinition(): Record<string, unknown> {
+    return {
+      url: "https://mcp.demo.example.com/endpoint",
+      headers: { Authorization: "${DEMO_REMOTE_TOKEN}", "X-Plain": "${DEMO_X_PLAIN}" },
+      agents: null,
+    };
+  }
+
+  function remoteRoutes(): Record<string, Envelope> {
+    return {
+      "mcp:status": makeEnvelope(
+        { domain: "mcp", elements: [remoteElement("mcp:remote-api")] },
+        { command: "mcp.status" },
+      ),
+      "policy:get": makeEnvelope(
+        makePolicyData({
+          layers: { sqlite: { mcp: { definitions: { "remote-api": remoteFullDefinition() } } } },
+        }),
+        { command: "policy.get" },
+      ),
+      "policy:set": makeEnvelope(makePolicyData({ layers: null, effective: null, attribution: null, layer: "sqlite", key: "mcp.definitions.x", value: null, path: "/native-manager.db" }), { command: "policy.set" }),
+    };
+  }
+
+  it("新增远程服务：url + headers 变量引用保存，无 stdio 字段", async () => {
+    const { calls } = renderWithEngine(<McpPage />, remoteRoutes());
+
+    await userEvent.click(await screen.findByTestId("add-server-button"));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByTestId("server-name-input"), { target: { value: "remote-demo" } });
+    await userEvent.click(within(dialog).getByTestId("server-transport-remote"));
+    // stdio 字段在远程模式下不渲染
+    expect(within(dialog).queryByTestId("server-command-input")).toBeNull();
+    expect(within(dialog).queryByTestId("server-env-input")).toBeNull();
+    fireEvent.change(within(dialog).getByTestId("server-url-input"), { target: { value: "https://api.example.com/mcp" } });
+    fireEvent.change(within(dialog).getByTestId("server-headers-input"), { target: { value: "Authorization=${REMOTE_TOKEN}\nX-Team=TEAM_VAR" } });
+    await userEvent.click(within(dialog).getByTestId("server-agent-claude-code"));
+    await userEvent.click(within(dialog).getByTestId("server-form-submit"));
+
+    const setCalls = calls.filter((call) => call.command === "policy:set");
+    expect(setCalls).toHaveLength(1);
+    expect(setCalls[0].args[3]).toBe("mcp.definitions.remote-demo");
+    const definition = JSON.parse(setCalls[0].args[5]);
+    expect(definition).toEqual({
+      _delete: false,
+      _replace: true,
+      url: "https://api.example.com/mcp",
+      headers: { Authorization: "${REMOTE_TOKEN}", "X-Team": "${TEAM_VAR}" },
+      agents: ["claude-code"],
+    });
+    expect(calls.some((call) => call.command === "mcp:plan")).toBe(false);
+    expect(calls.some((call) => call.command === "mcp:apply")).toBe(false);
+  });
+
+  it("远程表单校验：url 必填且白名单、headers 值必须 ${VAR} 形式，失败零写入", async () => {
+    const { calls } = renderWithEngine(<McpPage />, remoteRoutes());
+
+    await userEvent.click(await screen.findByTestId("add-server-button"));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByTestId("server-name-input"), { target: { value: "remote-demo" } });
+    await userEvent.click(within(dialog).getByTestId("server-transport-remote"));
+
+    // url 为空
+    await userEvent.click(within(dialog).getByTestId("server-form-submit"));
+    expect(within(dialog).getByText(/服务地址（url）不能为空/)).toBeInTheDocument();
+
+    // url 非 https / 非本机回环
+    fireEvent.change(within(dialog).getByTestId("server-url-input"), { target: { value: "http://example.com/mcp" } });
+    await userEvent.click(within(dialog).getByTestId("server-form-submit"));
+    expect(within(dialog).getByText(/仅支持 https:\/\/，或本机/)).toBeInTheDocument();
+
+    // headers 值非 ${VAR} 形式
+    fireEvent.change(within(dialog).getByTestId("server-url-input"), { target: { value: "https://api.example.com/mcp" } });
+    fireEvent.change(within(dialog).getByTestId("server-headers-input"), { target: { value: "Authorization=Bearer plain-token" } });
+    await userEvent.click(within(dialog).getByTestId("server-form-submit"));
+    expect(within(dialog).getByText(/变量引用形式/)).toBeInTheDocument();
+
+    // 非法 header 名
+    fireEvent.change(within(dialog).getByTestId("server-headers-input"), { target: { value: "Bad Header=${A}" } });
+    await userEvent.click(within(dialog).getByTestId("server-form-submit"));
+    expect(within(dialog).getByText(/非法 header 名/)).toBeInTheDocument();
+
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+  });
+
+  it("编辑远程条目：完整定义整条替换，headers 掩码值还原且 stdio 字段不复活", async () => {
+    const { calls } = renderWithEngine(<McpPage />, remoteRoutes());
+    await userEvent.click(await screen.findByText("mcp:remote-api"));
+    await userEvent.click(await screen.findByTestId("edit-server-mcp:remote-api"));
+
+    const dialog = await screen.findByRole("dialog");
+    // 远程模式自动识别，url 与 headers 初始带出
+    expect(within(dialog).getByTestId("server-transport-remote")).toBeChecked();
+    expect(within(dialog).getByTestId("server-url-input")).toHaveValue("https://mcp.demo.example.com/endpoint");
+    expect(within(dialog).getByTestId("server-headers-input")).toHaveValue("Authorization=${DEMO_REMOTE_TOKEN}\nX-Plain=${DEMO_X_PLAIN}");
+    fireEvent.change(within(dialog).getByTestId("server-url-input"), { target: { value: "https://v2.example.com/mcp" } });
+    await userEvent.click(within(dialog).getByTestId("server-form-submit"));
+
+    const setCalls = calls.filter((call) => call.command === "policy:set");
+    expect(setCalls).toHaveLength(1);
+    const definition = JSON.parse(setCalls[0].args[5]);
+    expect(definition._replace).toBe(true);
+    expect(definition.url).toBe("https://v2.example.com/mcp");
+    expect(definition.headers).toEqual({ Authorization: "${DEMO_REMOTE_TOKEN}", "X-Plain": "${DEMO_X_PLAIN}" });
+    // 互斥字段不得出现在远程定义中
+    for (const key of ["command", "args", "env", "startup_timeout_sec", "type"]) {
+      expect(definition).not.toHaveProperty(key);
+    }
+    expect(JSON.stringify(definition)).not.toContain("<literal>");
+  });
+
+  it("远程卡片与详情：渲染 url、远程标识与 headers 掩码解析块", async () => {
+    renderWithEngine(<McpPage />, remoteRoutes());
+
+    const card = await screen.findByTestId("mcp-card-mcp:remote-api");
+    expect(card).toHaveTextContent("https://mcp.demo.example.com/endpoint");
+    expect(card).toHaveTextContent("远程 HTTP");
+    expect(card).toHaveTextContent("请求头 1/1 已配置");
+
+    await userEvent.click(await screen.findByText("mcp:remote-api"));
+    const detail = await screen.findByTestId("mcp-detail-mcp:remote-api");
+    expect(detail).toHaveTextContent("服务地址（远程 HTTP）");
+    expect(detail).toHaveTextContent("请求头变量");
+    expect(within(detail).getByTestId("mcp-header-resolution")).toHaveTextContent("Authorization");
+    expect(detail).toHaveTextContent("已配置");
+    // 远程详情不渲染启动命令块
+    expect(detail).not.toHaveTextContent("启动命令");
+  });
+});
