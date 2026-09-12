@@ -27,7 +27,7 @@ export function SourceDefinitionsPanel({ domain }: { domain: "rules" | "hooks" |
       setEditing(null);
       void queryClient.invalidateQueries({ queryKey: engineKeys.all });
       toast.success("定义已保存");
-      preview.open({ title: "同步修改后的定义", subtitle: "来源已保存并备份；确认后生成并同步到目标。", planCommands: [`${domain}:plan`], execute: executeApply({ command: `${domain}:apply`, label: "同步定义" }) });
+      preview.open({ title: "同步修改后的定义", subtitle: "来源已保存到本机 SQLite；确认后将根据下方计划同步到目标。", planCommands: [`${domain}:plan`], execute: executeApply({ command: `${domain}:apply`, label: "同步定义" }) });
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     finally { setSaving(false); }
   };

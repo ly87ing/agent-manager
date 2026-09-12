@@ -14,7 +14,9 @@ describe("来源编辑", () => {
     await userEvent.click(await screen.findByRole("button", { name: "编辑 Shell aliases" }));
     fireEvent.change(screen.getByLabelText("定义内容"), { target: { value: '{"new":"echo new"}' } });
     await userEvent.click(screen.getByRole("button", { name: "保存并预览同步" }));
-    await screen.findByRole("dialog", { name: /将要执行的操作/ });
+    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
+    expect(dialog).not.toHaveTextContent("备份");
+    expect(dialog).not.toHaveTextContent("生成");
     const call = calls.find((item) => item.command === "sources:set")!;
     expect(call.args).toEqual(["--key", "aliases.shell", "--value", JSON.stringify({ revision: "revision-1", value: { new: "echo new" } })]);
     expect(calls.some((item) => item.command === "aliases:apply")).toBe(false);

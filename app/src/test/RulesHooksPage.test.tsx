@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import RulesHooksPage from "../pages/RulesHooksPage";
 import RulesPage from "../pages/RulesPage";
-import { makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode } from "./fixtures";
+import { makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePlanAction } from "./fixtures";
 import type { Envelope } from "../lib/contract";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 
@@ -93,27 +93,33 @@ describe("RulesHooksPage 规则与 Hooks 切换容器", () => {
     expect(rulesTab).toHaveAttribute("aria-selected", "true");
   });
 
-  it("规则详情没有原生动作契约时不发起 rules:plan", async () => {
+  it("规则详情展开时按目标精确请求 rules:plan（--only <id>）", async () => {
     const detailRoutes: Record<string, Envelope> = routes();
     detailRoutes["rules:status"] = makeEnvelope({
       domain: "rules",
       elements: [
         makeElement({
-          id: "rules:claude-code",
+          id: "rules:claude_global",
           domain: "rules",
-          spec: { name: "Claude Code 规则", source: "/tmp/rules.md" },
+          spec: { name: "Claude Code 全局规则", source_keys: ["rules.shared", "rules.claude"], target: "~/.claude/CLAUDE.md" },
           observed: { target: "/tmp/.claude/CLAUDE.md", target_exists: true },
           state: "drifted",
           freshness: makeFreshness(),
+          actions: [{ id: "sync", risk: "write-local", needs_lock: true, offline_ok: true }],
         }),
       ],
     }, { command: "rules.status" });
     detailRoutes["sources:get"] = makeEnvelope({ sources: [] }, { command: "sources.get" });
+    detailRoutes["rules:plan"] = makeEnvelope(
+      { domain: "rules", actions: [], summary: { read: 0, "write-local": 0, "exec-local": 0, network: 0, "install-remove": 0 } },
+      { command: "rules.plan" },
+    );
     const { calls } = renderWithEngine(<RulesPage />, detailRoutes);
 
-    await userEvent.click(await screen.findByRole("button", { name: "Claude Code 规则" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Claude Code 全局规则" }));
     await screen.findByTestId("drift-panel");
-    expect(calls.some((call) => call.command === "rules:plan")).toBe(false);
+    const planCall = calls.find((call) => call.command === "rules:plan");
+    expect(planCall?.args).toEqual(["--only", "rules:claude_global"]);
   });
 
   it("rules:status 与 hooks:status 返回 ok:false 且 data:{} 时，两 Tab 均显示 DOMAIN_NOT_IMPLEMENTED 且不抛异常", async () => {
@@ -162,5 +168,109 @@ describe("RulesHooksPage 规则与 Hooks 切换容器", () => {
     expect(rulesTab).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByRole("heading", { name: "规则" })).toBeInTheDocument();
     expect(screen.getByText("Rules 域尚未实现")).toBeInTheDocument();
+  });
+});
+
+function nativeRulesRoutes(): Record<string, Envelope> {
+  return {
+    "rules:status": makeEnvelope(
+      {
+        domain: "rules",
+        elements: [
+          makeElement({
+            id: "rules:codex_global",
+            domain: "rules",
+            spec: { name: "Codex 全局规则", group: "global-rules", source_keys: ["rules.shared", "rules.codex"], target: "~/.codex/AGENTS.md" },
+            policy: { enabled: true, agent_id: "codex" },
+            observed: { target: "/tmp/home/.codex/AGENTS.md", target_exists: true, expected_digest: "aaaa", applied_digest: "aaaa", shared_revision: "r1", adapter_revision: "r2", blocked_reason: null, registration_needed: false },
+            state: "managed-ok",
+            freshness: makeFreshness(),
+            actions: [],
+          }),
+          makeElement({
+            id: "rules:claude_global",
+            domain: "rules",
+            spec: { name: "Claude Code 全局规则", group: "global-rules", source_keys: ["rules.shared", "rules.claude"], target: "~/.claude/CLAUDE.md" },
+            policy: { enabled: true, agent_id: "claude-code" },
+            observed: { target: "/tmp/home/.claude/CLAUDE.md", target_exists: true, expected_digest: "bbbb", applied_digest: "aaaa", shared_revision: "r1", adapter_revision: "r3", blocked_reason: null, registration_needed: false },
+            state: "drifted",
+            freshness: makeFreshness(),
+            actions: [{ id: "sync", risk: "write-local", needs_lock: true, offline_ok: true }],
+          }),
+        ],
+      },
+      { command: "rules.status" },
+    ),
+    "rules:plan": makeEnvelope(
+      {
+        domain: "rules",
+        actions: [makePlanAction({ element: "rules:claude_global", target: "/tmp/home/.claude/CLAUDE.md", note: "同步 rules:claude_global 规则文件" })],
+        summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 },
+      },
+      { command: "rules.plan" },
+    ),
+    "rules:apply": makeEnvelope(
+      { domain: "rules", dry_run: false, steps: [{ name: "rules:sync rules:claude_global", ok: true, exit_code: 0 }], snapshot: null, skipped: [] },
+      { command: "rules.apply" },
+    ),
+    "sources:get": makeEnvelope({ sources: [] }, { command: "sources.get" }),
+  };
+}
+
+describe("RulesPage 原生规则目标", () => {
+  it("显示两个真实目标与来源定义，完全不出现 dist 卡与生成/备份旧文案", async () => {
+    renderWithEngine(<RulesPage />, nativeRulesRoutes());
+
+    expect(await screen.findByRole("button", { name: "Codex 全局规则" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Claude Code 全局规则" })).toBeInTheDocument();
+    expect(screen.getByText("rules.shared + rules.codex")).toBeInTheDocument();
+    expect(screen.getByText("rules.shared + rules.claude")).toBeInTheDocument();
+    expect(screen.getByText("/tmp/home/.codex/AGENTS.md")).toBeInTheDocument();
+    expect(screen.getByText("/tmp/home/.claude/CLAUDE.md")).toBeInTheDocument();
+
+    expect(screen.queryByTestId("rules-dist-card")).not.toBeInTheDocument();
+    const bodyText = document.body.textContent ?? "";
+    expect(bodyText).not.toContain("rules:dist");
+    expect(bodyText).not.toContain("生成");
+    expect(bodyText).not.toContain("备份");
+  });
+
+  it("仅带 sync 动作的行显示「同步此目标」，plan/apply 精确携带同一 --only 且零 policy:set", async () => {
+    const { calls } = renderWithEngine(<RulesPage />, nativeRulesRoutes());
+
+    const syncButton = await screen.findByTestId("action-sync-rules:claude_global");
+    expect(screen.queryByTestId("action-sync-rules:codex_global")).not.toBeInTheDocument();
+
+    await userEvent.click(syncButton);
+    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
+    expect(dialog).toHaveTextContent("同步 Claude Code 全局规则");
+    expect(dialog).not.toHaveTextContent("备份");
+    expect(dialog).not.toHaveTextContent("生成");
+
+    const planCalls = calls.filter((call) => call.command === "rules:plan");
+    expect(planCalls.length).toBeGreaterThan(0);
+    expect(planCalls[0].args).toEqual(["--only", "rules:claude_global"]);
+
+    await userEvent.click(screen.getByTestId("plan-confirm-button"));
+    const applyCall = calls.find((call) => call.command === "rules:apply");
+    expect(applyCall).toBeDefined();
+    expect(applyCall!.args).toEqual(["--only", "rules:claude_global"]);
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+  });
+
+  it("全局「立即同步」的 plan 与 apply 均不带 --only", async () => {
+    const { calls } = renderWithEngine(<RulesPage />, nativeRulesRoutes());
+
+    await userEvent.click(await screen.findByRole("button", { name: "立即同步" }));
+    await screen.findByRole("dialog", { name: /将要执行的操作/ });
+    const planCall = calls.find((call) => call.command === "rules:plan");
+    expect(planCall).toBeDefined();
+    expect(planCall!.args).toEqual([]);
+
+    await userEvent.click(screen.getByTestId("plan-confirm-button"));
+    const applyCall = calls.find((call) => call.command === "rules:apply");
+    expect(applyCall).toBeDefined();
+    expect(applyCall!.args).toEqual([]);
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
   });
 });

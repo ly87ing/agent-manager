@@ -128,24 +128,21 @@ export interface SkillObserved {
 // ---------- rules ----------
 
 export interface RulesSpec {
-  name?: string;
-  group?: string;
-  source?: string;
-  target?: string;
-  source_dir?: string;
-  dist_dir?: string;
+  name: string;
+  group: string;
+  source_keys: string[];
+  target: string;
 }
 
 export interface RulesObserved {
-  source?: string;
-  target?: string;
-  source_exists?: boolean;
-  target_exists?: boolean;
-  build_stale?: boolean;
-  src_latest_mtime?: number;
-  products?: string[];
-  missing_products?: string[];
-  stale_products?: string[];
+  target: string;
+  target_exists: boolean | null;
+  expected_digest: string;
+  applied_digest: string | null;
+  shared_revision: string;
+  adapter_revision: string;
+  blocked_reason: string | null;
+  registration_needed: boolean;
 }
 
 // ---------- secrets ----------
