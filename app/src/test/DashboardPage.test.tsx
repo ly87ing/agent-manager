@@ -206,7 +206,7 @@ describe("DashboardPage", () => {
       {
         domain: "system",
         verb: "refresh-upstream",
-        cache_file: "/tmp/upstream-cache.json",
+        cache_file: null,
         elements: [],
         summary: { probed: 5, current: 3, behind: 1, ahead: 0, unknown: 1 },
       },

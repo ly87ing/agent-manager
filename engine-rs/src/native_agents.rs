@@ -24,7 +24,7 @@ const APPLY_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// 单条命令的来源（status 明确展示）。
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Source {
+pub(crate) enum Source {
     Builtin,
     Custom,
 }
@@ -39,21 +39,21 @@ impl Source {
 }
 
 #[derive(Default, Clone)]
-struct CommandSet {
-    install: Option<(String, Source)>,
+pub(crate) struct CommandSet {
+    pub(crate) install: Option<(String, Source)>,
     upgrade: Option<(String, Source)>,
     uninstall: Option<(String, Source)>,
 }
 
-struct AgentDef {
-    id: String,
+pub(crate) struct AgentDef {
+    pub(crate) id: String,
     display_name: String,
-    bin: String,
-    commands: CommandSet,
+    pub(crate) bin: String,
+    pub(crate) commands: CommandSet,
     skills_dir: Option<String>,
     mcp_config: Option<String>,
     origin: Source,
-    enabled: bool,
+    pub(crate) enabled: bool,
     spec: Value,
     preferred_provider: String,
     providers: Map<String, Value>,
@@ -196,7 +196,7 @@ fn parse_definitions(policy: &Value, builtin: &Value) -> Result<Vec<AgentDef>> {
     Ok(defs)
 }
 
-fn load_definitions(ctx: &Context) -> Result<Vec<AgentDef>> {
+pub(crate) fn load_definitions(ctx: &Context) -> Result<Vec<AgentDef>> {
     let policy = store::effective_policy(ctx)?;
     parse_definitions(&policy, &store::builtin_policy())
 }
@@ -204,7 +204,7 @@ fn load_definitions(ctx: &Context) -> Result<Vec<AgentDef>> {
 // ---------- 只读探测 ----------
 
 /// PATH 与 ~/.local/bin 下解析 bin（home_dir 注入，测试替身）。
-fn resolve_bin(home_dir: &Path, bin: &str) -> Option<PathBuf> {
+pub(crate) fn resolve_bin(home_dir: &Path, bin: &str) -> Option<PathBuf> {
     if bin.is_empty() {
         return None;
     }
@@ -337,7 +337,7 @@ fn run_shell(_home_dir: &Path, _cmd: &str, _timeout: Duration, action: &str) -> 
 }
 
 /// status 的版本探测：只对已解析出的实际二进制执行固定 `--version`，不执行策略中的 shell。
-fn probe_version(bin_path: &Path) -> Option<String> {
+pub(crate) fn probe_version(bin_path: &Path) -> Option<String> {
     let mut command = Command::new(bin_path);
     command
         .arg("--version")
@@ -444,7 +444,11 @@ fn classified_provider(def: &AgentDef, provider: &str) -> &'static str {
     }
 }
 
-fn status_element(ctx: &Context, def: &AgentDef) -> Value {
+fn status_element(
+    ctx: &Context,
+    def: &AgentDef,
+    probes: &std::collections::BTreeMap<String, crate::native_upstream::ProbeRecord>,
+) -> Value {
     let bin_path = resolve_bin(&ctx.home_dir, &def.bin);
     let installed = bin_path.is_some();
     let version = if installed {
@@ -519,14 +523,24 @@ fn status_element(ctx: &Context, def: &AgentDef) -> Value {
         json!(actual_provider == Some(def.preferred_provider.as_str())),
     );
 
+    let element_id = format!("agents:{}", def.id);
+    // 上游轴：仅 enabled 且首选 provider install 命令可解析出 npm 包的 agent 参与
+    // 探测宇宙（与 refresh-upstream 收集逻辑共用同一分类器）；其余恒 not-applicable，
+    // current 仍携带本地版本用于展示。
+    let freshness = if crate::native_upstream::agent_probe_package(def).is_some() {
+        crate::native_upstream::freshness_from_cache(probes, &element_id, version.as_deref())
+    } else {
+        json!({"state": "not-applicable", "current": version.clone(), "upstream": null, "checked_at": null, "probe": "native", "cache_age_sec": null})
+    };
+
     json!({
-        "id": format!("agents:{}", def.id),
+        "id": element_id,
         "domain": "agents",
         "spec": def.spec.clone(),
         "policy": {"enabled": def.enabled},
         "observed": Value::Object(observed),
         "state": state,
-        "freshness": {"state": "not-applicable", "current": version.clone(), "upstream": null, "checked_at": null, "probe": "native", "cache_age_sec": null},
+        "freshness": freshness,
         "actions": actions,
     })
 }
@@ -743,7 +757,11 @@ pub fn handle(ctx: &Context, req: &Request) -> Result<Value> {
     let defs = load_definitions(ctx)?;
     match canonical_command(&req.command).as_str() {
         "agents:status" => {
-            let elements: Vec<Value> = defs.iter().map(|def| status_element(ctx, def)).collect();
+            let probes = crate::native_upstream::load_probe_cache(ctx)?;
+            let elements: Vec<Value> = defs
+                .iter()
+                .map(|def| status_element(ctx, def, &probes))
+                .collect();
             Ok(json!({"domain": "agents", "elements": elements}))
         }
         "agents:plan" => {

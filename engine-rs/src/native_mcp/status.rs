@@ -58,6 +58,7 @@ fn make_element(
     blocked_reason: Option<String>,
     state: &str,
     actions: Vec<Value>,
+    freshness: Value,
 ) -> Value {
     json!({
         "id": format!("mcp:{}", server),
@@ -71,15 +72,20 @@ fn make_element(
             "blocked_reason": blocked_reason.map(Value::String).unwrap_or(Value::Null)
         },
         "state": state,
-        "freshness": {
-            "state": "not-applicable",
-            "current": Value::Null,
-            "upstream": Value::Null,
-            "checked_at": Value::Null,
-            "probe": "native",
-            "cache_age_sec": Value::Null
-        },
+        "freshness": freshness,
         "actions": actions
+    })
+}
+
+/// 无上游概念（不在探测宇宙）的 mcp 元素固定 freshness 块。
+fn freshness_not_applicable() -> Value {
+    json!({
+        "state": "not-applicable",
+        "current": Value::Null,
+        "upstream": Value::Null,
+        "checked_at": Value::Null,
+        "probe": "native",
+        "cache_age_sec": Value::Null
     })
 }
 
@@ -196,6 +202,7 @@ fn build_orphan_element(
         blk_reason,
         "drifted",
         orphan_actions,
+        freshness_not_applicable(),
     )
 }
 
@@ -334,6 +341,7 @@ pub fn status(ctx: &Context) -> Result<Value> {
     let library = library_view(&policy);
     let (targets, _disabled_agents) = agent_targets(&policy, &ctx.home_dir)?;
     let bindings = load_bindings_readonly(ctx)?;
+    let probes = crate::native_upstream::load_probe_cache(ctx)?;
 
     let mut elements = Vec::new();
 
@@ -514,6 +522,15 @@ pub fn status(ctx: &Context) -> Result<Value> {
             })
             .collect();
 
+        // 上游轴：仅 enabled 且为 npx 包 / uvx git 源的定义参与探测宇宙；
+        // 其余（含 orphan）恒 not-applicable。status 只读缓存，缺行 → unknown。
+        let freshness = if lib_enabled && crate::native_upstream::classify_mcp_probe(def).is_some()
+        {
+            crate::native_upstream::freshness_from_cache(&probes, &format!("mcp:{}", server), None)
+        } else {
+            freshness_not_applicable()
+        };
+
         elements.push(make_element(
             server,
             mask_definition_with_agents_for_status(def),
@@ -525,6 +542,7 @@ pub fn status(ctx: &Context) -> Result<Value> {
             def_error,
             overall_state,
             elem_actions,
+            freshness,
         ));
     }
 

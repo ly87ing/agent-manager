@@ -414,8 +414,9 @@ fn unimplemented_domains_answer_clearly_and_unknown_rejected() {
 }
 
 // 2026-09-12 裁决退役面：tools/snapshots 域整体 UNKNOWN_DOMAIN；
-// system:converge 命中已知域的未知动词错误；system:refresh-upstream
-// 仍在路线图，保持 DOMAIN_NOT_IMPLEMENTED。
+// system:converge 命中已知域的未知动词错误；system:refresh-upstream 已接线
+// （探测语义见 tests/native_upstream.rs），此处仅验证 offline 拒绝不回退到
+// DOMAIN_NOT_IMPLEMENTED。
 #[test]
 fn retired_domains_and_verbs_are_rejected_clearly() {
     let (base, ctx) = temp_ctx("retired");
@@ -437,13 +438,14 @@ fn retired_domains_and_verbs_are_rejected_clearly() {
     let env = execute(&ctx, &request("system:converge", &[]));
     assert!(!env.ok);
     assert_eq!(env.errors[0].code, "UNKNOWN_VERB", "{:?}", env.errors);
-    let env = execute(&ctx, &request("system:refresh-upstream", &[]));
+    let env = execute(&ctx, &request("system:refresh-upstream", &["--offline"]));
     assert!(!env.ok);
     assert_eq!(
-        env.errors[0].code, "DOMAIN_NOT_IMPLEMENTED",
-        "路线图命令保持未接线语义: {:?}",
+        env.errors[0].code, "OFFLINE_NETWORK_DENIED",
+        "refresh-upstream 已接线：offline 拒绝而非未接线: {:?}",
         env.errors
     );
+    assert!(!store::db_path(&ctx).exists(), "offline 拒绝不得建库");
     let _ = std::fs::remove_dir_all(&base);
 }
 

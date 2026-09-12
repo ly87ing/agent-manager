@@ -491,6 +491,7 @@ fn build_collection_element(
     owner_marked: bool,
     discovered_names: &[String],
     inbox_skills: &[String],
+    probes: &BTreeMap<String, crate::native_upstream::ProbeRecord>,
 ) -> Value {
     let mut coll_actions = vec!["update".to_string()];
     if coll.enabled {
@@ -508,8 +509,24 @@ fn build_collection_element(
         "managed-ok"
     };
 
+    // 上游轴：仅 enabled 且有 url 的集合仓库参与探测宇宙；其余（含逐 skill 元素）
+    // 恒 not-applicable。status 只读缓存，缺行 → unknown。
+    let coll_id = format!("skill:{}", coll_name);
+    let freshness = if coll.enabled && coll.url.is_some() {
+        crate::native_upstream::freshness_from_cache(probes, &coll_id, None)
+    } else {
+        json!({
+            "state": "not-applicable",
+            "current": Value::Null,
+            "upstream": Value::Null,
+            "checked_at": Value::Null,
+            "probe": Value::Null,
+            "cache_age_sec": Value::Null,
+        })
+    };
+
     json!({
-        "id": format!("skill:{}", coll_name),
+        "id": coll_id,
         "domain": "skills",
         "spec": {
             "url": coll.url,
@@ -530,14 +547,7 @@ fn build_collection_element(
             "blocked_reason": Value::Null,
         },
         "state": coll_state,
-        "freshness": {
-            "state": "not-applicable",
-            "current": Value::Null,
-            "upstream": Value::Null,
-            "checked_at": Value::Null,
-            "probe": Value::Null,
-            "cache_age_sec": Value::Null,
-        },
+        "freshness": freshness,
         "actions": coll_actions,
     })
 }
@@ -545,6 +555,7 @@ fn build_collection_element(
 pub fn build_status(ctx: &Context) -> Result<Value> {
     let meta = load_metadata(ctx)?;
     let bindings = load_bindings_readonly(ctx)?;
+    let probes = crate::native_upstream::load_probe_cache(ctx)?;
     let bases = managed_bases(ctx);
     let mut elements = Vec::new();
 
@@ -593,6 +604,7 @@ pub fn build_status(ctx: &Context) -> Result<Value> {
             owner_marked,
             &discovered_names,
             &inbox_skills,
+            &probes,
         ));
     }
 

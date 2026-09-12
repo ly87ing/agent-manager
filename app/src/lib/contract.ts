@@ -198,7 +198,8 @@ export interface RefreshUpstreamSummary {
 export interface RefreshUpstreamData {
   domain: "system";
   verb: "refresh-upstream";
-  cache_file: string;
+  /** 探测缓存落 SQLite upstream_probes 表后不再有缓存文件路径，恒 null。 */
+  cache_file: string | null;
   elements: RefreshUpstreamEntry[];
   summary: RefreshUpstreamSummary;
 }

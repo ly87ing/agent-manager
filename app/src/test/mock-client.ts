@@ -578,11 +578,17 @@ function demoEnvelopes(): Record<string, Envelope> {
       {
         domain: "system",
         verb: "refresh-upstream",
-        cache_file: "/tmp/mock-upstream-cache.json",
+        // 真实引擎：缓存落 SQLite upstream_probes 表，无缓存文件路径
+        cache_file: null,
         elements: [
-          { id: "agents:claude-code", probe: "native", state: "behind", current: "2.0.0", upstream: "2.1.3", error: null },
+          { id: "agents:claude-code", probe: "npm-view", state: "behind", current: "2.0.0", upstream: "2.1.3", error: null },
+          { id: "agents:codex", probe: "npm-view", state: "ahead", current: "0.43.0-beta.1", upstream: "0.42.0", error: null },
+          { id: "mcp:chrome-devtools", probe: "npm-view", state: "behind", current: "1.2.0", upstream: "1.8.0", error: null },
+          { id: "mcp:grok-search", probe: "git-ls-remote", state: "unknown", current: null, upstream: "8f0ae3c7f25ec419631ade7e431fa2531503433e", error: "uvx-local-unavailable" },
+          { id: "mcp:my-proxy", probe: "npm-view", state: "current", current: "0.3.1", upstream: "0.3.1", error: null },
+          { id: "skill:agent-skills", probe: "git-ls-remote", state: "behind", current: "a1b2c3d4e5f60718293a4b5c6d7e8f9012a3b4c5", upstream: "f0e1d2c3b4a5968778695a4b3c2d1e0f9a8b7c6d", error: null },
         ],
-        summary: { probed: 6, current: 2, behind: 2, ahead: 1, unknown: 1 },
+        summary: { probed: 6, current: 1, behind: 3, ahead: 1, unknown: 1 },
       },
       { command: "system.refresh-upstream" },
     ),

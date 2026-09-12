@@ -59,6 +59,9 @@ pub(crate) struct ParsedTarget {
 // 供 native.rs 使用的 crate 内调度接口
 pub(crate) use preflight::preflight_apply;
 
+// 供 native_upstream 探测集合仓库本地 HEAD 时定位仓库缓存目录
+pub(crate) use paths::repo_base_dir;
+
 // 供集成测试使用的最小公开发行接口
 pub use snapshot::hash_skill_dir;
 

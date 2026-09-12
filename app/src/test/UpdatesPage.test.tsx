@@ -84,7 +84,7 @@ describe("UpdatesPage 更新中心", () => {
           release = () =>
             resolve(
               makeEnvelope(
-                { domain: "system", verb: "refresh-upstream", cache_file: "/tmp/x.json", elements: [], summary: { probed: 2, current: 1, behind: 1, ahead: 0, unknown: 0 } },
+                { domain: "system", verb: "refresh-upstream", cache_file: null, elements: [], summary: { probed: 2, current: 1, behind: 1, ahead: 0, unknown: 0 } },
                 { command: "system.refresh-upstream" },
               ),
             );
@@ -168,17 +168,17 @@ describe("UpdatesPage 更新中心", () => {
 
     const planCalls = calls.filter((c) => c.command.endsWith(":plan"));
     expect(planCalls.map((c) => c.command)).toEqual(["agents:plan", "mcp:plan", "skills:plan"]);
-    expect(planCalls[0].args).toEqual(["--only", "agents:a-behind"]);
-    expect(planCalls[1].args).toEqual(["--only", "mcp:mcp-behind"]);
-    expect(planCalls[2].args).toEqual(["--only", "skill:agent-skills/behind-skill"]);
+    expect(planCalls[0].args).toEqual(["--only", "agents:a-behind", "--action", "upgrade"]);
+    expect(planCalls[1].args).toEqual(["--only", "mcp:mcp-behind", "--action", "update"]);
+    expect(planCalls[2].args).toEqual(["--only", "skill:agent-skills/behind-skill", "--action", "update"]);
 
     await userEvent.click(screen.getByTestId("plan-confirm-button"));
 
     const applyCalls = calls.filter((c) => c.command.endsWith(":apply"));
     expect(applyCalls.map((c) => c.command)).toEqual(["agents:apply", "mcp:apply", "skills:apply"]);
-    expect(applyCalls[0].args).toEqual(["--only", "agents:a-behind"]);
-    expect(applyCalls[1].args).toEqual(["--only", "mcp:mcp-behind"]);
-    expect(applyCalls[2].args).toEqual(["--only", "skill:agent-skills/behind-skill"]);
+    expect(applyCalls[0].args).toEqual(["--only", "agents:a-behind", "--action", "upgrade"]);
+    expect(applyCalls[1].args).toEqual(["--only", "mcp:mcp-behind", "--action", "update"]);
+    expect(applyCalls[2].args).toEqual(["--only", "skill:agent-skills/behind-skill", "--action", "update"]);
   });
 
   it("全部更新：第二域执行失败时中断，不执行第三域", async () => {
@@ -240,5 +240,46 @@ describe("UpdatesPage 更新中心", () => {
 
     const applyCalls = calls.filter((c) => c.command.endsWith(":apply"));
     expect(applyCalls.map((c) => c.command)).toEqual(["agents:apply", "mcp:apply"]);
+  });
+
+  it("行内收敛：agents 带 --action upgrade，mcp/skills 带 --action update", async () => {
+    const routes: Record<string, Envelope> = {
+      ...statusRoutes(),
+      "agents:plan": makeEnvelope(
+        { domain: "agents", actions: [makePlanAction({ element: "agents:a-behind", risk: "network" })], summary: { read: 0, "write-local": 0, "exec-local": 0, network: 1, "install-remove": 0 } },
+        { command: "agents.plan" },
+      ),
+      "mcp:plan": makeEnvelope(
+        { domain: "mcp", actions: [makePlanAction({ element: "mcp:b-unknown" })], summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 } },
+        { command: "mcp.plan" },
+      ),
+      "agents:apply": makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }),
+      "mcp:apply": makeEnvelope(makeApplyResult({ domain: "mcp" }), { command: "mcp.apply" }),
+    };
+
+    const { calls } = renderWithEngine(<UpdatesPage />, routes);
+
+    // agents 行：behind → 更新此项，agents→upgrade；upgrade 为 network 风险，需勾选联网确认
+    await userEvent.click(await screen.findByTestId("update-agents:a-behind"));
+    await screen.findByRole("dialog", { name: /更新 agents:a-behind/ });
+    const agentPlan = calls.filter((c) => c.command === "agents:plan");
+    expect(agentPlan.map((c) => c.args)).toEqual([["--only", "agents:a-behind", "--action", "upgrade"]]);
+    await userEvent.click(screen.getByTestId("network-ack-checkbox"));
+    await userEvent.click(screen.getByTestId("plan-confirm-button"));
+    const agentApply = calls.filter((c) => c.command === "agents:apply");
+    expect(agentApply.map((c) => c.args)).toEqual([["--only", "agents:a-behind", "--action", "upgrade"]]);
+
+    // mcp 行：unknown → 更新此项，mcp→update
+    await userEvent.click(await screen.findByTestId("update-mcp:b-unknown"));
+    await screen.findByRole("dialog", { name: /更新 mcp:b-unknown/ });
+    const mcpPlan = calls.filter((c) => c.command === "mcp:plan");
+    expect(mcpPlan.map((c) => c.args)).toEqual([["--only", "mcp:b-unknown", "--action", "update"]]);
+    await userEvent.click(screen.getByTestId("plan-confirm-button"));
+    const mcpApply = calls.filter((c) => c.command === "mcp:apply");
+    expect(mcpApply.map((c) => c.args)).toEqual([["--only", "mcp:b-unknown", "--action", "update"]]);
+
+    // skills 行（ahead）不出现更新按钮；not-applicable 行不进表
+    expect(screen.queryByTestId("update-skill:c-ahead")).toBeNull();
+    expect(screen.queryByTestId("update-mcp:x-na")).toBeNull();
   });
 });

@@ -55,7 +55,7 @@
       }
     },
     "freshness": {
-      "description": "Upstream freshness block. Value fields are required but nullable: 'not-applicable' and never-probed 'unknown' elements carry nulls. Status commands read only cached probe data and never hit the network; system.refresh-upstream is the only writer of fresh values.",
+      "description": "Upstream freshness block. Value fields are required but nullable: 'not-applicable' and never-probed 'unknown' elements carry nulls. Status commands read only cached probe data (SQLite upstream_probes table in native-manager.db; a missing table or row reads as 'unknown' and is never created on the read path) and never hit the network; system.refresh-upstream is the only writer of fresh values.",
       "type": "object",
       "required": ["state", "current", "upstream", "checked_at", "probe", "cache_age_sec"],
       "additionalProperties": false,

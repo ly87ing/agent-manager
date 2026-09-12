@@ -156,6 +156,25 @@ pub fn open_readonly(ctx: &Context) -> Result<Option<Connection>> {
     Ok(Some(conn))
 }
 
+/// upstream_probes 表 DDL（system:refresh-upstream 探测缓存的唯一存储）。
+/// 与各自域表同一纪律：只由写路径（refresh-upstream 的 Immediate 事务）经
+/// ensure_upstream_probes 幂等建表；status 只读，缺表按空缓存处理，绝不建表。
+pub const UPSTREAM_PROBES_DDL: &str = "CREATE TABLE IF NOT EXISTS upstream_probes (
+    element_id TEXT PRIMARY KEY,
+    probe TEXT,
+    state TEXT NOT NULL,
+    current TEXT,
+    upstream TEXT,
+    error TEXT,
+    checked_at TEXT NOT NULL
+);";
+
+/// 建表迁移：幂等，供 refresh-upstream 写路径在任何既有库上补齐该表。
+pub fn ensure_upstream_probes(conn: &Connection) -> Result<()> {
+    conn.execute_batch(UPSTREAM_PROBES_DDL)?;
+    Ok(())
+}
+
 /// Shared schema. Domain tables are created by their owners, not here.
 fn init_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(

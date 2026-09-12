@@ -1,0 +1,770 @@
+//! Rust 原生 system:refresh-upstream：上游探测宇宙（agents/mcp/skills）的唯一
+//! 写探测值命令，及三域 status freshness 回填的只读缓存读取。
+//!
+//! 语义契约（冻结）：
+//! - 探测缓存落 SQLite `upstream_probes` 表（store::UPSTREAM_PROBES_DDL）；只有
+//!   refresh-upstream 写（Immediate 事务逐元素 upsert），status 经
+//!   `load_probe_cache` 只读连接读取，缺表/缺行一律 freshness unknown 且不建表。
+//! - 探测宇宙：enabled 且首选 provider install 命令可解析出 npm 包的 agents
+//!   （detect-only 语义不变：可探测但不因此获得收敛动作）+ enabled 的 MCP 定义中
+//!   npx 包与 uvx `git+repo@branch` 源 + enabled 且有 url 的 skills 集合仓库。
+//!   rules/hooks/aliases/secrets 恒 not-applicable，不参与。
+//! - 探测器带超时（网络 ≤30s）：npm 包 `npm view <pkg> version`；agents 本地版本
+//!   沿用 bin --version；MCP npx 本地版本读 npx 缓存
+//!   （~/.npm/_npx/*/node_modules/<pkg>/package.json）；skills 集合本地 HEAD
+//!   `git rev-parse HEAD`、上游 `git ls-remote <url> HEAD`；uvx git 源上游
+//!   git ls-remote、本地 current=null → state unknown（对齐旧语义）。单元素失败
+//!   → 该元素 unknown+error 类别，不拖垮整批。
+//! - 比较：语义化版本元组可比 → current/behind/ahead；commit 等不可比 → 相同
+//!   current、不同 behind；current/upstream 缺失 → unknown。
+//! - 缓存不存任何凭据：只写版本/commit 字符串、探测机制名与固定错误类别
+//!   （不拼接 URL/命令/环境值，错误类别无需再脱敏）。
+//! - refresh-upstream --offline 拒绝（OFFLINE_NETWORK_DENIED）；--only 过滤未知
+//!   元素报 USAGE_ERROR；不取全局 apply 锁、不改任何用户配置/策略。
+
+use std::collections::BTreeMap;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+use anyhow::Result;
+use rusqlite::TransactionBehavior;
+use serde_json::{json, Value};
+
+use crate::native::{Context, DispatchError, DispatchResult, Request};
+use crate::native_agents::{self, AgentDef};
+use crate::native_mcp::policy_view::{library_enabled, library_view};
+use crate::store;
+
+const NETWORK_PROBE_TIMEOUT: Duration = Duration::from_secs(30);
+const LOCAL_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+/// 单路输出有界捕获上限（版本/哈希行远低于此）。
+const CAPTURE_LIMIT: usize = 4096;
+
+const PROBE_NPM_VIEW: &str = "npm-view";
+const PROBE_GIT_LS_REMOTE: &str = "git-ls-remote";
+
+/// 固定错误类别（缓存只存类别，不存底层错误正文/URL/命令）。
+const ERR_NPM_VIEW_FAILED: &str = "npm-view-failed";
+const ERR_GIT_LS_REMOTE_FAILED: &str = "git-ls-remote-failed";
+const ERR_LOCAL_VERSION_MISSING: &str = "local-version-missing";
+const ERR_LOCAL_HEAD_MISSING: &str = "local-head-missing";
+const ERR_UVX_LOCAL_UNAVAILABLE: &str = "uvx-local-unavailable";
+
+// ---------------------------------------------------------------------------
+// 缓存读写
+// ---------------------------------------------------------------------------
+
+/// 一行探测缓存。字段与 upstream_probes 列一一对应。
+pub(crate) struct ProbeRecord {
+    pub probe: Option<String>,
+    pub state: String,
+    pub current: Option<String>,
+    pub upstream: Option<String>,
+    pub error: Option<String>,
+    pub checked_at: String,
+}
+
+/// 只读加载全部探测缓存。DB 不存在 → 空；表不存在 → 空（status 零写，
+/// 绝不建表）；单行损坏 → 跳过该行，不拖垮其他元素的回填。
+pub(crate) fn load_probe_cache(ctx: &Context) -> Result<BTreeMap<String, ProbeRecord>> {
+    let Some(conn) = store::open_readonly(ctx)? else {
+        return Ok(BTreeMap::new());
+    };
+    let mut stmt = match conn.prepare(
+        "SELECT element_id, probe, state, current, upstream, error, checked_at FROM upstream_probes",
+    ) {
+        Ok(stmt) => stmt,
+        Err(err) => {
+            if err.to_string().contains("no such table") {
+                return Ok(BTreeMap::new());
+            }
+            return Err(err.into());
+        }
+    };
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            ProbeRecord {
+                probe: row.get(1)?,
+                state: row.get(2)?,
+                current: row.get(3)?,
+                upstream: row.get(4)?,
+                error: row.get(5)?,
+                checked_at: row.get(6)?,
+            },
+        ))
+    })?;
+    let mut out = BTreeMap::new();
+    for row in rows.flatten() {
+        out.insert(row.0, row.1);
+    }
+    Ok(out)
+}
+
+fn cache_age_sec(checked_at: &str) -> Option<i64> {
+    let parsed = chrono::DateTime::parse_from_rfc3339(checked_at).ok()?;
+    let age = chrono::Utc::now()
+        .signed_duration_since(parsed.with_timezone(&chrono::Utc))
+        .num_seconds();
+    Some(age.max(0))
+}
+
+/// status 回填：probeable 元素从缓存构造 freshness 块；无记录 → unknown +
+/// nulls（current 仍携带本地已观测值）。TTL 不在引擎侧强制，如实输出
+/// checked_at 与派生的 cache_age_sec（UI 负责 stale 标注）。
+pub(crate) fn freshness_from_cache(
+    cache: &BTreeMap<String, ProbeRecord>,
+    element_id: &str,
+    local_current: Option<&str>,
+) -> Value {
+    let Some(record) = cache.get(element_id) else {
+        return json!({
+            "state": "unknown",
+            "current": local_current,
+            "upstream": Value::Null,
+            "checked_at": Value::Null,
+            "probe": Value::Null,
+            "cache_age_sec": Value::Null,
+        });
+    };
+    json!({
+        "state": record.state.as_str(),
+        "current": record.current.as_deref().or(local_current),
+        "upstream": record.upstream.as_deref(),
+        "checked_at": record.checked_at.as_str(),
+        "probe": record.probe.as_deref(),
+        "cache_age_sec": cache_age_sec(&record.checked_at),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// 探测宇宙分类
+// ---------------------------------------------------------------------------
+
+/// 从 `npm install [-g] <pkg>...` 命令提取包名（对齐旧 Python
+/// _extract_npm_package_name：scoped 包只有第二个 @ 才是版本分隔）。
+fn extract_npm_package_name(command: &str) -> Option<String> {
+    let tokens: Vec<&str> = command.split_whitespace().collect();
+    if tokens.len() < 3 || tokens[0] != "npm" || tokens[1] != "install" {
+        return None;
+    }
+    for token in &tokens[2..] {
+        if token.starts_with('-') {
+            continue;
+        }
+        let name = if let Some(stripped) = token.strip_prefix('@') {
+            match stripped.find('@') {
+                Some(pos) => &token[..pos + 1],
+                None => token,
+            }
+        } else {
+            token.split('@').next().unwrap_or(token)
+        };
+        if name.is_empty() {
+            return None;
+        }
+        return Some(name.to_string());
+    }
+    None
+}
+
+/// agent 是否在探测宇宙内：enabled 且首选 provider 的 install 命令可解析出
+/// npm 包。detect-only（安装来源不可管理）不改变可探测性。
+pub(crate) fn agent_probe_package(def: &AgentDef) -> Option<String> {
+    if !def.enabled {
+        return None;
+    }
+    let (install, _) = def.commands.install.as_ref()?;
+    extract_npm_package_name(install)
+}
+
+pub(crate) enum McpProbeSpec {
+    Npx(String),
+    UvxGit { repo: String, branch: String },
+}
+
+/// MCP 定义分类：npx 的第一个非 flag 参数为 npm 包；uvx 的 `git+repo@branch`
+/// 参数为 git 源（对齐旧 Python _classify_mcp_probe）。其余命令不参与探测。
+pub(crate) fn classify_mcp_probe(definition: &Value) -> Option<McpProbeSpec> {
+    let command = definition.get("command").and_then(Value::as_str)?;
+    let args = definition.get("args").and_then(Value::as_array)?;
+    match command {
+        "npx" => args
+            .iter()
+            .filter_map(Value::as_str)
+            .find(|arg| !arg.starts_with('-'))
+            .map(|package| McpProbeSpec::Npx(package.to_string())),
+        "uvx" => args.iter().filter_map(Value::as_str).find_map(|arg| {
+            let repo_and_branch = arg.strip_prefix("git+")?;
+            let (repo, branch) = repo_and_branch.rsplit_once('@')?;
+            if repo.is_empty() || branch.is_empty() {
+                return None;
+            }
+            Some(McpProbeSpec::UvxGit {
+                repo: repo.to_string(),
+                branch: branch.to_string(),
+            })
+        }),
+        _ => None,
+    }
+}
+
+enum ProbeKind {
+    AgentNpm { bin: String, package: String },
+    McpNpx { package: String },
+    McpUvxGit { repo: String, branch: String },
+    SkillGit { repo_dir: PathBuf, url: String },
+}
+
+struct ProbeTarget {
+    id: String,
+    kind: ProbeKind,
+}
+
+fn collect_targets(ctx: &Context) -> Result<Vec<ProbeTarget>> {
+    let mut targets = Vec::new();
+
+    for def in native_agents::load_definitions(ctx)? {
+        if let Some(package) = agent_probe_package(&def) {
+            targets.push(ProbeTarget {
+                id: format!("agents:{}", def.id),
+                kind: ProbeKind::AgentNpm {
+                    bin: def.bin.clone(),
+                    package,
+                },
+            });
+        }
+    }
+
+    let policy = store::effective_policy(ctx)?;
+    let library = library_view(&policy);
+    for (server, def) in &library.definitions {
+        if !library_enabled(&library, server) {
+            continue;
+        }
+        let kind = match classify_mcp_probe(def) {
+            Some(McpProbeSpec::Npx(package)) => ProbeKind::McpNpx { package },
+            Some(McpProbeSpec::UvxGit { repo, branch }) => ProbeKind::McpUvxGit { repo, branch },
+            None => continue,
+        };
+        targets.push(ProbeTarget {
+            id: format!("mcp:{}", server),
+            kind,
+        });
+    }
+
+    if let Some(repos) = policy
+        .get("skills")
+        .and_then(|v| v.get("repositories"))
+        .and_then(Value::as_object)
+    {
+        for (name, raw) in repos {
+            if raw.get("_delete") == Some(&Value::Bool(true)) {
+                continue;
+            }
+            let enabled = policy
+                .get("skills")
+                .and_then(|v| v.get(name))
+                .and_then(|v| v.get("enabled"))
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            let Some(url) = raw.get("url").and_then(Value::as_str) else {
+                continue;
+            };
+            if !enabled || url.is_empty() {
+                continue;
+            }
+            targets.push(ProbeTarget {
+                id: format!("skill:{}", name),
+                kind: ProbeKind::SkillGit {
+                    repo_dir: crate::native_skills::repo_base_dir(ctx).join(name),
+                    url: url.to_string(),
+                },
+            });
+        }
+    }
+
+    targets.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(targets)
+}
+
+// ---------------------------------------------------------------------------
+// 探测器（有界捕获 + 超时终止进程组，失败 → None，由上层归 unknown+error）
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+fn terminate_child(child: &mut std::process::Child) {
+    extern "C" {
+        fn kill(pid: i32, sig: i32) -> i32;
+    }
+    const SIGKILL: i32 = 9;
+    let pgid = child.id() as i32; // process_group(0) 使 pgid == pid
+    if unsafe { kill(-pgid, SIGKILL) } != 0 {
+        let _ = child.kill();
+    }
+}
+
+#[cfg(not(unix))]
+fn terminate_child(child: &mut std::process::Child) {
+    let _ = child.kill();
+}
+
+fn spawn_capture_reader(
+    mut pipe: impl Read + Send + 'static,
+    limit: usize,
+) -> std::sync::mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 256];
+        let mut captured = Vec::with_capacity(limit.min(1024));
+        while let Ok(n) = pipe.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            let remaining = limit.saturating_sub(captured.len());
+            captured.extend_from_slice(&buf[..n.min(remaining)]);
+        }
+        let _ = tx.send(captured);
+    });
+    rx
+}
+
+/// 以参数数组直接执行（不经 shell），exit 0 → Some(stdout)；超时/非 0/启动
+/// 失败 → None。stdin 关闭，HOME 注入 ctx.home_dir（探测不继承调用方 HOME）。
+fn run_capture(
+    program: &str,
+    args: &[&str],
+    cwd: Option<&Path>,
+    ctx: &Context,
+    timeout: Duration,
+) -> Option<String> {
+    let mut command = Command::new(program);
+    command
+        .args(args)
+        .env("HOME", &ctx.home_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(dir) = cwd {
+        command.current_dir(dir);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = command.spawn().ok()?;
+    let stdout_rx = spawn_capture_reader(child.stdout.take()?, CAPTURE_LIMIT);
+    let stderr_rx = spawn_capture_reader(child.stderr.take()?, 256);
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let stdout = stdout_rx
+                    .recv_timeout(Duration::from_secs(2))
+                    .unwrap_or_default();
+                let _ = stderr_rx.recv_timeout(Duration::from_secs(2));
+                if !status.success() {
+                    return None;
+                }
+                return String::from_utf8(stdout).ok();
+            }
+            Ok(None) => {
+                if start.elapsed() > timeout {
+                    terminate_child(&mut child);
+                    let _ = child.wait();
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(_) => return None,
+        }
+    }
+}
+
+/// npm 包名白名单校验（防策略值被拼成 flag）；不合法 → 探测失败类别。
+fn valid_npm_package(package: &str) -> bool {
+    !package.is_empty()
+        && !package.starts_with('-')
+        && package
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '@' | '/' | '.' | '_' | '-'))
+}
+
+fn npm_view(ctx: &Context, package: &str) -> Option<String> {
+    if !valid_npm_package(package) {
+        return None;
+    }
+    let out = run_capture(
+        "npm",
+        &["view", package, "version"],
+        None,
+        ctx,
+        NETWORK_PROBE_TIMEOUT,
+    )?;
+    out.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
+}
+
+/// git ls-remote 取指定 ref 的第一行第一列（commit hash）。repo/ref 校验非空
+/// 且不以 '-' 开头（防被解释为 flag）。
+fn git_ls_remote(ctx: &Context, repo: &str, git_ref: &str) -> Option<String> {
+    if repo.is_empty() || git_ref.is_empty() || repo.starts_with('-') || git_ref.starts_with('-') {
+        return None;
+    }
+    let out = run_capture(
+        "git",
+        &["ls-remote", repo, git_ref],
+        None,
+        ctx,
+        NETWORK_PROBE_TIMEOUT,
+    )?;
+    let first = out.lines().map(str::trim).find(|line| !line.is_empty())?;
+    let hash = first.split_whitespace().next()?;
+    if hash.is_empty() {
+        return None;
+    }
+    Some(hash.to_string())
+}
+
+fn git_local_head(ctx: &Context, repo_dir: &Path) -> Option<String> {
+    if !repo_dir.is_dir() {
+        return None;
+    }
+    let out = run_capture(
+        "git",
+        &["rev-parse", "HEAD"],
+        Some(repo_dir),
+        ctx,
+        LOCAL_PROBE_TIMEOUT,
+    )?;
+    let first = out.lines().map(str::trim).find(|line| !line.is_empty())?;
+    if first.is_empty() {
+        return None;
+    }
+    Some(first.to_string())
+}
+
+/// npx 缓存本地版本（~/.npm/_npx/*/node_modules/<pkg>/package.json），
+/// 纯本地文件读取，无网络；缺失 → None。
+fn npx_cached_version(home_dir: &Path, package: &str) -> Option<String> {
+    if !valid_npm_package(package) {
+        return None;
+    }
+    let cache_base = home_dir.join(".npm").join("_npx");
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(&cache_base)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .collect();
+    entries.sort();
+    let mut rel = PathBuf::from("node_modules");
+    for segment in package.split('/') {
+        rel.push(segment);
+    }
+    rel.push("package.json");
+    for entry in entries {
+        let package_json = entry.join(&rel);
+        let Ok(raw) = std::fs::read_to_string(&package_json) else {
+            continue;
+        };
+        let Ok(parsed) = serde_json::from_str::<Value>(&raw) else {
+            continue;
+        };
+        if let Some(version) = parsed.get("version").and_then(Value::as_str) {
+            let version = version.trim();
+            if !version.is_empty() {
+                return Some(version.to_string());
+            }
+        }
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
+// 比较（对齐旧 Python _compare_freshness）
+// ---------------------------------------------------------------------------
+
+fn version_tuple(text: &str) -> Option<Vec<u64>> {
+    let re = regex::Regex::new(r"\d+(?:\.\d+)+").expect("静态正则合法");
+    let token = re.find(text)?.as_str();
+    let mut parts = Vec::new();
+    for part in token.split('.') {
+        // 位宽保护：超长数字段按不可比处理（对齐 unorderable → behind）
+        if part.len() > 18 {
+            return None;
+        }
+        parts.push(part.parse::<u64>().ok()?);
+    }
+    Some(parts)
+}
+
+fn compare_freshness(current: Option<&str>, upstream: Option<&str>) -> &'static str {
+    let (Some(current), Some(upstream)) = (current, upstream) else {
+        return "unknown";
+    };
+    if current == upstream {
+        return "current";
+    }
+    if let (Some(mut current_key), Some(mut upstream_key)) =
+        (version_tuple(current), version_tuple(upstream))
+    {
+        let width = current_key.len().max(upstream_key.len());
+        current_key.resize(width, 0);
+        upstream_key.resize(width, 0);
+        if current_key == upstream_key {
+            return "current";
+        }
+        return if current_key > upstream_key {
+            "ahead"
+        } else {
+            "behind"
+        };
+    }
+    // 不可比值（如 commit hash）：任何差异按 behind；只有版本可有序时才断言 ahead。
+    "behind"
+}
+
+// ---------------------------------------------------------------------------
+// 单元素探测
+// ---------------------------------------------------------------------------
+
+fn probe_target(ctx: &Context, target: &ProbeTarget) -> ProbeRecord {
+    let (probe, mut state, current, upstream, error): (
+        &'static str,
+        &'static str,
+        Option<String>,
+        Option<String>,
+        Option<&'static str>,
+    ) = match &target.kind {
+        ProbeKind::AgentNpm { bin, package } => {
+            let current = native_agents::resolve_bin(&ctx.home_dir, bin)
+                .as_deref()
+                .and_then(native_agents::probe_version);
+            match npm_view(ctx, package) {
+                None => (
+                    PROBE_NPM_VIEW,
+                    "unknown",
+                    current,
+                    None,
+                    Some(ERR_NPM_VIEW_FAILED),
+                ),
+                Some(upstream) => {
+                    let state = compare_freshness(current.as_deref(), Some(&upstream));
+                    let error = if state == "unknown" {
+                        Some(ERR_LOCAL_VERSION_MISSING)
+                    } else {
+                        None
+                    };
+                    (PROBE_NPM_VIEW, state, current, Some(upstream), error)
+                }
+            }
+        }
+        ProbeKind::McpNpx { package } => {
+            let current = npx_cached_version(&ctx.home_dir, package);
+            match npm_view(ctx, package) {
+                None => (
+                    PROBE_NPM_VIEW,
+                    "unknown",
+                    current,
+                    None,
+                    Some(ERR_NPM_VIEW_FAILED),
+                ),
+                Some(upstream) => {
+                    let state = compare_freshness(current.as_deref(), Some(&upstream));
+                    let error = if state == "unknown" {
+                        Some(ERR_LOCAL_VERSION_MISSING)
+                    } else {
+                        None
+                    };
+                    (PROBE_NPM_VIEW, state, current, Some(upstream), error)
+                }
+            }
+        }
+        ProbeKind::McpUvxGit { repo, branch } => match git_ls_remote(ctx, repo, branch) {
+            None => (
+                PROBE_GIT_LS_REMOTE,
+                "unknown",
+                None,
+                None,
+                Some(ERR_GIT_LS_REMOTE_FAILED),
+            ),
+            // uvx 本地缓存 commit 不可读（对齐旧语义）：上游值仍入库供展示。
+            Some(upstream) => (
+                PROBE_GIT_LS_REMOTE,
+                "unknown",
+                None,
+                Some(upstream),
+                Some(ERR_UVX_LOCAL_UNAVAILABLE),
+            ),
+        },
+        ProbeKind::SkillGit { repo_dir, url } => {
+            let current = git_local_head(ctx, repo_dir);
+            match git_ls_remote(ctx, url, "HEAD") {
+                None => (
+                    PROBE_GIT_LS_REMOTE,
+                    "unknown",
+                    current,
+                    None,
+                    Some(ERR_GIT_LS_REMOTE_FAILED),
+                ),
+                Some(upstream) => {
+                    let state = compare_freshness(current.as_deref(), Some(&upstream));
+                    let error = if state == "unknown" {
+                        Some(ERR_LOCAL_HEAD_MISSING)
+                    } else {
+                        None
+                    };
+                    (PROBE_GIT_LS_REMOTE, state, current, Some(upstream), error)
+                }
+            }
+        }
+    };
+    // 防御：比较器只产出四态；异常值统一归 unknown。
+    if !matches!(state, "current" | "behind" | "ahead" | "unknown") {
+        state = "unknown";
+    }
+    ProbeRecord {
+        probe: Some(probe.to_string()),
+        state: state.to_string(),
+        current,
+        upstream,
+        error: error.map(str::to_string),
+        checked_at: String::new(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// handle
+// ---------------------------------------------------------------------------
+
+/// 严格参数：只接受可选的单个 --only <element-id>；--offline 固定拒绝
+/// （OFFLINE_NETWORK_DENIED）；位置参数、未知 flag、重复 --only、缺失/类 flag
+/// 取值均 USAGE_ERROR，错误消息固定，不回显取值。
+fn parse_args(request: &Request) -> std::result::Result<Option<String>, DispatchError> {
+    let mut only: Option<String> = None;
+    let mut index = 0;
+    while index < request.args.len() {
+        match request.args[index].as_str() {
+            "--offline" => {
+                return Err(DispatchError::new(
+                    "OFFLINE_NETWORK_DENIED",
+                    "system:refresh-upstream 需要网络探测，offline 模式下拒绝执行",
+                ));
+            }
+            "--only" => {
+                if only.is_some() {
+                    return Err(DispatchError::new(
+                        "USAGE_ERROR",
+                        "system:refresh-upstream 仅接受可选的单个 --only <元素id>",
+                    ));
+                }
+                let Some(value) = request.args.get(index + 1) else {
+                    return Err(DispatchError::new(
+                        "USAGE_ERROR",
+                        "system:refresh-upstream 仅接受可选的单个 --only <元素id>",
+                    ));
+                };
+                if value.starts_with("--") || value.is_empty() {
+                    return Err(DispatchError::new(
+                        "USAGE_ERROR",
+                        "system:refresh-upstream 仅接受可选的单个 --only <元素id>",
+                    ));
+                }
+                only = Some(value.clone());
+                index += 2;
+            }
+            _ => {
+                return Err(DispatchError::new(
+                    "USAGE_ERROR",
+                    "system:refresh-upstream 仅接受可选的单个 --only <元素id>",
+                ));
+            }
+        }
+    }
+    Ok(only)
+}
+
+pub(crate) fn handle(ctx: &Context, request: &Request) -> DispatchResult {
+    let only = parse_args(request)?;
+    let targets = collect_targets(ctx)?;
+    let selected: Vec<ProbeTarget> = match &only {
+        Some(id) => {
+            let Some(target) = targets.into_iter().find(|target| &target.id == id) else {
+                return Err(DispatchError::new(
+                    "USAGE_ERROR",
+                    "system:refresh-upstream 的 --only 元素不在探测范围内",
+                ));
+            };
+            vec![target]
+        }
+        None => targets,
+    };
+
+    // 先全部探测（可能耗时，不持有任何写连接/锁），再一次 Immediate 事务落库。
+    let checked_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let mut records = Vec::with_capacity(selected.len());
+    for target in &selected {
+        let mut record = probe_target(ctx, target);
+        record.checked_at = checked_at.clone();
+        records.push((target.id.clone(), record));
+    }
+
+    let mut conn = store::open_write(ctx)?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    store::ensure_upstream_probes(&tx)?;
+    for (id, record) in &records {
+        tx.execute(
+            "INSERT INTO upstream_probes (element_id, probe, state, current, upstream, error, checked_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(element_id) DO UPDATE SET
+                probe=excluded.probe, state=excluded.state, current=excluded.current,
+                upstream=excluded.upstream, error=excluded.error, checked_at=excluded.checked_at",
+            rusqlite::params![
+                id,
+                record.probe.as_deref(),
+                record.state,
+                record.current.as_deref(),
+                record.upstream.as_deref(),
+                record.error.as_deref(),
+                record.checked_at,
+            ],
+        )?;
+    }
+    tx.commit()?;
+
+    let mut probed = 0u64;
+    let mut counts: BTreeMap<&str, u64> = BTreeMap::new();
+    let mut elements = Vec::with_capacity(records.len());
+    for (id, record) in &records {
+        probed += 1;
+        *counts.entry(record.state.as_str()).or_insert(0) += 1;
+        elements.push(json!({
+            "id": id,
+            "probe": record.probe.as_deref(),
+            "state": record.state.as_str(),
+            "current": record.current.as_deref(),
+            "upstream": record.upstream.as_deref(),
+            "error": record.error.as_deref(),
+        }));
+    }
+
+    let data = json!({
+        "domain": "system",
+        "verb": "refresh-upstream",
+        "cache_file": Value::Null,
+        "elements": elements,
+        "summary": {
+            "probed": probed,
+            "current": counts.get("current").copied().unwrap_or(0),
+            "behind": counts.get("behind").copied().unwrap_or(0),
+            "ahead": counts.get("ahead").copied().unwrap_or(0),
+            "unknown": counts.get("unknown").copied().unwrap_or(0),
+        },
+    });
+    Ok((data, vec![]))
+}

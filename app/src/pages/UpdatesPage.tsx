@@ -26,6 +26,17 @@ const DOMAINS = [
   { key: "skills", label: "Skills" },
 ] as const;
 
+/** 行内收敛/全部更新的显式 --action：agents→upgrade，mcp/skills→update（引擎 plan/apply 强制要求）。 */
+const CONVERGE_ACTIONS: Record<string, string> = {
+  agents: "upgrade",
+  mcp: "update",
+  skills: "update",
+};
+
+function convergeAction(domain: string): string {
+  return CONVERGE_ACTIONS[domain] ?? "update";
+}
+
 export function sortByFreshness(elements: EngineElement[]): EngineElement[] {
   return elements
     .filter((element) => element.freshness.state !== "not-applicable")
@@ -69,23 +80,24 @@ export default function UpdatesPage() {
   );
   const behindElements = elements.filter((element) => element.freshness.state === "behind");
 
-  /** 行内收敛：仅针对选定元素执行 plan 与 apply（阶段 A 真实范围控制）。 */
+  /** 行内收敛：仅针对选定元素执行 plan 与 apply（阶段 A 真实范围控制），携带显式 --action。 */
   const openRowApply = (element: EngineElement) => {
+    const actionArgs = ["--only", element.id, "--action", convergeAction(element.domain)];
     preview.open({
       title: `更新 ${element.id}`,
       subtitle: "仅更新此组件；目标被外部修改时会拒绝覆盖。",
-      planCommands: [{ command: `${element.domain}:plan`, args: ["--only", element.id] }],
+      planCommands: [{ command: `${element.domain}:plan`, args: actionArgs }],
       requireConfirmText: element.domain === "agents" ? element.id : undefined,
       confirmLabel: "更新此项",
       execute: executeApply({
         command: `${element.domain}:apply`,
         label: `更新 ${element.id}`,
-        extraArgs: ["--only", element.id],
+        extraArgs: actionArgs,
       }),
     });
   };
 
-  /** 顶部聚合更新：按域收集全部落后组件的 --only plan 聚合预览 → 顺序执行各域 scoped apply。 */
+  /** 顶部聚合更新：按域收集全部落后组件的 --only + 显式 --action plan 聚合预览 → 顺序执行各域 scoped apply。 */
   const openUpdateAll = () => {
     const domainGroups = DOMAINS.map((domain) => {
       const items = behindElements.filter((el) => el.domain === domain.key);
@@ -94,12 +106,13 @@ export default function UpdatesPage() {
         label: domain.label,
         items,
         ids: items.map((el) => el.id),
+        action: convergeAction(domain.key),
       };
     }).filter((g) => g.items.length > 0);
 
     const planCommands = domainGroups.map((g) => ({
       command: `${g.key}:plan`,
-      args: g.ids.flatMap((id) => ["--only", id]),
+      args: [...g.ids.flatMap((id) => ["--only", id]), "--action", g.action],
     }));
 
     preview.open({
@@ -112,7 +125,12 @@ export default function UpdatesPage() {
         for (const group of domainGroups) {
           const envelope = await execute({
             command: `${group.key}:apply`,
-            args: [...group.ids.flatMap((id) => ["--only", id]), ...(dryRun ? ["--dry-run"] : [])],
+            args: [
+              ...group.ids.flatMap((id) => ["--only", id]),
+              "--action",
+              group.action,
+              ...(dryRun ? ["--dry-run"] : []),
+            ],
             label: `更新 ${group.label}`,
             dryRun,
           });

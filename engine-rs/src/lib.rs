@@ -23,6 +23,7 @@ pub(crate) mod native_secrets;
 pub mod native_skills;
 pub mod native_sources;
 pub(crate) mod native_system;
+pub(crate) mod native_upstream;
 pub mod store;
 
 pub use envelope::{diagnostic, Diagnostic, Envelope, Lock, Mode, CONTRACT_ID};
