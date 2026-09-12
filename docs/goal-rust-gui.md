@@ -3,9 +3,9 @@
 ## 当前结论
 
 - 核心已就绪：Rust/SQLite/Tauri 共用库与 `native-manager.db` 唯一事实源。
-- 已接线闭环：Agents、Skills、MCP、Rules、Hooks、Aliases 六个资源域，以及只读 `system:audit`、`secrets:status`。
+- 已接线闭环：Agents、Skills、MCP、Rules、Hooks、Aliases 六个资源域，以及只读 `system:audit`、`secrets:status`、`system:refresh-upstream`（探测宇宙 agents/mcp/skills，缓存落 SQLite `upstream_probes` 表，三域 status 回填 freshness，前端收敛调用已补显式 `--action`）。
 - 2026-09-12 高级管理入口裁决已执行完毕：Aliases 原生闭环落地（`b7f30db`）；Tools、快照与 `system:converge` 退役清理完成（`9080c1d`）。
-- 仍未完成：`system:refresh-upstream`、远程 HTTP MCP、当前代码的安装包与 GUI E2E、跨平台签名/公证/发布。
+- 仍未完成：远程 HTTP MCP、当前代码的安装包与 GUI E2E、跨平台签名/公证/发布。
 
 ## 目标
 
@@ -30,18 +30,19 @@
 - 只读 `system:audit` 接线：聚合 agents/skills/mcp/rules/hooks/aliases/secrets 与 runtime/storage 状态，支持 Tauri offline 桥接注入。
 - 只读 `secrets:status` 接线：仅读取 SQLite 有效策略中已启用 MCP 定义的合法 `${VAR}` 环境变量占位符，只检查 Agent Manager 当前进程环境是否存在对应变量，输出变量名与布尔；不扫描、定位或克隆外部密钥仓库，不持久化、序列化或显示变量值；畸形定义固定脱敏失败。
 - 2026-09-12 裁决退役已清理：Tools 域、快照（snapshots:list/restore）与 `system:converge` 的命令面、前端页面/类型/文案、契约 schema、种子文件与文档状态行全部清零；退役命令报错为 UNKNOWN_DOMAIN/UNKNOWN_VERB，六域 apply 输出不再携带 snapshot 字段，"自动备份"承诺文案改为 fail-closed 表述；`agent-tool/` 物理目录保留未动。
+- `system:refresh-upstream` 接线：探测宇宙为 enabled 的 npm 渠道 agents、MCP 的 npx 包与 uvx `git+repo@branch` 源、enabled 且有 url 的 skills 集合仓库；探测器（npm view / git ls-remote / git rev-parse / npx 缓存读取 / bin --version）不经 shell、参数数组执行、有界捕获、超时进程组终止（网络 ≤30s），单元素失败归 unknown+固定错误类别不拖垮整批；比较语义对齐旧版（semver 可比 → current/behind/ahead，hash 不可比 → 不同即 behind）；缓存落 SQLite `upstream_probes` 表（Immediate 事务逐元素 upsert，只存版本/commit 与错误类别），status 只读回填 freshness（缺表/缺行一律 unknown，status 零写零网络）；`--offline` 拒绝（OFFLINE_NETWORK_DENIED），`--only` 逐元素，不取 apply 锁；前端 Updates 页收敛调用已补显式 `--action`（agents→upgrade，mcp/skills→update）。
 
 ## 契约要求
 
 Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 必须支持新增、编辑/更新、启用、禁用、删除。保存定义不得执行动作；UI 按引擎 actions 遵循 plan → confirm → apply；移除管理与卸载分开。
 
-## 验收基线（2026-09-12，第二次）
+## 验收基线（2026-09-12，第三次）
 
-绑定提交 `9080c1d`（Aliases 闭环 `b7f30db` + 退役清理 `9080c1d`）。
+绑定提交：Aliases 闭环 `b7f30db`、退役清理 `9080c1d`、refresh-upstream 见本节提交（推送后以实际 hash 为准）。
 
-- 自动化：`engine-rs` 测试 226 项、`app/src-tauri` 测试 11 项、前端 222 项，全部通过；`pnpm typecheck` 与 `pnpm build` 通过；`cargo fmt --check` 通过。
-- 真实隔离 CLI：Aliases 十二项反例实测（缺库零写、plan/dry-run 零写不取锁、真实 apply 建库写区块 0600、重复 apply 幂等、外部修改 fail-closed 且字节不变、并发锁拒绝、`--only` 逐目标、非法名/疑似凭据/过期 revision 拒绝、audit 接线映射）；退役命令实测 UNKNOWN_DOMAIN/UNKNOWN_VERB，apply 输出无 snapshot 字段，audit 为 7 域 + runtime/storage 共 9 个 section。早前基线的 secrets/audit/MCP 反例结论继续有效。
-- 前端：Chrome 本地 mock 页面完成真实交互与几何像素检查（早前基线）；本轮前端为零改动（Aliases）与删除面（退役），mock 测试全绿。
+- 自动化：`engine-rs` 测试 232 项、`app/src-tauri` 测试 11 项、前端 223 项，全部通过；`pnpm typecheck` 与 `pnpm build` 通过；`cargo fmt --check` 通过。
+- 真实隔离 CLI：Aliases 十二项反例与退役命令 UNKNOWN_DOMAIN/UNKNOWN_VERB 实测同前；refresh-upstream 实测：fresh 环境 freshness 全 unknown 且 status 零写零建表、`--offline` 拒绝且不建库（仅写诊断日志）、shim 探测写 `upstream_probes` 缓存且不含凭据、skills 集合回填 `unknown + git-ls-remote + checked_at/cache_age_sec`、`--only` 过滤与未知元素 USAGE_ERROR、非法参数固定消息不回显取值。引擎测试以 PATH shim 覆盖全状态矩阵（current/behind/ahead/unknown 四类错误类别），全程无真实网络。
+- 前端：mock 测试全绿（含 Updates 页行内收敛 `--action upgrade` 与全部更新逐域编排断言）。
 - 边界：以上不构成当前安装包的 Tauri 前后端真实业务 E2E。
 
 ## 剩余路线图（未排期）
@@ -50,7 +51,6 @@ Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 必须支持新增、�
 
 | 事项 | 前置 | 产出 | 完成标准 |
 | --- | --- | --- | --- |
-| `system:refresh-upstream` | 参与域已定为 agents/mcp/skills（2026-09-12 裁决） | 上游探测 + SQLite `upstream_probes` 缓存表；三域 status 回填 freshness；前端 plan/apply 补显式 `--action` | 不改配置，逐域探测结果可回读 |
 | 远程 HTTP MCP | 本地 stdio 闭环（已完成） | 远程 HTTP MCP target | 与本地 stdio 同级的安全与脱敏验收通过 |
 | 当前代码安装包与 GUI E2E | 上述参与域完成 | 当前代码构建的 macOS 安装包 | Rules/MCP/Hooks/Aliases/Secrets/system:audit 的真实 GUI 业务 E2E 通过 |
 | 发布 | 当前安装包 E2E 通过 | 签名、公证、arm64、Linux、Windows、更新发布 | 各平台与渠道独立验收通过 |
@@ -61,15 +61,15 @@ Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 必须支持新增、�
 
 - Tools：退役。真实条目仅剩 playwright-cli（两条 npm 命令），实施为全新大域且投入产比低；退役后由用户手动管理。已于 `9080c1d` 清理完毕。
 - Aliases：保留实施，为恢复后第一个最小闭环。已于 `b7f30db` 落地并通过主审独立验收。
-- 更新中心：实施 `system:refresh-upstream`（参与域 agents/mcp/skills），退役 `system:converge`（已于 `9080c1d` 清理）；Updates 页逐域 plan→confirm→apply 编排已扶正为正式语义，前端调用待补显式 `--action`（随 refresh-upstream 实施）。
+- 更新中心：`system:refresh-upstream` 已实施（参与域 agents/mcp/skills，探测缓存落 SQLite `upstream_probes` 表，三域 status 只读回填 freshness，`--offline` 拒绝，不取 apply 锁）；`system:converge` 已于 `9080c1d` 退役清理；Updates 页逐域 plan→confirm→apply 编排已扶正为正式语义，前端调用已补显式 `--action`（agents→upgrade，mcp/skills→update）。
 - 快照：退役。新体系既定方向为 fail-closed 拒绝覆盖 + 操作内事务回滚，不恢复"写前持久备份"模型；"自动备份"承诺文案已于 `9080c1d` 清理。
 - 探测缓存：落 SQLite 新表（易失状态入库与 operation_logs 先例一致），不引入第二份可写状态文件。
 - 实施者：全部使用 Kimi YOLO 模式（AGENTS.md 已同步）。
 
 ## 本次停止点与恢复入口
 
-- 停止点：Aliases 闭环与三项退役清理已提交推送；下一步待启动。
-- 恢复入口：实施 `system:refresh-upstream`（任务书由主审出具）；随后远程 HTTP MCP，然后当前代码安装包与 GUI E2E，最后发布。
+- 停止点：`system:refresh-upstream` 已实施并通过主审独立验收（随本节文档同步提交）；远程 HTTP MCP 待启动。
+- 恢复入口：远程 HTTP MCP，然后当前代码安装包与 GUI E2E，最后发布。
 
 ## 验证
 

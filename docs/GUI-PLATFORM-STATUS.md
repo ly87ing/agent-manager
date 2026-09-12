@@ -18,7 +18,7 @@
 | 系统审计 | 已完成：Rust dispatcher 已接入只读 `system:audit` 及其 Tauri offline 桥接；聚合 agents/skills/mcp/rules/hooks/aliases/secrets 与 runtime/storage 状态 |
 | 密钥状态 | 已完成：只读 `secrets:status` 已接入 Rust dispatcher；仅读取 SQLite 有效策略中已启用 MCP 定义的合法 `${VAR}` 环境变量占位符，只检查 Agent Manager 当前进程环境是否存在对应变量，输出变量名与布尔；不扫描、定位或克隆外部密钥仓库，不持久化、序列化或显示变量值；畸形定义固定脱敏失败 |
 | Aliases 原生域 | 已完成：Rust dispatcher 已接入 `aliases:status` / `aliases:plan` / `aliases:apply`；固定 zshrc/zprofile 两目标，只换托管区块、外部修改 fail-closed |
-| 设置页高级管理 | 已完成（2026-09-12 裁决）：Aliases、更新中心与 Policy 页可达；Tools 域、快照（`snapshots:*`）与 `system:converge` 已退役，相关页面、Tauri 白名单与契约 schema 已移除；`system:refresh-upstream` 未实现，保留在路线图 |
+| 设置页高级管理 | 已完成（2026-09-12 裁决）：Aliases、更新中心与 Policy 页可达；Tools 域、快照（`snapshots:*`）与 `system:converge` 已退役，相关页面、Tauri 白名单与契约 schema 已移除；`system:refresh-upstream` 已接线（探测宇宙 agents/mcp/skills，缓存落 SQLite `upstream_probes` 表） |
 | 独立包真实业务 E2E | 未完成：2026-09-09 Darwin x86_64 DMG 已通过只读挂载、仓库外复制、无 Python、路径脱敏和从 `/` 隔离环境 5 秒启动验收；该包早于当前 Rules/MCP/Hooks/Secrets 与只读 `system:audit` 实现，不能证明当前 Rules/MCP/Hooks/Secrets/system:audit GUI 业务闭环 |
 | 跨平台发布、签名、更新 | 未完成：签名、公证、arm64、Linux、Windows 和更新发布仍未验证 |
 
