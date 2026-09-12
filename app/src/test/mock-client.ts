@@ -523,14 +523,82 @@ function demoEnvelopes(): Record<string, Envelope> {
     "skills:status": skillsStatus,
     "rules:status": rulesStatus,
     "secrets:status": secretsStatus,
-    "hooks:status": makeEnvelope({ domain: "hooks", elements: [] }, { command: "hooks.status" }),
+    "hooks:status": makeEnvelope(
+      {
+        domain: "hooks",
+        elements: [
+          makeElement({
+            id: "hooks:claude",
+            domain: "hooks",
+            spec: { name: "Claude Hooks", merge: "signature-set", source_key: "hooks.claude", target: "~/.claude/settings.json" },
+            policy: { enabled: true, agent_id: "claude-code" },
+            observed: {
+              target: "/Users/demo/.claude/settings.json",
+              target_exists: true,
+              expected_digest: "cccc5d5e240998863259085b2b52df0f1e0a855f4b4b4d3d0bb0be8ba91ef23b3",
+              applied_digest: "aaaa3c8ae2687d47a8e7543d3c8c43ef8dd9f744e3a3e2ce9aa9ad7a90de12a2",
+              actual_digest: "aaaa3c8ae2687d47a8e7543d3c8c43ef8dd9f744e3a3e2ce9aa9ad7a90de12a2",
+              source_revision: "1111",
+              blocked_reason: null,
+              registration_needed: false,
+              managed_hook_count: 1,
+              missing_signatures: 1,
+              removed_signatures_present: 0,
+            },
+            state: "drifted",
+            actions: [{ id: "sync", risk: "write-local", needs_lock: true, offline_ok: true }],
+          }),
+          makeElement({
+            id: "hooks:codex",
+            domain: "hooks",
+            spec: { name: "Codex Hooks", merge: "whole-file", source_key: "hooks.codex", target: "~/.codex/hooks.json" },
+            policy: { enabled: true, agent_id: "codex" },
+            observed: {
+              target: "/Users/demo/.codex/hooks.json",
+              target_exists: true,
+              expected_digest: "dddd6e6f351aa997436a196c3c63e01f2f1b96605c5c5e4e1cc1cf9cb02f034c4",
+              applied_digest: "dddd6e6f351aa997436a196c3c63e01f2f1b96605c5c5e4e1cc1cf9cb02f034c4",
+              actual_digest: "dddd6e6f351aa997436a196c3c63e01f2f1b96605c5c5e4e1cc1cf9cb02f034c4",
+              source_revision: "2222",
+              blocked_reason: null,
+              registration_needed: false,
+              managed_hook_count: 0,
+              missing_signatures: 0,
+              removed_signatures_present: 0,
+            },
+            state: "managed-ok",
+            actions: [],
+          }),
+        ],
+      },
+      { command: "hooks.status" },
+    ),
     "aliases:status": makeEnvelope({ domain: "aliases", elements: [] }, { command: "aliases.status" }),
     "mcp:plan": mcpPlan,
     "skills:plan": skillsPlan,
     "rules:plan": rulesPlan,
     "agents:plan": agentsPlan,
     "tools:plan": emptyPlan("tools"),
-    "hooks:plan": emptyPlan("hooks"),
+    "hooks:plan": makeEnvelope(
+      {
+        domain: "hooks",
+        actions: [
+          {
+            op: "write-file",
+            element: "hooks:claude",
+            target: "/Users/demo/.claude/settings.json",
+            risk: "write-local",
+            before_digest: "aaaa3c8ae2687d47a8e7543d3c8c43ef8dd9f744e3a3e2ce9aa9ad7a90de12a2",
+            after_digest: "cccc5d5e240998863259085b2b52df0f1e0a855f4b4b4d3d0bb0be8ba91ef23b3",
+            backup_path: null,
+            cmd: null,
+            note: "同步 hooks:claude 钩子文件",
+          },
+        ],
+        summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 },
+      },
+      { command: "hooks.plan" },
+    ),
     "aliases:plan": emptyPlan("aliases"),
     "system:refresh-upstream": makeEnvelope(
       {
@@ -714,8 +782,14 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
       // ---- 写路径与有状态命令 ----
       if (command === "sources:get") {
         const domain = args[args.indexOf("--key") + 1];
-        const suffix = domain === "rules" ? "shared" : domain === "hooks" ? "claude" : "shell";
-        return makeEnvelope({ sources: [{ key: `${domain}.${suffix}`, label: domain === "rules" ? "共享规则" : domain === "hooks" ? "Claude Hooks" : "Shell aliases", value: domain === "rules" ? "使用简体中文回答。\n" : {}, revision: "demo-revision", format: domain === "rules" ? "text" : "json" }] }, { command: "sources.get" });
+        if (domain === "hooks") {
+          return makeEnvelope({ sources: [
+            { key: "hooks.claude", label: "Claude Hooks", value: { hooks: { SessionStart: [{ hooks: [{ type: "command", command: "echo demo-hook" }] }] }, removed_signatures: [] }, revision: "demo-revision-claude", format: "json" },
+            { key: "hooks.codex", label: "Codex Hooks", value: { hooks: {} }, revision: "demo-revision-codex", format: "json" },
+          ] }, { command: "sources.get" });
+        }
+        const suffix = domain === "rules" ? "shared" : "shell";
+        return makeEnvelope({ sources: [{ key: `${domain}.${suffix}`, label: domain === "rules" ? "共享规则" : "Shell aliases", value: domain === "rules" ? "使用简体中文回答。\n" : {}, revision: "demo-revision", format: domain === "rules" ? "text" : "json" }] }, { command: "sources.get" });
       }
       if (command === "sources:set") return makeEnvelope({}, { command: "sources.set" });
       if (command === "policy:get") return policyGet();

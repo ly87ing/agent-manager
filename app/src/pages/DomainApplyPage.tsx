@@ -64,7 +64,7 @@ export default function DomainApplyPage({
           onClick={() =>
             preview.open({
               title: `同步${title}`,
-              subtitle: "先预览将要执行的操作；实际执行前会自动备份。",
+              subtitle: "先预览将要执行的操作；确认后按引擎计划执行。",
               planCommands: [`${domain}:plan`],
               confirmLabel: "立即同步",
               execute: executeApply({ command: `${domain}:apply`, label: `同步${title}` }),

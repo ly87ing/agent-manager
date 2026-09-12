@@ -37,7 +37,7 @@ export function SourceDefinitionsPanel({ domain }: { domain: "rules" | "hooks" |
   return <>
     <section className="rounded-lg border bg-white p-4">
       <h3 className="text-sm font-semibold">管理定义</h3>
-      <p className="mt-1 text-xs text-slate-500">在来源中添加、修改或移除条目，保存后预览同步。规则按共享内容和助手专用内容分别编辑。</p>
+      <p className="mt-1 text-xs text-slate-500">在来源中添加、修改或移除条目，保存后预览同步。{domain === "rules" && "规则按共享内容和助手专用内容分别编辑。"}</p>
       <div className="mt-3 flex flex-wrap gap-2">{query.data.data.sources.map((source) => <button type="button" key={source.key} onClick={() => { setEditing(source); setText(source.format === "json" ? JSON.stringify(source.value, null, 2) : String(source.value)); setError(null); }} className="rounded border px-3 py-2 text-sm">编辑 {source.label}</button>)}</div>
     </section>
     {editing && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onKeyDown={(event) => { if (event.key === "Escape" && !saving) setEditing(null); }}>

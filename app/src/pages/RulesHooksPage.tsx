@@ -85,7 +85,7 @@ export default function RulesHooksPage() {
           <DomainApplyPage
             domain="hooks"
             title="Hooks"
-            description="助手钩子脚本的生成与写入状态。"
+            description="助手钩子定义的写入与同步状态。"
           />
         )}
       </div>

@@ -274,3 +274,92 @@ describe("RulesPage 原生规则目标", () => {
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
   });
 });
+
+function nativeHooksRoutes(): Record<string, Envelope> {
+  return {
+    "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode() }),
+    "rules:status": makeEnvelope({ domain: "rules", elements: [] }, { command: "rules.status" }),
+    "hooks:status": makeEnvelope(
+      {
+        domain: "hooks",
+        elements: [
+          makeElement({
+            id: "hooks:claude",
+            domain: "hooks",
+            spec: { name: "Claude Hooks", merge: "signature-set", source_key: "hooks.claude", target: "~/.claude/settings.json" },
+            policy: { enabled: true, agent_id: "claude-code" },
+            observed: { target: "/tmp/home/.claude/settings.json", target_exists: true, expected_digest: "bbbb", applied_digest: "aaaa", actual_digest: "aaaa", source_revision: "r1", blocked_reason: null, registration_needed: false, managed_hook_count: 1, missing_signatures: 1, removed_signatures_present: 0 },
+            state: "drifted",
+            freshness: makeFreshness(),
+            actions: [{ id: "sync", risk: "write-local", needs_lock: true, offline_ok: true }],
+          }),
+          makeElement({
+            id: "hooks:codex",
+            domain: "hooks",
+            spec: { name: "Codex Hooks", merge: "whole-file", source_key: "hooks.codex", target: "~/.codex/hooks.json" },
+            policy: { enabled: true, agent_id: "codex" },
+            observed: { target: "/tmp/home/.codex/hooks.json", target_exists: true, expected_digest: "cccc", applied_digest: "cccc", actual_digest: "cccc", source_revision: "r2", blocked_reason: null, registration_needed: false, managed_hook_count: 0, missing_signatures: 0, removed_signatures_present: 0 },
+            state: "managed-ok",
+            freshness: makeFreshness(),
+            actions: [],
+          }),
+        ],
+      },
+      { command: "hooks.status" },
+    ),
+    "hooks:plan": makeEnvelope(
+      {
+        domain: "hooks",
+        actions: [makePlanAction({ element: "hooks:claude", target: "/tmp/home/.claude/settings.json", note: "同步 hooks:claude 钩子文件" })],
+        summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 },
+      },
+      { command: "hooks.plan" },
+    ),
+    "hooks:apply": makeEnvelope(
+      { domain: "hooks", dry_run: false, steps: [{ name: "hooks:sync hooks:claude", ok: true, exit_code: 0 }], snapshot: null, skipped: [] },
+      { command: "hooks.apply" },
+    ),
+    "sources:get": makeEnvelope(
+      { sources: [
+        { key: "hooks.claude", label: "Claude Hooks", value: { hooks: {}, removed_signatures: [] }, revision: "rev-c", format: "json" },
+        { key: "hooks.codex", label: "Codex Hooks", value: { hooks: {} }, revision: "rev-x", format: "json" },
+      ] },
+      { command: "sources.get" },
+    ),
+    "policy:get": makeEnvelope({ layers: { sqlite: null } }, { command: "policy.get" }),
+  };
+}
+
+describe("Hooks 页原生目标", () => {
+  it("列出两个真实目标，页面与弹窗无备份/生成文案", async () => {
+    renderWithEngine(<RulesHooksPage />, nativeHooksRoutes());
+    await userEvent.click(screen.getByRole("tab", { name: "Hooks" }));
+
+    expect(await screen.findByText("hooks:claude")).toBeInTheDocument();
+    expect(screen.getByText("hooks:codex")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "编辑 Claude Hooks" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "编辑 Codex Hooks" })).toBeInTheDocument();
+    const bodyText = document.body.textContent ?? "";
+    expect(bodyText).not.toContain("备份");
+    expect(bodyText).not.toContain("生成");
+  });
+
+  it("全局「立即同步」：hooks:plan/apply 均不带 --only，弹窗无备份承诺", async () => {
+    const { calls } = renderWithEngine(<RulesHooksPage />, nativeHooksRoutes());
+    await userEvent.click(screen.getByRole("tab", { name: "Hooks" }));
+
+    await userEvent.click(await screen.findByTestId("apply-hooks-button"));
+    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
+    expect(dialog).not.toHaveTextContent("备份");
+    expect(dialog).not.toHaveTextContent("生成");
+    const planCall = calls.find((call) => call.command === "hooks:plan");
+    expect(planCall).toBeDefined();
+    expect(planCall!.args).toEqual([]);
+
+    await userEvent.click(screen.getByTestId("plan-confirm-button"));
+    const applyCall = calls.find((call) => call.command === "hooks:apply");
+    expect(applyCall).toBeDefined();
+    expect(applyCall!.args).toEqual([]);
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+  });
+});
