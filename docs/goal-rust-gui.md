@@ -4,7 +4,8 @@
 
 - 核心已就绪：Rust/SQLite/Tauri 共用库与 `native-manager.db` 唯一事实源。
 - 已接线闭环：Agents、Skills、MCP、Rules、Hooks 五个资源域，以及只读 `system:audit`、`secrets:status`。
-- 仍未完成：设置页高级管理（Tools/Aliases/更新中心/快照）、远程 HTTP MCP、当前代码的安装包与 GUI E2E、跨平台签名/公证/发布。
+- 仍未完成：Aliases 原生闭环、`system:refresh-upstream`、远程 HTTP MCP、当前代码的安装包与 GUI E2E、跨平台签名/公证/发布。
+- 2026-09-12 高级管理入口裁决：Tools、快照与 `system:converge` 退役（清理未执行）；Aliases 与 `system:refresh-upstream` 保留实施。
 
 ## 目标
 
@@ -47,22 +48,29 @@ Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 必须支持新增、�
 
 | 事项 | 前置 | 产出 | 完成标准 |
 | --- | --- | --- | --- |
-| 高级管理入口裁决 | 无 | Tools/Aliases/更新中心/快照页面逐项实施或退役的产品裁决 | 每个页面有明确的实施或退役结论 |
-| tools 原生契约 | 裁决保留 Tools | `tools:status/plan/apply` 原生闭环 | 与既有域同级的测试与验收通过 |
-| aliases 原生契约 | 裁决保留 Aliases | `aliases:status/plan/apply` 原生闭环 | 与既有域同级的测试与验收通过 |
-| snapshots 原生契约 | 裁决保留快照 | `snapshots:list/restore` 原生闭环 | 与既有域同级的测试与验收通过 |
-| `system:refresh-upstream` | 参与域边界确定（裁决完成） | 上游版本检查与本地检查记录 | 不改配置，逐域探测结果可回读 |
-| `system:converge` | 所有参与域安全 plan/apply 就绪 | 收敛流水线 | 各参与域 plan → confirm → apply 串联可验收 |
+| Aliases 原生闭环 | 无（2026-09-12 裁决保留） | `aliases:status/plan/apply` 原生闭环 + `sources:get/set --key aliases` | 与既有域同级的测试与验收通过 |
+| Tools 退役清理 | 无（2026-09-12 裁决退役） | 删除 Tools 页、tools 命令面、种子文件与 `agent-tool/` 残留引用 | 引用面清零，测试与构建通过 |
+| 快照退役清理 | 无（2026-09-12 裁决退役） | 删除 Snapshots 页、snapshots 命令面与"自动备份"承诺文案 | 引用面清零，测试与构建通过 |
+| `system:converge` 退役 | 无（2026-09-12 裁决退役） | 删除命令面与 converge schema；Updates 页逐域 plan→apply 编排扶正为正式语义 | 引用面清零，测试与构建通过 |
+| `system:refresh-upstream` | 参与域已定为 agents/mcp/skills（2026-09-12 裁决） | 上游探测 + SQLite `upstream_probes` 缓存表；三域 status 回填 freshness；前端 plan/apply 补显式 `--action` | 不改配置，逐域探测结果可回读 |
 | 远程 HTTP MCP | 本地 stdio 闭环（已完成） | 远程 HTTP MCP target | 与本地 stdio 同级的安全与脱敏验收通过 |
 | 当前代码安装包与 GUI E2E | 上述参与域完成 | 当前代码构建的 macOS 安装包 | Rules/MCP/Hooks/Secrets/system:audit 的真实 GUI 业务 E2E 通过 |
 | 发布 | 当前安装包 E2E 通过 | 签名、公证、arm64、Linux、Windows、更新发布 | 各平台与渠道独立验收通过 |
 
 2026-09-09 Darwin x86_64 DMG 已通过只读挂载、仓库外复制、无 Python、路径脱敏和 5 秒启动验收，但该包早于当前 Rules/MCP/Hooks/Secrets 与只读 `system:audit` 实现，不能证明当前 Rules/MCP/Hooks/Secrets/system:audit GUI 业务闭环。签名、公证、arm64、Linux、Windows 和更新发布仍未验证。
 
+## 高级管理入口裁决记录（2026-09-12）
+
+- Tools：退役。真实条目仅剩 playwright-cli（两条 npm 命令），实施为全新大域且投入产比低；退役后由用户手动管理。
+- Aliases：保留实施，为恢复后第一个最小闭环。有 259 行 Rust 遗稿（`git show 4fe02f1^:engine-rs/src/aliases.rs`）作蓝本，语义只动 `~/.zshrc`/`~/.zprofile` 受管 marker 区块。
+- 更新中心：实施 `system:refresh-upstream`（参与域 agents/mcp/skills），退役 `system:converge`；Updates 页已有的逐域 plan→confirm→apply 编排扶正为正式语义，前端调用补显式 `--action`。
+- 快照：退役。新体系既定方向为 fail-closed 拒绝覆盖 + 操作内事务回滚，不恢复"写前持久备份"模型；同步清理"自动备份"承诺文案。
+- 探测缓存：落 SQLite 新表（易失状态入库与 operation_logs 先例一致），不引入第二份可写状态文件。
+
 ## 本次停止点与恢复入口
 
-- 停止点：本次文档同步推送后暂停编码工作。
-- 恢复入口：下次从「高级管理入口裁决」开始，按裁决结果选择最小闭环（tools、aliases 或 snapshots 之一）实施。
+- 停止点：高级管理入口裁决已完成，编码工作待实施标签页按任务书启动。
+- 恢复入口：按 Aliases 实施任务书交付第一个最小闭环；随后依次执行 Tools/快照/converge 退役清理与 `system:refresh-upstream` 实施。
 
 ## 验证
 
