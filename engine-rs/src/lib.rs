@@ -18,6 +18,7 @@ pub mod native_logs;
 pub mod native_mcp;
 pub(crate) mod native_rules;
 pub(crate) mod native_runs;
+pub(crate) mod native_secrets;
 pub mod native_skills;
 pub mod native_sources;
 pub(crate) mod native_system;

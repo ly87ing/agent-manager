@@ -1,4 +1,4 @@
-//! Rust 原生 system:audit：只读聚合已实现域（agents/skills/mcp/rules/hooks）
+//! Rust 原生 system:audit：只读聚合已实现域（agents/skills/mcp/rules/hooks/secrets）
 //! 的 status 元素，加原生 runtime/storage 状态，输出冻结的 AuditData 形状
 //! （status/version/sections/summary，对齐 app/src/lib/contract.ts）。
 //!
@@ -22,8 +22,8 @@ pub(crate) struct AuditOutcome {
     pub errors: Vec<Diagnostic>,
 }
 
-const WIRED_DOMAINS: &[&str] = &["agents", "skills", "mcp", "rules", "hooks"];
-const UNWIRED_DOMAINS: &[&str] = &["tools", "aliases", "secrets"];
+const WIRED_DOMAINS: &[&str] = &["agents", "skills", "mcp", "rules", "hooks", "secrets"];
+const UNWIRED_DOMAINS: &[&str] = &["tools", "aliases"];
 
 const MSG_OK: &str = "状态正常";
 const MSG_DISABLED: &str = "已禁用，未纳入管理";
@@ -85,6 +85,7 @@ fn domain_status(ctx: &Context, domain: &str, offline: bool) -> anyhow::Result<V
         "mcp" => crate::native_mcp::handle(ctx, &request),
         "rules" => crate::native_rules::handle(ctx, &request),
         "hooks" => crate::native_hooks::handle(ctx, &request),
+        "secrets" => crate::native_secrets::handle(ctx, &request),
         other => anyhow::bail!("未知审计子域 '{other}'"),
     }
 }

@@ -137,7 +137,7 @@ export function McpServerFormDialog({
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">密钥变量名（每行一个；只写变量名，值从密钥仓库取，永不显示）</label>
+            <label className="mb-1 block text-xs font-medium text-slate-500">密钥变量名（每行一个；只写变量名，值由 Agent Manager 进程环境提供，不在此保存或显示）</label>
             <textarea
               value={envText}
               onChange={(e) => setEnvText(e.target.value)}

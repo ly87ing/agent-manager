@@ -492,6 +492,9 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("hooks", "status" | "plan" | "apply") => crate::native_hooks::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("HOOK_ERROR", format!("{err:#}"))),
+        ("secrets", "status") => crate::native_secrets::handle(ctx, request)
+            .map(|data| (data, vec![]))
+            .map_err(|err| DispatchError::new("SECRET_ERROR", format!("{err:#}"))),
         ("sources", "get") => crate::native_sources::get(ctx, request),
         ("sources", "set") => crate::native_sources::set(ctx, request),
         ("policy", "get") => policy_get(ctx),

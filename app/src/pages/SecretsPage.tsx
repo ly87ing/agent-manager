@@ -1,9 +1,8 @@
 import { Check, EyeOff, X } from "lucide-react";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
-import { StateBadge } from "../components/StateBadge";
 import type { StatusData } from "../lib/contract";
-import type { SecretsMcpEnvObserved, SecretsRepoObserved } from "../lib/observed";
+import type { SecretsMcpEnvObserved } from "../lib/observed";
 import { useEngineQuery } from "../lib/queries";
 import { cn } from "../lib/utils";
 
@@ -14,9 +13,7 @@ export default function SecretsPage() {
   if (query.isError) return <PageError title="secrets:status 调用失败" error={query.error} />;
 
   const elements = query.data.data.elements;
-  const repo = elements.find((element) => element.id === "secrets:repo");
   const mcpEnv = elements.find((element) => element.id === "secrets:mcp-env");
-  const repoObserved = (repo?.observed ?? {}) as SecretsRepoObserved;
   const envObserved = (mcpEnv?.observed ?? {}) as SecretsMcpEnvObserved;
   const variables = envObserved.variables ?? [];
   const unresolved = envObserved.unresolved ?? variables.filter((item) => item.resolved === false).length;
@@ -24,48 +21,15 @@ export default function SecretsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="密钥状态" description="密钥仓库与 MCP 服务所需变量的配置状态（只显示是否已配置，永不显示值）。" />
+      <PageHeader title="密钥状态" description="MCP 服务所需变量的配置状态（只显示进程环境中是否已注入，永不显示值）。" />
       {query.data.errors.length > 0 && <ErrorPanel title="secrets:status 错误" errors={query.data.errors} />}
 
       <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-100 px-4 py-2.5 text-xs text-slate-600">
         <EyeOff className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
         <p>
-          本页只显示变量是否已配置，值永不显示。密钥仓库是独立的 git 仓库，修改请走该仓库本身的流程。
+          变量值由外部私有密钥仓库或用户环境注入进程环境；Agent Manager 只检查进程环境中是否存在对应变量，不使用、不持久化或显示变量值。
         </p>
       </div>
-
-      {repo && (
-        <section data-testid="secrets-repo-card" className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-slate-700">密钥仓库</h3>
-            <StateBadge state={repo.state} />
-          </div>
-          <dl className="mt-3 space-y-1.5 text-xs text-slate-600">
-            <div className="flex gap-2">
-              <dt className="text-slate-400">路径</dt>
-              <dd className="font-mono break-all">{repoObserved.path ?? "—"}</dd>
-            </div>
-            <div className="flex gap-2">
-              <dt className="text-slate-400">已就位</dt>
-              <dd>{repoObserved.exists ? "是" : "否"}</dd>
-            </div>
-            <div className="flex gap-2">
-              <dt className="text-slate-400">独立 git 仓库</dt>
-              <dd>{repoObserved.is_git ? "是" : "否"}</dd>
-            </div>
-            <div className="flex gap-2">
-              <dt className="text-slate-400">变量文件</dt>
-              <dd className="flex flex-wrap gap-1">
-                {(repoObserved.env_files ?? []).map((file) => (
-                  <code key={file} className="rounded bg-slate-100 px-1.5 py-0.5 font-mono">
-                    {file}
-                  </code>
-                ))}
-              </dd>
-            </div>
-          </dl>
-        </section>
-      )}
 
       {mcpEnv && (
         <section data-testid="secrets-env-matrix" className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">

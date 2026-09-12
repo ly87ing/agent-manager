@@ -1,0 +1,112 @@
+import { QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import SecretsPage from "../pages/SecretsPage";
+import { setEngineClient } from "../lib/engine";
+import { createQueryClient } from "../lib/queries";
+import { createMswEngineClient, startEngineServer, type EngineRoute } from "./engine-test-client";
+import { makeElement, makeEnvelope } from "./fixtures";
+import type { EngineElement } from "../lib/contract";
+
+const servers: Array<ReturnType<typeof startEngineServer>> = [];
+
+afterEach(() => {
+  while (servers.length > 0) {
+    servers.pop()?.close();
+  }
+});
+
+function renderSecrets(routes: Record<string, EngineRoute>) {
+  servers.push(startEngineServer(routes));
+  setEngineClient(createMswEngineClient());
+  const queryClient = createQueryClient({ retry: false });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <SecretsPage />
+    </QueryClientProvider>,
+  );
+}
+
+function mcpEnvElement(variables: unknown[], unresolved: number, state: EngineElement["state"]) {
+  return makeElement({
+    id: "secrets:mcp-env",
+    domain: "secrets",
+    spec: { sources: ["process env"] },
+    policy: { enabled: true },
+    observed: { variables, unresolved },
+    state,
+  });
+}
+
+describe("SecretsPage", () => {
+  it("无变量时显示空态且全部为已配置", async () => {
+    renderSecrets({
+      "secrets:status": makeEnvelope(
+        { domain: "secrets", elements: [mcpEnvElement([], 0, "managed-ok")] },
+        { command: "secrets.status" },
+      ),
+    });
+    await waitFor(() => expect(screen.getByTestId("secrets-env-matrix")).toBeInTheDocument());
+    expect(screen.getByText("没有需要配置的变量")).toBeInTheDocument();
+    expect(screen.getByTestId("env-unresolved-summary")).toHaveTextContent("全部 0 个变量已配置");
+  });
+
+  it("混合已配置/未配置时按行展示状态且不渲染值", async () => {
+    const sentinel = "SENTINEL-SECRET-VALUE-9c31";
+    renderSecrets({
+      "secrets:status": makeEnvelope(
+        {
+          domain: "secrets",
+          elements: [
+            mcpEnvElement(
+              [
+                { server: "grok-search", env_key: "GROK_API_KEY", placeholder: "GROK_API_KEY", resolved: true },
+                { server: "grok-search", env_key: "TAVILY_API_KEY", placeholder: "TAVILY_API_KEY", resolved: false },
+                // 哨兵：即使后端误带 value 字段，页面也绝不渲染
+                { server: "other", env_key: "OTHER_KEY", placeholder: "OTHER_KEY", resolved: false, value: sentinel },
+              ],
+              2,
+              "missing",
+            ),
+          ],
+        },
+        { command: "secrets.status" },
+      ),
+    });
+    await waitFor(() => expect(screen.getByTestId("secrets-env-matrix")).toBeInTheDocument());
+    expect(screen.getByTestId("env-unresolved-summary")).toHaveTextContent("2 个变量未配置");
+    expect(screen.getByText("GROK_API_KEY")).toBeInTheDocument();
+    expect(screen.getByText("TAVILY_API_KEY")).toBeInTheDocument();
+    expect(screen.getAllByText("已配置")).toHaveLength(1);
+    expect(screen.getAllByText("未配置")).toHaveLength(2);
+    expect(screen.queryByText(sentinel)).not.toBeInTheDocument();
+    expect(document.body.innerHTML).not.toContain(sentinel);
+  });
+
+  it("后端错误时展示错误面板", async () => {
+    renderSecrets({
+      "secrets:status": makeEnvelope(
+        { domain: "secrets", elements: [] },
+        {
+          command: "secrets.status",
+          ok: false,
+          errors: [{ code: "SECRET_ERROR", element: null, message: "MCP 环境变量定义存在非法内容（已脱敏），拒绝输出状态" }],
+        },
+      ),
+    });
+    await waitFor(() => expect(screen.getByText(/secrets:status 错误/)).toBeInTheDocument());
+    expect(screen.getByText(/已脱敏/)).toBeInTheDocument();
+  });
+
+  it("不再渲染密钥仓库卡片", async () => {
+    renderSecrets({
+      "secrets:status": makeEnvelope(
+        { domain: "secrets", elements: [mcpEnvElement([], 0, "managed-ok")] },
+        { command: "secrets.status" },
+      ),
+    });
+    await waitFor(() => expect(screen.getByTestId("secrets-env-matrix")).toBeInTheDocument());
+    expect(screen.queryByTestId("secrets-repo-card")).not.toBeInTheDocument();
+    expect(screen.queryByText(/git 仓库/)).not.toBeInTheDocument();
+  });
+});

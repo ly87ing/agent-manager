@@ -365,27 +365,19 @@ function demoEnvelopes(): Record<string, Envelope> {
       domain: "secrets",
       elements: [
         makeElement({
-          id: "secrets:repo",
-          domain: "secrets",
-          spec: { path: "secrets/", kind: "git-subrepo" },
-          policy: { enabled: true },
-          observed: { path: "/repo/secrets", exists: true, is_git: true, env_files: ["mcp.env", "terminal.env"] },
-          state: "managed-ok",
-        }),
-        makeElement({
           id: "secrets:mcp-env",
           domain: "secrets",
-          spec: { sources: [".env", "secrets/mcp.env", "process env"] },
+          spec: { sources: ["process env"] },
           policy: { enabled: true },
           observed: {
             variables: [
+              { server: "grok-search", env_key: "FIRECRAWL_API_KEY", placeholder: "FIRECRAWL_API_KEY", resolved: false },
               { server: "grok-search", env_key: "GROK_API_KEY", placeholder: "GROK_API_KEY", resolved: true },
               { server: "grok-search", env_key: "TAVILY_API_KEY", placeholder: "TAVILY_API_KEY", resolved: false },
-              { server: "grok-search", env_key: "FIRECRAWL_API_KEY", placeholder: "FIRECRAWL_API_KEY", resolved: false },
             ],
             unresolved: 2,
           },
-          state: "managed-ok",
+          state: "missing",
         }),
       ],
     },

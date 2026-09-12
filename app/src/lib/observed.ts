@@ -147,13 +147,6 @@ export interface RulesObserved {
 
 // ---------- secrets ----------
 
-export interface SecretsRepoObserved {
-  path?: string;
-  exists?: boolean;
-  is_git?: boolean;
-  env_files?: string[];
-}
-
 export interface SecretsEnvVariable {
   server?: string;
   env_key?: string;

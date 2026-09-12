@@ -60,12 +60,17 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
     ] {
         section(&env, name);
     }
-    for name in ["tools", "aliases", "secrets"] {
+    for name in ["tools", "aliases"] {
         let entries = section(&env, name);
         assert_eq!(entries.len(), 1, "{name}");
         assert_eq!(entries[0]["status"], "warning", "{name}");
         assert!(entries[0].get("category").is_none(), "{name} 不得计入分类");
     }
+    // secrets 已接线：fresh 上下文无已启用定义 → 单条 ok（managed-ok 映射）
+    let secrets = section(&env, "secrets");
+    assert_eq!(secrets.len(), 1);
+    assert_eq!(secrets[0]["status"], "ok");
+    assert_eq!(secrets[0]["name"], "secrets:mcp-env");
     let summary = &env.data["summary"];
     assert_eq!(summary["errors"], 0);
     let total_warnings: u64 = [
@@ -80,7 +85,7 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
             .count() as u64
     })
     .sum();
-    assert!(total_warnings >= 3, "三项未接线域至少带来 3 个 warning");
+    assert!(total_warnings >= 2, "两项未接线域至少带来 2 个 warning");
     assert_eq!(summary["warnings"].as_u64().unwrap(), total_warnings);
     assert_eq!(summary["warning_categories"]["optional_tools"], 0);
     assert_eq!(summary["warning_categories"]["official_gaps"], 0);
@@ -277,5 +282,39 @@ fn wired_domain_elements_map_into_sections() {
         .find(|d| d.code == "UNMATERIALIZED")
         .expect("应有 UNMATERIALIZED 分类诊断");
     assert!(unmat.message.contains(&unmaterialized.to_string()));
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+// secrets 已接线：真实未解析占位符 → secrets section 映射为
+// warning(unmaterialized)；tools/aliases 仍是固定未接线 warning。
+#[test]
+fn audit_maps_real_secrets_state_and_keeps_two_unwired_warnings() {
+    let (base, ctx) = temp_ctx("secrets-wired");
+    std::env::remove_var("AM_AUDIT_UNRESOLVED_VAR");
+    let mut policy = store::builtin_policy();
+    policy["mcp"]["definitions"] = serde_json::json!({
+        "demo-server": {"command": "d", "env": {"DEMO_KEY": "${AM_AUDIT_UNRESOLVED_VAR}"}},
+    });
+    {
+        let conn = store::open_write(&ctx).unwrap();
+        store::write_policy(&conn, &policy).unwrap();
+    }
+    let env = audit(&ctx, &[]);
+    assert!(env.ok, "{:?}", env.errors);
+    let secrets = section(&env, "secrets");
+    assert_eq!(secrets.len(), 1);
+    assert_eq!(secrets[0]["name"], "secrets:mcp-env");
+    assert_eq!(secrets[0]["status"], "warning");
+    assert_eq!(secrets[0]["category"], "unmaterialized");
+    for name in ["tools", "aliases"] {
+        let entries = section(&env, name);
+        assert_eq!(entries.len(), 1, "{name}");
+        assert_eq!(entries[0]["status"], "warning", "{name}");
+        assert_eq!(
+            entries[0]["message"], "Rust 原生域尚未接线，暂未纳入审计",
+            "{name} 仍是固定未接线 warning"
+        );
+        assert!(entries[0].get("category").is_none(), "{name} 不得计入分类");
+    }
     let _ = std::fs::remove_dir_all(&base);
 }
