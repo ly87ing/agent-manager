@@ -20,6 +20,7 @@ pub(crate) mod native_rules;
 pub(crate) mod native_runs;
 pub mod native_skills;
 pub mod native_sources;
+pub(crate) mod native_system;
 pub mod store;
 
 pub use envelope::{diagnostic, Diagnostic, Envelope, Lock, Mode, CONTRACT_ID};

@@ -817,6 +817,42 @@ mod tests {
     }
 
     #[test]
+    fn system_audit_bridge_injects_offline_and_raw_args_stay_strict() {
+        // raw validate_args 仍拒绝用户提供的 --offline（只能由 bridge 注入）
+        assert!(validate_args("system:audit", &["--offline".into()]).is_err());
+        assert!(validate_args("system:audit", &[]).is_ok());
+        // offline=true 时 bridge 注入 --offline 后原生 system:audit 成功且零写
+        let base = std::env::temp_dir().join(format!(
+            "am-tauri-audit-test-{}-{:x}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        let ctx = agent_manager_engine::Context {
+            data_dir: base.join("data"),
+            home_dir: base.join("home"),
+        };
+        let envelope = dispatch_native(
+            ctx,
+            "system:audit".into(),
+            vec![],
+            "audit-test".into(),
+            true,
+        )
+        .unwrap();
+        assert!(envelope.ok, "{:?}", envelope.errors);
+        assert!(envelope.mode.offline);
+        assert_eq!(envelope.data["status"], "warning");
+        assert!(envelope.data["sections"].as_object().unwrap().len() >= 8);
+        assert!(!base.join("data").exists(), "audit 不得创建数据目录");
+        assert!(!base.join("home").exists(), "audit 不得创建 home 目录");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
     fn sources_args_match_native_strictness_and_skip_offline_injection() {
         assert!(validate_args("sources:get", &["--key".into(), "rules".into()]).is_ok());
         assert!(validate_args(

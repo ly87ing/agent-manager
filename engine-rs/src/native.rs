@@ -193,6 +193,32 @@ fn record_diagnostic_log_if_needed(
 /// codes here (CLI maps errors to exit codes); status/plan never write the DB.
 pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     let start_time = std::time::Instant::now();
+    // system:audit 叶子特判：DispatchResult 无法表达“有效 data + errors”，
+    // 且 audit 永不取 apply lock、永不写库，直接在叶子路径组装 envelope。
+    if request.command.replace('.', ":") == "system:audit" {
+        let outcome = crate::native_system::run(ctx, request);
+        let sanitize = |items: Vec<Diagnostic>| -> Vec<Diagnostic> {
+            items
+                .into_iter()
+                .map(|mut d| {
+                    d.message = crate::native_logs::sanitize_diagnostic_message(&d.message);
+                    d
+                })
+                .collect()
+        };
+        let mut envelope = Envelope::new(
+            request.command.replacen(':', ".", 1),
+            mode_of(request),
+            lock_from_env(),
+            request.run_id.clone(),
+            None,
+            outcome.data,
+            sanitize(outcome.warnings),
+            sanitize(outcome.errors),
+        );
+        record_diagnostic_log_if_needed(ctx, request, &mut envelope, start_time);
+        return envelope;
+    }
     let is_agent_apply = request.command.replace('.', ":") == "agents:apply";
     let is_skill_apply = request.command.replace('.', ":") == "skills:apply";
     let is_mcp_apply = request.command.replace('.', ":") == "mcp:apply";
