@@ -15,8 +15,9 @@
 | MCP 原生域 | 已完成：Rust dispatcher 已接入本地 stdio `mcp:status` / `mcp:plan` / `mcp:apply`；定义与分配存 SQLite；支持 Claude JSON、Codex TOML、OpenCode JSON（需配置对应 Agent target）；逐助手 add/update/enable/disable/remove，库级 enable/disable/remove；status/plan/dry-run 零写；apply 具备锁、审计、CAS/回滚；env 在 SQLite definition/binding 中只持久化字面量 `${VAR}` 形式的环境变量引用；status、plan、诊断与操作日志不展示或保存解析后的真实值；真实 apply 执行时从进程环境解析，并按目标 codec 写入 Claude、Codex 或 OpenCode 的目标客户端配置，目标文件的明文由文件权限与客户端安全边界保护 |
 | Rules 原生域 | 已完成：Rust dispatcher 已接入 `rules:status` / `rules:plan` / `rules:apply`；固定 Codex/Claude 两目标；规则专用 `sources:get/set`（rules.shared/rules.codex/rules.claude）使用 revision CAS 只写 SQLite；status/plan/dry-run 零写；apply 具备排他锁、审计与 CAS/回滚，外部修改 fail-closed |
 | Hooks 原生域 | 已完成：Rust dispatcher 已接入 `hooks:status` / `hooks:plan` / `hooks:apply`；hooks 专用 `sources:get/set`（hooks.claude/hooks.codex）revision CAS 只写 SQLite；固定 Claude `~/.claude/settings.json` signature-set 合并与 Codex `~/.codex/hooks.json` whole-file 两目标，外部修改 fail-closed |
-| 设置页高级管理 | 未完成/待产品裁决：总览、Tools、Aliases、Secrets、更新中心和快照页面虽可达，但 `system:audit`、`system:refresh-upstream`、`system:converge`、`tools:status/plan/apply`、`aliases:status/plan/apply`、`secrets:status`、`snapshots:list/restore` 均未接入 Rust dispatcher；UI 入口不等同后端实现 |
-| 独立包真实业务 E2E | 未完成：2026-09-09 Darwin x86_64 DMG 已通过只读挂载、仓库外复制、无 Python、路径脱敏和从 `/` 隔离环境 5 秒启动验收；该包早于当前 Rules/MCP/Hooks 实现，不能证明当前 Rules/MCP/Hooks GUI 业务闭环 |
+| 系统审计 | 已完成：Rust dispatcher 已接入只读 `system:audit` 及其 Tauri offline 桥接；聚合 agents/skills/mcp/rules/hooks 与 runtime/storage 状态；tools/aliases/secrets 尚未接线，在审计结果中以固定 warning 呈现 |
+| 设置页高级管理 | 未完成/待产品裁决：Tools、Aliases、Secrets、更新中心和快照页面虽可达，但 `system:refresh-upstream`、`system:converge`、`tools:status/plan/apply`、`aliases:status/plan/apply`、`secrets:status`、`snapshots:list/restore` 均未接入 Rust dispatcher；UI 入口不等同后端实现 |
+| 独立包真实业务 E2E | 未完成：2026-09-09 Darwin x86_64 DMG 已通过只读挂载、仓库外复制、无 Python、路径脱敏和从 `/` 隔离环境 5 秒启动验收；该包早于当前 Rules/MCP/Hooks 与只读 `system:audit` 实现，不能证明当前 Rules/MCP/Hooks 与 `system:audit` GUI 业务闭环 |
 | 跨平台发布、签名、更新 | 未完成：签名、公证、arm64、Linux、Windows 和更新发布仍未验证 |
 
 缺库读取不建库，保存才初始化数据库；设置在 `app_settings` 表。policy 持久化来源为 `sqlite`，写入参数固定 `--layer local`。Claude Code 与 Codex 默认均为官方 `native` 命令，brew 仅按实际检测来源处理。
