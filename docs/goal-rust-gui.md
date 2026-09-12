@@ -1,5 +1,11 @@
 # Rust 原生 GUI 目标与边界
 
+## 当前结论
+
+- 核心已就绪：Rust/SQLite/Tauri 共用库与 `native-manager.db` 唯一事实源。
+- 已接线闭环：Agents、Skills、MCP、Rules、Hooks 五个资源域，以及只读 `system:audit`、`secrets:status`。
+- 仍未完成：设置页高级管理（Tools/Aliases/更新中心/快照）、远程 HTTP MCP、当前代码的安装包与 GUI E2E、跨平台签名/公证/发布。
+
 ## 目标
 
 让 CLI 与 Tauri 共享一个 Rust 原生库，并让 `native-manager.db` 成为本工具定义、分配和偏好的唯一事实源。设置保存在 `app_settings` 表，不引入可写 JSON settings 或 profile 层。
@@ -19,13 +25,45 @@
 - `sources:get/set` 原生接线：规则来源固定为 `rules.shared`、`rules.codex`、`rules.claude` 三项，保存使用 revision CAS 且只写 SQLite，不执行任何同步动作。
 - Rules 原生域接线：Rust dispatcher 提供 `rules:status`、`rules:plan`、`rules:apply`；固定目标为 `rules:codex_global`（`~/.codex/AGENTS.md`）与 `rules:claude_global`（`~/.claude/CLAUDE.md`），内容按共享与助手专用来源渲染；status/plan/dry-run 零写，真实 apply 使用全局排他锁、操作审计、文件字节 CAS 与事务/文件回滚，外部修改 fail-closed 拒绝覆盖，不承诺备份；不再有 rules/dist 构建链。Tauri bridge 参数白名单与 Rules 页面已对齐真实 schema，并支持逐目标 `--only`。
 - Hooks 原生域接线：Rust dispatcher 提供 `hooks:status`、`hooks:plan`、`hooks:apply`；hooks 专用 `sources:get/set`（hooks.claude/hooks.codex）使用 revision CAS 只写 SQLite；固定 Claude `~/.claude/settings.json` signature-set 合并（保留用户字段与非托管 hook）与 Codex `~/.codex/hooks.json` whole-file 两目标；status/plan/dry-run 零写，真实 apply 使用全局排他锁、Immediate 事务、精确旧字节 CAS、binding、审计与条件回滚，外部修改 fail-closed；前端两个目标与两个 JSON 编辑入口已接线。
+- 只读 `system:audit` 接线：聚合 agents/skills/mcp/rules/hooks/secrets 与 runtime/storage 状态，支持 Tauri offline 桥接注入；tools/aliases 尚未接线，在审计结果中以固定 warning 呈现。
+- 只读 `secrets:status` 接线：仅读取 SQLite 有效策略中已启用 MCP 定义的合法 `${VAR}` 环境变量占位符，只检查 Agent Manager 当前进程环境是否存在对应变量，输出变量名与布尔；不扫描、定位或克隆外部密钥仓库，不持久化、序列化或显示变量值；畸形定义固定脱敏失败。
 
 ## 契约要求
 
 Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 必须支持新增、编辑/更新、启用、禁用、删除。保存定义不得执行动作；UI 按引擎 actions 遵循 plan → confirm → apply；移除管理与卸载分开。
 
-## 尚未完成
+## 验收基线（2026-09-12）
 
-远程 HTTP MCP 尚未实现。`system:audit` 已接入 Rust dispatcher 及其 Tauri offline 桥接：只读聚合 agents/skills/mcp/rules/hooks 与 runtime/storage 状态；tools/aliases/secrets 尚未接线，在审计结果中以固定 warning 呈现。设置页高级管理可达 Tools、Aliases、Secrets、更新中心和快照页面；其 `system:refresh-upstream`、`system:converge`、`tools:status/plan/apply`、`aliases:status/plan/apply`、`secrets:status`、`snapshots:list/restore` 虽存在 Tauri 白名单或 React 页面入口，但 Rust dispatcher 尚未接线，不等同后端实现，待产品裁决实现或从新版 UI 退役。当前候选安装包尚未完成包含最新 Rules/MCP/Hooks 与 `system:audit` 的真实业务 E2E；macOS 独立安装包仍使用 `pnpm --dir app run build:macos` 与 `scripts/verify-macos-dmg.sh` 校验，2026-09-09 Darwin x86_64 DMG 已通过只读挂载、仓库外复制、无 Python、路径脱敏和 5 秒启动验收，但该包早于当前 Rules/MCP/Hooks 与只读 `system:audit` 实现，不能证明当前 Rules/MCP/Hooks 与 `system:audit` GUI 业务闭环。签名、公证、arm64、Linux、Windows 和更新发布仍未验证。
+绑定功能提交 `ec1b68fa2b7ffafc422c229054ec1e892ea3581e`。
 
-验证：`cargo fmt --manifest-path engine-rs/Cargo.toml -- --check`、两套 Cargo test/check，以及 `cd app && pnpm test:unit run && pnpm typecheck && pnpm build`。打包与独立包验收使用 `pnpm --dir app run build:macos` 与 `./scripts/verify-macos-dmg.sh <path-to-dmg>`。
+- 自动化：`engine-rs` 测试 205 项、`app/src-tauri` 测试 11 项、前端聚焦 Secrets/Dashboard/Settings 34 项，全部通过；`pnpm build` 通过（1943 modules）。
+- 真实隔离 CLI：fresh 上下文、非法参数反例、混合占位符矩阵、未解析变量的 system:audit 映射、损坏持久化 MCP 定义的固定脱敏失败均已实测；secrets:status 与 system:audit 不改变数据库及数据文件，变量值和错误 marker 不泄露。
+- 前端：Chrome 本地 mock 页面完成真实交互与几何像素检查。
+- 边界：以上不构成当前安装包的 Tauri 前后端真实业务 E2E。
+
+## 剩余路线图（未排期）
+
+各项均无排期、无指定负责人。
+
+| 事项 | 前置 | 产出 | 完成标准 |
+| --- | --- | --- | --- |
+| 高级管理入口裁决 | 无 | Tools/Aliases/更新中心/快照页面逐项实施或退役的产品裁决 | 每个页面有明确的实施或退役结论 |
+| tools 原生契约 | 裁决保留 Tools | `tools:status/plan/apply` 原生闭环 | 与既有域同级的测试与验收通过 |
+| aliases 原生契约 | 裁决保留 Aliases | `aliases:status/plan/apply` 原生闭环 | 与既有域同级的测试与验收通过 |
+| snapshots 原生契约 | 裁决保留快照 | `snapshots:list/restore` 原生闭环 | 与既有域同级的测试与验收通过 |
+| `system:refresh-upstream` | 参与域边界确定（裁决完成） | 上游版本检查与本地检查记录 | 不改配置，逐域探测结果可回读 |
+| `system:converge` | 所有参与域安全 plan/apply 就绪 | 收敛流水线 | 各参与域 plan → confirm → apply 串联可验收 |
+| 远程 HTTP MCP | 本地 stdio 闭环（已完成） | 远程 HTTP MCP target | 与本地 stdio 同级的安全与脱敏验收通过 |
+| 当前代码安装包与 GUI E2E | 上述参与域完成 | 当前代码构建的 macOS 安装包 | Rules/MCP/Hooks/Secrets/system:audit 的真实 GUI 业务 E2E 通过 |
+| 发布 | 当前安装包 E2E 通过 | 签名、公证、arm64、Linux、Windows、更新发布 | 各平台与渠道独立验收通过 |
+
+2026-09-09 Darwin x86_64 DMG 已通过只读挂载、仓库外复制、无 Python、路径脱敏和 5 秒启动验收，但该包早于当前 Rules/MCP/Hooks/Secrets 与只读 `system:audit` 实现，不能证明当前 Rules/MCP/Hooks/Secrets/system:audit GUI 业务闭环。签名、公证、arm64、Linux、Windows 和更新发布仍未验证。
+
+## 本次停止点与恢复入口
+
+- 停止点：本次文档同步推送后暂停编码工作。
+- 恢复入口：下次从「高级管理入口裁决」开始，按裁决结果选择最小闭环（tools、aliases 或 snapshots 之一）实施。
+
+## 验证
+
+`cargo fmt --manifest-path engine-rs/Cargo.toml -- --check`、两套 Cargo test/check，以及 `cd app && pnpm test:unit run && pnpm typecheck && pnpm build`。打包与独立包验收使用 `pnpm --dir app run build:macos` 与 `./scripts/verify-macos-dmg.sh <path-to-dmg>`。

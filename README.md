@@ -20,7 +20,7 @@ Rust dispatcher 已实现本地 stdio MCP 的 `mcp:status`、`mcp:plan` 和 `mcp
 
 远程 HTTP MCP 尚未实现。
 
-`system:audit` 已接入 Rust dispatcher 及其 Tauri offline 桥接：只读聚合 agents/skills/mcp/rules/hooks 与 runtime/storage 状态；tools/aliases/secrets 尚未接线，在审计结果中以固定 warning 呈现。设置页高级管理可达 Tools、Aliases、Secrets、更新中心和快照页面；其 `system:refresh-upstream`、`system:converge`、`tools:status/plan/apply`、`aliases:status/plan/apply`、`secrets:status`、`snapshots:list/restore` 虽存在 Tauri 白名单或 React 页面入口，但 Rust dispatcher 尚未接线，不等同后端实现，待产品裁决实现或从新版 UI 退役。
+`system:audit` 已接入 Rust dispatcher 及其 Tauri offline 桥接：只读聚合 agents/skills/mcp/rules/hooks/secrets 与 runtime/storage 状态；tools/aliases 尚未接线，在审计结果中以固定 warning 呈现。只读 `secrets:status` 已接入 Rust dispatcher：仅读取 SQLite 有效策略中已启用 MCP 定义的合法 `${VAR}` 环境变量占位符，只检查 Agent Manager 当前进程环境是否存在对应变量，输出变量名与布尔；不扫描、定位或克隆外部密钥仓库，不持久化、序列化或显示变量值；畸形定义固定脱敏失败。设置页高级管理可达 Tools、Aliases、更新中心和快照页面；其 `system:refresh-upstream`、`system:converge`、`tools:status/plan/apply`、`aliases:status/plan/apply`、`snapshots:list/restore` 虽存在 Tauri 白名单或 React 页面入口，但 Rust dispatcher 尚未接线，不等同后端实现，待产品裁决实现或从新版 UI 退役。
 
 ## 开发
 
@@ -36,7 +36,7 @@ make smoke
 macOS 打包与独立包验收（当前环境限定 Darwin x86_64，构建自动启用源码根目录与主目录路径脱敏重映射）：
 
 - 打包 app 与 dmg：`pnpm --dir app run build:macos`（产物位于 `app/src-tauri/target/release/bundle/dmg/`）
-- 独立包运行验收：`pnpm --dir app run verify:macos` 或 `./scripts/verify-macos-dmg.sh app/src-tauri/target/release/bundle/dmg/Agent\ Manager_0.1.0_x64.dmg`（只读挂载、隔离复制、元数据/架构/无 Python 依赖校验、源码路径脱敏校验、从 `/` 隔离目录 5 秒存活运行验收）。该 2026-09-09 Darwin x86_64 DMG 早于当前 Rules/MCP/Hooks 与只读 `system:audit` 实现，不能证明当前 Rules/MCP/Hooks 与 `system:audit` GUI 业务闭环；签名、公证、arm64、Linux、Windows 和更新发布仍未验证。
+- 独立包运行验收：`pnpm --dir app run verify:macos` 或 `./scripts/verify-macos-dmg.sh app/src-tauri/target/release/bundle/dmg/Agent\ Manager_0.1.0_x64.dmg`（只读挂载、隔离复制、元数据/架构/无 Python 依赖校验、源码路径脱敏校验、从 `/` 隔离目录 5 秒存活运行验收）。该 2026-09-09 Darwin x86_64 DMG 早于当前 Rules/MCP/Hooks/Secrets 与只读 `system:audit` 实现，不能证明当前 Rules/MCP/Hooks/Secrets/system:audit GUI 业务闭环；签名、公证、arm64、Linux、Windows 和更新发布仍未验证。
 
 ## 目录
 
