@@ -2,7 +2,7 @@
 
 当前 MCP 定义、库分配和启用偏好的事实源是本机 `native-manager.db`。设置位于 `app_settings` 表；不要把 JSON 文件当作 Agent Manager 的可写状态。
 
-Rust dispatcher 已实现本地 stdio MCP 的 `mcp:status`、`mcp:plan` 和 `mcp:apply`。定义与分配写入 SQLite；支持 Claude JSON、Codex TOML、OpenCode JSON，OpenCode 必须为对应 Agent 配置 `mcp_config` 目标。远程 HTTP MCP 尚未实现。
+Rust dispatcher 已实现本地 stdio 与远程 HTTP MCP 的 `mcp:status`、`mcp:plan` 和 `mcp:apply`。定义与分配写入 SQLite；支持 Claude JSON、Codex TOML、OpenCode JSON，OpenCode 必须为对应 Agent 配置 `mcp_config` 目标。远程定义含 `url`（必填；仅允许 `https://`，或本机回环 `http://localhost` / `http://127.0.0.1`）与可选 `headers`（值只允许 `${VAR}` 占位符，不超过 20 个），与 command/args/env/startup_timeout_sec 互斥；headers 在三 codec 全部以引用形式写入（Claude 字面量 `${VAR}` 由客户端原生展开、Codex `env_http_headers` 变量名映射、OpenCode `{env:VAR}` 插值），解析后明文不写入目标文件；受管标记统一为条目级 `_MANAGED_BY`（stdio 旧位置 env 内标记继续兼容）；OpenCode 远程条目固定 `"oauth": false`。
 
 逐 Agent MCP 支持 `add`、`update`、`enable`、`disable`、`remove`；库级支持 `enable`、`disable`、`remove`。移除管理定义不等于卸载外部软件；卸载必须是引擎单独返回并单独确认的高风险 action。
 

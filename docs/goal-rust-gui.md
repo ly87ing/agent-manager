@@ -5,7 +5,8 @@
 - 核心已就绪：Rust/SQLite/Tauri 共用库与 `native-manager.db` 唯一事实源。
 - 已接线闭环：Agents、Skills、MCP、Rules、Hooks、Aliases 六个资源域，以及只读 `system:audit`、`secrets:status`、`system:refresh-upstream`（探测宇宙 agents/mcp/skills，缓存落 SQLite `upstream_probes` 表，三域 status 回填 freshness，前端收敛调用已补显式 `--action`）。
 - 2026-09-12 高级管理入口裁决已执行完毕：Aliases 原生闭环落地（`b7f30db`）；Tools、快照与 `system:converge` 退役清理完成（`9080c1d`）。
-- 仍未完成：远程 HTTP MCP、当前代码的安装包与 GUI E2E、跨平台签名/公证/发布。
+- 远程 HTTP MCP 已落地（`b353aac`）：三客户端引用形式零明文落盘，与本地 stdio 同级安全语义。
+- 仍未完成：当前代码的安装包与 GUI E2E、跨平台签名/公证/发布。
 
 ## 目标
 
@@ -31,19 +32,20 @@
 - 只读 `secrets:status` 接线：仅读取 SQLite 有效策略中已启用 MCP 定义的合法 `${VAR}` 环境变量占位符，只检查 Agent Manager 当前进程环境是否存在对应变量，输出变量名与布尔；不扫描、定位或克隆外部密钥仓库，不持久化、序列化或显示变量值；畸形定义固定脱敏失败。
 - 2026-09-12 裁决退役已清理：Tools 域、快照（snapshots:list/restore）与 `system:converge` 的命令面、前端页面/类型/文案、契约 schema、种子文件与文档状态行全部清零；退役命令报错为 UNKNOWN_DOMAIN/UNKNOWN_VERB，六域 apply 输出不再携带 snapshot 字段，"自动备份"承诺文案改为 fail-closed 表述；`agent-tool/` 物理目录保留未动。
 - `system:refresh-upstream` 接线：探测宇宙为 enabled 的 npm 渠道 agents、MCP 的 npx 包与 uvx `git+repo@branch` 源、enabled 且有 url 的 skills 集合仓库；探测器（npm view / git ls-remote / git rev-parse / npx 缓存读取 / bin --version）不经 shell、参数数组执行、有界捕获、超时进程组终止（网络 ≤30s），单元素失败归 unknown+固定错误类别不拖垮整批；比较语义对齐旧版（semver 可比 → current/behind/ahead，hash 不可比 → 不同即 behind）；缓存落 SQLite `upstream_probes` 表（Immediate 事务逐元素 upsert，只存版本/commit 与错误类别），status 只读回填 freshness（缺表/缺行一律 unknown，status 零写零网络）；`--offline` 拒绝（OFFLINE_NETWORK_DENIED），`--only` 逐元素，不取 apply 锁；前端 Updates 页收敛调用已补显式 `--action`（agents→upgrade，mcp/skills→update）。
+- 远程 HTTP MCP 接线：远程定义 = `url`（仅 https 或本机回环 http，错误不回显 url）+ 可选 `headers`（值仅 `${VAR}` 占位符），与 stdio 字段互斥，`type` 由 codec 推导不持久化；三 codec 全部引用形式落盘零明文——Claude `type:"http"` 写字面量 `${VAR}`、Codex 写 `env_http_headers` 变量名映射、OpenCode `type:"remote"` 写 `{env:VAR}` 且固定 `oauth:false`；受管 marker 迁至条目级 `_MANAGED_BY`（stdio 旧位置兼容）；保存期 policy:set 跑完整定义校验；status/plan/审计对 headers 与 env 同级 `<literal>` 掩码，secrets:status 纳入 headers 并区分 `kind`；缺失变量同级 fail-closed。
 
 ## 契约要求
 
 Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 必须支持新增、编辑/更新、启用、禁用、删除。保存定义不得执行动作；UI 按引擎 actions 遵循 plan → confirm → apply；移除管理与卸载分开。
 
-## 验收基线（2026-09-12，第三次）
+## 验收基线（2026-09-12，第四次）
 
-绑定提交：Aliases 闭环 `b7f30db`、退役清理 `9080c1d`、refresh-upstream 见本节提交（推送后以实际 hash 为准）。
+绑定提交：Aliases 闭环 `b7f30db`、退役清理 `9080c1d`、refresh-upstream `7d9e83b`、远程 HTTP MCP `b353aac`。
 
-- 自动化：`engine-rs` 测试 232 项、`app/src-tauri` 测试 11 项、前端 223 项，全部通过；`pnpm typecheck` 与 `pnpm build` 通过；`cargo fmt --check` 通过。
-- 真实隔离 CLI：Aliases 十二项反例与退役命令 UNKNOWN_DOMAIN/UNKNOWN_VERB 实测同前；refresh-upstream 实测：fresh 环境 freshness 全 unknown 且 status 零写零建表、`--offline` 拒绝且不建库（仅写诊断日志）、shim 探测写 `upstream_probes` 缓存且不含凭据、skills 集合回填 `unknown + git-ls-remote + checked_at/cache_age_sec`、`--only` 过滤与未知元素 USAGE_ERROR、非法参数固定消息不回显取值。引擎测试以 PATH shim 覆盖全状态矩阵（current/behind/ahead/unknown 四类错误类别），全程无真实网络。
-- 前端：mock 测试全绿（含 Updates 页行内收敛 `--action upgrade` 与全部更新逐域编排断言）。
-- 边界：以上不构成当前安装包的 Tauri 前后端真实业务 E2E。
+- 自动化：`engine-rs` 测试 242 项、`app/src-tauri` 测试 11 项、前端 229 项，全部通过；`pnpm typecheck` 与 `pnpm build` 通过；`cargo fmt --check` 通过。
+- 真实隔离 CLI：Aliases 十二项反例、退役命令 UNKNOWN_DOMAIN/UNKNOWN_VERB、refresh-upstream shim 探测矩阵实测同前；远程 HTTP MCP 实测：保存期三层反例（http url / 字段混给 / headers 明文）USAGE_ERROR 且不回显正文、三 codec 零明文渲染（哨兵值 grep 为零）、缺失变量 fail-closed、删 marker 拒绝接管、条目内未受管字段 fail-closed、`_delete` 不误伤、secrets:status 含 `kind:"header"`。
+- 前端：mock 测试全绿（含 Updates 页行内收敛 `--action upgrade`、远程 MCP 表单与卡片掩码用例）。
+- 边界：以上不构成当前安装包的 Tauri 前后端真实业务 E2E；三真实客户端对条目级 marker 与引用展开的联调属安装包 E2E 项。
 
 ## 剩余路线图（未排期）
 
@@ -51,9 +53,8 @@ Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 必须支持新增、�
 
 | 事项 | 前置 | 产出 | 完成标准 |
 | --- | --- | --- | --- |
-| 远程 HTTP MCP | 本地 stdio 闭环（已完成） | 远程 HTTP MCP target | 与本地 stdio 同级的安全与脱敏验收通过 |
-| 当前代码安装包与 GUI E2E | 上述参与域完成 | 当前代码构建的 macOS 安装包 | Rules/MCP/Hooks/Aliases/Secrets/system:audit 的真实 GUI 业务 E2E 通过 |
-| 发布 | 当前安装包 E2E 通过 | 签名、公证、arm64、Linux、Windows、更新发布 | 各平台与渠道独立验收通过 |
+| 当前代码安装包与 GUI E2E | 参与域全部完成（已达） | 当前代码构建的 macOS 安装包 | Rules/MCP（stdio+远程 HTTP）/Hooks/Aliases/Secrets/system:audit 的真实 GUI 业务 E2E 通过 |
+| 发布 | 当前安装包 E2E 通过 | 签名、公证、arm64、Linux、Windows、更新发布 | 各平台与渠道独立验收通过（Release/打 tag 未授权，到达时报主审决定） |
 
 2026-09-09 Darwin x86_64 DMG 已通过只读挂载、仓库外复制、无 Python、路径脱敏和 5 秒启动验收，但该包早于当前 Rules/MCP/Hooks/Secrets 与只读 `system:audit` 实现，不能证明当前 Rules/MCP/Hooks/Secrets/system:audit GUI 业务闭环。签名、公证、arm64、Linux、Windows 和更新发布仍未验证。
 
@@ -68,8 +69,8 @@ Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 必须支持新增、�
 
 ## 本次停止点与恢复入口
 
-- 停止点：`system:refresh-upstream` 已实施并通过主审独立验收（随本节文档同步提交）；远程 HTTP MCP 待启动。
-- 恢复入口：远程 HTTP MCP，然后当前代码安装包与 GUI E2E，最后发布。
+- 停止点：远程 HTTP MCP 已实施并通过主审独立验收（`b353aac`）；当前代码安装包与 GUI E2E 待启动。
+- 恢复入口：构建当前代码的 macOS 安装包并完成 Rules/MCP（stdio+远程 HTTP）/Hooks/Aliases/Secrets/system:audit 真实 GUI 业务 E2E；发布项未授权，到达时报主审决定。
 
 ## 验证
 

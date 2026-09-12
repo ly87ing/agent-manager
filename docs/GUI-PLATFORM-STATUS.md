@@ -24,6 +24,6 @@
 
 缺库读取不建库，保存才初始化数据库；设置在 `app_settings` 表。policy 持久化来源为 `sqlite`，写入参数固定 `--layer local`。Claude Code 与 Codex 默认均为官方 `native` 命令，brew 仅按实际检测来源处理。
 
-MCP 仅支持本地 stdio；远程 HTTP MCP 尚未实现。OpenCode 使用 OpenCode JSON codec，必须为对应 Agent 配置 `mcp_config` 目标。
+MCP 支持本地 stdio 与远程 HTTP 两种传输（字段互斥：远程定义含 `url`，仅允许 `https://` 或本机回环 `http://localhost` / `http://127.0.0.1`，可选 `headers` 仅接受 `${VAR}` 占位符，以引用形式写入目标，明文不落盘）。OpenCode 使用 OpenCode JSON codec，必须为对应 Agent 配置 `mcp_config` 目标。
 
 验证入口：`cargo test --manifest-path engine-rs/Cargo.toml`、`cargo test --manifest-path app/src-tauri/Cargo.toml`，以及 `cd app && pnpm test:unit run && pnpm typecheck && pnpm build`。macOS 打包与独立包验收使用 `pnpm --dir app run build:macos` 与 `./scripts/verify-macos-dmg.sh <path-to-dmg>`。本机验收允许如实报告未签名状态，不代表 Apple 签名或公证通过，也不替代其他平台和未完成域的 E2E。

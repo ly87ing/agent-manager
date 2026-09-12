@@ -27,9 +27,9 @@ Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 的契约动作均要�
 
 ## MCP 原生域
 
-Rust dispatcher 已接入本地 stdio MCP 的 `mcp:status`、`mcp:plan` 和 `mcp:apply`。定义、库级开关和逐助手分配保存在 `native-manager.db` 的 SQLite 表中；codec 支持 Claude JSON、Codex TOML 和 OpenCode JSON，OpenCode 需要在对应 Agent definition 中配置 `mcp_config` 目标。
+Rust dispatcher 已接入本地 stdio 与远程 HTTP MCP 的 `mcp:status`、`mcp:plan` 和 `mcp:apply`。定义、库级开关和逐助手分配保存在 `native-manager.db` 的 SQLite 表中；codec 支持 Claude JSON、Codex TOML 和 OpenCode JSON，OpenCode 需要在对应 Agent definition 中配置 `mcp_config` 目标。远程定义含 `url`（仅 `https://` 或本机回环 http）与可选 `headers`（`${VAR}` 占位符引用），与 stdio 字段互斥。
 
-逐助手支持 `add`、`update`、`enable`、`disable`、`remove`；库级支持 `enable`、`disable`、`remove`。`status`、`plan` 和 `mcp:apply --dry-run` 零写；真实 `apply` 具备排他锁、操作审计、CAS 写入与回滚保护。MCP `env` 在 SQLite definition/binding 中只持久化字面量 `${VAR}` 形式的环境变量引用；status、plan、诊断与操作日志不展示或保存解析后的真实值；真实 apply 执行时从进程环境解析，并按目标 codec 写入 Claude、Codex 或 OpenCode 的目标客户端配置，目标文件的明文由文件权限与客户端安全边界保护。远程 HTTP MCP 尚未实现。
+逐助手支持 `add`、`update`、`enable`、`disable`、`remove`；库级支持 `enable`、`disable`、`remove`。`status`、`plan` 和 `mcp:apply --dry-run` 零写；真实 `apply` 具备排他锁、操作审计、CAS 写入与回滚保护。MCP `env` 在 SQLite definition/binding 中只持久化字面量 `${VAR}` 形式的环境变量引用；status、plan、诊断与操作日志不展示或保存解析后的真实值；真实 apply 执行时从进程环境解析，并按目标 codec 写入 Claude、Codex 或 OpenCode 的目标客户端配置，目标文件的明文由文件权限与客户端安全边界保护。远程 HTTP 与本地 stdio 同级：headers 只持久化 `${VAR}` 占位符并以引用形式写入目标，解析后明文不落盘。
 
 ## 默认渠道与状态
 
