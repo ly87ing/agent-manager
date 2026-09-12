@@ -10,7 +10,7 @@ Claude Code 与 Codex 的内置默认渠道都是官方 `native` 命令。brew �
 
 定义保存与执行动作分开：保存只写数据库；按钮只按引擎返回的 actions，遵循 plan → 用户确认 → apply。Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 都要求新增、编辑/更新、启用、禁用、删除；移除管理与卸载是不同动作。
 
-SQLite 核心、Tauri 桥、设置与 Policy 页面、主要资源页面布局、Agent 原生生命周期、Skills 原生域、MCP 原生域、Runs SQLite 操作记录、结构化诊断日志及 Python 清理已完成。Skills 内置集合只读默认，首次本地写入 `native-manager.db` 后本地优先；集合与 Skill×Agent 均支持更新、启停与移除，启用状态通过内容快照与安全软连接落地，status/plan 保持零写，真实 apply 具备进程锁与操作审计。两类日志协同运作：SQLite `operation_logs` 记录可审计任务历史，并在新增操作记录时清理过期记录；`data_dir/logs/agent-manager-YYYY-MM-DD.jsonl` 记录结构化诊断元数据（严格脱敏、Unix 0700/0600、只读零写、拒随软链接），并在诊断日志写入后及应用启动时清理过期文件。两类日志共用 `log_retention_days`（0 禁用自动清理）；执行中心支持 `runs:clear` 二次确认清空任务记录，设置页支持 `logs:clear` 二次确认清理诊断日志，两类手动清理互不影响。Rules/Hooks 原生 status/plan/apply 与 `sources:get/set` 尚未接线；当前候选安装包尚未完成真实业务 E2E。
+SQLite 核心、Tauri 桥、设置与 Policy 页面、主要资源页面布局、Agent 原生生命周期、Skills 原生域、MCP 原生域、Rules 原生域与规则来源、Runs SQLite 操作记录、结构化诊断日志及 Python 清理已完成。Skills 内置集合只读默认，首次本地写入 `native-manager.db` 后本地优先；集合与 Skill×Agent 均支持更新、启停与移除，启用状态通过内容快照与安全软连接落地，status/plan 保持零写，真实 apply 具备进程锁与操作审计。两类日志协同运作：SQLite `operation_logs` 记录可审计任务历史，并在新增操作记录时清理过期记录；`data_dir/logs/agent-manager-YYYY-MM-DD.jsonl` 记录结构化诊断元数据（严格脱敏、Unix 0700/0600、只读零写、拒随软链接），并在诊断日志写入后及应用启动时清理过期文件。两类日志共用 `log_retention_days`（0 禁用自动清理）；执行中心支持 `runs:clear` 二次确认清空任务记录，设置页支持 `logs:clear` 二次确认清理诊断日志，两类手动清理互不影响。Rules 原生 status/plan/apply 与规则专用 `sources:get/set` 已接线（固定 Codex/Claude 两目标，外部修改 fail-closed）；Hooks 原生 status/plan/apply 尚未接线；当前候选安装包尚未完成包含最新 Rules/MCP 的真实业务 E2E。
 
 ## MCP 原生域状态
 
@@ -18,7 +18,7 @@ Rust dispatcher 已实现本地 stdio MCP 的 `mcp:status`、`mcp:plan` 和 `mcp
 
 逐助手支持 `add`、`update`、`enable`、`disable`、`remove`；库级支持 `enable`、`disable`、`remove`。`status`、`plan` 和 `mcp:apply --dry-run` 零写；真实 `apply` 使用排他锁、操作审计、CAS 写入和回滚保护。MCP `env` 在 SQLite definition/binding 中只持久化字面量 `${VAR}` 形式的环境变量引用；status、plan、诊断与操作日志不展示或保存解析后的真实值；真实 apply 执行时从进程环境解析，并按目标 codec 写入 Claude、Codex 或 OpenCode 的目标客户端配置，目标文件的明文由文件权限与客户端安全边界保护。
 
-远程 HTTP MCP 尚未实现。Rules/Hooks 原生 `status/plan/apply` 与 `sources:get/set` 尚未接线。
+远程 HTTP MCP 尚未实现。Hooks 原生 `status/plan/apply` 尚未接线。
 
 设置页高级管理可达总览、Tools、Aliases、Secrets、更新中心和快照页面；其 `system:audit`、`system:refresh-upstream`、`system:converge`、`tools:status/plan/apply`、`aliases:status/plan/apply`、`secrets:status`、`snapshots:list/restore` 虽存在 Tauri 白名单或 React 页面入口，但 Rust dispatcher 尚未接线，不等同后端实现，待产品裁决实现或从新版 UI 退役。
 
@@ -36,7 +36,7 @@ make smoke
 macOS 打包与独立包验收（当前环境限定 Darwin x86_64，构建自动启用源码根目录与主目录路径脱敏重映射）：
 
 - 打包 app 与 dmg：`pnpm --dir app run build:macos`（产物位于 `app/src-tauri/target/release/bundle/dmg/`）
-- 独立包运行验收：`pnpm --dir app run verify:macos` 或 `./scripts/verify-macos-dmg.sh app/src-tauri/target/release/bundle/dmg/Agent\ Manager_0.1.0_x64.dmg`（只读挂载、隔离复制、元数据/架构/无 Python 依赖校验、源码路径脱敏校验、从 `/` 隔离目录 5 秒存活运行验收）。该 2026-09-09 Darwin x86_64 DMG 早于当前 MCP 实现，不能证明当前 MCP GUI 业务闭环；签名、公证、arm64、Linux、Windows 和更新发布仍未验证。
+- 独立包运行验收：`pnpm --dir app run verify:macos` 或 `./scripts/verify-macos-dmg.sh app/src-tauri/target/release/bundle/dmg/Agent\ Manager_0.1.0_x64.dmg`（只读挂载、隔离复制、元数据/架构/无 Python 依赖校验、源码路径脱敏校验、从 `/` 隔离目录 5 秒存活运行验收）。该 2026-09-09 Darwin x86_64 DMG 早于当前 Rules/MCP 实现，不能证明当前 Rules/MCP GUI 业务闭环；签名、公证、arm64、Linux、Windows 和更新发布仍未验证。
 
 ## 目录
 
