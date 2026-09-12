@@ -214,6 +214,37 @@ pub fn atomic_write_checked(
     Ok(())
 }
 
+/// 整文件原子 CAS 写入（crate 内复用，例如 Rules 渲染产物）：复用
+/// write_temp_and_replace 的临时文件 + rename 原子路径与既有安全校验
+/// （目标/祖先 symlink、目录、非普通文件一律拒绝），替换前精确比较
+/// 渲染阶段读出的旧字节；替换后重新读取，逐字节不等于本次 bytes 时
+/// 视为回读失败，走 safe_restore_bytes_cas —— 仅在当前仍是本次 bytes
+/// 时恢复旧字节，若外部再次修改则保留外部内容并报告回滚冲突。
+/// 新文件沿用现有 0600 与父目录创建/同步行为，现有文件保留既有 mode。
+pub(crate) fn atomic_write_bytes_checked(
+    path: &Path,
+    bytes: &[u8],
+    expected_old: Option<&[u8]>,
+) -> Result<()> {
+    write_temp_and_replace(path, bytes, ExpectedOld::Exact(expected_old), None)?;
+
+    let verify = (|| -> Result<()> {
+        let actual = read_existing_bytes(path)?;
+        if actual.as_deref() != Some(bytes) {
+            bail!("回读校验失败: 目标文件 {} 写入内容不一致", path.display());
+        }
+        Ok(())
+    })();
+
+    if let Err(exc) = verify {
+        if let Err(restore_err) = safe_restore_bytes_cas(path, bytes, expected_old) {
+            return Err(exc.context(format!("回滚恢复失败: {restore_err:#}")));
+        }
+        return Err(exc);
+    }
+    Ok(())
+}
+
 pub struct Mutation {
     pub path: PathBuf,
     pub old_bytes: Option<Vec<u8>>,
@@ -339,6 +370,114 @@ mod tests {
             "CAS 拒绝后必须清理临时文件"
         );
 
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn atomic_write_bytes_checked_creates_new_file_with_missing_parent() {
+        let root = test_root("cas-new-file");
+        let _ = std::fs::remove_dir_all(&root);
+        let path = root.join("nested/dir/new.bin");
+        assert!(!root.exists(), "父目录起始必须缺失");
+
+        atomic_write_bytes_checked(&path, b"fresh-bytes", None).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"fresh-bytes");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "新文件必须为 0600");
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn atomic_write_bytes_checked_replaces_with_correct_expected_old_and_keeps_mode() {
+        let root = test_root("cas-replace");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("existing.bin");
+        std::fs::write(&path, b"old-bytes").unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
+        }
+
+        atomic_write_bytes_checked(&path, b"new-bytes", Some(b"old-bytes")).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"new-bytes");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o640, "现有文件必须保留原 mode");
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn atomic_write_bytes_checked_rejects_stale_expected_old_and_leaves_no_temp() {
+        let root = test_root("cas-stale");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("stale.bin");
+        let external = b"external-current";
+        std::fs::write(&path, external).unwrap();
+
+        let result = atomic_write_bytes_checked(&path, b"attempt", Some(b"outdated"));
+        assert!(result.is_err(), "stale expected_old 必须拒绝覆盖");
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            external,
+            "外部字节必须原样保留"
+        );
+        assert!(
+            std::fs::read_dir(&root).unwrap().all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains(".tmp_")),
+            "拒绝后不得残留临时文件"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_bytes_checked_rejects_target_and_ancestor_symlinks() {
+        let root = test_root("cas-symlink");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("real")).unwrap();
+        let external_path = root.join("real/external.bin");
+        std::fs::write(&external_path, b"external-untouched").unwrap();
+
+        let link_path = root.join("link.bin");
+        std::os::unix::fs::symlink(&external_path, &link_path).unwrap();
+        let result = atomic_write_bytes_checked(&link_path, b"attempt", None);
+        assert!(result.is_err(), "目标为 symlink 必须拒绝");
+        assert_eq!(
+            std::fs::read(&external_path).unwrap(),
+            b"external-untouched",
+            "目标 symlink 拒绝后外部文件必须不变"
+        );
+
+        let ancestor_link = root.join("ancestor-link");
+        std::os::unix::fs::symlink(root.join("real"), &ancestor_link).unwrap();
+        let nested = ancestor_link.join("nested.bin");
+        let result = atomic_write_bytes_checked(&nested, b"attempt", None);
+        assert!(result.is_err(), "祖先含 symlink 必须拒绝");
+        assert!(
+            !external_path.exists()
+                || std::fs::read(&external_path).unwrap() == b"external-untouched",
+            "祖先 symlink 拒绝后外部文件必须不变"
+        );
+        assert!(
+            !root.join("real/nested.bin").exists(),
+            "拒绝后不得写出新文件"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

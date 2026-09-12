@@ -196,6 +196,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     let is_agent_apply = request.command.replace('.', ":") == "agents:apply";
     let is_skill_apply = request.command.replace('.', ":") == "skills:apply";
     let is_mcp_apply = request.command.replace('.', ":") == "mcp:apply";
+    let is_rule_apply = request.command.replace('.', ":") == "rules:apply";
     let (needs_lock, domain_label, diag_code) = if is_agent_apply {
         match crate::native_agents::preflight_apply(ctx, request) {
             Ok(real_apply) => (real_apply, "Agent", "AGENT_ERROR"),
@@ -263,6 +264,31 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
                     vec![],
                     vec![diagnostic(
                         "MCP_ERROR",
+                        None,
+                        crate::native_logs::sanitize_diagnostic_message(&format!("{err:#}")),
+                    )],
+                );
+                record_diagnostic_log_if_needed(ctx, request, &mut env, start_time);
+                return env;
+            }
+        }
+    } else if is_rule_apply {
+        match crate::native_rules::preflight_apply(ctx, request) {
+            Ok(real_apply) => (real_apply, "Rules", "RULE_ERROR"),
+            Err(err) => {
+                let mut env = Envelope::new(
+                    request.command.replacen(':', ".", 1),
+                    mode_of(request),
+                    Lock {
+                        held: false,
+                        pid: None,
+                    },
+                    request.run_id.clone(),
+                    None,
+                    Value::Object(Map::new()),
+                    vec![],
+                    vec![diagnostic(
+                        "RULE_ERROR",
                         None,
                         crate::native_logs::sanitize_diagnostic_message(&format!("{err:#}")),
                     )],
@@ -408,6 +434,9 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("mcp", "status" | "plan" | "apply") => crate::native_mcp::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("MCP_ERROR", format!("{err:#}"))),
+        ("rules", "status" | "plan" | "apply") => crate::native_rules::handle(ctx, request)
+            .map(|data| (data, vec![]))
+            .map_err(|err| DispatchError::new("RULE_ERROR", format!("{err:#}"))),
         ("sources", "get") => crate::native_sources::get(ctx, request),
         ("sources", "set") => crate::native_sources::set(ctx, request),
         ("policy", "get") => policy_get(ctx),

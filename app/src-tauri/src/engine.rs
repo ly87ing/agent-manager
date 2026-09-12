@@ -250,9 +250,14 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
 
 pub fn validate_args(command: &str, args: &[String]) -> Result<(), EngineError> {
     let specs = allowed_arg_specs(command);
+    let (domain, _) = command.split_once(':').unwrap_or(("", ""));
+    let is_rules = domain == "rules";
     // sources 与 native 严格参数保持一致：拒绝重复 flag。
     let reject_duplicates = matches!(command, "sources:get" | "sources:set");
     let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    // Rules 严格契约：--only 的 flag 可重复但值不可重复；--dry-run 不可重复。
+    let mut rules_only_seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut rules_dry_run_seen = false;
     let mut index = 0;
     while index < args.len() {
         let arg = &args[index];
@@ -268,6 +273,15 @@ pub fn validate_args(command: &str, args: &[String]) -> Result<(), EngineError> 
                 format!("命令 '{command}' 重复提供参数 '{arg}'"),
             ));
         }
+        if is_rules && arg == "--dry-run" {
+            if rules_dry_run_seen {
+                return Err(EngineError::new(
+                    "invalid_args",
+                    format!("命令 '{command}' 重复提供参数 '--dry-run'"),
+                ));
+            }
+            rules_dry_run_seen = true;
+        }
         if *kind != ArgValueKind::Flag {
             index += 1;
             let Some(value) = args.get(index) else {
@@ -277,6 +291,22 @@ pub fn validate_args(command: &str, args: &[String]) -> Result<(), EngineError> 
                 ));
             };
             validate_arg_value(*kind, value)?;
+            if is_rules && arg == "--only" {
+                if value != "rules:codex_global" && value != "rules:claude_global" {
+                    return Err(EngineError::new(
+                        "invalid_args",
+                        format!(
+                            "非法 rules 目标 '{value}'（仅 rules:codex_global|rules:claude_global）"
+                        ),
+                    ));
+                }
+                if !rules_only_seen.insert(value.as_str()) {
+                    return Err(EngineError::new(
+                        "invalid_args",
+                        format!("命令 '{command}' 重复提供 --only 目标 '{value}'"),
+                    ));
+                }
+            }
         }
         index += 1;
     }
@@ -665,6 +695,78 @@ mod tests {
             bad_action_err.message
         );
         assert!(!bad_action_err.message.contains("skills"));
+
+        // Rules 严格契约：无 only / 单 only / 两个不同 only（顺序不限）均通过。
+        for (command, args) in [
+            ("rules:plan", vec![]),
+            ("rules:apply", vec![]),
+            (
+                "rules:plan",
+                vec!["--only".into(), "rules:codex_global".into()],
+            ),
+            (
+                "rules:apply",
+                vec!["--only".into(), "rules:claude_global".into()],
+            ),
+            (
+                "rules:plan",
+                vec![
+                    "--only".into(),
+                    "rules:claude_global".into(),
+                    "--only".into(),
+                    "rules:codex_global".into(),
+                ],
+            ),
+            (
+                "rules:apply",
+                vec![
+                    "--only".into(),
+                    "rules:codex_global".into(),
+                    "--only".into(),
+                    "rules:claude_global".into(),
+                    "--dry-run".into(),
+                ],
+            ),
+        ] {
+            assert!(
+                validate_args(command, &args).is_ok(),
+                "{command} {args:?} should pass"
+            );
+        }
+
+        // Rules 拒绝：status 任意 raw arg（含 --offline，只能由 bridge 注入）、
+        // 重复 only、未知/别名 target、缺值、plan --dry-run、apply 重复 --dry-run。
+        for (command, args) in [
+            ("rules:status", vec!["--offline".into()]),
+            (
+                "rules:status",
+                vec!["--only".into(), "rules:codex_global".into()],
+            ),
+            ("rules:status", vec!["--dry-run".into()]),
+            ("rules:status", vec!["positional".into()]),
+            ("rules:plan", vec!["--offline".into()]),
+            ("rules:apply", vec!["--offline".into()]),
+            (
+                "rules:plan",
+                vec![
+                    "--only".into(),
+                    "rules:codex_global".into(),
+                    "--only".into(),
+                    "rules:codex_global".into(),
+                ],
+            ),
+            ("rules:plan", vec!["--only".into(), "rules:unknown".into()]),
+            ("rules:plan", vec!["--only".into(), "rules:codex".into()]),
+            ("rules:plan", vec!["--only".into(), "codex".into()]),
+            ("rules:plan", vec!["--only".into()]),
+            ("rules:plan", vec!["--dry-run".into()]),
+            ("rules:apply", vec!["--dry-run".into(), "--dry-run".into()]),
+        ] {
+            assert!(
+                validate_args(command, &args).is_err(),
+                "{command} {args:?} should fail"
+            );
+        }
     }
 
     #[test]
@@ -791,6 +893,53 @@ mod tests {
         assert!(!env.mode.offline, "sources 不注入 --offline");
         assert_eq!(env.data["sources"].as_array().unwrap().len(), 3);
         assert!(!root.join("data").exists(), "sources:get 零写");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rules_status_and_plan_inject_offline_via_bridge() {
+        // raw --offline 仍被 validate_args 拒绝，只能由 bridge 注入。
+        assert!(validate_args("rules:status", &["--offline".into()]).is_err());
+        assert!(validate_args("rules:plan", &["--offline".into()]).is_err());
+
+        let root = std::env::temp_dir().join(format!(
+            "am-rules-bridge-{}-{:x}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let c = || agent_manager_engine::Context {
+            data_dir: root.join("data"),
+            home_dir: root.join("home"),
+        };
+        let env = dispatch_native(
+            c(),
+            "rules:status".into(),
+            vec![],
+            "rules-bridge".into(),
+            true,
+        )
+        .unwrap();
+        assert!(env.ok, "{:?}", env.errors);
+        assert!(env.mode.offline, "bridge 必须注入 --offline");
+        assert_eq!(env.data["elements"].as_array().unwrap().len(), 2);
+        assert!(!root.join("data").exists(), "rules:status 零写");
+        assert!(!root.join("home").exists(), "rules:status 零写");
+
+        let env = dispatch_native(
+            c(),
+            "rules:plan".into(),
+            vec![],
+            "rules-bridge".into(),
+            true,
+        )
+        .unwrap();
+        assert!(env.ok, "{:?}", env.errors);
+        assert!(env.mode.offline);
+        assert_eq!(env.data["actions"].as_array().unwrap().len(), 2);
+        assert!(!root.join("data").exists(), "rules:plan 零写");
         let _ = std::fs::remove_dir_all(root);
     }
 
