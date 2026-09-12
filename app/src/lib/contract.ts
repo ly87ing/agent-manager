@@ -203,7 +203,7 @@ export interface RefreshUpstreamData {
   summary: RefreshUpstreamSummary;
 }
 
-// ---------- <domain>:apply / system:converge（apply-result / converge schema） ----------
+// ---------- <domain>:apply（apply-result schema） ----------
 
 export interface ApplyStep {
   name: string;
@@ -211,26 +211,10 @@ export interface ApplyStep {
   exit_code: number;
 }
 
-export interface SnapshotEcho {
-  run_id: string;
-  path: string;
-  file_count: number;
-  link_count: number;
-}
-
 export interface ApplyResultData {
   domain: string;
   dry_run: boolean;
   steps: ApplyStep[];
-  snapshot: SnapshotEcho | null;
-  skipped: string[];
-}
-
-export interface ConvergeData {
-  pipeline: "update";
-  dry_run: boolean;
-  steps: ApplyStep[];
-  snapshot: SnapshotEcho | null;
   skipped: string[];
 }
 
@@ -267,31 +251,6 @@ export interface RunsClearData {
 export interface LogsClearData {
   domain: "logs";
   deleted: number;
-}
-
-// ---------- snapshots:list / snapshots:restore ----------
-
-export interface SnapshotEntry {
-  run_id: string;
-  path: string;
-  created_at: string | null;
-  command: string | null;
-  file_count: number;
-  link_count: number;
-}
-
-export interface RestoreResultData {
-  restored_run: string;
-  files_restored: number;
-  files_deleted: number;
-  links_restored: number;
-  skipped: string[];
-  resnapshot_run_id: string;
-}
-
-export interface SnapshotsData {
-  snapshots: SnapshotEntry[] | null;
-  restore: RestoreResultData | null;
 }
 
 // ---------- policy:get / policy:set ----------

@@ -12,7 +12,7 @@ export type PlanCommandSpec = string | { command: string; args?: string[] };
 export interface OpenPreviewOptions {
   title: string;
   subtitle?: string;
-  /** 取这些域的 plan 做预览（converge 时传多个；可带参数如 { command: "mcp:plan", args: ["--only", "mcp:demo"] }）。 */
+  /** 取这些域的 plan 做预览（多域聚合时传多个；可带参数如 { command: "mcp:plan", args: ["--only", "mcp:demo"] }）。 */
   planCommands: PlanCommandSpec[];
   /** 只保留该元素的动作（仅在未通过 args 传 --only 时作为客户端回退）。 */
   filterElement?: string;

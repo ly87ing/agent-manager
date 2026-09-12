@@ -24,7 +24,6 @@ pub fn apply(ctx: &Context, req: &Request) -> Result<Value> {
             "domain": "mcp",
             "dry_run": true,
             "steps": [],
-            "snapshot": Value::Null,
             "skipped": [only]
         }));
     }
@@ -294,7 +293,6 @@ pub fn apply(ctx: &Context, req: &Request) -> Result<Value> {
             "ok": true,
             "exit_code": 0
         }],
-        "snapshot": Value::Null,
         "skipped": []
     }))
 }

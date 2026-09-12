@@ -42,7 +42,7 @@ fn section<'a>(env: &'a agent_manager_engine::Envelope, name: &str) -> &'a [Valu
         .unwrap_or_else(|| panic!("section '{name}' 必须存在且为数组: {}", env.data))
 }
 
-// A. fresh 隔离 Context：结构完整、tools 未接线域带来 warning、零写。
+// A. fresh 隔离 Context：结构完整、aliases 未生成带来 warning、零写。
 #[test]
 fn fresh_context_audit_is_complete_warning_and_zero_write() {
     let (base, ctx) = temp_ctx("fresh");
@@ -55,16 +55,16 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
     assert_eq!(env.data["status"], "warning");
     assert_eq!(env.data["version"], Value::Null);
     for name in [
-        "agents", "skills", "mcp", "rules", "hooks", "tools", "aliases", "secrets", "runtime",
-        "storage",
+        "agents", "skills", "mcp", "rules", "hooks", "aliases", "secrets", "runtime", "storage",
     ] {
         section(&env, name);
     }
-    // tools 仍是固定未接线 warning（单条、无 category）
-    let tools = section(&env, "tools");
-    assert_eq!(tools.len(), 1);
-    assert_eq!(tools[0]["status"], "warning");
-    assert!(tools[0].get("category").is_none());
+    // tools 域已退役：不再出现在审计 sections 中
+    assert!(
+        env.data["sections"].get("tools").is_none(),
+        "已退役 tools 域不得出现在审计结果: {}",
+        env.data
+    );
     // aliases 已接线：fresh 上下文两目标均 not-materialized → warning(unmaterialized)
     let aliases = section(&env, "aliases");
     assert_eq!(aliases.len(), 2);
@@ -81,8 +81,7 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
     let summary = &env.data["summary"];
     assert_eq!(summary["errors"], 0);
     let total_warnings: u64 = [
-        "agents", "skills", "mcp", "rules", "hooks", "tools", "aliases", "secrets", "runtime",
-        "storage",
+        "agents", "skills", "mcp", "rules", "hooks", "aliases", "secrets", "runtime", "storage",
     ]
     .iter()
     .map(|name| {
@@ -94,14 +93,13 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
     .sum();
     assert!(
         total_warnings >= 3,
-        "未接线 tools + 两 aliases 目标至少带来 3 个 warning"
+        "aliases 两目标与 agents/rules 未生成目标至少带来 3 个 warning"
     );
     assert_eq!(summary["warnings"].as_u64().unwrap(), total_warnings);
     assert_eq!(summary["warning_categories"]["optional_tools"], 0);
     assert_eq!(summary["warning_categories"]["official_gaps"], 0);
     let categorized: u64 = [
-        "agents", "skills", "mcp", "rules", "hooks", "tools", "aliases", "secrets", "runtime",
-        "storage",
+        "agents", "skills", "mcp", "rules", "hooks", "aliases", "secrets", "runtime", "storage",
     ]
     .iter()
     .map(|name| {
@@ -273,8 +271,7 @@ fn wired_domain_elements_map_into_sections() {
         .unwrap();
     assert!(unmaterialized >= agents.len() as u64);
     let expected: u64 = [
-        "agents", "skills", "mcp", "rules", "hooks", "tools", "aliases", "secrets", "runtime",
-        "storage",
+        "agents", "skills", "mcp", "rules", "hooks", "aliases", "secrets", "runtime", "storage",
     ]
     .iter()
     .map(|name| {
@@ -296,10 +293,10 @@ fn wired_domain_elements_map_into_sections() {
 }
 
 // secrets 已接线：真实未解析占位符 → secrets section 映射为
-// warning(unmaterialized)；tools 仍是固定未接线 warning；aliases 已接线，
-// fresh 上下文两目标 not-materialized → warning(unmaterialized)。
+// warning(unmaterialized)；aliases 已接线，fresh 上下文两目标
+// not-materialized → warning(unmaterialized)。
 #[test]
-fn audit_maps_real_secrets_state_and_keeps_one_unwired_warning() {
+fn audit_maps_real_secrets_state() {
     let (base, ctx) = temp_ctx("secrets-wired");
     std::env::remove_var("AM_AUDIT_UNRESOLVED_VAR");
     let mut policy = store::builtin_policy();
@@ -317,13 +314,10 @@ fn audit_maps_real_secrets_state_and_keeps_one_unwired_warning() {
     assert_eq!(secrets[0]["name"], "secrets:mcp-env");
     assert_eq!(secrets[0]["status"], "warning");
     assert_eq!(secrets[0]["category"], "unmaterialized");
-    let tools = section(&env, "tools");
-    assert_eq!(tools.len(), 1);
-    assert_eq!(tools[0]["status"], "warning");
-    assert_eq!(
-        tools[0]["message"], "Rust 原生域尚未接线，暂未纳入审计",
-        "tools 仍是固定未接线 warning"
+    assert!(
+        env.data["sections"].get("tools").is_none(),
+        "已退役 tools 域不得出现在审计结果: {}",
+        env.data
     );
-    assert!(tools[0].get("category").is_none(), "tools 不得计入分类");
     let _ = std::fs::remove_dir_all(&base);
 }

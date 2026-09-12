@@ -22,11 +22,11 @@
       "additionalProperties": false,
       "properties": {
         "id": {
-          "description": "Element id, e.g. 'agents:claude-code', 'mcp:grok-search', 'skill:<collection>/<skill-name>', 'rules:claude_global', 'tools:playwright-cli'.",
+          "description": "Element id, e.g. 'agents:claude-code', 'mcp:grok-search', 'skill:<collection>/<skill-name>', 'rules:claude_global'.",
           "type": "string"
         },
         "domain": {
-          "description": "Owning domain, e.g. 'agents', 'mcp', 'skills', 'rules', 'hooks', 'tools', 'aliases' or 'secrets'.",
+          "description": "Owning domain, e.g. 'agents', 'mcp', 'skills', 'rules', 'hooks', 'aliases' or 'secrets'.",
           "type": "string"
         },
         "spec": {

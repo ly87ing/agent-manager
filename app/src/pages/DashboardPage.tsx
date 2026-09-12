@@ -22,7 +22,6 @@ import { cn, formatCheckedAt } from "../lib/utils";
 /** freshness 聚合统计的域集合（提案 §4.1）。 */
 const FRESHNESS_DOMAINS = [
   { key: "agents", label: "Agents" },
-  { key: "tools", label: "工具" },
   { key: "mcp", label: "MCP" },
   { key: "skills", label: "Skills" },
 ] as const;
@@ -33,7 +32,6 @@ const SECTION_LABELS: Record<string, string> = {
   runtime: "运行时",
   storage: "存储",
   agents: "Agents",
-  tools: "工具",
   mcp: "MCP",
   skills: "Skills",
   rules: "Rules",

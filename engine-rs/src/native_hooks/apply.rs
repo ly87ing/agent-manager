@@ -58,7 +58,6 @@ fn result_json(dry_run: bool, steps: Vec<Value>, skipped: Vec<String>) -> Value 
         "domain": "hooks",
         "dry_run": dry_run,
         "steps": steps,
-        "snapshot": Value::Null,
         "skipped": skipped,
     })
 }

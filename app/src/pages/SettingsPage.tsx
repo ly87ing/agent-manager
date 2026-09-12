@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
-  DatabaseBackup,
   KeyRound,
   LayoutDashboard,
   Link2,
@@ -9,7 +8,6 @@ import {
   Save,
   SlidersHorizontal,
   Trash2,
-  Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
@@ -24,7 +22,6 @@ import DomainApplyPage from "./DomainApplyPage";
 import SecretsPage from "./SecretsPage";
 import UpdatesPage from "./UpdatesPage";
 import PolicyPage from "./PolicyPage";
-import SnapshotsPage from "./SnapshotsPage";
 
 interface AvailableUpdate {
   version: string;
@@ -40,12 +37,6 @@ const ADVANCED_ENTRIES = [
     title: "总览与诊断",
     description: "系统总览、运行状态与环境诊断。",
     icon: LayoutDashboard,
-  },
-  {
-    key: "tools",
-    title: "全局工具",
-    description: "全局命令行工具的安装与启停管理。",
-    icon: Wrench,
   },
   {
     key: "aliases",
@@ -70,12 +61,6 @@ const ADVANCED_ENTRIES = [
     title: "个性化配置",
     description: "SQLite 本机配置原文查看与编辑。",
     icon: SlidersHorizontal,
-  },
-  {
-    key: "snapshots",
-    title: "备份与恢复",
-    description: "系统状态备份记录与版本恢复。",
-    icon: DatabaseBackup,
   },
 ];
 
@@ -276,16 +261,12 @@ export default function SettingsPage() {
           <span className="text-xs text-slate-400">/ 高级管理 / {currentEntry?.title}</span>
         </div>
         {activeAdvanced === "dashboard" && <DashboardPage />}
-        {activeAdvanced === "tools" && (
-          <DomainApplyPage domain="tools" title="Tools" description="全局命令行工具的安装状态（安装/卸载会先预览并二次确认）。" enableToggles />
-        )}
         {activeAdvanced === "aliases" && (
           <DomainApplyPage domain="aliases" title="Aliases" description="终端快捷命令（alias）的同步状态，只改对应配置区块、不动其它内容。" />
         )}
         {activeAdvanced === "secrets" && <SecretsPage />}
         {activeAdvanced === "updates" && <UpdatesPage />}
         {activeAdvanced === "policy" && <PolicyPage />}
-        {activeAdvanced === "snapshots" && <SnapshotsPage />}
       </div>
     );
   }
@@ -377,7 +358,7 @@ export default function SettingsPage() {
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
         <div>
           <h2 className="text-sm font-semibold text-slate-800">高级管理</h2>
-          <p className="mt-1 text-xs text-slate-500">保留的系统诊断、环境工具与同步备份管理入口。</p>
+          <p className="mt-1 text-xs text-slate-500">保留的系统诊断、快捷命令、密钥与更新管理入口。</p>
         </div>
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {ADVANCED_ENTRIES.map((entry) => {

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
-import { makeAuditData, makeEnvelope, makeMode, makePlanAction, makePolicyData } from "./fixtures";
+import { makeAuditData, makeEnvelope, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 
 function Harness({
@@ -11,7 +11,7 @@ function Harness({
   complete,
   definition,
 }: {
-  domain: "agents" | "tools" | "mcp" | "skills";
+  domain: "agents" | "mcp" | "skills";
   isNew?: boolean;
   complete?: boolean;
   definition?: Record<string, unknown>;
@@ -232,30 +232,5 @@ describe("useDefinitionOps 保存语义", () => {
 
     // 零写入 policy:set，绝对不能把脱敏占位符存回 DB
     expect(calls.some((c) => c.command === "policy:set")).toBe(false);
-  });
-
-  it("tools 域：新增定义也带 _replace 整条替换语义", async () => {
-    const { calls } = renderWithEngine(<Harness domain="tools" />, {
-      "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode({ offline: false }) }),
-      "policy:set": policySetRoute,
-      "tools:plan": makeEnvelope(
-        {
-          domain: "tools",
-          actions: [makePlanAction({ op: "run-cmd", element: "tools:demo", target: null, risk: "network", cmd: "install.sh" })],
-          summary: { read: 0, "write-local": 0, "exec-local": 0, network: 1, "install-remove": 0 },
-        },
-        { command: "tools.plan" },
-      ),
-    });
-
-    await userEvent.click(screen.getByRole("button", { name: "保存" }));
-
-    await waitFor(() => {
-      const policySets = calls.filter((c) => c.command === "policy:set");
-      expect(policySets.some((c) => c.args[3] === "tools.demo.enabled" && c.args[5] === "true")).toBe(true);
-    });
-    const definitionSet = calls.find((c) => c.command === "policy:set" && c.args[3] === "tool_definitions.demo");
-    expect(definitionSet).toBeDefined();
-    expect(JSON.parse(definitionSet!.args[5])._replace).toBe(true);
   });
 });

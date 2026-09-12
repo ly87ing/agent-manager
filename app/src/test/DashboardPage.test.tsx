@@ -81,19 +81,6 @@ function okRoutes(): Record<string, EngineRoute> {
       },
       { command: "agents.status" },
     ),
-    "tools:status": makeEnvelope(
-      {
-        domain: "tools",
-        elements: [
-          makeElement({
-            id: "tools:playwright-cli",
-            domain: "tools",
-            freshness: makeFreshness({ state: "unknown" }),
-          }),
-        ],
-      },
-      { command: "tools.status" },
-    ),
     "mcp:status": makeEnvelope(
       {
         domain: "mcp",
@@ -110,6 +97,11 @@ function okRoutes(): Record<string, EngineRoute> {
               probe: "npm-view",
               cache_age_sec: 300,
             }),
+          }),
+          makeElement({
+            id: "mcp:grok-search",
+            domain: "mcp",
+            freshness: makeFreshness({ state: "unknown" }),
           }),
         ],
       },
@@ -164,7 +156,7 @@ describe("DashboardPage", () => {
     expect(screen.getByTestId("freshness-count-agents-current")).toHaveTextContent("1");
     expect(screen.getByTestId("freshness-count-agents-unknown")).toHaveTextContent("0");
     expect(screen.getByTestId("freshness-count-mcp-behind")).toHaveTextContent("1");
-    expect(screen.getByTestId("freshness-count-tools-unknown")).toHaveTextContent("1");
+    expect(screen.getByTestId("freshness-count-mcp-unknown")).toHaveTextContent("1");
     expect(screen.getByTestId("freshness-count-skills-current")).toHaveTextContent("1");
     // not-applicable 元素不进入任何计数桶
     expect(screen.getByTestId("freshness-count-skills-unknown")).toHaveTextContent("0");
@@ -178,7 +170,7 @@ describe("DashboardPage", () => {
     const staleTable = await screen.findByTestId("stale-elements");
     expect(within(staleTable).getByText("agents:claude-code")).toBeInTheDocument();
     expect(within(staleTable).getByText("mcp:chrome-devtools")).toBeInTheDocument();
-    expect(within(staleTable).getByText("tools:playwright-cli")).toBeInTheDocument();
+    expect(within(staleTable).getByText("mcp:grok-search")).toBeInTheDocument();
 
     // 审计明细按段分组渲染
     expect(screen.getByTestId("audit-section-config")).toHaveTextContent("manager.json");

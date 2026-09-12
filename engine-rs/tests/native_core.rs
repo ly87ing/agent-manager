@@ -413,6 +413,40 @@ fn unimplemented_domains_answer_clearly_and_unknown_rejected() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
+// 2026-09-12 裁决退役面：tools/snapshots 域整体 UNKNOWN_DOMAIN；
+// system:converge 命中已知域的未知动词错误；system:refresh-upstream
+// 仍在路线图，保持 DOMAIN_NOT_IMPLEMENTED。
+#[test]
+fn retired_domains_and_verbs_are_rejected_clearly() {
+    let (base, ctx) = temp_ctx("retired");
+    for command in [
+        "tools:status",
+        "tools:plan",
+        "tools:apply",
+        "snapshots:list",
+        "snapshots:restore",
+    ] {
+        let env = execute(&ctx, &request(command, &[]));
+        assert!(!env.ok, "{command} 必须失败");
+        assert_eq!(
+            env.errors[0].code, "UNKNOWN_DOMAIN",
+            "{command} 应为 UNKNOWN_DOMAIN: {:?}",
+            env.errors
+        );
+    }
+    let env = execute(&ctx, &request("system:converge", &[]));
+    assert!(!env.ok);
+    assert_eq!(env.errors[0].code, "UNKNOWN_VERB", "{:?}", env.errors);
+    let env = execute(&ctx, &request("system:refresh-upstream", &[]));
+    assert!(!env.ok);
+    assert_eq!(
+        env.errors[0].code, "DOMAIN_NOT_IMPLEMENTED",
+        "路线图命令保持未接线语义: {:?}",
+        env.errors
+    );
+    let _ = std::fs::remove_dir_all(&base);
+}
+
 #[test]
 fn agents_native_plan_dry_run_apply_and_audit() {
     let (base, ctx) = temp_ctx("agents-native");

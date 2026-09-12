@@ -22,7 +22,6 @@ const FRESHNESS_SORT_RANK: Record<FreshnessState, number> = {
 
 const DOMAINS = [
   { key: "agents", label: "Agents" },
-  { key: "tools", label: "工具" },
   { key: "mcp", label: "MCP" },
   { key: "skills", label: "Skills" },
 ] as const;
@@ -74,9 +73,9 @@ export default function UpdatesPage() {
   const openRowApply = (element: EngineElement) => {
     preview.open({
       title: `更新 ${element.id}`,
-      subtitle: "仅更新此组件（执行前自动备份）。",
+      subtitle: "仅更新此组件；目标被外部修改时会拒绝覆盖。",
       planCommands: [{ command: `${element.domain}:plan`, args: ["--only", element.id] }],
-      requireConfirmText: element.domain === "agents" || element.domain === "tools" ? element.id : undefined,
+      requireConfirmText: element.domain === "agents" ? element.id : undefined,
       confirmLabel: "更新此项",
       execute: executeApply({
         command: `${element.domain}:apply`,
@@ -86,8 +85,8 @@ export default function UpdatesPage() {
     });
   };
 
-  /** 顶部聚合收敛：按域收集全部落后组件的 --only plan 聚合预览 → 顺序执行各域 scoped apply。 */
-  const openConvergeAll = () => {
+  /** 顶部聚合更新：按域收集全部落后组件的 --only plan 聚合预览 → 顺序执行各域 scoped apply。 */
+  const openUpdateAll = () => {
     const domainGroups = DOMAINS.map((domain) => {
       const items = behindElements.filter((el) => el.domain === domain.key);
       return {
@@ -105,7 +104,7 @@ export default function UpdatesPage() {
 
     preview.open({
       title: "全部更新",
-      subtitle: "预览聚合了各域可更新组件的操作；实际执行将按域逐个更新各落后组件（执行前自动备份）。",
+      subtitle: "预览聚合了各域可更新组件的操作；实际执行将按域逐个更新各落后组件；目标被外部修改时会拒绝覆盖。",
       planCommands,
       confirmLabel: "全部更新",
       execute: async (dryRun: boolean): Promise<Envelope | null> => {
@@ -157,9 +156,9 @@ export default function UpdatesPage() {
       <div className="flex justify-end gap-2">
         <button
           type="button"
-          data-testid="converge-all-button"
+          data-testid="update-all-button"
           disabled={behindElements.length === 0}
-          onClick={openConvergeAll}
+          onClick={openUpdateAll}
           className={cn(
             "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white transition-colors",
             behindElements.length === 0 ? "cursor-not-allowed bg-slate-300" : "bg-emerald-600 hover:bg-emerald-700",
@@ -243,17 +242,17 @@ export default function UpdatesPage() {
                       {(element.freshness.state === "behind" || element.freshness.state === "unknown") && (
                         <button
                           type="button"
-                          data-testid={`converge-${element.id}`}
-                          disabled={offline && (element.domain === "agents" || element.domain === "tools")}
+                          data-testid={`update-${element.id}`}
+                          disabled={offline && element.domain === "agents"}
                           title={
-                            offline && (element.domain === "agents" || element.domain === "tools")
+                            offline && element.domain === "agents"
                               ? "离线模式下不可用（升级/安装需要联网）"
                               : "更新此项（会先预览将要执行的操作）"
                           }
                           onClick={() => openRowApply(element)}
                           className={cn(
                             "rounded border px-2 py-1 text-xs",
-                            offline && (element.domain === "agents" || element.domain === "tools")
+                            offline && element.domain === "agents"
                               ? "cursor-not-allowed border-slate-200 text-slate-300"
                               : "border-emerald-200 text-emerald-700 hover:bg-emerald-50",
                           )}

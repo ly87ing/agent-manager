@@ -27,19 +27,6 @@ function statusRoutes(): Record<string, Envelope> {
       },
       { command: "agents.status" },
     ),
-    "tools:status": makeEnvelope(
-      {
-        domain: "tools",
-        elements: [
-          makeElement({
-            id: "tools:c-ahead",
-            domain: "tools",
-            freshness: makeFreshness({ state: "ahead", current: "9.9.9", upstream: "9.9.8", checked_at: CHECKED, probe: "npm-view", cache_age_sec: 90000 }),
-          }),
-        ],
-      },
-      { command: "tools.status" },
-    ),
     "mcp:status": makeEnvelope(
       {
         domain: "mcp",
@@ -54,7 +41,19 @@ function statusRoutes(): Record<string, Envelope> {
       },
       { command: "mcp.status" },
     ),
-    "skills:status": makeEnvelope({ domain: "skills", elements: [] }, { command: "skills.status" }),
+    "skills:status": makeEnvelope(
+      {
+        domain: "skills",
+        elements: [
+          makeElement({
+            id: "skill:c-ahead",
+            domain: "skills",
+            freshness: makeFreshness({ state: "ahead", current: "9.9.9", upstream: "9.9.8", checked_at: CHECKED, probe: "git-ls-remote", cache_age_sec: 90000 }),
+          }),
+        ],
+      },
+      { command: "skills.status" },
+    ),
   };
 }
 
@@ -67,7 +66,7 @@ describe("UpdatesPage 更新中心", () => {
       "update-row-agents:a-behind",
       "update-row-mcp:b-unknown",
       "update-row-agents:z-current",
-      "update-row-tools:c-ahead",
+      "update-row-skill:c-ahead",
     ]);
     expect(screen.queryByTestId("update-row-mcp:x-na")).toBeNull();
     // 列内容：版本对比、缓存年龄（stale 标注）、探测源
@@ -161,10 +160,10 @@ describe("UpdatesPage 更新中心", () => {
     };
 
     const { calls } = renderWithEngine(<UpdatesPage />, routes);
-    const convergeBtn = await screen.findByTestId("converge-all-button");
-    expect(convergeBtn).toHaveTextContent("全部更新（3）");
+    const updateAllBtn = await screen.findByTestId("update-all-button");
+    expect(updateAllBtn).toHaveTextContent("全部更新（3）");
 
-    await userEvent.click(convergeBtn);
+    await userEvent.click(updateAllBtn);
     await screen.findByRole("dialog", { name: /全部更新/ });
 
     const planCalls = calls.filter((c) => c.command.endsWith(":plan"));
@@ -233,8 +232,8 @@ describe("UpdatesPage 更新中心", () => {
     };
 
     const { calls } = renderWithEngine(<UpdatesPage />, routes);
-    const convergeBtn = await screen.findByTestId("converge-all-button");
-    await userEvent.click(convergeBtn);
+    const updateAllBtn = await screen.findByTestId("update-all-button");
+    await userEvent.click(updateAllBtn);
     await screen.findByRole("dialog", { name: /全部更新/ });
 
     await userEvent.click(screen.getByTestId("plan-confirm-button"));

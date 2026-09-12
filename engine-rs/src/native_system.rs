@@ -26,7 +26,6 @@ pub(crate) struct AuditOutcome {
 const WIRED_DOMAINS: &[&str] = &[
     "agents", "skills", "mcp", "rules", "hooks", "aliases", "secrets",
 ];
-const UNWIRED_DOMAINS: &[&str] = &["tools"];
 
 const MSG_OK: &str = "状态正常";
 const MSG_DISABLED: &str = "已禁用，未纳入管理";
@@ -36,7 +35,6 @@ const MSG_DRIFTED: &str = "托管产物已漂移";
 const MSG_UNSUPPORTED: &str = "当前来源或环境不受支持";
 const MSG_ABNORMAL: &str = "状态数据异常";
 const MSG_DOMAIN_FAILED: &str = "状态查询失败（已脱敏）";
-const MSG_UNWIRED: &str = "Rust 原生域尚未接线，暂未纳入审计";
 
 fn entry(name: &str, status: &str, message: &str, category: Option<&str>) -> Value {
     let mut map = Map::new();
@@ -220,12 +218,6 @@ pub(crate) fn run(ctx: &Context, request: &Request) -> AuditOutcome {
         sections.insert(
             (*domain).to_string(),
             Value::Array(wired_section(ctx, domain, offline)),
-        );
-    }
-    for domain in UNWIRED_DOMAINS {
-        sections.insert(
-            (*domain).to_string(),
-            Value::Array(vec![entry(domain, "warning", MSG_UNWIRED, None)]),
         );
     }
     sections.insert("runtime".to_string(), Value::Array(runtime_section()));

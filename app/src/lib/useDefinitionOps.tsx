@@ -10,7 +10,7 @@ import { OVERLAY_COPY, TOGGLE_COPY } from "./ui-copy";
 import { useExecuteApply, usePlanPreview } from "./usePlanPreview";
 
 /**
- * 定义覆盖层的新增、编辑与移除；Agent/Tools 移除仅停止管理，
+ * 定义覆盖层的新增、编辑与移除；Agent 移除仅停止管理，
  * MCP/Skills 移除后继续预览清理目标配置与链接。
  */
 export function useDefinitionOps({
@@ -80,13 +80,13 @@ export function useDefinitionOps({
   };
 
   /** 新增/编辑：写定义。Agent 与资源定义（MCP/技能集合）只保存定义，
-   * 不写启用键、不 plan/apply、不触发安装/同步；Tools 保留原流程（新增写 enabled → plan 预览 → apply）。
+   * 不写启用键、不 plan/apply、不触发安装/同步。
    * 资源定义始终整条替换（_replace）：编辑时若调用方拿不到完整原定义（无 DB 的旧存储），
    * 先 db:migrate 再取 sqlite 有效定义合并表单字段，避免丢掉未展示字段或复活已清空字段。 */
   const saveAndApply = async (input: {
     name: string;
     definition: Record<string, unknown>;
-    /** true = 新增（同时写 enabled=true）；false = 编辑（不动启用键）。 */
+    /** true = 新增；false = 编辑（不动启用键）。 */
     isNew: boolean;
     /** 预览过滤的元素 id（mcp:<name> / skill:<name>）。 */
     elementId: string;
@@ -96,7 +96,7 @@ export function useDefinitionOps({
   }): Promise<void> => {
     const defKey = `${definitionKeyPrefix(section)}.${input.name}`;
     let definition = input.definition;
-    if (domain !== "agents" && domain !== "tools" && !input.isNew && input.complete === false) {
+    if (domain !== "agents" && !input.isNew && input.complete === false) {
       const full = await migrateAndLoadFullDefinition(input.name);
       if (!full) return;
       definition = { ...full, ...definition };
@@ -133,35 +133,14 @@ export function useDefinitionOps({
     if (!(await writePolicy("policy:set", ["--layer", "local", "--key", defKey, "--value", JSON.stringify({ ...definition, _delete: false, _replace: true })]))) {
       return;
     }
-    // Agent 与资源定义（MCP/技能集合）表单提交语义为「保存定义」：只保存定义，
-    // 不写启用键、不 plan/apply、不触发安装或同步；_replace 整条替换保证清空的可选字段不会复活。
-    if (domain !== "tools") {
-      void queryClient.invalidateQueries({ queryKey: engineKeys.all });
-      toast.success(
-        domain === "agents"
-          ? `已保存定义 ${input.name}（不会自动安装）`
-          : `已保存定义 ${input.name} 到本地资源库（不会自动安装或同步）`,
-      );
-      return;
-    }
-    if (input.isNew) {
-      if (!(await writePolicy("policy:set", ["--layer", "local", "--key", `${section}.${input.name}.enabled`, "--value", "true"]))) {
-        return;
-      }
-    }
+    // 表单提交语义为「保存定义」：只保存定义，不写启用键、不 plan/apply、不触发安装或
+    // 同步；_replace 整条替换保证清空的可选字段不会复活。
     void queryClient.invalidateQueries({ queryKey: engineKeys.all });
-    const label = `${input.isNew ? "新增" : "修改"} ${input.name}`;
-    preview.open({
-      title: label,
-      subtitle: "定义已写入本地数据库；预览将要执行的操作，确认后同步生效（执行前自动备份）。",
-      planCommands: [{ command: `${domain}:plan`, args: ["--only", input.elementId] }],
-      confirmLabel: TOGGLE_COPY.applyNow,
-      execute: executeApply({
-        command: `${domain}:apply`,
-        label,
-        extraArgs: ["--only", input.elementId],
-      }),
-    });
+    toast.success(
+      domain === "agents"
+        ? `已保存定义 ${input.name}（不会自动安装）`
+        : `已保存定义 ${input.name} 到本地资源库（不会自动安装或同步）`,
+    );
   };
 
   /** 移除确认后写遮蔽标记。 */
@@ -197,7 +176,7 @@ export function useDefinitionOps({
     setRemoval(null);
     void queryClient.invalidateQueries({ queryKey: engineKeys.all });
     toast.success(`已移除 ${name}`);
-    if (domain === "agents" || domain === "tools") return;
+    if (domain === "agents") return;
     const prefix = domain;
     const elementId = `${prefix}:${name}`;
     preview.open({
@@ -217,7 +196,7 @@ export function useDefinitionOps({
   const removalModal = removal && removalPlan ? (
     <ConfirmModal
       title={`移除 ${removal.name}`}
-      description={domain === "agents" || domain === "tools" ? "停止管理该定义，不自动卸载系统包。后续同步仍会清理本工具拥有的孤立缓存目录。" : OVERLAY_COPY.removeDefinitionNote}
+      description={domain === "agents" ? "停止管理该定义，不自动卸载系统包。后续同步仍会清理本工具拥有的孤立缓存目录。" : OVERLAY_COPY.removeDefinitionNote}
       risk="install-remove"
       requireText={removal.name}
       confirmLabel="确认移除"

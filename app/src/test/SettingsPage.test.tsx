@@ -408,7 +408,6 @@ describe("SettingsPage", () => {
     renderWithEngine(<SettingsPage />, {
       "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode() }),
       "agents:status": makeEnvelope({ domain: "agents", elements: [] }, { command: "agents.status" }),
-      "tools:status": makeEnvelope({ domain: "tools", elements: [] }, { command: "tools.status" }),
       "mcp:status": makeEnvelope({ domain: "mcp", elements: [] }, { command: "mcp.status" }),
       "skills:status": makeEnvelope({ domain: "skills", elements: [] }, { command: "skills.status" }),
       "git:status": makeEnvelope({ clean: true, branch: "main", ahead: 0, behind: 0, remote_configured: false }, { command: "git.status" }),
@@ -419,17 +418,18 @@ describe("SettingsPage", () => {
 
     const expectedKeys = [
       "dashboard",
-      "tools",
       "aliases",
       "secrets",
       "updates",
       "policy",
-      "snapshots",
     ];
 
     for (const key of expectedKeys) {
       expect(screen.getByTestId(`advanced-entry-${key}`)).toBeInTheDocument();
     }
+    // 2026-09-12 裁决退役：Tools 与快照入口不再出现
+    expect(screen.queryByTestId("advanced-entry-tools")).toBeNull();
+    expect(screen.queryByTestId("advanced-entry-snapshots")).toBeNull();
     expect(screen.queryByTestId("advanced-entry-sync")).toBeNull();
     expect(screen.queryByText("多设备同步")).toBeNull();
 

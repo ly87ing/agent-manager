@@ -1,7 +1,7 @@
 {
-  "description": "Data payload shape of '<domain>.apply' commands (envelope.data). apply executes the actions returned by the native engine after plan and user confirmation; a snapshot may be taken before a non-dry-run write.",
+  "description": "Data payload shape of '<domain>.apply' commands (envelope.data). apply executes the actions returned by the native engine after plan and user confirmation; external modification of a target fails closed instead of being overwritten.",
   "type": "object",
-  "required": ["domain", "dry_run", "steps", "snapshot", "skipped"],
+  "required": ["domain", "dry_run", "steps", "skipped"],
   "additionalProperties": false,
   "properties": {
     "domain": {
@@ -9,25 +9,13 @@
       "type": "string"
     },
     "dry_run": {
-      "description": "true when the run only previewed changes (no snapshot taken, no writes).",
+      "description": "true when the run only previewed changes (no writes).",
       "type": "boolean"
     },
     "steps": {
       "description": "Per-action execution results, in engine order.",
       "type": "array",
       "items": {"$ref": "#/$defs/step"}
-    },
-    "snapshot": {
-      "description": "Pre-write snapshot echo, or null in dry-run mode.",
-      "type": ["object", "null"],
-      "required": ["run_id", "path", "file_count", "link_count"],
-      "additionalProperties": false,
-      "properties": {
-        "run_id": {"description": "Snapshot directory name (the run's id).", "type": "string"},
-        "path": {"description": "Absolute snapshot directory path.", "type": "string"},
-        "file_count": {"description": "Regular files captured.", "type": "integer"},
-        "link_count": {"description": "Symlink entries recorded in the manifest.", "type": "integer"}
-      }
     },
     "skipped": {
       "description": "Steps the pipeline skipped by policy (names only), always present.",

@@ -1,6 +1,6 @@
-import type { Envelope, RunEntry, SnapshotEntry } from "../lib/contract";
+import type { Envelope, RunEntry } from "../lib/contract";
 import { EngineBridgeError, type EngineClient } from "../lib/engine";
-import { makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makeRunEntry, makeSnapshotEntry } from "./fixtures";
+import { makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makeRunEntry } from "./fixtures";
 
 /**
  * dev-only mock 引擎（?mock=1 / ?mock=offline，仅在 import.meta.env.DEV 下经
@@ -18,14 +18,13 @@ function demoEnvelopes(): Record<string, Envelope> {
         config: [{ name: "manager.json", status: "ok", message: "格式正确" }],
         runtime: [{ name: "engine-rs", status: "ok", message: "Rust 原生引擎" }],
         agents: [{ name: "Old Agent", status: "notice", message: "未声明策略（已忽略）" }],
-        tools: [{ name: "demo-cli", status: "warning", message: "可选工具未就绪", category: "optional_tool" }],
         mcp: [{ name: "Kimi Code", status: "warning", message: "托管产物尚未生成", category: "unmaterialized" }],
         skills: [{ name: "Codex", status: "error", message: "skill 目标漂移 (dead-one)" }],
       },
       summary: {
         errors: 1,
-        warnings: 2,
-        warning_categories: { optional_tools: 1, unmaterialized: 1, official_gaps: 0 },
+        warnings: 1,
+        warning_categories: { optional_tools: 0, unmaterialized: 1, official_gaps: 0 },
       },
     }),
     { command: "system.audit" },
@@ -62,7 +61,7 @@ function demoEnvelopes(): Record<string, Envelope> {
           policy: { enabled: true, auto_install: true, auto_update: true, preferred_provider: "native" },
           observed: { providers: ["native"], classified: { managed: ["native"], deprecated: [], system_only: [], unsupported: [] }, installed: true, preferred_active: true },
           state: "managed-ok",
-          freshness: makeFreshness({ state: "current", current: "0.42.0", upstream: "0.42.0", checked_at: CHECKED_AT, probe: "native", cache_age_sec: 300 }),
+          freshness: makeFreshness({ state: "ahead", current: "0.43.0-beta.1", upstream: "0.42.0", checked_at: CHECKED_AT, probe: "native", cache_age_sec: 300 }),
         }),
         makeElement({
           id: "agents:kimi-code",
@@ -92,39 +91,6 @@ function demoEnvelopes(): Record<string, Envelope> {
       ],
     },
     { command: "agents.status" },
-  );
-
-  const toolsStatus = makeEnvelope(
-    {
-      domain: "tools",
-      elements: [
-        makeElement({
-          id: "tools:playwright-cli",
-          domain: "tools",
-          state: "managed-ok",
-          freshness: makeFreshness({ state: "current", current: "0.0.66", upstream: "0.0.66", checked_at: CHECKED_AT, probe: "npm-view", cache_age_sec: 120 }),
-        }),
-        makeElement({
-          id: "tools:demo-cli",
-          domain: "tools",
-          state: "managed-ok",
-          freshness: makeFreshness({ state: "ahead", current: "9.9.9-beta", upstream: "9.9.8", checked_at: CHECKED_AT, probe: "npm-view", cache_age_sec: 90000 }),
-        }),
-        makeElement({
-          id: "tools:pending-cli",
-          domain: "tools",
-          state: "not-materialized",
-          freshness: makeFreshness({ state: "not-applicable" }),
-        }),
-        makeElement({
-          id: "tools:legacy-cli",
-          domain: "tools",
-          state: "unsupported",
-          freshness: makeFreshness({ state: "not-applicable" }),
-        }),
-      ],
-    },
-    { command: "tools.status" },
   );
 
   const mcpStatus = makeEnvelope(
@@ -210,6 +176,24 @@ function demoEnvelopes(): Record<string, Envelope> {
           },
           state: "drifted",
           freshness: makeFreshness({ state: "current", current: "a1b2c3d", upstream: "a1b2c3d", checked_at: CHECKED_AT, probe: "git-ls-remote", cache_age_sec: 200 }),
+        }),
+        makeElement({
+          id: "mcp:pending-server",
+          domain: "mcp",
+          spec: { command: "npx", args: ["-y", "pending-mcp"], startup_timeout_sec: 60, agents: null, env: {} },
+          policy: { enabled: true, agents: null },
+          observed: { agents: {}, env: {} },
+          state: "not-materialized",
+          freshness: makeFreshness({ state: "not-applicable" }),
+        }),
+        makeElement({
+          id: "mcp:legacy-server",
+          domain: "mcp",
+          spec: { command: "legacy-mcp", args: [], startup_timeout_sec: 60, agents: null, env: {} },
+          policy: { enabled: true, agents: null },
+          observed: { agents: {}, env: {} },
+          state: "unsupported",
+          freshness: makeFreshness({ state: "not-applicable" }),
         }),
       ],
     },
@@ -510,7 +494,6 @@ function demoEnvelopes(): Record<string, Envelope> {
   return {
     "system:audit": audit,
     "agents:status": agentsStatus,
-    "tools:status": toolsStatus,
     "mcp:status": mcpStatus,
     "skills:status": skillsStatus,
     "rules:status": rulesStatus,
@@ -570,7 +553,6 @@ function demoEnvelopes(): Record<string, Envelope> {
     "skills:plan": skillsPlan,
     "rules:plan": rulesPlan,
     "agents:plan": agentsPlan,
-    "tools:plan": emptyPlan("tools"),
     "hooks:plan": makeEnvelope(
       {
         domain: "hooks",
@@ -625,10 +607,6 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
   };
   const runs: RunEntry[] = [
     makeRunEntry({ run_id: "20260905T235900Z-legacy1", last_at: "2026-09-05T23:59:00Z", operations: 2 }),
-  ];
-  const snapshots: SnapshotEntry[] = [
-    makeSnapshotEntry({ run_id: "20260905T230000Z-mock00", command: "mcp.apply", file_count: 3, link_count: 0 }),
-    makeSnapshotEntry({ run_id: "20260905T235000Z-mock01", command: "system.converge", file_count: 8, link_count: 2, created_at: "2026-09-05T23:50:00Z" }),
   ];
 
   const deepMerge = (base: Record<string, unknown>, overlay: Record<string, unknown>): Record<string, unknown> => {
@@ -717,7 +695,6 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
     skills: "skills-link",
     rules: "rules-sync",
     hooks: "hooks-sync",
-    tools: "tools-sync",
     aliases: "shell-aliases",
   };
 
@@ -728,40 +705,14 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
   const applyEnvelope = (domain: string, args: string[], runId: string): Envelope => {
     const dryRun = args.includes("--dry-run");
     recordRun(runId, `${domain}.apply`, dryRun);
-    const snapshot = dryRun
-      ? null
-      : { run_id: runId, path: `/tmp/mock-snapshots/${runId}`, file_count: 2, link_count: 1 };
-    if (snapshot) {
-      snapshots.unshift(makeSnapshotEntry({ run_id: runId, command: `${domain}.apply`, created_at: new Date().toISOString(), file_count: 2, link_count: 1 }));
-    }
     return makeEnvelope(
       {
         domain,
         dry_run: dryRun,
         steps: [{ name: applyStepNames[domain] ?? `${domain}-sync`, ok: true, exit_code: 0 }],
-        snapshot,
         skipped: [],
       },
       { command: `${domain}.apply`, run_id: runId, lock: { held: !dryRun, pid: dryRun ? null : 4242 } },
-    );
-  };
-
-  const convergeEnvelope = (args: string[], runId: string): Envelope => {
-    const dryRun = args.includes("--dry-run");
-    recordRun(runId, "system.converge", dryRun);
-    const snapshot = dryRun ? null : { run_id: runId, path: `/tmp/mock-snapshots/${runId}`, file_count: 9, link_count: 2 };
-    if (snapshot) {
-      snapshots.unshift(makeSnapshotEntry({ run_id: runId, command: "system.converge", created_at: new Date().toISOString(), file_count: 9, link_count: 2 }));
-    }
-    return makeEnvelope(
-      {
-        pipeline: "update",
-        dry_run: dryRun,
-        steps: ["shell-aliases", "tools-sync", "rules-sync", "skills-link", "mcp-sync", "hooks-sync"].map((name) => ({ name, ok: true, exit_code: 0 })),
-        snapshot,
-        skipped: [],
-      },
-      { command: "system.converge", run_id: runId, lock: { held: !dryRun, pid: dryRun ? null : 4242 } },
     );
   };
 
@@ -797,19 +748,6 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
           { command: "runs.get" },
         );
       }
-      if (command === "snapshots:list") {
-        return makeEnvelope({ snapshots, restore: null }, { command: "snapshots.list" });
-      }
-      if (command === "snapshots:restore") {
-        const id = args[args.indexOf("--run") + 1];
-        const resnapshot = `resnap-${id}`;
-        snapshots.unshift(makeSnapshotEntry({ run_id: resnapshot, command: "snapshots.restore", created_at: new Date().toISOString() }));
-        return makeEnvelope(
-          { snapshots: null, restore: { restored_run: id, files_restored: 3, files_deleted: 1, links_restored: 1, skipped: [], resnapshot_run_id: resnapshot } },
-          { command: "snapshots.restore", run_id: runId },
-        );
-      }
-      if (command === "system:converge") return convergeEnvelope(args, runId);
       if (command.endsWith(":apply")) {
         return applyEnvelope(command.split(":")[0], args, runId);
       }

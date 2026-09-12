@@ -5,7 +5,7 @@ import { POLICY_LAYER_COPY, TOGGLE_COPY } from "./ui-copy";
 import { useExecuteApply, usePlanPreview } from "./usePlanPreview";
 
 /**
- * 元素启停开关编排（Agents/Tools/MCP/Skills 集合共用）：
+ * 元素启停开关编排（Agents/MCP/Skills 集合等域共用）：
  * policy.set <enabledKey> <bool>（固定写入 local）→ toast 给「立即同步」动作
  * → 点开即 plan 预览（含 install-remove 二次确认语义）→ 域级 apply。
  */
@@ -20,7 +20,7 @@ export function useElementToggle() {
     enabledKey: string;
     /** 当前启用态（引擎 policy.enabled）。 */
     enabled: boolean;
-    /** 域，如 agents / tools / mcp / skills。 */
+    /** 域，如 agents / mcp / skills。 */
     domain: string;
     /** 人类可读名称，如 Claude Code。 */
     name: string;
@@ -52,7 +52,7 @@ export function useElementToggle() {
         onClick: () =>
           preview.open({
             title: label,
-            subtitle: "仅同步此组件配置（执行前自动备份）。",
+            subtitle: "仅同步此组件配置；目标被外部修改时会拒绝覆盖。",
             planCommands: [{ command: `${input.domain}:plan`, args: ["--only", input.elementId] }],
             requireConfirmText: input.domain === "agents" ? input.elementId : undefined,
             confirmLabel: TOGGLE_COPY.applyNow,

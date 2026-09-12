@@ -58,7 +58,6 @@ fn result_json(dry_run: bool, steps: Vec<Value>, skipped: Vec<String>) -> Value 
         "domain": "rules",
         "dry_run": dry_run,
         "steps": steps,
-        "snapshot": Value::Null,
         "skipped": skipped,
     })
 }
@@ -372,7 +371,10 @@ mod tests {
         let result = apply(&ctx, &req(&["--dry-run"])).unwrap();
         assert_eq!(result["dry_run"], true);
         assert_eq!(result["steps"], json!([]));
-        assert_eq!(result["snapshot"], Value::Null);
+        assert!(
+            result.get("snapshot").is_none(),
+            "apply 输出不再携带 snapshot 字段"
+        );
         assert_eq!(
             result["skipped"],
             json!(["rules:codex_global", "rules:claude_global"])
@@ -606,13 +608,16 @@ mod tests {
         let root = temp_root("schema");
         let ctx = ctx_at(&root);
         let result = apply(&ctx, &req(&["--only", "rules:codex_global"])).unwrap();
-        for key in ["domain", "dry_run", "steps", "snapshot", "skipped"] {
+        for key in ["domain", "dry_run", "steps", "skipped"] {
             assert!(result.get(key).is_some(), "缺字段 {key}");
         }
+        assert!(
+            result.get("snapshot").is_none(),
+            "apply 输出不再携带 snapshot 字段"
+        );
         assert_eq!(result["domain"], "rules");
         assert!(result["dry_run"].is_boolean());
         assert!(result["steps"].is_array());
-        assert_eq!(result["snapshot"], Value::Null);
         assert!(result["skipped"].is_array());
         for step in result["steps"].as_array().unwrap() {
             for key in ["name", "ok", "exit_code"] {

@@ -94,8 +94,8 @@ pub fn sanitize_diagnostic_message(raw: &str) -> String {
 }
 
 /// Determines whether a request warrants writing to the structured diagnostic log.
-/// Mutating commands (apply, policy set/delete, sources set, snapshots restore,
-/// system refresh-upstream/converge, db migrate, runs:clear) are logged.
+/// Mutating commands (apply, policy set/delete, sources set, system
+/// refresh-upstream, db migrate, runs:clear) are logged.
 /// Readonly commands (status, plan, list, get, audit) and dry-run are never logged.
 pub fn should_log_request(request: &Request) -> bool {
     if request.flag("--dry-run") {
@@ -117,8 +117,7 @@ pub fn should_log_request(request: &Request) -> bool {
         (_, "apply")
             | ("policy", "set" | "delete")
             | ("sources", "set")
-            | ("snapshots", "restore")
-            | ("system", "refresh-upstream" | "converge")
+            | ("system", "refresh-upstream")
             | ("db", "migrate")
             | ("runs", "clear")
     )

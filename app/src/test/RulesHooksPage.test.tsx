@@ -210,7 +210,7 @@ function nativeRulesRoutes(): Record<string, Envelope> {
       { command: "rules.plan" },
     ),
     "rules:apply": makeEnvelope(
-      { domain: "rules", dry_run: false, steps: [{ name: "rules:sync rules:claude_global", ok: true, exit_code: 0 }], snapshot: null, skipped: [] },
+      { domain: "rules", dry_run: false, steps: [{ name: "rules:sync rules:claude_global", ok: true, exit_code: 0 }], skipped: [] },
       { command: "rules.apply" },
     ),
     "sources:get": makeEnvelope({ sources: [] }, { command: "sources.get" }),
@@ -316,7 +316,7 @@ function nativeHooksRoutes(): Record<string, Envelope> {
       { command: "hooks.plan" },
     ),
     "hooks:apply": makeEnvelope(
-      { domain: "hooks", dry_run: false, steps: [{ name: "hooks:sync hooks:claude", ok: true, exit_code: 0 }], snapshot: null, skipped: [] },
+      { domain: "hooks", dry_run: false, steps: [{ name: "hooks:sync hooks:claude", ok: true, exit_code: 0 }], skipped: [] },
       { command: "hooks.apply" },
     ),
     "sources:get": makeEnvelope(

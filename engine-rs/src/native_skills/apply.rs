@@ -30,7 +30,6 @@ pub fn apply(ctx: &Context, req: &Request) -> Result<Value> {
             "domain": "skills",
             "dry_run": true,
             "steps": [],
-            "snapshot": Value::Null,
             "skipped": [only],
         }));
     }
@@ -75,7 +74,6 @@ pub fn apply(ctx: &Context, req: &Request) -> Result<Value> {
             "domain": "skills",
             "dry_run": false,
             "steps": [{"name": format!("skills:{} {}", action, only), "ok": true, "exit_code": 0}],
-            "snapshot": Value::Null,
             "skipped": [],
         }))
     })();

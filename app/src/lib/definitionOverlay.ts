@@ -5,11 +5,10 @@ import type { PolicyLayers } from "./contract";
  * skills.repositories.<name> 覆盖 skills.json。移除用 tombstone 遮蔽同名定义。
  */
 
-export type DefinitionSection = "mcp" | "skills" | "agents" | "tools";
+export type DefinitionSection = "mcp" | "skills" | "agents";
 
 export function definitionKeyPrefix(section: DefinitionSection): string {
   if (section === "agents") return "agent_definitions";
-  if (section === "tools") return "tool_definitions";
   return section === "mcp" ? "mcp.definitions" : "skills.repositories";
 }
 
@@ -23,7 +22,7 @@ export interface DefinitionRemovalPlan {
 
 function layerHasDefinition(layer: Record<string, unknown> | null, section: DefinitionSection, name: string): boolean {
   if (!layer) return false;
-  if (section === "agents" || section === "tools") {
+  if (section === "agents") {
     const defs = layer[definitionKeyPrefix(section)];
     return typeof defs === "object" && defs !== null && name in defs;
   }

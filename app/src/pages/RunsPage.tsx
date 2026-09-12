@@ -21,7 +21,6 @@ function ExecutionCard({ record, onSelectRun }: { record: ExecutionRecord; onSel
   const data = record.envelope?.data as Partial<ApplyResultData> | undefined;
   const steps = Array.isArray(data?.steps) ? data.steps : [];
   const lock = record.envelope?.lock;
-  const snapshot = data?.snapshot;
 
   return (
     <section data-testid={`execution-${record.runId}`} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -85,11 +84,6 @@ function ExecutionCard({ record, onSelectRun }: { record: ExecutionRecord; onSel
             );
           })}
         </ul>
-      )}
-      {snapshot && (
-        <p className="mt-2 text-xs text-slate-500">
-          已自动备份 <code className="font-mono">{snapshot.run_id}</code>（{snapshot.file_count} 个文件 / {snapshot.link_count} 个链接）
-        </p>
       )}
     </section>
   );

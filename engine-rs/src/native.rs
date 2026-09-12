@@ -62,22 +62,8 @@ impl Request {
 }
 
 const KNOWN_DOMAINS: &[&str] = &[
-    "agents",
-    "mcp",
-    "skills",
-    "rules",
-    "hooks",
-    "tools",
-    "aliases",
-    "secrets",
-    "profile",
-    "policy",
-    "system",
-    "runs",
-    "snapshots",
-    "sources",
-    "db",
-    "logs",
+    "agents", "mcp", "skills", "rules", "hooks", "aliases", "secrets", "profile", "policy",
+    "system", "runs", "sources", "db", "logs",
 ];
 
 fn mode_of(request: &Request) -> Mode {
@@ -537,11 +523,15 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("runs", "get") => crate::native_runs::runs_get(ctx, request),
         ("runs", "clear") => crate::native_runs::runs_clear(ctx),
         ("logs", "clear") => crate::native_logs::logs_clear(ctx),
-        _ => Err(DispatchError::new(
+        // 契约命令面内但尚未接线的路线图命令（system:refresh-upstream）。
+        ("system", "refresh-upstream") => Err(DispatchError::new(
             "DOMAIN_NOT_IMPLEMENTED",
-            format!(
-                "命令 '{dotted}' 属于契约命令面，但 native 核心尚未接线（域模块由对应 owner 提供）"
-            ),
+            format!("命令 '{dotted}' 属于契约命令面，但 native 核心尚未接线（路线图保留）"),
+        )),
+        // 已退役或从未进入命令面的动词：已知域 + 未知动词。
+        _ => Err(DispatchError::new(
+            "UNKNOWN_VERB",
+            format!("未知动词 '{verb}'（域 '{domain}' 的命令面内没有该动词）"),
         )),
     }
 }

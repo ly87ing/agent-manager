@@ -29,16 +29,14 @@ impl EngineError {
 
 /// 支持 status + plan 的域（secrets 只有 status；system 只有 audit / refresh-upstream）。
 /// 支持 status/plan/apply 的域（对齐引擎 APPLY_DOMAINS；secrets 只读）。
-const READ_WRITE_DOMAINS: &[&str] = &[
-    "agents", "mcp", "skills", "rules", "hooks", "tools", "aliases",
-];
+const READ_WRITE_DOMAINS: &[&str] = &["agents", "mcp", "skills", "rules", "hooks", "aliases"];
 
 pub fn validate_command(command: &str) -> Result<(), EngineError> {
     let rejected = || {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|plan|apply / system:audit|refresh-upstream|converge / snapshots:* / runs:* / policy:* / sources:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|plan|apply / system:audit|refresh-upstream / runs:* / policy:* / sources:* / db:*）"
             ),
         )
     };
@@ -49,9 +47,8 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         return Err(rejected());
     }
     let allowed = match (domain, verb) {
-        ("system", "audit" | "refresh-upstream" | "converge") => true,
+        ("system", "audit" | "refresh-upstream") => true,
         ("secrets", "status") => true,
-        ("snapshots", "list" | "restore") => true,
         ("runs", "list" | "get" | "clear") => true,
         ("logs", "clear") => true,
         ("policy", "get" | "set" | "delete") => true,
@@ -74,7 +71,7 @@ enum ArgValueKind {
     Flag,
     /// 元素 id，如 mcp:grok-search / skill:agent-skills/find-skills。
     ElementId,
-    /// 运行 id（runs:get / snapshots:restore 的 --run），字母数字与 _/-。
+    /// 运行 id（runs:get 的 --run），字母数字与 _/-。
     RunId,
     /// policy:set 落点层。
     PolicyLayer,
@@ -103,7 +100,6 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         ("runs", "get") => {
             specs.push(("--run", ArgValueKind::RunId));
         }
-        ("snapshots", "restore") => specs.push(("--run", ArgValueKind::RunId)),
         ("policy", "set") => {
             specs.push(("--layer", ArgValueKind::PolicyLayer));
             specs.push(("--key", ArgValueKind::DotKey));
@@ -144,7 +140,6 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
                 specs.push(("--action", ArgValueKind::McpAction));
             }
         }
-        ("system", "converge") => specs.push(("--dry-run", ArgValueKind::Flag)),
         _ => {}
     }
     specs
@@ -413,18 +408,12 @@ mod tests {
             "hooks:status",
             "hooks:plan",
             "hooks:apply",
-            "tools:status",
-            "tools:plan",
-            "tools:apply",
             "aliases:status",
             "aliases:plan",
             "aliases:apply",
             "secrets:status",
             "system:audit",
             "system:refresh-upstream",
-            "system:converge",
-            "snapshots:list",
-            "snapshots:restore",
             "runs:list",
             "runs:get",
             "runs:clear",
@@ -445,6 +434,13 @@ mod tests {
             "secrets:plan",
             "secrets:apply",
             "system:status",
+            // 2026-09-12 裁决退役：tools 域、snapshots 域、system:converge 全部拒绝
+            "tools:status",
+            "tools:plan",
+            "tools:apply",
+            "system:converge",
+            "snapshots:list",
+            "snapshots:restore",
             "snapshots:status",
             "runs:delete",
             "policy:drop",
@@ -553,14 +549,9 @@ mod tests {
                 "agents:apply",
                 vec!["--allow-uninstall".into(), "--dry-run".into()],
             ),
-            ("system:converge", vec!["--dry-run".into()]),
             (
                 "runs:get",
                 vec!["--run".into(), "gui-20260906T010203Z-ab12cd".into()],
-            ),
-            (
-                "snapshots:restore",
-                vec!["--run".into(), "20260905103000_12345".into()],
             ),
             (
                 "policy:set",
@@ -611,7 +602,12 @@ mod tests {
             ("policy:get", vec!["--dry-run".into()]),
             ("sources:set", vec!["--def-file".into(), "elsewhere".into()]),
             ("system:refresh-upstream", vec!["--only".into()]),
-            ("snapshots:restore", vec!["--run".into(), "../etc".into()]),
+            // 已退役命令不再携带任何参数白名单
+            ("system:converge", vec!["--dry-run".into()]),
+            (
+                "snapshots:restore",
+                vec!["--run".into(), "20260905103000_12345".into()],
+            ),
             ("runs:get", vec!["--run".into()]),
             (
                 "runs:get",

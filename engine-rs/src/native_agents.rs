@@ -5,7 +5,7 @@
 //!   内置定义直接消费 store::BUILTIN_POLICY_JSON，不在此处复制。
 //! - 显式动作仅 install/upgrade/uninstall；status 只对已存在二进制执行固定 `--version` 探测。
 //! - 命令只在真实 apply 执行；plan、apply --dry-run、取消零执行零写。
-//! - apply 输出对齐前端 ApplyResultData {domain, dry_run, steps, snapshot, skipped}；
+//! - apply 输出对齐前端 ApplyResultData {domain, dry_run, steps, skipped}；
 //!   命令 exit 0 后必须探测到安装/卸载结果，否则报错而非谎报成功。
 
 use anyhow::{anyhow, bail, Result};
@@ -783,7 +783,6 @@ pub fn handle(ctx: &Context, req: &Request) -> Result<Value> {
                     "domain": "agents",
                     "dry_run": true,
                     "steps": [],
-                    "snapshot": Value::Null,
                     "skipped": [&parsed.agent_id],
                 }));
             }
@@ -829,7 +828,6 @@ pub fn handle(ctx: &Context, req: &Request) -> Result<Value> {
                 "domain": "agents",
                 "dry_run": false,
                 "steps": [{"name": step_name, "ok": true, "exit_code": output.exit_code}],
-                "snapshot": Value::Null,
                 "skipped": [],
             }))
         }

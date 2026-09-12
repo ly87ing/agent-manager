@@ -10,7 +10,6 @@ describe("DefinitionFormDialog", () => {
 
     render(
       <DefinitionFormDialog
-        domain="agents"
         existingNames={["claude-code", "codex"]}
         onSubmit={onSubmit}
         onClose={onClose}
@@ -79,7 +78,6 @@ describe("DefinitionFormDialog", () => {
 
     render(
       <DefinitionFormDialog
-        domain="agents"
         initial={initial}
         existingNames={["claude-code"]}
         onSubmit={onSubmit}
@@ -124,7 +122,6 @@ describe("DefinitionFormDialog", () => {
 
     render(
       <DefinitionFormDialog
-        domain="agents"
         initial={initial}
         existingNames={["codex"]}
         onSubmit={onSubmit}
@@ -164,7 +161,6 @@ describe("DefinitionFormDialog", () => {
 
     render(
       <DefinitionFormDialog
-        domain="agents"
         existingNames={["test-agent"]}
         onSubmit={onSubmit}
         onClose={onClose}
@@ -210,7 +206,6 @@ describe("DefinitionFormDialog", () => {
     const onClose = vi.fn();
     render(
       <DefinitionFormDialog
-        domain="agents"
         existingNames={[]}
         onSubmit={vi.fn()}
         onClose={onClose}
@@ -222,43 +217,6 @@ describe("DefinitionFormDialog", () => {
 
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(2);
-  });
-
-  it("保留工具分支兼容：domain 为 tools 时仍使用原有工具 JSON 流程", () => {
-    const onSubmit = vi.fn();
-    const onClose = vi.fn();
-
-    render(
-      <DefinitionFormDialog
-        domain="tools"
-        existingNames={["existing-tool"]}
-        onSubmit={onSubmit}
-        onClose={onClose}
-      />
-    );
-
-    expect(screen.getByRole("heading", { name: "添加工具" })).toBeInTheDocument();
-    expect(screen.getByLabelText("定义（JSON）")).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText("唯一名称"), { target: { value: "my-tool" } });
-    fireEvent.change(screen.getByLabelText("定义（JSON）"), {
-      target: {
-        value: JSON.stringify({
-          bin: "my-tool-bin",
-          install: "npm install -g my-tool",
-          upgrade: "npm install -g my-tool",
-        }),
-      },
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "保存并预览同步" }));
-
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledWith("my-tool", {
-      bin: "my-tool-bin",
-      install: "npm install -g my-tool",
-      upgrade: "npm install -g my-tool",
-    });
   });
 
   it("编辑已有定义：当前平台无安装/升级命令也可保存（不强迫补不支持的命令）", () => {
@@ -283,7 +241,6 @@ describe("DefinitionFormDialog", () => {
 
     render(
       <DefinitionFormDialog
-        domain="agents"
         initial={initial}
         existingNames={["codex"]}
         onSubmit={onSubmit}
@@ -323,7 +280,6 @@ describe("DefinitionFormDialog", () => {
 
     render(
       <DefinitionFormDialog
-        domain="agents"
         initial={initial}
         existingNames={["claude-code"]}
         onSubmit={onSubmit}
@@ -350,7 +306,7 @@ describe("DefinitionFormDialog", () => {
     render(
       <div>
         <button type="button">背景按钮</button>
-        <DefinitionFormDialog domain="agents" existingNames={[]} onSubmit={vi.fn()} onClose={vi.fn()} />
+        <DefinitionFormDialog existingNames={[]} onSubmit={vi.fn()} onClose={vi.fn()} />
       </div>
     );
 
@@ -370,7 +326,7 @@ describe("DefinitionFormDialog", () => {
 
   it("单渠道时管理渠道为只读名称，不可改名制造空 provider", () => {
     render(
-      <DefinitionFormDialog domain="agents" existingNames={[]} onSubmit={vi.fn()} onClose={vi.fn()} />
+      <DefinitionFormDialog existingNames={[]} onSubmit={vi.fn()} onClose={vi.fn()} />
     );
 
     // 只读文本展示，不提供可编辑 input（改名会丢草稿命令并假通过验证）
@@ -385,7 +341,7 @@ describe("DefinitionFormDialog", () => {
         <div>
           <button type="button" onClick={() => setOpen(true)}>添加助手</button>
           {open && (
-            <DefinitionFormDialog domain="agents" existingNames={[]} onSubmit={vi.fn()} onClose={() => setOpen(false)} />
+            <DefinitionFormDialog existingNames={[]} onSubmit={vi.fn()} onClose={() => setOpen(false)} />
           )}
         </div>
       );

@@ -9,7 +9,6 @@ import {
   type PlanAction,
   type PolicyData,
   type RunEntry,
-  type SnapshotEntry,
 } from "../lib/contract";
 
 export function makeFreshness(overrides: Partial<Freshness> = {}): Freshness {
@@ -83,7 +82,6 @@ export function makeApplyResult(overrides: Partial<ApplyResultData> = {}): Apply
     steps: [
       { name: "mcp-sync", ok: true, exit_code: 0 },
     ],
-    snapshot: { run_id: "20260906T010000Z-mock01", path: "/tmp/mock-snapshots/20260906T010000Z-mock01", file_count: 3, link_count: 0 },
     skipped: [],
     ...overrides,
   };
@@ -94,18 +92,6 @@ export function makeRunEntry(overrides: Partial<RunEntry> = {}): RunEntry {
     run_id: "20260906T010000Z-mock01",
     operations: 1,
     last_at: "2026-09-06T01:00:00Z",
-    ...overrides,
-  };
-}
-
-export function makeSnapshotEntry(overrides: Partial<SnapshotEntry> = {}): SnapshotEntry {
-  return {
-    run_id: "20260906T010000Z-mock01",
-    path: "/tmp/mock-snapshots/20260906T010000Z-mock01",
-    created_at: "2026-09-06T01:00:00Z",
-    command: "mcp.apply",
-    file_count: 3,
-    link_count: 1,
     ...overrides,
   };
 }

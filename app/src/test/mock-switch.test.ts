@@ -20,7 +20,6 @@ describe("dev-only mock 开关", () => {
     for (const command of [
       "system:audit",
       "agents:status",
-      "tools:status",
       "mcp:status",
       "skills:status",
       "rules:status",
@@ -39,9 +38,8 @@ describe("dev-only mock 开关", () => {
     const agents = await client.run("agents:status");
     const skills = await client.run("skills:status");
     const rules = await client.run("rules:status");
-    const tools = await client.run("tools:status");
 
-    const all = [mcp, agents, skills, rules, tools].flatMap(
+    const all = [mcp, agents, skills, rules].flatMap(
       (env) => (env.data as { elements: Array<{ freshness: { state: string }; state: string }> }).elements,
     );
     const freshnessStates = new Set(all.map((el) => el.freshness.state));
