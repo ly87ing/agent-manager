@@ -157,6 +157,34 @@ pub fn verify_skill_version(data_dir: &Path, version: &str) -> Result<PathBuf> {
     Ok(content_path)
 }
 
+/// skill_paths 解析失败的结构化信息：status 用于呈现 discovery_error
+/// （category 为固定词汇表，item 为出问题的 skill_paths 项），apply 路径
+/// 仍以 anyhow 错误消息上抛，消息文本与历史一致、不含敏感正文。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillPathsError {
+    pub category: &'static str,
+    pub item: Option<String>,
+    pub detail: String,
+}
+
+impl SkillPathsError {
+    fn new(category: &'static str, item: Option<String>, detail: String) -> anyhow::Error {
+        anyhow::Error::new(Self {
+            category,
+            item,
+            detail,
+        })
+    }
+}
+
+impl std::fmt::Display for SkillPathsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.detail)
+    }
+}
+
+impl std::error::Error for SkillPathsError {}
+
 pub fn resolve_skill_search_paths(
     repo_dir: &Path,
     def: &Map<String, Value>,
@@ -166,29 +194,53 @@ pub fn resolve_skill_search_paths(
         None | Some(Value::Null) => Ok(vec![repo_canonical]),
         Some(Value::Array(items)) => {
             if items.is_empty() {
-                bail!("skill_paths 必须是非空数组");
+                return Err(SkillPathsError::new(
+                    "empty-list",
+                    None,
+                    "skill_paths 必须是非空数组".to_string(),
+                ));
             }
             let mut paths = Vec::new();
             for item in items {
-                let rel = item
-                    .as_str()
-                    .ok_or_else(|| anyhow!("skill_paths 项必须是字符串"))?;
+                let rel = item.as_str().ok_or_else(|| {
+                    SkillPathsError::new(
+                        "non-string-item",
+                        None,
+                        "skill_paths 项必须是字符串".to_string(),
+                    )
+                })?;
                 if rel.is_empty() || rel.contains('\0') {
-                    bail!("skill_paths 包含非法路径");
+                    return Err(SkillPathsError::new(
+                        "invalid-path",
+                        Some(rel.to_string()),
+                        "skill_paths 包含非法路径".to_string(),
+                    ));
                 }
                 let path = repo_canonical.join(rel);
                 let resolved = resolve_loose(&path);
                 if !is_path_within(&resolved, &repo_canonical) {
-                    bail!("skill_paths 包含越界路径: {}", rel);
+                    return Err(SkillPathsError::new(
+                        "out-of-bounds",
+                        Some(rel.to_string()),
+                        format!("skill_paths 包含越界路径: {}", rel),
+                    ));
                 }
                 if !resolved.is_dir() {
-                    bail!("skill_paths 指向的目录不存在: {}", rel);
+                    return Err(SkillPathsError::new(
+                        "missing-dir",
+                        Some(rel.to_string()),
+                        format!("skill_paths 指向的目录不存在: {}", rel),
+                    ));
                 }
                 paths.push(resolved);
             }
             Ok(paths)
         }
-        _ => bail!("skill_paths 必须是字符串数组或 null"),
+        _ => Err(SkillPathsError::new(
+            "invalid-shape",
+            None,
+            "skill_paths 必须是字符串数组或 null".to_string(),
+        )),
     }
 }
 

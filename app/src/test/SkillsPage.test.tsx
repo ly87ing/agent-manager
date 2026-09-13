@@ -368,3 +368,86 @@ describe("SkillsPage 三级视图", () => {
     expect(screen.getByText("Rust 原生引擎暂未提供此操作")).toBeInTheDocument();
   });
 });
+
+describe("SkillsPage 空态引导与发现失败呈现", () => {
+  it("存在集合但全部 repo_cached=false 时，全部技能空态引导去「集合列表」更新资源库", async () => {
+    const routes = {
+      "skills:status": makeEnvelope(
+        {
+          domain: "skills",
+          elements: [
+            makeElement({
+              id: "skill:agent-skills",
+              domain: "skills",
+              spec: { url: "https://github.com/example/agent-skills.git", skill_paths: null, agents: ["codex"] },
+              observed: {
+                repo_cache: "/repo/agent-skills",
+                repo_cached: false,
+                owner_marked: false,
+                discovered: [],
+                discovery_error: null,
+                discovery_inbox: [],
+                extra_links: [],
+                actions: ["update", "disable", "remove"],
+                blocked_reason: null,
+              },
+              state: "not-materialized",
+            }),
+          ],
+        },
+        { command: "skills.status" },
+      ),
+    };
+    renderWithEngine(<SkillsPage />, routes);
+    await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
+    const empty = await screen.findByTestId("skills-empty-state");
+    expect(empty).toHaveTextContent("集合资源库尚未拉取：请到「集合列表」点击「更新资源库」，拉取成功后技能会出现在这里");
+    expect(empty).not.toHaveTextContent("无符合筛选条件的技能分配");
+  });
+
+  it("集合已拉取但无技能行时保持现有空态文案；发现失败在集合卡片以警告样式呈现", async () => {
+    const routes = {
+      "skills:status": makeEnvelope(
+        {
+          domain: "skills",
+          elements: [
+            makeElement({
+              id: "skill:broken-skills",
+              domain: "skills",
+              spec: { url: "https://github.com/example/broken-skills.git", skill_paths: ["alpha", "ghost"], agents: ["codex"] },
+              observed: {
+                repo_cache: "/repo/broken-skills",
+                repo_cached: true,
+                owner_marked: true,
+                discovered: [],
+                discovery_error: {
+                  category: "missing-dir",
+                  skill_paths_item: "ghost",
+                  message: "技能发现失败[missing-dir]: skill_paths 指向的目录不存在: ghost",
+                },
+                discovery_inbox: [],
+                extra_links: [],
+                actions: ["update", "disable", "remove"],
+                blocked_reason: "技能发现失败（missing-dir），集合暂按空发现处理；修复 skill_paths 后自动恢复",
+              },
+              state: "managed-ok",
+            }),
+          ],
+        },
+        { command: "skills.status" },
+      ),
+    };
+    renderWithEngine(<SkillsPage />, routes);
+    await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
+    const empty = await screen.findByTestId("skills-empty-state");
+    expect(empty).toHaveTextContent("无符合筛选条件的技能分配");
+    expect(empty).not.toHaveTextContent("集合资源库尚未拉取");
+
+    await userEvent.click(screen.getByRole("tab", { name: "集合列表" }));
+    const card = await screen.findByTestId("collection-card-broken-skills");
+    expect(within(card).getByTestId("discovery-error-broken-skills")).toHaveTextContent(
+      "技能发现失败[missing-dir]: skill_paths 指向的目录不存在: ghost",
+    );
+    expect(within(card).getByText(/技能发现失败（missing-dir）/)).toBeInTheDocument();
+  });
+});

@@ -9,10 +9,37 @@ use super::paths::{
     resolve_loose,
 };
 use super::persistence::load_bindings_readonly;
-use super::snapshot::{discover_repo_skills, hash_skill_dir};
+use super::snapshot::{discover_repo_skills, hash_skill_dir, SkillPathsError};
 use super::{AgentTargetInfo, CollectionDef};
 use crate::native::{Context, Request};
 use crate::store;
+
+/// 发现失败的固定语义块：category 为固定词汇表（与 resolve_skill_search_paths
+/// 一致，未知错误落 discovery-failed），skill_paths_item 为出问题的配置项
+/// （形状级错误无单项为 null），message 含类别与问题项、不回显敏感正文。
+fn discovery_error_value(err: &anyhow::Error) -> Value {
+    let (category, item, detail) = match err.downcast_ref::<SkillPathsError>() {
+        Some(e) => (
+            e.category,
+            e.item
+                .as_ref()
+                .map(|s| Value::String(s.clone()))
+                .unwrap_or(Value::Null),
+            e.detail.clone(),
+        ),
+        None => (
+            "discovery-failed",
+            Value::Null,
+            // 脱敏：只保留错误类别链顶层消息（本路径实际只会来自 skill_paths 校验）
+            err.to_string(),
+        ),
+    };
+    json!({
+        "category": category,
+        "skill_paths_item": item,
+        "message": format!("技能发现失败[{}]: {}", category, detail),
+    })
+}
 
 pub struct DomainMetadata {
     pub collections: BTreeMap<String, CollectionDef>,
@@ -490,6 +517,7 @@ fn build_collection_element(
     repo_cached: bool,
     owner_marked: bool,
     discovered_names: &[String],
+    discovery_error: Option<&Value>,
     inbox_skills: &[String],
     probes: &BTreeMap<String, crate::native_upstream::ProbeRecord>,
 ) -> Value {
@@ -525,6 +553,19 @@ fn build_collection_element(
         })
     };
 
+    // 发现失败不静默：discovery_error 给出类别与问题项，blocked_reason 给可读摘要；
+    // state 与 actions 计算不受影响，集合按空发现处理。
+    let blocked_reason = discovery_error.map(|e| {
+        let category = e
+            .get("category")
+            .and_then(Value::as_str)
+            .unwrap_or("discovery-failed");
+        format!(
+            "技能发现失败（{}），集合暂按空发现处理；修复 skill_paths 后自动恢复",
+            category
+        )
+    });
+
     json!({
         "id": coll_id,
         "domain": "skills",
@@ -541,10 +582,11 @@ fn build_collection_element(
             "repo_cached": repo_cached,
             "owner_marked": owner_marked,
             "discovered": discovered_names,
+            "discovery_error": discovery_error.cloned().unwrap_or(Value::Null),
             "discovery_inbox": inbox_skills,
             "extra_links": [],
             "actions": coll_actions,
-            "blocked_reason": Value::Null,
+            "blocked_reason": blocked_reason.map(Value::String).unwrap_or(Value::Null),
         },
         "state": coll_state,
         "freshness": freshness,
@@ -567,10 +609,17 @@ pub fn build_status(ctx: &Context) -> Result<Value> {
         let repo_cached = repo_dir.is_dir();
         let owner_marked = repo_dir.join(".agent-manager-owned").exists();
 
-        let (discovered_map, _dups) = if repo_cached {
-            discover_repo_skills(&repo_dir, &coll.raw).unwrap_or_default()
+        let (discovered_map, _dups, discovery_error) = if repo_cached {
+            match discover_repo_skills(&repo_dir, &coll.raw) {
+                Ok((map, dups)) => (map, dups, None),
+                Err(err) => (
+                    BTreeMap::new(),
+                    BTreeSet::new(),
+                    Some(discovery_error_value(&err)),
+                ),
+            }
         } else {
-            (BTreeMap::new(), BTreeSet::new())
+            (BTreeMap::new(), BTreeSet::new(), None)
         };
         let discovered_names: Vec<String> = discovered_map.keys().cloned().collect();
 
@@ -603,6 +652,7 @@ pub fn build_status(ctx: &Context) -> Result<Value> {
             repo_cached,
             owner_marked,
             &discovered_names,
+            discovery_error.as_ref(),
             &inbox_skills,
             &probes,
         ));

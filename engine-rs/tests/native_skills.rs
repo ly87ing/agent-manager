@@ -1061,3 +1061,98 @@ fn skills_dry_run_with_existing_db_does_not_create_apply_lock() {
 
     let _ = std::fs::remove_dir_all(base);
 }
+
+#[test]
+fn skills_discovery_error_surfaces_on_collection_and_recovers() {
+    let (root, context) = temp_ctx("skills-discovery-error");
+
+    // 受管仓库缓存已落地，但 skill_paths 指向不存在的目录 ghost
+    let repo_dir = context.data_dir.join("repositories").join("broken-skills");
+    std::fs::create_dir_all(repo_dir.join("alpha")).unwrap();
+    std::fs::write(repo_dir.join("alpha").join("SKILL.md"), "# Alpha\n").unwrap();
+
+    let set_res = execute(
+        &context,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "skills.repositories.broken-skills",
+                "--value",
+                "{\"url\":\"https://example.com/broken-skills.git\",\"skill_paths\":[\"alpha\",\"ghost\"],\"agents\":[\"codex\"]}",
+            ],
+        ),
+    );
+    assert!(set_res.ok, "{:?}", set_res.errors);
+
+    // 1. 发现失败：status 信封仍 ok，集合元素带 discovery_error 且 discovered 为空
+    let status = execute(&context, &request("skills:status", &[]));
+    assert!(status.ok, "{:?}", status.errors);
+    assert!(status.errors.is_empty(), "status 不应产生错误诊断");
+    let elements = status.data["elements"].as_array().unwrap();
+    let coll_el = elements
+        .iter()
+        .find(|el| el["id"] == "skill:broken-skills")
+        .expect("集合元素必须存在");
+    let discovery_error = &coll_el["observed"]["discovery_error"];
+    assert_eq!(discovery_error["category"], "missing-dir");
+    assert_eq!(discovery_error["skill_paths_item"], "ghost");
+    let message = discovery_error["message"].as_str().unwrap();
+    assert!(
+        message.contains("missing-dir") && message.contains("ghost"),
+        "消息须含失败类别与问题项: {}",
+        message
+    );
+    assert_eq!(
+        coll_el["observed"]["discovered"].as_array().unwrap().len(),
+        0,
+        "发现失败时 discovered 必须为空"
+    );
+    let blocked = coll_el["observed"]["blocked_reason"].as_str().unwrap();
+    assert!(
+        blocked.contains("missing-dir"),
+        "受阻摘要须可读: {}",
+        blocked
+    );
+    // state 计算保持不变：仓库已缓存且启用 → managed-ok；actions 不变
+    assert_eq!(coll_el["state"], "managed-ok");
+    let actions: Vec<&str> = coll_el["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a.as_str().unwrap())
+        .collect();
+    assert_eq!(actions, vec!["update", "disable", "remove"]);
+    // 集合下不产生任何 skill 元素
+    assert!(
+        !elements.iter().any(|el| el["id"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("skill:broken-skills/")),
+        "发现失败时不应产生 skill 元素"
+    );
+
+    // 2. 修复（目录补齐）后 discovery_error 消失，技能正常发现
+    std::fs::create_dir_all(repo_dir.join("ghost")).unwrap();
+    std::fs::write(repo_dir.join("ghost").join("SKILL.md"), "# Ghost\n").unwrap();
+    let status2 = execute(&context, &request("skills:status", &[]));
+    assert!(status2.ok, "{:?}", status2.errors);
+    let elements2 = status2.data["elements"].as_array().unwrap();
+    let coll_el2 = elements2
+        .iter()
+        .find(|el| el["id"] == "skill:broken-skills")
+        .unwrap();
+    assert!(coll_el2["observed"]["discovery_error"].is_null());
+    assert!(coll_el2["observed"]["blocked_reason"].is_null());
+    let discovered: Vec<&str> = coll_el2["observed"]["discovered"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s.as_str().unwrap())
+        .collect();
+    assert_eq!(discovered, vec!["alpha", "ghost"]);
+
+    let _ = std::fs::remove_dir_all(root);
+}

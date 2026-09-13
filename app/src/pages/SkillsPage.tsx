@@ -10,6 +10,7 @@ import type { EngineElement, PolicyData, PolicyLayers, StatusData } from "../lib
 import {
   agentCellsOf,
   type SkillAgentCell,
+  type SkillCollectionObserved,
   type SkillCollectionSpec,
   type SkillObserved,
   type SkillSpec,
@@ -198,6 +199,15 @@ export default function SkillsPage({
     }));
   });
 
+  // 空态引导：有集合但全未拉取时指向「更新资源库」；其余（含无集合、筛选无结果、
+  // 已拉取但发现失败/无技能）保持通用文案，发现失败由集合卡片的 discovery_error 呈现。
+  const allCollectionsUncached =
+    collections.length > 0 &&
+    collections.every((col) => (col.observed as SkillCollectionObserved).repo_cached === false);
+  const emptyAssignmentsText = allCollectionsUncached
+    ? "集合资源库尚未拉取：请到「集合列表」点击「更新资源库」，拉取成功后技能会出现在这里"
+    : "无符合筛选条件的技能分配";
+
   return (
     <div className="space-y-6">
       <PageHeader title="技能" description="管理技能集合与技能分发。支持查看集合资源库状态，并在全部技能列表中按集合与助手筛选操作。" />
@@ -354,7 +364,7 @@ export default function SkillsPage({
               </tbody>
             </table>
             {assignmentRows.length === 0 && (
-              <p className="py-8 text-center text-sm text-slate-400">无符合筛选条件的技能分配</p>
+              <p data-testid="skills-empty-state" className="py-8 text-center text-sm text-slate-400">{emptyAssignmentsText}</p>
             )}
           </div>
         </div>

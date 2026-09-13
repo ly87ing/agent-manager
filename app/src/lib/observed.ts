@@ -104,11 +104,20 @@ export interface SkillCollectionSpec {
   new_skill_default?: string;
 }
 
+/** 集合发现失败的固定语义块（引擎 skills:status observed.discovery_error）。 */
+export interface SkillDiscoveryError {
+  /** 固定词汇表：missing-dir / out-of-bounds / invalid-path / non-string-item / empty-list / invalid-shape / discovery-failed。 */
+  category?: string;
+  skill_paths_item?: string | null;
+  message?: string;
+}
+
 export interface SkillCollectionObserved {
   repo_cache?: string;
   repo_cached?: boolean;
   owner_marked?: boolean;
   discovered?: string[];
+  discovery_error?: SkillDiscoveryError | null;
   discovery_inbox?: string[];
   extra_links?: string[];
   actions?: string[];

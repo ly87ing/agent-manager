@@ -85,6 +85,15 @@ export function SkillCollectionCard({
 
       <p className="mt-2 text-xs text-slate-400">新技能需单独添加到助手；更新资源库不会改变助手已选版本。</p>
 
+      {observed.discovery_error && (
+        <div
+          data-testid={`discovery-error-${name}`}
+          className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+        >
+          {observed.discovery_error.message ?? "技能发现失败"}
+        </div>
+      )}
+
       {blockedReason && (
         <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           受阻原因：{blockedReason}
