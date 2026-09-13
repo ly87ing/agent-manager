@@ -12,9 +12,39 @@
       "description": "One entry per managed element of the domain.",
       "type": "array",
       "items": {"$ref": "#/$defs/element"}
+    },
+    "import_candidates": {
+      "description": "MCP domain only: unmanaged server entries found in configured agent target files, offered for import into the library. Each spec is masked — env and static header values are always '<literal>', only Codex env_http_headers pass through as ${VAR} references; plaintext secret values never appear. Read-only, zero-write.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/import_candidate"}
     }
   },
   "$defs": {
+    "import_candidate": {
+      "description": "One unmanaged MCP server entry discovered in an agent's existing config file.",
+      "type": "object",
+      "required": ["name", "agent", "transport", "spec"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "Server entry name as found in the client config; guaranteed to pass server-name validation.",
+          "type": "string"
+        },
+        "agent": {
+          "description": "Canonical agent id whose target file holds the entry, e.g. 'claude-code' or 'codex'.",
+          "type": "string"
+        },
+        "transport": {
+          "description": "Entry transport shape: 'stdio' (command/args/env) or 'remote' (url/headers).",
+          "type": "string",
+          "enum": ["stdio", "remote"]
+        },
+        "spec": {
+          "description": "Masked definition shape: stdio {command, args, env:{KEY:'<literal>'}}; remote {url, headers:{NAME:'<literal>'|'${VAR}'}}.",
+          "type": "object"
+        }
+      }
+    },
     "element": {
       "description": "Engine Contract v1 element model. Each managed object is exposed with observed state, freshness and the actions currently offered by the engine.",
       "type": "object",

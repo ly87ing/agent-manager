@@ -11,6 +11,7 @@
 
 pub mod apply;
 pub mod codecs;
+pub mod discovery;
 pub mod model;
 pub mod persistence;
 pub mod plan;

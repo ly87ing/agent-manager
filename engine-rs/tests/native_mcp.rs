@@ -6964,3 +6964,711 @@ fn mcp_test_policy_set_validates_full_definition_shape() {
 
     let _ = std::fs::remove_dir_all(root);
 }
+
+// ---------- import_candidates：未受管现有配置发现（只读、掩码） ----------
+
+fn candidate_names(status: &agent_manager_engine::Envelope) -> Vec<(String, String)> {
+    status.data["import_candidates"]
+        .as_array()
+        .expect("import_candidates 必须是数组")
+        .iter()
+        .map(|c| {
+            (
+                c["name"].as_str().unwrap().to_string(),
+                c["agent"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect()
+}
+
+fn candidate_by_name<'a>(
+    status: &'a agent_manager_engine::Envelope,
+    name: &str,
+) -> &'a serde_json::Value {
+    status.data["import_candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == name)
+        .unwrap_or_else(|| panic!("候选 {} 必须存在", name))
+}
+
+#[test]
+fn mcp_import_candidates_filters_masks_and_classifies() {
+    let (root, ctx) = temp_ctx("import-candidates");
+
+    // 注册 OpenCode agent
+    let set_oc = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "agents.definitions.opencode",
+                "--value",
+                r#"{"display_name":"OpenCode","mcp_config":{"path":"~/.config/opencode/opencode.json","format":"opencode"}}"#,
+            ],
+        ),
+    );
+    assert!(set_oc.ok, "{:?}", set_oc.errors);
+
+    // 库内同名定义：文件中的未受管 lib-dup 不得成为候选
+    let set_dup = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions.lib-dup",
+                "--value",
+                r#"{"command":"npx","args":["-y","lib-dup-mcp"]}"#,
+            ],
+        ),
+    );
+    assert!(set_dup.ok, "{:?}", set_dup.errors);
+
+    // binding 已有记录：apply add bound-one @ claude-code 后物理删除定义 → orphan
+    let set_bound = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions.bound-one",
+                "--value",
+                r#"{"command":"echo","args":["bound"],"agents":["claude-code"]}"#,
+            ],
+        ),
+    );
+    assert!(set_bound.ok, "{:?}", set_bound.errors);
+    let add_bound = execute(
+        &ctx,
+        &request(
+            "mcp:apply",
+            &[
+                "--only",
+                "mcp:bound-one",
+                "--action",
+                "add",
+                "--agent",
+                "claude-code",
+            ],
+        ),
+    );
+    assert!(add_bound.ok, "{:?}", add_bound.errors);
+    let del_bound = execute(
+        &ctx,
+        &request(
+            "policy:delete",
+            &["--layer", "local", "--key", "mcp.definitions.bound-one"],
+        ),
+    );
+    assert!(del_bound.ok, "{:?}", del_bound.errors);
+
+    // Claude JSON：覆盖 stdio/远程/受管（条目级与 env 内标记）/库内同名/binding 已知/非法名
+    let claude_cfg = ctx.home_dir.join(".claude.json");
+    std::fs::write(
+        &claude_cfg,
+        r#"{
+  "mcpServers": {
+    "plain-stdio": {"command": "npx", "args": ["-y", "plain-mcp"], "env": {"PLAIN_TOKEN": "sentinel-claude-env-1"}},
+    "managed-one": {"command": "x", "env": {"_MANAGED_BY": "agent-manager"}},
+    "managed-remote": {"type": "http", "url": "https://example.com/managed", "_MANAGED_BY": "agent-manager"},
+    "lib-dup": {"command": "npx", "args": ["lib-dup-mcp"]},
+    "bound-one": {"command": "echo", "args": ["bound"]},
+    "bad name!": {"command": "npx"},
+    "remote-claude": {"type": "http", "url": "https://api.example.com/mcp", "headers": {"Authorization": "sentinel-claude-header-2", "x-api-key": "sentinel-claude-header-3"}}
+  }
+}"#,
+    )
+    .unwrap();
+
+    // Codex TOML：stdio env 掩码、env_http_headers 引用直通、静态 http_headers 掩码
+    let codex_cfg = ctx.home_dir.join(".codex").join("config.toml");
+    std::fs::create_dir_all(codex_cfg.parent().unwrap()).unwrap();
+    std::fs::write(
+        &codex_cfg,
+        r#"[mcp_servers.codex-stdio]
+command = "codex-mcp"
+args = ["--serve"]
+
+[mcp_servers.codex-stdio.env]
+CODEX_KEY = "sentinel-codex-env-4"
+
+[mcp_servers.codex-remote]
+url = "https://codex.example.com/mcp"
+
+[mcp_servers.codex-remote.env_http_headers]
+Authorization = "REMOTE_TOKEN"
+
+[mcp_servers.codex-remote.http_headers]
+x-static = "sentinel-codex-header-5"
+"#,
+    )
+    .unwrap();
+
+    // OpenCode JSON：local command 数组 + environment；remote + headers
+    let oc_cfg = ctx
+        .home_dir
+        .join(".config")
+        .join("opencode")
+        .join("opencode.json");
+    std::fs::create_dir_all(oc_cfg.parent().unwrap()).unwrap();
+    std::fs::write(
+        &oc_cfg,
+        r#"{
+  "mcp": {
+    "oc-stdio": {"type": "local", "command": ["oc-mcp", "--serve"], "environment": {"OC_KEY": "sentinel-oc-env-6"}},
+    "oc-remote": {"type": "remote", "url": "https://oc.example.com/mcp", "headers": {"x-token": "sentinel-oc-header-7"}}
+  }
+}"#,
+    )
+    .unwrap();
+
+    let claude_before = std::fs::read_to_string(&claude_cfg).unwrap();
+    let codex_before = std::fs::read_to_string(&codex_cfg).unwrap();
+    let oc_before = std::fs::read_to_string(&oc_cfg).unwrap();
+
+    let status = execute(&ctx, &request("mcp:status", &[]));
+    assert!(status.ok, "{:?}", status.errors);
+
+    // 候选只含未受管、未入库、无 binding、名称合法的条目
+    let mut names = candidate_names(&status);
+    names.sort();
+    assert_eq!(
+        names,
+        vec![
+            ("codex-remote".to_string(), "codex".to_string()),
+            ("codex-stdio".to_string(), "codex".to_string()),
+            ("oc-remote".to_string(), "opencode".to_string()),
+            ("oc-stdio".to_string(), "opencode".to_string()),
+            ("plain-stdio".to_string(), "claude-code".to_string()),
+            ("remote-claude".to_string(), "claude-code".to_string()),
+        ],
+        "受管/库内同名/binding 已知/非法名一律不出现"
+    );
+
+    // 远程/stdio 分类与掩码形态
+    let plain = candidate_by_name(&status, "plain-stdio");
+    assert_eq!(plain["transport"], "stdio");
+    assert_eq!(plain["spec"]["command"], "npx");
+    assert_eq!(plain["spec"]["args"][0], "-y");
+    assert_eq!(plain["spec"]["env"]["PLAIN_TOKEN"], "<literal>");
+
+    let remote_claude = candidate_by_name(&status, "remote-claude");
+    assert_eq!(remote_claude["transport"], "remote");
+    assert_eq!(remote_claude["spec"]["url"], "https://api.example.com/mcp");
+    assert_eq!(
+        remote_claude["spec"]["headers"]["Authorization"],
+        "<literal>"
+    );
+    assert_eq!(remote_claude["spec"]["headers"]["x-api-key"], "<literal>");
+
+    let codex_stdio = candidate_by_name(&status, "codex-stdio");
+    assert_eq!(codex_stdio["transport"], "stdio");
+    assert_eq!(codex_stdio["spec"]["env"]["CODEX_KEY"], "<literal>");
+
+    // Codex env_http_headers 引用直通 ${VAR}；静态 http_headers 一律 <literal>
+    let codex_remote = candidate_by_name(&status, "codex-remote");
+    assert_eq!(codex_remote["transport"], "remote");
+    assert_eq!(
+        codex_remote["spec"]["headers"]["Authorization"],
+        "${REMOTE_TOKEN}"
+    );
+    assert_eq!(codex_remote["spec"]["headers"]["x-static"], "<literal>");
+
+    let oc_stdio = candidate_by_name(&status, "oc-stdio");
+    assert_eq!(oc_stdio["transport"], "stdio");
+    assert_eq!(oc_stdio["spec"]["command"], "oc-mcp");
+    assert_eq!(oc_stdio["spec"]["args"][0], "--serve");
+    assert_eq!(oc_stdio["spec"]["env"]["OC_KEY"], "<literal>");
+    let oc_remote = candidate_by_name(&status, "oc-remote");
+    assert_eq!(oc_remote["transport"], "remote");
+    assert_eq!(oc_remote["spec"]["headers"]["x-token"], "<literal>");
+
+    // 哨兵值断言：任何 env/header 明文绝不出现在 status JSON
+    let status_json = serde_json::to_string(&status.data).unwrap();
+    for sentinel in [
+        "sentinel-claude-env-1",
+        "sentinel-claude-header-2",
+        "sentinel-claude-header-3",
+        "sentinel-codex-env-4",
+        "sentinel-codex-header-5",
+        "sentinel-oc-env-6",
+        "sentinel-oc-header-7",
+    ] {
+        assert!(
+            !status_json.contains(sentinel),
+            "status JSON 绝不得包含明文 {}",
+            sentinel
+        );
+    }
+
+    // orphan 仍走既有元素路径，不进候选
+    let elements = status.data["elements"].as_array().unwrap();
+    assert!(elements.iter().any(|e| e["id"] == "mcp:bound-one"));
+
+    // 只读保证：status 后目标文件内容与之前完全一致
+    assert_eq!(std::fs::read_to_string(&claude_cfg).unwrap(), claude_before);
+    assert_eq!(std::fs::read_to_string(&codex_cfg).unwrap(), codex_before);
+    assert_eq!(std::fs::read_to_string(&oc_cfg).unwrap(), oc_before);
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn mcp_import_candidates_degrades_per_agent_on_missing_or_corrupt_files() {
+    let (root, ctx) = temp_ctx("import-degrade");
+
+    // 1. 全部目标文件不存在：候选为空数组，status 仍 ok
+    let status = execute(&ctx, &request("mcp:status", &[]));
+    assert!(status.ok, "{:?}", status.errors);
+    assert_eq!(
+        status.data["import_candidates"].as_array().unwrap().len(),
+        0,
+        "无目标文件时候选为空数组"
+    );
+
+    // 2. Claude 文件损坏、Codex 文件正常：Claude 候选为空（不报错），Codex 候选仍在
+    std::fs::create_dir_all(&ctx.home_dir).unwrap();
+    let claude_cfg = ctx.home_dir.join(".claude.json");
+    std::fs::write(&claude_cfg, "{ 这不是合法 JSON").unwrap();
+    let codex_cfg = ctx.home_dir.join(".codex").join("config.toml");
+    std::fs::create_dir_all(codex_cfg.parent().unwrap()).unwrap();
+    std::fs::write(
+        &codex_cfg,
+        "[mcp_servers.only-codex]\ncommand = \"codex-mcp\"\n",
+    )
+    .unwrap();
+
+    let status2 = execute(&ctx, &request("mcp:status", &[]));
+    assert!(status2.ok, "{:?}", status2.errors);
+    assert_eq!(
+        candidate_names(&status2),
+        vec![("only-codex".to_string(), "codex".to_string())],
+        "损坏文件只影响本 agent 候选，不影响其他 agent"
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn mcp_import_conversion_definitions_pass_save_validation_without_touching_targets() {
+    let (root, ctx) = temp_ctx("import-convert");
+
+    std::fs::create_dir_all(&ctx.home_dir).unwrap();
+    let claude_cfg = ctx.home_dir.join(".claude.json");
+    std::fs::write(
+        &claude_cfg,
+        r#"{
+  "mcpServers": {
+    "plain-stdio": {"command": "npx", "args": ["-y", "plain-mcp"], "env": {"PLAIN_TOKEN": "sentinel-env", "lower_key": "sentinel-env-2"}},
+    "remote-claude": {"type": "http", "url": "https://api.example.com/mcp", "headers": {"Authorization": "sentinel-header", "x-api-key": "sentinel-header-2"}}
+  }
+}"#,
+    )
+    .unwrap();
+    let codex_cfg = ctx.home_dir.join(".codex").join("config.toml");
+    std::fs::create_dir_all(codex_cfg.parent().unwrap()).unwrap();
+    std::fs::write(
+        &codex_cfg,
+        "[mcp_servers.codex-remote]\nurl = \"https://codex.example.com/mcp\"\n\n[mcp_servers.codex-remote.env_http_headers]\nAuthorization = \"REMOTE_TOKEN\"\n",
+    )
+    .unwrap();
+
+    let status = execute(&ctx, &request("mcp:status", &[]));
+    assert!(status.ok, "{:?}", status.errors);
+    let claude_before = std::fs::read_to_string(&claude_cfg).unwrap();
+    let codex_before = std::fs::read_to_string(&codex_cfg).unwrap();
+
+    // 模拟前端导入转换：env 值一律 ${<ENV_KEY>}；literal header 一律
+    // ${<HEADER_NAME大写下划线化>}；${VAR} 引用直通；agents 固定为来源 agent。
+    let plain = candidate_by_name(&status, "plain-stdio");
+    let env_in = plain["spec"]["env"].as_object().unwrap();
+    let mut env_out = serde_json::Map::new();
+    for key in env_in.keys() {
+        env_out.insert(
+            key.clone(),
+            serde_json::Value::String(format!("${{{}}}", key)),
+        );
+    }
+    let stdio_def = serde_json::json!({
+        "command": plain["spec"]["command"],
+        "args": plain["spec"]["args"],
+        "env": env_out,
+        "agents": [plain["agent"]],
+        "_delete": false,
+        "_replace": true,
+    });
+    let set_stdio = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions.plain-stdio",
+                "--value",
+                &stdio_def.to_string(),
+            ],
+        ),
+    );
+    assert!(
+        set_stdio.ok,
+        "env→${{ENV_KEY}} 转换后定义必须过保存校验: {:?}",
+        set_stdio.errors
+    );
+
+    let header_var = |name: &str| -> String {
+        let mut v: String = name
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() {
+                    c.to_ascii_uppercase()
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        if v.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+            v.insert(0, '_');
+        }
+        v
+    };
+    let convert_headers = |cand: &serde_json::Value| -> serde_json::Value {
+        let headers_in = cand["spec"]["headers"].as_object().unwrap();
+        let mut out = serde_json::Map::new();
+        for (name, value) in headers_in {
+            let v = value.as_str().unwrap();
+            let converted = if v.starts_with("${") && v.ends_with('}') {
+                v.to_string()
+            } else {
+                format!("${{{}}}", header_var(name))
+            };
+            out.insert(name.clone(), serde_json::Value::String(converted));
+        }
+        serde_json::json!({
+            "url": cand["spec"]["url"],
+            "headers": out,
+            "agents": [cand["agent"]],
+            "_delete": false,
+            "_replace": true,
+        })
+    };
+
+    let remote_def = convert_headers(candidate_by_name(&status, "remote-claude"));
+    assert_eq!(remote_def["headers"]["Authorization"], "${AUTHORIZATION}");
+    assert_eq!(remote_def["headers"]["x-api-key"], "${X_API_KEY}");
+    let set_remote = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions.remote-claude",
+                "--value",
+                &remote_def.to_string(),
+            ],
+        ),
+    );
+    assert!(
+        set_remote.ok,
+        "literal header→${{HEADER_NAME}} 转换后定义必须过保存校验: {:?}",
+        set_remote.errors
+    );
+
+    let codex_def = convert_headers(candidate_by_name(&status, "codex-remote"));
+    assert_eq!(
+        codex_def["headers"]["Authorization"], "${REMOTE_TOKEN}",
+        "${{VAR}} 引用必须直通"
+    );
+    assert_eq!(codex_def["agents"][0], "codex");
+    let set_codex = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions.codex-remote",
+                "--value",
+                &codex_def.to_string(),
+            ],
+        ),
+    );
+    assert!(set_codex.ok, "{:?}", set_codex.errors);
+
+    // 保存不执行：目标文件未被修改
+    assert_eq!(std::fs::read_to_string(&claude_cfg).unwrap(), claude_before);
+    assert_eq!(std::fs::read_to_string(&codex_cfg).unwrap(), codex_before);
+
+    // 导入后：候选因库内同名被排除，元素进入库视图
+    let status2 = execute(&ctx, &request("mcp:status", &[]));
+    assert!(status2.ok, "{:?}", status2.errors);
+    let names2 = candidate_names(&status2);
+    for imported in ["plain-stdio", "remote-claude", "codex-remote"] {
+        assert!(
+            !names2.iter().any(|(n, _)| n == imported),
+            "导入后 {} 不再出现在候选中",
+            imported
+        );
+    }
+    let elements2 = status2.data["elements"].as_array().unwrap();
+    for imported in ["plain-stdio", "remote-claude", "codex-remote"] {
+        assert!(
+            elements2
+                .iter()
+                .any(|e| e["id"] == format!("mcp:{}", imported)),
+            "导入后 {} 必须出现在库元素中",
+            imported
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn mcp_takeover_requires_flag_and_replaces_unmanaged_entry() {
+    let (root, ctx) = temp_ctx("takeover");
+
+    std::fs::create_dir_all(&ctx.home_dir).unwrap();
+    let claude_cfg = ctx.home_dir.join(".claude.json");
+    std::fs::write(
+        &claude_cfg,
+        r#"{
+  "globalFlag": true,
+  "mcpServers": {
+    "takeover-svc": {"command": "old-binary", "args": ["--old"], "env": {"OLD_KEY": "old-secret"}, "custom_field": "will-be-replaced"},
+    "other-svc": {"command": "other", "env": {"K": "v"}}
+  }
+}"#,
+    )
+    .unwrap();
+    let codex_cfg = ctx.home_dir.join(".codex").join("config.toml");
+    std::fs::create_dir_all(codex_cfg.parent().unwrap()).unwrap();
+    std::fs::write(
+        &codex_cfg,
+        "[mcp_servers.takeover-svc]\ncommand = \"old-codex\"\n\n[mcp_servers.other-svc]\ncommand = \"other\"\n",
+    )
+    .unwrap();
+
+    let set_def = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions.takeover-svc",
+                "--value",
+                r#"{"command":"npx","args":["-y","takeover-mcp"],"agents":["claude-code","codex"]}"#,
+            ],
+        ),
+    );
+    assert!(set_def.ok, "{:?}", set_def.errors);
+
+    // 1. 无 flag：plan 与 apply 一律 fail-closed，文件不变
+    let plan_no_flag = execute(
+        &ctx,
+        &request(
+            "mcp:plan",
+            &[
+                "--only",
+                "mcp:takeover-svc",
+                "--action",
+                "add",
+                "--agent",
+                "claude-code",
+            ],
+        ),
+    );
+    assert!(!plan_no_flag.ok, "无 flag 的 plan 必须 fail-closed");
+    assert!(error_messages(&plan_no_flag).contains("非受管同名条目"));
+    let apply_no_flag = execute(
+        &ctx,
+        &request(
+            "mcp:apply",
+            &[
+                "--only",
+                "mcp:takeover-svc",
+                "--action",
+                "add",
+                "--agent",
+                "claude-code",
+            ],
+        ),
+    );
+    assert!(!apply_no_flag.ok, "无 flag 的 apply 必须 fail-closed");
+    assert!(error_messages(&apply_no_flag).contains("非受管同名条目"));
+    let before = std::fs::read_to_string(&claude_cfg).unwrap();
+    assert!(before.contains("old-binary"), "拒绝后目标文件必须保持原样");
+
+    // 2. 有 flag：plan 预览标注 takeover（独立字段 + 说明文案）
+    let plan_flag = execute(
+        &ctx,
+        &request(
+            "mcp:plan",
+            &[
+                "--only",
+                "mcp:takeover-svc",
+                "--action",
+                "add",
+                "--agent",
+                "claude-code",
+                "--allow-takeover",
+            ],
+        ),
+    );
+    assert!(plan_flag.ok, "{:?}", plan_flag.errors);
+    let actions = plan_flag.data["actions"].as_array().unwrap();
+    let file_action = actions
+        .iter()
+        .find(|a| a["target"].as_str().unwrap_or("").ends_with(".claude.json"))
+        .expect("必须有目标文件写入步骤");
+    assert_eq!(file_action["takeover"], true, "文件写入步骤须标注 takeover");
+    assert!(
+        file_action["note"].as_str().unwrap().contains("接管"),
+        "预览说明须可见接管标注: {}",
+        file_action["note"]
+    );
+    let binding_action = actions
+        .iter()
+        .find(|a| a["target"].as_str().unwrap_or("").contains("mcp_bindings"))
+        .unwrap();
+    assert!(
+        binding_action.get("takeover").is_none(),
+        "绑定记录步骤不涉及条目替换，不得标注 takeover"
+    );
+
+    // 无冲突目标即使带 flag 也不标注（codex 的 takeover-svc 也是未受管冲突，
+    // 另起一个无冲突服务验证）
+    let set_clean = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions.clean-svc",
+                "--value",
+                r#"{"command":"npx","args":["clean"],"agents":["claude-code"]}"#,
+            ],
+        ),
+    );
+    assert!(set_clean.ok, "{:?}", set_clean.errors);
+    let plan_clean = execute(
+        &ctx,
+        &request(
+            "mcp:plan",
+            &[
+                "--only",
+                "mcp:clean-svc",
+                "--action",
+                "add",
+                "--agent",
+                "claude-code",
+                "--allow-takeover",
+            ],
+        ),
+    );
+    assert!(plan_clean.ok, "{:?}", plan_clean.errors);
+    assert!(
+        plan_clean.data["actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|a| a.get("takeover").is_none()),
+        "无未受管同名条目时不得标注 takeover"
+    );
+
+    // 3. 有 flag：apply 替换成功——受管渲染落地、marker 出现、其余条目/字段保留
+    let apply_flag = execute(
+        &ctx,
+        &request_with_run(
+            "mcp:apply",
+            &[
+                "--only",
+                "mcp:takeover-svc",
+                "--action",
+                "add",
+                "--agent",
+                "claude-code",
+                "--allow-takeover",
+            ],
+            "takeover-run-1",
+        ),
+    );
+    assert!(apply_flag.ok, "{:?}", apply_flag.errors);
+    let doc: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&claude_cfg).unwrap()).unwrap();
+    assert_eq!(doc["globalFlag"], true, "目标文件其余顶层字段必须保留");
+    let other = &doc["mcpServers"]["other-svc"];
+    assert_eq!(other["command"], "other");
+    assert_eq!(other["env"]["K"], "v", "其余条目必须原样保留");
+    let svc = &doc["mcpServers"]["takeover-svc"];
+    assert_eq!(svc["command"], "npx");
+    assert_eq!(svc["args"][0], "-y");
+    assert_eq!(
+        svc["env"]["_MANAGED_BY"], "agent-manager",
+        "替换后条目必须带受管 marker"
+    );
+    assert!(
+        svc.get("custom_field").is_none() && svc["env"].get("OLD_KEY").is_none(),
+        "未受管条目的自有字段随条目整体被受管渲染替换"
+    );
+
+    // 4. 审计 detail 记录 takeover: true
+    let runs = execute(
+        &ctx,
+        &request_with_run("runs:get", &["--run", "takeover-run-1"], "audit-check"),
+    );
+    assert!(runs.ok, "{:?}", runs.errors);
+    let ops = runs.data["operations"].as_array().unwrap();
+    let apply_op = ops
+        .iter()
+        .find(|op| op["operation_type"] == "mcp:add")
+        .expect("必须有 mcp:add 审计记录");
+    assert_eq!(apply_op["detail"]["takeover"], true);
+
+    // 5. Codex TOML 路径：未受管段被受管渲染替换并带条目表级/ env 表 marker，其余服务保留
+    let apply_codex = execute(
+        &ctx,
+        &request_with_run(
+            "mcp:apply",
+            &[
+                "--only",
+                "mcp:takeover-svc",
+                "--action",
+                "add",
+                "--agent",
+                "codex",
+                "--allow-takeover",
+            ],
+            "takeover-run-2",
+        ),
+    );
+    assert!(apply_codex.ok, "{:?}", apply_codex.errors);
+    let toml_text = std::fs::read_to_string(&codex_cfg).unwrap();
+    assert!(toml_text.contains("other-svc"), "TOML 其余服务必须保留");
+    assert!(toml_text.contains("npx"), "TOML 必须写入受管 command");
+    assert!(
+        toml_text.contains("_MANAGED_BY = \"agent-manager\""),
+        "TOML 替换后必须带受管 marker: {}",
+        toml_text
+    );
+    assert!(!toml_text.contains("old-codex"), "旧未受管内容必须被替换");
+
+    let _ = std::fs::remove_dir_all(root);
+}

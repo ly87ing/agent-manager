@@ -1,4 +1,5 @@
 import type { EngineElement } from "../lib/contract";
+import { MCP_UNMANAGED_CONFLICT_MARKER } from "../lib/mcpImport";
 import type { McpAgentCell } from "../lib/observed";
 import { cn } from "../lib/utils";
 
@@ -83,14 +84,19 @@ export function McpAssignmentRow({
   cell,
   onOpenDetail,
   onAction,
+  onTakeover,
 }: {
   element: EngineElement;
   agent: string;
   cell: McpAgentCellView | null;
   onOpenDetail: (id: string) => void;
   onAction: (element: EngineElement, agent: string, action: string) => void;
+  /** 显式接管入口：仅在 cell 因「非受管同名条目」fail-closed 且无动作时渲染。 */
+  onTakeover?: (element: EngineElement, agent: string, action: string) => void;
 }) {
   const actions = cell?.actions ?? [];
+  const takeoverBlocked =
+    cell !== null && actions.length === 0 && (cell.blocked_reason ?? "").includes(MCP_UNMANAGED_CONFLICT_MARKER);
 
   return (
     <tr className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50">
@@ -134,7 +140,18 @@ export function McpAssignmentRow({
               {label}
             </button>
           ))}
-          {cell && actions.length === 0 && <span className="text-xs text-slate-400">当前引擎未提供操作</span>}
+          {takeoverBlocked && onTakeover && (
+            <button
+              type="button"
+              data-testid={`takeover-${element.id}-${agent}`}
+              title="以本工具的标准配置替换目标文件中的同名外部条目（其余条目与字段保持不变）"
+              onClick={() => onTakeover(element, agent, cell.assigned ? "update" : "add")}
+              className="rounded border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 hover:bg-amber-100"
+            >
+              接管原条目
+            </button>
+          )}
+          {cell && actions.length === 0 && !takeoverBlocked && <span className="text-xs text-slate-400">当前引擎未提供操作</span>}
           {!cell && <span className="text-xs text-slate-400">未配置</span>}
         </div>
       </td>

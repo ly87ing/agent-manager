@@ -41,6 +41,10 @@
     "note": {
       "description": "Human-readable context, e.g. how many env placeholders resolved, or null.",
       "type": ["string", "null"]
+    },
+    "takeover": {
+      "description": "Optional annotation, emitted only when true: this write-file step replaces an unmanaged same-name entry in the target file under the explicit '--allow-takeover' opt-in (mcp domain add/update only). Absent means no takeover.",
+      "type": "boolean"
     }
   }
 }

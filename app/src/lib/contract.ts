@@ -102,6 +102,29 @@ export interface EngineElement {
 export interface StatusData {
   domain: string;
   elements: EngineElement[];
+  /** 仅 mcp 域输出：各助手现有配置中未受管的导入候选（掩码形态，绝无明文）。 */
+  import_candidates?: McpImportCandidate[];
+}
+
+// ---------- mcp:status import_candidates ----------
+
+export interface McpImportCandidateSpec {
+  /** stdio 形态 */
+  command?: string;
+  args?: string[];
+  /** 键为变量名，值恒为 "<literal>"（掩码）。 */
+  env?: Record<string, string>;
+  /** remote 形态 */
+  url?: string;
+  /** 值为 "<literal>"（掩码）或 "${VAR}"（Codex env_http_headers 引用直通）。 */
+  headers?: Record<string, string>;
+}
+
+export interface McpImportCandidate {
+  name: string;
+  agent: string;
+  transport: "stdio" | "remote" | string;
+  spec: McpImportCandidateSpec;
 }
 
 // ---------- <domain>:plan ----------
@@ -126,6 +149,8 @@ export interface PlanAction {
   backup_path: string | null;
   cmd: string | null;
   note: string | null;
+  /** 仅 mcp 域 --allow-takeover 的 add/update 且确有未受管同名条目时由引擎标注为 true。 */
+  takeover?: boolean;
 }
 
 export interface PlanSummary {

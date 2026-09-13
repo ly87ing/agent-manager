@@ -24,6 +24,9 @@ export interface OpenPreviewOptions {
   defaultDryRun?: boolean;
   /** 确认后执行（经 useExecutions.execute 走 run_id 追踪）。返回 envelope；null = 桥层失败。 */
   execute: (dryRun: boolean) => Promise<Envelope | null>;
+  /** 显式接管通道（MCP）：plan/apply 因「非受管同名条目」被拒时，错误区展示
+   * 「接管原条目并重试」，点击后由页面以追加 --allow-takeover 的参数重开预览。 */
+  takeoverRetry?: () => void;
 }
 
 interface PreviewState {
@@ -113,6 +116,7 @@ export function usePlanPreview() {
       defaultDryRun={state.options.defaultDryRun ?? settings?.preferences.defaultDryRun ?? false}
       executing={state.executing}
       resultErrors={state.resultErrors}
+      onTakeoverRetry={state.options.takeoverRetry}
       onConfirm={confirm}
       onClose={() => setState(null)}
     />

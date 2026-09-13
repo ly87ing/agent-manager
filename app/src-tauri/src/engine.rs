@@ -122,6 +122,7 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             if domain == "mcp" {
                 specs.push(("--agent", ArgValueKind::ElementId));
                 specs.push(("--action", ArgValueKind::McpAction));
+                specs.push(("--allow-takeover", ArgValueKind::Flag));
             }
         }
         (_, "apply") => {
@@ -138,6 +139,7 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             if domain == "mcp" {
                 specs.push(("--agent", ArgValueKind::ElementId));
                 specs.push(("--action", ArgValueKind::McpAction));
+                specs.push(("--allow-takeover", ArgValueKind::Flag));
             }
         }
         _ => {}
@@ -691,6 +693,37 @@ mod tests {
             bad_action_err.message
         );
         assert!(!bad_action_err.message.contains("skills"));
+
+        // --allow-takeover：仅 mcp:plan / mcp:apply 放行（显式接管通道）
+        for command in ["mcp:plan", "mcp:apply"] {
+            assert!(
+                validate_args(
+                    command,
+                    &[
+                        "--only".into(),
+                        "mcp:s1".into(),
+                        "--agent".into(),
+                        "claude-code".into(),
+                        "--action".into(),
+                        "add".into(),
+                        "--allow-takeover".into(),
+                    ]
+                )
+                .is_ok(),
+                "{command} --allow-takeover should pass"
+            );
+        }
+        for (command, args) in [
+            ("mcp:status", vec!["--allow-takeover".into()]),
+            ("skills:apply", vec!["--allow-takeover".into()]),
+            ("agents:apply", vec!["--allow-takeover".into()]),
+            ("rules:apply", vec!["--allow-takeover".into()]),
+        ] {
+            assert!(
+                validate_args(command, &args).is_err(),
+                "{command} --allow-takeover should fail"
+            );
+        }
 
         // Rules 严格契约：无 only / 单 only / 两个不同 only（顺序不限）均通过。
         for (command, args) in [

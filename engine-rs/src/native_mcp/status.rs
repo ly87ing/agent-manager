@@ -563,8 +563,12 @@ pub fn status(ctx: &Context) -> Result<Value> {
             .cmp(b["id"].as_str().unwrap_or(""))
     });
 
+    // 未受管现有配置的导入候选（只读扫描，零写）；掩码语义见 discovery 模块。
+    let import_candidates = super::discovery::import_candidates(&library, &bindings, &targets);
+
     Ok(json!({
         "domain": "mcp",
-        "elements": elements
+        "elements": elements,
+        "import_candidates": import_candidates
     }))
 }

@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import type { Diagnostic, PlanAction, RiskLevel } from "../lib/contract";
+import { MCP_UNMANAGED_CONFLICT_MARKER } from "../lib/mcpImport";
 import { COPY, planSummaryPhrase, RISK_COPY, RISK_ORDER } from "../lib/ui-copy";
 import { cn } from "../lib/utils";
 import { ErrorPanel } from "./ErrorPanel";
@@ -67,6 +68,14 @@ export function PlanActionList({ actions }: { actions: PlanAction[] }) {
                 <code className="font-mono font-medium text-slate-700">{action.op}</code>
                 <RiskBadge risk={action.risk} />
                 <span className="font-mono text-slate-400">{action.element}</span>
+                {action.takeover === true && (
+                  <span
+                    data-testid="takeover-badge"
+                    className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
+                  >
+                    接管
+                  </span>
+                )}
               </div>
               {(action.target || action.cmd) && (
                 <p className="mt-0.5 font-mono break-all text-slate-600">{action.target ?? action.cmd}</p>
@@ -94,6 +103,7 @@ export default function PlanPreviewModal({
   defaultDryRun = false,
   executing,
   resultErrors,
+  onTakeoverRetry,
   onConfirm,
   onClose,
 }: {
@@ -111,6 +121,8 @@ export default function PlanPreviewModal({
   executing: boolean;
   /** 执行后引擎返回的 errors（失败时留在弹窗内展示）。 */
   resultErrors?: Diagnostic[] | null;
+  /** MCP 显式接管通道：错误含「非受管同名条目」时展示接管重试按钮。 */
+  onTakeoverRetry?: () => void;
   onConfirm: (dryRun: boolean) => void;
   onClose: () => void;
 }) {
@@ -174,6 +186,10 @@ export default function PlanPreviewModal({
   const actions = (plans ?? []).flatMap((plan) => plan.actions);
   const maxRisk = maxRiskOf(actions);
   const summary = RISK_ORDER.map((risk) => ({ risk, count: actions.filter((a) => a.risk === risk).length }));
+
+  // MCP 显式接管：plan 预览或 apply 执行因未受管同名条目 fail-closed 时，提供带标注的重试入口
+  const errorMessages = [planError ?? "", ...(resultErrors ?? []).map((diag) => diag.message)];
+  const showTakeoverRetry = onTakeoverRetry !== undefined && errorMessages.some((msg) => msg.includes(MCP_UNMANAGED_CONFLICT_MARKER));
 
   const confirmBlocked =
     plans === null || planError != null || actions.length === 0 || executing ||
@@ -247,6 +263,26 @@ export default function PlanPreviewModal({
 
           {resultErrors && resultErrors.length > 0 && (
             <ErrorPanel title="执行失败" errors={resultErrors} />
+          )}
+
+          {showTakeoverRetry && (
+            <div
+              data-testid="takeover-retry-panel"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2"
+            >
+              <p className="text-xs text-amber-800">
+                目标文件中已存在同名的外部条目，默认拒绝覆盖。确认其内容可弃后，可显式接管：以本工具的标准配置替换该条目（其余条目与字段保持不变）。
+              </p>
+              <button
+                type="button"
+                data-testid="takeover-retry-button"
+                disabled={executing}
+                onClick={onTakeoverRetry}
+                className="rounded border border-amber-300 bg-white px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-40"
+              >
+                接管原条目并重试
+              </button>
+            </div>
           )}
 
           <label className="flex items-center gap-2 text-xs text-slate-600">

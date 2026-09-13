@@ -27,6 +27,9 @@ pub struct ParsedAction {
     pub action: String,
     pub dry_run: bool,
     pub offline: bool,
+    /// 显式接管通道：仅逐 agent add/update 可用，允许用受管渲染结果替换
+    /// 目标文件中的未受管同名条目；缺省保持 fail-closed 不变。
+    pub allow_takeover: bool,
 }
 
 pub fn parse_action_args(req: &Request) -> Result<ParsedAction> {
@@ -36,6 +39,7 @@ pub fn parse_action_args(req: &Request) -> Result<ParsedAction> {
     let mut agent: Option<String> = None;
     let mut dry_run = false;
     let mut offline = false;
+    let mut allow_takeover = false;
 
     let mut i = 0;
     while i < req.args.len() {
@@ -57,6 +61,10 @@ pub fn parse_action_args(req: &Request) -> Result<ParsedAction> {
             }
             "--offline" => {
                 offline = true;
+                i += 1;
+            }
+            "--allow-takeover" => {
+                allow_takeover = true;
                 i += 1;
             }
             "--only" | "--action" | "--agent" => {
@@ -107,12 +115,17 @@ pub fn parse_action_args(req: &Request) -> Result<ParsedAction> {
         );
     }
 
+    if allow_takeover && !(agent.is_some() && matches!(act.as_str(), "add" | "update")) {
+        bail!("--allow-takeover 仅适用于逐 agent 的 add/update 动作");
+    }
+
     Ok(ParsedAction {
         server,
         agent,
         action: act,
         dry_run,
         offline,
+        allow_takeover,
     })
 }
 
@@ -154,25 +167,33 @@ pub fn preflight_check_state(
 
         let (entry_opt, is_managed) =
             extract_entry(&target.path, target.format.clone(), &parsed.server)?;
+        // 显式接管：仅 --allow-takeover 的 add/update 允许替换未受管同名条目；
+        // 该条目将被受管渲染整体替换，其外部字段随条目一并被替换，不再逐字段拦截。
+        let takeover = parsed.allow_takeover
+            && matches!(parsed.action.as_str(), "add" | "update")
+            && entry_opt.is_some()
+            && !is_managed;
         if let Some(ref entry) = entry_opt {
-            if !is_managed {
+            if !is_managed && !takeover {
                 bail!(
                     "目标文件 {} 中已存在非受管同名条目 '{}'，拒绝覆盖以防止冲突",
                     target.path.display(),
                     parsed.server
                 );
             }
-            if let Some(def) = def_opt {
-                let expected_extra =
-                    expected_extra_fields(def, target.format.clone(), &parsed.server)?;
-                for (k, _) in &entry.extra {
-                    if !expected_extra.contains_key(k) {
-                        bail!(
-                            "目标文件 {} 中的条目 '{}' 包含未受管外部属性（外部未识别字段 '{}'），拒绝覆盖以防止外部配置丢失",
-                            target.path.display(),
-                            parsed.server,
-                            k
-                        );
+            if !takeover {
+                if let Some(def) = def_opt {
+                    let expected_extra =
+                        expected_extra_fields(def, target.format.clone(), &parsed.server)?;
+                    for (k, _) in &entry.extra {
+                        if !expected_extra.contains_key(k) {
+                            bail!(
+                                "目标文件 {} 中的条目 '{}' 包含未受管外部属性（外部未识别字段 '{}'），拒绝覆盖以防止外部配置丢失",
+                                target.path.display(),
+                                parsed.server,
+                                k
+                            );
+                        }
                     }
                 }
             }

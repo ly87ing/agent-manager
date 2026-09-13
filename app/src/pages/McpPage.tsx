@@ -1,15 +1,21 @@
 import { useRef, useState, type KeyboardEvent } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Plus } from "lucide-react";
+import { toast } from "sonner";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { McpAssignmentRow, type McpAgentCellView } from "../components/McpAssignmentRow";
+import { McpImportCandidates } from "../components/McpImportCandidates";
 import { McpServerCard, McpServerDetail } from "../components/McpServerCard";
 import { McpServerFormDialog } from "../components/McpServerFormDialog";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
-import type { EngineElement, PolicyData, PolicyLayers, StatusData } from "../lib/contract";
+import type { Diagnostic, EngineElement, McpImportCandidate, PolicyData, PolicyLayers, StatusData } from "../lib/contract";
+import { engineErrorMessage, runEngine } from "../lib/engine";
+import { candidateToDefinition } from "../lib/mcpImport";
 import { agentCellsOf, type McpObserved, type McpSpec } from "../lib/observed";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { OVERLAY_COPY } from "../lib/ui-copy";
-import { useEngineQuery } from "../lib/queries";
+import { engineKeys, useEngineQuery } from "../lib/queries";
 import { useExecuteApply, usePlanPreview } from "../lib/usePlanPreview";
 import { cn } from "../lib/utils";
 
@@ -24,10 +30,14 @@ export default function McpPage() {
   const query = useEngineQuery<StatusData>("mcp:status");
   const agentsQuery = useEngineQuery<StatusData>("agents:status");
   const policyQuery = useEngineQuery<PolicyData>("policy:get");
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"library" | "agents">("library");
   const [agentFilter, setAgentFilter] = useState<string>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [formState, setFormState] = useState<{ editing: EngineElement } | "new" | null>(null);
+  const [importTarget, setImportTarget] = useState<McpImportCandidate | null>(null);
+  const [importExecuting, setImportExecuting] = useState(false);
+  const [importErrors, setImportErrors] = useState<Diagnostic[] | null>(null);
 
   const preview = usePlanPreview();
   const executeApply = useExecuteApply();
@@ -87,8 +97,11 @@ export default function McpPage() {
     title: string,
     subtitle: string,
     args: string[],
-    options?: { confirmLabel?: string; requireConfirmText?: string },
+    options?: { confirmLabel?: string; requireConfirmText?: string; takeoverEligible?: boolean },
   ) => {
+    // 显式接管：逐 agent add/update 遇「非受管同名条目」拒绝时，错误区可带标注重试；
+    // 已带 flag 的请求不再重复提供重试
+    const canTakeover = options?.takeoverEligible === true && !args.includes("--allow-takeover");
     preview.open({
       title,
       subtitle,
@@ -96,6 +109,9 @@ export default function McpPage() {
       confirmLabel: options?.confirmLabel ?? "立即执行",
       requireConfirmText: options?.requireConfirmText,
       execute: executeApply({ command: "mcp:apply", label: title, extraArgs: args }),
+      takeoverRetry: canTakeover
+        ? () => openAction(title, subtitle, [...args, "--allow-takeover"], options)
+        : undefined,
     });
   };
 
@@ -130,7 +146,59 @@ export default function McpPage() {
       disable: "禁用",
       remove: "从此助手删除",
     };
-    openAction(`${labelMap[action] ?? action} ${element.id} @ ${agent}`, "仅同步此服务在对应助手中的配置。", args);
+    openAction(`${labelMap[action] ?? action} ${element.id} @ ${agent}`, "仅同步此服务在对应助手中的配置。", args, {
+      takeoverEligible: action === "add" || action === "update",
+    });
+  };
+
+  /** 冲突行的显式接管入口：直接以 --allow-takeover 打开预览（预览可见 takeover 标注）。 */
+  const handleTakeover = (element: EngineElement, agent: string, action: string) => {
+    const args = ["--only", element.id, "--agent", agent, "--action", action, "--allow-takeover"];
+    openAction(
+      `接管原条目 ${element.id} @ ${agent}`,
+      "以本工具的标准配置替换目标文件中的同名外部条目；其余条目与字段保持不变。",
+      args,
+      { takeoverEligible: true },
+    );
+  };
+
+  // 未导入候选（引擎已掩码，前端拿不到明文）与同名冲突视图（元素 + policy 定义双来源）
+  const importCandidates = query.data.data.import_candidates ?? [];
+  const policyDefinitions = (layers?.sqlite as { mcp?: { definitions?: Record<string, unknown> } } | null | undefined)?.mcp?.definitions ?? {};
+  const existingNames = new Set<string>([
+    ...elements.map((element) => element.id.replace(/^mcp:/, "")),
+    ...Object.keys(policyDefinitions),
+  ]);
+
+  /** 导入 = policy:set 保存定义（不执行动作、不改动助手配置）；转换只依赖掩码 spec。 */
+  const confirmImport = async () => {
+    if (!importTarget) return;
+    setImportExecuting(true);
+    setImportErrors(null);
+    const definition = candidateToDefinition(importTarget);
+    try {
+      const envelope = await runEngine<PolicyData>("policy:set", [
+        "--layer",
+        "local",
+        "--key",
+        `mcp.definitions.${importTarget.name}`,
+        "--value",
+        JSON.stringify({ ...definition, _delete: false, _replace: true }),
+      ]);
+      if (!envelope.ok) {
+        setImportErrors(envelope.errors);
+        setImportExecuting(false);
+        return;
+      }
+    } catch (err) {
+      setImportErrors([{ code: "BRIDGE_ERROR", element: null, message: engineErrorMessage(err) }]);
+      setImportExecuting(false);
+      return;
+    }
+    setImportExecuting(false);
+    setImportTarget(null);
+    void queryClient.invalidateQueries({ queryKey: engineKeys.all });
+    toast.success("已保存到库，按需执行添加/更新动作；应用时如遇同名冲突可选择接管");
   };
 
   const relevantAgents = agentFilter === "all" ? agentColumns : [agentFilter];
@@ -213,6 +281,8 @@ export default function McpPage() {
               <p className="text-xs text-slate-400">点击服务名展开详情（启动命令 / 密钥变量 / 写入位置 / 同步详情）。</p>
             )
           )}
+
+          <McpImportCandidates candidates={importCandidates} existingNames={existingNames} onImport={setImportTarget} />
         </div>
       )}
 
@@ -276,6 +346,7 @@ export default function McpPage() {
                       setActiveTab("library");
                     }}
                     onAction={handleCellAction}
+                    onTakeover={handleTakeover}
                   />
                 ))}
               </tbody>
@@ -303,6 +374,22 @@ export default function McpPage() {
 
       {preview.modal}
       {definitionOps.modals}
+
+      {importTarget && (
+        <ConfirmModal
+          title={`导入 ${importTarget.name}`}
+          description={`将 ${importTarget.agent} 现有配置中的「${importTarget.name}」保存为服务库定义；密钥以变量引用形式入库（本工具自始至终拿不到明文）。仅保存定义，不执行添加/更新动作，不改动助手配置。`}
+          risk="write-local"
+          confirmLabel="确认导入"
+          executing={importExecuting}
+          resultErrors={importErrors}
+          onConfirm={() => void confirmImport()}
+          onClose={() => {
+            setImportTarget(null);
+            setImportErrors(null);
+          }}
+        />
+      )}
     </div>
   );
 }

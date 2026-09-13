@@ -60,9 +60,21 @@ pub fn plan(ctx: &Context, req: &Request) -> Result<Value> {
             };
 
             if should_act {
+                // 显式接管标注：--allow-takeover 的 add/update 且目标存在未受管同名条目时，
+                // 预览步骤必须让用户看到「将替换未受管条目」（独立字段 + 说明文案）。
+                let takeover = parsed.allow_takeover
+                    && matches!(parsed.action.as_str(), "add" | "update")
+                    && extract_entry(&target.path, target.format.clone(), &parsed.server)
+                        .map(|(e, m)| e.is_some() && !m)
+                        .unwrap_or(false);
+
                 let note = match parsed.action.as_str() {
                     "disable" => format!("撤下 {} 在 {} 中的配置入口", parsed.server, target.agent),
                     "remove" => format!("清理 {} 在 {} 中的配置", parsed.server, target.agent),
+                    _ if takeover => format!(
+                        "{} mcp:{} 到 {}（接管：将替换目标文件中的未受管同名条目）",
+                        parsed.action, parsed.server, target.agent
+                    ),
                     _ => format!(
                         "{} mcp:{} 到 {}",
                         parsed.action, parsed.server, target.agent
@@ -107,7 +119,7 @@ pub fn plan(ctx: &Context, req: &Request) -> Result<Value> {
                         sha256_hex_bytes(rendered.content.as_bytes())
                     ));
 
-                    actions.push(json!({
+                    let mut file_action = json!({
                         "op": "write-file",
                         "element": format!("mcp:{}", parsed.server),
                         "target": target.path.to_string_lossy(),
@@ -117,7 +129,14 @@ pub fn plan(ctx: &Context, req: &Request) -> Result<Value> {
                         "backup_path": Value::Null,
                         "cmd": Value::Null,
                         "note": note
-                    }));
+                    });
+                    if takeover {
+                        file_action
+                            .as_object_mut()
+                            .expect("object")
+                            .insert("takeover".into(), Value::Bool(true));
+                    }
+                    actions.push(file_action);
                 }
 
                 actions.push(json!({

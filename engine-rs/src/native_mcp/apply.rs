@@ -44,6 +44,7 @@ pub fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     check_shared_targets(&targets)?;
 
     let mut guard = RollbackGuard::new();
+    let mut takeover = false;
 
     let execute_result: Result<()> = (|| {
         if let Some(ref a) = parsed.agent {
@@ -61,6 +62,13 @@ pub fn apply(ctx: &Context, req: &Request) -> Result<Value> {
                         .ok_or_else(|| anyhow!("服务定义 '{}' 不存在", parsed.server))?;
                     let entry = build_entry(def, &parsed.server, target.format.clone(), a)?;
                     let version = compute_definition_version(def);
+
+                    // 事务内重检（preflight_check_state 已跑）后记录接管事实：
+                    // 写入前条目仍未受管 → 本次写入为显式接管替换，审计需标记。
+                    takeover = parsed.allow_takeover
+                        && extract_entry(&target.path, target.format.clone(), &parsed.server)
+                            .map(|(e, m)| e.is_some() && !m)
+                            .unwrap_or(false);
 
                     let rendered = render_target_content(
                         &target.path,
@@ -268,7 +276,8 @@ pub fn apply(ctx: &Context, req: &Request) -> Result<Value> {
             Some(&json!({
                 "action": parsed.action,
                 "agent": parsed.agent,
-                "ok": true
+                "ok": true,
+                "takeover": takeover
             })),
         )?;
 

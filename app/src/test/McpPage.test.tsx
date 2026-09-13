@@ -239,3 +239,123 @@ describe("McpPage 服务库 + 助手中的服务", () => {
     expect(screen.queryByRole("tab", { name: "服务库" })).toBeNull();
   });
 });
+
+describe("McpPage 显式接管通道（--allow-takeover）", () => {
+  const CONFLICT_MESSAGE = "目标文件 /tmp/demo/.claude.json 中已存在非受管同名条目 'take-svc'，拒绝覆盖以防止冲突";
+
+  function takeoverRoutes(): Record<string, ReturnType<typeof makeEnvelope> | ((args: string[]) => Promise<ReturnType<typeof makeEnvelope>>)> {
+    const status: StatusData = {
+      domain: "mcp",
+      elements: [
+        makeElement({
+          id: "mcp:take-svc",
+          domain: "mcp",
+          spec: { command: "npx", args: ["-y", "take-mcp"], agents: null, env: {} },
+          observed: {
+            agents: {
+              // 冲突 cell：drifted + 非受管同名条目 blocked_reason + 无动作（导入后落地断点场景）
+              "claude-code": { state: "drifted", target: "/tmp/demo/.claude.json", target_exists: true, assigned: false, enabled: false, actions: [], blocked_reason: "存在外部非受管同名条目，拒绝操作以防止冲突" },
+              codex: { state: "missing", target: "/tmp/demo/.codex/config.toml", target_exists: true, assigned: false, enabled: false, actions: ["add"] },
+            },
+            env: {},
+            actions: ["disable", "remove"],
+          },
+          state: "drifted",
+        }),
+      ],
+    };
+    return {
+      "mcp:status": makeEnvelope(status, { command: "mcp.status" }),
+      "mcp:plan": async (args: string[]) => {
+        if (!args.includes("--allow-takeover")) {
+          return makeEnvelope(
+            {},
+            { command: "mcp.plan", ok: false, errors: [{ code: "PREFLIGHT_FAILED", element: null, message: CONFLICT_MESSAGE }] },
+          );
+        }
+        return makeEnvelope(
+          {
+            domain: "mcp",
+            actions: [
+              makePlanAction({
+                op: "write-file",
+                element: "mcp:take-svc",
+                target: "/tmp/demo/.claude.json",
+                risk: "write-local",
+                note: "add mcp:take-svc 到 claude-code（接管：将替换目标文件中的未受管同名条目）",
+                takeover: true,
+              }),
+            ],
+            summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 },
+          },
+          { command: "mcp.plan" },
+        );
+      },
+      "mcp:apply": makeEnvelope(makeApplyResult({ domain: "mcp" }), { command: "mcp.apply" }),
+    };
+  }
+
+  it("plan 遇「非受管同名条目」→ 错误区「接管原条目并重试」→ 重发 plan/apply 带 --allow-takeover 且预览可见接管标注", async () => {
+    const { calls } = renderWithEngine(<McpPage />, takeoverRoutes());
+    await userEvent.click(await screen.findByRole("tab", { name: "助手中的服务" }));
+
+    // codex cell 提供正常「添加」；plan 首次因冲突 fail-closed
+    await userEvent.click(await screen.findByTestId("action-add-mcp:take-svc-codex"));
+    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
+    expect(dialog).toHaveTextContent(CONFLICT_MESSAGE);
+    const firstPlan = calls.find((call) => call.command === "mcp:plan");
+    expect(firstPlan!.args).toEqual(["--only", "mcp:take-svc", "--agent", "codex", "--action", "add"]);
+    expect(firstPlan!.args).not.toContain("--allow-takeover");
+
+    // 错误区提供接管重试
+    await userEvent.click(await screen.findByTestId("takeover-retry-button"));
+
+    // 以相同 --only/--action 追加 --allow-takeover 重跑 plan
+    const planCalls = calls.filter((call) => call.command === "mcp:plan");
+    const retryPlan = planCalls[planCalls.length - 1];
+    expect(retryPlan.args).toEqual(["--only", "mcp:take-svc", "--agent", "codex", "--action", "add", "--allow-takeover"]);
+
+    // 预览可见 takeover 标注（徽标 + 说明文案）
+    expect(await screen.findByTestId("takeover-badge")).toHaveTextContent("接管");
+    expect(dialog).toHaveTextContent(/接管：将替换目标文件中的未受管同名条目/);
+
+    // 确认后 apply 同样带 flag
+    await userEvent.click(screen.getByTestId("plan-confirm-button"));
+    const applyCall = calls.find((call) => call.command === "mcp:apply");
+    expect(applyCall!.args).toEqual(["--only", "mcp:take-svc", "--agent", "codex", "--action", "add", "--allow-takeover"]);
+  });
+
+  it("冲突 cell 行内「接管原条目」直接以 --allow-takeover 打开预览，确认后 apply 带 flag", async () => {
+    const { calls } = renderWithEngine(<McpPage />, takeoverRoutes());
+    await userEvent.click(await screen.findByRole("tab", { name: "助手中的服务" }));
+
+    // 冲突 cell：无常规动作，提供显式接管入口（assigned=false → add）
+    expect(screen.queryByTestId("action-add-mcp:take-svc-claude-code")).toBeNull();
+    await userEvent.click(await screen.findByTestId("takeover-mcp:take-svc-claude-code"));
+
+    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
+    expect(dialog).toHaveTextContent("接管原条目 mcp:take-svc @ claude-code");
+    const planCall = calls.find((call) => call.command === "mcp:plan");
+    expect(planCall!.args).toEqual(["--only", "mcp:take-svc", "--agent", "claude-code", "--action", "add", "--allow-takeover"]);
+    expect(await screen.findByTestId("takeover-badge")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("plan-confirm-button"));
+    const applyCall = calls.find((call) => call.command === "mcp:apply");
+    expect(applyCall!.args).toEqual(["--only", "mcp:take-svc", "--agent", "claude-code", "--action", "add", "--allow-takeover"]);
+  });
+
+  it("非冲突错误不展示接管重试按钮", async () => {
+    const routes = takeoverRoutes();
+    routes["mcp:plan"] = async () =>
+      makeEnvelope(
+        {},
+        { command: "mcp.plan", ok: false, errors: [{ code: "PREFLIGHT_FAILED", element: null, message: "凭证变量未配置: SOME_TOKEN" }] },
+      );
+    renderWithEngine(<McpPage />, routes);
+    await userEvent.click(await screen.findByRole("tab", { name: "助手中的服务" }));
+    await userEvent.click(await screen.findByTestId("action-add-mcp:take-svc-codex"));
+    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
+    expect(dialog).toHaveTextContent("凭证变量未配置");
+    expect(screen.queryByTestId("takeover-retry-button")).toBeNull();
+  });
+});
