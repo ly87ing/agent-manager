@@ -16,23 +16,32 @@ permissions:
 
 jobs:
   release:
-    name: "${{ matrix.os }} / release installer"
+    name: "${{ matrix.os }} / ${{ matrix.target }} / release installer"
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: macos-latest
+            target: aarch64-apple-darwin
             bundles: "app,dmg"
-          - os: ubuntu-latest
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            bundles: "app,dmg"
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
             bundles: "appimage,deb"
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: "nsis,msi"
 
-    # 密钥只经 GitHub Secrets 注入，主仓库不落任何真实密钥（见
-    # docs/GUI-PLATFORM-STATUS.md 的 updater 接线说明）。
+    # 密钥只经 GitHub Secrets/Variables 注入，主仓库不落任何真实密钥（见
+    # docs/GUI-PLATFORM-STATUS.md 的 updater 接线说明）。签名材料缺失或仍为
+    # YOUR_* 占位时由 fail-closed 门禁直接失败，不做降级构建。私钥与各平台
+    # 证书 secrets 只注入到对应的 guard/import/build 步骤，不做 job 级暴露。
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
 
     steps:
       - name: Checkout
@@ -69,11 +78,117 @@ jobs:
             exit 1
           fi
 
+      # 门禁：依赖安装之前失败关闭。只输出缺失/占位变量的名字，绝不打印取值。
+      - name: Fail-closed provenance and common signing requirements
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -eo pipefail
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "git worktree must be clean before release build" >&2
+            git status --porcelain >&2
+            exit 1
+          fi
+          build_commit="$(git rev-parse HEAD)"
+          if [[ ! "$build_commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "HEAD commit id is not a 40-char lowercase hex sha" >&2
+            exit 1
+          fi
+          build_date="$(git show -s --format=%cI HEAD)"
+          if [[ ! "$build_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(Z|[+-][0-9]{2}:[0-9]{2})$ ]]; then
+            echo "HEAD commit date (%cI) is not a single-line RFC3339 timestamp" >&2
+            exit 1
+          fi
+          echo "AGENT_MANAGER_BUILD_COMMIT=$build_commit" >> "$GITHUB_ENV"
+          echo "AGENT_MANAGER_BUILD_DATE=$build_date" >> "$GITHUB_ENV"
+
+          missing=""
+          require_var() {
+            local name="$1"
+            local value="${!name:-}"
+            if [[ -z "$value" || "$value" == YOUR_* ]]; then
+              missing="$missing $name"
+            fi
+          }
+          require_var TAURI_SIGNING_PRIVATE_KEY
+          require_var TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+          require_var TAURI_UPDATER_PUBKEY
+          if [[ -n "$missing" ]]; then
+            for name in $missing; do
+              echo "required release variable is empty or a YOUR_* placeholder: $name" >&2
+            done
+            exit 1
+          fi
+
+      - name: Fail-closed macOS signing requirements
+        if: ${{ runner.os == 'macOS' }}
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -eo pipefail
+          missing=""
+          require_var() {
+            local name="$1"
+            local value="${!name:-}"
+            if [[ -z "$value" || "$value" == YOUR_* ]]; then
+              missing="$missing $name"
+            fi
+          }
+          require_var APPLE_CERTIFICATE
+          require_var APPLE_CERTIFICATE_PASSWORD
+          require_var KEYCHAIN_PASSWORD
+          require_var APPLE_ID
+          require_var APPLE_PASSWORD
+          require_var APPLE_TEAM_ID
+          if [[ -n "$missing" ]]; then
+            for name in $missing; do
+              echo "required release variable is empty or a YOUR_* placeholder: $name" >&2
+            done
+            exit 1
+          fi
+
+      - name: Fail-closed Windows signing requirements
+        if: ${{ runner.os == 'Windows' }}
+        shell: bash
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
+        run: |
+          set -eo pipefail
+          missing=""
+          require_var() {
+            local name="$1"
+            local value="${!name:-}"
+            if [[ -z "$value" || "$value" == YOUR_* ]]; then
+              missing="$missing $name"
+            fi
+          }
+          require_var WINDOWS_CERTIFICATE
+          require_var WINDOWS_CERTIFICATE_PASSWORD
+          require_var WINDOWS_TIMESTAMP_URL
+          if [[ -n "$missing" ]]; then
+            for name in $missing; do
+              echo "required release variable is empty or a YOUR_* placeholder: $name" >&2
+            done
+            exit 1
+          fi
+
+      # Tauri 2 Linux system dependencies per official docs
+      # (https://v2.tauri.app/start/prerequisites/#linux)
       - name: Install Tauri system dependencies (Linux)
         if: ${{ runner.os == 'Linux' }}
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -90,15 +205,25 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-store.outputs.store_path }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('app/pnpm-lock.yaml') }}
-          restore-keys: ${{ runner.os }}-pnpm-store-
+          key: ${{ runner.os }}-${{ matrix.target }}-pnpm-store-${{ hashFiles('app/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.target }}-pnpm-store-
 
       - name: Install app dependencies
         working-directory: app
         run: pnpm install --frozen-lockfile
 
+      - name: Typecheck
+        working-directory: app
+        run: pnpm typecheck
+
+      - name: Run unit tests
+        working-directory: app
+        run: pnpm test:unit run
+
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Cache rustup and cargo artifacts
         uses: actions/cache@v4
@@ -109,33 +234,154 @@ jobs:
             ~/.cargo/git
             app/src-tauri/target
             engine-rs/target
-          key: ${{ runner.os }}-app-cargo-${{ hashFiles('app/src-tauri/Cargo.lock', 'engine-rs/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-app-cargo-
+          key: ${{ runner.os }}-${{ matrix.target }}-app-cargo-${{ hashFiles('app/src-tauri/Cargo.lock', 'engine-rs/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.target }}-app-cargo-
 
-      # 仅当 TAURI_SIGNING_PRIVATE_KEY secret 存在时启用 updater 产物：
-      # tauri-action 检测到签名密钥 + updater 产物后会自动签名并生成
-      # latest.json 上传到该 tag 的 release；secret 不存在时本步骤跳过，
-      # 构建继续但不产出 latest.json（不签名）。
-      - name: Enable updater artifacts when signing key is present
-        if: ${{ env.TAURI_SIGNING_PRIVATE_KEY != '' }}
-        working-directory: app
-        run: >
-          node -e "const fs=require('fs');const p='src-tauri/tauri.conf.json';
-          const c=JSON.parse(fs.readFileSync(p,'utf8'));
-          c.bundle.createUpdaterArtifacts=true;
-          fs.writeFileSync(p, JSON.stringify(c,null,2)+'\n');"
+      - name: Run engine-rs tests and checks
+        run: |
+          cargo test --manifest-path engine-rs/Cargo.toml
+          cargo check --manifest-path engine-rs/Cargo.toml --all-targets
+
+      - name: Run Tauri app tests and checks
+        run: |
+          cargo test --manifest-path app/src-tauri/Cargo.toml
+          cargo check --manifest-path app/src-tauri/Cargo.toml --all-targets
 
       - name: Configure rust path remapping
         shell: bash
         run: |
-          echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }--remap-path-prefix=$HOME=/YOUR_BUILD_HOME --remap-path-prefix=$GITHUB_WORKSPACE=/YOUR_SOURCE_ROOT" >> "$GITHUB_ENV"
+          build_home="$HOME"
+          source_root="$GITHUB_WORKSPACE"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            build_home="$(cygpath -w "$HOME")"
+            source_root="$(cygpath -w "$GITHUB_WORKSPACE")"
+          fi
+          echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }--remap-path-prefix=$build_home=/YOUR_BUILD_HOME --remap-path-prefix=$source_root=/YOUR_SOURCE_ROOT" >> "$GITHUB_ENV"
 
+      # p12 与临时 keychain 使用 RUNNER_TEMP 下的固定路径，构建结束无论成败、
+      # 无论本步骤在哪一行失败，都由末尾 cleanup 步骤按固定路径删除。
+      - name: Import macOS signing certificate
+        if: ${{ runner.os == 'macOS' }}
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -eo pipefail
+          cert_path="$RUNNER_TEMP/agent-manager-signing.p12"
+          keychain_path="$RUNNER_TEMP/agent-manager-signing.keychain-db"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$cert_path"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$cert_path" -P "$APPLE_CERTIFICATE_PASSWORD" -k "$keychain_path" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security list-keychains -d user -s "$keychain_path" login.keychain
+          identity_count="$(security find-identity -v -p codesigning "$keychain_path" | grep -c "Developer ID Application" || true)"
+          identity="$(security find-identity -v -p codesigning "$keychain_path" | awk -F '"' '/Developer ID Application/ {print $2; exit}')"
+          if [[ "$identity_count" != "1" || -z "$identity" ]]; then
+            echo "expected exactly one Developer ID Application identity in temporary keychain, found $identity_count" >&2
+            exit 1
+          fi
+          echo "APPLE_SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
+
+      # pfx 解码到 RUNNER_TEMP 并导入 CurrentUser\My，仅把 thumbprint 写入
+      # GITHUB_ENV；构建结束无论成败由末尾 cleanup 步骤按精确 thumbprint 移除。
+      - name: Import Windows signing certificate
+        if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'agent-manager-signing.pfx'
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $securePassword = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $imported = @(Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $securePassword)
+          $leaf = @($imported | Where-Object { $_.HasPrivateKey -and -not [string]::IsNullOrEmpty($_.Thumbprint) })
+          if ($leaf.Count -ne 1) {
+            throw "expected exactly 1 imported certificate leaf with a private key, found $($leaf.Count)"
+          }
+          "WINDOWS_CERTIFICATE_THUMBPRINT=$($leaf[0].Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      # 只改 ephemeral checkout 内的 app/src-tauri/tauri.conf.json，仓库源文件
+      # 不受影响；脚本不回显任何密钥取值，末尾 cleanup 步骤 git restore 还原。
+      - name: Apply ephemeral updater and signing config
+        shell: bash
+        working-directory: app
+        env:
+          WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
+        run: |
+          node <<'EOF'
+          const fs = require('fs');
+          const p = 'src-tauri/tauri.conf.json';
+          const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+          const pubkey = process.env.TAURI_UPDATER_PUBKEY || '';
+          if (!pubkey || pubkey.startsWith('YOUR_')) {
+            console.error('TAURI_UPDATER_PUBKEY is empty or a YOUR_* placeholder');
+            process.exit(1);
+          }
+          c.bundle = c.bundle || {};
+          c.bundle.createUpdaterArtifacts = true;
+          c.plugins = c.plugins || {};
+          c.plugins.updater = c.plugins.updater || {};
+          c.plugins.updater.pubkey = pubkey;
+          if (process.platform === 'win32') {
+            const thumbprint = process.env.WINDOWS_CERTIFICATE_THUMBPRINT || '';
+            const timestampUrl = process.env.WINDOWS_TIMESTAMP_URL || '';
+            if (!thumbprint || !timestampUrl) {
+              console.error('WINDOWS_CERTIFICATE_THUMBPRINT or WINDOWS_TIMESTAMP_URL is empty');
+              process.exit(1);
+            }
+            c.bundle.windows = c.bundle.windows || {};
+            c.bundle.windows.certificateThumbprint = thumbprint;
+            c.bundle.windows.digestAlgorithm = 'sha256';
+            c.bundle.windows.timestampUrl = timestampUrl;
+          }
+          fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');
+          EOF
+
+      # releaseDraft 保持 true：Release 始终是草稿，人工核对后才可公开。
       - name: Build and upload release
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_ID: ${{ runner.os == 'macOS' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
         with:
           projectPath: app
           tagName: ${{ env.RELEASE_TAG }}
           releaseName: Agent Manager ${{ env.RELEASE_TAG }}
-          args: --bundles ${{ matrix.bundles }}
+          releaseDraft: true
+          prerelease: false
+          uploadUpdaterJson: true
+          uploadUpdaterSignatures: true
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      - name: Restore ephemeral tauri.conf.json
+        if: ${{ always() }}
+        shell: bash
+        run: git restore -- app/src-tauri/tauri.conf.json
+
+      - name: Remove macOS signing material
+        if: ${{ always() && runner.os == 'macOS' }}
+        shell: bash
+        run: |
+          security delete-keychain "$RUNNER_TEMP/agent-manager-signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/agent-manager-signing.p12"
+
+      - name: Remove Windows signing material
+        if: ${{ always() && runner.os == 'Windows' }}
+        shell: pwsh
+        run: |
+          if ($env:WINDOWS_CERTIFICATE_THUMBPRINT) {
+            $storePath = "Cert:\CurrentUser\My\$($env:WINDOWS_CERTIFICATE_THUMBPRINT)"
+            if (Test-Path $storePath) { Remove-Item $storePath -Force }
+          }
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'agent-manager-signing.pfx'
+          if (Test-Path $pfxPath) { Remove-Item $pfxPath -Force }
