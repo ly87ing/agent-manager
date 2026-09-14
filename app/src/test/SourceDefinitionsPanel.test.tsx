@@ -57,6 +57,19 @@ describe("Hooks JSON 来源", () => {
   });
 });
 
+describe("输入保真", () => {
+  it("定义编辑框禁用自动拼写、纠正与大小写替换，保护 rules 文本与 JSON 内容", async () => {
+    renderWithEngine(<SourceDefinitionsPanel domain="hooks" />, {
+      "sources:get": makeEnvelope({ sources: [{ key: "hooks.claude", label: "Claude Hooks", value: { hooks: {} }, revision: "r1", format: "json" }] }),
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "编辑 Claude Hooks" }));
+    const field = screen.getByLabelText("定义内容");
+    expect(field).toHaveAttribute("spellcheck", "false");
+    expect(field).toHaveAttribute("autocorrect", "off");
+    expect(field).toHaveAttribute("autocapitalize", "off");
+  });
+});
+
 describe("域专属说明文案", () => {
   it("rules 页显示共享/专用说明，hooks 页不出现", async () => {
     renderWithEngine(<SourceDefinitionsPanel domain="rules" />, {

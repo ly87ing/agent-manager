@@ -44,7 +44,7 @@ export function SourceDefinitionsPanel({ domain }: { domain: "rules" | "hooks" |
       <section role="dialog" aria-modal="true" aria-label={`编辑 ${editing.label}`} className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white p-5 shadow-xl">
         <h3 className="font-semibold">编辑 {editing.label}</h3>
         <p className="my-2 text-sm text-slate-500">{editing.format === "json" ? "添加或修改对象中的条目，删除对应键即可移除。使用 {} 清空这组定义。" : "直接添加、修改或删除规则文本；清空内容可移除这组规则。"}</p>
-        <textarea aria-label="定义内容" autoFocus value={text} onChange={(event) => setText(event.target.value)} rows={16} disabled={saving} className="w-full rounded border p-2 font-mono text-sm" />
+        <textarea aria-label="定义内容" autoFocus value={text} onChange={(event) => setText(event.target.value)} rows={16} disabled={saving} spellCheck={false} autoCorrect="off" autoCapitalize="off" className="w-full rounded border p-2 font-mono text-sm" />
         {error && <p role="alert" className="mt-2 text-sm text-red-600">{error}</p>}
         <div className="mt-4 flex justify-end gap-2"><button type="button" disabled={saving} onClick={() => setEditing(null)} className="rounded border px-4 py-2">取消</button><button type="button" disabled={saving} onClick={() => void save()} className="rounded bg-indigo-600 px-4 py-2 text-white">保存并预览同步</button></div>
       </section>
