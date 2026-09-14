@@ -7138,7 +7138,8 @@ x-static = "sentinel-codex-header-5"
     let status = execute(&ctx, &request("mcp:status", &[]));
     assert!(status.ok, "{:?}", status.errors);
 
-    // 候选只含未受管、未入库、无 binding、名称合法的条目
+    // 候选只含未入库、无 binding、名称合法的条目；marker 无 binding（旧体系遗留）
+    // 也进入候选（managed-one/managed-remote），marker+binding（bound-one）仍排除
     let mut names = candidate_names(&status);
     names.sort();
     assert_eq!(
@@ -7146,13 +7147,39 @@ x-static = "sentinel-codex-header-5"
         vec![
             ("codex-remote".to_string(), "codex".to_string()),
             ("codex-stdio".to_string(), "codex".to_string()),
+            ("managed-one".to_string(), "claude-code".to_string()),
+            ("managed-remote".to_string(), "claude-code".to_string()),
             ("oc-remote".to_string(), "opencode".to_string()),
             ("oc-stdio".to_string(), "opencode".to_string()),
             ("plain-stdio".to_string(), "claude-code".to_string()),
             ("remote-claude".to_string(), "claude-code".to_string()),
         ],
-        "受管/库内同名/binding 已知/非法名一律不出现"
+        "库内同名/binding 已知/非法名一律不出现；marker 无 binding 转为候选"
     );
+
+    // previously_managed 标志：marker 无 binding → true；纯外部 → false
+    assert_eq!(
+        candidate_by_name(&status, "managed-one")["previously_managed"],
+        true
+    );
+    assert_eq!(
+        candidate_by_name(&status, "managed-remote")["previously_managed"],
+        true
+    );
+    for name in [
+        "plain-stdio",
+        "remote-claude",
+        "codex-stdio",
+        "codex-remote",
+        "oc-stdio",
+        "oc-remote",
+    ] {
+        assert_eq!(
+            candidate_by_name(&status, name)["previously_managed"],
+            false,
+            "{name} 无 marker 必须标注 false"
+        );
+    }
 
     // 远程/stdio 分类与掩码形态
     let plain = candidate_by_name(&status, "plain-stdio");
@@ -7254,6 +7281,140 @@ fn mcp_import_candidates_degrades_per_agent_on_missing_or_corrupt_files() {
         vec![("only-codex".to_string(), "codex".to_string())],
         "损坏文件只影响本 agent 候选，不影响其他 agent"
     );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// marker 黑洞修正：有 marker 但无 binding（旧体系遗留）的条目必须作为
+/// 导入候选重新可见（previously_managed=true）；marker+binding（真正受管）、
+/// 库内同名（即使带 marker）仍排除；无 marker 纯外部候选标注 false。
+#[test]
+fn mcp_import_candidates_marker_without_binding_is_previously_managed() {
+    let (root, ctx) = temp_ctx("import-prev-managed");
+
+    // 库内同名定义：即使目标文件条目带 marker 也不得成为候选
+    let set_dup = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions.lib-dup",
+                "--value",
+                r#"{"command":"npx","args":["-y","lib-dup-mcp"]}"#,
+            ],
+        ),
+    );
+    assert!(set_dup.ok, "{:?}", set_dup.errors);
+
+    // marker+binding：入库并 add 到 claude-code（apply 写出的盘上条目自带 marker）
+    let set_bound = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions.bound-marked",
+                "--value",
+                r#"{"command":"echo","args":["bound"],"agents":["claude-code"]}"#,
+            ],
+        ),
+    );
+    assert!(set_bound.ok, "{:?}", set_bound.errors);
+    let add_bound = execute(
+        &ctx,
+        &request(
+            "mcp:apply",
+            &[
+                "--only",
+                "mcp:bound-marked",
+                "--action",
+                "add",
+                "--agent",
+                "claude-code",
+            ],
+        ),
+    );
+    assert!(add_bound.ok, "{:?}", add_bound.errors);
+
+    // 在 apply 写出的 .claude.json 上追加：marker 无 binding（旧体系遗留）、
+    // 无 marker（纯外部）、marker 且库内同名三种条目；bound-marked 保持原样
+    let claude_cfg = ctx.home_dir.join(".claude.json");
+    let mut doc: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&claude_cfg).unwrap()).unwrap();
+    let servers = doc["mcpServers"].as_object_mut().unwrap();
+    servers.insert(
+        "legacy-marked".to_string(),
+        serde_json::json!({"command": "legacy-mcp", "env": {"_MANAGED_BY": "agent-manager", "LEGACY_TOKEN": "sentinel-legacy-env-1"}}),
+    );
+    servers.insert(
+        "plain-external".to_string(),
+        serde_json::json!({"command": "npx", "args": ["-y", "plain-mcp"]}),
+    );
+    servers.insert(
+        "lib-dup".to_string(),
+        serde_json::json!({"command": "npx", "args": ["lib-dup-mcp"], "env": {"_MANAGED_BY": "agent-manager"}}),
+    );
+    std::fs::write(&claude_cfg, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
+
+    // Codex TOML：env 内 marker 无 binding（真实环境 chrome-devtools/grok-search 形态）
+    let codex_cfg = ctx.home_dir.join(".codex").join("config.toml");
+    std::fs::create_dir_all(codex_cfg.parent().unwrap()).unwrap();
+    std::fs::write(
+        &codex_cfg,
+        r#"[mcp_servers.codex-legacy]
+command = "codex-legacy-mcp"
+
+[mcp_servers.codex-legacy.env]
+_MANAGED_BY = "agent-manager"
+CODEX_LEGACY_KEY = "sentinel-legacy-env-2"
+"#,
+    )
+    .unwrap();
+
+    let status = execute(&ctx, &request("mcp:status", &[]));
+    assert!(status.ok, "{:?}", status.errors);
+    let mut names = candidate_names(&status);
+    names.sort();
+    assert_eq!(
+        names,
+        vec![
+            ("codex-legacy".to_string(), "codex".to_string()),
+            ("legacy-marked".to_string(), "claude-code".to_string()),
+            ("plain-external".to_string(), "claude-code".to_string()),
+        ],
+        "marker+无 binding 与无 marker 进候选；marker+binding、库内同名（带 marker）排除"
+    );
+
+    // 标志与掩码：marker 无 binding → previously_managed=true；marker 键不进 env 清单
+    let legacy = candidate_by_name(&status, "legacy-marked");
+    assert_eq!(legacy["previously_managed"], true);
+    assert_eq!(legacy["spec"]["env"]["LEGACY_TOKEN"], "<literal>");
+    assert!(
+        legacy["spec"]["env"].get("_MANAGED_BY").is_none(),
+        "marker 键不得进入候选 env 清单"
+    );
+    let codex_legacy = candidate_by_name(&status, "codex-legacy");
+    assert_eq!(codex_legacy["previously_managed"], true);
+    assert_eq!(codex_legacy["spec"]["env"]["CODEX_LEGACY_KEY"], "<literal>");
+    assert!(codex_legacy["spec"]["env"].get("_MANAGED_BY").is_none());
+    assert_eq!(
+        candidate_by_name(&status, "plain-external")["previously_managed"],
+        false
+    );
+
+    // 哨兵值断言：新可见的旧体系遗留条目的 env 明文绝不进入 status JSON
+    let status_json = serde_json::to_string(&status.data).unwrap();
+    for sentinel in ["sentinel-legacy-env-1", "sentinel-legacy-env-2"] {
+        assert!(
+            !status_json.contains(sentinel),
+            "status JSON 绝不得包含明文 {sentinel}"
+        );
+    }
 
     let _ = std::fs::remove_dir_all(root);
 }

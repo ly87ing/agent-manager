@@ -125,6 +125,8 @@ export interface McpImportCandidate {
   agent: string;
   transport: "stdio" | "remote" | string;
   spec: McpImportCandidateSpec;
+  /** true = 条目带旧体系写入的管理标记但本工具无绑定记录（此前由本工具管理）。 */
+  previously_managed?: boolean;
 }
 
 // ---------- <domain>:plan ----------

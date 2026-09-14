@@ -192,4 +192,33 @@ describe("McpPage 发现未导入的服务器", () => {
     expect(illegalBtn).toBeDisabled();
     expect(within(section).getByTestId("import-blocked-bad name")).toHaveTextContent("名称非法");
   });
+
+  it("带旧体系管理标记的候选显示「此前由本工具管理」徽标，纯外部候选不显示", async () => {
+    const routes = importRoutes();
+    const status = routes["mcp:status"].data as StatusData;
+    status.import_candidates = [
+      {
+        name: "legacy-marked",
+        agent: "claude-code",
+        transport: "stdio",
+        spec: { command: "legacy-mcp", args: [], env: { LEGACY_TOKEN: "<literal>" } },
+        previously_managed: true,
+      },
+      {
+        name: "plain-external",
+        agent: "codex",
+        transport: "stdio",
+        spec: { command: "npx", args: [], env: {} },
+        previously_managed: false,
+      },
+    ];
+    renderWithEngine(<McpPage />, routes);
+    const section = await screen.findByTestId("mcp-import-candidates");
+
+    const legacy = within(section).getByTestId("import-candidate-legacy-marked");
+    expect(within(legacy).getByTestId("previously-managed-legacy-marked")).toHaveTextContent("此前由本工具管理");
+
+    const plain = within(section).getByTestId("import-candidate-plain-external");
+    expect(within(plain).queryByTestId("previously-managed-plain-external")).not.toBeInTheDocument();
+  });
 });

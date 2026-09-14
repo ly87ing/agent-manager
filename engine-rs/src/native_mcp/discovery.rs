@@ -1,8 +1,11 @@
 //! MCP 未受管条目发现（mcp:status import_candidates，只读、零写、零网络）
 //!
 //! 扫描各已配置 agent target（Claude JSON / Codex TOML / OpenCode JSON）的目标
-//! 文件，提取未受管（无条目级或 env 内 `_MANAGED_BY` 标记）且库中无同名定义、
-//! mcp_bindings 无记录、名称合法的 server 条目，输出掩码后的导入候选。
+//! 文件，提取库中无同名定义、mcp_bindings 无记录、名称合法的 server 条目，
+//! 输出掩码后的导入候选。条目级或 env 内 `_MANAGED_BY` 标记不再整体排除：
+//! marker 与 mcp_bindings 记录同时存在（真正受管）的条目经 binding 条件排除；
+//! 有 marker 但无 binding（旧体系遗留）的条目进入候选并标注
+//! `"previously_managed": true`，无 marker（纯外部）的候选标注 false。
 //!
 //! 任何 env/header 明文值绝不进入输出：stdio env 与静态 headers 只保留键名、
 //! 值恒为 <literal>；Codex env_http_headers 是 header→变量名引用，按 ${VAR}
@@ -280,8 +283,9 @@ pub fn import_candidates(
             Format::Unsupported(_) => continue,
         };
         for (name, entry) in entries {
-            if entry.managed
-                || library.definitions.contains_key(&name)
+            // 真正受管（marker + binding）经 binding 条件排除；marker 无 binding
+            // （旧体系遗留）与无 marker（纯外部）都进入候选。
+            if library.definitions.contains_key(&name)
                 || bindings.contains_key(&name)
                 || !is_valid_server_name(&name)
             {
@@ -292,6 +296,7 @@ pub fn import_candidates(
                 "agent": target.agent,
                 "transport": if entry.remote { "remote" } else { "stdio" },
                 "spec": masked_spec(&entry),
+                "previously_managed": entry.managed,
             }));
         }
     }

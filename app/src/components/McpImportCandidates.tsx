@@ -63,6 +63,14 @@ export function McpImportCandidates({
                     <span className="rounded border border-sky-200 bg-sky-50 px-1 py-0.5 text-[10px] text-sky-700">
                       {candidate.transport === "remote" ? "远程" : "stdio"}
                     </span>
+                    {candidate.previously_managed === true && (
+                      <span
+                        data-testid={`previously-managed-${candidate.name}`}
+                        className="rounded border border-violet-200 bg-violet-50 px-1 py-0.5 text-[10px] text-violet-700"
+                      >
+                        此前由本工具管理
+                      </span>
+                    )}
                   </div>
                   <p className="mt-1 break-all font-mono text-[11px] text-slate-400">
                     {candidate.transport === "remote"
