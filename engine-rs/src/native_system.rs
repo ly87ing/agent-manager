@@ -4,7 +4,9 @@
 //! （status/version/sections/summary，对齐 app/src/lib/contract.ts）。
 //!
 //! 不移植旧 Python doctor：不扫描源码配置、不依赖 Python/Git/源码树、不做
-//! 全仓 secret scan；version 无编译期可信来源，固定 null。全程零写：不联网、
+//! 全仓 secret scan；version 由构建入口（scripts/build-macos.sh）注入的可信
+//! 元数据（完整 HEAD SHA±dirty、commit ISO 日期）经形状与 RFC3339 语义校验
+//! 后输出既有 {commit,date} 形状，缺失或畸形 fail-closed 为 null。全程零写：不联网、
 //! 不取 apply lock、不写 DB/目录/文件/operation_logs/JSONL；子域失败只降级
 //! 对应 section 为固定 error 条目，不中断其他域，原始错误正文不出现在
 //! data/envelope。
@@ -201,6 +203,87 @@ fn parse_audit_args(request: &Request) -> Result<bool, Diagnostic> {
     Ok(offline)
 }
 
+/// 发布构建溯源标记：构建入口注入完整 HEAD SHA（dirty 构建带可见 -dirty
+/// 后缀，不冒充 clean commit）与 commit ISO 日期；固定前缀加换行结尾保证
+/// 最终二进制经 strings 可逐条精确检索。普通 cargo/dev 构建为空值，不代表
+/// 任何 commit。标记只含注入值本身，不含源码路径、HOME 或其他环境内容。
+#[used]
+static BUILD_COMMIT_MARKER: &str = concat!(
+    "agent-manager-build-commit:",
+    env!("AGENT_MANAGER_BUILD_COMMIT"),
+    "\n"
+);
+#[used]
+static BUILD_DATE_MARKER: &str = concat!(
+    "agent-manager-build-date:",
+    env!("AGENT_MANAGER_BUILD_DATE"),
+    "\n"
+);
+
+/// 可信 commit 形状：40 位小写 hex（git 输出恒为小写），可选 `-dirty` 后缀。
+fn is_trustworthy_commit(commit: &str) -> bool {
+    let sha = commit.strip_suffix("-dirty").unwrap_or(commit);
+    sha.len() == 40
+        && sha
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// 可信日期：git `%cI` 严格形状（`YYYY-MM-DDTHH:MM:SS±HH:MM` 或 `Z` 结尾，
+/// 固定位置与数字位，偏移部分亦须数字）+ RFC3339 语义校验（chrono 解析，
+/// 拒绝月份 99、秒 99、2 月 30 等日历或数值非法值）。
+fn is_trustworthy_date(date: &str) -> bool {
+    let b = date.as_bytes();
+    let (body, tz_ok) = match b.len() {
+        25 => (
+            &b[..19],
+            matches!(b[19], b'+' | b'-')
+                && b[22] == b':'
+                && b[20].is_ascii_digit()
+                && b[21].is_ascii_digit()
+                && b[23].is_ascii_digit()
+                && b[24].is_ascii_digit(),
+        ),
+        20 => (&b[..19], b[19] == b'Z'),
+        _ => return false,
+    };
+    tz_ok && is_datetime_body(body) && chrono::DateTime::parse_from_rfc3339(date).is_ok()
+}
+
+fn is_datetime_body(b: &[u8]) -> bool {
+    debug_assert_eq!(b.len(), 19);
+    let digit_at = |i: usize| b[i].is_ascii_digit();
+    let digits = [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18];
+    digits.into_iter().all(digit_at)
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b[10] == b'T'
+        && b[13] == b':'
+        && b[16] == b':'
+}
+
+/// 由注入元数据构造 AuditData.version：两值齐全且形状可信时返回既有
+/// {commit, date} 形状；缺失（普通 cargo/dev 构建）或畸形一律 fail-closed
+/// 为 null，对齐契约 version nullable 语义。
+fn build_version_from(commit: Option<&str>, date: Option<&str>) -> Value {
+    let (Some(commit), Some(date)) = (commit, date) else {
+        return Value::Null;
+    };
+    if !is_trustworthy_commit(commit) || !is_trustworthy_date(date) {
+        return Value::Null;
+    }
+    json!({ "commit": commit, "date": date })
+}
+
+fn build_version() -> Value {
+    // 引用标记静态，确保发布二进制保留 strings 可检的溯源标记。
+    let _retained: (&str, &str) = (BUILD_COMMIT_MARKER, BUILD_DATE_MARKER);
+    build_version_from(
+        option_env!("AGENT_MANAGER_BUILD_COMMIT"),
+        option_env!("AGENT_MANAGER_BUILD_DATE"),
+    )
+}
+
 pub(crate) fn run(ctx: &Context, request: &Request) -> AuditOutcome {
     let offline = match parse_audit_args(request) {
         Ok(offline) => offline,
@@ -226,7 +309,7 @@ pub(crate) fn run(ctx: &Context, request: &Request) -> AuditOutcome {
     let (status, summary) = summarize(&sections);
     let data = json!({
         "status": status,
-        "version": Value::Null,
+        "version": build_version(),
         "sections": Value::Object(sections),
         "summary": summary,
     });
@@ -358,5 +441,114 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(summarize(&warning).0, "warning");
+    }
+
+    #[test]
+    fn build_version_missing_metadata_stays_null() {
+        let sha = "a".repeat(40);
+        let date = "2026-09-14T08:46:11+08:00";
+        assert_eq!(build_version_from(None, None), Value::Null);
+        assert_eq!(build_version_from(Some(&sha), None), Value::Null);
+        assert_eq!(build_version_from(None, Some(date)), Value::Null);
+        // 构建脚本对缺失环境归一为空串：等同缺失，不得冒充有效身份。
+        assert_eq!(build_version_from(Some(""), Some("")), Value::Null);
+    }
+
+    #[test]
+    fn build_version_accepts_valid_clean_commit() {
+        let sha = "8fa4274b".repeat(5);
+        let version = build_version_from(Some(&sha), Some("2026-09-14T08:46:11+08:00"));
+        assert_eq!(
+            version,
+            json!({"commit": sha, "date": "2026-09-14T08:46:11+08:00"})
+        );
+        // Zulu 时区同为 git %cI 合法形状。
+        let zulu = build_version_from(Some(&sha), Some("2026-09-14T00:46:11Z"));
+        assert_eq!(zulu["date"], "2026-09-14T00:46:11Z");
+    }
+
+    #[test]
+    fn build_version_marks_dirty_commit_visibly() {
+        let sha = "b".repeat(40);
+        let dirty = format!("{sha}-dirty");
+        let version = build_version_from(Some(&dirty), Some("2026-09-14T08:46:11+08:00"));
+        assert_eq!(version["commit"], dirty);
+        let commit = version["commit"].as_str().expect("commit string");
+        assert!(
+            commit.ends_with("-dirty"),
+            "dirty 构建必须在 commit 字段可见: {commit}"
+        );
+    }
+
+    #[test]
+    fn build_version_rejects_malformed_metadata() {
+        let sha = "c".repeat(40);
+        let date = "2026-09-14T08:46:11+08:00";
+        for bad_commit in [
+            "8fa4274".to_string(),        // 短 sha
+            "g".repeat(40),               // 非 hex
+            "A".repeat(40),               // 大写 hex
+            format!("{sha}-DIRTY"),       // 后缀形状不符
+            format!("{sha}-dirty-extra"), // 后缀冗余
+            format!("{sha} "),            // 尾部空白
+            format!(" {sha}"),            // 前导空白
+            format!("{sha}\n"),           // 换行注入
+            format!("{sha}\r\nX"),        // CRLF 注入
+        ] {
+            assert_eq!(
+                build_version_from(Some(&bad_commit), Some(date)),
+                Value::Null,
+                "commit={bad_commit:?}"
+            );
+        }
+        for bad_date in [
+            "2026-09-14",
+            "2026-09-14 08:46:11",
+            "2026-09-14T08:46:11",
+            "2026-09-14T08:46:11+0800",
+            "not-a-date",
+            "",
+        ] {
+            assert_eq!(
+                build_version_from(Some(&sha), Some(bad_date)),
+                Value::Null,
+                "date={bad_date:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn build_version_date_requires_rfc3339_semantics() {
+        let sha = "d".repeat(40);
+        // 形状接近合法但 RFC3339 语义非法：必须 fail-closed。
+        for bad_date in [
+            "2026-99-14T08:46:11+08:00", // 月份 99
+            "2026-09-99T08:46:11+08:00", // 日 99
+            "2026-09-14T99:46:11+08:00", // 时 99
+            "2026-09-14T08:99:11+08:00", // 分 99
+            "2026-09-14T08:46:99+08:00", // 秒 99
+            "2026-09-14T08:46:11+ab:cd", // 偏移非数字
+            "2026-09-14T08:46:11+99:00", // 偏移时 99
+            "2026-02-30T08:46:11+08:00", // 日历非法（2 月 30）
+        ] {
+            assert_eq!(
+                build_version_from(Some(&sha), Some(bad_date)),
+                Value::Null,
+                "date={bad_date:?}"
+            );
+        }
+        // 合法 git %cI：数字偏移与 Z 两种形态均输出既有 {commit,date}。
+        let offset_form = build_version_from(Some(&sha), Some("2026-09-14T08:28:54+08:00"));
+        assert_eq!(offset_form["commit"], sha);
+        assert_eq!(offset_form["date"], "2026-09-14T08:28:54+08:00");
+        let zulu_form = build_version_from(Some(&sha), Some("2026-09-14T00:28:54Z"));
+        assert_eq!(zulu_form["date"], "2026-09-14T00:28:54Z");
+    }
+
+    #[test]
+    fn build_markers_keep_stable_strings_prefix() {
+        // 固定前缀是 verify-macos-dmg.sh 的 strings 精确检索锚点。
+        assert!(BUILD_COMMIT_MARKER.starts_with("agent-manager-build-commit:"));
+        assert!(BUILD_DATE_MARKER.starts_with("agent-manager-build-date:"));
     }
 }

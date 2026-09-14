@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest",
     "build:macos": "bash ../scripts/build-macos.sh",
-    "verify:macos": "bash ../scripts/verify-macos-dmg.sh src-tauri/target/release/bundle/dmg/Agent\\ Manager_0.1.0_x64.dmg"
+    "verify:macos": "bash ../scripts/verify-macos-dmg.sh"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.102.8",

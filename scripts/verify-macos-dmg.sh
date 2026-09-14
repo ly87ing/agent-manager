@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # scripts/verify-macos-dmg.sh
-# 独立验收 macOS DMG 安装包与已安装 app 的运行健康度
+# 独立验收 macOS DMG 安装包与已安装 app 的运行健康度。
+# 用法: verify-macos-dmg.sh [path-to-dmg] [expected-commit]
+#   path-to-dmg      缺省按当前 tauri.conf 版本与宿主架构定位标准产物路径
+#   expected-commit  缺省取当前仓库 HEAD（app/ 或 engine-rs/ 有源改动时加 -dirty 后缀）
+#   期望构建日期恒取 HEAD commit 的 ISO 日期（git show -s --format=%cI HEAD，可公开信息）
 set -euo pipefail
 
 log_info() {
@@ -16,27 +20,70 @@ fail() {
   exit 1
 }
 
-# 1. 参数与文件检查
-if [[ $# -lt 1 ]] || [[ -z "${1:-}" ]]; then
-  echo "用法: $0 <path-to-dmg>" >&2
-  exit 1
-fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+TAURI_CONF="${REPO_ROOT}/app/src-tauri/tauri.conf.json"
 
-DMG_PATH="$1"
+# 1. 平台与架构检查（仅 Darwin；期望架构按宿主 x86_64/arm64 动态核对）
+OS_NAME="$(uname -s)"
+ARCH_NAME="$(uname -m)"
+if [[ "$OS_NAME" != "Darwin" ]]; then
+  fail "平台拒绝：本验收脚本仅支持 Darwin，当前系统为 ${OS_NAME} ${ARCH_NAME}"
+fi
+case "$ARCH_NAME" in
+  x86_64)
+    MACHO_ARCH="x86_64"
+    DMG_ARCH_SUFFIX="x64"
+    ;;
+  arm64)
+    MACHO_ARCH="arm64"
+    DMG_ARCH_SUFFIX="aarch64"
+    ;;
+  *)
+    fail "平台拒绝：不支持的宿主架构 ${ARCH_NAME}"
+    ;;
+esac
+log_info "平台检查通过: Darwin ${ARCH_NAME}（期望 Mach-O ${MACHO_ARCH} / DMG 后缀 ${DMG_ARCH_SUFFIX}）"
+
+# 2. 期望元数据：版本 / Bundle ID / 产品名读自当前 tauri.conf（不再硬编码）
+EXPECTED_VER="$(plutil -extract version raw -o - "$TAURI_CONF" 2>/dev/null || true)"
+EXPECTED_BID="$(plutil -extract identifier raw -o - "$TAURI_CONF" 2>/dev/null || true)"
+PRODUCT_NAME="$(plutil -extract productName raw -o - "$TAURI_CONF" 2>/dev/null || true)"
+if [[ -z "$EXPECTED_VER" ]] || [[ -z "$EXPECTED_BID" ]] || [[ -z "$PRODUCT_NAME" ]]; then
+  fail "元数据读取失败：无法从当前 tauri.conf 提取 version/identifier/productName"
+fi
+log_info "期望元数据（来自 tauri.conf）: version=${EXPECTED_VER} identifier=${EXPECTED_BID} product=${PRODUCT_NAME}"
+
+# 3. DMG 路径：参数优先，缺省按版本与宿主架构定位标准产物路径
+DMG_PATH="${1:-${REPO_ROOT}/app/src-tauri/target/release/bundle/dmg/${PRODUCT_NAME}_${EXPECTED_VER}_${DMG_ARCH_SUFFIX}.dmg}"
 if [[ ! -f "$DMG_PATH" ]]; then
   fail "DMG 文件不存在: ${DMG_PATH}"
 fi
 DMG_ABS="$(cd "$(dirname "$DMG_PATH")" && pwd)/$(basename "$DMG_PATH")"
 
-# 2. 平台与架构限制（严格限定 Darwin x86_64）
-OS_NAME="$(uname -s)"
-ARCH_NAME="$(uname -m)"
-if [[ "$OS_NAME" != "Darwin" ]] || [[ "$ARCH_NAME" != "x86_64" ]]; then
-  fail "平台拒绝：本验收脚本仅支持 Darwin x86_64，当前系统为 ${OS_NAME} ${ARCH_NAME}"
+# 4. 期望构建身份：commit 参数优先，缺省从当前仓库推导（完整 HEAD ± app//engine-rs/
+#    源脏标记）；期望日期恒取 HEAD commit 的 ISO 日期（%cI，可公开信息），空值即失败。
+HEAD_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
+if [[ ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+  fail "无法确定期望构建身份（git HEAD 无效），请在有效仓库内运行或检查 HEAD"
 fi
-log_info "平台检查通过: Darwin x86_64"
+EXPECTED_DATE="$(git -C "$REPO_ROOT" show -s --format=%cI HEAD 2>/dev/null || true)"
+if [[ -z "$EXPECTED_DATE" ]]; then
+  fail "无法确定期望构建日期（git show -s --format=%cI HEAD 为空）"
+fi
+EXPECTED_COMMIT="${2:-}"
+if [[ -z "$EXPECTED_COMMIT" ]]; then
+  EXPECTED_COMMIT="$HEAD_SHA"
+  if [[ -n "$(git -C "$REPO_ROOT" status --porcelain -- app engine-rs 2>/dev/null)" ]]; then
+    EXPECTED_COMMIT="${HEAD_SHA}-dirty"
+  fi
+fi
+if [[ ! "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}(-dirty)?$ ]]; then
+  fail "expected-commit 形状非法（需要 40 位小写 hex，可选 -dirty 后缀）"
+fi
+log_info "期望构建身份: commit=${EXPECTED_COMMIT} date=${EXPECTED_DATE}"
 
-# 3. 隔离工作区与清理 Trap 设置
+# 5. 隔离工作区与清理 Trap 设置
 TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/am-verify.XXXXXX")"
 MOUNT_DIR="${TEMP_DIR}/mount"
 APPS_DIR="${TEMP_DIR}/Applications"
@@ -80,7 +127,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM HUP
 
-# 4. 只读挂载 DMG
+# 6. 只读挂载 DMG
 log_info "挂载 DMG (只读、无自动打开)..."
 mkdir -p "$MOUNT_DIR"
 if ! hdiutil attach "$DMG_ABS" -mountpoint "$MOUNT_DIR" -readonly -nobrowse -noautoopen >/dev/null 2>&1; then
@@ -88,15 +135,15 @@ if ! hdiutil attach "$DMG_ABS" -mountpoint "$MOUNT_DIR" -readonly -nobrowse -noa
 fi
 MOUNTED=1
 
-APP_ON_MOUNT="${MOUNT_DIR}/Agent Manager.app"
+APP_ON_MOUNT="${MOUNT_DIR}/${PRODUCT_NAME}.app"
 if [[ ! -d "$APP_ON_MOUNT" ]]; then
-  fail "阶段失败 [检查 DMG 内容]：挂载点内未找到 Agent Manager.app，挂载目录内容:\n$(ls -la "$MOUNT_DIR" 2>/dev/null | head -n 10)"
+  fail "阶段失败 [检查 DMG 内容]：挂载点内未找到 ${PRODUCT_NAME}.app，挂载目录内容:\n$(ls -la "$MOUNT_DIR" 2>/dev/null | head -n 10)"
 fi
 
-# 5. 复制 App 到仓库外临时 Applications 目录并立即卸载 DMG
-log_info "使用 ditto 复制 Agent Manager.app 到仓库外隔离目录 ${APPS_DIR}..."
+# 7. 复制 App 到仓库外临时 Applications 目录并立即卸载 DMG
+log_info "使用 ditto 复制 ${PRODUCT_NAME}.app 到仓库外隔离目录 ${APPS_DIR}..."
 mkdir -p "$APPS_DIR"
-COPIED_APP="${APPS_DIR}/Agent Manager.app"
+COPIED_APP="${APPS_DIR}/${PRODUCT_NAME}.app"
 if ! ditto "$APP_ON_MOUNT" "$COPIED_APP"; then
   fail "阶段失败 [复制 App]：无法将 app 复制到 ${APPS_DIR}"
 fi
@@ -107,7 +154,7 @@ if ! hdiutil detach "$MOUNT_DIR" -force >/dev/null 2>&1; then
 fi
 MOUNTED=0
 
-# 6. 元数据与包内容静态检查
+# 8. 元数据与包内容静态检查
 INFO_PLIST="${COPIED_APP}/Contents/Info.plist"
 if [[ ! -f "$INFO_PLIST" ]]; then
   fail "阶段失败 [元数据检查]：未找到 Info.plist: ${INFO_PLIST}"
@@ -120,16 +167,16 @@ BUNDLE_EXEC="$(plutil -extract CFBundleExecutable raw "$INFO_PLIST" 2>/dev/null 
 if [[ -z "$BUNDLE_ID" ]]; then
   fail "阶段失败 [元数据检查]：无法提取 CFBundleIdentifier"
 fi
-if [[ "$BUNDLE_ID" != "com.agentmanager.dev" ]]; then
-  fail "阶段失败 [元数据检查]：Bundle Identifier 不匹配，期望 com.agentmanager.dev，实际为 ${BUNDLE_ID}"
+if [[ "$BUNDLE_ID" != "$EXPECTED_BID" ]]; then
+  fail "阶段失败 [元数据检查]：Bundle Identifier 不匹配，期望 ${EXPECTED_BID}（当前 tauri.conf），实际为 ${BUNDLE_ID}"
 fi
 log_info "Bundle Identifier 校验通过: ${BUNDLE_ID}"
 
 if [[ -z "$BUNDLE_VER" ]]; then
   fail "阶段失败 [元数据检查]：无法提取 CFBundleShortVersionString"
 fi
-if [[ "$BUNDLE_VER" != "0.1.0" ]]; then
-  fail "阶段失败 [元数据检查]：Bundle Version 不匹配，期望 0.1.0，实际为 ${BUNDLE_VER}"
+if [[ "$BUNDLE_VER" != "$EXPECTED_VER" ]]; then
+  fail "阶段失败 [元数据检查]：Bundle Version 不匹配，期望 ${EXPECTED_VER}（当前 tauri.conf），实际为 ${BUNDLE_VER}"
 fi
 log_info "Bundle Version 校验通过: ${BUNDLE_VER}"
 
@@ -146,12 +193,12 @@ if [[ ! -x "$APP_BIN" ]]; then
   fail "阶段失败 [二进制检查]：文件缺少可执行权限 ${APP_BIN}"
 fi
 
-# Mach-O 架构检查
+# Mach-O 架构检查（按宿主动态核对）
 FILE_OUTPUT="$(file "$APP_BIN")"
-if ! echo "$FILE_OUTPUT" | grep -q "x86_64"; then
-  fail "阶段失败 [架构检查]：二进制不是 x86_64 架构: ${FILE_OUTPUT}"
+if ! echo "$FILE_OUTPUT" | grep -q "$MACHO_ARCH"; then
+  fail "阶段失败 [架构检查]：二进制不含宿主架构 ${MACHO_ARCH}: ${FILE_OUTPUT}"
 fi
-log_info "Mach-O 架构: x86_64 ($(echo "$FILE_OUTPUT" | cut -d: -f2- | xargs))"
+log_info "Mach-O 架构: ${MACHO_ARCH} ($(echo "$FILE_OUTPUT" | cut -d: -f2- | xargs))"
 
 # otool 动态依赖检查（严禁包含 Python）
 OTOOL_OUTPUT="$(otool -L "$APP_BIN" 2>&1 || true)"
@@ -170,8 +217,7 @@ fi
 log_info "资源卫生检查通过: 无 .py/.pyc/manage.sh/python 遗留"
 
 # 路径脱敏检查（严禁泄露本机构建 HOME 或源码根目录绝对路径）
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CURRENT_REPO="$(cd "${SCRIPT_DIR}/.." && pwd)"
+CURRENT_REPO="$REPO_ROOT"
 
 STRINGS_FILE="${TEMP_DIR}/app_bin_strings.txt"
 strings "$APP_BIN" > "$STRINGS_FILE"
@@ -186,6 +232,39 @@ if grep -Fq "$HOME" "$STRINGS_FILE"; then
   fail "阶段失败 [路径脱敏检查]：二进制中发现本机构建 HOME 路径泄露:\n${SAMPLE}"
 fi
 log_info "路径脱敏检查通过: 二进制不包含本机构建 HOME 或源码绝对路径"
+
+# 构建身份核验（发布候选 fail-closed）：包内必须有且仅有 1 处与期望整行一致
+# 的 build-commit 标记（整行匹配，clean 期望不得命中 -dirty 标记，反之亦然）；
+# 缺失、不匹配或不唯一均拒绝。
+EXPECTED_MARKER="agent-manager-build-commit:${EXPECTED_COMMIT}"
+MARKER_COUNT="$(grep -Fxc "$EXPECTED_MARKER" "$STRINGS_FILE" || true)"
+if [[ "$MARKER_COUNT" == "0" ]]; then
+  FOUND_MARKER="$(grep -F "agent-manager-build-commit:" "$STRINGS_FILE" | head -n 1 || true)"
+  if [[ -n "$FOUND_MARKER" ]]; then
+    fail "阶段失败 [build identity 核验]：包内构建身份与期望不匹配，期望 commit=${EXPECTED_COMMIT}，实际标记: ${FOUND_MARKER}"
+  fi
+  fail "阶段失败 [build identity 核验]：包内缺少构建身份标记（非发布候选构建或未注入构建元数据）"
+fi
+if [[ "$MARKER_COUNT" != "1" ]]; then
+  fail "阶段失败 [build identity 核验]：包内构建身份标记不唯一（${MARKER_COUNT} 处）"
+fi
+log_info "build identity 核验通过: commit=${EXPECTED_COMMIT}"
+
+# 构建日期核验（与 commit 同级 fail-closed）：agent-manager-build-date: 整行
+# 精确匹配期望日期且恰好 1 处；缺失、不匹配、不唯一均拒绝。
+EXPECTED_DATE_MARKER="agent-manager-build-date:${EXPECTED_DATE}"
+DATE_MARKER_COUNT="$(grep -Fxc "$EXPECTED_DATE_MARKER" "$STRINGS_FILE" || true)"
+if [[ "$DATE_MARKER_COUNT" == "0" ]]; then
+  FOUND_DATE_MARKER="$(grep -F "agent-manager-build-date:" "$STRINGS_FILE" | head -n 1 || true)"
+  if [[ -n "$FOUND_DATE_MARKER" ]]; then
+    fail "阶段失败 [build identity 核验]：包内构建日期与期望不匹配，期望 date=${EXPECTED_DATE}，实际标记: ${FOUND_DATE_MARKER}"
+  fi
+  fail "阶段失败 [build identity 核验]：包内缺少构建日期标记（非发布候选构建或未注入构建元数据）"
+fi
+if [[ "$DATE_MARKER_COUNT" != "1" ]]; then
+  fail "阶段失败 [build identity 核验]：包内构建日期标记不唯一（${DATE_MARKER_COUNT} 处）"
+fi
+log_info "build date 核验通过: date=${EXPECTED_DATE}"
 
 # 检查代码签名状态
 CODESIGN_DISPLAY="$(codesign -dvv "$COPIED_APP" 2>&1 || true)"
@@ -205,7 +284,7 @@ else
 fi
 log_info "Apple 公证状态: 未验证（本地验证环境不要求 Apple 公证）"
 
-# 7. 独立运行存活验收
+# 9. 独立运行存活验收
 log_info "准备隔离运行环境（工作目录 /, 隔离 HOME, 独立 DATA_DIR, 最小 PATH=/usr/bin:/bin）..."
 mkdir -p "$ISOLATED_HOME" "$ISOLATED_DATA"
 
