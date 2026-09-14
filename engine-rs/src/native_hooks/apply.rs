@@ -1,7 +1,9 @@
 //! hooks 域 apply 核心：preflight 纯读校验 + 单 Immediate 事务内重检、
 //! 原子写入、binding 登记与单条审计。任何阻塞（外部修改/不安全路径/
-//! 来源或绑定损坏/目标 JSON 损坏）fail-closed；失败时 RollbackGuard 恢复
-//! 文件、DB 事务整体回滚。错误与审计只含 digest/revision 元数据。
+//! 来源或绑定损坏/目标 JSON 损坏）fail-closed；唯一例外是 --allow-takeover
+//! 显式接管（仅 --only 单目标，plan 已标注），结构/路径硬校验不受影响。
+//! 失败时 RollbackGuard 恢复文件、DB 事务整体回滚。错误与审计只含
+//! digest/revision 元数据；审计 detail 恒含 takeover 字段。
 
 use anyhow::{anyhow, bail, Result};
 use rusqlite::TransactionBehavior;
@@ -16,8 +18,8 @@ use crate::native_mcp::rollback::{atomic_write_bytes_checked, read_existing_byte
 use crate::native_mcp::targets::validate_target_path;
 use crate::store;
 
-/// 构造等价 hooks:plan 请求：保留归一后的 --only 与可选 --offline，
-/// 去掉 --dry-run。
+/// 构造等价 hooks:plan 请求：保留归一后的 --only 与可选 --offline /
+/// --allow-takeover，去掉 --dry-run。
 fn equivalent_plan_request(req: &Request, parsed: &args::HookArgs) -> Request {
     let mut plan_args: Vec<String> = Vec::new();
     for id in &parsed.only {
@@ -26,6 +28,9 @@ fn equivalent_plan_request(req: &Request, parsed: &args::HookArgs) -> Request {
     }
     if parsed.offline {
         plan_args.push("--offline".to_string());
+    }
+    if parsed.allow_takeover {
+        plan_args.push("--allow-takeover".to_string());
     }
     Request {
         command: "hooks:plan".to_string(),
@@ -62,12 +67,16 @@ fn result_json(dry_run: bool, steps: Vec<Value>, skipped: Vec<String>) -> Value 
     })
 }
 
-/// 单目标判定：返回 Skip 或 Write。任何外部修改/结构损坏 fail-closed。
+/// 单目标判定：返回 Skip 或 Write。任何外部修改/结构损坏 fail-closed；
+/// 唯一例外是显式接管（--allow-takeover，参数解析保证单目标）：绑定后的
+/// 外部修改与 codex whole-file 的外部内容允许被受管渲染替换，结构非法、
+/// 路径不安全等硬校验不受影响。
 fn decide(
     ctx: &Context,
     spec: &TargetSpec,
     sources: &std::collections::BTreeMap<String, String>,
     bindings: &std::collections::BTreeMap<String, Binding>,
+    allow_takeover: bool,
 ) -> Result<Decision> {
     let canonical = &sources[spec.source_key];
     let (managed_hooks, removed) = status::parse_source(spec, canonical)?;
@@ -116,7 +125,7 @@ fn decide(
 
     match binding {
         Some(b) => {
-            if actual_digest != b.applied_digest {
+            if actual_digest != b.applied_digest && !allow_takeover {
                 bail!("目标 {} 存在外部修改，拒绝覆盖", spec.target_id);
             }
             if actual_digest == expected_digest {
@@ -131,8 +140,9 @@ fn decide(
         }
         None => {
             if spec.merge == "whole-file" {
-                // Codex：仅当实际 JSON 语义与整文件期望相等才允许登记绑定。
-                if current != expected_value {
+                // Codex：仅当实际 JSON 语义与整文件期望相等才允许登记绑定；
+                // 显式接管时允许整文件替换（plan 已标注 takeover 与风险说明）。
+                if current != expected_value && !allow_takeover {
                     bail!("目标 {} 已有外部内容且无受管绑定，拒绝覆盖", spec.target_id);
                 }
                 Ok(Decision::Write {
@@ -184,7 +194,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
             skipped.push(spec.target_id.to_string());
             continue;
         }
-        let decision = decide(ctx, &spec, &sources, &bindings)?;
+        let decision = decide(ctx, &spec, &sources, &bindings, parsed.allow_takeover)?;
         if !matches!(decision, Decision::Skip) {
             pending.push((
                 spec.target_id.to_string(),
@@ -254,6 +264,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
             "action": "sync",
             "targets": ids,
             "count": ids.len(),
+            "takeover": parsed.allow_takeover,
             "meta": audit_targets,
         })),
     );
@@ -320,7 +331,7 @@ mod tests {
         sources.insert("hooks.codex".to_string(), "{\"hooks\":{}}".to_string());
         let bindings = std::collections::BTreeMap::new();
 
-        let result = decide(&ctx, &model::TARGET_CLAUDE, &sources, &bindings);
+        let result = decide(&ctx, &model::TARGET_CLAUDE, &sources, &bindings, false);
         let err = match result {
             Err(err) => err,
             Ok(_) => panic!("decide 必须拒绝坏结构目标"),

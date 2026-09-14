@@ -10,6 +10,9 @@ pub(crate) struct HookArgs {
     pub only: Vec<String>,
     pub dry_run: bool,
     pub offline: bool,
+    /// 显式接管通道：仅 plan/apply 可携带，且必须与 --only 指定单个目标同时
+    /// 使用；批量或缺省仍拒绝。缺省（无 flag）行为与此前完全一致。
+    pub allow_takeover: bool,
 }
 
 fn valid_target_id(value: &str) -> bool {
@@ -24,10 +27,16 @@ fn normalize_only(selected: &[String]) -> Vec<String> {
         .collect()
 }
 
-fn parse_args(req: &Request, allow_only: bool, allow_dry_run: bool) -> Result<HookArgs> {
+fn parse_args(
+    req: &Request,
+    allow_only: bool,
+    allow_dry_run: bool,
+    allow_takeover_flag: bool,
+) -> Result<HookArgs> {
     let mut selected: Vec<String> = Vec::new();
     let mut dry_run = false;
     let mut offline = false;
+    let mut allow_takeover = false;
 
     let mut iter = req.args.iter();
     while let Some(arg) = iter.next() {
@@ -53,6 +62,12 @@ fn parse_args(req: &Request, allow_only: bool, allow_dry_run: bool) -> Result<Ho
                 }
                 dry_run = true;
             }
+            "--allow-takeover" if allow_takeover_flag => {
+                if allow_takeover {
+                    bail!("参数错误: --allow-takeover 重复");
+                }
+                allow_takeover = true;
+            }
             "--offline" => {
                 if offline {
                     bail!("参数错误: --offline 重复");
@@ -68,6 +83,10 @@ fn parse_args(req: &Request, allow_only: bool, allow_dry_run: bool) -> Result<Ho
         }
     }
 
+    if allow_takeover && selected.len() != 1 {
+        bail!("参数错误: --allow-takeover 仅允许与 --only 指定单个目标同时使用");
+    }
+
     let only = if selected.is_empty() {
         model::targets()
             .iter()
@@ -80,20 +99,22 @@ fn parse_args(req: &Request, allow_only: bool, allow_dry_run: bool) -> Result<Ho
         only,
         dry_run,
         offline,
+        allow_takeover,
     })
 }
 
 /// hooks:status —— 只接受可选且最多一次 --offline。
 pub(crate) fn parse_status_args(req: &Request) -> Result<HookArgs> {
-    parse_args(req, false, false)
+    parse_args(req, false, false, false)
 }
 
-/// hooks:plan —— --only（零或多个）+ 可选最多一次 --offline，不接受 --dry-run。
+/// hooks:plan —— --only（零或多个）+ 可选最多一次 --offline / --allow-takeover，
+/// 不接受 --dry-run。
 pub(crate) fn parse_plan_args(req: &Request) -> Result<HookArgs> {
-    parse_args(req, true, false)
+    parse_args(req, true, false, true)
 }
 
 /// hooks:apply —— 同 plan，另接受可选最多一次 --dry-run。
 pub(crate) fn parse_apply_args(req: &Request) -> Result<HookArgs> {
-    parse_args(req, true, true)
+    parse_args(req, true, true, true)
 }

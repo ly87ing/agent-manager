@@ -3,7 +3,7 @@ import RulesHooksPage from "../pages/RulesHooksPage";
 import RulesPage from "../pages/RulesPage";
 import { makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePlanAction } from "./fixtures";
 import type { Envelope } from "../lib/contract";
-import { renderWithEngine, screen, userEvent } from "./render-with-engine";
+import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 
 function routes() {
   return {
@@ -361,5 +361,89 @@ describe("Hooks 页原生目标", () => {
     expect(applyCall).toBeDefined();
     expect(applyCall!.args).toEqual([]);
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+  });
+});
+
+describe("Hooks 阻塞目标的显式接管入口", () => {
+  function blockedHooksRoutes(): Record<string, Envelope> {
+    const routes = nativeHooksRoutes();
+    routes["hooks:status"] = makeEnvelope(
+      {
+        domain: "hooks",
+        elements: [
+          makeElement({
+            id: "hooks:claude",
+            domain: "hooks",
+            spec: { name: "Claude Hooks", merge: "signature-set", source_key: "hooks.claude", target: "~/.claude/settings.json" },
+            policy: { enabled: true, agent_id: "claude-code" },
+            observed: { target: "/tmp/home/.claude/settings.json", target_exists: true, expected_digest: "bbbb", applied_digest: "bbbb", actual_digest: "bbbb", source_revision: "r1", blocked_reason: null, registration_needed: false, managed_hook_count: 1, missing_signatures: 0, removed_signatures_present: 0 },
+            state: "managed-ok",
+            freshness: makeFreshness(),
+            actions: [],
+          }),
+          makeElement({
+            id: "hooks:codex",
+            domain: "hooks",
+            spec: { name: "Codex Hooks", merge: "whole-file", source_key: "hooks.codex", target: "~/.codex/hooks.json" },
+            policy: { enabled: true, agent_id: "codex" },
+            observed: { target: "/tmp/home/.codex/hooks.json", target_exists: true, expected_digest: "eeee", applied_digest: null, actual_digest: "ffff", source_revision: "r2", blocked_reason: "目标文件已存在外部内容且无受管绑定，拒绝覆盖", registration_needed: false, managed_hook_count: 1, missing_signatures: 0, removed_signatures_present: 0 },
+            state: "unmanaged-detected",
+            freshness: makeFreshness(),
+            actions: [],
+          }),
+        ],
+      },
+      { command: "hooks.status" },
+    );
+    routes["hooks:plan"] = makeEnvelope(
+      {
+        domain: "hooks",
+        actions: [
+          makePlanAction({
+            element: "hooks:codex",
+            target: "/tmp/home/.codex/hooks.json",
+            note: "同步 hooks:codex 钩子文件（whole-file 替换：目标文件现有内容将被整体替换，请先把需要保留的 hook 并入 hooks.codex 来源）",
+            takeover: true,
+          }),
+        ],
+        summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 },
+      },
+      { command: "hooks.plan" },
+    );
+    routes["hooks:apply"] = makeEnvelope(
+      { domain: "hooks", dry_run: false, steps: [{ name: "hooks:sync hooks:codex", ok: true, exit_code: 0 }], skipped: [] },
+      { command: "hooks.apply" },
+    );
+    return routes;
+  }
+
+  it("阻塞的 codex 目标显示「接管原内容」与整文件替换提示；正常目标不显示", async () => {
+    renderWithEngine(<RulesHooksPage />, blockedHooksRoutes());
+    await userEvent.click(screen.getByRole("tab", { name: "Hooks" }));
+
+    expect(await screen.findByTestId("takeover-hooks:codex")).toBeInTheDocument();
+    expect(screen.getByTestId("takeover-hint-hooks:codex")).toHaveTextContent(/整文件替换/);
+    expect(screen.queryByTestId("takeover-hooks:claude")).not.toBeInTheDocument();
+  });
+
+  it("接管流程：plan/apply 均携带 --only 单目标与 --allow-takeover，预览展示接管徽标与风险说明", async () => {
+    const { calls } = renderWithEngine(<RulesHooksPage />, blockedHooksRoutes());
+    await userEvent.click(screen.getByRole("tab", { name: "Hooks" }));
+
+    await userEvent.click(await screen.findByTestId("takeover-hooks:codex"));
+    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
+    expect(dialog).toHaveTextContent("接管原内容 hooks:codex");
+    expect(dialog).toHaveTextContent(/整文件替换/);
+    expect(dialog).toHaveTextContent(/whole-file 替换/);
+    expect(within(dialog).getByTestId("takeover-badge")).toHaveTextContent("接管");
+
+    const planCall = calls.find((call) => call.command === "hooks:plan");
+    expect(planCall).toBeDefined();
+    expect(planCall!.args).toEqual(["--only", "hooks:codex", "--allow-takeover"]);
+
+    await userEvent.click(screen.getByTestId("plan-confirm-button"));
+    const applyCall = calls.find((call) => call.command === "hooks:apply");
+    expect(applyCall).toBeDefined();
+    expect(applyCall!.args).toEqual(["--only", "hooks:codex", "--allow-takeover"]);
   });
 });

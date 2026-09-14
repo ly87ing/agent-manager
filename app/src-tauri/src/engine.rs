@@ -124,6 +124,9 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
                 specs.push(("--action", ArgValueKind::McpAction));
                 specs.push(("--allow-takeover", ArgValueKind::Flag));
             }
+            if domain == "hooks" {
+                specs.push(("--allow-takeover", ArgValueKind::Flag));
+            }
         }
         (_, "apply") => {
             specs.push(("--dry-run", ArgValueKind::Flag));
@@ -139,6 +142,9 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             if domain == "mcp" {
                 specs.push(("--agent", ArgValueKind::ElementId));
                 specs.push(("--action", ArgValueKind::McpAction));
+                specs.push(("--allow-takeover", ArgValueKind::Flag));
+            }
+            if domain == "hooks" {
                 specs.push(("--allow-takeover", ArgValueKind::Flag));
             }
         }
@@ -713,8 +719,24 @@ mod tests {
                 "{command} --allow-takeover should pass"
             );
         }
+        // hooks:plan / hooks:apply 同样放行（单目标显式接管，引擎侧再强制 --only 约束）
+        for command in ["hooks:plan", "hooks:apply"] {
+            assert!(
+                validate_args(
+                    command,
+                    &[
+                        "--only".into(),
+                        "hooks:codex".into(),
+                        "--allow-takeover".into()
+                    ]
+                )
+                .is_ok(),
+                "{command} --allow-takeover should pass"
+            );
+        }
         for (command, args) in [
             ("mcp:status", vec!["--allow-takeover".into()]),
+            ("hooks:status", vec!["--allow-takeover".into()]),
             ("skills:apply", vec!["--allow-takeover".into()]),
             ("agents:apply", vec!["--allow-takeover".into()]),
             ("rules:apply", vec!["--allow-takeover".into()]),

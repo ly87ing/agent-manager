@@ -988,3 +988,274 @@ fn invalid_args_return_hook_error_without_echoing_values() {
     assert!(!ctx.home_dir.exists());
     let _ = std::fs::remove_dir_all(&base);
 }
+
+// ---------- --allow-takeover：显式接管（仅 --only 单目标） ----------
+
+fn audit_takeover_flags(ctx: &Context) -> Vec<bool> {
+    let conn = store::open_readonly(ctx).unwrap().expect("db must exist");
+    let mut stmt = conn
+        .prepare("SELECT detail_json FROM operation_logs WHERE operation_type = 'hooks:apply'")
+        .unwrap();
+    let rows = stmt
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<Vec<String>, _>>()
+        .unwrap();
+    rows.iter()
+        .map(|detail| {
+            let value: Value = serde_json::from_str(detail).unwrap();
+            value["takeover"]
+                .as_bool()
+                .unwrap_or_else(|| panic!("审计 detail 必须恒含 takeover 布尔字段: {detail}"))
+        })
+        .collect()
+}
+
+#[test]
+fn allow_takeover_flag_requires_exactly_one_only_target() {
+    let (base, ctx) = temp_ctx("takeover-args");
+    // 缺 --only（批量缺省）、多个 --only、重复 flag：一律拒绝
+    for (command, args) in [
+        ("hooks:plan", vec!["--allow-takeover"]),
+        ("hooks:apply", vec!["--allow-takeover"]),
+        (
+            "hooks:plan",
+            vec![
+                "--only",
+                "hooks:claude",
+                "--only",
+                "hooks:codex",
+                "--allow-takeover",
+            ],
+        ),
+        (
+            "hooks:apply",
+            vec![
+                "--only",
+                "hooks:codex",
+                "--allow-takeover",
+                "--allow-takeover",
+            ],
+        ),
+        ("hooks:status", vec!["--allow-takeover"]),
+    ] {
+        let env = execute(&ctx, &request(command, &args));
+        assert!(!env.ok, "{command} {args:?} 应失败");
+        assert_eq!(env.errors[0].code, "HOOK_ERROR");
+        assert!(
+            env.errors[0].message.contains("参数错误"),
+            "{command} {args:?} 必须是参数错误: {}",
+            env.errors[0].message
+        );
+    }
+    // 合法形态：单目标 + flag 通过参数解析（fresh ctx 两目标 managed-ok 无动作）
+    for command in ["hooks:plan", "hooks:apply"] {
+        let mut args = vec!["--only", "hooks:codex", "--allow-takeover"];
+        if command == "hooks:apply" {
+            args.push("--dry-run");
+        }
+        let env = execute(&ctx, &request(command, &args));
+        assert!(env.ok, "{command} {args:?} 应通过: {:?}", env.errors);
+    }
+    assert!(!ctx.home_dir.exists());
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn codex_foreign_whole_file_takeover_with_flag_replaces_and_marks_plan_and_audit() {
+    let (base, ctx) = temp_ctx("codex-takeover");
+    write_hook_source(
+        &ctx,
+        "hooks.codex",
+        &managed_codex_source("echo codex-managed-takeover"),
+    );
+    let target = ctx.home_dir.join(".codex/hooks.json");
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    let foreign = json!({
+        "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "sh user-own-session.sh"}]}]},
+        "foreign": true
+    });
+    std::fs::write(
+        &target,
+        format!("{}\n", serde_json::to_string_pretty(&foreign).unwrap()),
+    )
+    .unwrap();
+    let foreign_sha =
+        agent_manager_engine::native_mcp::model::sha256_hex_bytes(&std::fs::read(&target).unwrap());
+
+    // 无 flag：plan 与 apply 维持 fail-closed（与此前行为完全一致）
+    let env = execute(&ctx, &request("hooks:plan", &["--only", "hooks:codex"]));
+    assert!(!env.ok, "无 flag plan 必须拒绝");
+    let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:codex"]));
+    assert!(!env.ok, "无 flag apply 必须拒绝");
+    assert!(!env.lock.held);
+
+    // 有 flag：plan 放行并标注 takeover + whole-file 风险说明
+    let env = execute(
+        &ctx,
+        &request("hooks:plan", &["--only", "hooks:codex", "--allow-takeover"]),
+    );
+    assert!(env.ok, "{:?}", env.errors);
+    let actions = env.data["actions"].as_array().unwrap();
+    assert_eq!(actions.len(), 1);
+    let action = &actions[0];
+    assert_eq!(
+        action["takeover"], true,
+        "codex whole-file 替换必须标注 takeover"
+    );
+    assert!(
+        action["note"].as_str().unwrap().contains("whole-file 替换")
+            && action["note"]
+                .as_str()
+                .unwrap()
+                .contains("并入 hooks.codex 来源"),
+        "note 必须明示整体替换与先并来源建议: {}",
+        action["note"]
+    );
+    assert_eq!(action["before_digest"].as_str().unwrap(), foreign_sha);
+    assert_ne!(action["after_digest"].as_str().unwrap(), foreign_sha);
+
+    // apply：整文件替换外部内容，登记 binding，审计 takeover=true
+    let env = execute(
+        &ctx,
+        &request(
+            "hooks:apply",
+            &["--only", "hooks:codex", "--allow-takeover"],
+        ),
+    );
+    assert!(env.ok, "{:?}", env.errors);
+    let after: Value = serde_json::from_str(&std::fs::read_to_string(&target).unwrap()).unwrap();
+    assert_eq!(after.get("foreign"), None, "外部根字段必须被整体替换");
+    let session = after["hooks"]["SessionStart"].as_array().unwrap();
+    let commands: Vec<&str> = session
+        .iter()
+        .flat_map(|e| e["hooks"].as_array().unwrap().iter())
+        .filter_map(|h| h["command"].as_str())
+        .collect();
+    assert!(commands.contains(&"echo codex-managed-takeover"));
+    assert!(
+        !commands.contains(&"sh user-own-session.sh"),
+        "外部 hook 必须被整体替换"
+    );
+    assert_eq!(
+        count_rows(
+            &ctx,
+            "SELECT COUNT(*) FROM hook_target_bindings WHERE target_id='hooks:codex'"
+        ),
+        1
+    );
+    assert_eq!(audit_takeover_flags(&ctx), vec![true]);
+
+    // status 转 managed-ok
+    let status = execute(&ctx, &request("hooks:status", &[]));
+    assert_eq!(element(&status, "hooks:codex")["state"], "managed-ok");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn claude_external_modification_takeover_merges_and_preserves_user_fields() {
+    let (base, ctx) = temp_ctx("claude-takeover");
+    write_hook_source(
+        &ctx,
+        "hooks.claude",
+        &managed_claude_source("echo managed-takeover"),
+    );
+    let settings = ctx.home_dir.join(".claude/settings.json");
+    execute(&ctx, &request("hooks:apply", &["--only", "hooks:claude"])).unwrap_apply();
+
+    // 绑定后外部修改：加用户根字段与用户自有 hook
+    let mut current: Value =
+        serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    current["model"] = json!("user-model");
+    current["hooks"]["SessionStart"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"hooks": [{"type": "command", "command": "echo user-own"}]}));
+    std::fs::write(&settings, serde_json::to_string_pretty(&current).unwrap()).unwrap();
+
+    // 无 flag：plan 与 apply 维持拒绝
+    let env = execute(&ctx, &request("hooks:plan", &["--only", "hooks:claude"]));
+    assert!(!env.ok, "无 flag plan 必须拒绝外部修改目标");
+    let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:claude"]));
+    assert!(!env.ok, "无 flag apply 必须拒绝外部修改目标");
+
+    // 有 flag：signature-set 合并，动作不标 takeover（合并天然保留用户内容）
+    let env = execute(
+        &ctx,
+        &request(
+            "hooks:plan",
+            &["--only", "hooks:claude", "--allow-takeover"],
+        ),
+    );
+    assert!(env.ok, "{:?}", env.errors);
+    let actions = env.data["actions"].as_array().unwrap();
+    assert_eq!(actions.len(), 1);
+    assert!(
+        actions[0].get("takeover").is_none(),
+        "claude 合并不标 takeover"
+    );
+
+    let env = execute(
+        &ctx,
+        &request(
+            "hooks:apply",
+            &["--only", "hooks:claude", "--allow-takeover"],
+        ),
+    );
+    assert!(env.ok, "{:?}", env.errors);
+    let merged: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    assert_eq!(merged["model"], "user-model", "根级用户字段必须保留");
+    let session = merged["hooks"]["SessionStart"].as_array().unwrap();
+    let commands: Vec<&str> = session
+        .iter()
+        .flat_map(|e| e["hooks"].as_array().unwrap().iter())
+        .filter_map(|h| h["command"].as_str())
+        .collect();
+    assert!(commands.contains(&"echo user-own"), "用户自有 hook 保留");
+    assert!(
+        commands.contains(&"echo managed-takeover"),
+        "受管 hook 合入"
+    );
+
+    // 两次 apply 的审计：第一次无 flag takeover=false，第二次 takeover=true
+    assert_eq!(audit_takeover_flags(&ctx), vec![false, true]);
+    let status = execute(&ctx, &request("hooks:status", &[]));
+    assert_eq!(element(&status, "hooks:claude")["state"], "managed-ok");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn allow_takeover_does_not_bypass_structural_or_batch_fail_closed() {
+    let (base, ctx) = temp_ctx("takeover-hard-block");
+    write_hook_source(
+        &ctx,
+        "hooks.codex",
+        &managed_codex_source("echo codex-managed"),
+    );
+    let target = ctx.home_dir.join(".codex/hooks.json");
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    // 目标 JSON 损坏：探测即阻塞（actual_digest 为空），flag 也不得放行
+    std::fs::write(&target, "{not json").unwrap();
+
+    let env = execute(
+        &ctx,
+        &request("hooks:plan", &["--only", "hooks:codex", "--allow-takeover"]),
+    );
+    assert!(!env.ok, "结构损坏目标即使带 flag 也必须拒绝");
+    let env = execute(
+        &ctx,
+        &request(
+            "hooks:apply",
+            &["--only", "hooks:codex", "--allow-takeover"],
+        ),
+    );
+    assert!(!env.ok, "结构损坏目标即使带 flag 也必须拒绝");
+    assert!(!env.lock.held);
+    assert_eq!(std::fs::read(&target).unwrap(), b"{not json");
+
+    // 批量场景：claude 正常、codex 外部内容阻塞；无 flag 的批量 plan 仍整体拒绝
+    std::fs::write(&target, json!({"hooks": {}, "foreign": true}).to_string()).unwrap();
+    let env = execute(&ctx, &request("hooks:plan", &[]));
+    assert!(!env.ok, "批量 plan 对阻塞目标仍整体 fail-closed");
+    let _ = std::fs::remove_dir_all(&base);
+}
