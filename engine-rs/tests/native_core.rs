@@ -754,6 +754,149 @@ fn agent_status_classifies_unsupported_install_and_skips_tombstones() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
+// 回归：官方 native 安装器在 ~/.local/bin 放置符号链接指向目录外的版本化可执行文件
+// （~/.local/share、~/.codex 等），来源以 launcher 所在目录判 native managed；但符号
+// 链接指向 Homebrew Cellar 时即便入口在 ~/.local/bin 也始终 brew unsupported；同一
+// 目标从普通 system 路径进入仍 unmanaged-detected。symlink 是 unix 语义，非 unix
+// 平台无此入口形态，整测 cfg(unix)。
+#[cfg(unix)]
+#[test]
+fn agent_status_launcher_symlink_native_managed_and_system_entry_counterexample() {
+    let (base, ctx) = temp_ctx("agents-launcher");
+    let target = ctx
+        .home_dir
+        .join(".local")
+        .join("share")
+        .join("tool-versions")
+        .join("v1")
+        .join("launcher-agent-bin");
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::write(&target, "#!/bin/sh\n").unwrap();
+    let native_link = ctx
+        .home_dir
+        .join(".local")
+        .join("bin")
+        .join("launcher-agent-bin");
+    std::fs::create_dir_all(native_link.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&target, &native_link).unwrap();
+    let system_link = base.join("usr").join("bin").join("system-entry-bin");
+    std::fs::create_dir_all(system_link.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&target, &system_link).unwrap();
+    let cellar_target = base
+        .join("Cellar")
+        .join("tool")
+        .join("1.0")
+        .join("bin")
+        .join("brew-launcher-bin");
+    std::fs::create_dir_all(cellar_target.parent().unwrap()).unwrap();
+    std::fs::write(&cellar_target, "#!/bin/sh\n").unwrap();
+    let brew_link = ctx
+        .home_dir
+        .join(".local")
+        .join("bin")
+        .join("brew-launcher-bin");
+    std::os::unix::fs::symlink(&cellar_target, &brew_link).unwrap();
+    let definition = |bin: &str| {
+        json!({
+            "display_name": "Launcher Agent",
+            "bin": bin,
+            "preferred_provider": "native",
+            "providers": {"native": {
+                "managed": true,
+                "install": "printf install > \"$HOME/launcher-marker\"",
+                "upgrade": "printf upgrade > \"$HOME/launcher-marker\"",
+                "uninstall": "printf uninstall > \"$HOME/launcher-marker\""
+            }}
+        })
+    };
+    set_agent_definition(&ctx, "launcher-agent", definition("launcher-agent-bin"));
+    set_agent_definition(
+        &ctx,
+        "system-entry-agent",
+        definition(system_link.to_str().unwrap()),
+    );
+    set_agent_definition(&ctx, "brew-launcher-agent", definition("brew-launcher-bin"));
+
+    let status = execute(&ctx, &request("agents:status", &[]));
+    assert!(status.ok, "{:?}", status.errors);
+    let elements = status.data["elements"].as_array().unwrap();
+    let native = elements
+        .iter()
+        .find(|element| element["id"] == "agents:launcher-agent")
+        .unwrap();
+    assert_eq!(native["state"], "managed-ok");
+    assert_eq!(native["observed"]["providers"][0], "native");
+    assert_eq!(native["observed"]["classified"]["managed"][0], "native");
+    assert_eq!(native["observed"]["preferred_active"], true);
+    let action_ids: Vec<&str> = native["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|action| action["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(action_ids, ["upgrade", "uninstall"]);
+    for action in ["upgrade", "uninstall"] {
+        let plan = execute(
+            &ctx,
+            &request(
+                "agents:plan",
+                &["--only", "agents:launcher-agent", "--action", action],
+            ),
+        );
+        assert!(
+            plan.ok,
+            "{action} 应对 native launcher 可计划: {:?}",
+            plan.errors
+        );
+    }
+
+    // 反例：同一版本化目标，入口位于普通 system 路径时仍 fail-closed。
+    let system = elements
+        .iter()
+        .find(|element| element["id"] == "agents:system-entry-agent")
+        .unwrap();
+    assert_eq!(system["state"], "unmanaged-detected");
+    assert!(system["actions"].as_array().unwrap().is_empty());
+    assert_eq!(system["observed"]["providers"][0], "system");
+    assert_eq!(system["observed"]["classified"]["system_only"][0], "system");
+    assert_eq!(system["observed"]["preferred_active"], false);
+    let blocked = execute(
+        &ctx,
+        &request(
+            "agents:plan",
+            &["--only", "agents:system-entry-agent", "--action", "upgrade"],
+        ),
+    );
+    assert!(!blocked.ok);
+    assert_eq!(blocked.errors[0].code, "AGENT_ERROR");
+
+    // 反例：入口在 ~/.local/bin 但符号链接指向 Homebrew Cellar，始终 brew unsupported。
+    let brew = elements
+        .iter()
+        .find(|element| element["id"] == "agents:brew-launcher-agent")
+        .unwrap();
+    assert_eq!(brew["state"], "unmanaged-detected");
+    assert!(brew["actions"].as_array().unwrap().is_empty());
+    assert_eq!(brew["observed"]["providers"][0], "brew");
+    assert_eq!(brew["observed"]["classified"]["unsupported"][0], "brew");
+    assert_eq!(brew["observed"]["preferred_active"], false);
+    let brew_blocked = execute(
+        &ctx,
+        &request(
+            "agents:plan",
+            &[
+                "--only",
+                "agents:brew-launcher-agent",
+                "--action",
+                "upgrade",
+            ],
+        ),
+    );
+    assert!(!brew_blocked.ok);
+    assert_eq!(brew_blocked.errors[0].code, "AGENT_ERROR");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
 fn request_with_run(command: &str, args: &[&str], run_id: &str) -> Request {
     Request {
         command: command.into(),

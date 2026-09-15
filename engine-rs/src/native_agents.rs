@@ -407,28 +407,40 @@ fn command_sources(commands: &CommandSet) -> Value {
     Value::Object(map)
 }
 
+/// 来源识别：Homebrew 按解析后的真实路径判定且优先最高——launcher 位于 ~/.local/bin
+/// 也不豁免（符号链接指向 Cellar 仍是 brew）；其余 native 以 launcher（PATH /
+/// ~/.local/bin 解析到的入口）所在目录判定——官方 native 安装器在 ~/.local/bin 放置的
+/// 入口常是指向 ~/.local/share、~/.codex 等版本目录的符号链接，先整体 canonicalize 比
+/// 目录会误判 system；普通路径兜底 system，fail-closed。
 fn detected_provider(home_dir: &Path, bin_path: &Path) -> &'static str {
     let canonical = bin_path
         .canonicalize()
         .unwrap_or_else(|_| bin_path.to_path_buf());
-    let native_dir = home_dir
-        .canonicalize()
-        .unwrap_or_else(|_| home_dir.to_path_buf())
-        .join(".local")
-        .join("bin");
     let path = canonical.to_string_lossy();
-    if canonical.starts_with(native_dir) {
-        "native"
-    } else if canonical
+    if canonical
         .components()
         .any(|component| component.as_os_str() == "Cellar")
         || path.starts_with("/opt/homebrew/")
         || path.contains("/homebrew/")
     {
-        "brew"
-    } else {
-        "system"
+        return "brew";
     }
+    let native_dir = home_dir
+        .canonicalize()
+        .unwrap_or_else(|_| home_dir.to_path_buf())
+        .join(".local")
+        .join("bin");
+    // 只 canonicalize launcher 的父目录，保留最终符号链接不展开
+    let launcher_dir = bin_path
+        .parent()
+        .map(|dir| dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()));
+    if launcher_dir
+        .as_deref()
+        .is_some_and(|dir| dir.starts_with(&native_dir))
+    {
+        return "native";
+    }
+    "system"
 }
 
 fn classified_provider(def: &AgentDef, provider: &str) -> &'static str {
