@@ -15,12 +15,13 @@
 | MCP 原生域 | 已完成：Rust dispatcher 已接入本地 stdio `mcp:status` / `mcp:plan` / `mcp:apply`；定义与分配存 SQLite；支持 Claude JSON、Codex TOML、OpenCode JSON（需配置对应 Agent target）；逐助手 add/update/enable/disable/remove，库级 enable/disable/remove；status/plan/dry-run 零写；apply 具备锁、审计、CAS/回滚；env 在 SQLite definition/binding 中只持久化字面量 `${VAR}` 形式的环境变量引用；status、plan、诊断与操作日志不展示或保存解析后的真实值；真实 apply 执行时从进程环境解析，并按目标 codec 写入 Claude、Codex 或 OpenCode 的目标客户端配置，目标文件的明文由文件权限与客户端安全边界保护 |
 | Rules 原生域 | 已完成：Rust dispatcher 已接入 `rules:status` / `rules:plan` / `rules:apply`；固定 Codex/Claude 两目标；规则专用 `sources:get/set`（rules.shared/rules.codex/rules.claude）使用 revision CAS 只写 SQLite；status/plan/dry-run 零写；apply 具备排他锁、审计与 CAS/回滚，外部修改 fail-closed |
 | Hooks 原生域 | 已完成：Rust dispatcher 已接入 `hooks:status` / `hooks:plan` / `hooks:apply`；hooks 专用 `sources:get/set`（hooks.claude/hooks.codex）revision CAS 只写 SQLite；固定 Claude `~/.claude/settings.json` signature-set 合并与 Codex `~/.codex/hooks.json` whole-file 两目标，外部修改 fail-closed |
+| 定义编辑原文保存 | 已完成（`5ae995b`）：SourceDefinitionsPanel 禁用文本框自动替换并有单测，Rules/Hooks 原文保存不被 smart quotes 等自动改写 |
 | 系统审计 | 已完成：Rust dispatcher 已接入只读 `system:audit` 及其 Tauri offline 桥接；聚合 agents/skills/mcp/rules/hooks/aliases/secrets 与 runtime/storage 状态 |
 | 密钥状态 | 已完成：只读 `secrets:status` 已接入 Rust dispatcher；仅读取 SQLite 有效策略中已启用 MCP 定义的合法 `${VAR}` 环境变量占位符，只检查 Agent Manager 当前进程环境是否存在对应变量，输出变量名与布尔；不扫描、定位或克隆外部密钥仓库，不持久化、序列化或显示变量值；畸形定义固定脱敏失败 |
 | Aliases 原生域 | 已完成：Rust dispatcher 已接入 `aliases:status` / `aliases:plan` / `aliases:apply`；固定 zshrc/zprofile 两目标，只换托管区块、外部修改 fail-closed |
 | 设置页高级管理 | 已完成（2026-09-12 裁决）：Aliases、更新中心与 Policy 页可达；Tools 域、快照（`snapshots:*`）与 `system:converge` 已退役，相关页面、Tauri 白名单与契约 schema 已移除；`system:refresh-upstream` 已接线（探测宇宙 agents/mcp/skills，缓存落 SQLite `upstream_probes` 表） |
-| 独立包真实业务 E2E | 未完成：2026-09-09 Darwin x86_64 DMG 已通过只读挂载、仓库外复制、无 Python、路径脱敏和从 `/` 隔离环境 5 秒启动验收；该包早于当前 Rules/MCP/Hooks/Secrets 与只读 `system:audit` 实现，不能证明当前 Rules/MCP/Hooks/Secrets/system:audit GUI 业务闭环 |
-| 跨平台发布、签名、更新 | 未完成：签名、公证、arm64、Linux、Windows 和更新发布仍未验证 |
+| 独立包真实业务 E2E | 部分完成：2026-09-14 基于 `5ae995b` 的干净 Darwin x86_64 DMG 已通过主审独立验收（只读挂载、仓库外复制、架构与版本、无 Python、源码与 HOME 路径脱敏、从 `/` 隔离环境 5 秒存活，包内构建身份 commit/date 与源码一致；SHA256 `71a386d6ab8e1a7f85ef59c82f379411e9aa1dccaa3c3166309b96b971fce26b`，7632599 bytes）；后续 `a2cc864`/`9f56f00` 仅改工作流，该包仍代表当前产品代码（非仓库 HEAD 构建包）。真实业务 E2E 未完成：宿主 AX/computer-use 对 Agent Manager 与 Finder 均 permission_denied，8 个业务场景未启动，隔离 HOME/data 无 DB 或目标写入，属验收基础设施阻塞，非产品通过或失败 |
+| 跨平台发布、签名、更新 | 源码管线已就绪但外部/真实验收未完成：`a2cc864` 的 gui-release.yml 覆盖 macOS arm64+x86_64、Linux x86_64、Windows x86_64（app/dmg、AppImage/deb、NSIS/MSI），含 updater 签名与 latest.json、Apple/Windows 签名及 Apple 公证接线，缺密钥/占位符/脏树/来源异常 fail-closed，临时证书清理，Release 固定 draft；`9f56f00` 已将 Windows 引擎与应用升级为阻断 CI（cargo fmt/test/check、engine release build、NSIS/MSI build，无 continue-on-error）。GitHub Actions secrets=0、variables=0、本机有效 codesigning identities=0，远程 GUI CI 因账户付款失败未实际运行；签名、公证、arm64/Linux/Windows 真实包与更新发布均未验证；未创建 tag、GitHub Release 或对外安装包 |
 
 缺库读取不建库，保存才初始化数据库；设置在 `app_settings` 表。policy 持久化来源为 `sqlite`，写入参数固定 `--layer local`。Claude Code 与 Codex 默认均为官方 `native` 命令，brew 仅按实际检测来源处理。
 
