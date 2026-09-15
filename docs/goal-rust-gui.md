@@ -6,8 +6,9 @@
 - 已接线闭环：Agents、Skills、MCP、Rules、Hooks、Aliases 六个资源域，以及只读 `system:audit`、`secrets:status`、`system:refresh-upstream`（探测宇宙 agents/mcp/skills，缓存落 SQLite `upstream_probes` 表，三域 status 回填 freshness，前端收敛调用已补显式 `--action`）。
 - 2026-09-12 高级管理入口裁决已执行完毕：Aliases 原生闭环落地（`b7f30db`）；Tools、快照与 `system:converge` 退役清理完成（`9080c1d`）。
 - 远程 HTTP MCP 已落地（`b353aac`）：三客户端引用形式零明文落盘，与本地 stdio 同级安全语义。
-- 2026-09-14 里程碑：基于 `5ae995b` 的干净 Darwin x86_64 DMG 已通过主审独立验收；后续 `a2cc864`、`9f56f00` 仅改工作流，该包仍代表当前产品代码。四平台发布源码管线（`a2cc864`）与 Windows 阻断 CI（`9f56f00`）已就绪。
-- 仍未完成：完整 GUI 业务 E2E（宿主 AX/computer-use permission_denied，8 个业务场景未启动，属验收基础设施阻塞）；签名、公证、arm64/Linux/Windows 真实包与更新发布（外部密钥材料与 GitHub billing 未就绪）；未创建 tag、GitHub Release 或对外安装包。
+- 2026-09-14 里程碑（历史）：基于 `5ae995b` 的干净 Darwin x86_64 DMG 通过主审独立验收；四平台发布源码管线（`a2cc864`）与 Windows 阻断 CI（`9f56f00`）就绪。
+- 2026-09-15 里程碑：验收基线提交 `5a110be3` 的 x86_64 DMG 通过 verify 与主要真实 GUI E2E 主审独立验收；同源码 arm64 DMG 交叉构建静态验收通过（thin arm64、adhoc linker-signed，未在 arm64 设备运行）；完整矩阵 9/9 exit 0（Rust 269 项、Vitest 246 项、typecheck/build 通过且 0 warning）。
+- 仍未完成：MCP 新增服务表单真实 GUI 验收（macOS 自动化输入限制）；公开跨平台发布条件——GitHub billing、真实密钥、Developer ID/公证、Windows 签名、Linux/Windows/arm64 真机运行与安装、updater 真实签名下载安装回读；未创建 tag、GitHub Release 或对外安装包，现有授权不包含这些动作。
 
 ## 目标
 
@@ -62,16 +63,28 @@ Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 必须支持新增、�
 - Windows 阻断 CI（`9f56f00`）：Windows 引擎与应用升级为不可容错门禁（cargo fmt/test/check、engine release build、NSIS/MSI build，无 continue-on-error）。远程 GUI CI run 34935947828 六个 jobs 均 steps=[]，因 GitHub 账户付款失败或 spending limit 在启动前失败，非测试失败。
 - 外部状态：GitHub Actions secrets=0、variables=0、本机有效 codesigning identities=0；签名、公证、arm64/Linux/Windows 真实包与更新发布均未验证。未创建 tag、GitHub Release 或对外发布安装包，现有授权不包含这些动作。
 
+## 验收基线（2026-09-15，第六次）
+
+绑定验收提交：`5a110be3da66d1bedee906eb0c30f04b5b95b245`。
+
+- 自动化完整矩阵：9/9 exit 0；`engine-rs` 258 项 + `app/src-tauri` 11 项 = Rust 269 项全部通过；Vitest 28 files / 246 tests 全部通过；`pnpm typecheck` 与 `pnpm build` 通过，0 warning。
+- x86_64 DMG（主审独立验收）：verify 脚本 exit 0；SHA256 `076d16b098ede8915802c0bc6dceec42dc06e0dcadddd137e7865681c7e90a68`，7632606 bytes；包内构建身份 commit/date 与源码精确一致；未签名。
+- arm64 DMG（交叉构建，仅静态验收）：SHA256 `a9540a2690b9d2ede16ef627f310e277ca49130e608c518b876aeaed0bbfd3f8`，7298163 bytes；thin arm64；adhoc linker-signed（非 Developer ID）；未在 arm64 设备运行。
+- 真实 GUI E2E（x86_64 安装包，主审独立验收）已覆盖：system:audit 缺库零写、Rules 取消零写/应用、Hooks 双目标、Aliases 双目标、MCP stdio+远程 HTTP 的 GUI plan/confirm/apply、Secrets 仅显示变量名与存在性、Runs、外部修改 plan fail-closed。MCP 定义使用共用 Rust CLI 写入隔离 SQLite 测试夹具；MCP 新增服务表单因 macOS 自动化输入限制未验收，不以测试夹具结果替代表单通过。
+- 零写与脱敏回读：stdio dry-run 数据库与目标文件哈希不变，日志不落库；远程 header 在 Codex 目标以环境变量引用写入，合成值不出现在目标文件、诊断日志与操作日志。
+- 外部状态（2026-09-15 复测）：GitHub Actions secrets=0、variables=0、本机有效 codesigning identities=0、GitHub Releases=0；GUI CI run 34936884572（该 run 绑定提交 `5a110be3`）六个 jobs 均 steps=[]，因账户付款失败或 spending limit 在启动前失败，非测试失败。
+- 发布结论：仍未达到公开跨平台发布条件——billing、真实密钥、Developer ID/公证、Windows 签名、Linux/Windows/arm64 真机运行与安装、updater 真实签名下载安装回读均未完成；现有授权不包含 tag、Release 或公开安装包。
+
 ## 剩余路线图（未排期）
 
 各项均无排期、无指定负责人。
 
 | 事项 | 前置 | 产出 | 完成标准 |
 | --- | --- | --- | --- |
-| 当前代码安装包与 GUI E2E | 参与域全部完成（已达）；macOS DMG 已验收（2026-09-14），待宿主 AX/computer-use 权限恢复 | 当前代码构建的 macOS 安装包（已产出并验收） | Rules/MCP（stdio+远程 HTTP）/Hooks/Aliases/Secrets/system:audit 的 8 个真实 GUI 业务场景 E2E 通过 |
-| 发布 | 当前安装包 E2E 通过；GitHub billing 恢复；updater/Apple/Windows 材料在仓库外与 Secrets 配齐 | 签名、公证、arm64、Linux、Windows、更新发布（源码管线 `a2cc864` 已就绪） | 各平台与渠道独立验收通过（Release/打 tag 未授权，到达时报主审决定） |
+| 当前代码安装包与 GUI E2E | 参与域全部完成（已达） | 验收基线提交 `5a110be3` 的 x86_64 DMG 与主要真实 GUI E2E 已验收（2026-09-15）；arm64 交叉构建 DMG 静态验收 | 主要场景已通过（2026-09-15）；仅剩 MCP 新增服务表单待 macOS 自动化输入条件具备后补验 |
+| 发布 | GitHub billing 解决；updater/Apple/Windows 签名材料在仓库外与 Secrets 配齐（GitHub Actions secrets/variables 与本机 codesigning identities 当前均为 0） | 签名、公证、arm64、Linux、Windows、更新发布（源码管线 `a2cc864` 已就绪） | GUI CI 对当前产品代码基线真实跑绿；各平台真机安装/运行与 updater 真实签名下载安装回读独立验收通过（Release/打 tag 未授权，到达时报主审决定） |
 
-2026-09-14 基于 `5ae995b` 的干净 Darwin x86_64 DMG 已通过主审独立验收（只读挂载、仓库外复制、架构与版本、无 Python、源码与 HOME 路径脱敏、从 `/` 隔离环境 5 秒存活，包内构建身份 commit/date 与源码一致），代表当前产品代码；完整 GUI 业务 E2E 因宿主 AX/computer-use 权限阻塞未启动。签名、公证、arm64、Linux、Windows 和更新发布仍未验证。
+2026-09-15 验收基线提交 `5a110be3` 的 x86_64 DMG 已通过 verify 与主要真实 GUI E2E 主审独立验收，arm64 DMG 交叉构建静态验收通过；本地可完成部分均已完成。公开发布仍受外部条件阻塞：GitHub billing、真实密钥、Developer ID/公证、Windows 签名、Linux/Windows/arm64 真机运行与安装、updater 真实签名下载安装回读均未就绪。
 
 ## 高级管理入口裁决记录（2026-09-12）
 
@@ -84,8 +97,8 @@ Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 必须支持新增、�
 
 ## 本次停止点与恢复入口
 
-- 停止点：基于 `5ae995b` 的 macOS DMG 已通过主审独立验收（2026-09-14）；完整 GUI 业务 E2E 因宿主 AX/computer-use permission_denied 阻塞未启动；发布源码管线（`a2cc864`）与 Windows 阻断 CI（`9f56f00`）已就绪但外部/真实验收未完成。
-- 恢复入口（按序）：恢复 Orca/宿主 AX 后完成 8 个业务场景真实 GUI E2E；解决 GitHub billing；在仓库外/Secrets 配齐 updater/Apple/Windows 材料；让 GUI CI 真正跑绿；由用户单独授权后打 tag，release workflow 产出草稿 Release；逐平台安装/签名/公证/updater 独立验收通过后才公开。
+- 停止点：验收基线提交 `5a110be3` 的 x86_64 DMG 已通过 verify 与主要真实 GUI E2E 主审独立验收（2026-09-15），arm64 DMG 交叉构建静态验收通过；发布源码管线（`a2cc864`）与 Windows 阻断 CI（`9f56f00`）已就绪；本地可完成部分均已完成，发布受外部条件阻塞。
+- 恢复入口（按序）：解决 GitHub billing；在仓库外/Secrets 配齐 updater/Apple/Windows 签名材料；让 GUI CI 对当前产品代码基线真实跑绿；Linux/Windows/arm64 各平台真机安装与运行独立验收；MCP 新增服务表单在 macOS 自动化输入条件具备时补验；由用户单独授权后打 tag，release workflow 产出草稿 Release；逐平台签名/公证/updater 真实下载安装回读独立验收通过后才公开。
 
 ## 验证
 
