@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
-import { usePlanPreview } from "../lib/usePlanPreview";
-import { makeAuditData, makeEnvelope, makeMode, makePlanAction } from "./fixtures";
-import { useState, type ReactNode } from "react";
+import { makeAuditData, makeEnvelope, makeMode } from "./fixtures";
+import { useState } from "react";
 import { check } from "@tauri-apps/plugin-updater";
 import SettingsPage from "../pages/SettingsPage";
 import App from "../App";
@@ -14,7 +13,7 @@ vi.mock("@tauri-apps/plugin-updater", () => ({ check: vi.fn() }));
 import { setSettingsClient, settingsSchema } from "../lib/settings";
 
 const settings: SettingsData = {
-  preferences: { offline: false, defaultDryRun: true, upstreamTtlSec: 86400, logRetentionDays: 30 },
+  preferences: { offline: false, upstreamTtlSec: 86400, logRetentionDays: 30 },
   appVersion: "1.2.3",
   contractVersion: "agent-manager/engine/v1",
   resourceDir: "/resources",
@@ -383,22 +382,6 @@ describe("SettingsPage", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it("独立预览等待设置读取后以默认演练打开且可取消", async () => {
-    let resolveSettings!: (value: SettingsData) => void;
-    setSettingsClient({ get: () => new Promise((resolve) => { resolveSettings = resolve; }), save: async (preferences) => ({ ...settings, preferences }) });
-    function Probe(): ReactNode {
-      const preview = usePlanPreview();
-      return <><button type="button" onClick={() => preview.open({ title: "延迟测试", planCommands: ["mcp:plan"], execute: async () => null })}>打开</button>{preview.modal}</>;
-    }
-    renderWithEngine(<Probe />, { "mcp:plan": makeEnvelope({ domain: "mcp", actions: [makePlanAction()], summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 } }, { command: "mcp.plan" }) });
-    await userEvent.click(screen.getByRole("button", { name: "打开" }));
-    expect(screen.queryByRole("dialog")).toBeNull();
-    resolveSettings({ ...settings, preferences: { ...settings.preferences, defaultDryRun: true } });
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
-    const toggle = screen.getByLabelText(/演练模式/); expect(toggle).toBeChecked();
-    await userEvent.click(toggle); expect(toggle).not.toBeChecked();
-  });
-
   it("渲染高级管理区块包含保留的非日常功能入口，点击可下钻，常驻返回设置按钮可返回", async () => {
     setSettingsClient({
       get: async () => settings,
@@ -571,7 +554,7 @@ describe("SettingsPage", () => {
 
   it("settingsSchema 严格校验：支持 maintenanceWarning（null、字符串、缺省）且拒绝多余字段", () => {
     const baseValid = {
-      preferences: { offline: false, defaultDryRun: false, upstreamTtlSec: 86400, logRetentionDays: 30 },
+      preferences: { offline: false, upstreamTtlSec: 86400, logRetentionDays: 30 },
       appVersion: "1.0.0",
       contractVersion: "agent-manager/engine/v1",
       resourceDir: "/res",

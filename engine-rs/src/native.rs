@@ -24,7 +24,7 @@ pub struct Context {
 }
 
 /// Frozen fields: command is "<domain>:<verb>" (a single '.' is also accepted),
-/// args is the raw flag list (["--only", "rules:x", "--dry-run", ...]),
+/// args is the raw flag list (["--only", "rules:x", "--offline", ...]),
 /// run_id is provided by the caller (GUI run id or CLI-generated).
 pub struct Request {
     pub command: String,
@@ -68,7 +68,6 @@ const KNOWN_DOMAINS: &[&str] = &[
 
 fn mode_of(request: &Request) -> Mode {
     Mode {
-        dry_run: request.flag("--dry-run"),
         offline: request.flag("--offline"),
     }
 }
@@ -176,7 +175,7 @@ fn record_diagnostic_log_if_needed(
 }
 
 /// The single native entry point. Pure with respect to process state: no exit
-/// codes here (CLI maps errors to exit codes); status/plan never write the DB.
+/// codes here (CLI maps errors to exit codes); status never writes the DB.
 pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     let start_time = std::time::Instant::now();
     // system:audit 叶子特判：DispatchResult 无法表达“有效 data + errors”，
@@ -213,7 +212,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     let is_alias_apply = request.command.replace('.', ":") == "aliases:apply";
     let (needs_lock, domain_label, diag_code) = if is_agent_apply {
         match crate::native_agents::preflight_apply(ctx, request) {
-            Ok(real_apply) => (real_apply, "Agent", "AGENT_ERROR"),
+            Ok(()) => (true, "Agent", "AGENT_ERROR"),
             Err(err) => {
                 let mut env = Envelope::new(
                     request.command.replacen(':', ".", 1),
@@ -238,7 +237,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
         }
     } else if is_skill_apply {
         match crate::native_skills::preflight_apply(ctx, request) {
-            Ok(real_apply) => (real_apply, "Skill", "SKILL_ERROR"),
+            Ok(()) => (true, "Skill", "SKILL_ERROR"),
             Err(err) => {
                 let mut env = Envelope::new(
                     request.command.replacen(':', ".", 1),
@@ -263,7 +262,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
         }
     } else if is_mcp_apply {
         match crate::native_mcp::preflight_apply(ctx, request) {
-            Ok(real_apply) => (real_apply, "MCP", "MCP_ERROR"),
+            Ok(()) => (true, "MCP", "MCP_ERROR"),
             Err(err) => {
                 let mut env = Envelope::new(
                     request.command.replacen(':', ".", 1),
@@ -288,7 +287,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
         }
     } else if is_rule_apply {
         match crate::native_rules::preflight_apply(ctx, request) {
-            Ok(real_apply) => (real_apply, "Rules", "RULE_ERROR"),
+            Ok(()) => (true, "Rules", "RULE_ERROR"),
             Err(err) => {
                 let mut env = Envelope::new(
                     request.command.replacen(':', ".", 1),
@@ -313,7 +312,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
         }
     } else if is_hook_apply {
         match crate::native_hooks::preflight_apply(ctx, request) {
-            Ok(real_apply) => (real_apply, "Hooks", "HOOK_ERROR"),
+            Ok(()) => (true, "Hooks", "HOOK_ERROR"),
             Err(err) => {
                 let mut env = Envelope::new(
                     request.command.replacen(':', ".", 1),
@@ -338,7 +337,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
         }
     } else if is_alias_apply {
         match crate::native_aliases::preflight_apply(ctx, request) {
-            Ok(real_apply) => (real_apply, "Aliases", "ALIAS_ERROR"),
+            Ok(()) => (true, "Aliases", "ALIAS_ERROR"),
             Err(err) => {
                 let mut env = Envelope::new(
                     request.command.replacen(':', ".", 1),
@@ -489,22 +488,22 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ));
     }
     match (domain, verb) {
-        ("agents", "status" | "plan" | "apply") => crate::native_agents::handle(ctx, request)
+        ("agents", "status" | "apply") => crate::native_agents::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}"))),
-        ("skills", "status" | "plan" | "apply") => crate::native_skills::handle(ctx, request)
+        ("skills", "status" | "apply") => crate::native_skills::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("SKILL_ERROR", format!("{err:#}"))),
-        ("mcp", "status" | "plan" | "apply") => crate::native_mcp::handle(ctx, request)
+        ("mcp", "status" | "apply") => crate::native_mcp::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("MCP_ERROR", format!("{err:#}"))),
-        ("rules", "status" | "plan" | "apply") => crate::native_rules::handle(ctx, request)
+        ("rules", "status" | "apply") => crate::native_rules::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("RULE_ERROR", format!("{err:#}"))),
-        ("hooks", "status" | "plan" | "apply") => crate::native_hooks::handle(ctx, request)
+        ("hooks", "status" | "apply") => crate::native_hooks::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("HOOK_ERROR", format!("{err:#}"))),
-        ("aliases", "status" | "plan" | "apply") => crate::native_aliases::handle(ctx, request)
+        ("aliases", "status" | "apply") => crate::native_aliases::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| {
                 DispatchError::new(crate::native_aliases::error_code(&err), format!("{err:#}"))
@@ -551,6 +550,33 @@ fn validate_key(key: &str) -> Result<Vec<&str>, DispatchError> {
         }
     }
     Ok(segments)
+}
+
+/// 严格参数面校验：args 只允许出现 `recognized` 中的 `--flag <value>` 对；
+/// 任何其他参数（已退役的 --dry-run、未知 flag、位置参数、缺值的悬挂
+/// flag）一律在任何写之前以 USAGE_ERROR 拒绝。
+fn reject_unrecognized_args(
+    request: &Request,
+    recognized: &[&str],
+    command: &str,
+) -> Result<(), DispatchError> {
+    let mut iter = request.args.iter();
+    while let Some(arg) = iter.next() {
+        if recognized.contains(&arg.as_str()) {
+            if iter.next().is_none() {
+                return Err(DispatchError::new(
+                    "USAGE_ERROR",
+                    format!("{command} 参数 {arg} 缺少值"),
+                ));
+            }
+            continue;
+        }
+        return Err(DispatchError::new(
+            "USAGE_ERROR",
+            format!("{command} 不支持参数 '{arg}'"),
+        ));
+    }
+    Ok(())
 }
 
 /// 无 regex 依赖的段校验（等价于 ^[A-Za-z0-9_-]+$）。
@@ -866,6 +892,7 @@ fn validate_mcp_policy_candidate(
 }
 
 fn policy_set(ctx: &Context, request: &Request) -> DispatchResult {
+    reject_unrecognized_args(request, &["--layer", "--key", "--value"], "policy:set")?;
     if request.value("--layer") != Some("local") {
         return Err(DispatchError::new(
             "USAGE_ERROR",
@@ -894,17 +921,6 @@ fn policy_set(ctx: &Context, request: &Request) -> DispatchResult {
     set_dot_path(&mut candidate_policy, &segments, value.clone())?;
     validate_mcp_policy_candidate(key, &value, &candidate_policy)?;
 
-    if request.flag("--dry-run") {
-        let data = policy_data(Some("sqlite"), Some(key), Some(value), None, None, None);
-        return Ok((
-            data,
-            vec![diagnostic(
-                "DRY_RUN",
-                None,
-                format!("dry-run：未写入 {key}"),
-            )],
-        ));
-    }
     // 首次明确保存即初始化库并固化内置默认；同连接同事务完成读-改-写。
     let mut conn = store::open_write(ctx).map_err(DispatchError::from)?;
     let tx = conn
@@ -935,6 +951,7 @@ fn policy_set(ctx: &Context, request: &Request) -> DispatchResult {
 }
 
 fn policy_delete(ctx: &Context, request: &Request) -> DispatchResult {
+    reject_unrecognized_args(request, &["--layer", "--key"], "policy:delete")?;
     if request.value("--layer") != Some("local") {
         return Err(DispatchError::new(
             "USAGE_ERROR",
@@ -945,17 +962,6 @@ fn policy_delete(ctx: &Context, request: &Request) -> DispatchResult {
         .value("--key")
         .ok_or_else(|| DispatchError::new("USAGE_ERROR", "policy:delete 需要 --key <dot.path>"))?;
     let segments = validate_key(key)?;
-    if request.flag("--dry-run") {
-        let data = policy_data(Some("sqlite"), Some(key), None, None, None, None);
-        return Ok((
-            data,
-            vec![diagnostic(
-                "DRY_RUN",
-                None,
-                format!("dry-run：未删除 {key}"),
-            )],
-        ));
-    }
     let mut conn = match store::open_readonly(ctx).map_err(DispatchError::from)? {
         // 无库即无键：删除不建库
         None => {
@@ -1038,22 +1044,189 @@ fn db_status(ctx: &Context) -> DispatchResult {
 }
 
 fn db_migrate(ctx: &Context, request: &Request) -> DispatchResult {
-    let path = store::db_path(ctx);
-    let exists = path.is_file();
-    if request.flag("--dry-run") {
-        let (mut data, _) = db_status(ctx)?;
-        let map = data.as_object_mut().expect("object");
-        map.insert("dry_run".into(), Value::Bool(true));
-        map.insert("would_migrate".into(), Value::Bool(!exists));
-        return Ok((
-            data,
-            vec![diagnostic(
-                "DRY_RUN",
-                None,
-                "dry-run：未执行初始化，native-manager.db 状态未改变".to_string(),
-            )],
-        ));
-    }
+    reject_unrecognized_args(request, &[], "db:migrate")?;
     store::open_write(ctx).map_err(DispatchError::from)?;
     db_status(ctx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_ctx(name: &str) -> (std::path::PathBuf, Context) {
+        let root =
+            std::env::temp_dir().join(format!("am-native-core-{}-{}", std::process::id(), name));
+        let _ = std::fs::remove_dir_all(&root);
+        (
+            root.clone(),
+            Context {
+                data_dir: root.join("data"),
+                home_dir: root.join("home"),
+            },
+        )
+    }
+
+    fn request(command: &str, args: &[&str]) -> Request {
+        Request {
+            command: command.to_string(),
+            args: args.iter().map(|s| s.to_string()).collect(),
+            run_id: "run-test".to_string(),
+        }
+    }
+
+    #[test]
+    fn six_domain_plan_is_unknown_verb() {
+        let (root, context) = temp_ctx("plan-unknown");
+        for command in [
+            "agents:plan",
+            "skills:plan",
+            "mcp:plan",
+            "rules:plan",
+            "hooks:plan",
+            "aliases:plan",
+            "skills.plan", // 点号形式同样归一化为 UNKNOWN_VERB
+        ] {
+            let env = execute(&context, &request(command, &[]));
+            assert!(!env.ok, "{command} 不应成功");
+            assert_eq!(
+                env.errors[0].code, "UNKNOWN_VERB",
+                "{command} 应报 UNKNOWN_VERB"
+            );
+        }
+        assert!(
+            !context.data_dir.exists(),
+            "plan 拒绝不得创建数据目录/库/日志"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn policy_set_delete_and_db_migrate_reject_dry_run_before_any_write() {
+        let (root, context) = temp_ctx("dry-run-reject");
+        let db = store::db_path(&context);
+        for (command, args) in [
+            (
+                "policy:set",
+                &[
+                    "--layer",
+                    "local",
+                    "--key",
+                    "agents.x",
+                    "--value",
+                    "1",
+                    "--dry-run",
+                ][..],
+            ),
+            (
+                "policy:delete",
+                &["--layer", "local", "--key", "agents.x", "--dry-run"][..],
+            ),
+            ("db:migrate", &["--dry-run"][..]),
+        ] {
+            let env = execute(&context, &request(command, args));
+            assert!(!env.ok, "{command} --dry-run 不应成功");
+            assert_eq!(
+                env.errors[0].code, "USAGE_ERROR",
+                "{command} --dry-run 应以 USAGE_ERROR 拒绝"
+            );
+            assert!(
+                !db.exists(),
+                "{command} --dry-run 被拒绝后不得创建 native-manager.db"
+            );
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn policy_and_db_reject_unrecognized_args() {
+        let (root, context) = temp_ctx("unknown-args");
+        let db = store::db_path(&context);
+        for (command, args) in [
+            (
+                "policy:set",
+                &[
+                    "--layer", "local", "--key", "agents.x", "--value", "1", "--bogus",
+                ][..],
+            ),
+            (
+                "policy:delete",
+                &["--layer", "local", "--key", "agents.x", "--bogus"][..],
+            ),
+            ("db:migrate", &["--bogus"][..]),
+            ("db:migrate", &["positional"][..]),
+        ] {
+            let env = execute(&context, &request(command, args));
+            assert!(!env.ok, "{command} {args:?} 不应成功");
+            assert_eq!(env.errors[0].code, "USAGE_ERROR");
+            assert!(!db.exists(), "{command} {args:?} 被拒绝后不得建库");
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejected_policy_set_dry_run_leaves_existing_db_untouched() {
+        let (root, context) = temp_ctx("reject-zero-write");
+        // 先建库，再验证被拒绝的 --dry-run 请求对库零写。
+        let conn = store::open_write(&context).unwrap();
+        drop(conn);
+        let db = store::db_path(&context);
+        let bytes_before = std::fs::read(&db).unwrap();
+
+        let env = execute(
+            &context,
+            &request(
+                "policy:set",
+                &[
+                    "--layer",
+                    "local",
+                    "--key",
+                    "agents.x",
+                    "--value",
+                    "1",
+                    "--dry-run",
+                ],
+            ),
+        );
+        assert!(!env.ok);
+        assert_eq!(env.errors[0].code, "USAGE_ERROR");
+        let bytes_after = std::fs::read(&db).unwrap();
+        assert_eq!(bytes_before, bytes_after, "拒绝必须先于任何写");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn policy_set_happy_path_still_writes() {
+        let (root, context) = temp_ctx("happy");
+        let env = execute(
+            &context,
+            &request(
+                "policy:set",
+                &[
+                    "--layer",
+                    "local",
+                    "--key",
+                    "agents.claude-code.enabled",
+                    "--value",
+                    "false",
+                ],
+            ),
+        );
+        assert!(env.ok, "{:?}", env.errors);
+        assert!(store::db_path(&context).exists());
+        let policy = store::effective_policy(&context).unwrap();
+        assert_eq!(
+            policy["agents"]["claude-code"]["enabled"],
+            Value::Bool(false)
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn db_migrate_without_args_initializes_store() {
+        let (root, context) = temp_ctx("migrate");
+        let env = execute(&context, &request("db:migrate", &[]));
+        assert!(env.ok, "{:?}", env.errors);
+        assert!(store::db_path(&context).exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

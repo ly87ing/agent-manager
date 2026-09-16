@@ -4,8 +4,8 @@
 //! - 定义唯一来源 = store::effective_policy 的 agents.definitions；
 //!   内置定义直接消费 store::BUILTIN_POLICY_JSON，不在此处复制。
 //! - 显式动作仅 install/upgrade/uninstall；status 只对已存在二进制执行固定 `--version` 探测。
-//! - 命令只在真实 apply 执行；plan、apply --dry-run、取消零执行零写。
-//! - apply 输出对齐前端 ApplyResultData {domain, dry_run, steps, skipped}；
+//! - 命令只在真实 apply 执行；plan 与 --dry-run 已退役，apply 一律真实执行并持有全局锁。
+//! - apply 输出为 {domain, steps, skipped}；
 //!   命令 exit 0 后必须探测到安装/卸载结果，否则报错而非谎报成功。
 
 use anyhow::{anyhow, bail, Result};
@@ -557,19 +557,21 @@ fn status_element(
     })
 }
 
-// ---------- plan / apply ----------
+// ---------- apply ----------
 
 struct ActionRequest {
     agent_id: String,
     action: String,
-    dry_run: bool,
     offline: bool,
 }
 
 fn parse_action_args(req: &Request) -> Result<ActionRequest> {
+    if req.flag("--dry-run") {
+        bail!("agents:apply 已退役 --dry-run，拒绝该参数（执行前请以 agents:status 确认状态）");
+    }
     let only = req
         .value("--only")
-        .ok_or_else(|| anyhow!("agents:plan/apply 需要显式 --only agents:<id>"))?;
+        .ok_or_else(|| anyhow!("agents:apply 需要显式 --only agents:<id>"))?;
     let agent_id = only
         .strip_prefix("agents:")
         .ok_or_else(|| anyhow!("--only 只接受 agents:<id>，得到 '{}'", only))?
@@ -577,7 +579,7 @@ fn parse_action_args(req: &Request) -> Result<ActionRequest> {
     let action = req
         .value("--action")
         .ok_or_else(|| {
-            anyhow!("agents:plan/apply 需要显式 --action install|upgrade|uninstall（不自动安装）")
+            anyhow!("agents:apply 需要显式 --action install|upgrade|uninstall（不自动安装）")
         })?
         .to_string();
     if !["install", "upgrade", "uninstall"].contains(&action.as_str()) {
@@ -589,7 +591,6 @@ fn parse_action_args(req: &Request) -> Result<ActionRequest> {
     Ok(ActionRequest {
         agent_id,
         action,
-        dry_run: req.flag("--dry-run"),
         offline: req.flag("--offline"),
     })
 }
@@ -673,54 +674,16 @@ fn prepare_apply(ctx: &Context, req: &Request) -> Result<(ActionRequest, AgentDe
 }
 
 /// Apply preflight is read-only and runs before the process lock is created.
-/// Returns whether this is a real (non-dry-run) apply.
-pub fn preflight_apply(ctx: &Context, req: &Request) -> Result<bool> {
-    let (parsed, _) = prepare_apply(ctx, req)?;
-    Ok(!parsed.dry_run)
+/// 通过完整安全预检（含 --dry-run 拒绝）后 apply 一律真实执行，调用方恒取全局锁。
+pub fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
+    prepare_apply(ctx, req)?;
+    Ok(())
 }
 
 fn find_def<'a>(defs: &'a [AgentDef], agent_id: &str) -> Result<&'a AgentDef> {
     defs.iter()
         .find(|def| def.id == agent_id)
         .ok_or_else(|| anyhow!("元素 'agents:{}' 在域 'agents' 中不存在", agent_id))
-}
-
-fn plan_data(def: &AgentDef, action: &str, cmd: &str) -> Value {
-    let risk = match action {
-        "upgrade" => "network",
-        _ => "install-remove",
-    };
-    let label = match action {
-        "install" => "安装",
-        "upgrade" => "升级",
-        "uninstall" => "卸载",
-        _ => unreachable!("validated agent action"),
-    };
-    let mut summary = Map::new();
-    for key in [
-        "read",
-        "write-local",
-        "exec-local",
-        "network",
-        "install-remove",
-    ] {
-        summary.insert(key.to_string(), json!(if key == risk { 1 } else { 0 }));
-    }
-    json!({
-        "domain": "agents",
-        "actions": [{
-            "op": "run-cmd",
-            "element": format!("agents:{}", def.id),
-            "target": Value::Null,
-            "risk": risk,
-            "before_digest": Value::Null,
-            "after_digest": Value::Null,
-            "backup_path": Value::Null,
-            "cmd": cmd,
-            "note": format!("{} {}（显式动作）", label, def.id),
-        }],
-        "summary": Value::Object(summary),
-    })
 }
 
 /// exit 0 后的结果核验：install/upgrade → bin 必须可解析；uninstall → bin 必须消失。
@@ -776,25 +739,6 @@ pub fn handle(ctx: &Context, req: &Request) -> Result<Value> {
                 .collect();
             Ok(json!({"domain": "agents", "elements": elements}))
         }
-        "agents:plan" => {
-            let parsed = parse_action_args(req)?;
-            let def = find_def(&defs, &parsed.agent_id)?;
-            let installed = resolve_bin(&ctx.home_dir, &def.bin).is_some();
-            check_action_allowed(ctx, def, &parsed.action, installed)?;
-            if parsed.offline && parsed.action != "uninstall" {
-                bail!(
-                    "agents:{} 在 offline 模式下拒绝执行 {}（需要联网）",
-                    def.id,
-                    parsed.action
-                );
-            }
-            resolve_action_command(def, &parsed.action)?;
-            Ok(plan_data(
-                def,
-                &parsed.action,
-                resolve_action_command(def, &parsed.action)?,
-            ))
-        }
         "agents:apply" => {
             let parsed = parse_action_args(req)?;
             let def = find_def(&defs, &parsed.agent_id)?;
@@ -808,14 +752,6 @@ pub fn handle(ctx: &Context, req: &Request) -> Result<Value> {
                 );
             }
             let cmd = resolve_action_command(def, &parsed.action)?.to_string();
-            if parsed.dry_run {
-                return Ok(json!({
-                    "domain": "agents",
-                    "dry_run": true,
-                    "steps": [],
-                    "skipped": [&parsed.agent_id],
-                }));
-            }
             let output = match run_shell(&ctx.home_dir, &cmd, APPLY_TIMEOUT, &parsed.action) {
                 Ok(output) => output,
                 Err(err) => {
@@ -856,7 +792,6 @@ pub fn handle(ctx: &Context, req: &Request) -> Result<Value> {
             record_apply_operation(ctx, req, def, &parsed.action, true, Some(output.exit_code))?;
             Ok(json!({
                 "domain": "agents",
-                "dry_run": false,
                 "steps": [{"name": step_name, "ok": true, "exit_code": output.exit_code}],
                 "skipped": [],
             }))

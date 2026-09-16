@@ -12,7 +12,7 @@ export function definitionKeyPrefix(section: DefinitionSection): string {
   return section === "mcp" ? "mcp.definitions" : "skills.repositories";
 }
 
-export interface DefinitionRemovalPlan {
+export interface DefinitionRemovalSpec {
   kind: "tombstone";
   /** SQLite 中的本地策略写入层。 */
   layer: "local";
@@ -37,11 +37,11 @@ function layerHasDefinition(layer: Record<string, unknown> | null, section: Defi
  * 移除写 tombstone，避免删除覆盖片段后下层同名定义重新生效。
  * 所有 tombstone 都写入 local，避免删除定义后下层同名定义重新生效。
  */
-export function planDefinitionRemoval(
+export function buildDefinitionRemoval(
   _layers: PolicyLayers | null,
   section: DefinitionSection,
   name: string,
-): DefinitionRemovalPlan {
+): DefinitionRemovalSpec {
   const key = `${definitionKeyPrefix(section)}.${name}`;
   return { kind: "tombstone", layer: "local", key };
 }

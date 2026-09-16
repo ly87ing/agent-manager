@@ -11,12 +11,12 @@ import { McpServerFormDialog } from "../components/McpServerFormDialog";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import type { Diagnostic, EngineElement, McpImportCandidate, PolicyData, PolicyLayers, StatusData } from "../lib/contract";
 import { engineErrorMessage, runEngine } from "../lib/engine";
-import { candidateToDefinition } from "../lib/mcpImport";
+import { candidateToDefinition, MCP_UNMANAGED_CONFLICT_MARKER } from "../lib/mcpImport";
 import { agentCellsOf, type McpObserved, type McpSpec } from "../lib/observed";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
+import { useDirectApply } from "../lib/useDirectApply";
 import { OVERLAY_COPY } from "../lib/ui-copy";
 import { engineKeys, useEngineQuery } from "../lib/queries";
-import { useExecuteApply, usePlanPreview } from "../lib/usePlanPreview";
 import { cn } from "../lib/utils";
 
 /** 从 policy:get 的 sqlite 有效定义中取服务完整定义；无 DB 旧存储返回 null（调用方走迁移后取完整定义）。 */
@@ -39,9 +39,14 @@ export default function McpPage() {
   const [importExecuting, setImportExecuting] = useState(false);
   const [importErrors, setImportErrors] = useState<Diagnostic[] | null>(null);
 
-  const preview = usePlanPreview();
-  const executeApply = useExecuteApply();
+  const directApply = useDirectApply();
   const definitionOps = useDefinitionOps({ section: "mcp", domain: "mcp" });
+
+  const [pendingRemove, setPendingRemove] = useState<
+    | { kind: "server"; element: EngineElement }
+    | { kind: "cell"; element: EngineElement; agent: string }
+    | null
+  >(null);
 
   const tabRefs = useRef<Record<"library" | "agents", HTMLButtonElement | null>>({ library: null, agents: null });
 
@@ -92,52 +97,37 @@ export default function McpPage() {
     .filter(Boolean)
     .sort();
 
-  /** 所有写操作统一走 plan 预览 → 确认 apply；取消零 policy:set、零 apply。 */
-  const openAction = (
-    title: string,
-    subtitle: string,
-    args: string[],
-    options?: { confirmLabel?: string; requireConfirmText?: string; takeoverEligible?: boolean },
-  ) => {
-    // 显式接管：逐 agent add/update 遇「非受管同名条目」拒绝时，错误区可带标注重试；
-    // 已带 flag 的请求不再重复提供重试
-    const canTakeover = options?.takeoverEligible === true && !args.includes("--allow-takeover");
-    preview.open({
-      title,
-      subtitle,
-      planCommands: [{ command: "mcp:plan", args }],
-      confirmLabel: options?.confirmLabel ?? "立即执行",
-      requireConfirmText: options?.requireConfirmText,
-      execute: executeApply({ command: "mcp:apply", label: title, extraArgs: args }),
-      takeoverRetry: canTakeover
-        ? () => openAction(title, subtitle, [...args, "--allow-takeover"], options)
-        : undefined,
+  /** 冲突行的显式接管入口：一键直接以精确范围 + --allow-takeover 执行 apply。 */
+  const handleTakeover = (element: EngineElement, agent: string, action: string) => {
+    void directApply.apply({
+      command: "mcp:apply",
+      label: `接管原条目 ${element.id} @ ${agent}`,
+      args: ["--only", element.id, "--agent", agent, "--action", action, "--allow-takeover"],
     });
   };
 
-  /** 库级操作：仅按 observed.actions 提供的 enable/disable/remove，无 agent 参数。 */
+  /** 库级操作：仅按 observed.actions 提供的 enable/disable/remove；remove 需先经独立 ConfirmModal。 */
   const handleServerAction = (element: EngineElement, action: "enable" | "disable" | "remove") => {
-    const name = element.id.replace(/^mcp:/, "");
-    const args = ["--only", element.id, "--action", action];
-    if (action === "enable") {
-      openAction(`启用服务 ${name}`, "仅切换服务库开关；保留各助手分配与配置文件，不恢复或重写助手配置。", args);
-    } else if (action === "disable") {
-      openAction(`停用服务 ${name}`, "仅切换服务库开关；保留各助手分配与配置文件，不撤下助手配置。", args);
-    } else {
-      const affected = Object.values(agentCellsOf(element)).filter(
-        (cell) => (cell as McpAgentCellView).assigned === true,
-      ).length;
-      openAction(
-        `删除服务 ${name}`,
-        `从配置中移除服务，并清理 ${affected} 条受影响的助手配置；不会卸载已安装的软件包。`,
-        args,
-        { confirmLabel: "立即删除", requireConfirmText: name },
-      );
+    if (action === "remove") {
+      setPendingRemove({ kind: "server", element });
+      return;
     }
+    const name = element.id.replace(/^mcp:/, "");
+    const titleMap: Record<"enable" | "disable" | "remove", string> = {
+      enable: `启用服务 ${name}`,
+      disable: `停用服务 ${name}`,
+      remove: `删除服务 ${name}`,
+    };
+    void directApply.apply({ command: "mcp:apply", label: titleMap[action], args: ["--only", element.id, "--action", action] });
   };
 
-  /** 服务 × 助手 操作：按钮来自 cell.actions，plan/apply 携带精确 --only/--agent/--action。 */
+  /** 服务 × 助手 操作：按钮来自 cell.actions，apply 携带精确 --only/--agent/--action；remove 需先经独立 ConfirmModal。
+   * add/update 因同名外部条目 fail-closed 时，失败 toast 外再以动作按钮提供显式接管直执。 */
   const handleCellAction = (element: EngineElement, agent: string, action: string) => {
+    if (action === "remove") {
+      setPendingRemove({ kind: "cell", element, agent });
+      return;
+    }
     const args = ["--only", element.id, "--agent", agent, "--action", action];
     const labelMap: Record<string, string> = {
       add: "添加",
@@ -146,20 +136,20 @@ export default function McpPage() {
       disable: "禁用",
       remove: "从此助手删除",
     };
-    openAction(`${labelMap[action] ?? action} ${element.id} @ ${agent}`, "仅同步此服务在对应助手中的配置。", args, {
-      takeoverEligible: action === "add" || action === "update",
+    const label = `${labelMap[action] ?? action} ${element.id} @ ${agent}`;
+    void directApply.apply({ command: "mcp:apply", label, args }).then((envelope) => {
+      if (
+        (action === "add" || action === "update") &&
+        envelope &&
+        !envelope.ok &&
+        envelope.errors.some((diag) => diag.message.includes(MCP_UNMANAGED_CONFLICT_MARKER))
+      ) {
+        toast.error(
+          "目标文件中已存在同名的外部条目，默认拒绝覆盖。确认其内容可弃后，可显式接管：以本工具的标准配置替换该条目（其余条目与字段保持不变）。",
+          { action: { label: "接管原条目并重试", onClick: () => handleTakeover(element, agent, action) } },
+        );
+      }
     });
-  };
-
-  /** 冲突行的显式接管入口：直接以 --allow-takeover 打开预览（预览可见 takeover 标注）。 */
-  const handleTakeover = (element: EngineElement, agent: string, action: string) => {
-    const args = ["--only", element.id, "--agent", agent, "--action", action, "--allow-takeover"];
-    openAction(
-      `接管原条目 ${element.id} @ ${agent}`,
-      "以本工具的标准配置替换目标文件中的同名外部条目；其余条目与字段保持不变。",
-      args,
-      { takeoverEligible: true },
-    );
   };
 
   // 未导入候选（引擎已掩码，前端拿不到明文）与同名冲突视图（元素 + policy 定义双来源）
@@ -212,6 +202,25 @@ export default function McpPage() {
       cell: (cells[agent] as McpAgentCellView | undefined) ?? null,
     }));
   });
+
+  const confirmRemove = () => {
+    if (!pendingRemove) return;
+    if (pendingRemove.kind === "server") {
+      const name = pendingRemove.element.id.replace(/^mcp:/, "");
+      void directApply.apply({
+        command: "mcp:apply",
+        label: `删除服务 ${name}`,
+        args: ["--only", pendingRemove.element.id, "--action", "remove"],
+      });
+    } else {
+      void directApply.apply({
+        command: "mcp:apply",
+        label: `从此助手删除 ${pendingRemove.element.id} @ ${pendingRemove.agent}`,
+        args: ["--only", pendingRemove.element.id, "--agent", pendingRemove.agent, "--action", "remove"],
+      });
+    }
+    setPendingRemove(null);
+  };
 
   return (
     <div className="space-y-6">
@@ -367,12 +376,11 @@ export default function McpPage() {
           onClose={() => setFormState(null)}
           onSubmit={(name, definition, isNew, complete) => {
             setFormState(null);
-            void definitionOps.saveAndApply({ name, definition, isNew, elementId: `mcp:${name}`, complete });
+            void definitionOps.saveDefinition({ name, definition, isNew, complete });
           }}
         />
       )}
 
-      {preview.modal}
       {definitionOps.modals}
 
       {importTarget && (
@@ -388,6 +396,27 @@ export default function McpPage() {
             setImportTarget(null);
             setImportErrors(null);
           }}
+        />
+      )}
+
+      {pendingRemove && (
+        <ConfirmModal
+          title={
+            pendingRemove.kind === "server"
+              ? `删除服务 ${pendingRemove.element.id.replace(/^mcp:/, "")}`
+              : `从此助手删除 ${pendingRemove.element.id} @ ${pendingRemove.agent}`
+          }
+          description={
+            pendingRemove.kind === "server"
+              ? "删除服务会清理各助手中的配置，但不会卸载软件。确认后执行。"
+              : "只清理该助手的配置。确认后执行。"
+          }
+          risk={pendingRemove.kind === "server" ? "install-remove" : "write-local"}
+          requireText={pendingRemove.kind === "server" ? pendingRemove.element.id.replace(/^mcp:/, "") : undefined}
+          confirmLabel="确认删除"
+          executing={directApply.executing}
+          onConfirm={confirmRemove}
+          onClose={() => setPendingRemove(null)}
         />
       )}
     </div>

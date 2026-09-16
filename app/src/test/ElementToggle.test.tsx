@@ -1,13 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { waitFor } from "@testing-library/react";
+import { toast } from "sonner";
 import McpPage from "../pages/McpPage";
-import { makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makePlanAction } from "./fixtures";
+import { makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 import type { Envelope } from "../lib/contract";
 
 /**
- * MCP 库级启停链路：服务卡片按钮（按 observed.actions 提供）→ mcp:plan（--only/--action，
- * 无 agent）→ 预览确认 → mcp:apply 同参。旧「Switch → policy.set 预写 enabled」链路已按
- * 新契约移除：启停不再有任何 policy:set 预写，动作完全由 plan/apply 的 --action 表达。
+ * MCP 库级启停链路：服务卡片按钮（按 observed.actions 提供）→ 直接 mcp:apply（--only/--action，
+ * 无 agent），不再先取 plan、不开预览弹窗。启停没有任何 policy:set 预写，
+ * 动作完全由 apply 的 --action 表达。
  */
 function routes(): Record<string, Envelope> {
   return {
@@ -35,20 +37,12 @@ function routes(): Record<string, Envelope> {
       },
       { command: "mcp.status" },
     ),
-    "mcp:plan": makeEnvelope(
-      {
-        domain: "mcp",
-        actions: [makePlanAction({ op: "write-file", element: "mcp:chrome-devtools", target: "/tmp/demo.json", risk: "write-local", note: "撤下助手入口" })],
-        summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 },
-      },
-      { command: "mcp.plan" },
-    ),
     "mcp:apply": makeEnvelope(makeApplyResult({ domain: "mcp" }), { command: "mcp.apply" }),
   };
 }
 
 describe("MCP 库级启停", () => {
-  it("已停用服务启用对话框明确保留分配与配置文件，不恢复或重写配置", async () => {
+  it("已停用服务：「启用」点击直接 mcp:apply --action enable（带 run_id），不取 plan、不开弹窗、零 policy:set", async () => {
     const disabledRoutes = routes();
     disabledRoutes["mcp:status"] = makeEnvelope(
       {
@@ -82,20 +76,19 @@ describe("MCP 库级启停", () => {
     const { calls } = renderWithEngine(<McpPage />, disabledRoutes);
 
     await userEvent.click(await screen.findByTestId("enable-server-mcp:chrome-devtools"));
-    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
-    expect(dialog).toHaveTextContent("仅切换服务库开关");
-    expect(dialog).toHaveTextContent("保留各助手分配与配置文件");
-    expect(dialog).toHaveTextContent("不恢复或重写助手配置");
-    expect(dialog).not.toHaveTextContent("恢复原来已启用的助手配置");
-    expect(calls.find((call) => call.command === "mcp:plan")?.args).toEqual([
-      "--only",
-      "mcp:chrome-devtools",
-      "--action",
-      "enable",
-    ]);
+    await waitFor(() => expect(calls.some((call) => call.command === "mcp:apply")).toBe(true));
+
+    const applyCalls = calls.filter((call) => call.command === "mcp:apply");
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0].args).toEqual(["--only", "mcp:chrome-devtools", "--action", "enable"]);
+    expect(applyCalls[0].args).not.toContain("--dry-run");
+    expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("已启用服务显示「停用」→ mcp:plan --action disable（无 agent）→ 确认 → mcp:apply 同参，全程零 policy:set", async () => {
+  it("已启用服务只提供「停用」：点击直接 mcp:apply --action disable（带 run_id），零 policy:set", async () => {
     const { calls } = renderWithEngine(<McpPage />, routes());
 
     // 已启用：只提供「停用」，不渲染「启用」
@@ -103,43 +96,38 @@ describe("MCP 库级启停", () => {
     expect(screen.queryByTestId("enable-server-mcp:chrome-devtools")).toBeNull();
     await userEvent.click(screen.getByTestId("disable-server-mcp:chrome-devtools"));
 
-    // plan 预览打开（限定本服务、无 agent），零 policy:set 预写
-    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
-    expect(dialog).toHaveTextContent("停用服务 chrome-devtools");
-    expect(dialog).toHaveTextContent("保留各助手分配与配置文件");
-    expect(dialog).toHaveTextContent("不撤下助手配置");
-    expect(dialog).toHaveTextContent("/tmp/demo.json");
-    const planCall = calls.find((call) => call.command === "mcp:plan");
-    expect(planCall!.args).toEqual(["--only", "mcp:chrome-devtools", "--action", "disable"]);
+    await waitFor(() => expect(calls.some((call) => call.command === "mcp:apply")).toBe(true));
+    const applyCalls = calls.filter((call) => call.command === "mcp:apply");
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0].args).toEqual(["--only", "mcp:chrome-devtools", "--action", "disable"]);
+    expect(applyCalls[0].args).not.toContain("--dry-run");
+    expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
-
-    await userEvent.click(screen.getByTestId("plan-confirm-button"));
-    const applyCall = calls.find((call) => call.command === "mcp:apply");
-    expect(applyCall).toBeDefined();
-    expect(applyCall!.args).toEqual(["--only", "mcp:chrome-devtools", "--action", "disable"]);
-    expect(applyCall!.options?.runId).toMatch(/^gui-/);
-
-    const order = ["mcp:plan", "mcp:apply"].map((cmd) => calls.findIndex((call) => call.command === cmd));
-    expect(order[0]).toBeLessThan(order[1]);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("plan 被引擎拒绝时预览内展示错误且确认不可用，零写入", async () => {
+  it("apply 被引擎拒绝：既有执行 toast 报告失败，不重试、不开弹窗", async () => {
     const rejected = routes();
-    rejected["mcp:plan"] = makeEnvelope(
+    rejected["mcp:apply"] = makeEnvelope(
       {},
       {
-        command: "mcp.plan",
+        command: "mcp.apply",
         ok: false,
-        errors: [{ code: "PLAN_FAILED", element: null, message: "引擎拒绝生成计划" }],
+        errors: [{ code: "APPLY_FAILED", element: null, message: "目标被外部修改，拒绝覆盖" }],
       },
     );
+    const toastErrorSpy = vi.spyOn(toast, "error");
     const { calls } = renderWithEngine(<McpPage />, rejected);
 
     await userEvent.click(await screen.findByTestId("disable-server-mcp:chrome-devtools"));
-    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
-    expect(dialog).toHaveTextContent("引擎拒绝生成计划");
-    expect(screen.getByTestId("plan-confirm-button")).toBeDisabled();
-    expect(calls.some((call) => call.command === "mcp:apply")).toBe(false);
+
+    await waitFor(() => expect(toastErrorSpy).toHaveBeenCalled());
+    expect(toastErrorSpy).toHaveBeenCalledWith(expect.stringContaining("目标被外部修改，拒绝覆盖"));
+    const applyCalls = calls.filter((call) => call.command === "mcp:apply");
+    expect(applyCalls).toHaveLength(1);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

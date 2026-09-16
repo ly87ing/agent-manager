@@ -64,44 +64,7 @@ export function createFakeEngineClient(
       if (!route) {
         throw new EngineBridgeError({ kind: "unknown_command", message: `测试未注册命令路由: ${command}` });
       }
-      const envelope = typeof route === "function" ? await route(args) : structuredClone(route);
-      if (command.endsWith(":plan") && args.includes("--only")) {
-        const onlyList: string[] = [];
-        for (let i = 0; i < args.length; i++) {
-          if (args[i] === "--only" && i + 1 < args.length) {
-            onlyList.push(args[i + 1]);
-          }
-        }
-        const agentIdx = args.indexOf("--agent");
-        const agent = agentIdx !== -1 ? args[agentIdx + 1] : null;
-        const data = envelope.data as { actions?: Array<Record<string, unknown>>; summary?: Record<string, number> };
-        if (data && Array.isArray(data.actions)) {
-          data.actions = data.actions.filter((act) =>
-            onlyList.some((o) => {
-              const el = act.element as string;
-              if (el === o) return true;
-              if (typeof el === "string") {
-                if (el.endsWith(`:${o}`) || el.startsWith(`${o}/`) || el.replace(/^[^:]+:/, "") === o) return true;
-              }
-              return false;
-            })
-          );
-          if (agent && command === "skills:plan") {
-            data.actions = data.actions.filter((act) =>
-              typeof act.target === "string" ? act.target.includes(agent) : (typeof act.note === "string" && act.note.includes(agent))
-            );
-          }
-          if (data.summary) {
-            const summary: Record<string, number> = { read: 0, "write-local": 0, "exec-local": 0, network: 0, "install-remove": 0 };
-            for (const act of data.actions) {
-              const risk = act.risk as string;
-              if (risk in summary) summary[risk]++;
-            }
-            data.summary = summary;
-          }
-        }
-      }
-      return envelope;
+      return typeof route === "function" ? await route(args) : structuredClone(route);
     },
   };
 }

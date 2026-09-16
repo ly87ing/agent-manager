@@ -16,23 +16,17 @@ use crate::native::{Context, Request};
 use crate::store;
 
 pub fn apply(ctx: &Context, req: &Request) -> Result<Value> {
+    // 参数严格校验是所有写路径的第一步：--dry-run 已退役，一律拒绝。
+    if req.flag("--dry-run") {
+        bail!("skills:apply 已退役 --dry-run，拒绝该参数（执行前请以 skills:status 确认状态）");
+    }
     let only = req
         .value("--only")
         .ok_or_else(|| anyhow!("缺少 --only 参数"))?;
     let action = req
         .value("--action")
         .ok_or_else(|| anyhow!("缺少 --action 参数"))?;
-    let dry_run = req.flag("--dry-run");
     let target = parse_only(only)?;
-
-    if dry_run {
-        return Ok(json!({
-            "domain": "skills",
-            "dry_run": true,
-            "steps": [],
-            "skipped": [only],
-        }));
-    }
 
     let result = (|| -> Result<Value> {
         let meta = load_metadata(ctx)?;
@@ -72,7 +66,6 @@ pub fn apply(ctx: &Context, req: &Request) -> Result<Value> {
 
         Ok(json!({
             "domain": "skills",
-            "dry_run": false,
             "steps": [{"name": format!("skills:{} {}", action, only), "ok": true, "exit_code": 0}],
             "skipped": [],
         }))

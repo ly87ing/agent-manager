@@ -14,19 +14,15 @@
       "type": "string"
     },
     "command": {
-      "description": "Command that produced this envelope, e.g. 'mcp.plan' or 'system.audit'.",
+      "description": "Command that produced this envelope, e.g. 'mcp.apply' or 'system.audit'.",
       "type": "string"
     },
     "mode": {
       "description": "Runtime mode flags interpreted uniformly by the native engine.",
       "type": "object",
-      "required": ["dry_run", "offline"],
+      "required": ["offline"],
       "additionalProperties": false,
       "properties": {
-        "dry_run": {
-          "description": "true when the run only previews changes.",
-          "type": "boolean"
-        },
         "offline": {
           "description": "true when the run must not touch the network.",
           "type": "boolean"

@@ -16,8 +16,8 @@ describe("useEngineQuery 请求缓存键", () => {
     });
 
     function Probe() {
-      const first = useEngineQuery<{ value: string }>("mcp:plan", ["--only", "first"]);
-      const second = useEngineQuery<{ value: string }>("mcp:plan", ["--only", "second"]);
+      const first = useEngineQuery<{ value: string }>("mcp:status", ["--only", "first"]);
+      const second = useEngineQuery<{ value: string }>("mcp:status", ["--only", "second"]);
       return (
         <>
           <output data-testid="first-result">{first.data?.data.value ?? "pending"}</output>
@@ -34,8 +34,8 @@ describe("useEngineQuery 请求缓存键", () => {
 
     await waitFor(() => expect(calls).toHaveLength(2));
     expect(calls).toEqual([
-      { command: "mcp:plan", args: ["--only", "first"] },
-      { command: "mcp:plan", args: ["--only", "second"] },
+      { command: "mcp:status", args: ["--only", "first"] },
+      { command: "mcp:status", args: ["--only", "second"] },
     ]);
     expect(await screen.findByTestId("first-result")).toHaveTextContent("--only first");
     expect(await screen.findByTestId("second-result")).toHaveTextContent("--only second");

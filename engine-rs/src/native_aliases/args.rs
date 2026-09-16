@@ -1,6 +1,6 @@
 //! Aliases 命令的严格参数解析：与 hooks 域同一契约。解析失败固定为可
 //! downcast 的 UsageError（dispatch 映射 USAGE_ERROR），消息只描述参数
-//! 种类，不回显未知 token/值。
+//! 种类，不回显未知 token/值。--dry-run 已退役，一律作为不支持的选项拒绝。
 
 use anyhow::Result;
 
@@ -21,8 +21,6 @@ impl std::error::Error for UsageError {}
 
 pub(crate) struct AliasArgs {
     pub only: Vec<String>,
-    pub dry_run: bool,
-    pub offline: bool,
 }
 
 fn usage(message: &str) -> anyhow::Error {
@@ -41,10 +39,9 @@ fn normalize_only(selected: &[String]) -> Vec<String> {
         .collect()
 }
 
-fn parse_args(req: &Request, allow_only: bool, allow_dry_run: bool) -> Result<AliasArgs> {
+fn parse_args(req: &Request, allow_only: bool) -> Result<AliasArgs> {
     let mut selected: Vec<String> = Vec::new();
-    let mut dry_run = false;
-    let mut offline = false;
+    let mut offline_seen = false;
 
     let mut iter = req.args.iter();
     while let Some(arg) = iter.next() {
@@ -66,17 +63,11 @@ fn parse_args(req: &Request, allow_only: bool, allow_dry_run: bool) -> Result<Al
                 }
                 selected.push(value.clone());
             }
-            "--dry-run" if allow_dry_run => {
-                if dry_run {
-                    return Err(usage("参数错误: --dry-run 重复"));
-                }
-                dry_run = true;
-            }
             "--offline" => {
-                if offline {
+                if offline_seen {
                     return Err(usage("参数错误: --offline 重复"));
                 }
-                offline = true;
+                offline_seen = true;
             }
             other if other.starts_with("--") => {
                 return Err(usage("参数错误: 存在不支持的选项"));
@@ -95,24 +86,16 @@ fn parse_args(req: &Request, allow_only: bool, allow_dry_run: bool) -> Result<Al
     } else {
         normalize_only(&selected)
     };
-    Ok(AliasArgs {
-        only,
-        dry_run,
-        offline,
-    })
+    Ok(AliasArgs { only })
 }
 
 /// aliases:status —— 只接受可选且最多一次 --offline。
 pub(crate) fn parse_status_args(req: &Request) -> Result<AliasArgs> {
-    parse_args(req, false, false)
+    parse_args(req, false)
 }
 
-/// aliases:plan —— --only（零或多个）+ 可选最多一次 --offline，不接受 --dry-run。
-pub(crate) fn parse_plan_args(req: &Request) -> Result<AliasArgs> {
-    parse_args(req, true, false)
-}
-
-/// aliases:apply —— 同 plan，另接受可选最多一次 --dry-run。
+/// aliases:apply —— --only（零或多个）+ 可选最多一次 --offline；--dry-run
+/// 与其余未知选项一样被拒绝。
 pub(crate) fn parse_apply_args(req: &Request) -> Result<AliasArgs> {
-    parse_args(req, true, true)
+    parse_args(req, true)
 }

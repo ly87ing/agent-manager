@@ -20,7 +20,7 @@ const envelopeSchema = z
     contract: z.literal(CONTRACT_ID),
     run_id: z.string(),
     command: z.string(),
-    mode: z.object({ dry_run: z.boolean(), offline: z.boolean() }).strict(),
+    mode: z.object({ offline: z.boolean() }).strict(),
     lock: z.object({ held: z.boolean(), pid: z.number().nullable() }).strict(),
     log_file: z.string().nullable(),
     ok: z.boolean(),

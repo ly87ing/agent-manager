@@ -62,13 +62,12 @@ fn count_rows(ctx: &Context, sql: &str) -> i64 {
 }
 
 #[test]
-fn status_and_plan_succeed_on_fresh_context_without_creating_anything() {
+fn status_succeeds_on_fresh_context_without_creating_anything() {
     let (base, ctx) = temp_ctx("fresh");
     let env = execute(&ctx, &request("rules:status", &["--offline"]));
     assert!(env.ok, "{:?}", env.errors);
     assert_eq!(env.command, "rules.status");
     assert!(env.mode.offline);
-    assert!(!env.mode.dry_run);
     assert!(!env.lock.held);
     let elements = env.data["elements"].as_array().unwrap();
     assert_eq!(elements.len(), 2);
@@ -77,17 +76,8 @@ fn status_and_plan_succeed_on_fresh_context_without_creating_anything() {
     assert_eq!(elements[0]["state"], "missing");
     assert_eq!(elements[1]["state"], "missing");
 
-    let env = execute(&ctx, &request("rules:plan", &[]));
-    assert!(env.ok, "{:?}", env.errors);
-    assert!(!env.mode.offline);
-    let actions = env.data["actions"].as_array().unwrap();
-    assert_eq!(actions.len(), 2);
-    assert_eq!(actions[0]["element"], "rules:codex_global");
-    assert_eq!(actions[1]["element"], "rules:claude_global");
-    assert_eq!(env.data["summary"]["write-local"], 2);
-
-    assert!(!ctx.data_dir.exists(), "status/plan 不得创建 data_dir");
-    assert!(!ctx.home_dir.exists(), "status/plan 不得创建 home_dir");
+    assert!(!ctx.data_dir.exists(), "status 不得创建 data_dir");
+    assert!(!ctx.home_dir.exists(), "status 不得创建 home_dir");
     let _ = std::fs::remove_dir_all(&base);
 }
 
@@ -102,15 +92,22 @@ fn dot_command_form_is_normalized() {
 }
 
 #[test]
-fn apply_dry_run_holds_no_lock_and_creates_nothing() {
+fn apply_dry_run_is_rejected_without_lock_db_or_target_writes() {
     let (base, ctx) = temp_ctx("dryrun");
     let env = execute(&ctx, &request("rules:apply", &["--dry-run"]));
-    assert!(env.ok, "{:?}", env.errors);
-    assert!(env.mode.dry_run);
-    assert!(!env.lock.held);
-    assert_eq!(env.data["dry_run"], true);
-    assert!(!ctx.data_dir.exists());
-    assert!(!ctx.home_dir.exists());
+    assert!(!env.ok, "--dry-run 必须以参数错误拒绝: {:?}", env.data);
+    assert_eq!(env.errors[0].code, "RULE_ERROR");
+    assert!(env.errors[0].message.contains("参数错误"));
+    assert!(!env.lock.held, "被拒绝的 apply 不得持锁");
+    assert!(
+        !store::db_path(&ctx).exists(),
+        "拒绝路径不得创建 DB（诊断日志不算 DB）"
+    );
+    assert!(
+        !ctx.data_dir.join("agent-manager.apply.lock").exists(),
+        "拒绝路径不得创建 apply lock"
+    );
+    assert!(!ctx.home_dir.exists(), "拒绝路径不得写目标");
     let _ = std::fs::remove_dir_all(&base);
 }
 
@@ -262,29 +259,41 @@ fn invalid_args_return_rule_error_without_leaking_marker() {
 }
 
 #[test]
-fn plan_with_selected_unmanaged_fails_closed_without_writes() {
+fn apply_with_selected_unmanaged_fails_closed_without_writes() {
     let (base, ctx) = temp_ctx("unmanaged");
     std::fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
     std::fs::write(ctx.home_dir.join(".codex/AGENTS.md"), "external\n").unwrap();
 
-    let env = execute(&ctx, &request("rules:plan", &[]));
+    let env = execute(&ctx, &request("rules:apply", &[]));
     assert!(!env.ok);
     assert_eq!(env.errors[0].code, "RULE_ERROR");
-    assert!(env.data["actions"]
-        .as_array()
-        .map_or(true, |a| a.is_empty()));
-    assert!(!ctx.data_dir.exists(), "plan 失败不得创建 data_dir");
+    assert!(env.errors[0].message.contains("preflight 拒绝"));
+    assert!(!env.lock.held);
+    assert!(
+        !store::db_path(&ctx).exists(),
+        "preflight 失败不得创建 DB（诊断日志不算 DB）"
+    );
+    assert!(!ctx.data_dir.join("agent-manager.apply.lock").exists());
     assert_eq!(
         std::fs::read(ctx.home_dir.join(".codex/AGENTS.md")).unwrap(),
         b"external\n"
     );
 
-    // 未选中的 unmanaged 不阻塞：--only claude 仍给出单个动作。
+    // 未选中的 unmanaged 不阻塞：--only claude 真实 apply 写入单个目标。
     let env = execute(
         &ctx,
-        &request("rules:plan", &["--only", "rules:claude_global"]),
+        &request("rules:apply", &["--only", "rules:claude_global"]),
     );
     assert!(env.ok, "{:?}", env.errors);
-    assert_eq!(env.data["actions"].as_array().unwrap().len(), 1);
+    assert_eq!(env.data["steps"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        env.data["steps"][0]["name"],
+        "rules:sync rules:claude_global"
+    );
+    assert_eq!(
+        std::fs::read(ctx.home_dir.join(".codex/AGENTS.md")).unwrap(),
+        b"external\n",
+        "未选中的外部文件必须原样保留"
+    );
     let _ = std::fs::remove_dir_all(&base);
 }

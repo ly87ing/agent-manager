@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Check, ChevronDown, ChevronRight, Download, RefreshCw, Sparkles, Trash2, X } from "lucide-react";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { DriftExplanationPanel } from "../components/DriftExplanationPanel";
-import type { DriftPlanRequest } from "../components/DriftExplanationPanel";
 import { DefinitionFormDialog } from "../components/DefinitionFormDialog";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { ErrorPanel } from "../components/ErrorPanel";
@@ -11,7 +11,7 @@ import { StateBadge } from "../components/StateBadge";
 import type { ElementAction, EngineElement, PolicyData, StatusData } from "../lib/contract";
 import type { AgentsObserved, AgentsPolicy, AgentsSpec } from "../lib/observed";
 import { useEngineQuery, useOfflineMode } from "../lib/queries";
-import { useExecuteApply, usePlanPreview } from "../lib/usePlanPreview";
+import { useDirectApply } from "../lib/useDirectApply";
 import { cn } from "../lib/utils";
 
 /** agents 动作按钮文案/样式（离线可用性由 actions[].offline_ok 驱动，引擎是事实源）。 */
@@ -32,13 +32,6 @@ const PROVIDER_CLASS_META: Record<ProviderBucket, { label: string; className: st
   unsupported: { label: "不可接管", className: "border-zinc-200 bg-zinc-100 text-zinc-500" },
 };
 
-function detailPlanRequest(element: EngineElement): DriftPlanRequest | null {
-  const action = ["upgrade", "install"].find((id) => element.actions.some((item) => item.id === id));
-  return action
-    ? { command: "agents:plan", args: ["--only", element.id, "--action", action] }
-    : null;
-}
-
 function PolicyChip({ label, value }: { label: string; value: boolean | undefined }) {
   return (
     <span className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-xs text-slate-600">
@@ -56,17 +49,18 @@ function AgentCard({
   element,
   onEdit,
   onRemove,
+  onRequestUninstall,
   onManageSkills,
 }: {
   element: EngineElement;
   onEdit: () => void;
   onRemove: () => void;
+  onRequestUninstall: () => void;
   onManageSkills?: (agentId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const offline = useOfflineMode();
-  const preview = usePlanPreview();
-  const executeApply = useExecuteApply();
+  const directApply = useDirectApply();
   const spec = element.spec as AgentsSpec;
   const policy = element.policy as AgentsPolicy;
   const observed = element.observed as AgentsObserved;
@@ -75,21 +69,17 @@ function AgentCard({
   const version = installed ? (element.freshness.current ?? "已安装（还没检查过版本）") : "未安装";
   const name = spec.display_name ?? element.id;
 
-  /** 显式动作 → plan 预览（带 --action）→ agents:apply；预览/取消零策略写入。 */
-  const openAction = (action: ElementAction) => {
-    const isDestructive = action.id === "uninstall" || action.id === "install";
+  /** 显式动作点击直接 agents:apply（带精确 --only/--action）；uninstall 需先经独立 ConfirmModal。 */
+  const runAction = (action: ElementAction) => {
+    if (action.id === "uninstall") {
+      onRequestUninstall();
+      return;
+    }
     const label = ACTION_META[action.id]?.label ?? action.id;
-    preview.open({
-      title: `${label} ${name}`,
-      subtitle: "仅针对此助手执行操作；命令以你的权限运行，结果不能自动撤销。",
-      planCommands: [{ command: "agents:plan", args: ["--only", element.id, "--action", action.id] }],
-      requireConfirmText: isDestructive ? element.id : undefined,
-      confirmLabel: label,
-      execute: executeApply({
-        command: "agents:apply",
-        label: `${label} ${name}`,
-        extraArgs: ["--only", element.id, "--action", action.id, ...(action.id === "uninstall" ? ["--allow-uninstall"] : [])],
-      }),
+    void directApply.apply({
+      command: "agents:apply",
+      label: `${label} ${name}`,
+      args: ["--only", element.id, "--action", action.id],
     });
   };
 
@@ -184,8 +174,8 @@ function AgentCard({
               type="button"
               data-testid={`action-${action.id}-${element.id}`}
               disabled={disabled}
-              title={disabled ? "离线模式下不可用（需要联网）" : `${meta.label}（会先预览将要执行的操作）`}
-              onClick={() => openAction(action)}
+              title={disabled ? "离线模式下不可用（需要联网）" : `${meta.label}：直接执行，命令以你的权限运行，结果不能自动撤销`}
+              onClick={() => runAction(action)}
               className={cn(
                 "inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs",
                 disabled ? "cursor-not-allowed border-slate-200 text-slate-300" : meta.className,
@@ -206,8 +196,7 @@ function AgentCard({
           {expanded ? "收起同步详情" : "展开同步详情"}
         </button>
       </div>
-      {expanded && <div className="mt-2"><DriftExplanationPanel element={element} planRequest={detailPlanRequest(element)} /></div>}
-      {preview.modal}
+      {expanded && <div className="mt-2"><DriftExplanationPanel element={element} /></div>}
     </section>
   );
 }
@@ -220,14 +209,18 @@ export default function AgentsPage({
   const query = useEngineQuery<StatusData>("agents:status");
   const policyQuery = useEngineQuery<PolicyData>("policy:get");
   const definitionOps = useDefinitionOps({ section: "agents", domain: "agents" });
+  const directApply = useDirectApply();
   const [form, setForm] = useState<EngineElement | "new" | null>(null);
+  const [pendingUninstall, setPendingUninstall] = useState<EngineElement | null>(null);
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="agents:status 调用失败" error={query.error} />;
 
   const elements = query.data.data.elements;
+  const uninstallElement = pendingUninstall;
+  const uninstallName = uninstallElement ? (uninstallElement.spec as AgentsSpec).display_name ?? uninstallElement.id : "";
   return (
     <div className="space-y-4">
-      <PageHeader title="助手" description="各 AI 助手的安装渠道、版本与官方最新版对比。安装/升级/卸载都会先预览再执行。" />
+      <PageHeader title="助手" description="各 AI 助手的安装渠道、版本与官方最新版对比。安装/升级点击后直接执行，卸载需确认。" />
       {query.data.errors.length > 0 && <ErrorPanel title="agents:status 错误" errors={query.data.errors} />}
       <div className="flex justify-end"><button type="button" onClick={() => setForm("new")} className="rounded-md bg-indigo-600 px-4 py-2 text-sm text-white">添加助手</button></div>
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -237,12 +230,33 @@ export default function AgentsPage({
             element={element}
             onEdit={() => setForm(element)}
             onRemove={() => definitionOps.requestRemove(element.id.replace(/^agents:/, ""), policyQuery.data?.data.layers ?? null)}
+            onRequestUninstall={() => setPendingUninstall(element)}
             onManageSkills={onManageSkills}
           />
         ))}
       </div>
-      {form && <DefinitionFormDialog existingNames={elements.map((element) => element.id.replace(/^agents:/, ""))} initial={form === "new" ? undefined : { name: form.id.replace(/^agents:/, ""), definition: form.spec }} onClose={() => setForm(null)} onSubmit={(name, definition) => { setForm(null); void definitionOps.saveAndApply({ name, definition, isNew: form === "new", elementId: `agents:${name}` }); }} />}
+      {form && <DefinitionFormDialog existingNames={elements.map((element) => element.id.replace(/^agents:/, ""))} initial={form === "new" ? undefined : { name: form.id.replace(/^agents:/, ""), definition: form.spec }} onClose={() => setForm(null)} onSubmit={(name, definition) => { setForm(null); void definitionOps.saveDefinition({ name, definition, isNew: form === "new" }); }} />}
       {definitionOps.modals}
+
+      {uninstallElement && (
+        <ConfirmModal
+          title={`卸载 ${uninstallName}`}
+          description="卸载将删除该助手在本工具管理下的安装与配置；命令以你的权限运行，结果不能自动撤销。"
+          risk="install-remove"
+          requireText={uninstallElement.id}
+          confirmLabel="确认卸载"
+          executing={directApply.executing}
+          onConfirm={() => {
+            void directApply.apply({
+              command: "agents:apply",
+              label: `卸载 ${uninstallName}`,
+              args: ["--only", uninstallElement.id, "--action", "uninstall", "--allow-uninstall"],
+            });
+            setPendingUninstall(null);
+          }}
+          onClose={() => setPendingUninstall(null)}
+        />
+      )}
     </div>
   );
 }

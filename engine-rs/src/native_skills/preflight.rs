@@ -12,7 +12,13 @@ use super::status::{load_metadata, DomainMetadata};
 use super::{CollectionDef, COLLECTION_ACTIONS, SKILL_ACTIONS};
 use crate::native::{Context, Request};
 
-pub fn preflight_apply(ctx: &Context, req: &Request) -> Result<bool> {
+/// 锁前预检：参数严格校验（含已退役的 --dry-run 拒绝）+ 纯读状态校验。
+/// Ok(()) 表示合法 apply（execute 稍后必须取得全局 apply lock）；参数无效或
+/// 状态阻塞即 Err。无效/阻塞预检不创建 data/home/DB/表/文件。
+pub fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
+    if req.flag("--dry-run") {
+        bail!("skills:apply 已退役 --dry-run，拒绝该参数（执行前请以 skills:status 确认状态）");
+    }
     let only = req
         .value("--only")
         .ok_or_else(|| anyhow!("缺少 --only 参数"))?;
@@ -73,7 +79,7 @@ pub fn preflight_apply(ctx: &Context, req: &Request) -> Result<bool> {
         None => preflight_coll_action(ctx, req, coll, &meta, &bases, &agent_targets, action)?,
     }
 
-    Ok(!req.flag("--dry-run"))
+    Ok(())
 }
 
 fn preflight_skill_action(

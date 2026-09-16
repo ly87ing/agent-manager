@@ -15,7 +15,7 @@ const SCAN_DIRS = ["components", "pages", "lib"];
 const BANNED = ["收敛", "漂移", "物化", "上游", "托管", "受管", "收件箱", "死链", "快照", "回滚", "策略", "探测", "占位符"];
 const BANNED_PATTERNS: [string, RegExp][] = [
   ...BANNED.map((word) => [word, new RegExp(word, "g")] as [string, RegExp]),
-  // dry-run 作为面向用户的文案禁用；引擎 CLI flag "--dry-run" 是机器接口，豁免。
+  // dry-run 作为面向用户的文案禁用；公共入口已退役，正则仅防用户可见文案回归。
   ["dry-run", /(?<![\w-])dry-run/g],
 ];
 

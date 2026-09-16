@@ -1,14 +1,10 @@
-import { useEngineQuery } from "../lib/queries";
-import type { EngineElement, PlanAction, PlanData } from "../lib/contract";
+import type { EngineElement } from "../lib/contract";
 import { agentCellsOf } from "../lib/observed";
-import { engineErrorMessage } from "../lib/engine";
-import { COPY, RISK_COPY } from "../lib/ui-copy";
 import { MatrixCell } from "./MatrixCell";
 
 /**
- * 结构化「不一致」解释视图（只读）。引擎不提供 before/after 文本 diff，
- * 本面板从现有 status/plan payload 组合：目标位置、各助手状态、
- * 将要执行的操作清单（op/类型/位置/改动前后内容指纹/说明）。
+ * 结构化「不一致」解释视图（只读，纯 status/observed 展示）：
+ * 目标位置与各助手状态；引擎不提供 before/after 文本 diff。
  */
 
 export function shortenDigest(digest: string | null): string {
@@ -17,71 +13,31 @@ export function shortenDigest(digest: string | null): string {
   return `${digest.slice(0, 16)}…${digest.slice(-6)}`;
 }
 
-function PlanActionTable({ actions }: { actions: PlanAction[] }) {
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-left text-xs">
-        <thead>
-          <tr className="border-b border-slate-200 text-slate-500">
-            <th className="py-1.5 pr-3 font-medium">操作</th>
-            <th className="py-1.5 pr-3 font-medium">类型</th>
-            <th className="py-1.5 pr-3 font-medium">位置</th>
-            <th className="py-1.5 pr-3 font-medium">内容指纹（前 → 后）</th>
-            <th className="py-1.5 font-medium">说明</th>
-          </tr>
-        </thead>
-        <tbody>
-          {actions.map((action, index) => (
-            <tr key={`${action.op}-${action.target ?? action.cmd ?? index}`} className="border-b border-slate-100 last:border-0">
-              <td className="py-1.5 pr-3 font-mono">{action.op}</td>
-              <td className="py-1.5 pr-3">{RISK_COPY[action.risk]?.label ?? action.risk}</td>
-              <td className="max-w-56 truncate py-1.5 pr-3 font-mono" title={action.target ?? undefined}>
-                {action.target ?? action.cmd ?? "—"}
-              </td>
-              <td className="py-1.5 pr-3 font-mono text-slate-500">
-                {action.before_digest || action.after_digest
-                  ? `${shortenDigest(action.before_digest)} → ${shortenDigest(action.after_digest)}`
-                  : "—"}
-              </td>
-              <td className="py-1.5 text-slate-600">{action.note ?? "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-export interface DriftPlanRequest {
-  command: string;
-  args: string[];
+function collectTargets(element: EngineElement): string[] {
+  const cells = agentCellsOf(element);
+  const raw: string[] = [];
+  for (const [, cell] of Object.entries(cells)) {
+    if (cell.target) raw.push(cell.target);
+    if (cell.link_path) raw.push(cell.link_path);
+  }
+  const observed = element.observed as { target?: unknown };
+  if (typeof observed.target === "string") raw.push(observed.target);
+  const spec = element.spec as { target?: unknown };
+  if (typeof spec.target === "string") raw.push(spec.target);
+  return Array.from(new Set(raw.filter(Boolean)));
 }
 
 export function DriftExplanationPanel({
   element,
-  planRequest,
   cellKind,
 }: {
   element: EngineElement;
-  /** 明确的、已限定元素和动作的 plan 请求；null 表示没有安全的自动预览动作。 */
-  planRequest: DriftPlanRequest | null;
   /** per-agent 单元格词汇表；不传则纯文本渲染 state。 */
   cellKind?: "mcp" | "skills";
 }) {
-  const planQuery = useEngineQuery<PlanData>(planRequest?.command ?? "", planRequest?.args, {
-    enabled: planRequest !== null,
-  });
-  const allActions = planRequest ? planQuery.data?.data.actions ?? [] : [];
-  const actions = allActions.filter((action) => action.element === element.id);
-
   const cells = agentCellsOf(element);
   const cellEntries = Object.entries(cells);
-  const targets = Array.from(
-    new Set([
-      ...cellEntries.map(([, cell]) => cell.target ?? cell.link_path ?? "").filter(Boolean),
-      ...actions.map((action) => action.target ?? "").filter(Boolean),
-    ]),
-  );
+  const targets = collectTargets(element);
 
   return (
     <div data-testid="drift-panel" className="space-y-4 rounded-md border border-slate-200 bg-slate-50 p-4">
@@ -124,24 +80,6 @@ export function DriftExplanationPanel({
           </table>
         </div>
       )}
-
-      <div>
-        <h4 className="mb-1.5 text-xs font-semibold text-slate-500">
-          {COPY.planPreviewTitle}
-          {planRequest ? `（来自 ${planRequest.command} 的预览，只读）` : "（当前没有可安全预览的同步动作）"}
-        </h4>
-        {!planRequest ? (
-          <p className="text-xs text-slate-400">当前没有可安全预览的同步动作。</p>
-        ) : planQuery.isPending ? (
-          <p className="text-xs text-slate-400">正在计算将要执行的操作…</p>
-        ) : planQuery.isError ? (
-          <p className="text-xs text-red-600">预览加载失败:{engineErrorMessage(planQuery.error)}</p>
-        ) : actions.length > 0 ? (
-          <PlanActionTable actions={actions} />
-        ) : (
-          <p className="text-xs text-slate-400">没有需要执行的操作。</p>
-        )}
-      </div>
     </div>
   );
 }

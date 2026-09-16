@@ -6,18 +6,22 @@ import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import type { EngineElement, StatusData } from "../lib/contract";
 import { useEngineQuery } from "../lib/queries";
+import { useDirectApply } from "../lib/useDirectApply";
 import { useElementToggle } from "../lib/useElementToggle";
-import { useExecuteApply, usePlanPreview } from "../lib/usePlanPreview";
 
-/** Hooks 阻塞目标（检测到外部内容且无绑定记录等）：显式接管入口。 */
+/** Hooks 阻塞/非受管目标：仅在引擎给出了可安全接管的 actual_digest（string）时才显示显式接管入口。
+ * actual_digest=null 表示无效 JSON、路径/类型不安全等情形，前端不得提供接管按钮。 */
 function isBlockedHooksElement(element: EngineElement): boolean {
+  const observed = element.observed as { blocked_reason?: unknown; actual_digest?: unknown };
+  const hasDigest = typeof observed.actual_digest === "string";
+  if (!hasDigest) return false;
   if (element.state === "unmanaged-detected") return true;
-  return (element.observed as { blocked_reason?: unknown }).blocked_reason != null;
+  return observed.blocked_reason != null;
 }
 
 /**
- * 简单域的只读 + 收敛页（Aliases / Hooks）：元素表 + 「收敛此域」按钮
- * （plan 预览确认 → 域级 apply）。
+ * 简单域的只读 + 同步页（Aliases / Hooks）：元素表 + 「立即同步」按钮，
+ * 所有写操作点击直接 apply。
  */
 export default function DomainApplyPage({
   domain,
@@ -32,9 +36,9 @@ export default function DomainApplyPage({
   enableToggles?: boolean;
 }) {
   const query = useEngineQuery<StatusData>(`${domain}:status`);
-  const preview = usePlanPreview();
-  const executeApply = useExecuteApply();
-  const elementToggle = useElementToggle();
+  const directApply = useDirectApply();
+  const { toggle, executing: toggleExecuting } = useElementToggle();
+  const disabled = directApply.executing || toggleExecuting;
 
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title={`${domain}:status 调用失败`} error={query.error} />;
@@ -49,32 +53,24 @@ export default function DomainApplyPage({
 
   const elements = query.data.data.elements;
 
-  /** Hooks 阻塞目标的「接管原内容」入口：plan→confirm→apply 全程带 --allow-takeover。 */
+  /** Hooks 阻塞目标的「接管原内容」入口：一键直接带 --allow-takeover 执行 apply。 */
   const hooksTakeoverAction = (element: EngineElement) => {
     if (!isBlockedHooksElement(element)) return null;
     const wholeFile = (element.spec as { merge?: string }).merge === "whole-file";
-    const takeoverArgs = ["--only", element.id, "--allow-takeover"];
     return (
       <div className="flex max-w-xs flex-col items-end gap-1 text-right">
         <button
           type="button"
           data-testid={`takeover-${element.id}`}
+          disabled={disabled}
           onClick={() =>
-            preview.open({
-              title: `接管原内容 ${element.id}`,
-              subtitle: wholeFile
-                ? "整文件替换：目标文件现有内容将被整体替换，先把需要保留的 hook 并入来源定义。"
-                : "按签名合并：保留文件中的用户字段与你自己添加的 hook。",
-              planCommands: [{ command: "hooks:plan", args: takeoverArgs }],
-              confirmLabel: "接管并同步",
-              execute: executeApply({
-                command: "hooks:apply",
-                label: `接管原内容 ${element.id}`,
-                extraArgs: takeoverArgs,
-              }),
+            void directApply.apply({
+              command: "hooks:apply",
+              label: `接管原内容 ${element.id}`,
+              args: ["--only", element.id, "--allow-takeover"],
             })
           }
-          className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100"
+          className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-40"
         >
           接管原内容
         </button>
@@ -97,16 +93,9 @@ export default function DomainApplyPage({
         <button
           type="button"
           data-testid={`apply-${domain}-button`}
-          onClick={() =>
-            preview.open({
-              title: `同步${title}`,
-              subtitle: "先预览将要执行的操作；确认后按引擎计划执行。",
-              planCommands: [`${domain}:plan`],
-              confirmLabel: "立即同步",
-              execute: executeApply({ command: `${domain}:apply`, label: `同步${title}` }),
-            })
-          }
-          className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+          disabled={disabled}
+          onClick={() => void directApply.apply({ command: `${domain}:apply`, label: `同步${title}` })}
+          className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
         >
           <PlayCircle className="h-4 w-4" aria-hidden /> 立即同步
         </button>
@@ -127,8 +116,9 @@ export default function DomainApplyPage({
                         checked={enabled}
                         testId={`toggle-${element.id}`}
                         label={`${enabled ? "停用" : "启用"} ${shortName}`}
+                        disabled={disabled}
                         onChange={() =>
-                          void elementToggle.toggle({
+                          void toggle({
                             elementId: element.id,
                             enabledKey: `${domain}.${shortName}.enabled`,
                             enabled,
@@ -144,8 +134,6 @@ export default function DomainApplyPage({
         />
       </section>
 
-      {preview.modal}
-      {elementToggle.modal}
     </div>
   );
 }

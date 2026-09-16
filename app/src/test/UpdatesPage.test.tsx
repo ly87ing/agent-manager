@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { fireEvent, waitFor } from "@testing-library/react";
 import UpdatesPage from "../pages/UpdatesPage";
-import { makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePlanAction } from "./fixtures";
+import { makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 import type { Envelope } from "../lib/contract";
 
@@ -113,7 +114,7 @@ describe("UpdatesPage 更新中心", () => {
     expect(screen.getByTestId("reprobe-agents:a-behind")).toBeDisabled();
   });
 
-  it("全部更新：聚合多域落后项 plan 并预览，确认后按域顺序执行 apply", async () => {
+  it("全部更新：点击直接按域顺序执行各域 scoped apply（agents → mcp → skills），不取 plan、不开弹窗", async () => {
     const routes: Record<string, Envelope> = {
       ...statusRoutes(),
       "skills:status": makeEnvelope(
@@ -141,18 +142,6 @@ describe("UpdatesPage 更新中心", () => {
           ],
         },
         { command: "mcp.status" },
-      ),
-      "agents:plan": makeEnvelope(
-        { domain: "agents", actions: [makePlanAction({ element: "agents:a-behind" })], summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 } },
-        { command: "agents.plan" },
-      ),
-      "mcp:plan": makeEnvelope(
-        { domain: "mcp", actions: [makePlanAction({ element: "mcp:mcp-behind" })], summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 } },
-        { command: "mcp.plan" },
-      ),
-      "skills:plan": makeEnvelope(
-        { domain: "skills", actions: [makePlanAction({ element: "skill:agent-skills/behind-skill" })], summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 } },
-        { command: "skills.plan" },
       ),
       "agents:apply": makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }),
       "mcp:apply": makeEnvelope(makeApplyResult({ domain: "mcp" }), { command: "mcp.apply" }),
@@ -164,24 +153,22 @@ describe("UpdatesPage 更新中心", () => {
     expect(updateAllBtn).toHaveTextContent("全部更新（3）");
 
     await userEvent.click(updateAllBtn);
-    await screen.findByRole("dialog", { name: /全部更新/ });
-
-    const planCalls = calls.filter((c) => c.command.endsWith(":plan"));
-    expect(planCalls.map((c) => c.command)).toEqual(["agents:plan", "mcp:plan", "skills:plan"]);
-    expect(planCalls[0].args).toEqual(["--only", "agents:a-behind", "--action", "upgrade"]);
-    expect(planCalls[1].args).toEqual(["--only", "mcp:mcp-behind", "--action", "update"]);
-    expect(planCalls[2].args).toEqual(["--only", "skill:agent-skills/behind-skill", "--action", "update"]);
-
-    await userEvent.click(screen.getByTestId("plan-confirm-button"));
+    await waitFor(() => expect(calls.filter((c) => c.command.endsWith(":apply"))).toHaveLength(3));
 
     const applyCalls = calls.filter((c) => c.command.endsWith(":apply"));
     expect(applyCalls.map((c) => c.command)).toEqual(["agents:apply", "mcp:apply", "skills:apply"]);
     expect(applyCalls[0].args).toEqual(["--only", "agents:a-behind", "--action", "upgrade"]);
     expect(applyCalls[1].args).toEqual(["--only", "mcp:mcp-behind", "--action", "update"]);
     expect(applyCalls[2].args).toEqual(["--only", "skill:agent-skills/behind-skill", "--action", "update"]);
+    for (const call of applyCalls) {
+      expect(call.args).not.toContain("--dry-run");
+      expect(call.options?.runId).toMatch(/^gui-/);
+    }
+    expect(calls.some((c) => c.command.endsWith(":plan"))).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("全部更新：第二域执行失败时中断，不执行第三域", async () => {
+  it("全部更新：第二域执行失败时中断，不执行第三域（成功域与失败域均有执行 toast）", async () => {
     const routes: Record<string, Envelope> = {
       ...statusRoutes(),
       "skills:status": makeEnvelope(
@@ -209,18 +196,6 @@ describe("UpdatesPage 更新中心", () => {
           ],
         },
         { command: "mcp.status" },
-      ),
-      "agents:plan": makeEnvelope(
-        { domain: "agents", actions: [makePlanAction({ element: "agents:a-behind" })], summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 } },
-        { command: "agents.plan" },
-      ),
-      "mcp:plan": makeEnvelope(
-        { domain: "mcp", actions: [makePlanAction({ element: "mcp:mcp-behind" })], summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 } },
-        { command: "mcp.plan" },
-      ),
-      "skills:plan": makeEnvelope(
-        { domain: "skills", actions: [makePlanAction({ element: "skill:agent-skills/behind-skill" })], summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 } },
-        { command: "skills.plan" },
       ),
       "agents:apply": makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }),
       "mcp:apply": makeEnvelope(makeApplyResult({ domain: "mcp" }), {
@@ -234,52 +209,244 @@ describe("UpdatesPage 更新中心", () => {
     const { calls } = renderWithEngine(<UpdatesPage />, routes);
     const updateAllBtn = await screen.findByTestId("update-all-button");
     await userEvent.click(updateAllBtn);
-    await screen.findByRole("dialog", { name: /全部更新/ });
 
-    await userEvent.click(screen.getByTestId("plan-confirm-button"));
-
+    await waitFor(() => expect(calls.filter((c) => c.command.endsWith(":apply"))).toHaveLength(2));
     const applyCalls = calls.filter((c) => c.command.endsWith(":apply"));
     expect(applyCalls.map((c) => c.command)).toEqual(["agents:apply", "mcp:apply"]);
+    expect(calls.some((c) => c.command === "skills:apply")).toBe(false);
+    expect(calls.some((c) => c.command.endsWith(":plan"))).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("行内收敛：agents 带 --action upgrade，mcp/skills 带 --action update", async () => {
-    const routes: Record<string, Envelope> = {
+  it("行内更新：点击直接 apply，agents 带 --action upgrade，mcp/skills 带 --action update（带 run_id）", async () => {
+    let releaseAgents: (() => void) | null = null;
+    const routes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = {
       ...statusRoutes(),
-      "agents:plan": makeEnvelope(
-        { domain: "agents", actions: [makePlanAction({ element: "agents:a-behind", risk: "network" })], summary: { read: 0, "write-local": 0, "exec-local": 0, network: 1, "install-remove": 0 } },
-        { command: "agents.plan" },
-      ),
-      "mcp:plan": makeEnvelope(
-        { domain: "mcp", actions: [makePlanAction({ element: "mcp:b-unknown" })], summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 } },
-        { command: "mcp.plan" },
-      ),
-      "agents:apply": makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }),
+      "agents:apply": () =>
+        new Promise<Envelope>((resolve) => {
+          releaseAgents = () => resolve(makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }));
+        }),
       "mcp:apply": makeEnvelope(makeApplyResult({ domain: "mcp" }), { command: "mcp.apply" }),
     };
 
     const { calls } = renderWithEngine(<UpdatesPage />, routes);
 
-    // agents 行：behind → 更新此项，agents→upgrade；upgrade 为 network 风险，需勾选联网确认
+    // agents 行：behind → 更新此项，agents→upgrade
     await userEvent.click(await screen.findByTestId("update-agents:a-behind"));
-    await screen.findByRole("dialog", { name: /更新 agents:a-behind/ });
-    const agentPlan = calls.filter((c) => c.command === "agents:plan");
-    expect(agentPlan.map((c) => c.args)).toEqual([["--only", "agents:a-behind", "--action", "upgrade"]]);
-    await userEvent.click(screen.getByTestId("network-ack-checkbox"));
-    await userEvent.click(screen.getByTestId("plan-confirm-button"));
+    await waitFor(() => expect(calls.some((c) => c.command === "agents:apply")).toBe(true));
     const agentApply = calls.filter((c) => c.command === "agents:apply");
     expect(agentApply.map((c) => c.args)).toEqual([["--only", "agents:a-behind", "--action", "upgrade"]]);
+    expect(agentApply[0].options?.runId).toMatch(/^gui-/);
+
+    // 行内更新互斥：agents apply 在途期间 mcp 更新按钮禁用
+    expect(screen.getByTestId("update-mcp:b-unknown")).toBeDisabled();
+    releaseAgents!();
+    await waitFor(() => expect(screen.getByTestId("update-mcp:b-unknown")).toBeEnabled());
 
     // mcp 行：unknown → 更新此项，mcp→update
-    await userEvent.click(await screen.findByTestId("update-mcp:b-unknown"));
-    await screen.findByRole("dialog", { name: /更新 mcp:b-unknown/ });
-    const mcpPlan = calls.filter((c) => c.command === "mcp:plan");
-    expect(mcpPlan.map((c) => c.args)).toEqual([["--only", "mcp:b-unknown", "--action", "update"]]);
-    await userEvent.click(screen.getByTestId("plan-confirm-button"));
+    await userEvent.click(screen.getByTestId("update-mcp:b-unknown"));
+    await waitFor(() => expect(calls.some((c) => c.command === "mcp:apply")).toBe(true));
     const mcpApply = calls.filter((c) => c.command === "mcp:apply");
     expect(mcpApply.map((c) => c.args)).toEqual([["--only", "mcp:b-unknown", "--action", "update"]]);
+    expect(mcpApply[0].options?.runId).toMatch(/^gui-/);
+
+    expect(calls.some((c) => c.command.endsWith(":plan"))).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
 
     // skills 行（ahead）不出现更新按钮；not-applicable 行不进表
     expect(screen.queryByTestId("update-skill:c-ahead")).toBeNull();
     expect(screen.queryByTestId("update-mcp:x-na")).toBeNull();
+  });
+
+  it("行内更新连点 guard：同一行在途期间再点不触发第二次 apply", async () => {
+    let release: (() => void) | null = null;
+    const routes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = {
+      ...statusRoutes(),
+      "agents:apply": () =>
+        new Promise<Envelope>((resolve) => {
+          release = () => resolve(makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }));
+        }),
+    };
+
+    const { calls } = renderWithEngine(<UpdatesPage />, routes);
+    const updateBtn = await screen.findByTestId("update-agents:a-behind");
+
+    await userEvent.click(updateBtn);
+    await userEvent.click(updateBtn);
+    await userEvent.click(updateBtn);
+
+    await waitFor(() => expect(calls.some((c) => c.command === "agents:apply")).toBe(true));
+    expect(calls.filter((c) => c.command === "agents:apply")).toHaveLength(1);
+
+    release!();
+    await waitFor(() => expect(screen.getByTestId("update-agents:a-behind")).toBeEnabled());
+  });
+
+  it("批量更新期间所有行内更新按钮禁用", async () => {
+    let release: (() => void) | null = null;
+    const routes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = {
+      ...statusRoutes(),
+      "agents:apply": () =>
+        new Promise<Envelope>((resolve) => {
+          release = () => resolve(makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }));
+        }),
+    };
+
+    renderWithEngine(<UpdatesPage />, routes);
+    const updateAllBtn = await screen.findByTestId("update-all-button");
+    await userEvent.click(updateAllBtn);
+
+    expect(screen.getByTestId("update-agents:a-behind")).toBeDisabled();
+
+    release!();
+    await waitFor(() => expect(screen.getByTestId("update-agents:a-behind")).toBeEnabled());
+  });
+
+  it("批量更新同一 tick 双击只启动一批", async () => {
+    const routes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = {
+      ...statusRoutes(),
+      "agents:apply": () =>
+        new Promise<Envelope>((resolve) => {
+          setTimeout(() => resolve(makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" })), 10);
+        }),
+    };
+
+    const { calls } = renderWithEngine(<UpdatesPage />, routes);
+    const updateAllBtn = await screen.findByTestId("update-all-button");
+
+    fireEvent.click(updateAllBtn);
+    fireEvent.click(updateAllBtn);
+
+    await waitFor(() => expect(calls.filter((c) => c.command.endsWith(":apply"))).toHaveLength(1));
+    expect(calls.filter((c) => c.command === "agents:apply")).toHaveLength(1);
+    expect(calls.some((c) => c.command.endsWith(":plan"))).toBe(false);
+  });
+
+  it("行更新启动后同一 tick 批量更新不得进入", async () => {
+    const routes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = {
+      ...statusRoutes(),
+      "agents:status": makeEnvelope(
+        {
+          domain: "agents",
+          elements: [
+            makeElement({
+              id: "agents:a-behind",
+              domain: "agents",
+              freshness: makeFreshness({ state: "behind", current: "1.0.0", upstream: "2.0.0", checked_at: CHECKED, probe: "npm-view", cache_age_sec: 10 }),
+            }),
+          ],
+        },
+        { command: "agents.status" },
+      ),
+      "mcp:status": makeEnvelope(
+        {
+          domain: "mcp",
+          elements: [
+            makeElement({
+              id: "mcp:mcp-behind",
+              domain: "mcp",
+              freshness: makeFreshness({ state: "behind", current: "0.1.0", upstream: "0.2.0" }),
+            }),
+          ],
+        },
+        { command: "mcp.status" },
+      ),
+      "mcp:apply": () =>
+        new Promise<Envelope>((resolve) => {
+          setTimeout(() => resolve(makeEnvelope(makeApplyResult({ domain: "mcp" }), { command: "mcp.apply" })), 10);
+        }),
+    };
+
+    const { calls } = renderWithEngine(<UpdatesPage />, routes);
+    const rowBtn = await screen.findByTestId("update-mcp:mcp-behind");
+    const batchBtn = screen.getByTestId("update-all-button");
+
+    fireEvent.click(rowBtn);
+    fireEvent.click(batchBtn);
+
+    await waitFor(() => expect(calls.some((c) => c.command === "mcp:apply")).toBe(true));
+    expect(calls.filter((c) => c.command === "mcp:apply")).toHaveLength(1);
+    expect(calls.filter((c) => c.command === "agents:apply")).toHaveLength(0);
+    expect(calls.some((c) => c.command.endsWith(":plan"))).toBe(false);
+  });
+
+  it("批量更新占位后同一 tick 任意行更新不得进入", async () => {
+    const routes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = {
+      ...statusRoutes(),
+      "agents:status": makeEnvelope(
+        {
+          domain: "agents",
+          elements: [
+            makeElement({
+              id: "agents:a-behind",
+              domain: "agents",
+              freshness: makeFreshness({ state: "behind", current: "1.0.0", upstream: "2.0.0", checked_at: CHECKED, probe: "npm-view", cache_age_sec: 10 }),
+            }),
+            makeElement({
+              id: "agents:a2-behind",
+              domain: "agents",
+              freshness: makeFreshness({ state: "behind", current: "1.1.0", upstream: "2.0.0", checked_at: CHECKED, probe: "npm-view", cache_age_sec: 10 }),
+            }),
+          ],
+        },
+        { command: "agents.status" },
+      ),
+      "agents:apply": () =>
+        new Promise<Envelope>((resolve) => {
+          setTimeout(() => resolve(makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" })), 10);
+        }),
+    };
+
+    const { calls } = renderWithEngine(<UpdatesPage />, routes);
+    const batchBtn = await screen.findByTestId("update-all-button");
+    const rowBtn = screen.getByTestId("update-agents:a2-behind");
+
+    fireEvent.click(batchBtn);
+    fireEvent.click(rowBtn);
+
+    await waitFor(() => expect(calls.some((c) => c.command === "agents:apply")).toBe(true));
+    const applyCalls = calls.filter((c) => c.command === "agents:apply");
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0].args).toEqual(["--only", "agents:a-behind", "--only", "agents:a2-behind", "--action", "upgrade"]);
+    expect(calls.some((c) => c.command.endsWith(":plan"))).toBe(false);
+  });
+
+  it("任一行在途时同一 tick 另一行不得进入 directApply", async () => {
+    const routes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = {
+      ...statusRoutes(),
+      "agents:status": makeEnvelope(
+        {
+          domain: "agents",
+          elements: [
+            makeElement({
+              id: "agents:a-behind",
+              domain: "agents",
+              freshness: makeFreshness({ state: "behind", current: "1.0.0", upstream: "2.0.0", checked_at: CHECKED, probe: "npm-view", cache_age_sec: 10 }),
+            }),
+            makeElement({
+              id: "agents:a2-behind",
+              domain: "agents",
+              freshness: makeFreshness({ state: "behind", current: "1.1.0", upstream: "2.0.0", checked_at: CHECKED, probe: "npm-view", cache_age_sec: 10 }),
+            }),
+          ],
+        },
+        { command: "agents.status" },
+      ),
+      "agents:apply": () =>
+        new Promise<Envelope>((resolve) => {
+          setTimeout(() => resolve(makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" })), 10);
+        }),
+    };
+
+    const { calls } = renderWithEngine(<UpdatesPage />, routes);
+    const row1 = await screen.findByTestId("update-agents:a-behind");
+    const row2 = screen.getByTestId("update-agents:a2-behind");
+
+    fireEvent.click(row1);
+    fireEvent.click(row2);
+
+    await waitFor(() => expect(calls.filter((c) => c.command === "agents:apply")).toHaveLength(1));
+    expect(calls.filter((c) => c.command === "agents:apply")[0].args).toEqual(["--only", "agents:a-behind", "--action", "upgrade"]);
+    expect(calls.some((c) => c.command.endsWith(":plan"))).toBe(false);
   });
 });

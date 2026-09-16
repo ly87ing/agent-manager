@@ -102,10 +102,11 @@ fn read(ctx: &Context, rel: &str) -> Option<Vec<u8>> {
     std::fs::read(ctx.home_dir.join(rel)).ok()
 }
 
-// 反例 1 + 8 前半：缺库时 status/plan/dry-run 不创建 DB、不写目标文件；
-// 默认种子 4 条 alias → 两目标 not-materialized，plan 产出两条 write-file。
+// 反例 1 + 8 前半：缺库时 status 不创建 DB、不写目标文件；--dry-run 已退役，
+// apply 一律以 USAGE_ERROR 拒绝且零写。默认种子 4 条 alias → 两目标
+// not-materialized（动作形态见私有 preflight 单测）。
 #[test]
-fn fresh_status_plan_dry_run_are_zero_write_and_not_materialized() {
+fn fresh_status_is_zero_write_not_materialized_and_dry_run_rejected() {
     let (base, ctx) = temp_ctx("fresh");
 
     let env = execute(&ctx, &request("aliases:status", &["--offline"]));
@@ -135,45 +136,21 @@ fn fresh_status_plan_dry_run_are_zero_write_and_not_materialized() {
         );
     }
 
-    let env = execute(&ctx, &request("aliases:plan", &[]));
-    assert!(env.ok, "{:?}", env.errors);
-    let actions = env.data["actions"].as_array().unwrap();
-    assert_eq!(actions.len(), 2);
-    for action in actions {
-        assert_eq!(action["op"], "write-file");
-        assert_eq!(action["risk"], "write-local");
-        assert_eq!(action["before_digest"], Value::Null);
-        assert!(action["after_digest"].as_str().is_some());
-        assert_eq!(action["backup_path"], Value::Null);
-        assert_eq!(action["cmd"], Value::Null);
-    }
-    assert_eq!(env.data["summary"]["write-local"], 2);
-    for key in [
-        "read",
-        "write-local",
-        "exec-local",
-        "network",
-        "install-remove",
-    ] {
-        assert!(env.data["summary"].get(key).is_some(), "summary 缺 {key}");
-    }
-
     let env = execute(&ctx, &request("aliases:apply", &["--dry-run"]));
-    assert!(env.ok, "{:?}", env.errors);
-    assert!(env.mode.dry_run);
-    assert!(!env.lock.held, "dry-run 不得取锁");
-    assert_eq!(env.data["dry_run"], true);
-    assert_eq!(env.data["steps"].as_array().unwrap().len(), 0);
-    assert_eq!(
-        env.data["skipped"],
-        json!(["aliases:zshrc", "aliases:zprofile"])
-    );
+    assert!(!env.ok, "--dry-run 必须以参数错误拒绝: {:?}", env.data);
+    assert_eq!(env.errors[0].code, "USAGE_ERROR");
+    assert!(env.errors[0].message.contains("参数错误"));
+    assert!(!env.lock.held, "被拒绝的 apply 不得持锁");
 
     assert!(
-        !ctx.data_dir.exists(),
-        "status/plan/dry-run 不得创建数据目录"
+        !store::db_path(&ctx).exists(),
+        "status/拒绝路径不得创建 DB（诊断日志不算 DB）"
     );
-    assert!(!ctx.home_dir.exists(), "status/plan/dry-run 不得写目标文件");
+    assert!(
+        !ctx.data_dir.join("agent-manager.apply.lock").exists(),
+        "拒绝路径不得创建 apply lock"
+    );
+    assert!(!ctx.home_dir.exists(), "status/拒绝路径不得写目标文件");
     let _ = std::fs::remove_dir_all(&base);
 }
 
@@ -243,7 +220,7 @@ fn apply_creates_block_from_scratch_with_audit() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
-// 反例 2：绑定后外部追加内容 → status drifted + blocked_reason，plan/apply
+// 反例 2：绑定后外部追加内容 → status drifted + blocked_reason，apply
 // fail-closed 拒绝且文件字节不变；绑定与既有审计保留。
 #[test]
 fn external_append_after_apply_is_rejected_fail_closed() {
@@ -271,10 +248,6 @@ fn external_append_after_apply_is_rejected_fail_closed() {
         element(&env, "aliases:zprofile")["state"],
         "not-materialized"
     );
-
-    let env = execute(&ctx, &request("aliases:plan", &["--only", "aliases:zshrc"]));
-    assert!(!env.ok, "plan 对阻塞目标必须 fail-closed");
-    assert_eq!(env.errors[0].code, "ALIAS_ERROR");
 
     let audit_before = count_rows(&ctx, "SELECT COUNT(*) FROM operation_logs");
     let env = execute(
@@ -409,7 +382,7 @@ fn only_zshrc_leaves_zprofile_untouched() {
 }
 
 // 反例 6：非法 alias 名（空格/引号注入）与疑似凭据值被 sources:set 拒绝；
-// revision 过期拒绝；dry-run 不写库。
+// revision 过期拒绝；--dry-run 已退役，携带即拒绝且对库零写。
 #[test]
 fn sources_set_rejects_injection_and_secret_values() {
     let (base, ctx) = temp_ctx("source-reject");
@@ -456,8 +429,10 @@ fn sources_set_rejects_injection_and_secret_values() {
         "所有拒绝路径不得创建 DB（含预检后的校验失败；诊断日志不算 DB）"
     );
 
-    // 合法保存：dry-run 不建库
+    // 合法保存：先真实 set 建库；--dry-run 已退役，携带即拒绝且对库零写
     let good = json!({"timezone": "UTC", "lang": "C", "aliases": {"ll": "ls -l"}});
+    set_alias_source(&ctx, &good);
+    let db_bytes = std::fs::read(store::db_path(&ctx)).expect("真实 sources:set 必须建库");
     let wrapper = json!({ "revision": revision, "value": good }).to_string();
     let env = execute(
         &ctx,
@@ -466,14 +441,17 @@ fn sources_set_rejects_injection_and_secret_values() {
             &["--key", "aliases.shell", "--value", &wrapper, "--dry-run"],
         ),
     );
-    assert!(env.ok, "{:?}", env.errors);
-    assert!(
-        !store::db_path(&ctx).exists(),
-        "sources:set --dry-run 不得建库"
+    assert!(!env.ok, "--dry-run 必须拒绝: {:?}", env.data);
+    assert_eq!(env.errors[0].code, "SOURCE_ERROR");
+    assert!(!env.lock.held, "被拒绝的 sources:set 不得持锁");
+    assert_eq!(
+        std::fs::read(store::db_path(&ctx)).unwrap(),
+        db_bytes,
+        "被拒绝的 --dry-run 不得改写 DB"
     );
+    assert!(!ctx.home_dir.exists(), "sources:set 拒绝路径不得写 home");
 
-    // 真实保存 → 渲染行使用新 timezone/lang；过期 revision 拒绝
-    set_alias_source(&ctx, &good);
+    // 真实保存已使旧 revision 过期：复用同一库重放即拒绝，不重复初始化
     let env = execute(
         &ctx,
         &request(
@@ -503,19 +481,14 @@ fn sources_set_rejects_injection_and_secret_values() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
-// 反例 7：dry-run 与真实 apply 基于同一 plan；重复 apply 幂等 no-op。
+// 反例 7：重复 apply 幂等 no-op；--dry-run 已退役，apply 携带即拒绝且零写。
 #[test]
-fn dry_run_matches_plan_and_repeat_apply_is_noop() {
+fn repeat_apply_is_noop_and_dry_run_is_rejected() {
     let (base, ctx) = temp_ctx("idempotent");
-    let plan_a = execute(&ctx, &request("aliases:plan", &[]));
-    let plan_b = execute(&ctx, &request("aliases:plan", &[]));
-    assert_eq!(
-        serde_json::to_string(&plan_a.data).unwrap(),
-        serde_json::to_string(&plan_b.data).unwrap(),
-        "plan 必须确定性一致"
-    );
     let dry = execute(&ctx, &request("aliases:apply", &["--dry-run"]));
-    assert!(dry.ok);
+    assert!(!dry.ok, "--dry-run 必须以参数错误拒绝");
+    assert_eq!(dry.errors[0].code, "USAGE_ERROR");
+    assert!(!dry.lock.held);
     assert!(!ctx.home_dir.exists());
 
     let first = execute(&ctx, &request("aliases:apply", &[]));
@@ -546,11 +519,10 @@ fn dry_run_matches_plan_and_repeat_apply_is_noop() {
         "no-op 不得新增审计"
     );
 
-    let after = execute(&ctx, &request("aliases:plan", &[]));
-    assert_eq!(after.data["actions"].as_array().unwrap().len(), 0);
     let status = execute(&ctx, &request("aliases:status", &[]));
     for id in ["aliases:zshrc", "aliases:zprofile"] {
         assert_eq!(element(&status, id)["state"], "managed-ok");
+        assert_eq!(element(&status, id)["actions"], json!([]));
     }
     let _ = std::fs::remove_dir_all(&base);
 }
@@ -564,13 +536,12 @@ fn invalid_args_return_usage_error_without_echoing_values() {
     for (command, args) in [
         ("aliases:status", vec!["--only", "aliases:zshrc"]),
         ("aliases:status", vec!["--dry-run"]),
-        ("aliases:plan", vec!["--only", marker]),
+        ("aliases:apply", vec!["--only", marker]),
         (
-            "aliases:plan",
+            "aliases:apply",
             vec!["--only", "aliases:zshrc", "--only", "aliases:zshrc"],
         ),
-        ("aliases:plan", vec!["--dry-run"]),
-        ("aliases:apply", vec!["--only", marker]),
+        ("aliases:apply", vec!["--dry-run"]),
         ("aliases:apply", vec!["--bogus"]),
         ("aliases:apply", vec!["positional"]),
         ("aliases:apply", vec!["--dry-run", "--dry-run"]),
@@ -695,7 +666,7 @@ fn corrupt_alias_source_rows_fail_closed_without_leaking_markers() {
     };
 
     let assert_fail_closed = |ctx: &Context| {
-        for command in ["sources:get", "aliases:status", "aliases:plan"] {
+        for command in ["sources:get", "aliases:status", "aliases:apply"] {
             let args: &[&str] = if command == "sources:get" {
                 &["--key", "aliases.shell"]
             } else {
@@ -797,7 +768,7 @@ fn corrupt_alias_source_rows_fail_closed_without_leaking_markers() {
 }
 
 // 不安全目标（符号链接）在 status 降级为 drifted + blocked_reason，
-// plan/apply 拒绝，链接目标字节不变。
+// apply 拒绝，链接目标字节不变。
 #[cfg(unix)]
 #[test]
 fn symlink_target_is_blocked_without_writes() {
@@ -813,13 +784,12 @@ fn symlink_target_is_blocked_without_writes() {
     assert!(zshrc["observed"]["blocked_reason"].as_str().is_some());
     assert_eq!(zshrc["actions"], json!([]));
 
-    let env = execute(&ctx, &request("aliases:plan", &["--only", "aliases:zshrc"]));
-    assert!(!env.ok);
     let env = execute(
         &ctx,
         &request("aliases:apply", &["--only", "aliases:zshrc"]),
     );
     assert!(!env.ok);
+    assert!(!env.lock.held, "preflight 拒绝不得持锁");
     assert_eq!(std::fs::read(&elsewhere).unwrap(), b"# elsewhere\n");
     // 拒绝发生在 preflight，可能未建库；若已建库则不得有绑定行。
     if store::db_path(&ctx).exists() {
@@ -843,8 +813,6 @@ fn empty_aliases_remove_block_and_create_nothing() {
         assert_eq!(element(&env, id)["state"], "managed-ok");
         assert_eq!(element(&env, id)["actions"], json!([]));
     }
-    let env = execute(&ctx, &request("aliases:plan", &[]));
-    assert_eq!(env.data["actions"].as_array().unwrap().len(), 0);
     let env = execute(&ctx, &request("aliases:apply", &[]));
     assert!(env.ok, "{:?}", env.errors);
     assert_eq!(env.data["steps"].as_array().unwrap().len(), 0);
@@ -860,11 +828,6 @@ fn empty_aliases_remove_block_and_create_nothing() {
     .unwrap();
     let env = execute(&ctx, &request("aliases:status", &[]));
     assert_eq!(element(&env, "aliases:zshrc")["state"], "drifted");
-    let env = execute(&ctx, &request("aliases:plan", &["--only", "aliases:zshrc"]));
-    let actions = env.data["actions"].as_array().unwrap();
-    assert_eq!(actions.len(), 1);
-    assert!(actions[0]["before_digest"].as_str().is_some());
-    assert_eq!(actions[0]["after_digest"], Value::Null);
     let env = execute(
         &ctx,
         &request("aliases:apply", &["--only", "aliases:zshrc"]),
@@ -879,7 +842,8 @@ fn empty_aliases_remove_block_and_create_nothing() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
-// 来源变更 → drifted，apply 收敛并更新绑定；plan before/after 为区块 sha256。
+// 来源变更 → drifted，apply 收敛并更新绑定；status 暴露区块级 expected/
+// actual_block_digest（动作 before/after 区块 sha256 见私有 preflight 单测）。
 #[test]
 fn source_change_drifts_and_converges_with_block_digests() {
     let (base, ctx) = temp_ctx("source-drift");
@@ -899,16 +863,15 @@ fn source_change_drifts_and_converges_with_block_digests() {
         zshrc["observed"]["expected_digest"],
         zshrc["observed"]["actual_block_digest"]
     );
-
-    let env = execute(&ctx, &request("aliases:plan", &["--only", "aliases:zshrc"]));
-    let actions = env.data["actions"].as_array().unwrap();
-    assert_eq!(actions.len(), 1);
-    let before = actions[0]["before_digest"].as_str().unwrap();
-    let after = actions[0]["after_digest"].as_str().unwrap();
-    assert_ne!(before, after);
     let block_sha = |text: &str| agent_manager_engine::native_mcp::model::sha256_hex(text);
-    assert_eq!(before, block_sha("alias ll='ls -l'"));
-    assert_eq!(after, block_sha("alias ll='ls -alh'"));
+    assert_eq!(
+        zshrc["observed"]["actual_block_digest"].as_str().unwrap(),
+        block_sha("alias ll='ls -l'")
+    );
+    assert_eq!(
+        zshrc["observed"]["expected_digest"].as_str().unwrap(),
+        block_sha("alias ll='ls -alh'")
+    );
 
     let env = execute(
         &ctx,

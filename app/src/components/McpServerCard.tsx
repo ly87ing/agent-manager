@@ -1,7 +1,6 @@
 import { Check, X } from "lucide-react";
 import type { EngineElement } from "../lib/contract";
 import { agentCellsOf, type McpObserved, type McpSpec } from "../lib/observed";
-import type { McpAgentCellView } from "./McpAssignmentRow";
 import { FreshnessBadge } from "./FreshnessBadge";
 import { StateBadge } from "./StateBadge";
 import { DriftExplanationPanel } from "./DriftExplanationPanel";
@@ -11,22 +10,6 @@ import { cn } from "../lib/utils";
 export interface McpServerObserved extends McpObserved {
   actions?: string[];
   blocked_reason?: string | null;
-}
-
-function detailPlanRequest(element: EngineElement): { command: string; args: string[] } | null {
-  const cells = ((element.observed as McpObserved).agents ?? {}) as Record<string, McpAgentCellView>;
-  for (const action of ["update", "enable", "add"]) {
-    const agent = Object.keys(cells)
-      .sort()
-      .find((key) => (cells[key].actions ?? []).includes(action));
-    if (agent) {
-      return {
-        command: "mcp:plan",
-        args: ["--only", element.id, "--agent", agent, "--action", action],
-      };
-    }
-  }
-  return null;
 }
 
 function EnvResolutionList({ element }: { element: EngineElement }) {
@@ -154,7 +137,7 @@ export function McpServerDetail({ element }: { element: EngineElement }) {
         </ul>
       </div>
 
-      <DriftExplanationPanel element={element} planRequest={detailPlanRequest(element)} cellKind="mcp" />
+      <DriftExplanationPanel element={element} cellKind="mcp" />
     </section>
   );
 }

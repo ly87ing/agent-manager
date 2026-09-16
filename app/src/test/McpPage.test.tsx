@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { waitFor } from "@testing-library/react";
+import { toast } from "sonner";
 import McpPage from "../pages/McpPage";
 import type { StatusData } from "../lib/contract";
-import { makeApplyResult, makeElement, makeEnvelope, makeFreshness, makePlanAction } from "./fixtures";
+import { makeApplyResult, makeElement, makeEnvelope, makeFreshness } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 
 const LONG_VERSION = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -60,62 +62,11 @@ function mcpRoutes(): Record<string, ReturnType<typeof makeEnvelope>> {
   };
   return {
     "mcp:status": makeEnvelope(status, { command: "mcp.status" }),
-    "mcp:plan": makeEnvelope(
-      {
-        domain: "mcp",
-        actions: [makePlanAction({ op: "write-file", element: "mcp:chrome-devtools", target: "/tmp/demo/.claude.json", risk: "write-local", note: "更新 claude-code 配置" })],
-        summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 },
-      },
-      { command: "mcp.plan" },
-    ),
     "mcp:apply": makeEnvelope(makeApplyResult({ domain: "mcp" }), { command: "mcp.apply" }),
   };
 }
 
 describe("McpPage 服务库 + 助手中的服务", () => {
-  it("服务详情优先选择 update，并在同动作中按 Agent key 升序选择", async () => {
-    const priorityRoutes = mcpRoutes();
-    priorityRoutes["mcp:status"] = makeEnvelope(
-      {
-        domain: "mcp",
-        elements: [
-          makeElement({
-            id: "mcp:priority",
-            domain: "mcp",
-            spec: { command: "npx", args: ["priority-mcp"], agents: null, env: {} },
-            policy: { enabled: true },
-            observed: {
-              agents: {
-                "zeta-agent": { state: "drifted", target: "/tmp/zeta.json", target_exists: true, actions: ["update"] },
-                "codex": { state: "missing", target: "/tmp/codex.json", target_exists: false, actions: ["add"] },
-                "alpha-agent": { state: "drifted", target: "/tmp/alpha.json", target_exists: true, actions: ["update"] },
-              },
-              env: {},
-              actions: [],
-            },
-            state: "drifted",
-            freshness: makeFreshness(),
-          }),
-        ],
-      },
-      { command: "mcp.status" },
-    );
-    const { calls } = renderWithEngine(<McpPage />, priorityRoutes);
-
-    await userEvent.click(await screen.findByRole("button", { name: "mcp:priority" }));
-    await screen.findByTestId("mcp-detail-mcp:priority");
-
-    expect(calls.filter((call) => call.command === "mcp:plan")).toHaveLength(1);
-    expect(calls.find((call) => call.command === "mcp:plan")?.args).toEqual([
-      "--only",
-      "mcp:priority",
-      "--agent",
-      "alpha-agent",
-      "--action",
-      "update",
-    ]);
-  });
-
   it("默认服务库：卡片渲染与 freshness；点击服务名展开详情（命令/密钥状态/附加参数/写入位置，不含密钥值）", async () => {
     const { calls } = renderWithEngine(<McpPage />, mcpRoutes());
 
@@ -134,23 +85,8 @@ describe("McpPage 服务库 + 助手中的服务", () => {
     expect(detail).toHaveTextContent("SERENA_KEY");
     expect(detail).toHaveTextContent("未配置");
     expect(detail).toHaveTextContent("/tmp/demo/.codex/config.toml");
-    // 只有 update/enable/add 才能自动预览；serena 只有 remove，不发起 plan。
-    expect(calls.some((call) => call.command === "mcp:plan")).toBe(false);
-  });
-
-  it("服务详情按 update→enable→add 与稳定助手名选择动作，并携带精确参数", async () => {
-    const { calls } = renderWithEngine(<McpPage />, mcpRoutes());
-    await userEvent.click(await screen.findByRole("button", { name: "mcp:chrome-devtools" }));
-    await screen.findByText("更新 claude-code 配置");
-
-    expect(calls.find((call) => call.command === "mcp:plan")?.args).toEqual([
-      "--only",
-      "mcp:chrome-devtools",
-      "--agent",
-      "claude-code",
-      "--action",
-      "update",
-    ]);
+    // 展开详情为纯状态展示：任何元素都不发起 plan
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
   });
 
   it("助手中的服务：单元格态 已配置/不一致/残留/尚未生成，版本短摘要 title 存完整值", async () => {
@@ -179,7 +115,7 @@ describe("McpPage 服务库 + 助手中的服务", () => {
     expect(screen.getByTitle("claude-code: drifted")).toBeInTheDocument();
   });
 
-  it("行操作：按 cell.actions 渲染，「更新」→ mcp:plan 精确 --only/--agent/--action → 确认 apply，全程零 policy:set", async () => {
+  it("行操作：按 cell.actions 渲染，「更新」点击直接 mcp:apply 精确 --only/--agent/--action（带 run_id），不取 plan、不开弹窗、零 policy:set", async () => {
     const { calls } = renderWithEngine(<McpPage />, mcpRoutes());
     await userEvent.click(await screen.findByRole("tab", { name: "助手中的服务" }));
 
@@ -190,33 +126,75 @@ describe("McpPage 服务库 + 助手中的服务", () => {
     expect(screen.getAllByText("当前引擎未提供操作").length).toBeGreaterThan(0);
 
     await userEvent.click(screen.getByTestId("action-update-mcp:chrome-devtools-claude-code"));
-    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
-    expect(dialog).toHaveTextContent("更新 mcp:chrome-devtools @ claude-code");
-    const planCall = calls.find((call) => call.command === "mcp:plan");
-    expect(planCall!.args).toEqual(["--only", "mcp:chrome-devtools", "--agent", "claude-code", "--action", "update"]);
-    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    await waitFor(() => expect(calls.some((call) => call.command === "mcp:apply")).toBe(true));
 
-    await userEvent.click(screen.getByTestId("plan-confirm-button"));
-    const applyCall = calls.find((call) => call.command === "mcp:apply");
-    expect(applyCall).toBeDefined();
-    expect(applyCall!.args).toEqual(["--only", "mcp:chrome-devtools", "--agent", "claude-code", "--action", "update"]);
-    expect(applyCall!.options?.runId).toMatch(/^gui-/);
+    const applyCalls = calls.filter((call) => call.command === "mcp:apply");
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0].args).toEqual(["--only", "mcp:chrome-devtools", "--agent", "claude-code", "--action", "update"]);
+    expect(applyCalls[0].args).not.toContain("--dry-run");
+    expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("库级删除：单个预览内确认（无前置弹窗），说明显示受影响配置数与保留语义", async () => {
+  it("库级删除：点击先打开 ConfirmModal，取消时零 apply/零 policy:set", async () => {
     const { calls } = renderWithEngine(<McpPage />, mcpRoutes());
+
     await userEvent.click(await screen.findByTestId("remove-server-mcp:chrome-devtools"));
+    const dialog = await screen.findByRole("dialog", { name: "删除服务 chrome-devtools" });
+    expect(dialog).toHaveTextContent(/但不会卸载软件/);
+    expect(screen.getByTestId("confirm-modal-input")).toBeInTheDocument();
 
-    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
-    expect(screen.queryByTestId("confirm-modal-input")).toBeNull();
-    // 仅 assigned=true 计入：chrome-devtools 两条均已分配
-    expect(dialog).toHaveTextContent("清理 2 条受影响的助手配置");
-    expect(dialog).toHaveTextContent(/不会卸载已安装的软件包/);
-    expect(calls.find((call) => call.command === "mcp:plan")!.args).toEqual(["--only", "mcp:chrome-devtools", "--action", "remove"]);
-
-    // 取消零写
     await userEvent.click(screen.getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
     expect(calls.some((call) => call.command === "mcp:apply")).toBe(false);
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
+  });
+
+  it("库级删除：输入服务名确认后 mcp:apply --action remove（带 run_id），无 plan、零 policy:set", async () => {
+    const { calls } = renderWithEngine(<McpPage />, mcpRoutes());
+
+    await userEvent.click(await screen.findByTestId("remove-server-mcp:chrome-devtools"));
+    await screen.findByRole("dialog", { name: "删除服务 chrome-devtools" });
+    await userEvent.type(screen.getByTestId("confirm-modal-input"), "chrome-devtools");
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "mcp:apply")).toBe(true));
+    const applyCalls = calls.filter((call) => call.command === "mcp:apply");
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0].args).toEqual(["--only", "mcp:chrome-devtools", "--action", "remove"]);
+    expect(applyCalls[0].args).not.toContain("--dry-run");
+    expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("服务 × 助手 remove：点击先确认，确认后 mcp:apply 精确 --only/--agent/--action remove，取消零 apply", async () => {
+    const { calls } = renderWithEngine(<McpPage />, mcpRoutes());
+    await userEvent.click(await screen.findByRole("tab", { name: "助手中的服务" }));
+
+    const removeBtn = await screen.findByTestId("action-remove-mcp:chrome-devtools-codex");
+    await userEvent.click(removeBtn);
+    const dialog = await screen.findByRole("dialog", { name: "从此助手删除 mcp:chrome-devtools @ codex" });
+    expect(dialog).toHaveTextContent(/只清理该助手的配置/);
+
+    await userEvent.click(screen.getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(calls.some((call) => call.command === "mcp:apply")).toBe(false);
+
+    await userEvent.click(removeBtn);
+    await screen.findByRole("dialog", { name: "从此助手删除 mcp:chrome-devtools @ codex" });
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+
+    await waitFor(() => expect(calls.filter((call) => call.command === "mcp:apply")).toHaveLength(1));
+    expect(calls.filter((call) => call.command === "mcp:apply")[0].args).toEqual([
+      "--only", "mcp:chrome-devtools", "--agent", "codex", "--action", "remove",
+    ]);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
   });
 
@@ -266,66 +244,48 @@ describe("McpPage 显式接管通道（--allow-takeover）", () => {
     };
     return {
       "mcp:status": makeEnvelope(status, { command: "mcp.status" }),
-      "mcp:plan": async (args: string[]) => {
+      // 引擎 fail-closed：无 --allow-takeover 一律拒绝，带 flag 才执行
+      "mcp:apply": async (args: string[]) => {
         if (!args.includes("--allow-takeover")) {
           return makeEnvelope(
             {},
-            { command: "mcp.plan", ok: false, errors: [{ code: "PREFLIGHT_FAILED", element: null, message: CONFLICT_MESSAGE }] },
+            { command: "mcp.apply", ok: false, errors: [{ code: "PREFLIGHT_FAILED", element: null, message: CONFLICT_MESSAGE }] },
           );
         }
-        return makeEnvelope(
-          {
-            domain: "mcp",
-            actions: [
-              makePlanAction({
-                op: "write-file",
-                element: "mcp:take-svc",
-                target: "/tmp/demo/.claude.json",
-                risk: "write-local",
-                note: "add mcp:take-svc 到 claude-code（接管：将替换目标文件中的未受管同名条目）",
-                takeover: true,
-              }),
-            ],
-            summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 },
-          },
-          { command: "mcp.plan" },
-        );
+        return makeEnvelope(makeApplyResult({ domain: "mcp" }), { command: "mcp.apply" });
       },
-      "mcp:apply": makeEnvelope(makeApplyResult({ domain: "mcp" }), { command: "mcp.apply" }),
     };
   }
 
-  it("plan 遇「非受管同名条目」→ 错误区「接管原条目并重试」→ 重发 plan/apply 带 --allow-takeover 且预览可见接管标注", async () => {
+  it("add 遇「非受管同名条目」fail-closed → 失败 toast 提供「接管原条目并重试」→ 点击直接以原范围 + --allow-takeover 重试 apply（不取 plan、无二次确认）", async () => {
     const { calls } = renderWithEngine(<McpPage />, takeoverRoutes());
     await userEvent.click(await screen.findByRole("tab", { name: "助手中的服务" }));
 
-    // codex cell 提供正常「添加」；plan 首次因冲突 fail-closed
+    // codex cell 提供正常「添加」：点击直接 apply，首次因冲突 fail-closed
     await userEvent.click(await screen.findByTestId("action-add-mcp:take-svc-codex"));
-    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
-    expect(dialog).toHaveTextContent(CONFLICT_MESSAGE);
-    const firstPlan = calls.find((call) => call.command === "mcp:plan");
-    expect(firstPlan!.args).toEqual(["--only", "mcp:take-svc", "--agent", "codex", "--action", "add"]);
-    expect(firstPlan!.args).not.toContain("--allow-takeover");
+    await waitFor(() => expect(calls.some((call) => call.command === "mcp:apply")).toBe(true));
+    const firstApply = calls.find((call) => call.command === "mcp:apply");
+    expect(firstApply!.args).toEqual(["--only", "mcp:take-svc", "--agent", "codex", "--action", "add"]);
+    expect(firstApply!.args).not.toContain("--allow-takeover");
+    expect(firstApply!.options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
 
-    // 错误区提供接管重试
-    await userEvent.click(await screen.findByTestId("takeover-retry-button"));
+    // 失败反馈外提供接管动作；全程无弹窗、无二次确认
+    const takeoverAction = await screen.findByRole("button", { name: "接管原条目并重试" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await userEvent.click(takeoverAction);
 
-    // 以相同 --only/--action 追加 --allow-takeover 重跑 plan
-    const planCalls = calls.filter((call) => call.command === "mcp:plan");
-    const retryPlan = planCalls[planCalls.length - 1];
-    expect(retryPlan.args).toEqual(["--only", "mcp:take-svc", "--agent", "codex", "--action", "add", "--allow-takeover"]);
-
-    // 预览可见 takeover 标注（徽标 + 说明文案）
-    expect(await screen.findByTestId("takeover-badge")).toHaveTextContent("接管");
-    expect(dialog).toHaveTextContent(/接管：将替换目标文件中的未受管同名条目/);
-
-    // 确认后 apply 同样带 flag
-    await userEvent.click(screen.getByTestId("plan-confirm-button"));
-    const applyCall = calls.find((call) => call.command === "mcp:apply");
-    expect(applyCall!.args).toEqual(["--only", "mcp:take-svc", "--agent", "codex", "--action", "add", "--allow-takeover"]);
+    await waitFor(() => expect(calls.filter((call) => call.command === "mcp:apply")).toHaveLength(2));
+    const retryApply = calls.filter((call) => call.command === "mcp:apply")[1];
+    expect(retryApply.args).toEqual(["--only", "mcp:take-svc", "--agent", "codex", "--action", "add", "--allow-takeover"]);
+    expect(retryApply.args).not.toContain("--dry-run");
+    expect(retryApply.options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("冲突 cell 行内「接管原条目」直接以 --allow-takeover 打开预览，确认后 apply 带 flag", async () => {
+  it("冲突 cell 行内「接管原条目」：一键直接 apply 带 --allow-takeover，不取 plan、不开弹窗，成功走既有执行 toast", async () => {
+    const toastSuccessSpy = vi.spyOn(toast, "success");
     const { calls } = renderWithEngine(<McpPage />, takeoverRoutes());
     await userEvent.click(await screen.findByRole("tab", { name: "助手中的服务" }));
 
@@ -333,29 +293,40 @@ describe("McpPage 显式接管通道（--allow-takeover）", () => {
     expect(screen.queryByTestId("action-add-mcp:take-svc-claude-code")).toBeNull();
     await userEvent.click(await screen.findByTestId("takeover-mcp:take-svc-claude-code"));
 
-    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
-    expect(dialog).toHaveTextContent("接管原条目 mcp:take-svc @ claude-code");
-    const planCall = calls.find((call) => call.command === "mcp:plan");
-    expect(planCall!.args).toEqual(["--only", "mcp:take-svc", "--agent", "claude-code", "--action", "add", "--allow-takeover"]);
-    expect(await screen.findByTestId("takeover-badge")).toBeInTheDocument();
-
-    await userEvent.click(screen.getByTestId("plan-confirm-button"));
-    const applyCall = calls.find((call) => call.command === "mcp:apply");
-    expect(applyCall!.args).toEqual(["--only", "mcp:take-svc", "--agent", "claude-code", "--action", "add", "--allow-takeover"]);
+    await waitFor(() => expect(toastSuccessSpy).toHaveBeenCalled());
+    const applyCalls = calls.filter((call) => call.command === "mcp:apply");
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0].args).toEqual(["--only", "mcp:take-svc", "--agent", "claude-code", "--action", "add", "--allow-takeover"]);
+    expect(applyCalls[0].args).not.toContain("--dry-run");
+    expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(toastSuccessSpy).toHaveBeenCalledWith(expect.stringContaining("接管原条目 mcp:take-svc @ claude-code"));
   });
 
-  it("非冲突错误不展示接管重试按钮", async () => {
-    const routes = takeoverRoutes();
-    routes["mcp:plan"] = async () =>
+  it("apply 因非冲突原因失败：失败 toast 可观测，不提供接管重试", async () => {
+    const failureRoutes = takeoverRoutes();
+    failureRoutes["mcp:apply"] = async () =>
       makeEnvelope(
         {},
-        { command: "mcp.plan", ok: false, errors: [{ code: "PREFLIGHT_FAILED", element: null, message: "凭证变量未配置: SOME_TOKEN" }] },
+        { command: "mcp.apply", ok: false, errors: [{ code: "APPLY_FAILED", element: null, message: "凭证变量未配置: SOME_TOKEN" }] },
       );
-    renderWithEngine(<McpPage />, routes);
+    const toastErrorSpy = vi.spyOn(toast, "error");
+    const { calls } = renderWithEngine(<McpPage />, failureRoutes);
     await userEvent.click(await screen.findByRole("tab", { name: "助手中的服务" }));
+
     await userEvent.click(await screen.findByTestId("action-add-mcp:take-svc-codex"));
-    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
-    expect(dialog).toHaveTextContent("凭证变量未配置");
-    expect(screen.queryByTestId("takeover-retry-button")).toBeNull();
+
+    await waitFor(() => expect(toastErrorSpy).toHaveBeenCalled());
+    expect(toastErrorSpy).toHaveBeenCalledWith(expect.stringContaining("凭证变量未配置"));
+    // 给潜在的接管动作 toast 一个节拍，确认不会出现
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const applyCalls = calls.filter((call) => call.command === "mcp:apply");
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0].args).toEqual(["--only", "mcp:take-svc", "--agent", "codex", "--action", "add"]);
+    expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
+    expect(toastErrorSpy).not.toHaveBeenCalledWith(expect.stringContaining("可显式接管"));
+    expect(screen.queryByRole("button", { name: "接管原条目并重试" })).toBeNull();
   });
 });

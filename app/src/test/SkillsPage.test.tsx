@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { fireEvent } from "@testing-library/react";
+import { fireEvent, waitFor } from "@testing-library/react";
 import SkillsPage from "../pages/SkillsPage";
 import type { Envelope } from "../lib/contract";
-import { makeApplyResult, makeElement, makeEnvelope, makePlanAction, makePolicyData } from "./fixtures";
+import { makeApplyResult, makeElement, makeEnvelope, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 
 function skillsRoutes() {
@@ -82,14 +82,6 @@ function skillsRoutes() {
       },
       { command: "skills.status" },
     ),
-    "skills:plan": makeEnvelope(
-      {
-        domain: "skills",
-        actions: [makePlanAction({ op: "unlink", element: "skill:agent-skills", risk: "write-local", note: "清理链接" })],
-        summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 },
-      },
-      { command: "skills.plan" },
-    ),
     "policy:get": makeEnvelope(
       makePolicyData({
         layers: {
@@ -143,7 +135,7 @@ describe("SkillsPage 三级视图", () => {
     });
     // 反例断言：完整原定义里的自定义字段 branch 必须保留，不能只验证新 payload
     expect(definition.branch).toBe("release");
-    // 不写启用键、不 plan/apply
+    // 不写启用键、不 apply/preflight
     expect(calls.some((call) => call.command === "policy:set" && call.args[3] === "skills.agent-skills.enabled")).toBe(false);
     expect(calls.some((call) => call.command === "skills:plan")).toBe(false);
     expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
@@ -187,11 +179,18 @@ describe("SkillsPage 三级视图", () => {
     expect(calls.filter((call) => call.command === "db:migrate")).toHaveLength(0);
   });
 
-  it("更新集合预览限定在所选集合", async () => {
+  it("更新集合：点击直接 skills:apply 限定在所选集合（带 run_id），不取 plan、不开弹窗", async () => {
     const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
     await userEvent.click(await screen.findByTestId("update-collection-agent-skills"));
-    await screen.findByRole("dialog", { name: /将要执行的操作/ });
-    expect(calls.find((call) => call.command === "skills:plan")?.args).toEqual(["--only", "skill:agent-skills", "--action", "update"]);
+    await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));
+
+    const applyCalls = calls.filter((call) => call.command === "skills:apply");
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0].args).toEqual(["--only", "skill:agent-skills", "--action", "update"]);
+    expect(applyCalls[0].args).not.toContain("--dry-run");
+    expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("集合卡片：缓存/收件箱计数徽标与新技能提示，不展示来源猜测徽标", async () => {
@@ -230,26 +229,103 @@ describe("SkillsPage 三级视图", () => {
     expect(screen.queryByTestId("action-add-skill:agent-skills/inbox-one-claude-code")).toBeNull();
   });
 
-  it("移除集合：单个预览内确认，说明受影响分配与源目录保留，执行 skills:plan/apply 携带 --only skill:<name> --action remove", async () => {
+  it("移除集合：点击先打开 ConfirmModal，取消时零 apply/零 policy:set", async () => {
     const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
     const removeBtn = await screen.findByTestId("remove-collection-agent-skills");
     await userEvent.click(removeBtn);
 
-    // 无前置确认弹窗：直接进入唯一的计划预览
-    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
-    expect(screen.queryByTestId("confirm-modal-input")).toBeNull();
-    // 预览说明显示受影响分配数（仅 assigned=true：alpha×2 + beta×2 = 4 条；未分配的 kimi-cli cell 不计）与源目录保留
-    expect(dialog).toHaveTextContent("清理 4 条受影响的助手分配");
+    const dialog = await screen.findByRole("dialog", { name: "删除集合 agent-skills" });
     expect(dialog).toHaveTextContent(/源目录保留/);
+    expect(screen.getByTestId("confirm-modal-input")).toBeInTheDocument();
 
-    const planCall = calls.find((c) => c.command === "skills:plan");
-    expect(planCall).toBeDefined();
-    expect(planCall!.args).toEqual(["--only", "skill:agent-skills", "--action", "remove"]);
+    await userEvent.click(screen.getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
-    await userEvent.click(screen.getByTestId("plan-confirm-button"));
-    const applyCall = calls.find((c) => c.command === "skills:apply");
-    expect(applyCall).toBeDefined();
-    expect(applyCall!.args).toEqual(["--only", "skill:agent-skills", "--action", "remove"]);
+    expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
+  });
+
+  it("移除集合：输入集合名确认后 skills:apply 携带 --only skill:<name> --action remove（带 run_id），无 plan、零 policy:set", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
+    const removeBtn = await screen.findByTestId("remove-collection-agent-skills");
+    await userEvent.click(removeBtn);
+
+    await screen.findByRole("dialog", { name: "删除集合 agent-skills" });
+    await userEvent.type(screen.getByTestId("confirm-modal-input"), "agent-skills");
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));
+    const applyCalls = calls.filter((call) => call.command === "skills:apply");
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0].args).toEqual(["--only", "skill:agent-skills", "--action", "remove"]);
+    expect(applyCalls[0].args).not.toContain("--dry-run");
+    expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("技能 × 助手 remove：点击先确认，确认后 skills:apply 精确 --only/--action/--agent，取消零 apply", async () => {
+    const customRoutes = skillsRoutes();
+    customRoutes["skills:status"] = makeEnvelope(
+      {
+        domain: "skills",
+        elements: [
+          makeElement({
+            id: "skill:agent-skills",
+            domain: "skills",
+            spec: { url: "https://github.com/example/agent-skills.git", skill_paths: ["alpha"], agents: ["claude-code"] },
+            observed: { repo_cache: "/repo/agent-skills", repo_cached: true, owner_marked: true, discovered: ["alpha"], discovery_inbox: [] },
+            state: "managed-ok",
+          }),
+          makeElement({
+            id: "skill:agent-skills/alpha",
+            domain: "skills",
+            spec: { collection: "agent-skills", name: "alpha", source_path: "/repo/.../alpha" },
+            policy: { enabled: true, agents: { "claude-code": true } },
+            observed: {
+              agents: {
+                "claude-code": {
+                  state: "linked",
+                  link_path: "/home/.claude/skills/alpha",
+                  target_dir_exists: true,
+                  assigned: true,
+                  enabled: true,
+                  actions: ["remove"],
+                },
+              },
+              discovery_inbox: false,
+            },
+            state: "managed-ok",
+          }),
+        ],
+      },
+      { command: "skills.status" },
+    );
+
+    const { calls } = renderWithEngine(<SkillsPage />, customRoutes);
+    await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
+    const removeBtn = await screen.findByTestId("action-remove-skill:agent-skills/alpha-claude-code");
+
+    await userEvent.click(removeBtn);
+    const dialog = await screen.findByRole("dialog", { name: "删除分配 alpha @ claude-code" });
+    expect(dialog).toHaveTextContent(/只清理该助手的入口/);
+
+    await userEvent.click(screen.getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
+
+    await userEvent.click(removeBtn);
+    await screen.findByRole("dialog", { name: "删除分配 alpha @ claude-code" });
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+
+    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(1));
+    expect(calls.filter((call) => call.command === "skills:apply")[0].args).toEqual([
+      "--only", "skill:agent-skills/alpha", "--action", "remove", "--agent", "claude-code",
+    ]);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
   });
 
   it("视图切换与键盘导航：支持键盘切换标签，点击集合卡片名称进入全部技能并筛选对应集合", async () => {
@@ -355,12 +431,15 @@ describe("SkillsPage 三级视图", () => {
     expect(screen.queryByTestId("action-assign-skill:agent-skills/alpha-claude-code")).toBeNull();
     expect(screen.queryByTestId("action-enable-skill:agent-skills/alpha-claude-code")).toBeNull();
 
-    // 点击禁用按钮触发 skills:plan 携带对应 action 与 agent
+    // 点击禁用按钮直接 skills:apply 携带对应 action 与 agent（带 run_id），不取 plan、不开弹窗
     await userEvent.click(screen.getByTestId("action-disable-skill:agent-skills/alpha-claude-code"));
-    await screen.findByRole("dialog", { name: /将要执行的操作/ });
-    const planCall = calls.find((c) => c.command === "skills:plan");
-    expect(planCall).toBeDefined();
-    expect(planCall!.args).toEqual(["--only", "skill:agent-skills/alpha", "--action", "disable", "--agent", "claude-code"]);
+    await waitFor(() => expect(calls.some((c) => c.command === "skills:apply")).toBe(true));
+    const applyCalls = calls.filter((c) => c.command === "skills:apply");
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0].args).toEqual(["--only", "skill:agent-skills/alpha", "--action", "disable", "--agent", "claude-code"]);
+    expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
+    expect(calls.some((c) => c.command.endsWith(":plan"))).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
 
     // codex: actions 为空，不推测动作，展示「当前引擎未提供操作」
     expect(screen.getByText("当前引擎未提供操作")).toBeInTheDocument();

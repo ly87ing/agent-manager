@@ -155,7 +155,7 @@ fn first_set_initializes_db_and_freezes_builtin() {
 }
 
 #[test]
-fn dry_run_set_writes_nothing() {
+fn dry_run_set_is_rejected_and_initializes_no_store() {
     let (base, ctx) = temp_ctx("dryrun");
     let env = execute(
         &ctx,
@@ -172,10 +172,10 @@ fn dry_run_set_writes_nothing() {
             ],
         ),
     );
-    assert!(env.ok);
-    assert!(env.warnings.iter().any(|w| w.code == "DRY_RUN"));
+    assert!(!env.ok, "--dry-run 已退役，必须拒绝: {:?}", env.data);
+    assert_eq!(env.errors[0].code, "USAGE_ERROR");
+    // 零目标写：不得建库（失败写动作的诊断日志按统一策略写 data_dir，不属于目标状态）
     assert!(!store::db_path(&ctx).exists());
-    assert!(!ctx.data_dir.exists());
     let _ = std::fs::remove_dir_all(&base);
 }
 
@@ -450,21 +450,12 @@ fn retired_domains_and_verbs_are_rejected_clearly() {
 }
 
 #[test]
-fn agents_native_plan_dry_run_apply_and_audit() {
+fn agents_native_apply_dry_run_rejection_and_audit() {
     let (base, ctx) = temp_ctx("agents-native");
     set_agent(&ctx, "local-agent", "agent-test-bin", "mkdir -p \"$HOME/.local/bin\"; printf '#!/bin/sh\\n' > \"$HOME/.local/bin/agent-test-bin\"; chmod +x \"$HOME/.local/bin/agent-test-bin\"");
     set_agent(&ctx, "broken-agent", "broken-test-bin", "exit 7");
 
-    let plan = execute(
-        &ctx,
-        &request(
-            "agents:plan",
-            &["--only", "agents:local-agent", "--action", "install"],
-        ),
-    );
-    assert!(plan.ok, "{:?}", plan.errors);
-    assert_eq!(plan.data["actions"][0]["cmd"], "mkdir -p \"$HOME/.local/bin\"; printf '#!/bin/sh\\n' > \"$HOME/.local/bin/agent-test-bin\"; chmod +x \"$HOME/.local/bin/agent-test-bin\"");
-
+    // --dry-run 已退役：拒绝、零目标写、零锁，且不产生任何运行记录
     let before = execute(&ctx, &request("runs:list", &[]));
     let dry = execute(
         &ctx,
@@ -479,8 +470,9 @@ fn agents_native_plan_dry_run_apply_and_audit() {
             ],
         ),
     );
-    assert!(dry.ok, "{:?}", dry.errors);
-    assert_eq!(dry.data["dry_run"], true);
+    assert!(!dry.ok, "--dry-run 已退役，必须拒绝: {:?}", dry.data);
+    assert_eq!(dry.errors[0].code, "AGENT_ERROR");
+    assert!(!dry.lock.held, "--dry-run 拒绝不得持有全局锁");
     let after = execute(&ctx, &request("runs:list", &[]));
     assert_eq!(before.data, after.data);
     assert!(!ctx.data_dir.join("agent-manager.apply.lock").exists());
@@ -531,15 +523,18 @@ fn agents_native_plan_dry_run_apply_and_audit() {
     assert_eq!(local["policy"]["enabled"], false);
     assert_eq!(local["state"], "disabled");
     assert!(local["actions"].as_array().unwrap().is_empty());
+    // 禁用拒绝由真实 apply 预检覆盖（原 plan 拦截语义由 check_action_allowed 保留）
     let blocked = execute(
         &ctx,
         &request(
-            "agents:plan",
+            "agents:apply",
             &["--only", "agents:local-agent", "--action", "install"],
         ),
     );
     assert!(!blocked.ok);
     assert_eq!(blocked.errors[0].code, "AGENT_ERROR");
+    assert!(!blocked.lock.held);
+    assert!(!ctx.home_dir.join(".local/bin/agent-test-bin").exists());
 
     let enabled_value = serde_json::to_string(&true).unwrap();
     let enabled = execute(
@@ -567,6 +562,10 @@ fn agents_native_plan_dry_run_apply_and_audit() {
     );
     assert!(applied.ok, "{:?}", applied.errors);
     assert!(applied.lock.held);
+    assert!(
+        applied.data.get("dry_run").is_none(),
+        "apply 输出不再携带 dry_run 字段"
+    );
     let runs = execute(&ctx, &request("runs:get", &["--run", "test-run-1"]));
     assert!(runs.data["operations"]
         .as_array()
@@ -603,7 +602,7 @@ fn agents_native_plan_dry_run_apply_and_audit() {
     let invalid = execute(
         &ctx,
         &request(
-            "agents:plan",
+            "agents:apply",
             &["--only", "agents:local-agent", "--action", "version"],
         ),
     );
@@ -659,7 +658,7 @@ fn agent_apply_rejects_contended_lock_without_execution_or_log() {
 }
 
 #[test]
-fn agent_dry_run_without_database_does_not_create_lock_file() {
+fn agent_apply_dry_run_is_rejected_without_lock_db_or_target() {
     let (base, ctx) = temp_ctx("agents-dry-run-no-db");
     let env = execute(
         &ctx,
@@ -674,9 +673,11 @@ fn agent_dry_run_without_database_does_not_create_lock_file() {
             ],
         ),
     );
-    assert!(!env.ok);
+    assert!(!env.ok, "--dry-run 已退役，必须拒绝: {:?}", env.data);
     assert_eq!(env.errors[0].code, "AGENT_ERROR");
-    assert!(!ctx.data_dir.exists());
+    assert!(!env.lock.held, "--dry-run 拒绝不得持有全局锁");
+    // 零目标写：不得建库、不得创建锁文件（诊断日志可按统一策略写 data_dir）
+    assert!(!store::db_path(&ctx).exists());
     assert!(!ctx.data_dir.join("agent-manager.apply.lock").exists());
     let _ = std::fs::remove_dir_all(&base);
 }
@@ -720,16 +721,17 @@ fn agent_status_classifies_unsupported_install_and_skips_tombstones() {
     assert_eq!(brew["observed"]["providers"][0], "brew");
     assert_eq!(brew["observed"]["classified"]["unsupported"][0], "brew");
     assert_eq!(brew["observed"]["preferred_active"], false);
-    for command in ["agents:plan", "agents.apply"] {
-        let request_args = ["--only", "agents:brew-agent", "--action", "upgrade"];
-        let result = execute(
-            &ctx,
-            &request_with_run(command, &request_args, "brew-direct-apply"),
-        );
-        assert!(!result.ok);
-        assert_eq!(result.errors[0].code, "AGENT_ERROR");
-        assert!(!result.lock.held);
-    }
+    let direct = execute(
+        &ctx,
+        &request_with_run(
+            "agents.apply",
+            &["--only", "agents:brew-agent", "--action", "upgrade"],
+            "brew-direct-apply",
+        ),
+    );
+    assert!(!direct.ok);
+    assert_eq!(direct.errors[0].code, "AGENT_ERROR");
+    assert!(!direct.lock.held);
     let apply = execute(
         &ctx,
         &request_with_run(
@@ -809,7 +811,11 @@ fn agent_status_launcher_symlink_native_managed_and_system_entry_counterexample(
             }}
         })
     };
-    set_agent_definition(&ctx, "launcher-agent", definition("launcher-agent-bin"));
+    // launcher-agent 的 uninstall 真实删除符号链接，支撑真实 scoped apply 的卸载核验
+    let mut launcher_definition = definition("launcher-agent-bin");
+    launcher_definition["providers"]["native"]["uninstall"] =
+        json!("rm -f \"$HOME/.local/bin/launcher-agent-bin\"");
+    set_agent_definition(&ctx, "launcher-agent", launcher_definition);
     set_agent_definition(
         &ctx,
         "system-entry-agent",
@@ -835,21 +841,6 @@ fn agent_status_launcher_symlink_native_managed_and_system_entry_counterexample(
         .map(|action| action["id"].as_str().unwrap())
         .collect();
     assert_eq!(action_ids, ["upgrade", "uninstall"]);
-    for action in ["upgrade", "uninstall"] {
-        let plan = execute(
-            &ctx,
-            &request(
-                "agents:plan",
-                &["--only", "agents:launcher-agent", "--action", action],
-            ),
-        );
-        assert!(
-            plan.ok,
-            "{action} 应对 native launcher 可计划: {:?}",
-            plan.errors
-        );
-    }
-
     // 反例：同一版本化目标，入口位于普通 system 路径时仍 fail-closed。
     let system = elements
         .iter()
@@ -863,12 +854,13 @@ fn agent_status_launcher_symlink_native_managed_and_system_entry_counterexample(
     let blocked = execute(
         &ctx,
         &request(
-            "agents:plan",
+            "agents:apply",
             &["--only", "agents:system-entry-agent", "--action", "upgrade"],
         ),
     );
     assert!(!blocked.ok);
     assert_eq!(blocked.errors[0].code, "AGENT_ERROR");
+    assert!(!blocked.lock.held);
 
     // 反例：入口在 ~/.local/bin 但符号链接指向 Homebrew Cellar，始终 brew unsupported。
     let brew = elements
@@ -883,7 +875,7 @@ fn agent_status_launcher_symlink_native_managed_and_system_entry_counterexample(
     let brew_blocked = execute(
         &ctx,
         &request(
-            "agents:plan",
+            "agents:apply",
             &[
                 "--only",
                 "agents:brew-launcher-agent",
@@ -894,6 +886,48 @@ fn agent_status_launcher_symlink_native_managed_and_system_entry_counterexample(
     );
     assert!(!brew_blocked.ok);
     assert_eq!(brew_blocked.errors[0].code, "AGENT_ERROR");
+    assert!(!brew_blocked.lock.held);
+    assert!(
+        !ctx.home_dir.join("launcher-marker").exists(),
+        "不可管理来源的 apply 拒绝不得执行任何命令"
+    );
+
+    // native launcher 正向路径由真实 scoped apply 覆盖：upgrade 执行命令并审计，
+    // uninstall 真实移除符号链接且通过 exit-0 后结果核验。
+    let upgraded = execute(
+        &ctx,
+        &request(
+            "agents:apply",
+            &["--only", "agents:launcher-agent", "--action", "upgrade"],
+        ),
+    );
+    assert!(upgraded.ok, "{:?}", upgraded.errors);
+    assert!(upgraded.lock.held);
+    assert_eq!(
+        std::fs::read(ctx.home_dir.join("launcher-marker")).unwrap(),
+        b"upgrade"
+    );
+    let uninstalled = execute(
+        &ctx,
+        &request(
+            "agents:apply",
+            &["--only", "agents:launcher-agent", "--action", "uninstall"],
+        ),
+    );
+    assert!(uninstalled.ok, "{:?}", uninstalled.errors);
+    assert!(
+        !native_link.exists(),
+        "uninstall 成功后 launcher 符号链接必须消失"
+    );
+    let runs = execute(&ctx, &request("runs:get", &["--run", "test-run-1"]));
+    let operation_types: Vec<&str> = runs.data["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|op| op["operation_type"].as_str().unwrap())
+        .collect();
+    assert!(operation_types.contains(&"agents:upgrade"));
+    assert!(operation_types.contains(&"agents:uninstall"));
     let _ = std::fs::remove_dir_all(&base);
 }
 
@@ -1029,7 +1063,8 @@ fn dry_run_and_invalid_input_do_not_initialize_store() {
             ],
         ),
     );
-    assert!(dry.ok);
+    assert!(!dry.ok, "--dry-run 已退役，必须拒绝: {:?}", dry.data);
+    assert_eq!(dry.errors[0].code, "USAGE_ERROR");
     let invalid = execute(
         &context,
         &request(

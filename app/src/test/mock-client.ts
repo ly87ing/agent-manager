@@ -385,129 +385,6 @@ function demoEnvelopes(): Record<string, Envelope> {
     { command: "secrets.status" },
   );
 
-  const mcpPlan = makeEnvelope(
-    {
-      domain: "mcp",
-      actions: [
-        {
-          op: "write-file",
-          element: "mcp:chrome-devtools",
-          target: "/Users/demo/.claude.json",
-          risk: "write-local",
-          before_digest: "sha256:dd9d3c8ae2687d47a8e7543d3c8c43ef8dd9f744e3a3e2ce9aa9ad7a90de12a2",
-          after_digest: "sha256:89b4b5c130887752148845080715867e6c3e6f40e69189067dd7d92db8b40c36",
-          backup_path: null,
-          cmd: null,
-          note: "注入/收敛 mcp:chrome-devtools 到 agent 'claude-code'（before=目标文件整体 digest，after=注入段规范形 digest）",
-        },
-        {
-          op: "write-file",
-          element: "mcp:chrome-devtools",
-          target: "/Users/demo/.kimi-code/mcp.json",
-          risk: "write-local",
-          before_digest: "sha256:60c71c56a3bead4e5535e8d2a6fce94bfbde198c428679f14351078d4cf7fdc0",
-          after_digest: "sha256:89b4b5c130887752148845080715867e6c3e6f40e69189067dd7d92db8b40c36",
-          backup_path: null,
-          cmd: null,
-          note: "注入/收敛 mcp:chrome-devtools 到 agent 'kimi-code'",
-        },
-      ],
-      summary: { read: 0, "write-local": 2, "exec-local": 0, network: 0, "install-remove": 0 },
-    },
-    { command: "mcp.plan" },
-  );
-
-  const skillsPlan = makeEnvelope(
-    {
-      domain: "skills",
-      actions: [
-        {
-          op: "symlink",
-          element: "skill:agent-skills/safe-merge-review",
-          target: "/Users/demo/.claude/skills/safe-merge-review",
-          risk: "exec-local",
-          before_digest: null,
-          after_digest: null,
-          backup_path: null,
-          cmd: null,
-          note: "链接重定向到 /repo/agent-skill/repositories/agent-skills/safe-merge-review",
-        },
-        {
-          op: "unlink",
-          element: "skill:agent-skills/dead-one",
-          target: "/Users/demo/.claude/skills/dead-one",
-          risk: "exec-local",
-          before_digest: null,
-          after_digest: null,
-          backup_path: null,
-          cmd: null,
-          note: "移除死链",
-        },
-      ],
-      summary: { read: 0, "write-local": 0, "exec-local": 2, network: 0, "install-remove": 0 },
-    },
-    { command: "skills.plan" },
-  );
-
-  const rulesPlan = makeEnvelope(
-    {
-      domain: "rules",
-      actions: [
-        {
-          op: "write-file",
-          element: "rules:claude_global",
-          target: "/Users/demo/.claude/CLAUDE.md",
-          risk: "write-local",
-          before_digest: "aaaa3c8ae2687d47a8e7543d3c8c43ef8dd9f744e3a3e2ce9aa9ad7a90de12a2",
-          after_digest: "bbbb4b5c130887752148845080715867e6c3e6f40e69189067dd7d92db8b40c36",
-          backup_path: null,
-          cmd: null,
-          note: "同步 rules:claude_global 规则文件",
-        },
-      ],
-      summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 },
-    },
-    { command: "rules.plan" },
-  );
-
-  const agentsPlan = makeEnvelope(
-    {
-      domain: "agents",
-      actions: [
-        {
-          op: "run-cmd",
-          element: "agents:claude-code",
-          target: null,
-          risk: "network",
-          before_digest: null,
-          after_digest: null,
-          backup_path: null,
-          cmd: "claude update",
-          note: "升级到上游最新 2.1.3（不锁版本）",
-        },
-        {
-          op: "install",
-          element: "agents:qoder",
-          target: null,
-          risk: "install-remove",
-          before_digest: null,
-          after_digest: null,
-          backup_path: null,
-          cmd: "npm install -g qoder",
-          note: "安装缺失 agent",
-        },
-      ],
-      summary: { read: 0, "write-local": 0, "exec-local": 0, network: 1, "install-remove": 1 },
-    },
-    { command: "agents.plan" },
-  );
-
-  const emptyPlan = (domain: string) =>
-    makeEnvelope(
-      { domain, actions: [], summary: { read: 0, "write-local": 0, "exec-local": 0, network: 0, "install-remove": 0 } },
-      { command: `${domain}.plan` },
-    );
-
   return {
     "system:audit": audit,
     "agents:status": agentsStatus,
@@ -566,31 +443,6 @@ function demoEnvelopes(): Record<string, Envelope> {
       { command: "hooks.status" },
     ),
     "aliases:status": makeEnvelope({ domain: "aliases", elements: [] }, { command: "aliases.status" }),
-    "mcp:plan": mcpPlan,
-    "skills:plan": skillsPlan,
-    "rules:plan": rulesPlan,
-    "agents:plan": agentsPlan,
-    "hooks:plan": makeEnvelope(
-      {
-        domain: "hooks",
-        actions: [
-          {
-            op: "write-file",
-            element: "hooks:claude",
-            target: "/Users/demo/.claude/settings.json",
-            risk: "write-local",
-            before_digest: "aaaa3c8ae2687d47a8e7543d3c8c43ef8dd9f744e3a3e2ce9aa9ad7a90de12a2",
-            after_digest: "cccc5d5e240998863259085b2b52df0f1e0a855f4b4b4d3d0bb0be8ba91ef23b3",
-            backup_path: null,
-            cmd: null,
-            note: "同步 hooks:claude 钩子文件",
-          },
-        ],
-        summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 },
-      },
-      { command: "hooks.plan" },
-    ),
-    "aliases:plan": emptyPlan("aliases"),
     "system:refresh-upstream": makeEnvelope(
       {
         domain: "system",
@@ -721,21 +573,19 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
     aliases: "shell-aliases",
   };
 
-  const recordRun = (runId: string, _command: string, dryRun: boolean): void => {
-    runs.unshift(makeRunEntry({ run_id: runId, last_at: new Date().toISOString(), operations: dryRun ? 1 : 2 }));
+  const recordRun = (runId: string, _command: string): void => {
+    runs.unshift(makeRunEntry({ run_id: runId, last_at: new Date().toISOString(), operations: 2 }));
   };
 
-  const applyEnvelope = (domain: string, args: string[], runId: string): Envelope => {
-    const dryRun = args.includes("--dry-run");
-    recordRun(runId, `${domain}.apply`, dryRun);
+  const applyEnvelope = (domain: string, _args: string[], runId: string): Envelope => {
+    recordRun(runId, `${domain}.apply`);
     return makeEnvelope(
       {
         domain,
-        dry_run: dryRun,
         steps: [{ name: applyStepNames[domain] ?? `${domain}-sync`, ok: true, exit_code: 0 }],
         skipped: [],
       },
-      { command: `${domain}.apply`, run_id: runId, lock: { held: !dryRun, pid: dryRun ? null : 4242 } },
+      { command: `${domain}.apply`, run_id: runId, lock: { held: true, pid: 4242 } },
     );
   };
 
@@ -767,7 +617,7 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
       if (command === "runs:get") {
         const id = args[args.indexOf("--run") + 1];
         return makeEnvelope(
-          { run_id: id, operations: [{ id: "op-mock", operation_type: "mcp:apply", target: "mcp:grok-search", detail: { dry_run: false }, created_at: "2026-09-05T23:59:00Z" }] },
+          { run_id: id, operations: [{ id: "op-mock", operation_type: "mcp:apply", target: "mcp:grok-search", detail: { result: "ok" }, created_at: "2026-09-05T23:59:00Z" }] },
           { command: "runs.get" },
         );
       }
@@ -789,47 +639,6 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
           cloned.errors = [
             { code: "OFFLINE_NETWORK_DENIED", element: null, message: "system:refresh-upstream 需要网络探测，offline 模式下拒绝执行" },
           ];
-        }
-      }
-      if (command.endsWith(":plan")) {
-        const onlyList: string[] = [];
-        for (let i = 0; i < args.length; i++) {
-          if (args[i] === "--only" && i + 1 < args.length) {
-            onlyList.push(args[i + 1]);
-          }
-        }
-        const agentIdx = args.indexOf("--agent");
-        const agent = agentIdx !== -1 ? args[agentIdx + 1] : null;
-
-        if (onlyList.length > 0 || agent) {
-          const data = cloned.data as { actions?: Array<Record<string, unknown>>; summary?: Record<string, number> };
-          if (data && Array.isArray(data.actions)) {
-            if (onlyList.length > 0) {
-              data.actions = data.actions.filter((act) =>
-                onlyList.some((o) => {
-                  const el = act.element as string;
-                  if (el === o) return true;
-                  if (typeof el === "string") {
-                    if (el.endsWith(`:${o}`) || el.startsWith(`${o}/`) || el.replace(/^[^:]+:/, "") === o) return true;
-                  }
-                  return false;
-                })
-              );
-            }
-            if (agent && command === "skills:plan") {
-              data.actions = data.actions.filter((act) =>
-                typeof act.target === "string" ? act.target.includes(agent) : (typeof act.note === "string" && act.note.includes(agent))
-              );
-            }
-            if (data.summary) {
-              const summary: Record<string, number> = { read: 0, "write-local": 0, "exec-local": 0, network: 0, "install-remove": 0 };
-              for (const act of data.actions) {
-                const risk = act.risk as string;
-                if (risk in summary) summary[risk]++;
-              }
-              data.summary = summary;
-            }
-          }
         }
       }
       if (command === "system:refresh-upstream" && args[0] === "--only" && typeof args[1] === "string") {

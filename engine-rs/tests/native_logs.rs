@@ -27,11 +27,11 @@ fn req(command: &str, args: &[&str]) -> Request {
 }
 
 #[test]
-fn readonly_and_dry_run_commands_never_create_logs_directory() {
+fn readonly_commands_never_create_logs_directory() {
     let (base, ctx) = temp_ctx("readonly-zero-write");
     let logs_dir = ctx.data_dir.join("logs");
 
-    // 1. 各类只读请求
+    // 各类只读请求
     let env_status = execute(&ctx, &req("agents:status", &[]));
     assert!(env_status.ok);
     assert!(env_status.log_file.is_none());
@@ -47,7 +47,16 @@ fn readonly_and_dry_run_commands_never_create_logs_directory() {
     assert!(env_runs.log_file.is_none());
     assert!(!logs_dir.exists(), "runs:list 不应创建 logs 目录");
 
-    // 2. dry-run 写动作也必须保持零写
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn rejected_dry_run_mutating_command_is_logged_without_creating_store() {
+    let (base, ctx) = temp_ctx("dry-run-logged");
+    let logs_dir = ctx.data_dir.join("logs");
+
+    // dry-run 已退役且不再享有日志豁免：被拒绝的写动作按失败写请求统一记录
+    // 诊断日志；日志不是目标状态——SQLite 库仍不得创建。
     let env_dry = execute(
         &ctx,
         &req(
@@ -63,11 +72,24 @@ fn readonly_and_dry_run_commands_never_create_logs_directory() {
             ],
         ),
     );
-    assert!(env_dry.ok);
-    assert!(env_dry.log_file.is_none());
     assert!(
-        !logs_dir.exists(),
-        "带 --dry-run 的 policy:set 不应创建 logs 目录"
+        !env_dry.ok,
+        "--dry-run 已退役，必须拒绝: {:?}",
+        env_dry.data
+    );
+    assert_eq!(env_dry.errors[0].code, "USAGE_ERROR");
+    assert!(env_dry.log_file.is_some(), "失败写动作必须记录诊断日志");
+    let log_path = PathBuf::from(env_dry.log_file.as_ref().unwrap());
+    assert!(log_path.exists());
+    assert!(log_path.starts_with(&logs_dir));
+    let content = std::fs::read_to_string(&log_path).unwrap();
+    let parsed: Value = serde_json::from_str(content.trim()).unwrap();
+    assert_eq!(parsed["command"], "policy:set");
+    assert_eq!(parsed["ok"], false);
+    assert_eq!(parsed["error_code"], "USAGE_ERROR");
+    assert!(
+        !store::db_path(&ctx).exists(),
+        "诊断日志不属于目标状态：不得创建 SQLite 库"
     );
 
     let _ = std::fs::remove_dir_all(&base);

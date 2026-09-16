@@ -25,7 +25,6 @@ pub fn diagnostic(code: &str, element: Option<String>, message: String) -> Diagn
 
 #[derive(Serialize, Debug)]
 pub struct Mode {
-    pub dry_run: bool,
     pub offline: bool,
 }
 

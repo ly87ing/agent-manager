@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { fireEvent, waitFor } from "@testing-library/react";
 import McpPage from "../pages/McpPage";
-import { makeApplyResult, makeElement, makeEnvelope, makeFreshness, makePlanAction, makePolicyData } from "./fixtures";
+import { makeApplyResult, makeElement, makeEnvelope, makeFreshness, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 import type { Envelope } from "../lib/contract";
 
 /**
- * MCP 定义覆盖层：新增/编辑只保存整条定义（_replace，不写 enabled、不 plan/apply）、
+ * MCP 定义覆盖层：新增/编辑只保存整条定义（_replace，不写 enabled、不 apply/preflight）、
  * 取消零写入、移除（overlay=policy:delete / 基线=tombstone {"_delete": true}）。
  */
 
@@ -67,23 +67,12 @@ function routes(): Record<string, Envelope> {
     ),
     "policy:set": makeEnvelope(makePolicyData({ layers: null, effective: null, attribution: null, layer: "sqlite", key: "mcp.definitions.x", value: null, path: "/native-manager.db" }), { command: "policy.set" }),
     "policy:delete": makeEnvelope(makePolicyData({ layers: null, effective: null, attribution: null, layer: "sqlite", key: "mcp.definitions.my-proxy", value: null, path: "/native-manager.db" }), { command: "policy.delete" }),
-    "mcp:plan": makeEnvelope(
-      {
-        domain: "mcp",
-        actions: [
-          makePlanAction({ op: "write-file", element: "mcp:my-proxy", target: "/tmp/demo/.claude.json", risk: "write-local", note: "注入 my-proxy" }),
-          makePlanAction({ op: "write-file", element: "mcp:demo-srv", target: "/tmp/demo/.claude.json", risk: "write-local", note: "注入 demo-srv" }),
-        ],
-        summary: { read: 0, "write-local": 2, "exec-local": 0, network: 0, "install-remove": 0 },
-      },
-      { command: "mcp.plan" },
-    ),
     "mcp:apply": makeEnvelope(makeApplyResult({ domain: "mcp" }), { command: "mcp.apply" }),
   };
 }
 
 describe("MCP 服务定义覆盖层", () => {
-  it("新增服务：只保存整条定义到资源库（_replace），不写 enabled、不 plan/apply", async () => {
+  it("新增服务：只保存整条定义到资源库（_replace），不写 enabled、不 apply/preflight", async () => {
     const { calls } = renderWithEngine(<McpPage />, routes());
 
     await userEvent.click(await screen.findByTestId("add-server-button"));
@@ -275,31 +264,39 @@ describe("MCP 服务定义覆盖层", () => {
     expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(0);
   });
 
-  it("移除服务：单级预览确认（无前置确认弹窗、无墓碑写入），plan/apply 携带 --only mcp:<name> --action remove", async () => {
+  it("移除服务：点击先打开 ConfirmModal，取消时零 apply/零 policy:set", async () => {
     const { calls } = renderWithEngine(<McpPage />, routes());
 
-    // overlay 条目：my-proxy 定义在 local 层——同一流程，不再区分覆盖层/基线写墓碑
     await userEvent.click(await screen.findByTestId("remove-server-mcp:my-proxy"));
-    let dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
-    expect(screen.queryByTestId("confirm-modal-input")).toBeNull();
-    expect(dialog).toHaveTextContent("清理 1 条受影响的助手配置");
-    let planCall = calls.find((call) => call.command === "mcp:plan");
-    expect(planCall!.args).toEqual(["--only", "mcp:my-proxy", "--action", "remove"]);
-    await userEvent.click(screen.getByTestId("plan-confirm-button"));
-    const applyCall = calls.find((call) => call.command === "mcp:apply");
-    expect(applyCall).toBeDefined();
-    expect(applyCall!.args).toEqual(["--only", "mcp:my-proxy", "--action", "remove"]);
+    const dialog = await screen.findByRole("dialog", { name: "删除服务 my-proxy" });
+    expect(dialog).toHaveTextContent(/但不会卸载软件/);
+    expect(screen.getByTestId("confirm-modal-input")).toBeInTheDocument();
 
-    // 基线条目：chrome-devtools 只在基线——同样只走 plan 预览；取消零写
-    await userEvent.click(await screen.findByTestId("remove-server-mcp:chrome-devtools"));
-    dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
-    planCall = calls.filter((call) => call.command === "mcp:plan").pop();
-    expect(planCall!.args).toEqual(["--only", "mcp:chrome-devtools", "--action", "remove"]);
     await userEvent.click(screen.getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
-    // 全程无 policy:set 墓碑/覆盖写入
+    expect(calls.some((call) => call.command === "mcp:apply")).toBe(false);
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
-    expect(calls.filter((call) => call.command === "mcp:apply")).toHaveLength(1);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
+  });
+
+  it("移除服务：输入服务名确认后 mcp:apply --only <name> --action remove（带 run_id），无 plan、零 policy:set", async () => {
+    const { calls } = renderWithEngine(<McpPage />, routes());
+
+    await userEvent.click(await screen.findByTestId("remove-server-mcp:my-proxy"));
+    await screen.findByRole("dialog", { name: "删除服务 my-proxy" });
+    await userEvent.type(screen.getByTestId("confirm-modal-input"), "my-proxy");
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "mcp:apply")).toBe(true));
+    const applyCalls = calls.filter((call) => call.command === "mcp:apply");
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0].args).toEqual(["--only", "mcp:my-proxy", "--action", "remove"]);
+    expect(applyCalls[0].args).not.toContain("--dry-run");
+    expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
 

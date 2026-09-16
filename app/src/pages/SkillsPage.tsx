@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ArrowLeft, Plus } from "lucide-react";
 import { toast } from "sonner";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { SkillAssignmentRow } from "../components/SkillAssignmentRow";
@@ -9,16 +10,15 @@ import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDial
 import type { EngineElement, PolicyData, PolicyLayers, StatusData } from "../lib/contract";
 import {
   agentCellsOf,
-  type SkillAgentCell,
   type SkillCollectionObserved,
   type SkillCollectionSpec,
   type SkillObserved,
   type SkillSpec,
 } from "../lib/observed";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
+import { useDirectApply } from "../lib/useDirectApply";
 import { OVERLAY_COPY } from "../lib/ui-copy";
 import { useEngineQuery } from "../lib/queries";
-import { useExecuteApply, usePlanPreview } from "../lib/usePlanPreview";
 import { cn } from "../lib/utils";
 
 function isCollection(element: EngineElement): boolean {
@@ -47,9 +47,14 @@ export default function SkillsPage({
   const [showAddForm, setShowAddForm] = useState(false);
   const [editing, setEditing] = useState<EngineElement | null>(null);
 
-  const preview = usePlanPreview();
-  const executeApply = useExecuteApply();
+  const directApply = useDirectApply();
   const definitionOps = useDefinitionOps({ section: "skills", domain: "skills" });
+
+  const [pendingRemove, setPendingRemove] = useState<
+    | { kind: "collection"; element: EngineElement }
+    | { kind: "skill"; element: EngineElement; agent: string }
+    | null
+  >(null);
 
   const tabRefs = useRef<Record<"collections" | "skills", HTMLButtonElement | null>>({
     collections: null,
@@ -111,55 +116,32 @@ export default function SkillsPage({
 
   const collName = (collection: EngineElement) => collection.id.replace(/^skill:/, "");
 
-  const openCollectionAction = (
-    collection: EngineElement,
-    action: "update" | "enable" | "disable" | "remove",
-    title: string,
-    subtitle: string,
-    confirmLabel: string,
-  ) => {
-    const args = ["--only", collection.id, "--action", action];
-    preview.open({
-      title,
-      subtitle,
-      planCommands: [{ command: "skills:plan", args }],
-      confirmLabel,
-      // 删除集合是单级确认：install-remove 风险时须在预览里输入集合名
-      requireConfirmText: action === "remove" ? collName(collection) : undefined,
-      execute: executeApply({ command: "skills:apply", label: title, extraArgs: args }),
-    });
+  /** 集合操作：按钮严格来自卡片动作，apply 携带精确 --only/--action；remove 需先经独立 ConfirmModal。 */
+  const runCollectionAction = (collection: EngineElement, action: "update" | "enable" | "disable" | "remove", title: string) => {
+    if (action === "remove") {
+      setPendingRemove({ kind: "collection", element: collection });
+      return;
+    }
+    void directApply.apply({ command: "skills:apply", label: title, args: ["--only", collection.id, "--action", action] });
   };
 
   const handleUpdateCollection = (c: EngineElement) =>
-    openCollectionAction(c, "update", `更新集合 ${collName(c)}`, "更新集合资源库中的技能定义，不会改动助手当前已安装的版本。", "立即更新");
+    runCollectionAction(c, "update", `更新集合 ${collName(c)}`);
 
   const handleToggleCollection = (c: EngineElement, action: "enable" | "disable") =>
-    openCollectionAction(
-      c,
-      action,
-      `${action === "enable" ? "启用" : "停用"}集合 ${collName(c)}`,
-      action === "enable" ? "启用集合，恢复原来已启用的分配。" : "停用集合，撤下已分配入口。",
-      "立即执行",
-    );
+    runCollectionAction(c, action, `${action === "enable" ? "启用" : "停用"}集合 ${collName(c)}`);
 
-  const handleRemoveCollection = (c: EngineElement) => {
-    // 预览说明里给出受影响分配数（仅 assigned=true）与源目录保留语义，单级确认（无前置弹窗）
-    const affected = skills
-      .filter((skill) => (skill.spec as SkillSpec).collection === collName(c))
-      .reduce((count, skill) => count + Object.values(agentCellsOf(skill)).filter((cell) => (cell as SkillAgentCell).assigned === true).length, 0);
-    openCollectionAction(
-      c,
-      "remove",
-      `删除集合 ${collName(c)}`,
-      `从配置中移除集合，并清理 ${affected} 条受影响的助手分配；集合源目录保留在本地，不会被删除。`,
-      "立即删除",
-    );
-  };
+  const handleRemoveCollection = (c: EngineElement) =>
+    runCollectionAction(c, "remove", `删除集合 ${collName(c)}`);
 
+  /** 技能 × 助手 操作：apply 携带精确 --only/--action/--agent；remove 需先经独立 ConfirmModal。 */
   const handleSkillAction = (skill: EngineElement, agent: string, action: string) => {
+    if (action === "remove") {
+      setPendingRemove({ kind: "skill", element: skill, agent });
+      return;
+    }
     const spec = skill.spec as SkillSpec;
     const skillName = spec.name ?? skill.id;
-    const args = ["--only", skill.id, "--action", action, "--agent", agent];
     const labelMap: Record<string, string> = {
       add: "添加分配",
       update: "更新",
@@ -167,14 +149,11 @@ export default function SkillsPage({
       disable: "停用",
       remove: "删除分配",
     };
-    const actionLabel = labelMap[action] ?? action;
-    const label = `${actionLabel} ${skillName} @ ${agent}`;
-    preview.open({
-      title: label,
-      subtitle: "仅同步此技能在对应助手中的配置与文件链接。",
-      planCommands: [{ command: "skills:plan", args }],
-      confirmLabel: "立即执行",
-      execute: executeApply({ command: "skills:apply", label, extraArgs: args }),
+    const label = `${labelMap[action] ?? action} ${skillName} @ ${agent}`;
+    void directApply.apply({
+      command: "skills:apply",
+      label,
+      args: ["--only", skill.id, "--action", action, "--agent", agent],
     });
   };
 
@@ -207,6 +186,27 @@ export default function SkillsPage({
   const emptyAssignmentsText = allCollectionsUncached
     ? "集合资源库尚未拉取：请到「集合列表」点击「更新资源库」，拉取成功后技能会出现在这里"
     : "无符合筛选条件的技能分配";
+
+  const confirmRemove = () => {
+    if (!pendingRemove) return;
+    if (pendingRemove.kind === "collection") {
+      const name = collName(pendingRemove.element);
+      void directApply.apply({
+        command: "skills:apply",
+        label: `删除集合 ${name}`,
+        args: ["--only", pendingRemove.element.id, "--action", "remove"],
+      });
+    } else {
+      const spec = pendingRemove.element.spec as SkillSpec;
+      const skillName = spec.name ?? pendingRemove.element.id;
+      void directApply.apply({
+        command: "skills:apply",
+        label: `删除分配 ${skillName} @ ${pendingRemove.agent}`,
+        args: ["--only", pendingRemove.element.id, "--action", "remove", "--agent", pendingRemove.agent],
+      });
+    }
+    setPendingRemove(null);
+  };
 
   return (
     <div className="space-y-6">
@@ -363,9 +363,7 @@ export default function SkillsPage({
                 ))}
               </tbody>
             </table>
-            {assignmentRows.length === 0 && (
-              <p data-testid="skills-empty-state" className="py-8 text-center text-sm text-slate-400">{emptyAssignmentsText}</p>
-            )}
+            {assignmentRows.length === 0 && <p data-testid="skills-empty-state" className="py-8 text-center text-sm text-slate-400">{emptyAssignmentsText}</p>}
           </div>
         </div>
       )}
@@ -384,11 +382,10 @@ export default function SkillsPage({
             setEditing(null);
             const isNew = !editing;
             void definitionOps
-              .saveAndApply({
+              .saveDefinition({
                 name,
                 definition,
                 isNew,
-                elementId: `skill:${name}`,
                 complete,
               })
               .then(() => {
@@ -400,8 +397,28 @@ export default function SkillsPage({
         />
       )}
 
-      {preview.modal}
       {definitionOps.modals}
+
+      {pendingRemove && (
+        <ConfirmModal
+          title={
+            pendingRemove.kind === "collection"
+              ? `删除集合 ${collName(pendingRemove.element)}`
+              : `删除分配 ${(pendingRemove.element.spec as SkillSpec).name ?? pendingRemove.element.id} @ ${pendingRemove.agent}`
+          }
+          description={
+            pendingRemove.kind === "collection"
+              ? "删除集合会清理已分配给各助手的入口，源目录保留。确认后执行。"
+              : "只清理该助手的入口。确认后执行。"
+          }
+          risk={pendingRemove.kind === "collection" ? "install-remove" : "write-local"}
+          requireText={pendingRemove.kind === "collection" ? collName(pendingRemove.element) : undefined}
+          confirmLabel="确认删除"
+          executing={directApply.executing}
+          onConfirm={confirmRemove}
+          onClose={() => setPendingRemove(null)}
+        />
+      )}
     </div>
   );
 }

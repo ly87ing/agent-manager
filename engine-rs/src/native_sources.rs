@@ -17,7 +17,6 @@ use std::collections::HashSet;
 use rusqlite::{Connection, TransactionBehavior};
 use serde_json::{json, Value};
 
-use crate::envelope::diagnostic;
 use crate::native::{reject_secret_text, Context, DispatchError, DispatchResult, Request};
 use crate::native_mcp::model::{now_iso, sha256_hex};
 use crate::store;
@@ -535,17 +534,15 @@ fn source_item(key: &str, value: &str) -> Value {
 struct SourcesArgs {
     key: Option<String>,
     value: Option<String>,
-    dry_run: bool,
 }
 
-/// 严格参数解析：只接受 --key/--value/--dry-run，拒绝位置参数、未知或重复
-/// flag、缺值与以 `--` 开头的值。解析错误一律使用不含参数内容的固定消息，
-/// 避免误传的规则正文经错误包络与诊断日志泄漏。
+/// 严格参数解析：只接受 --key/--value，拒绝位置参数、未知或重复 flag、缺值
+/// 与以 `--` 开头的值（已退役的 --dry-run 按未知选项一律拒绝）。解析错误一律
+/// 使用不含参数内容的固定消息，避免误传的规则正文经错误包络与诊断日志泄漏。
 fn parse_args(req: &Request) -> Result<SourcesArgs, DispatchError> {
     let mut seen: HashSet<&str> = HashSet::new();
     let mut key: Option<String> = None;
     let mut value: Option<String> = None;
-    let mut dry_run = false;
 
     let mut i = 0;
     while i < req.args.len() {
@@ -558,10 +555,6 @@ fn parse_args(req: &Request) -> Result<SourcesArgs, DispatchError> {
             return Err(source_error("sources 参数错误：重复提供同一参数"));
         }
         match flag {
-            "--dry-run" => {
-                dry_run = true;
-                i += 1;
-            }
             "--key" | "--value" => {
                 i += 1;
                 let val = req
@@ -580,25 +573,18 @@ fn parse_args(req: &Request) -> Result<SourcesArgs, DispatchError> {
             }
             _ => {
                 return Err(source_error(
-                    "sources 参数错误：未知选项（只接受 --key/--value/--dry-run）",
+                    "sources 参数错误：未知选项（只接受 --key/--value）",
                 ))
             }
         }
     }
-    Ok(SourcesArgs {
-        key,
-        value,
-        dry_run,
-    })
+    Ok(SourcesArgs { key, value })
 }
 
 pub(crate) fn get(ctx: &Context, req: &Request) -> DispatchResult {
     let args = parse_args(req)?;
     if args.value.is_some() {
         return Err(source_error("sources:get 不接受 --value"));
-    }
-    if args.dry_run {
-        return Err(source_error("sources:get 不接受 --dry-run"));
     }
     let key = args.key.ok_or_else(|| {
         source_error("sources:get 需要 --key <rules|hooks|aliases|rules.*|hooks.*|aliases.shell>")
@@ -799,16 +785,6 @@ pub(crate) fn set(ctx: &Context, req: &Request) -> DispatchResult {
     if is_rules_key {
         let new_value = validate_rules_value(&value)?;
         let new_revision = revision_of(&new_value);
-        if args.dry_run {
-            return Ok((
-                json!({ "sources": [source_item(&key, &new_value)] }),
-                vec![diagnostic(
-                    "DRY_RUN",
-                    None,
-                    format!("dry-run：未写入 {key}"),
-                )],
-            ));
-        }
         let mut conn = store::open_write(ctx).map_err(internal)?;
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -843,16 +819,6 @@ pub(crate) fn set(ctx: &Context, req: &Request) -> DispatchResult {
     if is_alias_key {
         let new_value = validate_alias_value(&key, &value)?;
         let new_revision = revision_of(&new_value);
-        if args.dry_run {
-            return Ok((
-                json!({ "sources": [alias_source_item(&key, &new_value).map_err(internal)?] }),
-                vec![diagnostic(
-                    "DRY_RUN",
-                    None,
-                    format!("dry-run：未写入 {key}"),
-                )],
-            ));
-        }
         let mut conn = store::open_write(ctx).map_err(internal)?;
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -886,16 +852,6 @@ pub(crate) fn set(ctx: &Context, req: &Request) -> DispatchResult {
 
     let new_value = validate_hooks_value(&key, &value)?;
     let new_revision = revision_of(&new_value);
-    if args.dry_run {
-        return Ok((
-            json!({ "sources": [hook_source_item(&key, &new_value).map_err(internal)?] }),
-            vec![diagnostic(
-                "DRY_RUN",
-                None,
-                format!("dry-run：未写入 {key}"),
-            )],
-        ));
-    }
     let mut conn = store::open_write(ctx).map_err(internal)?;
     let tx = conn
         .transaction_with_behavior(TransactionBehavior::Immediate)

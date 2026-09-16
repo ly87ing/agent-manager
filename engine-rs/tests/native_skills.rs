@@ -97,27 +97,24 @@ fn skills_collection_and_skill_lifecycle_and_cascading() {
     assert!(inbox.iter().any(|s| s == "alpha"));
     assert!(inbox.iter().any(|s| s == "beta"));
 
-    // 2. plan: add alpha @ codex
-    let plan = execute(
-        &context,
-        &request(
-            "skills:plan",
-            &[
-                "--only",
-                "skill:test-skills/alpha",
-                "--action",
-                "add",
-                "--agent",
-                "codex",
-            ],
-        ),
-    );
-    assert!(plan.ok, "{:?}", plan.errors);
-    assert_eq!(plan.data["summary"]["exec-local"], 1);
+    // 2. 应用前 status 回读：alpha 在 codex 下未分配且目标入口不存在（零写保证）
     let codex_link = context.home_dir.join(".codex").join("skills").join("alpha");
-    assert!(!codex_link.exists(), "plan 不应写文件");
+    let pre = execute(&context, &request("skills:status", &[]));
+    assert!(pre.ok, "{:?}", pre.errors);
+    let pre_alpha = pre.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|el| el["id"] == "skill:test-skills/alpha")
+        .unwrap();
+    assert_eq!(pre_alpha["observed"]["agents"]["codex"]["assigned"], false);
+    assert_eq!(
+        pre_alpha["observed"]["agents"]["codex"]["state"],
+        "not-assigned"
+    );
+    assert!(!codex_link.exists(), "status 回读不应写文件");
 
-    // 3. dry-run apply: 不写文件与锁
+    // 3. --dry-run 已退役：严格拒绝、不取锁、目标与 DB 零变化
     let dry = execute(
         &context,
         &request(
@@ -133,9 +130,17 @@ fn skills_collection_and_skill_lifecycle_and_cascading() {
             ],
         ),
     );
-    assert!(dry.ok, "{:?}", dry.errors);
-    assert_eq!(dry.data["dry_run"], true);
-    assert!(!codex_link.exists(), "dry-run 不应写软连接");
+    assert!(!dry.ok, "--dry-run 必须被严格拒绝");
+    assert_eq!(dry.errors[0].code, "SKILL_ERROR");
+    assert!(dry.errors[0].message.contains("--dry-run"));
+    assert!(!dry.lock.held, "--dry-run 拒绝必须先于取锁");
+    assert!(!codex_link.exists(), "--dry-run 拒绝不得写软连接");
+    if let Some(conn) = store::open_readonly(&context).unwrap() {
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM skill_bindings", [], |r| r.get(0))
+            .unwrap_or(0);
+        assert_eq!(count, 0, "--dry-run 拒绝不得写入绑定");
+    }
 
     // 4. real apply: add alpha @ codex
     let apply = execute(
@@ -528,23 +533,20 @@ fn skills_disable_collection_does_not_affect_other_collections() {
     assert!(codex_skills.join("alpha").exists());
     assert!(codex_skills.join("beta").exists());
 
-    // 1. plan 集合 repo-a disable：必须只计划 unlink alpha，绝不能出现 beta
-    let plan = execute(
-        &ctx,
-        &request(
-            "skills:plan",
-            &["--only", "skill:repo-a", "--action", "disable"],
-        ),
-    );
-    assert!(plan.ok);
-    let actions = plan.data["actions"].as_array().unwrap();
-    let unlinks: Vec<_> = actions
+    // 1. 停用前 status 回读：repo-a/alpha 与 repo-b/beta 各自 linked，分属不同集合
+    let pre = execute(&ctx, &request("skills:status", &[]));
+    assert!(pre.ok, "{:?}", pre.errors);
+    let pre_elements = pre.data["elements"].as_array().unwrap();
+    let alpha_el = pre_elements
         .iter()
-        .filter(|a| a["op"] == "unlink")
-        .map(|a| a["target"].as_str().unwrap())
-        .collect();
-    assert_eq!(unlinks.len(), 1, "只应有一个 unlink 动作");
-    assert!(unlinks[0].ends_with("alpha"), "只能 unlink alpha");
+        .find(|el| el["id"] == "skill:repo-a/alpha")
+        .unwrap();
+    assert_eq!(alpha_el["observed"]["agents"]["codex"]["state"], "linked");
+    let beta_el = pre_elements
+        .iter()
+        .find(|el| el["id"] == "skill:repo-b/beta")
+        .unwrap();
+    assert_eq!(beta_el["observed"]["agents"]["codex"]["state"], "linked");
 
     // 2. apply 集合 repo-a disable：alpha 被撤下，beta 依然保留
     let dis_a = execute(
@@ -734,23 +736,7 @@ fn skills_enable_rejected_when_collection_or_agent_disabled() {
     );
     assert!(dis_coll.ok);
 
-    let plan_fail = execute(
-        &ctx,
-        &request(
-            "skills:plan",
-            &[
-                "--only",
-                "skill:coll-gate/skill-gate",
-                "--action",
-                "enable",
-                "--agent",
-                "codex",
-            ],
-        ),
-    );
-    assert!(!plan_fail.ok, "集合停用时 plan 必须拒绝");
-    assert_eq!(plan_fail.errors[0].code, "SKILL_ERROR");
-
+    // 集合停用时：preflight 在取锁前拒绝 apply，且不写任何目标
     let apply_fail = execute(
         &ctx,
         &request(
@@ -767,6 +753,15 @@ fn skills_enable_rejected_when_collection_or_agent_disabled() {
     );
     assert!(!apply_fail.ok, "集合停用时 apply 必须拒绝");
     assert_eq!(apply_fail.errors[0].code, "SKILL_ERROR");
+    assert!(!apply_fail.lock.held, "preflight 拒绝必须先于取锁");
+    assert!(
+        !ctx.home_dir
+            .join(".codex")
+            .join("skills")
+            .join("skill-gate")
+            .exists(),
+        "被拒绝的 enable 不得建立软连接"
+    );
 
     // 3. 恢复集合，但停用 Agent：尝试启用单技能仍必须被拒绝
     let en_coll = execute(
@@ -801,23 +796,7 @@ fn skills_enable_rejected_when_collection_or_agent_disabled() {
     );
     assert!(dis_agent.ok);
 
-    let plan_fail_2 = execute(
-        &ctx,
-        &request(
-            "skills:plan",
-            &[
-                "--only",
-                "skill:coll-gate/skill-gate",
-                "--action",
-                "enable",
-                "--agent",
-                "codex",
-            ],
-        ),
-    );
-    assert!(!plan_fail_2.ok, "Agent 停用时 plan 必须拒绝");
-    assert_eq!(plan_fail_2.errors[0].code, "SKILL_ERROR");
-
+    // Agent 停用时：preflight 同样在取锁前拒绝 apply，且不写任何目标
     let apply_fail_2 = execute(
         &ctx,
         &request(
@@ -834,6 +813,15 @@ fn skills_enable_rejected_when_collection_or_agent_disabled() {
     );
     assert!(!apply_fail_2.ok, "Agent 停用时 apply 必须拒绝");
     assert_eq!(apply_fail_2.errors[0].code, "SKILL_ERROR");
+    assert!(!apply_fail_2.lock.held, "preflight 拒绝必须先于取锁");
+    assert!(
+        !ctx.home_dir
+            .join(".codex")
+            .join("skills")
+            .join("skill-gate")
+            .exists(),
+        "被拒绝的 enable 不得建立软连接"
+    );
 
     let _ = std::fs::remove_dir_all(base);
 }
@@ -984,8 +972,8 @@ fn skills_snapshot_rejects_external_symlinks() {
 }
 
 #[test]
-fn skills_dry_run_with_existing_db_does_not_create_apply_lock() {
-    let (base, ctx) = temp_ctx("skills-dry-run-lock");
+fn skills_apply_rejects_dry_run_without_lock_or_writes() {
+    let (base, ctx) = temp_ctx("skills-dry-run-reject");
     let repo_dir = ctx.data_dir.join("repositories").join("dry-coll");
     let skill_dir = repo_dir.join("my-skill");
     std::fs::create_dir_all(&skill_dir).unwrap();
@@ -1014,8 +1002,19 @@ fn skills_dry_run_with_existing_db_does_not_create_apply_lock() {
 
     let lock_path = ctx.data_dir.join("agent-manager.apply.lock");
     assert!(!lock_path.exists(), "执行 dry-run 前不能有锁文件");
+    let skill_link = ctx.home_dir.join(".codex").join("skills").join("my-skill");
+    let count_ops = |ctx: &Context| -> i64 {
+        store::open_readonly(ctx)
+            .unwrap()
+            .map(|conn| {
+                conn.query_row("SELECT count(*) FROM operation_logs", [], |r| r.get(0))
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0)
+    };
+    let ops_baseline = count_ops(&ctx);
 
-    // 1. 测试单 Skill dry-run
+    // 1. 单 Skill --dry-run：严格拒绝、不取锁、目标与 DB 零变化
     let dry_skill = execute(
         &ctx,
         &request(
@@ -1031,14 +1030,17 @@ fn skills_dry_run_with_existing_db_does_not_create_apply_lock() {
             ],
         ),
     );
-    assert!(dry_skill.ok, "{:?}", dry_skill.errors);
-    assert!(dry_skill.data["dry_run"].as_bool().unwrap_or(false));
+    assert!(!dry_skill.ok, "--dry-run 必须被严格拒绝");
+    assert_eq!(dry_skill.errors[0].code, "SKILL_ERROR");
+    assert!(dry_skill.errors[0].message.contains("--dry-run"));
+    assert!(!dry_skill.lock.held, "--dry-run 拒绝必须先于取锁");
     assert!(
         !lock_path.exists(),
-        "DB 已存在时 skills:apply --dry-run 绝不能创建锁文件"
+        "DB 已存在时 skills:apply --dry-run 拒绝不得创建锁文件"
     );
+    assert!(!skill_link.exists(), "--dry-run 拒绝不得写软连接");
 
-    // 2. 测试集合级 dry-run
+    // 2. 集合级 --dry-run：同样拒绝且零写
     let dry_coll = execute(
         &ctx,
         &request(
@@ -1052,11 +1054,25 @@ fn skills_dry_run_with_existing_db_does_not_create_apply_lock() {
             ],
         ),
     );
-    assert!(dry_coll.ok, "{:?}", dry_coll.errors);
-    assert!(dry_coll.data["dry_run"].as_bool().unwrap_or(false));
+    assert!(!dry_coll.ok, "集合级 --dry-run 必须被严格拒绝");
+    assert_eq!(dry_coll.errors[0].code, "SKILL_ERROR");
+    assert!(!dry_coll.lock.held, "集合级 --dry-run 拒绝必须先于取锁");
     assert!(
         !lock_path.exists(),
-        "DB 已存在时 collection skills:apply --dry-run 绝不能创建锁文件"
+        "集合级 skills:apply --dry-run 拒绝不得创建锁文件"
+    );
+
+    // 3. DB 不变：无绑定写入、操作审计记录数与拒绝前一致
+    if let Some(conn) = store::open_readonly(&ctx).unwrap() {
+        let bindings: i64 = conn
+            .query_row("SELECT count(*) FROM skill_bindings", [], |r| r.get(0))
+            .unwrap_or(0);
+        assert_eq!(bindings, 0, "--dry-run 拒绝不得写入绑定");
+    }
+    assert_eq!(
+        count_ops(&ctx),
+        ops_baseline,
+        "--dry-run 拒绝不得新增操作审计记录"
     );
 
     let _ = std::fs::remove_dir_all(base);

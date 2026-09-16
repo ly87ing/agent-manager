@@ -128,7 +128,7 @@ describe("McpPage 发现未导入的服务器", () => {
     expect(within(section).getAllByRole("button", { name: /导入/ })).toHaveLength(3);
   });
 
-  it("导入流程：单级确认后 policy:set 保存定义（value 无明文），toast 提示按需执行动作，不 plan/apply", async () => {
+  it("导入流程：单级确认后 policy:set 保存定义（value 无明文），toast 提示按需执行动作，不 apply/preflight", async () => {
     const { calls } = renderWithEngine(<McpPage />, importRoutes());
     await userEvent.click(await screen.findByTestId("import-button-remote-claude"));
 
@@ -153,7 +153,7 @@ describe("McpPage 发现未导入的服务器", () => {
     // 反例断言：payload 全文不得出现明文哨兵或掩码残留
     expect(rawValue).not.toContain("<literal>");
     expect(rawValue).not.toContain("sentinel");
-    // 保存不执行：不触发 plan/apply
+    // 保存不执行：不触发 apply/preflight
     expect(calls.some((call) => call.command === "mcp:plan")).toBe(false);
     expect(calls.some((call) => call.command === "mcp:apply")).toBe(false);
   });

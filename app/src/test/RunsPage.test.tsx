@@ -26,7 +26,7 @@ function routes(): Record<string, Envelope | ((args: string[]) => Promise<Envelo
         {
           run_id: id,
           operations: [
-            { id: "op-1", operation_type: "mcp:apply", target: "mcp:grok-search", detail: { dry_run: false, result: "ok" }, created_at: "2026-09-05T23:59:00Z" },
+            { id: "op-1", operation_type: "mcp:apply", target: "mcp:grok-search", detail: { result: "ok" }, created_at: "2026-09-05T23:59:00Z" },
           ],
         },
         { command: "runs.get" },

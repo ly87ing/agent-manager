@@ -37,6 +37,20 @@ fn request_with_run(command: &str, args: &[&str], run_id: &str) -> Request {
     }
 }
 
+/// 公开 mcp:plan 退役后的零写预检探针：与 mcp:apply 共享同一份参数解析与
+/// preflight_check_state 纯读校验，不创建 lock/DB/目标文件/诊断日志。
+fn preflight(ctx: &Context, args: &[&str]) -> anyhow::Result<()> {
+    agent_manager_engine::native_mcp::preflight_apply(ctx, &request("mcp:apply", args))
+}
+
+/// 预检必须拒绝时返回完整错误链文本（替代旧 plan 信封上的 error_messages 断言）。
+fn preflight_err(ctx: &Context, args: &[&str]) -> String {
+    format!(
+        "{:#}",
+        preflight(ctx, args).expect_err("预检必须拒绝该动作")
+    )
+}
+
 fn error_messages(env: &agent_manager_engine::Envelope) -> String {
     env.errors
         .iter()
@@ -157,23 +171,20 @@ fn mcp_zero_write_guarantee_without_db() {
     assert!(!ctx.data_dir.exists(), "mcp:status 不得创建 data_dir");
     assert!(!ctx.home_dir.exists(), "mcp:status 不得创建 home_dir");
 
-    // 2. 无定义时执行 mcp:plan 预检拦截，依然保证零写
-    let plan_fail = execute(
+    // 2. 无定义时执行 mcp:apply 预检拦截，依然保证零写
+    let err = preflight_err(
         &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:nonexistent",
-                "--action",
-                "add",
-                "--agent",
-                "claude",
-            ],
-        ),
+        &[
+            "--only",
+            "mcp:nonexistent",
+            "--action",
+            "add",
+            "--agent",
+            "claude",
+        ],
     );
-    assert!(!plan_fail.ok, "不存在的服务定义应当拦截");
-    assert!(!ctx.data_dir.exists(), "失败的 mcp:plan 不得创建 data_dir");
+    assert!(err.contains("不存在"), "不存在的服务定义应当拦截: {err}");
+    assert!(!ctx.data_dir.exists(), "失败的预检不得创建 data_dir");
 
     // 写入一个合法的服务定义到 policy
     let set_res = execute(
@@ -192,11 +203,27 @@ fn mcp_zero_write_guarantee_without_db() {
     );
     assert!(set_res.ok, "写入定义应当成功: {:?}", set_res.errors);
 
-    // 3. mcp:plan 应生成动作计划，但不得在目标文件或 mcp_bindings 写数据
-    let plan_res = execute(
+    // 3. 预检通过（适用性零写探针），随后真实 scoped apply 并读回验证
+    preflight(
+        &ctx,
+        &[
+            "--only",
+            "mcp:test-server",
+            "--action",
+            "add",
+            "--agent",
+            "claude",
+        ],
+    )
+    .expect("add 预检应当通过");
+    assert!(
+        !ctx.home_dir.join(".claude.json").exists(),
+        "预检不得创建目标配置文件"
+    );
+    let apply_res = execute(
         &ctx,
         &request(
-            "mcp:plan",
+            "mcp:apply",
             &[
                 "--only",
                 "mcp:test-server",
@@ -207,21 +234,13 @@ fn mcp_zero_write_guarantee_without_db() {
             ],
         ),
     );
-    assert!(plan_res.ok, "mcp:plan 应当成功: {:?}", plan_res.errors);
-    let actions = plan_res.data["actions"].as_array().unwrap();
-    assert_eq!(actions.len(), 2);
-    assert_eq!(actions[0]["op"], "write-file");
-    assert_eq!(actions[1]["op"], "write-file");
-    assert!(actions[1]["target"]
-        .as_str()
-        .unwrap()
-        .starts_with("native-manager.db:mcp_bindings"));
+    assert!(apply_res.ok, "真实 apply 应当成功: {:?}", apply_res.errors);
     assert!(
-        !ctx.home_dir.join(".claude.json").exists(),
-        "mcp:plan 不得创建目标配置文件"
+        ctx.home_dir.join(".claude.json").exists(),
+        "真实 apply 必须创建目标配置文件"
     );
 
-    // 4. mcp:apply --dry-run 零写保证：不创建目标文件、不创建 lock 文件、不写入 mcp_bindings
+    // 4. mcp:apply --dry-run 已退役：必须在任何 lock/DB/目标写之前严格拒绝
     let dry_res = execute(
         &ctx,
         &request(
@@ -238,21 +257,21 @@ fn mcp_zero_write_guarantee_without_db() {
         ),
     );
     assert!(
-        dry_res.ok,
-        "mcp:apply --dry-run 应当成功: {:?}",
-        dry_res.errors
-    );
-    assert_eq!(dry_res.data["dry_run"], true);
-    assert!(
-        !ctx.home_dir.join(".claude.json").exists(),
-        "dry-run 不得创建目标配置文件"
+        !dry_res.ok,
+        "mcp:apply --dry-run 必须被拒绝: {:?}",
+        dry_res.data
     );
     assert!(
-        !ctx.data_dir.join("agent-manager.apply.lock").exists(),
-        "dry-run 不得创建 lock 文件"
+        error_messages(&dry_res).contains("已退役 --dry-run"),
+        "拒绝消息必须说明 --dry-run 已退役: {}",
+        error_messages(&dry_res)
+    );
+    assert!(
+        !dry_res.lock.held,
+        "dry-run 拒绝必须在任何 lock/DB/目标写之前发生（信封 lock.held 恒为 false）"
     );
 
-    // 检查 mcp_bindings 表不存在或没有任何行
+    // 检查 mcp_bindings 中不存在 dry-run 参数对应的新增行（本例中仅真实 apply 的一行）
     if store::db_path(&ctx).exists() {
         let conn = store::open_readonly(&ctx).unwrap().unwrap();
         let table_exists: bool = conn
@@ -267,7 +286,7 @@ fn mcp_zero_write_guarantee_without_db() {
             let row_count: i64 = conn
                 .query_row("SELECT count(*) FROM mcp_bindings", [], |r| r.get(0))
                 .unwrap_or(0);
-            assert_eq!(row_count, 0, "dry-run 不得向 mcp_bindings 写入数据");
+            assert_eq!(row_count, 1, "dry-run 拒绝不得向 mcp_bindings 写入数据");
         }
     }
 
@@ -1126,22 +1145,21 @@ fn mcp_test_symlink_rejection_target_and_ancestor() {
     #[cfg(unix)]
     std::os::unix::fs::symlink(&decoy, &claude_path).unwrap();
 
-    let plan_res = execute(
+    let err = preflight_err(
         &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:sym-server",
-                "--action",
-                "add",
-                "--agent",
-                "claude",
-            ],
-        ),
+        &[
+            "--only",
+            "mcp:sym-server",
+            "--action",
+            "add",
+            "--agent",
+            "claude",
+        ],
     );
-    assert!(!plan_res.ok, "目标文件为软链接时 plan 必须拒绝");
-    assert!(error_messages(&plan_res).contains("符号链接"));
+    assert!(
+        err.contains("符号链接"),
+        "目标文件为软链接时预检必须拒绝: {err}"
+    );
 
     let apply_res = execute(
         &ctx,
@@ -1192,22 +1210,21 @@ fn mcp_test_symlink_rejection_target_and_ancestor() {
     );
     assert!(set_custom_agent.ok);
 
-    let plan_link_res = execute(
+    let err_link = preflight_err(
         &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:sym-server",
-                "--action",
-                "add",
-                "--agent",
-                "linked-agent",
-            ],
-        ),
+        &[
+            "--only",
+            "mcp:sym-server",
+            "--action",
+            "add",
+            "--agent",
+            "linked-agent",
+        ],
     );
-    assert!(!plan_link_res.ok, "祖先包含符号链接时 plan 必须拒绝");
-    assert!(error_messages(&plan_link_res).contains("符号链接"));
+    assert!(
+        err_link.contains("符号链接"),
+        "祖先包含符号链接时预检必须拒绝: {err_link}"
+    );
 
     let apply_link_res = execute(
         &ctx,
@@ -1258,10 +1275,9 @@ fn mcp_test_corrupt_files_fail_closed() {
     let corrupt_json_content = "{\n  \"mcpServers\": {\n    \"broken\":\n";
     std::fs::write(&claude_path, corrupt_json_content).unwrap();
 
-    let plan_json = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
+    assert!(
+        preflight(
+            &ctx,
             &[
                 "--only",
                 "mcp:corrupt-test",
@@ -1270,9 +1286,10 @@ fn mcp_test_corrupt_files_fail_closed() {
                 "--agent",
                 "claude",
             ],
-        ),
+        )
+        .is_err(),
+        "JSON 损坏时预检必须 fail-closed"
     );
-    assert!(!plan_json.ok, "JSON 损坏时 plan 必须 fail-closed");
     let apply_json = execute(
         &ctx,
         &request(
@@ -1299,10 +1316,9 @@ fn mcp_test_corrupt_files_fail_closed() {
     let corrupt_toml_content = "[mcp_servers\nunclosed table\n";
     std::fs::write(&codex_path, corrupt_toml_content).unwrap();
 
-    let plan_toml = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
+    assert!(
+        preflight(
+            &ctx,
             &[
                 "--only",
                 "mcp:corrupt-test",
@@ -1311,9 +1327,10 @@ fn mcp_test_corrupt_files_fail_closed() {
                 "--agent",
                 "codex",
             ],
-        ),
+        )
+        .is_err(),
+        "TOML 损坏时预检必须 fail-closed"
     );
-    assert!(!plan_toml.ok, "TOML 损坏时 plan 必须 fail-closed");
     let apply_toml = execute(
         &ctx,
         &request(
@@ -1434,22 +1451,18 @@ fn mcp_test_unsupported_format_and_disabled_agent() {
     assert_eq!(disabled_st["state"], "disabled");
     assert_eq!(disabled_st["actions"].as_array().unwrap().len(), 0);
 
-    let plan_unsupported = execute(
+    let err_unsupported = preflight_err(
         &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:combo-server",
-                "--action",
-                "add",
-                "--agent",
-                "yaml-agent",
-            ],
-        ),
+        &[
+            "--only",
+            "mcp:combo-server",
+            "--action",
+            "add",
+            "--agent",
+            "yaml-agent",
+        ],
     );
-    assert!(!plan_unsupported.ok);
-    assert!(error_messages(&plan_unsupported).contains("不支持"));
+    assert!(err_unsupported.contains("不支持"));
 
     let apply_unsupported = execute(
         &ctx,
@@ -1468,22 +1481,18 @@ fn mcp_test_unsupported_format_and_disabled_agent() {
     assert!(!apply_unsupported.ok);
     assert!(error_messages(&apply_unsupported).contains("不支持"));
 
-    let plan_disabled = execute(
+    let err_disabled = preflight_err(
         &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:combo-server",
-                "--action",
-                "add",
-                "--agent",
-                "disabled-agent",
-            ],
-        ),
+        &[
+            "--only",
+            "mcp:combo-server",
+            "--action",
+            "add",
+            "--agent",
+            "disabled-agent",
+        ],
     );
-    assert!(!plan_disabled.ok);
-    assert!(error_messages(&plan_disabled).contains("已被禁用"));
+    assert!(err_disabled.contains("已被禁用"));
 
     let apply_disabled = execute(
         &ctx,
@@ -1569,9 +1578,13 @@ fn mcp_test_env_literal_rejection_and_placeholder_checks() {
     );
     assert!(
         !dry_literal.ok,
-        "明文字面量在 policy:set --dry-run 也必须被直接拒绝"
+        "policy:set --dry-run 已退役，必须在任何写之前被拒绝"
     );
-    assert!(error_messages(&dry_literal).contains("仅允许 ${VAR} 占位符"));
+    assert!(
+        error_messages(&dry_literal).contains("--dry-run"),
+        "拒绝消息必须指出 --dry-run 不受支持: {}",
+        error_messages(&dry_literal)
+    );
 
     if db_exists_before {
         assert_eq!(
@@ -1683,7 +1696,7 @@ fn mcp_test_unrelated_policy_set_not_blocked_by_historical_bad_mcp() {
     store::write_policy(&conn, &bad_policy).unwrap();
     drop(conn);
 
-    // 1. 无关 settings.theme 在 --dry-run 下成功，不应受历史坏 MCP 牵连
+    // 1. 无关 settings.theme 携带 --dry-run 一律作为已退役参数拒绝，历史坏 MCP 不受影响
     let dry_settings = execute(
         &ctx,
         &request(
@@ -1700,9 +1713,10 @@ fn mcp_test_unrelated_policy_set_not_blocked_by_historical_bad_mcp() {
         ),
     );
     assert!(
-        dry_settings.ok,
-        "无关 settings.theme dry-run 不应被历史坏 MCP 阻塞"
+        !dry_settings.ok,
+        "policy:set --dry-run 已退役，必须被拒绝（与历史坏 MCP 无关）"
     );
+    assert!(error_messages(&dry_settings).contains("--dry-run"));
 
     // 2. 无关 settings.theme 实际写入成功
     let set_settings = execute(
@@ -1827,10 +1841,9 @@ fn mcp_test_db_corrupt_definition_fails_closed() {
     let st = execute(&ctx, &request("mcp:status", &[]));
     assert!(!st.ok, "DB 数据损坏时 status 必须 fail-closed");
 
-    let plan_res = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
+    assert!(
+        preflight(
+            &ctx,
             &[
                 "--only",
                 "mcp:bad-server",
@@ -1839,9 +1852,10 @@ fn mcp_test_db_corrupt_definition_fails_closed() {
                 "--agent",
                 "claude",
             ],
-        ),
+        )
+        .is_err(),
+        "DB 数据损坏时预检必须 fail-closed"
     );
-    assert!(!plan_res.ok, "DB 数据损坏时 plan 必须 fail-closed");
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -1943,34 +1957,46 @@ fn mcp_test_library_switch_isolation_vs_agent_files() {
         "Agent 专属 binding 状态必须保留原样"
     );
 
-    let plan_en = execute(
+    // 库级 enable 适用性零写探针 + 真实 apply：仅翻转策略开关，Agent 文件与绑定保持原样
+    preflight(&ctx, &["--only", "mcp:iso-server", "--action", "enable"])
+        .expect("库级 enable 预检应当通过");
+
+    let lib_en = execute(
         &ctx,
         &request(
-            "mcp:plan",
+            "mcp:apply",
             &["--only", "mcp:iso-server", "--action", "enable"],
         ),
     );
-    assert!(plan_en.ok);
-    let acts = plan_en.data["actions"].as_array().unwrap();
-    assert_eq!(acts.len(), 1);
-    assert_eq!(acts[0]["op"], "write-file");
-
-    let plan_rm = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
-            &["--only", "mcp:iso-server", "--action", "remove"],
-        ),
+    assert!(lib_en.ok, "库级 enable 必须成功: {:?}", lib_en.errors);
+    let st_en = execute(&ctx, &request("mcp:status", &[]));
+    assert!(st_en.ok);
+    let el_en = st_en.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "mcp:iso-server")
+        .unwrap();
+    assert_eq!(
+        el_en["policy"]["enabled"], true,
+        "库级 enable 必须真实翻转策略总开关"
     );
-    assert!(plan_rm.ok);
-    let rm_acts = plan_rm.data["actions"].as_array().unwrap();
-    assert!(rm_acts.iter().all(|a| a["op"] == "write-file"));
-    assert!(rm_acts
-        .iter()
-        .any(|a| a["target"] == "native-manager.db:policy"));
-    assert!(rm_acts
-        .iter()
-        .any(|a| a["target"] == "native-manager.db:mcp_bindings"));
+    assert!(
+        std::fs::read_to_string(&claude_file)
+            .unwrap()
+            .contains("iso-server"),
+        "库级 enable 不得修改 Claude 目标文件"
+    );
+    assert!(
+        std::fs::read_to_string(&codex_file)
+            .unwrap()
+            .contains("iso-server"),
+        "库级 enable 不得修改 Codex 目标文件"
+    );
+
+    // 库级 remove 适用性零写探针：随后真实 apply 清理文件、绑定与策略定义
+    preflight(&ctx, &["--only", "mcp:iso-server", "--action", "remove"])
+        .expect("库级 remove 预检应当通过");
 
     let lib_rm = execute(
         &ctx,
@@ -2145,12 +2171,10 @@ fn mcp_test_strict_cli_and_bridge_args() {
 }
 
 #[test]
-fn mcp_test_status_schema_and_plan_schema_contract() {
+fn mcp_test_status_schema_and_apply_envelope_contract() {
     let (root, ctx) = temp_ctx("schema-contract");
 
     let status_schema = load_contract_schema("contract/engine-v1/status.schema.json");
-    let plan_schema = load_contract_schema("contract/engine-v1/plan.schema.json");
-    let envelope_schema = load_contract_schema("contract/engine-v1/envelope.schema.json");
 
     let set_server = execute(
         &ctx,
@@ -2168,13 +2192,18 @@ fn mcp_test_status_schema_and_plan_schema_contract() {
     );
     assert!(set_server.ok);
 
-    // 1. 验证 mcp:status 输出真实匹配 status.schema.json 与 envelope.schema.json
+    // 1. 验证 mcp:status 输出真实匹配 status.schema.json；信封形状保留但不再要求 dry_run
+    //    （envelope.schema.json 的 dry_run 要求随 contract 批次一并退役）
     let st = execute(&ctx, &request("mcp:status", &[]));
     assert!(st.ok);
-
-    let st_envelope = serde_json::to_value(&st).unwrap();
-    validate_json_schema(&st_envelope, &envelope_schema, &envelope_schema);
     validate_json_schema(&st.data, &status_schema, &status_schema);
+    assert!(!st.mode.offline);
+    assert!(!st.lock.held, "status 永不取全局锁");
+    let st_mode = serde_json::to_value(&st.mode).unwrap();
+    assert!(
+        st_mode.get("dry_run").is_none(),
+        "mode 不得再携带 dry_run 字段: {st_mode:?}"
+    );
 
     // 验证 observed.agents 键名为规范 claude-code，严禁别名 claude
     let elements = st.data["elements"].as_array().unwrap();
@@ -2189,11 +2218,12 @@ fn mcp_test_status_schema_and_plan_schema_contract() {
         }
     }
 
-    // 2. 验证 mcp:plan 输出真实匹配 plan.schema.json 与 envelope.schema.json
-    let plan_res = execute(
+    // 2. 公开 plan 已退役：真实 mcp:apply 恒取全局锁，apply 数据保留
+    //    domain/steps/skipped 形状且不再携带 dry_run 字段
+    let apply_res = execute(
         &ctx,
         &request(
-            "mcp:plan",
+            "mcp:apply",
             &[
                 "--only",
                 "mcp:enum-server",
@@ -2204,11 +2234,16 @@ fn mcp_test_status_schema_and_plan_schema_contract() {
             ],
         ),
     );
-    assert!(plan_res.ok);
-
-    let plan_envelope = serde_json::to_value(&plan_res).unwrap();
-    validate_json_schema(&plan_envelope, &envelope_schema, &envelope_schema);
-    validate_json_schema(&plan_res.data, &plan_schema, &plan_schema);
+    assert!(apply_res.ok, "{:?}", apply_res.errors);
+    assert!(apply_res.lock.held, "mcp:apply 必须恒取全局锁");
+    assert_eq!(apply_res.data["domain"], "mcp");
+    assert!(apply_res.data["steps"].is_array());
+    assert!(apply_res.data["skipped"].is_array());
+    assert!(
+        apply_res.data.get("dry_run").is_none(),
+        "apply 结果不得再携带 dry_run 字段: {:?}",
+        apply_res.data
+    );
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -2697,7 +2732,7 @@ fn mcp_test_scope_and_canonical_identifiers() {
 }
 
 #[test]
-fn mcp_test_action_plan_consistency_and_leftovers() {
+fn mcp_test_action_preflight_consistency_and_leftovers() {
     let (root, ctx) = temp_ctx("plan-leftovers");
 
     // 1. 定义合法的 server
@@ -2737,39 +2772,37 @@ fn mcp_test_action_plan_consistency_and_leftovers() {
     .unwrap();
 
     // 2. 验证 preflight: managed leftover 必须拒绝 add 和 enable
-    let plan_add = execute(
+    let err_add = preflight_err(
         &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:srv-leftover",
-                "--action",
-                "add",
-                "--agent",
-                "claude-code",
-            ],
-        ),
+        &[
+            "--only",
+            "mcp:srv-leftover",
+            "--action",
+            "add",
+            "--agent",
+            "claude-code",
+        ],
     );
-    assert!(!plan_add.ok, "存在托管残留时必须拒绝 add");
-    assert!(error_messages(&plan_add).contains("残留受管条目"));
+    assert!(
+        err_add.contains("残留受管条目"),
+        "存在托管残留时必须拒绝 add: {err_add}"
+    );
 
-    let plan_enable = execute(
+    let err_enable = preflight_err(
         &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:srv-leftover",
-                "--action",
-                "enable",
-                "--agent",
-                "claude-code",
-            ],
-        ),
+        &[
+            "--only",
+            "mcp:srv-leftover",
+            "--action",
+            "enable",
+            "--agent",
+            "claude-code",
+        ],
     );
-    assert!(!plan_enable.ok, "存在托管残留时必须拒绝 enable");
-    assert!(error_messages(&plan_enable).contains("尚未在 Agent"));
+    assert!(
+        err_enable.contains("尚未在 Agent"),
+        "存在托管残留时必须拒绝 enable: {err_enable}"
+    );
 
     // 3. 未受管外部字段在缺少环境变量解析时仍能以结构性检查拒绝，无需先解析 secret
     let set_missing_env = execute(
@@ -2819,26 +2852,20 @@ fn mcp_test_action_plan_consistency_and_leftovers() {
     )
     .unwrap();
 
-    let plan_struct = execute(
+    let err_struct = preflight_err(
         &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:srv-struct-check",
-                "--action",
-                "add",
-                "--agent",
-                "claude-code",
-            ],
-        ),
+        &[
+            "--only",
+            "mcp:srv-struct-check",
+            "--action",
+            "add",
+            "--agent",
+            "claude-code",
+        ],
     );
-    assert!(!plan_struct.ok);
     assert!(
-        error_messages(&plan_struct).contains("未受管外部属性")
-            || error_messages(&plan_struct).contains("外部未识别字段"),
-        "结构性未知字段检查必须在环境变量解析之前拒绝: {}",
-        error_messages(&plan_struct)
+        err_struct.contains("未受管外部属性") || err_struct.contains("外部未识别字段"),
+        "结构性未知字段检查必须在环境变量解析之前拒绝: {err_struct}"
     );
 
     // 检查 mcp:status：包含未受管外部属性时单元格不得暴露可写动作
@@ -2867,25 +2894,18 @@ fn mcp_test_action_plan_consistency_and_leftovers() {
     let lo_cell = &srv_lo_elem["observed"]["agents"]["claude-code"];
     assert_eq!(lo_cell["state"], "leftover");
     assert_eq!(lo_cell["actions"], serde_json::json!(["remove"]));
-    let plan_lo_rm = execute(
+    preflight(
         &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:srv-leftover",
-                "--action",
-                "remove",
-                "--agent",
-                "claude-code",
-            ],
-        ),
-    );
-    assert!(
-        plan_lo_rm.ok,
-        "leftover 状态暴露的 remove 动作必须可通过 mcp:plan 执行: {:?}",
-        plan_lo_rm.errors
-    );
+        &[
+            "--only",
+            "mcp:srv-leftover",
+            "--action",
+            "remove",
+            "--agent",
+            "claude-code",
+        ],
+    )
+    .expect("leftover 状态暴露的 remove 动作必须通过预检");
 
     // 5. 绑定已停用 (enabled: false) 但配置文件中仍有残留受管条目
     let conn = store::open_write(&ctx).unwrap();
@@ -2925,105 +2945,81 @@ fn mcp_test_action_plan_consistency_and_leftovers() {
             && !dis_res_acts.contains(&"update".to_string())
     );
 
-    // 验证暴露的 disable 和 remove 均可通过 mcp:plan 执行
-    let plan_dis_clean = execute(
+    // 验证暴露的 disable 和 remove 均可通过预检
+    preflight(
         &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:srv-leftover",
-                "--action",
-                "disable",
-                "--agent",
-                "claude-code",
-            ],
-        ),
-    );
-    assert!(
-        plan_dis_clean.ok,
-        "已停用但有残留时暴露的 disable 必须可通过 plan 执行: {:?}",
-        plan_dis_clean.errors
-    );
+        &[
+            "--only",
+            "mcp:srv-leftover",
+            "--action",
+            "disable",
+            "--agent",
+            "claude-code",
+        ],
+    )
+    .expect("已停用但有残留时暴露的 disable 必须通过预检");
 
-    let plan_rm_clean = execute(
+    preflight(
         &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:srv-leftover",
-                "--action",
-                "remove",
-                "--agent",
-                "claude-code",
-            ],
-        ),
-    );
-    assert!(
-        plan_rm_clean.ok,
-        "已停用但有残留时暴露的 remove 必须可通过 plan 执行: {:?}",
-        plan_rm_clean.errors
-    );
+        &[
+            "--only",
+            "mcp:srv-leftover",
+            "--action",
+            "remove",
+            "--agent",
+            "claude-code",
+        ],
+    )
+    .expect("已停用但有残留时暴露的 remove 必须通过预检");
 
     let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
-fn mcp_test_plan_after_digest_matches_applied() {
+fn mcp_test_render_digest_matches_applied() {
+    use agent_manager_engine::native_mcp::policy_view::build_entry;
     use sha2::{Digest, Sha256};
-    let (root, ctx) = temp_ctx("plan-digest-matches");
+    let (root, ctx) = temp_ctx("render-digest-matches");
 
     // 1. 设置包含两个 server 的策略
-    execute(
-        &ctx,
-        &request(
-            "policy:set",
-            &[
-                "--layer",
-                "local",
-                "--key",
-                "mcp.definitions.srv-a",
-                "--value",
-                r#"{"command": "echo", "args": ["a"], "agents": ["claude-code"]}"#,
-            ],
-        ),
-    );
-    execute(
-        &ctx,
-        &request(
-            "policy:set",
-            &[
-                "--layer",
-                "local",
-                "--key",
-                "mcp.definitions.srv-b",
-                "--value",
-                r#"{"command": "echo", "args": ["b"], "agents": ["claude-code"]}"#,
-            ],
-        ),
-    );
+    let def_a = serde_json::json!({"command": "echo", "args": ["a"], "agents": ["claude-code"]});
+    let def_b = serde_json::json!({"command": "echo", "args": ["b"], "agents": ["claude-code"]});
+    for (name, def) in [("srv-a", &def_a), ("srv-b", &def_b)] {
+        let set_res = execute(
+            &ctx,
+            &request(
+                "policy:set",
+                &[
+                    "--layer",
+                    "local",
+                    "--key",
+                    &format!("mcp.definitions.{name}"),
+                    "--value",
+                    &serde_json::to_string(def).unwrap(),
+                ],
+            ),
+        );
+        assert!(set_res.ok, "{:?}", set_res.errors);
+    }
 
-    // 2. 先规划并应用 srv-a
-    let plan_a = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:srv-a",
-                "--action",
-                "add",
-                "--agent",
-                "claude-code",
-            ],
-        ),
-    );
-    assert!(plan_a.ok);
-    let plan_a_digest = plan_a.data["actions"][0]["after_digest"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let claude_cfg = ctx.home_dir.join(".claude.json");
+    let applied_digest_of = |ctx: &Context, server: &str| -> String {
+        store::open_readonly(ctx)
+            .unwrap()
+            .unwrap()
+            .query_row(
+                "SELECT applied_digest FROM mcp_bindings WHERE server=?1 AND agent='claude-code'",
+                rusqlite::params![server],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+
+    // 2. srv-a：渲染摘要（apply 共享同一渲染器）+ 真实 apply 后读回，两者必须严格一致
+    let entry_a = build_entry(&def_a, "srv-a", Format::ClaudeJson, "claude-code").unwrap();
+    let rendered_a =
+        render_target_content(&claude_cfg, &Format::ClaudeJson, "srv-a", Some(&entry_a)).unwrap();
+    let expected_a = format!("sha256:{:x}", Sha256::digest(rendered_a.content.as_bytes()));
 
     let apply_a = execute(
         &ctx,
@@ -3041,34 +3037,25 @@ fn mcp_test_plan_after_digest_matches_applied() {
     );
     assert!(apply_a.ok);
 
-    let claude_cfg = ctx.home_dir.join(".claude.json");
-    let actual_bytes_a = std::fs::read(&claude_cfg).unwrap();
-    let actual_sha_a = format!("sha256:{:x}", Sha256::digest(&actual_bytes_a));
+    let actual_sha_a = format!(
+        "sha256:{:x}",
+        Sha256::digest(std::fs::read(&claude_cfg).unwrap())
+    );
     assert_eq!(
-        plan_a_digest, actual_sha_a,
-        "add 计划中的 after_digest 必须与实际写入文件的 SHA256 严格一致"
+        expected_a, actual_sha_a,
+        "add 渲染摘要必须与实际写入文件的 SHA256 严格一致"
+    );
+    assert_eq!(
+        applied_digest_of(&ctx, "srv-a"),
+        entry_a.digest(),
+        "绑定读回的 applied_digest 必须等于渲染条目摘要"
     );
 
-    // 3. 再规划并应用 srv-b
-    let plan_b = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:srv-b",
-                "--action",
-                "add",
-                "--agent",
-                "claude-code",
-            ],
-        ),
-    );
-    assert!(plan_b.ok);
-    let plan_b_digest = plan_b.data["actions"][0]["after_digest"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    // 3. srv-b：在已有 entry 上累加时渲染摘要同样必须与落地字节一致
+    let entry_b = build_entry(&def_b, "srv-b", Format::ClaudeJson, "claude-code").unwrap();
+    let rendered_b =
+        render_target_content(&claude_cfg, &Format::ClaudeJson, "srv-b", Some(&entry_b)).unwrap();
+    let expected_b = format!("sha256:{:x}", Sha256::digest(rendered_b.content.as_bytes()));
 
     let apply_b = execute(
         &ctx,
@@ -3086,33 +3073,23 @@ fn mcp_test_plan_after_digest_matches_applied() {
     );
     assert!(apply_b.ok);
 
-    let actual_bytes_b = std::fs::read(&claude_cfg).unwrap();
-    let actual_sha_b = format!("sha256:{:x}", Sha256::digest(&actual_bytes_b));
+    let actual_sha_b = format!(
+        "sha256:{:x}",
+        Sha256::digest(std::fs::read(&claude_cfg).unwrap())
+    );
     assert_eq!(
-        plan_b_digest, actual_sha_b,
-        "在已有 entry 上累加 entry 时 plan after_digest 亦必须与实际写入完全一致"
+        expected_b, actual_sha_b,
+        "在已有 entry 上累加 entry 时渲染摘要亦必须与实际写入完全一致"
     );
+    assert_eq!(applied_digest_of(&ctx, "srv-b"), entry_b.digest());
 
-    // 4. 规划并执行 remove srv-a（srv-b 保持保留在同一个文件中）
-    let plan_rm_a = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:srv-a",
-                "--action",
-                "remove",
-                "--agent",
-                "claude-code",
-            ],
-        ),
+    // 4. remove srv-a（srv-b 保留在同一个文件中）：渲染删除结果必须与落地字节一致
+    let rendered_rm = render_target_content(&claude_cfg, &Format::ClaudeJson, "srv-a", None)
+        .expect("删除渲染必须成功");
+    let expected_rm = format!(
+        "sha256:{:x}",
+        Sha256::digest(rendered_rm.content.as_bytes())
     );
-    assert!(plan_rm_a.ok);
-    let plan_rm_a_digest = plan_rm_a.data["actions"][0]["after_digest"]
-        .as_str()
-        .unwrap()
-        .to_string();
 
     let apply_rm_a = execute(
         &ctx,
@@ -3130,11 +3107,13 @@ fn mcp_test_plan_after_digest_matches_applied() {
     );
     assert!(apply_rm_a.ok);
 
-    let actual_bytes_rm = std::fs::read(&claude_cfg).unwrap();
-    let actual_sha_rm = format!("sha256:{:x}", Sha256::digest(&actual_bytes_rm));
+    let actual_sha_rm = format!(
+        "sha256:{:x}",
+        Sha256::digest(std::fs::read(&claude_cfg).unwrap())
+    );
     assert_eq!(
-        plan_rm_a_digest, actual_sha_rm,
-        "在保留其他 entry 的情况下部分删除时，plan after_digest 必须与实际写入完全一致"
+        expected_rm, actual_sha_rm,
+        "在保留其他 entry 的情况下部分删除时，渲染摘要必须与实际写入完全一致"
     );
 
     let _ = std::fs::remove_dir_all(root);
@@ -3220,15 +3199,9 @@ fn mcp_test_recoverable_orphans_lifecycle() {
         "spec 应该展示脱敏后的历史规格"
     );
 
-    // 4. 运行 mcp:plan remove
-    let plan_rm = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
-            &["--only", "mcp:orphan-srv", "--action", "remove"],
-        ),
-    );
-    assert!(plan_rm.ok);
+    // 4. 库级 remove 适用性零写探针（旧公开 plan 的等价预检）
+    preflight(&ctx, &["--only", "mcp:orphan-srv", "--action", "remove"])
+        .expect("孤儿服务库级 remove 预检必须通过");
 
     // 5. 运行 mcp:apply remove，清理目标文件和 DB bindings
     let apply_rm = execute(
@@ -3340,18 +3313,8 @@ fn mcp_test_library_remove_with_unsupported_agent_without_binding() {
     );
 
     // 库级删除 srv-normal：虽然系统中有 unsupported agent，但该 agent 没有 binding 也未在文件提及 srv-normal，库级删除必须成功！
-    let plan_rm = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
-            &["--only", "mcp:srv-normal", "--action", "remove"],
-        ),
-    );
-    assert!(
-        plan_rm.ok,
-        "库级删除不应因未绑定的 unsupported agent 失败: {:?}",
-        plan_rm.errors
-    );
+    preflight(&ctx, &["--only", "mcp:srv-normal", "--action", "remove"])
+        .expect("库级删除不应因未绑定的 unsupported agent 失败");
 
     let apply_rm = execute(
         &ctx,
@@ -3411,14 +3374,14 @@ fn mcp_test_library_remove_bad_json_without_server_is_blocked() {
         element["actions"]
     );
 
-    let plan = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
-            &["--only", "mcp:bad-json-hidden", "--action", "remove"],
-        ),
+    assert!(
+        preflight(
+            &ctx,
+            &["--only", "mcp:bad-json-hidden", "--action", "remove"]
+        )
+        .is_err(),
+        "坏 JSON 即使不含 server 名也必须阻断库级 remove"
     );
-    assert!(!plan.ok, "坏 JSON 即使不含 server 名也必须阻断库级 remove");
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -3519,19 +3482,19 @@ fn mcp_test_disabled_target_nonmanaged_conflict_blocks_library_remove() {
         element["actions"]
     );
 
-    let plan = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
+    assert!(
+        preflight(
+            &ctx,
             &[
                 "--only",
                 "mcp:disabled-conflict-server",
                 "--action",
-                "remove",
+                "remove"
             ],
-        ),
+        )
+        .is_err(),
+        "停用目标的非受管冲突必须阻断库级 remove"
     );
-    assert!(!plan.ok, "停用目标的非受管冲突必须阻断库级 remove");
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -3603,14 +3566,11 @@ fn mcp_test_unknown_format_missing_target_allows_library_remove() {
 
     for action in element["actions"].as_array().unwrap() {
         if action["id"] == "remove" {
-            let plan = execute(
+            preflight(
                 &ctx,
-                &request(
-                    "mcp:plan",
-                    &["--only", "mcp:unknown-format-missing", "--action", "remove"],
-                ),
-            );
-            assert!(plan.ok, "暴露的 remove 必须可 plan: {:?}", plan.errors);
+                &["--only", "mcp:unknown-format-missing", "--action", "remove"],
+            )
+            .expect("暴露的 remove 必须通过预检");
         }
     }
     let apply = execute(
@@ -3664,44 +3624,24 @@ fn mcp_test_missing_target_file_disable_remove_zero_write() {
     assert!(apply_add.ok);
 
     let claude_cfg = ctx.home_dir.join(".claude.json");
-    let claude_cfg_str = claude_cfg.to_str().unwrap();
     assert!(claude_cfg.exists());
     // 删除目标文件，制造文件缺失但 DB 仍有 binding 的状态
     std::fs::remove_file(&claude_cfg).unwrap();
     assert!(!claude_cfg.exists());
 
-    // 1. plan disable: 目标文件不存在，plan 动作中绝不能包含对该文件的 write-file (op == "write-file")
-    let plan_dis = execute(
+    // 1. 目标文件不存在时 disable 必须可适用（零写探针），真实 apply 只写数据库、不创建目标文件
+    preflight(
         &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:srv-miss",
-                "--action",
-                "disable",
-                "--agent",
-                "claude-code",
-            ],
-        ),
-    );
-    assert!(plan_dis.ok);
-    let plan_dis_actions = plan_dis.data["actions"].as_array().unwrap();
-    assert!(
-        !plan_dis_actions
-            .iter()
-            .any(|a| a["op"] == "write-file" && a["target"] == claude_cfg_str),
-        "目标文件不存在时 plan disable 绝不能生成对目标文件的 write-file 物理写入: {:?}",
-        plan_dis_actions
-    );
-    assert!(
-        plan_dis_actions.iter().any(|a| a["op"] == "write-file"
-            && a["target"]
-                .as_str()
-                .map_or(false, |t| t.contains("native-manager.db"))),
-        "plan disable 必须保留对数据库的写操作: {:?}",
-        plan_dis_actions
-    );
+        &[
+            "--only",
+            "mcp:srv-miss",
+            "--action",
+            "disable",
+            "--agent",
+            "claude-code",
+        ],
+    )
+    .expect("目标文件缺失时 disable 预检必须通过");
 
     // apply disable 应该成功更新数据库而不产生新文件
     let apply_dis = execute(
@@ -3723,39 +3663,35 @@ fn mcp_test_missing_target_file_disable_remove_zero_write() {
         !claude_cfg.exists(),
         "apply disable 不应凭空创建缺失的配置文件"
     );
+    {
+        let conn = store::open_readonly(&ctx).unwrap().unwrap();
+        let (enabled, assigned): (i64, i64) = conn
+            .query_row(
+                "SELECT enabled, assigned FROM mcp_bindings WHERE server='srv-miss' AND agent='claude-code'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (enabled, assigned),
+            (0, 1),
+            "apply disable 必须真实落库：enabled=0 且保留分配"
+        );
+    }
 
-    // 2. plan remove: 目标文件不存在，plan 动作中亦绝不能包含 write-file
-    let plan_rm = execute(
+    // 2. 目标文件不存在时 remove 必须可适用（零写探针），真实 apply 只清理 DB binding
+    preflight(
         &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:srv-miss",
-                "--action",
-                "remove",
-                "--agent",
-                "claude-code",
-            ],
-        ),
-    );
-    assert!(plan_rm.ok);
-    let plan_rm_actions = plan_rm.data["actions"].as_array().unwrap();
-    assert!(
-        !plan_rm_actions
-            .iter()
-            .any(|a| a["op"] == "write-file" && a["target"] == claude_cfg_str),
-        "目标文件不存在时 plan remove 绝不能生成对目标文件的 write-file: {:?}",
-        plan_rm_actions
-    );
-    assert!(
-        plan_rm_actions.iter().any(|a| a["op"] == "write-file"
-            && a["target"]
-                .as_str()
-                .map_or(false, |t| t.contains("native-manager.db"))),
-        "plan remove 必须保留对数据库的写操作: {:?}",
-        plan_rm_actions
-    );
+        &[
+            "--only",
+            "mcp:srv-miss",
+            "--action",
+            "remove",
+            "--agent",
+            "claude-code",
+        ],
+    )
+    .expect("目标文件缺失时 remove 预检必须通过");
 
     // apply remove 成功清理 DB binding
     let apply_rm = execute(
@@ -3774,6 +3710,17 @@ fn mcp_test_missing_target_file_disable_remove_zero_write() {
     );
     assert!(apply_rm.ok);
     assert!(!claude_cfg.exists());
+    {
+        let conn = store::open_readonly(&ctx).unwrap().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM mcp_bindings WHERE server='srv-miss'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "apply remove 必须真实清理数据库 binding");
+    }
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -4108,10 +4055,9 @@ fn mcp_test_fail_closed_codecs_corrupt_entries() {
         assert_probe_error(&st, "opencode", reason);
     }
     let malformed_bytes = std::fs::read(&opencode_path).unwrap();
-    let plan = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
+    assert!(
+        preflight(
+            &ctx,
             &[
                 "--only",
                 "mcp:corrupt",
@@ -4120,9 +4066,10 @@ fn mcp_test_fail_closed_codecs_corrupt_entries() {
                 "--agent",
                 "opencode",
             ],
-        ),
+        )
+        .is_err(),
+        "codec probe-error 时预检必须 fail-closed"
     );
-    assert!(!plan.ok, "codec probe-error 时 plan 必须 fail-closed");
     let apply = execute(
         &ctx,
         &request(
@@ -4185,51 +4132,27 @@ fn mcp_test_cleanup_remote_or_missing_command_not_blocked() {
         ),
     );
 
-    // 验证正常服务的 add / plan 绝不被无关的 remote 服务定义阻断
-    let plan_norm = execute(
+    // 验证正常服务的 add 预检绝不被无关的 remote 服务定义阻断
+    preflight(
         &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:srv-norm",
-                "--action",
-                "add",
-                "--agent",
-                "claude-code",
-            ],
-        ),
-    );
-    assert!(
-        plan_norm.ok,
-        "正常服务的操作绝不能被无关的 remote 定义阻断: {:?}",
-        plan_norm.errors
-    );
+        &[
+            "--only",
+            "mcp:srv-norm",
+            "--action",
+            "add",
+            "--agent",
+            "claude-code",
+        ],
+    )
+    .expect("正常服务的操作绝不能被无关的 remote 定义阻断");
 
     // 2. 库级 disable 对 remote 定义生效且不被 stdio 检查阻断
-    let plan_lib_dis = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
-            &["--only", "mcp:srv-rem", "--action", "disable"],
-        ),
-    );
-    assert!(
-        plan_lib_dis.ok,
-        "库级 disable 动作不应被 remote 定义阻断: {:?}",
-        plan_lib_dis.errors
-    );
+    preflight(&ctx, &["--only", "mcp:srv-rem", "--action", "disable"])
+        .expect("库级 disable 动作不应被 remote 定义阻断");
 
     // 3. 库级 remove 对 remote 定义生效且不被 stdio 检查阻断
-    let plan_lib_rm = execute(
-        &ctx,
-        &request("mcp:plan", &["--only", "mcp:srv-rem", "--action", "remove"]),
-    );
-    assert!(
-        plan_lib_rm.ok,
-        "库级 remove 动作不应被 remote 定义阻断: {:?}",
-        plan_lib_rm.errors
-    );
+    preflight(&ctx, &["--only", "mcp:srv-rem", "--action", "remove"])
+        .expect("库级 remove 动作不应被 remote 定义阻断");
 
     // 4. 模拟该 remote 服务已存在历史绑定，验证针对该 Agent 的 disable 和 remove 清理动作完全不依赖缺失命令
     let conn = store::open_write(&ctx).unwrap();
@@ -4272,41 +4195,29 @@ fn mcp_test_cleanup_remote_or_missing_command_not_blocked() {
         cell_acts
     );
 
-    // 验证 status 暴露的所有动作均可直接通过 mcp:plan 执行成功！
+    // 验证 status 暴露的所有动作均可直接通过预检（零写适用性校验）！
     for act in srv_rem_elem["actions"].as_array().unwrap() {
         let act_id = act["id"].as_str().unwrap();
-        let p = execute(
-            &ctx,
-            &request("mcp:plan", &["--only", "mcp:srv-rem", "--action", act_id]),
-        );
-        assert!(
-            p.ok,
-            "status 暴露的元素级动作 '{}' 必须可通过 mcp:plan 执行: {:?}",
-            act_id, p.errors
-        );
+        preflight(&ctx, &["--only", "mcp:srv-rem", "--action", act_id])
+            .unwrap_or_else(|e| panic!("status 暴露的元素级动作 '{act_id}' 必须通过预检: {e:#}"));
     }
     for (agent, cell) in srv_rem_elem["observed"]["agents"].as_object().unwrap() {
         for act in cell["actions"].as_array().unwrap() {
             let act_id = act.as_str().unwrap();
-            let p = execute(
+            preflight(
                 &ctx,
-                &request(
-                    "mcp:plan",
-                    &[
-                        "--only",
-                        "mcp:srv-rem",
-                        "--action",
-                        act_id,
-                        "--agent",
-                        agent,
-                    ],
-                ),
-            );
-            assert!(
-                p.ok,
-                "status 暴露的 agent 级动作 '{}:{}' 必须可通过 mcp:plan 执行: {:?}",
-                agent, act_id, p.errors
-            );
+                &[
+                    "--only",
+                    "mcp:srv-rem",
+                    "--action",
+                    act_id,
+                    "--agent",
+                    agent,
+                ],
+            )
+            .unwrap_or_else(|e| {
+                panic!("status 暴露的 agent 级动作 '{agent}:{act_id}' 必须通过预检: {e:#}")
+            });
         }
     }
 
@@ -4383,14 +4294,8 @@ fn mcp_test_invalid_definition_exposes_safe_library_remove() {
         .values()
         .all(|cell| cell["actions"].as_array().unwrap().is_empty()));
 
-    let plan = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
-            &["--only", "mcp:remote-only", "--action", "remove"],
-        ),
-    );
-    assert!(plan.ok, "无效定义仍应可安全 plan remove: {:?}", plan.errors);
+    preflight(&ctx, &["--only", "mcp:remote-only", "--action", "remove"])
+        .expect("无效定义仍应可安全预检 remove");
 
     let applied = execute(
         &ctx,
@@ -4498,10 +4403,9 @@ fn mcp_test_disabled_orphan_has_no_agent_actions_but_library_remove_is_safe() {
     );
     assert_eq!(element["actions"][0]["id"], "remove");
 
-    let agent_remove = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
+    assert!(
+        preflight(
+            &ctx,
             &[
                 "--only",
                 "mcp:disabled-orphan",
@@ -4510,22 +4414,16 @@ fn mcp_test_disabled_orphan_has_no_agent_actions_but_library_remove_is_safe() {
                 "--agent",
                 "claude-code",
             ],
-        ),
+        )
+        .is_err(),
+        "停用 Agent 的逐 Agent remove 必须被拒绝"
     );
-    assert!(!agent_remove.ok, "停用 Agent 的逐 Agent remove 必须被拒绝");
 
-    let library_remove = execute(
+    preflight(
         &ctx,
-        &request(
-            "mcp:plan",
-            &["--only", "mcp:disabled-orphan", "--action", "remove"],
-        ),
-    );
-    assert!(
-        library_remove.ok,
-        "孤儿库级 remove 必须可 plan: {:?}",
-        library_remove.errors
-    );
+        &["--only", "mcp:disabled-orphan", "--action", "remove"],
+    )
+    .expect("孤儿库级 remove 必须通过预检");
     let applied_remove = execute(
         &ctx,
         &request(
@@ -4815,10 +4713,9 @@ fn mcp_test_startup_timeout_json_type_is_strict_and_zero_write() {
             "非法 timeout 不得暴露 add/update/enable: {actions:?}"
         );
 
-        let plan = execute(
-            &ctx,
-            &request(
-                "mcp:plan",
+        assert!(
+            preflight(
+                &ctx,
                 &[
                     "--only",
                     "mcp:startup-strict",
@@ -4827,11 +4724,9 @@ fn mcp_test_startup_timeout_json_type_is_strict_and_zero_write() {
                     "--agent",
                     "codex",
                 ],
-            ),
-        );
-        assert!(
-            !plan.ok,
-            "非法 timeout 的 plan 必须 fail-closed: {invalid_json}"
+            )
+            .is_err(),
+            "非法 timeout 的预检必须 fail-closed: {invalid_json}"
         );
         let apply = execute(
             &ctx,
@@ -5010,66 +4905,48 @@ fn mcp_test_allowed_agents_change_with_existing_binding_safe_cleanup() {
     );
 
     // 验证 preflight: 手动尝试 update 必须被明确拒绝
-    let plan_update = execute(
+    let err_update = preflight_err(
         &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:srv-allowed",
-                "--action",
-                "update",
-                "--agent",
-                "claude-code",
-            ],
-        ),
+        &[
+            "--only",
+            "mcp:srv-allowed",
+            "--action",
+            "update",
+            "--agent",
+            "claude-code",
+        ],
     );
     assert!(
-        !plan_update.ok,
-        "非允许 agent 的 update 必须被 preflight 拒绝"
-    );
-    assert!(error_messages(&plan_update).contains("不在服务"));
-
-    // 验证 status 暴露的安全动作均可成功 plan
-    let plan_dis = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:srv-allowed",
-                "--action",
-                "disable",
-                "--agent",
-                "claude-code",
-            ],
-        ),
-    );
-    assert!(
-        plan_dis.ok,
-        "安全 disable 动作必须可通过 plan: {:?}",
-        plan_dis.errors
+        err_update.contains("不在服务"),
+        "非允许 agent 的 update 必须被 preflight 拒绝: {err_update}"
     );
 
-    let plan_rm = execute(
+    // 验证 status 暴露的安全动作均可通过预检
+    preflight(
         &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:srv-allowed",
-                "--action",
-                "remove",
-                "--agent",
-                "claude-code",
-            ],
-        ),
-    );
-    assert!(
-        plan_rm.ok,
-        "安全 remove 动作必须可通过 plan: {:?}",
-        plan_rm.errors
-    );
+        &[
+            "--only",
+            "mcp:srv-allowed",
+            "--action",
+            "disable",
+            "--agent",
+            "claude-code",
+        ],
+    )
+    .expect("安全 disable 动作必须通过预检");
+
+    preflight(
+        &ctx,
+        &[
+            "--only",
+            "mcp:srv-allowed",
+            "--action",
+            "remove",
+            "--agent",
+            "claude-code",
+        ],
+    )
+    .expect("安全 remove 动作必须通过预检");
 
     // 4. 执行 disable 后再次检查 status：此时状态为 disabled，仅暴露 remove，绝不暴露 enable
     let apply_dis = execute(
@@ -5109,10 +4986,9 @@ fn mcp_test_allowed_agents_change_with_existing_binding_safe_cleanup() {
     assert_eq!(cell_dis_acts, vec!["remove"]);
 
     // 尝试 enable 必须被 preflight 拒绝
-    let plan_enable = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
+    assert!(
+        preflight(
+            &ctx,
             &[
                 "--only",
                 "mcp:srv-allowed",
@@ -5121,9 +4997,10 @@ fn mcp_test_allowed_agents_change_with_existing_binding_safe_cleanup() {
                 "--agent",
                 "claude-code",
             ],
-        ),
+        )
+        .is_err(),
+        "非允许 agent 的 enable 必须被拒绝"
     );
-    assert!(!plan_enable.ok, "非允许 agent 的 enable 必须被拒绝");
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -5211,22 +5088,14 @@ fn mcp_test_orphan_target_probe_error_blocks_remove_until_fixed() {
     );
 
     // 验证 preflight: 此时无论是元素级 remove 还是 agent 级 remove 均必须失败拒绝
-    let plan_elem_rm = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
-            &["--only", "mcp:srv-orp-probe", "--action", "remove"],
-        ),
-    );
     assert!(
-        !plan_elem_rm.ok,
+        preflight(&ctx, &["--only", "mcp:srv-orp-probe", "--action", "remove"]).is_err(),
         "目标损坏时孤儿 remove 必须被 preflight 拒绝"
     );
 
-    let plan_cell_rm = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
+    assert!(
+        preflight(
+            &ctx,
             &[
                 "--only",
                 "mcp:srv-orp-probe",
@@ -5235,10 +5104,8 @@ fn mcp_test_orphan_target_probe_error_blocks_remove_until_fixed() {
                 "--agent",
                 "claude-code",
             ],
-        ),
-    );
-    assert!(
-        !plan_cell_rm.ok,
+        )
+        .is_err(),
         "目标损坏时 agent 级 remove 必须被 preflight 拒绝"
     );
 
@@ -5277,19 +5144,9 @@ fn mcp_test_orphan_target_probe_error_blocks_remove_until_fixed() {
         "修复后必须暴露 remove 动作"
     );
 
-    // 验证现在可以成功 plan 和 apply
-    let plan_rm_ok = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
-            &["--only", "mcp:srv-orp-probe", "--action", "remove"],
-        ),
-    );
-    assert!(
-        plan_rm_ok.ok,
-        "修复后孤儿 remove 必须可通过 plan: {:?}",
-        plan_rm_ok.errors
-    );
+    // 验证现在可以通过预检并真实 apply
+    preflight(&ctx, &["--only", "mcp:srv-orp-probe", "--action", "remove"])
+        .expect("修复后孤儿 remove 必须通过预检");
 
     let apply_rm_ok = execute(
         &ctx,
@@ -5464,7 +5321,7 @@ fn mcp_test_direct_apply_rejects_inapplicable_state() {
 
 #[cfg(unix)]
 #[test]
-fn mcp_test_status_and_plan_reject_non_regular_targets_before_read() {
+fn mcp_test_status_and_preflight_reject_non_regular_targets_before_read() {
     use std::os::unix::net::UnixListener;
 
     let (root, ctx) = temp_ctx("non-regular-target");
@@ -5534,10 +5391,9 @@ fn mcp_test_status_and_plan_reject_non_regular_targets_before_read() {
         .contains("普通文件"));
     assert!(socket_cell["actions"].as_array().unwrap().is_empty());
 
-    let plan_socket = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
+    assert!(
+        preflight(
+            &ctx,
             &[
                 "--only",
                 "mcp:socket-target",
@@ -5546,9 +5402,10 @@ fn mcp_test_status_and_plan_reject_non_regular_targets_before_read() {
                 "--agent",
                 "claude-code",
             ],
-        ),
+        )
+        .is_err(),
+        "socket target 的预检必须先拒绝"
     );
-    assert!(!plan_socket.ok, "socket target 的 plan 必须先拒绝");
 
     let set_device_path = execute(
         &ctx,
@@ -5589,10 +5446,9 @@ fn mcp_test_status_and_plan_reject_non_regular_targets_before_read() {
         .contains("普通文件"));
     assert!(device_cell["actions"].as_array().unwrap().is_empty());
 
-    let plan_device = execute(
-        &ctx,
-        &request(
-            "mcp:plan",
+    assert!(
+        preflight(
+            &ctx,
             &[
                 "--only",
                 "mcp:device-target",
@@ -5601,11 +5457,9 @@ fn mcp_test_status_and_plan_reject_non_regular_targets_before_read() {
                 "--agent",
                 "claude-code",
             ],
-        ),
-    );
-    assert!(
-        !plan_device.ok,
-        "/dev/null device target 的 plan 必须先拒绝"
+        )
+        .is_err(),
+        "/dev/null device target 的预检必须先拒绝"
     );
 
     drop(listener);
@@ -5644,11 +5498,14 @@ fn mcp_test_direct_invalid_apply_does_not_initialize_fresh_context() {
         "--dry-run",
     ];
     let dry_err = direct_apply(&ctx, &request("mcp:apply", &dry_run_args))
-        .expect_err("dry-run 也必须先拒绝无效状态");
-    assert!(dry_err.to_string().contains("不存在") || dry_err.to_string().contains("定义"));
-    assert!(!ctx.home_dir.exists(), "无效 dry-run 不得创建 HOME 目录");
-    assert!(!ctx.data_dir.exists(), "无效 dry-run 不得创建 data_dir");
-    assert!(!store::db_path(&ctx).exists(), "无效 dry-run 不得创建 DB");
+        .expect_err("--dry-run 已退役，必须在任何写之前被参数解析拒绝");
+    assert!(
+        dry_err.to_string().contains("已退役 --dry-run"),
+        "拒绝消息必须说明 --dry-run 已退役: {dry_err:#}"
+    );
+    assert!(!ctx.home_dir.exists(), "dry-run 拒绝不得创建 HOME 目录");
+    assert!(!ctx.data_dir.exists(), "dry-run 拒绝不得创建 data_dir");
+    assert!(!store::db_path(&ctx).exists(), "dry-run 拒绝不得创建 DB");
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -6112,7 +5969,7 @@ fn mcp_test_remote_headers_rejected_at_policy_set_and_preflight() {
     assert_eq!(res.errors[0].code, "SECRET_INPUT_REJECTED");
     assert!(!res.errors[0].message.contains("ghp_"), "不得回显凭据正文");
 
-    // 3. preflight：绕过 policy:set 直写库中的明文 header 定义，plan/apply 必须 fail-closed
+    // 3. preflight：绕过 policy:set 直写库中的明文 header 定义，预检与 apply 必须 fail-closed
     let mut policy = store::builtin_policy();
     policy["mcp"]["definitions"] = serde_json::json!({
         "hdr-literal": {"url": "https://example.com/mcp", "headers": {"X-Key": "literal-value-9f2c"}}
@@ -6120,28 +5977,41 @@ fn mcp_test_remote_headers_rejected_at_policy_set_and_preflight() {
     let conn = store::open_write(&ctx).unwrap();
     store::write_policy(&conn, &policy).unwrap();
     drop(conn);
-    for cmd in ["mcp:plan", "mcp:apply"] {
-        let res = execute(
-            &ctx,
-            &request(
-                cmd,
-                &[
-                    "--only",
-                    "mcp:hdr-literal",
-                    "--action",
-                    "add",
-                    "--agent",
-                    "claude-code",
-                ],
-            ),
-        );
-        assert!(!res.ok, "{cmd} 对明文 header 定义必须 fail-closed");
-        let msgs = error_messages(&res);
-        assert!(
-            !msgs.contains("literal-value-9f2c"),
-            "{cmd} 不得回显字面值: {msgs}"
-        );
-    }
+    let preflight_msgs = preflight_err(
+        &ctx,
+        &[
+            "--only",
+            "mcp:hdr-literal",
+            "--action",
+            "add",
+            "--agent",
+            "claude-code",
+        ],
+    );
+    assert!(
+        !preflight_msgs.contains("literal-value-9f2c"),
+        "预检不得回显字面值: {preflight_msgs}"
+    );
+    let res = execute(
+        &ctx,
+        &request(
+            "mcp:apply",
+            &[
+                "--only",
+                "mcp:hdr-literal",
+                "--action",
+                "add",
+                "--agent",
+                "claude-code",
+            ],
+        ),
+    );
+    assert!(!res.ok, "mcp:apply 对明文 header 定义必须 fail-closed");
+    let msgs = error_messages(&res);
+    assert!(
+        !msgs.contains("literal-value-9f2c"),
+        "mcp:apply 不得回显字面值: {msgs}"
+    );
     // status 中该定义 unsupported 且 spec.headers 掩码 <literal>
     let st = execute(&ctx, &request("mcp:status", &[]));
     let el = find_element(&st, "mcp:hdr-literal");
@@ -6196,7 +6066,7 @@ fn mcp_test_remote_url_whitelist_and_mixed_fields_integration() {
         "被拒绝的保存不得初始化数据库"
     );
 
-    // 1b. 历史遗留非法定义（直写库模拟存量）：status unsupported、plan/apply fail-closed 且不回显
+    // 1b. 历史遗留非法定义（直写库模拟存量）：status unsupported、预检/apply fail-closed 且不回显
     let mut policy = store::builtin_policy();
     policy["mcp"]["definitions"] = serde_json::json!({
         "bad-url": {"url": bad_url, "agents": ["claude-code"]}
@@ -6211,32 +6081,49 @@ fn mcp_test_remote_url_whitelist_and_mixed_fields_integration() {
         .as_array()
         .unwrap()
         .is_empty());
-    for cmd in ["mcp:plan", "mcp:apply"] {
-        let res = execute(
-            &ctx,
-            &request(
-                cmd,
-                &[
-                    "--only",
-                    "mcp:bad-url",
-                    "--action",
-                    "add",
-                    "--agent",
-                    "claude-code",
-                ],
-            ),
-        );
-        assert!(!res.ok, "{cmd} 必须拒绝非法 url");
-        let msgs = error_messages(&res);
-        assert!(
-            !msgs.contains(bad_url),
-            "{cmd} 消息不得回显 url 正文: {msgs}"
-        );
-        assert!(
-            !msgs.contains("internal.example.com"),
-            "{cmd} 消息不得回显主机: {msgs}"
-        );
-    }
+    let preflight_msgs = preflight_err(
+        &ctx,
+        &[
+            "--only",
+            "mcp:bad-url",
+            "--action",
+            "add",
+            "--agent",
+            "claude-code",
+        ],
+    );
+    assert!(
+        !preflight_msgs.contains(bad_url),
+        "预检消息不得回显 url 正文: {preflight_msgs}"
+    );
+    assert!(
+        !preflight_msgs.contains("internal.example.com"),
+        "预检消息不得回显主机: {preflight_msgs}"
+    );
+    let res = execute(
+        &ctx,
+        &request(
+            "mcp:apply",
+            &[
+                "--only",
+                "mcp:bad-url",
+                "--action",
+                "add",
+                "--agent",
+                "claude-code",
+            ],
+        ),
+    );
+    assert!(!res.ok, "mcp:apply 必须拒绝非法 url");
+    let msgs = error_messages(&res);
+    assert!(
+        !msgs.contains(bad_url),
+        "mcp:apply 消息不得回显 url 正文: {msgs}"
+    );
+    assert!(
+        !msgs.contains("internal.example.com"),
+        "mcp:apply 消息不得回显主机: {msgs}"
+    );
 
     // 2a. 远程与 stdio 字段混给（url+command / url+env / url+startup_timeout_sec / url+args）
     //     → policy:set 保存期拒绝，消息说明互斥
@@ -6278,7 +6165,7 @@ fn mcp_test_remote_url_whitelist_and_mixed_fields_integration() {
         assert!(msg.contains("互斥"), "{name} 消息应说明字段互斥: {msg}");
     }
 
-    // 2b. 历史遗留混给定义（直写库模拟存量）：status unsupported、plan fail-closed
+    // 2b. 历史遗留混给定义（直写库模拟存量）：status unsupported、预检 fail-closed
     let mut policy = store::builtin_policy();
     policy["mcp"]["definitions"] = serde_json::json!({
         "mix-legacy": {"url": "https://example.com/mcp", "command": "node", "agents": ["claude-code"]}
@@ -6289,22 +6176,21 @@ fn mcp_test_remote_url_whitelist_and_mixed_fields_integration() {
     let st = execute(&ctx, &request("mcp:status", &[]));
     let el = find_element(&st, "mcp:mix-legacy");
     assert_eq!(el["state"], "unsupported", "存量混给定义必须 unsupported");
-    let plan = execute(
+    let err_mixed = preflight_err(
         &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:mix-legacy",
-                "--action",
-                "add",
-                "--agent",
-                "claude-code",
-            ],
-        ),
+        &[
+            "--only",
+            "mcp:mix-legacy",
+            "--action",
+            "add",
+            "--agent",
+            "claude-code",
+        ],
     );
-    assert!(!plan.ok, "存量混给定义 plan 必须 fail-closed");
-    assert!(error_messages(&plan).contains("互斥"));
+    assert!(
+        err_mixed.contains("互斥"),
+        "存量混给定义预检必须 fail-closed: {err_mixed}"
+    );
 
     // 3. 本机回环 http 白名单正向：http://localhost:8080 可全链路 apply
     let (root2, ctx2) = temp_ctx("remote-url-loopback");
@@ -6386,25 +6272,38 @@ fn mcp_test_remote_status_masking_missing_vars_and_secrets_kind() {
         "缺失 header 变量时不得暴露 add"
     );
 
-    // 2. plan/apply 同样被缺失变量 fail-closed 拦截（与 env 同级）
-    for cmd in ["mcp:plan", "mcp:apply"] {
-        let res = execute(
-            &ctx,
-            &request(
-                cmd,
-                &[
-                    "--only",
-                    "mcp:remote-srv",
-                    "--action",
-                    "add",
-                    "--agent",
-                    "claude-code",
-                ],
-            ),
-        );
-        assert!(!res.ok, "{cmd} 必须被缺失 header 变量拦截");
-        assert!(error_messages(&res).contains("AM_TEST_REMOTE_ABSENT"));
-    }
+    // 2. 预检与 apply 同样被缺失变量 fail-closed 拦截（与 env 同级）
+    let preflight_msgs = preflight_err(
+        &ctx,
+        &[
+            "--only",
+            "mcp:remote-srv",
+            "--action",
+            "add",
+            "--agent",
+            "claude-code",
+        ],
+    );
+    assert!(
+        preflight_msgs.contains("AM_TEST_REMOTE_ABSENT"),
+        "预检必须被缺失 header 变量拦截: {preflight_msgs}"
+    );
+    let res = execute(
+        &ctx,
+        &request(
+            "mcp:apply",
+            &[
+                "--only",
+                "mcp:remote-srv",
+                "--action",
+                "add",
+                "--agent",
+                "claude-code",
+            ],
+        ),
+    );
+    assert!(!res.ok, "mcp:apply 必须被缺失 header 变量拦截");
+    assert!(error_messages(&res).contains("AM_TEST_REMOTE_ABSENT"));
     assert!(!ctx.home_dir.join(".claude.json").exists(), "拦截后零写");
 
     // 3. 变量补齐后 add 成功（与 env 同级语义）
@@ -6511,23 +6410,36 @@ fn mcp_test_remote_external_modification_fail_closed() {
         "{cell:?}"
     );
     let oc_bytes = std::fs::read(&opencode_path).unwrap();
-    for cmd in ["mcp:plan", "mcp:apply"] {
-        let res = execute(
+    assert!(
+        preflight(
             &ctx,
-            &request(
-                cmd,
-                &[
-                    "--only",
-                    "mcp:remote-srv",
-                    "--action",
-                    "update",
-                    "--agent",
-                    "opencode",
-                ],
-            ),
-        );
-        assert!(!res.ok, "{cmd} 对未受管外部属性必须 fail-closed");
-    }
+            &[
+                "--only",
+                "mcp:remote-srv",
+                "--action",
+                "update",
+                "--agent",
+                "opencode",
+            ],
+        )
+        .is_err(),
+        "预检对未受管外部属性必须 fail-closed"
+    );
+    let res = execute(
+        &ctx,
+        &request(
+            "mcp:apply",
+            &[
+                "--only",
+                "mcp:remote-srv",
+                "--action",
+                "update",
+                "--agent",
+                "opencode",
+            ],
+        ),
+    );
+    assert!(!res.ok, "mcp:apply 对未受管外部属性必须 fail-closed");
     assert_eq!(
         std::fs::read(&opencode_path).unwrap(),
         oc_bytes,
@@ -6558,24 +6470,37 @@ fn mcp_test_remote_external_modification_fail_closed() {
         "非受管冲突不得暴露动作"
     );
     let codex_bytes = std::fs::read(&codex_path).unwrap();
-    for cmd in ["mcp:plan", "mcp:apply"] {
-        for action in ["update", "disable", "remove"] {
-            let res = execute(
+    for action in ["update", "disable", "remove"] {
+        assert!(
+            preflight(
                 &ctx,
-                &request(
-                    cmd,
-                    &[
-                        "--only",
-                        "mcp:remote-srv",
-                        "--action",
-                        action,
-                        "--agent",
-                        "codex",
-                    ],
-                ),
-            );
-            assert!(!res.ok, "{cmd} {action} 对非受管条目必须 fail-closed");
-        }
+                &[
+                    "--only",
+                    "mcp:remote-srv",
+                    "--action",
+                    action,
+                    "--agent",
+                    "codex",
+                ],
+            )
+            .is_err(),
+            "预检 {action} 对非受管条目必须 fail-closed"
+        );
+        let res = execute(
+            &ctx,
+            &request(
+                "mcp:apply",
+                &[
+                    "--only",
+                    "mcp:remote-srv",
+                    "--action",
+                    action,
+                    "--agent",
+                    "codex",
+                ],
+            ),
+        );
+        assert!(!res.ok, "mcp:apply {action} 对非受管条目必须 fail-closed");
     }
     assert_eq!(
         std::fs::read(&codex_path).unwrap(),
@@ -6613,25 +6538,22 @@ fn mcp_test_remote_zero_write_and_unmanaged_marker_conflict() {
     let db_bytes = std::fs::read(store::db_path(&ctx)).unwrap();
     let claude_path = ctx.home_dir.join(".claude.json");
 
-    // 1. status / plan / dry-run 零写：DB 字节不变、不创建目标文件、不创建 lock
+    // 1. status / 预检零写：DB 字节不变、不创建目标文件、不创建 lock；
+    //    --dry-run 已退役，必须在任何 lock/DB/目标写之前被严格拒绝
     let st = execute(&ctx, &request("mcp:status", &[]));
     assert!(st.ok);
-    let plan = execute(
+    preflight(
         &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:remote-srv",
-                "--action",
-                "add",
-                "--agent",
-                "claude-code",
-            ],
-        ),
-    );
-    assert!(plan.ok, "远程 plan 必须成功: {:?}", plan.errors);
-    assert!(!plan.data["actions"].as_array().unwrap().is_empty());
+        &[
+            "--only",
+            "mcp:remote-srv",
+            "--action",
+            "add",
+            "--agent",
+            "claude-code",
+        ],
+    )
+    .expect("远程 add 预检必须成功");
     let dry = execute(
         &ctx,
         &request(
@@ -6647,11 +6569,19 @@ fn mcp_test_remote_zero_write_and_unmanaged_marker_conflict() {
             ],
         ),
     );
-    assert!(dry.ok, "{:?}", dry.errors);
-    assert_eq!(dry.data["dry_run"], true);
+    assert!(
+        !dry.ok,
+        "mcp:apply --dry-run 已退役，必须被拒绝: {:?}",
+        dry.data
+    );
+    assert!(
+        error_messages(&dry).contains("已退役 --dry-run"),
+        "拒绝消息必须说明 --dry-run 已退役: {}",
+        error_messages(&dry)
+    );
     assert!(
         !claude_path.exists(),
-        "status/plan/dry-run 不得创建目标文件"
+        "status/预检/dry-run 拒绝不得创建目标文件"
     );
     assert!(
         !ctx.data_dir.join("agent-manager.apply.lock").exists(),
@@ -6660,7 +6590,7 @@ fn mcp_test_remote_zero_write_and_unmanaged_marker_conflict() {
     assert_eq!(
         std::fs::read(store::db_path(&ctx)).unwrap(),
         db_bytes,
-        "status/plan/dry-run 不得改变数据库字节"
+        "status/预检/dry-run 拒绝不得改变数据库字节"
     );
 
     // 2. 外部非受管同名远程条目（无 marker）→ add fail-closed
@@ -7639,23 +7569,22 @@ fn mcp_takeover_requires_flag_and_replaces_unmanaged_entry() {
     );
     assert!(set_def.ok, "{:?}", set_def.errors);
 
-    // 1. 无 flag：plan 与 apply 一律 fail-closed，文件不变
-    let plan_no_flag = execute(
+    // 1. 无 flag：预检与 apply 一律 fail-closed，文件不变
+    let err_no_flag = preflight_err(
         &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:takeover-svc",
-                "--action",
-                "add",
-                "--agent",
-                "claude-code",
-            ],
-        ),
+        &[
+            "--only",
+            "mcp:takeover-svc",
+            "--action",
+            "add",
+            "--agent",
+            "claude-code",
+        ],
     );
-    assert!(!plan_no_flag.ok, "无 flag 的 plan 必须 fail-closed");
-    assert!(error_messages(&plan_no_flag).contains("非受管同名条目"));
+    assert!(
+        err_no_flag.contains("非受管同名条目"),
+        "无 flag 的预检必须 fail-closed: {err_no_flag}"
+    );
     let apply_no_flag = execute(
         &ctx,
         &request(
@@ -7675,45 +7604,42 @@ fn mcp_takeover_requires_flag_and_replaces_unmanaged_entry() {
     let before = std::fs::read_to_string(&claude_cfg).unwrap();
     assert!(before.contains("old-binary"), "拒绝后目标文件必须保持原样");
 
-    // 2. 有 flag：plan 预览标注 takeover（独立字段 + 说明文案）
-    let plan_flag = execute(
+    // 2. 冲突在 status 中可见（blocked_reason + 不暴露动作）；
+    //    携带 --allow-takeover 的 add/update 预检放行（真实替换由第 3 步 apply 读回验证）
+    let st_conflict = execute(&ctx, &request("mcp:status", &[]));
+    assert!(st_conflict.ok);
+    let conflict_cell = &st_conflict.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "mcp:takeover-svc")
+        .expect("takeover-svc 必须在 status 中显示")["observed"]["agents"]["claude-code"];
+    assert!(
+        conflict_cell["blocked_reason"]
+            .as_str()
+            .unwrap_or("")
+            .contains("非受管同名条目"),
+        "冲突必须在 status 中可见: {conflict_cell:?}"
+    );
+    assert!(
+        conflict_cell["actions"].as_array().unwrap().is_empty(),
+        "未受管冲突单元格不得暴露动作: {conflict_cell:?}"
+    );
+    preflight(
         &ctx,
-        &request(
-            "mcp:plan",
-            &[
-                "--only",
-                "mcp:takeover-svc",
-                "--action",
-                "add",
-                "--agent",
-                "claude-code",
-                "--allow-takeover",
-            ],
-        ),
-    );
-    assert!(plan_flag.ok, "{:?}", plan_flag.errors);
-    let actions = plan_flag.data["actions"].as_array().unwrap();
-    let file_action = actions
-        .iter()
-        .find(|a| a["target"].as_str().unwrap_or("").ends_with(".claude.json"))
-        .expect("必须有目标文件写入步骤");
-    assert_eq!(file_action["takeover"], true, "文件写入步骤须标注 takeover");
-    assert!(
-        file_action["note"].as_str().unwrap().contains("接管"),
-        "预览说明须可见接管标注: {}",
-        file_action["note"]
-    );
-    let binding_action = actions
-        .iter()
-        .find(|a| a["target"].as_str().unwrap_or("").contains("mcp_bindings"))
-        .unwrap();
-    assert!(
-        binding_action.get("takeover").is_none(),
-        "绑定记录步骤不涉及条目替换，不得标注 takeover"
-    );
+        &[
+            "--only",
+            "mcp:takeover-svc",
+            "--action",
+            "add",
+            "--agent",
+            "claude-code",
+            "--allow-takeover",
+        ],
+    )
+    .expect("--allow-takeover 的 add 预检必须放行未受管同名条目");
 
-    // 无冲突目标即使带 flag 也不标注（codex 的 takeover-svc 也是未受管冲突，
-    // 另起一个无冲突服务验证）
+    // 无冲突目标即使带 flag 也不算接管：apply 真实落地且审计 takeover == false
     let set_clean = execute(
         &ctx,
         &request(
@@ -7729,10 +7655,23 @@ fn mcp_takeover_requires_flag_and_replaces_unmanaged_entry() {
         ),
     );
     assert!(set_clean.ok, "{:?}", set_clean.errors);
-    let plan_clean = execute(
+    preflight(
         &ctx,
-        &request(
-            "mcp:plan",
+        &[
+            "--only",
+            "mcp:clean-svc",
+            "--action",
+            "add",
+            "--agent",
+            "claude-code",
+            "--allow-takeover",
+        ],
+    )
+    .expect("无冲突目标带 flag 的 add 预检必须通过");
+    let apply_clean = execute(
+        &ctx,
+        &request_with_run(
+            "mcp:apply",
             &[
                 "--only",
                 "mcp:clean-svc",
@@ -7742,16 +7681,24 @@ fn mcp_takeover_requires_flag_and_replaces_unmanaged_entry() {
                 "claude-code",
                 "--allow-takeover",
             ],
+            "takeover-run-clean",
         ),
     );
-    assert!(plan_clean.ok, "{:?}", plan_clean.errors);
-    assert!(
-        plan_clean.data["actions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|a| a.get("takeover").is_none()),
-        "无未受管同名条目时不得标注 takeover"
+    assert!(apply_clean.ok, "{:?}", apply_clean.errors);
+    let runs_clean = execute(
+        &ctx,
+        &request_with_run("runs:get", &["--run", "takeover-run-clean"], "audit-clean"),
+    );
+    assert!(runs_clean.ok, "{:?}", runs_clean.errors);
+    let clean_op = runs_clean.data["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|op| op["operation_type"] == "mcp:add")
+        .expect("必须有 clean-svc 的 mcp:add 审计记录");
+    assert_eq!(
+        clean_op["detail"]["takeover"], false,
+        "无未受管同名条目时审计不得标记 takeover"
     );
 
     // 3. 有 flag：apply 替换成功——受管渲染落地、marker 出现、其余条目/字段保留

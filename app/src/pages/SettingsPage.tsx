@@ -68,7 +68,6 @@ function initialPreferences(data?: SettingsData): SettingsPreferences {
   const p = data?.preferences;
   return {
     offline: p?.offline ?? false,
-    defaultDryRun: p?.defaultDryRun ?? false,
     upstreamTtlSec: p?.upstreamTtlSec ?? 86400,
     logRetentionDays: p?.logRetentionDays ?? 30,
   };
@@ -316,7 +315,6 @@ export default function SettingsPage() {
         <h2 className="text-sm font-semibold text-slate-800">运行偏好</h2>
         <div className="mt-4 space-y-4 text-sm">
           <label className="flex items-center gap-2"><input type="checkbox" checked={preferences.offline} onChange={(e) => setPreferences({ ...preferences, offline: e.target.checked })} />离线模式</label>
-          <label className="flex items-center gap-2"><input type="checkbox" checked={preferences.defaultDryRun} onChange={(e) => setPreferences({ ...preferences, defaultDryRun: e.target.checked })} />预览弹窗默认使用演练</label>
           <label className="flex items-center gap-3"><span>官方缓存 TTL（秒）</span><input aria-label="官方缓存 TTL（秒）" type="number" min={0} step={1} value={Number.isNaN(preferences.upstreamTtlSec) ? "" : preferences.upstreamTtlSec} onChange={(e) => setPreferences({ ...preferences, upstreamTtlSec: e.target.value === "" ? NaN : Number(e.target.value) })} className="w-32 rounded border border-slate-200 px-2 py-1" /></label>
           <label className="flex items-center gap-3">
             <span>日志保留天数</span>

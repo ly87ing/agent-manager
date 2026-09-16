@@ -6,7 +6,7 @@ import { setEngineClient, type EngineClient } from "../lib/engine";
 import { createQueryClient } from "../lib/queries";
 import { makeAuditData, makeEnvelope, makeMode } from "./fixtures";
 
-function renderBanner(mode: { dry_run: boolean; offline: boolean }) {
+function renderBanner(mode: { offline: boolean }) {
   const client: EngineClient = {
     run: vi.fn(async () => makeEnvelope(makeAuditData(), { mode: makeMode(mode) })),
   };
@@ -28,18 +28,13 @@ describe("ModeBanner", () => {
   });
 
   it("offline 模式：渲染离线标注", async () => {
-    renderBanner({ offline: true, dry_run: false });
+    renderBanner({ offline: true });
     expect(await screen.findByText(/离线模式/)).toBeInTheDocument();
     expect(screen.getByText(/上次检查的结果/)).toBeInTheDocument();
   });
 
-  it("dry-run 模式：渲染演练标注", async () => {
-    renderBanner({ offline: false, dry_run: true });
-    expect(await screen.findByText(/演练模式/)).toBeInTheDocument();
-  });
-
   it("普通模式：不渲染横幅", async () => {
-    const { client, container } = renderBanner({ offline: false, dry_run: false });
+    const { client, container } = renderBanner({ offline: false });
     await waitFor(() => expect(client.run).toHaveBeenCalled());
     await waitFor(() => expect(container.querySelector('[role="status"]')).toBeNull());
   });

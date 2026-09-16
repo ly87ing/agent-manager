@@ -6,7 +6,6 @@ import {
   type Envelope,
   type Freshness,
   type Mode,
-  type PlanAction,
   type PolicyData,
   type RunEntry,
 } from "../lib/contract";
@@ -38,7 +37,7 @@ export function makeElement(overrides: Partial<EngineElement> = {}): EngineEleme
 }
 
 export function makeMode(overrides: Partial<Mode> = {}): Mode {
-  return { dry_run: false, offline: false, ...overrides };
+  return { offline: false, ...overrides };
 }
 
 export function makeEnvelope<T>(data: T, overrides: Partial<Envelope<T>> = {}): Envelope<T> {
@@ -78,7 +77,6 @@ export function makeAuditData(overrides: Partial<AuditData> = {}): AuditData {
 export function makeApplyResult(overrides: Partial<ApplyResultData> = {}): ApplyResultData {
   return {
     domain: "mcp",
-    dry_run: false,
     steps: [
       { name: "mcp-sync", ok: true, exit_code: 0 },
     ],
@@ -109,21 +107,6 @@ export function makePolicyData(overrides: Partial<PolicyData> = {}): PolicyData 
     key: null,
     value: null,
     path: null,
-    ...overrides,
-  };
-}
-
-export function makePlanAction(overrides: Partial<PlanAction> = {}): PlanAction {
-  return {
-    op: "write-file",
-    element: "mcp:demo",
-    target: "/tmp/demo.json",
-    risk: "write-local",
-    before_digest: null,
-    after_digest: null,
-    backup_path: null,
-    cmd: null,
-    note: null,
     ...overrides,
   };
 }

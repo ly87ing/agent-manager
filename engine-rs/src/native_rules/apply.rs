@@ -8,7 +8,7 @@ use rusqlite::TransactionBehavior;
 use serde_json::{json, Value};
 
 use super::model::{render_rules, Binding};
-use super::{args, plan, status};
+use super::{args, preflight, status};
 use crate::native::{Context, Request};
 use crate::native_mcp::model::{now_iso, sha256_hex};
 use crate::native_mcp::rollback::{atomic_write_bytes_checked, read_existing_bytes, RollbackGuard};
@@ -16,32 +16,13 @@ use crate::native_mcp::targets::validate_target_path;
 use crate::native_sources::{self, KEY_SHARED};
 use crate::store;
 
-/// 构造等价 rules:plan 请求：保留归一后的 --only 与可选 --offline，
-/// 去掉 --dry-run。
-fn equivalent_plan_request(req: &Request, parsed: &args::RuleArgs) -> Request {
-    let mut plan_args: Vec<String> = Vec::new();
-    for id in &parsed.only {
-        plan_args.push("--only".to_string());
-        plan_args.push(id.clone());
-    }
-    if parsed.offline {
-        plan_args.push("--offline".to_string());
-    }
-    Request {
-        command: "rules:plan".to_string(),
-        args: plan_args,
-        run_id: req.run_id.clone(),
-    }
-}
-
-/// 预检：严格解析 + 等价 plan 纯读校验。返回 true 表示合法非 dry-run
-/// apply（execute 稍后必须取得全局 apply lock）；dry-run 返回 false。
-/// 无效/阻塞预检不创建 data/home/DB/表/文件。
-pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<bool> {
+/// 锁前预检：严格解析 + 私有 preflight 纯读校验。Ok(()) 表示合法 apply
+///（execute 稍后必须取得全局 apply lock）；参数无效（含已退役的
+/// --dry-run）或目标阻塞即 Err。无效/阻塞预检不创建 data/home/DB/表/文件。
+pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
     let parsed = args::parse_apply_args(req)?;
-    let plan_req = equivalent_plan_request(req, &parsed);
-    plan::build_plan(ctx, &plan_req)?;
-    Ok(!parsed.dry_run)
+    preflight::build_preflight(ctx, &parsed)?;
+    Ok(())
 }
 
 enum Decision {
@@ -53,31 +34,26 @@ enum Decision {
     },
 }
 
-fn result_json(dry_run: bool, steps: Vec<Value>, skipped: Vec<String>) -> Value {
+fn result_json(steps: Vec<Value>, skipped: Vec<String>) -> Value {
     json!({
         "domain": "rules",
-        "dry_run": dry_run,
         "steps": steps,
         "skipped": skipped,
     })
 }
 
 pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
-    // 自身再次解析 + 等价 plan 预检：直接调用 apply 不能绕过安全校验。
+    // 自身再次解析 + 等价 preflight 预检：直接调用 apply 不能绕过安全校验。
     let parsed = args::parse_apply_args(req)?;
-    let plan_req = equivalent_plan_request(req, &parsed);
-    plan::build_plan(ctx, &plan_req)?;
+    preflight::build_preflight(ctx, &parsed)?;
 
     let selected = parsed.only.clone();
-    if parsed.dry_run {
-        return Ok(result_json(true, vec![], selected));
-    }
 
     let mut conn = store::open_write(ctx)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
     // Immediate 事务内基于同一 snapshot 重新读取并重检，不沿用锁前
-    // plan 的正文/摘要。
+    // preflight 的正文/摘要。
     let policy = store::policy_from_connection(&tx)?;
     let sources = native_sources::current_sources_from(&tx)?;
     let bindings = super::persistence::load_bindings_from(&tx)?;
@@ -170,7 +146,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     // 没有任何待写：直接提交（不建表、不写审计）。
     if pending.is_empty() {
         tx.commit()?;
-        return Ok(result_json(false, vec![], selected));
+        return Ok(result_json(vec![], selected));
     }
 
     super::persistence::ensure_table(&tx)?;
@@ -248,7 +224,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     }
     guard.commit();
 
-    Ok(result_json(false, steps, skipped))
+    Ok(result_json(steps, skipped))
 }
 
 #[cfg(test)]
@@ -365,20 +341,12 @@ mod tests {
     }
 
     #[test]
-    fn dry_run_creates_nothing_and_skips_all_selected() {
+    fn dry_run_is_rejected_before_any_write_and_creates_nothing() {
         let root = temp_root("dryrun");
         let ctx = ctx_at(&root);
-        let result = apply(&ctx, &req(&["--dry-run"])).unwrap();
-        assert_eq!(result["dry_run"], true);
-        assert_eq!(result["steps"], json!([]));
-        assert!(
-            result.get("snapshot").is_none(),
-            "apply 输出不再携带 snapshot 字段"
-        );
-        assert_eq!(
-            result["skipped"],
-            json!(["rules:codex_global", "rules:claude_global"])
-        );
+        let err = apply(&ctx, &req(&["--dry-run"])).unwrap_err();
+        assert!(format!("{err:#}").contains("参数错误"));
+        assert!(preflight_apply(&ctx, &req(&["--dry-run"])).is_err());
         assert!(!ctx.data_dir.exists());
         assert!(!ctx.home_dir.exists());
         drop_root(&root);
@@ -393,7 +361,7 @@ mod tests {
         assert!(!ctx.data_dir.exists());
         assert!(!ctx.home_dir.exists());
 
-        // 阻塞：外部内容 + 无绑定，plan 预检 fail-closed。
+        // 阻塞：外部内容 + 无绑定，preflight 预检 fail-closed。
         std::fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
         std::fs::write(
             ctx.home_dir.join(".codex/AGENTS.md"),
@@ -414,7 +382,6 @@ mod tests {
         std::fs::write(ctx.home_dir.join(".claude/CLAUDE.md"), "sentinel\n").unwrap();
 
         let result = apply(&ctx, &req(&["--only", "rules:codex_global"])).unwrap();
-        assert_eq!(result["dry_run"], false);
         let steps = result["steps"].as_array().unwrap();
         assert_eq!(steps.len(), 1);
         assert_eq!(steps[0]["name"], "rules:sync rules:codex_global");
@@ -439,7 +406,6 @@ mod tests {
         let marker = "AUDIT-BODY-LEAK-MARKER-9c4e1b";
         write_source(&ctx, KEY_SHARED, &format!("{marker}\n"));
         let result = apply(&ctx, &req(&["--only", "rules:codex_global"])).unwrap();
-        assert_eq!(result["dry_run"], false);
         assert_eq!(result["steps"].as_array().unwrap().len(), 1);
         assert!(
             !serde_json::to_string(&result).unwrap().contains(marker),
@@ -536,7 +502,7 @@ mod tests {
         let err = apply(&ctx, &req(&["--only", "rules:codex_global"])).unwrap_err();
         let msg = format!("{err:#}");
         assert!(
-            msg.contains("外部修改") || msg.contains("plan 拒绝"),
+            msg.contains("外部修改") || msg.contains("preflight 拒绝"),
             "fail-closed 消息不符: {msg}"
         );
         assert!(!msg.contains("tampered external"));
@@ -608,15 +574,18 @@ mod tests {
         let root = temp_root("schema");
         let ctx = ctx_at(&root);
         let result = apply(&ctx, &req(&["--only", "rules:codex_global"])).unwrap();
-        for key in ["domain", "dry_run", "steps", "skipped"] {
+        for key in ["domain", "steps", "skipped"] {
             assert!(result.get(key).is_some(), "缺字段 {key}");
         }
+        assert!(
+            result.get("dry_run").is_none(),
+            "apply 输出不再携带 dry_run 字段"
+        );
         assert!(
             result.get("snapshot").is_none(),
             "apply 输出不再携带 snapshot 字段"
         );
         assert_eq!(result["domain"], "rules");
-        assert!(result["dry_run"].is_boolean());
         assert!(result["steps"].is_array());
         assert!(result["skipped"].is_array());
         for step in result["steps"].as_array().unwrap() {

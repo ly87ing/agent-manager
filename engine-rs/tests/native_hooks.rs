@@ -132,7 +132,7 @@ fn managed_codex_source(command: &str) -> Value {
 }
 
 #[test]
-fn status_and_plan_on_fresh_context_are_zero_write_with_two_targets() {
+fn status_on_fresh_context_is_zero_write_with_two_targets() {
     let (base, ctx) = temp_ctx("fresh");
     // 默认来源：claude 只有 removed_signatures、codex hooks 为空 → 两目标 managed-ok 无动作
     let env = execute(&ctx, &request("hooks:status", &["--offline"]));
@@ -168,20 +168,6 @@ fn status_and_plan_on_fresh_context_are_zero_write_with_two_targets() {
         }
         assert_eq!(observed["target_exists"], Value::Bool(false));
         assert_eq!(observed["managed_hook_count"], 0);
-    }
-
-    let env = execute(&ctx, &request("hooks:plan", &[]));
-    assert!(env.ok, "{:?}", env.errors);
-    assert_eq!(env.data["actions"].as_array().unwrap().len(), 0);
-    assert_eq!(env.data["summary"]["write-local"], 0);
-    for key in [
-        "read",
-        "write-local",
-        "exec-local",
-        "network",
-        "install-remove",
-    ] {
-        assert!(env.data["summary"].get(key).is_some(), "summary 缺 {key}");
     }
 
     assert!(!ctx.data_dir.exists());
@@ -220,23 +206,28 @@ fn status_strict_args_and_missing_with_managed_hooks_offers_sync() {
         vec!["--only"],
         vec!["--dry-run"],
     ] {
-        let env = execute(&ctx, &request("hooks:plan", &args));
-        assert!(!env.ok, "plan args {args:?} 应失败");
+        let env = execute(&ctx, &request("hooks:apply", &args));
+        assert!(!env.ok, "apply args {args:?} 应失败");
         assert_eq!(env.errors[0].code, "HOOK_ERROR");
+        assert!(!env.lock.held, "参数拒绝不得持锁: {args:?}");
     }
     let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
-fn apply_dry_run_holds_no_lock_and_creates_nothing() {
+fn apply_dry_run_is_rejected_without_lock_or_writes() {
     let (base, ctx) = temp_ctx("dryrun");
     write_hook_source(&ctx, "hooks.claude", &managed_claude_source("echo managed"));
+    // 测试夹具写来源时已建库；--dry-run 拒绝自身不得取锁、不得写目标/DB
+    let db = store::db_path(&ctx);
+    let db_before = std::fs::read(&db).unwrap();
     let env = execute(&ctx, &request("hooks:apply", &["--dry-run"]));
-    assert!(env.ok, "{:?}", env.errors);
-    assert!(env.mode.dry_run);
+    assert!(!env.ok, "--dry-run 必须以参数错误拒绝: {:?}", env.data);
+    assert_eq!(env.errors[0].code, "HOOK_ERROR");
+    assert!(env.errors[0].message.contains("参数错误"));
     assert!(!env.lock.held);
-    // 测试夹具写来源时已建库；dry-run 自身不得取锁、不得写目标
     assert!(!ctx.data_dir.join("agent-manager.apply.lock").exists());
+    assert_eq!(std::fs::read(&db).unwrap(), db_before, "拒绝路径 DB 不变");
     assert!(!ctx.home_dir.exists());
     let _ = std::fs::remove_dir_all(&base);
 }
@@ -433,27 +424,22 @@ fn source_change_produces_drift_with_distinct_digests() {
         codex["observed"]["applied_digest"]
     );
 
-    let env = execute(&ctx, &request("hooks:plan", &["--only", "hooks:codex"]));
-    let actions = env.data["actions"].as_array().unwrap();
-    assert_eq!(actions.len(), 1);
-    let action = &actions[0];
-    for key in [
-        "op",
-        "element",
-        "target",
-        "risk",
-        "before_digest",
-        "after_digest",
-        "backup_path",
-        "cmd",
-        "note",
-    ] {
-        assert!(action.get(key).is_some(), "action 缺字段 {key}");
-    }
-    assert_eq!(action["op"], "write-file");
-    assert_eq!(action["backup_path"], Value::Null);
-    assert_eq!(action["cmd"], Value::Null);
-    assert_ne!(action["before_digest"], action["after_digest"]);
+    // 真实 apply 收敛 drift：单步写入 v2 渲染，status 转 managed-ok。
+    let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:codex"]));
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(env.data["steps"].as_array().unwrap().len(), 1);
+    let content = std::fs::read_to_string(ctx.home_dir.join(".codex/hooks.json")).unwrap();
+    assert!(
+        content.contains("echo v2"),
+        "目标必须写入 v2 渲染: {content}"
+    );
+    let status = execute(&ctx, &request("hooks:status", &[]));
+    let codex = element(&status, "hooks:codex");
+    assert_eq!(codex["state"], "managed-ok");
+    assert_eq!(
+        codex["observed"]["expected_digest"], codex["observed"]["applied_digest"],
+        "收敛后期望与绑定摘要一致"
+    );
     let _ = std::fs::remove_dir_all(&base);
 }
 
@@ -515,16 +501,36 @@ fn symlink_target_and_bad_json_are_blocked_without_writes() {
     let claude = element(&env, "hooks:claude");
     assert_eq!(claude["state"], "unmanaged-detected");
     assert!(claude["observed"]["blocked_reason"].as_str().is_some());
-    // plan 整单 fail-closed：选中的 unmanaged 目标不产出半份动作
-    let env = execute(&ctx, &request("hooks:plan", &[]));
-    assert!(!env.ok);
-    assert_eq!(env.errors[0].code, "HOOK_ERROR");
-    // 未选中不阻塞；plan 与失败的 apply 均不改变 DB（夹具已建库，比对字节）
+    // 批量 apply 整单 fail-closed：选中的 unmanaged 目标不产出半份写入
     let db = store::db_path(&ctx);
     let db_before = std::fs::read(&db).unwrap();
-    let env = execute(&ctx, &request("hooks:plan", &["--only", "hooks:codex"]));
+    let env = execute(&ctx, &request("hooks:apply", &[]));
+    assert!(!env.ok);
+    assert_eq!(env.errors[0].code, "HOOK_ERROR");
+    assert!(!env.lock.held);
+    assert_eq!(
+        std::fs::read(&db).unwrap(),
+        db_before,
+        "preflight 拒绝不得写 DB"
+    );
+    // 未选中不阻塞：--only codex 真实 apply 为 no-op（默认来源空 hooks），
+    // 不产生绑定与审计。
+    let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:codex"]));
     assert!(env.ok, "{:?}", env.errors);
-    assert_eq!(std::fs::read(&db).unwrap(), db_before, "plan 不得写 DB");
+    assert_eq!(env.data["steps"].as_array().unwrap().len(), 0);
+    assert_eq!(env.data["skipped"], json!(["hooks:codex"]));
+    assert!(!ctx.home_dir.join(".codex/hooks.json").exists());
+    assert_eq!(
+        count_rows(&ctx, "SELECT COUNT(*) FROM hook_target_bindings"),
+        0
+    );
+    assert_eq!(
+        count_rows(
+            &ctx,
+            "SELECT COUNT(*) FROM operation_logs WHERE operation_type='hooks:apply'"
+        ),
+        0
+    );
     let _ = std::fs::remove_dir_all(&base);
 }
 
@@ -690,7 +696,7 @@ fn corrupt_hook_source_rows_fail_closed_without_leaking_markers() {
     };
 
     let assert_fail_closed = |ctx: &Context| {
-        for command in ["sources:get", "hooks:status", "hooks:plan"] {
+        for command in ["sources:get", "hooks:status", "hooks:apply"] {
             let args: &[&str] = if command == "sources:get" {
                 &["--key", "hooks.claude"]
             } else {
@@ -814,7 +820,7 @@ fn corrupt_binding_rows_fail_closed_without_leaking_markers() {
         )
         .unwrap();
     }
-    for command in ["hooks:status", "hooks:plan"] {
+    for command in ["hooks:status", "hooks:apply"] {
         let env = execute(&ctx, &request_with_run(command, &[], "corrupt-binding"));
         assert!(!env.ok, "{command} 应 fail-closed");
         assert_eq!(env.errors[0].code, "HOOK_ERROR");
@@ -834,7 +840,7 @@ fn corrupt_binding_rows_fail_closed_without_leaking_markers() {
 }
 
 #[test]
-fn invalid_target_hooks_subtree_is_unmanaged_and_plan_apply_refuse() {
+fn invalid_target_hooks_subtree_is_unmanaged_and_apply_refuses() {
     let (base, ctx) = temp_ctx("bad-subtree");
     write_hook_source(&ctx, "hooks.claude", &managed_claude_source("echo m"));
     let settings = ctx.home_dir.join(".claude/settings.json");
@@ -890,10 +896,9 @@ fn invalid_target_hooks_subtree_is_unmanaged_and_plan_apply_refuse() {
         let claude = element(&env, "hooks:claude");
         assert_eq!(claude["state"], "unmanaged-detected", "{tag}");
         assert_eq!(claude["actions"], json!([]), "{tag}");
-        let env = execute(&ctx, &request("hooks:plan", &["--only", "hooks:claude"]));
-        assert!(!env.ok, "{tag} plan 应拒绝");
         let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:claude"]));
         assert!(!env.ok, "{tag} apply 应拒绝");
+        assert!(!env.lock.held, "{tag} preflight 拒绝不得持锁");
         assert_eq!(
             std::fs::read(&settings).unwrap(),
             content.as_bytes(),
@@ -912,7 +917,7 @@ fn invalid_target_hooks_subtree_is_unmanaged_and_plan_apply_refuse() {
 }
 
 #[test]
-fn plan_before_digest_uses_actual_bytes_for_unbound_merge() {
+fn status_actual_digest_matches_bytes_for_unbound_merge() {
     let (base, ctx) = temp_ctx("before-digest");
     write_hook_source(
         &ctx,
@@ -935,20 +940,8 @@ fn plan_before_digest_uses_actual_bytes_for_unbound_merge() {
         &std::fs::read(&settings).unwrap(),
     );
 
-    let env = execute(&ctx, &request("hooks:plan", &["--only", "hooks:claude"]));
-    assert!(env.ok, "{:?}", env.errors);
-    let actions = env.data["actions"].as_array().unwrap();
-    assert_eq!(actions.len(), 1);
-    let action = &actions[0];
-    assert_eq!(
-        action["before_digest"].as_str().unwrap(),
-        old_sha,
-        "before=旧字节 sha"
-    );
-    let after = action["after_digest"].as_str().unwrap();
-    assert_ne!(after, old_sha, "after=渲染 sha 且与 before 不同");
-
-    // status observed.actual_digest 与实际字节一致
+    // status observed.actual_digest 与实际字节一致（动作 before_digest 的
+    // 同一来源，动作形态见私有 preflight 单测）。
     let env = execute(&ctx, &request("hooks:status", &[]));
     assert_eq!(
         element(&env, "hooks:claude")["observed"]["actual_digest"]
@@ -959,6 +952,18 @@ fn plan_before_digest_uses_actual_bytes_for_unbound_merge() {
     assert_eq!(
         element(&env, "hooks:codex")["observed"]["actual_digest"],
         Value::Null
+    );
+
+    // 真实 apply 合并后登记绑定，实际摘要切换为期望摘要。
+    let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:claude"]));
+    assert!(env.ok, "{:?}", env.errors);
+    let status = execute(&ctx, &request("hooks:status", &[]));
+    let claude = element(&status, "hooks:claude");
+    assert_eq!(claude["state"], "managed-ok");
+    assert_ne!(
+        claude["observed"]["actual_digest"].as_str().unwrap(),
+        old_sha,
+        "合并后实际摘要必须不同于旧字节"
     );
     let _ = std::fs::remove_dir_all(&base);
 }
@@ -1016,10 +1021,9 @@ fn allow_takeover_flag_requires_exactly_one_only_target() {
     let (base, ctx) = temp_ctx("takeover-args");
     // 缺 --only（批量缺省）、多个 --only、重复 flag：一律拒绝
     for (command, args) in [
-        ("hooks:plan", vec!["--allow-takeover"]),
         ("hooks:apply", vec!["--allow-takeover"]),
         (
-            "hooks:plan",
+            "hooks:apply",
             vec![
                 "--only",
                 "hooks:claude",
@@ -1048,21 +1052,24 @@ fn allow_takeover_flag_requires_exactly_one_only_target() {
             env.errors[0].message
         );
     }
-    // 合法形态：单目标 + flag 通过参数解析（fresh ctx 两目标 managed-ok 无动作）
-    for command in ["hooks:plan", "hooks:apply"] {
-        let mut args = vec!["--only", "hooks:codex", "--allow-takeover"];
-        if command == "hooks:apply" {
-            args.push("--dry-run");
-        }
-        let env = execute(&ctx, &request(command, &args));
-        assert!(env.ok, "{command} {args:?} 应通过: {:?}", env.errors);
-    }
+    // 合法形态：单目标 + flag 通过参数解析（fresh ctx 两目标 managed-ok，
+    // 真实 apply 为 no-op 且不写目标）。
+    let env = execute(
+        &ctx,
+        &request(
+            "hooks:apply",
+            &["--only", "hooks:codex", "--allow-takeover"],
+        ),
+    );
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(env.data["steps"].as_array().unwrap().len(), 0);
+    assert_eq!(env.data["skipped"], json!(["hooks:codex"]));
     assert!(!ctx.home_dir.exists());
     let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
-fn codex_foreign_whole_file_takeover_with_flag_replaces_and_marks_plan_and_audit() {
+fn codex_foreign_whole_file_takeover_with_flag_replaces_and_marks_audit() {
     let (base, ctx) = temp_ctx("codex-takeover");
     write_hook_source(
         &ctx,
@@ -1080,42 +1087,15 @@ fn codex_foreign_whole_file_takeover_with_flag_replaces_and_marks_plan_and_audit
         format!("{}\n", serde_json::to_string_pretty(&foreign).unwrap()),
     )
     .unwrap();
-    let foreign_sha =
-        agent_manager_engine::native_mcp::model::sha256_hex_bytes(&std::fs::read(&target).unwrap());
 
-    // 无 flag：plan 与 apply 维持 fail-closed（与此前行为完全一致）
-    let env = execute(&ctx, &request("hooks:plan", &["--only", "hooks:codex"]));
-    assert!(!env.ok, "无 flag plan 必须拒绝");
+    // 无 flag：apply 维持 fail-closed（与此前行为完全一致）
     let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:codex"]));
     assert!(!env.ok, "无 flag apply 必须拒绝");
     assert!(!env.lock.held);
 
-    // 有 flag：plan 放行并标注 takeover + whole-file 风险说明
-    let env = execute(
-        &ctx,
-        &request("hooks:plan", &["--only", "hooks:codex", "--allow-takeover"]),
-    );
-    assert!(env.ok, "{:?}", env.errors);
-    let actions = env.data["actions"].as_array().unwrap();
-    assert_eq!(actions.len(), 1);
-    let action = &actions[0];
-    assert_eq!(
-        action["takeover"], true,
-        "codex whole-file 替换必须标注 takeover"
-    );
-    assert!(
-        action["note"].as_str().unwrap().contains("whole-file 替换")
-            && action["note"]
-                .as_str()
-                .unwrap()
-                .contains("并入 hooks.codex 来源"),
-        "note 必须明示整体替换与先并来源建议: {}",
-        action["note"]
-    );
-    assert_eq!(action["before_digest"].as_str().unwrap(), foreign_sha);
-    assert_ne!(action["after_digest"].as_str().unwrap(), foreign_sha);
-
-    // apply：整文件替换外部内容，登记 binding，审计 takeover=true
+    // 有 flag 的 preflight 动作标注 takeover + whole-file 风险说明（形态见
+    // 私有 preflight 单测）；apply：整文件替换外部内容，登记 binding，
+    // 审计 takeover=true
     let env = execute(
         &ctx,
         &request(
@@ -1173,28 +1153,12 @@ fn claude_external_modification_takeover_merges_and_preserves_user_fields() {
         .push(json!({"hooks": [{"type": "command", "command": "echo user-own"}]}));
     std::fs::write(&settings, serde_json::to_string_pretty(&current).unwrap()).unwrap();
 
-    // 无 flag：plan 与 apply 维持拒绝
-    let env = execute(&ctx, &request("hooks:plan", &["--only", "hooks:claude"]));
-    assert!(!env.ok, "无 flag plan 必须拒绝外部修改目标");
+    // 无 flag：apply 维持拒绝
     let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:claude"]));
     assert!(!env.ok, "无 flag apply 必须拒绝外部修改目标");
 
-    // 有 flag：signature-set 合并，动作不标 takeover（合并天然保留用户内容）
-    let env = execute(
-        &ctx,
-        &request(
-            "hooks:plan",
-            &["--only", "hooks:claude", "--allow-takeover"],
-        ),
-    );
-    assert!(env.ok, "{:?}", env.errors);
-    let actions = env.data["actions"].as_array().unwrap();
-    assert_eq!(actions.len(), 1);
-    assert!(
-        actions[0].get("takeover").is_none(),
-        "claude 合并不标 takeover"
-    );
-
+    // 有 flag：signature-set 合并（preflight 动作不标 takeover，形态见私有
+    // preflight 单测；合并天然保留用户内容）
     let env = execute(
         &ctx,
         &request(
@@ -1239,11 +1203,6 @@ fn allow_takeover_does_not_bypass_structural_or_batch_fail_closed() {
 
     let env = execute(
         &ctx,
-        &request("hooks:plan", &["--only", "hooks:codex", "--allow-takeover"]),
-    );
-    assert!(!env.ok, "结构损坏目标即使带 flag 也必须拒绝");
-    let env = execute(
-        &ctx,
         &request(
             "hooks:apply",
             &["--only", "hooks:codex", "--allow-takeover"],
@@ -1253,9 +1212,10 @@ fn allow_takeover_does_not_bypass_structural_or_batch_fail_closed() {
     assert!(!env.lock.held);
     assert_eq!(std::fs::read(&target).unwrap(), b"{not json");
 
-    // 批量场景：claude 正常、codex 外部内容阻塞；无 flag 的批量 plan 仍整体拒绝
+    // 批量场景：claude 正常、codex 外部内容阻塞；无 flag 的批量 apply 仍整体拒绝
     std::fs::write(&target, json!({"hooks": {}, "foreign": true}).to_string()).unwrap();
-    let env = execute(&ctx, &request("hooks:plan", &[]));
-    assert!(!env.ok, "批量 plan 对阻塞目标仍整体 fail-closed");
+    let env = execute(&ctx, &request("hooks:apply", &[]));
+    assert!(!env.ok, "批量 apply 对阻塞目标仍整体 fail-closed");
+    assert!(!env.lock.held);
     let _ = std::fs::remove_dir_all(&base);
 }

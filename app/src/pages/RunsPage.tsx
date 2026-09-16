@@ -35,7 +35,6 @@ function ExecutionCard({ record, onSelectRun }: { record: ExecutionRecord; onSel
         <span className="text-sm font-medium text-slate-800">{record.label}</span>
         <code className="font-mono text-xs text-slate-400">{record.command}</code>
         <code className="font-mono text-xs text-indigo-500">{record.runId}</code>
-        {record.dryRun && <span className="rounded bg-sky-100 px-1.5 py-0.5 text-xs text-sky-700">演练</span>}
         <span
           data-testid={`execution-status-${record.runId}`}
           className={cn(

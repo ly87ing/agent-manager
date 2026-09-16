@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { waitFor } from "@testing-library/react";
+import { toast } from "sonner";
 import RulesHooksPage from "../pages/RulesHooksPage";
 import RulesPage from "../pages/RulesPage";
-import { makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePlanAction } from "./fixtures";
+import { makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode } from "./fixtures";
 import type { Envelope } from "../lib/contract";
-import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
+import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 
 function routes() {
   return {
@@ -93,7 +95,7 @@ describe("RulesHooksPage 规则与 Hooks 切换容器", () => {
     expect(rulesTab).toHaveAttribute("aria-selected", "true");
   });
 
-  it("规则详情展开时按目标精确请求 rules:plan（--only <id>）", async () => {
+  it("规则详情展开为纯状态展示（drift 面板），不请求任何 plan", async () => {
     const detailRoutes: Record<string, Envelope> = routes();
     detailRoutes["rules:status"] = makeEnvelope({
       domain: "rules",
@@ -110,16 +112,12 @@ describe("RulesHooksPage 规则与 Hooks 切换容器", () => {
       ],
     }, { command: "rules.status" });
     detailRoutes["sources:get"] = makeEnvelope({ sources: [] }, { command: "sources.get" });
-    detailRoutes["rules:plan"] = makeEnvelope(
-      { domain: "rules", actions: [], summary: { read: 0, "write-local": 0, "exec-local": 0, network: 0, "install-remove": 0 } },
-      { command: "rules.plan" },
-    );
     const { calls } = renderWithEngine(<RulesPage />, detailRoutes);
 
     await userEvent.click(await screen.findByRole("button", { name: "Claude Code 全局规则" }));
-    await screen.findByTestId("drift-panel");
-    const planCall = calls.find((call) => call.command === "rules:plan");
-    expect(planCall?.args).toEqual(["--only", "rules:claude_global"]);
+    const panel = await screen.findByTestId("drift-panel");
+    expect(panel).toBeInTheDocument();
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
   });
 
   it("rules:status 与 hooks:status 返回 ok:false 且 data:{} 时，两 Tab 均显示 DOMAIN_NOT_IMPLEMENTED 且不抛异常", async () => {
@@ -201,16 +199,8 @@ function nativeRulesRoutes(): Record<string, Envelope> {
       },
       { command: "rules.status" },
     ),
-    "rules:plan": makeEnvelope(
-      {
-        domain: "rules",
-        actions: [makePlanAction({ element: "rules:claude_global", target: "/tmp/home/.claude/CLAUDE.md", note: "同步 rules:claude_global 规则文件" })],
-        summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 },
-      },
-      { command: "rules.plan" },
-    ),
     "rules:apply": makeEnvelope(
-      { domain: "rules", dry_run: false, steps: [{ name: "rules:sync rules:claude_global", ok: true, exit_code: 0 }], skipped: [] },
+      { domain: "rules", steps: [{ name: "rules:sync rules:claude_global", ok: true, exit_code: 0 }], skipped: [] },
       { command: "rules.apply" },
     ),
     "sources:get": makeEnvelope({ sources: [] }, { command: "sources.get" }),
@@ -235,43 +225,38 @@ describe("RulesPage 原生规则目标", () => {
     expect(bodyText).not.toContain("备份");
   });
 
-  it("仅带 sync 动作的行显示「同步此目标」，plan/apply 精确携带同一 --only 且零 policy:set", async () => {
+  it("仅带 sync 动作的行显示「同步此目标」，点击直接 rules:apply 精确 --only（带 run_id），不取 plan、零 policy:set", async () => {
     const { calls } = renderWithEngine(<RulesPage />, nativeRulesRoutes());
 
     const syncButton = await screen.findByTestId("action-sync-rules:claude_global");
     expect(screen.queryByTestId("action-sync-rules:codex_global")).not.toBeInTheDocument();
 
     await userEvent.click(syncButton);
-    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
-    expect(dialog).toHaveTextContent("同步 Claude Code 全局规则");
-    expect(dialog).not.toHaveTextContent("备份");
-    expect(dialog).not.toHaveTextContent("生成");
+    await waitFor(() => expect(calls.some((call) => call.command === "rules:apply")).toBe(true));
 
-    const planCalls = calls.filter((call) => call.command === "rules:plan");
-    expect(planCalls.length).toBeGreaterThan(0);
-    expect(planCalls[0].args).toEqual(["--only", "rules:claude_global"]);
-
-    await userEvent.click(screen.getByTestId("plan-confirm-button"));
-    const applyCall = calls.find((call) => call.command === "rules:apply");
-    expect(applyCall).toBeDefined();
-    expect(applyCall!.args).toEqual(["--only", "rules:claude_global"]);
+    const applyCalls = calls.filter((call) => call.command === "rules:apply");
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0].args).toEqual(["--only", "rules:claude_global"]);
+    expect(applyCalls[0].args).not.toContain("--dry-run");
+    expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("全局「立即同步」的 plan 与 apply 均不带 --only", async () => {
+  it("全局「立即同步」：点击直接 rules:apply 且不带 --only", async () => {
     const { calls } = renderWithEngine(<RulesPage />, nativeRulesRoutes());
 
     await userEvent.click(await screen.findByRole("button", { name: "立即同步" }));
-    await screen.findByRole("dialog", { name: /将要执行的操作/ });
-    const planCall = calls.find((call) => call.command === "rules:plan");
-    expect(planCall).toBeDefined();
-    expect(planCall!.args).toEqual([]);
+    await waitFor(() => expect(calls.some((call) => call.command === "rules:apply")).toBe(true));
 
-    await userEvent.click(screen.getByTestId("plan-confirm-button"));
-    const applyCall = calls.find((call) => call.command === "rules:apply");
-    expect(applyCall).toBeDefined();
-    expect(applyCall!.args).toEqual([]);
+    const applyCalls = calls.filter((call) => call.command === "rules:apply");
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0].args).toEqual([]);
+    expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
 
@@ -307,16 +292,8 @@ function nativeHooksRoutes(): Record<string, Envelope> {
       },
       { command: "hooks.status" },
     ),
-    "hooks:plan": makeEnvelope(
-      {
-        domain: "hooks",
-        actions: [makePlanAction({ element: "hooks:claude", target: "/tmp/home/.claude/settings.json", note: "同步 hooks:claude 钩子文件" })],
-        summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 },
-      },
-      { command: "hooks.plan" },
-    ),
     "hooks:apply": makeEnvelope(
-      { domain: "hooks", dry_run: false, steps: [{ name: "hooks:sync hooks:claude", ok: true, exit_code: 0 }], skipped: [] },
+      { domain: "hooks", steps: [{ name: "hooks:sync hooks:claude", ok: true, exit_code: 0 }], skipped: [] },
       { command: "hooks.apply" },
     ),
     "sources:get": makeEnvelope(
@@ -344,23 +321,20 @@ describe("Hooks 页原生目标", () => {
     expect(bodyText).not.toContain("生成");
   });
 
-  it("全局「立即同步」：hooks:plan/apply 均不带 --only，弹窗无备份承诺", async () => {
+  it("全局「立即同步」：点击直接 hooks:apply 且不带 --only，页面无备份/生成承诺", async () => {
     const { calls } = renderWithEngine(<RulesHooksPage />, nativeHooksRoutes());
     await userEvent.click(screen.getByRole("tab", { name: "Hooks" }));
 
     await userEvent.click(await screen.findByTestId("apply-hooks-button"));
-    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
-    expect(dialog).not.toHaveTextContent("备份");
-    expect(dialog).not.toHaveTextContent("生成");
-    const planCall = calls.find((call) => call.command === "hooks:plan");
-    expect(planCall).toBeDefined();
-    expect(planCall!.args).toEqual([]);
+    await waitFor(() => expect(calls.some((call) => call.command === "hooks:apply")).toBe(true));
 
-    await userEvent.click(screen.getByTestId("plan-confirm-button"));
-    const applyCall = calls.find((call) => call.command === "hooks:apply");
-    expect(applyCall).toBeDefined();
-    expect(applyCall!.args).toEqual([]);
+    const applyCalls = calls.filter((call) => call.command === "hooks:apply");
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0].args).toEqual([]);
+    expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
 
@@ -395,23 +369,8 @@ describe("Hooks 阻塞目标的显式接管入口", () => {
       },
       { command: "hooks.status" },
     );
-    routes["hooks:plan"] = makeEnvelope(
-      {
-        domain: "hooks",
-        actions: [
-          makePlanAction({
-            element: "hooks:codex",
-            target: "/tmp/home/.codex/hooks.json",
-            note: "同步 hooks:codex 钩子文件（whole-file 替换：目标文件现有内容将被整体替换，请先把需要保留的 hook 并入 hooks.codex 来源）",
-            takeover: true,
-          }),
-        ],
-        summary: { read: 0, "write-local": 1, "exec-local": 0, network: 0, "install-remove": 0 },
-      },
-      { command: "hooks.plan" },
-    );
     routes["hooks:apply"] = makeEnvelope(
-      { domain: "hooks", dry_run: false, steps: [{ name: "hooks:sync hooks:codex", ok: true, exit_code: 0 }], skipped: [] },
+      { domain: "hooks", steps: [{ name: "hooks:sync hooks:codex", ok: true, exit_code: 0 }], skipped: [] },
       { command: "hooks.apply" },
     );
     return routes;
@@ -426,24 +385,88 @@ describe("Hooks 阻塞目标的显式接管入口", () => {
     expect(screen.queryByTestId("takeover-hooks:claude")).not.toBeInTheDocument();
   });
 
-  it("接管流程：plan/apply 均携带 --only 单目标与 --allow-takeover，预览展示接管徽标与风险说明", async () => {
+  it("接管原内容：一键直接 apply 带 --only 与 --allow-takeover，不取 plan、不开预览，成功走既有执行 toast", async () => {
+    const toastSuccessSpy = vi.spyOn(toast, "success");
     const { calls } = renderWithEngine(<RulesHooksPage />, blockedHooksRoutes());
     await userEvent.click(screen.getByRole("tab", { name: "Hooks" }));
 
+    // 整文件替换警示仍在按钮旁展示
+    expect(await screen.findByTestId("takeover-hint-hooks:codex")).toHaveTextContent(/整文件替换/);
+    await userEvent.click(screen.getByTestId("takeover-hooks:codex"));
+
+    await waitFor(() => expect(toastSuccessSpy).toHaveBeenCalled());
+    const applyCalls = calls.filter((call) => call.command === "hooks:apply");
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0].args).toEqual(["--only", "hooks:codex", "--allow-takeover"]);
+    expect(applyCalls[0].args).not.toContain("--dry-run");
+    expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command === "hooks:plan")).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(toastSuccessSpy).toHaveBeenCalledWith(expect.stringContaining("接管原内容 hooks:codex"));
+  });
+
+  it("blocked/unsafe 且 actual_digest:null 的目标不显示接管按钮", async () => {
+    const unsafeRoutes = blockedHooksRoutes();
+    unsafeRoutes["hooks:status"] = makeEnvelope(
+      {
+        domain: "hooks",
+        elements: [
+          makeElement({
+            id: "hooks:codex",
+            domain: "hooks",
+            spec: { name: "Codex Hooks", merge: "whole-file", source_key: "hooks.codex", target: "~/.codex/hooks.json" },
+            policy: { enabled: true, agent_id: "codex" },
+            observed: { target: "/tmp/home/.codex/hooks.json", target_exists: true, expected_digest: "eeee", applied_digest: null, actual_digest: null, source_revision: "r2", blocked_reason: "目标文件已存在外部内容且无受管绑定，拒绝覆盖", registration_needed: false, managed_hook_count: 1, missing_signatures: 0, removed_signatures_present: 0 },
+            state: "unmanaged-detected",
+            freshness: makeFreshness(),
+            actions: [],
+          }),
+        ],
+      },
+      { command: "hooks.status" },
+    );
+
+    const { calls } = renderWithEngine(<RulesHooksPage />, unsafeRoutes);
+    await userEvent.click(screen.getByRole("tab", { name: "Hooks" }));
+
+    expect(await screen.findByText("hooks:codex")).toBeInTheDocument();
+    expect(screen.queryByTestId("takeover-hooks:codex")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("takeover-hint-hooks:codex")).not.toBeInTheDocument();
+    expect(calls.some((call) => call.command === "hooks:apply")).toBe(false);
+  });
+
+  it("安全 unmanaged 且 actual_digest 为 string 的目标仍显示接管按钮，点击直接 hooks:apply --allow-takeover", async () => {
+    const safeRoutes = blockedHooksRoutes();
+    safeRoutes["hooks:status"] = makeEnvelope(
+      {
+        domain: "hooks",
+        elements: [
+          makeElement({
+            id: "hooks:codex",
+            domain: "hooks",
+            spec: { name: "Codex Hooks", merge: "whole-file", source_key: "hooks.codex", target: "~/.codex/hooks.json" },
+            policy: { enabled: true, agent_id: "codex" },
+            observed: { target: "/tmp/home/.codex/hooks.json", target_exists: true, expected_digest: "eeee", applied_digest: null, actual_digest: "ffff", source_revision: "r2", blocked_reason: null, registration_needed: false, managed_hook_count: 1, missing_signatures: 0, removed_signatures_present: 0 },
+            state: "unmanaged-detected",
+            freshness: makeFreshness(),
+            actions: [],
+          }),
+        ],
+      },
+      { command: "hooks.status" },
+    );
+
+    const { calls } = renderWithEngine(<RulesHooksPage />, safeRoutes);
+    await userEvent.click(screen.getByRole("tab", { name: "Hooks" }));
+
     await userEvent.click(await screen.findByTestId("takeover-hooks:codex"));
-    const dialog = await screen.findByRole("dialog", { name: /将要执行的操作/ });
-    expect(dialog).toHaveTextContent("接管原内容 hooks:codex");
-    expect(dialog).toHaveTextContent(/整文件替换/);
-    expect(dialog).toHaveTextContent(/whole-file 替换/);
-    expect(within(dialog).getByTestId("takeover-badge")).toHaveTextContent("接管");
+    await waitFor(() => expect(calls.some((call) => call.command === "hooks:apply")).toBe(true));
 
-    const planCall = calls.find((call) => call.command === "hooks:plan");
-    expect(planCall).toBeDefined();
-    expect(planCall!.args).toEqual(["--only", "hooks:codex", "--allow-takeover"]);
-
-    await userEvent.click(screen.getByTestId("plan-confirm-button"));
-    const applyCall = calls.find((call) => call.command === "hooks:apply");
-    expect(applyCall).toBeDefined();
-    expect(applyCall!.args).toEqual(["--only", "hooks:codex", "--allow-takeover"]);
+    const applyCalls = calls.filter((call) => call.command === "hooks:apply");
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0].args).toEqual(["--only", "hooks:codex", "--allow-takeover"]);
+    expect(applyCalls[0].args).not.toContain("--dry-run");
+    expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
   });
 });

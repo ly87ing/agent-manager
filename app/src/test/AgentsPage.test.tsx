@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { waitFor } from "@testing-library/react";
 import AgentsPage from "../pages/AgentsPage";
-import { makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePlanAction } from "./fixtures";
+import { makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 import type { Envelope } from "../lib/contract";
 
@@ -29,131 +29,68 @@ function routes(offline: boolean): Record<string, Envelope> {
       },
       { command: "agents.status" },
     ),
-    "agents:plan": makeEnvelope(
-      {
-        domain: "agents",
-        actions: [
-          makePlanAction({ op: "run-cmd", element: "agents:claude-code", target: null, risk: "network", cmd: "npm install -g @anthropic-ai/claude-code", note: "升级到 2.1.3" }),
-        ],
-        summary: { read: 0, "write-local": 0, "exec-local": 0, network: 1, "install-remove": 0 },
-      },
-      { command: "agents.plan" },
-    ),
+    "agents:apply": makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }),
   };
 }
 
 describe("Agents 页写动作", () => {
-  it("仅有 uninstall 动作的助手详情显示无安全预览且零 agents:plan", async () => {
-    const uninstallOnlyRoutes = routes(false);
-    uninstallOnlyRoutes["agents:status"] = makeEnvelope(
-      {
-        domain: "agents",
-        elements: [
-          makeElement({
-            id: "agents:codex",
-            domain: "agents",
-            spec: { display_name: "Codex", bin: "codex" },
-            policy: { enabled: true },
-            observed: { installed: true, providers: ["native"] },
-            state: "managed-ok",
-            actions: [{ id: "uninstall", risk: "install-remove", needs_lock: true, offline_ok: false }],
-          }),
-        ],
-      },
-      { command: "agents.status" },
-    );
-    const { calls } = renderWithEngine(<AgentsPage />, uninstallOnlyRoutes);
-
-    await screen.findByTestId("action-uninstall-agents:codex");
-    await userEvent.click(screen.getByRole("button", { name: "展开同步详情" }));
-
-    expect(await screen.findByText("当前没有可安全预览的同步动作。")).toBeInTheDocument();
-    expect(calls.filter((call) => call.command === "agents:plan")).toHaveLength(0);
-  });
-
-  it("详情只为 upgrade/install 生成带元素与动作参数的 plan，不自动预览 uninstall", async () => {
+  it("详情展开为纯状态展示（drift 面板），任何动作组合都不发起 plan", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes(false));
     await screen.findByTestId("action-upgrade-agents:claude-code");
 
     await userEvent.click(screen.getByRole("button", { name: "展开同步详情" }));
-    await screen.findByTestId("drift-panel");
-    expect(calls.find((call) => call.command === "agents:plan")?.args).toEqual([
-      "--only",
-      "agents:claude-code",
-      "--action",
-      "upgrade",
-    ]);
-    expect(calls.find((call) => call.command === "agents:plan")?.args).not.toContain("uninstall");
+    expect(await screen.findByTestId("drift-panel")).toBeInTheDocument();
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
   });
 
-  it("升级按钮 → plan 预览（带 --action upgrade）→ network 知情勾选 → agents:apply 带 action 与 run_id", async () => {
+  it("升级按钮：点击直接 agents:apply 带 --action upgrade 与 run_id，不取 plan、不开弹窗、零 policy:set", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes(false));
     await userEvent.click(await screen.findByTestId("action-upgrade-agents:claude-code"));
 
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog).toHaveTextContent("升级 Claude Code");
-    expect(dialog).toHaveTextContent("npm install -g @anthropic-ai/claude-code");
-
-    // 预览请求带显式动作
-    const planCall = calls.find((call) => call.command === "agents:plan");
-    expect(planCall!.args).toEqual(["--only", "agents:claude-code", "--action", "upgrade"]);
-
-    // network 级：须勾选
-    const confirm = screen.getByTestId("plan-confirm-button");
-    expect(confirm).toBeDisabled();
-    await userEvent.click(screen.getByTestId("network-ack-checkbox"));
-    expect(confirm).toBeEnabled();
-    await userEvent.click(confirm);
-
-    const applyCall = calls.find((call) => call.command === "agents:apply");
-    expect(applyCall).toBeDefined();
-    expect(applyCall!.args).toEqual(["--only", "agents:claude-code", "--action", "upgrade"]);
-    expect(applyCall!.options?.runId).toMatch(/^gui-/);
-  });
-
-  it("卸载：预览到确认全程零 policy:set，apply 带 --action uninstall 与 --allow-uninstall", async () => {
-    const uninstallRoutes = routes(false);
-    uninstallRoutes["agents:plan"] = makeEnvelope(
-      {
-        domain: "agents",
-        actions: [
-          makePlanAction({ op: "uninstall", element: "agents:claude-code", target: null, risk: "install-remove", cmd: "npm uninstall -g @anthropic-ai/claude-code", note: "显式卸载（provider: npm）" }),
-        ],
-        summary: { read: 0, "write-local": 0, "exec-local": 0, network: 0, "install-remove": 1 },
-      },
-      { command: "agents.plan" },
-    );
-    const { calls } = renderWithEngine(<AgentsPage />, uninstallRoutes);
-    await userEvent.click(await screen.findByTestId("action-uninstall-agents:claude-code"));
-
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog).toHaveTextContent("卸载 Claude Code");
-    expect(dialog).toHaveTextContent(/不能自动撤销/);
-
-    const planCall = calls.find((call) => call.command === "agents:plan");
-    expect(planCall!.args).toEqual(["--only", "agents:claude-code", "--action", "uninstall"]);
-
-    // install-remove 级：需输入元素 id 确认
-    const confirm = screen.getByTestId("plan-confirm-button");
-    expect(confirm).toBeDisabled();
-    await userEvent.type(screen.getByTestId("install-remove-confirm-input"), "agents:claude-code");
-    expect(confirm).toBeEnabled();
-    await userEvent.click(confirm);
-
-    const applyCall = calls.find((call) => call.command === "agents:apply");
-    expect(applyCall!.args).toEqual(["--only", "agents:claude-code", "--action", "uninstall", "--allow-uninstall"]);
-    // 不再有任何 policy 预写
+    await waitFor(() => expect(calls.some((call) => call.command === "agents:apply")).toBe(true));
+    const applyCalls = calls.filter((call) => call.command === "agents:apply");
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0].args).toEqual(["--only", "agents:claude-code", "--action", "upgrade"]);
+    expect(applyCalls[0].args).not.toContain("--dry-run");
+    expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("取消预览：不写策略、不执行", async () => {
+  it("卸载：点击先打开 ConfirmModal，取消时零 apply/零 policy:set", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes(false));
     await userEvent.click(await screen.findByTestId("action-uninstall-agents:claude-code"));
-    await screen.findByRole("dialog");
-    await userEvent.click(screen.getByRole("button", { name: "取消" }));
 
-    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    await screen.findByRole("dialog", { name: "卸载 Claude Code" });
+    expect(screen.getByRole("dialog", { name: "卸载 Claude Code" })).toHaveTextContent(/命令以你的权限运行/);
+    expect(screen.getByTestId("confirm-modal-input")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
     expect(calls.some((call) => call.command === "agents:apply")).toBe(false);
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
+  });
+
+  it("卸载：输入 element.id 确认后 agents:apply 带 --action uninstall --allow-uninstall，无 plan、零 policy:set", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routes(false));
+    await userEvent.click(await screen.findByTestId("action-uninstall-agents:claude-code"));
+
+    await screen.findByRole("dialog", { name: "卸载 Claude Code" });
+    await userEvent.type(screen.getByTestId("confirm-modal-input"), "agents:claude-code");
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "agents:apply")).toBe(true));
+    const applyCalls = calls.filter((call) => call.command === "agents:apply");
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0].args).toEqual(["--only", "agents:claude-code", "--action", "uninstall", "--allow-uninstall"]);
+    expect(applyCalls[0].args).not.toContain("--dry-run");
+    expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("offline：network/install-remove 按钮全部禁用", async () => {

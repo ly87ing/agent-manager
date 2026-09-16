@@ -3,10 +3,10 @@ import { Loader2, X } from "lucide-react";
 import type { Diagnostic, RiskLevel } from "../lib/contract";
 import { cn } from "../lib/utils";
 import { ErrorPanel } from "./ErrorPanel";
-import { RiskBadge } from "./PlanPreviewModal";
+import { RiskBadge } from "./RiskBadge";
 
 /**
- * 非 plan 类动作的确认弹窗（例如清理诊断日志、移除定义）。
+ * 破坏性/独立确认动作的确认弹窗（例如清理诊断日志、移除定义）。
  * 风险级驱动：install-remove 级须输入 requireText 二次确认；其余单次确认。
  */
 export function ConfirmModal({

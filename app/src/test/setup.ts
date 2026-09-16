@@ -9,7 +9,7 @@ import { setEngineClient } from "../lib/engine";
 import { setSettingsClient, type SettingsClient } from "../lib/settings";
 
 const defaultSettingsClient: SettingsClient = {
-  get: async () => ({ preferences: { offline: false, defaultDryRun: false, upstreamTtlSec: 86400, logRetentionDays: 30 }, appVersion: "test", contractVersion: "agent-manager/engine/v1", resourceDir: "/resources", dataDir: "/data", logDir: "/logs", updaterConfigured: false, maintenanceWarning: null }),
+  get: async () => ({ preferences: { offline: false, upstreamTtlSec: 86400, logRetentionDays: 30 }, appVersion: "test", contractVersion: "agent-manager/engine/v1", resourceDir: "/resources", dataDir: "/data", logDir: "/logs", updaterConfigured: false, maintenanceWarning: null }),
   save: async (preferences) => ({ preferences, appVersion: "test", contractVersion: "agent-manager/engine/v1", resourceDir: "/resources", dataDir: "/data", logDir: "/logs", updaterConfigured: false, maintenanceWarning: null }),
 };
 setSettingsClient(defaultSettingsClient);

@@ -22,11 +22,10 @@ function Harness({
       <button
         type="button"
         onClick={() =>
-          void ops.saveAndApply({
+          void ops.saveDefinition({
             name: "demo",
             definition: definition ?? { bin: "demo", install: "install.sh", upgrade: "upgrade.sh" },
             isNew,
-            elementId: `${domain}:demo`,
             complete,
           })
         }
@@ -41,7 +40,7 @@ function Harness({
 const policySetRoute = makeEnvelope({ applied: true }, { command: "policy.set" });
 
 describe("useDefinitionOps 保存语义", () => {
-  it("agents 域：保存定义只写定义本身，不写 enabled、不 plan/apply", async () => {
+  it("agents 域：保存定义只写定义本身，不写 enabled、不 apply/preflight", async () => {
     const { calls } = renderWithEngine(<Harness domain="agents" />, {
       "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode({ offline: false }) }),
       "policy:set": policySetRoute,
@@ -64,7 +63,7 @@ describe("useDefinitionOps 保存语义", () => {
     expect(calls.some((c) => c.command === "agents:apply")).toBe(false);
   });
 
-  it("mcp 域：保存定义只写一条整条替换的定义，不写 enabled、不 plan/apply", async () => {
+  it("mcp 域：保存定义只写一条整条替换的定义，不写 enabled、不 apply/preflight", async () => {
     const { calls } = renderWithEngine(<Harness domain="mcp" />, {
       "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode({ offline: false }) }),
       "policy:set": policySetRoute,
@@ -90,7 +89,7 @@ describe("useDefinitionOps 保存语义", () => {
     expect(calls.some((c) => c.command === "mcp:apply")).toBe(false);
   });
 
-  it("skills 域：保存定义只写一条整条替换的定义，不写 enabled、不 plan/apply", async () => {
+  it("skills 域：保存定义只写一条整条替换的定义，不写 enabled、不 apply/preflight", async () => {
     const { calls } = renderWithEngine(<Harness domain="skills" />, {
       "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode({ offline: false }) }),
       "policy:set": policySetRoute,

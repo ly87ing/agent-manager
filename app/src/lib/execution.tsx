@@ -14,7 +14,6 @@ export interface ExecutionRecord {
   runId: string;
   command: string;
   label: string;
-  dryRun: boolean;
   startedAt: number;
   finishedAt: number | null;
   status: "running" | "ok" | "failed";
@@ -34,7 +33,6 @@ export interface ExecuteRequest {
   args?: string[];
   /** 人类可读的动作名，如「收敛 mcp 域」。 */
   label: string;
-  dryRun?: boolean;
 }
 
 const ExecutionContext = createContext<ExecutionContextValue | null>(null);
@@ -50,7 +48,6 @@ export function ExecutionProvider({ children }: { children: ReactNode }) {
         runId,
         command: request.command,
         label: request.label,
-        dryRun: request.dryRun ?? false,
         startedAt: Date.now(),
         finishedAt: null,
         status: "running",
@@ -78,7 +75,7 @@ export function ExecutionProvider({ children }: { children: ReactNode }) {
       patch({ status: ok ? "ok" : "failed", finishedAt: Date.now(), envelope });
       const firstError: Diagnostic | undefined = envelope.errors[0];
       if (ok) {
-        toast.success(`${request.label}${request.dryRun ? "（演练）" : ""}完成`);
+        toast.success(`${request.label}完成`);
       } else {
         toast.error(`${request.label} 失败：${firstError?.message ?? "详见任务记录"}`);
       }

@@ -21,20 +21,22 @@ React UI ── Tauri commands
 
 ## 保存与执行
 
-定义保存只更新 SQLite，不安装、卸载、链接或执行外部动作。`status` 读取状态，`plan` 生成 actions，用户确认后 `apply` 执行并记录日志。
+定义保存只更新 SQLite，不安装、卸载、链接或执行外部动作。`status` 只读读取状态；执行按钮直接触发真实 `apply`，`apply` 内部包含 preflight/写前校验、精确 scope、排他锁、外部修改检测、CAS/条件回滚与审计，并记录 operation log。
 
 Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 的契约动作均要求新增、编辑/更新、启用、禁用、删除。移除管理与卸载必须分开表达和确认。
 
+公共 `*:plan` 与 `--dry-run` 入口已退役，调用会被拒绝。
+
 ## MCP 原生域
 
-Rust dispatcher 已接入本地 stdio 与远程 HTTP MCP 的 `mcp:status`、`mcp:plan` 和 `mcp:apply`。定义、库级开关和逐助手分配保存在 `native-manager.db` 的 SQLite 表中；codec 支持 Claude JSON、Codex TOML 和 OpenCode JSON，OpenCode 需要在对应 Agent definition 中配置 `mcp_config` 目标。远程定义含 `url`（仅 `https://` 或本机回环 http）与可选 `headers`（`${VAR}` 占位符引用），与 stdio 字段互斥。
+Rust dispatcher 已接入本地 stdio 与远程 HTTP MCP 的 `mcp:status`（只读）与真实 `mcp:apply`。定义、库级开关和逐助手分配保存在 `native-manager.db` 的 SQLite 表中；codec 支持 Claude JSON、Codex TOML 和 OpenCode JSON，OpenCode 需要在对应 Agent definition 中配置 `mcp_config` 目标。远程定义含 `url`（仅 `https://` 或本机回环 http）与可选 `headers`（`${VAR}` 占位符引用），与 stdio 字段互斥。
 
-逐助手支持 `add`、`update`、`enable`、`disable`、`remove`；库级支持 `enable`、`disable`、`remove`。`status`、`plan` 和 `mcp:apply --dry-run` 零写；真实 `apply` 具备排他锁、操作审计、CAS 写入与回滚保护。MCP `env` 在 SQLite definition/binding 中只持久化字面量 `${VAR}` 形式的环境变量引用；status、plan、诊断与操作日志不展示或保存解析后的真实值；真实 apply 执行时从进程环境解析，并按目标 codec 写入 Claude、Codex 或 OpenCode 的目标客户端配置，目标文件的明文由文件权限与客户端安全边界保护。远程 HTTP 与本地 stdio 同级：headers 只持久化 `${VAR}` 占位符并以引用形式写入目标，解析后明文不落盘。
+逐助手支持 `add`、`update`、`enable`、`disable`、`remove`；库级支持 `enable`、`disable`、`remove`。`mcp:status` 只读零写；真实 `apply` 具备排他锁、操作审计、CAS 写入与回滚保护。MCP `env` 在 SQLite definition/binding 中只持久化字面量 `${VAR}` 形式的环境变量引用；status、诊断与操作日志不展示或保存解析后的真实值；真实 apply 执行时从进程环境解析，并按目标 codec 写入 Claude、Codex 或 OpenCode 的目标客户端配置，目标文件的明文由文件权限与客户端安全边界保护。远程 HTTP 与本地 stdio 同级：headers 只持久化 `${VAR}` 占位符并以引用形式写入目标，解析后明文不落盘。
 
 ## 默认渠道与状态
 
 Claude Code 和 Codex 的内置默认都是官方 `native` 命令；brew 只作为实际检测来源，不改变默认。
 
-`system:audit` 已接入 Rust dispatcher 及其 Tauri offline 桥接：只读聚合 agents/skills/mcp/rules/hooks/aliases/secrets 与 runtime/storage 状态。只读 `secrets:status` 已接入 Rust dispatcher：仅读取 SQLite 有效策略中已启用 MCP 定义的合法 `${VAR}` 环境变量占位符，只检查 Agent Manager 当前进程环境是否存在对应变量，输出变量名与布尔；不扫描、定位或克隆外部密钥仓库，不持久化、序列化或显示变量值；畸形定义固定脱敏失败。设置页高级管理可达 Aliases、更新中心等页面，Aliases 原生 `aliases:status/plan/apply` 已接线。按 2026-09-12 产品裁决，Tools 域、快照（`snapshots:*`）与 `system:converge` 已退役，相关页面、Tauri 白名单与契约 schema 已移除；`system:refresh-upstream` 尚未实现，保留在路线图。
+`system:audit` 已接入 Rust dispatcher 及其 Tauri offline 桥接：只读聚合 agents/skills/mcp/rules/hooks/aliases/secrets 与 runtime/storage 状态。只读 `secrets:status` 已接入 Rust dispatcher：仅读取 SQLite 有效策略中已启用 MCP 定义的合法 `${VAR}` 环境变量占位符，只检查 Agent Manager 当前进程环境是否存在对应变量，输出变量名与布尔；不扫描、定位或克隆外部密钥仓库，不持久化、序列化或显示变量值；畸形定义固定脱敏失败。设置页高级管理可达 Aliases、更新中心等页面，Aliases 原生 `aliases:status/apply` 已接线。按 2026-09-12 产品裁决，Tools 域、快照（`snapshots:*`）与 `system:converge` 已退役，相关页面、Tauri 白名单与契约 schema 已移除；`system:refresh-upstream` 已接线（探测缓存落 SQLite `upstream_probes` 表，agents/mcp/skills 三域 status 回填 freshness）。
 
-SQLite 核心、Tauri bridge、设置与 Policy 页面、主要资源页面布局、Agent 原生生命周期、Skills 原生域、MCP 原生域、Rules 原生域与规则专用 `sources:get/set`、Hooks 原生域与 hooks 专用 `sources:get/set`、Runs SQLite `operation_logs`、结构化诊断日志及 Python 清理已完成。Agent 与 Skills 的 apply 均使用跨进程文件锁与结构化操作审计；Skills 内置集合只读默认并在首次写入后本地优先，集合与 Skill×Agent 均支持更新、启停与移除，并通过内容快照与安全软连接落地；status 与 plan 全程零写。两类日志协同运作：SQLite `operation_logs` 记录任务操作历史，并在新增操作记录时清理过期记录；`data_dir/logs/agent-manager-YYYY-MM-DD.jsonl` 记录结构化诊断元数据（严格脱敏、Unix 0700/0600、只读零写、拒随软链接），并在诊断日志写入后及应用启动时清理过期文件。两类日志共用 `log_retention_days`（0 禁用自动清理）；执行中心支持 `runs:clear` 二次确认清空任务记录，设置页支持 `logs:clear` 二次确认清理诊断日志，两类手动清理互不影响。Rules 原生 `status/plan/apply` 已接线（固定 Codex/Claude 两目标，外部修改 fail-closed）；Hooks 原生 status/plan/apply 与 hooks 专用 `sources:get/set`（hooks.claude/hooks.codex）已接线：固定 Claude `~/.claude/settings.json` signature-set 合并与 Codex `~/.codex/hooks.json` whole-file 两目标，外部修改 fail-closed。2026-09-09 Darwin x86_64 DMG 的只读挂载、仓库外复制、无 Python、路径脱敏和 5 秒启动验收早于当前 Rules/MCP/Hooks/Secrets 与只读 `system:audit` 实现，不能证明当前 Rules/MCP/Hooks/Secrets/system:audit GUI 业务闭环；签名、公证、arm64、Linux、Windows 和更新发布仍未验证。详见 [契约](../contract/README.md) 与 [平台状态](GUI-PLATFORM-STATUS.md)。
+SQLite 核心、Tauri bridge、设置与 Policy 页面、主要资源页面布局、Agent 原生生命周期、Skills 原生域、MCP 原生域、Rules 原生域与规则专用 `sources:get/set`、Hooks 原生域与 hooks 专用 `sources:get/set`、Runs SQLite `operation_logs`、结构化诊断日志及 Python 清理已完成。Agent 与 Skills 的 apply 均使用跨进程文件锁与结构化操作审计；Skills 内置集合只读默认并在首次写入后本地优先，集合与 Skill×Agent 均支持更新、启停与移除，并通过内容快照与安全软连接落地；status 只读零写。两类日志协同运作：SQLite `operation_logs` 记录任务操作历史，并在新增操作记录时清理过期记录；`data_dir/logs/agent-manager-YYYY-MM-DD.jsonl` 记录结构化诊断元数据（严格脱敏、Unix 0700/0600、只读零写、拒随软链接），并在诊断日志写入后及应用启动时清理过期文件。两类日志共用 `log_retention_days`（0 禁用自动清理）；执行中心支持 `runs:clear` 二次确认清空任务记录，设置页支持 `logs:clear` 二次确认清理诊断日志，两类手动清理互不影响。Rules 原生 `status/apply` 已接线（固定 Codex/Claude 两目标，外部修改 fail-closed）；Hooks 原生 status/apply 与 hooks 专用 `sources:get/set`（hooks.claude/hooks.codex）已接线：固定 Claude `~/.claude/settings.json` signature-set 合并与 Codex `~/.codex/hooks.json` whole-file 两目标，外部修改 fail-closed。旧版 DMG/GUI E2E 不证明本轮直接 apply 新交互；本轮源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收已完成，最终 clean DMG 在最终提交后重建并记录于交付回执。签名、公证、arm64 真机运行、Linux、Windows 和更新发布仍未验证。详见 [契约](../contract/README.md) 与 [平台状态](GUI-PLATFORM-STATUS.md)。

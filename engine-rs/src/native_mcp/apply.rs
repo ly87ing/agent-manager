@@ -19,15 +19,6 @@ pub fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     let only = req.value("--only").unwrap_or("");
     preflight_apply(ctx, req)?;
 
-    if parsed.dry_run {
-        return Ok(json!({
-            "domain": "mcp",
-            "dry_run": true,
-            "steps": [],
-            "skipped": [only]
-        }));
-    }
-
     let mut conn = store::open_write(ctx)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
@@ -296,7 +287,6 @@ pub fn apply(ctx: &Context, req: &Request) -> Result<Value> {
 
     Ok(json!({
         "domain": "mcp",
-        "dry_run": false,
         "steps": [{
             "name": format!("mcp:{} {}", parsed.action, only),
             "ok": true,

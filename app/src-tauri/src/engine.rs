@@ -27,8 +27,7 @@ impl EngineError {
 
 // ---------- 命令面白名单 ----------
 
-/// 支持 status + plan 的域（secrets 只有 status；system 只有 audit / refresh-upstream）。
-/// 支持 status/plan/apply 的域（对齐引擎 APPLY_DOMAINS；secrets 只读）。
+/// 支持 status + apply 的域（对齐引擎 APPLY_DOMAINS；secrets 只读）。
 const READ_WRITE_DOMAINS: &[&str] = &["agents", "mcp", "skills", "rules", "hooks", "aliases"];
 
 pub fn validate_command(command: &str) -> Result<(), EngineError> {
@@ -36,7 +35,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|plan|apply / system:audit|refresh-upstream / runs:* / policy:* / sources:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / secrets:status / system:audit|refresh-upstream / runs:* / policy:* / sources:* / db:*）"
             ),
         )
     };
@@ -54,7 +53,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("policy", "get" | "set" | "delete") => true,
         ("sources", "get" | "set") => true,
         ("db", "status" | "migrate") => true,
-        (d, "status" | "plan" | "apply") => READ_WRITE_DOMAINS.contains(&d),
+        (d, "status" | "apply") => READ_WRITE_DOMAINS.contains(&d),
         _ => false,
     };
     if allowed {
@@ -67,7 +66,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
 /// 参数取值类型（按类型校验；不经 shell，argv 直传引擎）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ArgValueKind {
-    /// 纯开关（--dry-run / --allow-uninstall），不带值。
+    /// 纯开关（如 --allow-uninstall），不带值。
     Flag,
     /// 元素 id，如 mcp:grok-search / skill:agent-skills/find-skills。
     ElementId,
@@ -79,7 +78,7 @@ enum ArgValueKind {
     DotKey,
     /// policy:set 的 JSON 值——合法性即 JSON 可解析。
     JsonValue,
-    /// agents:plan/apply 的显式生命周期动作：仅 install/upgrade/uninstall。
+    /// agents:apply 的显式生命周期动作：仅 install/upgrade/uninstall。
     AgentAction,
     SkillAction,
     McpAction,
@@ -94,7 +93,6 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         ("sources", "set") => {
             specs.push(("--key", ArgValueKind::DotKey));
             specs.push(("--value", ArgValueKind::JsonValue));
-            specs.push(("--dry-run", ArgValueKind::Flag));
         }
         ("system", "refresh-upstream") => specs.push(("--only", ArgValueKind::ElementId)),
         ("runs", "get") => {
@@ -104,32 +102,12 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--layer", ArgValueKind::PolicyLayer));
             specs.push(("--key", ArgValueKind::DotKey));
             specs.push(("--value", ArgValueKind::JsonValue));
-            specs.push(("--dry-run", ArgValueKind::Flag));
         }
         ("policy", "delete") => {
             specs.push(("--layer", ArgValueKind::PolicyLayer));
             specs.push(("--key", ArgValueKind::DotKey));
         }
-        (_, "plan") => {
-            specs.push(("--only", ArgValueKind::ElementId));
-            if domain == "agents" {
-                specs.push(("--action", ArgValueKind::AgentAction));
-            }
-            if domain == "skills" {
-                specs.push(("--agent", ArgValueKind::ElementId));
-                specs.push(("--action", ArgValueKind::SkillAction));
-            }
-            if domain == "mcp" {
-                specs.push(("--agent", ArgValueKind::ElementId));
-                specs.push(("--action", ArgValueKind::McpAction));
-                specs.push(("--allow-takeover", ArgValueKind::Flag));
-            }
-            if domain == "hooks" {
-                specs.push(("--allow-takeover", ArgValueKind::Flag));
-            }
-        }
         (_, "apply") => {
-            specs.push(("--dry-run", ArgValueKind::Flag));
             specs.push(("--only", ArgValueKind::ElementId));
             if domain == "agents" {
                 specs.push(("--allow-uninstall", ArgValueKind::Flag));
@@ -258,9 +236,8 @@ pub fn validate_args(command: &str, args: &[String]) -> Result<(), EngineError> 
     // sources 与 native 严格参数保持一致：拒绝重复 flag。
     let reject_duplicates = matches!(command, "sources:get" | "sources:set");
     let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
-    // Rules 严格契约：--only 的 flag 可重复但值不可重复；--dry-run 不可重复。
+    // Rules 严格契约：--only 的 flag 可重复但值不可重复。
     let mut rules_only_seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
-    let mut rules_dry_run_seen = false;
     let mut index = 0;
     while index < args.len() {
         let arg = &args[index];
@@ -275,15 +252,6 @@ pub fn validate_args(command: &str, args: &[String]) -> Result<(), EngineError> 
                 "invalid_args",
                 format!("命令 '{command}' 重复提供参数 '{arg}'"),
             ));
-        }
-        if is_rules && arg == "--dry-run" {
-            if rules_dry_run_seen {
-                return Err(EngineError::new(
-                    "invalid_args",
-                    format!("命令 '{command}' 重复提供参数 '--dry-run'"),
-                ));
-            }
-            rules_dry_run_seen = true;
         }
         if *kind != ArgValueKind::Flag {
             index += 1;
@@ -402,22 +370,16 @@ mod tests {
     fn command_whitelist_covers_contract_surface_and_rejects_injection() {
         for command in [
             "agents:status",
-            "agents:plan",
             "agents:apply",
             "mcp:status",
-            "mcp:plan",
             "mcp:apply",
             "skills:status",
-            "skills:plan",
             "skills:apply",
             "rules:status",
-            "rules:plan",
             "rules:apply",
             "hooks:status",
-            "hooks:plan",
             "hooks:apply",
             "aliases:status",
-            "aliases:plan",
             "aliases:apply",
             "secrets:status",
             "system:audit",
@@ -439,6 +401,12 @@ mod tests {
 
         for command in [
             "agents:update",
+            "agents:plan",
+            "mcp:plan",
+            "skills:plan",
+            "rules:plan",
+            "hooks:plan",
+            "aliases:plan",
             "secrets:plan",
             "secrets:apply",
             "system:status",
@@ -480,16 +448,6 @@ mod tests {
     fn args_cover_command_aware_whitelist_and_reject_invalid_values() {
         for action in ["install", "upgrade", "uninstall"] {
             assert!(validate_args(
-                "agents:plan",
-                &[
-                    "--only".into(),
-                    "agents:codex".into(),
-                    "--action".into(),
-                    action.into()
-                ]
-            )
-            .is_ok());
-            assert!(validate_args(
                 "agents:apply",
                 &[
                     "--only".into(),
@@ -503,7 +461,7 @@ mod tests {
         }
         for action in ["add", "update", "enable", "disable", "remove"] {
             assert!(validate_args(
-                "skills:plan",
+                "skills:apply",
                 &[
                     "--only".into(),
                     "skill:repo/name".into(),
@@ -520,7 +478,7 @@ mod tests {
                     "--agent".into(),
                     "codex".into(),
                     "--action".into(),
-                    action.into()
+                    action.into(),
                 ]
             )
             .is_ok());
@@ -531,18 +489,6 @@ mod tests {
                 "system:refresh-upstream",
                 vec!["--only".into(), "mcp:grok-search".into()],
             ),
-            ("mcp:plan", vec!["--only".into(), "mcp:grok-search".into()]),
-            (
-                "mcp:plan",
-                vec![
-                    "--only".into(),
-                    "mcp:grok-search".into(),
-                    "--agent".into(),
-                    "codex".into(),
-                    "--action".into(),
-                    "update".into(),
-                ],
-            ),
             (
                 "mcp:apply",
                 vec![
@@ -550,13 +496,9 @@ mod tests {
                     "mcp:grok-search".into(),
                     "--action".into(),
                     "disable".into(),
-                    "--dry-run".into(),
                 ],
             ),
-            (
-                "agents:apply",
-                vec!["--allow-uninstall".into(), "--dry-run".into()],
-            ),
+            ("agents:apply", vec!["--allow-uninstall".into()]),
             (
                 "runs:get",
                 vec!["--run".into(), "gui-20260906T010203Z-ab12cd".into()],
@@ -570,7 +512,6 @@ mod tests {
                     "mcp.enabled".into(),
                     "--value".into(),
                     "{\"a\":true}".into(),
-                    "--dry-run".into(),
                 ],
             ),
             (
@@ -590,7 +531,6 @@ mod tests {
                     "rules.shared".into(),
                     "--value".into(),
                     "{}".into(),
-                    "--dry-run".into(),
                 ],
             ),
         ] {
@@ -601,9 +541,14 @@ mod tests {
         }
 
         for (command, args) in [
+            // plan 命令已被命令面拒绝，参数校验不会到达此处；--dry-run 已从白名单移除。
             ("mcp:status", vec!["--dry-run".into()]),
+            ("mcp:apply", vec!["--dry-run".into()]),
+            ("agents:apply", vec!["--dry-run".into()]),
+            ("rules:apply", vec!["--dry-run".into()]),
+            ("policy:set", vec!["--dry-run".into()]),
+            ("sources:set", vec!["--dry-run".into()]),
             ("mcp:apply", vec!["--allow-uninstall".into()]),
-            ("mcp:plan", vec!["--unexpected".into(), "codex".into()]),
             ("agents:status", vec!["--action".into(), "install".into()]),
             ("skills:apply", vec!["--action".into(), "install".into()]),
             ("runs:list", vec!["--run".into(), "r1".into()]),
@@ -650,12 +595,12 @@ mod tests {
                 ],
             ),
             ("policy:set", vec!["--layer".into(), "baseline".into()]),
-            ("agents:plan", vec!["--action".into(), "reinstall".into()]),
+            ("agents:apply", vec!["--action".into(), "reinstall".into()]),
             (
                 "agents:apply",
                 vec!["--action".into(), "install; rm -rf /".into()],
             ),
-            ("skills:plan", vec!["--action".into(), "INSTALL".into()]),
+            ("skills:apply", vec!["--action".into(), "INSTALL".into()]),
             ("mcp:status", vec!["; rm -rf /".into()]),
             ("mcp:status", vec!["$(reboot)".into()]),
             ("mcp:status", vec!["mcp:status --offline".into()]),
@@ -700,40 +645,36 @@ mod tests {
         );
         assert!(!bad_action_err.message.contains("skills"));
 
-        // --allow-takeover：仅 mcp:plan / mcp:apply 放行（显式接管通道）
-        for command in ["mcp:plan", "mcp:apply"] {
-            assert!(
-                validate_args(
-                    command,
-                    &[
-                        "--only".into(),
-                        "mcp:s1".into(),
-                        "--agent".into(),
-                        "claude-code".into(),
-                        "--action".into(),
-                        "add".into(),
-                        "--allow-takeover".into(),
-                    ]
-                )
-                .is_ok(),
-                "{command} --allow-takeover should pass"
-            );
-        }
-        // hooks:plan / hooks:apply 同样放行（单目标显式接管，引擎侧再强制 --only 约束）
-        for command in ["hooks:plan", "hooks:apply"] {
-            assert!(
-                validate_args(
-                    command,
-                    &[
-                        "--only".into(),
-                        "hooks:codex".into(),
-                        "--allow-takeover".into()
-                    ]
-                )
-                .is_ok(),
-                "{command} --allow-takeover should pass"
-            );
-        }
+        // --allow-takeover：仅 mcp:apply 放行（显式接管通道）
+        assert!(
+            validate_args(
+                "mcp:apply",
+                &[
+                    "--only".into(),
+                    "mcp:s1".into(),
+                    "--agent".into(),
+                    "claude-code".into(),
+                    "--action".into(),
+                    "add".into(),
+                    "--allow-takeover".into(),
+                ]
+            )
+            .is_ok(),
+            "mcp:apply --allow-takeover should pass"
+        );
+        // hooks:apply 同样放行（单目标显式接管，引擎侧再强制 --only 约束）
+        assert!(
+            validate_args(
+                "hooks:apply",
+                &[
+                    "--only".into(),
+                    "hooks:codex".into(),
+                    "--allow-takeover".into()
+                ]
+            )
+            .is_ok(),
+            "hooks:apply --allow-takeover should pass"
+        );
         for (command, args) in [
             ("mcp:status", vec!["--allow-takeover".into()]),
             ("hooks:status", vec!["--allow-takeover".into()]),
@@ -749,33 +690,18 @@ mod tests {
 
         // Rules 严格契约：无 only / 单 only / 两个不同 only（顺序不限）均通过。
         for (command, args) in [
-            ("rules:plan", vec![]),
             ("rules:apply", vec![]),
             (
-                "rules:plan",
+                "rules:apply",
                 vec!["--only".into(), "rules:codex_global".into()],
             ),
             (
                 "rules:apply",
-                vec!["--only".into(), "rules:claude_global".into()],
-            ),
-            (
-                "rules:plan",
-                vec![
-                    "--only".into(),
-                    "rules:claude_global".into(),
-                    "--only".into(),
-                    "rules:codex_global".into(),
-                ],
-            ),
-            (
-                "rules:apply",
                 vec![
                     "--only".into(),
                     "rules:codex_global".into(),
                     "--only".into(),
                     "rules:claude_global".into(),
-                    "--dry-run".into(),
                 ],
             ),
         ] {
@@ -786,7 +712,7 @@ mod tests {
         }
 
         // Rules 拒绝：status 任意 raw arg（含 --offline，只能由 bridge 注入）、
-        // 重复 only、未知/别名 target、缺值、plan --dry-run、apply 重复 --dry-run。
+        // 重复 only、未知/别名 target、缺值、apply --dry-run。
         for (command, args) in [
             ("rules:status", vec!["--offline".into()]),
             (
@@ -795,10 +721,9 @@ mod tests {
             ),
             ("rules:status", vec!["--dry-run".into()]),
             ("rules:status", vec!["positional".into()]),
-            ("rules:plan", vec!["--offline".into()]),
             ("rules:apply", vec!["--offline".into()]),
             (
-                "rules:plan",
+                "rules:apply",
                 vec![
                     "--only".into(),
                     "rules:codex_global".into(),
@@ -806,12 +731,11 @@ mod tests {
                     "rules:codex_global".into(),
                 ],
             ),
-            ("rules:plan", vec!["--only".into(), "rules:unknown".into()]),
-            ("rules:plan", vec!["--only".into(), "rules:codex".into()]),
-            ("rules:plan", vec!["--only".into(), "codex".into()]),
-            ("rules:plan", vec!["--only".into()]),
-            ("rules:plan", vec!["--dry-run".into()]),
-            ("rules:apply", vec!["--dry-run".into(), "--dry-run".into()]),
+            ("rules:apply", vec!["--only".into(), "rules:unknown".into()]),
+            ("rules:apply", vec!["--only".into(), "rules:codex".into()]),
+            ("rules:apply", vec!["--only".into(), "codex".into()]),
+            ("rules:apply", vec!["--only".into()]),
+            ("rules:apply", vec!["--dry-run".into()]),
         ] {
             assert!(
                 validate_args(command, &args).is_err(),
@@ -854,12 +778,12 @@ mod tests {
             vec!["--offline"]
         );
         assert_eq!(
-            effective_args(vec!["--dry-run".into()], true),
-            vec!["--dry-run", "--offline"]
+            effective_args(vec!["--only".into(), "mcp:s1".into()], true),
+            vec!["--only", "mcp:s1", "--offline"]
         );
         assert_eq!(
-            effective_args(vec!["--dry-run".into()], false),
-            vec!["--dry-run"]
+            effective_args(vec!["--only".into(), "mcp:s1".into()], false),
+            vec!["--only", "mcp:s1"]
         );
         assert_eq!(
             effective_args(vec!["--offline".into()], false),
@@ -949,7 +873,6 @@ mod tests {
                 "rules.shared".into(),
                 "--value".into(),
                 "{\"revision\":\"r\",\"value\":\"v\"}".into(),
-                "--dry-run".into(),
             ]
         )
         .is_ok());
@@ -975,17 +898,6 @@ mod tests {
                     "{}".into(),
                 ],
             ),
-            (
-                "sources:set",
-                vec![
-                    "--key".into(),
-                    "rules.shared".into(),
-                    "--value".into(),
-                    "{}".into(),
-                    "--dry-run".into(),
-                    "--dry-run".into(),
-                ],
-            ),
         ] {
             let err = validate_args(command, &args).unwrap_err();
             assert!(
@@ -995,6 +907,7 @@ mod tests {
             );
         }
         assert!(validate_args("sources:get", &["--offline".into()]).is_err());
+        assert!(validate_args("sources:set", &["--dry-run".into()]).is_err());
         assert!(validate_args("sources:set", &["positional".into()]).is_err());
 
         // dispatch_native 对 sources 不注入 --offline：离线偏好下仍直连成功且零写
@@ -1020,10 +933,9 @@ mod tests {
     }
 
     #[test]
-    fn rules_status_and_plan_inject_offline_via_bridge() {
+    fn rules_status_injects_offline_via_bridge() {
         // raw --offline 仍被 validate_args 拒绝，只能由 bridge 注入。
         assert!(validate_args("rules:status", &["--offline".into()]).is_err());
-        assert!(validate_args("rules:plan", &["--offline".into()]).is_err());
 
         let root = std::env::temp_dir().join(format!(
             "am-rules-bridge-{}-{:x}",
@@ -1050,24 +962,11 @@ mod tests {
         assert_eq!(env.data["elements"].as_array().unwrap().len(), 2);
         assert!(!root.join("data").exists(), "rules:status 零写");
         assert!(!root.join("home").exists(), "rules:status 零写");
-
-        let env = dispatch_native(
-            c(),
-            "rules:plan".into(),
-            vec![],
-            "rules-bridge".into(),
-            true,
-        )
-        .unwrap();
-        assert!(env.ok, "{:?}", env.errors);
-        assert!(env.mode.offline);
-        assert_eq!(env.data["actions"].as_array().unwrap().len(), 2);
-        assert!(!root.join("data").exists(), "rules:plan 零写");
         let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
-    fn dispatch_read_dry_write_read() {
+    fn dispatch_read_write_read() {
         let root = std::env::temp_dir().join(format!("am-dispatch-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let c = || agent_manager_engine::Context {
@@ -1078,25 +977,6 @@ mod tests {
             dispatch_native(c(), "policy:get".into(), vec![], "read".into(), false)
                 .unwrap()
                 .ok
-        );
-        assert!(
-            dispatch_native(
-                c(),
-                "policy:set".into(),
-                vec![
-                    "--layer".into(),
-                    "local".into(),
-                    "--key".into(),
-                    "agents.x".into(),
-                    "--value".into(),
-                    "true".into(),
-                    "--dry-run".into()
-                ],
-                "dry".into(),
-                false
-            )
-            .unwrap()
-            .ok
         );
         assert!(!root.join("data").exists());
         assert!(

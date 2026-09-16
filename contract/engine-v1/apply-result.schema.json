@@ -1,16 +1,12 @@
 {
-  "description": "Data payload shape of '<domain>.apply' commands (envelope.data). apply executes the actions returned by the native engine after plan and user confirmation; external modification of a target fails closed instead of being overwritten.",
+  "description": "Data payload shape of '<domain>.apply' commands (envelope.data). apply runs the native engine's internal preflight and then executes directly; external modification of a target fails closed instead of being overwritten.",
   "type": "object",
-  "required": ["domain", "dry_run", "steps", "skipped"],
+  "required": ["domain", "steps", "skipped"],
   "additionalProperties": false,
   "properties": {
     "domain": {
       "description": "Domain that was applied, e.g. 'mcp'.",
       "type": "string"
-    },
-    "dry_run": {
-      "description": "true when the run only previewed changes (no writes).",
-      "type": "boolean"
     },
     "steps": {
       "description": "Per-action execution results, in engine order.",

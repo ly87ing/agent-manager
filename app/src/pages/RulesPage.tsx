@@ -8,12 +8,12 @@ import { StateBadge } from "../components/StateBadge";
 import type { EngineElement, StatusData } from "../lib/contract";
 import type { RulesObserved, RulesSpec } from "../lib/observed";
 import { useEngineQuery } from "../lib/queries";
-import { useExecuteApply, usePlanPreview } from "../lib/usePlanPreview";
+import { useDirectApply } from "../lib/useDirectApply";
 import { cn } from "../lib/utils";
 
 const SYNC_NOTE = "从本机 SQLite 来源渲染并同步到目标文件；目标被外部修改时会拒绝覆盖。";
 
-/** 该元素详情/操作用的精确限定参数（plan 与 apply 必须一致）。 */
+/** 该元素详情/操作用的精确限定参数。 */
 function onlyArgs(element: EngineElement): string[] {
   return ["--only", element.id];
 }
@@ -21,8 +21,7 @@ function onlyArgs(element: EngineElement): string[] {
 export default function RulesPage() {
   const query = useEngineQuery<StatusData>("rules:status");
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const preview = usePlanPreview();
-  const executeApply = useExecuteApply();
+  const directApply = useDirectApply();
 
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="rules:status 调用失败" error={query.error} />;
@@ -47,16 +46,9 @@ export default function RulesPage() {
         <button
           type="button"
           data-testid="apply-rules-button"
-          onClick={() =>
-            preview.open({
-              title: "同步规则",
-              subtitle: SYNC_NOTE,
-              planCommands: ["rules:plan"],
-              confirmLabel: "立即同步",
-              execute: executeApply({ command: "rules:apply", label: "同步规则" }),
-            })
-          }
-          className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+          disabled={directApply.executing}
+          onClick={() => void directApply.apply({ command: "rules:apply", label: "同步规则" })}
+          className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
         >
           <PlayCircle className="h-4 w-4" aria-hidden /> 立即同步
         </button>
@@ -82,16 +74,10 @@ export default function RulesPage() {
                 onSync={() => {
                   const spec = element.spec as unknown as RulesSpec;
                   const name = spec.name ?? element.id;
-                  preview.open({
-                    title: `同步 ${name}`,
-                    subtitle: `只同步此目标。${SYNC_NOTE}`,
-                    planCommands: [{ command: "rules:plan", args: onlyArgs(element) }],
-                    confirmLabel: "同步此目标",
-                    execute: executeApply({
-                      command: "rules:apply",
-                      label: `同步 ${name}`,
-                      extraArgs: onlyArgs(element),
-                    }),
+                  void directApply.apply({
+                    command: "rules:apply",
+                    label: `同步 ${name}`,
+                    args: onlyArgs(element),
                   });
                 }}
               />
@@ -99,8 +85,6 @@ export default function RulesPage() {
           </tbody>
         </table>
       </section>
-
-      {preview.modal}
     </div>
   );
 }
@@ -157,10 +141,7 @@ function TargetRow({
       {isExpanded && (
         <tr className="border-b border-slate-100 last:border-0">
           <td colSpan={5} className="py-3">
-            <DriftExplanationPanel
-              element={element}
-              planRequest={{ command: "rules:plan", args: onlyArgs(element) }}
-            />
+            <DriftExplanationPanel element={element} />
           </td>
         </tr>
       )}

@@ -39,7 +39,6 @@ fn default_log_retention_days() -> u32 {
 #[serde(deny_unknown_fields)]
 pub struct AppSettings {
     pub offline: bool,
-    pub default_dry_run: bool,
     pub upstream_ttl_sec: u32,
     #[serde(default = "default_log_retention_days")]
     pub log_retention_days: u32,
@@ -49,7 +48,6 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             offline: false,
-            default_dry_run: false,
             upstream_ttl_sec: 86_400,
             log_retention_days: DEFAULT_LOG_RETENTION_DAYS,
         }
@@ -315,6 +313,11 @@ pub fn settings_from_connection(conn: &Connection) -> Result<AppSettings> {
     })?;
     for row in rows {
         let (key, raw) = row?;
+        // legacy default_dry_run 行：只跳过（零写）；其他未知行仍由
+        // deny_unknown_fields fail closed。
+        if key == "default_dry_run" {
+            continue;
+        }
         let mut object = serde_json::to_value(&settings)?
             .as_object()
             .cloned()
@@ -349,6 +352,8 @@ pub fn write_settings(conn: &Connection, settings: &AppSettings) -> Result<()> {
         .as_object()
         .cloned()
         .unwrap();
+    // 校验通过后顺带清除 legacy default_dry_run 行；与调用方同一事务边界。
+    conn.execute("DELETE FROM app_settings WHERE key = 'default_dry_run'", [])?;
     for (key, item) in values {
         conn.execute("INSERT INTO app_settings (key, value_json, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at", rusqlite::params![key, serde_json::to_string(&item)?, now_iso()])?;
     }
@@ -526,7 +531,6 @@ mod tests {
         let conn = open_write(&context).unwrap();
         let settings = AppSettings {
             offline: true,
-            default_dry_run: true,
             upstream_ttl_sec: 123,
             log_retention_days: 14,
         };
@@ -544,15 +548,17 @@ mod tests {
             )
             .unwrap();
         for raw in [
-            r#"{"offline":"yes","default_dry_run":false,"upstream_ttl_sec":1}"#,
-            r#"{"offline":false,"default_dry_run":false,"upstream_ttl_sec":-1}"#,
-            r#"{"offline":false,"default_dry_run":false,"upstream_ttl_sec":1,"extra":true}"#,
-            r#"{"offline":false,"default_dry_run":false,"upstream_ttl_sec":1,"log_retention_days":-1}"#,
+            r#"{"offline":"yes","upstream_ttl_sec":1}"#,
+            r#"{"offline":false,"upstream_ttl_sec":-1}"#,
+            r#"{"offline":false,"upstream_ttl_sec":1,"extra":true}"#,
+            r#"{"offline":false,"upstream_ttl_sec":1,"log_retention_days":-1}"#,
+            // legacy default_dry_run 不再是字段：serde 层面同样 fail closed
+            r#"{"offline":false,"upstream_ttl_sec":1,"default_dry_run":false}"#,
         ] {
             assert!(serde_json::from_str::<AppSettings>(raw).is_err());
         }
         let parsed_snake: AppSettings = serde_json::from_str(
-            r#"{"offline":false,"default_dry_run":false,"upstream_ttl_sec":1,"log_retention_days":20}"#,
+            r#"{"offline":false,"upstream_ttl_sec":1,"log_retention_days":20}"#,
         )
         .unwrap();
         assert_eq!(parsed_snake.log_retention_days, 20);
@@ -569,6 +575,91 @@ mod tests {
             )
             .unwrap();
         assert_eq!(before, after);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// 在 app_settings 里直接种入指定行（模拟旧版本写入的 legacy/未知行）。
+    fn seed_settings_row(conn: &Connection, key: &str, value_json: &str) {
+        conn.execute(
+            "INSERT INTO app_settings (key, value_json, updated_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at",
+            rusqlite::params![key, value_json, now_iso()],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn settings_legacy_default_dry_run_row_is_skipped_with_zero_writes() {
+        let (root, context) = ctx("legacy-skip");
+        let conn = open_write(&context).unwrap();
+        seed_settings_row(&conn, "offline", "true");
+        seed_settings_row(&conn, "default_dry_run", "true");
+        drop(conn);
+
+        let db = db_path(&context);
+        let bytes_before = std::fs::read(&db).unwrap();
+        let mtime_before = std::fs::metadata(&db).unwrap().modified().unwrap();
+
+        let settings = effective_settings(&context).unwrap();
+        assert!(settings.offline, "其他合法行仍须生效");
+        assert_eq!(settings.upstream_ttl_sec, 86_400);
+        assert_eq!(settings.log_retention_days, 30);
+
+        let bytes_after = std::fs::read(&db).unwrap();
+        let mtime_after = std::fs::metadata(&db).unwrap().modified().unwrap();
+        assert_eq!(bytes_before, bytes_after, "读取 legacy 行不得写库");
+        assert_eq!(mtime_before, mtime_after, "读取 legacy 行不得触动文件");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn write_settings_removes_legacy_default_dry_run_row() {
+        let (root, context) = ctx("legacy-purge");
+        let conn = open_write(&context).unwrap();
+        seed_settings_row(&conn, "default_dry_run", "true");
+        seed_settings_row(&conn, "offline", "false");
+
+        let settings = AppSettings {
+            offline: true,
+            upstream_ttl_sec: 42,
+            log_retention_days: 7,
+        };
+        let tx = conn.unchecked_transaction().unwrap();
+        write_settings(&tx, &settings).unwrap();
+        tx.commit().unwrap();
+
+        let legacy_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM app_settings WHERE key = 'default_dry_run'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy_count, 0, "保存后 legacy 行必须消失");
+        drop(conn);
+        assert_eq!(
+            effective_settings(&context).unwrap(),
+            settings,
+            "保存后其余值必须完整正确"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn settings_unknown_row_still_fails_closed() {
+        let (root, context) = ctx("unknown-row");
+        let conn = open_write(&context).unwrap();
+        seed_settings_row(&conn, "mystery_key", "true");
+        drop(conn);
+
+        let db = db_path(&context);
+        let bytes_before = std::fs::read(&db).unwrap();
+        assert!(
+            effective_settings(&context).is_err(),
+            "未知行必须 fail closed"
+        );
+        let bytes_after = std::fs::read(&db).unwrap();
+        assert_eq!(bytes_before, bytes_after, "fail closed 不得写库");
         let _ = std::fs::remove_dir_all(root);
     }
 

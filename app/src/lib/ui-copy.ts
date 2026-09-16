@@ -3,7 +3,7 @@
  * 原则：按钮/标题/徽章用「动作/结果」语言；工程原值（state 枚举、命令名）
  * 只保留在 tooltip/详情里做对照。引擎 envelope 的 code/note 属契约内容，不在此列。
  */
-import type { ElementState, Freshness, PlanAction, PolicyLayerName, RiskLevel } from "./contract";
+import type { ElementState, Freshness, PolicyLayerName, RiskLevel } from "./contract";
 
 // ---------- 同步状态（收敛轴七态） ----------
 
@@ -78,23 +78,6 @@ export const RISK_COPY: Record<RiskLevel, { label: string; className: string }> 
   "install-remove": { label: "安装/卸载软件", className: "border-red-200 bg-red-50 text-red-700" },
 };
 
-/** plan 动作清单的人话摘要：「3 处文件修改 · 1 个软件安装」。 */
-export function planSummaryPhrase(actions: PlanAction[]): string {
-  const count = (risk: RiskLevel) => actions.filter((action) => action.risk === risk).length;
-  const parts: string[] = [];
-  const writeLocal = count("write-local");
-  const execLocal = count("exec-local");
-  const network = count("network");
-  const installRemove = count("install-remove");
-  const read = count("read");
-  if (writeLocal > 0) parts.push(`${writeLocal} 处文件修改`);
-  if (execLocal > 0) parts.push(`${execLocal} 个本地命令`);
-  if (network > 0) parts.push(`${network} 个联网操作`);
-  if (installRemove > 0) parts.push(`${installRemove} 个软件安装/卸载`);
-  if (read > 0) parts.push(`${read} 项只读检查`);
-  return parts.length > 0 ? parts.join(" · ") : "没有实际改动";
-}
-
 // ---------- 个性化配置来源 ----------
 
 export const POLICY_LAYER_COPY: Record<PolicyLayerName, { label: string; className: string }> = {
@@ -117,14 +100,8 @@ export const COPY = {
   updateThis: "更新此项",
   updateAll: "全部更新",
   executing: "正在执行…",
-  /** dry-run。 */
-  dryRunChip: "演练",
-  dryRunToggle: "演练模式：只列出将要执行的操作，不实际改动",
-  /** plan 预览弹窗标题。 */
-  planPreviewTitle: "将要执行的操作",
   /** 模式横幅。 */
   offlineBannerBody: "未联网，版本与配置状态显示的是上次检查的结果；需要联网的操作已禁用。",
-  dryRunBannerBody: "所有操作只演示，不实际改动。",
   offlineNetworkDenied: "离线模式下不可用（需要联网）",
   /** 漂移解释面板。 */
   expandDetail: "展开同步详情",
@@ -135,9 +112,6 @@ export const COPY = {
 // ---------- 元素启停开关 ----------
 
 export const TOGGLE_COPY = {
-  /** policy.set 成功后的 toast 文案（action 按钮文案是「立即同步」）。 */
-  savedAskApply: (what: string, layerLabel: string) => `已${what}（保存到「${layerLabel}」）。要立即同步生效吗？`,
-  applyNow: "立即同步",
   enabled: "已启用",
   disabled: "已停用",
   saveFailed: "保存配置失败",
@@ -155,6 +129,6 @@ export const OVERLAY_COPY = {
   /** 编辑内置条目时表单内提示。 */
   editBuiltinNote: "该条目由内置默认值提供；你的修改会写入本地数据库，内置默认值不受影响。",
   /** 移除定义时确认文案（tombstone 语义）。 */
-  removeDefinitionNote: "写入移除标记，使该条目停止生效；删除标记即可恢复定义。确认同步后清理本工具管理的配置或链接。",
+  removeDefinitionNote: "写入移除标记，使该条目停止生效；删除标记即可恢复定义。确认后会清理本工具管理的配置或链接。",
   /** 移除覆盖层条目时确认文案（policy:delete 语义）。 */
 } as const;

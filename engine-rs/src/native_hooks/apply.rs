@@ -1,7 +1,7 @@
 //! hooks 域 apply 核心：preflight 纯读校验 + 单 Immediate 事务内重检、
 //! 原子写入、binding 登记与单条审计。任何阻塞（外部修改/不安全路径/
 //! 来源或绑定损坏/目标 JSON 损坏）fail-closed；唯一例外是 --allow-takeover
-//! 显式接管（仅 --only 单目标，plan 已标注），结构/路径硬校验不受影响。
+//! 显式接管（仅 --only 单目标，preflight 已标注），结构/路径硬校验不受影响。
 //! 失败时 RollbackGuard 恢复文件、DB 事务整体回滚。错误与审计只含
 //! digest/revision 元数据；审计 detail 恒含 takeover 字段。
 
@@ -11,42 +11,20 @@ use serde_json::{json, Value};
 
 use super::model::{self, TargetSpec};
 use super::persistence::Binding;
-use super::{args, plan, status};
+use super::{args, preflight, status};
 use crate::native::{Context, Request};
 use crate::native_mcp::model::now_iso;
 use crate::native_mcp::rollback::{atomic_write_bytes_checked, read_existing_bytes, RollbackGuard};
 use crate::native_mcp::targets::validate_target_path;
 use crate::store;
 
-/// 构造等价 hooks:plan 请求：保留归一后的 --only 与可选 --offline /
-/// --allow-takeover，去掉 --dry-run。
-fn equivalent_plan_request(req: &Request, parsed: &args::HookArgs) -> Request {
-    let mut plan_args: Vec<String> = Vec::new();
-    for id in &parsed.only {
-        plan_args.push("--only".to_string());
-        plan_args.push(id.clone());
-    }
-    if parsed.offline {
-        plan_args.push("--offline".to_string());
-    }
-    if parsed.allow_takeover {
-        plan_args.push("--allow-takeover".to_string());
-    }
-    Request {
-        command: "hooks:plan".to_string(),
-        args: plan_args,
-        run_id: req.run_id.clone(),
-    }
-}
-
-/// 预检：严格解析 + 等价 plan 纯读校验。返回 true 表示合法非 dry-run
-/// apply（execute 稍后必须取得全局 apply lock）；dry-run 返回 false。
-/// 无效/阻塞预检不创建 data/home/DB/表/文件。
-pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<bool> {
+/// 锁前预检：严格解析 + 私有 preflight 纯读校验。Ok(()) 表示合法 apply
+///（execute 稍后必须取得全局 apply lock）；参数无效（含已退役的
+/// --dry-run）或目标阻塞即 Err。无效/阻塞预检不创建 data/home/DB/表/文件。
+pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
     let parsed = args::parse_apply_args(req)?;
-    let plan_req = equivalent_plan_request(req, &parsed);
-    plan::build_plan(ctx, &plan_req)?;
-    Ok(!parsed.dry_run)
+    preflight::build_preflight(ctx, &parsed)?;
+    Ok(())
 }
 
 enum Decision {
@@ -58,10 +36,9 @@ enum Decision {
     },
 }
 
-fn result_json(dry_run: bool, steps: Vec<Value>, skipped: Vec<String>) -> Value {
+fn result_json(steps: Vec<Value>, skipped: Vec<String>) -> Value {
     json!({
         "domain": "hooks",
-        "dry_run": dry_run,
         "steps": steps,
         "skipped": skipped,
     })
@@ -141,7 +118,7 @@ fn decide(
         None => {
             if spec.merge == "whole-file" {
                 // Codex：仅当实际 JSON 语义与整文件期望相等才允许登记绑定；
-                // 显式接管时允许整文件替换（plan 已标注 takeover 与风险说明）。
+                // 显式接管时允许整文件替换（preflight 已标注 takeover 与风险说明）。
                 if current != expected_value && !allow_takeover {
                     bail!("目标 {} 已有外部内容且无受管绑定，拒绝覆盖", spec.target_id);
                 }
@@ -163,21 +140,17 @@ fn decide(
 }
 
 pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
-    // 自身再次解析 + 等价 plan 预检：直接调用 apply 不能绕过安全校验。
+    // 自身再次解析 + 等价 preflight 预检：直接调用 apply 不能绕过安全校验。
     let parsed = args::parse_apply_args(req)?;
-    let plan_req = equivalent_plan_request(req, &parsed);
-    plan::build_plan(ctx, &plan_req)?;
+    preflight::build_preflight(ctx, &parsed)?;
 
     let selected = parsed.only.clone();
-    if parsed.dry_run {
-        return Ok(result_json(true, vec![], selected));
-    }
 
     let mut conn = store::open_write(ctx)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
     // Immediate 事务内基于同一 snapshot 重新读取并重检，不沿用锁前
-    // plan 的正文/摘要。
+    // preflight 的正文/摘要。
     let policy = store::policy_from_connection(&tx)?;
     let sources = crate::native_sources::current_hook_sources_from(&tx)?;
     let bindings = super::persistence::load_bindings_from(&tx)?;
@@ -207,7 +180,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     // 没有任何待写：直接提交（不建表、不写审计）。
     if pending.is_empty() {
         tx.commit()?;
-        return Ok(result_json(false, vec![], selected));
+        return Ok(result_json(vec![], selected));
     }
 
     super::persistence::ensure_table(&tx)?;
@@ -285,7 +258,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     }
     guard.commit();
 
-    Ok(result_json(false, steps, skipped))
+    Ok(result_json(steps, skipped))
 }
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
 //! Hooks 命令的严格参数解析：与 rules 域同一契约。所有错误固定描述参数
-//! 种类，不回显未知 token/值。
+//! 种类，不回显未知 token/值。--dry-run 已退役，一律作为不支持的选项拒绝。
 
 use anyhow::{bail, Result};
 
@@ -8,9 +8,7 @@ use crate::native::Request;
 
 pub(crate) struct HookArgs {
     pub only: Vec<String>,
-    pub dry_run: bool,
-    pub offline: bool,
-    /// 显式接管通道：仅 plan/apply 可携带，且必须与 --only 指定单个目标同时
+    /// 显式接管通道：仅 apply 可携带，且必须与 --only 指定单个目标同时
     /// 使用；批量或缺省仍拒绝。缺省（无 flag）行为与此前完全一致。
     pub allow_takeover: bool,
 }
@@ -27,15 +25,9 @@ fn normalize_only(selected: &[String]) -> Vec<String> {
         .collect()
 }
 
-fn parse_args(
-    req: &Request,
-    allow_only: bool,
-    allow_dry_run: bool,
-    allow_takeover_flag: bool,
-) -> Result<HookArgs> {
+fn parse_args(req: &Request, allow_only: bool, allow_takeover_flag: bool) -> Result<HookArgs> {
     let mut selected: Vec<String> = Vec::new();
-    let mut dry_run = false;
-    let mut offline = false;
+    let mut offline_seen = false;
     let mut allow_takeover = false;
 
     let mut iter = req.args.iter();
@@ -56,12 +48,6 @@ fn parse_args(
                 }
                 selected.push(value.clone());
             }
-            "--dry-run" if allow_dry_run => {
-                if dry_run {
-                    bail!("参数错误: --dry-run 重复");
-                }
-                dry_run = true;
-            }
             "--allow-takeover" if allow_takeover_flag => {
                 if allow_takeover {
                     bail!("参数错误: --allow-takeover 重复");
@@ -69,10 +55,10 @@ fn parse_args(
                 allow_takeover = true;
             }
             "--offline" => {
-                if offline {
+                if offline_seen {
                     bail!("参数错误: --offline 重复");
                 }
-                offline = true;
+                offline_seen = true;
             }
             other if other.starts_with("--") => {
                 bail!("参数错误: 存在不支持的选项");
@@ -97,24 +83,17 @@ fn parse_args(
     };
     Ok(HookArgs {
         only,
-        dry_run,
-        offline,
         allow_takeover,
     })
 }
 
 /// hooks:status —— 只接受可选且最多一次 --offline。
 pub(crate) fn parse_status_args(req: &Request) -> Result<HookArgs> {
-    parse_args(req, false, false, false)
+    parse_args(req, false, false)
 }
 
-/// hooks:plan —— --only（零或多个）+ 可选最多一次 --offline / --allow-takeover，
-/// 不接受 --dry-run。
-pub(crate) fn parse_plan_args(req: &Request) -> Result<HookArgs> {
-    parse_args(req, true, false, true)
-}
-
-/// hooks:apply —— 同 plan，另接受可选最多一次 --dry-run。
+/// hooks:apply —— --only（零或多个）+ 可选最多一次 --offline /
+/// --allow-takeover；--dry-run 与其余未知选项一样被拒绝。
 pub(crate) fn parse_apply_args(req: &Request) -> Result<HookArgs> {
-    parse_args(req, true, true, true)
+    parse_args(req, true, true)
 }

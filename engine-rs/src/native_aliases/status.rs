@@ -3,7 +3,7 @@
 //! checkout。status 不创建 data/home 目录、DB、表或文件；来源/绑定损坏
 //! fail-closed；目标路径安全与读取问题降级为 drifted + blocked_reason
 //!（aliases 元素状态冻结为 managed-ok/drifted/missing/not-materialized，
-//! 阻塞不新增状态，plan/apply 对 blocked 目标一律拒绝）。输出不含来源正文。
+//! 阻塞不新增状态，preflight/apply 对 blocked 目标一律拒绝）。输出不含来源正文。
 
 use std::collections::BTreeMap;
 use std::path::Path;

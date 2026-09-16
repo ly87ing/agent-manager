@@ -24,10 +24,10 @@ describe("dev-only mock 开关", () => {
       "skills:status",
       "rules:status",
       "secrets:status",
-      "agents:plan",
-      "mcp:plan",
-      "skills:plan",
-      "rules:plan",
+      "agents:apply",
+      "mcp:apply",
+      "skills:apply",
+      "rules:apply",
       "system:refresh-upstream",
     ]) {
       const envelope = await client.run(command);

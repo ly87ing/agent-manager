@@ -113,7 +113,7 @@ fn get_rejects_nonconforming_args_with_source_error_and_zero_writes() {
 }
 
 #[test]
-fn set_dry_run_returns_candidate_without_creating_anything() {
+fn set_dry_run_is_rejected_before_any_write() {
     let (base, ctx) = temp_ctx("dry-run");
     let current = execute(&ctx, &request("sources:get", &["--key", "rules.shared"]));
     let revision = current.data["sources"][0]["revision"]
@@ -129,14 +129,13 @@ fn set_dry_run_returns_candidate_without_creating_anything() {
             &["--key", "rules.shared", "--value", &wrapper, "--dry-run"],
         ),
     );
-    assert!(env.ok, "{:?}", env.errors);
-    assert!(env.warnings.iter().any(|w| w.code == "DRY_RUN"));
-    let items = env.data["sources"].as_array().unwrap();
-    assert_eq!(items.len(), 1);
-    assert_source_item_shape(&items[0], "rules.shared", candidate);
-    // 零写：无 data/home、DB、表、apply lock、operation_logs、诊断日志
-    assert!(!ctx.data_dir.exists());
+    assert!(!env.ok, "--dry-run 已退役，必须拒绝: {:?}", env.data);
+    assert_eq!(env.errors[0].code, "SOURCE_ERROR");
+    // 零目标写：无 DB/表/apply lock/助手目标文件（失败写动作的诊断日志按统一
+    // 策略写 data_dir，不属于目标状态）
+    assert!(!store::db_path(&ctx).exists());
     assert!(!ctx.home_dir.exists());
+    assert!(!ctx.data_dir.join("agent-manager.apply.lock").exists());
     let after = execute(&ctx, &request("sources:get", &["--key", "rules.shared"]));
     assert_eq!(after.data["sources"][0]["value"], DEFAULT_SHARED);
     let _ = std::fs::remove_dir_all(base);
@@ -242,6 +241,14 @@ fn set_rejects_invalid_secret_nul_and_stale_inputs_without_writes() {
             "rules.shared".into(),
             "--value".into(),
             json!({"revision": "0".repeat(64), "value": "x"}).to_string(),
+        ],
+        // --dry-run 已退役：与其他未知选项一样在解析期、任何写之前拒绝
+        vec![
+            "--key".into(),
+            "rules.shared".into(),
+            "--value".into(),
+            json!({"revision": good_revision, "value": "x"}).to_string(),
+            "--dry-run".into(),
         ],
     ];
     for args in cases {
@@ -396,7 +403,7 @@ fn existing_db_without_table_reads_defaults_with_zero_write() {
     assert_source_item_shape(&items[1], "rules.claude", DEFAULT_CLAUDE);
     assert_source_item_shape(&items[2], "rules.codex", DEFAULT_CODEX);
 
-    // dry-run 同样只读
+    // --dry-run 已退役：与过期 revision 一样在打开写连接前被拒绝
     let rev = items[0]["revision"].as_str().unwrap().to_string();
     let wrapper = json!({"revision": rev, "value": "候选正文"}).to_string();
     let dry = execute(
@@ -406,7 +413,8 @@ fn existing_db_without_table_reads_defaults_with_zero_write() {
             &["--key", "rules.shared", "--value", &wrapper, "--dry-run"],
         ),
     );
-    assert!(dry.ok, "{:?}", dry.errors);
+    assert!(!dry.ok, "--dry-run 已退役，必须拒绝: {:?}", dry.data);
+    assert_eq!(dry.errors[0].code, "SOURCE_ERROR");
 
     // 过期 revision 在打开写连接前即被拒绝
     let stale = json!({"revision": "0".repeat(64), "value": "x"}).to_string();
@@ -588,7 +596,7 @@ fn hooks_get_returns_defaults_for_prefix_and_exact_keys() {
 }
 
 #[test]
-fn hooks_set_roundtrip_dry_run_stale_cas_and_audit_without_body() {
+fn hooks_set_roundtrip_stale_cas_and_audit_without_body() {
     let (base, ctx) = temp_ctx("hooks-set");
     // 哨兵目标：sources:set 绝不触碰
     let settings = ctx.home_dir.join(".claude/settings.json");
@@ -605,7 +613,7 @@ fn hooks_set_roundtrip_dry_run_stale_cas_and_audit_without_body() {
         "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo hi"}]}]},
         "removed_signatures": []
     });
-    // dry-run：合法候选不写
+    // --dry-run 已退役：合法候选同样在任何写之前拒绝
     let dry = execute(
         &ctx,
         &request_owned(
@@ -619,8 +627,9 @@ fn hooks_set_roundtrip_dry_run_stale_cas_and_audit_without_body() {
             ],
         ),
     );
-    assert!(dry.ok, "{:?}", dry.errors);
-    assert!(!store::db_path(&ctx).exists(), "dry-run 零写");
+    assert!(!dry.ok, "--dry-run 已退役，必须拒绝: {:?}", dry.data);
+    assert_eq!(dry.errors[0].code, "SOURCE_ERROR");
+    assert!(!store::db_path(&ctx).exists(), "--dry-run 拒绝零写");
 
     // 真实保存成功；value  canonical 化、revision 变化
     let env = execute(

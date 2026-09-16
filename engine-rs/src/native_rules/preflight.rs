@@ -1,13 +1,14 @@
-//! rules 域纯读 plan：先严格解析参数，再只读调用 status::build_status
-//! 取得状态；不创建/修改 data_dir、home_dir、DB、表或目标文件。
-//! 选中的 enabled 目标若 unmanaged-detected 或带 blocked_reason，整个
-//! plan fail-closed，不输出半份动作；输出与错误均不含规则正文。
+//! rules 域私有 preflight/action 计算：基于只读 status::build_status
+//! 推导 apply 将执行的动作；不创建/修改 data_dir、home_dir、DB、表或
+//! 目标文件。选中的 enabled 目标若 unmanaged-detected 或带 blocked_reason，
+//! 整个 preflight fail-closed，不输出半份动作；输出与错误均不含规则正文。
+//! 该计算只在 apply 锁前/写前预检内部使用，不再对应任何公开命令。
 
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
 
 use super::{args, model, status};
-use crate::native::{Context, Request};
+use crate::native::Context;
 
 fn action_for(element: &Value) -> Option<Value> {
     let state = element["state"].as_str().unwrap_or("");
@@ -37,8 +38,9 @@ fn action_for(element: &Value) -> Option<Value> {
     }))
 }
 
-pub(crate) fn build_plan(ctx: &Context, req: &Request) -> Result<Value> {
-    let parsed = args::parse_plan_args(req)?;
+/// 预检与动作计算：入参为已通过严格解析的 apply 参数；返回动作与汇总
+/// （仅测试断言使用，apply 只依赖其 fail-closed 语义）。
+pub(crate) fn build_preflight(ctx: &Context, parsed: &args::RuleArgs) -> Result<Value> {
     let status = status::build_status(ctx)?;
 
     let empty = Vec::new();
@@ -53,7 +55,7 @@ pub(crate) fn build_plan(ctx: &Context, req: &Request) -> Result<Value> {
             && (element["state"].as_str() == Some("unmanaged-detected")
                 || !element["observed"]["blocked_reason"].is_null())
         {
-            bail!("plan 拒绝: 选中的规则目标存在阻塞，未生成任何动作");
+            bail!("preflight 拒绝: 选中的规则目标存在阻塞，未生成任何动作");
         }
     }
 
@@ -89,6 +91,7 @@ pub(crate) fn build_plan(ctx: &Context, req: &Request) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::native::Request;
     use crate::native_mcp::model::sha256_hex;
     use crate::native_rules::model::{render_rules, targets, Binding, TargetSpec};
     use crate::native_rules::persistence::ensure_table;
@@ -98,7 +101,7 @@ mod tests {
 
     fn temp_root(tag: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
-            "native-rules-plan-test-{}-{}-{:x}",
+            "native-rules-preflight-test-{}-{}-{:x}",
             std::process::id(),
             tag,
             std::time::SystemTime::now()
@@ -119,12 +122,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
-    fn req(args: &[&str]) -> Request {
-        Request {
-            command: "rules:plan".to_string(),
+    fn run_preflight(ctx: &Context, args: &[&str]) -> Result<Value> {
+        let req = Request {
+            command: "rules:apply".to_string(),
             args: args.iter().map(|s| s.to_string()).collect(),
-            run_id: "run-plan-test".to_string(),
-        }
+            run_id: "run-preflight-test".to_string(),
+        };
+        let parsed = args::parse_apply_args(&req)?;
+        build_preflight(ctx, &parsed)
     }
 
     fn write_policy_disabled_agent(ctx: &Context, agent_id: &str) {
@@ -228,8 +233,8 @@ mod tests {
         assert_eq!(action["cmd"], Value::Null);
     }
 
-    fn expect_full_summary(plan: &Value, write_count: usize) {
-        let summary = &plan["summary"];
+    fn expect_full_summary(preflight: &Value, write_count: usize) {
+        let summary = &preflight["summary"];
         for key in [
             "read",
             "write-local",
@@ -250,9 +255,9 @@ mod tests {
     fn no_db_no_home_defaults_to_two_write_file_actions_and_creates_nothing() {
         let root = temp_root("empty");
         let ctx = ctx_at(&root);
-        let plan = build_plan(&ctx, &req(&[])).unwrap();
-        assert_eq!(plan["domain"], "rules");
-        let actions = plan["actions"].as_array().unwrap();
+        let preflight = run_preflight(&ctx, &[]).unwrap();
+        assert_eq!(preflight["domain"], "rules");
+        let actions = preflight["actions"].as_array().unwrap();
         assert_eq!(actions.len(), 2);
         assert_eq!(actions[0]["element"], "rules:codex_global");
         assert_eq!(actions[1]["element"], "rules:claude_global");
@@ -261,7 +266,7 @@ mod tests {
             assert_eq!(action["before_digest"], Value::Null);
             assert!(action["after_digest"].as_str().is_some());
         }
-        expect_full_summary(&plan, 2);
+        expect_full_summary(&preflight, 2);
         assert!(!ctx.data_dir.exists());
         assert!(!ctx.home_dir.exists());
         drop_root(&root);
@@ -271,23 +276,23 @@ mod tests {
     fn only_single_and_reversed_pair_are_stable() {
         let root = temp_root("only");
         let ctx = ctx_at(&root);
-        let plan = build_plan(&ctx, &req(&["--only", "rules:claude_global"])).unwrap();
-        let actions = plan["actions"].as_array().unwrap();
+        let preflight = run_preflight(&ctx, &["--only", "rules:claude_global"]).unwrap();
+        let actions = preflight["actions"].as_array().unwrap();
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0]["element"], "rules:claude_global");
-        expect_full_summary(&plan, 1);
+        expect_full_summary(&preflight, 1);
 
-        let plan = build_plan(
+        let preflight = run_preflight(
             &ctx,
-            &req(&[
+            &[
                 "--only",
                 "rules:claude_global",
                 "--only",
                 "rules:codex_global",
-            ]),
+            ],
         )
         .unwrap();
-        let actions = plan["actions"].as_array().unwrap();
+        let actions = preflight["actions"].as_array().unwrap();
         assert_eq!(actions.len(), 2);
         assert_eq!(actions[0]["element"], "rules:codex_global");
         assert_eq!(actions[1]["element"], "rules:claude_global");
@@ -305,9 +310,9 @@ mod tests {
         std::fs::write(ctx.home_dir.join(claude.target), &rendered).unwrap();
         write_binding(&ctx, &binding_for(&ctx, claude, &rendered));
 
-        let plan = build_plan(&ctx, &req(&[])).unwrap();
-        assert_eq!(plan["actions"].as_array().unwrap().len(), 0);
-        expect_full_summary(&plan, 0);
+        let preflight = run_preflight(&ctx, &[]).unwrap();
+        assert_eq!(preflight["actions"].as_array().unwrap().len(), 0);
+        expect_full_summary(&preflight, 0);
         drop_root(&root);
     }
 
@@ -323,8 +328,8 @@ mod tests {
         write_binding(&ctx, &binding);
         write_source(&ctx, KEY_SHARED, "changed shared v2\n");
 
-        let plan = build_plan(&ctx, &req(&["--only", "rules:codex_global"])).unwrap();
-        let actions = plan["actions"].as_array().unwrap();
+        let preflight = run_preflight(&ctx, &["--only", "rules:codex_global"]).unwrap();
+        let actions = preflight["actions"].as_array().unwrap();
         assert_eq!(actions.len(), 1);
         let action = &actions[0];
         expect_full_action(action);
@@ -351,8 +356,8 @@ mod tests {
         let rendered = current_rendered(&ctx, claude);
         std::fs::write(ctx.home_dir.join(claude.target), &rendered).unwrap();
 
-        let plan = build_plan(&ctx, &req(&["--only", "rules:claude_global"])).unwrap();
-        let actions = plan["actions"].as_array().unwrap();
+        let preflight = run_preflight(&ctx, &["--only", "rules:claude_global"]).unwrap();
+        let actions = preflight["actions"].as_array().unwrap();
         assert_eq!(actions.len(), 1);
         let action = &actions[0];
         expect_full_action(action);
@@ -365,7 +370,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_unmanaged_fails_whole_plan_but_unselected_does_not_block() {
+    fn selected_unmanaged_fails_whole_preflight_but_unselected_does_not_block() {
         let root = temp_root("blocked");
         let ctx = ctx_at(&root);
         std::fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
@@ -375,32 +380,32 @@ mod tests {
         )
         .unwrap();
 
-        let err = build_plan(&ctx, &req(&[])).unwrap_err();
+        let err = run_preflight(&ctx, &[]).unwrap_err();
         let msg = format!("{err:#}");
-        assert!(msg.contains("plan 拒绝"));
+        assert!(msg.contains("preflight 拒绝"));
         assert!(!msg.contains("external marker-free"));
 
-        let plan = build_plan(&ctx, &req(&["--only", "rules:claude_global"])).unwrap();
-        let actions = plan["actions"].as_array().unwrap();
+        let preflight = run_preflight(&ctx, &["--only", "rules:claude_global"]).unwrap();
+        let actions = preflight["actions"].as_array().unwrap();
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0]["element"], "rules:claude_global");
         drop_root(&root);
     }
 
     #[test]
-    fn plan_json_never_contains_rule_bodies() {
+    fn preflight_json_never_contains_rule_bodies() {
         let root = temp_root("noleak");
         let ctx = ctx_at(&root);
-        let marker = "PLAN-LEAK-MARKER-7f3d9a";
+        let marker = "PREFLIGHT-LEAK-MARKER-7f3d9a";
         write_source(&ctx, KEY_SHARED, &format!("{marker}\n"));
-        let plan = build_plan(&ctx, &req(&[])).unwrap();
-        let serialized = serde_json::to_string(&plan).unwrap();
-        assert!(!serialized.contains(marker), "plan JSON 泄漏规则正文");
+        let preflight = run_preflight(&ctx, &[]).unwrap();
+        let serialized = serde_json::to_string(&preflight).unwrap();
+        assert!(!serialized.contains(marker), "preflight JSON 泄漏规则正文");
         drop_root(&root);
     }
 
     #[test]
-    fn existing_db_and_target_bytes_unchanged_after_plan() {
+    fn existing_db_and_target_bytes_unchanged_after_preflight() {
         let root = temp_root("readonly");
         let ctx = ctx_at(&root);
         std::fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
@@ -413,9 +418,9 @@ mod tests {
         let db_before = std::fs::read(&db).unwrap();
         let target_before = std::fs::read(ctx.home_dir.join(codex.target)).unwrap();
 
-        let plan = build_plan(&ctx, &req(&[])).unwrap();
-        assert_eq!(plan["actions"].as_array().unwrap().len(), 1);
-        assert_eq!(plan["actions"][0]["element"], "rules:claude_global");
+        let preflight = run_preflight(&ctx, &[]).unwrap();
+        assert_eq!(preflight["actions"].as_array().unwrap().len(), 1);
+        assert_eq!(preflight["actions"][0]["element"], "rules:claude_global");
 
         assert_eq!(std::fs::read(&db).unwrap(), db_before);
         assert_eq!(

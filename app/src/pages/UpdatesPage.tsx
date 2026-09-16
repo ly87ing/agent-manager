@@ -1,14 +1,14 @@
 import { useQueries } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Loader2, PlayCircle, RefreshCw, WifiOff } from "lucide-react";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { FreshnessBadge } from "../components/FreshnessBadge";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
-import type { AuditData, EngineElement, Envelope, FreshnessState, StatusData } from "../lib/contract";
+import type { AuditData, EngineElement, FreshnessState, StatusData } from "../lib/contract";
 import { runEngine, toDiagnostic } from "../lib/engine";
 import { engineKeys, useEngineQuery, useRefreshUpstream } from "../lib/queries";
 import { useExecutions } from "../lib/execution";
-import { useExecuteApply, usePlanPreview } from "../lib/usePlanPreview";
+import { useDirectApply } from "../lib/useDirectApply";
 import { cn, formatCheckedAt, humanizeCacheAge, isCacheStale } from "../lib/utils";
 
 /** 提案 §4.12：behind → unknown → current → ahead；not-applicable 无上游概念，不进表。 */
@@ -26,7 +26,7 @@ const DOMAINS = [
   { key: "skills", label: "Skills" },
 ] as const;
 
-/** 行内收敛/全部更新的显式 --action：agents→upgrade，mcp/skills→update（引擎 plan/apply 强制要求）。 */
+/** 行内更新/全部更新的显式 --action：agents→upgrade，mcp/skills→update（引擎 apply 强制要求）。 */
 const CONVERGE_ACTIONS: Record<string, string> = {
   agents: "upgrade",
   mcp: "update",
@@ -63,9 +63,13 @@ export default function UpdatesPage() {
   const refreshAll = useRefreshUpstream();
   const refreshOne = useRefreshUpstream();
   const [pendingRowId, setPendingRowId] = useState<string | null>(null);
-  const preview = usePlanPreview();
-  const executeApply = useExecuteApply();
+  const [batchUpdating, setBatchUpdating] = useState(false);
+  const batchGuard = useRef(false);
+  const rowApplyGuard = useRef<Set<string>>(new Set());
+  const [rowApplyPending, setRowApplyPending] = useState<Set<string>>(new Set());
+  const directApply = useDirectApply();
   const { execute } = useExecutions();
+  const anyApplyInFlight = batchUpdating || directApply.executing || rowApplyPending.size > 0;
 
   const anyPending = auditQuery.isPending || statusResults.every((result) => result.isPending);
   if (anyPending) return <PageLoading />;
@@ -80,25 +84,33 @@ export default function UpdatesPage() {
   );
   const behindElements = elements.filter((element) => element.freshness.state === "behind");
 
-  /** 行内收敛：仅针对选定元素执行 plan 与 apply（阶段 A 真实范围控制），携带显式 --action。 */
-  const openRowApply = (element: EngineElement) => {
-    const actionArgs = ["--only", element.id, "--action", convergeAction(element.domain)];
-    preview.open({
-      title: `更新 ${element.id}`,
-      subtitle: "仅更新此组件；目标被外部修改时会拒绝覆盖。",
-      planCommands: [{ command: `${element.domain}:plan`, args: actionArgs }],
-      requireConfirmText: element.domain === "agents" ? element.id : undefined,
-      confirmLabel: "更新此项",
-      execute: executeApply({
+  /** 行内更新：仅针对选定元素直接执行 apply，携带显式 --action。
+   * 与批量更新互斥，ref 守卫 + state 双重防止同一行连点，并驱动按钮禁用。
+   * 任一行在途时，其他行亦不得启动 directApply。 */
+  const runRowApply = (element: EngineElement) => {
+    if (batchGuard.current || rowApplyGuard.current.size > 0 || rowApplyGuard.current.has(element.id)) return;
+    rowApplyGuard.current.add(element.id);
+    setRowApplyPending((prev) => new Set(prev).add(element.id));
+    void directApply
+      .apply({
         command: `${element.domain}:apply`,
         label: `更新 ${element.id}`,
-        extraArgs: actionArgs,
-      }),
-    });
+        args: ["--only", element.id, "--action", convergeAction(element.domain)],
+      })
+      .finally(() => {
+        rowApplyGuard.current.delete(element.id);
+        setRowApplyPending((prev) => {
+          const next = new Set(prev);
+          next.delete(element.id);
+          return next;
+        });
+      });
   };
 
-  /** 顶部聚合更新：按域收集全部落后组件的 --only + 显式 --action plan 聚合预览 → 顺序执行各域 scoped apply。 */
-  const openUpdateAll = () => {
+  /** 顶部聚合更新：按域顺序执行各域 scoped apply；每个域的执行 toast 各自可见，
+   * 首个失败即停（失败域与已成功域均有 toast，剩余域未执行），不会只执行第一域而不报告。
+   * 与行内更新互斥：batch ref 占位后同一 tick 内任意行不得启动，行在途时批量也不得启动。 */
+  const runUpdateAll = () => {
     const domainGroups = DOMAINS.map((domain) => {
       const items = behindElements.filter((el) => el.domain === domain.key);
       return {
@@ -110,38 +122,24 @@ export default function UpdatesPage() {
       };
     }).filter((g) => g.items.length > 0);
 
-    const planCommands = domainGroups.map((g) => ({
-      command: `${g.key}:plan`,
-      args: [...g.ids.flatMap((id) => ["--only", id]), "--action", g.action],
-    }));
-
-    preview.open({
-      title: "全部更新",
-      subtitle: "预览聚合了各域可更新组件的操作；实际执行将按域逐个更新各落后组件；目标被外部修改时会拒绝覆盖。",
-      planCommands,
-      confirmLabel: "全部更新",
-      execute: async (dryRun: boolean): Promise<Envelope | null> => {
-        let lastEnvelope: Envelope | null = null;
+    if (domainGroups.length === 0 || batchGuard.current || rowApplyGuard.current.size > 0) return;
+    batchGuard.current = true;
+    setBatchUpdating(true);
+    void (async () => {
+      try {
         for (const group of domainGroups) {
           const envelope = await execute({
             command: `${group.key}:apply`,
-            args: [
-              ...group.ids.flatMap((id) => ["--only", id]),
-              "--action",
-              group.action,
-              ...(dryRun ? ["--dry-run"] : []),
-            ],
+            args: [...group.ids.flatMap((id) => ["--only", id]), "--action", group.action],
             label: `更新 ${group.label}`,
-            dryRun,
           });
-          if (!envelope || !envelope.ok) {
-            return envelope;
-          }
-          lastEnvelope = envelope;
+          if (!envelope || !envelope.ok) return;
         }
-        return lastEnvelope;
-      },
-    });
+      } finally {
+        batchGuard.current = false;
+        setBatchUpdating(false);
+      }
+    })();
   };
 
   return (
@@ -175,11 +173,11 @@ export default function UpdatesPage() {
         <button
           type="button"
           data-testid="update-all-button"
-          disabled={behindElements.length === 0}
-          onClick={openUpdateAll}
+          disabled={behindElements.length === 0 || anyApplyInFlight}
+          onClick={runUpdateAll}
           className={cn(
             "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white transition-colors",
-            behindElements.length === 0 ? "cursor-not-allowed bg-slate-300" : "bg-emerald-600 hover:bg-emerald-700",
+            behindElements.length === 0 || anyApplyInFlight ? "cursor-not-allowed bg-slate-300" : "bg-emerald-600 hover:bg-emerald-700",
           )}
         >
           <PlayCircle className="h-4 w-4" aria-hidden />
@@ -261,16 +259,16 @@ export default function UpdatesPage() {
                         <button
                           type="button"
                           data-testid={`update-${element.id}`}
-                          disabled={offline && element.domain === "agents"}
+                          disabled={anyApplyInFlight || (offline && element.domain === "agents")}
                           title={
                             offline && element.domain === "agents"
                               ? "离线模式下不可用（升级/安装需要联网）"
-                              : "更新此项（会先预览将要执行的操作）"
+                              : "更新此项：直接执行，目标被外部修改时会拒绝覆盖"
                           }
-                          onClick={() => openRowApply(element)}
+                          onClick={() => runRowApply(element)}
                           className={cn(
                             "rounded border px-2 py-1 text-xs",
-                            offline && element.domain === "agents"
+                            anyApplyInFlight || (offline && element.domain === "agents")
                               ? "cursor-not-allowed border-slate-200 text-slate-300"
                               : "border-emerald-200 text-emerald-700 hover:bg-emerald-50",
                           )}
@@ -287,8 +285,6 @@ export default function UpdatesPage() {
         </table>
         {elements.length === 0 && <p className="py-4 text-center text-sm text-slate-400">没有需要检查更新的组件</p>}
       </section>
-
-      {preview.modal}
     </div>
   );
 }

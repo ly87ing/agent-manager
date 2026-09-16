@@ -9,7 +9,6 @@ export const CONTRACT_ID = "agent-manager/engine/v1";
 // ---------- envelope ----------
 
 export interface Mode {
-  dry_run: boolean;
   offline: boolean;
 }
 
@@ -39,7 +38,6 @@ export interface Envelope<T = unknown> {
 
 export interface SettingsPreferences {
   offline: boolean;
-  defaultDryRun: boolean;
   upstreamTtlSec: number;
   logRetentionDays: number;
 }
@@ -129,46 +127,6 @@ export interface McpImportCandidate {
   previously_managed?: boolean;
 }
 
-// ---------- <domain>:plan ----------
-
-export type PlanOp =
-  | "write-file"
-  | "run-cmd"
-  | "symlink"
-  | "unlink"
-  | "install"
-  | "uninstall"
-  | "git-pull"
-  | "render";
-
-export interface PlanAction {
-  op: PlanOp;
-  element: string;
-  target: string | null;
-  risk: RiskLevel;
-  before_digest: string | null;
-  after_digest: string | null;
-  backup_path: string | null;
-  cmd: string | null;
-  note: string | null;
-  /** 仅 mcp 域 --allow-takeover 的 add/update 且确有未受管同名条目时由引擎标注为 true。 */
-  takeover?: boolean;
-}
-
-export interface PlanSummary {
-  read: number;
-  "write-local": number;
-  "exec-local": number;
-  network: number;
-  "install-remove": number;
-}
-
-export interface PlanData {
-  domain: string;
-  actions: PlanAction[];
-  summary: PlanSummary;
-}
-
 // ---------- system:audit（data 沿用 doctor 报告结构，契约 v2 才正式固化） ----------
 
 export type AuditEntryStatus = "ok" | "notice" | "warning" | "error";
@@ -241,7 +199,6 @@ export interface ApplyStep {
 
 export interface ApplyResultData {
   domain: string;
-  dry_run: boolean;
   steps: ApplyStep[];
   skipped: string[];
 }

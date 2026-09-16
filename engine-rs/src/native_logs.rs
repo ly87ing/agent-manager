@@ -96,17 +96,14 @@ pub fn sanitize_diagnostic_message(raw: &str) -> String {
 /// Determines whether a request warrants writing to the structured diagnostic log.
 /// Mutating commands (apply, policy set/delete, sources set, system
 /// refresh-upstream, db migrate, runs:clear) are logged.
-/// Readonly commands (status, plan, list, get, audit) and dry-run are never logged.
+/// Readonly commands (status, list, get, audit) are never logged.
 pub fn should_log_request(request: &Request) -> bool {
-    if request.flag("--dry-run") {
-        return false;
-    }
     let norm = request.command.replace('.', ":");
     let (domain, verb) = match norm.split_once(':') {
         Some((d, v)) => (d, v),
         None => return false,
     };
-    if verb == "status" || verb == "plan" || verb == "list" || verb == "get" || verb == "audit" {
+    if verb == "status" || verb == "list" || verb == "get" || verb == "audit" {
         return false;
     }
     if domain == "logs" && verb == "clear" {

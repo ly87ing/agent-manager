@@ -2,13 +2,12 @@
 //!
 //! 职责：
 //! - status（只读，零写库/零网络）：集合定义 ∪ bindings 的全集视图；
-//! - plan（零写入预览）：校验动作并输出 actions 与风险 summary；
 //! - apply：执行单 Skill 或集合动作，通过内容快照与安全软连接落地，支持回滚与操作审计。
+//!   plan 与 --dry-run 已退役：apply 一律真实执行，经 preflight 后由调用方恒取全局锁。
 
 mod apply;
 mod paths;
 mod persistence;
-mod plan;
 mod preflight;
 mod snapshot;
 mod status;
@@ -68,7 +67,6 @@ pub use snapshot::hash_skill_dir;
 pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
     match req.command.as_str() {
         "skills:status" | "skills.status" => status::build_status(ctx),
-        "skills:plan" | "skills.plan" => plan::build_plan(ctx, req),
         "skills:apply" | "skills.apply" => apply::apply(ctx, req),
         other => bail!("native_skills 不支持命令 '{}'", other),
     }

@@ -25,7 +25,6 @@ pub struct ParsedAction {
     pub server: String,
     pub agent: Option<String>,
     pub action: String,
-    pub dry_run: bool,
     pub offline: bool,
     /// 显式接管通道：仅逐 agent add/update 可用，允许用受管渲染结果替换
     /// 目标文件中的未受管同名条目；缺省保持 fail-closed 不变。
@@ -37,7 +36,6 @@ pub fn parse_action_args(req: &Request) -> Result<ParsedAction> {
     let mut only: Option<String> = None;
     let mut action: Option<String> = None;
     let mut agent: Option<String> = None;
-    let mut dry_run = false;
     let mut offline = false;
     let mut allow_takeover = false;
 
@@ -56,8 +54,8 @@ pub fn parse_action_args(req: &Request) -> Result<ParsedAction> {
         }
         match flag {
             "--dry-run" => {
-                dry_run = true;
-                i += 1;
+                // 在任何锁/DB/目标写之前严格拒绝：解析是所有写路径的第一步。
+                bail!("mcp:apply 已退役 --dry-run，拒绝该参数（执行前请以 mcp:status 确认状态）");
             }
             "--offline" => {
                 offline = true;
@@ -123,18 +121,19 @@ pub fn parse_action_args(req: &Request) -> Result<ParsedAction> {
         server,
         agent,
         action: act,
-        dry_run,
         offline,
         allow_takeover,
     })
 }
 
-pub fn preflight_apply(ctx: &Context, req: &Request) -> Result<bool> {
+/// 锁前预检：严格解析 + preflight_check_state 纯读校验。Ok(()) 表示合法
+/// apply（execute 稍后必须取得全局 apply lock）；参数无效（含已退役的
+/// --dry-run）或状态阻塞即 Err。无效/阻塞预检不创建 data/home/DB/表/文件。
+pub fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
     let parsed = parse_action_args(req)?;
     let policy = store::effective_policy(ctx)?;
     let bindings = load_bindings_readonly(ctx)?;
-    preflight_check_state(&parsed, &policy, &ctx.home_dir, &bindings)?;
-    Ok(!parsed.dry_run)
+    preflight_check_state(&parsed, &policy, &ctx.home_dir, &bindings)
 }
 
 /// 与 preflight 等价的状态校验，直接作用于调用方提供的最新
