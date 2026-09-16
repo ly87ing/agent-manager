@@ -1,28 +1,76 @@
 # Agent Manager
 
-Agent Manager 是 Rust 原生引擎、Tauri 2 和 React 组成的本机管理工具。CLI 与 Tauri 共享 `engine-rs` 库；Python 已从根仓库清除。
+集中管理本机 AI 编程助手的桌面应用，基于 Tauri 2、React 与 Rust/SQLite，内置支持 Claude Code、Codex 和 OpenCode。桌面应用与命令行共用同一 Rust 引擎。
 
-## 当前事实源
+## 功能
 
-`native-manager.db` 是本工具定义、分配和偏好的唯一事实源，位于应用数据目录。设置保存在数据库 `app_settings` 表。缺库读取只返回 Rust 内置只读默认值，不创建文件；首次保存才初始化数据库。policy 可编辑写入固定使用 `--layer local`，持久化来源为 `sqlite`。
+- **助手管理**：安装、升级、卸载内置助手（Claude Code、Codex、OpenCode）与自定义助手，如实检测实际安装来源。
+- **Skills**：管理 Skill 集合与单个技能，按助手逐一启用、停用、更新或移除。
+- **MCP 服务器**：管理本地 stdio 与远程 HTTP 两类 MCP 服务器，按助手分配并写入各自客户端配置（Claude JSON、Codex TOML、OpenCode JSON）；可从客户端现有配置发现导入。
+- **Rules**：编辑共享与助手专用规则，应用到 `~/.codex/AGENTS.md` 与 `~/.claude/CLAUDE.md`。
+- **Hooks**：管理 Claude `~/.claude/settings.json` 与 Codex `~/.codex/hooks.json` 的钩子配置。
+- **Shell Aliases**：在 `~/.zshrc` 与 `~/.zprofile` 中维护受管别名区块，区块外内容不受影响。
+- **更新检查**：探测助手、MCP 与 Skills 的上游新版本。
+- **其他**：Secrets 状态（仅显示环境变量名与是否存在，不显示值）、任务操作记录、本地诊断日志管理。
 
-Claude Code 与 Codex 的内置默认渠道都是官方 `native` 命令。brew 只表示实际检测到的来源，不改变默认渠道。
+界面语言为简体中文。
 
-定义保存与执行动作分开：保存只写数据库，不自动安装或同步；执行按钮直接触发真实 `apply`，`apply` 内部先做 preflight/写前校验，再按精确 scope、排他锁、外部修改检测、CAS/条件回滚执行并记录操作审计；普通同步、启停、更新不二次确认。Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 都要求新增、编辑/更新、启用、禁用、删除；移除管理与卸载是不同动作，定义移除、清空日志等破坏性操作也保持独立二次确认。
+## 安装
 
-按 2026-09-15 产品裁决，公共 `*:plan` 与 `--dry-run` 入口已退役；status/query 只读零写，调用会被拒绝。SQLite 核心、Tauri 桥、设置与 Policy 页面、主要资源页面布局、Agent 原生生命周期、Skills 原生域、MCP 原生域、Rules 原生域与规则来源、Hooks 原生域与 hooks 来源、Runs SQLite 操作记录、结构化诊断日志及 Python 清理已完成。Skills 内置集合只读默认，首次本地写入 `native-manager.db` 后本地优先；集合与 Skill×Agent 均支持更新、启停与移除，启用状态通过内容快照与安全软连接落地，status 只读零写，真实 apply 具备进程锁与操作审计。两类日志协同运作：SQLite `operation_logs` 记录可审计任务历史，并在新增操作记录时清理过期记录；`data_dir/logs/agent-manager-YYYY-MM-DD.jsonl` 记录结构化诊断元数据（严格脱敏、Unix 0700/0600、只读零写、拒随软链接），并在诊断日志写入后及应用启动时清理过期文件。两类日志共用 `log_retention_days`（0 禁用自动清理）；执行中心支持 `runs:clear` 二次确认清空任务记录，设置页支持 `logs:clear` 二次确认清理诊断日志，两类手动清理互不影响。Rules 原生 status/apply 与规则专用 `sources:get/set` 已接线（固定 Codex/Claude 两目标，外部修改 fail-closed）；Hooks 原生 status/apply 与 hooks 专用 `sources:get/set`（hooks.claude/hooks.codex）已接线：固定 Claude `~/.claude/settings.json` signature-set 合并与 Codex `~/.codex/hooks.json` whole-file 两目标，外部修改 fail-closed；验收基线提交 `5a110be3` 的候选安装包已完成主要真实 GUI E2E 验收（含 Rules/MCP/Hooks/Aliases/Secrets/Runs/system:audit，MCP 新增服务表单因 macOS 自动化输入限制未覆盖；该验收针对旧版 plan→confirm 交互，现已失效，不证明本轮直接 apply 新交互）。
+### 下载安装包
 
-## MCP 原生域状态
+尚未发布首个 GitHub Release，安装包暂未提供。公开发布仍需完成仓库外部条件：GitHub Actions 计费、签名密钥、Apple Developer ID 与公证、Windows 签名材料，以及 Linux/Windows/arm64 真机验收。当前进展见 [平台状态](docs/GUI-PLATFORM-STATUS.md)。发布后将提供 macOS（dmg）、Linux（AppImage/deb）与 Windows（NSIS/MSI）安装包。
 
-Rust dispatcher 已实现本地 stdio 与远程 HTTP MCP 的 `mcp:status`（只读）与真实 `mcp:apply`。定义、库级开关和逐助手分配保存在 `native-manager.db` 的 SQLite 表中；支持 Claude JSON、Codex TOML 和 OpenCode JSON，OpenCode 必须在对应 Agent definition 中配置 `mcp_config` 目标。远程定义含 `url`（必填；仅允许 `https://`，或本机回环 `http://localhost` / `http://127.0.0.1`）与可选 `headers`（值只允许 `${VAR}` 占位符），与 stdio 字段互斥；headers 以引用形式写入目标，明文不落盘。
+### 从源码构建
 
-逐助手支持 `add`、`update`、`enable`、`disable`、`remove`；库级支持 `enable`、`disable`、`remove`。`mcp:status` 只读零写；真实 `apply` 使用排他锁、操作审计、CAS 写入和回滚保护。MCP `env` 在 SQLite definition/binding 中只持久化字面量 `${VAR}` 形式的环境变量引用；status、诊断与操作日志不展示或保存解析后的真实值；真实 apply 执行时从进程环境解析，并按目标 codec 写入 Claude、Codex 或 OpenCode 的目标客户端配置，目标文件的明文由文件权限与客户端安全边界保护。
+前置条件：Rust 工具链、Node.js 与 pnpm。克隆时不要加 `--recursive`：仓库含私有子模块 `secrets/`（不对外），跳过它不影响构建与使用。
 
-远程 HTTP MCP 已实现：远程定义含 `url`（必填；仅允许 `https://`，或本机回环 `http://localhost` / `http://127.0.0.1`）与可选 `headers`（值只允许 `${VAR}` 占位符），与 stdio 字段互斥；headers 以引用形式写入目标（Claude 字面量 `${VAR}`、Codex `env_http_headers`、OpenCode `{env:VAR}`），解析后明文不落盘；受管标记统一为条目级 `_MANAGED_BY`；远程定义 freshness 恒 not-applicable。
+macOS：
 
-`system:audit` 已接入 Rust dispatcher 及其 Tauri offline 桥接：只读聚合 agents/skills/mcp/rules/hooks/aliases/secrets 与 runtime/storage 状态。只读 `secrets:status` 已接入 Rust dispatcher：仅读取 SQLite 有效策略中已启用 MCP 定义的合法 `${VAR}` 环境变量占位符，只检查 Agent Manager 当前进程环境是否存在对应变量，输出变量名与布尔；不扫描、定位或克隆外部密钥仓库，不持久化、序列化或显示变量值；畸形定义固定脱敏失败。设置页高级管理可达 Aliases、更新中心等页面，Aliases 原生 `aliases:status/apply` 已接线。按 2026-09-12 产品裁决，Tools 域、快照（`snapshots:*`）与 `system:converge` 已退役，相关页面、Tauri 白名单与契约 schema 已移除；`system:refresh-upstream` 已接线（探测缓存落 SQLite `upstream_probes` 表，agents/mcp/skills 三域 status 回填 freshness）。
+```sh
+git clone https://github.com/ly87ing/agent-manager.git
+cd agent-manager
+pnpm --dir app install --frozen-lockfile
+pnpm --dir app run build:macos
+```
+
+产物位于 `app/src-tauri/target/release/bundle/dmg/`。独立包验收：`pnpm --dir app run verify:macos`。Linux 与 Windows 安装包由 [.github/workflows/gui-release.yml](.github/workflows/gui-release.yml) 构建；本地构建脚本目前仅面向 macOS。
+
+## 快速上手
+
+打开应用后，每个页面先以只读方式展示当前状态（status 零写入）。**保存定义只写入本地数据库，不安装软件、不修改任何配置文件**；只有点击页面上的执行按钮（应用/安装/同步等）才触发真实变更。
+
+执行（apply）内置安全语义：
+
+- 写前 preflight 校验，精确限定变更范围（scope）；
+- 排他锁防止并发写；
+- 外部修改检测：目标被本工具以外改动过时 fail-closed 拒绝覆盖；
+- 条件回滚与操作审计，每次执行可在任务记录页回查。
+
+卸载、移除定义、清空日志等破坏性动作需二次确认；"移除管理"与"卸载软件"是独立动作。
+
+## 数据与安全
+
+- **唯一事实源**：应用数据目录下的 `native-manager.db`（SQLite）保存全部定义、分配与偏好，没有第二份可写配置文件；查询与状态读取只读，缺库时不创建文件。
+- **写入范围**：仅写入受管目标——助手安装、客户端配置中的受管条目、`~/.codex/AGENTS.md`、`~/.claude/CLAUDE.md`、`~/.claude/settings.json`、`~/.codex/hooks.json`，以及 `~/.zshrc` / `~/.zprofile` 的受管区块。
+- **密钥模型**：MCP 定义中的密钥只保存 `${VAR}` 形式的环境变量占位符，应用到客户端配置时仍以引用形式写入；明文不出现在本工具的数据库与日志中。Secrets 页只显示变量名与是否存在，不读取外部密钥仓库。
+- **不收集数据**：无遥测上传；日志仅写入本机应用数据目录，严格脱敏并按保留期自动清理。
+
+## 文档
+
+- [架构](docs/ARCHITECTURE.md)：数据流与调用边界
+- [MCP 配置指南](docs/MCP-CONFIG-GUIDE.md)：MCP 定义字段与密钥占位符模型
+- [Secrets 边界](docs/SECRETS-MANAGEMENT.md)
+- [故障排查](docs/TROUBLESHOOTING.md)
+- [平台状态](docs/GUI-PLATFORM-STATUS.md)：各平台构建与验收状态
+- [变更日志](CHANGELOG.md)
+- 面向贡献者：[GUI 重设计契约](docs/GUI-REDESIGN.md)、[目标与验收](docs/goal-rust-gui.md)、[Engine 契约](contract/README.md)、[桌面应用开发说明](app/README.md)
 
 ## 开发
+
+仓库结构：`engine-rs/`（CLI 与桌面端共用的 Rust 库与 SQLite 存储）、`app/`（Tauri 应用与 React 前端）、`contract/`（Engine Contract v1 schema）、`scripts/`（构建与验收脚本）。
+
+验证命令（仓库根目录）：
 
 ```sh
 cargo test --manifest-path engine-rs/Cargo.toml
@@ -30,18 +78,17 @@ cargo test --manifest-path app/src-tauri/Cargo.toml
 cd app && pnpm test:unit run && pnpm typecheck && pnpm build
 ```
 
-冒烟：`./scripts/ci-smoke.sh`（构建后仅以隔离 `AGENT_MANAGER_DATA_DIR` 与 `HOME` 运行只读查询和真实 policy 写入回读，不触碰真实环境）。手动隔离写入请同时设置临时 `AGENT_MANAGER_DATA_DIR` 与 `HOME`，不要覆盖真实环境。
+冒烟测试 `./scripts/ci-smoke.sh` 在隔离数据目录运行，不触碰真实环境。完整验证要求见 [docs/goal-rust-gui.md](docs/goal-rust-gui.md) 的"验证"一节。
 
-macOS 打包与独立包验收（构建环境为 Darwin x86_64，构建自动启用源码根目录与主目录路径脱敏重映射；arm64 为交叉构建，仅静态验收）：
+## 许可证
 
-- 打包 app 与 dmg：`pnpm --dir app run build:macos`（产物位于 `app/src-tauri/target/release/bundle/dmg/`）
-- 独立包运行验收：`pnpm --dir app run verify:macos` 或 `./scripts/verify-macos-dmg.sh app/src-tauri/target/release/bundle/dmg/Agent\ Manager_0.1.0_x64.dmg`（只读挂载、隔离复制、元数据/架构/无 Python 依赖校验、源码路径脱敏校验、从 `/` 隔离目录 5 秒存活运行验收）。历史验收（2026-09-14）：基于 `5ae995b` 的干净 Darwin x86_64 DMG（SHA256 `71a386d6ab8e1a7f85ef59c82f379411e9aa1dccaa3c3166309b96b971fce26b`，7632599 bytes，非仓库 HEAD 构建包）。当前验收（2026-09-15 主审独立验收）：验收基线提交 `5a110be3` 的 Darwin x86_64 DMG verify 脚本 exit 0，包内构建身份 commit/date 与源码精确一致，未签名，SHA256 `076d16b098ede8915802c0bc6dceec42dc06e0dcadddd137e7865681c7e90a68`，7632606 bytes；同源码交叉构建 thin arm64 DMG 静态验收通过，SHA256 `a9540a2690b9d2ede16ef627f310e277ca49130e608c518b876aeaed0bbfd3f8`，7298163 bytes，adhoc linker-signed（非 Developer ID），未在 arm64 设备运行。当前 x86_64 安装包主要真实 GUI E2E 已验收（旧版 plan→confirm→apply 交互，现已失效，不证明本轮直接 apply 新交互）：system:audit 缺库零写、Rules 取消零写/应用、Hooks 双目标、Aliases 双目标、MCP stdio+远程 HTTP 的 plan/confirm/apply、Secrets 仅显示变量名与存在性、Runs、外部修改 plan fail-closed；MCP 定义经共用 Rust CLI 写入隔离 SQLite 测试夹具，MCP 新增服务表单因 macOS 自动化输入限制未验收。签名、公证、Linux、Windows、arm64 真机运行与安装、updater 真实签名下载安装回读仍未验证（2026-09-15 复测：GitHub Actions secrets=0、variables=0，本机有效 codesigning identities=0，GitHub Releases=0），未创建 tag、GitHub Release 或对外安装包。
+[MIT](LICENSE)
 
-旧 DMG/旧 GUI E2E 不证明本轮新交互。本轮源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收已完成；最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify（提交、SHA256 与验证结果见 [交付回执](docs/goal-rust-gui.md)）。
+## English Summary
 
-## 目录
+Agent Manager is a desktop app (Tauri 2 + React + Rust/SQLite) for centrally managing local AI coding agents, with built-in support for Claude Code, Codex, and OpenCode. The UI is in Simplified Chinese.
 
-- [engine-rs](engine-rs/)：CLI/Tauri 共用 Rust 库和 SQLite 存储。
-- [app](app/)：Tauri 桌面应用和 React 前端。
-- [contract](contract/)：Engine Contract v1 schema。
-- [当前架构](docs/ARCHITECTURE.md) · [平台状态](docs/GUI-PLATFORM-STATUS.md)。
+- **Features**: install/upgrade/uninstall agents (built-in and custom); manage Skill collections with per-agent enablement; manage local stdio and remote HTTP MCP servers across three client config formats (Claude JSON, Codex TOML, OpenCode JSON); edit Rules (`~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`), Hooks, and managed shell alias blocks in `~/.zshrc` / `~/.zprofile`; check for upstream updates; view secrets status (variable names and presence only) and task history.
+- **Install**: no public GitHub Release yet — packages are unavailable until external prerequisites (signing keys, Apple Developer ID and notarization, Windows signing, per-platform hardware acceptance) are met; see [platform status](docs/GUI-PLATFORM-STATUS.md). To build from source on macOS, install the Rust toolchain, Node.js, and pnpm, clone without `--recursive` (the private `secrets/` submodule is not needed), then run `pnpm --dir app install --frozen-lockfile && pnpm --dir app run build:macos`.
+- **Safety model**: saving a definition only writes the local SQLite database (`native-manager.db` in the app data directory); nothing is installed or modified until you click execute. Apply runs with preflight checks, exact scope, an exclusive lock, fail-closed external-modification detection, conditional rollback, and audit logging; destructive actions require confirmation. MCP secrets are stored as `${VAR}` placeholders and written to client configs by reference — plaintext never lands in this tool's database or logs. No telemetry.
+- **License**: [MIT](LICENSE).

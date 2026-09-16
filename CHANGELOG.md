@@ -1,0 +1,31 @@
+# Changelog
+
+本项目的重要变更记录在此文件。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
+
+## [0.1.0] - 未发布
+
+首个公开候选版本。公开发布仍受仓库外部条件阻塞：GitHub Actions 计费、仓库 Secrets/Variables（当前均为 0）、Apple Developer ID 与公证、Windows 签名材料、Linux/Windows/arm64 真机验收、updater 真实链路验收均未就绪；尚未创建 tag 或 GitHub Release，安装包暂未提供。
+
+### 新增
+
+- 六个资源域的完整管理闭环：
+  - 助手：安装、升级、卸载内置助手（Claude Code、Codex、OpenCode）与自定义助手，如实检测实际安装来源。
+  - Skills：集合与单个技能的更新、启停与移除，内容快照与安全软连接落地。
+  - MCP 服务器：本地 stdio 与远程 HTTP 两类传输，按助手分配，支持 Claude JSON、Codex TOML、OpenCode JSON 三种客户端格式；支持从客户端现有配置发现导入。
+  - Rules：共享与助手专用规则，应用到 `~/.codex/AGENTS.md` 与 `~/.claude/CLAUDE.md`。
+  - Hooks：Claude `~/.claude/settings.json` 合并写入与 Codex `~/.codex/hooks.json` 整文件写入。
+  - Shell Aliases：`~/.zshrc` 与 `~/.zprofile` 受管区块维护。
+- `native-manager.db`（SQLite）作为唯一事实源；查询与状态读取只读零写。
+- 直接执行（apply）交互：写前校验、精确范围、排他锁、外部修改 fail-closed 拒绝覆盖、条件回滚与操作审计；卸载、移除定义、清空日志等破坏性动作二次确认。
+- MCP 密钥占位符模型：仅持久化 `${VAR}` 引用，按客户端格式以引用形式落盘，明文不出现在本工具的数据库与日志中；Secrets 状态页只显示变量名与存在性。
+- 上游更新检查（助手、MCP、Skills），探测结果缓存于 SQLite。
+- 任务操作记录（SQLite）与本地结构化诊断日志（脱敏、按日滚动、保留期可配、手动清理二次确认）。
+- 前端顶层错误边界、自定义助手安装/升级确认、MCP 空态引导。
+- MIT 许可证、公开发布元数据与显式 Webview CSP；Bundle ID 定为 `io.github.ly87ing.agent-manager`。
+- 四平台发布管线（macOS dmg、Linux AppImage/deb、Windows NSIS/MSI）：草稿先行创建唯一 draft Release、矩阵按 releaseId 上传产物、收尾任务单写 updater `latest.json`、prerelease tag 支持、逐平台 SHA256 checksums、engine-rs 版本一致性门禁；Release 固定为 draft。
+- macOS 打包与独立包验收脚本（构建路径脱敏、只读挂载、隔离存活运行，已签名时如实检查公证票据）。
+
+### 移除
+
+- Python 实现与 `manage.sh` 入口；CLI 与桌面端现共用同一 Rust 库。
+- 公共 plan/dry-run 入口；写操作仅通过真实 apply 完成。
