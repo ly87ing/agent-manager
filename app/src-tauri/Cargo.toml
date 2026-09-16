@@ -1,7 +1,9 @@
 [package]
 name = "agent-manager-app"
 version = "0.1.0"
-description = "Agent Manager desktop client (Engine Contract v1)"
+description = "Tauri backend for Agent Manager"
+license = "MIT"
+repository = "https://github.com/ly87ing/agent-manager"
 edition = "2021"
 rust-version = "1.77"
 
