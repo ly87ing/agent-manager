@@ -29,6 +29,6 @@
 
 MCP 支持本地 stdio 与远程 HTTP 两种传输（字段互斥：远程定义含 `url`，仅允许 `https://` 或本机回环 `http://localhost` / `http://127.0.0.1`，可选 `headers` 仅接受 `${VAR}` 占位符，以引用形式写入目标，明文不落盘）。OpenCode 使用 OpenCode JSON codec，必须为对应 Agent 配置 `mcp_config` 目标。
 
-旧 DMG/旧 GUI E2E 不证明本轮新交互。本轮源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收已完成；最终 clean DMG 在最终提交后重建，并在交付回执中绑定提交、SHA256 与验证结果。
+旧 DMG/旧 GUI E2E 不证明本轮新交互。本轮源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收已完成；最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify（提交、SHA256 与验证结果见 [交付回执](goal-rust-gui.md)）。
 
 验证入口：`cargo test --manifest-path engine-rs/Cargo.toml`、`cargo test --manifest-path app/src-tauri/Cargo.toml`，以及 `cd app && pnpm test:unit run && pnpm typecheck && pnpm build`。macOS 打包与独立包验收使用 `pnpm --dir app run build:macos` 与 `./scripts/verify-macos-dmg.sh <path-to-dmg>`。本机验收允许如实报告未签名状态，不代表 Apple 签名或公证通过，也不替代其他平台和未完成域的 E2E。

@@ -37,7 +37,7 @@ macOS 打包与独立包验收（构建环境为 Darwin x86_64，构建自动启
 - 打包 app 与 dmg：`pnpm --dir app run build:macos`（产物位于 `app/src-tauri/target/release/bundle/dmg/`）
 - 独立包运行验收：`pnpm --dir app run verify:macos` 或 `./scripts/verify-macos-dmg.sh app/src-tauri/target/release/bundle/dmg/Agent\ Manager_0.1.0_x64.dmg`（只读挂载、隔离复制、元数据/架构/无 Python 依赖校验、源码路径脱敏校验、从 `/` 隔离目录 5 秒存活运行验收）。历史验收（2026-09-14）：基于 `5ae995b` 的干净 Darwin x86_64 DMG（SHA256 `71a386d6ab8e1a7f85ef59c82f379411e9aa1dccaa3c3166309b96b971fce26b`，7632599 bytes，非仓库 HEAD 构建包）。当前验收（2026-09-15 主审独立验收）：验收基线提交 `5a110be3` 的 Darwin x86_64 DMG verify 脚本 exit 0，包内构建身份 commit/date 与源码精确一致，未签名，SHA256 `076d16b098ede8915802c0bc6dceec42dc06e0dcadddd137e7865681c7e90a68`，7632606 bytes；同源码交叉构建 thin arm64 DMG 静态验收通过，SHA256 `a9540a2690b9d2ede16ef627f310e277ca49130e608c518b876aeaed0bbfd3f8`，7298163 bytes，adhoc linker-signed（非 Developer ID），未在 arm64 设备运行。当前 x86_64 安装包主要真实 GUI E2E 已验收（旧版 plan→confirm→apply 交互，现已失效，不证明本轮直接 apply 新交互）：system:audit 缺库零写、Rules 取消零写/应用、Hooks 双目标、Aliases 双目标、MCP stdio+远程 HTTP 的 plan/confirm/apply、Secrets 仅显示变量名与存在性、Runs、外部修改 plan fail-closed；MCP 定义经共用 Rust CLI 写入隔离 SQLite 测试夹具，MCP 新增服务表单因 macOS 自动化输入限制未验收。签名、公证、Linux、Windows、arm64 真机运行与安装、updater 真实签名下载安装回读仍未验证（2026-09-15 复测：GitHub Actions secrets=0、variables=0，本机有效 codesigning identities=0，GitHub Releases=0），未创建 tag、GitHub Release 或对外安装包。
 
-旧 DMG/旧 GUI E2E 不证明本轮新交互。本轮源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收已完成；最终 clean DMG 在最终提交后重建，并在交付回执中绑定提交、SHA256 与验证结果。
+旧 DMG/旧 GUI E2E 不证明本轮新交互。本轮源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收已完成；最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify（提交、SHA256 与验证结果见 [交付回执](docs/goal-rust-gui.md)）。
 
 ## 目录
 
