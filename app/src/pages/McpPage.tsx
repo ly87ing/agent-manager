@@ -281,7 +281,14 @@ export default function McpPage() {
               />
             ))}
           </div>
-          {elements.length === 0 && <p className="py-4 text-center text-sm text-slate-400">无 MCP server 定义</p>}
+          {elements.length === 0 && (
+            <div className="space-y-1 py-4 text-center text-sm text-slate-400">
+              <p>暂无 MCP 服务定义：点击右上角「{OVERLAY_COPY.addServer}」创建第一个服务</p>
+              {importCandidates.length > 0 && (
+                <p>检测到 {importCandidates.length} 个可导入的现有配置，也可在下方「发现未导入的服务器」中导入</p>
+              )}
+            </div>
+          )}
 
           {selected ? (
             <McpServerDetail element={selected} />
@@ -361,7 +368,11 @@ export default function McpPage() {
               </tbody>
             </table>
             {assignmentRows.length === 0 && (
-              <p className="py-8 text-center text-sm text-slate-400">无符合筛选条件的服务配置</p>
+              <p className="py-8 text-center text-sm text-slate-400">
+                {agentFilter !== "all"
+                  ? "无符合筛选条件的服务配置：点击上方「清除筛选」后查看全部助手"
+                  : "暂无可展示的服务配置：请先在「服务库」新增服务"}
+              </p>
             )}
           </div>
         </div>

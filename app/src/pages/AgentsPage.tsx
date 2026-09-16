@@ -9,6 +9,7 @@ import { FreshnessBadge } from "../components/FreshnessBadge";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { StateBadge } from "../components/StateBadge";
 import type { ElementAction, EngineElement, PolicyData, StatusData } from "../lib/contract";
+import { definitionOrigin } from "../lib/definitionOverlay";
 import type { AgentsObserved, AgentsPolicy, AgentsSpec } from "../lib/observed";
 import { useEngineQuery, useOfflineMode } from "../lib/queries";
 import { useDirectApply } from "../lib/useDirectApply";
@@ -47,15 +48,20 @@ function PolicyChip({ label, value }: { label: string; value: boolean | undefine
 
 function AgentCard({
   element,
+  customDefinition,
   onEdit,
   onRemove,
   onRequestUninstall,
+  onRequestAction,
   onManageSkills,
 }: {
   element: EngineElement;
+  /** true = 定义来自本地数据库（用户新增或改过内置定义）：安装/升级先弹确认。 */
+  customDefinition: boolean;
   onEdit: () => void;
   onRemove: () => void;
   onRequestUninstall: () => void;
+  onRequestAction: (action: ElementAction) => void;
   onManageSkills?: (agentId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -69,10 +75,15 @@ function AgentCard({
   const version = installed ? (element.freshness.current ?? "已安装（还没检查过版本）") : "未安装";
   const name = spec.display_name ?? element.id;
 
-  /** 显式动作点击直接 agents:apply（带精确 --only/--action）；uninstall 需先经独立 ConfirmModal。 */
+  /** 显式动作点击直接 agents:apply（带精确 --only/--action）；卸载先经独立 ConfirmModal，
+   * 自定义定义的安装/升级也先经 ConfirmModal（命令内容由用户定义提供）。 */
   const runAction = (action: ElementAction) => {
     if (action.id === "uninstall") {
       onRequestUninstall();
+      return;
+    }
+    if (customDefinition) {
+      onRequestAction(action);
       return;
     }
     const label = ACTION_META[action.id]?.label ?? action.id;
@@ -174,7 +185,13 @@ function AgentCard({
               type="button"
               data-testid={`action-${action.id}-${element.id}`}
               disabled={disabled}
-              title={disabled ? "离线模式下不可用（需要联网）" : `${meta.label}：直接执行，命令以你的权限运行，结果不能自动撤销`}
+              title={
+                disabled
+                  ? "离线模式下不可用（需要联网）"
+                  : customDefinition
+                    ? `${meta.label}：先弹确认再执行，命令以你的权限运行，结果不能自动撤销`
+                    : `${meta.label}：直接执行，命令以你的权限运行，结果不能自动撤销`
+              }
               onClick={() => runAction(action)}
               className={cn(
                 "inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs",
@@ -212,15 +229,24 @@ export default function AgentsPage({
   const directApply = useDirectApply();
   const [form, setForm] = useState<EngineElement | "new" | null>(null);
   const [pendingUninstall, setPendingUninstall] = useState<EngineElement | null>(null);
+  const [pendingAction, setPendingAction] = useState<{ element: EngineElement; action: ElementAction } | null>(null);
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="agents:status 调用失败" error={query.error} />;
 
   const elements = query.data.data.elements;
+  const layers = policyQuery.data?.data.layers ?? null;
+  /** 内置判定：policy 层已加载且本地数据库无该定义覆盖；未加载到时按自定义处理（先确认再执行）。 */
+  const isCustomDefinition = (element: EngineElement) =>
+    layers === null || definitionOrigin(layers, "agents", element.id.replace(/^agents:/, "")) === "sqlite";
   const uninstallElement = pendingUninstall;
   const uninstallName = uninstallElement ? (uninstallElement.spec as AgentsSpec).display_name ?? uninstallElement.id : "";
+  const pendingActionName = pendingAction
+    ? (pendingAction.element.spec as AgentsSpec).display_name ?? pendingAction.element.id
+    : "";
+  const pendingActionLabel = pendingAction ? (ACTION_META[pendingAction.action.id]?.label ?? pendingAction.action.id) : "";
   return (
     <div className="space-y-4">
-      <PageHeader title="助手" description="各 AI 助手的安装渠道、版本与官方最新版对比。安装/升级点击后直接执行，卸载需确认。" />
+      <PageHeader title="助手" description="各 AI 助手的安装渠道、版本与官方最新版对比。内置助手安装/升级点击后直接执行；自定义定义的安装/升级与卸载需先确认。" />
       {query.data.errors.length > 0 && <ErrorPanel title="agents:status 错误" errors={query.data.errors} />}
       <div className="flex justify-end"><button type="button" onClick={() => setForm("new")} className="rounded-md bg-indigo-600 px-4 py-2 text-sm text-white">添加助手</button></div>
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -228,9 +254,11 @@ export default function AgentsPage({
           <AgentCard
             key={element.id}
             element={element}
+            customDefinition={isCustomDefinition(element)}
             onEdit={() => setForm(element)}
             onRemove={() => definitionOps.requestRemove(element.id.replace(/^agents:/, ""), policyQuery.data?.data.layers ?? null)}
             onRequestUninstall={() => setPendingUninstall(element)}
+            onRequestAction={(action) => setPendingAction({ element, action })}
             onManageSkills={onManageSkills}
           />
         ))}
@@ -255,6 +283,25 @@ export default function AgentsPage({
             setPendingUninstall(null);
           }}
           onClose={() => setPendingUninstall(null)}
+        />
+      )}
+
+      {pendingAction && (
+        <ConfirmModal
+          title={`${pendingActionLabel} ${pendingActionName}`}
+          description={`该助手来自你的自定义定义：将执行定义中的${pendingActionLabel}命令，可能写入系统目录；命令以你的权限运行，结果不能自动撤销。`}
+          risk={pendingAction.action.risk}
+          confirmLabel={`确认${pendingActionLabel}`}
+          executing={directApply.executing}
+          onConfirm={() => {
+            void directApply.apply({
+              command: "agents:apply",
+              label: `${pendingActionLabel} ${pendingActionName}`,
+              args: ["--only", pendingAction.element.id, "--action", pendingAction.action.id],
+            });
+            setPendingAction(null);
+          }}
+          onClose={() => setPendingAction(null)}
         />
       )}
     </div>

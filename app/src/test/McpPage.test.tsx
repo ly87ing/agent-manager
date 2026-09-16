@@ -218,6 +218,56 @@ describe("McpPage 服务库 + 助手中的服务", () => {
   });
 });
 
+describe("McpPage 空态引导", () => {
+  function emptyRoutes(importCandidates: unknown[] = []): Record<string, ReturnType<typeof makeEnvelope>> {
+    return {
+      "mcp:status": makeEnvelope(
+        { domain: "mcp", elements: [], import_candidates: importCandidates } as unknown as StatusData,
+        { command: "mcp.status" },
+      ),
+      "agents:status": makeEnvelope({ domain: "agents", elements: [] } as unknown as StatusData, { command: "agents.status" }),
+    };
+  }
+
+  it("无服务定义且无导入候选：引导点击「新增服务」，不出现导入提示", async () => {
+    renderWithEngine(<McpPage />, emptyRoutes());
+
+    expect(await screen.findByText(/暂无 MCP 服务定义/)).toHaveTextContent("点击右上角「新增服务」创建第一个服务");
+    expect(screen.queryByText(/可导入的现有配置/)).toBeNull();
+    // 「新增服务」按钮本身就在空态上方
+    expect(screen.getByTestId("add-server-button")).toBeInTheDocument();
+  });
+
+  it("无服务定义但有导入候选：补充提示可在「发现未导入的服务器」中导入", async () => {
+    renderWithEngine(
+      <McpPage />,
+      emptyRoutes([{ name: "grok-search", agent: "claude-code", transport: "stdio", spec: { command: "npx" } }]),
+    );
+
+    expect(await screen.findByText(/检测到 1 个可导入的现有配置/)).toHaveTextContent("发现未导入的服务器");
+  });
+
+  it("助手中的服务：筛选后无记录时引导清除筛选，全部视图下引导先到服务库新增", async () => {
+    const routes = emptyRoutes();
+    routes["agents:status"] = makeEnvelope(
+      {
+        domain: "agents",
+        elements: [makeElement({ id: "agents:claude-code", domain: "agents" })],
+      } as unknown as StatusData,
+      { command: "agents.status" },
+    );
+    renderWithEngine(<McpPage />, routes);
+    await userEvent.click(await screen.findByRole("tab", { name: "助手中的服务" }));
+
+    // 全部视图：无服务定义 → 引导先到服务库新增
+    expect(await screen.findByText(/暂无可展示的服务配置/)).toHaveTextContent("请先在「服务库」新增服务");
+
+    // 收窄筛选后：引导清除筛选
+    await userEvent.selectOptions(screen.getByTestId("filter-agent-select"), "claude-code");
+    expect(screen.getByText(/无符合筛选条件的服务配置/)).toHaveTextContent("「清除筛选」后查看全部助手");
+  });
+});
+
 describe("McpPage 显式接管通道（--allow-takeover）", () => {
   const CONFLICT_MESSAGE = "目标文件 /tmp/demo/.claude.json 中已存在非受管同名条目 'take-svc'，拒绝覆盖以防止冲突";
 

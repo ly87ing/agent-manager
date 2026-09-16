@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { waitFor } from "@testing-library/react";
 import AgentsPage from "../pages/AgentsPage";
-import { makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode } from "./fixtures";
+import { makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 import type { Envelope } from "../lib/contract";
 
 function routes(offline: boolean): Record<string, Envelope> {
   return {
     "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode({ offline }) }),
+    // policy:get 已加载且 sqlite 层无 agent_definitions 覆盖 → claude-code 为内置定义，安装/升级一键直达
+    "policy:get": makeEnvelope(makePolicyData(), { command: "policy.get" }),
     "agents:status": makeEnvelope(
       {
         domain: "agents",
@@ -170,5 +172,95 @@ describe("Agents 页文案", () => {
     await userEvent.click(manageBtn);
 
     expect(selectedAgent).toBe("claude-code");
+  });
+});
+
+describe("自定义助手的安装/升级确认", () => {
+  /** my-agent 的定义写在本地数据库（agent_definitions 覆盖）→ 自定义定义，安装/升级需先确认。 */
+  function customRoutes(): Record<string, Envelope> {
+    const base = routes(false);
+    base["policy:get"] = makeEnvelope(
+      makePolicyData({
+        layers: {
+          sqlite: {
+            agent_definitions: {
+              "my-agent": { display_name: "My Agent", bin: "my-agent" },
+            },
+          },
+        },
+      }),
+      { command: "policy.get" },
+    );
+    base["agents:status"] = makeEnvelope(
+      {
+        domain: "agents",
+        elements: [
+          makeElement({
+            id: "agents:my-agent",
+            domain: "agents",
+            spec: { display_name: "My Agent", bin: "my-agent", providers: { custom: { managed: true } } },
+            policy: { enabled: true },
+            observed: { providers: [], classified: { managed: [], deprecated: [], system_only: [], unsupported: [] }, installed: false },
+            state: "missing",
+            actions: [
+              { id: "install", risk: "install-remove", needs_lock: true, offline_ok: false },
+              { id: "upgrade", risk: "network", needs_lock: true, offline_ok: false },
+            ],
+          }),
+        ],
+      },
+      { command: "agents.status" },
+    );
+    return base;
+  }
+
+  it("内置助手升级维持一键直达：不开弹窗，直接 agents:apply", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routes(false));
+    await userEvent.click(await screen.findByTestId("action-upgrade-agents:claude-code"));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "agents:apply")).toBe(true));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(calls.filter((call) => call.command === "agents:apply")[0].args).toEqual([
+      "--only", "agents:claude-code", "--action", "upgrade",
+    ]);
+  });
+
+  it("自定义助手安装：点击先弹 ConfirmModal（含风险说明），不立即执行", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, customRoutes());
+    await userEvent.click(await screen.findByTestId("action-install-agents:my-agent"));
+
+    const dialog = await screen.findByRole("dialog", { name: "安装 My Agent" });
+    expect(dialog).toHaveTextContent(/将执行定义中的安装命令，可能写入系统目录/);
+    expect(dialog).toHaveTextContent(/命令以你的权限运行，结果不能自动撤销/);
+    expect(calls.some((call) => call.command === "agents:apply")).toBe(false);
+  });
+
+  it("自定义助手升级：确认后 agents:apply 带 --action upgrade（带 run_id），无 plan、零 policy:set", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, customRoutes());
+    await userEvent.click(await screen.findByTestId("action-upgrade-agents:my-agent"));
+
+    await screen.findByRole("dialog", { name: "升级 My Agent" });
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "agents:apply")).toBe(true));
+    const applyCalls = calls.filter((call) => call.command === "agents:apply");
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0].args).toEqual(["--only", "agents:my-agent", "--action", "upgrade"]);
+    expect(applyCalls[0].args).not.toContain("--dry-run");
+    expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("自定义助手安装：取消弹窗则零 apply、零 policy:set", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, customRoutes());
+    await userEvent.click(await screen.findByTestId("action-install-agents:my-agent"));
+
+    await screen.findByRole("dialog", { name: "安装 My Agent" });
+    await userEvent.click(screen.getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    expect(calls.some((call) => call.command === "agents:apply")).toBe(false);
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
   });
 });
