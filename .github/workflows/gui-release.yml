@@ -14,9 +14,81 @@ on:
 permissions:
   contents: write
 
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
 jobs:
+  # 前置 job：统一校验 tag/checkout/版本一致性并创建唯一 draft Release，
+  # 矩阵各腿只向其上传产物，消除并发 create-draft 竞态。
+  create-release:
+    name: "validate tag / create draft release"
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Validate release tag, checkout, and version consistency
+        id: validate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$ ]] || {
+            echo "release tag must match vX.Y.Z or vX.Y.Z-(alpha|beta|rc).N" >&2
+            exit 1
+          }
+          tag_commit="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          head_commit="$(git rev-parse HEAD)"
+          [[ "$tag_commit" == "$head_commit" ]] || {
+            echo "checked out commit does not match release tag $RELEASE_TAG" >&2
+            exit 1
+          }
+          # 版本一致性比对剥离预发布后缀（仓库内版本号恒为 X.Y.Z）
+          version="${RELEASE_TAG#v}"
+          version="${version%%-*}"
+          pkg_ver="$(node -p 'require("./app/package.json").version')"
+          tauri_ver="$(node -p 'require("./app/src-tauri/tauri.conf.json").version')"
+          cargo_ver="$(awk -F '"' '/^\[package\]/{package=1; next} package && /^version[[:space:]]*=/{print $2; exit}' app/src-tauri/Cargo.toml)"
+          engine_ver="$(awk -F '"' '/^\[package\]/{package=1; next} package && /^version[[:space:]]*=/{print $2; exit}' engine-rs/Cargo.toml)"
+          if [[ "$pkg_ver" != "$version" || "$tauri_ver" != "$version" || "$cargo_ver" != "$version" || "$engine_ver" != "$version" ]]; then
+            echo "Version mismatch: tag=$version, package.json=$pkg_ver, tauri.conf.json=$tauri_ver, Cargo.toml=$cargo_ver, engine-rs/Cargo.toml=$engine_ver" >&2
+            exit 1
+          fi
+          # fail-closed：同名 Release 已发布（非草稿）时拒绝覆盖重建
+          existing_draft="$(gh api "repos/${{ github.repository }}/releases/tags/$RELEASE_TAG" --jq '.draft' 2>/dev/null || echo missing)"
+          if [[ "$existing_draft" == "false" ]]; then
+            echo "release for $RELEASE_TAG already exists and is published; refusing to rebuild into it" >&2
+            exit 1
+          fi
+          prerelease=false
+          [[ "$RELEASE_TAG" == *-* ]] && prerelease=true
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+      # Release 始终是草稿，人工核对后才可公开；prerelease 由 tag 后缀推导。
+      - name: Create draft release
+        id: create
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Agent Manager ${{ env.RELEASE_TAG }}
+          draft: true
+          prerelease: ${{ steps.validate.outputs.prerelease }}
+
   release:
     name: "${{ matrix.os }} / ${{ matrix.target }} / release installer"
+    needs: create-release
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -40,7 +112,6 @@ jobs:
     # YOUR_* 占位时由 fail-closed 门禁直接失败，不做降级构建。私钥与各平台
     # 证书 secrets 只注入到对应的 guard/import/build 步骤，不做 job 级暴露。
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
       TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
 
     steps:
@@ -53,30 +124,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
-
-      - name: Validate release tag, checkout, and version consistency
-        env:
-          RELEASE_TAG: ${{ env.RELEASE_TAG }}
-        shell: bash
-        run: |
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
-            echo "release tag must match vX.Y.Z" >&2
-            exit 1
-          }
-          tag_commit="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
-          head_commit="$(git rev-parse HEAD)"
-          [[ "$tag_commit" == "$head_commit" ]] || {
-            echo "checked out commit does not match release tag $RELEASE_TAG" >&2
-            exit 1
-          }
-          version="${RELEASE_TAG#v}"
-          pkg_ver="$(node -p 'require("./app/package.json").version')"
-          tauri_ver="$(node -p 'require("./app/src-tauri/tauri.conf.json").version')"
-          cargo_ver="$(awk -F '"' '/^\[package\]/{package=1; next} package && /^version[[:space:]]*=/{print $2; exit}' app/src-tauri/Cargo.toml)"
-          if [[ "$pkg_ver" != "$version" || "$tauri_ver" != "$version" || "$cargo_ver" != "$version" ]]; then
-            echo "Version mismatch: tag=$version, package.json=$pkg_ver, tauri.conf.json=$tauri_ver, Cargo.toml=$cargo_ver" >&2
-            exit 1
-          fi
 
       # 门禁：依赖安装之前失败关闭。只输出缺失/占位变量的名字，绝不打印取值。
       - name: Fail-closed provenance and common signing requirements
@@ -343,8 +390,12 @@ jobs:
           fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');
           EOF
 
-      # releaseDraft 保持 true：Release 始终是草稿，人工核对后才可公开。
+      # Release 由前置 create-release job 统一创建；本步骤以 releaseId 模式只向
+      # 既有草稿 Release 上传产物与 updater 签名，不再创建/修改 Release 本身。
+      # latest.json 不在此处生成，由全矩阵完成后的 updater-json job 一次性生成
+      # 上传，消除并发读-改-写竞态。
       - name: Build and upload release
+        id: build
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -355,13 +406,49 @@ jobs:
           APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
         with:
           projectPath: app
-          tagName: ${{ env.RELEASE_TAG }}
-          releaseName: Agent Manager ${{ env.RELEASE_TAG }}
-          releaseDraft: true
-          prerelease: false
-          uploadUpdaterJson: true
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          uploadUpdaterJson: false
           uploadUpdaterSignatures: true
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      # 本腿全部构建产物的 SHA256 清单，作为 Release 资产随包发布；文件名含
+      # target 三元组避免跨腿重名。artifactPaths 是 JSON 数组（tauri-action
+      # 源码 index.ts），用 node 解析并用 crypto 计算，跨平台且无路径引号问题。
+      - name: Generate SHA256 checksums
+        id: checksums
+        shell: bash
+        env:
+          ARTIFACT_PATHS: ${{ steps.build.outputs.artifactPaths }}
+        run: |
+          set -eo pipefail
+          out="checksums-${{ matrix.target }}.txt"
+          CHECKSUMS_OUT="$out" node <<'EOF'
+          const crypto = require('crypto');
+          const fs = require('fs');
+          const path = require('path');
+          const artifacts = JSON.parse(process.env.ARTIFACT_PATHS || '[]');
+          const lines = [];
+          for (const p of artifacts) {
+            let st;
+            try { st = fs.statSync(p); } catch { continue; }
+            if (!st.isFile()) continue;
+            const sum = crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+            lines.push(`${sum}  ${path.basename(p)}`);
+          }
+          if (!lines.length) {
+            console.error('no build artifacts found for checksums');
+            process.exit(1);
+          }
+          fs.writeFileSync(process.env.CHECKSUMS_OUT, lines.join('\n') + '\n');
+          console.log(`checksummed ${lines.length} artifacts`);
+          EOF
+          echo "checksums_file=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Upload checksums to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$RELEASE_TAG" "${{ steps.checksums.outputs.checksums_file }}" --clobber
 
       - name: Restore ephemeral tauri.conf.json
         if: ${{ always() }}
@@ -385,3 +472,97 @@ jobs:
           }
           $pfxPath = Join-Path $env:RUNNER_TEMP 'agent-manager-signing.pfx'
           if (Test-Path $pfxPath) { Remove-Item $pfxPath -Force }
+
+  # 收尾 job：全部矩阵腿成功后，基于 Release 已上传的 updater 产物与签名一次性
+  # 生成包含全部平台的 latest.json 并上传（单写者，无竞态）。任一平台产物或签名
+  # 缺失即失败，不上传残缺 latest.json。
+  updater-json:
+    name: "assemble and upload updater latest.json"
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eo pipefail
+          mkdir -p updater-assets
+          gh release download "$RELEASE_TAG" --dir updater-assets --clobber
+
+      - name: Assemble latest.json
+        shell: bash
+        run: |
+          node <<'EOF'
+          const fs = require('fs');
+          const path = require('path');
+
+          const tag = process.env.RELEASE_TAG;
+          const repo = process.env.GITHUB_REPOSITORY;
+          if (!tag || !repo) {
+            console.error('RELEASE_TAG or GITHUB_REPOSITORY is empty');
+            process.exit(1);
+          }
+          const version = tag.replace(/^v/, '').split('-')[0];
+          const dir = 'updater-assets';
+          const files = fs.readdirSync(dir);
+
+          const findOne = (pred, desc) => {
+            const hits = files.filter(pred);
+            if (hits.length !== 1) {
+              console.error(`expected exactly 1 ${desc}, found ${hits.length}: ${hits.join(', ')}`);
+              process.exit(1);
+            }
+            return hits[0];
+          };
+          const entry = (bundle) => {
+            const sig = `${bundle}.sig`;
+            if (!files.includes(sig)) {
+              console.error(`missing updater signature ${sig}`);
+              process.exit(1);
+            }
+            return {
+              signature: fs.readFileSync(path.join(dir, sig), 'utf8').trim(),
+              url: `https://github.com/${repo}/releases/download/${tag}/${bundle}`,
+            };
+          };
+
+          const macArm = findOne((f) => f.endsWith('.app.tar.gz') && f.includes('aarch64'), 'macOS aarch64 updater bundle');
+          const macX64 = findOne((f) => f.endsWith('.app.tar.gz') && !f.includes('aarch64') && (f.includes('x86_64') || f.includes('x64')), 'macOS x86_64 updater bundle');
+          const appimage = findOne((f) => f.endsWith('.AppImage.tar.gz'), 'Linux AppImage updater bundle');
+          const msi = findOne((f) => f.endsWith('.msi.zip'), 'Windows msi updater bundle');
+          const nsis = findOne((f) => f.endsWith('.nsis.zip'), 'Windows nsis updater bundle');
+
+          const eMacArm = entry(macArm);
+          const eMacX64 = entry(macX64);
+          const eLinux = entry(appimage);
+          const eMsi = entry(msi);
+          const eNsis = entry(nsis);
+
+          // 与 tauri-action uploadVersionJSON 默认行为一致（updaterJsonPreferNsis=false）：
+          // windows-x86_64 主键取 msi；每个平台同时写 {os}-{arch}-{bundle} 键。
+          const latest = {
+            version,
+            notes: `Agent Manager ${tag}`,
+            pub_date: new Date().toISOString(),
+            platforms: {
+              'darwin-aarch64': eMacArm,
+              'darwin-aarch64-app': eMacArm,
+              'darwin-x86_64': eMacX64,
+              'darwin-x86_64-app': eMacX64,
+              'linux-x86_64': eLinux,
+              'linux-x86_64-appimage': eLinux,
+              'windows-x86_64': eMsi,
+              'windows-x86_64-msi': eMsi,
+              'windows-x86_64-nsis': eNsis,
+            },
+          };
+          fs.writeFileSync('latest.json', JSON.stringify(latest, null, 2) + '\n');
+          console.log(`latest.json platforms: ${Object.keys(latest.platforms).join(', ')}`);
+          EOF
+
+      - name: Upload latest.json to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$RELEASE_TAG" latest.json --clobber

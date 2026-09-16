@@ -270,19 +270,27 @@ log_info "build date 核验通过: date=${EXPECTED_DATE}"
 CODESIGN_DISPLAY="$(codesign -dvv "$COPIED_APP" 2>&1 || true)"
 if echo "$CODESIGN_DISPLAY" | grep -q "code object is not signed at all"; then
   log_info "代码签名状态: 未签名"
+  log_info "Apple 公证状态: 不适用（未签名包不做公证票据检查，本地验收不要求 Apple 公证）"
 elif echo "$CODESIGN_DISPLAY" | grep -q "Signature=adhoc"; then
   if ! codesign --verify --deep --strict "$COPIED_APP" >/dev/null 2>&1; then
     fail "阶段失败 [代码签名校验]：adhoc 签名深度严格验证失败"
   fi
   log_info "代码签名状态: adhoc (已通过深度严格校验)"
+  log_info "Apple 公证状态: 不适用（adhoc 签名不做公证票据检查，本地验收不要求 Apple 公证）"
 else
   AUTHORITY="$(echo "$CODESIGN_DISPLAY" | grep "Authority=" | head -n 1 | cut -d= -f2-)"
   if ! codesign --verify --deep --strict "$COPIED_APP" >/dev/null 2>&1; then
     fail "阶段失败 [代码签名校验]：检测到签名但深度严格验证失败"
   fi
   log_info "代码签名状态: 有效签名 (${AUTHORITY:-未知}) (已通过深度严格校验)"
+  # 已签名分支追加公证票据检查：stapler validate 未通过只如实报告，
+  # 不改变本地验收结论（本地验证环境不强制 Apple 公证）。
+  if STAPLER_OUTPUT="$(xcrun stapler validate "$COPIED_APP" 2>&1)"; then
+    log_info "Apple 公证票据检查通过: $(echo "$STAPLER_OUTPUT" | tail -n 1)"
+  else
+    log_info "Apple 公证票据状态: 未装订有效票据或校验未通过（本地验收不强制 Apple 公证）: $(echo "$STAPLER_OUTPUT" | head -n 1)"
+  fi
 fi
-log_info "Apple 公证状态: 未验证（本地验证环境不要求 Apple 公证）"
 
 # 9. 独立运行存活验收
 log_info "准备隔离运行环境（工作目录 /, 隔离 HOME, 独立 DATA_DIR, 最小 PATH=/usr/bin:/bin）..."
