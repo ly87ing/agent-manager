@@ -222,7 +222,7 @@ describe("SkillsPage 三级视图", () => {
     expect(screen.getByTitle("claude-code: missing-link")).toHaveTextContent("未生效");
     const disabled = screen.getByTitle("codex: disabled");
     expect(disabled).toHaveTextContent("已停用");
-    expect(disabled.className).toContain("zinc");
+    expect(disabled.className).toContain("muted");
     // 新发现技能进入全部技能列表，可按助手添加；引擎未报告 cell 时不伪造可执行操作
     expect(screen.getAllByText("inbox-one").length).toBeGreaterThan(0);
     expect(screen.getAllByTitle("claude-code: 未配置").length).toBeGreaterThan(0);

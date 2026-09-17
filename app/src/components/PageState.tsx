@@ -5,7 +5,7 @@ import { ErrorPanel } from "./ErrorPanel";
 /** 页面级加载占位。 */
 export function PageLoading({ text = "正在读取数据…" }: { text?: string }) {
   return (
-    <div className="flex items-center gap-2 py-20 text-sm text-slate-400">
+    <div className="flex items-center gap-2 py-20 text-sm text-muted-foreground">
       <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
       {text}
     </div>
@@ -21,7 +21,7 @@ export function PageHeader({ title, description }: { title: string; description?
   return (
     <div>
       <h2 className="text-xl font-semibold tracking-tight">{title}</h2>
-      {description && <p className="mt-1 text-xs text-slate-400">{description}</p>}
+      {description && <p className="mt-1 text-xs text-muted-foreground">{description}</p>}
     </div>
   );
 }

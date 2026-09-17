@@ -106,35 +106,35 @@ function EditDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div role="dialog" aria-modal="true" aria-label="编辑配置项" className="w-full max-w-xl rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
-        <h3 className="text-base font-semibold text-slate-800">编辑配置项</h3>
+      <div role="dialog" aria-modal="true" aria-label="编辑配置项" className="w-full max-w-xl rounded-xl border bg-card p-5 shadow-xl">
+        <h3 className="text-base font-semibold text-foreground">编辑配置项</h3>
         <div className="mt-4 space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">配置项（点分路径）</label>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">配置项（点分路径）</label>
             <input
               type="text"
               value={key}
               onChange={(event) => setKey(event.target.value)}
               data-testid="policy-key-input"
-              className="w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-xs"
+              className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs"
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">值（JSON 格式）</label>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">值（JSON 格式）</label>
             <textarea
               value={rawValue}
               onChange={(event) => setRawValue(event.target.value)}
               rows={5}
               data-testid="policy-value-input"
-              className="w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-xs"
+              className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs"
             />
           </div>
-          <p className="text-xs text-slate-500">提交会写入 native-manager.db 的本地配置记录；内置默认值只读。</p>
-          {clientError && <p className="text-xs text-red-600">{clientError}</p>}
+          <p className="text-xs text-muted-foreground">提交会写入 native-manager.db 的本地配置记录；内置默认值只读。</p>
+          {clientError && <p className="text-xs text-destructive">{clientError}</p>}
           {errors && errors.length > 0 && <ErrorPanel title="保存被拒绝" errors={errors} />}
         </div>
         <div className="mt-4 flex justify-end gap-2">
-          <button type="button" onClick={onClose} disabled={submitting} className="rounded-md border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+          <button type="button" onClick={onClose} disabled={submitting} className="rounded-md border px-4 py-2 text-sm text-muted-foreground hover:bg-accent disabled:opacity-40">
             取消
           </button>
           <button
@@ -143,8 +143,8 @@ function EditDialog({
             disabled={submitting}
             data-testid="policy-set-submit"
             className={cn(
-              "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white",
-              submitting ? "cursor-not-allowed bg-slate-300" : "bg-indigo-600 hover:bg-indigo-700",
+              "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-primary-foreground",
+              submitting ? "cursor-not-allowed bg-muted text-muted-foreground" : "bg-primary hover:bg-primary/90",
             )}
           >
             {submitting && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
@@ -176,22 +176,22 @@ export default function PolicyPage() {
       />
       {query.data.errors.length > 0 && <ErrorPanel title="policy:get 错误" errors={query.data.errors} />}
 
-      <section className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <p className="text-xs text-slate-600">数据库状态：native-manager.db 是配置的唯一事实源，所有改动保存在本机数据库。</p>
+      <section className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-4 shadow-sm">
+        <p className="text-xs text-muted-foreground">数据库状态：native-manager.db 是配置的唯一事实源，所有改动保存在本机数据库。</p>
         <button
           type="button"
           onClick={() => setEditing({ key: "", value: undefined })}
-          className="ml-auto inline-flex items-center gap-1 rounded-md border border-indigo-200 px-3 py-1.5 text-xs text-indigo-600 hover:bg-indigo-50"
+          className="ml-auto inline-flex items-center gap-1 rounded-md border border-primary/30 px-3 py-1.5 text-xs text-primary hover:bg-primary/10"
         >
           <Plus className="h-3.5 w-3.5" aria-hidden /> 新增配置项
         </button>
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 className="mb-3 text-sm font-semibold text-slate-700">当前生效的配置</h3>
+      <section className="rounded-lg border bg-card p-5 shadow-sm">
+        <h3 className="mb-3 text-sm font-semibold text-foreground">当前生效的配置</h3>
         <table className="w-full text-left text-sm">
           <thead>
-            <tr className="border-b border-slate-200 text-xs text-slate-500">
+            <tr className="border-b text-xs text-muted-foreground">
               <th className="py-2 pr-4 font-medium">配置项</th>
               <th className="py-2 pr-4 font-medium">值</th>
               <th className="py-2 pr-4 font-medium">来源</th>
@@ -200,9 +200,9 @@ export default function PolicyPage() {
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.path} className="border-b border-slate-100 last:border-0">
-                <td className="py-1.5 pr-4 font-mono text-xs break-all text-slate-700">{row.path}</td>
-                <td className="py-1.5 pr-4 font-mono text-xs text-slate-500">{shortValue(row.value)}</td>
+              <tr key={row.path} className="border-b last:border-0">
+                <td className="py-1.5 pr-4 font-mono text-xs break-all text-foreground">{row.path}</td>
+                <td className="py-1.5 pr-4 font-mono text-xs text-muted-foreground">{shortValue(row.value)}</td>
                 <td className="py-1.5 pr-4">
                   <LayerBadge layer={layerOfTopKey(attribution, row.path)} />
                 </td>
@@ -211,7 +211,7 @@ export default function PolicyPage() {
                     type="button"
                     onClick={() => setEditing({ key: row.path, value: row.value })}
                     data-testid={`edit-${row.path}`}
-                    className="inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
+                    className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent"
                   >
                     <Pencil className="h-3 w-3" aria-hidden /> 编辑
                   </button>
@@ -220,15 +220,15 @@ export default function PolicyPage() {
             ))}
           </tbody>
         </table>
-        {rows.length === 0 && <p className="py-4 text-center text-sm text-slate-400">暂无配置</p>}
+        {rows.length === 0 && <p className="py-4 text-center text-sm text-muted-foreground">暂无配置</p>}
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="rounded-lg border bg-card p-5 shadow-sm">
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-700">本地数据库内容</h3>
+          <h3 className="text-sm font-semibold text-foreground">本地数据库内容</h3>
           <LayerBadge layer="sqlite" />
         </div>
-        <pre data-testid="layer-card-sqlite" className="max-h-64 overflow-auto rounded bg-slate-50 p-2 font-mono text-xs text-slate-600">
+        <pre data-testid="layer-card-sqlite" className="max-h-64 overflow-auto rounded bg-muted p-2 font-mono text-xs text-muted-foreground">
           {data.layers?.sqlite ? JSON.stringify(data.layers.sqlite, null, 2) : "数据库尚未写入本地配置"}
         </pre>
       </section>

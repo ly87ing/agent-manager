@@ -17,9 +17,9 @@ import { cn } from "../lib/utils";
 
 /** agents 动作按钮文案/样式（离线可用性由 actions[].offline_ok 驱动，引擎是事实源）。 */
 const ACTION_META: Record<string, { label: string; icon: typeof Download; className: string }> = {
-  install: { label: "安装", icon: Download, className: "border-indigo-200 text-indigo-600 hover:bg-indigo-50" },
-  upgrade: { label: "升级", icon: RefreshCw, className: "border-amber-200 text-amber-700 hover:bg-amber-50" },
-  uninstall: { label: "卸载", icon: Trash2, className: "border-red-200 text-red-600 hover:bg-red-50" },
+  install: { label: "安装", icon: Download, className: "border-primary/30 text-primary hover:bg-primary/10" },
+  upgrade: { label: "升级", icon: RefreshCw, className: "border-warning/30 text-warning hover:bg-warning/10" },
+  uninstall: { label: "卸载", icon: Trash2, className: "border-destructive/30 text-destructive hover:bg-destructive/10" },
 };
 
 /** provider 分类徽标（observed.classified 四桶 → 只读徽标）。 */
@@ -27,19 +27,19 @@ const PROVIDER_BUCKETS = ["managed", "deprecated", "system_only", "unsupported"]
 type ProviderBucket = (typeof PROVIDER_BUCKETS)[number];
 
 const PROVIDER_CLASS_META: Record<ProviderBucket, { label: string; className: string }> = {
-  managed: { label: "由此工具管理", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
-  deprecated: { label: "已弃用", className: "border-amber-200 bg-amber-50 text-amber-700" },
-  system_only: { label: "仅系统检测到", className: "border-sky-200 bg-sky-50 text-sky-700" },
-  unsupported: { label: "不可接管", className: "border-zinc-200 bg-zinc-100 text-zinc-500" },
+  managed: { label: "由此工具管理", className: "border-success/30 bg-success/10 text-success" },
+  deprecated: { label: "已弃用", className: "border-warning/30 bg-warning/10 text-warning" },
+  system_only: { label: "仅系统检测到", className: "border-info/30 bg-info/10 text-info" },
+  unsupported: { label: "不可接管", className: "border bg-muted text-muted-foreground" },
 };
 
 function PolicyChip({ label, value }: { label: string; value: boolean | undefined }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-xs text-slate-600">
+    <span className="inline-flex items-center gap-1 rounded border bg-card px-1.5 py-0.5 text-xs text-muted-foreground">
       {value ? (
-        <Check className="h-3 w-3 text-emerald-600" aria-hidden />
+        <Check className="h-3 w-3 text-success" aria-hidden />
       ) : (
-        <X className="h-3 w-3 text-slate-300" aria-hidden />
+        <X className="h-3 w-3 text-muted-foreground" aria-hidden />
       )}
       {label}
     </span>
@@ -95,14 +95,14 @@ function AgentCard({
   };
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+    <section className="rounded-lg border bg-card p-5 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="text-base font-semibold text-slate-800">
+          <h3 className="text-base font-semibold text-foreground">
             {name}
-            <span className="ml-2 font-mono text-xs font-normal text-slate-400">{spec.bin}</span>
+            <span className="ml-2 font-mono text-xs font-normal text-muted-foreground">{spec.bin}</span>
           </h3>
-          <p className="mt-0.5 text-sm text-slate-500">当前版本:{version}</p>
+          <p className="mt-0.5 text-sm text-muted-foreground">当前版本:{version}</p>
         </div>
         <div className="flex flex-col items-end gap-1.5">
           <StateBadge state={element.state} />
@@ -124,7 +124,7 @@ function AgentCard({
         )}
         {(observed.providers ?? []).length > 0 && (
           <span
-            className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-slate-600"
+            className="rounded border bg-muted px-1.5 py-0.5 text-muted-foreground"
             title="系统实际检测到的安装来源"
           >
             当前安装方式 {(observed.providers ?? []).join("、")}
@@ -135,8 +135,8 @@ function AgentCard({
             className={cn(
               "rounded border px-1.5 py-0.5",
               observed.preferred_active
-                ? "border-indigo-200 bg-indigo-50 text-indigo-700"
-                : "border-slate-200 bg-slate-50 text-slate-500",
+                ? "border-primary/30 bg-primary/10 text-primary"
+                : "border bg-muted text-muted-foreground",
             )}
             title={observed.preferred_active ? "当前安装与默认安装方式一致" : "当前安装与默认安装方式不一致"}
           >
@@ -146,16 +146,16 @@ function AgentCard({
         )}
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-3">
+      <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t pt-3">
         <PolicyChip label="自动安装" value={policy.auto_install} />
         <PolicyChip label="自动更新" value={policy.auto_update} />
-        <span className="ml-auto text-xs text-slate-500">
+        <span className="ml-auto text-xs text-muted-foreground">
           {policy.enabled === false ? "已停用" : "已启用"}
         </span>
       </div>
 
       {element.state === "unmanaged-detected" && (
-        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <div className="mt-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
           <p>
             检测到用 {(observed.classified?.unsupported ?? [])[0] ?? "其它渠道"} 安装的版本，该来源不在本工具管理范围内。
             当前不支持自动迁移安装方式；如需由本工具管理，请先自行卸载现有安装，再使用「安装」。
@@ -163,14 +163,14 @@ function AgentCard({
         </div>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+      <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
         <button type="button" onClick={onEdit} className="rounded border px-2.5 py-1 text-xs">编辑命令</button>
-        <button type="button" onClick={onRemove} className="rounded border border-red-200 px-2.5 py-1 text-xs text-red-600">移除管理</button>
+        <button type="button" onClick={onRemove} className="rounded border border-destructive/30 px-2.5 py-1 text-xs text-destructive">移除管理</button>
         <button
           type="button"
           data-testid={`manage-skills-${element.id}`}
           onClick={() => onManageSkills?.(element.id.replace(/^agents:/, ""))}
-          className="inline-flex items-center gap-1 rounded border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs text-indigo-700 hover:bg-indigo-100"
+          className="inline-flex items-center gap-1 rounded border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs text-primary hover:bg-primary/15"
         >
           <Sparkles className="h-3 w-3" aria-hidden /> 管理技能
         </button>
@@ -195,7 +195,7 @@ function AgentCard({
               onClick={() => runAction(action)}
               className={cn(
                 "inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs",
-                disabled ? "cursor-not-allowed border-slate-200 text-slate-300" : meta.className,
+                disabled ? "cursor-not-allowed border text-muted-foreground" : meta.className,
               )}
             >
               <Icon className="h-3 w-3" aria-hidden />
@@ -206,7 +206,7 @@ function AgentCard({
         <button
           type="button"
           onClick={() => setExpanded((value) => !value)}
-          className="ml-auto inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800"
+          className="ml-auto inline-flex items-center gap-1 text-xs text-primary hover:text-primary"
           aria-expanded={expanded}
         >
           {expanded ? <ChevronDown className="h-3.5 w-3.5" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden />}
@@ -248,7 +248,7 @@ export default function AgentsPage({
     <div className="space-y-4">
       <PageHeader title="助手" description="各 AI 助手的安装渠道、版本与官方最新版对比。内置助手安装/升级点击后直接执行；自定义定义的安装/升级与卸载需先确认。" />
       {query.data.errors.length > 0 && <ErrorPanel title="agents:status 错误" errors={query.data.errors} />}
-      <div className="flex justify-end"><button type="button" onClick={() => setForm("new")} className="rounded-md bg-indigo-600 px-4 py-2 text-sm text-white">添加助手</button></div>
+      <div className="flex justify-end"><button type="button" onClick={() => setForm("new")} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">添加助手</button></div>
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {elements.map((element) => (
           <AgentCard

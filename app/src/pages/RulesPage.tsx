@@ -48,15 +48,15 @@ export default function RulesPage() {
           data-testid="apply-rules-button"
           disabled={directApply.executing}
           onClick={() => void directApply.apply({ command: "rules:apply", label: "同步规则" })}
-          className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+          className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
         >
           <PlayCircle className="h-4 w-4" aria-hidden /> 立即同步
         </button>
       </div>
 
-      <section className="overflow-x-auto rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="overflow-x-auto rounded-lg border bg-card p-5 shadow-sm">
         <table className="w-full text-left text-sm"><thead>
-            <tr className="border-b border-slate-200 text-xs text-slate-500">
+            <tr className="border-b text-xs text-muted-foreground">
               <th className="py-2 pr-4 font-medium">名称</th>
               <th className="py-2 pr-4 font-medium">来源定义</th>
               <th className="py-2 pr-4 font-medium">写入位置</th>
@@ -106,22 +106,22 @@ function TargetRow({
   const hasSync = element.actions.some((action) => action.id === "sync");
   return (
     <>
-      <tr className={cn("border-b border-slate-100", !isExpanded && "last:border-0")}>
+      <tr className={cn("border-b", !isExpanded && "last:border-0")}>
         <td className="py-2 pr-4">
           <button
             type="button"
             onClick={onToggle}
             aria-expanded={isExpanded}
-            className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-800"
+            className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary"
           >
             {isExpanded ? <ChevronDown className="h-3 w-3" aria-hidden /> : <ChevronRight className="h-3 w-3" aria-hidden />}
             {name}
           </button>
         </td>
-        <td className="py-2 pr-4 font-mono text-xs break-all text-slate-500">
+        <td className="py-2 pr-4 font-mono text-xs break-all text-muted-foreground">
           {spec.source_keys && spec.source_keys.length > 0 ? spec.source_keys.join(" + ") : "—"}
         </td>
-        <td className="py-2 pr-4 font-mono text-xs break-all text-slate-600">{observed.target ?? spec.target ?? "—"}</td>
+        <td className="py-2 pr-4 font-mono text-xs break-all text-muted-foreground">{observed.target ?? spec.target ?? "—"}</td>
         <td className="py-2 pr-4">
           <StateBadge state={element.state} />
         </td>
@@ -131,7 +131,7 @@ function TargetRow({
               type="button"
               data-testid={`action-sync-${element.id}`}
               onClick={onSync}
-              className="rounded border border-indigo-200 px-2.5 py-1 text-xs text-indigo-700 hover:bg-indigo-50"
+              className="rounded border border-primary/30 px-2.5 py-1 text-xs text-primary hover:bg-primary/10"
             >
               同步此目标
             </button>
@@ -139,7 +139,7 @@ function TargetRow({
         </td>
       </tr>
       {isExpanded && (
-        <tr className="border-b border-slate-100 last:border-0">
+        <tr className="border-b last:border-0">
           <td colSpan={5} className="py-3">
             <DriftExplanationPanel element={element} />
           </td>

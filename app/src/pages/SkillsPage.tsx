@@ -214,7 +214,7 @@ export default function SkillsPage({
 
       {query.data.errors.length > 0 && <ErrorPanel title="skills:status 错误" errors={query.data.errors} />}
 
-      <div role="tablist" aria-label="技能管理视图" className="flex border-b border-slate-200">
+      <div role="tablist" aria-label="技能管理视图" className="flex border-b">
         {(["collections", "skills"] as const).map((tab) => (
           <button
             key={tab}
@@ -230,10 +230,10 @@ export default function SkillsPage({
             onClick={() => setActiveTab(tab)}
             onKeyDown={(e) => handleTabKeyDown(e, tab)}
             className={cn(
-              "border-b-2 px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500",
+              "border-b-2 px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring",
               activeTab === tab
-                ? "border-indigo-600 font-semibold text-indigo-600"
-                : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700",
+                ? "border-primary font-semibold text-primary"
+                : "border-transparent text-muted-foreground hover:border-input hover:text-foreground",
             )}
           >
             {tab === "collections" ? "集合列表" : "全部技能"}
@@ -244,12 +244,12 @@ export default function SkillsPage({
       {activeTab === "collections" && (
         <div id="panel-collections" role="tabpanel" aria-labelledby="tab-collections" className="space-y-4">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs text-slate-500">共 {collections.length} 个技能集合</span>
+            <span className="text-xs text-muted-foreground">共 {collections.length} 个技能集合</span>
             <button
               type="button"
               data-testid="add-collection-button"
               onClick={() => setShowAddForm(true)}
-              className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
             >
               <Plus className="h-4 w-4" aria-hidden /> {OVERLAY_COPY.addCollection}
             </button>
@@ -278,16 +278,16 @@ export default function SkillsPage({
 
       {activeTab === "skills" && (
         <div id="panel-skills" role="tabpanel" aria-labelledby="tab-skills" className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-4 shadow-sm">
             <div className="flex flex-wrap items-center gap-4">
-              <label className="flex items-center gap-2 text-xs font-medium text-slate-700">
+              <label className="flex items-center gap-2 text-xs font-medium text-foreground">
                 <span>集合筛选:</span>
                 <select
                   aria-label="集合筛选"
                   data-testid="filter-collection-select"
                   value={collectionFilter}
                   onChange={(e) => setCollectionFilter(e.target.value)}
-                  className="rounded border border-slate-300 bg-white px-2 py-1 font-mono text-xs text-slate-700"
+                  className="rounded border border-input bg-card px-2 py-1 font-mono text-xs text-foreground"
                 >
                   <option value="all">全部集合 ({collections.length})</option>
                   {collections.map((col) => (
@@ -298,14 +298,14 @@ export default function SkillsPage({
                 </select>
               </label>
 
-              <label className="flex items-center gap-2 text-xs font-medium text-slate-700">
+              <label className="flex items-center gap-2 text-xs font-medium text-foreground">
                 <span>助手筛选:</span>
                 <select
                   aria-label="助手筛选"
                   data-testid="filter-agent-select"
                   value={agentFilter}
                   onChange={(e) => setAgentFilter(e.target.value)}
-                  className="rounded border border-slate-300 bg-white px-2 py-1 font-mono text-xs text-slate-700"
+                  className="rounded border border-input bg-card px-2 py-1 font-mono text-xs text-foreground"
                 >
                   <option value="all">全部助手 ({agentColumns.length})</option>
                   {agentColumns.map((ag) => (
@@ -324,20 +324,20 @@ export default function SkillsPage({
                     setAgentFilter("all");
                     onResetAgent?.();
                   }}
-                  className="inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                  className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
                 >
                   <ArrowLeft className="h-3 w-3" aria-hidden /> 清除筛选
                 </button>
               )}
             </div>
 
-            <span className="text-xs text-slate-500">当前展示 {assignmentRows.length} 条分配记录</span>
+            <span className="text-xs text-muted-foreground">当前展示 {assignmentRows.length} 条分配记录</span>
           </div>
 
-          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="overflow-x-auto rounded-lg border bg-card p-5 shadow-sm">
             <table className="w-full text-left text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-xs text-slate-500">
+                <tr className="border-b text-xs text-muted-foreground">
                   <th className="py-2.5 pr-4 font-medium">技能名</th>
                   <th className="py-2.5 pr-4 font-medium">所属集合</th>
                   <th className="py-2.5 pr-4 font-medium">助手</th>
@@ -363,7 +363,7 @@ export default function SkillsPage({
                 ))}
               </tbody>
             </table>
-            {assignmentRows.length === 0 && <p data-testid="skills-empty-state" className="py-8 text-center text-sm text-slate-400">{emptyAssignmentsText}</p>}
+            {assignmentRows.length === 0 && <p data-testid="skills-empty-state" className="py-8 text-center text-sm text-muted-foreground">{emptyAssignmentsText}</p>}
           </div>
         </div>
       )}

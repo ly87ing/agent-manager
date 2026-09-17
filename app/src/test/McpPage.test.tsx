@@ -96,7 +96,7 @@ describe("McpPage 服务库 + 助手中的服务", () => {
     expect(await screen.findByTitle("codex: managed-ok")).toHaveTextContent("已配置");
     const drifted = screen.getByTitle("claude-code: drifted");
     expect(drifted).toHaveTextContent("不一致");
-    expect(drifted.className).toContain("amber");
+    expect(drifted.className).toContain("warning");
     expect(screen.getByTitle("claude-code: leftover")).toHaveTextContent("残留");
     expect(screen.getByTitle("codex: not-materialized")).toHaveTextContent("尚未生成");
 

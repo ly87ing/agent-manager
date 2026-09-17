@@ -13,13 +13,13 @@ export function ElementTable({
   renderActions?: (element: EngineElement) => ReactNode;
 }) {
   if (elements.length === 0) {
-    return <p className="py-4 text-center text-sm text-slate-400">无元素</p>;
+    return <p className="py-4 text-center text-sm text-muted-foreground">无元素</p>;
   }
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-left text-sm">
         <thead>
-          <tr className="border-b border-slate-200 text-xs text-slate-500">
+          <tr className="border-b text-xs text-muted-foreground">
             <th className="py-2 pr-4 font-medium">元素</th>
             <th className="py-2 pr-4 font-medium">同步状态</th>
             <th className="py-2 font-medium">最新版本</th>
@@ -28,8 +28,8 @@ export function ElementTable({
         </thead>
         <tbody>
           {elements.map((element) => (
-            <tr key={element.id} className="border-b border-slate-100 last:border-0">
-              <td className="py-2 pr-4 font-mono text-xs text-slate-700">{element.id}</td>
+            <tr key={element.id} className="border-b last:border-0">
+              <td className="py-2 pr-4 font-mono text-xs text-foreground">{element.id}</td>
               <td className="py-2 pr-4">
                 <StateBadge state={element.state} />
               </td>

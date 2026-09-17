@@ -9,13 +9,13 @@ const stateBadgeVariants = cva(
   {
     variants: {
       state: {
-        "managed-ok": "border-emerald-200 bg-emerald-50 text-emerald-700",
-        drifted: "border-amber-200 bg-amber-50 text-amber-700",
-        missing: "border-red-200 bg-red-50 text-red-700",
-        "not-materialized": "border-slate-200 bg-slate-50 text-slate-600",
-        "unmanaged-detected": "border-sky-200 bg-sky-50 text-sky-700",
-        unsupported: "border-zinc-200 bg-zinc-100 text-zinc-500",
-        disabled: "border-zinc-200 bg-zinc-50 text-zinc-400",
+        "managed-ok": "border-success/30 bg-success/10 text-success",
+        drifted: "border-warning/30 bg-warning/10 text-warning",
+        missing: "border-destructive/30 bg-destructive/10 text-destructive",
+        "not-materialized": "border bg-muted text-muted-foreground",
+        "unmanaged-detected": "border-info/30 bg-info/10 text-info",
+        unsupported: "border bg-muted text-muted-foreground",
+        disabled: "border bg-muted text-muted-foreground",
       },
     },
   },

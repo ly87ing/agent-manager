@@ -7,26 +7,26 @@ import { cn } from "../lib/utils";
  */
 
 const MCP_CELL_STYLE: Record<string, string> = {
-  "managed-ok": "border-emerald-200 bg-emerald-50 text-emerald-700",
-  drifted: "border-amber-200 bg-amber-50 text-amber-700",
-  missing: "border-slate-200 bg-slate-50 text-slate-500",
-  absent: "border-slate-200 bg-slate-50 text-slate-500",
-  "agent-disabled": "border-slate-200 bg-slate-50 text-slate-400",
-  "not-materialized": "border-zinc-200 bg-zinc-100 text-zinc-500",
-  leftover: "border-orange-200 bg-orange-50 text-orange-700",
-  "probe-error": "border-zinc-300 bg-zinc-100 text-zinc-500",
+  "managed-ok": "border-success/30 bg-success/10 text-success",
+  drifted: "border-warning/30 bg-warning/10 text-warning",
+  missing: "border bg-muted text-muted-foreground",
+  absent: "border bg-muted text-muted-foreground",
+  "agent-disabled": "border bg-muted text-muted-foreground",
+  "not-materialized": "border bg-muted text-muted-foreground",
+  leftover: "border-orange/30 bg-orange/10 text-orange",
+  "probe-error": "border-input bg-muted text-muted-foreground",
 };
 
 const SKILL_CELL_STYLE: Record<string, string> = {
-  linked: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  "missing-link": "border-slate-200 bg-slate-50 text-slate-500",
-  "dead-link": "border-red-200 bg-red-50 text-red-700",
-  drifted: "border-amber-200 bg-amber-50 text-amber-700",
-  "extra-link": "border-sky-200 bg-sky-50 text-sky-700",
-  disabled: "border-zinc-200 bg-zinc-50 text-zinc-400",
+  linked: "border-success/30 bg-success/10 text-success",
+  "missing-link": "border bg-muted text-muted-foreground",
+  "dead-link": "border-destructive/30 bg-destructive/10 text-destructive",
+  drifted: "border-warning/30 bg-warning/10 text-warning",
+  "extra-link": "border-info/30 bg-info/10 text-info",
+  disabled: "border bg-muted text-muted-foreground",
 };
 
-const FALLBACK_STYLE = "border-slate-200 bg-slate-50 text-slate-500";
+const FALLBACK_STYLE = "border bg-muted text-muted-foreground";
 
 export function MatrixCell({
   state,

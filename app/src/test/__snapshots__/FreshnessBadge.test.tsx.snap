@@ -6,13 +6,13 @@ exports[`FreshnessBadge 五态 > current：渲染绿色「已是最新」 1`] = 
     class="inline-flex flex-col items-start gap-0.5"
   >
     <span
-      class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap border-emerald-200 bg-emerald-50 text-emerald-700"
+      class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap border-success/30 bg-success/10 text-success"
       title="状态: current · 检查方式: npm-view · 上次检查: 2026/9/5 10:00:00"
     >
       已是最新
     </span>
     <span
-      class="text-xs text-slate-400"
+      class="text-xs text-muted-foreground"
       data-testid="freshness-cache-age"
     >
       2 分钟前

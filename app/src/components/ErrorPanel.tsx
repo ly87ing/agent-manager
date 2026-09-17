@@ -23,13 +23,13 @@ export function ErrorPanel({
       role="alert"
       className={cn(
         "rounded-lg border p-4",
-        variant === "error" ? "border-red-200 bg-red-50" : "border-amber-200 bg-amber-50",
+        variant === "error" ? "border-destructive/30 bg-destructive/10" : "border-warning/30 bg-warning/10",
         className,
       )}
     >
       <div className="mb-2 flex items-center gap-2">
-        <Icon className={cn("h-4 w-4", variant === "error" ? "text-red-600" : "text-amber-600")} aria-hidden />
-        <h3 className={cn("text-sm font-semibold", variant === "error" ? "text-red-800" : "text-amber-800")}>
+        <Icon className={cn("h-4 w-4", variant === "error" ? "text-destructive" : "text-warning")} aria-hidden />
+        <h3 className={cn("text-sm font-semibold", variant === "error" ? "text-destructive" : "text-warning")}>
           {title}（{errors.length}）
         </h3>
       </div>
@@ -39,13 +39,13 @@ export function ErrorPanel({
             <code
               className={cn(
                 "mr-2 rounded px-1.5 py-0.5 font-mono text-xs",
-                variant === "error" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700",
+                variant === "error" ? "bg-destructive/15 text-destructive" : "bg-warning/15 text-warning",
               )}
             >
               {diag.code}
             </code>
-            {diag.element && <span className="mr-2 font-mono text-xs text-slate-500">{diag.element}</span>}
-            <span className="text-slate-700">{diag.message}</span>
+            {diag.element && <span className="mr-2 font-mono text-xs text-muted-foreground">{diag.element}</span>}
+            <span className="text-foreground">{diag.message}</span>
           </li>
         ))}
       </ul>

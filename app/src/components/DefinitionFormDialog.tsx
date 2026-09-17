@@ -72,10 +72,10 @@ function DialogShell({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-xl"
+        className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-card shadow-xl"
       >
         <div className="flex-1 overflow-y-auto p-5">{children}</div>
-        <div className="flex flex-shrink-0 justify-end gap-2 border-t border-slate-200 bg-white px-5 py-3">
+        <div className="flex flex-shrink-0 justify-end gap-2 border-t bg-card px-5 py-3">
           {footer}
         </div>
       </section>
@@ -287,70 +287,70 @@ function AgentForm({
       onClose={onClose}
       footer={
         <>
-          <button type="button" onClick={onClose} className="rounded border border-slate-300 px-4 py-2 text-sm hover:bg-slate-50">取消</button>
-          <button type="button" onClick={submit} className="rounded bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700">保存定义</button>
+          <button type="button" onClick={onClose} className="rounded border border-input px-4 py-2 text-sm hover:bg-accent">取消</button>
+          <button type="button" onClick={submit} className="rounded bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90">保存定义</button>
         </>
       }
     >
-        <h3 className="text-base font-semibold text-slate-900">{title}</h3>
-        <p className="mt-1 text-sm text-slate-500">配置生命周期命令。保存定义只保存配置，不会执行安装或升级。</p>
+        <h3 className="text-base font-semibold text-foreground">{title}</h3>
+        <p className="mt-1 text-sm text-muted-foreground">配置生命周期命令。保存定义只保存配置，不会执行安装或升级。</p>
 
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <label className="block text-sm font-medium text-slate-700">唯一名称<input autoFocus disabled={!!initial} value={name} onChange={(e) => { setName(e.target.value); markDirty("name"); }} placeholder="如 claude-code" className="mt-1 w-full rounded border border-slate-300 p-2 text-sm disabled:bg-slate-100" /></label>
-          <label className="block text-sm font-medium text-slate-700">显示名称（可选）<input value={displayName} onChange={(e) => { setDisplayName(e.target.value); markDirty("displayName"); }} placeholder="如 Claude Code" className="mt-1 w-full rounded border border-slate-300 p-2 text-sm" /></label>
+          <label className="block text-sm font-medium text-foreground">唯一名称<input autoFocus disabled={!!initial} value={name} onChange={(e) => { setName(e.target.value); markDirty("name"); }} placeholder="如 claude-code" className="mt-1 w-full rounded border border-input p-2 text-sm disabled:bg-muted" /></label>
+          <label className="block text-sm font-medium text-foreground">显示名称（可选）<input value={displayName} onChange={(e) => { setDisplayName(e.target.value); markDirty("displayName"); }} placeholder="如 Claude Code" className="mt-1 w-full rounded border border-input p-2 text-sm" /></label>
         </div>
 
         <div className="mt-3">
-          <label className="block text-sm font-medium text-slate-700">命令名或可执行文件路径<input value={bin} onChange={(e) => { setBin(e.target.value); markDirty("bin"); }} placeholder="如 claude" className="mt-1 w-full rounded border border-slate-300 p-2 text-sm font-mono" /></label>
+          <label className="block text-sm font-medium text-foreground">命令名或可执行文件路径<input value={bin} onChange={(e) => { setBin(e.target.value); markDirty("bin"); }} placeholder="如 claude" className="mt-1 w-full rounded border border-input p-2 text-sm font-mono" /></label>
         </div>
 
-        <div className="mt-3 flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 font-mono">
+        <div className="mt-3 flex items-center justify-between rounded-lg border bg-muted px-3 py-2 text-xs text-muted-foreground font-mono">
           <span>版本检查：{bin.trim() || "YOUR_COMMAND"} --version</span>
-          <span className="text-slate-400 font-sans">执行环境：系统默认 Shell</span>
+          <span className="text-muted-foreground font-sans">执行环境：系统默认 Shell</span>
         </div>
 
         <div className="mt-4 space-y-3">
-          <label className="block text-sm font-medium text-slate-700">安装命令（新增时必填）<textarea rows={2} value={installCmd} onChange={(e) => handleInstallChange(e.target.value)} placeholder="YOUR_INSTALL_COMMAND" className="mt-1 w-full rounded border border-slate-300 p-2 font-mono text-xs font-normal" spellCheck={false} /></label>
-          <label className="block text-sm font-medium text-slate-700">升级命令（新增时必填）<textarea rows={2} value={upgradeCmd} onChange={(e) => handleUpgradeChange(e.target.value)} placeholder="YOUR_UPGRADE_COMMAND" className="mt-1 w-full rounded border border-slate-300 p-2 font-mono text-xs font-normal" spellCheck={false} /></label>
+          <label className="block text-sm font-medium text-foreground">安装命令（新增时必填）<textarea rows={2} value={installCmd} onChange={(e) => handleInstallChange(e.target.value)} placeholder="YOUR_INSTALL_COMMAND" className="mt-1 w-full rounded border border-input p-2 font-mono text-xs font-normal" spellCheck={false} /></label>
+          <label className="block text-sm font-medium text-foreground">升级命令（新增时必填）<textarea rows={2} value={upgradeCmd} onChange={(e) => handleUpgradeChange(e.target.value)} placeholder="YOUR_UPGRADE_COMMAND" className="mt-1 w-full rounded border border-input p-2 font-mono text-xs font-normal" spellCheck={false} /></label>
           <div>
-            <label className="block text-sm font-medium text-slate-700">卸载命令（可选）<textarea rows={2} value={uninstallCmd} onChange={(e) => handleUninstallChange(e.target.value)} placeholder="可选；未填则表示不支持自动卸载" className="mt-1 w-full rounded border border-slate-300 p-2 font-mono text-xs font-normal" spellCheck={false} /></label>
-            {!uninstallCmd.trim() && <p className="mt-1 text-xs text-amber-600">未填写卸载命令（不支持自动卸载）。</p>}
+            <label className="block text-sm font-medium text-foreground">卸载命令（可选）<textarea rows={2} value={uninstallCmd} onChange={(e) => handleUninstallChange(e.target.value)} placeholder="可选；未填则表示不支持自动卸载" className="mt-1 w-full rounded border border-input p-2 font-mono text-xs font-normal" spellCheck={false} /></label>
+            {!uninstallCmd.trim() && <p className="mt-1 text-xs text-warning">未填写卸载命令（不支持自动卸载）。</p>}
           </div>
         </div>
 
-        <details className="mt-4 rounded-lg border border-slate-200 p-3">
-          <summary className="cursor-pointer text-xs font-medium text-slate-600 select-none">高级设置</summary>
+        <details className="mt-4 rounded-lg border p-3">
+          <summary className="cursor-pointer text-xs font-medium text-muted-foreground select-none">高级设置</summary>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="block text-xs font-medium text-slate-600">
+            <div className="block text-xs font-medium text-muted-foreground">
               管理渠道
               {channelNames.length > 1 ? (
-                <select aria-label="管理渠道" value={channel} onChange={(e) => handleChannelChange(e.target.value)} className="mt-1 w-full rounded border border-slate-300 bg-white p-1.5 text-xs font-normal">
+                <select aria-label="管理渠道" value={channel} onChange={(e) => handleChannelChange(e.target.value)} className="mt-1 w-full rounded border border-input bg-card p-1.5 text-xs font-normal">
                   {channelNames.map((ch) => <option key={ch} value={ch}>{ch}</option>)}
                 </select>
               ) : (
-                <p className="mt-1 rounded border border-slate-200 bg-slate-50 p-1.5 font-mono text-xs font-normal text-slate-700">{channel}</p>
+                <p className="mt-1 rounded border bg-muted p-1.5 font-mono text-xs font-normal text-foreground">{channel}</p>
               )}
             </div>
-            <label className="block text-xs font-medium text-slate-600">
+            <label className="block text-xs font-medium text-muted-foreground">
               适用系统
-              <select value={platformScope} onChange={(e) => handlePlatformChange(e.target.value as PlatformScope)} className="mt-1 w-full rounded border border-slate-300 bg-white p-1.5 text-xs">
+              <select value={platformScope} onChange={(e) => handlePlatformChange(e.target.value as PlatformScope)} className="mt-1 w-full rounded border border-input bg-card p-1.5 text-xs">
                 {PLATFORM_OPTIONS.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
               </select>
             </label>
           </div>
           <div className="mt-3 space-y-3">
-            <label className="block text-xs font-medium text-slate-600">
+            <label className="block text-xs font-medium text-muted-foreground">
               默认安装方式
-              <input value={preferredProvider} onChange={(e) => { setPreferredProvider(e.target.value); markDirty("preferredProvider"); }} className="mt-1 w-full rounded border border-slate-300 p-1.5 text-xs font-mono" />
+              <input value={preferredProvider} onChange={(e) => { setPreferredProvider(e.target.value); markDirty("preferredProvider"); }} className="mt-1 w-full rounded border border-input p-1.5 text-xs font-mono" />
             </label>
-            <label className="block text-xs font-medium text-slate-600">
+            <label className="block text-xs font-medium text-muted-foreground">
               其他设置（JSON）
-              <textarea rows={3} value={advancedJson} onChange={(e) => { setAdvancedJson(e.target.value); markDirty("advancedJson"); }} placeholder="{}" className="mt-1 w-full rounded border border-slate-300 p-1.5 font-mono text-xs" spellCheck={false} />
+              <textarea rows={3} value={advancedJson} onChange={(e) => { setAdvancedJson(e.target.value); markDirty("advancedJson"); }} placeholder="{}" className="mt-1 w-full rounded border border-input p-1.5 font-mono text-xs" spellCheck={false} />
             </label>
           </div>
         </details>
 
-        {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
+        {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
     </DialogShell>
   );
 }

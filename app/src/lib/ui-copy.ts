@@ -71,18 +71,18 @@ export const SKILL_CELL_COPY: Record<string, string> = {
 export const RISK_ORDER: RiskLevel[] = ["read", "write-local", "exec-local", "network", "install-remove"];
 
 export const RISK_COPY: Record<RiskLevel, { label: string; className: string }> = {
-  read: { label: "只读检查", className: "border-slate-200 bg-slate-50 text-slate-500" },
-  "write-local": { label: "修改配置文件", className: "border-sky-200 bg-sky-50 text-sky-700" },
-  "exec-local": { label: "运行本地命令", className: "border-amber-200 bg-amber-50 text-amber-700" },
-  network: { label: "需要联网", className: "border-orange-200 bg-orange-50 text-orange-700" },
-  "install-remove": { label: "安装/卸载软件", className: "border-red-200 bg-red-50 text-red-700" },
+  read: { label: "只读检查", className: "border bg-muted text-muted-foreground" },
+  "write-local": { label: "修改配置文件", className: "border-info/30 bg-info/10 text-info" },
+  "exec-local": { label: "运行本地命令", className: "border-warning/30 bg-warning/10 text-warning" },
+  network: { label: "需要联网", className: "border-orange/30 bg-orange/10 text-orange" },
+  "install-remove": { label: "安装/卸载软件", className: "border-destructive/30 bg-destructive/10 text-destructive" },
 };
 
 // ---------- 个性化配置来源 ----------
 
 export const POLICY_LAYER_COPY: Record<PolicyLayerName, { label: string; className: string }> = {
-  builtin: { label: "内置默认值", className: "border-slate-200 bg-slate-100 text-slate-500" },
-  sqlite: { label: "本地数据库", className: "border-violet-200 bg-violet-50 text-violet-700" },
+  builtin: { label: "内置默认值", className: "border bg-muted text-muted-foreground" },
+  sqlite: { label: "本地数据库", className: "border-violet/30 bg-violet/10 text-violet" },
 };
 
 // ---------- 通用动作/状态短语 ----------

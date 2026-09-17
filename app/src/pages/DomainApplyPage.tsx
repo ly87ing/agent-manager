@@ -70,12 +70,12 @@ export default function DomainApplyPage({
               args: ["--only", element.id, "--allow-takeover"],
             })
           }
-          className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-40"
+          className="inline-flex items-center gap-1 rounded border border-warning/40 bg-warning/10 px-2.5 py-1 text-xs font-medium text-warning hover:bg-warning/15 disabled:opacity-40"
         >
           接管原内容
         </button>
         {wholeFile && (
-          <p data-testid={`takeover-hint-${element.id}`} className="text-[11px] leading-snug text-amber-700">
+          <p data-testid={`takeover-hint-${element.id}`} className="text-[11px] leading-snug text-warning">
             整文件替换：现有内容将被整体替换，先把需要保留的 hook 并入来源定义。
           </p>
         )}
@@ -95,13 +95,13 @@ export default function DomainApplyPage({
           data-testid={`apply-${domain}-button`}
           disabled={disabled}
           onClick={() => void directApply.apply({ command: `${domain}:apply`, label: `同步${title}` })}
-          className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+          className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
         >
           <PlayCircle className="h-4 w-4" aria-hidden /> 立即同步
         </button>
       </div>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="rounded-lg border bg-card p-5 shadow-sm">
         <ElementTable
           elements={elements}
           renderActions={

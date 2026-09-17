@@ -21,21 +21,21 @@ function shortDigest(value: string | null | undefined): string {
 
 /** 单元格状态文案与样式；异常态优先于 assigned/enabled，enabled=true 不能掩盖异常。 */
 const CELL_VIEW: Record<string, { label: string; className: string }> = {
-  drifted: { label: "不一致", className: "border-amber-200 bg-amber-50 text-amber-700" },
-  leftover: { label: "残留", className: "border-purple-200 bg-purple-50 text-purple-700" },
-  "probe-error": { label: "检查出错", className: "border-rose-200 bg-rose-50 text-rose-700" },
-  "managed-ok": { label: "已配置", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
-  "not-materialized": { label: "尚未生成", className: "border-slate-200 bg-slate-50 text-slate-600" },
-  missing: { label: "未配置", className: "border-slate-200 bg-slate-50 text-slate-500" },
-  absent: { label: "未配置", className: "border-slate-200 bg-slate-50 text-slate-500" },
-  "agent-disabled": { label: "未配置", className: "border-slate-200 bg-slate-50 text-slate-500" },
-  disabled: { label: "已停用", className: "border-zinc-200 bg-zinc-100 text-zinc-600" },
+  drifted: { label: "不一致", className: "border-warning/30 bg-warning/10 text-warning" },
+  leftover: { label: "残留", className: "border-violet/30 bg-violet/10 text-violet" },
+  "probe-error": { label: "检查出错", className: "border-rose/30 bg-rose/10 text-rose" },
+  "managed-ok": { label: "已配置", className: "border-success/30 bg-success/10 text-success" },
+  "not-materialized": { label: "尚未生成", className: "border bg-muted text-muted-foreground" },
+  missing: { label: "未配置", className: "border bg-muted text-muted-foreground" },
+  absent: { label: "未配置", className: "border bg-muted text-muted-foreground" },
+  "agent-disabled": { label: "未配置", className: "border bg-muted text-muted-foreground" },
+  disabled: { label: "已停用", className: "border bg-muted text-muted-foreground" },
 };
 
 export function McpCellStatusBadge({ agent, cell }: { agent: string; cell: McpAgentCellView | null }) {
   let label = "未配置";
   let state = "未配置";
-  let className = "border-slate-200 bg-slate-50 text-slate-400";
+  let className = "border bg-muted text-muted-foreground";
 
   if (cell) {
     state = cell.state;
@@ -45,13 +45,13 @@ export function McpCellStatusBadge({ agent, cell }: { agent: string; cell: McpAg
       className = view.className;
     } else if (cell.assigned && cell.enabled === false) {
       label = "已停用";
-      className = "border-zinc-200 bg-zinc-100 text-zinc-600";
+      className = "border bg-muted text-muted-foreground";
     } else if (cell.assigned && cell.enabled) {
       label = "已配置";
-      className = "border-emerald-200 bg-emerald-50 text-emerald-700";
+      className = "border-success/30 bg-success/10 text-success";
     } else {
       label = "未配置";
-      className = "border-slate-200 bg-slate-50 text-slate-500";
+      className = "border bg-muted text-muted-foreground";
     }
   }
 
@@ -66,11 +66,11 @@ export function McpCellStatusBadge({ agent, cell }: { agent: string; cell: McpAg
 }
 
 const MCP_ACTIONS: { action: string; label: string; className: string }[] = [
-  { action: "add", label: "添加", className: "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100" },
-  { action: "update", label: "更新", className: "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100" },
-  { action: "enable", label: "启用", className: "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" },
-  { action: "disable", label: "禁用", className: "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" },
-  { action: "remove", label: "从此助手删除", className: "border-red-200 bg-white text-red-600 hover:bg-red-50" },
+  { action: "add", label: "添加", className: "border-primary/30 bg-primary/10 text-primary hover:bg-primary/15" },
+  { action: "update", label: "更新", className: "border-primary/30 bg-primary/10 text-primary hover:bg-primary/15" },
+  { action: "enable", label: "启用", className: "border-success/30 bg-success/10 text-success hover:bg-success/15" },
+  { action: "disable", label: "禁用", className: "border-warning/30 bg-warning/10 text-warning hover:bg-warning/15" },
+  { action: "remove", label: "从此助手删除", className: "border-destructive/30 bg-card text-destructive hover:bg-destructive/10" },
 ];
 
 /**
@@ -99,29 +99,29 @@ export function McpAssignmentRow({
     cell !== null && actions.length === 0 && (cell.blocked_reason ?? "").includes(MCP_UNMANAGED_CONFLICT_MARKER);
 
   return (
-    <tr className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50">
+    <tr className="border-b last:border-0 hover:bg-muted/50">
       <td className="py-2.5 pr-4">
         <button
           type="button"
           onClick={() => onOpenDetail(element.id)}
-          className="font-mono text-xs font-medium break-all text-indigo-600 hover:text-indigo-800"
+          className="font-mono text-xs font-medium break-all text-primary hover:text-primary"
           title="查看服务定义详情"
         >
           {element.id}
         </button>
       </td>
-      <td className="py-2.5 pr-4 font-mono text-xs text-slate-700">{agent}</td>
-      <td className="py-2.5 pr-4 font-mono text-xs whitespace-nowrap text-slate-500" title={cell?.available_version ?? undefined}>
+      <td className="py-2.5 pr-4 font-mono text-xs text-foreground">{agent}</td>
+      <td className="py-2.5 pr-4 font-mono text-xs whitespace-nowrap text-muted-foreground" title={cell?.available_version ?? undefined}>
         {cell?.available_version ? shortDigest(cell.available_version) : "未获取"}
       </td>
-      <td className="py-2.5 pr-4 font-mono text-xs whitespace-nowrap text-slate-600" title={cell?.version ?? undefined}>
+      <td className="py-2.5 pr-4 font-mono text-xs whitespace-nowrap text-muted-foreground" title={cell?.version ?? undefined}>
         {cell ? (cell.version ? shortDigest(cell.version) : cell.assigned ? "已配置" : "未配置") : "—"}
       </td>
       <td className="py-2.5 pr-4">
         <div className="flex flex-col gap-1">
           <McpCellStatusBadge agent={agent} cell={cell} />
           {cell?.blocked_reason && (
-            <span className="text-xs text-amber-600" title={cell.blocked_reason}>
+            <span className="text-xs text-warning" title={cell.blocked_reason}>
               {cell.blocked_reason}
             </span>
           )}
@@ -146,13 +146,13 @@ export function McpAssignmentRow({
               data-testid={`takeover-${element.id}-${agent}`}
               title="以本工具的标准配置替换目标文件中的同名外部条目（其余条目与字段保持不变）"
               onClick={() => onTakeover(element, agent, cell.assigned ? "update" : "add")}
-              className="rounded border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 hover:bg-amber-100"
+              className="rounded border border-warning/40 bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning hover:bg-warning/15"
             >
               接管原条目
             </button>
           )}
-          {cell && actions.length === 0 && !takeoverBlocked && <span className="text-xs text-slate-400">当前引擎未提供操作</span>}
-          {!cell && <span className="text-xs text-slate-400">未配置</span>}
+          {cell && actions.length === 0 && !takeoverBlocked && <span className="text-xs text-muted-foreground">当前引擎未提供操作</span>}
+          {!cell && <span className="text-xs text-muted-foreground">未配置</span>}
         </div>
       </td>
     </tr>

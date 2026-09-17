@@ -12,8 +12,8 @@ import { engineKeys } from "../lib/queries";
 import { cn, formatCheckedAt } from "../lib/utils";
 
 const STEP_STATUS = {
-  ok: { icon: CheckCircle2, className: "text-emerald-600" },
-  failed: { icon: XCircle, className: "text-red-600" },
+  ok: { icon: CheckCircle2, className: "text-success" },
+  failed: { icon: XCircle, className: "text-destructive" },
 } as const;
 
 function ExecutionCard({ record, onSelectRun }: { record: ExecutionRecord; onSelectRun: (runId: string) => void }) {
@@ -23,28 +23,28 @@ function ExecutionCard({ record, onSelectRun }: { record: ExecutionRecord; onSel
   const lock = record.envelope?.lock;
 
   return (
-    <section data-testid={`execution-${record.runId}`} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+    <section data-testid={`execution-${record.runId}`} className="rounded-lg border bg-card p-4 shadow-sm">
       <div className="flex flex-wrap items-center gap-2">
         {running ? (
-          <Loader2 className="h-4 w-4 animate-spin text-indigo-600" aria-hidden />
+          <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden />
         ) : record.status === "ok" ? (
-          <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden />
+          <CheckCircle2 className="h-4 w-4 text-success" aria-hidden />
         ) : (
-          <XCircle className="h-4 w-4 text-red-600" aria-hidden />
+          <XCircle className="h-4 w-4 text-destructive" aria-hidden />
         )}
-        <span className="text-sm font-medium text-slate-800">{record.label}</span>
-        <code className="font-mono text-xs text-slate-400">{record.command}</code>
-        <code className="font-mono text-xs text-indigo-500">{record.runId}</code>
+        <span className="text-sm font-medium text-foreground">{record.label}</span>
+        <code className="font-mono text-xs text-muted-foreground">{record.command}</code>
+        <code className="font-mono text-xs text-primary">{record.runId}</code>
         <span
           data-testid={`execution-status-${record.runId}`}
           className={cn(
             "rounded-full px-2 py-0.5 text-xs font-medium",
-            running ? "bg-indigo-100 text-indigo-700" : record.status === "ok" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700",
+            running ? "bg-primary/15 text-primary" : record.status === "ok" ? "bg-success/15 text-success" : "bg-destructive/15 text-destructive",
           )}
         >
           {running ? "正在执行…" : record.status === "ok" ? "成功" : "失败"}
         </span>
-        <span className="ml-auto flex items-center gap-2 text-xs text-slate-400">
+        <span className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
           {lock && (
             <span className="inline-flex items-center gap-1" title="任务互斥：运行期间另一个任务无法同时执行（引擎锁 envelope.lock）">
               <Lock className="h-3 w-3" aria-hidden />
@@ -56,13 +56,13 @@ function ExecutionCard({ record, onSelectRun }: { record: ExecutionRecord; onSel
         <button
           type="button"
           onClick={() => onSelectRun(record.runId)}
-          className="rounded border border-indigo-200 px-2 py-0.5 text-xs text-indigo-600 hover:bg-indigo-50"
+          className="rounded border border-primary/30 px-2 py-0.5 text-xs text-primary hover:bg-primary/10"
         >
           详情
         </button>
       </div>
 
-      {record.bridgeError && <p className="mt-2 text-xs text-red-600">桥错误:{record.bridgeError}</p>}
+      {record.bridgeError && <p className="mt-2 text-xs text-destructive">桥错误:{record.bridgeError}</p>}
       {record.envelope && record.envelope.errors.length > 0 && (
         <div className="mt-2">
           <ErrorPanel title="引擎错误" errors={record.envelope.errors} />
@@ -70,15 +70,15 @@ function ExecutionCard({ record, onSelectRun }: { record: ExecutionRecord; onSel
       )}
 
       {steps.length > 0 && (
-        <ul className="mt-3 space-y-1 border-t border-slate-100 pt-2">
+        <ul className="mt-3 space-y-1 border-t pt-2">
           {steps.map((step) => {
             const meta = step.ok ? STEP_STATUS.ok : STEP_STATUS.failed;
             const Icon = meta.icon;
             return (
               <li key={step.name} className="flex items-center gap-2 text-xs">
                 <Icon className={cn("h-3.5 w-3.5", meta.className)} aria-hidden />
-                <span className="font-mono text-slate-700">{step.name}</span>
-                <span className="text-slate-400">exit {step.exit_code}</span>
+                <span className="font-mono text-foreground">{step.name}</span>
+                <span className="text-muted-foreground">exit {step.exit_code}</span>
               </li>
             );
           })}
@@ -91,13 +91,13 @@ function OperationDetail({ data }: { data: RunDetailData }) {
   return (
     <div className="space-y-2">
       {data.operations.map((operation) => (
-        <article key={operation.id} className="rounded border border-slate-200 p-3">
+        <article key={operation.id} className="rounded border p-3">
           <div className="flex flex-wrap items-center gap-3 text-xs">
-            <code className="font-mono font-medium text-slate-700">{operation.operation_type}</code>
-            <span className="text-slate-600">{operation.target ?? "—"}</span>
-            <time className="text-slate-400">{formatCheckedAt(operation.created_at)}</time>
+            <code className="font-mono font-medium text-foreground">{operation.operation_type}</code>
+            <span className="text-muted-foreground">{operation.target ?? "—"}</span>
+            <time className="text-muted-foreground">{formatCheckedAt(operation.created_at)}</time>
           </div>
-          <pre className="mt-2 overflow-x-auto rounded bg-slate-50 p-2 font-mono text-xs text-slate-600">
+          <pre className="mt-2 overflow-x-auto rounded bg-muted p-2 font-mono text-xs text-muted-foreground">
             {JSON.stringify(operation.detail, null, 2)}
           </pre>
         </article>
@@ -163,9 +163,9 @@ export default function RunsPage() {
           data-testid="clear-runs-button"
           onClick={() => setShowClearConfirm(true)}
           disabled={isClearing}
-          className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50"
         >
-          <Trash2 className="h-3.5 w-3.5 text-slate-500" aria-hidden />
+          <Trash2 className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
           清空任务记录
         </button>
       </div>
@@ -173,7 +173,7 @@ export default function RunsPage() {
       {clearStatus && (
         <p
           role={clearStatus.startsWith("清空任务记录失败") ? "alert" : "status"}
-          className={cn("text-xs", clearStatus.startsWith("清空任务记录失败") ? "text-red-600" : "text-emerald-700")}
+          className={cn("text-xs", clearStatus.startsWith("清空任务记录失败") ? "text-destructive" : "text-success")}
         >
           {clearStatus}
         </p>
@@ -181,7 +181,7 @@ export default function RunsPage() {
 
       {executions.length > 0 && (
         <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-slate-700">本次会话的任务</h3>
+          <h3 className="text-sm font-semibold text-foreground">本次会话的任务</h3>
           {executions.map((record) => (
             <ExecutionCard key={record.runId} record={record} onSelectRun={setSelectedRun} />
           ))}
@@ -189,30 +189,30 @@ export default function RunsPage() {
       )}
 
       {selectedRun && (
-        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="rounded-lg border bg-card p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-slate-700">
-              操作详情 <code className="font-mono text-xs text-indigo-500">{selectedRun}</code>
+            <h3 className="text-sm font-semibold text-foreground">
+              操作详情 <code className="font-mono text-xs text-primary">{selectedRun}</code>
             </h3>
-            <button type="button" onClick={() => setSelectedRun(null)} className="text-xs text-slate-400 hover:text-slate-600">
+            <button type="button" onClick={() => setSelectedRun(null)} className="text-xs text-muted-foreground hover:text-muted-foreground">
               关闭
             </button>
           </div>
           {detailQuery.isPending ? (
-            <p className="text-xs text-slate-400">详情加载中…</p>
+            <p className="text-xs text-muted-foreground">详情加载中…</p>
           ) : detailQuery.isError ? (
-            <p className="text-xs text-red-600">操作详情读取失败</p>
+            <p className="text-xs text-destructive">操作详情读取失败</p>
           ) : (
             <OperationDetail data={detailQuery.data.data} />
           )}
         </section>
       )}
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 className="mb-3 text-sm font-semibold text-slate-700">历史任务</h3>
+      <section className="rounded-lg border bg-card p-5 shadow-sm">
+        <h3 className="mb-3 text-sm font-semibold text-foreground">历史任务</h3>
         <table className="w-full text-left text-sm">
           <thead>
-            <tr className="border-b border-slate-200 text-xs text-slate-500">
+            <tr className="border-b text-xs text-muted-foreground">
               <th className="py-2 pr-4 font-medium">运行 ID</th>
               <th className="py-2 pr-4 font-medium">操作数</th>
               <th className="py-2 pr-4 font-medium">最后时间</th>
@@ -221,12 +221,12 @@ export default function RunsPage() {
           </thead>
           <tbody>
             {runs.map((run) => (
-              <tr key={run.run_id} data-testid={`run-row-${run.run_id}`} className="border-b border-slate-100 last:border-0">
-                <td className="py-2 pr-4 font-mono text-xs text-slate-700">{run.run_id}</td>
-                <td className="py-2 pr-4 text-xs text-slate-500">{run.operations}</td>
-                <td className="py-2 pr-4 text-xs text-slate-500">{formatCheckedAt(run.last_at)}</td>
+              <tr key={run.run_id} data-testid={`run-row-${run.run_id}`} className="border-b last:border-0">
+                <td className="py-2 pr-4 font-mono text-xs text-foreground">{run.run_id}</td>
+                <td className="py-2 pr-4 text-xs text-muted-foreground">{run.operations}</td>
+                <td className="py-2 pr-4 text-xs text-muted-foreground">{formatCheckedAt(run.last_at)}</td>
                 <td className="py-2">
-                  <button type="button" onClick={() => setSelectedRun(run.run_id)} className="rounded border border-indigo-200 px-2 py-0.5 text-xs text-indigo-600 hover:bg-indigo-50">
+                  <button type="button" onClick={() => setSelectedRun(run.run_id)} className="rounded border border-primary/30 px-2 py-0.5 text-xs text-primary hover:bg-primary/10">
                     详情
                   </button>
                 </td>
@@ -234,7 +234,7 @@ export default function RunsPage() {
             ))}
           </tbody>
         </table>
-        {runs.length === 0 && <p className="py-4 text-center text-sm text-slate-400">还没有任务记录</p>}
+        {runs.length === 0 && <p className="py-4 text-center text-sm text-muted-foreground">还没有任务记录</p>}
       </section>
 
       {showClearConfirm && (

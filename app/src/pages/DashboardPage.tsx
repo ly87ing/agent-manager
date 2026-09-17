@@ -64,16 +64,16 @@ export function aggregateFreshness(elements: EngineElement[]): FreshnessAggregat
 }
 
 const AUDIT_STATUS_META: Record<AuditData["status"], { label: string; icon: typeof CheckCircle2; className: string }> = {
-  healthy: { label: "健康", icon: CheckCircle2, className: "text-emerald-600" },
-  warning: { label: "存在警告", icon: AlertTriangle, className: "text-amber-600" },
-  error: { label: "存在错误", icon: XCircle, className: "text-red-600" },
+  healthy: { label: "健康", icon: CheckCircle2, className: "text-success" },
+  warning: { label: "存在警告", icon: AlertTriangle, className: "text-warning" },
+  error: { label: "存在错误", icon: XCircle, className: "text-destructive" },
 };
 
 const AUDIT_ENTRY_META: Record<AuditEntryStatus, { label: string; className: string }> = {
-  ok: { label: "正常", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
-  notice: { label: "提示", className: "border-sky-200 bg-sky-50 text-sky-700" },
-  warning: { label: "警告", className: "border-amber-200 bg-amber-50 text-amber-700" },
-  error: { label: "错误", className: "border-red-200 bg-red-50 text-red-700" },
+  ok: { label: "正常", className: "border-success/30 bg-success/10 text-success" },
+  notice: { label: "提示", className: "border-info/30 bg-info/10 text-info" },
+  warning: { label: "警告", className: "border-warning/30 bg-warning/10 text-warning" },
+  error: { label: "错误", className: "border-destructive/30 bg-destructive/10 text-destructive" },
 };
 
 function AuditEntryBadge({ status }: { status: AuditEntryStatus }) {
@@ -87,8 +87,8 @@ function AuditEntryBadge({ status }: { status: AuditEntryStatus }) {
 
 function Card({ title, children, testId }: { title: string; children: React.ReactNode; testId?: string }) {
   return (
-    <section data-testid={testId} className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-      <h3 className="mb-3 text-sm font-semibold text-slate-700">{title}</h3>
+    <section data-testid={testId} className="rounded-lg border bg-card p-5 shadow-sm">
+      <h3 className="mb-3 text-sm font-semibold text-foreground">{title}</h3>
       {children}
     </section>
   );
@@ -110,7 +110,7 @@ export default function DashboardPage() {
 
   if (auditQuery.isPending) {
     return (
-      <div className="flex items-center gap-2 py-20 text-sm text-slate-400">
+      <div className="flex items-center gap-2 py-20 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
         正在读取引擎状态…
       </div>
@@ -155,7 +155,7 @@ export default function DashboardPage() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold tracking-tight">总览</h2>
-          <p className="mt-1 text-xs text-slate-400">
+          <p className="mt-1 text-xs text-muted-foreground">
             运行 {audit.run_id} · 版本 {versionLabel}
           </p>
         </div>
@@ -166,10 +166,10 @@ export default function DashboardPage() {
             disabled={refreshMutation.isPending || offline}
             onClick={() => refreshMutation.mutate()}
             className={cn(
-              "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white transition-colors",
+              "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-primary-foreground transition-colors",
               refreshMutation.isPending || offline
-                ? "cursor-not-allowed bg-slate-300"
-                : "bg-indigo-600 hover:bg-indigo-700",
+                ? "cursor-not-allowed bg-muted text-muted-foreground"
+                : "bg-primary hover:bg-primary/90",
             )}
           >
             {refreshMutation.isPending ? (
@@ -179,7 +179,7 @@ export default function DashboardPage() {
             )}
             检查更新
           </button>
-          {offline && <p className="text-xs text-amber-600">离线模式下不可用（需要联网检查）</p>}
+          {offline && <p className="text-xs text-warning">离线模式下不可用（需要联网检查）</p>}
         </div>
       </div>
 
@@ -194,7 +194,7 @@ export default function DashboardPage() {
             <StatusIcon className={cn("h-8 w-8", statusMeta.className)} aria-hidden />
             <div>
               <p className={cn("text-lg font-semibold", statusMeta.className)}>{statusMeta.label}</p>
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-muted-foreground">
                 错误 {auditData.summary.errors} · 警告 {auditData.summary.warnings}
               </p>
             </div>
@@ -211,8 +211,8 @@ export default function DashboardPage() {
               ] as const
             ).map(([key, label]) => (
               <li key={key} className="flex items-center justify-between">
-                <span className="text-slate-600">{label}</span>
-                <span data-testid={`warning-count-${key}`} className="font-mono text-slate-800">
+                <span className="text-muted-foreground">{label}</span>
+                <span data-testid={`warning-count-${key}`} className="font-mono text-foreground">
                   {auditData.summary.warning_categories[key]}
                 </span>
               </li>
@@ -222,12 +222,12 @@ export default function DashboardPage() {
       </div>
 
       <div>
-        <h3 className="mb-3 text-sm font-semibold text-slate-700">最新版本检查（只读本地记录，不联网）</h3>
+        <h3 className="mb-3 text-sm font-semibold text-foreground">最新版本检查（只读本地记录，不联网）</h3>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {freshnessCards.map((card) => (
             <Card key={card.key} title={card.label} testId={`freshness-card-${card.key}`}>
               {card.query.isError ? (
-                <p className="text-sm text-red-600">加载失败：{engineErrorMessage(card.query.error)}</p>
+                <p className="text-sm text-destructive">加载失败：{engineErrorMessage(card.query.error)}</p>
               ) : (
                 <>
                   <ul className="space-y-1.5 text-sm">
@@ -240,13 +240,13 @@ export default function DashboardPage() {
                       ] as const
                     ).map(([state, label]) => (
                       <li key={state} className="flex items-center justify-between">
-                        <span className="text-slate-600">{label}</span>
+                        <span className="text-muted-foreground">{label}</span>
                         <span
                           data-testid={`freshness-count-${card.key}-${state}`}
                           className={cn(
                             "font-mono",
-                            state === "behind" && card.aggregate.behind > 0 ? "font-semibold text-amber-600" : "text-slate-800",
-                            state === "unknown" && card.aggregate.unknown > 0 ? "font-semibold text-slate-500" : "",
+                            state === "behind" && card.aggregate.behind > 0 ? "font-semibold text-warning" : "text-foreground",
+                            state === "unknown" && card.aggregate.unknown > 0 ? "font-semibold text-muted-foreground" : "",
                           )}
                         >
                           {card.aggregate[state]}
@@ -254,7 +254,7 @@ export default function DashboardPage() {
                       </li>
                     ))}
                   </ul>
-                  <p className="mt-3 flex items-center gap-1 border-t border-slate-100 pt-2 text-xs text-slate-400">
+                  <p className="mt-3 flex items-center gap-1 border-t pt-2 text-xs text-muted-foreground">
                     <Info className="h-3 w-3" aria-hidden />
                     上次检查：{formatCheckedAt(card.aggregate.lastCheckedAt)}
                   </p>
@@ -272,15 +272,15 @@ export default function DashboardPage() {
       )}
 
       <div className="space-y-4">
-        <h3 className="text-sm font-semibold text-slate-700">体检明细</h3>
+        <h3 className="text-sm font-semibold text-foreground">体检明细</h3>
         {Object.entries(auditData.sections).map(([section, entries]) => (
           <Card key={section} title={SECTION_LABELS[section] ?? section} testId={`audit-section-${section}`}>
             <ul className="space-y-1.5">
               {entries.map((entry) => (
                 <li key={entry.name} className="flex min-w-0 items-baseline gap-3 text-sm">
                   <AuditEntryBadge status={entry.status} />
-                  <span className="min-w-0 [overflow-wrap:anywhere] font-medium text-slate-700">{entry.name}</span>
-                  <span className="min-w-0 [overflow-wrap:anywhere] text-slate-500">{entry.message}</span>
+                  <span className="min-w-0 [overflow-wrap:anywhere] font-medium text-foreground">{entry.name}</span>
+                  <span className="min-w-0 [overflow-wrap:anywhere] text-muted-foreground">{entry.message}</span>
                 </li>
               ))}
             </ul>

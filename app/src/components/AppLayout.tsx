@@ -22,9 +22,9 @@ export function AppLayout({
   children: ReactNode;
 }) {
   return (
-    <div className="flex h-screen bg-slate-50 text-slate-900">
-      <aside className="flex w-56 shrink-0 flex-col border-r border-slate-200 bg-white">
-        <div className="border-b border-slate-100 px-5 py-4">
+    <div className="flex h-screen bg-background text-foreground">
+      <aside className="flex w-56 shrink-0 flex-col border-r bg-card">
+        <div className="border-b px-5 py-4">
           <h1 className="text-base font-semibold tracking-tight">Agent Manager</h1>
         </div>
         <nav className="flex-1 space-y-0.5 overflow-y-auto p-2">
@@ -39,7 +39,7 @@ export function AppLayout({
                 aria-current={isActive ? "page" : undefined}
                 className={cn(
                   "flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors",
-                  isActive ? "bg-indigo-50 font-medium text-indigo-700" : "text-slate-600 hover:bg-slate-100",
+                  isActive ? "bg-primary/10 font-medium text-primary" : "text-muted-foreground hover:bg-accent",
                 )}
               >
                 <Icon className="h-4 w-4 shrink-0" aria-hidden />

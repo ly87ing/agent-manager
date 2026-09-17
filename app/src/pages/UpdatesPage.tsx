@@ -152,7 +152,7 @@ export default function UpdatesPage() {
       {offline && (
         <div
           role="status"
-          className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800"
+          className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-4 py-2 text-sm text-warning"
         >
           <WifiOff className="h-4 w-4 shrink-0" aria-hidden />
           离线模式：显示的是上次检查的结果（只读），检查更新已禁用。
@@ -176,8 +176,8 @@ export default function UpdatesPage() {
           disabled={behindElements.length === 0 || anyApplyInFlight}
           onClick={runUpdateAll}
           className={cn(
-            "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white transition-colors",
-            behindElements.length === 0 || anyApplyInFlight ? "cursor-not-allowed bg-slate-300" : "bg-emerald-600 hover:bg-emerald-700",
+            "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-primary-foreground transition-colors",
+            behindElements.length === 0 || anyApplyInFlight ? "cursor-not-allowed bg-muted text-muted-foreground" : "bg-success hover:bg-success/90",
           )}
         >
           <PlayCircle className="h-4 w-4" aria-hidden />
@@ -189,8 +189,8 @@ export default function UpdatesPage() {
           disabled={refreshAll.isPending || offline}
           onClick={() => refreshAll.mutate(undefined)}
           className={cn(
-            "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white transition-colors",
-            refreshAll.isPending || offline ? "cursor-not-allowed bg-slate-300" : "bg-indigo-600 hover:bg-indigo-700",
+            "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-primary-foreground transition-colors",
+            refreshAll.isPending || offline ? "cursor-not-allowed bg-muted text-muted-foreground" : "bg-primary hover:bg-primary/90",
           )}
         >
           {refreshAll.isPending ? (
@@ -202,10 +202,10 @@ export default function UpdatesPage() {
         </button>
       </div>
 
-      <section className="overflow-x-auto rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="overflow-x-auto rounded-lg border bg-card p-5 shadow-sm">
         <table className="w-full text-left text-sm">
           <thead>
-            <tr className="border-b border-slate-200 text-xs text-slate-500">
+            <tr className="border-b text-xs text-muted-foreground">
               <th className="py-2 pr-4 font-medium">元素</th>
               <th className="py-2 pr-4 font-medium">当前 → 最新</th>
               <th className="py-2 pr-4 font-medium">状态</th>
@@ -220,22 +220,22 @@ export default function UpdatesPage() {
               const stale = isCacheStale(element.freshness.cache_age_sec);
               const rowPending = refreshOne.isPending && pendingRowId === element.id;
               return (
-                <tr key={element.id} data-testid={`update-row-${element.id}`} className="border-b border-slate-100 last:border-0">
-                  <td className="py-2 pr-4 font-mono text-xs text-slate-700">{element.id}</td>
-                  <td className="py-2 pr-4 font-mono text-xs text-slate-600">
+                <tr key={element.id} data-testid={`update-row-${element.id}`} className="border-b last:border-0">
+                  <td className="py-2 pr-4 font-mono text-xs text-foreground">{element.id}</td>
+                  <td className="py-2 pr-4 font-mono text-xs text-muted-foreground">
                     {shortenVersion(element.freshness.current)} → {shortenVersion(element.freshness.upstream)}
                   </td>
                   <td className="py-2 pr-4">
                     <FreshnessBadge freshness={element.freshness} />
                   </td>
-                  <td className="py-2 pr-4 text-xs text-slate-500">{formatCheckedAt(element.freshness.checked_at)}</td>
+                  <td className="py-2 pr-4 text-xs text-muted-foreground">{formatCheckedAt(element.freshness.checked_at)}</td>
                   <td
-                    className={cn("py-2 pr-4 text-xs", stale ? "text-amber-600" : "text-slate-500")}
+                    className={cn("py-2 pr-4 text-xs", stale ? "text-warning" : "text-muted-foreground")}
                     title={stale ? "检查结果较旧（超过 24 小时），建议重新检查" : undefined}
                   >
                     {element.freshness.cache_age_sec !== null ? humanizeCacheAge(element.freshness.cache_age_sec) : "—"}
                   </td>
-                  <td className="py-2 pr-4 font-mono text-xs text-slate-500">{element.freshness.probe ?? "—"}</td>
+                  <td className="py-2 pr-4 font-mono text-xs text-muted-foreground">{element.freshness.probe ?? "—"}</td>
                   <td className="py-2">
                     <div className="flex items-center gap-1.5">
                       <button
@@ -249,8 +249,8 @@ export default function UpdatesPage() {
                         className={cn(
                           "rounded border px-2 py-1 text-xs",
                           offline || refreshOne.isPending
-                            ? "cursor-not-allowed border-slate-200 text-slate-300"
-                            : "border-indigo-200 text-indigo-600 hover:bg-indigo-50",
+                            ? "cursor-not-allowed border text-muted-foreground"
+                            : "border-primary/30 text-primary hover:bg-primary/10",
                         )}
                       >
                         {rowPending ? "检查中…" : "重新检查"}
@@ -269,8 +269,8 @@ export default function UpdatesPage() {
                           className={cn(
                             "rounded border px-2 py-1 text-xs",
                             anyApplyInFlight || (offline && element.domain === "agents")
-                              ? "cursor-not-allowed border-slate-200 text-slate-300"
-                              : "border-emerald-200 text-emerald-700 hover:bg-emerald-50",
+                              ? "cursor-not-allowed border text-muted-foreground"
+                              : "border-success/30 text-success hover:bg-success/10",
                           )}
                         >
                           更新此项
@@ -283,7 +283,7 @@ export default function UpdatesPage() {
             })}
           </tbody>
         </table>
-        {elements.length === 0 && <p className="py-4 text-center text-sm text-slate-400">没有需要检查更新的组件</p>}
+        {elements.length === 0 && <p className="py-4 text-center text-sm text-muted-foreground">没有需要检查更新的组件</p>}
       </section>
     </div>
   );

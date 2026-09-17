@@ -17,19 +17,19 @@ function EnvResolutionList({ element }: { element: EngineElement }) {
   const env = observed.env ?? {};
   const entries = Object.entries(env);
   if (entries.length === 0) {
-    return <p className="text-xs text-slate-400">不需要环境变量。</p>;
+    return <p className="text-xs text-muted-foreground">不需要环境变量。</p>;
   }
   return (
     <ul className="space-y-1">
       {entries.map(([name, resolution]) => (
         <li key={name} className="flex items-center gap-2 text-xs">
           {resolution.resolved ? (
-            <Check className="h-3.5 w-3.5 text-emerald-600" aria-label="已配置" />
+            <Check className="h-3.5 w-3.5 text-success" aria-label="已配置" />
           ) : (
-            <X className="h-3.5 w-3.5 text-red-500" aria-label="未配置" />
+            <X className="h-3.5 w-3.5 text-destructive" aria-label="未配置" />
           )}
-          <span className="font-mono text-slate-700">{name}</span>
-          <span className={resolution.resolved ? "text-emerald-600" : "text-red-600"}>
+          <span className="font-mono text-foreground">{name}</span>
+          <span className={resolution.resolved ? "text-success" : "text-destructive"}>
             {resolution.resolved ? "已配置" : "未配置（运行时会显示变量名）"}
           </span>
         </li>
@@ -44,19 +44,19 @@ function HeaderResolutionList({ element }: { element: EngineElement }) {
   const headers = observed.headers ?? {};
   const entries = Object.entries(headers);
   if (entries.length === 0) {
-    return <p className="text-xs text-slate-400">不需要请求头。</p>;
+    return <p className="text-xs text-muted-foreground">不需要请求头。</p>;
   }
   return (
     <ul className="space-y-1">
       {entries.map(([name, resolution]) => (
         <li key={name} className="flex items-center gap-2 text-xs" data-testid="mcp-header-resolution">
           {resolution.resolved ? (
-            <Check className="h-3.5 w-3.5 text-emerald-600" aria-label="已配置" />
+            <Check className="h-3.5 w-3.5 text-success" aria-label="已配置" />
           ) : (
-            <X className="h-3.5 w-3.5 text-red-500" aria-label="未配置" />
+            <X className="h-3.5 w-3.5 text-destructive" aria-label="未配置" />
           )}
-          <span className="font-mono text-slate-700">{name}</span>
-          <span className={resolution.resolved ? "text-emerald-600" : "text-red-600"}>
+          <span className="font-mono text-foreground">{name}</span>
+          <span className={resolution.resolved ? "text-success" : "text-destructive"}>
             {resolution.resolved ? "已配置" : "未配置（运行时会显示变量名）"}
           </span>
         </li>
@@ -72,24 +72,24 @@ export function McpServerDetail({ element }: { element: EngineElement }) {
   const extraArgs = spec.extra_args_by_agent ?? {};
   const isRemote = typeof spec.url === "string" && spec.url.length > 0;
   return (
-    <section data-testid={`mcp-detail-${element.id}`} className="space-y-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+    <section data-testid={`mcp-detail-${element.id}`} className="space-y-4 rounded-lg border bg-card p-5 shadow-sm">
       {isRemote ? (
         <div>
-          <h4 className="mb-1 text-xs font-semibold text-slate-500">服务地址（远程 HTTP）</h4>
+          <h4 className="mb-1 text-xs font-semibold text-muted-foreground">服务地址（远程 HTTP）</h4>
           <code className="block overflow-x-auto rounded bg-slate-900 px-3 py-2 font-mono text-xs break-all text-slate-100">
             {spec.url}
           </code>
-          <p className="mt-1 text-xs text-slate-400">
+          <p className="mt-1 text-xs text-muted-foreground">
             应用到: {spec.agents === null || spec.agents === undefined ? "全部助手" : spec.agents.join(", ")}
           </p>
         </div>
       ) : (
         <div>
-          <h4 className="mb-1 text-xs font-semibold text-slate-500">启动命令</h4>
+          <h4 className="mb-1 text-xs font-semibold text-muted-foreground">启动命令</h4>
           <code className="block overflow-x-auto rounded bg-slate-900 px-3 py-2 font-mono text-xs break-all text-slate-100">
             {spec.command} {(spec.args ?? []).join(" ")}
           </code>
-          <p className="mt-1 text-xs text-slate-400">
+          <p className="mt-1 text-xs text-muted-foreground">
             启动超时 {spec.startup_timeout_sec ?? "—"} 秒 · 应用到:{" "}
             {spec.agents === null || spec.agents === undefined ? "全部助手" : spec.agents.join(", ")}
           </p>
@@ -98,12 +98,12 @@ export function McpServerDetail({ element }: { element: EngineElement }) {
 
       {Object.keys(extraArgs).length > 0 && (
         <div>
-          <h4 className="mb-1 text-xs font-semibold text-slate-500">各助手附加参数</h4>
+          <h4 className="mb-1 text-xs font-semibold text-muted-foreground">各助手附加参数</h4>
           <ul className="space-y-1">
             {Object.entries(extraArgs).map(([agent, args]) => (
               <li key={agent} className="text-xs">
-                <span className="font-mono text-slate-500">{agent}: </span>
-                <code className="font-mono text-slate-700">{args.join(" ")}</code>
+                <span className="font-mono text-muted-foreground">{agent}: </span>
+                <code className="font-mono text-foreground">{args.join(" ")}</code>
               </li>
             ))}
           </ul>
@@ -112,24 +112,24 @@ export function McpServerDetail({ element }: { element: EngineElement }) {
 
       {isRemote ? (
         <div>
-          <h4 className="mb-1 text-xs font-semibold text-slate-500">请求头变量（只显示是否已配置，永不显示值）</h4>
+          <h4 className="mb-1 text-xs font-semibold text-muted-foreground">请求头变量（只显示是否已配置，永不显示值）</h4>
           <HeaderResolutionList element={element} />
         </div>
       ) : (
         <div>
-          <h4 className="mb-1 text-xs font-semibold text-slate-500">密钥变量（只显示是否已配置，永不显示值）</h4>
+          <h4 className="mb-1 text-xs font-semibold text-muted-foreground">密钥变量（只显示是否已配置，永不显示值）</h4>
           <EnvResolutionList element={element} />
         </div>
       )}
 
       <div>
-        <h4 className="mb-1 text-xs font-semibold text-slate-500">写入位置</h4>
+        <h4 className="mb-1 text-xs font-semibold text-muted-foreground">写入位置</h4>
         <ul className="space-y-1">
           {Object.entries(cells).map(([agent, cell]) => (
             <li key={agent} className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="font-mono text-slate-500">{agent}</span>
-              <code className="font-mono break-all text-slate-700">{cell.target ?? "—"}</code>
-              <span className={cell.target_exists ? "text-emerald-600" : "text-slate-400"}>
+              <span className="font-mono text-muted-foreground">{agent}</span>
+              <code className="font-mono break-all text-foreground">{cell.target ?? "—"}</code>
+              <span className={cell.target_exists ? "text-success" : "text-muted-foreground"}>
                 {cell.target_exists ? "已存在" : "未生成"}
               </span>
             </li>
@@ -173,7 +173,7 @@ export function McpServerCard({
   return (
     <section
       data-testid={`mcp-card-${element.id}`}
-      className={cn("rounded-lg border bg-white p-5 shadow-sm", selected ? "border-indigo-300" : "border-slate-200")}
+      className={cn("rounded-lg border bg-card p-5 shadow-sm", selected ? "border-primary/40" : "border")}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -181,12 +181,12 @@ export function McpServerCard({
             type="button"
             onClick={() => onSelect(selected ? null : element.id)}
             aria-expanded={selected}
-            className="text-left font-mono text-xs font-semibold break-all text-indigo-600 hover:text-indigo-800"
+            className="text-left font-mono text-xs font-semibold break-all text-primary hover:text-primary"
             title="点击展开/收起服务详情"
           >
             {element.id}
           </button>
-          <p className="mt-1 font-mono text-xs break-all text-slate-400">
+          <p className="mt-1 font-mono text-xs break-all text-muted-foreground">
             {isRemote ? spec.url : `${spec.command ?? ""} ${(spec.args ?? []).join(" ")}`}
           </p>
         </div>
@@ -197,18 +197,18 @@ export function McpServerCard({
       </div>
 
       <div className="mt-3 flex flex-wrap gap-1.5 text-xs">
-        <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-slate-600">
+        <span className="rounded border bg-muted px-1.5 py-0.5 text-muted-foreground">
           {spec.agents === null || spec.agents === undefined ? "全部助手" : `限定 ${spec.agents.length} 个助手`}
         </span>
         {isRemote && (
-          <span className="rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-sky-700">远程 HTTP</span>
+          <span className="rounded border border-info/30 bg-info/10 px-1.5 py-0.5 text-info">远程 HTTP</span>
         )}
         <span
           className={cn(
             "rounded border px-1.5 py-0.5",
             secretEntries.length === 0 || envResolved === secretEntries.length
-              ? "border-slate-200 bg-slate-50 text-slate-600"
-              : "border-amber-200 bg-amber-50 text-amber-700",
+              ? "border bg-muted text-muted-foreground"
+              : "border-warning/30 bg-warning/10 text-warning",
           )}
         >
           {isRemote ? `请求头 ${envResolved}/${secretEntries.length} 已配置` : `密钥变量 ${envResolved}/${secretEntries.length} 已配置`}
@@ -216,17 +216,17 @@ export function McpServerCard({
       </div>
 
       {observed.blocked_reason && (
-        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <div className="mt-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
           受阻原因：{observed.blocked_reason}
         </div>
       )}
 
-      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+      <div className="mt-4 flex flex-wrap items-center gap-2 border-t pt-3">
         <button
           type="button"
           data-testid={`edit-server-${element.id}`}
           onClick={() => onEdit(element)}
-          className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50"
+          className="inline-flex items-center gap-1 rounded border bg-card px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent"
         >
           编辑定义
         </button>
@@ -235,7 +235,7 @@ export function McpServerCard({
             type="button"
             data-testid={`enable-server-${element.id}`}
             onClick={() => onAction(element, "enable")}
-            className="rounded border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs text-emerald-700 hover:bg-emerald-100"
+            className="rounded border border-success/30 bg-success/10 px-2.5 py-1 text-xs text-success hover:bg-success/15"
           >
             启用
           </button>
@@ -245,7 +245,7 @@ export function McpServerCard({
             type="button"
             data-testid={`disable-server-${element.id}`}
             onClick={() => onAction(element, "disable")}
-            className="rounded border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs text-amber-700 hover:bg-amber-100"
+            className="rounded border border-warning/30 bg-warning/10 px-2.5 py-1 text-xs text-warning hover:bg-warning/15"
           >
             停用
           </button>
@@ -255,12 +255,12 @@ export function McpServerCard({
             type="button"
             data-testid={`remove-server-${element.id}`}
             onClick={() => onAction(element, "remove")}
-            className="rounded border border-red-200 bg-white px-2.5 py-1 text-xs text-red-600 hover:bg-red-50"
+            className="rounded border border-destructive/30 bg-card px-2.5 py-1 text-xs text-destructive hover:bg-destructive/10"
           >
             删除服务
           </button>
         )}
-        {actions.length === 0 && <span className="text-xs text-slate-400">当前引擎未提供库级操作</span>}
+        {actions.length === 0 && <span className="text-xs text-muted-foreground">当前引擎未提供库级操作</span>}
       </div>
     </section>
   );

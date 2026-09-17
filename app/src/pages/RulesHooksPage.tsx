@@ -42,7 +42,7 @@ export default function RulesHooksPage() {
 
   return (
     <div className="space-y-4">
-      <div role="tablist" aria-label="规则与 Hooks" className="flex border-b border-slate-200">
+      <div role="tablist" aria-label="规则与 Hooks" className="flex border-b">
         {TABS.map((tab, idx) => {
           const isSelected = activeTab === tab.id;
           return (
@@ -60,10 +60,10 @@ export default function RulesHooksPage() {
               onClick={() => setActiveTab(tab.id)}
               onKeyDown={(e) => handleKeyDown(e, idx)}
               className={cn(
-                "border-b-2 px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2",
+                "border-b-2 px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
                 isSelected
-                  ? "border-indigo-600 font-semibold text-indigo-600"
-                  : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700",
+                  ? "border-primary font-semibold text-primary"
+                  : "border-transparent text-muted-foreground hover:border-input hover:text-foreground",
               )}
             >
               {tab.label}

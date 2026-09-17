@@ -40,38 +40,38 @@ export function DriftExplanationPanel({
   const targets = collectTargets(element);
 
   return (
-    <div data-testid="drift-panel" className="space-y-4 rounded-md border border-slate-200 bg-slate-50 p-4">
+    <div data-testid="drift-panel" className="space-y-4 rounded-md border bg-muted p-4">
       <div>
-        <h4 className="mb-1.5 text-xs font-semibold text-slate-500">目标位置</h4>
+        <h4 className="mb-1.5 text-xs font-semibold text-muted-foreground">目标位置</h4>
         {targets.length > 0 ? (
           <ul className="space-y-0.5">
             {targets.map((target) => (
-              <li key={target} className="font-mono text-xs break-all text-slate-600">
+              <li key={target} className="font-mono text-xs break-all text-muted-foreground">
                 {target}
               </li>
             ))}
           </ul>
         ) : (
-          <p className="text-xs text-slate-400">（本元素不涉及文件）</p>
+          <p className="text-xs text-muted-foreground">（本元素不涉及文件）</p>
         )}
       </div>
 
       {cellEntries.length > 0 && (
         <div>
-          <h4 className="mb-1.5 text-xs font-semibold text-slate-500">各助手状态</h4>
+          <h4 className="mb-1.5 text-xs font-semibold text-muted-foreground">各助手状态</h4>
           <table className="w-full text-left text-xs">
             <tbody>
               {cellEntries.map(([agent, cell]) => (
-                <tr key={agent} className="border-b border-slate-100 last:border-0">
-                  <td className="w-36 py-1.5 pr-3 font-mono text-slate-600">{agent}</td>
+                <tr key={agent} className="border-b last:border-0">
+                  <td className="w-36 py-1.5 pr-3 font-mono text-muted-foreground">{agent}</td>
                   <td className="py-1.5 pr-3">
                     {cellKind ? (
                       <MatrixCell state={cell.state} kind={cellKind} />
                     ) : (
-                      <span className="font-mono text-slate-600">{cell.state}</span>
+                      <span className="font-mono text-muted-foreground">{cell.state}</span>
                     )}
                   </td>
-                  <td className="py-1.5 font-mono break-all text-slate-400">
+                  <td className="py-1.5 font-mono break-all text-muted-foreground">
                     {cell.target ?? cell.link_path ?? ""}
                   </td>
                 </tr>

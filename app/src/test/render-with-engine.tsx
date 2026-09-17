@@ -6,6 +6,7 @@ import { Toaster } from "sonner";
 import { setEngineClient, type EngineRunOptions } from "../lib/engine";
 import { ExecutionProvider } from "../lib/execution";
 import { createQueryClient } from "../lib/queries";
+import { ThemeProvider } from "../lib/theme";
 import type { Envelope } from "../lib/contract";
 import { createFakeEngineClient } from "./engine-test-client";
 
@@ -31,8 +32,10 @@ export function renderWithEngine(
   const view = render(
     <QueryClientProvider client={queryClient}>
       <ExecutionProvider>
-        {ui}
-        <Toaster richColors position="top-right" />
+        <ThemeProvider>
+          {ui}
+          <Toaster richColors position="top-right" />
+        </ThemeProvider>
       </ExecutionProvider>
     </QueryClientProvider>,
   );
