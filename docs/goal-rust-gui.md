@@ -106,6 +106,13 @@ Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 必须支持新增、�
 - 未验收项如实说明：托盘点击交互、Dock Reopen、关窗驻留的真机 GUI 验收未做（避免在宿主打扰桌面；隔离验收只覆盖启动与存活）；暗色观感经 dev server 截图抽查。
 - 结论：精品化仓库内改造完成并验收；公开发布外部条件（billing、签名/公证材料、真机验收、updater 链路、tag/Release 授权）维持原状。
 
+### 2026-09-17 追加：Skills 计划外链接语义修复（`847d703` + `b313716`）
+
+- 起因（真机使用反馈）：「全部技能」矩阵中旧体系遗留链接行显示"已链接 + 计划外链接 + 添加"，语义自相矛盾，且非受管链接点「添加」必然被外部冲突保护 fail-closed 拒绝。
+- 改动：extra-link 单元格动作扩展为「纳入管理」（add）与「取消链接」（remove）；`skills:apply` 的逐 skill add/remove 支持显式 `--allow-takeover` 接管通道（仅限非受管符号链接，真实文件/目录仍 fail-closed；审计恒含 takeover 字段，对齐 MCP 先例）；status 单元格新增 `managed` 字段；Tauri 桥白名单放行该旗标；前端 extra-link 行标签改为「纳入管理/取消链接」，非受管链接先弹确认，「当前分配版本」列按 state 判定链接存在性（修掉 not-assigned 行误显"已链接"）。
+- 验证：`engine-rs` 279 项（新增 extra-link takeover 全链路正反例）、`app/src-tauri` 15 项、Vitest 303 项全部通过；typecheck/build 通过。
+- DMG（`847d703` 重建，主审独立验收）：`verify:macos` 全部通过；SHA256 `555b744ef97c85614bcdce750bdf822cf043b052a64484882427a8d9ddbe8830`。过程中发现单实例改造使验收副本在已有实例运行时秒退（存活检测误判），`b313716` 为验收脚本增加运行实例检出守卫后复验通过——该 DMG 不含 `b313716`（仅验收脚本，不影响产品代码）。
+
 ## 剩余路线图（未排期）
 
 各项均无排期、无指定负责人。
