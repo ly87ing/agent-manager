@@ -7,6 +7,7 @@
 | SQLite 核心 | 已完成：`native-manager.db`、settings、policy、runs 和读写边界 |
 | CLI / Tauri 共用库 | 已完成：两者调用同一 `engine-rs` |
 | Tauri bridge / React 基础 | 已完成：原生桥接、设置与 policy 页面、主要资源页面布局和直接 apply 交互 |
+| 精品化体验（2026-09-17） | 已完成：设计令牌与浅色/深色/跟随系统主题（同步原生标题栏）；系统托盘驻留、窗口位置尺寸记忆、单实例唤回；页面与弹窗动效、骨架屏、组件化空态；助手/技能/MCP/操作记录搜索、⌘,/⌘F 快捷键、设置入口更新提示角标。验收见 [交付回执](goal-rust-gui.md)（2026-09-17 精品化 UI 改造）；托盘点击/Dock Reopen/关窗驻留的真机 GUI 验收未做 |
 | Python 清理 | 已完成：根仓库不再依赖 Python 或 `manage.sh` |
 | Agent 原生域 | 已完成：定义、实际来源、状态、apply、跨进程锁、结果核验和操作记录 |
 | Skills 原生域 | 已完成：已接入 dispatcher；内置默认只读、写入进 SQLite；集合与单技能支持更新/启停/移除；内容快照与安全软连接；status 只读零写与 apply 排他锁/审计 |

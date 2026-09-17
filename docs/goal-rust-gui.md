@@ -96,6 +96,16 @@ Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 必须支持新增、�
 - 发布管线（`14e6790`）仅做 YAML/脚本级静态验收与正反例实测（tag 正则、版本门禁、latest.json 组装、checksums、stapler 分支），未真实执行；外部阻塞项（billing、secrets、签名/公证材料、真机验收、updater 链路）维持原状，未创建 tag 或 Release。
 - 结论：对外发布的仓库内就绪改造全部完成并验收；剩余未完成项不变——MCP 新增服务表单真实 GUI 验收与公开发布外部条件。
 
+## 交付回执（2026-09-17，精品化 UI 改造）
+
+绑定最终提交：`bcdcb6e`（2026-09-17，含 `e4debd2`/`8b4e753`/`6255aa1`/`bcdcb6e` 四个精品化提交；借鉴 cc-switch 的设计与便捷性做法）。
+
+- 改造内容：设计令牌体系（CSS 变量 + 语义色 token 全组件覆盖）与浅色/深色/跟随系统三态主题（含原生标题栏同步与首屏防闪烁）；系统托盘驻留（关窗入托盘、托盘唤回/退出、macOS Dock Reopen、退出显式摘图标）、窗口位置尺寸记忆（有意排除可见性/全屏）、单实例唤回；页面与弹窗过渡动画（prefers-reduced-motion 降级）、骨架屏加载态、组件化空态引导；助手/技能/MCP/操作记录四页搜索（与既有筛选叠加）、全局快捷键 ⌘,/⌘F、设置入口更新提示角标（启动延迟检查、按版本忽略、未配置不检查）。
+- 自动化矩阵（2026-09-17 主审复跑）：两套 `cargo fmt --check` 通过；`engine-rs` cargo test 全部通过；`app/src-tauri` 15 项通过（+4：主题解析、窗口 flags、退出分类）；Vitest 35 files / 298 tests 全部通过；`pnpm typecheck` 与 `pnpm build` 通过（一条无害的 dynamic import 提示）。
+- 最终 clean x86_64 DMG（2026-09-17 本地重建，主审独立验收）：`verify:macos` 全部通过——构建身份 commit/date 与 `bcdcb6e` 精确一致、隔离环境 5 秒存活并优雅退出（覆盖托盘启动路径）；未签名。SHA256 `29188131ae0f46c1112a8f0b12987e3da82c21bff0887ff61555a15f68a9d809`，7873725 bytes。
+- 未验收项如实说明：托盘点击交互、Dock Reopen、关窗驻留的真机 GUI 验收未做（避免在宿主打扰桌面；隔离验收只覆盖启动与存活）；暗色观感经 dev server 截图抽查。
+- 结论：精品化仓库内改造完成并验收；公开发布外部条件（billing、签名/公证材料、真机验收、updater 链路、tag/Release 授权）维持原状。
+
 ## 剩余路线图（未排期）
 
 各项均无排期、无指定负责人。

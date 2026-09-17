@@ -13,6 +13,14 @@
 - **更新检查**：探测助手、MCP 与 Skills 的上游新版本。
 - **其他**：Secrets 状态（仅显示环境变量名与是否存在，不显示值）、任务操作记录、本地诊断日志管理。
 
+## 体验
+
+- 浅色 / 深色 / 跟随系统三种主题，切换即时生效并同步原生窗口标题栏。
+- 关闭窗口驻留系统托盘，托盘可唤回主界面或退出；窗口位置与尺寸跨会话记忆；单实例运行（二次启动唤回已有窗口）。
+- 列表页内置搜索（助手 / 技能 / MCP / 操作记录）；快捷键 `⌘,` 打开设置、`⌘F` 聚焦页内搜索。
+- 新版本提示：启动后自动检查（更新服务已配置时），设置入口显示角标，可按版本忽略。
+- 骨架屏加载态、组件化空态引导、页面与弹窗过渡动画，遵循系统减弱动态效果设置。
+
 界面语言为简体中文。
 
 ## 安装
@@ -92,3 +100,4 @@ Agent Manager is a desktop app (Tauri 2 + React + Rust/SQLite) for centrally man
 - **Install**: no public GitHub Release yet — packages are unavailable until external prerequisites (signing keys, Apple Developer ID and notarization, Windows signing, per-platform hardware acceptance) are met; see [platform status](docs/GUI-PLATFORM-STATUS.md). To build from source on macOS, install the Rust toolchain, Node.js, and pnpm, clone without `--recursive` (the private `secrets/` submodule is not needed), then run `pnpm --dir app install --frozen-lockfile && pnpm --dir app run build:macos`.
 - **Safety model**: saving a definition only writes the local SQLite database (`native-manager.db` in the app data directory); nothing is installed or modified until you click execute. Apply runs with preflight checks, exact scope, an exclusive lock, fail-closed external-modification detection, conditional rollback, and audit logging; destructive actions require confirmation. MCP secrets are stored as `${VAR}` placeholders and written to client configs by reference — plaintext never lands in this tool's database or logs. No telemetry.
 - **License**: [MIT](LICENSE).
+- **Experience**: light/dark/system themes with native title bar sync, system tray with window recall, remembered window size/position, single instance, per-page search, `⌘,` / `⌘F` shortcuts, update badge, skeleton loading and transition animations.
