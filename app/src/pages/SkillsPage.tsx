@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { ArrowLeft, Plus } from "lucide-react";
+import { ArrowLeft, PackageOpen, Plus, SearchX } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { SkillAssignmentRow } from "../components/SkillAssignmentRow";
@@ -183,9 +184,6 @@ export default function SkillsPage({
   const allCollectionsUncached =
     collections.length > 0 &&
     collections.every((col) => (col.observed as SkillCollectionObserved).repo_cached === false);
-  const emptyAssignmentsText = allCollectionsUncached
-    ? "集合资源库尚未拉取：请到「集合列表」点击「更新资源库」，拉取成功后技能会出现在这里"
-    : "无符合筛选条件的技能分配";
 
   const confirmRemove = () => {
     if (!pendingRemove) return;
@@ -363,7 +361,19 @@ export default function SkillsPage({
                 ))}
               </tbody>
             </table>
-            {assignmentRows.length === 0 && <p data-testid="skills-empty-state" className="py-8 text-center text-sm text-muted-foreground">{emptyAssignmentsText}</p>}
+            {assignmentRows.length === 0 && (
+              <EmptyState
+                compact
+                testId="skills-empty-state"
+                icon={allCollectionsUncached ? PackageOpen : SearchX}
+                title={allCollectionsUncached ? "集合资源库尚未拉取" : "无符合筛选条件的技能分配"}
+                description={
+                  allCollectionsUncached
+                    ? "请到「集合列表」点击「更新资源库」，拉取成功后技能会出现在这里"
+                    : undefined
+                }
+              />
+            )}
           </div>
         </div>
       )}

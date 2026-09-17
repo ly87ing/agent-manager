@@ -1,8 +1,9 @@
 import { useRef, useState, type KeyboardEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Plus } from "lucide-react";
+import { ArrowLeft, LayoutGrid, Plus, SearchX, Server } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { McpAssignmentRow, type McpAgentCellView } from "../components/McpAssignmentRow";
 import { McpImportCandidates } from "../components/McpImportCandidates";
@@ -282,12 +283,18 @@ export default function McpPage() {
             ))}
           </div>
           {elements.length === 0 && (
-            <div className="space-y-1 py-4 text-center text-sm text-muted-foreground">
-              <p>暂无 MCP 服务定义：点击右上角「{OVERLAY_COPY.addServer}」创建第一个服务</p>
-              {importCandidates.length > 0 && (
-                <p>检测到 {importCandidates.length} 个可导入的现有配置，也可在下方「发现未导入的服务器」中导入</p>
-              )}
-            </div>
+            <EmptyState
+              icon={Server}
+              title="暂无 MCP 服务定义"
+              description={
+                <div className="space-y-1">
+                  <p>点击右上角「{OVERLAY_COPY.addServer}」创建第一个服务</p>
+                  {importCandidates.length > 0 && (
+                    <p>检测到 {importCandidates.length} 个可导入的现有配置，也可在下方「发现未导入的服务器」中导入</p>
+                  )}
+                </div>
+              }
+            />
           )}
 
           {selected ? (
@@ -368,11 +375,12 @@ export default function McpPage() {
               </tbody>
             </table>
             {assignmentRows.length === 0 && (
-              <p className="py-8 text-center text-sm text-muted-foreground">
-                {agentFilter !== "all"
-                  ? "无符合筛选条件的服务配置：点击上方「清除筛选」后查看全部助手"
-                  : "暂无可展示的服务配置：请先在「服务库」新增服务"}
-              </p>
+              <EmptyState
+                compact
+                icon={agentFilter !== "all" ? SearchX : LayoutGrid}
+                title={agentFilter !== "all" ? "无符合筛选条件的服务配置" : "暂无可展示的服务配置"}
+                description={agentFilter !== "all" ? "点击上方「清除筛选」后查看全部助手" : "请先在「服务库」新增服务"}
+              />
             )}
           </div>
         </div>

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { EngineElement } from "../lib/contract";
+import { EmptyState } from "./EmptyState";
 import { FreshnessBadge } from "./FreshnessBadge";
 import { StateBadge } from "./StateBadge";
 
@@ -13,7 +14,7 @@ export function ElementTable({
   renderActions?: (element: EngineElement) => ReactNode;
 }) {
   if (elements.length === 0) {
-    return <p className="py-4 text-center text-sm text-muted-foreground">无元素</p>;
+    return <EmptyState compact title="无元素" />;
   }
   return (
     <div className="overflow-x-auto">

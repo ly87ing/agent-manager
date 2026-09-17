@@ -1,6 +1,7 @@
 import { useQueries } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { Loader2, PlayCircle, RefreshCw, WifiOff } from "lucide-react";
+import { Loader2, PackageCheck, PlayCircle, RefreshCw, WifiOff } from "lucide-react";
+import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { FreshnessBadge } from "../components/FreshnessBadge";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
@@ -283,7 +284,28 @@ export default function UpdatesPage() {
             })}
           </tbody>
         </table>
-        {elements.length === 0 && <p className="py-4 text-center text-sm text-muted-foreground">没有需要检查更新的组件</p>}
+        {elements.length === 0 && (
+          <EmptyState
+            compact
+            icon={PackageCheck}
+            title="没有需要检查更新的组件"
+            description="添加助手、MCP 服务或技能集合后，可在这里对比官方最新版本。"
+            actions={
+              <button
+                type="button"
+                disabled={refreshAll.isPending || offline}
+                onClick={() => refreshAll.mutate(undefined)}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-primary-foreground transition-colors",
+                  refreshAll.isPending || offline ? "cursor-not-allowed bg-muted text-muted-foreground" : "bg-primary hover:bg-primary/90",
+                )}
+              >
+                <RefreshCw className="h-4 w-4" aria-hidden />
+                检查全部更新
+              </button>
+            }
+          />
+        )}
       </section>
     </div>
   );

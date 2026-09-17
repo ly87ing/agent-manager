@@ -42,7 +42,7 @@ export function SkillCollectionCard({
   return (
     <section
       data-testid={`collection-card-${name}`}
-      className="rounded-lg border bg-card p-5 shadow-sm"
+      className="rounded-lg border bg-card p-5 shadow-sm transition-shadow hover:shadow-md"
     >
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -175,9 +175,9 @@ export function SkillCollectionCard({
 /** 新发现技能列表（集合面板底部）。只读展示；添加分配在「全部技能」按助手操作。 */
 export function SkillDiscoveryInbox({ skills }: { skills: EngineElement[] }) {
   return (
-    <section data-testid="discovery-inbox" className="rounded-lg border bg-card p-5 shadow-sm">
+    <section data-testid="discovery-inbox" className="group rounded-lg border bg-card p-5 shadow-sm">
       <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
-        <Inbox className="h-4 w-4 text-info" aria-hidden />
+        <Inbox className="h-4 w-4 text-info transition-transform group-hover:scale-105" aria-hidden />
         新发现的技能
         <span data-testid="inbox-total" className="rounded-full bg-info/15 px-2 py-0.5 text-xs font-medium text-info">
           {skills.length}

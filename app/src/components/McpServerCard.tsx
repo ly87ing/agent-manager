@@ -173,7 +173,7 @@ export function McpServerCard({
   return (
     <section
       data-testid={`mcp-card-${element.id}`}
-      className={cn("rounded-lg border bg-card p-5 shadow-sm", selected ? "border-primary/40" : "border")}
+      className={cn("rounded-lg border bg-card p-5 shadow-sm transition-shadow hover:shadow-md", selected ? "border-primary/40" : "border")}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">

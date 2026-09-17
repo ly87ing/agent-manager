@@ -178,8 +178,8 @@ export function McpServerFormDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div role="dialog" aria-modal="true" aria-label={isNew ? "新增服务" : `编辑 ${name}`} className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl border bg-card p-5 shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 animate-fade-in" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div role="dialog" aria-modal="true" aria-label={isNew ? "新增服务" : `编辑 ${name}`} className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl border bg-card p-5 shadow-xl animate-zoom-in-95">
         <div className="flex items-start justify-between">
           <h3 className="text-base font-semibold text-foreground">{isNew ? "新增 MCP 服务" : `编辑服务 ${name}`}</h3>
           <button type="button" onClick={onClose} aria-label="关闭" className="rounded p-1 text-muted-foreground hover:bg-accent">

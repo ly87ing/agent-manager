@@ -95,7 +95,7 @@ function AgentCard({
   };
 
   return (
-    <section className="rounded-lg border bg-card p-5 shadow-sm">
+    <section className="rounded-lg border bg-card p-5 shadow-sm transition-shadow hover:shadow-md">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="text-base font-semibold text-foreground">

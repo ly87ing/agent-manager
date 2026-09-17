@@ -66,13 +66,13 @@ function DialogShell({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onKeyDown={onKeyDown}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 animate-fade-in" onKeyDown={onKeyDown}>
       <section
         ref={sectionRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-card shadow-xl"
+        className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-card shadow-xl animate-zoom-in-95"
       >
         <div className="flex-1 overflow-y-auto p-5">{children}</div>
         <div className="flex flex-shrink-0 justify-end gap-2 border-t bg-card px-5 py-3">

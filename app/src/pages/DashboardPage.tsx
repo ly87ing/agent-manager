@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { ElementTable } from "../components/ElementTable";
 import { ErrorPanel } from "../components/ErrorPanel";
+import { PageLoading } from "../components/PageState";
 import { engineErrorMessage, runEngine, toDiagnostic } from "../lib/engine";
 import type {
   AuditData,
@@ -109,12 +110,7 @@ export default function DashboardPage() {
   const offline = auditQuery.data?.mode.offline ?? false;
 
   if (auditQuery.isPending) {
-    return (
-      <div className="flex items-center gap-2 py-20 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-        正在读取引擎状态…
-      </div>
-    );
+    return <PageLoading text="正在读取引擎状态…" />;
   }
 
   if (auditQuery.isError) {

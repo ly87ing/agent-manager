@@ -232,7 +232,8 @@ describe("McpPage 空态引导", () => {
   it("无服务定义且无导入候选：引导点击「新增服务」，不出现导入提示", async () => {
     renderWithEngine(<McpPage />, emptyRoutes());
 
-    expect(await screen.findByText(/暂无 MCP 服务定义/)).toHaveTextContent("点击右上角「新增服务」创建第一个服务");
+    expect(await screen.findByText("暂无 MCP 服务定义")).toBeInTheDocument();
+    expect(screen.getByText(/点击右上角「新增服务」创建第一个服务/)).toBeInTheDocument();
     expect(screen.queryByText(/可导入的现有配置/)).toBeNull();
     // 「新增服务」按钮本身就在空态上方
     expect(screen.getByTestId("add-server-button")).toBeInTheDocument();
@@ -260,11 +261,13 @@ describe("McpPage 空态引导", () => {
     await userEvent.click(await screen.findByRole("tab", { name: "助手中的服务" }));
 
     // 全部视图：无服务定义 → 引导先到服务库新增
-    expect(await screen.findByText(/暂无可展示的服务配置/)).toHaveTextContent("请先在「服务库」新增服务");
+    expect(await screen.findByText("暂无可展示的服务配置")).toBeInTheDocument();
+    expect(screen.getByText("请先在「服务库」新增服务")).toBeInTheDocument();
 
     // 收窄筛选后：引导清除筛选
     await userEvent.selectOptions(screen.getByTestId("filter-agent-select"), "claude-code");
-    expect(screen.getByText(/无符合筛选条件的服务配置/)).toHaveTextContent("「清除筛选」后查看全部助手");
+    expect(screen.getByText("无符合筛选条件的服务配置")).toBeInTheDocument();
+    expect(screen.getByText(/「清除筛选」后查看全部助手/)).toBeInTheDocument();
   });
 });
 

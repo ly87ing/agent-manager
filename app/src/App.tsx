@@ -44,24 +44,27 @@ export default function App() {
 
   return (
     <AppLayout nav={NAV} active={activePage} onNavigate={handleNavigate}>
-      {activePage === "agents" && (
-        <AgentsPage
-          onManageSkills={(agentId) => {
-            setSelectedSkillAgent(agentId);
-            setActivePage("skills");
-          }}
-        />
-      )}
-      {activePage === "skills" && (
-        <SkillsPage
-          initialAgent={selectedSkillAgent}
-          onResetAgent={() => setSelectedSkillAgent(null)}
-        />
-      )}
-      {activePage === "mcp" && <McpPage />}
-      {activePage === "rules-hooks" && <RulesHooksPage />}
-      {activePage === "runs" && <RunsPage />}
-      {activePage === "settings" && <SettingsPage />}
+      {/* key 驱动重挂载，让页面切换时重放一次轻量进场动画 */}
+      <div key={activePage} className="animate-page-in">
+        {activePage === "agents" && (
+          <AgentsPage
+            onManageSkills={(agentId) => {
+              setSelectedSkillAgent(agentId);
+              setActivePage("skills");
+            }}
+          />
+        )}
+        {activePage === "skills" && (
+          <SkillsPage
+            initialAgent={selectedSkillAgent}
+            onResetAgent={() => setSelectedSkillAgent(null)}
+          />
+        )}
+        {activePage === "mcp" && <McpPage />}
+        {activePage === "rules-hooks" && <RulesHooksPage />}
+        {activePage === "runs" && <RunsPage />}
+        {activePage === "settings" && <SettingsPage />}
+      </div>
     </AppLayout>
   );
 }

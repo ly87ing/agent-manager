@@ -1,10 +1,12 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { CheckCircle2, Loader2, Lock, Trash2, XCircle } from "lucide-react";
+import { CheckCircle2, History, Loader2, Lock, Trash2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
+import { Skeleton } from "../components/Skeleton";
 import type { ApplyResultData, RunDetailData, RunEntry, RunsClearData, RunsListData } from "../lib/contract";
 import { engineErrorMessage, runEngine } from "../lib/engine";
 import { useExecutions, type ExecutionRecord } from "../lib/execution";
@@ -199,7 +201,11 @@ export default function RunsPage() {
             </button>
           </div>
           {detailQuery.isPending ? (
-            <p className="text-xs text-muted-foreground">详情加载中…</p>
+            <div role="status" className="space-y-2">
+              <span className="sr-only">详情加载中…</span>
+              <Skeleton className="h-14 w-full" />
+              <Skeleton className="h-14 w-full" />
+            </div>
           ) : detailQuery.isError ? (
             <p className="text-xs text-destructive">操作详情读取失败</p>
           ) : (
@@ -234,7 +240,14 @@ export default function RunsPage() {
             ))}
           </tbody>
         </table>
-        {runs.length === 0 && <p className="py-4 text-center text-sm text-muted-foreground">还没有任务记录</p>}
+        {runs.length === 0 && (
+          <EmptyState
+            compact
+            icon={History}
+            title="还没有任务记录"
+            description="通过本工具执行的安装、更新与分配操作会记录在这里。"
+          />
+        )}
       </section>
 
       {showClearConfirm && (
