@@ -293,6 +293,12 @@ else
 fi
 
 # 9. 独立运行存活验收
+# 前置守卫：应用启用单实例插件，若宿主机已有同标识实例在运行（含托盘驻留），
+# 验收副本会立即转发唤回并自行退出，存活检测必然误判失败。提前检出并如实拒绝。
+RUNNING_PID="$(pgrep -f "agent-manager-app" | head -n 1 || true)"
+if [[ -n "$RUNNING_PID" ]]; then
+  fail "阶段失败 [独立运行存活检测]：检测到正在运行的 Agent Manager 实例 (PID: ${RUNNING_PID})。单实例语义下验收副本会被立即唤回退出，请先通过托盘菜单「退出」该实例后重跑验收"
+fi
 log_info "准备隔离运行环境（工作目录 /, 隔离 HOME, 独立 DATA_DIR, 最小 PATH=/usr/bin:/bin）..."
 mkdir -p "$ISOLATED_HOME" "$ISOLATED_DATA"
 
