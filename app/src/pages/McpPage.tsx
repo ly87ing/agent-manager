@@ -10,6 +10,7 @@ import { McpImportCandidates } from "../components/McpImportCandidates";
 import { McpServerCard, McpServerDetail } from "../components/McpServerCard";
 import { McpServerFormDialog } from "../components/McpServerFormDialog";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
+import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import type { Diagnostic, EngineElement, McpImportCandidate, PolicyData, PolicyLayers, StatusData } from "../lib/contract";
 import { engineErrorMessage, runEngine } from "../lib/engine";
 import { candidateToDefinition, MCP_UNMANAGED_CONFLICT_MARKER } from "../lib/mcpImport";
@@ -34,6 +35,7 @@ export default function McpPage() {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"library" | "agents">("library");
   const [agentFilter, setAgentFilter] = useState<string>("all");
+  const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [formState, setFormState] = useState<{ editing: EngineElement } | "new" | null>(null);
   const [importTarget, setImportTarget] = useState<McpImportCandidate | null>(null);
@@ -193,6 +195,12 @@ export default function McpPage() {
   };
 
   const relevantAgents = agentFilter === "all" ? agentColumns : [agentFilter];
+  /** 服务库搜索：名称/启动命令/地址。 */
+  const filteredElements = elements.filter((element) => {
+    const spec = element.spec as McpSpec;
+    return matchesKeyword(search, [element.id, spec.command, spec.url, ...(spec.args ?? [])]);
+  });
+  /** 搜索与助手筛选叠加（AND）；行级额外匹配助手名列。 */
   const assignmentRows = elements.flatMap((element) => {
     const cells = (element.observed as McpObserved)?.agents ?? {};
     // cell 缺失 = 引擎未报告此助手的配置路径：不伪造可执行 cell，行内明确显示未配置
@@ -202,6 +210,9 @@ export default function McpPage() {
       agent,
       cell: (cells[agent] as McpAgentCellView | undefined) ?? null,
     }));
+  }).filter(({ element, agent }) => {
+    const spec = element.spec as McpSpec;
+    return matchesKeyword(search, [element.id, spec.command, spec.url, agent]);
   });
 
   const confirmRemove = () => {
@@ -259,7 +270,10 @@ export default function McpPage() {
       {activeTab === "library" && (
         <div id="panel-library" role="tabpanel" aria-labelledby="tab-library" className="space-y-4">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs text-muted-foreground">共 {elements.length} 个服务</span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground">共 {elements.length} 个服务</span>
+              <SearchInput value={search} onChange={setSearch} placeholder="搜索服务…" testId="mcp-search" />
+            </div>
             <button
               type="button"
               data-testid="add-server-button"
@@ -270,18 +284,36 @@ export default function McpPage() {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            {elements.map((element) => (
-              <McpServerCard
-                key={element.id}
-                element={element}
-                selected={selectedId === element.id}
-                onSelect={setSelectedId}
-                onEdit={(el) => setFormState({ editing: el })}
-                onAction={handleServerAction}
-              />
-            ))}
-          </div>
+          {search.trim() && filteredElements.length === 0 ? (
+            <EmptyState
+              icon={SearchX}
+              testId="mcp-search-empty"
+              title="无匹配结果"
+              description="没有名称、启动命令或地址包含该关键词的服务。"
+              actions={
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+                >
+                  清除搜索关键词
+                </button>
+              }
+            />
+          ) : (
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              {filteredElements.map((element) => (
+                <McpServerCard
+                  key={element.id}
+                  element={element}
+                  selected={selectedId === element.id}
+                  onSelect={setSelectedId}
+                  onEdit={(el) => setFormState({ editing: el })}
+                  onAction={handleServerAction}
+                />
+              ))}
+            </div>
+          )}
           {elements.length === 0 && (
             <EmptyState
               icon={Server}
@@ -300,7 +332,7 @@ export default function McpPage() {
           {selected ? (
             <McpServerDetail element={selected} />
           ) : (
-            elements.length > 0 && (
+            filteredElements.length > 0 && (
               <p className="text-xs text-muted-foreground">点击服务名展开详情（启动命令 / 密钥变量 / 写入位置 / 同步详情）。</p>
             )
           )}
@@ -313,6 +345,7 @@ export default function McpPage() {
         <div id="panel-agents" role="tabpanel" aria-labelledby="tab-agents" className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-4 shadow-sm">
             <div className="flex flex-wrap items-center gap-4">
+              <SearchInput value={search} onChange={setSearch} placeholder="搜索服务…" testId="mcp-search" />
               <label className="flex items-center gap-2 text-xs font-medium text-foreground">
                 <span>助手筛选:</span>
                 <select
@@ -374,14 +407,31 @@ export default function McpPage() {
                 ))}
               </tbody>
             </table>
-            {assignmentRows.length === 0 && (
-              <EmptyState
-                compact
-                icon={agentFilter !== "all" ? SearchX : LayoutGrid}
-                title={agentFilter !== "all" ? "无符合筛选条件的服务配置" : "暂无可展示的服务配置"}
-                description={agentFilter !== "all" ? "点击上方「清除筛选」后查看全部助手" : "请先在「服务库」新增服务"}
-              />
-            )}
+            {assignmentRows.length === 0 &&
+              (search.trim() ? (
+                <EmptyState
+                  compact
+                  icon={SearchX}
+                  title="无匹配结果"
+                  description="没有名称、启动命令或助手包含该关键词的服务配置。"
+                  actions={
+                    <button
+                      type="button"
+                      onClick={() => setSearch("")}
+                      className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+                    >
+                      清除搜索关键词
+                    </button>
+                  }
+                />
+              ) : (
+                <EmptyState
+                  compact
+                  icon={agentFilter !== "all" ? SearchX : LayoutGrid}
+                  title={agentFilter !== "all" ? "无符合筛选条件的服务配置" : "暂无可展示的服务配置"}
+                  description={agentFilter !== "all" ? "点击上方「清除筛选」后查看全部助手" : "请先在「服务库」新增服务"}
+                />
+              ))}
           </div>
         </div>
       )}

@@ -1,4 +1,4 @@
-import type { LucideIcon } from "lucide-react";
+import { X, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "../lib/utils";
 import { ModeBanner } from "./ModeBanner";
@@ -14,11 +14,17 @@ export function AppLayout({
   nav,
   active,
   onNavigate,
+  updateVersion,
+  onDismissUpdate,
   children,
 }: {
   nav: NavItem[];
   active: string;
   onNavigate: (key: string) => void;
+  /** 发现新版本时在「设置」导航项上显示提示点；点击导航项即进入设置页查看。 */
+  updateVersion?: string | null;
+  /** 按版本记住「不再提示」，直到出现更新版本再提示。 */
+  onDismissUpdate?: () => void;
   children: ReactNode;
 }) {
   return (
@@ -31,23 +37,56 @@ export function AppLayout({
           {nav.map((item) => {
             const Icon = item.icon;
             const isActive = item.key === active;
+            const showUpdateBadge = item.key === "settings" && Boolean(updateVersion);
             return (
-              <button
-                key={item.key}
-                type="button"
-                onClick={() => onNavigate(item.key)}
-                aria-current={isActive ? "page" : undefined}
-                className={cn(
-                  "flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors",
-                  isActive ? "bg-primary/10 font-medium text-primary" : "text-muted-foreground hover:bg-accent",
+              <div key={item.key} className="relative">
+                <button
+                  type="button"
+                  onClick={() => onNavigate(item.key)}
+                  aria-current={isActive ? "page" : undefined}
+                  className={cn(
+                    "flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors",
+                    isActive ? "bg-primary/10 font-medium text-primary" : "text-muted-foreground hover:bg-accent",
+                    showUpdateBadge && "pr-8",
+                  )}
+                >
+                  <Icon className="h-4 w-4 shrink-0" aria-hidden />
+                  {item.label}
+                  {showUpdateBadge && (
+                    <span
+                      data-testid="update-badge"
+                      title={`发现新版本 ${updateVersion}，点击查看`}
+                      className="ml-auto h-2 w-2 shrink-0 rounded-full bg-success"
+                    />
+                  )}
+                </button>
+                {showUpdateBadge && (
+                  <button
+                    type="button"
+                    data-testid="update-badge-dismiss"
+                    aria-label={`不再提示版本 ${updateVersion} 的更新`}
+                    title={`不再提示版本 ${updateVersion} 的更新`}
+                    onClick={onDismissUpdate}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  >
+                    <X className="h-3 w-3" aria-hidden />
+                  </button>
                 )}
-              >
-                <Icon className="h-4 w-4 shrink-0" aria-hidden />
-                {item.label}
-              </button>
+              </div>
             );
           })}
         </nav>
+        <div className="border-t px-4 py-3 text-xs text-muted-foreground">
+          <p className="font-medium text-foreground">快捷键</p>
+          <ul className="mt-1.5 space-y-1">
+            <li className="flex items-center gap-1.5">
+              <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">⌘,</kbd>打开设置
+            </li>
+            <li className="flex items-center gap-1.5">
+              <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">⌘F</kbd>聚焦页内搜索
+            </li>
+          </ul>
+        </div>
       </aside>
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-5xl space-y-6 p-6">

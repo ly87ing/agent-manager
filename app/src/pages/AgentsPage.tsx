@@ -1,12 +1,14 @@
 import { useState } from "react";
-import { Check, ChevronDown, ChevronRight, Download, RefreshCw, Sparkles, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Download, RefreshCw, SearchX, Sparkles, Trash2, X } from "lucide-react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { DriftExplanationPanel } from "../components/DriftExplanationPanel";
 import { DefinitionFormDialog } from "../components/DefinitionFormDialog";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
+import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { FreshnessBadge } from "../components/FreshnessBadge";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
+import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import { StateBadge } from "../components/StateBadge";
 import type { ElementAction, EngineElement, PolicyData, StatusData } from "../lib/contract";
 import { definitionOrigin } from "../lib/definitionOverlay";
@@ -230,10 +232,15 @@ export default function AgentsPage({
   const [form, setForm] = useState<EngineElement | "new" | null>(null);
   const [pendingUninstall, setPendingUninstall] = useState<EngineElement | null>(null);
   const [pendingAction, setPendingAction] = useState<{ element: EngineElement; action: ElementAction } | null>(null);
+  const [search, setSearch] = useState("");
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="agents:status 调用失败" error={query.error} />;
 
   const elements = query.data.data.elements;
+  const filteredElements = elements.filter((element) => {
+    const spec = element.spec as AgentsSpec;
+    return matchesKeyword(search, [spec.display_name, element.id, spec.bin, ...(element.observed as AgentsObserved).providers ?? []]);
+  });
   const layers = policyQuery.data?.data.layers ?? null;
   /** 内置判定：policy 层已加载且本地数据库无该定义覆盖；未加载到时按自定义处理（先确认再执行）。 */
   const isCustomDefinition = (element: EngineElement) =>
@@ -248,21 +255,42 @@ export default function AgentsPage({
     <div className="space-y-4">
       <PageHeader title="助手" description="各 AI 助手的安装渠道、版本与官方最新版对比。内置助手安装/升级点击后直接执行；自定义定义的安装/升级与卸载需先确认。" />
       {query.data.errors.length > 0 && <ErrorPanel title="agents:status 错误" errors={query.data.errors} />}
-      <div className="flex justify-end"><button type="button" onClick={() => setForm("new")} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">添加助手</button></div>
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        {elements.map((element) => (
-          <AgentCard
-            key={element.id}
-            element={element}
-            customDefinition={isCustomDefinition(element)}
-            onEdit={() => setForm(element)}
-            onRemove={() => definitionOps.requestRemove(element.id.replace(/^agents:/, ""), policyQuery.data?.data.layers ?? null)}
-            onRequestUninstall={() => setPendingUninstall(element)}
-            onRequestAction={(action) => setPendingAction({ element, action })}
-            onManageSkills={onManageSkills}
-          />
-        ))}
+      <div className="flex items-center justify-between gap-3">
+        <SearchInput value={search} onChange={setSearch} placeholder="搜索助手…" testId="agents-search" />
+        <button type="button" onClick={() => setForm("new")} className="shrink-0 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">添加助手</button>
       </div>
+      {search.trim() && filteredElements.length === 0 ? (
+        <EmptyState
+          icon={SearchX}
+          testId="agents-search-empty"
+          title="无匹配结果"
+          description="没有名称或命令包含该关键词的助手。"
+          actions={
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+            >
+              清除搜索关键词
+            </button>
+          }
+        />
+      ) : (
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          {filteredElements.map((element) => (
+            <AgentCard
+              key={element.id}
+              element={element}
+              customDefinition={isCustomDefinition(element)}
+              onEdit={() => setForm(element)}
+              onRemove={() => definitionOps.requestRemove(element.id.replace(/^agents:/, ""), policyQuery.data?.data.layers ?? null)}
+              onRequestUninstall={() => setPendingUninstall(element)}
+              onRequestAction={(action) => setPendingAction({ element, action })}
+              onManageSkills={onManageSkills}
+            />
+          ))}
+        </div>
+      )}
       {form && <DefinitionFormDialog existingNames={elements.map((element) => element.id.replace(/^agents:/, ""))} initial={form === "new" ? undefined : { name: form.id.replace(/^agents:/, ""), definition: form.spec }} onClose={() => setForm(null)} onSubmit={(name, definition) => { setForm(null); void definitionOps.saveDefinition({ name, definition, isNew: form === "new" }); }} />}
       {definitionOps.modals}
 

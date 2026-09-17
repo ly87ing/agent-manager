@@ -6,7 +6,7 @@ import {
   Settings,
   Sparkles,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AppLayout, type NavItem } from "./components/AppLayout";
 import AgentsPage from "./pages/AgentsPage";
 import McpPage from "./pages/McpPage";
@@ -15,6 +15,7 @@ import RunsPage from "./pages/RunsPage";
 import SkillsPage from "./pages/SkillsPage";
 import SettingsPage from "./pages/SettingsPage";
 import { useSettings } from "./lib/settings";
+import { useUpdateCheck } from "./lib/update-check";
 import { PageError, PageLoading } from "./components/PageState";
 
 const NAV: NavItem[] = [
@@ -26,11 +27,45 @@ const NAV: NavItem[] = [
   { key: "settings", label: "设置", icon: Settings },
 ];
 
+/** 事件目标是否处于文本编辑语境（输入框/文本域/下拉/可编辑区）：命中时全局快捷键不抢按键。 */
+function isTextEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName;
+  if (tag === "TEXTAREA" || tag === "SELECT") return true;
+  if (tag === "INPUT") {
+    const type = (target as HTMLInputElement).type;
+    return !["checkbox", "radio", "button", "submit", "range", "color", "file"].includes(type);
+  }
+  return false;
+}
+
 export default function App() {
   // 预加载本机偏好，确保首次打开任意预览时已有默认演练值。
   const settings = useSettings();
   const [activePage, setActivePage] = useState<string>("agents");
   const [selectedSkillAgent, setSelectedSkillAgent] = useState<string | null>(null);
+  const update = useUpdateCheck();
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey)) return;
+      if (isTextEditableTarget(event.target)) return;
+      if (event.key === ",") {
+        event.preventDefault();
+        setActivePage("settings");
+      } else if (event.key.toLowerCase() === "f") {
+        // 仅当前页挂了搜索框（data-page-search）时响应；无搜索框的页面不抢占
+        const searchInput = document.querySelector<HTMLElement>("[data-page-search]");
+        if (searchInput) {
+          event.preventDefault();
+          searchInput.focus();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   if (settings.isPending) return <PageLoading text="正在读取应用设置…" />;
   if (settings.isError) return <PageError title="应用设置加载失败" error={settings.error} />;
@@ -43,7 +78,13 @@ export default function App() {
   };
 
   return (
-    <AppLayout nav={NAV} active={activePage} onNavigate={handleNavigate}>
+    <AppLayout
+      nav={NAV}
+      active={activePage}
+      onNavigate={handleNavigate}
+      updateVersion={update.availableVersion}
+      onDismissUpdate={update.dismiss}
+    >
       {/* key 驱动重挂载，让页面切换时重放一次轻量进场动画 */}
       <div key={activePage} className="animate-page-in">
         {activePage === "agents" && (

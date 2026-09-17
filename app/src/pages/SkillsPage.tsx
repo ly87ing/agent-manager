@@ -5,6 +5,7 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
+import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import { SkillAssignmentRow } from "../components/SkillAssignmentRow";
 import { SkillCollectionCard, SkillDiscoveryInbox } from "../components/SkillCollectionCard";
 import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDialog";
@@ -45,6 +46,7 @@ export default function SkillsPage({
   const [activeTab, setActiveTab] = useState<"collections" | "skills">(() => (initialAgent ? "skills" : "collections"));
   const [collectionFilter, setCollectionFilter] = useState<string>("all");
   const [agentFilter, setAgentFilter] = useState<string>(() => initialAgent ?? "all");
+  const [search, setSearch] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
   const [editing, setEditing] = useState<EngineElement | null>(null);
 
@@ -161,7 +163,13 @@ export default function SkillsPage({
   const filteredSkills = skills.filter((skill) => {
     const spec = skill.spec as SkillSpec;
     if (collectionFilter !== "all" && spec.collection !== collectionFilter) return false;
-    return true;
+    return matchesKeyword(search, [spec.name, skill.id, spec.collection]);
+  });
+
+  /** 集合列表搜索：与技能列表共用同一关键词，仅作用于本 tab 的卡片网格。 */
+  const filteredCollections = collections.filter((collection) => {
+    const spec = collection.spec as SkillCollectionSpec;
+    return matchesKeyword(search, [collName(collection), spec.url]);
   });
 
   const relevantAgents = agentFilter === "all" ? agentColumns : [agentFilter];
@@ -208,7 +216,7 @@ export default function SkillsPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader title="技能" description="管理技能集合与技能分发。支持查看集合资源库状态，并在全部技能列表中按集合与助手筛选操作。" />
+      <PageHeader title="技能" description="管理技能集合与技能分发。支持查看集合资源库状态，并在全部技能列表中搜索、按集合与助手筛选操作。" />
 
       {query.data.errors.length > 0 && <ErrorPanel title="skills:status 错误" errors={query.data.errors} />}
 
@@ -242,7 +250,10 @@ export default function SkillsPage({
       {activeTab === "collections" && (
         <div id="panel-collections" role="tabpanel" aria-labelledby="tab-collections" className="space-y-4">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs text-muted-foreground">共 {collections.length} 个技能集合</span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground">共 {collections.length} 个技能集合</span>
+              <SearchInput value={search} onChange={setSearch} placeholder="搜索集合或技能…" testId="skills-search" />
+            </div>
             <button
               type="button"
               data-testid="add-collection-button"
@@ -253,22 +264,40 @@ export default function SkillsPage({
             </button>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            {collections.map((collection) => (
-              <SkillCollectionCard
-                key={collection.id}
-                collection={collection}
-                onDrilldown={(name) => {
-                  setCollectionFilter(name);
-                  setActiveTab("skills");
-                }}
-                onEdit={setEditing}
-                onUpdate={handleUpdateCollection}
-                onToggle={handleToggleCollection}
-                onRemove={handleRemoveCollection}
-              />
-            ))}
-          </div>
+          {search.trim() && filteredCollections.length === 0 ? (
+            <EmptyState
+              icon={SearchX}
+              testId="skills-search-empty"
+              title="无匹配结果"
+              description="没有名称或地址包含该关键词的技能集合。"
+              actions={
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+                >
+                  清除搜索关键词
+                </button>
+              }
+            />
+          ) : (
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              {filteredCollections.map((collection) => (
+                <SkillCollectionCard
+                  key={collection.id}
+                  collection={collection}
+                  onDrilldown={(name) => {
+                    setCollectionFilter(name);
+                    setActiveTab("skills");
+                  }}
+                  onEdit={setEditing}
+                  onUpdate={handleUpdateCollection}
+                  onToggle={handleToggleCollection}
+                  onRemove={handleRemoveCollection}
+                />
+              ))}
+            </div>
+          )}
 
           <SkillDiscoveryInbox skills={inboxSkills} />
         </div>
@@ -278,6 +307,7 @@ export default function SkillsPage({
         <div id="panel-skills" role="tabpanel" aria-labelledby="tab-skills" className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-4 shadow-sm">
             <div className="flex flex-wrap items-center gap-4">
+              <SearchInput value={search} onChange={setSearch} placeholder="搜索集合或技能…" testId="skills-search" />
               <label className="flex items-center gap-2 text-xs font-medium text-foreground">
                 <span>集合筛选:</span>
                 <select
@@ -361,19 +391,37 @@ export default function SkillsPage({
                 ))}
               </tbody>
             </table>
-            {assignmentRows.length === 0 && (
-              <EmptyState
-                compact
-                testId="skills-empty-state"
-                icon={allCollectionsUncached ? PackageOpen : SearchX}
-                title={allCollectionsUncached ? "集合资源库尚未拉取" : "无符合筛选条件的技能分配"}
-                description={
-                  allCollectionsUncached
-                    ? "请到「集合列表」点击「更新资源库」，拉取成功后技能会出现在这里"
-                    : undefined
-                }
-              />
-            )}
+            {assignmentRows.length === 0 &&
+              (search.trim() ? (
+                <EmptyState
+                  compact
+                  testId="skills-empty-state"
+                  icon={SearchX}
+                  title="无匹配结果"
+                  description="没有名称或所属集合包含该关键词的技能分配。"
+                  actions={
+                    <button
+                      type="button"
+                      onClick={() => setSearch("")}
+                      className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+                    >
+                      清除搜索关键词
+                    </button>
+                  }
+                />
+              ) : (
+                <EmptyState
+                  compact
+                  testId="skills-empty-state"
+                  icon={allCollectionsUncached ? PackageOpen : SearchX}
+                  title={allCollectionsUncached ? "集合资源库尚未拉取" : "无符合筛选条件的技能分配"}
+                  description={
+                    allCollectionsUncached
+                      ? "请到「集合列表」点击「更新资源库」，拉取成功后技能会出现在这里"
+                      : undefined
+                  }
+                />
+              ))}
           </div>
         </div>
       )}

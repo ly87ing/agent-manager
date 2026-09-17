@@ -1,11 +1,12 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { CheckCircle2, History, Loader2, Lock, Trash2, XCircle } from "lucide-react";
+import { CheckCircle2, History, Loader2, Lock, SearchX, Trash2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
+import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import { Skeleton } from "../components/Skeleton";
 import type { ApplyResultData, RunDetailData, RunEntry, RunsClearData, RunsListData } from "../lib/contract";
 import { engineErrorMessage, runEngine } from "../lib/engine";
@@ -115,6 +116,7 @@ export default function RunsPage() {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const [clearStatus, setClearStatus] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
 
   const listQuery = useQuery({
     queryKey: engineKeys.command("runs:list"),
@@ -155,21 +157,28 @@ export default function RunsPage() {
   if (listQuery.isError) return <PageError title="runs:list 调用失败" error={listQuery.error} />;
 
   const runs: RunEntry[] = listQuery.data.data.runs;
+  const filteredRuns = runs.filter((run) => matchesKeyword(search, [run.run_id]));
+  const filteredExecutions = executions.filter((record) =>
+    matchesKeyword(search, [record.label, record.command, record.runId]),
+  );
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <PageHeader title="任务记录" description="查看本工具通过 native-manager.db 记录的运行与操作详情。" />
-        <button
-          type="button"
-          data-testid="clear-runs-button"
-          onClick={() => setShowClearConfirm(true)}
-          disabled={isClearing}
-          className="inline-flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50"
-        >
-          <Trash2 className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-          清空任务记录
-        </button>
+        <div className="flex items-center gap-2">
+          <SearchInput value={search} onChange={setSearch} placeholder="搜索任务记录…" testId="runs-search" />
+          <button
+            type="button"
+            data-testid="clear-runs-button"
+            onClick={() => setShowClearConfirm(true)}
+            disabled={isClearing}
+            className="inline-flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50"
+          >
+            <Trash2 className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+            清空任务记录
+          </button>
+        </div>
       </div>
 
       {clearStatus && (
@@ -181,10 +190,10 @@ export default function RunsPage() {
         </p>
       )}
 
-      {executions.length > 0 && (
+      {filteredExecutions.length > 0 && (
         <div className="space-y-2">
           <h3 className="text-sm font-semibold text-foreground">本次会话的任务</h3>
-          {executions.map((record) => (
+          {filteredExecutions.map((record) => (
             <ExecutionCard key={record.runId} record={record} onSelectRun={setSelectedRun} />
           ))}
         </div>
@@ -226,7 +235,7 @@ export default function RunsPage() {
             </tr>
           </thead>
           <tbody>
-            {runs.map((run) => (
+            {filteredRuns.map((run) => (
               <tr key={run.run_id} data-testid={`run-row-${run.run_id}`} className="border-b last:border-0">
                 <td className="py-2 pr-4 font-mono text-xs text-foreground">{run.run_id}</td>
                 <td className="py-2 pr-4 text-xs text-muted-foreground">{run.operations}</td>
@@ -240,14 +249,32 @@ export default function RunsPage() {
             ))}
           </tbody>
         </table>
-        {runs.length === 0 && (
-          <EmptyState
-            compact
-            icon={History}
-            title="还没有任务记录"
-            description="通过本工具执行的安装、更新与分配操作会记录在这里。"
-          />
-        )}
+        {filteredRuns.length === 0 &&
+          (search.trim() ? (
+            <EmptyState
+              compact
+              testId="runs-search-empty"
+              icon={SearchX}
+              title="无匹配结果"
+              description="没有运行 ID 包含该关键词的任务记录。"
+              actions={
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+                >
+                  清除搜索关键词
+                </button>
+              }
+            />
+          ) : (
+            <EmptyState
+              compact
+              icon={History}
+              title="还没有任务记录"
+              description="通过本工具执行的安装、更新与分配操作会记录在这里。"
+            />
+          ))}
       </section>
 
       {showClearConfirm && (
