@@ -94,6 +94,7 @@ const LINKED_CELL_STATES = new Set(["linked", "dead-link", "drifted"]);
  * cell.actions 子集渲染（add/update/enable/disable/remove），更新与启用不混；
  * 计划外链接（extra-link）行的 add/remove 改用 纳入管理/取消链接 文案；
  * cell 缺失时不伪造操作，明确显示未配置。
+ * 首列勾选框仅在行有可执行动作（cell 存在且 actions 非空）时可用。
  */
 export function SkillAssignmentRow({
   skill,
@@ -101,6 +102,9 @@ export function SkillAssignmentRow({
   collection,
   agent,
   cell,
+  selected,
+  selectDisabled,
+  onToggleSelect,
   onFilterCollection,
   onFilterAgent,
   onAction,
@@ -110,14 +114,30 @@ export function SkillAssignmentRow({
   collection: string;
   agent: string;
   cell: SkillAgentCell | null;
+  selected: boolean;
+  /** 批量执行在途时禁用勾选；无可用动作的行恒不可勾选。 */
+  selectDisabled: boolean;
+  onToggleSelect: () => void;
   onFilterCollection: (collection: string) => void;
   onFilterAgent: (agent: string) => void;
   onAction: (skill: EngineElement, agent: string, action: string, cell: SkillAgentCell | null) => void;
 }) {
   const actions = cell?.actions ?? [];
+  const selectable = actions.length > 0;
 
   return (
     <tr className="border-b last:border-0 hover:bg-muted/50">
+      <td className="py-2.5 pr-3">
+        <input
+          type="checkbox"
+          aria-label={`选择 ${skillName} @ ${agent}`}
+          data-testid={`select-${skill.id}-${agent}`}
+          disabled={!selectable || selectDisabled}
+          checked={selected}
+          onChange={onToggleSelect}
+          className="h-3.5 w-3.5 accent-primary disabled:opacity-40"
+        />
+      </td>
       <td className="py-2.5 pr-4">
         <span className="font-mono text-xs font-medium text-foreground">{skillName}</span>
       </td>

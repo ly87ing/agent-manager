@@ -225,7 +225,8 @@ describe("SkillsPage 三级视图", () => {
     expect(disabled.className).toContain("muted");
     // 「当前分配版本」列按 state 判定链接存在（引擎恒输出非空 link_path，不能作为存在性依据）：
     // linked/dead-link 无版本时显示已链接；missing-link/disabled 已分配但无链接，显示已分配
-    const versionCellOf = (title: string) => within(screen.getByTitle(title).closest("tr")!).getAllByRole("cell")[4];
+    // （首列勾选框之后，该列索引为 5）
+    const versionCellOf = (title: string) => within(screen.getByTitle(title).closest("tr")!).getAllByRole("cell")[5];
     expect(versionCellOf("claude-code: linked")).toHaveTextContent("已链接");
     expect(versionCellOf("codex: dead-link")).toHaveTextContent("已链接");
     expect(versionCellOf("claude-code: missing-link")).toHaveTextContent("已分配");
@@ -690,7 +691,8 @@ describe("SkillsPage 计划外链接（extra-link）接管与取消链接", () =
     const row = addBtn.closest("tr")!;
     expect(within(row).getByTitle("codex: not-assigned")).toHaveTextContent("未分配");
     // 「当前分配版本」列：未分配且无链接的行不得误显「已链接」（引擎恒输出非空 link_path，不能据此判定）
-    expect(within(row).getAllByRole("cell")[4]).toHaveTextContent("未分配");
+    // （首列勾选框之后，该列索引为 5）
+    expect(within(row).getAllByRole("cell")[5]).toHaveTextContent("未分配");
     expect(within(row).queryByText("已链接")).toBeNull();
     expect(screen.queryByTestId("action-remove-skill:agent-skills/gamma-codex")).toBeNull();
 

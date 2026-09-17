@@ -19,6 +19,7 @@ import {
   type SkillSpec,
 } from "../lib/observed";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
+import { useBatchApply, type BatchApplyRow } from "../lib/useBatchApply";
 import { useDirectApply } from "../lib/useDirectApply";
 import { OVERLAY_COPY } from "../lib/ui-copy";
 import { useEngineQuery } from "../lib/queries";
@@ -27,6 +28,17 @@ import { cn } from "../lib/utils";
 function isCollection(element: EngineElement): boolean {
   return element.id.startsWith("skill:") && !element.id.includes("/");
 }
+
+/** 全部技能矩阵的批量动作：enable/disable 直执；add/remove 仅作用于计划外链接行（纳入管理/取消链接）。 */
+type BatchSkillAction = "enable" | "disable" | "add" | "remove";
+
+/** 批量按钮配色与行内操作按钮保持一致（启用/禁用/纳入管理/取消链接）。 */
+const BATCH_BUTTON_CLASS: Record<BatchSkillAction, string> = {
+  enable: "border-success/30 bg-success/10 text-success hover:bg-success/15",
+  disable: "border-warning/30 bg-warning/10 text-warning hover:bg-warning/15",
+  add: "border-primary/30 bg-primary/10 text-primary hover:bg-primary/15",
+  remove: "border-destructive/30 bg-card text-destructive hover:bg-destructive/10",
+};
 
 function fullSkillDefinition(layers: PolicyLayers | null, name: string): Record<string, unknown> | null {
   const repositories = (layers?.sqlite as { skills?: { repositories?: Record<string, unknown> } } | null | undefined)?.skills?.repositories;
@@ -52,7 +64,11 @@ export default function SkillsPage({
   const [editing, setEditing] = useState<EngineElement | null>(null);
 
   const directApply = useDirectApply();
+  const batchApply = useBatchApply();
   const definitionOps = useDefinitionOps({ section: "skills", domain: "skills" });
+
+  /** 全部技能矩阵勾选集合：元素为 `${skill.id}-${agent}` 行键；仅可见且可执行的行保留在集合内。 */
+  const [selectedKeys, setSelectedKeys] = useState<ReadonlySet<string>>(new Set());
 
   const [pendingRemove, setPendingRemove] = useState<
     | { kind: "collection"; element: EngineElement }
@@ -62,6 +78,10 @@ export default function SkillsPage({
   /** 计划外链接的外部链接接管确认：add=纳入管理、remove=取消链接，确认后携带 --allow-takeover。 */
   const [pendingTakeover, setPendingTakeover] = useState<
     { element: EngineElement; agent: string; action: "add" | "remove" } | null
+  >(null);
+  /** 批量 纳入管理/取消链接 的汇总确认：含外部链接（managed=false）的行先统一确认一次。 */
+  const [pendingBatch, setPendingBatch] = useState<
+    { action: BatchSkillAction; actionLabel: string; rows: BatchApplyRow[]; unmanagedCount: number } | null
   >(null);
 
   const tabRefs = useRef<Record<"collections" | "skills", HTMLButtonElement | null>>({
@@ -102,10 +122,8 @@ export default function SkillsPage({
     }
   }, [initialAgent]);
 
-  if (query.isPending) return <PageLoading />;
-  if (query.isError) return <PageError title="skills:status 调用失败" error={query.error} />;
-
-  const elements = query.data.data.elements;
+  // 数据计算容忍查询未就绪（空数组兜底），选择剔除 effect 必须在下方早退之前声明。
+  const elements = query.data?.data.elements ?? [];
   const collections = elements.filter(isCollection);
   const skills = elements.filter((element) => !isCollection(element));
   const inboxSkills = skills.filter((element) => (element.observed as SkillObserved).discovery_inbox === true);
@@ -123,6 +141,48 @@ export default function SkillsPage({
     .sort();
 
   const collName = (collection: EngineElement) => collection.id.replace(/^skill:/, "");
+
+  const filteredSkills = skills.filter((skill) => {
+    const spec = skill.spec as SkillSpec;
+    if (collectionFilter !== "all" && spec.collection !== collectionFilter) return false;
+    return matchesKeyword(search, [spec.name, skill.id, spec.collection]);
+  });
+
+  /** 集合列表搜索：与技能列表共用同一关键词，仅作用于本 tab 的卡片网格。 */
+  const filteredCollections = collections.filter((collection) => {
+    const spec = collection.spec as SkillCollectionSpec;
+    return matchesKeyword(search, [collName(collection), spec.url]);
+  });
+
+  const relevantAgents = agentFilter === "all" ? agentColumns : [agentFilter];
+  const assignmentRows = filteredSkills.flatMap((skill) => {
+    const spec = skill.spec as SkillSpec;
+    const cells = (skill.observed as SkillObserved)?.agents ?? {};
+    // cell 缺失 = 引擎未报告此助手的分配路径：不伪造可执行 cell，行内明确显示未配置
+    return relevantAgents.map((agent) => ({
+      key: `${skill.id}-${agent}`,
+      skill,
+      skillName: spec.name ?? skill.id,
+      collection: spec.collection ?? "",
+      agent,
+      cell: cells[agent] ?? null,
+    }));
+  });
+
+  // 筛选/搜索变化或数据刷新后，剔除不再可见、或已无可执行动作的选中项。
+  useEffect(() => {
+    setSelectedKeys((prev) => {
+      if (prev.size === 0) return prev;
+      const selectableKeys = new Set(
+        assignmentRows.filter((row) => (row.cell?.actions?.length ?? 0) > 0).map((row) => row.key),
+      );
+      const next = new Set([...prev].filter((key) => selectableKeys.has(key)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [assignmentRows]);
+
+  if (query.isPending) return <PageLoading />;
+  if (query.isError) return <PageError title="skills:status 调用失败" error={query.error} />;
 
   /** 集合操作：按钮严格来自卡片动作，apply 携带精确 --only/--action；remove 需先经独立 ConfirmModal。 */
   const runCollectionAction = (collection: EngineElement, action: "update" | "enable" | "disable" | "remove", title: string) => {
@@ -174,32 +234,68 @@ export default function SkillsPage({
     });
   };
 
-  const filteredSkills = skills.filter((skill) => {
-    const spec = skill.spec as SkillSpec;
-    if (collectionFilter !== "all" && spec.collection !== collectionFilter) return false;
-    return matchesKeyword(search, [spec.name, skill.id, spec.collection]);
-  });
+  /** 批量派生：仅可见可执行行可被勾选；批量按钮按选中集合的动作子集分组，无适用行的分组不显示。 */
+  const selectableRows = assignmentRows.filter((row) => (row.cell?.actions?.length ?? 0) > 0);
+  const selectedRows = assignmentRows.filter((row) => selectedKeys.has(row.key));
+  const batchGroups: { action: BatchSkillAction; label: string; rows: typeof selectedRows }[] = [
+    { action: "enable", label: "启用", rows: selectedRows.filter((row) => row.cell?.actions?.includes("enable")) },
+    { action: "disable", label: "禁用", rows: selectedRows.filter((row) => row.cell?.actions?.includes("disable")) },
+    {
+      action: "add",
+      label: "纳入管理",
+      rows: selectedRows.filter((row) => row.cell?.state === "extra-link" && row.cell?.actions?.includes("add")),
+    },
+    {
+      action: "remove",
+      label: "取消链接",
+      rows: selectedRows.filter((row) => row.cell?.state === "extra-link" && row.cell?.actions?.includes("remove")),
+    },
+  ];
+  const allVisibleSelected = selectableRows.length > 0 && selectableRows.every((row) => selectedKeys.has(row.key));
+  const someVisibleSelected = selectableRows.some((row) => selectedKeys.has(row.key));
 
-  /** 集合列表搜索：与技能列表共用同一关键词，仅作用于本 tab 的卡片网格。 */
-  const filteredCollections = collections.filter((collection) => {
-    const spec = collection.spec as SkillCollectionSpec;
-    return matchesKeyword(search, [collName(collection), spec.url]);
-  });
+  const toggleSelectAllVisible = () => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      for (const row of selectableRows) {
+        if (allVisibleSelected) next.delete(row.key);
+        else next.add(row.key);
+      }
+      return next;
+    });
+  };
 
-  const relevantAgents = agentFilter === "all" ? agentColumns : [agentFilter];
-  const assignmentRows = filteredSkills.flatMap((skill) => {
-    const spec = skill.spec as SkillSpec;
-    const cells = (skill.observed as SkillObserved)?.agents ?? {};
-    // cell 缺失 = 引擎未报告此助手的分配路径：不伪造可执行 cell，行内明确显示未配置
-    return relevantAgents.map((agent) => ({
-      key: `${skill.id}-${agent}`,
-      skill,
-      skillName: spec.name ?? skill.id,
-      collection: spec.collection ?? "",
-      agent,
-      cell: cells[agent] ?? null,
+  /** 批量执行结束后清空选择；数据刷新由各行的执行通道统一触发。 */
+  const runBatch = async (action: BatchSkillAction, actionLabel: string, rows: BatchApplyRow[]) => {
+    await batchApply.applyBatch({ action, actionLabel, rows });
+    setSelectedKeys(new Set());
+  };
+
+  /** 批量入口：enable/disable 直执；纳入管理/取消链接 中含外部链接的行先汇总确认一次。 */
+  const handleBatchAction = (action: BatchSkillAction, actionLabel: string, rows: typeof selectedRows) => {
+    if (batchApply.executing || rows.length === 0) return;
+    const batchRows: BatchApplyRow[] = rows.map((row) => ({
+      elementId: row.skill.id,
+      agent: row.agent,
+      label: `${row.skillName} @ ${row.agent}`,
+      takeover: (action === "add" || action === "remove") && row.cell?.managed === false,
     }));
-  });
+    if (action === "add" || action === "remove") {
+      const unmanagedCount = batchRows.filter((row) => row.takeover).length;
+      if (unmanagedCount > 0) {
+        setPendingBatch({ action, actionLabel, rows: batchRows, unmanagedCount });
+        return;
+      }
+    }
+    void runBatch(action, actionLabel, batchRows);
+  };
+
+  const confirmBatch = () => {
+    if (!pendingBatch) return;
+    const { action, actionLabel, rows } = pendingBatch;
+    setPendingBatch(null);
+    void runBatch(action, actionLabel, rows);
+  };
 
   // 空态引导：有集合但全未拉取时指向「更新资源库」；其余（含无集合、筛选无结果、
   // 已拉取但发现失败/无技能）保持通用文案，发现失败由集合卡片的 discovery_error 呈现。
@@ -398,10 +494,58 @@ export default function SkillsPage({
             <span className="text-xs text-muted-foreground">当前展示 {assignmentRows.length} 条分配记录</span>
           </div>
 
+          {selectedRows.length > 0 && (
+            <div
+              data-testid="batch-toolbar"
+              className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-3 shadow-sm"
+            >
+              <span className="text-xs font-medium text-foreground">已选 {selectedRows.length} 项</span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {batchGroups
+                  .filter(({ rows }) => rows.length > 0)
+                  .map(({ action, label, rows }) => (
+                    <button
+                      key={action}
+                      type="button"
+                      data-testid={`batch-${action}`}
+                      disabled={batchApply.executing}
+                      onClick={() => handleBatchAction(action, label, rows)}
+                      className={cn("rounded border px-2 py-0.5 text-xs disabled:opacity-40", BATCH_BUTTON_CLASS[action])}
+                    >
+                      批量{label} ({rows.length})
+                    </button>
+                  ))}
+              </div>
+              <button
+                type="button"
+                data-testid="batch-clear"
+                disabled={batchApply.executing}
+                onClick={() => setSelectedKeys(new Set())}
+                className="ml-auto inline-flex items-center gap-1 rounded border px-2 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-40"
+              >
+                清除选择
+              </button>
+            </div>
+          )}
+
           <div className="overflow-x-auto rounded-lg border bg-card p-5 shadow-sm">
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b text-xs text-muted-foreground">
+                  <th className="py-2.5 pr-3 font-medium">
+                    <input
+                      type="checkbox"
+                      aria-label="全选当前可见行"
+                      data-testid="select-all-visible"
+                      disabled={batchApply.executing || selectableRows.length === 0}
+                      checked={allVisibleSelected}
+                      ref={(element) => {
+                        if (element) element.indeterminate = someVisibleSelected && !allVisibleSelected;
+                      }}
+                      onChange={toggleSelectAllVisible}
+                      className="h-3.5 w-3.5 accent-primary disabled:opacity-40"
+                    />
+                  </th>
                   <th className="py-2.5 pr-4 font-medium">技能名</th>
                   <th className="py-2.5 pr-4 font-medium">所属集合</th>
                   <th className="py-2.5 pr-4 font-medium">助手</th>
@@ -420,6 +564,16 @@ export default function SkillsPage({
                     collection={collection}
                     agent={agent}
                     cell={cell}
+                    selected={selectedKeys.has(key)}
+                    selectDisabled={batchApply.executing}
+                    onToggleSelect={() =>
+                      setSelectedKeys((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(key)) next.delete(key);
+                        else next.add(key);
+                        return next;
+                      })
+                    }
                     onFilterCollection={setCollectionFilter}
                     onFilterAgent={setAgentFilter}
                     onAction={handleSkillAction}
@@ -523,6 +677,18 @@ export default function SkillsPage({
           executing={directApply.executing}
           onConfirm={confirmTakeover}
           onClose={() => setPendingTakeover(null)}
+        />
+      )}
+
+      {pendingBatch && (
+        <ConfirmModal
+          title={`批量${pendingBatch.actionLabel}（${pendingBatch.rows.length} 行）`}
+          description={`将对 ${pendingBatch.rows.length} 行执行${pendingBatch.actionLabel}。其中 ${pendingBatch.unmanagedCount} 行存在外部链接内容，确认后将被${pendingBatch.action === "add" ? "替换" : "移除"}（此操作会修改你的文件系统）。`}
+          risk="write-local"
+          confirmLabel={`确认${pendingBatch.actionLabel}`}
+          executing={batchApply.executing}
+          onConfirm={confirmBatch}
+          onClose={() => setPendingBatch(null)}
         />
       )}
     </div>

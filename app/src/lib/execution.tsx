@@ -33,6 +33,8 @@ export interface ExecuteRequest {
   args?: string[];
   /** 人类可读的动作名，如「收敛 mcp 域」。 */
   label: string;
+  /** 批量编排时压掉单行结果 toast（执行记录、run_id、查询刷新、错误返回全部保留），由调用方统一汇总反馈。 */
+  silent?: boolean;
 }
 
 const ExecutionContext = createContext<ExecutionContextValue | null>(null);
@@ -66,7 +68,7 @@ export function ExecutionProvider({ children }: { children: ReactNode }) {
       } catch (err) {
         const message = engineErrorMessage(err);
         patch({ status: "failed", finishedAt: Date.now(), bridgeError: message });
-        toast.error(`${request.label} 调用失败：${message}`);
+        if (!request.silent) toast.error(`${request.label} 调用失败：${message}`);
         void queryClient.invalidateQueries({ queryKey: engineKeys.all });
         return null;
       }
@@ -74,10 +76,12 @@ export function ExecutionProvider({ children }: { children: ReactNode }) {
       const ok = envelope.ok;
       patch({ status: ok ? "ok" : "failed", finishedAt: Date.now(), envelope });
       const firstError: Diagnostic | undefined = envelope.errors[0];
-      if (ok) {
-        toast.success(`${request.label}完成`);
-      } else {
-        toast.error(`${request.label} 失败：${firstError?.message ?? "详见任务记录"}`);
+      if (!request.silent) {
+        if (ok) {
+          toast.success(`${request.label}完成`);
+        } else {
+          toast.error(`${request.label} 失败：${firstError?.message ?? "详见任务记录"}`);
+        }
       }
       void queryClient.invalidateQueries({ queryKey: engineKeys.all });
       return envelope;
