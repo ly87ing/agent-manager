@@ -104,6 +104,92 @@ describe("Agents 页写动作", () => {
   });
 });
 
+describe("Agents 页动作执行反馈", () => {
+  function pendingApplyRoutes(): { routes: Record<string, Envelope | (() => Promise<Envelope>)>; release: () => void } {
+    let release: (() => void) | null = null;
+    const pending: Record<string, Envelope | (() => Promise<Envelope>)> = {
+      ...routes(false),
+      "agents:apply": () =>
+        new Promise<Envelope>((resolve) => {
+          release = () => resolve(makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }));
+        }),
+    };
+    return { routes: pending, release: () => release?.() };
+  }
+
+  it("升级 label 与按钮 title 携带版本对照（当前 → 最新）", async () => {
+    renderWithEngine(<AgentsPage />, routes(false));
+    const upgrade = await screen.findByTestId("action-upgrade-agents:claude-code");
+    expect(upgrade).toHaveAttribute("title", expect.stringContaining("2.0.0 → 2.1.3"));
+
+    await userEvent.click(upgrade);
+    expect(await screen.findByText("升级 Claude Code（2.0.0 → 2.1.3）完成")).toBeInTheDocument();
+  });
+
+  it("升级 label 缺版本时用「未知」占位", async () => {
+    const unknownRoutes = routes(false);
+    unknownRoutes["agents:status"] = makeEnvelope(
+      {
+        domain: "agents",
+        elements: [
+          makeElement({
+            id: "agents:claude-code",
+            domain: "agents",
+            spec: { display_name: "Claude Code", bin: "claude", preferred_provider: "npm", providers: { npm: { managed: true } } },
+            policy: { enabled: true },
+            observed: { providers: ["npm"], classified: { managed: ["npm"], deprecated: [], system_only: [], unsupported: [] }, installed: true, preferred_active: true },
+            state: "managed-ok",
+            freshness: makeFreshness({ state: "behind", current: "1.2.3", upstream: null }),
+            actions: [{ id: "upgrade", risk: "network", needs_lock: true, offline_ok: false }],
+          }),
+        ],
+      },
+      { command: "agents.status" },
+    );
+    renderWithEngine(<AgentsPage />, unknownRoutes);
+
+    await userEvent.click(await screen.findByTestId("action-upgrade-agents:claude-code"));
+    expect(await screen.findByText("升级 Claude Code（1.2.3 → 未知）完成")).toBeInTheDocument();
+  });
+
+  it("升级点击后立即进入执行态：按钮转 spinner、同卡其它动作禁用，结束后恢复", async () => {
+    const pending = pendingApplyRoutes();
+    const { calls } = renderWithEngine(<AgentsPage />, pending.routes);
+    const upgrade = await screen.findByTestId("action-upgrade-agents:claude-code");
+
+    await userEvent.click(upgrade);
+    await waitFor(() => expect(upgrade).toHaveTextContent("正在执行…"));
+    expect(upgrade.querySelector("svg.animate-spin")).not.toBeNull();
+    expect(upgrade).toBeDisabled();
+    expect(screen.getByTestId("action-uninstall-agents:claude-code")).toBeDisabled();
+
+    pending.release();
+    await waitFor(() => expect(screen.getByTestId("action-upgrade-agents:claude-code")).toHaveTextContent("升级"));
+    expect(screen.getByTestId("action-uninstall-agents:claude-code")).toBeEnabled();
+    expect(calls.filter((call) => call.command === "agents:apply")).toHaveLength(1);
+  });
+
+  it("卸载确认后：弹窗关闭，卡片卸载按钮保持执行态直到执行结束", async () => {
+    const pending = pendingApplyRoutes();
+    renderWithEngine(<AgentsPage />, pending.routes);
+    await userEvent.click(await screen.findByTestId("action-uninstall-agents:claude-code"));
+
+    await screen.findByRole("dialog", { name: "卸载 Claude Code" });
+    await userEvent.type(screen.getByTestId("confirm-modal-input"), "agents:claude-code");
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    const uninstall = screen.getByTestId("action-uninstall-agents:claude-code");
+    await waitFor(() => expect(uninstall).toHaveTextContent("正在执行…"));
+    expect(uninstall.querySelector("svg.animate-spin")).not.toBeNull();
+    expect(screen.getByTestId("action-upgrade-agents:claude-code")).toBeDisabled();
+
+    pending.release();
+    await waitFor(() => expect(screen.getByTestId("action-uninstall-agents:claude-code")).toHaveTextContent("卸载"));
+    expect(screen.getByTestId("action-upgrade-agents:claude-code")).toBeEnabled();
+  });
+});
+
 describe("Agents 页文案", () => {
   it("中文动作与安装方式措辞：无误导性 enabled 开关、无官方/推荐断言", async () => {
     renderWithEngine(<AgentsPage />, routes(false));
@@ -262,5 +348,34 @@ describe("自定义助手的安装/升级确认", () => {
 
     expect(calls.some((call) => call.command === "agents:apply")).toBe(false);
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+  });
+
+  it("自定义助手升级：确认后 apply label 携带版本对照", async () => {
+    const custom = customRoutes();
+    custom["agents:status"] = makeEnvelope(
+      {
+        domain: "agents",
+        elements: [
+          makeElement({
+            id: "agents:my-agent",
+            domain: "agents",
+            spec: { display_name: "My Agent", bin: "my-agent", providers: { custom: { managed: true } } },
+            policy: { enabled: true },
+            observed: { providers: ["custom"], classified: { managed: ["custom"], deprecated: [], system_only: [], unsupported: [] }, installed: true, preferred_active: true },
+            state: "managed-ok",
+            freshness: makeFreshness({ state: "behind", current: "0.9.0", upstream: "1.0.0" }),
+            actions: [{ id: "upgrade", risk: "network", needs_lock: true, offline_ok: false }],
+          }),
+        ],
+      },
+      { command: "agents.status" },
+    );
+    renderWithEngine(<AgentsPage />, custom);
+
+    await userEvent.click(await screen.findByTestId("action-upgrade-agents:my-agent"));
+    await screen.findByRole("dialog", { name: "升级 My Agent" });
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+
+    expect(await screen.findByText("升级 My Agent（0.9.0 → 1.0.0）完成")).toBeInTheDocument();
   });
 });

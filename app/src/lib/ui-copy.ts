@@ -42,6 +42,13 @@ export function freshnessLabel(freshness: Freshness): string {
 
 export const FRESHNESS_STALE_NOTE = "检查结果较旧";
 
+/** 升级/更新动作的版本对照（当前 → 最新）；缺失的一侧用「未知」占位。 */
+export function versionRangeHint(freshness: Freshness): string {
+  const current = freshness.current ? shortVersion(freshness.current) : "未知";
+  const upstream = freshness.upstream ? shortVersion(freshness.upstream) : "未知";
+  return `${current} → ${upstream}`;
+}
+
 // ---------- 矩阵单元格 ----------
 
 /** MCP 服务 × 助手 配置状态。 */

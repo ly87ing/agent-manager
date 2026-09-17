@@ -9,6 +9,7 @@ import type { AuditData, EngineElement, FreshnessState, StatusData } from "../li
 import { runEngine, toDiagnostic } from "../lib/engine";
 import { engineKeys, useEngineQuery, useRefreshUpstream } from "../lib/queries";
 import { useExecutions } from "../lib/execution";
+import { COPY, versionRangeHint } from "../lib/ui-copy";
 import { useDirectApply } from "../lib/useDirectApply";
 import { cn, formatCheckedAt, humanizeCacheAge, isCacheStale } from "../lib/utils";
 
@@ -95,7 +96,7 @@ export default function UpdatesPage() {
     void directApply
       .apply({
         command: `${element.domain}:apply`,
-        label: `更新 ${element.id}`,
+        label: `更新 ${element.id}（${versionRangeHint(element.freshness)}）`,
         args: ["--only", element.id, "--action", convergeAction(element.domain)],
       })
       .finally(() => {
@@ -129,10 +130,11 @@ export default function UpdatesPage() {
     void (async () => {
       try {
         for (const group of domainGroups) {
+          const versions = group.items.map((el) => `${el.id} ${versionRangeHint(el.freshness)}`).join("、");
           const envelope = await execute({
             command: `${group.key}:apply`,
             args: [...group.ids.flatMap((id) => ["--only", id]), "--action", group.action],
-            label: `更新 ${group.label}`,
+            label: `更新 ${group.label}（${versions}）`,
           });
           if (!envelope || !envelope.ok) return;
         }
@@ -181,8 +183,12 @@ export default function UpdatesPage() {
             behindElements.length === 0 || anyApplyInFlight ? "cursor-not-allowed bg-muted text-muted-foreground" : "bg-success hover:bg-success/90",
           )}
         >
-          <PlayCircle className="h-4 w-4" aria-hidden />
-          全部更新（{behindElements.length}）
+          {batchUpdating ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          ) : (
+            <PlayCircle className="h-4 w-4" aria-hidden />
+          )}
+          {batchUpdating ? COPY.executing : `全部更新（${behindElements.length}）`}
         </button>
         <button
           type="button"
@@ -220,6 +226,7 @@ export default function UpdatesPage() {
             {elements.map((element) => {
               const stale = isCacheStale(element.freshness.cache_age_sec);
               const rowPending = refreshOne.isPending && pendingRowId === element.id;
+              const rowApplying = rowApplyPending.has(element.id);
               return (
                 <tr key={element.id} data-testid={`update-row-${element.id}`} className="border-b last:border-0">
                   <td className="py-2 pr-4 font-mono text-xs text-foreground">{element.id}</td>
@@ -264,17 +271,22 @@ export default function UpdatesPage() {
                           title={
                             offline && element.domain === "agents"
                               ? "离线模式下不可用（升级/安装需要联网）"
-                              : "更新此项：直接执行，目标被外部修改时会拒绝覆盖"
+                              : rowApplying
+                                ? COPY.executing
+                                : `更新此项（${versionRangeHint(element.freshness)}）：直接执行，目标被外部修改时会拒绝覆盖`
                           }
                           onClick={() => runRowApply(element)}
                           className={cn(
-                            "rounded border px-2 py-1 text-xs",
-                            anyApplyInFlight || (offline && element.domain === "agents")
-                              ? "cursor-not-allowed border text-muted-foreground"
-                              : "border-success/30 text-success hover:bg-success/10",
+                            "inline-flex items-center gap-1 rounded border px-2 py-1 text-xs",
+                            rowApplying
+                              ? "border-success/30 text-success"
+                              : anyApplyInFlight || (offline && element.domain === "agents")
+                                ? "cursor-not-allowed border text-muted-foreground"
+                                : "border-success/30 text-success hover:bg-success/10",
                           )}
                         >
-                          更新此项
+                          {rowApplying && <Loader2 className="h-3 w-3 animate-spin" aria-hidden />}
+                          {rowApplying ? COPY.executing : "更新此项"}
                         </button>
                       )}
                     </div>

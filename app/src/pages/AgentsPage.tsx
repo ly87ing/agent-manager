@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, ChevronDown, ChevronRight, Download, RefreshCw, SearchX, Sparkles, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Download, Loader2, RefreshCw, SearchX, Sparkles, Trash2, X } from "lucide-react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { DriftExplanationPanel } from "../components/DriftExplanationPanel";
 import { DefinitionFormDialog } from "../components/DefinitionFormDialog";
@@ -14,6 +14,7 @@ import type { ElementAction, EngineElement, PolicyData, StatusData } from "../li
 import { definitionOrigin } from "../lib/definitionOverlay";
 import type { AgentsObserved, AgentsPolicy, AgentsSpec } from "../lib/observed";
 import { useEngineQuery, useOfflineMode } from "../lib/queries";
+import { COPY, versionRangeHint } from "../lib/ui-copy";
 import { useDirectApply } from "../lib/useDirectApply";
 import { cn } from "../lib/utils";
 
@@ -51,6 +52,7 @@ function PolicyChip({ label, value }: { label: string; value: boolean | undefine
 function AgentCard({
   element,
   customDefinition,
+  runningActionId,
   onEdit,
   onRemove,
   onRequestUninstall,
@@ -60,6 +62,8 @@ function AgentCard({
   element: EngineElement;
   /** true = 定义来自本地数据库（用户新增或改过内置定义）：安装/升级先弹确认。 */
   customDefinition: boolean;
+  /** 页面级确认路径（卸载/自定义定义安装升级）在途的动作 id；确认弹窗关闭后卡片按钮保持执行态。 */
+  runningActionId: string | null;
   onEdit: () => void;
   onRemove: () => void;
   onRequestUninstall: () => void;
@@ -67,6 +71,8 @@ function AgentCard({
   onManageSkills?: (agentId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  /** 本卡直执路径在途的动作 id（点击即置位，apply 结束回落）。 */
+  const [localActionId, setLocalActionId] = useState<string | null>(null);
   const offline = useOfflineMode();
   const directApply = useDirectApply();
   const spec = element.spec as AgentsSpec;
@@ -76,10 +82,13 @@ function AgentCard({
   const installed = observed.installed ?? false;
   const version = installed ? (element.freshness.current ?? "已安装（还没检查过版本）") : "未安装";
   const name = spec.display_name ?? element.id;
+  const busyActionId = localActionId ?? runningActionId;
 
   /** 显式动作点击直接 agents:apply（带精确 --only/--action）；卸载先经独立 ConfirmModal，
-   * 自定义定义的安装/升级也先经 ConfirmModal（命令内容由用户定义提供）。 */
+   * 自定义定义的安装/升级也先经 ConfirmModal（命令内容由用户定义提供）。
+   * 升级 label 携带版本对照（当前 → 最新），点击后按钮立即进入执行态直到 apply 结束。 */
   const runAction = (action: ElementAction) => {
+    if (busyActionId) return;
     if (action.id === "uninstall") {
       onRequestUninstall();
       return;
@@ -89,11 +98,16 @@ function AgentCard({
       return;
     }
     const label = ACTION_META[action.id]?.label ?? action.id;
-    void directApply.apply({
-      command: "agents:apply",
-      label: `${label} ${name}`,
-      args: ["--only", element.id, "--action", action.id],
-    });
+    const applyLabel =
+      action.id === "upgrade" ? `${label} ${name}（${versionRangeHint(element.freshness)}）` : `${label} ${name}`;
+    setLocalActionId(action.id);
+    void directApply
+      .apply({
+        command: "agents:apply",
+        label: applyLabel,
+        args: ["--only", element.id, "--action", action.id],
+      })
+      .finally(() => setLocalActionId(null));
   };
 
   return (
@@ -180,28 +194,29 @@ function AgentCard({
           const meta = ACTION_META[action.id];
           if (!meta) return null;
           const Icon = meta.icon;
-          const disabled = offline && !action.offline_ok;
+          const busy = busyActionId === action.id;
+          const offlineBlocked = offline && !action.offline_ok;
+          /** 任一动作在途时整卡动作禁用（防并发触发），在途按钮自身转 spinner + 执行中文案。 */
+          const disabled = offlineBlocked || busyActionId !== null;
+          const execHint = `${meta.label}${action.id === "upgrade" ? `（${versionRangeHint(element.freshness)}）` : ""}：${
+            customDefinition ? "先弹确认再执行" : "直接执行"
+          }，命令以你的权限运行，结果不能自动撤销`;
+          const title = busy ? COPY.executing : offlineBlocked ? "离线模式下不可用（需要联网）" : execHint;
           return (
             <button
               key={action.id}
               type="button"
               data-testid={`action-${action.id}-${element.id}`}
               disabled={disabled}
-              title={
-                disabled
-                  ? "离线模式下不可用（需要联网）"
-                  : customDefinition
-                    ? `${meta.label}：先弹确认再执行，命令以你的权限运行，结果不能自动撤销`
-                    : `${meta.label}：直接执行，命令以你的权限运行，结果不能自动撤销`
-              }
+              title={title}
               onClick={() => runAction(action)}
               className={cn(
                 "inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs",
-                disabled ? "cursor-not-allowed border text-muted-foreground" : meta.className,
+                busy ? meta.className : disabled ? "cursor-not-allowed border text-muted-foreground" : meta.className,
               )}
             >
-              <Icon className="h-3 w-3" aria-hidden />
-              {meta.label}
+              {busy ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : <Icon className="h-3 w-3" aria-hidden />}
+              {busy ? COPY.executing : meta.label}
             </button>
           );
         })}
@@ -232,6 +247,8 @@ export default function AgentsPage({
   const [form, setForm] = useState<EngineElement | "new" | null>(null);
   const [pendingUninstall, setPendingUninstall] = useState<EngineElement | null>(null);
   const [pendingAction, setPendingAction] = useState<{ element: EngineElement; action: ElementAction } | null>(null);
+  /** 确认弹窗路径（卸载/自定义定义安装升级）在途动作：弹窗确认即关闭，卡片按钮据此保持执行态直到 apply 结束。 */
+  const [runningAction, setRunningAction] = useState<{ elementId: string; actionId: string } | null>(null);
   const [search, setSearch] = useState("");
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="agents:status 调用失败" error={query.error} />;
@@ -287,6 +304,7 @@ export default function AgentsPage({
               onRequestUninstall={() => setPendingUninstall(element)}
               onRequestAction={(action) => setPendingAction({ element, action })}
               onManageSkills={onManageSkills}
+              runningActionId={runningAction?.elementId === element.id ? runningAction.actionId : null}
             />
           ))}
         </div>
@@ -303,11 +321,14 @@ export default function AgentsPage({
           confirmLabel="确认卸载"
           executing={directApply.executing}
           onConfirm={() => {
-            void directApply.apply({
-              command: "agents:apply",
-              label: `卸载 ${uninstallName}`,
-              args: ["--only", uninstallElement.id, "--action", "uninstall", "--allow-uninstall"],
-            });
+            setRunningAction({ elementId: uninstallElement.id, actionId: "uninstall" });
+            void directApply
+              .apply({
+                command: "agents:apply",
+                label: `卸载 ${uninstallName}`,
+                args: ["--only", uninstallElement.id, "--action", "uninstall", "--allow-uninstall"],
+              })
+              .finally(() => setRunningAction(null));
             setPendingUninstall(null);
           }}
           onClose={() => setPendingUninstall(null)}
@@ -322,11 +343,15 @@ export default function AgentsPage({
           confirmLabel={`确认${pendingActionLabel}`}
           executing={directApply.executing}
           onConfirm={() => {
-            void directApply.apply({
-              command: "agents:apply",
-              label: `${pendingActionLabel} ${pendingActionName}`,
-              args: ["--only", pendingAction.element.id, "--action", pendingAction.action.id],
-            });
+            const versionHint = pendingAction.action.id === "upgrade" ? `（${versionRangeHint(pendingAction.element.freshness)}）` : "";
+            setRunningAction({ elementId: pendingAction.element.id, actionId: pendingAction.action.id });
+            void directApply
+              .apply({
+                command: "agents:apply",
+                label: `${pendingActionLabel} ${pendingActionName}${versionHint}`,
+                args: ["--only", pendingAction.element.id, "--action", pendingAction.action.id],
+              })
+              .finally(() => setRunningAction(null));
             setPendingAction(null);
           }}
           onClose={() => setPendingAction(null)}

@@ -449,4 +449,50 @@ describe("UpdatesPage 更新中心", () => {
     expect(calls.filter((c) => c.command === "agents:apply")[0].args).toEqual(["--only", "agents:a-behind", "--action", "upgrade"]);
     expect(calls.some((c) => c.command.endsWith(":plan"))).toBe(false);
   });
+
+  it("行内更新：label 携带版本对照，执行中按钮转 spinner，结束后恢复", async () => {
+    let release: (() => void) | null = null;
+    const routes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = {
+      ...statusRoutes(),
+      "agents:apply": () =>
+        new Promise<Envelope>((resolve) => {
+          release = () => resolve(makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }));
+        }),
+    };
+
+    renderWithEngine(<UpdatesPage />, routes);
+    const rowBtn = await screen.findByTestId("update-agents:a-behind");
+    expect(rowBtn).toHaveAttribute("title", expect.stringContaining("1.0.0 → 2.0.0"));
+
+    await userEvent.click(rowBtn);
+    await waitFor(() => expect(rowBtn).toHaveTextContent("正在执行…"));
+    expect(rowBtn.querySelector("svg.animate-spin")).not.toBeNull();
+
+    release!();
+    expect(await screen.findByText("更新 agents:a-behind（1.0.0 → 2.0.0）完成")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("update-agents:a-behind")).toHaveTextContent("更新此项"));
+  });
+
+  it("全部更新：label 携带各元素版本对照，执行中按钮转 spinner，结束后恢复", async () => {
+    let release: (() => void) | null = null;
+    const routes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = {
+      ...statusRoutes(),
+      "agents:apply": () =>
+        new Promise<Envelope>((resolve) => {
+          release = () => resolve(makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }));
+        }),
+    };
+
+    renderWithEngine(<UpdatesPage />, routes);
+    const updateAllBtn = await screen.findByTestId("update-all-button");
+    expect(updateAllBtn).toHaveTextContent("全部更新（1）");
+
+    await userEvent.click(updateAllBtn);
+    await waitFor(() => expect(updateAllBtn).toHaveTextContent("正在执行…"));
+    expect(updateAllBtn.querySelector("svg.animate-spin")).not.toBeNull();
+
+    release!();
+    expect(await screen.findByText("更新 Agents（agents:a-behind 1.0.0 → 2.0.0）完成")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("update-all-button")).toHaveTextContent("全部更新（1）"));
+  });
 });
