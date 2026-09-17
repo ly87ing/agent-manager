@@ -223,6 +223,13 @@ describe("SkillsPage 三级视图", () => {
     const disabled = screen.getByTitle("codex: disabled");
     expect(disabled).toHaveTextContent("已停用");
     expect(disabled.className).toContain("muted");
+    // 「当前分配版本」列按 state 判定链接存在（引擎恒输出非空 link_path，不能作为存在性依据）：
+    // linked/dead-link 无版本时显示已链接；missing-link/disabled 已分配但无链接，显示已分配
+    const versionCellOf = (title: string) => within(screen.getByTitle(title).closest("tr")!).getAllByRole("cell")[4];
+    expect(versionCellOf("claude-code: linked")).toHaveTextContent("已链接");
+    expect(versionCellOf("codex: dead-link")).toHaveTextContent("已链接");
+    expect(versionCellOf("claude-code: missing-link")).toHaveTextContent("已分配");
+    expect(versionCellOf("codex: disabled")).toHaveTextContent("已分配");
     // 新发现技能进入全部技能列表，可按助手添加；引擎未报告 cell 时不伪造可执行操作
     expect(screen.getAllByText("inbox-one").length).toBeGreaterThan(0);
     expect(screen.getAllByTitle("claude-code: 未配置").length).toBeGreaterThan(0);
@@ -529,5 +536,169 @@ describe("SkillsPage 空态引导与发现失败呈现", () => {
       "技能发现失败[missing-dir]: skill_paths 指向的目录不存在: ghost",
     );
     expect(within(card).getByText(/技能发现失败（missing-dir）/)).toBeInTheDocument();
+  });
+});
+
+describe("SkillsPage 计划外链接（extra-link）接管与取消链接", () => {
+  function extraLinkRoutes(): Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> {
+    return {
+      "skills:status": makeEnvelope(
+        {
+          domain: "skills",
+          elements: [
+            makeElement({
+              id: "skill:agent-skills",
+              domain: "skills",
+              spec: { url: "https://github.com/example/agent-skills.git", skill_paths: ["alpha", "beta", "gamma"], agents: ["codex"] },
+              observed: { repo_cache: "/repo/agent-skills", repo_cached: true, owner_marked: true, discovered: ["alpha", "beta", "gamma"], discovery_inbox: [], extra_links: [], actions: ["update", "disable", "remove"], blocked_reason: null },
+              state: "managed-ok",
+            }),
+            makeElement({
+              id: "skill:agent-skills/alpha",
+              domain: "skills",
+              spec: { collection: "agent-skills", name: "alpha", source_path: "/repo/.../alpha" },
+              policy: { enabled: true, agents: { codex: false } },
+              observed: {
+                agents: {
+                  // 旧体系遗留的外部链接：未分配 + 非受管
+                  codex: { state: "extra-link", link_path: "/home/.codex/skills/alpha", target_dir_exists: true, assigned: false, enabled: false, managed: false, version: null, actions: ["add", "remove"] },
+                },
+                discovery_inbox: false,
+              },
+              state: "managed-ok",
+            }),
+            makeElement({
+              id: "skill:agent-skills/beta",
+              domain: "skills",
+              spec: { collection: "agent-skills", name: "beta", source_path: "/repo/.../beta" },
+              policy: { enabled: true, agents: { codex: false } },
+              observed: {
+                agents: {
+                  // 受管残留链接：未分配但链接指向受管基目录内
+                  codex: { state: "extra-link", link_path: "/home/.codex/skills/beta", target_dir_exists: true, assigned: false, enabled: false, managed: true, version: null, actions: ["add", "remove"] },
+                },
+                discovery_inbox: false,
+              },
+              state: "managed-ok",
+            }),
+            makeElement({
+              id: "skill:agent-skills/gamma",
+              domain: "skills",
+              spec: { collection: "agent-skills", name: "gamma", source_path: "/repo/.../gamma" },
+              policy: { enabled: true, agents: { codex: false } },
+              observed: {
+                agents: {
+                  // 未分配且无链接：维持既有「添加」语义
+                  codex: { state: "not-assigned", link_path: "/home/.codex/skills/gamma", target_dir_exists: true, assigned: false, enabled: false, managed: false, version: null, actions: ["add"] },
+                },
+                discovery_inbox: false,
+              },
+              state: "managed-ok",
+            }),
+          ],
+        },
+        { command: "skills.status" },
+      ),
+      "skills:apply": makeEnvelope(makeApplyResult({ domain: "skills" }), { command: "skills.apply" }),
+    };
+  }
+
+  it("extra-link 行：动作为 纳入管理/取消链接，「当前分配版本」显示未分配，链接存在由状态徽章表达", async () => {
+    renderWithEngine(<SkillsPage />, extraLinkRoutes());
+    await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
+
+    const addBtn = await screen.findByTestId("action-add-skill:agent-skills/alpha-codex");
+    expect(addBtn).toHaveTextContent("纳入管理");
+    expect(addBtn).toHaveAttribute("title", "保存当前技能内容并接管既有链接");
+    const removeBtn = screen.getByTestId("action-remove-skill:agent-skills/alpha-codex");
+    expect(removeBtn).toHaveTextContent("取消链接");
+    expect(removeBtn).toHaveAttribute("title", "移除磁盘上的链接入口，不删除技能本身");
+
+    const row = addBtn.closest("tr")!;
+    expect(within(row).getByTitle("codex: extra-link")).toHaveTextContent("计划外链接");
+    expect(within(row).getByText("未分配")).toBeInTheDocument();
+    expect(within(row).queryByText("已链接")).toBeNull();
+  });
+
+  it("非受管外部链接：纳入管理先弹确认，取消零 apply，确认后 apply 携带 --allow-takeover", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, extraLinkRoutes());
+    await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
+    const addBtn = await screen.findByTestId("action-add-skill:agent-skills/alpha-codex");
+
+    await userEvent.click(addBtn);
+    const dialog = await screen.findByRole("dialog", { name: "纳入管理 alpha @ codex" });
+    expect(dialog).toHaveTextContent(/目标位置存在外部链接内容，确认后将被替换（此操作会修改你的文件系统）/);
+
+    await userEvent.click(screen.getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
+
+    await userEvent.click(addBtn);
+    await screen.findByRole("dialog", { name: "纳入管理 alpha @ codex" });
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+
+    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(1));
+    const applyCalls = calls.filter((call) => call.command === "skills:apply");
+    expect(applyCalls[0].args).toEqual([
+      "--only", "skill:agent-skills/alpha", "--action", "add", "--agent", "codex", "--allow-takeover",
+    ]);
+    expect(applyCalls[0].args).not.toContain("--dry-run");
+    expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
+  });
+
+  it("非受管外部链接：取消链接先弹确认，确认后 apply 以 remove + --allow-takeover 执行", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, extraLinkRoutes());
+    await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
+
+    await userEvent.click(await screen.findByTestId("action-remove-skill:agent-skills/alpha-codex"));
+    const dialog = await screen.findByRole("dialog", { name: "取消链接 alpha @ codex" });
+    expect(dialog).toHaveTextContent(/目标位置存在外部链接内容，确认后将被移除（此操作会修改你的文件系统）/);
+
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(1));
+    expect(calls.filter((call) => call.command === "skills:apply")[0].args).toEqual([
+      "--only", "skill:agent-skills/alpha", "--action", "remove", "--agent", "codex", "--allow-takeover",
+    ]);
+  });
+
+  it("受管残留链接（managed=true）：纳入管理与取消链接均直接执行，不弹确认、不带 --allow-takeover", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, extraLinkRoutes());
+    await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
+
+    await userEvent.click(await screen.findByTestId("action-remove-skill:agent-skills/beta-codex"));
+    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(1));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(calls.filter((call) => call.command === "skills:apply")[0].args).toEqual([
+      "--only", "skill:agent-skills/beta", "--action", "remove", "--agent", "codex",
+    ]);
+
+    await userEvent.click(screen.getByTestId("action-add-skill:agent-skills/beta-codex"));
+    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(2));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const addArgs = calls.filter((call) => call.command === "skills:apply")[1].args;
+    expect(addArgs).toEqual(["--only", "skill:agent-skills/beta", "--action", "add", "--agent", "codex"]);
+    expect(addArgs).not.toContain("--allow-takeover");
+  });
+
+  it("not-assigned 行：add 维持「添加」标签，点击直接 apply，不弹确认、不带 --allow-takeover", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, extraLinkRoutes());
+    await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
+
+    const addBtn = await screen.findByTestId("action-add-skill:agent-skills/gamma-codex");
+    expect(addBtn).toHaveTextContent("添加");
+    const row = addBtn.closest("tr")!;
+    expect(within(row).getByTitle("codex: not-assigned")).toHaveTextContent("未分配");
+    // 「当前分配版本」列：未分配且无链接的行不得误显「已链接」（引擎恒输出非空 link_path，不能据此判定）
+    expect(within(row).getAllByRole("cell")[4]).toHaveTextContent("未分配");
+    expect(within(row).queryByText("已链接")).toBeNull();
+    expect(screen.queryByTestId("action-remove-skill:agent-skills/gamma-codex")).toBeNull();
+
+    await userEvent.click(addBtn);
+    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(1));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const args = calls.filter((call) => call.command === "skills:apply")[0].args;
+    expect(args).toEqual(["--only", "skill:agent-skills/gamma", "--action", "add", "--agent", "codex"]);
+    expect(args).not.toContain("--allow-takeover");
   });
 });

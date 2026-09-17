@@ -116,6 +116,8 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             if domain == "skills" {
                 specs.push(("--agent", ArgValueKind::ElementId));
                 specs.push(("--action", ArgValueKind::SkillAction));
+                // 逐 skill add/remove 的显式接管通道（引擎侧再强制动作范围与非受管判定）
+                specs.push(("--allow-takeover", ArgValueKind::Flag));
             }
             if domain == "mcp" {
                 specs.push(("--agent", ArgValueKind::ElementId));
@@ -645,7 +647,7 @@ mod tests {
         );
         assert!(!bad_action_err.message.contains("skills"));
 
-        // --allow-takeover：仅 mcp:apply 放行（显式接管通道）
+        // --allow-takeover：mcp:apply / hooks:apply / skills:apply 放行（显式接管通道）
         assert!(
             validate_args(
                 "mcp:apply",
@@ -675,10 +677,27 @@ mod tests {
             .is_ok(),
             "hooks:apply --allow-takeover should pass"
         );
+        // skills:apply 放行（逐 skill add/remove 显式接管，引擎侧再强制动作范围）
+        assert!(
+            validate_args(
+                "skills:apply",
+                &[
+                    "--only".into(),
+                    "skill:repo/name".into(),
+                    "--agent".into(),
+                    "codex".into(),
+                    "--action".into(),
+                    "add".into(),
+                    "--allow-takeover".into(),
+                ]
+            )
+            .is_ok(),
+            "skills:apply --allow-takeover should pass"
+        );
         for (command, args) in [
             ("mcp:status", vec!["--allow-takeover".into()]),
             ("hooks:status", vec!["--allow-takeover".into()]),
-            ("skills:apply", vec!["--allow-takeover".into()]),
+            ("skills:status", vec!["--allow-takeover".into()]),
             ("agents:apply", vec!["--allow-takeover".into()]),
             ("rules:apply", vec!["--allow-takeover".into()]),
         ] {

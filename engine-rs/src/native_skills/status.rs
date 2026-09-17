@@ -215,11 +215,15 @@ fn eval_agent_cell(
         };
     }
     if !assigned {
-        let actions = if coll.enabled && agent_info.enabled && available {
-            vec!["add"]
-        } else {
-            vec![]
-        };
+        // 计划外链接（extra-link）：除 add（纳入管理）外暴露 remove（取消链接），
+        // 清理入口不依赖集合/助手启用态；无链接行维持仅 add。
+        let mut actions = Vec::new();
+        if coll.enabled && agent_info.enabled && available {
+            actions.push("add");
+        }
+        if link_exists {
+            actions.push("remove");
+        }
         let st = if link_exists {
             "extra-link"
         } else {
@@ -383,6 +387,7 @@ fn aggregate_skill_agents(
                 "target_dir_exists": agent_info.skills_dir.is_dir(),
                 "assigned": assigned,
                 "enabled": binding_enabled,
+                "managed": ev.is_managed,
                 "version": version,
                 "available_version": available_version,
                 "actions": ev.actions,

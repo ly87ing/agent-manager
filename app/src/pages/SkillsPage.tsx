@@ -12,6 +12,7 @@ import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDial
 import type { EngineElement, PolicyData, PolicyLayers, StatusData } from "../lib/contract";
 import {
   agentCellsOf,
+  type SkillAgentCell,
   type SkillCollectionObserved,
   type SkillCollectionSpec,
   type SkillObserved,
@@ -57,6 +58,10 @@ export default function SkillsPage({
     | { kind: "collection"; element: EngineElement }
     | { kind: "skill"; element: EngineElement; agent: string }
     | null
+  >(null);
+  /** 计划外链接的外部链接接管确认：add=纳入管理、remove=取消链接，确认后携带 --allow-takeover。 */
+  const [pendingTakeover, setPendingTakeover] = useState<
+    { element: EngineElement; agent: string; action: "add" | "remove" } | null
   >(null);
 
   const tabRefs = useRef<Record<"collections" | "skills", HTMLButtonElement | null>>({
@@ -137,9 +142,16 @@ export default function SkillsPage({
   const handleRemoveCollection = (c: EngineElement) =>
     runCollectionAction(c, "remove", `删除集合 ${collName(c)}`);
 
-  /** 技能 × 助手 操作：apply 携带精确 --only/--action/--agent；remove 需先经独立 ConfirmModal。 */
-  const handleSkillAction = (skill: EngineElement, agent: string, action: string) => {
-    if (action === "remove") {
+  /** 技能 × 助手 操作：apply 携带精确 --only/--action/--agent；remove 需先经独立 ConfirmModal。
+   * 计划外链接（extra-link）行：外部链接（managed=false）的 纳入管理/取消链接 先经确认，
+   * 确认后携带 --allow-takeover；受管残留链接（managed=true）直接执行不弹确认。 */
+  const handleSkillAction = (skill: EngineElement, agent: string, action: string, cell: SkillAgentCell | null) => {
+    const isExtraLinkAction = cell?.state === "extra-link" && (action === "add" || action === "remove");
+    if (isExtraLinkAction && cell?.managed === false) {
+      setPendingTakeover({ element: skill, agent, action: action as "add" | "remove" });
+      return;
+    }
+    if (action === "remove" && !isExtraLinkAction) {
       setPendingRemove({ kind: "skill", element: skill, agent });
       return;
     }
@@ -152,7 +164,9 @@ export default function SkillsPage({
       disable: "停用",
       remove: "删除分配",
     };
-    const label = `${labelMap[action] ?? action} ${skillName} @ ${agent}`;
+    const extraLinkLabelMap: Record<string, string> = { add: "纳入管理", remove: "取消链接" };
+    const actionLabel = isExtraLinkAction ? (extraLinkLabelMap[action] ?? action) : (labelMap[action] ?? action);
+    const label = `${actionLabel} ${skillName} @ ${agent}`;
     void directApply.apply({
       command: "skills:apply",
       label,
@@ -212,6 +226,28 @@ export default function SkillsPage({
       });
     }
     setPendingRemove(null);
+  };
+
+  /** 接管确认后执行：apply 在原范围上追加 --allow-takeover（引擎侧仍对真实文件/目录 fail-closed）。 */
+  const confirmTakeover = () => {
+    if (!pendingTakeover) return;
+    const spec = pendingTakeover.element.spec as SkillSpec;
+    const skillName = spec.name ?? pendingTakeover.element.id;
+    const actionLabel = pendingTakeover.action === "add" ? "纳入管理" : "取消链接";
+    void directApply.apply({
+      command: "skills:apply",
+      label: `${actionLabel} ${skillName} @ ${pendingTakeover.agent}`,
+      args: [
+        "--only",
+        pendingTakeover.element.id,
+        "--action",
+        pendingTakeover.action,
+        "--agent",
+        pendingTakeover.agent,
+        "--allow-takeover",
+      ],
+    });
+    setPendingTakeover(null);
   };
 
   return (
@@ -475,6 +511,18 @@ export default function SkillsPage({
           executing={directApply.executing}
           onConfirm={confirmRemove}
           onClose={() => setPendingRemove(null)}
+        />
+      )}
+
+      {pendingTakeover && (
+        <ConfirmModal
+          title={`${pendingTakeover.action === "add" ? "纳入管理" : "取消链接"} ${(pendingTakeover.element.spec as SkillSpec).name ?? pendingTakeover.element.id} @ ${pendingTakeover.agent}`}
+          description={`目标位置存在外部链接内容，确认后将被${pendingTakeover.action === "add" ? "替换" : "移除"}（此操作会修改你的文件系统）。`}
+          risk="write-local"
+          confirmLabel={pendingTakeover.action === "add" ? "确认纳入管理" : "确认取消链接"}
+          executing={directApply.executing}
+          onConfirm={confirmTakeover}
+          onClose={() => setPendingTakeover(null)}
         />
       )}
     </div>

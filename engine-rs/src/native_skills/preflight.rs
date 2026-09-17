@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::paths::{
-    check_not_external_conflict, check_shared_agent_target, is_link_entry, managed_bases,
-    parse_only, repo_base_dir,
+    check_not_external_conflict, check_not_external_conflict_with_takeover,
+    check_shared_agent_target, is_link_entry, managed_bases, parse_only, repo_base_dir,
 };
 use super::persistence::load_bindings_readonly;
 use super::snapshot::verify_skill_version;
@@ -26,6 +26,12 @@ pub fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
         .value("--action")
         .ok_or_else(|| anyhow!("缺少 --action 参数"))?;
     let target = parse_only(only)?;
+    // 显式接管通道：仅逐 skill 的 add/remove 可携带，其余动作与集合级一律拒绝。
+    if req.flag("--allow-takeover")
+        && !(target.skill.is_some() && matches!(action, "add" | "remove"))
+    {
+        bail!("--allow-takeover 仅适用于逐 skill 的 add/remove 动作");
+    }
     let meta = load_metadata(ctx)?;
 
     let fallback_coll = CollectionDef {
@@ -107,7 +113,9 @@ fn preflight_skill_action(
     check_shared_agent_target(agent, agent_targets)?;
 
     let link_path = agent_info.skills_dir.join(skill);
-    check_not_external_conflict(&link_path, bases)?;
+    // 逐 skill add/remove 可携带 --allow-takeover 放行非受管符号链接（其余动作该旗标
+    // 已在入口被拒）；真实文件/目录与缺旗标的非受管链接仍 fail-closed。
+    check_not_external_conflict_with_takeover(&link_path, bases, req.flag("--allow-takeover"))?;
 
     if (action == "add" || action == "enable") && !coll.enabled {
         bail!(

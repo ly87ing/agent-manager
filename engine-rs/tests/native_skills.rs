@@ -1172,3 +1172,356 @@ fn skills_discovery_error_surfaces_on_collection_and_recovers() {
 
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn skills_extra_link_takeover_and_unlink() {
+    let (base, ctx) = temp_ctx("skills-extra-link");
+    let repo_dir = ctx.data_dir.join("repositories").join("takeover-coll");
+    std::fs::create_dir_all(repo_dir.join("alpha")).unwrap();
+    std::fs::write(repo_dir.join("alpha").join("SKILL.md"), "# alpha").unwrap();
+    std::fs::create_dir_all(repo_dir.join("beta")).unwrap();
+    std::fs::write(repo_dir.join("beta").join("SKILL.md"), "# beta").unwrap();
+
+    let set = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "skills.repositories.takeover-coll",
+                "--value",
+                "{\"url\":\"https://example.com/takeover.git\",\"skill_paths\":[\"alpha\",\"beta\"],\"agents\":[\"codex\"]}",
+            ],
+        ),
+    );
+    assert!(set.ok, "{:?}", set.errors);
+
+    // 旧体系遗留：codex 技能目录下的外部符号链接（目标在受管基目录之外）
+    let external_target = ctx.home_dir.join("external-skills").join("alpha");
+    std::fs::create_dir_all(&external_target).unwrap();
+    std::fs::write(external_target.join("SKILL.md"), "# external alpha").unwrap();
+    let link_path = ctx.home_dir.join(".codex").join("skills").join("alpha");
+    std::fs::create_dir_all(link_path.parent().unwrap()).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&external_target, &link_path).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&external_target, &link_path).unwrap();
+
+    // 1. status：extra-link 行提供 add+remove，managed=false，version 为空
+    let st = execute(&ctx, &request("skills:status", &[]));
+    assert!(st.ok, "{:?}", st.errors);
+    let alpha_el = st.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|el| el["id"] == "skill:takeover-coll/alpha")
+        .unwrap();
+    let cell = &alpha_el["observed"]["agents"]["codex"];
+    assert_eq!(cell["state"], "extra-link");
+    assert_eq!(
+        cell["actions"],
+        serde_json::json!(["add", "remove"]),
+        "计划外链接行必须提供 纳入管理(add) 与 取消链接(remove)"
+    );
+    assert_eq!(cell["managed"], false, "外部链接必须标记为非受管");
+    assert!(cell["version"].is_null());
+
+    // 2. 缺旗标 fail-closed：add 与 remove 均拒绝，链接与目标内容保持原样、绑定零写
+    let add_no_flag = execute(
+        &ctx,
+        &request(
+            "skills:apply",
+            &[
+                "--only",
+                "skill:takeover-coll/alpha",
+                "--action",
+                "add",
+                "--agent",
+                "codex",
+            ],
+        ),
+    );
+    assert!(
+        !add_no_flag.ok,
+        "非受管链接缺 --allow-takeover 的 add 必须拒绝"
+    );
+    assert_eq!(add_no_flag.errors[0].code, "SKILL_ERROR");
+    assert!(add_no_flag.errors[0].message.contains("外部非受管链接"));
+    assert!(add_no_flag.errors[0].message.contains("--allow-takeover"));
+
+    let rm_no_flag = execute(
+        &ctx,
+        &request(
+            "skills:apply",
+            &[
+                "--only",
+                "skill:takeover-coll/alpha",
+                "--action",
+                "remove",
+                "--agent",
+                "codex",
+            ],
+        ),
+    );
+    assert!(
+        !rm_no_flag.ok,
+        "非受管链接缺 --allow-takeover 的 remove 必须拒绝"
+    );
+    assert!(rm_no_flag.errors[0].message.contains("--allow-takeover"));
+    assert_eq!(
+        std::fs::read_link(&link_path).unwrap(),
+        external_target,
+        "被拒后外部链接必须保持原样"
+    );
+    assert!(
+        external_target.join("SKILL.md").exists(),
+        "被拒后外部目标内容必须完好"
+    );
+    if let Some(conn) = store::open_readonly(&ctx).unwrap() {
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM skill_bindings", [], |r| r.get(0))
+            .unwrap_or(0);
+        assert_eq!(count, 0, "preflight 拒绝不得写入绑定");
+    }
+
+    // 3. 旗标适用范围：update/enable/disable 与集合级动作携带 --allow-takeover 一律拒绝
+    for action in ["update", "enable", "disable"] {
+        let res = execute(
+            &ctx,
+            &request(
+                "skills:apply",
+                &[
+                    "--only",
+                    "skill:takeover-coll/alpha",
+                    "--action",
+                    action,
+                    "--agent",
+                    "codex",
+                    "--allow-takeover",
+                ],
+            ),
+        );
+        assert!(!res.ok, "{action} 携带 --allow-takeover 必须拒绝");
+        assert!(
+            res.errors[0]
+                .message
+                .contains("仅适用于逐 skill 的 add/remove"),
+            "{action} 拒绝消息须说明旗标适用范围: {}",
+            res.errors[0].message
+        );
+    }
+    let coll_flag = execute(
+        &ctx,
+        &request(
+            "skills:apply",
+            &[
+                "--only",
+                "skill:takeover-coll",
+                "--action",
+                "remove",
+                "--allow-takeover",
+            ],
+        ),
+    );
+    assert!(!coll_flag.ok, "集合级动作携带 --allow-takeover 必须拒绝");
+    assert!(coll_flag.errors[0]
+        .message
+        .contains("仅适用于逐 skill 的 add/remove"));
+
+    // 4. 带旗标 remove（取消链接）：外部链接被移除，链接目标内容保留，审计 takeover=true
+    let rm = execute(
+        &ctx,
+        &request_with_run(
+            "skills:apply",
+            &[
+                "--only",
+                "skill:takeover-coll/alpha",
+                "--action",
+                "remove",
+                "--agent",
+                "codex",
+                "--allow-takeover",
+            ],
+            "extra-unlink-run",
+        ),
+    );
+    assert!(rm.ok, "{:?}", rm.errors);
+    assert!(
+        std::fs::symlink_metadata(&link_path).is_err(),
+        "取消链接后链接入口必须不存在"
+    );
+    assert!(
+        external_target.join("SKILL.md").exists(),
+        "取消链接绝不删除链接目标的内容"
+    );
+    let runs_rm = execute(
+        &ctx,
+        &request_with_run("runs:get", &["--run", "extra-unlink-run"], "audit-unlink"),
+    );
+    assert!(runs_rm.ok, "{:?}", runs_rm.errors);
+    let rm_op = runs_rm.data["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|op| op["operation_type"] == "skills:remove")
+        .expect("必须有 skills:remove 审计记录");
+    assert_eq!(
+        rm_op["detail"]["takeover"], true,
+        "接管删除必须标记 takeover"
+    );
+
+    // 5. 重新放回外部链接，带旗标 add（纳入管理）：快照落地、原子替换、绑定写入
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&external_target, &link_path).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&external_target, &link_path).unwrap();
+    let add = execute(
+        &ctx,
+        &request_with_run(
+            "skills:apply",
+            &[
+                "--only",
+                "skill:takeover-coll/alpha",
+                "--action",
+                "add",
+                "--agent",
+                "codex",
+                "--allow-takeover",
+            ],
+            "extra-takeover-run",
+        ),
+    );
+    assert!(add.ok, "{:?}", add.errors);
+    let new_target = std::fs::read_link(&link_path).unwrap();
+    assert!(
+        new_target.to_string_lossy().contains("skill-versions"),
+        "纳入管理后链接必须指向受管快照目录"
+    );
+    let st_after = execute(&ctx, &request("skills:status", &[]));
+    let cell_after = &st_after.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|el| el["id"] == "skill:takeover-coll/alpha")
+        .unwrap()["observed"]["agents"]["codex"];
+    assert_eq!(cell_after["state"], "linked");
+    assert_eq!(cell_after["assigned"], true);
+    assert_eq!(cell_after["managed"], true);
+    let runs_add = execute(
+        &ctx,
+        &request_with_run(
+            "runs:get",
+            &["--run", "extra-takeover-run"],
+            "audit-takeover",
+        ),
+    );
+    assert!(runs_add.ok, "{:?}", runs_add.errors);
+    let add_op = runs_add.data["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|op| op["operation_type"] == "skills:add")
+        .expect("必须有 skills:add 审计记录");
+    assert_eq!(
+        add_op["detail"]["takeover"], true,
+        "接管替换必须标记 takeover"
+    );
+
+    // 6. 无冲突目标即使带旗标也不算接管：beta 正常 add，审计 takeover=false
+    let add_clean = execute(
+        &ctx,
+        &request_with_run(
+            "skills:apply",
+            &[
+                "--only",
+                "skill:takeover-coll/beta",
+                "--action",
+                "add",
+                "--agent",
+                "codex",
+                "--allow-takeover",
+            ],
+            "extra-clean-run",
+        ),
+    );
+    assert!(add_clean.ok, "{:?}", add_clean.errors);
+    let runs_clean = execute(
+        &ctx,
+        &request_with_run("runs:get", &["--run", "extra-clean-run"], "audit-clean"),
+    );
+    let clean_op = runs_clean.data["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|op| op["operation_type"] == "skills:add")
+        .expect("必须有 beta 的 skills:add 审计记录");
+    assert_eq!(
+        clean_op["detail"]["takeover"], false,
+        "无非受管链接时审计不得标记 takeover"
+    );
+
+    // 7. 受管残留链接：绑定已移除（assigned=false）但受管链接仍在 → extra-link 且 managed=true，
+    //    remove 无需 takeover 旗标即可清理，审计 takeover=false
+    {
+        let conn = store::open_write(&ctx).unwrap();
+        conn.execute(
+            "UPDATE skill_bindings SET assigned = 0, enabled = 0 WHERE collection = 'takeover-coll' AND skill = 'alpha' AND agent = 'codex'",
+            [],
+        )
+        .unwrap();
+    }
+    let st_leftover = execute(&ctx, &request("skills:status", &[]));
+    let cell_leftover = &st_leftover.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|el| el["id"] == "skill:takeover-coll/alpha")
+        .unwrap()["observed"]["agents"]["codex"];
+    assert_eq!(cell_leftover["state"], "extra-link");
+    assert_eq!(cell_leftover["managed"], true, "受管残留链接必须标记为受管");
+    assert_eq!(
+        cell_leftover["actions"],
+        serde_json::json!(["add", "remove"])
+    );
+
+    let rm_managed = execute(
+        &ctx,
+        &request_with_run(
+            "skills:apply",
+            &[
+                "--only",
+                "skill:takeover-coll/alpha",
+                "--action",
+                "remove",
+                "--agent",
+                "codex",
+            ],
+            "extra-managed-rm-run",
+        ),
+    );
+    assert!(
+        rm_managed.ok,
+        "受管残留链接的 remove 无需旗标: {:?}",
+        rm_managed.errors
+    );
+    assert!(std::fs::symlink_metadata(&link_path).is_err());
+    let runs_managed_rm = execute(
+        &ctx,
+        &request_with_run(
+            "runs:get",
+            &["--run", "extra-managed-rm-run"],
+            "audit-managed-rm",
+        ),
+    );
+    let managed_rm_op = runs_managed_rm.data["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|op| op["operation_type"] == "skills:remove")
+        .expect("必须有受管残留的 skills:remove 审计记录");
+    assert_eq!(managed_rm_op["detail"]["takeover"], false);
+
+    let _ = std::fs::remove_dir_all(base);
+}

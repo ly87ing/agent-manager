@@ -87,6 +87,8 @@ export interface SkillAgentCell {
   target_dir_exists?: boolean;
   assigned?: boolean;
   enabled?: boolean;
+  /** 链接是否指向本工具的受管基目录内；false 即外部链接（接管需显式确认）。 */
+  managed?: boolean;
   version?: string | null;
   available_version?: string | null;
   actions?: string[];

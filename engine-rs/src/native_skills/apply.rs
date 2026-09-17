@@ -4,9 +4,10 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
 use super::paths::{
-    atomic_create_or_replace_link, check_not_external_conflict, is_link_entry, managed_bases,
+    atomic_create_or_replace_link, check_not_external_conflict,
+    check_not_external_conflict_with_takeover, is_link_entry, is_unmanaged_link, managed_bases,
     parse_only, repo_base_dir, resolve_link_target, resolve_loose, safe_remove_link,
-    ExpectedLinkState, RollbackGuard,
+    safe_remove_link_with_takeover, ExpectedLinkState, RollbackGuard,
 };
 use super::persistence::{load_bindings_from_conn, load_bindings_readonly, write_binding};
 use super::snapshot::{discover_repo_skills, hash_skill_dir, snapshot_skill, verify_skill_version};
@@ -27,6 +28,12 @@ pub fn apply(ctx: &Context, req: &Request) -> Result<Value> {
         .value("--action")
         .ok_or_else(|| anyhow!("缺少 --action 参数"))?;
     let target = parse_only(only)?;
+    // 显式接管通道：仅逐 skill 的 add/remove 可携带，其余动作与集合级一律拒绝。
+    if req.flag("--allow-takeover")
+        && !(target.skill.is_some() && matches!(action, "add" | "remove"))
+    {
+        bail!("--allow-takeover 仅适用于逐 skill 的 add/remove 动作");
+    }
 
     let result = (|| -> Result<Value> {
         let meta = load_metadata(ctx)?;
@@ -238,7 +245,10 @@ fn apply_skill_add(
             bail!("[{}/{}] skill 已被集合全局禁用，拒绝操作", coll.name, skill);
         }
     }
-    check_not_external_conflict(link_path, bases)?;
+    // 显式接管：--allow-takeover 仅放行非受管符号链接的替换；真实文件/目录仍 fail-closed。
+    let allow_takeover = req.flag("--allow-takeover");
+    check_not_external_conflict_with_takeover(link_path, bases, allow_takeover)?;
+    let takeover = is_unmanaged_link(link_path, bases);
     let content_path = snapshot_skill(source_dir, &ctx.data_dir)?;
     let version = hash_skill_dir(source_dir)?;
 
@@ -262,7 +272,7 @@ fn apply_skill_add(
             Some(&req.run_id),
             "skills:add",
             Some(&format!("{}/{}@{}", coll.name, skill, agent)),
-            Some(&json!({"action": "add", "version": version})),
+            Some(&json!({"action": "add", "version": version, "takeover": takeover})),
         )?;
         tx.commit()?;
         Ok(())
@@ -497,15 +507,18 @@ fn apply_skill_remove(
     let old_version = existing_binding
         .map(|b| b.version.clone())
         .unwrap_or_default();
+    // 显式接管：--allow-takeover 仅放行非受管符号链接的删除；真实文件/目录仍 fail-closed。
+    let allow_takeover = req.flag("--allow-takeover");
+    let takeover = is_unmanaged_link(link_path, bases);
     let mut rollback_guard = RollbackGuard::new();
     if link_path.exists() || is_link_entry(link_path) {
-        check_not_external_conflict(link_path, bases)?;
+        check_not_external_conflict_with_takeover(link_path, bases, allow_takeover)?;
         let old_target = if is_link_entry(link_path) {
             resolve_link_target(link_path).ok()
         } else {
             None
         };
-        safe_remove_link(link_path, bases)?;
+        safe_remove_link_with_takeover(link_path, bases, allow_takeover)?;
         rollback_guard.record_mutation(link_path, old_target, ExpectedLinkState::Absent);
     }
     let res = (move || -> Result<()> {
@@ -515,7 +528,7 @@ fn apply_skill_remove(
             Some(&req.run_id),
             "skills:remove",
             Some(&format!("{}/{}@{}", coll.name, skill, agent)),
-            Some(&json!({"action": "remove"})),
+            Some(&json!({"action": "remove", "takeover": takeover})),
         )?;
         tx.commit()?;
         Ok(())

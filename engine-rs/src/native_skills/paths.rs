@@ -121,16 +121,42 @@ pub fn is_managed_link(link_path: &Path, bases: &[PathBuf]) -> bool {
 }
 
 pub fn check_not_external_conflict(link_path: &Path, bases: &[PathBuf]) -> Result<()> {
+    check_not_external_conflict_with_takeover(link_path, bases, false)
+}
+
+/// 入口为指向受管基目录之外的符号链接（旧体系遗留的计划外链接）。
+/// 真实文件/目录不属于可接管对象，仍由 fail-closed 检查拦截。
+pub fn is_unmanaged_link(link_path: &Path, bases: &[PathBuf]) -> bool {
+    is_link_entry(link_path) && !is_managed_link(link_path, bases)
+}
+
+/// 外部冲突检查（含显式接管通道）：入口不存在或链接指向受管基目录内 → 放行；
+/// 非受管符号链接仅在 allow_takeover=true 时放行（逐 skill add/remove 的显式接管）；
+/// 真实文件/目录与缺旗标的非受管链接一律 fail-closed。
+pub fn check_not_external_conflict_with_takeover(
+    link_path: &Path,
+    bases: &[PathBuf],
+    allow_takeover: bool,
+) -> Result<()> {
     if !link_path.exists() && !is_link_entry(link_path) {
         return Ok(());
     }
-    if !is_managed_link(link_path, bases) {
+    if is_managed_link(link_path, bases) {
+        return Ok(());
+    }
+    if is_link_entry(link_path) {
+        if allow_takeover {
+            return Ok(());
+        }
         bail!(
-            "目标路径已存在外部非受管内容 ({})，拒绝静默覆盖或删除以防损坏用户文件",
+            "目标路径已存在外部非受管链接 ({})，拒绝静默覆盖或删除以防损坏用户文件；如确认接管或移除该链接，请显式携带 --allow-takeover",
             link_path.display()
         );
     }
-    Ok(())
+    bail!(
+        "目标路径已存在外部非受管内容 ({})，拒绝静默覆盖或删除以防损坏用户文件",
+        link_path.display()
+    );
 }
 
 pub fn check_shared_agent_target(
@@ -187,10 +213,20 @@ pub fn atomic_create_or_replace_link(source: &Path, link_path: &Path) -> Result<
 }
 
 pub fn safe_remove_link(link_path: &Path, bases: &[PathBuf]) -> Result<()> {
+    safe_remove_link_with_takeover(link_path, bases, false)
+}
+
+/// 含显式接管通道的移除：allow_takeover=true 时允许删除非受管符号链接；
+/// 真实文件/目录仍 fail-closed，绝不删除。
+pub fn safe_remove_link_with_takeover(
+    link_path: &Path,
+    bases: &[PathBuf],
+    allow_takeover: bool,
+) -> Result<()> {
     if !link_path.exists() && !is_link_entry(link_path) {
         return Ok(());
     }
-    check_not_external_conflict(link_path, bases)?;
+    check_not_external_conflict_with_takeover(link_path, bases, allow_takeover)?;
     if is_link_entry(link_path) {
         std::fs::remove_file(link_path)
             .with_context(|| format!("删除符号链接失败: {}", link_path.display()))?;
