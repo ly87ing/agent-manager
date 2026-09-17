@@ -118,6 +118,13 @@ Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 必须支持新增、�
 - 全部技能矩阵新增勾选列与批量操作栏：批量启用/禁用（直执）与批量纳入管理/取消链接（含非受管行时一次汇总确认并带 `--allow-takeover`）；前端编排为逐行顺序 apply（每行独立 run_id/锁/审计/回滚），单行失败不中断，汇总 toast 反馈（执行通道新增 `silent` 选项抑制单行 toast，单行操作行为不变）。
 - 验证：Vitest 36 files / 313 tests 全部通过（新增批量用例 8 + 单行回归 1）；typecheck/build 通过；`26b94b3` 重建 DMG 通过 `verify:macos` 独立验收。
 
+### 2026-09-17 追加：动作执行反馈与版本提示（`0419d3c`）
+
+- 起因（真机使用反馈）：点击「升级」无任何即时提示，不知道是否点上，也不知道从什么版本升到什么版本。
+- 改动：助手卡片动作点击立即转 spinner「正在执行…」且同卡其余按钮互斥禁用（含卸载/自定义确认弹窗路径的执行态串联）；升级 label 与 title 带版本区间「当前 → 最新」（缺失侧「未知」占位，git hash 缩写），进入 toast 与任务记录；UpdatesPage 行内/批量更新同样补版本与执行态。
+- 顺手修复：jsdom 套件在默认并行度下因资源竞争批量超时的既有 flaky（vite.config.ts testTimeout/hookTimeout 放宽至 20s），修复后默认并行 36 文件 320 用例全绿。
+- 验证：Vitest 320 全绿、typecheck/build 通过；`0419d3c` 重建 DMG 通过 `verify:macos` 独立验收；SHA256 `05f1018010a0cecc1cfbc318ad790778be9865b0bacc34b2e0d3f323d5fa6f73`。
+
 ## 剩余路线图（未排期）
 
 各项均无排期、无指定负责人。
