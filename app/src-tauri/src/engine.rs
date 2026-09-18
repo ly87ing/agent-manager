@@ -49,7 +49,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
     }
     let allowed = match (domain, verb) {
         ("system", "audit" | "discover" | "refresh-upstream") => true,
-        ("secrets", "status") => true,
+        ("secrets", "status" | "set") => true,
         ("runs", "list" | "get" | "clear") => true,
         ("logs", "clear") => true,
         ("policy", "get" | "set" | "delete") => true,
@@ -85,6 +85,11 @@ enum ArgValueKind {
     AgentAction,
     SkillAction,
     McpAction,
+    /// secrets:set 的变量名：与 ${VAR} 占位符同形。
+    VarName,
+    /// secrets:set 的取值：不校验内容（任何密钥形态都可能），只挡控制字符；
+    /// 取值绝不进日志与诊断。
+    SecretValue,
 }
 
 /// 每个命令允许的 flag 集合（命令感知白名单）。
@@ -92,6 +97,10 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
     let (domain, verb) = command.split_once(':').unwrap_or(("", ""));
     let mut specs: Vec<(&'static str, ArgValueKind)> = Vec::new();
     match (domain, verb) {
+        ("secrets", "set") => {
+            specs.push(("--var", ArgValueKind::VarName));
+            specs.push(("--value", ArgValueKind::SecretValue));
+        }
         ("sources", "get") => specs.push(("--key", ArgValueKind::DotKey)),
         ("sources", "set") => {
             specs.push(("--key", ArgValueKind::DotKey));
@@ -218,6 +227,35 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
                     "invalid_args",
                     format!("非法 key 路径 '{value}'"),
                 ))
+            }
+        }
+        ArgValueKind::VarName => {
+            let mut chars = value.chars();
+            let ok = match chars.next() {
+                Some(first) => {
+                    (first.is_ascii_alphabetic() || first == '_')
+                        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+                }
+                None => false,
+            };
+            if ok {
+                Ok(())
+            } else {
+                Err(EngineError::new(
+                    "invalid_args",
+                    format!("非法变量名 '{value}'（须以字母或下划线开头，只含字母、数字与下划线）"),
+                ))
+            }
+        }
+        // 取值本身不回显：任何拒绝消息都只说形状，不带值。
+        ArgValueKind::SecretValue => {
+            if value.chars().any(|c| c.is_control()) {
+                Err(EngineError::new(
+                    "invalid_args",
+                    "凭据取值不能包含控制字符".to_string(),
+                ))
+            } else {
+                Ok(())
             }
         }
         ArgValueKind::JsonValue => serde_json::from_str::<serde_json::Value>(value)

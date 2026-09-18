@@ -221,6 +221,14 @@ export default function TakeoverPage() {
   ).length;
   /** 选中的清理项数量：确认文案要分开说，它删的是链接而不是纳管。 */
   const cleanupCount = selectedKeys.filter((key) => key.startsWith("skill-cleanup:")).length;
+  /** 带密钥的 MCP 条目数：接管不会去读原配置里的明文，用户得自己补填一次。 */
+  const secretCount = selectedKeys.filter((key) => {
+    if (!key.startsWith("mcp:")) return false;
+    const name = key.slice("mcp:".length);
+    const group = mcpGroups.find((item) => item.name === name);
+    const spec = (group?.entries[0]?.spec ?? {}) as { env?: Record<string, unknown>; headers?: Record<string, unknown> };
+    return Object.keys(spec.env ?? {}).length > 0 || Object.keys(spec.headers ?? {}).length > 0;
+  }).length;
 
   if (query.isPending) return <PageLoading text="正在扫描本机资源…" />;
   if (query.isError) return <PageError title="扫描失败" error={query.error} />;
@@ -480,6 +488,9 @@ export default function TakeoverPage() {
               ? `其中 ${replacingCount} 项会替换助手里的同名外部条目（接管后由本工具统一维护）。`
               : "",
             cleanupCount > 0 ? `另有 ${cleanupCount} 条残留链接会被删除（只删链接本身，不动源目录）。` : "",
+            secretCount > 0
+              ? `其中 ${secretCount} 个 MCP 服务需要密钥：接管不会去读原配置里的明文，纳管后要在「密钥」页各填一次，填之前这些服务同步不了。`
+              : "",
           ]
             .filter(Boolean)
             .join("")}

@@ -178,6 +178,10 @@ fn record_diagnostic_log_if_needed(
 /// codes here (CLI maps errors to exit codes); status never writes the DB.
 pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     let start_time = std::time::Instant::now();
+    // 每次执行重新读取本机保存的凭据取值。必须在这里、而不是在 dispatch 里：
+    // apply 的 preflight 在取锁前就跑了，比 dispatch 更早要用到取值。
+    // 桌面端一个进程会连续执行很多次命令，用户刚填的值要当场生效。
+    crate::secret_values::refresh(ctx);
     // system:audit 叶子特判：DispatchResult 无法表达“有效 data + errors”，
     // 且 audit 永不取 apply lock、永不写库，直接在叶子路径组装 envelope。
     if request.command.replace('.', ":") == "system:audit" {
@@ -537,7 +541,7 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
             .map_err(|err| {
                 DispatchError::new(crate::native_aliases::error_code(&err), format!("{err:#}"))
             }),
-        ("secrets", "status") => crate::native_secrets::handle(ctx, request)
+        ("secrets", "status") | ("secrets", "set") => crate::native_secrets::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("SECRET_ERROR", format!("{err:#}"))),
         ("sources", "get") => crate::native_sources::get(ctx, request),

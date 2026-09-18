@@ -73,7 +73,7 @@ pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
         ctx,
         &def,
         &|file| std::fs::read(dir.join(file)).ok(),
-        &|name| std::env::var(name).ok(),
+        &crate::secret_values::lookup,
     )?;
 
     let allow = req.flag("--allow-takeover");
@@ -166,7 +166,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
         ctx,
         &def,
         &|file| std::fs::read(dir.join(file)).ok(),
-        &|name| std::env::var(name).ok(),
+        &crate::secret_values::lookup,
     )?;
 
     let mut takeover = false;

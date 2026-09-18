@@ -63,7 +63,8 @@ fn fresh_context_status_is_empty_offline_aware_and_zero_write() {
     let env = secrets_status(&ctx, &[]);
     assert!(env.ok, "{:?}", env.errors);
     let element = mcp_env_element(&env);
-    assert_eq!(element["spec"]["sources"], json!(["process env"]));
+    // 取值先看用户在界面上填的（saved），再回退进程环境
+    assert_eq!(element["spec"]["sources"], json!(["saved", "process env"]));
     assert_eq!(element["policy"]["enabled"], true);
     assert_eq!(element["observed"]["variables"], json!([]));
     assert_eq!(element["observed"]["unresolved"], 0);

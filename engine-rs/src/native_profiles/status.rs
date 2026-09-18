@@ -72,7 +72,7 @@ fn element(
             ctx,
             def,
             &|file| std::fs::read(dir.join(file)).ok(),
-            &|name| std::env::var(name).ok(),
+            &crate::secret_values::lookup,
         )
         .ok()
     });
@@ -117,7 +117,7 @@ fn element(
             "name": name,
             "kind": if var.is_some() { "reference" } else { "literal" },
             "variable": var,
-            "resolved": var.map(|v| std::env::var(v).is_ok()),
+            "resolved": var.map(crate::secret_values::is_set),
         }));
     }
     if let Some(key) = &def.env_key {
@@ -125,7 +125,7 @@ fn element(
             "name": key,
             "kind": "reference",
             "variable": key,
-            "resolved": std::env::var(key).is_ok(),
+            "resolved": crate::secret_values::is_set(key),
         }));
     }
 

@@ -231,7 +231,7 @@ fn inspect_placeholder_map(definition: &Value, field: &str) -> (Map<String, Valu
     };
     for (key, value) in map {
         if let Some(var) = placeholder_name(value) {
-            let resolved = std::env::var(&var).is_ok();
+            let resolved = crate::secret_values::is_set(&var);
             if !resolved {
                 missing.push(var.clone());
             }
@@ -278,11 +278,11 @@ pub fn resolve_env(definition: &Value, _server: &str) -> Result<Map<String, Valu
                 key
             );
         };
-        match std::env::var(&var) {
-            Ok(resolved) => {
+        match crate::secret_values::lookup(&var) {
+            Some(resolved) => {
                 out.insert(key.clone(), Value::String(resolved));
             }
-            Err(_) => missing.push(var),
+            None => missing.push(var),
         }
     }
     if !missing.is_empty() {
@@ -306,7 +306,7 @@ pub fn resolve_header_vars(definition: &Value, _server: &str) -> Result<()> {
                 key
             );
         };
-        if std::env::var(&var).is_err() {
+        if !crate::secret_values::is_set(&var) {
             missing.push(var);
         }
     }

@@ -191,6 +191,8 @@ export interface SecretsEnvVariable {
   env_key?: string;
   placeholder?: string;
   resolved?: boolean;
+  /** true = 取值保存在本机库里（在这里填过）；false = 取值来自进程环境或还没有。 */
+  stored?: boolean;
   /** "env"（stdio 环境变量）或 "header"（远程 HTTP header 占位符）。 */
   kind?: "env" | "header" | string;
 }
