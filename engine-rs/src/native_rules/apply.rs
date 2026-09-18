@@ -464,7 +464,11 @@ mod tests {
         assert_eq!(result["steps"], json!([]));
         assert_eq!(
             result["skipped"],
-            json!(["rules:codex_global", "rules:claude_global"])
+            json!([
+                "rules:codex_global",
+                "rules:claude_global",
+                "rules:opencode_global"
+            ])
         );
         assert_eq!(operation_log_rows(&ctx).len(), logs_before);
         drop_root(&root);
@@ -521,7 +525,8 @@ mod tests {
         write_policy_disabled_agent(&ctx, "codex");
         let result = apply(&ctx, &req(&[])).unwrap();
         assert_eq!(result["skipped"], json!(["rules:codex_global"]));
-        assert_eq!(result["steps"].as_array().unwrap().len(), 1);
+        // 其余目标（claude、opencode）照常写入
+        assert_eq!(result["steps"].as_array().unwrap().len(), 2);
         assert!(!ctx.home_dir.join(".codex").exists());
         assert!(read_binding(&ctx, "rules:codex_global").is_none());
         assert!(read_binding(&ctx, "rules:claude_global").is_some());

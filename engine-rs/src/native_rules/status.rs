@@ -352,15 +352,16 @@ mod tests {
     }
 
     #[test]
-    fn no_db_no_dirs_returns_two_targets_without_creating_anything() {
+    fn no_db_no_dirs_returns_all_targets_without_creating_anything() {
         let root = temp_root("empty");
         let ctx = ctx_at(&root);
         let status = build_status(&ctx).unwrap();
         assert_eq!(status["domain"], "rules");
         let els = status["elements"].as_array().unwrap();
-        assert_eq!(els.len(), 2);
+        assert_eq!(els.len(), 3);
         assert_eq!(els[0]["id"], "rules:codex_global");
         assert_eq!(els[1]["id"], "rules:claude_global");
+        assert_eq!(els[2]["id"], "rules:opencode_global");
         assert!(!ctx.data_dir.exists());
         assert!(!ctx.home_dir.exists());
         assert_eq!(els[0]["state"], "missing");

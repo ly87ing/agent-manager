@@ -110,7 +110,8 @@ pub const BUILTIN_POLICY_JSON: &str = r#"{
         ],
         "agents": [
           "claude-code",
-          "codex"
+          "codex",
+          "opencode"
         ]
       }
     }

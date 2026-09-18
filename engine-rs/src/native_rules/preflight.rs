@@ -252,21 +252,23 @@ mod tests {
     }
 
     #[test]
-    fn no_db_no_home_defaults_to_two_write_file_actions_and_creates_nothing() {
+    fn no_db_no_home_defaults_to_all_write_file_actions_and_creates_nothing() {
         let root = temp_root("empty");
         let ctx = ctx_at(&root);
         let preflight = run_preflight(&ctx, &[]).unwrap();
         assert_eq!(preflight["domain"], "rules");
         let actions = preflight["actions"].as_array().unwrap();
-        assert_eq!(actions.len(), 2);
+        // 目标全集：codex、claude、opencode
+        assert_eq!(actions.len(), 3);
         assert_eq!(actions[0]["element"], "rules:codex_global");
         assert_eq!(actions[1]["element"], "rules:claude_global");
+        assert_eq!(actions[2]["element"], "rules:opencode_global");
         for action in actions {
             expect_full_action(action);
             assert_eq!(action["before_digest"], Value::Null);
             assert!(action["after_digest"].as_str().is_some());
         }
-        expect_full_summary(&preflight, 2);
+        expect_full_summary(&preflight, 3);
         assert!(!ctx.data_dir.exists());
         assert!(!ctx.home_dir.exists());
         drop_root(&root);
@@ -304,11 +306,14 @@ mod tests {
         let root = temp_root("skip");
         let ctx = ctx_at(&root);
         write_policy_disabled_agent(&ctx, "codex");
-        std::fs::create_dir_all(ctx.home_dir.join(".claude")).unwrap();
-        let claude = &targets()[1];
-        let rendered = current_rendered(&ctx, claude);
-        std::fs::write(ctx.home_dir.join(claude.target), &rendered).unwrap();
-        write_binding(&ctx, &binding_for(&ctx, claude, &rendered));
+        // codex 被停用，其余目标（claude、opencode）都已是受管且一致的状态
+        for target in [&targets()[1], &targets()[2]] {
+            let path = ctx.home_dir.join(target.target);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let rendered = current_rendered(&ctx, target);
+            std::fs::write(&path, &rendered).unwrap();
+            write_binding(&ctx, &binding_for(&ctx, target, &rendered));
+        }
 
         let preflight = run_preflight(&ctx, &[]).unwrap();
         assert_eq!(preflight["actions"].as_array().unwrap().len(), 0);
@@ -419,8 +424,9 @@ mod tests {
         let target_before = std::fs::read(ctx.home_dir.join(codex.target)).unwrap();
 
         let preflight = run_preflight(&ctx, &[]).unwrap();
-        assert_eq!(preflight["actions"].as_array().unwrap().len(), 1);
+        assert_eq!(preflight["actions"].as_array().unwrap().len(), 2);
         assert_eq!(preflight["actions"][0]["element"], "rules:claude_global");
+        assert_eq!(preflight["actions"][1]["element"], "rules:opencode_global");
 
         assert_eq!(std::fs::read(&db).unwrap(), db_before);
         assert_eq!(

@@ -24,8 +24,9 @@ use crate::store;
 pub const KEY_SHARED: &str = "rules.shared";
 pub const KEY_CLAUDE: &str = "rules.claude";
 pub const KEY_CODEX: &str = "rules.codex";
+pub const KEY_OPENCODE: &str = "rules.opencode";
 
-pub const SOURCE_KEYS: [&str; 3] = [KEY_SHARED, KEY_CLAUDE, KEY_CODEX];
+pub const SOURCE_KEYS: [&str; 4] = [KEY_SHARED, KEY_CLAUDE, KEY_CODEX, KEY_OPENCODE];
 
 pub const KEY_HOOKS_CLAUDE: &str = "hooks.claude";
 pub const KEY_HOOKS_CODEX: &str = "hooks.codex";
@@ -85,6 +86,9 @@ pub fn default_value(key: &str) -> Option<&'static str> {
         KEY_SHARED => Some(DEFAULT_SHARED),
         KEY_CLAUDE => Some(DEFAULT_CLAUDE),
         KEY_CODEX => Some(DEFAULT_CODEX),
+        // OpenCode 没有随仓库分发的专用适配正文：默认留空，共享规则照常生效，
+        // 需要专用内容时由用户自己填，不塞一份没核对过的默认文案。
+        KEY_OPENCODE => Some(""),
         _ => None,
     }
 }
@@ -94,6 +98,7 @@ pub fn label_of(key: &str) -> &'static str {
         KEY_SHARED => "共享核心规则",
         KEY_CLAUDE => "Claude 专用适配",
         KEY_CODEX => "Codex 专用适配",
+        KEY_OPENCODE => "OpenCode 专用适配",
         KEY_HOOKS_CLAUDE => "Claude Hooks",
         KEY_HOOKS_CODEX => "Codex Hooks",
         KEY_ALIAS_SHELL => "Shell 别名",

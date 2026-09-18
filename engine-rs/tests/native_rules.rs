@@ -70,11 +70,13 @@ fn status_succeeds_on_fresh_context_without_creating_anything() {
     assert!(env.mode.offline);
     assert!(!env.lock.held);
     let elements = env.data["elements"].as_array().unwrap();
-    assert_eq!(elements.len(), 2);
+    assert_eq!(elements.len(), 3);
     assert_eq!(elements[0]["id"], "rules:codex_global");
     assert_eq!(elements[1]["id"], "rules:claude_global");
-    assert_eq!(elements[0]["state"], "missing");
-    assert_eq!(elements[1]["state"], "missing");
+    assert_eq!(elements[2]["id"], "rules:opencode_global");
+    for element in elements {
+        assert_eq!(element["state"], "missing");
+    }
 
     assert!(!ctx.data_dir.exists(), "status 不得创建 data_dir");
     assert!(!ctx.home_dir.exists(), "status 不得创建 home_dir");

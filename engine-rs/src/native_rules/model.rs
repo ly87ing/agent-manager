@@ -21,9 +21,17 @@ pub(crate) const TARGET_CLAUDE: TargetSpec = TargetSpec {
     target: ".claude/CLAUDE.md",
 };
 
-/// 固定目标列表，稳定顺序：codex 在前，claude 在后。
-pub(crate) fn targets() -> [TargetSpec; 2] {
-    [TARGET_CODEX, TARGET_CLAUDE]
+pub(crate) const TARGET_OPENCODE: TargetSpec = TargetSpec {
+    target_id: "rules:opencode_global",
+    agent_id: "opencode",
+    adapter_key: "rules.opencode",
+    // OpenCode 的全局规则文件（官方文档：~/.config/opencode/AGENTS.md）
+    target: ".config/opencode/AGENTS.md",
+};
+
+/// 固定目标列表，稳定顺序：codex、claude、opencode。
+pub(crate) fn targets() -> [TargetSpec; 3] {
+    [TARGET_CODEX, TARGET_CLAUDE, TARGET_OPENCODE]
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,9 +65,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn targets_are_fixed_in_codex_then_claude_order() {
+    fn targets_are_fixed_in_codex_then_claude_then_opencode_order() {
         let list = targets();
-        assert_eq!(list.len(), 2);
+        assert_eq!(list.len(), 3);
 
         let codex = &list[0];
         assert_eq!(codex.target_id, "rules:codex_global");
@@ -72,6 +80,12 @@ mod tests {
         assert_eq!(claude.agent_id, "claude-code");
         assert_eq!(claude.adapter_key, "rules.claude");
         assert_eq!(claude.target, ".claude/CLAUDE.md");
+
+        let opencode = &list[2];
+        assert_eq!(opencode.target_id, "rules:opencode_global");
+        assert_eq!(opencode.agent_id, "opencode");
+        assert_eq!(opencode.adapter_key, "rules.opencode");
+        assert_eq!(opencode.target, ".config/opencode/AGENTS.md");
     }
 
     #[test]

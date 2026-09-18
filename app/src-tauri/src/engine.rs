@@ -983,7 +983,8 @@ mod tests {
         .unwrap();
         assert!(env.ok, "{:?}", env.errors);
         assert!(!env.mode.offline, "sources 不注入 --offline");
-        assert_eq!(env.data["sources"].as_array().unwrap().len(), 3);
+        // rules 来源四项：shared、claude、codex、opencode
+        assert_eq!(env.data["sources"].as_array().unwrap().len(), 4);
         assert!(!root.join("data").exists(), "sources:get 零写");
         let _ = std::fs::remove_dir_all(root);
     }
@@ -1015,7 +1016,8 @@ mod tests {
         .unwrap();
         assert!(env.ok, "{:?}", env.errors);
         assert!(env.mode.offline, "bridge 必须注入 --offline");
-        assert_eq!(env.data["elements"].as_array().unwrap().len(), 2);
+        // rules 固定三目标：codex、claude、opencode
+        assert_eq!(env.data["elements"].as_array().unwrap().len(), 3);
         assert!(!root.join("data").exists(), "rules:status 零写");
         assert!(!root.join("home").exists(), "rules:status 零写");
         let _ = std::fs::remove_dir_all(root);
