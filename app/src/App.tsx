@@ -1,6 +1,7 @@
 import {
   Activity,
   Bot,
+  LayoutDashboard,
   PackageCheck,
   ScrollText,
   Server,
@@ -10,6 +11,7 @@ import {
 import { useEffect, useState } from "react";
 import { AppLayout, type NavItem } from "./components/AppLayout";
 import AgentsPage from "./pages/AgentsPage";
+import DashboardPage from "./pages/DashboardPage";
 import McpPage from "./pages/McpPage";
 import RulesHooksPage from "./pages/RulesHooksPage";
 import RunsPage from "./pages/RunsPage";
@@ -21,6 +23,7 @@ import { useUpdateCheck } from "./lib/update-check";
 import { PageError, PageLoading } from "./components/PageState";
 
 const NAV: NavItem[] = [
+  { key: "dashboard", label: "总览", icon: LayoutDashboard },
   { key: "agents", label: "助手", icon: Bot },
   { key: "skills", label: "技能", icon: Sparkles },
   { key: "mcp", label: "MCP", icon: Server },
@@ -90,6 +93,7 @@ export default function App() {
     >
       {/* key 驱动重挂载，让页面切换时重放一次轻量进场动画 */}
       <div key={activePage} className="animate-page-in">
+        {activePage === "dashboard" && <DashboardPage />}
         {activePage === "agents" && (
           <AgentsPage
             onManageSkills={(agentId) => {

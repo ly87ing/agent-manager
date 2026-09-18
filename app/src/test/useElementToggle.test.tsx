@@ -50,7 +50,7 @@ describe("useElementToggle 启停开关", () => {
     expect(applyCalls).toHaveLength(1);
     expect(applyCalls[0].args).toEqual(["--only", "aliases:demo"]);
 
-    expect(toastSuccessSpy).toHaveBeenCalledWith(expect.stringContaining("同步 demo"));
+    expect(toastSuccessSpy.mock.calls.at(-1)?.[0]).toContain("同步 demo");
   });
 
   it("policy:set 被引擎拒绝时不执行 apply", async () => {

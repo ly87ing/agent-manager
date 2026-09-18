@@ -354,7 +354,7 @@ describe("McpPage 显式接管通道（--allow-takeover）", () => {
     expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
     expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(toastSuccessSpy).toHaveBeenCalledWith(expect.stringContaining("接管原条目 mcp:take-svc @ claude-code"));
+    expect(toastSuccessSpy.mock.calls.at(-1)?.[0]).toContain("接管原条目 mcp:take-svc @ claude-code");
   });
 
   it("apply 因非冲突原因失败：失败 toast 可观测，不提供接管重试", async () => {

@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   KeyRound,
-  LayoutDashboard,
   Link2,
   Monitor,
   Moon,
@@ -21,7 +20,6 @@ import { useSaveSettings, useSettings } from "../lib/settings";
 import { useTheme, type Theme } from "../lib/theme";
 import { cn } from "../lib/utils";
 import { check } from "@tauri-apps/plugin-updater";
-import DashboardPage from "./DashboardPage";
 import AliasesPage from "./AliasesPage";
 import SecretsPage from "./SecretsPage";
 import UpdatesPage from "./UpdatesPage";
@@ -74,12 +72,6 @@ interface AvailableUpdate {
 }
 
 const ADVANCED_ENTRIES = [
-  {
-    key: "dashboard",
-    title: "总览与诊断",
-    description: "系统总览、运行状态与环境诊断。",
-    icon: LayoutDashboard,
-  },
   {
     key: "aliases",
     title: "终端快捷命令",
@@ -301,7 +293,6 @@ export default function SettingsPage() {
           </button>
           <span className="text-xs text-muted-foreground">/ 高级管理 / {currentEntry?.title}</span>
         </div>
-        {activeAdvanced === "dashboard" && <DashboardPage />}
         {activeAdvanced === "aliases" && <AliasesPage />}
         {activeAdvanced === "secrets" && <SecretsPage />}
         {activeAdvanced === "updates" && <UpdatesPage />}

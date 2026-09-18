@@ -400,7 +400,6 @@ describe("SettingsPage", () => {
     expect(await screen.findByRole("heading", { name: "高级管理" })).toBeInTheDocument();
 
     const expectedKeys = [
-      "dashboard",
       "aliases",
       "secrets",
       "updates",
@@ -410,19 +409,21 @@ describe("SettingsPage", () => {
     for (const key of expectedKeys) {
       expect(screen.getByTestId(`advanced-entry-${key}`)).toBeInTheDocument();
     }
+    // 总览已提到一级导航，不再在高级管理里重复出现
+    expect(screen.queryByTestId("advanced-entry-dashboard")).toBeNull();
     // 2026-09-12 裁决退役：Tools 与快照入口不再出现
     expect(screen.queryByTestId("advanced-entry-tools")).toBeNull();
     expect(screen.queryByTestId("advanced-entry-snapshots")).toBeNull();
     expect(screen.queryByTestId("advanced-entry-sync")).toBeNull();
     expect(screen.queryByText("多设备同步")).toBeNull();
 
-    // 点击总览与诊断下钻
-    await userEvent.click(screen.getByTestId("advanced-entry-dashboard"));
+    // 点击终端快捷命令下钻
+    await userEvent.click(screen.getByTestId("advanced-entry-aliases"));
 
     // 常驻返回设置按钮出现，且在面包屑中展示
     const backButton = await screen.findByTestId("back-to-settings-button");
     expect(backButton).toBeInTheDocument();
-    expect(screen.getByText(/高级管理 \/ 总览与诊断/)).toBeInTheDocument();
+    expect(screen.getByText(/高级管理 \/ 终端快捷命令/)).toBeInTheDocument();
 
     // 点击返回设置
     await userEvent.click(backButton);

@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { effectHint } from "./effectHints";
 import { engineErrorMessage, runEngine } from "./engine";
 import type { Diagnostic, Envelope } from "./contract";
 import { engineKeys } from "./queries";
@@ -78,7 +79,9 @@ export function ExecutionProvider({ children }: { children: ReactNode }) {
       const firstError: Diagnostic | undefined = envelope.errors[0];
       if (!request.silent) {
         if (ok) {
-          toast.success(`${request.label}完成`);
+          // 写入完成不等于助手已经用上：直接把生效条件说清楚
+          const hint = effectHint(request.command, request.args ?? []);
+          toast.success(`${request.label}完成`, hint ? { description: hint } : undefined);
         } else {
           toast.error(`${request.label} 失败：${firstError?.message ?? "详见任务记录"}`);
         }

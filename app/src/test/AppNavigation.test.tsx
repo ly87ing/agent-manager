@@ -32,8 +32,8 @@ function routes() {
   };
 }
 
-describe("App 顶层导航收敛为日常七项", () => {
-  it("侧边栏仅有七项，且精确中文，默认渲染助手页，点击导航可切换页面", async () => {
+describe("App 顶层导航收敛为日常八项", () => {
+  it("侧边栏仅有八项，且精确中文，默认渲染助手页，点击导航可切换页面", async () => {
     setSettingsClient({
       get: async () => dummySettings,
       save: async (preferences) => ({ ...dummySettings, preferences }),
@@ -45,6 +45,7 @@ describe("App 顶层导航收敛为日常七项", () => {
     const navButtons = within(nav).getAllByRole("button");
 
     const expectedLabels = [
+      "总览",
       "助手",
       "技能",
       "MCP",

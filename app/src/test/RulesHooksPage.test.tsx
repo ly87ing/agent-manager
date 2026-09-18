@@ -402,7 +402,7 @@ describe("Hooks 阻塞目标的显式接管入口", () => {
     expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
     expect(calls.some((call) => call.command === "hooks:plan")).toBe(false);
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(toastSuccessSpy).toHaveBeenCalledWith(expect.stringContaining("接管原内容 hooks:codex"));
+    expect(toastSuccessSpy.mock.calls.at(-1)?.[0]).toContain("接管原内容 hooks:codex");
   });
 
   it("blocked/unsafe 且 actual_digest:null 的目标不显示接管按钮", async () => {
