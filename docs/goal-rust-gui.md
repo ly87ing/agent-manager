@@ -289,7 +289,15 @@ Watching for changes in skill/command directories: ~/.claude-work/skills
 即分配给实例的技能确实被该实例加载，主实例目录 `~/.claude/skills` 根本不存在、未被牵连。
 `profileSkillsDir(configDir) = <configDir>/skills` 这个假设由此有了实证。
 
-- 最终 clean x86_64 DMG（`04555d3` 后重建）：`verify:macos` 全部通过；SHA256 `520ab39ffbe94df44ae039d5119cd0e978ace04adb4e97d259b633b33565b084`，8077673 bytes；未签名。
+- 最终 clean x86_64 DMG（`c7f58c3` 后重建）：`verify:macos` 全部通过；SHA256 `31ef45d8ba79d7a4030a289058bd549ad2dd1829e48485a046ffb05fc915e2d5`，8080588 bytes；未签名。
+- 上一版 DMG（`04555d3` 后重建）：`verify:macos` 全部通过；SHA256 `520ab39ffbe94df44ae039d5119cd0e978ace04adb4e97d259b633b33565b084`，8077673 bytes；未签名。
+
+- **配置备份改为带上凭据取值**（`c7f58c3`，用户裁决）：此前不带、换机需重填。现在 export 带
+  `secrets` 段、import 整体恢复，A 机导出 → B 机全新导入 → 变量当场可解析 → 直接同步，写进
+  助手配置的值与 A 机一致。代价是这份文件等同密钥文件：界面因此不再把备份 JSON 铺在屏幕上
+  （只报「N 条定义 · M 份来源 · K 个凭据取值」加保管提示），复制到剪贴板拿到的仍是完整备份；
+  导入差异新增「凭据取值」一节，只列变量名与新增/改动/消失。status、操作记录、差异预览均不
+  含取值。顺带补上一个真缺口：备份的来源清单一直漏了 `rules.opencode`。
 
 其余实测：Hooks 与实例都验了「改自己的东西照常同步且内容保留」「动了本工具写的那部分才拒绝、
 接管后用户内容仍在」；接管保值验了「写回的值与原值一致」且 status/备份/回执均不含明文。
