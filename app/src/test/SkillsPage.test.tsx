@@ -179,6 +179,45 @@ describe("SkillsPage 三级视图", () => {
     expect(calls.filter((call) => call.command === "db:migrate")).toHaveLength(0);
   });
 
+  it("新增集合可选本机目录来源：只写 source_path 并清空 url", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
+    await userEvent.click(await screen.findByTestId("add-collection-button"));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByTestId("collection-name-input"), { target: { value: "vendor-tool" } });
+    await userEvent.click(within(dialog).getByTestId("collection-source-local"));
+    // 切到本机目录后不再要求 git 地址
+    expect(within(dialog).queryByTestId("collection-url-input")).toBeNull();
+    fireEvent.change(within(dialog).getByTestId("collection-source-path-input"), { target: { value: "~/.vendor-tool/skills" } });
+    fireEvent.change(within(dialog).getByTestId("collection-paths-input"), { target: { value: "ones" } });
+    await userEvent.click(within(dialog).getByTestId("collection-form-submit"));
+
+    const setCalls = calls.filter((call) => call.command === "policy:set");
+    expect(setCalls).toHaveLength(1);
+    const write = setCalls[0];
+    expect(write.args[write.args.indexOf("--key") + 1]).toBe("skills.repositories.vendor-tool");
+    expect(JSON.parse(write.args[write.args.indexOf("--value") + 1])).toMatchObject({
+      source_path: "~/.vendor-tool/skills",
+      url: null,
+      skill_paths: ["ones"],
+      _replace: true,
+    });
+    // 保存定义不触发任何执行
+    expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
+  });
+
+  it("本机目录来源填写非法路径时停在表单，不写入", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
+    await userEvent.click(await screen.findByTestId("add-collection-button"));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByTestId("collection-name-input"), { target: { value: "vendor-tool" } });
+    await userEvent.click(within(dialog).getByTestId("collection-source-local"));
+    fireEvent.change(within(dialog).getByTestId("collection-source-path-input"), { target: { value: "relative/skills" } });
+    await userEvent.click(within(dialog).getByTestId("collection-form-submit"));
+
+    expect(await within(dialog).findByText(/绝对路径或以 ~\/ 开头/)).toBeInTheDocument();
+    expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(0);
+  });
+
   it("更新集合：点击直接 skills:apply 限定在所选集合（带 run_id），不取 plan、不开弹窗", async () => {
     const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
     await userEvent.click(await screen.findByTestId("update-collection-agent-skills"));

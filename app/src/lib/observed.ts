@@ -99,7 +99,9 @@ export interface SkillAgentCell {
 export type SkillAgentObserved = SkillAgentCell;
 
 export interface SkillCollectionSpec {
-  url?: string;
+  url?: string | null;
+  /** 本机目录来源（与 url 互斥）：链接直接指向该目录，不做版本快照。 */
+  source_path?: string | null;
   skill_paths?: string[];
   agents?: string[] | null;
   matrix_mode?: boolean;

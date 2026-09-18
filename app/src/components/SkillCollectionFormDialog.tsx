@@ -23,7 +23,10 @@ export function SkillCollectionFormDialog({
   onClose: () => void;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
+  /** 来源二选一：git 仓库（下载到本地后按版本分发）或本地目录（直接链到该目录，内容随其更新）。 */
+  const [sourceKind, setSourceKind] = useState<"git" | "local">(initial?.definition.source_path ? "local" : "git");
   const [url, setUrl] = useState(String(initial?.definition.url ?? ""));
+  const [sourcePath, setSourcePath] = useState(String(initial?.definition.source_path ?? ""));
   const [pathsText, setPathsText] = useState((initial?.definition.skill_paths as string[] | undefined)?.join("\n") ?? "");
   const [selectedAgents, setSelectedAgents] = useState<string[]>((initial?.definition.agents as string[] | undefined) ?? []);
   const [error, setError] = useState<string | null>(null);
@@ -33,14 +36,24 @@ export function SkillCollectionFormDialog({
       setError("名称只能用小写字母/数字/连字符（如 my-skills）");
       return;
     }
-    if (!/^https?:\/\//.test(url.trim()) && !url.trim().startsWith("git@")) {
+    if (sourceKind === "git" && !/^https?:\/\//.test(url.trim()) && !url.trim().startsWith("git@")) {
       setError("仓库地址要以 https:// 或 git@ 开头");
+      return;
+    }
+    if (sourceKind === "local" && !/^(~\/|\/)/.test(sourcePath.trim())) {
+      setError("本地目录要填绝对路径或以 ~/ 开头");
       return;
     }
     const skillPaths = pathsText.split("\n").map((line) => line.trim()).filter(Boolean);
     // 表单负责字段（可选字段显式给出，null 表示清空）；编辑且有完整原定义时以其为基底，
     // 未展示字段原样保留；否则只提交这些字段做片段合并。
-    const owned: Record<string, unknown> = { url: url.trim(), skill_paths: skillPaths.length ? skillPaths : null, agents: selectedAgents.length ? selectedAgents : null };
+    // 两种来源互斥：保存哪一种，另一种就显式清空，避免遗留字段让引擎拒绝。
+    const owned: Record<string, unknown> = {
+      url: sourceKind === "git" ? url.trim() : null,
+      source_path: sourceKind === "local" ? sourcePath.trim() : null,
+      skill_paths: skillPaths.length ? skillPaths : null,
+      agents: selectedAgents.length ? selectedAgents : null,
+    };
     const complete = !initial || fullDefinition != null;
     const definition = initial && fullDefinition ? { ...fullDefinition, ...owned } : owned;
     onSubmit(name, definition, complete);
@@ -61,11 +74,40 @@ export function SkillCollectionFormDialog({
             <input value={name} disabled={!!initial} onChange={(e) => setName(e.target.value)} data-testid="collection-name-input" aria-label="集合名称" className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs" placeholder="my-skills" />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">仓库地址（git）</label>
-            <input value={url} onChange={(e) => setUrl(e.target.value)} data-testid="collection-url-input" className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs" placeholder="https://github.com/example/skills.git" />
+            <span className="mb-1 block text-xs font-medium text-muted-foreground">技能来自哪里</span>
+            <div className="flex gap-3 text-xs">
+              {([
+                { key: "git", label: "git 仓库" },
+                { key: "local", label: "本机目录" },
+              ] as const).map((option) => (
+                <label key={option.key} className="flex items-center gap-1.5 text-foreground">
+                  <input
+                    type="radio"
+                    name="collection-source-kind"
+                    checked={sourceKind === option.key}
+                    onChange={() => setSourceKind(option.key)}
+                    data-testid={`collection-source-${option.key}`}
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </div>
           </div>
+          {sourceKind === "git" ? (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">仓库地址（git）</label>
+              <input value={url} onChange={(e) => setUrl(e.target.value)} data-testid="collection-url-input" className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs" placeholder="https://github.com/example/skills.git" />
+            </div>
+          ) : (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">本机目录（助手目录里的链接直接指向它，内容仍由原处维护）</label>
+              <input value={sourcePath} onChange={(e) => setSourcePath(e.target.value)} data-testid="collection-source-path-input" className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs" placeholder="~/.some-tool/skills" />
+            </div>
+          )}
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">发现范围（每行一个目录名；留空 = 整个仓库）</label>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+              {sourceKind === "git" ? "发现范围（每行一个目录名；留空 = 整个仓库）" : "发现范围（每行一个技能目录名；留空 = 整个目录）"}
+            </label>
             <textarea value={pathsText} onChange={(e) => setPathsText(e.target.value)} rows={3} data-testid="collection-paths-input" className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs" placeholder={"safe-merge-review\nreader-facing-writing"} />
           </div>
           <div>

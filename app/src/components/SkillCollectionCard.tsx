@@ -54,7 +54,7 @@ export function SkillCollectionCard({
           >
             {name}
           </button>
-          <p className="mt-0.5 font-mono text-xs break-all text-muted-foreground">{spec.url ?? "（无 url）"}</p>
+          <p className="mt-0.5 font-mono text-xs break-all text-muted-foreground">{spec.source_path ?? spec.url ?? "（未填来源）"}</p>
         </div>
         <div className="flex items-center gap-2">
           <StateBadge state={collection.state} />
@@ -71,7 +71,13 @@ export function SkillCollectionCard({
           )}
           title={observed.repo_cache}
         >
-          {observed.repo_cached ? "已下载到本地" : "尚未下载"}
+          {spec.source_path
+            ? observed.repo_cached
+              ? "本机目录可用"
+              : "本机目录不存在"
+            : observed.repo_cached
+              ? "已下载到本地"
+              : "尚未下载"}
         </span>
         {inboxCount > 0 && (
           <span
