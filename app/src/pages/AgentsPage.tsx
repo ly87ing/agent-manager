@@ -293,6 +293,8 @@ export default function AgentsPage({
   const directApply = useDirectApply();
   // 启动命令与「终端快捷命令」页共用同一份来源：卡片按助手的可执行名取对应那一条
   const aliasSource = useAliasSource();
+  // 与助手动作分开的执行实例：两者互不占用彼此的在途状态与按钮文案
+  const aliasApply = useDirectApply();
   const [aliasEditing, setAliasEditing] = useState<{ bin: string; name: string; value: string | null } | null>(null);
   const [form, setForm] = useState<EngineElement | "new" | null>(null);
   const [pendingUninstall, setPendingUninstall] = useState<EngineElement | null>(null);
@@ -369,13 +371,13 @@ export default function AgentsPage({
               runningActionId={runningAction?.elementId === element.id ? runningAction.actionId : null}
               aliasValue={aliasOf(element)}
               aliasPreview={aliasPreviewOf(element)}
-              aliasSyncing={directApply.executing}
+              aliasSyncing={aliasApply.executing}
               onEditAlias={() => {
                 const bin = (element.spec as AgentsSpec).bin ?? element.id.replace(/^agents:/, "");
                 setAliasEditing({ bin, name: bin, value: aliasOf(element) });
               }}
               onSyncAliases={() =>
-                void directApply.apply({ command: "aliases:apply", label: "同步终端快捷命令" })
+                void aliasApply.apply({ command: "aliases:apply", label: "同步终端快捷命令" })
               }
             />
           ))}
