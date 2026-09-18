@@ -356,6 +356,36 @@ pub(crate) fn load_definitions(policy: &Value) -> Vec<Result<ProfileDef>> {
     out
 }
 
+/// 本工具在实例 settings.json 里真正拥有的键：env / model / hooks。
+/// 其余根级字段是用户自己的（合并写入时原样保留），因此外部修改检测不该看它们。
+const CLAUDE_SETTINGS_OWNED_KEYS: [&str; 3] = ["env", "model", "hooks"];
+
+/// 某个受管文件里「本工具拥有的那部分」的摘要。
+///
+/// settings.json 是合并写入的，用户可以在里面放自己的设置（permissions、statusLine…），
+/// 拿整文件做外部修改检测会把用户改这些误判成冲突。其余文件整份归本工具，比整文件。
+pub(crate) fn owned_slice_digest(file: &str, bytes: &[u8]) -> String {
+    if file != FILE_CLAUDE_SETTINGS {
+        return crate::native_mcp::model::sha256_hex_bytes(bytes);
+    }
+    let owned = serde_json::from_slice::<Value>(bytes)
+        .ok()
+        .and_then(|v| v.as_object().cloned())
+        .map(|obj| {
+            let mut slice = Map::new();
+            for key in CLAUDE_SETTINGS_OWNED_KEYS {
+                if let Some(value) = obj.get(key) {
+                    slice.insert(key.to_string(), value.clone());
+                }
+            }
+            Value::Object(slice)
+        })
+        .unwrap_or(Value::Null);
+    crate::native_mcp::model::sha256_hex_bytes(
+        serde_json::to_vec(&owned).unwrap_or_default().as_slice(),
+    )
+}
+
 /// 渲染该实例配置目录下的全部受管文件。
 ///
 /// `existing` 给出目标文件的现有字节：Claude 的 `settings.json` 采用合并写入，
@@ -675,5 +705,52 @@ mod tests {
         assert!(!valid_profile_id("-bad"));
         assert!(!valid_profile_id("Bad"));
         assert!(!valid_profile_id("has_underscore"));
+    }
+}
+
+#[cfg(test)]
+mod owned_slice_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn settings(extra: Value) -> Vec<u8> {
+        let mut obj = serde_json::json!({
+            "env": {"A": "1"},
+            "model": "claude-opus-5",
+            "hooks": {}
+        });
+        if let (Some(dst), Some(src)) = (obj.as_object_mut(), extra.as_object()) {
+            for (k, v) in src {
+                dst.insert(k.clone(), v.clone());
+            }
+        }
+        serde_json::to_vec(&obj).unwrap()
+    }
+
+    #[test]
+    fn user_own_settings_do_not_change_the_owned_digest() {
+        let before = owned_slice_digest(FILE_CLAUDE_SETTINGS, &settings(json!({})));
+        let after = owned_slice_digest(
+            FILE_CLAUDE_SETTINGS,
+            &settings(
+                json!({"statusLine": {"type": "command"}, "permissions": {"allow": ["Bash"]}}),
+            ),
+        );
+        assert_eq!(before, after, "用户自己的设置不该被判成本工具那部分变了");
+    }
+
+    #[test]
+    fn touching_an_owned_key_changes_the_digest() {
+        let before = owned_slice_digest(FILE_CLAUDE_SETTINGS, &settings(json!({})));
+        let after = owned_slice_digest(FILE_CLAUDE_SETTINGS, &settings(json!({"env": {"A": "2"}})));
+        assert_ne!(before, after, "本工具拥有的键被改必须检出");
+    }
+
+    #[test]
+    fn other_files_are_compared_whole() {
+        // CLAUDE.md 等整份归本工具：任何一个字节变了都算变了
+        let a = owned_slice_digest(FILE_CLAUDE_RULES, b"x");
+        let b = owned_slice_digest(FILE_CLAUDE_RULES, b"y");
+        assert_ne!(a, b);
     }
 }

@@ -82,20 +82,27 @@ fn element(
     if let (Some(dir), Some(targets)) = (config_dir.as_ref(), rendered.as_ref()) {
         for target in targets {
             let path = dir.join(&target.file);
-            let actual = std::fs::read(&path)
-                .ok()
-                .map(|bytes| sha256_hex_bytes(&bytes));
+            let bytes = std::fs::read(&path).ok();
+            // settings.json 合并写入，只比本工具拥有的键（env/model/hooks）；其余文件
+            // 整份归本工具，比整文件。旧绑定记的是整文件摘要，也照常认。
+            let actual_owned = bytes
+                .as_ref()
+                .map(|b| super::model::owned_slice_digest(&target.file, b));
+            let actual_whole = bytes.as_ref().map(|b| sha256_hex_bytes(b));
+            let actual = actual_whole.clone();
             let known = bindings
                 .get(&(def.id.clone(), target.file.clone()))
                 .map(|b| b.applied_digest.as_str());
             let expected = sha256_hex_bytes(&target.content);
+            let ours_unchanged = match (&actual_owned, &actual_whole, known) {
+                (Some(owned), Some(whole), Some(known)) => owned == known || whole == known,
+                _ => false,
+            };
             let state = match (&actual, known) {
                 (None, _) => "not-materialized",
-                (Some(actual), Some(known)) if actual == known && *actual == expected => {
-                    "managed-ok"
-                }
+                (Some(actual), Some(_)) if ours_unchanged && *actual == expected => "managed-ok",
                 // 本工具写过但内容该更新了：按需要重新写入处理，不算外部改动
-                (Some(actual), Some(known)) if actual == known => "outdated",
+                (Some(_), Some(_)) if ours_unchanged => "outdated",
                 (Some(_), _) => "drifted",
             };
             if actual.is_some() {

@@ -104,19 +104,23 @@ fn check_takeover(
     if !path.is_file() {
         return Ok(false);
     }
-    let actual = sha256_hex_bytes(&std::fs::read(path)?);
+    let bytes = std::fs::read(path)?;
+    let actual = sha256_hex_bytes(&bytes);
+    // settings.json 合并写入，只比本工具拥有的键；旧绑定记的是整文件摘要，
+    // 整文件没变也照常放行（下次写入自动升级），存量用户不会被误报一次。
+    let owned = super::model::owned_slice_digest(file, &bytes);
     let known = match store::open_readonly(ctx)? {
         Some(conn) => load_bindings_from(&conn)?
             .get(&(def.id.clone(), file.to_string()))
             .map(|b| b.applied_digest.clone()),
         None => None,
     };
-    if known.as_deref() == Some(actual.as_str()) {
+    if known.as_deref() == Some(actual.as_str()) || known.as_deref() == Some(owned.as_str()) {
         return Ok(false);
     }
     if !allow {
         bail!(
-            "[{}] {} 已存在且不是本工具写入的那份，拒绝覆盖；确认要接管请显式选择接管",
+            "[{}] {} 里本工具写的那部分被改过，拒绝覆盖；确认要用这里的内容替换它请选择接管",
             def.id,
             file
         );
@@ -209,7 +213,12 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
             rollback(&restore);
             return Err(err);
         }
-        written.push((target.file.clone(), sha256_hex_bytes(&target.content)));
+        // 记「本工具拥有的那部分」的摘要：settings.json 是合并写入，
+        // 用户随后往里加自己的设置不该被判成外部修改。
+        written.push((
+            target.file.clone(),
+            super::model::owned_slice_digest(&target.file, &target.content),
+        ));
     }
 
     let result = (|| -> Result<()> {
