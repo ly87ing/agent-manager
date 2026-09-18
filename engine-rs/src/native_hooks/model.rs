@@ -380,6 +380,35 @@ fn strip_removed_signatures(existing_hooks: &Value, removed: &[RemovedRule]) -> 
     })
 }
 
+/// 只留下命中受管签名的那些 hook 条目——本工具在这个文件里真正拥有的部分。
+///
+/// signature-set 合并的前提就是「用户可以有自己的字段」（model、permissions、
+/// statusLine…），拿整文件做外部修改检测会把用户改这些误判成冲突，每动一次
+/// settings.json 就要点一次接管。只比这一部分才对得上该目标的合并语义。
+pub(crate) fn managed_hooks_slice(
+    existing_hooks: &Value,
+    managed_signatures: &[Signature],
+) -> Value {
+    strip_hooks_where(existing_hooks, &|event, matcher, command| {
+        !managed_signatures.contains(&(
+            event.to_string(),
+            matcher.map(str::to_string),
+            command.to_string(),
+        ))
+    })
+}
+
+/// 受管部分的摘要：用于 signature-set 目标的外部修改检测。
+pub(crate) fn managed_slice_digest(current: &Value, managed_signatures: &[Signature]) -> String {
+    let hooks = current
+        .as_object()
+        .and_then(|m| m.get("hooks"))
+        .cloned()
+        .unwrap_or(Value::Object(Map::new()));
+    let slice = managed_hooks_slice(&hooks, managed_signatures);
+    digest_bytes(&render_bytes(&slice))
+}
+
 fn strip_managed_hooks(existing_hooks: &Value, managed_signatures: &[Signature]) -> Value {
     strip_hooks_where(existing_hooks, &|event, matcher, command| {
         managed_signatures.contains(&(
@@ -487,4 +516,64 @@ pub(crate) fn validate_target_hooks(target: &Value) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod managed_slice_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn doc() -> Value {
+        json!({
+            "model": "claude-opus-5",
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "Bash", "hooks": [{"type": "command", "command": "ours"}]},
+                    {"matcher": "Bash", "hooks": [{"type": "command", "command": "theirs"}]}
+                ]
+            }
+        })
+    }
+
+    fn ours() -> Vec<Signature> {
+        vec![(
+            "PreToolUse".to_string(),
+            Some("Bash".to_string()),
+            "ours".to_string(),
+        )]
+    }
+
+    #[test]
+    fn slice_keeps_only_managed_entries() {
+        let hooks = doc().get("hooks").cloned().unwrap();
+        let slice = managed_hooks_slice(&hooks, &ours());
+        let text = serde_json::to_string(&slice).unwrap();
+        assert!(text.contains("ours"), "受管条目必须保留: {text}");
+        assert!(!text.contains("theirs"), "别人的条目不该进受管切片: {text}");
+    }
+
+    #[test]
+    fn user_fields_and_foreign_hooks_do_not_change_managed_digest() {
+        let before = managed_slice_digest(&doc(), &ours());
+        // 用户改自己的根字段、又加了一条自己的 hook：受管部分没变
+        let mut after = doc();
+        after["model"] = json!("claude-sonnet-5");
+        after["statusLine"] = json!({"type": "command"});
+        after["hooks"]["PreToolUse"].as_array_mut().unwrap().push(
+            json!({"matcher": "Edit", "hooks": [{"type": "command", "command": "user-own"}]}),
+        );
+        assert_eq!(before, managed_slice_digest(&after, &ours()));
+    }
+
+    #[test]
+    fn tampering_with_a_managed_hook_changes_the_digest() {
+        let before = managed_slice_digest(&doc(), &ours());
+        let mut tampered = doc();
+        tampered["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = json!("tampered");
+        assert_ne!(
+            before,
+            managed_slice_digest(&tampered, &ours()),
+            "受管 hook 被改必须能检测到"
+        );
+    }
 }

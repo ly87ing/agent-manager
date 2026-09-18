@@ -1133,7 +1133,7 @@ fn codex_foreign_whole_file_takeover_with_flag_replaces_and_marks_audit() {
 }
 
 #[test]
-fn claude_external_modification_takeover_merges_and_preserves_user_fields() {
+fn claude_user_own_edits_do_not_block_and_managed_tampering_still_does() {
     let (base, ctx) = temp_ctx("claude-takeover");
     write_hook_source(
         &ctx,
@@ -1143,7 +1143,9 @@ fn claude_external_modification_takeover_merges_and_preserves_user_fields() {
     let settings = ctx.home_dir.join(".claude/settings.json");
     execute(&ctx, &request("hooks:apply", &["--only", "hooks:claude"])).unwrap_apply();
 
-    // 绑定后外部修改：加用户根字段与用户自有 hook
+    // ---- 用户改自己的东西：根字段 + 自己的 hook ----
+    // settings.json 是用户天天要动的文件（model、permissions、statusLine…），
+    // signature-set 合并的前提就是「用户可以有自己的字段」，因此这不该阻塞。
     let mut current: Value =
         serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
     current["model"] = json!("user-model");
@@ -1153,12 +1155,39 @@ fn claude_external_modification_takeover_merges_and_preserves_user_fields() {
         .push(json!({"hooks": [{"type": "command", "command": "echo user-own"}]}));
     std::fs::write(&settings, serde_json::to_string_pretty(&current).unwrap()).unwrap();
 
-    // 无 flag：apply 维持拒绝
+    let status = execute(&ctx, &request("hooks:status", &[]));
+    assert_ne!(
+        element(&status, "hooks:claude")["state"],
+        "unmanaged-detected",
+        "用户改自己的字段不该被判成外部修改"
+    );
     let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:claude"]));
-    assert!(!env.ok, "无 flag apply 必须拒绝外部修改目标");
+    assert!(env.ok, "用户改自己的东西之后仍须能同步: {:?}", env.errors);
+    let merged: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    assert_eq!(merged["model"], "user-model", "根级用户字段必须保留");
 
-    // 有 flag：signature-set 合并（preflight 动作不标 takeover，形态见私有
-    // preflight 单测；合并天然保留用户内容）
+    // ---- 用户动了本工具写的那条 hook：这才是真冲突 ----
+    let mut tampered: Value =
+        serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    for entry in tampered["hooks"]["SessionStart"].as_array_mut().unwrap() {
+        for hook in entry["hooks"].as_array_mut().unwrap() {
+            if hook["command"] == json!("echo managed-takeover") {
+                hook["command"] = json!("echo tampered");
+            }
+        }
+    }
+    std::fs::write(&settings, serde_json::to_string_pretty(&tampered).unwrap()).unwrap();
+
+    let status = execute(&ctx, &request("hooks:status", &[]));
+    assert_eq!(
+        element(&status, "hooks:claude")["state"],
+        "unmanaged-detected",
+        "受管 hook 被改必须检出"
+    );
+    let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:claude"]));
+    assert!(!env.ok, "无 flag apply 必须拒绝被改过的受管 hook");
+
+    // ---- 接管：合并仍保留用户内容 ----
     let env = execute(
         &ctx,
         &request(
@@ -1180,9 +1209,6 @@ fn claude_external_modification_takeover_merges_and_preserves_user_fields() {
         commands.contains(&"echo managed-takeover"),
         "受管 hook 合入"
     );
-
-    // 两次 apply 的审计：第一次无 flag takeover=false，第二次 takeover=true
-    assert_eq!(audit_takeover_flags(&ctx), vec![false, true]);
     let status = execute(&ctx, &request("hooks:status", &[]));
     assert_eq!(element(&status, "hooks:claude")["state"], "managed-ok");
     let _ = std::fs::remove_dir_all(&base);

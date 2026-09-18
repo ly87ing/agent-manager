@@ -79,7 +79,12 @@ fn decide(
         }
         let expected_value = status::expected_render(spec, &managed_hooks, &removed, None);
         let expected = model::render_bytes(&expected_value);
-        let applied = model::digest_bytes(&expected);
+        // signature-set 目标记受管部分摘要；whole-file 目标记整文件摘要。
+        let applied = if spec.merge == "whole-file" {
+            model::digest_bytes(&expected)
+        } else {
+            model::managed_slice_digest(&expected_value, &managed_signatures)
+        };
         return Ok(Decision::Write {
             expected,
             old_bytes: None,
@@ -100,10 +105,27 @@ fn decide(
     let expected_digest = model::digest_bytes(&expected);
     let actual_digest = model::digest_bytes(&old);
 
+    // signature-set 目标（Claude settings.json）只比本工具拥有的那部分 hook 条目：
+    // 用户改 model/permissions 这类自己的字段不该被判成外部修改。
+    // whole-file 目标（Codex hooks.json）整个文件都归本工具，仍比整文件。
+    let owned_digest = if spec.merge == "whole-file" {
+        actual_digest.clone()
+    } else {
+        model::managed_slice_digest(&current, &managed_signatures)
+    };
+    let expected_owned_digest = if spec.merge == "whole-file" {
+        expected_digest.clone()
+    } else {
+        model::managed_slice_digest(&expected_value, &managed_signatures)
+    };
+
     match binding {
         Some(b) => {
-            if actual_digest != b.applied_digest && !allow_takeover {
-                bail!("目标 {} 存在外部修改，拒绝覆盖", spec.target_id);
+            // 旧绑定存的是整文件摘要：整文件没变就照常放行，并在本次写入时升级为
+            // 受管部分摘要，不需要改表结构也不会对存量用户误报一次。
+            let unchanged = owned_digest == b.applied_digest || actual_digest == b.applied_digest;
+            if !unchanged && !allow_takeover {
+                bail!("目标 {} 的受管 hook 被外部修改，拒绝覆盖", spec.target_id);
             }
             if actual_digest == expected_digest {
                 Ok(Decision::Skip)
@@ -111,7 +133,7 @@ fn decide(
                 Ok(Decision::Write {
                     expected,
                     old_bytes: Some(old),
-                    binding: make_binding(expected_digest),
+                    binding: make_binding(expected_owned_digest),
                 })
             }
         }
@@ -129,10 +151,11 @@ fn decide(
                 })
             } else {
                 // Claude：按签名集合可安全合并有效 JSON（含语义已符合的登记）。
+                // 绑定记的是本工具拥有的那部分，用户的其它字段随后怎么改都不影响。
                 Ok(Decision::Write {
                     expected,
                     old_bytes: Some(old),
-                    binding: make_binding(expected_digest),
+                    binding: make_binding(expected_owned_digest),
                 })
             }
         }

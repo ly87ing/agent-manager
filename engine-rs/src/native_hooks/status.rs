@@ -300,13 +300,21 @@ fn build_element(ctx: &Context, snap: &Snapshot, spec: &TargetSpec) -> Result<Va
                 .filter(|s| !present.contains(s))
                 .count() as u64;
             let removed_present = count_removed_present(&removed, &present) as u64;
+            // signature-set 目标只比本工具拥有的那部分 hook 条目；whole-file 目标
+            // 整个文件都归本工具，仍比整文件。旧绑定存的是整文件摘要，整文件没变
+            // 也照常放行（下次写入时自动升级），存量用户不会被误报一次。
+            let owned_digest = if spec.merge == "whole-file" {
+                actual_digest.clone()
+            } else {
+                model::managed_slice_digest(&current, &managed_signatures)
+            };
             match binding {
                 Some(b) => {
-                    if actual_digest != b.applied_digest {
+                    if owned_digest != b.applied_digest && actual_digest != b.applied_digest {
                         (
                             "unmanaged-detected",
                             Value::Bool(true),
-                            Value::String("目标文件存在外部修改，拒绝覆盖".to_string()),
+                            Value::String("受管 hook 被外部修改，拒绝覆盖".to_string()),
                             false,
                             missing,
                             removed_present,
