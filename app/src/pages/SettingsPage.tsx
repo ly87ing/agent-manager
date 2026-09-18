@@ -22,7 +22,7 @@ import { useTheme, type Theme } from "../lib/theme";
 import { cn } from "../lib/utils";
 import { check } from "@tauri-apps/plugin-updater";
 import DashboardPage from "./DashboardPage";
-import DomainApplyPage from "./DomainApplyPage";
+import AliasesPage from "./AliasesPage";
 import SecretsPage from "./SecretsPage";
 import UpdatesPage from "./UpdatesPage";
 import PolicyPage from "./PolicyPage";
@@ -83,7 +83,7 @@ const ADVANCED_ENTRIES = [
   {
     key: "aliases",
     title: "终端快捷命令",
-    description: "终端快捷别名配置与同步。",
+    description: "每条命令的启动方式：时区、语言与固定参数。",
     icon: Link2,
   },
   {
@@ -302,9 +302,7 @@ export default function SettingsPage() {
           <span className="text-xs text-muted-foreground">/ 高级管理 / {currentEntry?.title}</span>
         </div>
         {activeAdvanced === "dashboard" && <DashboardPage />}
-        {activeAdvanced === "aliases" && (
-          <DomainApplyPage domain="aliases" title="Aliases" description="终端快捷命令（alias）的同步状态，只改对应配置区块、不动其它内容。" />
-        )}
+        {activeAdvanced === "aliases" && <AliasesPage />}
         {activeAdvanced === "secrets" && <SecretsPage />}
         {activeAdvanced === "updates" && <UpdatesPage />}
         {activeAdvanced === "policy" && <PolicyPage />}

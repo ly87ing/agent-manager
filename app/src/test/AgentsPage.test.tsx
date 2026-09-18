@@ -32,8 +32,86 @@ function routes(offline: boolean): Record<string, Envelope> {
       { command: "agents.status" },
     ),
     "agents:apply": makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }),
+    "sources:get": makeEnvelope(
+      {
+        sources: [
+          {
+            key: "aliases.shell",
+            label: "Shell Aliases",
+            format: "json",
+            revision: "rev-1",
+            value: { timezone: "America/Los_Angeles", lang: "en_US.UTF-8", aliases: {} },
+          },
+        ],
+      },
+      { command: "sources.get" },
+    ),
+    "sources:set": makeEnvelope({ key: "aliases.shell", revision: "rev-2" }, { command: "sources.set" }),
+    "aliases:apply": makeEnvelope(makeApplyResult({ domain: "aliases" }), { command: "aliases.apply" }),
   };
 }
+
+/** 已设启动命令的来源变体（与助手可执行名同名的一条）。 */
+function routesWithAlias(value: string): Record<string, Envelope> {
+  const base = routes(false);
+  base["sources:get"] = makeEnvelope(
+    {
+      sources: [
+        {
+          key: "aliases.shell",
+          label: "Shell Aliases",
+          format: "json",
+          revision: "rev-1",
+          value: { timezone: "America/Los_Angeles", lang: "en_US.UTF-8", aliases: { claude: value } },
+        },
+      ],
+    },
+    { command: "sources.get" },
+  );
+  return base;
+}
+
+describe("助手卡片的启动命令", () => {
+  it("已设置时展示同步后实际生效的那一行", async () => {
+    renderWithEngine(<AgentsPage />, routesWithAlias('TZ="{timezone}" LANG="{lang}" LC_ALL="{lang}" claude --dangerously-skip-permissions'));
+    const preview = await screen.findByTestId("alias-preview-agents:claude-code");
+    expect(preview).toHaveTextContent(
+      `alias claude='TZ="America/Los_Angeles" LANG="en_US.UTF-8" LC_ALL="en_US.UTF-8" claude --dangerously-skip-permissions'`,
+    );
+  });
+
+  it("未设置时给出提示，且不显示同步按钮", async () => {
+    renderWithEngine(<AgentsPage />, routes(false));
+    expect(await screen.findByTestId("alias-preview-agents:claude-code")).toHaveTextContent("还没设置");
+    expect(screen.queryByTestId("sync-alias-agents:claude-code")).toBeNull();
+  });
+
+  it("设置启动命令：预填助手的可执行名，保存只写配置不碰终端文件", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routes(false));
+    await userEvent.click(await screen.findByTestId("edit-alias-agents:claude-code"));
+    const dialog = await screen.findByRole("dialog", { name: "新增启动命令" });
+    expect(screen.getByTestId("alias-name-input")).toHaveValue("claude");
+    expect(screen.getByTestId("alias-command-input")).toHaveValue("claude");
+    await userEvent.type(screen.getByTestId("alias-extra-args-input"), "--dangerously-skip-permissions");
+    await userEvent.selectOptions(screen.getByTestId("alias-timezone-select"), "Asia/Shanghai");
+    await userEvent.click(screen.getByTestId("alias-form-submit"));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "sources:set")).toBe(true));
+    const write = calls.find((call) => call.command === "sources:set")!;
+    const payload = JSON.parse(write.args[write.args.indexOf("--value") + 1]);
+    expect(payload.revision).toBe("rev-1");
+    expect(payload.value.aliases.claude).toBe('TZ="Asia/Shanghai" LANG="{lang}" LC_ALL="{lang}" claude --dangerously-skip-permissions');
+    expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
+    expect(dialog).toBeDefined();
+  });
+
+  it("同步到终端触发 aliases:apply，不影响助手自身动作", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routesWithAlias("claude --foo"));
+    await userEvent.click(await screen.findByTestId("sync-alias-agents:claude-code"));
+    await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
+    expect(calls.some((call) => call.command === "agents:apply")).toBe(false);
+  });
+});
 
 describe("Agents 页写动作", () => {
   it("详情展开为纯状态展示（drift 面板），任何动作组合都不发起 plan", async () => {

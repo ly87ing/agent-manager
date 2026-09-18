@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Check, ChevronDown, ChevronRight, Download, Loader2, RefreshCw, SearchX, Sparkles, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Download, Loader2, RefreshCw, SearchX, Sparkles, Terminal, Trash2, X } from "lucide-react";
+import { AliasEditorDialog } from "../components/AliasEditorDialog";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { DriftExplanationPanel } from "../components/DriftExplanationPanel";
 import { DefinitionFormDialog } from "../components/DefinitionFormDialog";
@@ -11,10 +12,12 @@ import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import { StateBadge } from "../components/StateBadge";
 import type { ElementAction, EngineElement, PolicyData, StatusData } from "../lib/contract";
+import { renderAliasPreview } from "../lib/aliasCommand";
 import { definitionOrigin } from "../lib/definitionOverlay";
 import type { AgentsObserved, AgentsPolicy, AgentsSpec } from "../lib/observed";
 import { useEngineQuery, useOfflineMode } from "../lib/queries";
 import { COPY, versionRangeHint } from "../lib/ui-copy";
+import { useAliasSource } from "../lib/useAliasSource";
 import { useDirectApply } from "../lib/useDirectApply";
 import { cn } from "../lib/utils";
 
@@ -58,6 +61,11 @@ function AgentCard({
   onRequestUninstall,
   onRequestAction,
   onManageSkills,
+  aliasValue,
+  aliasPreview,
+  onEditAlias,
+  onSyncAliases,
+  aliasSyncing,
 }: {
   element: EngineElement;
   /** true = 定义来自本地数据库（用户新增或改过内置定义）：安装/升级先弹确认。 */
@@ -69,6 +77,13 @@ function AgentCard({
   onRequestUninstall: () => void;
   onRequestAction: (action: ElementAction) => void;
   onManageSkills?: (agentId: string) => void;
+  /** 该助手当前的启动命令取值（终端快捷命令来源里与其可执行名同名的一条）；没有则为 null。 */
+  aliasValue: string | null;
+  /** 同步后实际写入终端配置的那一行（已按全局设置渲染）。 */
+  aliasPreview: string | null;
+  onEditAlias: () => void;
+  onSyncAliases: () => void;
+  aliasSyncing: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   /** 本卡直执路径在途的动作 id（点击即置位，apply 结束回落）。 */
@@ -179,6 +194,38 @@ function AgentCard({
         </div>
       )}
 
+      <div className="mt-3 border-t pt-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <Terminal className="h-3.5 w-3.5" aria-hidden /> 启动命令
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              data-testid={`edit-alias-${element.id}`}
+              onClick={onEditAlias}
+              className="rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent"
+            >
+              {aliasValue ? "修改" : "设置"}
+            </button>
+            {aliasValue && (
+              <button
+                type="button"
+                data-testid={`sync-alias-${element.id}`}
+                disabled={aliasSyncing}
+                onClick={onSyncAliases}
+                className="rounded border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs text-primary hover:bg-primary/15 disabled:opacity-50"
+              >
+                {aliasSyncing ? "同步中…" : "同步到终端"}
+              </button>
+            )}
+          </div>
+        </div>
+        <p data-testid={`alias-preview-${element.id}`} className="mt-1.5 break-all font-mono text-[11px] text-muted-foreground">
+          {aliasPreview ?? `还没设置：终端里直接执行 ${spec.bin}，不带固定时区与参数`}
+        </p>
+      </div>
+
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
         <button type="button" onClick={onEdit} className="rounded border px-2.5 py-1 text-xs">编辑命令</button>
         <button type="button" onClick={onRemove} className="rounded border border-destructive/30 px-2.5 py-1 text-xs text-destructive">移除管理</button>
@@ -244,6 +291,9 @@ export default function AgentsPage({
   const policyQuery = useEngineQuery<PolicyData>("policy:get");
   const definitionOps = useDefinitionOps({ section: "agents", domain: "agents" });
   const directApply = useDirectApply();
+  // 启动命令与「终端快捷命令」页共用同一份来源：卡片按助手的可执行名取对应那一条
+  const aliasSource = useAliasSource();
+  const [aliasEditing, setAliasEditing] = useState<{ bin: string; name: string; value: string | null } | null>(null);
   const [form, setForm] = useState<EngineElement | "new" | null>(null);
   const [pendingUninstall, setPendingUninstall] = useState<EngineElement | null>(null);
   const [pendingAction, setPendingAction] = useState<{ element: EngineElement; action: ElementAction } | null>(null);
@@ -262,6 +312,18 @@ export default function AgentsPage({
   /** 内置判定：policy 层已加载且本地数据库无该定义覆盖；未加载到时按自定义处理（先确认再执行）。 */
   const isCustomDefinition = (element: EngineElement) =>
     layers === null || definitionOrigin(layers, "agents", element.id.replace(/^agents:/, "")) === "sqlite";
+  /** 助手的启动命令：来源里与其可执行名同名的那一条；来源还没读到时为 null。 */
+  const aliasOf = (element: EngineElement): string | null => {
+    const bin = (element.spec as AgentsSpec).bin;
+    if (!bin || !aliasSource.source) return null;
+    return aliasSource.source.aliases[bin] ?? null;
+  };
+  const aliasPreviewOf = (element: EngineElement): string | null => {
+    const value = aliasOf(element);
+    const bin = (element.spec as AgentsSpec).bin;
+    if (!value || !bin || !aliasSource.source) return null;
+    return renderAliasPreview(bin, value, { timezone: aliasSource.source.timezone, lang: aliasSource.source.lang });
+  };
   const uninstallElement = pendingUninstall;
   const uninstallName = uninstallElement ? (uninstallElement.spec as AgentsSpec).display_name ?? uninstallElement.id : "";
   const pendingActionName = pendingAction
@@ -305,9 +367,35 @@ export default function AgentsPage({
               onRequestAction={(action) => setPendingAction({ element, action })}
               onManageSkills={onManageSkills}
               runningActionId={runningAction?.elementId === element.id ? runningAction.actionId : null}
+              aliasValue={aliasOf(element)}
+              aliasPreview={aliasPreviewOf(element)}
+              aliasSyncing={directApply.executing}
+              onEditAlias={() => {
+                const bin = (element.spec as AgentsSpec).bin ?? element.id.replace(/^agents:/, "");
+                setAliasEditing({ bin, name: bin, value: aliasOf(element) });
+              }}
+              onSyncAliases={() =>
+                void directApply.apply({ command: "aliases:apply", label: "同步终端快捷命令" })
+              }
             />
           ))}
         </div>
+      )}
+      {aliasEditing && aliasSource.source && (
+        <AliasEditorDialog
+          initialName={aliasEditing.value === null ? undefined : aliasEditing.name}
+          initialValue={aliasEditing.value ?? undefined}
+          defaultCommand={aliasEditing.bin}
+          globals={{ timezone: aliasSource.source.timezone, lang: aliasSource.source.lang }}
+          existingNames={Object.keys(aliasSource.source.aliases)}
+          onSubmit={(name, value) => {
+            const aliases = { ...aliasSource.source!.aliases, [name]: value };
+            void aliasSource.save({ aliases }, `已保存 ${name} 的启动命令，点「同步到终端」写入配置`).then((ok) => {
+              if (ok) setAliasEditing(null);
+            });
+          }}
+          onClose={() => setAliasEditing(null)}
+        />
       )}
       {form && <DefinitionFormDialog existingNames={elements.map((element) => element.id.replace(/^agents:/, ""))} initial={form === "new" ? undefined : { name: form.id.replace(/^agents:/, ""), definition: form.spec }} onClose={() => setForm(null)} onSubmit={(name, definition) => { setForm(null); void definitionOps.saveDefinition({ name, definition, isNew: form === "new" }); }} />}
       {definitionOps.modals}

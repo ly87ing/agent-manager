@@ -666,6 +666,30 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
             { key: "hooks.codex", label: "Codex Hooks", value: { hooks: {} }, revision: "demo-revision-codex", format: "json" },
           ] }, { command: "sources.get" });
         }
+        if (domain === "aliases") {
+          return makeEnvelope(
+            {
+              sources: [
+                {
+                  key: "aliases.shell",
+                  label: "Shell aliases",
+                  format: "json",
+                  revision: "demo-revision-aliases",
+                  value: {
+                    timezone: "America/Los_Angeles",
+                    lang: "en_US.UTF-8",
+                    aliases: {
+                      claude: 'TZ="{timezone}" LANG="{lang}" LC_ALL="{lang}" claude --dangerously-skip-permissions',
+                      codex: 'TZ="{timezone}" LANG="{lang}" LC_ALL="{lang}" codex',
+                      chrome: 'open --env TZ="{timezone}" -n -a "Google Chrome" --args --lang=en-US',
+                    },
+                  },
+                },
+              ],
+            },
+            { command: "sources.get" },
+          );
+        }
         const suffix = domain === "rules" ? "shared" : "shell";
         return makeEnvelope({ sources: [{ key: `${domain}.${suffix}`, label: domain === "rules" ? "共享规则" : "Shell aliases", value: domain === "rules" ? "使用简体中文回答。\n" : {}, revision: "demo-revision", format: domain === "rules" ? "text" : "json" }] }, { command: "sources.get" });
       }
