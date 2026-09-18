@@ -271,6 +271,49 @@ describe("McpPage 空态引导", () => {
   });
 });
 
+describe("MCP 命令可用性提示", () => {
+  it("命令在本机找不到时给出提示；远程服务与可用命令都不提示", async () => {
+    const routes = mcpRoutes();
+    routes["mcp:status"] = makeEnvelope(
+      {
+        domain: "mcp",
+        elements: [
+          makeElement({
+            id: "mcp:missing-tool",
+            domain: "mcp",
+            spec: { command: "not-installed", args: [], agents: null, env: {} },
+            observed: { agents: {}, env: {}, actions: [], command_available: false },
+            state: "not-materialized",
+            freshness: makeFreshness({ state: "not-applicable" }),
+          }),
+          makeElement({
+            id: "mcp:ok-tool",
+            domain: "mcp",
+            spec: { command: "npx", args: [], agents: null, env: {} },
+            observed: { agents: {}, env: {}, actions: [], command_available: true },
+            state: "not-materialized",
+            freshness: makeFreshness({ state: "not-applicable" }),
+          }),
+          makeElement({
+            id: "mcp:remote-one",
+            domain: "mcp",
+            spec: { url: "https://mcp.example.com/sse", headers: {}, agents: null },
+            observed: { agents: {}, headers: {}, actions: [], command_available: null },
+            state: "not-materialized",
+            freshness: makeFreshness({ state: "not-applicable" }),
+          }),
+        ],
+      },
+      { command: "mcp.status" },
+    );
+    renderWithEngine(<McpPage />, routes);
+
+    expect(await screen.findByTestId("command-missing-mcp:missing-tool")).toHaveTextContent("找不到它要执行的命令");
+    expect(screen.queryByTestId("command-missing-mcp:ok-tool")).toBeNull();
+    expect(screen.queryByTestId("command-missing-mcp:remote-one")).toBeNull();
+  });
+});
+
 describe("McpPage 显式接管通道（--allow-takeover）", () => {
   const CONFLICT_MESSAGE = "目标文件 /tmp/demo/.claude.json 中已存在非受管同名条目 'take-svc'，拒绝覆盖以防止冲突";
 

@@ -215,6 +215,15 @@ export function McpServerCard({
         </span>
       </div>
 
+      {observed.command_available === false && (
+        <div
+          data-testid={`command-missing-${element.id}`}
+          className="mt-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"
+        >
+          本机找不到它要执行的命令，助手启动这个服务时会失败。先装好该命令，或改成已装好的命令。
+        </div>
+      )}
+
       {observed.blocked_reason && (
         <div className="mt-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
           受阻原因：{observed.blocked_reason}

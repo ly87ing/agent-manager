@@ -47,6 +47,31 @@ fn make_cell(
     })
 }
 
+/// stdio 命令能否在本机解析（只读：查 PATH 与官方安装器常用的 ~/.local/bin）。
+///
+/// 这是配完之后最容易踩的坑——命令没装，助手启动时才报错。只做存在性判断，
+/// 不执行它，也不对远程服务做网络探测（那要发请求、可能带上鉴权，不适合只读状态）。
+fn command_resolvable(command: &str, home_dir: &std::path::Path) -> bool {
+    if command.contains('/') {
+        return std::path::Path::new(command).is_file();
+    }
+    let mut dirs: Vec<std::path::PathBuf> = std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).collect())
+        .unwrap_or_default();
+    dirs.push(home_dir.join(".local").join("bin"));
+    dirs.into_iter().any(|dir| dir.join(command).is_file())
+}
+
+/// 定义的命令可用性：stdio 给 true/false，远程定义没有本地命令，恒 null。
+fn command_availability(definition: &Value, home_dir: &std::path::Path) -> Value {
+    match definition.get("command").and_then(Value::as_str) {
+        Some(command) if !command.trim().is_empty() => {
+            Value::Bool(command_resolvable(command.trim(), home_dir))
+        }
+        _ => Value::Null,
+    }
+}
+
 fn make_element(
     server: &str,
     spec: Value,
@@ -60,6 +85,7 @@ fn make_element(
     state: &str,
     actions: Vec<Value>,
     freshness: Value,
+    command_available: Value,
 ) -> Value {
     json!({
         "id": format!("mcp:{}", server),
@@ -71,6 +97,7 @@ fn make_element(
             "headers": headers,
             "agents": agent_cells,
             "actions": obs_actions,
+            "command_available": command_available,
             "blocked_reason": blocked_reason.map(Value::String).unwrap_or(Value::Null)
         },
         "state": state,
@@ -206,6 +233,8 @@ fn build_orphan_element(
         "drifted",
         orphan_actions,
         freshness_not_applicable(),
+        // 孤儿元素只剩残留配置，没有库内定义可判定命令
+        Value::Null,
     )
 }
 
@@ -553,6 +582,7 @@ pub fn status(ctx: &Context) -> Result<Value> {
             overall_state,
             elem_actions,
             freshness,
+            command_availability(def, &ctx.home_dir),
         ));
     }
 

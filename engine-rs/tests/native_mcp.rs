@@ -7780,3 +7780,70 @@ fn mcp_takeover_requires_flag_and_replaces_unmanaged_entry() {
 
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// 命令可用性：stdio 报 true/false，远程恒 null；判定只读、不执行命令。
+#[test]
+fn status_reports_whether_the_stdio_command_exists() {
+    let (root, ctx) = temp_ctx("command-availability");
+    // 本机确实存在的命令放进 ~/.local/bin（resolve 的既有查找位置）
+    let bin_dir = ctx.home_dir.join(".local/bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    std::fs::write(bin_dir.join("present-tool"), "#!/bin/sh\n").unwrap();
+
+    for (name, definition) in [
+        (
+            "with-command",
+            r#"{"command":"present-tool","args":[],"_delete":false,"_replace":true}"#,
+        ),
+        (
+            "missing-command",
+            r#"{"command":"definitely-not-installed-xyz","args":[],"_delete":false,"_replace":true}"#,
+        ),
+        (
+            "remote-one",
+            r#"{"url":"https://mcp.example.com/sse","_delete":false,"_replace":true}"#,
+        ),
+    ] {
+        let set = execute(
+            &ctx,
+            &request(
+                "policy:set",
+                &[
+                    "--layer",
+                    "local",
+                    "--key",
+                    &format!("mcp.definitions.{name}"),
+                    "--value",
+                    definition,
+                ],
+            ),
+        );
+        assert!(set.ok, "{:?}", set.errors);
+    }
+
+    let status = execute(&ctx, &request("mcp:status", &[]));
+    assert!(status.ok, "{:?}", status.errors);
+    let find = |id: &str| {
+        status.data["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|el| el["id"] == id)
+            .unwrap_or_else(|| panic!("缺少元素 {id}"))
+            .clone()
+    };
+    assert_eq!(
+        find("mcp:with-command")["observed"]["command_available"],
+        true
+    );
+    assert_eq!(
+        find("mcp:missing-command")["observed"]["command_available"],
+        false
+    );
+    assert_eq!(
+        find("mcp:remote-one")["observed"]["command_available"],
+        serde_json::Value::Null,
+        "远程服务没有本地命令可判定"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}

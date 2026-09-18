@@ -74,6 +74,9 @@ export interface McpObserved {
   env?: Record<string, McpEnvResolution>;
   /** 远程 headers 占位符解析块（与 env 同级：只输出占位符与布尔）。 */
   headers?: Record<string, McpEnvResolution>;
+  /** stdio 命令能否在本机解析；远程服务没有本地命令，恒 null。 */
+  command_available?: boolean | null;
+  blocked_reason?: string | null;
 }
 
 // ---------- skills ----------
