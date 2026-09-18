@@ -28,7 +28,9 @@ impl EngineError {
 // ---------- 命令面白名单 ----------
 
 /// 支持 status + apply 的域（对齐引擎 APPLY_DOMAINS；secrets 只读）。
-const READ_WRITE_DOMAINS: &[&str] = &["agents", "mcp", "skills", "rules", "hooks", "aliases"];
+const READ_WRITE_DOMAINS: &[&str] = &[
+    "agents", "mcp", "skills", "rules", "hooks", "aliases", "profiles",
+];
 
 pub fn validate_command(command: &str) -> Result<(), EngineError> {
     let rejected = || {
@@ -127,6 +129,10 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
                 specs.push(("--allow-takeover", ArgValueKind::Flag));
             }
             if domain == "hooks" {
+                specs.push(("--allow-takeover", ArgValueKind::Flag));
+            }
+            // 实例配置文件由本工具全权拥有：已有他人内容时需显式接管
+            if domain == "profiles" {
                 specs.push(("--allow-takeover", ArgValueKind::Flag));
             }
         }
@@ -385,6 +391,8 @@ mod tests {
             "hooks:apply",
             "aliases:status",
             "aliases:apply",
+            "profiles:status",
+            "profiles:apply",
             "secrets:status",
             "system:audit",
             "system:discover",

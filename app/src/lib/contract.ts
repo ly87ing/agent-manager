@@ -127,6 +127,44 @@ export interface McpImportCandidate {
   previously_managed?: boolean;
 }
 
+// ---------- profiles（助手实例） ----------
+
+/** 实例类型：决定配置目录变量与目标文件格式。 */
+export type ProfileKind = "claude" | "codex";
+
+export interface ProfileSpec {
+  display_name: string;
+  base_agent: string;
+  kind: ProfileKind | string;
+  config_dir: string;
+  base_url: string | null;
+  model: string | null;
+}
+
+export interface ProfileEnvRef {
+  name: string;
+  kind: "reference" | "literal" | string;
+  /** 引用形式时的变量名；直接写值时为 null。 */
+  variable: string | null;
+  /** 当前环境里是否给得出取值；直接写值时为 null。 */
+  resolved: boolean | null;
+}
+
+export interface ProfileObserved {
+  base_agent: string;
+  kind: ProfileKind | string;
+  /** 启动时指向独立配置目录的环境变量名（CLAUDE_CONFIG_DIR / CODEX_HOME）。 */
+  config_env: string;
+  config_dir: string;
+  config_dir_exists: boolean;
+  target: string;
+  target_exists: boolean;
+  env_refs: ProfileEnvRef[];
+  /** 建议的启动命令取值，可直接存成同名快捷命令。 */
+  launch_value: string;
+  blocked_reason: string | null;
+}
+
 // ---------- system:discover（只读接管发现） ----------
 
 /** 接管方式词汇表（引擎侧 manage 字段）：

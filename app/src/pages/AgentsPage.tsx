@@ -1,6 +1,9 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import { Check, ChevronDown, ChevronRight, Download, Loader2, RefreshCw, SearchX, Sparkles, Terminal, Trash2, X } from "lucide-react";
 import { AliasEditorDialog } from "../components/AliasEditorDialog";
+import { ProfileCard } from "../components/ProfileCards";
+import { ProfileFormDialog } from "../components/ProfileFormDialog";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { DriftExplanationPanel } from "../components/DriftExplanationPanel";
 import { DefinitionFormDialog } from "../components/DefinitionFormDialog";
@@ -13,6 +16,13 @@ import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import { StateBadge } from "../components/StateBadge";
 import type { ElementAction, EngineElement, PolicyData, StatusData } from "../lib/contract";
 import { renderAliasPreview } from "../lib/aliasCommand";
+import {
+  buildProfileDefinition,
+  parseProfileDefinition,
+  profileLaunchValue,
+  type ProfileFormInput,
+} from "../lib/profileDefinition";
+import { runEngine } from "../lib/engine";
 import { definitionOrigin } from "../lib/definitionOverlay";
 import type { AgentsObserved, AgentsPolicy, AgentsSpec } from "../lib/observed";
 import { useEngineQuery, useOfflineMode } from "../lib/queries";
@@ -295,6 +305,11 @@ export default function AgentsPage({
   const aliasSource = useAliasSource();
   // 与助手动作分开的执行实例：两者互不占用彼此的在途状态与按钮文案
   const aliasApply = useDirectApply();
+  // 实例（同一助手的多套独立配置）：定义与 agents 共用，状态与写入走 profiles 域
+  const profilesQuery = useEngineQuery<StatusData>("profiles:status");
+  const profileApply = useDirectApply();
+  const [profileForm, setProfileForm] = useState<ProfileFormInput | "new" | null>(null);
+  const [profileRemoving, setProfileRemoving] = useState<string | null>(null);
   const [aliasEditing, setAliasEditing] = useState<{ bin: string; name: string; value: string | null } | null>(null);
   const [form, setForm] = useState<EngineElement | "new" | null>(null);
   const [pendingUninstall, setPendingUninstall] = useState<EngineElement | null>(null);
@@ -314,6 +329,88 @@ export default function AgentsPage({
   /** 内置判定：policy 层已加载且本地数据库无该定义覆盖；未加载到时按自定义处理（先确认再执行）。 */
   const isCustomDefinition = (element: EngineElement) =>
     layers === null || definitionOrigin(layers, "agents", element.id.replace(/^agents:/, "")) === "sqlite";
+  const profileElements = profilesQuery.data?.ok ? profilesQuery.data.data.elements : [];
+  const profileIds = new Set(profileElements.map((element) => element.id.replace(/^profiles:/, "")));
+  /** 主助手（非实例）：只有它们参与安装渠道展示与「新建实例」。 */
+  const primaryElements = filteredElements.filter((element) => !profileIds.has(element.id.replace(/^agents:/, "")));
+  /** 可作为实例归属的助手：目前只有 Claude Code 与 Codex 有隔离配置目录的官方支持。 */
+  const profileCapableAgents = elements
+    .map((element) => ({ id: element.id.replace(/^agents:/, ""), spec: element.spec as AgentsSpec }))
+    .filter((item) => !profileIds.has(item.id) && ["claude-code", "codex"].includes(item.id))
+    .map((item) => ({ id: item.id, displayName: item.spec.display_name ?? item.id }));
+  const baseBinOf = (agentId: string) =>
+    (elements.find((element) => element.id === `agents:${agentId}`)?.spec as AgentsSpec | undefined)?.bin ??
+    (agentId === "codex" ? "codex" : "claude");
+
+  /** 保存实例：写定义 + 把启动命令存成同名快捷命令；两步都只写配置，不落地。 */
+  const saveProfile = async (input: ProfileFormInput) => {
+    const definition = buildProfileDefinition(input, baseBinOf(input.baseAgent));
+    let envelope;
+    try {
+      envelope = await runEngine("policy:set", [
+        "--layer",
+        "local",
+        "--key",
+        `agents.definitions.${input.id}`,
+        "--value",
+        JSON.stringify({ ...definition, _delete: false, _replace: true }),
+      ]);
+    } catch (err) {
+      toast.error(`保存实例失败:${String(err)}`);
+      return;
+    }
+    if (!envelope.ok) {
+      toast.error(`保存实例被拒绝:${envelope.errors[0]?.message ?? "未知错误"}`);
+      return;
+    }
+    if (aliasSource.source) {
+      await aliasSource.save(
+        {
+          aliases: {
+            ...aliasSource.source.aliases,
+            [input.id]: profileLaunchValue(input, baseBinOf(input.baseAgent)),
+          },
+        },
+        `已保存实例 ${input.id} 与它的启动命令`,
+      );
+    } else {
+      toast.success(`已保存实例 ${input.id}`);
+    }
+    setProfileForm(null);
+    void profilesQuery.refetch();
+  };
+
+  /** 移除实例定义：只停止管理这套配置，配置目录与里面的内容原样保留。 */
+  const removeProfile = async (id: string) => {
+    let envelope;
+    try {
+      envelope = await runEngine("policy:set", [
+        "--layer",
+        "local",
+        "--key",
+        `agents.definitions.${id}`,
+        "--value",
+        JSON.stringify({ _delete: true }),
+      ]);
+    } catch (err) {
+      toast.error(`移除实例失败:${String(err)}`);
+      return;
+    }
+    if (!envelope.ok) {
+      toast.error(`移除实例被拒绝:${envelope.errors[0]?.message ?? "未知错误"}`);
+      return;
+    }
+    if (aliasSource.source && aliasSource.source.aliases[id]) {
+      const next = { ...aliasSource.source.aliases };
+      delete next[id];
+      await aliasSource.save({ aliases: next }, `已移除实例 ${id}`);
+    } else {
+      toast.success(`已移除实例 ${id}`);
+    }
+    setProfileRemoving(null);
+    void profilesQuery.refetch();
+  };
+
   /** 助手的启动命令：来源里与其可执行名同名的那一条；来源还没读到时为 null。 */
   const aliasOf = (element: EngineElement): string | null => {
     const bin = (element.spec as AgentsSpec).bin;
@@ -358,7 +455,7 @@ export default function AgentsPage({
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          {filteredElements.map((element) => (
+          {primaryElements.map((element) => (
             <AgentCard
               key={element.id}
               element={element}
@@ -383,6 +480,95 @@ export default function AgentsPage({
           ))}
         </div>
       )}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">实例</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              同一个助手的多套独立配置：各自的配置目录、登录与会话，可以同时开着互不干扰，全局配置不受影响。
+            </p>
+          </div>
+          <button
+            type="button"
+            data-testid="add-profile-button"
+            disabled={profileCapableAgents.length === 0}
+            onClick={() => setProfileForm("new")}
+            className="shrink-0 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/15 disabled:opacity-50"
+          >
+            新建实例
+          </button>
+        </div>
+        {profileElements.length === 0 ? (
+          <EmptyState
+            compact
+            testId="profiles-empty"
+            title="还没有实例"
+            description="需要用第二个账号或另一套接口时，新建一个实例：它有自己的配置目录，和主实例同时开着也不会互相干扰。"
+          />
+        ) : (
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            {profileElements.map((element) => {
+              const id = element.id.replace(/^profiles:/, "");
+              return (
+                <ProfileCard
+                  key={element.id}
+                  element={element}
+                  busy={profileApply.executing}
+                  onApply={() =>
+                    void profileApply.apply({
+                      command: "profiles:apply",
+                      label: `写入实例配置 ${id}`,
+                      args: ["--only", element.id],
+                    })
+                  }
+                  onTakeover={() =>
+                    void profileApply.apply({
+                      command: "profiles:apply",
+                      label: `接管并写入实例配置 ${id}`,
+                      args: ["--only", element.id, "--allow-takeover"],
+                    })
+                  }
+                  onEdit={() => {
+                    const definition = (policyQuery.data?.ok
+                      ? ((policyQuery.data.data.layers?.sqlite as Record<string, any> | null)?.agents?.definitions?.[id] ?? null)
+                      : null) as Record<string, unknown> | null;
+                    setProfileForm(parseProfileDefinition(id, definition ?? {}));
+                  }}
+                  onRemove={() => setProfileRemoving(id)}
+                  onManageSkills={() => onManageSkills?.(id)}
+                  onSyncLaunch={() =>
+                    void aliasApply.apply({ command: "aliases:apply", label: "同步终端快捷命令" })
+                  }
+                />
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {profileForm && (
+        <ProfileFormDialog
+          baseAgents={profileCapableAgents}
+          initial={profileForm === "new" ? undefined : profileForm}
+          existingIds={elements.map((element) => element.id.replace(/^agents:/, ""))}
+          baseBinOf={baseBinOf}
+          onSubmit={(input) => void saveProfile(input)}
+          onClose={() => setProfileForm(null)}
+        />
+      )}
+
+      {profileRemoving && (
+        <ConfirmModal
+          title={`移除实例 ${profileRemoving}`}
+          description="只停止管理这套配置并删掉它的启动命令；配置目录、登录状态与里面的内容都原样保留，需要的话请自行删除目录。"
+          risk="write-local"
+          confirmLabel="确认移除"
+          executing={false}
+          onConfirm={() => void removeProfile(profileRemoving)}
+          onClose={() => setProfileRemoving(null)}
+        />
+      )}
+
       {aliasEditing && aliasSource.source && (
         <AliasEditorDialog
           initialName={aliasEditing.value === null ? undefined : aliasEditing.name}

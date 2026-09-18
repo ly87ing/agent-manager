@@ -62,8 +62,8 @@ impl Request {
 }
 
 const KNOWN_DOMAINS: &[&str] = &[
-    "agents", "mcp", "skills", "rules", "hooks", "aliases", "secrets", "profile", "policy",
-    "system", "runs", "sources", "db", "logs",
+    "agents", "mcp", "skills", "rules", "hooks", "aliases", "profiles", "secrets", "profile",
+    "policy", "system", "runs", "sources", "db", "logs",
 ];
 
 fn mode_of(request: &Request) -> Mode {
@@ -210,6 +210,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     let is_rule_apply = request.command.replace('.', ":") == "rules:apply";
     let is_hook_apply = request.command.replace('.', ":") == "hooks:apply";
     let is_alias_apply = request.command.replace('.', ":") == "aliases:apply";
+    let is_profile_apply = request.command.replace('.', ":") == "profiles:apply";
     let (needs_lock, domain_label, diag_code) = if is_agent_apply {
         match crate::native_agents::preflight_apply(ctx, request) {
             Ok(()) => (true, "Agent", "AGENT_ERROR"),
@@ -352,6 +353,31 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
                     vec![],
                     vec![diagnostic(
                         crate::native_aliases::error_code(&err),
+                        None,
+                        crate::native_logs::sanitize_diagnostic_message(&format!("{err:#}")),
+                    )],
+                );
+                record_diagnostic_log_if_needed(ctx, request, &mut env, start_time);
+                return env;
+            }
+        }
+    } else if is_profile_apply {
+        match crate::native_profiles::preflight_apply(ctx, request) {
+            Ok(()) => (true, "Profiles", "PROFILE_ERROR"),
+            Err(err) => {
+                let mut env = Envelope::new(
+                    request.command.replacen(':', ".", 1),
+                    mode_of(request),
+                    Lock {
+                        held: false,
+                        pid: None,
+                    },
+                    request.run_id.clone(),
+                    None,
+                    Value::Object(Map::new()),
+                    vec![],
+                    vec![diagnostic(
+                        "PROFILE_ERROR",
                         None,
                         crate::native_logs::sanitize_diagnostic_message(&format!("{err:#}")),
                     )],
@@ -503,6 +529,9 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("hooks", "status" | "apply") => crate::native_hooks::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("HOOK_ERROR", format!("{err:#}"))),
+        ("profiles", "status" | "apply") => crate::native_profiles::handle(ctx, request)
+            .map(|data| (data, vec![]))
+            .map_err(|err| DispatchError::new("PROFILE_ERROR", format!("{err:#}"))),
         ("aliases", "status" | "apply") => crate::native_aliases::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| {
