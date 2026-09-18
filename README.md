@@ -1,10 +1,10 @@
 # Agent Manager
 
-集中管理本机 AI 编程助手的桌面应用，基于 Tauri 2、React 与 Rust/SQLite，内置支持 Claude Code、Codex 和 OpenCode。桌面应用与命令行共用同一 Rust 引擎。
+集中管理本机 AI 编程助手的桌面应用，基于 Tauri 2、React 与 Rust/SQLite。内置定义为 Claude Code 与 Codex，其余助手可自行添加定义；MCP 另外支持写入 OpenCode 格式的配置。桌面应用与命令行共用同一 Rust 引擎。
 
 ## 功能
 
-- **助手管理**：安装、升级、卸载内置助手（Claude Code、Codex、OpenCode）与自定义助手，如实检测实际安装来源。
+- **助手管理**：安装、升级、卸载内置助手（Claude Code、Codex）与自行添加的助手，如实检测实际安装来源。
 - **Skills**：管理 Skill 集合与单个技能，按助手逐一启用、停用、更新或移除。
 - **MCP 服务器**：管理本地 stdio 与远程 HTTP 两类 MCP 服务器，按助手分配并写入各自客户端配置（Claude JSON、Codex TOML、OpenCode JSON）；可从客户端现有配置发现导入。
 - **Rules**：编辑共享与助手专用规则，应用到 `~/.codex/AGENTS.md` 与 `~/.claude/CLAUDE.md`。
@@ -99,7 +99,7 @@ cd app && pnpm test:unit run && pnpm typecheck && pnpm build
 
 ## English Summary
 
-Agent Manager is a desktop app (Tauri 2 + React + Rust/SQLite) for centrally managing local AI coding agents, with built-in support for Claude Code, Codex, and OpenCode. The UI is in Simplified Chinese.
+Agent Manager is a desktop app (Tauri 2 + React + Rust/SQLite) for centrally managing local AI coding agents. Claude Code and Codex ship as built-in definitions; other agents can be added manually. MCP configuration can additionally be written in OpenCode's format. The UI is in Simplified Chinese.
 
 - **Features**: install/upgrade/uninstall agents (built-in and custom); manage Skill collections with per-agent enablement; manage local stdio and remote HTTP MCP servers across three client config formats (Claude JSON, Codex TOML, OpenCode JSON); edit Rules (`~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`), Hooks, and managed shell alias blocks in `~/.zshrc` / `~/.zprofile`; check for upstream updates; view secrets status (variable names and presence only) and task history.
 - **Install**: no public GitHub Release yet — packages are unavailable until external prerequisites (signing keys, Apple Developer ID and notarization, Windows signing, per-platform hardware acceptance) are met; see [platform status](docs/GUI-PLATFORM-STATUS.md). To build from source on macOS, install the Rust toolchain, Node.js, and pnpm, clone without `--recursive` (the private `secrets/` submodule is not needed), then run `pnpm --dir app install --frozen-lockfile && pnpm --dir app run build:macos`.

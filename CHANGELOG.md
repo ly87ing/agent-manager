@@ -9,7 +9,7 @@
 ### 新增
 
 - 六个资源域的完整管理闭环：
-  - 助手：安装、升级、卸载内置助手（Claude Code、Codex、OpenCode）与自定义助手，如实检测实际安装来源。
+  - 助手：安装、升级、卸载内置助手（Claude Code、Codex）与自行添加的助手，如实检测实际安装来源。
   - Skills：集合与单个技能的更新、启停与移除，内容快照与安全软连接落地。
   - MCP 服务器：本地 stdio 与远程 HTTP 两类传输，按助手分配，支持 Claude JSON、Codex TOML、OpenCode JSON 三种客户端格式；支持从客户端现有配置发现导入。
   - Rules：共享与助手专用规则，应用到 `~/.codex/AGENTS.md` 与 `~/.claude/CLAUDE.md`。
