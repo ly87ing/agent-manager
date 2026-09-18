@@ -162,7 +162,10 @@ export function AliasEditorDialog({
                 data-testid="alias-raw-input"
                 className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs"
               />
-              <p className="mt-1 text-[11px] text-muted-foreground">这条命令不是「环境变量 + 命令」的常见写法，因此按原文编辑。</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                这条命令不是「环境变量 + 命令」的常见写法，因此按原文编辑。其中 {"{timezone}"} 与 {"{lang}"} 会在写入时
+                替换成全局设置（现在是 {globals.timezone} / {globals.lang}），保留它们就能继续跟随全局。
+              </p>
             </div>
           ) : (
             <>
@@ -382,6 +385,12 @@ export function AliasEditorDialog({
                 )}
               </div>
             </>
+          )}
+
+          {(timezone === FOLLOW_GLOBAL_TZ || lang === FOLLOW_GLOBAL_LANG || rawMode) && (
+            <p className="text-[11px] text-muted-foreground">
+              全局时区与语言在「设置 → 终端快捷命令」里改，改一次所有跟随全局的命令一起变。
+            </p>
           )}
 
           <div>

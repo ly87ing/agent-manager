@@ -120,6 +120,25 @@ describe("终端快捷命令页", () => {
     expect(within(dialog).getByTestId("alias-lang-select")).toHaveValue("{lang}");
   });
 
+  it("chrome 这类包装写法：原文编辑并说明记号会跟随全局设置", async () => {
+    renderWithEngine(
+      <AliasesPage />,
+      aliasRoutes({
+        chrome: 'open --env TZ="{timezone}" --env LANG="{lang}" -n -a "Google Chrome" --args --lang=en-US',
+      }),
+    );
+    // 列表里按全局设置渲染出实际生效的那一行
+    expect(await screen.findByTestId("alias-row-chrome")).toHaveTextContent('TZ="America/Los_Angeles"');
+
+    await userEvent.click(screen.getByTestId("edit-alias-chrome"));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByTestId("alias-raw-input")).toHaveValue(
+      'open --env TZ="{timezone}" --env LANG="{lang}" -n -a "Google Chrome" --args --lang=en-US',
+    );
+    expect(dialog).toHaveTextContent("会在写入时");
+    expect(dialog).toHaveTextContent("全局时区与语言在「设置 → 终端快捷命令」里改");
+  });
+
   it("非常见写法的命令自动切到原文编辑，不改写用户写法", async () => {
     renderWithEngine(
       <AliasesPage />,
