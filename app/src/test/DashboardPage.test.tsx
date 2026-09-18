@@ -72,6 +72,16 @@ function okRoutes(): Record<string, EngineRoute> {
           makeElement({
             id: "agents:codex",
             domain: "agents",
+            observed: {
+              usage: {
+                source: ".codex/sessions",
+                checked_at: "2026-09-05T11:00:00Z",
+                windows: [
+                  { window_minutes: 300, used_percent: 12, resets_at: null },
+                  { window_minutes: 10080, used_percent: 65, resets_at: null },
+                ],
+              },
+            },
             freshness: makeFreshness({
               state: "current",
               current: "0.42.0",
@@ -169,6 +179,10 @@ describe("DashboardPage", () => {
     expect(within(agents).getByTestId("overview-item-agents:claude-code")).toHaveTextContent("2.0.0 → 2.1.3");
     expect(within(agents).getByTestId("overview-item-agents:claude-code")).toHaveTextContent("可更新");
     expect(within(agents).getByTestId("overview-item-agents:codex")).toHaveTextContent("已是最新");
+    // 额度只放最吃紧的那个窗口（7 天 65% 而不是 5 小时 12%）；这份夹具的记账时刻很旧，
+    // 数字后面带问号提示别当真
+    expect(within(agents).getByTestId("overview-item-agents:codex")).toHaveTextContent("额度 65%?");
+    expect(within(agents).getByTestId("overview-item-agents:claude-code")).not.toHaveTextContent("额度");
 
     // MCP：被本工具以外改过的标成「要你决定」，并给去处理入口
     const mcp = await screen.findByTestId("overview-mcp");

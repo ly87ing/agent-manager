@@ -11,6 +11,7 @@ import {
   type OverviewItem,
 } from "../lib/overviewModel";
 import { engineKeys, useRefreshUpstream } from "../lib/queries";
+import { usageTone } from "../lib/agentUsage";
 import { useTakeover } from "../lib/useTakeover";
 import { cn } from "../lib/utils";
 
@@ -27,6 +28,12 @@ const UPDATE_STYLE: Record<string, string> = {
   behind: "text-warning",
   unknown: "text-muted-foreground",
   none: "",
+};
+
+const USAGE_STYLE: Record<string, string> = {
+  ok: "text-muted-foreground",
+  warn: "text-warning",
+  critical: "text-destructive",
 };
 
 const SYNC_STYLE: Record<string, string> = {
@@ -174,6 +181,23 @@ export function OverviewList({ onNavigate }: { onNavigate?: (page: string) => vo
                   title={item.version ?? undefined}
                 >
                   {versionText(item)}
+                </span>
+                {/* 额度：一行只放得下一个数字，放最接近用完的那个窗口；详情在助手页 */}
+                <span
+                  className={cn(
+                    "w-20 shrink-0 tabular-nums",
+                    item.usedPercent != null &&
+                      (item.usageStale ? "text-muted-foreground/60" : USAGE_STYLE[usageTone(item.usedPercent)]),
+                  )}
+                  title={
+                    item.usedPercent == null
+                      ? undefined
+                      : item.usageStale
+                        ? "这个数字是助手很久以前记的，可能已经不准；详情见助手页"
+                        : "额度用量，详情见助手页"
+                  }
+                >
+                  {item.usedPercent != null ? `额度 ${Math.round(item.usedPercent)}%${item.usageStale ? "?" : ""}` : ""}
                 </span>
                 <span className={cn("w-16 shrink-0", UPDATE_STYLE[item.update])}>{UPDATE_LABEL[item.update]}</span>
                 <span className={cn("w-20 shrink-0", SYNC_STYLE[item.sync])} title={item.reason}>

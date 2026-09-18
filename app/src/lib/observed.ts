@@ -30,6 +30,26 @@ export interface AgentsObserved {
   };
   installed?: boolean;
   preferred_active?: boolean;
+  version?: string | null;
+  /** 助手自己写在本机的额度记账；没有这类记录的助手为 null。 */
+  usage?: AgentUsage | null;
+}
+
+/** 一个计量窗口：window_minutes 是窗口长度（300=5 小时，10080=7 天）。 */
+export interface AgentUsageWindow {
+  window_minutes: number;
+  used_percent: number;
+  resets_at: string | null;
+}
+
+export interface AgentUsage {
+  /** 读的是哪个本地文件，用来说明数字从哪来。 */
+  source: string;
+  /** 助手最后一次记账的时刻；数字只和它一样新。 */
+  checked_at: string | null;
+  windows: AgentUsageWindow[];
+  plan?: string;
+  credits?: string;
 }
 
 // ---------- mcp ----------

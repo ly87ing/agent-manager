@@ -509,6 +509,11 @@ fn status_element(
         version.clone().map(Value::String).unwrap_or(Value::Null),
     );
     observed.insert("definition_origin".into(), json!(def.origin.as_str()));
+    // 额度读助手自己写在本机的记账文件，不联网；没有这类记录的助手为 null
+    observed.insert(
+        "usage".into(),
+        crate::agent_usage::read(&ctx.home_dir, &def.id).unwrap_or(Value::Null),
+    );
     observed.insert("command_sources".into(), command_sources(&def.commands));
     let mut classified = Map::new();
     for bucket_name in ["managed", "deprecated", "system_only", "unsupported"] {

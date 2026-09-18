@@ -1,4 +1,6 @@
 import type { EngineElement, Envelope, StatusData } from "./contract";
+import type { AgentUsage } from "./observed";
+import { isStale, tightestWindow } from "./agentUsage";
 
 /**
  * 总览清单模型：本机有哪些助手 / MCP / 技能 / 规则 / Hooks / 快捷命令，各自什么版本、
@@ -26,6 +28,10 @@ export interface OverviewItem {
   syncArgs?: string[];
   /** 要你决定时的一句原因。 */
   reason?: string;
+  /** 助手的额度：最吃紧那个窗口的已用百分比，没有本地记账的为 null。 */
+  usedPercent?: number | null;
+  /** 额度数字是否已经过旧（助手很久没记账）。 */
+  usageStale?: boolean;
 }
 
 export interface OverviewGroup {
@@ -102,7 +108,17 @@ function syncFromCells(element: EngineElement, cells: Record<string, Cell>): Pic
 
 function itemOf(element: EngineElement, name: string): OverviewItem {
   const { update, version, upstream } = updateOf(element);
-  const base = { id: element.id, name, domain: element.domain, version, upstream, update };
+  const usage = (element.observed as { usage?: AgentUsage | null }).usage ?? null;
+  const base = {
+    id: element.id,
+    name,
+    domain: element.domain,
+    version,
+    upstream,
+    update,
+    usedPercent: tightestWindow(usage)?.used_percent ?? null,
+    usageStale: usage ? isStale(usage.checked_at) : false,
+  };
   const observed = element.observed as { agents?: Record<string, Cell>; blocked_reason?: string | null };
 
   if (observed.agents && Object.keys(observed.agents).length > 0) {

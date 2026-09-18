@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { Check, ChevronDown, ChevronRight, Download, Loader2, RefreshCw, SearchX, Sparkles, Terminal, Trash2, X } from "lucide-react";
+import { AgentUsageBar } from "../components/AgentUsageBar";
 import { AliasEditorDialog } from "../components/AliasEditorDialog";
 import { ProfileCard } from "../components/ProfileCards";
 import { ProfileFormDialog } from "../components/ProfileFormDialog";
@@ -204,6 +205,13 @@ function AgentCard({
           <FreshnessBadge freshness={element.freshness} className="items-end" />
         </div>
       </div>
+
+      {/* 额度紧跟版本：这两件事是打开这页最常来看的 */}
+      {observed.usage && (
+        <div className="mt-3 rounded-md border px-3 py-2">
+          <AgentUsageBar usage={observed.usage} testId={`agent-usage-${element.id}`} />
+        </div>
+      )}
 
       <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
         {PROVIDER_BUCKETS.flatMap((bucket) =>
