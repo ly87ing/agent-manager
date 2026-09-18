@@ -61,7 +61,7 @@ export function makeAuditData(overrides: Partial<AuditData> = {}): AuditData {
     status: "healthy",
     version: { commit: "abc1234", date: "2026-09-05" },
     sections: {
-      config: [{ name: "manager.json", status: "ok", message: "格式正确" }],
+      runtime: [{ name: "engine-rs", status: "ok", message: "状态正常" }],
     },
     summary: {
       errors: 0,

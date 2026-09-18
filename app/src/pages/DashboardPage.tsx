@@ -27,9 +27,8 @@ const FRESHNESS_DOMAINS = [
   { key: "skills", label: "Skills" },
 ] as const;
 
+/** 引擎的 sections 固定为七个已接线的域 + runtime + storage（见 native_system 的 WIRED_DOMAINS）。 */
 const SECTION_LABELS: Record<string, string> = {
-  config: "配置文件",
-  security: "安全",
   runtime: "运行时",
   storage: "存储",
   agents: "Agents",
