@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AppLayout, type NavItem } from "./components/AppLayout";
+import { CommandPalette } from "./components/CommandPalette";
 import AgentsPage from "./pages/AgentsPage";
 import DashboardPage from "./pages/DashboardPage";
 import McpPage from "./pages/McpPage";
@@ -51,6 +52,7 @@ export default function App() {
   const settings = useSettings();
   const [activePage, setActivePage] = useState<string>("agents");
   const [selectedSkillAgent, setSelectedSkillAgent] = useState<string | null>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const update = useUpdateCheck();
 
   useEffect(() => {
@@ -60,6 +62,10 @@ export default function App() {
       if (event.key === ",") {
         event.preventDefault();
         setActivePage("settings");
+      } else if (event.key.toLowerCase() === "k") {
+        // 命令面板：一个入口搜到资源、页面与常用动作
+        event.preventDefault();
+        setPaletteOpen((prev) => !prev);
       } else if (event.key.toLowerCase() === "f") {
         // 仅当前页挂了搜索框（data-page-search）时响应；无搜索框的页面不抢占
         const searchInput = document.querySelector<HTMLElement>("[data-page-search]");
@@ -114,6 +120,18 @@ export default function App() {
         {activePage === "runs" && <RunsPage />}
         {activePage === "settings" && <SettingsPage />}
       </div>
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onNavigate={(page) => {
+          if (page === "skills") setSelectedSkillAgent(null);
+          setActivePage(page);
+        }}
+        onOpenAgentSkills={(agentId) => {
+          setSelectedSkillAgent(agentId);
+          setActivePage("skills");
+        }}
+      />
     </AppLayout>
   );
 }

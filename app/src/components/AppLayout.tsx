@@ -80,6 +80,9 @@ export function AppLayout({
           <p className="font-medium text-foreground">快捷键</p>
           <ul className="mt-1.5 space-y-1">
             <li className="flex items-center gap-1.5">
+              <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">⌘K</kbd>搜索与执行
+            </li>
+            <li className="flex items-center gap-1.5">
               <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">⌘,</kbd>打开设置
             </li>
             <li className="flex items-center gap-1.5">
