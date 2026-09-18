@@ -364,7 +364,7 @@ describe("SkillsPage 全部技能批量操作", () => {
       await openSkillsTab();
       await userEvent.click(await screen.findByTestId("action-enable-skill:agent-skills/alpha-claude-code"));
 
-      await waitFor(() => expect(successSpy.mock.calls.at(-1)?.[0]).toBe("启用 alpha @ claude-code完成"));
+      await waitFor(() => expect(successSpy.mock.calls[successSpy.mock.calls.length - 1][0]).toBe("启用 alpha @ claude-code完成"));
       expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(1);
     } finally {
       successSpy.mockRestore();

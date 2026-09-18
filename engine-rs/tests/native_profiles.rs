@@ -167,7 +167,8 @@ fn codex_profile_target_never_contains_the_secret_value() {
         !ctx.home_dir.join(".codex-work/config.toml").exists(),
         "不得写 config.toml（那是 MCP 域的目标）"
     );
-    let text = std::fs::read_to_string(ctx.home_dir.join(".codex-work/agent-manager.config.toml")).unwrap();
+    let text = std::fs::read_to_string(ctx.home_dir.join(".codex-work/agent-manager.config.toml"))
+        .unwrap();
     assert!(text.contains("env_key = \"AM_TEST_CODEX_TOKEN\""));
     assert!(text.contains("model_provider = \"agent-manager\""));
     let status = execute(&ctx, &request("profiles:status", &[]));
