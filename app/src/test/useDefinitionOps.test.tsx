@@ -55,7 +55,7 @@ describe("useDefinitionOps 保存语义", () => {
     const policySets = calls.filter((c) => c.command === "policy:set");
     expect(policySets).toHaveLength(1);
     expect(policySets[0].args[1]).toBe("local");
-    expect(policySets[0].args[3]).toBe("agent_definitions.demo");
+    expect(policySets[0].args[3]).toBe("agents.definitions.demo");
     // 不写启用键
     expect(policySets.some((c) => c.args[3] === "agents.demo.enabled")).toBe(false);
     // 不触发安装/升级/计划/应用

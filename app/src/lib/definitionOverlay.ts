@@ -7,9 +7,21 @@ import type { PolicyLayers } from "./contract";
 
 export type DefinitionSection = "mcp" | "skills" | "agents";
 
+/** 各定义区在 policy 里的落点：<根>.<定义容器>（引擎读取路径，见 agents.definitions / mcp.definitions / skills.repositories）。 */
+const DEFINITION_PATH: Record<DefinitionSection, { root: DefinitionSection; container: string }> = {
+  agents: { root: "agents", container: "definitions" },
+  mcp: { root: "mcp", container: "definitions" },
+  skills: { root: "skills", container: "repositories" },
+};
+
 export function definitionKeyPrefix(section: DefinitionSection): string {
-  if (section === "agents") return "agent_definitions";
-  return section === "mcp" ? "mcp.definitions" : "skills.repositories";
+  const { root, container } = DEFINITION_PATH[section];
+  return `${root}.${container}`;
+}
+
+/** 定义容器在层对象里的键名（policy:get 分层结构的读取用）。 */
+export function definitionContainerKey(section: DefinitionSection): string {
+  return DEFINITION_PATH[section].container;
 }
 
 export interface DefinitionRemovalSpec {
@@ -22,13 +34,9 @@ export interface DefinitionRemovalSpec {
 
 function layerHasDefinition(layer: Record<string, unknown> | null, section: DefinitionSection, name: string): boolean {
   if (!layer) return false;
-  if (section === "agents") {
-    const defs = layer[definitionKeyPrefix(section)];
-    return typeof defs === "object" && defs !== null && name in defs;
-  }
-  const root = layer[section];
+  const root = layer[DEFINITION_PATH[section].root];
   if (typeof root !== "object" || root === null) return false;
-  const defs = (root as Record<string, unknown>)[section === "mcp" ? "definitions" : "repositories"];
+  const defs = (root as Record<string, unknown>)[definitionContainerKey(section)];
   if (typeof defs !== "object" || defs === null) return false;
   return name in (defs as Record<string, unknown>);
 }

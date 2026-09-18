@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ConfirmModal } from "../components/ConfirmModal";
 import type { PolicyData, PolicyLayers } from "./contract";
-import { definitionKeyPrefix, buildDefinitionRemoval, type DefinitionSection } from "./definitionOverlay";
+import { definitionContainerKey, definitionKeyPrefix, buildDefinitionRemoval, type DefinitionSection } from "./definitionOverlay";
 import { engineErrorMessage, runEngine } from "./engine";
 import { engineKeys } from "./queries";
 import { OVERLAY_COPY, TOGGLE_COPY } from "./ui-copy";
@@ -69,8 +69,7 @@ export function useDefinitionOps({
     }
     const sqlite = policy.data.layers?.sqlite as Record<string, unknown> | null | undefined;
     const sectionData = sqlite?.[section] as Record<string, unknown> | undefined;
-    const defsKey = section === "mcp" ? "definitions" : "repositories";
-    const defs = sectionData?.[defsKey] as Record<string, unknown> | undefined;
+    const defs = sectionData?.[definitionContainerKey(section)] as Record<string, unknown> | undefined;
     const full = defs?.[name];
     if (typeof full !== "object" || full === null) {
       return fail("初始化后仍取不到完整定义，已停止保存（定义未改动）");

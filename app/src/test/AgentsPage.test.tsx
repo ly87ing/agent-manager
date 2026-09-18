@@ -8,7 +8,7 @@ import type { Envelope } from "../lib/contract";
 function routes(offline: boolean): Record<string, Envelope> {
   return {
     "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode({ offline }) }),
-    // policy:get 已加载且 sqlite 层无 agent_definitions 覆盖 → claude-code 为内置定义，安装/升级一键直达
+    // policy:get 已加载且 sqlite 层无 agents.definitions 覆盖 → claude-code 为内置定义，安装/升级一键直达
     "policy:get": makeEnvelope(makePolicyData(), { command: "policy.get" }),
     "agents:status": makeEnvelope(
       {
@@ -262,15 +262,17 @@ describe("Agents 页文案", () => {
 });
 
 describe("自定义助手的安装/升级确认", () => {
-  /** my-agent 的定义写在本地数据库（agent_definitions 覆盖）→ 自定义定义，安装/升级需先确认。 */
+  /** my-agent 的定义写在本地数据库（agents.definitions 覆盖）→ 自定义定义，安装/升级需先确认。 */
   function customRoutes(): Record<string, Envelope> {
     const base = routes(false);
     base["policy:get"] = makeEnvelope(
       makePolicyData({
         layers: {
           sqlite: {
-            agent_definitions: {
-              "my-agent": { display_name: "My Agent", bin: "my-agent" },
+            agents: {
+              definitions: {
+                "my-agent": { display_name: "My Agent", bin: "my-agent" },
+              },
             },
           },
         },
