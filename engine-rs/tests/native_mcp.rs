@@ -2785,7 +2785,27 @@ fn mcp_test_action_preflight_consistency_and_leftovers() {
     );
     assert!(
         err_add.contains("残留受管条目"),
-        "存在托管残留时必须拒绝 add: {err_add}"
+        "存在托管残留时不带接管标志必须拒绝 add: {err_add}"
+    );
+
+    // 残留条目是本工具自己以前写的，不是用户的外部内容：显式接管时直接替换即可。
+    // 不放行的话，接管中心发的 add 会对每个旧条目失败，用户在界面上无路可走
+    // （那条路径只发 add，不会先 remove）。
+    assert!(
+        preflight(
+            &ctx,
+            &[
+                "--only",
+                "mcp:srv-leftover",
+                "--action",
+                "add",
+                "--agent",
+                "claude-code",
+                "--allow-takeover",
+            ],
+        )
+        .is_ok(),
+        "显式接管须能覆盖残留受管条目"
     );
 
     let err_enable = preflight_err(

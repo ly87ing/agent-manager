@@ -320,7 +320,16 @@ function AgentCard({
             )}
           </div>
         </div>
-        <p data-testid={`alias-preview-${element.id}`} className="mt-1.5 break-all font-mono text-[11px] text-muted-foreground">
+        {/* 命令是一整行、按空格才有意义，break-all 会从 LC_ALL 中间断开很难读；
+            这里改为横向滚动，读的时候一眼能看出词边界。 */}
+        <p
+          data-testid={`alias-preview-${element.id}`}
+          title={aliasPreview ?? undefined}
+          className={cn(
+            "mt-1.5 font-mono text-[11px] text-muted-foreground",
+            aliasPreview ? "overflow-x-auto whitespace-pre" : "",
+          )}
+        >
           {aliasPreview ?? `还没设置：终端里直接执行 ${spec.bin}，不带固定时区与参数`}
         </p>
       </div>

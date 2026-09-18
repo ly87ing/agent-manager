@@ -215,9 +215,12 @@ pub fn preflight_check_state(
                         a
                     );
                 }
-                if entry_opt.is_some() && is_managed {
+                // 残留受管条目：文件里带着本工具的标记、库里却没有分配记录（旧体系遗留，
+                // 或分配被清掉过）。这份内容是本工具自己写的、不是用户的外部内容，因此
+                // 显式接管时直接整体替换即可；没有接管标志才要求先 remove 清理。
+                if entry_opt.is_some() && is_managed && !parsed.allow_takeover {
                     bail!(
-                        "目标文件 {} 中已存在残留受管条目 '{}'，add 不适用，请先执行 remove 清理",
+                        "目标文件 {} 中已存在残留受管条目 '{}'，add 不适用；确认要用当前定义替换它请选择接管",
                         target.path.display(),
                         parsed.server
                     );

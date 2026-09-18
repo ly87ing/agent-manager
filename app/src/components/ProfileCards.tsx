@@ -133,7 +133,11 @@ export function ProfileCard({
                     </button>
                   </div>
                 </div>
-                <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">
+                {/* 同助手卡片：命令按空格才有意义，横向滚动比从中间断开好读 */}
+                <p
+                  title={`alias ${cmd.name}='${cmd.value}'`}
+                  className="mt-1 overflow-x-auto whitespace-pre font-mono text-[11px] text-muted-foreground"
+                >
                   alias {cmd.name}=&#39;{cmd.value}&#39;
                 </p>
                 {cmd.needsTildeFix && (

@@ -34,7 +34,7 @@ export function renderWithEngine(
       <ExecutionProvider>
         <ThemeProvider>
           {ui}
-          <Toaster richColors position="top-right" />
+          <Toaster richColors position="bottom-right" />
         </ThemeProvider>
       </ExecutionProvider>
     </QueryClientProvider>,

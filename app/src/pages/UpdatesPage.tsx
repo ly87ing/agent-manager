@@ -1,5 +1,6 @@
 import { useQueries } from "@tanstack/react-query";
 import { useRef, useState } from "react";
+import { toast } from "sonner";
 import { Loader2, PackageCheck, PlayCircle, RefreshCw, WifiOff } from "lucide-react";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
@@ -37,6 +38,25 @@ const CONVERGE_ACTIONS: Record<string, string> = {
 
 function convergeAction(domain: string): string {
   return CONVERGE_ACTIONS[domain] ?? "update";
+}
+
+/**
+ * 一个元素要执行几次 apply、各带什么参数。
+ *
+ * MCP 的 update 是逐助手动作（库级只认 enable/disable/remove），所以要对每个已分配的
+ * 助手各发一次 `--agent`；直接发库级 update 会被引擎拒绝。其余域是库级一次。
+ */
+export function updateArgsFor(element: EngineElement): string[][] {
+  const action = convergeAction(element.domain);
+  if (element.domain !== "mcp") {
+    return [["--only", element.id, "--action", action]];
+  }
+  const cells = (element.observed as { agents?: Record<string, { assigned?: boolean }> }).agents ?? {};
+  const assigned = Object.entries(cells)
+    .filter(([, cell]) => cell?.assigned === true)
+    .map(([agent]) => agent)
+    .sort();
+  return assigned.map((agent) => ["--only", element.id, "--agent", agent, "--action", action]);
 }
 
 export function sortByFreshness(elements: EngineElement[]): EngineElement[] {
@@ -91,14 +111,24 @@ export default function UpdatesPage() {
    * 任一行在途时，其他行亦不得启动 directApply。 */
   const runRowApply = (element: EngineElement) => {
     if (batchGuard.current || rowApplyGuard.current.size > 0 || rowApplyGuard.current.has(element.id)) return;
+    const runs = updateArgsFor(element);
+    if (runs.length === 0) {
+      // MCP 没分配给任何助手：库里更新定义没有落地对象，直说而不是发一条必失败的请求
+      toast.error(`${element.id} 还没分配给任何助手，先在 MCP 页把它加给助手再更新`);
+      return;
+    }
     rowApplyGuard.current.add(element.id);
     setRowApplyPending((prev) => new Set(prev).add(element.id));
-    void directApply
-      .apply({
-        command: `${element.domain}:apply`,
-        label: `更新 ${element.id}（${versionRangeHint(element.freshness)}）`,
-        args: ["--only", element.id, "--action", convergeAction(element.domain)],
-      })
+    void (async () => {
+      for (const args of runs) {
+        const envelope = await directApply.apply({
+          command: `${element.domain}:apply`,
+          label: `更新 ${element.id}（${versionRangeHint(element.freshness)}）`,
+          args,
+        });
+        if (!envelope || !envelope.ok) break;
+      }
+    })()
       .finally(() => {
         rowApplyGuard.current.delete(element.id);
         setRowApplyPending((prev) => {
@@ -131,6 +161,20 @@ export default function UpdatesPage() {
       try {
         for (const group of domainGroups) {
           const versions = group.items.map((el) => `${el.id} ${versionRangeHint(el.freshness)}`).join("、");
+          if (group.key === "mcp") {
+            // MCP 的 update 是逐助手动作，库级只认 enable/disable/remove
+            for (const element of group.items) {
+              for (const args of updateArgsFor(element)) {
+                const envelope = await execute({
+                  command: "mcp:apply",
+                  args,
+                  label: `更新 ${element.id}（${versionRangeHint(element.freshness)}）`,
+                });
+                if (!envelope || !envelope.ok) return;
+              }
+            }
+            continue;
+          }
           const envelope = await execute({
             command: `${group.key}:apply`,
             args: [...group.ids.flatMap((id) => ["--only", id]), "--action", group.action],
@@ -216,9 +260,8 @@ export default function UpdatesPage() {
               <th className="py-2 pr-4 font-medium">元素</th>
               <th className="py-2 pr-4 font-medium">当前 → 最新</th>
               <th className="py-2 pr-4 font-medium">状态</th>
-              <th className="py-2 pr-4 font-medium">上次检查</th>
-              <th className="py-2 pr-4 font-medium">检查结果时间</th>
-              <th className="py-2 pr-4 font-medium">检查方式</th>
+              <th className="whitespace-nowrap py-2 pr-4 font-medium">上次检查</th>
+              <th className="whitespace-nowrap py-2 pr-4 font-medium">检查方式</th>
               <th className="py-2 font-medium">操作</th>
             </tr>
           </thead>
@@ -236,12 +279,15 @@ export default function UpdatesPage() {
                   <td className="py-2 pr-4">
                     <FreshnessBadge freshness={element.freshness} />
                   </td>
-                  <td className="py-2 pr-4 text-xs text-muted-foreground">{formatCheckedAt(element.freshness.checked_at)}</td>
+                  {/* 绝对时间与「多久以前」是同一件事，合成一列；分两列会把表头挤到换行 */}
                   <td
-                    className={cn("py-2 pr-4 text-xs", stale ? "text-warning" : "text-muted-foreground")}
+                    className={cn("whitespace-nowrap py-2 pr-4 text-xs", stale ? "text-warning" : "text-muted-foreground")}
                     title={stale ? "检查结果较旧（超过 24 小时），建议重新检查" : undefined}
                   >
-                    {element.freshness.cache_age_sec !== null ? humanizeCacheAge(element.freshness.cache_age_sec) : "—"}
+                    {formatCheckedAt(element.freshness.checked_at)}
+                    {element.freshness.cache_age_sec !== null && (
+                      <span className="ml-1 opacity-70">（{humanizeCacheAge(element.freshness.cache_age_sec)}）</span>
+                    )}
                   </td>
                   <td className="py-2 pr-4 font-mono text-xs text-muted-foreground">{element.freshness.probe ?? "—"}</td>
                   <td className="py-2">

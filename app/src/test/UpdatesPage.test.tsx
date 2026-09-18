@@ -35,6 +35,7 @@ function statusRoutes(): Record<string, Envelope> {
           makeElement({
             id: "mcp:b-unknown",
             domain: "mcp",
+            observed: { agents: { "claude-code": { assigned: true } } },
             freshness: makeFreshness({ state: "unknown" }),
           }),
           makeElement({ id: "mcp:x-na", domain: "mcp", freshness: makeFreshness({ state: "not-applicable" }) }),
@@ -72,7 +73,8 @@ describe("UpdatesPage 更新中心", () => {
     expect(screen.queryByTestId("update-row-mcp:x-na")).toBeNull();
     // 列内容：版本对比、缓存年龄（stale 标注）、探测源
     expect(screen.getByText("1.0.0 → 2.0.0")).toBeInTheDocument();
-    expect(screen.getByText("1 天前")).toBeInTheDocument();
+    // 绝对时间与「多久以前」合并到同一格，所以按包含匹配
+    expect(screen.getAllByText(/1 天前/).length).toBeGreaterThan(0);
     expect(screen.getAllByText("npm-view").length).toBeGreaterThan(0);
   });
 
@@ -137,6 +139,8 @@ describe("UpdatesPage 更新中心", () => {
             makeElement({
               id: "mcp:mcp-behind",
               domain: "mcp",
+              // MCP 的 update 是逐助手动作，界面据 observed.agents 里 assigned 的那些展开
+              observed: { agents: { "claude-code": { assigned: true }, codex: { assigned: false } } },
               freshness: makeFreshness({ state: "behind", current: "0.1.0", upstream: "0.2.0" }),
             }),
           ],
@@ -158,7 +162,8 @@ describe("UpdatesPage 更新中心", () => {
     const applyCalls = calls.filter((c) => c.command.endsWith(":apply"));
     expect(applyCalls.map((c) => c.command)).toEqual(["agents:apply", "mcp:apply", "skills:apply"]);
     expect(applyCalls[0].args).toEqual(["--only", "agents:a-behind", "--action", "upgrade"]);
-    expect(applyCalls[1].args).toEqual(["--only", "mcp:mcp-behind", "--action", "update"]);
+    // MCP 展开成逐助手：库级 update 会被引擎拒绝（仅 enable/disable/remove）
+    expect(applyCalls[1].args).toEqual(["--only", "mcp:mcp-behind", "--agent", "claude-code", "--action", "update"]);
     expect(applyCalls[2].args).toEqual(["--only", "skill:agent-skills/behind-skill", "--action", "update"]);
     for (const call of applyCalls) {
       expect(call.args).not.toContain("--dry-run");
@@ -191,6 +196,8 @@ describe("UpdatesPage 更新中心", () => {
             makeElement({
               id: "mcp:mcp-behind",
               domain: "mcp",
+              // MCP 的 update 是逐助手动作，界面据 observed.agents 里 assigned 的那些展开
+              observed: { agents: { "claude-code": { assigned: true }, codex: { assigned: false } } },
               freshness: makeFreshness({ state: "behind", current: "0.1.0", upstream: "0.2.0" }),
             }),
           ],
@@ -247,7 +254,10 @@ describe("UpdatesPage 更新中心", () => {
     await userEvent.click(screen.getByTestId("update-mcp:b-unknown"));
     await waitFor(() => expect(calls.some((c) => c.command === "mcp:apply")).toBe(true));
     const mcpApply = calls.filter((c) => c.command === "mcp:apply");
-    expect(mcpApply.map((c) => c.args)).toEqual([["--only", "mcp:b-unknown", "--action", "update"]]);
+    // MCP 逐助手展开：库级 update 引擎不认
+    expect(mcpApply.map((c) => c.args)).toEqual([
+      ["--only", "mcp:b-unknown", "--agent", "claude-code", "--action", "update"],
+    ]);
     expect(mcpApply[0].options?.runId).toMatch(/^gui-/);
 
     expect(calls.some((c) => c.command.endsWith(":plan"))).toBe(false);
@@ -345,6 +355,8 @@ describe("UpdatesPage 更新中心", () => {
             makeElement({
               id: "mcp:mcp-behind",
               domain: "mcp",
+              // MCP 的 update 是逐助手动作，界面据 observed.agents 里 assigned 的那些展开
+              observed: { agents: { "claude-code": { assigned: true }, codex: { assigned: false } } },
               freshness: makeFreshness({ state: "behind", current: "0.1.0", upstream: "0.2.0" }),
             }),
           ],
@@ -494,5 +506,32 @@ describe("UpdatesPage 更新中心", () => {
     release!();
     expect(await screen.findByText("更新 Agents（agents:a-behind 1.0.0 → 2.0.0）完成")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId("update-all-button")).toHaveTextContent("全部更新（1）"));
+  });
+
+  it("MCP 没分配给任何助手时不发那条必失败的请求，直说要先分配", async () => {
+    const routes: Record<string, Envelope> = {
+      "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode() }),
+      "agents:status": makeEnvelope({ domain: "agents", elements: [] }, { command: "agents.status" }),
+      "skills:status": makeEnvelope({ domain: "skills", elements: [] }, { command: "skills.status" }),
+      "mcp:status": makeEnvelope(
+        {
+          domain: "mcp",
+          elements: [
+            makeElement({
+              id: "mcp:orphan",
+              domain: "mcp",
+              // 库里有定义、但一个助手都没分配
+              observed: { agents: { "claude-code": { assigned: false } } },
+              freshness: makeFreshness({ state: "behind", current: "0.1.0", upstream: "0.2.0" }),
+            }),
+          ],
+        },
+        { command: "mcp.status" },
+      ),
+    };
+    const { calls } = renderWithEngine(<UpdatesPage />, routes);
+    await userEvent.click(await screen.findByTestId("update-mcp:orphan"));
+    expect(await screen.findByText(/还没分配给任何助手/)).toBeInTheDocument();
+    expect(calls.some((c) => c.command === "mcp:apply")).toBe(false);
   });
 });

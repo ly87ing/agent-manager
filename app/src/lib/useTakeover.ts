@@ -87,7 +87,11 @@ export function useTakeover() {
     }
     const summary = `接管完成：成功 ${succeeded}，失败 ${failures.length}`;
     if (failures.length > 0) {
-      toast.error(`${summary}，失败详情见任务记录`);
+      // 只给条数等于什么都没说：把每条失败的对象和原因直接列出来，用户才知道下一步做什么
+      toast.error(summary, {
+        description: failures.map((item) => `${item.label}：${item.message}`).join("\n"),
+        duration: 12_000,
+      });
     } else {
       toast.success(summary);
     }

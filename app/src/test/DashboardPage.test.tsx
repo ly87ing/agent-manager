@@ -25,7 +25,7 @@ function renderDashboard(routes: Record<string, EngineRoute>) {
   return render(
     <QueryClientProvider client={queryClient}>
       <DashboardPage />
-      <Toaster richColors position="top-right" />
+      <Toaster richColors position="bottom-right" />
     </QueryClientProvider>,
   );
 }
