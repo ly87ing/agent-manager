@@ -1525,3 +1525,329 @@ fn skills_extra_link_takeover_and_unlink() {
 
     let _ = std::fs::remove_dir_all(base);
 }
+
+// ---------- 本地来源集合（source_path 直链接管） ----------
+
+/// 本地来源集合的端到端接管：登记外部源目录后，add 直接把助手目录里的链接指向源，
+/// 内容跟随外部更新；停用/移除只动链接，绝不触碰外部源。
+#[test]
+fn local_source_collection_links_directly_to_external_source() {
+    let (root, context) = temp_ctx("skills-local-source");
+    // 外部工具自己维护的技能目录（manager 不拥有）
+    let vendor = context.home_dir.join(".vendor-tool").join("skills");
+    std::fs::create_dir_all(vendor.join("alpha")).unwrap();
+    std::fs::write(vendor.join("alpha").join("SKILL.md"), "# Alpha\nv1").unwrap();
+    // 接管前就已经存在的外部链接（旧体系/手工建立）
+    let claude_skills = context.home_dir.join(".claude").join("skills");
+    std::fs::create_dir_all(&claude_skills).unwrap();
+    std::os::unix::fs::symlink(vendor.join("alpha"), claude_skills.join("alpha")).unwrap();
+
+    let set_res = execute(
+        &context,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "skills.repositories.vendor-tool",
+                "--value",
+                "{\"source_path\":\"~/.vendor-tool/skills\",\"skill_paths\":[\"alpha\"],\"agents\":[\"claude-code\"]}",
+            ],
+        ),
+    );
+    assert!(set_res.ok, "{:?}", set_res.errors);
+
+    // status：集合以源目录为资源库，且不冒充 manager 自管缓存
+    let status = execute(&context, &request("skills:status", &[]));
+    assert!(status.ok, "{:?}", status.errors);
+    let coll_el = status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|el| el["id"] == "skill:vendor-tool")
+        .unwrap()
+        .clone();
+    assert_eq!(coll_el["spec"]["source_path"], "~/.vendor-tool/skills");
+    assert_eq!(coll_el["spec"]["url"], serde_json::Value::Null);
+    assert_eq!(coll_el["state"], "managed-ok");
+    assert_eq!(coll_el["observed"]["owner_marked"], false);
+
+    // add：接管既有外部链接（目标不变，文件系统零改动），不产生内容快照
+    let add = execute(
+        &context,
+        &request(
+            "skills:apply",
+            &[
+                "--only",
+                "vendor-tool/alpha",
+                "--agent",
+                "claude-code",
+                "--action",
+                "add",
+            ],
+        ),
+    );
+    assert!(add.ok, "{:?}", add.errors);
+    let link = claude_skills.join("alpha");
+    // 链接目标经词法/真实路径归一（macOS /var → /private/var），比较解析后的同一目录。
+    let links_to_source = |link: &std::path::Path| {
+        std::fs::read_link(link).unwrap().canonicalize().unwrap()
+            == vendor.join("alpha").canonicalize().unwrap()
+    };
+    assert!(links_to_source(&link), "本地来源集合必须直链源目录");
+    assert!(
+        !context.data_dir.join("skill-versions").exists(),
+        "直链模式不得复制内容快照"
+    );
+
+    // 内容跟随外部更新（无需 update）
+    std::fs::write(vendor.join("alpha").join("SKILL.md"), "# Alpha\nv2").unwrap();
+    assert_eq!(
+        std::fs::read_to_string(link.join("SKILL.md")).unwrap(),
+        "# Alpha\nv2"
+    );
+
+    let linked_state = |env: &agent_manager_engine::Envelope| -> String {
+        env.data["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|el| el["id"] == "skill:vendor-tool/alpha")
+            .unwrap()["observed"]["agents"]["claude-code"]["state"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let after_add = execute(&context, &request("skills:status", &[]));
+    assert_eq!(linked_state(&after_add), "linked");
+
+    // disable：只删链接，外部源原样保留
+    let disable = execute(
+        &context,
+        &request(
+            "skills:apply",
+            &[
+                "--only",
+                "vendor-tool/alpha",
+                "--agent",
+                "claude-code",
+                "--action",
+                "disable",
+            ],
+        ),
+    );
+    assert!(disable.ok, "{:?}", disable.errors);
+    assert!(!link.exists() && std::fs::read_link(&link).is_err());
+    assert!(
+        vendor.join("alpha").join("SKILL.md").is_file(),
+        "停用不得删除外部源内容"
+    );
+
+    // enable：重新直链回源
+    let enable = execute(
+        &context,
+        &request(
+            "skills:apply",
+            &[
+                "--only",
+                "vendor-tool/alpha",
+                "--agent",
+                "claude-code",
+                "--action",
+                "enable",
+            ],
+        ),
+    );
+    assert!(enable.ok, "{:?}", enable.errors);
+    assert!(links_to_source(&link));
+
+    // 集合级 update：无网络、无 clone，刷新指纹并保持直链
+    let update = execute(
+        &context,
+        &request(
+            "skills:apply",
+            &["--only", "vendor-tool", "--action", "update"],
+        ),
+    );
+    assert!(update.ok, "{:?}", update.errors);
+    assert!(links_to_source(&link));
+    assert!(!context
+        .data_dir
+        .join("repositories")
+        .join("vendor-tool")
+        .exists());
+
+    // remove：解除管理，外部源仍在
+    let remove = execute(
+        &context,
+        &request(
+            "skills:apply",
+            &[
+                "--only",
+                "vendor-tool/alpha",
+                "--agent",
+                "claude-code",
+                "--action",
+                "remove",
+            ],
+        ),
+    );
+    assert!(remove.ok, "{:?}", remove.errors);
+    assert!(vendor.join("alpha").join("SKILL.md").is_file());
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// 本地来源集合的源目录安全反例：非法定义一律 fail-closed，且不留下任何链接。
+#[test]
+fn local_source_rejects_unsafe_definitions() {
+    let (root, context) = temp_ctx("skills-local-source-guard");
+    let vendor = context.home_dir.join(".vendor-tool").join("skills");
+    std::fs::create_dir_all(vendor.join("alpha")).unwrap();
+    std::fs::write(vendor.join("alpha").join("SKILL.md"), "# Alpha").unwrap();
+    std::fs::create_dir_all(context.home_dir.join(".claude").join("skills")).unwrap();
+    // 指向源目录的符号链接（不允许作为 source_path 根）
+    let linked_root = context.home_dir.join("linked-skills");
+    std::os::unix::fs::symlink(&vendor, &linked_root).unwrap();
+
+    let cases: Vec<(&str, String)> = vec![
+        (
+            "url 与 source_path 互斥",
+            "{\"source_path\":\"~/.vendor-tool/skills\",\"url\":\"https://example.com/x.git\",\"skill_paths\":[\"alpha\"]}".to_string(),
+        ),
+        (
+            "源目录不存在",
+            "{\"source_path\":\"~/.missing-tool/skills\",\"skill_paths\":[\"alpha\"]}".to_string(),
+        ),
+        (
+            "源根是符号链接",
+            "{\"source_path\":\"~/linked-skills\",\"skill_paths\":[\"alpha\"]}".to_string(),
+        ),
+        (
+            "源落在助手技能目录内（自指）",
+            "{\"source_path\":\"~/.claude/skills\",\"skill_paths\":[\"alpha\"]}".to_string(),
+        ),
+    ];
+
+    for (label, definition) in cases {
+        let set_res = execute(
+            &context,
+            &request(
+                "policy:set",
+                &[
+                    "--layer",
+                    "local",
+                    "--key",
+                    "skills.repositories.guarded",
+                    "--value",
+                    &definition,
+                ],
+            ),
+        );
+        assert!(set_res.ok, "保存定义本身不执行动作: {label}");
+        let add = execute(
+            &context,
+            &request(
+                "skills:apply",
+                &[
+                    "--only",
+                    "guarded/alpha",
+                    "--agent",
+                    "claude-code",
+                    "--action",
+                    "add",
+                ],
+            ),
+        );
+        assert!(!add.ok, "[{label}] 必须 fail-closed 拒绝");
+        assert_eq!(add.errors[0].code, "SKILL_ERROR", "[{label}]");
+        assert!(
+            !context.home_dir.join(".claude/skills/alpha").exists(),
+            "[{label}] 失败不得留下链接"
+        );
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// 本地来源集合的漂移保护：链接被外部改指到别处时 status 报 drifted，
+/// 且不被静默覆盖（enable 会按期望目标重建，但外部真实目录仍 fail-closed）。
+#[test]
+fn local_source_detects_drifted_link() {
+    let (root, context) = temp_ctx("skills-local-drift");
+    let vendor = context.home_dir.join(".vendor-tool").join("skills");
+    std::fs::create_dir_all(vendor.join("alpha")).unwrap();
+    std::fs::write(vendor.join("alpha").join("SKILL.md"), "# Alpha").unwrap();
+    let other = context.home_dir.join("other-place");
+    std::fs::create_dir_all(&other).unwrap();
+    let claude_skills = context.home_dir.join(".claude").join("skills");
+    std::fs::create_dir_all(&claude_skills).unwrap();
+
+    let set_res = execute(
+        &context,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "skills.repositories.vendor-tool",
+                "--value",
+                "{\"source_path\":\"~/.vendor-tool/skills\",\"skill_paths\":[\"alpha\"],\"agents\":[\"claude-code\"]}",
+            ],
+        ),
+    );
+    assert!(set_res.ok, "{:?}", set_res.errors);
+    let add = execute(
+        &context,
+        &request(
+            "skills:apply",
+            &[
+                "--only",
+                "vendor-tool/alpha",
+                "--agent",
+                "claude-code",
+                "--action",
+                "add",
+            ],
+        ),
+    );
+    assert!(add.ok, "{:?}", add.errors);
+
+    // 外部把链接改指到别处
+    let link = claude_skills.join("alpha");
+    std::fs::remove_file(&link).unwrap();
+    std::os::unix::fs::symlink(&other, &link).unwrap();
+
+    let status = execute(&context, &request("skills:status", &[]));
+    assert!(status.ok, "{:?}", status.errors);
+    let cell = status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|el| el["id"] == "skill:vendor-tool/alpha")
+        .unwrap()["observed"]["agents"]["claude-code"]["state"]
+        .clone();
+    assert_eq!(cell, "drifted", "改指到登记源之外必须报漂移");
+
+    // 真实目录占位时 fail-closed：不接管、不覆盖
+    std::fs::remove_file(&link).unwrap();
+    std::fs::create_dir_all(link.join("inner")).unwrap();
+    let enable = execute(
+        &context,
+        &request(
+            "skills:apply",
+            &[
+                "--only",
+                "vendor-tool/alpha",
+                "--agent",
+                "claude-code",
+                "--action",
+                "enable",
+            ],
+        ),
+    );
+    assert!(!enable.ok, "真实目录占位必须 fail-closed");
+    assert!(link.join("inner").is_dir(), "外部真实目录不得被覆盖");
+    let _ = std::fs::remove_dir_all(root);
+}

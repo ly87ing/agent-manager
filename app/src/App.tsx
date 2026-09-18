@@ -1,6 +1,7 @@
 import {
   Activity,
   Bot,
+  PackageCheck,
   ScrollText,
   Server,
   Settings,
@@ -13,6 +14,7 @@ import McpPage from "./pages/McpPage";
 import RulesHooksPage from "./pages/RulesHooksPage";
 import RunsPage from "./pages/RunsPage";
 import SkillsPage from "./pages/SkillsPage";
+import TakeoverPage from "./pages/TakeoverPage";
 import SettingsPage from "./pages/SettingsPage";
 import { useSettings } from "./lib/settings";
 import { useUpdateCheck } from "./lib/update-check";
@@ -23,6 +25,7 @@ const NAV: NavItem[] = [
   { key: "skills", label: "技能", icon: Sparkles },
   { key: "mcp", label: "MCP", icon: Server },
   { key: "rules-hooks", label: "规则与 Hooks", icon: ScrollText },
+  { key: "takeover", label: "接管中心", icon: PackageCheck },
   { key: "runs", label: "操作记录", icon: Activity },
   { key: "settings", label: "设置", icon: Settings },
 ];
@@ -103,6 +106,7 @@ export default function App() {
         )}
         {activePage === "mcp" && <McpPage />}
         {activePage === "rules-hooks" && <RulesHooksPage />}
+        {activePage === "takeover" && <TakeoverPage />}
         {activePage === "runs" && <RunsPage />}
         {activePage === "settings" && <SettingsPage />}
       </div>

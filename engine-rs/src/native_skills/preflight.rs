@@ -1,13 +1,13 @@
 use anyhow::{anyhow, bail, Result};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use super::paths::{
     check_not_external_conflict, check_not_external_conflict_with_takeover,
-    check_shared_agent_target, is_link_entry, managed_bases, parse_only, repo_base_dir,
+    check_shared_agent_target, collection_source_root, expected_link_target, is_link_entry,
+    is_local_source, managed_bases, parse_only, validate_local_source,
 };
 use super::persistence::load_bindings_readonly;
-use super::snapshot::verify_skill_version;
 use super::status::{load_metadata, DomainMetadata};
 use super::{CollectionDef, COLLECTION_ACTIONS, SKILL_ACTIONS};
 use crate::native::{Context, Request};
@@ -37,6 +37,7 @@ pub fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
     let fallback_coll = CollectionDef {
         name: target.collection.clone(),
         url: None,
+        source_path: None,
         skill_paths: None,
         agents: None,
         disabled: None,
@@ -71,7 +72,7 @@ pub fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
         );
     }
 
-    let bases = managed_bases(ctx);
+    let bases = managed_bases(ctx, &meta.collections);
     let agent_targets: BTreeMap<String, PathBuf> = meta
         .agents
         .iter()
@@ -112,6 +113,10 @@ fn preflight_skill_action(
 
     check_shared_agent_target(agent, agent_targets)?;
 
+    // 本地来源集合先做源目录安全校验（存在、非链接、不越界、不与助手技能目录重叠）。
+    if is_local_source(coll) && matches!(action, "add" | "update" | "enable") {
+        validate_local_source(ctx, coll, agent_targets)?;
+    }
     let link_path = agent_info.skills_dir.join(skill);
     // 逐 skill add/remove 可携带 --allow-takeover 放行非受管符号链接（其余动作该旗标
     // 已在入口被拒）；真实文件/目录与缺旗标的非受管链接仍 fail-closed。
@@ -145,25 +150,19 @@ fn preflight_skill_action(
 
     let bindings = load_bindings_readonly(ctx)?;
     let existing_binding = bindings.get(&(coll.name.clone(), skill.to_string(), agent.to_string()));
-    preflight_verify_skill_binding(
-        action,
-        &coll.name,
-        skill,
-        agent,
-        existing_binding,
-        &ctx.data_dir,
-    )?;
+    preflight_verify_skill_binding(ctx, coll, action, skill, agent, existing_binding)?;
     Ok(())
 }
 
 fn preflight_verify_skill_binding(
+    ctx: &Context,
+    coll: &CollectionDef,
     action: &str,
-    coll_name: &str,
     skill: &str,
     agent: &str,
     existing_binding: Option<&super::BindingEntry>,
-    data_dir: &Path,
 ) -> Result<()> {
+    let coll_name = &coll.name;
     match action {
         "enable" => {
             let b = existing_binding.ok_or_else(|| {
@@ -172,7 +171,7 @@ fn preflight_verify_skill_binding(
             if !b.assigned {
                 bail!("[{coll_name}/{skill}@{agent}] 分配已被移除，无法启用");
             }
-            verify_skill_version(data_dir, &b.version)?;
+            expected_link_target(ctx, coll, skill, &b.version)?;
         }
         "add" => {
             if let Some(b) = existing_binding {
@@ -217,12 +216,17 @@ fn preflight_coll_action(
         bail!("集合动作不接受 --agent");
     }
     if action == "update" {
-        if coll.url.is_none() || coll.url.as_deref() == Some("") {
-            bail!("[{}] 集合定义缺少 url，无法刷新资源库", coll.name);
-        }
-        let repo_dir = repo_base_dir(ctx).join(&coll.name);
-        if req.flag("--offline") && !repo_dir.exists() {
-            bail!("[{}] 离线模式且本地仓库缺失，无法下载", coll.name);
+        if is_local_source(coll) {
+            // 本地来源集合无远端可拉，只校验登记源目录仍然安全可用。
+            validate_local_source(ctx, coll, agent_targets)?;
+        } else {
+            if coll.url.is_none() || coll.url.as_deref() == Some("") {
+                bail!("[{}] 集合定义缺少 url，无法刷新资源库", coll.name);
+            }
+            let repo_dir = collection_source_root(ctx, coll);
+            if req.flag("--offline") && !repo_dir.exists() {
+                bail!("[{}] 离线模式且本地仓库缺失，无法下载", coll.name);
+            }
         }
     }
     let bindings = load_bindings_readonly(ctx)?;
@@ -234,7 +238,7 @@ fn preflight_coll_action(
                         if agent_info.enabled {
                             let link_path = agent_info.skills_dir.join(s);
                             check_not_external_conflict(&link_path, bases)?;
-                            verify_skill_version(&ctx.data_dir, &b.version)?;
+                            expected_link_target(ctx, coll, s, &b.version)?;
                         }
                     }
                 }

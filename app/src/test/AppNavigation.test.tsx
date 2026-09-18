@@ -24,12 +24,16 @@ function routes() {
     "mcp:status": makeEnvelope({ domain: "mcp", elements: [] }, { command: "mcp.status" }),
     "rules:status": makeEnvelope({ domain: "rules", elements: [] }, { command: "rules.status" }),
     "runs:list": makeEnvelope({ runs: [] }, { command: "runs.list" }),
+    "system:discover": makeEnvelope(
+      { domain: "discover", agents: [], skills: { items: [], groups: [] }, mcp: [], summary: {} },
+      { command: "system.discover" },
+    ),
     "policy:get": makeEnvelope({ layers: { sqlite: null } }, { command: "policy.get" }),
   };
 }
 
-describe("App 顶层导航收敛为日常六项", () => {
-  it("侧边栏仅有六项，且精确中文，默认渲染助手页，点击导航可切换页面", async () => {
+describe("App 顶层导航收敛为日常七项", () => {
+  it("侧边栏仅有七项，且精确中文，默认渲染助手页，点击导航可切换页面", async () => {
     setSettingsClient({
       get: async () => dummySettings,
       save: async (preferences) => ({ ...dummySettings, preferences }),
@@ -45,6 +49,7 @@ describe("App 顶层导航收敛为日常六项", () => {
       "技能",
       "MCP",
       "规则与 Hooks",
+      "接管中心",
       "操作记录",
       "设置",
     ];
@@ -67,6 +72,12 @@ describe("App 顶层导航收敛为日常六项", () => {
     await userEvent.click(rulesHooksNav);
     expect(rulesHooksNav).toHaveAttribute("aria-current", "page");
     expect(await screen.findByRole("tab", { name: "规则" })).toBeInTheDocument();
+
+    // 点击接管中心
+    const takeoverNav = within(nav).getByRole("button", { name: "接管中心" });
+    await userEvent.click(takeoverNav);
+    expect(takeoverNav).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("heading", { name: "接管中心" })).toBeInTheDocument();
   }, 15000);
 
   it("从助手卡片点击「管理技能」跳转到技能页并预选对应助手，点击侧栏「技能」重置为全部助手", async () => {

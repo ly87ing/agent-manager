@@ -314,3 +314,25 @@ pub fn import_candidates(
     });
     out
 }
+
+/// 只读发现：供 `system:discover` 聚合的 MCP 未纳管候选。
+/// 与 `mcp:status.import_candidates` 同一扫描与掩码路径，额外补上统一的
+/// origin/manage 分类字段；目标解析失败的 agent 候选为空，不中断其他 agent。
+pub fn discover(ctx: &crate::native::Context) -> anyhow::Result<Value> {
+    let policy = crate::store::effective_policy(ctx)?;
+    let library = super::policy_view::library_view(&policy);
+    let (targets, _disabled_agents) = super::targets::agent_targets(&policy, &ctx.home_dir)?;
+    let bindings = super::persistence::load_bindings_readonly(ctx)?;
+    let mut items = import_candidates(&library, &bindings, &targets);
+    for item in items.iter_mut() {
+        let previously = item["previously_managed"].as_bool().unwrap_or(false);
+        item["origin"] = json!(if previously {
+            "previously-managed"
+        } else {
+            "unmanaged"
+        });
+        // MCP 是客户端配置条目，没有文件系统链接语义：接管 = 导入库定义并写受管标记。
+        item["manage"] = json!("register");
+    }
+    Ok(Value::Array(items))
+}

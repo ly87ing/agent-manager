@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Context as _, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use super::ParsedTarget;
+use super::{CollectionDef, ParsedTarget};
 use crate::native::Context;
 use crate::store;
 
@@ -85,8 +85,129 @@ pub fn repo_base_dir(ctx: &Context) -> PathBuf {
     ctx.data_dir.join("repositories")
 }
 
-pub fn managed_bases(ctx: &Context) -> Vec<PathBuf> {
+/// manager 自管基目录（git 集合缓存与内容快照），与集合定义无关。
+pub fn manager_bases(ctx: &Context) -> Vec<PathBuf> {
     vec![repo_base_dir(ctx), ctx.data_dir.join("skill-versions")]
+}
+
+/// 受管基准：自管基目录 + 已登记的本地来源集合源根。
+/// 本地来源集合的链接直接指向外部源目录，源根进入基准后这些链接才被视为「manager 可管」
+/// （可被覆盖、停用时删除）；未登记的外部路径仍是外部冲突，fail-closed 不覆盖。
+pub fn managed_bases(ctx: &Context, collections: &BTreeMap<String, CollectionDef>) -> Vec<PathBuf> {
+    let mut bases = manager_bases(ctx);
+    for coll in collections.values() {
+        if coll.deleted || coll.source_path.is_none() {
+            continue;
+        }
+        bases.push(collection_source_root(ctx, coll));
+    }
+    bases
+}
+
+/// 集合是否为本地来源（直链模式）。
+pub fn is_local_source(coll: &CollectionDef) -> bool {
+    coll.source_path.is_some()
+}
+
+/// 集合源根：本地来源集合为登记的 source_path（展开 ~ 后按词法归一），
+/// git 集合为 manager 自管的仓库缓存目录。
+pub fn collection_source_root(ctx: &Context, coll: &CollectionDef) -> PathBuf {
+    match coll.source_path.as_deref() {
+        Some(raw) => resolve_loose(&expand_home(raw, &ctx.home_dir)),
+        None => repo_base_dir(ctx).join(&coll.name),
+    }
+}
+
+/// 期望链接目标（只读路径计算，不做存在性/快照校验，供 status 判定漂移）：
+/// 本地来源集合指向源目录下的同名 skill，git 集合指向内容快照目录。
+pub fn expected_link_path(
+    ctx: &Context,
+    coll: &CollectionDef,
+    skill: &str,
+    version: Option<&str>,
+) -> PathBuf {
+    if is_local_source(coll) {
+        collection_source_root(ctx, coll).join(skill)
+    } else {
+        ctx.data_dir
+            .join("skill-versions")
+            .join(version.unwrap_or(""))
+            .join("content")
+    }
+}
+
+/// 写路径的期望链接目标（带校验，fail-closed）：本地来源集合校验源目录仍在且不越界，
+/// git 集合走既有内容快照校验（哈希必须与 version 一致）。
+pub fn expected_link_target(
+    ctx: &Context,
+    coll: &CollectionDef,
+    skill: &str,
+    version: &str,
+) -> Result<PathBuf> {
+    if !is_local_source(coll) {
+        return super::snapshot::verify_skill_version(&ctx.data_dir, version);
+    }
+    let root = collection_source_root(ctx, coll);
+    let target = resolve_loose(&root.join(skill));
+    if !is_path_within(&target, &root) {
+        bail!("[{}/{}] 源路径越界，拒绝链接", coll.name, skill);
+    }
+    if !target.is_dir() {
+        bail!(
+            "[{}/{}] 本地来源中找不到该技能目录（源已被移动或删除）",
+            coll.name,
+            skill
+        );
+    }
+    Ok(target)
+}
+
+/// 本地来源集合的源目录安全校验（fail-closed，写路径与只读 status 同一口径）：
+/// 必须是已存在的真实目录（不接受符号链接根，避免源被改指后静默换内容）；
+/// 不得落在 manager 自管数据目录内，也不得是任一 Agent 技能目录本身或其祖先/子孙
+/// ——否则链接会自指或让 manager 覆盖助手目录。
+pub fn validate_local_source(
+    ctx: &Context,
+    coll: &CollectionDef,
+    agent_targets: &BTreeMap<String, PathBuf>,
+) -> Result<PathBuf> {
+    let Some(raw) = coll.source_path.as_deref() else {
+        bail!("[{}] 不是本地来源集合", coll.name);
+    };
+    if raw.trim().is_empty() {
+        bail!("[{}] source_path 不能为空", coll.name);
+    }
+    if coll.url.is_some() {
+        bail!(
+            "[{}] source_path 与 url 互斥：本地来源集合不从 git 同步",
+            coll.name
+        );
+    }
+    let root = collection_source_root(ctx, coll);
+    if is_link_entry(&root) {
+        bail!("[{}] source_path 不能是符号链接", coll.name);
+    }
+    if !root.is_dir() {
+        bail!("[{}] source_path 指向的目录不存在", coll.name);
+    }
+    let data_dir = resolve_loose(&ctx.data_dir);
+    if is_path_within(&root, &data_dir) {
+        bail!(
+            "[{}] source_path 不得位于 Agent Manager 数据目录内",
+            coll.name
+        );
+    }
+    for (agent, skills_dir) in agent_targets {
+        let target = resolve_loose(skills_dir);
+        if root == target || is_path_within(&root, &target) || is_path_within(&target, &root) {
+            bail!(
+                "[{}] source_path 与 Agent '{}' 的技能目录重叠，拒绝自指",
+                coll.name,
+                agent
+            );
+        }
+    }
+    Ok(root)
 }
 
 // ---------------------------------------------------------------------------

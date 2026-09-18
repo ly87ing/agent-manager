@@ -127,6 +127,67 @@ export interface McpImportCandidate {
   previously_managed?: boolean;
 }
 
+// ---------- system:discover（只读接管发现） ----------
+
+/** 接管方式词汇表（引擎侧 manage 字段）：
+ * native = 官方路径/原生安装方案，只标识不接管；symlink = 外部资源以软链接纳管；
+ * collection = 走已定义集合的接管通道；register = 登记定义（助手 CLI 与 MCP 条目）；
+ * cleanup = 断链或旧体系残留，只建议清理。 */
+export type TakeoverManage = "native" | "symlink" | "collection" | "register" | "cleanup";
+
+export interface DiscoverAgentCandidate {
+  id: string;
+  display_name: string;
+  bin: string;
+  bin_path: string;
+  version: string | null;
+  origin: "npm" | "brew" | "native" | "system" | string;
+  npm_package: string | null;
+  manage: "register";
+  /** true = 登记后可由本工具升级/卸载（仅可靠反查到包名的 npm 渠道）。 */
+  managed_after_takeover: boolean;
+  suggested_definition: Record<string, unknown>;
+}
+
+export interface DiscoverSkillItem {
+  agent: string;
+  name: string;
+  link_path: string;
+  target: string | null;
+  origin: "native-dir" | "external-link" | "collection-extra-link" | "legacy-link" | "dead-link" | string;
+  manage: TakeoverManage;
+  /** 命中已定义集合时的集合名（collection-extra-link）。 */
+  collection: string | null;
+  /** 参与聚合的源根（external-link）。 */
+  group: string | null;
+  suggested_collection?: string;
+  has_skill_md: boolean;
+}
+
+export interface DiscoverSkillGroup {
+  name: string;
+  source_path: string;
+  manage: "symlink";
+  /** true = 该源根已登记为本地来源集合，接管直接落到既有集合。 */
+  existing_collection: boolean;
+  agents: string[];
+  skills: { name: string; agents: string[]; has_skill_md: boolean }[];
+  suggested_definition: { source_path: string; skill_paths: string[]; agents: string[] };
+}
+
+export interface DiscoverMcpCandidate extends McpImportCandidate {
+  origin: "unmanaged" | "previously-managed" | string;
+  manage: "register";
+}
+
+export interface DiscoverData {
+  domain: "discover";
+  agents?: DiscoverAgentCandidate[];
+  skills?: { items: DiscoverSkillItem[]; groups: DiscoverSkillGroup[] };
+  mcp?: DiscoverMcpCandidate[];
+  summary: Record<string, number>;
+}
+
 // ---------- system:audit（data 沿用 doctor 报告结构，契约 v2 才正式固化） ----------
 
 export type AuditEntryStatus = "ok" | "notice" | "warning" | "error";

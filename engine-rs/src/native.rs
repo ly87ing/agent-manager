@@ -522,6 +522,9 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("runs", "get") => crate::native_runs::runs_get(ctx, request),
         ("runs", "clear") => crate::native_runs::runs_clear(ctx),
         ("logs", "clear") => crate::native_logs::logs_clear(ctx),
+        ("system", "discover") => crate::native_discover::handle(ctx, request)
+            .map(|data| (data, vec![]))
+            .map_err(|err| DispatchError::new("DISCOVER_ERROR", format!("{err:#}"))),
         ("system", "refresh-upstream") => crate::native_upstream::handle(ctx, request),
         // 已退役或从未进入命令面的动词：已知域 + 未知动词。
         _ => Err(DispatchError::new(

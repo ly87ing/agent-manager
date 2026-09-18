@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::paths::{
-    expand_home, is_link_entry, is_managed_link, managed_bases, repo_base_dir, resolve_link_target,
-    resolve_loose,
+    collection_source_root, expand_home, expected_link_path, is_link_entry, is_local_source,
+    is_managed_link, managed_bases, resolve_link_target, resolve_loose,
 };
 use super::persistence::load_bindings_readonly;
 use super::snapshot::{discover_repo_skills, hash_skill_dir, SkillPathsError};
@@ -121,6 +121,11 @@ fn load_collection_defs(policy: &Value) -> BTreeMap<String, CollectionDef> {
             .get("url")
             .and_then(Value::as_str)
             .map(|s| s.to_string());
+        let source_path = raw
+            .get("source_path")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.to_string());
         let skill_paths = raw.get("skill_paths").and_then(Value::as_array).map(|arr| {
             arr.iter()
                 .filter_map(Value::as_str)
@@ -145,6 +150,7 @@ fn load_collection_defs(policy: &Value) -> BTreeMap<String, CollectionDef> {
             CollectionDef {
                 name: coll_name.clone(),
                 url,
+                source_path,
                 skill_paths,
                 agents: allowed_agents,
                 disabled: disabled_skills,
@@ -300,21 +306,14 @@ fn eval_assigned_agent_cell(
     (state, act, blocked_reason, should_be_linked)
 }
 
-fn check_managed_target_state(
-    ctx: &Context,
-    link_path: &Path,
-    version: Option<&str>,
-) -> &'static str {
+/// 受管链接的落地校验：目标必须存在且正好指向该集合的期望目标
+/// （本地来源集合为源目录，git 集合为内容快照）；其余一律 drifted/dead-link，不覆盖。
+fn check_managed_target_state(link_path: &Path, expected: &Path) -> &'static str {
     match resolve_link_target(link_path) {
         Ok(target) => {
-            let expected_content = ctx
-                .data_dir
-                .join("skill-versions")
-                .join(version.unwrap_or(""))
-                .join("content");
             if !target.exists() {
                 "dead-link"
-            } else if target == resolve_loose(&expected_content) {
+            } else if target == resolve_loose(expected) {
                 "linked"
             } else {
                 "drifted"
@@ -368,11 +367,11 @@ fn aggregate_skill_agents(
         let mut ev = eval_agent_cell(
             coll, agent_info, agent_id, binding, &link_path, bases, available,
         );
+        let expected = expected_link_path(ctx, coll, skill_name, version.as_deref());
         verify_agent_link_state(
-            ctx,
             &mut ev,
             &link_path,
-            version.as_deref(),
+            &expected,
             &mut all_disabled,
             &mut any_missing,
             &mut any_drifted,
@@ -408,10 +407,9 @@ fn aggregate_skill_agents(
 }
 
 fn verify_agent_link_state(
-    ctx: &Context,
     ev: &mut AgentCellEval,
     link_path: &Path,
-    version: Option<&str>,
+    expected: &Path,
     all_disabled: &mut bool,
     any_missing: &mut bool,
     any_drifted: &mut bool,
@@ -426,7 +424,7 @@ fn verify_agent_link_state(
             *any_drifted = true;
             *all_linked = false;
         } else {
-            let verified_state = check_managed_target_state(ctx, link_path, version);
+            let verified_state = check_managed_target_state(link_path, expected);
             ev.state = verified_state;
             if verified_state != "linked" {
                 *all_linked = false;
@@ -576,6 +574,7 @@ fn build_collection_element(
         "domain": "skills",
         "spec": {
             "url": coll.url,
+            "source_path": coll.source_path,
             "skill_paths": coll.skill_paths,
             "agents": coll.agents,
         },
@@ -603,16 +602,17 @@ pub fn build_status(ctx: &Context) -> Result<Value> {
     let meta = load_metadata(ctx)?;
     let bindings = load_bindings_readonly(ctx)?;
     let probes = crate::native_upstream::load_probe_cache(ctx)?;
-    let bases = managed_bases(ctx);
+    let bases = managed_bases(ctx, &meta.collections);
     let mut elements = Vec::new();
 
     for (coll_name, coll) in &meta.collections {
         if coll.deleted {
             continue;
         }
-        let repo_dir = repo_base_dir(ctx).join(coll_name);
+        // 本地来源集合的“资源库”就是登记的外部源目录本身（直链模式，无缓存与所有权标记）。
+        let repo_dir = collection_source_root(ctx, coll);
         let repo_cached = repo_dir.is_dir();
-        let owner_marked = repo_dir.join(".agent-manager-owned").exists();
+        let owner_marked = !is_local_source(coll) && repo_dir.join(".agent-manager-owned").exists();
 
         let (discovered_map, _dups, discovery_error) = if repo_cached {
             match discover_repo_skills(&repo_dir, &coll.raw) {

@@ -6,6 +6,7 @@
 //!   plan 与 --dry-run 已退役：apply 一律真实执行，经 preflight 后由调用方恒取全局锁。
 
 mod apply;
+mod discover;
 mod paths;
 mod persistence;
 mod preflight;
@@ -33,6 +34,9 @@ pub(crate) struct BindingEntry {
 pub(crate) struct CollectionDef {
     pub(crate) name: String,
     pub(crate) url: Option<String>,
+    /// 本地来源集合的源根目录（`~/...` 或绝对路径），与 `url` 互斥。
+    /// 有值即直链模式：链接直接指向源目录下的 skill，不做内容快照。
+    pub(crate) source_path: Option<String>,
     pub(crate) skill_paths: Option<Vec<String>>,
     pub(crate) agents: Option<Vec<String>>,
     pub(crate) disabled: Option<Vec<String>>,
@@ -60,6 +64,9 @@ pub(crate) use preflight::preflight_apply;
 
 // 供 native_upstream 探测集合仓库本地 HEAD 时定位仓库缓存目录
 pub(crate) use paths::repo_base_dir;
+
+// 供只读 system:discover 复用同一份元数据/binding 视图扫描未纳管条目（零写）
+pub(crate) use discover::discover as discover_unmanaged;
 
 // 供集成测试使用的最小公开发行接口
 pub use snapshot::hash_skill_dir;

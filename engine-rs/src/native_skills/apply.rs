@@ -5,12 +5,13 @@ use std::path::{Path, PathBuf};
 
 use super::paths::{
     atomic_create_or_replace_link, check_not_external_conflict,
-    check_not_external_conflict_with_takeover, is_link_entry, is_unmanaged_link, managed_bases,
-    parse_only, repo_base_dir, resolve_link_target, resolve_loose, safe_remove_link,
-    safe_remove_link_with_takeover, ExpectedLinkState, RollbackGuard,
+    check_not_external_conflict_with_takeover, collection_source_root, expected_link_target,
+    is_link_entry, is_local_source, is_unmanaged_link, managed_bases, parse_only, repo_base_dir,
+    resolve_link_target, resolve_loose, safe_remove_link, safe_remove_link_with_takeover,
+    validate_local_source, ExpectedLinkState, RollbackGuard,
 };
 use super::persistence::{load_bindings_from_conn, load_bindings_readonly, write_binding};
-use super::snapshot::{discover_repo_skills, hash_skill_dir, snapshot_skill, verify_skill_version};
+use super::snapshot::{discover_repo_skills, hash_skill_dir, snapshot_skill};
 use super::status::{load_metadata, record_apply_operation, DomainMetadata};
 use super::CollectionDef;
 use crate::native::{Context, Request};
@@ -40,6 +41,7 @@ pub fn apply(ctx: &Context, req: &Request) -> Result<Value> {
         let fallback_coll = CollectionDef {
             name: target.collection.clone(),
             url: None,
+            source_path: None,
             skill_paths: None,
             agents: None,
             disabled: None,
@@ -102,13 +104,17 @@ fn apply_single_skill(
         .agents
         .get(agent)
         .ok_or_else(|| anyhow!("未知 agent: {}", agent))?;
-    let repo_dir = repo_base_dir(ctx).join(&coll.name);
+    // 本地来源集合直接在登记的源目录里发现 skill（直链模式）；git 集合仍走自管仓库缓存。
+    if is_local_source(coll) {
+        validate_local_source(ctx, coll, &agent_target_map(meta))?;
+    }
+    let repo_dir = collection_source_root(ctx, coll);
     let (discovered, _) = discover_repo_skills(&repo_dir, &coll.raw)?;
     let source_dir = discovered
         .get(skill)
         .ok_or_else(|| anyhow!("集合 {} 中未发现 skill: {}", coll.name, skill))?;
     let link_path = agent_info.skills_dir.join(skill);
-    let bases = managed_bases(ctx);
+    let bases = managed_bases(ctx, &meta.collections);
 
     let mut conn = store::open_write(ctx)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -249,8 +255,13 @@ fn apply_skill_add(
     let allow_takeover = req.flag("--allow-takeover");
     check_not_external_conflict_with_takeover(link_path, bases, allow_takeover)?;
     let takeover = is_unmanaged_link(link_path, bases);
-    let content_path = snapshot_skill(source_dir, &ctx.data_dir)?;
     let version = hash_skill_dir(source_dir)?;
+    // 本地来源集合直链源目录（内容归外部所有、跟随其更新）；git 集合落内容快照。
+    let content_path = if is_local_source(coll) {
+        expected_link_target(ctx, coll, skill, &version)?
+    } else {
+        snapshot_skill(source_dir, &ctx.data_dir)?
+    };
 
     let mut rollback_guard = RollbackGuard::new();
     let old_target = if is_link_entry(link_path) {
@@ -316,8 +327,12 @@ fn apply_skill_update(
             agent
         );
     }
-    let content_path = snapshot_skill(source_dir, &ctx.data_dir)?;
     let version = hash_skill_dir(source_dir)?;
+    let content_path = if is_local_source(coll) {
+        expected_link_target(ctx, coll, skill, &version)?
+    } else {
+        snapshot_skill(source_dir, &ctx.data_dir)?
+    };
 
     let mut rollback_guard = RollbackGuard::new();
     if b.enabled && coll.enabled && agent_info.enabled {
@@ -411,7 +426,7 @@ fn apply_skill_enable(
     agent: &str,
 ) -> Result<()> {
     let b = validate_enable_eligibility(coll, agent_info, existing_binding, skill, agent)?;
-    let content_path = verify_skill_version(&ctx.data_dir, &b.version)?;
+    let content_path = expected_link_target(ctx, coll, skill, &b.version)?;
     check_not_external_conflict(link_path, bases)?;
 
     let mut rollback_guard = RollbackGuard::new();
@@ -550,10 +565,12 @@ fn apply_collection(
     meta: &DomainMetadata,
     action: &str,
 ) -> Result<()> {
-    let bases = managed_bases(ctx);
-    let repo_dir = repo_base_dir(ctx).join(&coll.name);
+    let bases = managed_bases(ctx, &meta.collections);
+    let repo_dir = collection_source_root(ctx, coll);
 
     match action {
+        // 本地来源集合没有远端可拉：update = 重扫源目录、刷新版本指纹并修复已启用链接。
+        "update" if is_local_source(coll) => apply_local_coll_update(ctx, req, coll, meta, &bases)?,
         "update" => apply_coll_update(ctx, req, coll, &repo_dir)?,
         "enable" | "disable" => {
             apply_coll_toggle(ctx, req, coll, meta, &bases, action == "enable")?
@@ -561,6 +578,82 @@ fn apply_collection(
         "remove" => apply_coll_remove(ctx, req, coll, meta, &bases)?,
         _ => bail!("不支持的集合动作: {}", action),
     }
+    Ok(())
+}
+
+/// meta 中的 agent → 技能目录映射（本地来源自指校验用）。
+fn agent_target_map(meta: &DomainMetadata) -> std::collections::BTreeMap<String, PathBuf> {
+    meta.agents
+        .iter()
+        .map(|(k, v)| (k.clone(), v.skills_dir.clone()))
+        .collect()
+}
+
+/// 本地来源集合的集合级 update：无网络、无 clone。重扫登记源目录，刷新各已分配 binding 的
+/// 内容指纹，并为「已启用且集合/助手都启用」的分配修复直链；源中已消失的 skill 保持原状不动。
+fn apply_local_coll_update(
+    ctx: &Context,
+    req: &Request,
+    coll: &CollectionDef,
+    meta: &DomainMetadata,
+    bases: &[PathBuf],
+) -> Result<()> {
+    let root = validate_local_source(ctx, coll, &agent_target_map(meta))?;
+    let (discovered, _) = discover_repo_skills(&root, &coll.raw)?;
+
+    let mut conn = store::open_write(ctx)?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let bindings = load_bindings_from_conn(&tx)?;
+    let mut rollback_guard = RollbackGuard::new();
+    let mut refreshed = 0usize;
+
+    let res = (|| -> Result<()> {
+        for ((c, s, a), b) in &bindings {
+            if c != &coll.name || !b.assigned {
+                continue;
+            }
+            let Some(agent_info) = meta.agents.get(a) else {
+                continue;
+            };
+            let Some(source_dir) = discovered.get(s) else {
+                continue;
+            };
+            let version = hash_skill_dir(source_dir)?;
+            if b.enabled && coll.enabled && agent_info.enabled {
+                let link_path = agent_info.skills_dir.join(s);
+                check_not_external_conflict(&link_path, bases)?;
+                let old_target = if is_link_entry(&link_path) {
+                    resolve_link_target(&link_path).ok()
+                } else {
+                    None
+                };
+                atomic_create_or_replace_link(source_dir, &link_path)?;
+                rollback_guard.record_mutation(
+                    &link_path,
+                    old_target,
+                    ExpectedLinkState::Present(resolve_loose(source_dir)),
+                );
+            }
+            write_binding(&tx, &coll.name, s, a, &version, b.enabled, true)?;
+            refreshed += 1;
+        }
+        store::record_operation(
+            &tx,
+            Some(&req.run_id),
+            "skills:update",
+            Some(&coll.name),
+            Some(&json!({"action": "update", "source": "local", "refreshed": refreshed})),
+        )?;
+        tx.commit()?;
+        Ok(())
+    })();
+    if let Err(err) = res {
+        if let Err(rb_err) = rollback_guard.rollback() {
+            return Err(err.context(format!("软链接回滚未完全成功: {rb_err}")));
+        }
+        return Err(err);
+    }
+    rollback_guard.disarm();
     Ok(())
 }
 
@@ -629,6 +722,7 @@ fn apply_coll_update(
 
 fn apply_coll_toggle_link(
     ctx: &Context,
+    coll: &CollectionDef,
     bases: &[PathBuf],
     agent_info: &super::AgentTargetInfo,
     skill: &str,
@@ -639,7 +733,7 @@ fn apply_coll_toggle_link(
     let link_path = agent_info.skills_dir.join(skill);
     if enabling {
         if binding.enabled && agent_info.enabled {
-            let content = verify_skill_version(&ctx.data_dir, &binding.version)?;
+            let content = expected_link_target(ctx, coll, skill, &binding.version)?;
             check_not_external_conflict(&link_path, bases)?;
             let old_target = if is_link_entry(&link_path) {
                 resolve_link_target(&link_path).ok()
@@ -687,7 +781,16 @@ fn apply_coll_toggle(
         let Some(agent_info) = meta.agents.get(a) else {
             continue;
         };
-        apply_coll_toggle_link(ctx, bases, agent_info, s, b, enabling, &mut rollback_guard)?;
+        apply_coll_toggle_link(
+            ctx,
+            coll,
+            bases,
+            agent_info,
+            s,
+            b,
+            enabling,
+            &mut rollback_guard,
+        )?;
     }
 
     let res = (|| -> Result<()> {

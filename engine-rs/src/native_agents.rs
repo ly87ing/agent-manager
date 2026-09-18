@@ -412,7 +412,7 @@ fn command_sources(commands: &CommandSet) -> Value {
 /// ~/.local/bin 解析到的入口）所在目录判定——官方 native 安装器在 ~/.local/bin 放置的
 /// 入口常是指向 ~/.local/share、~/.codex 等版本目录的符号链接，先整体 canonicalize 比
 /// 目录会误判 system；普通路径兜底 system，fail-closed。
-fn detected_provider(home_dir: &Path, bin_path: &Path) -> &'static str {
+pub(crate) fn detected_provider(home_dir: &Path, bin_path: &Path) -> &'static str {
     let canonical = bin_path
         .canonicalize()
         .unwrap_or_else(|_| bin_path.to_path_buf());
@@ -798,4 +798,139 @@ pub fn handle(ctx: &Context, req: &Request) -> Result<Value> {
         }
         other => bail!("native_agents 不支持命令 '{}'", other),
     }
+}
+
+// ---------- discover（只读，供 system:discover 聚合） ----------
+
+/// 已知 AI 助手 CLI 候选表：(bin, 建议 id, 展示名)。只决定“能发现什么”，不臆造安装命令：
+/// 仅当能从全局 node_modules 可靠反查出包名时才生成 npm 渠道命令；官方安装器、Homebrew
+/// 与 PATH 其他位置一律登记为只观测渠道，升级卸载继续走它们各自的原生管理方式。
+const KNOWN_AGENT_BINS: &[(&str, &str, &str)] = &[
+    ("aider", "aider", "Aider"),
+    ("amp", "amp", "Amp"),
+    ("copilot", "copilot-cli", "GitHub Copilot CLI"),
+    ("crush", "crush", "Crush"),
+    ("cursor-agent", "cursor-agent", "Cursor Agent"),
+    ("droid", "droid", "Factory Droid"),
+    ("gemini", "gemini-cli", "Gemini CLI"),
+    ("goose", "goose", "Goose"),
+    ("iflow", "iflow", "iFlow CLI"),
+    ("opencode", "opencode", "OpenCode"),
+    ("qwen", "qwen-code", "Qwen Code"),
+];
+
+/// 从全局 bin 链接反查 npm 包名：`.../lib/node_modules/<pkg>/bin/x`（scope 包取两段）。
+/// 解析失败或路径不含 node_modules 即 None，不猜测。
+fn npm_package_of(bin_path: &Path) -> Option<String> {
+    let resolved = bin_path.canonicalize().ok()?;
+    let comps: Vec<String> = resolved
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().to_string())
+        .collect();
+    let idx = comps.iter().rposition(|c| c == "node_modules")?;
+    let first = comps.get(idx + 1)?;
+    if first.starts_with('@') {
+        Some(format!("{}/{}", first, comps.get(idx + 2)?))
+    } else {
+        Some(first.clone())
+    }
+}
+
+fn tildify(path: &Path, home_dir: &Path) -> String {
+    if let Ok(rel) = path.strip_prefix(home_dir) {
+        return format!("~/{}", rel.to_string_lossy());
+    }
+    // 链接目标经 canonicalize 后可能落在 home 的真实路径上（如 macOS /var → /private/var），
+    // 两种写法都归一到 ~，避免输出里混入解析后的绝对路径。
+    if let Ok(canonical_home) = home_dir.canonicalize() {
+        if let Ok(rel) = path.strip_prefix(&canonical_home) {
+            return format!("~/{}", rel.to_string_lossy());
+        }
+    }
+    path.to_string_lossy().to_string()
+}
+
+/// 只读发现本机已安装、但 agents.definitions 里还没有的助手 CLI。
+/// 零写：只做 PATH/`~/.local/bin` 解析与既有 `--version` 探测（有界超时），不落库、不联网。
+pub(crate) fn discover(ctx: &Context) -> Result<Value> {
+    let policy = store::effective_policy(ctx)?;
+    let mut known_ids: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut known_bins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    if let Some(defs) = policy
+        .get("agents")
+        .and_then(|v| v.get("definitions"))
+        .and_then(Value::as_object)
+    {
+        for (id, raw) in defs {
+            if raw.get("_delete") == Some(&Value::Bool(true)) {
+                continue;
+            }
+            known_ids.insert(id.clone());
+            if let Some(bin) = raw.get("bin").and_then(Value::as_str) {
+                known_bins.insert(bin.to_string());
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    for (bin, id, display) in KNOWN_AGENT_BINS {
+        if known_ids.contains(*id) || known_bins.contains(*bin) {
+            continue;
+        }
+        let Some(bin_path) = resolve_bin(&ctx.home_dir, bin) else {
+            continue;
+        };
+        let npm_package = npm_package_of(&bin_path);
+        // node_modules 命中优先于路径归类：Homebrew 的 node 装的全局包仍是 npm 包。
+        let origin = match npm_package {
+            Some(_) => "npm",
+            None => detected_provider(&ctx.home_dir, &bin_path),
+        };
+        let version = probe_version(&bin_path);
+        let mut providers = Map::new();
+        match (origin, npm_package.as_deref()) {
+            ("npm", Some(pkg)) => {
+                providers.insert(
+                    "npm".into(),
+                    json!({
+                        "managed": true,
+                        "install": format!("npm install -g {pkg}"),
+                        "upgrade": format!("npm install -g {pkg}"),
+                        "uninstall": format!("npm uninstall -g {pkg}"),
+                    }),
+                );
+            }
+            ("native", _) => {
+                providers.insert(
+                    "native".into(),
+                    json!({"managed": false, "detect_paths": [tildify(&bin_path, &ctx.home_dir)]}),
+                );
+            }
+            ("brew", _) => {
+                providers.insert("brew".into(), json!({"managed": false}));
+            }
+            _ => {
+                providers.insert("system".into(), json!({"managed": false}));
+            }
+        }
+        let managed_after_takeover = origin == "npm";
+        out.push(json!({
+            "id": id,
+            "display_name": display,
+            "bin": bin,
+            "bin_path": tildify(&bin_path, &ctx.home_dir),
+            "version": version.clone().map(Value::String).unwrap_or(Value::Null),
+            "origin": origin,
+            "npm_package": npm_package.clone().map(Value::String).unwrap_or(Value::Null),
+            "manage": "register",
+            "managed_after_takeover": managed_after_takeover,
+            "suggested_definition": json!({
+                "display_name": display,
+                "bin": bin,
+                "preferred_provider": origin,
+                "providers": Value::Object(providers),
+            }),
+        }));
+    }
+    Ok(Value::Array(out))
 }

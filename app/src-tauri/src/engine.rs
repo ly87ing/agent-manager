@@ -35,7 +35,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / secrets:status / system:audit|refresh-upstream / runs:* / policy:* / sources:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / secrets:status / system:audit|discover|refresh-upstream / runs:* / policy:* / sources:* / db:*）"
             ),
         )
     };
@@ -46,7 +46,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         return Err(rejected());
     }
     let allowed = match (domain, verb) {
-        ("system", "audit" | "refresh-upstream") => true,
+        ("system", "audit" | "discover" | "refresh-upstream") => true,
         ("secrets", "status") => true,
         ("runs", "list" | "get" | "clear") => true,
         ("logs", "clear") => true,
@@ -95,6 +95,8 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--value", ArgValueKind::JsonValue));
         }
         ("system", "refresh-upstream") => specs.push(("--only", ArgValueKind::ElementId)),
+        // 只读发现：--only 取域名（agents/skills/mcp），引擎侧再做词汇表校验
+        ("system", "discover") => specs.push(("--only", ArgValueKind::ElementId)),
         ("runs", "get") => {
             specs.push(("--run", ArgValueKind::RunId));
         }
@@ -385,6 +387,7 @@ mod tests {
             "aliases:apply",
             "secrets:status",
             "system:audit",
+            "system:discover",
             "system:refresh-upstream",
             "runs:list",
             "runs:get",
@@ -491,6 +494,7 @@ mod tests {
                 "system:refresh-upstream",
                 vec!["--only".into(), "mcp:grok-search".into()],
             ),
+            ("system:discover", vec!["--only".into(), "skills".into()]),
             (
                 "mcp:apply",
                 vec![
@@ -557,6 +561,7 @@ mod tests {
             ("policy:get", vec!["--dry-run".into()]),
             ("sources:set", vec!["--def-file".into(), "elsewhere".into()]),
             ("system:refresh-upstream", vec!["--only".into()]),
+            ("system:discover", vec!["--dry-run".into()]),
             // 已退役命令不再携带任何参数白名单
             ("system:converge", vec!["--dry-run".into()]),
             (
