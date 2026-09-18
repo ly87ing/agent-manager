@@ -188,9 +188,17 @@ export default function TakeoverPage() {
         ...candidateToDefinition(group.entries[0]),
         agents: [...new Set(group.agents)],
       };
-      const steps: TakeoverTask["steps"] = [
-        { kind: "policy", key: `${definitionKeyPrefix("mcp")}.${group.name}`, definition },
-      ];
+      const steps: TakeoverTask["steps"] = [];
+      // 先把原配置里的明文密钥接过来，再写定义：定义里只留 ${VAR} 引用，
+      // 不先接取值的话同步时解析到的会是另一个值，而用户点「接管」的心智是保持原样。
+      for (const entry of group.entries) {
+        steps.push({
+          kind: "apply",
+          command: "secrets:adopt",
+          args: ["--agent", entry.agent, "--server", group.name],
+        });
+      }
+      steps.push({ kind: "policy", key: `${definitionKeyPrefix("mcp")}.${group.name}`, definition });
       for (const entry of group.entries) {
         steps.push({
           kind: "apply",
@@ -489,7 +497,7 @@ export default function TakeoverPage() {
               : "",
             cleanupCount > 0 ? `另有 ${cleanupCount} 条残留链接会被删除（只删链接本身，不动源目录）。` : "",
             secretCount > 0
-              ? `其中 ${secretCount} 个 MCP 服务需要密钥：接管不会去读原配置里的明文，纳管后要在「密钥」页各填一次，填之前这些服务同步不了。`
+              ? `其中 ${secretCount} 个 MCP 服务带密钥：原配置里已填的取值会一并接管，保存在本机、界面不回显；原来就是变量引用的仍需在「密钥」页填一次。`
               : "",
           ]
             .filter(Boolean)

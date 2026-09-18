@@ -49,7 +49,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
     }
     let allowed = match (domain, verb) {
         ("system", "audit" | "discover" | "refresh-upstream") => true,
-        ("secrets", "status" | "set") => true,
+        ("secrets", "status" | "set" | "adopt") => true,
         ("runs", "list" | "get" | "clear") => true,
         ("logs", "clear") => true,
         ("policy", "get" | "set" | "delete") => true,
@@ -100,6 +100,11 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         ("secrets", "set") => {
             specs.push(("--var", ArgValueKind::VarName));
             specs.push(("--value", ArgValueKind::SecretValue));
+        }
+        // 接管既有 MCP 时把原配置里的明文取值接过来，只报变量名不回显取值
+        ("secrets", "adopt") => {
+            specs.push(("--agent", ArgValueKind::ElementId));
+            specs.push(("--server", ArgValueKind::ElementId));
         }
         ("sources", "get") => specs.push(("--key", ArgValueKind::DotKey)),
         ("sources", "set") => {

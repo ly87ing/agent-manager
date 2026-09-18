@@ -146,6 +146,171 @@ fn set_value(ctx: &Context, req: &Request) -> Result<Value> {
     }))
 }
 
+/// 变量名推导：与界面接管时的规则一致（合法标识符直接用 env 键名）。
+fn var_name_for(env_key: &str) -> String {
+    if crate::secret_values::valid_var_name(env_key) {
+        return env_key.to_string();
+    }
+    let mut out = String::new();
+    for ch in env_key.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.starts_with(|c: char| c.is_ascii_digit()) {
+        out.insert(0, '_');
+    }
+    out
+}
+
+/// 从某个助手的 MCP 配置里，把指定服务的明文 env 取值接过来存进本机库。
+///
+/// 接管一条已有的 MCP 时，定义里只会留 `${VAR}` 引用；不把原来的取值一起接过来的话，
+/// 同步时解析到的会是另一个值（或直接缺失），用户点「接管」的心智却是「保持原样」。
+/// 只读该助手自己的配置文件，只取明文字面量（已经是 `${VAR}` 的跳过），
+/// 回执只报接过来几个变量名，绝不回显取值。
+fn adopt(ctx: &Context, req: &Request) -> Result<Value> {
+    let mut agent: Option<String> = None;
+    let mut server: Option<String> = None;
+    let mut iter = req.args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--agent" => {
+                if agent.is_some() {
+                    bail!("参数错误: --agent 重复");
+                }
+                agent = Some(
+                    iter.next()
+                        .ok_or_else(|| anyhow::anyhow!("参数错误: --agent 缺少取值"))?
+                        .clone(),
+                );
+            }
+            "--server" => {
+                if server.is_some() {
+                    bail!("参数错误: --server 重复");
+                }
+                server = Some(
+                    iter.next()
+                        .ok_or_else(|| anyhow::anyhow!("参数错误: --server 缺少取值"))?
+                        .clone(),
+                );
+            }
+            other if other.starts_with("--") => bail!("参数错误: 存在不支持的选项"),
+            _ => bail!("参数错误: 不接受位置参数"),
+        }
+    }
+    let (Some(agent), Some(server)) = (agent, server) else {
+        bail!("参数错误: 需要 --agent 与 --server");
+    };
+
+    let policy = store::effective_policy(ctx)?;
+    let (targets, _) = crate::native_mcp::targets::agent_targets(&policy, &ctx.home_dir)?;
+    let Some(target) = targets.into_iter().find(|t| t.agent == agent) else {
+        // 该助手没有配置目标：没有可接过来的取值，不算错
+        return Ok(json!({"domain": "secrets", "adopted": Vec::<String>::new()}));
+    };
+    crate::native_mcp::targets::validate_target_path(&target.path)?;
+
+    let literals = read_server_env_literals(&target, &server);
+    if literals.is_empty() {
+        return Ok(json!({"domain": "secrets", "adopted": Vec::<String>::new()}));
+    }
+
+    let mut conn = store::open_write(ctx)?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    crate::secret_values::ensure_table(&tx)?;
+    let now = crate::native_mcp::model::now_iso();
+    let mut adopted: Vec<String> = Vec::new();
+    for (env_key, value) in literals {
+        let var = var_name_for(&env_key);
+        if !crate::secret_values::valid_var_name(&var) {
+            continue;
+        }
+        crate::secret_values::set(&tx, &var, &value, &now)?;
+        adopted.push(var);
+    }
+    tx.commit()?;
+    crate::secret_values::refresh(ctx);
+    adopted.sort();
+    adopted.dedup();
+    Ok(json!({"domain": "secrets", "adopted": adopted}))
+}
+
+/// 读该助手配置里指定服务的 env 明文取值（已是 `${VAR}` 的跳过）。
+/// 读不了/解析不了都按「没有」处理，不让接管因为一个文件读不动而失败。
+fn read_server_env_literals(
+    target: &crate::native_mcp::targets::AgentTarget,
+    server: &str,
+) -> Vec<(String, String)> {
+    use crate::native_mcp::targets::Format;
+    let is_ref = |v: &str| v.starts_with("${") && v.ends_with('}');
+    let mut out = Vec::new();
+    match target.format {
+        Format::ClaudeJson | Format::OpenCodeJson => {
+            let Ok(Some(doc)) = crate::native_mcp::codecs::read_json_doc(&target.path) else {
+                return out;
+            };
+            let container = if matches!(target.format, Format::OpenCodeJson) {
+                "mcp"
+            } else {
+                "mcpServers"
+            };
+            let Some(env) = doc
+                .get(container)
+                .and_then(Value::as_object)
+                .and_then(|m| m.get(server))
+                .and_then(Value::as_object)
+                .and_then(|m| m.get("environment").or_else(|| m.get("env")))
+                .and_then(Value::as_object)
+            else {
+                return out;
+            };
+            for (key, value) in env {
+                if key == "_MANAGED_BY" {
+                    continue;
+                }
+                if let Some(text) = value.as_str() {
+                    if !text.is_empty() && !is_ref(text) {
+                        out.push((key.clone(), text.to_string()));
+                    }
+                }
+            }
+        }
+        Format::CodexToml => {
+            let Ok(text) = std::fs::read_to_string(&target.path) else {
+                return out;
+            };
+            let Ok(doc) = text.parse::<toml::Value>() else {
+                return out;
+            };
+            let Some(env) = doc
+                .get("mcp_servers")
+                .and_then(toml::Value::as_table)
+                .and_then(|t| t.get(server))
+                .and_then(toml::Value::as_table)
+                .and_then(|t| t.get("env"))
+                .and_then(toml::Value::as_table)
+            else {
+                return out;
+            };
+            for (key, value) in env {
+                if key == "_MANAGED_BY" {
+                    continue;
+                }
+                if let Some(text) = value.as_str() {
+                    if !text.is_empty() && !is_ref(text) {
+                        out.push((key.clone(), text.to_string()));
+                    }
+                }
+            }
+        }
+        Format::Unsupported(_) => {}
+    }
+    out
+}
+
 pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
     let cmd = req.command.replace('.', ":");
     match cmd.as_str() {
@@ -161,6 +326,7 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
             status(ctx)
         }
         "secrets:set" => set_value(ctx, req),
+        "secrets:adopt" => adopt(ctx, req),
         _ => bail!("secrets 域不支持命令 '{cmd}'"),
     }
 }

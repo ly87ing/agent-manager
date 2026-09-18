@@ -541,7 +541,7 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
             .map_err(|err| {
                 DispatchError::new(crate::native_aliases::error_code(&err), format!("{err:#}"))
             }),
-        ("secrets", "status") | ("secrets", "set") => crate::native_secrets::handle(ctx, request)
+        ("secrets", "status" | "set" | "adopt") => crate::native_secrets::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("SECRET_ERROR", format!("{err:#}"))),
         ("sources", "get") => crate::native_sources::get(ctx, request),

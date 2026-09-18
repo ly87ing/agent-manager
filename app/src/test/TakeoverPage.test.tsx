@@ -119,6 +119,7 @@ function routes(data: DiscoverData = discoverData()) {
   return {
     "system:discover": makeEnvelope(data, { command: "system.discover" }),
     "policy:set": makeEnvelope({ layers: null, effective: {} }, { command: "policy.set" }),
+    "secrets:adopt": makeEnvelope({ domain: "secrets", adopted: ["GROK_API_KEY"] }, { command: "secrets.adopt" }),
     "skills:apply": makeEnvelope(makeApplyResult({ domain: "skills" }), { command: "skills.apply" }),
     "mcp:apply": makeEnvelope(makeApplyResult({ domain: "mcp" }), { command: "mcp.apply" }),
   };
@@ -210,6 +211,14 @@ describe("接管中心", () => {
     expect(mcpCalls).toHaveLength(2);
     expect(mcpCalls[0].args).toEqual(["--only", "mcp:grok-search", "--agent", "claude-code", "--action", "add", "--allow-takeover"]);
     expect(mcpCalls[1].args).toEqual(["--only", "mcp:grok-search", "--agent", "codex", "--action", "add", "--allow-takeover"]);
+
+    // 取值要在写定义之前接过来：定义里只留 ${VAR}，晚接就会用另一个值同步
+    const adoptCalls = calls.filter((call) => call.command === "secrets:adopt");
+    expect(adoptCalls.map((call) => call.args)).toEqual([
+      ["--agent", "claude-code", "--server", "grok-search"],
+      ["--agent", "codex", "--server", "grok-search"],
+    ]);
+    expect(calls.indexOf(adoptCalls[0])).toBeLessThan(calls.indexOf(policyCall!));
   });
 
   it("助手登记只写定义，不执行任何 agents:apply", async () => {
