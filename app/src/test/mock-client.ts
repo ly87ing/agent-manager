@@ -526,7 +526,7 @@ function demoEnvelopes(): Record<string, Envelope> {
   };
 }
 
-export function createMockEngineClient(options: { offline?: boolean } = {}): EngineClient {
+export function createMockEngineClient(options: { offline?: boolean; fresh?: boolean } = {}): EngineClient {
   const routes = demoEnvelopes();
 
   // ---- 有状态的写路径演示数据（内存态，仅 DEV mock） ----
@@ -535,7 +535,10 @@ export function createMockEngineClient(options: { offline?: boolean } = {}): Eng
       mcp: { "grok-search": { enabled: true } },
       skills: { "agent-skills": { enabled: true, new_skill_default: "disabled" } },
   };
-  const sqlitePolicy: Record<string, unknown> = {
+  // fresh：全新机器，本地层空着——首次使用引导据此出现
+  const sqlitePolicy: Record<string, unknown> = options.fresh
+    ? {}
+    : {
       browser_us_sync: { enabled: false },
       mcp: {
         definitions: { "my-proxy": { command: "npx", args: ["-y", "my-proxy-mcp"], startup_timeout_sec: 60, agents: null, env: { MY_PROXY_TOKEN: "${MY_PROXY_TOKEN}" } } },

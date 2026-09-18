@@ -28,7 +28,7 @@
 - Agent 原生定义、安装来源探测、生命周期 apply、跨进程锁、结果核验与操作记录。
 - Skills 原生域接线与完整闭环：内置集合只读默认，首次本地写入 `native-manager.db` 后本地优先；集合与 Skill×Agent 独立更新/启停/移除；内容寻址快照与安全软连接落地及回滚保护；status 只读零写；真实 apply 跨进程锁与操作审计。
 - MCP 原生域接线与本地 stdio 闭环：Rust dispatcher 提供 `mcp:status`（只读）与真实 `mcp:apply`；定义与分配保存在 SQLite，支持 Claude JSON、Codex TOML、OpenCode JSON（需配置对应 Agent target）；逐助手支持 add/update/enable/disable/remove，库级支持 enable/disable/remove；status 只读零写，真实 apply 使用锁、审计、CAS 与回滚；env 在 SQLite definition/binding 中只持久化字面量 `${VAR}` 形式的环境变量引用；status、诊断与操作日志不展示或保存解析后的真实值；真实 apply 执行时从进程环境解析，并按目标 codec 写入 Claude、Codex 或 OpenCode 的目标客户端配置，目标文件的明文由文件权限与客户端安全边界保护。
-- `sources:get/set` 原生接线：规则来源固定为 `rules.shared`、`rules.codex`、`rules.claude` 三项，保存使用 revision CAS 且只写 SQLite，不执行任何同步动作。
+- `sources:get/set` 原生接线：规则来源固定为 `rules.shared`、`rules.codex`、`rules.claude`、`rules.opencode` 四项，保存使用 revision CAS 且只写 SQLite，不执行任何同步动作。
 - Rules 原生域接线：Rust dispatcher 提供 `rules:status`（只读）与真实 `rules:apply`；固定目标为 `rules:codex_global`（`~/.codex/AGENTS.md`）与 `rules:claude_global`（`~/.claude/CLAUDE.md`），内容按共享与助手专用来源渲染；status 只读零写，真实 apply 使用全局排他锁、操作审计、文件字节 CAS 与事务/文件回滚，外部修改 fail-closed 拒绝覆盖，不承诺备份；不再有 rules/dist 构建链。Tauri bridge 参数白名单与 Rules 页面已对齐真实 schema，并支持逐目标 `--only`。
 - Hooks 原生域接线：Rust dispatcher 提供 `hooks:status`（只读）与真实 `hooks:apply`；hooks 专用 `sources:get/set`（hooks.claude/hooks.codex）使用 revision CAS 只写 SQLite；固定 Claude `~/.claude/settings.json` signature-set 合并（保留用户字段与非托管 hook）与 Codex `~/.codex/hooks.json` whole-file 两目标；status 只读零写，真实 apply 使用全局排他锁、Immediate 事务、精确旧字节 CAS、binding、审计与条件回滚，外部修改 fail-closed；前端两个目标与两个 JSON 编辑入口已接线。
 - Aliases 原生域接线：Rust dispatcher 提供 `aliases:status`（只读）与真实 `aliases:apply`；aliases 专用 `sources:get/set`（aliases.shell）使用 revision CAS 只写 SQLite，alias 名/值结构校验与疑似凭据拒绝；固定 `~/.zshrc` 与 `~/.zprofile` 两目标的受管 marker 区块写入（区块外字节保留），status 只读零写，真实 apply 使用全局排他锁、Immediate 事务、整文件字节 CAS、binding、审计与条件回滚，外部修改 fail-closed，不承诺备份；前端 Aliases 页与来源面板零改动直接可用。
@@ -205,6 +205,26 @@ Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 必须支持新增、�
 - **技能版本回滚：裁决不做**。内容寻址快照按哈希存放，没有 skill 维度的历史记录，要做得先加一张历史表；而本地来源集合是直链模式本就没有版本概念，git 集合的回退在源仓库侧操作更自然。投入产比不成立，需要时再议。
 - **一个待用户裁决的观察**：内置默认的终端快捷命令里，`claude` 预置了 `--dangerously-skip-permissions`，即全新环境默认就是全自动。本轮加的参数预设已让用户可主动选择该档，但改内置默认会影响正在依赖它的现有用法，因此保持原样待裁决。
 - 实例里的技能加载仍未端到端实证（新配置目录要先在该实例下登录才能起会话）。
+
+### 2026-09-17 追加：启动参数编排、配置备份差异与 OpenCode 规则（`3478f54`…本次提交）
+
+用户要求「常见参数由用户自己选、要看得见是否真的生效」，以及把上一轮自评列出的剩余项一次处理完。
+
+- 高权限参数改为主动勾选（`3478f54`）：内置默认不再预置 `--dangerously-skip-permissions`；`aliases:status` 逐条回读期望取值与终端配置里的实际取值，界面按「已生效 / 还是旧的 / 区块里没有 / 还没写过」显示。只回答配置文件里现在是什么，不替用户断言终端会话已重新加载。
+- 全局时区的位置与记号含义（`ce4a28f`）：有跟随项时提示改哪里；包装写法的原文编辑里写明 `{timezone}` / `{lang}` 会在写入时替换成什么。
+- 配置导入前的差异（`a12cf0c`）：导入是整体替换且不可撤销，现在先读当前配置按类别列出新增、改动与消失的条目。看差异只读不写。
+- OpenCode 成为规则域的第三个目标（本次提交）：`rules:status/apply` 固定目标由 Codex/Claude 扩到 Codex/Claude/OpenCode，目标文件 `~/.config/opencode/AGENTS.md`（[官方文档](https://opencode.ai/docs/rules/)：全局规则就在该路径）；来源新增 `rules.opencode`，默认留空——仓库里没有核对过的 OpenCode 专用适配正文，共享规则照常生效，专用内容由用户自己填。OpenCode 不加 Hooks 目标：它的扩展机制是 JS/TS 插件，不是 JSON 配置。
+- 接管中心批量进度（本次提交）：批量执行时显示「第几项 / 共几项、正在做哪一项」与进度条，并说明失败那项跳过、后面继续。
+- 首次使用引导（本次提交）：本地配置层为空（= 还没在这里保存过任何东西）时，默认落地页给出三步——先扫描接管、再分配、最后点「立即同步」才真正写文件，并直达接管中心。点「不再提示」后不再出现。
+- 自动化：`engine-rs` 313 项、`app/src-tauri` 15 项、Vitest 51 files / 439 tests 全部通过；`pnpm typecheck` 与 `pnpm build` 通过；两套 `cargo fmt --check` 通过。
+- 隔离 CLI 实证（OpenCode 规则目标）：隔离 HOME + 数据目录下 `rules:status` 列出三目标且都为「缺失」、零写；`rules:apply` 生成 `~/.config/opencode/AGENTS.md`（内容与其余目标同源共享段）；二次 apply 无动作；手工往该文件追加一行后 status 变为「已被外部修改」，再 apply 被 preflight 拒绝且用户那一行原样保留。
+- 浏览器验收（dev server + `?mock=fresh` 全新机器数据）：首次使用引导按三步渲染、「去接管中心」跳转正确、「不再提示」点后消失并记住；接管中心批量执行逐项捕获到 7 条进度文案（第 1/7 → 第 7/7），结束后进度条消失、按钮复位；900px 窗口无横向滚动；控制台无报错与警告。接管完成后本地配置层不再为空，引导自动消失（不依赖用户手动关闭）。
+
+本轮未做与做不到，如实记录：
+
+- **OpenCode 实例（多套独立配置）做不到，不做**。Claude 与 Codex 各有一个官方的「换一个配置目录」变量（`CLAUDE_CONFIG_DIR`、`CODEX_HOME`），实例模型建立在此之上。OpenCode 没有等价物：按[官方配置文档](https://opencode.ai/docs/config/)，`OPENCODE_CONFIG` 只换一个配置**文件**，`OPENCODE_CONFIG_DIR` 只是额外搜索 agents/commands/modes/plugins 的目录，两者都不迁移全局 `~/.config/opencode/AGENTS.md`，也不隔离登录凭据与会话（那些在 `${XDG_DATA_HOME:-~/.local/share}/opencode/`）。要凑出隔离得同时设 `XDG_CONFIG_HOME` 与 `XDG_DATA_HOME` 两个通用变量，且本机未安装 opencode、无法实测。因此不提供 OpenCode 实例，等官方给出隔离变量再议。
+- **「助手页 6 条并发查询」不是真问题，不改**。实测本机引擎各只读命令（`agents:status` / `policy:get` / `aliases:status` / `profiles:status` / `system:audit` / `sources:get`）热态各约 10 毫秒，六条并发合计约 10 毫秒；首次 1.05 秒是二进制冷启动，与并发无关。桌面端引擎还是进程内调用，连启动开销都没有。此前测试里的超时是 jsdom 下的等待时限，不是引擎慢。
+- Linux / Windows 真机、签名公证、实例内技能加载端到端实证，与上一轮记录一致，仍未做。
 
 ## 剩余路线图（未排期）
 

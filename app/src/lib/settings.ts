@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { mockModeFromSearch } from "./engine";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import type { SettingsData, SettingsPreferences } from "./contract";
@@ -39,8 +40,8 @@ function devMockClient(): SettingsClient {
   return { get: async () => devMockValue!, save: async (preferences) => (devMockValue = { ...devMockValue!, preferences }) };
 }
 function devMockEnabled(): boolean {
-  const mode = new URLSearchParams(window.location.search).get("mock");
-  return import.meta.env.DEV && (mode === "1" || mode === "offline");
+  // 与引擎侧共用同一个开关解析，免得新增 mock 模式时两处清单走散
+  return mockModeFromSearch(window.location.search, import.meta.env.DEV) !== null;
 }
 export async function fetchSettings(): Promise<SettingsData> {
   if (devMockEnabled()) return devMockClient().get();

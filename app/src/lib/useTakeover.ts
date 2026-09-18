@@ -29,10 +29,20 @@ export interface TakeoverOutcome {
   failures: { label: string; message: string }[];
 }
 
+/** 批量执行进度：批量任务可能跑几十秒，界面要说清「跑到第几项、正在做哪一项」。 */
+export interface TakeoverProgress {
+  /** 已结束的任务数（含失败）。 */
+  done: number;
+  total: number;
+  /** 正在执行的任务名。 */
+  current: string;
+}
+
 export function useTakeover() {
   const { execute } = useExecutions();
   const busyRef = useRef(false);
   const [executing, setExecuting] = useState(false);
+  const [progress, setProgress] = useState<TakeoverProgress | null>(null);
 
   const run = async (tasks: TakeoverTask[]): Promise<TakeoverOutcome | null> => {
     if (busyRef.current || tasks.length === 0) return null;
@@ -41,7 +51,8 @@ export function useTakeover() {
     let succeeded = 0;
     const failures: { label: string; message: string }[] = [];
     try {
-      for (const task of tasks) {
+      for (const [index, task] of tasks.entries()) {
+        setProgress({ done: index, total: tasks.length, current: task.label });
         let ok = true;
         for (const step of task.steps) {
           const request =
@@ -72,6 +83,7 @@ export function useTakeover() {
     } finally {
       busyRef.current = false;
       setExecuting(false);
+      setProgress(null);
     }
     const summary = `接管完成：成功 ${succeeded}，失败 ${failures.length}`;
     if (failures.length > 0) {
@@ -82,5 +94,5 @@ export function useTakeover() {
     return { succeeded, failures };
   };
 
-  return { run, executing };
+  return { run, executing, progress };
 }

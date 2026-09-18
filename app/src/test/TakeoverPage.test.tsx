@@ -240,6 +240,35 @@ describe("接管中心", () => {
     ]);
   });
 
+  it("批量执行时显示进度：第几项、正在做哪一项", async () => {
+    // 卡住第一条 policy:set，让进度停在第 1 项上可断言
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    renderWithEngine(<TakeoverPage />, {
+      ...routes(),
+      "policy:set": async () => {
+        await gate;
+        return makeEnvelope({ layers: null, effective: {} }, { command: "policy.set" });
+      },
+    });
+    await waitFor(() => expect(screen.getByTestId("takeover-agent-opencode")).toBeInTheDocument());
+
+    // 两项：助手登记 + MCP，总数因此是 2
+    await userEvent.click(screen.getByTestId("takeover-agent-opencode").querySelector("input[type=checkbox]")!);
+    await userEvent.click(screen.getByTestId("takeover-mcp-grok-search").querySelector("input[type=checkbox]")!);
+    await userEvent.click(screen.getByTestId("takeover-run"));
+    await userEvent.click(await screen.findByRole("button", { name: "开始接管" }));
+
+    const progress = await screen.findByTestId("takeover-progress");
+    expect(progress).toHaveTextContent("正在处理第 1 / 2 项：助手 OpenCode");
+    expect(screen.getByTestId("takeover-run")).toHaveTextContent("正在接管 1/2…");
+
+    release!();
+    await waitFor(() => expect(screen.queryByTestId("takeover-progress")).toBeNull());
+  });
+
   it("没有可接管项时按钮禁用且空态可见", async () => {
     const empty: DiscoverData = {
       domain: "discover",

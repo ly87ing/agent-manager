@@ -273,10 +273,31 @@ export default function TakeoverPage() {
             )}
           >
             <PackageCheck className="h-3.5 w-3.5" aria-hidden />
-            {takeover.executing ? "正在接管…" : `一键接管所选（${takeoverCount}）`}
+            {takeover.executing
+              ? takeover.progress
+                ? `正在接管 ${takeover.progress.done + 1}/${takeover.progress.total}…`
+                : "正在接管…"
+              : `一键接管所选（${takeoverCount}）`}
           </button>
         </div>
       </div>
+
+      {takeover.progress && (
+        <div data-testid="takeover-progress" className="rounded-lg border bg-card p-4 shadow-sm">
+          <p className="text-xs text-foreground">
+            正在处理第 {takeover.progress.done + 1} / {takeover.progress.total} 项：{takeover.progress.current}
+          </p>
+          <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-muted">
+            <div
+              className="h-full rounded bg-primary transition-[width] duration-200"
+              style={{ width: `${(takeover.progress.done / takeover.progress.total) * 100}%` }}
+            />
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            每项逐条执行，失败的那项会跳过、后面的继续；结束后给出成功与失败条数，失败详情在任务记录里。
+          </p>
+        </div>
+      )}
 
       {query.data && !query.data.ok && <ErrorPanel title="扫描被拒绝" errors={query.data.errors} />}
 

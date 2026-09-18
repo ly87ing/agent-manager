@@ -9,6 +9,7 @@ import { DriftExplanationPanel } from "../components/DriftExplanationPanel";
 import { DefinitionFormDialog } from "../components/DefinitionFormDialog";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { EmptyState } from "../components/EmptyState";
+import { FirstRunGuide } from "../components/FirstRunGuide";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { FreshnessBadge } from "../components/FreshnessBadge";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
@@ -378,8 +379,10 @@ function AgentCard({
 
 export default function AgentsPage({
   onManageSkills,
+  onGoTakeover,
 }: {
   onManageSkills?: (agentId: string) => void;
+  onGoTakeover?: () => void;
 } = {}) {
   const query = useEngineQuery<StatusData>("agents:status");
   const policyQuery = useEngineQuery<PolicyData>("policy:get");
@@ -413,6 +416,9 @@ export default function AgentsPage({
     return matchesKeyword(search, [spec.display_name, element.id, spec.bin, ...(element.observed as AgentsObserved).providers ?? []]);
   });
   const layers = policyQuery.data?.data.layers ?? null;
+  /** 本地层为空 = 还没在这里保存过任何东西：首次使用引导据此出现（policyQuery 未就绪时不显示）。 */
+  const freshInstall =
+    policyQuery.data?.ok === true && Object.keys((layers?.sqlite ?? {}) as Record<string, unknown>).length === 0;
   /** 内置判定：policy 层已加载且本地数据库无该定义覆盖；未加载到时按自定义处理（先确认再执行）。 */
   const isCustomDefinition = (element: EngineElement) =>
     layers === null || definitionOrigin(layers, "agents", element.id.replace(/^agents:/, "")) === "sqlite";
@@ -584,6 +590,7 @@ export default function AgentsPage({
   return (
     <div className="space-y-4">
       <PageHeader title="助手" description="各 AI 助手的安装渠道、版本与官方最新版对比。内置助手安装/升级点击后直接执行；自定义定义的安装/升级与卸载需先确认。" />
+      <FirstRunGuide show={freshInstall} onGoTakeover={onGoTakeover} />
       {query.data.errors.length > 0 && <ErrorPanel title="agents:status 错误" errors={query.data.errors} />}
       <div className="flex items-center justify-between gap-3">
         <SearchInput value={search} onChange={setSearch} placeholder="搜索助手…" testId="agents-search" />

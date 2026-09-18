@@ -116,11 +116,13 @@ export function toDiagnostic(err: unknown): { code: string; element: null; messa
  * dev-only mock 开关（?mock=1 / ?mock=offline）。
  * 生产构建中 import.meta.env.DEV 为 false，isMockRequested 恒返回 null。
  */
-export function mockModeFromSearch(search: string, dev: boolean): "demo" | "offline" | null {
+export function mockModeFromSearch(search: string, dev: boolean): "demo" | "offline" | "fresh" | null {
   if (!dev) return null;
   const value = new URLSearchParams(search).get("mock");
   if (value === "1") return "demo";
   if (value === "offline") return "offline";
+  // fresh：本地配置层为空的全新机器，用来看首次使用引导
+  if (value === "fresh") return "fresh";
   return null;
 }
 
@@ -134,6 +136,6 @@ export async function initEngineClient(search?: string): Promise<void> {
     const mode = mockModeFromSearch(search ?? window.location.search, true);
     if (!mode) return;
     const { createMockEngineClient } = await import("../test/mock-client");
-    setEngineClient(createMockEngineClient({ offline: mode === "offline" }));
+    setEngineClient(createMockEngineClient({ offline: mode === "offline", fresh: mode === "fresh" }));
   }
 }

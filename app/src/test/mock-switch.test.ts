@@ -6,9 +6,11 @@ describe("dev-only mock 开关", () => {
   it("仅在 DEV 且 ?mock=1|offline 时激活；生产（dev=false）一律为 null", () => {
     expect(mockModeFromSearch("?mock=1", true)).toBe("demo");
     expect(mockModeFromSearch("?mock=offline", true)).toBe("offline");
+    expect(mockModeFromSearch("?mock=fresh", true)).toBe("fresh");
     // 生产门控：即使带参数也不激活
     expect(mockModeFromSearch("?mock=1", false)).toBeNull();
     expect(mockModeFromSearch("?mock=offline", false)).toBeNull();
+    expect(mockModeFromSearch("?mock=fresh", false)).toBeNull();
     // 无参数 / 其它值
     expect(mockModeFromSearch("", true)).toBeNull();
     expect(mockModeFromSearch("?mock=0", true)).toBeNull();
