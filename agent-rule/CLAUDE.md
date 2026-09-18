@@ -3,11 +3,10 @@
 ## Scope
 
 - Maintain the shared core and agent adapters under `agent-rule/rules/src/`.
-- Treat `agent-rule/rules/dist/` as generated artifacts; do not hand-edit them directly.
 
 ## Workflow
 
-- 规则构建与分发遵循根目录 Rust 原生目标；旧 `make update` / Python 构建器不再维护。替代入口未完成时明确报告未生成、未分发，不能手改 dist 代替验证。
+- `rules:apply` 从来源直接渲染写入各助手的规则文件，没有构建与分发两步；`rules/src/` 的正文是引擎内嵌的默认来源，改它只影响还没在本机改过规则的环境。
 
 ## Guardrails
 
@@ -42,7 +41,7 @@
 
 ## 规则与 skill 里一律不放注释(用户 2026-07-27 拍板,别再拿"这家免费"来复议)
 
-- **门禁**:`tests/test_rule_layout.test_rules_carry_no_comment_content_anywhere` 覆盖 `core.md`、三份 adapter 与三份 dist 产物;skill 侧对应 `agent-skills/tests/test_skill_contracts.test_skill_content_carries_no_comments`(SKILL.md + references,代码围栏内豁免)。给维护者看的话写进仓库文档,那是运行时不加载的地方。
+- **门禁**:`tests/test_rule_layout.test_rules_carry_no_comment_content_anywhere` 覆盖 `core.md` 与各 adapter;skill 侧对应 `agent-skills/tests/test_skill_contracts.test_skill_content_carries_no_comments`(SKILL.md + references,代码围栏内豁免)。给维护者看的话写进仓库文档,那是运行时不加载的地方。
 - **"某家会剥离所以免费"不是理由,这条已经试过并被推翻**:同一份文件发给两家。Claude Code 注入 CLAUDE.md 前确实会剥掉块级 HTML 注释(实测 CLI 2.1.220,单行与跨行都剥,`~/.claude/rules/*.md` 也一样),但 Codex 没有同等行为、每一轮都要计费,而且即便在 Claude 上,只要有 agent 用 Read 打开该文件,注释就照样进上下文。为一家的豁免维护一套例外,不值。
 - 这条同时封掉了"用注释给分发产物自报家门"的做法:`~/.claude/CLAUDE.md` 被工具整体接管、覆盖写不留 `.bak` 这件事,只能靠仓库文档和分发目标本身的选择解决,不能靠往产物里塞注释。
 

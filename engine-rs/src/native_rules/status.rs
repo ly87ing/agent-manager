@@ -1,5 +1,5 @@
 //! rules 域只读状态闭环：目标固定为 model::targets()，来源只从
-//! native_sources 当前有效文本取得，运行时不读 checkout 或 rules/dist。
+//! native_sources 当前有效文本取得，运行时不读 checkout。
 //! DB 缺失走 builtin policy + 默认来源 + 空 bindings；DB 存在时只打开一次
 //! readonly 连接并在同一 snapshot 读 policy/sources/bindings。status 不创建
 //! data/home 目录、DB、表或文件；来源/数据库损坏 fail-closed，目标路径安全
