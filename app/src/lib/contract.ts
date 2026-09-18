@@ -209,7 +209,8 @@ export interface DiscoverSkillGroup {
   /** true = 该源根已登记为本地来源集合，接管直接落到既有集合。 */
   existing_collection: boolean;
   agents: string[];
-  skills: { name: string; agents: string[]; has_skill_md: boolean }[];
+  /** linked=false：源目录里有、但还没被任何助手链接过，接管时一并收录。 */
+  skills: { name: string; agents: string[]; has_skill_md: boolean; linked?: boolean }[];
   suggested_definition: { source_path: string; skill_paths: string[]; agents: string[] };
 }
 
