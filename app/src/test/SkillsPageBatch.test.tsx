@@ -166,11 +166,12 @@ describe("SkillsPage 全部技能批量操作", () => {
     await expandAllRows();
     const alphaClaude = await screen.findByTestId("select-skill:agent-skills/alpha-claude-code");
     expect(alphaClaude).toHaveAttribute("aria-label", "选择 alpha @ claude-code");
-    // 无动作行与 cell 缺失行均不可勾选
+    // 有分配关系但暂时没动作的不可勾选
     await expandAllRows();
     expect(screen.getByTestId("select-skill:agent-skills/gamma-claude-code")).toBeDisabled();
+    // 引擎没报告的助手跟这个技能无关，展开区不列它（矩阵那格已经是个「·」）
     await expandAllRows();
-    expect(screen.getByTestId("select-skill:agent-skills/gamma-codex")).toBeDisabled();
+    expect(screen.queryByTestId("select-skill:agent-skills/gamma-codex")).toBeNull();
 
     const selectAll = screen.getByTestId("select-all-visible") as HTMLInputElement;
     expect(selectAll).toHaveAttribute("aria-label", "全选当前可见行");

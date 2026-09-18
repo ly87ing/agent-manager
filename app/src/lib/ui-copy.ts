@@ -61,6 +61,9 @@ export const MCP_CELL_COPY: Record<string, string> = {
   "not-materialized": "尚未生成",
   leftover: "以前配过",
   "probe-error": "检查出错",
+  disabled: "已停用",
+  // 服务定义里没勾这个助手；「不支持」会被读成「这个助手用不了 MCP」
+  unsupported: "未配置",
 };
 
 /** 技能 × 助手 启用状态。 */
@@ -73,6 +76,9 @@ export const SKILL_CELL_COPY: Record<string, string> = {
   disabled: "已停用",
   // 集合定义里没勾这个助手；「不支持」会被读成「这个助手用不了技能」
   unsupported: "未分配",
+  "not-assigned": "未分配",
+  "not-materialized": "尚未生成",
+  "managed-ok": "已启用",
 };
 
 // ---------- 风险级（操作类型） ----------

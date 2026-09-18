@@ -652,7 +652,7 @@ describe("SkillsPage 计划外链接（extra-link）接管与取消链接", () =
     };
   }
 
-  it("extra-link 行：动作为 纳入管理/取消链接，「当前分配版本」显示未分配，链接存在由状态徽章表达", async () => {
+  it("extra-link：动作为 纳入管理/取消链接，状态由上面矩阵那一格表达", async () => {
     renderWithEngine(<SkillsPage />, extraLinkRoutes());
     await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
 
@@ -664,10 +664,9 @@ describe("SkillsPage 计划外链接（extra-link）接管与取消链接", () =
     expect(removeBtn).toHaveTextContent("取消链接");
     expect(removeBtn).toHaveAttribute("title", "移除磁盘上的链接入口，不删除技能本身");
 
-    const row = addBtn.closest("tr")!;
-    expect(within(row).getByTitle("codex: extra-link")).toHaveTextContent("计划外链接");
-    expect(within(row).getByText("未分配")).toBeInTheDocument();
-    expect(within(row).queryByText("已链接")).toBeNull();
+    // 状态只在矩阵格子上说一次：展开区原来重复的技能名/集合/助手/状态四列已经去掉
+    const matrixRow = screen.getByTestId("matrix-row-skill:agent-skills/alpha");
+    expect(within(matrixRow).getByTitle(/extra-link/)).toHaveTextContent("计划外链接");
   });
 
   it("非受管外部链接：纳入管理先弹确认，取消零 apply，确认后 apply 携带 --allow-takeover", async () => {
@@ -741,12 +740,11 @@ describe("SkillsPage 计划外链接（extra-link）接管与取消链接", () =
     await expandAllRows();
     const addBtn = await screen.findByTestId("action-add-skill:agent-skills/gamma-codex");
     expect(addBtn).toHaveTextContent("添加");
-    const row = addBtn.closest("tr")!;
-    expect(within(row).getByTitle("codex: not-assigned")).toHaveTextContent("未分配");
-    // 「当前分配版本」列：未分配且无链接的行不得误显「已链接」（引擎恒输出非空 link_path，不能据此判定）
-    // （首列勾选框之后，该列索引为 5）
-    expect(within(row).getAllByRole("cell")[5]).toHaveTextContent("未分配");
-    expect(within(row).queryByText("已链接")).toBeNull();
+    // 未分配且无链接的不得误显「已链接」。原来「当前分配版本」那一列已随展开区的重复内容去掉，
+    // 现在这件事由矩阵那一格表达。
+    const matrixRow = screen.getByTestId("matrix-row-skill:agent-skills/gamma");
+    expect(within(matrixRow).getByTitle(/not-assigned/)).toHaveTextContent("未分配");
+    expect(within(matrixRow).queryByText("已链接")).toBeNull();
     expect(screen.queryByTestId("action-remove-skill:agent-skills/gamma-codex")).toBeNull();
 
     await userEvent.click(addBtn);

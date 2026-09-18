@@ -7,7 +7,7 @@ import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import { ResourceAgentMatrix, type MatrixRow, type MatrixRowCell } from "../components/ResourceAgentMatrix";
-import { SkillAssignmentRow } from "../components/SkillAssignmentRow";
+import { SkillAgentActions } from "../components/SkillAgentActions";
 import { SkillCollectionCard, SkillDiscoveryInbox } from "../components/SkillCollectionCard";
 import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDialog";
 import type { EngineElement, PolicyData, PolicyLayers, StatusData } from "../lib/contract";
@@ -529,7 +529,9 @@ export default function SkillsPage({
               )}
             </div>
 
-            <span className="text-xs text-muted-foreground">当前展示 {assignmentRows.length} 条分配记录</span>
+            <span className="text-xs text-muted-foreground">
+              当前展示 {filteredSkills.length} 个技能 × {relevantAgents.length} 个助手
+            </span>
           </div>
 
           {selectedRows.length > 0 && (
@@ -604,45 +606,24 @@ export default function SkillsPage({
             }}
             onToggleSelectAll={toggleSelectAllVisible}
             renderExpanded={(row) => (
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b text-[11px] text-muted-foreground">
-                    <th className="w-8 py-1.5 pr-3 font-medium" />
-                    <th className="py-1.5 pr-4 font-medium">技能名</th>
-                    <th className="py-1.5 pr-4 font-medium">所属集合</th>
-                    <th className="py-1.5 pr-4 font-medium">助手</th>
-                    <th className="py-1.5 pr-4 font-medium">状态</th>
-                    <th className="py-1.5 font-medium">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {assignmentRows
-                    .filter((item) => item.skill.id === row.key)
-                    .map(({ key, skill, skillName, collection, agent, cell }) => (
-                      <SkillAssignmentRow
-                        key={key}
-                        skill={skill}
-                        skillName={skillName}
-                        collection={collection}
-                        agent={agent}
-                        cell={cell}
-                        selected={selectedKeys.has(key)}
-                        selectDisabled={batchApply.executing}
-                        onToggleSelect={() =>
-                          setSelectedKeys((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(key)) next.delete(key);
-                            else next.add(key);
-                            return next;
-                          })
-                        }
-                        onFilterCollection={setCollectionFilter}
-                        onFilterAgent={setAgentFilter}
-                        onAction={handleSkillAction}
-                      />
-                    ))}
-                </tbody>
-              </table>
+              <SkillAgentActions
+                skill={assignmentRows.find((item) => item.skill.id === row.key)!.skill}
+                skillName={row.label}
+                assignments={assignmentRows
+                  .filter((item) => item.skill.id === row.key)
+                  .map(({ key, agent, cell }) => ({ key, agent, cell }))}
+                selectedKeys={selectedKeys}
+                selectDisabled={batchApply.executing}
+                onToggleSelect={(key) =>
+                  setSelectedKeys((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(key)) next.delete(key);
+                    else next.add(key);
+                    return next;
+                  })
+                }
+                onAction={handleSkillAction}
+              />
             )}
             emptyHint={
               search.trim() ? (
