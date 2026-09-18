@@ -12,6 +12,9 @@ import {
   renderAliasPreview,
 } from "../lib/aliasCommand";
 
+/** 下拉里的「自定义…」哨兵值：选中后切到可输入状态。 */
+const CUSTOM_OPTION = "__custom__";
+
 /**
  * 启动命令编辑弹窗：为一个终端快捷命令设置时区、语言与扩展参数，并实时预览最终那一行。
  *
@@ -51,6 +54,17 @@ export function AliasEditorDialog({
   const [error, setError] = useState<string | null>(null);
 
   const timeZones = useMemo(() => listTimeZones(), []);
+  // 读到的取值不在下拉里（例如手写的少见时区或语言）时直接进自定义模式，避免下拉把它吞掉
+  const [tzCustom, setTzCustom] = useState(
+    Boolean(parsed.timezone) && parsed.timezone !== FOLLOW_GLOBAL_TZ && !timeZones.includes(parsed.timezone as string),
+  );
+  const [langCustom, setLangCustom] = useState(
+    Boolean(parsed.lang) && parsed.lang !== FOLLOW_GLOBAL_LANG && !LANG_OPTIONS.includes(parsed.lang as string),
+  );
+  /** 除 TZ/LANG/LC_ALL 外的自定义环境变量行（可增删改）。 */
+  const [envRows, setEnvRows] = useState<{ key: string; value: string }[]>(
+    Object.entries(parsed.otherEnv).map(([key, value]) => ({ key, value })),
+  );
   const value = rawMode
     ? rawValue
     : buildAliasValue({
@@ -58,7 +72,9 @@ export function AliasEditorDialog({
         extraArgs,
         timezone: timezone || null,
         lang: lang || null,
-        otherEnv: parsed.otherEnv,
+        otherEnv: Object.fromEntries(
+          envRows.filter((row) => row.key.trim()).map((row) => [row.key.trim(), row.value]),
+        ),
       });
   const preview = name && value ? renderAliasPreview(name, value, globals) : "";
 
@@ -78,6 +94,18 @@ export function AliasEditorDialog({
     if (!value.trim()) {
       setError("命令内容不能为空");
       return;
+    }
+    for (const row of envRows) {
+      const key = row.key.trim();
+      if (!key) continue;
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+        setError(`环境变量名 ${key} 不合法：要以字母或下划线开头，只能用字母、数字与下划线`);
+        return;
+      }
+      if (row.value.includes('"')) {
+        setError(`环境变量 ${key} 的值不能包含双引号`);
+        return;
+      }
     }
     const textError = aliasTextError(value);
     if (textError) {
@@ -148,41 +176,109 @@ export function AliasEditorDialog({
                   <label className="mb-1 block text-xs font-medium text-muted-foreground" htmlFor="alias-timezone">
                     时区
                   </label>
-                  <select
-                    id="alias-timezone"
-                    value={timezone}
-                    onChange={(event) => setTimezone(event.target.value)}
-                    data-testid="alias-timezone-select"
-                    className="w-full rounded border border-input bg-background px-2 py-1.5 text-xs"
-                  >
-                    <option value={FOLLOW_GLOBAL_TZ}>跟随全局（{globals.timezone}）</option>
-                    <option value="">不设置</option>
-                    {timeZones.map((zone) => (
-                      <option key={zone} value={zone}>
-                        {zone}
-                      </option>
-                    ))}
-                  </select>
+                  {tzCustom ? (
+                    <div className="flex gap-1.5">
+                      <input
+                        value={timezone}
+                        onChange={(event) => setTimezone(event.target.value)}
+                        list="alias-timezone-options"
+                        data-testid="alias-timezone-input"
+                        placeholder="Asia/Shanghai"
+                        className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs"
+                      />
+                      <datalist id="alias-timezone-options">
+                        {timeZones.map((zone) => (
+                          <option key={zone} value={zone} />
+                        ))}
+                      </datalist>
+                      <button
+                        type="button"
+                        data-testid="alias-timezone-back"
+                        onClick={() => {
+                          setTzCustom(false);
+                          setTimezone(FOLLOW_GLOBAL_TZ);
+                        }}
+                        className="shrink-0 rounded border px-2 text-xs text-muted-foreground hover:bg-accent"
+                      >
+                        选常用
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      id="alias-timezone"
+                      value={timezone}
+                      onChange={(event) => {
+                        if (event.target.value === CUSTOM_OPTION) {
+                          setTzCustom(true);
+                          setTimezone("");
+                          return;
+                        }
+                        setTimezone(event.target.value);
+                      }}
+                      data-testid="alias-timezone-select"
+                      className="w-full rounded border border-input bg-background px-2 py-1.5 text-xs"
+                    >
+                      <option value={FOLLOW_GLOBAL_TZ}>跟随全局（{globals.timezone}）</option>
+                      <option value="">不设置</option>
+                      {timeZones.map((zone) => (
+                        <option key={zone} value={zone}>
+                          {zone}
+                        </option>
+                      ))}
+                      <option value={CUSTOM_OPTION}>自定义…</option>
+                    </select>
+                  )}
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-muted-foreground" htmlFor="alias-lang">
                     语言
                   </label>
-                  <select
-                    id="alias-lang"
-                    value={lang}
-                    onChange={(event) => setLang(event.target.value)}
-                    data-testid="alias-lang-select"
-                    className="w-full rounded border border-input bg-background px-2 py-1.5 text-xs"
-                  >
-                    <option value={FOLLOW_GLOBAL_LANG}>跟随全局（{globals.lang}）</option>
-                    <option value="">不设置</option>
-                    {LANG_OPTIONS.map((item) => (
-                      <option key={item} value={item}>
-                        {item}
-                      </option>
-                    ))}
-                  </select>
+                  {langCustom ? (
+                    <div className="flex gap-1.5">
+                      <input
+                        value={lang}
+                        onChange={(event) => setLang(event.target.value)}
+                        data-testid="alias-lang-input"
+                        placeholder="ja_JP.UTF-8"
+                        className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs"
+                      />
+                      <button
+                        type="button"
+                        data-testid="alias-lang-back"
+                        onClick={() => {
+                          setLangCustom(false);
+                          setLang(FOLLOW_GLOBAL_LANG);
+                        }}
+                        className="shrink-0 rounded border px-2 text-xs text-muted-foreground hover:bg-accent"
+                      >
+                        选常用
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      id="alias-lang"
+                      value={lang}
+                      onChange={(event) => {
+                        if (event.target.value === CUSTOM_OPTION) {
+                          setLangCustom(true);
+                          setLang("");
+                          return;
+                        }
+                        setLang(event.target.value);
+                      }}
+                      data-testid="alias-lang-select"
+                      className="w-full rounded border border-input bg-background px-2 py-1.5 text-xs"
+                    >
+                      <option value={FOLLOW_GLOBAL_LANG}>跟随全局（{globals.lang}）</option>
+                      <option value="">不设置</option>
+                      {LANG_OPTIONS.map((item) => (
+                        <option key={item} value={item}>
+                          {item}
+                        </option>
+                      ))}
+                      <option value={CUSTOM_OPTION}>自定义…</option>
+                    </select>
+                  )}
                 </div>
               </div>
               <div>
@@ -195,11 +291,56 @@ export function AliasEditorDialog({
                   placeholder="--dangerously-skip-permissions"
                 />
               </div>
-              {Object.keys(parsed.otherEnv).length > 0 && (
-                <p className="text-[11px] text-muted-foreground">
-                  保留原有环境变量：{Object.keys(parsed.otherEnv).join("、")}
-                </p>
-              )}
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-xs font-medium text-muted-foreground">其它环境变量（可选）</span>
+                  <button
+                    type="button"
+                    data-testid="alias-env-add"
+                    onClick={() => setEnvRows((prev) => [...prev, { key: "", value: "" }])}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    添加一项
+                  </button>
+                </div>
+                {envRows.length === 0 ? (
+                  <p className="text-[11px] text-muted-foreground">例如代理地址、自定义接口地址等，会放在命令前面。</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {envRows.map((row, index) => (
+                      <div key={index} className="flex items-center gap-1.5">
+                        <input
+                          value={row.key}
+                          onChange={(event) =>
+                            setEnvRows((prev) => prev.map((item, i) => (i === index ? { ...item, key: event.target.value } : item)))
+                          }
+                          data-testid={`alias-env-key-${index}`}
+                          placeholder="HTTPS_PROXY"
+                          className="w-2/5 rounded border border-input px-2 py-1.5 font-mono text-xs"
+                        />
+                        <input
+                          value={row.value}
+                          onChange={(event) =>
+                            setEnvRows((prev) => prev.map((item, i) => (i === index ? { ...item, value: event.target.value } : item)))
+                          }
+                          data-testid={`alias-env-value-${index}`}
+                          placeholder="http://127.0.0.1:7890"
+                          className="flex-1 rounded border border-input px-2 py-1.5 font-mono text-xs"
+                        />
+                        <button
+                          type="button"
+                          data-testid={`alias-env-remove-${index}`}
+                          onClick={() => setEnvRows((prev) => prev.filter((_, i) => i !== index))}
+                          aria-label="移除这项环境变量"
+                          className="shrink-0 rounded border px-2 py-1.5 text-xs text-destructive hover:bg-destructive/10"
+                        >
+                          移除
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </>
           )}
 

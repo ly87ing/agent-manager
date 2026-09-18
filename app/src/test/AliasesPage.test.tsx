@@ -98,6 +98,63 @@ describe("终端快捷命令页", () => {
     expect(within(dialog).queryByTestId("alias-command-input")).toBeNull();
   });
 
+  it("时区可以自定义输入，不受下拉列表限制", async () => {
+    const { calls } = renderWithEngine(<AliasesPage />, aliasRoutes());
+    await userEvent.click(await screen.findByTestId("add-alias-button"));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.type(within(dialog).getByTestId("alias-name-input"), "mytool");
+    await userEvent.type(within(dialog).getByTestId("alias-command-input"), "mytool");
+    await userEvent.selectOptions(within(dialog).getByTestId("alias-timezone-select"), "__custom__");
+    await userEvent.type(within(dialog).getByTestId("alias-timezone-input"), "Pacific/Chatham");
+    await userEvent.click(within(dialog).getByTestId("alias-form-submit"));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "sources:set")).toBe(true));
+    const write = calls.find((call) => call.command === "sources:set")!;
+    const payload = JSON.parse(write.args[write.args.indexOf("--value") + 1]);
+    expect(payload.value.aliases.mytool).toBe('TZ="Pacific/Chatham" LANG="{lang}" LC_ALL="{lang}" mytool');
+  });
+
+  it("可以添加自定义环境变量，并放在命令之前", async () => {
+    const { calls } = renderWithEngine(<AliasesPage />, aliasRoutes());
+    await userEvent.click(await screen.findByTestId("add-alias-button"));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.type(within(dialog).getByTestId("alias-name-input"), "mytool");
+    await userEvent.type(within(dialog).getByTestId("alias-command-input"), "mytool");
+    await userEvent.click(within(dialog).getByTestId("alias-env-add"));
+    await userEvent.type(within(dialog).getByTestId("alias-env-key-0"), "HTTPS_PROXY");
+    await userEvent.type(within(dialog).getByTestId("alias-env-value-0"), "http://127.0.0.1:7890");
+    await userEvent.click(within(dialog).getByTestId("alias-form-submit"));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "sources:set")).toBe(true));
+    const write = calls.find((call) => call.command === "sources:set")!;
+    const payload = JSON.parse(write.args[write.args.indexOf("--value") + 1]);
+    expect(payload.value.aliases.mytool).toBe(
+      'HTTPS_PROXY="http://127.0.0.1:7890" TZ="{timezone}" LANG="{lang}" LC_ALL="{lang}" mytool',
+    );
+  });
+
+  it("编辑既有命令时原有的其它环境变量可见可改", async () => {
+    renderWithEngine(<AliasesPage />, aliasRoutes({ proxied: 'HTTPS_PROXY="http://127.0.0.1:7890" TZ="{timezone}" LANG="{lang}" LC_ALL="{lang}" proxied' }));
+    await userEvent.click(await screen.findByTestId("edit-alias-proxied"));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByTestId("alias-env-key-0")).toHaveValue("HTTPS_PROXY");
+    expect(within(dialog).getByTestId("alias-env-value-0")).toHaveValue("http://127.0.0.1:7890");
+  });
+
+  it("非法的环境变量名被拦下", async () => {
+    const { calls } = renderWithEngine(<AliasesPage />, aliasRoutes());
+    await userEvent.click(await screen.findByTestId("add-alias-button"));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.type(within(dialog).getByTestId("alias-name-input"), "mytool");
+    await userEvent.type(within(dialog).getByTestId("alias-command-input"), "mytool");
+    await userEvent.click(within(dialog).getByTestId("alias-env-add"));
+    await userEvent.type(within(dialog).getByTestId("alias-env-key-0"), "1BAD");
+    await userEvent.type(within(dialog).getByTestId("alias-env-value-0"), "x");
+    await userEvent.click(within(dialog).getByTestId("alias-form-submit"));
+    expect(await within(dialog).findByTestId("alias-form-error")).toHaveTextContent("不合法");
+    expect(calls.some((call) => call.command === "sources:set")).toBe(false);
+  });
+
   it("保存前拦住会破坏配置行的取值", async () => {
     const { calls } = renderWithEngine(<AliasesPage />, aliasRoutes());
     await userEvent.click(await screen.findByTestId("add-alias-button"));
