@@ -32,16 +32,19 @@
 - **隔离是必须的,不是可选项**:规则已分发到 `~/.claude/CLAUDE.md`,直接跑 `claude -p` 两臂都读得到,测出来恒为 0;`--system-prompt` 挡不住 CLAUDE.md,`--bare` 不读 OAuth 登录不了——两条路都实测否决过,别重走。临时 HOME 里拷进来的 `.claude.json` 会带着整台机器的 MCP 列表,两臂都需 `--strict-mcp-config`,否则每次调用都重新拉起 MCP;代价是「该优先用哪个工具」这类规则测不了——臂里根本没有 MCP 工具。
 - 读数纪律与已否定的候选**不在这里重复一份**:唯一出处是 `agent-skill/repositories/agent-skills/README.md` 的 "rules for reading trigger-eval results" 与 "Already-tested dead ends" 两节(判官模型、N≥9、比 Wilson 区间、哪些 description 候选与拆分实验已实测否决)。规则层与 skill 层共用同一套读数规则,改了那里即可,本节只留规则层特有的部分。
 
-## 编辑 core.md 的隐形护栏(改前先看,否则门禁莫名报红)
+## 编辑 core.md 的护栏(门禁已随 tests/ 下线,纪律仍然有效)
 
-- **预算硬门禁** `tests/test_rule_budgets.py`:`round(len(core.md)/4)` 有硬上限(**数字以该测试的常量为准,别在这儿抄第二份**)。core 长期贴着上限跑,任何净增字符都可能破门——**改前先跑该测试看实测余量**;路由行改写须**字符中性或负增**,想加内容先压缩现有措辞腾位。
+`tests/` 目录已随 Python 实现清理一并删除,下面几条原本由那里的测试强制,现在**没有任何
+自动门禁替你把关**——改 core.md 时要自己守。需要恢复工具请从 git 历史取。
+
+- **预算**:`round(len(core.md)/4)` 曾有硬上限(原 `tests/test_rule_budgets.py`)。core 长期贴着上限跑,任何净增字符都可能越界;路由行改写须**字符中性或负增**,想加内容先压缩现有措辞腾位。
 - **抬上限的判据是 delete-test,不是「我加的是 always-on 边界」**——后者恰恰是 bd139d5 对自己的定性:它新增常驻条目并抬 420→460,三个 commit 后 6dd67bb 判定该行(core.md 第 11 行)是低频条件性 when-X-do-Y、过不了 delete-test,遂删行并**对称回退** 460→420,明写"恢复「净增即破门」的强制函数"。规矩:先用 delete-test(删了它 agent 会不会犯错)证明该行配占常驻槽位再抬,且**抬升与该行同生共死**——行下线时上限一并回退;绝不为让门禁变绿而抬。
-- **短语断言** `tests/test_sync_rules.py` 逐字断言四条 `` use the `change-discipline` skill ``/`` `artifact-hygiene` ``/`` `frontend-verification` ``/`` `reader-facing-writing` ``,`test_rule_layout.py` 按 ``re.findall(r"use the `([a-z0-9-]+)` skill")`` 提取——**skill 改名要同步测试**;但短语左侧的触发关键词不被断言,可自由改写。
-- **反向断言** `test_rule_layout.py` 禁止分发规则出现探索/工具督促类子句(`codebase-retrieval`、`augment MCP`、`graphify-out/GRAPH_REPORT.md`、`For codebase exploration:`)。
+- **四条路由短语**逐字生效:`` use the `change-discipline` skill ``/`` `artifact-hygiene` ``/`` `frontend-verification` ``/`` `reader-facing-writing` ``,按 ``re.findall(r"use the `([a-z0-9-]+)` skill")`` 提取——**skill 改名要同步改这四处**;短语左侧的触发关键词不受此限,可自由改写。
+- **不要**在分发规则里出现探索/工具督促类子句(`codebase-retrieval`、`augment MCP`、`graphify-out/GRAPH_REPORT.md`、`For codebase exploration:`)。
 
 ## 规则与 skill 里一律不放注释(用户 2026-07-27 拍板,别再拿"这家免费"来复议)
 
-- **门禁**:`tests/test_rule_layout.test_rules_carry_no_comment_content_anywhere` 覆盖 `core.md` 与各 adapter;skill 侧对应 `agent-skills/tests/test_skill_contracts.test_skill_content_carries_no_comments`(SKILL.md + references,代码围栏内豁免)。给维护者看的话写进仓库文档,那是运行时不加载的地方。
+- 覆盖 `core.md` 与各 adapter;skill 侧同理(SKILL.md + references,代码围栏内豁免)。给维护者看的话写进仓库文档,那是运行时不加载的地方。原来强制这条的测试已随 `tests/` 下线。
 - **"某家会剥离所以免费"不是理由,这条已经试过并被推翻**:同一份文件发给两家。Claude Code 注入 CLAUDE.md 前确实会剥掉块级 HTML 注释(实测 CLI 2.1.220,单行与跨行都剥,`~/.claude/rules/*.md` 也一样),但 Codex 没有同等行为、每一轮都要计费,而且即便在 Claude 上,只要有 agent 用 Read 打开该文件,注释就照样进上下文。为一家的豁免维护一套例外,不值。
 - 这条同时封掉了"用注释给分发产物自报家门"的做法:`~/.claude/CLAUDE.md` 被工具整体接管、覆盖写不留 `.bak` 这件事,只能靠仓库文档和分发目标本身的选择解决,不能靠往产物里塞注释。
 
@@ -50,5 +53,5 @@
 - **路由表 2026-07-27 第一次被实测,两条行结论不同**(sonnet,每行 2 用例 × 9 次 = N=18,两臂都装着 skill):`route-change-discipline` with 18/18 / without 15/18(+0.17,区间重叠);`route-artifact-hygiene` with 18/18 / **without 18/18**——裸臂一次没错过,delete-test 按仓库自己的判据是**触发了**的。
 - **但 delete-test 触发不等于该删,这是对既有判据的修正**:留着一行路由的代价是每会话约 28 token,删错的代价是 artifact-hygiene 那类边界(产物落位、密钥进日志)在边缘措辞上不再被认领。**代价不对称时,证据要求也应该不对称**——两个用例、一次会话的 null 不足以换掉一条按设计承重的行。想真正结掉这个问题,需要的是更边缘的措辞用例(不是更多次重复)、以及另外两条路由行(`frontend-verification`/`reader-facing-writing`)也各自测一遍;在那之前四行都留着,四条逐字断言也别动。
 - 那张常驻 skill 路由表是**唯一跨两端**生效的强制机制:hooks 是 Claude Code harness 专属,够不到 Codex——把守门 skill 搬进 hook、砍掉 core 路由表会让路由在 Codex 上失效。
-- MCP 工具(serena 等)自动暴露、相关时 agent 自会调用;**别加常驻规则或 hook 去督促工具使用**(重蹈已删除的 graphify 上下文膨胀覆辙,`test_rule_layout` 反向断言正是为此)。用得不够,唯一 graphify-safe 的补法是按需 skill,绝不是常驻规则。
+- MCP 工具(serena 等)自动暴露、相关时 agent 自会调用;**别加常驻规则或 hook 去督促工具使用**(重蹈已删除的 graphify 上下文膨胀覆辙,上一节那条「不要出现工具督促子句」正是为此)。用得不够,唯一 graphify-safe 的补法是按需 skill,绝不是常驻规则。
 - 路由行按**动词/动作**分流(Validate vs Write)而非共享名词,避免 `HTML`/`reports` 这类名词被两行同时认领而削弱触发确定性。
