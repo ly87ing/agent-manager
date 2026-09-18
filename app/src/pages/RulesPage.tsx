@@ -8,6 +8,7 @@ import { StateBadge } from "../components/StateBadge";
 import type { EngineElement, StatusData } from "../lib/contract";
 import type { RulesObserved, RulesSpec } from "../lib/observed";
 import { useEngineQuery } from "../lib/queries";
+import { TakeoverButton } from "../components/TakeoverButton";
 import { useDirectApply } from "../lib/useDirectApply";
 import { cn } from "../lib/utils";
 
@@ -80,6 +81,14 @@ export default function RulesPage() {
                     args: onlyArgs(element),
                   });
                 }}
+                busy={directApply.executing}
+                onTakeover={() =>
+                  void directApply.apply({
+                    command: "rules:apply",
+                    label: `接管原内容 ${element.id}`,
+                    args: ["--only", element.id, "--allow-takeover"],
+                  })
+                }
               />
             ))}
           </tbody>
@@ -94,10 +103,14 @@ function TargetRow({
   isExpanded,
   onToggle,
   onSync,
+  onTakeover,
+  busy,
 }: {
   element: EngineElement;
   isExpanded: boolean;
   onToggle: () => void;
+  onTakeover: () => void;
+  busy: boolean;
   onSync: () => void;
 }) {
   const spec = element.spec as unknown as RulesSpec;
@@ -136,6 +149,13 @@ function TargetRow({
               同步此目标
             </button>
           )}
+          <TakeoverButton
+            element={element}
+            domain="rules"
+            disabled={busy}
+            onTakeover={onTakeover}
+            showNote={false}
+          />
         </td>
       </tr>
       {isExpanded && (

@@ -11,6 +11,12 @@ use serde_json::{json, Value};
 use super::{args, model, status};
 use crate::native::Context;
 
+/// 能否显式接管：只有「当前内容读得到」的冲突才给接管。路径不安全、读不了的
+/// 目标 actual_digest 为 null，一律不提供接管入口。
+fn takeover_eligible(element: &Value, allow_takeover: bool) -> bool {
+    allow_takeover && element["observed"]["actual_digest"].is_string()
+}
+
 fn action_for(element: &Value) -> Option<Value> {
     let state = element["state"].as_str().unwrap_or("");
     if !matches!(state, "drifted" | "missing" | "not-materialized") {
@@ -55,8 +61,13 @@ pub(crate) fn build_preflight(ctx: &Context, parsed: &args::AliasArgs) -> Result
         let Some(element) = elements.iter().find(|e| e["id"].as_str() == Some(id)) else {
             continue;
         };
-        if !element["observed"]["blocked_reason"].is_null() {
-            bail!("preflight 拒绝: 选中的 aliases 目标存在阻塞，未生成任何动作");
+        if !element["observed"]["blocked_reason"].is_null()
+            && !takeover_eligible(element, parsed.allow_takeover)
+        {
+            bail!(
+                "preflight 拒绝: {} 的受管区块被本工具以外的方式改过，已停下没有覆盖。要用这里的内容替换该区块，用「接管原内容」。",
+                id
+            );
         }
     }
 

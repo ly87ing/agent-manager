@@ -7,6 +7,7 @@ import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { SourceDefinitionsPanel } from "../components/SourceDefinitionsPanel";
+import { TakeoverButton } from "../components/TakeoverButton";
 import type { StatusData } from "../lib/contract";
 import { LANG_OPTIONS, listTimeZones, renderAliasPreview } from "../lib/aliasCommand";
 import { ALIAS_EFFECT_HINT, ALIAS_EFFECT_LABEL, aliasEffectOf, aliasElementsOf } from "../lib/aliasEffect";
@@ -239,7 +240,23 @@ export default function AliasesPage() {
         <section className="rounded-lg border bg-card p-5 shadow-sm">
           <h3 className="text-sm font-semibold text-foreground">同步状态</h3>
           <div className="mt-3">
-            <ElementTable elements={statusQuery.data.data.elements} />
+            <ElementTable
+              elements={statusQuery.data.data.elements}
+              renderActions={(element) => (
+                <TakeoverButton
+                  element={element}
+                  domain="aliases"
+                  disabled={directApply.executing}
+                  onTakeover={() =>
+                    void directApply.apply({
+                      command: "aliases:apply",
+                      label: `接管原内容 ${element.id}`,
+                      args: ["--only", element.id, "--allow-takeover"],
+                    })
+                  }
+                />
+              )}
+            />
           </div>
         </section>
       )}

@@ -10,14 +10,19 @@ use serde_json::{json, Value};
 use super::{args, model, status};
 use crate::native::Context;
 
-fn action_for(element: &Value) -> Option<Value> {
+fn action_for(element: &Value, allow_takeover: bool) -> Option<Value> {
     let state = element["state"].as_str().unwrap_or("");
-    if state != "missing" && state != "drifted" {
+    // 显式接管：unmanaged-detected 且当前内容读得到时也生成写动作，
+    // before_digest 取现有内容的摘要，用户因此能看清会被替换掉什么。
+    let taking_over = state == "unmanaged-detected" && takeover_eligible(element, allow_takeover);
+    if state != "missing" && state != "drifted" && !taking_over {
         return None;
     }
     let observed = &element["observed"];
     let before_digest = if state == "missing" {
         Value::Null
+    } else if taking_over {
+        observed["actual_digest"].clone()
     } else if let Some(applied) = observed["applied_digest"].as_str() {
         json!(applied)
     } else {
@@ -40,6 +45,12 @@ fn action_for(element: &Value) -> Option<Value> {
 
 /// 预检与动作计算：入参为已通过严格解析的 apply 参数；返回动作与汇总
 /// （仅测试断言使用，apply 只依赖其 fail-closed 语义）。
+/// 能否显式接管：只有「当前内容读得到」的冲突才给接管。路径不安全、读不了的
+/// 目标 actual_digest 为 null，一律不提供接管入口。
+fn takeover_eligible(element: &Value, allow_takeover: bool) -> bool {
+    allow_takeover && element["observed"]["actual_digest"].is_string()
+}
+
 pub(crate) fn build_preflight(ctx: &Context, parsed: &args::RuleArgs) -> Result<Value> {
     let status = status::build_status(ctx)?;
 
@@ -54,8 +65,12 @@ pub(crate) fn build_preflight(ctx: &Context, parsed: &args::RuleArgs) -> Result<
         if enabled
             && (element["state"].as_str() == Some("unmanaged-detected")
                 || !element["observed"]["blocked_reason"].is_null())
+            && !takeover_eligible(element, parsed.allow_takeover)
         {
-            bail!("preflight 拒绝: 选中的规则目标存在阻塞，未生成任何动作");
+            bail!(
+                "preflight 拒绝: {} 被本工具以外的方式改过，已停下没有覆盖。要用这里的内容替换它，用「接管原内容」。",
+                id
+            );
         }
     }
 
@@ -68,7 +83,7 @@ pub(crate) fn build_preflight(ctx: &Context, parsed: &args::RuleArgs) -> Result<
             .iter()
             .find(|e| e["id"].as_str() == Some(spec.target_id))
         {
-            if let Some(action) = action_for(element) {
+            if let Some(action) = action_for(element, parsed.allow_takeover) {
                 actions.push(action);
             }
         }

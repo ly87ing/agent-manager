@@ -9,6 +9,8 @@ use crate::native::Request;
 
 pub(crate) struct RuleArgs {
     pub only: Vec<String>,
+    /// 显式接管：目标被外部改过时允许用本工具的内容整体替换它。
+    pub allow_takeover: bool,
 }
 
 fn valid_target_id(value: &str) -> bool {
@@ -23,9 +25,10 @@ fn normalize_only(selected: &[String]) -> Vec<String> {
         .collect()
 }
 
-fn parse_args(req: &Request, allow_only: bool) -> Result<RuleArgs> {
+fn parse_args(req: &Request, allow_only: bool, allow_takeover_flag: bool) -> Result<RuleArgs> {
     let mut selected: Vec<String> = Vec::new();
     let mut offline_seen = false;
+    let mut allow_takeover = false;
 
     let mut iter = req.args.iter();
     while let Some(arg) = iter.next() {
@@ -45,6 +48,12 @@ fn parse_args(req: &Request, allow_only: bool) -> Result<RuleArgs> {
                 }
                 selected.push(value.clone());
             }
+            "--allow-takeover" if allow_takeover_flag => {
+                if allow_takeover {
+                    bail!("参数错误: --allow-takeover 重复");
+                }
+                allow_takeover = true;
+            }
             "--offline" => {
                 if offline_seen {
                     bail!("参数错误: --offline 重复");
@@ -60,6 +69,11 @@ fn parse_args(req: &Request, allow_only: bool) -> Result<RuleArgs> {
         }
     }
 
+    // 接管是整文件替换，必须逐个目标显式来，不能一把全接管。
+    if allow_takeover && selected.len() != 1 {
+        bail!("参数错误: --allow-takeover 仅允许与 --only 指定单个目标同时使用");
+    }
+
     let only = if selected.is_empty() {
         model::targets()
             .iter()
@@ -68,18 +82,21 @@ fn parse_args(req: &Request, allow_only: bool) -> Result<RuleArgs> {
     } else {
         normalize_only(&selected)
     };
-    Ok(RuleArgs { only })
+    Ok(RuleArgs {
+        only,
+        allow_takeover,
+    })
 }
 
 /// rules:status —— 只接受可选且最多一次 --offline。
 pub(crate) fn parse_status_args(req: &Request) -> Result<RuleArgs> {
-    parse_args(req, false)
+    parse_args(req, false, false)
 }
 
-/// rules:apply —— --only（零或多个）+ 可选最多一次 --offline；--dry-run
-/// 与其余未知选项一样被拒绝。
+/// rules:apply —— --only（零或多个）+ 可选最多一次 --offline + 可选
+/// --allow-takeover（须恰好选中一个目标）；--dry-run 与其余未知选项一样被拒绝。
 pub(crate) fn parse_apply_args(req: &Request) -> Result<RuleArgs> {
-    parse_args(req, true)
+    parse_args(req, true, true)
 }
 
 #[cfg(test)]

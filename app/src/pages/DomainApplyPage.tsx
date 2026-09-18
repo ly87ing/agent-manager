@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { PlayCircle } from "lucide-react";
 import { HooksEditor } from "../components/HooksEditor";
+import { TakeoverButton } from "../components/TakeoverButton";
 import { SourceDefinitionsPanel } from "../components/SourceDefinitionsPanel";
 import { ElementTable } from "../components/ElementTable";
 import { Switch } from "../components/Switch";
@@ -10,16 +11,6 @@ import type { EngineElement, StatusData } from "../lib/contract";
 import { useEngineQuery } from "../lib/queries";
 import { useDirectApply } from "../lib/useDirectApply";
 import { useElementToggle } from "../lib/useElementToggle";
-
-/** Hooks 阻塞/非受管目标：仅在引擎给出了可安全接管的 actual_digest（string）时才显示显式接管入口。
- * actual_digest=null 表示无效 JSON、路径/类型不安全等情形，前端不得提供接管按钮。 */
-function isBlockedHooksElement(element: EngineElement): boolean {
-  const observed = element.observed as { blocked_reason?: unknown; actual_digest?: unknown };
-  const hasDigest = typeof observed.actual_digest === "string";
-  if (!hasDigest) return false;
-  if (element.state === "unmanaged-detected") return true;
-  return observed.blocked_reason != null;
-}
 
 /**
  * 简单域的只读 + 同步页（Aliases / Hooks）：元素表 + 「立即同步」按钮，
@@ -56,35 +47,21 @@ export default function DomainApplyPage({
 
   const elements = query.data.data.elements;
 
-  /** Hooks 阻塞目标的「接管原内容」入口：一键直接带 --allow-takeover 执行 apply。 */
-  const hooksTakeoverAction = (element: EngineElement) => {
-    if (!isBlockedHooksElement(element)) return null;
-    const wholeFile = (element.spec as { merge?: string }).merge === "whole-file";
-    return (
-      <div className="flex max-w-xs flex-col items-end gap-1 text-right">
-        <button
-          type="button"
-          data-testid={`takeover-${element.id}`}
-          disabled={disabled}
-          onClick={() =>
-            void directApply.apply({
-              command: "hooks:apply",
-              label: `接管原内容 ${element.id}`,
-              args: ["--only", element.id, "--allow-takeover"],
-            })
-          }
-          className="inline-flex items-center gap-1 rounded border border-warning/40 bg-warning/10 px-2.5 py-1 text-xs font-medium text-warning hover:bg-warning/15 disabled:opacity-40"
-        >
-          接管原内容
-        </button>
-        {wholeFile && (
-          <p data-testid={`takeover-hint-${element.id}`} className="text-[11px] leading-snug text-warning">
-            整文件替换：现有内容将被整体替换，先把需要保留的 hook 并入来源定义。
-          </p>
-        )}
-      </div>
-    );
-  };
+  /** 被外部改过的目标：给出显式接管入口，否则用户手改过文件后同步会永久失败。 */
+  const takeoverAction = (element: EngineElement) => (
+    <TakeoverButton
+      element={element}
+      domain={domain}
+      disabled={disabled}
+      onTakeover={() =>
+        void directApply.apply({
+          command: `${domain}:apply`,
+          label: `接管原内容 ${element.id}`,
+          args: ["--only", element.id, "--allow-takeover"],
+        })
+      }
+    />
+  );
 
   return (
     <div className="space-y-4">
@@ -126,7 +103,7 @@ export default function DomainApplyPage({
           elements={elements}
           renderActions={
             domain === "hooks"
-              ? hooksTakeoverAction
+              ? takeoverAction
               : enableToggles
                 ? (element) => {
                     const shortName = element.id.replace(`${domain}:`, "");

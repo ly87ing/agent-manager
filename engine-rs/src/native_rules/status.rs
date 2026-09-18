@@ -162,6 +162,9 @@ fn build_element(ctx: &Context, snap: &Snapshot, spec: &TargetSpec) -> Value {
         });
     }
 
+    // actual_digest 只在「能安全读到当前内容」时给出；路径不安全/读不了的目标它为 null，
+    // 接管入口据此判定——读都读不了的目标不提供接管。
+    let mut actual_digest = Value::Null;
     let (state, target_exists, blocked_reason, registration_needed) =
         match probe_target(&abs_target) {
             TargetProbe::Missing => ("missing", Value::Bool(false), Value::Null, false),
@@ -171,36 +174,39 @@ fn build_element(ctx: &Context, snap: &Snapshot, spec: &TargetSpec) -> Value {
                 Value::String(reason),
                 false,
             ),
-            TargetProbe::Digest(actual) => match binding {
-                Some(b) => {
-                    if actual == b.applied_digest && actual == expected_digest {
-                        ("managed-ok", Value::Bool(true), Value::Null, false)
-                    } else if actual == b.applied_digest {
-                        ("drifted", Value::Bool(true), Value::Null, false)
-                    } else {
-                        (
-                            "unmanaged-detected",
-                            Value::Bool(true),
-                            Value::String("目标文件存在外部修改，拒绝覆盖".to_string()),
-                            false,
-                        )
+            TargetProbe::Digest(actual) => {
+                actual_digest = Value::String(actual.clone());
+                match binding {
+                    Some(b) => {
+                        if actual == b.applied_digest && actual == expected_digest {
+                            ("managed-ok", Value::Bool(true), Value::Null, false)
+                        } else if actual == b.applied_digest {
+                            ("drifted", Value::Bool(true), Value::Null, false)
+                        } else {
+                            (
+                                "unmanaged-detected",
+                                Value::Bool(true),
+                                Value::String("目标文件存在外部修改，拒绝覆盖".to_string()),
+                                false,
+                            )
+                        }
+                    }
+                    None => {
+                        if actual == expected_digest {
+                            ("drifted", Value::Bool(true), Value::Null, true)
+                        } else {
+                            (
+                                "unmanaged-detected",
+                                Value::Bool(true),
+                                Value::String(
+                                    "目标文件已存在外部内容且无受管绑定，拒绝覆盖".to_string(),
+                                ),
+                                false,
+                            )
+                        }
                     }
                 }
-                None => {
-                    if actual == expected_digest {
-                        ("drifted", Value::Bool(true), Value::Null, true)
-                    } else {
-                        (
-                            "unmanaged-detected",
-                            Value::Bool(true),
-                            Value::String(
-                                "目标文件已存在外部内容且无受管绑定，拒绝覆盖".to_string(),
-                            ),
-                            false,
-                        )
-                    }
-                }
-            },
+            }
         };
 
     let actions =
@@ -220,6 +226,7 @@ fn build_element(ctx: &Context, snap: &Snapshot, spec: &TargetSpec) -> Value {
             "target_exists": target_exists,
             "expected_digest": expected_digest,
             "applied_digest": applied_digest,
+            "actual_digest": actual_digest,
             "shared_revision": shared_revision,
             "adapter_revision": adapter_revision,
             "blocked_reason": blocked_reason,
@@ -235,6 +242,7 @@ fn spec_json(spec: &TargetSpec) -> Value {
     json!({
         "name": match spec.target_id {
             "rules:codex_global" => "Codex 全局规则",
+            "rules:opencode_global" => "OpenCode 全局规则",
             _ => "Claude Code 全局规则",
         },
         "group": "global-rules",

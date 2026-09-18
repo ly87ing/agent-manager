@@ -133,7 +133,9 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
                 specs.push(("--action", ArgValueKind::McpAction));
                 specs.push(("--allow-takeover", ArgValueKind::Flag));
             }
-            if domain == "hooks" {
+            // 受管目标被外部改过时的显式接管通道：hooks 与 rules 整文件替换、
+            // aliases 换整个受管区块，引擎侧再强制「须恰好选中一个目标」。
+            if matches!(domain, "hooks" | "rules" | "aliases") {
                 specs.push(("--allow-takeover", ArgValueKind::Flag));
             }
             // 实例配置文件由本工具全权拥有：已有他人内容时需显式接管
@@ -714,6 +716,20 @@ mod tests {
             .is_ok(),
             "hooks:apply --allow-takeover should pass"
         );
+        // rules:apply / aliases:apply 同样放行：目标被外部改过时的唯一出路
+        for (command, target) in [
+            ("rules:apply", "rules:claude_global"),
+            ("aliases:apply", "aliases:zshrc"),
+        ] {
+            assert!(
+                validate_args(
+                    command,
+                    &["--only".into(), target.into(), "--allow-takeover".into()]
+                )
+                .is_ok(),
+                "{command} --allow-takeover should pass"
+            );
+        }
         // skills:apply 放行（逐 skill add/remove 显式接管，引擎侧再强制动作范围）
         assert!(
             validate_args(
@@ -736,7 +752,8 @@ mod tests {
             ("hooks:status", vec!["--allow-takeover".into()]),
             ("skills:status", vec!["--allow-takeover".into()]),
             ("agents:apply", vec!["--allow-takeover".into()]),
-            ("rules:apply", vec!["--allow-takeover".into()]),
+            ("rules:status", vec!["--allow-takeover".into()]),
+            ("aliases:status", vec!["--allow-takeover".into()]),
         ] {
             assert!(
                 validate_args(command, &args).is_err(),

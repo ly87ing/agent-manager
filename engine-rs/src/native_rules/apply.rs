@@ -99,7 +99,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
                 },
             },
             (Some(actual), Some(b)) => {
-                if *actual != b.applied_digest {
+                if *actual != b.applied_digest && !parsed.allow_takeover {
                     bail!("目标 {} 存在外部修改，拒绝覆盖", spec.target_id);
                 }
                 if *actual == expected_digest {
@@ -122,6 +122,19 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
             (Some(actual), None) => {
                 if *actual == expected_digest {
                     // 字节一致但无绑定：登记受管绑定。
+                    Decision::Write {
+                        expected: expected.into_bytes(),
+                        old_bytes,
+                        binding: Binding {
+                            target_id: spec.target_id.to_string(),
+                            applied_digest: expected_digest,
+                            shared_revision,
+                            adapter_revision,
+                            updated_at: now_iso(),
+                        },
+                    }
+                } else if parsed.allow_takeover {
+                    // 显式接管：用本工具的内容整体替换现有文件，并登记受管绑定。
                     Decision::Write {
                         expected: expected.into_bytes(),
                         old_bytes,

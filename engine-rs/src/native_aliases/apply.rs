@@ -50,6 +50,7 @@ fn decide(
     cfg: &serde_json::Map<String, Value>,
     source_revision: &str,
     bindings: &std::collections::BTreeMap<String, Binding>,
+    allow_takeover: bool,
 ) -> Result<Decision> {
     let alias_lines = model::render_alias_lines(cfg);
     let expected_inner = alias_lines.join("\n");
@@ -94,10 +95,10 @@ fn decide(
         let (found, inner) = model::extract_alias_block(&text);
         if b.applied_block_digest.is_empty() {
             // 旧行（补列默认值）：没有区块摘要可比，回退到整文件比较。
-            if sha256_hex_bytes(&old) != b.applied_digest {
+            if sha256_hex_bytes(&old) != b.applied_digest && !allow_takeover {
                 bail!("目标 {} 存在外部修改，拒绝覆盖", spec.target_id);
             }
-        } else if found && sha256_hex(&inner) != b.applied_block_digest {
+        } else if found && sha256_hex(&inner) != b.applied_block_digest && !allow_takeover {
             bail!("目标 {} 的受管区块被外部修改，拒绝覆盖", spec.target_id);
         }
         // 区块整段不见了：按缺失处理，下面照常重新写入，不算冲突。
@@ -137,7 +138,14 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
         if !selected.iter().any(|id| id == spec.target_id) {
             continue;
         }
-        let decision = decide(ctx, &spec, &cfg, &source_revision, &bindings)?;
+        let decision = decide(
+            ctx,
+            &spec,
+            &cfg,
+            &source_revision,
+            &bindings,
+            parsed.allow_takeover,
+        )?;
         if !matches!(decision, Decision::Skip) {
             pending.push((
                 spec.target_id.to_string(),

@@ -475,3 +475,64 @@ describe("Hooks 阻塞目标的显式接管入口", () => {
     expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
   });
 });
+
+describe("规则目标被外部改过时的出路", () => {
+  it("给出「接管原内容」，点了带 --allow-takeover 精确到该目标执行", async () => {
+    const rulesRoutes: Record<string, Envelope> = { ...routes() };
+    rulesRoutes["rules:status"] = makeEnvelope(
+      {
+        domain: "rules",
+        elements: [
+          makeElement({
+            id: "rules:claude_global",
+            domain: "rules",
+            spec: { name: "Claude Code 全局规则", target: "~/.claude/CLAUDE.md", source_keys: ["rules.shared", "rules.claude"] },
+            observed: {
+              target: "~/.claude/CLAUDE.md",
+              // 内容读得到 → 可以接管
+              actual_digest: "a".repeat(64),
+              blocked_reason: "目标文件存在外部修改，拒绝覆盖",
+            },
+            state: "unmanaged-detected",
+            actions: [],
+          }),
+        ],
+      },
+      { command: "rules.status" },
+    );
+    const { calls } = renderWithEngine(<RulesHooksPage />, rulesRoutes);
+
+    const button = await screen.findByTestId("takeover-rules:claude_global");
+    await userEvent.click(button);
+
+    await waitFor(() => expect(calls.some((call) => call.command === "rules:apply")).toBe(true));
+    expect(calls.find((call) => call.command === "rules:apply")!.args).toEqual([
+      "--only",
+      "rules:claude_global",
+      "--allow-takeover",
+    ]);
+  });
+
+  it("内容读不到（actual_digest 为 null）时不提供接管", async () => {
+    const rulesRoutes: Record<string, Envelope> = { ...routes() };
+    rulesRoutes["rules:status"] = makeEnvelope(
+      {
+        domain: "rules",
+        elements: [
+          makeElement({
+            id: "rules:claude_global",
+            domain: "rules",
+            spec: { name: "Claude Code 全局规则", target: "~/.claude/CLAUDE.md", source_keys: [] },
+            observed: { target: "~/.claude/CLAUDE.md", actual_digest: null, blocked_reason: "目标路径不安全" },
+            state: "unmanaged-detected",
+            actions: [],
+          }),
+        ],
+      },
+      { command: "rules.status" },
+    );
+    renderWithEngine(<RulesHooksPage />, rulesRoutes);
+    await screen.findByText("Claude Code 全局规则");
+    expect(screen.queryByTestId("takeover-rules:claude_global")).toBeNull();
+  });
+});
