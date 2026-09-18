@@ -33,7 +33,7 @@ fn base_bin(ctx: &Context, def: &ProfileDef) -> String {
         .unwrap_or_else(|| fallback.to_string())
 }
 
-fn bindings(ctx: &Context) -> Result<BTreeMap<String, Binding>> {
+fn bindings(ctx: &Context) -> Result<BTreeMap<(String, String), Binding>> {
     match store::open_readonly(ctx)? {
         Some(conn) => load_bindings_from(&conn),
         None => Ok(BTreeMap::new()),
@@ -54,21 +54,59 @@ fn invalid_element(id: &str, err: &anyhow::Error) -> Value {
     })
 }
 
-fn element(ctx: &Context, def: &ProfileDef, binding: Option<&Binding>) -> Value {
+fn element(
+    ctx: &Context,
+    def: &ProfileDef,
+    bindings: &BTreeMap<(String, String), Binding>,
+) -> Value {
     let dir_check = model::validate_config_dir(def, &ctx.home_dir, &ctx.data_dir);
     let (config_dir, blocked) = match dir_check {
         Ok(path) => (Some(path), None),
         Err(err) => (None, Some(format!("{err:#}"))),
     };
-    let target_path = config_dir
-        .as_ref()
-        .map(|dir| dir.join(def.kind.target_file()));
     let dir_exists = config_dir.as_ref().map(|dir| dir.is_dir()).unwrap_or(false);
-    let target_bytes = target_path
-        .as_ref()
-        .filter(|path| path.is_file())
-        .and_then(|path| std::fs::read(path).ok());
-    let actual_digest = target_bytes.as_ref().map(|bytes| sha256_hex_bytes(bytes));
+
+    // 逐个受管文件报状态：没渲染出来（来源损坏等）就只报目录层信息，不谎报就绪
+    let rendered = config_dir.as_ref().and_then(|dir| {
+        model::render_all(
+            ctx,
+            def,
+            &|file| std::fs::read(dir.join(file)).ok(),
+            &|name| std::env::var(name).ok(),
+        )
+        .ok()
+    });
+    let mut files = Vec::new();
+    let mut all_applied = rendered.is_some();
+    let mut any_present = false;
+    if let (Some(dir), Some(targets)) = (config_dir.as_ref(), rendered.as_ref()) {
+        for target in targets {
+            let path = dir.join(&target.file);
+            let actual = std::fs::read(&path)
+                .ok()
+                .map(|bytes| sha256_hex_bytes(&bytes));
+            let known = bindings
+                .get(&(def.id.clone(), target.file.clone()))
+                .map(|b| b.applied_digest.as_str());
+            let expected = sha256_hex_bytes(&target.content);
+            let state = match (&actual, known) {
+                (None, _) => "not-materialized",
+                (Some(actual), Some(known)) if actual == known && *actual == expected => {
+                    "managed-ok"
+                }
+                // 本工具写过但内容该更新了：按需要重新写入处理，不算外部改动
+                (Some(actual), Some(known)) if actual == known => "outdated",
+                (Some(_), _) => "drifted",
+            };
+            if actual.is_some() {
+                any_present = true;
+            }
+            if state != "managed-ok" {
+                all_applied = false;
+            }
+            files.push(json!({"file": target.file, "state": state}));
+        }
+    }
 
     // 环境变量只报变量名与当前环境是否给得出取值，绝不输出取值本身。
     let mut env_refs = Vec::new();
@@ -95,13 +133,14 @@ fn element(ctx: &Context, def: &ProfileDef, binding: Option<&Binding>) -> Value 
         "unsupported"
     } else if !def.enabled {
         "disabled"
+    } else if all_applied && !files.is_empty() {
+        "managed-ok"
+    } else if files.iter().any(|f| f["state"] == "drifted") {
+        "drifted"
+    } else if !any_present {
+        "not-materialized"
     } else {
-        match (&actual_digest, binding) {
-            (None, _) => "not-materialized",
-            (Some(actual), Some(b)) if *actual == b.applied_digest => "managed-ok",
-            // 目标已存在但不是本工具最后写入的那份：外部改过或本工具从未写过
-            (Some(_), _) => "drifted",
-        }
+        "drifted"
     };
 
     let mut actions = Vec::new();
@@ -121,9 +160,9 @@ fn element(ctx: &Context, def: &ProfileDef, binding: Option<&Binding>) -> Value 
         "target".into(),
         json!(format!("{}/{}", def.config_dir_raw, def.kind.target_file())),
     );
-    observed.insert("target_exists".into(), json!(actual_digest.is_some()));
+    observed.insert("target_exists".into(), json!(any_present));
+    observed.insert("files".into(), Value::Array(files));
     observed.insert("env_refs".into(), Value::Array(env_refs));
-    // 建议的启动命令取值：前端可直接存成同名别名，与别名域的取值格式一致
     observed.insert(
         "launch_value".into(),
         json!(model::launch_value(def, base_bin(ctx, def).as_str(), "")),
@@ -158,10 +197,7 @@ pub(crate) fn build_status(ctx: &Context) -> Result<Value> {
     let mut elements = Vec::new();
     for (index, parsed) in model::load_definitions(&policy).into_iter().enumerate() {
         match parsed {
-            Ok(def) => {
-                let binding = bindings.get(&def.id);
-                elements.push(element(ctx, &def, binding));
-            }
+            Ok(def) => elements.push(element(ctx, &def, &bindings)),
             Err(err) => elements.push(invalid_element(&format!("invalid-{index}"), &err)),
         }
     }

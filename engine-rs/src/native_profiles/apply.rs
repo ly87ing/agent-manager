@@ -68,32 +68,46 @@ pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
         bail!("[{}] 实例已停用，拒绝写入", id);
     }
     let dir = model::validate_config_dir(&def, &ctx.home_dir, &ctx.data_dir)?;
-    // 渲染一次：变量缺失、结构非法在取锁前就暴露
-    model::render_target(&def, &|name| std::env::var(name).ok())?;
+    // 渲染一次：变量缺失、来源结构非法在取锁前就暴露
+    let rendered = model::render_all(
+        ctx,
+        &def,
+        &|file| std::fs::read(dir.join(file)).ok(),
+        &|name| std::env::var(name).ok(),
+    )?;
 
-    let target = dir.join(def.kind.target_file());
-    if std::fs::symlink_metadata(&target)
-        .map(|m| m.file_type().is_symlink())
-        .unwrap_or(false)
-    {
-        bail!("[{}] 目标文件是符号链接，拒绝写入", id);
+    let allow = req.flag("--allow-takeover");
+    for target in &rendered {
+        let path = dir.join(&target.file);
+        if std::fs::symlink_metadata(&path)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            bail!("[{}] {} 是符号链接，拒绝写入", id, target.file);
+        }
+        if path.exists() && !path.is_file() {
+            bail!("[{}] {} 被目录占用，拒绝写入", id, target.file);
+        }
+        check_takeover(ctx, &def, &target.file, &path, allow)?;
     }
-    if target.exists() && !target.is_file() {
-        bail!("[{}] 目标路径被目录占用，拒绝写入", id);
-    }
-    check_takeover(ctx, &def, &target, req.flag("--allow-takeover"))?;
     Ok(())
 }
 
 /// 目标已存在但不是本工具最后写入的那份时，必须显式接管。
-fn check_takeover(ctx: &Context, def: &ProfileDef, target: &Path, allow: bool) -> Result<bool> {
-    if !target.is_file() {
+fn check_takeover(
+    ctx: &Context,
+    def: &ProfileDef,
+    file: &str,
+    path: &Path,
+    allow: bool,
+) -> Result<bool> {
+    if !path.is_file() {
         return Ok(false);
     }
-    let actual = sha256_hex_bytes(&std::fs::read(target)?);
+    let actual = sha256_hex_bytes(&std::fs::read(path)?);
     let known = match store::open_readonly(ctx)? {
         Some(conn) => load_bindings_from(&conn)?
-            .get(&def.id)
+            .get(&(def.id.clone(), file.to_string()))
             .map(|b| b.applied_digest.clone()),
         None => None,
     };
@@ -102,15 +116,16 @@ fn check_takeover(ctx: &Context, def: &ProfileDef, target: &Path, allow: bool) -
     }
     if !allow {
         bail!(
-            "[{}] 目标文件已存在且不是本工具写入的那份，拒绝覆盖；确认要接管请显式选择接管",
-            def.id
+            "[{}] {} 已存在且不是本工具写入的那份，拒绝覆盖；确认要接管请显式选择接管",
+            def.id,
+            file
         );
     }
     Ok(true)
 }
 
 /// 原子换入：同目录临时文件 + rename，权限 0600。
-fn atomic_write(target: &Path, content: &str) -> Result<()> {
+fn atomic_write(target: &Path, content: &[u8]) -> Result<()> {
     let dir = target
         .parent()
         .ok_or_else(|| anyhow!("目标路径没有父目录"))?;
@@ -146,41 +161,72 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     let id = parse_only(req)?;
     let def = find_def(ctx, &id)?;
     let dir = model::validate_config_dir(&def, &ctx.home_dir, &ctx.data_dir)?;
-    let target = dir.join(def.kind.target_file());
-    let takeover = check_takeover(ctx, &def, &target, req.flag("--allow-takeover"))?;
-    let content = model::render_target(&def, &|name| std::env::var(name).ok())?;
-    let digest = sha256_hex_bytes(content.as_bytes());
+    let allow = req.flag("--allow-takeover");
+    let rendered = model::render_all(
+        ctx,
+        &def,
+        &|file| std::fs::read(dir.join(file)).ok(),
+        &|name| std::env::var(name).ok(),
+    )?;
 
-    let previous = if target.is_file() {
-        Some(std::fs::read(&target)?)
-    } else {
-        None
-    };
+    let mut takeover = false;
+    for target in &rendered {
+        takeover |= check_takeover(ctx, &def, &target.file, &dir.join(&target.file), allow)?;
+    }
+
     ensure_dir(&dir)?;
-    atomic_write(&target, &content)?;
-
-    let restore = || {
-        match &previous {
-            Some(bytes) => {
-                let _ = std::fs::write(&target, bytes);
+    // 写前留存每个文件的原状，任一步失败就整体还原，不留半套配置
+    let mut restore: Vec<(PathBuf, Option<Vec<u8>>)> = Vec::new();
+    let mut written: Vec<(String, String)> = Vec::new();
+    let rollback = |restore: &[(PathBuf, Option<Vec<u8>>)]| {
+        for (path, previous) in restore {
+            match previous {
+                Some(bytes) => {
+                    let _ = std::fs::write(path, bytes);
+                }
+                None => {
+                    let _ = std::fs::remove_file(path);
+                }
             }
-            None => {
-                let _ = std::fs::remove_file(&target);
-            }
-        };
+        }
     };
+
+    for target in &rendered {
+        let path = dir.join(&target.file);
+        let previous = if path.is_file() {
+            match std::fs::read(&path) {
+                Ok(bytes) => Some(bytes),
+                Err(err) => {
+                    rollback(&restore);
+                    return Err(err.into());
+                }
+            }
+        } else {
+            None
+        };
+        restore.push((path.clone(), previous));
+        if let Err(err) = atomic_write(&path, &target.content) {
+            rollback(&restore);
+            return Err(err);
+        }
+        written.push((target.file.clone(), sha256_hex_bytes(&target.content)));
+    }
 
     let result = (|| -> Result<()> {
         let mut conn = store::open_write(ctx)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        write_binding(
-            &tx,
-            &Binding {
-                profile_id: def.id.clone(),
-                applied_digest: digest.clone(),
-                updated_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-            },
-        )?;
+        for (file, digest) in &written {
+            write_binding(
+                &tx,
+                &Binding {
+                    profile_id: def.id.clone(),
+                    file: file.clone(),
+                    applied_digest: digest.clone(),
+                    updated_at: chrono::Utc::now()
+                        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                },
+            )?;
+        }
         store::record_operation(
             &tx,
             Some(&req.run_id),
@@ -190,7 +236,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
                 "action": "apply",
                 "kind": def.kind.as_str(),
                 "takeover": takeover,
-                "digest": digest,
+                "files": written.iter().map(|(file, _)| file.clone()).collect::<Vec<_>>(),
             })),
         )?;
         tx.commit()?;
@@ -198,7 +244,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     })();
 
     if let Err(err) = result {
-        restore();
+        rollback(&restore);
         return Err(err);
     }
 

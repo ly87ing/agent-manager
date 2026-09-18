@@ -21,8 +21,6 @@ use crate::native::{Context, Request};
 
 pub(crate) const EXCLUDED_DIRS: &[&str] = &[".git", "node_modules", "__pycache__", "venv", ".venv"];
 pub(crate) const SKILL_ACTIONS: &[&str] = &["add", "update", "enable", "disable", "remove"];
-/// 孤立链接清理：不属于任何集合，因此不在逐 skill 动作表里，走独立入口。
-pub(crate) const LINK_ACTION: &str = "remove-link";
 pub(crate) const COLLECTION_ACTIONS: &[&str] = &["update", "enable", "disable", "remove"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]

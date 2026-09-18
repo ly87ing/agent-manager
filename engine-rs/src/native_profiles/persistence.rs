@@ -12,6 +12,8 @@ const TABLE: &str = "profile_bindings";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Binding {
     pub profile_id: String,
+    /// 配置目录内的相对文件名：一个实例有多个受管文件，各自记各自的指纹。
+    pub file: String,
     pub applied_digest: String,
     pub updated_at: String,
 }
@@ -19,9 +21,11 @@ pub(crate) struct Binding {
 pub(crate) fn ensure_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS profile_bindings (
-            profile_id TEXT PRIMARY KEY NOT NULL,
+            profile_id TEXT NOT NULL,
+            file TEXT NOT NULL,
             applied_digest TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (profile_id, file)
         );",
     )?;
     Ok(())
@@ -40,6 +44,9 @@ fn validate(binding: &Binding) -> Result<()> {
     if !super::model::valid_profile_id(&binding.profile_id) {
         bail!("profile_bindings 存在非法 profile_id");
     }
+    if binding.file.is_empty() || binding.file.contains('/') || binding.file.contains("..") {
+        bail!("profile_bindings 存在非法文件名");
+    }
     if !is_sha256_hex(&binding.applied_digest) {
         bail!("applied_digest 必须是 64 位小写 sha256 hex");
     }
@@ -49,25 +56,27 @@ fn validate(binding: &Binding) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn load_bindings_from(conn: &Connection) -> Result<BTreeMap<String, Binding>> {
+/// 键为 (profile_id, file)：一个实例有多个受管文件，各自记各自的指纹。
+pub(crate) fn load_bindings_from(conn: &Connection) -> Result<BTreeMap<(String, String), Binding>> {
     let mut out = BTreeMap::new();
     if !table_exists(conn)? {
         return Ok(out);
     }
     let mut stmt = conn.prepare(
-        "SELECT profile_id, applied_digest, updated_at FROM profile_bindings ORDER BY profile_id",
+        "SELECT profile_id, file, applied_digest, updated_at FROM profile_bindings ORDER BY profile_id, file",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(Binding {
             profile_id: row.get(0)?,
-            applied_digest: row.get(1)?,
-            updated_at: row.get(2)?,
+            file: row.get(1)?,
+            applied_digest: row.get(2)?,
+            updated_at: row.get(3)?,
         })
     })?;
     for row in rows {
         let binding = row?;
         validate(&binding).map_err(|e| anyhow!("profile_bindings 存在非法行: {e}"))?;
-        out.insert(binding.profile_id.clone(), binding);
+        out.insert((binding.profile_id.clone(), binding.file.clone()), binding);
     }
     Ok(out)
 }
@@ -76,13 +85,14 @@ pub(crate) fn write_binding(tx: &Transaction, binding: &Binding) -> Result<()> {
     validate(binding)?;
     ensure_table(tx)?;
     tx.execute(
-        "INSERT INTO profile_bindings (profile_id, applied_digest, updated_at)
-         VALUES (?1, ?2, ?3)
-         ON CONFLICT (profile_id) DO UPDATE SET
+        "INSERT INTO profile_bindings (profile_id, file, applied_digest, updated_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT (profile_id, file) DO UPDATE SET
             applied_digest = excluded.applied_digest,
             updated_at = excluded.updated_at",
         rusqlite::params![
             binding.profile_id,
+            binding.file,
             binding.applied_digest,
             binding.updated_at
         ],

@@ -316,3 +316,102 @@ fn status_is_read_only_and_args_are_strict() {
     assert!(!bad_apply.ok);
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// 实例目录下的受管文件是完整的一套：配置、规则与 Hooks 都随实例走，
+/// 而主实例的固定路径一个字节都不动。
+#[test]
+fn profile_directory_gets_rules_and_hooks_too() {
+    let (root, ctx) = temp_ctx("full-set");
+    std::fs::create_dir_all(ctx.home_dir.join(".claude")).unwrap();
+    let global_settings = ctx.home_dir.join(".claude/settings.json");
+    let global_rules = ctx.home_dir.join(".claude/CLAUDE.md");
+    std::fs::write(&global_settings, "{\"theme\":\"dark\"}\n").unwrap();
+    std::fs::write(&global_rules, "# 主实例规则\n").unwrap();
+    let settings_before = std::fs::read(&global_settings).unwrap();
+    let rules_before = std::fs::read(&global_rules).unwrap();
+
+    std::env::set_var("AM_TEST_TOKEN_FULLSET", "x");
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_TEST_TOKEN_FULLSET")
+    ));
+    // 用户自己在实例里加过的设置：合并写入必须保留
+    std::fs::create_dir_all(ctx.home_dir.join(".claude-ly")).unwrap();
+    std::fs::write(
+        ctx.home_dir.join(".claude-ly/settings.json"),
+        "{\"statusLine\":\"mine\"}\n",
+    )
+    .unwrap();
+
+    let apply = execute(
+        &ctx,
+        &request(
+            "profiles:apply",
+            &["--only", "profiles:cc-ly", "--allow-takeover"],
+        ),
+    );
+    assert!(apply.ok, "{:?}", apply.errors);
+
+    // 1) settings.json：本工具管的字段写入，用户字段保留
+    let settings: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(ctx.home_dir.join(".claude-ly/settings.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(settings["statusLine"], "mine", "用户自己的设置不得被抹掉");
+    assert!(settings["env"]["ANTHROPIC_BASE_URL"].is_string());
+    assert!(settings["hooks"].is_object(), "Hooks 也随实例落地");
+
+    // 2) 规则文件随实例生成，内容非空
+    let rules = std::fs::read_to_string(ctx.home_dir.join(".claude-ly/CLAUDE.md")).unwrap();
+    assert!(!rules.trim().is_empty(), "实例应拿到与主实例同源的规则正文");
+
+    // 3) 主实例的固定路径全程未被触碰
+    assert_eq!(std::fs::read(&global_settings).unwrap(), settings_before);
+    assert_eq!(std::fs::read(&global_rules).unwrap(), rules_before);
+
+    // 4) 逐文件的外部修改检测：只改规则文件，也要求显式接管
+    std::fs::write(ctx.home_dir.join(".claude-ly/CLAUDE.md"), "external edit\n").unwrap();
+    let status = execute(&ctx, &request("profiles:status", &[]));
+    assert_eq!(element(&status, "cc-ly")["state"], "drifted");
+    let denied = execute(
+        &ctx,
+        &request("profiles:apply", &["--only", "profiles:cc-ly"]),
+    );
+    assert!(!denied.ok, "规则文件被外部改过同样要拒绝覆盖");
+    assert_eq!(
+        std::fs::read_to_string(ctx.home_dir.join(".claude-ly/CLAUDE.md")).unwrap(),
+        "external edit\n",
+        "拒绝时不得改动文件"
+    );
+
+    std::env::remove_var("AM_TEST_TOKEN_FULLSET");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// Codex 实例同样拿到规则与 Hooks，且不碰归 MCP 域的 config.toml。
+#[test]
+fn codex_profile_directory_gets_rules_and_hooks() {
+    let (root, ctx) = temp_ctx("codex-full-set");
+    assert!(save_definition(
+        &ctx,
+        "cx-work",
+        r#"{"display_name":"Codex · work","bin":"codex","profile":{"base_agent":"codex","config_dir":"~/.codex-work","base_url":"https://api.example.com/v1","env_key":"AM_TEST_ABSENT_OK","model":"gpt-5.5"},"_delete":false,"_replace":true}"#
+    ));
+    let apply = execute(
+        &ctx,
+        &request("profiles:apply", &["--only", "profiles:cx-work"]),
+    );
+    assert!(apply.ok, "{:?}", apply.errors);
+
+    let dir = ctx.home_dir.join(".codex-work");
+    assert!(dir.join("agent-manager.config.toml").is_file());
+    assert!(!dir.join("config.toml").exists(), "config.toml 仍归 MCP 域");
+    let rules = std::fs::read_to_string(dir.join("AGENTS.md")).unwrap();
+    assert!(!rules.trim().is_empty());
+    let hooks: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("hooks.json")).unwrap()).unwrap();
+    assert!(hooks["hooks"].is_object());
+
+    let _ = std::fs::remove_dir_all(root);
+}

@@ -16,9 +16,29 @@ use anyhow::{bail, Result};
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 
+use crate::native::Context;
+
 /// Codex 叠加配置的固定名字：文件名与 `-p` 参数取值必须一致。
 pub(crate) const CODEX_PROFILE_NAME: &str = "agent-manager";
 const CODEX_PROFILE_FILE: &str = "agent-manager.config.toml";
+
+/// 实例配置目录里由本工具维护的文件。
+///
+/// 规则与 Hooks 的主实例目标是固定路径（`~/.claude`、`~/.codex`），不随实例走；
+/// 实例目录下的这些文件因此全部由 profiles 域一并渲染——一个目录一个域，
+/// 外部修改检测不会两个域互相判定对方是「外部改动」。
+pub(crate) const FILE_CLAUDE_SETTINGS: &str = "settings.json";
+pub(crate) const FILE_CLAUDE_RULES: &str = "CLAUDE.md";
+pub(crate) const FILE_CODEX_RULES: &str = "AGENTS.md";
+pub(crate) const FILE_CODEX_HOOKS: &str = "hooks.json";
+
+/// 一个待写入的受管文件。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RenderedTarget {
+    /// 配置目录内的相对文件名。
+    pub file: String,
+    pub content: Vec<u8>,
+}
 
 /// profile 的基础助手类型：决定配置目录变量与目标文件格式。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -336,63 +356,157 @@ pub(crate) fn load_definitions(policy: &Value) -> Vec<Result<ProfileDef>> {
     out
 }
 
-/// 渲染目标文件内容。Claude 的 env 值在此解析 `${VAR}`（缺变量即 fail-closed）；
-/// Codex 只写 `env_key` 变量名，鉴权值永不进入文件。
-pub(crate) fn render_target(
+/// 渲染该实例配置目录下的全部受管文件。
+///
+/// `existing` 给出目标文件的现有字节：Claude 的 `settings.json` 采用合并写入，
+/// 用户自己加的根级字段原样保留，本工具只覆盖它管的 env/model/hooks 三项。
+/// 规则与 Hooks 的正文复用主实例那套来源与渲染，实例因此和主实例拿到同一份内容。
+pub(crate) fn render_all(
+    ctx: &Context,
     def: &ProfileDef,
+    existing: &dyn Fn(&str) -> Option<Vec<u8>>,
     resolve: &dyn Fn(&str) -> Option<String>,
-) -> Result<String> {
+) -> Result<Vec<RenderedTarget>> {
+    let rule_sources = crate::native_sources::current_sources_readonly(ctx)?;
+    let hook_sources = crate::native_sources::current_hook_sources_readonly(ctx)?;
+    let shared = rule_sources
+        .get(crate::native_sources::KEY_SHARED)
+        .cloned()
+        .unwrap_or_default();
+
+    let mut out = Vec::new();
     match def.kind {
         ProfileKind::Claude => {
-            let mut env = Map::new();
-            for (name, value) in &def.env {
-                let text = value.as_str().unwrap_or("");
-                let resolved =
-                    if let Some(var) = text.strip_prefix("${").and_then(|v| v.strip_suffix('}')) {
-                        resolve(var).ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "[{}] 环境变量 {} 在当前环境里没有取值，拒绝写入不完整的配置",
-                                def.id,
-                                var
-                            )
-                        })?
-                    } else {
-                        text.to_string()
-                    };
-                env.insert(name.clone(), Value::String(resolved));
+            let adapter = rule_sources
+                .get(crate::native_sources::KEY_CLAUDE)
+                .cloned()
+                .unwrap_or_default();
+            let managed =
+                parse_hook_source(&hook_sources, crate::native_sources::KEY_HOOKS_CLAUDE)?;
+            // settings.json：既有内容为基底 → 覆盖 env/model → 合入 hooks
+            let base = existing(FILE_CLAUDE_SETTINGS)
+                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+                .filter(Value::is_object)
+                .unwrap_or_else(|| Value::Object(Map::new()));
+            let mut settings = base.as_object().cloned().unwrap_or_default();
+            settings.insert("env".into(), Value::Object(resolved_env(def, resolve)?));
+            match &def.model {
+                Some(model) => {
+                    settings.insert("model".into(), Value::String(model.clone()));
+                }
+                None => {
+                    settings.remove("model");
+                }
             }
-            let mut root = Map::new();
-            root.insert("env".into(), Value::Object(env));
-            if let Some(model) = &def.model {
-                root.insert("model".into(), Value::String(model.clone()));
-            }
-            Ok(serde_json::to_string_pretty(&Value::Object(root))? + "\n")
+            let merged = crate::native_hooks::model::claude_render(
+                &Value::Object(settings),
+                &managed.0,
+                &managed.1,
+            );
+            out.push(RenderedTarget {
+                file: FILE_CLAUDE_SETTINGS.to_string(),
+                content: crate::native_hooks::model::render_bytes(&merged),
+            });
+            out.push(RenderedTarget {
+                file: FILE_CLAUDE_RULES.to_string(),
+                content: crate::native_rules::model::render_rules(&shared, &adapter).into_bytes(),
+            });
         }
         ProfileKind::Codex => {
-            let provider = CODEX_PROFILE_NAME;
-            let mut out = String::new();
-            if let Some(model) = &def.model {
-                out.push_str(&format!("model = {}\n", toml_string(model)));
-            }
-            out.push_str(&format!("model_provider = {}\n", toml_string(provider)));
-            if let Some(url) = &def.base_url {
-                out.push_str(&format!("\n[model_providers.{provider}]\n"));
-                out.push_str(&format!(
-                    "name = {}\n",
-                    toml_string(def.display_name.as_str())
-                ));
-                out.push_str(&format!("base_url = {}\n", toml_string(url)));
-                if let Some(key) = &def.env_key {
-                    out.push_str(&format!("env_key = {}\n", toml_string(key)));
-                }
-                out.push_str(&format!(
-                    "wire_api = {}\n",
-                    toml_string(def.wire_api.as_deref().unwrap_or("responses"))
-                ));
-            }
-            Ok(out)
+            let adapter = rule_sources
+                .get(crate::native_sources::KEY_CODEX)
+                .cloned()
+                .unwrap_or_default();
+            let managed = parse_hook_source(&hook_sources, crate::native_sources::KEY_HOOKS_CODEX)?;
+            out.push(RenderedTarget {
+                file: CODEX_PROFILE_FILE.to_string(),
+                content: render_codex_provider(def).into_bytes(),
+            });
+            out.push(RenderedTarget {
+                file: FILE_CODEX_RULES.to_string(),
+                content: crate::native_rules::model::render_rules(&shared, &adapter).into_bytes(),
+            });
+            out.push(RenderedTarget {
+                file: FILE_CODEX_HOOKS.to_string(),
+                content: crate::native_hooks::model::render_bytes(
+                    &crate::native_hooks::model::codex_render(&managed.0),
+                ),
+            });
         }
     }
+    Ok(out)
+}
+
+/// 解析 hooks 来源；结构非法即 fail-closed，不回显来源正文。
+fn parse_hook_source(
+    sources: &std::collections::BTreeMap<String, String>,
+    key: &str,
+) -> Result<(
+    crate::native_hooks::model::HookMap,
+    Vec<crate::native_hooks::model::RemovedRule>,
+)> {
+    let raw = sources
+        .get(key)
+        .cloned()
+        .unwrap_or_else(|| "{}".to_string());
+    let value: Value = serde_json::from_str(&raw)
+        .map_err(|_| anyhow::anyhow!("hooks 来源 {key} 不是合法 JSON 对象"))?;
+    let obj = value
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("hooks 来源 {key} 不是合法 JSON 对象"))?;
+    crate::native_hooks::model::validate_source(key, obj)
+        .map_err(|err| anyhow::anyhow!("hooks 来源 {key} 结构非法: {err:#}"))
+}
+
+/// env 引用解析：缺变量即 fail-closed，不写出不完整的配置。
+fn resolved_env(
+    def: &ProfileDef,
+    resolve: &dyn Fn(&str) -> Option<String>,
+) -> Result<Map<String, Value>> {
+    let mut env = Map::new();
+    for (name, value) in &def.env {
+        let text = value.as_str().unwrap_or("");
+        let resolved = if let Some(var) = text.strip_prefix("${").and_then(|v| v.strip_suffix('}'))
+        {
+            resolve(var).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "[{}] 环境变量 {} 在当前环境里没有取值，拒绝写入不完整的配置",
+                    def.id,
+                    var
+                )
+            })?
+        } else {
+            text.to_string()
+        };
+        env.insert(name.clone(), Value::String(resolved));
+    }
+    Ok(env)
+}
+
+/// Codex 供应商叠加配置正文。
+fn render_codex_provider(def: &ProfileDef) -> String {
+    let provider = CODEX_PROFILE_NAME;
+    let mut out = String::new();
+    if let Some(model) = &def.model {
+        out.push_str(&format!("model = {}\n", toml_string(model)));
+    }
+    out.push_str(&format!("model_provider = {}\n", toml_string(provider)));
+    if let Some(url) = &def.base_url {
+        out.push_str(&format!("\n[model_providers.{provider}]\n"));
+        out.push_str(&format!(
+            "name = {}\n",
+            toml_string(def.display_name.as_str())
+        ));
+        out.push_str(&format!("base_url = {}\n", toml_string(url)));
+        if let Some(key) = &def.env_key {
+            out.push_str(&format!("env_key = {}\n", toml_string(key)));
+        }
+        out.push_str(&format!(
+            "wire_api = {}\n",
+            toml_string(def.wire_api.as_deref().unwrap_or("responses"))
+        ));
+    }
+    out
 }
 
 /// TOML 基本字符串字面量：只需转义反斜杠与双引号（取值里的控制字符已在校验层拒绝）。
@@ -462,18 +576,23 @@ mod tests {
     }
 
     #[test]
-    fn claude_target_resolves_references_and_codex_never_writes_values() {
+    fn env_references_resolve_and_missing_variable_fails_closed() {
         let claude = def(json!({
             "profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly",
                         "env": {"ANTHROPIC_AUTH_TOKEN": "${MY_TOKEN}"}}
         }))
         .unwrap();
-        let rendered = render_target(&claude, &|name| {
+        let resolved = resolved_env(&claude, &|name| {
             (name == "MY_TOKEN").then(|| "resolved-value".to_string())
         })
         .unwrap();
-        assert!(rendered.contains("resolved-value"));
+        assert_eq!(resolved["ANTHROPIC_AUTH_TOKEN"], "resolved-value");
+        // 变量取不到值时拒绝写出不完整配置（整份渲染在集成测试里覆盖）
+        assert!(resolved_env(&claude, &|_| None).is_err());
+    }
 
+    #[test]
+    fn codex_provider_only_writes_the_variable_name() {
         let codex = parse_definition(
             "cx-work",
             &json!({
@@ -483,22 +602,11 @@ mod tests {
             true,
         )
         .unwrap();
-        let rendered = render_target(&codex, &|_| Some("resolved-value".to_string())).unwrap();
+        let rendered = render_codex_provider(&codex);
         assert!(rendered.contains("env_key = \"MY_TOKEN\""));
-        assert!(
-            !rendered.contains("resolved-value"),
-            "Codex 目标不得出现解析后的值"
-        );
-    }
-
-    #[test]
-    fn missing_variable_fails_closed() {
-        let claude = def(json!({
-            "profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly",
-                        "env": {"ANTHROPIC_AUTH_TOKEN": "${MISSING}"}}
-        }))
-        .unwrap();
-        assert!(render_target(&claude, &|_| None).is_err());
+        assert!(rendered.contains("model_provider = \"agent-manager\""));
+        // 取值只留在环境变量里，永远不进这个文件
+        assert!(!rendered.contains("resolved-value"));
     }
 
     #[test]
