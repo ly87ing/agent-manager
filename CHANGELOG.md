@@ -23,6 +23,7 @@
 - 前端顶层错误边界、自定义助手安装/升级确认、MCP 空态引导。
 - MIT 许可证、公开发布元数据与显式 Webview CSP；Bundle ID 定为 `io.github.ly87ing.agent-manager`。
 - 四平台发布管线（macOS dmg、Linux AppImage/deb、Windows NSIS/MSI）：草稿先行创建唯一 draft Release、矩阵按 releaseId 上传产物、收尾任务单写 updater `latest.json`、prerelease tag 支持、逐平台 SHA256 checksums、engine-rs 版本一致性门禁；Release 固定为 draft。
+- 接管中心：扫描本机已有的助手、技能与 MCP 资源并按来源分类，勾选后批量纳入管理。官方路径与原生安装方案只标识、继续走各自的升级卸载方式；外部资源以软链接纳管——技能可登记为本机目录来源的集合，链接直接指向源目录，内容仍由原处维护并随其更新，停用只删链接不动源。
 - macOS 打包与独立包验收脚本（构建路径脱敏、只读挂载、隔离存活运行，已签名时如实检查公证票据）。
 
 ### 移除

@@ -3,7 +3,7 @@
 ## 当前结论
 
 - 核心已就绪：Rust/SQLite/Tauri 共用库与 `native-manager.db` 唯一事实源。
-- 已接线闭环：Agents、Skills、MCP、Rules、Hooks、Aliases 六个资源域，以及只读 `system:audit`、`secrets:status`、`system:refresh-upstream`（探测宇宙 agents/mcp/skills，缓存落 SQLite `upstream_probes` 表，三域 status 回填 freshness，前端收敛调用已补显式 `--action`）。
+- 已接线闭环：Agents、Skills、MCP、Rules、Hooks、Aliases 六个资源域，以及只读 `system:audit`、`secrets:status`、`system:discover`（接管发现，见下）、`system:refresh-upstream`（探测宇宙 agents/mcp/skills，缓存落 SQLite `upstream_probes` 表，三域 status 回填 freshness，前端收敛调用已补显式 `--action`）。
 - 2026-09-12 高级管理入口裁决已执行完毕：Aliases 原生闭环落地（`b7f30db`）；Tools、快照与 `system:converge` 退役清理完成（`9080c1d`）。
 - 远程 HTTP MCP 已落地（`b353aac`）：三客户端引用形式零明文落盘，与本地 stdio 同级安全语义。
 - 2026-09-14 里程碑（历史）：基于 `5ae995b` 的干净 Darwin x86_64 DMG 通过主审独立验收；四平台发布源码管线（`a2cc864`）与 Windows 阻断 CI（`9f56f00`）就绪。
@@ -124,6 +124,20 @@ Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 必须支持新增、�
 - 改动：助手卡片动作点击立即转 spinner「正在执行…」且同卡其余按钮互斥禁用（含卸载/自定义确认弹窗路径的执行态串联）；升级 label 与 title 带版本区间「当前 → 最新」（缺失侧「未知」占位，git hash 缩写），进入 toast 与任务记录；UpdatesPage 行内/批量更新同样补版本与执行态。
 - 顺手修复：jsdom 套件在默认并行度下因资源竞争批量超时的既有 flaky（vite.config.ts testTimeout/hookTimeout 放宽至 20s），修复后默认并行 36 文件 320 用例全绿。
 - 验证：Vitest 320 全绿、typecheck/build 通过；`0419d3c` 重建 DMG 通过 `verify:macos` 独立验收；SHA256 `05f1018010a0cecc1cfbc318ad790778be9865b0bacc34b2e0d3f323d5fa6f73`。
+
+### 2026-09-17 追加：接管中心（`04c99e6` + `f5e0273` + `763a988` + `d3faf30`）
+
+- 起因（用户需求）：一键接管机器上的 agent / mcp / skill 资源并分类标识；官方路径与各自原生安装方案继续用原生管理方式，其余用软链接方案。
+- 现状差距（实施前核对）：agents 只对已定义助手探测安装来源，不发现未定义助手；skills 只在已定义集合的矩阵格里看到计划外链接，目标目录里不属任何集合的条目无法发现，且集合必须有 git url，外部本地技能没有登记途径；MCP 已有 `import_candidates` 但逐条手工、无来源分类。
+- 引擎改动：新增只读 `system:discover`（`--only agents|skills|mcp`，零写零网络、不取 apply 锁），三域候选统一带 `manage` 分类（native / symlink / collection / register / cleanup）；skills 集合定义新增 `source_path`（与 `url` 互斥）的本地来源集合——直链登记源目录、不做内容快照，登记源根进入受管基准，集合级 update 不联网只重扫修链；agents 发现已知 CLI 并按来源给建议定义（仅 npm 反查成功者给管理命令）；MCP 复用既有掩码扫描并补 origin/manage。Tauri 命令面与参数白名单同步放行 `system:discover`。
+- 前端改动：新增「接管中心」页（导航第五项），分类展示 + 勾选批量 + 一次汇总确认，逐项走统一执行通道（独立 run_id / 执行记录 / 审计），单项失败不中断后续项；助手登记只写定义，技能与 MCP 走各自域既有真实 apply。
+- 顺带修复（独立提交 `04c99e6`）：`definitionKeyPrefix("agents")` 写的顶层 `agent_definitions` 引擎不读，自定义助手定义保存后不生效，改为引擎真实读取的 `agents.definitions`。
+- 补完（`763a988` / `d3faf30`）：dev mock 覆盖 `system:discover`（否则 `?mock=1` 下接管中心页只会报错）；技能集合表单改为来源二选一（git 仓库 / 本机目录），否则接管生成的本地来源集合在技能页点「编辑」会被 git 地址校验挡住、保存还会把 url 写回去破坏定义。
+- 自动化验证：`engine-rs` 289 项、`app/src-tauri` 15 项、Vitest 37 files / 330 tests 全部通过；`pnpm typecheck` 与 `pnpm build` 通过；两套 `cargo fmt --check` 通过。
+- 隔离环境真实 CLI 验收（隔离 HOME + AGENT_MANAGER_DATA_DIR，非 mock）：技能侧复刻本机形态（外部工具目录链接 + 官方目录内真实目录 + 断链），发现分类、按源根聚合建议集合、登记后逐助手 add、链接直指外部源、无内容快照、内容跟随外部更新、停用只删链接且外部源完好、已纳管项不再是候选、只读命令库哈希不变共 11 项检查全通过；MCP 侧发现掩码、导入接管、stdio 标记写入 env、SQLite 定义零明文且保留变量引用、status 零明文、用户其他字段保留、缺 `--allow-takeover` 时对未受管同名条目 fail-closed 共 7 项检查全通过；agents 侧 `agents.definitions.<id>` 登记后 `agents:status` 即出现该助手（state=unmanaged-detected、definition_origin=custom、无升级卸载动作）。
+- 最终 clean x86_64 DMG（`d3faf30` 后重建，主审独立验收）：`verify:macos` 全部通过——Bundle Identifier 与版本、Mach-O 架构、无 Python 动态链接与遗留、路径脱敏、构建身份 commit/date 与 `d3faf30` 精确一致、从 `/` 隔离环境（隔离 HOME、独立 DATA_DIR、最小 PATH）5 秒持续存活并优雅退出；未签名（公证按脚本语义报告"不适用"）。SHA256 `51c33f05882170f2f01e1711beeb79ecc27781c6de4517209d89393ed3131687`，7942641 bytes。
+- 浏览器验收（dev server + mock，Chrome DevTools）：接管中心页六个分区按来源正确渲染，「全选可接管项」得到 6 项、确认弹窗如实声明「其中 3 项会替换助手里的同名外部条目」，执行后 toast「接管完成：成功 6，失败 0」且勾选清空；控制台除 dev server 的 favicon 404 外无报错，页面无横向滚动。该验收证明页面渲染与编排链路，不证明真实引擎写入。
+- 未做/未验证，如实说明：断链与旧体系残留只标识，不提供清理动作（需手工删除）；助手发现基于固定已知 CLI 清单，清单外的助手不会被发现；安装包内的接管中心真机点击链路未验收（避免在宿主桌面执行真实写入），真实写入语义由隔离 CLI 验收覆盖。
 
 ## 剩余路线图（未排期）
 
