@@ -8,7 +8,6 @@
 ## Workflow
 
 - 规则构建与分发遵循根目录 Rust 原生目标；旧 `make update` / Python 构建器不再维护。替代入口未完成时明确报告未生成、未分发，不能手改 dist 代替验证。
-- When adjusting target paths or filenames, also check `config/rules-targets.list`.
 
 ## Guardrails
 

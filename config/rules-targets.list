@@ -1,3 +1,0 @@
-# name|group|source|target
-codex_global|global|rules/dist/codex/AGENTS.md|~/.codex/AGENTS.md
-claude_global|global|rules/dist/claude/CLAUDE.md|~/.claude/CLAUDE.md

@@ -1,7 +1,0 @@
-{
-  "settings_path": "~/.claude/settings.json",
-  "env": {
-    "ANTHROPIC_AUTH_TOKEN": "${ANTHROPIC_AUTH_TOKEN}",
-    "ANTHROPIC_BASE_URL": "${ANTHROPIC_BASE_URL}"
-  }
-}

@@ -1,8 +1,8 @@
 import type { PolicyLayers } from "./contract";
 
 /**
- * 定义覆盖层（引擎 P4a）：mcp.definitions.<name> 覆盖 config/mcp.json，
- * skills.repositories.<name> 覆盖 skills.json。移除用 tombstone 遮蔽同名定义。
+ * 定义覆盖层（引擎 P4a）：mcp.definitions.<name> 与 skills.repositories.<name>
+ * 覆盖引擎内置的同名定义。移除用 tombstone 遮蔽同名定义。
  */
 
 export type DefinitionSection = "mcp" | "skills" | "agents";
