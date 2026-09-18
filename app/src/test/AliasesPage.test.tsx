@@ -155,6 +155,45 @@ describe("终端快捷命令页", () => {
     expect(calls.some((call) => call.command === "sources:set")).toBe(false);
   });
 
+  it("按命令给出常用参数：点一下加上全自动，再点去掉，危险后果明确写出", async () => {
+    const { calls } = renderWithEngine(<AliasesPage />, aliasRoutes());
+    await userEvent.click(await screen.findByTestId("add-alias-button"));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.type(within(dialog).getByTestId("alias-name-input"), "cc");
+    await userEvent.type(within(dialog).getByTestId("alias-command-input"), "claude");
+
+    const preset = within(dialog).getByTestId("alias-preset-claude-yolo");
+    expect(preset).toHaveAttribute("aria-pressed", "false");
+    await userEvent.click(preset);
+    expect(within(dialog).getByTestId("alias-extra-args-input")).toHaveValue("--dangerously-skip-permissions");
+    expect(within(dialog).getByTestId("alias-preset-warning")).toHaveTextContent("不再逐次征求确认");
+
+    await userEvent.click(within(dialog).getByTestId("alias-form-submit"));
+    await waitFor(() => expect(calls.some((call) => call.command === "sources:set")).toBe(true));
+    const write = calls.find((call) => call.command === "sources:set")!;
+    const payload = JSON.parse(write.args[write.args.indexOf("--value") + 1]);
+    expect(payload.value.aliases.cc).toContain("--dangerously-skip-permissions");
+  });
+
+  it("Codex 有两档：全自动与保留沙箱，未知命令没有预设", async () => {
+    renderWithEngine(<AliasesPage />, aliasRoutes());
+    await userEvent.click(await screen.findByTestId("add-alias-button"));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.type(within(dialog).getByTestId("alias-command-input"), "codex");
+    expect(within(dialog).getByTestId("alias-preset-codex-yolo")).toBeInTheDocument();
+    const sandboxed = within(dialog).getByTestId("alias-preset-codex-auto-sandboxed");
+    await userEvent.click(sandboxed);
+    expect(within(dialog).getByTestId("alias-extra-args-input")).toHaveValue(
+      "--ask-for-approval never --sandbox workspace-write",
+    );
+    // 保留沙箱的那档不是危险项，不弹警示
+    expect(within(dialog).queryByTestId("alias-preset-warning")).toBeNull();
+
+    await userEvent.clear(within(dialog).getByTestId("alias-command-input"));
+    await userEvent.type(within(dialog).getByTestId("alias-command-input"), "some-tool");
+    expect(within(dialog).queryByTestId("alias-preset-codex-yolo")).toBeNull();
+  });
+
   it("保存前拦住会破坏配置行的取值", async () => {
     const { calls } = renderWithEngine(<AliasesPage />, aliasRoutes());
     await userEvent.click(await screen.findByTestId("add-alias-button"));

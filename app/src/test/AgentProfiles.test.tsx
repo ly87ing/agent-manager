@@ -161,6 +161,18 @@ describe("助手实例", () => {
     expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
   });
 
+  it("实例表单同样给出该助手的常用参数", async () => {
+    renderWithEngine(<AgentsPage />, routes());
+    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    const dialog = await screen.findByRole("dialog", { name: "新建实例" });
+    // 归属助手是 Claude Code，因此给 Claude 的预设
+    await userEvent.click(within(dialog).getByTestId("profile-preset-claude-yolo"));
+    expect(within(dialog).getByTestId("profile-extra-args")).toHaveValue("--dangerously-skip-permissions");
+    expect(within(dialog).getByTestId("profile-preset-warning")).toBeInTheDocument();
+    await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-auto");
+    expect(within(dialog).getByTestId("profile-launch-preview")).toHaveTextContent("--dangerously-skip-permissions");
+  });
+
   it("写入配置触发 profiles:apply，限定在该实例", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await userEvent.click(await screen.findByTestId("profile-apply-cc-ly"));

@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
+import { hasPresetArgs, presetsForCommand, togglePresetArgs } from "../lib/agentPresets";
+import { cn } from "../lib/utils";
 import {
   PROFILE_ID_RE,
   defaultConfigDir,
@@ -56,6 +58,9 @@ export function ProfileFormDialog({
     extraArgs,
   };
   const launch = id ? profileLaunchValue(input, baseBinOf(baseAgent)) : "";
+  /** 预设按该实例实际执行的命令给（实例的 bin 来自归属助手）。 */
+  const presets = presetsForCommand(baseBinOf(baseAgent));
+  const activeDangerPreset = presets.find((preset) => preset.danger && hasPresetArgs(extraArgs, preset));
 
   const submit = () => {
     if (!PROFILE_ID_RE.test(id)) {
@@ -210,6 +215,42 @@ export function ProfileFormDialog({
               />
             </div>
           </div>
+
+          {presets.length > 0 && (
+            <div className="space-y-1.5">
+              <span className="block text-xs font-medium text-muted-foreground">常用参数（点一下加上或去掉）</span>
+              <div className="flex flex-wrap gap-1.5">
+                {presets.map((preset) => {
+                  const on = hasPresetArgs(extraArgs, preset);
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      data-testid={`profile-preset-${preset.id}`}
+                      aria-pressed={on}
+                      title={preset.hint}
+                      onClick={() => setExtraArgs(togglePresetArgs(extraArgs, preset))}
+                      className={cn(
+                        "rounded border px-2 py-0.5 text-[11px]",
+                        on
+                          ? preset.danger
+                            ? "border-warning/40 bg-warning/15 text-warning"
+                            : "border-primary/30 bg-primary/10 text-primary"
+                          : "border text-muted-foreground hover:bg-accent",
+                      )}
+                    >
+                      {preset.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {activeDangerPreset && (
+                <p data-testid="profile-preset-warning" className="rounded-md border border-warning/30 bg-warning/10 px-2 py-1.5 text-[11px] text-warning">
+                  {activeDangerPreset.hint}
+                </p>
+              )}
+            </div>
+          )}
 
           <div>
             <span className="mb-1 block text-xs font-medium text-muted-foreground">启动方式</span>

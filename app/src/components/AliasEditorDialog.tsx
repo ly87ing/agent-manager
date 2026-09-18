@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import { X } from "lucide-react";
+import { cn } from "../lib/utils";
+import { hasPresetArgs, presetsForCommand, togglePresetArgs } from "../lib/agentPresets";
 import {
   ALIAS_NAME_RE,
   FOLLOW_GLOBAL_LANG,
@@ -54,6 +56,9 @@ export function AliasEditorDialog({
   const [error, setError] = useState<string | null>(null);
 
   const timeZones = useMemo(() => listTimeZones(), []);
+  /** 按实际执行的命令给常用参数；危险项选中后在下方明确说明后果。 */
+  const presets = useMemo(() => presetsForCommand(command), [command]);
+  const activeDangerPreset = presets.find((preset) => preset.danger && hasPresetArgs(extraArgs, preset));
   // 读到的取值不在下拉里（例如手写的少见时区或语言）时直接进自定义模式，避免下拉把它吞掉
   const [tzCustom, setTzCustom] = useState(
     Boolean(parsed.timezone) && parsed.timezone !== FOLLOW_GLOBAL_TZ && !timeZones.includes(parsed.timezone as string),
@@ -290,6 +295,41 @@ export function AliasEditorDialog({
                   className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs"
                   placeholder="--dangerously-skip-permissions"
                 />
+                {presets.length > 0 && (
+                  <div className="mt-1.5 space-y-1.5">
+                    <span className="block text-[11px] text-muted-foreground">常用参数（点一下加上或去掉）</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {presets.map((preset) => {
+                        const on = hasPresetArgs(extraArgs, preset);
+                        return (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            data-testid={`alias-preset-${preset.id}`}
+                            aria-pressed={on}
+                            title={preset.hint}
+                            onClick={() => setExtraArgs(togglePresetArgs(extraArgs, preset))}
+                            className={cn(
+                              "rounded border px-2 py-0.5 text-[11px]",
+                              on
+                                ? preset.danger
+                                  ? "border-warning/40 bg-warning/15 text-warning"
+                                  : "border-primary/30 bg-primary/10 text-primary"
+                                : "border text-muted-foreground hover:bg-accent",
+                            )}
+                          >
+                            {preset.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {activeDangerPreset && (
+                      <p data-testid="alias-preset-warning" className="rounded-md border border-warning/30 bg-warning/10 px-2 py-1.5 text-[11px] text-warning">
+                        {activeDangerPreset.hint}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
               <div>
                 <div className="mb-1 flex items-center justify-between">
