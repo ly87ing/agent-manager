@@ -7,15 +7,17 @@ import { engineKeys } from "../lib/queries";
 import { useQueryClient } from "@tanstack/react-query";
 
 /**
- * 配置备份：把本机的定义与来源导出成一份 JSON，换机器或重装时导回来。
+ * 配置备份：把本机的定义、来源与已填的凭据取值导出成一份 JSON，换机器或重装时导回来。
  *
- * 备份里只有定义与来源，没有分配记录与写入指纹——那些是本机落地状态，
- * 导回来之后还要各自应用一次才会写到助手配置里。凭据本来就不入库，
- * 备份里只有 ${变量名} 引用，换机器后要自己把变量配上。
+ * 备份含凭据取值，因此这份内容本身就是密钥：界面不把它铺在屏幕上（只报里面有什么），
+ * 复制走之后怎么保管由用户决定。不含分配记录与写入指纹——那些是本机落地状态，
+ * 导回来之后还要各自应用一次才会写到助手配置里。
  */
 export function ConfigBackupSection() {
   const queryClient = useQueryClient();
   const [exported, setExported] = useState<string | null>(null);
+  /** 导出内容里有什么：只报条数，正文不铺在屏幕上（里面有凭据取值）。 */
+  const [exportSummary, setExportSummary] = useState<string | null>(null);
   const [importText, setImportText] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -30,7 +32,15 @@ export function ConfigBackupSection() {
         toast.error(`导出失败:${envelope.errors[0]?.message ?? "未知错误"}`);
         return;
       }
+      const data = envelope.data as { policy?: Record<string, unknown>; sources?: Record<string, unknown>; secrets?: Record<string, unknown> };
+      const policy = (data.policy ?? {}) as Record<string, any>;
+      const count = (obj: unknown) => Object.keys((obj ?? {}) as Record<string, unknown>).length;
+      const definitions =
+        count(policy.agents?.definitions) + count(policy.mcp?.definitions) + count(policy.skills?.repositories);
       setExported(JSON.stringify(envelope.data, null, 2));
+      setExportSummary(
+        `${definitions} 条定义 · ${count(data.sources)} 份来源 · ${count(data.secrets)} 个凭据取值`,
+      );
       toast.success("已生成备份内容");
     } catch (err) {
       toast.error(`导出失败:${engineErrorMessage(err)}`);
@@ -99,8 +109,8 @@ export function ConfigBackupSection() {
     <section data-testid="config-backup-section" className="rounded-lg border bg-card p-5 shadow-sm">
       <h3 className="text-sm font-semibold text-foreground">配置备份</h3>
       <p className="mt-1 text-xs text-muted-foreground">
-        导出本机的助手、技能、MCP、实例定义与规则等来源，换机器或重装时导回来。备份里没有密钥（只有变量名），
-        也不含本机的落地记录——导回来之后要到各页面点一次应用才会写到助手配置。
+        导出本机的助手、技能、MCP、实例定义与规则等来源，换机器或重装时导回来。不含本机的落地记录——
+        导回来之后要到各页面点一次应用才会写到助手配置。
       </p>
 
       <div className="mt-3 space-y-3">
@@ -116,14 +126,13 @@ export function ConfigBackupSection() {
           </button>
           {exported && (
             <div className="mt-2 space-y-1.5">
-              <textarea
-                readOnly
-                value={exported}
-                rows={6}
-                data-testid="config-export-output"
-                aria-label="备份内容"
-                className="w-full rounded border border-input px-2 py-1.5 font-mono text-[11px]"
-              />
+              <p data-testid="config-export-output" className="rounded border bg-muted px-2.5 py-1.5 text-[11px] text-foreground">
+                已生成：{exportSummary}
+              </p>
+              <p className="rounded border border-warning/30 bg-warning/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-warning">
+                这份内容里带着你填过的凭据取值，等同于密钥文件——所以没有铺在屏幕上。复制走之后请当密钥保管：
+                别发进聊天、别放进代码仓库或公共网盘。
+              </p>
               <button
                 type="button"
                 data-testid="config-copy-button"
@@ -208,6 +217,21 @@ export function ConfigBackupSection() {
                       <p className="mt-1 text-[11px] text-warning">
                         会被替换：{diff.sourcesChanged.map(sourceLabel).join("、")}
                       </p>
+                    </div>
+                  )}
+                  {diff.secrets.added.length + diff.secrets.changed.length + diff.secrets.removed.length > 0 && (
+                    <div data-testid="config-diff-secrets" className="rounded-md border px-3 py-2">
+                      <p className="text-xs font-medium text-foreground">凭据取值</p>
+                      {/* 只报变量名，两边的取值都不显示 */}
+                      {diff.secrets.added.length > 0 && (
+                        <p className="mt-1 text-[11px] text-success">新增：{diff.secrets.added.join("、")}</p>
+                      )}
+                      {diff.secrets.changed.length > 0 && (
+                        <p className="mt-1 text-[11px] text-warning">取值会被换掉：{diff.secrets.changed.join("、")}</p>
+                      )}
+                      {diff.secrets.removed.length > 0 && (
+                        <p className="mt-1 text-[11px] text-destructive">会消失：{diff.secrets.removed.join("、")}</p>
+                      )}
                     </div>
                   )}
                 </>

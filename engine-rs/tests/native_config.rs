@@ -175,3 +175,95 @@ fn export_takes_no_args_and_import_needs_value() {
     assert!(!store::db_path(&ctx).exists(), "参数反例不得建库");
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// 备份带上凭据取值：换机器导入即可用。代价是这份文件本身就是凭据载体，
+/// 因此同时断言取值不进操作记录。
+#[test]
+fn backup_carries_secret_values_and_restores_them_on_another_machine() {
+    const SECRET: &str = "secret-value-under-test";
+    let (root_a, ctx_a) = temp_ctx("secrets-src");
+    let (root_b, ctx_b) = temp_ctx("secrets-dst");
+
+    assert!(
+        execute(
+            &ctx_a,
+            &request(
+                "policy:set",
+                &[
+                    "--layer",
+                    "local",
+                    "--key",
+                    "mcp.definitions.demo",
+                    "--value",
+                    r#"{"command":"npx","args":["-y","demo"],"env":{"K":"${MY_TOKEN}"},"_delete":false,"_replace":true}"#,
+                ],
+            ),
+        )
+        .ok
+    );
+    assert!(
+        execute(
+            &ctx_a,
+            &request("secrets:set", &["--var", "MY_TOKEN", "--value", SECRET]),
+        )
+        .ok
+    );
+
+    let exported = execute(&ctx_a, &request("config:export", &[]));
+    assert!(exported.ok, "{:?}", exported.errors);
+    assert_eq!(exported.data["secrets"]["MY_TOKEN"], SECRET);
+
+    // 另一台机器（全新上下文）导入后，变量当场可解析
+    let payload = serde_json::to_string(&exported.data).unwrap();
+    let imported = execute(&ctx_b, &request("config:import", &["--value", &payload]));
+    assert!(imported.ok, "{:?}", imported.errors);
+
+    let status = execute(&ctx_b, &request("secrets:status", &[]));
+    let observed = &status.data["elements"][0]["observed"];
+    assert_eq!(observed["unresolved"], 0, "导入后变量应当已可解析");
+    assert_eq!(observed["variables"][0]["stored"], true);
+    // status 永不回显取值
+    assert!(!serde_json::to_string(&status.data)
+        .unwrap()
+        .contains(SECRET));
+
+    // 审计只记变量名，不记取值
+    let runs = execute(&ctx_b, &request("runs:list", &[]));
+    assert!(!serde_json::to_string(&runs.data).unwrap().contains(SECRET));
+
+    let _ = std::fs::remove_dir_all(&root_a);
+    let _ = std::fs::remove_dir_all(&root_b);
+}
+
+/// 老备份没有 secrets 段：按空处理照常导入，不报错。
+#[test]
+fn backup_without_secrets_section_still_imports() {
+    let (root, ctx) = temp_ctx("legacy-backup");
+    let payload = serde_json::json!({
+        "format": "agent-manager/config-backup/v1",
+        "policy": {},
+        "sources": {},
+    })
+    .to_string();
+    let env = execute(&ctx, &request("config:import", &["--value", &payload]));
+    assert!(env.ok, "{:?}", env.errors);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// secrets 段结构非法即整份拒绝，且不部分写入。
+#[test]
+fn backup_with_malformed_secrets_is_rejected_whole() {
+    let (root, ctx) = temp_ctx("bad-secrets");
+    for bad in [
+        serde_json::json!({"format":"agent-manager/config-backup/v1","policy":{},"sources":{},"secrets":{"bad-name":"v"}}),
+        serde_json::json!({"format":"agent-manager/config-backup/v1","policy":{},"sources":{},"secrets":{"OK":1}}),
+        serde_json::json!({"format":"agent-manager/config-backup/v1","policy":{},"sources":{},"secrets":"nope"}),
+    ] {
+        let env = execute(
+            &ctx,
+            &request("config:import", &["--value", &bad.to_string()]),
+        );
+        assert!(!env.ok, "结构非法的 secrets 必须被拒绝");
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}

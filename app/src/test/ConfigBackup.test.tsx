@@ -4,11 +4,15 @@ import { ConfigBackupSection } from "../components/ConfigBackupSection";
 import { makeEnvelope } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 
+const SECRET = "secret-value-under-test";
+
 const BACKUP = {
   format: "agent-manager/config-backup/v1",
   exported_at: "2026-09-17T00:00:00Z",
   policy: { mcp: { definitions: { demo: { command: "npx", env: { T: "${T}" } } } } },
   sources: { "rules.shared": "我的规则\n" },
+  // 备份带凭据取值：界面不得把它铺在屏幕上
+  secrets: { T: SECRET },
 };
 
 function routes() {
@@ -22,14 +26,30 @@ function routes() {
 }
 
 describe("配置备份", () => {
-  it("导出后展示备份内容，密钥只以变量引用出现", async () => {
+  it("导出只报里面有什么，凭据取值不铺在屏幕上", async () => {
     const { calls } = renderWithEngine(<ConfigBackupSection />, routes());
     await userEvent.click(screen.getByTestId("config-export-button"));
 
-    const output = (await screen.findByTestId("config-export-output")) as HTMLTextAreaElement;
-    expect(output.value).toContain("agent-manager/config-backup/v1");
-    expect(output.value).toContain("${T}");
+    const output = await screen.findByTestId("config-export-output");
+    expect(output).toHaveTextContent("1 条定义");
+    expect(output).toHaveTextContent("1 个凭据取值");
+    // 取值本身绝不出现在页面上（备份内容等同密钥文件）
+    expect(document.body.innerHTML).not.toContain(SECRET);
+    expect(screen.getByText(/等同于密钥文件/)).toBeInTheDocument();
     expect(calls.find((call) => call.command === "config:export")?.args).toEqual([]);
+  });
+
+  it("复制到剪贴板拿到的是完整备份（含取值），而不是屏幕上那份摘要", async () => {
+    const written: string[] = [];
+    Object.assign(navigator, {
+      clipboard: { writeText: async (text: string) => void written.push(text) },
+    });
+    renderWithEngine(<ConfigBackupSection />, routes());
+    await userEvent.click(screen.getByTestId("config-export-button"));
+    await screen.findByTestId("config-export-output");
+    await userEvent.click(screen.getByTestId("config-copy-button"));
+    await waitFor(() => expect(written.length).toBe(1));
+    expect(written[0]).toContain(SECRET);
   });
 
   it("导入前先给差异预览，确认后才整份提交", async () => {
