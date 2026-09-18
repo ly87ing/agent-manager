@@ -461,6 +461,68 @@ function demoEnvelopes(): Record<string, Envelope> {
       },
       { command: "system.refresh-upstream" },
     ),
+    // 接管发现：覆盖五类来源（外部目录、已定义集合的计划外链接、原生真实目录、断链、未登记助手、未纳管 MCP）
+    "system:discover": makeEnvelope(
+      {
+        domain: "discover",
+        agents: [
+          {
+            id: "opencode",
+            display_name: "OpenCode",
+            bin: "opencode",
+            bin_path: "~/.local/bin/opencode",
+            version: "0.6.2",
+            origin: "native",
+            npm_package: null,
+            manage: "register",
+            managed_after_takeover: false,
+            suggested_definition: { display_name: "OpenCode", bin: "opencode", preferred_provider: "native", providers: { native: { managed: false, detect_paths: ["~/.local/bin/opencode"] } } },
+          },
+          {
+            id: "gemini-cli",
+            display_name: "Gemini CLI",
+            bin: "gemini",
+            bin_path: "~/.npm-global/bin/gemini",
+            version: "0.9.0",
+            origin: "npm",
+            npm_package: "@google/gemini-cli",
+            manage: "register",
+            managed_after_takeover: true,
+            suggested_definition: { display_name: "Gemini CLI", bin: "gemini", preferred_provider: "npm", providers: { npm: { managed: true, install: "npm install -g @google/gemini-cli", upgrade: "npm install -g @google/gemini-cli", uninstall: "npm uninstall -g @google/gemini-cli" } } },
+          },
+        ],
+        skills: {
+          items: [
+            { agent: "claude-code", name: "ones", link_path: "~/.claude/skills/ones", target: "~/.vendor-tool/skills/ones", origin: "external-link", manage: "symlink", collection: null, group: "~/.vendor-tool/skills", suggested_collection: "vendor-tool", has_skill_md: true },
+            { agent: "codex", name: "ones", link_path: "~/.codex/skills/ones", target: "~/.vendor-tool/skills/ones", origin: "external-link", manage: "symlink", collection: null, group: "~/.vendor-tool/skills", suggested_collection: "vendor-tool", has_skill_md: true },
+            { agent: "claude-code", name: "gitlab", link_path: "~/.claude/skills/gitlab", target: "~/.vendor-tool/skills/gitlab", origin: "external-link", manage: "symlink", collection: null, group: "~/.vendor-tool/skills", suggested_collection: "vendor-tool", has_skill_md: true },
+            { agent: "claude-code", name: "safe-merge-review", link_path: "~/.claude/skills/safe-merge-review", target: "~/legacy/agent-skills/safe-merge-review", origin: "collection-extra-link", manage: "collection", collection: "agent-skills", group: null, has_skill_md: true },
+            { agent: "claude-code", name: "synced", link_path: "~/.claude/skills/synced", target: null, origin: "native-dir", manage: "native", collection: null, group: null, has_skill_md: false },
+            { agent: "codex", name: "stale-one", link_path: "~/.codex/skills/stale-one", target: "~/gone/stale-one", origin: "dead-link", manage: "cleanup", collection: null, group: null, has_skill_md: false },
+          ],
+          groups: [
+            {
+              name: "vendor-tool",
+              source_path: "~/.vendor-tool/skills",
+              manage: "symlink",
+              existing_collection: false,
+              agents: ["claude-code", "codex"],
+              skills: [
+                { name: "gitlab", agents: ["claude-code"], has_skill_md: true },
+                { name: "ones", agents: ["claude-code", "codex"], has_skill_md: true },
+              ],
+              suggested_definition: { source_path: "~/.vendor-tool/skills", skill_paths: ["gitlab", "ones"], agents: ["claude-code", "codex"] },
+            },
+          ],
+        },
+        mcp: [
+          { name: "my-proxy", agent: "claude-code", transport: "stdio", spec: { command: "npx", args: ["-y", "my-proxy"], env: { PROXY_TOKEN: "<literal>" } }, previously_managed: false, origin: "unmanaged", manage: "register" },
+          { name: "vendor-remote", agent: "codex", transport: "remote", spec: { url: "https://mcp.example.com/sse", headers: { Authorization: "<literal>" } }, previously_managed: true, origin: "previously-managed", manage: "register" },
+        ],
+        summary: { agents: 2, skills_symlink: 3, skills_collection: 1, skills_native: 1, skills_cleanup: 1, mcp: 2 },
+      },
+      { command: "system.discover" },
+    ),
   };
 }
 
