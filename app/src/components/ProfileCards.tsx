@@ -1,6 +1,7 @@
-import { FolderTree, Loader2, PlayCircle, Sparkles, Terminal, Trash2 } from "lucide-react";
+import { Copy, FolderTree, Loader2, PlayCircle, Plus, Sparkles, Terminal, Trash2, Wrench } from "lucide-react";
 import type { EngineElement } from "../lib/contract";
 import type { ProfileObserved, ProfileSpec } from "../lib/contract";
+import type { ProfileLaunchCommand } from "../lib/profileDefinition";
 import { StateBadge } from "./StateBadge";
 import { cn } from "../lib/utils";
 
@@ -16,21 +17,36 @@ const STATE_NOTE: Record<string, string> = {
 export function ProfileCard({
   element,
   busy,
+  launchCommands,
   onApply,
   onTakeover,
   onEdit,
+  onDuplicate,
   onRemove,
   onManageSkills,
   onSyncLaunch,
+  onAddLaunch,
+  onEditLaunch,
+  onDuplicateLaunch,
+  onRemoveLaunch,
+  onFixLaunch,
 }: {
   element: EngineElement;
   busy: boolean;
+  /** 指向这个实例配置目录的全部启动命令（按配置目录反查，可以有多条）。 */
+  launchCommands: ProfileLaunchCommand[];
   onApply: () => void;
   onTakeover: () => void;
   onEdit: () => void;
+  onDuplicate: () => void;
   onRemove: () => void;
   onManageSkills: () => void;
   onSyncLaunch: () => void;
+  onAddLaunch: () => void;
+  onEditLaunch: (name: string) => void;
+  onDuplicateLaunch: (name: string) => void;
+  onRemoveLaunch: (name: string) => void;
+  onFixLaunch: (name: string) => void;
 }) {
   const spec = element.spec as unknown as ProfileSpec;
   const observed = element.observed as unknown as ProfileObserved;
@@ -64,12 +80,83 @@ export function ProfileCard({
           <span className="font-mono">{observed.config_dir}</span>
           {!observed.config_dir_exists && <span className="shrink-0 text-warning">（尚未创建）</span>}
         </p>
-        <p className="flex items-start gap-1.5 break-all">
-          <Terminal className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
-          <span data-testid={`profile-launch-${id}`} className="font-mono">
-            alias {id}=&#39;{observed.launch_value}&#39;
-          </span>
-        </p>
+      </div>
+
+      <div className="mt-3 border-t pt-3">
+        <div className="flex items-center justify-between gap-2">
+          <h4 className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+            <Terminal className="h-3 w-3" aria-hidden /> 启动命令
+          </h4>
+          <button
+            type="button"
+            data-testid={`profile-add-launch-${id}`}
+            onClick={onAddLaunch}
+            className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent"
+          >
+            <Plus className="h-3 w-3" aria-hidden /> 新增一条
+          </button>
+        </div>
+        {launchCommands.length === 0 ? (
+          <p data-testid={`profile-launch-empty-${id}`} className="mt-2 text-[11px] text-muted-foreground">
+            还没有指向这套配置的启动命令，新增一条后在终端里用它的名字启动。
+          </p>
+        ) : (
+          <ul className="mt-2 space-y-1.5">
+            {launchCommands.map((cmd) => (
+              <li key={cmd.name} data-testid={`profile-launch-${id}-${cmd.name}`} className="rounded border px-2.5 py-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-mono text-[11px] font-semibold text-foreground">{cmd.name}</span>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      data-testid={`profile-launch-edit-${id}-${cmd.name}`}
+                      onClick={() => onEditLaunch(cmd.name)}
+                      className="rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent"
+                    >
+                      编辑
+                    </button>
+                    <button
+                      type="button"
+                      data-testid={`profile-launch-copy-${id}-${cmd.name}`}
+                      onClick={() => onDuplicateLaunch(cmd.name)}
+                      className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent"
+                    >
+                      <Copy className="h-3 w-3" aria-hidden /> 复制
+                    </button>
+                    <button
+                      type="button"
+                      data-testid={`profile-launch-remove-${id}-${cmd.name}`}
+                      onClick={() => onRemoveLaunch(cmd.name)}
+                      className="inline-flex items-center gap-1 rounded border border-destructive/30 px-1.5 py-0.5 text-[11px] text-destructive hover:bg-destructive/10"
+                    >
+                      <Trash2 className="h-3 w-3" aria-hidden /> 删除
+                    </button>
+                  </div>
+                </div>
+                <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">
+                  alias {cmd.name}=&#39;{cmd.value}&#39;
+                </p>
+                {cmd.needsTildeFix && (
+                  <div
+                    data-testid={`profile-launch-fix-${id}-${cmd.name}`}
+                    className="mt-1.5 flex flex-wrap items-center gap-2 rounded border border-warning/30 bg-warning/10 px-2 py-1 text-[11px] text-warning"
+                  >
+                    <span>
+                      配置目录写成了引号里的 ~，终端不会把它当成主目录，这条命令会在当前目录下另建一套配置。
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onFixLaunch(cmd.name)}
+                      className="inline-flex shrink-0 items-center gap-1 rounded border border-warning/40 px-1.5 py-0.5 font-medium hover:bg-warning/15"
+                    >
+                      <Wrench className="h-3 w-3" aria-hidden /> 订正
+                    </button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       {missingVars.length > 0 && (
@@ -106,6 +193,14 @@ export function ProfileCard({
         </button>
         <button type="button" data-testid={`profile-edit-${id}`} onClick={onEdit} className="rounded border px-2.5 py-1 text-xs">
           编辑
+        </button>
+        <button
+          type="button"
+          data-testid={`profile-duplicate-${id}`}
+          onClick={onDuplicate}
+          className="inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent"
+        >
+          <Copy className="h-3 w-3" aria-hidden /> 复制
         </button>
         <button
           type="button"

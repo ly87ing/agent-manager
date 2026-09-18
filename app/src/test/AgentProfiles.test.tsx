@@ -104,7 +104,18 @@ function routes(profiles: ReturnType<typeof profileElement>[] = [profileElement(
             label: "Shell aliases",
             format: "json",
             revision: "rev-1",
-            value: { timezone: "America/Los_Angeles", lang: "en_US.UTF-8", aliases: {} },
+            value: {
+              timezone: "America/Los_Angeles",
+              lang: "en_US.UTF-8",
+              aliases: {
+                // 指向该实例配置目录的两条命令：卡片按配置目录反查，应两条都列出
+                "cc-ly": 'CLAUDE_CONFIG_DIR="$HOME/.claude-cc-ly" claude',
+                "cc-ly-yolo":
+                  'CLAUDE_CONFIG_DIR="$HOME/.claude-cc-ly" claude --dangerously-skip-permissions',
+                // 与该实例无关的一条：不该出现在实例卡片里
+                claude: "claude",
+              },
+            },
           },
         ],
       },
@@ -120,12 +131,34 @@ describe("助手实例", () => {
     const card = await screen.findByTestId("profile-card-cc-ly");
     expect(within(card).getByText("Claude Code · ly")).toBeInTheDocument();
     expect(card).toHaveTextContent("~/.claude-cc-ly");
-    expect(within(card).getByTestId("profile-launch-cc-ly")).toHaveTextContent(
-      `alias cc-ly='CLAUDE_CONFIG_DIR="~/.claude-cc-ly" claude --dangerously-skip-permissions'`,
+    // 一个实例可以挂多条启动命令，按配置目录反查后都列出来
+    expect(within(card).getByTestId("profile-launch-cc-ly-cc-ly")).toHaveTextContent(
+      `alias cc-ly='CLAUDE_CONFIG_DIR="$HOME/.claude-cc-ly" claude'`,
     );
+    expect(within(card).getByTestId("profile-launch-cc-ly-cc-ly-yolo")).toHaveTextContent(
+      "--dangerously-skip-permissions",
+    );
+    // 与该实例无关的命令不混进来
+    expect(within(card).queryByTestId("profile-launch-cc-ly-claude")).toBeNull();
+    // 每条都能编辑、复制、删除
+    expect(within(card).getByTestId("profile-launch-edit-cc-ly-cc-ly")).toBeInTheDocument();
+    expect(within(card).getByTestId("profile-launch-copy-cc-ly-cc-ly")).toBeInTheDocument();
+    expect(within(card).getByTestId("profile-launch-remove-cc-ly-cc-ly")).toBeInTheDocument();
     // 实例不再作为主助手卡片重复出现
     expect(screen.queryByTestId("manage-skills-agents:cc-ly")).toBeNull();
     expect(screen.getByTestId("manage-skills-agents:claude-code")).toBeInTheDocument();
+  });
+
+  it("复制实例：预填内容但名称与配置目录可改，且默认换了目录", async () => {
+    renderWithEngine(<AgentsPage />, routes());
+    const card = await screen.findByTestId("profile-card-cc-ly");
+    await userEvent.click(within(card).getByTestId("profile-duplicate-cc-ly"));
+    const dialog = await screen.findByRole("dialog", { name: "新建实例" });
+    expect(within(dialog).getByTestId("profile-id-input")).toHaveValue("cc-ly-copy");
+    // 名称必须可改：锁死就没法复制
+    expect(within(dialog).getByTestId("profile-id-input")).not.toBeDisabled();
+    // 两个实例不能指同一套配置，目录默认换掉
+    expect(within(dialog).getByTestId("profile-config-dir")).toHaveValue("~/.claude-cc-ly-copy");
   });
 
   it("新建实例：保存定义并把启动命令一并存成同名快捷命令，不落地任何配置", async () => {
@@ -137,7 +170,7 @@ describe("助手实例", () => {
     await userEvent.type(within(dialog).getByTestId("profile-token-var"), "WORK_TOKEN");
     await userEvent.type(within(dialog).getByTestId("profile-extra-args"), "--dangerously-skip-permissions");
     expect(within(dialog).getByTestId("profile-launch-preview")).toHaveTextContent(
-      `alias cc-work='CLAUDE_CONFIG_DIR="~/.claude-cc-work" claude --dangerously-skip-permissions'`,
+      `alias cc-work='CLAUDE_CONFIG_DIR="$HOME/.claude-cc-work" claude --dangerously-skip-permissions'`,
     );
     await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
 
@@ -154,7 +187,7 @@ describe("助手实例", () => {
     const aliasWrite = calls.find((call) => call.command === "sources:set")!;
     const payload = JSON.parse(aliasWrite.args[aliasWrite.args.indexOf("--value") + 1]);
     expect(payload.value.aliases["cc-work"]).toBe(
-      'CLAUDE_CONFIG_DIR="~/.claude-cc-work" claude --dangerously-skip-permissions',
+      'CLAUDE_CONFIG_DIR="$HOME/.claude-cc-work" claude --dangerously-skip-permissions',
     );
     // 保存阶段不写任何配置文件
     expect(calls.some((call) => call.command === "profiles:apply")).toBe(false);

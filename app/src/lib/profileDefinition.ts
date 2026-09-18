@@ -84,14 +84,92 @@ export function buildProfileDefinition(input: ProfileFormInput, baseBin: string)
   };
 }
 
+/** 实例的配置目录环境变量名。 */
+export function configEnvOf(kind: ProfileKind): string {
+  return kind === "codex" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR";
+}
+
+/**
+ * 配置目录写进 shell 命令时的形式：`~` 换成 `$HOME`。
+ *
+ * 双引号里的 `~` 不会被 shell 展开，`CLAUDE_CONFIG_DIR="~/.claude-x"` 取到的是
+ * 字面量，助手会在当前目录下建一个名叫 `~` 的文件夹——和本工具写配置的绝对路径
+ * 根本不是同一处。`"$HOME/..."` 在双引号里照常展开，路径带空格也不会被拆开。
+ */
+export function shellConfigDir(configDir: string): string {
+  const trimmed = configDir.replace(/\/$/, "");
+  if (trimmed === "~") return "$HOME";
+  if (trimmed.startsWith("~/")) return `$HOME/${trimmed.slice(2)}`;
+  return trimmed;
+}
+
 /** 该实例的启动命令取值（与别名域取值格式一致）。 */
 export function profileLaunchValue(input: ProfileFormInput, baseBin: string): string {
-  const configEnv = input.kind === "codex" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR";
-  const parts = [`${configEnv}="${input.configDir.replace(/\/$/, "")}"`, baseBin];
+  const parts = [
+    `${configEnvOf(input.kind)}="${shellConfigDir(input.configDir)}"`,
+    baseBin,
+  ];
   if (input.kind === "codex") parts.push("-p", CODEX_PROFILE_NAME);
   const extra = input.extraArgs.trim();
   if (extra) parts.push(extra);
   return parts.join(" ");
+}
+
+/**
+ * 这条命令里的配置目录是不是写成了不会展开的 `"~/..."`。
+ *
+ * 本工具早先生成的命令都是这个形状，已经写进用户终端配置里了，只能回读时认出来
+ * 并给一个订正入口，不能指望用户自己发现。
+ */
+export function launchCommandNeedsTildeFix(value: string): boolean {
+  return /\b(CLAUDE_CONFIG_DIR|CODEX_HOME)=(["'])~(\/|\2)/.test(value);
+}
+
+/** 把一条命令里不会展开的 `"~/..."` 订正成 `"$HOME/..."`，其余原样。 */
+export function fixLaunchCommandTilde(value: string): string {
+  return value.replace(
+    /\b(CLAUDE_CONFIG_DIR|CODEX_HOME)=(["'])~(\/[^"']*)?\2/g,
+    (_m, name: string, quote: string, rest: string | undefined) =>
+      `${name}=${quote}$HOME${rest ?? ""}${quote}`,
+  );
+}
+
+export interface ProfileLaunchCommand {
+  name: string;
+  value: string;
+  /** 配置目录写成了不会展开的 `"~/..."`，需要订正。 */
+  needsTildeFix: boolean;
+}
+
+/**
+ * 找出属于某个实例的全部启动命令。
+ *
+ * 归属不额外存字段，靠命令里的配置目录变量反查——别名始终只有别名域一个写者，
+ * 实例只是帮你生成第一条。一个实例可以挂任意多条（日常一条、全自动一条…）。
+ */
+export function launchCommandsForProfile(
+  aliases: Record<string, string>,
+  kind: ProfileKind,
+  configDir: string,
+  parseEnv: (value: string) => Record<string, string>,
+): ProfileLaunchCommand[] {
+  const envName = configEnvOf(kind);
+  const want = normalizeConfigDir(configDir);
+  return Object.entries(aliases)
+    .filter(([, value]) => {
+      const dir = parseEnv(value)[envName];
+      return dir !== undefined && normalizeConfigDir(dir) === want;
+    })
+    .map(([name, value]) => ({ name, value, needsTildeFix: launchCommandNeedsTildeFix(value) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** 归一化配置目录，用于判断一条命令属于哪个实例（`~/x`、`$HOME/x` 视为同一处）。 */
+export function normalizeConfigDir(dir: string): string {
+  const trimmed = dir.trim().replace(/\/$/, "");
+  if (trimmed === "~" || trimmed === "$HOME") return "~";
+  if (trimmed.startsWith("$HOME/")) return `~/${trimmed.slice(6)}`;
+  return trimmed;
 }
 
 /** 从既有定义回填表单（编辑实例时用）。 */

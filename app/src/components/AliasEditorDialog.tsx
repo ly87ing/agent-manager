@@ -28,6 +28,7 @@ export function AliasEditorDialog({
   initialName,
   initialValue,
   defaultCommand,
+  presetName,
   globals,
   existingNames,
   onSubmit,
@@ -38,16 +39,19 @@ export function AliasEditorDialog({
   initialValue?: string;
   /** 新增时预填的命令（助手卡片进入时为该助手的可执行名）。 */
   defaultCommand?: string;
+  /** 新增时预填的名字（复制既有条目时用）。 */
+  presetName?: string;
   globals: { timezone: string; lang: string };
   /** 已存在的别名名称，用于新增时的重名校验。 */
   existingNames: string[];
+  /** 编辑时改了名字即为重命名：调用方据此删掉旧名那一条。 */
   onSubmit: (name: string, value: string) => void;
   onClose: () => void;
 }) {
   const parsed = useMemo(() => parseAliasValue(initialValue ?? ""), [initialValue]);
   const isEdit = Boolean(initialName);
   const [rawMode, setRawMode] = useState(Boolean(initialValue) && !parsed.structured);
-  const [name, setName] = useState(initialName ?? defaultCommand ?? "");
+  const [name, setName] = useState(initialName ?? presetName ?? defaultCommand ?? "");
   const [command, setCommand] = useState(parsed.command || defaultCommand || "");
   const [extraArgs, setExtraArgs] = useState(parsed.extraArgs);
   const [timezone, setTimezone] = useState<string>(parsed.timezone ?? (initialValue ? "" : FOLLOW_GLOBAL_TZ));
@@ -88,8 +92,9 @@ export function AliasEditorDialog({
       setError("名称要以字母或下划线开头，只能用字母、数字、下划线与连字符");
       return;
     }
-    if (!isEdit && existingNames.includes(name)) {
-      setError("已有同名快捷命令，改个名称或直接编辑那一条");
+    // 改名允许，但不能撞上另一条；编辑时撞回自己的原名不算冲突。
+    if (name !== initialName && existingNames.includes(name)) {
+      setError("已有同名快捷命令，换个名称或直接编辑那一条");
       return;
     }
     if (!rawMode && !command.trim()) {
@@ -143,10 +148,9 @@ export function AliasEditorDialog({
             <label className="mb-1 block text-xs font-medium text-muted-foreground">在终端里输入的名称</label>
             <input
               value={name}
-              disabled={isEdit}
               onChange={(event) => setName(event.target.value)}
               data-testid="alias-name-input"
-              className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs disabled:bg-muted"
+              className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs"
               placeholder="claude"
             />
           </div>

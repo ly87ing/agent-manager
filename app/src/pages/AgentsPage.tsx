@@ -16,11 +16,15 @@ import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import { StateBadge } from "../components/StateBadge";
 import type { ElementAction, EngineElement, PolicyData, StatusData } from "../lib/contract";
-import { renderAliasPreview } from "../lib/aliasCommand";
+import { parseAliasValue, renderAliasPreview } from "../lib/aliasCommand";
 import { ALIAS_EFFECT_HINT, ALIAS_EFFECT_LABEL, aliasEffectOf, aliasElementsOf, type AliasEffect } from "../lib/aliasEffect";
 import {
   buildProfileDefinition,
+  defaultConfigDir,
+  fixLaunchCommandTilde,
+  launchCommandsForProfile,
   parseProfileDefinition,
+  profileKindOf,
   profileLaunchValue,
   type ProfileFormInput,
 } from "../lib/profileDefinition";
@@ -398,9 +402,14 @@ export default function AgentsPage({
   const profilesQuery = useEngineQuery<StatusData>("profiles:status");
   const profileApply = useDirectApply();
   const [profileForm, setProfileForm] = useState<ProfileFormInput | "new" | null>(null);
+  /** 复制实例：表单带着预填内容，但名称与配置目录仍要能改（否则两个实例指同一套配置）。 */
+  const [profileDuplicating, setProfileDuplicating] = useState(false);
   const [profileRemoving, setProfileRemoving] = useState<string | null>(null);
   const [policyBusy, setPolicyBusy] = useState(false);
-  const [aliasEditing, setAliasEditing] = useState<{ bin: string; name: string; value: string | null } | null>(null);
+  const [aliasEditing, setAliasEditing] = useState<
+    { bin: string; name: string; value: string | null; presetName?: string } | null
+  >(null);
+  const [launchRemoving, setLaunchRemoving] = useState<string | null>(null);
   const [form, setForm] = useState<EngineElement | "new" | null>(null);
   const [pendingUninstall, setPendingUninstall] = useState<EngineElement | null>(null);
   const [pendingAction, setPendingAction] = useState<{ element: EngineElement; action: ElementAction } | null>(null);
@@ -503,6 +512,7 @@ export default function AgentsPage({
       toast.success(`已保存实例 ${input.id}`);
     }
     setProfileForm(null);
+    setProfileDuplicating(false);
     void profilesQuery.refetch();
   };
 
@@ -581,6 +591,60 @@ export default function AgentsPage({
     if (!value || !bin || !aliasSource.source) return null;
     return renderAliasPreview(bin, value, { timezone: aliasSource.source.timezone, lang: aliasSource.source.lang });
   };
+  /** 一个实例可以挂多条启动命令：按命令里的配置目录变量反查，别名仍只有别名域一个写者。 */
+  const launchCommandsOf = (element: EngineElement) => {
+    if (!aliasSource.source) return [];
+    const spec = element.spec as unknown as { base_agent?: string; config_dir?: string };
+    const observed = element.observed as unknown as { config_dir?: string };
+    const dir = observed.config_dir ?? spec.config_dir ?? "";
+    if (!dir) return [];
+    return launchCommandsForProfile(
+      aliasSource.source.aliases,
+      profileKindOf(spec.base_agent ?? "claude-code"),
+      dir,
+      (value) => parseAliasValue(value).otherEnv,
+    );
+  };
+
+  /** 保存一条启动命令；改了名字即重命名，旧名那条一并去掉。 */
+  const saveLaunchAlias = async (name: string, value: string, renamedFrom?: string) => {
+    if (!aliasSource.source) return false;
+    const aliases = { ...aliasSource.source.aliases, [name]: value };
+    if (renamedFrom && renamedFrom !== name) delete aliases[renamedFrom];
+    return aliasSource.save(
+      { aliases },
+      renamedFrom && renamedFrom !== name
+        ? `已改名为 ${name}，点「同步启动命令」写入配置`
+        : `已保存 ${name}，点「同步启动命令」写入配置`,
+    );
+  };
+
+  const removeLaunchAlias = async (name: string) => {
+    if (!aliasSource.source) return;
+    const removed = aliasSource.source.aliases[name];
+    const aliases = { ...aliasSource.source.aliases };
+    delete aliases[name];
+    const ok = await aliasSource.save({ aliases }, `已删除 ${name}`, { silent: true });
+    if (!ok) return;
+    setLaunchRemoving(null);
+    toastWithUndo(`已删除启动命令 ${name}`, {
+      description: "还没同步到终端配置；撤销会把它加回来。",
+      onUndo: () => void aliasSource.save({ aliases: { ...aliases, [name]: removed } }, `已恢复 ${name}`),
+    });
+  };
+
+  /** 复制一条：名字自动避让已有条目，内容照搬等着改。 */
+  const duplicateLaunchAlias = (name: string, bin: string) => {
+    const existing = aliasSource.source?.aliases ?? {};
+    let candidate = `${name}-copy`;
+    let n = 2;
+    while (existing[candidate] !== undefined) {
+      candidate = `${name}-copy${n}`;
+      n += 1;
+    }
+    setAliasEditing({ bin, name: "", value: existing[name] ?? null, presetName: candidate });
+  };
+
   const uninstallElement = pendingUninstall;
   const uninstallName = uninstallElement ? (uninstallElement.spec as AgentsSpec).display_name ?? uninstallElement.id : "";
   const pendingActionName = pendingAction
@@ -700,10 +764,61 @@ export default function AgentsPage({
                     setProfileForm(parseProfileDefinition(id, definition ?? {}));
                   }}
                   onRemove={() => setProfileRemoving(id)}
+                  onDuplicate={() => {
+                    const definition = (policyQuery.data?.ok
+                      ? ((policyQuery.data.data.layers?.sqlite as Record<string, any> | null)?.agents?.definitions?.[id] ?? null)
+                      : null) as Record<string, unknown> | null;
+                    const base = parseProfileDefinition(id, definition ?? {});
+                    const existing = new Set(elements.map((e) => e.id.replace(/^agents:/, "")));
+                    let nextId = `${id}-copy`;
+                    let n = 2;
+                    while (existing.has(nextId)) {
+                      nextId = `${id}-copy${n}`;
+                      n += 1;
+                    }
+                    setProfileDuplicating(true);
+                    setProfileForm({
+                      ...base,
+                      id: nextId,
+                      displayName: `${base.displayName} 副本`,
+                      // 必须换目录：两个实例指同一套配置就不是两个实例了
+                      configDir: defaultConfigDir(base.kind, nextId),
+                    });
+                  }}
                   onManageSkills={() => onManageSkills?.(id)}
                   onSyncLaunch={() =>
                     void aliasApply.apply({ command: "aliases:apply", label: "同步终端快捷命令" })
                   }
+                  launchCommands={launchCommandsOf(element)}
+                  onAddLaunch={() => {
+                    const bin = baseBinOf((element.spec as unknown as { base_agent?: string }).base_agent ?? id);
+                    const existing = aliasSource.source?.aliases ?? {};
+                    let candidate = `${id}-2`;
+                    let n = 3;
+                    while (existing[candidate] !== undefined) {
+                      candidate = `${id}-${n}`;
+                      n += 1;
+                    }
+                    // 以该实例已有的第一条为底稿：配置目录等前置变量照搬，只改名字和参数
+                    const template = launchCommandsOf(element)[0]?.value ?? null;
+                    setAliasEditing({ bin, name: "", value: template, presetName: candidate });
+                  }}
+                  onEditLaunch={(name) => {
+                    const bin = baseBinOf((element.spec as unknown as { base_agent?: string }).base_agent ?? id);
+                    setAliasEditing({ bin, name, value: aliasSource.source?.aliases[name] ?? null });
+                  }}
+                  onDuplicateLaunch={(name) =>
+                    duplicateLaunchAlias(
+                      name,
+                      baseBinOf((element.spec as unknown as { base_agent?: string }).base_agent ?? id),
+                    )
+                  }
+                  onRemoveLaunch={(name) => setLaunchRemoving(name)}
+                  onFixLaunch={(name) => {
+                    const current = aliasSource.source?.aliases[name];
+                    if (!current) return;
+                    void saveLaunchAlias(name, fixLaunchCommandTilde(current));
+                  }}
                 />
               );
             })}
@@ -715,10 +830,14 @@ export default function AgentsPage({
         <ProfileFormDialog
           baseAgents={profileCapableAgents}
           initial={profileForm === "new" ? undefined : profileForm}
+          isEdit={profileForm !== "new" && !profileDuplicating}
           existingIds={elements.map((element) => element.id.replace(/^agents:/, ""))}
           baseBinOf={baseBinOf}
           onSubmit={(input) => void saveProfile(input)}
-          onClose={() => setProfileForm(null)}
+          onClose={() => {
+            setProfileForm(null);
+            setProfileDuplicating(false);
+          }}
         />
       )}
 
@@ -736,18 +855,31 @@ export default function AgentsPage({
 
       {aliasEditing && aliasSource.source && (
         <AliasEditorDialog
-          initialName={aliasEditing.value === null ? undefined : aliasEditing.name}
+          initialName={aliasEditing.value === null ? undefined : aliasEditing.name || undefined}
           initialValue={aliasEditing.value ?? undefined}
           defaultCommand={aliasEditing.bin}
+          presetName={aliasEditing.presetName}
           globals={{ timezone: aliasSource.source.timezone, lang: aliasSource.source.lang }}
           existingNames={Object.keys(aliasSource.source.aliases)}
           onSubmit={(name, value) => {
-            const aliases = { ...aliasSource.source!.aliases, [name]: value };
-            void aliasSource.save({ aliases }, `已保存 ${name} 的启动命令，点「同步到终端」写入配置`).then((ok) => {
+            // value===null 表示新建（助手卡片「设置」走这条），此时 name 只是预填的可执行名，不算改名
+            const renamedFrom = aliasEditing.value === null ? undefined : aliasEditing.name || undefined;
+            void saveLaunchAlias(name, value, renamedFrom).then((ok) => {
               if (ok) setAliasEditing(null);
             });
           }}
           onClose={() => setAliasEditing(null)}
+        />
+      )}
+      {launchRemoving && (
+        <ConfirmModal
+          title={`删除启动命令 ${launchRemoving}`}
+          description="只删这条命令，实例的配置目录与登录状态不受影响。下次同步会把它从终端配置里本工具维护的那一段中去掉。"
+          risk="write-local"
+          confirmLabel="确认删除"
+          executing={false}
+          onConfirm={() => void removeLaunchAlias(launchRemoving)}
+          onClose={() => setLaunchRemoving(null)}
         />
       )}
       {form && <DefinitionFormDialog existingNames={elements.map((element) => element.id.replace(/^agents:/, ""))} initial={form === "new" ? undefined : { name: form.id.replace(/^agents:/, ""), definition: form.spec }} onClose={() => setForm(null)} onSubmit={(name, definition) => { setForm(null); void definitionOps.saveDefinition({ name, definition, isNew: form === "new" }); }} />}

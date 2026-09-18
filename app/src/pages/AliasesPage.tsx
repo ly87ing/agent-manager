@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { PlayCircle, Plus, Terminal, Trash2 } from "lucide-react";
+import { Copy, PlayCircle, Plus, Terminal, Trash2 } from "lucide-react";
 import { AliasEditorDialog } from "../components/AliasEditorDialog";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { ElementTable } from "../components/ElementTable";
@@ -27,7 +27,7 @@ export default function AliasesPage() {
   const { query: sourceQuery, source, save } = useAliasSource();
   const statusQuery = useEngineQuery<StatusData>("aliases:status");
   const directApply = useDirectApply();
-  const [editing, setEditing] = useState<{ name?: string; value?: string } | null>(null);
+  const [editing, setEditing] = useState<{ name?: string; value?: string; presetName?: string } | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
 
@@ -48,9 +48,25 @@ export default function AliasesPage() {
   const timeZones = listTimeZones();
   const aliasElements = aliasElementsOf(statusQuery.data);
 
+  /** 保存一条；编辑时改了名字即重命名——旧名那条要一并去掉，否则会留下两条。 */
   const saveAlias = async (name: string, value: string) => {
-    const ok = await save({ aliases: { ...source.aliases, [name]: value } }, `已保存 ${name}`);
+    const next = { ...source.aliases, [name]: value };
+    const renamedFrom = editing?.name;
+    if (renamedFrom && renamedFrom !== name) delete next[renamedFrom];
+    const message = renamedFrom && renamedFrom !== name ? `已改名为 ${name}` : `已保存 ${name}`;
+    const ok = await save({ aliases: next }, message);
     if (ok) setEditing(null);
+  };
+
+  /** 复制一条：照着现有的改一点是最常见的新建方式，不用从空白开始。 */
+  const duplicateAlias = (name: string) => {
+    let candidate = `${name}-copy`;
+    let n = 2;
+    while (source.aliases[candidate] !== undefined) {
+      candidate = `${name}-copy${n}`;
+      n += 1;
+    }
+    setEditing({ name: undefined, value: source.aliases[name], presetName: candidate });
   };
 
   const removeAlias = async (name: string) => {
@@ -175,6 +191,14 @@ export default function AliasesPage() {
                   </button>
                   <button
                     type="button"
+                    data-testid={`duplicate-alias-${name}`}
+                    onClick={() => duplicateAlias(name)}
+                    className="inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent"
+                  >
+                    <Copy className="h-3.5 w-3.5" aria-hidden /> 复制
+                  </button>
+                  <button
+                    type="button"
                     data-testid={`remove-alias-${name}`}
                     onClick={() => setRemoving(name)}
                     className="inline-flex items-center gap-1 rounded border border-destructive/30 px-2.5 py-1 text-xs text-destructive hover:bg-destructive/10"
@@ -225,6 +249,7 @@ export default function AliasesPage() {
         <AliasEditorDialog
           initialName={editing.name}
           initialValue={editing.value}
+          presetName={editing.presetName}
           globals={globals}
           existingNames={names}
           onSubmit={(name, value) => void saveAlias(name, value)}

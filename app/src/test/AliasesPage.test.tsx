@@ -112,12 +112,36 @@ describe("终端快捷命令页", () => {
     renderWithEngine(<AliasesPage />, aliasRoutes());
     await userEvent.click(await screen.findByTestId("edit-alias-claude"));
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByTestId("alias-name-input")).toBeDisabled();
+    // 名字可改：改名是常见需求，早先锁死导致只能删了重建
+    expect(within(dialog).getByTestId("alias-name-input")).not.toBeDisabled();
     expect(within(dialog).getByTestId("alias-command-input")).toHaveValue("claude");
     expect(within(dialog).getByTestId("alias-extra-args-input")).toHaveValue("--dangerously-skip-permissions");
     // 跟随全局的取值回填为「跟随全局」选项
     expect(within(dialog).getByTestId("alias-timezone-select")).toHaveValue("{timezone}");
     expect(within(dialog).getByTestId("alias-lang-select")).toHaveValue("{lang}");
+  });
+
+  it("改名保存后只剩新名那一条，旧名不残留", async () => {
+    const { calls } = renderWithEngine(<AliasesPage />, aliasRoutes());
+    await userEvent.click(await screen.findByTestId("edit-alias-claude"));
+    const dialog = await screen.findByRole("dialog");
+    const nameInput = within(dialog).getByTestId("alias-name-input");
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, "cc");
+    await userEvent.click(within(dialog).getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "sources:set")).toBe(true));
+    const payload = JSON.parse(calls.find((call) => call.command === "sources:set")!.args[3]);
+    expect(Object.keys(payload.value.aliases)).toContain("cc");
+    expect(Object.keys(payload.value.aliases)).not.toContain("claude");
+  });
+
+  it("复制一条：名字自动避让，内容照搬等着改", async () => {
+    renderWithEngine(<AliasesPage />, aliasRoutes());
+    await userEvent.click(await screen.findByTestId("duplicate-alias-claude"));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByTestId("alias-name-input")).toHaveValue("claude-copy");
+    expect(within(dialog).getByTestId("alias-extra-args-input")).toHaveValue("--dangerously-skip-permissions");
   });
 
   it("chrome 这类包装写法：原文编辑并说明记号会跟随全局设置", async () => {

@@ -3,9 +3,13 @@ import {
   PROFILE_ID_RE,
   buildProfileDefinition,
   defaultConfigDir,
+  fixLaunchCommandTilde,
+  launchCommandNeedsTildeFix,
+  normalizeConfigDir,
   parseProfileDefinition,
   profileLaunchValue,
   profileMcpConfig,
+  shellConfigDir,
 } from "../lib/profileDefinition";
 
 const claudeInput = {
@@ -44,12 +48,13 @@ describe("助手实例定义", () => {
   });
 
   it("启动命令取值：Claude 指配置目录，Codex 额外叠加自己的配置", () => {
+    // 配置目录写 $HOME 而非引号里的 ~：后者 shell 不展开，取到的是字面量
     expect(profileLaunchValue(claudeInput, "claude")).toBe(
-      'CLAUDE_CONFIG_DIR="~/.claude-cc-ly" claude --dangerously-skip-permissions',
+      'CLAUDE_CONFIG_DIR="$HOME/.claude-cc-ly" claude --dangerously-skip-permissions',
     );
     expect(
       profileLaunchValue({ ...claudeInput, kind: "codex", configDir: "~/.codex-work", extraArgs: "" }, "codex"),
-    ).toBe('CODEX_HOME="~/.codex-work" codex -p agent-manager');
+    ).toBe('CODEX_HOME="$HOME/.codex-work" codex -p agent-manager');
   });
 
   it("回填既有定义", () => {
@@ -72,5 +77,36 @@ describe("助手实例定义", () => {
   it("MCP 目标按实例类型区分", () => {
     expect(profileMcpConfig("claude", "~/.claude-a/").path).toBe("~/.claude-a/.claude.json");
     expect(profileMcpConfig("codex", "~/.codex-a").path).toBe("~/.codex-a/config.toml");
+  });
+});
+
+describe("启动命令里的配置目录", () => {
+  it("写成 $HOME 而不是引号里的 ~（后者 shell 不展开）", () => {
+    const value = profileLaunchValue({ ...claudeInput, configDir: "~/.claude-work", extraArgs: "" }, "claude");
+    expect(value).toBe('CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude');
+    expect(value).not.toContain('"~/');
+  });
+
+  it("绝对路径与单独的 ~ 都能正确转换", () => {
+    expect(shellConfigDir("~")).toBe("$HOME");
+    expect(shellConfigDir("~/.codex-x/")).toBe("$HOME/.codex-x");
+    expect(shellConfigDir("/opt/cfg")).toBe("/opt/cfg");
+  });
+
+  it("认得出早先生成的坏写法并能订正", () => {
+    const broken = `CLAUDE_CONFIG_DIR="~/.claude-work" claude --dangerously-skip-permissions`;
+    expect(launchCommandNeedsTildeFix(broken)).toBe(true);
+    expect(fixLaunchCommandTilde(broken)).toBe(
+      `CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude --dangerously-skip-permissions`,
+    );
+    const good = `CODEX_HOME="$HOME/.codex-x" codex -p agent-manager`;
+    expect(launchCommandNeedsTildeFix(good)).toBe(false);
+    expect(fixLaunchCommandTilde(good)).toBe(good);
+  });
+
+  it("归一化后能把 ~ 与 $HOME 写法认作同一个目录", () => {
+    expect(normalizeConfigDir("$HOME/.claude-work")).toBe("~/.claude-work");
+    expect(normalizeConfigDir("~/.claude-work/")).toBe("~/.claude-work");
+    expect(normalizeConfigDir("$HOME")).toBe("~");
   });
 });

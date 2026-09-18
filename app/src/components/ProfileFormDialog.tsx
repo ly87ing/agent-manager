@@ -19,6 +19,7 @@ import {
 export function ProfileFormDialog({
   baseAgents,
   initial,
+  isEdit: isEditProp,
   existingIds,
   baseBinOf,
   onSubmit,
@@ -27,12 +28,14 @@ export function ProfileFormDialog({
   /** 可作为归属的助手（目前支持 Claude Code 与 Codex）。 */
   baseAgents: { id: string; displayName: string }[];
   initial?: ProfileFormInput;
+  /** 复制实例时带着预填内容但仍是新建：名称与配置目录必须可改。 */
+  isEdit?: boolean;
   existingIds: string[];
   baseBinOf: (agentId: string) => string;
   onSubmit: (input: ProfileFormInput) => void;
   onClose: () => void;
 }) {
-  const isEdit = Boolean(initial);
+  const isEdit = isEditProp ?? Boolean(initial);
   const firstAgent = baseAgents[0]?.id ?? "claude-code";
   const [id, setId] = useState(initial?.id ?? "");
   const [baseAgent, setBaseAgent] = useState(initial?.baseAgent ?? firstAgent);
