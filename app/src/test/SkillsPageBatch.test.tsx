@@ -150,15 +150,26 @@ async function openSkillsTab() {
   await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
 }
 
+/** 矩阵行默认折叠，逐助手操作在展开后才出现；等行渲染出来再全部展开，幂等。 */
+async function expandAllRows() {
+  await screen.findAllByTestId(/^expand-skill:/);
+  for (const toggle of screen.queryAllByTestId(/^expand-skill:/)) {
+    if (toggle.getAttribute("aria-expanded") !== "true") await userEvent.click(toggle);
+  }
+}
+
 describe("SkillsPage 全部技能批量操作", () => {
   it("勾选列：仅有可用动作的行可勾选；全选当前可见行与 indeterminate 态", async () => {
     renderWithEngine(<SkillsPage />, batchRoutes());
     await openSkillsTab();
 
+    await expandAllRows();
     const alphaClaude = await screen.findByTestId("select-skill:agent-skills/alpha-claude-code");
     expect(alphaClaude).toHaveAttribute("aria-label", "选择 alpha @ claude-code");
     // 无动作行与 cell 缺失行均不可勾选
+    await expandAllRows();
     expect(screen.getByTestId("select-skill:agent-skills/gamma-claude-code")).toBeDisabled();
+    await expandAllRows();
     expect(screen.getByTestId("select-skill:agent-skills/gamma-codex")).toBeDisabled();
 
     const selectAll = screen.getByTestId("select-all-visible") as HTMLInputElement;
@@ -177,6 +188,7 @@ describe("SkillsPage 全部技能批量操作", () => {
     expect(selectAll).toBeChecked();
     expect(selectAll.indeterminate).toBe(false);
     expect(screen.getByTestId("batch-toolbar")).toHaveTextContent("已选 4 项");
+    await expandAllRows();
     expect(screen.getByTestId("select-skill:agent-skills/beta-codex")).toBeChecked();
     expect(screen.getByTestId("select-skill:agent-skills/gamma-claude-code")).not.toBeChecked();
 
@@ -189,7 +201,9 @@ describe("SkillsPage 全部技能批量操作", () => {
   it("筛选/搜索变化时剔除不再可见的选中项", async () => {
     renderWithEngine(<SkillsPage />, batchRoutes());
     await openSkillsTab();
+    await expandAllRows();
     await userEvent.click(await screen.findByTestId("select-skill:agent-skills/alpha-claude-code"));
+    await expandAllRows();
     await userEvent.click(screen.getByTestId("select-skill:agent-skills/alpha-codex"));
     expect(screen.getByTestId("batch-toolbar")).toHaveTextContent("已选 2 项");
 
@@ -227,7 +241,9 @@ describe("SkillsPage 全部技能批量操作", () => {
     try {
       const { calls } = renderWithEngine(<SkillsPage />, batchRoutes());
       await openSkillsTab();
+      await expandAllRows();
       await userEvent.click(await screen.findByTestId("select-skill:agent-skills/alpha-claude-code"));
+      await expandAllRows();
       await userEvent.click(screen.getByTestId("select-skill:agent-skills/beta-claude-code"));
       await userEvent.click(screen.getByTestId("batch-enable"));
 
@@ -255,7 +271,9 @@ describe("SkillsPage 全部技能批量操作", () => {
   it("批量纳入管理含外部链接行：一次汇总确认后，仅外部链接行携带 --allow-takeover", async () => {
     const { calls } = renderWithEngine(<SkillsPage />, batchExtraLinkRoutes());
     await openSkillsTab();
+    await expandAllRows();
     await userEvent.click(await screen.findByTestId("select-skill:agent-skills/alpha-codex"));
+    await expandAllRows();
     await userEvent.click(screen.getByTestId("select-skill:agent-skills/beta-codex"));
 
     await userEvent.click(screen.getByTestId("batch-add"));
@@ -276,6 +294,7 @@ describe("SkillsPage 全部技能批量操作", () => {
     await openSkillsTab();
 
     // 外部链接行 → 弹汇总确认；取消后零 apply、选择保留
+    await expandAllRows();
     await userEvent.click(await screen.findByTestId("select-skill:agent-skills/alpha-codex"));
     await userEvent.click(screen.getByTestId("batch-remove"));
     const dialog = await screen.findByRole("dialog", { name: "批量取消链接（1 行）" });
@@ -287,6 +306,7 @@ describe("SkillsPage 全部技能批量操作", () => {
 
     // 改选受管残留行（managed=true）：不弹确认直执，不带 --allow-takeover
     await userEvent.click(screen.getByTestId("select-skill:agent-skills/alpha-codex"));
+    await expandAllRows();
     await userEvent.click(screen.getByTestId("select-skill:agent-skills/beta-codex"));
     await userEvent.click(screen.getByTestId("batch-remove"));
     await screen.findByText(/批量取消链接完成：成功 1，失败 0/);
@@ -313,7 +333,9 @@ describe("SkillsPage 全部技能批量操作", () => {
     try {
       const { calls } = renderWithEngine(<SkillsPage />, routes);
       await openSkillsTab();
+      await expandAllRows();
       await userEvent.click(await screen.findByTestId("select-skill:agent-skills/alpha-claude-code"));
+      await expandAllRows();
       await userEvent.click(screen.getByTestId("select-skill:agent-skills/beta-claude-code"));
       await userEvent.click(screen.getByTestId("batch-enable"));
 
@@ -343,6 +365,7 @@ describe("SkillsPage 全部技能批量操作", () => {
       });
     renderWithEngine(<SkillsPage />, routes);
     await openSkillsTab();
+    await expandAllRows();
     await userEvent.click(await screen.findByTestId("select-skill:agent-skills/alpha-claude-code"));
     await userEvent.click(screen.getByTestId("batch-enable"));
 
@@ -362,6 +385,7 @@ describe("SkillsPage 全部技能批量操作", () => {
     try {
       const { calls } = renderWithEngine(<SkillsPage />, batchRoutes());
       await openSkillsTab();
+      await expandAllRows();
       await userEvent.click(await screen.findByTestId("action-enable-skill:agent-skills/alpha-claude-code"));
 
       await waitFor(() => expect(successSpy.mock.calls[successSpy.mock.calls.length - 1][0]).toBe("启用 alpha @ claude-code完成"));

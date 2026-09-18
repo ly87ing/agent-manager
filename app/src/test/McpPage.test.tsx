@@ -66,6 +66,14 @@ function mcpRoutes(): Record<string, ReturnType<typeof makeEnvelope>> {
   };
 }
 
+/** 矩阵行默认折叠，逐助手操作在展开后才出现；等行渲染出来再全部展开，幂等。 */
+async function expandAllMcpRows() {
+  await screen.findAllByTestId(/^expand-mcp:/);
+  for (const toggle of screen.queryAllByTestId(/^expand-mcp:/)) {
+    if (toggle.getAttribute("aria-expanded") !== "true") await userEvent.click(toggle);
+  }
+}
+
 describe("McpPage 服务库 + 助手中的服务", () => {
   it("默认服务库：卡片渲染与 freshness；点击服务名展开详情（命令/密钥状态/附加参数/写入位置，不含密钥值）", async () => {
     const { calls } = renderWithEngine(<McpPage />, mcpRoutes());
@@ -93,27 +101,26 @@ describe("McpPage 服务库 + 助手中的服务", () => {
     renderWithEngine(<McpPage />, mcpRoutes());
     await userEvent.click(await screen.findByRole("tab", { name: "助手中的服务" }));
 
-    expect(await screen.findByTitle("codex: managed-ok")).toHaveTextContent("已配置");
-    const drifted = screen.getByTitle("claude-code: drifted");
+    // 矩阵格的 title 带上版本等细节（原来「最新版本 / 当前配置版本」两列多半整列同一个值，
+    // 而且「当前配置版本=未配置」与「状态=未配置」并排让人分不清在说什么，已去掉）
+    const cellByPrefix = (prefix: string) =>
+      screen.getAllByTitle((value) => value.startsWith(prefix))[0];
+    expect(await screen.findByText("已配置")).toBeInTheDocument();
+    const drifted = cellByPrefix("claude-code: drifted");
     expect(drifted).toHaveTextContent("不一致");
     expect(drifted.className).toContain("warning");
     // 「残留」对用户没意义，改成说清处境的说法
-    expect(screen.getByTitle("claude-code: leftover")).toHaveTextContent("以前配过");
-    expect(screen.getByTitle("codex: not-materialized")).toHaveTextContent("尚未生成");
+    expect(cellByPrefix("claude-code: leftover")).toHaveTextContent("以前配过");
+    expect(cellByPrefix("codex: not-materialized")).toHaveTextContent("尚未生成");
+    // 完整版本进 title，不单开一列
+    expect(screen.getAllByTitle((v) => v.includes(LONG_VERSION)).length).toBeGreaterThan(0);
 
-    // 64 位摘要只显示短形，完整值在 title（资源库版本与当前配置版本两列）
-    const versionCells = screen.getAllByTitle(LONG_VERSION);
-    expect(versionCells).toHaveLength(2);
-    expect(versionCells[0]).toHaveTextContent("0123456");
-    expect(versionCells[0]).not.toHaveTextContent(LONG_VERSION);
-
-    // 助手筛选收窄行
+    // 助手筛选收窄列
     const agentSelect = screen.getByTestId("filter-agent-select") as HTMLSelectElement;
     await userEvent.selectOptions(agentSelect, "codex");
-    expect(screen.queryByTitle("claude-code: drifted")).toBeNull();
-    expect(screen.getByTitle("codex: managed-ok")).toBeInTheDocument();
+    expect(screen.queryAllByTitle((v) => v.startsWith("claude-code: drifted"))).toHaveLength(0);
     await userEvent.click(screen.getByRole("button", { name: /清除筛选/ }));
-    expect(screen.getByTitle("claude-code: drifted")).toBeInTheDocument();
+    expect(cellByPrefix("claude-code: drifted")).toBeInTheDocument();
   });
 
   it("行操作：按 cell.actions 渲染，「更新」点击直接 mcp:apply 精确 --only/--agent/--action（带 run_id），不取 plan、不开弹窗、零 policy:set", async () => {
@@ -121,10 +128,12 @@ describe("McpPage 服务库 + 助手中的服务", () => {
     await userEvent.click(await screen.findByRole("tab", { name: "助手中的服务" }));
 
     // actions 之外的按钮不出现（更新与启用不混）
+    await expandAllMcpRows();
     expect(await screen.findByTestId("action-update-mcp:chrome-devtools-claude-code")).toBeInTheDocument();
     expect(screen.queryByTestId("action-enable-mcp:chrome-devtools-claude-code")).toBeNull();
     // actions 为空的 cell 不推测动作
-    expect(screen.getAllByText("当前引擎未提供操作").length).toBeGreaterThan(0);
+    // 没有可执行动作时说清为什么，不报告引擎的内部情况
+    expect(screen.getAllByText(/没有可做的|停用/).length).toBeGreaterThan(0);
 
     await userEvent.click(screen.getByTestId("action-update-mcp:chrome-devtools-claude-code"));
     await waitFor(() => expect(calls.some((call) => call.command === "mcp:apply")).toBe(true));
@@ -178,6 +187,7 @@ describe("McpPage 服务库 + 助手中的服务", () => {
     const { calls } = renderWithEngine(<McpPage />, mcpRoutes());
     await userEvent.click(await screen.findByRole("tab", { name: "助手中的服务" }));
 
+    await expandAllMcpRows();
     const removeBtn = await screen.findByTestId("action-remove-mcp:chrome-devtools-codex");
     await userEvent.click(removeBtn);
     const dialog = await screen.findByRole("dialog", { name: "从此助手删除 mcp:chrome-devtools @ codex" });
@@ -359,6 +369,7 @@ describe("McpPage 显式接管通道（--allow-takeover）", () => {
     await userEvent.click(await screen.findByRole("tab", { name: "助手中的服务" }));
 
     // codex cell 提供正常「添加」：点击直接 apply，首次因冲突 fail-closed
+    await expandAllMcpRows();
     await userEvent.click(await screen.findByTestId("action-add-mcp:take-svc-codex"));
     await waitFor(() => expect(calls.some((call) => call.command === "mcp:apply")).toBe(true));
     const firstApply = calls.find((call) => call.command === "mcp:apply");
@@ -388,6 +399,7 @@ describe("McpPage 显式接管通道（--allow-takeover）", () => {
 
     // 冲突 cell：无常规动作，提供显式接管入口（assigned=false → add）
     expect(screen.queryByTestId("action-add-mcp:take-svc-claude-code")).toBeNull();
+    await expandAllMcpRows();
     await userEvent.click(await screen.findByTestId("takeover-mcp:take-svc-claude-code"));
 
     await waitFor(() => expect(toastSuccessSpy).toHaveBeenCalled());
@@ -412,6 +424,7 @@ describe("McpPage 显式接管通道（--allow-takeover）", () => {
     const { calls } = renderWithEngine(<McpPage />, failureRoutes);
     await userEvent.click(await screen.findByRole("tab", { name: "助手中的服务" }));
 
+    await expandAllMcpRows();
     await userEvent.click(await screen.findByTestId("action-add-mcp:take-svc-codex"));
 
     await waitFor(() => expect(toastErrorSpy).toHaveBeenCalled());

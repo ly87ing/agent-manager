@@ -196,7 +196,12 @@ export function SkillAssignmentRow({
               </button>
             );
           })}
-          {cell && actions.length === 0 && <span className="text-xs text-muted-foreground">当前引擎未提供操作</span>}
+          {/* 同上：说清为什么不能操作，不报告引擎内部情况 */}
+          {cell && actions.length === 0 && (
+            <span className="text-xs text-muted-foreground">
+              {cell.blocked_reason ?? "这里没有可做的：状态正常或该项已停用"}
+            </span>
+          )}
           {!cell && <span className="text-xs text-muted-foreground">未配置</span>}
         </div>
       </td>

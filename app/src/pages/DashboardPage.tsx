@@ -2,16 +2,14 @@ import { useQueries } from "@tanstack/react-query";
 import {
   AlertTriangle,
   CheckCircle2,
-  Info,
   Loader2,
   RefreshCw,
   XCircle,
 } from "lucide-react";
-import { ElementTable } from "../components/ElementTable";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageLoading } from "../components/PageState";
 import { SyncCenter } from "../components/SyncCenter";
-import { engineErrorMessage, runEngine, toDiagnostic } from "../lib/engine";
+import { runEngine, toDiagnostic } from "../lib/engine";
 import type {
   AuditData,
   AuditEntryStatus,
@@ -142,9 +140,14 @@ export default function DashboardPage({ onNavigate }: { onNavigate?: (page: stri
     };
   });
 
-  const staleElements = freshnessCards
-    .flatMap((card) => card.elements)
-    .filter((element) => element.freshness.state === "behind" || element.freshness.state === "unknown");
+  const behindCount = freshnessCards.reduce((sum, card) => sum + card.aggregate.behind, 0);
+  const uncheckedCount = freshnessCards.reduce((sum, card) => sum + card.aggregate.unknown, 0);
+  const lastCheckedAt = freshnessCards
+    .map((card) => card.aggregate.lastCheckedAt)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .pop();
+  const lastCheckedLabel = lastCheckedAt ? formatCheckedAt(lastCheckedAt) : null;
 
   return (
     <div className="space-y-6">
@@ -220,58 +223,39 @@ export default function DashboardPage({ onNavigate }: { onNavigate?: (page: stri
         </Card>
       </div>
 
-      <div>
-        <h3 className="mb-3 text-sm font-semibold text-foreground">最新版本检查（只读本地记录，不联网）</h3>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {freshnessCards.map((card) => (
-            <Card key={card.key} title={card.label} testId={`freshness-card-${card.key}`}>
-              {card.query.isError ? (
-                <p className="text-sm text-destructive">加载失败：{engineErrorMessage(card.query.error)}</p>
-              ) : (
-                <>
-                  <ul className="space-y-1.5 text-sm">
-                    {(
-                      [
-                        ["current", "已是最新"],
-                        ["behind", "可更新"],
-                        ["ahead", "比官方新"],
-                        ["unknown", "未检查"],
-                      ] as const
-                    ).map(([state, label]) => (
-                      <li key={state} className="flex items-center justify-between">
-                        <span className="text-muted-foreground">{label}</span>
-                        <span
-                          data-testid={`freshness-count-${card.key}-${state}`}
-                          className={cn(
-                            "font-mono",
-                            state === "behind" && card.aggregate.behind > 0 ? "font-semibold text-warning" : "text-foreground",
-                            state === "unknown" && card.aggregate.unknown > 0 ? "font-semibold text-muted-foreground" : "",
-                          )}
-                        >
-                          {card.aggregate[state]}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                  <p className="mt-3 flex items-center gap-1 border-t pt-2 text-xs text-muted-foreground">
-                    <Info className="h-3 w-3" aria-hidden />
-                    上次检查：{formatCheckedAt(card.aggregate.lastCheckedAt)}
-                  </p>
-                </>
-              )}
-            </Card>
-          ))}
+      {/* 版本对比原来占三张卡加一张表，和更新中心完全重复；这里只留一句结论加入口 */}
+      <section data-testid="freshness-summary" className="rounded-lg border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-foreground">版本</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {behindCount > 0
+                ? `${behindCount} 项可更新${uncheckedCount > 0 ? `，另有 ${uncheckedCount} 项还没检查过` : ""}`
+                : uncheckedCount > 0
+                  ? `都不落后；${uncheckedCount} 项还没检查过`
+                  : "都已是最新"}
+              {lastCheckedLabel && ` · 上次检查 ${lastCheckedLabel}`}
+            </p>
+          </div>
+          {onNavigate && (behindCount > 0 || uncheckedCount > 0) && (
+            <button
+              type="button"
+              data-testid="goto-updates"
+              onClick={() => onNavigate("settings:updates")}
+              className="shrink-0 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/15"
+            >
+              去更新中心
+            </button>
+          )}
         </div>
-      </div>
+      </section>
 
-      {staleElements.length > 0 && (
-        <Card title={`可更新 / 未检查的元素（${staleElements.length}）`} testId="stale-elements">
-          <ElementTable elements={staleElements} />
-        </Card>
-      )}
-
-      <div className="space-y-4">
-        <h3 className="text-sm font-semibold text-foreground">体检明细</h3>
+      {/* 明细默认收起：进来先回答「要不要做事」，要刨根问底再展开 */}
+      <details data-testid="audit-details" className="rounded-lg border bg-card p-5 shadow-sm">
+        <summary className="cursor-pointer text-sm font-semibold text-foreground">
+          体检明细（{auditData.summary.errors} 个错误 · {auditData.summary.warnings} 个警告）
+        </summary>
+        <div className="mt-3 space-y-3">
         {Object.entries(auditData.sections).map(([section, entries]) => (
           <Card key={section} title={SECTION_LABELS[section] ?? section} testId={`audit-section-${section}`}>
             <ul className="space-y-1.5">
@@ -285,7 +269,8 @@ export default function DashboardPage({ onNavigate }: { onNavigate?: (page: stri
             </ul>
           </Card>
         ))}
-      </div>
+        </div>
+      </details>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { McpAssignmentRow, type McpAgentCellView } from "../components/McpAssignmentRow";
+import { ResourceAgentMatrix, type MatrixRow, type MatrixRowCell } from "../components/ResourceAgentMatrix";
 import { McpImportCandidates } from "../components/McpImportCandidates";
 import { McpServerCard, McpServerDetail } from "../components/McpServerCard";
 import { McpServerFormDialog } from "../components/McpServerFormDialog";
@@ -36,6 +37,8 @@ export default function McpPage() {
   const [activeTab, setActiveTab] = useState<"library" | "agents">("library");
   const [agentFilter, setAgentFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
+  /** 展开中的服务行：矩阵默认只看状态，点开才出逐助手操作；可同时展开多行。 */
+  const [expandedMcpIds, setExpandedMcpIds] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [formState, setFormState] = useState<{ editing: EngineElement } | "new" | null>(null);
   const [importTarget, setImportTarget] = useState<McpImportCandidate | null>(null);
@@ -201,6 +204,35 @@ export default function McpPage() {
     return matchesKeyword(search, [element.id, spec.command, spec.url, ...(spec.args ?? [])]);
   });
   /** 搜索与助手筛选叠加（AND）；行级额外匹配助手名列。 */
+  /** 矩阵行：一行一个服务，每个助手一格；展开那一行才出逐助手操作。 */
+  const mcpMatrixRows: MatrixRow[] = elements
+    .filter((element) => matchesKeyword(search, [element.id, (element.spec as McpSpec).command]))
+    .map((element) => {
+      const cells = (element.observed as McpObserved)?.agents ?? {};
+      const rowCells: Record<string, MatrixRowCell | null> = {};
+      for (const agent of relevantAgents) {
+        const cell = cells[agent] as McpAgentCellView | undefined;
+        if (!cell) {
+          rowCells[agent] = null;
+          continue;
+        }
+        rowCells[agent] = {
+          state: cell.state,
+          // 版本与阻塞原因放悬停：单开两列「最新版本 / 当前配置版本」多半整列同一个值，
+          // 而且「当前配置版本=未配置」与「状态=未配置」并排会让人分不清在说什么
+          title: [
+            `${agent}: ${cell.state}`,
+            cell.version ? `当前 ${cell.version}` : null,
+            cell.blocked_reason ?? null,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          hasActions: (cell.actions?.length ?? 0) > 0,
+        };
+      }
+      return { key: element.id, label: element.id.replace(/^mcp:/, ""), cells: rowCells };
+    });
+
   const assignmentRows = elements.flatMap((element) => {
     const cells = (element.observed as McpObserved)?.agents ?? {};
     // cell 缺失 = 引擎未报告此助手的配置路径：不伪造可执行 cell，行内明确显示未配置
@@ -378,37 +410,52 @@ export default function McpPage() {
             <span className="text-xs text-muted-foreground">当前展示 {assignmentRows.length} 条配置记录</span>
           </div>
 
-          <div className="overflow-x-auto rounded-lg border bg-card p-5 shadow-sm">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b text-xs text-muted-foreground">
-                  <th className="py-2.5 pr-4 font-medium">服务</th>
-                  <th className="py-2.5 pr-4 font-medium">助手</th>
-                  <th className="py-2.5 pr-4 font-medium">最新版本</th>
-                  <th className="py-2.5 pr-4 font-medium">当前配置版本</th>
-                  <th className="py-2.5 pr-4 font-medium">状态</th>
-                  <th className="py-2.5 font-medium">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {assignmentRows.map(({ key, element, agent, cell }) => (
-                  <McpAssignmentRow
-                    key={key}
-                    element={element}
-                    agent={agent}
-                    cell={cell}
-                    onOpenDetail={(id) => {
-                      setSelectedId(id);
-                      setActiveTab("library");
-                    }}
-                    onAction={handleCellAction}
-                    onTakeover={handleTakeover}
-                  />
-                ))}
-              </tbody>
-            </table>
-            {assignmentRows.length === 0 &&
-              (search.trim() ? (
+          <ResourceAgentMatrix
+            rows={mcpMatrixRows}
+            agents={relevantAgents}
+            kind="mcp"
+            resourceHeader="服务"
+            expandedKeys={expandedMcpIds}
+            onToggleExpand={(key) =>
+              setExpandedMcpIds((prev) => {
+                const next = new Set(prev);
+                if (next.has(key)) next.delete(key);
+                else next.add(key);
+                return next;
+              })
+            }
+            renderExpanded={(row) => (
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b text-[11px] text-muted-foreground">
+                    <th className="py-1.5 pr-4 font-medium">服务</th>
+                    <th className="py-1.5 pr-4 font-medium">助手</th>
+                    <th className="py-1.5 pr-4 font-medium">状态</th>
+                    <th className="py-1.5 font-medium">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {assignmentRows
+                    .filter((item) => item.element.id === row.key)
+                    .map(({ key, element, agent, cell }) => (
+                      <McpAssignmentRow
+                        key={key}
+                        element={element}
+                        agent={agent}
+                        cell={cell}
+                        onOpenDetail={(id) => {
+                          setSelectedId(id);
+                          setActiveTab("library");
+                        }}
+                        onAction={handleCellAction}
+                        onTakeover={handleTakeover}
+                      />
+                    ))}
+                </tbody>
+              </table>
+            )}
+            emptyHint={
+              search.trim() ? (
                 <EmptyState
                   compact
                   icon={SearchX}
@@ -431,8 +478,9 @@ export default function McpPage() {
                   title={agentFilter !== "all" ? "无符合筛选条件的服务配置" : "暂无可展示的服务配置"}
                   description={agentFilter !== "all" ? "点击上方「清除筛选」后查看全部助手" : "请先在「服务库」新增服务"}
                 />
-              ))}
-          </div>
+              )
+            }
+          />
         </div>
       )}
 

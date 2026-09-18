@@ -6,6 +6,7 @@ import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
+import { ResourceAgentMatrix, type MatrixRow, type MatrixRowCell } from "../components/ResourceAgentMatrix";
 import { SkillAssignmentRow } from "../components/SkillAssignmentRow";
 import { SkillCollectionCard, SkillDiscoveryInbox } from "../components/SkillCollectionCard";
 import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDialog";
@@ -57,6 +58,8 @@ export default function SkillsPage({
   const agentsQuery = useEngineQuery<StatusData>("agents:status");
   const policyQuery = useEngineQuery<PolicyData>("policy:get");
   const [activeTab, setActiveTab] = useState<"collections" | "skills">(() => (initialAgent ? "skills" : "collections"));
+  /** 展开中的技能行：矩阵默认只看状态，点开才出逐助手操作；可同时展开多行。 */
+  const [expandedSkillIds, setExpandedSkillIds] = useState<Set<string>>(new Set());
   const [collectionFilter, setCollectionFilter] = useState<string>("all");
   const [agentFilter, setAgentFilter] = useState<string>(() => initialAgent ?? "all");
   const [search, setSearch] = useState("");
@@ -169,6 +172,42 @@ export default function SkillsPage({
     }));
   });
 
+  /** 矩阵行：一行一个技能，每个助手一格。展开那一行才出逐助手操作。 */
+  const matrixRows: MatrixRow[] = filteredSkills.map((skill) => {
+    const spec = skill.spec as SkillSpec;
+    const cells = (skill.observed as SkillObserved)?.agents ?? {};
+    const rowCells: Record<string, MatrixRowCell | null> = {};
+    let anyActionable = false;
+    for (const agent of relevantAgents) {
+      const cell = cells[agent];
+      if (!cell) {
+        rowCells[agent] = null;
+        continue;
+      }
+      const actions = cell.actions ?? [];
+      if (actions.length > 0) anyActionable = true;
+      rowCells[agent] = {
+        state: cell.state,
+        // 版本与阻塞原因放悬停：单开一列多半整列「未获取」，白占宽度
+        title: [
+          `${agent}: ${cell.state}`,
+          cell.version ? `当前版本 ${cell.version}` : null,
+          cell.blocked_reason ?? null,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        hasActions: actions.length > 0,
+      };
+    }
+    return {
+      key: skill.id,
+      label: spec.name ?? skill.id,
+      sublabel: spec.collection ?? undefined,
+      cells: rowCells,
+      selectable: anyActionable,
+    };
+  });
+
   // 筛选/搜索变化或数据刷新后，剔除不再可见、或已无可执行动作的选中项。
   useEffect(() => {
     setSelectedKeys((prev) => {
@@ -252,7 +291,6 @@ export default function SkillsPage({
     },
   ];
   const allVisibleSelected = selectableRows.length > 0 && selectableRows.every((row) => selectedKeys.has(row.key));
-  const someVisibleSelected = selectableRows.some((row) => selectedKeys.has(row.key));
 
   const toggleSelectAllVisible = () => {
     setSelectedKeys((prev) => {
@@ -528,61 +566,86 @@ export default function SkillsPage({
             </div>
           )}
 
-          <div className="overflow-x-auto rounded-lg border bg-card p-5 shadow-sm">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b text-xs text-muted-foreground">
-                  <th className="py-2.5 pr-3 font-medium">
-                    <input
-                      type="checkbox"
-                      aria-label="全选当前可见行"
-                      data-testid="select-all-visible"
-                      disabled={batchApply.executing || selectableRows.length === 0}
-                      checked={allVisibleSelected}
-                      ref={(element) => {
-                        if (element) element.indeterminate = someVisibleSelected && !allVisibleSelected;
-                      }}
-                      onChange={toggleSelectAllVisible}
-                      className="h-3.5 w-3.5 accent-primary disabled:opacity-40"
-                    />
-                  </th>
-                  <th className="py-2.5 pr-4 font-medium">技能名</th>
-                  <th className="py-2.5 pr-4 font-medium">所属集合</th>
-                  <th className="py-2.5 pr-4 font-medium">助手</th>
-                  <th className="py-2.5 pr-4 font-medium">资源库版本</th>
-                  <th className="py-2.5 pr-4 font-medium">当前分配版本</th>
-                  <th className="py-2.5 pr-4 font-medium">状态</th>
-                  <th className="py-2.5 font-medium">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {assignmentRows.map(({ key, skill, skillName, collection, agent, cell }) => (
-                  <SkillAssignmentRow
-                    key={key}
-                    skill={skill}
-                    skillName={skillName}
-                    collection={collection}
-                    agent={agent}
-                    cell={cell}
-                    selected={selectedKeys.has(key)}
-                    selectDisabled={batchApply.executing}
-                    onToggleSelect={() =>
-                      setSelectedKeys((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(key)) next.delete(key);
-                        else next.add(key);
-                        return next;
-                      })
-                    }
-                    onFilterCollection={setCollectionFilter}
-                    onFilterAgent={setAgentFilter}
-                    onAction={handleSkillAction}
-                  />
-                ))}
-              </tbody>
-            </table>
-            {assignmentRows.length === 0 &&
-              (search.trim() ? (
+          <ResourceAgentMatrix
+            rows={matrixRows}
+            agents={relevantAgents}
+            kind="skills"
+            resourceHeader="技能"
+            expandedKeys={expandedSkillIds}
+            onToggleExpand={(key) =>
+              setExpandedSkillIds((prev) => {
+                const next = new Set(prev);
+                if (next.has(key)) next.delete(key);
+                else next.add(key);
+                return next;
+              })
+            }
+            isRowSelected={(key) => {
+              // 行选中 = 该技能所有可执行的「技能×助手」格都已选中
+              const keys = assignmentRows
+                .filter((row) => row.skill.id === key && (row.cell?.actions?.length ?? 0) > 0)
+                .map((row) => row.key);
+              return keys.length > 0 && keys.every((k) => selectedKeys.has(k));
+            }}
+            allSelected={allVisibleSelected}
+            someSelected={selectableRows.some((row) => selectedKeys.has(row.key))}
+            selectDisabled={batchApply.executing}
+            onToggleSelect={(key) => {
+              // 选中一行 = 选中它所有可执行的格子，批量动作照旧按格子发
+              const keys = assignmentRows
+                .filter((row) => row.skill.id === key && (row.cell?.actions?.length ?? 0) > 0)
+                .map((row) => row.key);
+              setSelectedKeys((prev) => {
+                const next = new Set(prev);
+                const allOn = keys.every((k) => next.has(k));
+                keys.forEach((k) => (allOn ? next.delete(k) : next.add(k)));
+                return next;
+              });
+            }}
+            onToggleSelectAll={toggleSelectAllVisible}
+            renderExpanded={(row) => (
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b text-[11px] text-muted-foreground">
+                    <th className="w-8 py-1.5 pr-3 font-medium" />
+                    <th className="py-1.5 pr-4 font-medium">技能名</th>
+                    <th className="py-1.5 pr-4 font-medium">所属集合</th>
+                    <th className="py-1.5 pr-4 font-medium">助手</th>
+                    <th className="py-1.5 pr-4 font-medium">状态</th>
+                    <th className="py-1.5 font-medium">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {assignmentRows
+                    .filter((item) => item.skill.id === row.key)
+                    .map(({ key, skill, skillName, collection, agent, cell }) => (
+                      <SkillAssignmentRow
+                        key={key}
+                        skill={skill}
+                        skillName={skillName}
+                        collection={collection}
+                        agent={agent}
+                        cell={cell}
+                        selected={selectedKeys.has(key)}
+                        selectDisabled={batchApply.executing}
+                        onToggleSelect={() =>
+                          setSelectedKeys((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(key)) next.delete(key);
+                            else next.add(key);
+                            return next;
+                          })
+                        }
+                        onFilterCollection={setCollectionFilter}
+                        onFilterAgent={setAgentFilter}
+                        onAction={handleSkillAction}
+                      />
+                    ))}
+                </tbody>
+              </table>
+            )}
+            emptyHint={
+              search.trim() ? (
                 <EmptyState
                   compact
                   testId="skills-empty-state"
@@ -611,8 +674,9 @@ export default function SkillsPage({
                       : undefined
                   }
                 />
-              ))}
-          </div>
+              )
+            }
+          />
         </div>
       )}
 

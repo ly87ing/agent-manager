@@ -172,7 +172,9 @@ export function SkillCollectionCard({
           </button>
         )}
 
-        {actions.length === 0 && <span className="text-xs text-muted-foreground">当前引擎未提供操作</span>}
+        {actions.length === 0 && (
+          <span className="text-xs text-muted-foreground">这里没有可做的：状态正常或该集合已停用</span>
+        )}
       </div>
     </section>
   );

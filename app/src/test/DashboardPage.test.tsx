@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Toaster } from "sonner";
 import { afterEach, describe, expect, it } from "vitest";
@@ -27,7 +27,7 @@ function renderDashboard(routes: Record<string, EngineRoute>) {
     <QueryClientProvider client={queryClient}>
       {/* 总览页现在含同步中心，它会执行 apply，所以需要执行通道 */}
       <ExecutionProvider>
-        <DashboardPage />
+        <DashboardPage onNavigate={() => {}} />
       </ExecutionProvider>
       <Toaster richColors position="bottom-right" />
     </QueryClientProvider>,
@@ -156,27 +156,17 @@ describe("DashboardPage", () => {
     expect(screen.getByTestId("warning-count-unmaterialized")).toHaveTextContent("1");
     expect(screen.getByTestId("warning-count-official_gaps")).toHaveTextContent("0");
 
-    await waitFor(() => expect(screen.getByTestId("freshness-count-agents-behind")).toHaveTextContent("1"));
-    expect(screen.getByTestId("freshness-count-agents-current")).toHaveTextContent("1");
-    expect(screen.getByTestId("freshness-count-agents-unknown")).toHaveTextContent("0");
-    expect(screen.getByTestId("freshness-count-mcp-behind")).toHaveTextContent("1");
-    expect(screen.getByTestId("freshness-count-mcp-unknown")).toHaveTextContent("1");
-    expect(screen.getByTestId("freshness-count-skills-current")).toHaveTextContent("1");
-    // not-applicable 元素不进入任何计数桶
-    expect(screen.getByTestId("freshness-count-skills-unknown")).toHaveTextContent("0");
-    expect(screen.getByTestId("freshness-count-skills-behind")).toHaveTextContent("0");
+    // 版本原来占三张聚合卡加一张落后元素表，与更新中心完全重复；总览只留一句结论加入口。
+    // 计数正确性由 aggregateFreshness 的单测保证，这里只断言结论这句话对得上。
+    const summary = await screen.findByTestId("freshness-summary");
+    // agents 1 项落后 + mcp 1 项落后 = 2；mcp 1 项未检查
+    expect(summary).toHaveTextContent("2 项可更新");
+    expect(summary).toHaveTextContent("1 项还没检查过");
+    expect(summary).toHaveTextContent(/上次检查/);
+    expect(screen.getByTestId("goto-updates")).toBeInTheDocument();
 
-    // 上次检查时间取各元素 checked_at 的最大值
-    const agentsCard = screen.getByTestId("freshness-card-agents");
-    expect(within(agentsCard).getByText(/上次检查/)).toHaveTextContent(/2026/);
-
-    // 落后/未知元素表
-    const staleTable = await screen.findByTestId("stale-elements");
-    expect(within(staleTable).getByText("agents:claude-code")).toBeInTheDocument();
-    expect(within(staleTable).getByText("mcp:chrome-devtools")).toBeInTheDocument();
-    expect(within(staleTable).getByText("mcp:grok-search")).toBeInTheDocument();
-
-    // 审计明细按段分组渲染
+    // 明细默认收起，展开后按段分组渲染
+    await userEvent.click(screen.getByText(/体检明细/));
     expect(screen.getByTestId("audit-section-runtime")).toHaveTextContent("engine-rs");
     expect(screen.getByTestId("audit-section-mcp")).toHaveTextContent("托管产物尚未生成");
   });
@@ -224,6 +214,6 @@ describe("DashboardPage", () => {
 
     expect(await screen.findByText(/检查更新完成/)).toBeInTheDocument();
     // 刷新完成后缓存失效重新拉取：agents:status 至少被调用过
-    await waitFor(() => expect(screen.getByTestId("freshness-count-agents-behind")).toHaveTextContent("1"));
+    await screen.findByTestId("freshness-summary");
   });
 });

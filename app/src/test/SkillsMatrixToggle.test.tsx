@@ -43,11 +43,20 @@ function routes(): Record<string, Envelope> {
   };
 }
 
+/** 矩阵行默认折叠，逐助手操作在展开后才出现；等行渲染出来再全部展开，幂等。 */
+async function expandAllRows() {
+  await screen.findAllByTestId(/^expand-skill:/);
+  for (const toggle of screen.queryAllByTestId(/^expand-skill:/)) {
+    if (toggle.getAttribute("aria-expanded") !== "true") await userEvent.click(toggle);
+  }
+}
+
 describe("Skills 逐技能操作链路", () => {
   it("codex 行点「启用」→ 直接 skills:apply 带 --action enable --agent codex 与 run_id，不取 plan、不开弹窗、零 policy:set", async () => {
     const { calls } = renderWithEngine(<SkillsPage />, routes());
 
     await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
+    await expandAllRows();
     await userEvent.click(await screen.findByTestId("action-enable-skill:agent-skills/alpha-codex"));
 
     await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));
@@ -75,6 +84,7 @@ describe("Skills 逐技能操作链路", () => {
     const { calls } = renderWithEngine(<SkillsPage />, rejected);
 
     await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
+    await expandAllRows();
     await userEvent.click(await screen.findByTestId("action-enable-skill:agent-skills/alpha-codex"));
 
     await waitFor(() => expect(toastErrorSpy).toHaveBeenCalled());

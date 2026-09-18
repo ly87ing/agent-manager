@@ -152,7 +152,13 @@ export function McpAssignmentRow({
               接管原条目
             </button>
           )}
-          {cell && actions.length === 0 && !takeoverBlocked && <span className="text-xs text-muted-foreground">当前引擎未提供操作</span>}
+          {/* 没有可执行动作时说清「为什么不能操作」，而不是报告引擎的内部情况——
+              用户不关心引擎提供不提供，他要知道的是接下来该做什么。 */}
+          {cell && actions.length === 0 && !takeoverBlocked && (
+            <span className="text-xs text-muted-foreground">
+              {cell.blocked_reason ?? "这里没有可做的：状态正常或该项已停用"}
+            </span>
+          )}
           {!cell && <span className="text-xs text-muted-foreground">未配置</span>}
         </div>
       </td>
