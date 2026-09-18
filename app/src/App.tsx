@@ -20,6 +20,7 @@ import SkillsPage from "./pages/SkillsPage";
 import TakeoverPage from "./pages/TakeoverPage";
 import SettingsPage from "./pages/SettingsPage";
 import { useSettings } from "./lib/settings";
+import { subscribeTrayActions } from "./lib/trayActions";
 import { useUpdateCheck } from "./lib/update-check";
 import { PageError, PageLoading } from "./components/PageState";
 
@@ -78,6 +79,15 @@ export default function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  useEffect(
+    () =>
+      subscribeTrayActions((action) => {
+        if (action === "search") setPaletteOpen(true);
+        else if (action === "takeover") setActivePage("takeover");
+      }),
+    [],
+  );
 
   if (settings.isPending) return <PageLoading text="正在读取应用设置…" />;
   if (settings.isError) return <PageError title="应用设置加载失败" error={settings.error} />;
