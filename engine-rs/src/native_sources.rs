@@ -160,6 +160,47 @@ fn default_alias_source(key: &str) -> Option<String> {
     Some(canonical_json(&obj))
 }
 
+/// 事务内直接写入一条来源（供配置备份恢复用）。
+///
+/// 与 `sources:set` 的区别只在于不做 revision 比对：恢复备份是整份替换，
+/// 本机当前内容按定义就要被覆盖。结构校验仍由调用方在写入前完成。
+pub(crate) fn write_source_in_tx(
+    tx: &rusqlite::Transaction,
+    key: &str,
+    text: &str,
+) -> anyhow::Result<()> {
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let revision = revision_of(text);
+    if SOURCE_KEYS.contains(&key) {
+        tx.execute_batch(TABLE_DDL)?;
+        tx.execute(
+            "INSERT INTO rule_sources (key, value, revision, updated_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value, revision = excluded.revision, updated_at = excluded.updated_at",
+            rusqlite::params![key, text, revision, now],
+        )?;
+        return Ok(());
+    }
+    if HOOK_SOURCE_KEYS.contains(&key) {
+        tx.execute_batch(HOOK_TABLE_DDL)?;
+        tx.execute(
+            "INSERT INTO hook_sources (key, value_json, revision, updated_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, revision = excluded.revision, updated_at = excluded.updated_at",
+            rusqlite::params![key, text, revision, now],
+        )?;
+        return Ok(());
+    }
+    if ALIAS_SOURCE_KEYS.contains(&key) {
+        tx.execute_batch(ALIAS_TABLE_DDL)?;
+        tx.execute(
+            "INSERT INTO alias_sources (key, value_json, revision, updated_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, revision = excluded.revision, updated_at = excluded.updated_at",
+            rusqlite::params![key, text, revision, now],
+        )?;
+        return Ok(());
+    }
+    anyhow::bail!("未知来源 key，拒绝写入")
+}
+
 fn ensure_table(conn: &Connection) -> anyhow::Result<()> {
     conn.execute_batch(TABLE_DDL)?;
     Ok(())

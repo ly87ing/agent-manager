@@ -20,6 +20,7 @@ import { useSaveSettings, useSettings } from "../lib/settings";
 import { useTheme, type Theme } from "../lib/theme";
 import { cn } from "../lib/utils";
 import { check } from "@tauri-apps/plugin-updater";
+import { ConfigBackupSection } from "../components/ConfigBackupSection";
 import AliasesPage from "./AliasesPage";
 import SecretsPage from "./SecretsPage";
 import UpdatesPage from "./UpdatesPage";
@@ -305,6 +306,7 @@ export default function SettingsPage() {
     <div className="space-y-4">
       <PageHeader title="设置" description="查看应用契约与运行路径，调整本机运行偏好。" />
       <AppearanceSection />
+      <ConfigBackupSection />
       {data.maintenanceWarning && (
         <div
           role="alert"

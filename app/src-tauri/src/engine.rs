@@ -55,6 +55,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("policy", "get" | "set" | "delete") => true,
         ("sources", "get" | "set") => true,
         ("db", "status" | "migrate") => true,
+        ("config", "export" | "import") => true,
         (d, "status" | "apply") => READ_WRITE_DOMAINS.contains(&d),
         _ => false,
     };
@@ -111,6 +112,8 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--layer", ArgValueKind::PolicyLayer));
             specs.push(("--key", ArgValueKind::DotKey));
         }
+        // 配置备份：导出不带参数，导入只接整份备份正文
+        ("config", "import") => specs.push(("--value", ArgValueKind::JsonValue)),
         (_, "apply") => {
             specs.push(("--only", ArgValueKind::ElementId));
             if domain == "agents" {
@@ -410,6 +413,8 @@ mod tests {
             "sources:set",
             "db:status",
             "db:migrate",
+            "config:export",
+            "config:import",
         ] {
             assert!(validate_command(command).is_ok(), "{command} should pass");
         }
@@ -505,6 +510,11 @@ mod tests {
                 vec!["--only".into(), "mcp:grok-search".into()],
             ),
             ("system:discover", vec!["--only".into(), "skills".into()]),
+            ("config:export", vec![]),
+            (
+                "config:import",
+                vec!["--value".into(), "{\"format\":\"x\"}".into()],
+            ),
             (
                 "skills:apply",
                 vec![
@@ -583,6 +593,7 @@ mod tests {
             ("sources:set", vec!["--def-file".into(), "elsewhere".into()]),
             ("system:refresh-upstream", vec!["--only".into()]),
             ("system:discover", vec!["--dry-run".into()]),
+            ("config:export", vec!["--value".into(), "{}".into()]),
             // 已退役命令不再携带任何参数白名单
             ("system:converge", vec!["--dry-run".into()]),
             (

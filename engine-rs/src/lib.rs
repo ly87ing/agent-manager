@@ -14,6 +14,7 @@ pub mod envelope;
 pub mod native;
 pub mod native_agents;
 pub(crate) mod native_aliases;
+pub(crate) mod native_config;
 pub(crate) mod native_discover;
 pub(crate) mod native_hooks;
 pub mod native_logs;

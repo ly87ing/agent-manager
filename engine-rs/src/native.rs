@@ -63,7 +63,7 @@ impl Request {
 
 const KNOWN_DOMAINS: &[&str] = &[
     "agents", "mcp", "skills", "rules", "hooks", "aliases", "profiles", "secrets", "profile",
-    "policy", "system", "runs", "sources", "db", "logs",
+    "policy", "system", "runs", "sources", "db", "logs", "config",
 ];
 
 fn mode_of(request: &Request) -> Mode {
@@ -551,6 +551,9 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("runs", "get") => crate::native_runs::runs_get(ctx, request),
         ("runs", "clear") => crate::native_runs::runs_clear(ctx),
         ("logs", "clear") => crate::native_logs::logs_clear(ctx),
+        ("config", "export" | "import") => crate::native_config::handle(ctx, request)
+            .map(|data| (data, vec![]))
+            .map_err(|err| DispatchError::new("CONFIG_ERROR", format!("{err:#}"))),
         ("system", "discover") => crate::native_discover::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("DISCOVER_ERROR", format!("{err:#}"))),
@@ -746,6 +749,11 @@ pub(crate) fn reject_secret_text(text: &str) -> Option<&'static str> {
     rules
         .iter()
         .find_map(|(kind, rule)| rule.is_match(text).then_some(*kind))
+}
+
+/// 整树凭据校验（配置备份恢复时复用同一道闸门）。
+pub(crate) fn reject_secrets_value(value: &Value) -> anyhow::Result<()> {
+    reject_secrets("", value).map_err(|err| anyhow::anyhow!("{}", err.message))
 }
 
 fn reject_secrets(key: &str, value: &Value) -> Result<(), DispatchError> {
