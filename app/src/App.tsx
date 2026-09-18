@@ -109,7 +109,7 @@ export default function App() {
     >
       {/* key 驱动重挂载，让页面切换时重放一次轻量进场动画 */}
       <div key={activePage} className="animate-page-in">
-        {activePage === "dashboard" && <DashboardPage />}
+        {activePage === "dashboard" && <DashboardPage onNavigate={handleNavigate} />}
         {activePage === "agents" && (
           <AgentsPage
             onManageSkills={(agentId) => {

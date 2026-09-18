@@ -10,6 +10,7 @@ import {
 import { ElementTable } from "../components/ElementTable";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageLoading } from "../components/PageState";
+import { SyncCenter } from "../components/SyncCenter";
 import { engineErrorMessage, runEngine, toDiagnostic } from "../lib/engine";
 import type {
   AuditData,
@@ -94,7 +95,7 @@ function Card({ title, children, testId }: { title: string; children: React.Reac
   );
 }
 
-export default function DashboardPage() {
+export default function DashboardPage({ onNavigate }: { onNavigate?: (page: string) => void } = {}) {
   const auditQuery = useEngineQuery<AuditData>("system:audit");
 
   const statusResults = useQueries({
@@ -177,6 +178,9 @@ export default function DashboardPage() {
           {offline && <p className="text-xs text-warning">离线模式下不可用（需要联网检查）</p>}
         </div>
       </div>
+
+      {/* 同步状态放在最前：用户进来最先要知道的是「有没有东西没落地」 */}
+      <SyncCenter onNavigate={onNavigate} />
 
       {audit.errors.length > 0 && <ErrorPanel title="system:audit 错误" errors={audit.errors} />}
       {audit.warnings.length > 0 && (

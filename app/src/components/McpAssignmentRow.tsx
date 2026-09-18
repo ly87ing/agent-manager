@@ -22,7 +22,8 @@ function shortDigest(value: string | null | undefined): string {
 /** 单元格状态文案与样式；异常态优先于 assigned/enabled，enabled=true 不能掩盖异常。 */
 const CELL_VIEW: Record<string, { label: string; className: string }> = {
   drifted: { label: "不一致", className: "border-warning/30 bg-warning/10 text-warning" },
-  leftover: { label: "残留", className: "border-violet/30 bg-violet/10 text-violet" },
+  // 「残留」对用户没有意义：说清是什么处境——以前配过、现在没在管
+  leftover: { label: "以前配过", className: "border-violet/30 bg-violet/10 text-violet" },
   "probe-error": { label: "检查出错", className: "border-rose/30 bg-rose/10 text-rose" },
   "managed-ok": { label: "已配置", className: "border-success/30 bg-success/10 text-success" },
   "not-materialized": { label: "尚未生成", className: "border bg-muted text-muted-foreground" },

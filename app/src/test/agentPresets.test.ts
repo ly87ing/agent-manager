@@ -33,3 +33,35 @@ describe("启动参数预设", () => {
     expect(togglePresetArgs(added, preset)).toBe("");
   });
 });
+
+describe("五个助手的权限档预设", () => {
+  it("各家参数名不同，按实际命令名给对应的那套", () => {
+    const of = (bin: string) => presetsForCommand(bin).map((p) => p.args);
+    expect(of("claude")).toEqual(["--dangerously-skip-permissions"]);
+    expect(of("codex")).toEqual([
+      "--dangerously-bypass-approvals-and-sandbox",
+      "--ask-for-approval never --sandbox workspace-write",
+    ]);
+    expect(of("agy")).toEqual(["--dangerously-skip-permissions", "--sandbox"]);
+    expect(of("grok")).toEqual(["--permission-mode bypassPermissions", "--permission-mode acceptEdits"]);
+    expect(of("kimi")).toEqual(["--auto", "-y"]);
+    // 不认识的命令不瞎给参数
+    expect(of("some-other-cli")).toEqual([]);
+  });
+
+  it("每套都恰好有一个被标成危险档", () => {
+    for (const bin of ["claude", "codex", "agy", "grok", "kimi"]) {
+      const danger = presetsForCommand(bin).filter((p) => p.danger);
+      expect(danger).toHaveLength(1);
+      expect(danger[0].hint.length).toBeGreaterThan(10);
+    }
+  });
+
+  it("带取值的参数（grok/codex 多段）整段增删，不留半截", () => {
+    const grok = presetsForCommand("grok")[0];
+    const added = togglePresetArgs("", grok);
+    expect(added).toBe("--permission-mode bypassPermissions");
+    expect(hasPresetArgs(added, grok)).toBe(true);
+    expect(togglePresetArgs(added, grok)).toBe("");
+  });
+});

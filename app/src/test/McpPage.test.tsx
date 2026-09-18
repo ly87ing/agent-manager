@@ -89,7 +89,7 @@ describe("McpPage 服务库 + 助手中的服务", () => {
     expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
   });
 
-  it("助手中的服务：单元格态 已配置/不一致/残留/尚未生成，版本短摘要 title 存完整值", async () => {
+  it("助手中的服务：单元格态 已配置/不一致/以前配过/尚未生成，版本短摘要 title 存完整值", async () => {
     renderWithEngine(<McpPage />, mcpRoutes());
     await userEvent.click(await screen.findByRole("tab", { name: "助手中的服务" }));
 
@@ -97,7 +97,8 @@ describe("McpPage 服务库 + 助手中的服务", () => {
     const drifted = screen.getByTitle("claude-code: drifted");
     expect(drifted).toHaveTextContent("不一致");
     expect(drifted.className).toContain("warning");
-    expect(screen.getByTitle("claude-code: leftover")).toHaveTextContent("残留");
+    // 「残留」对用户没意义，改成说清处境的说法
+    expect(screen.getByTitle("claude-code: leftover")).toHaveTextContent("以前配过");
     expect(screen.getByTitle("codex: not-materialized")).toHaveTextContent("尚未生成");
 
     // 64 位摘要只显示短形，完整值在 title（资源库版本与当前配置版本两列）

@@ -5,6 +5,7 @@ import { Toaster } from "sonner";
 import { afterEach, describe, expect, it } from "vitest";
 import DashboardPage from "../pages/DashboardPage";
 import { setEngineClient } from "../lib/engine";
+import { ExecutionProvider } from "../lib/execution";
 import { createQueryClient } from "../lib/queries";
 import { createMswEngineClient, startEngineServer, type EngineRoute } from "./engine-test-client";
 import { makeAuditData, makeElement, makeEnvelope, makeFreshness } from "./fixtures";
@@ -24,7 +25,10 @@ function renderDashboard(routes: Record<string, EngineRoute>) {
   const queryClient = createQueryClient({ retry: false });
   return render(
     <QueryClientProvider client={queryClient}>
-      <DashboardPage />
+      {/* 总览页现在含同步中心，它会执行 apply，所以需要执行通道 */}
+      <ExecutionProvider>
+        <DashboardPage />
+      </ExecutionProvider>
       <Toaster richColors position="bottom-right" />
     </QueryClientProvider>,
   );

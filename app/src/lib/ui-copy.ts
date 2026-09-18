@@ -59,7 +59,7 @@ export const MCP_CELL_COPY: Record<string, string> = {
   absent: "未配置",
   "agent-disabled": "未配置",
   "not-materialized": "尚未生成",
-  leftover: "残留",
+  leftover: "以前配过",
   "probe-error": "检查出错",
 };
 
