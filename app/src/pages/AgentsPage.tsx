@@ -23,6 +23,7 @@ import {
   type ProfileFormInput,
 } from "../lib/profileDefinition";
 import { runEngine } from "../lib/engine";
+import { toastWithUndo } from "../lib/undo";
 import { definitionOrigin } from "../lib/definitionOverlay";
 import type { AgentsObserved, AgentsPolicy, AgentsSpec } from "../lib/observed";
 import { useEngineQuery, useOfflineMode } from "../lib/queries";
@@ -49,16 +50,55 @@ const PROVIDER_CLASS_META: Record<ProviderBucket, { label: string; className: st
   unsupported: { label: "不可接管", className: "border bg-muted text-muted-foreground" },
 };
 
-function PolicyChip({ label, value }: { label: string; value: boolean | undefined }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded border bg-card px-1.5 py-0.5 text-xs text-muted-foreground">
-      {value ? (
+/** 偏好开关：点一下就改本机偏好（只写配置，不触发安装或同步）。 */
+function PolicyChip({
+  label,
+  value,
+  testId,
+  title,
+  disabled,
+  onToggle,
+}: {
+  label: string;
+  value: boolean | undefined;
+  testId?: string;
+  title?: string;
+  disabled?: boolean;
+  onToggle?: (next: boolean) => void;
+}) {
+  const active = value !== false;
+  const content = (
+    <>
+      {active ? (
         <Check className="h-3 w-3 text-success" aria-hidden />
       ) : (
         <X className="h-3 w-3 text-muted-foreground" aria-hidden />
       )}
       {label}
-    </span>
+    </>
+  );
+  if (!onToggle) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded border bg-card px-1.5 py-0.5 text-xs text-muted-foreground">
+        {content}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      title={title}
+      disabled={disabled}
+      aria-pressed={active}
+      onClick={() => onToggle(!active)}
+      className={cn(
+        "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-xs hover:bg-accent disabled:opacity-50",
+        active ? "bg-card text-foreground" : "bg-muted text-muted-foreground",
+      )}
+    >
+      {content}
+    </button>
   );
 }
 
@@ -76,6 +116,8 @@ function AgentCard({
   onEditAlias,
   onSyncAliases,
   aliasSyncing,
+  policyBusy,
+  onTogglePolicy,
 }: {
   element: EngineElement;
   /** true = 定义来自本地数据库（用户新增或改过内置定义）：安装/升级先弹确认。 */
@@ -94,6 +136,9 @@ function AgentCard({
   onEditAlias: () => void;
   onSyncAliases: () => void;
   aliasSyncing: boolean;
+  /** 偏好写入在途：期间禁用开关，避免连点写出交错结果。 */
+  policyBusy: boolean;
+  onTogglePolicy: (key: "enabled" | "auto_install" | "auto_update", next: boolean) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   /** 本卡直执路径在途的动作 id（点击即置位，apply 结束回落）。 */
@@ -188,11 +233,30 @@ function AgentCard({
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t pt-3">
-        <PolicyChip label="自动安装" value={policy.auto_install} />
-        <PolicyChip label="自动更新" value={policy.auto_update} />
-        <span className="ml-auto text-xs text-muted-foreground">
-          {policy.enabled === false ? "已停用" : "已启用"}
-        </span>
+        <PolicyChip
+          label="自动安装"
+          value={policy.auto_install}
+          testId={`policy-auto-install-${element.id}`}
+          title="缺失时是否自动安装（只改偏好，不会立刻执行安装）"
+          disabled={policyBusy}
+          onToggle={(next) => onTogglePolicy("auto_install", next)}
+        />
+        <PolicyChip
+          label="自动更新"
+          value={policy.auto_update}
+          testId={`policy-auto-update-${element.id}`}
+          title="有新版本时是否自动更新（只改偏好）"
+          disabled={policyBusy}
+          onToggle={(next) => onTogglePolicy("auto_update", next)}
+        />
+        <PolicyChip
+          label={policy.enabled === false ? "已停用" : "已启用"}
+          value={policy.enabled}
+          testId={`policy-enabled-${element.id}`}
+          title="停用后不再为它维护技能、MCP 等资源；已装的软件不受影响"
+          disabled={policyBusy}
+          onToggle={(next) => onTogglePolicy("enabled", next)}
+        />
       </div>
 
       {element.state === "unmanaged-detected" && (
@@ -310,6 +374,7 @@ export default function AgentsPage({
   const profileApply = useDirectApply();
   const [profileForm, setProfileForm] = useState<ProfileFormInput | "new" | null>(null);
   const [profileRemoving, setProfileRemoving] = useState<string | null>(null);
+  const [policyBusy, setPolicyBusy] = useState(false);
   const [aliasEditing, setAliasEditing] = useState<{ bin: string; name: string; value: string | null } | null>(null);
   const [form, setForm] = useState<EngineElement | "new" | null>(null);
   const [pendingUninstall, setPendingUninstall] = useState<EngineElement | null>(null);
@@ -341,6 +406,39 @@ export default function AgentsPage({
   const baseBinOf = (agentId: string) =>
     (elements.find((element) => element.id === `agents:${agentId}`)?.spec as AgentsSpec | undefined)?.bin ??
     (agentId === "codex" ? "codex" : "claude");
+
+  /** 改助手偏好：只写本机配置，不触发安装、卸载或同步。 */
+  const togglePolicy = async (agentId: string, key: "enabled" | "auto_install" | "auto_update", next: boolean) => {
+    if (policyBusy) return;
+    setPolicyBusy(true);
+    try {
+      const envelope = await runEngine("policy:set", [
+        "--layer",
+        "local",
+        "--key",
+        `agents.${agentId}.${key}`,
+        "--value",
+        JSON.stringify(next),
+      ]);
+      if (!envelope.ok) {
+        toast.error(`保存偏好被拒绝:${envelope.errors[0]?.message ?? "未知错误"}`);
+        return;
+      }
+      toast.success(next ? "已开启" : "已关闭", {
+        description:
+          key === "enabled"
+            ? next
+              ? "重新为它维护技能、MCP 等资源。"
+              : "不再为它维护技能、MCP 等资源；已安装的软件不受影响。"
+            : "只改本机偏好，不会立刻执行安装或更新。",
+      });
+      void query.refetch();
+    } catch (err) {
+      toast.error(`保存偏好失败:${String(err)}`);
+    } finally {
+      setPolicyBusy(false);
+    }
+  };
 
   /** 保存实例：写定义 + 把启动命令存成同名快捷命令；两步都只写配置，不落地。 */
   const saveProfile = async (input: ProfileFormInput) => {
@@ -382,6 +480,10 @@ export default function AgentsPage({
 
   /** 移除实例定义：只停止管理这套配置，配置目录与里面的内容原样保留。 */
   const removeProfile = async (id: string) => {
+    const snapshot = (policyQuery.data?.ok
+      ? ((policyQuery.data.data.layers?.sqlite as Record<string, any> | null)?.agents?.definitions?.[id] ?? null)
+      : null) as Record<string, unknown> | null;
+    const removedAlias = aliasSource.source?.aliases[id];
     let envelope;
     try {
       envelope = await runEngine("policy:set", [
@@ -403,12 +505,40 @@ export default function AgentsPage({
     if (aliasSource.source && aliasSource.source.aliases[id]) {
       const next = { ...aliasSource.source.aliases };
       delete next[id];
-      await aliasSource.save({ aliases: next }, `已移除实例 ${id}`);
-    } else {
-      toast.success(`已移除实例 ${id}`);
+      await aliasSource.save({ aliases: next }, `已移除实例 ${id}`, { silent: true });
     }
     setProfileRemoving(null);
     void profilesQuery.refetch();
+    if (snapshot) {
+      toastWithUndo(`已移除实例 ${id}`, {
+        description: "配置目录原样保留；撤销会把实例定义与启动命令加回来。",
+        onUndo: async () => {
+          const restored = await runEngine("policy:set", [
+            "--layer",
+            "local",
+            "--key",
+            `agents.definitions.${id}`,
+            "--value",
+            JSON.stringify({ ...snapshot, _delete: false, _replace: true }),
+          ]);
+          if (!restored.ok) {
+            toast.error(`恢复实例被拒绝:${restored.errors[0]?.message ?? "未知错误"}`);
+            return;
+          }
+          if (removedAlias && aliasSource.source) {
+            await aliasSource.save(
+              { aliases: { ...aliasSource.source.aliases, [id]: removedAlias } },
+              `已恢复实例 ${id}`,
+              { silent: true },
+            );
+          }
+          toast.success(`已恢复实例 ${id}`);
+          void profilesQuery.refetch();
+        },
+      });
+    } else {
+      toast.success(`已移除实例 ${id}`);
+    }
   };
 
   /** 助手的启动命令：来源里与其可执行名同名的那一条；来源还没读到时为 null。 */
@@ -476,6 +606,8 @@ export default function AgentsPage({
               onSyncAliases={() =>
                 void aliasApply.apply({ command: "aliases:apply", label: "同步终端快捷命令" })
               }
+              policyBusy={policyBusy}
+              onTogglePolicy={(key, next) => void togglePolicy(element.id.replace(/^agents:/, ""), key, next)}
             />
           ))}
         </div>

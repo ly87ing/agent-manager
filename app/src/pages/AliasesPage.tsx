@@ -9,6 +9,7 @@ import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { SourceDefinitionsPanel } from "../components/SourceDefinitionsPanel";
 import type { StatusData } from "../lib/contract";
 import { LANG_OPTIONS, listTimeZones, renderAliasPreview } from "../lib/aliasCommand";
+import { toastWithUndo } from "../lib/undo";
 import { useAliasSource } from "../lib/useAliasSource";
 import { useEngineQuery } from "../lib/queries";
 import { useDirectApply } from "../lib/useDirectApply";
@@ -50,10 +51,16 @@ export default function AliasesPage() {
   };
 
   const removeAlias = async (name: string) => {
+    const removed = source.aliases[name];
     const next = { ...source.aliases };
     delete next[name];
-    const ok = await save({ aliases: next }, `已移除 ${name}`);
-    if (ok) setRemoving(null);
+    const ok = await save({ aliases: next }, `已移除 ${name}`, { silent: true });
+    if (!ok) return;
+    setRemoving(null);
+    toastWithUndo(`已移除 ${name}`, {
+      description: "还没同步到终端配置；撤销会把它加回来。",
+      onUndo: () => void save({ aliases: { ...next, [name]: removed } }, `已恢复 ${name}`),
+    });
   };
 
   return (

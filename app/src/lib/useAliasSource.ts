@@ -63,6 +63,8 @@ export function useAliasSource() {
   const save = async (
     next: { timezone?: string; lang?: string; aliases?: Record<string, string> },
     successMessage: string,
+    /** silent: 由调用方给更合适的提示（例如带撤销的那种）。 */
+    options?: { silent?: boolean },
   ): Promise<boolean> => {
     if (!source) {
       toast.error("保存失败:还没读到当前配置");
@@ -91,7 +93,7 @@ export function useAliasSource() {
       return false;
     }
     void queryClient.invalidateQueries({ queryKey: engineKeys.all });
-    toast.success(successMessage);
+    if (!options?.silent) toast.success(successMessage);
     return true;
   };
 

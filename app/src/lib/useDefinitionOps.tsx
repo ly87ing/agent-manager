@@ -7,6 +7,7 @@ import { definitionContainerKey, definitionKeyPrefix, buildDefinitionRemoval, ty
 import { engineErrorMessage, runEngine } from "./engine";
 import { engineKeys } from "./queries";
 import { OVERLAY_COPY, TOGGLE_COPY } from "./ui-copy";
+import { toastWithUndo } from "./undo";
 import { useDirectApply } from "./useDirectApply";
 
 /**
@@ -158,6 +159,15 @@ export function useDefinitionOps({
     );
   };
 
+  /** 被移除定义的完整内容：撤销时原样写回；取不到就不提供撤销（不假装能复原）。 */
+  const fullDefinitionOf = (layers: PolicyLayers | null, name: string): Record<string, unknown> | null => {
+    const sqlite = layers?.sqlite as Record<string, unknown> | null | undefined;
+    const root = sqlite?.[section] as Record<string, unknown> | undefined;
+    const defs = root?.[definitionContainerKey(section)] as Record<string, unknown> | undefined;
+    const definition = defs?.[name];
+    return typeof definition === "object" && definition !== null ? (definition as Record<string, unknown>) : null;
+  };
+
   /** 移除确认后写遮蔽标记。 */
   const requestRemove = (name: string, layers: PolicyLayers | null) => {
     setRemoval({ name, layers });
@@ -182,9 +192,33 @@ export function useDefinitionOps({
     setRemovalExecuting(false);
     if (!ok) return;
     const name = removal.name;
+    const snapshot = fullDefinitionOf(removal.layers, name);
     setRemoval(null);
     void queryClient.invalidateQueries({ queryKey: engineKeys.all });
-    toast.success(`已移除 ${name}`);
+    if (snapshot) {
+      toastWithUndo(`已移除 ${name}`, {
+        description:
+          domain === "agents"
+            ? "撤销会把定义原样加回来。"
+            : "撤销只加回定义；已经清理掉的目标配置要再点一次应用才会写回。",
+        onUndo: async () => {
+          const restored = await writePolicy("policy:set", [
+            "--layer",
+            "local",
+            "--key",
+            `${definitionKeyPrefix(section)}.${name}`,
+            "--value",
+            JSON.stringify({ ...snapshot, _delete: false, _replace: true }),
+          ]);
+          if (restored) {
+            void queryClient.invalidateQueries({ queryKey: engineKeys.all });
+            toast.success(`已恢复 ${name}`);
+          }
+        },
+      });
+    } else {
+      toast.success(`已移除 ${name}`);
+    }
     if (domain === "agents") return;
     // 直接 scoped apply 清理目标配置
     void directApply.apply({
