@@ -1851,3 +1851,119 @@ fn local_source_detects_drifted_link() {
     assert!(link.join("inner").is_dir(), "外部真实目录不得被覆盖");
     let _ = std::fs::remove_dir_all(root);
 }
+
+// ---------- 孤立链接清理（remove-link） ----------
+
+/// 断链与旧体系残留：只删链接本身，真实目录与有分配记录的条目一律拒绝。
+#[test]
+fn remove_link_cleans_orphans_and_refuses_the_rest() {
+    let (root, context) = temp_ctx("skills-remove-link");
+    let claude_skills = context.home_dir.join(".claude").join("skills");
+    std::fs::create_dir_all(&claude_skills).unwrap();
+
+    // 1) 断链
+    std::os::unix::fs::symlink(
+        context.home_dir.join("gone/ghost"),
+        claude_skills.join("ghost"),
+    )
+    .unwrap();
+    // 2) 指向真实外部目录的链接（源必须完好保留）
+    let vendor = context.home_dir.join(".vendor-tool").join("skills");
+    std::fs::create_dir_all(vendor.join("alpha")).unwrap();
+    std::fs::write(vendor.join("alpha").join("SKILL.md"), "# Alpha").unwrap();
+    std::os::unix::fs::symlink(vendor.join("alpha"), claude_skills.join("alpha")).unwrap();
+    // 3) 真实目录（不是链接）
+    std::fs::create_dir_all(claude_skills.join("synced")).unwrap();
+
+    let remove = |link: &str| {
+        execute(
+            &context,
+            &request(
+                "skills:apply",
+                &[
+                    "--action",
+                    "remove-link",
+                    "--agent",
+                    "claude-code",
+                    "--link",
+                    link,
+                ],
+            ),
+        )
+    };
+
+    let ghost = remove("ghost");
+    assert!(ghost.ok, "{:?}", ghost.errors);
+    assert!(
+        std::fs::symlink_metadata(claude_skills.join("ghost")).is_err(),
+        "断链应已清理"
+    );
+
+    let alpha = remove("alpha");
+    assert!(alpha.ok, "{:?}", alpha.errors);
+    assert!(std::fs::symlink_metadata(claude_skills.join("alpha")).is_err());
+    assert!(
+        vendor.join("alpha").join("SKILL.md").is_file(),
+        "只删链接，绝不跟随链接删源"
+    );
+
+    let real_dir = remove("synced");
+    assert!(!real_dir.ok, "真实目录必须 fail-closed");
+    assert!(claude_skills.join("synced").is_dir(), "拒绝时目录原样保留");
+
+    let missing = remove("not-there");
+    assert!(!missing.ok, "不存在的目标应明确拒绝而不是谎报成功");
+
+    // 4) 有分配记录的条目不能从清理入口绕过
+    let conn = store::open_write(&context).unwrap();
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS skill_bindings (
+            collection TEXT NOT NULL, skill TEXT NOT NULL, agent TEXT NOT NULL,
+            version TEXT NOT NULL, enabled INTEGER NOT NULL, assigned INTEGER NOT NULL,
+            updated_at TEXT NOT NULL, PRIMARY KEY (collection, skill, agent));",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO skill_bindings VALUES ('vendor','bound','claude-code','v1',1,1,'now');",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    std::os::unix::fs::symlink(vendor.join("alpha"), claude_skills.join("bound")).unwrap();
+    let bound = remove("bound");
+    assert!(!bound.ok, "有分配记录的条目要走集合 remove");
+    assert!(
+        std::fs::symlink_metadata(claude_skills.join("bound")).is_ok(),
+        "拒绝时链接保留"
+    );
+
+    // 参数反例
+    for args in [
+        &["--action", "remove-link", "--agent", "claude-code"][..],
+        &["--action", "remove-link", "--link", "ghost"][..],
+        &[
+            "--action",
+            "remove-link",
+            "--agent",
+            "claude-code",
+            "--link",
+            "ghost",
+            "--only",
+            "x/y",
+        ][..],
+        &[
+            "--action",
+            "remove-link",
+            "--agent",
+            "claude-code",
+            "--link",
+            "../escape",
+        ][..],
+    ] {
+        let bad = execute(&context, &request("skills:apply", args));
+        assert!(!bad.ok, "参数 {:?} 必须被拒绝", args);
+    }
+
+    let _ = std::fs::remove_dir_all(root);
+}

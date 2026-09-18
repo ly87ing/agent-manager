@@ -22,12 +22,22 @@ pub fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     if req.flag("--dry-run") {
         bail!("skills:apply 已退役 --dry-run，拒绝该参数（执行前请以 skills:status 确认状态）");
     }
-    let only = req
-        .value("--only")
-        .ok_or_else(|| anyhow!("缺少 --only 参数"))?;
     let action = req
         .value("--action")
         .ok_or_else(|| anyhow!("缺少 --action 参数"))?;
+    // 清理孤立链接：不属于任何集合，因此不要 --only，用 --link 指名
+    if action == "remove-link" {
+        apply_remove_link(ctx, req)?;
+        let link = req.value("--link").unwrap_or("");
+        return Ok(json!({
+            "domain": "skills",
+            "steps": [{"name": format!("skills:remove-link {}", link), "ok": true, "exit_code": 0}],
+            "skipped": [],
+        }));
+    }
+    let only = req
+        .value("--only")
+        .ok_or_else(|| anyhow!("缺少 --only 参数"))?;
     let target = parse_only(only)?;
     // 显式接管通道：仅逐 skill 的 add/remove 可携带，其余动作与集合级一律拒绝。
     if req.flag("--allow-takeover")
@@ -87,6 +97,73 @@ pub fn apply(ctx: &Context, req: &Request) -> Result<Value> {
             Err(err)
         }
     }
+}
+
+/// 清理助手技能目录里的孤立链接：断链或旧体系残留，不属于任何集合、也没有分配记录。
+///
+/// 只删除符号链接本身，绝不跟随链接删源；真实文件/目录一律 fail-closed；
+/// 已有分配记录的条目要走它所属集合的 remove，不从这里绕过。
+fn apply_remove_link(ctx: &Context, req: &Request) -> Result<()> {
+    let agent = req
+        .value("--agent")
+        .ok_or_else(|| anyhow!("清理链接必须指定 --agent"))?;
+    let link = req
+        .value("--link")
+        .ok_or_else(|| anyhow!("清理链接必须用 --link 指名"))?;
+    super::paths::validate_path_identifier(agent, "Agent 名称")?;
+    super::paths::validate_path_identifier(link, "链接名称")?;
+
+    let meta = load_metadata(ctx)?;
+    let agent_info = meta
+        .agents
+        .get(agent)
+        .ok_or_else(|| anyhow!("未知 agent: {}", agent))?;
+    let link_path = agent_info.skills_dir.join(link);
+
+    if !is_link_entry(&link_path) {
+        if link_path.exists() {
+            bail!("[{}@{}] 目标是真实文件或目录，拒绝删除", link, agent);
+        }
+        bail!("[{}@{}] 目标不存在，无需清理", link, agent);
+    }
+    let bindings = load_bindings_readonly(ctx)?;
+    if bindings.iter().any(|((_, skill, bound_agent), binding)| {
+        skill == link && bound_agent == agent && binding.assigned
+    }) {
+        bail!(
+            "[{}@{}] 这条链接有分配记录，请在它所属集合里移除，不从清理入口绕过",
+            link,
+            agent
+        );
+    }
+
+    let old_target = resolve_link_target(&link_path).ok();
+    std::fs::remove_file(&link_path)
+        .with_context(|| format!("[{}@{}] 删除链接失败", link, agent))?;
+
+    let mut conn = store::open_write(ctx)?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let res = (|| -> Result<()> {
+        store::record_operation(
+            &tx,
+            Some(&req.run_id),
+            "skills:remove-link",
+            Some(&format!("{}@{}", link, agent)),
+            Some(
+                &json!({"action": "remove-link", "dangling": old_target.as_ref().map(|t| !t.exists()).unwrap_or(true)}),
+            ),
+        )?;
+        tx.commit()?;
+        Ok(())
+    })();
+    if let Err(err) = res {
+        // 审计写不进去就把链接放回原样，不留下「删了但没记录」的状态
+        if let Some(target) = old_target {
+            let _ = std::os::unix::fs::symlink(&target, &link_path);
+        }
+        return Err(err);
+    }
+    Ok(())
 }
 
 fn apply_single_skill(

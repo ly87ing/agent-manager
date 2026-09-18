@@ -120,6 +120,8 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             if domain == "skills" {
                 specs.push(("--agent", ArgValueKind::ElementId));
                 specs.push(("--action", ArgValueKind::SkillAction));
+                // 孤立链接清理：按名指定，不属于任何集合
+                specs.push(("--link", ArgValueKind::ElementId));
                 // 逐 skill add/remove 的显式接管通道（引擎侧再强制动作范围与非受管判定）
                 specs.push(("--allow-takeover", ArgValueKind::Flag));
             }
@@ -226,7 +228,7 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
             )),
         },
         ArgValueKind::SkillAction => match value {
-            "add" | "update" | "enable" | "disable" | "remove" => Ok(()),
+            "add" | "update" | "enable" | "disable" | "remove" | "remove-link" => Ok(()),
             _ => Err(EngineError::new("invalid_args", "非法 skills action")),
         },
         ArgValueKind::McpAction => match value {
@@ -503,6 +505,17 @@ mod tests {
                 vec!["--only".into(), "mcp:grok-search".into()],
             ),
             ("system:discover", vec!["--only".into(), "skills".into()]),
+            (
+                "skills:apply",
+                vec![
+                    "--action".into(),
+                    "remove-link".into(),
+                    "--agent".into(),
+                    "claude-code".into(),
+                    "--link".into(),
+                    "stale-one".into(),
+                ],
+            ),
             (
                 "mcp:apply",
                 vec![

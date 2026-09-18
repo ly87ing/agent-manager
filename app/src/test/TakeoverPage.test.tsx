@@ -126,10 +126,11 @@ describe("接管中心", () => {
     expect(screen.getByTestId("takeover-skill-group-vendor").querySelector("input[type=checkbox]")).toBeTruthy();
     expect(screen.getByTestId("takeover-mcp-grok-search").querySelector("input[type=checkbox]")).toBeTruthy();
 
-    // 原生管理与失效链接只展示，不提供接管勾选
+    // 原生管理项只展示，不提供勾选（它归各自的安装方式管）
     expect(screen.getByTestId("takeover-native-synced-claude-code").querySelector("input[type=checkbox]")).toBeNull();
-    expect(screen.getByTestId("takeover-dead-ghost-codex").querySelector("input[type=checkbox]")).toBeNull();
     expect(screen.getByTestId("takeover-native-synced-claude-code")).toHaveTextContent("原生管理");
+    // 残留链接可勾选，但走的是清理而不是纳管
+    expect(screen.getByTestId("takeover-dead-ghost-codex").querySelector("input[type=checkbox]")).toBeTruthy();
     // 非 npm 来源的助手登记后保持原生管理方式
     expect(screen.getByTestId("takeover-agent-opencode")).toHaveTextContent("仅登记标识，保持原生管理");
   });
@@ -214,6 +215,29 @@ describe("接管中心", () => {
     await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
     expect(calls.find((call) => call.command === "policy:set")?.args[3]).toBe("agents.definitions.opencode");
     expect(calls.some((call) => call.command === "agents:apply")).toBe(false);
+  });
+
+  it("残留链接可勾选清理：只删链接本身，确认文案分开说明", async () => {
+    const { calls } = renderWithEngine(<TakeoverPage />, {
+      ...routes(),
+      "skills:apply": makeEnvelope(makeApplyResult({ domain: "skills" }), { command: "skills.apply" }),
+    });
+    await waitFor(() => expect(screen.getByTestId("takeover-dead-ghost-codex")).toBeInTheDocument());
+
+    await userEvent.click(screen.getByTestId("takeover-dead-ghost-codex").querySelector("input[type=checkbox]")!);
+    await userEvent.click(screen.getByTestId("takeover-run"));
+    expect(await screen.findByText(/条残留链接会被删除（只删链接本身，不动源目录）/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "开始接管" }));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));
+    expect(calls.find((call) => call.command === "skills:apply")?.args).toEqual([
+      "--action",
+      "remove-link",
+      "--agent",
+      "codex",
+      "--link",
+      "ghost",
+    ]);
   });
 
   it("没有可接管项时按钮禁用且空态可见", async () => {

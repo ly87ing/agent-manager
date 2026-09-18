@@ -168,6 +168,21 @@ export default function TakeoverPage() {
         ],
       });
     }
+    for (const item of deadLinks) {
+      const key = `skill-cleanup:${item.name}@${item.agent}`;
+      map.set(key, {
+        key,
+        label: `清理链接 ${item.name} @ ${item.agent}`,
+        // 只删链接本身：真实目录与有分配记录的条目引擎侧一律拒绝
+        steps: [
+          {
+            kind: "apply",
+            command: "skills:apply",
+            args: ["--action", "remove-link", "--agent", item.agent, "--link", item.name],
+          },
+        ],
+      });
+    }
     for (const group of mcpGroups) {
       const definition = {
         ...candidateToDefinition(group.entries[0]),
@@ -186,7 +201,7 @@ export default function TakeoverPage() {
       map.set(`mcp:${group.name}`, { key: `mcp:${group.name}`, label: `MCP ${group.name}`, steps });
     }
     return map;
-  }, [agents, skillGroups, extraLinks, mcpGroups]);
+  }, [agents, skillGroups, extraLinks, deadLinks, mcpGroups]);
 
   const toggle = (key: string) => {
     setSelected((prev) => {
@@ -204,6 +219,8 @@ export default function TakeoverPage() {
   const replacingCount = selectedKeys.filter((key) =>
     tasks.get(key)?.steps.some((step) => step.kind === "apply" && step.args.includes("--allow-takeover")),
   ).length;
+  /** 选中的清理项数量：确认文案要分开说，它删的是链接而不是纳管。 */
+  const cleanupCount = selectedKeys.filter((key) => key.startsWith("skill-cleanup:")).length;
 
   if (query.isPending) return <PageLoading text="正在扫描本机资源…" />;
   if (query.isError) return <PageError title="扫描失败" error={query.error} />;
@@ -409,30 +426,42 @@ export default function TakeoverPage() {
         <SectionCard
           icon={Link2Off}
           testId="takeover-dead-links"
-          title="失效链接（建议清理）"
-          description="链接目标已不存在。本工具不自动删除这些条目，确认无用后手工删除即可。"
+          title="可清理的残留链接"
+          description="断链或旧体系留下的链接。清理只删链接本身，不会跟随链接删掉源目录；真实目录与仍有分配记录的条目会被拒绝。"
         >
-          {deadLinks.map((item) => (
-            <div key={`${item.agent}:${item.name}`} data-testid={`takeover-dead-${item.name}-${item.agent}`} className="rounded-md border px-3 py-2">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="font-mono text-xs font-semibold text-foreground">{item.name}</span>
-                <Badge tone="muted">{item.agent}</Badge>
-                <Badge tone="warning">目标已丢失</Badge>
-              </div>
-              <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{item.link_path}</p>
-            </div>
-          ))}
+          {deadLinks.map((item) => {
+            const key = `skill-cleanup:${item.name}@${item.agent}`;
+            return (
+              <SelectableRow
+                key={`${item.agent}:${item.name}`}
+                testId={`takeover-dead-${item.name}-${item.agent}`}
+                checked={selected.has(key)}
+                onToggle={() => toggle(key)}
+              >
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-mono text-xs font-semibold text-foreground">{item.name}</span>
+                  <Badge tone="muted">{item.agent}</Badge>
+                  <Badge tone="warning">{item.origin === "dead-link" ? "目标已丢失" : "旧体系残留"}</Badge>
+                </div>
+                <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{item.link_path}</p>
+              </SelectableRow>
+            );
+          })}
         </SectionCard>
       )}
 
       {confirming && (
         <ConfirmModal
-          title={`接管所选 ${takeoverCount} 项`}
-          description={
+          title={cleanupCount === takeoverCount && takeoverCount > 0 ? `清理所选 ${takeoverCount} 项` : `接管所选 ${takeoverCount} 项`}
+          description={[
+            "将保存定义并对可接管项执行真实操作。外部源目录与原生安装的资源不会被删除或改写。",
             replacingCount > 0
-              ? `将保存定义并对可接管项执行真实操作；其中 ${replacingCount} 项会替换助手里的同名外部条目（接管后由本工具统一维护）。外部源目录与原生安装的资源不会被删除或改写。`
-              : "将保存定义并对可接管项执行真实操作。外部源目录与原生安装的资源不会被删除或改写。"
-          }
+              ? `其中 ${replacingCount} 项会替换助手里的同名外部条目（接管后由本工具统一维护）。`
+              : "",
+            cleanupCount > 0 ? `另有 ${cleanupCount} 条残留链接会被删除（只删链接本身，不动源目录）。` : "",
+          ]
+            .filter(Boolean)
+            .join("")}
           risk="write-local"
           confirmLabel="开始接管"
           executing={takeover.executing}
