@@ -28,6 +28,11 @@ function profileElement(overrides: Record<string, unknown> = {}) {
       target_exists: false,
       env_refs: [{ name: "ANTHROPIC_AUTH_TOKEN", kind: "reference", variable: "MY_TOKEN", resolved: true }],
       launch_value: 'CLAUDE_CONFIG_DIR="~/.claude-cc-ly" claude --dangerously-skip-permissions',
+      usage: {
+        source: "/home/ly/.claude-cc-ly/.claude.json",
+        checked_at: "2026-09-18T03:00:00Z",
+        windows: [{ window_minutes: 300, used_percent: 7, resets_at: null }],
+      },
       blocked_reason: null,
     },
     state: "not-materialized",
@@ -144,6 +149,9 @@ describe("助手实例", () => {
     expect(within(card).getByTestId("profile-launch-edit-cc-ly-cc-ly")).toBeInTheDocument();
     expect(within(card).getByTestId("profile-launch-copy-cc-ly-cc-ly")).toBeInTheDocument();
     expect(within(card).getByTestId("profile-launch-remove-cc-ly-cc-ly")).toBeInTheDocument();
+    // 实例多半是另一个账号，额度读它自己的配置目录，不是默认那份
+    expect(within(card).getByTestId("profile-usage-cc-ly")).toHaveTextContent("7%");
+    expect(within(card).getByTestId("profile-usage-cc-ly")).toHaveTextContent("5 小时");
     // 实例不再作为主助手卡片重复出现
     expect(screen.queryByTestId("manage-skills-agents:cc-ly")).toBeNull();
     expect(screen.getByTestId("manage-skills-agents:claude-code")).toBeInTheDocument();

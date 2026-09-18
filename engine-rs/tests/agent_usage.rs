@@ -23,13 +23,17 @@ fn request(command: &str, args: &[&str]) -> Request {
     }
 }
 
-fn define_agent(ctx: &Context, id: &str) {
-    let value = json!({
+/// 自定义助手：id 随便取，bin 决定按哪家格式读，config 指向它自己的配置文件。
+fn define_agent_with(ctx: &Context, id: &str, bin: &str, config: Option<&str>) {
+    let mut value = json!({
         "display_name": id,
-        "bin": format!("{id}-not-installed"),
+        "bin": bin,
         "preferred_provider": "local-test",
         "providers": {"local-test": {"install": "true"}}
     });
+    if let Some(path) = config {
+        value["mcp_config"] = json!({"path": path, "format": "json"});
+    }
     let env = execute(
         ctx,
         &request(
@@ -76,10 +80,10 @@ fn claude_额度取自_claude_json_的缓存并跳过没有的窗口() {
         .unwrap(),
     )
     .unwrap();
-    define_agent(&ctx, "claude-code");
+    define_agent_with(&ctx, "claude-code", "claude", None);
 
     let usage = usage_of(&ctx, "claude-code");
-    assert_eq!(usage["source"], json!(".claude.json"));
+    assert_eq!(usage["source"], json!(ctx.home_dir.join(".claude.json").display().to_string()));
     assert_eq!(usage["checked_at"], json!("2026-09-17T00:41:37Z"));
     assert_eq!(
         usage["windows"],
@@ -126,10 +130,13 @@ fn codex_取最新会话文件的最后一条额度_并能从大文件尾部读�
     fs::write(&newest, &newer).unwrap();
     assert!(fs::metadata(&newest).unwrap().len() > 1 << 20, "垫料不足以触发尾部回读");
 
-    define_agent(&ctx, "codex");
+    define_agent_with(&ctx, "codex", "codex", None);
 
     let usage = usage_of(&ctx, "codex");
-    assert_eq!(usage["source"], json!(".codex/sessions"));
+    assert_eq!(
+        usage["source"],
+        json!(ctx.home_dir.join(".codex/sessions").display().to_string())
+    );
     assert_eq!(usage["plan"], json!("prolite"));
     assert_eq!(usage["credits"], json!("2443.02"));
     assert_eq!(
@@ -142,10 +149,61 @@ fn codex_取最新会话文件的最后一条额度_并能从大文件尾部读�
 #[test]
 fn 没有本地额度记录的助手为_null_且_status_不写任何文件() {
     let (base, ctx) = temp_ctx("none");
-    define_agent(&ctx, "opencode");
+    define_agent_with(&ctx, "opencode", "opencode", None);
     assert_eq!(usage_of(&ctx, "opencode"), json!(null));
     // status 只读：不得凭空生成这些目录
     assert!(!ctx.home_dir.join(".codex").exists());
     assert!(!ctx.home_dir.join(".claude.json").exists());
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn 用户新建的助手_按_bin_认种类_按它自己的配置路径读() {
+    let (base, ctx) = temp_ctx("custom");
+    // 实例式：配置不在 ~ 下，而在自己的目录里（CLAUDE_CONFIG_DIR 指过去的那种）
+    let instance = ctx.home_dir.join(".claude-work");
+    fs::create_dir_all(&instance).unwrap();
+    fs::write(
+        instance.join(".claude.json"),
+        serde_json::to_string(&json!({
+            "cachedUsageUtilization": {
+                "fetchedAtMs": 1_789_605_697_689i64,
+                "utilization": {"five_hour": {"utilization": 42, "resets_at": "2026-09-17T05:30:00+00:00"}}
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    // id 完全是用户自己取的，跟内置的 claude-code 无关
+    define_agent_with(&ctx, "my-work-claude", "claude", Some("~/.claude-work/.claude.json"));
+
+    let usage = usage_of(&ctx, "my-work-claude");
+    assert_eq!(usage["windows"][0]["used_percent"], json!(42.0));
+    // 来源给完整路径：多个实例只说「.claude.json」分不清是哪个
+    assert_eq!(usage["source"], json!(instance.join(".claude.json").display().to_string()));
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn bin_写成绝对路径也认得出来_不认识的_bin_为_null() {
+    let (base, ctx) = temp_ctx("binpath");
+    fs::write(
+        ctx.home_dir.join(".claude.json"),
+        serde_json::to_string(&json!({
+            "cachedUsageUtilization": {
+                "fetchedAtMs": 1_789_605_697_689i64,
+                "utilization": {"five_hour": {"utilization": 5, "resets_at": null}}
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    define_agent_with(&ctx, "abs-claude", "/opt/homebrew/bin/claude", None);
+    define_agent_with(&ctx, "something-else", "my-own-cli", None);
+
+    assert_eq!(usage_of(&ctx, "abs-claude")["windows"][0]["used_percent"], json!(5.0));
+    assert_eq!(usage_of(&ctx, "something-else"), json!(null));
     let _ = fs::remove_dir_all(&base);
 }

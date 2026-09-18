@@ -23,10 +23,50 @@ use serde_json::{json, Map, Value};
 const TAIL_SCAN_BYTES: u64 = 1 << 20;
 
 /// 读某个助手的额度。没有本地记录时返回 None。
-pub(crate) fn read(home_dir: &Path, agent_id: &str) -> Option<Value> {
-    match agent_id {
-        "claude-code" => claude(home_dir),
-        "codex" => codex(home_dir),
+///
+/// `bin` 决定按哪家的格式读，`config_path` 是这个助手定义里写的配置文件位置
+/// （claude 的 `.claude.json` / codex 的 `config.toml`），没写就回落到默认位置。
+pub(crate) fn read(home_dir: &Path, bin: &str, config_path: Option<&str>) -> Option<Value> {
+    let config = config_path.map(|raw| crate::native_mcp::targets::expand_home(raw, home_dir));
+    match binary_kind(bin)? {
+        Kind::Claude => {
+            let path = config.unwrap_or_else(|| home_dir.join(".claude.json"));
+            claude(&path)
+        }
+        Kind::Codex => {
+            // 配置文件是 <CODEX_HOME>/config.toml，会话就在它旁边
+            let root = config
+                .as_deref()
+                .and_then(Path::parent)
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| home_dir.join(".codex"));
+            codex(&root.join("sessions"))
+        }
+    }
+}
+
+/// 实例（profile）的额度：配置目录由实例自己定义，直接按种类去那里读。
+///
+/// 实例存在的意义就是多开不同账号，额度自然各算各的——用默认位置那份会张冠李戴。
+pub(crate) fn read_profile(kind: &str, config_dir: &Path) -> Option<Value> {
+    match kind {
+        "claude" => claude(&config_dir.join(".claude.json")),
+        "codex" => codex(&config_dir.join("sessions")),
+        _ => None,
+    }
+}
+
+enum Kind {
+    Claude,
+    Codex,
+}
+
+/// 只认可执行程序名，路径和 .exe 后缀都剥掉：自定义助手可能把 bin 写成绝对路径。
+fn binary_kind(bin: &str) -> Option<Kind> {
+    let name = Path::new(bin).file_stem()?.to_str()?;
+    match name {
+        "claude" => Some(Kind::Claude),
+        "codex" => Some(Kind::Codex),
         _ => None,
     }
 }
@@ -53,6 +93,12 @@ fn window(minutes: i64, used_percent: f64, resets_at: Option<String>) -> Value {
     })
 }
 
+/// 数字是从哪个文件读来的，直接给完整路径：实例各有各的配置目录，只说「.claude.json」
+/// 分不清是哪一个。
+fn display(path: &Path) -> String {
+    path.display().to_string()
+}
+
 fn rfc3339_secs(dt: DateTime<Utc>) -> String {
     dt.to_rfc3339_opts(SecondsFormat::Secs, true)
 }
@@ -70,9 +116,8 @@ fn from_unix_secs(secs: i64) -> Option<String> {
 
 /// Claude Code 自己缓存的额度：`utilization` 是已用百分比，窗口名固定为
 /// five_hour / seven_day，其余窗口（按套餐才有）为 null，跳过。
-fn claude(home_dir: &Path) -> Option<Value> {
-    let path = home_dir.join(".claude.json");
-    let root: Value = serde_json::from_str(&fs::read_to_string(&path).ok()?).ok()?;
+fn claude(path: &Path) -> Option<Value> {
+    let root: Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
     let cached = root.get("cachedUsageUtilization")?;
     let checked_at = cached
         .get("fetchedAtMs")
@@ -92,14 +137,14 @@ fn claude(home_dir: &Path) -> Option<Value> {
         windows.push(window(minutes, used, resets_at));
     }
 
-    usage(".claude.json", checked_at, windows, Map::new())
+    usage(&display(path), checked_at, windows, Map::new())
 }
 
 // ---------- Codex ----------
 
 /// Codex 把额度写在会话记录里，取最新那次会话的最后一条。
-fn codex(home_dir: &Path) -> Option<Value> {
-    let path = newest_rollout(&home_dir.join(".codex").join("sessions"))?;
+fn codex(sessions_dir: &Path) -> Option<Value> {
+    let path = newest_rollout(sessions_dir)?;
     let line = last_line_with(&path, "\"rate_limits\"")?;
     let event: Value = serde_json::from_str(&line).ok()?;
     let limits = find_key(&event, "rate_limits")?;
@@ -131,7 +176,7 @@ fn codex(home_dir: &Path) -> Option<Value> {
         extra.insert("credits".into(), json!(balance));
     }
 
-    usage(".codex/sessions", checked_at, windows, extra)
+    usage(&display(sessions_dir), checked_at, windows, extra)
 }
 
 /// 会话目录按 年/月/日 分层，文件数不多，直接按修改时刻取最新。

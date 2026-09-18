@@ -1,3 +1,4 @@
+import type { AgentUsage } from "./observed";
 /**
  * Contract v1（contract/engine-v1/*.schema.json）的 TypeScript 镜像。
  * 字段命名与 schema 完全一致（snake_case），可空字段遵循 schema 的
@@ -162,6 +163,8 @@ export interface ProfileObserved {
   env_refs: ProfileEnvRef[];
   /** 建议的启动命令取值，可直接存成同名快捷命令。 */
   launch_value: string;
+  /** 这个实例自己的额度：实例多半是另一个账号，各算各的。 */
+  usage?: AgentUsage | null;
   blocked_reason: string | null;
 }
 

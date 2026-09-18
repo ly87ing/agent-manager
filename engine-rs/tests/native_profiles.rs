@@ -415,3 +415,37 @@ fn codex_profile_directory_gets_rules_and_hooks() {
 
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn 实例的额度读它自己的配置目录_不是默认那份() {
+    let (root, ctx) = temp_ctx("usage");
+    // 默认位置放一份「别人的」额度：读串了就会看到 99
+    std::fs::write(
+        ctx.home_dir.join(".claude.json"),
+        r#"{"cachedUsageUtilization":{"fetchedAtMs":1789605697689,"utilization":{"five_hour":{"utilization":99,"resets_at":null}}}}"#,
+    )
+    .unwrap();
+    // 实例自己的配置目录
+    let instance = ctx.home_dir.join(".claude-ly");
+    std::fs::create_dir_all(&instance).unwrap();
+    std::fs::write(
+        instance.join(".claude.json"),
+        r#"{"cachedUsageUtilization":{"fetchedAtMs":1789605697689,"utilization":{"five_hour":{"utilization":7,"resets_at":null}}}}"#,
+    )
+    .unwrap();
+
+    std::env::set_var("AM_TEST_TOKEN_USAGE", "t");
+    assert!(save_definition(&ctx, "cc-usage", &claude_profile("AM_TEST_TOKEN_USAGE")));
+
+    let env = execute(&ctx, &request("profiles:status", &[]));
+    assert!(env.ok, "profiles:status 失败: {:?}", env.errors);
+    let usage = &element(&env, "cc-usage")["observed"]["usage"];
+    assert_eq!(usage["windows"][0]["used_percent"], serde_json::json!(7.0));
+    assert_eq!(
+        usage["source"],
+        serde_json::json!(instance.join(".claude.json").display().to_string())
+    );
+
+    std::env::remove_var("AM_TEST_TOKEN_USAGE");
+    let _ = std::fs::remove_dir_all(&root);
+}

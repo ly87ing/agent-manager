@@ -1,6 +1,7 @@
 import { Copy, FolderTree, Loader2, PlayCircle, Plus, Sparkles, Terminal, Trash2, Wrench } from "lucide-react";
 import type { EngineElement } from "../lib/contract";
 import type { ProfileObserved, ProfileSpec } from "../lib/contract";
+import { AgentUsageBar } from "./AgentUsageBar";
 import type { ProfileLaunchCommand } from "../lib/profileDefinition";
 import { StateBadge } from "./StateBadge";
 import { cn } from "../lib/utils";
@@ -73,6 +74,13 @@ export function ProfileCard({
       </div>
 
       <p className="mt-2 text-xs text-muted-foreground">{blocked ?? STATE_NOTE[element.state] ?? ""}</p>
+
+      {/* 实例多半是另一个账号，额度各算各的 */}
+      {observed.usage && (
+        <div className="mt-3 rounded-md border px-3 py-2">
+          <AgentUsageBar usage={observed.usage} testId={`profile-usage-${id}`} />
+        </div>
+      )}
 
       <div className="mt-3 space-y-1.5 border-t pt-3 text-[11px] text-muted-foreground">
         <p className="flex items-start gap-1.5 break-all">
