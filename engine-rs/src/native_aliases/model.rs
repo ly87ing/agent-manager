@@ -125,6 +125,29 @@ pub(crate) fn render_alias_lines(cfg: &Map<String, Value>) -> Vec<String> {
         .collect()
 }
 
+/// 解析受管区块里的 alias 行 → 名称到整行的映射。
+///
+/// 供状态逐条回读用：用户要知道「我配的这条，终端配置里现在到底是什么」，
+/// 光有整块摘要看不出是哪一条没跟上。不认识的行忽略，不猜测其含义。
+pub(crate) fn parse_alias_lines(inner: &str) -> std::collections::BTreeMap<String, String> {
+    let mut out = std::collections::BTreeMap::new();
+    for line in inner.lines() {
+        let trimmed = line.trim();
+        let Some(rest) = trimmed.strip_prefix("alias ") else {
+            continue;
+        };
+        let Some((name, _)) = rest.split_once('=') else {
+            continue;
+        };
+        let name = name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        out.insert(name.to_string(), trimmed.to_string());
+    }
+    out
+}
+
 /// 提取受管区块：(是否找到, 区块内文本)；区块外内容忽略。多区块只认首个，
 /// 与渲染侧替换语义一致。
 pub(crate) fn extract_alias_block(text: &str) -> (bool, String) {
@@ -220,6 +243,15 @@ mod tests {
             vec!["alias ll='ls -l'", "alias ts='TZ=UTC LANG=C x'"]
         );
         assert!(render_alias_lines(&Map::new()).is_empty());
+    }
+
+    #[test]
+    fn parse_alias_lines_reads_each_entry() {
+        let inner = "alias claude='TZ=\"UTC\" claude'\nalias ll='ls -l'\n# 注释行\n乱七八糟";
+        let parsed = parse_alias_lines(inner);
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed["claude"], "alias claude='TZ=\"UTC\" claude'");
+        assert_eq!(parsed["ll"], "alias ll='ls -l'");
     }
 
     #[test]

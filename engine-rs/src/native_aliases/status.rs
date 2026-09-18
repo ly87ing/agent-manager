@@ -124,6 +124,39 @@ fn sync_action() -> Value {
     json!([{ "id": "sync", "risk": "write-local", "needs_lock": true, "offline_ok": true }])
 }
 
+/// 逐条生效回读：每条快捷命令的期望取值、目标里的实际取值与是否一致。
+///
+/// 只回答「配置文件里现在是什么」——终端会话是否已加载是另一回事（要新开窗口），
+/// 那个本工具看不到，也不假装能看到。
+fn alias_entries(alias_lines: &[String], actual_block: Option<&str>) -> Value {
+    let actual = actual_block
+        .map(model::parse_alias_lines)
+        .unwrap_or_default();
+    let mut out = Vec::new();
+    for expected_line in alias_lines {
+        let name = expected_line
+            .strip_prefix("alias ")
+            .and_then(|rest| rest.split_once('='))
+            .map(|(name, _)| name.trim().to_string())
+            .unwrap_or_default();
+        let actual_line = actual.get(&name).cloned();
+        let state = match (&actual_line, actual_block.is_some()) {
+            (Some(line), _) if line == expected_line => "applied",
+            (Some(_), _) => "outdated",
+            // 区块都还没写进去，与「区块在但少了这条」区分开
+            (None, true) => "missing",
+            (None, false) => "not-materialized",
+        };
+        out.push(json!({
+            "name": name,
+            "expected": expected_line,
+            "actual": actual_line,
+            "state": state,
+        }));
+    }
+    Value::Array(out)
+}
+
 fn build_element(
     ctx: &Context,
     snap: &Snapshot,
@@ -140,6 +173,7 @@ fn build_element(
     let abs_target = ctx.home_dir.join(spec.target);
     let abs_display = abs_target.display().to_string();
 
+    let mut actual_block: Option<String> = None;
     let (state, target_exists, block_present, actual_digest, actual_block_digest, blocked_reason) =
         match probe_target(&abs_target) {
             TargetProbe::Blocked { exists, reason } => (
@@ -166,6 +200,9 @@ fn build_element(
                 let digest = sha256_hex_bytes(&bytes);
                 let text = String::from_utf8_lossy(&bytes);
                 let (found, inner) = model::extract_alias_block(&text);
+                if found {
+                    actual_block = Some(inner.clone());
+                }
                 let block_digest = if found {
                     Value::String(sha256_hex(&inner))
                 } else {
@@ -258,6 +295,7 @@ fn build_element(
             "source_revision": source_revision,
             "blocked_reason": blocked_reason,
             "registration_needed": false,
+            "entries": alias_entries(&alias_lines, actual_block.as_deref()),
         },
         "state": state,
         "freshness": freshness_json(),

@@ -9,9 +9,11 @@ import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { SourceDefinitionsPanel } from "../components/SourceDefinitionsPanel";
 import type { StatusData } from "../lib/contract";
 import { LANG_OPTIONS, listTimeZones, renderAliasPreview } from "../lib/aliasCommand";
+import { ALIAS_EFFECT_HINT, ALIAS_EFFECT_LABEL, aliasEffectOf, aliasElementsOf } from "../lib/aliasEffect";
 import { toastWithUndo } from "../lib/undo";
 import { useAliasSource } from "../lib/useAliasSource";
 import { useEngineQuery } from "../lib/queries";
+import { cn } from "../lib/utils";
 import { useDirectApply } from "../lib/useDirectApply";
 
 const PAGE_NOTE =
@@ -44,6 +46,7 @@ export default function AliasesPage() {
   const globals = { timezone: source.timezone, lang: source.lang };
   const names = Object.keys(source.aliases).sort();
   const timeZones = listTimeZones();
+  const aliasElements = aliasElementsOf(statusQuery.data);
 
   const saveAlias = async (name: string, value: string) => {
     const ok = await save({ aliases: { ...source.aliases, [name]: value } }, `已保存 ${name}`);
@@ -136,7 +139,27 @@ export default function AliasesPage() {
             {names.map((name) => (
               <li key={name} data-testid={`alias-row-${name}`} className="flex flex-wrap items-center justify-between gap-3 rounded-md border px-3 py-2">
                 <div className="min-w-0">
-                  <span className="font-mono text-xs font-semibold text-foreground">{name}</span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-mono text-xs font-semibold text-foreground">{name}</span>
+                    {(() => {
+                      const effect = aliasEffectOf(aliasElements, name);
+                      const tone =
+                        effect === "applied"
+                          ? "border-success/30 bg-success/10 text-success"
+                          : effect === "unknown"
+                            ? "border bg-muted text-muted-foreground"
+                            : "border-warning/30 bg-warning/10 text-warning";
+                      return (
+                        <span
+                          data-testid={`alias-effect-${name}`}
+                          title={ALIAS_EFFECT_HINT[effect]}
+                          className={cn("rounded border px-1.5 py-0.5 text-[10px]", tone)}
+                        >
+                          {ALIAS_EFFECT_LABEL[effect]}
+                        </span>
+                      );
+                    })()}
+                  </div>
                   <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">
                     {renderAliasPreview(name, source.aliases[name], globals)}
                   </p>

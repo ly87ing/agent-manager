@@ -170,7 +170,10 @@ fn apply_creates_block_from_scratch_with_audit() {
     let content = String::from_utf8(read(&ctx, ".zshrc").unwrap()).unwrap();
     assert!(content.starts_with("# >>> agent-manager shell aliases >>>\n"));
     assert!(content.contains("alias chrome='open --env TZ=\"America/Los_Angeles\""));
-    assert!(content.contains("alias claude='TZ=\"America/Los_Angeles\" LANG=\"en_US.UTF-8\" LC_ALL=\"en_US.UTF-8\" claude --dangerously-skip-permissions'"));
+    // 内置默认只带时区与语言：跳过权限确认一类的高权限参数改由用户在界面上主动勾选，
+    // 不再是装完就有的默认值
+    assert!(content.contains("alias claude='TZ=\"America/Los_Angeles\" LANG=\"en_US.UTF-8\" LC_ALL=\"en_US.UTF-8\" claude'"));
+    assert!(!content.contains("--dangerously-skip-permissions"));
     assert!(content.contains("alias codex="));
     assert!(content.contains("alias grok="));
     assert!(content.ends_with("# <<< agent-manager shell aliases <<<\n"));
@@ -903,4 +906,61 @@ fn saving_source_never_applies() {
         "not-materialized"
     );
     let _ = std::fs::remove_dir_all(&base);
+}
+
+/// 逐条生效回读：配置文件里现在到底是哪一条跟上了、哪一条没跟上。
+#[test]
+fn status_reports_each_entry_against_the_shell_file() {
+    let (root, ctx) = temp_ctx("entry-readback");
+    std::fs::create_dir_all(&ctx.home_dir).unwrap();
+
+    // 区块里：claude 与期望一致、codex 是旧取值、grok 与 chrome 缺失
+    let block = "# >>> agent-manager shell aliases >>>\n\
+alias chrome='open --env TZ=\"America/Los_Angeles\" --env LANG=\"en_US.UTF-8\" --env LC_ALL=\"en_US.UTF-8\" -n -a \"Google Chrome\" --args --lang=en-US'\n\
+alias claude='TZ=\"America/Los_Angeles\" LANG=\"en_US.UTF-8\" LC_ALL=\"en_US.UTF-8\" claude'\n\
+alias codex='old-value'\n\
+# <<< agent-manager shell aliases <<<\n";
+    std::fs::write(ctx.home_dir.join(".zshrc"), block).unwrap();
+
+    let env = execute(&ctx, &request("aliases:status", &[]));
+    assert!(env.ok, "{:?}", env.errors);
+    let zshrc = env.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|el| el["id"] == "aliases:zshrc")
+        .unwrap();
+    let entries = zshrc["observed"]["entries"].as_array().unwrap();
+    let find = |name: &str| {
+        entries
+            .iter()
+            .find(|e| e["name"] == name)
+            .unwrap_or_else(|| panic!("缺少条目 {name}"))
+    };
+    assert_eq!(find("claude")["state"], "applied", "与期望一致的报已生效");
+    assert_eq!(find("codex")["state"], "outdated", "取值不同的报待同步");
+    assert_eq!(find("grok")["state"], "missing", "区块里没有的报缺失");
+    // 实际取值如实回读，便于界面直接展示「现在是什么」
+    assert_eq!(find("codex")["actual"], "alias codex='old-value'");
+    assert!(find("grok")["actual"].is_null());
+    // 内置默认不再预置跳过权限确认的参数
+    assert_eq!(
+        find("claude")["expected"],
+        "alias claude='TZ=\"America/Los_Angeles\" LANG=\"en_US.UTF-8\" LC_ALL=\"en_US.UTF-8\" claude'"
+    );
+
+    // 目标文件还不存在时，逐条都报「尚未写入」而不是「缺失」
+    let (root2, ctx2) = temp_ctx("entry-readback-fresh");
+    std::fs::create_dir_all(&ctx2.home_dir).unwrap();
+    let fresh = execute(&ctx2, &request("aliases:status", &[]));
+    let fresh_entries = fresh.data["elements"].as_array().unwrap()[0]["observed"]["entries"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert!(fresh_entries
+        .iter()
+        .all(|e| e["state"] == "not-materialized"));
+
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(root2);
 }

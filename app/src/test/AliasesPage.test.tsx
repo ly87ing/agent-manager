@@ -32,7 +32,40 @@ function aliasRoutes(aliases: Record<string, string> = {}) {
     "aliases:status": makeEnvelope(
       {
         domain: "aliases",
-        elements: [makeElement({ id: "aliases:zshrc", domain: "aliases", state: "managed-ok", observed: {}, spec: {} })],
+        elements: [
+          makeElement({
+            id: "aliases:zshrc",
+            domain: "aliases",
+            state: "managed-ok",
+            spec: {},
+            observed: {
+              entries: [
+                {
+                  name: "claude",
+                  expected: "alias claude='x'",
+                  actual: "alias claude='x'",
+                  state: "applied",
+                },
+              ],
+            },
+          }),
+          makeElement({
+            id: "aliases:zprofile",
+            domain: "aliases",
+            state: "managed-ok",
+            spec: {},
+            observed: {
+              entries: [
+                {
+                  name: "claude",
+                  expected: "alias claude='x'",
+                  actual: "alias claude='x'",
+                  state: "applied",
+                },
+              ],
+            },
+          }),
+        ],
       },
       { command: "aliases.status" },
     ),
@@ -236,6 +269,43 @@ describe("终端快捷命令页", () => {
     const payload = JSON.parse(write.args[write.args.indexOf("--value") + 1]);
     expect(payload.value.aliases.codex).toBeUndefined();
     expect(payload.value.aliases.claude).toBeDefined();
+  });
+
+  it("逐条显示是否真的写进终端配置：两个目标都跟上才算已写入", async () => {
+    renderWithEngine(<AliasesPage />, aliasRoutes());
+    expect(await screen.findByTestId("alias-effect-claude")).toHaveTextContent("已写入终端配置");
+  });
+
+  it("任一目标还是旧取值时报「还是旧的」，提示需要同步", async () => {
+    const routes = aliasRoutes();
+    routes["aliases:status"] = makeEnvelope(
+      {
+        domain: "aliases",
+        elements: [
+          makeElement({
+            id: "aliases:zshrc",
+            domain: "aliases",
+            state: "managed-ok",
+            spec: {},
+            observed: {
+              entries: [{ name: "claude", expected: "alias claude='new'", actual: "alias claude='new'", state: "applied" }],
+            },
+          }),
+          makeElement({
+            id: "aliases:zprofile",
+            domain: "aliases",
+            state: "drifted",
+            spec: {},
+            observed: {
+              entries: [{ name: "claude", expected: "alias claude='new'", actual: "alias claude='old'", state: "outdated" }],
+            },
+          }),
+        ],
+      },
+      { command: "aliases.status" },
+    );
+    renderWithEngine(<AliasesPage />, routes);
+    expect(await screen.findByTestId("alias-effect-claude")).toHaveTextContent("还是旧的");
   });
 
   it("立即同步触发 aliases:apply", async () => {

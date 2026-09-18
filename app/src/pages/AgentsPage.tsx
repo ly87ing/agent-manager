@@ -16,6 +16,7 @@ import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import { StateBadge } from "../components/StateBadge";
 import type { ElementAction, EngineElement, PolicyData, StatusData } from "../lib/contract";
 import { renderAliasPreview } from "../lib/aliasCommand";
+import { ALIAS_EFFECT_HINT, ALIAS_EFFECT_LABEL, aliasEffectOf, aliasElementsOf, type AliasEffect } from "../lib/aliasEffect";
 import {
   buildProfileDefinition,
   parseProfileDefinition,
@@ -116,6 +117,7 @@ function AgentCard({
   onEditAlias,
   onSyncAliases,
   aliasSyncing,
+  aliasEffect,
   policyBusy,
   onTogglePolicy,
 }: {
@@ -136,6 +138,8 @@ function AgentCard({
   onEditAlias: () => void;
   onSyncAliases: () => void;
   aliasSyncing: boolean;
+  /** 该命令在终端配置里的落地情况（两个目标都跟上才算已写入）。 */
+  aliasEffect: AliasEffect;
   /** 偏好写入在途：期间禁用开关，避免连点写出交错结果。 */
   policyBusy: boolean;
   onTogglePolicy: (key: "enabled" | "auto_install" | "auto_update", next: boolean) => void;
@@ -272,6 +276,22 @@ function AgentCard({
         <div className="flex items-center justify-between gap-2">
           <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
             <Terminal className="h-3.5 w-3.5" aria-hidden /> 启动命令
+            {aliasValue && (
+              <span
+                data-testid={`alias-effect-${element.id}`}
+                title={ALIAS_EFFECT_HINT[aliasEffect]}
+                className={cn(
+                  "rounded border px-1.5 py-0.5 text-[10px] font-normal",
+                  aliasEffect === "applied"
+                    ? "border-success/30 bg-success/10 text-success"
+                    : aliasEffect === "unknown"
+                      ? "border bg-muted text-muted-foreground"
+                      : "border-warning/30 bg-warning/10 text-warning",
+                )}
+              >
+                {ALIAS_EFFECT_LABEL[aliasEffect]}
+              </span>
+            )}
           </span>
           <div className="flex items-center gap-2">
             <button
@@ -369,6 +389,8 @@ export default function AgentsPage({
   const aliasSource = useAliasSource();
   // 与助手动作分开的执行实例：两者互不占用彼此的在途状态与按钮文案
   const aliasApply = useDirectApply();
+  // 终端配置里的实际落地情况：卡片据此显示是否已写入
+  const aliasStatusQuery = useEngineQuery<StatusData>("aliases:status");
   // 实例（同一助手的多套独立配置）：定义与 agents 共用，状态与写入走 profiles 域
   const profilesQuery = useEngineQuery<StatusData>("profiles:status");
   const profileApply = useDirectApply();
@@ -599,6 +621,10 @@ export default function AgentsPage({
               aliasValue={aliasOf(element)}
               aliasPreview={aliasPreviewOf(element)}
               aliasSyncing={aliasApply.executing}
+              aliasEffect={aliasEffectOf(
+                aliasElementsOf(aliasStatusQuery.data),
+                (element.spec as AgentsSpec).bin ?? "",
+              )}
               onEditAlias={() => {
                 const bin = (element.spec as AgentsSpec).bin ?? element.id.replace(/^agents:/, "");
                 setAliasEditing({ bin, name: bin, value: aliasOf(element) });
