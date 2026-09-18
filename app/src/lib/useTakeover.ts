@@ -44,7 +44,8 @@ export function useTakeover() {
   const [executing, setExecuting] = useState(false);
   const [progress, setProgress] = useState<TakeoverProgress | null>(null);
 
-  const run = async (tasks: TakeoverTask[]): Promise<TakeoverOutcome | null> => {
+  /** verb 决定执行记录与汇总提示怎么称呼这批操作：总览是「同步」，MCP/技能页是「接管」。 */
+  const run = async (tasks: TakeoverTask[], verb = "接管"): Promise<TakeoverOutcome | null> => {
     if (busyRef.current || tasks.length === 0) return null;
     busyRef.current = true;
     setExecuting(true);
@@ -69,11 +70,11 @@ export function useTakeover() {
                   ],
                 }
               : { command: step.command, args: step.args };
-          const envelope = await execute({ ...request, label: `接管 ${task.label}`, silent: true });
+          const envelope = await execute({ ...request, label: `${verb} ${task.label}`, silent: true });
           if (!envelope?.ok) {
             const message = envelope?.errors[0]?.message ?? "引擎调用失败，详见任务记录";
             failures.push({ label: task.label, message });
-            console.error(`[接管] ${task.label} 失败：${message}`);
+            console.error(`[${verb}] ${task.label} 失败：${message}`);
             ok = false;
             break;
           }
@@ -85,7 +86,7 @@ export function useTakeover() {
       setExecuting(false);
       setProgress(null);
     }
-    const summary = `接管完成：成功 ${succeeded}，失败 ${failures.length}`;
+    const summary = `${verb}完成：成功 ${succeeded}，失败 ${failures.length}`;
     if (failures.length > 0) {
       // 只给条数等于什么都没说：把每条失败的对象和原因直接列出来，用户才知道下一步做什么
       toast.error(summary, {

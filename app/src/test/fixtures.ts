@@ -2,6 +2,7 @@ import {
   CONTRACT_ID,
   type ApplyResultData,
   type AuditData,
+  type ElementAction,
   type EngineElement,
   type Envelope,
   type Freshness,
@@ -109,4 +110,9 @@ export function makePolicyData(overrides: Partial<PolicyData> = {}): PolicyData 
     path: null,
     ...overrides,
   };
+}
+
+/** 元素动作：测试大多只关心 id，其余字段给不影响判定的默认值。 */
+export function makeAction(id: string, overrides: Partial<ElementAction> = {}): ElementAction {
+  return { id, risk: "write-local", needs_lock: true, offline_ok: true, ...overrides };
 }

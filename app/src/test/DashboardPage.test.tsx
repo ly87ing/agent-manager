@@ -8,7 +8,7 @@ import { setEngineClient } from "../lib/engine";
 import { ExecutionProvider } from "../lib/execution";
 import { createQueryClient } from "../lib/queries";
 import { createMswEngineClient, startEngineServer, type EngineRoute } from "./engine-test-client";
-import { makeAuditData, makeElement, makeEnvelope, makeFreshness } from "./fixtures";
+import { makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness } from "./fixtures";
 import type { RefreshUpstreamData } from "../lib/contract";
 
 const servers: Array<ReturnType<typeof startEngineServer>> = [];
@@ -25,7 +25,7 @@ function renderDashboard(routes: Record<string, EngineRoute>) {
   const queryClient = createQueryClient({ retry: false });
   return render(
     <QueryClientProvider client={queryClient}>
-      {/* 总览页现在含同步中心，它会执行 apply，所以需要执行通道 */}
+      {/* 总览清单能一键同步，会执行 apply，所以需要执行通道 */}
       <ExecutionProvider>
         <DashboardPage onNavigate={() => {}} />
       </ExecutionProvider>
@@ -127,10 +127,26 @@ function okRoutes(): Record<string, EngineRoute> {
               cache_age_sec: 90,
             }),
           }),
-          makeElement({ id: "rules:claude_global", domain: "skills", freshness: makeFreshness({ state: "not-applicable" }) }),
+          makeElement({ id: "skill:agent-skills", domain: "skills", freshness: makeFreshness({ state: "not-applicable" }) }),
         ],
       },
       { command: "skills.status" },
+    ),
+    "profiles:status": makeEnvelope({ domain: "profiles", elements: [] }, { command: "profiles.status" }),
+    "rules:status": makeEnvelope({ domain: "rules", elements: [] }, { command: "rules.status" }),
+    "hooks:status": makeEnvelope({ domain: "hooks", elements: [] }, { command: "hooks.status" }),
+    "aliases:status": makeEnvelope(
+      {
+        domain: "aliases",
+        elements: [
+          makeElement({
+            id: "aliases:zshrc",
+            domain: "aliases",
+            observed: { entries: [{ name: "cc", state: "applied" }, { name: "yolo", state: "missing" }] },
+          }),
+        ],
+      },
+      { command: "aliases.status" },
     ),
   };
 }
@@ -141,34 +157,56 @@ describe("DashboardPage", () => {
     routes["system:audit"] = makeEnvelope(makeAuditData({ version: null }), { command: "system.audit" });
     renderDashboard(routes);
 
-    expect(await screen.findByTestId("audit-status-card")).toBeInTheDocument();
+    await userEvent.click(await screen.findByText(/体检明细/));
     expect(screen.getByText(/版本 信息不可用/)).toBeInTheDocument();
   });
 
-  it("渲染总状态卡、警告分类与 freshness 聚合卡（计数正确，not-applicable 不计入）", async () => {
+  it("清单按域列出每一项：名字、版本、要不要更新、同步到位没有", async () => {
     renderDashboard(okRoutes());
 
-    const statusCard = await screen.findByTestId("audit-status-card");
-    expect(within(statusCard).getByText("存在警告")).toBeInTheDocument();
-    expect(within(statusCard).getByText(/错误 0 · 警告 1/)).toBeInTheDocument();
+    // 助手：落后的一项直接把「当前 → 上游」摆出来，不用再点进更新页
+    const agents = await screen.findByTestId("overview-agents");
+    expect(within(agents).getByTestId("overview-item-agents:claude-code")).toHaveTextContent("2.0.0 → 2.1.3");
+    expect(within(agents).getByTestId("overview-item-agents:claude-code")).toHaveTextContent("可更新");
+    expect(within(agents).getByTestId("overview-item-agents:codex")).toHaveTextContent("已是最新");
 
-    expect(screen.getByTestId("warning-count-optional_tools")).toHaveTextContent("2");
-    expect(screen.getByTestId("warning-count-unmaterialized")).toHaveTextContent("1");
-    expect(screen.getByTestId("warning-count-official_gaps")).toHaveTextContent("0");
+    // MCP：被本工具以外改过的标成「要你决定」，并给去处理入口
+    const mcp = await screen.findByTestId("overview-mcp");
+    expect(within(mcp).getByTestId("overview-item-mcp:chrome-devtools")).toHaveTextContent("要你决定");
+    expect(within(mcp).getByTestId("overview-goto-mcp:chrome-devtools")).toBeInTheDocument();
+    expect(within(mcp).getByTestId("overview-item-mcp:grok-search")).toHaveTextContent("未检查");
 
-    // 版本原来占三张聚合卡加一张落后元素表，与更新中心完全重复；总览只留一句结论加入口。
-    // 计数正确性由 aggregateFreshness 的单测保证，这里只断言结论这句话对得上。
-    const summary = await screen.findByTestId("freshness-summary");
-    // agents 1 项落后 + mcp 1 项落后 = 2；mcp 1 项未检查
-    expect(summary).toHaveTextContent("2 项可更新");
-    expect(summary).toHaveTextContent("1 项还没检查过");
-    expect(summary).toHaveTextContent(/上次检查/);
-    expect(screen.getByTestId("goto-updates")).toBeInTheDocument();
+    // 技能：来源已经展开成单个技能后，来源本身不再占一行
+    const skills = await screen.findByTestId("overview-skills");
+    expect(within(skills).getByTestId("overview-item-skill:agent-skills/find-skills")).toBeInTheDocument();
+    expect(within(skills).queryByTestId("overview-item-skill:agent-skills")).not.toBeInTheDocument();
+
+    // 快捷命令：按名字合并两个 shell 文件，没写进去的算待同步
+    const aliases = await screen.findByTestId("overview-aliases");
+    expect(within(aliases).getByTestId("overview-item-alias:cc")).toHaveTextContent("已同步");
+    expect(within(aliases).getByTestId("overview-item-alias:yolo")).toHaveTextContent("待同步");
+
+    // 空的域不占位置
+    expect(screen.queryByTestId("overview-profiles")).not.toBeInTheDocument();
 
     // 明细默认收起，展开后按段分组渲染
     await userEvent.click(screen.getByText(/体检明细/));
     expect(screen.getByTestId("audit-section-runtime")).toHaveTextContent("engine-rs");
     expect(screen.getByTestId("audit-section-mcp")).toHaveTextContent("托管产物尚未生成");
+  });
+
+  it("一键同步：只对待同步的执行 apply，要你决定的不碰", async () => {
+    const routes = okRoutes();
+    // 只注册 aliases:apply；若批量误把「要你决定」的 MCP 也算进去，mcp:apply 未注册会记为失败
+    routes["aliases:apply"] = makeEnvelope(makeApplyResult({ domain: "aliases" }), { command: "aliases.apply" });
+    renderDashboard(routes);
+
+    const button = await screen.findByTestId("sync-all-button");
+    // 待同步只有快捷命令 yolo 一条；MCP 那条是「要你决定」，不进批量
+    expect(button).toHaveTextContent("全部同步（1）");
+    await userEvent.click(button);
+
+    expect(await screen.findByText("同步完成：成功 1，失败 0")).toBeInTheDocument();
   });
 
   it("envelope errors 时 ErrorPanel 展示 code/message，其余内容照常渲染", async () => {
@@ -181,8 +219,7 @@ describe("DashboardPage", () => {
 
     expect(await screen.findByText("AUDIT_ERRORS")).toBeInTheDocument();
     expect(screen.getByText("doctor 报告 6 个错误")).toBeInTheDocument();
-    const statusCard = await screen.findByTestId("audit-status-card");
-    expect(within(statusCard).getByText("存在错误")).toBeInTheDocument();
+    expect(screen.getByTestId("audit-details")).toHaveTextContent("6 个错误");
   });
 
   it("桥错误（非 envelope）时展示结构化错误码", async () => {
@@ -213,7 +250,7 @@ describe("DashboardPage", () => {
     await userEvent.click(button);
 
     expect(await screen.findByText(/检查更新完成/)).toBeInTheDocument();
-    // 刷新完成后缓存失效重新拉取：agents:status 至少被调用过
-    await screen.findByTestId("freshness-summary");
+    // 刷新完成后缓存失效重新拉取，清单照常在
+    await screen.findByTestId("overview-agents");
   });
 });
