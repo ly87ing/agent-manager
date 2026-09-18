@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { PlayCircle } from "lucide-react";
+import { HooksEditor } from "../components/HooksEditor";
 import { SourceDefinitionsPanel } from "../components/SourceDefinitionsPanel";
 import { ElementTable } from "../components/ElementTable";
 import { Switch } from "../components/Switch";
@@ -36,6 +38,7 @@ export default function DomainApplyPage({
   enableToggles?: boolean;
 }) {
   const query = useEngineQuery<StatusData>(`${domain}:status`);
+  const [showRaw, setShowRaw] = useState(false);
   const directApply = useDirectApply();
   const { toggle, executing: toggleExecuting } = useElementToggle();
   const disabled = directApply.executing || toggleExecuting;
@@ -87,7 +90,24 @@ export default function DomainApplyPage({
     <div className="space-y-4">
       <PageHeader title={title} description={description} />
       {query.data.errors.length > 0 && <ErrorPanel title={`${domain}:status 错误`} errors={query.data.errors} />}
-      {(domain === "hooks" || domain === "aliases") && <SourceDefinitionsPanel domain={domain} />}
+      {domain === "hooks" ? (
+        <>
+          <HooksEditor />
+          <div className="flex justify-end">
+            <button
+              type="button"
+              data-testid="toggle-hooks-raw-panel"
+              onClick={() => setShowRaw((prev) => !prev)}
+              className="rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent"
+            >
+              {showRaw ? "收起原文编辑" : "编辑配置原文"}
+            </button>
+          </div>
+          {showRaw && <SourceDefinitionsPanel domain="hooks" />}
+        </>
+      ) : (
+        domain === "aliases" && <SourceDefinitionsPanel domain={domain} />
+      )}
 
       <div className="flex justify-end gap-2">
         <button

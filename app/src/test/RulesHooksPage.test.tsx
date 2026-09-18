@@ -314,7 +314,12 @@ describe("Hooks 页原生目标", () => {
 
     expect(await screen.findByText("hooks:claude")).toBeInTheDocument();
     expect(screen.getByText("hooks:codex")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "编辑 Claude Hooks" })).toBeInTheDocument();
+    // 默认是按项填写的结构化编辑；原文编辑收在按需展开的入口里
+    expect(await screen.findByTestId("hooks-editor-hooks.claude")).toBeInTheDocument();
+    expect(screen.getByTestId("hooks-editor-hooks.codex")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "编辑 Claude Hooks" })).toBeNull();
+    await userEvent.click(screen.getByTestId("toggle-hooks-raw-panel"));
+    expect(await screen.findByRole("button", { name: "编辑 Claude Hooks" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "编辑 Codex Hooks" })).toBeInTheDocument();
     const bodyText = document.body.textContent ?? "";
     expect(bodyText).not.toContain("备份");
@@ -402,7 +407,7 @@ describe("Hooks 阻塞目标的显式接管入口", () => {
     expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
     expect(calls.some((call) => call.command === "hooks:plan")).toBe(false);
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(toastSuccessSpy.mock.calls.at(-1)?.[0]).toContain("接管原内容 hooks:codex");
+    expect(toastSuccessSpy.mock.calls[toastSuccessSpy.mock.calls.length - 1][0]).toContain("接管原内容 hooks:codex");
   });
 
   it("blocked/unsafe 且 actual_digest:null 的目标不显示接管按钮", async () => {
