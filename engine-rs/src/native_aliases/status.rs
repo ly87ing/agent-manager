@@ -209,15 +209,21 @@ fn build_element(
                     Value::Null
                 };
                 if let Some(b) = binding {
-                    if digest != b.applied_digest {
-                        // 绑定存在但整文件摘要不符：外部修改（含区块外），拒绝覆盖。
+                    // 只比受管区块：区块外的字节本来就会保留，用户改自己的那部分
+                    // 不该阻塞同步。旧行（没有区块摘要）回退到整文件比较。
+                    let block_conflict = if b.applied_block_digest.is_empty() {
+                        digest != b.applied_digest
+                    } else {
+                        found && sha256_hex(&inner) != b.applied_block_digest
+                    };
+                    if block_conflict {
                         (
                             "drifted",
                             Value::Bool(true),
                             Value::Bool(found),
                             Value::String(digest),
                             block_digest,
-                            Value::String("目标文件存在外部修改，拒绝覆盖".to_string()),
+                            Value::String("受管区块被外部修改，拒绝覆盖".to_string()),
                         )
                     } else {
                         let state = if expected_inner.is_empty() && !found {

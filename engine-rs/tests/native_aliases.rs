@@ -223,10 +223,11 @@ fn apply_creates_block_from_scratch_with_audit() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
-// 反例 2：绑定后外部追加内容 → status drifted + blocked_reason，apply
-// fail-closed 拒绝且文件字节不变；绑定与既有审计保留。
+// 反例 2：外部修改分两种，只有【区块内】被改才拒绝。
+// 区块外追加是日常操作（用户往自己的 ~/.zshrc 里加东西），区块外字节本来就会
+// 逐字节保留，因此必须照常同步——否则加一行 export 就再也同步不了。
 #[test]
-fn external_append_after_apply_is_rejected_fail_closed() {
+fn external_edit_inside_block_is_rejected_outside_block_is_fine() {
     let (base, ctx) = temp_ctx("tamper");
     let env = execute(
         &ctx,
@@ -234,16 +235,34 @@ fn external_append_after_apply_is_rejected_fail_closed() {
     );
     assert!(env.ok, "{:?}", env.errors);
     let target = ctx.home_dir.join(".zshrc");
-    let mut bytes = std::fs::read(&target).unwrap();
-    bytes.extend_from_slice(b"# user external edit\nexport FOO=1\n");
-    std::fs::write(&target, &bytes).unwrap();
+
+    // ---- 区块外追加：状态照常，apply 照常 ----
+    let mut outside = std::fs::read(&target).unwrap();
+    outside.extend_from_slice(b"\n# my own line\nexport FOO=1\n");
+    std::fs::write(&target, &outside).unwrap();
+    let env = execute(&ctx, &request("aliases:status", &[]));
+    let zshrc = element(&env, "aliases:zshrc");
+    assert_eq!(zshrc["state"], "managed-ok", "区块外编辑不该判成外部修改");
+    assert!(zshrc["observed"]["blocked_reason"].is_null());
+    let env = execute(
+        &ctx,
+        &request("aliases:apply", &["--only", "aliases:zshrc"]),
+    );
+    assert!(env.ok, "区块外编辑后仍须能同步: {:?}", env.errors);
+    let after = std::fs::read_to_string(&target).unwrap();
+    assert!(after.contains("export FOO=1"), "用户自己的行必须原样保留");
+
+    // ---- 区块内被改：这才是真冲突 ----
+    let tampered = after.replace("alias ", "alias user-external-edit-");
+    std::fs::write(&target, tampered.as_bytes()).unwrap();
+    let bytes = std::fs::read(&target).unwrap();
 
     let env = execute(&ctx, &request("aliases:status", &[]));
     let zshrc = element(&env, "aliases:zshrc");
     assert_eq!(zshrc["state"], "drifted");
     assert_eq!(
         zshrc["observed"]["blocked_reason"].as_str().unwrap(),
-        "目标文件存在外部修改，拒绝覆盖"
+        "受管区块被外部修改，拒绝覆盖"
     );
     assert_eq!(zshrc["actions"], json!([]));
     // 未被外部触碰的 zprofile 仍是 not-materialized，不受影响

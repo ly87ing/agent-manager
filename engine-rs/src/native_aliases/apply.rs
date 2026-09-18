@@ -62,6 +62,12 @@ fn decide(
     let make_binding = |applied_digest: String| Binding {
         target_id: spec.target_id.to_string(),
         applied_digest,
+        // 写入后区块正文就是期望正文；期望为空表示区块被移除，记空串。
+        applied_block_digest: if expected_inner.is_empty() {
+            String::new()
+        } else {
+            sha256_hex(&expected_inner)
+        },
         source_revision: source_revision.to_string(),
         updated_at: now_iso(),
     };
@@ -81,13 +87,20 @@ fn decide(
         });
     };
 
-    // 锁内重读：绑定存在时整文件摘要必须等于上次写入，任何外部修改
-    // （含 marker 区块外）一律 fail-closed 拒绝覆盖。
-    let actual_digest = sha256_hex_bytes(&old);
+    // 锁内重读：只比受管区块。区块外的字节本来就会原样保留，用户往自己的
+    // ~/.zshrc 里加东西不该让同步停摆；区块被人改过才 fail-closed 拒绝覆盖。
     if let Some(b) = binding {
-        if actual_digest != b.applied_digest {
-            bail!("目标 {} 存在外部修改，拒绝覆盖", spec.target_id);
+        let text = String::from_utf8_lossy(&old);
+        let (found, inner) = model::extract_alias_block(&text);
+        if b.applied_block_digest.is_empty() {
+            // 旧行（补列默认值）：没有区块摘要可比，回退到整文件比较。
+            if sha256_hex_bytes(&old) != b.applied_digest {
+                bail!("目标 {} 存在外部修改，拒绝覆盖", spec.target_id);
+            }
+        } else if found && sha256_hex(&inner) != b.applied_block_digest {
+            bail!("目标 {} 的受管区块被外部修改，拒绝覆盖", spec.target_id);
         }
+        // 区块整段不见了：按缺失处理，下面照常重新写入，不算冲突。
     }
 
     let Some(expected) = model::converge_content(&old, &expected_inner)? else {

@@ -241,6 +241,7 @@ mod tests {
             &Binding {
                 target_id: "aliases:zshrc".to_string(),
                 applied_digest: crate::native_mcp::model::sha256_hex_bytes(content_v1.as_bytes()),
+                applied_block_digest: sha256_hex("alias ll='ls -l'"),
                 source_revision: revision,
                 updated_at: "2026-09-12T00:00:00Z".to_string(),
             },
@@ -300,16 +301,31 @@ mod tests {
             &Binding {
                 target_id: "aliases:zshrc".to_string(),
                 applied_digest: crate::native_mcp::model::sha256_hex_bytes(content.as_bytes()),
+                applied_block_digest: sha256_hex("alias ll='ls -l'"),
                 source_revision: sha256_hex(
                     &serde_json::to_string(&json!({"aliases": {"ll": "ls -l"}})).unwrap(),
                 ),
                 updated_at: "2026-09-12T00:00:00Z".to_string(),
             },
         );
-        // 绑定后外部追加：blocked_reason 出现。
+        // 区块【外】追加：用户在自己的 ~/.zshrc 里加东西是日常操作，区块外的字节
+        // 本来就会逐字节保留，因此不该阻塞——这里断言它照常放行。
         let mut bytes = std::fs::read(&zshrc).unwrap();
         bytes.extend_from_slice(b"# user external edit\n");
         std::fs::write(&zshrc, &bytes).unwrap();
+        let ok = run_preflight(&ctx, &["--only", "aliases:zshrc"]).unwrap();
+        assert_eq!(
+            ok["actions"].as_array().unwrap().len(),
+            0,
+            "区块外编辑不该阻塞"
+        );
+
+        // 区块【内】被改：这才是真冲突，fail-closed 拒绝，且错误不回显正文。
+        let tampered = std::fs::read_to_string(&zshrc).unwrap().replace(
+            "alias ll='ls -l'",
+            "alias ll='rm -rf / # user external edit'",
+        );
+        std::fs::write(&zshrc, tampered.as_bytes()).unwrap();
 
         let db = store::db_path(&ctx);
         let db_before = std::fs::read(&db).unwrap();
