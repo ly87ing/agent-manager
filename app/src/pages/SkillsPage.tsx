@@ -621,6 +621,8 @@ export default function SkillsPage({
           agentIds={agentColumns}
           initial={editing ? { name: editing.id.replace(/^skill:/, ""), definition: editing.spec } : undefined}
           fullDefinition={editing ? fullSkillDefinition(layers, editing.id.replace(/^skill:/, "")) : null}
+          discovered={editing ? (editing.observed as SkillCollectionObserved).discovered : undefined}
+          repoCached={editing ? (editing.observed as SkillCollectionObserved).repo_cached : undefined}
           onClose={() => {
             setShowAddForm(false);
             setEditing(null);

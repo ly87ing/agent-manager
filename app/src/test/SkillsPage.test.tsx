@@ -116,7 +116,8 @@ describe("SkillsPage 三级视图", () => {
     await userEvent.click(await screen.findByTestId("edit-collection-agent-skills"));
     expect(screen.getByTestId("collection-name-input")).toBeDisabled();
     expect(screen.getByTestId("collection-url-input")).toHaveValue("https://github.com/example/agent-skills.git");
-    fireEvent.change(screen.getByTestId("collection-paths-input"), { target: { value: "" } });
+    // 「不限定范围」现在是一个显式选项，不再靠把文本框清空来表达
+    await userEvent.click(screen.getByTestId("collection-scope-all"));
     await userEvent.click(screen.getByTestId("collection-form-submit"));
 
     // 唯一一次 policy:set，完整定义整条替换；无需迁移（sqlite 定义已在）
@@ -158,7 +159,7 @@ describe("SkillsPage 三级视图", () => {
     );
     const { calls } = renderWithEngine(<SkillsPage />, legacyRoutes);
     await userEvent.click(await screen.findByTestId("edit-collection-agent-skills"));
-    fireEvent.change(screen.getByTestId("collection-paths-input"), { target: { value: "" } });
+    await userEvent.click(screen.getByTestId("collection-scope-all"));
     await userEvent.click(screen.getByTestId("collection-form-submit"));
 
     await screen.findByText(/已停止保存/);
@@ -188,6 +189,9 @@ describe("SkillsPage 三级视图", () => {
     // 切到本机目录后不再要求 git 地址
     expect(within(dialog).queryByTestId("collection-url-input")).toBeNull();
     fireEvent.change(within(dialog).getByTestId("collection-source-path-input"), { target: { value: "~/.vendor-tool/skills" } });
+    // 新建时来源还没扫过、列不出候选，用手动填写补上
+    await userEvent.click(within(dialog).getByTestId("collection-scope-limited"));
+    await userEvent.click(within(dialog).getByTestId("collection-paths-manual-toggle"));
     fireEvent.change(within(dialog).getByTestId("collection-paths-input"), { target: { value: "ones" } });
     await userEvent.click(within(dialog).getByTestId("collection-form-submit"));
 
@@ -741,5 +745,65 @@ describe("SkillsPage 计划外链接（extra-link）接管与取消链接", () =
     const args = calls.filter((call) => call.command === "skills:apply")[0].args;
     expect(args).toEqual(["--only", "skill:agent-skills/gamma", "--action", "add", "--agent", "codex"]);
     expect(args).not.toContain("--allow-takeover");
+  });
+});
+
+describe("集合的「用哪些技能」改成勾选", () => {
+  it("来源里发现的技能列成复选项，勾选后保存成清单", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
+    await userEvent.click(await screen.findByTestId("edit-collection-agent-skills"));
+    await userEvent.click(screen.getByTestId("collection-scope-limited"));
+
+    // 引擎报告的 discovered 直接成为候选，不用自己敲目录名
+    for (const name of ["alpha", "beta", "inbox-one", "inbox-two"]) {
+      expect(screen.getByTestId(`collection-path-${name}`)).toBeInTheDocument();
+    }
+    await userEvent.click(screen.getByTestId("collection-paths-clear"));
+    await userEvent.click(screen.getByTestId("collection-path-alpha"));
+    await userEvent.click(screen.getByTestId("collection-path-beta"));
+    await userEvent.click(screen.getByTestId("collection-form-submit"));
+
+    const setCalls = calls.filter((call) => call.command === "policy:set");
+    const write = setCalls[setCalls.length - 1];
+    expect(JSON.parse(write.args[write.args.indexOf("--value") + 1])).toMatchObject({
+      skill_paths: ["alpha", "beta"],
+    });
+  });
+
+  it("全选一键勾上全部候选", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
+    await userEvent.click(await screen.findByTestId("edit-collection-agent-skills"));
+    await userEvent.click(screen.getByTestId("collection-scope-limited"));
+    await userEvent.click(screen.getByTestId("collection-paths-clear"));
+    await userEvent.click(screen.getByTestId("collection-paths-select-all"));
+    await userEvent.click(screen.getByTestId("collection-form-submit"));
+
+    const setCalls = calls.filter((call) => call.command === "policy:set");
+    const write = setCalls[setCalls.length - 1];
+    const saved = JSON.parse(write.args[write.args.indexOf("--value") + 1]) as { skill_paths: string[] };
+    expect([...saved.skill_paths].sort()).toEqual(["alpha", "beta", "inbox-one", "inbox-two"]);
+  });
+
+  it("选了「只用其中这些」却一个没勾：拦下来并说清怎么办，不写库", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
+    await userEvent.click(await screen.findByTestId("edit-collection-agent-skills"));
+    await userEvent.click(screen.getByTestId("collection-scope-limited"));
+    await userEvent.click(screen.getByTestId("collection-paths-clear"));
+    await userEvent.click(screen.getByTestId("collection-form-submit"));
+
+    expect(await screen.findByText(/想全用就切回/)).toBeInTheDocument();
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+  });
+
+  it("仓库还没取下来时说清为什么列不出来，而不是给个空白框", async () => {
+    const routes = skillsRoutes();
+    const status = JSON.parse(JSON.stringify(routes["skills:status"]));
+    status.data.elements[0].observed.repo_cached = false;
+    status.data.elements[0].observed.discovered = [];
+    routes["skills:status"] = status;
+    renderWithEngine(<SkillsPage />, routes);
+    await userEvent.click(await screen.findByTestId("edit-collection-agent-skills"));
+    await userEvent.click(screen.getByTestId("collection-scope-limited"));
+    expect(screen.getByTestId("collection-paths-empty")).toHaveTextContent("仓库还没取到本地");
   });
 });
