@@ -214,7 +214,7 @@ fn eval_agent_cell(
         return AgentCellEval {
             state: "unsupported",
             actions: vec![],
-            blocked_reason: Some("该助手不在集合允许的助手范围内".to_string()),
+            blocked_reason: Some("这个集合还没分配给该助手，去集合定义里勾上它".to_string()),
             should_be_linked: false,
             link_exists,
             is_managed,

@@ -77,8 +77,16 @@ function discoverData(overrides: Partial<DiscoverData> = {}): DiscoverData {
           manage: "symlink",
           existing_collection: false,
           agents: ["claude-code"],
-          skills: [{ name: "ones", agents: ["claude-code"], has_skill_md: true }],
-          suggested_definition: { source_path: "~/.vendor/skills", skill_paths: ["ones"], agents: ["claude-code"] },
+          // 源目录里还有一个没被链接过的，接管时一并收录
+          skills: [
+            { name: "ones", agents: ["claude-code"], has_skill_md: true, linked: true },
+            { name: "unlinked-one", agents: [], has_skill_md: true, linked: false },
+          ],
+          suggested_definition: {
+            source_path: "~/.vendor/skills",
+            skill_paths: ["ones", "unlinked-one"],
+            agents: ["claude-code"],
+          },
         },
       ],
     },
@@ -151,7 +159,7 @@ describe("接管中心", () => {
       "--key",
       "skills.repositories.vendor",
       "--value",
-      JSON.stringify({ source_path: "~/.vendor/skills", skill_paths: ["ones"], agents: ["claude-code"], _delete: false, _replace: true }),
+      JSON.stringify({ source_path: "~/.vendor/skills", skill_paths: ["ones", "unlinked-one"], agents: ["claude-code"], _delete: false, _replace: true }),
     ]);
     const applyCall = calls.find((call) => call.command === "skills:apply");
     expect(applyCall?.args).toEqual(["--only", "vendor/ones", "--agent", "claude-code", "--action", "add"]);

@@ -130,6 +130,29 @@ fn scan_agent_dir(agent: &str, skills_dir: &Path) -> Vec<RawEntry> {
 }
 
 /// 未纳入管理的技能条目发现结果（items 逐条 + groups 按源根聚合）。
+/// 源目录下含 SKILL.md、但还没被任何助手链接的技能名（按名排序）。
+/// 读不了目录时返回空——发现是只读路径，不因为一个目录读不了就整体失败。
+fn unlinked_skills_in(
+    root: &std::path::Path,
+    linked: &BTreeMap<String, BTreeSet<String>>,
+) -> Vec<String> {
+    let Ok(read_dir) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for entry in read_dir.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') || linked.contains_key(&name) {
+            continue;
+        }
+        if entry.path().join("SKILL.md").is_file() {
+            out.push(name);
+        }
+    }
+    out.sort();
+    out
+}
+
 pub(crate) fn discover(ctx: &Context) -> Result<Value> {
     let meta = load_metadata(ctx)?;
     let bindings = load_bindings_readonly(ctx)?;
@@ -233,6 +256,18 @@ pub(crate) fn discover(ctx: &Context) -> Result<Value> {
                 "name": skill,
                 "agents": skill_agents.iter().cloned().collect::<Vec<_>>(),
                 "has_skill_md": root.join(skill).join("SKILL.md").is_file(),
+                "linked": true,
+            }));
+        }
+        // 源目录里还有、但还没被任何助手链接过的技能也一并收录：用户的心智是
+        // 「把这个目录接管进来」，只拿已链接的那几个会让人以为其余的丢了。
+        for extra in unlinked_skills_in(&root, &skills) {
+            skill_paths.push(json!(extra));
+            skill_values.push(json!({
+                "name": extra,
+                "agents": Vec::<String>::new(),
+                "has_skill_md": true,
+                "linked": false,
             }));
         }
         let agents_list: Vec<String> = agents.into_iter().collect();

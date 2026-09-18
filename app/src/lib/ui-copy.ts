@@ -71,6 +71,8 @@ export const SKILL_CELL_COPY: Record<string, string> = {
   drifted: "不一致",
   "extra-link": "计划外链接",
   disabled: "已停用",
+  // 集合定义里没勾这个助手；「不支持」会被读成「这个助手用不了技能」
+  unsupported: "未分配",
 };
 
 // ---------- 风险级（操作类型） ----------

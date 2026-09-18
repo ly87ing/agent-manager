@@ -32,7 +32,8 @@ export function SkillStatusBadge({ agent, cell }: { agent: string; cell: SkillAg
       label = "不一致";
       className = "border-warning/30 bg-warning/10 text-warning";
     } else if (state === "unsupported") {
-      label = "不支持";
+      // 「不支持」会被读成「这个助手用不了技能」，实际只是集合定义里没勾这个助手
+      label = "未分配";
       className = "border-input bg-muted text-muted-foreground";
     } else if (state === "dead-link") {
       label = "失效链接";
