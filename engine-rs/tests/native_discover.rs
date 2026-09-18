@@ -202,8 +202,9 @@ fn discover_reports_installed_agent_without_definition() {
     let (root, ctx) = temp_ctx("agents");
     let bin_dir = ctx.home_dir.join(".local/bin");
     std::fs::create_dir_all(&bin_dir).unwrap();
-    let bin = bin_dir.join("opencode");
-    std::fs::write(&bin, "#!/bin/sh\necho 'opencode 1.2.3'\n").unwrap();
+    // opencode 已是内置定义，换一个仍未内置的助手做样本
+    let bin = bin_dir.join("qwen");
+    std::fs::write(&bin, "#!/bin/sh\necho 'qwen 1.2.3'\n").unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -216,9 +217,9 @@ fn discover_reports_installed_agent_without_definition() {
     let agents = env.data["agents"].as_array().unwrap();
     let found = agents
         .iter()
-        .find(|item| item["id"] == "opencode")
+        .find(|item| item["id"] == "qwen-code")
         .expect("已安装但无定义的助手必须被发现");
-    assert_eq!(found["bin"], "opencode");
+    assert_eq!(found["bin"], "qwen");
     assert_eq!(found["origin"], "native", "~/.local/bin 属官方安装器落点");
     assert_eq!(found["manage"], "register");
     assert_eq!(

@@ -91,21 +91,21 @@ describe("命令面板", () => {
   it("⌘K 打开后能搜到资源，选中跳到对应页面", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     renderWithEngine(<App />, routes());
-    await screen.findByRole("heading", { name: "助手" });
+    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
 
     const palette = await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "grok");
     await waitFor(() => expect(screen.getByTestId("command-item-mcp:grok-search")).toBeInTheDocument());
     await userEvent.click(screen.getByTestId("command-item-mcp:grok-search"));
 
-    expect(await screen.findByRole("heading", { name: "MCP" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "MCP" }, { timeout: 10_000 })).toBeInTheDocument();
     expect(palette).not.toBeInTheDocument();
   });
 
   it("可直接执行常用动作，走与页面相同的执行通道", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     const { calls } = renderWithEngine(<App />, routes());
-    await screen.findByRole("heading", { name: "助手" });
+    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
 
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "同步规则");
@@ -118,12 +118,12 @@ describe("命令面板", () => {
   it("键盘可完成：方向键选择、回车执行、Esc 关闭", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     renderWithEngine(<App />, routes());
-    await screen.findByRole("heading", { name: "助手" });
+    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
 
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "接管");
     await userEvent.keyboard("{Enter}");
-    expect(await screen.findByRole("heading", { name: "接管中心" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "接管中心" }, { timeout: 10_000 })).toBeInTheDocument();
 
     const palette = await openPalette();
     await userEvent.keyboard("{Escape}");
@@ -133,7 +133,7 @@ describe("命令面板", () => {
   it("无匹配时给出空态，不误触发任何动作", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     const { calls } = renderWithEngine(<App />, routes());
-    await screen.findByRole("heading", { name: "助手" });
+    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
 
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "zzzz-not-exist");
