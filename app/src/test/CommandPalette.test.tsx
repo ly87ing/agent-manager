@@ -20,6 +20,20 @@ const dummySettings: SettingsData = {
 function routes(): Record<string, Envelope> {
   return {
     "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode() }),
+    "secrets:status": makeEnvelope(
+      {
+        domain: "secrets",
+        elements: [
+          makeElement({
+            id: "secrets:mcp-env",
+            domain: "secrets",
+            observed: { variables: [], unresolved: 0 },
+            state: "managed-ok",
+          }),
+        ],
+      },
+      { command: "secrets.status" },
+    ),
     "agents:status": makeEnvelope(
       {
         domain: "agents",
@@ -140,5 +154,17 @@ describe("命令面板", () => {
     expect(await screen.findByText("没有匹配的资源或动作。")).toBeInTheDocument();
     await userEvent.keyboard("{Enter}");
     expect(calls.some((call) => call.command.endsWith(":apply"))).toBe(false);
+  });
+
+  it("设置里的二级页也搜得到，选中直达（密钥要填东西，不该只藏在二级菜单）", async () => {
+    setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
+    renderWithEngine(<App />, routes());
+    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+
+    await openPalette();
+    await userEvent.type(screen.getByTestId("command-palette-input"), "密钥");
+    await userEvent.click(await screen.findByTestId("command-item-page:settings:secrets"));
+
+    expect(await screen.findByRole("heading", { name: "密钥" }, { timeout: 10_000 })).toBeInTheDocument();
   });
 });

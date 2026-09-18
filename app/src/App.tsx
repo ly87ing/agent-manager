@@ -129,7 +129,12 @@ export default function App() {
         {activePage === "rules-hooks" && <RulesHooksPage />}
         {activePage === "takeover" && <TakeoverPage />}
         {activePage === "runs" && <RunsPage />}
-        {activePage === "settings" && <SettingsPage />}
+        {activePage.startsWith("settings") && (
+          <SettingsPage
+            key={activePage}
+            initialAdvanced={activePage.startsWith("settings:") ? activePage.slice("settings:".length) : null}
+          />
+        )}
       </div>
       <CommandPalette
         open={paletteOpen}

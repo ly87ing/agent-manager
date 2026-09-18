@@ -27,6 +27,9 @@ const PAGES: { key: string; label: string; keywords: string }[] = [
   { key: "takeover", label: "接管中心", keywords: "takeover 接管 发现" },
   { key: "runs", label: "操作记录", keywords: "runs 任务 日志" },
   { key: "settings", label: "设置", keywords: "settings 偏好 终端快捷命令" },
+  // 设置里的二级页面也要搜得到：密钥现在是要填东西的页，藏在二级菜单里不好找
+  { key: "settings:secrets", label: "密钥", keywords: "secrets 密钥 变量 token api key 凭据" },
+  { key: "settings:aliases", label: "终端快捷命令", keywords: "aliases alias 别名 启动命令 时区" },
 ];
 
 /**

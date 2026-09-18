@@ -36,7 +36,8 @@ export function AppLayout({
         <nav className="flex-1 space-y-0.5 overflow-y-auto p-2">
           {nav.map((item) => {
             const Icon = item.icon;
-            const isActive = item.key === active;
+            // settings:secrets 这类二级页仍高亮它所属的一级项
+            const isActive = item.key === active || active.startsWith(`${item.key}:`);
             const showUpdateBadge = item.key === "settings" && Boolean(updateVersion);
             return (
               <div key={item.key} className="relative">

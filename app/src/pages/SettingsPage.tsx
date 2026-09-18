@@ -81,8 +81,8 @@ const ADVANCED_ENTRIES = [
   },
   {
     key: "secrets",
-    title: "密钥状态",
-    description: "环境变量与密钥配置状态检测。",
+    title: "密钥",
+    description: "填写 MCP 服务需要的取值，并查看哪些还没配。",
     icon: KeyRound,
   },
   {
@@ -108,11 +108,12 @@ function initialPreferences(data?: SettingsData): SettingsPreferences {
   };
 }
 
-export default function SettingsPage() {
+export default function SettingsPage({ initialAdvanced }: { initialAdvanced?: string | null } = {}) {
   const settings = useSettings();
   const save = useSaveSettings();
   const [preferences, setPreferences] = useState<SettingsPreferences>(() => initialPreferences());
-  const [activeAdvanced, setActiveAdvanced] = useState<string | null>(null);
+  // 命令面板可以直达二级页（密钥、终端快捷命令），不用先进设置再找一次
+  const [activeAdvanced, setActiveAdvanced] = useState<string | null>(initialAdvanced ?? null);
   const [update, setUpdate] = useState<AvailableUpdate | null>(null);
   const [updateState, setUpdateState] = useState<"idle" | "checking" | "installing">("idle");
   const [updateError, setUpdateError] = useState<string | null>(null);
