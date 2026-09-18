@@ -354,6 +354,7 @@ state 与 actions，不自己推断；用户主动停用的不催。syncPlan 是
 
 - 自动化：`engine-rs` 326 项、`app/src-tauri` 15 项、Vitest 52 files / 472 tests 全部通过；
   typecheck、build、两套 `cargo fmt --check` 通过。
+- 最终 clean x86_64 DMG（`07583cc` 后重建）：`verify:macos` 全部通过；SHA256 `311805bebb50908f1e6b71164f4cdf63680fa9331c559de080ca7c5c72c3e259`，8085021 bytes；未签名。
 - 实测：接管残留条目在隔离环境验到 `leftover → managed-ok, assigned=true`；三个页面的行数、
   屏数、零信息列与黑话出现次数在浏览器里逐项量过（数字见上表）。
 
