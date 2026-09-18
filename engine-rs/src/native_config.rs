@@ -50,7 +50,7 @@ fn collect_sources(ctx: &Context) -> Result<Map<String, Value>> {
 
 /// 只读导出：定义树 + 来源正文。零写，不创建数据目录或数据库。
 pub(crate) fn export(ctx: &Context, req: &Request) -> Result<Value> {
-    for arg in &req.args {
+    if let Some(arg) = req.args.first() {
         bail!("config:export 不接受参数，得到 '{}'", arg);
     }
     let policy = store::effective_policy(ctx)?;

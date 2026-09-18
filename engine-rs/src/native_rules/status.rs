@@ -199,7 +199,7 @@ fn build_element(ctx: &Context, snap: &Snapshot, spec: &TargetSpec) -> Value {
                                 "unmanaged-detected",
                                 Value::Bool(true),
                                 Value::String(
-                                    "目标文件已存在外部内容且无受管绑定，拒绝覆盖".to_string(),
+                                    "这个文件里已经有本工具以外写的内容，不会覆盖它".to_string(),
                                 ),
                                 false,
                             )
