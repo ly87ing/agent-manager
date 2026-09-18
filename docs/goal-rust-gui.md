@@ -243,6 +243,9 @@ Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 必须支持新增、�
 - **矩阵里「不支持」会被读成「这个助手用不了技能」**（`0aa5669`），改「未分配」，原因文案直接说下一步。
 
 - 自动化：`engine-rs` 317 项、`app/src-tauri` 15 项、Vitest 51 files / 451 tests 全部通过；typecheck、build、两套 `cargo fmt --check` 通过。
+- 最终 clean x86_64 DMG（`7e9cf47` 后重建）：`verify:macos` 全部通过，构建身份 commit/date 与 `7e9cf47` 精确一致；SHA256 `8761d7f2bc6ae0d2a11792265a87eac57c38054bf0ae14c07273438a23616adb`，8048422 bytes；未签名。
+- 安装包内真机验收：隔离 HOME + 空数据目录启动打包产物，界面正常渲染，隔离数据目录与 HOME 均 0 项写入，日志无 panic/fatal。
+- 浏览器验收（dev server + mock）：⌘K 搜「密钥」直达该页，逐变量给出「已填写 / 已配置（来自环境）/ 未配置」与填写入口；快捷命令每条都有复制，复制预填 `claude-copy`，编辑态名字可改；控制台无报错。
 - 隔离 CLI 实证（每项都在隔离 HOME + 空数据目录下真跑）：区块外加行后状态仍 managed-ok 且能同步、用户那行原样保留，区块内被改则拒绝并可接管；规则外部改动后 `--allow-takeover` 精确到单目标接管成功、多目标接管被拒；密钥填写后 status 的 `resolved/stored` 正确、apply 真的用上该值、操作记录与配置备份均不含明文、清空即撤销；接管扫描对「源目录 3 个技能只链接了 1 个」给出全部 3 个。
 
 本轮未做与做不到，如实记录：
