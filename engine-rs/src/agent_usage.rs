@@ -1,8 +1,12 @@
 //! 从助手自己写在本机的文件里读额度，不联网、不调 API、不需要额外登录。
 //!
 //! 每家助手把自己的额度状态写在不同地方，格式也不一样：
-//! - Claude Code：`~/.claude.json` 的 `cachedUsageUtilization`，含 5 小时 / 7 天窗口的
-//!   已用百分比与重置时刻，以及这份缓存自身的抓取时刻。
+//! - Claude Code：两个来源取较新的那个。
+//!   1. `<配置目录>/.agent-manager-usage.json`：状态栏脚本顺手存下的实时额度。
+//!      Claude Code 每次渲染状态栏都把 `rate_limits` 推给脚本，但自己不写文件，
+//!      外部进程读不到；脚本存一份，这里就能拿到与它同屏显示的那个数。
+//!   2. `~/.claude.json` 的 `cachedUsageUtilization`：Claude Code 主动查额度时才刷新的
+//!      缓存，常规对话不更新，可能停在很多天前。没装落盘时只有它。
 //! - Codex：`~/.codex/sessions/<年>/<月>/<日>/rollout-*.jsonl`，每条 token_count 事件带
 //!   `rate_limits`；取最新会话文件里最后一条。
 //!
@@ -31,7 +35,8 @@ pub(crate) fn read(home_dir: &Path, bin: &str, config_path: Option<&str>) -> Opt
     match binary_kind(bin)? {
         Kind::Claude => {
             let path = config.unwrap_or_else(|| home_dir.join(".claude.json"));
-            claude(&path)
+            // 主助手的 .claude.json 在 home 根，配置目录却是 ~/.claude，落盘在后者
+            claude(&path, &home_dir.join(".claude"))
         }
         Kind::Codex => {
             // 配置文件是 <CODEX_HOME>/config.toml，会话就在它旁边
@@ -50,7 +55,8 @@ pub(crate) fn read(home_dir: &Path, bin: &str, config_path: Option<&str>) -> Opt
 /// 实例存在的意义就是多开不同账号，额度自然各算各的——用默认位置那份会张冠李戴。
 pub(crate) fn read_profile(kind: &str, config_dir: &Path) -> Option<Value> {
     match kind {
-        "claude" => claude(&config_dir.join(".claude.json")),
+        // 实例的配置目录就是 CLAUDE_CONFIG_DIR，落盘与 .claude.json 同级
+        "claude" => claude(&config_dir.join(".claude.json"), config_dir),
         "codex" => codex(&config_dir.join("sessions")),
         _ => None,
     }
@@ -114,9 +120,54 @@ fn from_unix_secs(secs: i64) -> Option<String> {
 
 // ---------- Claude Code ----------
 
+/// 两个来源取较新的那个：状态栏落盘的实时快照，或 Claude Code 自己的额度缓存。
+///
+/// 没装落盘时只有后者，行为与从前一致；装了就以它为准——除非缓存反而更新
+/// （比如刚在 Claude Code 里查过额度，而状态栏很久没刷）。
+fn claude(config_path: &Path, snapshot_dir: &Path) -> Option<Value> {
+    let snapshot = statusline_snapshot(snapshot_dir);
+    let cached = claude_cache(config_path);
+    match (snapshot, cached) {
+        (Some(a), Some(b)) => Some(if checked_at_of(&a) >= checked_at_of(&b) { a } else { b }),
+        (Some(only), None) | (None, Some(only)) => Some(only),
+        (None, None) => None,
+    }
+}
+
+/// 记账时刻，用于在两个来源间挑较新的那份；缺时刻的按最旧处理。
+fn checked_at_of(usage: &Value) -> String {
+    usage
+        .get("checked_at")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string()
+}
+
+/// 状态栏脚本存下的实时额度。字段沿用 Claude Code 推给状态栏的原名
+/// （`used_percentage` 与 Unix 秒的 `resets_at`），与 `.claude.json` 里那套不同。
+fn statusline_snapshot(dir: &Path) -> Option<Value> {
+    let path = dir.join(".agent-manager-usage.json");
+    let root: Value = serde_json::from_str(&fs::read_to_string(&path).ok()?).ok()?;
+    let checked_at = root.get("at").and_then(Value::as_i64).and_then(from_unix_secs);
+
+    let mut windows = Vec::new();
+    for (key, minutes) in [("five_hour", 5 * 60), ("seven_day", 7 * 24 * 60)] {
+        let Some(entry) = root.get(key).filter(|v| !v.is_null()) else {
+            continue;
+        };
+        let Some(used) = entry.get("used_percentage").and_then(Value::as_f64) else {
+            continue;
+        };
+        let resets_at = entry.get("resets_at").and_then(Value::as_i64).and_then(from_unix_secs);
+        windows.push(window(minutes, used, resets_at));
+    }
+
+    usage(&display(&path), checked_at, windows, Map::new())
+}
+
 /// Claude Code 自己缓存的额度：`utilization` 是已用百分比，窗口名固定为
 /// five_hour / seven_day，其余窗口（按套餐才有）为 null，跳过。
-fn claude(path: &Path) -> Option<Value> {
+fn claude_cache(path: &Path) -> Option<Value> {
     let root: Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
     let cached = root.get("cachedUsageUtilization")?;
     let checked_at = cached

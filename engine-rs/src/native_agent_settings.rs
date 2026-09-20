@@ -37,12 +37,6 @@ pub(crate) struct AgentSettings {
     pub(crate) yolo: bool,
 }
 
-impl AgentSettings {
-    /// 一项都没填 = 不接管这个助手的配置文件。
-    pub(crate) fn is_empty(&self) -> bool {
-        self.base_url.is_none() && self.token_var.is_none() && self.model.is_none() && !self.yolo
-    }
-}
 
 fn non_empty(raw: Option<&Value>) -> Option<String> {
     let text = raw?.as_str()?.trim();
@@ -254,7 +248,7 @@ mod tests {
         assert!(parse(&json!({"settings": {"token_var": "has-dash"}})).is_err());
         assert!(parse(&json!({"settings": {"token_var": "MY_TOKEN"}})).is_ok());
         // 没有 settings 段 = 没配过，不是错误
-        assert!(parse(&json!({"bin": "claude"})).unwrap().is_empty());
+        assert_eq!(parse(&json!({"bin": "claude"})).unwrap(), AgentSettings::default());
     }
 
     #[test]

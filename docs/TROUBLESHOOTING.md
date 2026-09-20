@@ -54,6 +54,44 @@ Agent、Skills、MCP、Rules 和 Hooks 原生域已接线；实际安装来源�
 
 `system:audit` 已接入 Rust dispatcher：只读聚合 agents/skills/mcp/rules/hooks/aliases/secrets 与 runtime/storage 状态。只读 `secrets:status` 已接入 Rust dispatcher：仅读取 SQLite 有效策略中已启用 MCP 定义的合法 `${VAR}` 环境变量占位符，按「先本机已保存的取值、再回退当前进程环境」判断该变量能否取到值，输出变量名与布尔（另给 `stored` 说明取值是否在本机库里）；`secrets:set` 写入取值，`secret_values` 表以明文保存，仅 apply 渲染目标配置时使用；不扫描、定位或克隆外部密钥仓库，任何路径都不序列化或显示取值本身；畸形定义固定脱敏失败。设置页高级管理可达 Aliases 与 Secrets 两页，Aliases 原生 `aliases:status/apply` 已接线。按 2026-09-12 产品裁决，Tools 域、快照（`snapshots:*`）与 `system:converge` 已退役，相关页面、Tauri 白名单与契约 schema 已移除；`system:refresh-upstream` 已接线（探测缓存落 SQLite `upstream_probes` 表，三域 status 回填 freshness）。
 
+## Claude Code 的额度停在很多天前
+
+助手卡片上的额度读自本机文件，不联网。Claude 这一侧有两个来源，取较新的那个：
+
+| 来源 | 什么时候更新 |
+| --- | --- |
+| `<配置目录>/.agent-manager-usage.json` | 状态栏每次渲染（事件驱动，300ms 防抖） |
+| `~/.claude.json` 的 `cachedUsageUtilization` | 只在 Claude Code 主动查额度时；**常规对话不触发** |
+
+只有后者时，数字会停在上次查额度的时刻——连用几天都不动是正常现象，不是读错了。
+卡片上会照实写「N 天前更新」，过了重置点的窗口不再显示百分比。
+
+要拿到与 Claude Code 状态栏同屏的实时值，在你的状态栏脚本里把它顺手存一份。
+Claude Code 每次渲染状态栏都会把 `rate_limits` 通过 stdin 推给脚本，但自己不写任何
+文件，外部进程读不到；脚本存下来，本工具就能读到。在解析出用量之后加这一段：
+
+```bash
+# $five / $week 是已用百分比，$five_reset / $week_reset 是 Unix 秒的重置时刻，
+# $now 是当前时刻（这几个变量名按你自己脚本里的实际命名改）
+if [[ -n $five || -n $week ]]; then
+  am_dir=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+  am_file=$am_dir/.agent-manager-usage.json
+  am_tmp=$am_file.$$
+  {
+    printf '{"at":%s' "${now:-0}"
+    [[ -n $five ]] && printf ',"five_hour":{"used_percentage":%s,"resets_at":%s}' "$five" "${five_reset:-null}"
+    [[ -n $week ]] && printf ',"seven_day":{"used_percentage":%s,"resets_at":%s}' "$week" "${week_reset:-null}"
+    printf '}\n'
+  } > "$am_tmp" 2>/dev/null && mv -f "$am_tmp" "$am_file" 2>/dev/null || rm -f "$am_tmp" 2>/dev/null
+fi
+```
+
+写临时文件再 `mv` 覆盖，多个窗口并发也不会让本工具读到半截内容；文件写坏了本工具
+自动回退到缓存那份。路径跟随 `CLAUDE_CONFIG_DIR`，所以每个实例各存各的，不会串。
+`rate_limits` 只对 Pro/Max 订阅出现，且要等会话里第一次 API 响应之后才有。
+
+Codex 那一侧不用配：它的额度由服务端随每次响应写进会话记录，用它就会更新。
+
 ## 安装渠道
 
 Claude Code 与 Codex 的内置默认渠道是官方 `native` 命令。brew 只在实际检测结果中作为来源展示，不是默认渠道；若 observed 与预期不符，应检查本机 PATH 和实际安装来源。

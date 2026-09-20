@@ -46,6 +46,23 @@ SQLite 核心、Tauri bridge、设置页面、主要资源页面布局、Agent �
 
 旧 DMG/旧 GUI E2E 不证明本轮新交互。本轮源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收已完成；最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify（提交、SHA256 与验证结果见 [交付回执](goal-rust-gui.md)）。
 
+## 额度来源
+
+助手卡片的额度只读本机文件，不联网、不调 API、不装 hook。
+
+Claude 侧两个来源取 `checked_at` 较新的那个：`<配置目录>/.agent-manager-usage.json`
+（状态栏脚本落盘的实时值，字段沿用 Claude Code 推给状态栏的 `used_percentage` 与
+Unix 秒 `resets_at`）与 `~/.claude.json` 的 `cachedUsageUtilization`（Claude Code 主动查
+额度时才刷新，常规对话不更新）。落盘文件由用户自愿在自己的状态栏脚本里加几行产生，
+本工具不生成、不依赖、也不要求它存在；缺失或内容损坏都回退到缓存那份。
+配置目录随 `CLAUDE_CONFIG_DIR` 走，实例各读各的。
+
+Codex 侧读 `<CODEX_HOME>/sessions/**/rollout-*.jsonl` 里最后一条 `rate_limits`，
+记账时刻取那条事件自带的 `timestamp`（文件 mtime 会被后续事件顶新，用它会谎报新鲜度）。
+
+展示口径：过了重置点的窗口不报百分比（那是上一轮的残值，Claude Code 自己的状态栏
+同样一到重置点就丢掉该窗口）；整份记账超 24 小时的，百分比转灰加问号。
+
 ## 助手运行参数
 
 `agents:configure` 把助手的运行参数写进它自己的配置文件，与装卸升级的 `agents:apply`

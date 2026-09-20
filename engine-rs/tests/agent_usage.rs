@@ -209,3 +209,90 @@ fn bin_写成绝对路径也认得出来_不认识的_bin_为_null() {
     assert_eq!(usage_of(&ctx, "something-else"), json!(null));
     let _ = fs::remove_dir_all(&base);
 }
+
+#[test]
+fn claude_优先用状态栏落盘的实时额度_缓存更新时才回头用缓存() {
+    let (base, ctx) = temp_ctx("statusline-snapshot");
+    let claude_dir = ctx.home_dir.join(".claude");
+    fs::create_dir_all(&claude_dir).unwrap();
+    // 三天前的缓存：Claude Code 只在主动查额度时刷新它
+    fs::write(
+        ctx.home_dir.join(".claude.json"),
+        serde_json::to_string(&json!({
+            "cachedUsageUtilization": {
+                "fetchedAtMs": 1_789_605_697_689i64,
+                "utilization": {
+                    "five_hour": {"utilization": 8, "resets_at": "2026-09-17T05:30:00.770741+00:00"}
+                }
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    // 状态栏刚存下的实时额度（字段名与 Claude Code 推给状态栏的一致）
+    let snapshot = claude_dir.join(".agent-manager-usage.json");
+    fs::write(
+        &snapshot,
+        json!({
+            "at": 1_789_871_000i64,
+            "five_hour": {"used_percentage": 23, "resets_at": 1_789_900_000i64},
+            "seven_day": {"used_percentage": 41, "resets_at": 1_790_400_000i64}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    define_agent_with(&ctx, "claude-code", "claude", None);
+
+    let usage = usage_of(&ctx, "claude-code");
+    assert_eq!(usage["source"], json!(snapshot.display().to_string()));
+    assert_eq!(usage["checked_at"], json!("2026-09-20T02:23:20Z"));
+    assert_eq!(
+        usage["windows"],
+        json!([
+            {"window_minutes": 300, "used_percent": 23.0, "resets_at": "2026-09-20T10:26:40Z"},
+            {"window_minutes": 10080, "used_percent": 41.0, "resets_at": "2026-09-26T05:20:00Z"}
+        ])
+    );
+
+    // 缓存反而更新时（刚在 Claude Code 里查过额度）用缓存那份
+    fs::write(
+        &snapshot,
+        json!({"at": 1_700_000_000i64, "five_hour": {"used_percentage": 1, "resets_at": 1_700_001_000i64}})
+            .to_string(),
+    )
+    .unwrap();
+    let usage = usage_of(&ctx, "claude-code");
+    assert_eq!(usage["checked_at"], json!("2026-09-17T00:41:37Z"));
+    assert_eq!(usage["windows"][0]["used_percent"], json!(8.0));
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn 没有状态栏落盘时行为与从前一致_畸形快照不影响回退() {
+    let (base, ctx) = temp_ctx("snapshot-fallback");
+    let claude_dir = ctx.home_dir.join(".claude");
+    fs::create_dir_all(&claude_dir).unwrap();
+    fs::write(
+        ctx.home_dir.join(".claude.json"),
+        serde_json::to_string(&json!({
+            "cachedUsageUtilization": {
+                "fetchedAtMs": 1_789_605_697_689i64,
+                "utilization": {"five_hour": {"utilization": 8, "resets_at": "2026-09-17T05:30:00Z"}}
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    define_agent_with(&ctx, "claude-code", "claude", None);
+
+    // 没有落盘文件
+    assert_eq!(usage_of(&ctx, "claude-code")["windows"][0]["used_percent"], json!(8.0));
+
+    // 写了半截的落盘文件（多窗口并发写被打断）不能让整块额度消失
+    fs::write(claude_dir.join(".agent-manager-usage.json"), "{\"at\":178987").unwrap();
+    let usage = usage_of(&ctx, "claude-code");
+    assert_eq!(usage["windows"][0]["used_percent"], json!(8.0), "畸形快照要回退到缓存");
+
+    let _ = fs::remove_dir_all(&base);
+}
