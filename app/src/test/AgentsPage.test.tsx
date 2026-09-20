@@ -74,7 +74,7 @@ describe("助手页产品边界", () => {
     expect(await screen.findByTestId("connection-workbench")).toBeInTheDocument();
     expect(screen.getByTestId("agent-runtime-button")).toBeEnabled();
     expect(screen.getByText("状态栏：用量状态栏")).toBeInTheDocument();
-    expect(screen.getByText("权限确认：逐次询问")).toBeInTheDocument();
+    expect(screen.getByText("权限确认：客户端默认")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "实例" })).toBeInTheDocument();
 
     expect(screen.queryByText("安装与维护")).toBeNull();

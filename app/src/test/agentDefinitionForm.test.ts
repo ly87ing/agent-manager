@@ -256,8 +256,18 @@ describe("agentDefinitionForm helpers", () => {
       },
     };
 
-    expect(runtimeOptionsOf(initial)).toEqual({ yolo: true, statusline: "builtin" });
-    const result = updateAgentRuntimeOptions(initial, { yolo: false, statusline: "untouched" });
+    expect(runtimeOptionsOf(initial)).toMatchObject({
+      yolo: true,
+      statusline: "builtin",
+      claudeToolSearch: false,
+      codexReasoningEffort: "",
+      codexContextWindow: "",
+    });
+    const result = updateAgentRuntimeOptions(initial, {
+      ...runtimeOptionsOf(initial),
+      yolo: false,
+      statusline: "untouched",
+    });
 
     expect(result).toEqual({
       ...initial,
@@ -274,12 +284,49 @@ describe("agentDefinitionForm helpers", () => {
   it("运行设置能从无 settings 的定义新增，并在清空最后一个自有键时移除空对象", () => {
     const enabled = updateAgentRuntimeOptions(
       { display_name: "Codex", bin: "codex" },
-      { yolo: true, statusline: "builtin" },
+      { ...runtimeOptionsOf(undefined), yolo: true, statusline: "builtin" },
     );
     expect(enabled.settings).toEqual({ yolo: true, statusline: "builtin" });
-    expect(updateAgentRuntimeOptions(enabled, { yolo: false, statusline: "untouched" })).toEqual({
+    expect(updateAgentRuntimeOptions(enabled, {
+      ...runtimeOptionsOf(enabled),
+      yolo: false,
+      statusline: "untouched",
+    })).toEqual({
       display_name: "Codex",
       bin: "codex",
+    });
+  });
+
+  it("运行设置保留明确的 Claude 与 Codex 参数并允许恢复客户端默认", () => {
+    const configured = updateAgentRuntimeOptions({ bin: "codex" }, {
+      ...runtimeOptionsOf(undefined),
+      claudeToolSearch: true,
+      claudeAgentTeams: true,
+      claudeEffortLevel: "max",
+      claudeDisableArtifact: true,
+      claudeHideAttribution: true,
+      codexReasoningEffort: "high",
+      codexContextWindow: "1000000",
+      codexAutoCompactTokenLimit: "900000",
+      codexWebSearch: "live",
+    });
+    expect(configured.settings).toMatchObject({
+      claude_tool_search: true,
+      claude_agent_teams: true,
+      claude_effort_level: "max",
+      claude_disable_artifact: true,
+      claude_hide_attribution: true,
+      codex_reasoning_effort: "high",
+      codex_context_window: 1000000,
+      codex_auto_compact_token_limit: 900000,
+      codex_web_search: "live",
+    });
+    expect(runtimeOptionsOf(configured)).toMatchObject({
+      claudeEffortLevel: "max",
+      codexReasoningEffort: "high",
+      codexContextWindow: "1000000",
+      codexAutoCompactTokenLimit: "900000",
+      codexWebSearch: "live",
     });
   });
 

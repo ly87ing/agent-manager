@@ -137,6 +137,59 @@ describe("助手运行参数", () => {
     expect(calls.indexOf(saved)).toBeLessThan(calls.indexOf(configureCalls(calls)[0]));
   });
 
+  it("Claude 高级运行参数显示真实配置键并保存为引擎支持的具体值", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routes());
+    await userEvent.click(await screen.findByTestId("agent-runtime-button"));
+    const dialog = await screen.findByRole("dialog", { name: "Claude Code 运行设置" });
+    expect(dialog).toHaveTextContent("env.ENABLE_TOOL_SEARCH");
+    expect(dialog).toHaveTextContent("env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS");
+    expect(dialog).toHaveTextContent("attribution.commit / attribution.pr");
+
+    await userEvent.selectOptions(screen.getByTestId("agent-runtime-claude-effort"), "max");
+    await userEvent.click(screen.getByTestId("agent-runtime-claude-tool-search"));
+    await userEvent.click(screen.getByTestId("agent-runtime-claude-agent-teams"));
+    await userEvent.click(screen.getByTestId("agent-runtime-claude-disable-artifact"));
+    await userEvent.click(screen.getByTestId("agent-runtime-claude-hide-attribution"));
+    await userEvent.click(screen.getByTestId("agent-runtime-submit"));
+
+    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
+    const saved = calls.find((call) => call.command === "policy:set")!;
+    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
+    expect(definition.settings).toMatchObject({
+      claude_effort_level: "max",
+      claude_tool_search: true,
+      claude_agent_teams: true,
+      claude_disable_artifact: true,
+      claude_hide_attribution: true,
+    });
+  });
+
+  it("Codex 运行参数允许研发填写推理、上下文、压缩与搜索的具体值", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, agentRoutes("codex", "codex"));
+    await userEvent.click(await screen.findByTestId("agent-runtime-button"));
+    const dialog = await screen.findByRole("dialog", { name: "codex 运行设置" });
+    expect(dialog).toHaveTextContent("model_reasoning_effort");
+    expect(dialog).toHaveTextContent("model_context_window");
+    expect(dialog).toHaveTextContent("model_auto_compact_token_limit");
+    expect(dialog).toHaveTextContent("web_search");
+
+    await userEvent.selectOptions(screen.getByTestId("agent-runtime-codex-reasoning"), "high");
+    await userEvent.type(screen.getByTestId("agent-runtime-codex-context-window"), "1000000");
+    await userEvent.type(screen.getByTestId("agent-runtime-codex-compact-limit"), "900000");
+    await userEvent.selectOptions(screen.getByTestId("agent-runtime-codex-web-search"), "live");
+    await userEvent.click(screen.getByTestId("agent-runtime-submit"));
+
+    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
+    const saved = calls.find((call) => call.command === "policy:set")!;
+    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
+    expect(definition.settings).toMatchObject({
+      codex_reasoning_effort: "high",
+      codex_context_window: 1000000,
+      codex_auto_compact_token_limit: 900000,
+      codex_web_search: "live",
+    });
+  });
+
   it("跳过权限确认先保存定义再二次确认，取消时不写助手文件", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await userEvent.click(await screen.findByTestId("agent-runtime-button"));

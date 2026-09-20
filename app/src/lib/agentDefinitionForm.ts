@@ -44,10 +44,23 @@ export interface ConnectionEntry {
   timeoutMs: string;
 }
 
-/** 助手自身的少量运行偏好；账号、地址、模型与凭据变量由接入配置单独维护。 */
+export type ClaudeEffortLevel = "" | "auto" | "low" | "medium" | "high" | "xhigh" | "max";
+export type CodexReasoningEffort = "" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type CodexWebSearch = "" | "disabled" | "cached" | "indexed" | "live";
+
+/** 助手自身的运行偏好；账号、地址、模型与凭据变量由接入配置单独维护。 */
 export interface AgentRuntimeOptions {
   yolo: boolean;
   statusline: "untouched" | "builtin";
+  claudeToolSearch: boolean;
+  claudeAgentTeams: boolean;
+  claudeEffortLevel: ClaudeEffortLevel;
+  claudeDisableArtifact: boolean;
+  claudeHideAttribution: boolean;
+  codexReasoningEffort: CodexReasoningEffort;
+  codexContextWindow: string;
+  codexAutoCompactTokenLimit: string;
+  codexWebSearch: CodexWebSearch;
 }
 
 /** 新建一套接入配置时的空白值。 */
@@ -455,11 +468,30 @@ export function runtimeOptionsOf(
   return {
     yolo: settings.yolo === true,
     statusline: settings.statusline === "builtin" ? "builtin" : "untouched",
+    claudeToolSearch: settings.claude_tool_search === true,
+    claudeAgentTeams: settings.claude_agent_teams === true,
+    claudeEffortLevel: ["auto", "low", "medium", "high", "xhigh", "max"].includes(String(settings.claude_effort_level))
+      ? settings.claude_effort_level as ClaudeEffortLevel
+      : "",
+    claudeDisableArtifact: settings.claude_disable_artifact === true,
+    claudeHideAttribution: settings.claude_hide_attribution === true,
+    codexReasoningEffort: ["minimal", "low", "medium", "high", "xhigh"].includes(String(settings.codex_reasoning_effort))
+      ? settings.codex_reasoning_effort as CodexReasoningEffort
+      : "",
+    codexContextWindow: typeof settings.codex_context_window === "number"
+      ? String(settings.codex_context_window)
+      : "",
+    codexAutoCompactTokenLimit: typeof settings.codex_auto_compact_token_limit === "number"
+      ? String(settings.codex_auto_compact_token_limit)
+      : "",
+    codexWebSearch: ["disabled", "cached", "indexed", "live"].includes(String(settings.codex_web_search))
+      ? settings.codex_web_search as CodexWebSearch
+      : "",
   };
 }
 
 /**
- * 只更新运行设置弹窗拥有的两个键。
+ * 只更新运行设置弹窗拥有的键。
  * 接入 profiles、当前 active、生命周期字段与未来版本加入的未知字段全部原样保留。
  */
 export function updateAgentRuntimeOptions(
@@ -476,6 +508,30 @@ export function updateAgentRuntimeOptions(
   else delete settings.yolo;
   if (options.statusline === "builtin") settings.statusline = "builtin";
   else delete settings.statusline;
+
+  const setBoolean = (key: string, value: boolean) => {
+    if (value) settings[key] = true;
+    else delete settings[key];
+  };
+  setBoolean("claude_tool_search", options.claudeToolSearch);
+  setBoolean("claude_agent_teams", options.claudeAgentTeams);
+  setBoolean("claude_disable_artifact", options.claudeDisableArtifact);
+  setBoolean("claude_hide_attribution", options.claudeHideAttribution);
+
+  if (options.claudeEffortLevel) settings.claude_effort_level = options.claudeEffortLevel;
+  else delete settings.claude_effort_level;
+  if (options.codexReasoningEffort) settings.codex_reasoning_effort = options.codexReasoningEffort;
+  else delete settings.codex_reasoning_effort;
+
+  const setPositiveInteger = (key: string, raw: string) => {
+    const value = Number(raw.trim());
+    if (raw.trim() && Number.isInteger(value) && value > 0) settings[key] = value;
+    else delete settings[key];
+  };
+  setPositiveInteger("codex_context_window", options.codexContextWindow);
+  setPositiveInteger("codex_auto_compact_token_limit", options.codexAutoCompactTokenLimit);
+  if (options.codexWebSearch) settings.codex_web_search = options.codexWebSearch;
+  else delete settings.codex_web_search;
 
   if (Object.keys(settings).length > 0) next.settings = settings;
   else delete next.settings;

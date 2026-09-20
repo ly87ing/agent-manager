@@ -281,7 +281,7 @@ export default function AgentsPage({
     }
   };
 
-  /** 保存运行偏好后立刻写进助手配置；只改 yolo/statusline 两个归属键。 */
+  /** 保存运行偏好后立刻写进助手配置；只改运行设置弹窗明确拥有的键。 */
   const saveRuntimeOptions = async (element: EngineElement, options: AgentRuntimeOptions) => {
     if (runtimeSaving) return;
     const agentId = element.id.replace(/^agents:/, "");
@@ -717,7 +717,7 @@ export default function AgentsPage({
           key={runtimeFormAgent.id}
           agentName={(runtimeFormAgent.spec as AgentsSpec).display_name ?? runtimeFormAgent.id.replace(/^agents:/, "")}
           initial={runtimeOptionsOf(runtimeFormAgent.spec as Record<string, unknown>)}
-          supportsStatusline={connectionKindOf(runtimeFormAgent) === "claude"}
+          kind={connectionKindOf(runtimeFormAgent) ?? "claude"}
           busy={runtimeSaving}
           error={runtimeFormError}
           onSubmit={(options) => void saveRuntimeOptions(runtimeFormAgent, options)}
