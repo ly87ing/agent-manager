@@ -64,6 +64,12 @@ impl AgentDef {
     pub(crate) fn spec_ref(&self) -> &Value {
         &self.spec
     }
+
+    /// 定义里写的客户端配置文件位置。Codex 的运行参数与 MCP 写的是同一个
+    /// `config.toml`，实例各有各的 CODEX_HOME，照定义走才不会张冠李戴。
+    pub(crate) fn config_path(&self) -> Option<&str> {
+        self.mcp_config.as_deref()
+    }
 }
 
 fn command_slot<'a>(

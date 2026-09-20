@@ -267,18 +267,18 @@ describe("助手运行参数", () => {
     expect(screen.queryByTestId("switch-connection-agents:claude-code")).toBeNull();
   });
 
-  it("不是 Claude 形态的助手：不显示运行参数这一段", async () => {
-    const codexRoutes = routes({
+  function agentRoutes(id: string, bin: string) {
+    return routes({
       "agents:status": makeEnvelope(
         {
           domain: "agents",
           elements: [
             makeElement({
-              id: "agents:codex",
+              id: `agents:${id}`,
               domain: "agents",
               spec: {
-                display_name: "Codex",
-                bin: "codex",
+                display_name: id,
+                bin,
                 preferred_provider: "native",
                 providers: { native: { managed: true, install: "i.sh", upgrade: "u.sh" } },
               },
@@ -293,7 +293,25 @@ describe("助手运行参数", () => {
         { command: "agents.status" },
       ),
     });
-    renderWithEngine(<AgentsPage />, codexRoutes);
+  }
+
+  it("Codex 也能配接入配置，但没有认证方式与状态栏那两项", async () => {
+    renderWithEngine(<AgentsPage />, agentRoutes("codex", "codex"));
+    await openEditor();
+    await addConnection();
+    // 地址、令牌变量名、模型都有
+    expect(screen.getByTestId("connection-base-url-input")).toBeInTheDocument();
+    expect(screen.getByTestId("connection-token-var-input")).toBeInTheDocument();
+    expect(screen.getByTestId("connection-model-input")).toBeInTheDocument();
+    // Codex 只认环境变量名，没有「令牌怎么发」可选；也没有状态栏机制
+    expect(screen.queryByTestId("connection-auth-select")).toBeNull();
+    expect(screen.queryByTestId("statusline-select")).toBeNull();
+    // 跳过权限确认两家都有
+    expect(screen.getByTestId("agent-yolo-checkbox")).toBeInTheDocument();
+  });
+
+  it("既不是 Claude 也不是 Codex 的助手：不显示运行参数这一段", async () => {
+    renderWithEngine(<AgentsPage />, agentRoutes("opencode", "opencode"));
     await openEditor();
     expect(screen.queryByTestId("add-connection")).toBeNull();
     expect(screen.queryByTestId("agent-yolo-checkbox")).toBeNull();

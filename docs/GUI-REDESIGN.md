@@ -66,8 +66,9 @@ Codex 侧读 `<CODEX_HOME>/sessions/**/rollout-*.jsonl` 里最后一条 `rate_li
 ## 助手运行参数
 
 `agents:configure` 把助手的运行参数写进它自己的配置文件，与装卸升级的 `agents:apply`
-分属两条路径（那条执行 shell 命令，这条写文件）。目前只支持 Claude Code 形态
-（按可执行名判定），目标固定为 `~/.claude/settings.json`。
+分属两条路径（那条执行 shell 命令，这条写文件）。支持 Claude Code 与 Codex 两种形态
+（按可执行名判定），目标分别是 `~/.claude/settings.json` 与定义里 `mcp_config` 指向的
+`config.toml`（缺省 `~/.codex/config.toml`）。
 
 **接入配置**：`settings.profiles` 存多套（官方、各家中转站），`settings.active` 指向
 当前生效的那套，同一时刻只有一套写进目标文件。每套含地址、令牌变量名、令牌走哪个头
@@ -103,7 +104,19 @@ x-api-key，中转站两种都有）、模型、小任务模型、opus/sonnet/ha
 一次真实写入，失败时定义已存但目标文件不动，并说明原因。卡片上另有接入配置下拉，
 选中即切换。
 
-Codex 形态（`~/.codex/config.toml` 的 `model_providers` / `approval_policy`）尚未接入。
+**Codex 侧**写同一份 `config.toml`——MCP 域也写它，因此按段落分工：本工具在这里拥有
+四个顶层键（`model_provider`、`model`、`approval_policy`、`sandbox_mode`）与带受管标记
+`# [agent-manager:managed]` 的 `[model_providers.*]` 段，其余行（含注释、用户自己的键、
+MCP 域写的 `[mcp_servers.*]`）逐行原样保留。写入是文本级编辑：顶层键就地替换或插在第一个
+表头之前（越过紧贴表头的注释，否则会把受管标记与它的表段拆散），表段整段替换。
+
+Codex 的令牌不落盘：provider 用 `env_key` 指向环境变量名，由 Codex 启动时自己去读，
+因此这里只写变量名——与 Claude 那边被迫写真值不同。`wire_api` 固定 `responses`
+（当前唯一支持值）。`openai` / `ollama` / `lmstudio` 是 Codex 内置 id，用作接入配置名会被
+拒绝。自定义接入方式没有默认地址，只填令牌变量名而不填地址同样拒绝。
+跳过权限确认在 Codex 侧写 `approval_policy = "never"` 与 `sandbox_mode = "danger-full-access"`。
+
+状态栏只有 Claude 侧有（Codex 没有这个机制）。
 
 按 2026-09-19 产品裁决，界面只保留能改变下一步动作的信息与开关，以下一并退役：
 

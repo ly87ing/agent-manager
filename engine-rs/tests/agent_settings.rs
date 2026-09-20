@@ -248,13 +248,14 @@ fn 令牌只存变量名_取不到值时拒绝写入_审计不记取值() {
 }
 
 #[test]
-fn 非_claude_形态的助手拒绝写运行参数_且零写() {
+fn 既不是_claude_也不是_codex_的助手拒绝写运行参数_且零写() {
     let (base, ctx) = temp_ctx("kind");
+    // 运行参数是按形态写各自的配置文件；别家助手没有对应的落点
     let definition = json!({
-        "display_name": "Codex",
-        "bin": "codex",
-        "preferred_provider": "native",
-        "providers": {"native": {"install": "true", "managed": true}},
+        "display_name": "OpenCode",
+        "bin": "opencode",
+        "preferred_provider": "system",
+        "providers": {"system": {"managed": false}},
         "settings": {"active": "p", "profiles": {"p": {"base_url": "https://api.example.com"}}},
     });
     let env = execute(
@@ -265,7 +266,7 @@ fn 非_claude_形态的助手拒绝写运行参数_且零写() {
                 "--layer",
                 "local",
                 "--key",
-                "agents.definitions.codex",
+                "agents.definitions.opencode",
                 "--value",
                 &definition.to_string(),
             ],
@@ -273,9 +274,10 @@ fn 非_claude_形态的助手拒绝写运行参数_且零写() {
     );
     assert!(env.ok, "{:?}", env.errors);
 
-    let refused = execute(&ctx, &request("agents:configure", &["--only", "agents:codex"]));
+    let refused = execute(&ctx, &request("agents:configure", &["--only", "agents:opencode"]));
     assert!(!refused.ok);
     assert!(!ctx.home_dir.join(".claude/settings.json").exists());
+    assert!(!ctx.home_dir.join(".codex/config.toml").exists());
 
     let _ = fs::remove_dir_all(&base);
 }
@@ -555,6 +557,239 @@ fn 切回默认会撤掉接入配置_库里的生效项也清空() {
         ),
     );
     assert!(!both.ok);
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+// ---------- Codex ----------
+
+/// 写一条 Codex 助手定义（配置文件与 MCP 同一个 config.toml）。
+fn define_codex(ctx: &Context, settings: Value) {
+    let definition = json!({
+        "_replace": true,
+        "display_name": "Codex",
+        "bin": "codex",
+        "mcp_config": {"path": "~/.codex/config.toml", "format": "toml"},
+        "preferred_provider": "native",
+        "providers": {"native": {"install": "true", "upgrade": "true", "managed": true}},
+        "settings": settings,
+    });
+    let env = execute(
+        ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "agents.definitions.codex",
+                "--value",
+                &definition.to_string(),
+            ],
+        ),
+    );
+    assert!(env.ok, "{:?}", env.errors);
+}
+
+fn codex_config(ctx: &Context) -> String {
+    fs::read_to_string(ctx.home_dir.join(".codex/config.toml")).unwrap()
+}
+
+#[test]
+fn codex_写入只动自己那几项_用户的四百行配置原样保留() {
+    let (base, ctx) = temp_ctx("codex-merge");
+    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
+    // 用户已有的配置：顶层键、别的表段、注释
+    fs::write(
+        ctx.home_dir.join(".codex/config.toml"),
+        concat!(
+            "service_tier = \"default\"\n",
+            "model_reasoning_effort = \"xhigh\"\n",
+            "\n",
+            "# 我自己加的插件\n",
+            "[plugins.\"chrome@openai-bundled\"]\n",
+            "enabled = true\n",
+            "\n",
+            "# [agent-manager:managed]\n",
+            "[mcp_servers.grok]\n",
+            "command = \"grok\"\n",
+        ),
+    )
+    .unwrap();
+    define_codex(
+        &ctx,
+        json!({
+            "active": "relay",
+            "profiles": {"relay": {"label": "我的中转", "base_url": "https://relay.example.com/v1", "token_var": "RELAY_KEY", "model": "gpt-5"}}
+        }),
+    );
+
+    let env = execute(&ctx, &request("agents:configure", &["--only", "agents:codex"]));
+    assert!(env.ok, "{:?}", env.errors);
+
+    let after = codex_config(&ctx);
+    // 用户的东西一个都没动
+    assert!(after.contains("service_tier = \"default\""));
+    assert!(after.contains("model_reasoning_effort = \"xhigh\""));
+    assert!(after.contains("# 我自己加的插件"));
+    assert!(after.contains("[plugins.\"chrome@openai-bundled\"]"));
+    // MCP 域写的那段也不能被我们碰
+    assert!(after.contains("[mcp_servers.grok]"), "MCP 域的受管段不归我们管");
+    // 我们的东西写上了
+    assert!(after.contains("[model_providers.relay]"), "{after}");
+    assert!(after.contains("base_url = \"https://relay.example.com/v1\""));
+    assert!(after.contains("env_key = \"RELAY_KEY\""), "令牌只写变量名，Codex 自己去读");
+    assert!(after.contains("wire_api = \"responses\""));
+    assert!(after.contains("model_provider = \"relay\""));
+    assert!(after.contains("model = \"gpt-5\""));
+    // 令牌取值不该出现在配置里（Codex 用 env_key 指向变量名）
+    assert!(!after.contains("sk-"));
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn codex_切换与切回默认_上一套的接入方式不残留() {
+    let (base, ctx) = temp_ctx("codex-switch");
+    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
+    define_codex(
+        &ctx,
+        json!({
+            "active": "a",
+            "profiles": {
+                "a": {"base_url": "https://a.example.com/v1"},
+                "b": {"base_url": "https://b.example.com/v1"}
+            }
+        }),
+    );
+    assert!(execute(&ctx, &request("agents:configure", &["--only", "agents:codex"])).ok);
+    assert!(codex_config(&ctx).contains("[model_providers.a]"));
+
+    let switched = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:codex", "--use", "b"]),
+    );
+    assert!(switched.ok, "{:?}", switched.errors);
+    let after = codex_config(&ctx);
+    assert!(after.contains("[model_providers.b]"));
+    assert!(!after.contains("[model_providers.a]"), "上一套必须撤干净：{after}");
+    assert!(after.contains("model_provider = \"b\""));
+    assert_eq!(after.matches("model_provider =").count(), 1, "不能留下两行赋值");
+
+    let back = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:codex", "--use-default"]),
+    );
+    assert!(back.ok, "{:?}", back.errors);
+    let after = codex_config(&ctx);
+    assert!(!after.contains("model_providers"), "切回默认后不留接入方式：{after}");
+    assert!(!after.contains("model_provider ="));
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn codex_跳过权限确认写审批与沙箱_关掉则撤回() {
+    let (base, ctx) = temp_ctx("codex-yolo");
+    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
+    define_codex(&ctx, json!({"yolo": true}));
+
+    let refused = execute(&ctx, &request("agents:configure", &["--only", "agents:codex"]));
+    assert!(!refused.ok, "降安全等级必须显式确认");
+
+    let ok = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:codex", "--allow-yolo"]),
+    );
+    assert!(ok.ok, "{:?}", ok.errors);
+    let after = codex_config(&ctx);
+    assert!(after.contains("approval_policy = \"never\""));
+    assert!(after.contains("sandbox_mode = \"danger-full-access\""));
+
+    // 关掉：我们写的那两项撤回
+    define_codex(&ctx, json!({}));
+    assert!(execute(&ctx, &request("agents:configure", &["--only", "agents:codex"])).ok);
+    let after = codex_config(&ctx);
+    assert!(!after.contains("approval_policy"));
+    assert!(!after.contains("sandbox_mode"));
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn codex_内置接入方式名被拒_缺地址也被拒() {
+    let (base, ctx) = temp_ctx("codex-reserved");
+    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
+
+    // openai / ollama / lmstudio 是 Codex 内置的，覆盖不了
+    define_codex(
+        &ctx,
+        json!({"active": "openai", "profiles": {"openai": {"base_url": "https://x.example.com/v1"}}}),
+    );
+    let refused = execute(&ctx, &request("agents:configure", &["--only", "agents:codex"]));
+    assert!(!refused.ok, "内置名字不该放行");
+
+    // 自定义接入方式没有默认地址，只填令牌变量名不成立
+    define_codex(
+        &ctx,
+        json!({"active": "relay", "profiles": {"relay": {"token_var": "RELAY_KEY"}}}),
+    );
+    let refused = execute(&ctx, &request("agents:configure", &["--only", "agents:codex"]));
+    assert!(!refused.ok, "缺地址要当场说清楚");
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn codex_外部改过我们那几项就拒绝覆盖() {
+    let (base, ctx) = temp_ctx("codex-takeover");
+    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
+    define_codex(
+        &ctx,
+        json!({"active": "relay", "profiles": {"relay": {"base_url": "https://relay.example.com/v1"}}}),
+    );
+    assert!(execute(&ctx, &request("agents:configure", &["--only", "agents:codex"])).ok);
+
+    // 本工具以外把地址改掉
+    let path = ctx.home_dir.join(".codex/config.toml");
+    let edited = codex_config(&ctx).replace("https://relay.example.com/v1", "https://hand.example.com/v1");
+    fs::write(&path, &edited).unwrap();
+
+    let refused = execute(&ctx, &request("agents:configure", &["--only", "agents:codex"]));
+    assert!(!refused.ok, "外部改过就该拒绝");
+    assert_eq!(codex_config(&ctx), edited, "拒绝时一个字节都不许动");
+
+    let taken = execute(
+        &ctx,
+        &request(
+            "agents:configure",
+            &["--only", "agents:codex", "--allow-takeover"],
+        ),
+    );
+    assert!(taken.ok, "{:?}", taken.errors);
+    assert!(codex_config(&ctx).contains("https://relay.example.com/v1"));
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn codex_用户自己配的顶层键首次也要显式接管() {
+    let (base, ctx) = temp_ctx("codex-first-run");
+    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
+    // 从没用本工具写过，但用户自己设了模型与审批策略
+    fs::write(
+        ctx.home_dir.join(".codex/config.toml"),
+        "model = \"gpt-5.6-sol\"\napproval_policy = \"never\"\n",
+    )
+    .unwrap();
+    define_codex(
+        &ctx,
+        json!({"active": "relay", "profiles": {"relay": {"base_url": "https://relay.example.com/v1", "model": "other"}}}),
+    );
+
+    let refused = execute(&ctx, &request("agents:configure", &["--only", "agents:codex"]));
+    assert!(!refused.ok, "不问自取会把用户手写的顶掉");
+    assert!(codex_config(&ctx).contains("gpt-5.6-sol"));
 
     let _ = fs::remove_dir_all(&base);
 }

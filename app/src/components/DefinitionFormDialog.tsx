@@ -163,8 +163,9 @@ function AgentForm({
     if (activeConnection === removed?.name) setActiveConnection("");
     markDirty("connections");
   };
-  // 运行参数目前只写 Claude Code 形态的 settings.json；判定与引擎一致，只认可执行名
-  const isClaudeLike = bin.trim().replace(/\.exe$/i, "").split("/").pop() === "claude";
+  // 运行参数按形态写各自的配置文件；判定与引擎一致，只认可执行名
+  const binName = bin.trim().replace(/\.exe$/i, "").split("/").pop();
+  const settingsKind = binName === "claude" ? "claude" : binName === "codex" ? "codex" : null;
 
   // Unified draft providers preserving in-flight edits across channel and platform switches
   const [draftProviders, setDraftProviders] = useState<Record<string, Record<string, unknown>>>(() => {
@@ -359,7 +360,7 @@ function AgentForm({
         </div>
 
         {/* 运行参数：只有 Claude Code 形态的助手写得进去（settings.json） */}
-        {isClaudeLike && (
+        {settingsKind && (
           <div className="mt-4 rounded-lg border p-3">
             <p className="text-xs font-medium text-foreground">运行参数</p>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -463,32 +464,38 @@ function AgentForm({
                               spellCheck={false}
                             />
                           </label>
-                          <div className="grid grid-cols-2 gap-2">
+                          <div className={settingsKind === "codex" ? "" : "grid grid-cols-2 gap-2"}>
                             <label className="block text-xs text-muted-foreground">
                               令牌所在的环境变量名
                               <input
                                 data-testid="connection-token-var-input"
                                 value={item.tokenVar}
                                 onChange={(e) => patchConnection(index, { tokenVar: e.target.value })}
-                                placeholder="取值在密钥页填"
+                                placeholder={
+                                  settingsKind === "codex"
+                                    ? "Codex 启动时自己去环境里读这个变量"
+                                    : "取值在密钥页填"
+                                }
                                 className="mt-1 w-full rounded border border-input p-1.5 font-mono text-xs"
                                 spellCheck={false}
                               />
                             </label>
-                            <label className="block text-xs text-muted-foreground">
-                              令牌怎么发
-                              <select
-                                data-testid="connection-auth-select"
-                                value={item.auth}
-                                onChange={(e) => patchConnection(index, { auth: e.target.value as ConnectionEntry["auth"] })}
-                                className="mt-1 w-full rounded border border-input bg-card p-1.5 text-xs"
-                              >
-                                <option value="token">Authorization: Bearer</option>
-                                <option value="api_key">x-api-key</option>
-                              </select>
-                            </label>
+                            {settingsKind === "claude" && (
+                              <label className="block text-xs text-muted-foreground">
+                                令牌怎么发
+                                <select
+                                  data-testid="connection-auth-select"
+                                  value={item.auth}
+                                  onChange={(e) => patchConnection(index, { auth: e.target.value as ConnectionEntry["auth"] })}
+                                  className="mt-1 w-full rounded border border-input bg-card p-1.5 text-xs"
+                                >
+                                  <option value="token">Authorization: Bearer</option>
+                                  <option value="api_key">x-api-key</option>
+                                </select>
+                              </label>
+                            )}
                           </div>
-                          <div className="grid grid-cols-2 gap-2">
+                          <div className={settingsKind === "codex" ? "" : "grid grid-cols-2 gap-2"}>
                             <label className="block text-xs text-muted-foreground">
                               模型（可选）
                               <input
@@ -499,24 +506,28 @@ function AgentForm({
                                 spellCheck={false}
                               />
                             </label>
-                            <label className="block text-xs text-muted-foreground">
-                              小任务模型（可选）
-                              <input
-                                value={item.smallFastModel}
-                                onChange={(e) => patchConnection(index, { smallFastModel: e.target.value })}
-                                className="mt-1 w-full rounded border border-input p-1.5 font-mono text-xs"
-                                spellCheck={false}
-                              />
-                            </label>
+                            {settingsKind === "claude" && (
+                              <label className="block text-xs text-muted-foreground">
+                                小任务模型（可选）
+                                <input
+                                  value={item.smallFastModel}
+                                  onChange={(e) => patchConnection(index, { smallFastModel: e.target.value })}
+                                  className="mt-1 w-full rounded border border-input p-1.5 font-mono text-xs"
+                                  spellCheck={false}
+                                />
+                              </label>
+                            )}
                           </div>
                           <details className="rounded border p-2">
                             <summary className="cursor-pointer text-xs text-muted-foreground select-none">
-                              模型别名与超时
+                              {settingsKind === "codex" ? "超时" : "模型别名与超时"}
                             </summary>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              中转站的模型名和官方对不上时，在这里把 opus / sonnet / haiku 各自指过去。
-                            </p>
-                            <div className="mt-2 grid grid-cols-3 gap-2">
+                            {settingsKind === "claude" && (
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                中转站的模型名和官方对不上时，在这里把 opus / sonnet / haiku 各自指过去。
+                              </p>
+                            )}
+                            <div className={settingsKind === "codex" ? "hidden" : "mt-2 grid grid-cols-3 gap-2"}>
                               {([["opus", "aliasOpus"], ["sonnet", "aliasSonnet"], ["haiku", "aliasHaiku"]] as const).map(
                                 ([tier, field]) => (
                                   <label key={tier} className="block text-xs text-muted-foreground">
@@ -551,6 +562,7 @@ function AgentForm({
             )}
 
             <div className="mt-3 space-y-2 border-t pt-3">
+              {settingsKind === "claude" && (
               <label className="block text-xs text-muted-foreground">
                 状态栏
                 <select
@@ -566,6 +578,7 @@ function AgentForm({
                   助手只把额度推给状态栏、不写文件，所以用本工具这份才能在卡片上看到与它同屏的实时额度。
                 </span>
               </label>
+              )}
               <label className="flex items-start gap-2 text-xs text-foreground">
                 <input
                   type="checkbox"
@@ -577,7 +590,9 @@ function AgentForm({
                 <span>
                   跳过权限确认
                   <span className="mt-0.5 block text-xs text-warning">
-                    它改的是助手的安全默认值：之后助手执行命令、改文件都不再征求你同意。保存时会再确认一次。
+                    {settingsKind === "codex"
+                      ? "它让 Codex 不再征求你同意，也不再受沙箱限制：执行命令、改文件都直接做。保存时会再确认一次。"
+                      : "它改的是助手的安全默认值：之后助手执行命令、改文件都不再征求你同意。保存时会再确认一次。"}
                   </span>
                 </span>
               </label>

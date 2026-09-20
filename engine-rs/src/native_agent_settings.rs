@@ -425,6 +425,279 @@ pub(crate) fn render_claude(
     Ok(out)
 }
 
+// ---------- Codex：config.toml ----------
+
+/// Codex 的目标文件，相对 CODEX_HOME。
+pub(crate) const CODEX_CONFIG: &str = "config.toml";
+
+/// 受管标记：与 MCP 写进同一个文件的标记一致，只有带它的表段才是本工具的。
+const MANAGED_MARK: &str = "# [agent-manager:managed]";
+
+/// 本工具在 config.toml 里拥有的顶层键。
+const CODEX_OWNED_KEYS: &[&str] = &["model_provider", "model", "approval_policy", "sandbox_mode"];
+
+/// Codex 内置的 provider id，不允许覆盖（写了也不生效，还会盖掉内置定义）。
+const CODEX_RESERVED_PROVIDERS: &[&str] = &["openai", "ollama", "lmstudio"];
+
+/// 顶层键在哪儿结束：TOML 里 `[table]` 之后的键属于那个表，所以根键必须在第一个表头之前。
+fn toml_root_end(lines: &[&str]) -> usize {
+    lines
+        .iter()
+        .position(|line| {
+            let t = line.trim();
+            t.starts_with('[') && !t.starts_with("[[") || t.starts_with("[[")
+        })
+        .unwrap_or(lines.len())
+}
+
+/// 这一行是不是在给 `key` 赋值。
+fn toml_line_assigns(line: &str, key: &str) -> bool {
+    let t = line.trim_start();
+    let Some(rest) = t.strip_prefix(key) else {
+        return false;
+    };
+    rest.trim_start().starts_with('=')
+}
+
+/// 新的顶层键插在哪儿：第一个表头之前，且要越过紧贴表头的注释——
+/// 那些注释属于下面那个表段（受管标记就是这么用的），插进去会把它们拆散。
+fn toml_insert_point(lines: &[&str]) -> usize {
+    let mut point = toml_root_end(lines);
+    while point > 0 {
+        let prev = lines[point - 1].trim();
+        if prev.starts_with('#') || prev.is_empty() {
+            point -= 1;
+        } else {
+            break;
+        }
+    }
+    point
+}
+
+/// 设置或删除一个顶层键；其余行（含注释与格式）原样保留。
+fn toml_set_root_key(content: &str, key: &str, value: Option<&str>) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let root_end = toml_root_end(&lines);
+    // 先把现有的那一行（可能有多行重复赋值，本就非法）全部摘掉
+    let kept: Vec<String> = lines
+        .iter()
+        .enumerate()
+        .filter(|(index, line)| !(*index < root_end && toml_line_assigns(line, key)))
+        .map(|(_, line)| (*line).to_string())
+        .collect();
+
+    let mut out = kept;
+    if let Some(v) = value {
+        let refs: Vec<&str> = out.iter().map(String::as_str).collect();
+        let point = toml_insert_point(&refs);
+        out.insert(point, format!("{key} = {v}"));
+    }
+    let mut text = out.join("\n");
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text
+}
+
+/// 取一个顶层键的原始字面量（含引号），没有则 None。
+fn toml_root_key_value(content: &str, key: &str) -> Option<String> {
+    let lines: Vec<&str> = content.lines().collect();
+    let root_end = toml_root_end(&lines);
+    lines[..root_end]
+        .iter()
+        .find(|line| toml_line_assigns(line, key))
+        .and_then(|line| line.split_once('='))
+        .map(|(_, value)| value.trim().to_string())
+}
+
+/// 删掉所有带受管标记、且表头以 `prefix.` 开头的表段，其余原样保留。
+fn toml_remove_managed_tables(content: &str, prefix: &str) -> String {
+    let mut out = String::new();
+    let mut skip = false;
+    let mut pending_mark = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == MANAGED_MARK {
+            // 先攥着：下一行是我们的表头就连标记一起丢，否则原样放回
+            pending_mark = true;
+            continue;
+        }
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            let header = trimmed.trim_matches(|c| c == '[' || c == ']');
+            let ours = pending_mark && header.starts_with(&format!("{prefix}."));
+            skip = ours;
+            if !ours && pending_mark {
+                out.push_str(MANAGED_MARK);
+                out.push('\n');
+            }
+            pending_mark = false;
+        } else if pending_mark {
+            out.push_str(MANAGED_MARK);
+            out.push('\n');
+            pending_mark = false;
+        }
+        if !skip {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    if pending_mark {
+        out.push_str(MANAGED_MARK);
+        out.push('\n');
+    }
+    out
+}
+
+/// 收集带受管标记的表段正文，用于外部修改检测。
+fn toml_managed_tables(content: &str, prefix: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut current: Option<String> = None;
+    let mut pending_mark = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == MANAGED_MARK {
+            pending_mark = true;
+            continue;
+        }
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            if let Some(block) = current.take() {
+                found.push(block);
+            }
+            let header = trimmed.trim_matches(|c| c == '[' || c == ']');
+            if pending_mark && header.starts_with(&format!("{prefix}.")) {
+                current = Some(format!("{trimmed}\n"));
+            }
+            pending_mark = false;
+            continue;
+        }
+        pending_mark = false;
+        if let Some(block) = current.as_mut() {
+            block.push_str(trimmed);
+            block.push('\n');
+        }
+    }
+    if let Some(block) = current.take() {
+        found.push(block);
+    }
+    found
+}
+
+/// config.toml 里本工具拥有的那部分：四个顶层键 + 受管的 provider 段。
+pub(crate) fn codex_owned_slice(content: &str) -> Value {
+    let mut slice = Map::new();
+    for key in CODEX_OWNED_KEYS {
+        if let Some(value) = toml_root_key_value(content, key) {
+            slice.insert((*key).to_string(), Value::String(value));
+        }
+    }
+    let tables = toml_managed_tables(content, "model_providers");
+    if !tables.is_empty() {
+        slice.insert(
+            "model_providers".into(),
+            Value::Array(tables.into_iter().map(Value::String).collect()),
+        );
+    }
+    Value::Object(slice)
+}
+
+pub(crate) fn codex_owned_digest(content: &str) -> String {
+    crate::native_mcp::model::sha256_hex_bytes(
+        serde_json::to_vec(&codex_owned_slice(content))
+            .unwrap_or_default()
+            .as_slice(),
+    )
+}
+
+/// 渲染 Codex 的 config.toml：既有内容为基底，只改本工具拥有的那几项。
+///
+/// 令牌不落盘：Codex 的 provider 用 `env_key` 指向环境变量名，由它自己去读，
+/// 因此这里只写变量名——与 Claude 那边被迫写真值不同。
+pub(crate) fn render_codex(existing: &str, settings: &AgentSettings) -> Result<String> {
+    // 先撤干净本工具写过的东西，再按当前生效的那套写回去
+    let mut text = toml_remove_managed_tables(existing, "model_providers");
+    for key in CODEX_OWNED_KEYS {
+        text = toml_set_root_key(&text, key, None);
+    }
+
+    let active_name = settings.active.clone();
+    if let (Some(name), Some(profile)) = (active_name.as_deref(), settings.current()) {
+        if CODEX_RESERVED_PROVIDERS.contains(&name) {
+            bail!("{name} 是 Codex 内置的接入方式，换个名字（内置的不能覆盖）");
+        }
+        // 只有真配了地址才值得建一个 provider；否则就是用 Codex 自带的登录
+        if profile.base_url.is_some() || profile.token_var.is_some() {
+            let Some(url) = profile.base_url.as_deref() else {
+                bail!("接入配置 {name} 要填接口地址，Codex 的自定义接入方式没有默认地址");
+            };
+            let mut table = format!(
+                "\n{MANAGED_MARK}\n[model_providers.{}]\nname = {}\nbase_url = {}\n",
+                name,
+                crate::native_mcp::codecs::toml_basic_string(
+                    profile.label.as_deref().unwrap_or(name)
+                ),
+                crate::native_mcp::codecs::toml_basic_string(url),
+            );
+            if let Some(var) = profile.token_var.as_deref() {
+                table.push_str(&format!(
+                    "env_key = {}\n",
+                    crate::native_mcp::codecs::toml_basic_string(var)
+                ));
+            }
+            // wire_api 目前只有 responses 这一种，写死避免用户填错
+            table.push_str("wire_api = \"responses\"\n");
+            if let Some(ms) = profile.timeout_ms {
+                table.push_str(&format!("stream_idle_timeout_ms = {ms}\n"));
+            }
+            if !text.ends_with('\n') && !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(&table);
+            text = toml_set_root_key(
+                &text,
+                "model_provider",
+                Some(&crate::native_mcp::codecs::toml_basic_string(name)),
+            );
+        }
+        if let Some(model) = profile.model.as_deref() {
+            text = toml_set_root_key(
+                &text,
+                "model",
+                Some(&crate::native_mcp::codecs::toml_basic_string(model)),
+            );
+        }
+    }
+
+    if settings.yolo {
+        text = toml_set_root_key(&text, "approval_policy", Some("\"never\""));
+        text = toml_set_root_key(&text, "sandbox_mode", Some("\"danger-full-access\""));
+    }
+
+    Ok(text)
+}
+
+/// Codex 的目标文件绝对路径：配置文件就在 CODEX_HOME 下。
+pub(crate) fn codex_target(ctx: &Context, config_path: Option<&str>) -> std::path::PathBuf {
+    match config_path {
+        Some(raw) => crate::native_mcp::targets::expand_home(raw, &ctx.home_dir),
+        None => ctx.home_dir.join(".codex").join(CODEX_CONFIG),
+    }
+}
+
+/// 助手形态：决定写哪个配置文件、用哪套渲染。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Kind {
+    Claude,
+    Codex,
+}
+
+/// 只认可执行名：codex 形态。
+fn is_codex_like(bin: &str) -> bool {
+    std::path::Path::new(bin)
+        .file_stem()
+        .and_then(|name| name.to_str())
+        == Some("codex")
+}
+
 /// 只认可执行名，路径和 .exe 后缀都剥掉——自定义助手可能把 bin 写成绝对路径。
 fn is_claude_like(bin: &str) -> bool {
     std::path::Path::new(bin)
@@ -505,18 +778,37 @@ fn applied_digest_of(ctx: &Context, agent_id: &str) -> Result<Option<String>> {
 ///
 /// 没写过而文件里已经有这些键 = 用户自己配过，同样按外部内容对待：不问自取会把
 /// 他手写的地址、令牌和状态栏顶掉。
-pub(crate) fn external_change(ctx: &Context, agent_id: &str, path: &Path) -> Result<bool> {
+pub(crate) fn external_change(
+    ctx: &Context,
+    agent_id: &str,
+    kind: Kind,
+    path: &Path,
+) -> Result<bool> {
     if !path.is_file() {
         return Ok(false);
     }
     let bytes = std::fs::read(path)?;
-    let statusline_path = statusline_target(ctx);
-    let current = owned_digest(&bytes, &statusline_path);
+    let (current, empty) = match kind {
+        Kind::Claude => {
+            let statusline_path = statusline_target(ctx);
+            (
+                owned_digest(&bytes, &statusline_path),
+                owned_slice(&bytes, &statusline_path)
+                    .as_object()
+                    .is_some_and(Map::is_empty),
+            )
+        }
+        Kind::Codex => {
+            let text = String::from_utf8_lossy(&bytes);
+            (
+                codex_owned_digest(&text),
+                codex_owned_slice(&text).as_object().is_some_and(Map::is_empty),
+            )
+        }
+    };
     match applied_digest_of(ctx, agent_id)? {
         Some(known) => Ok(known != current),
-        None => Ok(!owned_slice(&bytes, &statusline_path)
-            .as_object()
-            .is_some_and(Map::is_empty)),
+        None => Ok(!empty),
     }
 }
 
@@ -560,12 +852,16 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
         .iter()
         .find(|d| d.id == id)
         .ok_or_else(|| DispatchError::new("AGENT_ERROR", format!("没有这个助手：{id}")))?;
-    if !is_claude_like(&def.bin) {
+    let kind = if is_claude_like(&def.bin) {
+        Kind::Claude
+    } else if is_codex_like(&def.bin) {
+        Kind::Codex
+    } else {
         return Err(DispatchError::new(
             "AGENT_ERROR",
-            "目前只有 Claude Code 形态的助手支持写运行参数".to_string(),
+            "只有 Claude Code 与 Codex 形态的助手支持写运行参数".to_string(),
         ));
-    }
+    };
 
     let mut settings = parse(def.spec_ref())
         .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}")))?;
@@ -600,39 +896,58 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
         ));
     }
 
-    let path = claude_target(ctx);
-    let takeover = external_change(ctx, &id, &path)
+    let path = match kind {
+        Kind::Claude => claude_target(ctx),
+        Kind::Codex => codex_target(ctx, def.config_path()),
+    };
+    let file_label = match kind {
+        Kind::Claude => CLAUDE_SETTINGS,
+        Kind::Codex => CODEX_CONFIG,
+    };
+    let takeover = external_change(ctx, &id, kind, &path)
         .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}")))?;
     if takeover && !req.flag("--allow-takeover") {
         return Err(DispatchError::new(
             "AGENT_ERROR",
             format!(
-                "{} 里这几项被本工具以外改过，拒绝覆盖；确认要用这里的内容替换请选择接管",
-                CLAUDE_SETTINGS
+                "{file_label} 里这几项被本工具以外改过，拒绝覆盖；确认要用这里的内容替换请选择接管"
             ),
         ));
     }
 
     let statusline_path = statusline_target(ctx);
     // 脚本先就位再写 settings.json：反过来的话中途失败会留下一个指向不存在文件的状态栏
-    if settings.statusline == StatusLine::Builtin {
+    if kind == Kind::Claude && settings.statusline == StatusLine::Builtin {
         deploy_statusline(&statusline_path)
             .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}")))?;
     }
 
     let existing = std::fs::read(&path).ok();
-    let content = render_claude(
-        existing.as_deref(),
-        &settings,
-        &crate::secret_values::lookup,
-        &statusline_path,
-    )
+    let content = match kind {
+        Kind::Claude => render_claude(
+            existing.as_deref(),
+            &settings,
+            &crate::secret_values::lookup,
+            &statusline_path,
+        ),
+        Kind::Codex => {
+            let text = existing
+                .as_deref()
+                .map(String::from_utf8_lossy)
+                .unwrap_or_default()
+                .to_string();
+            render_codex(&text, &settings).map(String::into_bytes)
+        }
+    }
     .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}")))?;
 
     atomic_write(&path, &content)
         .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}")))?;
 
-    let digest = owned_digest(&content, &statusline_path);
+    let digest = match kind {
+        Kind::Claude => owned_digest(&content, &statusline_path),
+        Kind::Codex => codex_owned_digest(&String::from_utf8_lossy(&content)),
+    };
     let active = settings.active.clone();
     let persisted = (|| -> Result<()> {
         let mut conn = store::open_write(ctx)?;
@@ -645,7 +960,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
                  applied_digest=excluded.applied_digest, updated_at=excluded.updated_at",
             rusqlite::params![
                 &id,
-                CLAUDE_SETTINGS,
+                file_label,
                 &digest,
                 chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
             ],
@@ -683,13 +998,13 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
             "agents:configure",
             Some(&id),
             Some(&json!({
-                "file": CLAUDE_SETTINGS,
+                "file": file_label,
                 "takeover": takeover,
                 "active": active,
                 "profiles": settings.profiles.len(),
                 "token_var": settings.current().and_then(|p| p.token_var.clone()),
                 "yolo": settings.yolo,
-                "statusline": settings.statusline == StatusLine::Builtin,
+                "statusline": kind == Kind::Claude && settings.statusline == StatusLine::Builtin,
             })),
         )?;
         tx.commit()?;
@@ -707,7 +1022,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
         "target": path.display().to_string(),
         "active": settings.active,
         "takeover": takeover,
-        "statusline": settings.statusline == StatusLine::Builtin,
+        "statusline": kind == Kind::Claude && settings.statusline == StatusLine::Builtin,
     }))
 }
 
