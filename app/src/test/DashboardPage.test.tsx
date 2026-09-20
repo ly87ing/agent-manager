@@ -162,15 +162,6 @@ function okRoutes(): Record<string, EngineRoute> {
 }
 
 describe("DashboardPage", () => {
-  it("Git 版本信息为空时仍渲染总览并显示不可用提示", async () => {
-    const routes = okRoutes();
-    routes["system:audit"] = makeEnvelope(makeAuditData({ version: null }), { command: "system.audit" });
-    renderDashboard(routes);
-
-    await userEvent.click(await screen.findByText(/体检明细/));
-    expect(screen.getByText(/版本 信息不可用/)).toBeInTheDocument();
-  });
-
   it("清单按域列出每一项：名字、版本、要不要更新、同步到位没有", async () => {
     renderDashboard(okRoutes());
 
@@ -203,10 +194,8 @@ describe("DashboardPage", () => {
     // 空的域不占位置
     expect(screen.queryByTestId("overview-profiles")).not.toBeInTheDocument();
 
-    // 明细默认收起，展开后按段分组渲染
-    await userEvent.click(screen.getByText(/体检明细/));
-    expect(screen.getByTestId("audit-section-runtime")).toHaveTextContent("engine-rs");
-    expect(screen.getByTestId("audit-section-mcp")).toHaveTextContent("托管产物尚未生成");
+    // 引擎自检明细已撤下：清单本身就回答「要不要动手」
+    expect(screen.queryByTestId("audit-details")).toBeNull();
   });
 
   it("一键同步：只对待同步的执行 apply，要你决定的不碰", async () => {
@@ -233,7 +222,6 @@ describe("DashboardPage", () => {
 
     expect(await screen.findByText("AUDIT_ERRORS")).toBeInTheDocument();
     expect(screen.getByText("doctor 报告 6 个错误")).toBeInTheDocument();
-    expect(screen.getByTestId("audit-details")).toHaveTextContent("6 个错误");
   });
 
   it("桥错误（非 envelope）时展示结构化错误码", async () => {

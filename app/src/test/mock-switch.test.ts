@@ -3,13 +3,11 @@ import { mockModeFromSearch } from "../lib/engine";
 import { createMockEngineClient } from "./mock-client";
 
 describe("dev-only mock 开关", () => {
-  it("仅在 DEV 且 ?mock=1|offline 时激活；生产（dev=false）一律为 null", () => {
+  it("仅在 DEV 且 ?mock=1|fresh 时激活；生产（dev=false）一律为 null", () => {
     expect(mockModeFromSearch("?mock=1", true)).toBe("demo");
-    expect(mockModeFromSearch("?mock=offline", true)).toBe("offline");
     expect(mockModeFromSearch("?mock=fresh", true)).toBe("fresh");
     // 生产门控：即使带参数也不激活
     expect(mockModeFromSearch("?mock=1", false)).toBeNull();
-    expect(mockModeFromSearch("?mock=offline", false)).toBeNull();
     expect(mockModeFromSearch("?mock=fresh", false)).toBeNull();
     // 无参数 / 其它值
     expect(mockModeFromSearch("", true)).toBeNull();
@@ -60,14 +58,5 @@ describe("dev-only mock 开关", () => {
     ]) {
       expect(convergenceStates.has(state), `convergence ${state}`).toBe(true);
     }
-  });
-
-  it("offline 变体：所有 envelope mode.offline=true，refresh-upstream 被拒", async () => {
-    const client = createMockEngineClient({ offline: true });
-    const audit = await client.run("system:audit");
-    expect(audit.mode.offline).toBe(true);
-    const refresh = await client.run("system:refresh-upstream");
-    expect(refresh.ok).toBe(false);
-    expect(refresh.errors[0].code).toBe("OFFLINE_NETWORK_DENIED");
   });
 });

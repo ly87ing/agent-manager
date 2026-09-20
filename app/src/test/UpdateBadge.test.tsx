@@ -11,7 +11,7 @@ import { renderWithEngine, screen, userEvent, within } from "./render-with-engin
 vi.mock("@tauri-apps/plugin-updater", () => ({ check: vi.fn() }));
 
 const baseSettings: SettingsData = {
-  preferences: { offline: false, upstreamTtlSec: 86400, logRetentionDays: 30 },
+  preferences: { logRetentionDays: 30 },
   appVersion: "1.2.3",
   contractVersion: "agent-manager/engine/v1",
   resourceDir: "/resources",

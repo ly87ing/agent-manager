@@ -5,6 +5,13 @@ import { makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshnes
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 import type { Envelope } from "../lib/contract";
 
+/** 低频动作（停用、卸载、移除管理）收在卡片的「更多」里：点开才可见。 */
+async function openCardMenu(agentId = "agents:claude-code") {
+  const trigger = await screen.findByTestId(`agent-menu-${agentId}`);
+  // 幂等：已经展开时再点会收起
+  if (trigger.getAttribute("aria-expanded") !== "true") await userEvent.click(trigger);
+}
+
 function routes(offline: boolean): Record<string, Envelope> {
   return {
     "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode({ offline }) }),
@@ -18,8 +25,8 @@ function routes(offline: boolean): Record<string, Envelope> {
             id: "agents:claude-code",
             domain: "agents",
             spec: { display_name: "Claude Code", bin: "claude", preferred_provider: "npm", providers: { npm: { managed: true } } },
-            policy: { enabled: true, auto_install: true, auto_update: true, preferred_provider: "npm" },
-            observed: { providers: ["npm"], classified: { managed: ["npm"], deprecated: [], system_only: [], unsupported: [] }, installed: true, preferred_active: true },
+            policy: { enabled: true },
+            observed: { install_source: "npm", installed: true },
             state: "managed-ok",
             freshness: makeFreshness({ state: "behind", current: "2.0.0", upstream: "2.1.3", checked_at: "2026-09-06T00:00:00Z", probe: "npm-view", cache_age_sec: 60 }),
             actions: [
@@ -114,15 +121,6 @@ describe("助手卡片的启动命令", () => {
 });
 
 describe("Agents 页写动作", () => {
-  it("详情展开为纯状态展示（drift 面板），任何动作组合都不发起 plan", async () => {
-    const { calls } = renderWithEngine(<AgentsPage />, routes(false));
-    await screen.findByTestId("action-upgrade-agents:claude-code");
-
-    await userEvent.click(screen.getByRole("button", { name: "展开同步详情" }));
-    expect(await screen.findByTestId("drift-panel")).toBeInTheDocument();
-    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
-  });
-
   it("升级按钮：点击直接 agents:apply 带 --action upgrade 与 run_id，不取 plan、不开弹窗、零 policy:set", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes(false));
     await userEvent.click(await screen.findByTestId("action-upgrade-agents:claude-code"));
@@ -140,7 +138,8 @@ describe("Agents 页写动作", () => {
 
   it("卸载：点击先打开 ConfirmModal，取消时零 apply/零 policy:set", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes(false));
-    await userEvent.click(await screen.findByTestId("action-uninstall-agents:claude-code"));
+    await openCardMenu();
+    await userEvent.click(screen.getByTestId("menu-uninstall-agents:claude-code"));
 
     await screen.findByRole("dialog", { name: "卸载 Claude Code" });
     expect(screen.getByRole("dialog", { name: "卸载 Claude Code" })).toHaveTextContent(/命令以你的权限运行/);
@@ -156,7 +155,8 @@ describe("Agents 页写动作", () => {
 
   it("卸载：输入 element.id 确认后 agents:apply 带 --action uninstall --allow-uninstall，无 plan、零 policy:set", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes(false));
-    await userEvent.click(await screen.findByTestId("action-uninstall-agents:claude-code"));
+    await openCardMenu();
+    await userEvent.click(screen.getByTestId("menu-uninstall-agents:claude-code"));
 
     await screen.findByRole("dialog", { name: "卸载 Claude Code" });
     await userEvent.type(screen.getByTestId("confirm-modal-input"), "agents:claude-code");
@@ -173,13 +173,6 @@ describe("Agents 页写动作", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("offline：network/install-remove 按钮全部禁用", async () => {
-    renderWithEngine(<AgentsPage />, routes(true));
-    // offline 来自 system:audit 查询，待其就位后按钮转为禁用
-    const upgrade = await screen.findByTestId("action-upgrade-agents:claude-code");
-    await waitFor(() => expect(upgrade).toBeDisabled());
-    expect(screen.getByTestId("action-uninstall-agents:claude-code")).toBeDisabled();
-  });
 });
 
 describe("Agents 页动作执行反馈", () => {
@@ -215,7 +208,7 @@ describe("Agents 页动作执行反馈", () => {
             domain: "agents",
             spec: { display_name: "Claude Code", bin: "claude", preferred_provider: "npm", providers: { npm: { managed: true } } },
             policy: { enabled: true },
-            observed: { providers: ["npm"], classified: { managed: ["npm"], deprecated: [], system_only: [], unsupported: [] }, installed: true, preferred_active: true },
+            observed: { install_source: "npm", installed: true },
             state: "managed-ok",
             freshness: makeFreshness({ state: "behind", current: "1.2.3", upstream: null }),
             actions: [{ id: "upgrade", risk: "network", needs_lock: true, offline_ok: false }],
@@ -239,18 +232,21 @@ describe("Agents 页动作执行反馈", () => {
     await waitFor(() => expect(upgrade).toHaveTextContent("正在执行…"));
     expect(upgrade.querySelector("svg.animate-spin")).not.toBeNull();
     expect(upgrade).toBeDisabled();
-    expect(screen.getByTestId("action-uninstall-agents:claude-code")).toBeDisabled();
+    await openCardMenu();
+    expect(screen.getByTestId("menu-uninstall-agents:claude-code")).toBeDisabled();
 
     pending.release();
     await waitFor(() => expect(screen.getByTestId("action-upgrade-agents:claude-code")).toHaveTextContent("升级"));
-    expect(screen.getByTestId("action-uninstall-agents:claude-code")).toBeEnabled();
+    await openCardMenu();
+    expect(screen.getByTestId("menu-uninstall-agents:claude-code")).toBeEnabled();
     expect(calls.filter((call) => call.command === "agents:apply")).toHaveLength(1);
   });
 
   it("卸载确认后：弹窗关闭，卡片卸载按钮保持执行态直到执行结束", async () => {
     const pending = pendingApplyRoutes();
     renderWithEngine(<AgentsPage />, pending.routes);
-    await userEvent.click(await screen.findByTestId("action-uninstall-agents:claude-code"));
+    await openCardMenu();
+    await userEvent.click(screen.getByTestId("menu-uninstall-agents:claude-code"));
 
     await screen.findByRole("dialog", { name: "卸载 Claude Code" });
     await userEvent.type(screen.getByTestId("confirm-modal-input"), "agents:claude-code");
@@ -263,37 +259,38 @@ describe("Agents 页动作执行反馈", () => {
     expect(screen.getByTestId("action-upgrade-agents:claude-code")).toBeDisabled();
 
     pending.release();
-    await waitFor(() => expect(screen.getByTestId("action-uninstall-agents:claude-code")).toHaveTextContent("卸载"));
+    // 执行结束后卸载按钮退回「更多」里，主行只剩常用动作
+    await waitFor(() => expect(screen.queryByTestId("action-uninstall-agents:claude-code")).toBeNull());
     expect(screen.getByTestId("action-upgrade-agents:claude-code")).toBeEnabled();
   });
 });
 
 describe("Agents 页文案", () => {
-  it("中文动作与安装方式措辞：无误导性 enabled 开关、无官方/推荐断言", async () => {
+  it("卡片只留能改变下一步动作的信息：不重复安装渠道、不显示恒真的偏好与状态", async () => {
     renderWithEngine(<AgentsPage />, routes(false));
 
     await screen.findByTestId("action-upgrade-agents:claude-code");
 
-    // auto_install/auto_update 中文化
-    expect(screen.getByText("自动安装")).toBeInTheDocument();
-    expect(screen.getByText("自动更新")).toBeInTheDocument();
-    expect(screen.queryByText("auto_install")).toBeNull();
-    expect(screen.queryByText("auto_update")).toBeNull();
+    // 安装渠道三个徽标说的是同一件事（且没有切换入口），全部撤下；异常来源仍由警告框说明
+    expect(screen.queryByText(/默认安装方式/)).toBeNull();
+    expect(screen.queryByText(/当前安装方式/)).toBeNull();
+    expect(screen.queryByText(/由此工具管理/)).toBeNull();
 
-    // preferred_provider 只称默认安装方式；实际来源称当前安装方式；无官方/推荐措辞
-    expect(screen.getByText(/默认安装方式 npm/)).toBeInTheDocument();
-    expect(screen.getByText(/当前安装方式 npm/)).toBeInTheDocument();
-    expect(screen.queryByText(/推荐渠道/)).toBeNull();
-    expect(screen.queryByText(/官方渠道/)).toBeNull();
+    // 引擎从不读 auto_install/auto_update，界面不再假装它们是开关
+    expect(screen.queryByText("自动安装")).toBeNull();
+    expect(screen.queryByText("自动更新")).toBeNull();
 
-    // 普通 enabled 快捷开关已移除（实际会触发卸载语义），状态仅展示
-    expect(screen.queryByTestId("toggle-agents:claude-code")).toBeNull();
-    expect(screen.getByText("已启用")).toBeInTheDocument();
+    // 启用是常态，不占位；「正常」同理，只有不正常时才出徽标
+    expect(screen.queryByText("已启用")).toBeNull();
+    expect(screen.queryByText("正常")).toBeNull();
 
-    // 明确的安装/升级/卸载与编辑命令入口保留
+    // 常用动作留在主行，破坏性动作收进「更多」
     expect(screen.getByTestId("action-upgrade-agents:claude-code")).toBeInTheDocument();
-    expect(screen.getByTestId("action-uninstall-agents:claude-code")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "编辑命令" })).toBeInTheDocument();
+    expect(screen.queryByTestId("action-uninstall-agents:claude-code")).toBeNull();
+    await openCardMenu();
+    expect(screen.getByTestId("menu-uninstall-agents:claude-code")).toBeInTheDocument();
+    expect(screen.getByTestId("policy-enabled-agents:claude-code")).toHaveTextContent("停用");
   });
 
   it("未知来源安装：说明管理限制，不提供误导性的更换安装方式按钮", async () => {
@@ -307,7 +304,7 @@ describe("Agents 页文案", () => {
             domain: "agents",
             spec: { display_name: "Codex", bin: "codex", preferred_provider: "native", providers: { native: { managed: true } } },
             policy: { enabled: true },
-            observed: { providers: ["unknown-source"], classified: { managed: [], deprecated: [], system_only: [], unsupported: ["unknown-source"] }, installed: true, preferred_active: false },
+            observed: { install_source: "unknown-source", installed: true },
             state: "unmanaged-detected",
             freshness: makeFreshness(),
             actions: [{ id: "install", risk: "install-remove", needs_lock: true, offline_ok: false }],
@@ -366,7 +363,7 @@ describe("自定义助手的安装/升级确认", () => {
             domain: "agents",
             spec: { display_name: "My Agent", bin: "my-agent", providers: { custom: { managed: true } } },
             policy: { enabled: true },
-            observed: { providers: [], classified: { managed: [], deprecated: [], system_only: [], unsupported: [] }, installed: false },
+            observed: { install_source: null, installed: false },
             state: "missing",
             actions: [
               { id: "install", risk: "install-remove", needs_lock: true, offline_ok: false },
@@ -441,7 +438,7 @@ describe("自定义助手的安装/升级确认", () => {
             domain: "agents",
             spec: { display_name: "My Agent", bin: "my-agent", providers: { custom: { managed: true } } },
             policy: { enabled: true },
-            observed: { providers: ["custom"], classified: { managed: ["custom"], deprecated: [], system_only: [], unsupported: [] }, installed: true, preferred_active: true },
+            observed: { install_source: "custom", installed: true },
             state: "managed-ok",
             freshness: makeFreshness({ state: "behind", current: "0.9.0", upstream: "1.0.0" }),
             actions: [{ id: "upgrade", risk: "network", needs_lock: true, offline_ok: false }],

@@ -1,7 +1,7 @@
 import { QueryClient, useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { engineErrorMessage, runEngine } from "./engine";
-import type { AuditData, Envelope, RefreshUpstreamData } from "./contract";
+import type { Envelope, RefreshUpstreamData } from "./contract";
 
 export const engineKeys = {
   all: ["engine"] as const,
@@ -19,12 +19,6 @@ export function createQueryClient(options?: { retry?: number | false }) {
       },
     },
   });
-}
-
-/** 全局 offline 模式（读 system:audit envelope.mode，缓存共享）。 */
-export function useOfflineMode(): boolean {
-  const audit = useEngineQuery<AuditData>("system:audit");
-  return audit.data?.mode.offline ?? false;
 }
 
 /** 以引擎命令为 key 的只读查询（status/audit 均为 read 级、零网络）。 */

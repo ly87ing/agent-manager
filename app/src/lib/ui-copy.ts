@@ -116,8 +116,6 @@ export const COPY = {
   updateAll: "全部更新",
   executing: "正在执行…",
   /** 模式横幅。 */
-  offlineBannerBody: "未联网，版本与配置状态显示的是上次检查的结果；需要联网的操作已禁用。",
-  offlineNetworkDenied: "离线模式下不可用（需要联网）",
   /** 漂移解释面板。 */
   expandDetail: "展开同步详情",
   collapseDetail: "收起同步详情",

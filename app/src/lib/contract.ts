@@ -38,8 +38,6 @@ export interface Envelope<T = unknown> {
 }
 
 export interface SettingsPreferences {
-  offline: boolean;
-  upstreamTtlSec: number;
   logRetentionDays: number;
 }
 

@@ -77,7 +77,7 @@ function routes(profiles: ReturnType<typeof profileElement>[] = [profileElement(
             domain: "agents",
             spec: { display_name: "Claude Code", bin: "claude", preferred_provider: "native", providers: { native: { managed: true } } },
             policy: { enabled: true },
-            observed: { providers: ["native"], classified: { managed: ["native"], deprecated: [], system_only: [], unsupported: [] }, installed: true, preferred_active: true },
+            observed: { install_source: "native", installed: true },
             state: "managed-ok",
             freshness: makeFreshness(),
             actions: [],
@@ -87,7 +87,7 @@ function routes(profiles: ReturnType<typeof profileElement>[] = [profileElement(
             domain: "agents",
             spec: { display_name: "Claude Code · ly", bin: "claude" },
             policy: { enabled: true },
-            observed: { providers: [], classified: {}, installed: true },
+            observed: { install_source: null, installed: true },
             state: "unmanaged-detected",
             freshness: makeFreshness(),
             actions: [],
@@ -224,7 +224,7 @@ describe("助手实例", () => {
   });
 
   it("配置被外部改过时按钮转为接管，并显式带接管旗标", async () => {
-    const drifted = profileElement({ state: "drifted", observed: { ...profileElement().observed, target_exists: true, config_dir_exists: true } });
+    const drifted = profileElement({ state: "drifted", observed: { install_source: null, ...profileElement().observed, target_exists: true, config_dir_exists: true } });
     const { calls } = renderWithEngine(<AgentsPage />, routes([drifted]));
     const button = await screen.findByTestId("profile-apply-cc-ly");
     expect(button).toHaveTextContent("接管并写入");
@@ -239,10 +239,8 @@ describe("助手实例", () => {
 
   it("环境变量取不到值时先给出提示", async () => {
     const missing = profileElement({
-      observed: {
-        ...profileElement().observed,
-        env_refs: [{ name: "ANTHROPIC_AUTH_TOKEN", kind: "reference", variable: "MY_TOKEN", resolved: false }],
-      },
+      observed: { install_source: null, ...profileElement().observed,
+        env_refs: [{ name: "ANTHROPIC_AUTH_TOKEN", kind: "reference", variable: "MY_TOKEN", resolved: false }] },
     });
     renderWithEngine(<AgentsPage />, routes([missing]));
     expect(await screen.findByTestId("profile-missing-vars-cc-ly")).toHaveTextContent("MY_TOKEN");

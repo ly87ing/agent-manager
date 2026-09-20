@@ -27,8 +27,8 @@ function agentRoutes(): Record<string, Envelope> {
             id: "agents:my-agent",
             domain: "agents",
             spec: { display_name: "My Agent", bin: "my-agent", providers: {} },
-            policy: { enabled: true, auto_install: true, auto_update: false },
-            observed: { providers: [], classified: {}, installed: false },
+            policy: { enabled: true },
+            observed: { install_source: null, installed: false },
             state: "missing",
             freshness: makeFreshness(),
             actions: [],
@@ -59,27 +59,18 @@ function agentRoutes(): Record<string, Envelope> {
   };
 }
 
-describe("助手偏好开关", () => {
-  it("点击即写本机偏好，不触发任何安装或同步", async () => {
-    const { calls } = renderWithEngine(<AgentsPage />, agentRoutes());
-    await userEvent.click(await screen.findByTestId("policy-auto-update-agents:my-agent"));
-
-    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
-    const write = calls.find((call) => call.command === "policy:set")!;
-    expect(write.args[write.args.indexOf("--key") + 1]).toBe("agents.my-agent.auto_update");
-    expect(write.args[write.args.indexOf("--value") + 1]).toBe("true");
-    expect(calls.some((call) => call.command === "agents:apply")).toBe(false);
-  });
-
-  it("停用开关说明影响范围，已装软件不受影响", async () => {
+describe("助手启停", () => {
+  it("停用只写本机偏好、说明影响范围，不触发任何安装或同步", async () => {
     const successSpy = vi.spyOn(toast, "success");
     const { calls } = renderWithEngine(<AgentsPage />, agentRoutes());
-    await userEvent.click(await screen.findByTestId("policy-enabled-agents:my-agent"));
+    await userEvent.click(await screen.findByTestId("agent-menu-agents:my-agent"));
+    await userEvent.click(screen.getByTestId("policy-enabled-agents:my-agent"));
 
     await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
     const write = calls.find((call) => call.command === "policy:set")!;
     expect(write.args[write.args.indexOf("--key") + 1]).toBe("agents.my-agent.enabled");
     expect(write.args[write.args.indexOf("--value") + 1]).toBe("false");
+    expect(calls.some((call) => call.command === "agents:apply")).toBe(false);
     const lastCall = successSpy.mock.calls[successSpy.mock.calls.length - 1];
     expect(String((lastCall?.[1] as { description?: string } | undefined)?.description)).toContain("已安装的软件不受影响");
     successSpy.mockRestore();
@@ -107,7 +98,8 @@ describe("移除后的撤销", () => {
 
   it("移除助手定义给出撤销，点击后把定义原样加回", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, agentRoutes());
-    await userEvent.click(await screen.findByRole("button", { name: "移除管理" }));
+    await userEvent.click(await screen.findByTestId("agent-menu-agents:my-agent"));
+    await userEvent.click(screen.getByRole("menuitem", { name: "移除管理" }));
     const dialog = await screen.findByRole("dialog");
     await userEvent.type(within(dialog).getByRole("textbox"), "my-agent");
     await userEvent.click(within(dialog).getByRole("button", { name: "确认移除" }));

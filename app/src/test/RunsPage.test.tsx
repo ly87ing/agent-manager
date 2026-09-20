@@ -116,7 +116,8 @@ describe("执行中心", () => {
     expect(await screen.findByText("失败")).toBeInTheDocument();
     expect(screen.getByText("mcp-sync")).toBeInTheDocument();
     expect(screen.getByText("hooks-sync")).toBeInTheDocument();
-    expect(screen.getByText(/独占执行 · pid 4242/)).toBeInTheDocument();
+    // 锁与 pid 是引擎内部状态，不再摆在卡片上
+    expect(screen.queryByText(/独占执行/)).toBeNull();
     expect(screen.getByText("STEP_FAILED")).toBeInTheDocument();
 
     const listCallsAfter = calls.filter((call) => call.command === "runs:list").length;

@@ -2,7 +2,6 @@ import {
   Activity,
   Bot,
   LayoutDashboard,
-  PackageCheck,
   ScrollText,
   Server,
   Settings,
@@ -30,7 +29,6 @@ const NAV: NavItem[] = [
   { key: "skills", label: "技能", icon: Sparkles },
   { key: "mcp", label: "MCP", icon: Server },
   { key: "rules-hooks", label: "规则与 Hooks", icon: ScrollText },
-  { key: "takeover", label: "接管中心", icon: PackageCheck },
   { key: "runs", label: "操作记录", icon: Activity },
   { key: "settings", label: "设置", icon: Settings },
 ];

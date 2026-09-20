@@ -13,7 +13,7 @@ const dummySettings: SettingsData = {
   logDir: "/tmp/logs",
   updaterConfigured: false,
   maintenanceWarning: null,
-  preferences: { offline: false, upstreamTtlSec: 86400, logRetentionDays: 30 },
+  preferences: { logRetentionDays: 30 },
 };
 
 function routes() {

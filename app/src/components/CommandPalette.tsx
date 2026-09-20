@@ -30,8 +30,6 @@ const PAGES: { key: string; label: string; keywords: string }[] = [
   // 设置里的二级页面也要搜得到：密钥现在是要填东西的页，藏在二级菜单里不好找
   { key: "settings:secrets", label: "密钥", keywords: "secrets 密钥 变量 token api key 凭据" },
   { key: "settings:aliases", label: "终端快捷命令", keywords: "aliases alias 别名 启动命令 时区" },
-  { key: "settings:updates", label: "更新中心", keywords: "updates 更新 版本 升级" },
-  { key: "settings:policy", label: "个性化配置", keywords: "policy 偏好 本机配置 原文" },
 ];
 
 /**

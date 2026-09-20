@@ -1,12 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Check, ChevronDown, ChevronRight, Download, Loader2, RefreshCw, SearchX, Sparkles, Terminal, Trash2, X } from "lucide-react";
+import { Download, Loader2, MoreHorizontal, RefreshCw, SearchX, Sparkles, Terminal, Trash2 } from "lucide-react";
 import { AgentUsageBar } from "../components/AgentUsageBar";
 import { AliasEditorDialog } from "../components/AliasEditorDialog";
 import { ProfileCard } from "../components/ProfileCards";
 import { ProfileFormDialog } from "../components/ProfileFormDialog";
 import { ConfirmModal } from "../components/ConfirmModal";
-import { DriftExplanationPanel } from "../components/DriftExplanationPanel";
 import { DefinitionFormDialog } from "../components/DefinitionFormDialog";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { EmptyState } from "../components/EmptyState";
@@ -33,7 +32,7 @@ import { runEngine } from "../lib/engine";
 import { toastWithUndo } from "../lib/undo";
 import { definitionOrigin } from "../lib/definitionOverlay";
 import type { AgentsObserved, AgentsPolicy, AgentsSpec } from "../lib/observed";
-import { useEngineQuery, useOfflineMode } from "../lib/queries";
+import { useEngineQuery } from "../lib/queries";
 import { COPY, versionRangeHint } from "../lib/ui-copy";
 import { useAliasSource } from "../lib/useAliasSource";
 import { useDirectApply } from "../lib/useDirectApply";
@@ -46,66 +45,61 @@ const ACTION_META: Record<string, { label: string; icon: typeof Download; classN
   uninstall: { label: "卸载", icon: Trash2, className: "border-destructive/30 text-destructive hover:bg-destructive/10" },
 };
 
-/** provider 分类徽标（observed.classified 四桶 → 只读徽标）。 */
-const PROVIDER_BUCKETS = ["managed", "deprecated", "system_only", "unsupported"] as const;
-type ProviderBucket = (typeof PROVIDER_BUCKETS)[number];
-
-const PROVIDER_CLASS_META: Record<ProviderBucket, { label: string; className: string }> = {
-  managed: { label: "由此工具管理", className: "border-success/30 bg-success/10 text-success" },
-  deprecated: { label: "已弃用", className: "border-warning/30 bg-warning/10 text-warning" },
-  system_only: { label: "仅系统检测到", className: "border-info/30 bg-info/10 text-info" },
-  unsupported: { label: "不可接管", className: "border bg-muted text-muted-foreground" },
-};
-
-/** 偏好开关：点一下就改本机偏好（只写配置，不触发安装或同步）。 */
-function PolicyChip({
-  label,
-  value,
-  testId,
-  title,
-  disabled,
-  onToggle,
-}: {
+interface CardMenuItem {
   label: string;
-  value: boolean | undefined;
   testId?: string;
-  title?: string;
+  danger?: boolean;
   disabled?: boolean;
-  onToggle?: (next: boolean) => void;
-}) {
-  const active = value !== false;
-  const content = (
-    <>
-      {active ? (
-        <Check className="h-3 w-3 text-success" aria-hidden />
-      ) : (
-        <X className="h-3 w-3 text-muted-foreground" aria-hidden />
-      )}
-      {label}
-    </>
-  );
-  if (!onToggle) {
-    return (
-      <span className="inline-flex items-center gap-1 rounded border bg-card px-1.5 py-0.5 text-xs text-muted-foreground">
-        {content}
-      </span>
-    );
-  }
+  onSelect: () => void;
+}
+
+/** 卡片上的「更多」：停用、移除管理、卸载这类低频动作收在这里，主行只留常用的。 */
+function CardMenu({ items, testId }: { items: CardMenuItem[]; testId?: string }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    // 点别处就收起：菜单自身的点击在容器上已阻止冒泡
+    const close = () => setOpen(false);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [open]);
   return (
-    <button
-      type="button"
-      data-testid={testId}
-      title={title}
-      disabled={disabled}
-      aria-pressed={active}
-      onClick={() => onToggle(!active)}
-      className={cn(
-        "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-xs hover:bg-accent disabled:opacity-50",
-        active ? "bg-card text-foreground" : "bg-muted text-muted-foreground",
+    <div className="relative" onClick={(event) => event.stopPropagation()}>
+      <button
+        type="button"
+        data-testid={testId}
+        aria-label="更多操作"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="inline-flex items-center rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent"
+      >
+        <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
+      </button>
+      {open && (
+        <div role="menu" className="absolute right-0 z-10 mt-1 min-w-36 rounded-md border bg-card p-1 shadow-md">
+          {items.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              role="menuitem"
+              data-testid={item.testId}
+              disabled={item.disabled}
+              onClick={() => {
+                setOpen(false);
+                item.onSelect();
+              }}
+              className={cn(
+                "block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-accent disabled:opacity-50",
+                item.danger ? "text-destructive" : "text-foreground",
+              )}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
       )}
-    >
-      {content}
-    </button>
+    </div>
   );
 }
 
@@ -125,7 +119,7 @@ function AgentCard({
   aliasSyncing,
   aliasEffect,
   policyBusy,
-  onTogglePolicy,
+  onToggleEnabled,
 }: {
   element: EngineElement;
   /** true = 定义来自本地数据库（用户新增或改过内置定义）：安装/升级先弹确认。 */
@@ -146,19 +140,16 @@ function AgentCard({
   aliasSyncing: boolean;
   /** 该命令在终端配置里的落地情况（两个目标都跟上才算已写入）。 */
   aliasEffect: AliasEffect;
-  /** 偏好写入在途：期间禁用开关，避免连点写出交错结果。 */
+  /** 偏好写入在途：期间禁用菜单里的启停项，避免连点写出交错结果。 */
   policyBusy: boolean;
-  onTogglePolicy: (key: "enabled" | "auto_install" | "auto_update", next: boolean) => void;
+  onToggleEnabled: (next: boolean) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
   /** 本卡直执路径在途的动作 id（点击即置位，apply 结束回落）。 */
   const [localActionId, setLocalActionId] = useState<string | null>(null);
-  const offline = useOfflineMode();
   const directApply = useDirectApply();
   const spec = element.spec as AgentsSpec;
   const policy = element.policy as AgentsPolicy;
   const observed = element.observed as AgentsObserved;
-  const classified = observed.classified ?? {};
   const installed = observed.installed ?? false;
   const version = installed ? (element.freshness.current ?? "已安装（还没检查过版本）") : "未安装";
   const name = spec.display_name ?? element.id;
@@ -201,7 +192,10 @@ function AgentCard({
           <p className="mt-0.5 text-sm text-muted-foreground">当前版本:{version}</p>
         </div>
         <div className="flex flex-col items-end gap-1.5">
-          <StateBadge state={element.state} />
+          {/* 「正常」对装好的助手是废话；已停用下面另有整句说明，不在这里重复 */}
+          {element.state !== "managed-ok" && element.state !== "disabled" && (
+            <StateBadge state={element.state} />
+          )}
           <FreshnessBadge freshness={element.freshness} className="items-end" />
         </div>
       </div>
@@ -213,73 +207,16 @@ function AgentCard({
         </div>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
-        {PROVIDER_BUCKETS.flatMap((bucket) =>
-          (classified[bucket] ?? []).map((provider) => (
-            <span
-              key={`${bucket}-${provider}`}
-              className={cn("rounded border px-1.5 py-0.5", PROVIDER_CLASS_META[bucket].className)}
-              title={`${provider}（${PROVIDER_CLASS_META[bucket].label}）`}
-            >
-              {provider}·{PROVIDER_CLASS_META[bucket].label}
-            </span>
-          )),
-        )}
-        {(observed.providers ?? []).length > 0 && (
-          <span
-            className="rounded border bg-muted px-1.5 py-0.5 text-muted-foreground"
-            title="系统实际检测到的安装来源"
-          >
-            当前安装方式 {(observed.providers ?? []).join("、")}
-          </span>
-        )}
-        {spec.preferred_provider && (
-          <span
-            className={cn(
-              "rounded border px-1.5 py-0.5",
-              observed.preferred_active
-                ? "border-primary/30 bg-primary/10 text-primary"
-                : "border bg-muted text-muted-foreground",
-            )}
-            title={observed.preferred_active ? "当前安装与默认安装方式一致" : "当前安装与默认安装方式不一致"}
-          >
-            默认安装方式 {spec.preferred_provider}
-            {observed.preferred_active ? "·生效中" : "·未生效"}
-          </span>
-        )}
-      </div>
-
-      <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t pt-3">
-        <PolicyChip
-          label="自动安装"
-          value={policy.auto_install}
-          testId={`policy-auto-install-${element.id}`}
-          title="缺失时是否自动安装（只改偏好，不会立刻执行安装）"
-          disabled={policyBusy}
-          onToggle={(next) => onTogglePolicy("auto_install", next)}
-        />
-        <PolicyChip
-          label="自动更新"
-          value={policy.auto_update}
-          testId={`policy-auto-update-${element.id}`}
-          title="有新版本时是否自动更新（只改偏好）"
-          disabled={policyBusy}
-          onToggle={(next) => onTogglePolicy("auto_update", next)}
-        />
-        <PolicyChip
-          label={policy.enabled === false ? "已停用" : "已启用"}
-          value={policy.enabled}
-          testId={`policy-enabled-${element.id}`}
-          title="停用后不再为它维护技能、MCP 等资源；已装的软件不受影响"
-          disabled={policyBusy}
-          onToggle={(next) => onTogglePolicy("enabled", next)}
-        />
-      </div>
+      {policy.enabled === false && (
+        <p className="mt-3 rounded-md border bg-muted px-3 py-2 text-xs text-muted-foreground">
+          已停用：不再为它维护技能、MCP 等资源；已安装的软件不受影响。
+        </p>
+      )}
 
       {element.state === "unmanaged-detected" && (
         <div className="mt-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
           <p>
-            检测到用 {(observed.classified?.unsupported ?? [])[0] ?? "其它渠道"} 安装的版本，该来源不在本工具管理范围内。
+            检测到用 {observed.install_source ?? "其它渠道"} 安装的版本，该来源不在本工具管理范围内。
             当前不支持自动迁移安装方式；如需由本工具管理，请先自行卸载现有安装，再使用「安装」。
           </p>
         </div>
@@ -344,7 +281,6 @@ function AgentCard({
 
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
         <button type="button" onClick={onEdit} className="rounded border px-2.5 py-1 text-xs">编辑命令</button>
-        <button type="button" onClick={onRemove} className="rounded border border-destructive/30 px-2.5 py-1 text-xs text-destructive">移除管理</button>
         <button
           type="button"
           data-testid={`manage-skills-${element.id}`}
@@ -355,16 +291,16 @@ function AgentCard({
         </button>
         {element.actions.map((action) => {
           const meta = ACTION_META[action.id];
-          if (!meta) return null;
+          // 卸载收在「更多」里：破坏性且低频，不占主行；执行中回到主行，让进度看得见
+          if (!meta || (action.id === "uninstall" && busyActionId !== "uninstall")) return null;
           const Icon = meta.icon;
           const busy = busyActionId === action.id;
-          const offlineBlocked = offline && !action.offline_ok;
           /** 任一动作在途时整卡动作禁用（防并发触发），在途按钮自身转 spinner + 执行中文案。 */
-          const disabled = offlineBlocked || busyActionId !== null;
+          const disabled = busyActionId !== null;
           const execHint = `${meta.label}${action.id === "upgrade" ? `（${versionRangeHint(element.freshness)}）` : ""}：${
             customDefinition ? "先弹确认再执行" : "直接执行"
           }，命令以你的权限运行，结果不能自动撤销`;
-          const title = busy ? COPY.executing : offlineBlocked ? "离线模式下不可用（需要联网）" : execHint;
+          const title = busy ? COPY.executing : execHint;
           return (
             <button
               key={action.id}
@@ -383,17 +319,32 @@ function AgentCard({
             </button>
           );
         })}
-        <button
-          type="button"
-          onClick={() => setExpanded((value) => !value)}
-          className="ml-auto inline-flex items-center gap-1 text-xs text-primary hover:text-primary"
-          aria-expanded={expanded}
-        >
-          {expanded ? <ChevronDown className="h-3.5 w-3.5" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden />}
-          {expanded ? "收起同步详情" : "展开同步详情"}
-        </button>
+        <div className="ml-auto">
+          <CardMenu
+            testId={`agent-menu-${element.id}`}
+            items={[
+              {
+                label: policy.enabled === false ? "启用" : "停用",
+                testId: `policy-enabled-${element.id}`,
+                disabled: policyBusy,
+                onSelect: () => onToggleEnabled(policy.enabled === false),
+              },
+              ...(element.actions.some((action) => action.id === "uninstall")
+                ? [
+                    {
+                      label: "卸载软件",
+                      testId: `menu-uninstall-${element.id}`,
+                      danger: true,
+                      disabled: busyActionId !== null,
+                      onSelect: onRequestUninstall,
+                    },
+                  ]
+                : []),
+              { label: "移除管理", testId: `menu-remove-${element.id}`, danger: true, onSelect: onRemove },
+            ]}
+          />
+        </div>
       </div>
-      {expanded && <div className="mt-2"><DriftExplanationPanel element={element} /></div>}
     </section>
   );
 }
@@ -439,7 +390,7 @@ export default function AgentsPage({
   const elements = query.data.data.elements;
   const filteredElements = elements.filter((element) => {
     const spec = element.spec as AgentsSpec;
-    return matchesKeyword(search, [spec.display_name, element.id, spec.bin, ...(element.observed as AgentsObserved).providers ?? []]);
+    return matchesKeyword(search, [spec.display_name, element.id, spec.bin]);
   });
   const layers = policyQuery.data?.data.layers ?? null;
   /** 本地层为空 = 还没在这里保存过任何东西：首次使用引导据此出现（policyQuery 未就绪时不显示）。 */
@@ -461,8 +412,8 @@ export default function AgentsPage({
     (elements.find((element) => element.id === `agents:${agentId}`)?.spec as AgentsSpec | undefined)?.bin ??
     (agentId === "codex" ? "codex" : "claude");
 
-  /** 改助手偏好：只写本机配置，不触发安装、卸载或同步。 */
-  const togglePolicy = async (agentId: string, key: "enabled" | "auto_install" | "auto_update", next: boolean) => {
+  /** 启停助手：只写本机配置，不触发安装、卸载或同步。 */
+  const toggleEnabled = async (agentId: string, next: boolean) => {
     if (policyBusy) return;
     setPolicyBusy(true);
     try {
@@ -470,7 +421,7 @@ export default function AgentsPage({
         "--layer",
         "local",
         "--key",
-        `agents.${agentId}.${key}`,
+        `agents.${agentId}.enabled`,
         "--value",
         JSON.stringify(next),
       ]);
@@ -478,13 +429,10 @@ export default function AgentsPage({
         toast.error(`保存偏好被拒绝:${envelope.errors[0]?.message ?? "未知错误"}`);
         return;
       }
-      toast.success(next ? "已开启" : "已关闭", {
-        description:
-          key === "enabled"
-            ? next
-              ? "重新为它维护技能、MCP 等资源。"
-              : "不再为它维护技能、MCP 等资源；已安装的软件不受影响。"
-            : "只改本机偏好，不会立刻执行安装或更新。",
+      toast.success(next ? "已启用" : "已停用", {
+        description: next
+          ? "重新为它维护技能、MCP 等资源。"
+          : "不再为它维护技能、MCP 等资源；已安装的软件不受影响。",
       });
       void query.refetch();
     } catch (err) {
@@ -670,7 +618,7 @@ export default function AgentsPage({
   const pendingActionLabel = pendingAction ? (ACTION_META[pendingAction.action.id]?.label ?? pendingAction.action.id) : "";
   return (
     <div className="space-y-4">
-      <PageHeader title="助手" description="各 AI 助手的安装渠道、版本与官方最新版对比。内置助手安装/升级点击后直接执行；自定义定义的安装/升级与卸载需先确认。" />
+      <PageHeader title="助手" description="本机各 AI 助手的版本、额度与启动命令。内置助手安装/升级点击后直接执行；自定义定义的安装/升级与卸载需先确认。" />
       <FirstRunGuide show={freshInstall} onGoTakeover={onGoTakeover} />
       {query.data.errors.length > 0 && <ErrorPanel title="agents:status 错误" errors={query.data.errors} />}
       <div className="flex items-center justify-between gap-3">
@@ -721,7 +669,7 @@ export default function AgentsPage({
                 void aliasApply.apply({ command: "aliases:apply", label: "同步终端快捷命令" })
               }
               policyBusy={policyBusy}
-              onTogglePolicy={(key, next) => void togglePolicy(element.id.replace(/^agents:/, ""), key, next)}
+              onToggleEnabled={(next) => void toggleEnabled(element.id.replace(/^agents:/, ""), next)}
             />
           ))}
         </div>

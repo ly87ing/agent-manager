@@ -13,7 +13,7 @@ const dummySettings: SettingsData = {
   logDir: "/tmp/logs",
   updaterConfigured: false,
   maintenanceWarning: null,
-  preferences: { offline: false, upstreamTtlSec: 86400, logRetentionDays: 30 },
+  preferences: { logRetentionDays: 30 },
 };
 
 function routes() {
@@ -32,8 +32,8 @@ function routes() {
   };
 }
 
-describe("App 顶层导航收敛为日常八项", () => {
-  it("侧边栏仅有八项，且精确中文，默认渲染助手页，点击导航可切换页面", async () => {
+describe("App 顶层导航收敛为日常七项", () => {
+  it("侧边栏仅有七项，且精确中文，默认渲染助手页，点击导航可切换页面", async () => {
     setSettingsClient({
       get: async () => dummySettings,
       save: async (preferences) => ({ ...dummySettings, preferences }),
@@ -50,7 +50,6 @@ describe("App 顶层导航收敛为日常八项", () => {
       "技能",
       "MCP",
       "规则与 Hooks",
-      "接管中心",
       "操作记录",
       "设置",
     ];
@@ -74,11 +73,8 @@ describe("App 顶层导航收敛为日常八项", () => {
     expect(rulesHooksNav).toHaveAttribute("aria-current", "page");
     expect(await screen.findByRole("tab", { name: "规则" })).toBeInTheDocument();
 
-    // 点击接管中心
-    const takeoverNav = within(nav).getByRole("button", { name: "接管中心" });
-    await userEvent.click(takeoverNav);
-    expect(takeoverNav).toHaveAttribute("aria-current", "page");
-    expect(await screen.findByRole("heading", { name: "接管中心" })).toBeInTheDocument();
+    // 接管是一次性动作：不占侧栏，改由首次引导、命令面板与托盘进入
+    expect(within(nav).queryByRole("button", { name: "接管中心" })).toBeNull();
   }, 15000);
 
   it("从助手卡片点击「管理技能」跳转到技能页并预选对应助手，点击侧栏「技能」重置为全部助手", async () => {
@@ -98,7 +94,7 @@ describe("App 顶层导航收敛为日常八项", () => {
               domain: "agents",
               spec: { display_name: "Claude Code", bin: "claude", preferred_provider: "npm", providers: { npm: { managed: true } } },
               policy: { enabled: true },
-              observed: { providers: ["npm"], installed: true, preferred_active: true },
+              observed: { install_source: "npm", installed: true },
               state: "managed-ok",
               freshness: makeFreshness(),
               actions: [],
@@ -115,7 +111,7 @@ describe("App 顶层导航收敛为日常八项", () => {
               id: "skill:agent-skills",
               domain: "skills",
               spec: { url: "https://github.com/example/agent-skills.git", skill_paths: ["alpha"], agents: ["claude-code"] },
-              observed: { repo_cache: "/repo/agent-skills", repo_cached: true, owner_marked: true, discovered: ["alpha"], discovery_inbox: [] },
+              observed: { install_source: null, repo_cache: "/repo/agent-skills", repo_cached: true, owner_marked: true, discovered: ["alpha"], discovery_inbox: [] },
               state: "managed-ok",
             }),
             makeElement({

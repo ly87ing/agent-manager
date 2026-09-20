@@ -515,29 +515,13 @@ fn status_element(
         crate::agent_usage::read(&ctx.home_dir, &def.bin, def.mcp_config.as_deref()).unwrap_or(Value::Null),
     );
     observed.insert("command_sources".into(), command_sources(&def.commands));
-    let mut classified = Map::new();
-    for bucket_name in ["managed", "deprecated", "system_only", "unsupported"] {
-        classified.insert(
-            bucket_name.to_string(),
-            Value::Array(
-                actual_provider
-                    .filter(|provider| classified_provider(def, provider) == bucket_name)
-                    .map(|provider| Value::String(provider.to_string()))
-                    .into_iter()
-                    .collect(),
-            ),
-        );
-    }
+    // 实际检测到的安装来源：一个值说清「它是怎么装的」。是否可管由 state 表达
+    // （managed 之外 → unmanaged-detected），不再另发分类桶与首选对照。
     observed.insert(
-        "providers".into(),
+        "install_source".into(),
         actual_provider
-            .map(|provider| json!([provider]))
-            .unwrap_or_else(|| json!([])),
-    );
-    observed.insert("classified".into(), Value::Object(classified));
-    observed.insert(
-        "preferred_active".into(),
-        json!(actual_provider == Some(def.preferred_provider.as_str())),
+            .map(|provider| Value::String(provider.to_string()))
+            .unwrap_or(Value::Null),
     );
 
     let element_id = format!("agents:{}", def.id);

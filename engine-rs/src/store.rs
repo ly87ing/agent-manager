@@ -38,8 +38,6 @@ fn default_log_retention_days() -> u32 {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct AppSettings {
-    pub offline: bool,
-    pub upstream_ttl_sec: u32,
     #[serde(default = "default_log_retention_days")]
     pub log_retention_days: u32,
 }
@@ -47,8 +45,6 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            offline: false,
-            upstream_ttl_sec: 86_400,
             log_retention_days: DEFAULT_LOG_RETENTION_DAYS,
         }
     }
@@ -322,9 +318,10 @@ pub fn settings_from_connection(conn: &Connection) -> Result<AppSettings> {
     })?;
     for row in rows {
         let (key, raw) = row?;
-        // legacy default_dry_run 行：只跳过（零写）；其他未知行仍由
-        // deny_unknown_fields fail closed。
-        if key == "default_dry_run" {
+        // 已退役偏好留下的行：只跳过（零写）。default_dry_run 随公共 plan/dry-run
+        // 退役；offline 与 upstream_ttl_sec 是没有消费者的旋钮，已从界面撤下。
+        // 其他未知行仍由 deny_unknown_fields fail closed。
+        if matches!(key.as_str(), "default_dry_run" | "offline" | "upstream_ttl_sec") {
             continue;
         }
         let mut object = serde_json::to_value(&settings)?
@@ -361,8 +358,11 @@ pub fn write_settings(conn: &Connection, settings: &AppSettings) -> Result<()> {
         .as_object()
         .cloned()
         .unwrap();
-    // 校验通过后顺带清除 legacy default_dry_run 行；与调用方同一事务边界。
-    conn.execute("DELETE FROM app_settings WHERE key = 'default_dry_run'", [])?;
+    // 校验通过后顺带清除已退役偏好留下的行；与调用方同一事务边界。
+    conn.execute(
+        "DELETE FROM app_settings WHERE key IN ('default_dry_run', 'offline', 'upstream_ttl_sec')",
+        [],
+    )?;
     for (key, item) in values {
         conn.execute("INSERT INTO app_settings (key, value_json, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at", rusqlite::params![key, serde_json::to_string(&item)?, now_iso()])?;
     }
@@ -528,7 +528,6 @@ mod tests {
             effective_settings(&context).unwrap(),
             AppSettings::default()
         );
-        assert_eq!(AppSettings::default().upstream_ttl_sec, 86400);
         assert_eq!(AppSettings::default().log_retention_days, 30);
         assert!(!context.data_dir.exists());
         let _ = std::fs::remove_dir_all(root);
@@ -539,8 +538,6 @@ mod tests {
         let (root, context) = ctx("roundtrip");
         let conn = open_write(&context).unwrap();
         let settings = AppSettings {
-            offline: true,
-            upstream_ttl_sec: 123,
             log_retention_days: 14,
         };
         let tx = conn.unchecked_transaction().unwrap();
@@ -557,19 +554,17 @@ mod tests {
             )
             .unwrap();
         for raw in [
-            r#"{"offline":"yes","upstream_ttl_sec":1}"#,
-            r#"{"offline":false,"upstream_ttl_sec":-1}"#,
-            r#"{"offline":false,"upstream_ttl_sec":1,"extra":true}"#,
-            r#"{"offline":false,"upstream_ttl_sec":1,"log_retention_days":-1}"#,
-            // legacy default_dry_run 不再是字段：serde 层面同样 fail closed
-            r#"{"offline":false,"upstream_ttl_sec":1,"default_dry_run":false}"#,
+            r#"{"log_retention_days":-1}"#,
+            r#"{"log_retention_days":20,"extra":true}"#,
+            // 已退役的偏好不再是字段：整对象层面同样 fail closed（行级跳过见下一个用例）
+            r#"{"log_retention_days":20,"offline":false}"#,
+            r#"{"log_retention_days":20,"upstream_ttl_sec":1}"#,
+            r#"{"log_retention_days":20,"default_dry_run":false}"#,
         ] {
             assert!(serde_json::from_str::<AppSettings>(raw).is_err());
         }
-        let parsed_snake: AppSettings = serde_json::from_str(
-            r#"{"offline":false,"upstream_ttl_sec":1,"log_retention_days":20}"#,
-        )
-        .unwrap();
+        let parsed_snake: AppSettings =
+            serde_json::from_str(r#"{"log_retention_days":20}"#).unwrap();
         assert_eq!(parsed_snake.log_retention_days, 20);
 
         let mut invalid = settings.clone();
@@ -598,11 +593,14 @@ mod tests {
     }
 
     #[test]
-    fn settings_legacy_default_dry_run_row_is_skipped_with_zero_writes() {
+    fn settings_legacy_rows_are_skipped_with_zero_writes() {
         let (root, context) = ctx("legacy-skip");
         let conn = open_write(&context).unwrap();
+        // 旧版本写下的三种已退役偏好行都要被跳过，而不是让整库 fail closed
         seed_settings_row(&conn, "offline", "true");
+        seed_settings_row(&conn, "upstream_ttl_sec", "123");
         seed_settings_row(&conn, "default_dry_run", "true");
+        seed_settings_row(&conn, "log_retention_days", "20");
         drop(conn);
 
         let db = db_path(&context);
@@ -610,9 +608,7 @@ mod tests {
         let mtime_before = std::fs::metadata(&db).unwrap().modified().unwrap();
 
         let settings = effective_settings(&context).unwrap();
-        assert!(settings.offline, "其他合法行仍须生效");
-        assert_eq!(settings.upstream_ttl_sec, 86_400);
-        assert_eq!(settings.log_retention_days, 30);
+        assert_eq!(settings.log_retention_days, 20, "其他合法行仍须生效");
 
         let bytes_after = std::fs::read(&db).unwrap();
         let mtime_after = std::fs::metadata(&db).unwrap().modified().unwrap();
@@ -622,15 +618,14 @@ mod tests {
     }
 
     #[test]
-    fn write_settings_removes_legacy_default_dry_run_row() {
+    fn write_settings_removes_legacy_rows() {
         let (root, context) = ctx("legacy-purge");
         let conn = open_write(&context).unwrap();
         seed_settings_row(&conn, "default_dry_run", "true");
         seed_settings_row(&conn, "offline", "false");
+        seed_settings_row(&conn, "upstream_ttl_sec", "42");
 
         let settings = AppSettings {
-            offline: true,
-            upstream_ttl_sec: 42,
             log_retention_days: 7,
         };
         let tx = conn.unchecked_transaction().unwrap();
@@ -639,7 +634,7 @@ mod tests {
 
         let legacy_count: i64 = conn
             .query_row(
-                "SELECT count(*) FROM app_settings WHERE key = 'default_dry_run'",
+                "SELECT count(*) FROM app_settings WHERE key IN ('default_dry_run', 'offline', 'upstream_ttl_sec')",
                 [],
                 |r| r.get(0),
             )

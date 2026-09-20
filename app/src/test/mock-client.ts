@@ -1,11 +1,11 @@
 import type { Envelope, RunEntry } from "../lib/contract";
 import { EngineBridgeError, type EngineClient } from "../lib/engine";
-import { makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makeRunEntry } from "./fixtures";
+import { makeAuditData, makeElement, makeEnvelope, makeFreshness, makeRunEntry } from "./fixtures";
 
 /**
- * dev-only mock 引擎（?mock=1 / ?mock=offline，仅在 import.meta.env.DEV 下经
+ * dev-only mock 引擎（?mock=1 / ?mock=fresh，仅在 import.meta.env.DEV 下经
  * initEngineClient 动态加载；生产构建 treeshake 掉本模块）。
- * fixture 集覆盖：freshness 五态、收敛七态、offline 模式变体。
+ * fixture 集覆盖：freshness 五态、收敛七态。
  */
 
 const CHECKED_AT = "2026-09-05T10:00:00Z";
@@ -43,12 +43,7 @@ function demoEnvelopes(): Record<string, Envelope> {
             providers: { native: { managed: true }, brew: { managed: false } },
           },
           policy: { enabled: true, auto_install: true, auto_update: true, preferred_provider: "native" },
-          observed: {
-            providers: ["native"],
-            classified: { managed: ["native"], deprecated: [], system_only: [], unsupported: [] },
-            installed: true,
-            preferred_active: true,
-          },
+          observed: { install_source: "native", installed: true },
           state: "managed-ok",
           freshness: makeFreshness({ state: "behind", current: "2.0.0", upstream: "2.1.3", checked_at: CHECKED_AT, probe: "native", cache_age_sec: 300 }),
           actions: [{ id: "upgrade", risk: "network", needs_lock: true, offline_ok: false }],
@@ -58,7 +53,7 @@ function demoEnvelopes(): Record<string, Envelope> {
           domain: "agents",
           spec: { display_name: "Codex", bin: "codex", preferred_provider: "native", providers: { native: { managed: true } } },
           policy: { enabled: true, auto_install: true, auto_update: true, preferred_provider: "native" },
-          observed: { providers: ["native"], classified: { managed: ["native"], deprecated: [], system_only: [], unsupported: [] }, installed: true, preferred_active: true },
+          observed: { install_source: "native", installed: true },
           state: "managed-ok",
           freshness: makeFreshness({ state: "ahead", current: "0.43.0-beta.1", upstream: "0.42.0", checked_at: CHECKED_AT, probe: "native", cache_age_sec: 300 }),
         }),
@@ -67,7 +62,7 @@ function demoEnvelopes(): Record<string, Envelope> {
           domain: "agents",
           spec: { display_name: "Kimi Code", bin: "kimi", preferred_provider: "npm", providers: { npm: { managed: true }, brew: { managed: false } } },
           policy: { enabled: true, auto_install: false, auto_update: false, preferred_provider: "npm" },
-          observed: { providers: ["brew"], classified: { managed: [], deprecated: [], system_only: [], unsupported: ["brew"] }, installed: true, preferred_active: false },
+          observed: { install_source: "brew", installed: true },
           state: "unmanaged-detected",
           freshness: makeFreshness({ state: "unknown", current: null, upstream: null, checked_at: null, probe: null, cache_age_sec: null }),
         }),
@@ -76,7 +71,7 @@ function demoEnvelopes(): Record<string, Envelope> {
           domain: "agents",
           spec: { display_name: "Old Agent", bin: "old", preferred_provider: "npm", providers: { npm: { managed: true } } },
           policy: { enabled: false, auto_install: false, auto_update: false },
-          observed: { providers: [], classified: { managed: [], deprecated: [], system_only: [], unsupported: [] }, installed: false, preferred_active: false },
+          observed: { install_source: null, installed: false },
           state: "disabled",
         }),
         makeElement({
@@ -84,7 +79,7 @@ function demoEnvelopes(): Record<string, Envelope> {
           domain: "agents",
           spec: { display_name: "Qoder", bin: "qoder", preferred_provider: "npm", providers: { npm: { managed: true } } },
           policy: { enabled: true, auto_install: false, auto_update: false },
-          observed: { providers: [], classified: { managed: [], deprecated: [], system_only: [], unsupported: [] }, installed: false, preferred_active: false },
+          observed: { install_source: null, installed: false },
           state: "missing",
         }),
       ],
@@ -181,7 +176,7 @@ function demoEnvelopes(): Record<string, Envelope> {
           domain: "mcp",
           spec: { command: "npx", args: ["-y", "pending-mcp"], startup_timeout_sec: 60, agents: null, env: {} },
           policy: { enabled: true, agents: null },
-          observed: { agents: {}, env: {} },
+          observed: { install_source: null, agents: {}, env: {} },
           state: "not-materialized",
           freshness: makeFreshness({ state: "not-applicable" }),
         }),
@@ -206,7 +201,7 @@ function demoEnvelopes(): Record<string, Envelope> {
           domain: "mcp",
           spec: { command: "legacy-mcp", args: [], startup_timeout_sec: 60, agents: null, env: {} },
           policy: { enabled: true, agents: null },
-          observed: { agents: {}, env: {} },
+          observed: { install_source: null, agents: {}, env: {} },
           state: "unsupported",
           freshness: makeFreshness({ state: "not-applicable" }),
         }),
@@ -230,14 +225,12 @@ function demoEnvelopes(): Record<string, Envelope> {
             new_skill_default: "disabled",
           },
           policy: { enabled: true },
-          observed: {
-            repo_cache: "/repo/agent-skill/repositories/agent-skills",
+          observed: { install_source: null, repo_cache: "/repo/agent-skill/repositories/agent-skills",
             repo_cached: true,
             owner_marked: true,
             discovered: ["safe-merge-review", "artifact-hygiene", "dead-one", "new-hotness", "experimental-lint"],
             discovery_inbox: ["new-hotness", "experimental-lint"],
-            extra_links: [],
-          },
+            extra_links: [] },
           state: "managed-ok",
           freshness: makeFreshness({ state: "behind", current: "a1b2c3d4e5f60718293a4b5c6d7e8f9012a3b4c5", upstream: "f0e1d2c3b4a5968778695a4b3c2d1e0f9a8b7c6d", checked_at: CHECKED_AT, probe: "git-ls-remote", cache_age_sec: 600 }),
         }),
@@ -306,7 +299,7 @@ function demoEnvelopes(): Record<string, Envelope> {
           domain: "skills",
           spec: { collection: "agent-skills", name: "experimental-lint", source_path: "/repo/agent-skill/repositories/agent-skills/experimental-lint" },
           policy: { enabled: false, agents: {} },
-          observed: { agents: {}, discovery_inbox: true },
+          observed: { install_source: null, agents: {}, discovery_inbox: true },
           state: "disabled",
         }),
       ],
@@ -323,16 +316,14 @@ function demoEnvelopes(): Record<string, Envelope> {
           domain: "rules",
           spec: { name: "Codex 全局规则", group: "global-rules", source_keys: ["rules.shared", "rules.codex"], target: "~/.codex/AGENTS.md" },
           policy: { enabled: true, agent_id: "codex" },
-          observed: {
-            target: "/Users/demo/.codex/AGENTS.md",
+          observed: { install_source: null, target: "/Users/demo/.codex/AGENTS.md",
             target_exists: true,
             expected_digest: "aaaa3c8ae2687d47a8e7543d3c8c43ef8dd9f744e3a3e2ce9aa9ad7a90de12a2",
             applied_digest: "aaaa3c8ae2687d47a8e7543d3c8c43ef8dd9f744e3a3e2ce9aa9ad7a90de12a2",
             shared_revision: "1111",
             adapter_revision: "2222",
             blocked_reason: null,
-            registration_needed: false,
-          },
+            registration_needed: false },
           state: "managed-ok",
           actions: [],
         }),
@@ -341,16 +332,14 @@ function demoEnvelopes(): Record<string, Envelope> {
           domain: "rules",
           spec: { name: "Claude Code 全局规则", group: "global-rules", source_keys: ["rules.shared", "rules.claude"], target: "~/.claude/CLAUDE.md" },
           policy: { enabled: true, agent_id: "claude-code" },
-          observed: {
-            target: "/Users/demo/.claude/CLAUDE.md",
+          observed: { install_source: null, target: "/Users/demo/.claude/CLAUDE.md",
             target_exists: true,
             expected_digest: "bbbb4b5c130887752148845080715867e6c3e6f40e69189067dd7d92db8b40c36",
             applied_digest: "aaaa3c8ae2687d47a8e7543d3c8c43ef8dd9f744e3a3e2ce9aa9ad7a90de12a2",
             shared_revision: "1111",
             adapter_revision: "3333",
             blocked_reason: null,
-            registration_needed: false,
-          },
+            registration_needed: false },
           state: "drifted",
           actions: [{ id: "sync", risk: "write-local", needs_lock: true, offline_ok: true }],
         }),
@@ -368,15 +357,13 @@ function demoEnvelopes(): Record<string, Envelope> {
           domain: "secrets",
           spec: { sources: ["process env"] },
           policy: { enabled: true },
-          observed: {
-            variables: [
+          observed: { install_source: null, variables: [
               { server: "grok-search", env_key: "FIRECRAWL_API_KEY", placeholder: "FIRECRAWL_API_KEY", resolved: false, kind: "env" },
               { server: "grok-search", env_key: "GROK_API_KEY", placeholder: "GROK_API_KEY", resolved: true, kind: "env" },
               { server: "grok-search", env_key: "TAVILY_API_KEY", placeholder: "TAVILY_API_KEY", resolved: false, kind: "env" },
               { server: "remote-api", env_key: "Authorization", placeholder: "DEMO_REMOTE_TOKEN", resolved: true, kind: "header" },
             ],
-            unresolved: 2,
-          },
+            unresolved: 2 },
           state: "missing",
         }),
       ],
@@ -400,8 +387,7 @@ function demoEnvelopes(): Record<string, Envelope> {
             domain: "hooks",
             spec: { name: "Claude Hooks", merge: "signature-set", source_key: "hooks.claude", target: "~/.claude/settings.json" },
             policy: { enabled: true, agent_id: "claude-code" },
-            observed: {
-              target: "/Users/demo/.claude/settings.json",
+            observed: { install_source: null, target: "/Users/demo/.claude/settings.json",
               target_exists: true,
               expected_digest: "cccc5d5e240998863259085b2b52df0f1e0a855f4b4b4d3d0bb0be8ba91ef23b3",
               applied_digest: "aaaa3c8ae2687d47a8e7543d3c8c43ef8dd9f744e3a3e2ce9aa9ad7a90de12a2",
@@ -411,8 +397,7 @@ function demoEnvelopes(): Record<string, Envelope> {
               registration_needed: false,
               managed_hook_count: 1,
               missing_signatures: 1,
-              removed_signatures_present: 0,
-            },
+              removed_signatures_present: 0 },
             state: "drifted",
             actions: [{ id: "sync", risk: "write-local", needs_lock: true, offline_ok: true }],
           }),
@@ -421,8 +406,7 @@ function demoEnvelopes(): Record<string, Envelope> {
             domain: "hooks",
             spec: { name: "Codex Hooks", merge: "whole-file", source_key: "hooks.codex", target: "~/.codex/hooks.json" },
             policy: { enabled: true, agent_id: "codex" },
-            observed: {
-              target: "/Users/demo/.codex/hooks.json",
+            observed: { install_source: null, target: "/Users/demo/.codex/hooks.json",
               target_exists: true,
               expected_digest: "dddd6e6f351aa997436a196c3c63e01f2f1b96605c5c5e4e1cc1cf9cb02f034c4",
               applied_digest: "dddd6e6f351aa997436a196c3c63e01f2f1b96605c5c5e4e1cc1cf9cb02f034c4",
@@ -432,8 +416,7 @@ function demoEnvelopes(): Record<string, Envelope> {
               registration_needed: false,
               managed_hook_count: 0,
               missing_signatures: 0,
-              removed_signatures_present: 0,
-            },
+              removed_signatures_present: 0 },
             state: "managed-ok",
             actions: [],
           }),
@@ -525,7 +508,7 @@ function demoEnvelopes(): Record<string, Envelope> {
   };
 }
 
-export function createMockEngineClient(options: { offline?: boolean; fresh?: boolean } = {}): EngineClient {
+export function createMockEngineClient(options: { fresh?: boolean } = {}): EngineClient {
   const routes = demoEnvelopes();
 
   // ---- 有状态的写路径演示数据（内存态，仅 DEV mock） ----
@@ -719,16 +702,6 @@ export function createMockEngineClient(options: { offline?: boolean; fresh?: boo
         throw new EngineBridgeError({ kind: "unknown_command", message: `mock 未覆盖命令: ${command}` });
       }
       const cloned = structuredClone(envelope);
-      if (options.offline) {
-        cloned.mode = makeMode({ offline: true });
-        if (command === "system:refresh-upstream") {
-          cloned.ok = false;
-          cloned.data = {};
-          cloned.errors = [
-            { code: "OFFLINE_NETWORK_DENIED", element: null, message: "system:refresh-upstream 需要网络探测，offline 模式下拒绝执行" },
-          ];
-        }
-      }
       if (command === "system:refresh-upstream" && args[0] === "--only" && typeof args[1] === "string") {
         const only = args[1];
         const data = cloned.data as { elements?: Array<Record<string, unknown>> };

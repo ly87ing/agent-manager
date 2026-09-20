@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { CheckCircle2, History, Loader2, Lock, SearchX, Trash2, XCircle } from "lucide-react";
+import { CheckCircle2, History, Loader2, SearchX, Trash2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { EmptyState } from "../components/EmptyState";
@@ -23,7 +23,6 @@ function ExecutionCard({ record, onSelectRun }: { record: ExecutionRecord; onSel
   const running = record.status === "running";
   const data = record.envelope?.data as Partial<ApplyResultData> | undefined;
   const steps = Array.isArray(data?.steps) ? data.steps : [];
-  const lock = record.envelope?.lock;
 
   return (
     <section data-testid={`execution-${record.runId}`} className="rounded-lg border bg-card p-4 shadow-sm">
@@ -37,7 +36,6 @@ function ExecutionCard({ record, onSelectRun }: { record: ExecutionRecord; onSel
         )}
         <span className="text-sm font-medium text-foreground">{record.label}</span>
         <code className="font-mono text-xs text-muted-foreground">{record.command}</code>
-        <code className="font-mono text-xs text-primary">{record.runId}</code>
         <span
           data-testid={`execution-status-${record.runId}`}
           className={cn(
@@ -47,13 +45,7 @@ function ExecutionCard({ record, onSelectRun }: { record: ExecutionRecord; onSel
         >
           {running ? "正在执行…" : record.status === "ok" ? "成功" : "失败"}
         </span>
-        <span className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
-          {lock && (
-            <span className="inline-flex items-center gap-1" title="任务互斥：运行期间另一个任务无法同时执行（引擎锁 envelope.lock）">
-              <Lock className="h-3 w-3" aria-hidden />
-              {lock.held ? `独占执行 · pid ${lock.pid ?? "?"}` : "只读任务"}
-            </span>
-          )}
+        <span className="ml-auto text-xs text-muted-foreground">
           {new Date(record.startedAt).toLocaleTimeString("zh-CN", { hour12: false })}
         </span>
         <button

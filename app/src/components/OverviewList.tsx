@@ -205,7 +205,7 @@ export function OverviewList({ onNavigate }: { onNavigate?: (page: string) => vo
                 </span>
                 {/* 按钮槽位固定宽度：只在部分行出现的话，其余行的状态列会被挤得对不齐 */}
                 <span className="w-14 shrink-0 text-right">
-                  {item.sync === "decision" && onNavigate && (
+                  {(item.sync === "decision" || item.update === "behind") && onNavigate && (
                     <button
                       type="button"
                       data-testid={`overview-goto-${item.id}`}

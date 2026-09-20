@@ -344,28 +344,15 @@ pub fn validate_args(command: &str, args: &[String]) -> Result<(), EngineError> 
     Ok(())
 }
 
-fn effective_args(mut args: Vec<String>, offline: bool) -> Vec<String> {
-    if offline && !args.iter().any(|arg| arg == "--offline") {
-        args.push("--offline".into());
-    }
-    args
-}
 fn dispatch_native(
     ctx: agent_manager_engine::Context,
     command: String,
     args: Vec<String>,
     run_id: String,
-    offline: bool,
 ) -> Result<agent_manager_engine::Envelope, EngineError> {
     validate_command(&command)?;
     validate_args(&command, &args)?;
     validate_run_id(&run_id)?;
-    // sources 只读写本地 SQLite 且 native 严格参数拒绝 --offline，不做离线注入。
-    let args = if command.starts_with("sources:") {
-        args
-    } else {
-        effective_args(args, offline)
-    };
     Ok(agent_manager_engine::execute(
         &ctx,
         &agent_manager_engine::Request {
@@ -389,16 +376,12 @@ pub async fn engine_invoke(
     let home_dir = std::env::var_os("HOME")
         .map(std::path::PathBuf::from)
         .ok_or_else(|| EngineError::new("home_unavailable", "HOME 未设置"))?;
-    let offline = crate::settings::current_preferences(&app)
-        .map_err(|e| EngineError::new("settings_unavailable", e))?
-        .offline;
     tauri::async_runtime::spawn_blocking(move || {
         dispatch_native(
             agent_manager_engine::Context { data_dir, home_dir },
             command,
             args.unwrap_or_default(),
             run_id.unwrap_or_else(|| format!("tauri-{}", std::process::id())),
-            offline,
         )
     })
     .await
@@ -887,32 +870,10 @@ mod tests {
     }
 
     #[test]
-    fn offline_injection_is_idempotent() {
-        assert_eq!(effective_args(vec![], true), vec!["--offline"]);
-        assert_eq!(
-            effective_args(vec!["--offline".into()], true),
-            vec!["--offline"]
-        );
-        assert_eq!(
-            effective_args(vec!["--only".into(), "mcp:s1".into()], true),
-            vec!["--only", "mcp:s1", "--offline"]
-        );
-        assert_eq!(
-            effective_args(vec!["--only".into(), "mcp:s1".into()], false),
-            vec!["--only", "mcp:s1"]
-        );
-        assert_eq!(
-            effective_args(vec!["--offline".into()], false),
-            vec!["--offline"]
-        );
-    }
-
-    #[test]
-    fn system_audit_bridge_injects_offline_and_raw_args_stay_strict() {
-        // raw validate_args 仍拒绝用户提供的 --offline（只能由 bridge 注入）
+    fn system_audit_bridge_args_stay_strict_and_read_only() {
+        // 手动离线模式已退役：界面不再注入，用户也传不进 --offline
         assert!(validate_args("system:audit", &["--offline".into()]).is_err());
         assert!(validate_args("system:audit", &[]).is_ok());
-        // offline=true 时 bridge 注入 --offline 后原生 system:audit 成功且零写
         let base = std::env::temp_dir().join(format!(
             "am-tauri-audit-test-{}-{:x}",
             std::process::id(),
@@ -931,11 +892,10 @@ mod tests {
             "system:audit".into(),
             vec![],
             "audit-test".into(),
-            true,
         )
         .unwrap();
         assert!(envelope.ok, "{:?}", envelope.errors);
-        assert!(envelope.mode.offline);
+        assert!(!envelope.mode.offline);
         assert_eq!(envelope.data["status"], "warning");
         assert!(envelope.data["sections"].as_object().unwrap().len() >= 8);
         assert!(!base.join("data").exists(), "audit 不得创建数据目录");
@@ -944,11 +904,9 @@ mod tests {
     }
 
     #[test]
-    fn secrets_status_bridge_injects_offline_and_raw_args_stay_strict() {
-        // raw validate_args 仍拒绝用户提供的 --offline（只能由 bridge 注入）
+    fn secrets_status_bridge_args_stay_strict_and_read_only() {
         assert!(validate_args("secrets:status", &["--offline".into()]).is_err());
         assert!(validate_args("secrets:status", &[]).is_ok());
-        // offline=true 时 bridge 注入 --offline 后原生 secrets:status 成功且零写
         let base = std::env::temp_dir().join(format!(
             "am-tauri-secrets-test-{}-{:x}",
             std::process::id(),
@@ -967,11 +925,10 @@ mod tests {
             "secrets:status".into(),
             vec![],
             "secrets-test".into(),
-            true,
         )
         .unwrap();
         assert!(envelope.ok, "{:?}", envelope.errors);
-        assert!(envelope.mode.offline);
+        assert!(!envelope.mode.offline);
         assert_eq!(envelope.data["domain"], "secrets");
         assert_eq!(envelope.data["elements"][0]["id"], "secrets:mcp-env");
         assert!(!base.join("data").exists(), "status 不得创建数据目录");
@@ -980,7 +937,7 @@ mod tests {
     }
 
     #[test]
-    fn sources_args_match_native_strictness_and_skip_offline_injection() {
+    fn sources_args_match_native_strictness() {
         assert!(validate_args("sources:get", &["--key".into(), "rules".into()]).is_ok());
         assert!(validate_args(
             "sources:set",
@@ -1038,7 +995,6 @@ mod tests {
             "sources:get".into(),
             vec!["--key".into(), "rules".into()],
             "sources-offline".into(),
-            true,
         )
         .unwrap();
         assert!(env.ok, "{:?}", env.errors);
@@ -1050,8 +1006,8 @@ mod tests {
     }
 
     #[test]
-    fn rules_status_injects_offline_via_bridge() {
-        // raw --offline 仍被 validate_args 拒绝，只能由 bridge 注入。
+    fn rules_status_bridge_args_stay_strict_and_read_only() {
+        // 手动离线模式已退役：--offline 仍被 validate_args 拒绝，界面也不再注入。
         assert!(validate_args("rules:status", &["--offline".into()]).is_err());
 
         let root = std::env::temp_dir().join(format!(
@@ -1071,11 +1027,10 @@ mod tests {
             "rules:status".into(),
             vec![],
             "rules-bridge".into(),
-            true,
         )
         .unwrap();
         assert!(env.ok, "{:?}", env.errors);
-        assert!(env.mode.offline, "bridge 必须注入 --offline");
+        assert!(!env.mode.offline);
         // rules 固定三目标：codex、claude、opencode
         assert_eq!(env.data["elements"].as_array().unwrap().len(), 3);
         assert!(!root.join("data").exists(), "rules:status 零写");
@@ -1092,7 +1047,7 @@ mod tests {
             home_dir: root.join("home"),
         };
         assert!(
-            dispatch_native(c(), "policy:get".into(), vec![], "read".into(), false)
+            dispatch_native(c(), "policy:get".into(), vec![], "read".into())
                 .unwrap()
                 .ok
         );
@@ -1110,13 +1065,12 @@ mod tests {
                     "true".into()
                 ],
                 "write".into(),
-                false
             )
             .unwrap()
             .ok
         );
         assert_eq!(
-            dispatch_native(c(), "policy:get".into(), vec![], "read".into(), false)
+            dispatch_native(c(), "policy:get".into(), vec![], "read".into())
                 .unwrap()
                 .data["effective"]["agents"]["x"],
             true

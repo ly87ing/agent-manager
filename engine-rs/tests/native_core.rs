@@ -335,7 +335,6 @@ fn runs_clear_clears_logs_without_side_effects() {
     let (base, ctx) = temp_ctx("runs-clear-populated");
     let conn = store::open_write(&ctx).unwrap();
     let mut custom_settings = store::default_settings();
-    custom_settings.offline = true;
     custom_settings.log_retention_days = 45;
     store::write_settings(&conn, &custom_settings).unwrap();
     drop(conn);
@@ -370,7 +369,6 @@ fn runs_clear_clears_logs_without_side_effects() {
     assert_eq!(runs_after.len(), 0, "清空后任务记录列表应为空");
 
     let settings_after = store::effective_settings(&ctx).unwrap();
-    assert_eq!(settings_after.offline, true, "app_settings 偏好应保留");
     assert_eq!(
         settings_after.log_retention_days, 45,
         "app_settings 保留天数应保留"
@@ -718,9 +716,7 @@ fn agent_status_classifies_unsupported_install_and_skips_tombstones() {
         .unwrap();
     assert_eq!(brew["state"], "unmanaged-detected");
     assert!(brew["actions"].as_array().unwrap().is_empty());
-    assert_eq!(brew["observed"]["providers"][0], "brew");
-    assert_eq!(brew["observed"]["classified"]["unsupported"][0], "brew");
-    assert_eq!(brew["observed"]["preferred_active"], false);
+    assert_eq!(brew["observed"]["install_source"], "brew");
     let direct = execute(
         &ctx,
         &request_with_run(
@@ -831,9 +827,7 @@ fn agent_status_launcher_symlink_native_managed_and_system_entry_counterexample(
         .find(|element| element["id"] == "agents:launcher-agent")
         .unwrap();
     assert_eq!(native["state"], "managed-ok");
-    assert_eq!(native["observed"]["providers"][0], "native");
-    assert_eq!(native["observed"]["classified"]["managed"][0], "native");
-    assert_eq!(native["observed"]["preferred_active"], true);
+    assert_eq!(native["observed"]["install_source"], "native");
     let action_ids: Vec<&str> = native["actions"]
         .as_array()
         .unwrap()
@@ -848,9 +842,7 @@ fn agent_status_launcher_symlink_native_managed_and_system_entry_counterexample(
         .unwrap();
     assert_eq!(system["state"], "unmanaged-detected");
     assert!(system["actions"].as_array().unwrap().is_empty());
-    assert_eq!(system["observed"]["providers"][0], "system");
-    assert_eq!(system["observed"]["classified"]["system_only"][0], "system");
-    assert_eq!(system["observed"]["preferred_active"], false);
+    assert_eq!(system["observed"]["install_source"], "system");
     let blocked = execute(
         &ctx,
         &request(
@@ -869,9 +861,7 @@ fn agent_status_launcher_symlink_native_managed_and_system_entry_counterexample(
         .unwrap();
     assert_eq!(brew["state"], "unmanaged-detected");
     assert!(brew["actions"].as_array().unwrap().is_empty());
-    assert_eq!(brew["observed"]["providers"][0], "brew");
-    assert_eq!(brew["observed"]["classified"]["unsupported"][0], "brew");
-    assert_eq!(brew["observed"]["preferred_active"], false);
+    assert_eq!(brew["observed"]["install_source"], "brew");
     let brew_blocked = execute(
         &ctx,
         &request(

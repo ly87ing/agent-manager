@@ -9,15 +9,11 @@ use tauri::Manager;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct SettingsPreferences {
-    pub offline: bool,
-    pub upstream_ttl_sec: u32,
     pub log_retention_days: u32,
 }
 impl From<AppSettings> for SettingsPreferences {
     fn from(v: AppSettings) -> Self {
         Self {
-            offline: v.offline,
-            upstream_ttl_sec: v.upstream_ttl_sec,
             log_retention_days: v.log_retention_days,
         }
     }
@@ -25,8 +21,6 @@ impl From<AppSettings> for SettingsPreferences {
 impl From<SettingsPreferences> for AppSettings {
     fn from(v: SettingsPreferences) -> Self {
         Self {
-            offline: v.offline,
-            upstream_ttl_sec: v.upstream_ttl_sec,
             log_retention_days: v.log_retention_days,
         }
     }
@@ -165,12 +159,6 @@ mod tests {
         assert_eq!(
             read_preferences_data_dir(&root.join("data"), &root)
                 .unwrap()
-                .upstream_ttl_sec,
-            86400
-        );
-        assert_eq!(
-            read_preferences_data_dir(&root.join("data"), &root)
-                .unwrap()
                 .log_retention_days,
             30
         );
@@ -178,35 +166,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
     #[test]
-    fn preferences_save_reopens_and_camel_case_rejects_invalid_ttl() {
+    fn preferences_save_reopens_and_camel_case_rejects_unknown_fields() {
         let root =
             std::env::temp_dir().join(format!("am-tauri-settings-save-{}", std::process::id()));
         let data = root.join("data");
         let home = root.join("home");
         let value = SettingsPreferences {
-            offline: true,
-            upstream_ttl_sec: 7,
             log_retention_days: 14,
         };
         save_preferences_data_dir(&data, &home, value.clone()).unwrap();
         assert_eq!(read_preferences_data_dir(&data, &home).unwrap(), value);
+        assert!(serde_json::from_str::<SettingsPreferences>(r#"{"logRetentionDays":-1}"#).is_err());
         assert!(serde_json::from_str::<SettingsPreferences>(
-            r#"{"offline":false,"upstreamTtlSec":-1,"logRetentionDays":30}"#
+            r#"{"logRetentionDays":30,"extra":true}"#
         )
         .is_err());
-        assert!(serde_json::from_str::<SettingsPreferences>(
-            r#"{"offline":false,"upstreamTtlSec":1,"logRetentionDays":-1}"#
-        )
-        .is_err());
-        assert!(serde_json::from_str::<SettingsPreferences>(
-            r#"{"offline":false,"upstreamTtlSec":1,"logRetentionDays":30,"extra":true}"#
-        )
-        .is_err());
-        // defaultDryRun 已退役，作为未知字段拒绝
-        assert!(serde_json::from_str::<SettingsPreferences>(
-            r#"{"offline":false,"defaultDryRun":false,"upstreamTtlSec":1,"logRetentionDays":30}"#
-        )
-        .is_err());
+        // 已退役的偏好（defaultDryRun / offline / upstreamTtlSec）作为未知字段拒绝
+        for raw in [
+            r#"{"logRetentionDays":30,"defaultDryRun":false}"#,
+            r#"{"logRetentionDays":30,"offline":false}"#,
+            r#"{"logRetentionDays":30,"upstreamTtlSec":1}"#,
+        ] {
+            assert!(serde_json::from_str::<SettingsPreferences>(raw).is_err());
+        }
         let _ = std::fs::remove_dir_all(root);
     }
 }

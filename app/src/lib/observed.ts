@@ -15,21 +15,12 @@ export interface AgentsSpec {
 
 export interface AgentsPolicy {
   enabled?: boolean;
-  auto_install?: boolean;
-  auto_update?: boolean;
-  preferred_provider?: string;
 }
 
 export interface AgentsObserved {
-  providers?: string[];
-  classified?: {
-    managed?: string[];
-    deprecated?: string[];
-    system_only?: string[];
-    unsupported?: string[];
-  };
+  /** 实际检测到的安装来源（native / brew / system…）；未安装为 null。 */
+  install_source?: string | null;
   installed?: boolean;
-  preferred_active?: boolean;
   version?: string | null;
   /** 助手自己写在本机的额度记账；没有这类记录的助手为 null。 */
   usage?: AgentUsage | null;

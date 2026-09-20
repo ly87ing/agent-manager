@@ -13,7 +13,7 @@ vi.mock("@tauri-apps/plugin-updater", () => ({ check: vi.fn() }));
 import { setSettingsClient, settingsSchema } from "../lib/settings";
 
 const settings: SettingsData = {
-  preferences: { offline: false, upstreamTtlSec: 86400, logRetentionDays: 30 },
+  preferences: { logRetentionDays: 30 },
   appVersion: "1.2.3",
   contractVersion: "agent-manager/engine/v1",
   resourceDir: "/resources",
@@ -45,13 +45,13 @@ describe("SettingsPage", () => {
     });
     renderWithEngine(<SettingsPage />, {});
     expect(await screen.findByText("1.2.3")).toBeInTheDocument();
-    const ttl = screen.getByLabelText("官方缓存 TTL（秒）");
-    await userEvent.clear(ttl);
-    await userEvent.type(ttl, "3600");
+    const retention = screen.getByLabelText("日志保留天数");
+    await userEvent.clear(retention);
+    await userEvent.type(retention, "60");
     await userEvent.click(screen.getByRole("button", { name: "保存设置" }));
     expect(await screen.findByText("设置已保存")).toBeInTheDocument();
     expect(saved).toBe(true);
-    expect(ttl).toHaveValue(3600);
+    expect(retention).toHaveValue(60);
   });
 
   it("更新未配置时显示状态且不发起 updater 请求", async () => {
@@ -65,20 +65,20 @@ describe("SettingsPage", () => {
   it("DEV mock 保存后再次读取仍保留偏好", async () => {
     window.history.pushState({}, "", "?mock=1");
     renderWithEngine(<SettingsPage />, {});
-    const ttl = await screen.findByLabelText("官方缓存 TTL（秒）");
-    await userEvent.clear(ttl);
-    await userEvent.type(ttl, "1800");
+    const retention = await screen.findByLabelText("日志保留天数");
+    await userEvent.clear(retention);
+    await userEvent.type(retention, "45");
     await userEvent.click(screen.getByRole("button", { name: "保存设置" }));
     expect(await screen.findByText("设置已保存")).toBeInTheDocument();
-    expect(ttl).toHaveValue(1800);
+    expect(retention).toHaveValue(45);
     window.history.pushState({}, "", "/");
   });
 
   it("保存失败显示内联错误", async () => {
     setSettingsClient({ get: async () => settings, save: async () => { throw new Error("disk full"); } });
     renderWithEngine(<SettingsPage />, {});
-    const ttl = await screen.findByLabelText("官方缓存 TTL（秒）");
-    await userEvent.clear(ttl); await userEvent.type(ttl, "1800");
+    const retention = await screen.findByLabelText("日志保留天数");
+    await userEvent.clear(retention); await userEvent.type(retention, "45");
     await userEvent.click(screen.getByRole("button", { name: "保存设置" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("disk full");
   });
@@ -402,8 +402,6 @@ describe("SettingsPage", () => {
     const expectedKeys = [
       "aliases",
       "secrets",
-      "updates",
-      "policy",
     ];
 
     for (const key of expectedKeys) {
@@ -415,6 +413,9 @@ describe("SettingsPage", () => {
     expect(screen.queryByTestId("advanced-entry-tools")).toBeNull();
     expect(screen.queryByTestId("advanced-entry-snapshots")).toBeNull();
     expect(screen.queryByTestId("advanced-entry-sync")).toBeNull();
+    // 更新中心与总览清单重复；个性化配置是引擎配置原文编辑器，都已撤下
+    expect(screen.queryByTestId("advanced-entry-updates")).toBeNull();
+    expect(screen.queryByTestId("advanced-entry-policy")).toBeNull();
     expect(screen.queryByText("多设备同步")).toBeNull();
 
     // 点击终端快捷命令下钻
@@ -555,7 +556,7 @@ describe("SettingsPage", () => {
 
   it("settingsSchema 严格校验：支持 maintenanceWarning（null、字符串、缺省）且拒绝多余字段", () => {
     const baseValid = {
-      preferences: { offline: false, upstreamTtlSec: 86400, logRetentionDays: 30 },
+      preferences: { logRetentionDays: 30 },
       appVersion: "1.0.0",
       contractVersion: "agent-manager/engine/v1",
       resourceDir: "/res",

@@ -14,7 +14,7 @@ const dummySettings: SettingsData = {
   logDir: "/tmp/logs",
   updaterConfigured: false,
   maintenanceWarning: null,
-  preferences: { offline: false, upstreamTtlSec: 86400, logRetentionDays: 30 },
+  preferences: { logRetentionDays: 30 },
 };
 
 function routes(): Record<string, Envelope> {
@@ -27,7 +27,7 @@ function routes(): Record<string, Envelope> {
           makeElement({
             id: "secrets:mcp-env",
             domain: "secrets",
-            observed: { variables: [], unresolved: 0 },
+            observed: { install_source: null, variables: [], unresolved: 0 },
             state: "managed-ok",
           }),
         ],
@@ -43,7 +43,7 @@ function routes(): Record<string, Envelope> {
             domain: "agents",
             spec: { display_name: "Claude Code", bin: "claude" },
             policy: { enabled: true },
-            observed: { providers: [], classified: {}, installed: true },
+            observed: { install_source: null, installed: true },
             state: "managed-ok",
             freshness: makeFreshness(),
             actions: [],
@@ -60,7 +60,7 @@ function routes(): Record<string, Envelope> {
             id: "skill:agent-skills",
             domain: "skills",
             spec: { url: "https://example.com/x.git" },
-            observed: { repo_cached: true, discovered: [], discovery_inbox: [] },
+            observed: { install_source: null, repo_cached: true, discovered: [], discovery_inbox: [] },
             state: "managed-ok",
           }),
         ],
@@ -75,7 +75,7 @@ function routes(): Record<string, Envelope> {
             id: "mcp:grok-search",
             domain: "mcp",
             spec: { command: "uvx", args: [] },
-            observed: { agents: {}, env: {}, actions: [] },
+            observed: { install_source: null, agents: {}, env: {}, actions: [] },
             state: "managed-ok",
           }),
         ],

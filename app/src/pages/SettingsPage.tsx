@@ -7,7 +7,6 @@ import {
   Moon,
   RefreshCw,
   Save,
-  SlidersHorizontal,
   Sun,
   Trash2,
 } from "lucide-react";
@@ -23,8 +22,6 @@ import { check } from "@tauri-apps/plugin-updater";
 import { ConfigBackupSection } from "../components/ConfigBackupSection";
 import AliasesPage from "./AliasesPage";
 import SecretsPage from "./SecretsPage";
-import UpdatesPage from "./UpdatesPage";
-import PolicyPage from "./PolicyPage";
 
 const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: "light", label: "浅色", icon: Sun },
@@ -85,27 +82,10 @@ const ADVANCED_ENTRIES = [
     description: "填写 MCP 服务需要的取值，并查看哪些还没配。",
     icon: KeyRound,
   },
-  {
-    key: "updates",
-    title: "更新中心",
-    description: "各组件版本检查与更新对比。",
-    icon: RefreshCw,
-  },
-  {
-    key: "policy",
-    title: "个性化配置",
-    description: "SQLite 本机配置原文查看与编辑。",
-    icon: SlidersHorizontal,
-  },
 ];
 
 function initialPreferences(data?: SettingsData): SettingsPreferences {
-  const p = data?.preferences;
-  return {
-    offline: p?.offline ?? false,
-    upstreamTtlSec: p?.upstreamTtlSec ?? 86400,
-    logRetentionDays: p?.logRetentionDays ?? 30,
-  };
+  return { logRetentionDays: data?.preferences?.logRetentionDays ?? 30 };
 }
 
 export default function SettingsPage({ initialAdvanced }: { initialAdvanced?: string | null } = {}) {
@@ -150,12 +130,11 @@ export default function SettingsPage({ initialAdvanced }: { initialAdvanced?: st
   const data = settings.data;
   const changed = JSON.stringify(preferences) !== JSON.stringify(data.preferences);
 
-  const isTtlValid = Number.isInteger(preferences.upstreamTtlSec) && preferences.upstreamTtlSec >= 0;
   const isRetentionValid =
     Number.isInteger(preferences.logRetentionDays) &&
     preferences.logRetentionDays >= 0 &&
     preferences.logRetentionDays <= 3650;
-  const isFormValid = isTtlValid && isRetentionValid;
+  const isFormValid = isRetentionValid;
 
   const savePreferences = () => {
     if (!isFormValid) return;
@@ -297,15 +276,13 @@ export default function SettingsPage({ initialAdvanced }: { initialAdvanced?: st
         </div>
         {activeAdvanced === "aliases" && <AliasesPage />}
         {activeAdvanced === "secrets" && <SecretsPage />}
-        {activeAdvanced === "updates" && <UpdatesPage />}
-        {activeAdvanced === "policy" && <PolicyPage />}
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      <PageHeader title="设置" description="查看应用契约与运行路径，调整本机运行偏好。" />
+      <PageHeader title="设置" description="外观、配置备份与本机运行路径。" />
       <AppearanceSection />
       <ConfigBackupSection />
       {data.maintenanceWarning && (
@@ -341,17 +318,12 @@ export default function SettingsPage({ initialAdvanced }: { initialAdvanced?: st
           </p>
         )}
         <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
-          {[["应用版本", data.appVersion], ["契约版本", data.contractVersion], ["资源目录", data.resourceDir], ["数据目录", data.dataDir], ["日志目录", data.logDir]].map(([label, value]) => (
+          {[["应用版本", data.appVersion], ["资源目录", data.resourceDir], ["数据目录", data.dataDir], ["日志目录", data.logDir]].map(([label, value]) => (
             <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 break-all font-mono text-xs text-foreground">{value}</dd></div>
           ))}
         </dl>
-      </section>
-      <section className="rounded-lg border bg-card p-5 shadow-sm">
-        <h2 className="text-sm font-semibold text-foreground">运行偏好</h2>
-        <div className="mt-4 space-y-4 text-sm">
-          <label className="flex items-center gap-2"><input type="checkbox" checked={preferences.offline} onChange={(e) => setPreferences({ ...preferences, offline: e.target.checked })} />离线模式</label>
-          <label className="flex items-center gap-3"><span>官方缓存 TTL（秒）</span><input aria-label="官方缓存 TTL（秒）" type="number" min={0} step={1} value={Number.isNaN(preferences.upstreamTtlSec) ? "" : preferences.upstreamTtlSec} onChange={(e) => setPreferences({ ...preferences, upstreamTtlSec: e.target.value === "" ? NaN : Number(e.target.value) })} className="w-32 rounded border px-2 py-1" /></label>
-          <label className="flex items-center gap-3">
+        <div className="mt-4 space-y-3 border-t pt-4 text-sm">
+          <label className="flex flex-wrap items-center gap-3">
             <span>日志保留天数</span>
             <input
               aria-label="日志保留天数"
@@ -391,7 +363,7 @@ export default function SettingsPage({ initialAdvanced }: { initialAdvanced?: st
       <section className="rounded-lg border bg-card p-5 shadow-sm">
         <div>
           <h2 className="text-sm font-semibold text-foreground">高级管理</h2>
-          <p className="mt-1 text-xs text-muted-foreground">保留的系统诊断、快捷命令、密钥与更新管理入口。</p>
+          <p className="mt-1 text-xs text-muted-foreground">不常用但偶尔要改的：终端快捷命令与密钥。</p>
         </div>
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {ADVANCED_ENTRIES.map((entry) => {

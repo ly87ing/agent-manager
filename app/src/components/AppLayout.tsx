@@ -1,7 +1,6 @@
 import { X, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "../lib/utils";
-import { ModeBanner } from "./ModeBanner";
 
 export interface NavItem {
   key: string;
@@ -94,7 +93,6 @@ export function AppLayout({
       </aside>
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-5xl space-y-6 p-6">
-          <ModeBanner />
           {children}
         </div>
       </main>
