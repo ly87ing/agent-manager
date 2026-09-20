@@ -25,6 +25,7 @@ const PAGES: { key: string; label: string; keywords: string }[] = [
   { key: "mcp", label: "MCP", keywords: "mcp 服务器" },
   { key: "rules-hooks", label: "规则与 Hooks", keywords: "rules hooks 规则" },
   { key: "takeover", label: "接管中心", keywords: "takeover 接管 发现" },
+  { key: "usage", label: "用量", keywords: "usage 用量 token 花费 成本" },
   { key: "runs", label: "操作记录", keywords: "runs 任务 日志" },
   { key: "settings", label: "设置", keywords: "settings 偏好 终端快捷命令" },
   // 设置里的二级页面也要搜得到：密钥现在是要填东西的页，藏在二级菜单里不好找

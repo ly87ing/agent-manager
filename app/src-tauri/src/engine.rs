@@ -59,6 +59,8 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("agents", "configure") => true,
         // 接入配置可用性检查：会联网，但只在界面上点它时才发
         ("agents", "check") => true,
+        // 用量：status 只读，scan 读会话文件后写聚合，clear 清空重来
+        ("usage", "status" | "scan" | "clear") => true,
         (d, "status" | "apply") => READ_WRITE_DOMAINS.contains(&d),
         _ => false,
     };
@@ -415,6 +417,8 @@ mod tests {
             "agents:apply",
             "agents:configure",
             "agents:check",
+            "usage:status",
+            "usage:scan",
             "mcp:status",
             "mcp:apply",
             "skills:status",

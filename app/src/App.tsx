@@ -6,6 +6,7 @@ import {
   Server,
   Settings,
   Sparkles,
+  Wallet,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AppLayout, type NavItem } from "./components/AppLayout";
@@ -16,6 +17,7 @@ import McpPage from "./pages/McpPage";
 import RulesHooksPage from "./pages/RulesHooksPage";
 import RunsPage from "./pages/RunsPage";
 import SkillsPage from "./pages/SkillsPage";
+import UsagePage from "./pages/UsagePage";
 import TakeoverPage from "./pages/TakeoverPage";
 import SettingsPage from "./pages/SettingsPage";
 import { useSettings } from "./lib/settings";
@@ -29,6 +31,7 @@ const NAV: NavItem[] = [
   { key: "skills", label: "技能", icon: Sparkles },
   { key: "mcp", label: "MCP", icon: Server },
   { key: "rules-hooks", label: "规则与 Hooks", icon: ScrollText },
+  { key: "usage", label: "用量", icon: Wallet },
   { key: "runs", label: "操作记录", icon: Activity },
   { key: "settings", label: "设置", icon: Settings },
 ];
@@ -126,6 +129,7 @@ export default function App() {
         {activePage === "mcp" && <McpPage />}
         {activePage === "rules-hooks" && <RulesHooksPage />}
         {activePage === "takeover" && <TakeoverPage />}
+        {activePage === "usage" && <UsagePage />}
         {activePage === "runs" && <RunsPage />}
         {activePage.startsWith("settings") && (
           <SettingsPage

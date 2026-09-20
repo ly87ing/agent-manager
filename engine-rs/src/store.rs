@@ -50,6 +50,12 @@ impl Default for AppSettings {
     }
 }
 
+/// `usage.pricing` 是美元/百万 token 的单价，取自 Anthropic 官方定价页
+/// （platform.claude.com/docs/en/about-claude/pricing，2026-09-20 核对）：
+/// 缓存写入为输入价的 1.25 倍、缓存读取为 0.1 倍。只内置官方模型——
+/// 第三方与中转站的价格各家各时不同，编一个比不报更糟，留给用户自己填。
+/// 按前缀匹配，因此带日期后缀的模型 id 也能命中。
+///
 /// Reviewer-verified official defaults (docs: claude.ai/install.sh native
 /// install + manual `claude update`; chatgpt.com/codex/install.sh for both
 /// install and update). Field shape keeps `providers[preferred_provider].
@@ -91,6 +97,13 @@ pub const BUILTIN_POLICY_JSON: &str = r#"{
       }
     },
   "mcp": {"definitions": {}},
+  "usage": {
+    "pricing": {
+      "claude-opus-5": {"input": 5, "output": 25, "cache_write": 6.25, "cache_read": 0.5},
+      "claude-sonnet-5": {"input": 2, "output": 10, "cache_write": 2.5, "cache_read": 0.2},
+      "claude-haiku-4-5": {"input": 1, "output": 5, "cache_write": 1.25, "cache_read": 0.1}
+    }
+  },
   "skills": {
     "agent-skills": {"enabled": true},
     "repositories": {

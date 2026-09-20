@@ -62,6 +62,7 @@ impl Request {
 }
 
 const KNOWN_DOMAINS: &[&str] = &[
+    "usage",
     "agents", "mcp", "skills", "rules", "hooks", "aliases", "profiles", "secrets", "profile",
     "policy", "system", "runs", "sources", "db", "logs", "config",
 ];
@@ -438,6 +439,10 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("agents", "status" | "apply") => crate::native_agents::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}"))),
+        // 用量：status 只读已聚合的结果，scan 才去读会话文件并写库
+        ("usage", "status" | "scan" | "clear") => {
+            crate::native_usage::handle(ctx, request).map(|d| (d, vec![]))
+        }
         // 接入配置可用性检查：唯一会主动联网的助手侧命令，只在调用方点它时才发请求
         ("agents", "check") => crate::native_agent_check::handle(ctx, request).map(|d| (d, vec![])),
         // 运行参数落到助手自己的配置文件；与装卸升级分开，那条走 shell 命令，这条写文件

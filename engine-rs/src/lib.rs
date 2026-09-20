@@ -29,6 +29,7 @@ pub mod native_skills;
 pub mod native_sources;
 pub(crate) mod native_system;
 pub(crate) mod native_upstream;
+pub(crate) mod native_usage;
 pub mod sanitize;
 pub(crate) mod secret_values;
 pub mod store;
