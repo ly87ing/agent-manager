@@ -79,6 +79,34 @@ function configureCalls(calls: { command: string; args?: string[] }[]) {
 }
 
 describe("助手运行参数", () => {
+  function agentRoutes(id: string, bin: string) {
+    return routes({
+      "agents:status": makeEnvelope(
+        {
+          domain: "agents",
+          elements: [
+            makeElement({
+              id: `agents:${id}`,
+              domain: "agents",
+              spec: {
+                display_name: id,
+                bin,
+                preferred_provider: "native",
+                providers: { native: { managed: true, install: "i.sh", upgrade: "u.sh" } },
+              },
+              policy: { enabled: true },
+              observed: { install_source: "native", installed: true },
+              state: "managed-ok",
+              freshness: makeFreshness(),
+              actions: [],
+            }),
+          ],
+        },
+        { command: "agents.status" },
+      ),
+    });
+  }
+
   it("填了接口地址保存：先存定义，再写进助手配置文件", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await openEditor();
@@ -195,6 +223,34 @@ describe("助手运行参数", () => {
     expect(configureCalls(calls)[1].args).toContain("--allow-takeover");
   });
 
+  it("按厂商添加一套：地址与模型名填好，只剩令牌要自己配", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routes());
+    await openEditor();
+    await userEvent.selectOptions(screen.getByTestId("add-connection-preset"), "deepseek-claude");
+    await userEvent.click(screen.getByRole("button", { name: "保存定义" }));
+
+    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
+    const saved = calls.find((call) => call.command === "policy:set")!;
+    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
+    const entry = definition.settings.profiles.deepseek;
+    expect(entry.base_url).toBe("https://api.deepseek.com/anthropic");
+    expect(entry.model).toBe("deepseek-flash[1m]");
+    expect(entry.model_aliases.haiku).toBe("deepseek-flash");
+    // 预设只带变量名，取值仍要自己在密钥页填
+    expect(entry.token_var).toBe("DEEPSEEK_API_KEY");
+    expect(definition.settings.active).toBe("deepseek");
+  });
+
+  it("Codex 的厂商清单是另一套端点，不会拿 Claude 那条去填", async () => {
+    renderWithEngine(<AgentsPage />, agentRoutes("codex", "codex"));
+    await openEditor();
+    const picker = screen.getByTestId("add-connection-preset");
+    // 选项只给 Codex 那一套
+    await userEvent.selectOptions(picker, "deepseek-codex");
+    expect(screen.getByTestId("connection-base-url-input")).toHaveValue("https://api.deepseek.com/");
+    expect(screen.getByTestId("connection-model-input")).toHaveValue("deepseek-flash");
+  });
+
   it("状态栏选用本工具的：定义里记下来，随保存一起写入", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await openEditor();
@@ -266,34 +322,6 @@ describe("助手运行参数", () => {
     await screen.findByRole("button", { name: "编辑命令" });
     expect(screen.queryByTestId("switch-connection-agents:claude-code")).toBeNull();
   });
-
-  function agentRoutes(id: string, bin: string) {
-    return routes({
-      "agents:status": makeEnvelope(
-        {
-          domain: "agents",
-          elements: [
-            makeElement({
-              id: `agents:${id}`,
-              domain: "agents",
-              spec: {
-                display_name: id,
-                bin,
-                preferred_provider: "native",
-                providers: { native: { managed: true, install: "i.sh", upgrade: "u.sh" } },
-              },
-              policy: { enabled: true },
-              observed: { install_source: "native", installed: true },
-              state: "managed-ok",
-              freshness: makeFreshness(),
-              actions: [],
-            }),
-          ],
-        },
-        { command: "agents.status" },
-      ),
-    });
-  }
 
   it("Codex 也能配接入配置，但没有认证方式与状态栏那两项", async () => {
     renderWithEngine(<AgentsPage />, agentRoutes("codex", "codex"));

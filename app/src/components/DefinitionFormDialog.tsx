@@ -9,6 +9,12 @@ import {
   parseInitialToFormValues,
   updateCommandWithPlatform,
 } from "../lib/agentDefinitionForm";
+import {
+  connectionFromPreset,
+  presetConnectionName,
+  presetsFor,
+  type ConnectionPreset,
+} from "../lib/connectionPresets";
 
 const FOCUSABLE_SELECTOR =
   'button, [href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])';
@@ -144,6 +150,12 @@ function AgentForm({
     setConnections((list) => list.map((item, i) => (i === index ? { ...item, ...patch } : item)));
     markDirty("connections");
   };
+  const appendConnection = (entry: ConnectionEntry) => {
+    setConnections((list) => [...list, entry]);
+    setOpenConnection(entry.name);
+    if (!activeConnection) setActiveConnection(entry.name);
+    markDirty("connections");
+  };
   const addConnection = () => {
     // 名字自动避让已有的，省得用户先想名字
     let candidate = "relay";
@@ -152,10 +164,11 @@ function AgentForm({
       candidate = `relay${n}`;
       n += 1;
     }
-    setConnections((list) => [...list, emptyConnection(candidate)]);
-    setOpenConnection(candidate);
-    if (!activeConnection) setActiveConnection(candidate);
-    markDirty("connections");
+    appendConnection(emptyConnection(candidate));
+  };
+  const addFromPreset = (preset: ConnectionPreset) => {
+    const taken = connections.map((item) => item.name);
+    appendConnection(connectionFromPreset(preset, presetConnectionName(preset, taken)));
   };
   const removeConnection = (index: number) => {
     const removed = connections[index];
@@ -166,6 +179,7 @@ function AgentForm({
   // 运行参数按形态写各自的配置文件；判定与引擎一致，只认可执行名
   const binName = bin.trim().replace(/\.exe$/i, "").split("/").pop();
   const settingsKind = binName === "claude" ? "claude" : binName === "codex" ? "codex" : null;
+  const presets = presetsFor(settingsKind);
 
   // Unified draft providers preserving in-flight edits across channel and platform switches
   const [draftProviders, setDraftProviders] = useState<Record<string, Record<string, unknown>>>(() => {
@@ -367,17 +381,40 @@ function AgentForm({
               写进助手自己的配置文件，从终端、IDE、任何入口启动它都一样生效。保存即写入。
             </p>
 
-            <div className="mt-3 flex items-center justify-between gap-2">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-medium text-muted-foreground">接入配置</span>
-              <button
-                type="button"
-                data-testid="add-connection"
-                onClick={addConnection}
-                className="rounded border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs text-primary hover:bg-primary/15"
-              >
-                添加一套
-              </button>
+              <div className="flex items-center gap-2">
+                <select
+                  data-testid="add-connection-preset"
+                  aria-label="按厂商添加一套"
+                  value=""
+                  onChange={(event) => {
+                    const picked = presets.find((item) => item.id === event.target.value);
+                    if (picked) addFromPreset(picked);
+                  }}
+                  className="rounded border border-input bg-card px-2 py-0.5 text-xs"
+                >
+                  <option value="">按厂商添加…</option>
+                  {presets.map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  data-testid="add-connection"
+                  onClick={addConnection}
+                  className="rounded border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs text-primary hover:bg-primary/15"
+                >
+                  自己填
+                </button>
+              </div>
             </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              按厂商添的地址与模型取自各家官方文档（2026-09 核对），之后可能变；填完都能改，
+              报「模型不存在」时以各家官方文档为准。各类中转站不在这份清单里，用「自己填」。
+            </p>
             {connections.length === 0 ? (
               <p className="mt-1.5 text-xs text-muted-foreground">
                 还没配：用官方账号直接跑。要连中转站或换 key，添加一套。

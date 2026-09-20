@@ -22,6 +22,7 @@
 - 任务操作记录（SQLite，保留期可配、清空需二次确认）；错误消息在出库前统一脱敏。
 - 助手接入配置：Claude Code 与 Codex 都可存多套接入方式，卡片上一个下拉切换，切换与写入是一条命令，保存即写入。Claude 写 `~/.claude/settings.json` 的 `env`（含 Bearer/x-api-key 两种认证、模型别名、小任务模型）；Codex 写 `~/.codex/config.toml` 的 `[model_providers.<名字>]` 与 `model_provider`（令牌用 `env_key` 指向变量名，不落盘）。
 - 助手状态栏：可选用本工具维护的那份，或保持你自己定义的不动。用本工具那份时会把助手推给状态栏的实时额度存一份，卡片上的额度因此与状态栏同屏。
+- 接入配置厂商预设：智谱 GLM、Kimi、DeepSeek（国内/国际）的官方端点与模型名一键填入，按形态分开（Claude 的 Anthropic 端点与 Codex 的 Responses 端点不是同一个地址）。只收厂商自营且有官方文档写明的端点，聚合中转站不收。
 - 跳过权限确认：Claude 写 `permissions.defaultMode`，Codex 写 `approval_policy` 与 `sandbox_mode`；需显式确认后才执行。
 - 上述写入按受管项 fail-closed：Claude 比键路径（`env.ANTHROPIC_*`、`API_TIMEOUT_MS`、`permissions.defaultMode`，以及指向本工具脚本时的 `statusLine`），Codex 比四个顶层键与带受管标记的 `[model_providers.*]` 段；外部改过这些就拒绝覆盖，其余内容（含注释与 MCP 域写的段）原样保留。
 - 前端顶层错误边界、自定义助手安装/升级确认、MCP 空态引导。
