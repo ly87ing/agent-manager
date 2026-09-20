@@ -321,6 +321,132 @@ describe("助手运行参数", () => {
     ]);
   });
 
+  it("工作台编辑当前接入：预填原值、唯一名称不可改，保存后写回当前配置", async () => {
+    const withProfiles = routes();
+    const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.settings = {
+      active: "relay",
+      unknown_runtime_flag: "keep",
+      profiles: {
+        official: { label: "官方", custom_profile_flag: 7 },
+        relay: {
+          label: "我的中转",
+          base_url: "https://old.example.com",
+          token_var: "RELAY_KEY",
+          model: "old-model",
+          future_option: { mode: "keep" },
+        },
+      },
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
+
+    await userEvent.click(await screen.findByTestId("edit-connection-claude-code-relay"));
+    expect(await screen.findByRole("dialog", { name: "编辑 我的中转" })).toBeInTheDocument();
+    expect(screen.queryByText("1. 选择接入方式")).toBeNull();
+    expect(screen.getByTestId("new-connection-base-url")).toHaveValue("https://old.example.com");
+    expect(screen.getByTestId("new-connection-activate")).toBeChecked();
+    await userEvent.click(screen.getByTestId("new-connection-advanced"));
+    expect(screen.getByTestId("new-connection-name")).toBeDisabled();
+    await userEvent.clear(screen.getByTestId("new-connection-label"));
+    await userEvent.type(screen.getByTestId("new-connection-label"), "新版中转");
+    await userEvent.clear(screen.getByTestId("new-connection-base-url"));
+    await userEvent.type(screen.getByTestId("new-connection-base-url"), "https://new.example.com");
+    await userEvent.clear(screen.getByTestId("new-connection-model"));
+    await userEvent.type(screen.getByTestId("new-connection-model"), "new-model");
+    await userEvent.click(screen.getByTestId("connection-form-submit"));
+
+    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
+    const saved = calls.find((call) => call.command === "policy:set")!;
+    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
+    expect(definition.settings.active).toBe("relay");
+    expect(definition.settings.unknown_runtime_flag).toBe("keep");
+    expect(definition.settings.profiles.official).toEqual({ label: "官方", custom_profile_flag: 7 });
+    expect(definition.settings.profiles.relay).toMatchObject({
+      label: "新版中转",
+      base_url: "https://new.example.com",
+      token_var: "RELAY_KEY",
+      model: "new-model",
+      future_option: { mode: "keep" },
+    });
+    expect(configureCalls(calls)[0].args).toEqual(["--only", "agents:claude-code", "--use", "relay"]);
+    expect(calls.indexOf(saved)).toBeLessThan(calls.indexOf(configureCalls(calls)[0]));
+  });
+
+  it("工作台编辑非当前接入：默认只保存修改，不偷切当前项", async () => {
+    const withProfiles = routes();
+    const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.settings = {
+      active: "official",
+      profiles: {
+        official: { label: "官方" },
+        relay: {
+          label: "我的中转",
+          base_url: "https://relay.example.com",
+          token_var: "RELAY_KEY",
+          model: "relay-model",
+        },
+      },
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
+
+    await userEvent.click(await screen.findByTestId("edit-connection-claude-code-relay"));
+    expect(await screen.findByRole("dialog", { name: "编辑 我的中转" })).toBeInTheDocument();
+    expect(screen.getByTestId("new-connection-activate")).not.toBeChecked();
+    await userEvent.clear(screen.getByTestId("new-connection-label"));
+    await userEvent.type(screen.getByTestId("new-connection-label"), "备用中转");
+    await userEvent.click(screen.getByTestId("connection-form-submit"));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
+    expect(configureCalls(calls)).toHaveLength(0);
+    const saved = calls.find((call) => call.command === "policy:set")!;
+    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
+    expect(definition.settings.active).toBe("official");
+    expect(definition.settings.profiles.relay.label).toBe("备用中转");
+  });
+
+  it("工作台删除非当前接入：确认后只删目标定义，不切换也不删除凭据", async () => {
+    const withProfiles = routes();
+    const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.settings = {
+      active: "official",
+      profiles: {
+        official: { label: "官方" },
+        relay: { label: "我的中转", base_url: "https://relay.example.com" },
+      },
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
+
+    await userEvent.click(await screen.findByTestId("remove-connection-claude-code-relay"));
+    const confirm = await screen.findByRole("dialog", { name: "删除接入 我的中转" });
+    expect(confirm).toHaveTextContent("不会删除凭据变量");
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+
+    await waitFor(() => expect(confirm).not.toBeInTheDocument());
+    const saved = calls.find((call) => call.command === "policy:set")!;
+    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
+    expect(definition.settings.active).toBe("official");
+    expect(definition.settings.profiles).toEqual({ official: { label: "官方" } });
+    expect(configureCalls(calls)).toHaveLength(0);
+    expect(calls.some((call) => call.command === "secrets:set")).toBe(false);
+  });
+
+  it("当前接入不能删除，按钮说明先切换且不会触发任何写入", async () => {
+    const withProfiles = routes();
+    const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.settings = {
+      active: "relay",
+      profiles: {
+        relay: { label: "我的中转", base_url: "https://relay.example.com" },
+      },
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
+
+    const remove = await screen.findByTestId("remove-connection-claude-code-relay");
+    expect(remove).toBeDisabled();
+    expect(remove).toHaveAttribute("title", expect.stringContaining("先切换"));
+    expect(calls.some((call) => ["policy:set", "agents:configure", "secrets:set"].includes(call.command))).toBe(false);
+  });
+
   it("测一下：只读地问一次，把结果就地说清楚", async () => {
     const withProfiles = routes({
       "agents:check": makeEnvelope(

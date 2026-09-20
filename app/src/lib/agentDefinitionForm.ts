@@ -106,13 +106,55 @@ export function upsertAgentConnection(
       ? (currentSettings.profiles as Record<string, unknown>)
       : {};
   const name = item.name.trim();
+  const currentEntry =
+    currentProfiles[name] && typeof currentProfiles[name] === "object" && !Array.isArray(currentProfiles[name])
+      ? { ...(currentProfiles[name] as Record<string, unknown>) }
+      : {};
+  // 编辑时只替换表单真正拥有的字段。先删再合并，既能让“清空可选项”生效，也不会丢掉
+  // 新版客户端或用户手工加入、而当前表单尚不认识的字段。
+  for (const key of [
+    "label",
+    "base_url",
+    "auth",
+    "token_var",
+    "model",
+    "small_fast_model",
+    "model_aliases",
+    "timeout_ms",
+  ]) {
+    delete currentEntry[key];
+  }
   next.settings = {
     ...currentSettings,
     profiles: {
       ...currentProfiles,
-      [name]: connectionToDefinitionValue(item),
+      [name]: { ...currentEntry, ...connectionToDefinitionValue(item) },
     },
   };
+  return next;
+}
+
+/** 删除一套接入；只动目标 profile，其他定义字段、运行参数与接入原样保留。 */
+export function removeAgentConnection(
+  definition: Record<string, unknown>,
+  name: string,
+): Record<string, unknown> {
+  const next = JSON.parse(JSON.stringify(definition)) as Record<string, unknown>;
+  const settings = next.settings;
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return next;
+  const currentSettings = settings as Record<string, unknown>;
+  const profiles = currentSettings.profiles;
+  if (!profiles || typeof profiles !== "object" || Array.isArray(profiles)) return next;
+
+  const nextProfiles = { ...(profiles as Record<string, unknown>) };
+  delete nextProfiles[name];
+  const nextSettings = { ...currentSettings };
+  if (Object.keys(nextProfiles).length > 0) nextSettings.profiles = nextProfiles;
+  else delete nextSettings.profiles;
+  // 界面不允许删除当前项；这里仍防御旧调用方，避免 active 指向不存在的 profile。
+  if (nextSettings.active === name) delete nextSettings.active;
+  if (Object.keys(nextSettings).length > 0) next.settings = nextSettings;
+  else delete next.settings;
   return next;
 }
 

@@ -39,7 +39,14 @@ import {
 import { runEngine } from "../lib/engine";
 import { toastWithUndo } from "../lib/undo";
 import { definitionOrigin } from "../lib/definitionOverlay";
-import { connectionsOf, hasAgentSettings, upsertAgentConnection } from "../lib/agentDefinitionForm";
+import {
+  activeConnectionOf,
+  connectionsOf,
+  hasAgentSettings,
+  removeAgentConnection,
+  upsertAgentConnection,
+  type ConnectionEntry,
+} from "../lib/agentDefinitionForm";
 import type { AgentsObserved, AgentsPolicy, AgentsSpec } from "../lib/observed";
 import { useEngineQuery, useRefreshUpstream } from "../lib/queries";
 import { COPY, versionRangeHint } from "../lib/ui-copy";
@@ -385,9 +392,17 @@ export default function AgentsPage({
   const [policyBusy, setPolicyBusy] = useState(false);
   /** 日常接入工作台当前查看的主助手；null 时跟随列表里的第一个。 */
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-  const [connectionFormAgent, setConnectionFormAgent] = useState<EngineElement | null>(null);
+  const [connectionForm, setConnectionForm] = useState<{
+    agent: EngineElement;
+    initial?: ConnectionEntry;
+  } | null>(null);
   const [connectionSaving, setConnectionSaving] = useState(false);
   const [connectionFormError, setConnectionFormError] = useState<string | null>(null);
+  const [connectionRemoving, setConnectionRemoving] = useState<{
+    agent: EngineElement;
+    connection: ConnectionEntry;
+  } | null>(null);
+  const [connectionRemovingBusy, setConnectionRemovingBusy] = useState(false);
   /** 接入配置的检查结果：按「助手/配置名」存，卡片与弹窗都读它。 */
   const [checkResults, setCheckResults] = useState<
     Record<string, { ok: boolean; detail: string; latencyMs: number; pending?: boolean }>
@@ -559,7 +574,7 @@ export default function AgentsPage({
         }
       }
 
-      setConnectionFormAgent(null);
+      setConnectionForm(null);
       await query.refetch();
       if (submission.activate) {
         await runConfigure(agentId, { use: submission.connection.name });
@@ -568,6 +583,33 @@ export default function AgentsPage({
       setConnectionFormError(`保存接入失败:${String(err)}`);
     } finally {
       setConnectionSaving(false);
+    }
+  };
+
+  /** 删除非当前接入：只删定义里的目标 profile，不清理可能被其他接入复用的凭据变量。 */
+  const removeConnection = async (element: EngineElement, connection: ConnectionEntry) => {
+    if (connectionRemovingBusy) return;
+    const definition = element.spec as Record<string, unknown>;
+    if (activeConnectionOf(definition) === connection.name) {
+      toast.error("当前接入不能删除，请先切换到其他接入或助手默认账号");
+      return;
+    }
+    const agentId = element.id.replace(/^agents:/, "");
+    setConnectionRemovingBusy(true);
+    try {
+      const saved = await definitionOps.saveDefinition({
+        name: agentId,
+        definition: removeAgentConnection(definition, connection.name),
+        isNew: false,
+      });
+      if (!saved) return;
+      setConnectionRemoving(null);
+      await query.refetch();
+      toast.success(`已删除接入 ${connection.label || connection.name}`, {
+        description: "凭据变量没有删除；仍在使用时不会受影响，可在密钥页单独处理。",
+      });
+    } finally {
+      setConnectionRemovingBusy(false);
     }
   };
 
@@ -788,7 +830,7 @@ export default function AgentsPage({
         onSelectAgent={setSelectedAgentId}
         onAdd={(element) => {
           setConnectionFormError(null);
-          setConnectionFormAgent(element);
+          setConnectionForm({ agent: element });
         }}
         onSwitch={(element, connection) =>
           void runConfigure(element.id.replace(/^agents:/, ""), { use: connection })
@@ -796,6 +838,11 @@ export default function AgentsPage({
         onCheck={(element, connection) =>
           void runCheck(element.id.replace(/^agents:/, ""), connection)
         }
+        onEdit={(element, connection) => {
+          setConnectionFormError(null);
+          setConnectionForm({ agent: element, initial: connection });
+        }}
+        onRemove={(element, connection) => setConnectionRemoving({ agent: element, connection })}
       />
       <div className="pt-2">
         <h2 className="text-base font-semibold text-foreground">安装与维护</h2>
@@ -986,18 +1033,36 @@ export default function AgentsPage({
         )}
       </section>
 
-      {connectionFormAgent && connectionKindOf(connectionFormAgent) && (
+      {connectionForm && connectionKindOf(connectionForm.agent) && (
         <ConnectionFormDialog
-          agentName={(connectionFormAgent.spec as AgentsSpec).display_name ?? connectionFormAgent.id.replace(/^agents:/, "")}
-          kind={connectionKindOf(connectionFormAgent)!}
-          existingNames={connectionsOf(connectionFormAgent.spec as Record<string, unknown>).map((item) => item.name)}
+          agentName={(connectionForm.agent.spec as AgentsSpec).display_name ?? connectionForm.agent.id.replace(/^agents:/, "")}
+          kind={connectionKindOf(connectionForm.agent)!}
+          existingNames={connectionsOf(connectionForm.agent.spec as Record<string, unknown>).map((item) => item.name)}
+          initialConnection={connectionForm.initial}
+          initialActivate={
+            connectionForm.initial
+              ? activeConnectionOf(connectionForm.agent.spec as Record<string, unknown>) === connectionForm.initial.name
+              : undefined
+          }
           busy={connectionSaving}
           error={connectionFormError}
-          onSubmit={(submission) => void saveConnection(connectionFormAgent, submission)}
+          onSubmit={(submission) => void saveConnection(connectionForm.agent, submission)}
           onClose={() => {
-            setConnectionFormAgent(null);
+            setConnectionForm(null);
             setConnectionFormError(null);
           }}
+        />
+      )}
+      {connectionRemoving && (
+        <ConfirmModal
+          title={`删除接入 ${connectionRemoving.connection.label || connectionRemoving.connection.name}`}
+          description="只删除本应用保存的这套接入，不会删除凭据变量。当前正在使用的接入必须先切换到其他接入或助手默认账号。"
+          risk="write-local"
+          riskLabel="删除接入"
+          confirmLabel="确认删除"
+          executing={connectionRemovingBusy}
+          onConfirm={() => void removeConnection(connectionRemoving.agent, connectionRemoving.connection)}
+          onClose={() => setConnectionRemoving(null)}
         />
       )}
 

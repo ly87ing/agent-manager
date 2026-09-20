@@ -6,6 +6,7 @@ import {
   extractUnknownFields,
   getProviderNames,
   parseInitialToFormValues,
+  removeAgentConnection,
   upsertAgentConnection,
   updateCommandWithPlatform,
 } from "../lib/agentDefinitionForm";
@@ -88,6 +89,76 @@ describe("agentDefinitionForm helpers", () => {
       },
     });
     expect(result).not.toBe(initial);
+  });
+
+  it("编辑接入保留目标项的未知字段，同时允许清空已知可选字段", () => {
+    const initial = {
+      display_name: "Claude Code",
+      settings: {
+        active: "relay",
+        profiles: {
+          relay: {
+            label: "旧名称",
+            base_url: "https://old.example.com",
+            token_var: "OLD_KEY",
+            model: "old-model",
+            timeout_ms: 5000,
+            future_option: { mode: "keep" },
+          },
+        },
+      },
+    };
+
+    const result = upsertAgentConnection(initial, {
+      name: "relay",
+      label: "新名称",
+      baseUrl: "https://new.example.com",
+      auth: "token",
+      tokenVar: "NEW_KEY",
+      model: "new-model",
+      smallFastModel: "",
+      aliasOpus: "",
+      aliasSonnet: "",
+      aliasHaiku: "",
+      timeoutMs: "",
+    });
+
+    expect((result.settings as any).profiles.relay).toEqual({
+      label: "新名称",
+      base_url: "https://new.example.com",
+      token_var: "NEW_KEY",
+      model: "new-model",
+      future_option: { mode: "keep" },
+    });
+    expect((result.settings as any).active).toBe("relay");
+  });
+
+  it("删除接入只移除目标项，并清理悬空 active 与空 profiles", () => {
+    const initial = {
+      display_name: "Claude Code",
+      custom_meta: "keep",
+      settings: {
+        active: "relay",
+        yolo: true,
+        unknown_runtime_flag: "keep",
+        profiles: {
+          relay: { label: "中转" },
+          official: { label: "官方", custom_profile_flag: 7 },
+        },
+      },
+    };
+
+    const result = removeAgentConnection(initial, "relay");
+    expect(result).toEqual({
+      ...initial,
+      settings: {
+        yolo: true,
+        unknown_runtime_flag: "keep",
+        profiles: { official: { label: "官方", custom_profile_flag: 7 } },
+      },
+    });
+    expect(removeAgentConnection({ settings: { profiles: { relay: {} } } }, "relay")).toEqual({});
+    expect(initial.settings.profiles.relay).toEqual({ label: "中转" });
   });
 
   it("extractCommandForPlatform extracts plain string and platform-specific mapping", () => {

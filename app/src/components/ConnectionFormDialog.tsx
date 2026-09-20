@@ -38,6 +38,8 @@ export function ConnectionFormDialog({
   agentName,
   kind,
   existingNames,
+  initialConnection,
+  initialActivate,
   busy,
   error,
   onSubmit,
@@ -46,6 +48,10 @@ export function ConnectionFormDialog({
   agentName: string;
   kind: ConnectionKind;
   existingNames: string[];
+  /** 有值时进入编辑模式；唯一名称保持不变，避免一次编辑暗中变成复制。 */
+  initialConnection?: ConnectionEntry;
+  /** 编辑当前项时为 true，确保保存后的参数立即写回助手配置。 */
+  initialActivate?: boolean;
   busy: boolean;
   error?: string | null;
   onSubmit: (submission: ConnectionSubmission) => void;
@@ -56,11 +62,17 @@ export function ConnectionFormDialog({
     typeof document === "undefined" ? null : (document.activeElement as HTMLElement | null),
   );
   const presets = presetsFor(kind);
-  const [choice, setChoice] = useState<string | null>(null);
-  const [connection, setConnection] = useState<ConnectionEntry | null>(null);
+  const editing = initialConnection !== undefined;
+  const [choice, setChoice] = useState<string | null>(editing ? "edit" : null);
+  const [connection, setConnection] = useState<ConnectionEntry | null>(
+    initialConnection ? { ...initialConnection } : null,
+  );
   const [secretValue, setSecretValue] = useState("");
-  const [activate, setActivate] = useState(true);
+  const [activate, setActivate] = useState(initialActivate ?? !editing);
   const [localError, setLocalError] = useState<string | null>(null);
+  const dialogTitle = editing
+    ? `编辑 ${initialConnection.label || initialConnection.name}`
+    : `为 ${agentName} 添加接入`;
 
   useLayoutEffect(() => {
     return () => restoreFocusRef.current?.focus();
@@ -129,7 +141,7 @@ export function ConnectionFormDialog({
       setLocalError("唯一名称只能用字母、数字、连字符与下划线，长度不超过 64");
       return;
     }
-    if (existingNames.includes(name)) {
+    if (existingNames.includes(name) && name !== initialConnection?.name) {
       setLocalError(`已经有名为 ${name} 的接入，请换一个名称`);
       return;
     }
@@ -169,15 +181,17 @@ export function ConnectionFormDialog({
         ref={rootRef}
         role="dialog"
         aria-modal="true"
-        aria-label={`为 ${agentName} 添加接入`}
+        aria-label={dialogTitle}
         onKeyDown={onKeyDown}
         className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border bg-card shadow-xl animate-zoom-in-95"
       >
         <div className="flex items-start justify-between gap-3 border-b px-5 py-4">
           <div>
-            <h2 className="text-lg font-semibold text-foreground">为 {agentName} 添加接入</h2>
+            <h2 className="text-lg font-semibold text-foreground">{dialogTitle}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              先选厂商，再确认地址、模型和凭据；安装命令不在这里。
+              {editing
+                ? `修改 ${agentName} 的这套接入；留空凭据取值不会覆盖已经保存的值。`
+                : "先选厂商，再确认地址、模型和凭据；安装命令不在这里。"}
             </p>
           </div>
           <button
@@ -192,7 +206,7 @@ export function ConnectionFormDialog({
         </div>
 
         <div className="overflow-y-auto px-5 py-4">
-          <fieldset>
+          {!editing && <fieldset>
             <legend className="text-sm font-medium text-foreground">1. 选择接入方式</legend>
             <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {presets.map((preset, index) => (
@@ -229,16 +243,17 @@ export function ConnectionFormDialog({
                 </span>
               </button>
             </div>
-          </fieldset>
+          </fieldset>}
 
           {connection && (
             <div className="mt-5 space-y-4 border-t pt-4">
-              <h3 className="text-sm font-medium text-foreground">2. 确认必要信息</h3>
+              <h3 className="text-sm font-medium text-foreground">{editing ? "接入信息" : "2. 确认必要信息"}</h3>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className="text-sm text-foreground">
                   显示名称
                   <input
                     data-testid="new-connection-label"
+                    autoFocus={editing}
                     value={connection.label}
                     onChange={(event) => patch({ label: event.target.value })}
                     className="mt-1 w-full rounded border border-input p-2 text-sm"
@@ -306,8 +321,10 @@ export function ConnectionFormDialog({
                     <input
                       data-testid="new-connection-name"
                       value={connection.name}
+                      disabled={editing}
                       onChange={(event) => patch({ name: event.target.value })}
-                      className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
+                      title={editing ? "唯一名称用于配置引用，编辑时保持不变" : undefined}
+                      className="mt-1 w-full rounded border border-input p-2 font-mono text-sm disabled:bg-muted disabled:text-muted-foreground"
                     />
                   </label>
                   <label className="text-sm text-foreground">
@@ -387,7 +404,7 @@ export function ConnectionFormDialog({
                   className="mt-0.5"
                 />
                 <span>
-                  保存后立即启用
+                  {editing ? "保存后更新这套接入" : "保存后立即启用"}
                   <span className="mt-0.5 block text-xs text-muted-foreground">
                     会写入助手配置文件；若目标被外部改过，会先再次征求确认。
                   </span>
@@ -420,7 +437,15 @@ export function ConnectionFormDialog({
             className="inline-flex items-center gap-1.5 rounded bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-            {busy ? "正在保存…" : activate ? "保存并启用" : "保存接入"}
+            {busy
+              ? "正在保存…"
+              : editing
+                ? activate
+                  ? "保存并更新"
+                  : "保存修改"
+                : activate
+                  ? "保存并启用"
+                  : "保存接入"}
           </button>
         </div>
       </section>

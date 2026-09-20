@@ -35,6 +35,8 @@ export function ConnectionWorkbench({
   onAdd,
   onSwitch,
   onCheck,
+  onEdit,
+  onRemove,
 }: {
   agents: EngineElement[];
   selectedAgentId: string | null;
@@ -44,6 +46,8 @@ export function ConnectionWorkbench({
   onAdd: (element: EngineElement) => void;
   onSwitch: (element: EngineElement, connection: string) => void;
   onCheck: (element: EngineElement, connection: string) => void;
+  onEdit: (element: EngineElement, connection: ConnectionEntry) => void;
+  onRemove: (element: EngineElement, connection: ConnectionEntry) => void;
 }) {
   const selected = agents.find((element) => element.id === selectedAgentId) ?? agents[0];
   if (!selected) return null;
@@ -140,6 +144,8 @@ export function ConnectionWorkbench({
                 check={checkResults[key]}
                 onActivate={kind ? () => onSwitch(selected, connection.name) : undefined}
                 onCheck={kind ? () => onCheck(selected, connection.name) : undefined}
+                onEdit={kind ? () => onEdit(selected, connection) : undefined}
+                onRemove={kind ? () => onRemove(selected, connection) : undefined}
               />
             );
           })}
@@ -164,6 +170,8 @@ function ConnectionCard({
   check,
   onActivate,
   onCheck,
+  onEdit,
+  onRemove,
 }: {
   agentId: string;
   connection: ConnectionEntry | null;
@@ -173,6 +181,8 @@ function ConnectionCard({
   check?: ConnectionCheckResult;
   onActivate?: () => void;
   onCheck?: () => void;
+  onEdit?: () => void;
+  onRemove?: () => void;
 }) {
   const id = connection?.name ?? "default";
   return (
@@ -226,17 +236,19 @@ function ConnectionCard({
         </dl>
       )}
 
-      {connection && onCheck && (
+      {connection && (onCheck || onEdit || onRemove) && (
         <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
-          <button
-            type="button"
-            data-testid={`check-connection-${agentId}-${id}`}
-            disabled={check?.pending}
-            onClick={onCheck}
-            className="rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
-          >
-            {check?.pending ? "正在测试…" : "测试连接"}
-          </button>
+          {onCheck && (
+            <button
+              type="button"
+              data-testid={`check-connection-${agentId}-${id}`}
+              disabled={check?.pending}
+              onClick={onCheck}
+              className="rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
+            >
+              {check?.pending ? "正在测试…" : "测试连接"}
+            </button>
+          )}
           {check && !check.pending && (
             <p
               data-testid={`check-result-${agentId}-${id}`}
@@ -248,6 +260,31 @@ function ConnectionCard({
               )}
             </p>
           )}
+          <div className="ml-auto flex items-center gap-2">
+            {onEdit && (
+              <button
+                type="button"
+                data-testid={`edit-connection-${agentId}-${id}`}
+                disabled={disabled}
+                onClick={onEdit}
+                className="rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
+              >
+                编辑
+              </button>
+            )}
+            {onRemove && (
+              <button
+                type="button"
+                data-testid={`remove-connection-${agentId}-${id}`}
+                disabled={disabled || active}
+                title={active ? "当前接入不能删除，请先切换到其他接入或默认账号" : "删除这套接入"}
+                onClick={onRemove}
+                className="rounded border border-destructive/30 px-2.5 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                删除
+              </button>
+            )}
+          </div>
         </div>
       )}
     </article>
