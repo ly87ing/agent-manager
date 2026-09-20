@@ -298,10 +298,10 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
             _ => Err(EngineError::new("invalid_args", "非法 skills action")),
         },
         ArgValueKind::McpAction => match value {
-            "add" | "update" | "enable" | "disable" | "remove" => Ok(()),
+            "add" | "update" | "enable" | "disable" | "remove" | "upgrade" => Ok(()),
             _ => Err(EngineError::new(
                 "invalid_args",
-                format!("非法 mcp action '{value}'（仅 add|update|enable|disable|remove）"),
+                format!("非法 mcp action '{value}'（仅 add|update|enable|disable|remove|upgrade）"),
             )),
         },
     }
@@ -699,6 +699,16 @@ mod tests {
                 "mcp:apply with action {action} should pass"
             );
         }
+        assert!(validate_args(
+            "mcp:apply",
+            &[
+                "--only".into(),
+                "mcp:chrome-devtools".into(),
+                "--action".into(),
+                "upgrade".into(),
+            ]
+        )
+        .is_ok());
         let bad_action_err = validate_args(
             "mcp:apply",
             &[
