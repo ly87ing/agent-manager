@@ -11,8 +11,8 @@
 //! 解析顺序：先查本表，查不到再回退进程环境。在界面上明确填过的值优先，
 //! 这样用户改完立刻生效，不受启动方式影响。
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::sync::RwLock;
 
 use anyhow::{bail, Result};
 use rusqlite::{Connection, Transaction};
@@ -39,15 +39,18 @@ pub fn valid_var_name(name: &str) -> bool {
 ///
 /// 桌面端一个进程会连续分发很多次命令，因此不能一次性缓存到进程结束——
 /// 每次分发开头重新加载，用户刚填的值当场生效。
-static CACHE: RwLock<Option<BTreeMap<String, String>>> = RwLock::new(None);
+///
+/// 按线程存：一次 `execute` 的 refresh 与后续 lookup 都在同一个线程里，而同一进程
+/// 内可能有多份互不相干的上下文（集成测试并行、桌面端多次分发），全局一份会互相顶掉。
+thread_local! {
+    static CACHE: RefCell<Option<BTreeMap<String, String>>> = const { RefCell::new(None) };
+}
 
 /// 分发入口调用：重新加载本机已保存的取值。库不存在或表还没建都按「空」处理，
 /// 读失败同样降级为空而不是让整条命令失败——凭据缺失自有下游的 fail-closed 兜底。
 pub fn refresh(ctx: &Context) {
     let loaded = load_all(ctx).unwrap_or_default();
-    if let Ok(mut guard) = CACHE.write() {
-        *guard = Some(loaded);
-    }
+    CACHE.with(|cache| *cache.borrow_mut() = Some(loaded));
 }
 
 fn load_all(ctx: &Context) -> Result<BTreeMap<String, String>> {
@@ -80,14 +83,13 @@ pub fn read_all(conn: &Connection) -> Result<BTreeMap<String, String>> {
 
 /// 取一个变量的值：先本机已保存的，再回退进程环境。
 pub fn lookup(name: &str) -> Option<String> {
-    if let Ok(guard) = CACHE.read() {
-        if let Some(map) = guard.as_ref() {
-            if let Some(value) = map.get(name) {
-                return Some(value.clone());
-            }
-        }
-    }
-    std::env::var(name).ok()
+    let stored = CACHE.with(|cache| {
+        cache
+            .borrow()
+            .as_ref()
+            .and_then(|map| map.get(name).cloned())
+    });
+    stored.or_else(|| std::env::var(name).ok())
 }
 
 /// 该变量当前能不能取到值。
@@ -97,11 +99,12 @@ pub fn is_set(name: &str) -> bool {
 
 /// 这个变量的取值是不是存在本机库里（用于界面区分「已在这里填过」与「来自环境」）。
 pub fn is_stored(name: &str) -> bool {
-    CACHE
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().map(|map| map.contains_key(name)))
-        .unwrap_or(false)
+    CACHE.with(|cache| {
+        cache
+            .borrow()
+            .as_ref()
+            .is_some_and(|map| map.contains_key(name))
+    })
 }
 
 pub fn ensure_table(conn: &Connection) -> Result<()> {

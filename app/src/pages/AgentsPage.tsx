@@ -31,7 +31,7 @@ import {
 import { runEngine } from "../lib/engine";
 import { toastWithUndo } from "../lib/undo";
 import { definitionOrigin } from "../lib/definitionOverlay";
-import { hasAgentSettings } from "../lib/agentDefinitionForm";
+import { activeConnectionOf, connectionsOf, hasAgentSettings } from "../lib/agentDefinitionForm";
 import type { AgentsObserved, AgentsPolicy, AgentsSpec } from "../lib/observed";
 import { useEngineQuery } from "../lib/queries";
 import { COPY, versionRangeHint } from "../lib/ui-copy";
@@ -121,6 +121,8 @@ function AgentCard({
   aliasEffect,
   policyBusy,
   onToggleEnabled,
+  onSwitchConnection,
+  connectionBusy,
 }: {
   element: EngineElement;
   /** true = 定义来自本地数据库（用户新增或改过内置定义）：安装/升级先弹确认。 */
@@ -144,6 +146,10 @@ function AgentCard({
   /** 偏好写入在途：期间禁用菜单里的启停项，避免连点写出交错结果。 */
   policyBusy: boolean;
   onToggleEnabled: (next: boolean) => void;
+  /** 切换生效的接入配置；空字符串表示切回助手自带的账号与地址。 */
+  onSwitchConnection: (name: string) => void;
+  /** 接入配置写入在途。 */
+  connectionBusy: boolean;
 }) {
   /** 本卡直执路径在途的动作 id（点击即置位，apply 结束回落）。 */
   const [localActionId, setLocalActionId] = useState<string | null>(null);
@@ -155,6 +161,9 @@ function AgentCard({
   const version = installed ? (element.freshness.current ?? "已安装（还没检查过版本）") : "未安装";
   const name = spec.display_name ?? element.id;
   const busyActionId = localActionId ?? runningActionId;
+  // 接入配置存在定义里，切换即写助手的配置文件
+  const connections = connectionsOf(element.spec as Record<string, unknown>);
+  const activeConnection = activeConnectionOf(element.spec as Record<string, unknown>);
 
   /** 显式动作点击直接 agents:apply（带精确 --only/--action）；卸载先经独立 ConfirmModal，
    * 自定义定义的安装/升级也先经 ConfirmModal（命令内容由用户定义提供）。
@@ -205,6 +214,27 @@ function AgentCard({
       {observed.usage && (
         <div className="mt-3 rounded-md border px-3 py-2">
           <AgentUsageBar usage={observed.usage} testId={`agent-usage-${element.id}`} />
+        </div>
+      )}
+
+      {connections.length > 0 && (
+        <div className="mt-3 flex items-center gap-2 text-xs">
+          <span className="shrink-0 text-muted-foreground">接入</span>
+          <select
+            data-testid={`switch-connection-${element.id}`}
+            aria-label={`${name} 的接入配置`}
+            disabled={connectionBusy}
+            value={activeConnection ?? ""}
+            onChange={(event) => onSwitchConnection(event.target.value)}
+            className="min-w-0 flex-1 rounded border bg-card px-2 py-1 text-xs disabled:opacity-50"
+          >
+            <option value="">默认（助手自己的账号）</option>
+            {connections.map((item) => (
+              <option key={item.name} value={item.name}>
+                {item.label}
+              </option>
+            ))}
+          </select>
         </div>
       )}
 
@@ -384,7 +414,7 @@ export default function AgentsPage({
   const [pendingAction, setPendingAction] = useState<{ element: EngineElement; action: ElementAction } | null>(null);
   /** 运行参数写入前要用户点头的那一步：降安全等级，或目标被外部改过。 */
   const [pendingConfigure, setPendingConfigure] = useState<
-    { agentId: string; yolo: boolean; reason: "yolo" | "takeover" } | null
+    { agentId: string; yolo: boolean; use?: string; reason: "yolo" | "takeover" } | null
   >(null);
   const [configuring, setConfiguring] = useState(false);
   /** 确认弹窗路径（卸载/自定义定义安装升级）在途动作：弹窗确认即关闭，卡片按钮据此保持执行态直到 apply 结束。 */
@@ -426,16 +456,18 @@ export default function AgentsPage({
    */
   const runConfigure = async (
     agentId: string,
-    opts: { allowYolo?: boolean; allowTakeover?: boolean } = {},
+    opts: { allowYolo?: boolean; allowTakeover?: boolean; use?: string } = {},
   ): Promise<void> => {
     const args = ["--only", `agents:${agentId}`];
+    // 切换与写入是一条命令：库里的生效项和目标文件要么一起变，要么都不变
+    if (opts.use !== undefined) args.push(...(opts.use ? ["--use", opts.use] : ["--use-default"]));
     if (opts.allowYolo) args.push("--allow-yolo");
     if (opts.allowTakeover) args.push("--allow-takeover");
     setConfiguring(true);
     try {
       const envelope = await runEngine("agents:configure", args);
       if (envelope.ok) {
-        toast.success(`已写入 ${agentId} 的运行参数`, {
+        toast.success(opts.use !== undefined ? `已切换 ${agentId} 的接入配置` : `已写入 ${agentId} 的运行参数`, {
           description: "助手下次启动生效；已经开着的要重启它。",
         });
         void query.refetch();
@@ -444,7 +476,7 @@ export default function AgentsPage({
       const message = envelope.errors[0]?.message ?? "未知错误";
       // 外部改过：让用户看清再决定要不要用这里的内容替换
       if (!opts.allowTakeover && message.includes("拒绝覆盖")) {
-        setPendingConfigure({ agentId, yolo: opts.allowYolo === true, reason: "takeover" });
+        setPendingConfigure({ agentId, yolo: opts.allowYolo === true, use: opts.use, reason: "takeover" });
         return;
       }
       toast.error(`运行参数没写进去:${message}`, {
@@ -715,6 +747,10 @@ export default function AgentsPage({
               }
               policyBusy={policyBusy}
               onToggleEnabled={(next) => void toggleEnabled(element.id.replace(/^agents:/, ""), next)}
+              connectionBusy={configuring}
+              onSwitchConnection={(useName) =>
+                void runConfigure(element.id.replace(/^agents:/, ""), { use: useName })
+              }
             />
           ))}
         </div>
@@ -926,6 +962,7 @@ export default function AgentsPage({
             void runConfigure(pending.agentId, {
               allowYolo: pending.yolo,
               allowTakeover: pending.reason === "takeover",
+              use: pending.use,
             });
           }}
           onClose={() => {

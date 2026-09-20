@@ -132,6 +132,9 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         // 运行参数写助手配置文件：外部改过要显式接管，降安全等级要显式确认
         ("agents", "configure") => {
             specs.push(("--only", ArgValueKind::ElementId));
+            // 切换生效的接入配置：名字与元素 id 同一把尺子
+            specs.push(("--use", ArgValueKind::ElementId));
+            specs.push(("--use-default", ArgValueKind::Flag));
             specs.push(("--allow-takeover", ArgValueKind::Flag));
             specs.push(("--allow-yolo", ArgValueKind::Flag));
         }

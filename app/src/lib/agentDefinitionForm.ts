@@ -12,15 +12,56 @@ export interface AgentFormValues {
   uninstallCmd: string;
   preferredProvider?: string;
   advancedJson?: string;
-  /** 上游接口地址；留空用助手默认地址。 */
-  baseUrl: string;
-  /** 鉴权取值所在的环境变量名；库里只存这个名字。 */
-  tokenVar: string;
-  /** 固定使用的模型；留空用助手默认。 */
-  model: string;
+  /** 多套接入配置，同一时刻一套生效。 */
+  connections: ConnectionEntry[];
+  /** 当前生效的那套的 name；空表示都不生效（用助手默认地址与账号）。 */
+  activeConnection: string;
   /** 跳过权限确认：改的是助手的安全默认值，保存前要二次确认。 */
   yolo: boolean;
+  /** 状态栏由谁维护。 */
+  statusline: "untouched" | "builtin";
 }
+
+/** 一套接入配置：连到哪、拿什么认证、用什么模型。 */
+export interface ConnectionEntry {
+  /** 键名，写进定义；只用字母、数字、连字符与下划线。 */
+  name: string;
+  /** 界面上显示的名字；留空时用键名。 */
+  label: string;
+  baseUrl: string;
+  /** token = Authorization: Bearer；api_key = x-api-key。中转站两种都有。 */
+  auth: "token" | "api_key";
+  /** 令牌所在的环境变量名；库里只存这个名字。 */
+  tokenVar: string;
+  model: string;
+  /** 后台小任务用的轻量模型。 */
+  smallFastModel: string;
+  /** opus / sonnet / haiku 各自映射到哪个模型名。 */
+  aliasOpus: string;
+  aliasSonnet: string;
+  aliasHaiku: string;
+  /** 请求超时（毫秒）；留空用默认。 */
+  timeoutMs: string;
+}
+
+/** 新建一套接入配置时的空白值。 */
+export function emptyConnection(name = ""): ConnectionEntry {
+  return {
+    name,
+    label: "",
+    baseUrl: "",
+    auth: "token",
+    tokenVar: "",
+    model: "",
+    smallFastModel: "",
+    aliasOpus: "",
+    aliasSonnet: "",
+    aliasHaiku: "",
+    timeoutMs: "",
+  };
+}
+
+export const CONNECTION_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 export function detectSystemPlatform(): SupportedPlatform {
   if (typeof navigator === "undefined") return "darwin";
@@ -210,34 +251,113 @@ export function parseInitialToFormValues(
 }
 
 /** 定义里的 settings 段 → 表单字段。缺段或字段缺失都按「没配过」。 */
-function readAgentSettings(raw: unknown): Pick<AgentFormValues, "baseUrl" | "tokenVar" | "model" | "yolo"> {
+function readAgentSettings(
+  raw: unknown,
+): Pick<AgentFormValues, "connections" | "activeConnection" | "yolo" | "statusline"> {
   const obj = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-  const text = (key: string) => (typeof obj[key] === "string" ? (obj[key] as string) : "");
+  const rawProfiles =
+    obj.profiles && typeof obj.profiles === "object" && !Array.isArray(obj.profiles)
+      ? (obj.profiles as Record<string, unknown>)
+      : {};
+  const connections = Object.entries(rawProfiles).map(([name, value]) => {
+    const entry = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+    const text = (key: string) => (typeof entry[key] === "string" ? (entry[key] as string) : "");
+    const aliases =
+      entry.model_aliases && typeof entry.model_aliases === "object" && !Array.isArray(entry.model_aliases)
+        ? (entry.model_aliases as Record<string, unknown>)
+        : {};
+    const alias = (tier: string) => (typeof aliases[tier] === "string" ? (aliases[tier] as string) : "");
+    return {
+      ...emptyConnection(name),
+      label: text("label"),
+      baseUrl: text("base_url"),
+      auth: entry.auth === "api_key" ? ("api_key" as const) : ("token" as const),
+      tokenVar: text("token_var"),
+      model: text("model"),
+      smallFastModel: text("small_fast_model"),
+      aliasOpus: alias("opus"),
+      aliasSonnet: alias("sonnet"),
+      aliasHaiku: alias("haiku"),
+      timeoutMs: typeof entry.timeout_ms === "number" ? String(entry.timeout_ms) : "",
+    };
+  });
   return {
-    baseUrl: text("base_url"),
-    tokenVar: text("token_var"),
-    model: text("model"),
+    connections,
+    activeConnection: typeof obj.active === "string" ? obj.active : "",
     yolo: obj.yolo === true,
+    statusline: obj.statusline === "builtin" ? "builtin" : "untouched",
   };
 }
 
 /**
- * 表单字段 → 定义里的 settings 段。一项都没填就不写这个段：
+ * 表单字段 → 定义里的 settings 段。一项都没配就不写这个段：
  * 空段和没有段在引擎侧等价，但不写更干净，也让「从没配过」一眼可辨。
  */
 export function buildAgentSettings(formValues: AgentFormValues): Record<string, unknown> | undefined {
-  const entries: Record<string, unknown> = {};
-  if (formValues.baseUrl.trim()) entries.base_url = formValues.baseUrl.trim();
-  if (formValues.tokenVar.trim()) entries.token_var = formValues.tokenVar.trim();
-  if (formValues.model.trim()) entries.model = formValues.model.trim();
-  if (formValues.yolo) entries.yolo = true;
-  return Object.keys(entries).length > 0 ? entries : undefined;
+  const profiles: Record<string, unknown> = {};
+  for (const item of formValues.connections) {
+    const name = item.name.trim();
+    if (!name) continue;
+    const entry: Record<string, unknown> = {};
+    if (item.label.trim()) entry.label = item.label.trim();
+    if (item.baseUrl.trim()) entry.base_url = item.baseUrl.trim();
+    if (item.tokenVar.trim()) {
+      entry.token_var = item.tokenVar.trim();
+      // 认证方式只在真有令牌时才有意义
+      if (item.auth === "api_key") entry.auth = "api_key";
+    }
+    if (item.model.trim()) entry.model = item.model.trim();
+    if (item.smallFastModel.trim()) entry.small_fast_model = item.smallFastModel.trim();
+    const aliases: Record<string, string> = {};
+    if (item.aliasOpus.trim()) aliases.opus = item.aliasOpus.trim();
+    if (item.aliasSonnet.trim()) aliases.sonnet = item.aliasSonnet.trim();
+    if (item.aliasHaiku.trim()) aliases.haiku = item.aliasHaiku.trim();
+    if (Object.keys(aliases).length > 0) entry.model_aliases = aliases;
+    const timeout = Number(item.timeoutMs.trim());
+    if (item.timeoutMs.trim() && Number.isFinite(timeout) && timeout > 0) {
+      entry.timeout_ms = Math.floor(timeout);
+    }
+    profiles[name] = entry;
+  }
+
+  const settings: Record<string, unknown> = {};
+  if (Object.keys(profiles).length > 0) {
+    settings.profiles = profiles;
+    // active 必须指向真实存在的一套，否则引擎当场拒绝
+    const active = formValues.activeConnection.trim();
+    if (active && profiles[active]) settings.active = active;
+  }
+  if (formValues.yolo) settings.yolo = true;
+  if (formValues.statusline === "builtin") settings.statusline = "builtin";
+  return Object.keys(settings).length > 0 ? settings : undefined;
 }
 
 /** 这份定义有没有配过运行参数（决定保存后要不要写助手的配置文件）。 */
 export function hasAgentSettings(definition: Record<string, unknown> | undefined): boolean {
   const raw = definition?.settings;
   return !!raw && typeof raw === "object" && !Array.isArray(raw) && Object.keys(raw).length > 0;
+}
+
+/** 定义里当前生效的接入配置名；没有就返回 null。 */
+export function activeConnectionOf(definition: Record<string, unknown> | undefined): string | null {
+  const raw = definition?.settings;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const active = (raw as Record<string, unknown>).active;
+  return typeof active === "string" && active ? active : null;
+}
+
+/** 定义里的接入配置清单（名字 + 显示名），供卡片上的切换用。 */
+export function connectionsOf(
+  definition: Record<string, unknown> | undefined,
+): { name: string; label: string }[] {
+  const raw = definition?.settings;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+  const profiles = (raw as Record<string, unknown>).profiles;
+  if (!profiles || typeof profiles !== "object" || Array.isArray(profiles)) return [];
+  return Object.entries(profiles as Record<string, unknown>).map(([name, value]) => {
+    const entry = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+    return { name, label: typeof entry.label === "string" && entry.label ? entry.label : name };
+  });
 }
 
 export function buildAgentDefinition(

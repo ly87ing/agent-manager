@@ -69,13 +69,29 @@ Codex 侧读 `<CODEX_HOME>/sessions/**/rollout-*.jsonl` 里最后一条 `rate_li
 分属两条路径（那条执行 shell 命令，这条写文件）。目前只支持 Claude Code 形态
 （按可执行名判定），目标固定为 `~/.claude/settings.json`。
 
-受管粒度按键路径而不是整个顶层键：本工具只拥有 `env.ANTHROPIC_BASE_URL`、
-`env.ANTHROPIC_AUTH_TOKEN`、`model` 与 `permissions.defaultMode` 四条，同一文件里
-hooks 域的内容、用户自己的 `permissions.allow/deny` 与别的 `env` 变量原样保留；
-外部修改检测也只比这四条的摘要，用户往里加自己的设置不算冲突。从没写过而这几项已有
-内容时按外部内容对待，同样要 `--allow-takeover`。
+**接入配置**：`settings.profiles` 存多套（官方、各家中转站），`settings.active` 指向
+当前生效的那套，同一时刻只有一套写进目标文件。每套含地址、令牌变量名、令牌走哪个头
+（`token` → `ANTHROPIC_AUTH_TOKEN` 的 Bearer，`api_key` → `ANTHROPIC_API_KEY` 的
+x-api-key，中转站两种都有）、模型、小任务模型、opus/sonnet/haiku 别名与超时。
+渲染时先把受管的每条路径清空再写当前这套，切换后上一套留下的变量不会残留。
+`--use <名字>` 切换、`--use-default` 切回助手自带的账号与地址，切换与写入是同一条
+命令：库里的 `active` 与目标文件要么一起变，要么都不变。`active` 指向不存在的配置
+一律当场拒绝。
 
-密钥语义与实例、MCP 一致：库里只存变量名，写目标文件时解析成真值——`settings.json`
+**受管粒度**按键路径而不是整个顶层键：本工具只拥有 `env.ANTHROPIC_BASE_URL`、
+`env.ANTHROPIC_AUTH_TOKEN`、`env.ANTHROPIC_API_KEY`、`env.ANTHROPIC_MODEL`、
+`env.ANTHROPIC_SMALL_FAST_MODEL`、`env.ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`、
+`env.API_TIMEOUT_MS` 与 `permissions.defaultMode`。同一文件里 hooks 域的内容、
+用户自己的 `permissions.allow/deny` 与别的 `env` 变量原样保留；外部修改检测也只比
+这几条的摘要。从没写过而这几项已有内容时按外部内容对待，同样要 `--allow-takeover`。
+
+**状态栏**是条件受管：`settings.statusline` 为 `builtin` 时部署内置脚本到
+`<data_dir>/statusline.sh`（0755）并把 `statusLine` 指过去；为 `untouched`（默认）时
+只撤掉我们自己指过去的那条，用户手配的原样留着。判据是 `statusLine.command` 是否指向
+本工具部署的那份——指向别处的是用户的，既不清空也不算外部修改。内置脚本除了显示，
+还会把助手推给状态栏的 `rate_limits` 落盘（见「额度来源」）。
+
+**密钥**语义与实例、MCP 一致：库里只存变量名，写目标文件时解析成真值——`settings.json`
 的 `env` 是字面量映射，Claude Code 不对它做变量展开，引用写进去不生效。变量取不到值时
 拒绝写入而不是落一个空令牌。落地文件按 0600 写。
 
@@ -84,7 +100,8 @@ hooks 域的内容、用户自己的 `permissions.allow/deny` 与别的 `env` �
 审计只记改了哪几项与变量名，不记取值。
 
 界面上这几项在助手编辑弹窗里，按 2026-09-20 裁决保存即写入：保存定义成功后立即执行
-一次真实写入，失败时定义已存但目标文件不动，并说明原因。
+一次真实写入，失败时定义已存但目标文件不动，并说明原因。卡片上另有接入配置下拉，
+选中即切换。
 
 Codex 形态（`~/.codex/config.toml` 的 `model_providers` / `approval_policy`）尚未接入。
 

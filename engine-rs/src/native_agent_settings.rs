@@ -1,13 +1,18 @@
-//! 助手的运行参数：上游地址、令牌、模型、YOLO。写进助手自己的配置文件，
-//! 因此 IDE、别的终端、任何入口启动它都一样生效。
+//! 助手的运行参数：接入配置（地址、认证、模型）、跳过权限确认、状态栏。
+//! 写进助手自己的配置文件，因此 IDE、别的终端、任何入口启动它都一样生效。
 //!
-//! 与实例（profiles）同一套密钥语义：库里只存 `${VAR}` 引用，写目标文件时解析成
-//! 真值——`settings.json` 的 `env` 是字面量映射，Claude Code 不对它做变量展开，
-//! 所以引用写进去不会生效。落地文件里是明文，与 MCP 写助手配置同级，由文件权限保护。
+//! 一个助手可以存多套**接入配置**，同一时刻一套生效——官方、各家中转站各存一套，
+//! 切换只是改 `active` 再写一次文件，不用每次重填地址和令牌。
+//!
+//! 密钥语义与实例、MCP 一致：库里只存变量名，写目标文件时解析成真值。
+//! `settings.json` 的 `env` 是字面量映射，Claude Code 不对它做变量展开，
+//! 引用写进去不生效；落地文件里是明文，与 MCP 写助手配置同级，由文件权限保护。
 //!
 //! 受管粒度按「键路径」而不是整个顶层键：`~/.claude/settings.json` 里还住着 hooks 域
 //! 和用户自己的 permissions.allow/deny、别的 env 变量，整键归属会互相覆盖。
 //! 外部改过我们拥有的那几个路径就 fail-closed 拒绝覆盖。
+
+use std::collections::BTreeMap;
 
 use anyhow::{bail, Result};
 use serde_json::{Map, Value};
@@ -17,26 +22,117 @@ use crate::native::Context;
 /// Claude 的目标文件，相对 home。
 pub(crate) const CLAUDE_SETTINGS: &str = ".claude/settings.json";
 
+/// 本工具维护的状态栏脚本，落在数据目录里（不放助手目录，那是助手的地盘）。
+pub(crate) const STATUSLINE_FILE: &str = "statusline.sh";
+
+/// 内置状态栏正文：显示模型/目录/上下文/额度，并把额度存一份供本工具读。
+const STATUSLINE_BODY: &str = include_str!("../assets/statusline.sh");
+
 /// 本工具在 settings.json 里拥有的键路径。其余一律是别人的，原样保留。
-const CLAUDE_OWNED_PATHS: [&[&str]; 4] = [
+const CLAUDE_OWNED_PATHS: &[&[&str]] = &[
     &["env", "ANTHROPIC_BASE_URL"],
     &["env", "ANTHROPIC_AUTH_TOKEN"],
-    &["model"],
+    &["env", "ANTHROPIC_API_KEY"],
+    &["env", "ANTHROPIC_MODEL"],
+    &["env", "ANTHROPIC_SMALL_FAST_MODEL"],
+    &["env", "ANTHROPIC_DEFAULT_OPUS_MODEL"],
+    &["env", "ANTHROPIC_DEFAULT_SONNET_MODEL"],
+    &["env", "ANTHROPIC_DEFAULT_HAIKU_MODEL"],
+    &["env", "API_TIMEOUT_MS"],
     &["permissions", "defaultMode"],
 ];
 
-/// 一个助手的运行参数。字段全部可选：没填的项不写进目标文件，也不从里面删别人的。
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub(crate) struct AgentSettings {
-    /// 上游接口地址，留空表示用助手的默认地址。
-    pub(crate) base_url: Option<String>,
-    /// 鉴权取值所在的环境变量名。库里只存这个名字，取值另行解析。
-    pub(crate) token_var: Option<String>,
-    pub(crate) model: Option<String>,
-    /// 跳过权限确认。改的是助手的安全默认值，调用方负责二次确认。
-    pub(crate) yolo: bool,
+/// 状态栏是**条件受管**：只有 `statusLine.command` 指向本工具部署的那份脚本时才算我们的。
+/// 用户自己定义的状态栏与本工具无关，既不清空也不算外部修改。
+const STATUSLINE_PATH: &[&str] = &["statusLine"];
+
+fn statusline_is_ours(root: &Value, statusline_path: &std::path::Path) -> bool {
+    path_get(root, &["statusLine", "command"])
+        .and_then(Value::as_str)
+        .is_some_and(|cmd| std::path::Path::new(cmd) == statusline_path)
 }
 
+/// 令牌走哪个请求头。两种中转站都有，配错了会一直 401。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum AuthKind {
+    /// `Authorization: Bearer <token>`，写 `ANTHROPIC_AUTH_TOKEN`。
+    #[default]
+    Token,
+    /// `x-api-key: <key>`，写 `ANTHROPIC_API_KEY`。
+    ApiKey,
+}
+
+impl AuthKind {
+    fn parse(raw: Option<&Value>) -> Result<Self> {
+        match raw.and_then(Value::as_str) {
+            None | Some("token") => Ok(AuthKind::Token),
+            Some("api_key") => Ok(AuthKind::ApiKey),
+            Some(other) => bail!("auth 只能是 token 或 api_key，收到 {other}"),
+        }
+    }
+
+    fn env_key(self) -> &'static str {
+        match self {
+            AuthKind::Token => "ANTHROPIC_AUTH_TOKEN",
+            AuthKind::ApiKey => "ANTHROPIC_API_KEY",
+        }
+    }
+}
+
+/// 状态栏由谁维护。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum StatusLine {
+    /// 不碰：用户自己定义的那份原样保留。
+    #[default]
+    Untouched,
+    /// 用本工具维护的那份：部署脚本并把 statusLine 指过去。
+    Builtin,
+}
+
+impl StatusLine {
+    fn parse(raw: Option<&Value>) -> Result<Self> {
+        match raw.and_then(Value::as_str) {
+            None | Some("") | Some("untouched") => Ok(StatusLine::Untouched),
+            Some("builtin") => Ok(StatusLine::Builtin),
+            Some(other) => bail!("statusline 只能是 builtin 或 untouched，收到 {other}"),
+        }
+    }
+}
+
+/// 一套接入配置：连到哪、拿什么认证、用什么模型。
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct ConnectionProfile {
+    /// 界面上显示的名字；留空时用键名。
+    pub(crate) label: Option<String>,
+    pub(crate) base_url: Option<String>,
+    pub(crate) auth: AuthKind,
+    /// 令牌所在的环境变量名。库里只存这个名字，取值另行解析。
+    pub(crate) token_var: Option<String>,
+    pub(crate) model: Option<String>,
+    /// 后台小任务用的轻量模型。
+    pub(crate) small_fast_model: Option<String>,
+    /// opus / sonnet / haiku 各自映射到中转站的哪个模型名。
+    pub(crate) model_aliases: BTreeMap<String, String>,
+    pub(crate) timeout_ms: Option<u64>,
+}
+
+/// 一个助手的全部运行参数。
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct AgentSettings {
+    /// 当前生效的接入配置名。
+    pub(crate) active: Option<String>,
+    pub(crate) profiles: BTreeMap<String, ConnectionProfile>,
+    /// 跳过权限确认。改的是助手的安全默认值，调用方负责二次确认。
+    pub(crate) yolo: bool,
+    pub(crate) statusline: StatusLine,
+}
+
+impl AgentSettings {
+    /// 当前生效的那套接入配置；没选就返回 None。
+    pub(crate) fn current(&self) -> Option<&ConnectionProfile> {
+        self.profiles.get(self.active.as_deref()?)
+    }
+}
 
 fn non_empty(raw: Option<&Value>) -> Option<String> {
     let text = raw?.as_str()?.trim();
@@ -47,9 +143,67 @@ fn non_empty(raw: Option<&Value>) -> Option<String> {
     }
 }
 
-/// 变量名规则与 `${VAR}` 占位符可用的形状一致，和 secrets 域同一把尺子。
-fn valid_var_name(name: &str) -> bool {
-    crate::secret_values::valid_var_name(name)
+/// 接入配置名：只用安全字符，便于在命令行与界面里直接指名。
+fn valid_profile_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+fn parse_profile(id: &str, raw: &Value) -> Result<ConnectionProfile> {
+    let Some(obj) = raw.as_object() else {
+        bail!("接入配置 {id} 必须是对象");
+    };
+    let base_url = non_empty(obj.get("base_url"));
+    if let Some(url) = base_url.as_deref() {
+        // 与 MCP 远程定义同一条线：只允许 https，或本机回环的 http
+        let loopback = url.starts_with("http://localhost") || url.starts_with("http://127.0.0.1");
+        if !url.starts_with("https://") && !loopback {
+            bail!("接入配置 {id} 的地址只允许 https://，或本机回环的 http://localhost / http://127.0.0.1");
+        }
+    }
+    let token_var = non_empty(obj.get("token_var"));
+    if let Some(name) = token_var.as_deref() {
+        if !crate::secret_values::valid_var_name(name) {
+            bail!("接入配置 {id} 的令牌变量名不合法：要以字母或下划线开头，只能用字母、数字与下划线");
+        }
+    }
+    let timeout_ms = match obj.get("timeout_ms") {
+        None | Some(Value::Null) => None,
+        Some(value) => {
+            let ms = value
+                .as_u64()
+                .ok_or_else(|| anyhow::anyhow!("接入配置 {id} 的超时必须是非负整数毫秒"))?;
+            if ms == 0 {
+                None
+            } else {
+                Some(ms)
+            }
+        }
+    };
+    let mut model_aliases = BTreeMap::new();
+    if let Some(raw_aliases) = obj.get("model_aliases") {
+        let map = raw_aliases
+            .as_object()
+            .ok_or_else(|| anyhow::anyhow!("接入配置 {id} 的模型别名必须是对象"))?;
+        for tier in ["opus", "sonnet", "haiku"] {
+            if let Some(value) = non_empty(map.get(tier)) {
+                model_aliases.insert(tier.to_string(), value);
+            }
+        }
+    }
+    Ok(ConnectionProfile {
+        label: non_empty(obj.get("label")),
+        base_url,
+        auth: AuthKind::parse(obj.get("auth"))?,
+        token_var,
+        model: non_empty(obj.get("model")),
+        small_fast_model: non_empty(obj.get("small_fast_model")),
+        model_aliases,
+        timeout_ms,
+    })
 }
 
 /// 从助手定义里读运行参数。缺 `settings` 段就是没配过。
@@ -60,29 +214,37 @@ pub(crate) fn parse(spec: &Value) -> Result<AgentSettings> {
     let Some(obj) = raw.as_object() else {
         bail!("settings 必须是对象");
     };
-    let base_url = non_empty(obj.get("base_url"));
-    if let Some(url) = base_url.as_deref() {
-        // 与 MCP 远程定义同一条线：只允许 https，或本机回环的 http
-        let loopback = url.starts_with("http://localhost") || url.starts_with("http://127.0.0.1");
-        if !url.starts_with("https://") && !loopback {
-            bail!("settings.base_url 只允许 https://，或本机回环的 http://localhost / http://127.0.0.1");
+
+    let mut profiles = BTreeMap::new();
+    if let Some(raw_profiles) = obj.get("profiles") {
+        let map = raw_profiles
+            .as_object()
+            .ok_or_else(|| anyhow::anyhow!("settings.profiles 必须是对象"))?;
+        for (name, value) in map {
+            if !valid_profile_name(name) {
+                bail!("接入配置名 {name} 不合法：只能用字母、数字、连字符与下划线，最长 64 位");
+            }
+            profiles.insert(name.clone(), parse_profile(name, value)?);
         }
     }
-    let token_var = non_empty(obj.get("token_var"));
-    if let Some(name) = token_var.as_deref() {
-        if !valid_var_name(name) {
-            bail!("settings.token_var 不是合法的环境变量名：要以字母或下划线开头，只能用字母、数字与下划线");
+
+    let active = non_empty(obj.get("active"));
+    if let Some(name) = active.as_deref() {
+        if !profiles.contains_key(name) {
+            bail!("settings.active 指向不存在的接入配置 {name}");
         }
     }
+
     Ok(AgentSettings {
-        base_url,
-        token_var,
-        model: non_empty(obj.get("model")),
+        active,
+        profiles,
         yolo: obj.get("yolo").and_then(Value::as_bool).unwrap_or(false),
+        statusline: StatusLine::parse(obj.get("statusline"))?,
     })
 }
 
-/// 取某条路径上的值。
+// ---------- 键路径读写 ----------
+
 fn path_get<'a>(root: &'a Value, path: &[&str]) -> Option<&'a Value> {
     let mut cursor = root;
     for key in path {
@@ -154,7 +316,7 @@ fn path_remove(root: &mut Map<String, Value>, path: &[&str]) {
 
 /// 把本工具拥有的那几条路径切出来，用于外部修改检测。
 /// 用户往 settings.json 里加自己的东西不该被判成冲突。
-pub(crate) fn owned_slice(bytes: &[u8]) -> Value {
+pub(crate) fn owned_slice(bytes: &[u8], statusline_path: &std::path::Path) -> Value {
     let root = serde_json::from_slice::<Value>(bytes).unwrap_or(Value::Null);
     let mut slice = Map::new();
     for path in CLAUDE_OWNED_PATHS {
@@ -162,14 +324,24 @@ pub(crate) fn owned_slice(bytes: &[u8]) -> Value {
             path_set(&mut slice, path, found.clone());
         }
     }
+    // 指向别处的状态栏是用户的，不进摘要——他换自己的脚本不该被判成冲突
+    if statusline_is_ours(&root, statusline_path) {
+        if let Some(found) = path_get(&root, STATUSLINE_PATH) {
+            path_set(&mut slice, STATUSLINE_PATH, found.clone());
+        }
+    }
     Value::Object(slice)
 }
 
-pub(crate) fn owned_digest(bytes: &[u8]) -> String {
+pub(crate) fn owned_digest(bytes: &[u8], statusline_path: &std::path::Path) -> String {
     crate::native_mcp::model::sha256_hex_bytes(
-        serde_json::to_vec(&owned_slice(bytes)).unwrap_or_default().as_slice(),
+        serde_json::to_vec(&owned_slice(bytes, statusline_path))
+            .unwrap_or_default()
+            .as_slice(),
     )
 }
+
+// ---------- 渲染 ----------
 
 /// 渲染 Claude 的 settings.json：既有内容为基底，只改本工具拥有的那几条路径。
 ///
@@ -179,6 +351,7 @@ pub(crate) fn render_claude(
     existing: Option<&[u8]>,
     settings: &AgentSettings,
     resolve: &dyn Fn(&str) -> Option<String>,
+    statusline_path: &std::path::Path,
 ) -> Result<Vec<u8>> {
     let base = existing
         .and_then(|bytes| serde_json::from_slice::<Value>(bytes).ok())
@@ -186,31 +359,65 @@ pub(crate) fn render_claude(
         .unwrap_or_else(|| Value::Object(Map::new()));
     let mut root = base.as_object().cloned().unwrap_or_default();
 
-    match settings.base_url.as_deref() {
-        Some(url) => path_set(&mut root, &["env", "ANTHROPIC_BASE_URL"], Value::String(url.to_string())),
-        None => path_remove(&mut root, &["env", "ANTHROPIC_BASE_URL"]),
+    // 先把本工具拥有的每条路径清干净，再按当前生效的那套写回去：
+    // 切换接入配置时，上一套留下的变量必须消失，否则两套混着生效。
+    for path in CLAUDE_OWNED_PATHS {
+        path_remove(&mut root, path);
     }
-    match settings.token_var.as_deref() {
-        Some(name) => {
+
+    if let Some(profile) = settings.current() {
+        if let Some(url) = profile.base_url.as_deref() {
+            path_set(&mut root, &["env", "ANTHROPIC_BASE_URL"], Value::String(url.to_string()));
+        }
+        if let Some(name) = profile.token_var.as_deref() {
             let Some(value) = resolve(name) else {
                 bail!("环境变量 {name} 还没有取值：先在密钥页填上，或在启动环境里 export 它");
             };
-            path_set(&mut root, &["env", "ANTHROPIC_AUTH_TOKEN"], Value::String(value));
+            path_set(&mut root, &["env", profile.auth.env_key()], Value::String(value));
         }
-        None => path_remove(&mut root, &["env", "ANTHROPIC_AUTH_TOKEN"]),
+        if let Some(model) = profile.model.as_deref() {
+            path_set(&mut root, &["env", "ANTHROPIC_MODEL"], Value::String(model.to_string()));
+        }
+        if let Some(model) = profile.small_fast_model.as_deref() {
+            path_set(
+                &mut root,
+                &["env", "ANTHROPIC_SMALL_FAST_MODEL"],
+                Value::String(model.to_string()),
+            );
+        }
+        for (tier, target) in &profile.model_aliases {
+            let key = match tier.as_str() {
+                "opus" => "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                "sonnet" => "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                "haiku" => "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+                _ => continue,
+            };
+            path_set(&mut root, &["env", key], Value::String(target.clone()));
+        }
+        if let Some(ms) = profile.timeout_ms {
+            // Claude Code 读的是字符串形式的环境变量
+            path_set(&mut root, &["env", "API_TIMEOUT_MS"], Value::String(ms.to_string()));
+        }
     }
-    match settings.model.as_deref() {
-        Some(model) => path_set(&mut root, &["model"], Value::String(model.to_string())),
-        None => path_remove(&mut root, &["model"]),
-    }
+
     if settings.yolo {
         path_set(
             &mut root,
             &["permissions", "defaultMode"],
             Value::String("bypassPermissions".into()),
         );
-    } else {
-        path_remove(&mut root, &["permissions", "defaultMode"]);
+    }
+
+    // 状态栏：选内置就指过去；选「不碰」时只撤掉我们自己指过去的那条，
+    // 用户手配的原样留着——它本来就不归我们管。
+    if settings.statusline == StatusLine::Builtin {
+        let mut entry = Map::new();
+        entry.insert("type".into(), Value::String("command".into()));
+        entry.insert("command".into(), Value::String(statusline_path.display().to_string()));
+        entry.insert("padding".into(), Value::Number(0.into()));
+        path_set(&mut root, STATUSLINE_PATH, Value::Object(entry));
+    } else if statusline_is_ours(&Value::Object(root.clone()), statusline_path) {
+        path_remove(&mut root, STATUSLINE_PATH);
     }
 
     let mut out = serde_json::to_vec_pretty(&Value::Object(root))?;
@@ -231,121 +438,25 @@ pub(crate) fn claude_target(ctx: &Context) -> std::path::PathBuf {
     ctx.home_dir.join(CLAUDE_SETTINGS)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
+/// 本工具维护的状态栏脚本位置。
+pub(crate) fn statusline_target(ctx: &Context) -> std::path::PathBuf {
+    ctx.data_dir.join(STATUSLINE_FILE)
+}
 
-    fn no_secrets(_: &str) -> Option<String> {
-        None
+/// 部署内置状态栏脚本；内容没变就不重写，避免每次应用都动文件时间。
+fn deploy_statusline(path: &std::path::Path) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
     }
-
-    #[test]
-    fn 解析拒绝非法地址与变量名() {
-        assert!(parse(&json!({"settings": {"base_url": "http://evil.example.com"}})).is_err());
-        assert!(parse(&json!({"settings": {"base_url": "http://localhost:8080"}})).is_ok());
-        assert!(parse(&json!({"settings": {"base_url": "https://api.example.com"}})).is_ok());
-        assert!(parse(&json!({"settings": {"token_var": "has-dash"}})).is_err());
-        assert!(parse(&json!({"settings": {"token_var": "MY_TOKEN"}})).is_ok());
-        // 没有 settings 段 = 没配过，不是错误
-        assert_eq!(parse(&json!({"bin": "claude"})).unwrap(), AgentSettings::default());
+    if std::fs::read(path).ok().as_deref() != Some(STATUSLINE_BODY.as_bytes()) {
+        std::fs::write(path, STATUSLINE_BODY)?;
     }
-
-    #[test]
-    fn 只改自己那几条路径_别人的原样保留() {
-        let existing = serde_json::to_vec(&json!({
-            "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "x"}]}]},
-            "statusLine": {"type": "command", "command": "/x/statusline.sh"},
-            "env": {"MY_OWN": "keep-me"},
-            "permissions": {"allow": ["Bash(ls:*)"]}
-        }))
-        .unwrap();
-        let settings = AgentSettings {
-            base_url: Some("https://api.example.com".into()),
-            token_var: None,
-            model: Some("claude-opus-5".into()),
-            yolo: true,
-        };
-        let out = render_claude(Some(&existing), &settings, &no_secrets).unwrap();
-        let parsed: Value = serde_json::from_slice(&out).unwrap();
-
-        // 别人的东西一个都没动
-        assert!(parsed["hooks"]["SessionStart"].is_array());
-        assert_eq!(parsed["statusLine"]["command"], "/x/statusline.sh");
-        assert_eq!(parsed["env"]["MY_OWN"], "keep-me");
-        assert_eq!(parsed["permissions"]["allow"][0], "Bash(ls:*)");
-        // 自己的写上了
-        assert_eq!(parsed["env"]["ANTHROPIC_BASE_URL"], "https://api.example.com");
-        assert_eq!(parsed["model"], "claude-opus-5");
-        assert_eq!(parsed["permissions"]["defaultMode"], "bypassPermissions");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))?;
     }
-
-    #[test]
-    fn 清空某项只删自己那条_不留空壳也不碰同级() {
-        let existing = serde_json::to_vec(&json!({
-            "env": {"ANTHROPIC_BASE_URL": "https://old.example.com", "MY_OWN": "keep-me"},
-            "model": "old-model",
-            "permissions": {"defaultMode": "bypassPermissions", "allow": ["Bash(ls:*)"]}
-        }))
-        .unwrap();
-        let out = render_claude(Some(&existing), &AgentSettings::default(), &no_secrets).unwrap();
-        let parsed: Value = serde_json::from_slice(&out).unwrap();
-
-        assert!(parsed["env"].get("ANTHROPIC_BASE_URL").is_none());
-        assert_eq!(parsed["env"]["MY_OWN"], "keep-me", "同级的别人的变量要留着");
-        assert!(parsed.get("model").is_none());
-        assert!(parsed["permissions"].get("defaultMode").is_none());
-        assert_eq!(parsed["permissions"]["allow"][0], "Bash(ls:*)", "同级的 allow 要留着");
-    }
-
-    #[test]
-    fn 父对象空了才收走空壳() {
-        let existing = serde_json::to_vec(&json!({
-            "env": {"ANTHROPIC_BASE_URL": "https://old.example.com"},
-            "permissions": {"defaultMode": "bypassPermissions"}
-        }))
-        .unwrap();
-        let out = render_claude(Some(&existing), &AgentSettings::default(), &no_secrets).unwrap();
-        let parsed: Value = serde_json::from_slice(&out).unwrap();
-        assert!(parsed.get("env").is_none(), "只剩我们那一条时整个 env 收走");
-        assert!(parsed.get("permissions").is_none());
-    }
-
-    #[test]
-    fn 令牌取不到值时拒绝写入_而不是写个空的上去() {
-        let settings = AgentSettings {
-            token_var: Some("MISSING_TOKEN".into()),
-            ..Default::default()
-        };
-        let err = render_claude(None, &settings, &no_secrets).unwrap_err();
-        assert!(err.to_string().contains("MISSING_TOKEN"));
-
-        let resolved = render_claude(None, &settings, &|name| {
-            (name == "MISSING_TOKEN").then(|| "real-value".to_string())
-        })
-        .unwrap();
-        let parsed: Value = serde_json::from_slice(&resolved).unwrap();
-        // settings.json 的 env 不做变量展开，只能落真值
-        assert_eq!(parsed["env"]["ANTHROPIC_AUTH_TOKEN"], "real-value");
-    }
-
-    #[test]
-    fn 外部修改检测只看自己那几条路径() {
-        let ours = serde_json::to_vec(&json!({"env": {"ANTHROPIC_BASE_URL": "https://a"}})).unwrap();
-        let plus_theirs = serde_json::to_vec(&json!({
-            "env": {"ANTHROPIC_BASE_URL": "https://a", "MY_OWN": "x"},
-            "statusLine": {"command": "y"}
-        }))
-        .unwrap();
-        assert_eq!(
-            owned_digest(&ours),
-            owned_digest(&plus_theirs),
-            "用户加自己的设置不算外部修改"
-        );
-
-        let changed = serde_json::to_vec(&json!({"env": {"ANTHROPIC_BASE_URL": "https://b"}})).unwrap();
-        assert_ne!(owned_digest(&ours), owned_digest(&changed), "改了我们的值要认出来");
-    }
+    Ok(())
 }
 
 // ---------- 落地 ----------
@@ -393,16 +504,17 @@ fn applied_digest_of(ctx: &Context, agent_id: &str) -> Result<Option<String>> {
 /// 目标文件里本工具那部分是不是被外部改过。
 ///
 /// 没写过而文件里已经有这些键 = 用户自己配过，同样按外部内容对待：不问自取会把
-/// 他手写的地址和令牌顶掉。
+/// 他手写的地址、令牌和状态栏顶掉。
 pub(crate) fn external_change(ctx: &Context, agent_id: &str, path: &Path) -> Result<bool> {
     if !path.is_file() {
         return Ok(false);
     }
     let bytes = std::fs::read(path)?;
-    let current = owned_digest(&bytes);
+    let statusline_path = statusline_target(ctx);
+    let current = owned_digest(&bytes, &statusline_path);
     match applied_digest_of(ctx, agent_id)? {
         Some(known) => Ok(known != current),
-        None => Ok(!owned_slice(&bytes)
+        None => Ok(!owned_slice(&bytes, &statusline_path)
             .as_object()
             .is_some_and(Map::is_empty)),
     }
@@ -428,7 +540,10 @@ fn atomic_write(target: &Path, content: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// 真实写入：`agents:configure --only <id> [--allow-takeover] [--allow-yolo]`。
+/// 真实写入：`agents:configure --only <id> [--use <接入配置>] [--allow-takeover] [--allow-yolo]`。
+///
+/// `--use` 顺手把生效的接入配置切过去再写，切换因此是一步操作：库里的 active 和
+/// 目标文件要么一起变，要么都不变。
 ///
 /// YOLO 改的是助手的安全默认值，必须由调用方显式带 `--allow-yolo`——界面在那之前
 /// 弹二次确认。少了这个标志就拒绝，不靠界面自觉。
@@ -452,8 +567,32 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
         ));
     }
 
-    let settings = parse(def.spec_ref())
+    let mut settings = parse(def.spec_ref())
         .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}")))?;
+
+    // 切换生效的接入配置：--use <名字> 切过去，--use-default 切回助手自带的账号与地址。
+    // 指向不存在的配置一律拒绝，不静默落到「没有生效配置」。
+    let use_default = req.flag("--use-default");
+    let switch_to = req.value("--use").map(str::to_string);
+    if use_default && switch_to.is_some() {
+        return Err(DispatchError::new(
+            "USAGE_ERROR",
+            "--use 与 --use-default 不能同时给".to_string(),
+        ));
+    }
+    let switched = use_default || switch_to.is_some();
+    if use_default {
+        settings.active = None;
+    } else if let Some(name) = switch_to.as_deref() {
+        if !settings.profiles.contains_key(name) {
+            return Err(DispatchError::new(
+                "AGENT_ERROR",
+                format!("{id} 没有名为 {name} 的接入配置"),
+            ));
+        }
+        settings.active = Some(name.to_string());
+    }
+
     if settings.yolo && !req.flag("--allow-yolo") {
         return Err(DispatchError::new(
             "AGENT_ERROR",
@@ -474,14 +613,27 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
         ));
     }
 
+    let statusline_path = statusline_target(ctx);
+    // 脚本先就位再写 settings.json：反过来的话中途失败会留下一个指向不存在文件的状态栏
+    if settings.statusline == StatusLine::Builtin {
+        deploy_statusline(&statusline_path)
+            .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}")))?;
+    }
+
     let existing = std::fs::read(&path).ok();
-    let content = render_claude(existing.as_deref(), &settings, &crate::secret_values::lookup)
-        .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}")))?;
+    let content = render_claude(
+        existing.as_deref(),
+        &settings,
+        &crate::secret_values::lookup,
+        &statusline_path,
+    )
+    .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}")))?;
 
     atomic_write(&path, &content)
         .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}")))?;
 
-    let digest = owned_digest(&content);
+    let digest = owned_digest(&content, &statusline_path);
+    let active = settings.active.clone();
     let persisted = (|| -> Result<()> {
         let mut conn = store::open_write(ctx)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -498,6 +650,32 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
                 chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
             ],
         )?;
+        // --use 切换要落库，否则下次读定义又切回去了
+        if switched {
+            let mut policy = store::policy_from_connection(&tx)?;
+            let target = policy
+                .get_mut("agents")
+                .and_then(|v| v.get_mut("definitions"))
+                .and_then(|v| v.get_mut(&id));
+            if let Some(definition) = target {
+                if let Some(obj) = definition.as_object_mut() {
+                    let entry = obj
+                        .entry("settings".to_string())
+                        .or_insert_with(|| Value::Object(Map::new()));
+                    if let Some(settings_obj) = entry.as_object_mut() {
+                        match &active {
+                            Some(name) => {
+                                settings_obj.insert("active".into(), Value::String(name.clone()));
+                            }
+                            None => {
+                                settings_obj.remove("active");
+                            }
+                        }
+                    }
+                }
+                store::write_policy(&tx, &policy)?;
+            }
+        }
         // 审计只记改了哪几项，不记取值本身
         store::record_operation(
             &tx,
@@ -507,10 +685,11 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
             Some(&json!({
                 "file": CLAUDE_SETTINGS,
                 "takeover": takeover,
-                "base_url": settings.base_url.is_some(),
-                "token_var": settings.token_var.as_deref(),
-                "model": settings.model.as_deref(),
+                "active": active,
+                "profiles": settings.profiles.len(),
+                "token_var": settings.current().and_then(|p| p.token_var.clone()),
                 "yolo": settings.yolo,
+                "statusline": settings.statusline == StatusLine::Builtin,
             })),
         )?;
         tx.commit()?;
@@ -526,6 +705,208 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
         "action": "configure",
         "element": format!("agents:{id}"),
         "target": path.display().to_string(),
+        "active": settings.active,
         "takeover": takeover,
+        "statusline": settings.statusline == StatusLine::Builtin,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn no_secrets(_: &str) -> Option<String> {
+        None
+    }
+
+    fn sl() -> std::path::PathBuf {
+        std::path::PathBuf::from("/data/statusline.sh")
+    }
+
+    fn one_profile(entry: Value) -> AgentSettings {
+        parse(&json!({"settings": {"active": "p", "profiles": {"p": entry}}})).unwrap()
+    }
+
+    #[test]
+    fn 解析拒绝非法地址_变量名_配置名与认证方式() {
+        let bad_url = json!({"settings": {"profiles": {"p": {"base_url": "http://evil.example.com"}}}});
+        assert!(parse(&bad_url).is_err());
+        assert!(parse(&json!({"settings": {"profiles": {"p": {"base_url": "http://localhost:8080"}}}})).is_ok());
+        assert!(parse(&json!({"settings": {"profiles": {"p": {"token_var": "has-dash"}}}})).is_err());
+        assert!(parse(&json!({"settings": {"profiles": {"bad name": {}}}})).is_err());
+        assert!(parse(&json!({"settings": {"profiles": {"p": {"auth": "basic"}}}})).is_err());
+        assert!(parse(&json!({"settings": {"statusline": "custom"}})).is_err());
+        // active 指向不存在的配置要当场拒绝，不静默落空
+        assert!(parse(&json!({"settings": {"active": "nope", "profiles": {"p": {}}}})).is_err());
+        // 没有 settings 段 = 没配过
+        assert_eq!(parse(&json!({"bin": "claude"})).unwrap(), AgentSettings::default());
+    }
+
+    #[test]
+    fn 只改自己那几条路径_别人的原样保留() {
+        let existing = serde_json::to_vec(&json!({
+            "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "x"}]}]},
+            "statusLine": {"type": "command", "command": "/x/mine.sh"},
+            "env": {"MY_OWN": "keep-me"},
+            "permissions": {"allow": ["Bash(ls:*)"]}
+        }))
+        .unwrap();
+        let settings = one_profile(json!({
+            "base_url": "https://api.example.com",
+            "model": "claude-opus-5"
+        }));
+        let out = render_claude(Some(&existing), &settings, &no_secrets, &sl()).unwrap();
+        let parsed: Value = serde_json::from_slice(&out).unwrap();
+
+        assert!(parsed["hooks"]["SessionStart"].is_array());
+        assert_eq!(parsed["env"]["MY_OWN"], "keep-me");
+        assert_eq!(parsed["permissions"]["allow"][0], "Bash(ls:*)");
+        assert_eq!(parsed["env"]["ANTHROPIC_BASE_URL"], "https://api.example.com");
+        assert_eq!(parsed["env"]["ANTHROPIC_MODEL"], "claude-opus-5");
+        // 没选内置状态栏时，用户自己那份原样留着
+        assert_eq!(parsed["statusLine"]["command"], "/x/mine.sh");
+    }
+
+    #[test]
+    fn 两种认证方式写不同的环境变量() {
+        let resolve = |name: &str| (name == "TOK").then(|| "secret".to_string());
+        let bearer = one_profile(json!({"token_var": "TOK"}));
+        let parsed: Value =
+            serde_json::from_slice(&render_claude(None, &bearer, &resolve, &sl()).unwrap()).unwrap();
+        assert_eq!(parsed["env"]["ANTHROPIC_AUTH_TOKEN"], "secret");
+        assert!(parsed["env"].get("ANTHROPIC_API_KEY").is_none());
+
+        let api_key = one_profile(json!({"token_var": "TOK", "auth": "api_key"}));
+        let parsed: Value =
+            serde_json::from_slice(&render_claude(None, &api_key, &resolve, &sl()).unwrap()).unwrap();
+        assert_eq!(parsed["env"]["ANTHROPIC_API_KEY"], "secret");
+        assert!(parsed["env"].get("ANTHROPIC_AUTH_TOKEN").is_none());
+    }
+
+    #[test]
+    fn 切换接入配置时上一套的变量必须消失() {
+        let settings = parse(&json!({"settings": {
+            "active": "relay",
+            "profiles": {
+                "official": {},
+                "relay": {
+                    "base_url": "https://relay.example.com",
+                    "model": "relay-model",
+                    "small_fast_model": "relay-small",
+                    "model_aliases": {"opus": "relay-opus"},
+                    "timeout_ms": 600000
+                }
+            }
+        }}))
+        .unwrap();
+        let first = render_claude(None, &settings, &no_secrets, &sl()).unwrap();
+        let parsed: Value = serde_json::from_slice(&first).unwrap();
+        assert_eq!(parsed["env"]["ANTHROPIC_BASE_URL"], "https://relay.example.com");
+        assert_eq!(parsed["env"]["ANTHROPIC_SMALL_FAST_MODEL"], "relay-small");
+        assert_eq!(parsed["env"]["ANTHROPIC_DEFAULT_OPUS_MODEL"], "relay-opus");
+        assert_eq!(parsed["env"]["API_TIMEOUT_MS"], "600000");
+
+        // 切到什么都没配的 official：上一套留下的变量一个都不许剩
+        let mut switched = settings.clone();
+        switched.active = Some("official".into());
+        let second = render_claude(Some(&first), &switched, &no_secrets, &sl()).unwrap();
+        let parsed: Value = serde_json::from_slice(&second).unwrap();
+        assert!(parsed.get("env").is_none(), "官方配置不需要任何环境变量");
+    }
+
+    #[test]
+    fn 清空某项只删自己那条_不碰同级也不留空壳() {
+        let existing = serde_json::to_vec(&json!({
+            "env": {"ANTHROPIC_BASE_URL": "https://old.example.com", "MY_OWN": "keep-me"},
+            "permissions": {"defaultMode": "bypassPermissions", "allow": ["Bash(ls:*)"]}
+        }))
+        .unwrap();
+        let out = render_claude(Some(&existing), &AgentSettings::default(), &no_secrets, &sl()).unwrap();
+        let parsed: Value = serde_json::from_slice(&out).unwrap();
+
+        assert!(parsed["env"].get("ANTHROPIC_BASE_URL").is_none());
+        assert_eq!(parsed["env"]["MY_OWN"], "keep-me", "同级的别人的变量要留着");
+        assert!(parsed["permissions"].get("defaultMode").is_none());
+        assert_eq!(parsed["permissions"]["allow"][0], "Bash(ls:*)", "同级的 allow 要留着");
+
+        // 只剩我们那一条时整个父对象收走
+        let only_ours = serde_json::to_vec(&json!({"env": {"ANTHROPIC_BASE_URL": "https://x"}})).unwrap();
+        let out = render_claude(Some(&only_ours), &AgentSettings::default(), &no_secrets, &sl()).unwrap();
+        let parsed: Value = serde_json::from_slice(&out).unwrap();
+        assert!(parsed.get("env").is_none());
+    }
+
+    #[test]
+    fn 令牌取不到值时拒绝写入_而不是写个空的上去() {
+        let settings = one_profile(json!({"token_var": "MISSING_TOKEN"}));
+        let err = render_claude(None, &settings, &no_secrets, &sl()).unwrap_err();
+        assert!(err.to_string().contains("MISSING_TOKEN"));
+    }
+
+    #[test]
+    fn 选了内置状态栏就指向本工具部署的那份_不选则不碰() {
+        let builtin = parse(&json!({"settings": {"statusline": "builtin"}})).unwrap();
+        let out = render_claude(None, &builtin, &no_secrets, &sl()).unwrap();
+        let parsed: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(parsed["statusLine"]["type"], "command");
+        assert_eq!(parsed["statusLine"]["command"], "/data/statusline.sh");
+
+        // 从内置切回「不碰」：把我们指过去的那条撤掉，用户之后自己配什么是他的事
+        let back = render_claude(Some(&out), &AgentSettings::default(), &no_secrets, &sl()).unwrap();
+        let parsed: Value = serde_json::from_slice(&back).unwrap();
+        assert!(parsed.get("statusLine").is_none());
+    }
+
+    #[test]
+    fn 用户自己的状态栏不归我们管_不清空也不算冲突() {
+        let mine = serde_json::to_vec(&json!({
+            "statusLine": {"type": "command", "command": "/x/mine.sh"},
+            "env": {"ANTHROPIC_BASE_URL": "https://a"}
+        }))
+        .unwrap();
+        // 「不碰」模式下渲染：用户那条原样留着
+        let out = render_claude(Some(&mine), &AgentSettings::default(), &no_secrets, &sl()).unwrap();
+        let parsed: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(parsed["statusLine"]["command"], "/x/mine.sh");
+
+        // 他换成别的脚本也不算改了我们的东西
+        let switched = serde_json::to_vec(&json!({
+            "statusLine": {"type": "command", "command": "/x/another.sh"},
+            "env": {"ANTHROPIC_BASE_URL": "https://a"}
+        }))
+        .unwrap();
+        assert_eq!(owned_digest(&mine, &sl()), owned_digest(&switched, &sl()));
+    }
+
+    #[test]
+    fn 外部修改检测只看自己那几条路径() {
+        let ours = serde_json::to_vec(&json!({"env": {"ANTHROPIC_BASE_URL": "https://a"}})).unwrap();
+        let plus_theirs = serde_json::to_vec(&json!({
+            "env": {"ANTHROPIC_BASE_URL": "https://a", "MY_OWN": "x"},
+            "hooks": {"SessionStart": []}
+        }))
+        .unwrap();
+        assert_eq!(
+            owned_digest(&ours, &sl()),
+            owned_digest(&plus_theirs, &sl()),
+            "用户加自己的设置不算外部修改"
+        );
+
+        let changed = serde_json::to_vec(&json!({"env": {"ANTHROPIC_BASE_URL": "https://b"}})).unwrap();
+        assert_ne!(owned_digest(&ours, &sl()), owned_digest(&changed, &sl()));
+
+        // 状态栏归我们管，被外部改过要认出来
+        let sl_ours = serde_json::to_vec(&json!({"statusLine": {"command": "/data/statusline.sh"}})).unwrap();
+        let sl_changed = serde_json::to_vec(&json!({"statusLine": {"command": "/x/other.sh"}})).unwrap();
+        assert_ne!(owned_digest(&sl_ours, &sl()), owned_digest(&sl_changed, &sl()));
+    }
+
+    #[test]
+    fn 内置状态栏脚本自身可用() {
+        // 随脚本一起编译进来，跑一遍语法检查，避免改坏了到运行时才发现
+        assert!(STATUSLINE_BODY.starts_with("#!/bin/bash"));
+        assert!(STATUSLINE_BODY.contains("agent-manager-usage.json"), "落盘是它存在的理由");
+        assert!(STATUSLINE_BODY.contains("CLAUDE_CONFIG_DIR"), "实例要各存各的");
+    }
 }

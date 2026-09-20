@@ -1,7 +1,10 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
+  type ConnectionEntry,
   type PlatformScope,
+  CONNECTION_NAME_RE,
   buildAgentDefinition,
+  emptyConnection,
   extractCommandForPlatform,
   parseInitialToFormValues,
   updateCommandWithPlatform,
@@ -130,10 +133,36 @@ function AgentForm({
   const [channel, setChannel] = useState(initialParsed.channel);
   const [platformScope, setPlatformScope] = useState<PlatformScope>(initialParsed.platformScope);
   // 运行参数：写进助手自己的配置文件，因此 IDE 和别的终端启动它也一样生效
-  const [baseUrl, setBaseUrl] = useState(initialParsed.baseUrl);
-  const [tokenVar, setTokenVar] = useState(initialParsed.tokenVar);
-  const [model, setModel] = useState(initialParsed.model);
+  const [connections, setConnections] = useState<ConnectionEntry[]>(initialParsed.connections);
+  const [activeConnection, setActiveConnection] = useState(initialParsed.activeConnection);
   const [yolo, setYolo] = useState(initialParsed.yolo);
+  const [statusline, setStatusline] = useState(initialParsed.statusline);
+  /** 展开编辑的那一套；同时只展开一套，避免弹窗被撑得太长。 */
+  const [openConnection, setOpenConnection] = useState<string | null>(null);
+
+  const patchConnection = (index: number, patch: Partial<ConnectionEntry>) => {
+    setConnections((list) => list.map((item, i) => (i === index ? { ...item, ...patch } : item)));
+    markDirty("connections");
+  };
+  const addConnection = () => {
+    // 名字自动避让已有的，省得用户先想名字
+    let candidate = "relay";
+    let n = 2;
+    while (connections.some((item) => item.name === candidate)) {
+      candidate = `relay${n}`;
+      n += 1;
+    }
+    setConnections((list) => [...list, emptyConnection(candidate)]);
+    setOpenConnection(candidate);
+    if (!activeConnection) setActiveConnection(candidate);
+    markDirty("connections");
+  };
+  const removeConnection = (index: number) => {
+    const removed = connections[index];
+    setConnections((list) => list.filter((_, i) => i !== index));
+    if (activeConnection === removed?.name) setActiveConnection("");
+    markDirty("connections");
+  };
   // 运行参数目前只写 Claude Code 形态的 settings.json；判定与引擎一致，只认可执行名
   const isClaudeLike = bin.trim().replace(/\.exe$/i, "").split("/").pop() === "claude";
 
@@ -276,10 +305,10 @@ function AgentForm({
           uninstallCmd,
           preferredProvider: targetPreferred,
           advancedJson,
-          baseUrl,
-          tokenVar,
-          model,
+          connections,
+          activeConnection,
           yolo,
+          statusline,
         },
         initial?.definition,
         dirtyFields,
@@ -336,39 +365,206 @@ function AgentForm({
             <p className="mt-0.5 text-xs text-muted-foreground">
               写进助手自己的配置文件，从终端、IDE、任何入口启动它都一样生效。保存即写入。
             </p>
-            <div className="mt-3 space-y-3">
-              <label className="block text-xs font-medium text-muted-foreground">
-                接口地址（可选）
-                <input
-                  data-testid="agent-base-url-input"
-                  value={baseUrl}
-                  onChange={(e) => { setBaseUrl(e.target.value); markDirty("baseUrl"); }}
-                  placeholder="留空用官方地址；只接受 https:// 或本机地址"
-                  className="mt-1 w-full rounded border border-input p-1.5 text-xs font-mono"
-                  spellCheck={false}
-                />
-              </label>
-              <label className="block text-xs font-medium text-muted-foreground">
-                令牌所在的环境变量名（可选）
-                <input
-                  data-testid="agent-token-var-input"
-                  value={tokenVar}
-                  onChange={(e) => { setTokenVar(e.target.value); markDirty("tokenVar"); }}
-                  placeholder="如 MY_GATEWAY_TOKEN；取值在密钥页填，这里只写变量名"
-                  className="mt-1 w-full rounded border border-input p-1.5 text-xs font-mono"
-                  spellCheck={false}
-                />
-              </label>
-              <label className="block text-xs font-medium text-muted-foreground">
-                固定模型（可选）
-                <input
-                  data-testid="agent-model-input"
-                  value={model}
-                  onChange={(e) => { setModel(e.target.value); markDirty("model"); }}
-                  placeholder="留空用助手默认"
-                  className="mt-1 w-full rounded border border-input p-1.5 text-xs font-mono"
-                  spellCheck={false}
-                />
+
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-muted-foreground">接入配置</span>
+              <button
+                type="button"
+                data-testid="add-connection"
+                onClick={addConnection}
+                className="rounded border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs text-primary hover:bg-primary/15"
+              >
+                添加一套
+              </button>
+            </div>
+            {connections.length === 0 ? (
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                还没配：用官方账号直接跑。要连中转站或换 key，添加一套。
+              </p>
+            ) : (
+              <ul className="mt-1.5 space-y-1.5">
+                {connections.map((item, index) => {
+                  const open = openConnection === item.name;
+                  const nameBad = !CONNECTION_NAME_RE.test(item.name);
+                  return (
+                    <li key={index} className="rounded border">
+                      <div className="flex items-center gap-2 px-2 py-1.5">
+                        <input
+                          type="radio"
+                          name="active-connection"
+                          aria-label={`让 ${item.label || item.name} 生效`}
+                          data-testid={`use-connection-${item.name}`}
+                          checked={activeConnection === item.name}
+                          onChange={() => { setActiveConnection(item.name); markDirty("connections"); }}
+                        />
+                        <span className="min-w-0 flex-1 truncate text-xs text-foreground">
+                          {item.label || item.name}
+                          {item.baseUrl && (
+                            <span className="ml-1.5 font-mono text-xs text-muted-foreground">{item.baseUrl}</span>
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          data-testid={`edit-connection-${item.name}`}
+                          onClick={() => setOpenConnection(open ? null : item.name)}
+                          className="rounded border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent"
+                        >
+                          {open ? "收起" : "编辑"}
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`remove-connection-${item.name}`}
+                          onClick={() => removeConnection(index)}
+                          className="rounded border border-destructive/30 px-2 py-0.5 text-xs text-destructive hover:bg-destructive/10"
+                        >
+                          删除
+                        </button>
+                      </div>
+                      {open && (
+                        <div className="space-y-2 border-t px-2 py-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <label className="block text-xs text-muted-foreground">
+                              名称（写进配置）
+                              <input
+                                data-testid="connection-name-input"
+                                value={item.name}
+                                onChange={(e) => {
+                                  const next = e.target.value;
+                                  if (activeConnection === item.name) setActiveConnection(next);
+                                  setOpenConnection(next);
+                                  patchConnection(index, { name: next });
+                                }}
+                                className="mt-1 w-full rounded border border-input p-1.5 font-mono text-xs"
+                              />
+                              {nameBad && (
+                                <span className="mt-1 block text-xs text-destructive">
+                                  只能用字母、数字、连字符与下划线
+                                </span>
+                              )}
+                            </label>
+                            <label className="block text-xs text-muted-foreground">
+                              显示名（可选）
+                              <input
+                                value={item.label}
+                                onChange={(e) => patchConnection(index, { label: e.target.value })}
+                                placeholder="如 官方 / 我的中转"
+                                className="mt-1 w-full rounded border border-input p-1.5 text-xs"
+                              />
+                            </label>
+                          </div>
+                          <label className="block text-xs text-muted-foreground">
+                            接口地址（可选）
+                            <input
+                              data-testid="connection-base-url-input"
+                              value={item.baseUrl}
+                              onChange={(e) => patchConnection(index, { baseUrl: e.target.value })}
+                              placeholder="留空用官方地址；只接受 https:// 或本机地址"
+                              className="mt-1 w-full rounded border border-input p-1.5 font-mono text-xs"
+                              spellCheck={false}
+                            />
+                          </label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <label className="block text-xs text-muted-foreground">
+                              令牌所在的环境变量名
+                              <input
+                                data-testid="connection-token-var-input"
+                                value={item.tokenVar}
+                                onChange={(e) => patchConnection(index, { tokenVar: e.target.value })}
+                                placeholder="取值在密钥页填"
+                                className="mt-1 w-full rounded border border-input p-1.5 font-mono text-xs"
+                                spellCheck={false}
+                              />
+                            </label>
+                            <label className="block text-xs text-muted-foreground">
+                              令牌怎么发
+                              <select
+                                data-testid="connection-auth-select"
+                                value={item.auth}
+                                onChange={(e) => patchConnection(index, { auth: e.target.value as ConnectionEntry["auth"] })}
+                                className="mt-1 w-full rounded border border-input bg-card p-1.5 text-xs"
+                              >
+                                <option value="token">Authorization: Bearer</option>
+                                <option value="api_key">x-api-key</option>
+                              </select>
+                            </label>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <label className="block text-xs text-muted-foreground">
+                              模型（可选）
+                              <input
+                                data-testid="connection-model-input"
+                                value={item.model}
+                                onChange={(e) => patchConnection(index, { model: e.target.value })}
+                                className="mt-1 w-full rounded border border-input p-1.5 font-mono text-xs"
+                                spellCheck={false}
+                              />
+                            </label>
+                            <label className="block text-xs text-muted-foreground">
+                              小任务模型（可选）
+                              <input
+                                value={item.smallFastModel}
+                                onChange={(e) => patchConnection(index, { smallFastModel: e.target.value })}
+                                className="mt-1 w-full rounded border border-input p-1.5 font-mono text-xs"
+                                spellCheck={false}
+                              />
+                            </label>
+                          </div>
+                          <details className="rounded border p-2">
+                            <summary className="cursor-pointer text-xs text-muted-foreground select-none">
+                              模型别名与超时
+                            </summary>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              中转站的模型名和官方对不上时，在这里把 opus / sonnet / haiku 各自指过去。
+                            </p>
+                            <div className="mt-2 grid grid-cols-3 gap-2">
+                              {([["opus", "aliasOpus"], ["sonnet", "aliasSonnet"], ["haiku", "aliasHaiku"]] as const).map(
+                                ([tier, field]) => (
+                                  <label key={tier} className="block text-xs text-muted-foreground">
+                                    {tier}
+                                    <input
+                                      value={item[field]}
+                                      onChange={(e) => patchConnection(index, { [field]: e.target.value })}
+                                      className="mt-1 w-full rounded border border-input p-1.5 font-mono text-xs"
+                                      spellCheck={false}
+                                    />
+                                  </label>
+                                ),
+                              )}
+                            </div>
+                            <label className="mt-2 block text-xs text-muted-foreground">
+                              请求超时（毫秒，可选）
+                              <input
+                                type="number"
+                                min={0}
+                                value={item.timeoutMs}
+                                onChange={(e) => patchConnection(index, { timeoutMs: e.target.value })}
+                                className="mt-1 w-32 rounded border border-input p-1.5 font-mono text-xs"
+                              />
+                            </label>
+                          </details>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            <div className="mt-3 space-y-2 border-t pt-3">
+              <label className="block text-xs text-muted-foreground">
+                状态栏
+                <select
+                  data-testid="statusline-select"
+                  value={statusline}
+                  onChange={(e) => { setStatusline(e.target.value as "untouched" | "builtin"); markDirty("statusline"); }}
+                  className="mt-1 w-full rounded border border-input bg-card p-1.5 text-xs"
+                >
+                  <option value="untouched">不碰（你自己定义的那份照旧）</option>
+                  <option value="builtin">用本工具的（显示额度，并让这里也能读到实时额度）</option>
+                </select>
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  助手只把额度推给状态栏、不写文件，所以用本工具这份才能在卡片上看到与它同屏的实时额度。
+                </span>
               </label>
               <label className="flex items-start gap-2 text-xs text-foreground">
                 <input

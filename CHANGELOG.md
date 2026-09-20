@@ -20,7 +20,9 @@
 - MCP 密钥：定义里只存 `${VAR}` 引用；取值可以在「密钥」页直接填，保存在本机数据库，也可以由外部注入进程环境，两者都有时以填写的为准（从程序坞启动的应用拿不到终端里 export 的变量，这是系统的启动方式决定的）。取值界面永不回显，不进操作记录与配置备份；同步时按客户端格式写进各助手配置，那份文件里是明文。
 - 上游更新检查（助手、MCP、Skills），探测结果缓存于 SQLite。
 - 任务操作记录（SQLite，保留期可配、清空需二次确认）；错误消息在出库前统一脱敏。
-- 助手运行参数：接口地址、令牌变量名、固定模型与「跳过权限确认」写入 `~/.claude/settings.json`，保存即写入。按键路径受管（只动 `env.ANTHROPIC_BASE_URL`、`env.ANTHROPIC_AUTH_TOKEN`、`model`、`permissions.defaultMode`），外部改过这几项 fail-closed 拒绝覆盖，跳过权限确认需显式确认后才执行。
+- 助手接入配置：每个助手可存多套接入方式（地址、令牌变量名、Bearer 或 x-api-key、模型、模型别名、超时），卡片上一个下拉切换，切换与写入是一条命令。写入 `~/.claude/settings.json`，保存即写入。
+- 助手状态栏：可选用本工具维护的那份，或保持你自己定义的不动。用本工具那份时会把助手推给状态栏的实时额度存一份，卡片上的额度因此与状态栏同屏。
+- 上述写入按键路径受管（`env.ANTHROPIC_*`、`API_TIMEOUT_MS`、`permissions.defaultMode`，以及指向本工具脚本时的 `statusLine`），外部改过这几项 fail-closed 拒绝覆盖；跳过权限确认需显式确认后才执行。
 - 前端顶层错误边界、自定义助手安装/升级确认、MCP 空态引导。
 - MIT 许可证、公开发布元数据与显式 Webview CSP；Bundle ID 定为 `io.github.ly87ing.agent-manager`。
 - 四平台发布管线（macOS dmg、Linux AppImage/deb、Windows NSIS/MSI）：草稿先行创建唯一 draft Release、矩阵按 releaseId 上传产物、收尾任务单写 updater `latest.json`、prerelease tag 支持、逐平台 SHA256 checksums、engine-rs 版本一致性门禁；Release 固定为 draft。

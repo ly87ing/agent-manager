@@ -69,6 +69,11 @@ async function openEditor() {
   return screen.findByRole("dialog");
 }
 
+/** 新建一套接入配置并展开它的编辑区（新建后默认就是展开且生效的那套）。 */
+async function addConnection() {
+  await userEvent.click(screen.getByTestId("add-connection"));
+}
+
 function configureCalls(calls: { command: string; args?: string[] }[]) {
   return calls.filter((call) => call.command === "agents:configure");
 }
@@ -77,14 +82,16 @@ describe("助手运行参数", () => {
   it("填了接口地址保存：先存定义，再写进助手配置文件", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await openEditor();
-    await userEvent.type(screen.getByTestId("agent-base-url-input"), "https://api.example.com");
+    await addConnection();
+    await userEvent.type(screen.getByTestId("connection-base-url-input"), "https://api.example.com");
     await userEvent.click(screen.getByRole("button", { name: "保存定义" }));
 
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
     // 定义先落库，参数才写文件
     const saved = calls.find((call) => call.command === "policy:set")!;
     const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
-    expect(definition.settings.base_url).toBe("https://api.example.com");
+    expect(definition.settings.profiles.relay.base_url).toBe("https://api.example.com");
+    expect(definition.settings.active).toBe("relay");
     expect(configureCalls(calls)[0].args).toEqual(["--only", "agents:claude-code"]);
   });
 
@@ -100,13 +107,16 @@ describe("助手运行参数", () => {
   it("令牌只填变量名：定义里存的是名字，不是取值", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await openEditor();
-    await userEvent.type(screen.getByTestId("agent-token-var-input"), "MY_GATEWAY_TOKEN");
+    await addConnection();
+    await userEvent.type(screen.getByTestId("connection-token-var-input"), "MY_GATEWAY_TOKEN");
+    await userEvent.selectOptions(screen.getByTestId("connection-auth-select"), "api_key");
     await userEvent.click(screen.getByRole("button", { name: "保存定义" }));
 
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
     const saved = calls.find((call) => call.command === "policy:set")!;
     const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
-    expect(definition.settings.token_var).toBe("MY_GATEWAY_TOKEN");
+    expect(definition.settings.profiles.relay.token_var).toBe("MY_GATEWAY_TOKEN");
+    expect(definition.settings.profiles.relay.auth).toBe("api_key");
     expect(JSON.stringify(definition)).not.toContain("sk-");
   });
 
@@ -172,7 +182,8 @@ describe("助手运行参数", () => {
     };
     const { calls } = renderWithEngine(<AgentsPage />, withRefusal);
     await openEditor();
-    await userEvent.type(screen.getByTestId("agent-base-url-input"), "https://api.example.com");
+    await addConnection();
+    await userEvent.type(screen.getByTestId("connection-base-url-input"), "https://api.example.com");
     await userEvent.click(screen.getByRole("button", { name: "保存定义" }));
 
     // 第一次被拒 → 弹接管确认
@@ -182,6 +193,78 @@ describe("助手运行参数", () => {
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(2));
     expect(configureCalls(calls)[1].args).toContain("--allow-takeover");
+  });
+
+  it("状态栏选用本工具的：定义里记下来，随保存一起写入", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routes());
+    await openEditor();
+    await userEvent.selectOptions(screen.getByTestId("statusline-select"), "builtin");
+    await userEvent.click(screen.getByRole("button", { name: "保存定义" }));
+
+    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
+    const saved = calls.find((call) => call.command === "policy:set")!;
+    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
+    expect(definition.settings.statusline).toBe("builtin");
+  });
+
+  it("多套接入配置：只有选中的那套是生效的", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routes());
+    await openEditor();
+    await addConnection();
+    await userEvent.type(screen.getByTestId("connection-base-url-input"), "https://a.example.com");
+    await addConnection();
+    // 第二套新建后自动展开，填它的地址
+    await userEvent.type(screen.getByTestId("connection-base-url-input"), "https://b.example.com");
+    // 把生效切回第一套
+    await userEvent.click(screen.getByTestId("use-connection-relay"));
+    await userEvent.click(screen.getByRole("button", { name: "保存定义" }));
+
+    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
+    const saved = calls.find((call) => call.command === "policy:set")!;
+    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
+    expect(Object.keys(definition.settings.profiles).sort()).toEqual(["relay", "relay2"]);
+    expect(definition.settings.active).toBe("relay");
+    expect(definition.settings.profiles.relay.base_url).toBe("https://a.example.com");
+    expect(definition.settings.profiles.relay2.base_url).toBe("https://b.example.com");
+  });
+
+  it("卡片上直接切换接入配置：一条命令带 --use，切回默认带 --use-default", async () => {
+    const withProfiles = routes();
+    const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.settings = {
+      active: "relay",
+      profiles: {
+        official: { label: "官方" },
+        relay: { label: "我的中转", base_url: "https://relay.example.com" },
+      },
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
+
+    const picker = await screen.findByTestId("switch-connection-agents:claude-code");
+    expect(picker).toHaveValue("relay");
+
+    await userEvent.selectOptions(picker, "official");
+    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
+    expect(configureCalls(calls)[0].args).toEqual([
+      "--only",
+      "agents:claude-code",
+      "--use",
+      "official",
+    ]);
+
+    await userEvent.selectOptions(picker, "");
+    await waitFor(() => expect(configureCalls(calls)).toHaveLength(2));
+    expect(configureCalls(calls)[1].args).toEqual([
+      "--only",
+      "agents:claude-code",
+      "--use-default",
+    ]);
+  });
+
+  it("没配接入配置的助手：卡片上不出现切换器", async () => {
+    renderWithEngine(<AgentsPage />, routes());
+    await screen.findByRole("button", { name: "编辑命令" });
+    expect(screen.queryByTestId("switch-connection-agents:claude-code")).toBeNull();
   });
 
   it("不是 Claude 形态的助手：不显示运行参数这一段", async () => {
@@ -212,7 +295,7 @@ describe("助手运行参数", () => {
     });
     renderWithEngine(<AgentsPage />, codexRoutes);
     await openEditor();
-    expect(screen.queryByTestId("agent-base-url-input")).toBeNull();
+    expect(screen.queryByTestId("add-connection")).toBeNull();
     expect(screen.queryByTestId("agent-yolo-checkbox")).toBeNull();
   });
 });
