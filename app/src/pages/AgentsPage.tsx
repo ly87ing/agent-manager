@@ -31,6 +31,7 @@ import {
 import { runEngine } from "../lib/engine";
 import { toastWithUndo } from "../lib/undo";
 import { definitionOrigin } from "../lib/definitionOverlay";
+import { hasAgentSettings } from "../lib/agentDefinitionForm";
 import type { AgentsObserved, AgentsPolicy, AgentsSpec } from "../lib/observed";
 import { useEngineQuery } from "../lib/queries";
 import { COPY, versionRangeHint } from "../lib/ui-copy";
@@ -381,6 +382,11 @@ export default function AgentsPage({
   const [form, setForm] = useState<EngineElement | "new" | null>(null);
   const [pendingUninstall, setPendingUninstall] = useState<EngineElement | null>(null);
   const [pendingAction, setPendingAction] = useState<{ element: EngineElement; action: ElementAction } | null>(null);
+  /** 运行参数写入前要用户点头的那一步：降安全等级，或目标被外部改过。 */
+  const [pendingConfigure, setPendingConfigure] = useState<
+    { agentId: string; yolo: boolean; reason: "yolo" | "takeover" } | null
+  >(null);
+  const [configuring, setConfiguring] = useState(false);
   /** 确认弹窗路径（卸载/自定义定义安装升级）在途动作：弹窗确认即关闭，卡片按钮据此保持执行态直到 apply 结束。 */
   const [runningAction, setRunningAction] = useState<{ elementId: string; actionId: string } | null>(null);
   const [search, setSearch] = useState("");
@@ -411,6 +417,45 @@ export default function AgentsPage({
   const baseBinOf = (agentId: string) =>
     (elements.find((element) => element.id === `agents:${agentId}`)?.spec as AgentsSpec | undefined)?.bin ??
     (agentId === "codex" ? "codex" : "claude");
+
+  /**
+   * 把运行参数写进助手自己的配置文件。
+   *
+   * 两处需要用户点头，都由引擎强制、界面只负责问：降安全等级（--allow-yolo）、
+   * 目标里我们那几项被外部改过（--allow-takeover）。引擎拒绝时一个字节都不会动。
+   */
+  const runConfigure = async (
+    agentId: string,
+    opts: { allowYolo?: boolean; allowTakeover?: boolean } = {},
+  ): Promise<void> => {
+    const args = ["--only", `agents:${agentId}`];
+    if (opts.allowYolo) args.push("--allow-yolo");
+    if (opts.allowTakeover) args.push("--allow-takeover");
+    setConfiguring(true);
+    try {
+      const envelope = await runEngine("agents:configure", args);
+      if (envelope.ok) {
+        toast.success(`已写入 ${agentId} 的运行参数`, {
+          description: "助手下次启动生效；已经开着的要重启它。",
+        });
+        void query.refetch();
+        return;
+      }
+      const message = envelope.errors[0]?.message ?? "未知错误";
+      // 外部改过：让用户看清再决定要不要用这里的内容替换
+      if (!opts.allowTakeover && message.includes("拒绝覆盖")) {
+        setPendingConfigure({ agentId, yolo: opts.allowYolo === true, reason: "takeover" });
+        return;
+      }
+      toast.error(`运行参数没写进去:${message}`, {
+        description: "定义已经存下了，助手的配置文件没动。",
+      });
+    } catch (err) {
+      toast.error(`运行参数没写进去:${String(err)}`);
+    } finally {
+      setConfiguring(false);
+    }
+  };
 
   /** 启停助手：只写本机配置，不触发安装、卸载或同步。 */
   const toggleEnabled = async (agentId: string, next: boolean) => {
@@ -847,8 +892,48 @@ export default function AgentsPage({
           onClose={() => setLaunchRemoving(null)}
         />
       )}
-      {form && <DefinitionFormDialog existingNames={elements.map((element) => element.id.replace(/^agents:/, ""))} initial={form === "new" ? undefined : { name: form.id.replace(/^agents:/, ""), definition: form.spec }} onClose={() => setForm(null)} onSubmit={(name, definition) => { setForm(null); void definitionOps.saveDefinition({ name, definition, isNew: form === "new" }); }} />}
+      {form && <DefinitionFormDialog existingNames={elements.map((element) => element.id.replace(/^agents:/, ""))} initial={form === "new" ? undefined : { name: form.id.replace(/^agents:/, ""), definition: form.spec }} onClose={() => setForm(null)} onSubmit={(name, definition) => {
+        const isNew = form === "new";
+        setForm(null);
+        void (async () => {
+          if (!(await definitionOps.saveDefinition({ name, definition, isNew }))) return;
+          // 保存即写入：没配过运行参数就不碰助手的配置文件
+          if (!hasAgentSettings(definition)) return;
+          const yolo = (definition.settings as { yolo?: unknown } | undefined)?.yolo === true;
+          if (yolo) {
+            setPendingConfigure({ agentId: name, yolo: true, reason: "yolo" });
+            return;
+          }
+          await runConfigure(name);
+        })();
+      }} />}
       {definitionOps.modals}
+
+      {pendingConfigure && (
+        <ConfirmModal
+          title={pendingConfigure.reason === "yolo" ? "跳过权限确认" : "覆盖被改过的配置"}
+          description={
+            pendingConfigure.reason === "yolo"
+              ? "写入后这个助手执行命令、改文件都不再征求你同意，任何入口启动它都一样。确认要这么配吗？"
+              : "助手配置文件里本工具写的那几项被改过。继续会用这里的内容替换它们，文件里其余内容不动。"
+          }
+          risk="write-local"
+          confirmLabel={pendingConfigure.reason === "yolo" ? "确认跳过权限确认" : "确认覆盖"}
+          executing={configuring}
+          onConfirm={() => {
+            const pending = pendingConfigure;
+            setPendingConfigure(null);
+            void runConfigure(pending.agentId, {
+              allowYolo: pending.yolo,
+              allowTakeover: pending.reason === "takeover",
+            });
+          }}
+          onClose={() => {
+            setPendingConfigure(null);
+            toast.message("运行参数没写进去", { description: "定义已经存下了，助手的配置文件没动。" });
+          }}
+        />
+      )}
 
       {uninstallElement && (
         <ConfirmModal

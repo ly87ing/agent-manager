@@ -129,6 +129,13 @@ function AgentForm({
   const [bin, setBin] = useState(initialParsed.bin);
   const [channel, setChannel] = useState(initialParsed.channel);
   const [platformScope, setPlatformScope] = useState<PlatformScope>(initialParsed.platformScope);
+  // 运行参数：写进助手自己的配置文件，因此 IDE 和别的终端启动它也一样生效
+  const [baseUrl, setBaseUrl] = useState(initialParsed.baseUrl);
+  const [tokenVar, setTokenVar] = useState(initialParsed.tokenVar);
+  const [model, setModel] = useState(initialParsed.model);
+  const [yolo, setYolo] = useState(initialParsed.yolo);
+  // 运行参数目前只写 Claude Code 形态的 settings.json；判定与引擎一致，只认可执行名
+  const isClaudeLike = bin.trim().replace(/\.exe$/i, "").split("/").pop() === "claude";
 
   // Unified draft providers preserving in-flight edits across channel and platform switches
   const [draftProviders, setDraftProviders] = useState<Record<string, Record<string, unknown>>>(() => {
@@ -269,6 +276,10 @@ function AgentForm({
           uninstallCmd,
           preferredProvider: targetPreferred,
           advancedJson,
+          baseUrl,
+          tokenVar,
+          model,
+          yolo,
         },
         initial?.definition,
         dirtyFields,
@@ -317,6 +328,66 @@ function AgentForm({
             {!uninstallCmd.trim() && <p className="mt-1 text-xs text-warning">未填写卸载命令（不支持自动卸载）。</p>}
           </div>
         </div>
+
+        {/* 运行参数：只有 Claude Code 形态的助手写得进去（settings.json） */}
+        {isClaudeLike && (
+          <div className="mt-4 rounded-lg border p-3">
+            <p className="text-xs font-medium text-foreground">运行参数</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              写进助手自己的配置文件，从终端、IDE、任何入口启动它都一样生效。保存即写入。
+            </p>
+            <div className="mt-3 space-y-3">
+              <label className="block text-xs font-medium text-muted-foreground">
+                接口地址（可选）
+                <input
+                  data-testid="agent-base-url-input"
+                  value={baseUrl}
+                  onChange={(e) => { setBaseUrl(e.target.value); markDirty("baseUrl"); }}
+                  placeholder="留空用官方地址；只接受 https:// 或本机地址"
+                  className="mt-1 w-full rounded border border-input p-1.5 text-xs font-mono"
+                  spellCheck={false}
+                />
+              </label>
+              <label className="block text-xs font-medium text-muted-foreground">
+                令牌所在的环境变量名（可选）
+                <input
+                  data-testid="agent-token-var-input"
+                  value={tokenVar}
+                  onChange={(e) => { setTokenVar(e.target.value); markDirty("tokenVar"); }}
+                  placeholder="如 MY_GATEWAY_TOKEN；取值在密钥页填，这里只写变量名"
+                  className="mt-1 w-full rounded border border-input p-1.5 text-xs font-mono"
+                  spellCheck={false}
+                />
+              </label>
+              <label className="block text-xs font-medium text-muted-foreground">
+                固定模型（可选）
+                <input
+                  data-testid="agent-model-input"
+                  value={model}
+                  onChange={(e) => { setModel(e.target.value); markDirty("model"); }}
+                  placeholder="留空用助手默认"
+                  className="mt-1 w-full rounded border border-input p-1.5 text-xs font-mono"
+                  spellCheck={false}
+                />
+              </label>
+              <label className="flex items-start gap-2 text-xs text-foreground">
+                <input
+                  type="checkbox"
+                  data-testid="agent-yolo-checkbox"
+                  checked={yolo}
+                  onChange={(e) => { setYolo(e.target.checked); markDirty("yolo"); }}
+                  className="mt-0.5"
+                />
+                <span>
+                  跳过权限确认
+                  <span className="mt-0.5 block text-xs text-warning">
+                    它改的是助手的安全默认值：之后助手执行命令、改文件都不再征求你同意。保存时会再确认一次。
+                  </span>
+                </span>
+              </label>
+            </div>
+          </div>
+        )}
 
         <details className="mt-4 rounded-lg border p-3">
           <summary className="cursor-pointer text-xs font-medium text-muted-foreground select-none">高级设置</summary>

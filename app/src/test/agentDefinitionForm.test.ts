@@ -149,6 +149,10 @@ describe("agentDefinitionForm helpers", () => {
         _replace: true,
         legit_field: "allowed",
       }),
+      baseUrl: "",
+      tokenVar: "",
+      model: "",
+      yolo: false,
     };
 
     const dirtyFields = new Set<string>(["advancedJson"]);
@@ -195,6 +199,10 @@ describe("agentDefinitionForm helpers", () => {
       uninstallCmd: "",
       preferredProvider: "native",
       advancedJson: "",
+      baseUrl: "",
+      tokenVar: "",
+      model: "",
+      yolo: false,
     };
 
     const dirtyFields = new Set<string>(["providers.native.install"]);
@@ -241,6 +249,10 @@ describe("agentDefinitionForm helpers", () => {
       uninstallCmd: "",
       preferredProvider: "native",
       advancedJson: "",
+      baseUrl: "",
+      tokenVar: "",
+      model: "",
+      yolo: false,
     };
 
     const dirtyFields = new Set<string>(["providers.native.install"]);
@@ -278,6 +290,10 @@ describe("agentDefinitionForm helpers", () => {
       uninstallCmd: "",
       preferredProvider: "custom",
       advancedJson: "",
+      baseUrl: "",
+      tokenVar: "",
+      model: "",
+      yolo: false,
     };
 
     const dirtyFields = new Set<string>(["displayName"]);
@@ -311,6 +327,10 @@ describe("agentDefinitionForm helpers", () => {
       preferredProvider: "custom",
       // 用户在 JSON 中删掉 legacy_field，只保留 keep_field
       advancedJson: JSON.stringify({ keep_field: "keep" }),
+      baseUrl: "",
+      tokenVar: "",
+      model: "",
+      yolo: false,
     };
 
     const dirtyFields = new Set<string>(["advancedJson"]);
@@ -344,6 +364,10 @@ describe("agentDefinitionForm helpers", () => {
       upgradeCmd: "u.sh",
       uninstallCmd: "",
       preferredProvider: "custom",
+      baseUrl: "",
+      tokenVar: "",
+      model: "",
+      yolo: false,
     };
     const dirtyFields = new Set<string>(["advancedJson"]);
 
@@ -381,6 +405,10 @@ describe("agentDefinitionForm helpers", () => {
       uninstallCmd: "",
       preferredProvider: "custom",
       advancedJson: JSON.stringify({ legacy_field: "old" }),
+      baseUrl: "",
+      tokenVar: "",
+      model: "",
+      yolo: false,
     };
 
     // 只改了显示名称，advancedJson 非 dirty

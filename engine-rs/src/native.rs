@@ -146,6 +146,9 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     let is_hook_apply = request.command.replace('.', ":") == "hooks:apply";
     let is_alias_apply = request.command.replace('.', ":") == "aliases:apply";
     let is_profile_apply = request.command.replace('.', ":") == "profiles:apply";
+    // 运行参数写助手配置文件，与别的写动作同样要排他；校验在 configure 内部做，
+    // 这里只负责取锁。
+    let is_agent_configure = request.command.replace('.', ":") == "agents:configure";
     let (needs_lock, domain_label, diag_code) = if is_agent_apply {
         match crate::native_agents::preflight_apply(ctx, request) {
             Ok(()) => (true, "Agent", "AGENT_ERROR"),
@@ -307,6 +310,8 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
                 return env;
             }
         }
+    } else if is_agent_configure {
+        (true, "Agent", "AGENT_ERROR")
     } else {
         (false, "", "")
     };
@@ -433,6 +438,10 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("agents", "status" | "apply") => crate::native_agents::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}"))),
+        // 运行参数落到助手自己的配置文件；与装卸升级分开，那条走 shell 命令，这条写文件
+        ("agents", "configure") => {
+            crate::native_agent_settings::apply(ctx, request).map(|data| (data, vec![]))
+        }
         ("skills", "status" | "apply") => crate::native_skills::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("SKILL_ERROR", format!("{err:#}"))),

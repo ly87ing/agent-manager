@@ -46,6 +46,31 @@ SQLite 核心、Tauri bridge、设置页面、主要资源页面布局、Agent �
 
 旧 DMG/旧 GUI E2E 不证明本轮新交互。本轮源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收已完成；最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify（提交、SHA256 与验证结果见 [交付回执](goal-rust-gui.md)）。
 
+## 助手运行参数
+
+`agents:configure` 把助手的运行参数写进它自己的配置文件，与装卸升级的 `agents:apply`
+分属两条路径（那条执行 shell 命令，这条写文件）。目前只支持 Claude Code 形态
+（按可执行名判定），目标固定为 `~/.claude/settings.json`。
+
+受管粒度按键路径而不是整个顶层键：本工具只拥有 `env.ANTHROPIC_BASE_URL`、
+`env.ANTHROPIC_AUTH_TOKEN`、`model` 与 `permissions.defaultMode` 四条，同一文件里
+hooks 域的内容、用户自己的 `permissions.allow/deny` 与别的 `env` 变量原样保留；
+外部修改检测也只比这四条的摘要，用户往里加自己的设置不算冲突。从没写过而这几项已有
+内容时按外部内容对待，同样要 `--allow-takeover`。
+
+密钥语义与实例、MCP 一致：库里只存变量名，写目标文件时解析成真值——`settings.json`
+的 `env` 是字面量映射，Claude Code 不对它做变量展开，引用写进去不生效。变量取不到值时
+拒绝写入而不是落一个空令牌。落地文件按 0600 写。
+
+`permissions.defaultMode` 会改掉助手的安全默认值，因此 `--allow-yolo` 由引擎强制：
+少了这个标志一律拒绝，界面在此之前弹二次确认。写入取排他锁、记操作审计，
+审计只记改了哪几项与变量名，不记取值。
+
+界面上这几项在助手编辑弹窗里，按 2026-09-20 裁决保存即写入：保存定义成功后立即执行
+一次真实写入，失败时定义已存但目标文件不动，并说明原因。
+
+Codex 形态（`~/.codex/config.toml` 的 `model_providers` / `approval_policy`）尚未接入。
+
 按 2026-09-19 产品裁决，界面只保留能改变下一步动作的信息与开关，以下一并退役：
 
 - 引擎从不读取的 `agents.<id>.auto_install` / `auto_update` 偏好，以及写入它们的「个性化配置」页（policy 原文编辑器）；`policy:get/set` 本身保留，继续服务定义增删与启停。

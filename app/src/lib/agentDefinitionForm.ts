@@ -12,6 +12,14 @@ export interface AgentFormValues {
   uninstallCmd: string;
   preferredProvider?: string;
   advancedJson?: string;
+  /** 上游接口地址；留空用助手默认地址。 */
+  baseUrl: string;
+  /** 鉴权取值所在的环境变量名；库里只存这个名字。 */
+  tokenVar: string;
+  /** 固定使用的模型；留空用助手默认。 */
+  model: string;
+  /** 跳过权限确认：改的是助手的安全默认值，保存前要二次确认。 */
+  yolo: boolean;
 }
 
 export function detectSystemPlatform(): SupportedPlatform {
@@ -129,6 +137,8 @@ const STANDARD_DEFINITION_KEYS = new Set([
   "bin",
   "providers",
   "preferred_provider",
+  // 运行参数有自己的表单字段，不再混进「其他设置 JSON」
+  "settings",
   "_delete",
   "_replace",
 ]);
@@ -195,7 +205,39 @@ export function parseInitialToFormValues(
     uninstallCmd,
     preferredProvider: typeof def.preferred_provider === "string" ? def.preferred_provider : preferred,
     advancedJson,
+    ...readAgentSettings(def.settings),
   };
+}
+
+/** 定义里的 settings 段 → 表单字段。缺段或字段缺失都按「没配过」。 */
+function readAgentSettings(raw: unknown): Pick<AgentFormValues, "baseUrl" | "tokenVar" | "model" | "yolo"> {
+  const obj = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const text = (key: string) => (typeof obj[key] === "string" ? (obj[key] as string) : "");
+  return {
+    baseUrl: text("base_url"),
+    tokenVar: text("token_var"),
+    model: text("model"),
+    yolo: obj.yolo === true,
+  };
+}
+
+/**
+ * 表单字段 → 定义里的 settings 段。一项都没填就不写这个段：
+ * 空段和没有段在引擎侧等价，但不写更干净，也让「从没配过」一眼可辨。
+ */
+export function buildAgentSettings(formValues: AgentFormValues): Record<string, unknown> | undefined {
+  const entries: Record<string, unknown> = {};
+  if (formValues.baseUrl.trim()) entries.base_url = formValues.baseUrl.trim();
+  if (formValues.tokenVar.trim()) entries.token_var = formValues.tokenVar.trim();
+  if (formValues.model.trim()) entries.model = formValues.model.trim();
+  if (formValues.yolo) entries.yolo = true;
+  return Object.keys(entries).length > 0 ? entries : undefined;
+}
+
+/** 这份定义有没有配过运行参数（决定保存后要不要写助手的配置文件）。 */
+export function hasAgentSettings(definition: Record<string, unknown> | undefined): boolean {
+  const raw = definition?.settings;
+  return !!raw && typeof raw === "object" && !Array.isArray(raw) && Object.keys(raw).length > 0;
 }
 
 export function buildAgentDefinition(
@@ -269,6 +311,7 @@ export function buildAgentDefinition(
             k !== "providers" &&
             k !== "display_name" &&
             k !== "preferred_provider" &&
+            k !== "settings" &&
             k !== "_delete" &&
             k !== "_replace"
           ) {
@@ -279,6 +322,13 @@ export function buildAgentDefinition(
     } catch {
       // Ignored
     }
+  }
+
+  const settings = buildAgentSettings(formValues);
+  if (settings) {
+    baseDef.settings = settings;
+  } else {
+    delete baseDef.settings;
   }
 
   return baseDef;

@@ -37,7 +37,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / secrets:status / system:audit|discover|refresh-upstream / runs:* / policy:* / sources:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / agents:configure / secrets:status / system:audit|discover|refresh-upstream / runs:* / policy:* / sources:* / db:*）"
             ),
         )
     };
@@ -55,6 +55,8 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("sources", "get" | "set") => true,
         ("db", "status" | "migrate") => true,
         ("config", "export" | "import") => true,
+        // 运行参数写助手自己的配置文件：与装卸升级的 apply 分开，那条走 shell 命令
+        ("agents", "configure") => true,
         (d, "status" | "apply") => READ_WRITE_DOMAINS.contains(&d),
         _ => false,
     };
@@ -127,6 +129,12 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         }
         // 配置备份：导出不带参数，导入只接整份备份正文
         ("config", "import") => specs.push(("--value", ArgValueKind::JsonValue)),
+        // 运行参数写助手配置文件：外部改过要显式接管，降安全等级要显式确认
+        ("agents", "configure") => {
+            specs.push(("--only", ArgValueKind::ElementId));
+            specs.push(("--allow-takeover", ArgValueKind::Flag));
+            specs.push(("--allow-yolo", ArgValueKind::Flag));
+        }
         (_, "apply") => {
             specs.push(("--only", ArgValueKind::ElementId));
             if domain == "agents" {
@@ -396,6 +404,7 @@ mod tests {
         for command in [
             "agents:status",
             "agents:apply",
+            "agents:configure",
             "mcp:status",
             "mcp:apply",
             "skills:status",

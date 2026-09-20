@@ -5,6 +5,7 @@
 ## 功能
 
 - **助手管理**：安装、升级、卸载内置助手（Claude Code、Codex）与自行添加的助手，如实检测实际安装来源。
+- **运行参数**：给 Claude Code 形态的助手设接口地址、令牌变量名、固定模型与「跳过权限确认」，写进它自己的 `~/.claude/settings.json`，从终端、IDE、任何入口启动都一样生效。只改本工具写的那几项，同一文件里 hooks 与你自己的设置原样保留；令牌只登记变量名，取值在密钥页填。
 - **Skills**：管理 Skill 集合与单个技能，按助手逐一启用、停用、更新或移除。
 - **MCP 服务器**：管理本地 stdio 与远程 HTTP 两类 MCP 服务器，按助手分配并写入各自客户端配置（Claude JSON、Codex TOML、OpenCode JSON）；可从客户端现有配置发现导入。
 - **Rules**：编辑共享与助手专用规则，应用到 `~/.codex/AGENTS.md`、`~/.claude/CLAUDE.md` 与 `~/.config/opencode/AGENTS.md`。

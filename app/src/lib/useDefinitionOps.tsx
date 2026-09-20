@@ -90,12 +90,13 @@ export function useDefinitionOps({
     /** definition 是否为完整整条定义（mcp/skills 用）。新增恒为完整；编辑时调用方有
      * sqlite 有效定义则传完整定义（complete 可缺省），拿不到完整原定义必须显式传 false。 */
     complete?: boolean;
-  }): Promise<void> => {
+    /** 成功保存返回 true；被校验或引擎拒绝返回 false，调用方据此决定要不要接着落地。 */
+  }): Promise<boolean> => {
     const defKey = `${definitionKeyPrefix(section)}.${input.name}`;
     let definition = input.definition;
     if (domain !== "agents" && !input.isNew && input.complete === false) {
       const full = await migrateAndLoadFullDefinition(input.name);
-      if (!full) return;
+      if (!full) return false;
       definition = { ...full, ...definition };
       if (domain === "mcp") {
         // 传输互斥剥离：以表单提交的 owned 片段判定目标传输（远程含 url），
@@ -122,7 +123,7 @@ export function useDefinitionOps({
               const raw = fullMap[key];
               if (typeof raw !== "string") {
                 toast.error(`保存定义 ${input.name} 失败:${field === "env" ? "环境变量" : "请求头"} ${key} 无法在原定义中还原真实值，已停止保存`);
-                return;
+                return false;
               }
               rebuilt[key] = raw;
             } else {
@@ -140,14 +141,14 @@ export function useDefinitionOps({
           for (const [key, value] of Object.entries(map as Record<string, unknown>)) {
             if (value === "<literal>") {
               toast.error(`保存定义 ${input.name} 失败:${field === "env" ? "环境变量" : "请求头"} ${key} 仍为脱敏值，已停止保存`);
-              return;
+              return false;
             }
           }
         }
       }
     }
     if (!(await writePolicy("policy:set", ["--layer", "local", "--key", defKey, "--value", JSON.stringify({ ...definition, _delete: false, _replace: true })]))) {
-      return;
+      return false;
     }
     // 表单提交语义为「保存定义」：只保存定义，不写启用键、不 apply/preflight、不触发安装或
     // 同步；_replace 整条替换保证清空的可选字段不会复活。
@@ -157,6 +158,7 @@ export function useDefinitionOps({
         ? `已保存定义 ${input.name}（不会自动安装）`
         : `已保存定义 ${input.name} 到本地资源库（不会自动安装或同步）`,
     );
+    return true;
   };
 
   /** 被移除定义的完整内容：撤销时原样写回；取不到就不提供撤销（不假装能复原）。 */

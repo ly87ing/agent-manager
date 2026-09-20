@@ -59,6 +59,13 @@ pub(crate) struct AgentDef {
     providers: Map<String, Value>,
 }
 
+impl AgentDef {
+    /// 定义原文。别的域（如运行参数）从这里读自己那一段，不另开一套加载。
+    pub(crate) fn spec_ref(&self) -> &Value {
+        &self.spec
+    }
+}
+
 fn command_slot<'a>(
     set: &'a mut CommandSet,
     key: &str,
