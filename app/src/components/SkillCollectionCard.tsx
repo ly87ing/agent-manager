@@ -1,6 +1,6 @@
-import { Inbox, Pencil, RefreshCw, Trash2 } from "lucide-react";
+import { Pencil, RefreshCw, Trash2 } from "lucide-react";
 import type { EngineElement } from "../lib/contract";
-import type { SkillCollectionObserved, SkillCollectionSpec, SkillSpec } from "../lib/observed";
+import type { SkillCollectionObserved, SkillCollectionSpec } from "../lib/observed";
 import { FreshnessBadge } from "./FreshnessBadge";
 import { StateBadge } from "./StateBadge";
 import { cn } from "../lib/utils";
@@ -176,48 +176,6 @@ export function SkillCollectionCard({
           <span className="text-xs text-muted-foreground">这里没有可做的：状态正常或该集合已停用</span>
         )}
       </div>
-    </section>
-  );
-}
-
-/** 新发现技能列表（集合面板底部）。只读展示；添加分配在「全部技能」按助手操作。 */
-export function SkillDiscoveryInbox({ skills }: { skills: EngineElement[] }) {
-  return (
-    <section data-testid="discovery-inbox" className="group rounded-lg border bg-card p-5 shadow-sm">
-      <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
-        <Inbox className="h-4 w-4 text-info transition-transform group-hover:scale-105" aria-hidden />
-        新发现的技能
-        <span data-testid="inbox-total" className="rounded-full bg-info/15 px-2 py-0.5 text-xs font-medium text-info">
-          {skills.length}
-        </span>
-      </h3>
-      {skills.length === 0 ? (
-        <p className="text-sm text-muted-foreground">集合里没有新发现的技能。</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b text-xs text-muted-foreground">
-                <th className="py-2 pr-4 font-medium">名称</th>
-                <th className="py-2 pr-4 font-medium">来源</th>
-                <th className="py-2 font-medium">说明</th>
-              </tr>
-            </thead>
-            <tbody>
-              {skills.map((skill) => {
-                const spec = skill.spec as SkillSpec;
-                return (
-                  <tr key={skill.id} className="border-b last:border-0">
-                    <td className="py-2 pr-4 font-mono text-xs text-foreground">{spec.name ?? skill.id}</td>
-                    <td className="py-2 pr-4 font-mono text-xs break-all text-muted-foreground">{spec.source_path ?? spec.collection}</td>
-                    <td className="py-2 text-xs text-muted-foreground">集合里新出现的技能；请在「全部技能」中按目标助手添加分配，启用后才会分发到助手。</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
     </section>
   );
 }

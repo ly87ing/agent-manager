@@ -9,8 +9,8 @@ import { cn } from "../lib/utils";
  * 替代「资源 × 助手」笛卡尔积长表——那种表里资源名要重复 N 遍（5 个技能 × 5 个助手 = 25 行），
  * 看一眼说不出「哪个技能在哪缺」。矩阵一行看全一个资源在所有助手上的处境。
  *
- * 逐助手的操作不放格子里（格子太小、动作又不止一个），点开那一行才出现——默认视图因此保持
- * 可扫，能力一个不丢。
+ * 详细操作由调用方决定放在单元格内还是展开行：技能页适合单行直接操作，
+ * MCP 配置等详情较多的资源仍可展开查看。
  */
 
 export interface MatrixRowCell {
@@ -40,6 +40,7 @@ export function ResourceAgentMatrix({
   expandedKeys,
   onToggleExpand,
   renderExpanded,
+  renderCell,
   isRowSelected,
   allSelected = false,
   someSelected = false,
@@ -52,11 +53,13 @@ export function ResourceAgentMatrix({
   rows: MatrixRow[];
   agents: string[];
   kind: "mcp" | "skills";
-  /** 允许同时展开多行：对比两个资源时不用来回点。 */
-  expandedKeys: ReadonlySet<string>;
-  onToggleExpand: (key: string) => void;
+  /** 允许同时展开多行；不传时不显示展开列。 */
+  expandedKeys?: ReadonlySet<string>;
+  onToggleExpand?: (key: string) => void;
   /** 展开后显示的逐助手操作区。 */
-  renderExpanded: (row: MatrixRow) => ReactNode;
+  renderExpanded?: (row: MatrixRow) => ReactNode;
+  /** 自定义单元格内容，用于把状态与简短操作放在同一行。 */
+  renderCell?: (row: MatrixRow, agent: string, cell: MatrixRowCell) => ReactNode;
   /** 行是否选中由调用方判定：选中项可能以「资源×助手」为单位，矩阵不猜这个模型。 */
   isRowSelected?: (rowKey: string) => boolean;
   allSelected?: boolean;
@@ -69,6 +72,7 @@ export function ResourceAgentMatrix({
   emptyHint?: ReactNode;
 }) {
   const selectable = rows.filter((row) => row.selectable);
+  const expandable = Boolean(onToggleExpand && renderExpanded);
 
   if (rows.length === 0) return <>{emptyHint}</>;
 
@@ -93,7 +97,7 @@ export function ResourceAgentMatrix({
                 />
               </th>
             )}
-            <th className="w-8 py-2.5 pr-2" />
+            {expandable && <th className="w-8 py-2.5 pr-2" />}
             <th className="py-2.5 pr-4 font-medium">{resourceHeader}</th>
             {agents.map((agent) => (
               <th key={agent} className="whitespace-nowrap py-2.5 pr-4 text-center font-mono font-medium">
@@ -104,7 +108,7 @@ export function ResourceAgentMatrix({
         </thead>
         <tbody>
           {rows.map((row) => {
-            const expanded = expandedKeys.has(row.key);
+            const expanded = expandable && (expandedKeys?.has(row.key) ?? false);
             return (
               <Fragment key={row.key}>
                 <tr
@@ -124,18 +128,20 @@ export function ResourceAgentMatrix({
                       />
                     </td>
                   )}
-                  <td className="py-2 pr-2">
-                    <button
-                      type="button"
-                      data-testid={`expand-${row.key}`}
-                      aria-expanded={expanded}
-                      aria-label={`${expanded ? "收起" : "展开"} ${row.label} 的逐助手操作`}
-                      onClick={() => onToggleExpand(row.key)}
-                      className="rounded p-0.5 text-muted-foreground hover:bg-accent"
-                    >
-                      {expanded ? <ChevronDown className="h-3.5 w-3.5" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden />}
-                    </button>
-                  </td>
+                  {expandable && (
+                    <td className="py-2 pr-2">
+                      <button
+                        type="button"
+                        data-testid={`expand-${row.key}`}
+                        aria-expanded={expanded}
+                        aria-label={`${expanded ? "收起" : "展开"} ${row.label} 的逐助手操作`}
+                        onClick={() => onToggleExpand?.(row.key)}
+                        className="rounded p-0.5 text-muted-foreground hover:bg-accent"
+                      >
+                        {expanded ? <ChevronDown className="h-3.5 w-3.5" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden />}
+                      </button>
+                    </td>
+                  )}
                   <td className="py-2 pr-4">
                     <span className="font-mono text-xs font-medium text-foreground">{row.label}</span>
                     {row.sublabel && <span className="ml-1.5 text-[11px] text-muted-foreground">{row.sublabel}</span>}
@@ -144,7 +150,9 @@ export function ResourceAgentMatrix({
                     const cell = row.cells[agent];
                     return (
                       <td key={agent} className="py-2 pr-4 text-center">
-                        {cell ? (
+                        {cell && renderCell ? (
+                          renderCell(row, agent, cell)
+                        ) : cell ? (
                           <span className="inline-flex flex-col items-center gap-0.5">
                             <MatrixCell state={cell.state} kind={kind} title={cell.title} />
                           </span>
@@ -159,9 +167,12 @@ export function ResourceAgentMatrix({
                     );
                   })}
                 </tr>
-                {expanded && (
+                {expanded && renderExpanded && (
                   <tr className="border-b bg-accent/20 last:border-0">
-                    <td colSpan={agents.length + (onToggleSelect ? 3 : 2)} className="px-3 py-2">
+                    <td
+                      colSpan={agents.length + 1 + (onToggleSelect ? 1 : 0) + (expandable ? 1 : 0)}
+                      className="px-3 py-2"
+                    >
                       {renderExpanded(row)}
                     </td>
                   </tr>

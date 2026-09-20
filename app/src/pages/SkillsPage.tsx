@@ -7,8 +7,8 @@ import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import { ResourceAgentMatrix, type MatrixRow, type MatrixRowCell } from "../components/ResourceAgentMatrix";
-import { SkillAgentActions } from "../components/SkillAgentActions";
-import { SkillCollectionCard, SkillDiscoveryInbox } from "../components/SkillCollectionCard";
+import { SkillAgentCellActions } from "../components/SkillAgentActions";
+import { SkillCollectionCard } from "../components/SkillCollectionCard";
 import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDialog";
 import type { EngineElement, PolicyData, PolicyLayers, StatusData } from "../lib/contract";
 import {
@@ -60,8 +60,6 @@ export default function SkillsPage({
   const agentsQuery = useEngineQuery<StatusData>("agents:status");
   const policyQuery = useEngineQuery<PolicyData>("policy:get");
   const [activeTab, setActiveTab] = useState<"collections" | "skills">(() => (initialAgent ? "skills" : "collections"));
-  /** 展开中的技能行：矩阵默认只看状态，点开才出逐助手操作；可同时展开多行。 */
-  const [expandedSkillIds, setExpandedSkillIds] = useState<Set<string>>(new Set());
   const [collectionFilter, setCollectionFilter] = useState<string>("all");
   const [agentFilter, setAgentFilter] = useState<string>(() => initialAgent ?? "all");
   const [search, setSearch] = useState("");
@@ -133,7 +131,6 @@ export default function SkillsPage({
   const elements = query.data?.data.elements ?? [];
   const collections = elements.filter(isCollection);
   const skills = elements.filter((element) => !isCollection(element));
-  const inboxSkills = skills.filter((element) => (element.observed as SkillObserved).discovery_inbox === true);
 
   const layers = policyQuery.data?.data.layers ?? null;
 
@@ -176,7 +173,7 @@ export default function SkillsPage({
     }));
   });
 
-  /** 矩阵行：一行一个技能，每个助手一格。展开那一行才出逐助手操作。 */
+  /** 矩阵行：一行一个技能，每个助手一格，格内直接展示状态与操作。 */
   const matrixRows: MatrixRow[] = filteredSkills.map((skill) => {
     const spec = skill.spec as SkillSpec;
     const cells = (skill.observed as SkillObserved)?.agents ?? {};
@@ -481,8 +478,6 @@ export default function SkillsPage({
               ))}
             </div>
           )}
-
-          <SkillDiscoveryInbox skills={inboxSkills} />
         </div>
       )}
 
@@ -586,15 +581,6 @@ export default function SkillsPage({
             agents={relevantAgents}
             kind="skills"
             resourceHeader="技能"
-            expandedKeys={expandedSkillIds}
-            onToggleExpand={(key) =>
-              setExpandedSkillIds((prev) => {
-                const next = new Set(prev);
-                if (next.has(key)) next.delete(key);
-                else next.add(key);
-                return next;
-              })
-            }
             isRowSelected={(key) => {
               // 行选中 = 该技能所有可执行的「技能×助手」格都已选中
               const keys = assignmentRows
@@ -618,26 +604,29 @@ export default function SkillsPage({
               });
             }}
             onToggleSelectAll={toggleSelectAllVisible}
-            renderExpanded={(row) => (
-              <SkillAgentActions
-                skill={assignmentRows.find((item) => item.skill.id === row.key)!.skill}
-                skillName={row.label}
-                assignments={assignmentRows
-                  .filter((item) => item.skill.id === row.key)
-                  .map(({ key, agent, cell }) => ({ key, agent, cell }))}
-                selectedKeys={selectedKeys}
-                selectDisabled={batchApply.executing}
-                onToggleSelect={(key) =>
-                  setSelectedKeys((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(key)) next.delete(key);
-                    else next.add(key);
-                    return next;
-                  })
-                }
-                onAction={handleSkillAction}
-              />
-            )}
+            renderCell={(row, agent, cell) => {
+              const assignment = assignmentRows.find((item) => item.skill.id === row.key && item.agent === agent);
+              if (!assignment) return null;
+              return (
+                <SkillAgentCellActions
+                  skill={assignment.skill}
+                  skillName={row.label}
+                  assignment={{ key: assignment.key, agent: assignment.agent, cell: assignment.cell }}
+                  statusTitle={cell.title}
+                  selectedKeys={selectedKeys}
+                  selectDisabled={batchApply.executing}
+                  onToggleSelect={(key) =>
+                    setSelectedKeys((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(key)) next.delete(key);
+                      else next.add(key);
+                      return next;
+                    })
+                  }
+                  onAction={handleSkillAction}
+                />
+              );
+            }}
             emptyHint={
               search.trim() ? (
                 <EmptyState
