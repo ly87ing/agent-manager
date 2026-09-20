@@ -202,6 +202,26 @@ describe("助手实例", () => {
     expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
   });
 
+  it("新建实例使用整页分组编辑器，并实时列出全部落地位置与启动值", async () => {
+    renderWithEngine(<AgentsPage />, routes());
+    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    const dialog = await screen.findByRole("dialog", { name: "新建实例" });
+
+    expect(within(dialog).getByText("1. 选择归属助手")).toBeInTheDocument();
+    expect(within(dialog).getByText("2. 命名与存放位置")).toBeInTheDocument();
+    expect(within(dialog).getByText("3. 接口、账号与模型")).toBeInTheDocument();
+    expect(within(dialog).getByText("4. 运行参数")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("实例结果预览")).toBeInTheDocument();
+
+    await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-work");
+    expect(within(dialog).getByText("CLAUDE_CONFIG_DIR=~/.claude-cc-work")).toBeInTheDocument();
+    expect(within(dialog).getByText("~/.claude-cc-work/settings.json")).toBeInTheDocument();
+    expect(within(dialog).getByText("~/.claude-cc-work/.claude.json")).toBeInTheDocument();
+    expect(within(dialog).getByText("~/.claude-cc-work/skills")).toBeInTheDocument();
+    expect(within(dialog).getByTestId("profile-extra-args")).toHaveAttribute("rows", "4");
+    expect(within(dialog).getByRole("button", { name: "创建实例" })).toBeInTheDocument();
+  });
+
   it("实例表单同样给出该助手的常用参数", async () => {
     renderWithEngine(<AgentsPage />, routes());
     await userEvent.click(await screen.findByTestId("add-profile-button"));
