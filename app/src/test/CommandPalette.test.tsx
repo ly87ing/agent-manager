@@ -15,7 +15,44 @@ const dummySettings: SettingsData = {
   preferences: { logRetentionDays: 30 },
 };
 
-function routes(): Record<string, Envelope> {
+type TestRoute = Envelope | ((args: string[]) => Promise<Envelope>);
+
+function agentsStatus(active = "") {
+  return makeEnvelope(
+    {
+      domain: "agents",
+      elements: [
+        makeElement({
+          id: "agents:claude-code",
+          domain: "agents",
+          spec: {
+            display_name: "Claude Code",
+            bin: "claude",
+            settings: {
+              active,
+              profiles: {
+                kimi: {
+                  label: "Kimi Code",
+                  base_url: "https://api.moonshot.cn/anthropic",
+                  token_var: "KIMI_API_KEY",
+                  model: "kimi-k3[1m]",
+                },
+              },
+            },
+          },
+          policy: { enabled: true },
+          observed: { install_source: null, installed: true },
+          state: "managed-ok",
+          freshness: makeFreshness(),
+          actions: [],
+        }),
+      ],
+    },
+    { command: "agents.status" },
+  );
+}
+
+function routes(): Record<string, TestRoute> {
   return {
     "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode() }),
     "secrets:status": makeEnvelope(
@@ -32,24 +69,7 @@ function routes(): Record<string, Envelope> {
       },
       { command: "secrets.status" },
     ),
-    "agents:status": makeEnvelope(
-      {
-        domain: "agents",
-        elements: [
-          makeElement({
-            id: "agents:claude-code",
-            domain: "agents",
-            spec: { display_name: "Claude Code", bin: "claude" },
-            policy: { enabled: true },
-            observed: { install_source: null, installed: true },
-            state: "managed-ok",
-            freshness: makeFreshness(),
-            actions: [],
-          }),
-        ],
-      },
-      { command: "agents.status" },
-    ),
+    "agents:status": agentsStatus(),
     "skills:status": makeEnvelope(
       {
         domain: "skills",
@@ -164,5 +184,121 @@ describe("命令面板", () => {
     await userEvent.click(await screen.findByTestId("command-item-page:settings:secrets"));
 
     expect(await screen.findByRole("heading", { name: "密钥" }, { timeout: 10_000 })).toBeInTheDocument();
+  });
+
+  it("能搜索接入并一步切换，成功必须经过状态回读且带操作记录 id", async () => {
+    setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
+    let active = "";
+    const testRoutes = routes();
+    testRoutes["agents:status"] = async () => agentsStatus(active);
+    testRoutes["agents:configure"] = async (args) => {
+      active = args.includes("--use") ? args[args.indexOf("--use") + 1] : "";
+      return makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.configure" });
+    };
+    const { calls } = renderWithEngine(<App />, testRoutes);
+    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+
+    await openPalette();
+    await userEvent.type(screen.getByTestId("command-palette-input"), "Kimi Code");
+    await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:kimi"));
+
+    await screen.findByText("已切换 Claude Code 到 Kimi Code");
+    const configure = calls.find((call) => call.command === "agents:configure");
+    expect(configure?.args).toEqual(["--only", "agents:claude-code", "--use", "kimi"]);
+    expect(configure?.options?.runId).toMatch(/^gui-/);
+    expect(calls.filter((call) => call.command === "agents:status").length).toBeGreaterThanOrEqual(2);
+
+    await openPalette();
+    await userEvent.type(screen.getByTestId("command-palette-input"), "Kimi Code");
+    expect(await screen.findByTestId("command-item-connection:claude-code:kimi")).toBeDisabled();
+  });
+
+  it("切回助手默认账号使用 use-default，不复写不存在的 profile", async () => {
+    setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
+    let active = "kimi";
+    const testRoutes = routes();
+    testRoutes["agents:status"] = async () => agentsStatus(active);
+    testRoutes["agents:configure"] = async (args) => {
+      if (args.includes("--use-default")) active = "";
+      return makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.configure" });
+    };
+    const { calls } = renderWithEngine(<App />, testRoutes);
+    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+
+    await openPalette();
+    await userEvent.type(screen.getByTestId("command-palette-input"), "默认账号");
+    await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:default"));
+
+    await screen.findByText("已切换 Claude Code 到 助手默认账号");
+    expect(calls.find((call) => call.command === "agents:configure")?.args).toEqual([
+      "--only",
+      "agents:claude-code",
+      "--use-default",
+    ]);
+  });
+
+  it("外部修改时不冒充成功，确认后才携带 allow-takeover 重试", async () => {
+    setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
+    let active = "";
+    let attempts = 0;
+    const testRoutes = routes();
+    testRoutes["agents:status"] = async () => agentsStatus(active);
+    testRoutes["agents:configure"] = async (args) => {
+      attempts += 1;
+      if (!args.includes("--allow-takeover")) {
+        return makeEnvelope(
+          {},
+          {
+            command: "agents.configure",
+            ok: false,
+            errors: [{ code: "EXTERNAL_MODIFICATION", element: "agents:claude-code", message: "配置已被外部修改，拒绝覆盖" }],
+          },
+        );
+      }
+      active = "kimi";
+      return makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.configure" });
+    };
+    const { calls } = renderWithEngine(<App />, testRoutes);
+    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+
+    await openPalette();
+    await userEvent.type(screen.getByTestId("command-palette-input"), "Kimi Code");
+    await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:kimi"));
+
+    const confirm = await screen.findByRole("dialog", { name: "覆盖被改过的接入配置" });
+    expect(screen.queryByText("已切换 Claude Code 到 Kimi Code")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+    await waitFor(() => expect(confirm).not.toBeInTheDocument());
+    expect(attempts).toBe(2);
+    expect(calls.filter((call) => call.command === "agents:configure")[1]?.args).toEqual([
+      "--only",
+      "agents:claude-code",
+      "--use",
+      "kimi",
+      "--allow-takeover",
+    ]);
+  });
+
+  it("配置被拒绝时保留真实状态并说明失败，不弹接管确认", async () => {
+    setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
+    const testRoutes = routes();
+    testRoutes["agents:configure"] = async () =>
+      makeEnvelope(
+        {},
+        {
+          command: "agents.configure",
+          ok: false,
+          errors: [{ code: "MISSING_SECRET", element: "agents:claude-code", message: "凭据变量 KIMI_API_KEY 未配置" }],
+        },
+      );
+    renderWithEngine(<App />, testRoutes);
+    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+
+    await openPalette();
+    await userEvent.type(screen.getByTestId("command-palette-input"), "Kimi Code");
+    await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:kimi"));
+
+    expect(await screen.findByText("接入没有切换：凭据变量 KIMI_API_KEY 未配置")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "覆盖被改过的接入配置" })).not.toBeInTheDocument();
   });
 });

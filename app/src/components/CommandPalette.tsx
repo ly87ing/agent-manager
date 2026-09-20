@@ -1,11 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
+import { toast } from "sonner";
 import type { StatusData } from "../lib/contract";
+import { parseInitialToFormValues } from "../lib/agentDefinitionForm";
+import { useExecutions } from "../lib/execution";
 import { useEngineQuery } from "../lib/queries";
 import { useDirectApply } from "../lib/useDirectApply";
 import { useRefreshUpstream } from "../lib/queries";
 import { matchesKeyword } from "./SearchInput";
 import { cn } from "../lib/utils";
+import { ConfirmModal } from "./ConfirmModal";
 
 export interface CommandItem {
   id: string;
@@ -15,7 +19,17 @@ export interface CommandItem {
   /** 额外匹配词（英文名、命令名等）。 */
   keywords?: string;
   group: string;
+  /** 当前状态行仍可搜索，但不会重复执行写入。 */
+  disabled?: boolean;
+  current?: boolean;
   run: () => void;
+}
+
+interface ConnectionSwitchRequest {
+  agentId: string;
+  agentName: string;
+  profile: string;
+  profileLabel: string;
 }
 
 const PAGES: { key: string; label: string; keywords: string }[] = [
@@ -32,6 +46,17 @@ const PAGES: { key: string; label: string; keywords: string }[] = [
   { key: "settings:secrets", label: "密钥", keywords: "secrets 密钥 变量 token api key 凭据" },
   { key: "settings:aliases", label: "终端快捷命令", keywords: "aliases alias 别名 启动命令 时区" },
 ];
+
+function supportsConnectionSwitch(spec: Record<string, unknown>): boolean {
+  const bin = typeof spec.bin === "string" ? spec.bin.trim().replace(/\.exe$/i, "").split(/[\\/]/).pop() : "";
+  return bin === "claude" || bin === "codex";
+}
+
+function activeConnectionOf(data: StatusData | undefined, agentId: string): string | null {
+  const element = data?.elements.find((item) => item.id === `agents:${agentId}`);
+  if (!element) return null;
+  return parseInitialToFormValues(agentId, element.spec).activeConnection;
+}
 
 /**
  * 命令面板（⌘K）：一个入口搜到所有资源、页面与常用动作，键盘直接完成。
@@ -53,14 +78,68 @@ export function CommandPalette({
 }) {
   const [keyword, setKeyword] = useState("");
   const [active, setActive] = useState(0);
+  const [switchingTarget, setSwitchingTarget] = useState<string | null>(null);
+  const [pendingSwitch, setPendingSwitch] = useState<ConnectionSwitchRequest | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const switchBusyRef = useRef(false);
   const directApply = useDirectApply();
   const refreshUpstream = useRefreshUpstream();
+  const { execute } = useExecutions();
 
   const agents = useEngineQuery<StatusData>("agents:status", [], { enabled: open });
   const skills = useEngineQuery<StatusData>("skills:status", [], { enabled: open });
   const mcp = useEngineQuery<StatusData>("mcp:status", [], { enabled: open });
   const profiles = useEngineQuery<StatusData>("profiles:status", [], { enabled: open });
+  const refetchAgents = agents.refetch;
+
+  const switchConnection = useCallback(
+    async (request: ConnectionSwitchRequest, allowTakeover = false) => {
+      if (switchBusyRef.current) return;
+      switchBusyRef.current = true;
+      const target = `${request.agentId}/${request.profile || "default"}`;
+      setSwitchingTarget(target);
+      try {
+        const args = ["--only", `agents:${request.agentId}`];
+        args.push(...(request.profile ? ["--use", request.profile] : ["--use-default"]));
+        if (allowTakeover) args.push("--allow-takeover");
+
+        const envelope = await execute({
+          command: "agents:configure",
+          args,
+          label: `切换 ${request.agentName} 到 ${request.profileLabel}`,
+          silent: true,
+        });
+        if (!envelope) {
+          toast.error("切换调用失败，请查看操作记录后重试");
+          return;
+        }
+        if (!envelope.ok) {
+          const message = envelope.errors[0]?.message ?? "未知错误";
+          if (!allowTakeover && message.includes("拒绝覆盖")) {
+            setPendingSwitch(request);
+            return;
+          }
+          toast.error(`接入没有切换：${message}`);
+          return;
+        }
+
+        const refreshed = await refetchAgents();
+        const actual = refreshed.data?.ok ? activeConnectionOf(refreshed.data.data, request.agentId) : null;
+        if (actual !== request.profile) {
+          toast.error("写入已经返回成功，但状态回读没有确认新接入，请在助手页检查");
+          return;
+        }
+        setPendingSwitch(null);
+        toast.success(`已切换 ${request.agentName} 到 ${request.profileLabel}`, {
+          description: "助手下次启动生效；已经开着的要重启它。",
+        });
+      } finally {
+        switchBusyRef.current = false;
+        setSwitchingTarget(null);
+      }
+    },
+    [execute, refetchAgents],
+  );
 
   useEffect(() => {
     if (open) {
@@ -81,12 +160,16 @@ export function CommandPalette({
       run: () => onNavigate(page.key),
     }));
 
+    const profileIds = new Set(
+      (profiles.data?.ok ? profiles.data.data.elements : []).map((element) => element.id.replace(/^profiles:/, "")),
+    );
     for (const element of agents.data?.ok ? agents.data.data.elements : []) {
       const id = element.id.replace(/^agents:/, "");
       const spec = element.spec as { display_name?: string; bin?: string };
+      const displayName = spec.display_name ?? id;
       out.push({
         id: `agent:${id}`,
-        label: spec.display_name ?? id,
+        label: displayName,
         hint: "助手",
         keywords: `${id} ${spec.bin ?? ""}`,
         group: "资源",
@@ -100,6 +183,39 @@ export function CommandPalette({
         group: "资源",
         run: () => onOpenAgentSkills(id),
       });
+
+      if (!profileIds.has(id) && supportsConnectionSwitch(element.spec)) {
+        const form = parseInitialToFormValues(id, element.spec);
+        const options = [
+          { profile: "", label: "助手默认账号", baseUrl: "", model: "" },
+          ...form.connections.map((connection) => ({
+            profile: connection.name,
+            label: connection.label || connection.name,
+            baseUrl: connection.baseUrl,
+            model: connection.model,
+          })),
+        ];
+        for (const option of options) {
+          const current = form.activeConnection === option.profile;
+          const target = `${id}/${option.profile || "default"}`;
+          out.push({
+            id: `connection:${id}:${option.profile || "default"}`,
+            label: `${displayName} · ${option.label}`,
+            hint: current ? "当前接入" : switchingTarget === target ? "正在切换…" : "切换接入",
+            keywords: `${id} ${spec.bin ?? ""} ${option.profile} ${option.label} ${option.baseUrl} ${option.model} provider 供应商 接入 切换`,
+            group: "切换接入",
+            disabled: current || switchingTarget !== null,
+            current,
+            run: () =>
+              void switchConnection({
+                agentId: id,
+                agentName: displayName,
+                profile: option.profile,
+                profileLabel: option.label,
+              }),
+          });
+        }
+      }
     }
     for (const element of profiles.data?.ok ? profiles.data.data.elements : []) {
       const id = element.id.replace(/^profiles:/, "");
@@ -172,7 +288,7 @@ export function CommandPalette({
       },
     );
     return out;
-  }, [agents.data, skills.data, mcp.data, profiles.data, directApply, refreshUpstream, onNavigate, onOpenAgentSkills]);
+  }, [agents.data, skills.data, mcp.data, profiles.data, switchingTarget, directApply, refreshUpstream, switchConnection, onNavigate, onOpenAgentSkills]);
 
   const filtered = useMemo(
     () => items.filter((item) => matchesKeyword(keyword, [item.label, item.hint, item.keywords])),
@@ -183,9 +299,10 @@ export function CommandPalette({
     setActive((prev) => (prev >= filtered.length ? 0 : prev));
   }, [filtered.length]);
 
-  if (!open) return null;
+  if (!open && !pendingSwitch) return null;
 
   const runItem = (item: CommandItem) => {
+    if (item.disabled) return;
     item.run();
     onClose();
   };
@@ -197,7 +314,9 @@ export function CommandPalette({
   let renderIndex = -1;
 
   return (
-    <div
+    <>
+      {open && (
+        <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/40 p-4 pt-[12vh] animate-fade-in"
       onClick={(event) => event.target === event.currentTarget && onClose()}
     >
@@ -251,11 +370,19 @@ export function CommandPalette({
                       key={item.id}
                       type="button"
                       data-testid={`command-item-${item.id}`}
+                      disabled={item.disabled}
+                      aria-current={item.current ? "true" : undefined}
                       onMouseEnter={() => setActive(index)}
                       onClick={() => runItem(item)}
                       className={cn(
                         "flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm",
-                        index === active ? "bg-accent text-foreground" : "text-foreground hover:bg-accent/60",
+                        item.current
+                          ? "cursor-default bg-success/5 text-foreground"
+                          : item.disabled
+                            ? "cursor-wait text-muted-foreground"
+                            : index === active
+                              ? "bg-accent text-foreground"
+                              : "text-foreground hover:bg-accent/60",
                       )}
                     >
                       <span className="truncate">{item.label}</span>
@@ -271,6 +398,20 @@ export function CommandPalette({
           ↑↓ 选择 · Enter 执行 · Esc 关闭
         </div>
       </div>
-    </div>
+        </div>
+      )}
+      {pendingSwitch && (
+        <ConfirmModal
+          title="覆盖被改过的接入配置"
+          description={`${pendingSwitch.agentName} 的配置文件中，本工具负责的接入项已被外部修改。确认后会用“${pendingSwitch.profileLabel}”替换这些接入项，其他配置保持不变。`}
+          risk="write-local"
+          riskLabel="覆盖接入项"
+          confirmLabel="确认切换"
+          executing={switchingTarget !== null}
+          onConfirm={() => void switchConnection(pendingSwitch, true)}
+          onClose={() => setPendingSwitch(null)}
+        />
+      )}
+    </>
   );
 }

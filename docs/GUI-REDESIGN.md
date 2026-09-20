@@ -134,6 +134,12 @@ x-api-key，中转站两种都有）、模型、小任务模型、opus/sonnet/ha
 参数仍可在「管理助手」弹窗编辑；按 2026-09-20 裁决，该弹窗保存定义成功后会按既有条件执行
 一次真实写入，失败时定义已存但目标文件不动，并说明原因。
 
+`⌘K` 命令面板同时索引默认账号和每套接入。当前项标为「当前接入」且不可重复执行；选择其他项
+直接走 `agents:configure --use`（切回默认走 `--use-default`），写入带操作记录 ID。成功必须重新读取
+`agents:status` 并确认 active 已变化；普通失败保留真实状态并说明原因，只有引擎明确以外部修改拒绝
+覆盖时才弹出接管确认，确认后携带 `--allow-takeover` 重试。托盘仍只负责打开命令面板，不绕开
+可见反馈、锁、审计和确认路径。
+
 **Codex 侧**写同一份 `config.toml`——MCP 域也写它，因此按段落分工：本工具在这里拥有
 四个顶层键（`model_provider`、`model`、`approval_policy`、`sandbox_mode`）与带受管标记
 `# [agent-manager:managed]` 的 `[model_providers.*]` 段，其余行（含注释、用户自己的键、

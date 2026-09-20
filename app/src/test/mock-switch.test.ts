@@ -29,6 +29,7 @@ describe("dev-only mock 开关", () => {
       "skills:apply",
       "rules:apply",
       "system:refresh-upstream",
+      "agents:check",
     ]) {
       const envelope = await client.run(command);
       expect(envelope.ok, command).toBe(true);
@@ -58,5 +59,30 @@ describe("dev-only mock 开关", () => {
     ]) {
       expect(convergenceStates.has(state), `convergence ${state}`).toBe(true);
     }
+  });
+
+  it("mock client 可在无账号环境演示接入测试、切换与状态回读", async () => {
+    const client = createMockEngineClient();
+    const checked = await client.run("agents:check", ["--only", "agents:codex", "--use", "kimi"]);
+    expect(checked.ok).toBe(true);
+    expect((checked.data as { ok: boolean }).ok).toBe(true);
+
+    const switched = await client.run(
+      "agents:configure",
+      ["--only", "agents:codex", "--use", "kimi"],
+      { runId: "gui-mock-switch" },
+    );
+    expect(switched.ok).toBe(true);
+    expect(switched.run_id).toBe("gui-mock-switch");
+    const active = await client.run("agents:status");
+    const codex = (active.data as { elements: Array<{ id: string; spec: { settings?: { active?: string } } }> }).elements
+      .find((element) => element.id === "agents:codex");
+    expect(codex?.spec.settings?.active).toBe("kimi");
+
+    await client.run("agents:configure", ["--only", "agents:codex", "--use-default"]);
+    const restored = await client.run("agents:status");
+    const restoredCodex = (restored.data as { elements: Array<{ id: string; spec: { settings?: { active?: string } } }> }).elements
+      .find((element) => element.id === "agents:codex");
+    expect(restoredCodex?.spec.settings?.active).toBeUndefined();
   });
 });

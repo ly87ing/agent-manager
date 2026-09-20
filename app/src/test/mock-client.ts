@@ -51,7 +51,22 @@ function demoEnvelopes(): Record<string, Envelope> {
         makeElement({
           id: "agents:codex",
           domain: "agents",
-          spec: { display_name: "Codex", bin: "codex", preferred_provider: "native", providers: { native: { managed: true } } },
+          spec: {
+            display_name: "Codex",
+            bin: "codex",
+            preferred_provider: "native",
+            providers: { native: { managed: true } },
+            settings: {
+              profiles: {
+                kimi: {
+                  label: "Kimi Code",
+                  base_url: "https://api.kimi.com/coding/v1",
+                  token_var: "KIMI_API_KEY",
+                  model: "k3-256k",
+                },
+              },
+            },
+          },
           policy: { enabled: true, auto_install: true, auto_update: true, preferred_provider: "native" },
           observed: { install_source: "native", installed: true },
           state: "managed-ok",
@@ -636,6 +651,48 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
     );
   };
 
+  const configureAgent = (args: string[], runId: string): Envelope => {
+    const agentId = args[args.indexOf("--only") + 1];
+    const data = routes["agents:status"].data as {
+      elements: Array<{ id: string; spec: Record<string, unknown> }>;
+    };
+    const element = data.elements.find((item) => item.id === agentId);
+    if (!element) {
+      return makeEnvelope({}, {
+        command: "agents.configure",
+        ok: false,
+        errors: [{ code: "UNKNOWN_ELEMENT", element: agentId ?? null, message: `找不到助手:${agentId ?? ""}` }],
+      });
+    }
+
+    const current =
+      element.spec.settings && typeof element.spec.settings === "object" && !Array.isArray(element.spec.settings)
+        ? (element.spec.settings as Record<string, unknown>)
+        : {};
+    const next = structuredClone(current);
+    const useIndex = args.indexOf("--use");
+    if (useIndex >= 0) {
+      const profile = args[useIndex + 1];
+      const profiles = next.profiles;
+      if (!profile || !profiles || typeof profiles !== "object" || Array.isArray(profiles) || !(profile in profiles)) {
+        return makeEnvelope({}, {
+          command: "agents.configure",
+          ok: false,
+          errors: [{ code: "UNKNOWN_PROFILE", element: agentId, message: `找不到接入:${profile ?? ""}` }],
+        });
+      }
+      next.active = profile;
+    } else if (args.includes("--use-default")) {
+      delete next.active;
+    }
+    element.spec.settings = next;
+    recordRun(runId, "agents.configure");
+    return makeEnvelope(
+      { domain: "agents", steps: [{ name: "agent-settings", ok: true, exit_code: 0 }], skipped: [] },
+      { command: "agents.configure", run_id: runId, lock: { held: true, pid: 4242 } },
+    );
+  };
+
   return {
     async run(command, args = [], runOptions = {}) {
       // 模拟进程耗时，让加载/进行中的 UI 状态可见
@@ -690,6 +747,13 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
         return makeEnvelope(
           { run_id: id, operations: [{ id: "op-mock", operation_type: "mcp:apply", target: "mcp:grok-search", detail: { result: "ok" }, created_at: "2026-09-05T23:59:00Z" }] },
           { command: "runs.get" },
+        );
+      }
+      if (command === "agents:configure") return configureAgent(args, runId);
+      if (command === "agents:check") {
+        return makeEnvelope(
+          { ok: true, detail: "模拟连接正常", latency_ms: 128 },
+          { command: "agents.check" },
         );
       }
       if (command.endsWith(":apply")) {
