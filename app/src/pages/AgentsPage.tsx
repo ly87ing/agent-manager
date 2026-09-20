@@ -7,6 +7,14 @@ import { ProfileCard } from "../components/ProfileCards";
 import { ProfileFormDialog } from "../components/ProfileFormDialog";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { DefinitionFormDialog } from "../components/DefinitionFormDialog";
+import {
+  ConnectionFormDialog,
+  type ConnectionSubmission,
+} from "../components/ConnectionFormDialog";
+import {
+  ConnectionWorkbench,
+  connectionKindOf,
+} from "../components/ConnectionWorkbench";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { EmptyState } from "../components/EmptyState";
 import { FirstRunGuide } from "../components/FirstRunGuide";
@@ -31,7 +39,7 @@ import {
 import { runEngine } from "../lib/engine";
 import { toastWithUndo } from "../lib/undo";
 import { definitionOrigin } from "../lib/definitionOverlay";
-import { activeConnectionOf, connectionsOf, hasAgentSettings } from "../lib/agentDefinitionForm";
+import { connectionsOf, hasAgentSettings, upsertAgentConnection } from "../lib/agentDefinitionForm";
 import type { AgentsObserved, AgentsPolicy, AgentsSpec } from "../lib/observed";
 import { useEngineQuery, useRefreshUpstream } from "../lib/queries";
 import { COPY, versionRangeHint } from "../lib/ui-copy";
@@ -121,10 +129,6 @@ function AgentCard({
   aliasEffect,
   policyBusy,
   onToggleEnabled,
-  onSwitchConnection,
-  connectionBusy,
-  onCheckConnection,
-  check,
 }: {
   element: EngineElement;
   /** true = 定义来自本地数据库（用户新增或改过内置定义）：安装/升级先弹确认。 */
@@ -148,14 +152,6 @@ function AgentCard({
   /** 偏好写入在途：期间禁用菜单里的启停项，避免连点写出交错结果。 */
   policyBusy: boolean;
   onToggleEnabled: (next: boolean) => void;
-  /** 切换生效的接入配置；空字符串表示切回助手自带的账号与地址。 */
-  onSwitchConnection: (name: string) => void;
-  /** 接入配置写入在途。 */
-  connectionBusy: boolean;
-  /** 测一下当前这套接入配置能不能用。 */
-  onCheckConnection: (name: string) => void;
-  /** 当前这套的检查结果；没测过为 undefined。 */
-  check?: { ok: boolean; detail: string; latencyMs: number; pending?: boolean };
 }) {
   /** 本卡直执路径在途的动作 id（点击即置位，apply 结束回落）。 */
   const [localActionId, setLocalActionId] = useState<string | null>(null);
@@ -167,9 +163,6 @@ function AgentCard({
   const version = installed ? (element.freshness.current ?? "已安装（还没检查过版本）") : "未安装";
   const name = spec.display_name ?? element.id;
   const busyActionId = localActionId ?? runningActionId;
-  // 接入配置存在定义里，切换即写助手的配置文件
-  const connections = connectionsOf(element.spec as Record<string, unknown>);
-  const activeConnection = activeConnectionOf(element.spec as Record<string, unknown>);
 
   /** 显式动作点击直接 agents:apply（带精确 --only/--action）；卸载先经独立 ConfirmModal，
    * 自定义定义的安装/升级也先经 ConfirmModal（命令内容由用户定义提供）。
@@ -221,48 +214,6 @@ function AgentCard({
         <div className="mt-3 rounded-md border px-3 py-2">
           <AgentUsageBar usage={observed.usage} testId={`agent-usage-${element.id}`} />
         </div>
-      )}
-
-      {connections.length > 0 && (
-        <div className="mt-3 flex items-center gap-2 text-xs">
-          <span className="shrink-0 text-muted-foreground">接入</span>
-          <select
-            data-testid={`switch-connection-${element.id}`}
-            aria-label={`${name} 的接入配置`}
-            disabled={connectionBusy}
-            value={activeConnection ?? ""}
-            onChange={(event) => onSwitchConnection(event.target.value)}
-            className="min-w-0 flex-1 rounded border bg-card px-2 py-1 text-xs disabled:opacity-50"
-          >
-            <option value="">默认（助手自己的账号）</option>
-            {connections.map((item) => (
-              <option key={item.name} value={item.name}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-          {activeConnection && (
-            <button
-              type="button"
-              data-testid={`check-connection-${element.id}`}
-              disabled={check?.pending}
-              onClick={() => onCheckConnection(activeConnection)}
-              title="发一个最小请求，确认地址、令牌与模型名都对（这一下会联网）"
-              className="shrink-0 rounded border px-2 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
-            >
-              {check?.pending ? "测中…" : "测一下"}
-            </button>
-          )}
-        </div>
-      )}
-      {check && !check.pending && (
-        <p
-          data-testid={`check-result-${element.id}`}
-          className={cn("mt-1 text-xs", check.ok ? "text-success" : "text-destructive")}
-        >
-          {check.detail}
-          {check.ok && check.latencyMs > 0 && <span className="ml-1 text-muted-foreground">{check.latencyMs}ms</span>}
-        </p>
       )}
 
       {policy.enabled === false && (
@@ -338,7 +289,7 @@ function AgentCard({
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
-        <button type="button" onClick={onEdit} className="rounded border px-2.5 py-1 text-xs">编辑命令</button>
+        <button type="button" onClick={onEdit} className="rounded border px-2.5 py-1 text-xs">管理助手</button>
         <button
           type="button"
           data-testid={`manage-skills-${element.id}`}
@@ -432,6 +383,11 @@ export default function AgentsPage({
   const [profileDuplicating, setProfileDuplicating] = useState(false);
   const [profileRemoving, setProfileRemoving] = useState<string | null>(null);
   const [policyBusy, setPolicyBusy] = useState(false);
+  /** 日常接入工作台当前查看的主助手；null 时跟随列表里的第一个。 */
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [connectionFormAgent, setConnectionFormAgent] = useState<EngineElement | null>(null);
+  const [connectionSaving, setConnectionSaving] = useState(false);
+  const [connectionFormError, setConnectionFormError] = useState<string | null>(null);
   /** 接入配置的检查结果：按「助手/配置名」存，卡片与弹窗都读它。 */
   const [checkResults, setCheckResults] = useState<
     Record<string, { ok: boolean; detail: string; latencyMs: number; pending?: boolean }>
@@ -448,7 +404,9 @@ export default function AgentsPage({
   const [pendingConfigure, setPendingConfigure] = useState<
     { agentId: string; yolo: boolean; use?: string; reason: "yolo" | "takeover" } | null
   >(null);
-  const [configuring, setConfiguring] = useState(false);
+  /** 正在写入哪一个助手/接入；非空时禁止并发切换。 */
+  const [configuringTarget, setConfiguringTarget] = useState<string | null>(null);
+  const configuring = configuringTarget !== null;
   /** 确认弹窗路径（卸载/自定义定义安装升级）在途动作：弹窗确认即关闭，卡片按钮据此保持执行态直到 apply 结束。 */
   const [runningAction, setRunningAction] = useState<{ elementId: string; actionId: string } | null>(null);
   const [search, setSearch] = useState("");
@@ -472,7 +430,12 @@ export default function AgentsPage({
   const profileElements = profilesQuery.data?.ok ? profilesQuery.data.data.elements : [];
   const profileIds = new Set(profileElements.map((element) => element.id.replace(/^profiles:/, "")));
   /** 主助手（非实例）：只有它们参与安装渠道展示与「新建实例」。 */
+  const allPrimaryElements = elements.filter((element) => !profileIds.has(element.id.replace(/^agents:/, "")));
   const primaryElements = filteredElements.filter((element) => !profileIds.has(element.id.replace(/^agents:/, "")));
+  const effectiveSelectedAgentId =
+    selectedAgentId && allPrimaryElements.some((element) => element.id === selectedAgentId)
+      ? selectedAgentId
+      : allPrimaryElements[0]?.id ?? null;
   /** 可作为实例归属的助手：目前只有 Claude Code 与 Codex 有隔离配置目录的官方支持。 */
   const profileCapableAgents = elements
     .map((element) => ({ id: element.id.replace(/^agents:/, ""), spec: element.spec as AgentsSpec }))
@@ -491,35 +454,39 @@ export default function AgentsPage({
   const runConfigure = async (
     agentId: string,
     opts: { allowYolo?: boolean; allowTakeover?: boolean; use?: string } = {},
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     const args = ["--only", `agents:${agentId}`];
     // 切换与写入是一条命令：库里的生效项和目标文件要么一起变，要么都不变
     if (opts.use !== undefined) args.push(...(opts.use ? ["--use", opts.use] : ["--use-default"]));
     if (opts.allowYolo) args.push("--allow-yolo");
     if (opts.allowTakeover) args.push("--allow-takeover");
-    setConfiguring(true);
+    const target = opts.use !== undefined ? `${agentId}/${opts.use || "default"}` : `${agentId}/settings`;
+    setConfiguringTarget(target);
     try {
       const envelope = await runEngine("agents:configure", args);
       if (envelope.ok) {
+        // 以 status 的真实回读更新界面，再宣布成功；不靠本地乐观改状态。
+        await query.refetch();
         toast.success(opts.use !== undefined ? `已切换 ${agentId} 的接入配置` : `已写入 ${agentId} 的运行参数`, {
           description: "助手下次启动生效；已经开着的要重启它。",
         });
-        void query.refetch();
-        return;
+        return true;
       }
       const message = envelope.errors[0]?.message ?? "未知错误";
       // 外部改过：让用户看清再决定要不要用这里的内容替换
       if (!opts.allowTakeover && message.includes("拒绝覆盖")) {
         setPendingConfigure({ agentId, yolo: opts.allowYolo === true, use: opts.use, reason: "takeover" });
-        return;
+        return false;
       }
       toast.error(`运行参数没写进去:${message}`, {
         description: "定义已经存下了，助手的配置文件没动。",
       });
+      return false;
     } catch (err) {
       toast.error(`运行参数没写进去:${String(err)}`);
+      return false;
     } finally {
-      setConfiguring(false);
+      setConfiguringTarget(null);
     }
   };
 
@@ -553,6 +520,54 @@ export default function AgentsPage({
         ...prev,
         [key]: { ok: false, detail: String(err), latencyMs: 0 },
       }));
+    }
+  };
+
+  /**
+   * 聚焦式新增接入：先保存完整助手定义，再按需保存 Claude 凭据，最后才执行启用。
+   * 后一步失败时不冒充原子成功；已保存的定义仍会回读到卡片，用户可直接重试。
+   */
+  const saveConnection = async (element: EngineElement, submission: ConnectionSubmission) => {
+    if (connectionSaving) return;
+    const agentId = element.id.replace(/^agents:/, "");
+    setConnectionSaving(true);
+    setConnectionFormError(null);
+    try {
+      const definition = upsertAgentConnection(
+        element.spec as Record<string, unknown>,
+        submission.connection,
+      );
+      const saved = await definitionOps.saveDefinition({ name: agentId, definition, isNew: false });
+      if (!saved) {
+        setConnectionFormError("接入没有保存，请根据提示修正后重试");
+        return;
+      }
+
+      if (submission.secretValue) {
+        const secret = await runEngine("secrets:set", [
+          "--var",
+          submission.connection.tokenVar,
+          "--value",
+          submission.secretValue,
+        ]);
+        if (!secret.ok) {
+          await query.refetch();
+          setConnectionFormError(
+            `接入已保存，但凭据没有存下：${secret.errors[0]?.message ?? "请修正后重试，或从外部环境提供这个变量"}`,
+          );
+          return;
+        }
+      }
+
+      setConnectionFormAgent(null);
+      await query.refetch();
+      if (submission.activate) {
+        await runConfigure(agentId, { use: submission.connection.name });
+      }
+    } catch (err) {
+      setConnectionFormError(`保存接入失败:${String(err)}`);
+    } finally {
+      setConnectionSaving(false);
     }
   };
 
@@ -762,9 +777,32 @@ export default function AgentsPage({
   const pendingActionLabel = pendingAction ? (ACTION_META[pendingAction.action.id]?.label ?? pendingAction.action.id) : "";
   return (
     <div className="space-y-4">
-      <PageHeader title="助手" description="本机各 AI 助手的版本、额度与启动命令。内置助手安装/升级点击后直接执行；自定义定义的安装/升级与卸载需先确认。" />
+      <PageHeader title="助手" description="先选择助手和接入，再处理安装、版本与启动命令。" />
       <FirstRunGuide show={freshInstall} onGoTakeover={onGoTakeover} />
       {query.data.errors.length > 0 && <ErrorPanel title="agents:status 错误" errors={query.data.errors} />}
+      <ConnectionWorkbench
+        agents={allPrimaryElements}
+        selectedAgentId={effectiveSelectedAgentId}
+        busyTarget={configuringTarget}
+        checkResults={checkResults}
+        onSelectAgent={setSelectedAgentId}
+        onAdd={(element) => {
+          setConnectionFormError(null);
+          setConnectionFormAgent(element);
+        }}
+        onSwitch={(element, connection) =>
+          void runConfigure(element.id.replace(/^agents:/, ""), { use: connection })
+        }
+        onCheck={(element, connection) =>
+          void runCheck(element.id.replace(/^agents:/, ""), connection)
+        }
+      />
+      <div className="pt-2">
+        <h2 className="text-base font-semibold text-foreground">安装与维护</h2>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          低频操作集中在这里：版本、启动命令、技能与助手定义。
+        </p>
+      </div>
       <div className="flex items-center justify-between gap-3">
         <SearchInput value={search} onChange={setSearch} placeholder="搜索助手…" testId="agents-search" />
         <div className="flex shrink-0 items-center gap-2">
@@ -827,18 +865,6 @@ export default function AgentsPage({
               }
               policyBusy={policyBusy}
               onToggleEnabled={(next) => void toggleEnabled(element.id.replace(/^agents:/, ""), next)}
-              connectionBusy={configuring}
-              onSwitchConnection={(useName) =>
-                void runConfigure(element.id.replace(/^agents:/, ""), { use: useName })
-              }
-              onCheckConnection={(profile) =>
-                void runCheck(element.id.replace(/^agents:/, ""), profile)
-              }
-              check={
-                checkResults[
-                  `${element.id.replace(/^agents:/, "")}/${activeConnectionOf(element.spec as Record<string, unknown>) ?? ""}`
-                ]
-              }
             />
           ))}
         </div>
@@ -959,6 +985,21 @@ export default function AgentsPage({
           </div>
         )}
       </section>
+
+      {connectionFormAgent && connectionKindOf(connectionFormAgent) && (
+        <ConnectionFormDialog
+          agentName={(connectionFormAgent.spec as AgentsSpec).display_name ?? connectionFormAgent.id.replace(/^agents:/, "")}
+          kind={connectionKindOf(connectionFormAgent)!}
+          existingNames={connectionsOf(connectionFormAgent.spec as Record<string, unknown>).map((item) => item.name)}
+          busy={connectionSaving}
+          error={connectionFormError}
+          onSubmit={(submission) => void saveConnection(connectionFormAgent, submission)}
+          onClose={() => {
+            setConnectionFormAgent(null);
+            setConnectionFormError(null);
+          }}
+        />
+      )}
 
       {profileForm && (
         <ProfileFormDialog

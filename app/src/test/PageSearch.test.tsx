@@ -171,20 +171,21 @@ describe("页内搜索：助手页", () => {
   it("按名称大小写不敏感过滤卡片；无匹配时给出空态与清除入口", async () => {
     renderWithEngine(<AgentsPage />, agentsRoutes());
     const input = await screen.findByTestId("agents-search");
-    expect(screen.getByRole("heading", { name: /Claude Code/ })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /Codex/ })).toBeInTheDocument();
+    // 搜索只过滤下方安装维护卡片；上方日常工作台保持可用，因此精确断言卡片的 h3。
+    expect(screen.getByRole("heading", { level: 3, name: /Claude Code/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: /Codex/ })).toBeInTheDocument();
 
     await userEvent.type(input, "CLAUDE");
-    expect(screen.getByRole("heading", { name: /Claude Code/ })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: /Codex/ })).toBeNull();
+    expect(screen.getByRole("heading", { level: 3, name: /Claude Code/ })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 3, name: /Codex/ })).toBeNull();
 
     await userEvent.clear(input);
     await userEvent.type(input, "不存在的助手");
     expect(await screen.findByTestId("agents-search-empty")).toHaveTextContent("无匹配结果");
 
     await userEvent.click(screen.getByRole("button", { name: "清除搜索关键词" }));
-    expect(screen.getByRole("heading", { name: /Claude Code/ })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /Codex/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: /Claude Code/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: /Codex/ })).toBeInTheDocument();
   });
 });
 

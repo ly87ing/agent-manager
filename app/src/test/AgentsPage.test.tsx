@@ -307,7 +307,7 @@ describe("Agents 页文案", () => {
 
     // 常用动作留在主行，破坏性动作收进「更多」
     expect(screen.getByTestId("action-upgrade-agents:claude-code")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "编辑命令" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "管理助手" })).toBeInTheDocument();
     expect(screen.queryByTestId("action-uninstall-agents:claude-code")).toBeNull();
     await openCardMenu();
     expect(screen.getByTestId("menu-uninstall-agents:claude-code")).toBeInTheDocument();

@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { waitFor } from "@testing-library/react";
 import AgentsPage from "../pages/AgentsPage";
 import { makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
-import { renderWithEngine, screen, userEvent } from "./render-with-engine";
-import type { Envelope } from "../lib/contract";
+import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
+import type { EngineElement, Envelope } from "../lib/contract";
 
 /**
  * 助手运行参数：保存即写进助手自己的配置文件。
@@ -44,6 +44,10 @@ function routes(overrides: Record<string, Envelope> = {}): Record<string, Envelo
       { domain: "agents", action: "configure", element: "agents:claude-code" },
       { command: "agents.configure" },
     ),
+    "secrets:set": makeEnvelope(
+      { domain: "secrets", variable: "RELAY_KEY", stored: true },
+      { command: "secrets.set" },
+    ),
     "sources:get": makeEnvelope(
       {
         sources: [
@@ -65,7 +69,7 @@ function routes(overrides: Record<string, Envelope> = {}): Record<string, Envelo
 }
 
 async function openEditor() {
-  await userEvent.click(await screen.findByRole("button", { name: "编辑命令" }));
+  await userEvent.click(await screen.findByRole("button", { name: "管理助手" }));
   return screen.findByRole("dialog");
 }
 
@@ -74,7 +78,7 @@ async function addConnection() {
   await userEvent.click(screen.getByTestId("add-connection"));
 }
 
-function configureCalls(calls: { command: string; args?: string[] }[]) {
+function configureCalls<T extends { command: string }>(calls: T[]): T[] {
   return calls.filter((call) => call.command === "agents:configure");
 }
 
@@ -284,7 +288,7 @@ describe("助手运行参数", () => {
     expect(definition.settings.profiles.relay2.base_url).toBe("https://b.example.com");
   });
 
-  it("卡片上直接切换接入配置：一条命令带 --use，切回默认带 --use-default", async () => {
+  it("工作台一键切换接入：一条命令带 --use，切回默认带 --use-default", async () => {
     const withProfiles = routes();
     const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
     status.data.elements[0].spec.settings = {
@@ -296,10 +300,10 @@ describe("助手运行参数", () => {
     };
     const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
 
-    const picker = await screen.findByTestId("switch-connection-agents:claude-code");
-    expect(picker).toHaveValue("relay");
+    expect(await screen.findByTestId("active-connection-summary")).toHaveTextContent("我的中转");
+    expect(within(screen.getByTestId("connection-card-claude-code-relay")).getByText("当前接入")).toBeInTheDocument();
 
-    await userEvent.selectOptions(picker, "official");
+    await userEvent.click(screen.getByTestId("activate-connection-claude-code-official"));
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
     expect(configureCalls(calls)[0].args).toEqual([
       "--only",
@@ -308,7 +312,7 @@ describe("助手运行参数", () => {
       "official",
     ]);
 
-    await userEvent.selectOptions(picker, "");
+    await userEvent.click(screen.getByTestId("activate-connection-claude-code-default"));
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(2));
     expect(configureCalls(calls)[1].args).toEqual([
       "--only",
@@ -340,8 +344,8 @@ describe("助手运行参数", () => {
     };
     const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
 
-    await userEvent.click(await screen.findByTestId("check-connection-agents:claude-code"));
-    const result = await screen.findByTestId("check-result-agents:claude-code");
+    await userEvent.click(await screen.findByTestId("check-connection-claude-code-relay"));
+    const result = await screen.findByTestId("check-result-claude-code-relay");
     expect(result).toHaveTextContent("通了");
     expect(result).toHaveTextContent("432ms");
 
@@ -376,16 +380,179 @@ describe("助手运行参数", () => {
     };
     renderWithEngine(<AgentsPage />, withProfiles);
 
-    await userEvent.click(await screen.findByTestId("check-connection-agents:claude-code"));
-    const result = await screen.findByTestId("check-result-agents:claude-code");
+    await userEvent.click(await screen.findByTestId("check-connection-claude-code-relay"));
+    const result = await screen.findByTestId("check-result-claude-code-relay");
     expect(result).toHaveTextContent("RELAY_KEY");
     expect(result).toHaveTextContent("密钥页");
   });
 
-  it("没配接入配置的助手：卡片上不出现切换器", async () => {
+  it("没配接入配置的助手：工作台明确展示默认账号和新增入口", async () => {
     renderWithEngine(<AgentsPage />, routes());
-    await screen.findByRole("button", { name: "编辑命令" });
-    expect(screen.queryByTestId("switch-connection-agents:claude-code")).toBeNull();
+    expect(await screen.findByTestId("connection-card-claude-code-default")).toHaveTextContent("当前接入");
+    expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("助手默认账号");
+    expect(screen.getByTestId("add-connection-button")).toBeEnabled();
+    expect(screen.getByText(/目前只有助手默认账号/)).toBeInTheDocument();
+  });
+
+  it("切换执行中只锁接入动作，并在按钮上展示真实进行态", async () => {
+    const deferred: { release?: () => void } = {};
+    const pendingRoutes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
+    const status = pendingRoutes["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.settings = {
+      profiles: {
+        relay: { label: "我的中转", base_url: "https://relay.example.com" },
+        official: { label: "官方", base_url: "https://api.anthropic.com" },
+      },
+    };
+    pendingRoutes["agents:configure"] = () =>
+      new Promise<Envelope>((resolve) => {
+        deferred.release = () => resolve(makeEnvelope(
+          { domain: "agents", action: "configure", element: "agents:claude-code" },
+          { command: "agents.configure" },
+        ));
+      });
+    renderWithEngine(<AgentsPage />, pendingRoutes);
+
+    const activate = await screen.findByTestId("activate-connection-claude-code-relay");
+    await userEvent.click(activate);
+    await waitFor(() => expect(activate).toHaveTextContent("正在启用"));
+    expect(activate).toBeDisabled();
+    expect(screen.getByTestId("activate-connection-claude-code-official")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "管理助手" })).toBeEnabled();
+
+    deferred.release?.();
+    await waitFor(() => expect(activate).toHaveTextContent("启用"));
+  });
+
+  it("从厂商预设新增接入：保留完整定义，凭据单独保存，成功后再启用", async () => {
+    const withExisting = routes();
+    const status = withExisting["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.custom_meta = { owner: "local" };
+    status.data.elements[0].spec.settings = {
+      active: "official",
+      yolo: true,
+      unknown_runtime_flag: "keep-me",
+      profiles: { official: { label: "官方", custom_profile_flag: 7 } },
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, withExisting);
+
+    await userEvent.click(await screen.findByTestId("add-connection-button"));
+    await screen.findByRole("dialog", { name: "为 Claude Code 添加接入" });
+    await userEvent.click(screen.getByTestId("connection-preset-kimi-cn-claude"));
+    expect(screen.getByTestId("new-connection-base-url")).toHaveValue("https://api.moonshot.cn/anthropic");
+    await userEvent.click(screen.getByTestId("new-connection-advanced"));
+    expect(screen.getByTestId("new-connection-alias-opus")).toHaveValue("kimi-k3[1m]");
+    await userEvent.clear(screen.getByTestId("new-connection-alias-opus"));
+    await userEvent.type(screen.getByTestId("new-connection-alias-opus"), "custom-opus");
+    await userEvent.type(screen.getByTestId("new-connection-secret"), "fake-secret-value");
+    await userEvent.click(screen.getByTestId("connection-form-submit"));
+
+    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
+    const saved = calls.find((call) => call.command === "policy:set")!;
+    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
+    expect(definition.custom_meta).toEqual({ owner: "local" });
+    expect(definition.settings.yolo).toBe(true);
+    expect(definition.settings.unknown_runtime_flag).toBe("keep-me");
+    expect(definition.settings.active).toBe("official");
+    expect(definition.settings.profiles.official).toEqual({ label: "官方", custom_profile_flag: 7 });
+    expect(definition.settings.profiles["kimi-cn"]).toMatchObject({
+      label: "Kimi（国内）",
+      base_url: "https://api.moonshot.cn/anthropic",
+      token_var: "KIMI_API_KEY",
+      model: "kimi-k3[1m]",
+      model_aliases: {
+        opus: "custom-opus",
+        sonnet: "kimi-k3[1m]",
+        haiku: "kimi-k2.7-code",
+      },
+    });
+    const secret = calls.find((call) => call.command === "secrets:set")!;
+    expect(secret.args).toEqual(["--var", "KIMI_API_KEY", "--value", "fake-secret-value"]);
+    expect(configureCalls(calls)[0].args).toEqual([
+      "--only",
+      "agents:claude-code",
+      "--use",
+      "kimi-cn",
+    ]);
+    expect(calls.indexOf(saved)).toBeLessThan(calls.indexOf(secret));
+    expect(calls.indexOf(secret)).toBeLessThan(calls.indexOf(configureCalls(calls)[0]));
+  });
+
+  it("凭据保存被拒绝：保留弹窗和输入，说明已保存到哪一步且不继续启用", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routes({
+      "secrets:set": makeEnvelope(
+        {},
+        {
+          command: "secrets.set",
+          ok: false,
+          errors: [{ code: "SECRET_ERROR", element: null, message: "系统钥匙串暂时不可用" }],
+        },
+      ),
+    }));
+
+    await userEvent.click(await screen.findByTestId("add-connection-button"));
+    await userEvent.click(screen.getByTestId("connection-preset-kimi-cn-claude"));
+    await userEvent.type(screen.getByTestId("new-connection-secret"), "fake-secret-value");
+    await userEvent.click(screen.getByTestId("connection-form-submit"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("接入已保存，但凭据没有存下");
+    expect(screen.getByRole("alert")).toHaveTextContent("系统钥匙串暂时不可用");
+    expect(screen.getByTestId("new-connection-secret")).toHaveValue("fake-secret-value");
+    expect(screen.getByRole("dialog", { name: "为 Claude Code 添加接入" })).toBeInTheDocument();
+    expect(calls.some((call) => call.command === "policy:set")).toBe(true);
+    expect(configureCalls(calls)).toHaveLength(0);
+  });
+
+  it("新增接入取消：关闭弹窗并恢复焦点，零定义、凭据和配置写入", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routes());
+    const add = await screen.findByTestId("add-connection-button");
+    await userEvent.click(add);
+    await screen.findByRole("dialog", { name: "为 Claude Code 添加接入" });
+    await userEvent.click(screen.getByTestId("connection-preset-deepseek-claude"));
+    await userEvent.keyboard("{Escape}");
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "为 Claude Code 添加接入" })).toBeNull());
+    expect(document.activeElement).toBe(add);
+    expect(calls.some((call) => ["policy:set", "secrets:set", "agents:configure"].includes(call.command))).toBe(false);
+  });
+
+  it("自定义接入把校验错误留在弹窗里说明", async () => {
+    renderWithEngine(<AgentsPage />, routes());
+    await userEvent.click(await screen.findByTestId("add-connection-button"));
+    await userEvent.click(screen.getByTestId("connection-preset-custom"));
+    await userEvent.click(screen.getByTestId("connection-form-submit"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("接口地址必须是 https://");
+    expect(screen.getByRole("dialog", { name: "为 Claude Code 添加接入" })).toBeInTheDocument();
+  });
+
+  it("工作台可切换助手，并展示所选助手自己的当前接入", async () => {
+    const twoAgents = routes();
+    const status = twoAgents["agents:status"] as { data: { elements: EngineElement[] } };
+    status.data.elements.push(makeElement({
+      id: "agents:codex",
+      domain: "agents",
+      spec: {
+        display_name: "Codex",
+        bin: "codex",
+        providers: { native: { managed: true } },
+        settings: {
+          active: "glm",
+          profiles: { glm: { label: "GLM Coding", base_url: "https://open.bigmodel.cn/api/v1" } },
+        },
+      },
+      policy: { enabled: true },
+      observed: { install_source: "native", installed: true },
+      state: "managed-ok",
+      freshness: makeFreshness(),
+      actions: [],
+    }));
+    renderWithEngine(<AgentsPage />, twoAgents);
+
+    expect(await screen.findByTestId("active-connection-summary")).toHaveTextContent("助手默认账号");
+    await userEvent.click(screen.getByTestId("connection-agent-codex"));
+    expect(screen.getByRole("heading", { name: "Codex 接入工作台" })).toBeInTheDocument();
+    expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("GLM Coding");
   });
 
   it("Codex 也能配接入配置，但没有认证方式与状态栏那两项", async () => {
@@ -408,5 +575,21 @@ describe("助手运行参数", () => {
     await openEditor();
     expect(screen.queryByTestId("add-connection")).toBeNull();
     expect(screen.queryByTestId("agent-yolo-checkbox")).toBeNull();
+  });
+
+  it("不支持应用内接入的助手：历史 profiles 只读可见，不露出必失败的启用与测试动作", async () => {
+    const unsupported = agentRoutes("opencode", "opencode");
+    const status = unsupported["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.settings = {
+      active: "relay",
+      profiles: { relay: { label: "历史接入", base_url: "https://relay.example.com" } },
+    };
+    renderWithEngine(<AgentsPage />, unsupported);
+
+    expect(await screen.findByText(/暂不支持在应用内切换接入/)).toBeInTheDocument();
+    expect(screen.getByTestId("connection-card-opencode-relay")).toHaveTextContent("历史接入");
+    expect(screen.queryByTestId("activate-connection-opencode-default")).toBeNull();
+    expect(screen.queryByTestId("check-connection-opencode-relay")).toBeNull();
+    expect(screen.getByTestId("add-connection-button")).toBeDisabled();
   });
 });

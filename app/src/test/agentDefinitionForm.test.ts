@@ -6,6 +6,7 @@ import {
   extractUnknownFields,
   getProviderNames,
   parseInitialToFormValues,
+  upsertAgentConnection,
   updateCommandWithPlatform,
 } from "../lib/agentDefinitionForm";
 
@@ -36,6 +37,57 @@ describe("agentDefinitionForm helpers", () => {
         },
       })
     ).toEqual(["native", "npm"]);
+  });
+
+  it("新增接入只替换目标 profile，并保留未知设置、其他接入和当前生效项", () => {
+    const initial = {
+      display_name: "Claude Code",
+      bin: "claude",
+      custom_meta: { owner: "local" },
+      settings: {
+        active: "official",
+        yolo: true,
+        unknown_runtime_flag: "keep-me",
+        profiles: {
+          official: { label: "官方", custom_profile_flag: 7 },
+        },
+      },
+    };
+
+    const result = upsertAgentConnection(
+      initial,
+      {
+        name: "relay",
+        label: "我的中转",
+        baseUrl: "https://relay.example.com",
+        auth: "token",
+        tokenVar: "RELAY_KEY",
+        model: "relay-model",
+        smallFastModel: "",
+        aliasOpus: "",
+        aliasSonnet: "",
+        aliasHaiku: "",
+        timeoutMs: "30000",
+      },
+    );
+
+    expect(result).toEqual({
+      ...initial,
+      settings: {
+        ...initial.settings,
+        profiles: {
+          ...initial.settings.profiles,
+          relay: {
+            label: "我的中转",
+            base_url: "https://relay.example.com",
+            token_var: "RELAY_KEY",
+            model: "relay-model",
+            timeout_ms: 30000,
+          },
+        },
+      },
+    });
+    expect(result).not.toBe(initial);
   });
 
   it("extractCommandForPlatform extracts plain string and platform-specific mapping", () => {

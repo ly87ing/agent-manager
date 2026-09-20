@@ -63,6 +63,59 @@ export function emptyConnection(name = ""): ConnectionEntry {
 
 export const CONNECTION_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
+/** 一套接入配置写进 definition.settings.profiles 时的结构。 */
+export function connectionToDefinitionValue(item: ConnectionEntry): Record<string, unknown> {
+  const entry: Record<string, unknown> = {};
+  if (item.label.trim()) entry.label = item.label.trim();
+  if (item.baseUrl.trim()) entry.base_url = item.baseUrl.trim();
+  if (item.tokenVar.trim()) {
+    entry.token_var = item.tokenVar.trim();
+    // token 是默认值，不额外写；api_key 才需要显式记录。
+    if (item.auth === "api_key") entry.auth = "api_key";
+  }
+  if (item.model.trim()) entry.model = item.model.trim();
+  if (item.smallFastModel.trim()) entry.small_fast_model = item.smallFastModel.trim();
+  const aliases: Record<string, string> = {};
+  if (item.aliasOpus.trim()) aliases.opus = item.aliasOpus.trim();
+  if (item.aliasSonnet.trim()) aliases.sonnet = item.aliasSonnet.trim();
+  if (item.aliasHaiku.trim()) aliases.haiku = item.aliasHaiku.trim();
+  if (Object.keys(aliases).length > 0) entry.model_aliases = aliases;
+  const timeout = Number(item.timeoutMs.trim());
+  if (item.timeoutMs.trim() && Number.isFinite(timeout) && timeout > 0) {
+    entry.timeout_ms = Math.floor(timeout);
+  }
+  return entry;
+}
+
+/**
+ * 在完整助手定义里新增或替换一套接入配置。
+ * 只改 settings.profiles 的目标项，当前 active、其他运行参数和未知字段原样保留。
+ * 是否启用必须交给 agents:configure，让数据库与目标文件保持同成同败。
+ */
+export function upsertAgentConnection(
+  definition: Record<string, unknown>,
+  item: ConnectionEntry,
+): Record<string, unknown> {
+  const next = JSON.parse(JSON.stringify(definition)) as Record<string, unknown>;
+  const currentSettings =
+    next.settings && typeof next.settings === "object" && !Array.isArray(next.settings)
+      ? (next.settings as Record<string, unknown>)
+      : {};
+  const currentProfiles =
+    currentSettings.profiles && typeof currentSettings.profiles === "object" && !Array.isArray(currentSettings.profiles)
+      ? (currentSettings.profiles as Record<string, unknown>)
+      : {};
+  const name = item.name.trim();
+  next.settings = {
+    ...currentSettings,
+    profiles: {
+      ...currentProfiles,
+      [name]: connectionToDefinitionValue(item),
+    },
+  };
+  return next;
+}
+
 export function detectSystemPlatform(): SupportedPlatform {
   if (typeof navigator === "undefined") return "darwin";
   const platform = navigator.platform || "";
@@ -298,26 +351,7 @@ export function buildAgentSettings(formValues: AgentFormValues): Record<string, 
   for (const item of formValues.connections) {
     const name = item.name.trim();
     if (!name) continue;
-    const entry: Record<string, unknown> = {};
-    if (item.label.trim()) entry.label = item.label.trim();
-    if (item.baseUrl.trim()) entry.base_url = item.baseUrl.trim();
-    if (item.tokenVar.trim()) {
-      entry.token_var = item.tokenVar.trim();
-      // 认证方式只在真有令牌时才有意义
-      if (item.auth === "api_key") entry.auth = "api_key";
-    }
-    if (item.model.trim()) entry.model = item.model.trim();
-    if (item.smallFastModel.trim()) entry.small_fast_model = item.smallFastModel.trim();
-    const aliases: Record<string, string> = {};
-    if (item.aliasOpus.trim()) aliases.opus = item.aliasOpus.trim();
-    if (item.aliasSonnet.trim()) aliases.sonnet = item.aliasSonnet.trim();
-    if (item.aliasHaiku.trim()) aliases.haiku = item.aliasHaiku.trim();
-    if (Object.keys(aliases).length > 0) entry.model_aliases = aliases;
-    const timeout = Number(item.timeoutMs.trim());
-    if (item.timeoutMs.trim() && Number.isFinite(timeout) && timeout > 0) {
-      entry.timeout_ms = Math.floor(timeout);
-    }
-    profiles[name] = entry;
+    profiles[name] = connectionToDefinitionValue(item);
   }
 
   const settings: Record<string, unknown> = {};

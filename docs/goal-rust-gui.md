@@ -11,6 +11,7 @@
 - 当前状态：公共 `*:plan` 与 `--dry-run` 入口已退役，调用会被拒绝；status/query 只读零写；点击动作直接触发真实 apply；apply 内部保留 preflight/写前校验、精确 scope、排他锁、外部修改检测、CAS/条件回滚与审计。定义保存仍只保存；破坏性定义移除、清日志等独立确认不变。
 - 本轮直接 apply 新交互已完成源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收：Engine 278 项、Tauri 11 项、Vitest 28 files / 248 tests、typecheck/build、8 份 schema 与隔离 smoke 全部通过；旧 DMG/旧 GUI E2E 不证明本轮新交互，最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify，交付回执见下。仍未完成：MCP 新增服务表单真实 GUI 验收（macOS 自动化输入限制）；公开跨平台发布条件——GitHub billing、真实密钥、Developer ID/公证、Windows 签名、Linux/Windows/arm64 真机运行与安装、updater 真实签名下载安装回读；未创建 tag、GitHub Release 或对外安装包，现有授权不包含这些动作。
 - 2026-09-16 发布就绪仓库内改造完成（三提交）：`d46b85a` 补齐 MIT 许可证、公开发布元数据、显式 Webview CSP 与应用图标，Bundle ID 定为 `io.github.ly87ing.agent-manager`；`47702ed` 增加前端顶层错误边界、自定义助手安装/升级确认与 MCP 空态引导，并清理退役代码；`14e6790` 将发布管线重构为草稿先行单写者编排（前置 create-release job 创建唯一 draft，矩阵以 releaseId 上传产物，收尾 job 单写 latest.json），支持 prerelease tag、逐平台 SHA256 checksums 与 engine-rs 版本一致性门禁，verify 脚本在已签名分支补充公证票据如实检查。对外发布仍未进行：GitHub billing、仓库 Secrets/Variables、签名与公证材料、Linux/Windows/arm64 真机验收、updater 真实链路均未就绪，未创建 tag 或 Release。
+- 2026-09-20 用户友好闭环第一步：助手页顶部新增接入工作台，把助手选择、当前接入、卡片式切换、只读测试与预设优先的新增入口放在同一任务面；安装、版本、启动命令与完整定义编辑下沉到维护区。新增接入先保存完整定义与可选凭据，成功后才执行启用，不提前冒充当前状态。
 
 ## 目标
 
@@ -357,6 +358,27 @@ state 与 actions，不自己推断；用户主动停用的不催。syncPlan 是
 - 最终 clean x86_64 DMG（`07583cc` 后重建）：`verify:macos` 全部通过；SHA256 `311805bebb50908f1e6b71164f4cdf63680fa9331c559de080ca7c5c72c3e259`，8085021 bytes；未签名。
 - 实测：接管残留条目在隔离环境验到 `leftover → managed-ok, assigned=true`；三个页面的行数、
   屏数、零信息列与黑话出现次数在浏览器里逐项量过（数字见上表）。
+
+### 2026-09-20 追加：助手接入工作台第一闭环
+
+- 起因：助手接入原来藏在完整定义弹窗与卡片下拉里，新增、切换、测试分散，默认页面先展示安装
+  维护信息。用户要求借鉴 cc-switch 的低操作成本，并继续做到更完整、可信的使用闭环。
+- 改动：助手页顶部新增任务式接入工作台，先选助手，再以卡片展示默认账号和每套接入；当前项、
+  地址、模型、凭据变量与测试结果就地可见，非当前项一键启用。下方单独保留「安装与维护」区，
+  完整定义编辑入口改名为「管理助手」。新增接入弹窗先选按 Claude/Codex 形态过滤的厂商预设或
+  自定义，再确认必要字段；高级字段按需展开。
+- 状态边界：新增接入只替换目标 profile，保留未知字段、其他接入和当前 active。Claude 可选填
+  凭据取值并通过 `secrets:set` 单独保存；Codex 只登记环境变量名。勾选立即启用时，定义与可选
+  凭据成功后才调用 `agents:configure --use`；切换成功回读 status 后才提示完成。
+- 自动化：Vitest 55 files / 501 tests、Rust `agent_settings` 集成测试 24 项、`native_secrets`
+  5 项与 Tauri 14 项全部通过；`pnpm build` 通过。新增用例覆盖完整字段保留、当前/非当前卡片、
+  一键切回默认、执行中互斥、只读测试、预设新增、凭据写入顺序与失败重试、取消零写入、校验错误、
+  助手切换、非支持助手只读边界与焦点恢复。
+- 浏览器验收：dev server + `?mock=1` 下验证 Claude/Kimi 与 Codex/Kimi 两条预设路径；Claude
+  自动填 Anthropic 端点并提供可选凭据框，Codex 自动填 Responses 端点且不出现明文凭据框；
+  Esc 关闭后焦点回到「添加接入」。900×800 和默认视口均无横向溢出，控制台无错误或警告。
+- 边界：本闭环只改前端编排、测试与文档，复用已验收的 Rust `agents:configure`、`agents:check`
+  与 `secrets:set` 契约；尚未重建安装包，也不把浏览器 mock 验收称为安装包真实写入验收。
 
 ## 剩余路线图（未排期）
 
