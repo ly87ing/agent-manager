@@ -23,7 +23,9 @@ import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { useBatchApply, type BatchApplyRow } from "../lib/useBatchApply";
 import { useDirectApply } from "../lib/useDirectApply";
 import { OVERLAY_COPY } from "../lib/ui-copy";
-import { useEngineQuery } from "../lib/queries";
+import { engineKeys, useEngineQuery } from "../lib/queries";
+import { runEngine } from "../lib/engine";
+import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "../lib/utils";
 
 function isCollection(element: EngineElement): boolean {
@@ -67,6 +69,8 @@ export default function SkillsPage({
   const [editing, setEditing] = useState<EngineElement | null>(null);
 
   const directApply = useDirectApply();
+
+  const queryClient = useQueryClient();
   const batchApply = useBatchApply();
   const definitionOps = useDefinitionOps({ section: "skills", domain: "skills" });
 
@@ -229,7 +233,16 @@ export default function SkillsPage({
       setPendingRemove({ kind: "collection", element: collection });
       return;
     }
-    void directApply.apply({ command: "skills:apply", label: title, args: ["--only", collection.id, "--action", action] });
+    void directApply
+      .apply({ command: "skills:apply", label: title, args: ["--only", collection.id, "--action", action] })
+      .then((envelope) => {
+        // 拉完代码要顺手重查一次这个集合的最新提交，否则卡片还挂着「可更新」，
+        // 看上去像没生效——本地已经对齐了，落后的只是那份检查记录。
+        if (action !== "update" || !envelope?.ok) return;
+        return runEngine("system:refresh-upstream", ["--only", collection.id])
+          .catch(() => undefined)
+          .finally(() => void queryClient.invalidateQueries({ queryKey: engineKeys.all }));
+      });
   };
 
   const handleUpdateCollection = (c: EngineElement) =>

@@ -1967,3 +1967,101 @@ fn remove_link_cleans_orphans_and_refuses_the_rest() {
 
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// 上游改写历史（force push / rebase）后，"更新资源库"必须仍然成功。
+///
+/// 仓库缓存是工具自己 clone 的只读镜像，本地不产生提交，远端就是唯一真相。
+/// 早期用 `git pull --ff-only`：上游一旦改写历史，同一批提交换了 SHA，本地与远端
+/// 永久分叉，这个按钮就再也点不动了——真机上就是这么卡住的。
+#[test]
+fn 上游改写历史后更新资源库仍然成功() {
+    let (root, context) = temp_ctx("skills-force-push");
+
+    let git = |dir: &std::path::Path, args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .expect("git 可执行");
+        assert!(
+            out.status.success(),
+            "git {args:?} 失败: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+
+    // 远端 fixture：一个带 alpha 技能的仓库
+    let origin = root.join("origin");
+    std::fs::create_dir_all(origin.join("alpha")).unwrap();
+    std::fs::write(origin.join("alpha").join("SKILL.md"), "# Alpha\nv1").unwrap();
+    git(&origin, &["init", "-q", "-b", "main"]);
+    git(&origin, &["add", "-A"]);
+    git(&origin, &["commit", "-qm", "v1"]);
+
+    let repo_dir = context.data_dir.join("repositories").join("forced");
+    std::fs::create_dir_all(repo_dir.parent().unwrap()).unwrap();
+    git(
+        &root,
+        &[
+            "clone",
+            "-q",
+            &origin.to_string_lossy(),
+            &repo_dir.to_string_lossy(),
+        ],
+    );
+
+    let set = execute(
+        &context,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "skills.repositories.forced",
+                "--value",
+                &format!(
+                    "{{\"url\":\"{}\",\"skill_paths\":[\"alpha\"],\"agents\":[\"codex\"]}}",
+                    origin.to_string_lossy()
+                ),
+            ],
+        ),
+    );
+    assert!(set.ok, "{:?}", set.errors);
+
+    // 上游改写历史：同样的内容、不同的 SHA，本地与远端从此分叉
+    git(&origin, &["commit", "-q", "--amend", "-m", "v1 (重写)"]);
+    std::fs::write(origin.join("alpha").join("SKILL.md"), "# Alpha\nv2").unwrap();
+    git(&origin, &["add", "-A"]);
+    git(&origin, &["commit", "-qm", "v2"]);
+    let upstream_head = git(&origin, &["rev-parse", "HEAD"]);
+
+    let local_before = git(&repo_dir, &["rev-parse", "HEAD"]);
+    assert_ne!(local_before, upstream_head, "前提：本地确实落在旧历史上");
+
+    let env = execute(
+        &context,
+        &request(
+            "skills:apply",
+            &["--only", "skill:forced", "--action", "update"],
+        ),
+    );
+    assert!(env.ok, "分叉后更新仍应成功：{:?}", env.errors);
+    assert_eq!(
+        git(&repo_dir, &["rev-parse", "HEAD"]),
+        upstream_head,
+        "镜像必须对齐到远端当前 HEAD"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo_dir.join("alpha").join("SKILL.md")).unwrap(),
+        "# Alpha\nv2",
+        "工作区内容要跟着远端走"
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}

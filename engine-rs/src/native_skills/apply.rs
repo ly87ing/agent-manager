@@ -734,6 +734,64 @@ fn apply_local_coll_update(
     Ok(())
 }
 
+/// 跑一条 git 子命令，失败时把 git 自己的 stderr 带进错误——只说"git pull 失败"
+/// 等于没说，用户在界面上看不出到底卡在哪。
+fn git_in(repo_dir: &Path, args: &[&str], coll_name: &str) -> Result<()> {
+    let out = std::process::Command::new("git")
+        .args(args)
+        .current_dir(repo_dir)
+        .output()
+        .with_context(|| format!("git {} 启动失败: {}", args[0], repo_dir.display()))?;
+    if !out.status.success() {
+        let detail = String::from_utf8_lossy(&out.stderr);
+        let detail = detail.trim();
+        bail!(
+            "[{}] git {} 失败{}",
+            coll_name,
+            args[0],
+            if detail.is_empty() {
+                String::new()
+            } else {
+                format!("：{detail}")
+            }
+        );
+    }
+    Ok(())
+}
+
+/// 要对齐到的远端 ref：优先当前分支的上游，退到 origin/HEAD。
+fn remote_ref(repo_dir: &Path) -> Result<String> {
+    for args in [
+        [
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+        ]
+        .as_slice(),
+        ["rev-parse", "--abbrev-ref", "origin/HEAD"].as_slice(),
+    ] {
+        let Ok(out) = std::process::Command::new("git")
+            .args(args)
+            .current_dir(repo_dir)
+            .output()
+        else {
+            continue;
+        };
+        if !out.status.success() {
+            continue;
+        }
+        let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !name.is_empty() {
+            return Ok(name);
+        }
+    }
+    bail!(
+        "仓库 {} 没有可对齐的远端分支（既无上游也无 origin/HEAD）",
+        repo_dir.display()
+    )
+}
+
 fn apply_coll_update(
     ctx: &Context,
     req: &Request,
@@ -747,22 +805,12 @@ fn apply_coll_update(
     let offline = req.flag("--offline");
     if repo_dir.join(".git").is_dir() {
         if !offline {
-            let st = std::process::Command::new("git")
-                .args(["fetch", "--tags", "origin"])
-                .current_dir(repo_dir)
-                .status()
-                .with_context(|| format!("git fetch 失败: {}", repo_dir.display()))?;
-            if !st.success() {
-                bail!("[{}] git fetch 失败", coll.name);
-            }
-            let st = std::process::Command::new("git")
-                .args(["pull", "--ff-only"])
-                .current_dir(repo_dir)
-                .status()
-                .with_context(|| format!("git pull 失败: {}", repo_dir.display()))?;
-            if !st.success() {
-                bail!("[{}] git pull 失败", coll.name);
-            }
+            git_in(repo_dir, &["fetch", "--tags", "origin"], &coll.name)?;
+            // 这份仓库是工具自己 clone 的只读镜像，本地不产生提交，远端就是唯一真相。
+            // 原先用 pull --ff-only：上游一旦改写历史（force push / rebase），同一批提交
+            // 换了 SHA，本地与远端永久分叉，"更新资源库"就再也不可能成功。硬对齐远端。
+            let target = remote_ref(repo_dir)?;
+            git_in(repo_dir, &["reset", "--hard", &target], &coll.name)?;
         }
     } else {
         if offline {
