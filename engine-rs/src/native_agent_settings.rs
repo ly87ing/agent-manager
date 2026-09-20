@@ -1,4 +1,4 @@
-//! 助手的运行参数：接入配置（地址、认证、模型）、跳过权限确认、状态栏。
+//! 助手的运行参数：接入配置（地址、认证、模型）、权限与客户端运行偏好。
 //! 写进助手自己的配置文件，因此 IDE、别的终端、任何入口启动它都一样生效。
 //!
 //! 一个助手可以存多套**接入配置**，同一时刻一套生效——官方、各家中转站各存一套，
@@ -39,7 +39,13 @@ const CLAUDE_OWNED_PATHS: &[&[&str]] = &[
     &["env", "ANTHROPIC_DEFAULT_SONNET_MODEL"],
     &["env", "ANTHROPIC_DEFAULT_HAIKU_MODEL"],
     &["env", "API_TIMEOUT_MS"],
+    &["env", "ENABLE_TOOL_SEARCH"],
+    &["env", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"],
+    &["env", "CLAUDE_CODE_EFFORT_LEVEL"],
+    &["env", "CLAUDE_CODE_DISABLE_ARTIFACT"],
     &["permissions", "defaultMode"],
+    &["attribution", "commit"],
+    &["attribution", "pr"],
 ];
 
 /// 状态栏是**条件受管**：只有 `statusLine.command` 指向本工具部署的那份脚本时才算我们的。
@@ -125,6 +131,15 @@ pub(crate) struct AgentSettings {
     /// 跳过权限确认。改的是助手的安全默认值，调用方负责二次确认。
     pub(crate) yolo: bool,
     pub(crate) statusline: StatusLine,
+    pub(crate) claude_tool_search: bool,
+    pub(crate) claude_agent_teams: bool,
+    pub(crate) claude_effort_level: Option<String>,
+    pub(crate) claude_disable_artifact: bool,
+    pub(crate) claude_hide_attribution: bool,
+    pub(crate) codex_reasoning_effort: Option<String>,
+    pub(crate) codex_context_window: Option<u64>,
+    pub(crate) codex_auto_compact_token_limit: Option<u64>,
+    pub(crate) codex_web_search: Option<String>,
 }
 
 impl AgentSettings {
@@ -141,6 +156,35 @@ fn non_empty(raw: Option<&Value>) -> Option<String> {
     } else {
         Some(text.to_string())
     }
+}
+
+fn optional_choice(
+    object: &Map<String, Value>,
+    key: &str,
+    allowed: &[&str],
+) -> Result<Option<String>> {
+    let Some(value) = non_empty(object.get(key)) else {
+        return Ok(None);
+    };
+    if allowed.contains(&value.as_str()) {
+        Ok(Some(value))
+    } else {
+        bail!(
+            "settings.{key} 只能是 {}，收到 {value}",
+            allowed.join(" / ")
+        )
+    }
+}
+
+fn optional_positive_u64(object: &Map<String, Value>, key: &str) -> Result<Option<u64>> {
+    let Some(value) = object.get(key) else {
+        return Ok(None);
+    };
+    let number = value
+        .as_u64()
+        .filter(|number| *number > 0)
+        .ok_or_else(|| anyhow::anyhow!("settings.{key} 必须是正整数"))?;
+    Ok(Some(number))
 }
 
 /// 接入配置名：只用安全字符，便于在命令行与界面里直接指名。
@@ -242,6 +286,42 @@ pub(crate) fn parse(spec: &Value) -> Result<AgentSettings> {
         profiles,
         yolo: obj.get("yolo").and_then(Value::as_bool).unwrap_or(false),
         statusline: StatusLine::parse(obj.get("statusline"))?,
+        claude_tool_search: obj
+            .get("claude_tool_search")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        claude_agent_teams: obj
+            .get("claude_agent_teams")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        claude_effort_level: optional_choice(
+            obj,
+            "claude_effort_level",
+            &["auto", "low", "medium", "high", "xhigh", "max"],
+        )?,
+        claude_disable_artifact: obj
+            .get("claude_disable_artifact")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        claude_hide_attribution: obj
+            .get("claude_hide_attribution")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        codex_reasoning_effort: optional_choice(
+            obj,
+            "codex_reasoning_effort",
+            &["minimal", "low", "medium", "high", "xhigh"],
+        )?,
+        codex_context_window: optional_positive_u64(obj, "codex_context_window")?,
+        codex_auto_compact_token_limit: optional_positive_u64(
+            obj,
+            "codex_auto_compact_token_limit",
+        )?,
+        codex_web_search: optional_choice(
+            obj,
+            "codex_web_search",
+            &["disabled", "cached", "indexed", "live"],
+        )?,
     })
 }
 
@@ -426,6 +506,47 @@ pub(crate) fn render_claude(
         );
     }
 
+    if settings.claude_tool_search {
+        path_set(
+            &mut root,
+            &["env", "ENABLE_TOOL_SEARCH"],
+            Value::String("true".into()),
+        );
+    }
+    if settings.claude_agent_teams {
+        path_set(
+            &mut root,
+            &["env", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"],
+            Value::String("1".into()),
+        );
+    }
+    if let Some(level) = settings.claude_effort_level.as_deref() {
+        path_set(
+            &mut root,
+            &["env", "CLAUDE_CODE_EFFORT_LEVEL"],
+            Value::String(level.to_string()),
+        );
+    }
+    if settings.claude_disable_artifact {
+        path_set(
+            &mut root,
+            &["env", "CLAUDE_CODE_DISABLE_ARTIFACT"],
+            Value::String("1".into()),
+        );
+    }
+    if settings.claude_hide_attribution {
+        path_set(
+            &mut root,
+            &["attribution", "commit"],
+            Value::String(String::new()),
+        );
+        path_set(
+            &mut root,
+            &["attribution", "pr"],
+            Value::String(String::new()),
+        );
+    }
+
     // 状态栏：选内置就指过去；选「不碰」时只撤掉我们自己指过去的那条，
     // 用户手配的原样留着——它本来就不归我们管。
     if settings.statusline == StatusLine::Builtin {
@@ -455,7 +576,16 @@ pub(crate) const CODEX_CONFIG: &str = "config.toml";
 const MANAGED_MARK: &str = "# [agent-manager:managed]";
 
 /// 本工具在 config.toml 里拥有的顶层键。
-const CODEX_OWNED_KEYS: &[&str] = &["model_provider", "model", "approval_policy", "sandbox_mode"];
+const CODEX_OWNED_KEYS: &[&str] = &[
+    "model_provider",
+    "model",
+    "approval_policy",
+    "sandbox_mode",
+    "model_reasoning_effort",
+    "model_context_window",
+    "model_auto_compact_token_limit",
+    "web_search",
+];
 
 /// Codex 内置的 provider id，不允许覆盖（写了也不生效，还会盖掉内置定义）。
 const CODEX_RESERVED_PROVIDERS: &[&str] = &["openai", "ollama", "lmstudio"];
@@ -691,6 +821,30 @@ pub(crate) fn render_codex(existing: &str, settings: &AgentSettings) -> Result<S
     if settings.yolo {
         text = toml_set_root_key(&text, "approval_policy", Some("\"never\""));
         text = toml_set_root_key(&text, "sandbox_mode", Some("\"danger-full-access\""));
+    }
+    if let Some(value) = settings.codex_reasoning_effort.as_deref() {
+        text = toml_set_root_key(
+            &text,
+            "model_reasoning_effort",
+            Some(&crate::native_mcp::codecs::toml_basic_string(value)),
+        );
+    }
+    if let Some(value) = settings.codex_context_window {
+        text = toml_set_root_key(&text, "model_context_window", Some(&value.to_string()));
+    }
+    if let Some(value) = settings.codex_auto_compact_token_limit {
+        text = toml_set_root_key(
+            &text,
+            "model_auto_compact_token_limit",
+            Some(&value.to_string()),
+        );
+    }
+    if let Some(value) = settings.codex_web_search.as_deref() {
+        text = toml_set_root_key(
+            &text,
+            "web_search",
+            Some(&crate::native_mcp::codecs::toml_basic_string(value)),
+        );
     }
 
     Ok(text)
@@ -1081,6 +1235,10 @@ mod tests {
         assert!(parse(&json!({"settings": {"profiles": {"bad name": {}}}})).is_err());
         assert!(parse(&json!({"settings": {"profiles": {"p": {"auth": "basic"}}}})).is_err());
         assert!(parse(&json!({"settings": {"statusline": "custom"}})).is_err());
+        assert!(parse(&json!({"settings": {"claude_effort_level": "ultra"}})).is_err());
+        assert!(parse(&json!({"settings": {"codex_reasoning_effort": "max"}})).is_err());
+        assert!(parse(&json!({"settings": {"codex_context_window": 0}})).is_err());
+        assert!(parse(&json!({"settings": {"codex_web_search": "auto"}})).is_err());
         // active 指向不存在的配置要当场拒绝，不静默落空
         assert!(parse(&json!({"settings": {"active": "nope", "profiles": {"p": {}}}})).is_err());
         // 没有 settings 段 = 没配过
@@ -1116,6 +1274,39 @@ mod tests {
         assert_eq!(parsed["env"]["ANTHROPIC_MODEL"], "claude-opus-5");
         // 没选内置状态栏时，用户自己那份原样留着
         assert_eq!(parsed["statusLine"]["command"], "/x/mine.sh");
+    }
+
+    #[test]
+    fn claude_运行参数写入明确路径_清空时只撤掉这些路径() {
+        let settings = parse(&json!({"settings": {
+            "claude_tool_search": true,
+            "claude_agent_teams": true,
+            "claude_effort_level": "max",
+            "claude_disable_artifact": true,
+            "claude_hide_attribution": true
+        }}))
+        .unwrap();
+        let existing = serde_json::to_vec(&json!({
+            "env": {"MY_OWN": "keep"},
+            "attribution": {"other": "keep"}
+        }))
+        .unwrap();
+        let out = render_claude(Some(&existing), &settings, &no_secrets, &sl()).unwrap();
+        let parsed: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(parsed["env"]["ENABLE_TOOL_SEARCH"], "true");
+        assert_eq!(parsed["env"]["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"], "1");
+        assert_eq!(parsed["env"]["CLAUDE_CODE_EFFORT_LEVEL"], "max");
+        assert_eq!(parsed["env"]["CLAUDE_CODE_DISABLE_ARTIFACT"], "1");
+        assert_eq!(parsed["attribution"]["commit"], "");
+        assert_eq!(parsed["attribution"]["pr"], "");
+
+        let cleared =
+            render_claude(Some(&out), &AgentSettings::default(), &no_secrets, &sl()).unwrap();
+        let parsed: Value = serde_json::from_slice(&cleared).unwrap();
+        assert_eq!(parsed["env"]["MY_OWN"], "keep");
+        assert_eq!(parsed["attribution"]["other"], "keep");
+        assert!(parsed["env"].get("ENABLE_TOOL_SEARCH").is_none());
+        assert!(parsed["attribution"].get("commit").is_none());
     }
 
     #[test]
@@ -1280,6 +1471,30 @@ mod tests {
             owned_digest(&sl_ours, &sl()),
             owned_digest(&sl_changed, &sl())
         );
+    }
+
+    #[test]
+    fn codex_运行参数写成顶层_toml_并进入受管摘要() {
+        let settings = parse(&json!({"settings": {
+            "codex_reasoning_effort": "high",
+            "codex_context_window": 1000000,
+            "codex_auto_compact_token_limit": 900000,
+            "codex_web_search": "live"
+        }}))
+        .unwrap();
+        let out = render_codex("user_instructions = \"keep\"\n", &settings).unwrap();
+        assert!(out.contains("model_reasoning_effort = \"high\""));
+        assert!(out.contains("model_context_window = 1000000"));
+        assert!(out.contains("model_auto_compact_token_limit = 900000"));
+        assert!(out.contains("web_search = \"live\""));
+        assert!(out.contains("user_instructions = \"keep\""));
+        let slice = codex_owned_slice(&out);
+        assert_eq!(slice["model_context_window"], "1000000");
+
+        let cleared = render_codex(&out, &AgentSettings::default()).unwrap();
+        assert!(!cleared.contains("model_reasoning_effort"));
+        assert!(!cleared.contains("model_context_window"));
+        assert!(cleared.contains("user_instructions = \"keep\""));
     }
 
     #[test]

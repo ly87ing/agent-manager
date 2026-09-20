@@ -695,7 +695,7 @@ fn codex_写入只动自己那几项_用户的四百行配置原样保留() {
         ctx.home_dir.join(".codex/config.toml"),
         concat!(
             "service_tier = \"default\"\n",
-            "model_reasoning_effort = \"xhigh\"\n",
+            "project_doc_max_bytes = 32768\n",
             "\n",
             "# 我自己加的插件\n",
             "[plugins.\"chrome@openai-bundled\"]\n",
@@ -724,7 +724,7 @@ fn codex_写入只动自己那几项_用户的四百行配置原样保留() {
     let after = codex_config(&ctx);
     // 用户的东西一个都没动
     assert!(after.contains("service_tier = \"default\""));
-    assert!(after.contains("model_reasoning_effort = \"xhigh\""));
+    assert!(after.contains("project_doc_max_bytes = 32768"));
     assert!(after.contains("# 我自己加的插件"));
     assert!(after.contains("[plugins.\"chrome@openai-bundled\"]"));
     // MCP 域写的那段也不能被我们碰
