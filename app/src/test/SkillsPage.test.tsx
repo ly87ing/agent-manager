@@ -310,7 +310,7 @@ describe("SkillsPage 三级视图", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("技能 × 助手 remove：点击先确认，确认后 skills:apply 精确 --only/--action/--agent，取消零 apply", async () => {
+  it("已分配技能：软链接模式只显示可逆的停用，不暴露与其重复的删除分配", async () => {
     const customRoutes = skillsRoutes();
     customRoutes["skills:status"] = makeEnvelope(
       {
@@ -336,7 +336,7 @@ describe("SkillsPage 三级视图", () => {
                   target_dir_exists: true,
                   assigned: true,
                   enabled: true,
-                  actions: ["remove"],
+                  actions: ["disable", "remove"],
                 },
               },
               discovery_inbox: false,
@@ -350,26 +350,9 @@ describe("SkillsPage 三级视图", () => {
 
     const { calls } = renderWithEngine(<SkillsPage />, customRoutes);
     await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
-    const removeBtn = await screen.findByTestId("action-remove-skill:agent-skills/alpha-claude-code");
-
-    await userEvent.click(removeBtn);
-    const dialog = await screen.findByRole("dialog", { name: "删除分配 alpha @ claude-code" });
-    expect(dialog).toHaveTextContent(/只清理该助手的入口/);
-
-    await userEvent.click(screen.getByRole("button", { name: "取消" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(await screen.findByTestId("action-disable-skill:agent-skills/alpha-claude-code")).toHaveTextContent("停用");
+    expect(screen.queryByTestId("action-remove-skill:agent-skills/alpha-claude-code")).toBeNull();
     expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
-
-    await userEvent.click(removeBtn);
-    await screen.findByRole("dialog", { name: "删除分配 alpha @ claude-code" });
-    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
-
-    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(1));
-    expect(calls.filter((call) => call.command === "skills:apply")[0].args).toEqual([
-      "--only", "skill:agent-skills/alpha", "--action", "remove", "--agent", "claude-code",
-    ]);
-    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
-    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
   });
 
   it("视图切换与键盘导航：支持键盘切换标签，点击集合卡片名称进入全部技能并筛选对应集合", async () => {
@@ -444,6 +427,8 @@ describe("SkillsPage 三级视图", () => {
                   state: "linked",
                   link_path: "/home/.claude/skills/alpha",
                   target_dir_exists: true,
+                  version: "old-version",
+                  available_version: "new-version",
                   actions: ["update", "disable", "remove"],
                   blocked_reason: null,
                 },
@@ -467,10 +452,10 @@ describe("SkillsPage 三级视图", () => {
     const { calls } = renderWithEngine(<SkillsPage />, customRoutes);
     await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
 
-    // claude-code: 具有 actions 按钮
+    // 真有新版本才显示更新；删除分配与软链接停用重复，不进入日常界面。
     expect(screen.getByTestId("action-update-skill:agent-skills/alpha-claude-code")).toBeInTheDocument();
     expect(screen.getByTestId("action-disable-skill:agent-skills/alpha-claude-code")).toBeInTheDocument();
-    expect(screen.getByTestId("action-remove-skill:agent-skills/alpha-claude-code")).toBeInTheDocument();
+    expect(screen.queryByTestId("action-remove-skill:agent-skills/alpha-claude-code")).toBeNull();
     // 没有 assign / enable 按钮
     expect(screen.queryByTestId("action-assign-skill:agent-skills/alpha-claude-code")).toBeNull();
     expect(screen.queryByTestId("action-enable-skill:agent-skills/alpha-claude-code")).toBeNull();

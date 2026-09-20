@@ -7,7 +7,7 @@ import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import { ResourceAgentMatrix, type MatrixRow, type MatrixRowCell } from "../components/ResourceAgentMatrix";
-import { SkillAgentCellActions } from "../components/SkillAgentActions";
+import { SkillAgentCellActions, skillNeedsUpdate } from "../components/SkillAgentActions";
 import { SkillCollectionCard } from "../components/SkillCollectionCard";
 import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDialog";
 import type { EngineElement, PolicyData, PolicyLayers, StatusData } from "../lib/contract";
@@ -32,16 +32,27 @@ function isCollection(element: EngineElement): boolean {
   return element.id.startsWith("skill:") && !element.id.includes("/");
 }
 
-/** 全部技能矩阵的批量动作：enable/disable 直执；add/remove 仅作用于计划外链接行（纳入管理/取消链接）。 */
-type BatchSkillAction = "enable" | "disable" | "add" | "remove";
+/** 全部技能矩阵的批量动作：更新/启停直执；add/remove 仅作用于计划外链接行。 */
+type BatchSkillAction = "update" | "enable" | "disable" | "add" | "remove";
 
-/** 批量按钮配色与行内操作按钮保持一致（启用/禁用/纳入管理/取消链接）。 */
+/** 批量按钮配色与行内操作按钮保持一致（更新/启用/停用/纳入管理/取消链接）。 */
 const BATCH_BUTTON_CLASS: Record<BatchSkillAction, string> = {
+  update: "border-primary/30 bg-primary/10 text-primary hover:bg-primary/15",
   enable: "border-success/30 bg-success/10 text-success hover:bg-success/15",
   disable: "border-warning/30 bg-warning/10 text-warning hover:bg-warning/15",
   add: "border-primary/30 bg-primary/10 text-primary hover:bg-primary/15",
   remove: "border-destructive/30 bg-card text-destructive hover:bg-destructive/10",
 };
+
+function isBatchSelectableCell(cell: SkillAgentCell | null): boolean {
+  const actions = cell?.actions ?? [];
+  return Boolean(
+    skillNeedsUpdate(cell) ||
+      actions.includes("enable") ||
+      actions.includes("disable") ||
+      (cell?.state === "extra-link" && (actions.includes("add") || actions.includes("remove"))),
+  );
+}
 
 function fullSkillDefinition(layers: PolicyLayers | null, name: string): Record<string, unknown> | null {
   const repositories = (layers?.sqlite as { skills?: { repositories?: Record<string, unknown> } } | null | undefined)?.skills?.repositories;
@@ -75,11 +86,7 @@ export default function SkillsPage({
   /** 全部技能矩阵勾选集合：元素为 `${skill.id}-${agent}` 行键；仅可见且可执行的行保留在集合内。 */
   const [selectedKeys, setSelectedKeys] = useState<ReadonlySet<string>>(new Set());
 
-  const [pendingRemove, setPendingRemove] = useState<
-    | { kind: "collection"; element: EngineElement }
-    | { kind: "skill"; element: EngineElement; agent: string }
-    | null
-  >(null);
+  const [pendingRemove, setPendingRemove] = useState<EngineElement | null>(null);
   /** 计划外链接的外部链接接管确认：add=纳入管理、remove=取消链接，确认后携带 --allow-takeover。 */
   const [pendingTakeover, setPendingTakeover] = useState<
     { element: EngineElement; agent: string; action: "add" | "remove" } | null
@@ -186,7 +193,7 @@ export default function SkillsPage({
         continue;
       }
       const actions = cell.actions ?? [];
-      if (actions.length > 0) anyActionable = true;
+      if (isBatchSelectableCell(cell)) anyActionable = true;
       rowCells[agent] = {
         state: cell.state,
         // 版本与阻塞原因放悬停：单开一列多半整列「未获取」，白占宽度
@@ -214,7 +221,7 @@ export default function SkillsPage({
     setSelectedKeys((prev) => {
       if (prev.size === 0) return prev;
       const selectableKeys = new Set(
-        assignmentRows.filter((row) => (row.cell?.actions?.length ?? 0) > 0).map((row) => row.key),
+        assignmentRows.filter((row) => isBatchSelectableCell(row.cell)).map((row) => row.key),
       );
       const next = new Set([...prev].filter((key) => selectableKeys.has(key)));
       return next.size === prev.size ? prev : next;
@@ -227,7 +234,7 @@ export default function SkillsPage({
   /** 集合操作：按钮严格来自卡片动作，apply 携带精确 --only/--action；remove 需先经独立 ConfirmModal。 */
   const runCollectionAction = (collection: EngineElement, action: "update" | "enable" | "disable" | "remove", title: string) => {
     if (action === "remove") {
-      setPendingRemove({ kind: "collection", element: collection });
+      setPendingRemove(collection);
       return;
     }
     void directApply
@@ -251,17 +258,13 @@ export default function SkillsPage({
   const handleRemoveCollection = (c: EngineElement) =>
     runCollectionAction(c, "remove", `删除集合 ${collName(c)}`);
 
-  /** 技能 × 助手 操作：apply 携带精确 --only/--action/--agent；remove 需先经独立 ConfirmModal。
-   * 计划外链接（extra-link）行：外部链接（managed=false）的 纳入管理/取消链接 先经确认，
+  /** 技能 × 助手 操作：apply 携带精确 --only/--action/--agent。
+   * 计划外链接（extra-link）行：外部链接（managed=false）的纳入管理/取消链接先经确认，
    * 确认后携带 --allow-takeover；受管残留链接（managed=true）直接执行不弹确认。 */
   const handleSkillAction = (skill: EngineElement, agent: string, action: string, cell: SkillAgentCell | null) => {
     const isExtraLinkAction = cell?.state === "extra-link" && (action === "add" || action === "remove");
     if (isExtraLinkAction && cell?.managed === false) {
       setPendingTakeover({ element: skill, agent, action: action as "add" | "remove" });
-      return;
-    }
-    if (action === "remove" && !isExtraLinkAction) {
-      setPendingRemove({ kind: "skill", element: skill, agent });
       return;
     }
     const spec = skill.spec as SkillSpec;
@@ -271,7 +274,6 @@ export default function SkillsPage({
       update: "更新",
       enable: "启用",
       disable: "停用",
-      remove: "删除分配",
     };
     const extraLinkLabelMap: Record<string, string> = { add: "纳入管理", remove: "取消链接" };
     const actionLabel = isExtraLinkAction ? (extraLinkLabelMap[action] ?? action) : (labelMap[action] ?? action);
@@ -283,12 +285,13 @@ export default function SkillsPage({
     });
   };
 
-  /** 批量派生：仅可见可执行行可被勾选；批量按钮按选中集合的动作子集分组，无适用行的分组不显示。 */
-  const selectableRows = assignmentRows.filter((row) => (row.cell?.actions?.length ?? 0) > 0);
+  /** 批量派生：一个技能行勾选后，按每个助手当前真正可执行的动作分组。 */
+  const selectableRows = assignmentRows.filter((row) => isBatchSelectableCell(row.cell));
   const selectedRows = assignmentRows.filter((row) => selectedKeys.has(row.key));
   const batchGroups: { action: BatchSkillAction; label: string; rows: typeof selectedRows }[] = [
+    { action: "update", label: "更新", rows: selectedRows.filter((row) => skillNeedsUpdate(row.cell)) },
     { action: "enable", label: "启用", rows: selectedRows.filter((row) => row.cell?.actions?.includes("enable")) },
-    { action: "disable", label: "禁用", rows: selectedRows.filter((row) => row.cell?.actions?.includes("disable")) },
+    { action: "disable", label: "停用", rows: selectedRows.filter((row) => row.cell?.actions?.includes("disable")) },
     {
       action: "add",
       label: "纳入管理",
@@ -300,6 +303,7 @@ export default function SkillsPage({
       rows: selectedRows.filter((row) => row.cell?.state === "extra-link" && row.cell?.actions?.includes("remove")),
     },
   ];
+  const selectedSkillCount = new Set(selectedRows.map((row) => row.skill.id)).size;
   const allVisibleSelected = selectableRows.length > 0 && selectableRows.every((row) => selectedKeys.has(row.key));
 
   const toggleSelectAllVisible = () => {
@@ -353,22 +357,12 @@ export default function SkillsPage({
 
   const confirmRemove = () => {
     if (!pendingRemove) return;
-    if (pendingRemove.kind === "collection") {
-      const name = collName(pendingRemove.element);
-      void directApply.apply({
-        command: "skills:apply",
-        label: `删除集合 ${name}`,
-        args: ["--only", pendingRemove.element.id, "--action", "remove"],
-      });
-    } else {
-      const spec = pendingRemove.element.spec as SkillSpec;
-      const skillName = spec.name ?? pendingRemove.element.id;
-      void directApply.apply({
-        command: "skills:apply",
-        label: `删除分配 ${skillName} @ ${pendingRemove.agent}`,
-        args: ["--only", pendingRemove.element.id, "--action", "remove", "--agent", pendingRemove.agent],
-      });
-    }
+    const name = collName(pendingRemove);
+    void directApply.apply({
+      command: "skills:apply",
+      label: `删除集合 ${name}`,
+      args: ["--only", pendingRemove.id, "--action", "remove"],
+    });
     setPendingRemove(null);
   };
 
@@ -547,16 +541,17 @@ export default function SkillsPage({
               data-testid="batch-toolbar"
               className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-3 shadow-sm"
             >
-              <span className="text-xs font-medium text-foreground">已选 {selectedRows.length} 项</span>
+              <span className="text-xs font-medium text-foreground">已选 {selectedSkillCount} 个技能</span>
               <div className="flex flex-wrap items-center gap-1.5">
                 {batchGroups
-                  .filter(({ rows }) => rows.length > 0)
+                  .filter(({ action, rows }) => ["update", "enable", "disable"].includes(action) || rows.length > 0)
                   .map(({ action, label, rows }) => (
                     <button
                       key={action}
                       type="button"
                       data-testid={`batch-${action}`}
-                      disabled={batchApply.executing}
+                      disabled={batchApply.executing || rows.length === 0}
+                      title={rows.length === 0 ? `所选技能中没有可${label}的助手分配` : undefined}
                       onClick={() => handleBatchAction(action, label, rows)}
                       className={cn("rounded border px-2 py-0.5 text-xs disabled:opacity-40", BATCH_BUTTON_CLASS[action])}
                     >
@@ -584,7 +579,7 @@ export default function SkillsPage({
             isRowSelected={(key) => {
               // 行选中 = 该技能所有可执行的「技能×助手」格都已选中
               const keys = assignmentRows
-                .filter((row) => row.skill.id === key && (row.cell?.actions?.length ?? 0) > 0)
+                .filter((row) => row.skill.id === key && isBatchSelectableCell(row.cell))
                 .map((row) => row.key);
               return keys.length > 0 && keys.every((k) => selectedKeys.has(k));
             }}
@@ -594,7 +589,7 @@ export default function SkillsPage({
             onToggleSelect={(key) => {
               // 选中一行 = 选中它所有可执行的格子，批量动作照旧按格子发
               const keys = assignmentRows
-                .filter((row) => row.skill.id === key && (row.cell?.actions?.length ?? 0) > 0)
+                .filter((row) => row.skill.id === key && isBatchSelectableCell(row.cell))
                 .map((row) => row.key);
               setSelectedKeys((prev) => {
                 const next = new Set(prev);
@@ -610,19 +605,8 @@ export default function SkillsPage({
               return (
                 <SkillAgentCellActions
                   skill={assignment.skill}
-                  skillName={row.label}
-                  assignment={{ key: assignment.key, agent: assignment.agent, cell: assignment.cell }}
+                  assignment={{ agent: assignment.agent, cell: assignment.cell }}
                   statusTitle={cell.title}
-                  selectedKeys={selectedKeys}
-                  selectDisabled={batchApply.executing}
-                  onToggleSelect={(key) =>
-                    setSelectedKeys((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(key)) next.delete(key);
-                      else next.add(key);
-                      return next;
-                    })
-                  }
                   onAction={handleSkillAction}
                 />
               );
@@ -698,18 +682,10 @@ export default function SkillsPage({
 
       {pendingRemove && (
         <ConfirmModal
-          title={
-            pendingRemove.kind === "collection"
-              ? `删除集合 ${collName(pendingRemove.element)}`
-              : `删除分配 ${(pendingRemove.element.spec as SkillSpec).name ?? pendingRemove.element.id} @ ${pendingRemove.agent}`
-          }
-          description={
-            pendingRemove.kind === "collection"
-              ? "删除集合会清理已分配给各助手的入口，源目录保留。确认后执行。"
-              : "只清理该助手的入口。确认后执行。"
-          }
-          risk={pendingRemove.kind === "collection" ? "install-remove" : "write-local"}
-          requireText={pendingRemove.kind === "collection" ? collName(pendingRemove.element) : undefined}
+          title={`删除集合 ${collName(pendingRemove)}`}
+          description="删除集合会清理已分配给各助手的入口，源目录保留。确认后执行。"
+          risk="install-remove"
+          requireText={collName(pendingRemove)}
           confirmLabel="确认删除"
           executing={directApply.executing}
           onConfirm={confirmRemove}
