@@ -101,10 +101,7 @@ fn apply_dry_run_is_rejected_without_lock_db_or_target_writes() {
     assert_eq!(env.errors[0].code, "RULE_ERROR");
     assert!(env.errors[0].message.contains("参数错误"));
     assert!(!env.lock.held, "被拒绝的 apply 不得持锁");
-    assert!(
-        !store::db_path(&ctx).exists(),
-        "拒绝路径不得创建 DB"
-    );
+    assert!(!store::db_path(&ctx).exists(), "拒绝路径不得创建 DB");
     assert!(
         !ctx.data_dir.join("agent-manager.apply.lock").exists(),
         "拒绝路径不得创建 apply lock"
@@ -264,10 +261,7 @@ fn apply_with_selected_unmanaged_fails_closed_without_writes() {
     assert_eq!(env.errors[0].code, "RULE_ERROR");
     assert!(env.errors[0].message.contains("preflight 拒绝"));
     assert!(!env.lock.held);
-    assert!(
-        !store::db_path(&ctx).exists(),
-        "preflight 失败不得创建 DB"
-    );
+    assert!(!store::db_path(&ctx).exists(), "preflight 失败不得创建 DB");
     assert!(!ctx.data_dir.join("agent-manager.apply.lock").exists());
     assert_eq!(
         std::fs::read(ctx.home_dir.join(".codex/AGENTS.md")).unwrap(),

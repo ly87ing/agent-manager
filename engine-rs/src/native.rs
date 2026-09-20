@@ -62,9 +62,8 @@ impl Request {
 }
 
 const KNOWN_DOMAINS: &[&str] = &[
-    "usage",
-    "agents", "mcp", "skills", "rules", "hooks", "aliases", "profiles", "secrets", "profile",
-    "policy", "system", "runs", "sources", "db", "logs", "config",
+    "usage", "agents", "mcp", "skills", "rules", "hooks", "aliases", "profiles", "secrets",
+    "profile", "policy", "system", "runs", "sources", "db", "logs", "config",
 ];
 
 fn mode_of(request: &Request) -> Mode {
@@ -107,7 +106,6 @@ fn acquire_apply_lock(ctx: &Context, domain: &str) -> Result<ApplyLock> {
         .map_err(|err| anyhow::anyhow!("{domain} apply 正在执行，拒绝并发动作：{err}"))?;
     Ok(ApplyLock { _file: file })
 }
-
 
 /// The single native entry point. Pure with respect to process state: no exit
 /// codes here (CLI maps errors to exit codes); status never writes the DB.

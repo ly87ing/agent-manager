@@ -142,10 +142,7 @@ fn fresh_status_is_zero_write_not_materialized_and_dry_run_rejected() {
     assert!(env.errors[0].message.contains("参数错误"));
     assert!(!env.lock.held, "被拒绝的 apply 不得持锁");
 
-    assert!(
-        !store::db_path(&ctx).exists(),
-        "status/拒绝路径不得创建 DB"
-    );
+    assert!(!store::db_path(&ctx).exists(), "status/拒绝路径不得创建 DB");
     assert!(
         !ctx.data_dir.join("agent-manager.apply.lock").exists(),
         "拒绝路径不得创建 apply lock"

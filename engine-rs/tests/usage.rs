@@ -35,7 +35,14 @@ fn request(command: &str) -> Request {
     }
 }
 
-fn claude_event(id: &str, hour: &str, model: &str, input: i64, output: i64, cache_r: i64) -> String {
+fn claude_event(
+    id: &str,
+    hour: &str,
+    model: &str,
+    input: i64,
+    output: i64,
+    cache_r: i64,
+) -> String {
     json!({
         "type": "assistant",
         "timestamp": format!("2026-09-20T{hour}:30:00.000Z"),
@@ -159,7 +166,11 @@ fn codex_取本次增量_模型名来自前面的上下文事件() {
         })
         .to_string(),
     ];
-    fs::write(dir.join("rollout-x.jsonl"), format!("{}\n", lines.join("\n"))).unwrap();
+    fs::write(
+        dir.join("rollout-x.jsonl"),
+        format!("{}\n", lines.join("\n")),
+    )
+    .unwrap();
 
     assert!(execute(&ctx, &request("usage:scan")).ok);
     let rows = rows_of(&execute(&ctx, &request("usage:status")));
@@ -192,7 +203,11 @@ fn 文件被重写后从头重扫_不会因为偏移过界而漏掉() {
     assert!(execute(&ctx, &request("usage:scan")).ok);
 
     // 文件被截短（清理/轮转）：旧偏移已越界，应当从头重来
-    fs::write(&path, format!("{}\n", claude_event("9", "05", "m", 1, 2, 0))).unwrap();
+    fs::write(
+        &path,
+        format!("{}\n", claude_event("9", "05", "m", 1, 2, 0)),
+    )
+    .unwrap();
     assert!(execute(&ctx, &request("usage:scan")).ok);
 
     let rows = rows_of(&execute(&ctx, &request("usage:status")));

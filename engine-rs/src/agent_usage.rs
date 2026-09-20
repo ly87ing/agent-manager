@@ -77,13 +77,21 @@ fn binary_kind(bin: &str) -> Option<Kind> {
     }
 }
 
-fn usage(source: &str, checked_at: Option<String>, windows: Vec<Value>, extra: Map<String, Value>) -> Option<Value> {
+fn usage(
+    source: &str,
+    checked_at: Option<String>,
+    windows: Vec<Value>,
+    extra: Map<String, Value>,
+) -> Option<Value> {
     if windows.is_empty() {
         return None;
     }
     let mut out = Map::new();
     out.insert("source".into(), json!(source));
-    out.insert("checked_at".into(), checked_at.map(Value::String).unwrap_or(Value::Null));
+    out.insert(
+        "checked_at".into(),
+        checked_at.map(Value::String).unwrap_or(Value::Null),
+    );
     out.insert("windows".into(), Value::Array(windows));
     for (key, value) in extra {
         out.insert(key, value);
@@ -111,7 +119,9 @@ fn rfc3339_secs(dt: DateTime<Utc>) -> String {
 
 /// 规整成秒级 UTC：这些字段各家写法不一（带微秒、带偏移），统一后界面才好比对。
 fn normalize_time(raw: &str) -> Option<String> {
-    DateTime::parse_from_rfc3339(raw).ok().map(|dt| rfc3339_secs(dt.with_timezone(&Utc)))
+    DateTime::parse_from_rfc3339(raw)
+        .ok()
+        .map(|dt| rfc3339_secs(dt.with_timezone(&Utc)))
 }
 
 fn from_unix_secs(secs: i64) -> Option<String> {
@@ -128,7 +138,11 @@ fn claude(config_path: &Path, snapshot_dir: &Path) -> Option<Value> {
     let snapshot = statusline_snapshot(snapshot_dir);
     let cached = claude_cache(config_path);
     match (snapshot, cached) {
-        (Some(a), Some(b)) => Some(if checked_at_of(&a) >= checked_at_of(&b) { a } else { b }),
+        (Some(a), Some(b)) => Some(if checked_at_of(&a) >= checked_at_of(&b) {
+            a
+        } else {
+            b
+        }),
         (Some(only), None) | (None, Some(only)) => Some(only),
         (None, None) => None,
     }
@@ -148,7 +162,10 @@ fn checked_at_of(usage: &Value) -> String {
 fn statusline_snapshot(dir: &Path) -> Option<Value> {
     let path = dir.join(".agent-manager-usage.json");
     let root: Value = serde_json::from_str(&fs::read_to_string(&path).ok()?).ok()?;
-    let checked_at = root.get("at").and_then(Value::as_i64).and_then(from_unix_secs);
+    let checked_at = root
+        .get("at")
+        .and_then(Value::as_i64)
+        .and_then(from_unix_secs);
 
     let mut windows = Vec::new();
     for (key, minutes) in [("five_hour", 5 * 60), ("seven_day", 7 * 24 * 60)] {
@@ -158,7 +175,10 @@ fn statusline_snapshot(dir: &Path) -> Option<Value> {
         let Some(used) = entry.get("used_percentage").and_then(Value::as_f64) else {
             continue;
         };
-        let resets_at = entry.get("resets_at").and_then(Value::as_i64).and_then(from_unix_secs);
+        let resets_at = entry
+            .get("resets_at")
+            .and_then(Value::as_i64)
+            .and_then(from_unix_secs);
         windows.push(window(minutes, used, resets_at));
     }
 
@@ -178,13 +198,20 @@ fn claude_cache(path: &Path) -> Option<Value> {
 
     let mut windows = Vec::new();
     for (key, minutes) in [("five_hour", 5 * 60), ("seven_day", 7 * 24 * 60)] {
-        let Some(entry) = cached.get("utilization").and_then(|u| u.get(key)).filter(|v| !v.is_null()) else {
+        let Some(entry) = cached
+            .get("utilization")
+            .and_then(|u| u.get(key))
+            .filter(|v| !v.is_null())
+        else {
             continue;
         };
         let Some(used) = entry.get("utilization").and_then(Value::as_f64) else {
             continue;
         };
-        let resets_at = entry.get("resets_at").and_then(Value::as_str).and_then(normalize_time);
+        let resets_at = entry
+            .get("resets_at")
+            .and_then(Value::as_str)
+            .and_then(normalize_time);
         windows.push(window(minutes, used, resets_at));
     }
 
@@ -208,8 +235,14 @@ fn codex(sessions_dir: &Path) -> Option<Value> {
         let Some(used) = entry.get("used_percent").and_then(Value::as_f64) else {
             continue;
         };
-        let minutes = entry.get("window_minutes").and_then(Value::as_i64).unwrap_or(0);
-        let resets_at = entry.get("resets_at").and_then(Value::as_i64).and_then(from_unix_secs);
+        let minutes = entry
+            .get("window_minutes")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        let resets_at = entry
+            .get("resets_at")
+            .and_then(Value::as_i64)
+            .and_then(from_unix_secs);
         windows.push(window(minutes, used, resets_at));
     }
 
@@ -230,7 +263,11 @@ fn codex(sessions_dir: &Path) -> Option<Value> {
     if let Some(plan) = limits.get("plan_type").and_then(Value::as_str) {
         extra.insert("plan".into(), json!(plan));
     }
-    if let Some(balance) = limits.get("credits").and_then(|c| c.get("balance")).and_then(Value::as_str) {
+    if let Some(balance) = limits
+        .get("credits")
+        .and_then(|c| c.get("balance"))
+        .and_then(Value::as_str)
+    {
         extra.insert("credits".into(), json!(balance));
     }
 
@@ -259,7 +296,9 @@ fn newest_rollout(sessions_dir: &Path) -> Option<PathBuf> {
             if !is_rollout {
                 continue;
             }
-            let Ok(modified) = meta.modified() else { continue };
+            let Ok(modified) = meta.modified() else {
+                continue;
+            };
             if newest.as_ref().is_none_or(|(best, _)| modified > *best) {
                 newest = Some((modified, path));
             }
@@ -282,7 +321,10 @@ fn last_line_with(path: &Path, needle: &str) -> Option<String> {
     if start > 0 {
         lines.next();
     }
-    lines.filter(|line| line.contains(needle)).next_back().map(str::to_string)
+    lines
+        .filter(|line| line.contains(needle))
+        .next_back()
+        .map(str::to_string)
 }
 
 /// `rate_limits` 在事件里的层级各版本不同，按键名递归找第一处。

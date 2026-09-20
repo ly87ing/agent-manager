@@ -891,13 +891,8 @@ mod tests {
             data_dir: base.join("data"),
             home_dir: base.join("home"),
         };
-        let envelope = dispatch_native(
-            ctx,
-            "system:audit".into(),
-            vec![],
-            "audit-test".into(),
-        )
-        .unwrap();
+        let envelope =
+            dispatch_native(ctx, "system:audit".into(), vec![], "audit-test".into()).unwrap();
         assert!(envelope.ok, "{:?}", envelope.errors);
         assert!(!envelope.mode.offline);
         assert_eq!(envelope.data["status"], "warning");
@@ -924,13 +919,8 @@ mod tests {
             data_dir: base.join("data"),
             home_dir: base.join("home"),
         };
-        let envelope = dispatch_native(
-            ctx,
-            "secrets:status".into(),
-            vec![],
-            "secrets-test".into(),
-        )
-        .unwrap();
+        let envelope =
+            dispatch_native(ctx, "secrets:status".into(), vec![], "secrets-test".into()).unwrap();
         assert!(envelope.ok, "{:?}", envelope.errors);
         assert!(!envelope.mode.offline);
         assert_eq!(envelope.data["domain"], "secrets");
@@ -1026,13 +1016,8 @@ mod tests {
             data_dir: root.join("data"),
             home_dir: root.join("home"),
         };
-        let env = dispatch_native(
-            c(),
-            "rules:status".into(),
-            vec![],
-            "rules-bridge".into(),
-        )
-        .unwrap();
+        let env =
+            dispatch_native(c(), "rules:status".into(), vec![], "rules-bridge".into()).unwrap();
         assert!(env.ok, "{:?}", env.errors);
         assert!(!env.mode.offline);
         // rules 固定三目标：codex、claude、opencode

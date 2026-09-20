@@ -130,7 +130,8 @@ fn run_probe(ctx: &Context, url: &str, headers: &[String], body: &Value) -> Prob
     cfg.push_str(&format!("max-time = {}\n", TIMEOUT.as_secs()));
     cfg.push_str("write-out = \"%{http_code} %{time_total}\"\n");
 
-    if write_private(&cfg_path, &cfg).is_err() || write_private(&body_path, &body.to_string()).is_err()
+    if write_private(&cfg_path, &cfg).is_err()
+        || write_private(&body_path, &body.to_string()).is_err()
     {
         cleanup(&[&cfg_path, &body_path, &out_path]);
         return Probe {
@@ -161,7 +162,10 @@ fn run_probe(ctx: &Context, url: &str, headers: &[String], body: &Value) -> Prob
         };
     };
     let mut parts = summary.split_whitespace();
-    let status = parts.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
+    let status = parts
+        .next()
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(0);
     let latency_ms = parts
         .next()
         .and_then(|s| s.parse::<f64>().ok())
@@ -272,10 +276,9 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value, DispatchErro
             )
         })?,
     };
-    let profile: &ConnectionProfile = settings
-        .profiles
-        .get(&name)
-        .ok_or_else(|| DispatchError::new("AGENT_ERROR", format!("{id} 没有名为 {name} 的接入配置")))?;
+    let profile: &ConnectionProfile = settings.profiles.get(&name).ok_or_else(|| {
+        DispatchError::new("AGENT_ERROR", format!("{id} 没有名为 {name} 的接入配置"))
+    })?;
 
     let Some(base_url) = profile.base_url.as_deref() else {
         return Err(DispatchError::new(
@@ -398,7 +401,10 @@ mod tests {
         assert!(ok);
         assert!(text.contains("限流"));
 
-        let (ok, text) = verdict(Kind::Claude, &probe(401, r#"{"error":{"message":"invalid key"}}"#));
+        let (ok, text) = verdict(
+            Kind::Claude,
+            &probe(401, r#"{"error":{"message":"invalid key"}}"#),
+        );
         assert!(!ok);
         assert!(text.contains("令牌无效"));
         assert!(text.contains("invalid key"), "上游原话要带上：{text}");

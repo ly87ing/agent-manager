@@ -83,7 +83,10 @@ fn claude_额度取自_claude_json_的缓存并跳过没有的窗口() {
     define_agent_with(&ctx, "claude-code", "claude", None);
 
     let usage = usage_of(&ctx, "claude-code");
-    assert_eq!(usage["source"], json!(ctx.home_dir.join(".claude.json").display().to_string()));
+    assert_eq!(
+        usage["source"],
+        json!(ctx.home_dir.join(".claude.json").display().to_string())
+    );
     assert_eq!(usage["checked_at"], json!("2026-09-17T00:41:37Z"));
     assert_eq!(
         usage["windows"],
@@ -128,7 +131,10 @@ fn codex_取最新会话文件的最后一条额度_并能从大文件尾部读�
     ));
     let newest = day.join("rollout-2026-09-17T09-00-00-new.jsonl");
     fs::write(&newest, &newer).unwrap();
-    assert!(fs::metadata(&newest).unwrap().len() > 1 << 20, "垫料不足以触发尾部回读");
+    assert!(
+        fs::metadata(&newest).unwrap().len() > 1 << 20,
+        "垫料不足以触发尾部回读"
+    );
 
     define_agent_with(&ctx, "codex", "codex", None);
 
@@ -178,12 +184,20 @@ fn 用户新建的助手_按_bin_认种类_按它自己的配置路径读() {
     .unwrap();
 
     // id 完全是用户自己取的，跟内置的 claude-code 无关
-    define_agent_with(&ctx, "my-work-claude", "claude", Some("~/.claude-work/.claude.json"));
+    define_agent_with(
+        &ctx,
+        "my-work-claude",
+        "claude",
+        Some("~/.claude-work/.claude.json"),
+    );
 
     let usage = usage_of(&ctx, "my-work-claude");
     assert_eq!(usage["windows"][0]["used_percent"], json!(42.0));
     // 来源给完整路径：多个实例只说「.claude.json」分不清是哪个
-    assert_eq!(usage["source"], json!(instance.join(".claude.json").display().to_string()));
+    assert_eq!(
+        usage["source"],
+        json!(instance.join(".claude.json").display().to_string())
+    );
     let _ = fs::remove_dir_all(&base);
 }
 
@@ -205,7 +219,10 @@ fn bin_写成绝对路径也认得出来_不认识的_bin_为_null() {
     define_agent_with(&ctx, "abs-claude", "/opt/homebrew/bin/claude", None);
     define_agent_with(&ctx, "something-else", "my-own-cli", None);
 
-    assert_eq!(usage_of(&ctx, "abs-claude")["windows"][0]["used_percent"], json!(5.0));
+    assert_eq!(
+        usage_of(&ctx, "abs-claude")["windows"][0]["used_percent"],
+        json!(5.0)
+    );
     assert_eq!(usage_of(&ctx, "something-else"), json!(null));
     let _ = fs::remove_dir_all(&base);
 }
@@ -287,12 +304,23 @@ fn 没有状态栏落盘时行为与从前一致_畸形快照不影响回退() {
     define_agent_with(&ctx, "claude-code", "claude", None);
 
     // 没有落盘文件
-    assert_eq!(usage_of(&ctx, "claude-code")["windows"][0]["used_percent"], json!(8.0));
+    assert_eq!(
+        usage_of(&ctx, "claude-code")["windows"][0]["used_percent"],
+        json!(8.0)
+    );
 
     // 写了半截的落盘文件（多窗口并发写被打断）不能让整块额度消失
-    fs::write(claude_dir.join(".agent-manager-usage.json"), "{\"at\":178987").unwrap();
+    fs::write(
+        claude_dir.join(".agent-manager-usage.json"),
+        "{\"at\":178987",
+    )
+    .unwrap();
     let usage = usage_of(&ctx, "claude-code");
-    assert_eq!(usage["windows"][0]["used_percent"], json!(8.0), "畸形快照要回退到缓存");
+    assert_eq!(
+        usage["windows"][0]["used_percent"],
+        json!(8.0),
+        "畸形快照要回退到缓存"
+    );
 
     let _ = fs::remove_dir_all(&base);
 }

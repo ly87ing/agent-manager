@@ -167,7 +167,9 @@ fn parse_profile(id: &str, raw: &Value) -> Result<ConnectionProfile> {
     let token_var = non_empty(obj.get("token_var"));
     if let Some(name) = token_var.as_deref() {
         if !crate::secret_values::valid_var_name(name) {
-            bail!("接入配置 {id} 的令牌变量名不合法：要以字母或下划线开头，只能用字母、数字与下划线");
+            bail!(
+                "接入配置 {id} 的令牌变量名不合法：要以字母或下划线开头，只能用字母、数字与下划线"
+            );
         }
     }
     let timeout_ms = match obj.get("timeout_ms") {
@@ -367,16 +369,28 @@ pub(crate) fn render_claude(
 
     if let Some(profile) = settings.current() {
         if let Some(url) = profile.base_url.as_deref() {
-            path_set(&mut root, &["env", "ANTHROPIC_BASE_URL"], Value::String(url.to_string()));
+            path_set(
+                &mut root,
+                &["env", "ANTHROPIC_BASE_URL"],
+                Value::String(url.to_string()),
+            );
         }
         if let Some(name) = profile.token_var.as_deref() {
             let Some(value) = resolve(name) else {
                 bail!("环境变量 {name} 还没有取值：先在密钥页填上，或在启动环境里 export 它");
             };
-            path_set(&mut root, &["env", profile.auth.env_key()], Value::String(value));
+            path_set(
+                &mut root,
+                &["env", profile.auth.env_key()],
+                Value::String(value),
+            );
         }
         if let Some(model) = profile.model.as_deref() {
-            path_set(&mut root, &["env", "ANTHROPIC_MODEL"], Value::String(model.to_string()));
+            path_set(
+                &mut root,
+                &["env", "ANTHROPIC_MODEL"],
+                Value::String(model.to_string()),
+            );
         }
         if let Some(model) = profile.small_fast_model.as_deref() {
             path_set(
@@ -396,7 +410,11 @@ pub(crate) fn render_claude(
         }
         if let Some(ms) = profile.timeout_ms {
             // Claude Code 读的是字符串形式的环境变量
-            path_set(&mut root, &["env", "API_TIMEOUT_MS"], Value::String(ms.to_string()));
+            path_set(
+                &mut root,
+                &["env", "API_TIMEOUT_MS"],
+                Value::String(ms.to_string()),
+            );
         }
     }
 
@@ -413,7 +431,10 @@ pub(crate) fn render_claude(
     if settings.statusline == StatusLine::Builtin {
         let mut entry = Map::new();
         entry.insert("type".into(), Value::String("command".into()));
-        entry.insert("command".into(), Value::String(statusline_path.display().to_string()));
+        entry.insert(
+            "command".into(),
+            Value::String(statusline_path.display().to_string()),
+        );
         entry.insert("padding".into(), Value::Number(0.into()));
         path_set(&mut root, STATUSLINE_PATH, Value::Object(entry));
     } else if statusline_is_ours(&Value::Object(root.clone()), statusline_path) {
@@ -802,7 +823,9 @@ pub(crate) fn external_change(
             let text = String::from_utf8_lossy(&bytes);
             (
                 codex_owned_digest(&text),
-                codex_owned_slice(&text).as_object().is_some_and(Map::is_empty),
+                codex_owned_slice(&text)
+                    .as_object()
+                    .is_some_and(Map::is_empty),
             )
         }
     };
@@ -1045,17 +1068,26 @@ mod tests {
 
     #[test]
     fn 解析拒绝非法地址_变量名_配置名与认证方式() {
-        let bad_url = json!({"settings": {"profiles": {"p": {"base_url": "http://evil.example.com"}}}});
+        let bad_url =
+            json!({"settings": {"profiles": {"p": {"base_url": "http://evil.example.com"}}}});
         assert!(parse(&bad_url).is_err());
-        assert!(parse(&json!({"settings": {"profiles": {"p": {"base_url": "http://localhost:8080"}}}})).is_ok());
-        assert!(parse(&json!({"settings": {"profiles": {"p": {"token_var": "has-dash"}}}})).is_err());
+        assert!(parse(
+            &json!({"settings": {"profiles": {"p": {"base_url": "http://localhost:8080"}}}})
+        )
+        .is_ok());
+        assert!(
+            parse(&json!({"settings": {"profiles": {"p": {"token_var": "has-dash"}}}})).is_err()
+        );
         assert!(parse(&json!({"settings": {"profiles": {"bad name": {}}}})).is_err());
         assert!(parse(&json!({"settings": {"profiles": {"p": {"auth": "basic"}}}})).is_err());
         assert!(parse(&json!({"settings": {"statusline": "custom"}})).is_err());
         // active 指向不存在的配置要当场拒绝，不静默落空
         assert!(parse(&json!({"settings": {"active": "nope", "profiles": {"p": {}}}})).is_err());
         // 没有 settings 段 = 没配过
-        assert_eq!(parse(&json!({"bin": "claude"})).unwrap(), AgentSettings::default());
+        assert_eq!(
+            parse(&json!({"bin": "claude"})).unwrap(),
+            AgentSettings::default()
+        );
     }
 
     #[test]
@@ -1077,7 +1109,10 @@ mod tests {
         assert!(parsed["hooks"]["SessionStart"].is_array());
         assert_eq!(parsed["env"]["MY_OWN"], "keep-me");
         assert_eq!(parsed["permissions"]["allow"][0], "Bash(ls:*)");
-        assert_eq!(parsed["env"]["ANTHROPIC_BASE_URL"], "https://api.example.com");
+        assert_eq!(
+            parsed["env"]["ANTHROPIC_BASE_URL"],
+            "https://api.example.com"
+        );
         assert_eq!(parsed["env"]["ANTHROPIC_MODEL"], "claude-opus-5");
         // 没选内置状态栏时，用户自己那份原样留着
         assert_eq!(parsed["statusLine"]["command"], "/x/mine.sh");
@@ -1088,13 +1123,15 @@ mod tests {
         let resolve = |name: &str| (name == "TOK").then(|| "secret".to_string());
         let bearer = one_profile(json!({"token_var": "TOK"}));
         let parsed: Value =
-            serde_json::from_slice(&render_claude(None, &bearer, &resolve, &sl()).unwrap()).unwrap();
+            serde_json::from_slice(&render_claude(None, &bearer, &resolve, &sl()).unwrap())
+                .unwrap();
         assert_eq!(parsed["env"]["ANTHROPIC_AUTH_TOKEN"], "secret");
         assert!(parsed["env"].get("ANTHROPIC_API_KEY").is_none());
 
         let api_key = one_profile(json!({"token_var": "TOK", "auth": "api_key"}));
         let parsed: Value =
-            serde_json::from_slice(&render_claude(None, &api_key, &resolve, &sl()).unwrap()).unwrap();
+            serde_json::from_slice(&render_claude(None, &api_key, &resolve, &sl()).unwrap())
+                .unwrap();
         assert_eq!(parsed["env"]["ANTHROPIC_API_KEY"], "secret");
         assert!(parsed["env"].get("ANTHROPIC_AUTH_TOKEN").is_none());
     }
@@ -1117,7 +1154,10 @@ mod tests {
         .unwrap();
         let first = render_claude(None, &settings, &no_secrets, &sl()).unwrap();
         let parsed: Value = serde_json::from_slice(&first).unwrap();
-        assert_eq!(parsed["env"]["ANTHROPIC_BASE_URL"], "https://relay.example.com");
+        assert_eq!(
+            parsed["env"]["ANTHROPIC_BASE_URL"],
+            "https://relay.example.com"
+        );
         assert_eq!(parsed["env"]["ANTHROPIC_SMALL_FAST_MODEL"], "relay-small");
         assert_eq!(parsed["env"]["ANTHROPIC_DEFAULT_OPUS_MODEL"], "relay-opus");
         assert_eq!(parsed["env"]["API_TIMEOUT_MS"], "600000");
@@ -1137,17 +1177,33 @@ mod tests {
             "permissions": {"defaultMode": "bypassPermissions", "allow": ["Bash(ls:*)"]}
         }))
         .unwrap();
-        let out = render_claude(Some(&existing), &AgentSettings::default(), &no_secrets, &sl()).unwrap();
+        let out = render_claude(
+            Some(&existing),
+            &AgentSettings::default(),
+            &no_secrets,
+            &sl(),
+        )
+        .unwrap();
         let parsed: Value = serde_json::from_slice(&out).unwrap();
 
         assert!(parsed["env"].get("ANTHROPIC_BASE_URL").is_none());
         assert_eq!(parsed["env"]["MY_OWN"], "keep-me", "同级的别人的变量要留着");
         assert!(parsed["permissions"].get("defaultMode").is_none());
-        assert_eq!(parsed["permissions"]["allow"][0], "Bash(ls:*)", "同级的 allow 要留着");
+        assert_eq!(
+            parsed["permissions"]["allow"][0], "Bash(ls:*)",
+            "同级的 allow 要留着"
+        );
 
         // 只剩我们那一条时整个父对象收走
-        let only_ours = serde_json::to_vec(&json!({"env": {"ANTHROPIC_BASE_URL": "https://x"}})).unwrap();
-        let out = render_claude(Some(&only_ours), &AgentSettings::default(), &no_secrets, &sl()).unwrap();
+        let only_ours =
+            serde_json::to_vec(&json!({"env": {"ANTHROPIC_BASE_URL": "https://x"}})).unwrap();
+        let out = render_claude(
+            Some(&only_ours),
+            &AgentSettings::default(),
+            &no_secrets,
+            &sl(),
+        )
+        .unwrap();
         let parsed: Value = serde_json::from_slice(&out).unwrap();
         assert!(parsed.get("env").is_none());
     }
@@ -1168,7 +1224,8 @@ mod tests {
         assert_eq!(parsed["statusLine"]["command"], "/data/statusline.sh");
 
         // 从内置切回「不碰」：把我们指过去的那条撤掉，用户之后自己配什么是他的事
-        let back = render_claude(Some(&out), &AgentSettings::default(), &no_secrets, &sl()).unwrap();
+        let back =
+            render_claude(Some(&out), &AgentSettings::default(), &no_secrets, &sl()).unwrap();
         let parsed: Value = serde_json::from_slice(&back).unwrap();
         assert!(parsed.get("statusLine").is_none());
     }
@@ -1181,7 +1238,8 @@ mod tests {
         }))
         .unwrap();
         // 「不碰」模式下渲染：用户那条原样留着
-        let out = render_claude(Some(&mine), &AgentSettings::default(), &no_secrets, &sl()).unwrap();
+        let out =
+            render_claude(Some(&mine), &AgentSettings::default(), &no_secrets, &sl()).unwrap();
         let parsed: Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(parsed["statusLine"]["command"], "/x/mine.sh");
 
@@ -1196,7 +1254,8 @@ mod tests {
 
     #[test]
     fn 外部修改检测只看自己那几条路径() {
-        let ours = serde_json::to_vec(&json!({"env": {"ANTHROPIC_BASE_URL": "https://a"}})).unwrap();
+        let ours =
+            serde_json::to_vec(&json!({"env": {"ANTHROPIC_BASE_URL": "https://a"}})).unwrap();
         let plus_theirs = serde_json::to_vec(&json!({
             "env": {"ANTHROPIC_BASE_URL": "https://a", "MY_OWN": "x"},
             "hooks": {"SessionStart": []}
@@ -1208,20 +1267,32 @@ mod tests {
             "用户加自己的设置不算外部修改"
         );
 
-        let changed = serde_json::to_vec(&json!({"env": {"ANTHROPIC_BASE_URL": "https://b"}})).unwrap();
+        let changed =
+            serde_json::to_vec(&json!({"env": {"ANTHROPIC_BASE_URL": "https://b"}})).unwrap();
         assert_ne!(owned_digest(&ours, &sl()), owned_digest(&changed, &sl()));
 
         // 状态栏归我们管，被外部改过要认出来
-        let sl_ours = serde_json::to_vec(&json!({"statusLine": {"command": "/data/statusline.sh"}})).unwrap();
-        let sl_changed = serde_json::to_vec(&json!({"statusLine": {"command": "/x/other.sh"}})).unwrap();
-        assert_ne!(owned_digest(&sl_ours, &sl()), owned_digest(&sl_changed, &sl()));
+        let sl_ours =
+            serde_json::to_vec(&json!({"statusLine": {"command": "/data/statusline.sh"}})).unwrap();
+        let sl_changed =
+            serde_json::to_vec(&json!({"statusLine": {"command": "/x/other.sh"}})).unwrap();
+        assert_ne!(
+            owned_digest(&sl_ours, &sl()),
+            owned_digest(&sl_changed, &sl())
+        );
     }
 
     #[test]
     fn 内置状态栏脚本自身可用() {
         // 随脚本一起编译进来，跑一遍语法检查，避免改坏了到运行时才发现
         assert!(STATUSLINE_BODY.starts_with("#!/bin/bash"));
-        assert!(STATUSLINE_BODY.contains("agent-manager-usage.json"), "落盘是它存在的理由");
-        assert!(STATUSLINE_BODY.contains("CLAUDE_CONFIG_DIR"), "实例要各存各的");
+        assert!(
+            STATUSLINE_BODY.contains("agent-manager-usage.json"),
+            "落盘是它存在的理由"
+        );
+        assert!(
+            STATUSLINE_BODY.contains("CLAUDE_CONFIG_DIR"),
+            "实例要各存各的"
+        );
     }
 }

@@ -435,7 +435,11 @@ fn 实例的额度读它自己的配置目录_不是默认那份() {
     .unwrap();
 
     std::env::set_var("AM_TEST_TOKEN_USAGE", "t");
-    assert!(save_definition(&ctx, "cc-usage", &claude_profile("AM_TEST_TOKEN_USAGE")));
+    assert!(save_definition(
+        &ctx,
+        "cc-usage",
+        &claude_profile("AM_TEST_TOKEN_USAGE")
+    ));
 
     let env = execute(&ctx, &request("profiles:status", &[]));
     assert!(env.ok, "profiles:status 失败: {:?}", env.errors);

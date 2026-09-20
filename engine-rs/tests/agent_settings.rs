@@ -99,10 +99,16 @@ fn 写入只动自己那几条路径_别人的键原样保留() {
     assert!(env.lock.held, "写动作要取排他锁");
 
     let after = settings_file(&ctx);
-    assert!(after["hooks"]["SessionStart"].is_array(), "hooks 域的内容不能动");
+    assert!(
+        after["hooks"]["SessionStart"].is_array(),
+        "hooks 域的内容不能动"
+    );
     assert_eq!(after["statusLine"]["command"], "/x/statusline.sh");
     assert_eq!(after["env"]["MY_OWN"], "keep-me");
-    assert_eq!(after["env"]["ANTHROPIC_BASE_URL"], "https://api.example.com");
+    assert_eq!(
+        after["env"]["ANTHROPIC_BASE_URL"],
+        "https://api.example.com"
+    );
     assert_eq!(after["env"]["ANTHROPIC_MODEL"], "claude-opus-5");
 
     let _ = fs::remove_dir_all(&base);
@@ -158,8 +164,10 @@ fn 首次写入遇到用户手配的同名键_同样要显式接管() {
     // 从没用本工具写过，但用户自己配了地址
     fs::write(
         ctx.home_dir.join(".claude/settings.json"),
-        serde_json::to_vec_pretty(&json!({"env": {"ANTHROPIC_BASE_URL": "https://mine.example.com"}}))
-            .unwrap(),
+        serde_json::to_vec_pretty(
+            &json!({"env": {"ANTHROPIC_BASE_URL": "https://mine.example.com"}}),
+        )
+        .unwrap(),
     )
     .unwrap();
     define(&ctx, json!({"base_url": "https://api.example.com"}));
@@ -224,7 +232,10 @@ fn 令牌只存变量名_取不到值时拒绝写入_审计不记取值() {
     const SECRET: &str = "sk-gateway-secret-value";
     let set = execute(
         &ctx,
-        &request("secrets:set", &["--var", "MY_GATEWAY_TOKEN", "--value", SECRET]),
+        &request(
+            "secrets:set",
+            &["--var", "MY_GATEWAY_TOKEN", "--value", SECRET],
+        ),
     );
     assert!(set.ok, "{:?}", set.errors);
 
@@ -274,7 +285,10 @@ fn 既不是_claude_也不是_codex_的助手拒绝写运行参数_且零写() {
     );
     assert!(env.ok, "{:?}", env.errors);
 
-    let refused = execute(&ctx, &request("agents:configure", &["--only", "agents:opencode"]));
+    let refused = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:opencode"]),
+    );
     assert!(!refused.ok);
     assert!(!ctx.home_dir.join(".claude/settings.json").exists());
     assert!(!ctx.home_dir.join(".codex/config.toml").exists());
@@ -303,7 +317,10 @@ fn 非法地址与变量名在写之前就被挡住() {
 #[test]
 fn 清空参数会把自己那几条撤掉_不碰别人的() {
     let (base, ctx) = temp_ctx("clear");
-    define(&ctx, json!({"base_url": "https://api.example.com", "model": "m1"}));
+    define(
+        &ctx,
+        json!({"base_url": "https://api.example.com", "model": "m1"}),
+    );
     assert!(
         execute(
             &ctx,
@@ -359,8 +376,17 @@ fn 切换接入配置一步到位_库里与文件一起变() {
         }),
     );
     // 先按 official 落一次
-    assert!(execute(&ctx, &request("agents:configure", &["--only", "agents:claude-code"])).ok);
-    assert!(settings_file(&ctx).get("env").is_none(), "官方配置不需要环境变量");
+    assert!(
+        execute(
+            &ctx,
+            &request("agents:configure", &["--only", "agents:claude-code"])
+        )
+        .ok
+    );
+    assert!(
+        settings_file(&ctx).get("env").is_none(),
+        "官方配置不需要环境变量"
+    );
 
     // 切到中转：一条命令既改库也写文件
     let switched = execute(
@@ -373,7 +399,10 @@ fn 切换接入配置一步到位_库里与文件一起变() {
     assert!(switched.ok, "{:?}", switched.errors);
     assert_eq!(switched.data["active"], "relay");
     let after = settings_file(&ctx);
-    assert_eq!(after["env"]["ANTHROPIC_BASE_URL"], "https://relay.example.com");
+    assert_eq!(
+        after["env"]["ANTHROPIC_BASE_URL"],
+        "https://relay.example.com"
+    );
     assert_eq!(after["env"]["ANTHROPIC_MODEL"], "relay-model");
 
     // 库里的 active 也跟着变了，下次读定义不会切回去
@@ -392,7 +421,10 @@ fn 切换接入配置一步到位_库里与文件一起变() {
         ),
     );
     assert!(back.ok, "{:?}", back.errors);
-    assert!(settings_file(&ctx).get("env").is_none(), "切回后不得残留上一套的变量");
+    assert!(
+        settings_file(&ctx).get("env").is_none(),
+        "切回后不得残留上一套的变量"
+    );
 
     let _ = fs::remove_dir_all(&base);
 }
@@ -404,7 +436,13 @@ fn 切到不存在的接入配置被拒绝_且不动文件() {
         &ctx,
         json!({"active": "p", "profiles": {"p": {"base_url": "https://api.example.com"}}}),
     );
-    assert!(execute(&ctx, &request("agents:configure", &["--only", "agents:claude-code"])).ok);
+    assert!(
+        execute(
+            &ctx,
+            &request("agents:configure", &["--only", "agents:claude-code"])
+        )
+        .ok
+    );
     let before = fs::read(ctx.home_dir.join(".claude/settings.json")).unwrap();
 
     let refused = execute(
@@ -429,7 +467,10 @@ fn 内置状态栏会部署脚本并指过去_切回不碰只撤自己那条() {
     let (base, ctx) = temp_ctx("statusline");
     define_settings(&ctx, json!({"statusline": "builtin"}));
 
-    let env = execute(&ctx, &request("agents:configure", &["--only", "agents:claude-code"]));
+    let env = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:claude-code"]),
+    );
     assert!(env.ok, "{:?}", env.errors);
     assert_eq!(env.data["statusline"], true);
 
@@ -437,7 +478,10 @@ fn 内置状态栏会部署脚本并指过去_切回不碰只撤自己那条() {
     assert!(script.is_file(), "脚本要落到数据目录");
     let body = fs::read_to_string(&script).unwrap();
     assert!(body.starts_with("#!/bin/bash"));
-    assert!(body.contains("agent-manager-usage.json"), "落盘是它存在的理由");
+    assert!(
+        body.contains("agent-manager-usage.json"),
+        "落盘是它存在的理由"
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -451,7 +495,13 @@ fn 内置状态栏会部署脚本并指过去_切回不碰只撤自己那条() {
 
     // 切回「不碰」：只撤掉我们指过去的那条
     define_settings(&ctx, json!({}));
-    assert!(execute(&ctx, &request("agents:configure", &["--only", "agents:claude-code"])).ok);
+    assert!(
+        execute(
+            &ctx,
+            &request("agents:configure", &["--only", "agents:claude-code"])
+        )
+        .ok
+    );
     assert!(settings_file(&ctx).get("statusLine").is_none());
 
     let _ = fs::remove_dir_all(&base);
@@ -475,14 +525,20 @@ fn 用户自己的状态栏不被碰_也不算外部修改() {
     );
 
     // 不该因为他有自己的状态栏就判成冲突
-    let env = execute(&ctx, &request("agents:configure", &["--only", "agents:claude-code"]));
+    let env = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:claude-code"]),
+    );
     assert!(env.ok, "{:?}", env.errors);
     assert_eq!(
         settings_file(&ctx)["statusLine"]["command"],
         "/x/mine.sh",
         "用户自己的状态栏原样留着"
     );
-    assert!(!ctx.data_dir.join("statusline.sh").exists(), "没选内置就不部署脚本");
+    assert!(
+        !ctx.data_dir.join("statusline.sh").exists(),
+        "没选内置就不部署脚本"
+    );
 
     let _ = fs::remove_dir_all(&base);
 }
@@ -491,13 +547,25 @@ fn 用户自己的状态栏不被碰_也不算外部修改() {
 fn 两种认证方式各写各的环境变量() {
     let (base, ctx) = temp_ctx("auth");
     const SECRET: &str = "sk-relay-secret";
-    assert!(execute(&ctx, &request("secrets:set", &["--var", "RELAY_KEY", "--value", SECRET])).ok);
+    assert!(
+        execute(
+            &ctx,
+            &request("secrets:set", &["--var", "RELAY_KEY", "--value", SECRET])
+        )
+        .ok
+    );
 
     define_settings(
         &ctx,
         json!({"active": "p", "profiles": {"p": {"token_var": "RELAY_KEY", "auth": "api_key"}}}),
     );
-    assert!(execute(&ctx, &request("agents:configure", &["--only", "agents:claude-code"])).ok);
+    assert!(
+        execute(
+            &ctx,
+            &request("agents:configure", &["--only", "agents:claude-code"])
+        )
+        .ok
+    );
     let after = settings_file(&ctx);
     assert_eq!(after["env"]["ANTHROPIC_API_KEY"], SECRET);
     assert!(after["env"].get("ANTHROPIC_AUTH_TOKEN").is_none());
@@ -507,7 +575,13 @@ fn 两种认证方式各写各的环境变量() {
         &ctx,
         json!({"active": "p", "profiles": {"p": {"token_var": "RELAY_KEY", "auth": "token"}}}),
     );
-    assert!(execute(&ctx, &request("agents:configure", &["--only", "agents:claude-code"])).ok);
+    assert!(
+        execute(
+            &ctx,
+            &request("agents:configure", &["--only", "agents:claude-code"])
+        )
+        .ok
+    );
     let after = settings_file(&ctx);
     assert_eq!(after["env"]["ANTHROPIC_AUTH_TOKEN"], SECRET);
     assert!(after["env"].get("ANTHROPIC_API_KEY").is_none());
@@ -525,7 +599,13 @@ fn 切回默认会撤掉接入配置_库里的生效项也清空() {
             "profiles": {"relay": {"base_url": "https://relay.example.com"}}
         }),
     );
-    assert!(execute(&ctx, &request("agents:configure", &["--only", "agents:claude-code"])).ok);
+    assert!(
+        execute(
+            &ctx,
+            &request("agents:configure", &["--only", "agents:claude-code"])
+        )
+        .ok
+    );
     assert_eq!(
         settings_file(&ctx)["env"]["ANTHROPIC_BASE_URL"],
         "https://relay.example.com"
@@ -540,20 +620,31 @@ fn 切回默认会撤掉接入配置_库里的生效项也清空() {
     );
     assert!(back.ok, "{:?}", back.errors);
     assert_eq!(back.data["active"], Value::Null);
-    assert!(settings_file(&ctx).get("env").is_none(), "切回默认后不留任何接入变量");
+    assert!(
+        settings_file(&ctx).get("env").is_none(),
+        "切回默认后不留任何接入变量"
+    );
 
     // 库里也清了，下次读定义不会又切回中转
     let policy = execute(&ctx, &request("policy:get", &[]));
-    assert!(policy.data["effective"]["agents"]["definitions"]["claude-code"]["settings"]
-        .get("active")
-        .is_none());
+    assert!(
+        policy.data["effective"]["agents"]["definitions"]["claude-code"]["settings"]
+            .get("active")
+            .is_none()
+    );
 
     // 两个切换参数不能同时给
     let both = execute(
         &ctx,
         &request(
             "agents:configure",
-            &["--only", "agents:claude-code", "--use", "relay", "--use-default"],
+            &[
+                "--only",
+                "agents:claude-code",
+                "--use",
+                "relay",
+                "--use-default",
+            ],
         ),
     );
     assert!(!both.ok);
@@ -624,7 +715,10 @@ fn codex_写入只动自己那几项_用户的四百行配置原样保留() {
         }),
     );
 
-    let env = execute(&ctx, &request("agents:configure", &["--only", "agents:codex"]));
+    let env = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:codex"]),
+    );
     assert!(env.ok, "{:?}", env.errors);
 
     let after = codex_config(&ctx);
@@ -634,11 +728,17 @@ fn codex_写入只动自己那几项_用户的四百行配置原样保留() {
     assert!(after.contains("# 我自己加的插件"));
     assert!(after.contains("[plugins.\"chrome@openai-bundled\"]"));
     // MCP 域写的那段也不能被我们碰
-    assert!(after.contains("[mcp_servers.grok]"), "MCP 域的受管段不归我们管");
+    assert!(
+        after.contains("[mcp_servers.grok]"),
+        "MCP 域的受管段不归我们管"
+    );
     // 我们的东西写上了
     assert!(after.contains("[model_providers.relay]"), "{after}");
     assert!(after.contains("base_url = \"https://relay.example.com/v1\""));
-    assert!(after.contains("env_key = \"RELAY_KEY\""), "令牌只写变量名，Codex 自己去读");
+    assert!(
+        after.contains("env_key = \"RELAY_KEY\""),
+        "令牌只写变量名，Codex 自己去读"
+    );
     assert!(after.contains("wire_api = \"responses\""));
     assert!(after.contains("model_provider = \"relay\""));
     assert!(after.contains("model = \"gpt-5\""));
@@ -662,27 +762,49 @@ fn codex_切换与切回默认_上一套的接入方式不残留() {
             }
         }),
     );
-    assert!(execute(&ctx, &request("agents:configure", &["--only", "agents:codex"])).ok);
+    assert!(
+        execute(
+            &ctx,
+            &request("agents:configure", &["--only", "agents:codex"])
+        )
+        .ok
+    );
     assert!(codex_config(&ctx).contains("[model_providers.a]"));
 
     let switched = execute(
         &ctx,
-        &request("agents:configure", &["--only", "agents:codex", "--use", "b"]),
+        &request(
+            "agents:configure",
+            &["--only", "agents:codex", "--use", "b"],
+        ),
     );
     assert!(switched.ok, "{:?}", switched.errors);
     let after = codex_config(&ctx);
     assert!(after.contains("[model_providers.b]"));
-    assert!(!after.contains("[model_providers.a]"), "上一套必须撤干净：{after}");
+    assert!(
+        !after.contains("[model_providers.a]"),
+        "上一套必须撤干净：{after}"
+    );
     assert!(after.contains("model_provider = \"b\""));
-    assert_eq!(after.matches("model_provider =").count(), 1, "不能留下两行赋值");
+    assert_eq!(
+        after.matches("model_provider =").count(),
+        1,
+        "不能留下两行赋值"
+    );
 
     let back = execute(
         &ctx,
-        &request("agents:configure", &["--only", "agents:codex", "--use-default"]),
+        &request(
+            "agents:configure",
+            &["--only", "agents:codex", "--use-default"],
+        ),
     );
     assert!(back.ok, "{:?}", back.errors);
     let after = codex_config(&ctx);
-    assert!(!after.contains("model_providers"), "切回默认后不留接入方式：{after}");
+    assert!(
+        !after.contains("model_providers"),
+        "切回默认后不留接入方式：{after}"
+    );
     assert!(!after.contains("model_provider ="));
 
     let _ = fs::remove_dir_all(&base);
@@ -694,12 +816,18 @@ fn codex_跳过权限确认写审批与沙箱_关掉则撤回() {
     fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
     define_codex(&ctx, json!({"yolo": true}));
 
-    let refused = execute(&ctx, &request("agents:configure", &["--only", "agents:codex"]));
+    let refused = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:codex"]),
+    );
     assert!(!refused.ok, "降安全等级必须显式确认");
 
     let ok = execute(
         &ctx,
-        &request("agents:configure", &["--only", "agents:codex", "--allow-yolo"]),
+        &request(
+            "agents:configure",
+            &["--only", "agents:codex", "--allow-yolo"],
+        ),
     );
     assert!(ok.ok, "{:?}", ok.errors);
     let after = codex_config(&ctx);
@@ -708,7 +836,13 @@ fn codex_跳过权限确认写审批与沙箱_关掉则撤回() {
 
     // 关掉：我们写的那两项撤回
     define_codex(&ctx, json!({}));
-    assert!(execute(&ctx, &request("agents:configure", &["--only", "agents:codex"])).ok);
+    assert!(
+        execute(
+            &ctx,
+            &request("agents:configure", &["--only", "agents:codex"])
+        )
+        .ok
+    );
     let after = codex_config(&ctx);
     assert!(!after.contains("approval_policy"));
     assert!(!after.contains("sandbox_mode"));
@@ -726,7 +860,10 @@ fn codex_内置接入方式名被拒_缺地址也被拒() {
         &ctx,
         json!({"active": "openai", "profiles": {"openai": {"base_url": "https://x.example.com/v1"}}}),
     );
-    let refused = execute(&ctx, &request("agents:configure", &["--only", "agents:codex"]));
+    let refused = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:codex"]),
+    );
     assert!(!refused.ok, "内置名字不该放行");
 
     // 自定义接入方式没有默认地址，只填令牌变量名不成立
@@ -734,7 +871,10 @@ fn codex_内置接入方式名被拒_缺地址也被拒() {
         &ctx,
         json!({"active": "relay", "profiles": {"relay": {"token_var": "RELAY_KEY"}}}),
     );
-    let refused = execute(&ctx, &request("agents:configure", &["--only", "agents:codex"]));
+    let refused = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:codex"]),
+    );
     assert!(!refused.ok, "缺地址要当场说清楚");
 
     let _ = fs::remove_dir_all(&base);
@@ -748,14 +888,26 @@ fn codex_外部改过我们那几项就拒绝覆盖() {
         &ctx,
         json!({"active": "relay", "profiles": {"relay": {"base_url": "https://relay.example.com/v1"}}}),
     );
-    assert!(execute(&ctx, &request("agents:configure", &["--only", "agents:codex"])).ok);
+    assert!(
+        execute(
+            &ctx,
+            &request("agents:configure", &["--only", "agents:codex"])
+        )
+        .ok
+    );
 
     // 本工具以外把地址改掉
     let path = ctx.home_dir.join(".codex/config.toml");
-    let edited = codex_config(&ctx).replace("https://relay.example.com/v1", "https://hand.example.com/v1");
+    let edited = codex_config(&ctx).replace(
+        "https://relay.example.com/v1",
+        "https://hand.example.com/v1",
+    );
     fs::write(&path, &edited).unwrap();
 
-    let refused = execute(&ctx, &request("agents:configure", &["--only", "agents:codex"]));
+    let refused = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:codex"]),
+    );
     assert!(!refused.ok, "外部改过就该拒绝");
     assert_eq!(codex_config(&ctx), edited, "拒绝时一个字节都不许动");
 
@@ -787,7 +939,10 @@ fn codex_用户自己配的顶层键首次也要显式接管() {
         json!({"active": "relay", "profiles": {"relay": {"base_url": "https://relay.example.com/v1", "model": "other"}}}),
     );
 
-    let refused = execute(&ctx, &request("agents:configure", &["--only", "agents:codex"]));
+    let refused = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:codex"]),
+    );
     assert!(!refused.ok, "不问自取会把用户手写的顶掉");
     assert!(codex_config(&ctx).contains("gpt-5.6-sol"));
 
@@ -802,9 +957,16 @@ fn 检查在发请求之前就把缺东西说清楚_且零网络() {
 
     // 没有接入配置：直说现在用的是助手自带账号
     define_settings(&ctx, json!({}));
-    let none = execute(&ctx, &request("agents:check", &["--only", "agents:claude-code"]));
+    let none = execute(
+        &ctx,
+        &request("agents:check", &["--only", "agents:claude-code"]),
+    );
     assert!(!none.ok);
-    assert!(none.errors[0].message.contains("助手自带"), "{:?}", none.errors);
+    assert!(
+        none.errors[0].message.contains("助手自带"),
+        "{:?}",
+        none.errors
+    );
 
     // 缺地址 / 缺模型 / 缺令牌变量名，各自给出能照着做的话
     for (settings, needle) in [
@@ -819,7 +981,10 @@ fn 检查在发请求之前就把缺东西说清楚_且零网络() {
         ),
     ] {
         define_settings(&ctx, settings);
-        let env = execute(&ctx, &request("agents:check", &["--only", "agents:claude-code"]));
+        let env = execute(
+            &ctx,
+            &request("agents:check", &["--only", "agents:claude-code"]),
+        );
         assert!(!env.ok);
         assert!(
             env.errors[0].message.contains(needle),
@@ -833,7 +998,10 @@ fn 检查在发请求之前就把缺东西说清楚_且零网络() {
         &ctx,
         json!({"active": "p", "profiles": {"p": {"base_url": "https://api.example.com", "model": "m", "token_var": "NOPE_TOKEN"}}}),
     );
-    let missing = execute(&ctx, &request("agents:check", &["--only", "agents:claude-code"]));
+    let missing = execute(
+        &ctx,
+        &request("agents:check", &["--only", "agents:claude-code"]),
+    );
     assert!(!missing.ok);
     assert!(missing.errors[0].message.contains("NOPE_TOKEN"));
 
@@ -855,14 +1023,29 @@ fn 检查不改配置文件_也不动生效的那套() {
             }
         }),
     );
-    assert!(execute(&ctx, &request("secrets:set", &["--var", "T", "--value", "v"])).ok);
-    assert!(execute(&ctx, &request("agents:configure", &["--only", "agents:claude-code"])).ok);
+    assert!(
+        execute(
+            &ctx,
+            &request("secrets:set", &["--var", "T", "--value", "v"])
+        )
+        .ok
+    );
+    assert!(
+        execute(
+            &ctx,
+            &request("agents:configure", &["--only", "agents:claude-code"])
+        )
+        .ok
+    );
     let before = fs::read(ctx.home_dir.join(".claude/settings.json")).unwrap();
 
     // --use 测的是另一套，但不该把生效的那套切过去
     let env = execute(
         &ctx,
-        &request("agents:check", &["--only", "agents:claude-code", "--use", "b"]),
+        &request(
+            "agents:check",
+            &["--only", "agents:claude-code", "--use", "b"],
+        ),
     );
     // 联不联得上取决于环境，这里只断言它没有改任何东西
     assert_eq!(env.data["profile"], json!("b"), "{:?}", env.errors);
@@ -873,8 +1056,7 @@ fn 检查不改配置文件_也不动生效的那套() {
     );
     let policy = execute(&ctx, &request("policy:get", &[]));
     assert_eq!(
-        policy.data["effective"]["agents"]["definitions"]["claude-code"]["settings"]["active"],
-        "a",
+        policy.data["effective"]["agents"]["definitions"]["claude-code"]["settings"]["active"], "a",
         "检查不该改生效的那套"
     );
 
@@ -890,7 +1072,10 @@ fn 检查不存在的接入配置被拒() {
     );
     let env = execute(
         &ctx,
-        &request("agents:check", &["--only", "agents:claude-code", "--use", "nope"]),
+        &request(
+            "agents:check",
+            &["--only", "agents:claude-code", "--use", "nope"],
+        ),
     );
     assert!(!env.ok);
     assert!(env.errors[0].message.contains("nope"));

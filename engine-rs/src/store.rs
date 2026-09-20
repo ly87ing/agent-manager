@@ -334,7 +334,10 @@ pub fn settings_from_connection(conn: &Connection) -> Result<AppSettings> {
         // 已退役偏好留下的行：只跳过（零写）。default_dry_run 随公共 plan/dry-run
         // 退役；offline 与 upstream_ttl_sec 是没有消费者的旋钮，已从界面撤下。
         // 其他未知行仍由 deny_unknown_fields fail closed。
-        if matches!(key.as_str(), "default_dry_run" | "offline" | "upstream_ttl_sec") {
+        if matches!(
+            key.as_str(),
+            "default_dry_run" | "offline" | "upstream_ttl_sec"
+        ) {
             continue;
         }
         let mut object = serde_json::to_value(&settings)?
