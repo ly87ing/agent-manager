@@ -18,15 +18,25 @@ export function windowLabel(minutes: number): string {
 }
 
 /**
- * 还剩多久重置。重置时刻已经过去说明这个窗口早就翻篇了——多半是助手很久没记账，
- * 那条百分比已经作废，得说清楚，不能含糊成「随时会重置」让人以为还在计。
+ * 这个窗口的计量区间是不是已经结束。
+ *
+ * 结束了就说明额度早已回满、那条百分比是上一轮的残值——Claude Code 自己的状态栏
+ * 也是一到重置点就把这个窗口丢掉，不会继续摆一个作废的数。
  */
+export function isWindowExpired(resetsAt: string | null, now: Date = new Date()): boolean {
+  if (!resetsAt) return false;
+  const target = new Date(resetsAt).getTime();
+  if (Number.isNaN(target)) return false;
+  return target <= now.getTime();
+}
+
+/** 还剩多久重置。已经过了重置点的窗口由 isWindowExpired 单独处理，这里不给说法。 */
 export function resetLabel(resetsAt: string | null, now: Date = new Date()): string | null {
   if (!resetsAt) return null;
   const target = new Date(resetsAt).getTime();
   if (Number.isNaN(target)) return null;
   const minutes = Math.round((target - now.getTime()) / 60000);
-  if (minutes <= 0) return "已过重置点，这个数作废";
+  if (minutes <= 0) return null;
   if (minutes < 60) return `${minutes} 分钟后重置`;
   const hours = Math.round(minutes / 60);
   if (hours < 48) return `${hours} 小时后重置`;
@@ -56,10 +66,18 @@ export function isStale(checkedAt: string | null, now: Date = new Date()): boole
   return now.getTime() - at > STALE_HOURS * 3600_000;
 }
 
-/** 最吃紧的那个窗口：总览一行只放得下一个数字，放最接近用完的那个。 */
-export function tightestWindow(usage: AgentUsage | null | undefined): AgentUsageWindow | null {
-  if (!usage || usage.windows.length === 0) return null;
-  return usage.windows.reduce((worst, item) => (item.used_percent > worst.used_percent ? item : worst));
+/**
+ * 最吃紧的那个窗口：总览一行只放得下一个数字，放最接近用完的那个。
+ * 已经过了重置点的窗口不参与——那条百分比是上一轮的残值。
+ */
+export function tightestWindow(
+  usage: AgentUsage | null | undefined,
+  now: Date = new Date(),
+): AgentUsageWindow | null {
+  if (!usage) return null;
+  const live = usage.windows.filter((item) => !isWindowExpired(item.resets_at, now));
+  if (live.length === 0) return null;
+  return live.reduce((worst, item) => (item.used_percent > worst.used_percent ? item : worst));
 }
 
 /** 余额是长小数串（"2443.0204250000"），显示两位就够。 */

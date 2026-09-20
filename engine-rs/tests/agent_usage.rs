@@ -119,7 +119,7 @@ fn codex_取最新会话文件的最后一条额度_并能从大文件尾部读�
     }
     newer.push_str(&format!(
         "{}\n",
-        json!({"payload": {"info": {"rate_limits": {
+        json!({"timestamp": "2026-09-17T09:29:42.648Z", "payload": {"info": {"rate_limits": {
             "primary": {"used_percent": 65.0, "window_minutes": 10080, "resets_at": 1_789_882_199i64},
             "secondary": null,
             "credits": {"balance": "2443.02"},
@@ -143,6 +143,8 @@ fn codex_取最新会话文件的最后一条额度_并能从大文件尾部读�
         usage["windows"],
         json!([{"window_minutes": 10080, "used_percent": 65.0, "resets_at": "2026-09-20T05:29:59Z"}])
     );
+    // 记账时刻取事件自带的 timestamp，而不是会被后续写入顶新的文件 mtime
+    assert_eq!(usage["checked_at"], json!("2026-09-17T09:29:42Z"));
     let _ = fs::remove_dir_all(&base);
 }
 

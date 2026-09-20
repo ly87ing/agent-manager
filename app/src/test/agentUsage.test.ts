@@ -3,6 +3,7 @@ import {
   creditsLabel,
   freshnessLabel,
   isStale,
+  isWindowExpired,
   resetLabel,
   tightestWindow,
   usageTone,
@@ -22,13 +23,35 @@ describe("额度展示口径", () => {
     expect(windowLabel(45)).toBe("45 分钟");
   });
 
-  it("已经过了重置点不显示负数", () => {
+  it("还剩多久重置；已过重置点的窗口不给倒计时", () => {
     expect(resetLabel("2026-09-18T04:30:00Z", NOW)).toBe("30 分钟后重置");
     expect(resetLabel("2026-09-18T09:00:00Z", NOW)).toBe("5 小时后重置");
     expect(resetLabel("2026-09-21T04:00:00Z", NOW)).toBe("3 天后重置");
-    // 重置点已过说明这条百分比早就翻篇了，得说作废而不是「随时会重置」
-    expect(resetLabel("2026-09-18T03:00:00Z", NOW)).toBe("已过重置点，这个数作废");
+    // 过了重置点交给 isWindowExpired 单独处理：那一行整条不画，不在这里给说法
+    expect(resetLabel("2026-09-18T03:00:00Z", NOW)).toBeNull();
     expect(resetLabel(null, NOW)).toBeNull();
+  });
+
+  it("过了重置点的窗口算作废：百分比是上一轮残值，不参与「最吃紧」", () => {
+    expect(isWindowExpired("2026-09-18T03:00:00Z", NOW)).toBe(true);
+    expect(isWindowExpired("2026-09-18T04:30:00Z", NOW)).toBe(false);
+    // 没有重置时刻的窗口无从判断，按仍在计量处理
+    expect(isWindowExpired(null, NOW)).toBe(false);
+
+    const usage = {
+      source: "/tmp/x.json",
+      checked_at: "2026-09-18T03:00:00Z",
+      windows: [
+        // 已过重置点、数字更大，但已经作废
+        { window_minutes: 300, used_percent: 90, resets_at: "2026-09-18T03:00:00Z" },
+        { window_minutes: 10080, used_percent: 13, resets_at: "2026-09-21T04:00:00Z" },
+      ],
+    };
+    expect(tightestWindow(usage, NOW)?.window_minutes).toBe(10080);
+
+    // 全部作废时没有可报的窗口
+    const allExpired = { ...usage, windows: [usage.windows[0]] };
+    expect(tightestWindow(allExpired, NOW)).toBeNull();
   });
 
   it("数字的新鲜度照实说；超过一天标为可能不准", () => {

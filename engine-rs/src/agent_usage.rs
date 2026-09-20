@@ -162,11 +162,18 @@ fn codex(sessions_dir: &Path) -> Option<Value> {
         windows.push(window(minutes, used, resets_at));
     }
 
-    // 会话文件的修改时刻就是 Codex 最后一次记账的时刻
-    let checked_at = fs::metadata(&path)
-        .and_then(|meta| meta.modified())
-        .ok()
-        .map(|time| rfc3339_secs(DateTime::<Utc>::from(time)));
+    // 记账时刻取这条事件自己带的 timestamp：文件修改时刻会被后续别的事件顶新，
+    // 那样显示出来的「几时更新」比这份额度的实际采样时刻新，等于谎报新鲜度。
+    let checked_at = event
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .and_then(normalize_time)
+        .or_else(|| {
+            fs::metadata(&path)
+                .and_then(|meta| meta.modified())
+                .ok()
+                .map(|time| rfc3339_secs(DateTime::<Utc>::from(time)))
+        });
 
     let mut extra = Map::new();
     if let Some(plan) = limits.get("plan_type").and_then(Value::as_str) {
