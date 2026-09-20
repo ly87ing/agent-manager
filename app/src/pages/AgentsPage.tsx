@@ -42,6 +42,7 @@ import { definitionOrigin } from "../lib/definitionOverlay";
 import {
   activeConnectionOf,
   connectionsOf,
+  duplicateConnectionDraft,
   hasAgentSettings,
   removeAgentConnection,
   upsertAgentConnection,
@@ -395,6 +396,8 @@ export default function AgentsPage({
   const [connectionForm, setConnectionForm] = useState<{
     agent: EngineElement;
     initial?: ConnectionEntry;
+    variant?: "edit" | "duplicate";
+    preserveUnknownFrom?: string;
   } | null>(null);
   const [connectionSaving, setConnectionSaving] = useState(false);
   const [connectionFormError, setConnectionFormError] = useState<string | null>(null);
@@ -551,6 +554,7 @@ export default function AgentsPage({
       const definition = upsertAgentConnection(
         element.spec as Record<string, unknown>,
         submission.connection,
+        connectionForm?.preserveUnknownFrom,
       );
       const saved = await definitionOps.saveDefinition({ name: agentId, definition, isNew: false });
       if (!saved) {
@@ -840,7 +844,17 @@ export default function AgentsPage({
         }
         onEdit={(element, connection) => {
           setConnectionFormError(null);
-          setConnectionForm({ agent: element, initial: connection });
+          setConnectionForm({ agent: element, initial: connection, variant: "edit" });
+        }}
+        onDuplicate={(element, connection) => {
+          const existingNames = connectionsOf(element.spec as Record<string, unknown>).map((item) => item.name);
+          setConnectionFormError(null);
+          setConnectionForm({
+            agent: element,
+            initial: duplicateConnectionDraft(connection, existingNames),
+            variant: "duplicate",
+            preserveUnknownFrom: connection.name,
+          });
         }}
         onRemove={(element, connection) => setConnectionRemoving({ agent: element, connection })}
       />
@@ -1039,6 +1053,7 @@ export default function AgentsPage({
           kind={connectionKindOf(connectionForm.agent)!}
           existingNames={connectionsOf(connectionForm.agent.spec as Record<string, unknown>).map((item) => item.name)}
           initialConnection={connectionForm.initial}
+          variant={connectionForm.variant}
           initialActivate={
             connectionForm.initial
               ? activeConnectionOf(connectionForm.agent.spec as Record<string, unknown>) === connectionForm.initial.name

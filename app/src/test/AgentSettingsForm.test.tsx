@@ -404,6 +404,53 @@ describe("助手运行参数", () => {
     expect(definition.settings.profiles.relay.label).toBe("备用中转");
   });
 
+  it("工作台复制接入：预填参数并生成新名称，默认只保存且不读取凭据", async () => {
+    const withProfiles = routes();
+    const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.settings = {
+      active: "official",
+      profiles: {
+        official: { label: "官方" },
+        relay: {
+          label: "我的中转",
+          base_url: "https://relay.example.com",
+          token_var: "RELAY_KEY",
+          model: "relay-model",
+          future_option: { mode: "keep" },
+        },
+      },
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
+
+    await userEvent.click(await screen.findByTestId("duplicate-connection-claude-code-relay"));
+    expect(await screen.findByRole("dialog", { name: "复制为 我的中转 副本" })).toBeInTheDocument();
+    expect(screen.queryByText("1. 选择接入方式")).toBeNull();
+    expect(screen.getByTestId("new-connection-label")).toHaveValue("我的中转 副本");
+    expect(screen.getByTestId("new-connection-base-url")).toHaveValue("https://relay.example.com");
+    expect(screen.getByTestId("new-connection-token-var")).toHaveValue("RELAY_KEY");
+    expect(screen.getByTestId("new-connection-secret")).toHaveValue("");
+    expect(screen.getByTestId("new-connection-activate")).not.toBeChecked();
+    await userEvent.click(screen.getByTestId("new-connection-advanced"));
+    expect(screen.getByTestId("new-connection-name")).toHaveValue("relay-copy");
+    expect(screen.getByTestId("new-connection-name")).not.toBeDisabled();
+    await userEvent.click(screen.getByTestId("connection-form-submit"));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
+    const saved = calls.find((call) => call.command === "policy:set")!;
+    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
+    expect(definition.settings.active).toBe("official");
+    expect(definition.settings.profiles.relay.future_option).toEqual({ mode: "keep" });
+    expect(definition.settings.profiles["relay-copy"]).toMatchObject({
+      label: "我的中转 副本",
+      base_url: "https://relay.example.com",
+      token_var: "RELAY_KEY",
+      model: "relay-model",
+      future_option: { mode: "keep" },
+    });
+    expect(configureCalls(calls)).toHaveLength(0);
+    expect(calls.some((call) => call.command === "secrets:set")).toBe(false);
+  });
+
   it("工作台删除非当前接入：确认后只删目标定义，不切换也不删除凭据", async () => {
     const withProfiles = routes();
     const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAgentDefinition,
   detectSystemPlatform,
+  duplicateConnectionDraft,
   extractCommandForPlatform,
   extractUnknownFields,
   getProviderNames,
@@ -127,6 +128,78 @@ describe("agentDefinitionForm helpers", () => {
       label: "新名称",
       base_url: "https://new.example.com",
       token_var: "NEW_KEY",
+      model: "new-model",
+      future_option: { mode: "keep" },
+    });
+    expect((result.settings as any).active).toBe("relay");
+  });
+
+  it("复制接入生成不冲突且合法的名称，并保留原草稿不变", () => {
+    const original = {
+      name: "a".repeat(64),
+      label: "主线路",
+      baseUrl: "https://relay.example.com",
+      auth: "token" as const,
+      tokenVar: "RELAY_KEY",
+      model: "relay-model",
+      smallFastModel: "",
+      aliasOpus: "",
+      aliasSonnet: "",
+      aliasHaiku: "",
+      timeoutMs: "",
+    };
+    const firstName = `${"a".repeat(59)}-copy`;
+    const result = duplicateConnectionDraft(original, [original.name, firstName]);
+
+    expect(result).toMatchObject({
+      name: `${"a".repeat(57)}-copy-2`,
+      label: "主线路 副本",
+      baseUrl: "https://relay.example.com",
+      tokenVar: "RELAY_KEY",
+    });
+    expect(result.name).toHaveLength(64);
+    expect(original.name).toHaveLength(64);
+    expect(original.label).toBe("主线路");
+  });
+
+  it("复制接入可从来源项带入未知字段，同时不改动来源项", () => {
+    const initial = {
+      settings: {
+        active: "relay",
+        profiles: {
+          relay: {
+            label: "中转",
+            base_url: "https://old.example.com",
+            token_var: "RELAY_KEY",
+            model: "old-model",
+            future_option: { mode: "keep" },
+          },
+        },
+      },
+    };
+    const result = upsertAgentConnection(
+      initial,
+      {
+        name: "relay-copy",
+        label: "中转 副本",
+        baseUrl: "https://new.example.com",
+        auth: "token",
+        tokenVar: "RELAY_KEY",
+        model: "new-model",
+        smallFastModel: "",
+        aliasOpus: "",
+        aliasSonnet: "",
+        aliasHaiku: "",
+        timeoutMs: "",
+      },
+      "relay",
+    );
+
+    expect((result.settings as any).profiles.relay).toEqual(initial.settings.profiles.relay);
+    expect((result.settings as any).profiles["relay-copy"]).toEqual({
+      label: "中转 副本",
+      base_url: "https://new.example.com",
+      token_var: "RELAY_KEY",
       model: "new-model",
       future_option: { mode: "keep" },
     });

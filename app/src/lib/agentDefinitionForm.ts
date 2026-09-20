@@ -95,6 +95,7 @@ export function connectionToDefinitionValue(item: ConnectionEntry): Record<strin
 export function upsertAgentConnection(
   definition: Record<string, unknown>,
   item: ConnectionEntry,
+  preserveUnknownFrom = item.name,
 ): Record<string, unknown> {
   const next = JSON.parse(JSON.stringify(definition)) as Record<string, unknown>;
   const currentSettings =
@@ -107,11 +108,13 @@ export function upsertAgentConnection(
       : {};
   const name = item.name.trim();
   const currentEntry =
-    currentProfiles[name] && typeof currentProfiles[name] === "object" && !Array.isArray(currentProfiles[name])
-      ? { ...(currentProfiles[name] as Record<string, unknown>) }
+    currentProfiles[preserveUnknownFrom] &&
+    typeof currentProfiles[preserveUnknownFrom] === "object" &&
+    !Array.isArray(currentProfiles[preserveUnknownFrom])
+      ? { ...(currentProfiles[preserveUnknownFrom] as Record<string, unknown>) }
       : {};
-  // 编辑时只替换表单真正拥有的字段。先删再合并，既能让“清空可选项”生效，也不会丢掉
-  // 新版客户端或用户手工加入、而当前表单尚不认识的字段。
+  // 编辑或复制时只替换表单真正拥有的字段。先删再合并，既能让“清空可选项”生效，
+  // 也不会丢掉新版客户端或用户手工加入、而当前表单尚不认识的字段。
   for (const key of [
     "label",
     "base_url",
@@ -132,6 +135,27 @@ export function upsertAgentConnection(
     },
   };
   return next;
+}
+
+/** 复制接入时生成不冲突的草稿；只复制变量名和连接参数，不涉及凭据取值。 */
+export function duplicateConnectionDraft(
+  item: ConnectionEntry,
+  existingNames: string[],
+): ConnectionEntry {
+  const existing = new Set(existingNames);
+  let counter = 1;
+  while (true) {
+    const suffix = counter === 1 ? "-copy" : `-copy-${counter}`;
+    const candidate = `${item.name.slice(0, 64 - suffix.length)}${suffix}`;
+    if (!existing.has(candidate)) {
+      return {
+        ...item,
+        name: candidate,
+        label: `${item.label || item.name} 副本`,
+      };
+    }
+    counter += 1;
+  }
 }
 
 /** 删除一套接入；只动目标 profile，其他定义字段、运行参数与接入原样保留。 */

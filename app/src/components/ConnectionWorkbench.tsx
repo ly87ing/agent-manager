@@ -36,6 +36,7 @@ export function ConnectionWorkbench({
   onSwitch,
   onCheck,
   onEdit,
+  onDuplicate,
   onRemove,
 }: {
   agents: EngineElement[];
@@ -47,6 +48,7 @@ export function ConnectionWorkbench({
   onSwitch: (element: EngineElement, connection: string) => void;
   onCheck: (element: EngineElement, connection: string) => void;
   onEdit: (element: EngineElement, connection: ConnectionEntry) => void;
+  onDuplicate: (element: EngineElement, connection: ConnectionEntry) => void;
   onRemove: (element: EngineElement, connection: ConnectionEntry) => void;
 }) {
   const selected = agents.find((element) => element.id === selectedAgentId) ?? agents[0];
@@ -145,6 +147,7 @@ export function ConnectionWorkbench({
                 onActivate={kind ? () => onSwitch(selected, connection.name) : undefined}
                 onCheck={kind ? () => onCheck(selected, connection.name) : undefined}
                 onEdit={kind ? () => onEdit(selected, connection) : undefined}
+                onDuplicate={kind ? () => onDuplicate(selected, connection) : undefined}
                 onRemove={kind ? () => onRemove(selected, connection) : undefined}
               />
             );
@@ -171,6 +174,7 @@ function ConnectionCard({
   onActivate,
   onCheck,
   onEdit,
+  onDuplicate,
   onRemove,
 }: {
   agentId: string;
@@ -182,6 +186,7 @@ function ConnectionCard({
   onActivate?: () => void;
   onCheck?: () => void;
   onEdit?: () => void;
+  onDuplicate?: () => void;
   onRemove?: () => void;
 }) {
   const id = connection?.name ?? "default";
@@ -236,7 +241,7 @@ function ConnectionCard({
         </dl>
       )}
 
-      {connection && (onCheck || onEdit || onRemove) && (
+      {connection && (onCheck || onEdit || onDuplicate || onRemove) && (
         <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
           {onCheck && (
             <button
@@ -270,6 +275,17 @@ function ConnectionCard({
                 className="rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
               >
                 编辑
+              </button>
+            )}
+            {onDuplicate && (
+              <button
+                type="button"
+                data-testid={`duplicate-connection-${agentId}-${id}`}
+                disabled={disabled}
+                onClick={onDuplicate}
+                className="rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
+              >
+                复制
               </button>
             )}
             {onRemove && (

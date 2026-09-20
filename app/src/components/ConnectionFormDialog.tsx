@@ -39,6 +39,7 @@ export function ConnectionFormDialog({
   kind,
   existingNames,
   initialConnection,
+  variant,
   initialActivate,
   busy,
   error,
@@ -48,8 +49,10 @@ export function ConnectionFormDialog({
   agentName: string;
   kind: ConnectionKind;
   existingNames: string[];
-  /** 有值时进入编辑模式；唯一名称保持不变，避免一次编辑暗中变成复制。 */
+  /** 编辑或复制时的预填值；具体语义由 variant 决定。 */
   initialConnection?: ConnectionEntry;
+  /** 复制模式预填连接参数但允许修改唯一名称；凭据取值始终为空。 */
+  variant?: "edit" | "duplicate";
   /** 编辑当前项时为 true，确保保存后的参数立即写回助手配置。 */
   initialActivate?: boolean;
   busy: boolean;
@@ -62,17 +65,21 @@ export function ConnectionFormDialog({
     typeof document === "undefined" ? null : (document.activeElement as HTMLElement | null),
   );
   const presets = presetsFor(kind);
-  const editing = initialConnection !== undefined;
-  const [choice, setChoice] = useState<string | null>(editing ? "edit" : null);
+  const prefilled = initialConnection !== undefined;
+  const editing = prefilled && variant !== "duplicate";
+  const duplicating = prefilled && variant === "duplicate";
+  const [choice, setChoice] = useState<string | null>(prefilled ? variant ?? "edit" : null);
   const [connection, setConnection] = useState<ConnectionEntry | null>(
     initialConnection ? { ...initialConnection } : null,
   );
   const [secretValue, setSecretValue] = useState("");
-  const [activate, setActivate] = useState(initialActivate ?? !editing);
+  const [activate, setActivate] = useState(initialActivate ?? !prefilled);
   const [localError, setLocalError] = useState<string | null>(null);
   const dialogTitle = editing
     ? `编辑 ${initialConnection.label || initialConnection.name}`
-    : `为 ${agentName} 添加接入`;
+    : duplicating
+      ? `复制为 ${initialConnection.label || initialConnection.name}`
+      : `为 ${agentName} 添加接入`;
 
   useLayoutEffect(() => {
     return () => restoreFocusRef.current?.focus();
@@ -141,7 +148,7 @@ export function ConnectionFormDialog({
       setLocalError("唯一名称只能用字母、数字、连字符与下划线，长度不超过 64");
       return;
     }
-    if (existingNames.includes(name) && name !== initialConnection?.name) {
+    if (existingNames.includes(name) && !(editing && name === initialConnection?.name)) {
       setLocalError(`已经有名为 ${name} 的接入，请换一个名称`);
       return;
     }
@@ -191,6 +198,8 @@ export function ConnectionFormDialog({
             <p className="mt-1 text-sm text-muted-foreground">
               {editing
                 ? `修改 ${agentName} 的这套接入；留空凭据取值不会覆盖已经保存的值。`
+                : duplicating
+                  ? "已带入连接参数和凭据变量名，但不会读取或复制凭据取值。副本默认不会切换为当前接入。"
                 : "先选厂商，再确认地址、模型和凭据；安装命令不在这里。"}
             </p>
           </div>
@@ -206,54 +215,56 @@ export function ConnectionFormDialog({
         </div>
 
         <div className="overflow-y-auto px-5 py-4">
-          {!editing && <fieldset>
-            <legend className="text-sm font-medium text-foreground">1. 选择接入方式</legend>
-            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {presets.map((preset, index) => (
+          {!prefilled && (
+            <fieldset>
+              <legend className="text-sm font-medium text-foreground">1. 选择接入方式</legend>
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {presets.map((preset, index) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    autoFocus={index === 0}
+                    data-testid={`connection-preset-${preset.id}`}
+                    aria-pressed={choice === preset.id}
+                    onClick={() => choosePreset(preset.id)}
+                    className={cn(
+                      "rounded-lg border p-3 text-left",
+                      choice === preset.id ? "border-primary bg-primary/10" : "hover:bg-accent",
+                    )}
+                  >
+                    <span className="block text-sm font-medium text-foreground">{preset.label}</span>
+                    <span className="mt-1 block text-xs text-muted-foreground">{preset.source}</span>
+                  </button>
+                ))}
                 <button
-                  key={preset.id}
                   type="button"
-                  autoFocus={index === 0}
-                  data-testid={`connection-preset-${preset.id}`}
-                  aria-pressed={choice === preset.id}
-                  onClick={() => choosePreset(preset.id)}
+                  autoFocus={presets.length === 0}
+                  data-testid="connection-preset-custom"
+                  aria-pressed={choice === "custom"}
+                  onClick={chooseCustom}
                   className={cn(
                     "rounded-lg border p-3 text-left",
-                    choice === preset.id ? "border-primary bg-primary/10" : "hover:bg-accent",
+                    choice === "custom" ? "border-primary bg-primary/10" : "hover:bg-accent",
                   )}
                 >
-                  <span className="block text-sm font-medium text-foreground">{preset.label}</span>
-                  <span className="mt-1 block text-xs text-muted-foreground">{preset.source}</span>
+                  <span className="block text-sm font-medium text-foreground">自定义接入</span>
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    用于其他官方端点或你自己维护的网关
+                  </span>
                 </button>
-              ))}
-              <button
-                type="button"
-                autoFocus={presets.length === 0}
-                data-testid="connection-preset-custom"
-                aria-pressed={choice === "custom"}
-                onClick={chooseCustom}
-                className={cn(
-                  "rounded-lg border p-3 text-left",
-                  choice === "custom" ? "border-primary bg-primary/10" : "hover:bg-accent",
-                )}
-              >
-                <span className="block text-sm font-medium text-foreground">自定义接入</span>
-                <span className="mt-1 block text-xs text-muted-foreground">
-                  用于其他官方端点或你自己维护的网关
-                </span>
-              </button>
-            </div>
-          </fieldset>}
+              </div>
+            </fieldset>
+          )}
 
           {connection && (
             <div className="mt-5 space-y-4 border-t pt-4">
-              <h3 className="text-sm font-medium text-foreground">{editing ? "接入信息" : "2. 确认必要信息"}</h3>
+              <h3 className="text-sm font-medium text-foreground">{prefilled ? "接入信息" : "2. 确认必要信息"}</h3>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className="text-sm text-foreground">
                   显示名称
                   <input
                     data-testid="new-connection-label"
-                    autoFocus={editing}
+                    autoFocus={prefilled}
                     value={connection.label}
                     onChange={(event) => patch({ label: event.target.value })}
                     className="mt-1 w-full rounded border border-input p-2 text-sm"
@@ -404,7 +415,11 @@ export function ConnectionFormDialog({
                   className="mt-0.5"
                 />
                 <span>
-                  {editing ? "保存后更新这套接入" : "保存后立即启用"}
+                  {editing
+                    ? "保存后更新这套接入"
+                    : duplicating
+                      ? "保存副本后立即启用"
+                      : "保存后立即启用"}
                   <span className="mt-0.5 block text-xs text-muted-foreground">
                     会写入助手配置文件；若目标被外部改过，会先再次征求确认。
                   </span>
@@ -443,6 +458,10 @@ export function ConnectionFormDialog({
                 ? activate
                   ? "保存并更新"
                   : "保存修改"
+                : duplicating
+                  ? activate
+                    ? "保存并启用副本"
+                    : "保存副本"
                 : activate
                   ? "保存并启用"
                   : "保存接入"}
