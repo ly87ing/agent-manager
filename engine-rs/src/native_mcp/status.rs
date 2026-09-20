@@ -340,7 +340,9 @@ fn compute_cell_actions(
             let blk = if !agent_allowed {
                 Some(format!("Agent '{}' 不在服务允许列表中", target.agent))
             } else if missing_reason.is_none() {
-                acts.push("enable");
+                // 停用期间库定义可能已经改变。此时直接 update 会同时用最新定义
+                // 重新启用，避免先 enable 恢复旧快照、随后还要再 update 一次。
+                acts.push(if b.version == lib_version { "enable" } else { "update" });
                 None
             } else {
                 missing_reason.map(str::to_string)
