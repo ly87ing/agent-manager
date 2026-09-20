@@ -76,7 +76,7 @@ describe("App 顶层导航收敛为日常八项", () => {
     expect(within(nav).queryByRole("button", { name: "接管中心" })).toBeNull();
   }, 15000);
 
-  it("从助手卡片点击「管理技能」跳转到技能页并预选对应助手，点击侧栏「技能」重置为全部助手", async () => {
+  it("从实例卡片点击「管理技能」跳转到技能页并预选对应实例，点击侧栏「技能」重置为全部助手", async () => {
     setSettingsClient({
       get: async () => dummySettings,
       save: async (preferences) => ({ ...dummySettings, preferences }),
@@ -98,9 +98,46 @@ describe("App 顶层导航收敛为日常八项", () => {
               freshness: makeFreshness(),
               actions: [],
             }),
+            makeElement({
+              id: "agents:cc-work",
+              domain: "agents",
+              spec: { display_name: "Claude Code · 工作号", bin: "claude" },
+              policy: { enabled: true },
+              observed: { installed: true },
+              state: "managed-ok",
+              freshness: makeFreshness(),
+              actions: [],
+            }),
           ],
         },
         { command: "agents.status" },
+      ),
+      "profiles:status": makeEnvelope(
+        {
+          domain: "profiles",
+          elements: [makeElement({
+            id: "profiles:cc-work",
+            domain: "profiles",
+            spec: {
+              display_name: "Claude Code · 工作号",
+              base_agent: "claude-code",
+              kind: "claude",
+              config_dir: "~/.claude-cc-work",
+            },
+            policy: { enabled: true },
+            observed: {
+              base_agent: "claude-code",
+              kind: "claude",
+              config_env: "CLAUDE_CONFIG_DIR",
+              config_dir: "~/.claude-cc-work",
+              env_refs: [],
+            },
+            state: "not-materialized",
+            freshness: makeFreshness({ state: "not-applicable" }),
+            actions: [],
+          })],
+        },
+        { command: "profiles.status" },
       ),
       "skills:status": makeEnvelope(
         {
@@ -109,7 +146,7 @@ describe("App 顶层导航收敛为日常八项", () => {
             makeElement({
               id: "skill:agent-skills",
               domain: "skills",
-              spec: { url: "https://github.com/example/agent-skills.git", skill_paths: ["alpha"], agents: ["claude-code"] },
+              spec: { url: "https://github.com/example/agent-skills.git", skill_paths: ["alpha"], agents: ["cc-work"] },
               observed: { install_source: null, repo_cache: "/repo/agent-skills", repo_cached: true, owner_marked: true, discovered: ["alpha"], discovery_inbox: [] },
               state: "managed-ok",
             }),
@@ -117,10 +154,10 @@ describe("App 顶层导航收敛为日常八项", () => {
               id: "skill:agent-skills/alpha",
               domain: "skills",
               spec: { collection: "agent-skills", name: "alpha", source_path: "/repo/.../alpha" },
-              policy: { enabled: true, agents: { "claude-code": true } },
+              policy: { enabled: true, agents: { "cc-work": true } },
               observed: {
                 agents: {
-                  "claude-code": {
+                  "cc-work": {
                     state: "linked",
                     link_path: "/home/.claude/skills/alpha",
                     target_dir_exists: true,
@@ -139,11 +176,11 @@ describe("App 顶层导航收敛为日常八项", () => {
 
     renderWithEngine(<App />, customRoutes);
 
-    // 默认助手页，点击 Claude Code 的「管理技能」
-    const manageBtn = await screen.findByTestId("manage-skills-agents:claude-code");
+    // 默认助手页，点击独立实例的「管理技能」
+    const manageBtn = await screen.findByTestId("profile-skills-cc-work");
     await userEvent.click(manageBtn);
 
-    // 跳转到技能页，并且助手筛选预选为 claude-code
+    // 跳转到技能页，并且助手筛选预选为 cc-work
     const nav = screen.getByRole("navigation");
     const skillsNav = within(nav).getByRole("button", { name: "技能" });
     expect(skillsNav).toHaveAttribute("aria-current", "page");
@@ -152,7 +189,7 @@ describe("App 顶层导航收敛为日常八项", () => {
     expect(tabSkills).toHaveAttribute("aria-selected", "true");
 
     const agentSelect = screen.getByTestId("filter-agent-select") as HTMLSelectElement;
-    expect(agentSelect.value).toBe("claude-code");
+    expect(agentSelect.value).toBe("cc-work");
 
     // 点击侧栏「技能」项，重置为全部助手
     await userEvent.click(skillsNav);

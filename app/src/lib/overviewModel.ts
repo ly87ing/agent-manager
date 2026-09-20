@@ -107,7 +107,12 @@ function syncFromCells(element: EngineElement, cells: Record<string, Cell>): Pic
 }
 
 function itemOf(element: EngineElement, name: string): OverviewItem {
-  const { update, version, upstream } = updateOf(element);
+  // AI CLI 的软件生命周期交还给各自安装渠道；总览只保留助手状态与额度，
+  // 版本和安装来源集中到「设置 → 客户端诊断」只读展示。
+  const { update, version, upstream } =
+    element.domain === "agents"
+      ? { update: "none" as const, version: null, upstream: null }
+      : updateOf(element);
   const usage = (element.observed as { usage?: AgentUsage | null }).usage ?? null;
   const base = {
     id: element.id,

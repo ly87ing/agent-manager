@@ -1,11 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { waitFor } from "@testing-library/react";
-import { toast } from "sonner";
 import AgentsPage from "../pages/AgentsPage";
 import AliasesPage from "../pages/AliasesPage";
 import type { Envelope } from "../lib/contract";
 import { makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
-import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
+import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 
 function agentRoutes(): Record<string, Envelope> {
   return {
@@ -60,20 +59,14 @@ function agentRoutes(): Record<string, Envelope> {
 }
 
 describe("助手启停", () => {
-  it("停用只写本机偏好、说明影响范围，不触发任何安装或同步", async () => {
-    const successSpy = vi.spyOn(toast, "success");
+  it("助手主路径不再提供启停或安装维护菜单，不会误触定义与生命周期写入", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, agentRoutes());
-    await userEvent.click(await screen.findByTestId("agent-menu-agents:my-agent"));
-    await userEvent.click(screen.getByTestId("policy-enabled-agents:my-agent"));
+    await screen.findByTestId("connection-workbench");
 
-    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
-    const write = calls.find((call) => call.command === "policy:set")!;
-    expect(write.args[write.args.indexOf("--key") + 1]).toBe("agents.my-agent.enabled");
-    expect(write.args[write.args.indexOf("--value") + 1]).toBe("false");
+    expect(screen.queryByTestId("agent-menu-agents:my-agent")).toBeNull();
+    expect(screen.queryByTestId("policy-enabled-agents:my-agent")).toBeNull();
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
     expect(calls.some((call) => call.command === "agents:apply")).toBe(false);
-    const lastCall = successSpy.mock.calls[successSpy.mock.calls.length - 1];
-    expect(String((lastCall?.[1] as { description?: string } | undefined)?.description)).toContain("已安装的软件不受影响");
-    successSpy.mockRestore();
   });
 });
 
@@ -96,25 +89,12 @@ describe("移除后的撤销", () => {
     expect(restored.value.aliases.claude).toBe("claude");
   });
 
-  it("移除助手定义给出撤销，点击后把定义原样加回", async () => {
+  it("助手定义移除入口随完整定义维护一起撤下，保留定义且零写入", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, agentRoutes());
-    await userEvent.click(await screen.findByTestId("agent-menu-agents:my-agent"));
-    await userEvent.click(screen.getByRole("menuitem", { name: "移除管理" }));
-    const dialog = await screen.findByRole("dialog");
-    await userEvent.type(within(dialog).getByRole("textbox"), "my-agent");
-    await userEvent.click(within(dialog).getByRole("button", { name: "确认移除" }));
+    await screen.findByTestId("connection-workbench");
 
-    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
-    const removal = calls.find((call) => call.command === "policy:set")!;
-    expect(JSON.parse(removal.args[removal.args.indexOf("--value") + 1])).toEqual({ _delete: true });
-
-    await userEvent.click(await screen.findByRole("button", { name: "撤销" }));
-    const policyWrites = () => calls.filter((call) => call.command === "policy:set");
-    await waitFor(() => expect(policyWrites()).toHaveLength(2));
-    const restore = policyWrites()[1];
-    const restored = JSON.parse(restore.args[restore.args.indexOf("--value") + 1]);
-    expect(restored.display_name).toBe("My Agent");
-    expect(restored._delete).toBe(false);
-    expect(restored._replace).toBe(true);
+    expect(screen.queryByRole("menuitem", { name: "移除管理" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "添加助手" })).toBeNull();
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
   });
 });

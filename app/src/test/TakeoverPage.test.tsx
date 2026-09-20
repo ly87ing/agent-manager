@@ -140,8 +140,8 @@ describe("接管中心", () => {
     expect(screen.getByTestId("takeover-native-synced-claude-code")).toHaveTextContent("原生管理");
     // 残留链接可勾选，但走的是清理而不是纳管
     expect(screen.getByTestId("takeover-dead-ghost-codex").querySelector("input[type=checkbox]")).toBeTruthy();
-    // 非 npm 来源的助手登记后保持原生管理方式
-    expect(screen.getByTestId("takeover-agent-opencode")).toHaveTextContent("仅登记标识，保持原生管理");
+    // 助手登记只服务于识别和配置，软件生命周期一律交还原安装渠道。
+    expect(screen.getByTestId("takeover-agent-opencode")).toHaveTextContent("仅登记配置，软件由原渠道维护");
   });
 
   it("外部技能组接管：先登记本地来源集合定义，再逐助手 add（不带接管旗标）", async () => {

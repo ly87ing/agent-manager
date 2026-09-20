@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  Activity,
   ArrowLeft,
   KeyRound,
   Link2,
@@ -20,6 +21,7 @@ import { cn } from "../lib/utils";
 import { check } from "@tauri-apps/plugin-updater";
 import { ConfigBackupSection } from "../components/ConfigBackupSection";
 import AliasesPage from "./AliasesPage";
+import ClientDiagnosticsPage from "./ClientDiagnosticsPage";
 import SecretsPage from "./SecretsPage";
 
 const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
@@ -69,6 +71,12 @@ interface AvailableUpdate {
 }
 
 const ADVANCED_ENTRIES = [
+  {
+    key: "client-diagnostics",
+    title: "客户端诊断",
+    description: "只读查看 AI CLI 的版本与安装来源。",
+    icon: Activity,
+  },
   {
     key: "aliases",
     title: "终端快捷命令",
@@ -243,6 +251,7 @@ export default function SettingsPage({ initialAdvanced }: { initialAdvanced?: st
           <span className="text-xs text-muted-foreground">/ 高级管理 / {currentEntry?.title}</span>
         </div>
         {activeAdvanced === "aliases" && <AliasesPage />}
+        {activeAdvanced === "client-diagnostics" && <ClientDiagnosticsPage />}
         {activeAdvanced === "secrets" && <SecretsPage />}
       </div>
     );
@@ -301,7 +310,7 @@ export default function SettingsPage({ initialAdvanced }: { initialAdvanced?: st
       <section className="rounded-lg border bg-card p-5 shadow-sm">
         <div>
           <h2 className="text-sm font-semibold text-foreground">高级管理</h2>
-          <p className="mt-1 text-xs text-muted-foreground">不常用但偶尔要改的：终端快捷命令与密钥。</p>
+          <p className="mt-1 text-xs text-muted-foreground">不常用的诊断与本机配置入口。</p>
         </div>
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {ADVANCED_ENTRIES.map((entry) => {

@@ -11,7 +11,7 @@
 - 当前状态：公共 `*:plan` 与 `--dry-run` 入口已退役，调用会被拒绝；status/query 只读零写；点击动作直接触发真实 apply；apply 内部保留 preflight/写前校验、精确 scope、排他锁、外部修改检测、CAS/条件回滚与审计。定义保存仍只保存；破坏性定义移除、清日志等独立确认不变。
 - 本轮直接 apply 新交互已完成源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收：Engine 278 项、Tauri 11 项、Vitest 28 files / 248 tests、typecheck/build、8 份 schema 与隔离 smoke 全部通过；旧 DMG/旧 GUI E2E 不证明本轮新交互，最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify，交付回执见下。仍未完成：MCP 新增服务表单真实 GUI 验收（macOS 自动化输入限制）；公开跨平台发布条件——GitHub billing、真实密钥、Developer ID/公证、Windows 签名、Linux/Windows/arm64 真机运行与安装、updater 真实签名下载安装回读；未创建 tag、GitHub Release 或对外安装包，现有授权不包含这些动作。
 - 2026-09-16 发布就绪仓库内改造完成（三提交）：`d46b85a` 补齐 MIT 许可证、公开发布元数据、显式 Webview CSP 与应用图标，Bundle ID 定为 `io.github.ly87ing.agent-manager`；`47702ed` 增加前端顶层错误边界、自定义助手安装/升级确认与 MCP 空态引导，并清理退役代码；`14e6790` 将发布管线重构为草稿先行单写者编排（前置 create-release job 创建唯一 draft，矩阵以 releaseId 上传产物，收尾 job 单写 latest.json），支持 prerelease tag、逐平台 SHA256 checksums 与 engine-rs 版本一致性门禁，verify 脚本在已签名分支补充公证票据如实检查。对外发布仍未进行：GitHub billing、仓库 Secrets/Variables、签名与公证材料、Linux/Windows/arm64 真机验收、updater 真实链路均未就绪，未创建 tag 或 Release。
-- 2026-09-20 用户友好闭环第一步：助手页顶部新增接入工作台，把助手选择、当前接入、卡片式切换、只读测试与预设优先的新增入口放在同一任务面；安装、版本、启动命令与完整定义编辑下沉到维护区。新增接入先保存完整定义与可选凭据，成功后才执行启用，不提前冒充当前状态。
+- 2026-09-20 用户友好闭环：助手页以接入工作台、运行设置和账号实例为主；AI CLI 的安装、升级、卸载脚本与完整定义编辑已撤出产品主路径。新增接入先保存完整定义与可选凭据，成功后才执行启用；客户端安装状态、版本与来源仅在设置的只读诊断页展示。数据库既有生命周期字段第一阶段兼容保留，不在本轮物理删除。
 
 ## 目标
 
@@ -26,7 +26,7 @@
 - Claude Code、Codex 官方 `native` 默认渠道；brew 只按实际检测来源处理。
 - 根仓库 Python 与旧 `manage.sh` 入口清理。
 - Runs 列表与详情使用 SQLite `operation_logs`，新增操作记录时清理过期记录；本地结构化诊断日志基于 `data_dir/logs/agent-manager-YYYY-MM-DD.jsonl` 日切写入（严格脱敏、Unix 0700/0600、只读零写、拒随软链接），在诊断日志写入后及应用启动时清理过期文件。两者共用 `log_retention_days`（0 禁用自动清理）；执行中心支持 `runs:clear` 二次确认清空任务记录，设置页支持 `logs:clear` 二次确认清理诊断日志，两类清理互不影响。
-- Agent 原生定义、安装来源探测、生命周期 apply、跨进程锁、结果核验与操作记录。
+- Agent 原生运行配置与只读安装来源探测；既有生命周期 apply、锁与审计仅作兼容保留，普通 GUI 不提供入口。
 - Skills 原生域接线与完整闭环：内置集合只读默认，首次本地写入 `native-manager.db` 后本地优先；集合与 Skill×Agent 独立更新/启停/移除；内容寻址快照与安全软连接落地及回滚保护；status 只读零写；真实 apply 跨进程锁与操作审计。
 - MCP 原生域接线与本地 stdio 闭环：Rust dispatcher 提供 `mcp:status`（只读）与真实 `mcp:apply`；定义与分配保存在 SQLite，支持 Claude JSON、Codex TOML、OpenCode JSON（需配置对应 Agent target）；逐助手支持 add/update/enable/disable/remove，库级支持 enable/disable/remove；status 只读零写，真实 apply 使用锁、审计、CAS 与回滚；env 在 SQLite definition/binding 中只持久化字面量 `${VAR}` 形式的环境变量引用；status、诊断与操作日志不展示或保存解析后的真实值；真实 apply 执行时从进程环境解析，并按目标 codec 写入 Claude、Codex 或 OpenCode 的目标客户端配置，目标文件的明文由文件权限与客户端安全边界保护。
 - `sources:get/set` 原生接线：规则来源固定为 `rules.shared`、`rules.codex`、`rules.claude`、`rules.opencode` 四项，保存使用 revision CAS 且只写 SQLite，不执行任何同步动作。
@@ -45,7 +45,7 @@
 
 ## 契约要求
 
-Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 必须支持新增、编辑/更新、启用、禁用、删除。保存定义不得执行动作；UI 直接触发真实 apply（apply 内部保留 preflight/写前校验、精确 scope、锁、外部修改检测、CAS/条件回滚与审计），普通同步、启停、更新不二次确认；移除管理与卸载分开，破坏性动作独立确认。
+Skill、MCP 等资源及其逐助手分配必须支持新增、编辑/更新、启用、禁用、删除。保存定义不得执行动作；UI 直接触发真实 apply（apply 内部保留 preflight/写前校验、精确 scope、锁、外部修改检测、CAS/条件回滚与审计），普通同步、启停、更新不二次确认，破坏性动作独立确认。AI CLI 普通界面只维护接入、运行参数和账号实例；不提供安装、升级、卸载和完整定义编辑入口，软件生命周期交给原安装渠道。既有生命周期字段与引擎能力第一阶段兼容保留。
 
 ## 验收基线（2026-09-12，第四次）
 
@@ -361,6 +361,8 @@ state 与 actions，不自己推断；用户主动停用的不催。syncPlan 是
 
 ### 2026-09-20 追加：助手接入工作台第一闭环
 
+> 历史里程碑：其中「安装与维护」和「管理助手」入口已被同日第五闭环撤下。
+
 - 起因：助手接入原来藏在完整定义弹窗与卡片下拉里，新增、切换、测试分散，默认页面先展示安装
   维护信息。用户要求借鉴 cc-switch 的低操作成本，并继续做到更完整、可信的使用闭环。
 - 改动：助手页顶部新增任务式接入工作台，先选助手，再以卡片展示默认账号和每套接入；当前项、
@@ -431,6 +433,24 @@ state 与 actions，不自己推断；用户主动停用的不催。syncPlan 是
   `pnpm build` 通过。浏览器 DEV mock 完成预填、唯一名称可编辑、重名阻止保存、Esc 焦点恢复验证；
   900×800 无横向溢出，控制台无警告或错误。
 - 边界：未改 Rust 契约与数据库结构，未重建安装包；没有合适账号，未做真实厂商联网检查。
+
+### 2026-09-20 追加：运行时优先与客户端诊断第五闭环
+
+- 起因：真实窗口截图显示助手页仍被安装维护卡片、完整定义和命令文本占据，运行时与账号配置反而
+  不够直观。对照 cc-switch 的高频路径后，将产品职责收敛为 Provider/接入、变量、运行设置与账号
+  实例；AI CLI 软件安装和更新继续使用官方安装器、Homebrew、npm 等原渠道。
+- 改动：助手页撤下安装/升级/卸载卡片、完整 alias、完整定义编辑及助手增删停用入口；接入工作台
+  新增紧凑的「运行设置」，Claude 可控制状态栏与权限模式，Codex 控制权限模式。设置页新增只读
+  「客户端诊断」，集中展示是否安装、当前版本和识别到的安装来源，不提供生命周期动作。接管中心和
+  总览同步移除“由本工具升级”暗示及 AI CLI 版本更新展示。
+- 数据边界：`native-manager.db` 仍是唯一事实源；保存运行设置只拥有 `settings.yolo/statusline`，完整
+  保留 profiles、active、未知扩展字段及既有生命周期字段。第一阶段不改 Rust schema，也不物理删除
+  兼容能力；后续清理必须先审计调用方、CI、打包、文档和迁移边界。
+- 验证：Vitest 56 files / 495 tests、`pnpm build`、engine-rs 373 tests、Tauri 14 tests 全部通过。
+  在 1792×1044 原生 Tauri 窗口实测助手主内容一屏完整显示，运行设置弹窗无需滚动，客户端诊断页
+  仅有只读状态且无安装/更新按钮。
+- 边界：本轮没有合适的真实厂商账号，联网接入测试按授权跳过；未重建安装包。原生窗口验收证明
+  当前开发构建的布局与交互，不等同于安装包验收。
 
 ## 剩余路线图（未排期）
 

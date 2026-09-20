@@ -180,7 +180,7 @@ export interface DiscoverAgentCandidate {
   origin: "npm" | "brew" | "native" | "system" | string;
   npm_package: string | null;
   manage: "register";
-  /** true = 登记后可由本工具升级/卸载（仅可靠反查到包名的 npm 渠道）。 */
+  /** 兼容引擎探测字段；当前 UI 不据此提供安装、升级或卸载入口。 */
   managed_after_takeover: boolean;
   suggested_definition: Record<string, unknown>;
 }

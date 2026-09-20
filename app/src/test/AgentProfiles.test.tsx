@@ -154,7 +154,7 @@ describe("助手实例", () => {
     expect(within(card).getByTestId("profile-usage-cc-ly")).toHaveTextContent("5 小时");
     // 实例不再作为主助手卡片重复出现
     expect(screen.queryByTestId("manage-skills-agents:cc-ly")).toBeNull();
-    expect(screen.getByTestId("manage-skills-agents:claude-code")).toBeInTheDocument();
+    expect(within(card).getByTestId("profile-skills-cc-ly")).toBeInTheDocument();
   });
 
   it("复制实例：预填内容但名称与配置目录可改，且默认换了目录", async () => {

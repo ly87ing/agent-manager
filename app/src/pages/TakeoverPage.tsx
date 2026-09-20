@@ -321,10 +321,10 @@ export default function TakeoverPage() {
         icon={Bot}
         testId="takeover-agents"
         title="助手"
-        description="本机已安装、但还没有管理定义的助手 CLI。登记只保存定义，不执行任何安装命令；只有能可靠反查到 npm 包名的才由本工具接管升级卸载，其余保持原生管理方式。"
+        description="本机已安装、但还没有登记的助手 CLI。登记只保存识别与配置所需的定义，不执行安装、升级或卸载；客户端软件继续由原安装渠道维护。"
       >
         {agents.length === 0 ? (
-          <EmptyState compact title="没有发现未登记的助手" description="已安装的助手都已在「助手」页管理。" testId="takeover-agents-empty" />
+          <EmptyState compact title="没有发现未登记的助手" description="已安装的助手都已登记。" testId="takeover-agents-empty" />
         ) : (
           agents.map((agent: DiscoverAgentCandidate) => (
             <SelectableRow
@@ -336,11 +336,7 @@ export default function TakeoverPage() {
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="text-xs font-semibold text-foreground">{agent.display_name}</span>
                 <Badge tone="muted">{AGENT_ORIGIN_LABEL[agent.origin] ?? agent.origin}</Badge>
-                {agent.managed_after_takeover ? (
-                  <Badge tone="success">登记后可由本工具升级</Badge>
-                ) : (
-                  <Badge tone="info">仅登记标识，保持原生管理</Badge>
-                )}
+                <Badge tone="info">仅登记配置，软件由原渠道维护</Badge>
                 {agent.version && <Badge tone="muted">{agent.version}</Badge>}
               </div>
               <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{agent.bin_path}</p>

@@ -1,54 +1,15 @@
 import { describe, expect, it } from "vitest";
-import AgentsPage from "../pages/AgentsPage";
 import McpPage from "../pages/McpPage";
 import RunsPage from "../pages/RunsPage";
 import SkillsPage from "../pages/SkillsPage";
 import type { Envelope, StatusData } from "../lib/contract";
 import {
-  makeAuditData,
   makeElement,
   makeEnvelope,
-  makeFreshness,
-  makeMode,
   makePolicyData,
   makeRunEntry,
 } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
-
-function agentsRoutes(): Record<string, Envelope> {
-  return {
-    "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode() }),
-    "policy:get": makeEnvelope(makePolicyData(), { command: "policy.get" }),
-    "agents:status": makeEnvelope(
-      {
-        domain: "agents",
-        elements: [
-          makeElement({
-            id: "agents:claude-code",
-            domain: "agents",
-            spec: { display_name: "Claude Code", bin: "claude", preferred_provider: "npm", providers: { npm: { managed: true } } },
-            policy: { enabled: true },
-            observed: { install_source: "npm", installed: true },
-            state: "managed-ok",
-            freshness: makeFreshness(),
-            actions: [],
-          }),
-          makeElement({
-            id: "agents:codex",
-            domain: "agents",
-            spec: { display_name: "Codex", bin: "codex", preferred_provider: "native", providers: { native: { managed: true } } },
-            policy: { enabled: true },
-            observed: { install_source: "native", installed: true },
-            state: "managed-ok",
-            freshness: makeFreshness(),
-            actions: [],
-          }),
-        ],
-      },
-      { command: "agents.status" },
-    ),
-  };
-}
 
 function mcpRoutes(): Record<string, Envelope> {
   const status: StatusData = {
@@ -166,28 +127,6 @@ function skillsRoutes(): Record<string, Envelope> {
     "policy:get": makeEnvelope(makePolicyData(), { command: "policy.get" }),
   };
 }
-
-describe("页内搜索：助手页", () => {
-  it("按名称大小写不敏感过滤卡片；无匹配时给出空态与清除入口", async () => {
-    renderWithEngine(<AgentsPage />, agentsRoutes());
-    const input = await screen.findByTestId("agents-search");
-    // 搜索只过滤下方安装维护卡片；上方日常工作台保持可用，因此精确断言卡片的 h3。
-    expect(screen.getByRole("heading", { level: 3, name: /Claude Code/ })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 3, name: /Codex/ })).toBeInTheDocument();
-
-    await userEvent.type(input, "CLAUDE");
-    expect(screen.getByRole("heading", { level: 3, name: /Claude Code/ })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { level: 3, name: /Codex/ })).toBeNull();
-
-    await userEvent.clear(input);
-    await userEvent.type(input, "不存在的助手");
-    expect(await screen.findByTestId("agents-search-empty")).toHaveTextContent("无匹配结果");
-
-    await userEvent.click(screen.getByRole("button", { name: "清除搜索关键词" }));
-    expect(screen.getByRole("heading", { level: 3, name: /Claude Code/ })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 3, name: /Codex/ })).toBeInTheDocument();
-  });
-});
 
 describe("页内搜索：MCP 页", () => {
   it("服务库按名称/命令过滤卡片；无匹配时给出空态与清除入口", async () => {

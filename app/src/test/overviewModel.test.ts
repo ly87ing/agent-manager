@@ -8,7 +8,7 @@ function status(domain: string, elements: ReturnType<typeof makeElement>[]): Env
 }
 
 describe("buildOverview", () => {
-  it("落后的元素给出当前版本与上游版本，not-applicable 不显示版本轴", () => {
+  it("助手版本与上游状态不进入总览，统一留给客户端诊断", () => {
     const groups = buildOverview({
       agents: status("agents", [
         makeElement({
@@ -28,7 +28,7 @@ describe("buildOverview", () => {
 
     const agents = groups.find((group) => group.domain === "agents");
     expect(agents?.items.map((item) => [item.name, item.update, item.version, item.upstream])).toEqual([
-      ["Claude Code", "behind", "2.0.0", "2.1.3"],
+      ["Claude Code", "none", null, null],
       ["Codex", "none", null, null],
     ]);
   });
@@ -111,7 +111,7 @@ describe("buildOverview", () => {
 });
 
 describe("buildOverview 真实形态", () => {
-  it("助手版本来自装出来的 observed.version，没装的说「没装」而不是「要你决定」", () => {
+  it("助手版本不进入总览，没装的仍说「没装」而不是「要你决定」", () => {
     const groups = buildOverview({
       agents: status("agents", [
         makeElement({
@@ -134,7 +134,7 @@ describe("buildOverview 真实形态", () => {
     });
 
     expect(groups[0].items.map((item) => [item.name, item.version, item.sync])).toEqual([
-      ["Claude Code", "2.1.276", "ok"],
+      ["Claude Code", null, "ok"],
       ["OpenCode", null, "absent"],
     ]);
     // 没装不是待办，不进一键同步

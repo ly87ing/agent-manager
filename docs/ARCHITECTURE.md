@@ -21,9 +21,9 @@ React UI ── Tauri commands
 
 ## 保存与执行
 
-定义保存只更新 SQLite，不安装、卸载、链接或执行外部动作。`status` 只读读取状态；执行按钮直接触发真实 `apply`，`apply` 内部包含 preflight/写前校验、精确 scope、排他锁、外部修改检测、CAS/条件回滚与审计，并记录 operation log。
+定义保存只更新 SQLite，不链接或执行外部动作。`status` 只读读取状态；资源执行按钮直接触发真实 `apply`，`apply` 内部包含 preflight/写前校验、精确 scope、排他锁、外部修改检测、CAS/条件回滚与审计，并记录 operation log。
 
-Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 的契约动作均要求新增、编辑/更新、启用、禁用、删除。移除管理与卸载必须分开表达和确认。
+Skill、MCP 等资源及其逐助手分配支持新增、编辑/更新、启用、禁用、删除。AI CLI 普通界面只维护接入、运行参数与账号实例；安装、升级、卸载和完整定义编辑不再作为产品入口，软件生命周期由原安装渠道负责。既有生命周期字段和引擎能力第一阶段兼容保留。
 
 公共 `*:plan` 与 `--dry-run` 入口已退役，调用会被拒绝。
 

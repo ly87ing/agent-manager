@@ -64,13 +64,13 @@ describe("首次使用引导", () => {
 
     unmount();
     renderWithEngine(<AgentsPage />, routes(null));
-    await waitFor(() => expect(screen.getByTestId("agents-search")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("connection-workbench")).toBeInTheDocument());
     expect(screen.queryByTestId("first-run-guide")).toBeNull();
   });
 
   it("已经保存过配置的机器上不出现", async () => {
     renderWithEngine(<AgentsPage />, routes({ agents: { "claude-code": { enabled: true } } }));
-    await waitFor(() => expect(screen.getByTestId("agents-search")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("connection-workbench")).toBeInTheDocument());
     expect(screen.queryByTestId("first-run-guide")).toBeNull();
   });
 });

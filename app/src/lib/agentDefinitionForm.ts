@@ -44,6 +44,12 @@ export interface ConnectionEntry {
   timeoutMs: string;
 }
 
+/** 助手自身的少量运行偏好；账号、地址、模型与凭据变量由接入配置单独维护。 */
+export interface AgentRuntimeOptions {
+  yolo: boolean;
+  statusline: "untouched" | "builtin";
+}
+
 /** 新建一套接入配置时的空白值。 */
 export function emptyConnection(name = ""): ConnectionEntry {
   return {
@@ -436,6 +442,44 @@ export function buildAgentSettings(formValues: AgentFormValues): Record<string, 
 export function hasAgentSettings(definition: Record<string, unknown> | undefined): boolean {
   const raw = definition?.settings;
   return !!raw && typeof raw === "object" && !Array.isArray(raw) && Object.keys(raw).length > 0;
+}
+
+/** 从定义读取界面拥有的运行偏好；未知设置不参与解释。 */
+export function runtimeOptionsOf(
+  definition: Record<string, unknown> | undefined,
+): AgentRuntimeOptions {
+  const raw = definition?.settings;
+  const settings = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : {};
+  return {
+    yolo: settings.yolo === true,
+    statusline: settings.statusline === "builtin" ? "builtin" : "untouched",
+  };
+}
+
+/**
+ * 只更新运行设置弹窗拥有的两个键。
+ * 接入 profiles、当前 active、生命周期字段与未来版本加入的未知字段全部原样保留。
+ */
+export function updateAgentRuntimeOptions(
+  definition: Record<string, unknown>,
+  options: AgentRuntimeOptions,
+): Record<string, unknown> {
+  const next = JSON.parse(JSON.stringify(definition)) as Record<string, unknown>;
+  const raw = next.settings;
+  const settings = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? { ...(raw as Record<string, unknown>) }
+    : {};
+
+  if (options.yolo) settings.yolo = true;
+  else delete settings.yolo;
+  if (options.statusline === "builtin") settings.statusline = "builtin";
+  else delete settings.statusline;
+
+  if (Object.keys(settings).length > 0) next.settings = settings;
+  else delete next.settings;
+  return next;
 }
 
 /** 定义里当前生效的接入配置名；没有就返回 null。 */

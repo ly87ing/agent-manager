@@ -8,7 +8,9 @@ import {
   getProviderNames,
   parseInitialToFormValues,
   removeAgentConnection,
+  runtimeOptionsOf,
   upsertAgentConnection,
+  updateAgentRuntimeOptions,
   updateCommandWithPlatform,
 } from "../lib/agentDefinitionForm";
 
@@ -232,6 +234,53 @@ describe("agentDefinitionForm helpers", () => {
     });
     expect(removeAgentConnection({ settings: { profiles: { relay: {} } } }, "relay")).toEqual({});
     expect(initial.settings.profiles.relay).toEqual({ label: "中转" });
+  });
+
+  it("运行设置只更新自己拥有的键，保留接入、未知字段和生命周期定义", () => {
+    const initial = {
+      display_name: "Claude Code",
+      providers: {
+        native: {
+          install: "install.sh",
+          upgrade: "claude update",
+          uninstall: "uninstall.sh",
+        },
+      },
+      custom_meta: { owner: "local" },
+      settings: {
+        active: "relay",
+        yolo: true,
+        statusline: "builtin",
+        unknown_runtime_flag: "keep",
+        profiles: { relay: { label: "中转", future_option: 7 } },
+      },
+    };
+
+    expect(runtimeOptionsOf(initial)).toEqual({ yolo: true, statusline: "builtin" });
+    const result = updateAgentRuntimeOptions(initial, { yolo: false, statusline: "untouched" });
+
+    expect(result).toEqual({
+      ...initial,
+      settings: {
+        active: "relay",
+        unknown_runtime_flag: "keep",
+        profiles: { relay: { label: "中转", future_option: 7 } },
+      },
+    });
+    expect(initial.settings.yolo).toBe(true);
+    expect((result.providers as any).native.uninstall).toBe("uninstall.sh");
+  });
+
+  it("运行设置能从无 settings 的定义新增，并在清空最后一个自有键时移除空对象", () => {
+    const enabled = updateAgentRuntimeOptions(
+      { display_name: "Codex", bin: "codex" },
+      { yolo: true, statusline: "builtin" },
+    );
+    expect(enabled.settings).toEqual({ yolo: true, statusline: "builtin" });
+    expect(updateAgentRuntimeOptions(enabled, { yolo: false, statusline: "untouched" })).toEqual({
+      display_name: "Codex",
+      bin: "codex",
+    });
   });
 
   it("extractCommandForPlatform extracts plain string and platform-specific mapping", () => {

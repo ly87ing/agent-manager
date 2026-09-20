@@ -53,7 +53,9 @@ describe("全局快捷键", () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     renderWithEngine(<App />, routes());
 
-    const search = await screen.findByTestId("agents-search");
+    const nav = await screen.findByRole("navigation");
+    await userEvent.click(within(nav).getByRole("button", { name: "MCP" }));
+    const search = await screen.findByTestId("mcp-search");
     expect(search).not.toHaveFocus();
 
     await userEvent.keyboard("{Meta>}f{/Meta}");
@@ -63,7 +65,7 @@ describe("全局快捷键", () => {
     search.blur();
     await userEvent.keyboard("{Meta>},{/Meta}");
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
-    expect(screen.queryByTestId("agents-search")).toBeNull();
+    expect(screen.queryByTestId("mcp-search")).toBeNull();
     await userEvent.keyboard("{Meta>}f{/Meta}");
     expect(document.activeElement?.tagName).toBe("BODY");
   }, 15000);
@@ -72,13 +74,14 @@ describe("全局快捷键", () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     renderWithEngine(<App />, routes());
 
-    const search = await screen.findByTestId("agents-search");
+    const nav = await screen.findByRole("navigation");
+    await userEvent.click(within(nav).getByRole("button", { name: "MCP" }));
+    const search = await screen.findByTestId("mcp-search");
     await userEvent.click(search);
     expect(search).toHaveFocus();
 
     await userEvent.keyboard("{Meta>},{/Meta}");
-    const nav = screen.getByRole("navigation");
-    expect(within(nav).getByRole("button", { name: "助手" })).toHaveAttribute("aria-current", "page");
+    expect(within(nav).getByRole("button", { name: "MCP" })).toHaveAttribute("aria-current", "page");
     expect(screen.queryByRole("heading", { name: "设置" })).toBeNull();
   }, 15000);
 });

@@ -68,16 +68,6 @@ function routes(overrides: Record<string, Envelope> = {}): Record<string, Envelo
   };
 }
 
-async function openEditor() {
-  await userEvent.click(await screen.findByRole("button", { name: "管理助手" }));
-  return screen.findByRole("dialog");
-}
-
-/** 新建一套接入配置并展开它的编辑区（新建后默认就是展开且生效的那套）。 */
-async function addConnection() {
-  await userEvent.click(screen.getByTestId("add-connection"));
-}
-
 function configureCalls<T extends { command: string }>(calls: T[]): T[] {
   return calls.filter((call) => call.command === "agents:configure");
 }
@@ -111,67 +101,61 @@ describe("助手运行参数", () => {
     });
   }
 
-  it("填了接口地址保存：先存定义，再写进助手配置文件", async () => {
-    const { calls } = renderWithEngine(<AgentsPage />, routes());
-    await openEditor();
-    await addConnection();
-    await userEvent.type(screen.getByTestId("connection-base-url-input"), "https://api.example.com");
-    await userEvent.click(screen.getByRole("button", { name: "保存定义" }));
+  it("运行设置短弹窗不展示生命周期脚本，保存只改自有键并回写助手", async () => {
+    const withExisting = routes();
+    const status = withExisting["agents:status"] as { data: { elements: { spec: Record<string, any> }[] } };
+    status.data.elements[0].spec.custom_meta = { owner: "local" };
+    status.data.elements[0].spec.providers.native.uninstall = "keep-uninstall.sh";
+    status.data.elements[0].spec.settings = {
+      active: "relay",
+      unknown_runtime_flag: "keep",
+      profiles: { relay: { label: "中转", future_option: 7 } },
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, withExisting);
+
+    await userEvent.click(await screen.findByTestId("agent-runtime-button"));
+    const dialog = await screen.findByRole("dialog", { name: "Claude Code 运行设置" });
+    expect(dialog).toHaveTextContent("账号、接口地址、模型与凭据变量在接入卡片中维护");
+    expect(screen.queryByLabelText("安装命令")).toBeNull();
+    expect(screen.queryByLabelText("升级命令")).toBeNull();
+    expect(screen.queryByLabelText("卸载命令")).toBeNull();
+    await userEvent.selectOptions(screen.getByTestId("agent-runtime-statusline"), "builtin");
+    await userEvent.click(screen.getByTestId("agent-runtime-submit"));
 
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
-    // 定义先落库，参数才写文件
     const saved = calls.find((call) => call.command === "policy:set")!;
     const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
-    expect(definition.settings.profiles.relay.base_url).toBe("https://api.example.com");
-    expect(definition.settings.active).toBe("relay");
+    expect(definition.custom_meta).toEqual({ owner: "local" });
+    expect(definition.providers.native.uninstall).toBe("keep-uninstall.sh");
+    expect(definition.settings).toEqual({
+      active: "relay",
+      unknown_runtime_flag: "keep",
+      profiles: { relay: { label: "中转", future_option: 7 } },
+      statusline: "builtin",
+    });
     expect(configureCalls(calls)[0].args).toEqual(["--only", "agents:claude-code"]);
+    expect(calls.indexOf(saved)).toBeLessThan(calls.indexOf(configureCalls(calls)[0]));
   });
 
-  it("一项都没填：只存定义，不碰助手的配置文件", async () => {
+  it("跳过权限确认先保存定义再二次确认，取消时不写助手文件", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
-    await openEditor();
-    await userEvent.click(screen.getByRole("button", { name: "保存定义" }));
-
-    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
-    expect(configureCalls(calls)).toHaveLength(0);
-  });
-
-  it("令牌只填变量名：定义里存的是名字，不是取值", async () => {
-    const { calls } = renderWithEngine(<AgentsPage />, routes());
-    await openEditor();
-    await addConnection();
-    await userEvent.type(screen.getByTestId("connection-token-var-input"), "MY_GATEWAY_TOKEN");
-    await userEvent.selectOptions(screen.getByTestId("connection-auth-select"), "api_key");
-    await userEvent.click(screen.getByRole("button", { name: "保存定义" }));
-
-    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
-    const saved = calls.find((call) => call.command === "policy:set")!;
-    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
-    expect(definition.settings.profiles.relay.token_var).toBe("MY_GATEWAY_TOKEN");
-    expect(definition.settings.profiles.relay.auth).toBe("api_key");
-    expect(JSON.stringify(definition)).not.toContain("sk-");
-  });
-
-  it("勾了跳过权限确认：先弹确认，取消就不写文件", async () => {
-    const { calls } = renderWithEngine(<AgentsPage />, routes());
-    await openEditor();
-    await userEvent.click(screen.getByTestId("agent-yolo-checkbox"));
-    await userEvent.click(screen.getByRole("button", { name: "保存定义" }));
+    await userEvent.click(await screen.findByTestId("agent-runtime-button"));
+    await userEvent.click(screen.getByTestId("agent-runtime-yolo"));
+    await userEvent.click(screen.getByTestId("agent-runtime-submit"));
 
     await screen.findByRole("dialog", { name: "跳过权限确认" });
+    expect(calls.some((call) => call.command === "policy:set")).toBe(true);
     expect(configureCalls(calls)).toHaveLength(0);
-
     await userEvent.click(screen.getByRole("button", { name: "取消" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(configureCalls(calls)).toHaveLength(0);
   });
 
-  it("勾了跳过权限确认并确认：带 --allow-yolo 写入", async () => {
+  it("跳过权限确认经确认后带 --allow-yolo 写入", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
-    await openEditor();
-    await userEvent.click(screen.getByTestId("agent-yolo-checkbox"));
-    await userEvent.click(screen.getByRole("button", { name: "保存定义" }));
-
+    await userEvent.click(await screen.findByTestId("agent-runtime-button"));
+    await userEvent.click(screen.getByTestId("agent-runtime-yolo"));
+    await userEvent.click(screen.getByTestId("agent-runtime-submit"));
     await screen.findByRole("dialog", { name: "跳过权限确认" });
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
 
@@ -185,9 +169,8 @@ describe("助手运行参数", () => {
 
   it("配置文件被外部改过：先问再覆盖，确认后带 --allow-takeover 重试", async () => {
     let allowed = false;
-    const base = routes();
     const withRefusal: Record<string, Envelope | (() => Promise<Envelope>)> = {
-      ...base,
+      ...routes(),
       "agents:configure": async () => {
         if (allowed) {
           return makeEnvelope(
@@ -201,91 +184,25 @@ describe("助手运行参数", () => {
           {
             command: "agents.configure",
             ok: false,
-            errors: [
-              {
-                code: "AGENT_ERROR",
-                element: null,
-                message: ".claude/settings.json 里这几项被本工具以外改过，拒绝覆盖；确认要用这里的内容替换请选择接管",
-              },
-            ],
+            errors: [{
+              code: "AGENT_ERROR",
+              element: null,
+              message: ".claude/settings.json 里这几项被本工具以外改过，拒绝覆盖；确认要用这里的内容替换请选择接管",
+            }],
           },
         );
       },
     };
     const { calls } = renderWithEngine(<AgentsPage />, withRefusal);
-    await openEditor();
-    await addConnection();
-    await userEvent.type(screen.getByTestId("connection-base-url-input"), "https://api.example.com");
-    await userEvent.click(screen.getByRole("button", { name: "保存定义" }));
+    await userEvent.click(await screen.findByTestId("agent-runtime-button"));
+    await userEvent.selectOptions(screen.getByTestId("agent-runtime-statusline"), "builtin");
+    await userEvent.click(screen.getByTestId("agent-runtime-submit"));
 
-    // 第一次被拒 → 弹接管确认
     await screen.findByRole("dialog", { name: "覆盖被改过的配置" });
     expect(configureCalls(calls)).toHaveLength(1);
-
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(2));
     expect(configureCalls(calls)[1].args).toContain("--allow-takeover");
-  });
-
-  it("按厂商添加一套：地址与模型名填好，只剩令牌要自己配", async () => {
-    const { calls } = renderWithEngine(<AgentsPage />, routes());
-    await openEditor();
-    await userEvent.selectOptions(screen.getByTestId("add-connection-preset"), "deepseek-claude");
-    await userEvent.click(screen.getByRole("button", { name: "保存定义" }));
-
-    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
-    const saved = calls.find((call) => call.command === "policy:set")!;
-    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
-    const entry = definition.settings.profiles.deepseek;
-    expect(entry.base_url).toBe("https://api.deepseek.com/anthropic");
-    expect(entry.model).toBe("deepseek-flash[1m]");
-    expect(entry.model_aliases.haiku).toBe("deepseek-flash");
-    // 预设只带变量名，取值仍要自己在密钥页填
-    expect(entry.token_var).toBe("DEEPSEEK_API_KEY");
-    expect(definition.settings.active).toBe("deepseek");
-  });
-
-  it("Codex 的厂商清单是另一套端点，不会拿 Claude 那条去填", async () => {
-    renderWithEngine(<AgentsPage />, agentRoutes("codex", "codex"));
-    await openEditor();
-    const picker = screen.getByTestId("add-connection-preset");
-    // 选项只给 Codex 那一套
-    await userEvent.selectOptions(picker, "deepseek-codex");
-    expect(screen.getByTestId("connection-base-url-input")).toHaveValue("https://api.deepseek.com/");
-    expect(screen.getByTestId("connection-model-input")).toHaveValue("deepseek-flash");
-  });
-
-  it("状态栏选用本工具的：定义里记下来，随保存一起写入", async () => {
-    const { calls } = renderWithEngine(<AgentsPage />, routes());
-    await openEditor();
-    await userEvent.selectOptions(screen.getByTestId("statusline-select"), "builtin");
-    await userEvent.click(screen.getByRole("button", { name: "保存定义" }));
-
-    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
-    const saved = calls.find((call) => call.command === "policy:set")!;
-    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
-    expect(definition.settings.statusline).toBe("builtin");
-  });
-
-  it("多套接入配置：只有选中的那套是生效的", async () => {
-    const { calls } = renderWithEngine(<AgentsPage />, routes());
-    await openEditor();
-    await addConnection();
-    await userEvent.type(screen.getByTestId("connection-base-url-input"), "https://a.example.com");
-    await addConnection();
-    // 第二套新建后自动展开，填它的地址
-    await userEvent.type(screen.getByTestId("connection-base-url-input"), "https://b.example.com");
-    // 把生效切回第一套
-    await userEvent.click(screen.getByTestId("use-connection-relay"));
-    await userEvent.click(screen.getByRole("button", { name: "保存定义" }));
-
-    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
-    const saved = calls.find((call) => call.command === "policy:set")!;
-    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
-    expect(Object.keys(definition.settings.profiles).sort()).toEqual(["relay", "relay2"]);
-    expect(definition.settings.active).toBe("relay");
-    expect(definition.settings.profiles.relay.base_url).toBe("https://a.example.com");
-    expect(definition.settings.profiles.relay2.base_url).toBe("https://b.example.com");
   });
 
   it("工作台一键切换接入：一条命令带 --use，切回默认带 --use-default", async () => {
@@ -591,7 +508,7 @@ describe("助手运行参数", () => {
     await waitFor(() => expect(activate).toHaveTextContent("正在启用"));
     expect(activate).toBeDisabled();
     expect(screen.getByTestId("activate-connection-claude-code-official")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "管理助手" })).toBeEnabled();
+    expect(screen.getByTestId("agent-runtime-button")).toBeEnabled();
 
     deferred.release?.();
     await waitFor(() => expect(activate).toHaveTextContent("启用"));
@@ -730,24 +647,25 @@ describe("助手运行参数", () => {
 
   it("Codex 也能配接入配置，但没有认证方式与状态栏那两项", async () => {
     renderWithEngine(<AgentsPage />, agentRoutes("codex", "codex"));
-    await openEditor();
-    await addConnection();
+    await userEvent.click(await screen.findByTestId("add-connection-button"));
+    await userEvent.click(screen.getByTestId("connection-preset-custom"));
     // 地址、令牌变量名、模型都有
-    expect(screen.getByTestId("connection-base-url-input")).toBeInTheDocument();
-    expect(screen.getByTestId("connection-token-var-input")).toBeInTheDocument();
-    expect(screen.getByTestId("connection-model-input")).toBeInTheDocument();
-    // Codex 只认环境变量名，没有「令牌怎么发」可选；也没有状态栏机制
-    expect(screen.queryByTestId("connection-auth-select")).toBeNull();
-    expect(screen.queryByTestId("statusline-select")).toBeNull();
-    // 跳过权限确认两家都有
-    expect(screen.getByTestId("agent-yolo-checkbox")).toBeInTheDocument();
+    expect(screen.getByTestId("new-connection-base-url")).toBeInTheDocument();
+    expect(screen.getByTestId("new-connection-token-var")).toBeInTheDocument();
+    expect(screen.getByTestId("new-connection-model")).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+
+    await userEvent.click(screen.getByTestId("agent-runtime-button"));
+    expect(await screen.findByRole("dialog", { name: "codex 运行设置" })).toBeInTheDocument();
+    expect(screen.queryByTestId("agent-runtime-statusline")).toBeNull();
+    expect(screen.getByTestId("agent-runtime-yolo")).toBeInTheDocument();
   });
 
-  it("既不是 Claude 也不是 Codex 的助手：不显示运行参数这一段", async () => {
+  it("既不是 Claude 也不是 Codex 的助手：接入与运行设置都保持只读", async () => {
     renderWithEngine(<AgentsPage />, agentRoutes("opencode", "opencode"));
-    await openEditor();
-    expect(screen.queryByTestId("add-connection")).toBeNull();
-    expect(screen.queryByTestId("agent-yolo-checkbox")).toBeNull();
+    expect(await screen.findByTestId("add-connection-button")).toBeDisabled();
+    expect(screen.getByTestId("agent-runtime-button")).toBeDisabled();
+    expect(screen.queryByLabelText("当前运行设置")).toBeNull();
   });
 
   it("不支持应用内接入的助手：历史 profiles 只读可见，不露出必失败的启用与测试动作", async () => {

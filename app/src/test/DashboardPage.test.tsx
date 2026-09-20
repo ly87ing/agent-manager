@@ -162,14 +162,15 @@ function okRoutes(): Record<string, EngineRoute> {
 }
 
 describe("DashboardPage", () => {
-  it("清单按域列出每一项：名字、版本、要不要更新、同步到位没有", async () => {
+  it("清单按域列出每一项，并把 AI CLI 版本维护收敛到只读诊断页", async () => {
     renderDashboard(okRoutes());
 
-    // 助手：落后的一项直接把「当前 → 上游」摆出来，不用再点进更新页
+    // 助手：总览只显示配置/额度状态，不再暴露版本与更新入口。
     const agents = await screen.findByTestId("overview-agents");
-    expect(within(agents).getByTestId("overview-item-agents:claude-code")).toHaveTextContent("2.0.0 → 2.1.3");
-    expect(within(agents).getByTestId("overview-item-agents:claude-code")).toHaveTextContent("可更新");
-    expect(within(agents).getByTestId("overview-item-agents:codex")).toHaveTextContent("已是最新");
+    expect(within(agents).getByTestId("overview-item-agents:claude-code")).not.toHaveTextContent("2.0.0");
+    expect(within(agents).getByTestId("overview-item-agents:claude-code")).not.toHaveTextContent("2.1.3");
+    expect(within(agents).queryByText("可更新")).not.toBeInTheDocument();
+    expect(within(agents).queryByText("已是最新")).not.toBeInTheDocument();
     // 额度只放最吃紧的那个窗口（7 天 65% 而不是 5 小时 12%）；这份夹具的记账时刻很旧，
     // 数字后面带问号提示别当真
     expect(within(agents).getByTestId("overview-item-agents:codex")).toHaveTextContent("额度 65%?");

@@ -1,9 +1,13 @@
-import { Check, Loader2, Plus } from "lucide-react";
+import { Check, Loader2, Plus, Settings2 } from "lucide-react";
 import { AgentUsageBar } from "./AgentUsageBar";
 import type { ConnectionKind } from "./ConnectionFormDialog";
 import type { EngineElement } from "../lib/contract";
 import type { AgentsObserved, AgentsSpec } from "../lib/observed";
-import { parseInitialToFormValues, type ConnectionEntry } from "../lib/agentDefinitionForm";
+import {
+  parseInitialToFormValues,
+  runtimeOptionsOf,
+  type ConnectionEntry,
+} from "../lib/agentDefinitionForm";
 import { cn } from "../lib/utils";
 
 export interface ConnectionCheckResult {
@@ -38,6 +42,7 @@ export function ConnectionWorkbench({
   onEdit,
   onDuplicate,
   onRemove,
+  onRuntimeSettings,
 }: {
   agents: EngineElement[];
   selectedAgentId: string | null;
@@ -50,6 +55,7 @@ export function ConnectionWorkbench({
   onEdit: (element: EngineElement, connection: ConnectionEntry) => void;
   onDuplicate: (element: EngineElement, connection: ConnectionEntry) => void;
   onRemove: (element: EngineElement, connection: ConnectionEntry) => void;
+  onRuntimeSettings: (element: EngineElement) => void;
 }) {
   const selected = agents.find((element) => element.id === selectedAgentId) ?? agents[0];
   if (!selected) return null;
@@ -61,6 +67,7 @@ export function ConnectionWorkbench({
   const activeEntry = form.connections.find((item) => item.name === active);
   const observed = selected.observed as AgentsObserved;
   const kind = connectionKindOf(selected);
+  const runtime = runtimeOptionsOf(selected.spec as Record<string, unknown>);
 
   return (
     <section data-testid="connection-workbench" className="rounded-xl border bg-card p-4 shadow-sm sm:p-5">
@@ -77,16 +84,43 @@ export function ConnectionWorkbench({
               。切换会同时更新本机记录和助手配置文件，下次启动生效。
             </p>
           </div>
-          <button
-            type="button"
-            data-testid="add-connection-button"
-            disabled={!kind}
-            onClick={() => onAdd(selected)}
-            className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Plus className="h-4 w-4" aria-hidden /> 添加接入
-          </button>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <button
+              type="button"
+              data-testid="agent-runtime-button"
+              disabled={!kind}
+              onClick={() => onRuntimeSettings(selected)}
+              className="inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-sm text-muted-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Settings2 className="h-4 w-4" aria-hidden /> 运行设置
+            </button>
+            <button
+              type="button"
+              data-testid="add-connection-button"
+              disabled={!kind}
+              onClick={() => onAdd(selected)}
+              className="inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Plus className="h-4 w-4" aria-hidden /> 添加接入
+            </button>
+          </div>
         </div>
+
+        {kind && (
+          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground" aria-label="当前运行设置">
+            {kind === "claude" && (
+              <span className="rounded-full border bg-muted/40 px-2.5 py-1">
+                状态栏：{runtime.statusline === "builtin" ? "用量状态栏" : "保持现状"}
+              </span>
+            )}
+            <span className={cn(
+              "rounded-full border px-2.5 py-1",
+              runtime.yolo ? "border-destructive/30 bg-destructive/10 text-destructive" : "bg-muted/40",
+            )}>
+              权限确认：{runtime.yolo ? "已跳过" : "逐次询问"}
+            </span>
+          </div>
+        )}
 
         <div aria-label="选择助手" className="flex flex-wrap gap-2" role="group">
           {agents.map((element) => {
@@ -120,7 +154,7 @@ export function ConnectionWorkbench({
 
         {!kind && (
           <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
-            这个助手暂不支持在应用内切换接入；安装、启动命令和技能管理仍可在下方完成。
+            这个助手暂不支持在应用内切换接入或写入运行设置；已有配置仅只读展示。
           </p>
         )}
 
