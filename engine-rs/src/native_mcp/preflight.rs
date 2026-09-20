@@ -166,12 +166,12 @@ pub fn preflight_check_state(
 
         let (entry_opt, is_managed) =
             extract_entry(&target.path, target.format.clone(), &parsed.server)?;
-        // 显式接管：仅 --allow-takeover 的 add/update 允许替换未受管同名条目；
-        // 该条目将被受管渲染整体替换，其外部字段随条目一并被替换，不再逐字段拦截。
+        // 显式接管：仅 --allow-takeover 的 add/update 允许整体替换现有同名条目；
+        // 既覆盖完全未受管的条目，也覆盖受管条目里后来新增的外部字段。
+        // 缺省仍逐字段 fail-closed，只有用户点明「接管」才会舍弃这些额外字段。
         let takeover = parsed.allow_takeover
             && matches!(parsed.action.as_str(), "add" | "update")
-            && entry_opt.is_some()
-            && !is_managed;
+            && entry_opt.is_some();
         if let Some(ref entry) = entry_opt {
             if !is_managed && !takeover {
                 bail!(

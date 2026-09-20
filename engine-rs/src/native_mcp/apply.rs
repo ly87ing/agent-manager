@@ -101,10 +101,10 @@ pub fn apply(ctx: &Context, req: &Request) -> Result<Value> {
                     let version = compute_definition_version(def);
 
                     // 事务内重检（preflight_check_state 已跑）后记录接管事实：
-                    // 写入前条目仍未受管 → 本次写入为显式接管替换，审计需标记。
+                    // 显式接管且写入前已有同名条目 → 本次为整体替换，审计需标记。
                     takeover = parsed.allow_takeover
                         && extract_entry(&target.path, target.format.clone(), &parsed.server)
-                            .map(|(e, m)| e.is_some() && !m)
+                            .map(|(entry, _)| entry.is_some())
                             .unwrap_or(false);
 
                     let rendered = render_target_content(

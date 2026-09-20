@@ -2328,6 +2328,92 @@ fn mcp_test_external_modification_with_unknown_fields() {
         "拒绝后文件字节必须严格不变"
     );
 
+    // 显式接管是这类阻塞的闭环：只替换这个服务条目，舍弃额外字段并恢复受管定义。
+    let takeover_res = execute(
+        &ctx,
+        &request(
+            "mcp:apply",
+            &[
+                "--only",
+                "mcp:mod-server",
+                "--action",
+                "update",
+                "--agent",
+                "claude",
+                "--allow-takeover",
+            ],
+        ),
+    );
+    assert!(
+        takeover_res.ok,
+        "显式接管必须能收敛未知外部字段: {:?}",
+        takeover_res.errors
+    );
+    let repaired: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&claude_file).unwrap()).unwrap();
+    assert!(
+        repaired["mcpServers"]["mod-server"]
+            .get("unrecognized_custom_field")
+            .is_none(),
+        "接管后额外字段必须被服务库定义替换"
+    );
+    let repaired_status = execute(&ctx, &request("mcp:status", &[]));
+    let repaired_cell =
+        &find_element(&repaired_status, "mcp:mod-server")["observed"]["agents"]["claude-code"];
+    assert_eq!(repaired_cell["state"], "managed-ok");
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn mcp_test_disallowed_absent_agent_does_not_make_limited_service_drifted() {
+    let (root, ctx) = temp_ctx("limited-service-overall-state");
+    let set_res = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions.codex-only",
+                "--value",
+                r#"{"command":"node","args":["server.js"],"agents":["codex"]}"#,
+            ],
+        ),
+    );
+    assert!(set_res.ok, "{:?}", set_res.errors);
+    let add_res = execute(
+        &ctx,
+        &request(
+            "mcp:apply",
+            &[
+                "--only",
+                "mcp:codex-only",
+                "--action",
+                "add",
+                "--agent",
+                "codex",
+            ],
+        ),
+    );
+    assert!(add_res.ok, "{:?}", add_res.errors);
+
+    let status = execute(&ctx, &request("mcp:status", &[]));
+    let element = find_element(&status, "mcp:codex-only");
+    assert_eq!(
+        element["observed"]["agents"]["codex"]["state"],
+        "managed-ok"
+    );
+    assert_eq!(
+        element["observed"]["agents"]["claude-code"]["state"],
+        "absent"
+    );
+    assert_eq!(
+        element["state"], "managed-ok",
+        "不在允许列表且没有受管残留的助手不应制造误报"
+    );
+
     let _ = std::fs::remove_dir_all(root);
 }
 

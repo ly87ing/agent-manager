@@ -451,7 +451,9 @@ pub fn status(ctx: &Context) -> Result<Value> {
                         Some(reason),
                     ),
                 );
-                cell_states.push(s);
+                if agent_allowed || binding.is_some() {
+                    cell_states.push(s);
+                }
                 continue;
             }
 
@@ -470,7 +472,9 @@ pub fn status(ctx: &Context) -> Result<Value> {
                                 Some(format!("配置文件解析失败: {}", e)),
                             ),
                         );
-                        cell_states.push("probe-error");
+                        if agent_allowed || binding.is_some() {
+                            cell_states.push("probe-error");
+                        }
                         continue;
                     }
                 };
@@ -488,7 +492,11 @@ pub fn status(ctx: &Context) -> Result<Value> {
                 missing_reason.as_deref(),
             );
 
-            cell_states.push(state);
+            // 限定助手的定义不应被其他助手的纯 absent 状态拖成「不一致」。
+            // 但旧绑定或受管残留仍属于本工具责任，必须继续计入并给出清理动作。
+            if agent_allowed || binding.is_some() || (actual_entry.is_some() && is_managed) {
+                cell_states.push(state);
+            }
             agent_cells.insert(
                 agent.clone(),
                 make_cell(
