@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-本仓库协作要求以根目录 [AGENTS.md](AGENTS.md) 为准。当前目标是 Rust 原生后端与 Tauri UI，Python 实现已停止维护并获准清理。
+本仓库协作要求以根目录 @AGENTS.md 为准——这一行是 import，它的正文随本文件一并加载，不用再单独打开。当前目标是 Rust 原生后端与 Tauri UI，Python 实现已停止维护并获准清理。
 
 - 产品要求：[GUI 重设计](docs/GUI-REDESIGN.md)。
 - 当前实施、执行者切换及验收：[任务书](docs/goal-rust-gui.md)。
