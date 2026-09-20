@@ -12,7 +12,7 @@ type Routes = Record<string, Envelope | ((args: string[]) => Promise<Envelope>)>
  * 批量测试矩阵：
  * - alpha: claude-code 可启用、codex 可禁用
  * - beta: claude-code 与 codex 均可启用
- * - gamma: claude-code 无动作、codex 无 cell（均不可勾选）
+ * - gamma: claude-code 未分配但可首次启用（实际 add）、codex 无 cell
  */
 function batchRoutes(): Routes {
   return {
@@ -84,7 +84,7 @@ function batchRoutes(): Routes {
             policy: { enabled: true, agents: {} },
             observed: {
               agents: {
-                "claude-code": { state: "unsupported", assigned: false, enabled: false, actions: [] },
+                "claude-code": { state: "not-assigned", assigned: false, enabled: false, actions: ["add"] },
               },
               discovery_inbox: false,
             },
@@ -175,7 +175,7 @@ describe("SkillsPage 全部技能批量操作", () => {
     expect(alpha).toHaveAttribute("aria-label", "选择 alpha");
     expect(screen.queryByTestId("select-skill:agent-skills/alpha-claude-code")).toBeNull();
     expect(screen.queryByTestId("select-skill:agent-skills/alpha-codex")).toBeNull();
-    expect(screen.getByTestId("select-skill:agent-skills/gamma")).toBeDisabled();
+    expect(screen.getByTestId("select-skill:agent-skills/gamma")).toBeEnabled();
 
     const selectAll = screen.getByTestId("select-all-visible") as HTMLInputElement;
     expect(selectAll).toHaveAttribute("aria-label", "全选当前可见行");
@@ -188,13 +188,13 @@ describe("SkillsPage 全部技能批量操作", () => {
     expect(selectAll.indeterminate).toBe(true);
     expect(screen.getByTestId("batch-toolbar")).toHaveTextContent("已选 1 个技能");
 
-    // 全选 → alpha/beta 两个可批量处理的技能行全部选中。
+    // 全选 → alpha/beta/gamma 三个可批量处理的技能行全部选中。
     await userEvent.click(selectAll);
     expect(selectAll).toBeChecked();
     expect(selectAll.indeterminate).toBe(false);
-    expect(screen.getByTestId("batch-toolbar")).toHaveTextContent("已选 2 个技能");
+    expect(screen.getByTestId("batch-toolbar")).toHaveTextContent("已选 3 个技能");
     expect(screen.getByTestId("select-skill:agent-skills/beta")).toBeChecked();
-    expect(screen.getByTestId("select-skill:agent-skills/gamma")).not.toBeChecked();
+    expect(screen.getByTestId("select-skill:agent-skills/gamma")).toBeChecked();
 
     // 再次点击全选 → 清空选择，工具栏消失
     await userEvent.click(selectAll);
@@ -225,10 +225,10 @@ describe("SkillsPage 全部技能批量操作", () => {
     await userEvent.click(await screen.findByTestId("select-all-visible"));
 
     const toolbar = screen.getByTestId("batch-toolbar");
-    // alpha@claude-code + beta@claude-code + beta@codex 可启用；仅 alpha@codex 可禁用
+    // 既有分配的 3 行加 gamma@claude-code 首次启用共 4 行；仅 alpha@codex 可停用。
     expect(within(toolbar).getByTestId("batch-update")).toHaveTextContent("批量更新 (1)");
     expect(within(toolbar).getByTestId("batch-update")).toBeEnabled();
-    expect(within(toolbar).getByTestId("batch-enable")).toHaveTextContent("批量启用 (3)");
+    expect(within(toolbar).getByTestId("batch-enable")).toHaveTextContent("批量启用 (4)");
     expect(within(toolbar).getByTestId("batch-disable")).toHaveTextContent("批量停用 (1)");
     // 选中集合无计划外链接行：纳入管理/取消链接不显示
     expect(within(toolbar).queryByTestId("batch-add")).toBeNull();
@@ -256,7 +256,7 @@ describe("SkillsPage 全部技能批量操作", () => {
     ]);
   });
 
-  it("批量启用：逐行顺序调用 skills:apply，参数精确、独立 run_id、不弹确认，只发汇总 toast，结束后清空选择", async () => {
+  it("批量启用：既有分配用 enable、首次启用用 add，共用一次汇总且各行独立 run_id", async () => {
     const successSpy = vi.spyOn(toast, "success");
     const errorSpy = vi.spyOn(toast, "error");
     try {
@@ -265,22 +265,25 @@ describe("SkillsPage 全部技能批量操作", () => {
       fireEvent.change(screen.getByTestId("filter-agent-select"), { target: { value: "claude-code" } });
       await userEvent.click(await screen.findByTestId("select-skill:agent-skills/alpha"));
       await userEvent.click(screen.getByTestId("select-skill:agent-skills/beta"));
+      await userEvent.click(screen.getByTestId("select-skill:agent-skills/gamma"));
       await userEvent.click(screen.getByTestId("batch-enable"));
 
-      await screen.findByText(/批量启用完成：成功 2，失败 0/);
+      await screen.findByText(/批量启用完成：成功 3，失败 0/);
       const applyCalls = calls.filter((call) => call.command === "skills:apply");
-      expect(applyCalls).toHaveLength(2);
+      expect(applyCalls).toHaveLength(3);
       expect(applyCalls[0].args).toEqual(["--only", "skill:agent-skills/alpha", "--action", "enable", "--agent", "claude-code"]);
       expect(applyCalls[1].args).toEqual(["--only", "skill:agent-skills/beta", "--action", "enable", "--agent", "claude-code"]);
+      expect(applyCalls[2].args).toEqual(["--only", "skill:agent-skills/gamma", "--action", "add", "--agent", "claude-code"]);
       expect(applyCalls[0].args).not.toContain("--allow-takeover");
       expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
       expect(applyCalls[1].options?.runId).toMatch(/^gui-/);
+      expect(applyCalls[2].options?.runId).toMatch(/^gui-/);
       expect(applyCalls[0].options?.runId).not.toBe(applyCalls[1].options?.runId);
       expect(screen.queryByRole("dialog")).toBeNull();
       expect(screen.queryByTestId("batch-toolbar")).toBeNull();
       // 仅汇总 toast：两行单行结果 toast（成功/失败）均被压掉
       expect(successSpy).toHaveBeenCalledTimes(1);
-      expect(successSpy).toHaveBeenCalledWith(expect.stringContaining("批量启用完成：成功 2，失败 0"));
+      expect(successSpy).toHaveBeenCalledWith(expect.stringContaining("批量启用完成：成功 3，失败 0"));
       expect(errorSpy).not.toHaveBeenCalled();
     } finally {
       successSpy.mockRestore();

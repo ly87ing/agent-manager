@@ -48,10 +48,18 @@ function isBatchSelectableCell(cell: SkillAgentCell | null): boolean {
   const actions = cell?.actions ?? [];
   return Boolean(
     skillNeedsUpdate(cell) ||
-      actions.includes("enable") ||
+      skillEnableAction(cell) ||
       actions.includes("disable") ||
       (cell?.state === "extra-link" && (actions.includes("add") || actions.includes("remove"))),
   );
+}
+
+/** 用户界面的「启用」：未分配时实际执行 add，已停用时执行 enable。 */
+function skillEnableAction(cell: SkillAgentCell | null): "add" | "enable" | null {
+  const actions = cell?.actions ?? [];
+  if (actions.includes("enable")) return "enable";
+  if (cell?.state === "not-assigned" && actions.includes("add")) return "add";
+  return null;
 }
 
 function fullSkillDefinition(layers: PolicyLayers | null, name: string): Record<string, unknown> | null {
@@ -290,7 +298,7 @@ export default function SkillsPage({
   const selectedRows = assignmentRows.filter((row) => selectedKeys.has(row.key));
   const batchGroups: { action: BatchSkillAction; label: string; rows: typeof selectedRows }[] = [
     { action: "update", label: "更新", rows: selectedRows.filter((row) => skillNeedsUpdate(row.cell)) },
-    { action: "enable", label: "启用", rows: selectedRows.filter((row) => row.cell?.actions?.includes("enable")) },
+    { action: "enable", label: "启用", rows: selectedRows.filter((row) => skillEnableAction(row.cell)) },
     { action: "disable", label: "停用", rows: selectedRows.filter((row) => row.cell?.actions?.includes("disable")) },
     {
       action: "add",
@@ -318,20 +326,27 @@ export default function SkillsPage({
   };
 
   /** 批量执行结束后清空选择；数据刷新由各行的执行通道统一触发。 */
-  const runBatch = async (action: BatchSkillAction, actionLabel: string, rows: BatchApplyRow[]) => {
-    await batchApply.applyBatch({ action, actionLabel, rows });
+  const runBatch = async (actionLabel: string, rows: BatchApplyRow[]) => {
+    await batchApply.applyBatch({ actionLabel, rows });
     setSelectedKeys(new Set());
   };
 
-  /** 批量入口：enable/disable 直执；纳入管理/取消链接 中含外部链接的行先汇总确认一次。 */
+  /** 批量入口：界面启用按行映射为 add/enable；计划外链接操作含外部链接时先汇总确认一次。 */
   const handleBatchAction = (action: BatchSkillAction, actionLabel: string, rows: typeof selectedRows) => {
     if (batchApply.executing || rows.length === 0) return;
-    const batchRows: BatchApplyRow[] = rows.map((row) => ({
-      elementId: row.skill.id,
-      agent: row.agent,
-      label: `${row.skillName} @ ${row.agent}`,
-      takeover: (action === "add" || action === "remove") && row.cell?.managed === false,
-    }));
+    const batchRows: BatchApplyRow[] = rows.map((row) => {
+      const applyAction = action === "enable" ? (skillEnableAction(row.cell) ?? action) : action;
+      return {
+        elementId: row.skill.id,
+        agent: row.agent,
+        action: applyAction,
+        label: `${row.skillName} @ ${row.agent}`,
+        takeover:
+          row.cell?.state === "extra-link" &&
+          (applyAction === "add" || applyAction === "remove") &&
+          row.cell?.managed === false,
+      };
+    });
     if (action === "add" || action === "remove") {
       const unmanagedCount = batchRows.filter((row) => row.takeover).length;
       if (unmanagedCount > 0) {
@@ -339,14 +354,14 @@ export default function SkillsPage({
         return;
       }
     }
-    void runBatch(action, actionLabel, batchRows);
+    void runBatch(actionLabel, batchRows);
   };
 
   const confirmBatch = () => {
     if (!pendingBatch) return;
-    const { action, actionLabel, rows } = pendingBatch;
+    const { actionLabel, rows } = pendingBatch;
     setPendingBatch(null);
-    void runBatch(action, actionLabel, rows);
+    void runBatch(actionLabel, rows);
   };
 
   // 空态引导：有集合但全未拉取时指向「更新资源库」；其余（含无集合、筛选无结果、

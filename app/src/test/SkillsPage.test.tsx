@@ -40,8 +40,8 @@ function skillsRoutes() {
             policy: { enabled: true, agents: { "claude-code": true, codex: true } },
             observed: {
               agents: {
-                "claude-code": { state: "linked", link_path: "/home/.claude/skills/alpha", target_dir_exists: true, assigned: true, enabled: true },
-                codex: { state: "dead-link", link_path: "/home/.codex/skills/alpha", target_dir_exists: true, assigned: true, enabled: true },
+                "claude-code": { state: "linked", link_path: "/home/.claude/skills/alpha", target_dir_exists: true, assigned: true, enabled: true, actions: ["disable", "remove"] },
+                codex: { state: "dead-link", link_path: "/home/.codex/skills/alpha", target_dir_exists: true, assigned: true, enabled: true, actions: ["update", "disable", "remove"] },
                 "kimi-cli": { state: "unsupported", assigned: false, enabled: false, actions: [] },
               },
               discovery_inbox: false,
@@ -55,8 +55,8 @@ function skillsRoutes() {
             policy: { enabled: true, agents: { "claude-code": true, codex: false } },
             observed: {
               agents: {
-                "claude-code": { state: "missing-link", link_path: "/home/.claude/skills/beta", target_dir_exists: true, assigned: true, enabled: true },
-                codex: { state: "disabled", link_path: "/home/.codex/skills/beta", target_dir_exists: true, assigned: true, enabled: false },
+                "claude-code": { state: "missing-link", link_path: "/home/.claude/skills/beta", target_dir_exists: true, assigned: true, enabled: true, actions: ["update", "disable", "remove"] },
+                codex: { state: "disabled", link_path: "/home/.codex/skills/beta", target_dir_exists: true, assigned: true, enabled: false, actions: ["enable", "remove"] },
               },
               discovery_inbox: false,
             },
@@ -256,15 +256,15 @@ describe("SkillsPage 三级视图", () => {
     expect(screen.queryByText("inbox-two")).toBeNull();
   });
 
-  it("启用矩阵：单元格态 已启用/失效链接/未生效/已停用，新发现技能也进列表但无 cell 时明确未配置", async () => {
+  it("启用矩阵：正常状态由启停动作表达，链接异常保留状态，新发现技能无 cell 时明确未配置", async () => {
     renderWithEngine(<SkillsPage />, skillsRoutes());
     await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
-    expect(await screen.findByTitle("claude-code: linked")).toHaveTextContent("已启用");
+    expect(await screen.findByTestId("action-disable-skill:agent-skills/alpha-claude-code")).toHaveTextContent("停用");
+    expect(screen.queryByTitle("claude-code: linked")).toBeNull();
     expect(screen.getByTitle("codex: dead-link")).toHaveTextContent("失效链接");
     expect(screen.getByTitle("claude-code: missing-link")).toHaveTextContent("未生效");
-    const disabled = screen.getByTitle("codex: disabled");
-    expect(disabled).toHaveTextContent("已停用");
-    expect(disabled.className).toContain("muted");
+    expect(screen.getByTestId("action-enable-skill:agent-skills/beta-codex")).toHaveTextContent("启用");
+    expect(screen.queryByTitle("codex: disabled")).toBeNull();
     // 原来有一列叫「当前分配版本」，里面放的却是「已链接/已分配」——那是状态不是版本，
     // 且与状态列语义重叠。矩阵里状态只由格子表达，版本等细节进悬停，不再单开一列。
     // 新发现技能进入全部技能列表，可按助手添加；引擎未报告 cell 时不伪造可执行操作
@@ -394,7 +394,7 @@ describe("SkillsPage 三级视图", () => {
 
     // 仅展示 claude-code 的行
     expect(screen.queryByTitle("codex: dead-link")).toBeNull();
-    expect(screen.getByTitle("claude-code: linked")).toBeInTheDocument();
+    expect(screen.getByTestId("action-disable-skill:agent-skills/alpha-claude-code")).toBeInTheDocument();
 
     // 清除筛选按钮
     const clearBtn = screen.getByRole("button", { name: /清除筛选/ });
@@ -610,7 +610,7 @@ describe("SkillsPage 计划外链接（extra-link）接管与取消链接", () =
               policy: { enabled: true, agents: { codex: false } },
               observed: {
                 agents: {
-                  // 未分配且无链接：维持既有「添加」语义
+                  // 未分配且无链接：底层 add 在界面统一表达为首次启用
                   codex: { state: "not-assigned", link_path: "/home/.codex/skills/gamma", target_dir_exists: true, assigned: false, enabled: false, managed: false, version: null, actions: ["add"] },
                 },
                 discovery_inbox: false,
@@ -703,16 +703,17 @@ describe("SkillsPage 计划外链接（extra-link）接管与取消链接", () =
     expect(addArgs).not.toContain("--allow-takeover");
   });
 
-  it("not-assigned 行：add 维持「添加」标签，点击直接 apply，不弹确认、不带 --allow-takeover", async () => {
+  it("not-assigned 行：底层 add 对用户显示为「启用」，不重复显示未分配状态", async () => {
     const { calls } = renderWithEngine(<SkillsPage />, extraLinkRoutes());
     await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
 
     const addBtn = await screen.findByTestId("action-add-skill:agent-skills/gamma-codex");
-    expect(addBtn).toHaveTextContent("添加");
-    // 未分配且无链接的不得误显「已链接」，由同一单元格直接表达。
+    expect(addBtn).toHaveTextContent("启用");
+    expect(addBtn).toHaveAttribute("title", "首次启用并建立分配");
+    // 普通状态由可执行动作表达，不再重复放「未分配」徽标。
     const matrixRow = screen.getByTestId("matrix-row-skill:agent-skills/gamma");
-    expect(within(matrixRow).getByTitle(/not-assigned/)).toHaveTextContent("未分配");
-    expect(within(matrixRow).queryByText("已链接")).toBeNull();
+    expect(within(matrixRow).queryByTitle(/not-assigned/)).toBeNull();
+    expect(within(matrixRow).queryByText("未分配")).toBeNull();
     expect(screen.queryByTestId("action-remove-skill:agent-skills/gamma-codex")).toBeNull();
 
     await userEvent.click(addBtn);

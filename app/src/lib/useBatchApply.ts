@@ -6,6 +6,8 @@ import { useExecutions } from "./execution";
 export interface BatchApplyRow {
   elementId: string;
   agent: string;
+  /** 实际引擎动作；同一个「批量启用」里首次启用用 add，重新启用用 enable。 */
+  action: string;
   /** 人类可读行名（技能 @ 助手），用于执行记录与失败日志。 */
   label: string;
   /** 外部链接接管/移除：已经过一次汇总确认，apply 携带 --allow-takeover。 */
@@ -23,7 +25,7 @@ export function useBatchApply() {
   const busyRef = useRef(false);
   const [executing, setExecuting] = useState(false);
 
-  const applyBatch = async (request: { action: string; actionLabel: string; rows: BatchApplyRow[] }): Promise<void> => {
+  const applyBatch = async (request: { actionLabel: string; rows: BatchApplyRow[] }): Promise<void> => {
     if (busyRef.current || request.rows.length === 0) return;
     busyRef.current = true;
     setExecuting(true);
@@ -31,7 +33,7 @@ export function useBatchApply() {
     const failures: { label: string; message: string }[] = [];
     try {
       for (const row of request.rows) {
-        const args = ["--only", row.elementId, "--action", request.action, "--agent", row.agent];
+        const args = ["--only", row.elementId, "--action", row.action, "--agent", row.agent];
         if (row.takeover) args.push("--allow-takeover");
         const envelope = await execute({
           command: "skills:apply",

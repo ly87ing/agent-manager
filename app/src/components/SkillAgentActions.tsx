@@ -58,21 +58,29 @@ export function SkillAgentCellActions({
         ...(needsUpdate ? ["update"] : []),
         ...(["add", "enable", "disable"] as const).filter((action) => actions.includes(action)),
       ] as string[]);
+  const showStatus = !["linked", "disabled", "not-assigned"].includes(cell.state) || visibleActions.length === 0;
 
   const actionLabel = (action: string) => {
     if (needsRepair && action === "update") return "修复";
+    if (cell.state === "not-assigned" && action === "add") return "启用";
     return cell.state === "extra-link" ? (EXTRA_LINK_ACTION_VIEW[action]?.label ?? SKILL_ACTION_VIEW[action]?.label) : SKILL_ACTION_VIEW[action]?.label;
   };
 
   return (
     <div className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap text-xs">
-      <MatrixCell state={cell.state} kind="skills" title={statusTitle} />
+      {showStatus && <MatrixCell state={cell.state} kind="skills" title={statusTitle} />}
       {visibleActions.map((action) => (
         <button
           key={action}
           type="button"
           data-testid={`action-${action}-${skill.id}-${agent}`}
-          title={cell.state === "extra-link" ? EXTRA_LINK_ACTION_VIEW[action]?.title : undefined}
+          title={
+            cell.state === "extra-link"
+              ? EXTRA_LINK_ACTION_VIEW[action]?.title
+              : cell.state === "not-assigned" && action === "add"
+                ? "首次启用并建立分配"
+                : undefined
+          }
           onClick={() => onAction(skill, agent, action, cell)}
           className={cn("rounded border px-1.5 py-0.5", SKILL_ACTION_VIEW[action].className)}
         >
