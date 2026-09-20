@@ -23,6 +23,12 @@ const HEADER_NAME_RE = /^[!#$%&'*+.^_`|~A-Za-z0-9-]+$/;
 const VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const PLACEHOLDER_RE = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/;
 
+function referenceLines(raw: Record<string, unknown>): string {
+  return Object.entries(raw)
+    .map(([key, value]) => `${key}=${typeof value === "string" && PLACEHOLDER_RE.test(value) ? value : "<literal>"}`)
+    .join("\n");
+}
+
 /**
  * MCP 服务新增/编辑表单。写入的是定义覆盖层片段（mcp.definitions.<name>）；
  * 编辑内置条目时整段写覆盖片段并注明「内置默认值不受影响」。
@@ -58,14 +64,21 @@ export function McpServerFormDialog({
   const [name, setName] = useState(editing ? editing.id.replace(/^mcp:/, "") : "");
   const [command, setCommand] = useState(editingSpec?.command ?? "");
   const [argsText, setArgsText] = useState((editingSpec?.args ?? []).join("\n"));
-  const [envText, setEnvText] = useState(Object.keys((fullDefinition?.env as Record<string, unknown> | undefined) ?? editingSpec?.env ?? {}).join("\n"));
+  const [envText, setEnvText] = useState(referenceLines(
+    (fullDefinition?.env as Record<string, unknown> | undefined) ?? editingSpec?.env ?? {},
+  ));
   const [url, setUrl] = useState((fullDefinition?.url as string | undefined) ?? editingSpec?.url ?? "");
-  const [headersText, setHeadersText] = useState(
-    Object.entries((fullDefinition?.headers as Record<string, unknown> | undefined) ?? editingSpec?.headers ?? {})
-      .map(([key, value]) => `${key}=${typeof value === "string" ? value : ""}`)
-      .join("\n"),
-  );
+  const [headersText, setHeadersText] = useState(referenceLines(
+    (fullDefinition?.headers as Record<string, unknown> | undefined) ?? editingSpec?.headers ?? {},
+  ));
   const [timeoutText, setTimeoutText] = useState(String(editingSpec?.startup_timeout_sec ?? 120));
+  const [extraArgsText, setExtraArgsText] = useState(JSON.stringify(
+    (fullDefinition?.extra_args_by_agent as Record<string, unknown> | undefined)
+      ?? editingSpec?.extra_args_by_agent
+      ?? {},
+    null,
+    2,
+  ));
   const [selectedAgents, setSelectedAgents] = useState<string[]>(editingSpec?.agents ?? []);
   const [error, setError] = useState<string | null>(null);
 
@@ -137,20 +150,50 @@ export function McpServerFormDialog({
         return;
       }
       const args = argsText.split("\n").map((line) => line.trim()).filter(Boolean);
-      // 密钥变量只编辑变量名清单。取值优先用完整原定义的真实值；只有脱敏 spec 时，
+      // 密钥变量编辑「目标键=${来源变量}」映射。取值优先用完整原定义的真实值；只有脱敏 spec 时，
       // ${REF} 占位引用原样保留，被掩码为 <literal> 的字面值原样带出，由保存方用完整定义重建。
       const fullEnv = (fullDefinition?.env ?? null) as Record<string, unknown> | null;
       const specEnv = editingSpec?.env ?? {};
       const env: Record<string, string> = {};
       for (const line of envText.split("\n").map((item) => item.trim()).filter(Boolean)) {
-        const varName = line.split("=")[0].trim();
+        const eq = line.indexOf("=");
+        const varName = (eq >= 0 ? line.slice(0, eq) : line).trim();
         if (!VAR_NAME_RE.test(varName)) {
           setError(`非法变量名:${line}`);
           return;
         }
         const fromFull = typeof fullEnv?.[varName] === "string" ? (fullEnv[varName] as string) : null;
         const fromSpec = typeof specEnv[varName] === "string" ? specEnv[varName] : null;
-        env[varName] = fromFull ?? fromSpec ?? `\${${varName}}`;
+        const valuePart = eq >= 0 ? line.slice(eq + 1).trim() : "";
+        if (!valuePart) {
+          env[varName] = fromFull ?? fromSpec ?? `\${${varName}}`;
+        } else if (valuePart === "<literal>") {
+          const restored = fromFull ?? fromSpec;
+          if (!restored) {
+            setError(`变量 ${varName} 的原值不可用，请改成 ${varName}=\${VAR_NAME}`);
+            return;
+          }
+          env[varName] = restored;
+        } else if (PLACEHOLDER_RE.test(valuePart)) {
+          env[varName] = valuePart;
+        } else if (VAR_NAME_RE.test(valuePart)) {
+          env[varName] = `\${${valuePart}}`;
+        } else {
+          setError(`变量取值只能是 \${VAR} 引用形式:${line}`);
+          return;
+        }
+      }
+      let extraArgsByAgent: Record<string, string[]> = {};
+      try {
+        const parsed = JSON.parse(extraArgsText || "{}");
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+        for (const [agent, values] of Object.entries(parsed)) {
+          if (!Array.isArray(values) || values.some((value) => typeof value !== "string")) throw new Error();
+          extraArgsByAgent[agent] = values as string[];
+        }
+      } catch {
+        setError('各助手附加参数必须是 JSON 对象，例如 {"codex":["--flag"]}');
+        return;
       }
       owned = {
         command: command.trim(),
@@ -158,6 +201,7 @@ export function McpServerFormDialog({
         startup_timeout_sec: timeout,
         agents,
         env,
+        extra_args_by_agent: extraArgsByAgent,
       };
     }
     // 表单负责字段（可选字段显式给出）；编辑且有完整原定义时以其为基底，
@@ -173,13 +217,16 @@ export function McpServerFormDialog({
       for (const key of ["url", "headers", "type"]) {
         delete definition[key];
       }
+      if (Object.keys(definition.extra_args_by_agent as Record<string, unknown>).length === 0) {
+        delete definition.extra_args_by_agent;
+      }
     }
     onSubmit(name, definition, isNew, complete);
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 animate-fade-in" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div role="dialog" aria-modal="true" aria-label={isNew ? "新增服务" : `编辑 ${name}`} className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl border bg-card p-5 shadow-xl animate-zoom-in-95">
+      <div role="dialog" aria-modal="true" aria-label={isNew ? "新增服务" : `编辑 ${name}`} className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-xl border bg-card p-5 shadow-xl animate-zoom-in-95 sm:p-6">
         <div className="flex items-start justify-between">
           <h3 className="text-base font-semibold text-foreground">{isNew ? "新增 MCP 服务" : `编辑服务 ${name}`}</h3>
           <button type="button" onClick={onClose} aria-label="关闭" className="rounded p-1 text-muted-foreground hover:bg-accent">
@@ -193,8 +240,8 @@ export function McpServerFormDialog({
           </p>
         )}
 
-        <div className="mt-4 space-y-3 text-sm">
-          <div>
+        <div className="mt-4 grid grid-cols-1 gap-4 text-sm lg:grid-cols-2">
+          <div className="lg:col-span-2">
             <label className="mb-1 block text-xs font-medium text-muted-foreground">名称（唯一，小写字母/数字/连字符）</label>
             <input
               value={name}
@@ -205,7 +252,7 @@ export function McpServerFormDialog({
               placeholder="my-server"
             />
           </div>
-          <div>
+          <div className="lg:col-span-2">
             <span className="mb-1 block text-xs font-medium text-muted-foreground">传输方式</span>
             <div className="flex gap-4">
               <label className="flex items-center gap-1.5 text-xs text-foreground">
@@ -232,7 +279,7 @@ export function McpServerFormDialog({
           </div>
           {transport === "remote" ? (
             <>
-              <div>
+              <div className="lg:col-span-2">
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">服务地址（https://，或本机 http://localhost / http://127.0.0.1）</label>
                 <input
                   value={url}
@@ -242,12 +289,12 @@ export function McpServerFormDialog({
                   placeholder="https://example.com/mcp"
                 />
               </div>
-              <div>
+              <div className="lg:col-span-2">
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">请求头变量引用（每行一个 Header-Name=${"{VAR}"}；值由 Agent Manager 进程环境提供，不在此保存或显示）</label>
                 <textarea
                   value={headersText}
                   onChange={(e) => setHeadersText(e.target.value)}
-                  rows={2}
+                  rows={5}
                   data-testid="server-headers-input"
                   className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs"
                   placeholder="Authorization=${GROK_API_KEY}"
@@ -271,26 +318,40 @@ export function McpServerFormDialog({
                 <textarea
                   value={argsText}
                   onChange={(e) => setArgsText(e.target.value)}
-                  rows={3}
+                  rows={7}
                   data-testid="server-args-input"
                   className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs"
                   placeholder={"-y\nchrome-devtools-mcp"}
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-muted-foreground">密钥变量名（每行一个；只写变量名，值由 Agent Manager 进程环境提供，不在此保存或显示）</label>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">环境变量映射（每行一个 配置键=${"{来源变量}"}；只保存变量引用，不显示明文）</label>
                 <textarea
                   value={envText}
                   onChange={(e) => setEnvText(e.target.value)}
-                  rows={2}
+                  rows={7}
                   data-testid="server-env-input"
                   className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs"
-                  placeholder="GROK_API_KEY"
+                  placeholder="API_KEY=${GROK_API_KEY}"
                 />
+              </div>
+              <div className="lg:col-span-2">
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                  各助手附加参数 <code>extra_args_by_agent</code>（JSON）
+                </label>
+                <textarea
+                  value={extraArgsText}
+                  onChange={(e) => setExtraArgsText(e.target.value)}
+                  rows={7}
+                  data-testid="server-extra-args-input"
+                  className="w-full rounded border border-input px-3 py-2 font-mono text-xs"
+                  placeholder={'{"codex": ["--flag"]}'}
+                />
+                <p className="mt-1 text-xs text-muted-foreground">这些参数只追加给指定助手；普通参数仍在上方逐行维护。</p>
               </div>
             </>
           )}
-          <div>
+          <div className="lg:col-span-2">
             <span className="mb-1 block text-xs font-medium text-muted-foreground">允许分配的助手（不选则不限）</span>
             <p className="mb-1.5 text-xs text-muted-foreground">这里只保存允许范围，保存后再为各助手分别添加。</p>
             <div className="flex flex-wrap gap-3">
@@ -320,7 +381,7 @@ export function McpServerFormDialog({
               />
             </div>
           )}
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-xs text-destructive lg:col-span-2">{error}</p>}
         </div>
 
         <div className="mt-5 flex items-center justify-end gap-2">

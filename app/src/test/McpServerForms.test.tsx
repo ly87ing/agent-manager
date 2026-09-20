@@ -80,7 +80,7 @@ describe("MCP 服务定义覆盖层", () => {
     fireEvent.change(within(dialog).getByTestId("server-name-input"), { target: { value: "demo-srv" } });
     fireEvent.change(within(dialog).getByTestId("server-command-input"), { target: { value: "npx" } });
     fireEvent.change(within(dialog).getByTestId("server-args-input"), { target: { value: "-y\ndemo-srv-mcp" } });
-    fireEvent.change(within(dialog).getByTestId("server-env-input"), { target: { value: "DEMO_TOKEN" } });
+    fireEvent.change(within(dialog).getByTestId("server-env-input"), { target: { value: "API_KEY=${DEMO_TOKEN}" } });
     await userEvent.click(within(dialog).getByTestId("server-agent-claude-code"));
     fireEvent.change(within(dialog).getByTestId("server-timeout-input"), { target: { value: "90" } });
     await userEvent.click(within(dialog).getByTestId("server-form-submit"));
@@ -97,7 +97,7 @@ describe("MCP 服务定义覆盖层", () => {
       args: ["-y", "demo-srv-mcp"],
       startup_timeout_sec: 90,
       agents: ["claude-code"],
-      env: { DEMO_TOKEN: "${DEMO_TOKEN}" },
+      env: { API_KEY: "${DEMO_TOKEN}" },
     });
 
     // 零额外写入：无 enabled 键，无预览/同步
@@ -116,8 +116,13 @@ describe("MCP 服务定义覆盖层", () => {
     expect(within(dialog).queryByTestId("builtin-overlay-note")).toBeNull();
     // 名称不可改
     expect(within(dialog).getByTestId("server-name-input")).toBeDisabled();
-    // env 初始列出完整定义的全部变量名
-    expect(within(dialog).getByTestId("server-env-input")).toHaveValue("GROK_API_KEY\nPLAIN_TOKEN");
+    // env 初始明确展示配置键与来源变量；历史明文只显示掩码，不回显取值
+    expect(within(dialog).getByTestId("server-env-input")).toHaveValue(
+      "GROK_API_KEY=${SECRETS_GROK_API_KEY}\nPLAIN_TOKEN=<literal>",
+    );
+    expect(within(dialog).getByTestId("server-extra-args-input")).toHaveValue(
+      JSON.stringify({ "claude-code": ["--verbose"] }, null, 2),
+    );
     fireEvent.change(within(dialog).getByTestId("server-timeout-input"), { target: { value: "99" } });
     // 清空参数：整条 replacement 语义下保存后不应从基线复活
     fireEvent.change(within(dialog).getByTestId("server-args-input"), { target: { value: "" } });
@@ -152,8 +157,10 @@ describe("MCP 服务定义覆盖层", () => {
     await userEvent.click(await screen.findByTestId("edit-server-mcp:my-proxy"));
 
     const dialog = await screen.findByRole("dialog");
-    // 表单初始带出完整定义的两个变量名，清空后提交
-    expect(within(dialog).getByTestId("server-env-input")).toHaveValue("GROK_API_KEY\nPLAIN_TOKEN");
+    // 表单初始带出完整定义的两个映射，清空后提交
+    expect(within(dialog).getByTestId("server-env-input")).toHaveValue(
+      "GROK_API_KEY=${SECRETS_GROK_API_KEY}\nPLAIN_TOKEN=<literal>",
+    );
     fireEvent.change(within(dialog).getByTestId("server-env-input"), { target: { value: "" } });
     await userEvent.click(within(dialog).getByTestId("server-form-submit"));
 
@@ -164,6 +171,27 @@ describe("MCP 服务定义覆盖层", () => {
     expect(definition.env).toEqual({});
     expect(definition.extra_args_by_agent).toEqual({ "claude-code": ["--verbose"] });
     expect(definition.custom_flag).toBe("keep-me");
+  });
+
+  it("研发可编辑每个助手的附加参数，非法 JSON 会在本地阻止保存", async () => {
+    const { calls } = renderWithEngine(<McpPage />, routes());
+    await userEvent.click(await screen.findByText("mcp:chrome-devtools"));
+    await userEvent.click(await screen.findByTestId("edit-server-mcp:chrome-devtools"));
+    const dialog = await screen.findByRole("dialog");
+
+    fireEvent.change(within(dialog).getByTestId("server-extra-args-input"), { target: { value: "not-json" } });
+    await userEvent.click(within(dialog).getByTestId("server-form-submit"));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("各助手附加参数必须是 JSON 对象");
+    expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(0);
+
+    fireEvent.change(within(dialog).getByTestId("server-extra-args-input"), {
+      target: { value: JSON.stringify({ codex: ["--profile", "review"] }, null, 2) },
+    });
+    await userEvent.click(within(dialog).getByTestId("server-form-submit"));
+    const setCalls = calls.filter((call) => call.command === "policy:set");
+    expect(setCalls).toHaveLength(1);
+    const definition = JSON.parse(setCalls[0].args[5]);
+    expect(definition.extra_args_by_agent).toEqual({ codex: ["--profile", "review"] });
   });
 
   /** 无 DB 旧存储：policy:get 在 db:migrate 前无 sqlite 层，迁移后返回完整有效定义。 */

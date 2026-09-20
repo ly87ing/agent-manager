@@ -12,6 +12,11 @@ export interface McpServerObserved extends McpObserved {
   blocked_reason?: string | null;
 }
 
+function displayPlaceholder(value: string | undefined): string {
+  if (!value) return "<明文已隐藏>";
+  return value.startsWith("${") ? value : `\${${value}}`;
+}
+
 function EnvResolutionList({ element }: { element: EngineElement }) {
   const observed = element.observed as McpObserved;
   const env = observed.env ?? {};
@@ -29,6 +34,8 @@ function EnvResolutionList({ element }: { element: EngineElement }) {
             <X className="h-3.5 w-3.5 text-destructive" aria-label="未配置" />
           )}
           <span className="font-mono text-foreground">{name}</span>
+          <span className="text-muted-foreground">→</span>
+          <code className="font-mono text-foreground">{displayPlaceholder(resolution.placeholder)}</code>
           <span className={resolution.resolved ? "text-success" : "text-destructive"}>
             {resolution.resolved ? "已配置" : "未配置（运行时会显示变量名）"}
           </span>
@@ -56,6 +63,8 @@ function HeaderResolutionList({ element }: { element: EngineElement }) {
             <X className="h-3.5 w-3.5 text-destructive" aria-label="未配置" />
           )}
           <span className="font-mono text-foreground">{name}</span>
+          <span className="text-muted-foreground">→</span>
+          <code className="font-mono text-foreground">{displayPlaceholder(resolution.placeholder)}</code>
           <span className={resolution.resolved ? "text-success" : "text-destructive"}>
             {resolution.resolved ? "已配置" : "未配置（运行时会显示变量名）"}
           </span>
@@ -84,11 +93,19 @@ export function McpServerDetail({ element }: { element: EngineElement }) {
           </p>
         </div>
       ) : (
-        <div>
-          <h4 className="mb-1 text-xs font-semibold text-muted-foreground">启动命令</h4>
-          <code className="block overflow-x-auto rounded bg-slate-900 px-3 py-2 font-mono text-xs break-all text-slate-100">
-            {spec.command} {(spec.args ?? []).join(" ")}
-          </code>
+        <div className="space-y-3">
+          <div>
+            <h4 className="mb-1 text-xs font-semibold text-muted-foreground">启动命令 <code>command</code></h4>
+            <code className="block overflow-x-auto rounded bg-slate-900 px-3 py-2 font-mono text-xs break-all text-slate-100">
+              {spec.command}
+            </code>
+          </div>
+          <div>
+            <h4 className="mb-1 text-xs font-semibold text-muted-foreground">参数 <code>args</code></h4>
+            <pre className="max-h-48 overflow-auto rounded bg-slate-900 px-3 py-2 font-mono text-xs text-slate-100">
+              {JSON.stringify(spec.args ?? [], null, 2)}
+            </pre>
+          </div>
           <p className="mt-1 text-xs text-muted-foreground">
             启动超时 {spec.startup_timeout_sec ?? "—"} 秒 · 应用到:{" "}
             {spec.agents === null || spec.agents === undefined ? "全部助手" : spec.agents.join(", ")}
@@ -169,6 +186,7 @@ export function McpServerCard({
   const headerEntries = Object.entries(observed.headers ?? {});
   const secretEntries = [...envEntries, ...headerEntries];
   const envResolved = secretEntries.filter(([, resolution]) => resolution.resolved).length;
+  const configuredReferences = Object.entries(isRemote ? spec.headers ?? {} : spec.env ?? {});
 
   return (
     <section
@@ -214,6 +232,48 @@ export function McpServerCard({
           {isRemote ? `请求头 ${envResolved}/${secretEntries.length} 已配置` : `密钥变量 ${envResolved}/${secretEntries.length} 已配置`}
         </span>
       </div>
+
+      <dl className="mt-3 grid grid-cols-1 gap-x-4 gap-y-2 rounded-md border bg-muted/20 p-3 text-xs sm:grid-cols-2">
+        {isRemote ? (
+          <div className="sm:col-span-2">
+            <dt className="text-muted-foreground">服务地址 <code>url</code></dt>
+            <dd className="mt-0.5 break-all font-mono text-foreground">{spec.url}</dd>
+          </div>
+        ) : (
+          <>
+            <div>
+              <dt className="text-muted-foreground">启动命令 <code>command</code></dt>
+              <dd className="mt-0.5 break-all font-mono text-foreground">{spec.command}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">启动超时 <code>startup_timeout_sec</code></dt>
+              <dd className="mt-0.5 font-mono text-foreground">{spec.startup_timeout_sec ?? "未指定"}</dd>
+            </div>
+            <div className="sm:col-span-2">
+              <dt className="text-muted-foreground">参数 <code>args</code></dt>
+              <dd className="mt-0.5 max-h-16 overflow-auto whitespace-pre-wrap break-all font-mono text-foreground">
+                {JSON.stringify(spec.args ?? [])}
+              </dd>
+            </div>
+          </>
+        )}
+        <div className="sm:col-span-2">
+          <dt className="text-muted-foreground">变量引用</dt>
+          <dd className="mt-1 max-h-24 overflow-auto rounded bg-background px-2 py-1.5 font-mono text-foreground">
+            {configuredReferences.length === 0 ? "无" : configuredReferences.map(([key, value]) => (
+              <span key={key} className="block break-all">{key} = {value}</span>
+            ))}
+          </dd>
+        </div>
+        {!isRemote && Object.keys(spec.extra_args_by_agent ?? {}).length > 0 && (
+          <div className="sm:col-span-2">
+            <dt className="text-muted-foreground">各助手附加参数 <code>extra_args_by_agent</code></dt>
+            <dd className="mt-0.5 max-h-16 overflow-auto break-all font-mono text-foreground">
+              {JSON.stringify(spec.extra_args_by_agent)}
+            </dd>
+          </div>
+        )}
+      </dl>
 
       {observed.command_available === false && (
         <div

@@ -117,8 +117,37 @@ export function ConnectionWorkbench({
               "rounded-full border px-2.5 py-1",
               runtime.yolo ? "border-destructive/30 bg-destructive/10 text-destructive" : "bg-muted/40",
             )}>
-              权限确认：{runtime.yolo ? "已跳过" : "逐次询问"}
+              权限确认：{runtime.yolo ? "已跳过" : "客户端默认"}
             </span>
+            {kind === "claude" && (
+              <>
+                <span className="rounded-full border bg-muted/40 px-2.5 py-1">
+                  推理强度：{runtime.claudeEffortLevel || "客户端默认"}
+                </span>
+                <span className="rounded-full border bg-muted/40 px-2.5 py-1">
+                  工具搜索：{runtime.claudeToolSearch ? "开启" : "默认"}
+                </span>
+                <span className="rounded-full border bg-muted/40 px-2.5 py-1">
+                  Agent Teams：{runtime.claudeAgentTeams ? "开启" : "默认"}
+                </span>
+              </>
+            )}
+            {kind === "codex" && (
+              <>
+                <span className="rounded-full border bg-muted/40 px-2.5 py-1">
+                  推理强度：{runtime.codexReasoningEffort || "客户端默认"}
+                </span>
+                <span className="rounded-full border bg-muted/40 px-2.5 py-1">
+                  上下文：{runtime.codexContextWindow || "客户端默认"}
+                </span>
+                <span className="rounded-full border bg-muted/40 px-2.5 py-1">
+                  自动压缩：{runtime.codexAutoCompactTokenLimit || "客户端默认"}
+                </span>
+                <span className="rounded-full border bg-muted/40 px-2.5 py-1">
+                  Web 搜索：{runtime.codexWebSearch || "客户端默认"}
+                </span>
+              </>
+            )}
           </div>
         )}
 
@@ -161,6 +190,7 @@ export function ConnectionWorkbench({
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           <ConnectionCard
             agentId={agentId}
+            kind={kind}
             connection={null}
             active={!active}
             busy={busyTarget === `${agentId}/default`}
@@ -173,6 +203,7 @@ export function ConnectionWorkbench({
               <ConnectionCard
                 key={connection.name}
                 agentId={agentId}
+                kind={kind}
                 connection={connection}
                 active={active === connection.name}
                 busy={busyTarget === key}
@@ -200,6 +231,7 @@ export function ConnectionWorkbench({
 
 function ConnectionCard({
   agentId,
+  kind,
   connection,
   active,
   busy,
@@ -212,6 +244,7 @@ function ConnectionCard({
   onRemove,
 }: {
   agentId: string;
+  kind: ConnectionKind | null;
   connection: ConnectionEntry | null;
   active: boolean;
   busy: boolean;
@@ -263,15 +296,51 @@ function ConnectionCard({
       </div>
 
       {connection && (
-        <dl className="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+        <dl className="mt-3 grid grid-cols-1 gap-x-4 gap-y-3 rounded-md border bg-muted/20 p-3 text-xs sm:grid-cols-2">
           <div>
-            <dt className="text-muted-foreground">模型</dt>
+            <dt className="text-muted-foreground">模型 <code>model</code></dt>
             <dd className="mt-0.5 break-all font-mono text-foreground">{connection.model || "未指定"}</dd>
           </div>
           <div>
-            <dt className="text-muted-foreground">凭据变量</dt>
+            <dt className="text-muted-foreground">凭据变量 <code>token_var</code></dt>
             <dd className="mt-0.5 break-all font-mono text-foreground">{connection.tokenVar || "未指定"}</dd>
           </div>
+          {kind === "claude" && (
+            <div>
+              <dt className="text-muted-foreground">认证方式 <code>auth</code></dt>
+              <dd className="mt-0.5 break-all font-mono text-foreground">
+                {connection.auth === "api_key" ? "api_key (x-api-key)" : "token (Authorization: Bearer)"}
+              </dd>
+            </div>
+          )}
+          <div>
+            <dt className="text-muted-foreground">请求超时 <code>timeout_ms</code></dt>
+            <dd className="mt-0.5 break-all font-mono text-foreground">
+              {connection.timeoutMs ? `${connection.timeoutMs} ms` : "未指定（使用客户端默认）"}
+            </dd>
+          </div>
+          {kind === "claude" && (
+            <>
+              <div>
+                <dt className="text-muted-foreground">小任务模型 <code>small_fast_model</code></dt>
+                <dd className="mt-0.5 break-all font-mono text-foreground">
+                  {connection.smallFastModel || "未指定（使用客户端默认）"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Opus 别名 <code>model_aliases.opus</code></dt>
+                <dd className="mt-0.5 break-all font-mono text-foreground">{connection.aliasOpus || "未指定"}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Sonnet 别名 <code>model_aliases.sonnet</code></dt>
+                <dd className="mt-0.5 break-all font-mono text-foreground">{connection.aliasSonnet || "未指定"}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Haiku 别名 <code>model_aliases.haiku</code></dt>
+                <dd className="mt-0.5 break-all font-mono text-foreground">{connection.aliasHaiku || "未指定"}</dd>
+              </div>
+            </>
+          )}
         </dl>
       )}
 

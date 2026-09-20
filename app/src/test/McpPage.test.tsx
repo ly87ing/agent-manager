@@ -86,7 +86,8 @@ describe("McpPage 服务库 + 助手中的服务", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "mcp:serena" }));
     const detail = await screen.findByTestId("mcp-detail-mcp:serena");
-    expect(detail).toHaveTextContent("uvx --from git+https://example.com/serena@main serena");
+    expect(detail).toHaveTextContent("uvx");
+    expect(detail).toHaveTextContent('"git+https://example.com/serena@main"');
     expect(detail).toHaveTextContent("启动超时 60 秒");
     expect(detail).toHaveTextContent("--context codex");
     // env 占位符：变量名 + 未解析标注，永不出现值

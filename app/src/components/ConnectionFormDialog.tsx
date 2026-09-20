@@ -75,6 +75,10 @@ export function ConnectionFormDialog({
   const [secretValue, setSecretValue] = useState("");
   const [activate, setActivate] = useState(initialActivate ?? !prefilled);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(Boolean(
+    initialConnection?.timeoutMs || initialConnection?.smallFastModel || initialConnection?.aliasOpus
+    || initialConnection?.aliasSonnet || initialConnection?.aliasHaiku || initialConnection?.auth === "api_key",
+  ));
   const dialogTitle = editing
     ? `编辑 ${initialConnection.label || initialConnection.name}`
     : duplicating
@@ -190,7 +194,7 @@ export function ConnectionFormDialog({
         aria-modal="true"
         aria-label={dialogTitle}
         onKeyDown={onKeyDown}
-        className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border bg-card shadow-xl animate-zoom-in-95"
+        className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border bg-card shadow-xl animate-zoom-in-95"
       >
         <div className="flex items-start justify-between gap-3 border-b px-5 py-4">
           <div>
@@ -322,7 +326,11 @@ export function ConnectionFormDialog({
                 )}
               </div>
 
-              <details className="rounded-lg border px-3 py-2">
+              <details
+                className="rounded-lg border px-3 py-2"
+                open={advancedOpen}
+                onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
+              >
                 <summary data-testid="new-connection-advanced" className="cursor-pointer text-sm font-medium text-foreground">
                   高级字段
                 </summary>
