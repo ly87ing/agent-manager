@@ -113,18 +113,29 @@ export default function McpPage() {
   };
 
   /** 库级操作：仅按 observed.actions 提供的 enable/disable/remove；remove 需先经独立 ConfirmModal。 */
-  const handleServerAction = (element: EngineElement, action: "enable" | "disable" | "remove") => {
+  const handleServerAction = (element: EngineElement, action: "enable" | "disable" | "remove" | "upgrade") => {
     if (action === "remove") {
       setPendingRemove({ kind: "server", element });
       return;
     }
     const name = element.id.replace(/^mcp:/, "");
-    const titleMap: Record<"enable" | "disable" | "remove", string> = {
+    const titleMap: Record<"enable" | "disable" | "remove" | "upgrade", string> = {
       enable: `启用服务 ${name}`,
       disable: `停用服务 ${name}`,
       remove: `删除服务 ${name}`,
+      upgrade: `把 ${name} 换到新版本`,
     };
-    void directApply.apply({ command: "mcp:apply", label: titleMap[action], args: ["--only", element.id, "--action", action] });
+    void directApply
+      .apply({ command: "mcp:apply", label: titleMap[action], args: ["--only", element.id, "--action", action] })
+      .then((envelope) => {
+        // 换完版本号顺手重查一次，否则卡片还挂着旧读数。各助手那边要再点一次
+        // 「更新」才会真正换过去——那条路上的外部配置保护不能绕。
+        if (action !== "upgrade" || !envelope?.ok) return;
+        toast.info("定义已换到新版本。已经接管的助手要再点一次「更新」才会真正换过去。");
+        return runEngine("system:refresh-upstream", ["--only", element.id])
+          .catch(() => undefined)
+          .finally(() => void queryClient.invalidateQueries({ queryKey: engineKeys.all }));
+      });
   };
 
   /** 服务 × 助手 操作：按钮来自 cell.actions，apply 携带精确 --only/--agent/--action；remove 需先经独立 ConfirmModal。

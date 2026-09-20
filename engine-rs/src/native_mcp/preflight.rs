@@ -108,7 +108,7 @@ pub fn parse_action_args(req: &Request) -> Result<ParsedAction> {
         }
     } else if !LIBRARY_ACTIONS.contains(&act.as_str()) {
         bail!(
-            "库级动作不支持 '{}'，仅支持 enable/disable/remove（逐 agent 动作需指定 --agent）",
+            "库级动作不支持 '{}'，仅支持 enable/disable/remove/upgrade（逐 agent 动作需指定 --agent）",
             act
         );
     }
@@ -321,6 +321,23 @@ pub fn preflight_check_state(
                 def_opt.ok_or_else(|| anyhow!("服务定义 '{}' 不存在", parsed.server))?;
                 if !library_enabled(&library, &parsed.server) {
                     bail!("服务 '{}' 已处于停用状态，disable 不适用", parsed.server);
+                }
+            }
+            // 升级只改库里定义的版本号，落到各助手仍要走逐 agent 的 update——
+            // 那条路上的非受管条目、外部字段保护一个都不能绕过。
+            "upgrade" => {
+                let def = def_opt.ok_or_else(|| anyhow!("服务定义 '{}' 不存在", parsed.server))?;
+                if !library_enabled(&library, &parsed.server) {
+                    bail!("服务 '{}' 已停用，先启用再升级", parsed.server);
+                }
+                if !matches!(
+                    crate::native_upstream::classify_mcp_probe(def),
+                    Some(crate::native_upstream::McpProbeSpec::Npx(_))
+                ) {
+                    bail!(
+                        "服务 '{}' 不是 npx 包，版本不由本工具决定，没有可改的版本号",
+                        parsed.server
+                    );
                 }
             }
             "remove" => {

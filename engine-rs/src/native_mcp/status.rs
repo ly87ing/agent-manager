@@ -524,9 +524,29 @@ pub fn status(ctx: &Context) -> Result<Value> {
                 "missing"
             };
 
+        // 上游轴：仅 enabled 且为 npx 包 / uvx git 源的定义参与探测宇宙；
+        // 其余（含 orphan）恒 not-applicable。status 只读缓存，缺行 → unknown。
+        let freshness = if lib_enabled && crate::native_upstream::classify_mcp_probe(def).is_some()
+        {
+            crate::native_upstream::freshness_from_cache(&probes, &format!("mcp:{}", server), None)
+        } else {
+            freshness_not_applicable()
+        };
+
         let mut lib_actions = Vec::new();
         if def_error.is_none() {
             lib_actions.push(if lib_enabled { "disable" } else { "enable" });
+        }
+        // 官方出了新版才谈得上升级，而且只有 npx 包的版本是写在定义里、本工具改得动的；
+        // uvx git 源跟的是分支，没有版本号可钉。
+        let upgradable = def_error.is_none()
+            && freshness["state"] == "behind"
+            && matches!(
+                crate::native_upstream::classify_mcp_probe(def),
+                Some(crate::native_upstream::McpProbeSpec::Npx(_))
+            );
+        if upgradable {
+            lib_actions.push("upgrade");
         }
         let has_remove_blocker = agent_cells.iter().any(|(agent, c)| {
             let state = c.get("state").and_then(Value::as_str).unwrap_or("");
@@ -559,15 +579,6 @@ pub fn status(ctx: &Context) -> Result<Value> {
                 json!({ "id": act, "risk": "write-local", "needs_lock": true, "offline_ok": true })
             })
             .collect();
-
-        // 上游轴：仅 enabled 且为 npx 包 / uvx git 源的定义参与探测宇宙；
-        // 其余（含 orphan）恒 not-applicable。status 只读缓存，缺行 → unknown。
-        let freshness = if lib_enabled && crate::native_upstream::classify_mcp_probe(def).is_some()
-        {
-            crate::native_upstream::freshness_from_cache(&probes, &format!("mcp:{}", server), None)
-        } else {
-            freshness_not_applicable()
-        };
 
         elements.push(make_element(
             server,

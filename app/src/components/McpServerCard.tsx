@@ -158,7 +158,7 @@ export function McpServerCard({
   selected: boolean;
   onSelect: (id: string | null) => void;
   onEdit: (element: EngineElement) => void;
-  onAction: (element: EngineElement, action: "enable" | "disable" | "remove") => void;
+  onAction: (element: EngineElement, action: "enable" | "disable" | "remove" | "upgrade") => void;
 }) {
   const spec = element.spec as McpSpec;
   const observed = element.observed as McpServerObserved;
@@ -257,6 +257,16 @@ export function McpServerCard({
             className="rounded border border-warning/30 bg-warning/10 px-2.5 py-1 text-xs text-warning hover:bg-warning/15"
           >
             停用
+          </button>
+        )}
+        {actions.includes("upgrade") && (
+          <button
+            type="button"
+            data-testid={`upgrade-server-${element.id}`}
+            onClick={() => onAction(element, "upgrade")}
+            className="rounded border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs text-primary hover:bg-primary/15"
+          >
+            换到 {element.freshness.upstream}
           </button>
         )}
         {actions.includes("remove") && (

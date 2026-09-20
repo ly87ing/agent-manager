@@ -69,6 +69,7 @@ pub const BUILTIN_POLICY_JSON: &str = r#"{
     "definitions": {
     "claude-code": {
       "display_name": "Claude Code", "bin": "claude", "skills_dir": "~/.claude/skills", "mcp_config": {"path": "~/.claude.json", "format": "json"},
+      "upstream_npm": "@anthropic-ai/claude-code",
       "preferred_provider": "native",
       "providers": {
         "native": {
@@ -79,6 +80,7 @@ pub const BUILTIN_POLICY_JSON: &str = r#"{
     },
     "codex": {
       "display_name": "Codex", "bin": "codex", "skills_dir": "~/.codex/skills", "mcp_config": {"path": "~/.codex/config.toml", "format": "toml"},
+      "upstream_npm": "@openai/codex",
       "preferred_provider": "native",
       "providers": {
         "native": {

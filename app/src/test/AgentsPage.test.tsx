@@ -265,6 +265,27 @@ describe("Agents 页动作执行反馈", () => {
   });
 });
 
+describe("Agents 页的版本对比", () => {
+  it("卡片上直接显示有没有新版本，就地能点检查", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, {
+      ...routes(false),
+      "system:refresh-upstream": makeEnvelope(
+        { domain: "upstream", elements: [], summary: { probed: 2 } },
+        { command: "system.refresh-upstream" },
+      ),
+    });
+    // 夹具里 claude-code 是 behind 2.0.0 → 2.1.3，卡片上要看得出来
+    // 徽标上直接摆出「当前 → 最新」，不用点进去才知道
+    expect(await screen.findByText(/可更新 2\.0\.0 → 2\.1\.3/)).toBeInTheDocument();
+
+    // 没探过时也要有地方就地点，不用先跑去总览
+    await userEvent.click(screen.getByTestId("agents-check-updates"));
+    await waitFor(() =>
+      expect(calls.some((call) => call.command === "system:refresh-upstream")).toBe(true),
+    );
+  });
+});
+
 describe("Agents 页文案", () => {
   it("卡片只留能改变下一步动作的信息：不重复安装渠道、不显示恒真的偏好与状态", async () => {
     renderWithEngine(<AgentsPage />, routes(false));

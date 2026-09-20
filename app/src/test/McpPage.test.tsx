@@ -31,7 +31,7 @@ function mcpRoutes(): Record<string, ReturnType<typeof makeEnvelope>> {
             codex: { state: "managed-ok", target: "/tmp/demo/.codex/config.toml", target_exists: true, assigned: true, enabled: true, actions: ["disable", "remove"] },
           },
           env: {},
-          actions: ["enable", "disable", "remove"],
+          actions: ["enable", "disable", "remove", "upgrade"],
         },
         state: "drifted",
         freshness: makeFreshness({ state: "behind", current: "1.2.0", upstream: "1.8.0", checked_at: "2026-09-05T10:00:00Z", probe: "npm-view", cache_age_sec: 60 }),
@@ -438,5 +438,32 @@ describe("McpPage 显式接管通道（--allow-takeover）", () => {
     expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
     expect(toastErrorSpy).not.toHaveBeenCalledWith(expect.stringContaining("可显式接管"));
     expect(screen.queryByRole("button", { name: "接管原条目并重试" })).toBeNull();
+  });
+  it("官方有新版时给出换版本按钮：点了就把定义钉到新版，uvx 源没有这个按钮", async () => {
+    const { calls } = renderWithEngine(<McpPage />, mcpRoutes());
+
+    // uvx 跟的是分支，没有版本号可钉，不该出现这个按钮
+    await screen.findByTestId("mcp-card-mcp:serena");
+    expect(screen.queryByTestId("upgrade-server-mcp:serena")).toBeNull();
+
+    const button = await screen.findByTestId("upgrade-server-mcp:chrome-devtools");
+    expect(button).toHaveTextContent("换到 1.8.0");
+    await userEvent.click(button);
+
+    await waitFor(() => {
+      const applyCalls = calls.filter((call) => call.command === "mcp:apply");
+      expect(applyCalls).toHaveLength(1);
+      expect(applyCalls[0].args).toEqual(["--only", "mcp:chrome-devtools", "--action", "upgrade"]);
+    });
+    // 换完顺手重查一次，卡片不该挂着旧读数
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (call) =>
+            call.command === "system:refresh-upstream" &&
+            call.args?.[1] === "mcp:chrome-devtools",
+        ),
+      ).toBe(true),
+    );
   });
 });

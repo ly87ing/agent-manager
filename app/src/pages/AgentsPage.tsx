@@ -33,7 +33,7 @@ import { toastWithUndo } from "../lib/undo";
 import { definitionOrigin } from "../lib/definitionOverlay";
 import { activeConnectionOf, connectionsOf, hasAgentSettings } from "../lib/agentDefinitionForm";
 import type { AgentsObserved, AgentsPolicy, AgentsSpec } from "../lib/observed";
-import { useEngineQuery } from "../lib/queries";
+import { useEngineQuery, useRefreshUpstream } from "../lib/queries";
 import { COPY, versionRangeHint } from "../lib/ui-copy";
 import { useAliasSource } from "../lib/useAliasSource";
 import { useDirectApply } from "../lib/useDirectApply";
@@ -452,6 +452,8 @@ export default function AgentsPage({
   /** 确认弹窗路径（卸载/自定义定义安装升级）在途动作：弹窗确认即关闭，卡片按钮据此保持执行态直到 apply 结束。 */
   const [runningAction, setRunningAction] = useState<{ elementId: string; actionId: string } | null>(null);
   const [search, setSearch] = useState("");
+  // 版本对比要先探一次才有数：探测只在点它时联网，status 一律零网络
+  const refreshUpstream = useRefreshUpstream();
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="agents:status 调用失败" error={query.error} />;
 
@@ -765,7 +767,20 @@ export default function AgentsPage({
       {query.data.errors.length > 0 && <ErrorPanel title="agents:status 错误" errors={query.data.errors} />}
       <div className="flex items-center justify-between gap-3">
         <SearchInput value={search} onChange={setSearch} placeholder="搜索助手…" testId="agents-search" />
-        <button type="button" onClick={() => setForm("new")} className="shrink-0 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">添加助手</button>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            data-testid="agents-check-updates"
+            disabled={refreshUpstream.isPending}
+            onClick={() => refreshUpstream.mutate(undefined)}
+            title="去各自的发布源查一次最新版本（这一下会联网）"
+            className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm text-muted-foreground hover:bg-accent disabled:opacity-60"
+          >
+            <RefreshCw className={cn("h-4 w-4", refreshUpstream.isPending && "animate-spin")} aria-hidden />
+            {refreshUpstream.isPending ? "正在查…" : "检查更新"}
+          </button>
+          <button type="button" onClick={() => setForm("new")} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">添加助手</button>
+        </div>
       </div>
       {search.trim() && filteredElements.length === 0 ? (
         <EmptyState

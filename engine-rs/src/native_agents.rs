@@ -57,9 +57,19 @@ pub(crate) struct AgentDef {
     spec: Value,
     preferred_provider: String,
     providers: Map<String, Value>,
+    /// 查最新版去哪个 npm 包看。
+    ///
+    /// 官方安装器装的助手（curl install.sh）没有包名可推，但它们在 npm 上发的是同一份
+    /// 版本号，显式声明一下就能查到新版本；不声明的助手不参与探测，不瞎猜。
+    upstream_npm: Option<String>,
 }
 
 impl AgentDef {
+    /// 显式声明的上游探测包名。
+    pub(crate) fn upstream_npm(&self) -> Option<&str> {
+        self.upstream_npm.as_deref()
+    }
+
     /// 定义原文。别的域（如运行参数）从这里读自己那一段，不另开一套加载。
     pub(crate) fn spec_ref(&self) -> &Value {
         &self.spec
@@ -204,6 +214,10 @@ fn parse_definitions(policy: &Value, builtin: &Value) -> Result<Vec<AgentDef>> {
             spec: strip_internal_markers(&Value::Object(raw.clone())),
             preferred_provider: preferred.to_string(),
             providers: providers.clone(),
+            upstream_npm: raw
+                .get("upstream_npm")
+                .and_then(Value::as_str)
+                .map(str::to_string),
         });
     }
     Ok(defs)
@@ -672,6 +686,7 @@ fn prepare_apply(ctx: &Context, req: &Request) -> Result<(ActionRequest, AgentDe
             spec: def.spec.clone(),
             preferred_provider: def.preferred_provider.clone(),
             providers: def.providers.clone(),
+            upstream_npm: def.upstream_npm.clone(),
         },
     ))
 }

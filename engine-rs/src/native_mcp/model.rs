@@ -19,7 +19,7 @@ pub const TABLE_DDL: &str = "CREATE TABLE IF NOT EXISTS mcp_bindings (
 )";
 
 pub const AGENT_ACTIONS: [&str; 5] = ["add", "update", "enable", "disable", "remove"];
-pub const LIBRARY_ACTIONS: [&str; 3] = ["enable", "disable", "remove"];
+pub const LIBRARY_ACTIONS: [&str; 4] = ["enable", "disable", "remove", "upgrade"];
 
 pub fn canonicalize_agent_id(raw: &str) -> String {
     let s = raw.strip_prefix("agents:").unwrap_or(raw).trim();

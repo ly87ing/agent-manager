@@ -176,6 +176,10 @@ pub(crate) fn agent_probe_package(def: &AgentDef) -> Option<String> {
     if !def.enabled {
         return None;
     }
+    // 显式声明优先：官方安装器装的助手没有包名可从命令里推，但 npm 上发的是同一份版本号
+    if let Some(explicit) = def.upstream_npm() {
+        return Some(explicit.to_string());
+    }
     let (install, _) = def.commands.install.as_ref()?;
     extract_npm_package_name(install)
 }
@@ -460,24 +464,47 @@ fn git_local_head(ctx: &Context, repo_dir: &Path) -> Option<String> {
     Some(first.to_string())
 }
 
-/// npx 缓存本地版本（~/.npm/_npx/*/node_modules/<pkg>/package.json），
+/// 把 `chrome-devtools-mcp@1.9.0` 拆成包名和钉死的版本；作用域包 `@scope/name` 的
+/// 首个 `@` 不是版本分隔符。没写版本就是"跟最新"。
+pub(crate) fn split_package_spec(spec: &str) -> (&str, Option<&str>) {
+    let search_from = usize::from(spec.starts_with('@'));
+    match spec[search_from..].find('@') {
+        Some(offset) => {
+            let at = search_from + offset;
+            let version = spec[at + 1..].trim();
+            if version.is_empty() {
+                (&spec[..at], None)
+            } else {
+                (&spec[..at], Some(version))
+            }
+        }
+        None => (spec, None),
+    }
+}
+
+/// 本机 npx 缓存里这个包的最高版本（~/.npm/_npx/*/node_modules/<pkg>/package.json），
 /// 纯本地文件读取，无网络；缺失 → None。
+///
+/// npx 按调用参数哈希分目录，同一个包可能在 `~/.npm/_npx` 下留着好几份不同版本
+/// （真机上见过 8 份）。原先按目录名字典序取第一个能读到的，报出来的版本跟实际会跑
+/// 哪个毫无关系——真机上本地最高已有 1.8.0，却报成 1.2.0。取最高版本：它代表
+/// "本机已经拉到过的最新的那份"，再低就确实没拉到过。
 fn npx_cached_version(home_dir: &Path, package: &str) -> Option<String> {
     if !valid_npm_package(package) {
         return None;
     }
     let cache_base = home_dir.join(".npm").join("_npx");
-    let mut entries: Vec<PathBuf> = std::fs::read_dir(&cache_base)
+    let entries: Vec<PathBuf> = std::fs::read_dir(&cache_base)
         .ok()?
         .flatten()
         .map(|entry| entry.path())
         .collect();
-    entries.sort();
     let mut rel = PathBuf::from("node_modules");
     for segment in package.split('/') {
         rel.push(segment);
     }
     rel.push("package.json");
+    let mut best: Option<String> = None;
     for entry in entries {
         let package_json = entry.join(&rel);
         let Ok(raw) = std::fs::read_to_string(&package_json) else {
@@ -486,14 +513,26 @@ fn npx_cached_version(home_dir: &Path, package: &str) -> Option<String> {
         let Ok(parsed) = serde_json::from_str::<Value>(&raw) else {
             continue;
         };
-        if let Some(version) = parsed.get("version").and_then(Value::as_str) {
-            let version = version.trim();
-            if !version.is_empty() {
-                return Some(version.to_string());
-            }
+        let Some(version) = parsed.get("version").and_then(Value::as_str) else {
+            continue;
+        };
+        let version = version.trim();
+        if version.is_empty() {
+            continue;
+        }
+        let better = match &best {
+            None => true,
+            Some(current) => match (version_tuple(version), version_tuple(current)) {
+                (Some(a), Some(b)) => a > b,
+                // 版本号排不出先后时不换，保持先读到的那个
+                _ => false,
+            },
+        };
+        if better {
+            best = Some(version.to_string());
         }
     }
-    None
+    best
 }
 
 // ---------------------------------------------------------------------------
@@ -576,8 +615,15 @@ fn probe_target(ctx: &Context, target: &ProbeTarget) -> ProbeRecord {
             }
         }
         ProbeKind::McpNpx { package } => {
-            let current = npx_cached_version(&ctx.home_dir, package);
-            match npm_view(ctx, package) {
+            let (name, pinned) = split_package_spec(package);
+            // 定义里钉死了版本，跑的就是它；没钉死才去看本机缓存拉到过哪些。
+            let current = match pinned {
+                Some(version) => Some(version.to_string()),
+                None => npx_cached_version(&ctx.home_dir, name),
+            };
+            // 上游一律问 latest：`npm view foo@1.2.0 version` 只会把 1.2.0 原样回来，
+            // 拿它当上游就永远比不出落后。
+            match npm_view(ctx, name) {
                 None => (
                     PROBE_NPM_VIEW,
                     "unknown",
