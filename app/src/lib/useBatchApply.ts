@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { useExecutions } from "./execution";
 
-/** 批量执行的一行目标：skills:apply 的最小范围（--only/--action/--agent），takeover 行追加 --allow-takeover。 */
+/** 批量执行的一行目标：资源 apply 的最小范围（--only/--action/--agent），takeover 行追加 --allow-takeover。 */
 export interface BatchApplyRow {
   elementId: string;
   agent: string;
@@ -15,7 +15,7 @@ export interface BatchApplyRow {
 }
 
 /**
- * 全部技能矩阵的批量执行器：对目标行顺序逐行 skills:apply，每行走与单行相同的
+ * 资源批量执行器：对目标行顺序逐行 apply，每行走与单行相同的
  * 执行通道（独立 run_id、执行记录、查询刷新；silent 压掉单行结果 toast）；
  * 单行失败不中断后续行；全部完成后汇总 toast（失败时指向任务记录并逐行
  * console.error 原因）；同步 ref 保证在途期间拒绝重入。
@@ -25,7 +25,7 @@ export function useBatchApply() {
   const busyRef = useRef(false);
   const [executing, setExecuting] = useState(false);
 
-  const applyBatch = async (request: { actionLabel: string; rows: BatchApplyRow[] }): Promise<void> => {
+  const applyBatch = async (request: { command?: string; actionLabel: string; rows: BatchApplyRow[] }): Promise<void> => {
     if (busyRef.current || request.rows.length === 0) return;
     busyRef.current = true;
     setExecuting(true);
@@ -36,7 +36,7 @@ export function useBatchApply() {
         const args = ["--only", row.elementId, "--action", row.action, "--agent", row.agent];
         if (row.takeover) args.push("--allow-takeover");
         const envelope = await execute({
-          command: "skills:apply",
+          command: request.command ?? "skills:apply",
           label: `${request.actionLabel} ${row.label}`,
           args,
           // 单行结果 toast 由下方汇总 toast 取代；执行记录与查询刷新照常。

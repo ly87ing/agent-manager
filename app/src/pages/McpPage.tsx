@@ -8,14 +8,16 @@ import { ErrorPanel } from "../components/ErrorPanel";
 import { McpAssignmentRow, type McpAgentCellView } from "../components/McpAssignmentRow";
 import { ResourceAgentMatrix, type MatrixRow, type MatrixRowCell } from "../components/ResourceAgentMatrix";
 import { McpImportCandidates } from "../components/McpImportCandidates";
-import { McpServerCard, McpServerDetail } from "../components/McpServerCard";
+import { McpServerCard } from "../components/McpServerCard";
 import { McpServerFormDialog } from "../components/McpServerFormDialog";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import type { Diagnostic, EngineElement, McpImportCandidate, PolicyData, PolicyLayers, StatusData } from "../lib/contract";
 import { engineErrorMessage, runEngine } from "../lib/engine";
 import { candidateToDefinition, isMcpTakeoverBlocked } from "../lib/mcpImport";
+import { buildMcpSyncPlan, type McpSyncPlan } from "../lib/mcpSync";
 import { agentCellsOf, type McpObserved, type McpSpec } from "../lib/observed";
+import { useBatchApply } from "../lib/useBatchApply";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { useDirectApply } from "../lib/useDirectApply";
 import { OVERLAY_COPY } from "../lib/ui-copy";
@@ -44,8 +46,10 @@ export default function McpPage({ onNavigate }: { onNavigate?: (page: string) =>
   const [importTarget, setImportTarget] = useState<McpImportCandidate | null>(null);
   const [importExecuting, setImportExecuting] = useState(false);
   const [importErrors, setImportErrors] = useState<Diagnostic[] | null>(null);
+  const [pendingSync, setPendingSync] = useState<{ element: EngineElement; plan: McpSyncPlan } | null>(null);
 
   const directApply = useDirectApply();
+  const batchApply = useBatchApply();
   const definitionOps = useDefinitionOps({ section: "mcp", domain: "mcp" });
 
   const [pendingRemove, setPendingRemove] = useState<
@@ -167,6 +171,31 @@ export default function McpPage({ onNavigate }: { onNavigate?: (page: string) =>
         );
       }
     });
+  };
+
+  const executeSync = async (plan: McpSyncPlan) => {
+    await batchApply.applyBatch({
+      command: "mcp:apply",
+      actionLabel: "同步",
+      rows: plan.rows,
+    });
+    if (plan.blocked.length > 0) {
+      toast.warning(`仍有 ${plan.blocked.length} 个助手需要先处理阻塞原因`);
+    }
+  };
+
+  /** 服务库的一键同步：自动选出每个助手需要的动作；接管或清理残留只做一次汇总确认。 */
+  const handleSync = (element: EngineElement) => {
+    const plan = buildMcpSyncPlan(element);
+    if (plan.rows.length === 0) {
+      if (plan.blocked.length > 0) toast.warning("当前没有可自动执行的同步项，请先处理卡片中的阻塞原因");
+      return;
+    }
+    if (plan.takeoverCount > 0 || plan.removeCount > 0) {
+      setPendingSync({ element, plan });
+      return;
+    }
+    void executeSync(plan);
   };
 
   // 未导入候选（引擎已掩码，前端拿不到明文）与同名冲突视图（元素 + policy 定义双来源）
@@ -344,7 +373,7 @@ export default function McpPage({ onNavigate }: { onNavigate?: (page: string) =>
               }
             />
           ) : (
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4">
               {filteredElements.map((element) => (
                 <McpServerCard
                   key={element.id}
@@ -353,8 +382,8 @@ export default function McpPage({ onNavigate }: { onNavigate?: (page: string) =>
                   onSelect={setSelectedId}
                   onEdit={(el) => setFormState({ editing: el })}
                   onAction={handleServerAction}
-                  onCellAction={handleCellAction}
-                  onTakeover={handleTakeover}
+                  onSync={handleSync}
+                  syncing={batchApply.executing || directApply.executing}
                   onConfigureSecrets={onNavigate ? () => onNavigate("settings:secrets") : undefined}
                 />
               ))}
@@ -375,12 +404,8 @@ export default function McpPage({ onNavigate }: { onNavigate?: (page: string) =>
             />
           )}
 
-          {selected ? (
-            <McpServerDetail element={selected} />
-          ) : (
-            filteredElements.length > 0 && (
-              <p className="text-xs text-muted-foreground">点击服务名展开详情（启动命令 / 密钥变量 / 写入位置 / 同步详情）。</p>
-            )
+          {!selected && filteredElements.length > 0 && (
+            <p className="text-xs text-muted-foreground">点击服务名展开完整参数、变量状态、写入位置和同步详情。</p>
           )}
 
           <McpImportCandidates candidates={importCandidates} existingNames={existingNames} onImport={setImportTarget} />
@@ -548,6 +573,20 @@ export default function McpPage({ onNavigate }: { onNavigate?: (page: string) =>
           executing={directApply.executing}
           onConfirm={confirmRemove}
           onClose={() => setPendingRemove(null)}
+        />
+      )}
+
+      {pendingSync && (
+        <ConfirmModal
+          title={`同步 ${pendingSync.element.id.replace(/^mcp:/, "")}`}
+          description={`将同步 ${pendingSync.plan.rows.length} 个助手${pendingSync.plan.takeoverCount > 0 ? `，其中 ${pendingSync.plan.takeoverCount} 个会用服务库定义接管同名条目` : ""}${pendingSync.plan.removeCount > 0 ? `，并清理 ${pendingSync.plan.removeCount} 个由本工具写入的旧配置` : ""}。其他服务和顶层配置保持不变。`}
+          risk="write-local"
+          confirmLabel="确认同步"
+          executing={batchApply.executing}
+          onConfirm={() => {
+            void executeSync(pendingSync.plan).then(() => setPendingSync(null));
+          }}
+          onClose={() => setPendingSync(null)}
         />
       )}
     </div>

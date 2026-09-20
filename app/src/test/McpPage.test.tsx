@@ -92,11 +92,13 @@ describe("McpPage 服务库 + 助手中的服务", () => {
     // 凭据只显示状态统计
     expect(screen.getByText("密钥变量 0/1 已配置")).toBeInTheDocument();
     const chromeResolution = screen.getByTestId("mcp-resolution-mcp:chrome-devtools");
-    expect(chromeResolution).toHaveTextContent("1 个助手待处理");
+    expect(chromeResolution).toHaveTextContent("1 个助手待同步");
     expect(chromeResolution).toHaveTextContent("claude-code");
-    expect(chromeResolution).toHaveTextContent("这个助手中的配置与服务库定义不同");
-    expect(screen.getByTestId("action-update-mcp:chrome-devtools-claude-code")).toBeInTheDocument();
+    expect(chromeResolution).toHaveTextContent("将按服务库定义同步到这个助手");
+    expect(screen.getByTestId("sync-server-mcp:chrome-devtools")).toBeInTheDocument();
+    expect(screen.queryByTestId("action-update-mcp:chrome-devtools-claude-code")).toBeNull();
 
+    expect(screen.queryByTestId("mcp-detail-mcp:serena")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "mcp:serena" }));
     const detail = await screen.findByTestId("mcp-detail-mcp:serena");
     expect(detail).toHaveTextContent("uvx");
@@ -111,14 +113,14 @@ describe("McpPage 服务库 + 助手中的服务", () => {
     expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
   });
 
-  it("服务库直接闭环不一致：卡片上的更新按钮精确同步对应助手，不必切换标签页", async () => {
+  it("服务库直接闭环不一致：一键同步自动选择 update 并精确同步对应助手", async () => {
     const { calls } = renderWithEngine(<McpPage />, mcpRoutes());
 
-    await userEvent.click(await screen.findByTestId("action-update-mcp:chrome-devtools-claude-code"));
+    await userEvent.click(await screen.findByTestId("sync-server-mcp:chrome-devtools"));
     await waitFor(() => expect(calls.some((call) => call.command === "mcp:apply")).toBe(true));
 
     const apply = calls.find((call) => call.command === "mcp:apply")!;
-    expect(apply.args).toEqual(["--only", "mcp:chrome-devtools", "--agent", "claude-code", "--action", "update"]);
+    expect(apply.args).toEqual(["--only", "mcp:chrome-devtools", "--action", "update", "--agent", "claude-code"]);
     expect(apply.options?.runId).toMatch(/^gui-/);
     expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
@@ -463,20 +465,29 @@ describe("McpPage 显式接管通道（--allow-takeover）", () => {
       actions: [],
       blocked_reason: "目标文件中的条目包含未受管外部属性（外部未识别字段 'custom_field'），拒绝覆盖",
     };
+    cell.codex = {
+      state: "managed-ok",
+      target: "/tmp/demo/.codex/config.toml",
+      target_exists: true,
+      assigned: true,
+      enabled: true,
+      actions: ["disable", "remove"],
+    };
     const { calls } = renderWithEngine(<McpPage />, routes);
 
-    const button = await screen.findByTestId("takeover-mcp:take-svc-claude-code");
-    expect(button).toHaveTextContent("用服务库定义覆盖");
-    await userEvent.click(button);
+    await userEvent.click(await screen.findByTestId("sync-server-mcp:take-svc"));
+    const dialog = await screen.findByRole("dialog", { name: "同步 take-svc" });
+    expect(dialog).toHaveTextContent("1 个会用服务库定义接管同名条目");
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
 
     await waitFor(() => expect(calls.filter((call) => call.command === "mcp:apply")).toHaveLength(1));
     expect(calls.filter((call) => call.command === "mcp:apply")[0].args).toEqual([
       "--only",
       "mcp:take-svc",
-      "--agent",
-      "claude-code",
       "--action",
       "update",
+      "--agent",
+      "claude-code",
       "--allow-takeover",
     ]);
   });

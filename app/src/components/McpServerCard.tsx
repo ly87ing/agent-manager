@@ -1,43 +1,17 @@
-import { Check, CircleAlert, X } from "lucide-react";
+import { Check, CircleAlert, RefreshCw, X } from "lucide-react";
 import type { EngineElement } from "../lib/contract";
 import { agentCellsOf, type McpObserved, type McpSpec } from "../lib/observed";
+import { buildMcpSyncPlan } from "../lib/mcpSync";
 import { FreshnessBadge } from "./FreshnessBadge";
 import { StateBadge } from "./StateBadge";
 import { DriftExplanationPanel } from "./DriftExplanationPanel";
-import { McpCellActions, McpCellStatusBadge, type McpAgentCellView } from "./McpAssignmentRow";
+import { McpCellStatusBadge, type McpAgentCellView } from "./McpAssignmentRow";
 import { cn } from "../lib/utils";
 
 /** 服务级 observed 扩展：库级操作动作与受阻原因（observed.ts 冻结，本地扩展）。 */
 export interface McpServerObserved extends McpObserved {
   actions?: string[];
   blocked_reason?: string | null;
-}
-
-const RESOLUTION_STATES = new Set(["drifted", "leftover", "probe-error", "missing", "not-materialized"]);
-
-function resolutionActions(cell: McpAgentCellView): string[] {
-  const actions = cell.actions ?? [];
-  if (cell.state === "leftover") return actions.includes("remove") ? ["remove"] : [];
-  if (cell.state === "drifted") {
-    if (actions.includes("update")) return ["update"];
-    if (actions.includes("disable")) return ["disable"];
-    return [];
-  }
-  if (cell.state === "missing" || cell.state === "not-materialized") {
-    if (actions.includes("update")) return ["update"];
-    if (actions.includes("add")) return ["add"];
-  }
-  return [];
-}
-
-function resolutionReason(cell: McpAgentCellView, actions: string[]): string {
-  if (cell.blocked_reason) return cell.blocked_reason;
-  if (cell.state === "leftover") return "分配已取消，但旧配置还留在这个助手中。";
-  if (cell.state === "probe-error") return "配置读取失败，修复文件后再重新检查。";
-  if (cell.state === "not-materialized") return "这个助手的配置文件尚未生成。";
-  if (cell.state === "missing") return "服务库已有定义，但这个助手中还没有该服务。";
-  if (actions.includes("disable")) return "分配已停用，但助手中仍保留启用配置。";
-  return "这个助手中的配置与服务库定义不同。";
 }
 
 function displayPlaceholder(value: string | undefined): string {
@@ -198,8 +172,8 @@ export function McpServerCard({
   onSelect,
   onEdit,
   onAction,
-  onCellAction,
-  onTakeover,
+  onSync,
+  syncing,
   onConfigureSecrets,
 }: {
   element: EngineElement;
@@ -207,8 +181,8 @@ export function McpServerCard({
   onSelect: (id: string | null) => void;
   onEdit: (element: EngineElement) => void;
   onAction: (element: EngineElement, action: "enable" | "disable" | "remove" | "upgrade") => void;
-  onCellAction: (element: EngineElement, agent: string, action: string) => void;
-  onTakeover: (element: EngineElement, agent: string, action: string) => void;
+  onSync: (element: EngineElement) => void;
+  syncing: boolean;
   onConfigureSecrets?: () => void;
 }) {
   const spec = element.spec as McpSpec;
@@ -220,17 +194,14 @@ export function McpServerCard({
   const headerEntries = Object.entries(observed.headers ?? {});
   const secretEntries = [...envEntries, ...headerEntries];
   const envResolved = secretEntries.filter(([, resolution]) => resolution.resolved).length;
-  const configuredReferences = Object.entries(isRemote ? spec.headers ?? {} : spec.env ?? {});
+  const syncPlan = buildMcpSyncPlan(element);
+  const syncRows = new Map(syncPlan.rows.map((row) => [row.agent, row]));
+  const blockedRows = new Map(syncPlan.blocked.map((row) => [row.agent, row]));
+  const issueAgents = new Set([...syncRows.keys(), ...blockedRows.keys()]);
   const resolutionEntries = Object.entries(agentCellsOf(element))
-    .map(([agent, cell]) => ({ agent, cell: cell as McpAgentCellView }))
-    .filter(
-      ({ agent, cell }) =>
-        RESOLUTION_STATES.has(cell.state) &&
-        (spec.agents == null || spec.agents.includes(agent) || cell.assigned || cell.state === "leftover"),
-    );
-  const hasMissingSecrets = resolutionEntries.some(({ cell }) =>
-    (cell.blocked_reason ?? "").includes("凭证变量未配置"),
-  );
+    .filter(([agent]) => issueAgents.has(agent))
+    .map(([agent, cell]) => ({ agent, cell: cell as McpAgentCellView }));
+  const hasMissingSecrets = syncPlan.blocked.some(({ reason }) => reason.includes("凭证变量未配置"));
 
   return (
     <section
@@ -248,7 +219,10 @@ export function McpServerCard({
           >
             {element.id}
           </button>
-          <p className="mt-1 font-mono text-xs break-all text-muted-foreground">
+          <p
+            className="mt-1 truncate font-mono text-xs text-muted-foreground"
+            title={isRemote ? spec.url : `${spec.command ?? ""} ${(spec.args ?? []).join(" ")}`}
+          >
             {isRemote ? spec.url : `${spec.command ?? ""} ${(spec.args ?? []).join(" ")}`}
           </p>
         </div>
@@ -277,47 +251,7 @@ export function McpServerCard({
         </span>
       </div>
 
-      <dl className="mt-3 grid grid-cols-1 gap-x-4 gap-y-2 rounded-md border bg-muted/20 p-3 text-xs sm:grid-cols-2">
-        {isRemote ? (
-          <div className="sm:col-span-2">
-            <dt className="text-muted-foreground">服务地址 <code>url</code></dt>
-            <dd className="mt-0.5 break-all font-mono text-foreground">{spec.url}</dd>
-          </div>
-        ) : (
-          <>
-            <div>
-              <dt className="text-muted-foreground">启动命令 <code>command</code></dt>
-              <dd className="mt-0.5 break-all font-mono text-foreground">{spec.command}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">启动超时 <code>startup_timeout_sec</code></dt>
-              <dd className="mt-0.5 font-mono text-foreground">{spec.startup_timeout_sec ?? "未指定"}</dd>
-            </div>
-            <div className="sm:col-span-2">
-              <dt className="text-muted-foreground">参数 <code>args</code></dt>
-              <dd className="mt-0.5 max-h-16 overflow-auto whitespace-pre-wrap break-all font-mono text-foreground">
-                {JSON.stringify(spec.args ?? [])}
-              </dd>
-            </div>
-          </>
-        )}
-        <div className="sm:col-span-2">
-          <dt className="text-muted-foreground">变量引用</dt>
-          <dd className="mt-1 max-h-24 overflow-auto rounded bg-background px-2 py-1.5 font-mono text-foreground">
-            {configuredReferences.length === 0 ? "无" : configuredReferences.map(([key, value]) => (
-              <span key={key} className="block break-all">{key} = {value}</span>
-            ))}
-          </dd>
-        </div>
-        {!isRemote && Object.keys(spec.extra_args_by_agent ?? {}).length > 0 && (
-          <div className="sm:col-span-2">
-            <dt className="text-muted-foreground">各助手附加参数 <code>extra_args_by_agent</code></dt>
-            <dd className="mt-0.5 max-h-16 overflow-auto break-all font-mono text-foreground">
-              {JSON.stringify(spec.extra_args_by_agent)}
-            </dd>
-          </div>
-        )}
-      </dl>
+      {selected && <div className="mt-4"><McpServerDetail element={element} /></div>}
 
       {observed.command_available === false && (
         <div
@@ -342,22 +276,38 @@ export function McpServerCard({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
               <CircleAlert className="h-3.5 w-3.5 text-warning" aria-hidden />
-              {resolutionEntries.length} 个助手待处理
+              {syncPlan.rows.length > 0 ? `${syncPlan.rows.length} 个助手待同步` : "暂时无法自动同步"}
+              {syncPlan.blocked.length > 0 && <span className="font-normal text-warning">· {syncPlan.blocked.length} 个需先处理</span>}
             </div>
-            {hasMissingSecrets && onConfigureSecrets && (
-              <button
-                type="button"
-                data-testid={`configure-secrets-${element.id}`}
-                onClick={onConfigureSecrets}
-                className="rounded border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary hover:bg-primary/15"
-              >
-                配置缺失变量
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {hasMissingSecrets && onConfigureSecrets && (
+                <button
+                  type="button"
+                  data-testid={`configure-secrets-${element.id}`}
+                  onClick={onConfigureSecrets}
+                  className="rounded border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary hover:bg-primary/15"
+                >
+                  配置缺失变量
+                </button>
+              )}
+              {syncPlan.rows.length > 0 && (
+                <button
+                  type="button"
+                  data-testid={`sync-server-${element.id}`}
+                  onClick={() => onSync(element)}
+                  disabled={syncing}
+                  className="inline-flex items-center gap-1 rounded border border-primary/30 bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                >
+                  <RefreshCw className={cn("h-3 w-3", syncing && "animate-spin")} aria-hidden />
+                  一键同步
+                </button>
+              )}
+            </div>
           </div>
           <ul className="mt-2 divide-y divide-border/70">
             {resolutionEntries.map(({ agent, cell }) => {
-              const actions = resolutionActions(cell);
+              const syncRow = syncRows.get(agent);
+              const blockedRow = blockedRows.get(agent);
               return (
                 <li
                   key={agent}
@@ -367,17 +317,8 @@ export function McpServerCard({
                   <span className="min-w-24 font-mono text-xs font-medium text-foreground">{agent}</span>
                   <McpCellStatusBadge agent={agent} cell={cell} />
                   <span className="min-w-48 flex-1 text-xs text-muted-foreground">
-                    {resolutionReason(cell, actions)}
+                    {syncRow?.reason ?? blockedRow?.reason}
                   </span>
-                  <McpCellActions
-                    element={element}
-                    agent={agent}
-                    cell={cell}
-                    visibleActions={actions}
-                    showEmptyReason={false}
-                    onAction={onCellAction}
-                    onTakeover={onTakeover}
-                  />
                 </li>
               );
             })}
@@ -390,7 +331,8 @@ export function McpServerCard({
           type="button"
           data-testid={`edit-server-${element.id}`}
           onClick={() => onEdit(element)}
-          className="inline-flex items-center gap-1 rounded border bg-card px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent"
+          disabled={syncing}
+          className="inline-flex items-center gap-1 rounded border bg-card px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
         >
           编辑定义
         </button>
@@ -399,7 +341,8 @@ export function McpServerCard({
             type="button"
             data-testid={`enable-server-${element.id}`}
             onClick={() => onAction(element, "enable")}
-            className="rounded border border-success/30 bg-success/10 px-2.5 py-1 text-xs text-success hover:bg-success/15"
+            disabled={syncing}
+            className="rounded border border-success/30 bg-success/10 px-2.5 py-1 text-xs text-success hover:bg-success/15 disabled:opacity-50"
           >
             启用
           </button>
@@ -409,7 +352,8 @@ export function McpServerCard({
             type="button"
             data-testid={`disable-server-${element.id}`}
             onClick={() => onAction(element, "disable")}
-            className="rounded border border-warning/30 bg-warning/10 px-2.5 py-1 text-xs text-warning hover:bg-warning/15"
+            disabled={syncing}
+            className="rounded border border-warning/30 bg-warning/10 px-2.5 py-1 text-xs text-warning hover:bg-warning/15 disabled:opacity-50"
           >
             停用
           </button>
@@ -419,7 +363,8 @@ export function McpServerCard({
             type="button"
             data-testid={`upgrade-server-${element.id}`}
             onClick={() => onAction(element, "upgrade")}
-            className="rounded border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs text-primary hover:bg-primary/15"
+            disabled={syncing}
+            className="rounded border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs text-primary hover:bg-primary/15 disabled:opacity-50"
           >
             换到 {element.freshness.upstream}
           </button>
@@ -429,12 +374,12 @@ export function McpServerCard({
             type="button"
             data-testid={`remove-server-${element.id}`}
             onClick={() => onAction(element, "remove")}
-            className="rounded border border-destructive/30 bg-card px-2.5 py-1 text-xs text-destructive hover:bg-destructive/10"
+            disabled={syncing}
+            className="rounded border border-destructive/30 bg-card px-2.5 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:opacity-50"
           >
             删除服务
           </button>
         )}
-        {actions.length === 0 && <span className="text-xs text-muted-foreground">当前引擎未提供库级操作</span>}
       </div>
     </section>
   );
