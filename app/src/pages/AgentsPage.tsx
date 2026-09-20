@@ -123,6 +123,8 @@ function AgentCard({
   onToggleEnabled,
   onSwitchConnection,
   connectionBusy,
+  onCheckConnection,
+  check,
 }: {
   element: EngineElement;
   /** true = 定义来自本地数据库（用户新增或改过内置定义）：安装/升级先弹确认。 */
@@ -150,6 +152,10 @@ function AgentCard({
   onSwitchConnection: (name: string) => void;
   /** 接入配置写入在途。 */
   connectionBusy: boolean;
+  /** 测一下当前这套接入配置能不能用。 */
+  onCheckConnection: (name: string) => void;
+  /** 当前这套的检查结果；没测过为 undefined。 */
+  check?: { ok: boolean; detail: string; latencyMs: number; pending?: boolean };
 }) {
   /** 本卡直执路径在途的动作 id（点击即置位，apply 结束回落）。 */
   const [localActionId, setLocalActionId] = useState<string | null>(null);
@@ -235,7 +241,28 @@ function AgentCard({
               </option>
             ))}
           </select>
+          {activeConnection && (
+            <button
+              type="button"
+              data-testid={`check-connection-${element.id}`}
+              disabled={check?.pending}
+              onClick={() => onCheckConnection(activeConnection)}
+              title="发一个最小请求，确认地址、令牌与模型名都对（这一下会联网）"
+              className="shrink-0 rounded border px-2 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
+            >
+              {check?.pending ? "测中…" : "测一下"}
+            </button>
+          )}
         </div>
+      )}
+      {check && !check.pending && (
+        <p
+          data-testid={`check-result-${element.id}`}
+          className={cn("mt-1 text-xs", check.ok ? "text-success" : "text-destructive")}
+        >
+          {check.detail}
+          {check.ok && check.latencyMs > 0 && <span className="ml-1 text-muted-foreground">{check.latencyMs}ms</span>}
+        </p>
       )}
 
       {policy.enabled === false && (
@@ -405,6 +432,11 @@ export default function AgentsPage({
   const [profileDuplicating, setProfileDuplicating] = useState(false);
   const [profileRemoving, setProfileRemoving] = useState<string | null>(null);
   const [policyBusy, setPolicyBusy] = useState(false);
+  /** 接入配置的检查结果：按「助手/配置名」存，卡片与弹窗都读它。 */
+  const [checkResults, setCheckResults] = useState<
+    Record<string, { ok: boolean; detail: string; latencyMs: number; pending?: boolean }>
+  >({});
+
   const [aliasEditing, setAliasEditing] = useState<
     { bin: string; name: string; value: string | null; presetName?: string } | null
   >(null);
@@ -486,6 +518,39 @@ export default function AgentsPage({
       toast.error(`运行参数没写进去:${String(err)}`);
     } finally {
       setConfiguring(false);
+    }
+  };
+
+  /**
+   * 测一下这套接入配置：发一个最小真实请求，确认地址、令牌与模型名都对。
+   *
+   * 这是全局唯一会主动联网的助手侧动作，只在点它时才发；只读，不碰配置文件，
+   * 也不改当前生效的那套。
+   */
+  const runCheck = async (agentId: string, profile: string): Promise<void> => {
+    const key = `${agentId}/${profile}`;
+    setCheckResults((prev) => ({ ...prev, [key]: { ok: false, detail: "正在测…", latencyMs: 0, pending: true } }));
+    try {
+      const envelope = await runEngine<{ ok?: boolean; detail?: string; latency_ms?: number }>(
+        "agents:check",
+        ["--only", `agents:${agentId}`, "--use", profile],
+      );
+      const detail = envelope.ok
+        ? envelope.data?.detail ?? "测完了"
+        : envelope.errors[0]?.message ?? "没测成";
+      setCheckResults((prev) => ({
+        ...prev,
+        [key]: {
+          ok: envelope.ok === true && envelope.data?.ok === true,
+          detail,
+          latencyMs: envelope.data?.latency_ms ?? 0,
+        },
+      }));
+    } catch (err) {
+      setCheckResults((prev) => ({
+        ...prev,
+        [key]: { ok: false, detail: String(err), latencyMs: 0 },
+      }));
     }
   };
 
@@ -750,6 +815,14 @@ export default function AgentsPage({
               connectionBusy={configuring}
               onSwitchConnection={(useName) =>
                 void runConfigure(element.id.replace(/^agents:/, ""), { use: useName })
+              }
+              onCheckConnection={(profile) =>
+                void runCheck(element.id.replace(/^agents:/, ""), profile)
+              }
+              check={
+                checkResults[
+                  `${element.id.replace(/^agents:/, "")}/${activeConnectionOf(element.spec as Record<string, unknown>) ?? ""}`
+                ]
               }
             />
           ))}

@@ -37,7 +37,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / agents:configure / secrets:status / system:audit|discover|refresh-upstream / runs:* / policy:* / sources:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / agents:configure|check / secrets:status / system:audit|discover|refresh-upstream / runs:* / policy:* / sources:* / db:*）"
             ),
         )
     };
@@ -57,6 +57,8 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("config", "export" | "import") => true,
         // 运行参数写助手自己的配置文件：与装卸升级的 apply 分开，那条走 shell 命令
         ("agents", "configure") => true,
+        // 接入配置可用性检查：会联网，但只在界面上点它时才发
+        ("agents", "check") => true,
         (d, "status" | "apply") => READ_WRITE_DOMAINS.contains(&d),
         _ => false,
     };
@@ -130,6 +132,10 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         // 配置备份：导出不带参数，导入只接整份备份正文
         ("config", "import") => specs.push(("--value", ArgValueKind::JsonValue)),
         // 运行参数写助手配置文件：外部改过要显式接管，降安全等级要显式确认
+        ("agents", "check") => {
+            specs.push(("--only", ArgValueKind::ElementId));
+            specs.push(("--use", ArgValueKind::ElementId));
+        }
         ("agents", "configure") => {
             specs.push(("--only", ArgValueKind::ElementId));
             // 切换生效的接入配置：名字与元素 id 同一把尺子
@@ -408,6 +414,7 @@ mod tests {
             "agents:status",
             "agents:apply",
             "agents:configure",
+            "agents:check",
             "mcp:status",
             "mcp:apply",
             "skills:status",

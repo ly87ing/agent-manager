@@ -317,6 +317,71 @@ describe("助手运行参数", () => {
     ]);
   });
 
+  it("测一下：只读地问一次，把结果就地说清楚", async () => {
+    const withProfiles = routes({
+      "agents:check": makeEnvelope(
+        {
+          domain: "agents",
+          action: "check",
+          element: "agents:claude-code",
+          profile: "relay",
+          ok: true,
+          http_status: 200,
+          latency_ms: 432,
+          detail: "通了：地址、令牌与模型都没问题",
+        },
+        { command: "agents.check" },
+      ),
+    });
+    const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.settings = {
+      active: "relay",
+      profiles: { relay: { label: "我的中转", base_url: "https://relay.example.com" } },
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
+
+    await userEvent.click(await screen.findByTestId("check-connection-agents:claude-code"));
+    const result = await screen.findByTestId("check-result-agents:claude-code");
+    expect(result).toHaveTextContent("通了");
+    expect(result).toHaveTextContent("432ms");
+
+    const checks = calls.filter((call) => call.command === "agents:check");
+    expect(checks).toHaveLength(1);
+    expect(checks[0].args).toEqual(["--only", "agents:claude-code", "--use", "relay"]);
+    // 只读：不该顺手写配置
+    expect(calls.some((call) => call.command === "agents:configure")).toBe(false);
+  });
+
+  it("测一下失败：把引擎给的原因原样摆出来", async () => {
+    const withProfiles = routes({
+      "agents:check": makeEnvelope(
+        {},
+        {
+          command: "agents.check",
+          ok: false,
+          errors: [
+            {
+              code: "AGENT_ERROR",
+              element: null,
+              message: "环境变量 RELAY_KEY 还没有取值：先在密钥页填上，或在启动环境里 export 它",
+            },
+          ],
+        },
+      ),
+    });
+    const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.settings = {
+      active: "relay",
+      profiles: { relay: { label: "我的中转", base_url: "https://relay.example.com" } },
+    };
+    renderWithEngine(<AgentsPage />, withProfiles);
+
+    await userEvent.click(await screen.findByTestId("check-connection-agents:claude-code"));
+    const result = await screen.findByTestId("check-result-agents:claude-code");
+    expect(result).toHaveTextContent("RELAY_KEY");
+    expect(result).toHaveTextContent("密钥页");
+  });
+
   it("没配接入配置的助手：卡片上不出现切换器", async () => {
     renderWithEngine(<AgentsPage />, routes());
     await screen.findByRole("button", { name: "编辑命令" });

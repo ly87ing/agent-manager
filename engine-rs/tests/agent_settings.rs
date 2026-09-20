@@ -793,3 +793,106 @@ fn codex_用户自己配的顶层键首次也要显式接管() {
 
     let _ = fs::remove_dir_all(&base);
 }
+
+// ---------- 可用性检查 ----------
+
+#[test]
+fn 检查在发请求之前就把缺东西说清楚_且零网络() {
+    let (base, ctx) = temp_ctx("check-preflight");
+
+    // 没有接入配置：直说现在用的是助手自带账号
+    define_settings(&ctx, json!({}));
+    let none = execute(&ctx, &request("agents:check", &["--only", "agents:claude-code"]));
+    assert!(!none.ok);
+    assert!(none.errors[0].message.contains("助手自带"), "{:?}", none.errors);
+
+    // 缺地址 / 缺模型 / 缺令牌变量名，各自给出能照着做的话
+    for (settings, needle) in [
+        (json!({"active": "p", "profiles": {"p": {}}}), "没填地址"),
+        (
+            json!({"active": "p", "profiles": {"p": {"base_url": "https://api.example.com"}}}),
+            "没填模型",
+        ),
+        (
+            json!({"active": "p", "profiles": {"p": {"base_url": "https://api.example.com", "model": "m"}}}),
+            "没填令牌变量名",
+        ),
+    ] {
+        define_settings(&ctx, settings);
+        let env = execute(&ctx, &request("agents:check", &["--only", "agents:claude-code"]));
+        assert!(!env.ok);
+        assert!(
+            env.errors[0].message.contains(needle),
+            "期望提到「{needle}」，实际：{:?}",
+            env.errors
+        );
+    }
+
+    // 变量没取值时也不该发请求
+    define_settings(
+        &ctx,
+        json!({"active": "p", "profiles": {"p": {"base_url": "https://api.example.com", "model": "m", "token_var": "NOPE_TOKEN"}}}),
+    );
+    let missing = execute(&ctx, &request("agents:check", &["--only", "agents:claude-code"]));
+    assert!(!missing.ok);
+    assert!(missing.errors[0].message.contains("NOPE_TOKEN"));
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn 检查不改配置文件_也不动生效的那套() {
+    let (base, ctx) = temp_ctx("check-readonly");
+    define_settings(
+        &ctx,
+        json!({
+            "active": "a",
+            // 端口 1 会被立即拒绝：这条用例要的是「检查没改任何东西」，
+            // 不是真去连一个外网地址干等超时
+            "profiles": {
+                "a": {"base_url": "https://127.0.0.1:1", "model": "m", "token_var": "T"},
+                "b": {"base_url": "https://127.0.0.1:1", "model": "m", "token_var": "T"}
+            }
+        }),
+    );
+    assert!(execute(&ctx, &request("secrets:set", &["--var", "T", "--value", "v"])).ok);
+    assert!(execute(&ctx, &request("agents:configure", &["--only", "agents:claude-code"])).ok);
+    let before = fs::read(ctx.home_dir.join(".claude/settings.json")).unwrap();
+
+    // --use 测的是另一套，但不该把生效的那套切过去
+    let env = execute(
+        &ctx,
+        &request("agents:check", &["--only", "agents:claude-code", "--use", "b"]),
+    );
+    // 联不联得上取决于环境，这里只断言它没有改任何东西
+    assert_eq!(env.data["profile"], json!("b"), "{:?}", env.errors);
+    assert_eq!(
+        fs::read(ctx.home_dir.join(".claude/settings.json")).unwrap(),
+        before,
+        "检查是只读的，不许碰配置文件"
+    );
+    let policy = execute(&ctx, &request("policy:get", &[]));
+    assert_eq!(
+        policy.data["effective"]["agents"]["definitions"]["claude-code"]["settings"]["active"],
+        "a",
+        "检查不该改生效的那套"
+    );
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn 检查不存在的接入配置被拒() {
+    let (base, ctx) = temp_ctx("check-missing-profile");
+    define_settings(
+        &ctx,
+        json!({"active": "p", "profiles": {"p": {"base_url": "https://a.example.com", "model": "m", "token_var": "T"}}}),
+    );
+    let env = execute(
+        &ctx,
+        &request("agents:check", &["--only", "agents:claude-code", "--use", "nope"]),
+    );
+    assert!(!env.ok);
+    assert!(env.errors[0].message.contains("nope"));
+    let _ = fs::remove_dir_all(&base);
+}
