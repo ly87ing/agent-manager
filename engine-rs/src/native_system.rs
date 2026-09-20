@@ -54,7 +54,7 @@ fn entry(name: &str, status: &str, message: &str, category: Option<&str>) -> Val
 /// 畸形 payload（id 缺失、空字符串或脱敏后为空）固定 error，不进入状态映射。
 pub(crate) fn map_element_entry(id: Option<&str>, state: Option<&str>, fallback: &str) -> Value {
     let Some(name) = id
-        .map(|raw| crate::native_logs::sanitize_diagnostic_message(raw))
+        .map(|raw| crate::sanitize::sanitize_diagnostic_message(raw))
         .filter(|name| !name.is_empty())
     else {
         return entry(fallback, "error", MSG_ABNORMAL, None);

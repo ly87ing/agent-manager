@@ -107,77 +107,10 @@ fn acquire_apply_lock(ctx: &Context, domain: &str) -> Result<ApplyLock> {
     Ok(ApplyLock { _file: file })
 }
 
-fn record_diagnostic_log_if_needed(
-    ctx: &Context,
-    request: &Request,
-    envelope: &mut Envelope,
-    start_time: std::time::Instant,
-) {
-    if !crate::native_logs::should_log_request(request) {
-        return;
-    }
-    let duration_ms = start_time.elapsed().as_millis() as u64;
-    let entry = crate::native_logs::DiagnosticLogEntry {
-        timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-        run_id: if envelope.run_id.is_empty() {
-            None
-        } else {
-            Some(envelope.run_id.clone())
-        },
-        command: request.command.replace('.', ":"),
-        ok: envelope.ok,
-        duration_ms,
-        error_code: if !envelope.ok {
-            envelope.errors.first().map(|d| d.code.clone())
-        } else {
-            None
-        },
-        error_message: if !envelope.ok {
-            envelope
-                .errors
-                .first()
-                .map(|d| crate::native_logs::sanitize_diagnostic_message(&d.message))
-        } else {
-            None
-        },
-        diagnostics: envelope
-            .errors
-            .iter()
-            .chain(envelope.warnings.iter())
-            .map(|d| crate::native_logs::SafeDiagnosticItem {
-                code: d.code.clone(),
-                message: crate::native_logs::sanitize_diagnostic_message(&d.message),
-            })
-            .collect(),
-    };
-    let (write_res, prune_warnings) =
-        crate::native_logs::write_and_prune_diagnostic_log(ctx, &entry);
-    match write_res {
-        Ok(path) => {
-            envelope.log_file = Some(path.to_string_lossy().to_string());
-        }
-        Err(err) => {
-            envelope.warnings.push(diagnostic(
-                "LOG_WRITE_WARNING",
-                None,
-                format!(
-                    "诊断日志记录失败：{}",
-                    crate::native_logs::sanitize_diagnostic_message(&err.to_string())
-                ),
-            ));
-        }
-    }
-    for w in prune_warnings {
-        envelope
-            .warnings
-            .push(diagnostic("LOG_PRUNE_WARNING", None, w));
-    }
-}
 
 /// The single native entry point. Pure with respect to process state: no exit
 /// codes here (CLI maps errors to exit codes); status never writes the DB.
 pub fn execute(ctx: &Context, request: &Request) -> Envelope {
-    let start_time = std::time::Instant::now();
     // 每次执行重新读取本机保存的凭据取值。必须在这里、而不是在 dispatch 里：
     // apply 的 preflight 在取锁前就跑了，比 dispatch 更早要用到取值。
     // 桌面端一个进程会连续执行很多次命令，用户刚填的值要当场生效。
@@ -190,22 +123,20 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
             items
                 .into_iter()
                 .map(|mut d| {
-                    d.message = crate::native_logs::sanitize_diagnostic_message(&d.message);
+                    d.message = crate::sanitize::sanitize_diagnostic_message(&d.message);
                     d
                 })
                 .collect()
         };
-        let mut envelope = Envelope::new(
+        let envelope = Envelope::new(
             request.command.replacen(':', ".", 1),
             mode_of(request),
             lock_from_env(),
             request.run_id.clone(),
-            None,
             outcome.data,
             sanitize(outcome.warnings),
             sanitize(outcome.errors),
         );
-        record_diagnostic_log_if_needed(ctx, request, &mut envelope, start_time);
         return envelope;
     }
     let is_agent_apply = request.command.replace('.', ":") == "agents:apply";
@@ -219,7 +150,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
         match crate::native_agents::preflight_apply(ctx, request) {
             Ok(()) => (true, "Agent", "AGENT_ERROR"),
             Err(err) => {
-                let mut env = Envelope::new(
+                let env = Envelope::new(
                     request.command.replacen(':', ".", 1),
                     mode_of(request),
                     Lock {
@@ -227,16 +158,14 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
                         pid: None,
                     },
                     request.run_id.clone(),
-                    None,
                     Value::Object(Map::new()),
                     vec![],
                     vec![diagnostic(
                         "AGENT_ERROR",
                         None,
-                        crate::native_logs::sanitize_diagnostic_message(&format!("{err:#}")),
+                        crate::sanitize::sanitize_diagnostic_message(&format!("{err:#}")),
                     )],
                 );
-                record_diagnostic_log_if_needed(ctx, request, &mut env, start_time);
                 return env;
             }
         }
@@ -244,7 +173,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
         match crate::native_skills::preflight_apply(ctx, request) {
             Ok(()) => (true, "Skill", "SKILL_ERROR"),
             Err(err) => {
-                let mut env = Envelope::new(
+                let env = Envelope::new(
                     request.command.replacen(':', ".", 1),
                     mode_of(request),
                     Lock {
@@ -252,16 +181,14 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
                         pid: None,
                     },
                     request.run_id.clone(),
-                    None,
                     Value::Object(Map::new()),
                     vec![],
                     vec![diagnostic(
                         "SKILL_ERROR",
                         None,
-                        crate::native_logs::sanitize_diagnostic_message(&format!("{err:#}")),
+                        crate::sanitize::sanitize_diagnostic_message(&format!("{err:#}")),
                     )],
                 );
-                record_diagnostic_log_if_needed(ctx, request, &mut env, start_time);
                 return env;
             }
         }
@@ -269,7 +196,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
         match crate::native_mcp::preflight_apply(ctx, request) {
             Ok(()) => (true, "MCP", "MCP_ERROR"),
             Err(err) => {
-                let mut env = Envelope::new(
+                let env = Envelope::new(
                     request.command.replacen(':', ".", 1),
                     mode_of(request),
                     Lock {
@@ -277,16 +204,14 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
                         pid: None,
                     },
                     request.run_id.clone(),
-                    None,
                     Value::Object(Map::new()),
                     vec![],
                     vec![diagnostic(
                         "MCP_ERROR",
                         None,
-                        crate::native_logs::sanitize_diagnostic_message(&format!("{err:#}")),
+                        crate::sanitize::sanitize_diagnostic_message(&format!("{err:#}")),
                     )],
                 );
-                record_diagnostic_log_if_needed(ctx, request, &mut env, start_time);
                 return env;
             }
         }
@@ -294,7 +219,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
         match crate::native_rules::preflight_apply(ctx, request) {
             Ok(()) => (true, "Rules", "RULE_ERROR"),
             Err(err) => {
-                let mut env = Envelope::new(
+                let env = Envelope::new(
                     request.command.replacen(':', ".", 1),
                     mode_of(request),
                     Lock {
@@ -302,16 +227,14 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
                         pid: None,
                     },
                     request.run_id.clone(),
-                    None,
                     Value::Object(Map::new()),
                     vec![],
                     vec![diagnostic(
                         "RULE_ERROR",
                         None,
-                        crate::native_logs::sanitize_diagnostic_message(&format!("{err:#}")),
+                        crate::sanitize::sanitize_diagnostic_message(&format!("{err:#}")),
                     )],
                 );
-                record_diagnostic_log_if_needed(ctx, request, &mut env, start_time);
                 return env;
             }
         }
@@ -319,7 +242,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
         match crate::native_hooks::preflight_apply(ctx, request) {
             Ok(()) => (true, "Hooks", "HOOK_ERROR"),
             Err(err) => {
-                let mut env = Envelope::new(
+                let env = Envelope::new(
                     request.command.replacen(':', ".", 1),
                     mode_of(request),
                     Lock {
@@ -327,16 +250,14 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
                         pid: None,
                     },
                     request.run_id.clone(),
-                    None,
                     Value::Object(Map::new()),
                     vec![],
                     vec![diagnostic(
                         "HOOK_ERROR",
                         None,
-                        crate::native_logs::sanitize_diagnostic_message(&format!("{err:#}")),
+                        crate::sanitize::sanitize_diagnostic_message(&format!("{err:#}")),
                     )],
                 );
-                record_diagnostic_log_if_needed(ctx, request, &mut env, start_time);
                 return env;
             }
         }
@@ -344,7 +265,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
         match crate::native_aliases::preflight_apply(ctx, request) {
             Ok(()) => (true, "Aliases", "ALIAS_ERROR"),
             Err(err) => {
-                let mut env = Envelope::new(
+                let env = Envelope::new(
                     request.command.replacen(':', ".", 1),
                     mode_of(request),
                     Lock {
@@ -352,16 +273,14 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
                         pid: None,
                     },
                     request.run_id.clone(),
-                    None,
                     Value::Object(Map::new()),
                     vec![],
                     vec![diagnostic(
                         crate::native_aliases::error_code(&err),
                         None,
-                        crate::native_logs::sanitize_diagnostic_message(&format!("{err:#}")),
+                        crate::sanitize::sanitize_diagnostic_message(&format!("{err:#}")),
                     )],
                 );
-                record_diagnostic_log_if_needed(ctx, request, &mut env, start_time);
                 return env;
             }
         }
@@ -369,7 +288,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
         match crate::native_profiles::preflight_apply(ctx, request) {
             Ok(()) => (true, "Profiles", "PROFILE_ERROR"),
             Err(err) => {
-                let mut env = Envelope::new(
+                let env = Envelope::new(
                     request.command.replacen(':', ".", 1),
                     mode_of(request),
                     Lock {
@@ -377,16 +296,14 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
                         pid: None,
                     },
                     request.run_id.clone(),
-                    None,
                     Value::Object(Map::new()),
                     vec![],
                     vec![diagnostic(
                         "PROFILE_ERROR",
                         None,
-                        crate::native_logs::sanitize_diagnostic_message(&format!("{err:#}")),
+                        crate::sanitize::sanitize_diagnostic_message(&format!("{err:#}")),
                     )],
                 );
-                record_diagnostic_log_if_needed(ctx, request, &mut env, start_time);
                 return env;
             }
         }
@@ -397,7 +314,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
         match acquire_apply_lock(ctx, domain_label) {
             Ok(lock) => Some(lock),
             Err(err) => {
-                let mut env = Envelope::new(
+                let env = Envelope::new(
                     request.command.replacen(':', ".", 1),
                     mode_of(request),
                     Lock {
@@ -405,16 +322,14 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
                         pid: None,
                     },
                     request.run_id.clone(),
-                    None,
                     Value::Object(Map::new()),
                     vec![],
                     vec![diagnostic(
                         diag_code,
                         None,
-                        crate::native_logs::sanitize_diagnostic_message(&format!("{err:#}")),
+                        crate::sanitize::sanitize_diagnostic_message(&format!("{err:#}")),
                     )],
                 );
-                record_diagnostic_log_if_needed(ctx, request, &mut env, start_time);
                 return env;
             }
         }
@@ -429,12 +344,12 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     } else {
         lock_from_env()
     };
-    let mut envelope = match dispatch(ctx, request) {
+    let envelope = match dispatch(ctx, request) {
         Ok((data, warnings)) => {
             let sanitized_warnings = warnings
                 .into_iter()
                 .map(|mut w| {
-                    w.message = crate::native_logs::sanitize_diagnostic_message(&w.message);
+                    w.message = crate::sanitize::sanitize_diagnostic_message(&w.message);
                     w
                 })
                 .collect();
@@ -443,7 +358,6 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
                 mode_of(request),
                 lock,
                 request.run_id.clone(),
-                None,
                 data,
                 sanitized_warnings,
                 vec![],
@@ -454,17 +368,15 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
             mode_of(request),
             lock,
             request.run_id.clone(),
-            None,
             Value::Object(Map::new()),
             vec![],
             vec![diagnostic(
                 code,
                 None,
-                crate::native_logs::sanitize_diagnostic_message(&message),
+                crate::sanitize::sanitize_diagnostic_message(&message),
             )],
         ),
     };
-    record_diagnostic_log_if_needed(ctx, request, &mut envelope, start_time);
     envelope
 }
 
@@ -554,7 +466,6 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("runs", "list") => crate::native_runs::runs_list(ctx),
         ("runs", "get") => crate::native_runs::runs_get(ctx, request),
         ("runs", "clear") => crate::native_runs::runs_clear(ctx),
-        ("logs", "clear") => crate::native_logs::logs_clear(ctx),
         ("config", "export" | "import") => crate::native_config::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("CONFIG_ERROR", format!("{err:#}"))),

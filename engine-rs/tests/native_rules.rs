@@ -103,7 +103,7 @@ fn apply_dry_run_is_rejected_without_lock_db_or_target_writes() {
     assert!(!env.lock.held, "被拒绝的 apply 不得持锁");
     assert!(
         !store::db_path(&ctx).exists(),
-        "拒绝路径不得创建 DB（诊断日志不算 DB）"
+        "拒绝路径不得创建 DB"
     );
     assert!(
         !ctx.data_dir.join("agent-manager.apply.lock").exists(),
@@ -248,13 +248,6 @@ fn invalid_args_return_rule_error_without_leaking_marker() {
             !serialized.contains(marker),
             "错误 envelope 不得回显传入 token: {args:?}"
         );
-        if let Some(log_file) = &env.log_file {
-            let log_text = std::fs::read_to_string(log_file).unwrap();
-            assert!(
-                !log_text.contains(marker),
-                "诊断 JSONL 不得回显传入 token: {args:?}"
-            );
-        }
     }
     assert!(!ctx.home_dir.exists());
     let _ = std::fs::remove_dir_all(&base);
@@ -273,7 +266,7 @@ fn apply_with_selected_unmanaged_fails_closed_without_writes() {
     assert!(!env.lock.held);
     assert!(
         !store::db_path(&ctx).exists(),
-        "preflight 失败不得创建 DB（诊断日志不算 DB）"
+        "preflight 失败不得创建 DB"
     );
     assert!(!ctx.data_dir.join("agent-manager.apply.lock").exists());
     assert_eq!(

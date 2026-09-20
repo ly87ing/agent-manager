@@ -26,23 +26,6 @@ impl From<SettingsPreferences> for AppSettings {
     }
 }
 
-use std::sync::Mutex;
-
-static STARTUP_MAINTENANCE_WARNING: Mutex<Option<String>> = Mutex::new(None);
-
-pub fn set_startup_maintenance_warning(warning: Option<String>) {
-    if let Ok(mut lock) = STARTUP_MAINTENANCE_WARNING.lock() {
-        *lock = warning;
-    }
-}
-
-pub fn get_startup_maintenance_warning() -> Option<String> {
-    STARTUP_MAINTENANCE_WARNING
-        .lock()
-        .ok()
-        .and_then(|g| g.clone())
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsData {
@@ -51,9 +34,7 @@ pub struct SettingsData {
     pub contract_version: String,
     pub resource_dir: String,
     pub data_dir: String,
-    pub log_dir: String,
     pub updater_configured: bool,
-    pub maintenance_warning: Option<String>,
 }
 
 fn data_root(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
@@ -132,9 +113,7 @@ pub(crate) fn settings_data(app: &tauri::AppHandle) -> Result<SettingsData, Stri
         contract_version: crate::engine::CONTRACT_ID.into(),
         resource_dir: resource.display().to_string(),
         data_dir: data.display().to_string(),
-        log_dir: data.join("logs").display().to_string(),
         updater_configured: updater_configured(app),
-        maintenance_warning: get_startup_maintenance_warning(),
     })
 }
 pub(crate) fn save_preferences(

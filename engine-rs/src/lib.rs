@@ -18,7 +18,6 @@ pub(crate) mod native_aliases;
 pub(crate) mod native_config;
 pub(crate) mod native_discover;
 pub(crate) mod native_hooks;
-pub mod native_logs;
 pub mod native_mcp;
 pub(crate) mod native_profiles;
 pub(crate) mod native_rules;
@@ -28,6 +27,7 @@ pub mod native_skills;
 pub mod native_sources;
 pub(crate) mod native_system;
 pub(crate) mod native_upstream;
+pub mod sanitize;
 pub(crate) mod secret_values;
 pub mod store;
 

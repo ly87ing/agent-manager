@@ -38,7 +38,7 @@ fn request_with_run(command: &str, args: &[&str], run_id: &str) -> Request {
 }
 
 /// 公开 mcp:plan 退役后的零写预检探针：与 mcp:apply 共享同一份参数解析与
-/// preflight_check_state 纯读校验，不创建 lock/DB/目标文件/诊断日志。
+/// preflight_check_state 纯读校验，不创建 lock/DB/目标文件。
 fn preflight(ctx: &Context, args: &[&str]) -> anyhow::Result<()> {
     agent_manager_engine::native_mcp::preflight_apply(ctx, &request("mcp:apply", args))
 }

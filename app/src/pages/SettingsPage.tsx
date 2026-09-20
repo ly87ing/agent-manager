@@ -8,13 +8,12 @@ import {
   RefreshCw,
   Save,
   Sun,
-  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { ConfirmModal } from "../components/ConfirmModal";
-import { engineErrorMessage, runEngine } from "../lib/engine";
-import type { LogsClearData, SettingsData, SettingsPreferences } from "../lib/contract";
+import { engineErrorMessage } from "../lib/engine";
+import type { SettingsData, SettingsPreferences } from "../lib/contract";
 import { useSaveSettings, useSettings } from "../lib/settings";
 import { useTheme, type Theme } from "../lib/theme";
 import { cn } from "../lib/utils";
@@ -100,9 +99,6 @@ export default function SettingsPage({ initialAdvanced }: { initialAdvanced?: st
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [confirmUpdate, setConfirmUpdate] = useState(false);
-  const [showClearLogsConfirm, setShowClearLogsConfirm] = useState(false);
-  const [isClearingLogs, setIsClearingLogs] = useState(false);
-  const [clearLogsStatus, setClearLogsStatus] = useState<string | null>(null);
   const isMountedRef = useRef(true);
   const isInstallingRef = useRef(false);
 
@@ -147,34 +143,6 @@ export default function SettingsPage({ initialAdvanced }: { initialAdvanced?: st
     });
   };
 
-  const handleClearLogs = async () => {
-    setIsClearingLogs(true);
-    setClearLogsStatus(null);
-    try {
-      const res = await runEngine<LogsClearData>("logs:clear");
-      setShowClearLogsConfirm(false);
-      if (!res.ok) {
-        const err = res.errors?.[0];
-        const errorMsg = err?.message || "未知错误";
-        const codePrefix = err?.code ? `[${err.code}] ` : "";
-        const msg = `清理诊断日志失败：${codePrefix}${errorMsg}`;
-        setClearLogsStatus(msg);
-        toast.error(msg);
-        return;
-      }
-      const count = res.data?.deleted ?? 0;
-      const msg = `诊断日志已清理（共删除 ${count} 个日志文件）`;
-      setClearLogsStatus(msg);
-      toast.success(msg);
-    } catch (err) {
-      setShowClearLogsConfirm(false);
-      const msg = `清理诊断日志失败：${engineErrorMessage(err)}`;
-      setClearLogsStatus(msg);
-      toast.error(msg);
-    } finally {
-      setIsClearingLogs(false);
-    }
-  };
 
   const checkForUpdate = async () => {
     setUpdateError(null);
@@ -285,40 +253,10 @@ export default function SettingsPage({ initialAdvanced }: { initialAdvanced?: st
       <PageHeader title="设置" description="外观、配置备份与本机运行路径。" />
       <AppearanceSection />
       <ConfigBackupSection />
-      {data.maintenanceWarning && (
-        <div
-          role="alert"
-          data-testid="maintenance-warning-banner"
-          className="rounded-lg border border-warning/30 bg-warning/10 p-4 text-xs text-warning"
-        >
-          <p className="font-semibold">启动维护提示</p>
-          <p className="mt-1">{data.maintenanceWarning}</p>
-        </div>
-      )}
       <section className="rounded-lg border bg-card p-5 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold text-foreground">应用与运行路径</h2>
-          <button
-            type="button"
-            data-testid="clear-logs-button"
-            onClick={() => setShowClearLogsConfirm(true)}
-            disabled={isClearingLogs}
-            className="inline-flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50"
-          >
-            <Trash2 className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-            清理诊断日志
-          </button>
-        </div>
-        {clearLogsStatus && (
-          <p
-            role={clearLogsStatus.startsWith("清理诊断日志失败") ? "alert" : "status"}
-            className={cn("mt-2 text-xs", clearLogsStatus.startsWith("清理诊断日志失败") ? "text-destructive" : "text-success")}
-          >
-            {clearLogsStatus}
-          </p>
-        )}
+        <h2 className="text-sm font-semibold text-foreground">应用与运行路径</h2>
         <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
-          {[["应用版本", data.appVersion], ["资源目录", data.resourceDir], ["数据目录", data.dataDir], ["日志目录", data.logDir]].map(([label, value]) => (
+          {[["应用版本", data.appVersion], ["资源目录", data.resourceDir], ["数据目录", data.dataDir]].map(([label, value]) => (
             <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 break-all font-mono text-xs text-foreground">{value}</dd></div>
           ))}
         </dl>
@@ -335,7 +273,7 @@ export default function SettingsPage({ initialAdvanced }: { initialAdvanced?: st
               onChange={(e) => setPreferences({ ...preferences, logRetentionDays: e.target.value === "" ? NaN : Number(e.target.value) })}
               className="w-32 rounded border px-2 py-1"
             />
-            <span className="text-xs text-muted-foreground">（同时控制任务记录与诊断日志，0 为不自动清理，最大 3650 天）</span>
+            <span className="text-xs text-muted-foreground">（操作记录保留多久，0 为不自动清理，最大 3650 天）</span>
           </label>
           <button type="button" onClick={savePreferences} disabled={!changed || save.isPending || !isFormValid} className={cn("inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-primary-foreground", !changed || save.isPending || !isFormValid ? "bg-muted text-muted-foreground" : "bg-primary hover:bg-primary/90")}><Save className="h-4 w-4" aria-hidden />保存设置</button>
           {saveStatus && <p role={saveStatus.startsWith("设置保存失败") ? "alert" : "status"} className={saveStatus.startsWith("设置保存失败") ? "text-sm text-destructive" : "text-sm text-success"}>{saveStatus}</p>}
@@ -389,18 +327,6 @@ export default function SettingsPage({ initialAdvanced }: { initialAdvanced?: st
         </div>
       </section>
       {confirmUpdate && update && <ConfirmModal title="安装应用更新" description={`将下载并安装版本 ${update.version}，完成后请重启应用。`} risk="network" confirmLabel="确认下载并安装" executing={updateState === "installing"} onConfirm={() => void installUpdate()} onClose={() => setConfirmUpdate(false)} />}
-      {showClearLogsConfirm && (
-        <ConfirmModal
-          title="清理诊断日志"
-          description="将删除本地所有 agent-manager-*.jsonl 结构化诊断日志文件。任务运行历史（SQLite 记录）与个性化配置不会受到影响。"
-          risk="write-local"
-          riskLabel="清理诊断日志"
-          confirmLabel="确认清理"
-          executing={isClearingLogs}
-          onConfirm={() => void handleClearLogs()}
-          onClose={() => setShowClearLogsConfirm(false)}
-        />
-      )}
     </div>
   );
 }

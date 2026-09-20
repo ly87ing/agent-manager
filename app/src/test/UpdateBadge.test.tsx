@@ -16,9 +16,7 @@ const baseSettings: SettingsData = {
   contractVersion: "agent-manager/engine/v1",
   resourceDir: "/resources",
   dataDir: "/data",
-  logDir: "/logs",
   updaterConfigured: false,
-  maintenanceWarning: null,
 };
 
 function useUpdaterConfigured(configured: boolean) {

@@ -51,7 +51,7 @@ export function SecretValueDialog({
         />
 
         <p className="mt-3 rounded-md border bg-muted px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-          取值保存在本机数据库里，界面不回显，也不进操作记录、诊断日志与配置备份。
+          取值保存在本机数据库里，界面不回显，也不进操作记录与配置备份。
           它会在同步时写进对应助手的配置文件——那份文件里是明文，与你手工填进去的一样。
         </p>
 

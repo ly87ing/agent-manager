@@ -151,7 +151,7 @@ fn malformed_persisted_definitions_fail_closed_redacted() {
         !serialized.contains(&base.display().to_string()),
         "路径不得回显"
     );
-    // 失败路径零写：DB 字节不变、无诊断日志
+    // 失败路径零写：DB 字节不变
     let db_after = std::fs::read(store::db_path(&ctx)).unwrap();
     assert_eq!(db_before, db_after, "失败状态不得改变数据库字节");
     assert!(!ctx.data_dir.join("logs").exists(), "失败状态不得写日志");

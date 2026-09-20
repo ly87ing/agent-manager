@@ -6,7 +6,7 @@ import { ErrorPanel } from "./ErrorPanel";
 import { RiskBadge } from "./RiskBadge";
 
 /**
- * 破坏性/独立确认动作的确认弹窗（例如清理诊断日志、移除定义）。
+ * 破坏性/独立确认动作的确认弹窗（例如卸载助手、移除定义、清空操作记录）。
  * 风险级驱动：install-remove 级须输入 requireText 二次确认；其余单次确认。
  */
 export function ConfirmModal({

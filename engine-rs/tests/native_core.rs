@@ -174,7 +174,7 @@ fn dry_run_set_is_rejected_and_initializes_no_store() {
     );
     assert!(!env.ok, "--dry-run 已退役，必须拒绝: {:?}", env.data);
     assert_eq!(env.errors[0].code, "USAGE_ERROR");
-    // 零目标写：不得建库（失败写动作的诊断日志按统一策略写 data_dir，不属于目标状态）
+    // 零目标写：不得建库
     assert!(!store::db_path(&ctx).exists());
     let _ = std::fs::remove_dir_all(&base);
 }
@@ -674,7 +674,7 @@ fn agent_apply_dry_run_is_rejected_without_lock_db_or_target() {
     assert!(!env.ok, "--dry-run 已退役，必须拒绝: {:?}", env.data);
     assert_eq!(env.errors[0].code, "AGENT_ERROR");
     assert!(!env.lock.held, "--dry-run 拒绝不得持有全局锁");
-    // 零目标写：不得建库、不得创建锁文件（诊断日志可按统一策略写 data_dir）
+    // 零目标写：不得建库、不得创建锁文件
     assert!(!store::db_path(&ctx).exists());
     assert!(!ctx.data_dir.join("agent-manager.apply.lock").exists());
     let _ = std::fs::remove_dir_all(&base);

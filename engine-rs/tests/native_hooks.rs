@@ -709,11 +709,6 @@ fn corrupt_hook_source_rows_fail_closed_without_leaking_markers() {
                 !serialized.contains(source_marker),
                 "{command} envelope 不得含来源 marker"
             );
-            if let Some(log_file) = &env.log_file {
-                assert!(!std::fs::read_to_string(log_file)
-                    .unwrap()
-                    .contains(source_marker));
-            }
         }
     };
 
@@ -829,11 +824,6 @@ fn corrupt_binding_rows_fail_closed_without_leaking_markers() {
             !serialized.contains(binding_marker),
             "{command} envelope 不得含绑定行 marker"
         );
-        if let Some(log_file) = &env.log_file {
-            assert!(!std::fs::read_to_string(log_file)
-                .unwrap()
-                .contains(binding_marker));
-        }
     }
     assert!(!ctx.home_dir.exists());
     let _ = std::fs::remove_dir_all(&base);
@@ -985,9 +975,6 @@ fn invalid_args_return_hook_error_without_echoing_values() {
         assert!(!env.ok, "{args:?} 应失败");
         assert_eq!(env.errors[0].code, "HOOK_ERROR");
         assert!(!serde_json::to_string(&env).unwrap().contains(marker));
-        if let Some(log_file) = &env.log_file {
-            assert!(!std::fs::read_to_string(log_file).unwrap().contains(marker));
-        }
     }
     assert!(!ctx.data_dir.join("agent-manager.apply.lock").exists());
     assert!(!ctx.home_dir.exists());

@@ -30,7 +30,6 @@ export interface Envelope<T = unknown> {
   command: string;
   mode: Mode;
   lock: LockInfo;
-  log_file: string | null;
   ok: boolean;
   data: T;
   warnings: Diagnostic[];
@@ -47,9 +46,7 @@ export interface SettingsData {
   contractVersion: string;
   resourceDir: string;
   dataDir: string;
-  logDir: string;
   updaterConfigured: boolean;
-  maintenanceWarning?: string | null;
 }
 
 // ---------- element（双轴模型：收敛轴 state + 上游轴 freshness） ----------
@@ -334,10 +331,6 @@ export interface RunsClearData {
   deleted: number;
 }
 
-export interface LogsClearData {
-  domain: "logs";
-  deleted: number;
-}
 
 // ---------- policy:get / policy:set ----------
 

@@ -1,7 +1,7 @@
 {
   "description": "Engine Contract v1 envelope. Every engine command writes exactly one payload of this shape to stdout; human-readable text only goes to stderr. The data member is refined per command by the domain schemas. Exit code semantics: 0 = ok (warnings allowed), 1 = errors non-empty, 2 = contract/usage error.",
   "type": "object",
-  "required": ["contract", "run_id", "command", "mode", "lock", "log_file", "ok", "data", "warnings", "errors"],
+  "required": ["contract", "run_id", "command", "mode", "lock", "ok", "data", "warnings", "errors"],
   "additionalProperties": false,
   "properties": {
     "contract": {
@@ -44,10 +44,6 @@
           "type": ["integer", "null"]
         }
       }
-    },
-    "log_file": {
-      "description": "Path of the per-run log file, or null when the run wrote no log.",
-      "type": ["string", "null"]
     },
     "ok": {
       "description": "true iff 'errors' is empty; warnings do not flip ok.",

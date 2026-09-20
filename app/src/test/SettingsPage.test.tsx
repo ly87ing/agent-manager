@@ -6,7 +6,6 @@ import { check } from "@tauri-apps/plugin-updater";
 import SettingsPage from "../pages/SettingsPage";
 import App from "../App";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
-import { within } from "@testing-library/react";
 import type { SettingsData } from "../lib/contract";
 
 vi.mock("@tauri-apps/plugin-updater", () => ({ check: vi.fn() }));
@@ -18,9 +17,7 @@ const settings: SettingsData = {
   contractVersion: "agent-manager/engine/v1",
   resourceDir: "/resources",
   dataDir: "/data",
-  logDir: "/logs",
   updaterConfigured: false,
-  maintenanceWarning: null,
 };
 
 describe("SettingsPage", () => {
@@ -446,7 +443,7 @@ describe("SettingsPage", () => {
     renderWithEngine(<SettingsPage />, {});
     const input = await screen.findByLabelText("日志保留天数");
     expect(input).toHaveValue(30);
-    expect(screen.getByText("（同时控制任务记录与诊断日志，0 为不自动清理，最大 3650 天）")).toBeInTheDocument();
+    expect(screen.getByText("（操作记录保留多久，0 为不自动清理，最大 3650 天）")).toBeInTheDocument();
 
     const saveBtn = screen.getByRole("button", { name: "保存设置" });
 
@@ -469,104 +466,19 @@ describe("SettingsPage", () => {
     expect(savedPreferences.logRetentionDays).toBe(0);
   });
 
-  it("清理诊断日志：二次确认弹窗、执行 logs:clear、并给出成功反馈", async () => {
-    const r: Record<string, any> = {};
-    r["logs:clear"] = makeEnvelope({ domain: "logs", deleted: 5 }, { command: "logs.clear" });
-    const { calls } = renderWithEngine(<SettingsPage />, r);
-
-    const clearBtn = await screen.findByTestId("clear-logs-button");
-    await userEvent.click(clearBtn);
-
-    const dialog = await screen.findByRole("dialog", { name: "清理诊断日志" });
-    expect(dialog).toBeInTheDocument();
-    expect(within(dialog).getByRole("heading", { name: "清理诊断日志" })).toBeInTheDocument();
-    expect(within(dialog).getAllByText("清理诊断日志")).toHaveLength(2);
-    expect(within(dialog).getByText(/将删除本地所有 agent-manager-\*\.jsonl 结构化诊断日志文件/)).toBeInTheDocument();
-
-    // 取消：零调用
-    await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
-    expect(screen.queryByRole("dialog", { name: "清理诊断日志" })).toBeNull();
-    expect(calls.some((c) => c.command === "logs:clear")).toBe(false);
-
-    // 重新打开并确认
-    await userEvent.click(clearBtn);
-    const reopenDialog = await screen.findByRole("dialog", { name: "清理诊断日志" });
-    await userEvent.click(within(reopenDialog).getByRole("button", { name: "确认清理" }));
-
-    expect(calls.some((c) => c.command === "logs:clear")).toBe(true);
-    expect((await screen.findAllByText("诊断日志已清理（共删除 5 个日志文件）")).length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("清理诊断日志失败时展示具体错误反馈", async () => {
-    const r: Record<string, any> = {};
-    r["logs:clear"] = () => Promise.reject(new Error("IO error: Permission denied"));
-    renderWithEngine(<SettingsPage />, r);
-
-    const clearBtn = await screen.findByTestId("clear-logs-button");
-    await userEvent.click(clearBtn);
-
-    const dialog = await screen.findByRole("dialog", { name: "清理诊断日志" });
-    await userEvent.click(within(dialog).getByRole("button", { name: "确认清理" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("清理诊断日志失败：IO error: Permission denied");
-  });
-
-  it("清理诊断日志返回 ok:false 错误信封时正确展示错误信息并不展示成功文案", async () => {
-    const r: Record<string, any> = {};
-    r["logs:clear"] = () =>
-      Promise.resolve(
-        makeEnvelope(
-          {},
-          {
-            ok: false,
-            errors: [{ code: "LOGS_CLEAR_ERROR", element: null, message: "删除日志文件失败：只读文件系统" }],
-          },
-        ),
-      );
-    renderWithEngine(<SettingsPage />, r);
-
-    const clearBtn = await screen.findByTestId("clear-logs-button");
-    await userEvent.click(clearBtn);
-
-    const dialog = await screen.findByRole("dialog", { name: "清理诊断日志" });
-    await userEvent.click(within(dialog).getByRole("button", { name: "确认清理" }));
-
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("[LOGS_CLEAR_ERROR]");
-    expect(alert).toHaveTextContent("删除日志文件失败：只读文件系统");
-    expect(alert).toHaveTextContent("清理诊断日志失败：[LOGS_CLEAR_ERROR] 删除日志文件失败：只读文件系统");
-    expect(screen.queryByText(/诊断日志已清理/)).toBeNull();
-  });
-
-  it("存在启动维护告警时在页面顶端显示提示横幅", async () => {
-    setSettingsClient({
-      get: async () => ({
-        ...settings,
-        maintenanceWarning: "清理过期诊断日志失败：权限不足",
-      }),
-      save: async (preferences) => ({ ...settings, preferences }),
-    });
-    renderWithEngine(<SettingsPage />, {});
-
-    const banner = await screen.findByTestId("maintenance-warning-banner");
-    expect(banner).toBeInTheDocument();
-    expect(within(banner).getByText("启动维护提示")).toBeInTheDocument();
-    expect(within(banner).getByText("清理过期诊断日志失败：权限不足")).toBeInTheDocument();
-  });
-
-  it("settingsSchema 严格校验：支持 maintenanceWarning（null、字符串、缺省）且拒绝多余字段", () => {
+  it("settingsSchema 严格校验：拒绝多余字段与已退役的偏好", () => {
     const baseValid = {
       preferences: { logRetentionDays: 30 },
       appVersion: "1.0.0",
       contractVersion: "agent-manager/engine/v1",
       resourceDir: "/res",
       dataDir: "/data",
-      logDir: "/logs",
       updaterConfigured: false,
     };
-    expect(() => settingsSchema.parse({ ...baseValid, maintenanceWarning: null })).not.toThrow();
-    expect(() => settingsSchema.parse({ ...baseValid, maintenanceWarning: "启动清理失败" })).not.toThrow();
     expect(() => settingsSchema.parse(baseValid)).not.toThrow();
     expect(() => settingsSchema.parse({ ...baseValid, extraField: true })).toThrow();
+    // 诊断日志与启动维护已退役：日志目录与维护告警不再是契约字段
+    expect(() => settingsSchema.parse({ ...baseValid, logDir: "/logs" })).toThrow();
+    expect(() => settingsSchema.parse({ ...baseValid, maintenanceWarning: "启动清理失败" })).toThrow();
   });
 });

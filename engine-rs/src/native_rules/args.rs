@@ -1,6 +1,6 @@
 //! Rules 命令的严格参数解析：不复用 Request::flag/value 的宽松语义。
 //! 所有错误固定描述参数种类，不回显未知 token/值，避免正文或凭据进入
-//! envelope/诊断日志。--dry-run 已退役，一律作为不支持的选项拒绝。
+//! envelope。--dry-run 已退役，一律作为不支持的选项拒绝。
 
 use anyhow::{bail, Result};
 

@@ -144,7 +144,7 @@ fn fresh_status_is_zero_write_not_materialized_and_dry_run_rejected() {
 
     assert!(
         !store::db_path(&ctx).exists(),
-        "status/拒绝路径不得创建 DB（诊断日志不算 DB）"
+        "status/拒绝路径不得创建 DB"
     );
     assert!(
         !ctx.data_dir.join("agent-manager.apply.lock").exists(),
@@ -448,7 +448,7 @@ fn sources_set_rejects_injection_and_secret_values() {
     assert!(env.errors[0].message.contains("疑似凭据"));
     assert!(
         !store::db_path(&ctx).exists(),
-        "所有拒绝路径不得创建 DB（含预检后的校验失败；诊断日志不算 DB）"
+        "所有拒绝路径不得创建 DB（含预检后的校验失败）"
     );
 
     // 合法保存：先真实 set 建库；--dry-run 已退役，携带即拒绝且对库零写
@@ -575,9 +575,6 @@ fn invalid_args_return_usage_error_without_echoing_values() {
             "{command} {args:?} 必须映射 USAGE_ERROR"
         );
         assert!(!serde_json::to_string(&env).unwrap().contains(marker));
-        if let Some(log_file) = &env.log_file {
-            assert!(!std::fs::read_to_string(log_file).unwrap().contains(marker));
-        }
     }
     assert!(!ctx.data_dir.join("agent-manager.apply.lock").exists());
     assert!(!ctx.home_dir.exists());
@@ -704,11 +701,6 @@ fn corrupt_alias_source_rows_fail_closed_without_leaking_markers() {
                 !serialized.contains(source_marker),
                 "{command} envelope 不得含来源 marker"
             );
-            if let Some(log_file) = &env.log_file {
-                assert!(!std::fs::read_to_string(log_file)
-                    .unwrap()
-                    .contains(source_marker));
-            }
         }
     };
 

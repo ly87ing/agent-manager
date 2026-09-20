@@ -10,9 +10,7 @@ const dummySettings: SettingsData = {
   contractVersion: "v1",
   resourceDir: "/tmp/resources",
   dataDir: "/tmp/data",
-  logDir: "/tmp/logs",
   updaterConfigured: false,
-  maintenanceWarning: null,
   preferences: { logRetentionDays: 30 },
 };
 

@@ -48,7 +48,6 @@ export function makeEnvelope<T>(data: T, overrides: Partial<Envelope<T>> = {}): 
     command: "test.command",
     mode: makeMode(),
     lock: { held: false, pid: null },
-    log_file: null,
     ok: true,
     data,
     warnings: [],

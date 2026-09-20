@@ -50,7 +50,6 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
     assert!(env.ok, "{:?}", env.errors);
     assert!(env.errors.is_empty());
     assert!(!env.lock.held);
-    assert_eq!(env.log_file, None);
     assert!(!env.mode.offline);
     assert_eq!(env.data["status"], "warning");
     assert_eq!(env.data["version"], Value::Null);

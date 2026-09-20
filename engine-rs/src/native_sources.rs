@@ -584,7 +584,7 @@ struct SourcesArgs {
 
 /// 严格参数解析：只接受 --key/--value，拒绝位置参数、未知或重复 flag、缺值
 /// 与以 `--` 开头的值（已退役的 --dry-run 按未知选项一律拒绝）。解析错误一律
-/// 使用不含参数内容的固定消息，避免误传的规则正文经错误包络与诊断日志泄漏。
+/// 使用不含参数内容的固定消息，避免误传的规则正文经错误包络泄漏。
 fn parse_args(req: &Request) -> Result<SourcesArgs, DispatchError> {
     let mut seen: HashSet<&str> = HashSet::new();
     let mut key: Option<String> = None;

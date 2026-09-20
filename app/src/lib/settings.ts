@@ -17,9 +17,7 @@ export const settingsSchema = z
     contractVersion: z.string(),
     resourceDir: z.string(),
     dataDir: z.string(),
-    logDir: z.string(),
     updaterConfigured: z.boolean(),
-    maintenanceWarning: z.string().nullable().optional(),
   })
   .strict();
 
@@ -34,7 +32,7 @@ export function getSettingsClient(): SettingsClient { return activeSettingsClien
 
 let devMockValue: SettingsData | null = null;
 function devMockClient(): SettingsClient {
-  if (!devMockValue) devMockValue = { preferences: { logRetentionDays: 30 }, appVersion: "0.1.0-demo", contractVersion: "agent-manager/engine/v1", resourceDir: "/Applications/Agent Manager.app/Contents/Resources", dataDir: "/Users/demo/Library/Application Support/Agent Manager", logDir: "/Users/demo/Library/Logs/Agent Manager", updaterConfigured: false, maintenanceWarning: null };
+  if (!devMockValue) devMockValue = { preferences: { logRetentionDays: 30 }, appVersion: "0.1.0-demo", contractVersion: "agent-manager/engine/v1", resourceDir: "/Applications/Agent Manager.app/Contents/Resources", dataDir: "/Users/demo/Library/Application Support/Agent Manager", updaterConfigured: false };
   return { get: async () => devMockValue!, save: async (preferences) => (devMockValue = { ...devMockValue!, preferences }) };
 }
 function devMockEnabled(): boolean {

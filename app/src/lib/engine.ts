@@ -22,7 +22,6 @@ const envelopeSchema = z
     command: z.string(),
     mode: z.object({ offline: z.boolean() }).strict(),
     lock: z.object({ held: z.boolean(), pid: z.number().nullable() }).strict(),
-    log_file: z.string().nullable(),
     ok: z.boolean(),
     data: z.record(z.string(), z.unknown()),
     warnings: z.array(diagnosticSchema),

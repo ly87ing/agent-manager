@@ -76,7 +76,6 @@ fn main() {
         })
         .setup(|app| {
             tray::setup(app)?;
-            engine::maintenance_cleanup(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -450,7 +450,7 @@ fn existing_db_without_table_reads_defaults_with_zero_write() {
 }
 
 #[test]
-fn positional_body_marker_never_leaks_into_envelope_or_diagnostic_log() {
+fn positional_body_marker_never_leaks_into_envelope() {
     let (base, ctx) = temp_ctx("no-body-leak");
     let marker = format!("LEAKMARKER-{}-唯一占位正文标记", std::process::id());
     let current = execute(&ctx, &request("sources:get", &["--key", "rules.shared"]));
@@ -501,21 +501,8 @@ fn positional_body_marker_never_leaks_into_envelope_or_diagnostic_log() {
         );
     }
 
-    // 真实 set 失败会写诊断日志：日志文件必须存在且不含正文标记
-    let logs_dir = ctx.data_dir.join("logs");
-    let entries: Vec<_> = std::fs::read_dir(&logs_dir)
-        .unwrap_or_else(|_| panic!("真实 set 错误应记录诊断日志: {}", logs_dir.display()))
-        .collect::<Result<_, _>>()
-        .unwrap();
-    assert!(!entries.is_empty(), "应至少有一条诊断日志文件");
-    for entry in entries {
-        let content = std::fs::read_to_string(entry.path()).unwrap();
-        assert!(
-            !content.contains(&marker),
-            "诊断日志不得包含正文标记: {}",
-            entry.path().display()
-        );
-    }
+    // 诊断日志已退役：错误路径不得在数据目录留下日志文件
+    assert!(!ctx.data_dir.join("logs").exists(), "不应再写诊断日志目录");
 
     // SQLite / 助手目标文件 / operation_logs 零写
     assert!(!store::db_path(&ctx).exists());
@@ -817,10 +804,6 @@ fn hooks_set_rejects_invalid_schema_nul_secret_and_never_echoes_marker() {
     assert!(!env.ok);
     let serialized = serde_json::to_string(&env).unwrap();
     assert!(!serialized.contains(marker), "envelope 不得回显 marker");
-    if let Some(log_file) = &env.log_file {
-        let log_text = std::fs::read_to_string(log_file).unwrap();
-        assert!(!log_text.contains(marker), "诊断日志不得回显 marker");
-    }
 
     assert!(!store::db_path(&ctx).exists(), "全部失败路径零写");
     let _ = std::fs::remove_dir_all(base);
