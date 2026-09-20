@@ -1,15 +1,43 @@
-import { Check, X } from "lucide-react";
+import { Check, CircleAlert, X } from "lucide-react";
 import type { EngineElement } from "../lib/contract";
 import { agentCellsOf, type McpObserved, type McpSpec } from "../lib/observed";
 import { FreshnessBadge } from "./FreshnessBadge";
 import { StateBadge } from "./StateBadge";
 import { DriftExplanationPanel } from "./DriftExplanationPanel";
+import { McpCellActions, McpCellStatusBadge, type McpAgentCellView } from "./McpAssignmentRow";
 import { cn } from "../lib/utils";
 
 /** 服务级 observed 扩展：库级操作动作与受阻原因（observed.ts 冻结，本地扩展）。 */
 export interface McpServerObserved extends McpObserved {
   actions?: string[];
   blocked_reason?: string | null;
+}
+
+const RESOLUTION_STATES = new Set(["drifted", "leftover", "probe-error", "missing", "not-materialized"]);
+
+function resolutionActions(cell: McpAgentCellView): string[] {
+  const actions = cell.actions ?? [];
+  if (cell.state === "leftover") return actions.includes("remove") ? ["remove"] : [];
+  if (cell.state === "drifted") {
+    if (actions.includes("update")) return ["update"];
+    if (actions.includes("disable")) return ["disable"];
+    return [];
+  }
+  if (cell.state === "missing" || cell.state === "not-materialized") {
+    if (actions.includes("update")) return ["update"];
+    if (actions.includes("add")) return ["add"];
+  }
+  return [];
+}
+
+function resolutionReason(cell: McpAgentCellView, actions: string[]): string {
+  if (cell.blocked_reason) return cell.blocked_reason;
+  if (cell.state === "leftover") return "分配已取消，但旧配置还留在这个助手中。";
+  if (cell.state === "probe-error") return "配置读取失败，修复文件后再重新检查。";
+  if (cell.state === "not-materialized") return "这个助手的配置文件尚未生成。";
+  if (cell.state === "missing") return "服务库已有定义，但这个助手中还没有该服务。";
+  if (actions.includes("disable")) return "分配已停用，但助手中仍保留启用配置。";
+  return "这个助手中的配置与服务库定义不同。";
 }
 
 function displayPlaceholder(value: string | undefined): string {
@@ -170,12 +198,18 @@ export function McpServerCard({
   onSelect,
   onEdit,
   onAction,
+  onCellAction,
+  onTakeover,
+  onConfigureSecrets,
 }: {
   element: EngineElement;
   selected: boolean;
   onSelect: (id: string | null) => void;
   onEdit: (element: EngineElement) => void;
   onAction: (element: EngineElement, action: "enable" | "disable" | "remove" | "upgrade") => void;
+  onCellAction: (element: EngineElement, agent: string, action: string) => void;
+  onTakeover: (element: EngineElement, agent: string, action: string) => void;
+  onConfigureSecrets?: () => void;
 }) {
   const spec = element.spec as McpSpec;
   const observed = element.observed as McpServerObserved;
@@ -187,6 +221,16 @@ export function McpServerCard({
   const secretEntries = [...envEntries, ...headerEntries];
   const envResolved = secretEntries.filter(([, resolution]) => resolution.resolved).length;
   const configuredReferences = Object.entries(isRemote ? spec.headers ?? {} : spec.env ?? {});
+  const resolutionEntries = Object.entries(agentCellsOf(element))
+    .map(([agent, cell]) => ({ agent, cell: cell as McpAgentCellView }))
+    .filter(
+      ({ agent, cell }) =>
+        RESOLUTION_STATES.has(cell.state) &&
+        (spec.agents == null || spec.agents.includes(agent) || cell.assigned || cell.state === "leftover"),
+    );
+  const hasMissingSecrets = resolutionEntries.some(({ cell }) =>
+    (cell.blocked_reason ?? "").includes("凭证变量未配置"),
+  );
 
   return (
     <section
@@ -287,6 +331,57 @@ export function McpServerCard({
       {observed.blocked_reason && (
         <div className="mt-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
           受阻原因：{observed.blocked_reason}
+        </div>
+      )}
+
+      {resolutionEntries.length > 0 && (
+        <div
+          data-testid={`mcp-resolution-${element.id}`}
+          className="mt-3 rounded-md border border-warning/30 bg-warning/5 px-3 py-2.5"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+              <CircleAlert className="h-3.5 w-3.5 text-warning" aria-hidden />
+              {resolutionEntries.length} 个助手待处理
+            </div>
+            {hasMissingSecrets && onConfigureSecrets && (
+              <button
+                type="button"
+                data-testid={`configure-secrets-${element.id}`}
+                onClick={onConfigureSecrets}
+                className="rounded border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary hover:bg-primary/15"
+              >
+                配置缺失变量
+              </button>
+            )}
+          </div>
+          <ul className="mt-2 divide-y divide-border/70">
+            {resolutionEntries.map(({ agent, cell }) => {
+              const actions = resolutionActions(cell);
+              return (
+                <li
+                  key={agent}
+                  data-testid={`mcp-resolution-${element.id}-${agent}`}
+                  className="flex flex-wrap items-center gap-x-2 gap-y-1.5 py-2 first:pt-0 last:pb-0"
+                >
+                  <span className="min-w-24 font-mono text-xs font-medium text-foreground">{agent}</span>
+                  <McpCellStatusBadge agent={agent} cell={cell} />
+                  <span className="min-w-48 flex-1 text-xs text-muted-foreground">
+                    {resolutionReason(cell, actions)}
+                  </span>
+                  <McpCellActions
+                    element={element}
+                    agent={agent}
+                    cell={cell}
+                    visibleActions={actions}
+                    showEmptyReason={false}
+                    onAction={onCellAction}
+                    onTakeover={onTakeover}
+                  />
+                </li>
+              );
+            })}
+          </ul>
         </div>
       )}
 

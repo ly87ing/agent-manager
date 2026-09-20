@@ -14,7 +14,7 @@ import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import type { Diagnostic, EngineElement, McpImportCandidate, PolicyData, PolicyLayers, StatusData } from "../lib/contract";
 import { engineErrorMessage, runEngine } from "../lib/engine";
-import { candidateToDefinition, MCP_UNMANAGED_CONFLICT_MARKER } from "../lib/mcpImport";
+import { candidateToDefinition, isMcpTakeoverBlocked } from "../lib/mcpImport";
 import { agentCellsOf, type McpObserved, type McpSpec } from "../lib/observed";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { useDirectApply } from "../lib/useDirectApply";
@@ -29,7 +29,7 @@ function fullMcpDefinition(layers: PolicyLayers | null, name: string): Record<st
   return typeof definition === "object" && definition !== null ? (definition as Record<string, unknown>) : null;
 }
 
-export default function McpPage() {
+export default function McpPage({ onNavigate }: { onNavigate?: (page: string) => void }) {
   const query = useEngineQuery<StatusData>("mcp:status");
   const agentsQuery = useEngineQuery<StatusData>("agents:status");
   const policyQuery = useEngineQuery<PolicyData>("policy:get");
@@ -159,10 +159,10 @@ export default function McpPage() {
         (action === "add" || action === "update") &&
         envelope &&
         !envelope.ok &&
-        envelope.errors.some((diag) => diag.message.includes(MCP_UNMANAGED_CONFLICT_MARKER))
+        envelope.errors.some((diag) => isMcpTakeoverBlocked(diag.message))
       ) {
         toast.error(
-          "目标文件中已存在同名的外部条目，默认拒绝覆盖。确认其内容可弃后，可显式接管：以本工具的标准配置替换该条目（其余条目与字段保持不变）。",
+          "目标文件中的这个服务条目含有不能静默覆盖的内容。确认其内容可弃后，可显式接管：以服务库定义替换该条目（其他服务与顶层配置保持不变）。",
           { action: { label: "接管原条目并重试", onClick: () => handleTakeover(element, agent, action) } },
         );
       }
@@ -353,6 +353,9 @@ export default function McpPage() {
                   onSelect={setSelectedId}
                   onEdit={(el) => setFormState({ editing: el })}
                   onAction={handleServerAction}
+                  onCellAction={handleCellAction}
+                  onTakeover={handleTakeover}
+                  onConfigureSecrets={onNavigate ? () => onNavigate("settings:secrets") : undefined}
                 />
               ))}
             </div>

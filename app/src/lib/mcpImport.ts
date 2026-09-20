@@ -15,6 +15,13 @@ export const SERVER_NAME_RE = /^[A-Za-z0-9_-]+$/;
 /** 引擎「同名条目」fail-closed 错误/blocked_reason 的稳定片段（显式接管通道的触发标识；
  * 覆盖「已存在非××同名条目…拒绝覆盖/拒绝自动删除」与「存在外部非××同名条目」全部变体）。 */
 export const MCP_UNMANAGED_CONFLICT_MARKER = "同名条目";
+export const MCP_EXTERNAL_FIELDS_MARKER = "外部属性";
+
+/** 只有这两类阻塞能由引擎的显式 --allow-takeover 收敛；其余错误继续 fail-closed。 */
+export function isMcpTakeoverBlocked(reason: string | null | undefined): boolean {
+  const message = reason ?? "";
+  return message.includes(MCP_UNMANAGED_CONFLICT_MARKER) || message.includes(MCP_EXTERNAL_FIELDS_MARKER);
+}
 
 const PLACEHOLDER_RE = /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/;
 

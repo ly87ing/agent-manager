@@ -1,5 +1,5 @@
 import type { EngineElement } from "../lib/contract";
-import { MCP_UNMANAGED_CONFLICT_MARKER } from "../lib/mcpImport";
+import { isMcpTakeoverBlocked, MCP_EXTERNAL_FIELDS_MARKER } from "../lib/mcpImport";
 import type { McpAgentCell } from "../lib/observed";
 import { cn } from "../lib/utils";
 
@@ -74,6 +74,69 @@ const MCP_ACTIONS: { action: string; label: string; className: string }[] = [
   { action: "remove", label: "从此助手删除", className: "border-destructive/30 bg-card text-destructive hover:bg-destructive/10" },
 ];
 
+export function McpCellActions({
+  element,
+  agent,
+  cell,
+  visibleActions,
+  showEmptyReason = true,
+  onAction,
+  onTakeover,
+}: {
+  element: EngineElement;
+  agent: string;
+  cell: McpAgentCellView | null;
+  /** 卡片只展示能让异常状态收敛的主动作；逐助手详情仍展示引擎给出的全部动作。 */
+  visibleActions?: string[];
+  showEmptyReason?: boolean;
+  onAction: (element: EngineElement, agent: string, action: string) => void;
+  onTakeover?: (element: EngineElement, agent: string, action: string) => void;
+}) {
+  const actions = visibleActions ?? cell?.actions ?? [];
+  const takeoverBlocked =
+    cell !== null &&
+    (cell.actions?.length ?? 0) === 0 &&
+    isMcpTakeoverBlocked(cell.blocked_reason);
+  const replacesExtraFields = (cell?.blocked_reason ?? "").includes(MCP_EXTERNAL_FIELDS_MARKER);
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {MCP_ACTIONS.filter(({ action }) => actions.includes(action)).map(({ action, label, className }) => (
+        <button
+          key={action}
+          type="button"
+          data-testid={`action-${action}-${element.id}-${agent}`}
+          onClick={() => onAction(element, agent, action)}
+          className={cn("rounded border px-2 py-0.5 text-xs", className)}
+        >
+          {label}
+        </button>
+      ))}
+      {takeoverBlocked && onTakeover && (
+        <button
+          type="button"
+          data-testid={`takeover-${element.id}-${agent}`}
+          title={
+            replacesExtraFields
+              ? "用服务库定义整体替换这个服务条目；该条目的额外字段会被移除，其他服务与顶层配置保持不变"
+              : "以本工具的标准配置替换目标文件中的同名外部条目（其余条目与字段保持不变）"
+          }
+          onClick={() => onTakeover(element, agent, cell.assigned ? "update" : "add")}
+          className="rounded border border-warning/40 bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning hover:bg-warning/15"
+        >
+          {replacesExtraFields ? "用服务库定义覆盖" : "接管原条目"}
+        </button>
+      )}
+      {showEmptyReason && cell && actions.length === 0 && !takeoverBlocked && (
+        <span className="text-xs text-muted-foreground">
+          {cell.blocked_reason ?? "这里没有可做的：状态正常或该项已停用"}
+        </span>
+      )}
+      {showEmptyReason && !cell && <span className="text-xs text-muted-foreground">未配置</span>}
+    </div>
+  );
+}
+
 /**
  * 「助手中的服务」一行（服务 × 助手）。操作按钮严格按引擎报告的 cell.actions
  * 子集渲染（add/update/enable/disable/remove），更新与启用不混；cell 缺失时
@@ -92,13 +155,9 @@ export function McpAssignmentRow({
   cell: McpAgentCellView | null;
   onOpenDetail: (id: string) => void;
   onAction: (element: EngineElement, agent: string, action: string) => void;
-  /** 显式接管入口：仅在 cell 因「非受管同名条目」fail-closed 且无动作时渲染。 */
+  /** 显式接管入口：仅在同名外部条目或额外字段导致 fail-closed 且无动作时渲染。 */
   onTakeover?: (element: EngineElement, agent: string, action: string) => void;
 }) {
-  const actions = cell?.actions ?? [];
-  const takeoverBlocked =
-    cell !== null && actions.length === 0 && (cell.blocked_reason ?? "").includes(MCP_UNMANAGED_CONFLICT_MARKER);
-
   return (
     <tr className="border-b last:border-0 hover:bg-muted/50">
       <td className="py-2.5 pr-4">
@@ -112,14 +171,20 @@ export function McpAssignmentRow({
         </button>
       </td>
       <td className="py-2.5 pr-4 font-mono text-xs text-foreground">{agent}</td>
-      <td className="py-2.5 pr-4 font-mono text-xs whitespace-nowrap text-muted-foreground" title={cell?.available_version ?? undefined}>
-        {cell?.available_version ? shortDigest(cell.available_version) : "未获取"}
-      </td>
-      <td className="py-2.5 pr-4 font-mono text-xs whitespace-nowrap text-muted-foreground" title={cell?.version ?? undefined}>
-        {cell ? (cell.version ? shortDigest(cell.version) : cell.assigned ? "已配置" : "未配置") : "—"}
-      </td>
       <td className="py-2.5 pr-4">
-        <div className="flex flex-col gap-1">
+        <div
+          className="flex flex-col gap-1"
+          title={
+            cell
+              ? [
+                  cell.available_version ? `服务库 ${shortDigest(cell.available_version)}` : null,
+                  cell.version ? `当前 ${shortDigest(cell.version)}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || undefined
+              : undefined
+          }
+        >
           <McpCellStatusBadge agent={agent} cell={cell} />
           {cell?.blocked_reason && (
             <span className="text-xs text-warning" title={cell.blocked_reason}>
@@ -129,38 +194,13 @@ export function McpAssignmentRow({
         </div>
       </td>
       <td className="py-2.5">
-        <div className="flex flex-wrap items-center gap-1.5">
-          {MCP_ACTIONS.filter(({ action }) => actions.includes(action)).map(({ action, label, className }) => (
-            <button
-              key={action}
-              type="button"
-              data-testid={`action-${action}-${element.id}-${agent}`}
-              onClick={() => onAction(element, agent, action)}
-              className={cn("rounded border px-2 py-0.5 text-xs", className)}
-            >
-              {label}
-            </button>
-          ))}
-          {takeoverBlocked && onTakeover && (
-            <button
-              type="button"
-              data-testid={`takeover-${element.id}-${agent}`}
-              title="以本工具的标准配置替换目标文件中的同名外部条目（其余条目与字段保持不变）"
-              onClick={() => onTakeover(element, agent, cell.assigned ? "update" : "add")}
-              className="rounded border border-warning/40 bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning hover:bg-warning/15"
-            >
-              接管原条目
-            </button>
-          )}
-          {/* 没有可执行动作时说清「为什么不能操作」，而不是报告引擎的内部情况——
-              用户不关心引擎提供不提供，他要知道的是接下来该做什么。 */}
-          {cell && actions.length === 0 && !takeoverBlocked && (
-            <span className="text-xs text-muted-foreground">
-              {cell.blocked_reason ?? "这里没有可做的：状态正常或该项已停用"}
-            </span>
-          )}
-          {!cell && <span className="text-xs text-muted-foreground">未配置</span>}
-        </div>
+        <McpCellActions
+          element={element}
+          agent={agent}
+          cell={cell}
+          onAction={onAction}
+          onTakeover={onTakeover}
+        />
       </td>
     </tr>
   );

@@ -126,7 +126,7 @@ export default function App() {
             onResetAgent={() => setSelectedSkillAgent(null)}
           />
         )}
-        {activePage === "mcp" && <McpPage />}
+        {activePage === "mcp" && <McpPage onNavigate={handleNavigate} />}
         {activePage === "rules-hooks" && <RulesHooksPage />}
         {activePage === "takeover" && <TakeoverPage />}
         {activePage === "usage" && <UsagePage />}

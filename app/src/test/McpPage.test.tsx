@@ -50,7 +50,15 @@ function mcpRoutes(): Record<string, ReturnType<typeof makeEnvelope>> {
         observed: {
           agents: {
             "claude-code": { state: "leftover", target: "/tmp/demo/.claude.json", target_exists: true, assigned: false, enabled: false, actions: ["remove"] },
-            codex: { state: "not-materialized", target: "/tmp/demo/.codex/config.toml", target_exists: false, assigned: true, enabled: true, actions: [] },
+            codex: {
+              state: "not-materialized",
+              target: "/tmp/demo/.codex/config.toml",
+              target_exists: false,
+              assigned: true,
+              enabled: true,
+              actions: [],
+              blocked_reason: "凭证变量未配置: SERENA_KEY",
+            },
           },
           env: { SERENA_KEY: { placeholder: "SERENA_KEY", resolved: false } },
           actions: ["disable", "remove"],
@@ -83,6 +91,11 @@ describe("McpPage 服务库 + 助手中的服务", () => {
     expect(screen.getByText(/可更新 1\.2\.0 → 1\.8\.0/)).toBeInTheDocument();
     // 凭据只显示状态统计
     expect(screen.getByText("密钥变量 0/1 已配置")).toBeInTheDocument();
+    const chromeResolution = screen.getByTestId("mcp-resolution-mcp:chrome-devtools");
+    expect(chromeResolution).toHaveTextContent("1 个助手待处理");
+    expect(chromeResolution).toHaveTextContent("claude-code");
+    expect(chromeResolution).toHaveTextContent("这个助手中的配置与服务库定义不同");
+    expect(screen.getByTestId("action-update-mcp:chrome-devtools-claude-code")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "mcp:serena" }));
     const detail = await screen.findByTestId("mcp-detail-mcp:serena");
@@ -96,6 +109,30 @@ describe("McpPage 服务库 + 助手中的服务", () => {
     expect(detail).toHaveTextContent("/tmp/demo/.codex/config.toml");
     // 展开详情为纯状态展示：任何元素都不发起 plan
     expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
+  });
+
+  it("服务库直接闭环不一致：卡片上的更新按钮精确同步对应助手，不必切换标签页", async () => {
+    const { calls } = renderWithEngine(<McpPage />, mcpRoutes());
+
+    await userEvent.click(await screen.findByTestId("action-update-mcp:chrome-devtools-claude-code"));
+    await waitFor(() => expect(calls.some((call) => call.command === "mcp:apply")).toBe(true));
+
+    const apply = calls.find((call) => call.command === "mcp:apply")!;
+    expect(apply.args).toEqual(["--only", "mcp:chrome-devtools", "--agent", "claude-code", "--action", "update"]);
+    expect(apply.options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+  });
+
+  it("缺少变量时给出下一步：从待处理区直接进入密钥页", async () => {
+    const onNavigate = vi.fn();
+    renderWithEngine(<McpPage onNavigate={onNavigate} />, mcpRoutes());
+
+    const resolution = await screen.findByTestId("mcp-resolution-mcp:serena");
+    expect(resolution).toHaveTextContent("凭证变量未配置: SERENA_KEY");
+    await userEvent.click(screen.getByTestId("configure-secrets-mcp:serena"));
+
+    expect(onNavigate).toHaveBeenCalledWith("settings:secrets");
   });
 
   it("助手中的服务：单元格态 已配置/不一致/以前配过/尚未生成，版本短摘要 title 存完整值", async () => {
@@ -132,9 +169,8 @@ describe("McpPage 服务库 + 助手中的服务", () => {
     await expandAllMcpRows();
     expect(await screen.findByTestId("action-update-mcp:chrome-devtools-claude-code")).toBeInTheDocument();
     expect(screen.queryByTestId("action-enable-mcp:chrome-devtools-claude-code")).toBeNull();
-    // actions 为空的 cell 不推测动作
-    // 没有可执行动作时说清为什么，不报告引擎的内部情况
-    expect(screen.getAllByText(/没有可做的|停用/).length).toBeGreaterThan(0);
+    // actions 为空的 cell 不推测动作；直接显示引擎给出的可处理原因
+    expect(screen.getAllByText("凭证变量未配置: SERENA_KEY").length).toBeGreaterThan(0);
 
     await userEvent.click(screen.getByTestId("action-update-mcp:chrome-devtools-claude-code"));
     await waitFor(() => expect(calls.some((call) => call.command === "mcp:apply")).toBe(true));
@@ -412,6 +448,37 @@ describe("McpPage 显式接管通道（--allow-takeover）", () => {
     expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(toastSuccessSpy.mock.calls[toastSuccessSpy.mock.calls.length - 1][0]).toContain("接管原条目 mcp:take-svc @ claude-code");
+  });
+
+  it("受管条目含额外字段时提供明确覆盖动作，并以 update + --allow-takeover 收敛", async () => {
+    const routes = takeoverRoutes();
+    const status = routes["mcp:status"] as ReturnType<typeof makeEnvelope<StatusData>>;
+    const cell = status.data.elements[0].observed.agents as Record<string, Record<string, unknown>>;
+    cell["claude-code"] = {
+      state: "drifted",
+      target: "/tmp/demo/.claude.json",
+      target_exists: true,
+      assigned: true,
+      enabled: true,
+      actions: [],
+      blocked_reason: "目标文件中的条目包含未受管外部属性（外部未识别字段 'custom_field'），拒绝覆盖",
+    };
+    const { calls } = renderWithEngine(<McpPage />, routes);
+
+    const button = await screen.findByTestId("takeover-mcp:take-svc-claude-code");
+    expect(button).toHaveTextContent("用服务库定义覆盖");
+    await userEvent.click(button);
+
+    await waitFor(() => expect(calls.filter((call) => call.command === "mcp:apply")).toHaveLength(1));
+    expect(calls.filter((call) => call.command === "mcp:apply")[0].args).toEqual([
+      "--only",
+      "mcp:take-svc",
+      "--agent",
+      "claude-code",
+      "--action",
+      "update",
+      "--allow-takeover",
+    ]);
   });
 
   it("apply 因非冲突原因失败：失败 toast 可观测，不提供接管重试", async () => {
