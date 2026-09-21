@@ -8,7 +8,7 @@ export interface NavItem {
   icon: LucideIcon;
 }
 
-/** 应用外壳：侧边栏导航 + 内容区（含全局模式横幅）。 */
+/** 应用外壳：桌面侧边栏、窄屏顶部导航与内容区。 */
 export function AppLayout({
   nav,
   active,
@@ -27,25 +27,25 @@ export function AppLayout({
   children: ReactNode;
 }) {
   return (
-    <div className="flex h-screen bg-background text-foreground">
-      <aside className="flex w-56 shrink-0 flex-col border-r bg-card">
-        <div className="border-b px-5 py-4">
+    <div className="flex h-screen flex-col bg-background text-foreground sm:flex-row">
+      <aside className="flex w-full shrink-0 flex-col border-b bg-card sm:w-56 sm:border-b-0 sm:border-r">
+        <div className="border-b px-4 py-3 sm:px-5 sm:py-4">
           <h1 className="text-base font-semibold tracking-tight">Agent Manager</h1>
         </div>
-        <nav className="flex-1 space-y-0.5 overflow-y-auto p-2">
+        <nav className="flex gap-1 overflow-x-auto p-2 sm:block sm:flex-1 sm:space-y-0.5 sm:overflow-y-auto">
           {nav.map((item) => {
             const Icon = item.icon;
             // settings:secrets 这类二级页仍高亮它所属的一级项
             const isActive = item.key === active || active.startsWith(`${item.key}:`);
             const showUpdateBadge = item.key === "settings" && Boolean(updateVersion);
             return (
-              <div key={item.key} className="relative">
+              <div key={item.key} className="relative shrink-0">
                 <button
                   type="button"
                   onClick={() => onNavigate(item.key)}
                   aria-current={isActive ? "page" : undefined}
                   className={cn(
-                    "flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors",
+                    "flex items-center gap-2.5 whitespace-nowrap rounded-md px-3 py-2 text-left text-sm transition-colors sm:w-full",
                     isActive ? "bg-primary/10 font-medium text-primary" : "text-muted-foreground hover:bg-accent",
                     showUpdateBadge && "pr-8",
                   )}
@@ -76,7 +76,7 @@ export function AppLayout({
             );
           })}
         </nav>
-        <div className="border-t px-4 py-3 text-xs text-muted-foreground">
+        <div className="hidden border-t px-4 py-3 text-xs text-muted-foreground sm:block">
           <p className="font-medium text-foreground">快捷键</p>
           <ul className="mt-1.5 space-y-1">
             <li className="flex items-center gap-1.5">
@@ -91,8 +91,8 @@ export function AppLayout({
           </ul>
         </div>
       </aside>
-      <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-5xl space-y-6 p-6">
+      <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6">
           {children}
         </div>
       </main>
