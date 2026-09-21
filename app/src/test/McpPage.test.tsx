@@ -126,6 +126,81 @@ describe("McpPage 服务库 + 助手中的服务", () => {
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
   });
 
+  it("全部纳管并同步：不受搜索结果影响，汇总全部服务的安全项与接管项后只确认一次", async () => {
+    const { calls } = renderWithEngine(<McpPage />, mcpRoutes());
+
+    await userEvent.type(await screen.findByTestId("mcp-search"), "serena");
+    expect(screen.queryByTestId("mcp-card-mcp:chrome-devtools")).toBeNull();
+
+    await userEvent.click(screen.getByTestId("sync-all-mcp"));
+    const dialog = await screen.findByRole("dialog", { name: "全部纳管并同步" });
+    expect(dialog).toHaveTextContent("将执行 2 项助手配置同步，涉及 2 个服务");
+    expect(dialog).toHaveTextContent("1 项会用服务库定义接管同名条目");
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+    await waitFor(() => expect(calls.filter((call) => call.command === "mcp:apply")).toHaveLength(2));
+
+    const applyCalls = calls.filter((call) => call.command === "mcp:apply");
+    expect(applyCalls.map((call) => call.args)).toEqual([
+      ["--only", "mcp:chrome-devtools", "--action", "update", "--agent", "claude-code"],
+      ["--only", "mcp:serena", "--action", "add", "--agent", "claude-code", "--allow-takeover"],
+    ]);
+    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+  });
+
+  it("全部纳管并同步：把发现的未导入服务先保存定义、接取变量并写回受管标记", async () => {
+    const routes = mcpRoutes();
+    const status = routes["mcp:status"] as ReturnType<typeof makeEnvelope<StatusData>>;
+    status.data.import_candidates = [
+      {
+        name: "new-search",
+        agent: "codex",
+        transport: "stdio",
+        spec: { command: "npx", args: ["-y", "new-search-mcp"], env: { SEARCH_TOKEN: "<literal>" } },
+      },
+    ];
+    routes["secrets:adopt"] = makeEnvelope({ domain: "secrets", adopted: ["SEARCH_TOKEN"] }, { command: "secrets.adopt" });
+    routes["policy:set"] = makeEnvelope({ layers: null, effective: {} }, { command: "policy.set" });
+    const { calls } = renderWithEngine(<McpPage />, routes);
+
+    await userEvent.click(await screen.findByTestId("sync-all-mcp"));
+    const dialog = await screen.findByRole("dialog", { name: "全部纳管并同步" });
+    expect(dialog).toHaveTextContent("将执行 3 项助手配置同步，涉及 3 个服务");
+    expect(dialog).toHaveTextContent("1 个未纳管服务会先导入服务库");
+    expect(dialog).toHaveTextContent("1 个服务会尝试将原配置中的变量取值一并保存到本机库");
+    expect(dialog).toHaveTextContent("2 项会用服务库定义接管同名条目");
+
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+    await waitFor(() => expect(calls.filter((call) => call.command === "mcp:apply")).toHaveLength(3));
+
+    expect(calls.find((call) => call.command === "secrets:adopt")?.args).toEqual([
+      "--agent",
+      "codex",
+      "--server",
+      "new-search",
+    ]);
+    const policyCall = calls.find((call) => call.command === "policy:set")!;
+    expect(policyCall.args.slice(0, 4)).toEqual(["--layer", "local", "--key", "mcp.definitions.new-search"]);
+    expect(JSON.parse(policyCall.args[5])).toMatchObject({
+      command: "npx",
+      args: ["-y", "new-search-mcp"],
+      env: { SEARCH_TOKEN: "${SEARCH_TOKEN}" },
+      agents: ["codex"],
+      _replace: true,
+    });
+    expect(calls.filter((call) => call.command === "mcp:apply")[0].args).toEqual([
+      "--only",
+      "mcp:new-search",
+      "--agent",
+      "codex",
+      "--action",
+      "add",
+      "--allow-takeover",
+    ]);
+  });
+
   it("缺少变量时给出下一步：从待处理区直接进入密钥页", async () => {
     const onNavigate = vi.fn();
     renderWithEngine(<McpPage onNavigate={onNavigate} />, mcpRoutes());
@@ -477,7 +552,7 @@ describe("McpPage 显式接管通道（--allow-takeover）", () => {
 
     await userEvent.click(await screen.findByTestId("sync-server-mcp:take-svc"));
     const dialog = await screen.findByRole("dialog", { name: "同步 take-svc" });
-    expect(dialog).toHaveTextContent("1 个会用服务库定义接管同名条目");
+    expect(dialog).toHaveTextContent("1 项会用服务库定义接管同名条目");
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
 
     await waitFor(() => expect(calls.filter((call) => call.command === "mcp:apply")).toHaveLength(1));

@@ -1,6 +1,6 @@
 import { useRef, useState, type KeyboardEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, LayoutGrid, Plus, SearchX, Server } from "lucide-react";
+import { ArrowLeft, LayoutGrid, Plus, RefreshCw, SearchX, Server } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { EmptyState } from "../components/EmptyState";
@@ -15,11 +15,12 @@ import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import type { Diagnostic, EngineElement, McpImportCandidate, PolicyData, PolicyLayers, StatusData } from "../lib/contract";
 import { engineErrorMessage, runEngine } from "../lib/engine";
 import { candidateToDefinition, isMcpTakeoverBlocked } from "../lib/mcpImport";
-import { buildMcpSyncPlan, type McpSyncPlan } from "../lib/mcpSync";
+import { buildMcpGlobalSyncPlan, buildMcpSyncPlan, type McpSyncPlan } from "../lib/mcpSync";
 import { agentCellsOf, type McpObserved, type McpSpec } from "../lib/observed";
 import { useBatchApply } from "../lib/useBatchApply";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { useDirectApply } from "../lib/useDirectApply";
+import { useTakeover, type TakeoverTask } from "../lib/useTakeover";
 import { OVERLAY_COPY } from "../lib/ui-copy";
 import { engineKeys, useEngineQuery } from "../lib/queries";
 import { cn } from "../lib/utils";
@@ -46,10 +47,23 @@ export default function McpPage({ onNavigate }: { onNavigate?: (page: string) =>
   const [importTarget, setImportTarget] = useState<McpImportCandidate | null>(null);
   const [importExecuting, setImportExecuting] = useState(false);
   const [importErrors, setImportErrors] = useState<Diagnostic[] | null>(null);
-  const [pendingSync, setPendingSync] = useState<{ element: EngineElement; plan: McpSyncPlan } | null>(null);
+  const [pendingSync, setPendingSync] = useState<
+    | {
+        title: string;
+        serviceCount: number;
+        actionCount: number;
+        takeoverCount: number;
+        removeCount: number;
+        importCount: number;
+        secretImportCount: number;
+        execution: { kind: "plan"; plan: McpSyncPlan } | { kind: "all"; tasks: TakeoverTask[]; blockedCount: number };
+      }
+    | null
+  >(null);
 
   const directApply = useDirectApply();
   const batchApply = useBatchApply();
+  const takeover = useTakeover();
   const definitionOps = useDefinitionOps({ section: "mcp", domain: "mcp" });
 
   const [pendingRemove, setPendingRemove] = useState<
@@ -184,18 +198,31 @@ export default function McpPage({ onNavigate }: { onNavigate?: (page: string) =>
     }
   };
 
-  /** 服务库的一键同步：自动选出每个助手需要的动作；接管或清理残留只做一次汇总确认。 */
-  const handleSync = (element: EngineElement) => {
-    const plan = buildMcpSyncPlan(element);
+  const requestSync = (title: string, serviceCount: number, plan: McpSyncPlan) => {
     if (plan.rows.length === 0) {
-      if (plan.blocked.length > 0) toast.warning("当前没有可自动执行的同步项，请先处理卡片中的阻塞原因");
+      if (plan.blocked.length > 0) toast.warning("当前没有可自动执行的同步项，请先处理服务卡片中的阻塞原因");
       return;
     }
     if (plan.takeoverCount > 0 || plan.removeCount > 0) {
-      setPendingSync({ element, plan });
+      setPendingSync({
+        title,
+        serviceCount,
+        actionCount: plan.rows.length,
+        takeoverCount: plan.takeoverCount,
+        removeCount: plan.removeCount,
+        importCount: 0,
+        secretImportCount: 0,
+        execution: { kind: "plan", plan },
+      });
       return;
     }
     void executeSync(plan);
+  };
+
+  /** 服务库的一键同步：自动选出每个助手需要的动作；接管或清理残留只做一次汇总确认。 */
+  const handleSync = (element: EngineElement) => {
+    const plan = buildMcpSyncPlan(element);
+    requestSync(`同步 ${element.id.replace(/^mcp:/, "")}`, 1, plan);
   };
 
   // 未导入候选（引擎已掩码，前端拿不到明文）与同名冲突视图（元素 + policy 定义双来源）
@@ -205,6 +232,35 @@ export default function McpPage({ onNavigate }: { onNavigate?: (page: string) =>
     ...elements.map((element) => element.id.replace(/^mcp:/, "")),
     ...Object.keys(policyDefinitions),
   ]);
+  const globalSync = buildMcpGlobalSyncPlan(elements, importCandidates, existingNames);
+
+  const executeSyncAll = async (tasks: TakeoverTask[], blockedCount: number) => {
+    await takeover.run(tasks, "纳管并同步");
+    if (blockedCount > 0) toast.warning(`仍有 ${blockedCount} 项需要先处理服务卡片中的阻塞原因`);
+  };
+
+  /** 页面级动作覆盖完整服务库及全部可导入候选，不受当前搜索结果影响。 */
+  const handleSyncAll = () => {
+    if (globalSync.tasks.length === 0) {
+      if (globalSync.blockedCount > 0) toast.warning("当前没有可自动执行的项目，请先处理服务卡片中的阻塞原因");
+      return;
+    }
+    const request = {
+      title: "全部纳管并同步",
+      serviceCount: globalSync.serviceCount,
+      actionCount: globalSync.actionCount,
+      takeoverCount: globalSync.takeoverCount,
+      removeCount: globalSync.removeCount,
+      importCount: globalSync.importCount,
+      secretImportCount: globalSync.secretImportCount,
+      execution: { kind: "all" as const, tasks: globalSync.tasks, blockedCount: globalSync.blockedCount },
+    };
+    if (request.importCount > 0 || request.takeoverCount > 0 || request.removeCount > 0) {
+      setPendingSync(request);
+      return;
+    }
+    void executeSyncAll(globalSync.tasks, globalSync.blockedCount);
+  };
 
   /** 导入 = policy:set 保存定义（不执行动作、不改动助手配置）；转换只依赖掩码 spec。 */
   const confirmImport = async () => {
@@ -341,19 +397,39 @@ export default function McpPage({ onNavigate }: { onNavigate?: (page: string) =>
 
       {activeTab === "library" && (
         <div id="panel-library" role="tabpanel" aria-labelledby="tab-library" className="space-y-4">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-3">
               <span className="text-xs text-muted-foreground">共 {elements.length} 个服务</span>
               <SearchInput value={search} onChange={setSearch} placeholder="搜索服务…" testId="mcp-search" />
             </div>
-            <button
-              type="button"
-              data-testid="add-server-button"
-              onClick={() => setFormState("new")}
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-            >
-              <Plus className="h-4 w-4" aria-hidden /> {OVERLAY_COPY.addServer}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                data-testid="sync-all-mcp"
+                onClick={handleSyncAll}
+                disabled={
+                  batchApply.executing ||
+                  takeover.executing ||
+                  directApply.executing ||
+                  (globalSync.tasks.length === 0 && globalSync.blockedCount === 0)
+                }
+                title="按服务库定义同步全部服务到全部适用助手；不受搜索结果影响"
+                className="inline-flex items-center gap-1.5 rounded-md border border-input bg-card px-3.5 py-1.5 text-xs font-medium text-foreground hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RefreshCw className={cn("h-4 w-4", takeover.executing && "animate-spin")} aria-hidden />
+                {takeover.executing && takeover.progress
+                  ? `正在处理 ${takeover.progress.done + 1}/${takeover.progress.total}`
+                  : "全部纳管并同步"}
+              </button>
+              <button
+                type="button"
+                data-testid="add-server-button"
+                onClick={() => setFormState("new")}
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              >
+                <Plus className="h-4 w-4" aria-hidden /> {OVERLAY_COPY.addServer}
+              </button>
+            </div>
           </div>
 
           {search.trim() && filteredElements.length === 0 ? (
@@ -383,7 +459,7 @@ export default function McpPage({ onNavigate }: { onNavigate?: (page: string) =>
                   onEdit={(el) => setFormState({ editing: el })}
                   onAction={handleServerAction}
                   onSync={handleSync}
-                  syncing={batchApply.executing || directApply.executing}
+                  syncing={batchApply.executing || takeover.executing || directApply.executing}
                   onConfigureSecrets={onNavigate ? () => onNavigate("settings:secrets") : undefined}
                 />
               ))}
@@ -578,13 +654,18 @@ export default function McpPage({ onNavigate }: { onNavigate?: (page: string) =>
 
       {pendingSync && (
         <ConfirmModal
-          title={`同步 ${pendingSync.element.id.replace(/^mcp:/, "")}`}
-          description={`将同步 ${pendingSync.plan.rows.length} 个助手${pendingSync.plan.takeoverCount > 0 ? `，其中 ${pendingSync.plan.takeoverCount} 个会用服务库定义接管同名条目` : ""}${pendingSync.plan.removeCount > 0 ? `，并清理 ${pendingSync.plan.removeCount} 个由本工具写入的旧配置` : ""}。其他服务和顶层配置保持不变。`}
+          title={pendingSync.title}
+          description={`将执行 ${pendingSync.actionCount} 项助手配置同步，涉及 ${pendingSync.serviceCount} 个服务${pendingSync.importCount > 0 ? `；其中 ${pendingSync.importCount} 个未纳管服务会先导入服务库` : ""}${pendingSync.secretImportCount > 0 ? `，${pendingSync.secretImportCount} 个服务会尝试将原配置中的变量取值一并保存到本机库（界面不回显）` : ""}${pendingSync.takeoverCount > 0 ? `，${pendingSync.takeoverCount} 项会用服务库定义接管同名条目` : ""}${pendingSync.removeCount > 0 ? `，并清理 ${pendingSync.removeCount} 项由本工具写入的旧配置` : ""}。未列入计划的配置和顶层配置保持不变。`}
           risk="write-local"
           confirmLabel="确认同步"
-          executing={batchApply.executing}
+          executing={batchApply.executing || takeover.executing}
           onConfirm={() => {
-            void executeSync(pendingSync.plan).then(() => setPendingSync(null));
+            const execution = pendingSync.execution;
+            const promise =
+              execution.kind === "plan"
+                ? executeSync(execution.plan)
+                : executeSyncAll(execution.tasks, execution.blockedCount);
+            void promise.then(() => setPendingSync(null));
           }}
           onClose={() => setPendingSync(null)}
         />
