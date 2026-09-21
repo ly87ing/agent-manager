@@ -135,6 +135,7 @@ export default function App() {
           <SettingsPage
             key={activePage}
             initialAdvanced={activePage.startsWith("settings:") ? activePage.slice("settings:".length) : null}
+            onNavigate={handleNavigate}
           />
         )}
       </div>

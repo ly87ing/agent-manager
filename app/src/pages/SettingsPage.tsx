@@ -95,7 +95,13 @@ function initialPreferences(data?: SettingsData): SettingsPreferences {
   return { logRetentionDays: data?.preferences?.logRetentionDays ?? 30 };
 }
 
-export default function SettingsPage({ initialAdvanced }: { initialAdvanced?: string | null } = {}) {
+export default function SettingsPage({
+  initialAdvanced,
+  onNavigate,
+}: {
+  initialAdvanced?: string | null;
+  onNavigate?: (page: string) => void;
+} = {}) {
   const settings = useSettings();
   const save = useSaveSettings();
   const [preferences, setPreferences] = useState<SettingsPreferences>(() => initialPreferences());
@@ -261,7 +267,7 @@ export default function SettingsPage({ initialAdvanced }: { initialAdvanced?: st
     <div className="space-y-4">
       <PageHeader title="设置" description="外观、配置备份与本机运行路径。" />
       <AppearanceSection />
-      <ConfigBackupSection />
+      <ConfigBackupSection onGoSync={onNavigate ? () => onNavigate("dashboard") : undefined} />
       <section className="rounded-lg border bg-card p-5 shadow-sm">
         <h2 className="text-sm font-semibold text-foreground">应用与运行路径</h2>
         <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">

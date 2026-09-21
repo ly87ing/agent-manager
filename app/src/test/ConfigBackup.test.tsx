@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, waitFor } from "@testing-library/react";
 import { ConfigBackupSection } from "../components/ConfigBackupSection";
 import { makeEnvelope } from "./fixtures";
@@ -53,7 +53,8 @@ describe("配置备份", () => {
   });
 
   it("导入前先给差异预览，确认后才整份提交", async () => {
-    const { calls } = renderWithEngine(<ConfigBackupSection />, routes());
+    const onGoSync = vi.fn();
+    const { calls } = renderWithEngine(<ConfigBackupSection onGoSync={onGoSync} />, routes());
     // 这份备份相对当前少了 demo、多了 newcomer，规则来源也换了
     fireEvent.change(screen.getByTestId("config-import-input"), {
       target: {
@@ -79,6 +80,10 @@ describe("配置备份", () => {
     const write = calls.find((call) => call.command === "config:import")!;
     expect(write.args[0]).toBe("--value");
     expect(JSON.parse(write.args[1]).format).toBe("agent-manager/config-backup/v1");
+    const goSync = await screen.findByTestId("config-go-sync");
+    expect(goSync).toHaveTextContent("去总览一键同步");
+    await userEvent.click(goSync);
+    expect(onGoSync).toHaveBeenCalledOnce();
   });
 
   it("与当前完全一致时明说不会改变任何东西", async () => {

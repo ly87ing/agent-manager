@@ -11,9 +11,9 @@ import { useQueryClient } from "@tanstack/react-query";
  *
  * 备份含凭据取值，因此这份内容本身就是密钥：界面不把它铺在屏幕上（只报里面有什么），
  * 复制走之后怎么保管由用户决定。不含分配记录与写入指纹——那些是本机落地状态，
- * 导回来之后还要各自应用一次才会写到助手配置里。
+ * 导回来之后仍由用户到总览确认一次「全部同步」，才会写到助手配置里。
  */
-export function ConfigBackupSection() {
+export function ConfigBackupSection({ onGoSync }: { onGoSync?: () => void } = {}) {
   const queryClient = useQueryClient();
   const [exported, setExported] = useState<string | null>(null);
   /** 导出内容里有什么：只报条数，正文不铺在屏幕上（里面有凭据取值）。 */
@@ -21,6 +21,7 @@ export function ConfigBackupSection() {
   const [importText, setImportText] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [imported, setImported] = useState(false);
   /** 确认前算好的差异：导入不可撤销，先让人看清会改掉什么。 */
   const [diff, setDiff] = useState<BackupDiff | null>(null);
 
@@ -94,9 +95,10 @@ export function ConfigBackupSection() {
         return;
       }
       setImportText("");
+      setImported(true);
       void queryClient.invalidateQueries({ queryKey: engineKeys.all });
       toast.success("已恢复定义与来源", {
-        description: "还没写到助手配置：到各页面点一次应用才会落地。",
+        description: "还没写到助手配置：到总览点一次「全部同步」即可落地。",
       });
     } catch (err) {
       toast.error(`导入失败:${engineErrorMessage(err)}`);
@@ -110,7 +112,7 @@ export function ConfigBackupSection() {
       <h3 className="text-sm font-semibold text-foreground">配置备份</h3>
       <p className="mt-1 text-xs text-muted-foreground">
         导出本机的助手、技能、MCP、实例定义与规则等来源，换机器或重装时导回来。不含本机的落地记录——
-        导回来之后要到各页面点一次应用才会写到助手配置。
+        导回来之后到总览点一次「全部同步」才会写到助手配置。
       </p>
 
       <div className="mt-3 space-y-3">
@@ -152,7 +154,10 @@ export function ConfigBackupSection() {
           <textarea
             id="config-import-input"
             value={importText}
-            onChange={(event) => setImportText(event.target.value)}
+            onChange={(event) => {
+              setImportText(event.target.value);
+              setImported(false);
+            }}
             rows={4}
             spellCheck={false}
             data-testid="config-import-input"
@@ -168,6 +173,19 @@ export function ConfigBackupSection() {
           >
             <Upload className="h-3.5 w-3.5" aria-hidden /> 导入并覆盖
           </button>
+          {imported && onGoSync && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-success/30 bg-success/10 px-3 py-2 text-xs text-success">
+              <span>定义与来源已恢复，还没有写入助手配置。</span>
+              <button
+                type="button"
+                data-testid="config-go-sync"
+                onClick={onGoSync}
+                className="rounded border border-primary/30 bg-primary/10 px-2.5 py-1 font-medium text-primary hover:bg-primary/15"
+              >
+                去总览一键同步
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -185,7 +203,7 @@ export function ConfigBackupSection() {
           >
             <h3 className="text-base font-semibold text-foreground">这份备份会改掉这些</h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              导入是整体替换，不能撤销。助手配置文件本身不受影响——恢复后要到各页面点一次应用才会落地。
+              导入是整体替换，不能撤销。助手配置文件本身不受影响——恢复后到总览点一次「全部同步」才会落地。
             </p>
 
             <div className="mt-3 space-y-2 text-sm">
