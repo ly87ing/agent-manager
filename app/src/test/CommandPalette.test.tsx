@@ -4,7 +4,7 @@ import App from "../App";
 import type { Envelope, SettingsData } from "../lib/contract";
 import { setSettingsClient } from "../lib/settings";
 import { agentManagementFixture, makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
-import { renderWithEngine, screen, userEvent } from "./render-with-engine";
+import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 
 const trayEvents = vi.hoisted(() => ({
   listeners: new Set<(event: { payload: unknown }) => void>(),
@@ -160,6 +160,11 @@ async function openPalette() {
   return screen.findByTestId("command-palette");
 }
 
+async function openConnectionSwitcher() {
+  await userEvent.keyboard("{Meta>}{Shift>}k{/Shift}{/Meta}");
+  return screen.findByRole("dialog", { name: "接入快切" });
+}
+
 describe("命令面板", () => {
   beforeEach(() => trayEvents.listeners.clear());
 
@@ -175,6 +180,27 @@ describe("命令面板", () => {
 
     expect(await screen.findByRole("heading", { name: "MCP" }, { timeout: 10_000 })).toBeInTheDocument();
     expect(palette).not.toBeInTheDocument();
+  });
+
+  it("⌘⇧K 直接打开接入快切，只列接入并可继续按备注过滤", async () => {
+    setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
+    renderWithEngine(<App />, routes());
+    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+
+    const switcher = await openConnectionSwitcher();
+    expect(within(switcher).getByTestId("command-item-connection:claude-code:default")).toBeInTheDocument();
+    expect(within(switcher).getByTestId("command-item-connection:claude-code:kimi")).toBeInTheDocument();
+    expect(within(switcher).queryByTestId("command-item-page:agents")).toBeNull();
+    expect(within(switcher).queryByTestId("command-item-action:apply-rules")).toBeNull();
+
+    const input = within(switcher).getByRole("textbox", { name: "搜索接入名称、备注、地址或模型" });
+    await userEvent.type(input, "月度套餐");
+    expect(within(switcher).getByTestId("command-item-connection:claude-code:kimi")).toHaveTextContent("Claude Code · Kimi Code");
+    expect(within(switcher).queryByTestId("command-item-connection:claude-code:default")).toBeNull();
+
+    await userEvent.keyboard("{Escape}");
+    await openPalette();
+    expect(screen.getByTestId("command-item-page:agents")).toBeInTheDocument();
   });
 
   it("可直接执行常用动作，走与页面相同的执行通道", async () => {

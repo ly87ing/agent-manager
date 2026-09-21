@@ -55,6 +55,7 @@ export default function App() {
   const [activePage, setActivePage] = useState<string>("agents");
   const [selectedSkillAgent, setSelectedSkillAgent] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteScope, setPaletteScope] = useState<"all" | "connections">("all");
   const [paletteConnectionTarget, setPaletteConnectionTarget] = useState<{ keyword: string; itemId: string } | null>(null);
   const update = useUpdateCheck();
 
@@ -66,9 +67,12 @@ export default function App() {
         event.preventDefault();
         setActivePage("settings");
       } else if (event.key.toLowerCase() === "k") {
-        // 命令面板：一个入口搜到资源、页面与常用动作
+        // ⌘K 搜全部；⌘⇧K 只看接入，减少高频切换前的输入。
         event.preventDefault();
-        setPaletteOpen((prev) => !prev);
+        const nextScope = event.shiftKey ? "connections" : "all";
+        setPaletteConnectionTarget(null);
+        setPaletteOpen((prev) => (prev && paletteScope === nextScope ? false : true));
+        setPaletteScope(nextScope);
       } else if (event.key.toLowerCase() === "f") {
         // 仅当前页挂了搜索框（data-page-search）时响应；无搜索框的页面不抢占
         const searchInput = document.querySelector<HTMLElement>("[data-page-search]");
@@ -80,17 +84,19 @@ export default function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [paletteScope]);
 
   useEffect(
     () =>
       subscribeTrayActions((action) => {
         if (action === "search") {
+          setPaletteScope("all");
           setPaletteConnectionTarget(null);
           setPaletteOpen(true);
         }
         else if (action === "takeover") setActivePage("takeover");
         else {
+          setPaletteScope("connections");
           setPaletteConnectionTarget({
             keyword: `${action.agentName} · ${action.profileLabel}`,
             itemId: `connection:${action.agentId}:${action.profile || "default"}`,
@@ -152,10 +158,12 @@ export default function App() {
       </div>
       <CommandPalette
         open={paletteOpen}
+        scope={paletteScope}
         initialKeyword={paletteConnectionTarget?.keyword}
         initialItemId={paletteConnectionTarget?.itemId}
         onClose={() => {
           setPaletteOpen(false);
+          setPaletteScope("all");
           setPaletteConnectionTarget(null);
         }}
         onNavigate={(page) => {

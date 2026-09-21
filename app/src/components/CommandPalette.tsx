@@ -83,6 +83,7 @@ function connectionSwitchConfirmed(data: StatusData | undefined, agentId: string
  */
 export function CommandPalette({
   open,
+  scope = "all",
   initialKeyword,
   initialItemId,
   onClose,
@@ -90,6 +91,8 @@ export function CommandPalette({
   onOpenAgentSkills,
 }: {
   open: boolean;
+  /** 接入快切模式只保留接入项；执行路径与完整命令面板相同。 */
+  scope?: "all" | "connections";
   /** 托盘目标会带精确查询，打开后直接把焦点落在对应接入。 */
   initialKeyword?: string | null;
   initialItemId?: string | null;
@@ -365,12 +368,14 @@ export function CommandPalette({
     return out;
   }, [agents.data, skills.data, mcp.data, profiles.data, switchingTarget, directApply, refreshUpstream, switchConnection, onNavigate, onOpenAgentSkills]);
 
-  const filtered = useMemo(
-    () => targetItemId
-      ? items.filter((item) => item.id === targetItemId)
-      : items.filter((item) => matchesKeyword(keyword, [item.label, item.hint, item.keywords])),
-    [items, keyword, targetItemId],
-  );
+  const filtered = useMemo(() => {
+    const scoped = scope === "connections"
+      ? items.filter((item) => item.group === "切换接入")
+      : items;
+    return targetItemId
+      ? scoped.filter((item) => item.id === targetItemId)
+      : scoped.filter((item) => matchesKeyword(keyword, [item.label, item.hint, item.keywords]));
+  }, [items, keyword, scope, targetItemId]);
 
   useEffect(() => {
     setActive((prev) => (prev >= filtered.length ? 0 : prev));
@@ -400,7 +405,7 @@ export function CommandPalette({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="命令面板"
+        aria-label={scope === "connections" ? "接入快切" : "命令面板"}
         data-testid="command-palette"
         className="w-full max-w-xl overflow-hidden rounded-xl border bg-card shadow-xl animate-zoom-in-95"
         onKeyDown={(event) => {
@@ -430,14 +435,16 @@ export function CommandPalette({
               setKeyword(event.target.value);
             }}
             data-testid="command-palette-input"
-            aria-label="搜索资源、页面与动作"
-            placeholder="搜索助手、技能、MCP、实例，或直接执行常用动作…"
+            aria-label={scope === "connections" ? "搜索接入名称、备注、地址或模型" : "搜索资源、页面与动作"}
+            placeholder={scope === "connections" ? "搜索接入名称、备注、地址或模型…" : "搜索助手、技能、MCP、实例，或直接执行常用动作…"}
             className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
         </div>
         <div className="max-h-[50vh] overflow-y-auto p-2">
           {filtered.length === 0 ? (
-            <p className="px-3 py-6 text-center text-sm text-muted-foreground">没有匹配的资源或动作。</p>
+            <p className="px-3 py-6 text-center text-sm text-muted-foreground">
+              {scope === "connections" ? "没有匹配的接入。" : "没有匹配的资源或动作。"}
+            </p>
           ) : (
             Object.entries(groups).map(([group, groupItems]) => (
               <div key={group} className="mb-2 last:mb-0">
