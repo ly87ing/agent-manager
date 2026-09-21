@@ -1,16 +1,44 @@
 /**
  * 托盘动作的界面侧处理。
  *
- * 托盘只负责把人带到能做这件事的地方，不直接触发写操作——真正的执行仍在界面上点，
- * 因此锁、确认与审计都走同一条既有路径。非 Tauri 环境（浏览器预览、单测）拿不到
- * 事件通道，直接静默跳过。
+ * 托盘的接入快切仍交给界面侧现有执行通道处理，因此锁、确认、审计与双回读不另起一套。
+ * 非 Tauri 环境（浏览器预览、单测）拿不到事件通道，直接静默跳过。
  */
-export type TrayAction = "search" | "takeover";
+import { invoke, isTauri } from "@tauri-apps/api/core";
+
+export interface TrayConnection {
+  agentId: string;
+  agentName: string;
+  profile: string;
+  profileLabel: string;
+  current: boolean;
+  needsRepair: boolean;
+}
+
+export type TrayAction = "search" | "takeover" | ({ type: "switch-connection" } & Omit<TrayConnection, "current" | "needsRepair">);
 
 const TRAY_ACTION_EVENT = "tray-action";
 
 export function isTrayAction(value: unknown): value is TrayAction {
-  return value === "search" || value === "takeover";
+  if (value === "search" || value === "takeover") return true;
+  if (typeof value !== "object" || value === null) return false;
+  const action = value as Record<string, unknown>;
+  return action.type === "switch-connection"
+    && typeof action.agentId === "string"
+    && typeof action.agentName === "string"
+    && typeof action.profile === "string"
+    && typeof action.profileLabel === "string";
+}
+
+/** 用脱敏的 id/显示名刷新托盘菜单；浏览器预览中静默跳过。 */
+export async function publishTrayConnections(connections: TrayConnection[]): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await invoke("tray_set_connections", { connections });
+  } catch (error) {
+    // 原生菜单更新失败应留下诊断；它不影响主界面继续工作。
+    console.error("更新托盘接入菜单失败", error);
+  }
 }
 
 /** 订阅托盘动作；返回取消订阅函数（拿不到事件通道时返回空函数）。 */

@@ -56,6 +56,7 @@ fn classify_exit_request(code: Option<i32>) -> ExitRequestAction {
 
 fn main() {
     let app = tauri::Builder::default()
+        .manage(tray::TrayState::default())
         // 单实例须最先注册：二次启动时把已有主窗口唤到前台，不再起第二份进程。
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tray::show_main_window(app);
@@ -82,6 +83,7 @@ fn main() {
             engine::engine_invoke,
             settings_get,
             settings_save,
+            tray::tray_set_connections,
             theme::set_window_theme
         ])
         .build(tauri::generate_context!())

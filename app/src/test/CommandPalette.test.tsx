@@ -1,10 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "@testing-library/react";
 import App from "../App";
 import type { Envelope, SettingsData } from "../lib/contract";
 import { setSettingsClient } from "../lib/settings";
 import { agentManagementFixture, makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
+
+const trayEvents = vi.hoisted(() => ({
+  listeners: new Set<(event: { payload: unknown }) => void>(),
+}));
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(async (_event: string, listener: (event: { payload: unknown }) => void) => {
+    trayEvents.listeners.add(listener);
+    return () => trayEvents.listeners.delete(listener);
+  }),
+}));
 
 const dummySettings: SettingsData = {
   appVersion: "0.1.0",
@@ -149,6 +160,8 @@ async function openPalette() {
 }
 
 describe("命令面板", () => {
+  beforeEach(() => trayEvents.listeners.clear());
+
   it("⌘K 打开后能搜到资源，选中跳到对应页面", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     renderWithEngine(<App />, routes());
@@ -240,6 +253,78 @@ describe("命令面板", () => {
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "Kimi Code");
     expect(await screen.findByTestId("command-item-connection:claude-code:kimi")).toBeDisabled();
+  });
+
+  it("原生托盘接入事件唤回精确目标且确认后走同一条切换与双回读路径", async () => {
+    setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
+    let active = "";
+    const testRoutes = routes();
+    testRoutes["agents:status"] = async () => agentsStatus(active);
+    testRoutes["agents:configure"] = async (args) => {
+      active = args.includes("--use") ? args[args.indexOf("--use") + 1] : "";
+      return makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.configure" });
+    };
+    const { calls } = renderWithEngine(<App />, testRoutes);
+    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await waitFor(() => expect(trayEvents.listeners.size).toBe(1));
+
+    for (const listener of trayEvents.listeners) {
+      listener({
+        payload: {
+          type: "switch-connection",
+          agentId: "claude-code",
+          agentName: "Claude Code",
+          profile: "kimi",
+          profileLabel: "Kimi Code",
+        },
+      });
+    }
+
+    expect(await screen.findByTestId("command-palette")).toBeInTheDocument();
+    expect(await screen.findByTestId("command-item-connection:claude-code:kimi")).toBeInTheDocument();
+    expect(calls.some((call) => call.command === "agents:configure")).toBe(false);
+    await userEvent.keyboard("{Enter}");
+
+    await screen.findByText("已切换 Claude Code 到 Kimi Code");
+    expect(calls.find((call) => call.command === "agents:configure")?.args).toEqual([
+      "--only",
+      "agents:claude-code",
+      "--use",
+      "kimi",
+    ]);
+    expect(calls.filter((call) => call.command === "agents:status").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("托盘目标遇到外部修改时不静默覆盖而是转入可见确认", async () => {
+    setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
+    const testRoutes = routes();
+    testRoutes["agents:configure"] = async () => makeEnvelope(
+      {},
+      {
+        command: "agents.configure",
+        ok: false,
+        errors: [{ code: "EXTERNAL_MODIFICATION", element: "agents:claude-code", message: "配置已被外部修改，拒绝覆盖" }],
+      },
+    );
+    renderWithEngine(<App />, testRoutes);
+    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await waitFor(() => expect(trayEvents.listeners.size).toBe(1));
+
+    for (const listener of trayEvents.listeners) {
+      listener({
+        payload: {
+          type: "switch-connection",
+          agentId: "claude-code",
+          agentName: "Claude Code",
+          profile: "kimi",
+          profileLabel: "Kimi Code",
+        },
+      });
+    }
+
+    expect(await screen.findByTestId("command-palette")).toBeInTheDocument();
+    await userEvent.keyboard("{Enter}");
+    expect(await screen.findByRole("dialog", { name: "覆盖被改过的接入配置" })).toBeInTheDocument();
   });
 
   it("切回助手默认账号使用 use-default，不复写不存在的 profile", async () => {

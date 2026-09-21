@@ -55,6 +55,7 @@ export default function App() {
   const [activePage, setActivePage] = useState<string>("agents");
   const [selectedSkillAgent, setSelectedSkillAgent] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteConnectionTarget, setPaletteConnectionTarget] = useState<{ keyword: string; itemId: string } | null>(null);
   const update = useUpdateCheck();
 
   useEffect(() => {
@@ -84,8 +85,18 @@ export default function App() {
   useEffect(
     () =>
       subscribeTrayActions((action) => {
-        if (action === "search") setPaletteOpen(true);
+        if (action === "search") {
+          setPaletteConnectionTarget(null);
+          setPaletteOpen(true);
+        }
         else if (action === "takeover") setActivePage("takeover");
+        else {
+          setPaletteConnectionTarget({
+            keyword: `${action.agentName} · ${action.profileLabel}`,
+            itemId: `connection:${action.agentId}:${action.profile || "default"}`,
+          });
+          setPaletteOpen(true);
+        }
       }),
     [],
   );
@@ -141,7 +152,12 @@ export default function App() {
       </div>
       <CommandPalette
         open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
+        initialKeyword={paletteConnectionTarget?.keyword}
+        initialItemId={paletteConnectionTarget?.itemId}
+        onClose={() => {
+          setPaletteOpen(false);
+          setPaletteConnectionTarget(null);
+        }}
         onNavigate={(page) => {
           if (page === "skills") setSelectedSkillAgent(null);
           setActivePage(page);

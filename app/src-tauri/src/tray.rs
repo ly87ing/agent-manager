@@ -1,6 +1,8 @@
 //! 系统托盘：图标、最小菜单，以及关窗驻留相关的共用入口。
 
-use tauri::menu::{MenuBuilder, MenuItem};
+use serde::{Deserialize, Serialize};
+use std::sync::Mutex;
+use tauri::menu::{Menu, MenuBuilder, MenuItem, SubmenuBuilder};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -11,9 +13,52 @@ const MENU_SHOW_MAIN: &str = "show_main";
 const MENU_SEARCH: &str = "open_search";
 const MENU_TAKEOVER: &str = "open_takeover";
 const MENU_QUIT: &str = "quit";
+const MENU_CONNECTION_PREFIX: &str = "switch_connection:";
 
 /// 托盘发给界面的动作事件名；载荷是界面侧认识的动作 id。
 pub const TRAY_ACTION_EVENT: &str = "tray-action";
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrayConnection {
+    agent_id: String,
+    agent_name: String,
+    profile: String,
+    profile_label: String,
+    current: bool,
+    needs_repair: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrayConnectionAction {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    agent_id: String,
+    agent_name: String,
+    profile: String,
+    profile_label: String,
+}
+
+#[derive(Default)]
+pub struct TrayState(Mutex<Vec<TrayConnection>>);
+
+fn escape_menu_text(value: &str) -> String {
+    value.replace('&', "&&")
+}
+
+fn connection_menu_label(connection: &TrayConnection) -> String {
+    if connection.current {
+        format!("✓ {}", escape_menu_text(&connection.profile_label))
+    } else if connection.needs_repair {
+        format!(
+            "⚠ {} · 重新应用",
+            escape_menu_text(&connection.profile_label)
+        )
+    } else {
+        escape_menu_text(&connection.profile_label)
+    }
+}
 
 /// 恢复并聚焦主窗口；托盘「显示主界面」、单实例二次启动回调与
 /// macOS Dock Reopen 共用同一条路径。
@@ -25,8 +70,6 @@ pub fn show_main_window(app: &AppHandle) {
     }
 }
 
-/// 托盘只负责「把人带到能做这件事的地方」，不直接触发写操作：
-/// 真正的执行仍要在界面上点，锁、确认与审计因此都走同一条既有路径。
 fn handle_menu_event(app: &AppHandle, event_id: &str) {
     match event_id {
         MENU_SHOW_MAIN => show_main_window(app),
@@ -38,10 +81,111 @@ fn handle_menu_event(app: &AppHandle, event_id: &str) {
             show_main_window(app);
             let _ = app.emit(TRAY_ACTION_EVENT, "takeover");
         }
+        id if id.starts_with(MENU_CONNECTION_PREFIX) => {
+            let Some(index) = id
+                .strip_prefix(MENU_CONNECTION_PREFIX)
+                .and_then(|value| value.parse::<usize>().ok())
+            else {
+                return;
+            };
+            let connection = app
+                .state::<TrayState>()
+                .0
+                .lock()
+                .ok()
+                .and_then(|connections| connections.get(index).cloned());
+            if let Some(connection) = connection {
+                show_main_window(app);
+                let _ = app.emit(
+                    TRAY_ACTION_EVENT,
+                    TrayConnectionAction {
+                        kind: "switch-connection",
+                        agent_id: connection.agent_id,
+                        agent_name: connection.agent_name,
+                        profile: connection.profile,
+                        profile_label: connection.profile_label,
+                    },
+                );
+            }
+        }
         // 退出统一走 app.exit(0) → RunEvent::ExitRequested，由 main.rs 收尾摘托盘图标。
         MENU_QUIT => app.exit(0),
         _ => {}
     }
+}
+
+fn build_menu(app: &AppHandle, connections: &[TrayConnection]) -> tauri::Result<Menu<tauri::Wry>> {
+    let show_main = MenuItem::with_id(app, MENU_SHOW_MAIN, "显示主界面", true, None::<&str>)?;
+    let search = MenuItem::with_id(app, MENU_SEARCH, "搜索与执行…", true, None::<&str>)?;
+    let takeover = MenuItem::with_id(app, MENU_TAKEOVER, "接管中心", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, MENU_QUIT, "退出", true, None::<&str>)?;
+    let mut menu = MenuBuilder::new(app).item(&show_main);
+
+    let mut agent_ids: Vec<&str> = Vec::new();
+    for connection in connections {
+        if !agent_ids.contains(&connection.agent_id.as_str()) {
+            agent_ids.push(&connection.agent_id);
+        }
+    }
+    if !agent_ids.is_empty() {
+        menu = menu.separator();
+        for agent_id in agent_ids {
+            let agent_connections: Vec<(usize, &TrayConnection)> = connections
+                .iter()
+                .enumerate()
+                .filter(|(_, connection)| connection.agent_id == agent_id)
+                .collect();
+            let current_label = agent_connections
+                .iter()
+                .find(|(_, connection)| connection.current)
+                .map(|(_, connection)| connection.profile_label.as_str())
+                .unwrap_or("待确认");
+            let agent_name = agent_connections
+                .first()
+                .map(|(_, connection)| connection.agent_name.as_str())
+                .unwrap_or(agent_id);
+            let submenu_label = escape_menu_text(&format!("{agent_name} · {current_label}"));
+            let mut submenu = SubmenuBuilder::new(app, submenu_label);
+            for (index, connection) in agent_connections {
+                let label = connection_menu_label(connection);
+                let item = MenuItem::with_id(
+                    app,
+                    format!("{MENU_CONNECTION_PREFIX}{index}"),
+                    label,
+                    !connection.current,
+                    None::<&str>,
+                )?;
+                submenu = submenu.item(&item);
+            }
+            menu = menu.item(&submenu.build()?);
+        }
+    }
+
+    menu.separator()
+        .item(&search)
+        .item(&takeover)
+        .separator()
+        .item(&quit)
+        .build()
+}
+
+#[tauri::command]
+pub fn tray_set_connections(
+    app: AppHandle,
+    connections: Vec<TrayConnection>,
+) -> Result<(), String> {
+    let menu = build_menu(&app, &connections).map_err(|error| error.to_string())?;
+    let tray = app
+        .tray_by_id(TRAY_ID)
+        .ok_or_else(|| "托盘尚未初始化".to_string())?;
+    let state = app.state::<TrayState>();
+    let mut stored = state.0.lock().map_err(|_| "托盘状态锁已损坏".to_string())?;
+    let previous = std::mem::replace(&mut *stored, connections);
+    if let Err(error) = tray.set_menu(Some(menu)) {
+        *stored = previous;
+        return Err(error.to_string());
+    }
+    Ok(())
 }
 
 /// icons/32x32.png 是彩色应用图标而非 macOS 单色模板图，不设 `icon_as_template`
@@ -62,18 +206,7 @@ fn tray_icon(app: &tauri::App) -> Option<tauri::image::Image<'static>> {
 }
 
 pub fn setup(app: &tauri::App) -> tauri::Result<()> {
-    let show_main = MenuItem::with_id(app, MENU_SHOW_MAIN, "显示主界面", true, None::<&str>)?;
-    let search = MenuItem::with_id(app, MENU_SEARCH, "搜索与执行…", true, None::<&str>)?;
-    let takeover = MenuItem::with_id(app, MENU_TAKEOVER, "接管中心", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, MENU_QUIT, "退出", true, None::<&str>)?;
-    let menu = MenuBuilder::new(app)
-        .item(&show_main)
-        .separator()
-        .item(&search)
-        .item(&takeover)
-        .separator()
-        .item(&quit)
-        .build()?;
+    let menu = build_menu(app.handle(), &[])?;
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("Agent Manager")
@@ -95,5 +228,40 @@ pub fn setup(app: &tauri::App) -> tauri::Result<()> {
 pub fn remove_tray_icon_before_exit(app: &AppHandle) {
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         let _ = tray.set_visible(false);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn connection(current: bool, needs_repair: bool) -> TrayConnection {
+        TrayConnection {
+            agent_id: "claude-code".into(),
+            agent_name: "Claude Code".into(),
+            profile: "kimi".into(),
+            profile_label: "Kimi Code".into(),
+            current,
+            needs_repair,
+        }
+    }
+
+    #[test]
+    fn connection_labels_distinguish_confirmed_current_and_repair() {
+        assert_eq!(
+            connection_menu_label(&connection(true, false)),
+            "✓ Kimi Code"
+        );
+        assert_eq!(
+            connection_menu_label(&connection(false, true)),
+            "⚠ Kimi Code · 重新应用"
+        );
+        assert_eq!(
+            connection_menu_label(&connection(false, false)),
+            "Kimi Code"
+        );
+        let mut with_mnemonic = connection(false, false);
+        with_mnemonic.profile_label = "A&B".into();
+        assert_eq!(connection_menu_label(&with_mnemonic), "A&&B");
     }
 }

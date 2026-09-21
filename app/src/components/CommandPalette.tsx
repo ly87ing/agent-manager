@@ -13,6 +13,10 @@ import { matchesKeyword } from "./SearchInput";
 import { cn } from "../lib/utils";
 import { ConfirmModal } from "./ConfirmModal";
 import { connectionAlignment } from "./ConnectionWorkbench";
+import {
+  publishTrayConnections,
+  type TrayConnection,
+} from "../lib/trayActions";
 
 export interface CommandItem {
   id: string;
@@ -79,17 +83,23 @@ function connectionSwitchConfirmed(data: StatusData | undefined, agentId: string
  */
 export function CommandPalette({
   open,
+  initialKeyword,
+  initialItemId,
   onClose,
   onNavigate,
   onOpenAgentSkills,
 }: {
   open: boolean;
+  /** 托盘目标会带精确查询，打开后直接把焦点落在对应接入。 */
+  initialKeyword?: string | null;
+  initialItemId?: string | null;
   onClose: () => void;
   onNavigate: (page: string) => void;
   /** 选中某个助手/实例的技能时，跳到技能页并预选它。 */
   onOpenAgentSkills: (agentId: string) => void;
 }) {
   const [keyword, setKeyword] = useState("");
+  const [targetItemId, setTargetItemId] = useState<string | null>(null);
   const [active, setActive] = useState(0);
   const [switchingTarget, setSwitchingTarget] = useState<string | null>(null);
   const [pendingSwitch, setPendingSwitch] = useState<ConnectionSwitchRequest | null>(null);
@@ -99,10 +109,12 @@ export function CommandPalette({
   const refreshUpstream = useRefreshUpstream();
   const { execute } = useExecutions();
 
-  const agents = useEngineQuery<StatusData>("agents:status", [], { enabled: open });
+  // 托盘快切在窗口隐藏时也要有可信的脱敏状态，因此这两项保持热缓存；
+  // React Query 会与助手页共享请求，不会为同一状态另建数据源。
+  const agents = useEngineQuery<StatusData>("agents:status", [], { enabled: true });
   const skills = useEngineQuery<StatusData>("skills:status", [], { enabled: open });
   const mcp = useEngineQuery<StatusData>("mcp:status", [], { enabled: open });
-  const profiles = useEngineQuery<StatusData>("profiles:status", [], { enabled: open });
+  const profiles = useEngineQuery<StatusData>("profiles:status", [], { enabled: true });
   const refetchAgents = agents.refetch;
 
   const switchConnection = useCallback(
@@ -155,14 +167,53 @@ export function CommandPalette({
     [execute, refetchAgents],
   );
 
+  const trayConnections = useMemo<TrayConnection[]>(() => {
+    const out: TrayConnection[] = [];
+    const profileIds = new Set(
+      (profiles.data?.ok ? profiles.data.data.elements : []).map((element) => element.id.replace(/^profiles:/, "")),
+    );
+    for (const element of agents.data?.ok ? agents.data.data.elements : []) {
+      const agentId = element.id.replace(/^agents:/, "");
+      if (profileIds.has(agentId) || !supportsConnectionSwitch(element.spec)) continue;
+      const spec = element.spec as { display_name?: string };
+      const agentName = spec.display_name ?? agentId;
+      const form = parseInitialToFormValues(agentId, element.spec);
+      const options = [
+        { profile: "", label: "助手默认账号" },
+        ...form.connections.map((connection) => ({ profile: connection.name, label: connection.label || connection.name })),
+      ];
+      for (const option of options) {
+        const selected = form.activeConnection === option.profile;
+        const confirmed = selected && Boolean(
+          agents.data?.ok && connectionSwitchConfirmed(agents.data.data, agentId, option.profile),
+        );
+        out.push({
+          agentId,
+          agentName,
+          profile: option.profile,
+          profileLabel: option.label,
+          current: confirmed,
+          needsRepair: selected && !confirmed,
+        });
+      }
+    }
+    return out;
+  }, [agents.data, profiles.data]);
+
+  useEffect(() => {
+    // 两份状态都成功后才替换原生菜单，避免启动竞态或瞬时读取失败清空上一次可用菜单。
+    if (agents.data?.ok && profiles.data?.ok) void publishTrayConnections(trayConnections);
+  }, [agents.data?.ok, profiles.data?.ok, trayConnections]);
+
   useEffect(() => {
     if (open) {
-      setKeyword("");
+      setKeyword(initialKeyword ?? "");
+      setTargetItemId(initialItemId ?? null);
       setActive(0);
       // 面板一打开就能直接敲字
       window.setTimeout(() => inputRef.current?.focus(), 0);
     }
-  }, [open]);
+  }, [initialItemId, initialKeyword, open]);
 
   const items = useMemo<CommandItem[]>(() => {
     const out: CommandItem[] = PAGES.map((page) => ({
@@ -314,8 +365,10 @@ export function CommandPalette({
   }, [agents.data, skills.data, mcp.data, profiles.data, switchingTarget, directApply, refreshUpstream, switchConnection, onNavigate, onOpenAgentSkills]);
 
   const filtered = useMemo(
-    () => items.filter((item) => matchesKeyword(keyword, [item.label, item.hint, item.keywords])),
-    [items, keyword],
+    () => targetItemId
+      ? items.filter((item) => item.id === targetItemId)
+      : items.filter((item) => matchesKeyword(keyword, [item.label, item.hint, item.keywords])),
+    [items, keyword, targetItemId],
   );
 
   useEffect(() => {
@@ -371,7 +424,10 @@ export function CommandPalette({
           <input
             ref={inputRef}
             value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
+            onChange={(event) => {
+              setTargetItemId(null);
+              setKeyword(event.target.value);
+            }}
             data-testid="command-palette-input"
             aria-label="搜索资源、页面与动作"
             placeholder="搜索助手、技能、MCP、实例，或直接执行常用动作…"
