@@ -264,7 +264,7 @@ describe("助手运行参数", () => {
   });
 
   it("工作台一键切换接入：一条命令带 --use，切回默认带 --use-default", async () => {
-    const withProfiles = routes();
+    const withProfiles: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
     const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
     status.data.elements[0].spec.settings = {
       active: "relay",
@@ -272,6 +272,16 @@ describe("助手运行参数", () => {
         official: { label: "官方" },
         relay: { label: "我的中转", base_url: "https://relay.example.com" },
       },
+    };
+    withProfiles["agents:configure"] = async (args) => {
+      const settings = status.data.elements[0].spec.settings as { active?: string };
+      const useAt = args.indexOf("--use");
+      if (useAt >= 0) settings.active = args[useAt + 1];
+      else if (args.includes("--use-default")) delete settings.active;
+      return makeEnvelope(
+        { domain: "agents", action: "configure", element: "agents:claude-code" },
+        { command: "agents.configure" },
+      );
     };
     const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
 
@@ -286,6 +296,7 @@ describe("助手运行参数", () => {
       "--use",
       "official",
     ]);
+    await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("官方"));
 
     await userEvent.click(screen.getByTestId("activate-connection-claude-code-default"));
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(2));
@@ -294,6 +305,24 @@ describe("助手运行参数", () => {
       "agents:claude-code",
       "--use-default",
     ]);
+    await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("助手默认账号"));
+  });
+
+  it("切换命令成功但状态没有变化时不误报成功", async () => {
+    const withProfiles = routes();
+    const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.settings = {
+      active: "relay",
+      profiles: {
+        official: { label: "官方" },
+        relay: { label: "我的中转", base_url: "https://relay.example.com" },
+      },
+    };
+    renderWithEngine(<AgentsPage />, withProfiles);
+
+    await userEvent.click(await screen.findByTestId("activate-connection-claude-code-official"));
+    expect(await screen.findByText("写入已经返回成功，但状态回读没有确认新接入")).toBeInTheDocument();
+    expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("我的中转");
   });
 
   it("工作台编辑当前接入：预填原值、唯一名称不可改，保存后写回当前配置", async () => {
@@ -628,6 +657,14 @@ describe("助手运行参数", () => {
           },
         )));
     });
+    batchRoutes["agents:configure"] = async (args) => {
+      const settings = status.data.elements[0].spec.settings as { active?: string };
+      settings.active = args[args.indexOf("--use") + 1];
+      return makeEnvelope(
+        { domain: "agents", action: "configure", element: "agents:claude-code" },
+        { command: "agents.configure" },
+      );
+    };
     const { calls } = renderWithEngine(<AgentsPage />, batchRoutes);
 
     const checkAll = await screen.findByTestId("check-all-connections-button");
@@ -647,6 +684,17 @@ describe("助手运行参数", () => {
     expect(screen.getByTestId("check-result-claude-code-relay")).toHaveTextContent("连接正常");
     expect(screen.getByTestId("check-result-claude-code-broken")).toHaveTextContent("模型不可用");
     expect(checkAll).toBeEnabled();
+
+    await userEvent.click(screen.getByTestId("activate-fastest-connection"));
+    await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("Relay"));
+    const configure = configureCalls(calls);
+    expect(configure[configure.length - 1]?.args).toEqual([
+      "--only",
+      "agents:claude-code",
+      "--use",
+      "relay",
+    ]);
+    expect(screen.queryByTestId("activate-fastest-connection")).toBeNull();
   });
 
   it("没配接入配置的助手：工作台明确展示默认账号和新增入口", async () => {

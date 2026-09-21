@@ -166,7 +166,22 @@ export default function AgentsPage({
       const envelope = await runEngine("agents:configure", args);
       if (envelope.ok) {
         // 以 status 的真实回读更新界面，再宣布成功；不靠本地乐观改状态。
-        await query.refetch();
+        const refreshed = await query.refetch();
+        if (opts.use !== undefined) {
+          const refreshedAgent = refreshed.data?.data.elements.find(
+            (element) => element.id === `agents:${agentId}`,
+          );
+          const actual = refreshedAgent
+            ? activeConnectionOf(refreshedAgent.spec as Record<string, unknown>)
+            : null;
+          const expected = opts.use || null;
+          if (!refreshedAgent || actual !== expected) {
+            toast.error("写入已经返回成功，但状态回读没有确认新接入", {
+              description: "界面保留真实状态，请检查客户端配置或重试。",
+            });
+            return false;
+          }
+        }
         toast.success(opts.use !== undefined ? `已切换 ${agentId} 的接入配置` : `已写入 ${agentId} 的运行参数`, {
           description: "助手下次启动生效；已经开着的要重启它。",
         });

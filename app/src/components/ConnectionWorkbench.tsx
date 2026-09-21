@@ -411,9 +411,22 @@ export function ConnectionWorkbench({
               </strong>
             </p>
             {allChecked && fastest && (
-              <p className="text-success">
-                最快：{fastest.connection.label || fastest.connection.name} {fastest.result.latencyMs}ms
-              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-success">
+                  最快：{fastest.connection.label || fastest.connection.name} {fastest.result.latencyMs}ms
+                </p>
+                {fastest.connection.name !== active && (
+                  <button
+                    type="button"
+                    data-testid="activate-fastest-connection"
+                    disabled={busyTarget !== null}
+                    onClick={() => onSwitch(selected, fastest.connection.name)}
+                    className="rounded border border-success/30 bg-success/10 px-2.5 py-1 text-xs font-medium text-success hover:bg-success/15 disabled:opacity-50"
+                  >
+                    启用最快接入
+                  </button>
+                )}
+              </div>
             )}
           </div>
         )}
