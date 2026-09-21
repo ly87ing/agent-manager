@@ -602,6 +602,53 @@ describe("助手运行参数", () => {
     expect(result).toHaveTextContent("密钥页");
   });
 
+  it("一键检查全部接入：并发回填成功与失败，汇总最快线路且不重复提交", async () => {
+    const batchRoutes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
+    const status = batchRoutes["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.settings = {
+      profiles: {
+        relay: { label: "Relay", base_url: "https://relay.example.com" },
+        broken: { label: "Broken", base_url: "https://broken.example.com" },
+      },
+    };
+    const releases = new Map<string, () => void>();
+    batchRoutes["agents:check"] = (args) => new Promise<Envelope>((resolve) => {
+      const profile = args[args.indexOf("--use") + 1];
+      releases.set(profile, () => resolve(profile === "relay"
+        ? makeEnvelope(
+          { ok: true, detail: "连接正常", latency_ms: 128 },
+          { command: "agents.check" },
+        )
+        : makeEnvelope(
+          {},
+          {
+            command: "agents.check",
+            ok: false,
+            errors: [{ code: "AGENT_ERROR", element: null, message: "模型不可用" }],
+          },
+        )));
+    });
+    const { calls } = renderWithEngine(<AgentsPage />, batchRoutes);
+
+    const checkAll = await screen.findByTestId("check-all-connections-button");
+    await userEvent.click(checkAll);
+    await waitFor(() => expect(calls.filter((call) => call.command === "agents:check")).toHaveLength(2));
+    expect(checkAll).toBeDisabled();
+    expect(checkAll).toHaveTextContent("正在检查全部");
+    await userEvent.click(checkAll);
+    expect(calls.filter((call) => call.command === "agents:check")).toHaveLength(2);
+
+    releases.get("relay")?.();
+    releases.get("broken")?.();
+    const summary = await screen.findByTestId("connection-check-summary");
+    await waitFor(() => expect(summary).toHaveTextContent("已完成 2/2"));
+    expect(summary).toHaveTextContent("1 个可用");
+    expect(summary).toHaveTextContent("最快：Relay 128ms");
+    expect(screen.getByTestId("check-result-claude-code-relay")).toHaveTextContent("连接正常");
+    expect(screen.getByTestId("check-result-claude-code-broken")).toHaveTextContent("模型不可用");
+    expect(checkAll).toBeEnabled();
+  });
+
   it("没配接入配置的助手：工作台明确展示默认账号和新增入口", async () => {
     renderWithEngine(<AgentsPage />, routes());
     expect(await screen.findByTestId("connection-card-claude-code-default")).toHaveTextContent("当前接入");

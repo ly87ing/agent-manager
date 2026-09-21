@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowDown, ArrowUp, Check, Download, Loader2, Plus, RefreshCw, Settings2, Upload } from "lucide-react";
+import { Activity, AlertTriangle, ArrowDown, ArrowUp, Check, Download, Loader2, Plus, RefreshCw, Settings2, Upload } from "lucide-react";
 import { AgentUsageBar } from "./AgentUsageBar";
 import { AuthCommandActions } from "./AuthCommandActions";
 import type { ConnectionKind } from "./ConnectionFormDialog";
@@ -177,12 +177,14 @@ export function ConnectionWorkbench({
   agents,
   selectedAgentId,
   busyTarget,
+  checkingAllAgentId,
   checkResults,
   onSelectAgent,
   onAdd,
   onImport,
   onSwitch,
   onCheck,
+  onCheckAll,
   onEdit,
   onDuplicate,
   onExport,
@@ -193,12 +195,14 @@ export function ConnectionWorkbench({
   agents: EngineElement[];
   selectedAgentId: string | null;
   busyTarget: string | null;
+  checkingAllAgentId: string | null;
   checkResults: Record<string, ConnectionCheckResult>;
   onSelectAgent: (agentId: string) => void;
   onAdd: (element: EngineElement) => void;
   onImport: (element: EngineElement) => void;
   onSwitch: (element: EngineElement, connection: string) => void;
   onCheck: (element: EngineElement, connection: string) => void;
+  onCheckAll: (element: EngineElement, connections: ConnectionEntry[]) => void;
   onEdit: (element: EngineElement, connection: ConnectionEntry) => void;
   onDuplicate: (element: EngineElement, connection: ConnectionEntry) => void;
   onExport: (element: EngineElement, connection: ConnectionEntry) => void;
@@ -220,6 +224,17 @@ export function ConnectionWorkbench({
   const runtime = runtimeSettingsOf(selected.spec as Record<string, unknown>);
   const auth = observed.auth;
   const currentConfig = observed.current_config;
+  const connectionCheckStates = form.connections
+    .map((connection) => ({ connection, result: checkResults[`${agentId}/${connection.name}`] }));
+  const connectionChecks = connectionCheckStates.filter(
+    (item): item is { connection: ConnectionEntry; result: ConnectionCheckResult } =>
+      Boolean(item.result && !item.result.pending),
+  );
+  const allChecked = form.connections.length > 0 && connectionChecks.length === form.connections.length;
+  const fastest = connectionChecks
+    .filter((item) => item.result.ok && item.result.latencyMs > 0)
+    .sort((a, b) => a.result.latencyMs - b.result.latencyMs)[0];
+  const checkingAll = checkingAllAgentId === agentId;
 
   return (
     <section data-testid="connection-workbench" className="rounded-xl border bg-card p-4 shadow-sm sm:p-5">
@@ -237,6 +252,18 @@ export function ConnectionWorkbench({
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {form.connections.length > 0 && (
+              <button
+                type="button"
+                data-testid="check-all-connections-button"
+                disabled={!kind || checkingAll || connectionCheckStates.some((item) => item.result?.pending)}
+                onClick={() => onCheckAll(selected, form.connections)}
+                className="inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
+              >
+                {checkingAll ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Activity className="h-4 w-4" aria-hidden />}
+                {checkingAll ? "正在检查全部…" : "检查全部接入"}
+              </button>
+            )}
             <button
               type="button"
               data-testid="import-connection-button"
@@ -370,6 +397,25 @@ export function ConnectionWorkbench({
             disabled={busyTarget !== null}
             onReapply={() => onSwitch(selected, active)}
           />
+        )}
+
+        {connectionChecks.length > 0 && (
+          <div
+            data-testid="connection-check-summary"
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm"
+          >
+            <p className="text-muted-foreground">
+              接入检查：已完成 {connectionChecks.length}/{form.connections.length}，
+              <strong className="font-medium text-foreground">
+                {connectionChecks.filter((item) => item.result.ok).length} 个可用
+              </strong>
+            </p>
+            {allChecked && fastest && (
+              <p className="text-success">
+                最快：{fastest.connection.label || fastest.connection.name} {fastest.result.latencyMs}ms
+              </p>
+            )}
+          </div>
         )}
 
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">

@@ -90,6 +90,7 @@ export default function AgentsPage({
   const [checkResults, setCheckResults] = useState<
     Record<string, { ok: boolean; detail: string; latencyMs: number; pending?: boolean }>
   >({});
+  const [checkingAllAgentId, setCheckingAllAgentId] = useState<string | null>(null);
 
   const [aliasEditing, setAliasEditing] = useState<
     { bin: string; name: string; value: string | null; presetName?: string } | null
@@ -219,6 +220,17 @@ export default function AgentsPage({
         ...prev,
         [key]: { ok: false, detail: String(err), latencyMs: 0 },
       }));
+    }
+  };
+
+  /** 用户显式触发后并发检查当前助手的全部接入；单项失败不阻断其他结果。 */
+  const runCheckAll = async (agentId: string, profiles: string[]): Promise<void> => {
+    if (checkingAllAgentId || profiles.length === 0) return;
+    setCheckingAllAgentId(agentId);
+    try {
+      await Promise.all(profiles.map((profile) => runCheck(agentId, profile)));
+    } finally {
+      setCheckingAllAgentId(null);
     }
   };
 
@@ -532,6 +544,7 @@ export default function AgentsPage({
         agents={allPrimaryElements}
         selectedAgentId={effectiveSelectedAgentId}
         busyTarget={configuringTarget}
+        checkingAllAgentId={checkingAllAgentId}
         checkResults={checkResults}
         onSelectAgent={setSelectedAgentId}
         onAdd={(element) => {
@@ -544,6 +557,12 @@ export default function AgentsPage({
         }
         onCheck={(element, connection) =>
           void runCheck(element.id.replace(/^agents:/, ""), connection)
+        }
+        onCheckAll={(element, connections) =>
+          void runCheckAll(
+            element.id.replace(/^agents:/, ""),
+            connections.map((connection) => connection.name),
+          )
         }
         onEdit={(element, connection) => {
           setConnectionFormError(null);
