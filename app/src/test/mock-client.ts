@@ -113,11 +113,12 @@ function demoEnvelopes(): Record<string, Envelope> {
           policy: { enabled: true, agents: null },
           observed: {
             agents: {
-              "claude-code": { state: "drifted", target: "/Users/demo/.claude.json", target_exists: true },
-              codex: { state: "managed-ok", target: "/Users/demo/.codex/config.toml", target_exists: true },
-              "kimi-code": { state: "missing", target: "/Users/demo/.kimi-code/mcp.json", target_exists: true },
+              "claude-code": { state: "drifted", target: "/Users/demo/.claude.json", target_exists: true, assigned: true, enabled: true, actions: ["update"] },
+              codex: { state: "managed-ok", target: "/Users/demo/.codex/config.toml", target_exists: true, assigned: true, enabled: true, actions: ["disable"] },
+              "kimi-code": { state: "missing", target: "/Users/demo/.kimi-code/mcp.json", target_exists: true, assigned: true, enabled: true, actions: ["add"] },
             },
             env: {},
+            actions: ["disable", "remove", "upgrade"],
           },
           state: "drifted",
           freshness: makeFreshness({ state: "behind", current: "1.2.0", upstream: "1.8.0", checked_at: CHECKED_AT, probe: "npm-view", cache_age_sec: 1820 }),
@@ -135,16 +136,17 @@ function demoEnvelopes(): Record<string, Envelope> {
           policy: { enabled: true, agents: null },
           observed: {
             agents: {
-              "claude-code": { state: "managed-ok", target: "/Users/demo/.claude.json", target_exists: true },
-              codex: { state: "managed-ok", target: "/Users/demo/.codex/config.toml", target_exists: true },
-              "kimi-code": { state: "managed-ok", target: "/Users/demo/.kimi-code/mcp.json", target_exists: true },
+              "claude-code": { state: "managed-ok", target: "/Users/demo/.claude.json", target_exists: true, assigned: true, enabled: true, actions: ["disable"] },
+              codex: { state: "not-materialized", target: "/Users/demo/.codex/config.toml", target_exists: true, assigned: true, enabled: true, actions: [], blocked_reason: "凭证变量未配置: TAVILY_API_KEY" },
+              "kimi-code": { state: "managed-ok", target: "/Users/demo/.kimi-code/mcp.json", target_exists: true, assigned: true, enabled: true, actions: ["disable"] },
             },
             env: {
               GROK_API_KEY: { placeholder: "GROK_API_KEY", resolved: true },
               TAVILY_API_KEY: { placeholder: "TAVILY_API_KEY", resolved: false },
             },
+            actions: ["disable", "remove"],
           },
-          state: "managed-ok",
+          state: "drifted",
           freshness: makeFreshness({ state: "unknown", current: null, upstream: "8f0ae3c7f25ec419631ade7e431fa2531503433e", checked_at: CHECKED_AT, probe: "git-ls-remote", cache_age_sec: 4000 }),
         }),
         makeElement({
@@ -154,11 +156,12 @@ function demoEnvelopes(): Record<string, Envelope> {
           policy: { enabled: true, agents: null },
           observed: {
             agents: {
-              "claude-code": { state: "managed-ok", target: "/Users/demo/.claude.json", target_exists: true },
-              codex: { state: "missing", target: "/Users/demo/.codex/config.toml", target_exists: true },
-              "kimi-code": { state: "missing", target: "/Users/demo/.kimi-code/mcp.json", target_exists: true },
+              "claude-code": { state: "managed-ok", target: "/Users/demo/.claude.json", target_exists: true, assigned: true, enabled: true, actions: ["disable"] },
+              codex: { state: "missing", target: "/Users/demo/.codex/config.toml", target_exists: true, assigned: true, enabled: true, actions: ["add"] },
+              "kimi-code": { state: "missing", target: "/Users/demo/.kimi-code/mcp.json", target_exists: true, assigned: true, enabled: true, actions: ["add"] },
             },
             env: { MY_PROXY_TOKEN: { placeholder: "MY_PROXY_TOKEN", resolved: true } },
+            actions: ["disable", "remove", "upgrade"],
           },
           state: "managed-ok",
           freshness: makeFreshness({ state: "current", current: "0.3.1", upstream: "0.3.1", checked_at: CHECKED_AT, probe: "npm-view", cache_age_sec: 60 }),
@@ -177,11 +180,12 @@ function demoEnvelopes(): Record<string, Envelope> {
           policy: { enabled: true, agents: null },
           observed: {
             agents: {
-              "claude-code": { state: "managed-ok", target: "/Users/demo/.claude.json", target_exists: true },
-              codex: { state: "leftover", target: "/Users/demo/.codex/config.toml", target_exists: true },
-              "kimi-code": { state: "not-materialized", target: "/Users/demo/.kimi-code/mcp.json", target_exists: false },
+              "claude-code": { state: "managed-ok", target: "/Users/demo/.claude.json", target_exists: true, assigned: true, enabled: true, actions: ["disable"] },
+              codex: { state: "leftover", target: "/Users/demo/.codex/config.toml", target_exists: true, assigned: false, enabled: false, actions: ["remove"] },
+              "kimi-code": { state: "not-materialized", target: "/Users/demo/.kimi-code/mcp.json", target_exists: false, assigned: true, enabled: true, actions: ["add"] },
             },
             env: {},
+            actions: ["disable", "remove"],
           },
           state: "drifted",
           freshness: makeFreshness({ state: "current", current: "a1b2c3d", upstream: "a1b2c3d", checked_at: CHECKED_AT, probe: "git-ls-remote", cache_age_sec: 200 }),
@@ -202,11 +206,12 @@ function demoEnvelopes(): Record<string, Envelope> {
           policy: { enabled: true, agents: null },
           observed: {
             agents: {
-              "claude-code": { state: "managed-ok", target: "/Users/demo/.claude.json", target_exists: true },
-              codex: { state: "missing", target: "/Users/demo/.codex/config.toml", target_exists: true },
+              "claude-code": { state: "managed-ok", target: "/Users/demo/.claude.json", target_exists: true, assigned: true, enabled: true, actions: ["disable"] },
+              codex: { state: "missing", target: "/Users/demo/.codex/config.toml", target_exists: true, assigned: true, enabled: true, actions: ["add"] },
             },
             env: {},
             headers: { Authorization: { placeholder: "${DEMO_REMOTE_TOKEN}", resolved: true } },
+            actions: ["disable", "remove"],
           },
           state: "managed-ok",
           freshness: makeFreshness({ state: "not-applicable" }),
@@ -245,7 +250,10 @@ function demoEnvelopes(): Record<string, Envelope> {
             owner_marked: true,
             discovered: ["safe-merge-review", "artifact-hygiene", "dead-one", "new-hotness", "experimental-lint"],
             discovery_inbox: ["new-hotness", "experimental-lint"],
-            extra_links: [] },
+            extra_links: [],
+            discovery_error: null,
+            blocked_reason: null,
+            actions: ["update", "disable", "remove"] },
           state: "managed-ok",
           freshness: makeFreshness({ state: "behind", current: "a1b2c3d4e5f60718293a4b5c6d7e8f9012a3b4c5", upstream: "f0e1d2c3b4a5968778695a4b3c2d1e0f9a8b7c6d", checked_at: CHECKED_AT, probe: "git-ls-remote", cache_age_sec: 600 }),
         }),
@@ -256,9 +264,9 @@ function demoEnvelopes(): Record<string, Envelope> {
           policy: { enabled: true, agents: { "claude-code": true, codex: true, "kimi-code": true } },
           observed: {
             agents: {
-              "claude-code": { state: "drifted", link_path: "/Users/demo/.claude/skills/safe-merge-review", target_dir_exists: true },
-              codex: { state: "linked", link_path: "/Users/demo/.codex/skills/safe-merge-review", target_dir_exists: true },
-              "kimi-code": { state: "missing-link", link_path: "/Users/demo/.kimi-code/skills/safe-merge-review", target_dir_exists: true },
+              "claude-code": { state: "drifted", link_path: "/Users/demo/.claude/skills/safe-merge-review", target_dir_exists: true, assigned: true, enabled: true, actions: ["disable"] },
+              codex: { state: "linked", link_path: "/Users/demo/.codex/skills/safe-merge-review", target_dir_exists: true, assigned: true, enabled: true, actions: ["disable"] },
+              "kimi-code": { state: "missing-link", link_path: "/Users/demo/.kimi-code/skills/safe-merge-review", target_dir_exists: true, assigned: true, enabled: true, actions: ["update"] },
             },
             discovery_inbox: false,
           },
@@ -271,9 +279,9 @@ function demoEnvelopes(): Record<string, Envelope> {
           policy: { enabled: true, agents: { "claude-code": true, codex: true, "kimi-code": true } },
           observed: {
             agents: {
-              "claude-code": { state: "linked", link_path: "/Users/demo/.claude/skills/artifact-hygiene", target_dir_exists: true },
-              codex: { state: "linked", link_path: "/Users/demo/.codex/skills/artifact-hygiene", target_dir_exists: true },
-              "kimi-code": { state: "linked", link_path: "/Users/demo/.kimi-code/skills/artifact-hygiene", target_dir_exists: true },
+              "claude-code": { state: "linked", link_path: "/Users/demo/.claude/skills/artifact-hygiene", target_dir_exists: true, assigned: true, enabled: true, actions: ["disable"] },
+              codex: { state: "linked", link_path: "/Users/demo/.codex/skills/artifact-hygiene", target_dir_exists: true, assigned: true, enabled: true, actions: ["disable"] },
+              "kimi-code": { state: "linked", link_path: "/Users/demo/.kimi-code/skills/artifact-hygiene", target_dir_exists: true, assigned: true, enabled: true, actions: ["disable"] },
             },
             discovery_inbox: false,
           },
@@ -286,9 +294,9 @@ function demoEnvelopes(): Record<string, Envelope> {
           policy: { enabled: true, agents: { "claude-code": true, codex: false, "kimi-code": true } },
           observed: {
             agents: {
-              "claude-code": { state: "dead-link", link_path: "/Users/demo/.claude/skills/dead-one", target_dir_exists: true },
-              codex: { state: "disabled", link_path: "/Users/demo/.codex/skills/dead-one", target_dir_exists: true },
-              "kimi-code": { state: "linked", link_path: "/Users/demo/.kimi-code/skills/dead-one", target_dir_exists: true },
+              "claude-code": { state: "dead-link", link_path: "/Users/demo/.claude/skills/dead-one", target_dir_exists: true, assigned: true, enabled: true, actions: ["update"] },
+              codex: { state: "disabled", link_path: "/Users/demo/.codex/skills/dead-one", target_dir_exists: true, assigned: true, enabled: false, actions: ["enable"] },
+              "kimi-code": { state: "linked", link_path: "/Users/demo/.kimi-code/skills/dead-one", target_dir_exists: true, assigned: true, enabled: true, actions: ["disable"] },
             },
             discovery_inbox: false,
           },
@@ -301,9 +309,9 @@ function demoEnvelopes(): Record<string, Envelope> {
           policy: { enabled: false, agents: { "claude-code": false, codex: false, "kimi-code": false } },
           observed: {
             agents: {
-              "claude-code": { state: "disabled", link_path: "/Users/demo/.claude/skills/new-hotness", target_dir_exists: true },
-              codex: { state: "disabled", link_path: "/Users/demo/.codex/skills/new-hotness", target_dir_exists: true },
-              "kimi-code": { state: "disabled", link_path: "/Users/demo/.kimi-code/skills/new-hotness", target_dir_exists: true },
+              "claude-code": { state: "not-assigned", link_path: "/Users/demo/.claude/skills/new-hotness", target_dir_exists: true, assigned: false, enabled: false, actions: ["add"] },
+              codex: { state: "not-assigned", link_path: "/Users/demo/.codex/skills/new-hotness", target_dir_exists: true, assigned: false, enabled: false, actions: ["add"] },
+              "kimi-code": { state: "not-assigned", link_path: "/Users/demo/.kimi-code/skills/new-hotness", target_dir_exists: true, assigned: false, enabled: false, actions: ["add"] },
             },
             discovery_inbox: true,
           },
@@ -314,7 +322,7 @@ function demoEnvelopes(): Record<string, Envelope> {
           domain: "skills",
           spec: { collection: "agent-skills", name: "experimental-lint", source_path: "/repo/agent-skill/repositories/agent-skills/experimental-lint" },
           policy: { enabled: false, agents: {} },
-          observed: { install_source: null, agents: {}, discovery_inbox: true },
+          observed: { install_source: null, agents: {}, discovery_inbox: true, blocked_reason: "请先在集合定义中选择要分配的助手" },
           state: "disabled",
         }),
       ],
@@ -373,17 +381,86 @@ function demoEnvelopes(): Record<string, Envelope> {
           spec: { sources: ["process env"] },
           policy: { enabled: true },
           observed: { install_source: null, variables: [
-              { server: "grok-search", env_key: "FIRECRAWL_API_KEY", placeholder: "FIRECRAWL_API_KEY", resolved: false, kind: "env" },
               { server: "grok-search", env_key: "GROK_API_KEY", placeholder: "GROK_API_KEY", resolved: true, kind: "env" },
               { server: "grok-search", env_key: "TAVILY_API_KEY", placeholder: "TAVILY_API_KEY", resolved: false, kind: "env" },
               { server: "remote-api", env_key: "Authorization", placeholder: "DEMO_REMOTE_TOKEN", resolved: true, kind: "header" },
             ],
-            unresolved: 2 },
+            unresolved: 1 },
           state: "missing",
         }),
       ],
     },
     { command: "secrets.status" },
+  );
+
+  const profilesStatus = makeEnvelope(
+    {
+      domain: "profiles",
+      elements: [
+        makeElement({
+          id: "profiles:claude-work",
+          domain: "profiles",
+          spec: {
+            display_name: "Claude Code · 工作账号",
+            base_agent: "claude-code",
+            kind: "claude",
+            config_dir: "~/.claude-work",
+            base_url: "https://api.example.com",
+            model: "claude-sonnet-demo",
+          },
+          policy: { enabled: true },
+          observed: {
+            base_agent: "claude-code",
+            kind: "claude",
+            config_env: "CLAUDE_CONFIG_DIR",
+            config_dir: "~/.claude-work",
+            config_dir_exists: true,
+            target: "~/.claude-work/settings.json",
+            target_exists: true,
+            env_refs: [{ name: "ANTHROPIC_AUTH_TOKEN", kind: "reference", variable: "WORK_API_KEY", resolved: true }],
+            launch_value: 'CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude',
+            blocked_reason: null,
+          },
+          state: "managed-ok",
+          freshness: makeFreshness({ state: "not-applicable" }),
+          actions: [{ id: "apply", risk: "write-local", needs_lock: true, offline_ok: true }],
+        }),
+      ],
+    },
+    { command: "profiles.status" },
+  );
+
+  const usageStatus = makeEnvelope(
+    {
+      domain: "usage",
+      rows: [
+        {
+          hour: `${new Date().toISOString().slice(0, 10)}T02:00:00Z`,
+          agent: "claude-code",
+          model: "claude-sonnet-demo",
+          input: 820_000,
+          output: 95_000,
+          cache_write: 120_000,
+          cache_read: 460_000,
+          requests: 14,
+        },
+        {
+          hour: `${new Date().toISOString().slice(0, 10)}T03:00:00Z`,
+          agent: "codex",
+          model: "gpt-demo",
+          input: 510_000,
+          output: 62_000,
+          cache_write: 0,
+          cache_read: 180_000,
+          requests: 9,
+        },
+      ],
+      pricing: {
+        "claude-sonnet-demo": { input: 3, output: 15, cache_write: 3.75, cache_read: 0.3 },
+      },
+      last_scan_at: new Date().toISOString(),
+    },
+    { command: "usage.status" },
   );
 
   return {
@@ -393,6 +470,9 @@ function demoEnvelopes(): Record<string, Envelope> {
     "skills:status": skillsStatus,
     "rules:status": rulesStatus,
     "secrets:status": secretsStatus,
+    "profiles:status": profilesStatus,
+    "usage:status": usageStatus,
+    "usage:scan": makeEnvelope({ domain: "usage", action: "scan", files: 3, bytes: 24_576 }, { command: "usage.scan" }),
     "hooks:status": makeEnvelope(
       {
         domain: "hooks",
@@ -525,6 +605,16 @@ function demoEnvelopes(): Record<string, Envelope> {
 
 export function createMockEngineClient(options: { fresh?: boolean } = {}): EngineClient {
   const routes = demoEnvelopes();
+  const initialSecretVariables = ((routes["secrets:status"].data as { elements: Array<{ observed: { variables?: Array<{ placeholder?: string; env_key?: string; resolved?: boolean; stored?: boolean }> } }> })
+    .elements[0]?.observed.variables ?? []);
+  const externallyResolvedSecrets = new Set(
+    initialSecretVariables
+      .filter((item) => item.resolved === true && item.stored !== true)
+      .map((item) => {
+        const placeholder = item.placeholder ?? item.env_key ?? "";
+        return /^\$\{([^}]+)\}$/.exec(placeholder)?.[1] ?? placeholder;
+      }),
+  );
 
   // ---- 有状态的写路径演示数据（内存态，仅 DEV mock） ----
   const builtinPolicy: Record<string, unknown> = {
@@ -651,6 +741,49 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
     );
   };
 
+  const setSecret = (args: string[], runId: string): Envelope => {
+    const variable = args[args.indexOf("--var") + 1] ?? "";
+    const value = args[args.indexOf("--value") + 1] ?? "";
+    const normalize = (placeholder: string): string => /^\$\{([^}]+)\}$/.exec(placeholder)?.[1] ?? placeholder;
+    const secretsData = routes["secrets:status"].data as {
+      elements: Array<{ observed: { variables?: Array<{ placeholder?: string; env_key?: string; resolved?: boolean; stored?: boolean }>; unresolved?: number } }>;
+    };
+    const variables = secretsData.elements[0]?.observed.variables ?? [];
+    for (const item of variables) {
+      if (normalize(item.placeholder ?? item.env_key ?? "") !== variable) continue;
+      item.stored = value.length > 0;
+      item.resolved = value.length > 0 || externallyResolvedSecrets.has(variable);
+    }
+    if (secretsData.elements[0]) {
+      secretsData.elements[0].observed.unresolved = variables.filter((item) => item.resolved === false).length;
+    }
+
+    const mcpData = routes["mcp:status"].data as {
+      elements: Array<{
+        observed: {
+          env?: Record<string, { placeholder?: string; resolved?: boolean }>;
+          headers?: Record<string, { placeholder?: string; resolved?: boolean }>;
+          agents?: Record<string, { state: string; actions?: string[]; blocked_reason?: string | null }>;
+        };
+      }>;
+    };
+    for (const element of mcpData.elements) {
+      for (const resolution of [...Object.values(element.observed.env ?? {}), ...Object.values(element.observed.headers ?? {})]) {
+        if (normalize(resolution.placeholder ?? "") === variable) {
+          resolution.resolved = value.length > 0 || externallyResolvedSecrets.has(variable);
+        }
+      }
+      if (variable === "TAVILY_API_KEY" && element.observed.agents?.codex) {
+        const cell = element.observed.agents.codex;
+        cell.state = value.length > 0 ? "missing" : "not-materialized";
+        cell.actions = value.length > 0 ? ["add"] : [];
+        cell.blocked_reason = value.length > 0 ? null : "凭证变量未配置: TAVILY_API_KEY";
+      }
+    }
+    recordRun(runId, "secrets.set");
+    return makeEnvelope({ variable, stored: value.length > 0 }, { command: "secrets.set", run_id: runId });
+  };
+
   const configureAgent = (args: string[], runId: string): Envelope => {
     const agentId = args[args.indexOf("--only") + 1];
     const data = routes["agents:status"].data as {
@@ -739,6 +872,31 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       if (command === "policy:get") return policyGet();
       if (command === "policy:set") return policySet(args);
       if (command === "policy:delete") return policyDelete(args);
+      if (command === "secrets:set") return setSecret(args, runId);
+      if (command === "secrets:adopt") {
+        recordRun(runId, "secrets.adopt");
+        return makeEnvelope({ domain: "secrets", adopted: [] }, { command: "secrets.adopt", run_id: runId });
+      }
+      if (command === "config:export") {
+        return makeEnvelope(
+          {
+            format: "agent-manager/config-backup/v1",
+            policy: structuredClone(sqlitePolicy),
+            sources: {},
+            secrets: {},
+          },
+          { command: "config.export" },
+        );
+      }
+      if (command === "config:import") {
+        try {
+          JSON.parse(args[args.indexOf("--value") + 1] ?? "");
+        } catch {
+          return makeEnvelope({}, { command: "config.import", ok: false, errors: [{ code: "USAGE_ERROR", element: null, message: "备份内容不是合法 JSON" }] });
+        }
+        recordRun(runId, "config.import");
+        return makeEnvelope({ imported: true }, { command: "config.import", run_id: runId });
+      }
       if (command === "runs:list") {
         return makeEnvelope({ runs }, { command: "runs.list" });
       }
@@ -748,6 +906,11 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
           { run_id: id, operations: [{ id: "op-mock", operation_type: "mcp:apply", target: "mcp:grok-search", detail: { result: "ok" }, created_at: "2026-09-05T23:59:00Z" }] },
           { command: "runs.get" },
         );
+      }
+      if (command === "runs:clear") {
+        const deleted = runs.length;
+        runs.splice(0, runs.length);
+        return makeEnvelope({ deleted }, { command: "runs.clear" });
       }
       if (command === "agents:configure") return configureAgent(args, runId);
       if (command === "agents:check") {

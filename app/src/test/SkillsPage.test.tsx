@@ -510,8 +510,11 @@ describe("SkillsPage 空态引导与发现失败呈现", () => {
     await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
     const empty = await screen.findByTestId("skills-empty-state");
     expect(empty).toHaveTextContent("集合资源库尚未拉取");
-    expect(empty).toHaveTextContent("请到「集合列表」点击「更新资源库」，拉取成功后技能会出现在这里");
+    expect(empty).toHaveTextContent("先更新集合资源库，拉取成功后技能会出现在这里");
     expect(empty).not.toHaveTextContent("无符合筛选条件的技能分配");
+    await userEvent.click(screen.getByTestId("open-collections-to-update"));
+    expect(screen.getByRole("tab", { name: "集合列表" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("update-collection-agent-skills")).toBeInTheDocument();
   });
 
   it("集合已拉取但无技能行时保持现有空态文案；发现失败在集合卡片以警告样式呈现", async () => {

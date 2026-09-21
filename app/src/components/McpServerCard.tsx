@@ -19,6 +19,12 @@ function displayPlaceholder(value: string | undefined): string {
   return value.startsWith("${") ? value : `\${${value}}`;
 }
 
+function variableName(name: string, placeholder: string | undefined): string {
+  const value = placeholder ?? name;
+  const match = /^\$\{([^}]+)\}$/.exec(value);
+  return match?.[1] ?? value;
+}
+
 function EnvResolutionList({ element }: { element: EngineElement }) {
   const observed = element.observed as McpObserved;
   const env = observed.env ?? {};
@@ -183,7 +189,7 @@ export function McpServerCard({
   onAction: (element: EngineElement, action: "enable" | "disable" | "remove" | "upgrade") => void;
   onSync: (element: EngineElement) => void;
   syncing: boolean;
-  onConfigureSecrets?: () => void;
+  onConfigureSecrets?: (variable: string) => void;
 }) {
   const spec = element.spec as McpSpec;
   const observed = element.observed as McpServerObserved;
@@ -194,6 +200,13 @@ export function McpServerCard({
   const headerEntries = Object.entries(observed.headers ?? {});
   const secretEntries = [...envEntries, ...headerEntries];
   const envResolved = secretEntries.filter(([, resolution]) => resolution.resolved).length;
+  const missingSecretVariables = Array.from(
+    new Set(
+      secretEntries
+        .filter(([, resolution]) => resolution.resolved === false)
+        .map(([name, resolution]) => variableName(name, resolution.placeholder)),
+    ),
+  );
   const syncPlan = buildMcpSyncPlan(element);
   const syncRows = new Map(syncPlan.rows.map((row) => [row.agent, row]));
   const blockedRows = new Map(syncPlan.blocked.map((row) => [row.agent, row]));
@@ -201,7 +214,7 @@ export function McpServerCard({
   const resolutionEntries = Object.entries(agentCellsOf(element))
     .filter(([agent]) => issueAgents.has(agent))
     .map(([agent, cell]) => ({ agent, cell: cell as McpAgentCellView }));
-  const hasMissingSecrets = syncPlan.blocked.some(({ reason }) => reason.includes("凭证变量未配置"));
+  const firstMissingSecret = missingSecretVariables[0];
 
   return (
     <section
@@ -249,6 +262,16 @@ export function McpServerCard({
         >
           {isRemote ? `请求头 ${envResolved}/${secretEntries.length} 已配置` : `密钥变量 ${envResolved}/${secretEntries.length} 已配置`}
         </span>
+        {firstMissingSecret && onConfigureSecrets && (
+          <button
+            type="button"
+            data-testid={`configure-secrets-${element.id}`}
+            onClick={() => onConfigureSecrets(firstMissingSecret)}
+            className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-medium text-primary hover:bg-primary/15"
+          >
+            填写缺失变量{missingSecretVariables.length > 1 ? `（${missingSecretVariables.length}）` : ""}
+          </button>
+        )}
       </div>
 
       {selected && <div className="mt-4"><McpServerDetail element={element} /></div>}
@@ -280,16 +303,6 @@ export function McpServerCard({
               {syncPlan.blocked.length > 0 && <span className="font-normal text-warning">· {syncPlan.blocked.length} 个需先处理</span>}
             </div>
             <div className="flex items-center gap-2">
-              {hasMissingSecrets && onConfigureSecrets && (
-                <button
-                  type="button"
-                  data-testid={`configure-secrets-${element.id}`}
-                  onClick={onConfigureSecrets}
-                  className="rounded border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary hover:bg-primary/15"
-                >
-                  配置缺失变量
-                </button>
-              )}
               {syncPlan.rows.length > 0 && (
                 <button
                   type="button"

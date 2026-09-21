@@ -201,15 +201,27 @@ describe("McpPage 服务库 + 助手中的服务", () => {
     ]);
   });
 
-  it("缺少变量时给出下一步：从待处理区直接进入密钥页", async () => {
-    const onNavigate = vi.fn();
-    renderWithEngine(<McpPage onNavigate={onNavigate} />, mcpRoutes());
+  it("缺少变量时在当前服务卡片直接填写，不离开 MCP 页", async () => {
+    const routes = {
+      ...mcpRoutes(),
+      "secrets:set": makeEnvelope({}, { command: "secrets.set" }),
+    };
+    const { calls } = renderWithEngine(<McpPage />, routes);
 
     const resolution = await screen.findByTestId("mcp-resolution-mcp:serena");
     expect(resolution).toHaveTextContent("凭证变量未配置: SERENA_KEY");
     await userEvent.click(screen.getByTestId("configure-secrets-mcp:serena"));
+    expect(await screen.findByRole("dialog", { name: "填写 SERENA_KEY" })).toBeInTheDocument();
+    expect(screen.getByTestId("secret-value-save")).toBeDisabled();
 
-    expect(onNavigate).toHaveBeenCalledWith("settings:secrets");
+    await userEvent.type(screen.getByTestId("secret-value-input"), "test-only-value");
+    expect(screen.getByTestId("secret-value-save")).toBeEnabled();
+    await userEvent.click(screen.getByTestId("secret-value-save"));
+    await waitFor(() => expect(calls.some((call) => call.command === "secrets:set")).toBe(true));
+
+    const save = calls.find((call) => call.command === "secrets:set")!;
+    expect(save.args).toEqual(["--var", "SERENA_KEY", "--value", "test-only-value"]);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "填写 SERENA_KEY" })).toBeNull());
   });
 
   it("助手中的服务：单元格态 已配置/不一致/以前配过/尚未生成，版本短摘要 title 存完整值", async () => {

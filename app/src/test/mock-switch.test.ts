@@ -24,12 +24,17 @@ describe("dev-only mock 开关", () => {
       "skills:status",
       "rules:status",
       "secrets:status",
+      "profiles:status",
+      "usage:status",
+      "usage:scan",
       "agents:apply",
       "mcp:apply",
       "skills:apply",
       "rules:apply",
       "system:refresh-upstream",
       "agents:check",
+      "config:export",
+      "runs:clear",
     ]) {
       const envelope = await client.run(command);
       expect(envelope.ok, command).toBe(true);
@@ -84,5 +89,29 @@ describe("dev-only mock 开关", () => {
     const restoredCodex = (restored.data as { elements: Array<{ id: string; spec: { settings?: { active?: string } } }> }).elements
       .find((element) => element.id === "agents:codex");
     expect(restoredCodex?.spec.settings?.active).toBeUndefined();
+  });
+
+  it("mock client 支持 MCP 页就地填写缺失变量并回读状态", async () => {
+    const client = createMockEngineClient();
+
+    const before = await client.run("mcp:status");
+    const beforeGrok = (before.data as { elements: Array<{ id: string; observed: { env?: Record<string, { resolved?: boolean }> } }> }).elements
+      .find((element) => element.id === "mcp:grok-search");
+    expect(beforeGrok?.observed.env?.TAVILY_API_KEY.resolved).toBe(false);
+
+    const saved = await client.run(
+      "secrets:set",
+      ["--var", "TAVILY_API_KEY", "--value", "test-only-value"],
+      { runId: "gui-mock-secret" },
+    );
+    expect(saved.ok).toBe(true);
+    expect(saved.run_id).toBe("gui-mock-secret");
+
+    const after = await client.run("mcp:status");
+    const afterGrok = (after.data as { elements: Array<{ id: string; observed: { env?: Record<string, { resolved?: boolean }>; agents?: Record<string, { actions?: string[]; blocked_reason?: string | null }> } }> }).elements
+      .find((element) => element.id === "mcp:grok-search");
+    expect(afterGrok?.observed.env?.TAVILY_API_KEY.resolved).toBe(true);
+    expect(afterGrok?.observed.agents?.codex.actions).toEqual(["add"]);
+    expect(afterGrok?.observed.agents?.codex.blocked_reason).toBeNull();
   });
 });

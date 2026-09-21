@@ -652,8 +652,20 @@ export default function SkillsPage({
                   title={allCollectionsUncached ? "集合资源库尚未拉取" : "无符合筛选条件的技能分配"}
                   description={
                     allCollectionsUncached
-                      ? "请到「集合列表」点击「更新资源库」，拉取成功后技能会出现在这里"
+                      ? "先更新集合资源库，拉取成功后技能会出现在这里"
                       : undefined
+                  }
+                  actions={
+                    allCollectionsUncached ? (
+                      <button
+                        type="button"
+                        data-testid="open-collections-to-update"
+                        onClick={() => setActiveTab("collections")}
+                        className="inline-flex items-center gap-1 rounded border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/15"
+                      >
+                        去更新资源库
+                      </button>
+                    ) : undefined
                   }
                 />
               )

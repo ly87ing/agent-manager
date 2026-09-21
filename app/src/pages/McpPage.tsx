@@ -12,6 +12,7 @@ import { McpServerCard } from "../components/McpServerCard";
 import { McpServerFormDialog } from "../components/McpServerFormDialog";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
+import { SecretValueDialog } from "../components/SecretValueDialog";
 import type { Diagnostic, EngineElement, McpImportCandidate, PolicyData, PolicyLayers, StatusData } from "../lib/contract";
 import { engineErrorMessage, runEngine } from "../lib/engine";
 import { candidateToDefinition, isMcpTakeoverBlocked } from "../lib/mcpImport";
@@ -32,7 +33,7 @@ function fullMcpDefinition(layers: PolicyLayers | null, name: string): Record<st
   return typeof definition === "object" && definition !== null ? (definition as Record<string, unknown>) : null;
 }
 
-export default function McpPage({ onNavigate }: { onNavigate?: (page: string) => void }) {
+export default function McpPage() {
   const query = useEngineQuery<StatusData>("mcp:status");
   const agentsQuery = useEngineQuery<StatusData>("agents:status");
   const policyQuery = useEngineQuery<PolicyData>("policy:get");
@@ -44,6 +45,7 @@ export default function McpPage({ onNavigate }: { onNavigate?: (page: string) =>
   const [expandedMcpIds, setExpandedMcpIds] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [formState, setFormState] = useState<{ editing: EngineElement } | "new" | null>(null);
+  const [editingSecret, setEditingSecret] = useState<string | null>(null);
   const [importTarget, setImportTarget] = useState<McpImportCandidate | null>(null);
   const [importExecuting, setImportExecuting] = useState(false);
   const [importErrors, setImportErrors] = useState<Diagnostic[] | null>(null);
@@ -460,7 +462,7 @@ export default function McpPage({ onNavigate }: { onNavigate?: (page: string) =>
                   onAction={handleServerAction}
                   onSync={handleSync}
                   syncing={batchApply.executing || takeover.executing || directApply.executing}
-                  onConfigureSecrets={onNavigate ? () => onNavigate("settings:secrets") : undefined}
+                  onConfigureSecrets={setEditingSecret}
                 />
               ))}
             </div>
@@ -609,6 +611,27 @@ export default function McpPage({ onNavigate }: { onNavigate?: (page: string) =>
           onSubmit={(name, definition, isNew, complete) => {
             setFormState(null);
             void definitionOps.saveDefinition({ name, definition, isNew, complete });
+          }}
+        />
+      )}
+
+      {editingSecret && (
+        <SecretValueDialog
+          variable={editingSecret}
+          stored={false}
+          requireValue
+          busy={directApply.executing}
+          onClose={() => setEditingSecret(null)}
+          onSubmit={(value) => {
+            void directApply
+              .apply({
+                command: "secrets:set",
+                label: `保存取值 ${editingSecret}`,
+                args: ["--var", editingSecret, "--value", value],
+              })
+              .then((envelope) => {
+                if (envelope?.ok) setEditingSecret(null);
+              });
           }}
         />
       )}

@@ -10,6 +10,7 @@ import { X } from "lucide-react";
 export function SecretValueDialog({
   variable,
   stored,
+  requireValue = false,
   busy,
   onSubmit,
   onClose,
@@ -17,6 +18,8 @@ export function SecretValueDialog({
   variable: string;
   /** 该变量在本机是否已经填过——决定说明文案与是否给「清除」。 */
   stored: boolean;
+  /** 缺失变量的就地补齐入口不能提交空值；密钥管理页仍允许留空清除。 */
+  requireValue?: boolean;
   busy: boolean;
   onSubmit: (value: string) => void;
   onClose: () => void;
@@ -62,7 +65,7 @@ export function SecretValueDialog({
           <button
             type="button"
             data-testid="secret-value-save"
-            disabled={busy}
+            disabled={busy || (requireValue && value.length === 0)}
             onClick={() => onSubmit(value)}
             className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
           >
