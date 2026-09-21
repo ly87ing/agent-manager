@@ -3,7 +3,7 @@ import { waitFor } from "@testing-library/react";
 import AgentsPage from "../pages/AgentsPage";
 import AliasesPage from "../pages/AliasesPage";
 import type { Envelope } from "../lib/contract";
-import { makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
+import { agentManagementFixture, makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 
 function agentRoutes(): Record<string, Envelope> {
@@ -12,7 +12,7 @@ function agentRoutes(): Record<string, Envelope> {
     "policy:get": makeEnvelope(
       makePolicyData({
         layers: {
-          sqlite: { agents: { definitions: { "my-agent": { display_name: "My Agent", bin: "my-agent" } } } },
+          sqlite: { agents: { definitions: { "claude-code": { display_name: "Claude Code", bin: "claude" } } } },
         },
       }),
       { command: "policy.get" },
@@ -23,11 +23,11 @@ function agentRoutes(): Record<string, Envelope> {
         domain: "agents",
         elements: [
           makeElement({
-            id: "agents:my-agent",
+            id: "agents:claude-code",
             domain: "agents",
-            spec: { display_name: "My Agent", bin: "my-agent", providers: {} },
+            spec: { display_name: "Claude Code", bin: "claude", providers: {} },
             policy: { enabled: true },
-            observed: { install_source: null, installed: false },
+            observed: { install_source: null, installed: false, management: agentManagementFixture("claude") },
             state: "missing",
             freshness: makeFreshness(),
             actions: [],
@@ -63,8 +63,8 @@ describe("助手启停", () => {
     const { calls } = renderWithEngine(<AgentsPage />, agentRoutes());
     await screen.findByTestId("connection-workbench");
 
-    expect(screen.queryByTestId("agent-menu-agents:my-agent")).toBeNull();
-    expect(screen.queryByTestId("policy-enabled-agents:my-agent")).toBeNull();
+    expect(screen.queryByTestId("agent-menu-agents:claude-code")).toBeNull();
+    expect(screen.queryByTestId("policy-enabled-agents:claude-code")).toBeNull();
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
     expect(calls.some((call) => call.command === "agents:apply")).toBe(false);
   });

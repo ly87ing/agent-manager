@@ -176,6 +176,13 @@ fn element(
             .and_then(|dir| crate::agent_usage::read_profile(def.kind.as_str(), dir))
             .unwrap_or(Value::Null),
     );
+    if let Some(dir) = config_dir.as_deref() {
+        let auth_kind = match def.kind {
+            model::ProfileKind::Claude => crate::native_auth::AuthKind::Claude,
+            model::ProfileKind::Codex => crate::native_auth::AuthKind::Codex,
+        };
+        observed.insert("auth".into(), crate::native_auth::inspect(dir, auth_kind));
+    }
     observed.insert("files".into(), Value::Array(files));
     observed.insert("env_refs".into(), Value::Array(env_refs));
     observed.insert(

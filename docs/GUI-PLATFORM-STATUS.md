@@ -13,8 +13,8 @@
 | Skills 原生域 | 已完成：已接入 dispatcher；内置默认只读、写入进 SQLite；集合与单技能支持更新/启停/移除；内容快照与安全软连接；status 只读零写与 apply 排他锁/审计 |
 | Runs 操作记录与清理 | 已完成：列表与详情读取 SQLite `operation_logs`；新增操作记录时按设置（`log_retention_days`，0 为不清理）删除过期记录；提供 `runs:clear` 二次确认手动清空（清空自身零审计且不删库改配置） |
 | 本地结构化诊断日志与清理 | 已退役（2026-09-19 裁决）：JSONL 诊断日志、`logs:clear` 与 envelope `log_file` 一并移除；错误消息出库前仍统一脱敏，排查依赖 `operation_logs` |
-| MCP 原生域 | 已完成：Rust dispatcher 已接入本地 stdio 与远程 HTTP `mcp:status` / 真实 `mcp:apply`；定义与分配存 SQLite；支持 Claude JSON、Codex TOML、OpenCode JSON（需配置对应 Agent target）；逐助手 add/update/enable/disable/remove，库级 enable/disable/remove；status 只读零写；apply 具备锁、审计、CAS/回滚；env 在 SQLite definition/binding 中只持久化字面量 `${VAR}` 形式的环境变量引用；status、诊断与操作日志不展示或保存解析后的真实值；真实 apply 执行时从进程环境解析，并按目标 codec 写入 Claude、Codex 或 OpenCode 的目标客户端配置，目标文件的明文由文件权限与客户端安全边界保护 |
-| Rules 原生域 | 已完成：Rust dispatcher 已接入 `rules:status` / 真实 `rules:apply`；固定 Codex/Claude/OpenCode 三目标；规则专用 `sources:get/set`（rules.shared/rules.codex/rules.claude/rules.opencode）使用 revision CAS 只写 SQLite；status 只读零写；apply 具备排他锁、审计与 CAS/回滚，外部修改 fail-closed |
+| MCP 原生域 | 已完成：Rust dispatcher 已接入本地 stdio 与远程 HTTP `mcp:status` / 真实 `mcp:apply`；定义与分配存 SQLite；当前产品支持 Claude JSON 与 Codex TOML，旧 OpenCode codec 仅用于兼容既有数据；逐助手 add/update/enable/disable/remove，库级 enable/disable/remove；status 只读零写；apply 具备锁、审计、CAS/回滚；env 在 SQLite definition/binding 中只持久化字面量 `${VAR}` 形式的环境变量引用；status、诊断与操作日志不展示或保存解析后的真实值 |
+| Rules 原生域 | 已完成：Rust dispatcher 已接入 `rules:status` / 真实 `rules:apply`；固定 Codex/Claude 两目标；规则专用 `sources:get/set`（rules.shared/rules.codex/rules.claude）使用 revision CAS 只写 SQLite；status 只读零写；apply 具备排他锁、审计与 CAS/回滚，外部修改 fail-closed |
 | Hooks 原生域 | 已完成：Rust dispatcher 已接入 `hooks:status` / 真实 `hooks:apply`；hooks 专用 `sources:get/set`（hooks.claude/hooks.codex）revision CAS 只写 SQLite；固定 Claude `~/.claude/settings.json` signature-set 合并与 Codex `~/.codex/hooks.json` whole-file 两目标，外部修改 fail-closed |
 | 定义编辑原文保存 | 已完成（`5ae995b`）：SourceDefinitionsPanel 禁用文本框自动替换并有单测，Rules/Hooks 原文保存不被 smart quotes 等自动改写 |
 | 系统审计 | 已完成：Rust dispatcher 已接入只读 `system:audit`；聚合 agents/skills/mcp/rules/hooks/aliases/secrets 与 runtime/storage 状态 |
@@ -30,7 +30,7 @@
 
 公共 `*:plan` 与 `--dry-run` 入口已退役，调用会被拒绝；status/query 只读零写；六域写操作仅通过真实 apply 完成，apply 内部保留 preflight/写前校验、精确 scope、锁、外部修改检测、CAS/条件回滚与审计。
 
-MCP 支持本地 stdio 与远程 HTTP 两种传输（字段互斥：远程定义含 `url`，仅允许 `https://` 或本机回环 `http://localhost` / `http://127.0.0.1`，可选 `headers` 仅接受 `${VAR}` 占位符，以引用形式写入目标，明文不落盘）。OpenCode 使用 OpenCode JSON codec，必须为对应 Agent 配置 `mcp_config` 目标。
+MCP 支持本地 stdio 与远程 HTTP 两种传输（字段互斥：远程定义含 `url`，仅允许 `https://` 或本机回环 `http://localhost` / `http://127.0.0.1`，可选 `headers` 仅接受 `${VAR}` 占位符，以引用形式写入目标，明文不落盘）。当前产品只向 Claude Code 与 Codex 暴露分配入口。
 
 旧 DMG/旧 GUI E2E 不证明本轮新交互。本轮源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收已完成；最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify（提交、SHA256 与验证结果见 [交付回执](goal-rust-gui.md)）。
 

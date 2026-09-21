@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { waitFor } from "@testing-library/react";
 import AgentsPage from "../pages/AgentsPage";
 import type { Envelope } from "../lib/contract";
-import { makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
+import { agentManagementFixture, makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 
 function profileElement(overrides: Record<string, unknown> = {}) {
@@ -77,7 +77,7 @@ function routes(profiles: ReturnType<typeof profileElement>[] = [profileElement(
             domain: "agents",
             spec: { display_name: "Claude Code", bin: "claude", preferred_provider: "native", providers: { native: { managed: true } } },
             policy: { enabled: true },
-            observed: { install_source: "native", installed: true },
+            observed: { install_source: "native", installed: true, management: agentManagementFixture("claude") },
             state: "managed-ok",
             freshness: makeFreshness(),
             actions: [],

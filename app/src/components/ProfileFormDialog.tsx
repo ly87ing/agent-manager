@@ -7,10 +7,10 @@ import {
   configEnvOf,
   defaultConfigDir,
   profileMcpConfig,
-  profileKindOf,
   profileLaunchValue,
   profileSkillsDir,
   type ProfileFormInput,
+  type ProfileKind,
 } from "../lib/profileDefinition";
 
 /**
@@ -29,7 +29,7 @@ export function ProfileFormDialog({
   onClose,
 }: {
   /** 可作为归属的助手（目前支持 Claude Code 与 Codex）。 */
-  baseAgents: { id: string; displayName: string }[];
+  baseAgents: { id: string; displayName: string; kind: ProfileKind }[];
   initial?: ProfileFormInput;
   /** 复制实例时带着预填内容但仍是新建：名称与配置目录必须可改。 */
   isEdit?: boolean;
@@ -50,7 +50,8 @@ export function ProfileFormDialog({
   const [extraArgs, setExtraArgs] = useState(initial?.extraArgs ?? "");
   const [error, setError] = useState<string | null>(null);
 
-  const kind = profileKindOf(baseAgent);
+  const selectedAgent = baseAgents.find((agent) => agent.id === baseAgent);
+  const kind = selectedAgent?.kind ?? baseAgents[0]?.kind ?? "claude";
   const effectiveConfigDir = configDir.trim() || defaultConfigDir(kind, id);
   const input: ProfileFormInput = {
     id,
@@ -64,7 +65,6 @@ export function ProfileFormDialog({
     extraArgs,
   };
   const launch = id ? profileLaunchValue(input, baseBinOf(baseAgent)) : "";
-  const selectedAgent = baseAgents.find((agent) => agent.id === baseAgent);
   const managedConfigFile = `${effectiveConfigDir.replace(/\/$/, "")}/${kind === "codex" ? "agent-manager.config.toml" : "settings.json"}`;
   const mcpConfigFile = profileMcpConfig(kind, effectiveConfigDir).path;
   const skillsDir = profileSkillsDir(effectiveConfigDir);

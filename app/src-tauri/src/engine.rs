@@ -1003,8 +1003,8 @@ mod tests {
         .unwrap();
         assert!(env.ok, "{:?}", env.errors);
         assert!(!env.mode.offline, "sources 不注入 --offline");
-        // rules 来源四项：shared、claude、codex、opencode
-        assert_eq!(env.data["sources"].as_array().unwrap().len(), 4);
+        // rules 来源三项：shared、claude、codex
+        assert_eq!(env.data["sources"].as_array().unwrap().len(), 3);
         assert!(!root.join("data").exists(), "sources:get 零写");
         let _ = std::fs::remove_dir_all(root);
     }
@@ -1030,8 +1030,8 @@ mod tests {
             dispatch_native(c(), "rules:status".into(), vec![], "rules-bridge".into()).unwrap();
         assert!(env.ok, "{:?}", env.errors);
         assert!(!env.mode.offline);
-        // rules 固定三目标：codex、claude、opencode
-        assert_eq!(env.data["elements"].as_array().unwrap().len(), 3);
+        // rules 固定两目标：codex、claude
+        assert_eq!(env.data["elements"].as_array().unwrap().len(), 2);
         assert!(!root.join("data").exists(), "rules:status 零写");
         assert!(!root.join("home").exists(), "rules:status 零写");
         let _ = std::fs::remove_dir_all(root);

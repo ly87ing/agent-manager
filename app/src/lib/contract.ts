@@ -160,6 +160,8 @@ export interface ProfileObserved {
   launch_value: string;
   /** 这个实例自己的额度：实例多半是另一个账号，各算各的。 */
   usage?: AgentUsage | null;
+  /** 官方认证文件的脱敏状态；不含账号或凭据正文。 */
+  auth?: import("./observed").AgentAuthStatus | null;
   blocked_reason: string | null;
 }
 

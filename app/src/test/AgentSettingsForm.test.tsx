@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { waitFor } from "@testing-library/react";
+import { fireEvent, waitFor } from "@testing-library/react";
 import AgentsPage from "../pages/AgentsPage";
-import { makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
+import { agentManagementFixture, makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 import type { EngineElement, Envelope } from "../lib/contract";
 
@@ -30,7 +30,7 @@ function routes(overrides: Record<string, Envelope> = {}): Record<string, Envelo
               providers: { native: { managed: true, install: "i.sh", upgrade: "u.sh" } },
             },
             policy: { enabled: true },
-            observed: { install_source: "native", installed: true },
+            observed: { install_source: "native", installed: true, management: agentManagementFixture("claude") },
             state: "managed-ok",
             freshness: makeFreshness(),
             actions: [],
@@ -89,7 +89,11 @@ describe("助手运行参数", () => {
                 providers: { native: { managed: true, install: "i.sh", upgrade: "u.sh" } },
               },
               policy: { enabled: true },
-              observed: { install_source: "native", installed: true },
+              observed: {
+                install_source: "native",
+                installed: true,
+                management: bin === "claude" || bin === "codex" ? agentManagementFixture(bin) : null,
+              },
               state: "managed-ok",
               freshness: makeFreshness(),
               actions: [],
@@ -143,9 +147,10 @@ describe("助手运行参数", () => {
     const dialog = await screen.findByRole("dialog", { name: "Claude Code 运行设置" });
     expect(dialog).toHaveTextContent("env.ENABLE_TOOL_SEARCH");
     expect(dialog).toHaveTextContent("env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS");
-    expect(dialog).toHaveTextContent("attribution.commit / attribution.pr");
+    expect(dialog).toHaveTextContent("attribution.commit");
+    expect(dialog).toHaveTextContent("attribution.pr");
 
-    await userEvent.selectOptions(screen.getByTestId("agent-runtime-claude-effort"), "max");
+    await userEvent.selectOptions(screen.getByTestId("agent-runtime-claude-effort-level"), "max");
     await userEvent.click(screen.getByTestId("agent-runtime-claude-tool-search"));
     await userEvent.click(screen.getByTestId("agent-runtime-claude-agent-teams"));
     await userEvent.click(screen.getByTestId("agent-runtime-claude-disable-artifact"));
@@ -173,9 +178,9 @@ describe("助手运行参数", () => {
     expect(dialog).toHaveTextContent("model_auto_compact_token_limit");
     expect(dialog).toHaveTextContent("web_search");
 
-    await userEvent.selectOptions(screen.getByTestId("agent-runtime-codex-reasoning"), "high");
+    await userEvent.selectOptions(screen.getByTestId("agent-runtime-codex-reasoning-effort"), "high");
     await userEvent.type(screen.getByTestId("agent-runtime-codex-context-window"), "1000000");
-    await userEvent.type(screen.getByTestId("agent-runtime-codex-compact-limit"), "900000");
+    await userEvent.type(screen.getByTestId("agent-runtime-codex-auto-compact-token-limit"), "900000");
     await userEvent.selectOptions(screen.getByTestId("agent-runtime-codex-web-search"), "live");
     await userEvent.click(screen.getByTestId("agent-runtime-submit"));
 
@@ -421,6 +426,48 @@ describe("助手运行参数", () => {
     expect(calls.some((call) => call.command === "secrets:set")).toBe(false);
   });
 
+  it("工作台导入接入：先预览，只保存定义且不启用、不写凭据", async () => {
+    const withProfiles = routes();
+    const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
+
+    await userEvent.click(await screen.findByTestId("import-connection-button"));
+    const dialog = await screen.findByRole("dialog", { name: "导入接入" });
+    expect(dialog).toHaveTextContent("不导入凭据取值、不启用接入");
+    fireEvent.change(screen.getByTestId("connection-import-text"), { target: { value: JSON.stringify({
+      format: "agent-manager/provider/v1",
+      kind: "claude",
+      connection: {
+        name: "shared-relay",
+        label: "分享线路",
+        baseUrl: "https://shared.example.com",
+        auth: "token",
+        tokenVar: "SHARED_KEY",
+        model: "shared-model",
+        smallFastModel: "",
+        aliasOpus: "",
+        aliasSonnet: "",
+        aliasHaiku: "",
+        timeoutMs: "",
+      },
+    }) } });
+    await userEvent.click(screen.getByTestId("connection-import-inspect"));
+    expect(screen.getByTestId("connection-import-preview")).toHaveTextContent("分享线路");
+    await userEvent.click(screen.getByTestId("connection-import-confirm"));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
+    const saved = calls.find((call) => call.command === "policy:set")!;
+    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
+    expect(definition.settings.profiles["shared-relay"]).toEqual({
+      label: "分享线路",
+      base_url: "https://shared.example.com",
+      token_var: "SHARED_KEY",
+      model: "shared-model",
+    });
+    expect(definition.settings.active).toBeUndefined();
+    expect(configureCalls(calls)).toHaveLength(0);
+    expect(calls.some((call) => call.command === "secrets:set")).toBe(false);
+  });
+
   it("工作台删除非当前接入：确认后只删目标定义，不切换也不删除凭据", async () => {
     const withProfiles = routes();
     const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
@@ -462,6 +509,32 @@ describe("助手运行参数", () => {
     expect(remove).toBeDisabled();
     expect(remove).toHaveAttribute("title", expect.stringContaining("先切换"));
     expect(calls.some((call) => ["policy:set", "agents:configure", "secrets:set"].includes(call.command))).toBe(false);
+  });
+
+  it("接入卡片可调整顺序，只保存定义且不触碰配置或认证", async () => {
+    const withProfiles = routes();
+    const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.settings = {
+      active: "beta",
+      profiles: {
+        alpha: { label: "Alpha", base_url: "https://a.example.com", future: 1 },
+        beta: { label: "Beta", base_url: "https://b.example.com", future: 2 },
+        gamma: { label: "Gamma", base_url: "https://c.example.com", future: 3 },
+      },
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
+
+    expect(await screen.findByRole("button", { name: "上移 Alpha" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "上移 Beta" }));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
+    const saved = calls.find((call) => call.command === "policy:set")!;
+    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
+    expect(Object.keys(definition.settings.profiles)).toEqual(["beta", "alpha", "gamma"]);
+    expect(definition.settings.active).toBe("beta");
+    expect(definition.settings.profiles.beta.future).toBe(2);
+    expect(configureCalls(calls)).toHaveLength(0);
+    expect(calls.some((call) => call.command === "secrets:set")).toBe(false);
   });
 
   it("测一下：只读地问一次，把结果就地说清楚", async () => {
@@ -685,7 +758,7 @@ describe("助手运行参数", () => {
         },
       },
       policy: { enabled: true },
-      observed: { install_source: "native", installed: true },
+      observed: { install_source: "native", installed: true, management: agentManagementFixture("codex") },
       state: "managed-ok",
       freshness: makeFreshness(),
       actions: [],
@@ -714,14 +787,13 @@ describe("助手运行参数", () => {
     expect(screen.getByTestId("agent-runtime-yolo")).toBeInTheDocument();
   });
 
-  it("既不是 Claude 也不是 Codex 的助手：接入与运行设置都保持只读", async () => {
+  it("既不是 Claude 也不是 Codex 的助手：不进入接入工作台", async () => {
     renderWithEngine(<AgentsPage />, agentRoutes("opencode", "opencode"));
-    expect(await screen.findByTestId("add-connection-button")).toBeDisabled();
-    expect(screen.getByTestId("agent-runtime-button")).toBeDisabled();
-    expect(screen.queryByLabelText("当前运行设置")).toBeNull();
+    expect(await screen.findByRole("heading", { name: "实例" })).toBeInTheDocument();
+    expect(screen.queryByTestId("connection-workbench")).toBeNull();
   });
 
-  it("不支持应用内接入的助手：历史 profiles 只读可见，不露出必失败的启用与测试动作", async () => {
+  it("不支持的历史助手定义不再露出接入卡片", async () => {
     const unsupported = agentRoutes("opencode", "opencode");
     const status = unsupported["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
     status.data.elements[0].spec.settings = {
@@ -730,10 +802,8 @@ describe("助手运行参数", () => {
     };
     renderWithEngine(<AgentsPage />, unsupported);
 
-    expect(await screen.findByText(/暂不支持在应用内切换接入/)).toBeInTheDocument();
-    expect(screen.getByTestId("connection-card-opencode-relay")).toHaveTextContent("历史接入");
-    expect(screen.queryByTestId("activate-connection-opencode-default")).toBeNull();
-    expect(screen.queryByTestId("check-connection-opencode-relay")).toBeNull();
-    expect(screen.getByTestId("add-connection-button")).toBeDisabled();
+    expect(await screen.findByRole("heading", { name: "实例" })).toBeInTheDocument();
+    expect(screen.queryByTestId("connection-card-opencode-relay")).toBeNull();
+    expect(screen.queryByTestId("connection-workbench")).toBeNull();
   });
 });

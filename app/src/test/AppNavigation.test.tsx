@@ -101,7 +101,11 @@ describe("App 顶层导航收敛为日常八项", () => {
             makeElement({
               id: "agents:cc-work",
               domain: "agents",
-              spec: { display_name: "Claude Code · 工作号", bin: "claude" },
+              spec: {
+                display_name: "Claude Code · 工作号",
+                bin: "claude",
+                profile: { base_agent: "claude-code", kind: "claude", config_dir: "~/.claude-cc-work" },
+              },
               policy: { enabled: true },
               observed: { installed: true },
               state: "managed-ok",

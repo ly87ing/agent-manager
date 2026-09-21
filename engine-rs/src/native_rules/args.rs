@@ -111,12 +111,11 @@ mod tests {
         }
     }
 
-    /// 不带 --only 时的默认目标全集（新增 OpenCode 后为三个）。
+    /// 不带 --only 时的默认目标全集。
     fn both_targets() -> Vec<String> {
         vec![
             "rules:codex_global".to_string(),
             "rules:claude_global".to_string(),
-            "rules:opencode_global".to_string(),
         ]
     }
 

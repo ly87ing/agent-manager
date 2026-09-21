@@ -26,7 +26,6 @@ const SOURCE_KEYS: &[&str] = &[
     native_sources::KEY_SHARED,
     native_sources::KEY_CLAUDE,
     native_sources::KEY_CODEX,
-    native_sources::KEY_OPENCODE,
     native_sources::KEY_HOOKS_CLAUDE,
     native_sources::KEY_HOOKS_CODEX,
     native_sources::KEY_ALIAS_SHELL,

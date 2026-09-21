@@ -13,10 +13,12 @@
 pub(crate) mod agent_usage;
 pub mod envelope;
 pub mod native;
+pub(crate) mod native_agent_adapters;
 pub(crate) mod native_agent_check;
 pub(crate) mod native_agent_settings;
 pub mod native_agents;
 pub(crate) mod native_aliases;
+pub(crate) mod native_auth;
 pub(crate) mod native_config;
 pub(crate) mod native_discover;
 pub(crate) mod native_hooks;

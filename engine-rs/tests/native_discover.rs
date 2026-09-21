@@ -198,11 +198,10 @@ fn discover_skips_entries_already_managed_by_binding() {
 }
 
 #[test]
-fn discover_reports_installed_agent_without_definition() {
+fn discover_ignores_unsupported_agent() {
     let (root, ctx) = temp_ctx("agents");
     let bin_dir = ctx.home_dir.join(".local/bin");
     std::fs::create_dir_all(&bin_dir).unwrap();
-    // opencode 已是内置定义，换一个仍未内置的助手做样本
     let bin = bin_dir.join("qwen");
     std::fs::write(&bin, "#!/bin/sh\necho 'qwen 1.2.3'\n").unwrap();
     #[cfg(unix)]
@@ -215,34 +214,17 @@ fn discover_reports_installed_agent_without_definition() {
     let env = execute(&ctx, &request("system:discover", &["--only", "agents"]));
     assert!(env.ok, "{:?}", env.errors);
     let agents = env.data["agents"].as_array().unwrap();
-    let found = agents
-        .iter()
-        .find(|item| item["id"] == "qwen-code")
-        .expect("已安装但无定义的助手必须被发现");
-    assert_eq!(found["bin"], "qwen");
-    assert_eq!(found["origin"], "native", "~/.local/bin 属官方安装器落点");
-    assert_eq!(found["manage"], "register");
-    assert_eq!(
-        found["managed_after_takeover"], false,
-        "非 npm 渠道登记后只观测，升级卸载仍走其原生方式"
+    assert!(
+        agents.is_empty(),
+        "只支持 Claude Code 与 Codex，不发现 Qwen"
     );
-    // 不臆造安装命令：只观测渠道不得出现 install/upgrade/uninstall
-    let providers = found["suggested_definition"]["providers"]
-        .as_object()
-        .unwrap();
-    let native = providers["native"].as_object().unwrap();
-    assert_eq!(native["managed"], false);
-    assert!(!native.contains_key("install"));
-    assert!(!native.contains_key("upgrade"));
-
-    // 已有内置定义的助手（claude/codex）不重复出现
     assert!(!agents.iter().any(|item| item["id"] == "claude-code"));
     assert!(!ctx.data_dir.exists(), "agents 发现同样零写");
     let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
-fn discover_detects_npm_channel_and_offers_managed_commands() {
+fn discover_ignores_unsupported_npm_agent() {
     let (root, ctx) = temp_ctx("agents-npm");
     let npm_root = ctx.home_dir.join(".npm-global");
     let pkg_bin = npm_root.join("lib/node_modules/@scope/gemini-cli/bin");
@@ -262,19 +244,10 @@ fn discover_detects_npm_channel_and_offers_managed_commands() {
     let env = execute(&ctx, &request("system:discover", &["--only", "agents"]));
     assert!(env.ok, "{:?}", env.errors);
     let agents = env.data["agents"].as_array().unwrap();
-    let found = agents
-        .iter()
-        .find(|item| item["id"] == "gemini-cli")
-        .expect("npm 全局安装的助手必须被发现");
-    assert_eq!(found["origin"], "npm");
-    assert_eq!(found["npm_package"], "@scope/gemini-cli");
-    assert_eq!(found["managed_after_takeover"], true);
-    let npm = found["suggested_definition"]["providers"]["npm"]
-        .as_object()
-        .unwrap();
-    assert_eq!(npm["managed"], true);
-    assert_eq!(npm["install"], "npm install -g @scope/gemini-cli");
-    assert_eq!(npm["uninstall"], "npm uninstall -g @scope/gemini-cli");
+    assert!(
+        agents.is_empty(),
+        "只支持 Claude Code 与 Codex，不发现 Gemini"
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 

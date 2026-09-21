@@ -18,6 +18,10 @@ use anyhow::{bail, Result};
 use serde_json::{Map, Value};
 
 use crate::native::Context;
+pub(crate) use crate::native_agent_adapters::AdapterKind as Kind;
+use crate::native_agent_adapters::{
+    kind_for_bin, CLAUDE_EFFORT_LEVELS, CODEX_REASONING_EFFORTS, CODEX_WEB_SEARCH_MODES,
+};
 
 /// Claude 的目标文件，相对 home。
 pub(crate) const CLAUDE_SETTINGS: &str = ".claude/settings.json";
@@ -47,6 +51,110 @@ const CLAUDE_OWNED_PATHS: &[&[&str]] = &[
     &["attribution", "commit"],
     &["attribution", "pr"],
 ];
+
+const MAX_CLIENT_CONFIG_BYTES: u64 = 4 * 1024 * 1024;
+
+fn read_observed_config(
+    path: &std::path::Path,
+) -> std::result::Result<Option<Vec<u8>>, &'static str> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("unreadable"),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("unsafe");
+    }
+    if metadata.len() > MAX_CLIENT_CONFIG_BYTES {
+        return Err("too-large");
+    }
+    std::fs::read(path).map(Some).map_err(|_| "unreadable")
+}
+
+fn string_at<'a>(value: &'a Value, path: &[&str]) -> Option<&'a str> {
+    path.iter()
+        .try_fold(value, |current, key| current.get(*key))?
+        .as_str()
+        .filter(|value| !value.is_empty())
+}
+
+fn claude_observed_config(bytes: &[u8]) -> Option<Value> {
+    let root = serde_json::from_slice::<Value>(bytes)
+        .ok()?
+        .as_object()?
+        .clone();
+    let value = Value::Object(root);
+    let credential_kind = if string_at(&value, &["env", "ANTHROPIC_AUTH_TOKEN"]).is_some() {
+        Some("token")
+    } else if string_at(&value, &["env", "ANTHROPIC_API_KEY"]).is_some() {
+        Some("api_key")
+    } else {
+        None
+    };
+    Some(json!({
+        "provider": "anthropic",
+        "base_url": string_at(&value, &["env", "ANTHROPIC_BASE_URL"]),
+        "model": string_at(&value, &["env", "ANTHROPIC_MODEL"]),
+        "small_fast_model": string_at(&value, &["env", "ANTHROPIC_SMALL_FAST_MODEL"]),
+        "credential": {"configured": credential_kind.is_some(), "kind": credential_kind, "variable": null},
+        "runtime": {
+            "yolo": string_at(&value, &["permissions", "defaultMode"]) == Some("bypassPermissions"),
+            "claude_effort_level": string_at(&value, &["env", "CLAUDE_CODE_EFFORT_LEVEL"]),
+            "claude_tool_search": string_at(&value, &["env", "ENABLE_TOOL_SEARCH"]) == Some("true"),
+            "claude_agent_teams": string_at(&value, &["env", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"]) == Some("1"),
+            "claude_disable_artifact": string_at(&value, &["env", "CLAUDE_CODE_DISABLE_ARTIFACT"]) == Some("1")
+        }
+    }))
+}
+
+fn codex_observed_config(bytes: &[u8]) -> Option<Value> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let root = text.parse::<toml::Value>().ok()?;
+    let provider = root.get("model_provider").and_then(toml::Value::as_str);
+    let provider_config = provider
+        .and_then(|name| root.get("model_providers")?.get(name))
+        .and_then(toml::Value::as_table);
+    let env_key = provider_config
+        .and_then(|table| table.get("env_key"))
+        .and_then(toml::Value::as_str)
+        .filter(|value| !value.is_empty());
+    Some(json!({
+        "provider": provider.unwrap_or("openai"),
+        "base_url": provider_config.and_then(|table| table.get("base_url")).and_then(toml::Value::as_str),
+        "model": root.get("model").and_then(toml::Value::as_str),
+        "credential": {"configured": env_key.is_some(), "kind": env_key.map(|_| "env"), "variable": env_key},
+        "runtime": {
+            "yolo": root.get("approval_policy").and_then(toml::Value::as_str) == Some("never")
+                && root.get("sandbox_mode").and_then(toml::Value::as_str) == Some("danger-full-access"),
+            "codex_reasoning_effort": root.get("model_reasoning_effort").and_then(toml::Value::as_str),
+            "codex_web_search": root.get("web_search").and_then(toml::Value::as_str),
+            "codex_context_window": root.get("model_context_window").and_then(toml::Value::as_integer),
+            "codex_auto_compact_token_limit": root.get("model_auto_compact_token_limit").and_then(toml::Value::as_integer)
+        }
+    }))
+}
+
+/// 只读客户端当前配置，输出固定脱敏结构；不会返回 Claude 写入文件中的真实 token。
+pub(crate) fn inspect_current_config(config_dir: &std::path::Path, kind: Kind) -> Value {
+    let file = match kind {
+        Kind::Claude => "settings.json",
+        Kind::Codex => CODEX_CONFIG,
+    };
+    let path = config_dir.join(file);
+    let bytes = match read_observed_config(&path) {
+        Ok(Some(bytes)) => bytes,
+        Ok(None) => return json!({"state": "missing", "file": file, "config": null}),
+        Err(state) => return json!({"state": state, "file": file, "config": null}),
+    };
+    let config = match kind {
+        Kind::Claude => claude_observed_config(&bytes),
+        Kind::Codex => codex_observed_config(&bytes),
+    };
+    match config {
+        Some(config) => json!({"state": "ready", "file": file, "config": config}),
+        None => json!({"state": "invalid", "file": file, "config": null}),
+    }
+}
 
 /// 状态栏是**条件受管**：只有 `statusLine.command` 指向本工具部署的那份脚本时才算我们的。
 /// 用户自己定义的状态栏与本工具无关，既不清空也不算外部修改。
@@ -294,11 +402,7 @@ pub(crate) fn parse(spec: &Value) -> Result<AgentSettings> {
             .get("claude_agent_teams")
             .and_then(Value::as_bool)
             .unwrap_or(false),
-        claude_effort_level: optional_choice(
-            obj,
-            "claude_effort_level",
-            &["auto", "low", "medium", "high", "xhigh", "max"],
-        )?,
+        claude_effort_level: optional_choice(obj, "claude_effort_level", CLAUDE_EFFORT_LEVELS)?,
         claude_disable_artifact: obj
             .get("claude_disable_artifact")
             .and_then(Value::as_bool)
@@ -310,18 +414,14 @@ pub(crate) fn parse(spec: &Value) -> Result<AgentSettings> {
         codex_reasoning_effort: optional_choice(
             obj,
             "codex_reasoning_effort",
-            &["minimal", "low", "medium", "high", "xhigh"],
+            CODEX_REASONING_EFFORTS,
         )?,
         codex_context_window: optional_positive_u64(obj, "codex_context_window")?,
         codex_auto_compact_token_limit: optional_positive_u64(
             obj,
             "codex_auto_compact_token_limit",
         )?,
-        codex_web_search: optional_choice(
-            obj,
-            "codex_web_search",
-            &["disabled", "cached", "indexed", "live"],
-        )?,
+        codex_web_search: optional_choice(obj, "codex_web_search", CODEX_WEB_SEARCH_MODES)?,
     })
 }
 
@@ -793,6 +893,9 @@ pub(crate) fn render_codex(existing: &str, settings: &AgentSettings) -> Result<S
                     "env_key = {}\n",
                     crate::native_mcp::codecs::toml_basic_string(var)
                 ));
+                // Provider 请求优先使用 env_key；保留这个标志让 Codex 继续识别并刷新
+                // auth.json 中的 ChatGPT 登录，避免切换第三方接入后账号/插件表现为掉线。
+                table.push_str("requires_openai_auth = true\n");
             }
             // wire_api 目前只有 responses 这一种，写死避免用户填错
             table.push_str("wire_api = \"responses\"\n");
@@ -851,34 +954,18 @@ pub(crate) fn render_codex(existing: &str, settings: &AgentSettings) -> Result<S
 }
 
 /// Codex 的目标文件绝对路径：配置文件就在 CODEX_HOME 下。
-pub(crate) fn codex_target(ctx: &Context, config_path: Option<&str>) -> std::path::PathBuf {
-    match config_path {
+pub(crate) fn codex_target(ctx: &Context, config_path: Option<&str>) -> Result<std::path::PathBuf> {
+    let target = match config_path {
         Some(raw) => crate::native_mcp::targets::expand_home(raw, &ctx.home_dir),
         None => ctx.home_dir.join(".codex").join(CODEX_CONFIG),
+    };
+    if target.file_name().and_then(|name| name.to_str()) != Some(CODEX_CONFIG) {
+        bail!(
+            "Codex 普通运行设置只允许写 config.toml；认证文件必须通过独立的显式认证操作修改：{}",
+            target.display()
+        );
     }
-}
-
-/// 助手形态：决定写哪个配置文件、用哪套渲染。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Kind {
-    Claude,
-    Codex,
-}
-
-/// 只认可执行名：codex 形态。
-fn is_codex_like(bin: &str) -> bool {
-    std::path::Path::new(bin)
-        .file_stem()
-        .and_then(|name| name.to_str())
-        == Some("codex")
-}
-
-/// 只认可执行名，路径和 .exe 后缀都剥掉——自定义助手可能把 bin 写成绝对路径。
-fn is_claude_like(bin: &str) -> bool {
-    std::path::Path::new(bin)
-        .file_stem()
-        .and_then(|name| name.to_str())
-        == Some("claude")
+    Ok(target)
 }
 
 /// 目标文件的绝对路径。
@@ -1029,16 +1116,12 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
         .iter()
         .find(|d| d.id == id)
         .ok_or_else(|| DispatchError::new("AGENT_ERROR", format!("没有这个助手：{id}")))?;
-    let kind = if is_claude_like(&def.bin) {
-        Kind::Claude
-    } else if is_codex_like(&def.bin) {
-        Kind::Codex
-    } else {
-        return Err(DispatchError::new(
+    let kind = kind_for_bin(&def.bin).ok_or_else(|| {
+        DispatchError::new(
             "AGENT_ERROR",
             "只有 Claude Code 与 Codex 形态的助手支持写运行参数".to_string(),
-        ));
-    };
+        )
+    })?;
 
     let mut settings = parse(def.spec_ref())
         .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}")))?;
@@ -1075,7 +1158,8 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
 
     let path = match kind {
         Kind::Claude => claude_target(ctx),
-        Kind::Codex => codex_target(ctx, def.config_path()),
+        Kind::Codex => codex_target(ctx, def.config_path())
+            .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}")))?,
     };
     let file_label = match kind {
         Kind::Claude => CLAUDE_SETTINGS,
@@ -1495,6 +1579,87 @@ mod tests {
         assert!(!cleared.contains("model_reasoning_effort"));
         assert!(!cleared.contains("model_context_window"));
         assert!(cleared.contains("user_instructions = \"keep\""));
+    }
+
+    #[test]
+    fn 当前配置只读脱敏且不改原文件() {
+        let root = std::env::temp_dir().join(format!(
+            "agent-manager-current-config-{}-{:x}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let claude = root.join("claude");
+        let codex = root.join("codex");
+        std::fs::create_dir_all(&claude).unwrap();
+        std::fs::create_dir_all(&codex).unwrap();
+        let claude_bytes = br#"{"env":{"ANTHROPIC_BASE_URL":"https://relay.example.com","ANTHROPIC_AUTH_TOKEN":"never-expose","ANTHROPIC_MODEL":"claude-model","CLAUDE_CODE_EFFORT_LEVEL":"high"}}"#;
+        std::fs::write(claude.join("settings.json"), claude_bytes).unwrap();
+        let codex_bytes = br#"model_provider = "relay"
+model = "gpt-test"
+model_reasoning_effort = "high"
+[model_providers.relay]
+base_url = "https://codex.example.com/v1"
+env_key = "CODEX_RELAY_KEY"
+"#;
+        std::fs::write(codex.join(CODEX_CONFIG), codex_bytes).unwrap();
+
+        let claude_status = inspect_current_config(&claude, Kind::Claude);
+        assert_eq!(claude_status["state"], "ready");
+        assert_eq!(
+            claude_status["config"]["base_url"],
+            "https://relay.example.com"
+        );
+        assert_eq!(claude_status["config"]["model"], "claude-model");
+        assert_eq!(claude_status["config"]["credential"]["configured"], true);
+        assert!(!claude_status.to_string().contains("never-expose"));
+        assert_eq!(
+            std::fs::read(claude.join("settings.json")).unwrap(),
+            claude_bytes
+        );
+
+        let codex_status = inspect_current_config(&codex, Kind::Codex);
+        assert_eq!(codex_status["state"], "ready");
+        assert_eq!(codex_status["config"]["provider"], "relay");
+        assert_eq!(
+            codex_status["config"]["credential"]["variable"],
+            "CODEX_RELAY_KEY"
+        );
+        assert_eq!(
+            std::fs::read(codex.join(CODEX_CONFIG)).unwrap(),
+            codex_bytes
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn 当前配置拒绝符号链接且缺失读取零写() {
+        use std::os::unix::fs::symlink;
+        let root = std::env::temp_dir().join(format!(
+            "agent-manager-current-config-safe-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let missing = root.join("missing");
+        assert_eq!(
+            inspect_current_config(&missing, Kind::Claude)["state"],
+            "missing"
+        );
+        assert!(!missing.exists());
+
+        let target = root.join("target.json");
+        let config_dir = root.join("claude");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(&target, b"{}").unwrap();
+        symlink(&target, config_dir.join("settings.json")).unwrap();
+        assert_eq!(
+            inspect_current_config(&config_dir, Kind::Claude)["state"],
+            "unsafe"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

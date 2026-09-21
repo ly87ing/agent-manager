@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "@testing-library/react";
 import AgentsPage from "../pages/AgentsPage";
-import { makeAuditData, makeElement, makeEnvelope, makeMode, makePolicyData } from "./fixtures";
+import { agentManagementFixture, makeAuditData, makeElement, makeEnvelope, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 import type { Envelope } from "../lib/contract";
 
@@ -18,7 +18,7 @@ function routes(sqliteLayer: Record<string, unknown> | null): Record<string, Env
             id: "agents:claude-code",
             domain: "agents",
             spec: { display_name: "Claude Code", bin: "claude", preferred_provider: "npm", providers: { npm: { managed: true } } },
-            observed: { install_source: "npm", installed: true },
+            observed: { install_source: "npm", installed: true, management: agentManagementFixture("claude") },
           }),
         ],
       },

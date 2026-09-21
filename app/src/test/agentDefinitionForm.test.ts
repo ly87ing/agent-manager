@@ -6,15 +6,48 @@ import {
   extractCommandForPlatform,
   extractUnknownFields,
   getProviderNames,
+  normalizeAgentRuntimeSettings,
   parseInitialToFormValues,
   removeAgentConnection,
-  runtimeOptionsOf,
+  moveAgentConnection,
+  parseConnectionBundle,
+  runtimeRequiresYoloConfirmation,
+  runtimeSettingsOf,
+  serializeConnectionBundle,
   upsertAgentConnection,
-  updateAgentRuntimeOptions,
+  updateAgentRuntimeSettings,
   updateCommandWithPlatform,
 } from "../lib/agentDefinitionForm";
+import { agentManagementFixture } from "./fixtures";
 
 describe("agentDefinitionForm helpers", () => {
+  it("接入分享只包含连接定义，按助手类型校验且不接受凭据取值", () => {
+    const connection = {
+      name: "relay",
+      label: "中转",
+      baseUrl: "https://relay.example.com",
+      auth: "token" as const,
+      tokenVar: "RELAY_KEY",
+      model: "relay-model",
+      smallFastModel: "",
+      aliasOpus: "",
+      aliasSonnet: "",
+      aliasHaiku: "",
+      timeoutMs: "30000",
+    };
+    const text = serializeConnectionBundle("claude", connection);
+
+    expect(text).not.toContain("secretValue");
+    expect(text).not.toContain("auth.json");
+    expect(parseConnectionBundle(text, "claude")).toEqual(connection);
+    expect(() => parseConnectionBundle(text, "codex")).toThrow("不能导入当前助手");
+    expect(() => parseConnectionBundle(JSON.stringify({
+      format: "agent-manager/provider/v1",
+      kind: "claude",
+      connection: { ...connection, baseUrl: "http://remote.example.com", secretValue: "must-not-pass" },
+    }), "claude")).toThrow("接口地址必须是 https://");
+  });
+
   it("extractUnknownFields captures unknown non-standard keys", () => {
     const unknown = extractUnknownFields({
       display_name: "Test",
@@ -236,7 +269,7 @@ describe("agentDefinitionForm helpers", () => {
     expect(initial.settings.profiles.relay).toEqual({ label: "中转" });
   });
 
-  it("运行设置只更新自己拥有的键，保留接入、未知字段和生命周期定义", () => {
+  it("运行设置完整往返未知键，并保留接入和生命周期定义", () => {
     const initial = {
       display_name: "Claude Code",
       providers: {
@@ -256,24 +289,24 @@ describe("agentDefinitionForm helpers", () => {
       },
     };
 
-    expect(runtimeOptionsOf(initial)).toMatchObject({
+    expect(runtimeSettingsOf(initial)).toEqual({
       yolo: true,
       statusline: "builtin",
-      claudeToolSearch: false,
-      codexReasoningEffort: "",
-      codexContextWindow: "",
+      unknown_runtime_flag: "keep",
     });
-    const result = updateAgentRuntimeOptions(initial, {
-      ...runtimeOptionsOf(initial),
-      yolo: false,
-      statusline: "untouched",
+    const result = updateAgentRuntimeSettings(initial, {
+      ...runtimeSettingsOf(initial),
+      future_runtime_option: { mode: "custom" },
     });
 
     expect(result).toEqual({
       ...initial,
       settings: {
         active: "relay",
+        yolo: true,
+        statusline: "builtin",
         unknown_runtime_flag: "keep",
+        future_runtime_option: { mode: "custom" },
         profiles: { relay: { label: "中转", future_option: 7 } },
       },
     });
@@ -281,53 +314,43 @@ describe("agentDefinitionForm helpers", () => {
     expect((result.providers as any).native.uninstall).toBe("uninstall.sh");
   });
 
-  it("运行设置能从无 settings 的定义新增，并在清空最后一个自有键时移除空对象", () => {
-    const enabled = updateAgentRuntimeOptions(
+  it("运行设置能从无 settings 的定义新增，并在清空最后一个键时移除空对象", () => {
+    const enabled = updateAgentRuntimeSettings(
       { display_name: "Codex", bin: "codex" },
-      { ...runtimeOptionsOf(undefined), yolo: true, statusline: "builtin" },
+      { yolo: true, codex_web_search: "live" },
     );
-    expect(enabled.settings).toEqual({ yolo: true, statusline: "builtin" });
-    expect(updateAgentRuntimeOptions(enabled, {
-      ...runtimeOptionsOf(enabled),
-      yolo: false,
-      statusline: "untouched",
-    })).toEqual({
+    expect(enabled.settings).toEqual({ yolo: true, codex_web_search: "live" });
+    expect(updateAgentRuntimeSettings(enabled, {})).toEqual({
       display_name: "Codex",
       bin: "codex",
     });
   });
 
-  it("运行设置保留明确的 Claude 与 Codex 参数并允许恢复客户端默认", () => {
-    const configured = updateAgentRuntimeOptions({ bin: "codex" }, {
-      ...runtimeOptionsOf(undefined),
-      claudeToolSearch: true,
-      claudeAgentTeams: true,
-      claudeEffortLevel: "max",
-      claudeDisableArtifact: true,
-      claudeHideAttribution: true,
-      codexReasoningEffort: "high",
-      codexContextWindow: "1000000",
-      codexAutoCompactTokenLimit: "900000",
-      codexWebSearch: "live",
-    });
-    expect(configured.settings).toMatchObject({
-      claude_tool_search: true,
-      claude_agent_teams: true,
-      claude_effort_level: "max",
-      claude_disable_artifact: true,
-      claude_hide_attribution: true,
+  it("后端 schema 校验已知参数、归一化数值，并保留未来参数", () => {
+    const fields = agentManagementFixture("codex").runtime_fields;
+    const normalized = normalizeAgentRuntimeSettings({
+      yolo: true,
+      codex_reasoning_effort: "high",
+      codex_context_window: "1000000",
+      codex_auto_compact_token_limit: 900000,
+      codex_web_search: "live",
+      future_runtime_option: { mode: "keep" },
+    }, fields);
+    const configured = updateAgentRuntimeSettings({ bin: "codex" }, normalized);
+    expect(configured.settings).toEqual({
+      yolo: true,
       codex_reasoning_effort: "high",
       codex_context_window: 1000000,
       codex_auto_compact_token_limit: 900000,
       codex_web_search: "live",
+      future_runtime_option: { mode: "keep" },
     });
-    expect(runtimeOptionsOf(configured)).toMatchObject({
-      claudeEffortLevel: "max",
-      codexReasoningEffort: "high",
-      codexContextWindow: "1000000",
-      codexAutoCompactTokenLimit: "900000",
-      codexWebSearch: "live",
-    });
+    expect(runtimeSettingsOf(configured)).toEqual(normalized);
+    expect(runtimeRequiresYoloConfirmation(normalized, fields)).toBe(true);
+    expect(() => normalizeAgentRuntimeSettings({ codex_web_search: "invalid" }, fields)).toThrow(
+      "Web 搜索模式不是适配器支持的取值",
+    );
+    expect(() => normalizeAgentRuntimeSettings({ profiles: {} }, fields)).toThrow("接入 profiles");
   });
 
   it("extractCommandForPlatform extracts plain string and platform-specific mapping", () => {
@@ -709,5 +732,37 @@ describe("agentDefinitionForm helpers", () => {
 
     expect(savedDef.legacy_field).toBe("old");
     expect(savedDef.display_name).toBe("Renamed");
+  });
+});
+
+describe("moveAgentConnection", () => {
+  it("只调整 profiles 顺序，保留当前项、未知字段和接入内容", () => {
+    const initial = {
+      custom: { keep: true },
+      settings: {
+        active: "beta",
+        yolo: true,
+        profiles: {
+          alpha: { label: "Alpha", base_url: "https://a.example.com", extra: 1 },
+          beta: { label: "Beta", base_url: "https://b.example.com", extra: 2 },
+          gamma: { label: "Gamma", base_url: "https://c.example.com", extra: 3 },
+        },
+      },
+    };
+
+    const moved = moveAgentConnection(initial, "beta", "up");
+    expect(Object.keys((moved.settings as any).profiles)).toEqual(["beta", "alpha", "gamma"]);
+    expect((moved.settings as any).active).toBe("beta");
+    expect((moved.settings as any).yolo).toBe(true);
+    expect(((moved.settings as any).profiles.beta as any).extra).toBe(2);
+    expect(moved.custom).toEqual({ keep: true });
+    expect(initial.settings.profiles).toHaveProperty("alpha");
+  });
+
+  it("边界移动与未知名称保持原定义", () => {
+    const initial = { settings: { profiles: { alpha: {}, beta: {} } } };
+    expect(moveAgentConnection(initial, "alpha", "up")).toEqual(initial);
+    expect(moveAgentConnection(initial, "beta", "down")).toEqual(initial);
+    expect(moveAgentConnection(initial, "missing", "up")).toEqual(initial);
   });
 });

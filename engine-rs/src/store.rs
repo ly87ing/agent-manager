@@ -65,7 +65,6 @@ pub const BUILTIN_POLICY_JSON: &str = r#"{
   "agents": {
     "claude-code": {"enabled": true},
     "codex": {"enabled": true},
-    "opencode": {"enabled": true},
     "definitions": {
     "claude-code": {
       "display_name": "Claude Code", "bin": "claude", "skills_dir": "~/.claude/skills", "mcp_config": {"path": "~/.claude.json", "format": "json"},
@@ -87,13 +86,6 @@ pub const BUILTIN_POLICY_JSON: &str = r#"{
           "install": "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
           "upgrade": "curl -fsSL https://chatgpt.com/codex/install.sh | sh", "managed": true
         }
-      }
-    },
-    "opencode": {
-      "display_name": "OpenCode", "bin": "opencode", "skills_dir": "~/.config/opencode/skills", "mcp_config": {"path": "~/.config/opencode/opencode.json", "format": "opencode"},
-      "preferred_provider": "system",
-      "providers": {
-        "system": {"managed": false}
       }
     }
       }
@@ -121,8 +113,7 @@ pub const BUILTIN_POLICY_JSON: &str = r#"{
         ],
         "agents": [
           "claude-code",
-          "codex",
-          "opencode"
+          "codex"
         ]
       }
     }

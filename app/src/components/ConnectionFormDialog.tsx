@@ -3,6 +3,7 @@ import { Loader2, X } from "lucide-react";
 import {
   CONNECTION_NAME_RE,
   emptyConnection,
+  validateConnectionEntry,
   type ConnectionEntry,
 } from "../lib/agentDefinitionForm";
 import {
@@ -22,17 +23,6 @@ export interface ConnectionSubmission {
 
 const FOCUSABLE_SELECTOR =
   'button, [href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])';
-const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-function validBaseUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    if (url.protocol === "https:") return true;
-    return url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-  } catch {
-    return false;
-  }
-}
 
 export function ConnectionFormDialog({
   agentName,
@@ -156,16 +146,9 @@ export function ConnectionFormDialog({
       setLocalError(`已经有名为 ${name} 的接入，请换一个名称`);
       return;
     }
-    if (!validBaseUrl(connection.baseUrl.trim())) {
-      setLocalError("接口地址必须是 https://，或本机 localhost / 127.0.0.1 地址");
-      return;
-    }
-    if (!ENV_NAME_RE.test(connection.tokenVar.trim())) {
-      setLocalError("凭据变量名格式不正确");
-      return;
-    }
-    if (!connection.model.trim()) {
-      setLocalError("要填写模型名，测试连接时才能确认这套接入可用");
+    const validationError = validateConnectionEntry(connection);
+    if (validationError) {
+      setLocalError(validationError);
       return;
     }
     onSubmit({

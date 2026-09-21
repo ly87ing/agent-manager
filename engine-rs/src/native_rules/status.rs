@@ -242,7 +242,6 @@ fn spec_json(spec: &TargetSpec) -> Value {
     json!({
         "name": match spec.target_id {
             "rules:codex_global" => "Codex 全局规则",
-            "rules:opencode_global" => "OpenCode 全局规则",
             _ => "Claude Code 全局规则",
         },
         "group": "global-rules",
@@ -366,10 +365,9 @@ mod tests {
         let status = build_status(&ctx).unwrap();
         assert_eq!(status["domain"], "rules");
         let els = status["elements"].as_array().unwrap();
-        assert_eq!(els.len(), 3);
+        assert_eq!(els.len(), 2);
         assert_eq!(els[0]["id"], "rules:codex_global");
         assert_eq!(els[1]["id"], "rules:claude_global");
-        assert_eq!(els[2]["id"], "rules:opencode_global");
         assert!(!ctx.data_dir.exists());
         assert!(!ctx.home_dir.exists());
         assert_eq!(els[0]["state"], "missing");

@@ -2,6 +2,7 @@ import { Copy, FolderTree, Loader2, PlayCircle, Plus, Sparkles, Terminal, Trash2
 import type { EngineElement } from "../lib/contract";
 import type { ProfileObserved, ProfileSpec } from "../lib/contract";
 import { AgentUsageBar } from "./AgentUsageBar";
+import { AuthCommandActions } from "./AuthCommandActions";
 import type { ProfileLaunchCommand } from "../lib/profileDefinition";
 import { StateBadge } from "./StateBadge";
 import { cn } from "../lib/utils";
@@ -17,6 +18,7 @@ const STATE_NOTE: Record<string, string> = {
 
 export function ProfileCard({
   element,
+  bin,
   busy,
   launchCommands,
   onApply,
@@ -33,6 +35,7 @@ export function ProfileCard({
   onFixLaunch,
 }: {
   element: EngineElement;
+  bin: string;
   busy: boolean;
   /** 指向这个实例配置目录的全部启动命令（按配置目录反查，可以有多条）。 */
   launchCommands: ProfileLaunchCommand[];
@@ -79,6 +82,32 @@ export function ProfileCard({
       {observed.usage && (
         <div className="mt-3 rounded-md border px-3 py-2">
           <AgentUsageBar usage={observed.usage} testId={`profile-usage-${id}`} />
+        </div>
+      )}
+
+      {observed.auth && (
+        <div
+          data-testid={`profile-auth-status-${id}`}
+          className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
+        >
+          <span>
+            官方登录：
+            <span className="ml-1 font-medium text-foreground">
+              {observed.auth.state === "ready"
+                ? `已识别${observed.auth.mode ? `（${observed.auth.mode}）` : ""}`
+                : observed.auth.state === "missing" && observed.kind === "claude"
+                  ? "未发现凭据文件（可能保存在系统钥匙串）"
+                  : observed.auth.state === "missing"
+                    ? "未登录"
+                    : "认证文件需要处理"}
+            </span>
+          </span>
+          <AuthCommandActions
+            kind={observed.kind === "codex" ? "codex" : "claude"}
+            bin={bin}
+            configDir={observed.config_dir}
+            testIdPrefix={`profile-${id}`}
+          />
         </div>
       )}
 

@@ -63,22 +63,18 @@ fn get_returns_compiled_defaults_for_prefix_and_exact_keys() {
     let env = execute(&ctx, &request("sources:get", &["--key", "rules"]));
     assert!(env.ok, "{:?}", env.errors);
     let items = env.data["sources"].as_array().unwrap();
-    assert_eq!(items.len(), 4);
+    assert_eq!(items.len(), 3);
     assert_source_item_shape(&items[0], "rules.shared", DEFAULT_SHARED);
     assert_source_item_shape(&items[1], "rules.claude", DEFAULT_CLAUDE);
     assert_source_item_shape(&items[2], "rules.codex", DEFAULT_CODEX);
-    // OpenCode 无随仓库分发的适配正文，默认空串
-    assert_source_item_shape(&items[3], "rules.opencode", "");
     assert_eq!(items[0]["label"], "共享核心规则");
     assert_eq!(items[1]["label"], "Claude 专用适配");
     assert_eq!(items[2]["label"], "Codex 专用适配");
-    assert_eq!(items[3]["label"], "OpenCode 专用适配");
 
     for (key, default) in [
         ("rules.shared", DEFAULT_SHARED),
         ("rules.claude", DEFAULT_CLAUDE),
         ("rules.codex", DEFAULT_CODEX),
-        ("rules.opencode", ""),
     ] {
         let env = execute(&ctx, &request("sources:get", &["--key", key]));
         assert!(env.ok, "{key}: {:?}", env.errors);
@@ -402,11 +398,10 @@ fn existing_db_without_table_reads_defaults_with_zero_write() {
     let env = execute(&ctx, &request("sources:get", &["--key", "rules"]));
     assert!(env.ok, "{:?}", env.errors);
     let items = env.data["sources"].as_array().unwrap();
-    assert_eq!(items.len(), 4);
+    assert_eq!(items.len(), 3);
     assert_source_item_shape(&items[0], "rules.shared", DEFAULT_SHARED);
     assert_source_item_shape(&items[1], "rules.claude", DEFAULT_CLAUDE);
     assert_source_item_shape(&items[2], "rules.codex", DEFAULT_CODEX);
-    assert_source_item_shape(&items[3], "rules.opencode", "");
 
     // --dry-run 已退役：与过期 revision 一样在打开写连接前被拒绝
     let rev = items[0]["revision"].as_str().unwrap().to_string();

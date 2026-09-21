@@ -273,17 +273,16 @@ mod tests {
         let preflight = run_preflight(&ctx, &[]).unwrap();
         assert_eq!(preflight["domain"], "rules");
         let actions = preflight["actions"].as_array().unwrap();
-        // 目标全集：codex、claude、opencode
-        assert_eq!(actions.len(), 3);
+        // 产品目标全集只有 codex、claude。
+        assert_eq!(actions.len(), 2);
         assert_eq!(actions[0]["element"], "rules:codex_global");
         assert_eq!(actions[1]["element"], "rules:claude_global");
-        assert_eq!(actions[2]["element"], "rules:opencode_global");
         for action in actions {
             expect_full_action(action);
             assert_eq!(action["before_digest"], Value::Null);
             assert!(action["after_digest"].as_str().is_some());
         }
-        expect_full_summary(&preflight, 3);
+        expect_full_summary(&preflight, 2);
         assert!(!ctx.data_dir.exists());
         assert!(!ctx.home_dir.exists());
         drop_root(&root);
@@ -321,8 +320,8 @@ mod tests {
         let root = temp_root("skip");
         let ctx = ctx_at(&root);
         write_policy_disabled_agent(&ctx, "codex");
-        // codex 被停用，其余目标（claude、opencode）都已是受管且一致的状态
-        for target in [&targets()[1], &targets()[2]] {
+        // codex 被停用，Claude 已是受管且一致的状态。
+        for target in [&targets()[1]] {
             let path = ctx.home_dir.join(target.target);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             let rendered = current_rendered(&ctx, target);
@@ -439,9 +438,8 @@ mod tests {
         let target_before = std::fs::read(ctx.home_dir.join(codex.target)).unwrap();
 
         let preflight = run_preflight(&ctx, &[]).unwrap();
-        assert_eq!(preflight["actions"].as_array().unwrap().len(), 2);
+        assert_eq!(preflight["actions"].as_array().unwrap().len(), 1);
         assert_eq!(preflight["actions"][0]["element"], "rules:claude_global");
-        assert_eq!(preflight["actions"][1]["element"], "rules:opencode_global");
 
         assert_eq!(std::fs::read(&db).unwrap(), db_before);
         assert_eq!(

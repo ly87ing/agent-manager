@@ -10,6 +10,98 @@ import {
   type PolicyData,
   type RunEntry,
 } from "../lib/contract";
+import type { AgentManagement, AgentRuntimeField, AgentRuntimeSummary } from "../lib/observed";
+
+const summary = (label: string, extras: Partial<AgentRuntimeSummary> = {}): AgentRuntimeSummary => ({
+  label,
+  default: "客户端默认",
+  ...extras,
+});
+
+/** 与 Rust 适配器的 status schema 对齐；页面测试只消费契约，不再根据 bin 猜能力。 */
+export function agentManagementFixture(kind: "claude" | "codex"): AgentManagement {
+  const yolo: AgentRuntimeField = {
+    key: "yolo",
+    type: "boolean",
+    section: "权限与执行",
+    section_description: "高风险设置仍会在保存后要求二次确认。",
+    label: "跳过权限确认",
+    description: "开启后执行命令和修改文件不再逐次询问。",
+    danger: true,
+    requires_yolo_confirmation: true,
+    targets: kind === "claude"
+      ? [{ key: "permissions.defaultMode", enabled_value: '"bypassPermissions"' }]
+      : [
+          { key: "approval_policy", enabled_value: '"never"' },
+          { key: "sandbox_mode", enabled_value: '"danger-full-access"' },
+        ],
+    summary: summary("权限确认", { enabled: "已跳过" }),
+  };
+  const fields: AgentRuntimeField[] = kind === "claude"
+    ? [
+        yolo,
+        {
+          key: "statusline", type: "enum", section: "界面与模型行为", label: "状态栏",
+          description: "选择是否使用本地用量状态栏。",
+          options: [{ value: "", label: "保持现有状态栏" }, { value: "builtin", label: "使用 Agent Manager 用量状态栏" }],
+          targets: [{ key: "statusLine.command", enabled_value: "<Agent Manager statusline.sh>" }],
+          summary: summary("状态栏", { default: "保持现状", values: { builtin: "用量状态栏" } }),
+        },
+        {
+          key: "claude_effort_level", type: "enum", section: "界面与模型行为", label: "推理强度",
+          description: "留空即恢复 Claude 自己的默认值。",
+          options: ["auto", "low", "medium", "high", "xhigh", "max"].map((value) => ({ value, label: value })),
+          targets: [{ key: "env.CLAUDE_CODE_EFFORT_LEVEL" }], summary: summary("推理强度"),
+        },
+        ...[
+          ["claude_tool_search", "工具搜索", "env.ENABLE_TOOL_SEARCH", '"true"'],
+          ["claude_agent_teams", "Agent Teams", "env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", '"1"'],
+          ["claude_disable_artifact", "禁用 Artifact", "env.CLAUDE_CODE_DISABLE_ARTIFACT", '"1"'],
+          ["claude_hide_attribution", "隐藏提交与 PR 署名", "attribution.commit", '""'],
+        ].map(([key, label, target, enabled]) => ({
+          key, type: "boolean", section: "高级能力", label,
+          description: `${label} 开关。`,
+          targets: key === "claude_hide_attribution"
+            ? [
+                { key: "attribution.commit", enabled_value: '""' },
+                { key: "attribution.pr", enabled_value: '""' },
+              ]
+            : [{ key: target, enabled_value: enabled }],
+          ...(key === "claude_tool_search" || key === "claude_agent_teams"
+            ? { summary: summary(label, { enabled: "开启", default: "默认" }) }
+            : {}),
+        })),
+      ]
+    : [
+        yolo,
+        {
+          key: "codex_reasoning_effort", type: "enum", section: "模型与上下文", label: "推理强度",
+          description: "选择 Codex 的模型推理强度。",
+          options: ["minimal", "low", "medium", "high", "xhigh"].map((value) => ({ value, label: value })),
+          targets: [{ key: "model_reasoning_effort" }], summary: summary("推理强度"),
+        },
+        {
+          key: "codex_web_search", type: "enum", section: "模型与上下文", label: "Web 搜索模式",
+          description: "选择 Codex 使用的 Web 搜索策略。",
+          options: ["disabled", "cached", "indexed", "live"].map((value) => ({ value, label: value })),
+          targets: [{ key: "web_search" }], summary: summary("Web 搜索"),
+        },
+        ...[
+          ["codex_context_window", "上下文窗口（tokens）", "model_context_window", "上下文"],
+          ["codex_auto_compact_token_limit", "自动压缩阈值（tokens）", "model_auto_compact_token_limit", "自动压缩"],
+        ].map(([key, label, target, summaryLabel]) => ({
+          key, type: "positive_integer", section: "模型与上下文", label,
+          description: "留空使用 Codex 默认值。", targets: [{ key: target }], summary: summary(summaryLabel),
+        })),
+      ];
+  return {
+    adapter: kind,
+    schema_version: 1,
+    connection_kind: kind,
+    supports_profiles: true,
+    runtime_fields: fields,
+  };
+}
 
 export function makeFreshness(overrides: Partial<Freshness> = {}): Freshness {
   return {

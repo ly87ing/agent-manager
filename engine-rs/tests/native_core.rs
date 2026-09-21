@@ -97,6 +97,40 @@ fn status_queries_never_create_db() {
 }
 
 #[test]
+fn agents_status_reads_current_client_config_redacted_and_zero_write() {
+    let (base, ctx) = temp_ctx("agents-current-config");
+    std::fs::create_dir_all(ctx.home_dir.join(".claude")).unwrap();
+    let bytes = br#"{"env":{"ANTHROPIC_BASE_URL":"https://relay.example.com","ANTHROPIC_AUTH_TOKEN":"status-secret","ANTHROPIC_MODEL":"claude-observed"}}"#;
+    let path = ctx.home_dir.join(".claude/settings.json");
+    std::fs::write(&path, bytes).unwrap();
+
+    let env = execute(&ctx, &request("agents:status", &[]));
+    assert!(env.ok, "{:?}", env.errors);
+    let claude = env.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|element| element["id"] == "agents:claude-code")
+        .unwrap();
+    assert_eq!(claude["observed"]["current_config"]["state"], "ready");
+    assert_eq!(
+        claude["observed"]["current_config"]["config"]["base_url"],
+        "https://relay.example.com"
+    );
+    assert_eq!(
+        claude["observed"]["current_config"]["config"]["credential"]["configured"],
+        true
+    );
+    assert!(!env.data.to_string().contains("status-secret"));
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert!(
+        !ctx.data_dir.exists(),
+        "只读 status 不得创建数据库或数据目录"
+    );
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
 fn builtin_policy_is_default_effective() {
     let (base, ctx) = temp_ctx("builtin");
     let env = execute(&ctx, &request("policy:get", &[]));
@@ -114,6 +148,14 @@ fn builtin_policy_is_default_effective() {
         effective["agents"]["definitions"]["claude-code"]["providers"]["native"]
             .get("uninstall")
             .is_none()
+    );
+    assert!(
+        effective["agents"]["definitions"].get("opencode").is_none(),
+        "新安装只内置 Claude Code 与 Codex"
+    );
+    assert_eq!(
+        effective["skills"]["repositories"]["agent-skills"]["agents"],
+        serde_json::json!(["claude-code", "codex"])
     );
     let _ = std::fs::remove_dir_all(&base);
 }

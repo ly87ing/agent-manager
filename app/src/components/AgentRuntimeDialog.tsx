@@ -1,79 +1,155 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { Loader2, X } from "lucide-react";
-import type { AgentRuntimeOptions } from "../lib/agentDefinitionForm";
+import { Braces, FormInput, Loader2, X } from "lucide-react";
+import {
+  normalizeAgentRuntimeSettings,
+  type AgentRuntimeSettings,
+} from "../lib/agentDefinitionForm";
+import type { AgentCurrentConfigStatus, AgentRuntimeField, AgentRuntimeTarget } from "../lib/observed";
+import { cn } from "../lib/utils";
 
 const FOCUSABLE_SELECTOR =
   'button, [href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])';
 
-function FieldHint({ configKey, value }: { configKey: string; value: string }) {
+function testIdOf(field: AgentRuntimeField): string {
+  return `agent-runtime-${field.key.replaceAll("_", "-")}`;
+}
+
+function targetValue(target: AgentRuntimeTarget, value: unknown): string {
+  if (value === undefined || value === null || value === "" || value === false) {
+    return "<删除该键，使用客户端默认>";
+  }
+  if (target.enabled_value) return target.enabled_value;
+  return typeof value === "string" ? JSON.stringify(value) : String(value);
+}
+
+function FieldHints({ field, value }: { field: AgentRuntimeField; value: unknown }) {
   return (
-    <span className="mt-1 block break-all font-mono text-[11px] text-muted-foreground">
-      {configKey} = {value}
+    <span className="mt-1 block space-y-0.5 break-all font-mono text-[11px] text-muted-foreground">
+      {field.targets.map((target) => (
+        <span key={target.key} className="block">
+          {target.key} = {targetValue(target, value)}
+        </span>
+      ))}
     </span>
   );
 }
 
-function ToggleField({
-  checked,
+function RuntimeField({
+  field,
+  value,
   disabled,
-  testId,
-  title,
-  description,
-  configKey,
-  enabledValue,
   onChange,
 }: {
-  checked: boolean;
+  field: AgentRuntimeField;
+  value: unknown;
   disabled: boolean;
-  testId: string;
-  title: string;
-  description: string;
-  configKey: string;
-  enabledValue: string;
-  onChange: (checked: boolean) => void;
+  onChange: (value: unknown) => void;
 }) {
+  if (field.type === "boolean") {
+    const checked = value === true;
+    return (
+      <label
+        className={cn(
+          "flex min-h-28 items-start gap-3 rounded-lg border bg-background p-3",
+          field.danger && "border-destructive/25 bg-destructive/5",
+        )}
+      >
+        <input
+          type="checkbox"
+          data-testid={testIdOf(field)}
+          checked={checked}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.checked)}
+          className="mt-0.5"
+        />
+        <span className="min-w-0">
+          <span className="block font-medium text-foreground">{field.label}</span>
+          <span className="mt-1 block text-xs leading-5 text-muted-foreground">{field.description}</span>
+          <FieldHints field={field} value={checked} />
+        </span>
+      </label>
+    );
+  }
+
+  if (field.type === "enum") {
+    const selected = typeof value === "string" ? value : "";
+    const options = field.options ?? [];
+    const hasDefault = options.some((option) => option.value === "");
+    return (
+      <label className="rounded-lg border bg-background p-3 text-foreground">
+        <span className="font-medium">{field.label}</span>
+        <span className="mt-1 block text-xs leading-5 text-muted-foreground">{field.description}</span>
+        <select
+          data-testid={testIdOf(field)}
+          value={selected}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+          className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+        >
+          {!hasDefault && <option value="">使用客户端默认值</option>}
+          {options.map((option) => (
+            <option key={option.value || "__default"} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+        <FieldHints field={field} value={selected} />
+      </label>
+    );
+  }
+
+  if (field.type === "positive_integer") {
+    const text = value === undefined || value === null ? "" : String(value);
+    return (
+      <label className="rounded-lg border bg-background p-3 text-foreground">
+        <span className="font-medium">{field.label}</span>
+        <span className="mt-1 block text-xs leading-5 text-muted-foreground">{field.description}</span>
+        <input
+          data-testid={testIdOf(field)}
+          inputMode="numeric"
+          value={text}
+          disabled={disabled}
+          placeholder={field.placeholder}
+          onChange={(event) => onChange(event.target.value)}
+          className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm"
+        />
+        <FieldHints field={field} value={text} />
+      </label>
+    );
+  }
+
   return (
-    <label className="flex min-h-28 items-start gap-3 rounded-lg border bg-background p-3">
-      <input
-        type="checkbox"
-        data-testid={testId}
-        checked={checked}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.checked)}
-        className="mt-0.5"
-      />
-      <span className="min-w-0">
-        <span className="block font-medium text-foreground">{title}</span>
-        <span className="mt-1 block text-xs leading-5 text-muted-foreground">{description}</span>
-        <FieldHint configKey={configKey} value={checked ? enabledValue : "<删除该键，使用客户端默认>"} />
-      </span>
-    </label>
+    <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+      当前版本不认识字段类型 <code>{field.type}</code>（<code>{field.key}</code>），已停止编辑，避免误写。
+    </div>
   );
 }
 
-/** 管理助手真正支持的运行参数；接入、登录和生命周期不在这里混用。 */
+/** 后端 schema 驱动的运行设置编辑器；JSON 模式完整保留尚未认识的设置键。 */
 export function AgentRuntimeDialog({
   agentName,
-  kind,
+  fields,
   initial,
+  currentConfig,
   busy,
   error,
   onSubmit,
   onClose,
 }: {
   agentName: string;
-  kind: "claude" | "codex";
-  initial: AgentRuntimeOptions;
+  fields: AgentRuntimeField[];
+  initial: AgentRuntimeSettings;
+  currentConfig?: AgentCurrentConfigStatus | null;
   busy: boolean;
   error?: string | null;
-  onSubmit: (options: AgentRuntimeOptions) => void;
+  onSubmit: (settings: AgentRuntimeSettings) => void;
   onClose: () => void;
 }) {
   const rootRef = useRef<HTMLElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(
     typeof document === "undefined" ? null : (document.activeElement as HTMLElement | null),
   );
-  const [options, setOptions] = useState(initial);
+  const [settings, setSettings] = useState<AgentRuntimeSettings>(initial);
+  const [mode, setMode] = useState<"form" | "json" | "observed">("form");
+  const [rawText, setRawText] = useState(() => JSON.stringify(initial, null, 2));
   const [localError, setLocalError] = useState<string | null>(null);
 
   useLayoutEffect(() => {
@@ -108,21 +184,52 @@ export function AgentRuntimeDialog({
     }
   };
 
-  const submit = () => {
-    if (kind === "codex") {
-      for (const [label, raw] of [
-        ["上下文窗口", options.codexContextWindow],
-        ["自动压缩阈值", options.codexAutoCompactTokenLimit],
-      ] as const) {
-        if (raw.trim() && (!Number.isInteger(Number(raw)) || Number(raw) <= 0)) {
-          setLocalError(`${label}必须是正整数，留空表示使用 Codex 默认值`);
-          return;
-        }
+  const readRaw = (): AgentRuntimeSettings | null => {
+    try {
+      const parsed = JSON.parse(rawText) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("运行设置 JSON 必须是对象");
       }
+      return parsed as AgentRuntimeSettings;
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : String(err));
+      return null;
     }
-    setLocalError(null);
-    onSubmit(options);
   };
+
+  const switchMode = (next: "form" | "json" | "observed") => {
+    if (next === mode) return;
+    if (next === "observed" || mode === "observed") {
+      setLocalError(null);
+      setMode(next);
+      return;
+    }
+    if (next === "json") {
+      setRawText(JSON.stringify(settings, null, 2));
+      setLocalError(null);
+      setMode(next);
+      return;
+    }
+    const parsed = readRaw();
+    if (!parsed) return;
+    setSettings(parsed);
+    setLocalError(null);
+    setMode(next);
+  };
+
+  const submit = () => {
+    const candidate = mode === "json" ? readRaw() : settings;
+    if (!candidate) return;
+    try {
+      const normalized = normalizeAgentRuntimeSettings(candidate, fields);
+      setLocalError(null);
+      onSubmit(normalized);
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const sections = Array.from(new Set(fields.map((field) => field.section)));
 
   return (
     <div
@@ -135,262 +242,132 @@ export function AgentRuntimeDialog({
         aria-modal="true"
         aria-label={`${agentName} 运行设置`}
         onKeyDown={onKeyDown}
-        className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border bg-card shadow-xl animate-zoom-in-95"
+        className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border bg-card shadow-xl animate-zoom-in-95"
       >
         <div className="flex items-start justify-between gap-3 border-b px-5 py-4 sm:px-6">
           <div>
             <h3 className="text-lg font-semibold text-foreground">{agentName} 运行设置</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              常用项直接编辑；每项下面同时标出将写入的真实配置键和值。账号、接口地址、模型与凭据变量在接入卡片中维护。
+              字段由客户端适配器提供；每项都显示最终写入的真实配置键和值。账号、接口地址、模型与凭据变量在接入卡片中维护。
             </p>
           </div>
-          <button
-            type="button"
-            aria-label="关闭"
-            disabled={busy}
-            onClick={close}
-            className="rounded p-1 text-muted-foreground hover:bg-accent disabled:opacity-50"
-          >
+          <button type="button" aria-label="关闭" disabled={busy} onClick={close} className="rounded p-1 text-muted-foreground hover:bg-accent disabled:opacity-50">
             <X className="h-4 w-4" aria-hidden />
           </button>
         </div>
 
+        <div className="flex items-center gap-2 border-b px-5 py-3 sm:px-6" role="group" aria-label="编辑方式">
+          <button
+            type="button"
+            aria-pressed={mode === "form"}
+            data-testid="agent-runtime-form-mode"
+            onClick={() => switchMode("form")}
+            className={cn("inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm", mode === "form" ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent")}
+          >
+            <FormInput className="h-4 w-4" aria-hidden /> 按项填写
+          </button>
+          <button
+            type="button"
+            aria-pressed={mode === "json"}
+            data-testid="agent-runtime-json-mode"
+            onClick={() => switchMode("json")}
+            className={cn("inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm", mode === "json" ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent")}
+          >
+            <Braces className="h-4 w-4" aria-hidden /> 已纳管 JSON
+          </button>
+          <button
+            type="button"
+            aria-pressed={mode === "observed"}
+            data-testid="agent-runtime-observed-mode"
+            onClick={() => switchMode("observed")}
+            className={cn("inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm", mode === "observed" ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent")}
+          >
+            <Braces className="h-4 w-4" aria-hidden /> 本机实际值
+          </button>
+        </div>
+
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
-          <div className="space-y-5 text-sm">
-            <section>
-              <h4 className="font-semibold text-foreground">权限与执行</h4>
-              <p className="mt-1 text-xs text-muted-foreground">高风险设置仍会在保存后要求二次确认。</p>
-              <label className="mt-3 flex items-start gap-3 rounded-lg border border-destructive/25 bg-destructive/5 p-3">
-                <input
-                  type="checkbox"
-                  data-testid="agent-runtime-yolo"
-                  checked={options.yolo}
-                  disabled={busy}
-                  onChange={(event) => setOptions((current) => ({ ...current, yolo: event.target.checked }))}
-                  className="mt-0.5"
-                />
-                <span>
-                  <span className="block font-medium text-foreground">跳过权限确认</span>
-                  <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                    开启后执行命令和修改文件不再逐次询问；关闭时撤销本工具写入的权限覆盖。
-                  </span>
-                  {kind === "claude" ? (
-                    <FieldHint
-                      configKey="permissions.defaultMode"
-                      value={options.yolo ? '\"bypassPermissions\"' : "<删除该键，使用客户端默认>"}
-                    />
-                  ) : (
-                    <>
-                      <FieldHint configKey="approval_policy" value={options.yolo ? '\"never\"' : "<删除该键，使用客户端默认>"} />
-                      <FieldHint configKey="sandbox_mode" value={options.yolo ? '\"danger-full-access\"' : "<删除该键，使用客户端默认>"} />
-                    </>
-                  )}
-                </span>
-              </label>
-            </section>
-
-            {kind === "claude" ? (
-              <>
-                <section>
-                  <h4 className="font-semibold text-foreground">界面与模型行为</h4>
-                  <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
-                    <label className="rounded-lg border bg-background p-3 text-foreground">
-                      状态栏
-                      <select
-                        data-testid="agent-runtime-statusline"
-                        value={options.statusline}
-                        disabled={busy}
-                        onChange={(event) =>
-                          setOptions((current) => ({
-                            ...current,
-                            statusline: event.target.value === "builtin" ? "builtin" : "untouched",
-                          }))
-                        }
-                        className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                      >
-                        <option value="untouched">保持现有状态栏</option>
-                        <option value="builtin">使用 Agent Manager 用量状态栏</option>
-                      </select>
-                      <FieldHint
-                        configKey="statusLine.command"
-                        value={options.statusline === "builtin" ? "<Agent Manager statusline.sh>" : "<不写入，保留现状>"}
-                      />
-                    </label>
-                    <label className="rounded-lg border bg-background p-3 text-foreground">
-                      推理强度
-                      <select
-                        data-testid="agent-runtime-claude-effort"
-                        value={options.claudeEffortLevel}
-                        disabled={busy}
-                        onChange={(event) => setOptions((current) => ({
-                          ...current,
-                          claudeEffortLevel: event.target.value as AgentRuntimeOptions["claudeEffortLevel"],
-                        }))}
-                        className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                      >
-                        <option value="">使用 Claude 默认值</option>
-                        <option value="auto">auto</option>
-                        <option value="low">low</option>
-                        <option value="medium">medium</option>
-                        <option value="high">high</option>
-                        <option value="xhigh">xhigh</option>
-                        <option value="max">max</option>
-                      </select>
-                      <FieldHint
-                        configKey="env.CLAUDE_CODE_EFFORT_LEVEL"
-                        value={options.claudeEffortLevel || "<删除该键，使用客户端默认>"}
-                      />
-                    </label>
-                  </div>
-                </section>
-                <section>
-                  <h4 className="font-semibold text-foreground">高级能力</h4>
-                  <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
-                    <ToggleField
-                      checked={options.claudeToolSearch}
-                      disabled={busy}
-                      testId="agent-runtime-claude-tool-search"
-                      title="工具搜索"
-                      description="让 Claude Code 按需发现工具，减少一次性加载的工具描述。"
-                      configKey="env.ENABLE_TOOL_SEARCH"
-                      enabledValue='"true"'
-                      onChange={(checked) => setOptions((current) => ({ ...current, claudeToolSearch: checked }))}
-                    />
-                    <ToggleField
-                      checked={options.claudeAgentTeams}
-                      disabled={busy}
-                      testId="agent-runtime-claude-agent-teams"
-                      title="Agent Teams"
-                      description="启用 Claude Code 的实验性多 Agent 协作能力。"
-                      configKey="env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
-                      enabledValue='"1"'
-                      onChange={(checked) => setOptions((current) => ({ ...current, claudeAgentTeams: checked }))}
-                    />
-                    <ToggleField
-                      checked={options.claudeDisableArtifact}
-                      disabled={busy}
-                      testId="agent-runtime-claude-disable-artifact"
-                      title="禁用 Artifact"
-                      description="不让 Claude Code 创建 Artifact；适合只需要代码与终端输出的环境。"
-                      configKey="env.CLAUDE_CODE_DISABLE_ARTIFACT"
-                      enabledValue='"1"'
-                      onChange={(checked) => setOptions((current) => ({ ...current, claudeDisableArtifact: checked }))}
-                    />
-                    <ToggleField
-                      checked={options.claudeHideAttribution}
-                      disabled={busy}
-                      testId="agent-runtime-claude-hide-attribution"
-                      title="隐藏提交与 PR 署名"
-                      description="把 Claude 的 commit 和 PR attribution 模板设为空。"
-                      configKey="attribution.commit / attribution.pr"
-                      enabledValue='""'
-                      onChange={(checked) => setOptions((current) => ({ ...current, claudeHideAttribution: checked }))}
-                    />
-                  </div>
-                </section>
-              </>
-            ) : (
-              <section>
-                <h4 className="font-semibold text-foreground">模型与上下文</h4>
-                <p className="mt-1 text-xs text-muted-foreground">留空即删除本工具的覆盖，恢复 Codex 自己的默认值。</p>
-                <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
-                  <label className="rounded-lg border bg-background p-3 text-foreground">
-                    推理强度
-                    <select
-                      data-testid="agent-runtime-codex-reasoning"
-                      value={options.codexReasoningEffort}
-                      disabled={busy}
-                      onChange={(event) => setOptions((current) => ({
-                        ...current,
-                        codexReasoningEffort: event.target.value as AgentRuntimeOptions["codexReasoningEffort"],
-                      }))}
-                      className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    >
-                      <option value="">使用 Codex 默认值</option>
-                      <option value="minimal">minimal</option>
-                      <option value="low">low</option>
-                      <option value="medium">medium</option>
-                      <option value="high">high</option>
-                      <option value="xhigh">xhigh</option>
-                    </select>
-                    <FieldHint configKey="model_reasoning_effort" value={options.codexReasoningEffort || "<删除该键，使用客户端默认>"} />
-                  </label>
-                  <label className="rounded-lg border bg-background p-3 text-foreground">
-                    Web 搜索模式
-                    <select
-                      data-testid="agent-runtime-codex-web-search"
-                      value={options.codexWebSearch}
-                      disabled={busy}
-                      onChange={(event) => setOptions((current) => ({
-                        ...current,
-                        codexWebSearch: event.target.value as AgentRuntimeOptions["codexWebSearch"],
-                      }))}
-                      className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    >
-                      <option value="">使用 Codex 默认值</option>
-                      <option value="disabled">disabled</option>
-                      <option value="cached">cached</option>
-                      <option value="indexed">indexed</option>
-                      <option value="live">live</option>
-                    </select>
-                    <FieldHint configKey="web_search" value={options.codexWebSearch || "<删除该键，使用客户端默认>"} />
-                  </label>
-                  <label className="rounded-lg border bg-background p-3 text-foreground">
-                    上下文窗口（tokens）
-                    <input
-                      data-testid="agent-runtime-codex-context-window"
-                      inputMode="numeric"
-                      value={options.codexContextWindow}
-                      disabled={busy}
-                      placeholder="例如 1000000"
-                      onChange={(event) => setOptions((current) => ({ ...current, codexContextWindow: event.target.value }))}
-                      className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm"
-                    />
-                    <FieldHint configKey="model_context_window" value={options.codexContextWindow || "<删除该键，使用客户端默认>"} />
-                  </label>
-                  <label className="rounded-lg border bg-background p-3 text-foreground">
-                    自动压缩阈值（tokens）
-                    <input
-                      data-testid="agent-runtime-codex-compact-limit"
-                      inputMode="numeric"
-                      value={options.codexAutoCompactTokenLimit}
-                      disabled={busy}
-                      placeholder="例如 900000"
-                      onChange={(event) => setOptions((current) => ({ ...current, codexAutoCompactTokenLimit: event.target.value }))}
-                      className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm"
-                    />
-                    <FieldHint configKey="model_auto_compact_token_limit" value={options.codexAutoCompactTokenLimit || "<删除该键，使用客户端默认>"} />
-                  </label>
-                </div>
-              </section>
-            )}
-
-            <p className="rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
-              官方账号仍在助手自身完成登录；本工具只维护上述运行参数，不读取账号密码或令牌明文。
-            </p>
-            {(error || localError) && <p role="alert" className="text-sm text-destructive">{error ?? localError}</p>}
-          </div>
+          {mode === "form" ? (
+            <div className="space-y-5 text-sm">
+              {sections.map((section) => {
+                const sectionFields = fields.filter((field) => field.section === section);
+                return (
+                  <section key={section}>
+                    <h4 className="font-semibold text-foreground">{section}</h4>
+                    {sectionFields[0]?.section_description && (
+                      <p className="mt-1 text-xs text-muted-foreground">{sectionFields[0].section_description}</p>
+                    )}
+                    <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                      {sectionFields.map((field) => (
+                        <RuntimeField
+                          key={field.key}
+                          field={field}
+                          value={settings[field.key]}
+                          disabled={busy}
+                          onChange={(value) => setSettings((current) => {
+                            const next = { ...current };
+                            if (value === false || value === "") delete next[field.key];
+                            else next[field.key] = value;
+                            return next;
+                          })}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
+              <p className="rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
+                官方账号仍在助手自身完成登录；本工具不读取账号密码或令牌明文。
+              </p>
+            </div>
+          ) : mode === "json" ? (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                这里是数据库中的完整运行设置，不含由接入工作台管理的 <code>profiles</code> 和 <code>active</code>。
+                未知键会原样保留，待新版适配器支持后即可生效；当前适配器不会把未知键写入客户端。不要在这里填写凭据明文。
+              </div>
+              <textarea
+                aria-label="运行设置 JSON 原文"
+                data-testid="agent-runtime-json"
+                value={rawText}
+                disabled={busy}
+                onChange={(event) => setRawText(event.target.value)}
+                spellCheck={false}
+                className="min-h-[24rem] w-full resize-y rounded-lg border border-input bg-slate-950 p-4 font-mono text-xs leading-5 text-slate-100"
+              />
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                这里来自客户端配置文件的只读脱敏观察值，不会显示 token/API key，也不会自动写入数据库或接管配置。
+              </div>
+              <pre
+                data-testid="agent-runtime-observed-json"
+                className="min-h-[24rem] overflow-auto rounded-lg border border-input bg-slate-950 p-4 font-mono text-xs leading-5 text-slate-100"
+              >
+                {JSON.stringify(currentConfig ?? { state: "unavailable", config: null }, null, 2)}
+              </pre>
+            </div>
+          )}
+          {(error || localError) && <p role="alert" className="mt-3 text-sm text-destructive">{error ?? localError}</p>}
         </div>
 
         <div className="flex justify-end gap-2 border-t px-5 py-4 sm:px-6">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={close}
-            className="rounded-md border px-4 py-2 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
-          >
+          <button type="button" disabled={busy} onClick={close} className="rounded-md border px-4 py-2 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50">
             取消
           </button>
-          <button
-            type="button"
-            data-testid="agent-runtime-submit"
-            disabled={busy}
-            onClick={submit}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-          >
-            {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-            {busy ? "正在写入…" : "保存并写入助手"}
-          </button>
+          {mode !== "observed" && (
+            <button
+              type="button"
+              data-testid="agent-runtime-submit"
+              disabled={busy}
+              onClick={submit}
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+              {busy ? "正在写入…" : "保存并写入助手"}
+            </button>
+          )}
         </div>
       </section>
     </div>

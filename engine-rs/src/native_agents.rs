@@ -551,6 +551,30 @@ fn status_element(
             .map(|provider| Value::String(provider.to_string()))
             .unwrap_or(Value::Null),
     );
+    observed.insert(
+        "management".into(),
+        crate::native_agent_adapters::management_for_bin(&def.bin),
+    );
+    if let Some(kind) = crate::native_agent_adapters::kind_for_bin(&def.bin) {
+        let auth_kind = match kind {
+            crate::native_agent_adapters::AdapterKind::Claude => {
+                crate::native_auth::AuthKind::Claude
+            }
+            crate::native_agent_adapters::AdapterKind::Codex => crate::native_auth::AuthKind::Codex,
+        };
+        let config_dir = match kind {
+            crate::native_agent_adapters::AdapterKind::Claude => ctx.home_dir.join(".claude"),
+            crate::native_agent_adapters::AdapterKind::Codex => ctx.home_dir.join(".codex"),
+        };
+        observed.insert(
+            "auth".into(),
+            crate::native_auth::inspect(&config_dir, auth_kind),
+        );
+        observed.insert(
+            "current_config".into(),
+            crate::native_agent_settings::inspect_current_config(&config_dir, kind),
+        );
+    }
 
     let element_id = format!("agents:{}", def.id);
     // 上游轴：仅 enabled 且首选 provider install 命令可解析出 npm 包的 agent 参与
@@ -820,21 +844,11 @@ pub fn handle(ctx: &Context, req: &Request) -> Result<Value> {
 
 // ---------- discover（只读，供 system:discover 聚合） ----------
 
-/// 已知 AI 助手 CLI 候选表：(bin, 建议 id, 展示名)。只决定“能发现什么”，不臆造安装命令：
-/// 仅当能从全局 node_modules 可靠反查出包名时才生成 npm 渠道命令；官方安装器、Homebrew
-/// 与 PATH 其他位置一律登记为只观测渠道，升级卸载继续走它们各自的原生管理方式。
+/// 产品只支持 Claude Code 与 Codex。两者通常已有内置定义；保留在候选表中，
+/// 兼容旧数据库里定义被用户移除后重新发现的场景。
 const KNOWN_AGENT_BINS: &[(&str, &str, &str)] = &[
-    ("aider", "aider", "Aider"),
-    ("amp", "amp", "Amp"),
-    ("copilot", "copilot-cli", "GitHub Copilot CLI"),
-    ("crush", "crush", "Crush"),
-    ("cursor-agent", "cursor-agent", "Cursor Agent"),
-    ("droid", "droid", "Factory Droid"),
-    ("gemini", "gemini-cli", "Gemini CLI"),
-    ("goose", "goose", "Goose"),
-    ("iflow", "iflow", "iFlow CLI"),
-    ("opencode", "opencode", "OpenCode"),
-    ("qwen", "qwen-code", "Qwen Code"),
+    ("claude", "claude-code", "Claude Code"),
+    ("codex", "codex", "Codex"),
 ];
 
 /// 从全局 bin 链接反查 npm 包名：`.../lib/node_modules/<pkg>/bin/x`（scope 包取两段）。

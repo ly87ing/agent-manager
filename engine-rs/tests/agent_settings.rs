@@ -687,6 +687,94 @@ fn codex_config(ctx: &Context) -> String {
 }
 
 #[test]
+fn codex_普通运行设置保留认证并拒绝把配置路径指向认证文件() {
+    let (base, ctx) = temp_ctx("codex-auth-boundary");
+    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
+    let auth_path = ctx.home_dir.join(".codex/auth.json");
+    let auth_bytes = br#"{"auth_mode":"chatgpt","tokens":{"refresh_token":"test-only"}}"#;
+    fs::write(&auth_path, auth_bytes).unwrap();
+
+    let before = execute(&ctx, &request("agents:status", &[]));
+    assert!(before.ok, "{:?}", before.errors);
+    let codex = before.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|element| element["id"] == "agents:codex")
+        .unwrap();
+    assert_eq!(codex["observed"]["auth"]["state"], "ready");
+    assert_eq!(codex["observed"]["auth"]["mode"], "chatgpt");
+    assert!(!codex["observed"]["auth"].to_string().contains("test-only"));
+
+    define_codex(
+        &ctx,
+        json!({"active": "relay", "profiles": {"relay": {"base_url": "https://relay.example.com/v1", "token_var": "RELAY_KEY"}}}),
+    );
+    let applied = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:codex"]),
+    );
+    assert!(applied.ok, "{:?}", applied.errors);
+    let config = codex_config(&ctx);
+    assert!(config.contains("env_key = \"RELAY_KEY\""));
+    assert!(config.contains("requires_openai_auth = true"));
+    assert_eq!(fs::read(&auth_path).unwrap(), auth_bytes);
+
+    define_codex(
+        &ctx,
+        json!({"active": "local", "profiles": {"local": {"base_url": "http://127.0.0.1:11434/v1"}}}),
+    );
+    let keyless = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:codex"]),
+    );
+    assert!(keyless.ok, "{:?}", keyless.errors);
+    let keyless_config = codex_config(&ctx);
+    assert!(!keyless_config.contains("env_key ="));
+    assert!(!keyless_config.contains("requires_openai_auth"));
+    assert_eq!(fs::read(&auth_path).unwrap(), auth_bytes);
+
+    let dangerous = json!({
+        "_replace": true,
+        "display_name": "Codex",
+        "bin": "codex",
+        "mcp_config": {"path": "~/.codex/auth.json", "format": "toml"},
+        "preferred_provider": "native",
+        "providers": {"native": {"install": "true", "upgrade": "true", "managed": true}},
+        "settings": {"active": "relay", "profiles": {"relay": {"base_url": "https://other.example.com/v1"}}},
+    });
+    let saved = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "agents.definitions.codex",
+                "--value",
+                &dangerous.to_string(),
+            ],
+        ),
+    );
+    assert!(saved.ok, "{:?}", saved.errors);
+
+    let refused = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:codex"]),
+    );
+    assert!(!refused.ok);
+    assert!(
+        refused.errors[0].message.contains("只允许写 config.toml"),
+        "{:?}",
+        refused.errors
+    );
+    assert_eq!(fs::read(&auth_path).unwrap(), auth_bytes);
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
 fn codex_写入只动自己那几项_用户的四百行配置原样保留() {
     let (base, ctx) = temp_ctx("codex-merge");
     fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();

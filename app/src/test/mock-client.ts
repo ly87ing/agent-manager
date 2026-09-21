@@ -1,6 +1,13 @@
 import type { Envelope, RunEntry } from "../lib/contract";
 import { EngineBridgeError, type EngineClient } from "../lib/engine";
-import { makeAuditData, makeElement, makeEnvelope, makeFreshness, makeRunEntry } from "./fixtures";
+import {
+  agentManagementFixture,
+  makeAuditData,
+  makeElement,
+  makeEnvelope,
+  makeFreshness,
+  makeRunEntry,
+} from "./fixtures";
 
 /**
  * dev-only mock 引擎（?mock=1 / ?mock=fresh，仅在 import.meta.env.DEV 下经
@@ -43,7 +50,12 @@ function demoEnvelopes(): Record<string, Envelope> {
             providers: { native: { managed: true }, brew: { managed: false } },
           },
           policy: { enabled: true, auto_install: true, auto_update: true, preferred_provider: "native" },
-          observed: { install_source: "native", installed: true },
+          observed: {
+            install_source: "native",
+            installed: true,
+            management: agentManagementFixture("claude"),
+            auth: { state: "ready", authenticated: true, mode: "oauth", storage: "file", file: ".credentials.json" },
+          },
           state: "managed-ok",
           freshness: makeFreshness({ state: "behind", current: "2.0.0", upstream: "2.1.3", checked_at: CHECKED_AT, probe: "native", cache_age_sec: 300 }),
           actions: [{ id: "upgrade", risk: "network", needs_lock: true, offline_ok: false }],
@@ -68,7 +80,12 @@ function demoEnvelopes(): Record<string, Envelope> {
             },
           },
           policy: { enabled: true, auto_install: true, auto_update: true, preferred_provider: "native" },
-          observed: { install_source: "native", installed: true },
+          observed: {
+            install_source: "native",
+            installed: true,
+            management: agentManagementFixture("codex"),
+            auth: { state: "ready", authenticated: true, mode: "chatgpt", storage: "file", file: "auth.json" },
+          },
           state: "managed-ok",
           freshness: makeFreshness({ state: "ahead", current: "0.43.0-beta.1", upstream: "0.42.0", checked_at: CHECKED_AT, probe: "native", cache_age_sec: 300 }),
         }),
@@ -420,6 +437,7 @@ function demoEnvelopes(): Record<string, Envelope> {
             env_refs: [{ name: "ANTHROPIC_AUTH_TOKEN", kind: "reference", variable: "WORK_API_KEY", resolved: true }],
             launch_value: 'CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude',
             blocked_reason: null,
+            auth: { state: "missing", authenticated: false, mode: null, storage: "file", file: ".credentials.json" },
           },
           state: "managed-ok",
           freshness: makeFreshness({ state: "not-applicable" }),

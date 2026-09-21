@@ -9,10 +9,8 @@ import {
   ConnectionFormDialog,
   type ConnectionSubmission,
 } from "../components/ConnectionFormDialog";
-import {
-  ConnectionWorkbench,
-  connectionKindOf,
-} from "../components/ConnectionWorkbench";
+import { ConnectionWorkbench } from "../components/ConnectionWorkbench";
+import { ConnectionImportDialog } from "../components/ConnectionImportDialog";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { EmptyState } from "../components/EmptyState";
 import { FirstRunGuide } from "../components/FirstRunGuide";
@@ -36,14 +34,18 @@ import {
   activeConnectionOf,
   connectionsOf,
   duplicateConnectionDraft,
+  moveAgentConnection,
+  serializeConnectionBundle,
   removeAgentConnection,
-  runtimeOptionsOf,
+  runtimeRequiresYoloConfirmation,
+  runtimeSettingsOf,
   upsertAgentConnection,
-  updateAgentRuntimeOptions,
-  type AgentRuntimeOptions,
+  updateAgentRuntimeSettings,
+  type AgentRuntimeSettings,
   type ConnectionEntry,
 } from "../lib/agentDefinitionForm";
-import type { AgentsSpec } from "../lib/observed";
+import { agentManagementOf, connectionKindOf } from "../lib/agentManagement";
+import type { AgentsObserved, AgentsSpec } from "../lib/observed";
 import { useEngineQuery } from "../lib/queries";
 import { useAliasSource } from "../lib/useAliasSource";
 import { useDirectApply } from "../lib/useDirectApply";
@@ -78,6 +80,7 @@ export default function AgentsPage({
   } | null>(null);
   const [connectionSaving, setConnectionSaving] = useState(false);
   const [connectionFormError, setConnectionFormError] = useState<string | null>(null);
+  const [connectionImportAgent, setConnectionImportAgent] = useState<EngineElement | null>(null);
   const [connectionRemoving, setConnectionRemoving] = useState<{
     agent: EngineElement;
     connection: ConnectionEntry;
@@ -113,16 +116,30 @@ export default function AgentsPage({
   const profileElements = profilesQuery.data?.ok ? profilesQuery.data.data.elements : [];
   const profileIds = new Set(profileElements.map((element) => element.id.replace(/^profiles:/, "")));
   /** 主助手（非实例）：参与接入工作台与「新建实例」。 */
-  const allPrimaryElements = elements.filter((element) => !profileIds.has(element.id.replace(/^agents:/, "")));
+  const allPrimaryElements = elements.filter(
+    (element) =>
+      connectionKindOf(element) !== null &&
+      !profileIds.has(element.id.replace(/^agents:/, "")),
+  );
   const effectiveSelectedAgentId =
     selectedAgentId && allPrimaryElements.some((element) => element.id === selectedAgentId)
       ? selectedAgentId
       : allPrimaryElements[0]?.id ?? null;
-  /** 可作为实例归属的助手：目前只有 Claude Code 与 Codex 有隔离配置目录的官方支持。 */
+  /** 可作为实例归属的助手：以后由后端适配器声明，不再按定义 ID 猜客户端类型。 */
   const profileCapableAgents = elements
-    .map((element) => ({ id: element.id.replace(/^agents:/, ""), spec: element.spec as AgentsSpec }))
-    .filter((item) => !profileIds.has(item.id) && ["claude-code", "codex"].includes(item.id))
-    .map((item) => ({ id: item.id, displayName: item.spec.display_name ?? item.id }));
+    .map((element) => ({
+      id: element.id.replace(/^agents:/, ""),
+      spec: element.spec as AgentsSpec,
+      management: agentManagementOf(element),
+    }))
+    .filter((item) => !profileIds.has(item.id) && item.management?.supports_profiles)
+    .map((item) => ({
+      id: item.id,
+      displayName: item.spec.display_name ?? item.id,
+      kind: item.management!.connection_kind as "claude" | "codex",
+    }))
+    .filter((item) => item.kind === "claude" || item.kind === "codex");
+  const runtimeManagement = runtimeFormAgent ? agentManagementOf(runtimeFormAgent) : null;
   const baseBinOf = (agentId: string) =>
     (elements.find((element) => element.id === `agents:${agentId}`)?.spec as AgentsSpec | undefined)?.bin ??
     (agentId === "codex" ? "codex" : "claude");
@@ -281,14 +298,56 @@ export default function AgentsPage({
     }
   };
 
+  /** Provider 排序只保存定义顺序，不改当前接入，也不触碰助手配置或认证文件。 */
+  const moveConnection = async (
+    element: EngineElement,
+    connection: ConnectionEntry,
+    direction: "up" | "down",
+  ) => {
+    if (connectionSaving) return;
+    const agentId = element.id.replace(/^agents:/, "");
+    setConnectionSaving(true);
+    try {
+      const definition = moveAgentConnection(
+        element.spec as Record<string, unknown>,
+        connection.name,
+        direction,
+      );
+      const saved = await definitionOps.saveDefinition({ name: agentId, definition, isNew: false });
+      if (!saved) return;
+      await query.refetch();
+    } finally {
+      setConnectionSaving(false);
+    }
+  };
+
+  /** 分享内容不含凭据取值；导入只保存定义，不启用、不写助手配置。 */
+  const exportConnection = async (element: EngineElement, connection: ConnectionEntry) => {
+    const kind = connectionKindOf(element);
+    if (!kind) return;
+    try {
+      await navigator.clipboard.writeText(serializeConnectionBundle(kind, connection));
+      toast.success(`已复制接入 ${connection.label || connection.name}`, {
+        description: "只包含连接参数与凭据变量名，不包含密钥或官方登录信息。",
+      });
+    } catch {
+      toast.error("复制失败，请检查剪贴板权限");
+    }
+  };
+
   /** 保存运行偏好后立刻写进助手配置；只改运行设置弹窗明确拥有的键。 */
-  const saveRuntimeOptions = async (element: EngineElement, options: AgentRuntimeOptions) => {
+  const saveRuntimeSettings = async (element: EngineElement, settings: AgentRuntimeSettings) => {
     if (runtimeSaving) return;
     const agentId = element.id.replace(/^agents:/, "");
+    const management = agentManagementOf(element);
+    if (!management) {
+      setRuntimeFormError("当前助手没有可用的运行设置适配器");
+      return;
+    }
     setRuntimeSaving(true);
     setRuntimeFormError(null);
     try {
-      const definition = updateAgentRuntimeOptions(element.spec as Record<string, unknown>, options);
+      const definition = updateAgentRuntimeSettings(element.spec as Record<string, unknown>, settings);
       const saved = await definitionOps.saveDefinition({ name: agentId, definition, isNew: false });
       if (!saved) {
         setRuntimeFormError("运行设置没有保存，请根据提示修正后重试");
@@ -296,7 +355,7 @@ export default function AgentsPage({
       }
       setRuntimeFormAgent(null);
       await query.refetch();
-      if (options.yolo) {
+      if (runtimeRequiresYoloConfirmation(settings, management.runtime_fields)) {
         setPendingConfigure({ agentId, yolo: true, reason: "yolo" });
         return;
       }
@@ -479,6 +538,7 @@ export default function AgentsPage({
           setConnectionFormError(null);
           setConnectionForm({ agent: element });
         }}
+        onImport={setConnectionImportAgent}
         onSwitch={(element, connection) =>
           void runConfigure(element.id.replace(/^agents:/, ""), { use: connection })
         }
@@ -499,7 +559,9 @@ export default function AgentsPage({
             preserveUnknownFrom: connection.name,
           });
         }}
+        onExport={(element, connection) => void exportConnection(element, connection)}
         onRemove={(element, connection) => setConnectionRemoving({ agent: element, connection })}
+        onMove={(element, connection, direction) => void moveConnection(element, connection, direction)}
         onRuntimeSettings={(element) => {
           setRuntimeFormError(null);
           setRuntimeFormAgent(element);
@@ -538,6 +600,7 @@ export default function AgentsPage({
                 <ProfileCard
                   key={element.id}
                   element={element}
+                  bin={baseBinOf((element.spec as unknown as { base_agent?: string }).base_agent ?? id)}
                   busy={profileApply.executing}
                   onApply={() =>
                     void profileApply.apply({
@@ -643,6 +706,18 @@ export default function AgentsPage({
           }}
         />
       )}
+      {connectionImportAgent && connectionKindOf(connectionImportAgent) && (
+        <ConnectionImportDialog
+          kind={connectionKindOf(connectionImportAgent)!}
+          existingNames={connectionsOf(connectionImportAgent.spec as Record<string, unknown>).map((item) => item.name)}
+          busy={connectionSaving}
+          onImport={(connection) => {
+            setConnectionImportAgent(null);
+            void saveConnection(connectionImportAgent, { connection, secretValue: "", activate: false });
+          }}
+          onClose={() => setConnectionImportAgent(null)}
+        />
+      )}
       {connectionRemoving && (
         <ConfirmModal
           title={`删除接入 ${connectionRemoving.connection.label || connectionRemoving.connection.name}`}
@@ -712,15 +787,16 @@ export default function AgentsPage({
           onClose={() => setLaunchRemoving(null)}
         />
       )}
-      {runtimeFormAgent && (
+      {runtimeFormAgent && runtimeManagement && (
         <AgentRuntimeDialog
           key={runtimeFormAgent.id}
           agentName={(runtimeFormAgent.spec as AgentsSpec).display_name ?? runtimeFormAgent.id.replace(/^agents:/, "")}
-          initial={runtimeOptionsOf(runtimeFormAgent.spec as Record<string, unknown>)}
-          kind={connectionKindOf(runtimeFormAgent) ?? "claude"}
+          fields={runtimeManagement.runtime_fields}
+          initial={runtimeSettingsOf(runtimeFormAgent.spec as Record<string, unknown>)}
+          currentConfig={(runtimeFormAgent.observed as AgentsObserved).current_config}
           busy={runtimeSaving}
           error={runtimeFormError}
-          onSubmit={(options) => void saveRuntimeOptions(runtimeFormAgent, options)}
+          onSubmit={(settings) => void saveRuntimeSettings(runtimeFormAgent, settings)}
           onClose={() => {
             setRuntimeFormAgent(null);
             setRuntimeFormError(null);

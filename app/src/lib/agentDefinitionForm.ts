@@ -1,3 +1,5 @@
+import type { AgentRuntimeField } from "./observed";
+
 export type SupportedPlatform = "darwin" | "linux" | "windows";
 export type PlatformScope = "universal" | SupportedPlatform;
 
@@ -44,24 +46,8 @@ export interface ConnectionEntry {
   timeoutMs: string;
 }
 
-export type ClaudeEffortLevel = "" | "auto" | "low" | "medium" | "high" | "xhigh" | "max";
-export type CodexReasoningEffort = "" | "minimal" | "low" | "medium" | "high" | "xhigh";
-export type CodexWebSearch = "" | "disabled" | "cached" | "indexed" | "live";
-
-/** 助手自身的运行偏好；账号、地址、模型与凭据变量由接入配置单独维护。 */
-export interface AgentRuntimeOptions {
-  yolo: boolean;
-  statusline: "untouched" | "builtin";
-  claudeToolSearch: boolean;
-  claudeAgentTeams: boolean;
-  claudeEffortLevel: ClaudeEffortLevel;
-  claudeDisableArtifact: boolean;
-  claudeHideAttribution: boolean;
-  codexReasoningEffort: CodexReasoningEffort;
-  codexContextWindow: string;
-  codexAutoCompactTokenLimit: string;
-  codexWebSearch: CodexWebSearch;
-}
+/** 账号、地址、模型与凭据变量之外的完整运行设置文档；未知键必须原样往返。 */
+export type AgentRuntimeSettings = Record<string, unknown>;
 
 /** 新建一套接入配置时的空白值。 */
 export function emptyConnection(name = ""): ConnectionEntry {
@@ -81,6 +67,91 @@ export function emptyConnection(name = ""): ConnectionEntry {
 }
 
 export const CONNECTION_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const CONNECTION_BUNDLE_FORMAT = "agent-manager/provider/v1";
+
+export interface ConnectionBundle {
+  format: typeof CONNECTION_BUNDLE_FORMAT;
+  kind: "claude" | "codex";
+  connection: ConnectionEntry;
+}
+
+function validConnectionBaseUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.protocol === "https:") return true;
+    return url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** 校验可保存的连接定义。凭据取值不属于这个结构，也不会被导入导出。 */
+export function validateConnectionEntry(item: ConnectionEntry): string | null {
+  if (!CONNECTION_NAME_RE.test(item.name.trim())) {
+    return "唯一名称只能用字母、数字、连字符与下划线，长度不超过 64";
+  }
+  if (!validConnectionBaseUrl(item.baseUrl.trim())) {
+    return "接口地址必须是 https://，或本机 localhost / 127.0.0.1 地址";
+  }
+  if (!ENV_NAME_RE.test(item.tokenVar.trim())) return "凭据变量名格式不正确";
+  if (!item.model.trim()) return "要填写模型名";
+  if (item.timeoutMs.trim()) {
+    const timeout = Number(item.timeoutMs.trim());
+    if (!Number.isFinite(timeout) || timeout <= 0) return "请求超时必须是正数";
+  }
+  return null;
+}
+
+/** 导出单个 Provider。结构里只有凭据变量名，不包含凭据取值或官方认证文件。 */
+export function serializeConnectionBundle(
+  kind: "claude" | "codex",
+  connection: ConnectionEntry,
+): string {
+  return JSON.stringify({ format: CONNECTION_BUNDLE_FORMAT, kind, connection }, null, 2);
+}
+
+/** 解析分享内容；只接受当前版本与明确字段，避免把任意配置透传到助手文件。 */
+export function parseConnectionBundle(text: string, expectedKind: "claude" | "codex"): ConnectionEntry {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new Error("粘贴的内容不是合法 JSON");
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("接入分享内容必须是对象");
+  const bundle = value as Record<string, unknown>;
+  if (bundle.format !== CONNECTION_BUNDLE_FORMAT) throw new Error("不支持的接入分享格式");
+  if (bundle.kind !== expectedKind) throw new Error(`这份接入属于 ${String(bundle.kind)}，不能导入当前助手`);
+  if (!bundle.connection || typeof bundle.connection !== "object" || Array.isArray(bundle.connection)) {
+    throw new Error("接入分享内容缺少 connection");
+  }
+  const raw = bundle.connection as Record<string, unknown>;
+  const stringField = (key: keyof ConnectionEntry): string => {
+    const field = raw[key];
+    if (field === undefined) return "";
+    if (typeof field !== "string") throw new Error(`connection.${key} 必须是字符串`);
+    return field;
+  };
+  const auth = raw.auth === undefined ? "token" : raw.auth;
+  if (auth !== "token" && auth !== "api_key") throw new Error("connection.auth 只能是 token 或 api_key");
+  const connection: ConnectionEntry = {
+    name: stringField("name").trim(),
+    label: stringField("label").trim(),
+    baseUrl: stringField("baseUrl").trim(),
+    auth,
+    tokenVar: stringField("tokenVar").trim(),
+    model: stringField("model").trim(),
+    smallFastModel: stringField("smallFastModel").trim(),
+    aliasOpus: stringField("aliasOpus").trim(),
+    aliasSonnet: stringField("aliasSonnet").trim(),
+    aliasHaiku: stringField("aliasHaiku").trim(),
+    timeoutMs: stringField("timeoutMs").trim(),
+  };
+  const error = validateConnectionEntry(connection);
+  if (error) throw new Error(error);
+  return { ...connection, label: connection.label || connection.name };
+}
 
 /** 一套接入配置写进 definition.settings.profiles 时的结构。 */
 export function connectionToDefinitionValue(item: ConnectionEntry): Record<string, unknown> {
@@ -198,6 +269,28 @@ export function removeAgentConnection(
   if (nextSettings.active === name) delete nextSettings.active;
   if (Object.keys(nextSettings).length > 0) next.settings = nextSettings;
   else delete next.settings;
+  return next;
+}
+
+/** 调整接入卡片顺序；只重建 profiles 的键顺序，不改变任何接入内容或当前项。 */
+export function moveAgentConnection(
+  definition: Record<string, unknown>,
+  name: string,
+  direction: "up" | "down",
+): Record<string, unknown> {
+  const next = JSON.parse(JSON.stringify(definition)) as Record<string, unknown>;
+  const settings = next.settings;
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return next;
+  const currentSettings = settings as Record<string, unknown>;
+  const profiles = currentSettings.profiles;
+  if (!profiles || typeof profiles !== "object" || Array.isArray(profiles)) return next;
+
+  const entries = Object.entries(profiles as Record<string, unknown>);
+  const index = entries.findIndex(([key]) => key === name);
+  const nextIndex = direction === "up" ? index - 1 : index + 1;
+  if (index < 0 || nextIndex < 0 || nextIndex >= entries.length) return next;
+  [entries[index], entries[nextIndex]] = [entries[nextIndex], entries[index]];
+  next.settings = { ...currentSettings, profiles: Object.fromEntries(entries) };
   return next;
 }
 
@@ -457,85 +550,96 @@ export function hasAgentSettings(definition: Record<string, unknown> | undefined
   return !!raw && typeof raw === "object" && !Array.isArray(raw) && Object.keys(raw).length > 0;
 }
 
-/** 从定义读取界面拥有的运行偏好；未知设置不参与解释。 */
-export function runtimeOptionsOf(
+/** 从定义读取运行设置；接入 profiles 与 active 由接入工作台单独管理。 */
+export function runtimeSettingsOf(
   definition: Record<string, unknown> | undefined,
-): AgentRuntimeOptions {
+): AgentRuntimeSettings {
   const raw = definition?.settings;
   const settings = raw && typeof raw === "object" && !Array.isArray(raw)
     ? (raw as Record<string, unknown>)
     : {};
-  return {
-    yolo: settings.yolo === true,
-    statusline: settings.statusline === "builtin" ? "builtin" : "untouched",
-    claudeToolSearch: settings.claude_tool_search === true,
-    claudeAgentTeams: settings.claude_agent_teams === true,
-    claudeEffortLevel: ["auto", "low", "medium", "high", "xhigh", "max"].includes(String(settings.claude_effort_level))
-      ? settings.claude_effort_level as ClaudeEffortLevel
-      : "",
-    claudeDisableArtifact: settings.claude_disable_artifact === true,
-    claudeHideAttribution: settings.claude_hide_attribution === true,
-    codexReasoningEffort: ["minimal", "low", "medium", "high", "xhigh"].includes(String(settings.codex_reasoning_effort))
-      ? settings.codex_reasoning_effort as CodexReasoningEffort
-      : "",
-    codexContextWindow: typeof settings.codex_context_window === "number"
-      ? String(settings.codex_context_window)
-      : "",
-    codexAutoCompactTokenLimit: typeof settings.codex_auto_compact_token_limit === "number"
-      ? String(settings.codex_auto_compact_token_limit)
-      : "",
-    codexWebSearch: ["disabled", "cached", "indexed", "live"].includes(String(settings.codex_web_search))
-      ? settings.codex_web_search as CodexWebSearch
-      : "",
-  };
+  return Object.fromEntries(
+    Object.entries(settings)
+      .filter(([key]) => key !== "profiles" && key !== "active")
+      .map(([key, value]) => [key, JSON.parse(JSON.stringify(value))]),
+  );
 }
 
 /**
- * 只更新运行设置弹窗拥有的键。
- * 接入 profiles、当前 active、生命周期字段与未来版本加入的未知字段全部原样保留。
+ * 用完整运行设置文档替换定义里的运行设置，同时保留接入 profiles/active 与定义其他字段。
+ * 表单模式从 runtimeSettingsOf 开始编辑，因此未知运行键也会原样保留；JSON 模式则允许研发
+ * 明确新增或删除未知键，等待新版适配器接管。
  */
-export function updateAgentRuntimeOptions(
+export function updateAgentRuntimeSettings(
   definition: Record<string, unknown>,
-  options: AgentRuntimeOptions,
+  runtime: AgentRuntimeSettings,
 ): Record<string, unknown> {
   const next = JSON.parse(JSON.stringify(definition)) as Record<string, unknown>;
   const raw = next.settings;
-  const settings = raw && typeof raw === "object" && !Array.isArray(raw)
-    ? { ...(raw as Record<string, unknown>) }
+  const previous = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
     : {};
-
-  if (options.yolo) settings.yolo = true;
-  else delete settings.yolo;
-  if (options.statusline === "builtin") settings.statusline = "builtin";
-  else delete settings.statusline;
-
-  const setBoolean = (key: string, value: boolean) => {
-    if (value) settings[key] = true;
-    else delete settings[key];
-  };
-  setBoolean("claude_tool_search", options.claudeToolSearch);
-  setBoolean("claude_agent_teams", options.claudeAgentTeams);
-  setBoolean("claude_disable_artifact", options.claudeDisableArtifact);
-  setBoolean("claude_hide_attribution", options.claudeHideAttribution);
-
-  if (options.claudeEffortLevel) settings.claude_effort_level = options.claudeEffortLevel;
-  else delete settings.claude_effort_level;
-  if (options.codexReasoningEffort) settings.codex_reasoning_effort = options.codexReasoningEffort;
-  else delete settings.codex_reasoning_effort;
-
-  const setPositiveInteger = (key: string, raw: string) => {
-    const value = Number(raw.trim());
-    if (raw.trim() && Number.isInteger(value) && value > 0) settings[key] = value;
-    else delete settings[key];
-  };
-  setPositiveInteger("codex_context_window", options.codexContextWindow);
-  setPositiveInteger("codex_auto_compact_token_limit", options.codexAutoCompactTokenLimit);
-  if (options.codexWebSearch) settings.codex_web_search = options.codexWebSearch;
-  else delete settings.codex_web_search;
+  const settings: Record<string, unknown> = {};
+  if (previous.profiles !== undefined) settings.profiles = previous.profiles;
+  if (previous.active !== undefined) settings.active = previous.active;
+  for (const [key, value] of Object.entries(runtime)) settings[key] = value;
 
   if (Object.keys(settings).length > 0) next.settings = settings;
   else delete next.settings;
   return next;
+}
+
+/** 按后端 schema 校验并归一化运行设置；未知键保留，已知空值删除。 */
+export function normalizeAgentRuntimeSettings(
+  input: AgentRuntimeSettings,
+  fields: AgentRuntimeField[],
+): AgentRuntimeSettings {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("运行设置必须是 JSON 对象");
+  }
+  if ("profiles" in input || "active" in input) {
+    throw new Error("接入 profiles 与 active 请在接入工作台维护，不能放进运行设置 JSON");
+  }
+  const normalized = JSON.parse(JSON.stringify(input)) as AgentRuntimeSettings;
+  for (const field of fields) {
+    const value = normalized[field.key];
+    if (field.type === "boolean") {
+      if (value === undefined || value === false) delete normalized[field.key];
+      else if (value !== true) throw new Error(`${field.label}必须是 true 或 false`);
+      continue;
+    }
+    if (field.type === "enum") {
+      if (value === undefined || value === null || value === "") {
+        delete normalized[field.key];
+        continue;
+      }
+      if (typeof value !== "string" || !field.options?.some((option) => option.value === value)) {
+        throw new Error(`${field.label}不是适配器支持的取值`);
+      }
+      continue;
+    }
+    if (field.type === "positive_integer") {
+      if (value === undefined || value === null || value === "") {
+        delete normalized[field.key];
+        continue;
+      }
+      const number = typeof value === "number" ? value : Number(String(value).trim());
+      if (!Number.isInteger(number) || number <= 0) {
+        throw new Error(`${field.label}必须是正整数，留空表示使用客户端默认值`);
+      }
+      normalized[field.key] = number;
+      continue;
+    }
+    throw new Error(`当前版本不认识运行设置类型 ${field.type}（${field.key}）`);
+  }
+  return normalized;
+}
+
+export function runtimeRequiresYoloConfirmation(
+  runtime: AgentRuntimeSettings,
+  fields: AgentRuntimeField[],
+): boolean {
+  return fields.some((field) => field.requires_yolo_confirmation && runtime[field.key] === true);
 }
 
 /** 定义里当前生效的接入配置名；没有就返回 null。 */

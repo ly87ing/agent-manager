@@ -342,7 +342,11 @@ fn compute_cell_actions(
             } else if missing_reason.is_none() {
                 // 停用期间库定义可能已经改变。此时直接 update 会同时用最新定义
                 // 重新启用，避免先 enable 恢复旧快照、随后还要再 update 一次。
-                acts.push(if b.version == lib_version { "enable" } else { "update" });
+                acts.push(if b.version == lib_version {
+                    "enable"
+                } else {
+                    "update"
+                });
                 None
             } else {
                 missing_reason.map(str::to_string)

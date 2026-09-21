@@ -116,6 +116,26 @@ export function profileLaunchValue(input: ProfileFormInput, baseBin: string): st
 }
 
 /**
+ * 生成由用户在终端亲自执行的官方认证命令。本应用只复制文本，绝不代为启动登录或退出。
+ * 实例必须带独立配置目录，避免认证写到主账号；主助手省略 configDir。
+ */
+export function authTerminalCommand(
+  kind: ProfileKind,
+  bin: string,
+  action: "login" | "logout",
+  configDir?: string,
+): string {
+  const quotedBin = /^[A-Za-z0-9_./-]+$/.test(bin) ? bin : `'${bin.replace(/'/g, `'"'"'`)}'`;
+  const command = kind === "claude" ? `${quotedBin} auth ${action}` : `${quotedBin} ${action}`;
+  if (!configDir) return command;
+  const rendered = shellConfigDir(configDir);
+  const quoted = rendered.startsWith("$HOME")
+    ? `"$HOME${rendered.slice(5).replace(/(["\\`$])/g, "\\$1")}"`
+    : `'${rendered.replace(/'/g, `'"'"'`)}'`;
+  return `${configEnvOf(kind)}=${quoted} ${command}`;
+}
+
+/**
  * 这条命令里的配置目录是不是写成了不会展开的 `"~/..."`。
  *
  * 本工具早先生成的命令都是这个形状，已经写进用户终端配置里了，只能回读时认出来

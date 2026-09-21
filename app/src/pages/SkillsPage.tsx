@@ -27,6 +27,7 @@ import { engineKeys, useEngineQuery } from "../lib/queries";
 import { runEngine } from "../lib/engine";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "../lib/utils";
+import { supportedAgentKindOf } from "../lib/agentManagement";
 
 function isCollection(element: EngineElement): boolean {
   return element.id.startsWith("skill:") && !element.id.includes("/");
@@ -77,6 +78,7 @@ export default function SkillsPage({
 } = {}) {
   const query = useEngineQuery<StatusData>("skills:status");
   const agentsQuery = useEngineQuery<StatusData>("agents:status");
+  const profilesQuery = useEngineQuery<StatusData>("profiles:status");
   const policyQuery = useEngineQuery<PolicyData>("policy:get");
   const [activeTab, setActiveTab] = useState<"collections" | "skills">(() => (initialAgent ? "skills" : "collections"));
   const [collectionFilter, setCollectionFilter] = useState<string>("all");
@@ -151,12 +153,25 @@ export default function SkillsPage({
 
   // 助手列来源：agents:status、集合声明的 agents、技能已报告的 cell。
   // 不取 policy 层的 agents 结构——其中混有 definitions 等保留字段，不能当助手 ID 列表。
-  const statusAgents = (agentsQuery.data?.data?.elements ?? []).map((el) => el.id.replace(/^agents:/, ""));
+  const supportedAgents = new Set([
+    "claude-code",
+    "codex",
+    ...(agentsQuery.data?.data?.elements ?? [])
+      .filter((element) => supportedAgentKindOf(element) !== null)
+      .map((element) => element.id.replace(/^agents:/, "")),
+    ...(profilesQuery.data?.ok ? profilesQuery.data.data.elements : [])
+      .filter((element) => {
+        const kind = (element.observed as { kind?: unknown }).kind;
+        return kind === "claude" || kind === "codex";
+      })
+      .map((element) => element.id.replace(/^profiles:/, "")),
+  ]);
+  const statusAgents = Array.from(supportedAgents);
   const collectionAgents = collections.flatMap((col) => (col.spec as SkillCollectionSpec).agents ?? []);
   const skillAgents = skills.flatMap((element) => Object.keys(agentCellsOf(element)));
 
   const agentColumns = Array.from(new Set([...statusAgents, ...collectionAgents, ...skillAgents]))
-    .filter(Boolean)
+    .filter((agent) => Boolean(agent) && supportedAgents.has(agent))
     .sort();
 
   const collName = (collection: EngineElement) => collection.id.replace(/^skill:/, "");

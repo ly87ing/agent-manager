@@ -3714,36 +3714,40 @@ fn mcp_test_disabled_binding_with_new_definition_updates_and_enables_in_one_step
         ),
     );
     assert!(set_v1.ok);
-    assert!(execute(
-        &ctx,
-        &request(
-            "mcp:apply",
-            &[
-                "--only",
-                "mcp:srv-disabled-update",
-                "--action",
-                "add",
-                "--agent",
-                "claude-code",
-            ],
-        ),
-    )
-    .ok);
-    assert!(execute(
-        &ctx,
-        &request(
-            "mcp:apply",
-            &[
-                "--only",
-                "mcp:srv-disabled-update",
-                "--action",
-                "disable",
-                "--agent",
-                "claude-code",
-            ],
-        ),
-    )
-    .ok);
+    assert!(
+        execute(
+            &ctx,
+            &request(
+                "mcp:apply",
+                &[
+                    "--only",
+                    "mcp:srv-disabled-update",
+                    "--action",
+                    "add",
+                    "--agent",
+                    "claude-code",
+                ],
+            ),
+        )
+        .ok
+    );
+    assert!(
+        execute(
+            &ctx,
+            &request(
+                "mcp:apply",
+                &[
+                    "--only",
+                    "mcp:srv-disabled-update",
+                    "--action",
+                    "disable",
+                    "--agent",
+                    "claude-code",
+                ],
+            ),
+        )
+        .ok
+    );
 
     let set_v2 = execute(
         &ctx,
@@ -3769,8 +3773,16 @@ fn mcp_test_disabled_binding_with_new_definition_updates_and_enables_in_one_step
         .find(|element| element["id"] == "mcp:srv-disabled-update")
         .unwrap()["observed"]["agents"]["claude-code"];
     assert_eq!(cell["state"], "disabled");
-    assert!(cell["actions"].as_array().unwrap().iter().any(|action| action == "update"));
-    assert!(!cell["actions"].as_array().unwrap().iter().any(|action| action == "enable"));
+    assert!(cell["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|action| action == "update"));
+    assert!(!cell["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|action| action == "enable"));
 
     let update = execute(
         &ctx,
@@ -3786,7 +3798,11 @@ fn mcp_test_disabled_binding_with_new_definition_updates_and_enables_in_one_step
             ],
         ),
     );
-    assert!(update.ok, "update 应一次恢复并同步最新定义: {:?}", update.errors);
+    assert!(
+        update.ok,
+        "update 应一次恢复并同步最新定义: {:?}",
+        update.errors
+    );
     assert!(std::fs::read_to_string(ctx.home_dir.join(".claude.json"))
         .unwrap()
         .contains("v2.js"));

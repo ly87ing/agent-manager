@@ -58,7 +58,6 @@ const SOURCE_LABELS: Record<string, string> = {
   "rules.shared": "共享规则",
   "rules.claude": "Claude 专用规则",
   "rules.codex": "Codex 专用规则",
-  "rules.opencode": "OpenCode 专用规则",
   "hooks.claude": "Claude Hooks",
   "hooks.codex": "Codex Hooks",
   "aliases.shell": "终端快捷命令",

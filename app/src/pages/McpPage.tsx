@@ -25,6 +25,7 @@ import { useTakeover, type TakeoverTask } from "../lib/useTakeover";
 import { OVERLAY_COPY } from "../lib/ui-copy";
 import { engineKeys, useEngineQuery } from "../lib/queries";
 import { cn } from "../lib/utils";
+import { supportedAgentKindOf } from "../lib/agentManagement";
 
 /** 从 policy:get 的 sqlite 有效定义中取服务完整定义；无 DB 旧存储返回 null（调用方走迁移后取完整定义）。 */
 function fullMcpDefinition(layers: PolicyLayers | null, name: string): Record<string, unknown> | null {
@@ -36,6 +37,7 @@ function fullMcpDefinition(layers: PolicyLayers | null, name: string): Record<st
 export default function McpPage() {
   const query = useEngineQuery<StatusData>("mcp:status");
   const agentsQuery = useEngineQuery<StatusData>("agents:status");
+  const profilesQuery = useEngineQuery<StatusData>("profiles:status");
   const policyQuery = useEngineQuery<PolicyData>("policy:get");
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"library" | "agents">("library");
@@ -116,11 +118,24 @@ export default function McpPage() {
 
   // 助手列来源：agents:status、服务声明的 agents、已报告的 cell。
   // 不取 policy 层的 agents 结构——其中混有 definitions 等保留字段，不能当助手 ID 列表。
-  const statusAgents = (agentsQuery.data?.data?.elements ?? []).map((el) => el.id.replace(/^agents:/, ""));
+  const supportedAgents = new Set([
+    "claude-code",
+    "codex",
+    ...(agentsQuery.data?.data?.elements ?? [])
+      .filter((element) => supportedAgentKindOf(element) !== null)
+      .map((element) => element.id.replace(/^agents:/, "")),
+    ...(profilesQuery.data?.ok ? profilesQuery.data.data.elements : [])
+      .filter((element) => {
+        const kind = (element.observed as { kind?: unknown }).kind;
+        return kind === "claude" || kind === "codex";
+      })
+      .map((element) => element.id.replace(/^profiles:/, "")),
+  ]);
+  const statusAgents = Array.from(supportedAgents);
   const specAgents = elements.flatMap((element) => (element.spec as McpSpec).agents ?? []);
   const cellAgents = elements.flatMap((element) => Object.keys(agentCellsOf(element)));
   const agentColumns = Array.from(new Set([...statusAgents, ...specAgents, ...cellAgents]))
-    .filter(Boolean)
+    .filter((agent) => Boolean(agent) && supportedAgents.has(agent))
     .sort();
 
   /** 冲突行的显式接管入口：一键直接以精确范围 + --allow-takeover 执行 apply。 */
