@@ -85,6 +85,12 @@ export interface AgentCurrentConfig {
   base_url?: string | null;
   model?: string | null;
   small_fast_model?: string | null;
+  model_aliases?: {
+    opus?: string | null;
+    sonnet?: string | null;
+    haiku?: string | null;
+  } | null;
+  timeout_ms?: string | number | null;
   credential?: AgentCurrentConfigCredential | null;
   runtime?: Record<string, unknown>;
 }

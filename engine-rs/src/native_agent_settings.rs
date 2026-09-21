@@ -96,6 +96,12 @@ fn claude_observed_config(bytes: &[u8]) -> Option<Value> {
         "base_url": string_at(&value, &["env", "ANTHROPIC_BASE_URL"]),
         "model": string_at(&value, &["env", "ANTHROPIC_MODEL"]),
         "small_fast_model": string_at(&value, &["env", "ANTHROPIC_SMALL_FAST_MODEL"]),
+        "model_aliases": {
+            "opus": string_at(&value, &["env", "ANTHROPIC_DEFAULT_OPUS_MODEL"]),
+            "sonnet": string_at(&value, &["env", "ANTHROPIC_DEFAULT_SONNET_MODEL"]),
+            "haiku": string_at(&value, &["env", "ANTHROPIC_DEFAULT_HAIKU_MODEL"])
+        },
+        "timeout_ms": string_at(&value, &["env", "API_TIMEOUT_MS"]),
         "credential": {"configured": credential_kind.is_some(), "kind": credential_kind, "variable": null},
         "runtime": {
             "yolo": string_at(&value, &["permissions", "defaultMode"]) == Some("bypassPermissions"),
@@ -122,6 +128,7 @@ fn codex_observed_config(bytes: &[u8]) -> Option<Value> {
         "provider": provider.unwrap_or("openai"),
         "base_url": provider_config.and_then(|table| table.get("base_url")).and_then(toml::Value::as_str),
         "model": root.get("model").and_then(toml::Value::as_str),
+        "timeout_ms": provider_config.and_then(|table| table.get("stream_idle_timeout_ms")).and_then(toml::Value::as_integer),
         "credential": {"configured": env_key.is_some(), "kind": env_key.map(|_| "env"), "variable": env_key},
         "runtime": {
             "yolo": root.get("approval_policy").and_then(toml::Value::as_str) == Some("never")
@@ -1595,7 +1602,7 @@ mod tests {
         let codex = root.join("codex");
         std::fs::create_dir_all(&claude).unwrap();
         std::fs::create_dir_all(&codex).unwrap();
-        let claude_bytes = br#"{"env":{"ANTHROPIC_BASE_URL":"https://relay.example.com","ANTHROPIC_AUTH_TOKEN":"never-expose","ANTHROPIC_MODEL":"claude-model","CLAUDE_CODE_EFFORT_LEVEL":"high"}}"#;
+        let claude_bytes = br#"{"env":{"ANTHROPIC_BASE_URL":"https://relay.example.com","ANTHROPIC_AUTH_TOKEN":"never-expose","ANTHROPIC_MODEL":"claude-model","ANTHROPIC_SMALL_FAST_MODEL":"claude-small","ANTHROPIC_DEFAULT_OPUS_MODEL":"claude-opus","API_TIMEOUT_MS":"600000","CLAUDE_CODE_EFFORT_LEVEL":"high"}}"#;
         std::fs::write(claude.join("settings.json"), claude_bytes).unwrap();
         let codex_bytes = br#"model_provider = "relay"
 model = "gpt-test"
@@ -1603,6 +1610,7 @@ model_reasoning_effort = "high"
 [model_providers.relay]
 base_url = "https://codex.example.com/v1"
 env_key = "CODEX_RELAY_KEY"
+stream_idle_timeout_ms = 450000
 "#;
         std::fs::write(codex.join(CODEX_CONFIG), codex_bytes).unwrap();
 
@@ -1613,6 +1621,12 @@ env_key = "CODEX_RELAY_KEY"
             "https://relay.example.com"
         );
         assert_eq!(claude_status["config"]["model"], "claude-model");
+        assert_eq!(claude_status["config"]["small_fast_model"], "claude-small");
+        assert_eq!(
+            claude_status["config"]["model_aliases"]["opus"],
+            "claude-opus"
+        );
+        assert_eq!(claude_status["config"]["timeout_ms"], "600000");
         assert_eq!(claude_status["config"]["credential"]["configured"], true);
         assert!(!claude_status.to_string().contains("never-expose"));
         assert_eq!(
@@ -1627,6 +1641,7 @@ env_key = "CODEX_RELAY_KEY"
             codex_status["config"]["credential"]["variable"],
             "CODEX_RELAY_KEY"
         );
+        assert_eq!(codex_status["config"]["timeout_ms"], 450000);
         assert_eq!(
             std::fs::read(codex.join(CODEX_CONFIG)).unwrap(),
             codex_bytes

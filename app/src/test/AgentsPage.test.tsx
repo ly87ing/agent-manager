@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { waitFor } from "@testing-library/react";
 import AgentsPage from "../pages/AgentsPage";
 import { agentManagementFixture, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
@@ -8,6 +9,10 @@ function routes(bin = "claude", id = "claude-code"): Record<string, Envelope> {
   return {
     "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode() }),
     "policy:get": makeEnvelope(makePolicyData(), { command: "policy.get" }),
+    "agents:configure": makeEnvelope(
+      { domain: "agents", action: "configure", element: `agents:${id}` },
+      { command: "agents.configure" },
+    ),
     "agents:status": makeEnvelope(
       {
         domain: "agents",
@@ -110,6 +115,7 @@ describe("助手页产品边界", () => {
     expect(current).toHaveTextContent("本机当前配置");
     expect(current).toHaveTextContent("https://claude.example.com");
     expect(current).toHaveTextContent("凭据：已配置（值已隐藏）");
+    expect(screen.getByTestId("agent-current-config-alignment")).toHaveTextContent("与已纳管选择不一致");
 
     expect(screen.queryByText("安装与维护")).toBeNull();
     expect(screen.queryByRole("button", { name: "管理助手" })).toBeNull();
@@ -118,6 +124,40 @@ describe("助手页产品边界", () => {
     expect(screen.queryByTestId("menu-uninstall-agents:claude-code")).toBeNull();
     expect(screen.queryByText(/curl https:\/\/example\.invalid/)).toBeNull();
     expect(screen.queryByText(/claude --dangerously-skip-permissions/)).toBeNull();
+  });
+
+  it("本机接入与已纳管选择一致时直接给出可信结论", async () => {
+    const matched = routes();
+    const status = matched["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.settings = {
+      active: "relay",
+      profiles: {
+        relay: {
+          label: "Relay",
+          base_url: "https://claude.example.com",
+          auth: "token",
+          token_var: "CLAUDE_RELAY_KEY",
+          model: "claude-test",
+        },
+      },
+    };
+    renderWithEngine(<AgentsPage />, matched);
+
+    expect(await screen.findByTestId("agent-current-config-alignment")).toHaveTextContent("与已纳管选择一致");
+    expect(screen.queryByTestId("reapply-managed-connection")).toBeNull();
+  });
+
+  it("本机接入漂移时可就地重新应用已纳管选择并复用真实回读链路", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routes());
+    const repair = await screen.findByTestId("reapply-managed-connection");
+    await userEvent.click(repair);
+
+    await waitFor(() => expect(calls.some((call) => call.command === "agents:configure")).toBe(true));
+    expect(calls.find((call) => call.command === "agents:configure")?.args).toEqual([
+      "--only",
+      "agents:claude-code",
+      "--use-default",
+    ]);
   });
 
   it("不再展示 Claude 与 Codex 之外的客户端", async () => {

@@ -86,9 +86,11 @@ describe("dev-only mock 开关", () => {
 
     await client.run("agents:configure", ["--only", "agents:codex", "--use-default"]);
     const restored = await client.run("agents:status");
-    const restoredCodex = (restored.data as { elements: Array<{ id: string; spec: { settings?: { active?: string } } }> }).elements
+    const restoredCodex = (restored.data as { elements: Array<{ id: string; spec: { settings?: { active?: string } }; observed: { current_config?: { config?: { provider?: string | null; base_url?: string | null } } } }> }).elements
       .find((element) => element.id === "agents:codex");
     expect(restoredCodex?.spec.settings?.active).toBeUndefined();
+    expect(restoredCodex?.observed.current_config?.config?.provider).toBe("openai");
+    expect(restoredCodex?.observed.current_config?.config?.base_url).toBeNull();
   });
 
   it("mock client 支持 MCP 页就地填写缺失变量并回读状态", async () => {

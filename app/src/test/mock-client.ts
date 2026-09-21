@@ -55,6 +55,20 @@ function demoEnvelopes(): Record<string, Envelope> {
             installed: true,
             management: agentManagementFixture("claude"),
             auth: { state: "ready", authenticated: true, mode: "oauth", storage: "file", file: ".credentials.json" },
+            current_config: {
+              state: "ready",
+              file: "settings.json",
+              config: {
+                provider: "anthropic",
+                base_url: "https://old-relay.example.com",
+                model: "claude-old",
+                small_fast_model: null,
+                model_aliases: { opus: null, sonnet: null, haiku: null },
+                timeout_ms: null,
+                credential: { configured: true, kind: "token", variable: null },
+                runtime: {},
+              },
+            },
           },
           state: "managed-ok",
           freshness: makeFreshness({ state: "behind", current: "2.0.0", upstream: "2.1.3", checked_at: CHECKED_AT, probe: "native", cache_age_sec: 300 }),
@@ -805,7 +819,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
   const configureAgent = (args: string[], runId: string): Envelope => {
     const agentId = args[args.indexOf("--only") + 1];
     const data = routes["agents:status"].data as {
-      elements: Array<{ id: string; spec: Record<string, unknown> }>;
+      elements: Array<{ id: string; spec: Record<string, unknown>; observed: Record<string, unknown> }>;
     };
     const element = data.elements.find((item) => item.id === agentId);
     if (!element) {
@@ -833,8 +847,43 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
         });
       }
       next.active = profile;
+      const selected = (profiles as Record<string, Record<string, unknown>>)[profile];
+      const codex = element.spec.bin === "codex";
+      element.observed.current_config = {
+        state: "ready",
+        file: codex ? "config.toml" : "settings.json",
+        config: {
+          provider: codex ? profile : "anthropic",
+          base_url: selected.base_url ?? null,
+          model: selected.model ?? null,
+          small_fast_model: selected.small_fast_model ?? null,
+          model_aliases: selected.model_aliases ?? { opus: null, sonnet: null, haiku: null },
+          timeout_ms: selected.timeout_ms ?? null,
+          credential: {
+            configured: true,
+            kind: codex ? "env" : selected.auth ?? "token",
+            variable: codex ? selected.token_var ?? null : null,
+          },
+          runtime: {},
+        },
+      };
     } else if (args.includes("--use-default")) {
       delete next.active;
+      const codex = element.spec.bin === "codex";
+      element.observed.current_config = {
+        state: "ready",
+        file: codex ? "config.toml" : "settings.json",
+        config: {
+          provider: codex ? "openai" : "anthropic",
+          base_url: null,
+          model: null,
+          small_fast_model: null,
+          model_aliases: { opus: null, sonnet: null, haiku: null },
+          timeout_ms: null,
+          credential: { configured: false, kind: null, variable: null },
+          runtime: {},
+        },
+      };
     }
     element.spec.settings = next;
     recordRun(runId, "agents.configure");

@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Check, Download, Loader2, Plus, Settings2, Upload } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, Check, Download, Loader2, Plus, RefreshCw, Settings2, Upload } from "lucide-react";
 import { AgentUsageBar } from "./AgentUsageBar";
 import { AuthCommandActions } from "./AuthCommandActions";
 import type { ConnectionKind } from "./ConnectionFormDialog";
@@ -31,12 +31,92 @@ function runtimeSummaryValue(value: unknown, field: NonNullable<ReturnType<typeo
   return summary.values?.[String(value)] ?? String(value);
 }
 
-function CurrentConfigCard({ status }: { status: AgentCurrentConfigStatus }) {
+type ConnectionAlignment = "aligned" | "drifted" | "unknown";
+
+function observedText(value: unknown): string {
+  return value === undefined || value === null ? "" : String(value);
+}
+
+/** 只比较接入流程明确拥有、且 status 能脱敏观察到的字段。 */
+function connectionAlignment(
+  kind: ConnectionKind,
+  connection: ConnectionEntry | null,
+  status: AgentCurrentConfigStatus,
+): ConnectionAlignment {
+  if (status.state === "missing") return connection ? "drifted" : "aligned";
+  if (status.state !== "ready" || !status.config) return "unknown";
+  const config = status.config;
+  const credential = config.credential;
+  if (!connection) {
+    const hasManagedValue = [
+      config.base_url,
+      config.model,
+      config.small_fast_model,
+      config.model_aliases?.opus,
+      config.model_aliases?.sonnet,
+      config.model_aliases?.haiku,
+      config.timeout_ms,
+    ].some((value) => observedText(value) !== "");
+    return !hasManagedValue && credential?.configured !== true ? "aligned" : "drifted";
+  }
+
+  const commonMatches = observedText(config.base_url) === connection.baseUrl
+    && observedText(config.model) === connection.model
+    && observedText(config.timeout_ms) === connection.timeoutMs;
+  if (!commonMatches) return "drifted";
+  if (kind === "codex") {
+    return config.provider === connection.name
+      && credential?.configured === true
+      && credential.variable === connection.tokenVar
+      ? "aligned"
+      : "drifted";
+  }
+  return observedText(config.small_fast_model) === connection.smallFastModel
+    && observedText(config.model_aliases?.opus) === connection.aliasOpus
+    && observedText(config.model_aliases?.sonnet) === connection.aliasSonnet
+    && observedText(config.model_aliases?.haiku) === connection.aliasHaiku
+    && credential?.configured === true
+    && credential.kind === connection.auth
+    ? "aligned"
+    : "drifted";
+}
+
+function CurrentConfigCard({
+  status,
+  kind,
+  connection,
+  busy,
+  disabled,
+  onReapply,
+}: {
+  status: AgentCurrentConfigStatus;
+  kind: ConnectionKind;
+  connection: ConnectionEntry | null;
+  busy: boolean;
+  disabled: boolean;
+  onReapply: () => void;
+}) {
+  const alignment = connectionAlignment(kind, connection, status);
+  const alignmentLabel = connection?.label || connection?.name || "助手默认账号";
   const config = status.config;
   if (status.state === "missing") {
     return (
-      <div data-testid="agent-current-config" className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">
-        本机尚无 <code>{status.file}</code>，当前使用客户端默认配置。
+      <div data-testid="agent-current-config" className={cn(
+        "rounded-lg border px-3 py-2 text-sm",
+        alignment === "aligned" ? "border-dashed text-muted-foreground" : "border-warning/30 bg-warning/10 text-warning",
+      )}>
+        <p>本机尚无 <code>{status.file}</code>，当前使用客户端默认配置。</p>
+        {alignment === "aligned" ? (
+          <p data-testid="agent-current-config-alignment" className="mt-1 font-medium text-success">与已纳管选择一致</p>
+        ) : (
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+            <p data-testid="agent-current-config-alignment" className="font-medium">与已纳管选择“{alignmentLabel}”不一致</p>
+            <button type="button" data-testid="reapply-managed-connection" disabled={disabled} onClick={onReapply} className="inline-flex items-center gap-1.5 rounded border border-warning/40 px-2.5 py-1.5 text-xs font-medium hover:bg-warning/10 disabled:opacity-50">
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
+              {busy ? "正在重新应用" : "重新应用已纳管选择"}
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -52,7 +132,21 @@ function CurrentConfigCard({ status }: { status: AgentCurrentConfigStatus }) {
     <div data-testid="agent-current-config" className="rounded-lg border bg-muted/30 px-3 py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-medium text-foreground">本机当前配置</p>
-        <span className="font-mono text-xs text-muted-foreground">{status.file} · 只读</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            data-testid="agent-current-config-alignment"
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium",
+              alignment === "aligned" && "border-success/30 bg-success/10 text-success",
+              alignment === "drifted" && "border-warning/30 bg-warning/10 text-warning",
+              alignment === "unknown" && "text-muted-foreground",
+            )}
+          >
+            {alignment === "drifted" && <AlertTriangle className="h-3 w-3" aria-hidden />}
+            {alignment === "aligned" ? "与已纳管选择一致" : alignment === "drifted" ? "与已纳管选择不一致" : "无法比较"}
+          </span>
+          <span className="font-mono text-xs text-muted-foreground">{status.file} · 只读</span>
+        </div>
       </div>
       <dl className="mt-2 grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
         <div><dt className="inline text-muted-foreground">Provider：</dt><dd className="inline font-mono">{config.provider || "客户端默认"}</dd></div>
@@ -60,7 +154,21 @@ function CurrentConfigCard({ status }: { status: AgentCurrentConfigStatus }) {
         <div className="sm:col-span-2"><dt className="inline text-muted-foreground">地址：</dt><dd className="inline break-all font-mono">{config.base_url || "客户端默认"}</dd></div>
         <div className="sm:col-span-2"><dt className="inline text-muted-foreground">凭据：</dt><dd className="inline">{credential?.configured ? `已配置${credential.variable ? `（变量 ${credential.variable}）` : "（值已隐藏）"}` : "未在该配置文件中设置"}</dd></div>
       </dl>
-      <p className="mt-2 text-xs text-muted-foreground">这是客户端文件的实际观察值，不会自动写入数据库或接管。</p>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">这是客户端文件的实际观察值，不会自动写入数据库或接管。</p>
+        {alignment === "drifted" && (
+          <button
+            type="button"
+            data-testid="reapply-managed-connection"
+            disabled={disabled}
+            onClick={onReapply}
+            className="inline-flex items-center gap-1.5 rounded border border-warning/40 px-2.5 py-1.5 text-xs font-medium text-warning hover:bg-warning/10 disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
+            {busy ? "正在重新应用" : "重新应用已纳管选择"}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -253,7 +361,16 @@ export function ConnectionWorkbench({
           </p>
         )}
 
-        {currentConfig && <CurrentConfigCard status={currentConfig} />}
+        {currentConfig && kind && (
+          <CurrentConfigCard
+            status={currentConfig}
+            kind={kind}
+            connection={activeEntry ?? null}
+            busy={busyTarget === `${agentId}/${active || "default"}`}
+            disabled={busyTarget !== null}
+            onReapply={() => onSwitch(selected, active)}
+          />
+        )}
 
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           <ConnectionCard
