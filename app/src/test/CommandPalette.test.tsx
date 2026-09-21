@@ -286,6 +286,40 @@ describe("命令面板", () => {
     expect(screen.queryByText("已切换 Claude Code 到 Kimi Code")).not.toBeInTheDocument();
   });
 
+  it("当前接入被外部改动时可在命令面板原位重新应用并恢复可信状态", async () => {
+    setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
+    let actual = "";
+    const testRoutes = routes();
+    testRoutes["agents:status"] = async () => agentsStatus("kimi", actual);
+    testRoutes["agents:configure"] = async () => {
+      actual = "kimi";
+      return makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.configure" });
+    };
+    const { calls } = renderWithEngine(<App />, testRoutes);
+    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+
+    await openPalette();
+    await userEvent.type(screen.getByTestId("command-palette-input"), "Kimi Code");
+    const repair = await screen.findByTestId("command-item-connection:claude-code:kimi");
+    expect(repair).toBeEnabled();
+    expect(repair).toHaveTextContent("配置不一致 · 重新应用");
+    await userEvent.click(repair);
+
+    expect(await screen.findByText("已切换 Claude Code 到 Kimi Code")).toBeInTheDocument();
+    expect(calls.find((call) => call.command === "agents:configure")?.args).toEqual([
+      "--only",
+      "agents:claude-code",
+      "--use",
+      "kimi",
+    ]);
+
+    await openPalette();
+    await userEvent.type(screen.getByTestId("command-palette-input"), "Kimi Code");
+    const current = await screen.findByTestId("command-item-connection:claude-code:kimi");
+    expect(current).toBeDisabled();
+    expect(current).toHaveTextContent("当前接入");
+  });
+
   it("外部修改时不冒充成功，确认后才携带 allow-takeover 重试", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     let active = "";

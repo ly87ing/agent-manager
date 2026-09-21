@@ -211,15 +211,24 @@ export function CommandPalette({
         ];
         for (const option of options) {
           const current = form.activeConnection === option.profile;
+          const currentConfirmed = current && Boolean(
+            agents.data?.ok
+            && connectionSwitchConfirmed(agents.data.data, id, option.profile),
+          );
+          const needsRepair = current && !currentConfirmed;
           const target = `${id}/${option.profile || "default"}`;
           out.push({
             id: `connection:${id}:${option.profile || "default"}`,
             label: `${displayName} · ${option.label}`,
-            hint: current ? "当前接入" : switchingTarget === target ? "正在切换…" : "切换接入",
-            keywords: `${id} ${spec.bin ?? ""} ${option.profile} ${option.label} ${option.baseUrl} ${option.model} provider 供应商 接入 切换`,
+            hint: currentConfirmed
+              ? "当前接入"
+              : switchingTarget === target
+                ? needsRepair ? "正在重新应用…" : "正在切换…"
+                : needsRepair ? "配置不一致 · 重新应用" : "切换接入",
+            keywords: `${id} ${spec.bin ?? ""} ${option.profile} ${option.label} ${option.baseUrl} ${option.model} provider 供应商 接入 切换 ${needsRepair ? "修复 重新应用" : ""}`,
             group: "切换接入",
-            disabled: current || switchingTarget !== null,
-            current,
+            disabled: currentConfirmed || switchingTarget !== null,
+            current: currentConfirmed,
             run: () =>
               void switchConnection({
                 agentId: id,
