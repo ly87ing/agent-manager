@@ -72,6 +72,29 @@ function configureCalls<T extends { command: string }>(calls: T[]): T[] {
   return calls.filter((call) => call.command === "agents:configure");
 }
 
+function setClaudeCurrentConfig(element: EngineElement, profile: string | null): void {
+  const settings = (element.spec as { settings?: { profiles?: Record<string, Record<string, unknown>> } }).settings;
+  const connection = profile ? settings?.profiles?.[profile] : null;
+  (element.observed as Record<string, unknown>).current_config = {
+    state: "ready",
+    file: "settings.json",
+    config: {
+      provider: "anthropic",
+      base_url: connection?.base_url ?? null,
+      model: connection?.model ?? null,
+      small_fast_model: connection?.small_fast_model ?? null,
+      model_aliases: connection?.model_aliases ?? { opus: null, sonnet: null, haiku: null },
+      timeout_ms: connection?.timeout_ms ?? null,
+      credential: {
+        configured: connection !== null,
+        kind: connection ? connection.auth ?? "token" : null,
+        variable: null,
+      },
+      runtime: {},
+    },
+  };
+}
+
 describe("助手运行参数", () => {
   function agentRoutes(id: string, bin: string) {
     return routes({
@@ -273,11 +296,17 @@ describe("助手运行参数", () => {
         relay: { label: "我的中转", base_url: "https://relay.example.com" },
       },
     };
+    setClaudeCurrentConfig(status.data.elements[0] as EngineElement, "relay");
     withProfiles["agents:configure"] = async (args) => {
       const settings = status.data.elements[0].spec.settings as { active?: string };
       const useAt = args.indexOf("--use");
-      if (useAt >= 0) settings.active = args[useAt + 1];
-      else if (args.includes("--use-default")) delete settings.active;
+      if (useAt >= 0) {
+        settings.active = args[useAt + 1];
+        setClaudeCurrentConfig(status.data.elements[0] as EngineElement, settings.active);
+      } else if (args.includes("--use-default")) {
+        delete settings.active;
+        setClaudeCurrentConfig(status.data.elements[0] as EngineElement, null);
+      }
       return makeEnvelope(
         { domain: "agents", action: "configure", element: "agents:claude-code" },
         { command: "agents.configure" },
@@ -308,8 +337,8 @@ describe("助手运行参数", () => {
     await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("助手默认账号"));
   });
 
-  it("切换命令成功但状态没有变化时不误报成功", async () => {
-    const withProfiles = routes();
+  it("纳管选择已变化但客户端实际配置仍漂移时不误报成功", async () => {
+    const withProfiles: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
     const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
     status.data.elements[0].spec.settings = {
       active: "relay",
@@ -318,11 +347,21 @@ describe("助手运行参数", () => {
         relay: { label: "我的中转", base_url: "https://relay.example.com" },
       },
     };
+    setClaudeCurrentConfig(status.data.elements[0] as EngineElement, "relay");
+    withProfiles["agents:configure"] = async () => {
+      (status.data.elements[0].spec.settings as { active?: string }).active = "official";
+      return makeEnvelope(
+        { domain: "agents", action: "configure", element: "agents:claude-code" },
+        { command: "agents.configure" },
+      );
+    };
     renderWithEngine(<AgentsPage />, withProfiles);
 
     await userEvent.click(await screen.findByTestId("activate-connection-claude-code-official"));
-    expect(await screen.findByText("写入已经返回成功，但状态回读没有确认新接入")).toBeInTheDocument();
-    expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("我的中转");
+    expect(await screen.findByText("写入已经返回成功，但状态回读没有确认接入生效")).toBeInTheDocument();
+    expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("官方");
+    expect(screen.getByTestId("agent-current-config-alignment")).toHaveTextContent("与已纳管选择不一致");
+    expect(screen.getByTestId("reapply-managed-connection")).toBeEnabled();
   });
 
   it("工作台编辑当前接入：预填原值、唯一名称不可改，保存后写回当前配置", async () => {
@@ -640,6 +679,7 @@ describe("助手运行参数", () => {
         broken: { label: "Broken", base_url: "https://broken.example.com" },
       },
     };
+    setClaudeCurrentConfig(status.data.elements[0] as EngineElement, null);
     const releases = new Map<string, () => void>();
     batchRoutes["agents:check"] = (args) => new Promise<Envelope>((resolve) => {
       const profile = args[args.indexOf("--use") + 1];
@@ -660,6 +700,7 @@ describe("助手运行参数", () => {
     batchRoutes["agents:configure"] = async (args) => {
       const settings = status.data.elements[0].spec.settings as { active?: string };
       settings.active = args[args.indexOf("--use") + 1];
+      setClaudeCurrentConfig(status.data.elements[0] as EngineElement, settings.active);
       return makeEnvelope(
         { domain: "agents", action: "configure", element: "agents:claude-code" },
         { command: "agents.configure" },

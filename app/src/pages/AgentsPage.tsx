@@ -9,7 +9,7 @@ import {
   ConnectionFormDialog,
   type ConnectionSubmission,
 } from "../components/ConnectionFormDialog";
-import { ConnectionWorkbench } from "../components/ConnectionWorkbench";
+import { ConnectionWorkbench, connectionAlignment } from "../components/ConnectionWorkbench";
 import { ConnectionImportDialog } from "../components/ConnectionImportDialog";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { EmptyState } from "../components/EmptyState";
@@ -35,6 +35,7 @@ import {
   connectionsOf,
   duplicateConnectionDraft,
   moveAgentConnection,
+  parseInitialToFormValues,
   serializeConnectionBundle,
   removeAgentConnection,
   runtimeRequiresYoloConfirmation,
@@ -175,9 +176,21 @@ export default function AgentsPage({
             ? activeConnectionOf(refreshedAgent.spec as Record<string, unknown>)
             : null;
           const expected = opts.use || null;
-          if (!refreshedAgent || actual !== expected) {
-            toast.error("写入已经返回成功，但状态回读没有确认新接入", {
-              description: "界面保留真实状态，请检查客户端配置或重试。",
+          const kind = refreshedAgent ? connectionKindOf(refreshedAgent) : null;
+          const selectedConnection = refreshedAgent && expected
+            ? parseInitialToFormValues(agentId, refreshedAgent.spec as Record<string, unknown>).connections
+              .find((connection) => connection.name === expected) ?? null
+            : null;
+          const currentConfig = refreshedAgent
+            ? (refreshedAgent.observed as AgentsObserved).current_config
+            : undefined;
+          const actualAligned = Boolean(
+            kind && currentConfig
+            && connectionAlignment(kind, selectedConnection, currentConfig) === "aligned",
+          );
+          if (!refreshedAgent || actual !== expected || !actualAligned) {
+            toast.error("写入已经返回成功，但状态回读没有确认接入生效", {
+              description: "界面保留纳管选择和客户端实际配置，请检查配置不一致提示后重试。",
             });
             return false;
           }

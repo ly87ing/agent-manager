@@ -31,14 +31,14 @@ function runtimeSummaryValue(value: unknown, field: NonNullable<ReturnType<typeo
   return summary.values?.[String(value)] ?? String(value);
 }
 
-type ConnectionAlignment = "aligned" | "drifted" | "unknown";
+export type ConnectionAlignment = "aligned" | "drifted" | "unknown";
 
 function observedText(value: unknown): string {
   return value === undefined || value === null ? "" : String(value);
 }
 
 /** 只比较接入流程明确拥有、且 status 能脱敏观察到的字段。 */
-function connectionAlignment(
+export function connectionAlignment(
   kind: ConnectionKind,
   connection: ConnectionEntry | null,
   status: AgentCurrentConfigStatus,

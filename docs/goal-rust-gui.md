@@ -493,10 +493,11 @@ state 与 actions，不自己推断；用户主动停用的不催。syncPlan 是
   检查与生产构建通过。
 - 最快接入直达与切换回读门禁：批量检查完成后，若最快成功线路不是当前项，可直接启用；该动作不
   新增写路径，仍走 `agents:configure`、外部修改确认和 `agents:status` 回读。助手页此前虽执行
-  `refetch()`，却未核对回读的 `active`；现在命令返回成功但状态未变化时保留真实界面并报错，不再
-  误报切换成功。Vitest 为 57 files / 525 tests，类型检查与生产构建通过；浏览器 mock 实见默认账号
-  经 Kimi Code 128 ms 推荐切换为 Kimi Code，快捷入口随真实状态消失且控制台无错误。未用真实
-  Provider 凭据执行联网与切换验收。
+  `refetch()`，却未核对回读结果；现在同时校验数据库 `active` 和客户端脱敏
+  `observed.current_config`。任一侧未与目标一致都保留真实界面并报错，不再误报切换或重新应用成功。
+  Vitest 为 57 files / 525 tests，类型检查与生产构建通过；浏览器 mock 实见 Claude 漂移重新应用后
+  恢复一致，以及默认账号经 Kimi Code 128 ms 推荐切换为 Kimi Code 后两侧均一致，控制台无错误。
+  未用真实 Provider 凭据执行联网与切换验收。
 
 ## 剩余路线图（未排期）
 

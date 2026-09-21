@@ -3,7 +3,7 @@ import { waitFor } from "@testing-library/react";
 import AgentsPage from "../pages/AgentsPage";
 import { agentManagementFixture, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
-import type { Envelope } from "../lib/contract";
+import type { EngineElement, Envelope } from "../lib/contract";
 
 function routes(bin = "claude", id = "claude-code"): Record<string, Envelope> {
   return {
@@ -148,7 +148,29 @@ describe("助手页产品边界", () => {
   });
 
   it("本机接入漂移时可就地重新应用已纳管选择并复用真实回读链路", async () => {
-    const { calls } = renderWithEngine(<AgentsPage />, routes());
+    const repairRoutes: Record<string, Envelope | (() => Promise<Envelope>)> = routes();
+    const status = repairRoutes["agents:status"] as { data: { elements: EngineElement[] } };
+    repairRoutes["agents:configure"] = async () => {
+      (status.data.elements[0].observed as Record<string, unknown>).current_config = {
+        state: "ready",
+        file: "settings.json",
+        config: {
+          provider: "anthropic",
+          base_url: null,
+          model: null,
+          small_fast_model: null,
+          model_aliases: { opus: null, sonnet: null, haiku: null },
+          timeout_ms: null,
+          credential: { configured: false, kind: null, variable: null },
+          runtime: {},
+        },
+      };
+      return makeEnvelope(
+        { domain: "agents", action: "configure", element: "agents:claude-code" },
+        { command: "agents.configure" },
+      );
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, repairRoutes);
     const repair = await screen.findByTestId("reapply-managed-connection");
     await userEvent.click(repair);
 
@@ -158,6 +180,8 @@ describe("助手页产品边界", () => {
       "agents:claude-code",
       "--use-default",
     ]);
+    await waitFor(() => expect(screen.getByTestId("agent-current-config-alignment")).toHaveTextContent("与已纳管选择一致"));
+    expect(screen.queryByTestId("reapply-managed-connection")).toBeNull();
   });
 
   it("不再展示 Claude 与 Codex 之外的客户端", async () => {
