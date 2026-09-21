@@ -156,6 +156,7 @@ export function ConnectionFormDialog({
         ...connection,
         name,
         label: connection.label.trim() || name,
+        note: connection.note?.trim() ?? "",
         baseUrl: connection.baseUrl.trim(),
         tokenVar: connection.tokenVar.trim(),
         model: connection.model.trim(),
@@ -277,6 +278,21 @@ export function ConnectionFormDialog({
                   className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
                   spellCheck={false}
                 />
+              </label>
+              <label className="block text-sm text-foreground">
+                备注（可选）
+                <textarea
+                  data-testid="new-connection-note"
+                  value={connection.note ?? ""}
+                  onChange={(event) => patch({ note: event.target.value })}
+                  maxLength={200}
+                  rows={2}
+                  placeholder="例如：工作账号、备用线路、套餐到期时间"
+                  className="mt-1 w-full resize-y rounded border border-input p-2 text-sm"
+                />
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  仅用于本应用展示和搜索，不会写进助手配置；导出接入时会一并包含。
+                </span>
               </label>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className="text-sm text-foreground">

@@ -374,6 +374,7 @@ describe("助手运行参数", () => {
         official: { label: "官方", custom_profile_flag: 7 },
         relay: {
           label: "我的中转",
+          note: "旧备注",
           base_url: "https://old.example.com",
           token_var: "RELAY_KEY",
           model: "old-model",
@@ -383,15 +384,19 @@ describe("助手运行参数", () => {
     };
     const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
 
+    expect(await screen.findByTestId("connection-note-claude-code-relay")).toHaveTextContent("旧备注");
     await userEvent.click(await screen.findByTestId("edit-connection-claude-code-relay"));
     expect(await screen.findByRole("dialog", { name: "编辑 我的中转" })).toBeInTheDocument();
     expect(screen.queryByText("1. 选择接入方式")).toBeNull();
     expect(screen.getByTestId("new-connection-base-url")).toHaveValue("https://old.example.com");
+    expect(screen.getByTestId("new-connection-note")).toHaveValue("旧备注");
     expect(screen.getByTestId("new-connection-activate")).toBeChecked();
     await userEvent.click(screen.getByTestId("new-connection-advanced"));
     expect(screen.getByTestId("new-connection-name")).toBeDisabled();
     await userEvent.clear(screen.getByTestId("new-connection-label"));
     await userEvent.type(screen.getByTestId("new-connection-label"), "新版中转");
+    await userEvent.clear(screen.getByTestId("new-connection-note"));
+    await userEvent.type(screen.getByTestId("new-connection-note"), "工作账号，月底到期");
     await userEvent.clear(screen.getByTestId("new-connection-base-url"));
     await userEvent.type(screen.getByTestId("new-connection-base-url"), "https://new.example.com");
     await userEvent.clear(screen.getByTestId("new-connection-model"));
@@ -406,6 +411,7 @@ describe("助手运行参数", () => {
     expect(definition.settings.profiles.official).toEqual({ label: "官方", custom_profile_flag: 7 });
     expect(definition.settings.profiles.relay).toMatchObject({
       label: "新版中转",
+      note: "工作账号，月底到期",
       base_url: "https://new.example.com",
       token_var: "RELAY_KEY",
       model: "new-model",

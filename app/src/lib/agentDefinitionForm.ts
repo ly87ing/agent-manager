@@ -30,6 +30,8 @@ export interface ConnectionEntry {
   name: string;
   /** 界面上显示的名字；留空时用键名。 */
   label: string;
+  /** 仅供本应用辨认接入，不会写进助手配置。 */
+  note?: string;
   baseUrl: string;
   /** token = Authorization: Bearer；api_key = x-api-key。中转站两种都有。 */
   auth: "token" | "api_key";
@@ -54,6 +56,7 @@ export function emptyConnection(name = ""): ConnectionEntry {
   return {
     name,
     label: "",
+    note: "",
     baseUrl: "",
     auth: "token",
     tokenVar: "",
@@ -96,6 +99,7 @@ export function validateConnectionEntry(item: ConnectionEntry): string | null {
   }
   if (!ENV_NAME_RE.test(item.tokenVar.trim())) return "凭据变量名格式不正确";
   if (!item.model.trim()) return "要填写模型名";
+  if ((item.note?.trim().length ?? 0) > 200) return "备注不能超过 200 个字符";
   if (item.timeoutMs.trim()) {
     const timeout = Number(item.timeoutMs.trim());
     if (!Number.isFinite(timeout) || timeout <= 0) return "请求超时必须是正数";
@@ -138,6 +142,7 @@ export function parseConnectionBundle(text: string, expectedKind: "claude" | "co
   const connection: ConnectionEntry = {
     name: stringField("name").trim(),
     label: stringField("label").trim(),
+    note: stringField("note").trim(),
     baseUrl: stringField("baseUrl").trim(),
     auth,
     tokenVar: stringField("tokenVar").trim(),
@@ -157,6 +162,7 @@ export function parseConnectionBundle(text: string, expectedKind: "claude" | "co
 export function connectionToDefinitionValue(item: ConnectionEntry): Record<string, unknown> {
   const entry: Record<string, unknown> = {};
   if (item.label.trim()) entry.label = item.label.trim();
+  if (item.note?.trim()) entry.note = item.note.trim();
   if (item.baseUrl.trim()) entry.base_url = item.baseUrl.trim();
   if (item.tokenVar.trim()) {
     entry.token_var = item.tokenVar.trim();
@@ -207,6 +213,7 @@ export function upsertAgentConnection(
   // 也不会丢掉新版客户端或用户手工加入、而当前表单尚不认识的字段。
   for (const key of [
     "label",
+    "note",
     "base_url",
     "auth",
     "token_var",
@@ -501,6 +508,7 @@ function readAgentSettings(
     return {
       ...emptyConnection(name),
       label: text("label"),
+      note: text("note"),
       baseUrl: text("base_url"),
       auth: entry.auth === "api_key" ? ("api_key" as const) : ("token" as const),
       tokenVar: text("token_var"),

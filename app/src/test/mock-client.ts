@@ -86,6 +86,7 @@ function demoEnvelopes(): Record<string, Envelope> {
               profiles: {
                 kimi: {
                   label: "Kimi Code",
+                  note: "工作账号 · 月底到期",
                   base_url: "https://api.kimi.com/coding/v1",
                   token_var: "KIMI_API_KEY",
                   model: "k3-256k",

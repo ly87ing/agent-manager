@@ -25,6 +25,7 @@ describe("agentDefinitionForm helpers", () => {
     const connection = {
       name: "relay",
       label: "中转",
+      note: "工作账号，月底到期",
       baseUrl: "https://relay.example.com",
       auth: "token" as const,
       tokenVar: "RELAY_KEY",
@@ -46,6 +47,11 @@ describe("agentDefinitionForm helpers", () => {
       kind: "claude",
       connection: { ...connection, baseUrl: "http://remote.example.com", secretValue: "must-not-pass" },
     }), "claude")).toThrow("接口地址必须是 https://");
+    expect(() => parseConnectionBundle(JSON.stringify({
+      format: "agent-manager/provider/v1",
+      kind: "claude",
+      connection: { ...connection, note: "过".repeat(201) },
+    }), "claude")).toThrow("备注不能超过 200 个字符");
   });
 
   it("extractUnknownFields captures unknown non-standard keys", () => {
@@ -96,6 +102,7 @@ describe("agentDefinitionForm helpers", () => {
       {
         name: "relay",
         label: "我的中转",
+        note: "工作账号",
         baseUrl: "https://relay.example.com",
         auth: "token",
         tokenVar: "RELAY_KEY",
@@ -116,6 +123,7 @@ describe("agentDefinitionForm helpers", () => {
           ...initial.settings.profiles,
           relay: {
             label: "我的中转",
+            note: "工作账号",
             base_url: "https://relay.example.com",
             token_var: "RELAY_KEY",
             model: "relay-model",
@@ -148,6 +156,7 @@ describe("agentDefinitionForm helpers", () => {
     const result = upsertAgentConnection(initial, {
       name: "relay",
       label: "新名称",
+      note: "新的说明",
       baseUrl: "https://new.example.com",
       auth: "token",
       tokenVar: "NEW_KEY",
@@ -161,6 +170,7 @@ describe("agentDefinitionForm helpers", () => {
 
     expect((result.settings as any).profiles.relay).toEqual({
       label: "新名称",
+      note: "新的说明",
       base_url: "https://new.example.com",
       token_var: "NEW_KEY",
       model: "new-model",

@@ -533,6 +533,11 @@ function ConnectionCard({
           <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
             {connection?.baseUrl || "使用助手自己的地址与登录状态"}
           </p>
+          {connection?.note && (
+            <p data-testid={`connection-note-${agentId}-${id}`} className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">
+              {connection.note}
+            </p>
+          )}
         </div>
         {!active && onActivate && (
           <button

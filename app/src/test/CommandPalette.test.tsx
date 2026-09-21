@@ -51,6 +51,7 @@ function agentsStatus(active = "", actual = active) {
               profiles: {
                 kimi: {
                   label: "Kimi Code",
+                  note: "月度套餐备用线路",
                   base_url: "https://api.moonshot.cn/anthropic",
                   token_var: "KIMI_API_KEY",
                   model: "kimi-k3[1m]",
@@ -253,6 +254,17 @@ describe("命令面板", () => {
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "Kimi Code");
     expect(await screen.findByTestId("command-item-connection:claude-code:kimi")).toBeDisabled();
+  });
+
+  it("可按接入备注搜索，备注不会取代接入名称", async () => {
+    setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
+    renderWithEngine(<App />, routes());
+    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+
+    await openPalette();
+    await userEvent.type(screen.getByTestId("command-palette-input"), "月度套餐");
+
+    expect(await screen.findByTestId("command-item-connection:claude-code:kimi")).toHaveTextContent("Claude Code · Kimi Code");
   });
 
   it("原生托盘接入事件唤回精确目标且确认后走同一条切换与双回读路径", async () => {

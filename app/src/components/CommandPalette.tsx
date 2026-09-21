@@ -252,12 +252,13 @@ export function CommandPalette({
       if (!profileIds.has(id) && supportsConnectionSwitch(element.spec)) {
         const form = parseInitialToFormValues(id, element.spec);
         const options = [
-          { profile: "", label: "助手默认账号", baseUrl: "", model: "" },
+          { profile: "", label: "助手默认账号", baseUrl: "", model: "", note: "" },
           ...form.connections.map((connection) => ({
             profile: connection.name,
             label: connection.label || connection.name,
             baseUrl: connection.baseUrl,
             model: connection.model,
+            note: connection.note ?? "",
           })),
         ];
         for (const option of options) {
@@ -276,7 +277,7 @@ export function CommandPalette({
               : switchingTarget === target
                 ? needsRepair ? "正在重新应用…" : "正在切换…"
                 : needsRepair ? "配置不一致 · 重新应用" : "切换接入",
-            keywords: `${id} ${spec.bin ?? ""} ${option.profile} ${option.label} ${option.baseUrl} ${option.model} provider 供应商 接入 切换 ${needsRepair ? "修复 重新应用" : ""}`,
+            keywords: `${id} ${spec.bin ?? ""} ${option.profile} ${option.label} ${option.baseUrl} ${option.model} ${option.note} provider 供应商 接入 切换 ${needsRepair ? "修复 重新应用" : ""}`,
             group: "切换接入",
             disabled: currentConfirmed || switchingTarget !== null,
             current: currentConfirmed,
