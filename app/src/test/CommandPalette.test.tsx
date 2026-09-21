@@ -3,7 +3,7 @@ import { waitFor } from "@testing-library/react";
 import App from "../App";
 import type { Envelope, SettingsData } from "../lib/contract";
 import { setSettingsClient } from "../lib/settings";
-import { makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
+import { agentManagementFixture, makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 
 const dummySettings: SettingsData = {
@@ -17,7 +17,14 @@ const dummySettings: SettingsData = {
 
 type TestRoute = Envelope | ((args: string[]) => Promise<Envelope>);
 
-function agentsStatus(active = "") {
+function agentsStatus(active = "", actual = active) {
+  const actualConnection = actual === "kimi"
+    ? {
+        base_url: "https://api.moonshot.cn/anthropic",
+        model: "kimi-k3[1m]",
+        auth: "token",
+      }
+    : null;
   return makeEnvelope(
     {
       domain: "agents",
@@ -41,7 +48,29 @@ function agentsStatus(active = "") {
             },
           },
           policy: { enabled: true },
-          observed: { install_source: null, installed: true },
+          observed: {
+            install_source: null,
+            installed: true,
+            management: agentManagementFixture("claude"),
+            current_config: {
+              state: "ready",
+              file: "settings.json",
+              config: {
+                provider: "anthropic",
+                base_url: actualConnection?.base_url ?? null,
+                model: actualConnection?.model ?? null,
+                small_fast_model: null,
+                model_aliases: { opus: null, sonnet: null, haiku: null },
+                timeout_ms: null,
+                credential: {
+                  configured: actualConnection !== null,
+                  kind: actualConnection?.auth ?? null,
+                  variable: null,
+                },
+                runtime: {},
+              },
+            },
+          },
           state: "managed-ok",
           freshness: makeFreshness(),
           actions: [],
@@ -235,6 +264,26 @@ describe("命令面板", () => {
       "agents:claude-code",
       "--use-default",
     ]);
+  });
+
+  it("纳管选择已变化但客户端实际配置未生效时不误报成功", async () => {
+    setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
+    let active = "";
+    const testRoutes = routes();
+    testRoutes["agents:status"] = async () => agentsStatus(active, "");
+    testRoutes["agents:configure"] = async () => {
+      active = "kimi";
+      return makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.configure" });
+    };
+    renderWithEngine(<App />, testRoutes);
+    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+
+    await openPalette();
+    await userEvent.type(screen.getByTestId("command-palette-input"), "Kimi Code");
+    await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:kimi"));
+
+    expect(await screen.findByText("写入已经返回成功，但状态回读没有确认接入生效，请在助手页检查")).toBeInTheDocument();
+    expect(screen.queryByText("已切换 Claude Code 到 Kimi Code")).not.toBeInTheDocument();
   });
 
   it("外部修改时不冒充成功，确认后才携带 allow-takeover 重试", async () => {

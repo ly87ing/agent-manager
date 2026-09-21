@@ -498,6 +498,10 @@ state 与 actions，不自己推断；用户主动停用的不催。syncPlan 是
   Vitest 为 57 files / 525 tests，类型检查与生产构建通过；浏览器 mock 实见 Claude 漂移重新应用后
   恢复一致，以及默认账号经 Kimi Code 128 ms 推荐切换为 Kimi Code 后两侧均一致，控制台无错误。
   未用真实 Provider 凭据执行联网与切换验收。
+- 命令面板切换统一双回读：`⌘K` 快切不再只核对数据库 `active`，而是与助手页共用完整 profile
+  解析及脱敏客户端配置比对；`active` 已变化但客户端实际配置未生效时不再提示成功。Vitest 扩展为
+  57 files / 526 tests；浏览器 mock 以键盘完成 Codex/Kimi 切换，再次搜索时当前项禁用，助手页回读
+  纳管选择与客户端实际配置一致，控制台无错误。后端、Tauri 与写入协议本批未修改。
 
 ## 剩余路线图（未排期）
 

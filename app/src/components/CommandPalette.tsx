@@ -3,6 +3,8 @@ import { Search } from "lucide-react";
 import { toast } from "sonner";
 import type { StatusData } from "../lib/contract";
 import { parseInitialToFormValues } from "../lib/agentDefinitionForm";
+import { connectionKindOf } from "../lib/agentManagement";
+import type { AgentsObserved } from "../lib/observed";
 import { useExecutions } from "../lib/execution";
 import { useEngineQuery } from "../lib/queries";
 import { useDirectApply } from "../lib/useDirectApply";
@@ -10,6 +12,7 @@ import { useRefreshUpstream } from "../lib/queries";
 import { matchesKeyword } from "./SearchInput";
 import { cn } from "../lib/utils";
 import { ConfirmModal } from "./ConfirmModal";
+import { connectionAlignment } from "./ConnectionWorkbench";
 
 export interface CommandItem {
   id: string;
@@ -52,10 +55,20 @@ function supportsConnectionSwitch(spec: Record<string, unknown>): boolean {
   return bin === "claude" || bin === "codex";
 }
 
-function activeConnectionOf(data: StatusData | undefined, agentId: string): string | null {
+function connectionSwitchConfirmed(data: StatusData | undefined, agentId: string, profile: string): boolean {
   const element = data?.elements.find((item) => item.id === `agents:${agentId}`);
-  if (!element) return null;
-  return parseInitialToFormValues(agentId, element.spec).activeConnection;
+  if (!element) return false;
+  const form = parseInitialToFormValues(agentId, element.spec);
+  if (form.activeConnection !== profile) return false;
+  const kind = connectionKindOf(element);
+  const currentConfig = (element.observed as AgentsObserved).current_config;
+  const selected = profile
+    ? form.connections.find((connection) => connection.name === profile) ?? null
+    : null;
+  return Boolean(
+    kind && currentConfig
+    && connectionAlignment(kind, selected, currentConfig) === "aligned",
+  );
 }
 
 /**
@@ -124,9 +137,10 @@ export function CommandPalette({
         }
 
         const refreshed = await refetchAgents();
-        const actual = refreshed.data?.ok ? activeConnectionOf(refreshed.data.data, request.agentId) : null;
-        if (actual !== request.profile) {
-          toast.error("写入已经返回成功，但状态回读没有确认新接入，请在助手页检查");
+        const confirmed = refreshed.data?.ok
+          && connectionSwitchConfirmed(refreshed.data.data, request.agentId, request.profile);
+        if (!confirmed) {
+          toast.error("写入已经返回成功，但状态回读没有确认接入生效，请在助手页检查");
           return;
         }
         setPendingSwitch(null);
