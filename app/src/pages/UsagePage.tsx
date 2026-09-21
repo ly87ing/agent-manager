@@ -8,6 +8,7 @@ import { engineErrorMessage, runEngine } from "../lib/engine";
 import { engineKeys, useEngineQuery } from "../lib/queries";
 import {
   formatCost,
+  filterUsage,
   groupUsage,
   priceOf,
   shortTokens,
@@ -149,10 +150,18 @@ const RANGES: { days: number; label: string }[] = [
   { days: 0, label: "全部" },
 ];
 
+function agentLabel(agent: string): string {
+  if (agent === "claude" || agent === "claude-code") return "Claude Code";
+  if (agent === "codex") return "Codex";
+  return agent;
+}
+
 export default function UsagePage() {
   const query = useEngineQuery<UsageData>("usage:status");
   const queryClient = useQueryClient();
   const [days, setDays] = useState(7);
+  const [agent, setAgent] = useState("");
+  const [model, setModel] = useState("");
   const [scanning, setScanning] = useState(false);
   /** 正在填单价的模型。 */
   const [pricing, setPricing] = useState<string | null>(null);
@@ -179,8 +188,13 @@ export default function UsagePage() {
   if (query.isError) return <PageError title="usage:status 调用失败" error={query.error} />;
 
   const data = query.data.data;
-  const groups = withinDays(groupUsage(data), days);
+  const timeGroups = withinDays(groupUsage(data), days);
+  const agents = [...new Set(timeGroups.map((group) => group.agent))].sort();
+  const agentGroups = filterUsage(timeGroups, agent, "");
+  const models = [...new Set(agentGroups.map((group) => group.model))].sort();
+  const groups = filterUsage(agentGroups, "", model);
   const totals = totalsOf(groups);
+  const filtersActive = Boolean(agent || model);
   const lastScan = data.last_scan_at ? new Date(data.last_scan_at).toLocaleString("zh-CN", { hour12: false }) : null;
 
   return (
@@ -199,7 +213,11 @@ export default function UsagePage() {
               type="button"
               aria-pressed={days === range.days}
               data-testid={`usage-range-${range.days}`}
-              onClick={() => setDays(range.days)}
+              onClick={() => {
+                setDays(range.days);
+                setAgent("");
+                setModel("");
+              }}
               className={cn(
                 "rounded-md px-3 py-1.5 text-xs transition-colors",
                 days === range.days ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground",
@@ -209,6 +227,48 @@ export default function UsagePage() {
             </button>
           ))}
         </div>
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          助手
+          <select
+            data-testid="usage-agent-filter"
+            aria-label="按助手筛选用量"
+            value={agent}
+            onChange={(event) => {
+              setAgent(event.target.value);
+              setModel("");
+            }}
+            className="rounded-md border border-input bg-card px-2 py-1.5 text-xs text-foreground"
+          >
+            <option value="">全部助手</option>
+            {agents.map((item) => <option key={item} value={item}>{agentLabel(item)}</option>)}
+          </select>
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          模型
+          <select
+            data-testid="usage-model-filter"
+            aria-label="按模型筛选用量"
+            value={model}
+            onChange={(event) => setModel(event.target.value)}
+            className="max-w-56 rounded-md border border-input bg-card px-2 py-1.5 font-mono text-xs text-foreground"
+          >
+            <option value="">全部模型</option>
+            {models.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+        </label>
+        {filtersActive && (
+          <button
+            type="button"
+            data-testid="usage-clear-filters"
+            onClick={() => {
+              setAgent("");
+              setModel("");
+            }}
+            className="rounded-md border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent"
+          >
+            清除筛选
+          </button>
+        )}
         <button
           type="button"
           data-testid="usage-rescan"
@@ -270,25 +330,40 @@ export default function UsagePage() {
       {groups.length === 0 ? (
         <EmptyState
           testId="usage-empty"
-          title="这段时间没有用量记录"
-          description="换个时间范围，或点「重新统计」读一次会话记录。刚用过助手的话，它要写完这一轮才会出现在这里。"
+          title={filtersActive ? "当前筛选没有用量记录" : "这段时间没有用量记录"}
+          description={filtersActive
+            ? "换一个助手或模型，或清除筛选查看这段时间的全部记录。"
+            : "换个时间范围，或点「重新统计」读一次会话记录。刚用过助手的话，它要写完这一轮才会出现在这里。"}
+          actions={filtersActive ? (
+            <button
+              type="button"
+              onClick={() => {
+                setAgent("");
+                setModel("");
+              }}
+              className="rounded-md border px-3 py-1.5 text-xs text-foreground hover:bg-accent"
+            >
+              清除筛选
+            </button>
+          ) : undefined}
         />
       ) : (
         <section className="rounded-lg border bg-card p-5 shadow-sm">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b text-xs text-muted-foreground">
-                <th className="py-2 pr-4 font-medium">日期</th>
-                <th className="py-2 pr-4 font-medium">模型</th>
-                <th className="py-2 pr-4 text-right font-medium">输入</th>
-                <th className="py-2 pr-4 text-right font-medium">输出</th>
-                <th className="py-2 pr-4 text-right font-medium">缓存读</th>
-                <th className="py-2 pr-4 text-right font-medium">请求</th>
-                <th className="py-2 text-right font-medium">折算</th>
-              </tr>
-            </thead>
-            <tbody>
-              {groups.map((group) => (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[42rem] text-left text-sm">
+              <thead>
+                <tr className="border-b text-xs text-muted-foreground">
+                  <th className="py-2 pr-4 font-medium">日期</th>
+                  <th className="py-2 pr-4 font-medium">模型</th>
+                  <th className="py-2 pr-4 text-right font-medium">输入</th>
+                  <th className="py-2 pr-4 text-right font-medium">输出</th>
+                  <th className="py-2 pr-4 text-right font-medium">缓存读</th>
+                  <th className="py-2 pr-4 text-right font-medium">请求</th>
+                  <th className="py-2 text-right font-medium">折算</th>
+                </tr>
+              </thead>
+              <tbody>
+                {groups.map((group) => (
                 <tr key={`${group.day}/${group.agent}/${group.model}`} data-testid={`usage-row-${group.day}-${group.model}`} className="border-b last:border-0">
                   <td className="py-1.5 pr-4 text-xs text-muted-foreground">{group.day}</td>
                   <td className="py-1.5 pr-4 font-mono text-xs text-foreground">
@@ -314,9 +389,10 @@ export default function UsagePage() {
                     </button>
                   </td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
       {pricing && (

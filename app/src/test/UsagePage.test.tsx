@@ -39,6 +39,29 @@ describe("用量页", () => {
     expect(await screen.findByText(/不是你的账单/)).toBeInTheDocument();
   });
 
+  it("助手与模型筛选同步驱动汇总、未定价提示和明细，切换时间范围会清除筛选", async () => {
+    renderWithEngine(<UsagePage />, routes());
+    const today = new Date().toISOString().slice(0, 10);
+    const claudeRow = `usage-row-${today}-claude-opus-5`;
+    const codexRow = `usage-row-${today}-gpt-5.6-sol`;
+
+    await screen.findByTestId(claudeRow);
+    await userEvent.selectOptions(screen.getByTestId("usage-agent-filter"), "codex");
+    expect(screen.queryByTestId(claudeRow)).toBeNull();
+    expect(screen.getByTestId(codexRow)).toBeInTheDocument();
+    expect(screen.getByTestId("usage-total-cost")).toHaveTextContent("$0.00");
+    expect(screen.getByTestId("usage-unpriced")).toHaveTextContent("gpt-5.6-sol");
+    expect(screen.getByTestId("usage-model-filter")).toHaveTextContent("gpt-5.6-sol");
+
+    await userEvent.selectOptions(screen.getByTestId("usage-model-filter"), "gpt-5.6-sol");
+    await userEvent.click(screen.getByTestId("usage-range-30"));
+    expect(screen.getByTestId("usage-agent-filter")).toHaveValue("");
+    expect(screen.getByTestId("usage-model-filter")).toHaveValue("");
+    expect(screen.getByTestId(claudeRow)).toBeInTheDocument();
+    expect(screen.getByTestId(codexRow)).toBeInTheDocument();
+    expect(screen.getByTestId("usage-total-cost")).toHaveTextContent("$10.00");
+  });
+
   it("没单价的那行费用留空，不拿 0 冒充", async () => {
     renderWithEngine(<UsagePage />, routes());
     const row = await screen.findByTestId(

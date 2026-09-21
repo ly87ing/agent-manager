@@ -162,6 +162,13 @@ export function withinDays(groups: UsageGroup[], days: number, today = new Date(
   return groups.filter((group) => group.day >= limit);
 }
 
+/** 助手与模型筛选共用同一份分组结果，汇总卡和明细表因此不会口径分叉。 */
+export function filterUsage(groups: UsageGroup[], agent: string, model: string): UsageGroup[] {
+  return groups.filter(
+    (group) => (!agent || group.agent === agent) && (!model || group.model === model),
+  );
+}
+
 /** token 数读起来太长，按千/百万缩写。 */
 export function shortTokens(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;

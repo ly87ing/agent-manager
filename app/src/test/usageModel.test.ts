@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   costOf,
   formatCost,
+  filterUsage,
   groupUsage,
   priceOf,
   totalsOf,
@@ -88,6 +89,17 @@ describe("用量口径", () => {
     expect(withinDays(groups, 1, today).map((g) => g.day)).toEqual(["2026-09-20"]);
     expect(withinDays(groups, 7, today).map((g) => g.day)).toEqual(["2026-09-20", "2026-09-14"]);
     expect(withinDays(groups, 0, today)).toHaveLength(2);
+  });
+
+  it("助手与模型筛选可组合，空值表示不限制", () => {
+    const groups = groupUsage(data([
+      { hour: "2026-09-20T02:00:00Z", agent: "claude", model: "claude-opus-5", input: 10, output: 1, cache_write: 0, cache_read: 0, requests: 1 },
+      { hour: "2026-09-20T03:00:00Z", agent: "codex", model: "gpt-5.6-sol", input: 20, output: 2, cache_write: 0, cache_read: 0, requests: 2 },
+    ]));
+
+    expect(filterUsage(groups, "", "")).toHaveLength(2);
+    expect(filterUsage(groups, "codex", "").map((group) => group.model)).toEqual(["gpt-5.6-sol"]);
+    expect(filterUsage(groups, "claude", "gpt-5.6-sol")).toEqual([]);
   });
 
   it("小额费用看得出不是零", () => {
