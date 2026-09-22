@@ -39,7 +39,7 @@
 
 - **预算**:`round(len(core.md)/4)` 曾有硬上限(原 `tests/test_rule_budgets.py`)。core 长期贴着上限跑,任何净增字符都可能越界;路由行改写须**字符中性或负增**,想加内容先压缩现有措辞腾位。
 - **抬上限的判据是 delete-test,不是「我加的是 always-on 边界」**——后者恰恰是 bd139d5 对自己的定性:它新增常驻条目并抬 420→460,三个 commit 后 6dd67bb 判定该行(core.md 第 11 行)是低频条件性 when-X-do-Y、过不了 delete-test,遂删行并**对称回退** 460→420,明写"恢复「净增即破门」的强制函数"。规矩:先用 delete-test(删了它 agent 会不会犯错)证明该行配占常驻槽位再抬,且**抬升与该行同生共死**——行下线时上限一并回退;绝不为让门禁变绿而抬。
-- **五条路由短语**逐字生效:`` use the `solution-shaping` skill ``/`` `change-discipline` ``/`` `verification` ``(2026-09-21 起接替 `frontend-verification`)/`` `artifact-hygiene` ``/`` `reader-facing-writing` ``,按 ``re.findall(r"use the `([a-z0-9-]+)` skill")`` 提取——**skill 改名要同步改这四处**;短语左侧的触发关键词不受此限,可自由改写。
+- **路由行已于 2026-09-21 全部删除**:core.md 不再写 `` use the `<skill>` skill ``。skill 的 description 本来就常驻在两端系统提示里,路由行是同一触发条件的第二份拷贝,还把规则层与 skill 目录耦死(改名要跨仓库改规则源、锚点、内置清单再 apply)。证据见下节。以后新增 skill 只改 `agent-skills`,不碰 core.md。
 - **不要**在分发规则里出现探索/工具督促类子句(`codebase-retrieval`、`augment MCP`、`graphify-out/GRAPH_REPORT.md`、`For codebase exploration:`)。
 
 ## 规则与 skill 里一律不放注释(用户 2026-07-27 拍板,别再拿"这家免费"来复议)
@@ -49,6 +49,8 @@
 - 这条同时封掉了"用注释给分发产物自报家门"的做法:`~/.claude/CLAUDE.md` 被工具整体接管、覆盖写不留 `.bak` 这件事,只能靠仓库文档和分发目标本身的选择解决,不能靠往产物里塞注释。
 
 ## 别用 hook 替代路由表,别加常驻规则去"推"工具
+
+- **2026-09-21 决定:删除全部五条路由行,description 是唯一触发源。** 依据两组测量:本仓 7 月 27 日的两条路由行 delete-test(change-discipline +0.17 区间重叠;artifact-hygiene without 18/18,已触发);以及 agent-skills 同日的触发评测——verification 30/30、solution-shaping 10/10、change-discipline 9/9、description 压缩后 artifact-hygiene 35/35 与 safe-merge-review 18/18(sonnet,N=2–3),全部在隔离 HOME 即**无任何路由行**下测得。删行后又在真实 HOME 的 Claude Code 与 Codex 运行时各跑了一批跨 skill 用例复核,结果记在 agent-skills 的 README。原「路由表是唯一跨两端的强制机制」一说不再成立:description 同样两端都装。下面各条保留为历史测量记录。
 
 - **路由表 2026-07-27 第一次被实测,两条行结论不同**(sonnet,每行 2 用例 × 9 次 = N=18,两臂都装着 skill):`route-change-discipline` with 18/18 / without 15/18(+0.17,区间重叠);`route-artifact-hygiene` with 18/18 / **without 18/18**——裸臂一次没错过,delete-test 按仓库自己的判据是**触发了**的。
 - **但 delete-test 触发不等于该删,这是对既有判据的修正**:留着一行路由的代价是每会话约 28 token,删错的代价是 artifact-hygiene 那类边界(产物落位、密钥进日志)在边缘措辞上不再被认领。**代价不对称时,证据要求也应该不对称**——两个用例、一次会话的 null 不足以换掉一条按设计承重的行。想真正结掉这个问题,需要的是更边缘的措辞用例(不是更多次重复)、以及另外两条路由行(`frontend-verification`/`reader-facing-writing`)也各自测一遍;在那之前四行都留着,四条逐字断言也别动。
