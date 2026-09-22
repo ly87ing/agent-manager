@@ -207,7 +207,7 @@ describe("SecretsPage", () => {
     const input = await screen.findByTestId("secret-value-input");
     // 输入框是密码型：取值不以明文呈现
     expect(input).toHaveAttribute("type", "password");
-    expect(screen.getByRole("dialog")).toHaveTextContent("只写入“密钥”页选择的外部文件");
+    expect(screen.getByRole("dialog")).toHaveTextContent("只写入“设置 → 密钥”选择的外部文件");
     await userEvent.type(input, "value-under-test");
     await userEvent.click(screen.getByTestId("secret-value-save"));
 

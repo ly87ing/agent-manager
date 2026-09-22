@@ -138,7 +138,7 @@ export function CommandPalette({
           silent: true,
         });
         if (!envelope) {
-          toast.error("切换调用失败，请查看操作记录后重试");
+          toast.error("切换失败，请查看任务记录后重试");
           return;
         }
         if (!envelope.ok) {

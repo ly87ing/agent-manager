@@ -196,7 +196,7 @@ describe("McpPage 服务库 + 助手中的服务", () => {
     const dialog = await screen.findByRole("dialog", { name: "全部纳管并同步" });
     expect(dialog).toHaveTextContent("将执行 3 项助手配置同步，涉及 3 个服务");
     expect(dialog).toHaveTextContent("1 个未纳管服务会先导入服务库");
-    expect(dialog).toHaveTextContent("1 个服务会把原配置里的变量取值转存到“密钥”页选择的外部文件");
+    expect(dialog).toHaveTextContent("1 个服务会把原配置里的变量取值转存到“设置 → 密钥”选择的外部文件");
     expect(dialog).toHaveTextContent("2 项会用服务库定义接管同名条目");
 
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));

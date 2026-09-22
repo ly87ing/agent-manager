@@ -102,12 +102,12 @@ export default function McpPage() {
   };
 
   if (query.isPending) return <PageLoading />;
-  if (query.isError) return <PageError title="mcp:status 调用失败" error={query.error} />;
+  if (query.isError) return <PageError title="MCP 状态读取失败" error={query.error} />;
   if (!query.data.ok) {
     return (
       <div className="space-y-6">
         <PageHeader title="MCP" description="服务库管理 MCP 服务定义；「助手中的服务」按助手查看并操作每个服务的配置。" />
-        <ErrorPanel title="mcp:status 错误" errors={query.data.errors} />
+        <ErrorPanel title="MCP 状态读取失败" errors={query.data.errors} />
       </div>
     );
   }
@@ -383,7 +383,7 @@ export default function McpPage() {
     <div className="space-y-6">
       <PageHeader title="MCP" description="服务库管理 MCP 服务定义；「助手中的服务」按助手查看并操作每个服务的配置。" />
 
-      {query.data.errors.length > 0 && <ErrorPanel title="mcp:status 错误" errors={query.data.errors} />}
+      {query.data.errors.length > 0 && <ErrorPanel title="MCP 状态读取失败" errors={query.data.errors} />}
 
       <div role="tablist" aria-label="MCP 管理视图" className="flex border-b">
         {(["library", "agents"] as const).map((tab) => (
@@ -692,7 +692,7 @@ export default function McpPage() {
       {pendingSync && (
         <ConfirmModal
           title={pendingSync.title}
-          description={`将执行 ${pendingSync.actionCount} 项助手配置同步，涉及 ${pendingSync.serviceCount} 个服务${pendingSync.importCount > 0 ? `；其中 ${pendingSync.importCount} 个未纳管服务会先导入服务库` : ""}${pendingSync.secretImportCount > 0 ? `，${pendingSync.secretImportCount} 个服务会把原配置里的变量取值转存到“密钥”页选择的外部文件（界面不回显）` : ""}${pendingSync.takeoverCount > 0 ? `，${pendingSync.takeoverCount} 项会用服务库定义接管同名条目` : ""}${pendingSync.removeCount > 0 ? `，并清理 ${pendingSync.removeCount} 项由本工具写入的旧配置` : ""}。未列入计划的配置和顶层配置保持不变。`}
+          description={`将执行 ${pendingSync.actionCount} 项助手配置同步，涉及 ${pendingSync.serviceCount} 个服务${pendingSync.importCount > 0 ? `；其中 ${pendingSync.importCount} 个未纳管服务会先导入服务库` : ""}${pendingSync.secretImportCount > 0 ? `，${pendingSync.secretImportCount} 个服务会把原配置里的变量取值转存到“设置 → 密钥”选择的外部文件（界面不回显）` : ""}${pendingSync.takeoverCount > 0 ? `，${pendingSync.takeoverCount} 项会用服务库定义接管同名条目` : ""}${pendingSync.removeCount > 0 ? `，并清理 ${pendingSync.removeCount} 项由本工具写入的旧配置` : ""}。未列入计划的配置和顶层配置保持不变。`}
           risk="write-local"
           confirmLabel="确认同步"
           executing={batchApply.executing || takeover.executing}

@@ -185,7 +185,7 @@ export default function UsagePage() {
   };
 
   if (query.isPending) return <PageLoading text="正在读用量…" />;
-  if (query.isError) return <PageError title="usage:status 调用失败" error={query.error} />;
+  if (query.isError) return <PageError title="用量读取失败" error={query.error} />;
 
   const data = query.data.data;
   const timeGroups = withinDays(groupUsage(data), days);
@@ -203,7 +203,7 @@ export default function UsagePage() {
         title="用量"
         description="按助手与模型累加本机会话记录里的 token。数字来自本机文件，不联网。"
       />
-      {query.data.errors.length > 0 && <ErrorPanel title="usage:status 错误" errors={query.data.errors} />}
+      {query.data.errors.length > 0 && <ErrorPanel title="用量读取失败" errors={query.data.errors} />}
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-lg border bg-muted p-0.5" role="group" aria-label="时间范围">

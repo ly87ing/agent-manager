@@ -12,7 +12,7 @@ export default function DashboardPage({ onNavigate }: { onNavigate?: (page: stri
     return <PageLoading text="正在读取引擎状态…" />;
   }
   if (auditQuery.isError) {
-    return <ErrorPanel title="system:audit 调用失败" errors={[toDiagnostic(auditQuery.error)]} />;
+    return <ErrorPanel title="总览状态读取失败" errors={[toDiagnostic(auditQuery.error)]} />;
   }
 
   const audit = auditQuery.data;

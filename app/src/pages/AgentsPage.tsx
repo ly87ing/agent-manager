@@ -108,7 +108,7 @@ export default function AgentsPage({
   const [configuringTarget, setConfiguringTarget] = useState<string | null>(null);
   const configuring = configuringTarget !== null;
   if (query.isPending) return <PageLoading />;
-  if (query.isError) return <PageError title="agents:status 调用失败" error={query.error} />;
+  if (query.isError) return <PageError title="助手状态读取失败" error={query.error} />;
 
   const elements = query.data.data.elements;
   const profileElements = profilesQuery.data?.ok ? profilesQuery.data.data.elements : [];
@@ -305,7 +305,7 @@ export default function AgentsPage({
         if (!secret.ok) {
           await query.refetch();
           setConnectionFormError(
-            `接入已保存，但凭据没有写入外部文件：${secret.errors[0]?.message ?? "请先在密钥页选择外部文件，或从进程环境提供这个变量"}`,
+            `接入已保存，但凭据没有写入外部文件：${secret.errors[0]?.message ?? "请先在“设置 → 密钥”选择外部文件，或从进程环境提供这个变量"}`,
           );
           return;
         }
@@ -340,7 +340,7 @@ export default function AgentsPage({
       setConnectionRemoving(null);
       await query.refetch();
       toast.success(`已删除接入 ${connection.label || connection.name}`, {
-        description: "凭据变量没有删除；仍在使用时不会受影响，可在密钥页单独处理。",
+        description: "凭据变量没有删除；仍在使用时不会受影响，可在“设置 → 密钥”单独处理。",
       });
     } finally {
       setConnectionRemovingBusy(false);
@@ -575,7 +575,7 @@ export default function AgentsPage({
   return (
     <div>
       <h2 className="sr-only">助手</h2>
-      {query.data.errors.length > 0 && <ErrorPanel title="agents:status 错误" errors={query.data.errors} />}
+      {query.data.errors.length > 0 && <ErrorPanel title="助手状态读取失败" errors={query.data.errors} />}
       <div className="mb-3 inline-flex rounded-xl bg-muted p-1" role="group" aria-label="选择环境类型">
         <button type="button" data-testid="default-environment-button" aria-pressed={environmentView === "default"} onClick={() => setEnvironmentView("default")} className={`rounded-lg px-4 py-2 text-sm ${environmentView === "default" ? "bg-background font-medium shadow-sm" : "text-muted-foreground"}`}>默认环境</button>
         <button type="button" data-testid="manage-instances-button" aria-pressed={environmentView === "independent"} onClick={() => setEnvironmentView("independent")} className={`rounded-lg px-4 py-2 text-sm ${environmentView === "independent" ? "bg-background font-medium shadow-sm" : "text-muted-foreground"}`}>独立环境</button>

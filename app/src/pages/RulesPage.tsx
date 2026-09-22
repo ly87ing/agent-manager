@@ -25,12 +25,12 @@ export default function RulesPage() {
   const directApply = useDirectApply();
 
   if (query.isPending) return <PageLoading />;
-  if (query.isError) return <PageError title="rules:status 调用失败" error={query.error} />;
+  if (query.isError) return <PageError title="规则状态读取失败" error={query.error} />;
   if (!query.data.ok) {
     return (
       <div className="space-y-4">
         <PageHeader title="规则" description={SYNC_NOTE} />
-        <ErrorPanel title="rules:status 错误" errors={query.data.errors} />
+        <ErrorPanel title="规则状态读取失败" errors={query.data.errors} />
       </div>
     );
   }
@@ -40,7 +40,7 @@ export default function RulesPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="规则" description={SYNC_NOTE} />
-      {query.data.errors.length > 0 && <ErrorPanel title="rules:status 错误" errors={query.data.errors} />}
+      {query.data.errors.length > 0 && <ErrorPanel title="规则状态读取失败" errors={query.data.errors} />}
       <SourceDefinitionsPanel domain="rules" />
 
       <div className="flex justify-end">

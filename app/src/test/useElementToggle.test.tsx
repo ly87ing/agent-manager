@@ -35,6 +35,15 @@ function routes(): Record<string, Envelope> {
 }
 
 describe("useElementToggle 启停开关", () => {
+  it("状态读取失败时展示页面名称而不是内部命令", async () => {
+    const broken: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
+    broken["aliases:status"] = () => Promise.reject(new Error("bridge down"));
+    renderWithEngine(<DomainApplyPage domain="aliases" title="终端快捷命令" description="desc" enableToggles />, broken);
+
+    expect(await screen.findByRole("heading", { name: /终端快捷命令状态读取失败/ })).toBeInTheDocument();
+    expect(screen.queryByText(/aliases:status 调用失败/)).toBeNull();
+  });
+
   it("policy:set 成功后立即自动 apply --only element，不再 toast 二次询问", async () => {
     const toastSuccessSpy = vi.spyOn(toast, "success");
     const { calls } = renderWithEngine(<DomainApplyPage domain="aliases" title="Aliases" description="desc" enableToggles />, routes());

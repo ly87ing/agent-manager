@@ -407,7 +407,7 @@ export default function TakeoverPage() {
         icon={Server}
         testId="takeover-mcp"
         title="MCP 服务"
-        description="各助手配置里尚未纳入管理的 MCP 条目。定义只保存变量名；如果原配置直接写了密钥，确认后会转存到“密钥”页选择的外部文件，界面不会显示取值。"
+        description="各助手配置里尚未纳入管理的 MCP 条目。定义只保存变量名；如果原配置直接写了密钥，确认后会转存到“设置 → 密钥”选择的外部文件，界面不会显示取值。"
       >
         {mcpGroups.length === 0 ? (
           <EmptyState compact title="没有发现未纳管的 MCP 条目" testId="takeover-mcp-empty" />
@@ -493,7 +493,7 @@ export default function TakeoverPage() {
               : "",
             cleanupCount > 0 ? `另有 ${cleanupCount} 条残留链接会被删除（只删链接本身，不动源目录）。` : "",
             secretCount > 0
-              ? `其中 ${secretCount} 个 MCP 服务带密钥：原配置里的取值会转存到“密钥”页选择的外部文件，界面不回显；未选择可用文件时会停止，不会继续覆盖助手配置。`
+              ? `其中 ${secretCount} 个 MCP 服务带密钥：原配置里的取值会转存到“设置 → 密钥”选择的外部文件，界面不回显；未选择可用文件时会停止，不会继续覆盖助手配置。`
               : "",
           ]
             .filter(Boolean)

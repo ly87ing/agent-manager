@@ -35,12 +35,12 @@ export default function DomainApplyPage({
   const disabled = directApply.executing || toggleExecuting;
 
   if (query.isPending) return <PageLoading />;
-  if (query.isError) return <PageError title={`${domain}:status 调用失败`} error={query.error} />;
+  if (query.isError) return <PageError title={`${title}状态读取失败`} error={query.error} />;
   if (!query.data.ok) {
     return (
       <div className="space-y-4">
         <PageHeader title={title} description={description} />
-        <ErrorPanel title={`${domain}:status 错误`} errors={query.data.errors} />
+        <ErrorPanel title={`${title}状态读取失败`} errors={query.data.errors} />
       </div>
     );
   }
@@ -66,7 +66,7 @@ export default function DomainApplyPage({
   return (
     <div className="space-y-4">
       <PageHeader title={title} description={description} />
-      {query.data.errors.length > 0 && <ErrorPanel title={`${domain}:status 错误`} errors={query.data.errors} />}
+      {query.data.errors.length > 0 && <ErrorPanel title={`${title}状态读取失败`} errors={query.data.errors} />}
       {domain === "hooks" ? (
         <>
           <HooksEditor />

@@ -252,7 +252,7 @@ export default function SkillsPage({
   }, [assignmentRows]);
 
   if (query.isPending) return <PageLoading />;
-  if (query.isError) return <PageError title="skills:status 调用失败" error={query.error} />;
+  if (query.isError) return <PageError title="技能状态读取失败" error={query.error} />;
 
   /** 集合操作：按钮严格来自卡片动作，apply 携带精确 --only/--action；remove 需先经独立 ConfirmModal。 */
   const runCollectionAction = (collection: EngineElement, action: "update" | "enable" | "disable" | "remove", title: string) => {
@@ -422,7 +422,7 @@ export default function SkillsPage({
     <div className="space-y-6">
       <PageHeader title="技能" description="管理技能集合与技能分发。支持查看集合资源库状态，并在全部技能列表中搜索、按集合与助手筛选操作。" />
 
-      {query.data.errors.length > 0 && <ErrorPanel title="skills:status 错误" errors={query.data.errors} />}
+      {query.data.errors.length > 0 && <ErrorPanel title="技能状态读取失败" errors={query.data.errors} />}
 
       <div role="tablist" aria-label="技能管理视图" className="flex border-b">
         {(["collections", "skills"] as const).map((tab) => (

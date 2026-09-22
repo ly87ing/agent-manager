@@ -114,6 +114,7 @@ describe("执行中心", () => {
 
     releaseApply!();
     expect(await screen.findByText("失败")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /执行失败/ })).toBeInTheDocument();
     expect(screen.getByText("mcp-sync")).toBeInTheDocument();
     expect(screen.getByText("hooks-sync")).toBeInTheDocument();
     // 锁与 pid 是引擎内部状态，不再摆在卡片上
@@ -173,5 +174,14 @@ describe("执行中心", () => {
     await userEvent.click(within(confirmDialog).getByRole("button", { name: "确认清空" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("清空任务记录失败：SQLite busy");
+  });
+
+  it("列表读取失败时使用用户能理解的标题", async () => {
+    const broken = routes();
+    broken["runs:list"] = () => Promise.reject(new Error("bridge down"));
+    renderWithEngine(<RunsPage />, broken);
+
+    expect(await screen.findByRole("heading", { name: /任务记录读取失败/ })).toBeInTheDocument();
+    expect(screen.queryByText(/runs:list 调用失败/)).toBeNull();
   });
 });

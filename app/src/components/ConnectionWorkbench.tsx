@@ -231,9 +231,10 @@ export function ConnectionWorkbench({
                 onClick={() => onCheckAll(selected, form.connections)}
                 title="检查全部接入"
                 aria-label="检查全部接入"
-                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border text-muted-foreground hover:bg-accent disabled:opacity-50"
+                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border px-3 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
               >
                 {checkingAll ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Activity className="h-4 w-4" aria-hidden />}
+                {checkingAll ? "检查中…" : "检查全部"}
               </button>
             )}
             <details className="group relative">
@@ -577,9 +578,10 @@ function ConnectionCard({
             title={connection ? "编辑 Provider" : "默认账号由助手管理；添加一个可编辑 Provider"}
             disabled={disabled}
             onClick={onEdit}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border text-muted-foreground hover:border-primary/40 hover:bg-accent hover:text-foreground disabled:opacity-50"
+            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border px-2.5 text-xs text-muted-foreground hover:border-primary/40 hover:bg-accent hover:text-foreground disabled:opacity-50"
           >
             <Pencil className="h-4 w-4" aria-hidden />
+            {connection ? "编辑" : "添加 Provider"}
           </button>
         )}
         {connection && (onCheck || onEdit || onDuplicate || onExport || onRemove || onMoveUp || onMoveDown) && (

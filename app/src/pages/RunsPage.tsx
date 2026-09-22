@@ -60,7 +60,7 @@ function ExecutionCard({ record, onSelectRun }: { record: ExecutionRecord; onSel
       {record.bridgeError && <p className="mt-2 text-xs text-destructive">桥错误:{record.bridgeError}</p>}
       {record.envelope && record.envelope.errors.length > 0 && (
         <div className="mt-2">
-          <ErrorPanel title="引擎错误" errors={record.envelope.errors} />
+          <ErrorPanel title="执行失败" errors={record.envelope.errors} />
         </div>
       )}
 
@@ -146,7 +146,7 @@ export default function RunsPage() {
   };
 
   if (listQuery.isPending) return <PageLoading />;
-  if (listQuery.isError) return <PageError title="runs:list 调用失败" error={listQuery.error} />;
+  if (listQuery.isError) return <PageError title="任务记录读取失败" error={listQuery.error} />;
 
   const runs: RunEntry[] = listQuery.data.data.runs;
   const filteredRuns = runs.filter((run) => matchesKeyword(search, [run.run_id]));

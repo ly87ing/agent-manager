@@ -53,7 +53,7 @@ export function SecretValueDialog({
         />
 
         <p className="mt-3 rounded-md border bg-muted px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-          取值只写入“密钥”页选择的外部文件，不进入本机数据库、操作记录或配置备份。
+          取值只写入“设置 → 密钥”选择的外部文件，不进入本机数据库、操作记录或配置备份。
           同步到部分助手时，目标配置本身可能需要明文；保存前请确认你信任该文件位置。
         </p>
 

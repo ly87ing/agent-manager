@@ -422,7 +422,7 @@ export function ConnectionFormDialog({
                       className="mt-1 w-full rounded border border-input p-2 text-sm"
                     />
                     <span className="mt-1 block text-xs text-muted-foreground">
-                      填写后只写入“密钥”页选择的外部文件，不进入本机数据库。
+                      填写后只写入“设置 → 密钥”选择的外部文件，不进入本机数据库。
                     </span>
                   </label>
                 ) : kind === "codex" ? (

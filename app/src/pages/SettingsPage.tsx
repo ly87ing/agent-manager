@@ -86,7 +86,7 @@ const ADVANCED_ENTRIES = [
   {
     key: "secrets",
     title: "密钥",
-    description: "填写 MCP 服务需要的取值，并查看哪些还没配。",
+    description: "选择外部密钥文件，填写取值并查看哪些还没配。",
     icon: KeyRound,
   },
 ];
@@ -254,7 +254,7 @@ export default function SettingsPage({
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
             返回设置
           </button>
-          <span className="text-xs text-muted-foreground">/ 高级管理 / {currentEntry?.title}</span>
+          <span className="text-xs text-muted-foreground">/ 配置工具 / {currentEntry?.title}</span>
         </div>
         {activeAdvanced === "aliases" && <AliasesPage />}
         {activeAdvanced === "client-diagnostics" && <ClientDiagnosticsPage />}
@@ -286,10 +286,17 @@ export default function SettingsPage({
               step={1}
               value={Number.isNaN(preferences.logRetentionDays) ? "" : preferences.logRetentionDays}
               onChange={(e) => setPreferences({ ...preferences, logRetentionDays: e.target.value === "" ? NaN : Number(e.target.value) })}
-              className="w-32 rounded border px-2 py-1"
+              aria-invalid={!isRetentionValid}
+              aria-describedby={!isRetentionValid ? "log-retention-error" : undefined}
+              className={cn("w-32 rounded border px-2 py-1", !isRetentionValid && "border-destructive")}
             />
             <span className="text-xs text-muted-foreground">（操作记录保留多久，0 为不自动清理，最大 3650 天）</span>
           </label>
+          {!isRetentionValid && (
+            <p id="log-retention-error" role="alert" className="text-xs text-destructive">
+              请输入 0 到 3650 之间的整数。
+            </p>
+          )}
           <button type="button" onClick={savePreferences} disabled={!changed || save.isPending || !isFormValid} className={cn("inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-primary-foreground", !changed || save.isPending || !isFormValid ? "bg-muted text-muted-foreground" : "bg-primary hover:bg-primary/90")}><Save className="h-4 w-4" aria-hidden />保存设置</button>
           {saveStatus && <p role={saveStatus.startsWith("设置保存失败") ? "alert" : "status"} className={saveStatus.startsWith("设置保存失败") ? "text-sm text-destructive" : "text-sm text-success"}>{saveStatus}</p>}
         </div>
@@ -315,8 +322,8 @@ export default function SettingsPage({
       </section>
       <section className="rounded-lg border bg-card p-5 shadow-sm">
         <div>
-          <h2 className="text-sm font-semibold text-foreground">高级管理</h2>
-          <p className="mt-1 text-xs text-muted-foreground">不常用的诊断与本机配置入口。</p>
+          <h2 className="text-sm font-semibold text-foreground">配置工具</h2>
+          <p className="mt-1 text-xs text-muted-foreground">密钥、终端快捷命令和客户端诊断都在这里。</p>
         </div>
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {ADVANCED_ENTRIES.map((entry) => {

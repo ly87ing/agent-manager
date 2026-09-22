@@ -379,7 +379,7 @@ describe("SettingsPage", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it("渲染高级管理区块包含保留的非日常功能入口，点击可下钻，常驻返回设置按钮可返回", async () => {
+  it("渲染配置工具区块，点击可下钻，常驻返回设置按钮可返回", async () => {
     setSettingsClient({
       get: async () => settings,
       save: async (preferences) => ({ ...settings, preferences }),
@@ -394,7 +394,7 @@ describe("SettingsPage", () => {
       "system:version": makeEnvelope({ version: "0.1.0" }, { command: "system.version" }),
     });
 
-    expect(await screen.findByRole("heading", { name: "高级管理" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "配置工具" })).toBeInTheDocument();
 
     const expectedKeys = [
       "aliases",
@@ -404,7 +404,7 @@ describe("SettingsPage", () => {
     for (const key of expectedKeys) {
       expect(screen.getByTestId(`advanced-entry-${key}`)).toBeInTheDocument();
     }
-    // 总览已提到一级导航，不再在高级管理里重复出现
+    // 总览已提到一级导航，不再在配置工具里重复出现
     expect(screen.queryByTestId("advanced-entry-dashboard")).toBeNull();
     // 2026-09-12 裁决退役：Tools 与快照入口不再出现
     expect(screen.queryByTestId("advanced-entry-tools")).toBeNull();
@@ -421,13 +421,13 @@ describe("SettingsPage", () => {
     // 常驻返回设置按钮出现，且在面包屑中展示
     const backButton = await screen.findByTestId("back-to-settings-button");
     expect(backButton).toBeInTheDocument();
-    expect(screen.getByText(/高级管理 \/ 终端快捷命令/)).toBeInTheDocument();
+    expect(screen.getByText(/配置工具 \/ 终端快捷命令/)).toBeInTheDocument();
 
     // 点击返回设置
     await userEvent.click(backButton);
 
     // 重新回到基础设置页
-    expect(await screen.findByRole("heading", { name: "高级管理" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "配置工具" })).toBeInTheDocument();
     expect(screen.queryByTestId("back-to-settings-button")).toBeNull();
   });
 
@@ -451,6 +451,7 @@ describe("SettingsPage", () => {
     await userEvent.clear(input);
     await userEvent.type(input, "3651");
     expect(saveBtn).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent("请输入 0 到 3650 之间的整数");
 
     // 负数：禁用保存
     await userEvent.clear(input);
@@ -461,6 +462,7 @@ describe("SettingsPage", () => {
     await userEvent.clear(input);
     await userEvent.type(input, "0");
     expect(saveBtn).not.toBeDisabled();
+    expect(screen.queryByRole("alert")).toBeNull();
     await userEvent.click(saveBtn);
     expect(await screen.findByText("设置已保存")).toBeInTheDocument();
     expect(savedPreferences.logRetentionDays).toBe(0);
