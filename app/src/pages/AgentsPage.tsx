@@ -305,7 +305,7 @@ export default function AgentsPage({
         if (!secret.ok) {
           await query.refetch();
           setConnectionFormError(
-            `接入已保存，但凭据没有存下：${secret.errors[0]?.message ?? "请修正后重试，或从外部环境提供这个变量"}`,
+            `接入已保存，但凭据没有写入外部文件：${secret.errors[0]?.message ?? "请先在密钥页选择外部文件，或从进程环境提供这个变量"}`,
           );
           return;
         }

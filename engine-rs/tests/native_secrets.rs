@@ -63,11 +63,15 @@ fn fresh_context_status_is_empty_offline_aware_and_zero_write() {
     let env = secrets_status(&ctx, &[]);
     assert!(env.ok, "{:?}", env.errors);
     let element = mcp_env_element(&env);
-    // 取值先看用户在界面上填的（saved），再回退进程环境
-    assert_eq!(element["spec"]["sources"], json!(["saved", "process env"]));
+    assert_eq!(
+        element["spec"]["sources"],
+        json!(["external file", "process env"])
+    );
     assert_eq!(element["policy"]["enabled"], true);
     assert_eq!(element["observed"]["variables"], json!([]));
     assert_eq!(element["observed"]["unresolved"], 0);
+    assert_eq!(element["observed"]["source"]["configured"], false);
+    assert_eq!(element["observed"]["legacy_database_values"], 0);
     assert_eq!(element["state"], "managed-ok");
     assert_eq!(element["freshness"]["state"], "not-applicable");
     assert_eq!(element["actions"], json!([]));
@@ -227,5 +231,110 @@ fn disabled_definitions_with_malformed_env_are_ignored() {
         "禁用定义字面量不得外泄"
     );
     std::env::remove_var("AM_TEST_ENABLED_VAR");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn external_file_is_explicit_private_and_never_leaks_values() {
+    let (base, ctx) = temp_ctx("external-file");
+    std::fs::create_dir_all(&ctx.home_dir).unwrap();
+    let path = ctx.home_dir.join("private.env");
+    const SECRET: &str = "external-secret-value-under-test";
+    std::fs::write(&path, format!("FILE_TOKEN={SECRET}\n")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let configured = execute(
+        &ctx,
+        &request("secrets:source", &["--path", path.to_str().unwrap()]),
+    );
+    assert!(configured.ok, "{:?}", configured.errors);
+    persist_policy(
+        &ctx,
+        &policy_with_definitions(json!({
+            "file-server": {"command": "x", "env": {"TOKEN": "${FILE_TOKEN}"}},
+        })),
+    );
+
+    let status = secrets_status(&ctx, &[]);
+    assert!(status.ok, "{:?}", status.errors);
+    let element = mcp_env_element(&status);
+    assert_eq!(element["observed"]["source"]["configured"], true);
+    assert_eq!(element["observed"]["source"]["ready"], true);
+    assert_eq!(element["observed"]["variables"][0]["resolved"], true);
+    assert_eq!(element["observed"]["variables"][0]["stored"], true);
+    assert!(!serde_json::to_string(&status).unwrap().contains(SECRET));
+
+    let replaced = execute(
+        &ctx,
+        &request(
+            "secrets:set",
+            &["--var", "FILE_TOKEN", "--value", "replacement-under-test"],
+        ),
+    );
+    assert!(replaced.ok, "{:?}", replaced.errors);
+    let written = std::fs::read_to_string(&path).unwrap();
+    assert!(written.contains("replacement-under-test"));
+    assert!(!written.contains(SECRET));
+    assert!(!serde_json::to_string(&replaced)
+        .unwrap()
+        .contains("replacement-under-test"));
+
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn legacy_database_values_require_explicit_migration_to_external_file() {
+    let (base, ctx) = temp_ctx("legacy-migrate");
+    std::fs::create_dir_all(&ctx.home_dir).unwrap();
+    let path = ctx.home_dir.join("private.env");
+    std::fs::write(&path, "LEGACY_TOKEN=\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    assert!(
+        execute(
+            &ctx,
+            &request("secrets:source", &["--path", path.to_str().unwrap()]),
+        )
+        .ok
+    );
+
+    let conn = store::open_write(&ctx).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE secret_values (name TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL, updated_at TEXT NOT NULL);",
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO secret_values(name, value, updated_at) VALUES (?1, ?2, ?3)",
+        rusqlite::params![
+            "LEGACY_TOKEN",
+            "legacy-value-under-test",
+            "2026-09-22T00:00:00Z"
+        ],
+    )
+    .unwrap();
+    drop(conn);
+
+    let before = secrets_status(&ctx, &[]);
+    assert_eq!(
+        mcp_env_element(&before)["observed"]["legacy_database_values"],
+        1
+    );
+    let migrated = execute(&ctx, &request("secrets:migrate-legacy", &[]));
+    assert!(migrated.ok, "{:?}", migrated.errors);
+    assert_eq!(migrated.data["migrated"], json!(["LEGACY_TOKEN"]));
+    assert!(std::fs::read_to_string(&path)
+        .unwrap()
+        .contains("legacy-value-under-test"));
+    assert_eq!(
+        mcp_env_element(&secrets_status(&ctx, &[]))["observed"]["legacy_database_values"],
+        0
+    );
+
     let _ = std::fs::remove_dir_all(&base);
 }

@@ -16,8 +16,6 @@ export interface BackupDiff {
   sections: DiffSection[];
   /** 内容会变的来源键。 */
   sourcesChanged: string[];
-  /** 凭据取值的变动，只报变量名与条数，绝不带取值。 */
-  secrets: { added: string[]; changed: string[]; removed: string[] };
   /** true = 两边完全一样，导入不会改变任何东西。 */
   identical: boolean;
 }
@@ -90,21 +88,9 @@ export function diffBackup(current: Json, incoming: Json): BackupDiff {
     .filter((key) => JSON.stringify(currentSources[key] ?? "") !== JSON.stringify(incomingSources[key]))
     .sort();
 
-  // 凭据只比变量名与「取值是否变了」，两边的取值都不出现在结果里
-  const secretsDiff = diffMaps("凭据取值", asObject(current.secrets), asObject(incoming.secrets));
-  const secrets = {
-    added: secretsDiff.added,
-    changed: secretsDiff.changed,
-    removed: secretsDiff.removed,
-  };
-
   return {
     sections,
     sourcesChanged,
-    secrets,
-    identical:
-      sections.length === 0 &&
-      sourcesChanged.length === 0 &&
-      secrets.added.length + secrets.changed.length + secrets.removed.length === 0,
+    identical: sections.length === 0 && sourcesChanged.length === 0,
   };
 }

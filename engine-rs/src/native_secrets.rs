@@ -1,17 +1,17 @@
-//! Rust 原生 secrets 域：只读 `secrets:status` 与写入取值的 `secrets:set`。
+//! Rust 原生 secrets 域：外部密钥文件状态、取值写入与旧数据库凭据迁移。
 //!
 //! 唯一元素 secrets:mcp-env：事实源为 store::effective_policy 与原生 MCP
 //! 定义，仅纳入已启用定义；对每个合法 ${VAR} 占位符（stdio env 与远程
 //! headers 同级）输出确定性行 {server, env_key, placeholder, resolved, kind}，
-//! kind 为 "env" 或 "header"；resolved 判断该变量当前能否取到值（先看用户在
-//! 界面上填过的本机取值，再回退进程环境），`stored` 说明取值是否存在本机库里。
-//! 任何路径都不保存、不序列化、不输出变量值本身。外部私有密钥
-//! 仓库在 Agent Manager 之外注入进程环境：不扫描、不定位、不克隆、不探测
-//! git、不读取或暴露任何仓库/路径/env 文件。历史畸形已启用 env/headers 定义
+//! kind 为 "env" 或 "header"；resolved 判断该变量当前能否取到值（先看用户选择的
+//! 外部 `.env` 文件，再回退进程环境），`stored` 说明取值是否来自外部文件。
+//! 任何状态、操作记录与配置备份都不保存、不序列化、不输出变量值本身。历史畸形已启用 env/headers 定义
 //! fail-closed，固定脱敏错误，不回显存储字面量/server/key/路径。
 //!
-//! `secrets:set --var NAME --value V` 把取值写进本机库（空值即删除）。取值是明文，
-//! 只在 apply 渲染目标配置时使用；错误消息一律不回显取值。
+//! `secrets:set --var NAME --value V` 只写用户明确选择的外部文件（空值即删除）；
+//! `secrets:migrate-legacy` 需显式触发，先迁移旧表取值再删表。错误消息一律不回显取值。
+
+use std::collections::BTreeMap;
 
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
@@ -75,14 +75,27 @@ fn status(ctx: &Context) -> Result<Value> {
     } else {
         "missing"
     };
+    let (source_path, source_error) = crate::secret_values::source_state();
+    let source_ready = source_path.is_some() && source_error.is_none();
+    let legacy_count = crate::secret_values::legacy_count(ctx)?;
     Ok(json!({
         "domain": "secrets",
         "elements": [{
             "id": "secrets:mcp-env",
             "domain": "secrets",
-            "spec": {"sources": ["saved", "process env"]},
+            "spec": {"sources": ["external file", "process env"]},
             "policy": {"enabled": true},
-            "observed": {"variables": variables, "unresolved": unresolved},
+            "observed": {
+                "variables": variables,
+                "unresolved": unresolved,
+                "source": {
+                    "configured": source_path.is_some(),
+                    "path": source_path,
+                    "ready": source_ready,
+                    "error": source_error,
+                },
+                "legacy_database_values": legacy_count,
+            },
             "state": state,
             "freshness": {"state": "not-applicable", "current": Value::Null, "upstream": Value::Null, "checked_at": Value::Null, "probe": Value::Null, "cache_age_sec": Value::Null},
             "actions": [],
@@ -90,7 +103,7 @@ fn status(ctx: &Context) -> Result<Value> {
     }))
 }
 
-/// `secrets:set --var NAME --value V`：把取值写进本机库；空值即删除该变量。
+/// `secrets:set --var NAME --value V`：把取值写进外部文件；空值即删除该变量。
 /// 错误消息只说变量种类，绝不回显取值。
 fn set_value(ctx: &Context, req: &Request) -> Result<Value> {
     let mut var: Option<String> = None;
@@ -131,12 +144,7 @@ fn set_value(ctx: &Context, req: &Request) -> Result<Value> {
         bail!("参数错误: 取值含非法字符");
     }
 
-    let mut conn = store::open_write(ctx)?;
-    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    crate::secret_values::ensure_table(&tx)?;
-    crate::secret_values::set(&tx, &var, &value, &crate::native_mcp::model::now_iso())?;
-    tx.commit()?;
-    // 本次分发内后续读取也要看到新值
+    crate::secret_values::set(ctx, &var, &value)?;
     crate::secret_values::refresh(ctx);
 
     Ok(json!({
@@ -165,7 +173,7 @@ fn var_name_for(env_key: &str) -> String {
     out
 }
 
-/// 从某个助手的 MCP 配置里，把指定服务的明文 env 取值接过来存进本机库。
+/// 从某个助手的 MCP 配置里，把指定服务的明文 env 取值接到外部密钥文件。
 ///
 /// 接管一条已有的 MCP 时，定义里只会留 `${VAR}` 引用；不把原来的取值一起接过来的话，
 /// 同步时解析到的会是另一个值（或直接缺失），用户点「接管」的心智却是「保持原样」。
@@ -218,24 +226,62 @@ fn adopt(ctx: &Context, req: &Request) -> Result<Value> {
         return Ok(json!({"domain": "secrets", "adopted": Vec::<String>::new()}));
     }
 
-    let mut conn = store::open_write(ctx)?;
-    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    crate::secret_values::ensure_table(&tx)?;
-    let now = crate::native_mcp::model::now_iso();
-    let mut adopted: Vec<String> = Vec::new();
+    let mut incoming = BTreeMap::new();
     for (env_key, value) in literals {
         let var = var_name_for(&env_key);
         if !crate::secret_values::valid_var_name(&var) {
             continue;
         }
-        crate::secret_values::set(&tx, &var, &value, &now)?;
-        adopted.push(var);
+        if incoming
+            .insert(var.clone(), value.clone())
+            .is_some_and(|previous| previous != value)
+        {
+            bail!("原配置中的变量 {var} 出现多个不同取值，拒绝自动接管");
+        }
     }
+    let adopted = crate::secret_values::merge_without_overwrite(ctx, &incoming)?;
+    crate::secret_values::refresh(ctx);
+    Ok(json!({"domain": "secrets", "adopted": adopted}))
+}
+
+fn set_source(ctx: &Context, req: &Request) -> Result<Value> {
+    let mut path: Option<String> = None;
+    let mut iter = req.args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--path" if path.is_none() => {
+                path = Some(
+                    iter.next()
+                        .ok_or_else(|| anyhow::anyhow!("参数错误: --path 缺少取值"))?
+                        .trim()
+                        .to_string(),
+                );
+            }
+            "--path" => bail!("参数错误: --path 重复"),
+            other if other.starts_with("--") => bail!("参数错误: 存在不支持的选项"),
+            _ => bail!("参数错误: 不接受位置参数"),
+        }
+    }
+    let path = path.ok_or_else(|| anyhow::anyhow!("参数错误: 缺少 --path"))?;
+    crate::secret_values::validate_source(ctx, &path)?;
+    let mut conn = store::open_write(ctx)?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    // 与设置页各自只改自己拥有的字段；同一事务读取可避免并发保存时互相覆盖。
+    let mut settings = store::settings_from_connection(&tx)?;
+    settings.secrets_file_path = path.clone();
+    store::write_settings(&tx, &settings)?;
     tx.commit()?;
     crate::secret_values::refresh(ctx);
-    adopted.sort();
-    adopted.dedup();
-    Ok(json!({"domain": "secrets", "adopted": adopted}))
+    Ok(json!({"domain": "secrets", "configured": !path.is_empty()}))
+}
+
+fn migrate_legacy(ctx: &Context, req: &Request) -> Result<Value> {
+    if !req.args.is_empty() {
+        bail!("secrets:migrate-legacy 不接受参数");
+    }
+    let migrated = crate::secret_values::migrate_legacy(ctx)?;
+    crate::secret_values::refresh(ctx);
+    Ok(json!({"domain": "secrets", "migrated": migrated}))
 }
 
 /// 读该助手配置里指定服务的 env 明文取值（已是 `${VAR}` 的跳过）。
@@ -327,6 +373,8 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
         }
         "secrets:set" => set_value(ctx, req),
         "secrets:adopt" => adopt(ctx, req),
+        "secrets:source" => set_source(ctx, req),
+        "secrets:migrate-legacy" => migrate_legacy(ctx, req),
         _ => bail!("secrets 域不支持命令 '{cmd}'"),
     }
 }

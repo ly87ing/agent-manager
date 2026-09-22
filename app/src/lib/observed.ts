@@ -293,7 +293,7 @@ export interface SecretsEnvVariable {
   env_key?: string;
   placeholder?: string;
   resolved?: boolean;
-  /** true = 取值保存在本机库里（在这里填过）；false = 取值来自进程环境或还没有。 */
+  /** true = 取值来自已选择的外部密钥文件；false = 来自进程环境或还没有。 */
   stored?: boolean;
   /** "env"（stdio 环境变量）或 "header"（远程 HTTP header 占位符）。 */
   kind?: "env" | "header" | string;
@@ -302,6 +302,13 @@ export interface SecretsEnvVariable {
 export interface SecretsMcpEnvObserved {
   variables?: SecretsEnvVariable[];
   unresolved?: number;
+  source?: {
+    configured?: boolean;
+    path?: string | null;
+    ready?: boolean;
+    error?: string | null;
+  };
+  legacy_database_values?: number;
 }
 
 /** 读取 observed.agents 映射（mcp / skills 的 per-agent 单元格）。 */

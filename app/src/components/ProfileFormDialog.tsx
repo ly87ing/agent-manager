@@ -267,7 +267,7 @@ export function ProfileFormDialog({
                   </label>
                 </div>
                 <p className="mt-3 rounded-lg border border-info/20 bg-info/5 px-3 py-2 text-xs text-muted-foreground">
-                  这里只保存环境变量名，不保存密钥值。真正的密钥继续留在你的环境变量中。
+                  这里只保存变量名，不保存密钥值。取值来自「设置 → 密钥」选择的外部文件，或启动进程的环境变量。
                 </p>
               </section>
 

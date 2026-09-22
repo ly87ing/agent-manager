@@ -71,26 +71,3 @@ describe("备份导入差异", () => {
     expect(sourceLabel("unknown.key")).toBe("unknown.key");
   });
 });
-
-describe("凭据取值的差异", () => {
-  it("只报变量名与变动类别，两边的取值都不出现", () => {
-    const diff = diffBackup(
-      { policy: {}, sources: {}, secrets: { KEEP: "a", CHANGE: "old-value", GONE: "bye" } },
-      { policy: {}, sources: {}, secrets: { KEEP: "a", CHANGE: "new-value", FRESH: "hi" } },
-    );
-    expect(diff.secrets.added).toEqual(["FRESH"]);
-    expect(diff.secrets.changed).toEqual(["CHANGE"]);
-    expect(diff.secrets.removed).toEqual(["GONE"]);
-    const text = JSON.stringify(diff);
-    for (const value of ["old-value", "new-value", "bye", "hi"]) {
-      expect(text).not.toContain(value);
-    }
-  });
-
-  it("取值变了就不算「完全一样」", () => {
-    const same = diffBackup({ policy: {}, sources: {}, secrets: { T: "x" } }, { policy: {}, sources: {}, secrets: { T: "x" } });
-    expect(same.identical).toBe(true);
-    const differs = diffBackup({ policy: {}, sources: {}, secrets: { T: "x" } }, { policy: {}, sources: {}, secrets: { T: "y" } });
-    expect(differs.identical).toBe(false);
-  });
-});

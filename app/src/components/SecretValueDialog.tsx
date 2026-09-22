@@ -4,24 +4,23 @@ import { X } from "lucide-react";
 /**
  * 填写一个凭据变量的取值。
  *
- * 只写不读：界面任何地方都不回显已保存的取值，要改只能覆写。留空保存即清除，
- * 清除后该变量回落到进程环境（若那里有的话）。
+ * 只写不读：界面任何地方都不回显已保存的取值，要改只能覆写。
+ * 删除走独立确认，不能靠“空值保存”这种不明确动作触发。
  */
 export function SecretValueDialog({
   variable,
   stored,
-  requireValue = false,
   busy,
   onSubmit,
+  onRequestClear,
   onClose,
 }: {
   variable: string;
-  /** 该变量在本机是否已经填过——决定说明文案与是否给「清除」。 */
+  /** 该变量是否存在于外部密钥文件——决定是否给独立的删除入口。 */
   stored: boolean;
-  /** 缺失变量的就地补齐入口不能提交空值；密钥管理页仍允许留空清除。 */
-  requireValue?: boolean;
   busy: boolean;
   onSubmit: (value: string) => void;
+  onRequestClear?: () => void;
   onClose: () => void;
 }) {
   const [value, setValue] = useState("");
@@ -49,23 +48,34 @@ export function SecretValueDialog({
           autoComplete="off"
           data-testid="secret-value-input"
           onChange={(event) => setValue(event.target.value)}
-          placeholder={stored ? "留空保存即清除已填的取值" : "粘贴取值"}
+          placeholder={stored ? "粘贴新取值以覆盖" : "粘贴取值"}
           className="mt-1 w-full rounded border border-input px-2 py-1.5 font-mono text-xs"
         />
 
         <p className="mt-3 rounded-md border bg-muted px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-          取值保存在本机数据库里，界面不回显，也不进操作记录与配置备份。
-          它会在同步时写进对应助手的配置文件——那份文件里是明文，与你手工填进去的一样。
+          取值只写入“密钥”页选择的外部文件，不进入本机数据库、操作记录或配置备份。
+          同步到部分助手时，目标配置本身可能需要明文；保存前请确认你信任该文件位置。
         </p>
 
         <div className="mt-4 flex justify-end gap-2">
+          {stored && onRequestClear && (
+            <button
+              type="button"
+              data-testid="secret-value-clear"
+              disabled={busy}
+              onClick={onRequestClear}
+              className="mr-auto rounded border border-destructive/30 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10 disabled:opacity-50"
+            >
+              删除取值
+            </button>
+          )}
           <button type="button" onClick={onClose} className="rounded border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent">
             取消
           </button>
           <button
             type="button"
             data-testid="secret-value-save"
-            disabled={busy || (requireValue && value.length === 0)}
+            disabled={busy || value.length === 0}
             onClick={() => onSubmit(value)}
             className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
           >

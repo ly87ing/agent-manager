@@ -189,7 +189,7 @@ export default function TakeoverPage() {
         agents: [...new Set(group.agents)],
       };
       const steps: TakeoverTask["steps"] = [];
-      // 先把原配置里的明文密钥接过来，再写定义：定义里只留 ${VAR} 引用，
+      // 先把原配置里的明文密钥接到已选择的外部文件，再写定义：定义里只留 ${VAR} 引用，
       // 不先接取值的话同步时解析到的会是另一个值，而用户点「接管」的心智是保持原样。
       for (const entry of group.entries) {
         steps.push({
@@ -407,7 +407,7 @@ export default function TakeoverPage() {
         icon={Server}
         testId="takeover-mcp"
         title="MCP 服务"
-        description="各助手配置里尚未纳入管理的 MCP 条目。定义只保存变量名；如果原配置直接写了密钥，本机引擎会在确认后把取值转存到本机凭据存储，界面不会读取或显示。"
+        description="各助手配置里尚未纳入管理的 MCP 条目。定义只保存变量名；如果原配置直接写了密钥，确认后会转存到“密钥”页选择的外部文件，界面不会显示取值。"
       >
         {mcpGroups.length === 0 ? (
           <EmptyState compact title="没有发现未纳管的 MCP 条目" testId="takeover-mcp-empty" />
@@ -493,7 +493,7 @@ export default function TakeoverPage() {
               : "",
             cleanupCount > 0 ? `另有 ${cleanupCount} 条残留链接会被删除（只删链接本身，不动源目录）。` : "",
             secretCount > 0
-              ? `其中 ${secretCount} 个 MCP 服务带密钥：原配置里已填的取值会一并接管，保存在本机、界面不回显；原来就是变量引用的仍需在「密钥」页填一次。`
+              ? `其中 ${secretCount} 个 MCP 服务带密钥：原配置里的取值会转存到“密钥”页选择的外部文件，界面不回显；未选择可用文件时会停止，不会继续覆盖助手配置。`
               : "",
           ]
             .filter(Boolean)

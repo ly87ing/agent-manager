@@ -1000,7 +1000,7 @@ describe("助手运行参数", () => {
     await userEvent.type(screen.getByTestId("new-connection-secret"), "fake-secret-value");
     await userEvent.click(screen.getByTestId("connection-form-submit"));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("接入已保存，但凭据没有存下");
+    expect(await screen.findByRole("alert")).toHaveTextContent("接入已保存，但凭据没有写入外部文件");
     expect(screen.getByRole("alert")).toHaveTextContent("系统钥匙串暂时不可用");
     expect(screen.getByTestId("new-connection-secret")).toHaveValue("fake-secret-value");
     expect(screen.getByRole("dialog", { name: "为 Claude Code 添加接入" })).toBeInTheDocument();

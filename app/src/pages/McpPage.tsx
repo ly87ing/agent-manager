@@ -634,14 +634,13 @@ export default function McpPage() {
         <SecretValueDialog
           variable={editingSecret}
           stored={false}
-          requireValue
           busy={directApply.executing}
           onClose={() => setEditingSecret(null)}
           onSubmit={(value) => {
             void directApply
               .apply({
                 command: "secrets:set",
-                label: `保存取值 ${editingSecret}`,
+                label: `写入外部密钥 ${editingSecret}`,
                 args: ["--var", editingSecret, "--value", value],
               })
               .then((envelope) => {
@@ -656,7 +655,7 @@ export default function McpPage() {
       {importTarget && (
         <ConfirmModal
           title={`导入 ${importTarget.name}`}
-          description={`将 ${importTarget.agent} 现有配置中的「${importTarget.name}」保存为服务库定义；密钥以变量引用形式入库（本工具自始至终拿不到明文）。仅保存定义，不执行添加/更新动作，不改动助手配置。`}
+          description={`将 ${importTarget.agent} 现有配置中的「${importTarget.name}」保存为服务库定义；扫描结果只带变量名，不带密钥取值。仅保存定义，不执行添加/更新动作，也不改动助手配置。`}
           risk="write-local"
           confirmLabel="确认导入"
           executing={importExecuting}
@@ -693,7 +692,7 @@ export default function McpPage() {
       {pendingSync && (
         <ConfirmModal
           title={pendingSync.title}
-          description={`将执行 ${pendingSync.actionCount} 项助手配置同步，涉及 ${pendingSync.serviceCount} 个服务${pendingSync.importCount > 0 ? `；其中 ${pendingSync.importCount} 个未纳管服务会先导入服务库` : ""}${pendingSync.secretImportCount > 0 ? `，${pendingSync.secretImportCount} 个服务会尝试将原配置中的变量取值一并保存到本机库（界面不回显）` : ""}${pendingSync.takeoverCount > 0 ? `，${pendingSync.takeoverCount} 项会用服务库定义接管同名条目` : ""}${pendingSync.removeCount > 0 ? `，并清理 ${pendingSync.removeCount} 项由本工具写入的旧配置` : ""}。未列入计划的配置和顶层配置保持不变。`}
+          description={`将执行 ${pendingSync.actionCount} 项助手配置同步，涉及 ${pendingSync.serviceCount} 个服务${pendingSync.importCount > 0 ? `；其中 ${pendingSync.importCount} 个未纳管服务会先导入服务库` : ""}${pendingSync.secretImportCount > 0 ? `，${pendingSync.secretImportCount} 个服务会把原配置里的变量取值转存到“密钥”页选择的外部文件（界面不回显）` : ""}${pendingSync.takeoverCount > 0 ? `，${pendingSync.takeoverCount} 项会用服务库定义接管同名条目` : ""}${pendingSync.removeCount > 0 ? `，并清理 ${pendingSync.removeCount} 项由本工具写入的旧配置` : ""}。未列入计划的配置和顶层配置保持不变。`}
           risk="write-local"
           confirmLabel="确认同步"
           executing={batchApply.executing || takeover.executing}

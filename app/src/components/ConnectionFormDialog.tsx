@@ -205,7 +205,7 @@ export function ConnectionFormDialog({
             <h2 className="text-lg font-semibold text-foreground">{dialogTitle}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               {editing
-                ? `修改 ${agentName} 的这套接入；留空凭据取值不会覆盖已经保存的值。`
+                ? `修改 ${agentName} 的这套接入；留空凭据取值不会覆盖外部密钥文件中的值。`
                 : duplicating
                   ? "确认新名称即可创建；原 Provider、当前接入和客户端配置都不会改变。"
                   : adopting
@@ -418,9 +418,12 @@ export function ConnectionFormDialog({
                       data-testid="new-connection-secret"
                       value={secretValue}
                       onChange={(event) => setSecretValue(event.target.value)}
-                      placeholder="留空则使用已保存值或进程环境"
+                      placeholder="留空则保持外部文件或进程环境中的值"
                       className="mt-1 w-full rounded border border-input p-2 text-sm"
                     />
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      填写后只写入“密钥”页选择的外部文件，不进入本机数据库。
+                    </span>
                   </label>
                 ) : kind === "codex" ? (
                   <p className="rounded border bg-muted px-3 py-2 text-xs text-muted-foreground">

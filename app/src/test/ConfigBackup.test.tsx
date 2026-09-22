@@ -4,15 +4,11 @@ import { ConfigBackupSection } from "../components/ConfigBackupSection";
 import { makeEnvelope } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 
-const SECRET = "secret-value-under-test";
-
 const BACKUP = {
   format: "agent-manager/config-backup/v1",
   exported_at: "2026-09-17T00:00:00Z",
   policy: { mcp: { definitions: { demo: { command: "npx", env: { T: "${T}" } } } } },
   sources: { "rules.shared": "我的规则\n" },
-  // 备份带凭据取值：界面不得把它铺在屏幕上
-  secrets: { T: SECRET },
 };
 
 function routes() {
@@ -26,20 +22,18 @@ function routes() {
 }
 
 describe("配置备份", () => {
-  it("导出只报里面有什么，凭据取值不铺在屏幕上", async () => {
+  it("导出明确不包含密钥取值与外部文件路径", async () => {
     const { calls } = renderWithEngine(<ConfigBackupSection />, routes());
     await userEvent.click(screen.getByTestId("config-export-button"));
 
     const output = await screen.findByTestId("config-export-output");
     expect(output).toHaveTextContent("1 条定义");
-    expect(output).toHaveTextContent("1 个凭据取值");
-    // 取值本身绝不出现在页面上（备份内容等同密钥文件）
-    expect(document.body.innerHTML).not.toContain(SECRET);
-    expect(screen.getByText(/等同于密钥文件/)).toBeInTheDocument();
+    expect(output).toHaveTextContent("不含密钥");
+    expect(screen.getByText(/不含密钥取值，也不含外部密钥文件路径/)).toBeInTheDocument();
     expect(calls.find((call) => call.command === "config:export")?.args).toEqual([]);
   });
 
-  it("复制到剪贴板拿到的是完整备份（含取值），而不是屏幕上那份摘要", async () => {
+  it("复制到剪贴板拿到完整定义与来源，但没有 secrets 段", async () => {
     const written: string[] = [];
     Object.assign(navigator, {
       clipboard: { writeText: async (text: string) => void written.push(text) },
@@ -49,7 +43,8 @@ describe("配置备份", () => {
     await screen.findByTestId("config-export-output");
     await userEvent.click(screen.getByTestId("config-copy-button"));
     await waitFor(() => expect(written.length).toBe(1));
-    expect(written[0]).toContain(SECRET);
+    expect(JSON.parse(written[0])).toEqual(BACKUP);
+    expect(written[0]).not.toContain('"secrets"');
   });
 
   it("导入前先给差异预览，确认后才整份提交", async () => {
@@ -100,6 +95,33 @@ describe("配置备份", () => {
     fireEvent.change(screen.getByTestId("config-import-input"), { target: { value: "not json" } });
     await userEvent.click(screen.getByTestId("config-import-button"));
     expect(screen.queryByTestId("config-import-diff")).toBeNull();
+    expect(calls.some((call) => call.command === "config:import")).toBe(false);
+  });
+
+  it("旧备份含明文 secrets 时当场停止，不读取也不写入", async () => {
+    const { calls } = renderWithEngine(<ConfigBackupSection />, routes());
+    fireEvent.change(screen.getByTestId("config-import-input"), {
+      target: {
+        value: JSON.stringify({
+          ...BACKUP,
+          secrets: { T: "legacy-secret-under-test" },
+        }),
+      },
+    });
+    await userEvent.click(screen.getByTestId("config-import-button"));
+    expect(screen.queryByTestId("config-import-diff")).toBeNull();
+    expect(calls.some((call) => call.command === "config:export")).toBe(false);
+    expect(calls.some((call) => call.command === "config:import")).toBe(false);
+  });
+
+  it("旧备份的 secrets 不是空对象时也在预览前停止", async () => {
+    const { calls } = renderWithEngine(<ConfigBackupSection />, routes());
+    fireEvent.change(screen.getByTestId("config-import-input"), {
+      target: { value: JSON.stringify({ ...BACKUP, secrets: ["legacy-secret-under-test"] }) },
+    });
+    await userEvent.click(screen.getByTestId("config-import-button"));
+    expect(screen.queryByTestId("config-import-diff")).toBeNull();
+    expect(calls.some((call) => call.command === "config:export")).toBe(false);
     expect(calls.some((call) => call.command === "config:import")).toBe(false);
   });
 

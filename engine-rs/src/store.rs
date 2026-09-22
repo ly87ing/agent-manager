@@ -40,12 +40,16 @@ fn default_log_retention_days() -> u32 {
 pub struct AppSettings {
     #[serde(default = "default_log_retention_days")]
     pub log_retention_days: u32,
+    /// 外部私有凭据文件路径；只存路径，凭据取值永不进入本数据库。
+    #[serde(default)]
+    pub secrets_file_path: String,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             log_retention_days: DEFAULT_LOG_RETENTION_DAYS,
+            secrets_file_path: String::new(),
         }
     }
 }
@@ -358,6 +362,9 @@ pub fn write_settings(conn: &Connection, settings: &AppSettings) -> Result<()> {
             settings.log_retention_days
         );
     }
+    if settings.secrets_file_path.contains('\0') || settings.secrets_file_path.len() > 4096 {
+        bail!("外部密钥文件路径不合法");
+    }
     let object = serde_json::to_value(settings)?
         .as_object()
         .cloned()
@@ -539,6 +546,7 @@ mod tests {
             AppSettings::default()
         );
         assert_eq!(AppSettings::default().log_retention_days, 30);
+        assert!(AppSettings::default().secrets_file_path.is_empty());
         assert!(!context.data_dir.exists());
         let _ = std::fs::remove_dir_all(root);
     }
@@ -549,6 +557,7 @@ mod tests {
         let conn = open_write(&context).unwrap();
         let settings = AppSettings {
             log_retention_days: 14,
+            secrets_file_path: "~/private/secrets.env".into(),
         };
         let tx = conn.unchecked_transaction().unwrap();
         write_settings(&tx, &settings).unwrap();
@@ -637,6 +646,7 @@ mod tests {
 
         let settings = AppSettings {
             log_retention_days: 7,
+            ..AppSettings::default()
         };
         let tx = conn.unchecked_transaction().unwrap();
         write_settings(&tx, &settings).unwrap();

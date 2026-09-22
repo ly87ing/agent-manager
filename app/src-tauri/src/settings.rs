@@ -18,14 +18,6 @@ impl From<AppSettings> for SettingsPreferences {
         }
     }
 }
-impl From<SettingsPreferences> for AppSettings {
-    fn from(v: SettingsPreferences) -> Self {
-        Self {
-            log_retention_days: v.log_retention_days,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsData {
@@ -63,11 +55,15 @@ pub(crate) fn save_preferences_data_dir(
     home_dir: &Path,
     preferences: SettingsPreferences,
 ) -> Result<(), String> {
-    let mut conn = store::open_write(&context(data_dir, home_dir)).map_err(|e| e.to_string())?;
+    let ctx = context(data_dir, home_dir);
+    let mut conn = store::open_write(&ctx).map_err(|e| e.to_string())?;
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|e| e.to_string())?;
-    store::write_settings(&tx, &preferences.into()).map_err(|e| e.to_string())?;
+    // 设置页只拥有日志保留天数；在同一写事务里读取，避免覆盖密钥页刚保存的路径。
+    let mut settings = store::settings_from_connection(&tx).map_err(|e| e.to_string())?;
+    settings.log_retention_days = preferences.log_retention_days;
+    store::write_settings(&tx, &settings).map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -168,6 +164,42 @@ mod tests {
         ] {
             assert!(serde_json::from_str::<SettingsPreferences>(raw).is_err());
         }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn preferences_save_preserves_secret_file_path_owned_by_secrets_page() {
+        let root = std::env::temp_dir().join(format!(
+            "am-tauri-settings-preserve-secret-path-{}",
+            std::process::id()
+        ));
+        let data = root.join("data");
+        let home = root.join("home");
+        let context = context(&data, &home);
+        let conn = store::open_write(&context).unwrap();
+        let tx = conn.unchecked_transaction().unwrap();
+        store::write_settings(
+            &tx,
+            &AppSettings {
+                log_retention_days: 30,
+                secrets_file_path: "~/private/secrets.env".into(),
+            },
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        save_preferences_data_dir(
+            &data,
+            &home,
+            SettingsPreferences {
+                log_retention_days: 14,
+            },
+        )
+        .unwrap();
+
+        let saved = store::effective_settings(&context).unwrap();
+        assert_eq!(saved.log_retention_days, 14);
+        assert_eq!(saved.secrets_file_path, "~/private/secrets.env");
         let _ = std::fs::remove_dir_all(root);
     }
 }

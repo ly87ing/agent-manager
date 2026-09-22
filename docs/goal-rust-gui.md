@@ -34,7 +34,7 @@
 - Hooks 原生域接线：Rust dispatcher 提供 `hooks:status`（只读）与真实 `hooks:apply`；hooks 专用 `sources:get/set`（hooks.claude/hooks.codex）使用 revision CAS 只写 SQLite；固定 Claude `~/.claude/settings.json` signature-set 合并（保留用户字段与非托管 hook）与 Codex `~/.codex/hooks.json` whole-file 两目标；status 只读零写，真实 apply 使用全局排他锁、Immediate 事务、精确旧字节 CAS、binding、审计与条件回滚，外部修改 fail-closed；前端两个目标与两个 JSON 编辑入口已接线。
 - Aliases 原生域接线：Rust dispatcher 提供 `aliases:status`（只读）与真实 `aliases:apply`；aliases 专用 `sources:get/set`（aliases.shell）使用 revision CAS 只写 SQLite，alias 名/值结构校验与疑似凭据拒绝；固定 `~/.zshrc` 与 `~/.zprofile` 两目标的受管 marker 区块写入（区块外字节保留），status 只读零写，真实 apply 使用全局排他锁、Immediate 事务、整文件字节 CAS、binding、审计与条件回滚，外部修改 fail-closed，不承诺备份；前端 Aliases 页与来源面板零改动直接可用。
 - 只读 `system:audit` 接线：聚合 agents/skills/mcp/rules/hooks/aliases/secrets 与 runtime/storage 状态，支持 Tauri offline 桥接注入。
-- 只读 `secrets:status` 接线：仅读取 SQLite 有效策略中已启用 MCP 定义的合法 `${VAR}` 环境变量占位符，按「先本机已保存的取值、再回退当前进程环境」判断该变量能否取到值，输出变量名与布尔（另给 `stored` 说明取值是否在本机库里）；`secrets:set` 写入取值，`secret_values` 表以明文保存，仅 apply 渲染目标配置时使用；不扫描、定位或克隆外部密钥仓库，任何路径都不序列化或显示取值本身；畸形定义固定脱敏失败。
+- 密钥闭环：`secrets:status` 只读输出变量名、来源与是否可解析；用户显式选择权限为 `600` 的外部 `.env` 文件后，填写和接管只写该文件，SQLite 只存路径，配置备份不含路径或取值。历史 `secret_values` 仅用于显式迁移，先写文件成功再删旧表。
 - 2026-09-12 裁决退役已清理：Tools 域、快照（snapshots:list/restore）与 `system:converge` 的命令面、前端页面/类型/文案、契约 schema、种子文件与文档状态行全部清零；退役命令报错为 UNKNOWN_DOMAIN/UNKNOWN_VERB，六域 apply 输出不再携带 snapshot 字段，"自动备份"承诺文案改为 fail-closed 表述；`agent-tool/` 物理目录保留未动。
 - `system:refresh-upstream` 接线：探测宇宙为 enabled 的 npm 渠道 agents、MCP 的 npx 包与 uvx `git+repo@branch` 源、enabled 且有 url 的 skills 集合仓库；探测器（npm view / git ls-remote / git rev-parse / npx 缓存读取 / bin --version）不经 shell、参数数组执行、有界捕获、超时进程组终止（网络 ≤30s），单元素失败归 unknown+固定错误类别不拖垮整批；比较语义对齐旧版（semver 可比 → current/behind/ahead，hash 不可比 → 不同即 behind）；缓存落 SQLite `upstream_probes` 表（Immediate 事务逐元素 upsert，只存版本/commit 与错误类别），status 只读回填 freshness（缺表/缺行一律 unknown，status 零写零网络）；`--offline` 拒绝（OFFLINE_NETWORK_DENIED），`--only` 逐元素，不取 apply 锁；前端 Updates 页直接触发真实 apply（apply 内部保留 preflight/写前校验），调用已补显式 `--action`（agents→upgrade，mcp/skills→update）。
 - 远程 HTTP MCP 接线：远程定义 = `url`（仅 https 或本机回环 http，错误不回显 url）+ 可选 `headers`（值仅 `${VAR}` 占位符），与 stdio 字段互斥，`type` 由 codec 推导不持久化；三 codec 全部引用形式落盘零明文——Claude `type:"http"` 写字面量 `${VAR}`、Codex 写 `env_http_headers` 变量名映射、OpenCode `type:"remote"` 写 `{env:VAR}` 且固定 `oauth:false`；受管 marker 迁至条目级 `_MANAGED_BY`（stdio 旧位置兼容）；保存期 policy:set 跑完整定义校验；status/apply 审计对 headers 与 env 同级 `<literal>` 掩码，secrets:status 纳入 headers 并区分 `kind`；缺失变量同级 fail-closed。
@@ -239,7 +239,7 @@ Skill、MCP 等资源及其逐助手分配必须支持新增、编辑/更新、�
 - **实例启动命令是坏的**（`a0e33a6`）。生成的是 `CLAUDE_CONFIG_DIR="~/.claude-x"`，双引号里的 `~` 不展开，助手会在当前工作目录下另建一个名叫 `~` 的文件夹，而本工具写配置用的是绝对路径——两边不是同一个目录，实例功能实际不通。改成 `"$HOME/..."`，已写出去的坏命令回读时认得出来并给「订正」。
 - **实例只能挂一条启动命令、别名不能改名不能复制**（`a0e33a6`）。现在实例卡片列出指向该配置目录的全部命令（按 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` 反查，不加字段，别名仍只有别名域一个写者），每条可编辑/复制/删除；别名可改名（真正重命名，不留两条）与复制；实例整体也能复制，复制时默认换掉配置目录。
 - **规则与快捷命令被手改过之后是死路**（`2e5c105`）。状态变「已被外部修改」、可用动作为空、同步永久失败，引擎不接受 `--allow-takeover`，页面也没有入口；而同页面的 Hooks 有。照 hooks 给两个域各补三处，只对「当前内容读得到」的冲突放行，错误文案点名是哪个目标、下一步点什么。
-- **密钥只认进程环境，GUI 启动基本拿不到**（`4d60857`）。`launchctl getenv` 里没有任何 shell 导出的变量，而程序坞启动的应用继承的正是这套环境。现在「密钥」页可逐个变量填取值，存本机库 `secret_values`，解析顺序为先本机保存的、再回退进程环境。
+- **密钥只认进程环境，GUI 启动基本拿不到**（最初由 `4d60857` 修复，后续安全边界已收紧）。现在「密钥」页先选择外部私有 `.env` 文件，再逐个变量填写；解析顺序为先外部文件、再回退进程环境，明文不再进入本机数据库。
 - **接管技能目录只收录已链接过的那几个**（`0aa5669`）。源目录里其余含 SKILL.md 的技能一并收进来，逐条标注哪些已在用。
 - **矩阵里「不支持」会被读成「这个助手用不了技能」**（`0aa5669`），改「未分配」，原因文案直接说下一步。
 

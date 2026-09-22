@@ -176,13 +176,30 @@ fn export_takes_no_args_and_import_needs_value() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// 备份带上凭据取值：换机器导入即可用。代价是这份文件本身就是凭据载体，
-/// 因此同时断言取值不进操作记录。
+/// 备份永不带凭据取值；外部密钥文件独立迁移，旧版含密钥备份拒绝导入。
 #[test]
-fn backup_carries_secret_values_and_restores_them_on_another_machine() {
+fn backup_excludes_secret_values_and_rejects_legacy_secret_payload() {
     const SECRET: &str = "secret-value-under-test";
     let (root_a, ctx_a) = temp_ctx("secrets-src");
     let (root_b, ctx_b) = temp_ctx("secrets-dst");
+
+    let secrets_file = root_a.join("private-secrets.env");
+    std::fs::write(&secrets_file, "").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&secrets_file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    assert!(
+        execute(
+            &ctx_a,
+            &request(
+                "secrets:source",
+                &["--path", secrets_file.to_str().unwrap()],
+            ),
+        )
+        .ok
+    );
 
     assert!(
         execute(
@@ -211,25 +228,32 @@ fn backup_carries_secret_values_and_restores_them_on_another_machine() {
 
     let exported = execute(&ctx_a, &request("config:export", &[]));
     assert!(exported.ok, "{:?}", exported.errors);
-    assert_eq!(exported.data["secrets"]["MY_TOKEN"], SECRET);
+    assert!(exported.data.get("secrets").is_none());
+    assert!(!serde_json::to_string(&exported.data)
+        .unwrap()
+        .contains(SECRET));
 
-    // 另一台机器（全新上下文）导入后，变量当场可解析
+    // 另一台机器可以恢复定义，但凭据仍由它自己的外部文件提供。
     let payload = serde_json::to_string(&exported.data).unwrap();
     let imported = execute(&ctx_b, &request("config:import", &["--value", &payload]));
     assert!(imported.ok, "{:?}", imported.errors);
 
     let status = execute(&ctx_b, &request("secrets:status", &[]));
     let observed = &status.data["elements"][0]["observed"];
-    assert_eq!(observed["unresolved"], 0, "导入后变量应当已可解析");
-    assert_eq!(observed["variables"][0]["stored"], true);
-    // status 永不回显取值
-    assert!(!serde_json::to_string(&status.data)
-        .unwrap()
-        .contains(SECRET));
+    assert_eq!(observed["unresolved"], 1);
+    assert_eq!(observed["variables"][0]["stored"], false);
 
-    // 审计只记变量名，不记取值
-    let runs = execute(&ctx_b, &request("runs:list", &[]));
-    assert!(!serde_json::to_string(&runs.data).unwrap().contains(SECRET));
+    let legacy = serde_json::json!({
+        "format": "agent-manager/config-backup/v1",
+        "policy": {},
+        "sources": {},
+        "secrets": {"MY_TOKEN": SECRET},
+    })
+    .to_string();
+    let rejected = execute(&ctx_b, &request("config:import", &["--value", &legacy]));
+    assert!(!rejected.ok);
+    assert!(rejected.errors[0].message.contains("外部密钥文件"));
+    assert!(!serde_json::to_string(&rejected).unwrap().contains(SECRET));
 
     let _ = std::fs::remove_dir_all(&root_a);
     let _ = std::fs::remove_dir_all(&root_b);
@@ -250,7 +274,7 @@ fn backup_without_secrets_section_still_imports() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// secrets 段结构非法即整份拒绝，且不部分写入。
+/// secrets 段只能省略或为空；任何明文或坏结构都整份拒绝。
 #[test]
 fn backup_with_malformed_secrets_is_rejected_whole() {
     let (root, ctx) = temp_ctx("bad-secrets");

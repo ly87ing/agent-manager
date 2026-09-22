@@ -34,7 +34,7 @@ function renderSecrets(routes: Record<string, EngineRoute>, calls?: { command: s
   const queryClient = createQueryClient({ retry: false });
   return render(
     <QueryClientProvider client={queryClient}>
-      {/* 页面现在能写入取值（secrets:set），执行通道需要 ExecutionProvider */}
+      {/* 页面会配置外部文件并写入取值，执行通道需要 ExecutionProvider */}
       <ExecutionProvider>
         <SecretsPage />
       </ExecutionProvider>
@@ -42,13 +42,19 @@ function renderSecrets(routes: Record<string, EngineRoute>, calls?: { command: s
   );
 }
 
-function mcpEnvElement(variables: unknown[], unresolved: number, state: EngineElement["state"]) {
+function mcpEnvElement(
+  variables: unknown[],
+  unresolved: number,
+  state: EngineElement["state"],
+  source: Record<string, unknown> = { configured: true, path: "~/private/secrets.env", ready: true, error: null },
+  legacyDatabaseValues = 0,
+) {
   return makeElement({
     id: "secrets:mcp-env",
     domain: "secrets",
     spec: { sources: ["process env"] },
     policy: { enabled: true },
-    observed: { variables, unresolved },
+    observed: { variables, unresolved, source, legacy_database_values: legacyDatabaseValues },
     state,
   });
 }
@@ -93,7 +99,7 @@ describe("SecretsPage", () => {
     expect(screen.getByText("GROK_API_KEY")).toBeInTheDocument();
     expect(screen.getByText("TAVILY_API_KEY")).toBeInTheDocument();
     // 区分「在这里填过」与「来自进程环境」：用户要知道改哪儿才有用
-    expect(screen.getAllByText("已填写")).toHaveLength(1);
+    expect(screen.getAllByText("外部文件")).toHaveLength(1);
     expect(screen.getAllByText("未配置")).toHaveLength(2);
     expect(screen.queryByText(sentinel)).not.toBeInTheDocument();
     expect(document.body.innerHTML).not.toContain(sentinel);
@@ -110,23 +116,74 @@ describe("SecretsPage", () => {
         },
       ),
     });
-    await waitFor(() => expect(screen.getByText(/secrets:status 错误/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/密钥状态读取失败/)).toBeInTheDocument());
     expect(screen.getByText(/已脱敏/)).toBeInTheDocument();
   });
 
-  it("不再渲染密钥仓库卡片", async () => {
+  it("明确展示外部密钥文件及连接状态", async () => {
     renderSecrets({
       "secrets:status": makeEnvelope(
         { domain: "secrets", elements: [mcpEnvElement([], 0, "managed-ok")] },
         { command: "secrets.status" },
       ),
     });
-    await waitFor(() => expect(screen.getByTestId("secrets-env-matrix")).toBeInTheDocument());
-    expect(screen.queryByTestId("secrets-repo-card")).not.toBeInTheDocument();
-    expect(screen.queryByText(/git 仓库/)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("secrets-source-card")).toBeInTheDocument());
+    expect(screen.getByTestId("secrets-source-path")).toHaveValue("~/private/secrets.env");
+    expect(screen.getByTestId("secrets-source-status")).toHaveTextContent("已连接");
+    expect(screen.getByText(/只保存路径/)).toBeInTheDocument();
   });
 
-  it("填取值：只写不回显，保存走 secrets:set", async () => {
+  it("验证新路径后只向后端提交用户选择的外部文件", async () => {
+    const calls: { command: string; args: string[] }[] = [];
+    renderSecrets({
+      "secrets:status": makeEnvelope(
+        { domain: "secrets", elements: [mcpEnvElement([], 0, "managed-ok")] },
+        { command: "secrets.status" },
+      ),
+      "secrets:source": makeEnvelope(
+        { domain: "secrets", source: { configured: true, path: "~/private/next.env", ready: true } },
+        { command: "secrets.source" },
+      ),
+    }, calls);
+
+    const input = await screen.findByTestId("secrets-source-path");
+    await userEvent.clear(input);
+    await userEvent.type(input, "~/private/next.env");
+    await userEvent.click(screen.getByTestId("secrets-source-save"));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "secrets:source")).toBe(true));
+    expect(calls.find((call) => call.command === "secrets:source")?.args).toEqual([
+      "--path",
+      "~/private/next.env",
+    ]);
+  });
+
+  it("旧数据库密钥必须输入确认词后才执行迁移", async () => {
+    const calls: { command: string; args: string[] }[] = [];
+    renderSecrets({
+      "secrets:status": makeEnvelope(
+        { domain: "secrets", elements: [mcpEnvElement([], 0, "managed-ok", undefined, 2)] },
+        { command: "secrets.status" },
+      ),
+      "secrets:migrate-legacy": makeEnvelope(
+        { domain: "secrets", migrated: 2 },
+        { command: "secrets.migrate-legacy" },
+      ),
+    }, calls);
+
+    await userEvent.click(await screen.findByTestId("migrate-legacy-secrets"));
+    const dialog = await screen.findByRole("dialog", { name: "迁移旧数据库密钥" });
+    expect(dialog).toHaveTextContent("全部成功后才删除数据库里的旧密钥表");
+    expect(screen.getByTestId("confirm-modal-confirm")).toBeDisabled();
+    expect(calls.some((call) => call.command === "secrets:migrate-legacy")).toBe(false);
+
+    await userEvent.type(screen.getByTestId("confirm-modal-input"), "迁移");
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+    await waitFor(() => expect(calls.some((call) => call.command === "secrets:migrate-legacy")).toBe(true));
+    expect(calls.find((call) => call.command === "secrets:migrate-legacy")?.args).toEqual([]);
+  });
+
+  it("填取值：明确写入外部文件且不回显，保存走 secrets:set", async () => {
     const calls: { command: string; args: string[] }[] = [];
     renderSecrets({
       "secrets:status": makeEnvelope(
@@ -150,11 +207,35 @@ describe("SecretsPage", () => {
     const input = await screen.findByTestId("secret-value-input");
     // 输入框是密码型：取值不以明文呈现
     expect(input).toHaveAttribute("type", "password");
+    expect(screen.getByRole("dialog")).toHaveTextContent("只写入“密钥”页选择的外部文件");
     await userEvent.type(input, "value-under-test");
     await userEvent.click(screen.getByTestId("secret-value-save"));
 
     await waitFor(() => expect(calls.some((call) => call.command === "secrets:set")).toBe(true));
     const call = calls.find((item) => item.command === "secrets:set")!;
     expect(call.args).toEqual(["--var", "GROK_API_KEY", "--value", "value-under-test"]);
+  });
+
+  it("未选择外部文件时禁止填写，并说明先做什么", async () => {
+    renderSecrets({
+      "secrets:status": makeEnvelope(
+        {
+          domain: "secrets",
+          elements: [
+            mcpEnvElement(
+              [{ server: "grok-search", env_key: "GROK_API_KEY", placeholder: "GROK_API_KEY", resolved: false, stored: false }],
+              1,
+              "missing",
+              { configured: false, path: null, ready: false, error: null },
+            ),
+          ],
+        },
+        { command: "secrets.status" },
+      ),
+    });
+    const button = await screen.findByTestId("fill-secret-GROK_API_KEY");
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "先在上方选择可用的外部密钥文件");
+    expect(screen.getByTestId("secrets-source-status")).toHaveTextContent("尚未选择");
   });
 });

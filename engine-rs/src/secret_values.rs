@@ -1,29 +1,29 @@
-//! 用户在界面上填写的凭据取值（本机 SQLite）。
+//! 凭据取值只来自用户显式选择的外部 `.env` 文件或进程环境。
 //!
-//! 为什么需要它：此前变量只从「Agent Manager 进程环境」解析，而 macOS 上从 Dock /
-//! Finder 启动的应用继承的是 launchd 环境，拿不到用户在 shell 里 export 的变量——
-//! 用户在终端设好、打开应用一看仍是「未配置」，GUI 场景下这条路基本不通。
-//!
-//! 边界：值以明文存在本机数据库里（`secret_values` 表），任何以当前用户身份运行的
-//! 进程都能读到它，与写进各助手配置文件的明文同级；库文件权限与 SQLite 一致。
-//! 取值只在 apply 时用来渲染目标配置，**不进** status、操作审计与配置备份。
-//!
-//! 解析顺序：先查本表，查不到再回退进程环境。在界面上明确填过的值优先，
-//! 这样用户改完立刻生效，不受启动方式影响。
+//! `native-manager.db` 只保存外部文件路径，不保存凭据值。外部文件优先于进程环境，
+//! 这样从 Dock / Finder 启动时也能稳定解析，同时仍保留终端注入作为回退。
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Result};
-use rusqlite::{Connection, Transaction};
+use anyhow::{bail, Context as _, Result};
+use rusqlite::Connection;
 
 use crate::native::Context;
 
-const TABLE_DDL: &str = "CREATE TABLE IF NOT EXISTS secret_values (
-    name TEXT PRIMARY KEY NOT NULL,
-    value TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-)";
+#[derive(Clone, Default)]
+struct Snapshot {
+    values: BTreeMap<String, String>,
+    configured_path: Option<String>,
+    error: Option<String>,
+}
+
+thread_local! {
+    static CACHE: RefCell<Snapshot> = RefCell::new(Snapshot::default());
+}
 
 /// 变量名规则：与 `${VAR}` 占位符可用的形状一致。
 pub fn valid_var_name(name: &str) -> bool {
@@ -35,45 +35,367 @@ pub fn valid_var_name(name: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// 本次分发可见的取值快照。
-///
-/// 桌面端一个进程会连续分发很多次命令，因此不能一次性缓存到进程结束——
-/// 每次分发开头重新加载，用户刚填的值当场生效。
-///
-/// 按线程存：一次 `execute` 的 refresh 与后续 lookup 都在同一个线程里，而同一进程
-/// 内可能有多份互不相干的上下文（集成测试并行、桌面端多次分发），全局一份会互相顶掉。
-thread_local! {
-    static CACHE: RefCell<Option<BTreeMap<String, String>>> = const { RefCell::new(None) };
-}
-
-/// 分发入口调用：重新加载本机已保存的取值。库不存在或表还没建都按「空」处理，
-/// 读失败同样降级为空而不是让整条命令失败——凭据缺失自有下游的 fail-closed 兜底。
-pub fn refresh(ctx: &Context) {
-    let loaded = load_all(ctx).unwrap_or_default();
-    CACHE.with(|cache| *cache.borrow_mut() = Some(loaded));
-}
-
-fn load_all(ctx: &Context) -> Result<BTreeMap<String, String>> {
-    let Some(conn) = crate::store::open_readonly(ctx)? else {
-        return Ok(BTreeMap::new());
+fn configured_path(ctx: &Context) -> Result<Option<(String, PathBuf)>> {
+    let raw = crate::store::effective_settings(ctx)?.secrets_file_path;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let path = if trimmed == "~" {
+        ctx.home_dir.clone()
+    } else if let Some(rest) = trimmed.strip_prefix("~/") {
+        ctx.home_dir.join(rest)
+    } else {
+        PathBuf::from(trimmed)
     };
-    read_all(&conn)
+    if !path.is_absolute() {
+        bail!("外部密钥文件必须使用绝对路径或 ~/ 开头的路径");
+    }
+    Ok(Some((trimmed.to_string(), path)))
 }
 
-pub fn read_all(conn: &Connection) -> Result<BTreeMap<String, String>> {
+#[cfg(unix)]
+fn validate_permissions(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = fs::metadata(path)?.permissions().mode() & 0o777;
+    if mode & 0o077 != 0 {
+        bail!("外部密钥文件权限过宽，请先执行 chmod 600");
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn validate_permissions(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
+fn validated_source_path(ctx: &Context) -> Result<(String, PathBuf)> {
+    let Some((display, path)) = configured_path(ctx)? else {
+        bail!("尚未选择外部密钥文件，请先到“设置 → 密钥”配置");
+    };
+    let metadata = fs::symlink_metadata(&path).with_context(|| "外部密钥文件不存在或无法读取")?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        bail!("外部密钥文件必须是普通文件，不能是目录或符号链接");
+    }
+    validate_permissions(&path)?;
+    let canonical = path
+        .canonicalize()
+        .with_context(|| "无法解析外部密钥文件路径")?;
+    if let Ok(data_dir) = ctx.data_dir.canonicalize() {
+        if canonical.starts_with(data_dir) {
+            bail!("外部密钥文件不能放在 Agent Manager 数据目录中");
+        }
+    }
+    Ok((display, canonical))
+}
+
+pub fn validate_source(ctx: &Context, raw: &str) -> Result<()> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    let path = if trimmed == "~" {
+        ctx.home_dir.clone()
+    } else if let Some(rest) = trimmed.strip_prefix("~/") {
+        ctx.home_dir.join(rest)
+    } else {
+        PathBuf::from(trimmed)
+    };
+    if !path.is_absolute() {
+        bail!("外部密钥文件必须使用绝对路径或 ~/ 开头的路径");
+    }
+    let metadata = fs::symlink_metadata(&path).with_context(|| "外部密钥文件不存在或无法读取")?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        bail!("外部密钥文件必须是普通文件，不能是目录或符号链接");
+    }
+    validate_permissions(&path)?;
+    let canonical = path
+        .canonicalize()
+        .with_context(|| "无法解析外部密钥文件路径")?;
+    if let Ok(data_dir) = ctx.data_dir.canonicalize() {
+        if canonical.starts_with(data_dir) {
+            bail!("外部密钥文件不能放在 Agent Manager 数据目录中");
+        }
+    }
+    let text = fs::read_to_string(&path).with_context(|| "外部密钥文件不是可读的 UTF-8 文本")?;
+    parse_env(&text)?;
+    Ok(())
+}
+
+fn parse_value(raw: &str) -> Result<String> {
+    let value = raw.trim();
+    if value.starts_with('"') {
+        return serde_json::from_str::<String>(value)
+            .map_err(|_| anyhow::anyhow!("双引号取值格式不正确"));
+    }
+    if value.starts_with('\'') {
+        if value.len() < 2 || !value.ends_with('\'') {
+            bail!("单引号取值格式不正确");
+        }
+        return Ok(value[1..value.len() - 1].to_string());
+    }
+    Ok(value.to_string())
+}
+
+fn key_of_line(line: &str) -> Option<&str> {
+    let mut item = line.trim();
+    if item.is_empty() || item.starts_with('#') {
+        return None;
+    }
+    if let Some(rest) = item.strip_prefix("export ") {
+        item = rest.trim_start();
+    }
+    let (key, _) = item.split_once('=')?;
+    let key = key.trim();
+    valid_var_name(key).then_some(key)
+}
+
+fn parse_env(text: &str) -> Result<BTreeMap<String, String>> {
+    let mut values = BTreeMap::new();
+    for (index, line) in text.lines().enumerate() {
+        let mut item = line.trim();
+        if item.is_empty() || item.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = item.strip_prefix("export ") {
+            item = rest.trim_start();
+        }
+        let Some((key, raw)) = item.split_once('=') else {
+            bail!("外部密钥文件第 {} 行不是 KEY=VALUE", index + 1);
+        };
+        let key = key.trim();
+        if !valid_var_name(key) {
+            bail!("外部密钥文件第 {} 行的变量名不合法", index + 1);
+        }
+        let value =
+            parse_value(raw).with_context(|| format!("外部密钥文件第 {} 行取值无效", index + 1))?;
+        if value.contains('\0') {
+            bail!("外部密钥文件第 {} 行含非法字符", index + 1);
+        }
+        if values.insert(key.to_string(), value).is_some() {
+            bail!("外部密钥文件中存在重复变量 {key}");
+        }
+    }
+    Ok(values)
+}
+
+fn load_snapshot(ctx: &Context) -> Snapshot {
+    let configured = match configured_path(ctx) {
+        Ok(value) => value,
+        Err(err) => {
+            return Snapshot {
+                error: Some(format!("{err:#}")),
+                ..Snapshot::default()
+            };
+        }
+    };
+    let Some((display, _)) = configured else {
+        return Snapshot::default();
+    };
+    match validated_source_path(ctx).and_then(|(_, path)| {
+        let text = fs::read_to_string(path).with_context(|| "外部密钥文件不是可读的 UTF-8 文本")?;
+        parse_env(&text)
+    }) {
+        Ok(values) => Snapshot {
+            values,
+            configured_path: Some(display),
+            error: None,
+        },
+        Err(err) => Snapshot {
+            values: BTreeMap::new(),
+            configured_path: Some(display),
+            error: Some(format!("{err:#}")),
+        },
+    }
+}
+
+/// 每条命令开头重新读取外部文件；用户修改后无需重启应用。
+pub fn refresh(ctx: &Context) {
+    CACHE.with(|cache| *cache.borrow_mut() = load_snapshot(ctx));
+}
+
+pub fn lookup(name: &str) -> Option<String> {
+    let from_file = CACHE.with(|cache| {
+        cache
+            .borrow()
+            .values
+            .get(name)
+            .filter(|value| !value.is_empty())
+            .cloned()
+    });
+    from_file.or_else(|| std::env::var(name).ok().filter(|value| !value.is_empty()))
+}
+
+pub fn is_set(name: &str) -> bool {
+    lookup(name).is_some()
+}
+
+/// 变量是否来自已选择的外部密钥文件。
+pub fn is_stored(name: &str) -> bool {
+    CACHE.with(|cache| {
+        cache
+            .borrow()
+            .values
+            .get(name)
+            .is_some_and(|value| !value.is_empty())
+    })
+}
+
+pub fn source_state() -> (Option<String>, Option<String>) {
+    CACHE.with(|cache| {
+        let snapshot = cache.borrow();
+        (snapshot.configured_path.clone(), snapshot.error.clone())
+    })
+}
+
+fn render_line(name: &str, value: &str) -> Result<String> {
+    Ok(format!("{name}={}", serde_json::to_string(value)?))
+}
+
+fn render_updated(text: &str, updates: &BTreeMap<String, Option<String>>) -> Result<String> {
+    let mut seen = BTreeSet::new();
+    let mut lines = Vec::new();
+    for line in text.lines() {
+        if let Some(key) = key_of_line(line) {
+            if let Some(value) = updates.get(key) {
+                seen.insert(key.to_string());
+                if let Some(value) = value {
+                    lines.push(render_line(key, value)?);
+                }
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+    for (key, value) in updates {
+        if !seen.contains(key) {
+            if let Some(value) = value {
+                lines.push(render_line(key, value)?);
+            }
+        }
+    }
+    let mut out = lines.join("\n");
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+fn atomic_write(path: &Path, text: &str) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("外部密钥文件没有父目录"))?;
+    let temp = parent.join(format!(
+        ".agent-manager-secrets-{}-{}.tmp",
+        std::process::id(),
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    ));
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let result = (|| -> Result<()> {
+        let mut file = options.open(&temp)?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+        fs::rename(&temp, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result.with_context(|| "写入外部密钥文件失败")
+}
+
+fn update_values(ctx: &Context, updates: &BTreeMap<String, Option<String>>) -> Result<()> {
+    let (_, path) = validated_source_path(ctx)?;
+    let text = fs::read_to_string(&path).with_context(|| "外部密钥文件不是可读的 UTF-8 文本")?;
+    parse_env(&text)?;
+    let updated = render_updated(&text, updates)?;
+    atomic_write(&path, &updated)
+}
+
+pub fn set(ctx: &Context, name: &str, value: &str) -> Result<()> {
+    if !valid_var_name(name) {
+        bail!("变量名不合法：要以字母或下划线开头，只能用字母、数字与下划线");
+    }
+    let mut updates = BTreeMap::new();
+    updates.insert(
+        name.to_string(),
+        if value.is_empty() {
+            None
+        } else {
+            Some(value.to_string())
+        },
+    );
+    update_values(ctx, &updates)
+}
+
+/// 只补缺失值；同名不同值时拒绝，避免接管覆盖用户在外部仓库维护的凭据。
+pub fn merge_without_overwrite(
+    ctx: &Context,
+    incoming: &BTreeMap<String, String>,
+) -> Result<Vec<String>> {
+    let (_, path) = validated_source_path(ctx)?;
+    let text = fs::read_to_string(&path).with_context(|| "外部密钥文件不是可读的 UTF-8 文本")?;
+    let current = parse_env(&text)?;
+    let mut updates = BTreeMap::new();
+    let mut merged = Vec::new();
+    for (name, value) in incoming {
+        if !valid_var_name(name) {
+            continue;
+        }
+        match current.get(name) {
+            Some(existing) if existing.is_empty() => {
+                updates.insert(name.clone(), Some(value.clone()));
+            }
+            Some(existing) if existing != value => {
+                bail!("外部密钥文件中的变量 {name} 已存在且取值不同，拒绝覆盖")
+            }
+            Some(_) => {}
+            None => {
+                updates.insert(name.clone(), Some(value.clone()));
+            }
+        }
+        merged.push(name.clone());
+    }
+    if !updates.is_empty() {
+        let updated = render_updated(&text, &updates)?;
+        atomic_write(&path, &updated)?;
+    }
+    merged.sort();
+    merged.dedup();
+    Ok(merged)
+}
+
+pub fn legacy_count(ctx: &Context) -> Result<usize> {
+    let Some(conn) = crate::store::open_readonly(ctx)? else {
+        return Ok(0);
+    };
     let exists: i64 = conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'secret_values'",
         [],
         |row| row.get(0),
     )?;
-    let mut out = BTreeMap::new();
     if exists == 0 {
-        return Ok(out);
+        return Ok(0);
     }
+    Ok(
+        conn.query_row("SELECT COUNT(*) FROM secret_values", [], |row| {
+            row.get::<_, i64>(0)
+        })? as usize,
+    )
+}
+
+fn read_legacy(conn: &Connection) -> Result<BTreeMap<String, String>> {
     let mut stmt = conn.prepare("SELECT name, value FROM secret_values ORDER BY name")?;
     let rows = stmt.query_map([], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
+    let mut out = BTreeMap::new();
     for row in rows {
         let (name, value) = row?;
         out.insert(name, value);
@@ -81,57 +403,21 @@ pub fn read_all(conn: &Connection) -> Result<BTreeMap<String, String>> {
     Ok(out)
 }
 
-/// 取一个变量的值：先本机已保存的，再回退进程环境。
-pub fn lookup(name: &str) -> Option<String> {
-    let stored = CACHE.with(|cache| {
-        cache
-            .borrow()
-            .as_ref()
-            .and_then(|map| map.get(name).cloned())
-    });
-    stored.or_else(|| std::env::var(name).ok())
-}
-
-/// 该变量当前能不能取到值。
-pub fn is_set(name: &str) -> bool {
-    lookup(name).is_some()
-}
-
-/// 这个变量的取值是不是存在本机库里（用于界面区分「已在这里填过」与「来自环境」）。
-pub fn is_stored(name: &str) -> bool {
-    CACHE.with(|cache| {
-        cache
-            .borrow()
-            .as_ref()
-            .is_some_and(|map| map.contains_key(name))
-    })
-}
-
-pub fn ensure_table(conn: &Connection) -> Result<()> {
-    conn.execute_batch(TABLE_DDL)?;
-    Ok(())
-}
-
-/// 写入/覆盖一个变量的取值。空值按删除处理——界面上清空即撤销配置。
-pub fn set(tx: &Transaction, name: &str, value: &str, now: &str) -> Result<()> {
-    if !valid_var_name(name) {
-        bail!("变量名不合法：要以字母或下划线开头，只能用字母、数字与下划线");
+/// 显式迁移：先无覆盖写入外部文件，成功后才删除旧表，失败时数据库原样保留。
+pub fn migrate_legacy(ctx: &Context) -> Result<Vec<String>> {
+    let Some(conn) = crate::store::open_readonly(ctx)? else {
+        return Ok(Vec::new());
+    };
+    let count = legacy_count(ctx)?;
+    if count == 0 {
+        return Ok(Vec::new());
     }
-    if value.is_empty() {
-        tx.execute("DELETE FROM secret_values WHERE name = ?1", [name])?;
-        return Ok(());
-    }
-    tx.execute(
-        "INSERT INTO secret_values (name, value, updated_at) VALUES (?1, ?2, ?3)
-         ON CONFLICT (name) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-        rusqlite::params![name, value, now],
-    )?;
-    Ok(())
-}
-
-pub fn delete(tx: &Transaction, name: &str) -> Result<()> {
-    tx.execute("DELETE FROM secret_values WHERE name = ?1", [name])?;
-    Ok(())
+    let values = read_legacy(&conn)?;
+    drop(conn);
+    let migrated = merge_without_overwrite(ctx, &values)?;
+    let conn = crate::store::open_write(ctx)?;
+    conn.execute("DROP TABLE IF EXISTS secret_values", [])?;
+    Ok(migrated)
 }
 
 #[cfg(test)]
@@ -149,36 +435,38 @@ mod tests {
     }
 
     #[test]
-    fn set_then_read_back_and_empty_value_deletes() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        ensure_table(&conn).unwrap();
-        let tx = conn.transaction().unwrap();
-        set(&tx, "TOK", "v1", "2026-09-18T00:00:00Z").unwrap();
-        tx.commit().unwrap();
-        assert_eq!(
-            read_all(&conn).unwrap().get("TOK").map(String::as_str),
-            Some("v1")
-        );
-
-        let tx = conn.transaction().unwrap();
-        set(&tx, "TOK", "", "2026-09-18T00:01:00Z").unwrap();
-        tx.commit().unwrap();
-        assert!(read_all(&conn).unwrap().is_empty());
+    fn env_parser_supports_quotes_and_rejects_duplicates() {
+        let parsed = parse_env("# comment\nA=plain\nB='json value'\nC=\"line\\nvalue\"\n").unwrap();
+        assert_eq!(parsed.get("A").map(String::as_str), Some("plain"));
+        assert_eq!(parsed.get("B").map(String::as_str), Some("json value"));
+        assert_eq!(parsed.get("C").map(String::as_str), Some("line\nvalue"));
+        assert!(parse_env("A=one\nA=two\n").is_err());
+        assert!(parse_env("bad-name=value\n").is_err());
     }
 
     #[test]
-    fn set_rejects_illegal_name_without_writing() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        ensure_table(&conn).unwrap();
-        let tx = conn.transaction().unwrap();
-        assert!(set(&tx, "bad-name", "v", "2026-09-18T00:00:00Z").is_err());
-        tx.commit().unwrap();
-        assert!(read_all(&conn).unwrap().is_empty());
+    fn updater_preserves_unowned_lines_and_can_remove() {
+        let mut updates = BTreeMap::new();
+        updates.insert("A".into(), Some("new value".into()));
+        updates.insert("C".into(), Some("three".into()));
+        updates.insert("B".into(), None);
+        let rendered = render_updated("# keep\nA=old\nB=two\n", &updates).unwrap();
+        assert!(rendered.starts_with("# keep\n"));
+        assert!(rendered.contains("A=\"new value\"\n"));
+        assert!(!rendered.contains("B="));
+        assert!(rendered.contains("C=\"three\"\n"));
     }
 
     #[test]
-    fn missing_table_reads_as_empty() {
-        let conn = Connection::open_in_memory().unwrap();
-        assert!(read_all(&conn).unwrap().is_empty());
+    fn empty_file_value_is_not_reported_as_a_configured_secret() {
+        CACHE.with(|cache| {
+            *cache.borrow_mut() = Snapshot {
+                values: BTreeMap::from([("EMPTY_TEST_SECRET".into(), String::new())]),
+                ..Snapshot::default()
+            };
+        });
+        assert_eq!(lookup("EMPTY_TEST_SECRET"), None);
+        assert!(!is_set("EMPTY_TEST_SECRET"));
+        assert!(!is_stored("EMPTY_TEST_SECRET"));
     }
 }

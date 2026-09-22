@@ -411,14 +411,16 @@ function demoEnvelopes(): Record<string, Envelope> {
         makeElement({
           id: "secrets:mcp-env",
           domain: "secrets",
-          spec: { sources: ["process env"] },
+          spec: { sources: ["external file", "process env"] },
           policy: { enabled: true },
           observed: { install_source: null, variables: [
               { server: "grok-search", env_key: "GROK_API_KEY", placeholder: "GROK_API_KEY", resolved: true, kind: "env" },
               { server: "grok-search", env_key: "TAVILY_API_KEY", placeholder: "TAVILY_API_KEY", resolved: false, kind: "env" },
               { server: "remote-api", env_key: "Authorization", placeholder: "DEMO_REMOTE_TOKEN", resolved: true, kind: "header" },
             ],
-            unresolved: 1 },
+            unresolved: 1,
+            source: { configured: true, path: "~/agent-manager/secrets/mcp.env", ready: true, error: null },
+            legacy_database_values: 0 },
           state: "missing",
         }),
       ],
@@ -944,6 +946,26 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       if (command === "policy:set") return policySet(args);
       if (command === "policy:delete") return policyDelete(args);
       if (command === "secrets:set") return setSecret(args, runId);
+      if (command === "secrets:source") {
+        const path = args[args.indexOf("--path") + 1] ?? "";
+        const data = routes["secrets:status"].data as {
+          elements: Array<{ observed: { source?: { configured: boolean; path: string | null; ready: boolean; error: string | null } } }>;
+        };
+        if (data.elements[0]) {
+          data.elements[0].observed.source = {
+            configured: path.length > 0,
+            path: path || null,
+            ready: path.length > 0,
+            error: null,
+          };
+        }
+        recordRun(runId, "secrets.source");
+        return makeEnvelope({ domain: "secrets", configured: path.length > 0 }, { command: "secrets.source", run_id: runId });
+      }
+      if (command === "secrets:migrate-legacy") {
+        recordRun(runId, "secrets.migrate-legacy");
+        return makeEnvelope({ domain: "secrets", migrated: [] }, { command: "secrets.migrate-legacy", run_id: runId });
+      }
       if (command === "secrets:adopt") {
         recordRun(runId, "secrets.adopt");
         return makeEnvelope({ domain: "secrets", adopted: [] }, { command: "secrets.adopt", run_id: runId });
@@ -954,7 +976,6 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
             format: "agent-manager/config-backup/v1",
             policy: structuredClone(sqlitePolicy),
             sources: {},
-            secrets: {},
           },
           { command: "config.export" },
         );

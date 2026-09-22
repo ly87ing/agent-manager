@@ -37,7 +37,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / agents:configure|check / secrets:status / system:audit|discover|refresh-upstream / runs:* / policy:* / sources:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / agents:configure|check / secrets:status|set|adopt|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / sources:* / db:*）"
             ),
         )
     };
@@ -49,7 +49,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
     }
     let allowed = match (domain, verb) {
         ("system", "audit" | "discover" | "refresh-upstream") => true,
-        ("secrets", "status" | "set" | "adopt") => true,
+        ("secrets", "status" | "set" | "adopt" | "source" | "migrate-legacy") => true,
         ("runs", "list" | "get" | "clear") => true,
         ("policy", "get" | "set" | "delete") => true,
         ("sources", "get" | "set") => true,
@@ -95,6 +95,8 @@ enum ArgValueKind {
     /// secrets:set 的取值：不校验内容（任何密钥形态都可能），只挡控制字符；
     /// 取值绝不进日志与诊断。
     SecretValue,
+    /// 用户选择的外部密钥文件路径。允许空值表示停止使用，但拒绝控制字符与超长输入。
+    FilePath,
 }
 
 /// 每个命令允许的 flag 集合（命令感知白名单）。
@@ -111,6 +113,7 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--agent", ArgValueKind::ElementId));
             specs.push(("--server", ArgValueKind::ElementId));
         }
+        ("secrets", "source") => specs.push(("--path", ArgValueKind::FilePath)),
         ("sources", "get") => specs.push(("--key", ArgValueKind::DotKey)),
         ("sources", "set") => {
             specs.push(("--key", ArgValueKind::DotKey));
@@ -281,6 +284,16 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
                 Ok(())
             }
         }
+        ArgValueKind::FilePath => {
+            if value.len() > 4096 || value.chars().any(|c| c.is_control()) {
+                Err(EngineError::new(
+                    "invalid_args",
+                    "外部密钥文件路径不合法".to_string(),
+                ))
+            } else {
+                Ok(())
+            }
+        }
         ArgValueKind::JsonValue => serde_json::from_str::<serde_json::Value>(value)
             .map(|_| ())
             .map_err(|err| {
@@ -432,6 +445,10 @@ mod tests {
             "profiles:status",
             "profiles:apply",
             "secrets:status",
+            "secrets:set",
+            "secrets:adopt",
+            "secrets:source",
+            "secrets:migrate-legacy",
             "system:audit",
             "system:discover",
             "system:refresh-upstream",
@@ -544,6 +561,12 @@ mod tests {
             ("system:discover", vec!["--only".into(), "skills".into()]),
             ("config:export", vec![]),
             (
+                "secrets:source",
+                vec!["--path".into(), "~/private/secrets.env".into()],
+            ),
+            ("secrets:source", vec!["--path".into(), "".into()]),
+            ("secrets:migrate-legacy", vec![]),
+            (
                 "config:import",
                 vec!["--value".into(), "{\"format\":\"x\"}".into()],
             ),
@@ -617,6 +640,8 @@ mod tests {
             ("rules:apply", vec!["--dry-run".into()]),
             ("policy:set", vec!["--dry-run".into()]),
             ("sources:set", vec!["--dry-run".into()]),
+            ("secrets:source", vec!["--path".into(), "bad\npath".into()]),
+            ("secrets:migrate-legacy", vec!["--force".into()]),
             ("mcp:apply", vec!["--allow-uninstall".into()]),
             ("agents:status", vec!["--action".into(), "install".into()]),
             ("skills:apply", vec!["--action".into(), "install".into()]),

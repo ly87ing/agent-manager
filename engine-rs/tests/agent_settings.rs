@@ -34,6 +34,21 @@ fn request(command: &str, args: &[&str]) -> Request {
     }
 }
 
+fn configure_secret_source(ctx: &Context) {
+    let path = ctx.home_dir.join("secrets.env");
+    fs::write(&path, "").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let configured = execute(
+        ctx,
+        &request("secrets:source", &["--path", path.to_str().unwrap()]),
+    );
+    assert!(configured.ok, "{:?}", configured.errors);
+}
+
 /// 写一条只有单套接入配置的定义：大多数用例只关心那一套。
 fn define(ctx: &Context, profile: Value) {
     define_settings(ctx, json!({"active": "p", "profiles": {"p": profile}}));
@@ -234,6 +249,7 @@ fn claude_智能自动写入_auto_且不需要高风险确认() {
 #[test]
 fn 令牌只存变量名_取不到值时拒绝写入_审计不记取值() {
     let (base, ctx) = temp_ctx("token");
+    configure_secret_source(&ctx);
     define(&ctx, json!({"token_var": "MY_GATEWAY_TOKEN"}));
 
     let refused = execute(
@@ -561,6 +577,7 @@ fn 用户自己的状态栏不被碰_也不算外部修改() {
 #[test]
 fn 两种认证方式各写各的环境变量() {
     let (base, ctx) = temp_ctx("auth");
+    configure_secret_source(&ctx);
     const SECRET: &str = "sk-relay-secret";
     assert!(
         execute(
@@ -1134,6 +1151,7 @@ fn 检查在发请求之前就把缺东西说清楚_且零网络() {
 #[test]
 fn 检查不改配置文件_也不动生效的那套() {
     let (base, ctx) = temp_ctx("check-readonly");
+    configure_secret_source(&ctx);
     define_settings(
         &ctx,
         json!({

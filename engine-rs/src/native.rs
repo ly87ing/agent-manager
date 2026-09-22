@@ -148,6 +148,10 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     // 运行参数写助手配置文件，与别的写动作同样要排他；校验在 configure 内部做，
     // 这里只负责取锁。
     let is_agent_configure = request.command.replace('.', ":") == "agents:configure";
+    let is_secret_write = matches!(
+        request.command.replace('.', ":").as_str(),
+        "secrets:set" | "secrets:adopt" | "secrets:source" | "secrets:migrate-legacy"
+    );
     let (needs_lock, domain_label, diag_code) = if is_agent_apply {
         match crate::native_agents::preflight_apply(ctx, request) {
             Ok(()) => (true, "Agent", "AGENT_ERROR"),
@@ -311,6 +315,8 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
         }
     } else if is_agent_configure {
         (true, "Agent", "AGENT_ERROR")
+    } else if is_secret_write {
+        (true, "Secrets", "SECRET_ERROR")
     } else {
         (false, "", "")
     };
@@ -467,9 +473,11 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
             .map_err(|err| {
                 DispatchError::new(crate::native_aliases::error_code(&err), format!("{err:#}"))
             }),
-        ("secrets", "status" | "set" | "adopt") => crate::native_secrets::handle(ctx, request)
-            .map(|data| (data, vec![]))
-            .map_err(|err| DispatchError::new("SECRET_ERROR", format!("{err:#}"))),
+        ("secrets", "status" | "set" | "adopt" | "source" | "migrate-legacy") => {
+            crate::native_secrets::handle(ctx, request)
+                .map(|data| (data, vec![]))
+                .map_err(|err| DispatchError::new("SECRET_ERROR", format!("{err:#}")))
+        }
         ("sources", "get") => crate::native_sources::get(ctx, request),
         ("sources", "set") => crate::native_sources::set(ctx, request),
         ("policy", "get") => policy_get(ctx),
