@@ -74,11 +74,11 @@ export function ProfileFormDialog({
 
   const submit = () => {
     if (!PROFILE_ID_RE.test(id)) {
-      setError("实例名只能用小写字母、数字与连字符，且以字母或数字开头（它同时是终端里输入的命令名）");
+      setError("环境名只能用小写字母、数字与连字符，且以字母或数字开头（它同时是终端里输入的命令名）");
       return;
     }
     if (!isEdit && existingIds.includes(id)) {
-      setError("已有同名实例或助手，换一个名字");
+      setError("已有同名环境或助手，换一个名字");
       return;
     }
     if (!/^(~\/|\/)/.test(effectiveConfigDir)) {
@@ -100,7 +100,7 @@ export function ProfileFormDialog({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label={isEdit ? "编辑实例" : "新建实例"}
+      aria-label={isEdit ? "编辑独立环境" : "新建独立环境"}
       data-testid="profile-form-panel"
       className="fixed inset-0 z-50 flex flex-col bg-background animate-fade-in"
     >
@@ -115,7 +115,7 @@ export function ProfileFormDialog({
             <ArrowLeft className="h-5 w-5" aria-hidden />
           </button>
           <div>
-            <h2 className="text-lg font-semibold text-foreground">{isEdit ? "编辑实例" : "新建实例"}</h2>
+            <h2 className="text-lg font-semibold text-foreground">{isEdit ? "编辑独立环境" : "新建独立环境"}</h2>
             <p className="text-xs text-muted-foreground">为同一个助手建立独立账号、接口与运行环境</p>
           </div>
         </div>
@@ -132,7 +132,7 @@ export function ProfileFormDialog({
                   </span>
                   <div>
                     <h3 id="profile-agent-heading" className="font-semibold text-foreground">1. 选择归属助手</h3>
-                    <p className="mt-0.5 text-xs text-muted-foreground">实例会复用这个助手的程序，但使用自己的配置目录与登录状态。</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">独立环境会复用这个助手的程序，但使用自己的配置目录与登录状态。</p>
                   </div>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2" data-testid="profile-base-agent">
@@ -176,7 +176,7 @@ export function ProfileFormDialog({
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="block text-sm font-medium text-foreground" htmlFor="profile-id-input">
-                    实例名
+                    环境名
                     <span className="ml-2 text-xs font-normal text-muted-foreground">终端里输入它启动</span>
                     <input
                       id="profile-id-input"
@@ -340,14 +340,14 @@ export function ProfileFormDialog({
               )}
             </div>
 
-            <aside className="space-y-4 min-[900px]:sticky min-[900px]:top-6" aria-label="实例结果预览">
+            <aside className="space-y-4 min-[900px]:sticky min-[900px]:top-6" aria-label="独立环境结果预览">
               <section className="rounded-xl border bg-card p-5 shadow-sm">
                 <div className="flex items-center gap-3">
                   <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-success/10 text-success">
                     <Terminal className="h-5 w-5" aria-hidden />
                   </span>
                   <div>
-                    <h3 className="font-semibold text-foreground">将创建的实例</h3>
+                    <h3 className="font-semibold text-foreground">将创建的独立环境</h3>
                     <p className="text-xs text-muted-foreground">所有实际值随输入实时更新</p>
                   </div>
                 </div>
@@ -387,7 +387,7 @@ export function ProfileFormDialog({
               <section className="rounded-xl border bg-card p-5 shadow-sm">
                 <h3 className="text-sm font-semibold text-foreground">终端启动命令</h3>
                 <pre data-testid="profile-launch-preview" className="mt-3 whitespace-pre-wrap break-all rounded-lg border bg-muted px-3 py-3 font-mono text-xs leading-5 text-foreground">
-                  {launch ? `alias ${id}='${launch}'` : "填写实例名后显示完整命令"}
+                  {launch ? `alias ${id}='${launch}'` : "填写环境名后显示完整命令"}
                 </pre>
               </section>
 
@@ -412,7 +412,7 @@ export function ProfileFormDialog({
               data-testid="profile-form-submit"
               className="rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
             >
-              {isEdit ? "保存修改" : "创建实例"}
+              {isEdit ? "保存修改" : "创建独立环境"}
             </button>
           </div>
         </div>

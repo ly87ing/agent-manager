@@ -133,7 +133,7 @@ function routes(profiles: ReturnType<typeof profileElement>[] = [profileElement(
 describe("助手实例", () => {
   async function openInstanceManager() {
     await userEvent.click(await screen.findByTestId("manage-instances-button"));
-    return screen.findByRole("dialog", { name: "隔离实例" });
+    return screen.findByTestId("independent-environments");
   }
 
   it("实例单独成卡，展示配置目录与启动方式，不混进主助手列表", async () => {
@@ -168,7 +168,7 @@ describe("助手实例", () => {
     await openInstanceManager();
     const card = await screen.findByTestId("profile-card-cc-ly");
     await userEvent.click(within(card).getByTestId("profile-duplicate-cc-ly"));
-    const dialog = await screen.findByRole("dialog", { name: "新建实例" });
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     expect(within(dialog).getByTestId("profile-id-input")).toHaveValue("cc-ly-copy");
     // 名称必须可改：锁死就没法复制
     expect(within(dialog).getByTestId("profile-id-input")).not.toBeDisabled();
@@ -180,7 +180,7 @@ describe("助手实例", () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await openInstanceManager();
     await userEvent.click(await screen.findByTestId("add-profile-button"));
-    const dialog = await screen.findByRole("dialog", { name: "新建实例" });
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-work");
     await userEvent.type(within(dialog).getByTestId("profile-base-url"), "https://api.example.com");
     await userEvent.type(within(dialog).getByTestId("profile-token-var"), "WORK_TOKEN");
@@ -214,13 +214,13 @@ describe("助手实例", () => {
     renderWithEngine(<AgentsPage />, routes());
     await openInstanceManager();
     await userEvent.click(await screen.findByTestId("add-profile-button"));
-    const dialog = await screen.findByRole("dialog", { name: "新建实例" });
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
 
     expect(within(dialog).getByText("1. 选择归属助手")).toBeInTheDocument();
     expect(within(dialog).getByText("2. 命名与存放位置")).toBeInTheDocument();
     expect(within(dialog).getByText("3. 接口、账号与模型")).toBeInTheDocument();
     expect(within(dialog).getByText("4. 运行参数")).toBeInTheDocument();
-    expect(within(dialog).getByLabelText("实例结果预览")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("独立环境结果预览")).toBeInTheDocument();
 
     await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-work");
     expect(within(dialog).getByText("CLAUDE_CONFIG_DIR=~/.claude-cc-work")).toBeInTheDocument();
@@ -228,14 +228,14 @@ describe("助手实例", () => {
     expect(within(dialog).getByText("~/.claude-cc-work/.claude.json")).toBeInTheDocument();
     expect(within(dialog).getByText("~/.claude-cc-work/skills")).toBeInTheDocument();
     expect(within(dialog).getByTestId("profile-extra-args")).toHaveAttribute("rows", "4");
-    expect(within(dialog).getByRole("button", { name: "创建实例" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "创建独立环境" })).toBeInTheDocument();
   });
 
   it("实例表单同样给出该助手的常用参数", async () => {
     renderWithEngine(<AgentsPage />, routes());
     await openInstanceManager();
     await userEvent.click(await screen.findByTestId("add-profile-button"));
-    const dialog = await screen.findByRole("dialog", { name: "新建实例" });
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     // 归属助手是 Claude Code，因此给 Claude 的预设
     await userEvent.click(within(dialog).getByTestId("profile-preset-claude-yolo"));
     expect(within(dialog).getByTestId("profile-extra-args")).toHaveValue("--dangerously-skip-permissions");

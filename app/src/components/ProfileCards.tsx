@@ -10,7 +10,7 @@ import { cn } from "../lib/utils";
 /** 实例状态 → 一句话说明用户现在处于什么位置。 */
 const STATE_NOTE: Record<string, string> = {
   "not-materialized": "还没写入这套配置，点「写入配置」后就能用这个名字启动。",
-  "managed-ok": "配置已写入，终端里用它的名字即可启动这套实例。",
+  "managed-ok": "配置已写入，终端里用它的名字即可启动这个独立环境。",
   drifted: "配置文件被本工具以外改过，写入会覆盖它——确认后再接管。",
   disabled: "已停用，不再维护这套配置。",
   unsupported: "定义有问题，先修好再写入。",
@@ -70,7 +70,7 @@ export function ProfileCard({
             <span className="ml-2 font-mono text-xs font-normal text-muted-foreground">{id}</span>
           </h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {spec.base_agent} 的独立实例{spec.base_url ? ` · ${spec.base_url}` : ""}
+            {spec.base_agent} 的独立环境{spec.base_url ? ` · ${spec.base_url}` : ""}
           </p>
         </div>
         <StateBadge state={element.state} />
@@ -257,7 +257,7 @@ export function ProfileCard({
           onClick={onRemove}
           className="ml-auto inline-flex items-center gap-1 rounded border border-destructive/30 px-2.5 py-1 text-xs text-destructive hover:bg-destructive/10"
         >
-          <Trash2 className="h-3 w-3" aria-hidden /> 移除实例
+          <Trash2 className="h-3 w-3" aria-hidden /> 移除环境
         </button>
       </div>
     </section>

@@ -91,7 +91,7 @@ export default function AgentsPage({
     Record<string, { ok: boolean; detail: string; latencyMs: number; pending?: boolean }>
   >({});
   const [checkingAllAgentId, setCheckingAllAgentId] = useState<string | null>(null);
-  const [instancesOpen, setInstancesOpen] = useState(false);
+  const [environmentView, setEnvironmentView] = useState<"default" | "independent">("default");
 
   const [aliasEditing, setAliasEditing] = useState<
     { bin: string; name: string; value: string | null; presetName?: string } | null
@@ -123,6 +123,10 @@ export default function AgentsPage({
     selectedAgentId && allPrimaryElements.some((element) => element.id === selectedAgentId)
       ? selectedAgentId
       : allPrimaryElements[0]?.id ?? null;
+  const effectiveAgentName = effectiveSelectedAgentId?.replace(/^agents:/, "") ?? null;
+  const visibleProfileElements = profileElements.filter(
+    (element) => (element.spec as unknown as { base_agent?: string }).base_agent === effectiveAgentName,
+  );
   /** 可作为实例归属的助手：以后由后端适配器声明，不再按定义 ID 猜客户端类型。 */
   const profileCapableAgents = elements
     .map((element) => ({
@@ -411,11 +415,11 @@ export default function AgentsPage({
         JSON.stringify({ ...definition, _delete: false, _replace: true }),
       ]);
     } catch (err) {
-      toast.error(`保存实例失败:${String(err)}`);
+      toast.error(`保存独立环境失败:${String(err)}`);
       return;
     }
     if (!envelope.ok) {
-      toast.error(`保存实例被拒绝:${envelope.errors[0]?.message ?? "未知错误"}`);
+      toast.error(`保存独立环境被拒绝:${envelope.errors[0]?.message ?? "未知错误"}`);
       return;
     }
     if (aliasSource.source) {
@@ -426,10 +430,10 @@ export default function AgentsPage({
             [input.id]: profileLaunchValue(input, baseBinOf(input.baseAgent)),
           },
         },
-        `已保存实例 ${input.id} 与它的启动命令`,
+        `已保存独立环境 ${input.id} 与它的启动命令`,
       );
     } else {
-      toast.success(`已保存实例 ${input.id}`);
+      toast.success(`已保存独立环境 ${input.id}`);
     }
     setProfileForm(null);
     setProfileDuplicating(false);
@@ -557,7 +561,11 @@ export default function AgentsPage({
     <div>
       <h2 className="sr-only">助手</h2>
       {query.data.errors.length > 0 && <ErrorPanel title="agents:status 错误" errors={query.data.errors} />}
-      <ConnectionWorkbench
+      <div className="mb-3 inline-flex rounded-xl bg-muted p-1" role="group" aria-label="选择环境类型">
+        <button type="button" data-testid="default-environment-button" aria-pressed={environmentView === "default"} onClick={() => setEnvironmentView("default")} className={`rounded-lg px-4 py-2 text-sm ${environmentView === "default" ? "bg-background font-medium shadow-sm" : "text-muted-foreground"}`}>默认环境</button>
+        <button type="button" data-testid="manage-instances-button" aria-pressed={environmentView === "independent"} onClick={() => setEnvironmentView("independent")} className={`rounded-lg px-4 py-2 text-sm ${environmentView === "independent" ? "bg-background font-medium shadow-sm" : "text-muted-foreground"}`}>独立环境</button>
+      </div>
+      {environmentView === "default" && <ConnectionWorkbench
         agents={allPrimaryElements}
         selectedAgentId={effectiveSelectedAgentId}
         busyTarget={configuringTarget}
@@ -629,16 +637,21 @@ export default function AgentsPage({
           setRuntimeFormError(null);
           setRuntimeFormAgent(element);
         }}
-        onManageInstances={() => setInstancesOpen(true)}
-      />
-      {instancesOpen && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/45 p-6" role="dialog" aria-label="隔离实例">
-          <section className="max-h-[85vh] w-full max-w-5xl space-y-3 overflow-y-auto rounded-2xl border bg-background p-6 shadow-2xl">
+      />}
+      {environmentView === "independent" && (
+          <section data-testid="independent-environments" className="space-y-4 rounded-xl border bg-card p-5 shadow-sm">
+        <div aria-label="选择助手" className="inline-flex rounded-xl bg-muted p-1" role="group">
+          {allPrimaryElements.map((element) => {
+            const id = element.id.replace(/^agents:/, "");
+            const chosen = element.id === effectiveSelectedAgentId;
+            return <button key={element.id} type="button" data-testid={`independent-agent-${id}`} aria-pressed={chosen} onClick={() => setSelectedAgentId(element.id)} className={`rounded-lg px-5 py-2 text-sm font-medium ${chosen ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"}`}>{(element.spec as AgentsSpec).display_name ?? id}</button>;
+          })}
+        </div>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-semibold text-foreground">隔离实例</h3>
+            <h3 className="text-base font-semibold text-foreground">独立环境</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              同一个助手的多套独立配置：各自的配置目录、登录与会话，可以同时开着互不干扰，全局配置不受影响。
+              为当前 Agent 创建另一套配置目录、登录与会话；它和默认环境可以同时运行，互不干扰。
             </p>
           </div>
           <button
@@ -648,27 +661,19 @@ export default function AgentsPage({
             onClick={() => setProfileForm("new")}
             className="shrink-0 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/15 disabled:opacity-50"
           >
-            新建实例
-          </button>
-          <button
-            type="button"
-            aria-label="关闭隔离实例"
-            onClick={() => setInstancesOpen(false)}
-            className="rounded-md border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent"
-          >
-            关闭
+            新建独立环境
           </button>
         </div>
-        {profileElements.length === 0 ? (
+        {visibleProfileElements.length === 0 ? (
           <EmptyState
             compact
             testId="profiles-empty"
-            title="还没有实例"
-            description="需要用第二个账号或另一套接口时，新建一个实例：它有自己的配置目录，和主实例同时开着也不会互相干扰。"
+            title="当前 Agent 还没有独立环境"
+            description="需要第二个账号或完全独立的配置时再创建；只添加 Provider 请回到默认环境。"
           />
         ) : (
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            {profileElements.map((element) => {
+            {visibleProfileElements.map((element) => {
               const id = element.id.replace(/^profiles:/, "");
               return (
                 <ProfileCard
@@ -758,7 +763,6 @@ export default function AgentsPage({
           </div>
         )}
           </section>
-        </div>
       )}
 
       {connectionForm && connectionKindOf(connectionForm.agent) && (
@@ -835,8 +839,8 @@ export default function AgentsPage({
 
       {profileRemoving && (
         <ConfirmModal
-          title={`移除实例 ${profileRemoving}`}
-          description="只停止管理这套配置并删掉它的启动命令；配置目录、登录状态与里面的内容都原样保留，需要的话请自行删除目录。"
+          title={`移除独立环境 ${profileRemoving}`}
+          description="只停止管理这个独立环境并删掉它的启动命令；配置目录、登录状态与里面的内容都原样保留，需要的话请自行删除目录。"
           risk="write-local"
           confirmLabel="确认移除"
           executing={false}

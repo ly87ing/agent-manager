@@ -109,16 +109,19 @@ describe("助手页产品边界", () => {
     expect(await screen.findByTestId("connection-workbench")).toBeInTheDocument();
     expect(screen.getByTestId("add-connection-button")).toBeEnabled();
     expect(screen.getByTestId("connection-card-claude-code-default")).toHaveTextContent("助手默认账号");
-    expect(screen.getByText("默认实例")).toBeInTheDocument();
+    expect(screen.getAllByText("默认环境").length).toBeGreaterThan(0);
     expect(screen.getByText(/自动化：手动确认/)).toBeInTheDocument();
-    expect(screen.getByTestId("agent-runtime-button")).toHaveTextContent("自动化与运行");
-    expect(screen.getByTestId("manage-instances-button")).toHaveTextContent("隔离实例");
+    expect(screen.getByTestId("workbench-tab-automation")).toHaveTextContent("自动化与权限");
+    expect(screen.getByTestId("manage-instances-button")).toHaveTextContent("独立环境");
+    await userEvent.click(screen.getByTestId("workbench-tab-launch"));
     const launches = screen.getByTestId("agent-launch-commands-claude-code");
     expect(within(launches).getByTestId("agent-launch-claude-code-claude")).toHaveTextContent(
       "alias claude='claude --dangerously-skip-permissions'",
     );
     expect(within(launches).getByTestId("agent-add-launch-claude-code")).toHaveTextContent("新增别名");
     expect(within(launches).getByTestId("agent-sync-launch-claude-code")).toHaveTextContent("同步到终端");
+    expect(within(launches).getByTestId("agent-launch-override-claude-code-claude")).toHaveTextContent("覆盖环境自动化");
+    await userEvent.click(screen.getByTestId("workbench-tab-providers"));
     expect(screen.getByText("待应用")).toBeInTheDocument();
     expect(screen.getByTestId("reset-connection-claude-code-default")).toHaveTextContent("重置");
     expect(screen.queryByRole("heading", { name: "实例" })).toBeNull();
@@ -136,11 +139,23 @@ describe("助手页产品边界", () => {
   it("主 Agent 的运行别名可就地审查和编辑，保存与同步仍是独立操作", async () => {
     renderWithEngine(<AgentsPage />, routes());
 
+    await userEvent.click(await screen.findByTestId("workbench-tab-launch"));
     await userEvent.click(await screen.findByTestId("agent-launch-edit-claude-code-claude"));
     const dialog = await screen.findByRole("dialog", { name: "编辑启动命令" });
     expect(within(dialog).getByTestId("alias-name-input")).toHaveValue("claude");
     expect(within(dialog).getByTestId("alias-command-input")).toHaveValue("claude");
     expect(within(dialog).getByTestId("alias-extra-args-input")).toHaveValue("--dangerously-skip-permissions");
+  });
+
+  it("实际配置页直接展示目标文件与脱敏后的最终生效值", async () => {
+    renderWithEngine(<AgentsPage />, routes());
+
+    await userEvent.click(await screen.findByTestId("workbench-tab-actual"));
+    const panel = screen.getByTestId("actual-config-panel");
+    expect(panel).toHaveTextContent("settings.json");
+    expect(panel).toHaveTextContent("https://claude.example.com");
+    expect(panel).toHaveTextContent('"configured": true');
+    expect(panel).not.toHaveTextContent("ANTHROPIC_AUTH_TOKEN=");
   });
 
   it("当前 Provider 排在首位并直接标记当前使用", async () => {
@@ -220,6 +235,7 @@ describe("助手页产品边界", () => {
     expect(await screen.findByTestId("connection-workbench")).toBeInTheDocument();
     expect(screen.queryByText("auth.json")).toBeNull();
 
+    await userEvent.click(screen.getByTestId("workbench-tab-automation"));
     await userEvent.click(screen.getByTestId("agent-runtime-button"));
     await userEvent.click(screen.getByTestId("agent-runtime-observed-mode"));
     const observedJson = screen.getByTestId("agent-runtime-observed-json");

@@ -1,4 +1,5 @@
-import { Activity, ArrowDown, ArrowUp, Check, Download, Loader2, MoreHorizontal, Pencil, Plus, Settings2, Terminal, Trash2, Upload } from "lucide-react";
+import { useState } from "react";
+import { Activity, ArrowDown, ArrowUp, Check, Download, Loader2, MoreHorizontal, Pencil, Settings2, Terminal, Trash2, Upload } from "lucide-react";
 import type { ConnectionKind } from "./ConnectionFormDialog";
 import type { EngineElement } from "../lib/contract";
 import type { AgentCurrentConfigStatus, AgentsObserved, AgentsSpec } from "../lib/observed";
@@ -33,6 +34,20 @@ function automationLabelOf(element: EngineElement): string {
   const management = (element.observed as AgentsObserved).management;
   const field = management?.runtime_fields.find((candidate) => candidate.key === "automation_mode");
   return field?.summary?.values?.[value] ?? field?.summary?.default ?? "未设置";
+}
+
+type WorkbenchTab = "providers" | "automation" | "launch" | "actual";
+
+function automationOverrideOf(value: string): string | null {
+  const args = parseAliasValue(value).extraArgs;
+  if (/(^|\s)--dangerously-skip-permissions(?=\s|$)/.test(args)) return "启动时跳过所有权限确认";
+  if (/(^|\s)--enable-auto-mode(?=\s|$)/.test(args)) return "启动时启用 Auto 模式";
+  if (/(^|\s)--dangerously-bypass-approvals-and-sandbox(?=\s|$)/.test(args)) return "启动时绕过审批与沙箱";
+  if (/(^|\s)--full-auto(?=\s|$)/.test(args)) return "启动时启用 Full Auto";
+  if (/(^|\s)--permission-mode(?:=|\s+)/.test(args)
+    || /(^|\s)--ask-for-approval(?:=|\s+)/.test(args)
+    || /(^|\s)--sandbox(?:=|\s+)/.test(args)) return "启动参数另行指定权限方式";
+  return null;
 }
 
 export type ConnectionAlignment = "aligned" | "drifted" | "unknown";
@@ -111,7 +126,6 @@ export function ConnectionWorkbench({
   onRemove,
   onMove,
   onRuntimeSettings,
-  onManageInstances,
 }: {
   agents: EngineElement[];
   selectedAgentId: string | null;
@@ -138,8 +152,8 @@ export function ConnectionWorkbench({
   onRemove: (element: EngineElement, connection: ConnectionEntry) => void;
   onMove: (element: EngineElement, connection: ConnectionEntry, direction: "up" | "down") => void;
   onRuntimeSettings: (element: EngineElement) => void;
-  onManageInstances: () => void;
 }) {
+  const [tab, setTab] = useState<WorkbenchTab>("providers");
   const selected = agents.find((element) => element.id === selectedAgentId) ?? agents[0];
   if (!selected) return null;
 
@@ -205,7 +219,7 @@ export function ConnectionWorkbench({
           <span className="sr-only" data-testid="active-connection-summary">
             {activeEntry?.label || activeEntry?.name || "助手默认账号"}
           </span>
-          <div className="flex items-center gap-2">
+          {tab === "providers" && <div className="flex items-center gap-2">
             {form.connections.length > 0 && (
               <button
                 type="button"
@@ -219,23 +233,6 @@ export function ConnectionWorkbench({
                 {checkingAll ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Activity className="h-4 w-4" aria-hidden />}
               </button>
             )}
-            <button
-              type="button"
-              data-testid="agent-runtime-button"
-              disabled={!kind}
-              onClick={() => onRuntimeSettings(selected)}
-              className="inline-flex h-10 items-center gap-1.5 rounded-xl border px-3 text-sm text-foreground hover:bg-accent disabled:opacity-50"
-            >
-              <Settings2 className="h-4 w-4" aria-hidden /> 自动化与运行
-            </button>
-            <button
-              type="button"
-              data-testid="manage-instances-button"
-              onClick={onManageInstances}
-              className="inline-flex h-10 items-center gap-1.5 rounded-xl border px-3 text-sm text-foreground hover:bg-accent"
-            >
-              <Settings2 className="h-4 w-4" aria-hidden /> 隔离实例
-            </button>
             <details className="group relative">
               <summary aria-label="更多设置" className="inline-flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-xl border text-muted-foreground hover:bg-accent">
                 <Settings2 className="h-4 w-4" aria-hidden />
@@ -255,31 +252,65 @@ export function ConnectionWorkbench({
             <button
               type="button"
               data-testid="add-connection-button"
-              aria-label={`添加 ${name} 接入`}
-              title={`添加 ${name} 接入`}
               disabled={!kind}
               onClick={() => onAdd(selected)}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-10 items-center rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <Plus className="h-5 w-5" aria-hidden />
+              添加 Provider
             </button>
-          </div>
+          </div>}
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">默认实例</span>
+              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">默认环境</span>
               <strong className="text-sm font-semibold text-foreground">{name}</strong>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               当前选择：{activeEntry?.label || activeEntry?.name || "助手默认账号"} · 自动化：{automationLabel}。
-              下面修改的是这套默认实例；第二个账号或独立配置请进入“隔离实例”。
+              下面所有页签都属于这一个环境。
             </p>
           </div>
         </div>
 
-        <div data-testid={`agent-launch-commands-${agentId}`} className="rounded-xl border px-4 py-3">
+        <div aria-label="环境配置" role="tablist" className="flex gap-1 overflow-x-auto border-b">
+          {([
+            ["providers", "接入 Provider"],
+            ["automation", "自动化与权限"],
+            ["launch", "启动命令"],
+            ["actual", "实际配置"],
+          ] as const).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={tab === id}
+              data-testid={`workbench-tab-${id}`}
+              onClick={() => setTab(id)}
+              className={cn(
+                "whitespace-nowrap border-b-2 px-3 py-2 text-sm",
+                tab === id ? "border-primary font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "automation" && (
+          <div data-testid="automation-panel" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-4">
+            <div>
+              <h3 className="text-sm font-medium text-foreground">当前自动化：{automationLabel}</h3>
+              <p className="mt-1 text-xs text-muted-foreground">这是该环境的默认权限方式；启动命令若带权限参数，会在启动时覆盖它。</p>
+            </div>
+            <button type="button" data-testid="agent-runtime-button" disabled={!kind} onClick={() => onRuntimeSettings(selected)} className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+              修改自动化与权限
+            </button>
+          </div>
+        )}
+
+        {tab === "launch" && <div data-testid={`agent-launch-commands-${agentId}`} className="rounded-xl border px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="flex items-center gap-1.5 text-sm font-medium text-foreground">
@@ -300,10 +331,15 @@ export function ConnectionWorkbench({
             <p className="mt-3 text-xs text-muted-foreground">还没有属于这个 Agent 的运行别名。</p>
           ) : (
             <ul className="mt-3 space-y-2">
-              {launchAliases.map(([name, value]) => (
+              {launchAliases.map(([name, value]) => {
+                const override = automationOverrideOf(value);
+                return (
                 <li key={name} data-testid={`agent-launch-${agentId}-${name}`} className="rounded-lg bg-muted/35 px-3 py-2">
                   <div className="flex items-center justify-between gap-2">
-                    <code className="text-xs font-semibold text-foreground">{name}</code>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <code className="text-xs font-semibold text-foreground">{name}</code>
+                      {override && <span data-testid={`agent-launch-override-${agentId}-${name}`} className="rounded-full bg-warning/15 px-2 py-0.5 text-[11px] font-medium text-warning">覆盖环境自动化</span>}
+                    </div>
                     <div className="flex items-center gap-1">
                       <button type="button" data-testid={`agent-launch-edit-${agentId}-${name}`} onClick={() => onEditLaunch(selected, name)} className="rounded border px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent">编辑</button>
                       <button type="button" data-testid={`agent-launch-remove-${agentId}-${name}`} onClick={() => onRemoveLaunch(name)} className="inline-flex items-center gap-1 rounded border border-destructive/30 px-2 py-1 text-[11px] text-destructive hover:bg-destructive/10">
@@ -312,11 +348,26 @@ export function ConnectionWorkbench({
                     </div>
                   </div>
                   <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all font-mono text-[11px] text-muted-foreground">{renderAliasPreview(name, value, aliasGlobals)}</pre>
+                  {override && <p className="mt-1 text-xs text-warning">{override}</p>}
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
-        </div>
+        </div>}
+
+        {tab === "actual" && (
+          <div data-testid="actual-config-panel" className="space-y-3 rounded-xl border px-4 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-medium text-foreground">当前实际生效值</h3>
+                <p className="mt-1 text-xs text-muted-foreground">来源：{currentConfig?.target ?? currentConfig?.file ?? "未发现配置文件"}。敏感值只显示是否已配置。</p>
+              </div>
+              <span className={cn("rounded-full px-2 py-1 text-xs", currentConfig?.state === "ready" ? "bg-success/15 text-success" : "bg-muted text-muted-foreground")}>{currentConfig?.state === "ready" ? "已读取" : "未读取"}</span>
+            </div>
+            <pre className="max-h-96 overflow-auto rounded-lg bg-muted/45 p-3 font-mono text-xs text-foreground">{JSON.stringify(currentConfig?.config ?? {}, null, 2)}</pre>
+          </div>
+        )}
 
         {!kind && (
           <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
@@ -324,7 +375,7 @@ export function ConnectionWorkbench({
           </p>
         )}
 
-        {connectionChecks.length > 0 && (
+        {tab === "providers" && connectionChecks.length > 0 && (
           <div
             data-testid="connection-check-summary"
             className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm"
@@ -356,7 +407,7 @@ export function ConnectionWorkbench({
           </div>
         )}
 
-        <div className="flex flex-col gap-3">
+        {tab === "providers" && <div className="flex flex-col gap-3">
             {orderedEntries.map((connection) => {
               const connectionName = connection?.name ?? "";
               const key = `${agentId}/${connectionName || "default"}`;
@@ -390,7 +441,7 @@ export function ConnectionWorkbench({
               />
               );
             })}
-        </div>
+        </div>}
       </div>
     </section>
   );

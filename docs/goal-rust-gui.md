@@ -539,6 +539,13 @@ state 与 actions，不自己推断；用户主动停用的不催。syncPlan 是
   `automation_mode=auto` 写入、官方重置、重置后删除，以及两条别名同步并回读 `managed-ok`；真实
   原生窗口只读确认了运行别名和官方重置界面，并打开后取消两类确认框。未操作真实 Claude/Codex，
   未构建或验收安装包。
+- 环境化信息架构：助手页固定为「Agent → 默认环境/独立环境 → 当前环境内容」。默认
+  环境拆成接入 Provider、自动化与权限、启动命令、实际配置四页；添加 Provider 使用明确文字入口，
+  独立环境从弹窗迁到同一工作区并按当前 Agent 过滤，创建入口与 Provider 完全分离。启动命令含权限
+  参数时显示“覆盖环境自动化”及具体效果；实际配置直接展示目标文件和脱敏后的回读值。未改变 SQLite、
+  Provider、profile 或 alias 协议，`native-manager.db` 仍是唯一事实源。Vitest 57 files / 540 tests、
+  前端生产构建、engine-rs 与 Tauri 15 tests 全部通过；原生 Tauri 窗口只读验收了默认环境四页与
+  独立环境空态，未点击任何应用、同步或确认动作，未改动真实 Claude/Codex 配置。
 
 ## 剩余路线图（未排期）
 
