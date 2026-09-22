@@ -807,11 +807,11 @@ export default function AgentsPage({
       )}
       {connectionResetting && (
         <ConfirmModal
-          title={`重置 ${(connectionResetting.spec as AgentsSpec).display_name ?? connectionResetting.id.replace(/^agents:/, "")} 的官方 Provider`}
-          description="将助手恢复为官方默认地址与账号配置。不会删除助手登录状态、密钥变量或其他 Provider 定义；已经打开的助手需要重启后生效。"
+          title={`应用 ${(connectionResetting.spec as AgentsSpec).display_name ?? connectionResetting.id.replace(/^agents:/, "")} 的官方 Provider`}
+          description="把官方默认地址与账号配置写入助手，解决当前选择与实际配置不一致。不会删除助手登录状态、密钥变量或其他 Provider 定义；已经打开的助手需要重启后生效。"
           risk="write-local"
-          riskLabel="重置官方 Provider"
-          confirmLabel="确认重置"
+          riskLabel="应用官方 Provider"
+          confirmLabel="确认应用"
           executing={configuringTarget === `${connectionResetting.id.replace(/^agents:/, "")}/default`}
           onConfirm={() => {
             const agentId = connectionResetting.id.replace(/^agents:/, "");

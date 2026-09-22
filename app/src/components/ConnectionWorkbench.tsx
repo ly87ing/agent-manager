@@ -174,6 +174,9 @@ export function ConnectionWorkbench({
     })
     .sort(([left], [right]) => left.localeCompare(right));
   const currentConfig = (selected.observed as AgentsObserved).current_config;
+  const activeAlignment = kind && currentConfig
+    ? connectionAlignment(kind, activeEntry ?? null, currentConfig)
+    : "unknown";
   const connectionCheckStates = form.connections
     .map((connection) => ({ connection, result: checkResults[`${agentId}/${connection.name}`] }));
   const connectionChecks = connectionCheckStates.filter(
@@ -269,7 +272,7 @@ export function ConnectionWorkbench({
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               当前选择：{activeEntry?.label || activeEntry?.name || "助手默认账号"} · 自动化：{automationLabel}。
-              下面所有页签都属于这一个环境。
+              {activeAlignment === "drifted" ? " 当前选择尚未应用，请在下方点击应用。" : " 下面所有页签都属于这一个环境。"}
             </p>
           </div>
         </div>
@@ -492,7 +495,9 @@ function ConnectionCard({
       className={cn(
         "flex min-h-24 items-center gap-4 rounded-2xl border bg-background px-5 py-4 shadow-sm transition-colors",
         onEdit && "cursor-pointer",
-        active ? "border-success/40 bg-success/5" : "hover:border-primary/30",
+        active && alignment === "aligned" && "border-success/40 bg-success/5",
+        active && alignment === "drifted" && "border-warning/40 bg-warning/5",
+        (!active || alignment === "unknown") && "hover:border-primary/30",
       )}
     >
       <span className="select-none text-xl text-muted-foreground" aria-hidden>⠿</span>
@@ -504,13 +509,17 @@ function ConnectionCard({
           <h3 className="text-lg font-semibold text-foreground">
             {connection ? connection.label || connection.name : "助手默认账号"}
           </h3>
-          {active && (
+          {active && alignment !== "unknown" && (
             <span className={cn(
               "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium",
               alignment === "drifted" ? "bg-warning/15 text-warning" : "bg-success/15 text-success",
             )}>
-              <Check className="h-3 w-3" aria-hidden /> {alignment === "drifted" ? "待应用" : "当前使用"}
+              {alignment === "aligned" && <Check className="h-3 w-3" aria-hidden />}
+              {alignment === "drifted" ? "尚未生效" : "当前使用"}
             </span>
+          )}
+          {active && alignment === "unknown" && (
+            <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">无法确认是否生效</span>
           )}
         </div>
         <p className="mt-1 truncate text-sm text-primary">
@@ -549,9 +558,15 @@ function ConnectionCard({
             data-testid={`reset-connection-${agentId}-${id}`}
             disabled={disabled}
             onClick={onReset}
-            className="inline-flex shrink-0 items-center rounded-lg border px-3 py-2 text-xs font-medium text-foreground hover:bg-accent disabled:opacity-50"
+            className={cn(
+              "inline-flex shrink-0 items-center gap-1 rounded-lg px-3 py-2 text-xs font-medium disabled:opacity-50",
+              alignment === "drifted"
+                ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                : "border text-foreground hover:bg-accent",
+            )}
           >
-            重置
+            {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
+            {busy ? "正在应用…" : alignment === "drifted" ? "应用默认配置" : "重新应用"}
           </button>
         )}
         {onEdit && (

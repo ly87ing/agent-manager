@@ -122,8 +122,9 @@ describe("助手页产品边界", () => {
     expect(within(launches).getByTestId("agent-sync-launch-claude-code")).toHaveTextContent("同步到终端");
     expect(within(launches).getByTestId("agent-launch-override-claude-code-claude")).toHaveTextContent("覆盖环境自动化");
     await userEvent.click(screen.getByTestId("workbench-tab-providers"));
-    expect(screen.getByText("待应用")).toBeInTheDocument();
-    expect(screen.getByTestId("reset-connection-claude-code-default")).toHaveTextContent("重置");
+    expect(screen.getByText("尚未生效")).toBeInTheDocument();
+    expect(screen.getByText(/当前选择尚未应用/)).toBeInTheDocument();
+    expect(screen.getByTestId("reset-connection-claude-code-default")).toHaveTextContent("应用默认配置");
     expect(screen.queryByRole("heading", { name: "实例" })).toBeNull();
     expect(screen.queryByText("本机配置状态")).toBeNull();
     expect(screen.queryByText("状态栏：用量状态栏")).toBeNull();

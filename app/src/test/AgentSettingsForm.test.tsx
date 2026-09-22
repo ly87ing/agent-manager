@@ -375,7 +375,7 @@ describe("助手运行参数", () => {
     await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("官方"));
 
     await userEvent.click(screen.getByTestId("reset-connection-claude-code-default"));
-    const resetConfirm = await screen.findByRole("dialog", { name: "重置 Claude Code 的官方 Provider" });
+    const resetConfirm = await screen.findByRole("dialog", { name: "应用 Claude Code 的官方 Provider" });
     expect(configureCalls(calls)).toHaveLength(1);
     expect(resetConfirm).toHaveTextContent("不会删除助手登录状态、密钥变量或其他 Provider 定义");
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
@@ -488,10 +488,10 @@ describe("助手运行参数", () => {
     expect(await screen.findByRole("dialog", { name: "编辑 我的中转" })).toBeInTheDocument();
   });
 
-  it("默认官方 Provider 只提供重置，不伪装成可编辑或可删除项", async () => {
+  it("默认官方 Provider 只提供重新应用，不伪装成可编辑或可删除项", async () => {
     renderWithEngine(<AgentsPage />, routes());
 
-    expect(await screen.findByTestId("reset-connection-claude-code-default")).toHaveTextContent("重置");
+    expect(await screen.findByTestId("reset-connection-claude-code-default")).toHaveTextContent("重新应用");
     expect(screen.queryByTestId("edit-connection-claude-code-default")).toBeNull();
     expect(screen.queryByTestId("remove-connection-claude-code-default")).toBeNull();
   });
@@ -822,7 +822,7 @@ describe("助手运行参数", () => {
   it("没配接入配置的助手：工作台明确展示默认账号和新增入口", async () => {
     renderWithEngine(<AgentsPage />, routes());
     expect(await screen.findByTestId("connection-card-claude-code-default")).toHaveTextContent("当前使用");
-    expect(screen.getByTestId("reset-connection-claude-code-default")).toHaveTextContent("重置");
+    expect(screen.getByTestId("reset-connection-claude-code-default")).toHaveTextContent("重新应用");
     expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("助手默认账号");
     expect(screen.getByTestId("add-connection-button")).toBeEnabled();
   });
