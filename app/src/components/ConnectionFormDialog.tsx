@@ -61,14 +61,14 @@ export function ConnectionFormDialog({
   );
   const [secretValue, setSecretValue] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
-  const [advancedOpen, setAdvancedOpen] = useState(!adopting && Boolean(
+  const [advancedOpen, setAdvancedOpen] = useState(!adopting && !duplicating && Boolean(
     initialConnection?.timeoutMs || initialConnection?.smallFastModel || initialConnection?.aliasOpus
     || initialConnection?.aliasSonnet || initialConnection?.aliasHaiku || initialConnection?.auth === "api_key",
   ));
   const dialogTitle = editing
     ? `编辑 ${initialConnection.label || initialConnection.name}`
     : duplicating
-      ? `复制为 ${initialConnection.label || initialConnection.name}`
+      ? "复制 Provider"
       : adopting
         ? `纳管 ${agentName} 的客户端当前配置`
         : `为 ${agentName} 添加接入`;
@@ -82,7 +82,7 @@ export function ConnectionFormDialog({
       ].filter((item): item is string => Boolean(item))
     : [];
   const validationError = connection
-    ? (!connection.label.trim() && adopting ? "请填写显示名称" : validateConnectionEntry(connection))
+    ? (!connection.label.trim() && (adopting || duplicating) ? "请填写显示名称" : validateConnectionEntry(connection))
     : null;
   const duplicateName = Boolean(
     connection && existingNames.includes(connection.name.trim()) && !(editing && connection.name.trim() === initialConnection?.name),
@@ -94,7 +94,7 @@ export function ConnectionFormDialog({
       : duplicateName
         ? "内部名称已存在，请关闭后重试。"
         : null;
-  const saveDisabled = busy || !connection || (adopting && (Boolean(validationError) || duplicateName));
+  const saveDisabled = busy || !connection || ((adopting || duplicating) && (Boolean(validationError) || duplicateName));
 
   useLayoutEffect(() => {
     return () => restoreFocusRef.current?.focus();
@@ -207,7 +207,7 @@ export function ConnectionFormDialog({
               {editing
                 ? `修改 ${agentName} 的这套接入；留空凭据取值不会覆盖已经保存的值。`
                 : duplicating
-                  ? "已带入连接参数和凭据变量名，但不会读取或复制凭据取值。副本默认不会切换为当前接入。"
+                  ? "确认新名称即可创建；原 Provider、当前接入和客户端配置都不会改变。"
                   : adopting
                     ? "这里只把客户端当前值保存成一个 Provider，不会修改、切换或覆盖客户端配置。"
                 : "先选厂商，再确认地址、模型和凭据；安装命令不在这里。"}
@@ -265,6 +265,65 @@ export function ConnectionFormDialog({
 
           {connection && (
             <div className={cn("space-y-4", prefilled ? "" : "mt-4 border-t pt-4")}>
+              {duplicating ? (
+                <>
+                  <label className="block text-sm font-medium text-foreground">
+                    新 Provider 名称
+                    <input
+                      data-testid="new-connection-label"
+                      autoFocus
+                      value={connection.label}
+                      onChange={(event) => patch({ label: event.target.value })}
+                      placeholder="例如：工作线路副本"
+                      className={cn(
+                        "mt-1 w-full rounded border p-2 text-sm",
+                        connection.label.trim() ? "border-input" : "border-amber-500",
+                      )}
+                    />
+                    {!connection.label.trim() && (
+                      <span className="mt-1 block text-xs text-warning">填写名称后才能创建副本。</span>
+                    )}
+                  </label>
+
+                  <div className="overflow-hidden rounded-xl border" data-testid="duplicate-connection-summary">
+                    <div className="border-b bg-muted/40 px-3 py-2 text-xs font-medium text-foreground">
+                      将原样复制
+                    </div>
+                    <dl className="divide-y text-sm">
+                      <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 px-3 py-2">
+                        <dt className="text-muted-foreground">API 地址</dt>
+                        <dd className="break-all font-mono text-xs text-foreground">{connection.baseUrl}</dd>
+                      </div>
+                      <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 px-3 py-2">
+                        <dt className="text-muted-foreground">默认模型</dt>
+                        <dd className="break-all font-mono text-xs text-foreground">{connection.model}</dd>
+                      </div>
+                      <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 px-3 py-2">
+                        <dt className="text-muted-foreground">凭据来源</dt>
+                        <dd className="break-all font-mono text-xs text-foreground">环境变量 {connection.tokenVar}</dd>
+                      </div>
+                    </dl>
+                    {(connection.timeoutMs || connection.smallFastModel || connection.aliasOpus || connection.aliasSonnet || connection.aliasHaiku || connection.auth === "api_key") && (
+                      <details className="border-t px-3 py-2 text-xs">
+                        <summary className="cursor-pointer text-muted-foreground">查看一并复制的高级配置</summary>
+                        <dl className="mt-2 grid grid-cols-[7rem_minmax(0,1fr)] gap-x-3 gap-y-1 text-foreground">
+                          {connection.auth === "api_key" && <><dt>认证方式</dt><dd className="font-mono">x-api-key</dd></>}
+                          {connection.timeoutMs && <><dt>请求超时</dt><dd className="font-mono">{connection.timeoutMs} ms</dd></>}
+                          {connection.smallFastModel && <><dt>小任务模型</dt><dd className="break-all font-mono">{connection.smallFastModel}</dd></>}
+                          {connection.aliasOpus && <><dt>Opus 映射</dt><dd className="break-all font-mono">{connection.aliasOpus}</dd></>}
+                          {connection.aliasSonnet && <><dt>Sonnet 映射</dt><dd className="break-all font-mono">{connection.aliasSonnet}</dd></>}
+                          {connection.aliasHaiku && <><dt>Haiku 映射</dt><dd className="break-all font-mono">{connection.aliasHaiku}</dd></>}
+                        </dl>
+                      </details>
+                    )}
+                  </div>
+
+                  <p className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs leading-5 text-foreground">
+                    创建后只会在 {agentName} 的 Provider 列表增加一项；不会应用，只复用凭据变量名，不读取或新存一份 API Key。需要改地址或模型，可创建后单独点“编辑”。
+                  </p>
+                </>
+              ) : (
+                <>
               {adopting && (
                 <div
                   data-testid="adoption-readiness"
@@ -463,6 +522,8 @@ export function ConnectionFormDialog({
                   ? "点击保存只会创建一个新的 Provider，不会应用到客户端。保存后可在卡片上单独选择是否应用。"
                   : "保存只更新 Provider 定义，不写助手配置。需要生效时，请回到卡片点击“应用”。"}
               </p>
+                </>
+              )}
             </div>
           )}
 
@@ -495,7 +556,7 @@ export function ConnectionFormDialog({
               : editing
                 ? "保存修改"
                 : duplicating
-                  ? "保存副本"
+                  ? "创建副本"
                   : adopting
                     ? "保存为 Provider"
                     : "保存接入"}

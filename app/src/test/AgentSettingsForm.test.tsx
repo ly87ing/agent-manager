@@ -616,16 +616,17 @@ describe("助手运行参数", () => {
     const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
 
     await userEvent.click(await screen.findByTestId("duplicate-connection-claude-code-relay"));
-    expect(await screen.findByRole("dialog", { name: "复制为 我的中转 副本" })).toBeInTheDocument();
-    expect(screen.queryByText("1. 选择接入方式")).toBeNull();
+    const dialog = await screen.findByRole("dialog", { name: "复制 Provider" });
+    expect(dialog).toHaveTextContent("原 Provider、当前接入和客户端配置都不会改变");
     expect(screen.getByTestId("new-connection-label")).toHaveValue("我的中转 副本");
-    expect(screen.getByTestId("new-connection-base-url")).toHaveValue("https://relay.example.com");
-    expect(screen.getByTestId("new-connection-token-var")).toHaveValue("RELAY_KEY");
-    expect(screen.getByTestId("new-connection-secret")).toHaveValue("");
-    expect(screen.queryByTestId("new-connection-activate")).toBeNull();
-    await userEvent.click(screen.getByTestId("new-connection-advanced"));
-    expect(screen.getByTestId("new-connection-name")).toHaveValue("relay-copy");
-    expect(screen.getByTestId("new-connection-name")).not.toBeDisabled();
+    expect(screen.getByTestId("duplicate-connection-summary")).toHaveTextContent("https://relay.example.com");
+    expect(screen.getByTestId("duplicate-connection-summary")).toHaveTextContent("relay-model");
+    expect(screen.getByTestId("duplicate-connection-summary")).toHaveTextContent("环境变量 RELAY_KEY");
+    expect(screen.queryByTestId("new-connection-base-url")).toBeNull();
+    expect(screen.queryByTestId("new-connection-token-var")).toBeNull();
+    expect(screen.queryByTestId("new-connection-secret")).toBeNull();
+    expect(screen.queryByTestId("new-connection-name")).toBeNull();
+    expect(screen.getByTestId("connection-form-submit")).toHaveTextContent("创建副本");
     await userEvent.click(screen.getByTestId("connection-form-submit"));
 
     await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));

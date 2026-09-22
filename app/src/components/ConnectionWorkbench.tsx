@@ -627,7 +627,7 @@ function ConnectionCard({
                 onClick={onDuplicate}
                 className="rounded px-3 py-2 text-left text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
               >
-                复制
+                创建副本
               </button>
             )}
             {onExport && (
