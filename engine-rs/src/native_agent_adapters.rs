@@ -36,33 +36,72 @@ pub(crate) fn kind_for_bin(bin: &str) -> Option<AdapterKind> {
     }
 }
 
-fn shared_yolo(kind: AdapterKind) -> Value {
-    let targets = match kind {
+fn automation_mode(kind: AdapterKind) -> Value {
+    let options = match kind {
         AdapterKind::Claude => json!([
-            {"key": "permissions.defaultMode", "enabled_value": "\"bypassPermissions\""}
+            {
+                "value": "manual", "label": "手动确认", "description": "由你确认敏感操作，适合陌生项目。",
+                "targets": [{"key": "permissions.defaultMode", "enabled_value": "\"manual\""}]
+            },
+            {
+                "value": "auto", "label": "智能自动", "description": "由 Claude 的分类器自动判断，遇到高风险操作仍会拦截。",
+                "recommended": true,
+                "targets": [{"key": "permissions.defaultMode", "enabled_value": "\"auto\""}]
+            },
+            {
+                "value": "full", "label": "完全放开", "description": "绕过所有权限检查，只适合已经隔离的可信环境。",
+                "danger": true, "requires_confirmation": true,
+                "targets": [{"key": "permissions.defaultMode", "enabled_value": "\"bypassPermissions\""}]
+            }
         ]),
         AdapterKind::Codex => json!([
-            {"key": "approval_policy", "enabled_value": "\"never\""},
-            {"key": "sandbox_mode", "enabled_value": "\"danger-full-access\""}
+            {
+                "value": "manual", "label": "手动确认", "description": "保留工作区沙箱，越界操作由你确认。",
+                "targets": [
+                    {"key": "approval_policy", "enabled_value": "\"on-request\""},
+                    {"key": "sandbox_mode", "enabled_value": "\"workspace-write\""},
+                    {"key": "approvals_reviewer", "enabled_value": "\"user\""}
+                ]
+            },
+            {
+                "value": "auto", "label": "智能自动", "description": "保留工作区沙箱，由独立审查器处理符合条件的越界请求。",
+                "recommended": true,
+                "targets": [
+                    {"key": "approval_policy", "enabled_value": "\"on-request\""},
+                    {"key": "sandbox_mode", "enabled_value": "\"workspace-write\""},
+                    {"key": "approvals_reviewer", "enabled_value": "\"auto_review\""}
+                ]
+            },
+            {
+                "value": "full", "label": "完全放开", "description": "不询问且移除沙箱，只适合外部已经隔离的环境。",
+                "danger": true, "requires_confirmation": true,
+                "targets": [
+                    {"key": "approval_policy", "enabled_value": "\"never\""},
+                    {"key": "sandbox_mode", "enabled_value": "\"danger-full-access\""}
+                ]
+            }
         ]),
     };
     json!({
-        "key": "yolo",
-        "type": "boolean",
+        "key": "automation_mode",
+        "type": "enum",
+        "presentation": "choice_cards",
         "section": "权限与执行",
-        "section_description": "高风险设置仍会在保存后要求二次确认。",
-        "label": "跳过权限确认",
-        "description": "开启后执行命令和修改文件不再逐次询问；关闭时撤销本工具写入的权限覆盖。",
-        "danger": true,
-        "requires_yolo_confirmation": true,
-        "targets": targets,
-        "summary": {"label": "权限确认", "enabled": "已跳过", "default": "客户端默认"}
+        "section_description": "建议使用智能自动；完全放开会在保存后再次确认。",
+        "label": "自动化程度",
+        "description": "选择助手如何处理需要权限的操作。",
+        "options": options,
+        "targets": [],
+        "summary": {
+            "label": "自动化", "default": "手动确认",
+            "values": {"manual": "手动确认", "auto": "智能自动", "full": "完全放开"}
+        }
     })
 }
 
 fn claude_fields() -> Vec<Value> {
     vec![
-        shared_yolo(AdapterKind::Claude),
+        automation_mode(AdapterKind::Claude),
         json!({
             "key": "statusline", "type": "enum", "section": "界面与模型行为",
             "label": "状态栏", "description": "选择是否使用 Agent Manager 提供的本地用量状态栏。",
@@ -110,7 +149,7 @@ fn claude_fields() -> Vec<Value> {
 
 fn codex_fields() -> Vec<Value> {
     vec![
-        shared_yolo(AdapterKind::Codex),
+        automation_mode(AdapterKind::Codex),
         json!({
             "key": "codex_reasoning_effort", "type": "enum", "section": "模型与上下文",
             "section_description": "留空即删除本工具的覆盖，恢复 Codex 自己的默认值。",

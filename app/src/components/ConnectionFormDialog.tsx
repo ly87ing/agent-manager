@@ -18,7 +18,6 @@ export type ConnectionKind = "claude" | "codex";
 export interface ConnectionSubmission {
   connection: ConnectionEntry;
   secretValue: string;
-  activate: boolean;
 }
 
 const FOCUSABLE_SELECTOR =
@@ -30,7 +29,6 @@ export function ConnectionFormDialog({
   existingNames,
   initialConnection,
   variant,
-  initialActivate,
   busy,
   error,
   onSubmit,
@@ -43,8 +41,6 @@ export function ConnectionFormDialog({
   initialConnection?: ConnectionEntry;
   /** 复制模式预填连接参数但允许修改唯一名称；凭据取值始终为空。 */
   variant?: "edit" | "duplicate";
-  /** 编辑当前项时为 true，确保保存后的参数立即写回助手配置。 */
-  initialActivate?: boolean;
   busy: boolean;
   error?: string | null;
   onSubmit: (submission: ConnectionSubmission) => void;
@@ -63,7 +59,6 @@ export function ConnectionFormDialog({
     initialConnection ? { ...initialConnection } : null,
   );
   const [secretValue, setSecretValue] = useState("");
-  const [activate, setActivate] = useState(initialActivate ?? !prefilled);
   const [localError, setLocalError] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(Boolean(
     initialConnection?.timeoutMs || initialConnection?.smallFastModel || initialConnection?.aliasOpus
@@ -162,7 +157,6 @@ export function ConnectionFormDialog({
         model: connection.model.trim(),
       },
       secretValue,
-      activate,
     });
   };
 
@@ -178,7 +172,7 @@ export function ConnectionFormDialog({
         aria-modal="true"
         aria-label={dialogTitle}
         onKeyDown={onKeyDown}
-        className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border bg-card shadow-xl animate-zoom-in-95"
+        className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border bg-card shadow-xl animate-zoom-in-95"
       >
         <div className="flex items-start justify-between gap-3 border-b px-5 py-4">
           <div>
@@ -205,8 +199,8 @@ export function ConnectionFormDialog({
         <div className="overflow-y-auto px-5 py-4">
           {!prefilled && (
             <fieldset>
-              <legend className="text-sm font-medium text-foreground">1. 选择接入方式</legend>
-              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              <legend className="text-sm font-medium text-foreground">选择 Provider</legend>
+              <div className="mt-2 flex flex-wrap gap-2">
                 {presets.map((preset, index) => (
                   <button
                     key={preset.id}
@@ -215,13 +209,13 @@ export function ConnectionFormDialog({
                     data-testid={`connection-preset-${preset.id}`}
                     aria-pressed={choice === preset.id}
                     onClick={() => choosePreset(preset.id)}
+                    title={preset.source}
                     className={cn(
-                      "rounded-lg border p-3 text-left",
+                      "rounded-full border px-3 py-1.5 text-left text-sm transition-colors",
                       choice === preset.id ? "border-primary bg-primary/10" : "hover:bg-accent",
                     )}
                   >
-                    <span className="block text-sm font-medium text-foreground">{preset.label}</span>
-                    <span className="mt-1 block text-xs text-muted-foreground">{preset.source}</span>
+                    <span className="font-medium text-foreground">{preset.label}</span>
                   </button>
                 ))}
                 <button
@@ -231,22 +225,26 @@ export function ConnectionFormDialog({
                   aria-pressed={choice === "custom"}
                   onClick={chooseCustom}
                   className={cn(
-                    "rounded-lg border p-3 text-left",
+                    "rounded-full border px-3 py-1.5 text-left text-sm transition-colors",
                     choice === "custom" ? "border-primary bg-primary/10" : "hover:bg-accent",
                   )}
                 >
-                  <span className="block text-sm font-medium text-foreground">自定义接入</span>
-                  <span className="mt-1 block text-xs text-muted-foreground">
-                    用于其他官方端点或你自己维护的网关
-                  </span>
+                  <span className="font-medium text-foreground">自定义</span>
                 </button>
               </div>
             </fieldset>
           )}
 
           {connection && (
-            <div className="mt-5 space-y-4 border-t pt-4">
-              <h3 className="text-sm font-medium text-foreground">{prefilled ? "接入信息" : "2. 确认必要信息"}</h3>
+            <div className={cn("space-y-4", prefilled ? "" : "mt-4 border-t pt-4")}>
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-medium text-foreground">Provider 配置</h3>
+                {!prefilled && (
+                  <span data-testid="selected-connection-preset" className="text-xs text-muted-foreground">
+                    已选择：{presets.find((preset) => preset.id === choice)?.label ?? "自定义"}
+                  </span>
+                )}
+              </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className="text-sm text-foreground">
                   显示名称
@@ -255,26 +253,29 @@ export function ConnectionFormDialog({
                     autoFocus={prefilled}
                     value={connection.label}
                     onChange={(event) => patch({ label: event.target.value })}
+                    placeholder="例如：工作账号"
                     className="mt-1 w-full rounded border border-input p-2 text-sm"
                   />
                 </label>
                 <label className="text-sm text-foreground">
-                  模型
+                  默认模型
                   <input
                     data-testid="new-connection-model"
                     value={connection.model}
                     onChange={(event) => patch({ model: event.target.value })}
+                    placeholder={kind === "claude" ? "例如：claude-sonnet-4-5" : "例如：gpt-5"}
                     className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
                     spellCheck={false}
                   />
                 </label>
               </div>
               <label className="block text-sm text-foreground">
-                接口地址
+                API 地址
                 <input
                   data-testid="new-connection-base-url"
                   value={connection.baseUrl}
                   onChange={(event) => patch({ baseUrl: event.target.value })}
+                  placeholder="https://api.example.com"
                   className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
                   spellCheck={false}
                 />
@@ -296,18 +297,19 @@ export function ConnectionFormDialog({
               </label>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className="text-sm text-foreground">
-                  凭据变量名
+                  API Key 环境变量
                   <input
                     data-testid="new-connection-token-var"
                     value={connection.tokenVar}
                     onChange={(event) => patch({ tokenVar: event.target.value })}
+                    placeholder={kind === "claude" ? "ANTHROPIC_AUTH_TOKEN" : "OPENAI_API_KEY"}
                     className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
                     spellCheck={false}
                   />
                 </label>
                 {kind === "claude" ? (
                   <label className="text-sm text-foreground">
-                    凭据取值（可选）
+                    API Key（可选）
                     <input
                       type="password"
                       autoComplete="new-password"
@@ -413,25 +415,9 @@ export function ConnectionFormDialog({
                 </div>
               </details>
 
-              <label className="flex items-start gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm text-foreground">
-                <input
-                  type="checkbox"
-                  data-testid="new-connection-activate"
-                  checked={activate}
-                  onChange={(event) => setActivate(event.target.checked)}
-                  className="mt-0.5"
-                />
-                <span>
-                  {editing
-                    ? "保存后更新这套接入"
-                    : duplicating
-                      ? "保存副本后立即启用"
-                      : "保存后立即启用"}
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
-                    会写入助手配置文件；若目标被外部改过，会先再次征求确认。
-                  </span>
-                </span>
-              </label>
+              <p className="rounded-lg border bg-muted/40 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                保存只更新 Provider 定义，不写助手配置。需要生效时，请回到卡片点击“应用”。
+              </p>
             </div>
           )}
 
@@ -462,15 +448,9 @@ export function ConnectionFormDialog({
             {busy
               ? "正在保存…"
               : editing
-                ? activate
-                  ? "保存并更新"
-                  : "保存修改"
+                ? "保存修改"
                 : duplicating
-                  ? activate
-                    ? "保存并启用副本"
-                    : "保存副本"
-                : activate
-                  ? "保存并启用"
+                  ? "保存副本"
                   : "保存接入"}
           </button>
         </div>

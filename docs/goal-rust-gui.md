@@ -530,6 +530,15 @@ state 与 actions，不自己推断；用户主动停用的不催。syncPlan 是
   `usage:status` 的已读结果，不触发扫描或写入。Vitest 扩展为 57 files / 533 tests，类型检查与生产
   构建通过；浏览器 DEV mock 实见助手筛选后汇总和明细同步变化。本批未启动原生应用、未点重新统计，
   也未读取、写入或操作真实 Claude/Codex。
+- Provider 与运行管理收口（未提交候选）：Provider 创建、编辑、应用彼此独立；使用中的自定义
+  Provider 必须先切换或重置才能删除，删除有二次确认；官方默认 Provider 只提供带确认的重置。
+  Claude/Codex 自动化改为手动、智能自动、完全放开三档，按适配器写入真实客户端字段。主 Agent
+  页面直接审查、新增、编辑、删除和显式同步它自己的运行别名，隔离实例仍按配置目录归属；别名定义
+  与 shell 落地保持两个动作，事实源仍是 `aliases.shell`。Vitest 57 files / 539 tests、前端类型检查与
+  生产构建、engine-rs 386 tests、Tauri 15 tests 全部通过。隔离 HOME 实际完成 Provider 创建/应用、
+  `automation_mode=auto` 写入、官方重置、重置后删除，以及两条别名同步并回读 `managed-ok`；真实
+  原生窗口只读确认了运行别名和官方重置界面，并打开后取消两类确认框。未操作真实 Claude/Codex，
+  未构建或验收安装包。
 
 ## 剩余路线图（未排期）
 

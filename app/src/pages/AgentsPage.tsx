@@ -13,9 +13,8 @@ import { ConnectionWorkbench, connectionAlignment } from "../components/Connecti
 import { ConnectionImportDialog } from "../components/ConnectionImportDialog";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { EmptyState } from "../components/EmptyState";
-import { FirstRunGuide } from "../components/FirstRunGuide";
 import { ErrorPanel } from "../components/ErrorPanel";
-import { PageError, PageHeader, PageLoading } from "../components/PageState";
+import { PageError, PageLoading } from "../components/PageState";
 import type { EngineElement, PolicyData, StatusData } from "../lib/contract";
 import { parseAliasValue } from "../lib/aliasCommand";
 import {
@@ -53,7 +52,6 @@ import { useDirectApply } from "../lib/useDirectApply";
 
 export default function AgentsPage({
   onManageSkills,
-  onGoTakeover,
 }: {
   onManageSkills?: (agentId: string) => void;
   onGoTakeover?: () => void;
@@ -87,11 +85,13 @@ export default function AgentsPage({
     connection: ConnectionEntry;
   } | null>(null);
   const [connectionRemovingBusy, setConnectionRemovingBusy] = useState(false);
+  const [connectionResetting, setConnectionResetting] = useState<EngineElement | null>(null);
   /** 接入配置的检查结果：按「助手/配置名」存，卡片与弹窗都读它。 */
   const [checkResults, setCheckResults] = useState<
     Record<string, { ok: boolean; detail: string; latencyMs: number; pending?: boolean }>
   >({});
   const [checkingAllAgentId, setCheckingAllAgentId] = useState<string | null>(null);
+  const [instancesOpen, setInstancesOpen] = useState(false);
 
   const [aliasEditing, setAliasEditing] = useState<
     { bin: string; name: string; value: string | null; presetName?: string } | null
@@ -111,10 +111,6 @@ export default function AgentsPage({
   if (query.isError) return <PageError title="agents:status 调用失败" error={query.error} />;
 
   const elements = query.data.data.elements;
-  const layers = policyQuery.data?.data.layers ?? null;
-  /** 本地层为空 = 还没在这里保存过任何东西：首次使用引导据此出现（policyQuery 未就绪时不显示）。 */
-  const freshInstall =
-    policyQuery.data?.ok === true && Object.keys((layers?.sqlite ?? {}) as Record<string, unknown>).length === 0;
   const profileElements = profilesQuery.data?.ok ? profilesQuery.data.data.elements : [];
   const profileIds = new Set(profileElements.map((element) => element.id.replace(/^profiles:/, "")));
   /** 主助手（非实例）：参与接入工作台与「新建实例」。 */
@@ -262,10 +258,7 @@ export default function AgentsPage({
     }
   };
 
-  /**
-   * 聚焦式新增接入：先保存完整助手定义，再按需保存 Claude 凭据，最后才执行启用。
-   * 后一步失败时不冒充原子成功；已保存的定义仍会回读到卡片，用户可直接重试。
-   */
+  /** 创建/编辑 Provider 只保存定义与可选凭据；应用是卡片上的独立操作。 */
   const saveConnection = async (element: EngineElement, submission: ConnectionSubmission) => {
     if (connectionSaving) return;
     const agentId = element.id.replace(/^agents:/, "");
@@ -301,9 +294,6 @@ export default function AgentsPage({
 
       setConnectionForm(null);
       await query.refetch();
-      if (submission.activate) {
-        await runConfigure(agentId, { use: submission.connection.name });
-      }
     } catch (err) {
       setConnectionFormError(`保存接入失败:${String(err)}`);
     } finally {
@@ -564,9 +554,8 @@ export default function AgentsPage({
   };
 
   return (
-    <div className="space-y-4">
-      <PageHeader title="助手" description="管理账号接入、模型、凭据变量与运行设置。" />
-      <FirstRunGuide show={freshInstall} onGoTakeover={onGoTakeover} />
+    <div>
+      <h2 className="sr-only">助手</h2>
       {query.data.errors.length > 0 && <ErrorPanel title="agents:status 错误" errors={query.data.errors} />}
       <ConnectionWorkbench
         agents={allPrimaryElements}
@@ -582,6 +571,33 @@ export default function AgentsPage({
         onImport={setConnectionImportAgent}
         onSwitch={(element, connection) =>
           void runConfigure(element.id.replace(/^agents:/, ""), { use: connection })
+        }
+        onResetDefault={setConnectionResetting}
+        aliases={aliasSource.source?.aliases ?? {}}
+        aliasGlobals={{
+          timezone: aliasSource.source?.timezone ?? "America/Los_Angeles",
+          lang: aliasSource.source?.lang ?? "en_US.UTF-8",
+        }}
+        aliasBusy={aliasApply.executing}
+        onAddLaunch={(element) => {
+          const agentId = element.id.replace(/^agents:/, "");
+          const bin = (element.spec as AgentsSpec).bin ?? (connectionKindOf(element) === "codex" ? "codex" : "claude");
+          const aliases = aliasSource.source?.aliases ?? {};
+          let candidate = aliases[agentId] === undefined ? agentId : `${agentId}-2`;
+          let n = 3;
+          while (aliases[candidate] !== undefined) {
+            candidate = `${agentId}-${n}`;
+            n += 1;
+          }
+          setAliasEditing({ bin, name: "", value: null, presetName: candidate });
+        }}
+        onEditLaunch={(element, name) => {
+          const bin = (element.spec as AgentsSpec).bin ?? (connectionKindOf(element) === "codex" ? "codex" : "claude");
+          setAliasEditing({ bin, name, value: aliasSource.source?.aliases[name] ?? null });
+        }}
+        onRemoveLaunch={setLaunchRemoving}
+        onSyncLaunch={() =>
+          void aliasApply.apply({ command: "aliases:apply", label: "同步终端快捷命令" })
         }
         onCheck={(element, connection) =>
           void runCheck(element.id.replace(/^agents:/, ""), connection)
@@ -613,11 +629,14 @@ export default function AgentsPage({
           setRuntimeFormError(null);
           setRuntimeFormAgent(element);
         }}
+        onManageInstances={() => setInstancesOpen(true)}
       />
-      <section className="space-y-3">
+      {instancesOpen && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/45 p-6" role="dialog" aria-label="隔离实例">
+          <section className="max-h-[85vh] w-full max-w-5xl space-y-3 overflow-y-auto rounded-2xl border bg-background p-6 shadow-2xl">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-semibold text-foreground">实例</h3>
+            <h3 className="text-sm font-semibold text-foreground">隔离实例</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
               同一个助手的多套独立配置：各自的配置目录、登录与会话，可以同时开着互不干扰，全局配置不受影响。
             </p>
@@ -630,6 +649,14 @@ export default function AgentsPage({
             className="shrink-0 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/15 disabled:opacity-50"
           >
             新建实例
+          </button>
+          <button
+            type="button"
+            aria-label="关闭隔离实例"
+            onClick={() => setInstancesOpen(false)}
+            className="rounded-md border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent"
+          >
+            关闭
           </button>
         </div>
         {profileElements.length === 0 ? (
@@ -730,7 +757,9 @@ export default function AgentsPage({
             })}
           </div>
         )}
-      </section>
+          </section>
+        </div>
+      )}
 
       {connectionForm && connectionKindOf(connectionForm.agent) && (
         <ConnectionFormDialog
@@ -739,11 +768,6 @@ export default function AgentsPage({
           existingNames={connectionsOf(connectionForm.agent.spec as Record<string, unknown>).map((item) => item.name)}
           initialConnection={connectionForm.initial}
           variant={connectionForm.variant}
-          initialActivate={
-            connectionForm.initial
-              ? activeConnectionOf(connectionForm.agent.spec as Record<string, unknown>) === connectionForm.initial.name
-              : undefined
-          }
           busy={connectionSaving}
           error={connectionFormError}
           onSubmit={(submission) => void saveConnection(connectionForm.agent, submission)}
@@ -760,7 +784,7 @@ export default function AgentsPage({
           busy={connectionSaving}
           onImport={(connection) => {
             setConnectionImportAgent(null);
-            void saveConnection(connectionImportAgent, { connection, secretValue: "", activate: false });
+            void saveConnection(connectionImportAgent, { connection, secretValue: "" });
           }}
           onClose={() => setConnectionImportAgent(null)}
         />
@@ -775,6 +799,22 @@ export default function AgentsPage({
           executing={connectionRemovingBusy}
           onConfirm={() => void removeConnection(connectionRemoving.agent, connectionRemoving.connection)}
           onClose={() => setConnectionRemoving(null)}
+        />
+      )}
+      {connectionResetting && (
+        <ConfirmModal
+          title={`重置 ${(connectionResetting.spec as AgentsSpec).display_name ?? connectionResetting.id.replace(/^agents:/, "")} 的官方 Provider`}
+          description="将助手恢复为官方默认地址与账号配置。不会删除助手登录状态、密钥变量或其他 Provider 定义；已经打开的助手需要重启后生效。"
+          risk="write-local"
+          riskLabel="重置官方 Provider"
+          confirmLabel="确认重置"
+          executing={configuringTarget === `${connectionResetting.id.replace(/^agents:/, "")}/default`}
+          onConfirm={() => {
+            const agentId = connectionResetting.id.replace(/^agents:/, "");
+            setConnectionResetting(null);
+            void runConfigure(agentId, { use: "" });
+          }}
+          onClose={() => setConnectionResetting(null)}
         />
       )}
 
@@ -838,6 +878,7 @@ export default function AgentsPage({
         <AgentRuntimeDialog
           key={runtimeFormAgent.id}
           agentName={(runtimeFormAgent.spec as AgentsSpec).display_name ?? runtimeFormAgent.id.replace(/^agents:/, "")}
+          adapter={runtimeManagement.adapter}
           fields={runtimeManagement.runtime_fields}
           initial={runtimeSettingsOf(runtimeFormAgent.spec as Record<string, unknown>)}
           currentConfig={(runtimeFormAgent.observed as AgentsObserved).current_config}
@@ -854,14 +895,14 @@ export default function AgentsPage({
 
       {pendingConfigure && (
         <ConfirmModal
-          title={pendingConfigure.reason === "yolo" ? "跳过权限确认" : "覆盖被改过的配置"}
+          title={pendingConfigure.reason === "yolo" ? "完全放开助手权限" : "覆盖被改过的配置"}
           description={
             pendingConfigure.reason === "yolo"
-              ? "写入后这个助手执行命令、改文件都不再征求你同意，任何入口启动它都一样。确认要这么配吗？"
+              ? "这会关闭权限询问，并允许助手脱离工作区沙箱操作；任何入口启动它都一样。只应在可信且已经隔离的环境中使用。"
               : "助手配置文件里本工具写的那几项被改过。继续会用这里的内容替换它们，文件里其余内容不动。"
           }
           risk="write-local"
-          confirmLabel={pendingConfigure.reason === "yolo" ? "确认跳过权限确认" : "确认覆盖"}
+          confirmLabel={pendingConfigure.reason === "yolo" ? "确认完全放开" : "确认覆盖"}
           executing={configuring}
           onConfirm={() => {
             const pending = pendingConfigure;

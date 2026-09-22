@@ -300,7 +300,7 @@ describe("agentDefinitionForm helpers", () => {
     };
 
     expect(runtimeSettingsOf(initial)).toEqual({
-      yolo: true,
+      automation_mode: "full",
       statusline: "builtin",
       unknown_runtime_flag: "keep",
     });
@@ -313,7 +313,7 @@ describe("agentDefinitionForm helpers", () => {
       ...initial,
       settings: {
         active: "relay",
-        yolo: true,
+        automation_mode: "full",
         statusline: "builtin",
         unknown_runtime_flag: "keep",
         future_runtime_option: { mode: "custom" },
@@ -327,9 +327,9 @@ describe("agentDefinitionForm helpers", () => {
   it("运行设置能从无 settings 的定义新增，并在清空最后一个键时移除空对象", () => {
     const enabled = updateAgentRuntimeSettings(
       { display_name: "Codex", bin: "codex" },
-      { yolo: true, codex_web_search: "live" },
+      { automation_mode: "full", codex_web_search: "live" },
     );
-    expect(enabled.settings).toEqual({ yolo: true, codex_web_search: "live" });
+    expect(enabled.settings).toEqual({ automation_mode: "full", codex_web_search: "live" });
     expect(updateAgentRuntimeSettings(enabled, {})).toEqual({
       display_name: "Codex",
       bin: "codex",
@@ -339,7 +339,7 @@ describe("agentDefinitionForm helpers", () => {
   it("后端 schema 校验已知参数、归一化数值，并保留未来参数", () => {
     const fields = agentManagementFixture("codex").runtime_fields;
     const normalized = normalizeAgentRuntimeSettings({
-      yolo: true,
+      automation_mode: "full",
       codex_reasoning_effort: "high",
       codex_context_window: "1000000",
       codex_auto_compact_token_limit: 900000,
@@ -348,7 +348,7 @@ describe("agentDefinitionForm helpers", () => {
     }, fields);
     const configured = updateAgentRuntimeSettings({ bin: "codex" }, normalized);
     expect(configured.settings).toEqual({
-      yolo: true,
+      automation_mode: "full",
       codex_reasoning_effort: "high",
       codex_context_window: 1000000,
       codex_auto_compact_token_limit: 900000,

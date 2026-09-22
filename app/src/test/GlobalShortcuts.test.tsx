@@ -32,7 +32,7 @@ describe("全局快捷键", () => {
     renderWithEngine(<App />, routes());
 
     const nav = await screen.findByRole("navigation");
-    expect(within(nav).getByRole("button", { name: "助手" })).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("heading", { name: "助手" })).toBeInTheDocument();
     // 侧边栏底部的快捷键说明
     expect(screen.getByText("快捷键")).toBeInTheDocument();
     expect(screen.getByText("接入快切")).toBeInTheDocument();
@@ -45,7 +45,7 @@ describe("全局快捷键", () => {
 
     // Ctrl 变体（非 macOS 约定）：先回助手页再用 Ctrl+, 进设置
     await userEvent.click(within(nav).getByRole("button", { name: "助手" }));
-    expect(await screen.findByRole("heading", { name: "助手" })).toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: "助手" })).toHaveAttribute("aria-current", "page");
     await userEvent.keyboard("{Control>},{/Control}");
     expect(within(nav).getByRole("button", { name: "设置" })).toHaveAttribute("aria-current", "page");
   }, 15000);

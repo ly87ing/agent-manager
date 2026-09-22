@@ -570,10 +570,32 @@ fn status_element(
             "auth".into(),
             crate::native_auth::inspect(&config_dir, auth_kind),
         );
-        observed.insert(
-            "current_config".into(),
-            crate::native_agent_settings::inspect_current_config(&config_dir, kind),
-        );
+        let current_config = match kind {
+            crate::native_agent_adapters::AdapterKind::Claude => {
+                crate::native_agent_settings::inspect_current_config(
+                    &crate::native_agent_settings::claude_target(ctx),
+                    kind,
+                )
+            }
+            crate::native_agent_adapters::AdapterKind::Codex => {
+                match crate::native_agent_settings::codex_target(ctx, def.config_path()) {
+                    Ok(target) => {
+                        crate::native_agent_settings::inspect_current_config(&target, kind)
+                    }
+                    Err(_) => {
+                        let raw = def.config_path().unwrap_or("~/.codex/config.toml");
+                        let target = crate::native_mcp::targets::expand_home(raw, &ctx.home_dir);
+                        json!({
+                            "state": "invalid-target",
+                            "file": target.file_name().and_then(|name| name.to_str()).unwrap_or_default(),
+                            "target": target.display().to_string(),
+                            "config": null
+                        })
+                    }
+                }
+            }
+        };
+        observed.insert("current_config".into(), current_config);
     }
 
     let element_id = format!("agents:{}", def.id);

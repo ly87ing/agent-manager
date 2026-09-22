@@ -625,7 +625,7 @@ function AgentForm({
                   className="mt-0.5"
                 />
                 <span>
-                  跳过权限确认
+                  完全放开权限
                   <span className="mt-0.5 block text-xs text-warning">
                     {settingsKind === "codex"
                       ? "它让 Codex 不再征求你同意，也不再受沙箱限制：执行命令、改文件都直接做。保存时会再确认一次。"

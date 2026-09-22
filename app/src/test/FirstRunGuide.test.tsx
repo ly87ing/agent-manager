@@ -1,8 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { waitFor } from "@testing-library/react";
 import AgentsPage from "../pages/AgentsPage";
 import { agentManagementFixture, makeAuditData, makeElement, makeEnvelope, makeMode, makePolicyData } from "./fixtures";
-import { renderWithEngine, screen, userEvent } from "./render-with-engine";
+import { renderWithEngine, screen } from "./render-with-engine";
 import type { Envelope } from "../lib/contract";
 
 /** sqliteLayer=null 表示本机还没保存过任何配置（全新安装）。 */
@@ -42,27 +42,14 @@ describe("首次使用引导", () => {
     window.localStorage.clear();
   });
 
-  it("本机还没保存过配置时出现，并能直接去接管中心", async () => {
-    const onGoTakeover = vi.fn();
-    renderWithEngine(<AgentsPage onGoTakeover={onGoTakeover} />, routes(null));
-
-    const guide = await screen.findByTestId("first-run-guide");
-    expect(guide).toHaveTextContent("三步开始用");
-    // 三步里要说清「哪一步才真的改文件」
-    expect(guide).toHaveTextContent("点「立即同步」才真正写入");
-
-    await userEvent.click(screen.getByTestId("first-run-goto-takeover"));
-    expect(onGoTakeover).toHaveBeenCalledTimes(1);
+  it("全新安装也直接进入 Provider 列表，不展示长篇首次引导", async () => {
+    renderWithEngine(<AgentsPage />, routes(null));
+    await waitFor(() => expect(screen.getByTestId("connection-workbench")).toBeInTheDocument());
+    expect(screen.queryByTestId("first-run-guide")).toBeNull();
   });
 
-  it("点过「不再提示」后消失并记住", async () => {
-    const { unmount } = renderWithEngine(<AgentsPage />, routes(null));
-    await screen.findByTestId("first-run-guide");
-
-    await userEvent.click(screen.getByTestId("first-run-dismiss"));
-    expect(screen.queryByTestId("first-run-guide")).toBeNull();
-
-    unmount();
+  it("旧版首次引导偏好不会让说明重新出现", async () => {
+    window.localStorage.setItem("agent-manager:first-run-guide-dismissed", "false");
     renderWithEngine(<AgentsPage />, routes(null));
     await waitFor(() => expect(screen.getByTestId("connection-workbench")).toBeInTheDocument());
     expect(screen.queryByTestId("first-run-guide")).toBeNull();

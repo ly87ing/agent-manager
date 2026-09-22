@@ -20,26 +20,31 @@ const summary = (label: string, extras: Partial<AgentRuntimeSummary> = {}): Agen
 
 /** 与 Rust 适配器的 status schema 对齐；页面测试只消费契约，不再根据 bin 猜能力。 */
 export function agentManagementFixture(kind: "claude" | "codex"): AgentManagement {
-  const yolo: AgentRuntimeField = {
-    key: "yolo",
-    type: "boolean",
+  const automationMode: AgentRuntimeField = {
+    key: "automation_mode",
+    type: "enum",
+    presentation: "choice_cards",
     section: "权限与执行",
-    section_description: "高风险设置仍会在保存后要求二次确认。",
-    label: "跳过权限确认",
-    description: "开启后执行命令和修改文件不再逐次询问。",
-    danger: true,
-    requires_yolo_confirmation: true,
-    targets: kind === "claude"
-      ? [{ key: "permissions.defaultMode", enabled_value: '"bypassPermissions"' }]
+    section_description: "建议使用智能自动；完全放开会在保存后再次确认。",
+    label: "自动化程度",
+    description: "选择助手如何处理需要权限的操作。",
+    options: kind === "claude"
+      ? [
+          { value: "manual", label: "手动确认", description: "由你确认敏感操作。", targets: [{ key: "permissions.defaultMode", enabled_value: '"manual"' }] },
+          { value: "auto", label: "智能自动", description: "由 Claude 自动判断。", recommended: true, targets: [{ key: "permissions.defaultMode", enabled_value: '"auto"' }] },
+          { value: "full", label: "完全放开", description: "绕过所有权限检查。", danger: true, requires_confirmation: true, targets: [{ key: "permissions.defaultMode", enabled_value: '"bypassPermissions"' }] },
+        ]
       : [
-          { key: "approval_policy", enabled_value: '"never"' },
-          { key: "sandbox_mode", enabled_value: '"danger-full-access"' },
+          { value: "manual", label: "手动确认", description: "保留沙箱，越界操作由你确认。", targets: [{ key: "approval_policy", enabled_value: '"on-request"' }, { key: "sandbox_mode", enabled_value: '"workspace-write"' }, { key: "approvals_reviewer", enabled_value: '"user"' }] },
+          { value: "auto", label: "智能自动", description: "保留沙箱，由审查器自动判断。", recommended: true, targets: [{ key: "approval_policy", enabled_value: '"on-request"' }, { key: "sandbox_mode", enabled_value: '"workspace-write"' }, { key: "approvals_reviewer", enabled_value: '"auto_review"' }] },
+          { value: "full", label: "完全放开", description: "不询问且移除沙箱。", danger: true, requires_confirmation: true, targets: [{ key: "approval_policy", enabled_value: '"never"' }, { key: "sandbox_mode", enabled_value: '"danger-full-access"' }] },
         ],
-    summary: summary("权限确认", { enabled: "已跳过" }),
+    targets: [],
+    summary: summary("自动化", { values: { manual: "手动确认", auto: "智能自动", full: "完全放开" } }),
   };
   const fields: AgentRuntimeField[] = kind === "claude"
     ? [
-        yolo,
+        automationMode,
         {
           key: "statusline", type: "enum", section: "界面与模型行为", label: "状态栏",
           description: "选择是否使用本地用量状态栏。",
@@ -73,7 +78,7 @@ export function agentManagementFixture(kind: "claude" | "codex"): AgentManagemen
         })),
       ]
     : [
-        yolo,
+        automationMode,
         {
           key: "codex_reasoning_effort", type: "enum", section: "模型与上下文", label: "推理强度",
           description: "选择 Codex 的模型推理强度。",

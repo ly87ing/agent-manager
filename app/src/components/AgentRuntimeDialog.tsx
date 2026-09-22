@@ -22,16 +22,55 @@ function targetValue(target: AgentRuntimeTarget, value: unknown): string {
   return typeof value === "string" ? JSON.stringify(value) : String(value);
 }
 
+function targetsFor(field: AgentRuntimeField, value: unknown): AgentRuntimeTarget[] {
+  const option = field.options?.find((candidate) => candidate.value === value);
+  return option?.targets ?? field.targets;
+}
+
 function FieldHints({ field, value }: { field: AgentRuntimeField; value: unknown }) {
   return (
     <span className="mt-1 block space-y-0.5 break-all font-mono text-[11px] text-muted-foreground">
-      {field.targets.map((target) => (
+      {targetsFor(field, value).map((target) => (
         <span key={target.key} className="block">
           {target.key} = {targetValue(target, value)}
         </span>
       ))}
     </span>
   );
+}
+
+function previewValue(target: AgentRuntimeTarget, value: unknown): unknown {
+  if (!target.enabled_value) return value;
+  try {
+    return JSON.parse(target.enabled_value);
+  } catch {
+    return target.enabled_value;
+  }
+}
+
+function runtimePreview(adapter: string, fields: AgentRuntimeField[], settings: AgentRuntimeSettings): string {
+  const entries = fields.flatMap((field) => {
+    const value = settings[field.key];
+    if (value === undefined || value === null || value === "" || value === false) return [];
+    return targetsFor(field, value).map((target) => [target.key, previewValue(target, value)] as const);
+  });
+  if (adapter === "codex") {
+    return entries.length > 0
+      ? `${entries.map(([key, value]) => `${key} = ${JSON.stringify(value)}`).join("\n")}\n`
+      : "# 未设置运行覆盖，使用 Codex 默认值\n";
+  }
+  const root: Record<string, unknown> = {};
+  for (const [key, value] of entries) {
+    const parts = key.split(".");
+    let cursor = root;
+    for (const part of parts.slice(0, -1)) {
+      const next = cursor[part];
+      if (!next || typeof next !== "object" || Array.isArray(next)) cursor[part] = {};
+      cursor = cursor[part] as Record<string, unknown>;
+    }
+    cursor[parts[parts.length - 1]] = value;
+  }
+  return JSON.stringify(root, null, 2);
 }
 
 function RuntimeField({
@@ -74,6 +113,53 @@ function RuntimeField({
   if (field.type === "enum") {
     const selected = typeof value === "string" ? value : "";
     const options = field.options ?? [];
+    if (field.presentation === "choice_cards") {
+      return (
+        <fieldset data-testid={testIdOf(field)} className="col-span-full rounded-lg border bg-background p-3">
+          <legend className="px-1 font-medium text-foreground">{field.label}</legend>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">{field.description}</p>
+          <div className="mt-3 grid gap-2 md:grid-cols-3">
+            {options.map((option) => {
+              const checked = option.value === selected;
+              return (
+                <label
+                  key={option.value}
+                  className={cn(
+                    "cursor-pointer rounded-lg border p-3 transition-colors",
+                    checked ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:bg-accent/50",
+                    option.danger && "border-destructive/30 bg-destructive/5",
+                    disabled && "cursor-not-allowed opacity-60",
+                  )}
+                >
+                  <span className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name={field.key}
+                      value={option.value}
+                      checked={checked}
+                      disabled={disabled}
+                      data-testid={`${testIdOf(field)}-${option.value}`}
+                      onChange={() => onChange(option.value)}
+                    />
+                    <span className="font-medium text-foreground">{option.label}</span>
+                    {option.recommended && (
+                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">推荐</span>
+                    )}
+                    {option.danger && (
+                      <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive">高风险</span>
+                    )}
+                  </span>
+                  {option.description && (
+                    <span className="mt-2 block text-xs leading-5 text-muted-foreground">{option.description}</span>
+                  )}
+                  <FieldHints field={{ ...field, targets: option.targets ?? [] }} value={option.value} />
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
+      );
+    }
     const hasDefault = options.some((option) => option.value === "");
     return (
       <label className="rounded-lg border bg-background p-3 text-foreground">
@@ -123,9 +209,10 @@ function RuntimeField({
   );
 }
 
-/** 后端 schema 驱动的运行设置编辑器；JSON 模式完整保留尚未认识的设置键。 */
+/** 后端 schema 驱动的运行设置编辑器；表单修改后可即时查看真实目标键值。 */
 export function AgentRuntimeDialog({
   agentName,
+  adapter,
   fields,
   initial,
   currentConfig,
@@ -135,6 +222,7 @@ export function AgentRuntimeDialog({
   onClose,
 }: {
   agentName: string;
+  adapter: string;
   fields: AgentRuntimeField[];
   initial: AgentRuntimeSettings;
   currentConfig?: AgentCurrentConfigStatus | null;
@@ -148,8 +236,7 @@ export function AgentRuntimeDialog({
     typeof document === "undefined" ? null : (document.activeElement as HTMLElement | null),
   );
   const [settings, setSettings] = useState<AgentRuntimeSettings>(initial);
-  const [mode, setMode] = useState<"form" | "json" | "observed">("form");
-  const [rawText, setRawText] = useState(() => JSON.stringify(initial, null, 2));
+  const [mode, setMode] = useState<"form" | "preview" | "observed">("form");
   const [localError, setLocalError] = useState<string | null>(null);
 
   useLayoutEffect(() => {
@@ -184,44 +271,14 @@ export function AgentRuntimeDialog({
     }
   };
 
-  const readRaw = (): AgentRuntimeSettings | null => {
-    try {
-      const parsed = JSON.parse(rawText) as unknown;
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new Error("运行设置 JSON 必须是对象");
-      }
-      return parsed as AgentRuntimeSettings;
-    } catch (err) {
-      setLocalError(err instanceof Error ? err.message : String(err));
-      return null;
-    }
-  };
-
-  const switchMode = (next: "form" | "json" | "observed") => {
-    if (next === mode) return;
-    if (next === "observed" || mode === "observed") {
-      setLocalError(null);
-      setMode(next);
-      return;
-    }
-    if (next === "json") {
-      setRawText(JSON.stringify(settings, null, 2));
-      setLocalError(null);
-      setMode(next);
-      return;
-    }
-    const parsed = readRaw();
-    if (!parsed) return;
-    setSettings(parsed);
+  const switchMode = (next: "form" | "preview" | "observed") => {
     setLocalError(null);
     setMode(next);
   };
 
   const submit = () => {
-    const candidate = mode === "json" ? readRaw() : settings;
-    if (!candidate) return;
     try {
-      const normalized = normalizeAgentRuntimeSettings(candidate, fields);
+      const normalized = normalizeAgentRuntimeSettings(settings, fields);
       setLocalError(null);
       onSubmit(normalized);
     } catch (err) {
@@ -268,12 +325,12 @@ export function AgentRuntimeDialog({
           </button>
           <button
             type="button"
-            aria-pressed={mode === "json"}
-            data-testid="agent-runtime-json-mode"
-            onClick={() => switchMode("json")}
-            className={cn("inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm", mode === "json" ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent")}
+            aria-pressed={mode === "preview"}
+            data-testid="agent-runtime-preview-mode"
+            onClick={() => switchMode("preview")}
+            className={cn("inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm", mode === "preview" ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent")}
           >
-            <Braces className="h-4 w-4" aria-hidden /> 已纳管 JSON
+            <Braces className="h-4 w-4" aria-hidden /> 写入预览
           </button>
           <button
             type="button"
@@ -320,21 +377,24 @@ export function AgentRuntimeDialog({
                 官方账号仍在助手自身完成登录；本工具不读取账号密码或令牌明文。
               </p>
             </div>
-          ) : mode === "json" ? (
+          ) : mode === "preview" ? (
             <div className="space-y-3">
-              <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs leading-5 text-muted-foreground">
-                这里是数据库中的完整运行设置，不含由接入工作台管理的 <code>profiles</code> 和 <code>active</code>。
-                未知键会原样保留，待新版适配器支持后即可生效；当前适配器不会把未知键写入客户端。不要在这里填写凭据明文。
+              <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-3 text-sm text-foreground">
+                <span className="text-muted-foreground">保存后写入：</span>{" "}
+                <code data-testid="agent-runtime-target" className="break-all font-semibold">
+                  {currentConfig?.target ?? currentConfig?.file ?? "目标文件暂不可用"}
+                </code>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  下方是 Agent Manager 负责的最终配置值；目标文件中的其他配置保持不变。返回“按项填写”可直接修改。
+                </p>
               </div>
-              <textarea
-                aria-label="运行设置 JSON 原文"
-                data-testid="agent-runtime-json"
-                value={rawText}
-                disabled={busy}
-                onChange={(event) => setRawText(event.target.value)}
-                spellCheck={false}
-                className="min-h-[24rem] w-full resize-y rounded-lg border border-input bg-slate-950 p-4 font-mono text-xs leading-5 text-slate-100"
-              />
+              <pre
+                aria-label="最终写入配置预览"
+                data-testid="agent-runtime-preview"
+                className="min-h-[24rem] w-full overflow-auto rounded-lg border border-input bg-slate-950 p-4 font-mono text-xs leading-5 text-slate-100"
+              >
+                {runtimePreview(adapter, fields, settings)}
+              </pre>
             </div>
           ) : (
             <div className="space-y-3">

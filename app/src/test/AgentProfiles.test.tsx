@@ -131,8 +131,14 @@ function routes(profiles: ReturnType<typeof profileElement>[] = [profileElement(
 }
 
 describe("助手实例", () => {
+  async function openInstanceManager() {
+    await userEvent.click(await screen.findByTestId("manage-instances-button"));
+    return screen.findByRole("dialog", { name: "隔离实例" });
+  }
+
   it("实例单独成卡，展示配置目录与启动方式，不混进主助手列表", async () => {
     renderWithEngine(<AgentsPage />, routes());
+    await openInstanceManager();
     const card = await screen.findByTestId("profile-card-cc-ly");
     expect(within(card).getByText("Claude Code · ly")).toBeInTheDocument();
     expect(card).toHaveTextContent("~/.claude-cc-ly");
@@ -159,6 +165,7 @@ describe("助手实例", () => {
 
   it("复制实例：预填内容但名称与配置目录可改，且默认换了目录", async () => {
     renderWithEngine(<AgentsPage />, routes());
+    await openInstanceManager();
     const card = await screen.findByTestId("profile-card-cc-ly");
     await userEvent.click(within(card).getByTestId("profile-duplicate-cc-ly"));
     const dialog = await screen.findByRole("dialog", { name: "新建实例" });
@@ -171,6 +178,7 @@ describe("助手实例", () => {
 
   it("新建实例：保存定义并把启动命令一并存成同名快捷命令，不落地任何配置", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
+    await openInstanceManager();
     await userEvent.click(await screen.findByTestId("add-profile-button"));
     const dialog = await screen.findByRole("dialog", { name: "新建实例" });
     await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-work");
@@ -204,6 +212,7 @@ describe("助手实例", () => {
 
   it("新建实例使用整页分组编辑器，并实时列出全部落地位置与启动值", async () => {
     renderWithEngine(<AgentsPage />, routes());
+    await openInstanceManager();
     await userEvent.click(await screen.findByTestId("add-profile-button"));
     const dialog = await screen.findByRole("dialog", { name: "新建实例" });
 
@@ -224,6 +233,7 @@ describe("助手实例", () => {
 
   it("实例表单同样给出该助手的常用参数", async () => {
     renderWithEngine(<AgentsPage />, routes());
+    await openInstanceManager();
     await userEvent.click(await screen.findByTestId("add-profile-button"));
     const dialog = await screen.findByRole("dialog", { name: "新建实例" });
     // 归属助手是 Claude Code，因此给 Claude 的预设
@@ -236,6 +246,7 @@ describe("助手实例", () => {
 
   it("写入配置触发 profiles:apply，限定在该实例", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
+    await openInstanceManager();
     await userEvent.click(await screen.findByTestId("profile-apply-cc-ly"));
     await waitFor(() => expect(calls.some((call) => call.command === "profiles:apply")).toBe(true));
     const apply = calls.find((call) => call.command === "profiles:apply")!;
@@ -246,6 +257,7 @@ describe("助手实例", () => {
   it("配置被外部改过时按钮转为接管，并显式带接管旗标", async () => {
     const drifted = profileElement({ state: "drifted", observed: { install_source: null, ...profileElement().observed, target_exists: true, config_dir_exists: true } });
     const { calls } = renderWithEngine(<AgentsPage />, routes([drifted]));
+    await openInstanceManager();
     const button = await screen.findByTestId("profile-apply-cc-ly");
     expect(button).toHaveTextContent("接管并写入");
     await userEvent.click(button);
@@ -263,11 +275,13 @@ describe("助手实例", () => {
         env_refs: [{ name: "ANTHROPIC_AUTH_TOKEN", kind: "reference", variable: "MY_TOKEN", resolved: false }] },
     });
     renderWithEngine(<AgentsPage />, routes([missing]));
+    await openInstanceManager();
     expect(await screen.findByTestId("profile-missing-vars-cc-ly")).toHaveTextContent("MY_TOKEN");
   });
 
   it("移除实例需确认，且只停止管理、不动配置目录", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
+    await openInstanceManager();
     await userEvent.click(await screen.findByTestId("profile-remove-cc-ly"));
     expect(await screen.findByText(/配置目录、登录状态与里面的内容都原样保留/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "确认移除" }));

@@ -150,6 +150,33 @@ describe("McpPage 服务库 + 助手中的服务", () => {
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
   });
 
+  it("全部纳管并同步部分失败：Toast 只给可操作摘要，不塞入超长内部错误", async () => {
+    const longError = "凭证变量未配置: NODE_REPL_INSTRUCTIONS_USE_CASE_BROWSER, NODE_REPL_INSTRUCTIONS_USE_CASE_CHROME";
+    const routes: Parameters<typeof renderWithEngine>[1] = {
+      ...mcpRoutes(),
+      "mcp:apply": async (args: string[]) => args.includes("mcp:serena")
+        ? makeEnvelope({}, {
+            command: "mcp.apply",
+            ok: false,
+            errors: [{ code: "MCP_ERROR", element: "mcp:serena", message: longError }],
+          })
+        : makeEnvelope(makeApplyResult({ domain: "mcp" }), { command: "mcp.apply" }),
+    };
+    const toastErrorSpy = vi.spyOn(toast, "error");
+
+    renderWithEngine(<McpPage />, routes);
+    await userEvent.click(await screen.findByTestId("sync-all-mcp"));
+    await userEvent.click(await screen.findByTestId("confirm-modal-confirm"));
+
+    await waitFor(() => expect(toastErrorSpy).toHaveBeenCalled());
+    const [summary, options] = toastErrorSpy.mock.calls[toastErrorSpy.mock.calls.length - 1];
+    expect(summary).toBe("纳管并同步完成：成功 1，失败 1");
+    expect(options?.description).toContain("serena");
+    expect(options?.description).toContain("完整原因见操作记录");
+    expect(options?.description).not.toContain("NODE_REPL_INSTRUCTIONS");
+    toastErrorSpy.mockRestore();
+  });
+
   it("全部纳管并同步：把发现的未导入服务先保存定义、接取变量并写回受管标记", async () => {
     const routes = mcpRoutes();
     const status = routes["mcp:status"] as ReturnType<typeof makeEnvelope<StatusData>>;

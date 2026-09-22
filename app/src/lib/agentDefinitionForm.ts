@@ -18,7 +18,7 @@ export interface AgentFormValues {
   connections: ConnectionEntry[];
   /** 当前生效的那套的 name；空表示都不生效（用助手默认地址与账号）。 */
   activeConnection: string;
-  /** 跳过权限确认：改的是助手的安全默认值，保存前要二次确认。 */
+  /** 兼容旧定义编辑器的“完全放开”开关；持久化为 automation_mode=full。 */
   yolo: boolean;
   /** 状态栏由谁维护。 */
   statusline: "untouched" | "builtin";
@@ -523,7 +523,7 @@ function readAgentSettings(
   return {
     connections,
     activeConnection: typeof obj.active === "string" ? obj.active : "",
-    yolo: obj.yolo === true,
+    yolo: obj.yolo === true || obj.automation_mode === "full",
     statusline: obj.statusline === "builtin" ? "builtin" : "untouched",
   };
 }
@@ -547,7 +547,7 @@ export function buildAgentSettings(formValues: AgentFormValues): Record<string, 
     const active = formValues.activeConnection.trim();
     if (active && profiles[active]) settings.active = active;
   }
-  if (formValues.yolo) settings.yolo = true;
+  if (formValues.yolo) settings.automation_mode = "full";
   if (formValues.statusline === "builtin") settings.statusline = "builtin";
   return Object.keys(settings).length > 0 ? settings : undefined;
 }
@@ -566,17 +566,20 @@ export function runtimeSettingsOf(
   const settings = raw && typeof raw === "object" && !Array.isArray(raw)
     ? (raw as Record<string, unknown>)
     : {};
-  return Object.fromEntries(
+  const runtime = Object.fromEntries(
     Object.entries(settings)
-      .filter(([key]) => key !== "profiles" && key !== "active")
+      .filter(([key]) => key !== "profiles" && key !== "active" && key !== "yolo")
       .map(([key, value]) => [key, JSON.parse(JSON.stringify(value))]),
   );
+  if (typeof runtime.automation_mode !== "string") {
+    runtime.automation_mode = settings.yolo === true ? "full" : "manual";
+  }
+  return runtime;
 }
 
 /**
  * 用完整运行设置文档替换定义里的运行设置，同时保留接入 profiles/active 与定义其他字段。
- * 表单模式从 runtimeSettingsOf 开始编辑，因此未知运行键也会原样保留；JSON 模式则允许研发
- * 明确新增或删除未知键，等待新版适配器接管。
+ * 表单模式从 runtimeSettingsOf 开始编辑，因此未知运行键也会原样保留。
  */
 export function updateAgentRuntimeSettings(
   definition: Record<string, unknown>,
@@ -590,7 +593,9 @@ export function updateAgentRuntimeSettings(
   const settings: Record<string, unknown> = {};
   if (previous.profiles !== undefined) settings.profiles = previous.profiles;
   if (previous.active !== undefined) settings.active = previous.active;
-  for (const [key, value] of Object.entries(runtime)) settings[key] = value;
+  for (const [key, value] of Object.entries(runtime)) {
+    if (key !== "yolo") settings[key] = value;
+  }
 
   if (Object.keys(settings).length > 0) next.settings = settings;
   else delete next.settings;
@@ -647,7 +652,13 @@ export function runtimeRequiresYoloConfirmation(
   runtime: AgentRuntimeSettings,
   fields: AgentRuntimeField[],
 ): boolean {
-  return fields.some((field) => field.requires_yolo_confirmation && runtime[field.key] === true);
+  return fields.some((field) => {
+    const value = runtime[field.key];
+    if (field.requires_yolo_confirmation && value === true) return true;
+    return field.options?.some(
+      (option) => option.value === value && option.requires_confirmation === true,
+    ) === true;
+  });
 }
 
 /** 定义里当前生效的接入配置名；没有就返回 null。 */

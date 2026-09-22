@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import App from "../App";
-import { makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode } from "./fixtures";
+import { agentManagementFixture, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 import { setSettingsClient } from "../lib/settings";
 import type { SettingsData } from "../lib/contract";
@@ -93,7 +93,7 @@ describe("App 顶层导航收敛为日常八项", () => {
               domain: "agents",
               spec: { display_name: "Claude Code", bin: "claude", preferred_provider: "npm", providers: { npm: { managed: true } } },
               policy: { enabled: true },
-              observed: { install_source: "npm", installed: true },
+              observed: { install_source: "npm", installed: true, management: agentManagementFixture("claude") },
               state: "managed-ok",
               freshness: makeFreshness(),
               actions: [],
@@ -181,6 +181,7 @@ describe("App 顶层导航收敛为日常八项", () => {
     renderWithEngine(<App />, customRoutes);
 
     // 默认助手页，点击独立实例的「管理技能」
+    await userEvent.click(await screen.findByTestId("manage-instances-button"));
     const manageBtn = await screen.findByTestId("profile-skills-cc-work");
     await userEvent.click(manageBtn);
 

@@ -27,6 +27,11 @@ export interface AgentRuntimeTarget {
 export interface AgentRuntimeOption {
   value: string;
   label: string;
+  description?: string;
+  recommended?: boolean;
+  danger?: boolean;
+  requires_confirmation?: boolean;
+  targets?: AgentRuntimeTarget[];
 }
 
 export interface AgentRuntimeSummary {
@@ -39,6 +44,7 @@ export interface AgentRuntimeSummary {
 export interface AgentRuntimeField {
   key: string;
   type: "boolean" | "enum" | "positive_integer" | string;
+  presentation?: "choice_cards" | string;
   section: string;
   section_description?: string;
   label: string;
@@ -98,6 +104,8 @@ export interface AgentCurrentConfig {
 export interface AgentCurrentConfigStatus {
   state: "missing" | "ready" | "invalid" | "unsafe" | "unreadable" | "too-large" | string;
   file: string;
+  /** 运行设置保存时使用的真实目标文件。 */
+  target?: string;
   config?: AgentCurrentConfig | null;
 }
 

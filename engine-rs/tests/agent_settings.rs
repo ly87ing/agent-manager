@@ -217,6 +217,21 @@ fn yolo_没有显式确认标志一律拒绝() {
 }
 
 #[test]
+fn claude_智能自动写入_auto_且不需要高风险确认() {
+    let (base, ctx) = temp_ctx("claude-auto");
+    define_settings(&ctx, json!({"automation_mode": "auto"}));
+
+    let result = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:claude-code"]),
+    );
+    assert!(result.ok, "{:?}", result.errors);
+    assert_eq!(settings_file(&ctx)["permissions"]["defaultMode"], "auto");
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
 fn 令牌只存变量名_取不到值时拒绝写入_审计不记取值() {
     let (base, ctx) = temp_ctx("token");
     define(&ctx, json!({"token_var": "MY_GATEWAY_TOKEN"}));
@@ -899,7 +914,7 @@ fn codex_切换与切回默认_上一套的接入方式不残留() {
 }
 
 #[test]
-fn codex_跳过权限确认写审批与沙箱_关掉则撤回() {
+fn codex_完全放开写审批与沙箱_切回手动写明安全值() {
     let (base, ctx) = temp_ctx("codex-yolo");
     fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
     define_codex(&ctx, json!({"yolo": true}));
@@ -922,7 +937,7 @@ fn codex_跳过权限确认写审批与沙箱_关掉则撤回() {
     assert!(after.contains("approval_policy = \"never\""));
     assert!(after.contains("sandbox_mode = \"danger-full-access\""));
 
-    // 关掉：我们写的那两项撤回
+    // 切回手动：写出最终生效值，便于用户直接审查，而不是依赖客户端隐式默认。
     define_codex(&ctx, json!({}));
     assert!(
         execute(
@@ -932,8 +947,28 @@ fn codex_跳过权限确认写审批与沙箱_关掉则撤回() {
         .ok
     );
     let after = codex_config(&ctx);
-    assert!(!after.contains("approval_policy"));
-    assert!(!after.contains("sandbox_mode"));
+    assert!(after.contains("approval_policy = \"on-request\""));
+    assert!(after.contains("sandbox_mode = \"workspace-write\""));
+    assert!(after.contains("approvals_reviewer = \"user\""));
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn codex_智能自动保留沙箱并启用自动审查() {
+    let (base, ctx) = temp_ctx("codex-auto");
+    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
+    define_codex(&ctx, json!({"automation_mode": "auto"}));
+
+    let result = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:codex"]),
+    );
+    assert!(result.ok, "{:?}", result.errors);
+    let after = codex_config(&ctx);
+    assert!(after.contains("approval_policy = \"on-request\""));
+    assert!(after.contains("sandbox_mode = \"workspace-write\""));
+    assert!(after.contains("approvals_reviewer = \"auto_review\""));
 
     let _ = fs::remove_dir_all(&base);
 }

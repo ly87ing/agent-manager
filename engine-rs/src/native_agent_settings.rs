@@ -52,6 +52,39 @@ const CLAUDE_OWNED_PATHS: &[&[&str]] = &[
     &["attribution", "pr"],
 ];
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AutomationMode {
+    #[default]
+    Manual,
+    Auto,
+    Full,
+}
+
+impl AutomationMode {
+    fn parse(obj: &Map<String, Value>) -> Result<Self> {
+        let legacy_full = obj.get("yolo").and_then(Value::as_bool).unwrap_or(false);
+        let mode = match non_empty(obj.get("automation_mode")).as_deref() {
+            None => {
+                if legacy_full {
+                    Self::Full
+                } else {
+                    Self::Manual
+                }
+            }
+            Some("manual") => Self::Manual,
+            Some("auto") => Self::Auto,
+            Some("full") => Self::Full,
+            Some(other) => {
+                bail!("settings.automation_mode 只能是 manual / auto / full，收到 {other}")
+            }
+        };
+        if legacy_full && mode != Self::Full {
+            bail!("settings.yolo=true 与 settings.automation_mode 冲突");
+        }
+        Ok(mode)
+    }
+}
+
 const MAX_CLIENT_CONFIG_BYTES: u64 = 4 * 1024 * 1024;
 
 fn read_observed_config(
@@ -104,7 +137,11 @@ fn claude_observed_config(bytes: &[u8]) -> Option<Value> {
         "timeout_ms": string_at(&value, &["env", "API_TIMEOUT_MS"]),
         "credential": {"configured": credential_kind.is_some(), "kind": credential_kind, "variable": null},
         "runtime": {
-            "yolo": string_at(&value, &["permissions", "defaultMode"]) == Some("bypassPermissions"),
+            "automation_mode": match string_at(&value, &["permissions", "defaultMode"]) {
+                Some("auto") => "auto",
+                Some("bypassPermissions") => "full",
+                _ => "manual"
+            },
             "claude_effort_level": string_at(&value, &["env", "CLAUDE_CODE_EFFORT_LEVEL"]),
             "claude_tool_search": string_at(&value, &["env", "ENABLE_TOOL_SEARCH"]) == Some("true"),
             "claude_agent_teams": string_at(&value, &["env", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"]) == Some("1"),
@@ -131,8 +168,16 @@ fn codex_observed_config(bytes: &[u8]) -> Option<Value> {
         "timeout_ms": provider_config.and_then(|table| table.get("stream_idle_timeout_ms")).and_then(toml::Value::as_integer),
         "credential": {"configured": env_key.is_some(), "kind": env_key.map(|_| "env"), "variable": env_key},
         "runtime": {
-            "yolo": root.get("approval_policy").and_then(toml::Value::as_str) == Some("never")
-                && root.get("sandbox_mode").and_then(toml::Value::as_str) == Some("danger-full-access"),
+            "automation_mode": if root.get("approval_policy").and_then(toml::Value::as_str) == Some("never")
+                && root.get("sandbox_mode").and_then(toml::Value::as_str) == Some("danger-full-access") {
+                "full"
+            } else if root.get("approval_policy").and_then(toml::Value::as_str) == Some("on-request")
+                && root.get("sandbox_mode").and_then(toml::Value::as_str) == Some("workspace-write")
+                && root.get("approvals_reviewer").and_then(toml::Value::as_str) == Some("auto_review") {
+                "auto"
+            } else {
+                "manual"
+            },
             "codex_reasoning_effort": root.get("model_reasoning_effort").and_then(toml::Value::as_str),
             "codex_web_search": root.get("web_search").and_then(toml::Value::as_str),
             "codex_context_window": root.get("model_context_window").and_then(toml::Value::as_integer),
@@ -142,24 +187,29 @@ fn codex_observed_config(bytes: &[u8]) -> Option<Value> {
 }
 
 /// 只读客户端当前配置，输出固定脱敏结构；不会返回 Claude 写入文件中的真实 token。
-pub(crate) fn inspect_current_config(config_dir: &std::path::Path, kind: Kind) -> Value {
-    let file = match kind {
-        Kind::Claude => "settings.json",
-        Kind::Codex => CODEX_CONFIG,
-    };
-    let path = config_dir.join(file);
+/// `path` 必须与真实写入目标一致，状态响应据此告诉界面最终会写进哪个文件。
+pub(crate) fn inspect_current_config(path: &std::path::Path, kind: Kind) -> Value {
+    let file = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    let target = path.display().to_string();
     let bytes = match read_observed_config(&path) {
         Ok(Some(bytes)) => bytes,
-        Ok(None) => return json!({"state": "missing", "file": file, "config": null}),
-        Err(state) => return json!({"state": state, "file": file, "config": null}),
+        Ok(None) => {
+            return json!({"state": "missing", "file": file, "target": target, "config": null})
+        }
+        Err(state) => {
+            return json!({"state": state, "file": file, "target": target, "config": null})
+        }
     };
     let config = match kind {
         Kind::Claude => claude_observed_config(&bytes),
         Kind::Codex => codex_observed_config(&bytes),
     };
     match config {
-        Some(config) => json!({"state": "ready", "file": file, "config": config}),
-        None => json!({"state": "invalid", "file": file, "config": null}),
+        Some(config) => json!({"state": "ready", "file": file, "target": target, "config": config}),
+        None => json!({"state": "invalid", "file": file, "target": target, "config": null}),
     }
 }
 
@@ -243,8 +293,8 @@ pub(crate) struct AgentSettings {
     /// 当前生效的接入配置名。
     pub(crate) active: Option<String>,
     pub(crate) profiles: BTreeMap<String, ConnectionProfile>,
-    /// 跳过权限确认。改的是助手的安全默认值，调用方负责二次确认。
-    pub(crate) yolo: bool,
+    /// 自动化程度；完全放开时调用方负责二次确认。
+    pub(crate) automation_mode: AutomationMode,
     pub(crate) statusline: StatusLine,
     pub(crate) claude_tool_search: bool,
     pub(crate) claude_agent_teams: bool,
@@ -399,7 +449,7 @@ pub(crate) fn parse(spec: &Value) -> Result<AgentSettings> {
     Ok(AgentSettings {
         active,
         profiles,
-        yolo: obj.get("yolo").and_then(Value::as_bool).unwrap_or(false),
+        automation_mode: AutomationMode::parse(obj)?,
         statusline: StatusLine::parse(obj.get("statusline"))?,
         claude_tool_search: obj
             .get("claude_tool_search")
@@ -605,12 +655,28 @@ pub(crate) fn render_claude(
         }
     }
 
-    if settings.yolo {
-        path_set(
-            &mut root,
-            &["permissions", "defaultMode"],
-            Value::String("bypassPermissions".into()),
-        );
+    match settings.automation_mode {
+        AutomationMode::Manual => {
+            path_set(
+                &mut root,
+                &["permissions", "defaultMode"],
+                Value::String("manual".into()),
+            );
+        }
+        AutomationMode::Auto => {
+            path_set(
+                &mut root,
+                &["permissions", "defaultMode"],
+                Value::String("auto".into()),
+            );
+        }
+        AutomationMode::Full => {
+            path_set(
+                &mut root,
+                &["permissions", "defaultMode"],
+                Value::String("bypassPermissions".into()),
+            );
+        }
     }
 
     if settings.claude_tool_search {
@@ -688,6 +754,7 @@ const CODEX_OWNED_KEYS: &[&str] = &[
     "model",
     "approval_policy",
     "sandbox_mode",
+    "approvals_reviewer",
     "model_reasoning_effort",
     "model_context_window",
     "model_auto_compact_token_limit",
@@ -928,9 +995,21 @@ pub(crate) fn render_codex(existing: &str, settings: &AgentSettings) -> Result<S
         }
     }
 
-    if settings.yolo {
-        text = toml_set_root_key(&text, "approval_policy", Some("\"never\""));
-        text = toml_set_root_key(&text, "sandbox_mode", Some("\"danger-full-access\""));
+    match settings.automation_mode {
+        AutomationMode::Manual => {
+            text = toml_set_root_key(&text, "approval_policy", Some("\"on-request\""));
+            text = toml_set_root_key(&text, "sandbox_mode", Some("\"workspace-write\""));
+            text = toml_set_root_key(&text, "approvals_reviewer", Some("\"user\""));
+        }
+        AutomationMode::Auto => {
+            text = toml_set_root_key(&text, "approval_policy", Some("\"on-request\""));
+            text = toml_set_root_key(&text, "sandbox_mode", Some("\"workspace-write\""));
+            text = toml_set_root_key(&text, "approvals_reviewer", Some("\"auto_review\""));
+        }
+        AutomationMode::Full => {
+            text = toml_set_root_key(&text, "approval_policy", Some("\"never\""));
+            text = toml_set_root_key(&text, "sandbox_mode", Some("\"danger-full-access\""));
+        }
     }
     if let Some(value) = settings.codex_reasoning_effort.as_deref() {
         text = toml_set_root_key(
@@ -1156,10 +1235,10 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
         settings.active = Some(name.to_string());
     }
 
-    if settings.yolo && !req.flag("--allow-yolo") {
+    if settings.automation_mode == AutomationMode::Full && !req.flag("--allow-yolo") {
         return Err(DispatchError::new(
             "AGENT_ERROR",
-            "跳过权限确认会改掉助手的安全默认值，需要显式确认后再执行".to_string(),
+            "完全放开会关闭权限询问与沙箱，需要显式确认后再执行".to_string(),
         ));
     }
 
@@ -1271,7 +1350,11 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
                 "active": active,
                 "profiles": settings.profiles.len(),
                 "token_var": settings.current().and_then(|p| p.token_var.clone()),
-                "yolo": settings.yolo,
+                "automation_mode": match settings.automation_mode {
+                    AutomationMode::Manual => "manual",
+                    AutomationMode::Auto => "auto",
+                    AutomationMode::Full => "full",
+                },
                 "statusline": kind == Kind::Claude && settings.statusline == StatusLine::Builtin,
             })),
         )?;
@@ -1453,7 +1536,7 @@ mod tests {
     }
 
     #[test]
-    fn 清空某项只删自己那条_不碰同级也不留空壳() {
+    fn 清空普通项只删自己那条_自动化模式写明安全值_且不碰同级() {
         let existing = serde_json::to_vec(&json!({
             "env": {"ANTHROPIC_BASE_URL": "https://old.example.com", "MY_OWN": "keep-me"},
             "permissions": {"defaultMode": "bypassPermissions", "allow": ["Bash(ls:*)"]}
@@ -1470,7 +1553,7 @@ mod tests {
 
         assert!(parsed["env"].get("ANTHROPIC_BASE_URL").is_none());
         assert_eq!(parsed["env"]["MY_OWN"], "keep-me", "同级的别人的变量要留着");
-        assert!(parsed["permissions"].get("defaultMode").is_none());
+        assert_eq!(parsed["permissions"]["defaultMode"], "manual");
         assert_eq!(
             parsed["permissions"]["allow"][0], "Bash(ls:*)",
             "同级的 allow 要留着"
@@ -1614,8 +1697,12 @@ stream_idle_timeout_ms = 450000
 "#;
         std::fs::write(codex.join(CODEX_CONFIG), codex_bytes).unwrap();
 
-        let claude_status = inspect_current_config(&claude, Kind::Claude);
+        let claude_status = inspect_current_config(&claude.join("settings.json"), Kind::Claude);
         assert_eq!(claude_status["state"], "ready");
+        assert_eq!(
+            claude_status["target"],
+            claude.join("settings.json").display().to_string()
+        );
         assert_eq!(
             claude_status["config"]["base_url"],
             "https://relay.example.com"
@@ -1634,8 +1721,12 @@ stream_idle_timeout_ms = 450000
             claude_bytes
         );
 
-        let codex_status = inspect_current_config(&codex, Kind::Codex);
+        let codex_status = inspect_current_config(&codex.join(CODEX_CONFIG), Kind::Codex);
         assert_eq!(codex_status["state"], "ready");
+        assert_eq!(
+            codex_status["target"],
+            codex.join(CODEX_CONFIG).display().to_string()
+        );
         assert_eq!(codex_status["config"]["provider"], "relay");
         assert_eq!(
             codex_status["config"]["credential"]["variable"],
@@ -1660,7 +1751,7 @@ stream_idle_timeout_ms = 450000
         let _ = std::fs::remove_dir_all(&root);
         let missing = root.join("missing");
         assert_eq!(
-            inspect_current_config(&missing, Kind::Claude)["state"],
+            inspect_current_config(&missing.join("settings.json"), Kind::Claude)["state"],
             "missing"
         );
         assert!(!missing.exists());
@@ -1671,7 +1762,7 @@ stream_idle_timeout_ms = 450000
         std::fs::write(&target, b"{}").unwrap();
         symlink(&target, config_dir.join("settings.json")).unwrap();
         assert_eq!(
-            inspect_current_config(&config_dir, Kind::Claude)["state"],
+            inspect_current_config(&config_dir.join("settings.json"), Kind::Claude)["state"],
             "unsafe"
         );
         let _ = std::fs::remove_dir_all(root);

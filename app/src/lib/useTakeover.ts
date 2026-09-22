@@ -88,10 +88,10 @@ export function useTakeover() {
     }
     const summary = `${verb}完成：成功 ${succeeded}，失败 ${failures.length}`;
     if (failures.length > 0) {
-      // 只给条数等于什么都没说：把每条失败的对象和原因直接列出来，用户才知道下一步做什么
+      const visibleLabels = failures.slice(0, 2).map((item) => item.label).join("、");
+      const remaining = failures.length - 2;
       toast.error(summary, {
-        description: failures.map((item) => `${item.label}：${item.message}`).join("\n"),
-        duration: 12_000,
+        description: `${visibleLabels}${remaining > 0 ? ` 等 ${failures.length} 项` : ""}未完成。请到对应项目处理，完整原因见操作记录。`,
       });
     } else {
       toast.success(summary);

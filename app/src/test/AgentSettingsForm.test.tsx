@@ -30,7 +30,12 @@ function routes(overrides: Record<string, Envelope> = {}): Record<string, Envelo
               providers: { native: { managed: true, install: "i.sh", upgrade: "u.sh" } },
             },
             policy: { enabled: true },
-            observed: { install_source: "native", installed: true, management: agentManagementFixture("claude") },
+            observed: {
+              install_source: "native",
+              installed: true,
+              management: agentManagementFixture("claude"),
+              current_config: { state: "missing", file: "settings.json", target: "/Users/demo/.claude/settings.json", config: null },
+            },
             state: "managed-ok",
             freshness: makeFreshness(),
             actions: [],
@@ -78,6 +83,7 @@ function setClaudeCurrentConfig(element: EngineElement, profile: string | null):
   (element.observed as Record<string, unknown>).current_config = {
     state: "ready",
     file: "settings.json",
+    target: "/Users/demo/.claude/settings.json",
     config: {
       provider: "anthropic",
       base_url: connection?.base_url ?? null,
@@ -116,6 +122,9 @@ describe("助手运行参数", () => {
                 install_source: "native",
                 installed: true,
                 management: bin === "claude" || bin === "codex" ? agentManagementFixture(bin) : null,
+                current_config: bin === "codex"
+                  ? { state: "missing", file: "config.toml", target: "/Users/demo/.codex/config.toml", config: null }
+                  : { state: "missing", file: "settings.json", target: "/Users/demo/.claude/settings.json", config: null },
               },
               state: "managed-ok",
               freshness: makeFreshness(),
@@ -135,6 +144,7 @@ describe("助手运行参数", () => {
     status.data.elements[0].spec.providers.native.uninstall = "keep-uninstall.sh";
     status.data.elements[0].spec.settings = {
       active: "relay",
+      automation_mode: "manual",
       unknown_runtime_flag: "keep",
       profiles: { relay: { label: "中转", future_option: 7 } },
     };
@@ -156,6 +166,7 @@ describe("助手运行参数", () => {
     expect(definition.providers.native.uninstall).toBe("keep-uninstall.sh");
     expect(definition.settings).toEqual({
       active: "relay",
+      automation_mode: "manual",
       unknown_runtime_flag: "keep",
       profiles: { relay: { label: "中转", future_option: 7 } },
       statusline: "builtin",
@@ -192,6 +203,33 @@ describe("助手运行参数", () => {
     });
   });
 
+  it("写入预览显示 Claude 最终配置值和真实目标文件", async () => {
+    renderWithEngine(<AgentsPage />, routes());
+    await userEvent.click(await screen.findByTestId("agent-runtime-button"));
+    const dialog = await screen.findByRole("dialog", { name: "Claude Code 运行设置" });
+    await userEvent.click(screen.getByTestId("agent-runtime-automation-mode-full"));
+    expect(dialog).toHaveTextContent('permissions.defaultMode = "bypassPermissions"');
+
+    await userEvent.click(screen.getByTestId("agent-runtime-preview-mode"));
+    expect(screen.getByTestId("agent-runtime-target")).toHaveTextContent("/Users/demo/.claude/settings.json");
+    expect(screen.getByTestId("agent-runtime-preview")).toHaveTextContent('"defaultMode": "bypassPermissions"');
+    expect(dialog).toHaveTextContent("目标文件中的其他配置保持不变");
+  });
+
+  it("写入预览显示 Codex TOML 最终配置值和真实目标文件", async () => {
+    renderWithEngine(<AgentsPage />, agentRoutes("codex", "codex"));
+    await userEvent.click(await screen.findByTestId("agent-runtime-button"));
+    await userEvent.click(screen.getByTestId("agent-runtime-automation-mode-full"));
+    await userEvent.selectOptions(screen.getByTestId("agent-runtime-codex-reasoning-effort"), "high");
+    await userEvent.click(screen.getByTestId("agent-runtime-preview-mode"));
+
+    expect(screen.getByTestId("agent-runtime-target")).toHaveTextContent("/Users/demo/.codex/config.toml");
+    const preview = screen.getByTestId("agent-runtime-preview");
+    expect(preview).toHaveTextContent('approval_policy = "never"');
+    expect(preview).toHaveTextContent('sandbox_mode = "danger-full-access"');
+    expect(preview).toHaveTextContent('model_reasoning_effort = "high"');
+  });
+
   it("Codex 运行参数允许研发填写推理、上下文、压缩与搜索的具体值", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, agentRoutes("codex", "codex"));
     await userEvent.click(await screen.findByTestId("agent-runtime-button"));
@@ -218,13 +256,13 @@ describe("助手运行参数", () => {
     });
   });
 
-  it("跳过权限确认先保存定义再二次确认，取消时不写助手文件", async () => {
+  it("完全放开先保存定义再二次确认，取消时不写助手文件", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await userEvent.click(await screen.findByTestId("agent-runtime-button"));
-    await userEvent.click(screen.getByTestId("agent-runtime-yolo"));
+    await userEvent.click(screen.getByTestId("agent-runtime-automation-mode-full"));
     await userEvent.click(screen.getByTestId("agent-runtime-submit"));
 
-    await screen.findByRole("dialog", { name: "跳过权限确认" });
+    await screen.findByRole("dialog", { name: "完全放开助手权限" });
     expect(calls.some((call) => call.command === "policy:set")).toBe(true);
     expect(configureCalls(calls)).toHaveLength(0);
     await userEvent.click(screen.getByRole("button", { name: "取消" }));
@@ -232,12 +270,12 @@ describe("助手运行参数", () => {
     expect(configureCalls(calls)).toHaveLength(0);
   });
 
-  it("跳过权限确认经确认后带 --allow-yolo 写入", async () => {
+  it("完全放开经确认后带 --allow-yolo 写入", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await userEvent.click(await screen.findByTestId("agent-runtime-button"));
-    await userEvent.click(screen.getByTestId("agent-runtime-yolo"));
+    await userEvent.click(screen.getByTestId("agent-runtime-automation-mode-full"));
     await userEvent.click(screen.getByTestId("agent-runtime-submit"));
-    await screen.findByRole("dialog", { name: "跳过权限确认" });
+    await screen.findByRole("dialog", { name: "完全放开助手权限" });
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
 
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
@@ -315,7 +353,11 @@ describe("助手运行参数", () => {
     const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
 
     expect(await screen.findByTestId("active-connection-summary")).toHaveTextContent("我的中转");
-    expect(within(screen.getByTestId("connection-card-claude-code-relay")).getByText("当前接入")).toBeInTheDocument();
+    expect(screen.getAllByTestId(/^connection-card-claude-code-/)[0]).toHaveAttribute(
+      "data-testid",
+      "connection-card-claude-code-relay",
+    );
+    expect(within(screen.getByTestId("connection-card-claude-code-relay")).getByText("当前使用")).toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId("activate-connection-claude-code-official"));
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
@@ -327,7 +369,11 @@ describe("助手运行参数", () => {
     ]);
     await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("官方"));
 
-    await userEvent.click(screen.getByTestId("activate-connection-claude-code-default"));
+    await userEvent.click(screen.getByTestId("reset-connection-claude-code-default"));
+    const resetConfirm = await screen.findByRole("dialog", { name: "重置 Claude Code 的官方 Provider" });
+    expect(configureCalls(calls)).toHaveLength(1);
+    expect(resetConfirm).toHaveTextContent("不会删除助手登录状态、密钥变量或其他 Provider 定义");
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(2));
     expect(configureCalls(calls)[1].args).toEqual([
       "--only",
@@ -360,11 +406,10 @@ describe("助手运行参数", () => {
     await userEvent.click(await screen.findByTestId("activate-connection-claude-code-official"));
     expect(await screen.findByText("写入已经返回成功，但状态回读没有确认接入生效")).toBeInTheDocument();
     expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("官方");
-    expect(screen.getByTestId("agent-current-config-alignment")).toHaveTextContent("与已纳管选择不一致");
-    expect(screen.getByTestId("reapply-managed-connection")).toBeEnabled();
+    expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("官方");
   });
 
-  it("工作台编辑当前接入：预填原值、唯一名称不可改，保存后写回当前配置", async () => {
+  it("工作台编辑当前接入：预填原值、唯一名称不可改，保存不写助手配置", async () => {
     const withProfiles = routes();
     const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
     status.data.elements[0].spec.settings = {
@@ -390,7 +435,8 @@ describe("助手运行参数", () => {
     expect(screen.queryByText("1. 选择接入方式")).toBeNull();
     expect(screen.getByTestId("new-connection-base-url")).toHaveValue("https://old.example.com");
     expect(screen.getByTestId("new-connection-note")).toHaveValue("旧备注");
-    expect(screen.getByTestId("new-connection-activate")).toBeChecked();
+    expect(screen.queryByTestId("new-connection-activate")).toBeNull();
+    expect(screen.getByText(/保存只更新 Provider 定义/)).toBeInTheDocument();
     await userEvent.click(screen.getByTestId("new-connection-advanced"));
     expect(screen.getByTestId("new-connection-name")).toBeDisabled();
     await userEvent.clear(screen.getByTestId("new-connection-label"));
@@ -403,7 +449,7 @@ describe("助手运行参数", () => {
     await userEvent.type(screen.getByTestId("new-connection-model"), "new-model");
     await userEvent.click(screen.getByTestId("connection-form-submit"));
 
-    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
     const saved = calls.find((call) => call.command === "policy:set")!;
     const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
     expect(definition.settings.active).toBe("relay");
@@ -417,8 +463,32 @@ describe("助手运行参数", () => {
       model: "new-model",
       future_option: { mode: "keep" },
     });
-    expect(configureCalls(calls)[0].args).toEqual(["--only", "agents:claude-code", "--use", "relay"]);
-    expect(calls.indexOf(saved)).toBeLessThan(calls.indexOf(configureCalls(calls)[0]));
+    expect(configureCalls(calls)).toHaveLength(0);
+  });
+
+  it("Provider 卡片直接提供编辑入口，点击卡片主体也能打开同一个编辑页", async () => {
+    const withProfiles = routes();
+    const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.settings = {
+      active: "relay",
+      profiles: {
+        relay: { label: "我的中转", base_url: "https://relay.example.com", token_var: "RELAY_KEY", model: "relay-model" },
+      },
+    };
+    renderWithEngine(<AgentsPage />, withProfiles);
+
+    const edit = await screen.findByTestId("edit-connection-claude-code-relay");
+    expect(edit).toHaveAccessibleName("编辑 我的中转");
+    await userEvent.click(screen.getByTestId("connection-card-claude-code-relay"));
+    expect(await screen.findByRole("dialog", { name: "编辑 我的中转" })).toBeInTheDocument();
+  });
+
+  it("默认官方 Provider 只提供重置，不伪装成可编辑或可删除项", async () => {
+    renderWithEngine(<AgentsPage />, routes());
+
+    expect(await screen.findByTestId("reset-connection-claude-code-default")).toHaveTextContent("重置");
+    expect(screen.queryByTestId("edit-connection-claude-code-default")).toBeNull();
+    expect(screen.queryByTestId("remove-connection-claude-code-default")).toBeNull();
   });
 
   it("工作台编辑非当前接入：默认只保存修改，不偷切当前项", async () => {
@@ -440,7 +510,7 @@ describe("助手运行参数", () => {
 
     await userEvent.click(await screen.findByTestId("edit-connection-claude-code-relay"));
     expect(await screen.findByRole("dialog", { name: "编辑 我的中转" })).toBeInTheDocument();
-    expect(screen.getByTestId("new-connection-activate")).not.toBeChecked();
+    expect(screen.queryByTestId("new-connection-activate")).toBeNull();
     await userEvent.clear(screen.getByTestId("new-connection-label"));
     await userEvent.type(screen.getByTestId("new-connection-label"), "备用中转");
     await userEvent.click(screen.getByTestId("connection-form-submit"));
@@ -478,7 +548,7 @@ describe("助手运行参数", () => {
     expect(screen.getByTestId("new-connection-base-url")).toHaveValue("https://relay.example.com");
     expect(screen.getByTestId("new-connection-token-var")).toHaveValue("RELAY_KEY");
     expect(screen.getByTestId("new-connection-secret")).toHaveValue("");
-    expect(screen.getByTestId("new-connection-activate")).not.toBeChecked();
+    expect(screen.queryByTestId("new-connection-activate")).toBeNull();
     await userEvent.click(screen.getByTestId("new-connection-advanced"));
     expect(screen.getByTestId("new-connection-name")).toHaveValue("relay-copy");
     expect(screen.getByTestId("new-connection-name")).not.toBeDisabled();
@@ -557,6 +627,7 @@ describe("助手运行参数", () => {
     await userEvent.click(await screen.findByTestId("remove-connection-claude-code-relay"));
     const confirm = await screen.findByRole("dialog", { name: "删除接入 我的中转" });
     expect(confirm).toHaveTextContent("不会删除凭据变量");
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
 
     await waitFor(() => expect(confirm).not.toBeInTheDocument());
@@ -636,7 +707,6 @@ describe("助手运行参数", () => {
 
     await userEvent.click(await screen.findByTestId("check-connection-claude-code-relay"));
     const result = await screen.findByTestId("check-result-claude-code-relay");
-    expect(result).toHaveTextContent("通了");
     expect(result).toHaveTextContent("432ms");
 
     const checks = calls.filter((call) => call.command === "agents:check");
@@ -718,7 +788,7 @@ describe("助手运行参数", () => {
     await userEvent.click(checkAll);
     await waitFor(() => expect(calls.filter((call) => call.command === "agents:check")).toHaveLength(2));
     expect(checkAll).toBeDisabled();
-    expect(checkAll).toHaveTextContent("正在检查全部");
+    expect(checkAll.querySelector(".animate-spin")).not.toBeNull();
     await userEvent.click(checkAll);
     expect(calls.filter((call) => call.command === "agents:check")).toHaveLength(2);
 
@@ -728,7 +798,7 @@ describe("助手运行参数", () => {
     await waitFor(() => expect(summary).toHaveTextContent("已完成 2/2"));
     expect(summary).toHaveTextContent("1 个可用");
     expect(summary).toHaveTextContent("最快：Relay 128ms");
-    expect(screen.getByTestId("check-result-claude-code-relay")).toHaveTextContent("连接正常");
+    expect(screen.getByTestId("check-result-claude-code-relay")).toHaveTextContent("128ms");
     expect(screen.getByTestId("check-result-claude-code-broken")).toHaveTextContent("模型不可用");
     expect(checkAll).toBeEnabled();
 
@@ -746,10 +816,10 @@ describe("助手运行参数", () => {
 
   it("没配接入配置的助手：工作台明确展示默认账号和新增入口", async () => {
     renderWithEngine(<AgentsPage />, routes());
-    expect(await screen.findByTestId("connection-card-claude-code-default")).toHaveTextContent("当前接入");
+    expect(await screen.findByTestId("connection-card-claude-code-default")).toHaveTextContent("当前使用");
+    expect(screen.getByTestId("reset-connection-claude-code-default")).toHaveTextContent("重置");
     expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("助手默认账号");
     expect(screen.getByTestId("add-connection-button")).toBeEnabled();
-    expect(screen.getByText(/目前只有助手默认账号/)).toBeInTheDocument();
   });
 
   it("切换执行中只锁接入动作，并在按钮上展示真实进行态", async () => {
@@ -773,16 +843,16 @@ describe("助手运行参数", () => {
 
     const activate = await screen.findByTestId("activate-connection-claude-code-relay");
     await userEvent.click(activate);
-    await waitFor(() => expect(activate).toHaveTextContent("正在启用"));
+    await waitFor(() => expect(activate).toHaveTextContent("正在应用"));
     expect(activate).toBeDisabled();
     expect(screen.getByTestId("activate-connection-claude-code-official")).toBeDisabled();
     expect(screen.getByTestId("agent-runtime-button")).toBeEnabled();
 
     deferred.release?.();
-    await waitFor(() => expect(activate).toHaveTextContent("启用"));
+    await waitFor(() => expect(activate).toHaveTextContent("应用"));
   });
 
-  it("从厂商预设新增接入：保留完整定义，凭据单独保存，成功后再启用", async () => {
+  it("从厂商预设新增接入：保留完整定义并单独保存凭据，但不自动应用", async () => {
     const withExisting = routes();
     const status = withExisting["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
     status.data.elements[0].spec.custom_meta = { owner: "local" };
@@ -797,7 +867,15 @@ describe("助手运行参数", () => {
     await userEvent.click(await screen.findByTestId("add-connection-button"));
     await screen.findByRole("dialog", { name: "为 Claude Code 添加接入" });
     await userEvent.click(screen.getByTestId("connection-preset-kimi-cn-claude"));
+    expect(screen.getByTestId("selected-connection-preset")).toHaveTextContent("已选择：Kimi（国内）");
+    expect(screen.getByRole("heading", { name: "Provider 配置" })).toBeInTheDocument();
     expect(screen.getByTestId("new-connection-base-url")).toHaveValue("https://api.moonshot.cn/anthropic");
+    expect(screen.getByTestId("new-connection-model")).toHaveValue("kimi-k3[1m]");
+    await userEvent.click(screen.getByTestId("connection-preset-deepseek-claude"));
+    expect(screen.getByTestId("selected-connection-preset")).toHaveTextContent("已选择：DeepSeek");
+    expect(screen.getByTestId("new-connection-base-url")).toHaveValue("https://api.deepseek.com/anthropic");
+    expect(screen.getByTestId("new-connection-model")).toHaveValue("deepseek-flash[1m]");
+    await userEvent.click(screen.getByTestId("connection-preset-kimi-cn-claude"));
     await userEvent.click(screen.getByTestId("new-connection-advanced"));
     expect(screen.getByTestId("new-connection-alias-opus")).toHaveValue("kimi-k3[1m]");
     await userEvent.clear(screen.getByTestId("new-connection-alias-opus"));
@@ -805,7 +883,7 @@ describe("助手运行参数", () => {
     await userEvent.type(screen.getByTestId("new-connection-secret"), "fake-secret-value");
     await userEvent.click(screen.getByTestId("connection-form-submit"));
 
-    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
+    await waitFor(() => expect(calls.some((call) => call.command === "secrets:set")).toBe(true));
     const saved = calls.find((call) => call.command === "policy:set")!;
     const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
     expect(definition.custom_meta).toEqual({ owner: "local" });
@@ -826,14 +904,8 @@ describe("助手运行参数", () => {
     });
     const secret = calls.find((call) => call.command === "secrets:set")!;
     expect(secret.args).toEqual(["--var", "KIMI_API_KEY", "--value", "fake-secret-value"]);
-    expect(configureCalls(calls)[0].args).toEqual([
-      "--only",
-      "agents:claude-code",
-      "--use",
-      "kimi-cn",
-    ]);
+    expect(configureCalls(calls)).toHaveLength(0);
     expect(calls.indexOf(saved)).toBeLessThan(calls.indexOf(secret));
-    expect(calls.indexOf(secret)).toBeLessThan(calls.indexOf(configureCalls(calls)[0]));
   });
 
   it("凭据保存被拒绝：保留弹窗和输入，说明已保存到哪一步且不继续启用", async () => {
@@ -909,7 +981,7 @@ describe("助手运行参数", () => {
 
     expect(await screen.findByTestId("active-connection-summary")).toHaveTextContent("助手默认账号");
     await userEvent.click(screen.getByTestId("connection-agent-codex"));
-    expect(screen.getByRole("heading", { name: "Codex 接入工作台" })).toBeInTheDocument();
+    expect(screen.getByTestId("connection-agent-codex")).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("GLM Coding");
   });
 
@@ -926,13 +998,12 @@ describe("助手运行参数", () => {
     await userEvent.click(screen.getByTestId("agent-runtime-button"));
     expect(await screen.findByRole("dialog", { name: "codex 运行设置" })).toBeInTheDocument();
     expect(screen.queryByTestId("agent-runtime-statusline")).toBeNull();
-    expect(screen.getByTestId("agent-runtime-yolo")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-runtime-automation-mode")).toBeInTheDocument();
   });
 
   it("既不是 Claude 也不是 Codex 的助手：不进入接入工作台", async () => {
     renderWithEngine(<AgentsPage />, agentRoutes("opencode", "opencode"));
-    expect(await screen.findByRole("heading", { name: "实例" })).toBeInTheDocument();
-    expect(screen.queryByTestId("connection-workbench")).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId("connection-workbench")).toBeNull());
   });
 
   it("不支持的历史助手定义不再露出接入卡片", async () => {
@@ -944,7 +1015,7 @@ describe("助手运行参数", () => {
     };
     renderWithEngine(<AgentsPage />, unsupported);
 
-    expect(await screen.findByRole("heading", { name: "实例" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("connection-workbench")).toBeNull());
     expect(screen.queryByTestId("connection-card-opencode-relay")).toBeNull();
     expect(screen.queryByTestId("connection-workbench")).toBeNull();
   });

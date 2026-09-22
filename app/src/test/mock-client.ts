@@ -58,6 +58,7 @@ function demoEnvelopes(): Record<string, Envelope> {
             current_config: {
               state: "ready",
               file: "settings.json",
+              target: "/Users/demo/.claude/settings.json",
               config: {
                 provider: "anthropic",
                 base_url: "https://old-relay.example.com",
@@ -853,6 +854,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       element.observed.current_config = {
         state: "ready",
         file: codex ? "config.toml" : "settings.json",
+        target: codex ? "/Users/demo/.codex/config.toml" : "/Users/demo/.claude/settings.json",
         config: {
           provider: codex ? profile : "anthropic",
           base_url: selected.base_url ?? null,
@@ -874,6 +876,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       element.observed.current_config = {
         state: "ready",
         file: codex ? "config.toml" : "settings.json",
+        target: codex ? "/Users/demo/.codex/config.toml" : "/Users/demo/.claude/settings.json",
         config: {
           provider: codex ? "openai" : "anthropic",
           base_url: null,
