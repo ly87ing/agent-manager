@@ -45,6 +45,7 @@ import {
   type ConnectionEntry,
 } from "../lib/agentDefinitionForm";
 import { agentManagementOf, connectionKindOf } from "../lib/agentManagement";
+import { runtimeAlignment } from "../lib/agentRuntime";
 import type { AgentCurrentConfig, AgentsObserved, AgentsSpec } from "../lib/observed";
 import { useEngineQuery } from "../lib/queries";
 import { useAliasSource } from "../lib/useAliasSource";
@@ -55,7 +56,6 @@ export default function AgentsPage({
   onOpenSecrets,
 }: {
   onManageSkills?: (agentId: string) => void;
-  onGoTakeover?: () => void;
   onOpenSecrets?: () => void;
 } = {}) {
   const query = useEngineQuery<StatusData>("agents:status");
@@ -190,10 +190,24 @@ export default function AgentsPage({
       if (envelope.ok) {
         // 以 status 的真实回读更新界面，再宣布成功；不靠本地乐观改状态。
         const refreshed = await query.refetch();
+        const refreshedAgent = refreshed.data?.data.elements.find(
+          (element) => element.id === `agents:${agentId}`,
+        );
+        const currentConfig = refreshedAgent
+          ? (refreshedAgent.observed as AgentsObserved).current_config
+          : undefined;
+        const management = refreshedAgent ? agentManagementOf(refreshedAgent) : null;
+        const runtimeVerified = Boolean(
+          refreshedAgent
+          && currentConfig?.state === "ready"
+          && management
+          && runtimeAlignment(
+            management.runtime_fields,
+            runtimeSettingsOf(refreshedAgent.spec as Record<string, unknown>),
+            currentConfig,
+          ) === "aligned",
+        );
         if (opts.use !== undefined) {
-          const refreshedAgent = refreshed.data?.data.elements.find(
-            (element) => element.id === `agents:${agentId}`,
-          );
           const actual = refreshedAgent
             ? activeConnectionOf(refreshedAgent.spec as Record<string, unknown>)
             : null;
@@ -203,19 +217,21 @@ export default function AgentsPage({
             ? parseInitialToFormValues(agentId, refreshedAgent.spec as Record<string, unknown>).connections
               .find((connection) => connection.name === expected) ?? null
             : null;
-          const currentConfig = refreshedAgent
-            ? (refreshedAgent.observed as AgentsObserved).current_config
-            : undefined;
           const actualAligned = Boolean(
             kind && currentConfig
             && connectionAlignment(kind, selectedConnection, currentConfig) === "aligned",
           );
-          if (!refreshedAgent || actual !== expected || !actualAligned) {
-            toast.error("写入已经返回成功，但状态回读没有确认接入生效", {
-              description: "界面保留纳管选择和客户端实际配置，请检查配置不一致提示后重试。",
+          if (!refreshedAgent || actual !== expected || !actualAligned || !runtimeVerified) {
+            toast.error("写入已经返回成功，但状态回读没有确认全部配置生效", {
+              description: "界面保留软件保存值和客户端实际值，请到“实际配置”查看不一致项后重试。",
             });
             return false;
           }
+        } else if (!runtimeVerified) {
+          toast.error("写入已经返回成功，但状态回读没有确认运行设置生效", {
+            description: "请到“实际配置”查看软件保存值与客户端实际值，再决定是否重试。",
+          });
+          return false;
         }
         toast.success(opts.use !== undefined ? `已切换 ${agentId} 的接入配置` : `已写入 ${agentId} 的运行参数`, {
           description: "助手下次启动生效；已经开着的要重启它。",

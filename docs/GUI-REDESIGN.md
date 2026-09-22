@@ -107,7 +107,9 @@ x-api-key，中转站两种都有）、模型、小任务模型、opus/sonnet/ha
 **受管粒度**按键路径而不是整个顶层键：本工具只拥有 `env.ANTHROPIC_BASE_URL`、
 `env.ANTHROPIC_AUTH_TOKEN`、`env.ANTHROPIC_API_KEY`、`env.ANTHROPIC_MODEL`、
 `env.ANTHROPIC_SMALL_FAST_MODEL`、`env.ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`、
-`env.API_TIMEOUT_MS` 与 `permissions.defaultMode`。同一文件里 hooks 域的内容、
+`env.API_TIMEOUT_MS`、`env.ENABLE_TOOL_SEARCH`、`env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`、
+`env.CLAUDE_CODE_EFFORT_LEVEL`、`env.CLAUDE_CODE_DISABLE_ARTIFACT`、`permissions.defaultMode`
+与 `attribution.{commit,pr}`。同一文件里 hooks 域的内容、
 用户自己的 `permissions.allow/deny` 与别的 `env` 变量原样保留；外部修改检测也只比
 这几条的摘要。从没写过而这几项已有内容时按外部内容对待，同样要 `--allow-takeover`。
 
@@ -133,7 +135,8 @@ x-api-key，中转站两种都有）、模型、小任务模型、opus/sonnet/ha
 可用数量与最快线路。检查不切换接入、不写配置；最快线路不是当前项时提供显式启用入口，切换
 仍复用 `agents:configure`、外部修改确认与状态回读。独立环境在同一工作区单独创建，用于独立账号、
 登录和会话；它不是新增 Provider 的另一种写法。启动命令若携带权限参数，界面明确标记其会覆盖环境
-自动化；实际配置页展示目标文件与脱敏后的最终读取值。
+自动化；实际配置页按 Provider 与运行设置分组展示目标文件和脱敏后的最终读取值，运行设置逐项并列
+软件保存值与客户端实际值，不把内部 JSON 直接交给用户判断。
 普通页面不展示 AI CLI 的安装、升级、卸载动作、生命周期脚本或完整 alias。
 
 AI CLI 软件生命周期不再由产品界面维护。客户端是否可用、当前版本和安装来源只在
@@ -184,8 +187,10 @@ AI CLI 软件生命周期不再由产品界面维护。客户端是否可用、�
 `agents:status` 还会只读解析 Claude `settings.json` 与 Codex `config.toml`，把本机实际 provider、
 地址、模型、凭据是否配置及运行参数放进脱敏的 `observed.current_config`。它不返回 token/API key
 正文，不自动生成数据库 profile，也不接管外部配置；符号链接、非普通文件、超限或畸形内容按固定
-状态 fail-closed。界面将“本机当前配置”与“Agent Manager 已纳管选择”分开；运行设置弹窗也把
-可编辑的“已纳管 JSON”和不可保存的“本机实际值”分开，避免把数据库期望值冒充客户端实际值。
+状态 fail-closed。界面将“本机当前配置”与“Agent Manager 已纳管选择”分开；运行设置弹窗使用
+按项表单编辑，写入预览集中展示真实键值，本机实际值则用只读对照表展示，避免把数据库期望值
+冒充客户端实际值。运行设置的一致性按适配器声明的全部字段逐项判断，而不是只比较自动化档位；
+`agents:configure` 返回成功后也必须回读到 `ready` 且 Provider 与全部运行字段一致，才向用户提示成功。
 接入工作台只比较本工具拥有且能安全观察的 provider 字段，并明确显示“一致”“不一致”或“无法
 比较”；不一致时由用户显式点击“重新应用已纳管选择”。修复继续复用 `agents:configure` 的外部
 修改接管确认、锁、审计和成功后状态回读，不后台自动覆盖客户端配置，也不比较或暴露凭据取值。
@@ -206,7 +211,9 @@ AI CLI 软件生命周期不再由产品界面维护。客户端是否可用、�
 动作；快捷键在文本输入语境中不抢按键。快切只减少查找步骤，不新增写路径或跳过确认与双回读。
 
 **Codex 侧**写同一份 `config.toml`——MCP 域也写它，因此按段落分工：本工具在这里拥有
-四个顶层键（`model_provider`、`model`、`approval_policy`、`sandbox_mode`）与带受管标记
+`model_provider`、`model`、`approval_policy`、`sandbox_mode`、`approvals_reviewer`、
+`model_reasoning_effort`、`model_context_window`、`model_auto_compact_token_limit`、`web_search`
+九个顶层键与带受管标记
 `# [agent-manager:managed]` 的 `[model_providers.*]` 段，其余行（含注释、用户自己的键、
 MCP 域写的 `[mcp_servers.*]`）逐行原样保留。写入是文本级编辑：顶层键就地替换或插在第一个
 表头之前（越过紧贴表头的注释，否则会把受管标记与它的表段拆散），表段整段替换。
@@ -238,7 +245,7 @@ Codex `{base}/responses`），HTTP 结果翻成可执行的话（401 → 令牌�
 - 引擎从不读取的 `agents.<id>.auto_install` / `auto_update` 偏好，以及写入它们的「个性化配置」页（policy 原文编辑器）；`policy:get/set` 本身保留，继续服务定义增删与启停。
 - 助手 `observed` 的 `providers`、`classified`、`preferred_active` 三个派生字段合并为单值 `install_source`；能否由本工具管理仍只由 `state`（`unmanaged-detected`）表达。
 - 手动离线模式与 `upstream_ttl_sec` 偏好：`AppSettings` 只剩 `log_retention_days`，旧 `app_settings` 行读取时跳过、下次保存时删除；Tauri 不再注入 `--offline`。引擎 CLI 的 `--offline`、envelope `mode.offline` 与 `actions[].offline_ok` 保留不变。
-- 更新中心页并入总览清单（可更新项在清单内给「去处理」入口）；总览不再展示 `system:audit` 明细分段；“导入现有配置”保留一级导航，并同时支持首次使用引导、命令面板与托盘入口。
+- 更新中心页并入总览清单（可更新项在清单内给「去处理」入口）；总览不再展示 `system:audit` 明细分段；“导入现有配置”保留一级导航，并同时支持命令面板与托盘入口。全新安装直接进入 Provider 列表，不再展示需要阅读后才能继续的长篇首次引导。
 - JSONL 结构化诊断日志整套退役：写入与轮转、`logs:clear`、envelope `log_file`、启动维护清理与设置页的日志目录/清理入口一并移除；错误消息出库前仍统一脱敏（`sanitize` 模块），排查依赖 `operation_logs`，`log_retention_days` 只管它。
 
 详见 [当前架构](ARCHITECTURE.md)、[平台状态](GUI-PLATFORM-STATUS.md) 和 [Engine Contract](../contract/README.md)。

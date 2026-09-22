@@ -158,7 +158,7 @@ describe("助手运行参数", () => {
     await openRuntimeSettings();
     const dialog = await screen.findByRole("dialog", { name: "Claude Code 运行设置" });
     expect(screen.getByTestId("agent-runtime-cancel")).toHaveFocus();
-    expect(dialog).toHaveTextContent("账号、接口地址、模型与凭据变量在接入卡片中维护");
+    expect(dialog).toHaveTextContent("账号、接口地址、模型与凭据变量在 Provider 卡片中维护");
     expect(screen.queryByLabelText("安装命令")).toBeNull();
     expect(screen.queryByLabelText("升级命令")).toBeNull();
     expect(screen.queryByLabelText("卸载命令")).toBeNull();
@@ -181,20 +181,22 @@ describe("助手运行参数", () => {
     expect(calls.indexOf(saved)).toBeLessThan(calls.indexOf(configureCalls(calls)[0]));
   });
 
-  it("Claude 高级运行参数显示真实配置键并保存为引擎支持的具体值", async () => {
+  it("Claude 高级运行参数在写入预览集中显示真实配置键并保存具体值", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await openRuntimeSettings();
     const dialog = await screen.findByRole("dialog", { name: "Claude Code 运行设置" });
-    expect(dialog).toHaveTextContent("env.ENABLE_TOOL_SEARCH");
-    expect(dialog).toHaveTextContent("env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS");
-    expect(dialog).toHaveTextContent("attribution.commit");
-    expect(dialog).toHaveTextContent("attribution.pr");
+    expect(dialog).not.toHaveTextContent("env.ENABLE_TOOL_SEARCH");
 
     await userEvent.selectOptions(screen.getByTestId("agent-runtime-claude-effort-level"), "max");
     await userEvent.click(screen.getByTestId("agent-runtime-claude-tool-search"));
     await userEvent.click(screen.getByTestId("agent-runtime-claude-agent-teams"));
     await userEvent.click(screen.getByTestId("agent-runtime-claude-disable-artifact"));
     await userEvent.click(screen.getByTestId("agent-runtime-claude-hide-attribution"));
+    await userEvent.click(screen.getByTestId("agent-runtime-preview-mode"));
+    expect(dialog).toHaveTextContent('"ENABLE_TOOL_SEARCH": "true"');
+    expect(dialog).toHaveTextContent('"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"');
+    expect(dialog).toHaveTextContent('"commit": ""');
+    expect(dialog).toHaveTextContent('"pr": ""');
     await userEvent.click(screen.getByTestId("agent-runtime-submit"));
 
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
@@ -214,7 +216,6 @@ describe("助手运行参数", () => {
     await openRuntimeSettings();
     const dialog = await screen.findByRole("dialog", { name: "Claude Code 运行设置" });
     await userEvent.click(screen.getByTestId("agent-runtime-automation-mode-full"));
-    expect(dialog).toHaveTextContent('permissions.defaultMode = "bypassPermissions"');
 
     await userEvent.click(screen.getByTestId("agent-runtime-preview-mode"));
     expect(screen.getByTestId("agent-runtime-target")).toHaveTextContent("/Users/demo/.claude/settings.json");
@@ -240,15 +241,16 @@ describe("助手运行参数", () => {
     const { calls } = renderWithEngine(<AgentsPage />, agentRoutes("codex", "codex"));
     await openRuntimeSettings();
     const dialog = await screen.findByRole("dialog", { name: "codex 运行设置" });
-    expect(dialog).toHaveTextContent("model_reasoning_effort");
-    expect(dialog).toHaveTextContent("model_context_window");
-    expect(dialog).toHaveTextContent("model_auto_compact_token_limit");
-    expect(dialog).toHaveTextContent("web_search");
 
     await userEvent.selectOptions(screen.getByTestId("agent-runtime-codex-reasoning-effort"), "high");
     await userEvent.type(screen.getByTestId("agent-runtime-codex-context-window"), "1000000");
     await userEvent.type(screen.getByTestId("agent-runtime-codex-auto-compact-token-limit"), "900000");
     await userEvent.selectOptions(screen.getByTestId("agent-runtime-codex-web-search"), "live");
+    await userEvent.click(screen.getByTestId("agent-runtime-preview-mode"));
+    expect(dialog).toHaveTextContent("model_reasoning_effort");
+    expect(dialog).toHaveTextContent("model_context_window");
+    expect(dialog).toHaveTextContent("model_auto_compact_token_limit");
+    expect(dialog).toHaveTextContent("web_search");
     await userEvent.click(screen.getByTestId("agent-runtime-submit"));
 
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
@@ -305,12 +307,36 @@ describe("助手运行参数", () => {
     const { calls } = renderWithEngine(<AgentsPage />, drifted);
 
     await userEvent.click(await screen.findByTestId("workbench-tab-automation"));
-    expect(screen.getByTestId("automation-panel")).toHaveTextContent("已保存：智能自动");
-    expect(screen.getByTestId("automation-panel")).toHaveTextContent("客户端实际仍是 手动确认");
+    expect(screen.getByTestId("automation-panel")).toHaveTextContent("1 项设置尚未生效");
+    expect(screen.getByTestId("automation-panel")).toHaveTextContent("自动化：已保存 智能自动，客户端实际 手动确认");
     await userEvent.click(screen.getByTestId("agent-runtime-apply"));
 
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
     expect(configureCalls(calls)[0].args).toEqual(["--only", "agents:claude-code"]);
+  });
+
+  it("自动化档位一致但其他运行设置漂移时仍显示差异且回读不误报成功", async () => {
+    const drifted = routes();
+    const status = drifted["agents:status"] as { data: { elements: EngineElement[] } };
+    const element = status.data.elements[0];
+    (element.spec as Record<string, unknown>).settings = {
+      automation_mode: "manual",
+      claude_effort_level: "high",
+    };
+    setClaudeCurrentConfig(element, null);
+    const current = (element.observed as any).current_config.config;
+    current.runtime = { automation_mode: "manual", claude_effort_level: "low" };
+    const { calls } = renderWithEngine(<AgentsPage />, drifted);
+
+    await userEvent.click(await screen.findByTestId("workbench-tab-automation"));
+    const panel = screen.getByTestId("automation-panel");
+    expect(panel).toHaveTextContent("1 项设置尚未生效");
+    expect(panel).toHaveTextContent("推理强度：已保存 high，客户端实际 low");
+    expect(panel).toHaveTextContent("自动化档位已是 手动确认");
+    await userEvent.click(screen.getByTestId("agent-runtime-apply"));
+
+    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
+    expect(await screen.findByText("写入已经返回成功，但状态回读没有确认运行设置生效")).toBeInTheDocument();
   });
 
   it("配置文件被外部改过：先问再覆盖，确认后带 --allow-takeover 重试", async () => {
@@ -500,7 +526,7 @@ describe("助手运行参数", () => {
     renderWithEngine(<AgentsPage />, withProfiles);
 
     await userEvent.click(await screen.findByTestId("activate-connection-claude-code-official"));
-    expect(await screen.findByText("写入已经返回成功，但状态回读没有确认接入生效")).toBeInTheDocument();
+    expect(await screen.findByText("写入已经返回成功，但状态回读没有确认全部配置生效")).toBeInTheDocument();
     expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("官方");
     expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("官方");
   });

@@ -138,7 +138,6 @@ export default function App() {
                 setSelectedSkillAgent(agentId);
                 setActivePage("skills");
               }}
-              onGoTakeover={() => setActivePage("takeover")}
               onOpenSecrets={() => setActivePage("settings:secrets")}
             />
           )}

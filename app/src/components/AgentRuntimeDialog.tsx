@@ -7,34 +7,15 @@ import {
 import type { AgentCurrentConfigStatus, AgentRuntimeField, AgentRuntimeTarget } from "../lib/observed";
 import { cn } from "../lib/utils";
 import { useDialogFocus } from "../lib/dialogFocus";
+import { AgentCurrentConfigView } from "./AgentCurrentConfigView";
 
 function testIdOf(field: AgentRuntimeField): string {
   return `agent-runtime-${field.key.replaceAll("_", "-")}`;
 }
 
-function targetValue(target: AgentRuntimeTarget, value: unknown): string {
-  if (value === undefined || value === null || value === "" || value === false) {
-    return "<删除该键，使用客户端默认>";
-  }
-  if (target.enabled_value) return target.enabled_value;
-  return typeof value === "string" ? JSON.stringify(value) : String(value);
-}
-
 function targetsFor(field: AgentRuntimeField, value: unknown): AgentRuntimeTarget[] {
   const option = field.options?.find((candidate) => candidate.value === value);
   return option?.targets ?? field.targets;
-}
-
-function FieldHints({ field, value }: { field: AgentRuntimeField; value: unknown }) {
-  return (
-    <span className="mt-1 block space-y-0.5 break-all font-mono text-[11px] text-muted-foreground">
-      {targetsFor(field, value).map((target) => (
-        <span key={target.key} className="block">
-          {target.key} = {targetValue(target, value)}
-        </span>
-      ))}
-    </span>
-  );
 }
 
 function previewValue(target: AgentRuntimeTarget, value: unknown): unknown {
@@ -102,7 +83,6 @@ function RuntimeField({
         <span className="min-w-0">
           <span className="block font-medium text-foreground">{field.label}</span>
           <span className="mt-1 block text-xs leading-5 text-muted-foreground">{field.description}</span>
-          <FieldHints field={field} value={checked} />
         </span>
       </label>
     );
@@ -150,7 +130,6 @@ function RuntimeField({
                   {option.description && (
                     <span className="mt-2 block text-xs leading-5 text-muted-foreground">{option.description}</span>
                   )}
-                  <FieldHints field={{ ...field, targets: option.targets ?? [] }} value={option.value} />
                 </label>
               );
             })}
@@ -175,7 +154,6 @@ function RuntimeField({
             <option key={option.value || "__default"} value={option.value}>{option.label}</option>
           ))}
         </select>
-        <FieldHints field={field} value={selected} />
       </label>
     );
   }
@@ -195,7 +173,6 @@ function RuntimeField({
           onChange={(event) => onChange(event.target.value)}
           className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm"
         />
-        <FieldHints field={field} value={text} />
       </label>
     );
   }
@@ -275,7 +252,7 @@ export function AgentRuntimeDialog({
           <div>
             <h3 className="text-lg font-semibold text-foreground">{agentName} 运行设置</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              字段由客户端适配器提供；每项都显示最终写入的真实配置键和值。账号、接口地址、模型与凭据变量在接入卡片中维护。
+              先选择要达到的效果；“写入预览”集中展示最终配置键值。账号、接口地址、模型与凭据变量在 Provider 卡片中维护。
             </p>
           </div>
           <button type="button" aria-label="关闭" disabled={busy} onClick={close} className="rounded p-1 text-muted-foreground hover:bg-accent disabled:opacity-50">
@@ -367,16 +344,13 @@ export function AgentRuntimeDialog({
               </pre>
             </div>
           ) : (
-            <div className="space-y-3">
-              <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs leading-5 text-muted-foreground">
-                这里来自客户端配置文件的只读脱敏观察值，不会显示 token/API key，也不会自动写入数据库或接管配置。
-              </div>
-              <pre
-                data-testid="agent-runtime-observed-json"
-                className="min-h-[24rem] overflow-auto rounded-lg border border-input bg-slate-950 p-4 font-mono text-xs leading-5 text-slate-100"
-              >
-                {JSON.stringify(currentConfig ?? { state: "unavailable", config: null }, null, 2)}
-              </pre>
+            <div data-testid="agent-runtime-observed-values" className="space-y-3">
+              <AgentCurrentConfigView
+                status={currentConfig}
+                fields={fields}
+                savedRuntime={settings}
+                showProvider={false}
+              />
             </div>
           )}
           {(error || localError) && <p role="alert" className="mt-3 text-sm text-destructive">{error ?? localError}</p>}

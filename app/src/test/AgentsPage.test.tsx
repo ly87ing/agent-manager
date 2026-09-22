@@ -110,7 +110,7 @@ describe("助手页产品边界", () => {
     expect(screen.getByTestId("add-connection-button")).toBeEnabled();
     expect(screen.getByTestId("connection-card-claude-code-default")).toHaveTextContent("助手默认账号");
     expect(screen.getAllByText("默认环境").length).toBeGreaterThan(0);
-    expect(screen.getByText(/自动化：手动确认/)).toBeInTheDocument();
+    expect(screen.getByText(/2 项运行设置尚未生效/)).toBeInTheDocument();
     expect(screen.getByTestId("workbench-tab-automation")).toHaveTextContent("自动化与权限");
     expect(screen.getByTestId("manage-instances-button")).toHaveTextContent("独立环境");
     await userEvent.click(screen.getByTestId("workbench-tab-launch"));
@@ -155,7 +155,10 @@ describe("助手页产品边界", () => {
     const panel = screen.getByTestId("actual-config-panel");
     expect(panel).toHaveTextContent("settings.json");
     expect(panel).toHaveTextContent("https://claude.example.com");
-    expect(panel).toHaveTextContent('"configured": true');
+    expect(panel).toHaveTextContent("已配置（token）");
+    expect(panel).toHaveTextContent("软件保存值");
+    expect(panel).toHaveTextContent("客户端实际值");
+    expect(panel).not.toHaveTextContent('"configured"');
     expect(panel).not.toHaveTextContent("ANTHROPIC_AUTH_TOKEN=");
   });
 
@@ -239,10 +242,12 @@ describe("助手页产品边界", () => {
     await userEvent.click(screen.getByTestId("workbench-tab-automation"));
     await userEvent.click(screen.getByTestId("agent-runtime-button"));
     await userEvent.click(screen.getByTestId("agent-runtime-observed-mode"));
-    const observedJson = screen.getByTestId("agent-runtime-observed-json");
-    expect(observedJson).toHaveTextContent('"model": "gpt-test"');
-    expect(observedJson).toHaveTextContent('"codex_reasoning_effort": "high"');
-    expect(observedJson).not.toHaveTextContent("token");
+    const observedValues = screen.getByTestId("agent-runtime-observed-values");
+    expect(observedValues).toHaveTextContent("推理强度");
+    expect(observedValues).toHaveTextContent("high");
+    expect(observedValues).toHaveTextContent("软件保存值");
+    expect(observedValues).not.toHaveTextContent('"model"');
+    expect(observedValues).not.toHaveTextContent("token");
     expect(screen.queryByTestId("agent-runtime-submit")).toBeNull();
   });
 });

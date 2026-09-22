@@ -1,13 +1,16 @@
 import { useState, type MouseEvent } from "react";
 import { Activity, ArrowDown, ArrowUp, Check, Download, Loader2, MoreHorizontal, Pencil, Settings2, Terminal, Trash2, Upload } from "lucide-react";
 import type { ConnectionKind } from "./ConnectionFormDialog";
+import { AgentCurrentConfigView } from "./AgentCurrentConfigView";
 import type { EngineElement } from "../lib/contract";
 import type { AgentCurrentConfigStatus, AgentsObserved, AgentsSpec } from "../lib/observed";
 import {
   parseInitialToFormValues,
+  runtimeSettingsOf,
   type ConnectionEntry,
 } from "../lib/agentDefinitionForm";
 import { connectionKindOf } from "../lib/agentManagement";
+import { runtimeAlignment, runtimeComparisons } from "../lib/agentRuntime";
 import { parseAliasValue, renderAliasPreview } from "../lib/aliasCommand";
 import { cn } from "../lib/utils";
 
@@ -37,13 +40,6 @@ function automationLabelOf(element: EngineElement, value = automationValueOf(ele
   const management = (element.observed as AgentsObserved).management;
   const field = management?.runtime_fields.find((candidate) => candidate.key === "automation_mode");
   return field?.summary?.values?.[value] ?? field?.summary?.default ?? "未设置";
-}
-
-function observedAutomationValue(status: AgentCurrentConfigStatus | null | undefined): string | null {
-  if (status?.state === "missing") return "manual";
-  if (status?.state !== "ready") return null;
-  const value = status.config?.runtime?.automation_mode;
-  return typeof value === "string" ? value : "manual";
 }
 
 /** details 没有内建“选择后关闭”，执行菜单动作时显式收起，避免弹窗后面还挂着旧菜单。 */
@@ -181,6 +177,9 @@ export function ConnectionWorkbench({
   const name = displayNameOf(selected);
   const savedAutomationValue = automationValueOf(selected);
   const savedAutomationLabel = automationLabelOf(selected, savedAutomationValue);
+  const management = (selected.observed as AgentsObserved).management;
+  const runtimeFields = management?.runtime_fields ?? [];
+  const savedRuntime = runtimeSettingsOf(selected.spec as Record<string, unknown>);
   const form = parseInitialToFormValues(agentId, selected.spec as Record<string, unknown>);
   const active = form.activeConnection;
   const activeEntry = form.connections.find((item) => item.name === active);
@@ -195,11 +194,10 @@ export function ConnectionWorkbench({
     })
     .sort(([left], [right]) => left.localeCompare(right));
   const currentConfig = (selected.observed as AgentsObserved).current_config;
-  const actualAutomationValue = observedAutomationValue(currentConfig);
-  const actualAutomationLabel = actualAutomationValue
-    ? automationLabelOf(selected, actualAutomationValue)
-    : null;
-  const automationAligned = actualAutomationValue !== null && actualAutomationValue === savedAutomationValue;
+  const runtimeState = runtimeAlignment(runtimeFields, savedRuntime, currentConfig);
+  const runtimeComparisonItems = runtimeComparisons(runtimeFields, savedRuntime, currentConfig);
+  const runtimeDifferences = runtimeComparisonItems.filter((item) => item.aligned === false);
+  const automationComparison = runtimeComparisonItems.find((item) => item.key === "automation_mode");
   const activeAlignment = kind && currentConfig
     ? connectionAlignment(kind, activeEntry ?? null, currentConfig)
     : "unknown";
@@ -298,11 +296,11 @@ export function ConnectionWorkbench({
               <strong className="text-sm font-semibold text-foreground">{name}</strong>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              当前选择：{activeEntry?.label || activeEntry?.name || "助手默认账号"} · {automationAligned
-                ? `自动化：${savedAutomationLabel}`
-                : actualAutomationLabel
-                  ? `自动化：已保存 ${savedAutomationLabel}，客户端实际 ${actualAutomationLabel}`
-                  : `自动化：已保存 ${savedAutomationLabel}，客户端实际值暂不可读`}。
+              当前选择：{activeEntry?.label || activeEntry?.name || "助手默认账号"} · {runtimeState === "aligned"
+                ? `运行设置已生效（自动化：${savedAutomationLabel}）`
+                : runtimeState === "drifted"
+                  ? `${runtimeDifferences.length} 项运行设置尚未生效`
+                  : "运行设置暂时无法核对"}。
               {activeAlignment === "drifted" ? " 当前 Provider 尚未应用，请在下方点击应用。" : " 下面所有页签都属于这一个环境。"}
             </p>
           </div>
@@ -336,18 +334,34 @@ export function ConnectionWorkbench({
           <div data-testid="automation-panel" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-4">
             <div>
               <h3 className="text-sm font-medium text-foreground">
-                {automationAligned ? `当前生效：${savedAutomationLabel}` : `已保存：${savedAutomationLabel}`}
+                {runtimeState === "aligned"
+                  ? `运行设置已生效 · ${savedAutomationLabel}`
+                  : runtimeState === "drifted"
+                    ? `${runtimeDifferences.length} 项设置尚未生效`
+                    : "客户端实际值暂不可读"}
               </h3>
               <p className="mt-1 text-xs text-muted-foreground">
-                {automationAligned
-                  ? "客户端实际配置与这里一致；启动命令若带权限参数，会在启动时覆盖它。"
-                  : actualAutomationLabel
-                    ? `客户端实际仍是 ${actualAutomationLabel}，请应用已保存设置。`
-                    : "客户端实际值暂不可读；可以审查后重新应用已保存设置。"}
+                {runtimeState === "aligned"
+                  ? "软件保存值与客户端实际配置逐项一致；启动命令若带权限参数，会在启动时覆盖它。"
+                  : runtimeState === "drifted"
+                    ? "下面直接列出不一致项；应用只写本工具负责的配置键。"
+                    : "可以先到“实际配置”查看读取失败原因，再决定是否重新应用。"}
               </p>
+              {runtimeDifferences.length > 0 && (
+                <ul data-testid="runtime-differences" className="mt-2 space-y-1 text-xs">
+                  {runtimeDifferences.map((item) => (
+                    <li key={item.key} className="text-warning">
+                      {item.label}：已保存 {item.saved}，客户端实际 {item.actual}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {automationComparison?.aligned === true && runtimeState === "drifted" && (
+                <p className="mt-2 text-xs text-muted-foreground">自动化档位已是 {automationComparison.actual}；差异来自其他运行设置。</p>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {!automationAligned && (
+              {runtimeState !== "aligned" && (
                 <button type="button" data-testid="agent-runtime-apply" disabled={!kind || busyTarget !== null} onClick={() => onApplyRuntime(selected)} className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
                   应用已保存设置
                 </button>
@@ -407,14 +421,15 @@ export function ConnectionWorkbench({
 
         {tab === "actual" && (
           <div data-testid="actual-config-panel" className="space-y-3 rounded-xl border px-4 py-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h3 className="text-sm font-medium text-foreground">当前实际生效值</h3>
-                <p className="mt-1 text-xs text-muted-foreground">来源：{currentConfig?.target ?? currentConfig?.file ?? "未发现配置文件"}。敏感值只显示是否已配置。</p>
-              </div>
-              <span className={cn("rounded-full px-2 py-1 text-xs", currentConfig?.state === "ready" ? "bg-success/15 text-success" : "bg-muted text-muted-foreground")}>{currentConfig?.state === "ready" ? "已读取" : "未读取"}</span>
+            <div>
+              <h3 className="text-sm font-medium text-foreground">当前实际生效值</h3>
+              <p className="mt-1 text-xs text-muted-foreground">按用途整理客户端最终读取值；敏感值只显示是否已配置。</p>
             </div>
-            <pre className="max-h-96 overflow-auto rounded-lg bg-muted/45 p-3 font-mono text-xs text-foreground">{JSON.stringify(currentConfig?.config ?? {}, null, 2)}</pre>
+            <AgentCurrentConfigView
+              status={currentConfig}
+              fields={runtimeFields}
+              savedRuntime={savedRuntime}
+            />
           </div>
         )}
 

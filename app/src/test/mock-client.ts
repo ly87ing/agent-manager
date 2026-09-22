@@ -839,6 +839,23 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
         ? (element.spec.settings as Record<string, unknown>)
         : {};
     const next = structuredClone(current);
+    const runtime = element.spec.bin === "codex"
+      ? {
+          automation_mode: next.automation_mode ?? "manual",
+          codex_reasoning_effort: next.codex_reasoning_effort ?? null,
+          codex_web_search: next.codex_web_search ?? null,
+          codex_context_window: next.codex_context_window ?? null,
+          codex_auto_compact_token_limit: next.codex_auto_compact_token_limit ?? null,
+        }
+      : {
+          automation_mode: next.automation_mode ?? "manual",
+          statusline: next.statusline === "builtin" ? "builtin" : null,
+          claude_effort_level: next.claude_effort_level ?? null,
+          claude_tool_search: next.claude_tool_search === true,
+          claude_agent_teams: next.claude_agent_teams === true,
+          claude_disable_artifact: next.claude_disable_artifact === true,
+          claude_hide_attribution: next.claude_hide_attribution === true,
+        };
     const useIndex = args.indexOf("--use");
     if (useIndex >= 0) {
       const profile = args[useIndex + 1];
@@ -869,7 +886,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
             kind: codex ? "env" : selected.auth ?? "token",
             variable: codex ? selected.token_var ?? null : null,
           },
-          runtime: {},
+          runtime,
         },
       };
     } else if (args.includes("--use-default")) {
@@ -887,10 +904,15 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
           model_aliases: { opus: null, sonnet: null, haiku: null },
           timeout_ms: null,
           credential: { configured: false, kind: null, variable: null },
-          runtime: {},
+          runtime,
         },
       };
     }
+    const observed = element.observed.current_config as {
+      state?: string;
+      config?: { runtime?: Record<string, unknown> } | null;
+    } | undefined;
+    if (observed?.state === "ready" && observed.config) observed.config.runtime = runtime;
     element.spec.settings = next;
     recordRun(runId, "agents.configure");
     return makeEnvelope(
