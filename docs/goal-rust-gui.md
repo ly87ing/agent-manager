@@ -543,12 +543,13 @@ state 与 actions，不自己推断；用户主动停用的不催。syncPlan 是
   环境拆成接入 Provider、自动化与权限、启动命令、实际配置四页；添加 Provider 使用明确文字入口，
   独立环境从弹窗迁到同一工作区并按当前 Agent 过滤，创建入口与 Provider 完全分离。启动命令含权限
   参数时显示“覆盖环境自动化”及具体效果；实际配置直接展示目标文件和脱敏后的回读值。未改变 SQLite、
-  Provider、profile 或 alias 协议，`native-manager.db` 仍是唯一事实源。Vitest 57 files / 541 tests、
+  Provider、profile 或 alias 协议，`native-manager.db` 仍是唯一事实源。Vitest 57 files / 542 tests、
   前端生产构建、engine-rs 与 Tauri 15 tests 全部通过；原生 Tauri 窗口只读验收了默认环境四页与
   独立环境空态，未点击任何应用、同步或确认动作，未改动真实 Claude/Codex 配置。
 - Provider 接管差异审查：外部修改拒绝覆盖后，确认框不再要求用户盲选，逐项展示软件配置与客户端
-  当前值；用户可只覆盖受管字段，也可把客户端当前地址、模型及脱敏凭据元数据导入为新 Provider
-  后继续编辑。未读取或保存凭据明文，取消仍保持客户端文件零写。
+  当前值；用户可只覆盖受管字段，也可通过专用精简表单把客户端当前地址、模型及脱敏凭据元数据
+  保存为新 Provider。内部名称隐藏，缺少必填项时明确提示并禁止保存；未读取或保存凭据明文，取消
+  仍保持客户端文件零写。
 
 ## 剩余路线图（未排期）
 

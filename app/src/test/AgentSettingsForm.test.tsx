@@ -358,10 +358,44 @@ describe("助手运行参数", () => {
     expect(differences).toHaveTextContent("凭据");
 
     await userEvent.click(within(conflict).getByTestId("confirm-modal-secondary"));
-    const editor = await screen.findByRole("dialog", { name: "复制为 客户端当前配置" });
+    const editor = await screen.findByRole("dialog", { name: "纳管 Claude Code 的客户端当前配置" });
     expect(within(editor).getByTestId("new-connection-base-url")).toHaveValue("https://client.example.com");
     expect(within(editor).getByTestId("new-connection-model")).toHaveValue("client-model");
     expect(within(editor).getByTestId("new-connection-token-var")).toHaveValue("CLIENT_TOKEN");
+    expect(within(editor).queryByTestId("new-connection-name")).toBeNull();
+    expect(within(editor).queryByTestId("new-connection-note")).toBeNull();
+    expect(within(editor).getByTestId("adoption-readiness")).toHaveTextContent("已完整");
+    expect(within(editor).getByTestId("connection-form-submit")).toHaveTextContent("保存为 Provider");
+    expect(within(editor).getByText(/不会应用到客户端/)).toBeInTheDocument();
+  });
+
+  it("客户端当前配置不完整时明确缺失项并禁止保存", async () => {
+    const matched: Record<string, Envelope | (() => Promise<Envelope>)> = routes();
+    const status = matched["agents:status"] as { data: { elements: EngineElement[] } };
+    (status.data.elements[0].observed as Record<string, unknown>).current_config = {
+      state: "ready",
+      file: "settings.json",
+      config: {
+        base_url: "",
+        model: "",
+        credential: { configured: false, kind: "token", variable: "ANTHROPIC_AUTH_TOKEN" },
+        runtime: {},
+      },
+    };
+    matched["agents:configure"] = async () => makeEnvelope({}, {
+      command: "agents.configure",
+      ok: false,
+      errors: [{ code: "AGENT_ERROR", element: null, message: "配置被本工具以外改过，拒绝覆盖" }],
+    });
+    renderWithEngine(<AgentsPage />, matched);
+
+    await userEvent.click(await screen.findByTestId("reset-connection-claude-code-default"));
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+    const conflict = await screen.findByRole("dialog", { name: "选择如何处理配置差异" });
+    await userEvent.click(within(conflict).getByTestId("confirm-modal-secondary"));
+    const editor = await screen.findByRole("dialog", { name: "纳管 Claude Code 的客户端当前配置" });
+    expect(within(editor).getByTestId("adoption-readiness")).toHaveTextContent("API 地址、默认模型");
+    expect(within(editor).getByTestId("connection-form-submit")).toBeDisabled();
   });
 
   it("工作台一键切换接入：一条命令带 --use，切回默认带 --use-default", async () => {

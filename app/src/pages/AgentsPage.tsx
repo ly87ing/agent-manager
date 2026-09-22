@@ -74,7 +74,7 @@ export default function AgentsPage({
   const [connectionForm, setConnectionForm] = useState<{
     agent: EngineElement;
     initial?: ConnectionEntry;
-    variant?: "edit" | "duplicate";
+    variant?: "edit" | "duplicate" | "adopt";
     preserveUnknownFrom?: string;
   } | null>(null);
   const [connectionSaving, setConnectionSaving] = useState(false);
@@ -928,7 +928,7 @@ export default function AgentsPage({
                 const draft = observedConnectionDraft(takeoverKind, takeoverCurrent, connectionsOf(takeoverAgent.spec as Record<string, unknown>).map((item) => item.name));
                 setPendingConfigure(null);
                 setConnectionFormError(null);
-                setConnectionForm({ agent: takeoverAgent, initial: draft, variant: "duplicate" });
+                setConnectionForm({ agent: takeoverAgent, initial: draft, variant: "adopt" });
               }
             : undefined}
           executing={configuring}
