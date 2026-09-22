@@ -25,13 +25,15 @@ export function agentManagementFixture(kind: "claude" | "codex"): AgentManagemen
     type: "enum",
     presentation: "choice_cards",
     section: "权限与执行",
-    section_description: "建议使用智能自动；完全放开会在保存后再次确认。",
+    section_description: kind === "claude"
+      ? "Auto 是否可用由 Claude 当前账号、模型与组织设置决定；完全放开会在保存前再次确认。"
+      : "建议使用智能自动；完全放开会在保存前再次确认。",
     label: "自动化程度",
     description: "选择助手如何处理需要权限的操作。",
     options: kind === "claude"
       ? [
           { value: "manual", label: "手动确认", description: "由你确认敏感操作。", targets: [{ key: "permissions.defaultMode", enabled_value: '"manual"' }] },
-          { value: "auto", label: "智能自动", description: "由 Claude 自动判断。", recommended: true, targets: [{ key: "permissions.defaultMode", enabled_value: '"auto"' }] },
+          { value: "auto", label: "智能自动", description: "由 Claude 自动判断；仅在当前账号、模型与组织设置支持时可用。", targets: [{ key: "permissions.defaultMode", enabled_value: '"auto"' }] },
           { value: "full", label: "完全放开", description: "绕过所有权限检查。", danger: true, requires_confirmation: true, targets: [{ key: "permissions.defaultMode", enabled_value: '"bypassPermissions"' }] },
         ]
       : [

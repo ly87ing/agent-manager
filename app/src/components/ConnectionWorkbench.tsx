@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type MouseEvent } from "react";
 import { Activity, ArrowDown, ArrowUp, Check, Download, Loader2, MoreHorizontal, Pencil, Settings2, Terminal, Trash2, Upload } from "lucide-react";
 import type { ConnectionKind } from "./ConnectionFormDialog";
 import type { EngineElement } from "../lib/contract";
@@ -23,17 +23,33 @@ function displayNameOf(element: EngineElement): string {
 }
 
 /** 默认实例当前选择的自动化档位；显示词仍由后端适配器 schema 提供。 */
-function automationLabelOf(element: EngineElement): string {
+function automationValueOf(element: EngineElement): string {
   const spec = element.spec as Record<string, unknown>;
   const settings = spec.settings && typeof spec.settings === "object" && !Array.isArray(spec.settings)
     ? spec.settings as Record<string, unknown>
     : {};
-  const value = typeof settings.automation_mode === "string"
+  return typeof settings.automation_mode === "string"
     ? settings.automation_mode
     : settings.yolo === true ? "full" : "manual";
+}
+
+function automationLabelOf(element: EngineElement, value = automationValueOf(element)): string {
   const management = (element.observed as AgentsObserved).management;
   const field = management?.runtime_fields.find((candidate) => candidate.key === "automation_mode");
   return field?.summary?.values?.[value] ?? field?.summary?.default ?? "未设置";
+}
+
+function observedAutomationValue(status: AgentCurrentConfigStatus | null | undefined): string | null {
+  if (status?.state === "missing") return "manual";
+  if (status?.state !== "ready") return null;
+  const value = status.config?.runtime?.automation_mode;
+  return typeof value === "string" ? value : "manual";
+}
+
+/** details 没有内建“选择后关闭”，执行菜单动作时显式收起，避免弹窗后面还挂着旧菜单。 */
+function runMenuAction(event: MouseEvent<HTMLButtonElement>, action: (() => void) | undefined) {
+  event.currentTarget.closest("details")?.removeAttribute("open");
+  action?.();
 }
 
 type WorkbenchTab = "providers" | "automation" | "launch" | "actual";
@@ -41,8 +57,10 @@ type WorkbenchTab = "providers" | "automation" | "launch" | "actual";
 function automationOverrideOf(value: string): string | null {
   const args = parseAliasValue(value).extraArgs;
   if (/(^|\s)--dangerously-skip-permissions(?=\s|$)/.test(args)) return "启动时跳过所有权限确认";
-  if (/(^|\s)--enable-auto-mode(?=\s|$)/.test(args)) return "启动时启用 Auto 模式";
+  if (/(^|\s)--enable-auto-mode(?=\s|$)/.test(args)
+    || /(^|\s)--permission-mode(?:=|\s+)auto(?=\s|$)/.test(args)) return "启动时启用智能自动";
   if (/(^|\s)--dangerously-bypass-approvals-and-sandbox(?=\s|$)/.test(args)) return "启动时绕过审批与沙箱";
+  if (/(^|\s)--approve-for-me(?=\s|$)/.test(args)) return "启动时启用自动审查并保留沙箱";
   if (/(^|\s)--full-auto(?=\s|$)/.test(args)) return "启动时启用 Full Auto";
   if (/(^|\s)--permission-mode(?:=|\s+)/.test(args)
     || /(^|\s)--ask-for-approval(?:=|\s+)/.test(args)
@@ -126,6 +144,7 @@ export function ConnectionWorkbench({
   onRemove,
   onMove,
   onRuntimeSettings,
+  onApplyRuntime,
 }: {
   agents: EngineElement[];
   selectedAgentId: string | null;
@@ -152,6 +171,7 @@ export function ConnectionWorkbench({
   onRemove: (element: EngineElement, connection: ConnectionEntry) => void;
   onMove: (element: EngineElement, connection: ConnectionEntry, direction: "up" | "down") => void;
   onRuntimeSettings: (element: EngineElement) => void;
+  onApplyRuntime: (element: EngineElement) => void;
 }) {
   const [tab, setTab] = useState<WorkbenchTab>("providers");
   const selected = agents.find((element) => element.id === selectedAgentId) ?? agents[0];
@@ -159,7 +179,8 @@ export function ConnectionWorkbench({
 
   const agentId = selected.id.replace(/^agents:/, "");
   const name = displayNameOf(selected);
-  const automationLabel = automationLabelOf(selected);
+  const savedAutomationValue = automationValueOf(selected);
+  const savedAutomationLabel = automationLabelOf(selected, savedAutomationValue);
   const form = parseInitialToFormValues(agentId, selected.spec as Record<string, unknown>);
   const active = form.activeConnection;
   const activeEntry = form.connections.find((item) => item.name === active);
@@ -174,6 +195,11 @@ export function ConnectionWorkbench({
     })
     .sort(([left], [right]) => left.localeCompare(right));
   const currentConfig = (selected.observed as AgentsObserved).current_config;
+  const actualAutomationValue = observedAutomationValue(currentConfig);
+  const actualAutomationLabel = actualAutomationValue
+    ? automationLabelOf(selected, actualAutomationValue)
+    : null;
+  const automationAligned = actualAutomationValue !== null && actualAutomationValue === savedAutomationValue;
   const activeAlignment = kind && currentConfig
     ? connectionAlignment(kind, activeEntry ?? null, currentConfig)
     : "unknown";
@@ -246,7 +272,7 @@ export function ConnectionWorkbench({
                   type="button"
                   data-testid="import-connection-button"
                   disabled={!kind}
-                  onClick={() => onImport(selected)}
+                  onClick={(event) => runMenuAction(event, () => onImport(selected))}
                   className="inline-flex items-center gap-2 rounded px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
                 >
                   <Upload className="h-4 w-4" aria-hidden /> 导入接入
@@ -272,8 +298,12 @@ export function ConnectionWorkbench({
               <strong className="text-sm font-semibold text-foreground">{name}</strong>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              当前选择：{activeEntry?.label || activeEntry?.name || "助手默认账号"} · 自动化：{automationLabel}。
-              {activeAlignment === "drifted" ? " 当前选择尚未应用，请在下方点击应用。" : " 下面所有页签都属于这一个环境。"}
+              当前选择：{activeEntry?.label || activeEntry?.name || "助手默认账号"} · {automationAligned
+                ? `自动化：${savedAutomationLabel}`
+                : actualAutomationLabel
+                  ? `自动化：已保存 ${savedAutomationLabel}，客户端实际 ${actualAutomationLabel}`
+                  : `自动化：已保存 ${savedAutomationLabel}，客户端实际值暂不可读`}。
+              {activeAlignment === "drifted" ? " 当前 Provider 尚未应用，请在下方点击应用。" : " 下面所有页签都属于这一个环境。"}
             </p>
           </div>
         </div>
@@ -305,12 +335,27 @@ export function ConnectionWorkbench({
         {tab === "automation" && (
           <div data-testid="automation-panel" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-4">
             <div>
-              <h3 className="text-sm font-medium text-foreground">当前自动化：{automationLabel}</h3>
-              <p className="mt-1 text-xs text-muted-foreground">这是该环境的默认权限方式；启动命令若带权限参数，会在启动时覆盖它。</p>
+              <h3 className="text-sm font-medium text-foreground">
+                {automationAligned ? `当前生效：${savedAutomationLabel}` : `已保存：${savedAutomationLabel}`}
+              </h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {automationAligned
+                  ? "客户端实际配置与这里一致；启动命令若带权限参数，会在启动时覆盖它。"
+                  : actualAutomationLabel
+                    ? `客户端实际仍是 ${actualAutomationLabel}，请应用已保存设置。`
+                    : "客户端实际值暂不可读；可以审查后重新应用已保存设置。"}
+              </p>
             </div>
-            <button type="button" data-testid="agent-runtime-button" disabled={!kind} onClick={() => onRuntimeSettings(selected)} className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-              修改自动化与权限
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {!automationAligned && (
+                <button type="button" data-testid="agent-runtime-apply" disabled={!kind || busyTarget !== null} onClick={() => onApplyRuntime(selected)} className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+                  应用已保存设置
+                </button>
+              )}
+              <button type="button" data-testid="agent-runtime-button" disabled={!kind} onClick={() => onRuntimeSettings(selected)} className="rounded-lg border px-3 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50">
+                修改自动化与权限
+              </button>
+            </div>
           </div>
         )}
 
@@ -501,7 +546,6 @@ function ConnectionCard({
         (!active || alignment === "unknown") && "hover:border-primary/30",
       )}
     >
-      <span className="select-none text-xl text-muted-foreground" aria-hidden>⠿</span>
       <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border bg-muted text-lg font-semibold text-foreground">
         {(connection?.label || connection?.name || "默").slice(0, 1).toUpperCase()}
       </div>
@@ -595,7 +639,7 @@ function ConnectionCard({
               type="button"
               data-testid={`check-connection-${agentId}-${id}`}
               disabled={check?.pending}
-              onClick={onCheck}
+              onClick={(event) => runMenuAction(event, onCheck)}
               className="rounded px-3 py-2 text-left text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
             >
               {check?.pending ? "正在测试…" : "测试连接"}
@@ -606,7 +650,7 @@ function ConnectionCard({
                 type="button"
                 aria-label={`上移 ${connection.label || connection.name}`}
                 disabled={disabled || !onMoveUp}
-                onClick={onMoveUp}
+                onClick={(event) => runMenuAction(event, onMoveUp)}
                 className="flex-1 rounded-l border px-2 py-1.5 text-muted-foreground hover:bg-accent disabled:opacity-30"
               >
                 <ArrowUp className="h-3.5 w-3.5" aria-hidden />
@@ -615,7 +659,7 @@ function ConnectionCard({
                 type="button"
                 aria-label={`下移 ${connection.label || connection.name}`}
                 disabled={disabled || !onMoveDown}
-                onClick={onMoveDown}
+                onClick={(event) => runMenuAction(event, onMoveDown)}
                 className="flex-1 rounded-r border border-l-0 px-2 py-1.5 text-muted-foreground hover:bg-accent disabled:opacity-30"
               >
                 <ArrowDown className="h-3.5 w-3.5" aria-hidden />
@@ -626,7 +670,7 @@ function ConnectionCard({
                 type="button"
                 data-testid={`duplicate-connection-${agentId}-${id}`}
                 disabled={disabled}
-                onClick={onDuplicate}
+                onClick={(event) => runMenuAction(event, onDuplicate)}
                 className="rounded px-3 py-2 text-left text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
               >
                 创建副本
@@ -637,7 +681,7 @@ function ConnectionCard({
                 type="button"
                 data-testid={`export-connection-${agentId}-${id}`}
                 disabled={disabled}
-                onClick={onExport}
+                onClick={(event) => runMenuAction(event, onExport)}
                 className="inline-flex items-center gap-1 rounded px-3 py-2 text-left text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
               >
                 <Download className="h-3.5 w-3.5" aria-hidden /> 导出
@@ -649,7 +693,7 @@ function ConnectionCard({
                 data-testid={`remove-connection-${agentId}-${id}`}
                 disabled={disabled || active}
                 title={active ? "当前接入不能删除，请先切换到其他接入或默认账号" : "删除这套接入"}
-                onClick={onRemove}
+                onClick={(event) => runMenuAction(event, onRemove)}
                 className="rounded px-3 py-2 text-left text-xs text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 删除

@@ -3,7 +3,10 @@ import { hasPresetArgs, presetsForCommand, togglePresetArgs } from "../lib/agent
 
 describe("启动参数预设", () => {
   it("按命令名给出预设，未知命令没有", () => {
-    expect(presetsForCommand("claude").map((p) => p.args)).toEqual(["--dangerously-skip-permissions"]);
+    expect(presetsForCommand("claude").map((p) => p.args)).toEqual([
+      "--dangerously-skip-permissions",
+      "--permission-mode auto",
+    ]);
     expect(presetsForCommand("codex")).toHaveLength(2);
     expect(presetsForCommand("~/.local/bin/codex")).toHaveLength(2);
     expect(presetsForCommand("some-tool")).toEqual([]);
@@ -23,13 +26,11 @@ describe("启动参数预设", () => {
     expect(togglePresetArgs("--verbose --dangerously-skip-permissions", preset)).toBe("--verbose");
   });
 
-  it("多段参数的预设整体判定与整体移除", () => {
+  it("自动审查预设可以整体切换", () => {
     const preset = presetsForCommand("codex").find((p) => p.id === "codex-auto-sandboxed")!;
     const added = togglePresetArgs("", preset);
-    expect(added).toBe("--ask-for-approval never --sandbox workspace-write");
+    expect(added).toBe("--approve-for-me");
     expect(hasPresetArgs(added, preset)).toBe(true);
-    // 只有一半参数时不算已启用
-    expect(hasPresetArgs("--ask-for-approval never", preset)).toBe(false);
     expect(togglePresetArgs(added, preset)).toBe("");
   });
 });
@@ -37,10 +38,10 @@ describe("启动参数预设", () => {
 describe("五个助手的权限档预设", () => {
   it("各家参数名不同，按实际命令名给对应的那套", () => {
     const of = (bin: string) => presetsForCommand(bin).map((p) => p.args);
-    expect(of("claude")).toEqual(["--dangerously-skip-permissions"]);
+    expect(of("claude")).toEqual(["--dangerously-skip-permissions", "--permission-mode auto"]);
     expect(of("codex")).toEqual([
       "--dangerously-bypass-approvals-and-sandbox",
-      "--ask-for-approval never --sandbox workspace-write",
+      "--approve-for-me",
     ]);
     expect(of("agy")).toEqual(["--dangerously-skip-permissions", "--sandbox"]);
     expect(of("grok")).toEqual(["--permission-mode bypassPermissions", "--permission-mode acceptEdits"]);

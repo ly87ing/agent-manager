@@ -251,7 +251,7 @@ describe("终端快捷命令页", () => {
     expect(payload.value.aliases.cc).toContain("--dangerously-skip-permissions");
   });
 
-  it("Codex 有两档：全自动与保留沙箱，未知命令没有预设", async () => {
+  it("Codex 有两档：完全放开与自动审查，未知命令没有预设", async () => {
     renderWithEngine(<AliasesPage />, aliasRoutes());
     await userEvent.click(await screen.findByTestId("add-alias-button"));
     const dialog = await screen.findByRole("dialog");
@@ -259,15 +259,23 @@ describe("终端快捷命令页", () => {
     expect(within(dialog).getByTestId("alias-preset-codex-yolo")).toBeInTheDocument();
     const sandboxed = within(dialog).getByTestId("alias-preset-codex-auto-sandboxed");
     await userEvent.click(sandboxed);
-    expect(within(dialog).getByTestId("alias-extra-args-input")).toHaveValue(
-      "--ask-for-approval never --sandbox workspace-write",
-    );
+    expect(within(dialog).getByTestId("alias-extra-args-input")).toHaveValue("--approve-for-me");
     // 保留沙箱的那档不是危险项，不弹警示
     expect(within(dialog).queryByTestId("alias-preset-warning")).toBeNull();
 
     await userEvent.clear(within(dialog).getByTestId("alias-command-input"));
     await userEvent.type(within(dialog).getByTestId("alias-command-input"), "some-tool");
     expect(within(dialog).queryByTestId("alias-preset-codex-yolo")).toBeNull();
+  });
+
+  it("Claude 提供安全检查版 Auto，不必只能选择完全放开", async () => {
+    renderWithEngine(<AliasesPage />, aliasRoutes());
+    await userEvent.click(await screen.findByTestId("add-alias-button"));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.type(within(dialog).getByTestId("alias-command-input"), "claude");
+    await userEvent.click(within(dialog).getByTestId("alias-preset-claude-auto"));
+    expect(within(dialog).getByTestId("alias-extra-args-input")).toHaveValue("--permission-mode auto");
+    expect(within(dialog).queryByTestId("alias-preset-warning")).toBeNull();
   });
 
   it("保存前拦住会破坏配置行的取值", async () => {

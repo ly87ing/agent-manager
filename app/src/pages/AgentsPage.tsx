@@ -52,9 +52,11 @@ import { useDirectApply } from "../lib/useDirectApply";
 
 export default function AgentsPage({
   onManageSkills,
+  onOpenSecrets,
 }: {
   onManageSkills?: (agentId: string) => void;
   onGoTakeover?: () => void;
+  onOpenSecrets?: () => void;
 } = {}) {
   const query = useEngineQuery<StatusData>("agents:status");
   const policyQuery = useEngineQuery<PolicyData>("policy:get");
@@ -100,6 +102,11 @@ export default function AgentsPage({
   const [runtimeFormAgent, setRuntimeFormAgent] = useState<EngineElement | null>(null);
   const [runtimeSaving, setRuntimeSaving] = useState(false);
   const [runtimeFormError, setRuntimeFormError] = useState<string | null>(null);
+  /** 高风险运行模式先确认，再保存定义和写入客户端；取消必须保持零写入。 */
+  const [pendingRuntimeSave, setPendingRuntimeSave] = useState<{
+    agent: EngineElement;
+    settings: AgentRuntimeSettings;
+  } | null>(null);
   /** 运行参数写入前要用户点头的那一步：降安全等级，或目标被外部改过。 */
   const [pendingConfigure, setPendingConfigure] = useState<
     { agentId: string; yolo: boolean; use?: string; reason: "yolo" | "takeover" } | null
@@ -384,15 +391,14 @@ export default function AgentsPage({
     }
   };
 
-  /** 保存运行偏好后立刻写进助手配置；只改运行设置弹窗明确拥有的键。 */
-  const saveRuntimeSettings = async (element: EngineElement, settings: AgentRuntimeSettings) => {
+  /** 保存运行偏好后立刻写进助手配置；失败时保留为明确的“待应用”方案。 */
+  const persistRuntimeSettings = async (
+    element: EngineElement,
+    settings: AgentRuntimeSettings,
+    allowYolo = false,
+  ) => {
     if (runtimeSaving) return;
     const agentId = element.id.replace(/^agents:/, "");
-    const management = agentManagementOf(element);
-    if (!management) {
-      setRuntimeFormError("当前助手没有可用的运行设置适配器");
-      return;
-    }
     setRuntimeSaving(true);
     setRuntimeFormError(null);
     try {
@@ -400,20 +406,47 @@ export default function AgentsPage({
       const saved = await definitionOps.saveDefinition({ name: agentId, definition, isNew: false });
       if (!saved) {
         setRuntimeFormError("运行设置没有保存，请根据提示修正后重试");
+        setRuntimeFormAgent(element);
         return;
       }
       setRuntimeFormAgent(null);
       await query.refetch();
-      if (runtimeRequiresYoloConfirmation(settings, management.runtime_fields)) {
-        setPendingConfigure({ agentId, yolo: true, reason: "yolo" });
-        return;
-      }
-      await runConfigure(agentId);
+      await runConfigure(agentId, { allowYolo });
     } catch (err) {
       setRuntimeFormError(`保存运行设置失败:${String(err)}`);
+      setRuntimeFormAgent(element);
     } finally {
       setRuntimeSaving(false);
     }
+  };
+
+  /** 普通模式直接保存并应用；完全放开先确认，取消时定义和客户端都不动。 */
+  const saveRuntimeSettings = (element: EngineElement, settings: AgentRuntimeSettings) => {
+    if (runtimeSaving) return;
+    const management = agentManagementOf(element);
+    if (!management) {
+      setRuntimeFormError("当前助手没有可用的运行设置适配器");
+      return;
+    }
+    if (runtimeRequiresYoloConfirmation(settings, management.runtime_fields)) {
+      setRuntimeFormAgent(null);
+      setPendingRuntimeSave({ agent: element, settings });
+      return;
+    }
+    void persistRuntimeSettings(element, settings);
+  };
+
+  /** 把已经保存但尚未生效的运行设置重新应用到客户端。 */
+  const applySavedRuntimeSettings = (element: EngineElement) => {
+    const management = agentManagementOf(element);
+    if (!management) return;
+    const settings = runtimeSettingsOf(element.spec as Record<string, unknown>);
+    const agentId = element.id.replace(/^agents:/, "");
+    if (runtimeRequiresYoloConfirmation(settings, management.runtime_fields)) {
+      setPendingConfigure({ agentId, yolo: true, reason: "yolo" });
+      return;
+    }
+    void runConfigure(agentId);
   };
 
   /** 保存实例：写定义 + 把启动命令存成同名快捷命令；两步都只写配置，不落地。 */
@@ -652,6 +685,7 @@ export default function AgentsPage({
           setRuntimeFormError(null);
           setRuntimeFormAgent(element);
         }}
+        onApplyRuntime={applySavedRuntimeSettings}
       />}
       {environmentView === "independent" && (
           <section data-testid="independent-environments" className="space-y-4 rounded-xl border bg-card p-5 shadow-sm">
@@ -789,6 +823,7 @@ export default function AgentsPage({
           variant={connectionForm.variant}
           busy={connectionSaving}
           error={connectionFormError}
+          onOpenSecrets={onOpenSecrets}
           onSubmit={(submission) => void saveConnection(connectionForm.agent, submission)}
           onClose={() => {
             setConnectionForm(null);
@@ -943,7 +978,7 @@ export default function AgentsPage({
           }}
           onClose={() => {
             setPendingConfigure(null);
-            toast.message("运行参数没写进去", { description: "定义已经存下了，助手的配置文件没动。" });
+            toast.message("没有应用到客户端", { description: "已保存方案保持不变，客户端配置没有修改。" });
           }}
         >
           {pendingConfigure.reason === "takeover" && (
@@ -957,6 +992,25 @@ export default function AgentsPage({
             </div>
           )}
         </ConfirmModal>
+      )}
+      {pendingRuntimeSave && (
+        <ConfirmModal
+          title="完全放开助手权限"
+          description="这会保存高风险方案并写入客户端：关闭权限询问，同时允许助手脱离工作区沙箱操作。只应在可信且已经隔离的环境中使用。"
+          risk="write-local"
+          riskLabel="完全放开"
+          confirmLabel="确认保存并应用"
+          executing={runtimeSaving}
+          onConfirm={() => {
+            const pending = pendingRuntimeSave;
+            setPendingRuntimeSave(null);
+            void persistRuntimeSettings(pending.agent, pending.settings, true);
+          }}
+          onClose={() => {
+            setPendingRuntimeSave(null);
+            toast.message("已取消", { description: "运行设置没有保存，客户端配置也没有修改。" });
+          }}
+        />
       )}
     </div>
   );

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, waitFor } from "@testing-library/react";
 import AgentsPage from "../pages/AgentsPage";
 import { agentManagementFixture, makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
@@ -157,6 +157,7 @@ describe("助手运行参数", () => {
 
     await openRuntimeSettings();
     const dialog = await screen.findByRole("dialog", { name: "Claude Code 运行设置" });
+    expect(screen.getByTestId("agent-runtime-cancel")).toHaveFocus();
     expect(dialog).toHaveTextContent("账号、接口地址、模型与凭据变量在接入卡片中维护");
     expect(screen.queryByLabelText("安装命令")).toBeNull();
     expect(screen.queryByLabelText("升级命令")).toBeNull();
@@ -261,17 +262,18 @@ describe("助手运行参数", () => {
     });
   });
 
-  it("完全放开先保存定义再二次确认，取消时不写助手文件", async () => {
+  it("完全放开先二次确认，取消时定义和助手文件都不写", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await openRuntimeSettings();
     await userEvent.click(screen.getByTestId("agent-runtime-automation-mode-full"));
     await userEvent.click(screen.getByTestId("agent-runtime-submit"));
 
     await screen.findByRole("dialog", { name: "完全放开助手权限" });
-    expect(calls.some((call) => call.command === "policy:set")).toBe(true);
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
     expect(configureCalls(calls)).toHaveLength(0);
     await userEvent.click(screen.getByRole("button", { name: "取消" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
     expect(configureCalls(calls)).toHaveLength(0);
   });
 
@@ -284,11 +286,31 @@ describe("助手运行参数", () => {
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
 
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
+    expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(1);
     expect(configureCalls(calls)[0].args).toEqual([
       "--only",
       "agents:claude-code",
       "--allow-yolo",
     ]);
+  });
+
+  it("已保存自动化与客户端实际值不一致时明确提示并可直接应用", async () => {
+    const drifted = routes();
+    const status = drifted["agents:status"] as { data: { elements: EngineElement[] } };
+    const element = status.data.elements[0];
+    (element.spec as Record<string, unknown>).settings = { automation_mode: "auto" };
+    setClaudeCurrentConfig(element, null);
+    const current = (element.observed as any).current_config.config;
+    current.runtime = { automation_mode: "manual" };
+    const { calls } = renderWithEngine(<AgentsPage />, drifted);
+
+    await userEvent.click(await screen.findByTestId("workbench-tab-automation"));
+    expect(screen.getByTestId("automation-panel")).toHaveTextContent("已保存：智能自动");
+    expect(screen.getByTestId("automation-panel")).toHaveTextContent("客户端实际仍是 手动确认");
+    await userEvent.click(screen.getByTestId("agent-runtime-apply"));
+
+    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
+    expect(configureCalls(calls)[0].args).toEqual(["--only", "agents:claude-code"]);
   });
 
   it("配置文件被外部改过：先问再覆盖，确认后带 --allow-takeover 重试", async () => {
@@ -615,7 +637,12 @@ describe("助手运行参数", () => {
     };
     const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
 
-    await userEvent.click(await screen.findByTestId("duplicate-connection-claude-code-relay"));
+    const manage = await screen.findByLabelText("管理 我的中转");
+    await userEvent.click(manage);
+    const menu = manage.closest("details")!;
+    expect(menu).toHaveAttribute("open");
+    await userEvent.click(screen.getByTestId("duplicate-connection-claude-code-relay"));
+    expect(menu).not.toHaveAttribute("open");
     const dialog = await screen.findByRole("dialog", { name: "复制 Provider" });
     expect(dialog).toHaveTextContent("原 Provider、当前接入和客户端配置都不会改变");
     expect(screen.getByTestId("new-connection-label")).toHaveValue("我的中转 副本");
@@ -1004,8 +1031,28 @@ describe("助手运行参数", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("系统钥匙串暂时不可用");
     expect(screen.getByTestId("new-connection-secret")).toHaveValue("fake-secret-value");
     expect(screen.getByRole("dialog", { name: "为 Claude Code 添加接入" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "打开密钥设置" })).toBeNull();
     expect(calls.some((call) => call.command === "policy:set")).toBe(true);
     expect(configureCalls(calls)).toHaveLength(0);
+  });
+
+  it("凭据保存失败时可从错误处直接打开密钥设置", async () => {
+    const onOpenSecrets = vi.fn();
+    renderWithEngine(<AgentsPage onOpenSecrets={onOpenSecrets} />, routes({
+      "secrets:set": makeEnvelope({}, {
+        command: "secrets.set",
+        ok: false,
+        errors: [{ code: "SECRET_ERROR", element: null, message: "外部密钥文件尚未选择" }],
+      }),
+    }));
+
+    await userEvent.click(await screen.findByTestId("add-connection-button"));
+    await userEvent.click(screen.getByTestId("connection-preset-kimi-cn-claude"));
+    await userEvent.type(screen.getByTestId("new-connection-secret"), "fake-secret-value");
+    await userEvent.click(screen.getByTestId("connection-form-submit"));
+    await userEvent.click(await screen.findByRole("button", { name: "打开密钥设置" }));
+
+    expect(onOpenSecrets).toHaveBeenCalledTimes(1);
   });
 
   it("新增接入取消：关闭弹窗并恢复焦点，零定义、凭据和配置写入", async () => {

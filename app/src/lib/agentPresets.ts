@@ -3,9 +3,9 @@
  *
  * 取值全部来自本机实测的 `--help` 输出，不臆造——各家叫法完全不同，照抄别家的名字会写出
  * 根本不存在的参数：
- * - Claude Code / Antigravity：`--dangerously-skip-permissions`
+ * - Claude Code：`--permission-mode auto` 与 `--dangerously-skip-permissions`
  * - Codex：`--dangerously-bypass-approvals-and-sandbox`（官方标注 EXTREMELY DANGEROUS）；
- *   中间档 `--ask-for-approval never --sandbox workspace-write`
+ *   中间档 `--approve-for-me`（自动审查且保留 workspace-write 沙箱）
  * - Grok：`--permission-mode <default|acceptEdits|auto|dontAsk|bypassPermissions|plan>`
  * - Kimi：`--auto`（Never Ask）与 `-y/--yolo`（Ask When Needed，风险动作仍问）
  *
@@ -29,6 +29,13 @@ const CLAUDE_PRESETS: LaunchPreset[] = [
     danger: true,
     hint: "助手不再逐次征求确认，直接执行改文件、跑命令等操作。只在你信任的目录里用。",
   },
+  {
+    id: "claude-auto",
+    label: "智能自动（保留安全检查）",
+    args: "--permission-mode auto",
+    danger: false,
+    hint: "由 Claude 的分类器审查操作；是否可用取决于当前账号、模型与组织设置。",
+  },
 ];
 
 const CODEX_PRESETS: LaunchPreset[] = [
@@ -41,10 +48,10 @@ const CODEX_PRESETS: LaunchPreset[] = [
   },
   {
     id: "codex-auto-sandboxed",
-    label: "自动执行，保留沙箱",
-    args: "--ask-for-approval never --sandbox workspace-write",
+    label: "智能自动（保留沙箱）",
+    args: "--approve-for-me",
     danger: false,
-    hint: "不再逐次确认，但命令仍限制在可写工作区沙箱内，比完全放开安全。",
+    hint: "需要越过沙箱时交给独立审查器判断；仍保留可写工作区沙箱。",
   },
 ];
 

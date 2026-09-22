@@ -32,6 +32,7 @@ export function ConnectionFormDialog({
   busy,
   error,
   onSubmit,
+  onOpenSecrets,
   onClose,
 }: {
   agentName: string;
@@ -44,6 +45,7 @@ export function ConnectionFormDialog({
   busy: boolean;
   error?: string | null;
   onSubmit: (submission: ConnectionSubmission) => void;
+  onOpenSecrets?: () => void;
   onClose: () => void;
 }) {
   const rootRef = useRef<HTMLElement>(null);
@@ -531,9 +533,14 @@ export function ConnectionFormDialog({
           )}
 
           {shownError && (
-            <p role="alert" data-testid="connection-form-error" className="mt-4 text-sm text-destructive">
-              {shownError}
-            </p>
+            <div role="alert" data-testid="connection-form-error" className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <span>{shownError}</span>
+              {onOpenSecrets && shownError.includes("凭据") && (
+                <button type="button" onClick={onOpenSecrets} className="rounded border border-destructive/30 bg-card px-2.5 py-1 text-xs font-medium hover:bg-destructive/10">
+                  打开密钥设置
+                </button>
+              )}
+            </div>
           )}
         </div>
 

@@ -37,57 +37,62 @@ pub(crate) fn kind_for_bin(bin: &str) -> Option<AdapterKind> {
 }
 
 fn automation_mode(kind: AdapterKind) -> Value {
-    let options = match kind {
-        AdapterKind::Claude => json!([
-            {
-                "value": "manual", "label": "手动确认", "description": "由你确认敏感操作，适合陌生项目。",
-                "targets": [{"key": "permissions.defaultMode", "enabled_value": "\"manual\""}]
-            },
-            {
-                "value": "auto", "label": "智能自动", "description": "由 Claude 的分类器自动判断，遇到高风险操作仍会拦截。",
-                "recommended": true,
-                "targets": [{"key": "permissions.defaultMode", "enabled_value": "\"auto\""}]
-            },
-            {
-                "value": "full", "label": "完全放开", "description": "绕过所有权限检查，只适合已经隔离的可信环境。",
-                "danger": true, "requires_confirmation": true,
-                "targets": [{"key": "permissions.defaultMode", "enabled_value": "\"bypassPermissions\""}]
-            }
-        ]),
-        AdapterKind::Codex => json!([
-            {
-                "value": "manual", "label": "手动确认", "description": "保留工作区沙箱，越界操作由你确认。",
-                "targets": [
-                    {"key": "approval_policy", "enabled_value": "\"on-request\""},
-                    {"key": "sandbox_mode", "enabled_value": "\"workspace-write\""},
-                    {"key": "approvals_reviewer", "enabled_value": "\"user\""}
-                ]
-            },
-            {
-                "value": "auto", "label": "智能自动", "description": "保留工作区沙箱，由独立审查器处理符合条件的越界请求。",
-                "recommended": true,
-                "targets": [
-                    {"key": "approval_policy", "enabled_value": "\"on-request\""},
-                    {"key": "sandbox_mode", "enabled_value": "\"workspace-write\""},
-                    {"key": "approvals_reviewer", "enabled_value": "\"auto_review\""}
-                ]
-            },
-            {
-                "value": "full", "label": "完全放开", "description": "不询问且移除沙箱，只适合外部已经隔离的环境。",
-                "danger": true, "requires_confirmation": true,
-                "targets": [
-                    {"key": "approval_policy", "enabled_value": "\"never\""},
-                    {"key": "sandbox_mode", "enabled_value": "\"danger-full-access\""}
-                ]
-            }
-        ]),
+    let (options, section_description) = match kind {
+        AdapterKind::Claude => (
+            json!([
+                {
+                    "value": "manual", "label": "手动确认", "description": "由你确认敏感操作，适合陌生项目。",
+                    "targets": [{"key": "permissions.defaultMode", "enabled_value": "\"manual\""}]
+                },
+                {
+                    "value": "auto", "label": "智能自动", "description": "由 Claude 的分类器自动判断；仅在当前账号、模型与组织设置支持时可用。",
+                    "targets": [{"key": "permissions.defaultMode", "enabled_value": "\"auto\""}]
+                },
+                {
+                    "value": "full", "label": "完全放开", "description": "绕过所有权限检查，只适合已经隔离的可信环境。",
+                    "danger": true, "requires_confirmation": true,
+                    "targets": [{"key": "permissions.defaultMode", "enabled_value": "\"bypassPermissions\""}]
+                }
+            ]),
+            "Auto 是否可用由 Claude 当前账号、模型与组织设置决定；完全放开会在保存前再次确认。",
+        ),
+        AdapterKind::Codex => (
+            json!([
+                {
+                    "value": "manual", "label": "手动确认", "description": "保留工作区沙箱，越界操作由你确认。",
+                    "targets": [
+                        {"key": "approval_policy", "enabled_value": "\"on-request\""},
+                        {"key": "sandbox_mode", "enabled_value": "\"workspace-write\""},
+                        {"key": "approvals_reviewer", "enabled_value": "\"user\""}
+                    ]
+                },
+                {
+                    "value": "auto", "label": "智能自动", "description": "保留工作区沙箱，由独立审查器处理符合条件的越界请求。",
+                    "recommended": true,
+                    "targets": [
+                        {"key": "approval_policy", "enabled_value": "\"on-request\""},
+                        {"key": "sandbox_mode", "enabled_value": "\"workspace-write\""},
+                        {"key": "approvals_reviewer", "enabled_value": "\"auto_review\""}
+                    ]
+                },
+                {
+                    "value": "full", "label": "完全放开", "description": "不询问且移除沙箱，只适合外部已经隔离的环境。",
+                    "danger": true, "requires_confirmation": true,
+                    "targets": [
+                        {"key": "approval_policy", "enabled_value": "\"never\""},
+                        {"key": "sandbox_mode", "enabled_value": "\"danger-full-access\""}
+                    ]
+                }
+            ]),
+            "建议使用智能自动；完全放开会在保存前再次确认。",
+        ),
     };
     json!({
         "key": "automation_mode",
         "type": "enum",
         "presentation": "choice_cards",
         "section": "权限与执行",
-        "section_description": "建议使用智能自动；完全放开会在保存后再次确认。",
+        "section_description": section_description,
         "label": "自动化程度",
         "description": "选择助手如何处理需要权限的操作。",
         "options": options,
@@ -228,5 +233,43 @@ mod tests {
             .map(|option| option["value"].as_str().unwrap())
             .collect();
         assert_eq!(values, CLAUDE_EFFORT_LEVELS);
+    }
+
+    #[test]
+    fn 自动化档位暴露真实写入键且不把受账号限制的_claude_auto_标为推荐() {
+        let claude = management_for_bin("claude");
+        let automation = claude["runtime_fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|field| field["key"] == "automation_mode")
+            .unwrap();
+        let claude_auto = automation["options"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|option| option["value"] == "auto")
+            .unwrap();
+        assert!(claude_auto.get("recommended").is_none());
+        assert_eq!(
+            claude_auto["targets"][0],
+            json!({"key": "permissions.defaultMode", "enabled_value": "\"auto\""})
+        );
+
+        let codex = management_for_bin("codex");
+        let automation = codex["runtime_fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|field| field["key"] == "automation_mode")
+            .unwrap();
+        let codex_auto = automation["options"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|option| option["value"] == "auto")
+            .unwrap();
+        assert_eq!(codex_auto["recommended"], true);
+        assert_eq!(codex_auto["targets"][2]["key"], "approvals_reviewer");
     }
 }
