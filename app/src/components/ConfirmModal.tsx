@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Loader2, X } from "lucide-react";
 import type { Diagnostic, RiskLevel } from "../lib/contract";
 import { cn } from "../lib/utils";
@@ -18,6 +18,9 @@ export function ConfirmModal({
   confirmLabel = "确认执行",
   executing,
   resultErrors,
+  children,
+  secondaryLabel,
+  onSecondary,
   onConfirm,
   onClose,
 }: {
@@ -29,6 +32,9 @@ export function ConfirmModal({
   confirmLabel?: string;
   executing: boolean;
   resultErrors?: Diagnostic[] | null;
+  children?: ReactNode;
+  secondaryLabel?: string;
+  onSecondary?: () => void;
   onConfirm: () => void;
   onClose: () => void;
 }) {
@@ -64,6 +70,7 @@ export function ConfirmModal({
         </div>
 
         <p className="mt-3 text-sm text-muted-foreground">{description}</p>
+        {children}
 
         {needsText && (
           <input
@@ -80,6 +87,11 @@ export function ConfirmModal({
         {resultErrors && resultErrors.length > 0 && <div className="mt-3"><ErrorPanel title="执行失败" errors={resultErrors} /></div>}
 
         <div className="mt-4 flex justify-end gap-2">
+          {secondaryLabel && onSecondary && (
+            <button type="button" data-testid="confirm-modal-secondary" onClick={onSecondary} disabled={executing} className="rounded-md border border-primary/30 px-4 py-2 text-sm text-primary hover:bg-primary/10 disabled:opacity-40">
+              {secondaryLabel}
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}

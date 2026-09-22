@@ -45,7 +45,7 @@ import {
   type ConnectionEntry,
 } from "../lib/agentDefinitionForm";
 import { agentManagementOf, connectionKindOf } from "../lib/agentManagement";
-import type { AgentsObserved, AgentsSpec } from "../lib/observed";
+import type { AgentCurrentConfig, AgentsObserved, AgentsSpec } from "../lib/observed";
 import { useEngineQuery } from "../lib/queries";
 import { useAliasSource } from "../lib/useAliasSource";
 import { useDirectApply } from "../lib/useDirectApply";
@@ -145,6 +145,21 @@ export default function AgentsPage({
   const baseBinOf = (agentId: string) =>
     (elements.find((element) => element.id === `agents:${agentId}`)?.spec as AgentsSpec | undefined)?.bin ??
     (agentId === "codex" ? "codex" : "claude");
+
+  const takeoverAgent = pendingConfigure?.reason === "takeover"
+    ? elements.find((element) => element.id === `agents:${pendingConfigure.agentId}`) ?? null
+    : null;
+  const takeoverKind = takeoverAgent ? connectionKindOf(takeoverAgent) : null;
+  const takeoverCurrent = takeoverAgent
+    ? (takeoverAgent.observed as AgentsObserved).current_config?.config ?? null
+    : null;
+  const takeoverConnection = takeoverAgent && pendingConfigure?.use
+    ? parseInitialToFormValues(pendingConfigure.agentId, takeoverAgent.spec as Record<string, unknown>).connections
+      .find((item) => item.name === pendingConfigure.use) ?? null
+    : null;
+  const takeoverDiffs = pendingConfigure?.reason === "takeover" && pendingConfigure.use !== undefined
+    ? connectionDifferences(takeoverKind, takeoverConnection, takeoverCurrent)
+    : [];
 
   /**
    * 把运行参数写进助手自己的配置文件。
@@ -899,14 +914,23 @@ export default function AgentsPage({
 
       {pendingConfigure && (
         <ConfirmModal
-          title={pendingConfigure.reason === "yolo" ? "完全放开助手权限" : "覆盖被改过的配置"}
+          title={pendingConfigure.reason === "yolo" ? "完全放开助手权限" : "选择如何处理配置差异"}
           description={
             pendingConfigure.reason === "yolo"
               ? "这会关闭权限询问，并允许助手脱离工作区沙箱操作；任何入口启动它都一样。只应在可信且已经隔离的环境中使用。"
-              : "助手配置文件里本工具写的那几项被改过。继续会用这里的内容替换它们，文件里其余内容不动。"
+              : "下面只列出本工具负责且与软件配置不一致的项目。可以使用软件配置覆盖这些项目，也可以保留客户端当前值并导入为新的 Provider。"
           }
           risk="write-local"
-          confirmLabel={pendingConfigure.reason === "yolo" ? "确认完全放开" : "确认覆盖"}
+          confirmLabel={pendingConfigure.reason === "yolo" ? "确认完全放开" : "使用软件配置"}
+          secondaryLabel={pendingConfigure.reason === "takeover" && pendingConfigure.use !== undefined && takeoverCurrent ? "保留并纳管当前配置" : undefined}
+          onSecondary={pendingConfigure.reason === "takeover" && pendingConfigure.use !== undefined && takeoverAgent && takeoverCurrent
+            ? () => {
+                const draft = observedConnectionDraft(takeoverKind, takeoverCurrent, connectionsOf(takeoverAgent.spec as Record<string, unknown>).map((item) => item.name));
+                setPendingConfigure(null);
+                setConnectionFormError(null);
+                setConnectionForm({ agent: takeoverAgent, initial: draft, variant: "duplicate" });
+              }
+            : undefined}
           executing={configuring}
           onConfirm={() => {
             const pending = pendingConfigure;
@@ -921,8 +945,77 @@ export default function AgentsPage({
             setPendingConfigure(null);
             toast.message("运行参数没写进去", { description: "定义已经存下了，助手的配置文件没动。" });
           }}
-        />
+        >
+          {pendingConfigure.reason === "takeover" && (
+            <div className="mt-4 overflow-hidden rounded-lg border" data-testid="takeover-differences">
+              {takeoverDiffs.length > 0 ? (
+                <table className="w-full table-fixed text-left text-xs">
+                  <thead className="bg-muted/60 text-muted-foreground"><tr><th className="w-1/4 px-3 py-2">配置项</th><th className="px-3 py-2">软件配置</th><th className="px-3 py-2">客户端当前值</th></tr></thead>
+                  <tbody>{takeoverDiffs.map((item) => <tr key={item.label} className="border-t"><th className="px-3 py-2 font-medium text-foreground">{item.label}</th><td className="break-all px-3 py-2 text-primary">{item.managed}</td><td className="break-all px-3 py-2 text-warning">{item.actual}</td></tr>)}</tbody>
+                </table>
+              ) : <p className="px-3 py-3 text-xs text-muted-foreground">客户端运行参数与软件记录的摘要不一致；请回到“自动化与权限”审查最终写入值。</p>}
+            </div>
+          )}
+        </ConfirmModal>
       )}
     </div>
   );
+}
+
+function displayConfigValue(value: unknown): string {
+  return value === undefined || value === null || value === "" ? "使用客户端默认值" : String(value);
+}
+
+function connectionDifferences(
+  kind: "claude" | "codex" | null,
+  connection: ConnectionEntry | null,
+  current: AgentCurrentConfig | null,
+): Array<{ label: string; managed: string; actual: string }> {
+  if (!current) return [];
+  const expected = connection ?? emptyObservedConnection();
+  const fields: Array<[string, unknown, unknown]> = [
+    ["接口地址", expected.baseUrl, current.base_url],
+    ["模型", expected.model, current.model],
+  ];
+  if (kind === "claude") fields.push(
+    ["小任务模型", expected.smallFastModel, current.small_fast_model],
+    ["Opus 映射", expected.aliasOpus, current.model_aliases?.opus],
+    ["Sonnet 映射", expected.aliasSonnet, current.model_aliases?.sonnet],
+    ["Haiku 映射", expected.aliasHaiku, current.model_aliases?.haiku],
+    ["请求超时", expected.timeoutMs, current.timeout_ms],
+  );
+  if (connection) {
+    fields.push(["凭据", `${connection.auth} · ${connection.tokenVar}`, current.credential?.configured
+      ? `${current.credential.kind ?? "已配置"}${current.credential.variable ? ` · ${current.credential.variable}` : ""}`
+      : "未配置"]);
+  } else if (current.credential?.configured) {
+    fields.push(["凭据", "使用助手默认登录", `${current.credential.kind ?? "已配置"}${current.credential.variable ? ` · ${current.credential.variable}` : ""}`]);
+  }
+  return fields
+    .filter(([, managed, actual]) => displayConfigValue(managed) !== displayConfigValue(actual))
+    .map(([label, managed, actual]) => ({ label, managed: displayConfigValue(managed), actual: displayConfigValue(actual) }));
+}
+
+function emptyObservedConnection(): ConnectionEntry {
+  return { name: "", label: "", baseUrl: "", auth: "token", tokenVar: "", model: "", smallFastModel: "", aliasOpus: "", aliasSonnet: "", aliasHaiku: "", timeoutMs: "" };
+}
+
+function observedConnectionDraft(kind: "claude" | "codex" | null, current: AgentCurrentConfig, existingNames: string[]): ConnectionEntry {
+  let name = "client-current";
+  let index = 2;
+  while (existingNames.includes(name)) name = `client-current-${index++}`;
+  return {
+    name,
+    label: "客户端当前配置",
+    note: "从客户端现有配置导入，请核对后保存",
+    baseUrl: current.base_url ?? "",
+    auth: current.credential?.kind === "api_key" ? "api_key" : "token",
+    tokenVar: current.credential?.variable ?? "",
+    model: current.model ?? "",
+    smallFastModel: kind === "claude" ? current.small_fast_model ?? "" : "",
+    aliasOpus: kind === "claude" ? current.model_aliases?.opus ?? "" : "",
+    aliasSonnet: kind === "claude" ? current.model_aliases?.sonnet ?? "" : "",
+    aliasHaiku: kind === "claude" ? current.model_aliases?.haiku ?? "" : "",
+    timeoutMs: current.timeout_ms === undefined || current.timeout_ms === null ? "" : String(current.timeout_ms),
+  };
 }
