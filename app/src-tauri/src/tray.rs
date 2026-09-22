@@ -117,7 +117,7 @@ fn handle_menu_event(app: &AppHandle, event_id: &str) {
 fn build_menu(app: &AppHandle, connections: &[TrayConnection]) -> tauri::Result<Menu<tauri::Wry>> {
     let show_main = MenuItem::with_id(app, MENU_SHOW_MAIN, "显示主界面", true, None::<&str>)?;
     let search = MenuItem::with_id(app, MENU_SEARCH, "搜索与执行…", true, None::<&str>)?;
-    let takeover = MenuItem::with_id(app, MENU_TAKEOVER, "接管中心", true, None::<&str>)?;
+    let takeover = MenuItem::with_id(app, MENU_TAKEOVER, "导入现有配置", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, MENU_QUIT, "退出", true, None::<&str>)?;
     let mut menu = MenuBuilder::new(app).item(&show_main);
 

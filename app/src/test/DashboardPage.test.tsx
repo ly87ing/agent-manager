@@ -210,6 +210,11 @@ describe("DashboardPage", () => {
     expect(button).toHaveTextContent("全部同步（1）");
     await userEvent.click(button);
 
+    const confirm = await screen.findByRole("dialog", { name: "同步 1 个待处理项目" });
+    expect(within(confirm).getByTestId("sync-all-preview")).toHaveTextContent("yolo");
+    expect(within(confirm).getByText(/“要你决定”的项目不会执行/)).toBeInTheDocument();
+    await userEvent.click(within(confirm).getByRole("button", { name: "确认同步" }));
+
     expect(await screen.findByText("同步完成：成功 1，失败 0")).toBeInTheDocument();
   });
 

@@ -224,7 +224,7 @@ describe("命令面板", () => {
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "接管");
     await userEvent.keyboard("{Enter}");
-    expect(await screen.findByRole("heading", { name: "接管中心" }, { timeout: 10_000 })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "导入现有配置" }, { timeout: 10_000 })).toBeInTheDocument();
 
     const palette = await openPalette();
     await userEvent.keyboard("{Escape}");

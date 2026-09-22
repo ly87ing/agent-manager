@@ -29,16 +29,16 @@ function persistDismissed(): void {
 
 const STEPS: { title: string; detail: string }[] = [
   {
-    title: "先扫描本机已有的东西",
-    detail: "「接管中心」会列出已装好的助手、技能和 MCP 服务。官方安装的那些只做标记，继续用它们原来的方式升级卸载。",
+    title: "先导入本机已有配置",
+    detail: "「导入现有配置」会列出已装好的助手、技能和 MCP 服务。先勾选、核对影响，再确认导入。",
   },
   {
     title: "把资源分给需要的助手",
     detail: "在「技能」「MCP」页勾选谁用哪些。这一步只保存你的选择，不会动任何助手的配置文件。",
   },
   {
-    title: "点「立即同步」才真正写入",
-    detail: "写之前会先告诉你要改哪些文件、改成什么样；发现文件被别处改过会停下来问你，不会闷头覆盖。",
+    title: "最后确认并同步",
+    detail: "总览的「全部同步」会先列出这次要写入的项目；发现目标被其他工具改过时会停下来，不会直接覆盖。",
   },
 ];
 
@@ -79,7 +79,7 @@ export function FirstRunGuide({ show, onGoTakeover }: { show: boolean; onGoTakeo
             onClick={onGoTakeover}
             className="inline-flex items-center gap-1.5 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/15"
           >
-            <PackageCheck className="h-3.5 w-3.5" aria-hidden /> 去接管中心
+            <PackageCheck className="h-3.5 w-3.5" aria-hidden /> 导入现有配置
             <ArrowRight className="h-3 w-3" aria-hidden />
           </button>
         )}

@@ -2,6 +2,7 @@ import {
   Activity,
   Bot,
   LayoutDashboard,
+  PackageCheck,
   ScrollText,
   Server,
   Settings,
@@ -27,6 +28,7 @@ import { PageError, PageLoading } from "./components/PageState";
 
 const NAV: NavItem[] = [
   { key: "dashboard", label: "总览", icon: LayoutDashboard },
+  { key: "takeover", label: "导入现有配置", icon: PackageCheck },
   { key: "agents", label: "助手", icon: Bot },
   { key: "skills", label: "技能", icon: Sparkles },
   { key: "mcp", label: "MCP", icon: Server },

@@ -30,8 +30,8 @@ function routes() {
   };
 }
 
-describe("App 顶层导航收敛为日常八项", () => {
-  it("侧边栏仅有八项，且精确中文，默认渲染助手页，点击导航可切换页面", async () => {
+describe("App 顶层导航", () => {
+  it("侧边栏保留现有配置导入入口，默认渲染助手页，点击导航可切换页面", async () => {
     setSettingsClient({
       get: async () => dummySettings,
       save: async (preferences) => ({ ...dummySettings, preferences }),
@@ -44,6 +44,7 @@ describe("App 顶层导航收敛为日常八项", () => {
 
     const expectedLabels = [
       "总览",
+      "导入现有配置",
       "助手",
       "技能",
       "MCP",
@@ -72,8 +73,10 @@ describe("App 顶层导航收敛为日常八项", () => {
     expect(rulesHooksNav).toHaveAttribute("aria-current", "page");
     expect(await screen.findByRole("tab", { name: "规则" })).toBeInTheDocument();
 
-    // 接管是一次性动作：不占侧栏，改由首次引导、命令面板与托盘进入
-    expect(within(nav).queryByRole("button", { name: "接管中心" })).toBeNull();
+    const takeoverNav = within(nav).getByRole("button", { name: "导入现有配置" });
+    await userEvent.click(takeoverNav);
+    expect(takeoverNav).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("heading", { name: "导入现有配置" })).toBeInTheDocument();
   }, 15000);
 
   it("从实例卡片点击「管理技能」跳转到技能页并预选对应实例，点击侧栏「技能」重置为全部助手", async () => {

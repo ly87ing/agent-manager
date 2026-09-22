@@ -1,4 +1,5 @@
 import { useQueries } from "@tanstack/react-query";
+import { useState } from "react";
 import { CheckCircle2, PlayCircle, RefreshCw } from "lucide-react";
 import type { StatusData } from "../lib/contract";
 import { runEngine } from "../lib/engine";
@@ -14,6 +15,7 @@ import { engineKeys, useRefreshUpstream } from "../lib/queries";
 import { usageTone } from "../lib/agentUsage";
 import { useTakeover } from "../lib/useTakeover";
 import { cn } from "../lib/utils";
+import { ConfirmModal } from "./ConfirmModal";
 
 /**
  * 总览清单：本机有哪些助手 / 实例 / MCP / 技能 / 规则 / Hooks / 快捷命令，
@@ -58,6 +60,7 @@ function short(value: string): string {
 }
 
 export function OverviewList({ onNavigate }: { onNavigate?: (page: string) => void }) {
+  const [confirmSyncAll, setConfirmSyncAll] = useState(false);
   const results = useQueries({
     queries: OVERVIEW_DOMAINS.map(({ domain }) => ({
       queryKey: engineKeys.command(`${domain}:status`),
@@ -83,6 +86,7 @@ export function OverviewList({ onNavigate }: { onNavigate?: (page: string) => vo
   );
 
   const runSyncAll = () => {
+    setConfirmSyncAll(false);
     void sync
       .run(
         syncable.map((item) => ({
@@ -109,7 +113,7 @@ export function OverviewList({ onNavigate }: { onNavigate?: (page: string) => vo
             type="button"
             data-testid="sync-all-button"
             disabled={sync.executing}
-            onClick={runSyncAll}
+            onClick={() => setConfirmSyncAll(true)}
             className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
           >
             <PlayCircle className="h-4 w-4" aria-hidden />
@@ -222,6 +226,30 @@ export function OverviewList({ onNavigate }: { onNavigate?: (page: string) => vo
         </section>
         ))}
       </div>
+
+      {confirmSyncAll && (
+        <ConfirmModal
+          title={`同步 ${syncable.length} 个待处理项目`}
+          description="将按下列清单写入对应的助手或终端配置。这里只处理“待同步”项目；标为“要你决定”的项目不会执行。"
+          risk="write-local"
+          riskLabel="写入本机配置"
+          confirmLabel="确认同步"
+          executing={sync.executing}
+          onConfirm={runSyncAll}
+          onClose={() => setConfirmSyncAll(false)}
+        >
+          <ul data-testid="sync-all-preview" className="mt-3 max-h-48 space-y-1 overflow-y-auto rounded-md border bg-muted/30 p-3 text-xs text-foreground">
+            {syncable.map((item) => (
+              <li key={`${item.domain}:${item.name}:${item.args.join(" ")}`} className="flex items-start justify-between gap-3">
+                <span>{item.name}</span>
+                <span className="shrink-0 text-muted-foreground">
+                  写入 {OVERVIEW_DOMAINS.find((entry) => entry.domain === item.domain)?.label ?? item.domain} 配置
+                </span>
+              </li>
+            ))}
+          </ul>
+        </ConfirmModal>
+      )}
     </div>
   );
 }

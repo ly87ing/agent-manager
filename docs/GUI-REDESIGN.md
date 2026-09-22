@@ -8,9 +8,9 @@ Skill、MCP 等资源及其逐助手分配要求新增、编辑/更新、启用�
 
 公共 `*:plan` 与 `--dry-run` 入口已退役，调用会被拒绝。
 
-## 接管中心（system:discover）
+## 导入现有配置（system:discover）
 
-「接管中心」页一次列出本机已存在、但还没纳入管理的助手 CLI、技能与 MCP 条目，按来源分类后批量接管。分类直接决定可做什么：
+「导入现有配置」页一次列出本机已存在、但还没纳入管理的助手 CLI、技能与 MCP 条目，按来源分类后批量接管。它是侧栏常驻入口：安装新工具或在客户端新增配置后都可再次扫描，不依赖首次引导、命令面板或托盘才能找到。分类直接决定可做什么：
 
 | 来源 | 判定 | 处理方式 |
 | --- | --- | --- |
@@ -238,7 +238,7 @@ Codex `{base}/responses`），HTTP 结果翻成可执行的话（401 → 令牌�
 - 引擎从不读取的 `agents.<id>.auto_install` / `auto_update` 偏好，以及写入它们的「个性化配置」页（policy 原文编辑器）；`policy:get/set` 本身保留，继续服务定义增删与启停。
 - 助手 `observed` 的 `providers`、`classified`、`preferred_active` 三个派生字段合并为单值 `install_source`；能否由本工具管理仍只由 `state`（`unmanaged-detected`）表达。
 - 手动离线模式与 `upstream_ttl_sec` 偏好：`AppSettings` 只剩 `log_retention_days`，旧 `app_settings` 行读取时跳过、下次保存时删除；Tauri 不再注入 `--offline`。引擎 CLI 的 `--offline`、envelope `mode.offline` 与 `actions[].offline_ok` 保留不变。
-- 更新中心页并入总览清单（可更新项在清单内给「去处理」入口）；总览不再展示 `system:audit` 明细分段；接管中心从一级导航移到首次使用引导、命令面板与托盘入口。
+- 更新中心页并入总览清单（可更新项在清单内给「去处理」入口）；总览不再展示 `system:audit` 明细分段；“导入现有配置”保留一级导航，并同时支持首次使用引导、命令面板与托盘入口。
 - JSONL 结构化诊断日志整套退役：写入与轮转、`logs:clear`、envelope `log_file`、启动维护清理与设置页的日志目录/清理入口一并移除；错误消息出库前仍统一脱敏（`sanitize` 模块），排查依赖 `operation_logs`，`log_retention_days` 只管它。
 
 详见 [当前架构](ARCHITECTURE.md)、[平台状态](GUI-PLATFORM-STATUS.md) 和 [Engine Contract](../contract/README.md)。

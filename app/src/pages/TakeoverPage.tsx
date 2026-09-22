@@ -229,7 +229,7 @@ export default function TakeoverPage() {
   ).length;
   /** 选中的清理项数量：确认文案要分开说，它删的是链接而不是纳管。 */
   const cleanupCount = selectedKeys.filter((key) => key.startsWith("skill-cleanup:")).length;
-  /** 带密钥的 MCP 条目数：接管不会去读原配置里的明文，用户得自己补填一次。 */
+  /** 带密钥的 MCP 条目数：确认文案要说明本机引擎会转存原配置中的字面量。 */
   const secretCount = selectedKeys.filter((key) => {
     if (!key.startsWith("mcp:")) return false;
     const name = key.slice("mcp:".length);
@@ -255,8 +255,8 @@ export default function TakeoverPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <PageHeader
-          title="接管中心"
-          description="扫描本机已有的助手、技能与 MCP 资源并按来源分类。官方路径与原生安装方案只做标识，继续用它们自己的方式升级卸载；其余资源用软链接纳入管理，内容仍归原处所有。"
+          title="导入现有配置"
+          description="扫描本机已有的助手、技能与 MCP 配置。先选择要导入的项目，再查看影响并确认；官方安装的软件仍由原安装渠道维护。"
         />
         <div className="flex items-center gap-2">
           <button
@@ -407,7 +407,7 @@ export default function TakeoverPage() {
         icon={Server}
         testId="takeover-mcp"
         title="MCP 服务"
-        description="各助手配置里尚未纳入管理的 MCP 条目。接管会把定义导入服务库（密钥全程只以变量引用形式入库，本工具拿不到明文），并在对应助手配置里把该条目标记为由本工具管理。"
+        description="各助手配置里尚未纳入管理的 MCP 条目。定义只保存变量名；如果原配置直接写了密钥，本机引擎会在确认后把取值转存到本机凭据存储，界面不会读取或显示。"
       >
         {mcpGroups.length === 0 ? (
           <EmptyState compact title="没有发现未纳管的 MCP 条目" testId="takeover-mcp-empty" />
