@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { X } from "lucide-react";
+import { useDialogFocus } from "../lib/dialogFocus";
 
 /**
  * 技能集合定义表单。保存只把定义写入本地资源库，不自动安装或同步。
@@ -52,6 +53,7 @@ export function SkillCollectionFormDialog({
     setSelectedPaths((prev) => (prev.includes(value) ? prev.filter((item) => item !== value) : [...prev, value]));
   const [selectedAgents, setSelectedAgents] = useState<string[]>((initial?.definition.agents as string[] | undefined) ?? []);
   const [error, setError] = useState<string | null>(null);
+  const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({ onEscape: onClose });
 
   const submit = () => {
     if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
@@ -88,7 +90,7 @@ export function SkillCollectionFormDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 animate-fade-in" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div role="dialog" aria-modal="true" aria-label={initial ? "编辑集合" : "新增集合"} className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border bg-card p-5 shadow-xl animate-zoom-in-95">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={initial ? "编辑集合" : "新增集合"} tabIndex={-1} onKeyDown={onDialogKeyDown} className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border bg-card p-5 shadow-xl animate-zoom-in-95">
         <div className="flex items-start justify-between">
           <h3 className="text-base font-semibold text-foreground">{initial ? "编辑技能集合" : "新增技能集合"}</h3>
           <button type="button" onClick={onClose} aria-label="关闭" className="rounded p-1 text-muted-foreground hover:bg-accent">

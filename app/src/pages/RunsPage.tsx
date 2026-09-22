@@ -57,7 +57,7 @@ function ExecutionCard({ record, onSelectRun }: { record: ExecutionRecord; onSel
         </button>
       </div>
 
-      {record.bridgeError && <p className="mt-2 text-xs text-destructive">桥错误:{record.bridgeError}</p>}
+      {record.bridgeError && <p className="mt-2 text-xs text-destructive">无法连接到本机执行服务：{record.bridgeError}</p>}
       {record.envelope && record.envelope.errors.length > 0 && (
         <div className="mt-2">
           <ErrorPanel title="执行失败" errors={record.envelope.errors} />
@@ -73,7 +73,7 @@ function ExecutionCard({ record, onSelectRun }: { record: ExecutionRecord; onSel
               <li key={step.name} className="flex items-center gap-2 text-xs">
                 <Icon className={cn("h-3.5 w-3.5", meta.className)} aria-hidden />
                 <span className="font-mono text-foreground">{step.name}</span>
-                <span className="text-muted-foreground">exit {step.exit_code}</span>
+                <span className="text-muted-foreground">退出码 {step.exit_code}</span>
               </li>
             );
           })}
@@ -157,7 +157,7 @@ export default function RunsPage() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <PageHeader title="任务记录" description="查看本工具通过 native-manager.db 记录的运行与操作详情。" />
+        <PageHeader title="任务记录" description="查看本工具执行过的同步、应用与配置操作。" />
         <div className="flex items-center gap-2">
           <SearchInput value={search} onChange={setSearch} placeholder="搜索任务记录…" testId="runs-search" />
           <button

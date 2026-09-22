@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ArrowLeft, Bot, Folder, KeyRound, Play, Terminal } from "lucide-react";
 import { hasPresetArgs, presetsForCommand, togglePresetArgs } from "../lib/agentPresets";
 import { cn } from "../lib/utils";
+import { useDialogFocus } from "../lib/dialogFocus";
 import {
   PROFILE_ID_RE,
   configEnvOf,
@@ -49,6 +50,7 @@ export function ProfileFormDialog({
   const [model, setModel] = useState(initial?.model ?? "");
   const [extraArgs, setExtraArgs] = useState(initial?.extraArgs ?? "");
   const [error, setError] = useState<string | null>(null);
+  const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({ onEscape: onClose });
 
   const selectedAgent = baseAgents.find((agent) => agent.id === baseAgent);
   const kind = selectedAgent?.kind ?? baseAgents[0]?.kind ?? "claude";
@@ -98,10 +100,13 @@ export function ProfileFormDialog({
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label={isEdit ? "编辑独立环境" : "新建独立环境"}
       data-testid="profile-form-panel"
+      tabIndex={-1}
+      onKeyDown={onDialogKeyDown}
       className="fixed inset-0 z-50 flex flex-col bg-background animate-fade-in"
     >
       <header className="flex h-16 flex-none items-center border-b bg-card px-6">

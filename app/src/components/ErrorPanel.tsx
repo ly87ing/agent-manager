@@ -33,19 +33,17 @@ export function ErrorPanel({
           {title}（{errors.length}）
         </h3>
       </div>
-      <ul className="space-y-1.5">
+      <ul className="space-y-2">
         {errors.map((diag, index) => (
-          <li key={`${diag.code}-${index}`} className="text-sm">
-            <code
-              className={cn(
-                "mr-2 rounded px-1.5 py-0.5 font-mono text-xs",
-                variant === "error" ? "bg-destructive/15 text-destructive" : "bg-warning/15 text-warning",
-              )}
-            >
-              {diag.code}
-            </code>
-            {diag.element && <span className="mr-2 font-mono text-xs text-muted-foreground">{diag.element}</span>}
-            <span className="text-foreground">{diag.message}</span>
+          <li key={`${diag.code}-${index}`} className="text-sm text-foreground">
+            <p>{diag.message}</p>
+            <details className="mt-1 text-xs text-muted-foreground">
+              <summary className="w-fit cursor-pointer select-none">技术详情</summary>
+              <div className="mt-1 flex flex-wrap gap-2 pl-2">
+                <code className="rounded bg-muted px-1.5 py-0.5 font-mono">{diag.code}</code>
+                {diag.element && <code className="break-all font-mono">{diag.element}</code>}
+              </div>
+            </details>
           </li>
         ))}
       </ul>

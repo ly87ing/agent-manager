@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Braces, FormInput, Loader2, X } from "lucide-react";
 import {
   normalizeAgentRuntimeSettings,
@@ -6,9 +6,7 @@ import {
 } from "../lib/agentDefinitionForm";
 import type { AgentCurrentConfigStatus, AgentRuntimeField, AgentRuntimeTarget } from "../lib/observed";
 import { cn } from "../lib/utils";
-
-const FOCUSABLE_SELECTOR =
-  'button, [href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])';
+import { useDialogFocus } from "../lib/dialogFocus";
 
 function testIdOf(field: AgentRuntimeField): string {
   return `agent-runtime-${field.key.replaceAll("_", "-")}`;
@@ -231,44 +229,16 @@ export function AgentRuntimeDialog({
   onSubmit: (settings: AgentRuntimeSettings) => void;
   onClose: () => void;
 }) {
-  const rootRef = useRef<HTMLElement>(null);
-  const restoreFocusRef = useRef<HTMLElement | null>(
-    typeof document === "undefined" ? null : (document.activeElement as HTMLElement | null),
-  );
   const [settings, setSettings] = useState<AgentRuntimeSettings>(initial);
   const [mode, setMode] = useState<"form" | "preview" | "observed">("form");
   const [localError, setLocalError] = useState<string | null>(null);
-
-  useLayoutEffect(() => {
-    return () => restoreFocusRef.current?.focus();
-  }, []);
+  const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLElement>({
+    onEscape: busy ? undefined : onClose,
+    initialFocusSelector: '[data-testid="agent-runtime-cancel"]',
+  });
 
   const close = () => {
     if (!busy) onClose();
-  };
-
-  const onKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      close();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    const root = rootRef.current;
-    if (!root) return;
-    const focusable = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
-      (element) => !element.hasAttribute("disabled"),
-    );
-    if (focusable.length === 0) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
   };
 
   const switchMode = (next: "form" | "preview" | "observed") => {
@@ -294,11 +264,11 @@ export function AgentRuntimeDialog({
       onClick={(event) => event.target === event.currentTarget && close()}
     >
       <section
-        ref={rootRef}
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={`${agentName} 运行设置`}
-        onKeyDown={onKeyDown}
+        onKeyDown={onDialogKeyDown}
         className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border bg-card shadow-xl animate-zoom-in-95"
       >
         <div className="flex items-start justify-between gap-3 border-b px-5 py-4 sm:px-6">
@@ -413,7 +383,7 @@ export function AgentRuntimeDialog({
         </div>
 
         <div className="flex justify-end gap-2 border-t px-5 py-4 sm:px-6">
-          <button type="button" disabled={busy} onClick={close} className="rounded-md border px-4 py-2 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50">
+          <button type="button" data-testid="agent-runtime-cancel" disabled={busy} onClick={close} className="rounded-md border px-4 py-2 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50">
             取消
           </button>
           {mode !== "observed" && (

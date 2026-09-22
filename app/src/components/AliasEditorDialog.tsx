@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { cn } from "../lib/utils";
+import { useDialogFocus } from "../lib/dialogFocus";
 import { hasPresetArgs, presetsForCommand, togglePresetArgs } from "../lib/agentPresets";
 import {
   ALIAS_NAME_RE,
@@ -58,6 +59,7 @@ export function AliasEditorDialog({
   const [lang, setLang] = useState<string>(parsed.lang ?? (initialValue ? "" : FOLLOW_GLOBAL_LANG));
   const [rawValue, setRawValue] = useState(initialValue ?? "");
   const [error, setError] = useState<string | null>(null);
+  const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({ onEscape: onClose });
 
   const timeZones = useMemo(() => listTimeZones(), []);
   /** 按实际执行的命令给常用参数；危险项选中后在下方明确说明后果。 */
@@ -131,9 +133,12 @@ export function AliasEditorDialog({
       onClick={(event) => event.target === event.currentTarget && onClose()}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={isEdit ? "编辑启动命令" : "新增启动命令"}
+        tabIndex={-1}
+        onKeyDown={onDialogKeyDown}
         className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border bg-card p-5 shadow-xl animate-zoom-in-95"
       >
         <div className="flex items-start justify-between">

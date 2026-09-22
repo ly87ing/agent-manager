@@ -5,6 +5,7 @@ import { diffBackup, sourceLabel, type BackupDiff } from "../lib/backupDiff";
 import { engineErrorMessage, runEngine } from "../lib/engine";
 import { engineKeys } from "../lib/queries";
 import { useQueryClient } from "@tanstack/react-query";
+import { useDialogFocus } from "../lib/dialogFocus";
 
 /**
  * 配置备份：把本机的定义与来源导出成一份 JSON，换机器或重装时导回来。
@@ -23,6 +24,11 @@ export function ConfigBackupSection({ onGoSync }: { onGoSync?: () => void } = {}
   const [imported, setImported] = useState(false);
   /** 确认前算好的差异：导入不可撤销，先让人看清会改掉什么。 */
   const [diff, setDiff] = useState<BackupDiff | null>(null);
+  const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({
+    active: confirming && diff !== null,
+    onEscape: busy ? undefined : () => setConfirming(false),
+    initialFocusSelector: '[data-testid="config-import-cancel"]',
+  });
 
   const doExport = async () => {
     setBusy(true);
@@ -206,10 +212,13 @@ export function ConfigBackupSection({ onGoSync }: { onGoSync?: () => void } = {}
           onClick={(event) => event.target === event.currentTarget && setConfirming(false)}
         >
           <div
+            ref={dialogRef}
             role="dialog"
             aria-modal="true"
             aria-label="导入前的改动预览"
             data-testid="config-import-diff"
+            tabIndex={-1}
+            onKeyDown={onDialogKeyDown}
             className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border bg-card p-5 shadow-xl animate-zoom-in-95"
           >
             <h3 className="text-base font-semibold text-foreground">这份备份会改掉这些</h3>
@@ -255,6 +264,7 @@ export function ConfigBackupSection({ onGoSync }: { onGoSync?: () => void } = {}
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
                 type="button"
+                data-testid="config-import-cancel"
                 onClick={() => setConfirming(false)}
                 className="rounded-md border px-4 py-2 text-sm text-muted-foreground hover:bg-accent"
               >

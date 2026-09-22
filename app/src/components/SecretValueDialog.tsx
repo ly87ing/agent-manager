@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { X } from "lucide-react";
+import { useDialogFocus } from "../lib/dialogFocus";
 
 /**
  * 填写一个凭据变量的取值。
@@ -24,10 +25,14 @@ export function SecretValueDialog({
   onClose: () => void;
 }) {
   const [value, setValue] = useState("");
+  const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({
+    onEscape: busy ? undefined : onClose,
+    initialFocusSelector: "#secret-value-input",
+  });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 animate-fade-in">
-      <div role="dialog" aria-modal="true" aria-label={`填写 ${variable}`} className="w-full max-w-md rounded-lg border bg-card p-5 shadow-lg">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`填写 ${variable}`} tabIndex={-1} onKeyDown={onDialogKeyDown} className="w-full max-w-md rounded-lg border bg-card p-5 shadow-lg">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h3 className="text-base font-semibold text-foreground">填写取值</h3>

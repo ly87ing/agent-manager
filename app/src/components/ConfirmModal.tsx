@@ -1,7 +1,8 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Loader2, X } from "lucide-react";
 import type { Diagnostic, RiskLevel } from "../lib/contract";
 import { cn } from "../lib/utils";
+import { useDialogFocus } from "../lib/dialogFocus";
 import { ErrorPanel } from "./ErrorPanel";
 import { RiskBadge } from "./RiskBadge";
 
@@ -39,17 +40,12 @@ export function ConfirmModal({
   onClose: () => void;
 }) {
   const [text, setText] = useState("");
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !executing) onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [executing, onClose]);
-
   const needsText = requireText !== undefined;
   const blocked = executing || (needsText && text !== requireText);
+  const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({
+    onEscape: executing ? undefined : onClose,
+    initialFocusSelector: needsText ? '[data-testid="confirm-modal-input"]' : '[data-testid="confirm-modal-cancel"]',
+  });
 
   return (
     <div
@@ -58,7 +54,15 @@ export function ConfirmModal({
         if (event.target === event.currentTarget && !executing) onClose();
       }}
     >
-      <div role="dialog" aria-modal="true" aria-label={title} className="w-full max-w-lg rounded-xl border bg-card p-5 shadow-xl animate-zoom-in-95">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        onKeyDown={onDialogKeyDown}
+        className="w-full max-w-lg rounded-xl border bg-card p-5 shadow-xl animate-zoom-in-95"
+      >
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
             <h3 className="text-base font-semibold text-foreground">{title}</h3>
@@ -94,6 +98,7 @@ export function ConfirmModal({
           )}
           <button
             type="button"
+            data-testid="confirm-modal-cancel"
             onClick={onClose}
             disabled={executing}
             className="rounded-md border px-4 py-2 text-sm text-muted-foreground hover:bg-accent disabled:opacity-40"

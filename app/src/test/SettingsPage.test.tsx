@@ -395,6 +395,9 @@ describe("SettingsPage", () => {
     });
 
     expect(await screen.findByRole("heading", { name: "配置工具" })).toBeInTheDocument();
+    const tools = screen.getByRole("heading", { name: "配置工具" }).closest("section")!;
+    const appearance = screen.getByRole("heading", { name: "外观" }).closest("section")!;
+    expect(tools.compareDocumentPosition(appearance) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
 
     const expectedKeys = [
       "aliases",

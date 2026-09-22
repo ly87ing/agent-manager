@@ -9,22 +9,23 @@ import {
   Sparkles,
   Wallet,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { AppLayout, type NavItem } from "./components/AppLayout";
 import { CommandPalette } from "./components/CommandPalette";
 import AgentsPage from "./pages/AgentsPage";
-import DashboardPage from "./pages/DashboardPage";
-import McpPage from "./pages/McpPage";
-import RulesHooksPage from "./pages/RulesHooksPage";
-import RunsPage from "./pages/RunsPage";
-import SkillsPage from "./pages/SkillsPage";
-import UsagePage from "./pages/UsagePage";
-import TakeoverPage from "./pages/TakeoverPage";
-import SettingsPage from "./pages/SettingsPage";
 import { useSettings } from "./lib/settings";
 import { subscribeTrayActions } from "./lib/trayActions";
 import { useUpdateCheck } from "./lib/update-check";
 import { PageError, PageLoading } from "./components/PageState";
+
+const DashboardPage = lazy(() => import("./pages/DashboardPage"));
+const McpPage = lazy(() => import("./pages/McpPage"));
+const RulesHooksPage = lazy(() => import("./pages/RulesHooksPage"));
+const RunsPage = lazy(() => import("./pages/RunsPage"));
+const SkillsPage = lazy(() => import("./pages/SkillsPage"));
+const UsagePage = lazy(() => import("./pages/UsagePage"));
+const TakeoverPage = lazy(() => import("./pages/TakeoverPage"));
+const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 
 const NAV: NavItem[] = [
   { key: "dashboard", label: "总览", icon: LayoutDashboard },
@@ -128,36 +129,39 @@ export default function App() {
       onDismissUpdate={update.dismiss}
     >
       {/* key 驱动重挂载，让页面切换时重放一次轻量进场动画 */}
-      <div key={activePage} className="animate-page-in">
-        {activePage === "dashboard" && <DashboardPage onNavigate={handleNavigate} />}
-        {activePage === "agents" && (
-          <AgentsPage
-            onManageSkills={(agentId) => {
-              setSelectedSkillAgent(agentId);
-              setActivePage("skills");
-            }}
-            onGoTakeover={() => setActivePage("takeover")}
-          />
-        )}
-        {activePage === "skills" && (
-          <SkillsPage
-            initialAgent={selectedSkillAgent}
-            onResetAgent={() => setSelectedSkillAgent(null)}
-          />
-        )}
-        {activePage === "mcp" && <McpPage />}
-        {activePage === "rules-hooks" && <RulesHooksPage />}
-        {activePage === "takeover" && <TakeoverPage />}
-        {activePage === "usage" && <UsagePage />}
-        {activePage === "runs" && <RunsPage />}
-        {activePage.startsWith("settings") && (
-          <SettingsPage
-            key={activePage}
-            initialAdvanced={activePage.startsWith("settings:") ? activePage.slice("settings:".length) : null}
-            onNavigate={handleNavigate}
-          />
-        )}
-      </div>
+      <Suspense fallback={<PageLoading text="正在打开页面…" />}>
+        <div key={activePage} className="animate-page-in">
+          {activePage === "dashboard" && <DashboardPage onNavigate={handleNavigate} />}
+          {activePage === "agents" && (
+            <AgentsPage
+              onManageSkills={(agentId) => {
+                setSelectedSkillAgent(agentId);
+                setActivePage("skills");
+              }}
+              onGoTakeover={() => setActivePage("takeover")}
+              onOpenSecrets={() => setActivePage("settings:secrets")}
+            />
+          )}
+          {activePage === "skills" && (
+            <SkillsPage
+              initialAgent={selectedSkillAgent}
+              onResetAgent={() => setSelectedSkillAgent(null)}
+            />
+          )}
+          {activePage === "mcp" && <McpPage />}
+          {activePage === "rules-hooks" && <RulesHooksPage />}
+          {activePage === "takeover" && <TakeoverPage />}
+          {activePage === "usage" && <UsagePage />}
+          {activePage === "runs" && <RunsPage />}
+          {activePage.startsWith("settings") && (
+            <SettingsPage
+              key={activePage}
+              initialAdvanced={activePage.startsWith("settings:") ? activePage.slice("settings:".length) : null}
+              onNavigate={handleNavigate}
+            />
+          )}
+        </div>
+      </Suspense>
       <CommandPalette
         open={paletteOpen}
         scope={paletteScope}

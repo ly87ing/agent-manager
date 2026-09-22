@@ -18,7 +18,6 @@ import type { SettingsData, SettingsPreferences } from "../lib/contract";
 import { useSaveSettings, useSettings } from "../lib/settings";
 import { useTheme, type Theme } from "../lib/theme";
 import { cn } from "../lib/utils";
-import { check } from "@tauri-apps/plugin-updater";
 import { ConfigBackupSection } from "../components/ConfigBackupSection";
 import AliasesPage from "./AliasesPage";
 import ClientDiagnosticsPage from "./ClientDiagnosticsPage";
@@ -90,6 +89,39 @@ const ADVANCED_ENTRIES = [
     icon: KeyRound,
   },
 ];
+
+function ConfigurationToolsSection({ onSelect }: { onSelect: (key: string) => void }) {
+  return (
+    <section className="rounded-lg border bg-card p-5 shadow-sm">
+      <div>
+        <h2 className="text-sm font-semibold text-foreground">配置工具</h2>
+        <p className="mt-1 text-xs text-muted-foreground">密钥、终端快捷命令和客户端诊断都在这里。</p>
+      </div>
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {ADVANCED_ENTRIES.map((entry) => {
+          const Icon = entry.icon;
+          return (
+            <button
+              key={entry.key}
+              type="button"
+              data-testid={`advanced-entry-${entry.key}`}
+              onClick={() => onSelect(entry.key)}
+              className="flex flex-col items-start rounded-lg border bg-muted/50 p-3.5 text-left transition-all hover:border-primary/40 hover:bg-primary/10 hover:shadow-xs focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+            >
+              <div className="flex w-full items-center justify-between gap-2">
+                <span className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                  <Icon className="h-4 w-4 text-primary" aria-hidden />
+                  {entry.title}
+                </span>
+              </div>
+              <p className="mt-1.5 text-xs text-muted-foreground line-clamp-2">{entry.description}</p>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
 
 function initialPreferences(data?: SettingsData): SettingsPreferences {
   return { logRetentionDays: data?.preferences?.logRetentionDays ?? 30 };
@@ -168,6 +200,7 @@ export default function SettingsPage({
     if (!data.updaterConfigured) return;
     setUpdateState("checking");
     try {
+      const { check } = await import("@tauri-apps/plugin-updater");
       const found = await check();
       if (!isMountedRef.current) {
         if (found) {
@@ -266,6 +299,7 @@ export default function SettingsPage({
   return (
     <div className="space-y-4">
       <PageHeader title="设置" description="外观、配置备份与本机运行路径。" />
+      <ConfigurationToolsSection onSelect={setActiveAdvanced} />
       <AppearanceSection />
       <ConfigBackupSection onGoSync={onNavigate ? () => onNavigate("dashboard") : undefined} />
       <section className="rounded-lg border bg-card p-5 shadow-sm">
@@ -319,34 +353,6 @@ export default function SettingsPage({
           </div>
         )}
         {update && <div className="mt-3 rounded-md border border-primary/20 bg-primary/10 p-3 text-sm"><p className="font-medium text-primary">发现新版本 {update.version}</p>{update.date && <p className="mt-1 text-xs text-primary">发布时间：{update.date}</p>}{update.body && <p className="mt-2 whitespace-pre-wrap text-xs text-primary">{update.body}</p>}<button type="button" onClick={() => setConfirmUpdate(true)} disabled={updateState !== "idle"} className="mt-3 inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">下载并安装</button></div>}
-      </section>
-      <section className="rounded-lg border bg-card p-5 shadow-sm">
-        <div>
-          <h2 className="text-sm font-semibold text-foreground">配置工具</h2>
-          <p className="mt-1 text-xs text-muted-foreground">密钥、终端快捷命令和客户端诊断都在这里。</p>
-        </div>
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {ADVANCED_ENTRIES.map((entry) => {
-            const Icon = entry.icon;
-            return (
-              <button
-                key={entry.key}
-                type="button"
-                data-testid={`advanced-entry-${entry.key}`}
-                onClick={() => setActiveAdvanced(entry.key)}
-                className="flex flex-col items-start rounded-lg border bg-muted/50 p-3.5 text-left transition-all hover:border-primary/40 hover:bg-primary/10 hover:shadow-xs focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-              >
-                <div className="flex w-full items-center justify-between gap-2">
-                  <span className="flex items-center gap-2 text-xs font-semibold text-foreground">
-                    <Icon className="h-4 w-4 text-primary" aria-hidden />
-                    {entry.title}
-                  </span>
-                </div>
-                <p className="mt-1.5 text-xs text-muted-foreground line-clamp-2">{entry.description}</p>
-              </button>
-            );
-          })}
-        </div>
       </section>
       {confirmUpdate && update && <ConfirmModal title="安装应用更新" description={`将下载并安装版本 ${update.version}，完成后请重启应用。`} risk="network" confirmLabel="确认下载并安装" executing={updateState === "installing"} onConfirm={() => void installUpdate()} onClose={() => setConfirmUpdate(false)} />}
     </div>

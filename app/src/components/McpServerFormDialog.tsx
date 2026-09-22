@@ -4,6 +4,7 @@ import type { EngineElement, PolicyLayers } from "../lib/contract";
 import { definitionOrigin } from "../lib/definitionOverlay";
 import type { McpSpec } from "../lib/observed";
 import { OVERLAY_COPY } from "../lib/ui-copy";
+import { useDialogFocus } from "../lib/dialogFocus";
 
 type McpTransport = "stdio" | "remote";
 
@@ -81,6 +82,7 @@ export function McpServerFormDialog({
   ));
   const [selectedAgents, setSelectedAgents] = useState<string[]>(editingSpec?.agents ?? []);
   const [error, setError] = useState<string | null>(null);
+  const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({ onEscape: onClose });
 
   const isNew = editing === null;
   const origin = !isNew ? definitionOrigin(layers, "mcp", name) : null;
@@ -226,7 +228,7 @@ export function McpServerFormDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 animate-fade-in" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div role="dialog" aria-modal="true" aria-label={isNew ? "新增服务" : `编辑 ${name}`} className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-xl border bg-card p-5 shadow-xl animate-zoom-in-95 sm:p-6">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={isNew ? "新增服务" : `编辑 ${name}`} tabIndex={-1} onKeyDown={onDialogKeyDown} className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-xl border bg-card p-5 shadow-xl animate-zoom-in-95 sm:p-6">
         <div className="flex items-start justify-between">
           <h3 className="text-base font-semibold text-foreground">{isNew ? "新增 MCP 服务" : `编辑服务 ${name}`}</h3>
           <button type="button" onClick={onClose} aria-label="关闭" className="rounded p-1 text-muted-foreground hover:bg-accent">

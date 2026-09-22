@@ -19,6 +19,7 @@ import {
 } from "../lib/usageModel";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "../lib/utils";
+import { useDialogFocus } from "../lib/dialogFocus";
 
 /**
  * 用量：从助手自己的会话记录里累加 token，按模型算花了多少。
@@ -53,6 +54,9 @@ function PriceDialog({
     cache_read: current?.cache_read?.toString() ?? "",
   });
   const [saving, setSaving] = useState(false);
+  const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({
+    onEscape: saving ? undefined : onClose,
+  });
 
   const fields: { key: keyof typeof form; label: string }[] = [
     { key: "input", label: "输入" },
@@ -103,7 +107,7 @@ function PriceDialog({
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
       onClick={(event) => event.target === event.currentTarget && onClose()}
     >
-      <div role="dialog" aria-modal="true" aria-label={`${model} 的单价`} className="w-full max-w-md rounded-xl border bg-card p-5 shadow-xl">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`${model} 的单价`} tabIndex={-1} onKeyDown={onDialogKeyDown} className="w-full max-w-md rounded-xl border bg-card p-5 shadow-xl">
         <h3 className="text-base font-semibold text-foreground">{model} 的单价</h3>
         <p className="mt-1 text-xs text-muted-foreground">
           美元 / 百万 token，去这家的定价页抄。留空的那项如果真有用量，这个模型就整体不折算——
