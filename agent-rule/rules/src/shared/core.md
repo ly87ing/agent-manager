@@ -10,8 +10,9 @@
 - After every change, run the smallest relevant verification that could fail.
 - If you skip verification, cannot run it, or ran something that did not actually exercise the change, say so explicitly.
 - Verify load-bearing conclusions against primary sources (code, origin, live systems); treat search summaries, other AIs' analyses, and "already done" claims as leads, not facts.
-- Never publish work product to a remote or shared location without explicit user consent; packaging, exporting, or sending a deliverable also needs an explicit instruction. After the user accepts a milestone, proactively offer to commit and push.
-- Editing existing code — architecture/interfaces/dependency boundaries, or code style/config/data contracts/naming/comments: use the `change-discipline` skill.
-- UI/flows/frontend/browser automation: use the `frontend-verification` skill.
+- Never publish work product, or package, export, or send a deliverable, without explicit user consent. After the user accepts a milestone, offer to commit and push.
+- Shaping a scheme, migration, or design before anything is built: use the `solution-shaping` skill.
+- Editing existing code, its interfaces, config, contracts, or style: use the `change-discipline` skill.
+- Verifying, validating, or accepting a built change, UI and browser evidence included: use the `verification` skill.
 - Generated scripts/notes/reports/artifacts/debug output/downloads: use the `artifact-hygiene` skill.
 - Reader-facing plans/proposals/specs/checklists/Markdown/HTML: use the `reader-facing-writing` skill.

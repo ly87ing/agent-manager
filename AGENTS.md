@@ -14,7 +14,7 @@
 
 ## 开发与验证
 - Rust 工具链、Node.js 与 pnpm 是原生版本的开发工具；不要再把 Python 和旧 make 管线作为新版前置条件。
-- 修改行为或共享接口前读历史、调用方和邻近测试，使用 `change-discipline`；界面验收使用 `frontend-verification`；文档使用 `reader-facing-writing`；临时产物使用 `artifact-hygiene`。
+- 修改行为或共享接口前读历史、调用方和邻近测试，使用 `change-discipline`；方案与改造设计使用 `solution-shaping`；验收（含界面）使用 `verification`；文档使用 `reader-facing-writing`；临时产物使用 `artifact-hygiene`。
 - 先运行最小相关检查，再运行对应完整检查：`cargo test --manifest-path engine-rs/Cargo.toml`、`cargo test --manifest-path app/src-tauri/Cargo.toml`；前端在 `app/` 运行 `pnpm test:unit run` 和 `pnpm build`。
 - 文档改动检查链接、命令和目标一致性，不为旧文案断言补回已废弃要求。没有运行或没有真正覆盖的验证必须说明。
 - 不删测、降断言或跳过来掩盖有效失败。旧 Python 专属测试随退役实现清理；仍适用的数据安全、范围隔离和反例迁入 Rust。

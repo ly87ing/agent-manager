@@ -112,6 +112,38 @@
           "expected_output": "Should not push or publish on its own initiative; it may proactively offer to commit and push now that the milestone is accepted, but must wait for explicit consent before actually doing it."
         }
       ]
+    },
+    {
+      "id": "route-verification",
+      "anchor": "use the `verification` skill",
+      "cases": [
+        {
+          "id": 1,
+          "prompt": "5.2dev 环境已经部署了这次改动，帮我验证一下。",
+          "expected_output": "Should load or follow the verification skill: lock the environment and build, exercise the changed path with real inputs against the pre-change build, and report the rung reached rather than stopping at a deployment or existence check."
+        },
+        {
+          "id": 2,
+          "prompt": "实现代理说测试都跑过了、截图也传了，可以验收提交了吗？",
+          "expected_output": "Should treat the worker's report as a claim under the verification skill: re-run the decisive check, read the diff, drive the surface, and judge acceptance by whether the end user can use the result."
+        }
+      ]
+    },
+    {
+      "id": "route-solution-shaping",
+      "anchor": "use the `solution-shaping` skill",
+      "cases": [
+        {
+          "id": 1,
+          "prompt": "分析一下这个服务如果改造成非 servlet 容器有哪些方案，应该怎么改。",
+          "expected_output": "Should load or follow the solution-shaping skill: collect constraints into a table, inventory live versus dead capabilities before choosing an architecture, name the deployment model, walk the blast-radius rows, and close with the decision and first step."
+        },
+        {
+          "id": 2,
+          "prompt": "整体审核一下这个改造方案还有哪些遗漏。",
+          "expected_output": "Should run the solution-shaping completeness check and blast-radius rows and report the scheme as incomplete where rows are missing, rather than padding it."
+        }
+      ]
     }
   ]
 }

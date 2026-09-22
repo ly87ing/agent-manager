@@ -105,8 +105,9 @@ pub const BUILTIN_POLICY_JSON: &str = r#"{
         "url": "https://github.com/ly87ing/agent-skills.git",
         "skill_paths": [
           "safe-merge-review",
+          "solution-shaping",
           "change-discipline",
-          "frontend-verification",
+          "verification",
           "artifact-hygiene",
           "reader-facing-writing",
           "technical-diagramming"

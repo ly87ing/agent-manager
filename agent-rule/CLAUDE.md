@@ -39,7 +39,7 @@
 
 - **预算**:`round(len(core.md)/4)` 曾有硬上限(原 `tests/test_rule_budgets.py`)。core 长期贴着上限跑,任何净增字符都可能越界;路由行改写须**字符中性或负增**,想加内容先压缩现有措辞腾位。
 - **抬上限的判据是 delete-test,不是「我加的是 always-on 边界」**——后者恰恰是 bd139d5 对自己的定性:它新增常驻条目并抬 420→460,三个 commit 后 6dd67bb 判定该行(core.md 第 11 行)是低频条件性 when-X-do-Y、过不了 delete-test,遂删行并**对称回退** 460→420,明写"恢复「净增即破门」的强制函数"。规矩:先用 delete-test(删了它 agent 会不会犯错)证明该行配占常驻槽位再抬,且**抬升与该行同生共死**——行下线时上限一并回退;绝不为让门禁变绿而抬。
-- **四条路由短语**逐字生效:`` use the `change-discipline` skill ``/`` `artifact-hygiene` ``/`` `frontend-verification` ``/`` `reader-facing-writing` ``,按 ``re.findall(r"use the `([a-z0-9-]+)` skill")`` 提取——**skill 改名要同步改这四处**;短语左侧的触发关键词不受此限,可自由改写。
+- **五条路由短语**逐字生效:`` use the `solution-shaping` skill ``/`` `change-discipline` ``/`` `verification` ``(2026-09-21 起接替 `frontend-verification`)/`` `artifact-hygiene` ``/`` `reader-facing-writing` ``,按 ``re.findall(r"use the `([a-z0-9-]+)` skill")`` 提取——**skill 改名要同步改这四处**;短语左侧的触发关键词不受此限,可自由改写。
 - **不要**在分发规则里出现探索/工具督促类子句(`codebase-retrieval`、`augment MCP`、`graphify-out/GRAPH_REPORT.md`、`For codebase exploration:`)。
 
 ## 规则与 skill 里一律不放注释(用户 2026-07-27 拍板,别再拿"这家免费"来复议)
