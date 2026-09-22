@@ -575,12 +575,13 @@ fn status_element(
                 crate::native_agent_settings::inspect_current_config(
                     &crate::native_agent_settings::claude_target(ctx),
                     kind,
+                    Some(&crate::native_agent_settings::statusline_target(ctx)),
                 )
             }
             crate::native_agent_adapters::AdapterKind::Codex => {
                 match crate::native_agent_settings::codex_target(ctx, def.config_path()) {
                     Ok(target) => {
-                        crate::native_agent_settings::inspect_current_config(&target, kind)
+                        crate::native_agent_settings::inspect_current_config(&target, kind, None)
                     }
                     Err(_) => {
                         let raw = def.config_path().unwrap_or("~/.codex/config.toml");

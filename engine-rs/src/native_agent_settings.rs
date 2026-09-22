@@ -111,7 +111,10 @@ fn string_at<'a>(value: &'a Value, path: &[&str]) -> Option<&'a str> {
         .filter(|value| !value.is_empty())
 }
 
-fn claude_observed_config(bytes: &[u8]) -> Option<Value> {
+fn claude_observed_config(
+    bytes: &[u8],
+    statusline_path: Option<&std::path::Path>,
+) -> Option<Value> {
     let root = serde_json::from_slice::<Value>(bytes)
         .ok()?
         .as_object()?
@@ -124,6 +127,18 @@ fn claude_observed_config(bytes: &[u8]) -> Option<Value> {
     } else {
         None
     };
+    let statusline = path_get(&value, &["statusLine", "command"])
+        .and_then(Value::as_str)
+        .map(|command| {
+            if statusline_path.is_some_and(|path| std::path::Path::new(command) == path) {
+                "builtin"
+            } else {
+                "custom"
+            }
+        });
+    let hide_attribution = path_get(&value, &["attribution", "commit"]).and_then(Value::as_str)
+        == Some("")
+        && path_get(&value, &["attribution", "pr"]).and_then(Value::as_str) == Some("");
     Some(json!({
         "provider": "anthropic",
         "base_url": string_at(&value, &["env", "ANTHROPIC_BASE_URL"]),
@@ -142,10 +157,12 @@ fn claude_observed_config(bytes: &[u8]) -> Option<Value> {
                 Some("bypassPermissions") => "full",
                 _ => "manual"
             },
+            "statusline": statusline,
             "claude_effort_level": string_at(&value, &["env", "CLAUDE_CODE_EFFORT_LEVEL"]),
             "claude_tool_search": string_at(&value, &["env", "ENABLE_TOOL_SEARCH"]) == Some("true"),
             "claude_agent_teams": string_at(&value, &["env", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"]) == Some("1"),
-            "claude_disable_artifact": string_at(&value, &["env", "CLAUDE_CODE_DISABLE_ARTIFACT"]) == Some("1")
+            "claude_disable_artifact": string_at(&value, &["env", "CLAUDE_CODE_DISABLE_ARTIFACT"]) == Some("1"),
+            "claude_hide_attribution": hide_attribution
         }
     }))
 }
@@ -188,7 +205,11 @@ fn codex_observed_config(bytes: &[u8]) -> Option<Value> {
 
 /// 只读客户端当前配置，输出固定脱敏结构；不会返回 Claude 写入文件中的真实 token。
 /// `path` 必须与真实写入目标一致，状态响应据此告诉界面最终会写进哪个文件。
-pub(crate) fn inspect_current_config(path: &std::path::Path, kind: Kind) -> Value {
+pub(crate) fn inspect_current_config(
+    path: &std::path::Path,
+    kind: Kind,
+    statusline_path: Option<&std::path::Path>,
+) -> Value {
     let file = path
         .file_name()
         .and_then(|name| name.to_str())
@@ -204,7 +225,7 @@ pub(crate) fn inspect_current_config(path: &std::path::Path, kind: Kind) -> Valu
         }
     };
     let config = match kind {
-        Kind::Claude => claude_observed_config(&bytes),
+        Kind::Claude => claude_observed_config(&bytes, statusline_path),
         Kind::Codex => codex_observed_config(&bytes),
     };
     match config {
@@ -907,7 +928,7 @@ fn toml_managed_tables(content: &str, prefix: &str) -> Vec<String> {
     found
 }
 
-/// config.toml 里本工具拥有的那部分：四个顶层键 + 受管的 provider 段。
+/// config.toml 里本工具拥有的那部分：明确列举的顶层键 + 受管的 provider 段。
 pub(crate) fn codex_owned_slice(content: &str) -> Value {
     let mut slice = Map::new();
     for key in CODEX_OWNED_KEYS {
@@ -1685,8 +1706,22 @@ mod tests {
         let codex = root.join("codex");
         std::fs::create_dir_all(&claude).unwrap();
         std::fs::create_dir_all(&codex).unwrap();
-        let claude_bytes = br#"{"env":{"ANTHROPIC_BASE_URL":"https://relay.example.com","ANTHROPIC_AUTH_TOKEN":"never-expose","ANTHROPIC_MODEL":"claude-model","ANTHROPIC_SMALL_FAST_MODEL":"claude-small","ANTHROPIC_DEFAULT_OPUS_MODEL":"claude-opus","API_TIMEOUT_MS":"600000","CLAUDE_CODE_EFFORT_LEVEL":"high"}}"#;
-        std::fs::write(claude.join("settings.json"), claude_bytes).unwrap();
+        let statusline = root.join("statusline.sh");
+        let claude_bytes = serde_json::to_vec(&json!({
+            "env": {
+                "ANTHROPIC_BASE_URL": "https://relay.example.com",
+                "ANTHROPIC_AUTH_TOKEN": "never-expose",
+                "ANTHROPIC_MODEL": "claude-model",
+                "ANTHROPIC_SMALL_FAST_MODEL": "claude-small",
+                "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus",
+                "API_TIMEOUT_MS": "600000",
+                "CLAUDE_CODE_EFFORT_LEVEL": "high"
+            },
+            "statusLine": {"command": statusline.display().to_string()},
+            "attribution": {"commit": "", "pr": ""}
+        }))
+        .unwrap();
+        std::fs::write(claude.join("settings.json"), &claude_bytes).unwrap();
         let codex_bytes = br#"model_provider = "relay"
 model = "gpt-test"
 model_reasoning_effort = "high"
@@ -1697,7 +1732,11 @@ stream_idle_timeout_ms = 450000
 "#;
         std::fs::write(codex.join(CODEX_CONFIG), codex_bytes).unwrap();
 
-        let claude_status = inspect_current_config(&claude.join("settings.json"), Kind::Claude);
+        let claude_status = inspect_current_config(
+            &claude.join("settings.json"),
+            Kind::Claude,
+            Some(&statusline),
+        );
         assert_eq!(claude_status["state"], "ready");
         assert_eq!(
             claude_status["target"],
@@ -1715,13 +1754,18 @@ stream_idle_timeout_ms = 450000
         );
         assert_eq!(claude_status["config"]["timeout_ms"], "600000");
         assert_eq!(claude_status["config"]["credential"]["configured"], true);
+        assert_eq!(claude_status["config"]["runtime"]["statusline"], "builtin");
+        assert_eq!(
+            claude_status["config"]["runtime"]["claude_hide_attribution"],
+            true
+        );
         assert!(!claude_status.to_string().contains("never-expose"));
         assert_eq!(
             std::fs::read(claude.join("settings.json")).unwrap(),
             claude_bytes
         );
 
-        let codex_status = inspect_current_config(&codex.join(CODEX_CONFIG), Kind::Codex);
+        let codex_status = inspect_current_config(&codex.join(CODEX_CONFIG), Kind::Codex, None);
         assert_eq!(codex_status["state"], "ready");
         assert_eq!(
             codex_status["target"],
@@ -1740,6 +1784,26 @@ stream_idle_timeout_ms = 450000
         let _ = std::fs::remove_dir_all(root);
     }
 
+    #[test]
+    fn 当前配置区分本工具状态栏与用户状态栏_署名开关必须两项都为空() {
+        let statusline = std::path::Path::new("/tmp/agent-manager/statusline.sh");
+        let custom = claude_observed_config(
+            br#"{"statusLine":{"command":"/tmp/user/statusline.sh"},"attribution":{"commit":"","pr":"keep"}}"#,
+            Some(statusline),
+        )
+        .unwrap();
+        assert_eq!(custom["runtime"]["statusline"], "custom");
+        assert_eq!(custom["runtime"]["claude_hide_attribution"], false);
+
+        let builtin = claude_observed_config(
+            br#"{"statusLine":{"command":"/tmp/agent-manager/statusline.sh"},"attribution":{"commit":"","pr":""}}"#,
+            Some(statusline),
+        )
+        .unwrap();
+        assert_eq!(builtin["runtime"]["statusline"], "builtin");
+        assert_eq!(builtin["runtime"]["claude_hide_attribution"], true);
+    }
+
     #[cfg(unix)]
     #[test]
     fn 当前配置拒绝符号链接且缺失读取零写() {
@@ -1751,7 +1815,7 @@ stream_idle_timeout_ms = 450000
         let _ = std::fs::remove_dir_all(&root);
         let missing = root.join("missing");
         assert_eq!(
-            inspect_current_config(&missing.join("settings.json"), Kind::Claude)["state"],
+            inspect_current_config(&missing.join("settings.json"), Kind::Claude, None)["state"],
             "missing"
         );
         assert!(!missing.exists());
@@ -1762,7 +1826,7 @@ stream_idle_timeout_ms = 450000
         std::fs::write(&target, b"{}").unwrap();
         symlink(&target, config_dir.join("settings.json")).unwrap();
         assert_eq!(
-            inspect_current_config(&config_dir.join("settings.json"), Kind::Claude)["state"],
+            inspect_current_config(&config_dir.join("settings.json"), Kind::Claude, None)["state"],
             "unsafe"
         );
         let _ = std::fs::remove_dir_all(root);
