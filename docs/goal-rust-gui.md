@@ -2,7 +2,7 @@
 
 ## 当前结论
 
-- 核心已就绪：Rust/SQLite/Tauri 共用库；2026-09-22 起数据模型改为「实际配置为准」（见下方裁决与 `GUI-REDESIGN.md`），源码与隔离实测验收已完成，安装包真机 E2E 待补。
+- 核心已就绪：Rust/SQLite/Tauri 共用库；2026-09-22 起数据模型改为「实际配置为准」（见下方裁决与 `GUI-REDESIGN.md`），源码、隔离实测与 x86_64 安装包真机验收已完成（见 2026-09-23 交付回执）。
 - 已接线闭环：Agents、Skills、MCP、Rules、Hooks、Aliases 六个资源域，以及只读 `system:audit`、`secrets:status`、`system:discover`（接管发现，见下）、`system:refresh-upstream`（探测宇宙 agents/mcp/skills，缓存落 SQLite `upstream_probes` 表，三域 status 回填 freshness，前端收敛调用已补显式 `--action`）。
 - 2026-09-12 高级管理入口裁决已执行完毕：Aliases 原生闭环落地（`b7f30db`）；Tools、快照与 `system:converge` 退役清理完成（`9080c1d`）。
 - 远程 HTTP MCP 已落地（`b353aac`）：三客户端引用形式零明文落盘，与本地 stdio 同级安全语义。
@@ -607,7 +607,18 @@ state 与 actions，不自己推断；用户主动停用的不催。syncPlan 是
 - 参考：CC Switch（`farion1231/cc-switch@8e478b2`）首启把实际配置导入为当前项、官方预设只追加不激活（`src-tauri/src/lib.rs:728-782`），切换前回填实际配置（`services/provider/mod.rs:5836-5884`），提示词读取以实际文件刷新已启用项（`services/prompt.rs:62-85`）。不照搬其整份覆盖 settings.json、MCP 导入后以库为准、读取时写库三点。
 - 裁决：采用 `GUI-REDESIGN.md`「数据模型：实际配置为准」三层模型；规则取消 shared + adapter 拼接，改为每个助手一个实际文件，另提供「复制到另一个助手」；Codex MCP 停用使用官方 `mcp_servers.<id>.enabled = false`。
 - 实施阶段与回执（均已推送 `rust`）：契约 `1ce4a15` → 技能内置仓库改推荐 `1e60a7b` → 接入与运行参数（实际值预填、切换前回填、令牌只经外部密钥文件）`1acc84a` → 规则（实际文件、模板、回填，取消拼接）`e89abc5` → MCP（实际条目为主、官方字段停用）`e318d8d` → Hooks（实际读写、清理建议）`94037ef` → 别名（实际区块、推荐项）`b2eb229` → 实例（生成文件以实际为准、覆盖或采纳二选一）`4268bad`。
-- 验收方式：每阶段两套 cargo test、前端单测、typecheck、build 全绿；关键修复做反向验证；隔离 HOME 用编译出的 CLI 实测回读（含用改动前二进制造旧库再升级）；接入、MCP、实例另在 DEV mock 下浏览器验收；Codex 停用由真实 `codex mcp list` 回读。未做：安装包真机 GUI E2E。
+- 验收方式：每阶段两套 cargo test、前端单测、typecheck、build 全绿；关键修复做反向验证；隔离 HOME 用编译出的 CLI 实测回读（含用改动前二进制造旧库再升级）；接入、MCP、实例另在 DEV mock 下浏览器验收；Codex 停用由真实 `codex mcp list` 回读。安装包真机验收见 2026-09-23 交付回执。
+
+## 交付回执（2026-09-23，实际配置为准 x86_64 DMG 真机验收）
+
+绑定提交：`c0065c090e2ed89e6adedac60bc025a159baefda`（产品代码；其后 `0ceb7e0` 只改验收脚本）。
+
+- 安装包：本机重建 clean x86_64 DMG，SHA256 `56cd1ab2a10da097d6a321215948fbbbb1150e00be4b3cf6218af5554de3358d`，8514164 bytes；`verify:macos` 全部通过（元数据、构建身份 commit/date 精确一致、无 Python、路径脱敏、隔离环境 5 秒存活并优雅退出）；未签名、未公证。
+- 验收环境：从 DMG 复制出的 .app 直接以隔离 HOME、隔离 `AGENT_MANAGER_DATA_DIR`、只含替身 `claude`/`codex`（只回版本号）的 PATH 启动；经 macOS 辅助功能（System Events/JXA）点击原生窗口、窗口区域截图，文件与库逐项回读。全程不运行真实 Claude/Codex、不点登录/退出/可用性检查/安装升级。
+- 通过的场景：启动与各页 status 零写（数据目录为空、HOME 与夹具逐字节一致）；总览不把内置项计入待同步；技能页显示真实技能目录、内置仓库只作推荐；MCP 直接列出手写条目，GUI 停用 Codex 条目只加 `enabled = false`（注释、`cwd`、`enabled_tools`、用户 provider 表保留），Claude 条目含明文令牌且未选密钥文件时拒绝停用并提示；规则页显示实际文件，外部抢先写入后「写入」被拒且保留外部内容，重开后写入内置推荐并先把外部内容另存为备份模板；Hooks 显示 `prompt` 与 `command` 两类且不阻塞；终端快捷命令内置项只作推荐，添加后两个 rc 文件出现区块、区块外用户 alias 保留、`zsh -n` 通过；助手切到默认账号时先弹「令牌未保存」，显式放弃后只撤掉 `ANTHROPIC_*` 三键（hooks、permissions、theme 保留），原实际配置存为导入项且无令牌；独立环境卡片逐字段列出差异，「用定义覆盖」经确认后合并写入（用户 env 与 theme 保留），外部改模型后「以实际配置更新定义」只改库、文件不动。
+- 验收中发现并已修复：Claude MCP 停用快照仅按取值格式判定凭据，`GITHUB_TOKEN` 等无厂商前缀的令牌会以明文进库（`c0065c0` 改为变量名或取值像凭据即转存，回归用例覆盖）；验收脚本的构建身份整行匹配依赖字符串布局，会误报（`0ceb7e0` 改为按标记格式提取比对，反例保留）。
+- 真实环境核对：验收前后 `~/.claude/settings.json`、`~/.claude/CLAUDE.md`、`~/.claude.json` 的 `mcpServers`、`~/.codex/config.toml`/`AGENTS.md`/`hooks.json`、`~/.zshrc`/`~/.zprofile` 摘要一致，`~/.codex/auth.json` 只比元数据（未读内容）一致，应用 Application Support 目录一致。例外：WebKit 按真实主目录存放本应用 webview 数据，`~/Library/WebKit/io.github.ly87ing.agent-manager` 的访问统计与 localStorage WAL/共享内存文件被触碰（`localstorage.sqlite3` 主文件未变、WAL 为 0 字节），与 Claude/Codex 账号和配置无关。
+- 局限：替身 CLI 位于非标准路径，两个助手在总览显示「要你决定」（安装来源 system），属验收环境现象；独立环境定义经 CLI 写入隔离库后在 GUI 操作，新建表单的键盘输入未走真机；未签名包；只验 x86_64。
 
 ## 本次停止点与恢复入口
 
