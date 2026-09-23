@@ -4,7 +4,7 @@ use anyhow::{anyhow, bail, Context as _, Result};
 use serde_json::{Map, Value};
 use std::path::Path;
 
-use super::model::{MARKER_KEY, MARKER_VALUE};
+use super::model::{LEGACY_TOML_COMMENT, MARKER_KEY};
 use super::targets::{validate_target_path, Entry, Format};
 
 pub fn json_doc_from_bytes(path: &Path, bytes: &[u8]) -> Result<Map<String, Value>> {
@@ -38,6 +38,10 @@ pub fn read_json_doc(path: &Path) -> Result<Option<Map<String, Value>>> {
     Ok(Some(json_doc_from_bytes(path, &bytes)?))
 }
 
+/// 读取目标文件中的同名条目。返回 `(条目, legacy_marker)`：旧版 `_MANAGED_BY`
+/// （条目级或 env/environment 内）一律剥离，不进入 Entry 的 env/extra；
+/// `legacy_marker` 只表示文件里仍残留旧标记，供状态给出清理提示，**不代表归属**
+/// ——归属只看 `mcp_bindings`（见 `model::owns_entry`）。
 pub fn extract_entry(path: &Path, format: Format, server: &str) -> Result<(Option<Entry>, bool)> {
     validate_target_path(path)?;
     match format {
@@ -103,9 +107,8 @@ pub fn extract_entry(path: &Path, format: Format, server: &str) -> Result<(Optio
                     ),
                 }
             }
-            // 受管标记：远程条目统一在条目级；stdio 旧位置 env 内标记继续兼容
-            let managed = srv.get(MARKER_KEY).and_then(Value::as_str) == Some(MARKER_VALUE)
-                || env_map.get(MARKER_KEY).and_then(Value::as_str) == Some(MARKER_VALUE);
+            // 旧版标记：条目级或 env 内出现即记为 legacy，随后剥离
+            let legacy_marker = srv.contains_key(MARKER_KEY) || env_map.contains_key(MARKER_KEY);
             let mut env = Map::new();
             for (k, v) in &env_map {
                 if k == MARKER_KEY {
@@ -235,7 +238,7 @@ pub fn extract_entry(path: &Path, format: Format, server: &str) -> Result<(Optio
                 (cmd, args)
             };
             let mut extra = srv.clone();
-            for key in ["command", "args", "env", "environment", "type"] {
+            for key in ["command", "args", "env", "environment", "type", MARKER_KEY] {
                 extra.remove(key);
             }
             Ok((
@@ -245,7 +248,7 @@ pub fn extract_entry(path: &Path, format: Format, server: &str) -> Result<(Optio
                     env,
                     extra,
                 }),
-                managed,
+                legacy_marker,
             ))
         }
         Format::CodexToml => {
@@ -292,9 +295,9 @@ pub fn extract_entry(path: &Path, format: Format, server: &str) -> Result<(Optio
                 ),
             };
             let remote = table.get("url").is_some();
-            // 受管标记：远程条目统一在条目表级；stdio 旧位置 env 表内标记继续兼容
-            let managed = table.get(MARKER_KEY).and_then(toml::Value::as_str) == Some(MARKER_VALUE)
-                || env_table.get(MARKER_KEY).and_then(toml::Value::as_str) == Some(MARKER_VALUE);
+            // 旧版标记：条目表级或 env 表内出现即记为 legacy，随后剥离
+            let legacy_marker =
+                table.contains_key(MARKER_KEY) || env_table.contains_key(MARKER_KEY);
             let mut env = Map::new();
             for (key, value) in &env_table {
                 if key == MARKER_KEY {
@@ -384,7 +387,7 @@ pub fn extract_entry(path: &Path, format: Format, server: &str) -> Result<(Optio
             };
             let mut extra = Map::new();
             for (key, val) in table {
-                if key != "command" && key != "args" && key != "env" {
+                if key != "command" && key != "args" && key != "env" && key != MARKER_KEY {
                     if key == "startup_timeout_sec" {
                         let timeout = val.as_integer().filter(|&t| t > 0).ok_or_else(|| {
                             anyhow!(
@@ -406,7 +409,7 @@ pub fn extract_entry(path: &Path, format: Format, server: &str) -> Result<(Optio
                     env,
                     extra,
                 }),
-                managed,
+                legacy_marker,
             ))
         }
         Format::Unsupported(ref fmt) => {
@@ -447,18 +450,13 @@ pub fn toml_key(key: &str) -> String {
 
 pub fn render_entry_toml(server: &str, entry: &Entry) -> String {
     if let Some(Value::String(url)) = entry.extra.get("url") {
-        // 远程条目：条目表内 url + 条目级受管标记；headers 以
-        // env_http_headers（header 名 → 变量名）引用形式写入，零明文。
+        // 远程条目：条目表内只写 url；headers 以 env_http_headers
+        // （header 名 → 变量名）引用形式写入，零明文。归属只记在 mcp_bindings。
         let mut out = format!(
-            "\n# [agent-manager:managed]\n[mcp_servers.{}]\nurl = {}\n",
+            "\n[mcp_servers.{}]\nurl = {}\n",
             toml_key(server),
             toml_basic_string(url)
         );
-        out.push_str(&format!(
-            "{} = {}\n",
-            MARKER_KEY,
-            toml_basic_string(MARKER_VALUE)
-        ));
         if let Some(Value::Object(headers)) = entry.extra.get("env_http_headers") {
             if !headers.is_empty() {
                 out.push_str(&format!(
@@ -480,7 +478,7 @@ pub fn render_entry_toml(server: &str, entry: &Entry) -> String {
         return out;
     }
     let mut out = format!(
-        "\n# [agent-manager:managed]\n[mcp_servers.{}]\ncommand = {}\n",
+        "\n[mcp_servers.{}]\ncommand = {}\n",
         toml_key(server),
         toml_basic_string(&entry.command)
     );
@@ -500,41 +498,43 @@ pub fn render_entry_toml(server: &str, entry: &Entry) -> String {
             toml_basic_string(value)
         ));
     }
-    out.push_str(&format!(
-        "{} = {}\n",
-        MARKER_KEY,
-        toml_basic_string(MARKER_VALUE)
-    ));
     out
 }
 
+/// 删除 `[mcp_servers.<server>]` 及其子表。被删表头紧邻的上一行若是旧版注释
+/// `# [agent-manager:managed]` 一并删除；被删区域末尾紧贴下一个保留表头的注释/空行
+/// 属于下一个表，原样保留。其余行（含换行符）逐字节保留。
 pub fn toml_remove_server_text(content: &str, server: &str) -> String {
-    let mut out = String::new();
+    let mut out: Vec<&str> = Vec::new();
     let mut skip = false;
-    let mut pending_comment = false;
-    for line in content.lines() {
+    // 删除区域内、紧贴下一个表头之前的连续注释/空行
+    let mut trailing: Vec<&str> = Vec::new();
+    for line in content.split_inclusive('\n') {
         let trimmed = line.trim();
-        if trimmed == "# [agent-manager:managed]" {
-            pending_comment = true;
-            continue;
-        }
         if trimmed.starts_with('[') && trimmed.ends_with(']') {
             let header = &trimmed[1..trimmed.len() - 1];
-            skip = header_is_server(header, server);
-            if !skip && pending_comment {
-                out.push_str("# [agent-manager:managed]\n");
+            let removing = header_is_server(header, server);
+            if skip && !removing {
+                out.append(&mut trailing);
             }
-            pending_comment = false;
-        } else if pending_comment {
-            out.push_str("# [agent-manager:managed]\n");
-            pending_comment = false;
+            trailing.clear();
+            if removing && !skip && out.last().map(|prev| prev.trim()) == Some(LEGACY_TOML_COMMENT)
+            {
+                out.pop();
+            }
+            skip = removing;
+        } else if skip {
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                trailing.push(line);
+            } else {
+                trailing.clear();
+            }
         }
         if !skip {
-            out.push_str(line);
-            out.push('\n');
+            out.push(line);
         }
     }
-    out
+    out.concat()
 }
 
 fn header_is_server(header: &str, server: &str) -> bool {
@@ -562,7 +562,7 @@ pub fn json_set_entry(doc: &mut Map<String, Value>, format: Format, server: &str
     let map = container.as_object_mut().unwrap();
     if entry.extra.contains_key("url") {
         // 远程条目：codec 推导 type 常量（Claude "http" / OpenCode "remote"），
-        // url/headers 引用形式来自 entry.extra，受管标记统一条目级。
+        // url/headers 引用形式来自 entry.extra；不写任何归属标记。
         let mut obj = Map::new();
         let kind = if format == Format::OpenCodeJson {
             "remote"
@@ -573,19 +573,16 @@ pub fn json_set_entry(doc: &mut Map<String, Value>, format: Format, server: &str
         for (k, v) in &entry.extra {
             obj.insert(k.clone(), v.clone());
         }
-        obj.insert(MARKER_KEY.into(), Value::String(MARKER_VALUE.into()));
         map.insert(server.to_string(), Value::Object(obj));
         return;
     }
     if format == Format::OpenCodeJson {
         let mut cmd_array = vec![Value::String(entry.command.clone())];
         cmd_array.extend(entry.args.iter().cloned().map(Value::String));
-        let mut env = entry.env.clone();
-        env.insert(MARKER_KEY.into(), Value::String(MARKER_VALUE.into()));
         let mut obj = Map::new();
         obj.insert("type".into(), Value::String("local".into()));
         obj.insert("command".into(), Value::Array(cmd_array));
-        obj.insert("environment".into(), Value::Object(env));
+        obj.insert("environment".into(), Value::Object(entry.env.clone()));
         for (k, v) in &entry.extra {
             obj.insert(k.clone(), v.clone());
         }
@@ -597,9 +594,7 @@ pub fn json_set_entry(doc: &mut Map<String, Value>, format: Format, server: &str
             "args".into(),
             Value::Array(entry.args.iter().cloned().map(Value::String).collect()),
         );
-        let mut env = entry.env.clone();
-        env.insert(MARKER_KEY.into(), Value::String(MARKER_VALUE.into()));
-        obj.insert("env".into(), Value::Object(env));
+        obj.insert("env".into(), Value::Object(entry.env.clone()));
         for (k, v) in &entry.extra {
             obj.insert(k.clone(), v.clone());
         }

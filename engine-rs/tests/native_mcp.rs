@@ -371,7 +371,11 @@ fn mcp_three_formats_lifecycle_and_two_agent_isolation() {
     let claude_server = &claude_content["mcpServers"]["multi-server"];
     assert_eq!(claude_server["command"], "npx");
     assert_eq!(claude_server["args"][0], "-y");
-    assert_eq!(claude_server["env"]["_MANAGED_BY"], "agent-manager");
+    // 归属只记在 mcp_bindings：env 里不写 _MANAGED_BY（它会作为环境变量传给 MCP 进程）
+    assert!(
+        claude_server["env"].get("_MANAGED_BY").is_none(),
+        "Claude env 不得写入 _MANAGED_BY"
+    );
 
     // 2. Codex add: 创建 Codex TOML，不干扰 Claude
     let add_codex = execute(
@@ -391,11 +395,11 @@ fn mcp_three_formats_lifecycle_and_two_agent_isolation() {
     assert!(add_codex.ok, "{:?}", add_codex.errors);
     assert!(codex_path.exists(), "Codex 目标配置文件应已创建");
 
-    // 验证 Codex TOML 回读格式（包含 extra_args 与受管注释）
+    // 验证 Codex TOML 回读格式（包含 extra_args，不含任何归属标记/注释）
     let toml_str = std::fs::read_to_string(&codex_path).unwrap();
     assert!(
-        toml_str.contains("# [agent-manager:managed]"),
-        "Codex TOML 必须包含受管标记注释"
+        !toml_str.contains("agent-manager") && !toml_str.contains("_MANAGED_BY"),
+        "Codex TOML 不得包含受管标记注释或 _MANAGED_BY: {toml_str}"
     );
     assert!(
         toml_str.contains("[mcp_servers.multi-server]"),
@@ -429,9 +433,9 @@ fn mcp_three_formats_lifecycle_and_two_agent_isolation() {
     let opencode_server = &opencode_content["mcp"]["multi-server"];
     assert_eq!(opencode_server["type"], "local");
     assert_eq!(opencode_server["command"][0], "npx");
-    assert_eq!(
-        opencode_server["environment"]["_MANAGED_BY"],
-        "agent-manager"
+    assert!(
+        opencode_server["environment"].get("_MANAGED_BY").is_none(),
+        "OpenCode environment 不得写入 _MANAGED_BY"
     );
 
     // 4. Claude disable: 移除配置条目，但数据库绑定保留 enabled=false
@@ -2838,7 +2842,8 @@ fn mcp_test_action_preflight_consistency_and_leftovers() {
     );
     assert!(set_res.ok);
 
-    // 构造 managed leftover：配置文件中有 entry 且标记为 managed，但 DB 中没有该 binding
+    // 旧版遗留：配置文件中的条目带 _MANAGED_BY 标记，但 DB 中没有该 binding。
+    // 归属只看 mcp_bindings（assigned 且 enabled），旧标记不代表归属 → 这是外部条目。
     let claude_cfg = ctx.home_dir.join(".claude.json");
     std::fs::create_dir_all(claude_cfg.parent().unwrap()).unwrap();
     std::fs::write(
@@ -2857,7 +2862,7 @@ fn mcp_test_action_preflight_consistency_and_leftovers() {
     )
     .unwrap();
 
-    // 2. 验证 preflight: managed leftover 必须拒绝 add 和 enable
+    // 2. 验证 preflight: 无绑定的同名条目（即使带旧标记）按外部条目拒绝 add 和 enable
     let err_add = preflight_err(
         &ctx,
         &[
@@ -2870,13 +2875,11 @@ fn mcp_test_action_preflight_consistency_and_leftovers() {
         ],
     );
     assert!(
-        err_add.contains("残留受管条目"),
-        "存在托管残留时不带接管标志必须拒绝 add: {err_add}"
+        err_add.contains("非受管同名条目"),
+        "无绑定的同名条目不带接管标志必须拒绝 add: {err_add}"
     );
 
-    // 残留条目是本工具自己以前写的，不是用户的外部内容：显式接管时直接替换即可。
-    // 不放行的话，接管中心发的 add 会对每个旧条目失败，用户在界面上无路可走
-    // （那条路径只发 add，不会先 remove）。
+    // 显式接管仍是用户替换外部同名条目的唯一通道。
     assert!(
         preflight(
             &ctx,
@@ -2891,7 +2894,7 @@ fn mcp_test_action_preflight_consistency_and_leftovers() {
             ],
         )
         .is_ok(),
-        "显式接管须能覆盖残留受管条目"
+        "显式接管须能覆盖带旧标记的外部同名条目"
     );
 
     let err_enable = preflight_err(
@@ -2906,11 +2909,18 @@ fn mcp_test_action_preflight_consistency_and_leftovers() {
         ],
     );
     assert!(
-        err_enable.contains("尚未在 Agent"),
-        "存在托管残留时必须拒绝 enable: {err_enable}"
+        err_enable.contains("非受管同名条目"),
+        "无绑定的同名条目必须拒绝 enable: {err_enable}"
     );
 
-    // 3. 未受管外部字段在缺少环境变量解析时仍能以结构性检查拒绝，无需先解析 secret
+    // 3. 受管条目（绑定 assigned+enabled）中的未知外部字段在缺少环境变量解析时
+    //    仍能以结构性检查拒绝，无需先解析 secret
+    let struct_def = serde_json::json!({
+        "command": "node",
+        "args": ["server.js"],
+        "agents": ["claude-code"],
+        "env": {"TOKEN": "${DEFINITELY_UNSET_VAR_XYZ}"}
+    });
     let set_missing_env = execute(
         &ctx,
         &request(
@@ -2921,19 +2931,25 @@ fn mcp_test_action_preflight_consistency_and_leftovers() {
                 "--key",
                 "mcp.definitions.srv-struct-check",
                 "--value",
-                r#"{
-                    "command": "node",
-                    "args": ["server.js"],
-                    "agents": ["claude-code"],
-                    "env": {"TOKEN": "${DEFINITELY_UNSET_VAR_XYZ}"}
-                }"#,
+                &serde_json::to_string(&struct_def).unwrap(),
             ],
         ),
     );
     assert!(set_missing_env.ok);
+    {
+        let conn = store::open_write(&ctx).unwrap();
+        agent_manager_engine::native_mcp::persistence::ensure_table(&conn).unwrap();
+        let struct_version =
+            agent_manager_engine::native_mcp::compute_definition_version(&struct_def);
+        conn.execute(
+            "INSERT INTO mcp_bindings (server, agent, version, definition_json, enabled, assigned, applied_digest, updated_at)
+             VALUES ('srv-struct-check', 'claude-code', ?1, ?2, 1, 1, '', '2026-09-11T00:00:00Z')",
+            rusqlite::params![struct_version, serde_json::to_string(&struct_def).unwrap()],
+        )
+        .unwrap();
+    }
 
     // 写入含有未知外部属性的配置文件条目（同时保留 srv-leftover）
-    let claude_cfg = ctx.home_dir.join(".claude.json");
     std::fs::write(
         &claude_cfg,
         r#"{
@@ -2964,7 +2980,7 @@ fn mcp_test_action_preflight_consistency_and_leftovers() {
             "--only",
             "mcp:srv-struct-check",
             "--action",
-            "add",
+            "update",
             "--agent",
             "claude-code",
         ],
@@ -2990,7 +3006,7 @@ fn mcp_test_action_preflight_consistency_and_leftovers() {
         "包含未受管外部属性时单元格不得暴露可写动作"
     );
 
-    // 4. 验证残留受管条目 (leftover) 在 status 中的呈现及动作可执行性
+    // 4. 无绑定、带旧标记的同名条目在 status 中按外部非受管同名条目呈现，不是 leftover
     let srv_lo_elem = st_struct.data["elements"]
         .as_array()
         .unwrap()
@@ -2998,9 +3014,16 @@ fn mcp_test_action_preflight_consistency_and_leftovers() {
         .find(|e| e["id"] == "mcp:srv-leftover")
         .expect("srv-leftover 必须在 status 中显示");
     let lo_cell = &srv_lo_elem["observed"]["agents"]["claude-code"];
-    assert_eq!(lo_cell["state"], "leftover");
-    assert_eq!(lo_cell["actions"], serde_json::json!(["remove"]));
-    preflight(
+    assert_eq!(lo_cell["state"], "drifted");
+    assert_eq!(lo_cell["actions"], serde_json::json!([]));
+    assert!(
+        lo_cell["blocked_reason"]
+            .as_str()
+            .unwrap_or("")
+            .contains("同名条目"),
+        "外部同名条目必须给出含「同名条目」的 blocked_reason 以便前端提供接管: {lo_cell}"
+    );
+    let err_rm = preflight_err(
         &ctx,
         &[
             "--only",
@@ -3010,10 +3033,14 @@ fn mcp_test_action_preflight_consistency_and_leftovers() {
             "--agent",
             "claude-code",
         ],
-    )
-    .expect("leftover 状态暴露的 remove 动作必须通过预检");
+    );
+    assert!(
+        err_rm.contains("非受管同名条目"),
+        "无绑定时 remove 不得删除外部同名条目: {err_rm}"
+    );
 
-    // 5. 绑定已停用 (enabled: false) 但配置文件中仍有残留受管条目
+    // 5. 绑定已停用 (enabled: false) 但配置文件中出现同名条目：停用时本工具已删掉自己的条目，
+    //    这里的是外部条目 → 只允许 remove（只删绑定），disable/enable/update 均不适用
     let conn = store::open_write(&ctx).unwrap();
     agent_manager_engine::native_mcp::persistence::ensure_table(&conn).unwrap();
     let lo_def = serde_json::json!({"command": "echo", "args": ["lo"], "agents": ["claude-code"]});
@@ -3035,35 +3062,29 @@ fn mcp_test_action_preflight_consistency_and_leftovers() {
         .unwrap();
     let dis_res_cell = &dis_res_elem["observed"]["agents"]["claude-code"];
     assert_eq!(dis_res_cell["state"], "drifted");
-    let dis_res_acts: Vec<String> = dis_res_cell["actions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v.as_str().unwrap().to_string())
-        .collect();
-    assert!(
-        dis_res_acts.contains(&"disable".to_string())
-            && dis_res_acts.contains(&"remove".to_string())
-    );
-    assert!(
-        !dis_res_acts.contains(&"add".to_string())
-            && !dis_res_acts.contains(&"enable".to_string())
-            && !dis_res_acts.contains(&"update".to_string())
-    );
+    assert_eq!(dis_res_cell["actions"], serde_json::json!(["remove"]));
+    assert!(dis_res_cell["blocked_reason"]
+        .as_str()
+        .unwrap_or("")
+        .contains("同名条目"));
 
-    // 验证暴露的 disable 和 remove 均可通过预检
-    preflight(
-        &ctx,
-        &[
-            "--only",
-            "mcp:srv-leftover",
-            "--action",
-            "disable",
-            "--agent",
-            "claude-code",
-        ],
-    )
-    .expect("已停用但有残留时暴露的 disable 必须通过预检");
+    for action in ["disable", "enable", "update"] {
+        let err = preflight_err(
+            &ctx,
+            &[
+                "--only",
+                "mcp:srv-leftover",
+                "--action",
+                action,
+                "--agent",
+                "claude-code",
+            ],
+        );
+        assert!(
+            err.contains("非受管同名条目"),
+            "停用绑定 + 外部同名条目时 {action} 必须拒绝: {err}"
+        );
+    }
 
     preflight(
         &ctx,
@@ -3076,7 +3097,7 @@ fn mcp_test_action_preflight_consistency_and_leftovers() {
             "claude-code",
         ],
     )
-    .expect("已停用但有残留时暴露的 remove 必须通过预检");
+    .expect("停用绑定时暴露的 remove（只删绑定）必须通过预检");
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -3493,7 +3514,7 @@ fn mcp_test_library_remove_bad_json_without_server_is_blocked() {
 }
 
 #[test]
-fn mcp_test_disabled_target_nonmanaged_conflict_blocks_library_remove() {
+fn mcp_test_disabled_target_nonmanaged_entry_is_skipped_by_library_remove() {
     let (root, ctx) = temp_ctx("disabled-nonmanaged-conflict");
     let set_agent = execute(
         &ctx,
@@ -3553,11 +3574,13 @@ fn mcp_test_disabled_target_nonmanaged_conflict_blocks_library_remove() {
         set_server.errors
     );
     std::fs::create_dir_all(&ctx.home_dir).unwrap();
+    let conflict_path = ctx.home_dir.join(".disabled-conflict.json");
     std::fs::write(
-        ctx.home_dir.join(".disabled-conflict.json"),
+        &conflict_path,
         r#"{"mcpServers":{"disabled-conflict-server":{"command":"external"}}}"#,
     )
     .unwrap();
+    let conflict_bytes = std::fs::read(&conflict_path).unwrap();
 
     let status = execute(&ctx, &request("mcp:status", &[]));
     assert!(
@@ -3578,28 +3601,34 @@ fn mcp_test_disabled_target_nonmanaged_conflict_blocks_library_remove() {
         .as_str()
         .unwrap()
         .contains("非受管同名条目"));
+    // 库级 remove 只删本工具自己的东西：外部同名条目被跳过，不再阻断库级 remove
     assert!(
         element["actions"]
             .as_array()
             .unwrap()
             .iter()
-            .all(|action| action["id"] != "remove"),
-        "非受管冲突时 element 不得暴露 remove: {:?}",
+            .any(|action| action["id"] == "remove"),
+        "外部同名条目不得令库级 remove 不可用: {:?}",
         element["actions"]
     );
 
-    assert!(
-        preflight(
-            &ctx,
+    let rm = execute(
+        &ctx,
+        &request(
+            "mcp:apply",
             &[
                 "--only",
                 "mcp:disabled-conflict-server",
                 "--action",
-                "remove"
+                "remove",
             ],
-        )
-        .is_err(),
-        "停用目标的非受管冲突必须阻断库级 remove"
+        ),
+    );
+    assert!(rm.ok, "库级 remove 必须成功: {:?}", rm.errors);
+    assert_eq!(
+        std::fs::read(&conflict_path).unwrap(),
+        conflict_bytes,
+        "停用目标中的外部同名条目必须逐字节保留"
     );
 
     let _ = std::fs::remove_dir_all(root);
@@ -5852,7 +5881,7 @@ fn mcp_test_remote_roundtrip_all_codecs() {
         assert!(res.ok, "远程 add {agent} 必须成功: {:?}", res.errors);
     }
 
-    // 3. Claude JSON：type "http" + url + 字面量 ${VAR} headers + 条目级 marker；零明文
+    // 3. Claude JSON：type "http" + url + 字面量 ${VAR} headers；不写 marker；零明文
     let claude_content: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&claude_path).unwrap()).unwrap();
     let claude_srv = &claude_content["mcpServers"]["remote-srv"];
@@ -5863,7 +5892,10 @@ fn mcp_test_remote_roundtrip_all_codecs() {
         "${AM_TEST_REMOTE_TOKEN}"
     );
     assert_eq!(claude_srv["headers"]["X-Team"], "${AM_TEST_REMOTE_TEAM}");
-    assert_eq!(claude_srv["_MANAGED_BY"], "agent-manager");
+    assert!(
+        claude_srv.get("_MANAGED_BY").is_none(),
+        "Claude 远程条目不得写入 _MANAGED_BY"
+    );
     for key in ["command", "args", "env"] {
         assert!(claude_srv.get(key).is_none(), "Claude 远程条目不得含 {key}");
     }
@@ -5875,7 +5907,7 @@ fn mcp_test_remote_roundtrip_all_codecs() {
         );
     }
 
-    // 4. Codex TOML：url 键即远程 + env_http_headers（header 名 → 变量名）+ 条目级 marker
+    // 4. Codex TOML：url 键即远程 + env_http_headers（header 名 → 变量名）；不写 marker/注释
     let toml_raw = std::fs::read_to_string(&codex_path).unwrap();
     assert!(toml_raw.contains("[mcp_servers.remote-srv]"), "{toml_raw}");
     assert!(
@@ -5883,7 +5915,7 @@ fn mcp_test_remote_roundtrip_all_codecs() {
         "{toml_raw}"
     );
     assert!(
-        toml_raw.contains("_MANAGED_BY = \"agent-manager\""),
+        !toml_raw.contains("_MANAGED_BY") && !toml_raw.contains("agent-manager"),
         "{toml_raw}"
     );
     assert!(
@@ -5909,7 +5941,7 @@ fn mcp_test_remote_roundtrip_all_codecs() {
         );
     }
 
-    // 5. OpenCode JSON：type "remote" + {env:VAR} 插值 headers + 固定 oauth:false + 条目级 marker
+    // 5. OpenCode JSON：type "remote" + {env:VAR} 插值 headers + 固定 oauth:false；不写 marker
     let opencode_content: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&opencode_path).unwrap()).unwrap();
     let oc_srv = &opencode_content["mcp"]["remote-srv"];
@@ -5921,7 +5953,10 @@ fn mcp_test_remote_roundtrip_all_codecs() {
     );
     assert_eq!(oc_srv["headers"]["X-Team"], "{env:AM_TEST_REMOTE_TEAM}");
     assert_eq!(oc_srv["oauth"], false);
-    assert_eq!(oc_srv["_MANAGED_BY"], "agent-manager");
+    assert!(
+        oc_srv.get("_MANAGED_BY").is_none(),
+        "OpenCode 远程条目不得写入 _MANAGED_BY"
+    );
     let oc_raw = std::fs::read_to_string(&opencode_path).unwrap();
     for sentinel in ["SENTINEL-REMOTE-TOKEN-3f9a", "SENTINEL-REMOTE-TEAM-7c21"] {
         assert!(
@@ -5930,14 +5965,14 @@ fn mcp_test_remote_roundtrip_all_codecs() {
         );
     }
 
-    // 6. 回读往返：extract_entry 从条目级识别 marker，digest 一致 → managed-ok
+    // 6. 回读往返：extract_entry 读回条目且无旧标记，digest 一致 → managed-ok（归属看绑定）
     for (path, format) in [
         (&claude_path, Format::ClaudeJson),
         (&codex_path, Format::CodexToml),
         (&opencode_path, Format::OpenCodeJson),
     ] {
-        let (entry, managed) = extract_entry(path, format, "remote-srv").unwrap();
-        assert!(managed, "条目级 marker 必须被识别: {}", path.display());
+        let (entry, legacy_marker) = extract_entry(path, format, "remote-srv").unwrap();
+        assert!(!legacy_marker, "新写入条目不得带旧标记: {}", path.display());
         assert!(entry.is_some());
     }
     let st = execute(&ctx, &request("mcp:status", &[]));
@@ -6667,14 +6702,15 @@ fn mcp_test_remote_external_modification_fail_closed() {
         "fail-closed 后文件不变"
     );
 
-    // 3. marker 缺失即非受管（Codex 删除条目级 marker 行）→ 拒绝覆盖
-    let toml_raw = std::fs::read_to_string(&codex_path).unwrap();
-    let stripped: String = toml_raw
-        .lines()
-        .filter(|line| !line.starts_with("_MANAGED_BY"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    std::fs::write(&codex_path, format!("{stripped}\n")).unwrap();
+    // 3. 归属只看 mcp_bindings：Codex 的分配记录不存在时，文件里的同名条目即非受管 → 拒绝覆盖
+    {
+        let conn = store::open_write(&ctx).unwrap();
+        conn.execute(
+            "DELETE FROM mcp_bindings WHERE server = 'remote-srv' AND agent = 'codex'",
+            [],
+        )
+        .unwrap();
+    }
     let st = execute(&ctx, &request("mcp:status", &[]));
     let el = find_element(&st, "mcp:remote-srv");
     let cell = &el["observed"]["agents"]["codex"];
@@ -7922,7 +7958,7 @@ fn mcp_takeover_requires_flag_and_replaces_unmanaged_entry() {
         "无未受管同名条目时审计不得标记 takeover"
     );
 
-    // 3. 有 flag：apply 替换成功——受管渲染落地、marker 出现、其余条目/字段保留
+    // 3. 有 flag：apply 替换成功——受管渲染落地、不写 marker、其余条目/字段保留
     let apply_flag = execute(
         &ctx,
         &request_with_run(
@@ -7949,9 +7985,9 @@ fn mcp_takeover_requires_flag_and_replaces_unmanaged_entry() {
     let svc = &doc["mcpServers"]["takeover-svc"];
     assert_eq!(svc["command"], "npx");
     assert_eq!(svc["args"][0], "-y");
-    assert_eq!(
-        svc["env"]["_MANAGED_BY"], "agent-manager",
-        "替换后条目必须带受管 marker"
+    assert!(
+        svc["env"].get("_MANAGED_BY").is_none(),
+        "替换后条目不得写入 _MANAGED_BY（归属只记在 mcp_bindings）"
     );
     assert!(
         svc.get("custom_field").is_none() && svc["env"].get("OLD_KEY").is_none(),
@@ -7971,7 +8007,7 @@ fn mcp_takeover_requires_flag_and_replaces_unmanaged_entry() {
         .expect("必须有 mcp:add 审计记录");
     assert_eq!(apply_op["detail"]["takeover"], true);
 
-    // 5. Codex TOML 路径：未受管段被受管渲染替换并带条目表级/ env 表 marker，其余服务保留
+    // 5. Codex TOML 路径：未受管段被受管渲染替换且不写 marker/注释，其余服务保留
     let apply_codex = execute(
         &ctx,
         &request_with_run(
@@ -7993,8 +8029,8 @@ fn mcp_takeover_requires_flag_and_replaces_unmanaged_entry() {
     assert!(toml_text.contains("other-svc"), "TOML 其余服务必须保留");
     assert!(toml_text.contains("npx"), "TOML 必须写入受管 command");
     assert!(
-        toml_text.contains("_MANAGED_BY = \"agent-manager\""),
-        "TOML 替换后必须带受管 marker: {}",
+        !toml_text.contains("_MANAGED_BY") && !toml_text.contains("agent-manager"),
+        "TOML 替换后不得写入 marker 或受管注释: {}",
         toml_text
     );
     assert!(!toml_text.contains("old-codex"), "旧未受管内容必须被替换");
@@ -8067,4 +8103,517 @@ fn status_reports_whether_the_stdio_command_exists() {
         "远程服务没有本地命令可判定"
     );
     let _ = std::fs::remove_dir_all(root);
+}
+
+// ---- 归属只看 mcp_bindings：写入不带标记、旧标记只作清理提示 ----
+
+fn apply_ok(ctx: &Context, args: &[&str]) {
+    let res = execute(ctx, &request("mcp:apply", args));
+    assert!(res.ok, "mcp:apply {args:?} 必须成功: {:?}", res.errors);
+}
+
+fn binding_row(ctx: &Context, server: &str, agent: &str) -> Option<(i64, i64, String)> {
+    let conn = store::open_readonly(ctx).unwrap().unwrap();
+    conn.query_row(
+        "SELECT assigned, enabled, applied_digest FROM mcp_bindings WHERE server=?1 AND agent=?2",
+        rusqlite::params![server, agent],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )
+    .ok()
+}
+
+fn set_stdio_def(ctx: &Context, name: &str, agents: &str) {
+    let res = execute(
+        ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                &format!("mcp.definitions.{name}"),
+                "--value",
+                &format!(r#"{{"command":"npx","args":["-y","{name}-pkg"],"agents":{agents}}}"#),
+            ],
+        ),
+    );
+    assert!(res.ok, "{:?}", res.errors);
+}
+
+/// a. 绑定 assigned+enabled、摘要一致、文件含旧标记 → drifted + update + 非阻断提示；
+///    update 后无标记、其余内容逐字节保留、applied_digest 不变。
+#[test]
+fn mcp_legacy_marker_on_owned_entry_is_drifted_and_update_cleans_it() {
+    std::env::set_var("AM_TEST_LEGACY_KEY", "x");
+    let (root, ctx) = setup_remote_ctx(
+        "legacy-marker-owned",
+        r#"{"url":"https://legacy.example.com/mcp","headers":{"X-Key":"${AM_TEST_LEGACY_KEY}"},"agents":["codex"]}"#,
+    );
+    set_stdio_def(&ctx, "legacy-stdio", r#"["claude-code"]"#);
+    let claude_path = ctx.home_dir.join(".claude.json");
+    let codex_path = ctx.home_dir.join(".codex/config.toml");
+
+    apply_ok(
+        &ctx,
+        &[
+            "--only",
+            "mcp:remote-srv",
+            "--action",
+            "add",
+            "--agent",
+            "codex",
+        ],
+    );
+    apply_ok(
+        &ctx,
+        &[
+            "--only",
+            "mcp:legacy-stdio",
+            "--action",
+            "add",
+            "--agent",
+            "claude-code",
+        ],
+    );
+    let codex_digest = binding_row(&ctx, "remote-srv", "codex").unwrap().2;
+    let claude_digest = binding_row(&ctx, "legacy-stdio", "claude-code").unwrap().2;
+
+    // 构造旧版 Codex 文件：用户内容 + 旧注释/条目级 _MANAGED_BY 的受管段 + 其后的用户表
+    let rendered = std::fs::read_to_string(&codex_path).unwrap();
+    let block = rendered.trim_start_matches('\n');
+    let mut legacy_block = String::from("# [agent-manager:managed]\n");
+    for line in block.split_inclusive('\n') {
+        legacy_block.push_str(line);
+        if line.starts_with("url = ") {
+            legacy_block.push_str("_MANAGED_BY = \"agent-manager\"\n");
+        }
+    }
+    let prefix = "# user top comment\nmodel = \"o3\"\n\n[profiles.work]\n# user profile comment\napproval = \"never\"\n\n";
+    let suffix =
+        "\n# user comment for other server\n[mcp_servers.user-srv]\ncommand = \"user-cmd\"\n";
+    std::fs::write(&codex_path, format!("{prefix}{legacy_block}{suffix}")).unwrap();
+
+    // 构造旧版 Claude 文件：stdio env 内 _MANAGED_BY + 其他用户键与用户条目
+    let mut claude_doc: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&claude_path).unwrap()).unwrap();
+    claude_doc["userKey"] = serde_json::json!({"keep": [1, 2, 3]});
+    claude_doc["mcpServers"]["user-srv"] =
+        serde_json::json!({"command": "user-cmd", "env": {"USER_K": "v"}});
+    let expected_claude_doc = claude_doc.clone();
+    claude_doc["mcpServers"]["legacy-stdio"]["env"]["_MANAGED_BY"] =
+        serde_json::json!("agent-manager");
+    std::fs::write(
+        &claude_path,
+        serde_json::to_string_pretty(&claude_doc).unwrap(),
+    )
+    .unwrap();
+
+    // status：drifted + update，提示在 notice 而非 blocked_reason；status 零写
+    let codex_before = std::fs::read(&codex_path).unwrap();
+    let claude_before = std::fs::read(&claude_path).unwrap();
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    for (id, agent) in [
+        ("mcp:remote-srv", "codex"),
+        ("mcp:legacy-stdio", "claude-code"),
+    ] {
+        let cell = &find_element(&st, id)["observed"]["agents"][agent];
+        assert_eq!(cell["state"], "drifted", "{id}@{agent}: {cell}");
+        assert!(
+            cell["actions"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("update")),
+            "{id}@{agent} 必须暴露 update: {cell}"
+        );
+        assert!(cell["blocked_reason"].is_null(), "提示不得阻断: {cell}");
+        assert!(
+            cell["notice"].as_str().unwrap_or("").contains("旧版"),
+            "必须给出旧标记清理提示: {cell}"
+        );
+    }
+    assert_eq!(
+        std::fs::read(&codex_path).unwrap(),
+        codex_before,
+        "status 零写"
+    );
+    assert_eq!(
+        std::fs::read(&claude_path).unwrap(),
+        claude_before,
+        "status 零写"
+    );
+
+    apply_ok(
+        &ctx,
+        &[
+            "--only",
+            "mcp:remote-srv",
+            "--action",
+            "update",
+            "--agent",
+            "codex",
+        ],
+    );
+    apply_ok(
+        &ctx,
+        &[
+            "--only",
+            "mcp:legacy-stdio",
+            "--action",
+            "update",
+            "--agent",
+            "claude-code",
+        ],
+    );
+
+    let codex_after = std::fs::read_to_string(&codex_path).unwrap();
+    assert!(
+        !codex_after.contains("_MANAGED_BY") && !codex_after.contains("agent-manager"),
+        "{codex_after}"
+    );
+    assert!(
+        codex_after.starts_with(prefix),
+        "用户前缀逐字节保留: {codex_after}"
+    );
+    assert!(
+        codex_after.contains(suffix),
+        "其后的用户注释与表逐字节保留: {codex_after}"
+    );
+    assert!(
+        codex_after.ends_with(block),
+        "受管段按新格式重写: {codex_after}"
+    );
+
+    let claude_after = std::fs::read_to_string(&claude_path).unwrap();
+    assert!(
+        !claude_after.contains("_MANAGED_BY") && !claude_after.contains("agent-manager"),
+        "{claude_after}"
+    );
+    assert_eq!(
+        claude_after,
+        serde_json::to_string_pretty(&expected_claude_doc).unwrap(),
+        "Claude 其他用户键/条目必须逐字节保留"
+    );
+
+    assert_eq!(
+        binding_row(&ctx, "remote-srv", "codex").unwrap().2,
+        codex_digest
+    );
+    assert_eq!(
+        binding_row(&ctx, "legacy-stdio", "claude-code").unwrap().2,
+        claude_digest
+    );
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    for (id, agent) in [
+        ("mcp:remote-srv", "codex"),
+        ("mcp:legacy-stdio", "claude-code"),
+    ] {
+        let cell = &find_element(&st, id)["observed"]["agents"][agent];
+        assert_eq!(cell["state"], "managed-ok", "{id}@{agent}: {cell}");
+        assert!(cell.get("notice").is_none(), "{cell}");
+    }
+
+    std::env::remove_var("AM_TEST_LEGACY_KEY");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// b. 无绑定、文件有带旧标记的同名条目 → 视为用户条目：无接管 add 被拒、库级 remove
+///    不动文件、status 不是 leftover。
+#[test]
+fn mcp_legacy_marker_without_binding_is_user_entry() {
+    let (root, ctx) = temp_ctx("legacy-marker-no-binding");
+    set_stdio_def(&ctx, "legacy-user", r#"["claude-code","codex"]"#);
+    let claude_path = ctx.home_dir.join(".claude.json");
+    let codex_path = ctx.home_dir.join(".codex/config.toml");
+    std::fs::create_dir_all(codex_path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &claude_path,
+        r#"{"mcpServers":{"legacy-user":{"command":"npx","args":["-y","legacy-user-pkg"],"env":{"_MANAGED_BY":"agent-manager"}}}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &codex_path,
+        "# [agent-manager:managed]\n[mcp_servers.legacy-user]\ncommand = \"npx\"\nargs = [\"-y\", \"legacy-user-pkg\"]\n[mcp_servers.legacy-user.env]\n_MANAGED_BY = \"agent-manager\"\n",
+    )
+    .unwrap();
+    let claude_bytes = std::fs::read(&claude_path).unwrap();
+    let codex_bytes = std::fs::read(&codex_path).unwrap();
+
+    for agent in ["claude-code", "codex"] {
+        let res = execute(
+            &ctx,
+            &request(
+                "mcp:apply",
+                &[
+                    "--only",
+                    "mcp:legacy-user",
+                    "--action",
+                    "add",
+                    "--agent",
+                    agent,
+                ],
+            ),
+        );
+        assert!(!res.ok, "无接管的 add 必须被拒 ({agent})");
+        assert!(
+            error_messages(&res).contains("非受管同名条目"),
+            "{}",
+            error_messages(&res)
+        );
+    }
+
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    let el = find_element(&st, "mcp:legacy-user");
+    for agent in ["claude-code", "codex"] {
+        let cell = &el["observed"]["agents"][agent];
+        assert_ne!(cell["state"], "leftover", "{cell}");
+        assert_eq!(cell["state"], "drifted", "{cell}");
+        assert!(
+            cell["blocked_reason"]
+                .as_str()
+                .unwrap_or("")
+                .contains("同名条目"),
+            "{cell}"
+        );
+    }
+
+    let rm = execute(
+        &ctx,
+        &request(
+            "mcp:apply",
+            &["--only", "mcp:legacy-user", "--action", "remove"],
+        ),
+    );
+    // 库级 remove 跳过用户同名条目：操作成功、库定义删除、文件字节不变
+    assert!(rm.ok, "库级 remove 必须成功: {:?}", rm.errors);
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    assert!(
+        st.data["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["id"] != "mcp:legacy-user"),
+        "库定义必须已删除"
+    );
+    assert_eq!(std::fs::read(&claude_path).unwrap(), claude_bytes);
+    assert_eq!(std::fs::read(&codex_path).unwrap(), codex_bytes);
+    assert!(binding_row(&ctx, "legacy-user", "claude-code").is_none());
+    assert!(binding_row(&ctx, "legacy-user", "codex").is_none());
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// c. 停用绑定 + 文件出现同名条目（外部）→ remove 只删绑定、文件字节不变；无接管 enable 被拒。
+#[test]
+fn mcp_disabled_binding_with_external_entry_remove_only_drops_binding() {
+    let (root, ctx) = temp_ctx("disabled-binding-external");
+    set_stdio_def(&ctx, "paused-svc", r#"["claude-code"]"#);
+    let claude_path = ctx.home_dir.join(".claude.json");
+    apply_ok(
+        &ctx,
+        &[
+            "--only",
+            "mcp:paused-svc",
+            "--action",
+            "add",
+            "--agent",
+            "claude-code",
+        ],
+    );
+    apply_ok(
+        &ctx,
+        &[
+            "--only",
+            "mcp:paused-svc",
+            "--action",
+            "disable",
+            "--agent",
+            "claude-code",
+        ],
+    );
+    assert_eq!(
+        binding_row(&ctx, "paused-svc", "claude-code").map(|r| (r.0, r.1)),
+        Some((1, 0))
+    );
+
+    // 用户自己在停用期间写入同名条目
+    std::fs::write(
+        &claude_path,
+        "{\n  \"mcpServers\": {\n    \"paused-svc\": {\"command\": \"user-own\", \"env\": {\"_MANAGED_BY\": \"agent-manager\"}}\n  }\n}\n",
+    )
+    .unwrap();
+    let bytes = std::fs::read(&claude_path).unwrap();
+
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    let cell = &find_element(&st, "mcp:paused-svc")["observed"]["agents"]["claude-code"];
+    assert_eq!(cell["state"], "drifted", "{cell}");
+    assert_eq!(cell["actions"], serde_json::json!(["remove"]), "{cell}");
+
+    let en = execute(
+        &ctx,
+        &request(
+            "mcp:apply",
+            &[
+                "--only",
+                "mcp:paused-svc",
+                "--action",
+                "enable",
+                "--agent",
+                "claude-code",
+            ],
+        ),
+    );
+    assert!(!en.ok, "无接管 enable 必须被拒");
+    assert!(error_messages(&en).contains("非受管同名条目"));
+    assert_eq!(std::fs::read(&claude_path).unwrap(), bytes);
+
+    apply_ok(
+        &ctx,
+        &[
+            "--only",
+            "mcp:paused-svc",
+            "--action",
+            "remove",
+            "--agent",
+            "claude-code",
+        ],
+    );
+    assert_eq!(
+        std::fs::read(&claude_path).unwrap(),
+        bytes,
+        "remove 只删绑定，外部条目字节不变"
+    );
+    assert!(binding_row(&ctx, "paused-svc", "claude-code").is_none());
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// d. 三种客户端的 stdio 与远程全新 add 都不写入任何归属标记。
+#[test]
+fn mcp_fresh_add_writes_no_marker_for_all_clients() {
+    std::env::set_var("AM_TEST_FRESH_KEY", "x");
+    let (root, ctx) = setup_remote_ctx(
+        "fresh-add-no-marker",
+        r#"{"url":"https://fresh.example.com/mcp","headers":{"X-Key":"${AM_TEST_FRESH_KEY}"},"agents":["claude-code","codex","opencode"]}"#,
+    );
+    set_stdio_def(&ctx, "fresh-stdio", r#"["claude-code","codex","opencode"]"#);
+    for agent in ["claude-code", "codex", "opencode"] {
+        for server in ["mcp:remote-srv", "mcp:fresh-stdio"] {
+            apply_ok(
+                &ctx,
+                &["--only", server, "--action", "add", "--agent", agent],
+            );
+        }
+    }
+    for path in [
+        ctx.home_dir.join(".claude.json"),
+        ctx.home_dir.join(".codex/config.toml"),
+        ctx.home_dir.join(".config/opencode/opencode.json"),
+    ] {
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("fresh-stdio") && text.contains("remote-srv"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("_MANAGED_BY") && !text.contains("agent-manager"),
+            "{}: {text}",
+            path.display()
+        );
+    }
+    let st = execute(&ctx, &request("mcp:status", &[]));
+    for id in ["mcp:remote-srv", "mcp:fresh-stdio"] {
+        assert_eq!(find_element(&st, id)["state"], "managed-ok", "{id}");
+    }
+    std::env::remove_var("AM_TEST_FRESH_KEY");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// e. toml_remove_server_text 连带删除紧邻的旧注释，保留无关注释与其他表。
+#[test]
+fn mcp_toml_remove_drops_adjacent_legacy_comment_and_keeps_others() {
+    use agent_manager_engine::native_mcp::targets::toml_remove_server_text;
+    let input = "# top user comment\nmodel = \"o3\"\n\n# user note before target\n# [agent-manager:managed]\n[mcp_servers.target]\ncommand = \"x\"\n# inside target\n[mcp_servers.target.env]\nK = \"v\"\n\n# [agent-manager:managed]\n[mcp_servers.keep]\ncommand = \"k\"\n# user comment before profiles\n[profiles.p]\nk = 1\n";
+    let expected = "# top user comment\nmodel = \"o3\"\n\n# user note before target\n\n# [agent-manager:managed]\n[mcp_servers.keep]\ncommand = \"k\"\n# user comment before profiles\n[profiles.p]\nk = 1\n";
+    assert_eq!(toml_remove_server_text(input, "target"), expected);
+
+    // 非目标表前的旧注释不动；不含目标时逐字节不变（含无结尾换行）
+    let untouched = "# [agent-manager:managed]\n[mcp_servers.other]\ncommand = \"o\"";
+    assert_eq!(toml_remove_server_text(untouched, "target"), untouched);
+
+    // 目标表前是用户注释而非旧注释：用户注释保留
+    let user_comment = "# mine\n[mcp_servers.target]\ncommand = \"x\"\n";
+    assert_eq!(toml_remove_server_text(user_comment, "target"), "# mine\n");
+}
+
+/// 库级 remove：服务 X 在 Claude 受管、Codex 有用户自己的同名 X（无绑定，带/不带旧标记各一例）
+/// → 成功；Claude 条目被删，Codex 文件逐字节不变，库定义与绑定均已删除。
+#[test]
+fn mcp_library_remove_skips_user_entries_and_removes_owned() {
+    for (tag, codex_text) in [
+        (
+            "lib-rm-skip-plain",
+            "# user codex\n[mcp_servers.shared-x]\ncommand = \"user-own\"\n",
+        ),
+        (
+            "lib-rm-skip-legacy",
+            "# [agent-manager:managed]\n[mcp_servers.shared-x]\ncommand = \"user-own\"\n_MANAGED_BY = \"agent-manager\"\n",
+        ),
+    ] {
+        let (root, ctx) = temp_ctx(tag);
+        set_stdio_def(&ctx, "shared-x", r#"["claude-code","codex"]"#);
+        let claude_path = ctx.home_dir.join(".claude.json");
+        let codex_path = ctx.home_dir.join(".codex/config.toml");
+        apply_ok(
+            &ctx,
+            &["--only", "mcp:shared-x", "--action", "add", "--agent", "claude-code"],
+        );
+        std::fs::create_dir_all(codex_path.parent().unwrap()).unwrap();
+        std::fs::write(&codex_path, codex_text).unwrap();
+
+        let st = execute(&ctx, &request("mcp:status", &[]));
+        let el = find_element(&st, "mcp:shared-x");
+        let codex_cell = &el["observed"]["agents"]["codex"];
+        assert_eq!(codex_cell["state"], "drifted", "{tag}: {codex_cell}");
+        assert!(
+            codex_cell["blocked_reason"]
+                .as_str()
+                .unwrap_or("")
+                .contains("非受管同名条目"),
+            "{tag}: 逐助手外部冲突状态保持: {codex_cell}"
+        );
+        assert!(
+            el["actions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|a| a["id"] == "remove"),
+            "{tag}: 库级 remove 必须可用: {}",
+            el["actions"]
+        );
+
+        apply_ok(&ctx, &["--only", "mcp:shared-x", "--action", "remove"]);
+        let claude_doc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&claude_path).unwrap()).unwrap();
+        assert!(
+            claude_doc["mcpServers"].get("shared-x").is_none(),
+            "{tag}: Claude 受管条目必须被删"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&codex_path).unwrap(),
+            codex_text,
+            "{tag}: Codex 用户文件逐字节不变"
+        );
+        assert!(binding_row(&ctx, "shared-x", "claude-code").is_none());
+        assert!(binding_row(&ctx, "shared-x", "codex").is_none());
+        let st = execute(&ctx, &request("mcp:status", &[]));
+        assert!(
+            st.data["elements"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|e| e["id"] != "mcp:shared-x"),
+            "{tag}: 库定义必须已删除"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

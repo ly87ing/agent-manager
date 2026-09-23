@@ -4,8 +4,11 @@ use anyhow::{bail, Result};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
+/// 旧版写入的条目级 / env 内标记：新版不再写入，读取时识别并剥离，只用于清理提示。
 pub const MARKER_KEY: &str = "_MANAGED_BY";
 pub const MARKER_VALUE: &str = "agent-manager";
+/// 旧版在 Codex `[mcp_servers.<server>]` 表头前写入的注释行。
+pub const LEGACY_TOML_COMMENT: &str = "# [agent-manager:managed]";
 pub const TABLE_DDL: &str = "CREATE TABLE IF NOT EXISTS mcp_bindings (
     server TEXT NOT NULL,
     agent TEXT NOT NULL,
@@ -75,6 +78,13 @@ pub struct Binding {
 }
 
 pub type Bindings = BTreeMap<String, BTreeMap<String, Binding>>;
+
+/// 归属判定的唯一依据：目标文件里的同名条目属于 Agent Manager，当且仅当
+/// 该 (server, agent) 绑定 assigned 且 enabled。文件里的旧 `_MANAGED_BY`
+/// 标记不代表归属。
+pub fn owns_entry(binding: Option<&Binding>) -> bool {
+    binding.map_or(false, |b| b.assigned && b.enabled)
+}
 
 pub fn now_iso() -> String {
     let secs = std::time::SystemTime::now()

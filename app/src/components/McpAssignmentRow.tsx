@@ -191,6 +191,11 @@ export function McpAssignmentRow({
               {cell.blocked_reason}
             </span>
           )}
+          {cell?.notice && (
+            <span className="text-xs text-muted-foreground" title={cell.notice}>
+              {cell.notice}
+            </span>
+          )}
         </div>
       </td>
       <td className="py-2.5">

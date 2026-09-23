@@ -187,10 +187,10 @@ pub fn atomic_write_checked(
 
     let verify = (|| -> Result<()> {
         if let Some((server, entry, format)) = expect {
-            let (actual, managed) = extract_entry(path, format, server)?;
+            let (actual, legacy_marker) = extract_entry(path, format, server)?;
             let actual = actual.ok_or_else(|| anyhow!("回读校验失败: 条目 '{}' 缺失", server))?;
-            if !managed {
-                bail!("回读校验失败: 条目 '{}' 缺少受管标记", server);
+            if legacy_marker {
+                bail!("回读校验失败: 条目 '{}' 仍含旧版标记", server);
             }
             if actual.digest() != entry.digest() {
                 bail!("回读校验失败: 条目 '{}' 摘要与写入不一致", server);

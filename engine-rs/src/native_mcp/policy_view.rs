@@ -3,7 +3,7 @@
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Map, Value};
 
-use super::model::{canonicalize_agent_id, MARKER_KEY};
+use super::model::canonicalize_agent_id;
 use super::targets::{Entry, Format};
 
 /// 远程定义 headers 数量上限
@@ -183,8 +183,8 @@ pub fn validate_definition_headers(definition: &Value) -> Result<()> {
 
 /// 未受管外部属性守卫的期望字段集（按 format + 传输形态产出）：
 /// stdio 仅 Codex 消费 startup_timeout_sec；远程按 codec 推导常量与白名单
-/// （Claude {type,url,headers,marker} / Codex {url,env_http_headers,marker} /
-/// OpenCode {type,url,headers,oauth,marker}）。
+/// （Claude {type,url,headers} / Codex {url,env_http_headers} /
+/// OpenCode {type,url,headers,oauth}）。旧版 `_MANAGED_BY` 已在提取阶段剥离。
 pub fn expected_extra_fields(
     definition: &Value,
     format: Format,
@@ -193,9 +193,9 @@ pub fn expected_extra_fields(
     let mut extra = Map::new();
     if is_remote_definition(definition) {
         let keys: &[&str] = match format {
-            Format::ClaudeJson => &["type", "url", "headers", MARKER_KEY],
-            Format::CodexToml => &["url", "env_http_headers", MARKER_KEY],
-            Format::OpenCodeJson => &["type", "url", "headers", "oauth", MARKER_KEY],
+            Format::ClaudeJson => &["type", "url", "headers"],
+            Format::CodexToml => &["url", "env_http_headers"],
+            Format::OpenCodeJson => &["type", "url", "headers", "oauth"],
             Format::Unsupported(_) => &[],
         };
         for key in keys {

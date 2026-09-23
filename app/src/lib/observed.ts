@@ -151,6 +151,8 @@ export interface McpAgentCell {
   state: McpCellState | string;
   target?: string;
   target_exists?: boolean;
+  /** 非阻断提示（如条目含旧版标记、更新即可清理）；不影响可用动作。 */
+  notice?: string | null;
 }
 
 export interface McpSpec {

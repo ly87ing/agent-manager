@@ -5,7 +5,7 @@ use serde_json::{json, Map, Value};
 
 use super::model::{
     compute_definition_version, is_valid_server_name, mask_definition_with_agents_for_status,
-    Binding,
+    owns_entry, Binding,
 };
 use super::persistence::load_bindings_readonly;
 use super::policy_view::{
@@ -131,6 +131,7 @@ fn build_orphan_element(
     let mut agent_cells = Map::new();
     for t in targets {
         let b = bindings.get(server).and_then(|m| m.get(&t.agent));
+        let owned = owns_entry(b);
         let (s, acts, blk) = if !t.enabled {
             match extract_entry(&t.path, t.format.clone(), server) {
                 Err(e) => (
@@ -138,12 +139,12 @@ fn build_orphan_element(
                     vec![],
                     Some(format!("配置文件解析失败: {}", e)),
                 ),
-                Ok((Some(_), false)) => (
+                Ok((Some(_), _)) if !owned => (
                     "drifted",
                     vec![],
                     Some("存在外部非受管同名条目，拒绝操作以防止冲突".into()),
                 ),
-                Ok((Some(_), true)) => (
+                Ok((Some(_), _)) => (
                     "leftover",
                     vec![],
                     Some(format!("Agent '{}' 已在策略中停用", t.agent)),
@@ -162,15 +163,14 @@ fn build_orphan_element(
                     vec![],
                     Some(format!("配置文件解析失败: {}", e)),
                 ),
-                Ok((Some(_), false)) => (
+                Ok((Some(_), _)) if !owned => (
                     "drifted",
                     vec![],
                     Some("存在外部非受管同名条目，拒绝操作以防止冲突".into()),
                 ),
-                Ok((entry, managed)) => {
-                    let res = b.is_some() || (entry.is_some() && managed);
-                    if res {
-                        if b.map_or(false, |b| b.assigned && b.enabled) {
+                Ok(_) => {
+                    if b.is_some() {
+                        if owned {
                             ("drifted", vec!["disable", "remove"], None)
                         } else {
                             ("leftover", vec!["remove"], None)
@@ -186,27 +186,30 @@ fn build_orphan_element(
             make_cell(s, &t.path, b, Value::Null, acts, blk),
         );
     }
-    let has_blocker = agent_cells.values().any(|c| {
-        c.get("state").and_then(Value::as_str) == Some("probe-error")
-            || c.get("blocked_reason")
-                .and_then(Value::as_str)
-                .map_or(false, |r| r.contains("非受管同名条目"))
-    });
+    // 外部同名条目不归属本工具，库级 remove 会跳过它，不构成阻断。
+    let has_blocker = agent_cells
+        .values()
+        .any(|c| c.get("state").and_then(Value::as_str) == Some("probe-error"));
     let has_rem = targets.iter().any(|target| {
         let binding_exists = bindings
             .get(server)
             .and_then(|per_agent| per_agent.get(&target.agent))
             .is_some();
-        let cell_has_residue = agent_cells
-            .get(&target.agent)
-            .and_then(|cell| cell.get("state"))
+        let cell = agent_cells.get(&target.agent);
+        let external = cell
+            .and_then(|cell| cell.get("blocked_reason"))
             .and_then(Value::as_str)
-            .map_or(false, |state| matches!(state, "leftover" | "drifted"));
+            .map_or(false, |r| r.contains("非受管同名条目"));
+        let cell_has_residue = !external
+            && cell
+                .and_then(|cell| cell.get("state"))
+                .and_then(Value::as_str)
+                .map_or(false, |state| matches!(state, "leftover" | "drifted"));
         binding_exists || cell_has_residue
     });
     let (orphan_actions, obs_actions, blk_reason) = if has_blocker || !has_rem {
         let r = if has_blocker {
-            "部分目标配置文件解析失败或存在非受管冲突，无法执行清理"
+            "部分目标配置文件解析失败，无法执行清理"
         } else {
             "无受管残留配置可清理"
         };
@@ -242,7 +245,7 @@ fn compute_cell_actions(
     target: &AgentTarget,
     binding: Option<&Binding>,
     actual_entry: Option<&Entry>,
-    is_managed: bool,
+    legacy_marker: bool,
     def: &Value,
     server: &str,
     def_error: Option<&str>,
@@ -250,11 +253,19 @@ fn compute_cell_actions(
     agent_allowed: bool,
     missing_reason: Option<&str>,
 ) -> (&'static str, Vec<&'static str>, Option<String>) {
+    // 归属只看绑定（assigned 且 enabled）；文件里的旧标记不代表归属。
+    let owned = owns_entry(binding);
     if let Some(entry) = actual_entry {
-        if !is_managed {
+        if !owned {
+            // 停用中的分配仍可单独 remove（只删绑定、不动外部条目）。
+            let acts = if binding.map_or(false, |b| b.assigned) {
+                vec!["remove"]
+            } else {
+                vec![]
+            };
             return (
                 "drifted",
-                vec![],
+                acts,
                 Some("存在外部非受管同名条目，拒绝操作以防止冲突".into()),
             );
         }
@@ -274,7 +285,7 @@ fn compute_cell_actions(
         }
     }
     if !target.enabled {
-        if actual_entry.is_some() && is_managed {
+        if actual_entry.is_some() {
             return (
                 "leftover",
                 vec![],
@@ -288,8 +299,7 @@ fn compute_cell_actions(
         );
     }
     if let Some(err_msg) = def_error {
-        let has_res = binding.map_or(false, |b| b.assigned && b.enabled)
-            || (actual_entry.is_some() && is_managed);
+        let has_res = owned;
         let s = "unsupported";
         let acts = if has_res && binding.map_or(false, |b| b.assigned) {
             vec!["disable", "remove"]
@@ -302,9 +312,11 @@ fn compute_cell_actions(
     }
     if let Some(b) = binding.filter(|b| b.assigned) {
         if b.enabled {
-            let in_sync = actual_entry.map_or(false, |entry| {
-                entry.digest() == b.applied_digest && b.version == lib_version
-            });
+            // 条目仍带旧版标记时不算 managed-ok：给出 update（清理标记），摘要不受影响。
+            let in_sync = !legacy_marker
+                && actual_entry.map_or(false, |entry| {
+                    entry.digest() == b.applied_digest && b.version == lib_version
+                });
             let (s, acts) = if in_sync && agent_allowed {
                 ("managed-ok", vec!["disable", "remove"])
             } else {
@@ -328,13 +340,6 @@ fn compute_cell_actions(
                 missing_reason.map(str::to_string)
             };
             return (s, acts, blk);
-        } else if actual_entry.is_some() && is_managed {
-            let blk = if !agent_allowed {
-                Some(format!("Agent '{}' 不在服务允许列表中", target.agent))
-            } else {
-                None
-            };
-            return ("drifted", vec!["disable", "remove"], blk);
         } else {
             let mut acts = Vec::new();
             let blk = if !agent_allowed {
@@ -355,9 +360,7 @@ fn compute_cell_actions(
             return ("disabled", acts, blk);
         }
     }
-    if actual_entry.is_some() && is_managed {
-        ("leftover", vec!["remove"], None)
-    } else if agent_allowed {
+    if agent_allowed {
         let s = if target.path.exists() {
             "missing"
         } else {
@@ -463,7 +466,7 @@ pub fn status(ctx: &Context) -> Result<Value> {
                 continue;
             }
 
-            let (actual_entry, is_managed) =
+            let (actual_entry, legacy_marker) =
                 match extract_entry(&target.path, target.format.clone(), server) {
                     Ok(pair) => pair,
                     Err(e) => {
@@ -489,7 +492,7 @@ pub fn status(ctx: &Context) -> Result<Value> {
                 target,
                 binding,
                 actual_entry.as_ref(),
-                is_managed,
+                legacy_marker,
                 def,
                 server,
                 def_error.as_deref(),
@@ -499,21 +502,24 @@ pub fn status(ctx: &Context) -> Result<Value> {
             );
 
             // 限定助手的定义不应被其他助手的纯 absent 状态拖成「不一致」。
-            // 但旧绑定或受管残留仍属于本工具责任，必须继续计入并给出清理动作。
-            if agent_allowed || binding.is_some() || (actual_entry.is_some() && is_managed) {
+            // 但旧绑定仍属于本工具责任，必须继续计入并给出清理动作。
+            if agent_allowed || binding.is_some() {
                 cell_states.push(state);
             }
-            agent_cells.insert(
-                agent.clone(),
-                make_cell(
-                    state,
-                    &target.path,
-                    binding,
-                    lib_version_val.clone(),
-                    actions,
-                    blocked_reason,
-                ),
+            let mut cell = make_cell(
+                state,
+                &target.path,
+                binding,
+                lib_version_val.clone(),
+                actions,
+                blocked_reason,
             );
+            // 非阻断提示：本工具的条目仍带旧版标记，用户显式 update 即可清理。
+            // 不放进 blocked_reason，避免挡住 update 或触发接管判定。
+            if legacy_marker && state == "drifted" && owns_entry(binding) {
+                cell["notice"] = json!("条目含旧版 Agent Manager 标记，更新即可清理");
+            }
+            agent_cells.insert(agent.clone(), cell);
         }
 
         let overall_state =
@@ -580,7 +586,6 @@ pub fn status(ctx: &Context) -> Result<Value> {
                 || (state == "unsupported"
                     && blk.contains("不支持的配置格式")
                     && (binding_exists || target_exists))
-                || blk.contains("非受管同名条目")
                 || blk.contains("未受管外部属性")
         });
         if !has_remove_blocker {

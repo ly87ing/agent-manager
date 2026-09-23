@@ -2,10 +2,9 @@
 //!
 //! 扫描各已配置 agent target（Claude JSON / Codex TOML / OpenCode JSON）的目标
 //! 文件，提取库中无同名定义、mcp_bindings 无记录、名称合法的 server 条目，
-//! 输出掩码后的导入候选。条目级或 env 内 `_MANAGED_BY` 标记不再整体排除：
-//! marker 与 mcp_bindings 记录同时存在（真正受管）的条目经 binding 条件排除；
-//! 有 marker 但无 binding（旧体系遗留）的条目进入候选并标注
-//! `"previously_managed": true`，无 marker（纯外部）的候选标注 false。
+//! 输出掩码后的导入候选。归属只看 mcp_bindings：有记录的条目经 binding 条件排除；
+//! 带旧版 `_MANAGED_BY` 标记但无 binding 的条目同样是用户条目，进入候选并标注
+//! `"previously_managed": true`（仅作展示提示，不代表归属），无标记的标注 false。
 //!
 //! 任何 env/header 明文值绝不进入输出：stdio env 与静态 headers 只保留键名、
 //! 值恒为 <literal>；Codex env_http_headers 是 header→变量名引用，按 ${VAR}
@@ -283,8 +282,8 @@ pub fn import_candidates(
             Format::Unsupported(_) => continue,
         };
         for (name, entry) in entries {
-            // 真正受管（marker + binding）经 binding 条件排除；marker 无 binding
-            // （旧体系遗留）与无 marker（纯外部）都进入候选。
+            // 有 binding 的条目经 binding 条件排除；带旧标记无 binding（旧体系遗留）
+            // 与无标记（纯外部）都进入候选。
             if library.definitions.contains_key(&name)
                 || bindings.contains_key(&name)
                 || !is_valid_server_name(&name)
@@ -331,7 +330,7 @@ pub fn discover(ctx: &crate::native::Context) -> anyhow::Result<Value> {
         } else {
             "unmanaged"
         });
-        // MCP 是客户端配置条目，没有文件系统链接语义：接管 = 导入库定义并写受管标记。
+        // MCP 是客户端配置条目，没有文件系统链接语义：接管 = 导入库定义并记录分配。
         item["manage"] = json!("register");
     }
     Ok(Value::Array(items))

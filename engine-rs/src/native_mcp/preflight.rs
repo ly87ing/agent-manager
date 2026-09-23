@@ -7,7 +7,8 @@ use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
 
 use super::model::{
-    canonicalize_agent_id, is_valid_server_name, Bindings, AGENT_ACTIONS, LIBRARY_ACTIONS,
+    canonicalize_agent_id, is_valid_server_name, owns_entry, Bindings, AGENT_ACTIONS,
+    LIBRARY_ACTIONS,
 };
 use super::persistence::load_bindings_readonly;
 use super::policy_view::{
@@ -164,23 +165,28 @@ pub fn preflight_check_state(
         }
         validate_target_path(&target.path)?;
 
-        let (entry_opt, is_managed) =
+        let (entry_opt, _legacy_marker) =
             extract_entry(&target.path, target.format.clone(), &parsed.server)?;
+        let binding = bindings.get(&parsed.server).and_then(|m| m.get(a));
+        // 归属只看绑定：assigned 且 enabled 才是本工具写入的条目；无绑定或绑定已停用时
+        // 文件里的同名条目（带不带旧标记都一样）都是外部内容。
+        let owned = owns_entry(binding);
         // 显式接管：仅 --allow-takeover 的 add/update 允许整体替换现有同名条目；
-        // 既覆盖完全未受管的条目，也覆盖受管条目里后来新增的外部字段。
+        // 既覆盖外部同名条目，也覆盖受管条目里后来新增的外部字段。
         // 缺省仍逐字段 fail-closed，只有用户点明「接管」才会舍弃这些额外字段。
         let takeover = parsed.allow_takeover
             && matches!(parsed.action.as_str(), "add" | "update")
             && entry_opt.is_some();
         if let Some(ref entry) = entry_opt {
-            if !is_managed && !takeover {
+            // remove 对外部条目只删绑定、不动文件，由下方 remove 分支单独判定。
+            if !owned && !takeover && parsed.action != "remove" {
                 bail!(
                     "目标文件 {} 中已存在非受管同名条目 '{}'，拒绝覆盖以防止冲突",
                     target.path.display(),
                     parsed.server
                 );
             }
-            if !takeover {
+            if owned && !takeover {
                 if let Some(def) = def_opt {
                     let expected_extra =
                         expected_extra_fields(def, target.format.clone(), &parsed.server)?;
@@ -198,7 +204,6 @@ pub fn preflight_check_state(
             }
         }
 
-        let binding = bindings.get(&parsed.server).and_then(|m| m.get(a));
         match parsed.action.as_str() {
             "add" => {
                 let def = def_opt.ok_or_else(|| anyhow!("服务定义 '{}' 不存在", parsed.server))?;
@@ -213,16 +218,6 @@ pub fn preflight_check_state(
                         "服务 '{}' 已在 Agent '{}' 中分配，add 不适用",
                         parsed.server,
                         a
-                    );
-                }
-                // 残留受管条目：文件里带着本工具的标记、库里却没有分配记录（旧体系遗留，
-                // 或分配被清掉过）。这份内容是本工具自己写的、不是用户的外部内容，因此
-                // 显式接管时直接整体替换即可；没有接管标志才要求先 remove 清理。
-                if entry_opt.is_some() && is_managed && !parsed.allow_takeover {
-                    bail!(
-                        "目标文件 {} 中已存在残留受管条目 '{}'，add 不适用；确认要用当前定义替换它请选择接管",
-                        target.path.display(),
-                        parsed.server
                     );
                 }
                 resolve_env(def, &parsed.server)?;
@@ -261,12 +256,6 @@ pub fn preflight_check_state(
                         a
                     );
                 }
-                if entry_opt.is_some() && is_managed {
-                    bail!(
-                        "目标文件 {} 中已残留受管配置，enable 不适用，请先执行 disable 同步或 remove",
-                        target.path.display()
-                    );
-                }
                 let def = def_opt.unwrap_or(&b.definition);
                 validate_definition(def, &parsed.server)?;
                 validate_definition_env(def)?;
@@ -289,7 +278,7 @@ pub fn preflight_check_state(
                         a
                     )
                 })?;
-                if !b.enabled && (entry_opt.is_none() || !is_managed) {
+                if !b.enabled {
                     bail!(
                         "服务 '{}' 在 Agent '{}' 中已处于停用状态，disable 不适用",
                         parsed.server,
@@ -298,8 +287,15 @@ pub fn preflight_check_state(
                 }
             }
             "remove" => {
-                let is_assigned = binding.map_or(false, |b| b.assigned);
-                if !is_assigned && entry_opt.is_none() {
+                // 没有绑定就没有属于本工具的东西可删；同名条目是用户的，绝不删除。
+                if binding.is_none() {
+                    if entry_opt.is_some() {
+                        bail!(
+                            "目标文件 {} 中已存在非受管同名条目 '{}'，拒绝删除以防止冲突",
+                            target.path.display(),
+                            parsed.server
+                        );
+                    }
                     bail!(
                         "服务 '{}' 在 Agent '{}' 中不存在分配或受管条目，remove 不适用",
                         parsed.server,
@@ -347,10 +343,10 @@ pub fn preflight_check_state(
                     .map_or(false, |m| !m.is_empty());
                 let mut disk_exists = false;
                 for target in &targets {
-                    let has_binding = bindings
+                    let target_binding = bindings
                         .get(&parsed.server)
-                        .and_then(|m| m.get(&target.agent))
-                        .is_some();
+                        .and_then(|m| m.get(&target.agent));
+                    let has_binding = target_binding.is_some();
                     let target_exists = check_symlink_metadata(&target.path)?.is_some();
                     if target_exists {
                         validate_target_path(&target.path)?;
@@ -369,15 +365,13 @@ pub fn preflight_check_state(
                     if !target_exists {
                         continue;
                     }
-                    let (entry_opt, is_managed) =
+                    let (entry_opt, _legacy_marker) =
                         extract_entry(&target.path, target.format.clone(), &parsed.server)?;
                     if let Some(ref entry) = entry_opt {
-                        if !is_managed {
-                            bail!(
-                                "目标文件 {} 中已存在非受管同名条目 '{}'，拒绝自动删除以防止冲突",
-                                target.path.display(),
-                                parsed.server
-                            );
+                        // 库级 remove 只删本工具自己的东西：不归属本工具的同名条目是用户的，
+                        // 执行时跳过该助手文件，不阻塞整个操作（逐助手互不影响）。
+                        if !owns_entry(target_binding) {
+                            continue;
                         }
                         if let Some(def) = def_opt {
                             let expected_extra =

@@ -4,7 +4,7 @@ use anyhow::{anyhow, bail, Result};
 use rusqlite::TransactionBehavior;
 use serde_json::{json, Value};
 
-use super::model::{compute_definition_version, Binding};
+use super::model::{compute_definition_version, owns_entry, Binding};
 use super::persistence::{ensure_table, load_bindings_from, save_binding_in_tx};
 use super::policy_view::{build_entry, library_view};
 use super::preflight::{parse_action_args, preflight_apply, preflight_check_state};
@@ -200,7 +200,8 @@ pub fn apply(ctx: &Context, req: &Request) -> Result<Value> {
                     save_binding_in_tx(&tx, &parsed.server, a, Some(&updated))?;
                 }
                 "remove" => {
-                    if target.path.exists() {
+                    // 停用的绑定期间文件里出现的同名条目是外部内容：只删绑定，不动文件。
+                    if owns_entry(binding) && target.path.exists() {
                         let rendered = render_target_content(
                             &target.path,
                             &target.format,
@@ -254,13 +255,14 @@ pub fn apply(ctx: &Context, req: &Request) -> Result<Value> {
                         if let Format::Unsupported(_) = target.format {
                             continue;
                         }
-                        let (entry_opt, is_managed) =
-                            extract_entry(&target.path, target.format.clone(), &parsed.server)?;
-                        let has_binding = bindings
-                            .get(&parsed.server)
-                            .and_then(|m| m.get(&target.agent))
-                            .is_some();
-                        if has_binding || (entry_opt.is_some() && is_managed) {
+                        // 只删属于本工具的条目（绑定 assigned+enabled）；其余同名条目
+                        // 是外部内容，预检已拒绝，这里也绝不改动。
+                        let owned = owns_entry(
+                            bindings
+                                .get(&parsed.server)
+                                .and_then(|m| m.get(&target.agent)),
+                        );
+                        if owned {
                             if target.path.exists() {
                                 let rendered = render_target_content(
                                     &target.path,

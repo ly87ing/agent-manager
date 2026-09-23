@@ -337,6 +337,7 @@ export default function McpPage() {
             `${agent}: ${cell.state}`,
             cell.version ? `当前 ${cell.version}` : null,
             cell.blocked_reason ?? null,
+            cell.notice ?? null,
           ]
             .filter(Boolean)
             .join(" · "),
