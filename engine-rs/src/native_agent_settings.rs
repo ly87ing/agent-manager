@@ -12,7 +12,7 @@
 //! 和用户自己的 permissions.allow/deny、别的 env 变量，整键归属会互相覆盖。
 //! 外部改过我们拥有的那几个路径就 fail-closed 拒绝覆盖。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{bail, Result};
 use serde_json::{Map, Value};
@@ -766,8 +766,9 @@ pub(crate) fn render_claude(
 /// Codex 的目标文件，相对 CODEX_HOME。
 pub(crate) const CODEX_CONFIG: &str = "config.toml";
 
-/// 受管标记：与 MCP 写进同一个文件的标记一致，只有带它的表段才是本工具的。
-const MANAGED_MARK: &str = "# [agent-manager:managed]";
+/// 旧版本写在受管 provider 表前的注释。新版本不再往助手配置里写它（哪些是本工具写的
+/// 只记在库里），仅在迁移时读取；MCP 域写的同名注释不归这里管，原样保留。
+const LEGACY_MANAGED_MARK: &str = "# [agent-manager:managed]";
 
 /// 本工具在 config.toml 里拥有的顶层键。
 const CODEX_OWNED_KEYS: &[&str] = &[
@@ -856,29 +857,68 @@ fn toml_root_key_value(content: &str, key: &str) -> Option<String> {
         .map(|(_, value)| value.trim().to_string())
 }
 
-/// 删掉所有带受管标记、且表头以 `prefix.` 开头的表段，其余原样保留。
-fn toml_remove_managed_tables(content: &str, prefix: &str) -> String {
+/// 表头文本（去掉方括号）是不是 `model_providers.<id>` 或它的子表，是则给出 `<id>`。
+fn provider_id_of(header: &str) -> Option<&str> {
+    let rest = header.trim().strip_prefix("model_providers.")?;
+    if let Some(quoted) = rest.strip_prefix('"') {
+        return quoted.find('"').map(|end| &quoted[..end]);
+    }
+    rest.split('.').next().map(str::trim)
+}
+
+/// 一行是不是表头；是则给出去掉方括号的表头文本。
+fn toml_header(trimmed: &str) -> Option<&str> {
+    (trimmed.starts_with('[') && trimmed.ends_with(']'))
+        .then(|| trimmed.trim_matches(|c| c == '[' || c == ']'))
+}
+
+/// 本工具认领的 provider：库里记下的上次写入的那些，加上文件里仍带旧受管注释的
+/// `[model_providers.*]`——那条注释只有旧版本写过，认下来才能把它们迁走。
+fn codex_claimed_providers(content: &str, recorded: &[String]) -> BTreeSet<String> {
+    let mut claimed: BTreeSet<String> = recorded.iter().cloned().collect();
+    let mut pending_mark = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == LEGACY_MANAGED_MARK {
+            pending_mark = true;
+            continue;
+        }
+        if pending_mark {
+            if let Some(id) = toml_header(trimmed).and_then(provider_id_of) {
+                claimed.insert(id.to_string());
+            }
+        }
+        pending_mark = false;
+    }
+    claimed
+}
+
+/// 删掉认领集合里的 provider 表（含子表）以及紧贴在它们前面的旧受管注释，其余原样保留。
+fn toml_remove_provider_tables(content: &str, claimed: &BTreeSet<String>) -> String {
     let mut out = String::new();
     let mut skip = false;
     let mut pending_mark = false;
     for line in content.lines() {
         let trimmed = line.trim();
-        if trimmed == MANAGED_MARK {
-            // 先攥着：下一行是我们的表头就连标记一起丢，否则原样放回
+        if trimmed == LEGACY_MANAGED_MARK {
+            // 先攥着：下一行是要删的表头就连注释一起丢，否则原样放回
+            if pending_mark {
+                out.push_str(LEGACY_MANAGED_MARK);
+                out.push('\n');
+            }
             pending_mark = true;
             continue;
         }
-        if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            let header = trimmed.trim_matches(|c| c == '[' || c == ']');
-            let ours = pending_mark && header.starts_with(&format!("{prefix}."));
+        if let Some(header) = toml_header(trimmed) {
+            let ours = provider_id_of(header).is_some_and(|id| claimed.contains(id));
             skip = ours;
             if !ours && pending_mark {
-                out.push_str(MANAGED_MARK);
+                out.push_str(LEGACY_MANAGED_MARK);
                 out.push('\n');
             }
             pending_mark = false;
         } else if pending_mark {
-            out.push_str(MANAGED_MARK);
+            out.push_str(LEGACY_MANAGED_MARK);
             out.push('\n');
             pending_mark = false;
         }
@@ -888,35 +928,33 @@ fn toml_remove_managed_tables(content: &str, prefix: &str) -> String {
         }
     }
     if pending_mark {
-        out.push_str(MANAGED_MARK);
+        out.push_str(LEGACY_MANAGED_MARK);
         out.push('\n');
     }
     out
 }
 
-/// 收集带受管标记的表段正文，用于外部修改检测。
-fn toml_managed_tables(content: &str, prefix: &str) -> Vec<String> {
+/// 收集认领集合里的 provider 表正文，用于外部修改检测。
+///
+/// 口径与旧版本一致（表头 + 逐行 trim 的正文，旧受管注释不计入），带旧注释的既有文件
+/// 算出的摘要不变，升级后不会被误判为外部修改。
+fn toml_provider_tables(content: &str, claimed: &BTreeSet<String>) -> Vec<String> {
     let mut found = Vec::new();
     let mut current: Option<String> = None;
-    let mut pending_mark = false;
     for line in content.lines() {
         let trimmed = line.trim();
-        if trimmed == MANAGED_MARK {
-            pending_mark = true;
+        if trimmed == LEGACY_MANAGED_MARK {
             continue;
         }
-        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+        if let Some(header) = toml_header(trimmed) {
             if let Some(block) = current.take() {
                 found.push(block);
             }
-            let header = trimmed.trim_matches(|c| c == '[' || c == ']');
-            if pending_mark && header.starts_with(&format!("{prefix}.")) {
+            if provider_id_of(header).is_some_and(|id| claimed.contains(id)) {
                 current = Some(format!("{trimmed}\n"));
             }
-            pending_mark = false;
             continue;
         }
-        pending_mark = false;
         if let Some(block) = current.as_mut() {
             block.push_str(trimmed);
             block.push('\n');
@@ -928,15 +966,18 @@ fn toml_managed_tables(content: &str, prefix: &str) -> Vec<String> {
     found
 }
 
-/// config.toml 里本工具拥有的那部分：明确列举的顶层键 + 受管的 provider 段。
-pub(crate) fn codex_owned_slice(content: &str) -> Value {
+/// config.toml 里本工具拥有的那部分：明确列举的顶层键 + 认领的 provider 表。
+///
+/// `recorded` 是库里记下的上次写入的 provider id。
+pub(crate) fn codex_owned_slice(content: &str, recorded: &[String]) -> Value {
     let mut slice = Map::new();
     for key in CODEX_OWNED_KEYS {
         if let Some(value) = toml_root_key_value(content, key) {
             slice.insert((*key).to_string(), Value::String(value));
         }
     }
-    let tables = toml_managed_tables(content, "model_providers");
+    let claimed = codex_claimed_providers(content, recorded);
+    let tables = toml_provider_tables(content, &claimed);
     if !tables.is_empty() {
         slice.insert(
             "model_providers".into(),
@@ -946,9 +987,9 @@ pub(crate) fn codex_owned_slice(content: &str) -> Value {
     Value::Object(slice)
 }
 
-pub(crate) fn codex_owned_digest(content: &str) -> String {
+pub(crate) fn codex_owned_digest(content: &str, recorded: &[String]) -> String {
     crate::native_mcp::model::sha256_hex_bytes(
-        serde_json::to_vec(&codex_owned_slice(content))
+        serde_json::to_vec(&codex_owned_slice(content, recorded))
             .unwrap_or_default()
             .as_slice(),
     )
@@ -958,9 +999,18 @@ pub(crate) fn codex_owned_digest(content: &str) -> String {
 ///
 /// 令牌不落盘：Codex 的 provider 用 `env_key` 指向环境变量名，由它自己去读，
 /// 因此这里只写变量名——与 Claude 那边被迫写真值不同。
-pub(crate) fn render_codex(existing: &str, settings: &AgentSettings) -> Result<String> {
+///
+/// `recorded` 是库里记下的上次写入的 provider id；返回渲染结果与本次写入的 provider id，
+/// 后者由调用方记回库里。
+pub(crate) fn render_codex(
+    existing: &str,
+    settings: &AgentSettings,
+    recorded: &[String],
+) -> Result<(String, Vec<String>)> {
     // 先撤干净本工具写过的东西，再按当前生效的那套写回去
-    let mut text = toml_remove_managed_tables(existing, "model_providers");
+    let claimed = codex_claimed_providers(existing, recorded);
+    let mut text = toml_remove_provider_tables(existing, &claimed);
+    let mut written = Vec::new();
     for key in CODEX_OWNED_KEYS {
         text = toml_set_root_key(&text, key, None);
     }
@@ -976,7 +1026,7 @@ pub(crate) fn render_codex(existing: &str, settings: &AgentSettings) -> Result<S
                 bail!("接入配置 {name} 要填接口地址，Codex 的自定义接入方式没有默认地址");
             };
             let mut table = format!(
-                "\n{MANAGED_MARK}\n[model_providers.{}]\nname = {}\nbase_url = {}\n",
+                "\n[model_providers.{}]\nname = {}\nbase_url = {}\n",
                 name,
                 crate::native_mcp::codecs::toml_basic_string(
                     profile.label.as_deref().unwrap_or(name)
@@ -1001,6 +1051,7 @@ pub(crate) fn render_codex(existing: &str, settings: &AgentSettings) -> Result<S
                 text.push('\n');
             }
             text.push_str(&table);
+            written.push(name.to_string());
             text = toml_set_root_key(
                 &text,
                 "model_provider",
@@ -1057,7 +1108,7 @@ pub(crate) fn render_codex(existing: &str, settings: &AgentSettings) -> Result<S
         );
     }
 
-    Ok(text)
+    Ok((text, written))
 }
 
 /// Codex 的目标文件绝对路径：配置文件就在 CODEX_HOME 下。
@@ -1113,16 +1164,37 @@ const BINDINGS_DDL: &str = "CREATE TABLE IF NOT EXISTS agent_settings_bindings (
     agent_id TEXT PRIMARY KEY NOT NULL,
     file TEXT NOT NULL,
     applied_digest TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    -- 末列：旧库补列时 ALTER TABLE 只能追加到末尾，新建库与补列库的列顺序保持一致。
+    -- Codex 上次写入的 provider id（JSON 字符串数组）：哪些表是本工具写的只记在这里。
+    owned_providers TEXT NOT NULL DEFAULT '[]'
 )";
 
 fn ensure_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(BINDINGS_DDL)?;
+    // 旧库补列：补出来的行取 '[]'，旧版本写的表靠文件里的旧注释认领，下一次写入即记上
+    if !has_owned_providers_column(conn)? {
+        conn.execute_batch(
+            "ALTER TABLE agent_settings_bindings
+             ADD COLUMN owned_providers TEXT NOT NULL DEFAULT '[]'",
+        )?;
+    }
     Ok(())
 }
 
-/// 上次本工具写进去的那部分的摘要；没写过就是 None。
-fn applied_digest_of(ctx: &Context, agent_id: &str) -> Result<Option<String>> {
+fn has_owned_providers_column(conn: &Connection) -> Result<bool> {
+    let mut stmt = conn.prepare("PRAGMA table_info(agent_settings_bindings)")?;
+    let found = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .iter()
+        .any(|name| name == "owned_providers");
+    Ok(found)
+}
+
+/// 上次本工具写入的记录：写进去那部分的摘要，以及 Codex 写入的 provider id。
+/// 没写过就是 None。只读：旧库缺列时按 `[]` 理解，不在这里补列。
+fn applied_binding_of(ctx: &Context, agent_id: &str) -> Result<Option<(String, Vec<String>)>> {
     let Some(conn) = store::open_readonly(ctx)? else {
         return Ok(None);
     };
@@ -1134,13 +1206,29 @@ fn applied_digest_of(ctx: &Context, agent_id: &str) -> Result<Option<String>> {
     if exists == 0 {
         return Ok(None);
     }
-    let mut stmt =
-        conn.prepare("SELECT applied_digest FROM agent_settings_bindings WHERE agent_id = ?1")?;
+    let sql = if has_owned_providers_column(&conn)? {
+        "SELECT applied_digest, owned_providers FROM agent_settings_bindings WHERE agent_id = ?1"
+    } else {
+        "SELECT applied_digest, '[]' FROM agent_settings_bindings WHERE agent_id = ?1"
+    };
+    let mut stmt = conn.prepare(sql)?;
     let mut rows = stmt.query([agent_id])?;
-    match rows.next()? {
-        Some(row) => Ok(Some(row.get(0)?)),
-        None => Ok(None),
-    }
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+    let digest: String = row.get(0)?;
+    let raw: String = row.get(1)?;
+    let Ok(owned) = serde_json::from_str::<Vec<String>>(&raw) else {
+        bail!("agent_settings_bindings.owned_providers 不是字符串数组，库可能已损坏");
+    };
+    Ok(Some((digest, owned)))
+}
+
+/// 库里记下的 Codex 上次写入的 provider id；没写过为空。
+fn recorded_providers(ctx: &Context, agent_id: &str) -> Result<Vec<String>> {
+    Ok(applied_binding_of(ctx, agent_id)?
+        .map(|(_, owned)| owned)
+        .unwrap_or_default())
 }
 
 /// 目标文件里本工具那部分是不是被外部改过。
@@ -1157,6 +1245,7 @@ pub(crate) fn external_change(
         return Ok(false);
     }
     let bytes = std::fs::read(path)?;
+    let binding = applied_binding_of(ctx, agent_id)?;
     let (current, empty) = match kind {
         Kind::Claude => {
             let statusline_path = statusline_target(ctx);
@@ -1169,16 +1258,20 @@ pub(crate) fn external_change(
         }
         Kind::Codex => {
             let text = String::from_utf8_lossy(&bytes);
+            let recorded = binding
+                .as_ref()
+                .map(|(_, owned)| owned.as_slice())
+                .unwrap_or_default();
             (
-                codex_owned_digest(&text),
-                codex_owned_slice(&text)
+                codex_owned_digest(&text, recorded),
+                codex_owned_slice(&text, recorded)
                     .as_object()
                     .is_some_and(Map::is_empty),
             )
         }
     };
-    match applied_digest_of(ctx, agent_id)? {
-        Some(known) => Ok(known != current),
+    match binding {
+        Some((known, _)) => Ok(known != current),
         None => Ok(!empty),
     }
 }
@@ -1291,6 +1384,8 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
     }
 
     let existing = std::fs::read(&path).ok();
+    // Codex 本次写入的 provider id，成功后记回库里；Claude 没有这一项，记 []
+    let mut owned_providers = Vec::new();
     let content = match kind {
         Kind::Claude => render_claude(
             existing.as_deref(),
@@ -1304,7 +1399,12 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
                 .map(String::from_utf8_lossy)
                 .unwrap_or_default()
                 .to_string();
-            render_codex(&text, &settings).map(String::into_bytes)
+            recorded_providers(ctx, &id)
+                .and_then(|recorded| render_codex(&text, &settings, &recorded))
+                .map(|(text, written)| {
+                    owned_providers = written;
+                    text.into_bytes()
+                })
         }
     }
     .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}")))?;
@@ -1314,23 +1414,28 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
 
     let digest = match kind {
         Kind::Claude => owned_digest(&content, &statusline_path),
-        Kind::Codex => codex_owned_digest(&String::from_utf8_lossy(&content)),
+        Kind::Codex => codex_owned_digest(&String::from_utf8_lossy(&content), &owned_providers),
     };
+    let owned_json = serde_json::to_string(&owned_providers)
+        .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}")))?;
     let active = settings.active.clone();
     let persisted = (|| -> Result<()> {
         let mut conn = store::open_write(ctx)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         ensure_table(&tx)?;
         tx.execute(
-            "INSERT INTO agent_settings_bindings (agent_id, file, applied_digest, updated_at)
-             VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO agent_settings_bindings
+                 (agent_id, file, applied_digest, updated_at, owned_providers)
+             VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(agent_id) DO UPDATE SET file=excluded.file,
-                 applied_digest=excluded.applied_digest, updated_at=excluded.updated_at",
+                 applied_digest=excluded.applied_digest, updated_at=excluded.updated_at,
+                 owned_providers=excluded.owned_providers",
             rusqlite::params![
                 &id,
                 file_label,
                 &digest,
-                chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+                chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                &owned_json
             ],
         )?;
         // --use 切换要落库，否则下次读定义又切回去了
@@ -1413,6 +1518,109 @@ mod tests {
 
     fn one_profile(entry: Value) -> AgentSettings {
         parse(&json!({"settings": {"active": "p", "profiles": {"p": entry}}})).unwrap()
+    }
+
+    const LEGACY_CODEX: &str = concat!(
+        "model_provider = \"relay\"\n",
+        "model = \"gpt-5\"\n",
+        "approval_policy = \"on-request\"\n",
+        "sandbox_mode = \"workspace-write\"\n",
+        "approvals_reviewer = \"user\"\n",
+        "service_tier = \"default\"\n",
+        "\n",
+        "# 我自己的接入\n",
+        "[model_providers.mine]\n",
+        "name = \"mine\"\n",
+        "base_url = \"https://mine.example.com/v1\"\n",
+        "\n",
+        "# [agent-manager:managed]\n",
+        "[model_providers.relay]\n",
+        "name = \"relay\"\n",
+        "base_url = \"https://relay.example.com/v1\"\n",
+        "env_key = \"RELAY_KEY\"\n",
+        "requires_openai_auth = true\n",
+        "wire_api = \"responses\"\n",
+        "\n",
+        "# [agent-manager:managed]\n",
+        "[mcp_servers.grok]\n",
+        "command = \"grok\"\n",
+    );
+
+    /// 旧版本（写受管注释、靠注释认领）按同一份文件算出的摘要，改动前实际运行旧代码得到。
+    const LEGACY_CODEX_DIGEST: &str =
+        "c4f2c01c16017f3bc7814ff07743d5db0f63d7e89250290906c704e69d4569f9";
+
+    fn relay_settings(name: &str) -> AgentSettings {
+        parse(&json!({"settings": {"active": name, "profiles": {name: {
+            "base_url": format!("https://{name}.example.com/v1"),
+            "token_var": "RELAY_KEY"
+        }}}}))
+        .unwrap()
+    }
+
+    #[test]
+    fn 带旧注释的既有文件摘要与旧版本一致_不被误判外部修改() {
+        // 旧库没有 owned_providers，按 [] 计；旧注释照样认领
+        assert_eq!(codex_owned_digest(LEGACY_CODEX, &[]), LEGACY_CODEX_DIGEST);
+        // 升级后首次写入前库里就算已记上 relay，口径也不变
+        assert_eq!(
+            codex_owned_digest(LEGACY_CODEX, &["relay".to_string()]),
+            LEGACY_CODEX_DIGEST
+        );
+        // 用户自己的 mine 不进摘要
+        let slice = codex_owned_slice(LEGACY_CODEX, &[]);
+        assert!(!slice.to_string().contains("mine.example.com"));
+    }
+
+    #[test]
+    fn 带旧注释的既有文件写入后注释与旧表撤掉_新表不带注释_其余保留() {
+        let (out, written) = render_codex(LEGACY_CODEX, &relay_settings("next"), &[]).unwrap();
+        assert_eq!(written, vec!["next".to_string()]);
+        assert!(!out.contains("[model_providers.relay]"), "{out}");
+        assert!(out.contains("[model_providers.next]"), "{out}");
+        assert!(
+            !out.contains("# [agent-manager:managed]\n[model_providers"),
+            "provider 表前不再有受管注释：{out}"
+        );
+        // 用户自己的表与注释逐字节保留
+        assert!(out.contains(
+            "# 我自己的接入\n[model_providers.mine]\nname = \"mine\"\nbase_url = \"https://mine.example.com/v1\"\n"
+        ));
+        assert!(out.contains("service_tier = \"default\""));
+        // MCP 域的受管注释与表不归这里管
+        assert!(out.contains("# [agent-manager:managed]\n[mcp_servers.grok]\ncommand = \"grok\"\n"));
+        assert_eq!(out.matches("# [agent-manager:managed]").count(), 1);
+    }
+
+    #[test]
+    fn 认领集合只含库里记录与旧注释_子表一起撤_别人的逐字节保留() {
+        let existing = concat!(
+            "[model_providers.a]\n",
+            "name = \"a\"\n",
+            "[model_providers.a.http_headers]\n",
+            "X = \"1\"\n",
+            "[model_providers.mine]\n",
+            "base_url = \"https://mine.example.com\"\n",
+            "[model_providers.\"quoted.id\"]\n",
+            "base_url = \"https://q.example.com\"\n",
+        );
+        let claimed = codex_claimed_providers(existing, &["a".to_string()]);
+        assert_eq!(claimed, BTreeSet::from(["a".to_string()]));
+        let removed = toml_remove_provider_tables(existing, &claimed);
+        assert_eq!(
+            removed,
+            concat!(
+                "[model_providers.mine]\n",
+                "base_url = \"https://mine.example.com\"\n",
+                "[model_providers.\"quoted.id\"]\n",
+                "base_url = \"https://q.example.com\"\n",
+            )
+        );
+        // 带引号的 id 也能按记录认领
+        let claimed = codex_claimed_providers(existing, &["quoted.id".to_string()]);
+        let removed = toml_remove_provider_tables(existing, &claimed);
+        assert!(!removed.contains("quoted.id"), "{removed}");
+        assert!(removed.contains("[model_providers.a.http_headers]"));
     }
 
     #[test]
@@ -1677,16 +1885,16 @@ mod tests {
             "codex_web_search": "live"
         }}))
         .unwrap();
-        let out = render_codex("user_instructions = \"keep\"\n", &settings).unwrap();
+        let (out, _) = render_codex("user_instructions = \"keep\"\n", &settings, &[]).unwrap();
         assert!(out.contains("model_reasoning_effort = \"high\""));
         assert!(out.contains("model_context_window = 1000000"));
         assert!(out.contains("model_auto_compact_token_limit = 900000"));
         assert!(out.contains("web_search = \"live\""));
         assert!(out.contains("user_instructions = \"keep\""));
-        let slice = codex_owned_slice(&out);
+        let slice = codex_owned_slice(&out, &[]);
         assert_eq!(slice["model_context_window"], "1000000");
 
-        let cleared = render_codex(&out, &AgentSettings::default()).unwrap();
+        let (cleared, _) = render_codex(&out, &AgentSettings::default(), &[]).unwrap();
         assert!(!cleared.contains("model_reasoning_effort"));
         assert!(!cleared.contains("model_context_window"));
         assert!(cleared.contains("user_instructions = \"keep\""));
@@ -1836,10 +2044,12 @@ stream_idle_timeout_ms = 450000
     fn 内置状态栏脚本自身可用() {
         // 随脚本一起编译进来，跑一遍语法检查，避免改坏了到运行时才发现
         assert!(STATUSLINE_BODY.starts_with("#!/bin/bash"));
+        // 落盘是它存在的理由：落在脚本所在的数据目录下，不往助手配置目录放文件
         assert!(
-            STATUSLINE_BODY.contains("agent-manager-usage.json"),
+            STATUSLINE_BODY.contains("am_usage=${am_self%/*}/usage"),
             "落盘是它存在的理由"
         );
+        assert!(!STATUSLINE_BODY.contains("agent-manager-usage.json"));
         assert!(
             STATUSLINE_BODY.contains("CLAUDE_CONFIG_DIR"),
             "实例要各存各的"

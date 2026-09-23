@@ -2,9 +2,10 @@
 //!
 //! 每家助手把自己的额度状态写在不同地方，格式也不一样：
 //! - Claude Code：两个来源取较新的那个。
-//!   1. `<配置目录>/.agent-manager-usage.json`：状态栏脚本顺手存下的实时额度。
+//!   1. `<数据目录>/usage/<编码后的配置目录>.json`：状态栏脚本顺手存下的实时额度。
 //!      Claude Code 每次渲染状态栏都把 `rate_limits` 推给脚本，但自己不写文件，
-//!      外部进程读不到；脚本存一份，这里就能拿到与它同屏显示的那个数。
+//!      外部进程读不到；脚本存一份，这里就能拿到与它同屏显示的那个数。存在本工具
+//!      自己的数据目录里，不往助手的配置目录放文件；编码规则见 [`usage_key`]。
 //!   2. `~/.claude.json` 的 `cachedUsageUtilization`：Claude Code 主动查额度时才刷新的
 //!      缓存，常规对话不更新，可能停在很多天前。没装落盘时只有它。
 //! - Codex：`~/.codex/sessions/<年>/<月>/<日>/rollout-*.jsonl`，每条 token_count 事件带
@@ -30,13 +31,19 @@ const TAIL_SCAN_BYTES: u64 = 1 << 20;
 ///
 /// `bin` 决定按哪家的格式读，`config_path` 是这个助手定义里写的配置文件位置
 /// （claude 的 `.claude.json` / codex 的 `config.toml`），没写就回落到默认位置。
-pub(crate) fn read(home_dir: &Path, bin: &str, config_path: Option<&str>) -> Option<Value> {
+/// `data_dir` 是本工具的数据目录，状态栏落盘的额度在它下面。
+pub(crate) fn read(
+    home_dir: &Path,
+    data_dir: &Path,
+    bin: &str,
+    config_path: Option<&str>,
+) -> Option<Value> {
     let config = config_path.map(|raw| crate::native_mcp::targets::expand_home(raw, home_dir));
     match binary_kind(bin)? {
         Kind::Claude => {
             let path = config.unwrap_or_else(|| home_dir.join(".claude.json"));
             // 主助手的 .claude.json 在 home 根，配置目录却是 ~/.claude，落盘在后者
-            claude(&path, &home_dir.join(".claude"))
+            claude(&path, &snapshot_path(data_dir, &home_dir.join(".claude")))
         }
         Kind::Codex => {
             // 配置文件是 <CODEX_HOME>/config.toml，会话就在它旁边
@@ -53,13 +60,31 @@ pub(crate) fn read(home_dir: &Path, bin: &str, config_path: Option<&str>) -> Opt
 /// 实例（profile）的额度：配置目录由实例自己定义，直接按种类去那里读。
 ///
 /// 实例存在的意义就是多开不同账号，额度自然各算各的——用默认位置那份会张冠李戴。
-pub(crate) fn read_profile(kind: &str, config_dir: &Path) -> Option<Value> {
+pub(crate) fn read_profile(kind: &str, config_dir: &Path, data_dir: &Path) -> Option<Value> {
     match kind {
-        // 实例的配置目录就是 CLAUDE_CONFIG_DIR，落盘与 .claude.json 同级
-        "claude" => claude(&config_dir.join(".claude.json"), config_dir),
+        // 实例的配置目录就是 CLAUDE_CONFIG_DIR，落盘按它编码出文件名
+        "claude" => claude(
+            &config_dir.join(".claude.json"),
+            &snapshot_path(data_dir, config_dir),
+        ),
         "codex" => codex(&config_dir.join("sessions")),
         _ => None,
     }
+}
+
+/// 状态栏脚本存额度的位置：`<数据目录>/usage/<编码后的配置目录>.json`。
+///
+/// 脚本部署在 `<数据目录>/statusline.sh`，按自身所在目录定位，两边因此是同一处。
+fn snapshot_path(data_dir: &Path, config_dir: &Path) -> PathBuf {
+    data_dir
+        .join("usage")
+        .join(format!("{}.json", usage_key(&config_dir.to_string_lossy())))
+}
+
+/// 配置目录编进文件名：先 `%` -> `%25`，再 `/` -> `%2F`。与状态栏脚本逐字一致，
+/// 不同目录编出来不会相同。
+fn usage_key(config_dir: &str) -> String {
+    config_dir.replace('%', "%25").replace('/', "%2F")
 }
 
 enum Kind {
@@ -134,8 +159,8 @@ fn from_unix_secs(secs: i64) -> Option<String> {
 ///
 /// 没装落盘时只有后者，行为与从前一致；装了就以它为准——除非缓存反而更新
 /// （比如刚在 Claude Code 里查过额度，而状态栏很久没刷）。
-fn claude(config_path: &Path, snapshot_dir: &Path) -> Option<Value> {
-    let snapshot = statusline_snapshot(snapshot_dir);
+fn claude(config_path: &Path, snapshot_path: &Path) -> Option<Value> {
+    let snapshot = statusline_snapshot(snapshot_path);
     let cached = claude_cache(config_path);
     match (snapshot, cached) {
         (Some(a), Some(b)) => Some(if checked_at_of(&a) >= checked_at_of(&b) {
@@ -159,9 +184,8 @@ fn checked_at_of(usage: &Value) -> String {
 
 /// 状态栏脚本存下的实时额度。字段沿用 Claude Code 推给状态栏的原名
 /// （`used_percentage` 与 Unix 秒的 `resets_at`），与 `.claude.json` 里那套不同。
-fn statusline_snapshot(dir: &Path) -> Option<Value> {
-    let path = dir.join(".agent-manager-usage.json");
-    let root: Value = serde_json::from_str(&fs::read_to_string(&path).ok()?).ok()?;
+fn statusline_snapshot(path: &Path) -> Option<Value> {
+    let root: Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
     let checked_at = root
         .get("at")
         .and_then(Value::as_i64)
@@ -182,7 +206,7 @@ fn statusline_snapshot(dir: &Path) -> Option<Value> {
         windows.push(window(minutes, used, resets_at));
     }
 
-    usage(&display(&path), checked_at, windows, Map::new())
+    usage(&display(path), checked_at, windows, Map::new())
 }
 
 /// Claude Code 自己缓存的额度：`utilization` 是已用百分比，窗口名固定为
@@ -338,5 +362,105 @@ fn find_key<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
         }
         Value::Array(items) => items.iter().find_map(|item| find_key(item, key)),
         _ => None,
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    const SCRIPT: &str = include_str!("../assets/statusline.sh");
+
+    /// 按 Claude Code 的方式跑一次部署好的状态栏脚本：绝对路径调用，stdin 推 rate_limits。
+    fn run_statusline(script: &Path, home: &Path, config_dir: Option<&Path>, five: u32) {
+        let mut cmd = Command::new("/bin/bash");
+        cmd.arg(script)
+            .env("HOME", home)
+            .env("AM_STATUSLINE_NOW", "1789871000")
+            .env_remove("CLAUDE_CONFIG_DIR")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null());
+        if let Some(dir) = config_dir {
+            cmd.env("CLAUDE_CONFIG_DIR", dir);
+        }
+        let mut child = cmd.spawn().unwrap();
+        let input = format!(
+            r#"{{"model":{{"display_name":"Claude Test"}},"rate_limits":{{"five_hour":{{"used_percentage":{five},"resets_at":1789900000}},"seven_day":{{"used_percentage":41,"resets_at":1790400000}}}}}}"#
+        );
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.as_bytes())
+            .unwrap();
+        assert!(child.wait().unwrap().success());
+    }
+
+    fn entries(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn 状态栏脚本与读取端编码一致_额度落在数据目录_不同配置目录互不覆盖() {
+        let base = std::env::temp_dir().join(format!(
+            "am-usage-key-{}-{:x}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let data = base.join("data");
+        let home = base.join("home");
+        // 两个目录按朴素的「/ 换成 %2F」会撞成同一个文件名，% 必须先转义
+        let a = home.join("a").join("b");
+        let b = home.join("a%2Fb");
+        let default_dir = home.join(".claude");
+        for dir in [&data, &a, &b, &default_dir] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        let script = data.join("statusline.sh");
+        fs::write(&script, SCRIPT).unwrap();
+
+        run_statusline(&script, &home, Some(&a), 11);
+        run_statusline(&script, &home, Some(&b), 22);
+        run_statusline(&script, &home, None, 33);
+        // CLAUDE_CONFIG_DIR 写成 "~/..." 时（引号里 shell 不展开）按 HOME 展开后编码
+        let tilde = std::path::PathBuf::from("~/a%2Fb");
+        run_statusline(&script, &home, Some(&tilde), 44);
+
+        // 助手配置目录里不产生任何文件
+        for dir in [&a, &b, &default_dir] {
+            assert!(entries(dir).is_empty(), "{} 被写入了文件", dir.display());
+        }
+        assert_eq!(entries(&data.join("usage")).len(), 3);
+
+        let used = |dir: &Path| {
+            let path = snapshot_path(&data, dir);
+            assert!(path.starts_with(data.join("usage")));
+            statusline_snapshot(&path).unwrap()["windows"][0]["used_percent"].clone()
+        };
+        assert_eq!(used(&a), json!(11.0));
+        assert_eq!(used(&b), json!(44.0), "~ 展开后与同一目录共用一份");
+        assert_eq!(used(&default_dir), json!(33.0));
+
+        // 读取端经 read / read_profile 也读到同一份
+        let via_read = read(&home, &data, "claude", None).unwrap();
+        assert_eq!(
+            via_read["source"],
+            json!(snapshot_path(&data, &default_dir).display().to_string())
+        );
+        assert_eq!(via_read["checked_at"], json!("2026-09-20T02:23:20Z"));
+        let via_profile = read_profile("claude", &a, &data).unwrap();
+        assert_eq!(via_profile["windows"][0]["used_percent"], json!(11.0));
+
+        let _ = fs::remove_dir_all(&base);
     }
 }

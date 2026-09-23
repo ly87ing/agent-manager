@@ -2,12 +2,15 @@
 # Agent Manager 内置状态栏。
 #
 # 显示：模型 · 目录(分支) · 上下文占用 · 本会话增删行 · 花费 · 5h/7d 额度与重置倒计时。
-# 顺带把额度存一份到 <配置目录>/.agent-manager-usage.json：Claude Code 每次渲染状态栏
-# 都把 rate_limits 通过 stdin 推给本脚本，但它自己不写任何文件，外部进程读不到；
-# 存下来 Agent Manager 才能显示与这一行同屏的实时额度。
+# 顺带把额度存一份到 Agent Manager 数据目录（即本脚本所在目录）下的
+# usage/<编码后的配置目录>.json：Claude Code 每次渲染状态栏都把 rate_limits 通过 stdin
+# 推给本脚本，但它自己不写任何文件，外部进程读不到；存下来 Agent Manager 才能显示与
+# 这一行同屏的实时额度。不往助手的配置目录里放任何文件。
+# 配置目录编码：先 % -> %25，再 / -> %2F，不同目录不会撞名；Agent Manager 按同一规则读取。
 #
 # 主体纯 bash 内建（read / [[ =~ ]] / printf / 参数展开），无 jq、无 git、无网络；
-# 仅在有重置时刻时 fork 一次 date、落盘时 fork 一次 mv。兼容 macOS 自带的 bash 3.2。
+# 仅在有重置时刻时 fork 一次 date、落盘时 fork 一次 mv，usage 目录还不存在时再
+# fork 一次 mkdir。兼容 macOS 自带的 bash 3.2。
 # 任一字段缺失时对应段自动省略。本文件由 Agent Manager 部署，手改会在下次应用时被覆盖。
 
 IFS= read -rd '' I   # 读全部 stdin
@@ -69,10 +72,20 @@ if [[ -n $five_reset || -n $week_reset ]]; then now=${AM_STATUSLINE_NOW:-$(date 
 
 # ---- 额度落盘 ----
 # 写临时文件再 mv 覆盖：多个窗口并发也不会让 Agent Manager 读到半截内容。
-# 路径跟随当前会话的配置目录，实例各存各的。
+# 文件名跟随当前会话的配置目录，实例各存各的。
 if [[ -n $five || -n $week ]]; then
   am_dir=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
-  am_file=$am_dir/.agent-manager-usage.json
+  # 启动命令写成 CLAUDE_CONFIG_DIR="~/..." 时引号里的 ~ 不会被 shell 展开，这里补上，
+  # 与 Agent Manager 读取时展开后的路径对得上
+  [[ $am_dir == "~" ]] && am_dir=$HOME
+  [[ $am_dir == "~/"* ]] && am_dir=$HOME/${am_dir#"~/"}
+  am_pct='%'
+  am_key=${am_dir//$am_pct/%25}
+  am_key=${am_key//\//%2F}
+  am_self=${BASH_SOURCE[0]}
+  if [[ $am_self == */* ]]; then am_usage=${am_self%/*}/usage; else am_usage=usage; fi
+  [[ -d $am_usage ]] || mkdir -p "$am_usage" 2>/dev/null
+  am_file=$am_usage/$am_key.json
   am_tmp=$am_file.$$
   {
     printf '{"at":%s' "${now:-0}"

@@ -509,10 +509,6 @@ fn 内置状态栏会部署脚本并指过去_切回不碰只撤自己那条() {
     assert!(script.is_file(), "脚本要落到数据目录");
     let body = fs::read_to_string(&script).unwrap();
     assert!(body.starts_with("#!/bin/bash"));
-    assert!(
-        body.contains("agent-manager-usage.json"),
-        "落盘是它存在的理由"
-    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -523,6 +519,65 @@ fn 内置状态栏会部署脚本并指过去_切回不碰只撤自己那条() {
         settings_file(&ctx)["statusLine"]["command"],
         script.display().to_string()
     );
+
+    // 落盘是它存在的理由：像 Claude Code 那样按绝对路径跑一次，额度落在数据目录下，
+    // 助手配置目录里不多出任何文件，agents:status 能读回
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        let claude_dir = ctx.home_dir.join(".claude");
+        let before: Vec<_> = fs::read_dir(&claude_dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        let mut child = std::process::Command::new(&script)
+            .env("HOME", &ctx.home_dir)
+            .env_remove("CLAUDE_CONFIG_DIR")
+            .env("AM_STATUSLINE_NOW", "1789871000")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(
+                br#"{"rate_limits":{"five_hour":{"used_percentage":23,"resets_at":1789900000}}}"#,
+            )
+            .unwrap();
+        assert!(child.wait().unwrap().success());
+
+        let key = claude_dir
+            .display()
+            .to_string()
+            .replace('%', "%25")
+            .replace('/', "%2F");
+        let usage_file = ctx.data_dir.join("usage").join(format!("{key}.json"));
+        assert!(usage_file.is_file(), "额度要落到数据目录的 usage/ 下");
+        let after: Vec<_> = fs::read_dir(&claude_dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(after, before, "助手配置目录里不能多出文件");
+
+        let status = execute(&ctx, &request("agents:status", &[]));
+        assert!(status.ok, "{:?}", status.errors);
+        let claude = status.data["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|element| element["id"] == "agents:claude-code")
+            .unwrap();
+        assert_eq!(
+            claude["observed"]["usage"]["source"],
+            json!(usage_file.display().to_string())
+        );
+        assert_eq!(
+            claude["observed"]["usage"]["windows"][0]["used_percent"],
+            json!(23.0)
+        );
+    }
 
     // 切回「不碰」：只撤掉我们指过去的那条
     define_settings(&ctx, json!({}));
@@ -926,6 +981,251 @@ fn codex_切换与切回默认_上一套的接入方式不残留() {
         "切回默认后不留接入方式：{after}"
     );
     assert!(!after.contains("model_provider ="));
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+fn owned_providers(ctx: &Context) -> Value {
+    let conn = rusqlite::Connection::open(store::db_path(ctx)).unwrap();
+    let raw: String = conn
+        .query_row(
+            "SELECT owned_providers FROM agent_settings_bindings WHERE agent_id = 'codex'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    serde_json::from_str(&raw).unwrap()
+}
+
+/// 表结构：(列名, 类型, 非空, 默认值, 主键序号)，按列顺序。
+fn bindings_schema(ctx: &Context) -> Vec<(String, String, bool, Option<String>, i64)> {
+    let conn = rusqlite::Connection::open(store::db_path(ctx)).unwrap();
+    let mut stmt = conn
+        .prepare("PRAGMA table_info(agent_settings_bindings)")
+        .unwrap();
+    stmt.query_map([], |row| {
+        Ok((
+            row.get(1)?,
+            row.get(2)?,
+            row.get(3)?,
+            row.get(4)?,
+            row.get(5)?,
+        ))
+    })
+    .unwrap()
+    .collect::<Result<_, _>>()
+    .unwrap()
+}
+
+fn has_owned_providers_column(ctx: &Context) -> bool {
+    bindings_schema(ctx)
+        .iter()
+        .any(|(name, ..)| name == "owned_providers")
+}
+
+#[test]
+fn codex_用户自己的_provider_在写入_切换_清空后都逐字节保留() {
+    let (base, ctx) = temp_ctx("codex-user-provider");
+    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
+    let mine = concat!(
+        "# 我自己的接入，别动\n",
+        "[model_providers.mine]\n",
+        "name = \"Mine\"\n",
+        "base_url  =  \"https://mine.example.com/v1\"   # 手写的对齐\n",
+        "\n",
+        "[model_providers.mine.http_headers]\n",
+        "X-Team = \"t\"\n",
+    );
+    let path = ctx.home_dir.join(".codex/config.toml");
+    fs::write(&path, mine).unwrap();
+    define_codex(
+        &ctx,
+        json!({
+            "active": "a",
+            "profiles": {
+                "a": {"base_url": "https://a.example.com/v1"},
+                "b": {"base_url": "https://b.example.com/v1"}
+            }
+        }),
+    );
+
+    let applied = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:codex"]),
+    );
+    assert!(applied.ok, "{:?}", applied.errors);
+    assert!(codex_config(&ctx).contains(mine), "{}", codex_config(&ctx));
+    assert_eq!(owned_providers(&ctx), json!(["a"]));
+
+    let switched = execute(
+        &ctx,
+        &request(
+            "agents:configure",
+            &["--only", "agents:codex", "--use", "b"],
+        ),
+    );
+    assert!(switched.ok, "{:?}", switched.errors);
+    assert!(codex_config(&ctx).contains(mine), "{}", codex_config(&ctx));
+    assert_eq!(owned_providers(&ctx), json!(["b"]));
+
+    let cleared = execute(
+        &ctx,
+        &request(
+            "agents:configure",
+            &["--only", "agents:codex", "--use-default"],
+        ),
+    );
+    assert!(cleared.ok, "{:?}", cleared.errors);
+    let after = codex_config(&ctx);
+    assert!(after.contains(mine), "{after}");
+    assert!(!after.contains("[model_providers.b]"), "{after}");
+    assert_eq!(owned_providers(&ctx), json!([]));
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn codex_从_a_切到_b_按库里记录撤表_文件不留本工具注释() {
+    let (base, ctx) = temp_ctx("codex-owned-switch");
+    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
+    define_codex(
+        &ctx,
+        json!({
+            "active": "a",
+            "profiles": {
+                "a": {"base_url": "https://a.example.com/v1", "token_var": "A_KEY"},
+                "b": {"base_url": "https://b.example.com/v1"}
+            }
+        }),
+    );
+    assert!(
+        execute(
+            &ctx,
+            &request("agents:configure", &["--only", "agents:codex"])
+        )
+        .ok
+    );
+    let first = codex_config(&ctx);
+    assert!(first.contains("[model_providers.a]"));
+    assert!(!first.contains("agent-manager"), "{first}");
+    assert_eq!(owned_providers(&ctx), json!(["a"]));
+
+    let switched = execute(
+        &ctx,
+        &request(
+            "agents:configure",
+            &["--only", "agents:codex", "--use", "b"],
+        ),
+    );
+    assert!(switched.ok, "{:?}", switched.errors);
+    let after = codex_config(&ctx);
+    assert!(!after.contains("[model_providers.a]"), "{after}");
+    assert!(!after.contains("A_KEY"), "{after}");
+    assert!(after.contains("[model_providers.b]"), "{after}");
+    assert!(!after.contains("agent-manager"), "{after}");
+    assert_eq!(owned_providers(&ctx), json!(["b"]));
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn codex_旧库缺列加旧注释文件_不算外部修改_写入后补列并迁走注释() {
+    let (base, ctx) = temp_ctx("codex-legacy-db");
+    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
+    define_codex(
+        &ctx,
+        json!({
+            "active": "relay",
+            "profiles": {
+                "relay": {"base_url": "https://relay.example.com/v1", "token_var": "RELAY_KEY"},
+                "next": {"base_url": "https://next.example.com/v1"}
+            }
+        }),
+    );
+    assert!(
+        execute(
+            &ctx,
+            &request("agents:configure", &["--only", "agents:codex"])
+        )
+        .ok
+    );
+
+    let fresh_schema = bindings_schema(&ctx);
+    assert_eq!(
+        fresh_schema.last().map(|col| col.0.as_str()),
+        Some("owned_providers")
+    );
+
+    // 还原成旧版本留下的样子：provider 表前带受管注释，库里的表没有 owned_providers 列
+    let path = ctx.home_dir.join(".codex/config.toml");
+    // 追加在末尾且紧接旧注释：provider 表正文一字不改，摘要才应与库里那条相同
+    let legacy = format!(
+        "{}# [agent-manager:managed]\n[mcp_servers.grok]\ncommand = \"grok\"\n# 我的注释\n[model_providers.mine]\nbase_url = \"https://mine.example.com/v1\"\n",
+        codex_config(&ctx).replace(
+            "[model_providers.relay]",
+            "# [agent-manager:managed]\n[model_providers.relay]"
+        )
+    );
+    fs::write(&path, &legacy).unwrap();
+    {
+        let conn = rusqlite::Connection::open(store::db_path(&ctx)).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE legacy_bindings (
+                agent_id TEXT PRIMARY KEY NOT NULL,
+                file TEXT NOT NULL,
+                applied_digest TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO legacy_bindings SELECT agent_id, file, applied_digest, updated_at
+                FROM agent_settings_bindings;
+            DROP TABLE agent_settings_bindings;
+            ALTER TABLE legacy_bindings RENAME TO agent_settings_bindings;",
+        )
+        .unwrap();
+    }
+    assert!(!has_owned_providers_column(&ctx));
+
+    // 查询零写：状态读取不补列
+    let status = execute(&ctx, &request("agents:status", &[]));
+    assert!(status.ok, "{:?}", status.errors);
+    assert!(!has_owned_providers_column(&ctx), "查询不得写库");
+    assert_eq!(fs::read_to_string(&path).unwrap(), legacy);
+
+    // 旧注释认领 + 摘要口径不变：不需要 --allow-takeover
+    let switched = execute(
+        &ctx,
+        &request(
+            "agents:configure",
+            &["--only", "agents:codex", "--use", "next"],
+        ),
+    );
+    assert!(switched.ok, "{:?}", switched.errors);
+    assert_eq!(switched.data["takeover"], false);
+    assert_eq!(
+        bindings_schema(&ctx),
+        fresh_schema,
+        "补列库与新建库结构一致"
+    );
+    assert_eq!(owned_providers(&ctx), json!(["next"]));
+
+    let after = codex_config(&ctx);
+    assert!(!after.contains("[model_providers.relay]"), "{after}");
+    assert!(after.contains("[model_providers.next]"), "{after}");
+    assert!(
+        after.contains(
+            "# 我的注释\n[model_providers.mine]\nbase_url = \"https://mine.example.com/v1\"\n"
+        ),
+        "{after}"
+    );
+    assert!(
+        after.contains("# [agent-manager:managed]\n[mcp_servers.grok]\n"),
+        "MCP 域的注释不归这里管：{after}"
+    );
+    assert_eq!(
+        after.matches("# [agent-manager:managed]").count(),
+        1,
+        "{after}"
+    );
 
     let _ = fs::remove_dir_all(&base);
 }

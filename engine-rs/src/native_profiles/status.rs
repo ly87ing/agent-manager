@@ -173,7 +173,7 @@ fn element(
         "usage".into(),
         config_dir
             .as_deref()
-            .and_then(|dir| crate::agent_usage::read_profile(def.kind.as_str(), dir))
+            .and_then(|dir| crate::agent_usage::read_profile(def.kind.as_str(), dir, &ctx.data_dir))
             .unwrap_or(Value::Null),
     );
     if let Some(dir) = config_dir.as_deref() {

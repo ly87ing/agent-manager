@@ -15,6 +15,16 @@ fn temp_ctx(tag: &str) -> (PathBuf, Context) {
     (base, ctx)
 }
 
+/// 状态栏脚本存额度的位置：`<数据目录>/usage/<配置目录按 % -> %25、/ -> %2F 编码>.json`。
+fn snapshot_path(ctx: &Context, config_dir: &std::path::Path) -> PathBuf {
+    let key = config_dir
+        .display()
+        .to_string()
+        .replace('%', "%25")
+        .replace('/', "%2F");
+    ctx.data_dir.join("usage").join(format!("{key}.json"))
+}
+
 fn request(command: &str, args: &[&str]) -> Request {
     Request {
         command: command.to_string(),
@@ -246,8 +256,9 @@ fn claude_优先用状态栏落盘的实时额度_缓存更新时才回头用缓
         .unwrap(),
     )
     .unwrap();
-    // 状态栏刚存下的实时额度（字段名与 Claude Code 推给状态栏的一致）
-    let snapshot = claude_dir.join(".agent-manager-usage.json");
+    // 状态栏刚存下的实时额度（字段名与 Claude Code 推给状态栏的一致），存在数据目录下
+    let snapshot = snapshot_path(&ctx, &claude_dir);
+    fs::create_dir_all(snapshot.parent().unwrap()).unwrap();
     fs::write(
         &snapshot,
         json!({
@@ -258,6 +269,14 @@ fn claude_优先用状态栏落盘的实时额度_缓存更新时才回头用缓
         .to_string(),
     )
     .unwrap();
+    // 旧版本放在配置目录里的落盘文件不再读取，也不去删它
+    let legacy = claude_dir.join(".agent-manager-usage.json");
+    let legacy_body = json!({
+        "at": 1_799_999_999i64,
+        "five_hour": {"used_percentage": 99, "resets_at": 1_800_000_000i64}
+    })
+    .to_string();
+    fs::write(&legacy, &legacy_body).unwrap();
     define_agent_with(&ctx, "claude-code", "claude", None);
 
     let usage = usage_of(&ctx, "claude-code");
@@ -281,6 +300,7 @@ fn claude_优先用状态栏落盘的实时额度_缓存更新时才回头用缓
     let usage = usage_of(&ctx, "claude-code");
     assert_eq!(usage["checked_at"], json!("2026-09-17T00:41:37Z"));
     assert_eq!(usage["windows"][0]["used_percent"], json!(8.0));
+    assert_eq!(fs::read_to_string(&legacy).unwrap(), legacy_body);
 
     let _ = fs::remove_dir_all(&base);
 }
@@ -310,11 +330,9 @@ fn 没有状态栏落盘时行为与从前一致_畸形快照不影响回退() {
     );
 
     // 写了半截的落盘文件（多窗口并发写被打断）不能让整块额度消失
-    fs::write(
-        claude_dir.join(".agent-manager-usage.json"),
-        "{\"at\":178987",
-    )
-    .unwrap();
+    let snapshot = snapshot_path(&ctx, &claude_dir);
+    fs::create_dir_all(snapshot.parent().unwrap()).unwrap();
+    fs::write(&snapshot, "{\"at\":178987").unwrap();
     let usage = usage_of(&ctx, "claude-code");
     assert_eq!(
         usage["windows"][0]["used_percent"],
