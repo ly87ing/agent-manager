@@ -162,13 +162,24 @@ describe("buildOverview 真实形态", () => {
           state: "missing",
           actions: [],
         }),
+        // npm / Homebrew / 手动放的二进制：安装来源不归本工具管，但装着就是到位，不是「要你决定」
+        makeElement({
+          id: "agents:codex",
+          domain: "agents",
+          spec: { display_name: "Codex" },
+          observed: { installed: true, install_source: "npm" },
+          state: "unmanaged-detected",
+          actions: [],
+        }),
       ]),
     });
 
     expect(groups[0].items.map((item) => [item.name, item.version, item.sync])).toEqual([
       ["Claude Code", null, "ok"],
       ["OpenCode", null, "absent"],
+      ["Codex", null, "ok"],
     ]);
+    expect(groups[0].pending).toBe(0);
     // 没装不是待办，不进一键同步
     expect(syncableOf(groups)).toEqual([]);
   });

@@ -147,6 +147,13 @@ function itemOf(element: EngineElement, name: string): OverviewItem {
     usedPercent: tightestWindow(usage)?.used_percent ?? null,
     usageStale: usage ? isStale(usage.checked_at) : false,
   };
+  // 助手：软件生命周期交还给各自安装渠道，安装来源认不出（npm、Homebrew、手动放的二进制）
+  // 也没有什么要用户决定的——装着就是到位，来源在「客户端诊断」里只读展示。
+  if (element.domain === "agents") {
+    if (element.state === "disabled") return { ...base, sync: "disabled" };
+    if (element.state === "missing") return { ...base, sync: "absent" };
+    return { ...base, sync: "ok" };
+  }
   if (element.domain === "skills") return { ...base, ...skillSyncOf(element) };
   if (element.domain === "rules") return { ...base, ...fileSyncOf(element, "规则文件不能安全读写") };
   if (element.domain === "hooks") return { ...base, ...fileSyncOf(element, "Hooks 配置文件不能安全读写") };
