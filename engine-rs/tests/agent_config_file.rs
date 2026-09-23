@@ -1,5 +1,5 @@
-//! 助手配置文件原文编辑：agents:config-file 只读零写并遮住凭据；agents:edit-config 按整文件
-//! 基准写入，`<hidden>` 原位还原，外部修改、挪动占位符与非法内容一律拒绝且文件不变。
+//! 助手配置文件原文编辑：agents:config-file 只读零写、原样返回全文；agents:edit-config 按整文件
+//! 基准写回用户给的原文，外部修改与解析不了的内容一律拒绝且文件不变；库与审计不记取值。
 
 use agent_manager_engine::{execute, store, Context, Envelope, Request};
 use serde_json::{json, Value};
@@ -41,62 +41,42 @@ fn read(ctx: &Context, id: &str) -> Value {
     env.data
 }
 
+fn edit(ctx: &Context, id: &str, base: &str, text: &str) -> Envelope {
+    run(
+        ctx,
+        "agents:edit-config",
+        &["--only", id, "--file-base", base, "--value", text],
+    )
+}
+
 const TOKEN: &str = "tok-config-file-sentinel-7731";
 
 #[test]
-fn claude_settings_are_shown_masked_and_edited_in_place() {
+fn claude_settings_are_shown_and_written_back_verbatim() {
     let (root, ctx) = temp_ctx("claude");
     let path = ctx.home_dir.join(".claude/settings.json");
-    std::fs::write(
-        &path,
-        serde_json::to_vec_pretty(&json!({
-            "env": {"ANTHROPIC_AUTH_TOKEN": TOKEN, "MY_VAR": "1"},
-            "hooks": {"Stop": [{"hooks": [{"type": "prompt", "prompt": "done?"}]}]},
-            "theme": "dark"
-        }))
-        .unwrap(),
-    )
-    .unwrap();
+    // 用户自己的排版（4 空格缩进、键序）要原样保留
+    let original = format!(
+        "{{\n    \"env\": {{\"ANTHROPIC_AUTH_TOKEN\": \"{TOKEN}\"}},\n    \"theme\": \"dark\",\n    \"hooks\": {{\"Stop\": [{{\"hooks\": [{{\"type\": \"prompt\", \"prompt\": \"done?\"}}]}}]}}\n}}\n"
+    );
+    std::fs::write(&path, &original).unwrap();
 
-    // 只读零写：不建库；原文里看不到令牌
+    // 只读零写：不建库；全文原样返回
     let file = read(&ctx, "agents:claude-code");
     assert!(!ctx.data_dir.exists(), "读取不得建库");
     assert_eq!(file["format"], "json");
-    assert_eq!(file["hidden"], 1);
-    let content = file["content"].as_str().unwrap().to_string();
-    assert!(
-        content.contains("<hidden>") && !content.contains(TOKEN),
-        "{content}"
-    );
+    assert_eq!(file["content"], original.as_str());
     let base = file["base"].as_str().unwrap().to_string();
 
-    // 用户在原文里加一条权限规则、改主题；令牌原位保留
-    let mut edited: Value = serde_json::from_str(&content).unwrap();
-    edited["theme"] = json!("light");
-    edited["permissions"] = json!({"allow": ["Bash(npm run test *)"]});
-    let text = serde_json::to_string_pretty(&edited).unwrap();
-    let env = run(
-        &ctx,
-        "agents:edit-config",
-        &[
-            "--only",
-            "agents:claude-code",
-            "--file-base",
-            &base,
-            "--value",
-            &text,
-        ],
+    // 用户改主题、加一条权限规则：写回的就是用户给的原文
+    let edited = original.replace("\"dark\"", "\"light\"").replace(
+        "    \"theme\"",
+        "    \"permissions\": {\"allow\": [\"Bash(npm run test *)\"]},\n    \"theme\"",
     );
+    let env = edit(&ctx, "agents:claude-code", &base, &edited);
     assert!(env.ok, "{:?}", env.errors);
     assert_eq!(env.data["changed"], json!(["permissions", "theme"]));
-    let written: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    assert_eq!(
-        written["env"]["ANTHROPIC_AUTH_TOKEN"], TOKEN,
-        "令牌原位还原"
-    );
-    assert_eq!(written["theme"], "light");
-    assert_eq!(written["permissions"]["allow"][0], "Bash(npm run test *)");
-    assert_eq!(written["hooks"]["Stop"][0]["hooks"][0]["type"], "prompt");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), edited);
 
     // 库与审计里没有令牌，也没有取值
     let blob: Vec<u8> = std::fs::read_dir(&ctx.data_dir)
@@ -115,68 +95,41 @@ fn claude_settings_are_shown_masked_and_edited_in_place() {
         )
         .unwrap();
     assert!(
-        !detail.contains("light") && !detail.contains("npm run"),
+        !detail.contains("light") && !detail.contains("npm run") && !detail.contains(TOKEN),
         "{detail}"
     );
     drop(conn);
 
     // 旧基准：文件打开后被外部改过 → 拒绝、文件不变
     let before = std::fs::read(&path).unwrap();
-    let env = run(
-        &ctx,
-        "agents:edit-config",
-        &[
-            "--only",
-            "agents:claude-code",
-            "--file-base",
-            &base,
-            "--value",
-            &text,
-        ],
-    );
+    let env = edit(&ctx, "agents:claude-code", &base, &original);
     assert!(!env.ok);
     assert_eq!(env.errors[0].code, "AGENT_CONFIG_CHANGED");
     assert!(env.errors[0].message.contains("已在外部修改"));
     assert_eq!(std::fs::read(&path).unwrap(), before);
 
-    // 占位符挪到别处：拒绝
+    // 非法 JSON：拒绝，错误只报位置不带原文
     let fresh = read(&ctx, "agents:claude-code");
-    let moved = fresh["content"]
-        .as_str()
-        .unwrap()
-        .replace("\"ANTHROPIC_AUTH_TOKEN\"", "\"OTHER_NAME\"");
-    let env = run(
+    let broken = format!("{{\n  \"env\": {{\"ANTHROPIC_AUTH_TOKEN\": \"{TOKEN}\",}}\n}}");
+    let env = edit(
         &ctx,
-        "agents:edit-config",
-        &[
-            "--only",
-            "agents:claude-code",
-            "--file-base",
-            fresh["base"].as_str().unwrap(),
-            "--value",
-            &moved,
-        ],
+        "agents:claude-code",
+        fresh["base"].as_str().unwrap(),
+        &broken,
     );
     assert!(!env.ok);
     assert!(
-        env.errors[0].message.contains("<hidden>"),
+        env.errors[0].message.contains("第 2 行"),
         "{:?}",
         env.errors
     );
-    assert_eq!(std::fs::read(&path).unwrap(), before);
-
-    // 非法 JSON：拒绝
-    let env = run(
+    assert!(!env.errors[0].message.contains(TOKEN));
+    // 数组不是 settings.json
+    let env = edit(
         &ctx,
-        "agents:edit-config",
-        &[
-            "--only",
-            "agents:claude-code",
-            "--file-base",
-            fresh["base"].as_str().unwrap(),
-            "--value",
-            "{ not json",
-        ],
+        "agents:claude-code",
+        fresh["base"].as_str().unwrap(),
+        "[]",
     );
     assert!(!env.ok);
     assert_eq!(std::fs::read(&path).unwrap(), before);
@@ -184,58 +137,69 @@ fn claude_settings_are_shown_masked_and_edited_in_place() {
 }
 
 #[test]
-fn codex_config_keeps_comments_and_hidden_values() {
+fn codex_config_is_written_back_verbatim() {
     let (root, ctx) = temp_ctx("codex");
     let path = ctx.home_dir.join(".codex/config.toml");
     let original = format!(
-        "# 我的 codex 配置\nmodel = \"o3\" # 常用\n\n[model_providers.mine]\nname = \"mine\"\nenv_key = \"MINE_KEY\"\n\n[mcp_servers.gh]\ncommand = \"gh\"\n[mcp_servers.gh.env]\nGITHUB_TOKEN = \"{TOKEN}\"\n"
+        "# 我的 codex 配置\nmodel = \"o3\" # 常用\n\n[mcp_servers.gh]\ncommand = \"gh\"\n[mcp_servers.gh.env]\nGITHUB_TOKEN = \"{TOKEN}\"\n"
     );
     std::fs::write(&path, &original).unwrap();
     let file = read(&ctx, "agents:codex");
     assert_eq!(file["format"], "toml");
-    let content = file["content"].as_str().unwrap();
-    assert!(
-        content.contains("env_key = \"MINE_KEY\""),
-        "变量名照常显示: {content}"
-    );
-    assert!(content.contains("GITHUB_TOKEN = \"<hidden>\"") && !content.contains(TOKEN));
+    assert_eq!(file["content"], original.as_str());
 
-    let edited = content.replace("model = \"o3\"", "model = \"o4\"");
-    let env = run(
+    let edited = original.replace("model = \"o3\"", "model = \"o4\"");
+    let env = edit(
         &ctx,
-        "agents:edit-config",
-        &[
-            "--only",
-            "agents:codex",
-            "--file-base",
-            file["base"].as_str().unwrap(),
-            "--value",
-            &edited,
-        ],
+        "agents:codex",
+        file["base"].as_str().unwrap(),
+        &edited,
     );
     assert!(env.ok, "{:?}", env.errors);
     assert_eq!(env.data["changed"], json!(["model"]));
-    let written = std::fs::read_to_string(&path).unwrap();
-    assert_eq!(
-        written,
-        original.replace("model = \"o3\"", "model = \"o4\"")
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), edited);
+
+    // 内容没变：不写、不记审计
+    let fresh = read(&ctx, "agents:codex");
+    let env = edit(
+        &ctx,
+        "agents:codex",
+        fresh["base"].as_str().unwrap(),
+        &edited,
     );
+    assert!(env.ok);
+    assert_eq!(env.data["changed"], json!([]));
 
     // 非法 TOML：拒绝
-    let fresh = read(&ctx, "agents:codex");
-    let env = run(
+    let env = edit(
         &ctx,
-        "agents:edit-config",
-        &[
-            "--only",
-            "agents:codex",
-            "--file-base",
-            fresh["base"].as_str().unwrap(),
-            "--value",
-            "[broken",
-        ],
+        "agents:codex",
+        fresh["base"].as_str().unwrap(),
+        "[broken",
     );
     assert!(!env.ok);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), edited);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn missing_file_is_created_from_the_editor() {
+    let (root, ctx) = temp_ctx("missing");
+    let file = read(&ctx, "agents:claude-code");
+    assert_eq!(file["exists"], false);
+    assert_eq!(file["content"], "");
+    assert_eq!(file["base"], "missing");
+    let env = edit(
+        &ctx,
+        "agents:claude-code",
+        "missing",
+        "{\"theme\": \"dark\"}\n",
+    );
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(
+        std::fs::read_to_string(ctx.home_dir.join(".claude/settings.json")).unwrap(),
+        "{\"theme\": \"dark\"}\n"
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -248,24 +212,21 @@ fn symlinked_settings_are_written_through_and_unknown_args_are_rejected() {
     let link = ctx.home_dir.join(".claude/settings.json");
     std::os::unix::fs::symlink(&real, &link).unwrap();
     let file = read(&ctx, "agents:claude-code");
-    let env = run(
+    let env = edit(
         &ctx,
-        "agents:edit-config",
-        &[
-            "--only",
-            "agents:claude-code",
-            "--file-base",
-            file["base"].as_str().unwrap(),
-            "--value",
-            "{\"theme\": \"light\"}",
-        ],
+        "agents:claude-code",
+        file["base"].as_str().unwrap(),
+        "{\"theme\": \"light\"}",
     );
     assert!(env.ok, "{:?}", env.errors);
     assert!(std::fs::symlink_metadata(&link)
         .unwrap()
         .file_type()
         .is_symlink());
-    assert!(std::fs::read_to_string(&real).unwrap().contains("light"));
+    assert_eq!(
+        std::fs::read_to_string(&real).unwrap(),
+        "{\"theme\": \"light\"}"
+    );
 
     let env = run(
         &ctx,
@@ -293,17 +254,11 @@ fn io_failure_is_reported_as_is_not_as_external_change() {
     let file = read(&ctx, "agents:claude-code");
     // 目录只读：临时文件建不出来，写入失败但文件没被别人改过
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
-    let env = run(
+    let env = edit(
         &ctx,
-        "agents:edit-config",
-        &[
-            "--only",
-            "agents:claude-code",
-            "--file-base",
-            file["base"].as_str().unwrap(),
-            "--value",
-            "{\"theme\": \"light\"}",
-        ],
+        "agents:claude-code",
+        file["base"].as_str().unwrap(),
+        "{\"theme\": \"light\"}",
     );
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
     assert!(!env.ok);
@@ -312,33 +267,5 @@ fn io_failure_is_reported_as_is_not_as_external_change() {
         std::fs::read_to_string(&path).unwrap(),
         "{\"theme\": \"dark\"}\n"
     );
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn length_params_stay_visible_and_pat_like_names_are_hidden() {
-    let (root, ctx) = temp_ctx("classes");
-    std::fs::write(
-        ctx.home_dir.join(".claude/settings.json"),
-        serde_json::to_vec_pretty(&json!({"env": {
-            "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "32000",
-            "GITHUB_PAT": "plain-pat-value-1",
-            "DB_PASS": "plain-pass-value-2"
-        }}))
-        .unwrap(),
-    )
-    .unwrap();
-    std::fs::write(
-        ctx.home_dir.join(".codex/config.toml"),
-        "preferred_auth_method = \"apikey\"\n",
-    )
-    .unwrap();
-    let claude = read(&ctx, "agents:claude-code");
-    let content = claude["content"].as_str().unwrap();
-    assert!(content.contains("\"32000\""), "{content}");
-    assert!(!content.contains("plain-pat-value-1") && !content.contains("plain-pass-value-2"));
-    assert_eq!(claude["hidden"], 2);
-    let codex = read(&ctx, "agents:codex");
-    assert!(codex["content"].as_str().unwrap().contains("\"apikey\""));
     let _ = std::fs::remove_dir_all(root);
 }
