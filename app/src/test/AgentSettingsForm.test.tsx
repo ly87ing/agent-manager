@@ -194,11 +194,14 @@ describe("助手运行参数", () => {
     await userEvent.selectOptions(screen.getByTestId("agent-runtime-claude-effort-level"), "xhigh");
     await userEvent.click(screen.getByTestId("agent-runtime-claude-tool-search"));
     await userEvent.click(screen.getByTestId("agent-runtime-claude-agent-teams"));
+    await userEvent.click(screen.getByTestId("agent-runtime-claude-disable-autoupdate"));
     await userEvent.click(screen.getByTestId("agent-runtime-claude-disable-artifact"));
     await userEvent.click(screen.getByTestId("agent-runtime-claude-hide-attribution"));
     await userEvent.click(screen.getByTestId("agent-runtime-preview-mode"));
     expect(dialog).toHaveTextContent('"ENABLE_TOOL_SEARCH": "true"');
     expect(dialog).toHaveTextContent('"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"');
+    // 官方禁用自动更新的写法
+    expect(dialog).toHaveTextContent('"DISABLE_AUTOUPDATER": "1"');
     expect(dialog).toHaveTextContent('"commit": ""');
     expect(dialog).toHaveTextContent('"pr": ""');
     // 官方持久键，不再写单次会话覆盖变量
@@ -213,6 +216,7 @@ describe("助手运行参数", () => {
       claude_effort_level: "xhigh",
       claude_tool_search: true,
       claude_agent_teams: true,
+      claude_disable_autoupdate: true,
       claude_disable_artifact: true,
       claude_hide_attribution: true,
     });

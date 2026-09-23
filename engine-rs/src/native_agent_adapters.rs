@@ -141,6 +141,13 @@ fn claude_fields() -> Vec<Value> {
             "summary": {"label": "Agent Teams", "enabled": "开启", "default": "默认"}
         }),
         json!({
+            "key": "claude_disable_autoupdate", "type": "boolean", "section": "高级能力",
+            "label": "禁止自动更新",
+            "description": "写入 settings.json 的 env.DISABLE_AUTOUPDATER=1，停掉 Claude Code 启动时和运行中的后台自动更新；手动 claude update 仍可用。通过系统包管理器安装的本来就不自动更新。",
+            "targets": [{"key": "env.DISABLE_AUTOUPDATER", "enabled_value": "\"1\""}],
+            "summary": {"label": "自动更新", "enabled": "已禁止", "default": "默认"}
+        }),
+        json!({
             "key": "claude_disable_artifact", "type": "boolean", "section": "高级能力",
             "label": "禁用 Artifact", "description": "不让 Claude Code 创建 Artifact；适合只需要代码与终端输出的环境。",
             "targets": [{"key": "enableArtifact", "enabled_value": "false"}]

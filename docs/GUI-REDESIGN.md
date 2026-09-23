@@ -172,6 +172,7 @@ Codex：地址 + 令牌变量且仍是本工具写的那张表，或引用同一
 `env.ANTHROPIC_AUTH_TOKEN`、`env.ANTHROPIC_API_KEY`、`env.ANTHROPIC_MODEL`、
 `env.ANTHROPIC_SMALL_FAST_MODEL`、`env.ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`、
 `env.API_TIMEOUT_MS`、`env.ENABLE_TOOL_SEARCH`、`env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`、
+`env.DISABLE_AUTOUPDATER`（禁止自动更新，官方写法）、
 `effortLevel`、`enableArtifact`（连同已废弃的 `disableArtifact`）、`permissions.defaultMode`
 与 `attribution.{commit,pr}`。同一文件里 hooks 域的内容、
 用户自己的 `permissions.allow/deny` 与别的 `env` 变量原样保留；写入基准也只算

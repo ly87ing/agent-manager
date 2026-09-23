@@ -52,6 +52,8 @@ const CLAUDE_OWNED_PATHS: &[&[&str]] = &[
     &["env", "API_TIMEOUT_MS"],
     &["env", "ENABLE_TOOL_SEARCH"],
     &["env", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"],
+    // 官方禁用自动更新的写法：settings.json 的 env 里 DISABLE_AUTOUPDATER=1
+    &["env", "DISABLE_AUTOUPDATER"],
     // 官方持久键：默认推理强度与 Artifact 开关（/effort、/config 写的就是它们）
     &["effortLevel"],
     &["enableArtifact"],
@@ -209,6 +211,7 @@ fn claude_observed_config(
             "claude_effort_level": string_at(&value, &["effortLevel"]),
             "claude_tool_search": string_at(&value, &["env", "ENABLE_TOOL_SEARCH"]) == Some("true"),
             "claude_agent_teams": string_at(&value, &["env", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"]) == Some("1"),
+            "claude_disable_autoupdate": string_at(&value, &["env", "DISABLE_AUTOUPDATER"]) == Some("1"),
             // enableArtifact: false 关掉；已废弃的 disableArtifact: true 官方仍按关掉处理
             "claude_disable_artifact": path_get(&value, &["enableArtifact"]) == Some(&Value::Bool(false))
                 || path_get(&value, &["disableArtifact"]) == Some(&Value::Bool(true)),
@@ -951,6 +954,13 @@ fn write_claude_runtime(
                     on.then(|| "1".to_string()),
                 );
             }
+            ("claude_disable_autoupdate", RuntimeValue::Flag(on)) => {
+                set_or_remove(
+                    root,
+                    &["env", "DISABLE_AUTOUPDATER"],
+                    on.then(|| "1".to_string()),
+                );
+            }
             ("claude_disable_artifact", RuntimeValue::Flag(on)) => {
                 // 官方键 enableArtifact: false；打开时撤掉它，连同已废弃、会锁死关闭的 disableArtifact
                 if *on {
@@ -1022,6 +1032,7 @@ const CLAUDE_RUNTIME_FIELDS: &[(&str, FieldKind)] = &[
     ),
     ("claude_tool_search", FieldKind::Flag),
     ("claude_agent_teams", FieldKind::Flag),
+    ("claude_disable_autoupdate", FieldKind::Flag),
     ("claude_disable_artifact", FieldKind::Flag),
     ("claude_hide_attribution", FieldKind::Flag),
     // 不是表单项：用户确认后清理旧版本写进 env 的单次会话覆盖变量
@@ -3321,6 +3332,7 @@ mod tests {
             json!({
                 "claude_tool_search": true,
                 "claude_agent_teams": true,
+                "claude_disable_autoupdate": true,
                 "claude_effort_level": "xhigh",
                 "claude_disable_artifact": true,
                 "claude_hide_attribution": true
@@ -3329,6 +3341,7 @@ mod tests {
         let parsed: Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(parsed["env"]["ENABLE_TOOL_SEARCH"], "true");
         assert_eq!(parsed["env"]["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"], "1");
+        assert_eq!(parsed["env"]["DISABLE_AUTOUPDATER"], "1");
         // 官方持久键：effortLevel 与 enableArtifact；单次会话覆盖变量一律不写
         assert_eq!(parsed["effortLevel"], "xhigh");
         assert_eq!(parsed["enableArtifact"], false);
@@ -3344,6 +3357,7 @@ mod tests {
             json!({
                 "claude_tool_search": false,
                 "claude_agent_teams": null,
+                "claude_disable_autoupdate": false,
                 "claude_effort_level": "",
                 "claude_disable_artifact": false,
                 "claude_hide_attribution": false
@@ -3353,6 +3367,7 @@ mod tests {
         assert_eq!(parsed["env"]["MY_OWN"], "keep");
         assert_eq!(parsed["attribution"]["other"], "keep");
         assert!(parsed["env"].get("ENABLE_TOOL_SEARCH").is_none());
+        assert!(parsed["env"].get("DISABLE_AUTOUPDATER").is_none());
         assert!(parsed["attribution"].get("commit").is_none());
         assert!(parsed.get("effortLevel").is_none());
         assert!(parsed.get("enableArtifact").is_none());

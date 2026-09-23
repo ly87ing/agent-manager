@@ -66,6 +66,7 @@ export function agentManagementFixture(kind: "claude" | "codex"): AgentManagemen
         ...[
           ["claude_tool_search", "工具搜索", "env.ENABLE_TOOL_SEARCH", '"true"'],
           ["claude_agent_teams", "Agent Teams", "env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", '"1"'],
+          ["claude_disable_autoupdate", "禁止自动更新", "env.DISABLE_AUTOUPDATER", '"1"'],
           ["claude_disable_artifact", "禁用 Artifact", "enableArtifact", "false"],
           ["claude_hide_attribution", "隐藏提交与 PR 署名", "attribution.commit", '""'],
         ].map(([key, label, target, enabled]) => ({
