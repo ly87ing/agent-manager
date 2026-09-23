@@ -767,7 +767,7 @@ export default function SkillsPage({
       {pendingRecommendation && (
         <ConfirmModal
           title={`添加推荐来源 ${pendingRecommendation.name}`}
-          description={`只保存集合定义：仓库 ${pendingRecommendation.url}，含 ${pendingRecommendation.skill_paths.length} 个技能。不会下载，也不会启用到任何助手；保存后在集合卡片上点「更新资源库」取回仓库，再到「全部技能」里逐个启用。`}
+          description={`只保存集合定义：仓库 ${pendingRecommendation.url}，技能取自 ${pendingRecommendation.skill_paths.map((path) => `${path}/`).join("、")}。不会下载，也不会启用到任何助手；保存后在集合卡片上点「更新资源库」取回仓库，再到「全部技能」里逐个启用。`}
           risk="write-local"
           confirmLabel="添加"
           executing={false}

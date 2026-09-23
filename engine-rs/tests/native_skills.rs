@@ -1184,6 +1184,135 @@ fn skills_discovery_error_surfaces_on_collection_and_recovers() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+fn set_collection(context: &Context, name: &str, value: &str) {
+    let res = execute(
+        context,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                &format!("skills.repositories.{name}"),
+                "--value",
+                value,
+            ],
+        ),
+    );
+    assert!(res.ok, "{:?}", res.errors);
+}
+
+fn collection_discovery(context: &Context, name: &str) -> (Vec<String>, serde_json::Value) {
+    let status = execute(context, &request("skills:status", &[]));
+    assert!(status.ok, "{:?}", status.errors);
+    let coll = status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|el| el["id"] == format!("skill:{name}"))
+        .expect("集合元素必须存在")
+        .clone();
+    let discovered = coll["observed"]["discovered"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s.as_str().unwrap().to_string())
+        .collect();
+    (discovered, coll["observed"]["discovery_error"].clone())
+}
+
+#[test]
+fn skills_moved_under_skills_dir_are_found_by_old_and_new_definitions() {
+    let (root, context) = temp_ctx("skills-moved-layout");
+    // 来源把技能收进了 skills/，顶层只剩规则等非技能目录
+    let repo_dir = context.data_dir.join("repositories").join("moved-skills");
+    for name in ["alpha", "beta"] {
+        std::fs::create_dir_all(repo_dir.join("skills").join(name)).unwrap();
+        std::fs::write(
+            repo_dir.join("skills").join(name).join("SKILL.md"),
+            format!("# {name}\n"),
+        )
+        .unwrap();
+    }
+    std::fs::create_dir_all(repo_dir.join("rules")).unwrap();
+    std::fs::write(repo_dir.join("rules").join("core.md"), "# core\n").unwrap();
+
+    // 1. 旧定义列的是顶层技能名：到 skills/<名> 找到，照常发现
+    set_collection(
+        &context,
+        "moved-skills",
+        r#"{"url":"https://example.com/moved-skills.git","skill_paths":["alpha","beta"],"agents":["codex"]}"#,
+    );
+    let (discovered, error) = collection_discovery(&context, "moved-skills");
+    assert!(error.is_null(), "旧定义不应报发现失败: {error}");
+    assert_eq!(discovered, ["alpha", "beta"]);
+
+    // 按旧定义启用：链接到的快照内容就是 skills/alpha 的内容
+    let apply = execute(
+        &context,
+        &request(
+            "skills:apply",
+            &[
+                "--only",
+                "skill:moved-skills/alpha",
+                "--action",
+                "add",
+                "--agent",
+                "codex",
+            ],
+        ),
+    );
+    assert!(apply.ok, "{:?}", apply.errors);
+    let installed = context.home_dir.join(".codex/skills/alpha/SKILL.md");
+    assert_eq!(std::fs::read_to_string(installed).unwrap(), "# alpha\n");
+
+    // 2. 新定义直接取 skills/ 目录：发现同一组技能，不把 rules/ 当技能
+    set_collection(
+        &context,
+        "moved-skills",
+        r#"{"url":"https://example.com/moved-skills.git","skill_paths":["skills"],"agents":["codex"]}"#,
+    );
+    let (discovered, error) = collection_discovery(&context, "moved-skills");
+    assert!(error.is_null(), "{error}");
+    assert_eq!(discovered, ["alpha", "beta"]);
+
+    // 3. 只有单段技能名才回退；多段路径缺失照旧报目录不存在
+    set_collection(
+        &context,
+        "moved-skills",
+        r#"{"url":"https://example.com/moved-skills.git","skill_paths":["nested/alpha"],"agents":["codex"]}"#,
+    );
+    let (discovered, error) = collection_discovery(&context, "moved-skills");
+    assert_eq!(error["category"], "missing-dir");
+    assert!(discovered.is_empty());
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn skills_dir_fallback_does_not_escape_the_repository() {
+    let (root, context) = temp_ctx("skills-moved-escape");
+    let repo_dir = context.data_dir.join("repositories").join("escape-skills");
+    std::fs::create_dir_all(&repo_dir).unwrap();
+    // 仓库里的 skills 是指向仓库外的链接：回退找到的目录也必须按越界拒绝
+    let outside = root.join("outside");
+    std::fs::create_dir_all(outside.join("alpha")).unwrap();
+    std::fs::write(outside.join("alpha").join("SKILL.md"), "# outside\n").unwrap();
+    std::os::unix::fs::symlink(&outside, repo_dir.join("skills")).unwrap();
+
+    set_collection(
+        &context,
+        "escape-skills",
+        r#"{"url":"https://example.com/escape-skills.git","skill_paths":["alpha"],"agents":["codex"]}"#,
+    );
+    let (discovered, error) = collection_discovery(&context, "escape-skills");
+    assert_eq!(error["category"], "out-of-bounds");
+    assert!(discovered.is_empty());
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[test]
 fn skills_extra_link_takeover_and_unlink() {
     let (base, ctx) = temp_ctx("skills-extra-link");
@@ -2313,12 +2442,14 @@ fn adding_recommendation_creates_unassigned_collection_then_per_skill_enable() {
         "添加不链接任何助手"
     );
 
-    // 仓库取回后（测试不走网络，直接按推荐的 skill_paths 放镜像）逐个技能启用
+    // 仓库取回后（测试不走网络，直接在推荐的 skill_paths 目录下放技能）逐个技能启用
     let mirror = ctx.data_dir.join("repositories").join("agent-skills");
-    for skill in rec["skill_paths"].as_array().unwrap() {
-        let skill = skill.as_str().unwrap();
-        std::fs::create_dir_all(mirror.join(skill)).unwrap();
-        std::fs::write(mirror.join(skill).join("SKILL.md"), format!("# {skill}")).unwrap();
+    for dir in rec["skill_paths"].as_array().unwrap() {
+        for skill in ["verification", "change-discipline"] {
+            let path = mirror.join(dir.as_str().unwrap()).join(skill);
+            std::fs::create_dir_all(&path).unwrap();
+            std::fs::write(path.join("SKILL.md"), format!("# {skill}")).unwrap();
+        }
     }
     let status = execute(&ctx, &request("skills:status", &[]));
     let skill = status.data["elements"]

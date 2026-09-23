@@ -25,15 +25,7 @@ const RECOMMENDATIONS: &[Recommendation] = &[Recommendation {
     name: "agent-skills",
     description: "本项目作者维护的通用工作技能：合并审查、方案设计、改动纪律、验证、临时产物整理、面向读者写作、技术图示；另含常驻规则（rules/）与推荐快捷命令（aliases/），取回后分别在规则页与终端快捷命令页出现。",
     url: "https://github.com/ly87ing/agent-skills.git",
-    skill_paths: &[
-        "safe-merge-review",
-        "solution-shaping",
-        "change-discipline",
-        "verification",
-        "artifact-hygiene",
-        "reader-facing-writing",
-        "technical-diagramming",
-    ],
+    skill_paths: &["skills"],
 }];
 
 /// 旧库里固化、仍为原值且该集合没有任何 skill_bindings 行（从未在任何助手生效）的

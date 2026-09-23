@@ -216,8 +216,15 @@ pub fn resolve_skill_search_paths(
                         "skill_paths 包含非法路径".to_string(),
                     ));
                 }
-                let path = repo_canonical.join(rel);
-                let resolved = resolve_loose(&path);
+                let mut resolved = resolve_loose(&repo_canonical.join(rel));
+                // 来源把顶层技能目录收进了 skills/：旧定义里的单段技能名在顶层找不到时，
+                // 按 skills/<名> 找，旧定义不用改也能继续发现。
+                if !resolved.is_dir() && is_single_segment(rel) {
+                    let moved = resolve_loose(&repo_canonical.join("skills").join(rel));
+                    if moved.is_dir() {
+                        resolved = moved;
+                    }
+                }
                 if !is_path_within(&resolved, &repo_canonical) {
                     return Err(SkillPathsError::new(
                         "out-of-bounds",
@@ -242,6 +249,14 @@ pub fn resolve_skill_search_paths(
             "skill_paths 必须是字符串数组或 null".to_string(),
         )),
     }
+}
+
+fn is_single_segment(rel: &str) -> bool {
+    let mut parts = Path::new(rel).components();
+    matches!(
+        (parts.next(), parts.next()),
+        (Some(std::path::Component::Normal(_)), None)
+    )
 }
 
 pub fn discover_repo_skills(

@@ -191,6 +191,51 @@ fn discover_marks_collection_extra_link_for_user_collection() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// skill_paths 是装技能的目录（`["skills"]`）时，按来源里实际发现的技能名判定计划外链接。
+#[test]
+fn discover_marks_collection_extra_link_for_directory_skill_paths() {
+    let (root, ctx) = temp_ctx("extra-link-dir");
+    let claude_skills = ctx.home_dir.join(".claude/skills");
+    std::fs::create_dir_all(&claude_skills).unwrap();
+    let elsewhere = ctx.home_dir.join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    link(
+        &make_skill(&elsewhere, "verification"),
+        &claude_skills.join("verification"),
+    );
+    let mirror = ctx.data_dir.join("repositories").join("my-skills");
+    make_skill(&mirror.join("skills"), "verification");
+
+    let set = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "skills.repositories.my-skills",
+                "--value",
+                r#"{"url":"https://example.invalid/my-skills.git","skill_paths":["skills"]}"#,
+            ],
+        ),
+    );
+    assert!(set.ok, "{:?}", set.errors);
+
+    let env = execute(&ctx, &request("system:discover", &["--only", "skills"]));
+    assert!(env.ok, "{:?}", env.errors);
+    let item = env.data["skills"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["name"] == "verification")
+        .expect("计划外链接必须列出")
+        .clone();
+    assert_eq!(item["origin"], "collection-extra-link");
+    assert_eq!(item["collection"], "my-skills");
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[test]
 fn discover_skips_entries_already_managed_by_binding() {
     let (root, ctx) = temp_ctx("managed-skip");

@@ -788,7 +788,7 @@ describe("集合的「用哪些技能」改成勾选", () => {
   });
 });
 
-const RECOMMENDED_PATHS = ["safe-merge-review", "verification"];
+const RECOMMENDED_PATHS = ["skills"];
 
 function recommendationRoutes(opts: { added?: boolean; collections?: boolean } = {}) {
   const base = skillsRoutes();
@@ -825,11 +825,12 @@ describe("SkillsPage 推荐来源与当前安装", () => {
   it("推荐来源：确认后才保存为集合定义（不限助手、不分配），不下载、不同步", async () => {
     const { calls } = renderWithEngine(<SkillsPage />, recommendationRoutes());
     const card = await screen.findByTestId("recommendation-agent-skills-rec");
-    expect(card).toHaveTextContent("2 个技能");
+    expect(card).toHaveTextContent("技能取自 skills/");
     await userEvent.click(within(card).getByTestId("recommendation-add-agent-skills-rec"));
 
     // 逐项确认：弹窗出现前后都还没写
     const dialog = await screen.findByRole("dialog", { name: "添加推荐来源 agent-skills-rec" });
+    expect(dialog).toHaveTextContent("技能取自 skills/");
     expect(dialog).toHaveTextContent("不会下载，也不会启用到任何助手");
     expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(0);
     await userEvent.click(within(dialog).getByRole("button", { name: "添加" }));

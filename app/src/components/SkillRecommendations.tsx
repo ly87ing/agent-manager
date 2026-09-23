@@ -32,7 +32,7 @@ export function SkillRecommendations({
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="font-mono text-xs font-semibold text-foreground">{item.name}</span>
                 <span className="rounded border bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
-                  {item.skill_paths.length} 个技能
+                  技能取自 {item.skill_paths.map((path) => `${path}/`).join("、")}
                 </span>
               </div>
               <p className="mt-0.5 break-all font-mono text-[11px] text-muted-foreground">{item.url}</p>

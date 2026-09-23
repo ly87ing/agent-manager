@@ -6,7 +6,7 @@
 //! 2. 真实目录/文件 → `native-dir`：位于助手官方技能目录内的原生安装（Claude `synced/` 等），
 //!    只标识、保持其原生管理方式，不提供接管（软链接接管会与原生体系互相覆盖）；
 //! 3. 断链 → `dead-link`：只建议清理；
-//! 4. 名称命中某个已定义集合的 `skill_paths` → `collection-extra-link`：走既有集合接管通道；
+//! 4. 名称命中某个已定义集合（按 `skill_paths` 发现的技能名）→ `collection-extra-link`：走既有集合接管通道；
 //! 5. 链接目标落在 manager 自管基目录内 → `legacy-link`：旧体系残留，只建议清理；
 //! 6. 其余符号链接 → `external-link`：按源根目录聚合为建议的本地来源集合，软链接纳管。
 //!
@@ -26,6 +26,7 @@ use super::paths::{
     managed_bases, manager_bases, resolve_link_target, resolve_loose,
 };
 use super::persistence::load_bindings_readonly;
+use super::snapshot::discover_repo_skills;
 use super::status::{load_metadata, DomainMetadata};
 use super::BindingEntry;
 use crate::native::Context;
@@ -160,20 +161,31 @@ fn unlinked_skills_in(
 }
 
 /// skill 名 → 已定义集合名（来自集合 skill_paths；整仓发现的集合无法按名判定，留给 external）。
-fn collection_of_skill_map(meta: &DomainMetadata) -> BTreeMap<String, String> {
+/// skill_paths 可以是装技能的目录（如 `skills`），所以来源已在本地时按实际发现的技能名；
+/// 还没取回或发现失败时按 skill_paths 末段。只读。
+fn collection_of_skill_map(ctx: &Context, meta: &DomainMetadata) -> BTreeMap<String, String> {
     let mut collection_of_skill: BTreeMap<String, String> = BTreeMap::new();
     for (coll_name, coll) in &meta.collections {
         if coll.deleted {
             continue;
         }
         if let Some(paths) = &coll.skill_paths {
-            for rel in paths {
-                let leaf = Path::new(rel)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| rel.clone());
+            let names: Vec<String> =
+                match discover_repo_skills(&collection_source_root(ctx, coll), &coll.raw) {
+                    Ok((found, _)) if !found.is_empty() => found.into_keys().collect(),
+                    _ => paths
+                        .iter()
+                        .map(|rel| {
+                            Path::new(rel)
+                                .file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_else(|| rel.clone())
+                        })
+                        .collect(),
+                };
+            for name in names {
                 collection_of_skill
-                    .entry(leaf)
+                    .entry(name)
                     .or_insert_with(|| coll_name.clone());
             }
         }
@@ -212,7 +224,7 @@ fn scan_all(meta: &DomainMetadata, bindings: &Bindings) -> Vec<(RawEntry, Option
 pub(crate) fn installed(ctx: &Context, meta: &DomainMetadata, bindings: &Bindings) -> Value {
     let bases = manager_bases(ctx);
     let link_bases = managed_bases(ctx, &meta.collections);
-    let collection_of_skill = collection_of_skill_map(meta);
+    let collection_of_skill = collection_of_skill_map(ctx, meta);
     let items: Vec<Value> = scan_all(meta, bindings)
         .into_iter()
         .map(|(entry, bound)| {
@@ -248,7 +260,7 @@ pub(crate) fn discover(ctx: &Context) -> Result<Value> {
     let meta = load_metadata(ctx)?;
     let bindings = load_bindings_readonly(ctx)?;
     let bases = manager_bases(ctx);
-    let collection_of_skill = collection_of_skill_map(&meta);
+    let collection_of_skill = collection_of_skill_map(ctx, &meta);
     let mut taken_names: BTreeSet<String> = meta.collections.keys().cloned().collect();
 
     // 已登记的本地来源集合：源根 → 集合名。指向这些源根的未绑定链接直接接管进该集合，
