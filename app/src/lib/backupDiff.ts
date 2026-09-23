@@ -88,7 +88,8 @@ const SOURCE_LABELS: Record<string, string> = {
   // 旧版本保存、还没生效的 hooks：导入后在 Hooks 页作为未生效建议出现，不改实际配置
   "hooks.claude": "旧版已保存的 Claude Hooks（未生效）",
   "hooks.codex": "旧版已保存的 Codex Hooks（未生效）",
-  "aliases.shell": "终端快捷命令",
+  // 旧版本保存、还没写进终端配置的快捷命令：导入后在快捷命令页作为已保存未生效建议出现
+  "aliases.shell": "旧版已保存的终端快捷命令（未生效）",
 };
 
 export function sourceLabel(key: string): string {

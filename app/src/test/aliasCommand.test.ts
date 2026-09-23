@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   ALIAS_NAME_RE,
-  FOLLOW_GLOBAL_LANG,
-  FOLLOW_GLOBAL_TZ,
   aliasTextError,
   buildAliasValue,
   listTimeZones,
@@ -11,13 +9,13 @@ import {
 } from "../lib/aliasCommand";
 
 describe("启动命令别名的解析与生成", () => {
-  it("解析跟随全局设置的既有别名", () => {
-    const parsed = parseAliasValue('TZ="{timezone}" LANG="{lang}" LC_ALL="{lang}" claude --dangerously-skip-permissions');
+  it("解析实际区块里的既有别名", () => {
+    const parsed = parseAliasValue('TZ="America/Los_Angeles" LANG="en_US.UTF-8" LC_ALL="en_US.UTF-8" claude --dangerously-skip-permissions');
     expect(parsed.structured).toBe(true);
     expect(parsed.command).toBe("claude");
     expect(parsed.extraArgs).toBe("--dangerously-skip-permissions");
-    expect(parsed.timezone).toBe(FOLLOW_GLOBAL_TZ);
-    expect(parsed.lang).toBe(FOLLOW_GLOBAL_LANG);
+    expect(parsed.timezone).toBe("America/Los_Angeles");
+    expect(parsed.lang).toBe("en_US.UTF-8");
     expect(parsed.otherEnv).toEqual({});
   });
 
@@ -45,7 +43,7 @@ describe("启动命令别名的解析与生成", () => {
   });
 
   it("环境变量写在参数里的包装命令不做结构化", () => {
-    const parsed = parseAliasValue('open --env TZ="{timezone}" -n -a "Google Chrome"');
+    const parsed = parseAliasValue('open --env TZ="America/Los_Angeles" -n -a "Google Chrome"');
     expect(parsed.structured).toBe(false);
   });
 
@@ -57,10 +55,10 @@ describe("启动命令别名的解析与生成", () => {
     const value = buildAliasValue({
       command: "claude",
       extraArgs: "--dangerously-skip-permissions",
-      timezone: FOLLOW_GLOBAL_TZ,
-      lang: FOLLOW_GLOBAL_LANG,
+      timezone: "Asia/Shanghai",
+      lang: "zh_CN.UTF-8",
     });
-    expect(value).toBe('TZ="{timezone}" LANG="{lang}" LC_ALL="{lang}" claude --dangerously-skip-permissions');
+    expect(value).toBe('TZ="Asia/Shanghai" LANG="zh_CN.UTF-8" LC_ALL="zh_CN.UTF-8" claude --dangerously-skip-permissions');
     // 生成结果必须能被自己解析回去（往返稳定）
     expect(parseAliasValue(value).command).toBe("claude");
   });
@@ -73,11 +71,8 @@ describe("启动命令别名的解析与生成", () => {
     expect(buildAliasValue({ command: "codex", timezone: "Asia/Tokyo", lang: null })).toBe('TZ="Asia/Tokyo" codex');
   });
 
-  it("预览把跟随全局的记号换成实际生效值", () => {
-    const preview = renderAliasPreview("claude", 'TZ="{timezone}" LANG="{lang}" LC_ALL="{lang}" claude', {
-      timezone: "America/Los_Angeles",
-      lang: "en_US.UTF-8",
-    });
+  it("预览就是写进 shell 配置的那一行（取值原样，没有占位替换）", () => {
+    const preview = renderAliasPreview("claude", 'TZ="America/Los_Angeles" LANG="en_US.UTF-8" LC_ALL="en_US.UTF-8" claude');
     expect(preview).toBe(`alias claude='TZ="America/Los_Angeles" LANG="en_US.UTF-8" LC_ALL="en_US.UTF-8" claude'`);
   });
 

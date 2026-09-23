@@ -78,12 +78,9 @@ export function ConnectionWorkbench({
   onSwitch,
   onResetDefault,
   aliases,
-  aliasGlobals,
-  aliasBusy,
   onAddLaunch,
   onEditLaunch,
   onRemoveLaunch,
-  onSyncLaunch,
   onCheck,
   onCheckAll,
   onEdit,
@@ -106,12 +103,9 @@ export function ConnectionWorkbench({
   onSwitch: (element: EngineElement, connection: string) => void;
   onResetDefault: (element: EngineElement) => void;
   aliases: Record<string, string>;
-  aliasGlobals: { timezone: string; lang: string };
-  aliasBusy: boolean;
   onAddLaunch: (element: EngineElement) => void;
   onEditLaunch: (element: EngineElement, name: string) => void;
   onRemoveLaunch: (name: string) => void;
-  onSyncLaunch: () => void;
   onCheck: (element: EngineElement, connection: string) => void;
   onCheckAll: (element: EngineElement, connections: ConnectionEntry[]) => void;
   onEdit: (element: EngineElement, connection: ConnectionEntry) => void;
@@ -323,14 +317,11 @@ export function ConnectionWorkbench({
               <h3 className="flex items-center gap-1.5 text-sm font-medium text-foreground">
                 <Terminal className="h-4 w-4" aria-hidden /> 运行别名
               </h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">保存只改本机定义；点“同步到终端”才写入 shell 配置。</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">以 ~/.zshrc 与 ~/.zprofile 里本工具那一段为准；保存即写入，新开终端窗口生效。</p>
             </div>
             <div className="flex items-center gap-2">
               <button type="button" data-testid={`agent-add-launch-${agentId}`} onClick={() => onAddLaunch(selected)} className="rounded border px-2.5 py-1.5 text-xs hover:bg-accent">
                 新增别名
-              </button>
-              <button type="button" data-testid={`agent-sync-launch-${agentId}`} disabled={aliasBusy} onClick={onSyncLaunch} className="rounded border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50">
-                {aliasBusy ? "同步中…" : "同步到终端"}
               </button>
             </div>
           </div>
@@ -354,7 +345,7 @@ export function ConnectionWorkbench({
                       </button>
                     </div>
                   </div>
-                  <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all font-mono text-[11px] text-muted-foreground">{renderAliasPreview(name, value, aliasGlobals)}</pre>
+                  <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all font-mono text-[11px] text-muted-foreground">{renderAliasPreview(name, value)}</pre>
                   {override && <p className="mt-1 text-xs text-warning">{override}</p>}
                 </li>
                 );

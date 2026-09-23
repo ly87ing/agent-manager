@@ -3,7 +3,7 @@ import { waitFor } from "@testing-library/react";
 import AgentsPage from "../pages/AgentsPage";
 import AliasesPage from "../pages/AliasesPage";
 import type { Envelope } from "../lib/contract";
-import { agentManagementFixture, makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
+import { agentManagementFixture, makeAliasStatus, makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 
 function agentRoutes(): Record<string, Envelope> {
@@ -38,22 +38,7 @@ function agentRoutes(): Record<string, Envelope> {
     ),
     "profiles:status": makeEnvelope({ domain: "profiles", elements: [] }, { command: "profiles.status" }),
     "agents:apply": makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }),
-    "sources:get": makeEnvelope(
-      {
-        sources: [
-          {
-            key: "aliases.shell",
-            label: "Shell aliases",
-            format: "json",
-            revision: "rev-1",
-            value: { timezone: "America/Los_Angeles", lang: "en_US.UTF-8", aliases: { claude: "claude" } },
-          },
-        ],
-      },
-      { command: "sources.get" },
-    ),
-    "sources:set": makeEnvelope({ key: "aliases.shell", revision: "rev-2" }, { command: "sources.set" }),
-    "aliases:status": makeEnvelope({ domain: "aliases", elements: [] }, { command: "aliases.status" }),
+    "aliases:status": makeEnvelope(makeAliasStatus({ claude: "claude" }), { command: "aliases.status" }),
     "aliases:apply": makeEnvelope(makeApplyResult({ domain: "aliases" }), { command: "aliases.apply" }),
   };
 }
@@ -71,22 +56,17 @@ describe("助手启停", () => {
 });
 
 describe("移除后的撤销", () => {
-  it("移除快捷命令给出撤销，点击后原样写回", async () => {
+  it("移除快捷命令直接写回终端配置文件：先确认，写进文件的动作不给撤销", async () => {
     const { calls } = renderWithEngine(<AliasesPage />, agentRoutes());
     await userEvent.click(await screen.findByTestId("remove-alias-claude"));
     await userEvent.click(await screen.findByRole("button", { name: "确认移除" }));
 
-    const sourceWrites = () => calls.filter((call) => call.command === "sources:set");
-    await waitFor(() => expect(sourceWrites()).toHaveLength(1));
-    const removedCall = sourceWrites()[0];
-    const removed = JSON.parse(removedCall.args[removedCall.args.indexOf("--value") + 1]);
-    expect(removed.value.aliases.claude).toBeUndefined();
-
-    await userEvent.click(await screen.findByRole("button", { name: "撤销" }));
-    await waitFor(() => expect(sourceWrites()).toHaveLength(2));
-    const restoreCall = sourceWrites()[1];
-    const restored = JSON.parse(restoreCall.args[restoreCall.args.indexOf("--value") + 1]);
-    expect(restored.value.aliases.claude).toBe("claude");
+    const writes = () => calls.filter((call) => call.command === "aliases:apply");
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    const args = writes()[0].args;
+    expect(args[args.indexOf("--remove") + 1]).toBe("claude");
+    expect(await screen.findByText(/移除快捷命令 claude/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "撤销" })).toBeNull();
   });
 
   it("助手定义移除入口随完整定义维护一起撤下，保留定义且零写入", async () => {

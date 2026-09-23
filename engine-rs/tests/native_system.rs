@@ -42,7 +42,8 @@ fn section<'a>(env: &'a agent_manager_engine::Envelope, name: &str) -> &'a [Valu
         .unwrap_or_else(|| panic!("section '{name}' 必须存在且为数组: {}", env.data))
 }
 
-// A. fresh 隔离 Context：结构完整、aliases 未生成带来 warning、零写。
+// A. fresh 隔离 Context：结构完整、零写；规则、hooks 与别名以实际文件为准，没有文件
+// （区块）是正常空状态（notice）。整体是否 warning 只取决于 agents 在本机 PATH 下的探测结果。
 #[test]
 fn fresh_context_audit_is_complete_warning_and_zero_write() {
     let (base, ctx) = temp_ctx("fresh");
@@ -51,7 +52,6 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
     assert!(env.errors.is_empty());
     assert!(!env.lock.held);
     assert!(!env.mode.offline);
-    assert_eq!(env.data["status"], "warning");
     assert_eq!(env.data["version"], Value::Null);
     for name in [
         "agents", "skills", "mcp", "rules", "hooks", "aliases", "secrets", "runtime", "storage",
@@ -64,13 +64,14 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
         "已退役 tools 域不得出现在审计结果: {}",
         env.data
     );
-    // aliases 已接线：fresh 上下文两目标均 not-materialized → warning(unmaterialized)
+    // aliases 以 rc 文件受管区块为准：fresh 上下文两文件都没有区块 → notice（内置别名只是推荐，
+    // 不再是「待生成」的产物）
     let aliases = section(&env, "aliases");
     assert_eq!(aliases.len(), 2);
     for (idx, id) in ["aliases:zshrc", "aliases:zprofile"].iter().enumerate() {
         assert_eq!(aliases[idx]["name"], *id);
-        assert_eq!(aliases[idx]["status"], "warning");
-        assert_eq!(aliases[idx]["category"], "unmaterialized");
+        assert_eq!(aliases[idx]["status"], "notice");
+        assert!(aliases[idx].get("category").is_none());
     }
     // secrets 已接线：fresh 上下文无已启用定义 → 单条 ok（managed-ok 映射）
     let secrets = section(&env, "secrets");
@@ -99,11 +100,19 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
             assert!(entry.get("category").is_none(), "{entry}");
         }
     }
-    assert!(
-        total_warnings >= 2,
-        "aliases 两目标未生成至少带来 2 个 warning"
-    );
+    // 其余域在 fresh 上下文里都不产生 warning；只有 agents 可能（取决于 PATH）
+    let agent_warnings = section(&env, "agents")
+        .iter()
+        .filter(|entry| entry["status"] == "warning")
+        .count() as u64;
+    assert_eq!(total_warnings, agent_warnings);
     assert_eq!(summary["warnings"].as_u64().unwrap(), total_warnings);
+    let expected_status = if total_warnings > 0 {
+        "warning"
+    } else {
+        "healthy"
+    };
+    assert_eq!(env.data["status"], expected_status);
     assert_eq!(summary["warning_categories"]["optional_tools"], 0);
     assert_eq!(summary["warning_categories"]["official_gaps"], 0);
     let categorized: u64 = [
@@ -266,10 +275,18 @@ fn audit_args_are_strict_and_fail_closed() {
 }
 
 // D 的集成侧：wired 域元素被映射进对应 section（fresh 上下文下 agents 全部
-// missing → warning/unmaterialized），notice 不计入 summary。
+// missing → warning/unmaterialized），notice 不计入 summary。未解析的密钥引用固定带来一条
+// warning(unmaterialized)，保证分类诊断在任何 PATH 下都出现。
 #[test]
 fn wired_domain_elements_map_into_sections() {
     let (base, ctx) = temp_ctx("mapping");
+    std::env::remove_var("AM_AUDIT_MAPPING_UNRESOLVED_VAR");
+    std::fs::create_dir_all(&ctx.home_dir).unwrap();
+    std::fs::write(
+        ctx.home_dir.join(".claude.json"),
+        r#"{"mcpServers":{"demo-server":{"command":"d","env":{"DEMO_KEY":"${AM_AUDIT_MAPPING_UNRESOLVED_VAR}"}}}}"#,
+    )
+    .unwrap();
     let env = audit(&ctx, &[]);
     assert!(env.ok, "{:?}", env.errors);
     let agents = section(&env, "agents");
@@ -289,7 +306,12 @@ fn wired_domain_elements_map_into_sections() {
     let unmaterialized = env.data["summary"]["warning_categories"]["unmaterialized"]
         .as_u64()
         .unwrap();
-    assert!(unmaterialized >= agents.len() as u64);
+    let agent_warnings = agents
+        .iter()
+        .filter(|entry| entry["status"] == "warning")
+        .count() as u64;
+    assert_eq!(section(&env, "secrets")[0]["category"], "unmaterialized");
+    assert!(unmaterialized > agent_warnings);
     let expected: u64 = [
         "agents", "skills", "mcp", "rules", "hooks", "aliases", "secrets", "runtime", "storage",
     ]
@@ -313,8 +335,7 @@ fn wired_domain_elements_map_into_sections() {
 }
 
 // secrets 已接线：真实未解析占位符 → secrets section 映射为
-// warning(unmaterialized)；aliases 已接线，fresh 上下文两目标
-// not-materialized → warning(unmaterialized)。
+// warning(unmaterialized)。
 #[test]
 fn audit_maps_real_secrets_state() {
     let (base, ctx) = temp_ctx("secrets-wired");

@@ -63,7 +63,7 @@ impl Request {
 
 const KNOWN_DOMAINS: &[&str] = &[
     "usage", "agents", "mcp", "skills", "rules", "hooks", "aliases", "profiles", "secrets",
-    "profile", "policy", "system", "runs", "sources", "db", "logs", "config",
+    "profile", "policy", "system", "runs", "db", "logs", "config",
 ];
 
 fn mode_of(request: &Request) -> Mode {
@@ -480,18 +480,19 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("profiles", "status" | "apply") => crate::native_profiles::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("PROFILE_ERROR", format!("{err:#}"))),
-        ("aliases", "status" | "apply") => crate::native_aliases::handle(ctx, request)
-            .map(|data| (data, vec![]))
-            .map_err(|err| {
-                DispatchError::new(crate::native_aliases::error_code(&err), format!("{err:#}"))
-            }),
+        // 别名以 rc 文件受管区块的实际行为准：apply 写文件（取锁），丢弃旧版保存的别名只写库
+        ("aliases", "status" | "apply" | "discard-legacy") => {
+            crate::native_aliases::handle(ctx, request)
+                .map(|data| (data, vec![]))
+                .map_err(|err| {
+                    DispatchError::new(crate::native_aliases::error_code(&err), format!("{err:#}"))
+                })
+        }
         ("secrets", "status" | "set" | "adopt" | "source" | "migrate-legacy") => {
             crate::native_secrets::handle(ctx, request)
                 .map(|data| (data, vec![]))
                 .map_err(|err| DispatchError::new("SECRET_ERROR", format!("{err:#}")))
         }
-        ("sources", "get") => crate::native_sources::get(ctx, request),
-        ("sources", "set") => crate::native_sources::set(ctx, request),
         ("policy", "get") => policy_get(ctx),
         ("policy", "set") => policy_set(ctx, request),
         ("policy", "delete") => policy_delete(ctx, request),

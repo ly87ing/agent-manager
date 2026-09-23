@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, waitFor } from "@testing-library/react";
 import AgentsPage from "../pages/AgentsPage";
-import { agentManagementFixture, makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
+import { agentManagementFixture, makeAliasStatus, makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 import type { EngineElement, Envelope } from "../lib/contract";
 
@@ -57,21 +57,7 @@ function routes(overrides: Record<string, Envelope> = {}): Record<string, Envelo
       { domain: "secrets", variable: "RELAY_KEY", stored: true },
       { command: "secrets.set" },
     ),
-    "sources:get": makeEnvelope(
-      {
-        sources: [
-          {
-            key: "aliases.shell",
-            label: "Shell Aliases",
-            format: "json",
-            revision: "rev-1",
-            value: { timezone: "America/Los_Angeles", lang: "en_US.UTF-8", aliases: {} },
-          },
-        ],
-      },
-      { command: "sources.get" },
-    ),
-    "sources:set": makeEnvelope({ key: "aliases.shell", revision: "rev-2" }, { command: "sources.set" }),
+    "aliases:status": makeEnvelope(makeAliasStatus({}), { command: "aliases.status" }),
     "aliases:apply": makeEnvelope(makeApplyResult({ domain: "aliases" }), { command: "aliases.apply" }),
     ...overrides,
   };

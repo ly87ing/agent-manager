@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { waitFor } from "@testing-library/react";
 import AgentsPage from "../pages/AgentsPage";
-import { agentManagementFixture, makeAuditData, makeElement, makeEnvelope, makeMode, makePolicyData } from "./fixtures";
+import { agentManagementFixture, makeAliasStatus, makeAuditData, makeElement, makeEnvelope, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen } from "./render-with-engine";
 import type { Envelope } from "../lib/contract";
 
@@ -24,16 +24,8 @@ function routes(sqliteLayer: Record<string, unknown> | null): Record<string, Env
       },
       { command: "agents.status" },
     ),
-    "aliases:status": makeEnvelope({ domain: "aliases", elements: [] }, { command: "aliases.status" }),
+    "aliases:status": makeEnvelope(makeAliasStatus({}), { command: "aliases.status" }),
     "profiles:status": makeEnvelope({ domain: "profiles", elements: [] }, { command: "profiles.status" }),
-    "sources:get": makeEnvelope(
-      {
-        sources: [
-          { key: "aliases.shell", label: "Shell Aliases", format: "json", revision: "rev-1", value: { aliases: {} } },
-        ],
-      },
-      { command: "sources.get" },
-    ),
   };
 }
 

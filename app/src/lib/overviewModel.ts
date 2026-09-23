@@ -167,35 +167,37 @@ function itemOf(element: EngineElement, name: string): OverviewItem {
   return { ...base, sync: "decision", reason: observed.blocked_reason ?? "被本工具以外改过" };
 }
 
-/** 别名单独处理：用户关心的是「有哪些快捷命令、写进终端没有」，不是 zshrc/zprofile 两个文件。 */
+/**
+ * 别名单独处理：用户关心的是「有哪些快捷命令」，不是 zshrc/zprofile 两个文件。快捷命令以
+ * rc 文件受管区块里的实际行为准，没有「该写成什么样」的库内期望，永远不算待同步（内置推荐与
+ * 已保存未生效的建议也不算）；读写不了的文件要你决定。
+ */
 function aliasItems(envelope: Envelope<StatusData> | undefined): OverviewItem[] {
   if (!envelope?.ok) return [];
-  const byName = new Map<string, { applied: boolean; blocked: boolean }>();
+  const items: OverviewItem[] = (envelope.data.aliases ?? []).map((item) => ({
+    id: `alias:${item.name}`,
+    name: item.name,
+    domain: "aliases",
+    version: null,
+    upstream: null,
+    update: "none" as const,
+    sync: "ok" as const,
+  }));
   for (const element of envelope.data.elements) {
-    const entries = (element.observed as { entries?: { name: string; state: string }[] }).entries ?? [];
-    const blocked = (element.observed as { blocked_reason?: string | null }).blocked_reason != null;
-    for (const entry of entries) {
-      const prev = byName.get(entry.name) ?? { applied: true, blocked: false };
-      byName.set(entry.name, {
-        applied: prev.applied && entry.state === "applied",
-        blocked: prev.blocked || blocked,
-      });
-    }
-  }
-  return [...byName.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([name, info]) => ({
-      id: `alias:${name}`,
-      name,
+    const reason = (element.observed as { blocked_reason?: string | null }).blocked_reason;
+    if (!reason) continue;
+    items.push({
+      id: element.id,
+      name: (element.spec as { target?: string }).target ?? element.id,
       domain: "aliases",
       version: null,
       upstream: null,
-      update: "none" as const,
-      sync: info.blocked ? ("decision" as const) : info.applied ? ("ok" as const) : ("pending" as const),
-      // 别名是整块区块写入的，逐条没有单独的 apply 参数
-      syncArgs: info.blocked || info.applied ? undefined : [],
-      reason: info.blocked ? "本工具写的那段被外面改过" : undefined,
-    }));
+      update: "none",
+      sync: "decision",
+      reason,
+    });
+  }
+  return items;
 }
 
 /** 技能只列单个技能（skill:集合/名称），集合本身不占一行——用户问的是「有哪些技能」。 */
@@ -242,7 +244,7 @@ export function buildOverview(results: Record<string, Envelope<StatusData> | und
 /**
  * 顶部一键同步要执行的那些（要你决定的不进批量）。
  *
- * 同参数的合成一次：快捷命令是整块写入的，三条待同步只需要执行一次 aliases:apply。
+ * 同参数的合成一次：同一条命令只需要执行一次。
  */
 export function syncableOf(groups: OverviewGroup[]): { domain: string; name: string; args: string[] }[] {
   const byCommand = new Map<string, { domain: string; name: string; args: string[]; count: number }>();

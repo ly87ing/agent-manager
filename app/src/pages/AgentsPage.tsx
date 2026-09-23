@@ -53,7 +53,7 @@ import {
 import { actualRuntimeSettings, runtimePatchApplied } from "../lib/agentRuntime";
 import type { AgentsSpec } from "../lib/observed";
 import { useEngineQuery } from "../lib/queries";
-import { useAliasSource } from "../lib/useAliasSource";
+import { DEFAULT_LANG, DEFAULT_TIMEZONE, useAliasSource } from "../lib/useAliasSource";
 import { useDirectApply } from "../lib/useDirectApply";
 
 export default function AgentsPage({
@@ -66,9 +66,8 @@ export default function AgentsPage({
   const query = useEngineQuery<StatusData>("agents:status");
   const policyQuery = useEngineQuery<PolicyData>("policy:get");
   const definitionOps = useDefinitionOps({ section: "agents", domain: "agents" });
-  // 实例启动命令与「终端快捷命令」页共用同一份来源。
+  // 实例启动命令与「终端快捷命令」页共用同一份实际配置（rc 文件受管区块）。
   const aliasSource = useAliasSource();
-  const aliasApply = useDirectApply();
   // 实例（同一助手的多套独立配置）：定义与 agents 共用，状态与写入走 profiles 域
   const profilesQuery = useEngineQuery<StatusData>("profiles:status");
   const profileApply = useDirectApply();
@@ -483,15 +482,17 @@ export default function AgentsPage({
       return;
     }
     if (aliasSource.source) {
-      await aliasSource.save(
-        {
-          aliases: {
-            ...aliasSource.source.aliases,
-            [input.id]: profileLaunchValue(input, baseBinOf(input.baseAgent)),
-          },
-        },
-        `已保存独立环境 ${input.id} 与它的启动命令`,
-      );
+      const ok = await aliasSource.setAlias(input.id, profileLaunchValue(input, baseBinOf(input.baseAgent)), {
+        label: `写入独立环境 ${input.id} 的启动命令`,
+        silent: true,
+      });
+      if (ok) {
+        toast.success(`已保存独立环境 ${input.id} 与它的启动命令`, { description: "新开一个终端窗口后生效。" });
+      } else {
+        toast.error(`已保存独立环境 ${input.id}，但启动命令没有写入终端配置`, {
+          description: "原因见任务记录；可以在实例卡片上重新新增启动命令。",
+        });
+      }
     } else {
       toast.success(`已保存独立环境 ${input.id}`);
     }
@@ -525,9 +526,7 @@ export default function AgentsPage({
       return;
     }
     if (aliasSource.source && aliasSource.source.aliases[id]) {
-      const next = { ...aliasSource.source.aliases };
-      delete next[id];
-      await aliasSource.save({ aliases: next }, `已移除实例 ${id}`, { silent: true });
+      await aliasSource.removeAlias(id, { label: `移除实例 ${id} 的启动命令`, silent: true });
     }
     setProfileRemoving(null);
     void profilesQuery.refetch();
@@ -547,12 +546,8 @@ export default function AgentsPage({
             toast.error(`恢复实例被拒绝:${restored.errors[0]?.message ?? "未知错误"}`);
             return;
           }
-          if (removedAlias && aliasSource.source) {
-            await aliasSource.save(
-              { aliases: { ...aliasSource.source.aliases, [id]: removedAlias } },
-              `已恢复实例 ${id}`,
-              { silent: true },
-            );
+          if (removedAlias) {
+            await aliasSource.setAlias(id, removedAlias, { label: `恢复实例 ${id} 的启动命令`, silent: true });
           }
           toast.success(`已恢复实例 ${id}`);
           void profilesQuery.refetch();
@@ -578,31 +573,14 @@ export default function AgentsPage({
     );
   };
 
-  /** 保存一条启动命令；改了名字即重命名，旧名那条一并去掉。 */
-  const saveLaunchAlias = async (name: string, value: string, renamedFrom?: string) => {
-    if (!aliasSource.source) return false;
-    const aliases = { ...aliasSource.source.aliases, [name]: value };
-    if (renamedFrom && renamedFrom !== name) delete aliases[renamedFrom];
-    return aliasSource.save(
-      { aliases },
-      renamedFrom && renamedFrom !== name
-        ? `已改名为 ${name}，点「同步启动命令」写入配置`
-        : `已保存 ${name}，点「同步启动命令」写入配置`,
-    );
-  };
+  /** 保存一条启动命令（直接写进终端配置）；改了名字即重命名，旧名那条一并去掉。 */
+  const saveLaunchAlias = (name: string, value: string, renamedFrom?: string) =>
+    aliasSource.setAlias(name, value, { renameFrom: renamedFrom });
 
+  /** 删除一条启动命令：已确认过，直接从终端配置里去掉（写进文件的动作不给撤销）。 */
   const removeLaunchAlias = async (name: string) => {
-    if (!aliasSource.source) return;
-    const removed = aliasSource.source.aliases[name];
-    const aliases = { ...aliasSource.source.aliases };
-    delete aliases[name];
-    const ok = await aliasSource.save({ aliases }, `已删除 ${name}`, { silent: true });
-    if (!ok) return;
-    setLaunchRemoving(null);
-    toastWithUndo(`已删除启动命令 ${name}`, {
-      description: "还没同步到终端配置；撤销会把它加回来。",
-      onUndo: () => void aliasSource.save({ aliases: { ...aliases, [name]: removed } }, `已恢复 ${name}`),
-    });
+    const ok = await aliasSource.removeAlias(name, { label: `删除启动命令 ${name}` });
+    if (ok) setLaunchRemoving(null);
   };
 
   /** 复制一条：名字自动避让已有条目，内容照搬等着改。 */
@@ -645,11 +623,6 @@ export default function AgentsPage({
         }
         onResetDefault={setConnectionResetting}
         aliases={aliasSource.source?.aliases ?? {}}
-        aliasGlobals={{
-          timezone: aliasSource.source?.timezone ?? "America/Los_Angeles",
-          lang: aliasSource.source?.lang ?? "en_US.UTF-8",
-        }}
-        aliasBusy={aliasApply.executing}
         onAddLaunch={(element) => {
           const agentId = element.id.replace(/^agents:/, "");
           const bin = (element.spec as AgentsSpec).bin ?? (connectionKindOf(element) === "codex" ? "codex" : "claude");
@@ -667,9 +640,6 @@ export default function AgentsPage({
           setAliasEditing({ bin, name, value: aliasSource.source?.aliases[name] ?? null });
         }}
         onRemoveLaunch={setLaunchRemoving}
-        onSyncLaunch={() =>
-          void aliasApply.apply({ command: "aliases:apply", label: "同步终端快捷命令" })
-        }
         onCheck={(element, connection) =>
           void runCheck(element.id.replace(/^agents:/, ""), connection)
         }
@@ -799,9 +769,6 @@ export default function AgentsPage({
                     });
                   }}
                   onManageSkills={() => onManageSkills?.(id)}
-                  onSyncLaunch={() =>
-                    void aliasApply.apply({ command: "aliases:apply", label: "同步终端快捷命令" })
-                  }
                   launchCommands={launchCommandsOf(element)}
                   onAddLaunch={() => {
                     const bin = baseBinOf((element.spec as unknown as { base_agent?: string }).base_agent ?? id);
@@ -935,7 +902,7 @@ export default function AgentsPage({
           initialValue={aliasEditing.value ?? undefined}
           defaultCommand={aliasEditing.bin}
           presetName={aliasEditing.presetName}
-          globals={{ timezone: aliasSource.source.timezone, lang: aliasSource.source.lang }}
+          defaults={{ timezone: DEFAULT_TIMEZONE, lang: DEFAULT_LANG }}
           existingNames={Object.keys(aliasSource.source.aliases)}
           onSubmit={(name, value) => {
             // value===null 表示新建，此时 name 只是预填的可执行名，不算改名
@@ -950,10 +917,10 @@ export default function AgentsPage({
       {launchRemoving && (
         <ConfirmModal
           title={`删除启动命令 ${launchRemoving}`}
-          description="只删这条命令，实例的配置目录与登录状态不受影响。下次同步会把它从终端配置里本工具维护的那一段中去掉。"
+          description="只删这条命令，实例的配置目录与登录状态不受影响。确认后直接从 ~/.zshrc 与 ~/.zprofile 里本工具维护的那一段中去掉。"
           risk="write-local"
           confirmLabel="确认删除"
-          executing={false}
+          executing={aliasSource.busy}
           onConfirm={() => void removeLaunchAlias(launchRemoving)}
           onClose={() => setLaunchRemoving(null)}
         />

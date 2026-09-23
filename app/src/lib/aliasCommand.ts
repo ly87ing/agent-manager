@@ -2,16 +2,11 @@
  * 启动命令别名的解析与生成（纯函数，供助手卡片与终端快捷命令页共用）。
  *
  * 落盘格式由引擎 aliases 域固定：`alias <名称>='<值>'`，值内不得出现单引号与换行
- * （引擎 valid_alias_text 会拒绝）。值里的 `{timezone}` / `{lang}` 由引擎渲染时替换为
- * 来源里的全局设置，因此「跟随全局」就是写这两个记号，指定具体值就是写字面量。
+ * （引擎 valid_alias_text 会拒绝）。值原样写进 rc 文件，时区与语言都是字面量。
  *
  * 结构化形状：`TZ="…" LANG="…" LC_ALL="…" <命令> <扩展参数>`。解析不出这个形状的
  * 别名（例如包裹了 open/env 等其它命令）标记为非结构化，界面只提供原文编辑，不猜测改写。
  */
-
-/** 跟随全局设置的记号（引擎渲染时替换）。 */
-export const FOLLOW_GLOBAL_TZ = "{timezone}";
-export const FOLLOW_GLOBAL_LANG = "{lang}";
 
 /** 常用时区：置顶显示，同时兼作 Intl 不可用时的回退列表。 */
 const COMMON_TIMEZONES = [
@@ -60,7 +55,7 @@ export interface ParsedAlias {
   command: string;
   /** 命令之后的其余参数原文。 */
   extraArgs: string;
-  /** TZ 取值：FOLLOW_GLOBAL_TZ 表示跟随全局；null 表示该别名没设时区。 */
+  /** TZ 取值；null 表示该别名没设时区。 */
   timezone: string | null;
   /** LANG/LC_ALL 取值（两者一致时才结构化识别）。 */
   lang: string | null;
@@ -126,9 +121,9 @@ export function parseAliasValue(value: string): ParsedAlias {
 export interface BuildAliasInput {
   command: string;
   extraArgs?: string;
-  /** null = 不写 TZ；FOLLOW_GLOBAL_TZ = 跟随全局。 */
+  /** null = 不写 TZ。 */
   timezone?: string | null;
-  /** null = 不写 LANG/LC_ALL；FOLLOW_GLOBAL_LANG = 跟随全局。 */
+  /** null = 不写 LANG/LC_ALL。 */
   lang?: string | null;
   otherEnv?: Record<string, string>;
 }
@@ -150,10 +145,9 @@ export function buildAliasValue(input: BuildAliasInput): string {
   return parts.filter(Boolean).join(" ");
 }
 
-/** 渲染预览：把跟随全局的记号换成实际生效值，展示最终写进 shell 的那一行。 */
-export function renderAliasPreview(name: string, value: string, globals: { timezone: string; lang: string }): string {
-  const resolved = value.replaceAll(FOLLOW_GLOBAL_TZ, globals.timezone).replaceAll(FOLLOW_GLOBAL_LANG, globals.lang);
-  return `alias ${name}='${resolved}'`;
+/** 渲染预览：最终写进 shell 配置的那一行。 */
+export function renderAliasPreview(name: string, value: string): string {
+  return `alias ${name}='${value}'`;
 }
 
 /** 别名名称规则，与引擎 valid_alias_name 一致。 */

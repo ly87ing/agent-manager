@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { waitFor } from "@testing-library/react";
 import AgentsPage from "../pages/AgentsPage";
-import { agentManagementFixture, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
+import { agentManagementFixture, makeAliasStatus, makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 import type { EngineElement, Envelope } from "../lib/contract";
 
@@ -89,24 +89,9 @@ function routes(bin = "claude", id = "claude-code"): Record<string, Envelope> {
       { domain: "profiles", elements: [] },
       { command: "profiles.status" },
     ),
-    "sources:get": makeEnvelope(
-      {
-        sources: [
-          {
-            key: "aliases.shell",
-            label: "Shell Aliases",
-            format: "json",
-            revision: "rev-1",
-            value: {
-              timezone: "America/Los_Angeles",
-              lang: "en_US.UTF-8",
-              aliases: { [bin]: `${bin} --dangerously-skip-permissions` },
-            },
-          },
-        ],
-      },
-      { command: "sources.get" },
-    ),
+    "aliases:status": makeEnvelope(makeAliasStatus({ [bin]: `${bin} --dangerously-skip-permissions` }), {
+      command: "aliases.status",
+    }),
   };
 }
 
@@ -129,7 +114,8 @@ describe("助手页产品边界", () => {
       "alias claude='claude --dangerously-skip-permissions'",
     );
     expect(within(launches).getByTestId("agent-add-launch-claude-code")).toHaveTextContent("新增别名");
-    expect(within(launches).getByTestId("agent-sync-launch-claude-code")).toHaveTextContent("同步到终端");
+    // 别名以 rc 文件为准、保存即写入：没有单独的「同步到终端」
+    expect(within(launches).queryByTestId("agent-sync-launch-claude-code")).toBeNull();
     expect(within(launches).getByTestId("agent-launch-override-claude-code-claude")).toHaveTextContent("覆盖环境自动化");
     await userEvent.click(screen.getByTestId("workbench-tab-providers"));
     expect(screen.getByTestId("connection-card-claude-code-live")).toHaveTextContent("https://claude.example.com");
@@ -147,8 +133,10 @@ describe("助手页产品边界", () => {
     expect(screen.queryByText(/curl https:\/\/example\.invalid/)).toBeNull();
   });
 
-  it("主 Agent 的运行别名可就地审查和编辑，保存与同步仍是独立操作", async () => {
-    renderWithEngine(<AgentsPage />, routes());
+  it("主 Agent 的运行别名可就地审查和编辑，保存即按名写回终端配置", async () => {
+    const all = routes();
+    all["aliases:apply"] = makeEnvelope(makeApplyResult({ domain: "aliases" }), { command: "aliases.apply" });
+    const { calls } = renderWithEngine(<AgentsPage />, all);
 
     await userEvent.click(await screen.findByTestId("workbench-tab-launch"));
     await userEvent.click(await screen.findByTestId("agent-launch-edit-claude-code-claude"));
@@ -156,6 +144,15 @@ describe("助手页产品边界", () => {
     expect(within(dialog).getByTestId("alias-name-input")).toHaveValue("claude");
     expect(within(dialog).getByTestId("alias-command-input")).toHaveValue("claude");
     expect(within(dialog).getByTestId("alias-extra-args-input")).toHaveValue("--dangerously-skip-permissions");
+    await userEvent.clear(within(dialog).getByTestId("alias-extra-args-input"));
+    await userEvent.click(within(dialog).getByTestId("alias-form-submit"));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
+    const args = calls.find((call) => call.command === "aliases:apply")!.args;
+    expect(args[args.indexOf("--set") + 1]).toBe("claude");
+    expect(args[args.indexOf("--value") + 1]).toBe("claude");
+    expect(args).toContain("--zshrc-base");
+    expect(args).not.toContain("--rename-from");
   });
 
   it("实际配置页直接展示目标文件与脱敏后的最终生效值", async () => {

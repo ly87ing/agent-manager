@@ -78,7 +78,8 @@ describe("备份导入差异", () => {
   });
 
   it("来源键有可读名称；旧备份的规则来源标明导入后转为模板", () => {
-    expect(sourceLabel("aliases.shell")).toBe("终端快捷命令");
+    // 快捷命令以 rc 文件为准：备份里的 aliases.shell 只是旧版保存、还没生效的那些
+    expect(sourceLabel("aliases.shell")).toContain("未生效");
     expect(sourceLabel("unknown.key")).toBe("unknown.key");
     expect(sourceLabel("rules.shared")).toContain("导入后转为模板");
     // hooks 以实际配置为准：备份里的 hooks.* 只是旧版保存、还没生效的那些

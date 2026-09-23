@@ -160,7 +160,6 @@ function routes(): Record<string, TestRoute> {
     ),
     "runs:list": makeEnvelope({ runs: [] }, { command: "runs.list" }),
     "policy:get": makeEnvelope(makePolicyData({ layers: { sqlite: null } }), { command: "policy.get" }),
-    "sources:get": makeEnvelope({ sources: [] }, { command: "sources.get" }),
     "aliases:apply": makeEnvelope(makeApplyResult({ domain: "aliases" }), { command: "aliases.apply" }),
   };
 }
@@ -213,21 +212,19 @@ describe("命令面板", () => {
     expect(screen.getByTestId("command-item-page:agents")).toBeInTheDocument();
   });
 
-  it("可直接执行常用动作，走与页面相同的执行通道", async () => {
+  it("规则与终端快捷命令都以实际文件为准、逐条编辑，没有一键同步动作", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     const { calls } = renderWithEngine(<App />, routes());
     await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
 
     await openPalette();
-    // 规则改为逐文件编辑后没有「一键同步规则」
     await userEvent.type(screen.getByTestId("command-palette-input"), "同步规则");
     expect(screen.queryByTestId("command-item-action:apply-rules")).toBeNull();
     await userEvent.clear(screen.getByTestId("command-palette-input"));
+    // 快捷命令每次编辑都直接写回 rc 文件，没有「同步」可做（执行通道见下方接入快切用例）
     await userEvent.type(screen.getByTestId("command-palette-input"), "同步终端快捷命令");
-    await userEvent.click(await screen.findByTestId("command-item-action:apply-aliases"));
-
-    await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
-    expect(calls.find((call) => call.command === "aliases:apply")?.options?.runId).toMatch(/^gui-/);
+    expect(screen.queryByTestId("command-item-action:apply-aliases")).toBeNull();
+    expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
     expect(calls.some((call) => call.command === "rules:apply")).toBe(false);
   });
 

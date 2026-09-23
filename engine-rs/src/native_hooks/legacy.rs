@@ -203,7 +203,7 @@ pub(crate) fn prune_in_tx(
     }
     let mut next = obj.clone();
     next.insert("hooks".to_string(), hooks);
-    let text = crate::native_sources::canonical_json(&next);
+    let text = crate::native_mcp::model::canonical_compact(&Value::Object(next));
     conn.execute(
         "UPDATE hook_sources SET value_json = ?2, revision = ?3, updated_at = ?4 WHERE key = ?1",
         rusqlite::params![
@@ -227,7 +227,12 @@ pub(crate) fn exportable(rows: &Rows) -> BTreeMap<String, String> {
             };
             !candidates(rows, kind).is_empty()
         })
-        .map(|(key, obj)| (key.clone(), crate::native_sources::canonical_json(obj)))
+        .map(|(key, obj)| {
+            (
+                key.clone(),
+                crate::native_mcp::model::canonical_compact(&Value::Object(obj.clone())),
+            )
+        })
         .collect()
 }
 
@@ -238,7 +243,7 @@ pub(crate) fn write_row_in_tx(
     obj: &Map<String, Value>,
 ) -> Result<()> {
     conn.execute_batch(TABLE_DDL)?;
-    let text = crate::native_sources::canonical_json(obj);
+    let text = crate::native_mcp::model::canonical_compact(&Value::Object(obj.clone()));
     conn.execute(
         "INSERT INTO hook_sources (key, value_json, revision, updated_at) VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, revision = excluded.revision, updated_at = excluded.updated_at",

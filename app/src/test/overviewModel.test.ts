@@ -79,26 +79,62 @@ describe("buildOverview", () => {
     expect(groups.find((group) => group.domain === "skills")?.items.map((item) => item.name)).toEqual(["find-skills"]);
   });
 
-  it("快捷命令按名字合并两个 shell 文件，任一文件没写进去就算待同步", () => {
+  it("快捷命令以 rc 文件实际区块为准：按名字列出、从不算待同步，读写不了的文件要你决定", () => {
     const groups = buildOverview({
-      aliases: status("aliases", [
-        makeElement({
-          id: "aliases:zshrc",
+      aliases: makeEnvelope(
+        {
           domain: "aliases",
-          observed: { entries: [{ name: "cc", state: "applied" }, { name: "yolo", state: "applied" }] },
-        }),
-        makeElement({
-          id: "aliases:zprofile",
-          domain: "aliases",
-          observed: { entries: [{ name: "cc", state: "applied" }, { name: "yolo", state: "missing" }] },
-        }),
-      ]),
+          elements: [
+            makeElement({ id: "aliases:zshrc", domain: "aliases", spec: { target: "~/.zshrc" }, observed: { blocked_reason: null } }),
+            makeElement({
+              id: "aliases:zprofile",
+              domain: "aliases",
+              state: "unmanaged-detected",
+              spec: { target: "~/.zprofile" },
+              observed: { blocked_reason: "目标路径是符号链接，拒绝操作以保证安全" },
+            }),
+          ],
+          // 只在 zshrc 里的 yolo 也照样是「已到位」：实际有它就是当前配置
+          aliases: [
+            { name: "cc", value: "claude", line: "alias cc='claude'", targets: ["aliases:zshrc", "aliases:zprofile"], consistent: true },
+            { name: "yolo", value: "claude -y", line: "alias yolo='claude -y'", targets: ["aliases:zshrc"], consistent: true },
+          ],
+          alias_recommendations: [{ name: "codex", value: "codex", line: "alias codex='codex'" }],
+          alias_legacy: [{ id: "legacy-0123456789abcdef", name: "gp", value: "git push", line: "alias gp='git push'", actual: null }],
+        },
+        { command: "aliases.status" },
+      ),
     });
 
-    expect(groups.find((group) => group.domain === "aliases")?.items.map((item) => [item.name, item.sync])).toEqual([
-      ["cc", "ok"],
-      ["yolo", "pending"],
+    const aliases = groups.find((group) => group.domain === "aliases");
+    expect(aliases?.items.map((item) => [item.name, item.sync, item.reason ?? null])).toEqual([
+      ["cc", "ok", null],
+      ["yolo", "ok", null],
+      ["~/.zprofile", "decision", "目标路径是符号链接，拒绝操作以保证安全"],
     ]);
+    expect(aliases?.pending).toBe(1);
+    expect(syncableOf(groups)).toEqual([]);
+  });
+
+  it("没有任何区块时：推荐的内置快捷命令不进总览，待同步为 0", () => {
+    const groups = buildOverview({
+      aliases: makeEnvelope(
+        {
+          domain: "aliases",
+          elements: [
+            makeElement({ id: "aliases:zshrc", domain: "aliases", state: "missing", observed: { blocked_reason: null } }),
+            makeElement({ id: "aliases:zprofile", domain: "aliases", state: "missing", observed: { blocked_reason: null } }),
+          ],
+          aliases: [],
+          alias_recommendations: ["chrome", "claude", "codex", "grok"].map((name) => ({ name, value: name, line: `alias ${name}='${name}'` })),
+          alias_legacy: [],
+        },
+        { command: "aliases.status" },
+      ),
+    });
+    expect(groups.find((group) => group.domain === "aliases")).toBeUndefined();
+    expect(groups.reduce((sum, group) => sum + group.pending, 0)).toBe(0);
+    expect(syncableOf(groups)).toEqual([]);
   });
 
   it("状态读不出来的域不占位置", () => {
@@ -299,17 +335,12 @@ describe("buildOverview Hooks", () => {
 });
 
 describe("syncableOf", () => {
-  it("快捷命令整块写入，多条待同步只执行一次 apply", () => {
-    const groups = buildOverview({
-      aliases: status("aliases", [
-        makeElement({
-          id: "aliases:zshrc",
-          domain: "aliases",
-          observed: { entries: [{ name: "cc", state: "missing" }, { name: "yolo", state: "missing" }] },
-        }),
+  it("同一条命令的多个待同步项只执行一次", () => {
+    const item = { domain: "demo", version: null, upstream: null, update: "none" as const, sync: "pending" as const, syncArgs: ["--only", "demo:x"] };
+    expect(
+      syncableOf([
+        { domain: "demo", label: "示例", pending: 2, items: [{ ...item, id: "a", name: "a" }, { ...item, id: "b", name: "b" }] },
       ]),
-    });
-
-    expect(syncableOf(groups)).toEqual([{ domain: "aliases", name: "终端快捷命令 2 项", args: [] }]);
+    ).toEqual([{ domain: "demo", name: "示例 2 项", args: ["--only", "demo:x"] }]);
   });
 });

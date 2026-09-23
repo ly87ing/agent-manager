@@ -27,7 +27,6 @@ export function ProfileCard({
   onDuplicate,
   onRemove,
   onManageSkills,
-  onSyncLaunch,
   onAddLaunch,
   onEditLaunch,
   onDuplicateLaunch,
@@ -45,7 +44,6 @@ export function ProfileCard({
   onDuplicate: () => void;
   onRemove: () => void;
   onManageSkills: () => void;
-  onSyncLaunch: () => void;
   onAddLaunch: () => void;
   onEditLaunch: (name: string) => void;
   onDuplicateLaunch: (name: string) => void;
@@ -222,15 +220,6 @@ export function ProfileCard({
         >
           {busy ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : <PlayCircle className="h-3 w-3" aria-hidden />}
           {busy ? "执行中…" : element.state === "drifted" ? "接管并写入" : "写入配置"}
-        </button>
-        <button
-          type="button"
-          data-testid={`profile-sync-launch-${id}`}
-          disabled={busy}
-          onClick={onSyncLaunch}
-          className="rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
-        >
-          同步启动命令
         </button>
         <button type="button" data-testid={`profile-edit-${id}`} onClick={onEdit} className="rounded border px-2.5 py-1 text-xs">
           编辑

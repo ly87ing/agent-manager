@@ -224,21 +224,33 @@ export interface McpObserved {
   agents?: Record<string, McpAgentCell>;
 }
 
-/** 一条快捷命令在终端配置里的实际落地情况。 */
-export interface AliasEntry {
+/** rc 文件里的一行别名定义。 */
+export interface AliasLine {
   name: string;
-  /** 同步后应有的那一行。 */
-  expected: string;
-  /** 终端配置里现在的那一行；还没写入时为 null。 */
-  actual: string | null;
-  /** applied=已生效 outdated=配置里是旧的 missing=区块里没有 not-materialized=还没写过 */
-  state: "applied" | "outdated" | "missing" | "not-materialized" | string;
+  /** 本工具写法时的取值；其他写法为 null。 */
+  value: string | null;
+  line: string;
 }
 
 export interface AliasesObserved {
-  target?: string;
-  entries?: AliasEntry[];
-  blocked_reason?: string | null;
+  /** 绝对路径。 */
+  target: string;
+  target_exists: boolean | null;
+  block_present: boolean | null;
+  /** 写入基准：区块正文摘要；没有区块为 "missing"；不能读写时为 null。 */
+  base: string | null;
+  /** 受管区块里的别名。 */
+  entries: AliasLine[];
+  /** 区块外用户自己的别名：只读，不由本工具写入。 */
+  external: AliasLine[];
+  blocked_reason: string | null;
+}
+
+export interface AliasesSpec {
+  name: string;
+  target: string;
+  /** aliases:apply 里给出这个文件写入基准的参数。 */
+  base_flag: string;
 }
 
 // ---------- skills ----------

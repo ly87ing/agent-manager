@@ -1,5 +1,4 @@
 import { PlayCircle } from "lucide-react";
-import { SourceDefinitionsPanel } from "../components/SourceDefinitionsPanel";
 import { ElementTable } from "../components/ElementTable";
 import { Switch } from "../components/Switch";
 import { ErrorPanel } from "../components/ErrorPanel";
@@ -47,7 +46,6 @@ export default function DomainApplyPage({
     <div className="space-y-4">
       <PageHeader title={title} description={description} />
       {query.data.errors.length > 0 && <ErrorPanel title={`${title}状态读取失败`} errors={query.data.errors} />}
-      {domain === "aliases" && <SourceDefinitionsPanel domain={domain} />}
 
       <div className="flex justify-end gap-2">
         <button

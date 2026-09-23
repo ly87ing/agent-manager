@@ -2,6 +2,7 @@ import type { Envelope, RunEntry } from "../lib/contract";
 import { EngineBridgeError, type EngineClient } from "../lib/engine";
 import {
   agentManagementFixture,
+  makeAliasStatus,
   makeAuditData,
   makeElement,
   makeEnvelope,
@@ -989,6 +990,52 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
     return hookError("hooks.discard-legacy", "这条旧版 hooks 已不存在（可能已加入或已丢弃），请刷新后重试");
   };
 
+  // ---- aliases：两个 rc 文件受管区块里的实际命令（有状态；内置只作推荐，旧版保存的作建议）----
+  const TZ_LANG = 'TZ="America/Los_Angeles" LANG="en_US.UTF-8" LC_ALL="en_US.UTF-8"';
+  const aliasState: Record<string, string> = {
+    claude: `${TZ_LANG} claude --dangerously-skip-permissions`,
+    codex: `${TZ_LANG} codex`,
+    chrome: 'open --env TZ="America/Los_Angeles" -n -a "Google Chrome" --args --lang=en-US',
+  };
+  const aliasRecommended = ["grok"].map((name) => ({ name, value: `${TZ_LANG} ${name}`, line: `alias ${name}='${TZ_LANG} ${name}'` }));
+  let aliasLegacy = [
+    {
+      id: "legacy-0a1b2c3d4e5f6a7b",
+      name: "cc",
+      value: 'CLAUDE_CONFIG_DIR="$HOME/.claude-cc" claude',
+      line: `alias cc='CLAUDE_CONFIG_DIR="$HOME/.claude-cc" claude'`,
+      actual: null as string | null,
+    },
+  ];
+  const aliasStatus = (): Envelope =>
+    makeEnvelope(
+      makeAliasStatus(aliasState, {
+        recommendations: aliasRecommended.filter((item) => !(item.name in aliasState)),
+        legacy: aliasLegacy.filter((item) => aliasState[item.name] !== item.value),
+        external: { gp: "git push" },
+      }),
+      { command: "aliases.status" },
+    );
+  const applyAliases = (args: string[], runId: string): Envelope => {
+    const set = argOf(args, "--set");
+    const removed = argOf(args, "--remove");
+    if (set) {
+      const rename = argOf(args, "--rename-from");
+      if (rename && rename !== set) delete aliasState[rename];
+      aliasState[set] = argOf(args, "--value") ?? "";
+    } else if (removed) {
+      delete aliasState[removed];
+    } else if (args.includes("--recommended")) {
+      const item = aliasRecommended.find((entry) => entry.name === argOf(args, "--recommended"));
+      if (item) aliasState[item.name] = item.value;
+    } else if (args.includes("--legacy")) {
+      const item = aliasLegacy.find((entry) => entry.id === argOf(args, "--legacy"));
+      if (item) aliasState[item.name] = item.value;
+      aliasLegacy = aliasLegacy.filter((entry) => entry !== item);
+    }
+    return applyEnvelope("aliases", args, runId);
+  };
+
   const setSecret = (args: string[], runId: string): Envelope => {
     const variable = args[args.indexOf("--var") + 1] ?? "";
     const value = args[args.indexOf("--value") + 1] ?? "";
@@ -1203,35 +1250,6 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       const runId = runOptions.runId ?? "20260906T020000Z-mockrun";
 
       // ---- 写路径与有状态命令 ----
-      if (command === "sources:get") {
-        const domain = args[args.indexOf("--key") + 1];
-        if (domain === "aliases") {
-          return makeEnvelope(
-            {
-              sources: [
-                {
-                  key: "aliases.shell",
-                  label: "Shell aliases",
-                  format: "json",
-                  revision: "demo-revision-aliases",
-                  value: {
-                    timezone: "America/Los_Angeles",
-                    lang: "en_US.UTF-8",
-                    aliases: {
-                      claude: 'TZ="{timezone}" LANG="{lang}" LC_ALL="{lang}" claude --dangerously-skip-permissions',
-                      codex: 'TZ="{timezone}" LANG="{lang}" LC_ALL="{lang}" codex',
-                      chrome: 'open --env TZ="{timezone}" -n -a "Google Chrome" --args --lang=en-US',
-                    },
-                  },
-                },
-              ],
-            },
-            { command: "sources.get" },
-          );
-        }
-        return makeEnvelope({ sources: [{ key: `${domain}.shell`, label: "Shell aliases", value: {}, revision: "demo-revision", format: "json" }] }, { command: "sources.get" });
-      }
-      if (command === "sources:set") return makeEnvelope({}, { command: "sources.set" });
       if (command === "policy:get") return policyGet();
       if (command === "policy:set") return policySet(args);
       if (command === "policy:delete") return policyDelete(args);
@@ -1302,6 +1320,13 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       if (command === "rules:delete-template") return deleteRuleTemplate(args);
       if (command === "hooks:apply") return applyHooks(args, runId);
       if (command === "hooks:discard-legacy") return discardLegacyHook(args);
+      if (command === "aliases:status") return aliasStatus();
+      if (command === "aliases:apply") return applyAliases(args, runId);
+      if (command === "aliases:discard-legacy") {
+        const id = argOf(args, "--legacy");
+        aliasLegacy = aliasLegacy.filter((entry) => entry.id !== id);
+        return makeEnvelope({ domain: "aliases", discarded: id, source_removed: aliasLegacy.length === 0 }, { command: "aliases.discard-legacy" });
+      }
       if (command.endsWith(":apply")) {
         return applyEnvelope(command.split(":")[0], args, runId);
       }

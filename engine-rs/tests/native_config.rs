@@ -429,3 +429,79 @@ fn only_unapplied_legacy_hooks_travel_in_backups() {
     let _ = std::fs::remove_dir_all(root);
     let _ = std::fs::remove_dir_all(root2);
 }
+
+/// 终端快捷命令以 rc 文件受管区块为准，不进备份；只有旧版本保存、与内置推荐不同的别名以
+/// aliases.shell 来源导出，导入（含旧备份）后在别名页作为已保存未生效建议出现，不改 rc 文件。
+#[test]
+fn only_unapplied_legacy_aliases_travel_in_backups() {
+    let (root, ctx) = temp_ctx("aliases-backup");
+    // 实际区块里的别名不进备份
+    let zshrc = ctx.home_dir.join(".zshrc");
+    std::fs::create_dir_all(&ctx.home_dir).unwrap();
+    std::fs::write(
+        &zshrc,
+        "# >>> agent-manager shell aliases >>>\nalias live='echo live'\n# <<< agent-manager shell aliases <<<\n",
+    )
+    .unwrap();
+    let exported = execute(&ctx, &request("config:export", &[]));
+    assert!(exported.ok, "{:?}", exported.errors);
+    assert!(exported.data["sources"].get("aliases.shell").is_none());
+    assert!(!serde_json::to_string(&exported.data)
+        .unwrap()
+        .contains("echo live"));
+
+    // 旧版本的每份备份都带 aliases.shell：与内置相同的 claude 不算，ll 才是用户存过的
+    let legacy = r#"{"aliases":{"claude":"TZ=\"{timezone}\" LANG=\"{lang}\" LC_ALL=\"{lang}\" claude","ll":"ls -l"},"lang":"en_US.UTF-8","timezone":"America/Los_Angeles"}"#;
+    let mut backup = exported.data.clone();
+    backup["sources"]["aliases.shell"] = serde_json::json!(legacy);
+    let before = std::fs::read(&zshrc).unwrap();
+    let env = execute(
+        &ctx,
+        &request("config:import", &["--value", &backup.to_string()]),
+    );
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(std::fs::read(&zshrc).unwrap(), before, "导入不改 rc 文件");
+    let names = |ctx: &Context| -> Vec<String> {
+        let status = execute(ctx, &request("aliases:status", &[]));
+        status.data["alias_legacy"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["name"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert_eq!(names(&ctx), ["ll"]);
+
+    // 仍有未生效的别名：导出带上这一行，换机器导入后照样是建议
+    let exported = execute(&ctx, &request("config:export", &[]));
+    let text = exported.data["sources"]["aliases.shell"].as_str().unwrap();
+    assert!(text.contains("ls -l"));
+    let (root2, ctx2) = temp_ctx("aliases-backup-2");
+    let env = execute(
+        &ctx2,
+        &request(
+            "config:import",
+            &["--value", &serde_json::to_string(&exported.data).unwrap()],
+        ),
+    );
+    assert!(env.ok, "{:?}", env.errors);
+    assert!(
+        std::fs::read_dir(&ctx2.home_dir)
+            .map(|mut dir| dir.next().is_none())
+            .unwrap_or(true),
+        "导入不写 home"
+    );
+    assert_eq!(names(&ctx2), ["ll"]);
+
+    // 结构非法的 aliases.shell 整份拒绝
+    let mut bad = exported.data.clone();
+    bad["sources"]["aliases.shell"] = serde_json::json!(r#"{"aliases":{"bad name":"x"}}"#);
+    let env = execute(
+        &ctx2,
+        &request("config:import", &["--value", &bad.to_string()]),
+    );
+    assert!(!env.ok);
+    assert_eq!(env.errors[0].code, "CONFIG_ERROR");
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(root2);
+}

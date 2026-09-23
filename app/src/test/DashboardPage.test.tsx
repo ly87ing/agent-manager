@@ -8,7 +8,7 @@ import { setEngineClient } from "../lib/engine";
 import { ExecutionProvider } from "../lib/execution";
 import { createQueryClient } from "../lib/queries";
 import { createMswEngineClient, startEngineServer, type EngineRoute } from "./engine-test-client";
-import { makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness } from "./fixtures";
+import { makeAction, makeAliasStatus, makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness } from "./fixtures";
 import type { RefreshUpstreamData } from "../lib/contract";
 
 const servers: Array<ReturnType<typeof startEngineServer>> = [];
@@ -149,16 +149,10 @@ function okRoutes(): Record<string, EngineRoute> {
     "rules:status": makeEnvelope({ domain: "rules", elements: [] }, { command: "rules.status" }),
     "hooks:status": makeEnvelope({ domain: "hooks", elements: [] }, { command: "hooks.status" }),
     "aliases:status": makeEnvelope(
-      {
-        domain: "aliases",
-        elements: [
-          makeElement({
-            id: "aliases:zshrc",
-            domain: "aliases",
-            observed: { entries: [{ name: "cc", state: "applied" }, { name: "yolo", state: "missing" }] },
-          }),
-        ],
-      },
+      makeAliasStatus(
+        { cc: "claude", yolo: "claude --dangerously-skip-permissions" },
+        { recommendations: [{ name: "grok", value: "grok", line: "alias grok='grok'" }] },
+      ),
       { command: "aliases.status" },
     ),
   };
@@ -192,10 +186,12 @@ describe("DashboardPage", () => {
     expect(within(skills).getByTestId("overview-item-skill:agent-skills/find-skills")).toBeInTheDocument();
     expect(within(skills).queryByTestId("overview-item-skill:agent-skills")).not.toBeInTheDocument();
 
-    // 快捷命令：按名字合并两个 shell 文件，没写进去的算待同步
+    // 快捷命令：以终端配置文件里的实际行为准，按名字列出，永远不算待同步；推荐不进清单
     const aliases = await screen.findByTestId("overview-aliases");
     expect(within(aliases).getByTestId("overview-item-alias:cc")).toHaveTextContent("已同步");
-    expect(within(aliases).getByTestId("overview-item-alias:yolo")).toHaveTextContent("待同步");
+    expect(within(aliases).getByTestId("overview-item-alias:yolo")).toHaveTextContent("已同步");
+    expect(within(aliases).queryByTestId("overview-item-alias:grok")).toBeNull();
+    expect(screen.queryByTestId("sync-all-button")).toBeNull();
 
     // 空的域不占位置
     expect(screen.queryByTestId("overview-profiles")).not.toBeInTheDocument();
@@ -206,17 +202,24 @@ describe("DashboardPage", () => {
 
   it("一键同步：只对待同步的执行 apply，要你决定的不碰", async () => {
     const routes = okRoutes();
-    // 只注册 aliases:apply；MCP 不进批量，若误算进去 mcp:apply 未注册会记为失败
-    routes["aliases:apply"] = makeEnvelope(makeApplyResult({ domain: "aliases" }), { command: "aliases.apply" });
+    // 技能来源有可用更新 → 待同步（原夹具用快捷命令当待同步项：快捷命令已改为以实际区块为准，
+    // 不再有待同步）。只注册 skills:apply；MCP 与快捷命令不进批量，若误算进去未注册的 apply 会记为失败
+    const skills = routes["skills:status"] as ReturnType<typeof makeEnvelope<{ domain: string; elements: ReturnType<typeof makeElement>[] }>>;
+    skills.data.elements = skills.data.elements.map((element) =>
+      element.id === "skill:agent-skills"
+        ? { ...element, freshness: makeFreshness({ state: "behind", current: "a1b2c3d", upstream: "f0e1d2c" }), actions: [makeAction("update")] }
+        : element,
+    );
+    routes["skills:apply"] = makeEnvelope(makeApplyResult({ domain: "skills" }), { command: "skills.apply" });
     renderDashboard(routes);
 
     const button = await screen.findByTestId("sync-all-button");
-    // 待同步只有快捷命令 yolo 一条；MCP 没有待同步
+    // 待同步只有这一个技能来源；MCP 与快捷命令没有待同步
     expect(button).toHaveTextContent("全部同步（1）");
     await userEvent.click(button);
 
     const confirm = await screen.findByRole("dialog", { name: "同步 1 个待处理项目" });
-    expect(within(confirm).getByTestId("sync-all-preview")).toHaveTextContent("yolo");
+    expect(within(confirm).getByTestId("sync-all-preview")).toHaveTextContent("agent-skills");
     expect(within(confirm).getByText(/“要你决定”的项目不会执行/)).toBeInTheDocument();
     await userEvent.click(within(confirm).getByRole("button", { name: "确认同步" }));
 

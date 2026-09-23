@@ -37,7 +37,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / hooks:discard-legacy / agents:configure|check / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / sources:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / agents:configure|check / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
             ),
         )
     };
@@ -52,13 +52,14 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("secrets", "status" | "set" | "source" | "migrate-legacy") => true,
         ("runs", "list" | "get" | "clear") => true,
         ("policy", "get" | "set" | "delete") => true,
-        ("sources", "get" | "set") => true,
         ("db", "status" | "migrate") => true,
         ("config", "export" | "import") => true,
         // 规则模板只写库：保存与删除，不动规则文件
         ("rules", "save-template" | "delete-template") => true,
         // 丢弃旧版本保存的 hooks：只写库，不动助手文件
         ("hooks", "discard-legacy") => true,
+        // 丢弃旧版本保存的终端快捷命令：只写库，不动 rc 文件
+        ("aliases", "discard-legacy") => true,
         // 运行参数写助手自己的配置文件：与装卸升级的 apply 分开，那条走 shell 命令
         ("agents", "configure") => true,
         // 接入配置可用性检查：会联网，但只在界面上点它时才发
@@ -106,9 +107,10 @@ enum ArgValueKind {
     Digest,
     /// 规则正文（整份文件内容）：任意文本，换行等照常；NUL 等内容规则由引擎判定。
     RuleText,
-    /// 规则与 Hooks 写入的 CAS 基准：64 位小写 sha256，或没有内容时的 missing。
+    /// 规则、Hooks 与终端快捷命令写入的 CAS 基准：64 位小写 sha256，或没有内容时的 missing。
     RuleBase,
-    /// Hooks 建议 id：cleanup-/legacy- 前缀加 16 位小写十六进制（引擎再校验前缀与来源）。
+    /// Hooks / 终端快捷命令的建议 id：cleanup-/legacy- 前缀加 16 位小写十六进制
+    /// （引擎再校验前缀与来源）。
     SuggestionId,
     /// 规则模板 id：小写字母、数字与连字符。
     TemplateId,
@@ -128,11 +130,6 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--value", ArgValueKind::SecretValue));
         }
         ("secrets", "source") => specs.push(("--path", ArgValueKind::FilePath)),
-        ("sources", "get") => specs.push(("--key", ArgValueKind::DotKey)),
-        ("sources", "set") => {
-            specs.push(("--key", ArgValueKind::DotKey));
-            specs.push(("--value", ArgValueKind::JsonValue));
-        }
         ("system", "refresh-upstream") => specs.push(("--only", ArgValueKind::ElementId)),
         // 规则以实际文件为准：写一个目标，base 做 CAS；新内容四选一（引擎再强制恰好一个）
         ("rules", "apply") => {
@@ -159,6 +156,19 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--legacy", ArgValueKind::SuggestionId));
         }
         ("hooks", "discard-legacy") => specs.push(("--legacy", ArgValueKind::SuggestionId)),
+        // 终端快捷命令以 rc 文件受管区块为准：按名编辑一条，要写的文件各带自己的 base 做 CAS；
+        // 操作四选一（引擎再强制恰好一个）。名称与元素 id 同一把尺子，取值由引擎校验。
+        ("aliases", "apply") => {
+            specs.push(("--zshrc-base", ArgValueKind::RuleBase));
+            specs.push(("--zprofile-base", ArgValueKind::RuleBase));
+            specs.push(("--set", ArgValueKind::ElementId));
+            specs.push(("--value", ArgValueKind::RuleText));
+            specs.push(("--rename-from", ArgValueKind::ElementId));
+            specs.push(("--remove", ArgValueKind::ElementId));
+            specs.push(("--recommended", ArgValueKind::ElementId));
+            specs.push(("--legacy", ArgValueKind::SuggestionId));
+        }
+        ("aliases", "discard-legacy") => specs.push(("--legacy", ArgValueKind::SuggestionId)),
         // 只读发现：--only 取域名（agents/skills/mcp），引擎侧再做词汇表校验
         ("system", "discover") => specs.push(("--only", ArgValueKind::ElementId)),
         ("runs", "get") => {
@@ -218,11 +228,6 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
                 specs.push(("--to", ArgValueKind::ElementId));
                 specs.push(("--to-base", ArgValueKind::Digest));
                 specs.push(("--replace", ArgValueKind::Flag));
-            }
-            // 受管目标被外部改过时的显式接管通道：aliases 换整个受管区块，
-            // 引擎侧再强制「须恰好选中一个目标」。
-            if domain == "aliases" {
-                specs.push(("--allow-takeover", ArgValueKind::Flag));
             }
             // 实例配置文件由本工具全权拥有：已有他人内容时需显式接管
             if domain == "profiles" {
@@ -492,9 +497,8 @@ pub fn validate_args(command: &str, args: &[String]) -> Result<(), EngineError> 
     let (domain, _) = command.split_once(':').unwrap_or(("", ""));
     let is_rules = domain == "rules";
     let is_hooks = domain == "hooks";
-    // sources、rules 与 hooks 同 native 严格参数保持一致：拒绝重复 flag。
-    let reject_duplicates =
-        matches!(command, "sources:get" | "sources:set") || is_rules || is_hooks;
+    // rules、hooks 与 aliases 同 native 严格参数保持一致：拒绝重复 flag。
+    let reject_duplicates = is_rules || is_hooks || domain == "aliases";
     let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let mut index = 0;
     while index < args.len() {
@@ -612,6 +616,7 @@ mod tests {
             "hooks:discard-legacy",
             "aliases:status",
             "aliases:apply",
+            "aliases:discard-legacy",
             "profiles:status",
             "profiles:apply",
             "secrets:status",
@@ -627,8 +632,6 @@ mod tests {
             "policy:get",
             "policy:set",
             "policy:delete",
-            "sources:get",
-            "sources:set",
             "db:status",
             "db:migrate",
             "config:export",
@@ -662,6 +665,9 @@ mod tests {
             "runs:delete",
             "policy:drop",
             "sources:delete",
+            // 别名来源已退役：sources 整个域不再在命令面内
+            "sources:get",
+            "sources:set",
             "profile:init",
             "profile:status",
             "profile:pull",
@@ -785,16 +791,6 @@ mod tests {
                     "local".into(),
                     "--key".into(),
                     "mcp.enabled".into(),
-                ],
-            ),
-            ("sources:get", vec!["--key".into(), "aliases.shell".into()]),
-            (
-                "sources:set",
-                vec![
-                    "--key".into(),
-                    "aliases.shell".into(),
-                    "--value".into(),
-                    "{}".into(),
                 ],
             ),
         ] {
@@ -983,7 +979,7 @@ mod tests {
             "mcp:apply 已不再接受 --allow-takeover"
         );
         assert!(validate_command("secrets:adopt").is_err());
-        // aliases:apply 同样放行：受管区块被外部改过时的唯一出路
+        // aliases 以 rc 文件受管区块的实际行为准：按 base 直接编辑，「接管」已退役
         assert!(
             validate_args(
                 "aliases:apply",
@@ -993,8 +989,8 @@ mod tests {
                     "--allow-takeover".into()
                 ]
             )
-            .is_ok(),
-            "aliases:apply --allow-takeover should pass"
+            .is_err(),
+            "aliases:apply --allow-takeover should fail"
         );
         // skills:apply 放行（逐 skill add/remove 显式接管，引擎侧再强制动作范围）
         assert!(
@@ -1376,7 +1372,15 @@ mod tests {
             dispatch_native(ctx, "system:audit".into(), vec![], "audit-test".into()).unwrap();
         assert!(envelope.ok, "{:?}", envelope.errors);
         assert!(!envelope.mode.offline);
-        assert_eq!(envelope.data["status"], "warning");
+        // fresh 上下文没有错误；是否 warning 只取决于本机 PATH 下的助手探测
+        //（终端快捷命令没有区块是正常空状态，不再算待生成）
+        assert!(matches!(
+            envelope.data["status"].as_str(),
+            Some("warning" | "healthy")
+        ));
+        for entry in envelope.data["sections"]["aliases"].as_array().unwrap() {
+            assert_eq!(entry["status"], "notice", "{entry}");
+        }
         assert!(envelope.data["sections"].as_object().unwrap().len() >= 8);
         assert!(!base.join("data").exists(), "audit 不得创建数据目录");
         assert!(!base.join("home").exists(), "audit 不得创建 home 目录");
@@ -1412,71 +1416,96 @@ mod tests {
     }
 
     #[test]
-    fn sources_args_match_native_strictness() {
-        assert!(validate_args("sources:get", &["--key".into(), "aliases".into()]).is_ok());
-        assert!(validate_args(
-            "sources:set",
-            &[
-                "--key".into(),
-                "aliases.shell".into(),
-                "--value".into(),
-                "{\"revision\":\"r\",\"value\":\"v\"}".into(),
-            ]
-        )
-        .is_ok());
-        // 重复 flag 与 native 严格参数一致拒绝
-        for (command, args) in [
+    fn aliases_args_follow_the_actual_block_contract() {
+        let base = "a".repeat(64);
+        let args = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        for (command, list) in [
             (
-                "sources:get",
-                vec![
-                    "--key".into(),
-                    "aliases".into(),
-                    "--key".into(),
-                    "aliases".into(),
-                ],
+                "aliases:apply",
+                args(&[
+                    "--zshrc-base",
+                    &base,
+                    "--zprofile-base",
+                    "missing",
+                    "--set",
+                    "cc-work",
+                    "--value",
+                    "TZ=\"UTC\" claude --model opus",
+                    "--rename-from",
+                    "cc",
+                ]),
             ),
             (
-                "sources:set",
-                vec![
-                    "--key".into(),
-                    "aliases.shell".into(),
-                    "--value".into(),
-                    "{}".into(),
-                    "--value".into(),
-                    "{}".into(),
-                ],
+                "aliases:apply",
+                args(&["--zprofile-base", "missing", "--remove", "ll"]),
+            ),
+            (
+                "aliases:apply",
+                args(&["--zshrc-base", &base, "--recommended", "claude"]),
+            ),
+            (
+                "aliases:apply",
+                args(&["--zshrc-base", &base, "--legacy", "legacy-0123456789abcdef"]),
+            ),
+            (
+                "aliases:discard-legacy",
+                args(&["--legacy", "legacy-0123456789abcdef"]),
             ),
         ] {
-            let err = validate_args(command, &args).unwrap_err();
             assert!(
-                err.message.contains("重复"),
-                "{command} {args:?} should mention duplicate, got: {}",
-                err.message
+                validate_args(command, &list).is_ok(),
+                "{command} {list:?} should pass"
             );
         }
-        assert!(validate_args("sources:get", &["--offline".into()]).is_err());
-        assert!(validate_args("sources:set", &["--dry-run".into()]).is_err());
-        assert!(validate_args("sources:set", &["positional".into()]).is_err());
+        for (command, list) in [
+            ("aliases:status", args(&["--offline"])),
+            ("aliases:apply", args(&["--only", "aliases:zshrc"])),
+            ("aliases:apply", args(&["--zshrc-base", "nothex"])),
+            (
+                "aliases:apply",
+                args(&["--zshrc-base", "missing", "--zshrc-base", "missing"]),
+            ),
+            (
+                "aliases:apply",
+                args(&["--zshrc-base", "missing", "--remove", "bad name"]),
+            ),
+            (
+                "aliases:apply",
+                args(&["--zshrc-base", "missing", "--legacy", "legacy-xyz"]),
+            ),
+            (
+                "aliases:apply",
+                args(&["--zshrc-base", "missing", "--dry-run"]),
+            ),
+            ("aliases:discard-legacy", args(&["--legacy", "Bad"])),
+            ("aliases:discard-legacy", args(&["--remove", "ll"])),
+        ] {
+            assert!(
+                validate_args(command, &list).is_err(),
+                "{command} {list:?} should fail"
+            );
+        }
 
-        // dispatch_native 对 sources 不注入 --offline：离线偏好下仍直连成功且零写
-        let root = std::env::temp_dir().join(format!("am-sources-bridge-{}", std::process::id()));
+        // 端到端：bridge 直连引擎，status 只读零写
+        let root = std::env::temp_dir().join(format!("am-aliases-bridge-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        let c = || agent_manager_engine::Context {
-            data_dir: root.join("data"),
-            home_dir: root.join("home"),
-        };
         let env = dispatch_native(
-            c(),
-            "sources:get".into(),
-            vec!["--key".into(), "aliases".into()],
-            "sources-offline".into(),
+            agent_manager_engine::Context {
+                data_dir: root.join("data"),
+                home_dir: root.join("home"),
+            },
+            "aliases:status".into(),
+            vec![],
+            "aliases-bridge".into(),
         )
         .unwrap();
         assert!(env.ok, "{:?}", env.errors);
-        assert!(!env.mode.offline, "sources 不注入 --offline");
-        // 只剩 aliases 来源（规则与 hooks 来源已退役）
-        assert_eq!(env.data["sources"].as_array().unwrap().len(), 1);
-        assert!(!root.join("data").exists(), "sources:get 零写");
+        assert_eq!(
+            env.data["alias_recommendations"].as_array().unwrap().len(),
+            4
+        );
+        assert!(!root.join("data").exists(), "aliases:status 零写");
+        assert!(!root.join("home").exists(), "aliases:status 零写");
         let _ = std::fs::remove_dir_all(root);
     }
 

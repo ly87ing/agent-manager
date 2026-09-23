@@ -5,8 +5,6 @@ import { useDialogFocus } from "../lib/dialogFocus";
 import { hasPresetArgs, presetsForCommand, togglePresetArgs } from "../lib/agentPresets";
 import {
   ALIAS_NAME_RE,
-  FOLLOW_GLOBAL_LANG,
-  FOLLOW_GLOBAL_TZ,
   LANG_OPTIONS,
   aliasTextError,
   buildAliasValue,
@@ -23,14 +21,14 @@ const CUSTOM_OPTION = "__custom__";
  *
  * 结构化编辑只处理「环境变量在前、命令在后」这一形状；读到的值不是这个形状时（例如包了
  * open/env 等其它命令）自动切到原文编辑，不猜测改写用户已有的写法。
- * 保存只写本地资源库，要写进 shell 配置需在页面上另点同步。
+ * 保存即按名写回 ~/.zshrc 与 ~/.zprofile 里本工具维护的那一段。
  */
 export function AliasEditorDialog({
   initialName,
   initialValue,
   defaultCommand,
   presetName,
-  globals,
+  defaults,
   existingNames,
   onSubmit,
   onClose,
@@ -42,7 +40,8 @@ export function AliasEditorDialog({
   defaultCommand?: string;
   /** 新增时预填的名字（复制既有条目时用）。 */
   presetName?: string;
-  globals: { timezone: string; lang: string };
+  /** 新增时预填的时区与语言（写进去的是字面量）。 */
+  defaults: { timezone: string; lang: string };
   /** 已存在的别名名称，用于新增时的重名校验。 */
   existingNames: string[];
   /** 编辑时改了名字即为重命名：调用方据此删掉旧名那一条。 */
@@ -55,8 +54,8 @@ export function AliasEditorDialog({
   const [name, setName] = useState(initialName ?? presetName ?? defaultCommand ?? "");
   const [command, setCommand] = useState(parsed.command || defaultCommand || "");
   const [extraArgs, setExtraArgs] = useState(parsed.extraArgs);
-  const [timezone, setTimezone] = useState<string>(parsed.timezone ?? (initialValue ? "" : FOLLOW_GLOBAL_TZ));
-  const [lang, setLang] = useState<string>(parsed.lang ?? (initialValue ? "" : FOLLOW_GLOBAL_LANG));
+  const [timezone, setTimezone] = useState<string>(parsed.timezone ?? (initialValue ? "" : defaults.timezone));
+  const [lang, setLang] = useState<string>(parsed.lang ?? (initialValue ? "" : defaults.lang));
   const [rawValue, setRawValue] = useState(initialValue ?? "");
   const [error, setError] = useState<string | null>(null);
   const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({ onEscape: onClose });
@@ -66,12 +65,8 @@ export function AliasEditorDialog({
   const presets = useMemo(() => presetsForCommand(command), [command]);
   const activeDangerPreset = presets.find((preset) => preset.danger && hasPresetArgs(extraArgs, preset));
   // 读到的取值不在下拉里（例如手写的少见时区或语言）时直接进自定义模式，避免下拉把它吞掉
-  const [tzCustom, setTzCustom] = useState(
-    Boolean(parsed.timezone) && parsed.timezone !== FOLLOW_GLOBAL_TZ && !timeZones.includes(parsed.timezone as string),
-  );
-  const [langCustom, setLangCustom] = useState(
-    Boolean(parsed.lang) && parsed.lang !== FOLLOW_GLOBAL_LANG && !LANG_OPTIONS.includes(parsed.lang as string),
-  );
+  const [tzCustom, setTzCustom] = useState(Boolean(parsed.timezone) && !timeZones.includes(parsed.timezone as string));
+  const [langCustom, setLangCustom] = useState(Boolean(parsed.lang) && !LANG_OPTIONS.includes(parsed.lang as string));
   /** 除 TZ/LANG/LC_ALL 外的自定义环境变量行（可增删改）。 */
   const [envRows, setEnvRows] = useState<{ key: string; value: string }[]>(
     Object.entries(parsed.otherEnv).map(([key, value]) => ({ key, value })),
@@ -87,7 +82,7 @@ export function AliasEditorDialog({
           envRows.filter((row) => row.key.trim()).map((row) => [row.key.trim(), row.value]),
         ),
       });
-  const preview = name && value ? renderAliasPreview(name, value, globals) : "";
+  const preview = name && value ? renderAliasPreview(name, value) : "";
 
   const submit = () => {
     if (!ALIAS_NAME_RE.test(name)) {
@@ -172,8 +167,7 @@ export function AliasEditorDialog({
                 className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs"
               />
               <p className="mt-1 text-[11px] text-muted-foreground">
-                这条命令不是「环境变量 + 命令」的常见写法，因此按原文编辑。其中 {"{timezone}"} 与 {"{lang}"} 会在写入时
-                替换成全局设置（现在是 {globals.timezone} / {globals.lang}），保留它们就能继续跟随全局。
+                这条命令不是「环境变量 + 命令」的常见写法，因此按原文编辑，写进去的就是这里的内容。
               </p>
             </div>
           ) : (
@@ -213,7 +207,7 @@ export function AliasEditorDialog({
                         data-testid="alias-timezone-back"
                         onClick={() => {
                           setTzCustom(false);
-                          setTimezone(FOLLOW_GLOBAL_TZ);
+                          setTimezone(defaults.timezone);
                         }}
                         className="shrink-0 rounded border px-2 text-xs text-muted-foreground hover:bg-accent"
                       >
@@ -235,7 +229,6 @@ export function AliasEditorDialog({
                       data-testid="alias-timezone-select"
                       className="w-full rounded border border-input bg-background px-2 py-1.5 text-xs"
                     >
-                      <option value={FOLLOW_GLOBAL_TZ}>跟随全局（{globals.timezone}）</option>
                       <option value="">不设置</option>
                       {timeZones.map((zone) => (
                         <option key={zone} value={zone}>
@@ -264,7 +257,7 @@ export function AliasEditorDialog({
                         data-testid="alias-lang-back"
                         onClick={() => {
                           setLangCustom(false);
-                          setLang(FOLLOW_GLOBAL_LANG);
+                          setLang(defaults.lang);
                         }}
                         className="shrink-0 rounded border px-2 text-xs text-muted-foreground hover:bg-accent"
                       >
@@ -286,7 +279,6 @@ export function AliasEditorDialog({
                       data-testid="alias-lang-select"
                       className="w-full rounded border border-input bg-background px-2 py-1.5 text-xs"
                     >
-                      <option value={FOLLOW_GLOBAL_LANG}>跟随全局（{globals.lang}）</option>
                       <option value="">不设置</option>
                       {LANG_OPTIONS.map((item) => (
                         <option key={item} value={item}>
@@ -396,12 +388,6 @@ export function AliasEditorDialog({
             </>
           )}
 
-          {(timezone === FOLLOW_GLOBAL_TZ || lang === FOLLOW_GLOBAL_LANG || rawMode) && (
-            <p className="text-[11px] text-muted-foreground">
-              全局时区与语言在「设置 → 终端快捷命令」里改，改一次所有跟随全局的命令一起变。
-            </p>
-          )}
-
           <div>
             <span className="mb-1 block text-xs font-medium text-muted-foreground">写入 shell 配置的效果</span>
             <pre data-testid="alias-preview" className="overflow-x-auto rounded border bg-muted px-2 py-1.5 font-mono text-[11px] text-foreground">
@@ -426,7 +412,7 @@ export function AliasEditorDialog({
         </div>
 
         <div className="mt-5 flex items-center justify-end gap-2">
-          <span className="mr-auto text-xs text-muted-foreground">只保存配置，之后点同步才写入终端配置文件</span>
+          <span className="mr-auto text-xs text-muted-foreground">保存即写入 ~/.zshrc 与 ~/.zprofile 里本工具维护的那一段</span>
           <button type="button" onClick={onClose} className="rounded-md border px-4 py-2 text-sm text-muted-foreground hover:bg-accent">
             取消
           </button>

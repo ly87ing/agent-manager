@@ -106,6 +106,40 @@ export interface StatusData {
   templates?: RuleTemplate[];
   /** 仅 rules 域：编译内置的推荐规则。只读，不入库，不计入待同步。 */
   recommended?: RuleRecommended;
+  /** 仅 aliases 域：两个 rc 文件受管区块里的实际别名，按名合并。这就是当前配置。 */
+  aliases?: AliasCurrent[];
+  /** 仅 aliases 域：内置推荐别名（任一文件里已有同名的不推荐）。只读，不计入待同步。 */
+  alias_recommendations?: AliasRecommendation[];
+  /** 仅 aliases 域：旧版本保存、实际区块里还没有的别名（已保存未生效）。 */
+  alias_legacy?: AliasLegacySuggestion[];
+}
+
+// ---------- aliases:status 顶层 ----------
+
+export interface AliasCurrent {
+  name: string;
+  /** 本工具写法 alias name='value' 时的取值；其他写法为 null（只能整条改写或删除）。 */
+  value: string | null;
+  line: string;
+  /** 区块里定义了它的文件（元素 id）。 */
+  targets: string[];
+  /** false = 两个文件里的写法不一样。 */
+  consistent: boolean;
+}
+
+export interface AliasRecommendation {
+  name: string;
+  value: string;
+  line: string;
+}
+
+export interface AliasLegacySuggestion {
+  id: string;
+  name: string;
+  value: string;
+  line: string;
+  /** 区块里现在定义这个名字的那一行；没有为 null。 */
+  actual: string | null;
 }
 
 // ---------- rules:status templates / recommended ----------

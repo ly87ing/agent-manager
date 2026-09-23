@@ -1,5 +1,7 @@
 import {
   CONTRACT_ID,
+  type AliasLegacySuggestion,
+  type AliasRecommendation,
   type ApplyResultData,
   type AuditData,
   type ElementAction,
@@ -9,6 +11,7 @@ import {
   type Mode,
   type PolicyData,
   type RunEntry,
+  type StatusData,
 } from "../lib/contract";
 import type { AgentManagement, AgentRuntimeField, AgentRuntimeSummary } from "../lib/observed";
 
@@ -213,4 +216,59 @@ export function makePolicyData(overrides: Partial<PolicyData> = {}): PolicyData 
 /** 元素动作：测试大多只关心 id，其余字段给不影响判定的默认值。 */
 export function makeAction(id: string, overrides: Partial<ElementAction> = {}): ElementAction {
   return { id, risk: "write-local", needs_lock: true, offline_ok: true, ...overrides };
+}
+
+/**
+ * aliases:status 的 data：两个 rc 文件的受管区块都写着同样的 `aliases`（本工具写法），
+ * 区块外的只读别名、推荐与已保存未生效的建议按需给出。与引擎 aliases 域的输出形状一致。
+ */
+export function makeAliasStatus(
+  aliases: Record<string, string>,
+  options: {
+    recommendations?: AliasRecommendation[];
+    legacy?: AliasLegacySuggestion[];
+    external?: Record<string, string>;
+    blockedZprofile?: string;
+  } = {},
+): StatusData {
+  const line = (name: string, value: string) => `alias ${name}='${value}'`;
+  const entries = Object.entries(aliases).map(([name, value]) => ({ name, value, line: line(name, value) }));
+  const target = (id: string, file: string, flag: string, blocked?: string) =>
+    makeElement({
+      id,
+      domain: "aliases",
+      spec: { name: id, target: file, marker: "agent-manager shell aliases", base_flag: flag },
+      policy: { enabled: true },
+      observed: {
+        target: `/Users/demo/${file.slice(2)}`,
+        target_exists: !blocked,
+        block_present: blocked ? null : entries.length > 0,
+        base: blocked ? null : entries.length > 0 ? `base-${id}` : "missing",
+        entries: blocked ? [] : entries,
+        external:
+          blocked || file !== "~/.zshrc"
+            ? []
+            : Object.entries(options.external ?? {}).map(([name, value]) => ({ name, value, line: line(name, value) })),
+        blocked_reason: blocked ?? null,
+      },
+      state: blocked ? "unmanaged-detected" : entries.length > 0 ? "managed-ok" : "missing",
+      actions: blocked ? [] : [makeAction("write")],
+    });
+  const zprofileBlocked = options.blockedZprofile;
+  return {
+    domain: "aliases",
+    elements: [
+      target("aliases:zshrc", "~/.zshrc", "--zshrc-base"),
+      target("aliases:zprofile", "~/.zprofile", "--zprofile-base", zprofileBlocked),
+    ],
+    aliases: entries
+      .map((entry) => ({
+        ...entry,
+        targets: zprofileBlocked ? ["aliases:zshrc"] : ["aliases:zshrc", "aliases:zprofile"],
+        consistent: true,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    alias_recommendations: options.recommendations ?? [],
+    alias_legacy: options.legacy ?? [],
+  };
 }

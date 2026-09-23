@@ -44,9 +44,61 @@
         "body": {"type": "string"},
         "revision": {"description": "sha256 of body.", "type": "string"}
       }
+    },
+    "aliases": {
+      "description": "Aliases domain only: the aliases actually present in the managed blocks of ~/.zshrc and ~/.zprofile, merged by name. This is the current configuration; nothing here comes from the database. Read-only, zero-write.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/alias_current"}
+    },
+    "alias_recommendations": {
+      "description": "Aliases domain only: compiled-in recommended aliases whose name is not defined in either file (inside or outside the managed block). Never stored, never counted as pending; added one by one on explicit request (aliases:apply --recommended).",
+      "type": "array",
+      "items": {"$ref": "#/$defs/alias_recommendation"}
+    },
+    "alias_legacy": {
+      "description": "Aliases domain only: aliases saved by an older version (legacy alias_sources row) that differ from the recommendations and are not in any managed block with the same value. Can be added (aliases:apply --legacy) or discarded (aliases:discard-legacy).",
+      "type": "array",
+      "items": {"$ref": "#/$defs/alias_legacy"}
     }
   },
   "$defs": {
+    "alias_current": {
+      "description": "One alias found in the managed blocks.",
+      "type": "object",
+      "required": ["name", "value", "line", "targets", "consistent"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string"},
+        "value": {"description": "Value when the line uses the tool's form alias name='value'; null for any other form (listed, kept, editable only by replacing or removing it).", "type": ["string", "null"]},
+        "line": {"description": "The line as found in the first file that defines it.", "type": "string"},
+        "targets": {"description": "Element ids of the files whose block defines this name.", "type": "array", "items": {"type": "string"}},
+        "consistent": {"description": "false when the files define this name with different lines.", "type": "boolean"}
+      }
+    },
+    "alias_recommendation": {
+      "description": "One compiled-in recommended alias, placeholders already resolved.",
+      "type": "object",
+      "required": ["name", "value", "line"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string"},
+        "value": {"type": "string"},
+        "line": {"type": "string"}
+      }
+    },
+    "alias_legacy": {
+      "description": "One alias saved by an older version and not in effect.",
+      "type": "object",
+      "required": ["id", "name", "value", "line", "actual"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"description": "Suggestion id: 'legacy-' plus 16 lowercase hex.", "type": "string"},
+        "name": {"type": "string"},
+        "value": {"description": "Saved value with the saved timezone/lang resolved.", "type": "string"},
+        "line": {"type": "string"},
+        "actual": {"description": "The line currently defining this name in a managed block, or null.", "type": ["string", "null"]}
+      }
+    },
     "rule_template": {
       "description": "One saved rule template.",
       "type": "object",

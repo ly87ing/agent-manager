@@ -13,7 +13,6 @@ import {
 } from "../lib/agentCurrent";
 import { useExecutions } from "../lib/execution";
 import { useEngineQuery } from "../lib/queries";
-import { useDirectApply } from "../lib/useDirectApply";
 import { useRefreshUpstream } from "../lib/queries";
 import { matchesKeyword } from "./SearchInput";
 import { cn } from "../lib/utils";
@@ -110,7 +109,6 @@ export function CommandPalette({
   } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const switchBusyRef = useRef(false);
-  const directApply = useDirectApply();
   const refreshUpstream = useRefreshUpstream();
   const { execute } = useExecutions();
 
@@ -353,14 +351,6 @@ export function CommandPalette({
         run: () => refreshUpstream.mutate(undefined),
       },
       {
-        id: "action:apply-aliases",
-        label: "同步终端快捷命令",
-        hint: "写入 .zshrc 与 .zprofile",
-        keywords: "alias 别名 启动命令",
-        group: "动作",
-        run: () => void directApply.apply({ command: "aliases:apply", label: "同步终端快捷命令" }),
-      },
-      {
         id: "action:takeover",
         label: "扫描本机资源",
         hint: "扫描并导入本机已有配置",
@@ -370,7 +360,7 @@ export function CommandPalette({
       },
     );
     return out;
-  }, [agents.data, skills.data, mcp.data, profiles.data, switchingTarget, directApply, refreshUpstream, switchConnection, onNavigate, onOpenAgentSkills]);
+  }, [agents.data, skills.data, mcp.data, profiles.data, switchingTarget, refreshUpstream, switchConnection, onNavigate, onOpenAgentSkills]);
 
   const filtered = useMemo(() => {
     const scoped = scope === "connections"

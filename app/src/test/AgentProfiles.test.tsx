@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { waitFor } from "@testing-library/react";
 import AgentsPage from "../pages/AgentsPage";
 import type { Envelope } from "../lib/contract";
-import { agentManagementFixture, makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
+import { agentManagementFixture, makeAliasStatus, makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 
 function profileElement(overrides: Record<string, unknown> = {}) {
@@ -101,32 +101,16 @@ function routes(profiles: ReturnType<typeof profileElement>[] = [profileElement(
     "agents:apply": makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }),
     "aliases:apply": makeEnvelope(makeApplyResult({ domain: "aliases" }), { command: "aliases.apply" }),
     "policy:set": makeEnvelope(makePolicyData(), { command: "policy.set" }),
-    "sources:get": makeEnvelope(
-      {
-        sources: [
-          {
-            key: "aliases.shell",
-            label: "Shell aliases",
-            format: "json",
-            revision: "rev-1",
-            value: {
-              timezone: "America/Los_Angeles",
-              lang: "en_US.UTF-8",
-              aliases: {
-                // 指向该实例配置目录的两条命令：卡片按配置目录反查，应两条都列出
-                "cc-ly": 'CLAUDE_CONFIG_DIR="$HOME/.claude-cc-ly" claude',
-                "cc-ly-yolo":
-                  'CLAUDE_CONFIG_DIR="$HOME/.claude-cc-ly" claude --dangerously-skip-permissions',
-                // 与该实例无关的一条：不该出现在实例卡片里
-                claude: "claude",
-              },
-            },
-          },
-        ],
-      },
-      { command: "sources.get" },
+    "aliases:status": makeEnvelope(
+      makeAliasStatus({
+        // 指向该实例配置目录的两条命令：卡片按配置目录反查，应两条都列出
+        "cc-ly": 'CLAUDE_CONFIG_DIR="$HOME/.claude-cc-ly" claude',
+        "cc-ly-yolo": 'CLAUDE_CONFIG_DIR="$HOME/.claude-cc-ly" claude --dangerously-skip-permissions',
+        // 与该实例无关的一条：不该出现在实例卡片里
+        claude: "claude",
+      }),
+      { command: "aliases.status" },
     ),
-    "sources:set": makeEnvelope({ key: "aliases.shell", revision: "rev-2" }, { command: "sources.set" }),
   };
 }
 
@@ -176,7 +160,7 @@ describe("助手实例", () => {
     expect(within(dialog).getByTestId("profile-config-dir")).toHaveValue("~/.claude-cc-ly-copy");
   });
 
-  it("新建实例：保存定义并把启动命令一并存成同名快捷命令，不落地任何配置", async () => {
+  it("新建实例：保存定义，并把启动命令按名直接写进终端配置；实例配置目录不落地", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await openInstanceManager();
     await userEvent.click(await screen.findByTestId("add-profile-button"));
@@ -190,7 +174,7 @@ describe("助手实例", () => {
     );
     await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
 
-    await waitFor(() => expect(calls.some((call) => call.command === "sources:set")).toBe(true));
+    await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
     const defWrite = calls.find((call) => call.command === "policy:set")!;
     expect(defWrite.args[defWrite.args.indexOf("--key") + 1]).toBe("agents.definitions.cc-work");
     const definition = JSON.parse(defWrite.args[defWrite.args.indexOf("--value") + 1]);
@@ -199,15 +183,15 @@ describe("助手实例", () => {
     expect(definition.mcp_config).toEqual({ path: "~/.claude-cc-work/.claude.json", format: "json" });
     // 鉴权只存变量名
     expect(definition.profile.env.ANTHROPIC_AUTH_TOKEN).toBe("${WORK_TOKEN}");
-    // 启动命令同时进快捷命令来源
-    const aliasWrite = calls.find((call) => call.command === "sources:set")!;
-    const payload = JSON.parse(aliasWrite.args[aliasWrite.args.indexOf("--value") + 1]);
-    expect(payload.value.aliases["cc-work"]).toBe(
+    // 启动命令以终端配置为准：保存即按名写进 rc 文件的受管区块（先写定义再写别名）
+    const aliasWrite = calls.find((call) => call.command === "aliases:apply")!;
+    expect(calls.indexOf(aliasWrite)).toBeGreaterThan(calls.indexOf(defWrite));
+    expect(aliasWrite.args[aliasWrite.args.indexOf("--set") + 1]).toBe("cc-work");
+    expect(aliasWrite.args[aliasWrite.args.indexOf("--value") + 1]).toBe(
       'CLAUDE_CONFIG_DIR="$HOME/.claude-cc-work" claude --dangerously-skip-permissions',
     );
-    // 保存阶段不写任何配置文件
+    // 实例配置目录仍要单独「写入配置」才落地
     expect(calls.some((call) => call.command === "profiles:apply")).toBe(false);
-    expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
   });
 
   it("新建实例使用整页分组编辑器，并实时列出全部落地位置与启动值", async () => {
