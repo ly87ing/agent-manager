@@ -163,11 +163,11 @@ describe("dev-only mock 开关", () => {
 
   it("mock client 支持 MCP 页就地填写缺失变量并回读状态", async () => {
     const client = createMockEngineClient();
+    type Cells = { elements: Array<{ id: string; observed: { agents?: Record<string, { vars?: Record<string, { resolved?: boolean }> }> } }> };
 
     const before = await client.run("mcp:status");
-    const beforeGrok = (before.data as { elements: Array<{ id: string; observed: { env?: Record<string, { resolved?: boolean }> } }> }).elements
-      .find((element) => element.id === "mcp:grok-search");
-    expect(beforeGrok?.observed.env?.TAVILY_API_KEY.resolved).toBe(false);
+    const beforeGrok = (before.data as Cells).elements.find((element) => element.id === "mcp:grok-search");
+    expect(beforeGrok?.observed.agents?.["claude-code"].vars?.TAVILY_API_KEY.resolved).toBe(false);
 
     const saved = await client.run(
       "secrets:set",
@@ -178,10 +178,7 @@ describe("dev-only mock 开关", () => {
     expect(saved.run_id).toBe("gui-mock-secret");
 
     const after = await client.run("mcp:status");
-    const afterGrok = (after.data as { elements: Array<{ id: string; observed: { env?: Record<string, { resolved?: boolean }>; agents?: Record<string, { actions?: string[]; blocked_reason?: string | null }> } }> }).elements
-      .find((element) => element.id === "mcp:grok-search");
-    expect(afterGrok?.observed.env?.TAVILY_API_KEY.resolved).toBe(true);
-    expect(afterGrok?.observed.agents?.codex.actions).toEqual(["add"]);
-    expect(afterGrok?.observed.agents?.codex.blocked_reason).toBeNull();
+    const afterGrok = (after.data as Cells).elements.find((element) => element.id === "mcp:grok-search");
+    expect(afterGrok?.observed.agents?.["claude-code"].vars?.TAVILY_API_KEY.resolved).toBe(true);
   });
 });

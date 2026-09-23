@@ -3,6 +3,8 @@
  *
  * 导入是整体替换且不可撤销，所以点确认之前要让人看清楚：哪些定义会新增、哪些会被改、
  * 哪些会消失。只比定义与来源本身，不比本机落地状态（那本来就不在备份里）。
+ * MCP 例外：生效条目在各助手配置文件里、不进备份；备份只带「已保存未生效」的 MCP 项
+ * （mcp_saved，旧备份则是 policy.mcp.definitions），导入时逐项写入、本机已有的不删除。
  */
 
 export interface DiffSection {
@@ -36,6 +38,21 @@ function agentBuckets(policy: Json): { agents: Json; profiles: Json } {
     else agents[name] = value;
   }
   return { agents, profiles };
+}
+
+/** 已保存的 MCP 项：键为「服务 @ 助手」（未分配的只写服务名）；旧备份的服务库定义按未分配处理。 */
+function mcpSavedItems(backup: Json): Json {
+  const out: Json = {};
+  const rows = Array.isArray(backup.mcp_saved) ? backup.mcp_saved : [];
+  for (const raw of rows) {
+    const row = asObject(raw);
+    const key = row.agent ? `${String(row.server)} @ ${String(row.agent)}` : String(row.server);
+    out[key] = { entry: row.entry, resolve: row.resolve };
+  }
+  for (const [name, def] of Object.entries(asObject(asObject(asObject(backup.policy).mcp).definitions))) {
+    if (!(name in out)) out[name] = { entry: def, resolve: { env: [], headers: [] } };
+  }
+  return out;
 }
 
 function diffMaps(label: string, before: Json, after: Json): DiffSection {
@@ -86,7 +103,8 @@ export function diffBackup(current: Json, incoming: Json): BackupDiff {
   const sections = [
     diffMaps("助手定义", currentAgents.agents, incomingAgents.agents),
     diffMaps("实例", currentAgents.profiles, incomingAgents.profiles),
-    diffMaps("MCP 服务", asObject(asObject(currentPolicy.mcp).definitions), asObject(asObject(incomingPolicy.mcp).definitions)),
+    // 导入只新增或覆盖同名项，本机已有的 MCP 已保存项不会消失
+    { ...diffMaps("MCP 已保存项", mcpSavedItems(current), mcpSavedItems(incoming)), removed: [] },
     diffMaps(
       "技能集合",
       asObject(asObject(currentPolicy.skills).repositories),

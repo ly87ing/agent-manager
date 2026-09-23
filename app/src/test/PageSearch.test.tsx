@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import McpPage from "../pages/McpPage";
 import RunsPage from "../pages/RunsPage";
 import SkillsPage from "../pages/SkillsPage";
-import type { Envelope, StatusData } from "../lib/contract";
+import type { Envelope } from "../lib/contract";
 import {
   makeElement,
   makeEnvelope,
@@ -10,54 +10,10 @@ import {
   makeRunEntry,
 } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
+import { mcpStatusData } from "./mcp-fixtures";
 
 function mcpRoutes(): Record<string, Envelope> {
-  const status: StatusData = {
-    domain: "mcp",
-    elements: [
-      makeElement({
-        id: "mcp:chrome-devtools",
-        domain: "mcp",
-        spec: { command: "npx", args: ["-y", "chrome-devtools-mcp"], startup_timeout_sec: 120, agents: null, env: {} },
-        observed: {
-          agents: {
-            "claude-code": { state: "drifted", target: "/tmp/demo/.claude.json", target_exists: true, assigned: true, enabled: true, actions: ["update"] },
-            codex: { state: "managed-ok", target: "/tmp/demo/.codex/config.toml", target_exists: true, assigned: true, enabled: true, actions: ["disable", "remove"] },
-          },
-          env: {},
-          actions: ["enable", "disable", "remove"],
-        },
-        state: "drifted",
-      }),
-      makeElement({
-        id: "mcp:serena",
-        domain: "mcp",
-        spec: { command: "uvx", args: ["serena"], startup_timeout_sec: 60, agents: null, env: {} },
-        observed: {
-          agents: {
-            "claude-code": { state: "leftover", target: "/tmp/demo/.claude.json", target_exists: true, assigned: false, enabled: false, actions: ["remove"] },
-            codex: { state: "not-materialized", target: "/tmp/demo/.codex/config.toml", target_exists: false, assigned: true, enabled: true, actions: [] },
-          },
-          env: {},
-          actions: ["disable", "remove"],
-        },
-        state: "managed-ok",
-      }),
-    ],
-  };
-  return {
-    "mcp:status": makeEnvelope(status, { command: "mcp.status" }),
-    "agents:status": makeEnvelope(
-      {
-        domain: "agents",
-        elements: [
-          makeElement({ id: "agents:claude-code", domain: "agents" }),
-          makeElement({ id: "agents:codex", domain: "agents" }),
-        ],
-      },
-      { command: "agents.status" },
-    ),
-  };
+  return { "mcp:status": makeEnvelope(mcpStatusData(), { command: "mcp.status" }) };
 }
 
 function runsRoutes(): Record<string, Envelope> {
@@ -129,40 +85,40 @@ function skillsRoutes(): Record<string, Envelope> {
 }
 
 describe("页内搜索：MCP 页", () => {
-  it("服务库按名称/命令过滤卡片；无匹配时给出空态与清除入口", async () => {
+  it("服务按名称/命令/地址过滤卡片；无匹配时给出空态与清除入口", async () => {
     renderWithEngine(<McpPage />, mcpRoutes());
     const input = await screen.findByTestId("mcp-search");
-    expect(await screen.findByRole("button", { name: "mcp:chrome-devtools" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "mcp:serena" })).toBeInTheDocument();
+    expect(await screen.findByTestId("mcp-card-mcp:fs")).toBeInTheDocument();
+    expect(screen.getByTestId("mcp-card-mcp:remote-api")).toBeInTheDocument();
 
-    await userEvent.type(input, "Serena");
-    expect(screen.queryByRole("button", { name: "mcp:chrome-devtools" })).toBeNull();
-    expect(screen.getByRole("button", { name: "mcp:serena" })).toBeInTheDocument();
+    await userEvent.type(input, "mcp.example.com");
+    expect(screen.queryByTestId("mcp-card-mcp:fs")).toBeNull();
+    expect(screen.getByTestId("mcp-card-mcp:remote-api")).toBeInTheDocument();
 
     await userEvent.clear(input);
     await userEvent.type(input, "不存在的服务");
     expect(await screen.findByTestId("mcp-search-empty")).toHaveTextContent("无匹配结果");
 
     await userEvent.click(screen.getByRole("button", { name: "清除搜索关键词" }));
-    expect(screen.getByRole("button", { name: "mcp:chrome-devtools" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "mcp:serena" })).toBeInTheDocument();
+    expect(screen.getByTestId("mcp-card-mcp:fs")).toBeInTheDocument();
+    expect(screen.getByTestId("mcp-card-mcp:remote-api")).toBeInTheDocument();
   });
 
-  it("助手中的服务：搜索与助手下拉筛选叠加（AND）", async () => {
+  it("按助手查看：搜索与助手下拉筛选叠加（AND）", async () => {
     renderWithEngine(<McpPage />, mcpRoutes());
-    await userEvent.click(await screen.findByRole("tab", { name: "助手中的服务" }));
+    await userEvent.click(await screen.findByRole("tab", { name: "按助手查看" }));
 
-    await userEvent.selectOptions(screen.getByTestId("filter-agent-select"), "claude-code");
+    await userEvent.selectOptions(screen.getByTestId("filter-agent-select"), "codex");
     const input = await screen.findByTestId("mcp-search");
-    await userEvent.type(input, "serena");
+    await userEvent.type(input, "remote");
 
-    // AND 生效：仅剩 serena × claude-code（leftover），chrome-devtools × claude-code 被搜索过滤
-    expect(await screen.findByTitle("claude-code: leftover")).toBeInTheDocument();
-    expect(screen.queryByTitle("claude-code: drifted")).toBeNull();
-    expect(screen.queryByTitle("codex: managed-ok")).toBeNull();
+    // AND 生效：只剩 remote-api × codex（已停用），fs 被搜索过滤、Claude 列被助手筛选去掉
+    expect(await screen.findByTitle(/^codex: disabled/)).toBeInTheDocument();
+    expect(screen.queryByTitle(/^codex: enabled/)).toBeNull();
+    expect(screen.queryByTitle(/^claude-code:/)).toBeNull();
 
     await userEvent.clear(input);
-    expect(await screen.findByTitle("claude-code: drifted")).toBeInTheDocument();
+    expect(await screen.findByTitle(/^codex: enabled/)).toBeInTheDocument();
   });
 });
 

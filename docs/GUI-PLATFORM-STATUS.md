@@ -13,12 +13,12 @@
 | Skills 原生域 | 已完成：已接入 dispatcher；内置默认只读、写入进 SQLite；集合与单技能支持更新/启停/移除；内容快照与安全软连接；status 只读零写与 apply 排他锁/审计 |
 | Runs 操作记录与清理 | 已完成：列表与详情读取 SQLite `operation_logs`；新增操作记录时按设置（`log_retention_days`，0 为不清理）删除过期记录；提供 `runs:clear` 二次确认手动清空（清空自身零审计且不删库改配置） |
 | 本地结构化诊断日志与清理 | 已退役（2026-09-19 裁决）：JSONL 诊断日志、`logs:clear` 与 envelope `log_file` 一并移除；错误消息出库前仍统一脱敏，排查依赖 `operation_logs` |
-| MCP 原生域 | 已完成：Rust dispatcher 已接入本地 stdio 与远程 HTTP `mcp:status` / 真实 `mcp:apply`；定义与分配存 SQLite；当前产品支持 Claude JSON 与 Codex TOML，旧 OpenCode codec 仅用于兼容既有数据；逐助手 add/update/enable/disable/remove，库级 enable/disable/remove；status 只读零写；apply 具备锁、审计、CAS/回滚；env 在 SQLite definition/binding 中只持久化字面量 `${VAR}` 形式的环境变量引用；status、诊断与操作日志不展示或保存解析后的真实值 |
+| MCP 原生域 | 2026-09-22 改为「实际条目为主」，待主审验收：`mcp:status` 直接列出各助手配置文件里的 stdio 与远程条目（脱敏、原样保留未建模字段、给出条目摘要），`mcp:apply` 逐条 add/edit/enable/disable/remove/copy/forget，写前按摘要 CAS、外部修改报「已在外部修改」；Codex/OpenCode 用官方 `enabled` 停用，Claude 停用移出条目并存快照（疑似凭据转存外部密钥文件）；旧服务库与分配表在首次写入时迁移，迁移不改配置文件；status 只读零写，apply 具备锁、审计、回读与条件回滚 |
 | Rules 原生域 | 已完成（2026-09-22 改为实际文件为准）：`rules:status` 输出主 Codex/Claude 与各实例规则文件的实际全文与写入基准；`rules:apply` 按 `--base` 直接编辑，或应用模板/内置推荐/复制另一目标（覆盖前回填备份）；模板存 `rule_templates`；status 只读零写；apply 具备排他锁、审计与 CAS/回滚，外部修改时拒绝并提示刷新 |
 | Hooks 原生域 | 已完成：Rust dispatcher 已接入 `hooks:status` / 真实 `hooks:apply`；hooks 专用 `sources:get/set`（hooks.claude/hooks.codex）revision CAS 只写 SQLite；固定 Claude `~/.claude/settings.json` signature-set 合并与 Codex `~/.codex/hooks.json` whole-file 两目标，外部修改 fail-closed |
 | 定义编辑原文保存 | 已完成（`5ae995b`）：SourceDefinitionsPanel 禁用文本框自动替换并有单测，Rules/Hooks 原文保存不被 smart quotes 等自动改写 |
 | 系统审计 | 已完成：Rust dispatcher 已接入只读 `system:audit`；聚合 agents/skills/mcp/rules/hooks/aliases/secrets 与 runtime/storage 状态 |
-| 密钥状态 | 已完成：`secrets:status` 只读输出变量名、来源与布尔状态；用户显式选择权限为 `600` 的外部 `.env` 文件，数据库只存路径，`secrets:set` / `secrets:adopt` 只写文件，配置备份不含路径或取值；历史数据库值需显式确认迁移，写入成功后才删旧表；畸形定义固定脱敏失败 |
+| 密钥状态 | 已完成：`secrets:status` 只读输出变量名、来源与布尔状态；用户显式选择权限为 `600` 的外部 `.env` 文件，数据库只存路径，`secrets:set` 与 MCP 停用时的密钥转存只写文件，配置备份不含路径或取值；历史数据库值需显式确认迁移，写入成功后才删旧表；变量行来自各助手实际 MCP 条目与停用快照，字面量不列出、不回显 |
 | Aliases 原生域 | 已完成：Rust dispatcher 已接入 `aliases:status` / 真实 `aliases:apply`；固定 zshrc/zprofile 两目标，只换托管区块、外部修改 fail-closed |
 | 设置页配置工具 | 已完成：保留客户端诊断、Aliases 与 Secrets 入口，更新中心并入总览、Policy 原文编辑器撤销；Tools 域、快照（`snapshots:*`）与 `system:converge` 已退役，相关页面、Tauri 白名单与契约 schema 已移除；`system:refresh-upstream` 已接线（探测宇宙 agents/mcp/skills，缓存落 SQLite `upstream_probes` 表） |
 | 独立包真实业务 E2E | 主要场景已完成（2026-09-15 主审独立验收，绑定验收提交 `5a110be3`）：Darwin x86_64 DMG verify 脚本 exit 0、包内构建身份 commit/date 与源码精确一致、未签名，SHA256 `076d16b098ede8915802c0bc6dceec42dc06e0dcadddd137e7865681c7e90a68`，7632606 bytes；真实 GUI E2E（旧版 plan→confirm→apply 交互，现已失效，不证明本轮直接 apply 新交互）覆盖 system:audit 缺库零写、Rules 取消零写/应用、Hooks 双目标、Aliases 双目标、MCP stdio+远程 HTTP 的 plan/confirm/apply、Secrets 仅显示变量名与存在性、Runs、外部修改 plan fail-closed；MCP 定义经共用 Rust CLI 写入隔离 SQLite 测试夹具，MCP 新增服务表单因 macOS 自动化输入限制未验收（不以测试夹具结果替代表单通过）；（旧版 dry-run 证据）stdio dry-run 数据库与目标文件哈希不变、日志不落库，远程 header 以环境变量引用写入 Codex 目标、合成值不出现在目标/诊断/操作日志。历史（2026-09-14）：基于 `5ae995b` 的 DMG 曾通过独立包验收（SHA256 `71a386d6ab8e1a7f85ef59c82f379411e9aa1dccaa3c3166309b96b971fce26b`，7632599 bytes，非 HEAD 构建包），当时 GUI 业务 E2E 因宿主 AX/computer-use permission_denied 未启动 |
@@ -30,7 +30,7 @@
 
 公共 `*:plan` 与 `--dry-run` 入口已退役，调用会被拒绝；status/query 只读零写；六域写操作仅通过真实 apply 完成，apply 内部保留 preflight/写前校验、精确 scope、锁、外部修改检测、CAS/条件回滚与审计。
 
-MCP 支持本地 stdio 与远程 HTTP 两种传输（字段互斥：远程定义含 `url`，仅允许 `https://` 或本机回环 `http://localhost` / `http://127.0.0.1`，可选 `headers` 仅接受 `${VAR}` 占位符，以引用形式写入目标，明文不落盘）。当前产品只向 Claude Code 与 Codex 暴露分配入口。
+MCP 支持本地 stdio 与远程 HTTP 两种传输；条目以各助手配置文件为准，新增或修改远程地址时仅允许 `https://` 或本机回环 `http://localhost` / `http://127.0.0.1`，headers 只接受 `${VAR}` 引用或保留原值，以客户端原生引用形式写入。界面按 `mcp:status` 的 `targets` 列出全部配置了 MCP 的助手（含实例与 OpenCode）。
 
 旧 DMG/旧 GUI E2E 不证明本轮新交互。本轮源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收已完成；最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify（提交、SHA256 与验证结果见 [交付回执](goal-rust-gui.md)）。
 

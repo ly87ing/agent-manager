@@ -102,7 +102,8 @@ function okRoutes(): Record<string, EngineRoute> {
           makeElement({
             id: "mcp:chrome-devtools",
             domain: "mcp",
-            state: "drifted",
+            state: "managed-ok",
+            observed: { agents: { "claude-code": { state: "enabled", source: "file", base: "a".repeat(64), actions: [] } } },
             freshness: makeFreshness({
               state: "behind",
               current: "1.2.0",
@@ -115,6 +116,8 @@ function okRoutes(): Record<string, EngineRoute> {
           makeElement({
             id: "mcp:grok-search",
             domain: "mcp",
+            state: "disabled",
+            observed: { agents: { codex: { state: "disabled", source: "file", base: "b".repeat(64), actions: [] } } },
             freshness: makeFreshness({ state: "unknown" }),
           }),
         ],
@@ -176,10 +179,12 @@ describe("DashboardPage", () => {
     expect(within(agents).getByTestId("overview-item-agents:codex")).toHaveTextContent("额度 65%?");
     expect(within(agents).getByTestId("overview-item-agents:claude-code")).not.toHaveTextContent("额度");
 
-    // MCP：被本工具以外改过的标成「要你决定」，并给去处理入口
+    // MCP：实际条目就是当前配置，没有「待同步 / 要你决定」（原断言来自已退役的服务库模型）；
+    // 只看启用与否，更新轴照常显示
     const mcp = await screen.findByTestId("overview-mcp");
-    expect(within(mcp).getByTestId("overview-item-mcp:chrome-devtools")).toHaveTextContent("要你决定");
-    expect(within(mcp).getByTestId("overview-goto-mcp:chrome-devtools")).toBeInTheDocument();
+    expect(within(mcp).getByTestId("overview-item-mcp:chrome-devtools")).not.toHaveTextContent("要你决定");
+    expect(within(mcp).getByTestId("overview-item-mcp:chrome-devtools")).toHaveTextContent("可更新");
+    expect(within(mcp).getByTestId("overview-item-mcp:grok-search")).toHaveTextContent("已停用");
     expect(within(mcp).getByTestId("overview-item-mcp:grok-search")).toHaveTextContent("未检查");
 
     // 技能：来源已经展开成单个技能后，来源本身不再占一行
@@ -201,12 +206,12 @@ describe("DashboardPage", () => {
 
   it("一键同步：只对待同步的执行 apply，要你决定的不碰", async () => {
     const routes = okRoutes();
-    // 只注册 aliases:apply；若批量误把「要你决定」的 MCP 也算进去，mcp:apply 未注册会记为失败
+    // 只注册 aliases:apply；MCP 不进批量，若误算进去 mcp:apply 未注册会记为失败
     routes["aliases:apply"] = makeEnvelope(makeApplyResult({ domain: "aliases" }), { command: "aliases.apply" });
     renderDashboard(routes);
 
     const button = await screen.findByTestId("sync-all-button");
-    // 待同步只有快捷命令 yolo 一条；MCP 那条是「要你决定」，不进批量
+    // 待同步只有快捷命令 yolo 一条；MCP 没有待同步
     expect(button).toHaveTextContent("全部同步（1）");
     await userEvent.click(button);
 

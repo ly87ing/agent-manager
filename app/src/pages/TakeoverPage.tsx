@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Bot, FolderSymlink, Link2Off, PackageCheck, RefreshCw, Server, ShieldCheck, Sparkles } from "lucide-react";
+import { Bot, FolderSymlink, Link2Off, PackageCheck, RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { EmptyState } from "../components/EmptyState";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
@@ -7,12 +7,10 @@ import { ErrorPanel } from "../components/ErrorPanel";
 import type {
   DiscoverAgentCandidate,
   DiscoverData,
-  DiscoverMcpCandidate,
   DiscoverSkillGroup,
   DiscoverSkillItem,
 } from "../lib/contract";
 import { definitionKeyPrefix } from "../lib/definitionOverlay";
-import { candidateToDefinition } from "../lib/mcpImport";
 import { useEngineQuery } from "../lib/queries";
 import { useTakeover, type TakeoverTask } from "../lib/useTakeover";
 import { cn } from "../lib/utils";
@@ -82,23 +80,9 @@ function SelectableRow({
   );
 }
 
-/** 同名 MCP 候选按服务名聚合：一条定义（agents 为全部来源助手），逐助手各写一次目标配置。 */
-function groupMcpCandidates(candidates: DiscoverMcpCandidate[]): { name: string; agents: string[]; entries: DiscoverMcpCandidate[] }[] {
-  const byName = new Map<string, DiscoverMcpCandidate[]>();
-  for (const candidate of candidates) {
-    const list = byName.get(candidate.name) ?? [];
-    list.push(candidate);
-    byName.set(candidate.name, list);
-  }
-  return [...byName.entries()].map(([name, entries]) => ({
-    name,
-    agents: entries.map((entry) => entry.agent),
-    entries,
-  }));
-}
-
 /**
- * 接管中心：一次看清本机已有的助手、技能与 MCP 资源，按来源分类后批量纳入管理。
+ * 接管中心：一次看清本机已有的助手与技能资源，按来源分类后批量纳入管理。
+ * MCP 条目以各助手配置文件为准，直接在 MCP 页查看与编辑，不经这里导入。
  *
  * 分类即处理方式：官方路径与原生安装方案（Claude 同步目录、Homebrew、官方安装器等）
  * 只标识、继续用它们各自的原生管理方式；其余外部资源用软链接方案纳管
@@ -114,7 +98,6 @@ export default function TakeoverPage() {
   const agents = data?.agents ?? [];
   const skillItems = data?.skills?.items ?? [];
   const skillGroups = data?.skills?.groups ?? [];
-  const mcpGroups = useMemo(() => groupMcpCandidates(data?.mcp ?? []), [data?.mcp]);
 
   const extraLinks = skillItems.filter((item) => item.manage === "collection");
   const nativeItems = skillItems.filter((item) => item.manage === "native");
@@ -183,33 +166,8 @@ export default function TakeoverPage() {
         ],
       });
     }
-    for (const group of mcpGroups) {
-      const definition = {
-        ...candidateToDefinition(group.entries[0]),
-        agents: [...new Set(group.agents)],
-      };
-      const steps: TakeoverTask["steps"] = [];
-      // 先把原配置里的明文密钥接到已选择的外部文件，再写定义：定义里只留 ${VAR} 引用，
-      // 不先接取值的话同步时解析到的会是另一个值，而用户点「接管」的心智是保持原样。
-      for (const entry of group.entries) {
-        steps.push({
-          kind: "apply",
-          command: "secrets:adopt",
-          args: ["--agent", entry.agent, "--server", group.name],
-        });
-      }
-      steps.push({ kind: "policy", key: `${definitionKeyPrefix("mcp")}.${group.name}`, definition });
-      for (const entry of group.entries) {
-        steps.push({
-          kind: "apply",
-          command: "mcp:apply",
-          args: ["--only", `mcp:${group.name}`, "--agent", entry.agent, "--action", "add", "--allow-takeover"],
-        });
-      }
-      map.set(`mcp:${group.name}`, { key: `mcp:${group.name}`, label: `MCP ${group.name}`, steps });
-    }
     return map;
-  }, [agents, skillGroups, extraLinks, deadLinks, mcpGroups]);
+  }, [agents, skillGroups, extraLinks, deadLinks]);
 
   const toggle = (key: string) => {
     setSelected((prev) => {
@@ -229,15 +187,6 @@ export default function TakeoverPage() {
   ).length;
   /** 选中的清理项数量：确认文案要分开说，它删的是链接而不是纳管。 */
   const cleanupCount = selectedKeys.filter((key) => key.startsWith("skill-cleanup:")).length;
-  /** 带密钥的 MCP 条目数：确认文案要说明本机引擎会转存原配置中的字面量。 */
-  const secretCount = selectedKeys.filter((key) => {
-    if (!key.startsWith("mcp:")) return false;
-    const name = key.slice("mcp:".length);
-    const group = mcpGroups.find((item) => item.name === name);
-    const spec = (group?.entries[0]?.spec ?? {}) as { env?: Record<string, unknown>; headers?: Record<string, unknown> };
-    return Object.keys(spec.env ?? {}).length > 0 || Object.keys(spec.headers ?? {}).length > 0;
-  }).length;
-
   if (query.isPending) return <PageLoading text="正在扫描本机资源…" />;
   if (query.isError) return <PageError title="扫描失败" error={query.error} />;
 
@@ -256,7 +205,7 @@ export default function TakeoverPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <PageHeader
           title="导入现有配置"
-          description="扫描本机已有的助手、技能与 MCP 配置。先选择要导入的项目，再查看影响并确认；官方安装的软件仍由原安装渠道维护。"
+          description="扫描本机已有的助手与技能。先选择要导入的项目，再查看影响并确认；官方安装的软件仍由原安装渠道维护。MCP 条目直接在 MCP 页查看和编辑，不需要导入。"
         />
         <div className="flex items-center gap-2">
           <button
@@ -404,36 +353,6 @@ export default function TakeoverPage() {
       </SectionCard>
 
       <SectionCard
-        icon={Server}
-        testId="takeover-mcp"
-        title="MCP 服务"
-        description="各助手配置里尚未纳入管理的 MCP 条目。定义只保存变量名；如果原配置直接写了密钥，确认后会转存到“设置 → 密钥”选择的外部文件，界面不会显示取值。"
-      >
-        {mcpGroups.length === 0 ? (
-          <EmptyState compact title="没有发现未纳管的 MCP 条目" testId="takeover-mcp-empty" />
-        ) : (
-          mcpGroups.map((group) => (
-            <SelectableRow
-              key={group.name}
-              testId={`takeover-mcp-${group.name}`}
-              checked={selected.has(`mcp:${group.name}`)}
-              onToggle={() => toggle(`mcp:${group.name}`)}
-            >
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="font-mono text-xs font-semibold text-foreground">{group.name}</span>
-                <Badge tone="muted">{group.entries[0]?.transport === "remote" ? "远程" : "stdio"}</Badge>
-                <Badge tone="muted">{group.agents.join(" / ")}</Badge>
-                {group.entries.some((entry) => entry.origin === "previously-managed") && (
-                  <Badge tone="info">此前由本工具管理</Badge>
-                )}
-                <Badge tone="warning">替换同名外部条目</Badge>
-              </div>
-            </SelectableRow>
-          ))
-        )}
-      </SectionCard>
-
-      <SectionCard
         icon={ShieldCheck}
         testId="takeover-native"
         title="原生管理（只标识，不接管）"
@@ -492,9 +411,6 @@ export default function TakeoverPage() {
               ? `其中 ${replacingCount} 项会替换助手里的同名外部条目（接管后由本工具统一维护）。`
               : "",
             cleanupCount > 0 ? `另有 ${cleanupCount} 条残留链接会被删除（只删链接本身，不动源目录）。` : "",
-            secretCount > 0
-              ? `其中 ${secretCount} 个 MCP 服务带密钥：原配置里的取值会转存到“设置 → 密钥”选择的外部文件，界面不回显；未选择可用文件时会停止，不会继续覆盖助手配置。`
-              : "",
           ]
             .filter(Boolean)
             .join("")}

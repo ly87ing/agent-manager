@@ -150,7 +150,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     let is_agent_configure = request.command.replace('.', ":") == "agents:configure";
     let is_secret_write = matches!(
         request.command.replace('.', ":").as_str(),
-        "secrets:set" | "secrets:adopt" | "secrets:source" | "secrets:migrate-legacy"
+        "secrets:set" | "secrets:source" | "secrets:migrate-legacy"
     );
     let (needs_lock, domain_label, diag_code) = if is_agent_apply {
         match crate::native_agents::preflight_apply(ctx, request) {
@@ -456,8 +456,14 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("skills", "status" | "apply") => crate::native_skills::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("SKILL_ERROR", format!("{err:#}"))),
-        ("mcp", "status" | "apply") => crate::native_mcp::handle(ctx, request)
-            .map(|data| (data, vec![]))
+        ("mcp", "status" | "apply") => crate::native_mcp::dispatch(ctx, request)
+            .map(|(data, notes)| {
+                let warnings = notes
+                    .into_iter()
+                    .map(|note| diagnostic("MCP_NOTICE", None, note))
+                    .collect();
+                (data, warnings)
+            })
             .map_err(|err| DispatchError::new("MCP_ERROR", format!("{err:#}"))),
         // 规则以实际文件为准：apply 写文件（取锁），模板保存/删除只写库
         ("rules", "status" | "apply" | "save-template" | "delete-template") => {
@@ -910,6 +916,12 @@ fn policy_set(ctx: &Context, request: &Request) -> DispatchResult {
     set_dot_path(&mut policy, &segments, value.clone())?;
     validate_mcp_policy_candidate(key, &value, &policy)?;
     store::write_policy(&tx, &policy).map_err(DispatchError::from)?;
+    // MCP 定义不再留在策略里：同一事务里转成「未分配的已保存定义」（mcp_saved）。
+    if key == "mcp" || key.starts_with("mcp.") {
+        let scans = crate::native_mcp::inventory::scan_targets(&policy, &ctx.home_dir);
+        crate::native_mcp::legacy::migrate(&tx, &scans, Some(&request.run_id))
+            .map_err(|err| DispatchError::new("USAGE_ERROR", format!("{err:#}")))?;
+    }
     store::record_operation(
         &tx,
         Some(&request.run_id),

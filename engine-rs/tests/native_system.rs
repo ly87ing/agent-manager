@@ -305,14 +305,13 @@ fn wired_domain_elements_map_into_sections() {
 fn audit_maps_real_secrets_state() {
     let (base, ctx) = temp_ctx("secrets-wired");
     std::env::remove_var("AM_AUDIT_UNRESOLVED_VAR");
-    let mut policy = store::builtin_policy();
-    policy["mcp"]["definitions"] = serde_json::json!({
-        "demo-server": {"command": "d", "env": {"DEMO_KEY": "${AM_AUDIT_UNRESOLVED_VAR}"}},
-    });
-    {
-        let conn = store::open_write(&ctx).unwrap();
-        store::write_policy(&conn, &policy).unwrap();
-    }
+    // 变量行来自助手实际 MCP 条目里的引用（原先来自服务库定义，该模型已退役）。
+    std::fs::create_dir_all(&ctx.home_dir).unwrap();
+    std::fs::write(
+        ctx.home_dir.join(".claude.json"),
+        r#"{"mcpServers":{"demo-server":{"command":"d","env":{"DEMO_KEY":"${AM_AUDIT_UNRESOLVED_VAR}"}}}}"#,
+    )
+    .unwrap();
     let env = audit(&ctx, &[]);
     assert!(env.ok, "{:?}", env.errors);
     let secrets = section(&env, "secrets");

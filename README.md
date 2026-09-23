@@ -14,14 +14,14 @@
 - **跳过权限确认**：一个开关写进助手的安全默认值，改它需要二次确认。
 - **客户端诊断**：在「设置 → 客户端诊断」只读查看 AI CLI 是否可用、当前版本与安装来源；安装和更新继续使用客户端官方安装器或系统包管理器。
 - **Skills**：管理 Skill 集合与单个技能，按助手逐一启用、停用、更新或移除。
-- **MCP 服务器**：管理本地 stdio 与远程 HTTP 两类 MCP 服务器，按助手分配并写入 Claude JSON 或 Codex TOML；可从客户端现有配置发现导入。旧 OpenCode codec 仅用于兼容既有数据，不构成当前产品支持。
+- **MCP 服务器**：直接列出各助手配置文件（Claude `~/.claude.json`、Codex `config.toml`，以及配置过的 OpenCode）里已有的本地 stdio 与远程 HTTP 条目，无需导入；逐条新增、编辑、启停、复制到另一个助手或删除，只改这一条，条目里表单不管的官方字段原样保留，写入前核对是否已被外部修改。停用时 Codex/OpenCode 写官方 `enabled = false`；Claude Code 没有全局停用字段，条目移出配置、保存在本工具里，启用时写回。
 - **Rules**：直接查看和编辑 `~/.codex/AGENTS.md`、`~/.claude/CLAUDE.md` 与各实例的规则文件；规则模板只存在本机，应用模板、内置推荐或复制前先把对不上模板的原内容另存为备份。
 - **Hooks**：管理 Claude `~/.claude/settings.json` 与 Codex `~/.codex/hooks.json` 的钩子配置。
 - **助手实例**：为同一个助手配多套独立配置（不同账号或接口），各有自己的配置目录、登录、会话、技能与 MCP，多个实例可以同时开着互不干扰；全局 `~/.claude` 与 `~/.codex` 不受影响。鉴权只登记环境变量名，取值不进本工具的库。
 - **实例启动命令**：实例可维护自己的启动命令；通用终端快捷命令放在「设置 → 终端快捷命令」，写入 `~/.zshrc` 与 `~/.zprofile` 中由本工具维护的那一段，该段以外的内容不受影响。
-- **导入现有配置**：侧栏常驻入口扫描本机已有的助手、技能与 MCP 配置，勾选后先核对影响，再批量纳入管理。官方路径与原生安装方案（助手自带的技能同步目录、Homebrew、官方安装器）只做标识，继续用它们各自的方式升级卸载；其余外部资源以软链接纳管——技能登记为本地来源集合后直接链到源目录，内容仍由原处维护并随其更新，停用只删链接。
+- **导入现有配置**：侧栏常驻入口扫描本机已有的助手与技能，勾选后先核对影响，再批量纳入管理（MCP 条目直接在 MCP 页查看和编辑，不需要导入）。官方路径与原生安装方案（助手自带的技能同步目录、Homebrew、官方安装器）只做标识，继续用它们各自的方式升级卸载；其余外部资源以软链接纳管——技能登记为本地来源集合后直接链到源目录，内容仍由原处维护并随其更新，停用只删链接。
 - **Hooks**：按「事件 + 匹配器 + 命令」逐行填写，不用照着 JSON 结构手写；不展示的字段原样保留。
-- **密钥与配置备份**：先在「密钥」页选择一个已存在、权限为 `600` 的外部 `.env` 文件；应用只在数据库保存文件路径，密钥取值不进入数据库、日志或配置备份。配置备份只导出定义与来源，换机器时外部密钥文件需单独迁移。
+- **密钥与配置备份**：先在「密钥」页选择一个已存在、权限为 `600` 的外部 `.env` 文件；应用只在数据库保存文件路径，密钥取值不进入数据库、日志或配置备份。配置备份只导出定义、来源与 MCP 的已保存项（停用快照等，只含变量引用），换机器时外部密钥文件需单独迁移。
 - **额度**：读本机文件显示 Claude Code 与 Codex 的用量与重置时刻，不联网、不用再登录。Claude 侧想要与状态栏同屏的实时值，见[故障排查](docs/TROUBLESHOOTING.md)里的一段状态栏落盘配置。
 - **用量**：读本机会话记录累加 token，可按时间、助手与模型联动筛选，再按天与模型看谁吃掉了用量，并按可编辑的单价表折算成美元。汇总、未定价提示与明细始终使用同一筛选范围。折算是「同样的用量按 API 单价要花多少」，不是账单——订阅制下该付的是订阅费；没有单价的模型只报 token 不报钱。增量扫描，第二次起只读新增部分。
 - **更新检查**：只读探测助手、MCP 与 Skills 的上游新版本；AI CLI 的更新不由本工具执行。
@@ -77,13 +77,13 @@ pnpm --dir app run build:macos
 
 - **以实际配置为准**：各助手真实文件与目录是生效配置的唯一事实源；应用数据目录下的 `native-manager.db`（SQLite）只保存偏好、归属记录和未生效的备选（如未激活的接入配置），没有第二份可写配置文件；查询与状态读取只读，缺库时不创建文件。内置默认只作推荐，确认后才应用。
 - **写入范围**：仅写入受管目标——客户端配置中的受管条目、`~/.codex/AGENTS.md`、`~/.claude/CLAUDE.md`、`~/.claude/settings.json`、`~/.codex/hooks.json`，以及 `~/.zshrc` / `~/.zprofile` 的受管区块。
-- **密钥模型**：MCP 定义只保存 `${VAR}` 占位符。用户在「密钥」页显式选择一个外部 `.env` 文件后，应用会校验它是普通文件、权限为 `600` 且内容是合法 `KEY=VALUE`；填写和接管的取值只写该文件。页面不回显取值，数据库只保存文件路径，配置备份不包含路径或取值；未选择可用文件时写入操作 fail-closed。
+- **密钥模型**：MCP 的生效条目就在各助手配置文件里，本工具只在「已保存未生效」项（如 Claude 侧停用的条目）里存东西：密钥一律改成 `${VAR}` 引用、取值转存到外部文件，只有不像凭据的普通取值（如 `NODE_ENV=production`）原样保存。用户在「密钥」页显式选择一个外部 `.env` 文件后，应用会校验它是普通文件、权限为 `600` 且内容是合法 `KEY=VALUE`；填写和接管的取值只写该文件。页面不回显取值，数据库只保存文件路径，配置备份不包含路径或取值；未选择可用文件时写入操作 fail-closed。
 - **不收集数据**：无遥测上传；日志仅写入本机应用数据目录，严格脱敏并按保留期自动清理。
 
 ## 文档
 
 - [架构](docs/ARCHITECTURE.md)：数据流与调用边界
-- [MCP 配置指南](docs/MCP-CONFIG-GUIDE.md)：MCP 定义字段与密钥占位符模型
+- [MCP 配置指南](docs/MCP-CONFIG-GUIDE.md)：MCP 条目的读写、启停方式与密钥规则
 - [Secrets 边界](docs/SECRETS-MANAGEMENT.md)
 - [故障排查](docs/TROUBLESHOOTING.md)
 - [平台状态](docs/GUI-PLATFORM-STATUS.md)：各平台构建与验收状态
@@ -114,6 +114,6 @@ Agent Manager is a desktop app (Tauri 2 + React + Rust/SQLite) for centrally man
 
 - **Features**: manage providers, isolated account instances, runtime settings, Skills, local stdio and remote HTTP MCP servers, Rules (edit `~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md` and per-instance rules files in place, with saved templates), Hooks, and managed shell alias blocks in `~/.zshrc` / `~/.zprofile`; check for upstream updates; view redacted authentication and secrets status, local usage, and task history. AI CLI installation and updates remain with the official installer or system package manager.
 - **Install**: no public GitHub Release yet — packages are unavailable until external prerequisites (signing keys, Apple Developer ID and notarization, Windows signing, per-platform hardware acceptance) are met; see [platform status](docs/GUI-PLATFORM-STATUS.md). To build from source on macOS, install the Rust toolchain, Node.js, and pnpm, clone without `--recursive` (the private `secrets/` submodule is not needed), then run `pnpm --dir app install --frozen-lockfile && pnpm --dir app run build:macos`.
-- **Safety model**: saving a definition only writes the local SQLite database (`native-manager.db` in the app data directory); nothing is installed or modified until you click execute. Apply runs with preflight checks, exact scope, an exclusive lock, fail-closed external-modification detection, conditional rollback, and audit logging; destructive actions require confirmation. MCP secrets are stored as `${VAR}` placeholders and written to client configs by reference — plaintext never lands in this tool's database or logs. No telemetry.
+- **Safety model**: saving a definition only writes the local SQLite database (`native-manager.db` in the app data directory); nothing is installed or modified until you click execute. Apply runs with preflight checks, exact scope, an exclusive lock, fail-closed external-modification detection, conditional rollback, and audit logging; destructive actions require confirmation. MCP entries are read from and edited in each client's own config file (one entry at a time, fail-closed if changed externally); the only MCP data this tool stores are saved-but-inactive items such as Claude entries you disabled, where secrets are kept as `${VAR}` references with values moved to your external secrets file — plaintext secrets never land in this tool's database or logs. No telemetry.
 - **License**: [MIT](LICENSE).
 - **Experience**: light/dark/system themes with native title bar sync, system tray with window recall, remembered window size/position, single instance, per-page search, `⌘,` / `⌘F` shortcuts, update badge, skeleton loading and transition animations.

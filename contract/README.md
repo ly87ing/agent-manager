@@ -2,17 +2,19 @@
 
 `contract/engine-v1/` 描述 CLI 与 Tauri 共用的 JSON envelope、状态、动作和 policy 数据形状。实现入口是 `engine-rs`；根仓库不依赖 Python 或旧 shell 管线。
 
-`native-manager.db` 是本工具定义、分配和偏好的唯一事实源。设置存储在 SQLite 的 `app_settings` 表。policy 只返回 `builtin` 或 `sqlite` 归属；不存在三层 JSON、可写 settings JSON 或 profile 同步层。
+`native-manager.db` 保存本工具的定义、偏好与「已保存未生效」的备选；各助手配置文件里的实际内容是生效配置的事实源。设置存储在 SQLite 的 `app_settings` 表。policy 只返回 `builtin` 或 `sqlite` 归属；不存在三层 JSON、可写 settings JSON 或 profile 同步层。
 
 policy 写入请求使用 `--layer local`，其中 `local` 是写入目标参数，持久化结果来源是 `sqlite`。缺库读取和 status/query 只读零写。
 
-Agent 集合、逐 Agent Skill、MCP 库、逐 Agent MCP 的动作契约覆盖新增、编辑/更新、启用、禁用、删除。保存定义不执行动作；`apply` 直接执行引擎返回的 actions，`apply` 内部包含 preflight、精确 scope、锁、外部修改检测、CAS/条件回滚与审计。移除管理和卸载是不同 action。
+Agent 集合与逐 Agent Skill 的动作契约覆盖新增、编辑/更新、启用、禁用、删除。保存定义不执行动作；`apply` 直接执行引擎返回的 actions，`apply` 内部包含 preflight、精确 scope、锁、外部修改检测、CAS/条件回滚与审计。移除管理和卸载是不同 action。
+
+MCP 以各助手配置文件里的实际条目为准：`mcp:status` 的 `targets` 列出各助手的 MCP 配置文件，`elements` 按服务名汇总各助手里的条目（env/headers 引用原样、字面量掩码为 `<literal>`，未建模的官方字段非凭据类原样、其余 `<hidden>`）与每条的摘要 `base`。`mcp:apply` 逐条操作：`add`（`--spec`）、`edit`（`--spec --base`）、`enable`/`disable`/`remove`（`--base`）、`copy`（`--to --base`，覆盖同名需 `--replace --to-base`）、`forget`（删除未分配的已保存定义）；写入前在锁内重读并比对 `--base`，不一致报「已在外部修改」且文件与库不变。停用按 `targets[].disable_mode`：Codex/OpenCode 写官方 `enabled = false`，Claude Code 移出条目并存停用快照（`mcp_saved`，不存疑似凭据明文）。附带提示（转存了哪些变量、复制时未带过去的字段）经 envelope `warnings` 返回。
 
 公共 `*:plan` 与 `--dry-run` 入口已退役，调用会被拒绝。
 
-只读 `system:discover` 扫描本机已存在但未纳入管理的 agents / skills / MCP 资源，支持 `--only agents|skills|mcp`，零写零网络、不取 apply 锁。每个候选带 `manage` 分类：`native`（官方路径与原生安装方案，只标识不接管）、`symlink`（外部资源以软链接纳管）、`collection`（走已定义集合的接管通道）、`register`（登记定义，助手 CLI 与 MCP 条目）、`cleanup`（断链等残留，只建议清理）。与 `system:audit` 同属只读聚合，data 形状由前端类型固定，契约 v2 才正式固化。
+只读 `system:discover` 扫描本机已存在但未纳入管理的 agents / skills 资源，支持 `--only agents|skills`，零写零网络、不取 apply 锁（MCP 条目直接在 `mcp:status` 里列出，不经发现与导入）。每个候选带 `manage` 分类：`native`（官方路径与原生安装方案，只标识不接管）、`symlink`（外部资源以软链接纳管）、`collection`（走已定义集合的接管通道）、`register`（登记定义，助手 CLI）、`cleanup`（断链等残留，只建议清理）。与 `system:audit` 同属只读聚合，data 形状由前端类型固定，契约 v2 才正式固化。
 
-`profiles:status/apply` 管理助手实例：实例定义就是带 `profile` 段的 `agents.definitions.<id>` 条目，因此技能与 MCP 的逐助手分配直接适用。`status` 只读零写，只输出变量名与能否解析；`apply` 只写实例配置目录下本工具全权拥有的那个文件（Claude 为 `settings.json`，Codex 为 `agent-manager.config.toml` 并由启动参数 `-p` 叠加，避开归 MCP 域的 `config.toml`），目录 0700、文件 0600、原子换入、事务失败回滚，已有他人内容或被外部改过一律 fail-closed 需显式 `--allow-takeover`。鉴权取值只以 `${VAR}` 持久化：Claude 目标在 apply 时解析写入（客户端不展开引用，由文件权限保护），Codex 目标只写 `env_key` 变量名。配置目录必须位于 HOME 下，不得是主实例目录、数据目录内或符号链接。
+`profiles:status/apply` 管理助手实例：实例定义就是带 `profile` 段的 `agents.definitions.<id>` 条目，因此技能的逐助手分配与 MCP 的逐助手条目直接适用。`status` 只读零写，只输出变量名与能否解析；`apply` 只写实例配置目录下本工具全权拥有的那个文件（Claude 为 `settings.json`，Codex 为 `agent-manager.config.toml` 并由启动参数 `-p` 叠加，避开归 MCP 域的 `config.toml`），目录 0700、文件 0600、原子换入、事务失败回滚，已有他人内容或被外部改过一律 fail-closed 需显式 `--allow-takeover`。鉴权取值只以 `${VAR}` 持久化：Claude 目标在 apply 时解析写入（客户端不展开引用，由文件权限保护），Codex 目标只写 `env_key` 变量名。配置目录必须位于 HOME 下，不得是主实例目录、数据目录内或符号链接。
 
 技能集合定义新增 `source_path`（与 `url` 互斥）：本地来源集合不做内容快照，助手目录下的链接直接指向登记源目录，内容随外部源更新；登记源根进入受管基准后这些链接才可被覆盖或在停用时删除，未登记的外部路径仍 fail-closed。集合级 `update` 对本地来源集合不联网、不 clone，只重扫源目录、刷新指纹并修复已启用链接。
 

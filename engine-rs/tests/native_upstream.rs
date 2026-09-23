@@ -219,33 +219,21 @@ fn setup_full_universe(ctx: &Context) {
     set_npm_agent(ctx, "disabled-agent", "am-test-disabled-bin", "behind-pkg");
     policy_set(ctx, "agents.disabled-agent", json!({"enabled": false}));
 
-    set_mcp_definition(
-        ctx,
-        "npx-current",
-        json!({"command": "npx", "args": ["-y", "npx-current-pkg"]}),
-    );
-    set_mcp_definition(
-        ctx,
-        "npx-nocache",
-        json!({"command": "npx", "args": ["-y", "npx-nocache-pkg"]}),
-    );
-    set_mcp_definition(
-        ctx,
-        "uvx-srv",
-        json!({"command": "uvx", "args": ["--from", "git+https://example.invalid/uvx.git@main", "uvx-tool"]}),
-    );
-    // 反例：非 npx/uvx 命令、disabled 服务均不参与探测
-    set_mcp_definition(
-        ctx,
-        "plain-node",
-        json!({"command": "node", "args": ["server.js"]}),
-    );
-    set_mcp_definition(
-        ctx,
-        "disabled-npx",
-        json!({"command": "npx", "args": ["-y", "npx-current-pkg"]}),
-    );
-    policy_set(ctx, "mcp.disabled-npx", json!({"enabled": false}));
+    // MCP：探测来源是各助手实际配置里的条目（原先是服务库定义，该模型已退役）。
+    // 反例：非 npx/uvx 命令不参与探测。停用的条目仍参与（原先按库级开关排除——
+    // 库级开关已退役，停用条目重新启用时跑的还是它，版本照样要看）。
+    std::fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
+    std::fs::write(
+        ctx.home_dir.join(".codex/config.toml"),
+        concat!(
+            "[mcp_servers.npx-current]\ncommand = \"npx\"\nargs = [\"-y\", \"npx-current-pkg\"]\n",
+            "[mcp_servers.npx-nocache]\ncommand = \"npx\"\nargs = [\"-y\", \"npx-nocache-pkg\"]\n",
+            "[mcp_servers.uvx-srv]\ncommand = \"uvx\"\nargs = [\"--from\", \"git+https://example.invalid/uvx.git@main\", \"uvx-tool\"]\n",
+            "[mcp_servers.plain-node]\ncommand = \"node\"\nargs = [\"server.js\"]\n",
+            "[mcp_servers.disabled-npx]\ncommand = \"npx\"\nargs = [\"-y\", \"npx-current-pkg\"]\nenabled = false\n",
+        ),
+    )
+    .unwrap();
 
     // npx 缓存：仅 npx-current-pkg 有本地已解析版本
     let pkg_dir = ctx
@@ -448,8 +436,9 @@ fn probe_state_matrix_and_summary() {
         .iter()
         .map(|el| (el["id"].as_str().unwrap(), el))
         .collect();
-    // 13 = 原先的 11 + 两个内置助手（显式声明了 upstream_npm 后一并进探测宇宙）
-    assert_eq!(elements.len(), 13, "探测宇宙大小: {elements:?}");
+    // 14 = 原先的 11 + 两个内置助手（显式声明了 upstream_npm 后一并进探测宇宙）
+    // + 停用的 MCP 条目 disabled-npx（库级开关退役，停用条目照样探测）
+    assert_eq!(elements.len(), 14, "探测宇宙大小: {elements:?}");
     // 输出按元素 id 字典序稳定排序
     let ids: Vec<&str> = elements
         .iter()
@@ -523,6 +512,13 @@ fn probe_state_matrix_and_summary() {
         None,
     );
     case(
+        "mcp:disabled-npx",
+        "current",
+        Some("1.5.0"),
+        Some("1.5.0"),
+        None,
+    );
+    case(
         "mcp:npx-nocache",
         "unknown",
         None,
@@ -575,7 +571,6 @@ fn probe_state_matrix_and_summary() {
         "agents:native-agent",
         "agents:disabled-agent",
         "mcp:plain-node",
-        "mcp:disabled-npx",
         "skill:no-url",
         "skill:disabled-coll",
         "skill:agent-skills",
@@ -587,7 +582,7 @@ fn probe_state_matrix_and_summary() {
         env.data["summary"],
         // 两个内置助手声明 upstream_npm 后进了探测宇宙；测试环境的 npm 只认夹具里的包，
         // 它们探测不到结果，计入 unknown
-        json!({"probed": 13, "current": 3, "behind": 2, "ahead": 1, "unknown": 7})
+        json!({"probed": 14, "current": 4, "behind": 2, "ahead": 1, "unknown": 7})
     );
 
     // 缓存落库可回读（含 error 类别），checked_at 已写入
@@ -786,204 +781,5 @@ fn npx类mcp的本机版本取缓存最高版_钉死版本则以定义为准() {
     );
     assert_eq!(pinned["state"], "behind");
 
-    let _ = std::fs::remove_dir_all(base);
-}
-
-/// 官方出了新版 → 点「升级」→ 定义里的版本被钉到最新 → 读数跟着归位。
-///
-/// 这条链路原先是断的：`update` 动作比的是"落地内容和库定义对不对得上"，
-/// `behind` 说的是"npm 上有新版"，两条轴从不相交，所以有新版永远长不出按钮。
-#[test]
-fn npx类mcp有新版时可以把定义钉到最新版() {
-    let (base, ctx) = temp_ctx("mcp-upgrade");
-    let shim_dir = install_shims(&base);
-    let _path = PathGuard::prepend(&shim_dir);
-
-    set_mcp_definition(
-        &ctx,
-        "multi",
-        json!({"command": "npx", "args": ["-y", "multi-cache-pkg"], "agents": ["codex"]}),
-    );
-    let pkg_dir = ctx
-        .home_dir
-        .join(".npm/_npx/aaaa/node_modules/multi-cache-pkg");
-    std::fs::create_dir_all(&pkg_dir).unwrap();
-    std::fs::write(pkg_dir.join("package.json"), r#"{"version":"1.8.0"}"#).unwrap();
-
-    // 还没查过最新版就升级 → 拒绝，不拿一份不知道多旧的记录去改配置
-    let premature = execute(
-        &ctx,
-        &request("mcp:apply", &["--only", "mcp:multi", "--action", "upgrade"]),
-    );
-    assert!(!premature.ok, "没查过版本不该允许升级");
-    assert!(
-        premature
-            .errors
-            .iter()
-            .any(|e| e.message.contains("检查更新")),
-        "要指明先去检查更新：{:?}",
-        premature.errors
-    );
-
-    assert!(refresh(&ctx, &[]).ok);
-    let before = status_element_freshness(&ctx, "mcp:status", "mcp:multi");
-    assert_eq!(before["state"], "behind");
-    assert_eq!(before["current"], "1.8.0");
-    assert_eq!(before["upstream"], "1.9.0");
-
-    let actions = |ctx: &Context| -> Vec<String> {
-        let env = execute(ctx, &request("mcp:status", &[]));
-        env.data["elements"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|el| el["id"] == "mcp:multi")
-            .unwrap()["actions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|a| a["id"].as_str().unwrap().to_string())
-            .collect()
-    };
-    assert!(
-        actions(&ctx).contains(&"upgrade".to_string()),
-        "落后时要给出升级动作：{:?}",
-        actions(&ctx)
-    );
-
-    let env = execute(
-        &ctx,
-        &request("mcp:apply", &["--only", "mcp:multi", "--action", "upgrade"]),
-    );
-    assert!(env.ok, "{:?}", env.errors);
-
-    let policy = execute(&ctx, &request("policy:get", &[]));
-    assert!(policy.ok, "{:?}", policy.errors);
-    let args = policy.data["effective"]["mcp"]["definitions"]["multi"]["args"]
-        .as_array()
-        .unwrap();
-    assert_eq!(
-        args.iter().map(|a| a.as_str().unwrap()).collect::<Vec<_>>(),
-        vec!["-y", "multi-cache-pkg@1.9.0"],
-        "包名要钉上版本，其余参数原样保留"
-    );
-
-    // 钉完再查：本机版本以定义为准（缓存里那份 1.8.0 不再作数），不再落后
-    assert!(refresh(&ctx, &[]).ok);
-    let after = status_element_freshness(&ctx, "mcp:status", "mcp:multi");
-    assert_eq!(after["current"], "1.9.0");
-    assert_eq!(after["upstream"], "1.9.0");
-    assert_eq!(after["state"], "current");
-    assert!(
-        !actions(&ctx).contains(&"upgrade".to_string()),
-        "已经最新就不该再给升级动作"
-    );
-
-    // 已是最新还点升级 → 拒绝
-    let again = execute(
-        &ctx,
-        &request("mcp:apply", &["--only", "mcp:multi", "--action", "upgrade"]),
-    );
-    assert!(!again.ok, "已是最新不该允许升级");
-
-    let _ = std::fs::remove_dir_all(base);
-}
-
-/// uvx git 源跟的是分支，没有版本号可钉，不该给升级动作。
-#[test]
-fn uvx源没有版本号可钉不给升级动作() {
-    let (base, ctx) = temp_ctx("mcp-upgrade-uvx");
-    let shim_dir = install_shims(&base);
-    let _path = PathGuard::prepend(&shim_dir);
-
-    set_mcp_definition(
-        &ctx,
-        "uvxsrv",
-        json!({
-            "command": "uvx",
-            "args": ["--from", "git+https://example.invalid/stale-repo.git@main", "srv"],
-            "agents": ["codex"]
-        }),
-    );
-    assert!(refresh(&ctx, &[]).ok);
-
-    let env = execute(&ctx, &request("mcp:status", &[]));
-    let el = env.data["elements"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|el| el["id"] == "mcp:uvxsrv")
-        .unwrap();
-    let acts: Vec<&str> = el["actions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|a| a["id"].as_str().unwrap())
-        .collect();
-    assert!(!acts.contains(&"upgrade"), "uvx 源不该有升级动作：{acts:?}");
-
-    let env = execute(
-        &ctx,
-        &request(
-            "mcp:apply",
-            &["--only", "mcp:uvxsrv", "--action", "upgrade"],
-        ),
-    );
-    assert!(!env.ok, "uvx 源升级应被拒绝");
-    assert!(
-        env.errors.iter().any(|e| e.message.contains("npx")),
-        "要说清楚为什么不行：{:?}",
-        env.errors
-    );
-
-    let _ = std::fs::remove_dir_all(base);
-}
-
-/// 旧库固化、从未生效的内置技能仓库按推荐处理：refresh-upstream 不把它纳入探测
-/// （推荐不做网络检查），刷新本身作为写操作顺带把它移出 policy。
-#[test]
-fn legacy_builtin_skills_repo_is_not_probed() {
-    let (base, ctx) = temp_ctx("legacy-builtin");
-    let shim_dir = install_shims(&base);
-    let _path = PathGuard::prepend(&shim_dir);
-    {
-        let conn = store::open_write(&ctx).unwrap();
-        let mut policy = store::policy_from_connection(&conn).unwrap();
-        // 与普通集合一起直接落库：刷新前不经任何写路径，确保探测收集时旧值仍在库里
-        policy["skills"] = json!({
-            "agent-skills": {"enabled": true},
-            "repositories": {
-                "agent-skills": {
-                    "url": "https://github.com/ly87ing/agent-skills.git",
-                    "skill_paths": ["safe-merge-review", "solution-shaping", "change-discipline",
-                                    "verification", "artifact-hygiene", "reader-facing-writing",
-                                    "technical-diagramming"],
-                    "agents": ["claude-code", "codex"]
-                },
-                "coll-equal": {"url": "https://example.invalid/skills-equal.git"}
-            }
-        });
-        store::write_policy(&conn, &policy).unwrap();
-    }
-
-    let env = refresh(&ctx, &[]);
-    assert!(env.ok, "{:?}", env.errors);
-    let ids: Vec<&str> = env.data["elements"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|el| el["id"].as_str().unwrap())
-        .collect();
-    assert!(ids.contains(&"skill:coll-equal"), "{ids:?}");
-    assert!(
-        !ids.contains(&"skill:agent-skills"),
-        "推荐不得参与探测: {ids:?}"
-    );
-    assert!(cached_row(&ctx, "skill:agent-skills").is_none());
-    let conn = store::open_readonly(&ctx).unwrap().unwrap();
-    let policy = store::policy_from_connection(&conn).unwrap();
-    assert!(policy["skills"]["repositories"]
-        .get("agent-skills")
-        .is_none());
     let _ = std::fs::remove_dir_all(base);
 }

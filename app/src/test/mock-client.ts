@@ -157,128 +157,95 @@ function demoEnvelopes(): Record<string, Envelope> {
     { command: "agents.status" },
   );
 
+  const mcpCellBase = { target_exists: true, extra: {}, vars: {}, legacy_marker: false, has_saved: false, notice: null, blocked_reason: null };
   const mcpStatus = makeEnvelope(
     {
       domain: "mcp",
+      targets: [
+        { agent: "claude-code", path: "/Users/demo/.claude.json", format: "claude-json", exists: true, agent_enabled: true, disable_mode: "snapshot", error: null },
+        { agent: "codex", path: "/Users/demo/.codex/config.toml", format: "codex-toml", exists: true, agent_enabled: true, disable_mode: "field", error: null },
+        { agent: "kimi-code", path: "/Users/demo/.kimi-code/mcp.json", format: "unsupported", exists: true, agent_enabled: true, disable_mode: "field", error: "不支持的 MCP 配置格式: kimi" },
+      ],
       elements: [
         makeElement({
           id: "mcp:chrome-devtools",
           domain: "mcp",
-          spec: { command: "npx", args: ["-y", "chrome-devtools-mcp", "--isolated"], startup_timeout_sec: 120, agents: null, env: {} },
-          policy: { enabled: true, agents: null },
+          spec: { name: "chrome-devtools", saved: null },
           observed: {
             agents: {
-              "claude-code": { state: "drifted", target: "/Users/demo/.claude.json", target_exists: true, assigned: true, enabled: true, actions: ["update"] },
-              codex: { state: "managed-ok", target: "/Users/demo/.codex/config.toml", target_exists: true, assigned: true, enabled: true, actions: ["disable"] },
-              "kimi-code": { state: "missing", target: "/Users/demo/.kimi-code/mcp.json", target_exists: true, assigned: true, enabled: true, actions: ["add"] },
+              "claude-code": { ...mcpCellBase, state: "enabled", source: "file", target: "/Users/demo/.claude.json", transport: "stdio", entry: { command: "npx", args: ["-y", "chrome-devtools-mcp", "--isolated"], env: {} }, base: "1".repeat(64), command_available: true, actions: ["edit", "disable", "copy", "remove"] },
+              codex: { ...mcpCellBase, state: "enabled", source: "file", target: "/Users/demo/.codex/config.toml", transport: "stdio", entry: { command: "npx", args: ["-y", "chrome-devtools-mcp@1.2.0"], env: {}, startup_timeout_sec: 120 }, extra: { cwd: "/Users/demo/work", enabled_tools: ["take_screenshot"] }, base: "2".repeat(64), legacy_marker: true, notice: "条目含旧版 Agent Manager 标记，编辑或启停时会顺带清除", command_available: true, actions: ["edit", "disable", "copy", "remove"] },
             },
-            env: {},
-            actions: ["disable", "remove", "upgrade"],
           },
-          state: "drifted",
+          state: "managed-ok",
           freshness: makeFreshness({ state: "behind", current: "1.2.0", upstream: "1.8.0", checked_at: CHECKED_AT, probe: "npm-view", cache_age_sec: 1820 }),
         }),
         makeElement({
           id: "mcp:grok-search",
           domain: "mcp",
-          spec: {
-            command: "uvx",
-            args: ["--from", "git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily", "grok-search"],
-            startup_timeout_sec: 120,
-            agents: null,
-            env: { GROK_API_KEY: "${GROK_API_KEY}", TAVILY_API_KEY: "${TAVILY_API_KEY}" },
-          },
-          policy: { enabled: true, agents: null },
+          spec: { name: "grok-search", saved: null },
           observed: {
             agents: {
-              "claude-code": { state: "managed-ok", target: "/Users/demo/.claude.json", target_exists: true, assigned: true, enabled: true, actions: ["disable"] },
-              codex: { state: "not-materialized", target: "/Users/demo/.codex/config.toml", target_exists: true, assigned: true, enabled: true, actions: [], blocked_reason: "凭证变量未配置: TAVILY_API_KEY" },
-              "kimi-code": { state: "managed-ok", target: "/Users/demo/.kimi-code/mcp.json", target_exists: true, assigned: true, enabled: true, actions: ["disable"] },
+              "claude-code": {
+                ...mcpCellBase,
+                state: "enabled",
+                source: "file",
+                target: "/Users/demo/.claude.json",
+                transport: "stdio",
+                entry: { command: "uvx", args: ["--from", "git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily", "grok-search"], env: { GROK_API_KEY: "<literal>", TAVILY_API_KEY: "${TAVILY_API_KEY}" } },
+                vars: { TAVILY_API_KEY: { placeholder: "${TAVILY_API_KEY}", resolved: false, stored: false, kind: "env" } },
+                base: "3".repeat(64),
+                command_available: true,
+                actions: ["edit", "disable", "copy", "remove"],
+              },
+              codex: { ...mcpCellBase, state: "disabled", source: "file", target: "/Users/demo/.codex/config.toml", transport: "stdio", entry: { command: "uvx", args: ["grok-search"], env: { GROK_API_KEY: "<literal>" } }, base: "4".repeat(64), command_available: true, actions: ["edit", "enable", "copy", "remove"] },
             },
-            env: {
-              GROK_API_KEY: { placeholder: "GROK_API_KEY", resolved: true },
-              TAVILY_API_KEY: { placeholder: "TAVILY_API_KEY", resolved: false },
-            },
-            actions: ["disable", "remove"],
           },
-          state: "drifted",
+          state: "managed-ok",
           freshness: makeFreshness({ state: "unknown", current: null, upstream: "8f0ae3c7f25ec419631ade7e431fa2531503433e", checked_at: CHECKED_AT, probe: "git-ls-remote", cache_age_sec: 4000 }),
         }),
         makeElement({
           id: "mcp:my-proxy",
           domain: "mcp",
-          spec: { command: "npx", args: ["-y", "my-proxy-mcp"], startup_timeout_sec: 60, agents: null, env: { MY_PROXY_TOKEN: "${MY_PROXY_TOKEN}" } },
-          policy: { enabled: true, agents: null },
+          spec: { name: "my-proxy", saved: null },
           observed: {
             agents: {
-              "claude-code": { state: "managed-ok", target: "/Users/demo/.claude.json", target_exists: true, assigned: true, enabled: true, actions: ["disable"] },
-              codex: { state: "missing", target: "/Users/demo/.codex/config.toml", target_exists: true, assigned: true, enabled: true, actions: ["add"] },
-              "kimi-code": { state: "missing", target: "/Users/demo/.kimi-code/mcp.json", target_exists: true, assigned: true, enabled: true, actions: ["add"] },
+              "claude-code": { ...mcpCellBase, state: "disabled", source: "saved", target: "/Users/demo/.claude.json", transport: "stdio", entry: { command: "npx", args: ["-y", "my-proxy-mcp"], env: { MY_PROXY_TOKEN: "${MY_PROXY_TOKEN}", NODE_ENV: "<literal>" } }, vars: { MY_PROXY_TOKEN: { placeholder: "${MY_PROXY_TOKEN}", resolved: true, stored: true, kind: "env" } }, base: "5".repeat(64), command_available: null, notice: "已停用：条目保存在本工具里，启用时写回配置文件", actions: ["enable", "copy", "remove"] },
             },
-            env: { MY_PROXY_TOKEN: { placeholder: "MY_PROXY_TOKEN", resolved: true } },
-            actions: ["disable", "remove", "upgrade"],
+          },
+          state: "disabled",
+          freshness: makeFreshness({ state: "current", current: "0.3.1", upstream: "0.3.1", checked_at: CHECKED_AT, probe: "npm-view", cache_age_sec: 60 }),
+        }),
+        makeElement({
+          id: "mcp:remote-api",
+          domain: "mcp",
+          spec: { name: "remote-api", saved: null },
+          observed: {
+            agents: {
+              codex: { ...mcpCellBase, state: "enabled", source: "file", target: "/Users/demo/.codex/config.toml", transport: "remote", entry: { url: "https://mcp.demo.example.com/endpoint", headers: { Authorization: "${DEMO_REMOTE_TOKEN}" } }, vars: { Authorization: { placeholder: "${DEMO_REMOTE_TOKEN}", resolved: true, stored: false, kind: "header" } }, base: "6".repeat(64), command_available: null, actions: ["edit", "disable", "copy", "remove"] },
+            },
           },
           state: "managed-ok",
-          freshness: makeFreshness({ state: "current", current: "0.3.1", upstream: "0.3.1", checked_at: CHECKED_AT, probe: "npm-view", cache_age_sec: 60 }),
+          freshness: makeFreshness({ state: "not-applicable" }),
         }),
         makeElement({
           id: "mcp:serena",
           domain: "mcp",
           spec: {
-            command: "uvx",
-            args: ["--from", "git+https://github.com/oraios/serena@main", "serena", "start-mcp-server"],
-            extra_args_by_agent: { "claude-code": ["--context", "claude-code"], codex: ["--context", "codex"] },
-            startup_timeout_sec: 120,
-            agents: null,
-            env: {},
+            name: "serena",
+            saved: {
+              definition: { command: "uvx", args: ["--from", "git+https://github.com/oraios/serena@main", "serena", "start-mcp-server"], env: {}, extra_args_by_agent: { "claude-code": ["--context", "claude-code"], codex: ["--context", "codex"] } },
+              valid: true,
+            },
           },
-          policy: { enabled: true, agents: null },
           observed: {
             agents: {
-              "claude-code": { state: "managed-ok", target: "/Users/demo/.claude.json", target_exists: true, assigned: true, enabled: true, actions: ["disable"] },
-              codex: { state: "leftover", target: "/Users/demo/.codex/config.toml", target_exists: true, assigned: false, enabled: false, actions: ["remove"] },
-              "kimi-code": { state: "not-materialized", target: "/Users/demo/.kimi-code/mcp.json", target_exists: false, assigned: true, enabled: true, actions: ["add"] },
+              codex: { ...mcpCellBase, state: "invalid", source: "file", target: "/Users/demo/.codex/config.toml", reason: "command 必须是字符串", base: "7".repeat(64), blocked_reason: "条目结构无法识别（command 必须是字符串），只能删除或直接在配置文件里修正", actions: ["remove"] },
             },
-            env: {},
-            actions: ["disable", "remove"],
           },
-          state: "drifted",
-          freshness: makeFreshness({ state: "current", current: "a1b2c3d", upstream: "a1b2c3d", checked_at: CHECKED_AT, probe: "git-ls-remote", cache_age_sec: 200 }),
-        }),
-        makeElement({
-          id: "mcp:pending-server",
-          domain: "mcp",
-          spec: { command: "npx", args: ["-y", "pending-mcp"], startup_timeout_sec: 60, agents: null, env: {} },
-          policy: { enabled: true, agents: null },
-          observed: { install_source: null, agents: {}, env: {} },
-          state: "not-materialized",
-          freshness: makeFreshness({ state: "not-applicable" }),
-        }),
-        makeElement({
-          id: "mcp:remote-api",
-          domain: "mcp",
-          spec: { url: "https://mcp.demo.example.com/endpoint", headers: { Authorization: "${DEMO_REMOTE_TOKEN}" }, agents: null },
-          policy: { enabled: true, agents: null },
-          observed: {
-            agents: {
-              "claude-code": { state: "managed-ok", target: "/Users/demo/.claude.json", target_exists: true, assigned: true, enabled: true, actions: ["disable"] },
-              codex: { state: "missing", target: "/Users/demo/.codex/config.toml", target_exists: true, assigned: true, enabled: true, actions: ["add"] },
-            },
-            env: {},
-            headers: { Authorization: { placeholder: "${DEMO_REMOTE_TOKEN}", resolved: true } },
-            actions: ["disable", "remove"],
-          },
-          state: "managed-ok",
-          freshness: makeFreshness({ state: "not-applicable" }),
-        }),
-        makeElement({
-          id: "mcp:legacy-server",
-          domain: "mcp",
-          spec: { command: "legacy-mcp", args: [], startup_timeout_sec: 60, agents: null, env: {} },
-          policy: { enabled: true, agents: null },
-          observed: { install_source: null, agents: {}, env: {} },
           state: "unsupported",
-          freshness: makeFreshness({ state: "not-applicable" }),
+          freshness: makeFreshness({ state: "current", current: "a1b2c3d", upstream: "a1b2c3d", checked_at: CHECKED_AT, probe: "git-ls-remote", cache_age_sec: 200 }),
+          actions: [{ id: "forget", risk: "write-local", needs_lock: true, offline_ok: true }],
         }),
       ],
     },
@@ -311,6 +278,32 @@ function demoEnvelopes(): Record<string, Envelope> {
             actions: ["update", "disable", "remove"] },
           state: "managed-ok",
           freshness: makeFreshness({ state: "behind", current: "a1b2c3d4e5f60718293a4b5c6d7e8f9012a3b4c5", upstream: "f0e1d2c3b4a5968778695a4b3c2d1e0f9a8b7c6d", checked_at: CHECKED_AT, probe: "git-ls-remote", cache_age_sec: 600 }),
+        }),
+        // 用户添加、还没拉取的集合：收敛七态里的 not-materialized 由这里演示
+        //（原先由 MCP「已分配未写入」提供，该状态随服务库模型退役）
+        makeElement({
+          id: "skill:team-skills",
+          domain: "skills",
+          spec: {
+            url: "https://github.com/example/team-skills.git",
+            skill_paths: ["team-review"],
+            agents: [],
+            matrix_mode: true,
+            new_skill_default: "disabled",
+          },
+          policy: { enabled: true },
+          observed: { install_source: null, repo_cache: "/repo/agent-skill/repositories/team-skills",
+            repo_cached: false,
+            owner_marked: false,
+            discovered: [],
+            discovery_inbox: [],
+            extra_links: [],
+            discovery_error: null,
+            blocked_reason: null,
+            actions: ["update", "disable", "remove"] },
+          state: "not-materialized",
+          freshness: makeFreshness({ state: "unknown" }),
+          actions: [{ id: "update", risk: "network", needs_lock: true, offline_ok: false }],
         }),
         makeElement({
           id: "skill:agent-skills/safe-merge-review",
@@ -647,7 +640,7 @@ function demoEnvelopes(): Record<string, Envelope> {
       },
       { command: "system.refresh-upstream" },
     ),
-    // 接管发现：覆盖五类来源（外部目录、已定义集合的计划外链接、原生真实目录、断链、未登记助手、未纳管 MCP）
+    // 接管发现：覆盖五类来源（外部目录、已定义集合的计划外链接、原生真实目录、断链、未登记助手）
     "system:discover": makeEnvelope(
       {
         domain: "discover",
@@ -701,11 +694,7 @@ function demoEnvelopes(): Record<string, Envelope> {
             },
           ],
         },
-        mcp: [
-          { name: "my-proxy", agent: "claude-code", transport: "stdio", spec: { command: "npx", args: ["-y", "my-proxy"], env: { PROXY_TOKEN: "<literal>" } }, previously_managed: false, origin: "unmanaged", manage: "register" },
-          { name: "vendor-remote", agent: "codex", transport: "remote", spec: { url: "https://mcp.example.com/sse", headers: { Authorization: "<literal>" } }, previously_managed: true, origin: "previously-managed", manage: "register" },
-        ],
-        summary: { agents: 2, skills_symlink: 3, skills_collection: 1, skills_native: 1, skills_cleanup: 1, mcp: 2 },
+        summary: { agents: 2, skills_symlink: 3, skills_collection: 1, skills_native: 1, skills_cleanup: 1 },
       },
       { command: "system.discover" },
     ),
@@ -728,7 +717,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
   // ---- 有状态的写路径演示数据（内存态，仅 DEV mock） ----
   const builtinPolicy: Record<string, unknown> = {
       agents: { "claude-code": { enabled: true, auto_update: true } },
-      mcp: { "grok-search": { enabled: true } },
+      mcp: { definitions: {} },
       skills: { "agent-skills": { enabled: true, new_skill_default: "disabled" } },
   };
   // fresh：全新机器，本地层空着——首次使用引导据此出现
@@ -736,10 +725,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
     ? {}
     : {
       browser_us_sync: { enabled: false },
-      mcp: {
-        definitions: { "my-proxy": { command: "npx", args: ["-y", "my-proxy-mcp"], startup_timeout_sec: 60, agents: null, env: { MY_PROXY_TOKEN: "${MY_PROXY_TOKEN}" } } },
-        "my-proxy": { enabled: true },
-      },
+      mcp: { definitions: {} },
   };
   const runs: RunEntry[] = [
     makeRunEntry({ run_id: "20260905T235900Z-legacy1", last_at: "2026-09-05T23:59:00Z", operations: 2 }),
@@ -956,25 +942,16 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
     }
 
     const mcpData = routes["mcp:status"].data as {
-      elements: Array<{
-        observed: {
-          env?: Record<string, { placeholder?: string; resolved?: boolean }>;
-          headers?: Record<string, { placeholder?: string; resolved?: boolean }>;
-          agents?: Record<string, { state: string; actions?: string[]; blocked_reason?: string | null }>;
-        };
-      }>;
+      elements: Array<{ observed: { agents?: Record<string, { vars?: Record<string, { placeholder?: string; resolved?: boolean; stored?: boolean }> }> } }>;
     };
     for (const element of mcpData.elements) {
-      for (const resolution of [...Object.values(element.observed.env ?? {}), ...Object.values(element.observed.headers ?? {})]) {
-        if (normalize(resolution.placeholder ?? "") === variable) {
-          resolution.resolved = value.length > 0 || externallyResolvedSecrets.has(variable);
+      for (const cell of Object.values(element.observed.agents ?? {})) {
+        for (const resolution of Object.values(cell.vars ?? {})) {
+          if (normalize(resolution.placeholder ?? "") === variable) {
+            resolution.resolved = value.length > 0 || externallyResolvedSecrets.has(variable);
+            resolution.stored = value.length > 0;
+          }
         }
-      }
-      if (variable === "TAVILY_API_KEY" && element.observed.agents?.codex) {
-        const cell = element.observed.agents.codex;
-        cell.state = value.length > 0 ? "missing" : "not-materialized";
-        cell.actions = value.length > 0 ? ["add"] : [];
-        cell.blocked_reason = value.length > 0 ? null : "凭证变量未配置: TAVILY_API_KEY";
       }
     }
     recordRun(runId, "secrets.set");
@@ -1219,10 +1196,6 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       if (command === "secrets:migrate-legacy") {
         recordRun(runId, "secrets.migrate-legacy");
         return makeEnvelope({ domain: "secrets", migrated: [] }, { command: "secrets.migrate-legacy", run_id: runId });
-      }
-      if (command === "secrets:adopt") {
-        recordRun(runId, "secrets.adopt");
-        return makeEnvelope({ domain: "secrets", adopted: [] }, { command: "secrets.adopt", run_id: runId });
       }
       if (command === "config:export") {
         return makeEnvelope(

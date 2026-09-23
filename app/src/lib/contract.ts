@@ -96,8 +96,8 @@ export interface EngineElement {
 export interface StatusData {
   domain: string;
   elements: EngineElement[];
-  /** 仅 mcp 域输出：各助手现有配置中未受管的导入候选（掩码形态，绝无明文）。 */
-  import_candidates?: McpImportCandidate[];
+  /** 仅 mcp 域输出：各助手的 MCP 配置文件（未配置 mcp_config 的助手不在其中）。 */
+  targets?: McpTarget[];
   /** 仅 skills 域：编译内置的推荐技能来源。不是元素，不计入待同步。 */
   recommendations?: SkillRecommendation[];
   /** 仅 skills 域：各助手技能目录里的实际条目（当前视图，只展示）。 */
@@ -162,27 +162,19 @@ export interface SkillInstalledEntry {
   collection: string | null;
 }
 
-// ---------- mcp:status import_candidates ----------
+// ---------- mcp:status targets ----------
 
-export interface McpImportCandidateSpec {
-  /** stdio 形态 */
-  command?: string;
-  args?: string[];
-  /** 键为变量名，值恒为 "<literal>"（掩码）。 */
-  env?: Record<string, string>;
-  /** remote 形态 */
-  url?: string;
-  /** 值为 "<literal>"（掩码）或 "${VAR}"（Codex env_http_headers 引用直通）。 */
-  headers?: Record<string, string>;
-}
-
-export interface McpImportCandidate {
-  name: string;
+export interface McpTarget {
   agent: string;
-  transport: "stdio" | "remote" | string;
-  spec: McpImportCandidateSpec;
-  /** true = 条目带旧体系写入的管理标记但本工具无绑定记录（此前由本工具管理）。 */
-  previously_managed?: boolean;
+  path: string;
+  format: "claude-json" | "codex-toml" | "opencode-json" | "unsupported" | string;
+  exists: boolean;
+  /** false = 该助手在本工具里已停用：条目只读展示。 */
+  agent_enabled: boolean;
+  /** field = 停用写官方 enabled=false，条目留在文件；snapshot = 停用时移出条目、保存在本工具里。 */
+  disable_mode: "field" | "snapshot" | string;
+  /** 文件或路径问题（解析失败、符号链接、格式不支持、与其他助手共用文件）；非空时该助手的条目无法列出与操作。 */
+  error: string | null;
 }
 
 // ---------- profiles（助手实例） ----------
@@ -231,7 +223,7 @@ export interface ProfileObserved {
 
 /** 接管方式词汇表（引擎侧 manage 字段）：
  * native = 官方路径/原生安装方案，只标识不接管；symlink = 外部资源以软链接纳管；
- * collection = 走已定义集合的接管通道；register = 登记定义（助手 CLI 与 MCP 条目）；
+ * collection = 走已定义集合的接管通道；register = 登记定义（助手 CLI）；
  * cleanup = 断链或旧体系残留，只建议清理。 */
 export type TakeoverManage = "native" | "symlink" | "collection" | "register" | "cleanup";
 
@@ -276,16 +268,10 @@ export interface DiscoverSkillGroup {
   suggested_definition: { source_path: string; skill_paths: string[]; agents: string[] };
 }
 
-export interface DiscoverMcpCandidate extends McpImportCandidate {
-  origin: "unmanaged" | "previously-managed" | string;
-  manage: "register";
-}
-
 export interface DiscoverData {
   domain: "discover";
   agents?: DiscoverAgentCandidate[];
   skills?: { items: DiscoverSkillItem[]; groups: DiscoverSkillGroup[] };
-  mcp?: DiscoverMcpCandidate[];
   summary: Record<string, number>;
 }
 

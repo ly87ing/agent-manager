@@ -33,7 +33,7 @@ export function DriftExplanationPanel({
 }: {
   element: EngineElement;
   /** per-agent 单元格词汇表；不传则纯文本渲染 state。 */
-  cellKind?: "mcp" | "skills";
+  cellKind?: "skills";
 }) {
   const cells = agentCellsOf(element);
   const cellEntries = Object.entries(cells);

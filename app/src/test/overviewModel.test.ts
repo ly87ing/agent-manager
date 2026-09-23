@@ -33,43 +33,39 @@ describe("buildOverview", () => {
     ]);
   });
 
-  it("逐助手的域：有可执行动作的算待同步，被外部改过的算要你决定", () => {
+  it("MCP 没有待同步：有助手启用着算正常，全部停用算已停用，不进一键同步", () => {
     const groups = buildOverview({
       mcp: status("mcp", [
         makeElement({
-          id: "mcp:chrome-devtools",
+          id: "mcp:fs",
           domain: "mcp",
-          spec: { name: "chrome-devtools" },
-          observed: { agents: { claude: { state: "missing", actions: [{ id: "add" }] } } },
+          spec: { name: "fs", saved: null },
+          observed: { agents: { claude: { state: "enabled", actions: ["edit", "disable"] }, codex: { state: "disabled" } } },
         }),
         makeElement({
-          id: "mcp:grok-search",
+          id: "mcp:old",
           domain: "mcp",
-          spec: { name: "grok-search" },
-          observed: {
-            agents: { claude: { state: "unmanaged-detected", blocked_reason: "本工具以外写过", actions: [] } },
-          },
+          state: "disabled",
+          spec: { name: "old", saved: null },
+          observed: { agents: { claude: { state: "disabled", source: "saved", actions: ["enable"] } } },
         }),
         makeElement({
-          id: "mcp:serena",
+          id: "mcp:broken",
           domain: "mcp",
-          spec: { name: "serena" },
-          observed: { agents: { claude: { state: "managed-ok", actions: [] }, codex: { state: "absent" } } },
+          state: "unsupported",
+          spec: { name: "broken", saved: null },
+          observed: { agents: { claude: { state: "invalid", actions: ["remove"] }, codex: { state: "enabled" } } },
         }),
       ]),
     });
-
     const mcp = groups.find((group) => group.domain === "mcp");
     expect(mcp?.items.map((item) => [item.name, item.sync])).toEqual([
-      ["chrome-devtools", "pending"],
-      ["grok-search", "decision"],
-      ["serena", "ok"],
+      ["fs", "ok"],
+      ["old", "disabled"],
+      ["broken", "ok"],
     ]);
-    expect(mcp?.pending).toBe(2);
-    // 只有待同步的进一键同步；要你决定的不替用户做主
-    expect(syncableOf(groups)).toEqual([
-      { domain: "mcp", name: "chrome-devtools", args: ["--only", "mcp:chrome-devtools", "--agent", "claude", "--action", "add"] },
-    ]);
+    expect(mcp?.pending).toBe(0);
+    expect(syncableOf(groups)).toEqual([]);
   });
 
   it("技能只列单个技能，集合本身不占一行", () => {

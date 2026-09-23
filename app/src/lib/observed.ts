@@ -155,51 +155,73 @@ export interface AgentUsage {
 
 // ---------- mcp ----------
 
-/** server × agent 单元格词汇表（引擎 _mcp_cell_state）。 */
-export type McpCellState =
-  | "managed-ok"
-  | "drifted"
-  | "missing"
-  | "not-materialized"
-  | "leftover"
-  | "agent-disabled"
-  | "probe-error"
-  | "absent";
+/** 服务 × 助手 单元格状态：enabled / disabled（官方字段停用或已保存未生效的快照）/ invalid（结构无法识别）。 */
+export type McpCellState = "enabled" | "disabled" | "invalid";
+
+/** 脱敏后的已建模字段：env/headers 引用显示 ${VAR}，字面量一律 <literal>。 */
+export interface McpEntryView {
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  /** 只有 Codex 建模。 */
+  startup_timeout_sec?: number;
+  url?: string;
+  headers?: Record<string, string>;
+}
+
+export interface McpVarResolution {
+  placeholder: string;
+  resolved: boolean;
+  /** 取值来自已选择的外部密钥文件。 */
+  stored?: boolean;
+  kind?: "env" | "header" | string;
+}
 
 export interface McpAgentCell {
   state: McpCellState | string;
+  /** file = 助手配置文件里的条目；saved = 保存在本工具里的停用快照。 */
+  source: "file" | "saved" | string;
   target?: string;
   target_exists?: boolean;
-  /** 非阻断提示（如条目含旧版标记、更新即可清理）；不影响可用动作。 */
+  transport?: "stdio" | "remote";
+  entry?: McpEntryView;
+  /** 本工具不建模、写入时原样保留的官方字段（非凭据类原样，其余 <hidden>）。 */
+  extra?: Record<string, unknown>;
+  vars?: Record<string, McpVarResolution>;
+  /** 条目摘要：编辑、启停、删除、复制时作为 --base 回传。 */
+  base: string;
+  legacy_marker?: boolean;
+  /** 文件里有条目，同时本工具还保存着一份停用快照。 */
+  has_saved?: boolean;
+  /** stdio 命令能否在本机解析；远程与快照恒 null。 */
+  command_available?: boolean | null;
   notice?: string | null;
+  blocked_reason?: string | null;
+  reason?: string;
+  actions: string[];
+}
+
+export interface McpSavedDefinition {
+  /** 未分配到任何助手的已保存定义（引用原样、字面量掩码）。 */
+  definition: {
+    command?: string;
+    args?: string[];
+    env?: Record<string, string>;
+    startup_timeout_sec?: number;
+    extra_args_by_agent?: Record<string, string[]>;
+    url?: string;
+    headers?: Record<string, string>;
+  };
+  valid: boolean;
 }
 
 export interface McpSpec {
-  command?: string;
-  args?: string[];
-  startup_timeout_sec?: number;
-  agents?: string[] | null;
-  env?: Record<string, string>;
-  extra_args_by_agent?: Record<string, string[]>;
-  /** 远程 HTTP 定义：含 url 即远程（与 command 互斥）；type 为历史遗留输入，不持久化。 */
-  url?: string;
-  headers?: Record<string, string>;
-  type?: string;
-}
-
-export interface McpEnvResolution {
-  placeholder?: string;
-  resolved?: boolean;
+  name: string;
+  saved: McpSavedDefinition | null;
 }
 
 export interface McpObserved {
   agents?: Record<string, McpAgentCell>;
-  env?: Record<string, McpEnvResolution>;
-  /** 远程 headers 占位符解析块（与 env 同级：只输出占位符与布尔）。 */
-  headers?: Record<string, McpEnvResolution>;
-  /** stdio 命令能否在本机解析；远程服务没有本地命令，恒 null。 */
-  command_available?: boolean | null;
-  blocked_reason?: string | null;
 }
 
 /** 一条快捷命令在终端配置里的实际落地情况。 */

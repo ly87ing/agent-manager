@@ -266,7 +266,7 @@ export default function SecretsPage() {
       {clearing && (
         <ConfirmModal
           title={`删除 ${clearing} 的取值`}
-          description={`只从外部密钥文件 ${currentSourcePath} 删除这一项；Provider 和 MCP 定义中的变量名不变。删除后如果进程环境也没有该变量，相关配置将无法同步。`}
+          description={`只从外部密钥文件 ${currentSourcePath} 删除这一项；接入配置与 MCP 条目里的变量引用不变。删除后如果进程环境也没有该变量，相关配置将无法同步。`}
           risk="write-local"
           riskLabel="删除外部密钥"
           confirmLabel="确认删除"

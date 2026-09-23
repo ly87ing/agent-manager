@@ -1,11 +1,12 @@
 //! 只读 `system:discover`：扫描本机已存在、但还没纳入 Agent Manager 管理的
-//! agents / skills / MCP 资源，按来源分类并给出接管方式建议。
+//! agents / skills 资源，按来源分类并给出接管方式建议。MCP 条目以各助手配置
+//! 文件为准，直接在 MCP 页查看与编辑，不再经过「导入」。
 //!
 //! 统一分类词汇（`manage` 字段，前端据此决定可做什么）：
 //! - `native`：位于助手官方路径、由各自原生安装方案管理 —— 只标识，不接管；
 //! - `symlink`：外部路径资源 —— 登记本地来源集合后由 manager 以软链接纳管；
 //! - `collection`：已定义集合的计划外链接 —— 走既有集合接管通道；
-//! - `register`：无文件系统链接语义的资源（助手 CLI、MCP 条目）—— 登记定义后纳管；
+//! - `register`：无文件系统链接语义的资源（助手 CLI）—— 登记定义后纳管；
 //! - `cleanup`：断链或旧体系残留 —— 只建议清理。
 //!
 //! 零写零网络：各域发现复用其 status 侧的只读视图（effective_policy + binding +
@@ -17,7 +18,7 @@ use serde_json::{json, Map, Value};
 
 use crate::native::{Context, Request};
 
-const DOMAINS: &[&str] = &["agents", "skills", "mcp"];
+const DOMAINS: &[&str] = &["agents", "skills"];
 
 fn parse_only(req: &Request) -> Result<Vec<String>> {
     let mut idx = 0;
@@ -30,7 +31,7 @@ fn parse_only(req: &Request) -> Result<Vec<String>> {
                 .get(idx + 1)
                 .ok_or_else(|| anyhow::anyhow!("--only 缺少取值"))?;
             if !DOMAINS.contains(&value.as_str()) {
-                bail!("--only 仅支持 agents/skills/mcp，得到 '{}'", value);
+                bail!("--only 仅支持 agents/skills，得到 '{}'", value);
             }
             if !selected.contains(value) {
                 selected.push(value.clone());
@@ -69,15 +70,6 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
         summary.insert("skills_cleanup".into(), json!(count("cleanup")));
         data.insert("skills".into(), skills);
     }
-    if selected.iter().any(|d| d == "mcp") {
-        let mcp = crate::native_mcp::discovery::discover(ctx)?;
-        summary.insert(
-            "mcp".into(),
-            json!(mcp.as_array().map(Vec::len).unwrap_or(0)),
-        );
-        data.insert("mcp".into(), mcp);
-    }
-
     data.insert("domain".into(), json!("discover"));
     data.insert("summary".into(), Value::Object(summary));
     Ok(Value::Object(data))

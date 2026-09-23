@@ -1,56 +1,20 @@
-//! MCP 纯读状态聚合（mcp:status，零写库保证）
+//! mcp:status：各助手配置文件里的实际条目 + 已保存未生效项（只读、零写）。
 
 use anyhow::Result;
 use serde_json::{json, Map, Value};
+use std::collections::BTreeSet;
 
-use super::model::{
-    compute_definition_version, is_valid_server_name, mask_definition_with_agents_for_status,
-    owns_entry, Binding,
-};
-use super::persistence::load_bindings_readonly;
-use super::policy_view::{
-    allowed_agents, expected_extra_fields, inspect_env, inspect_headers, is_allowed,
-    library_enabled, library_view, validate_definition, validate_definition_env,
-};
-use super::targets::{
-    agent_targets, extract_entry, validate_target_path, AgentTarget, Entry, Format,
-};
+use super::entry::{self, masked_entry, masked_extra, referenced_vars, Transport, View};
+use super::inventory::{self, FileEntry, Inventory, TargetScan};
+use super::model::{is_valid_server_name, placeholder_var};
+use super::saved::{self, SavedRow};
+use super::targets::Format;
 use crate::native::Context;
-use crate::store;
-
-fn target_exists(target: &std::path::Path) -> bool {
-    match std::fs::symlink_metadata(target) {
-        Ok(_) => true,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-        Err(_) => true,
-    }
-}
-
-fn make_cell(
-    state: &str,
-    target: &std::path::Path,
-    binding: Option<&Binding>,
-    avail_version: Value,
-    actions: Vec<&str>,
-    blocked_reason: Option<String>,
-) -> Value {
-    json!({
-        "state": state,
-        "target": target.to_string_lossy(),
-        "target_exists": target_exists(target),
-        "assigned": binding.map_or(false, |b| b.assigned),
-        "enabled": binding.map_or(false, |b| b.enabled),
-        "version": binding.and_then(|b| if b.assigned { Some(Value::String(b.version.clone())) } else { None }).unwrap_or(Value::Null),
-        "available_version": avail_version,
-        "actions": actions,
-        "blocked_reason": blocked_reason.map(Value::String).unwrap_or(Value::Null)
-    })
-}
 
 /// stdio 命令能否在本机解析（只读：查 PATH 与官方安装器常用的 ~/.local/bin）。
 ///
 /// 这是配完之后最容易踩的坑——命令没装，助手启动时才报错。只做存在性判断，
-/// 不执行它，也不对远程服务做网络探测（那要发请求、可能带上鉴权，不适合只读状态）。
+/// 不执行它，也不对远程服务做网络探测。
 fn command_resolvable(command: &str, home_dir: &std::path::Path) -> bool {
     if command.contains('/') {
         return std::path::Path::new(command).is_file();
@@ -62,51 +26,16 @@ fn command_resolvable(command: &str, home_dir: &std::path::Path) -> bool {
     dirs.into_iter().any(|dir| dir.join(command).is_file())
 }
 
-/// 定义的命令可用性：stdio 给 true/false，远程定义没有本地命令，恒 null。
-fn command_availability(definition: &Value, home_dir: &std::path::Path) -> Value {
-    match definition.get("command").and_then(Value::as_str) {
-        Some(command) if !command.trim().is_empty() => {
-            Value::Bool(command_resolvable(command.trim(), home_dir))
+fn command_available(view: &View, home_dir: &std::path::Path) -> Value {
+    match view.transport {
+        Transport::Stdio if !view.command.trim().is_empty() => {
+            Value::Bool(command_resolvable(view.command.trim(), home_dir))
         }
         _ => Value::Null,
     }
 }
 
-fn make_element(
-    server: &str,
-    spec: Value,
-    enabled: bool,
-    agents: Value,
-    env: Map<String, Value>,
-    headers: Map<String, Value>,
-    agent_cells: Map<String, Value>,
-    obs_actions: Vec<&str>,
-    blocked_reason: Option<String>,
-    state: &str,
-    actions: Vec<Value>,
-    freshness: Value,
-    command_available: Value,
-) -> Value {
-    json!({
-        "id": format!("mcp:{}", server),
-        "domain": "mcp",
-        "spec": spec,
-        "policy": { "enabled": enabled, "agents": agents },
-        "observed": {
-            "env": env,
-            "headers": headers,
-            "agents": agent_cells,
-            "actions": obs_actions,
-            "command_available": command_available,
-            "blocked_reason": blocked_reason.map(Value::String).unwrap_or(Value::Null)
-        },
-        "state": state,
-        "freshness": freshness,
-        "actions": actions
-    })
-}
-
-/// 无上游概念（不在探测宇宙）的 mcp 元素固定 freshness 块。
+/// 无上游概念的元素固定 freshness 块。
 fn freshness_not_applicable() -> Value {
     json!({
         "state": "not-applicable",
@@ -118,517 +47,337 @@ fn freshness_not_applicable() -> Value {
     })
 }
 
-fn build_orphan_element(
-    server: &str,
-    bindings: &std::collections::BTreeMap<String, std::collections::BTreeMap<String, Binding>>,
-    targets: &[AgentTarget],
-) -> Value {
-    let def = bindings
-        .get(server)
-        .and_then(|m| m.values().next())
-        .map(|b| b.definition.clone())
-        .unwrap_or_else(|| json!({"command": "orphan"}));
-    let mut agent_cells = Map::new();
-    for t in targets {
-        let b = bindings.get(server).and_then(|m| m.get(&t.agent));
-        let owned = owns_entry(b);
-        let (s, acts, blk) = if !t.enabled {
-            match extract_entry(&t.path, t.format.clone(), server) {
-                Err(e) => (
-                    "probe-error",
-                    vec![],
-                    Some(format!("配置文件解析失败: {}", e)),
-                ),
-                Ok((Some(_), _)) if !owned => (
-                    "drifted",
-                    vec![],
-                    Some("存在外部非受管同名条目，拒绝操作以防止冲突".into()),
-                ),
-                Ok((Some(_), _)) => (
-                    "leftover",
-                    vec![],
-                    Some(format!("Agent '{}' 已在策略中停用", t.agent)),
-                ),
-                Ok((None, _)) if b.is_some() => (
-                    "disabled",
-                    vec![],
-                    Some(format!("Agent '{}' 已在策略中停用", t.agent)),
-                ),
-                Ok((None, _)) => ("absent", vec![], None),
-            }
-        } else {
-            match extract_entry(&t.path, t.format.clone(), server) {
-                Err(e) => (
-                    "probe-error",
-                    vec![],
-                    Some(format!("配置文件解析失败: {}", e)),
-                ),
-                Ok((Some(_), _)) if !owned => (
-                    "drifted",
-                    vec![],
-                    Some("存在外部非受管同名条目，拒绝操作以防止冲突".into()),
-                ),
-                Ok(_) => {
-                    if b.is_some() {
-                        if owned {
-                            ("drifted", vec!["disable", "remove"], None)
-                        } else {
-                            ("leftover", vec!["remove"], None)
-                        }
-                    } else {
-                        ("absent", vec![], None)
-                    }
-                }
-            }
-        };
-        agent_cells.insert(
-            t.agent.clone(),
-            make_cell(s, &t.path, b, Value::Null, acts, blk),
+fn vars_block(format: &Format, view: &View) -> Value {
+    let mut out = Map::new();
+    for (key, kind, var) in referenced_vars(format, view) {
+        out.insert(
+            key,
+            json!({
+                "placeholder": format!("${{{var}}}"),
+                "resolved": crate::secret_values::is_set(&var),
+                "stored": crate::secret_values::is_stored(&var),
+                "kind": kind,
+            }),
         );
     }
-    // 外部同名条目不归属本工具，库级 remove 会跳过它，不构成阻断。
-    let has_blocker = agent_cells
-        .values()
-        .any(|c| c.get("state").and_then(Value::as_str) == Some("probe-error"));
-    let has_rem = targets.iter().any(|target| {
-        let binding_exists = bindings
-            .get(server)
-            .and_then(|per_agent| per_agent.get(&target.agent))
-            .is_some();
-        let cell = agent_cells.get(&target.agent);
-        let external = cell
-            .and_then(|cell| cell.get("blocked_reason"))
-            .and_then(Value::as_str)
-            .map_or(false, |r| r.contains("非受管同名条目"));
-        let cell_has_residue = !external
-            && cell
-                .and_then(|cell| cell.get("state"))
-                .and_then(Value::as_str)
-                .map_or(false, |state| matches!(state, "leftover" | "drifted"));
-        binding_exists || cell_has_residue
-    });
-    let (orphan_actions, obs_actions, blk_reason) = if has_blocker || !has_rem {
-        let r = if has_blocker {
-            "部分目标配置文件解析失败，无法执行清理"
-        } else {
-            "无受管残留配置可清理"
-        };
-        (vec![], vec![], Some(r.to_string()))
-    } else {
-        (
-            vec![
-                json!({ "id": "remove", "risk": "write-local", "needs_lock": true, "offline_ok": true }),
-            ],
-            vec!["remove"],
-            None,
-        )
-    };
-    make_element(
-        server,
-        mask_definition_with_agents_for_status(&def),
-        false,
-        Value::Null,
-        Map::new(),
-        Map::new(),
-        agent_cells,
-        obs_actions,
-        blk_reason,
-        "drifted",
-        orphan_actions,
-        freshness_not_applicable(),
-        // 孤儿元素只剩残留配置，没有库内定义可判定命令
-        Value::Null,
-    )
+    Value::Object(out)
 }
 
-fn compute_cell_actions(
-    target: &AgentTarget,
-    binding: Option<&Binding>,
-    actual_entry: Option<&Entry>,
-    legacy_marker: bool,
-    def: &Value,
+/// 助手级阻断原因：文件出错、助手在本工具中停用、名称不合法。
+fn agent_block(scan: Option<&TargetScan>, agent: &str, server: &str) -> Option<String> {
+    let Some(scan) = scan else {
+        return Some(format!("助手 '{agent}' 已没有 MCP 配置目标"));
+    };
+    if let Some(error) = &scan.error {
+        return Some(error.clone());
+    }
+    if !scan.target.enabled {
+        return Some(format!("助手 '{agent}' 已在本工具中停用"));
+    }
+    if !is_valid_server_name(server) {
+        return Some(
+            "服务名含本工具不支持的字符（只允许字母、数字、- 与 _），请直接在助手配置里修改"
+                .to_string(),
+        );
+    }
+    None
+}
+
+fn cell_base(state: &str, source: &str, scan: Option<&TargetScan>) -> Map<String, Value> {
+    let mut cell = Map::new();
+    cell.insert("state".into(), json!(state));
+    cell.insert("source".into(), json!(source));
+    let (target, exists) = scan.map_or((String::new(), false), |s| {
+        (s.target.path.to_string_lossy().to_string(), s.exists)
+    });
+    cell.insert("target".into(), json!(target));
+    cell.insert("target_exists".into(), json!(exists));
+    cell
+}
+
+fn file_cell(
+    ctx: &Context,
+    scan: &TargetScan,
     server: &str,
-    def_error: Option<&str>,
-    lib_version: &str,
-    agent_allowed: bool,
-    missing_reason: Option<&str>,
-) -> (&'static str, Vec<&'static str>, Option<String>) {
-    // 归属只看绑定（assigned 且 enabled）；文件里的旧标记不代表归属。
-    let owned = owns_entry(binding);
-    if let Some(entry) = actual_entry {
-        if !owned {
-            // 停用中的分配仍可单独 remove（只删绑定、不动外部条目）。
-            let acts = if binding.map_or(false, |b| b.assigned) {
-                vec!["remove"]
-            } else {
-                vec![]
-            };
-            return (
-                "drifted",
-                acts,
-                Some("存在外部非受管同名条目，拒绝操作以防止冲突".into()),
+    file_entry: &FileEntry,
+    snapshot: Option<&SavedRow>,
+) -> Value {
+    let format = &scan.target.format;
+    let block = agent_block(Some(scan), &scan.target.agent, server);
+    let (state, mut cell) = match &file_entry.view {
+        Ok(view) => {
+            let state = if view.enabled { "enabled" } else { "disabled" };
+            let mut cell = cell_base(state, "file", Some(scan));
+            cell.insert(
+                "transport".into(),
+                json!(if view.transport == Transport::Remote {
+                    "remote"
+                } else {
+                    "stdio"
+                }),
             );
+            cell.insert("entry".into(), masked_entry(format, view));
+            cell.insert("extra".into(), masked_extra(view));
+            cell.insert("vars".into(), vars_block(format, view));
+            cell.insert("legacy_marker".into(), json!(view.legacy_marker));
+            cell.insert(
+                "command_available".into(),
+                command_available(view, &ctx.home_dir),
+            );
+            (state, cell)
         }
-        if let Ok(expected) = expected_extra_fields(def, target.format.clone(), server) {
-            if let Some((k, _)) = entry.extra.iter().find(|(k, _)| !expected.contains_key(*k)) {
-                return (
-                    "drifted",
-                    vec![],
-                    Some(format!(
-                        "目标文件 {} 中的条目 '{}' 包含未受管外部属性（外部未识别字段 '{}'），拒绝覆盖以防止外部配置丢失",
-                        target.path.display(),
-                        server,
-                        k
-                    )),
-                );
+        Err(reason) => {
+            let mut cell = cell_base("invalid", "file", Some(scan));
+            cell.insert("reason".into(), json!(reason));
+            ("invalid", cell)
+        }
+    };
+    cell.insert("base".into(), json!(file_entry.base));
+    cell.insert("has_saved".into(), json!(snapshot.is_some()));
+    let mut notices = Vec::new();
+    if let Ok(view) = &file_entry.view {
+        if view.legacy_marker {
+            notices.push("条目含旧版 Agent Manager 标记，编辑或启停时会顺带清除");
+        }
+    }
+    if snapshot.is_some() {
+        notices.push("库里还保存着一份停用时的旧内容，删除会一并清掉");
+    }
+    cell.insert(
+        "notice".into(),
+        if notices.is_empty() {
+            Value::Null
+        } else {
+            json!(notices.join("；"))
+        },
+    );
+    let actions: Vec<&str> = if block.is_some() {
+        vec![]
+    } else {
+        match state {
+            "enabled" => vec!["edit", "disable", "copy", "remove"],
+            "disabled" => vec!["edit", "enable", "copy", "remove"],
+            _ => vec!["remove"],
+        }
+    };
+    let reason = block.or_else(|| {
+        (state == "invalid").then(|| {
+            format!(
+                "条目结构无法识别（{}），只能删除或直接在配置文件里修正",
+                file_entry.view.as_ref().err().cloned().unwrap_or_default()
+            )
+        })
+    });
+    cell.insert("blocked_reason".into(), json!(reason));
+    cell.insert("actions".into(), json!(actions));
+    Value::Object(cell)
+}
+
+fn snapshot_cell(scan: Option<&TargetScan>, row: &SavedRow) -> Value {
+    let block = agent_block(scan, &row.agent, &row.server);
+    let parsed = scan
+        .ok_or_else(|| "助手已没有 MCP 配置目标".to_string())
+        .and_then(|s| {
+            saved::validate_row(row).map_err(|e| format!("{e:#}"))?;
+            entry::parse(&s.target.format, &row.entry).map(|v| (s.target.format.clone(), v))
+        });
+    let mut cell = match &parsed {
+        Ok((format, view)) => {
+            let mut cell = cell_base("disabled", "saved", scan);
+            cell.insert(
+                "transport".into(),
+                json!(if view.transport == Transport::Remote {
+                    "remote"
+                } else {
+                    "stdio"
+                }),
+            );
+            cell.insert("entry".into(), masked_entry(format, view));
+            cell.insert("extra".into(), masked_extra(view));
+            cell.insert("vars".into(), vars_block(format, view));
+            cell.insert("legacy_marker".into(), json!(false));
+            cell.insert("command_available".into(), Value::Null);
+            cell
+        }
+        Err(reason) => {
+            let mut cell = cell_base("invalid", "saved", scan);
+            cell.insert("reason".into(), json!(reason));
+            cell
+        }
+    };
+    cell.insert("base".into(), json!(row.base()));
+    cell.insert("has_saved".into(), json!(false));
+    cell.insert(
+        "notice".into(),
+        json!("已停用：条目保存在本工具里，启用时写回配置文件"),
+    );
+    let actions: Vec<&str> = match (&parsed, &block) {
+        (Ok(_), None) => vec!["enable", "copy", "remove"],
+        // 助手没了或快照无效：只能丢掉这份保存的内容
+        _ if scan.map_or(true, |s| s.target.enabled) => vec!["remove"],
+        _ => vec![],
+    };
+    let reason = match (&parsed, block) {
+        (_, Some(block)) => Some(block),
+        (Err(reason), None) => Some(format!("已保存的内容无效（{reason}），只能删除")),
+        _ => None,
+    };
+    cell.insert("blocked_reason".into(), json!(reason));
+    cell.insert("actions".into(), json!(actions));
+    Value::Object(cell)
+}
+
+/// 未分配的已保存定义的脱敏展示：引用原样，字面量掩码。
+fn masked_saved_definition(row: &SavedRow) -> Value {
+    let mut out = row.entry.as_object().cloned().unwrap_or_default();
+    for field in ["env", "headers"] {
+        if let Some(Value::Object(map)) = out.get_mut(field) {
+            for value in map.values_mut() {
+                let is_ref = value
+                    .as_str()
+                    .map_or(false, |v| placeholder_var(v).is_some());
+                if !is_ref {
+                    *value = json!(entry::LITERAL_MASK);
+                }
             }
         }
     }
-    if !target.enabled {
-        if actual_entry.is_some() {
-            return (
-                "leftover",
-                vec![],
-                Some(format!("Agent '{}' 已在策略中停用", target.agent)),
-            );
-        }
-        return (
-            "disabled",
-            vec![],
-            Some(format!("Agent '{}' 已在策略中停用", target.agent)),
-        );
-    }
-    if let Some(err_msg) = def_error {
-        let has_res = owned;
-        let s = "unsupported";
-        let acts = if has_res && binding.map_or(false, |b| b.assigned) {
-            vec!["disable", "remove"]
-        } else if has_res || binding.map_or(false, |b| b.assigned) {
-            vec!["remove"]
-        } else {
-            vec![]
-        };
-        return (s, acts, Some(err_msg.to_string()));
-    }
-    if let Some(b) = binding.filter(|b| b.assigned) {
-        if b.enabled {
-            // 条目仍带旧版标记时不算 managed-ok：给出 update（清理标记），摘要不受影响。
-            let in_sync = !legacy_marker
-                && actual_entry.map_or(false, |entry| {
-                    entry.digest() == b.applied_digest && b.version == lib_version
-                });
-            let (s, acts) = if in_sync && agent_allowed {
-                ("managed-ok", vec!["disable", "remove"])
-            } else {
-                let mut acts = Vec::new();
-                if agent_allowed && missing_reason.is_none() {
-                    acts.push("update");
+    let valid = saved::validate_row(row).is_ok();
+    json!({
+        "definition": Value::Object(out),
+        "valid": valid,
+    })
+}
+
+/// 该服务用于上游探测的定义形态（command/args）：文件条目优先（按助手 id 顺序），
+/// 其次快照与未分配定义。与 refresh-upstream 的收集规则一致。
+pub fn probe_definition(inv: &Inventory, server: &str) -> Option<Value> {
+    for scan in &inv.scans {
+        if let Some(Ok(view)) = scan.entry(server).map(|e| e.view.as_ref()) {
+            if view.transport == Transport::Stdio {
+                let def = json!({"command": view.command, "args": view.args});
+                if crate::native_upstream::classify_mcp_probe(&def).is_some() {
+                    return Some(def);
                 }
-                acts.extend(["disable", "remove"]);
-                let s = if actual_entry.is_some() {
-                    "drifted"
-                } else if target.path.exists() {
-                    "missing"
-                } else {
-                    "not-materialized"
-                };
-                (s, acts)
-            };
-            let blk = if !agent_allowed {
-                Some(format!("Agent '{}' 不在服务允许列表中", target.agent))
-            } else {
-                missing_reason.map(str::to_string)
-            };
-            return (s, acts, blk);
-        } else {
-            let mut acts = Vec::new();
-            let blk = if !agent_allowed {
-                Some(format!("Agent '{}' 不在服务允许列表中", target.agent))
-            } else if missing_reason.is_none() {
-                // 停用期间库定义可能已经改变。此时直接 update 会同时用最新定义
-                // 重新启用，避免先 enable 恢复旧快照、随后还要再 update 一次。
-                acts.push(if b.version == lib_version {
-                    "enable"
-                } else {
-                    "update"
-                });
-                None
-            } else {
-                missing_reason.map(str::to_string)
-            };
-            acts.push("remove");
-            return ("disabled", acts, blk);
+            }
         }
     }
-    if agent_allowed {
-        let s = if target.path.exists() {
-            "missing"
+    for row in inv.saved.iter().filter(|r| r.server == server) {
+        let def = if row.agent.is_empty() {
+            row.entry.clone()
         } else {
-            "not-materialized"
+            let format = inv
+                .scan(&row.agent)
+                .map(|s| s.target.format.clone())
+                .unwrap_or(Format::ClaudeJson);
+            match entry::parse(&format, &row.entry) {
+                Ok(view) if view.transport == Transport::Stdio => {
+                    json!({"command": view.command, "args": view.args})
+                }
+                _ => continue,
+            }
         };
-        let acts = if missing_reason.is_none() {
-            vec!["add"]
-        } else {
-            vec![]
-        };
-        (s, acts, missing_reason.map(str::to_string))
-    } else {
-        ("absent", vec![], None)
+        if crate::native_upstream::classify_mcp_probe(&def).is_some() {
+            return Some(def);
+        }
     }
+    None
 }
 
 pub fn status(ctx: &Context) -> Result<Value> {
-    let policy = store::effective_policy(ctx)?;
-    let library = library_view(&policy);
-    let (targets, _disabled_agents) = agent_targets(&policy, &ctx.home_dir)?;
-    let bindings = load_bindings_readonly(ctx)?;
+    let inv = inventory::load(ctx)?;
     let probes = crate::native_upstream::load_probe_cache(ctx)?;
 
+    let mut names: BTreeSet<String> = BTreeSet::new();
+    for scan in &inv.scans {
+        names.extend(scan.entries.iter().map(|e| e.name.clone()));
+    }
+    names.extend(inv.saved.iter().map(|r| r.server.clone()));
+
     let mut elements = Vec::new();
-
-    let all_servers: std::collections::BTreeSet<_> =
-        library.definitions.keys().chain(bindings.keys()).collect();
-
-    for server in all_servers {
-        let Some(def) = library.definitions.get(server) else {
-            elements.push(build_orphan_element(server, &bindings, &targets));
-            continue;
-        };
-
-        let name_valid = is_valid_server_name(server);
-        let def_shape_res = validate_definition(def, server);
-        let env_res = validate_definition_env(def);
-        let allowed_res = allowed_agents(def);
-
-        let def_error = if !name_valid {
-            Some(format!(
-                "服务标识 '{}' 非法: 仅支持字母、数字、短横线与下划线",
-                server
-            ))
-        } else if let Err(e) = def_shape_res {
-            Some(e.to_string())
-        } else if let Err(e) = env_res {
-            Some(e.to_string())
-        } else if let Err(e) = allowed_res.as_ref() {
-            Some(e.to_string())
-        } else {
-            None
-        };
-
-        let lib_enabled = library_enabled(&library, server);
-        let lib_version = compute_definition_version(def);
-        let lib_version_val = Value::String(lib_version.clone());
-        let allowed = allowed_res.ok().flatten();
-        let (observed_env, missing_env_vars) = inspect_env(def);
-        let (observed_headers, missing_header_vars) = inspect_headers(def);
-
-        let mut missing_vars = missing_env_vars;
-        missing_vars.extend(missing_header_vars);
-        missing_vars.sort();
-        missing_vars.dedup();
-
-        let missing_reason = if missing_vars.is_empty() {
-            None
-        } else {
-            Some(format!("凭证变量未配置: {}", missing_vars.join(", ")))
-        };
-
-        let mut agent_cells = Map::new();
-        let mut cell_states = Vec::new();
-
-        for target in &targets {
-            let agent = &target.agent;
-            let agent_allowed = is_allowed(&allowed, agent);
-            let binding = bindings.get(server).and_then(|m| m.get(agent));
-
-            let pre_error = if let Format::Unsupported(ref fmt) = target.format {
-                Some(("unsupported", format!("不支持的配置格式: {}", fmt)))
-            } else if let Err(e) = validate_target_path(&target.path) {
-                Some(("probe-error", e.to_string()))
-            } else {
-                None
-            };
-            if let Some((s, reason)) = pre_error {
-                agent_cells.insert(
+    for name in &names {
+        let mut cells = Map::new();
+        for scan in &inv.scans {
+            let agent = &scan.target.agent;
+            let snapshot = inv.saved_row(name, agent);
+            if let Some(file_entry) = scan.entry(name) {
+                cells.insert(
                     agent.clone(),
-                    make_cell(
-                        s,
-                        &target.path,
-                        binding,
-                        lib_version_val.clone(),
-                        vec![],
-                        Some(reason),
-                    ),
+                    file_cell(ctx, scan, name, file_entry, snapshot),
                 );
-                if agent_allowed || binding.is_some() {
-                    cell_states.push(s);
-                }
-                continue;
+            } else if let Some(row) = snapshot {
+                cells.insert(agent.clone(), snapshot_cell(Some(scan), row));
             }
-
-            let (actual_entry, legacy_marker) =
-                match extract_entry(&target.path, target.format.clone(), server) {
-                    Ok(pair) => pair,
-                    Err(e) => {
-                        agent_cells.insert(
-                            agent.clone(),
-                            make_cell(
-                                "probe-error",
-                                &target.path,
-                                binding,
-                                lib_version_val.clone(),
-                                vec![],
-                                Some(format!("配置文件解析失败: {}", e)),
-                            ),
-                        );
-                        if agent_allowed || binding.is_some() {
-                            cell_states.push("probe-error");
-                        }
-                        continue;
-                    }
-                };
-
-            let (state, actions, blocked_reason) = compute_cell_actions(
-                target,
-                binding,
-                actual_entry.as_ref(),
-                legacy_marker,
-                def,
-                server,
-                def_error.as_deref(),
-                &lib_version,
-                agent_allowed,
-                missing_reason.as_deref(),
-            );
-
-            // 限定助手的定义不应被其他助手的纯 absent 状态拖成「不一致」。
-            // 但旧绑定仍属于本工具责任，必须继续计入并给出清理动作。
-            if agent_allowed || binding.is_some() {
-                cell_states.push(state);
-            }
-            let mut cell = make_cell(
-                state,
-                &target.path,
-                binding,
-                lib_version_val.clone(),
-                actions,
-                blocked_reason,
-            );
-            // 非阻断提示：本工具的条目仍带旧版标记，用户显式 update 即可清理。
-            // 不放进 blocked_reason，避免挡住 update 或触发接管判定。
-            if legacy_marker && state == "drifted" && owns_entry(binding) {
-                cell["notice"] = json!("条目含旧版 Agent Manager 标记，更新即可清理");
-            }
-            agent_cells.insert(agent.clone(), cell);
         }
-
-        let overall_state =
-            if def_error.is_some() || cell_states.iter().any(|&s| s == "unsupported") {
-                "unsupported"
-            } else if !lib_enabled {
-                "disabled"
-            } else if cell_states
-                .iter()
-                .any(|&s| s == "drifted" || s == "leftover" || s == "probe-error")
-            {
-                "drifted"
-            } else if cell_states.iter().all(|&s| s == "managed-ok") && !cell_states.is_empty() {
-                "managed-ok"
-            } else if cell_states.iter().any(|&s| s == "managed-ok") {
-                "drifted"
-            } else if cell_states.iter().any(|&s| s == "disabled") {
-                "disabled"
-            } else if cell_states.iter().any(|&s| s == "not-materialized") {
-                "not-materialized"
-            } else {
-                "missing"
-            };
-
-        // 上游轴：仅 enabled 且为 npx 包 / uvx git 源的定义参与探测宇宙；
-        // 其余（含 orphan）恒 not-applicable。status 只读缓存，缺行 → unknown。
-        let freshness = if lib_enabled && crate::native_upstream::classify_mcp_probe(def).is_some()
+        for row in inv
+            .saved
+            .iter()
+            .filter(|r| r.server == *name && !r.agent.is_empty())
         {
-            crate::native_upstream::freshness_from_cache(&probes, &format!("mcp:{}", server), None)
+            if inv.scan(&row.agent).is_none() {
+                cells.insert(row.agent.clone(), snapshot_cell(None, row));
+            }
+        }
+        let states: Vec<&str> = cells
+            .values()
+            .filter_map(|c| c.get("state").and_then(Value::as_str))
+            .collect();
+        let unassigned = inv.saved_row(name, "");
+        let state = if states.contains(&"invalid")
+            || unassigned.map_or(false, |row| saved::validate_row(row).is_err())
+        {
+            "unsupported"
+        } else if states.contains(&"enabled") {
+            "managed-ok"
+        } else {
+            "disabled"
+        };
+        let freshness = if probe_definition(&inv, name).is_some() {
+            crate::native_upstream::freshness_from_cache(&probes, &format!("mcp:{name}"), None)
         } else {
             freshness_not_applicable()
         };
-
-        let mut lib_actions = Vec::new();
-        if def_error.is_none() {
-            lib_actions.push(if lib_enabled { "disable" } else { "enable" });
-        }
-        // 官方出了新版才谈得上升级，而且只有 npx 包的版本是写在定义里、本工具改得动的；
-        // uvx git 源跟的是分支，没有版本号可钉。
-        let upgradable = def_error.is_none()
-            && freshness["state"] == "behind"
-            && matches!(
-                crate::native_upstream::classify_mcp_probe(def),
-                Some(crate::native_upstream::McpProbeSpec::Npx(_))
-            );
-        if upgradable {
-            lib_actions.push("upgrade");
-        }
-        let has_remove_blocker = agent_cells.iter().any(|(agent, c)| {
-            let state = c.get("state").and_then(Value::as_str).unwrap_or("");
-            let binding_exists = bindings
-                .get(server)
-                .and_then(|per_agent| per_agent.get(agent))
-                .is_some();
-            let target_exists = c
-                .get("target_exists")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            let blk = c
-                .get("blocked_reason")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            state == "probe-error"
-                || (state == "unsupported"
-                    && blk.contains("不支持的配置格式")
-                    && (binding_exists || target_exists))
-                || blk.contains("未受管外部属性")
-        });
-        if !has_remove_blocker {
-            lib_actions.push("remove");
-        }
-
-        let elem_actions: Vec<Value> = lib_actions
-            .iter()
-            .map(|act| {
-                json!({ "id": act, "risk": "write-local", "needs_lock": true, "offline_ok": true })
-            })
-            .collect();
-
-        elements.push(make_element(
-            server,
-            mask_definition_with_agents_for_status(def),
-            lib_enabled,
-            def.get("agents").cloned().unwrap_or(Value::Null),
-            observed_env,
-            observed_headers,
-            agent_cells,
-            lib_actions,
-            def_error,
-            overall_state,
-            elem_actions,
-            freshness,
-            command_availability(def, &ctx.home_dir),
-        ));
+        let actions: Vec<Value> = if unassigned.is_some() {
+            vec![
+                json!({"id": "forget", "risk": "write-local", "needs_lock": true, "offline_ok": true}),
+            ]
+        } else {
+            vec![]
+        };
+        elements.push(json!({
+            "id": format!("mcp:{name}"),
+            "domain": "mcp",
+            "spec": {
+                "name": name,
+                "saved": unassigned.map(masked_saved_definition).unwrap_or(Value::Null),
+            },
+            "policy": {},
+            "observed": { "agents": Value::Object(cells) },
+            "state": state,
+            "freshness": freshness,
+            "actions": actions,
+        }));
     }
 
-    elements.sort_by(|a, b| {
-        a["id"]
-            .as_str()
-            .unwrap_or("")
-            .cmp(b["id"].as_str().unwrap_or(""))
-    });
-
-    // 未受管现有配置的导入候选（只读扫描，零写）；掩码语义见 discovery 模块。
-    let import_candidates = super::discovery::import_candidates(&library, &bindings, &targets);
+    let targets: Vec<Value> = inv
+        .scans
+        .iter()
+        .map(|scan| {
+            json!({
+                "agent": scan.target.agent,
+                "path": scan.target.path.to_string_lossy(),
+                "format": scan.target.format.label(),
+                "exists": scan.exists,
+                "agent_enabled": scan.target.enabled,
+                "disable_mode": scan.target.format.disable_mode(),
+                "error": scan.error,
+            })
+        })
+        .collect();
 
     Ok(json!({
         "domain": "mcp",
+        "targets": targets,
         "elements": elements,
-        "import_candidates": import_candidates
     }))
 }

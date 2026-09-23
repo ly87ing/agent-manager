@@ -37,7 +37,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / agents:configure|check / secrets:status|set|adopt|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / sources:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / agents:configure|check / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / sources:* / db:*）"
             ),
         )
     };
@@ -49,7 +49,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
     }
     let allowed = match (domain, verb) {
         ("system", "audit" | "discover" | "refresh-upstream") => true,
-        ("secrets", "status" | "set" | "adopt" | "source" | "migrate-legacy") => true,
+        ("secrets", "status" | "set" | "source" | "migrate-legacy") => true,
         ("runs", "list" | "get" | "clear") => true,
         ("policy", "get" | "set" | "delete") => true,
         ("sources", "get" | "set") => true,
@@ -99,7 +99,8 @@ enum ArgValueKind {
     SecretValue,
     /// 用户选择的外部密钥文件路径。允许空值表示停止使用，但拒绝控制字符与超长输入。
     FilePath,
-    /// agents:configure 的写入基准：status 给出的 64 位小写十六进制摘要。
+    /// 写入基准：status 给出的 64 位小写十六进制摘要（agents:configure 的 --base；
+    /// mcp:apply 的 --base / --to-base）。
     Digest,
     /// 规则正文（整份文件内容）：任意文本，换行等照常；NUL 等内容规则由引擎判定。
     RuleText,
@@ -121,11 +122,6 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         ("secrets", "set") => {
             specs.push(("--var", ArgValueKind::VarName));
             specs.push(("--value", ArgValueKind::SecretValue));
-        }
-        // 接管既有 MCP 时把原配置里的明文取值接过来，只报变量名不回显取值
-        ("secrets", "adopt") => {
-            specs.push(("--agent", ArgValueKind::ElementId));
-            specs.push(("--server", ArgValueKind::ElementId));
         }
         ("secrets", "source") => specs.push(("--path", ArgValueKind::FilePath)),
         ("sources", "get") => specs.push(("--key", ArgValueKind::DotKey)),
@@ -199,10 +195,16 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
                 // 逐 skill add/remove 的显式接管通道（引擎侧再强制动作范围与非受管判定）
                 specs.push(("--allow-takeover", ArgValueKind::Flag));
             }
+            // MCP 逐条写入：条目内容（--spec，JSON）、写入基准摘要（--base，
+            // 复制覆盖同名时另带目标的 --to-base）、复制目标助手（--to）。
             if domain == "mcp" {
                 specs.push(("--agent", ArgValueKind::ElementId));
                 specs.push(("--action", ArgValueKind::McpAction));
-                specs.push(("--allow-takeover", ArgValueKind::Flag));
+                specs.push(("--spec", ArgValueKind::JsonValue));
+                specs.push(("--base", ArgValueKind::Digest));
+                specs.push(("--to", ArgValueKind::ElementId));
+                specs.push(("--to-base", ArgValueKind::Digest));
+                specs.push(("--replace", ArgValueKind::Flag));
             }
             // 受管目标被外部改过时的显式接管通道：hooks 整文件替换、
             // aliases 换整个受管区块，引擎侧再强制「须恰好选中一个目标」。
@@ -409,10 +411,12 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
             _ => Err(EngineError::new("invalid_args", "非法 skills action")),
         },
         ArgValueKind::McpAction => match value {
-            "add" | "update" | "enable" | "disable" | "remove" | "upgrade" => Ok(()),
+            "add" | "edit" | "enable" | "disable" | "remove" | "copy" | "forget" => Ok(()),
             _ => Err(EngineError::new(
                 "invalid_args",
-                format!("非法 mcp action '{value}'（仅 add|update|enable|disable|remove|upgrade）"),
+                format!(
+                    "非法 mcp action '{value}'（仅 add|edit|enable|disable|remove|copy|forget）"
+                ),
             )),
         },
     }
@@ -558,7 +562,6 @@ mod tests {
             "profiles:apply",
             "secrets:status",
             "secrets:set",
-            "secrets:adopt",
             "secrets:source",
             "secrets:migrate-legacy",
             "system:audit",
@@ -822,7 +825,10 @@ mod tests {
             );
         }
 
-        for action in ["add", "update", "enable", "disable", "remove"] {
+        let digest = "a".repeat(64);
+        for action in [
+            "add", "edit", "enable", "disable", "remove", "copy", "forget",
+        ] {
             assert!(
                 validate_args(
                     "mcp:apply",
@@ -839,34 +845,73 @@ mod tests {
                 "mcp:apply with action {action} should pass"
             );
         }
+        // 逐条写入的完整参数面：--spec JSON、--base/--to-base 摘要、--to、--replace
         assert!(validate_args(
             "mcp:apply",
             &[
                 "--only".into(),
-                "mcp:chrome-devtools".into(),
+                "mcp:s1".into(),
+                "--agent".into(),
+                "claude-code".into(),
+                "--to".into(),
+                "codex".into(),
                 "--action".into(),
-                "upgrade".into(),
+                "copy".into(),
+                "--base".into(),
+                digest.clone(),
+                "--replace".into(),
+                "--to-base".into(),
+                digest.clone(),
             ]
         )
         .is_ok());
-        let bad_action_err = validate_args(
+        assert!(validate_args(
             "mcp:apply",
             &[
                 "--only".into(),
                 "mcp:s1".into(),
+                "--agent".into(),
+                "codex".into(),
                 "--action".into(),
-                "install".into(),
-            ],
+                "edit".into(),
+                "--base".into(),
+                digest.clone(),
+                "--spec".into(),
+                r#"{"command":"npx","args":["-y","pkg"],"env":{"K":"<literal>"}}"#.into(),
+            ]
         )
-        .unwrap_err();
-        assert!(
-            bad_action_err.message.contains("非法 mcp action"),
-            "MCP action error must mention mcp action, got: {}",
-            bad_action_err.message
-        );
-        assert!(!bad_action_err.message.contains("skills"));
-
-        // --allow-takeover：mcp:apply / hooks:apply / skills:apply 放行（显式接管通道）
+        .is_ok());
+        for bad in [
+            vec!["--base".to_string(), "ABC".to_string()],
+            vec!["--base".to_string(), "A".repeat(64)],
+            vec!["--spec".to_string(), "{not json".to_string()],
+        ] {
+            let mut args: Vec<String> = vec!["--only".into(), "mcp:s1".into()];
+            args.extend(bad.clone());
+            assert!(
+                validate_args("mcp:apply", &args).is_err(),
+                "{bad:?} should fail"
+            );
+        }
+        // 已退役：按库版本升级、update、显式接管、导入时的密钥接管命令
+        for action in ["update", "upgrade", "install"] {
+            let err = validate_args(
+                "mcp:apply",
+                &[
+                    "--only".into(),
+                    "mcp:s1".into(),
+                    "--action".into(),
+                    action.into(),
+                ],
+            )
+            .unwrap_err();
+            assert!(
+                err.message.contains("非法 mcp action"),
+                "MCP action error must mention mcp action, got: {}",
+                err.message
+            );
+            assert!(!err.message.contains("skills"));
+        }
         assert!(
             validate_args(
                 "mcp:apply",
@@ -880,9 +925,10 @@ mod tests {
                     "--allow-takeover".into(),
                 ]
             )
-            .is_ok(),
-            "mcp:apply --allow-takeover should pass"
+            .is_err(),
+            "mcp:apply 已不再接受 --allow-takeover"
         );
+        assert!(validate_command("secrets:adopt").is_err());
         // hooks:apply 同样放行（单目标显式接管，引擎侧再强制 --only 约束）
         assert!(
             validate_args(

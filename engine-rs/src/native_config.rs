@@ -7,10 +7,13 @@
 //! 导出只读零写；导入是整体替换，走与逐条保存相同的校验闸门（疑似凭据拒绝、
 //! MCP 定义校验、来源结构校验），并在一个事务里完成——要么整份生效，要么原样不动。
 //!
-//! 不进备份的东西：分配记录与写入指纹（那是本机落地状态，换机器后必须重新应用）、
-//! 操作记录、探测缓存、本机偏好。
+//! 不进备份的东西：写入指纹（那是本机落地状态）、操作记录、探测缓存、本机偏好。
+//! MCP 的生效条目在各助手自己的配置文件里，不进备份；「已保存未生效」的 MCP 项
+//! （停用快照、未分配定义，`mcp_saved`）进备份，导入时逐项写回（同名以备份为准，
+//! 备份里没有的本机项保留，不丢失）。
 //!
-//! 凭据取值与外部密钥文件路径都不进备份；定义与来源里只有 `${VAR}` 引用。
+//! 凭据取值与外部密钥文件路径都不进备份；定义与来源里只有 `${VAR}` 引用，
+//! MCP 已保存项另外只含未命中疑似凭据检测的普通字面量。
 
 use anyhow::{bail, Result};
 use rusqlite::TransactionBehavior;
@@ -19,6 +22,7 @@ use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
 use crate::native::{Context, Request};
+use crate::native_mcp::saved::{self as mcp_saved, SavedRow};
 use crate::native_rules::templates::{self, Template};
 use crate::native_sources;
 use crate::store;
@@ -47,14 +51,22 @@ fn collect_sources(ctx: &Context) -> Result<Map<String, Value>> {
     Ok(out)
 }
 
-/// 只读导出：定义树 + 来源正文 + 规则模板。零写，不创建数据目录或数据库。
+/// 只读导出：定义树 + 来源正文 + 规则模板 + MCP 已保存项。零写，不创建数据目录或数据库。
 pub(crate) fn export(ctx: &Context, req: &Request) -> Result<Value> {
     if let Some(arg) = req.args.first() {
         bail!("config:export 不接受参数，得到 '{}'", arg);
     }
-    let policy = store::effective_policy(ctx)?;
+    let mut policy = store::effective_policy(ctx)?;
     let sources = collect_sources(ctx)?;
     let (_, rule_templates) = crate::native_rules::status::load_snapshot(ctx)?;
+    // 旧库里还没迁移的 MCP 定义按迁移规则推导成已保存项导出，策略里不再重复带。
+    let mcp = crate::native_mcp::inventory::load(ctx)?;
+    if let Some(map) = policy.as_object_mut() {
+        if map.contains_key("mcp") {
+            map.insert("mcp".into(), json!({"definitions": {}}));
+        }
+    }
+    let saved: Vec<Value> = mcp.saved.iter().map(|row| row.to_backup()).collect();
     Ok(json!({
         "format": FORMAT,
         "exported_at": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
@@ -64,16 +76,18 @@ pub(crate) fn export(ctx: &Context, req: &Request) -> Result<Value> {
             .iter()
             .map(|t| json!({ "name": t.name, "body": t.body, "origin": t.origin }))
             .collect::<Vec<_>>(),
+        "mcp_saved": saved,
     }))
 }
 
 /// 校验后的备份内容：policy、来源（不含旧规则键）、规则模板（None = 备份没带这一段）、
-/// 旧规则来源（旧备份的 rules.* 键）。
+/// 旧规则来源（旧备份的 rules.* 键）、MCP 已保存项。
 struct Payload {
     policy: Value,
     sources: Map<String, Value>,
     rule_templates: Option<Vec<(String, String, String)>>,
     legacy_rules: BTreeMap<String, String>,
+    mcp_saved: Vec<SavedRow>,
 }
 
 /// 规则模板段：[{name, body, origin?}]，名称合法且不重复，正文无 NUL、不含疑似凭据。
@@ -200,16 +214,28 @@ fn validate_payload(payload: &Value) -> Result<Payload> {
         }
     }
 
+    // MCP 已保存项：与逐项写入同一套不变式（无疑似凭据、headers 只存引用）
+    let mcp_saved = match obj.get("mcp_saved") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(SavedRow::from_backup)
+            .collect::<Result<Vec<_>>>()?,
+        Some(_) => bail!("备份里的 mcp_saved 必须是数组"),
+    };
+
     Ok(Payload {
         policy,
         sources,
         rule_templates,
         legacy_rules,
+        mcp_saved,
     })
 }
 
 /// 导入：整体替换定义与来源；带 rule_templates 时整体替换规则模板，旧备份的 rules.*
-/// 来源转换成旧来源模板。一个事务内完成，任一步失败即全部回滚。
+/// 来源转换成旧来源模板；MCP 已保存项逐项写入（同名以备份为准，本机其余项保留）。
+/// 一个事务内完成，任一步失败即全部回滚。
 /// 不动分配记录、写入指纹与任何规则文件——恢复定义之后还要各自应用一次才会落到目标配置。
 pub(crate) fn import(ctx: &Context, req: &Request) -> Result<Value> {
     let raw = req
@@ -226,7 +252,19 @@ pub(crate) fn import(ctx: &Context, req: &Request) -> Result<Value> {
 
     let mut conn = store::open_write(ctx)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    // 本机旧库先迁移（本机的已保存项因此不会随策略替换而丢失），再换策略；
+    // 备份策略里的旧版 MCP 定义随即转成未分配的已保存定义。
+    let current = store::policy_from_connection(&tx)?;
+    let scans = crate::native_mcp::inventory::scan_targets(&current, &ctx.home_dir);
+    crate::native_mcp::legacy::migrate(&tx, &scans, Some(&req.run_id))?;
     store::write_policy(&tx, &payload.policy)?;
+    crate::native_mcp::legacy::migrate(&tx, &scans, Some(&req.run_id))?;
+    if !payload.mcp_saved.is_empty() {
+        mcp_saved::ensure_table(&tx)?;
+        for row in &payload.mcp_saved {
+            mcp_saved::upsert(&tx, row)?;
+        }
+    }
     let mut restored = Vec::new();
     for (key, value) in &payload.sources {
         let text = value.as_str().unwrap_or("");
@@ -272,6 +310,7 @@ pub(crate) fn import(ctx: &Context, req: &Request) -> Result<Value> {
             "action": "import",
             "sources": restored,
             "rule_templates": restored_templates,
+            "mcp_saved": payload.mcp_saved.len(),
         })),
     )?;
     tx.commit()?;

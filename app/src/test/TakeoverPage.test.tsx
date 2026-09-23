@@ -90,27 +90,7 @@ function discoverData(overrides: Partial<DiscoverData> = {}): DiscoverData {
         },
       ],
     },
-    mcp: [
-      {
-        name: "grok-search",
-        agent: "claude-code",
-        transport: "stdio",
-        spec: { command: "uvx", args: ["--from", "git+https://example.com/x", "grok"], env: { GROK_API_KEY: "<literal>" } },
-        previously_managed: true,
-        origin: "previously-managed",
-        manage: "register",
-      },
-      {
-        name: "grok-search",
-        agent: "codex",
-        transport: "stdio",
-        spec: { command: "uvx", args: ["--from", "git+https://example.com/x", "grok"], env: { GROK_API_KEY: "<literal>" } },
-        previously_managed: true,
-        origin: "previously-managed",
-        manage: "register",
-      },
-    ],
-    summary: { agents: 1, skills_symlink: 1, skills_collection: 1, skills_native: 1, skills_cleanup: 1, mcp: 2 },
+    summary: { agents: 1, skills_symlink: 1, skills_collection: 1, skills_native: 1, skills_cleanup: 1 },
     ...overrides,
   };
 }
@@ -119,9 +99,7 @@ function routes(data: DiscoverData = discoverData()) {
   return {
     "system:discover": makeEnvelope(data, { command: "system.discover" }),
     "policy:set": makeEnvelope({ layers: null, effective: {} }, { command: "policy.set" }),
-    "secrets:adopt": makeEnvelope({ domain: "secrets", adopted: ["GROK_API_KEY"] }, { command: "secrets.adopt" }),
     "skills:apply": makeEnvelope(makeApplyResult({ domain: "skills" }), { command: "skills.apply" }),
-    "mcp:apply": makeEnvelope(makeApplyResult({ domain: "mcp" }), { command: "mcp.apply" }),
   };
 }
 
@@ -133,7 +111,8 @@ describe("接管中心", () => {
     // 可接管项带勾选框
     expect(screen.getByTestId("takeover-agent-opencode").querySelector("input[type=checkbox]")).toBeTruthy();
     expect(screen.getByTestId("takeover-skill-group-vendor").querySelector("input[type=checkbox]")).toBeTruthy();
-    expect(screen.getByTestId("takeover-mcp-grok-search").querySelector("input[type=checkbox]")).toBeTruthy();
+    // MCP 条目以各助手配置文件为准，直接在 MCP 页编辑，接管中心不再有 MCP 分区
+    expect(screen.queryByTestId("takeover-mcp")).toBeNull();
 
     // 原生管理项只展示，不提供勾选（它归各自的安装方式管）
     expect(screen.getByTestId("takeover-native-synced-claude-code").querySelector("input[type=checkbox]")).toBeNull();
@@ -191,36 +170,6 @@ describe("接管中心", () => {
     ]);
   });
 
-  it("MCP 接管：同名条目合并为一条定义（agents 含全部来源），再逐助手写回", async () => {
-    const { calls } = renderWithEngine(<TakeoverPage />, routes());
-    await waitFor(() => expect(screen.getByTestId("takeover-mcp-grok-search")).toBeInTheDocument());
-
-    await userEvent.click(screen.getByTestId("takeover-mcp-grok-search").querySelector("input[type=checkbox]")!);
-    await userEvent.click(screen.getByTestId("takeover-run"));
-    await userEvent.click(await screen.findByRole("button", { name: "开始接管" }));
-
-    await waitFor(() => expect(calls.some((call) => call.command === "mcp:apply")).toBe(true));
-    const policyCall = calls.find((call) => call.command === "policy:set");
-    const saved = JSON.parse(policyCall!.args[5]) as Record<string, unknown>;
-    expect(policyCall!.args[3]).toBe("mcp.definitions.grok-search");
-    expect(saved.agents).toEqual(["claude-code", "codex"]);
-    // 密钥只以变量引用入库，明文绝不出现
-    expect(JSON.stringify(saved)).toContain("${GROK_API_KEY}");
-    expect(JSON.stringify(saved)).not.toContain("<literal>");
-    const mcpCalls = calls.filter((call) => call.command === "mcp:apply");
-    expect(mcpCalls).toHaveLength(2);
-    expect(mcpCalls[0].args).toEqual(["--only", "mcp:grok-search", "--agent", "claude-code", "--action", "add", "--allow-takeover"]);
-    expect(mcpCalls[1].args).toEqual(["--only", "mcp:grok-search", "--agent", "codex", "--action", "add", "--allow-takeover"]);
-
-    // 取值要在写定义之前接过来：定义里只留 ${VAR}，晚接就会用另一个值同步
-    const adoptCalls = calls.filter((call) => call.command === "secrets:adopt");
-    expect(adoptCalls.map((call) => call.args)).toEqual([
-      ["--agent", "claude-code", "--server", "grok-search"],
-      ["--agent", "codex", "--server", "grok-search"],
-    ]);
-    expect(calls.indexOf(adoptCalls[0])).toBeLessThan(calls.indexOf(policyCall!));
-  });
-
   it("助手登记只写定义，不执行任何 agents:apply", async () => {
     const { calls } = renderWithEngine(<TakeoverPage />, routes());
     await waitFor(() => expect(screen.getByTestId("takeover-agent-opencode")).toBeInTheDocument());
@@ -272,9 +221,9 @@ describe("接管中心", () => {
     });
     await waitFor(() => expect(screen.getByTestId("takeover-agent-opencode")).toBeInTheDocument());
 
-    // 两项：助手登记 + MCP，总数因此是 2
+    // 两项：助手登记 + 技能集合，总数因此是 2（原先第二项是已退役的 MCP 接管）
     await userEvent.click(screen.getByTestId("takeover-agent-opencode").querySelector("input[type=checkbox]")!);
-    await userEvent.click(screen.getByTestId("takeover-mcp-grok-search").querySelector("input[type=checkbox]")!);
+    await userEvent.click(screen.getByTestId("takeover-skill-group-vendor").querySelector("input[type=checkbox]")!);
     await userEvent.click(screen.getByTestId("takeover-run"));
     await userEvent.click(await screen.findByRole("button", { name: "开始接管" }));
 
@@ -291,13 +240,11 @@ describe("接管中心", () => {
       domain: "discover",
       agents: [],
       skills: { items: [], groups: [] },
-      mcp: [],
       summary: {},
     };
     renderWithEngine(<TakeoverPage />, routes(empty));
     await waitFor(() => expect(screen.getByTestId("takeover-agents-empty")).toBeInTheDocument());
     expect(screen.getByTestId("takeover-skill-groups-empty")).toBeInTheDocument();
-    expect(screen.getByTestId("takeover-mcp-empty")).toBeInTheDocument();
     expect(screen.getByTestId("takeover-run")).toBeDisabled();
   });
 });

@@ -224,6 +224,8 @@ fn dry_run_set_is_rejected_and_initializes_no_store() {
 #[test]
 fn replace_semantics_and_delete_roundtrip() {
     let (base, ctx) = temp_ctx("replace");
+    // 通用 policy:set/_replace/delete 语义。原先拿 mcp.definitions 作例子；MCP 定义现在
+    // 写入即转成「未分配的已保存定义」、不再留在策略里，改用中性的 demo 键验证同一语义。
     execute(
         &ctx,
         &request(
@@ -232,7 +234,7 @@ fn replace_semantics_and_delete_roundtrip() {
                 "--layer",
                 "local",
                 "--key",
-                "mcp",
+                "demo",
                 "--value",
                 "{\"definitions\":{\"srv\":{\"command\":\"a\",\"keep\":1}}}",
             ],
@@ -247,7 +249,7 @@ fn replace_semantics_and_delete_roundtrip() {
                 "--layer",
                 "local",
                 "--key",
-                "mcp.definitions",
+                "demo.definitions",
                 "--value",
                 "{\"_replace\":true,\"srv\":{\"command\":\"b\"}}",
             ],
@@ -255,14 +257,16 @@ fn replace_semantics_and_delete_roundtrip() {
     );
     assert!(env.ok, "{:?}", env.errors);
     let effective = store::effective_policy(&ctx).unwrap();
-    assert_eq!(effective["mcp"]["definitions"]["srv"]["command"], "b");
-    assert!(effective["mcp"]["definitions"]["srv"].get("keep").is_none());
+    assert_eq!(effective["demo"]["definitions"]["srv"]["command"], "b");
+    assert!(effective["demo"]["definitions"]["srv"]
+        .get("keep")
+        .is_none());
     // delete 存在的键成功、再删报错
     let env = execute(
         &ctx,
         &request(
             "policy:delete",
-            &["--layer", "local", "--key", "mcp.definitions.srv"],
+            &["--layer", "local", "--key", "demo.definitions.srv"],
         ),
     );
     assert!(env.ok, "{:?}", env.errors);
@@ -270,7 +274,7 @@ fn replace_semantics_and_delete_roundtrip() {
         &ctx,
         &request(
             "policy:delete",
-            &["--layer", "local", "--key", "mcp.definitions.srv"],
+            &["--layer", "local", "--key", "demo.definitions.srv"],
         ),
     );
     assert!(!env.ok);

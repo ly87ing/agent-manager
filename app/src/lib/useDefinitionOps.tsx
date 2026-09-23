@@ -12,7 +12,7 @@ import { useDirectApply } from "./useDirectApply";
 
 /**
  * 定义覆盖层的新增、编辑与移除；Agent 移除仅停止管理，
- * MCP/Skills 移除后直接 scoped apply 清理目标配置与链接。
+ * Skills 移除后直接 scoped apply 清理目标链接。
  */
 export function useDefinitionOps({
   section,
@@ -78,7 +78,7 @@ export function useDefinitionOps({
     return full as Record<string, unknown>;
   };
 
-  /** 新增/编辑：写定义。Agent 与资源定义（MCP/技能集合）只保存定义，
+  /** 新增/编辑：写定义。Agent 与资源定义（技能集合）只保存定义，
    * 不写启用键、不 apply/preflight、不触发安装/同步。
    * 资源定义始终整条替换（_replace）：编辑时若调用方拿不到完整原定义（无 DB 的旧存储），
    * 先 db:migrate 再取 sqlite 有效定义合并表单字段，避免丢掉未展示字段或复活已清空字段。 */
@@ -87,7 +87,7 @@ export function useDefinitionOps({
     definition: Record<string, unknown>;
     /** true = 新增；false = 编辑（不动启用键）。 */
     isNew: boolean;
-    /** definition 是否为完整整条定义（mcp/skills 用）。新增恒为完整；编辑时调用方有
+    /** definition 是否为完整整条定义（skills 用）。新增恒为完整；编辑时调用方有
      * sqlite 有效定义则传完整定义（complete 可缺省），拿不到完整原定义必须显式传 false。 */
     complete?: boolean;
     /** 成功保存返回 true；被校验或引擎拒绝返回 false，调用方据此决定要不要接着落地。 */
@@ -98,54 +98,6 @@ export function useDefinitionOps({
       const full = await migrateAndLoadFullDefinition(input.name);
       if (!full) return false;
       definition = { ...full, ...definition };
-      if (domain === "mcp") {
-        // 传输互斥剥离：以表单提交的 owned 片段判定目标传输（远程含 url），
-        // 合并后 full 中遗留的对方传输字段必须剥掉，避免混合定义被引擎拒绝。
-        // type 为历史遗留输入，定义不持久化，两种形态保存时一律剥离。
-        const remoteIntent = typeof input.definition.url === "string";
-        const stripKeys = remoteIntent
-          ? ["command", "args", "env", "startup_timeout_sec", "extra_args_by_agent", "type"]
-          : ["url", "headers", "type"];
-        for (const key of stripKeys) {
-          delete definition[key];
-        }
-        // spec.env / spec.headers 是脱敏视图：普通字面值被掩码为 <literal>。表单只有脱敏
-        // 片段时会带出 <literal>，这里用完整定义的真实值重建保留变量，不让 <literal> 覆盖
-        // 真实值。若在完整 DB 原定义找不到对应 string，必须 toast 失败并停止保存，
-        // 绝不把脱敏占位符存回 DB。env（stdio）与 headers（远程）同级处理。
-        for (const field of ["env", "headers"] as const) {
-          if (!(field in definition)) continue;
-          const fullMap = (full[field] ?? {}) as Record<string, unknown>;
-          const ownedMap = (definition[field] ?? {}) as Record<string, unknown>;
-          const rebuilt: Record<string, unknown> = {};
-          for (const [key, value] of Object.entries(ownedMap)) {
-            if (value === "<literal>") {
-              const raw = fullMap[key];
-              if (typeof raw !== "string") {
-                toast.error(`保存定义 ${input.name} 失败:${field === "env" ? "环境变量" : "请求头"} ${key} 无法在原定义中还原真实值，已停止保存`);
-                return false;
-              }
-              rebuilt[key] = raw;
-            } else {
-              rebuilt[key] = value;
-            }
-          }
-          definition = { ...definition, [field]: rebuilt };
-        }
-      }
-    }
-    if (domain === "mcp") {
-      for (const field of ["env", "headers"] as const) {
-        const map = definition[field];
-        if (map && typeof map === "object") {
-          for (const [key, value] of Object.entries(map as Record<string, unknown>)) {
-            if (value === "<literal>") {
-              toast.error(`保存定义 ${input.name} 失败:${field === "env" ? "环境变量" : "请求头"} ${key} 仍为脱敏值，已停止保存`);
-              return false;
-            }
-          }
-        }
-      }
     }
     if (!(await writePolicy("policy:set", ["--layer", "local", "--key", defKey, "--value", JSON.stringify({ ...definition, _delete: false, _replace: true })]))) {
       return false;
@@ -221,13 +173,6 @@ export function useDefinitionOps({
     } else {
       toast.success(`已移除 ${name}`);
     }
-    if (domain === "agents") return;
-    // 直接 scoped apply 清理目标配置
-    void directApply.apply({
-      command: `${domain}:apply`,
-      label: `移除 ${name}`,
-      args: ["--only", `${domain}:${name}`],
-    });
   };
 
   const removalSpec = removal ? buildDefinitionRemoval(removal.layers, section, removal.name) : null;

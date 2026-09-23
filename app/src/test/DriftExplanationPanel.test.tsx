@@ -3,13 +3,14 @@ import { DriftExplanationPanel, shortenDigest } from "../components/DriftExplana
 import { makeElement } from "./fixtures";
 import { renderWithEngine, screen } from "./render-with-engine";
 
+// 原先以 MCP 单元格举例；MCP 页已不再用这块面板（条目直接逐条展示），改用技能单元格词汇表。
 const drifted = makeElement({
-  id: "mcp:chrome-devtools",
-  domain: "mcp",
+  id: "skill:demo/one",
+  domain: "skills",
   observed: {
     agents: {
-      "claude-code": { state: "drifted", target: "/tmp/demo/.claude.json", target_exists: true },
-      codex: { state: "managed-ok", target: "/tmp/demo/.codex/config.toml", target_exists: true },
+      "claude-code": { state: "drifted", target: "/tmp/demo/.claude/skills/one", target_exists: true },
+      codex: { state: "linked", target: "/tmp/demo/.codex/skills/one", target_exists: true },
     },
   },
   state: "drifted",
@@ -17,16 +18,16 @@ const drifted = makeElement({
 
 describe("DriftExplanationPanel", () => {
   it("渲染目标位置与各助手状态表（纯 status/observed，不发起任何 plan）", async () => {
-    const { calls } = renderWithEngine(<DriftExplanationPanel element={drifted} cellKind="mcp" />, {});
+    const { calls } = renderWithEngine(<DriftExplanationPanel element={drifted} cellKind="skills" />, {});
 
     const panel = await screen.findByTestId("drift-panel");
     // 目标位置（cell targets）
-    expect(panel).toHaveTextContent("/tmp/demo/.claude.json");
-    expect(panel).toHaveTextContent("/tmp/demo/.codex/config.toml");
+    expect(panel).toHaveTextContent("/tmp/demo/.claude/skills/one");
+    expect(panel).toHaveTextContent("/tmp/demo/.codex/skills/one");
     // per-agent 单元格状态
     expect(panel).toHaveTextContent("claude-code");
     expect(screen.getByTitle("drifted")).toHaveTextContent("不一致");
-    expect(screen.getByTitle("managed-ok")).toHaveTextContent("已配置");
+    expect(screen.getByTitle("linked")).toHaveTextContent("已启用");
     // 不请求任何 plan，也不渲染操作计划区
     expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
     expect(panel).not.toHaveTextContent("将要执行的操作");
@@ -37,7 +38,7 @@ describe("DriftExplanationPanel", () => {
 
     const panel = await screen.findByTestId("drift-panel");
     expect(panel).toHaveTextContent("drifted");
-    expect(panel).toHaveTextContent("managed-ok");
+    expect(panel).toHaveTextContent("linked");
   });
 
   it("无 per-agent cell 时仍从 observed.target / spec.target 收集目标位置", async () => {

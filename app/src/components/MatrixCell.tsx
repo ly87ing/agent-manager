@@ -2,19 +2,15 @@ import { MCP_CELL_COPY, SKILL_CELL_COPY } from "../lib/ui-copy";
 import { cn } from "../lib/utils";
 
 /**
- * 矩阵单元格徽章：MCP 服务 × 助手（配置状态）与 技能 × 助手（启用状态）
+ * 矩阵单元格徽章：MCP 服务 × 助手（条目状态）与 技能 × 助手（启用状态）
  * 共用渲染。用户文案集中在 lib/ui-copy.ts；title 保留工程原值对照。
  */
 
 const MCP_CELL_STYLE: Record<string, string> = {
-  "managed-ok": "border-success/30 bg-success/10 text-success",
-  drifted: "border-warning/30 bg-warning/10 text-warning",
-  missing: "border bg-muted text-muted-foreground",
-  absent: "border bg-muted text-muted-foreground",
-  "agent-disabled": "border bg-muted text-muted-foreground",
-  "not-materialized": "border bg-muted text-muted-foreground",
-  leftover: "border-orange/30 bg-orange/10 text-orange",
-  "probe-error": "border-input bg-muted text-muted-foreground",
+  enabled: "border-success/30 bg-success/10 text-success",
+  disabled: "border bg-muted text-muted-foreground",
+  saved: "border bg-muted text-muted-foreground",
+  invalid: "border-rose/30 bg-rose/10 text-rose",
 };
 
 const SKILL_CELL_STYLE: Record<string, string> = {

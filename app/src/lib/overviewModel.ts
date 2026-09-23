@@ -55,8 +55,6 @@ export const OVERVIEW_DOMAINS: { domain: string; label: string }[] = [
 
 /** 这些状态表示「就该是这样」。 */
 const HEALTHY = new Set(["managed-ok", "linked", "absent", "not-assigned", "agent-disabled", "unsupported"]);
-/** 被外部改过 / 旧体系残留：不能替用户做主。 */
-const DECISION = new Set(["unmanaged-detected", "leftover", "conflict", "shared"]);
 
 function actionIds(actions: unknown): string[] {
   if (!Array.isArray(actions)) return [];
@@ -78,33 +76,6 @@ interface Cell {
   state?: string;
   actions?: string[];
   blocked_reason?: string | null;
-}
-
-/** 逐助手的域（mcp；技能另见 skillSyncOf）：把各助手单元格聚合成这个资源的一个同步状态。 */
-function syncFromCells(element: EngineElement, cells: Record<string, Cell>): Pick<OverviewItem, "sync" | "syncArgs" | "reason"> {
-  let pendingArgs: string[] | null = null;
-  let decisionReason: string | null = null;
-  let sawAny = false;
-  for (const [agent, cell] of Object.entries(cells)) {
-    const state = cell?.state ?? "";
-    if (!state || state === "absent" || state === "not-assigned" || state === "unsupported") continue;
-    sawAny = true;
-    if (state === "disabled" || state === "agent-disabled" || HEALTHY.has(state)) continue;
-    if (DECISION.has(state)) {
-      decisionReason ??= cell?.blocked_reason ?? "被本工具以外改过";
-      continue;
-    }
-    const acts = actionIds(cell?.actions);
-    const action = acts.includes("update") ? "update" : acts.includes("add") ? "add" : null;
-    if (action) {
-      pendingArgs ??= ["--only", element.id, "--agent", agent, "--action", action];
-    } else {
-      decisionReason ??= cell?.blocked_reason ?? "暂时没有可执行的操作";
-    }
-  }
-  if (decisionReason) return { sync: "decision", reason: decisionReason };
-  if (pendingArgs) return { sync: "pending", syncArgs: pendingArgs };
-  return { sync: sawAny ? "ok" : "ok" };
 }
 
 /**
@@ -179,8 +150,10 @@ function itemOf(element: EngineElement, name: string): OverviewItem {
   if (element.domain === "rules") return { ...base, ...rulesSyncOf(element) };
   const observed = element.observed as { agents?: Record<string, Cell>; blocked_reason?: string | null };
 
-  if (observed.agents && Object.keys(observed.agents).length > 0) {
-    return { ...base, ...syncFromCells(element, observed.agents) };
+  // MCP 的实际条目就是当前配置，没有「待同步」：有助手启用着就算到位，否则是停用
+  if (element.domain === "mcp") {
+    const enabled = Object.values(observed.agents ?? {}).some((cell) => cell?.state === "enabled");
+    return { ...base, sync: enabled ? "ok" : "disabled" };
   }
   if (element.state === "disabled") return { ...base, sync: "disabled" };
   if (HEALTHY.has(element.state)) return { ...base, sync: "ok" };

@@ -77,10 +77,19 @@ fn export_is_read_only_and_roundtrips_definitions_and_sources() {
     let restore = execute(&ctx2, &request("config:import", &["--value", &payload]));
     assert!(restore.ok, "{:?}", restore.errors);
 
+    // MCP 定义不再留在策略里，而是作为「未分配的已保存定义」随备份往返
+    //（原断言读 policy.mcp.definitions：来自已退役的「服务库定义」模型）。
     let after = execute(&ctx2, &request("config:export", &[]));
+    let saved = after.data["mcp_saved"].as_array().unwrap();
+    let demo = saved
+        .iter()
+        .find(|row| row["server"] == "demo" && row["agent"] == "")
+        .unwrap_or_else(|| panic!("demo 必须作为未分配的已保存定义恢复: {saved:?}"));
+    assert_eq!(demo["entry"]["command"], "npx");
+    assert_eq!(demo["entry"]["env"]["DEMO_TOKEN"], "${DEMO_TOKEN}");
     assert_eq!(
-        after.data["policy"]["mcp"]["definitions"]["demo"]["command"],
-        "npx"
+        after.data["policy"]["mcp"],
+        serde_json::json!({"definitions": {}})
     );
     assert_eq!(after.data["rule_templates"][0]["name"], "我的规则模板");
     assert_eq!(after.data["rule_templates"][0]["body"], "我的共享规则\n");
@@ -227,10 +236,24 @@ fn backup_excludes_secret_values_and_rejects_legacy_secret_payload() {
     let imported = execute(&ctx_b, &request("config:import", &["--value", &payload]));
     assert!(imported.ok, "{:?}", imported.errors);
 
+    // 恢复的 MCP 定义只带变量引用（作为未分配的已保存定义）；B 机器没有取值，
+    // 也没有从备份得到外部密钥文件。原先断言 B 的 secrets:status 里有一条未解析变量——
+    // 那来自「服务库定义即生效」的旧模型；现在变量行只来自各助手实际条目与停用快照。
+    let restored = execute(&ctx_b, &request("config:export", &[]));
+    let demo = restored.data["mcp_saved"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["server"] == "demo")
+        .cloned()
+        .expect("demo 定义随备份恢复");
+    assert_eq!(demo["entry"]["env"]["K"], "${MY_TOKEN}");
     let status = execute(&ctx_b, &request("secrets:status", &[]));
     let observed = &status.data["elements"][0]["observed"];
-    assert_eq!(observed["unresolved"], 1);
-    assert_eq!(observed["variables"][0]["stored"], false);
+    assert_eq!(observed["source"]["configured"], false);
+    assert!(!serde_json::to_string(&restored.data)
+        .unwrap()
+        .contains(SECRET));
 
     let legacy = serde_json::json!({
         "format": "agent-manager/config-backup/v1",

@@ -6,8 +6,9 @@
 //!   refresh-upstream 写（Immediate 事务逐元素 upsert），status 经
 //!   `load_probe_cache` 只读连接读取，缺表/缺行一律 freshness unknown 且不建表。
 //! - 探测宇宙：enabled 且首选 provider install 命令可解析出 npm 包的 agents
-//!   （detect-only 语义不变：可探测但不因此获得收敛动作）+ enabled 的 MCP 定义中
-//!   npx 包与 uvx `git+repo@branch` 源 + enabled 且有 url 的 skills 集合仓库。
+//!   （detect-only 语义不变：可探测但不因此获得收敛动作）+ 各助手实际 MCP 条目与
+//!   已保存项中的 npx 包与 uvx `git+repo@branch` 源（每个服务名一份）+ enabled 且有
+//!   url 的 skills 集合仓库。
 //!   rules/hooks/aliases/secrets 恒 not-applicable，不参与。
 //! - 探测器带超时（网络 ≤30s）：npm 包 `npm view <pkg> version`；agents 本地版本
 //!   沿用 bin --version；MCP npx 本地版本读 npx 缓存
@@ -34,7 +35,6 @@ use serde_json::{json, Value};
 
 use crate::native::{Context, DispatchError, DispatchResult, Request};
 use crate::native_agents::{self, AgentDef};
-use crate::native_mcp::policy_view::{library_enabled, library_view};
 use crate::store;
 
 const NETWORK_PROBE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -242,13 +242,22 @@ fn collect_targets(ctx: &Context) -> Result<Vec<ProbeTarget>> {
         }
     }
 
-    let policy = store::effective_policy(ctx)?;
-    let library = library_view(&policy);
-    for (server, def) in &library.definitions {
-        if !library_enabled(&library, server) {
+    // MCP：各助手实际条目与已保存项里的 npx 包 / uvx git 源，每个服务名取一份
+    // （选取规则与 mcp:status 的 freshness 一致）。
+    let mcp = crate::native_mcp::inventory::load(ctx)?;
+    let mut servers: Vec<String> = mcp
+        .scans
+        .iter()
+        .flat_map(|scan| scan.entries.iter().map(|e| e.name.clone()))
+        .chain(mcp.saved.iter().map(|row| row.server.clone()))
+        .collect();
+    servers.sort();
+    servers.dedup();
+    for server in &servers {
+        let Some(def) = crate::native_mcp::status::probe_definition(&mcp, server) else {
             continue;
-        }
-        let kind = match classify_mcp_probe(def) {
+        };
+        let kind = match classify_mcp_probe(&def) {
             Some(McpProbeSpec::Npx(package)) => ProbeKind::McpNpx { package },
             Some(McpProbeSpec::UvxGit { repo, branch }) => ProbeKind::McpUvxGit { repo, branch },
             None => continue,
@@ -259,6 +268,7 @@ fn collect_targets(ctx: &Context) -> Result<Vec<ProbeTarget>> {
         });
     }
 
+    let policy = store::effective_policy(ctx)?;
     // 旧库固化、从未生效的内置集合按推荐处理，推荐不参与上游检查
     let hidden_skills = crate::native_skills::hidden_builtin_collections(ctx, &policy)?;
     if let Some(repos) = policy

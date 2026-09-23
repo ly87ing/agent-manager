@@ -1,9 +1,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
-import type { EngineElement, PolicyLayers } from "../lib/contract";
-import { definitionOrigin } from "../lib/definitionOverlay";
-import type { McpSpec } from "../lib/observed";
-import { OVERLAY_COPY } from "../lib/ui-copy";
+import type { McpTarget } from "../lib/contract";
+import type { McpAgentCell, McpSavedDefinition } from "../lib/observed";
 import { useDialogFocus } from "../lib/dialogFocus";
 
 type McpTransport = "stdio" | "remote";
@@ -23,228 +21,183 @@ export function isValidRemoteUrl(url: string): boolean {
 const HEADER_NAME_RE = /^[!#$%&'*+.^_`|~A-Za-z0-9-]+$/;
 const VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const PLACEHOLDER_RE = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/;
+const KEEP = "<literal>";
 
-function referenceLines(raw: Record<string, unknown>): string {
-  return Object.entries(raw)
-    .map(([key, value]) => `${key}=${typeof value === "string" && PLACEHOLDER_RE.test(value) ? value : "<literal>"}`)
+function lines(map: Record<string, string> | undefined): string {
+  return Object.entries(map ?? {})
+    .map(([key, value]) => `${key}=${value}`)
     .join("\n");
 }
 
+/** 提交给引擎的表单内容（只含已建模字段；超时由调用方按助手决定带不带）。 */
+export interface McpFormPayload {
+  name: string;
+  /** 新增时选中的助手；编辑时为该条目所在的助手。 */
+  agents: string[];
+  spec: Record<string, unknown>;
+  /** Codex 启动超时（秒）；null = 不写。 */
+  startupTimeoutSec: number | null;
+}
+
+export type McpFormMode =
+  | {
+      kind: "add";
+      targets: McpTarget[];
+      /** 从「已保存的定义」添加时预填。 */
+      initialName?: string;
+      initial?: McpSavedDefinition["definition"];
+    }
+  | { kind: "edit"; name: string; agent: string; cell: McpAgentCell; format: string };
+
 /**
- * MCP 服务新增/编辑表单。写入的是定义覆盖层片段（mcp.definitions.<name>）；
- * 编辑内置条目时整段写覆盖片段并注明「内置默认值不受影响」。
- * 支持本地 stdio 与远程 HTTP 两种传输，字段互斥：stdio 必填 command；
- * 远程必填 url（https 或本机回环 http），headers 值只接受 ${VAR} 占位符。
- * status 的 spec.env/spec.headers 是脱敏视图（普通字面值被掩码为 <literal>），不能当完整原定义：
- * 编辑时以 fullDefinition（policy:get 的 sqlite 有效定义）为基底，只覆盖表单负责字段，
- * 表单未展示的定义字段与已有密钥取值原样保留；
- * 拿不到完整原定义（无 DB 旧存储）时只提交表单负责字段，由保存方迁移后取完整定义合并。
+ * MCP 条目表单：新增直接写入所选助手的配置文件；编辑只改这一条的已建模字段，
+ * 条目里其他官方字段原样保留。env 的 `<literal>` 表示保留原值（界面拿不到明文），
+ * `${VAR}` 为变量引用（写入时按助手规则解析或引用），其余为新写的普通取值
+ * （疑似凭据会被引擎拒绝）。header 只接受变量引用或保留原值。
  */
 export function McpServerFormDialog({
-  agentIds,
-  /** 编辑时传入既有元素；新增传 null。 */
-  editing,
-  layers,
-  /** 完整原定义（policy:get 的 sqlite 有效定义），整条替换基底；新增或无 DB 旧存储为 null。 */
-  fullDefinition,
+  mode,
   onSubmit,
   onClose,
 }: {
-  agentIds: string[];
-  editing: EngineElement | null;
-  layers: PolicyLayers | null;
-  fullDefinition?: Record<string, unknown> | null;
-  /** complete=false 表示 definition 只是表单负责字段，需由保存方迁移后取完整定义合并。 */
-  onSubmit: (name: string, definition: Record<string, unknown>, isNew: boolean, complete: boolean) => void;
+  mode: McpFormMode;
+  onSubmit: (payload: McpFormPayload) => void;
   onClose: () => void;
 }) {
-  const editingSpec = editing ? (editing.spec as McpSpec) : null;
-  const initialTransport: McpTransport =
-    typeof fullDefinition?.url === "string" || typeof editingSpec?.url === "string" ? "remote" : "stdio";
-  const [transport, setTransport] = useState<McpTransport>(initialTransport);
-  const [name, setName] = useState(editing ? editing.id.replace(/^mcp:/, "") : "");
-  const [command, setCommand] = useState(editingSpec?.command ?? "");
-  const [argsText, setArgsText] = useState((editingSpec?.args ?? []).join("\n"));
-  const [envText, setEnvText] = useState(referenceLines(
-    (fullDefinition?.env as Record<string, unknown> | undefined) ?? editingSpec?.env ?? {},
-  ));
-  const [url, setUrl] = useState((fullDefinition?.url as string | undefined) ?? editingSpec?.url ?? "");
-  const [headersText, setHeadersText] = useState(referenceLines(
-    (fullDefinition?.headers as Record<string, unknown> | undefined) ?? editingSpec?.headers ?? {},
-  ));
-  const [timeoutText, setTimeoutText] = useState(String(editingSpec?.startup_timeout_sec ?? 120));
-  const [extraArgsText, setExtraArgsText] = useState(JSON.stringify(
-    (fullDefinition?.extra_args_by_agent as Record<string, unknown> | undefined)
-      ?? editingSpec?.extra_args_by_agent
-      ?? {},
-    null,
-    2,
-  ));
-  const [selectedAgents, setSelectedAgents] = useState<string[]>(editingSpec?.agents ?? []);
+  const isNew = mode.kind === "add";
+  const editEntry = mode.kind === "edit" ? (mode.cell.entry ?? {}) : null;
+  const initial = mode.kind === "add" ? mode.initial : undefined;
+  const writableTargets =
+    mode.kind === "add" ? mode.targets.filter((target) => target.error === null && target.agent_enabled) : [];
+
+  const [transport, setTransport] = useState<McpTransport>(
+    mode.kind === "edit"
+      ? mode.cell.transport === "remote"
+        ? "remote"
+        : "stdio"
+      : typeof initial?.url === "string"
+        ? "remote"
+        : "stdio",
+  );
+  const [name, setName] = useState(mode.kind === "edit" ? mode.name : (mode.initialName ?? ""));
+  const [selectedAgents, setSelectedAgents] = useState<string[]>(
+    mode.kind === "edit" ? [mode.agent] : writableTargets.length === 1 ? [writableTargets[0].agent] : [],
+  );
+  const [command, setCommand] = useState(editEntry?.command ?? initial?.command ?? "");
+  const [argsText, setArgsText] = useState((editEntry?.args ?? initial?.args ?? []).join("\n"));
+  const [envText, setEnvText] = useState(lines(editEntry?.env ?? initial?.env));
+  const [url, setUrl] = useState(editEntry?.url ?? initial?.url ?? "");
+  const [headersText, setHeadersText] = useState(lines(editEntry?.headers ?? initial?.headers));
+  const [timeoutText, setTimeoutText] = useState(
+    String(editEntry?.startup_timeout_sec ?? initial?.startup_timeout_sec ?? (mode.kind === "add" ? 120 : "")),
+  );
   const [error, setError] = useState<string | null>(null);
   const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({ onEscape: onClose });
 
-  const isNew = editing === null;
-  const origin = !isNew ? definitionOrigin(layers, "mcp", name) : null;
+  const formatOf = (agent: string) =>
+    mode.kind === "edit" ? mode.format : (mode.targets.find((target) => target.agent === agent)?.format ?? "");
+  const involvesCodex = selectedAgents.some((agent) => formatOf(agent) === "codex-toml");
+  const preserved = mode.kind === "edit" ? Object.keys(mode.cell.extra ?? {}).filter((key) => key !== "type") : [];
 
   const submit = () => {
-    if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
-      setError("名称只能用小写字母/数字/连字符（如 my-server）");
+    if (isNew && !/^[A-Za-z0-9_-]+$/.test(name)) {
+      setError("名称只能用字母、数字、- 与 _（如 my-server）");
       return;
     }
-    const agents = selectedAgents.length > 0 ? selectedAgents : null;
-    let owned: Record<string, unknown>;
+    if (selectedAgents.length === 0) {
+      setError("至少选一个助手");
+      return;
+    }
+    let spec: Record<string, unknown>;
     if (transport === "remote") {
       const trimmedUrl = url.trim();
       if (!trimmedUrl) {
         setError("远程服务地址（url）不能为空");
         return;
       }
-      if (!isValidRemoteUrl(trimmedUrl)) {
+      const urlChanged = mode.kind === "add" || trimmedUrl !== (editEntry?.url ?? "");
+      if (urlChanged && !isValidRemoteUrl(trimmedUrl)) {
         setError("服务地址仅支持 https://，或本机 http://localhost / http://127.0.0.1（可带端口与路径）");
         return;
       }
-      // headers 与 env 同等语义：值只允许 ${VAR} 占位符（可写 VAR 简写），
-      // 脱敏视图中的 <literal> 原样带出，由保存方用完整定义重建真实值。
-      const fullHeaders = (fullDefinition?.headers ?? null) as Record<string, unknown> | null;
-      const specHeaders = editingSpec?.headers ?? {};
       const headers: Record<string, string> = {};
       for (const line of headersText.split("\n").map((item) => item.trim()).filter(Boolean)) {
         const eq = line.indexOf("=");
         const headerName = (eq >= 0 ? line.slice(0, eq) : line).trim();
+        const value = eq >= 0 ? line.slice(eq + 1).trim() : "";
         if (!HEADER_NAME_RE.test(headerName)) {
           setError(`非法 header 名:${line}`);
           return;
         }
-        const valuePart = eq >= 0 ? line.slice(eq + 1).trim() : "";
-        if (valuePart) {
-          if (valuePart === "<literal>") {
-            const fromFull = typeof fullHeaders?.[headerName] === "string" ? (fullHeaders[headerName] as string) : null;
-            headers[headerName] = fromFull ?? "<literal>";
-          } else if (PLACEHOLDER_RE.test(valuePart)) {
-            headers[headerName] = valuePart;
-          } else if (VAR_NAME_RE.test(valuePart)) {
-            headers[headerName] = `\${${valuePart}}`;
-          } else {
-            setError(`header 值只能是 \${VAR} 变量引用形式:${line}`);
-            return;
-          }
+        if (value === KEEP && !isNew) {
+          headers[headerName] = KEEP;
+        } else if (PLACEHOLDER_RE.test(value)) {
+          headers[headerName] = value;
+        } else if (VAR_NAME_RE.test(value)) {
+          headers[headerName] = `\${${value}}`;
         } else {
-          const fromFull = typeof fullHeaders?.[headerName] === "string" ? (fullHeaders[headerName] as string) : null;
-          const fromSpec = typeof specHeaders[headerName] === "string" ? specHeaders[headerName] : null;
-          const restored = fromFull ?? fromSpec;
-          if (!restored) {
-            setError(`header ${headerName} 缺少取值，请写成 ${headerName}=\${VAR_NAME}`);
-            return;
-          }
-          headers[headerName] = restored;
+          setError(`header 值只能写 \${VAR} 变量引用${isNew ? "" : "或保留原值 <literal>"}:${headerName}`);
+          return;
         }
       }
-      owned = { url: trimmedUrl, headers, agents };
+      spec = { url: trimmedUrl, headers };
     } else {
       if (!command.trim()) {
         setError("启动命令不能为空");
         return;
       }
+      const env: Record<string, string> = {};
+      for (const line of envText.split("\n").map((item) => item.trim()).filter(Boolean)) {
+        const eq = line.indexOf("=");
+        if (eq <= 0) {
+          setError(`环境变量要写成 KEY=取值:${line}`);
+          return;
+        }
+        const key = line.slice(0, eq).trim();
+        const value = line.slice(eq + 1).trim();
+        if (/\s/.test(key)) {
+          setError(`非法变量名:${key}`);
+          return;
+        }
+        if (value === KEEP && isNew) {
+          setError(`新增时没有可保留的原值，请写 ${key}=\${VAR} 或直接写取值`);
+          return;
+        }
+        env[key] = value;
+      }
+      spec = {
+        command: command.trim(),
+        args: argsText.split("\n").map((line) => line.trim()).filter(Boolean),
+        env,
+      };
+    }
+    let startupTimeoutSec: number | null = null;
+    if (transport === "stdio" && involvesCodex && timeoutText.trim()) {
       const timeout = Number(timeoutText);
       if (!Number.isInteger(timeout) || timeout <= 0) {
         setError("超时秒数要是正整数");
         return;
       }
-      const args = argsText.split("\n").map((line) => line.trim()).filter(Boolean);
-      // 密钥变量编辑「目标键=${来源变量}」映射。取值优先用完整原定义的真实值；只有脱敏 spec 时，
-      // ${REF} 占位引用原样保留，被掩码为 <literal> 的字面值原样带出，由保存方用完整定义重建。
-      const fullEnv = (fullDefinition?.env ?? null) as Record<string, unknown> | null;
-      const specEnv = editingSpec?.env ?? {};
-      const env: Record<string, string> = {};
-      for (const line of envText.split("\n").map((item) => item.trim()).filter(Boolean)) {
-        const eq = line.indexOf("=");
-        const varName = (eq >= 0 ? line.slice(0, eq) : line).trim();
-        if (!VAR_NAME_RE.test(varName)) {
-          setError(`非法变量名:${line}`);
-          return;
-        }
-        const fromFull = typeof fullEnv?.[varName] === "string" ? (fullEnv[varName] as string) : null;
-        const fromSpec = typeof specEnv[varName] === "string" ? specEnv[varName] : null;
-        const valuePart = eq >= 0 ? line.slice(eq + 1).trim() : "";
-        if (!valuePart) {
-          env[varName] = fromFull ?? fromSpec ?? `\${${varName}}`;
-        } else if (valuePart === "<literal>") {
-          const restored = fromFull ?? fromSpec;
-          if (!restored) {
-            setError(`变量 ${varName} 的原值不可用，请改成 ${varName}=\${VAR_NAME}`);
-            return;
-          }
-          env[varName] = restored;
-        } else if (PLACEHOLDER_RE.test(valuePart)) {
-          env[varName] = valuePart;
-        } else if (VAR_NAME_RE.test(valuePart)) {
-          env[varName] = `\${${valuePart}}`;
-        } else {
-          setError(`变量取值只能是 \${VAR} 引用形式:${line}`);
-          return;
-        }
-      }
-      let extraArgsByAgent: Record<string, string[]> = {};
-      try {
-        const parsed = JSON.parse(extraArgsText || "{}");
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
-        for (const [agent, values] of Object.entries(parsed)) {
-          if (!Array.isArray(values) || values.some((value) => typeof value !== "string")) throw new Error();
-          extraArgsByAgent[agent] = values as string[];
-        }
-      } catch {
-        setError('各助手附加参数必须是 JSON 对象，例如 {"codex":["--flag"]}');
-        return;
-      }
-      owned = {
-        command: command.trim(),
-        args,
-        startup_timeout_sec: timeout,
-        agents,
-        env,
-        extra_args_by_agent: extraArgsByAgent,
-      };
+      startupTimeoutSec = timeout;
     }
-    // 表单负责字段（可选字段显式给出）；编辑且有完整原定义时以其为基底，
-    // 未展示字段原样保留；否则只提交这些字段，由保存方迁移后合并完整定义。
-    // 两种传输字段互斥：切换传输时剥离对方字段，避免混合定义被引擎拒绝。
-    const complete = isNew || fullDefinition != null;
-    const definition: Record<string, unknown> = !isNew && fullDefinition ? { ...fullDefinition, ...owned } : owned;
-    if (transport === "remote") {
-      for (const key of ["command", "args", "env", "startup_timeout_sec", "extra_args_by_agent", "type"]) {
-        delete definition[key];
-      }
-    } else {
-      for (const key of ["url", "headers", "type"]) {
-        delete definition[key];
-      }
-      if (Object.keys(definition.extra_args_by_agent as Record<string, unknown>).length === 0) {
-        delete definition.extra_args_by_agent;
-      }
-    }
-    onSubmit(name, definition, isNew, complete);
+    onSubmit({ name, agents: selectedAgents, spec, startupTimeoutSec });
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 animate-fade-in" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={isNew ? "新增服务" : `编辑 ${name}`} tabIndex={-1} onKeyDown={onDialogKeyDown} className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-xl border bg-card p-5 shadow-xl animate-zoom-in-95 sm:p-6">
         <div className="flex items-start justify-between">
-          <h3 className="text-base font-semibold text-foreground">{isNew ? "新增 MCP 服务" : `编辑服务 ${name}`}</h3>
+          <h3 className="text-base font-semibold text-foreground">
+            {isNew ? "新增 MCP 服务" : `编辑 ${name}（${mode.kind === "edit" ? mode.agent : ""}）`}
+          </h3>
           <button type="button" onClick={onClose} aria-label="关闭" className="rounded p-1 text-muted-foreground hover:bg-accent">
             <X className="h-4 w-4" aria-hidden />
           </button>
         </div>
 
-        {!isNew && origin === "builtin" && (
-          <p data-testid="builtin-overlay-note" className="mt-2 rounded-md border border-info/30 bg-info/10 px-3 py-2 text-xs text-info">
-            {OVERLAY_COPY.editBuiltinNote}
-          </p>
-        )}
-
         <div className="mt-4 grid grid-cols-1 gap-4 text-sm lg:grid-cols-2">
           <div className="lg:col-span-2">
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">名称（唯一，小写字母/数字/连字符）</label>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">名称（字母、数字、- 与 _）</label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -254,30 +207,47 @@ export function McpServerFormDialog({
               placeholder="my-server"
             />
           </div>
+          {mode.kind === "add" && (
+            <div className="lg:col-span-2">
+              <span className="mb-1 block text-xs font-medium text-muted-foreground">写入哪些助手的配置</span>
+              <div className="flex flex-wrap gap-3">
+                {writableTargets.map((target) => (
+                  <label key={target.agent} className="flex items-center gap-1.5 text-xs text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={selectedAgents.includes(target.agent)}
+                      onChange={(e) =>
+                        setSelectedAgents((prev) =>
+                          e.target.checked ? [...prev, target.agent] : prev.filter((item) => item !== target.agent),
+                        )
+                      }
+                      data-testid={`server-agent-${target.agent}`}
+                    />
+                    <span className="font-mono">{target.agent}</span>
+                  </label>
+                ))}
+                {writableTargets.length === 0 && <span className="text-xs text-muted-foreground">没有可写入的助手配置</span>}
+              </div>
+            </div>
+          )}
           <div className="lg:col-span-2">
             <span className="mb-1 block text-xs font-medium text-muted-foreground">传输方式</span>
             <div className="flex gap-4">
-              <label className="flex items-center gap-1.5 text-xs text-foreground">
-                <input
-                  type="radio"
-                  name="mcp-transport"
-                  checked={transport === "stdio"}
-                  onChange={() => setTransport("stdio")}
-                  data-testid="server-transport-stdio"
-                />
-                本地 stdio（启动命令）
-              </label>
-              <label className="flex items-center gap-1.5 text-xs text-foreground">
-                <input
-                  type="radio"
-                  name="mcp-transport"
-                  checked={transport === "remote"}
-                  onChange={() => setTransport("remote")}
-                  data-testid="server-transport-remote"
-                />
-                远程 HTTP（服务地址）
-              </label>
+              {(["stdio", "remote"] as const).map((kind) => (
+                <label key={kind} className="flex items-center gap-1.5 text-xs text-foreground">
+                  <input
+                    type="radio"
+                    name="mcp-transport"
+                    checked={transport === kind}
+                    disabled={!isNew}
+                    onChange={() => setTransport(kind)}
+                    data-testid={`server-transport-${kind}`}
+                  />
+                  {kind === "stdio" ? "本地 stdio（启动命令）" : "远程 HTTP（服务地址）"}
+                </label>
+              ))}
             </div>
+            {!isNew && <p className="mt-1 text-xs text-muted-foreground">编辑不能切换传输方式；要换请删除后重新新增。</p>}
           </div>
           {transport === "remote" ? (
             <>
@@ -292,7 +262,9 @@ export function McpServerFormDialog({
                 />
               </div>
               <div className="lg:col-span-2">
-                <label className="mb-1 block text-xs font-medium text-muted-foreground">请求头变量引用（每行一个 Header-Name=${"{VAR}"}；值由 Agent Manager 进程环境提供，不在此保存或显示）</label>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                  请求头（每行一个 Header-Name=${"{VAR}"}；{isNew ? "" : "<literal> 表示保留原值；"}取值由变量提供，不在此显示）
+                </label>
                 <textarea
                   value={headersText}
                   onChange={(e) => setHeadersText(e.target.value)}
@@ -326,68 +298,44 @@ export function McpServerFormDialog({
                   placeholder={"-y\nchrome-devtools-mcp"}
                 />
               </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-muted-foreground">环境变量映射（每行一个 配置键=${"{来源变量}"}；只保存变量引用，不显示明文）</label>
+              <div className="lg:col-span-2">
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                  环境变量（每行一个 KEY=取值；${"{VAR}"} 为变量引用{isNew ? "" : "，<literal> 表示保留原值"}；密钥请用变量引用）
+                </label>
                 <textarea
                   value={envText}
                   onChange={(e) => setEnvText(e.target.value)}
-                  rows={7}
+                  rows={6}
                   data-testid="server-env-input"
                   className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs"
-                  placeholder="API_KEY=${GROK_API_KEY}"
+                  placeholder={"API_KEY=${GROK_API_KEY}\nNODE_ENV=production"}
                 />
               </div>
-              <div className="lg:col-span-2">
-                <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                  各助手附加参数 <code>extra_args_by_agent</code>（JSON）
-                </label>
-                <textarea
-                  value={extraArgsText}
-                  onChange={(e) => setExtraArgsText(e.target.value)}
-                  rows={7}
-                  data-testid="server-extra-args-input"
-                  className="w-full rounded border border-input px-3 py-2 font-mono text-xs"
-                  placeholder={'{"codex": ["--flag"]}'}
-                />
-                <p className="mt-1 text-xs text-muted-foreground">这些参数只追加给指定助手；普通参数仍在上方逐行维护。</p>
-              </div>
+              {involvesCodex && (
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-muted-foreground">Codex 启动超时（秒，留空用默认）</label>
+                  <input
+                    value={timeoutText}
+                    onChange={(e) => setTimeoutText(e.target.value)}
+                    data-testid="server-timeout-input"
+                    className="w-28 rounded border border-input px-2 py-1.5 font-mono text-xs"
+                  />
+                </div>
+              )}
             </>
           )}
-          <div className="lg:col-span-2">
-            <span className="mb-1 block text-xs font-medium text-muted-foreground">允许分配的助手（不选则不限）</span>
-            <p className="mb-1.5 text-xs text-muted-foreground">这里只保存允许范围，保存后再为各助手分别添加。</p>
-            <div className="flex flex-wrap gap-3">
-              {agentIds.map((agent) => (
-                <label key={agent} className="flex items-center gap-1.5 text-xs text-foreground">
-                  <input
-                    type="checkbox"
-                    checked={selectedAgents.includes(agent)}
-                    onChange={(e) =>
-                      setSelectedAgents((prev) => (e.target.checked ? [...prev, agent] : prev.filter((item) => item !== agent)))
-                    }
-                    data-testid={`server-agent-${agent}`}
-                  />
-                  <span className="font-mono">{agent}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-          {transport === "stdio" && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">启动超时（秒）</label>
-              <input
-                value={timeoutText}
-                onChange={(e) => setTimeoutText(e.target.value)}
-                data-testid="server-timeout-input"
-                className="w-28 rounded border border-input px-2 py-1.5 font-mono text-xs"
-              />
-            </div>
+          {preserved.length > 0 && (
+            <p data-testid="server-preserved-fields" className="text-xs text-muted-foreground lg:col-span-2">
+              条目里的这些字段本表单不改动，保存时原样保留：{preserved.join("、")}
+            </p>
           )}
           {error && <p role="alert" className="text-xs text-destructive lg:col-span-2">{error}</p>}
         </div>
 
         <div className="mt-5 flex items-center justify-end gap-2">
-          <span className="mr-auto text-xs text-muted-foreground">只保存到本地资源库，不会自动安装或同步</span>
+          <span className="mr-auto text-xs text-muted-foreground">
+            {isNew ? "直接写入所选助手的配置文件" : "只改这一条，写入前会核对是否已被外部修改"}
+          </span>
           <button type="button" onClick={onClose} className="rounded-md border px-4 py-2 text-sm text-muted-foreground hover:bg-accent">
             取消
           </button>
@@ -397,7 +345,7 @@ export function McpServerFormDialog({
             data-testid="server-form-submit"
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
           >
-            保存到资源库
+            {isNew ? "写入配置" : "保存修改"}
           </button>
         </div>
       </div>

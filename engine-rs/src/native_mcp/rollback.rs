@@ -4,8 +4,7 @@ use anyhow::{anyhow, bail, Context as _, Result};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use super::codecs::extract_entry;
-use super::targets::{check_symlink_metadata, validate_target_path, Entry, Format};
+use super::targets::{check_symlink_metadata, validate_target_path};
 use crate::store;
 
 pub fn read_existing_bytes(path: &Path) -> Result<Option<Vec<u8>>> {
@@ -20,7 +19,6 @@ pub fn read_existing_bytes(path: &Path) -> Result<Option<Vec<u8>>> {
 
 #[derive(Clone, Copy)]
 enum ExpectedOld<'a> {
-    Any,
     Exact(Option<&'a [u8]>),
 }
 
@@ -34,7 +32,7 @@ fn write_temp_and_replace(
     let parent = path
         .parent()
         .ok_or_else(|| anyhow!("目标路径缺少父目录: {}", path.display()))?;
-    let create_parent = matches!(expected_old, ExpectedOld::Any | ExpectedOld::Exact(None));
+    let create_parent = matches!(expected_old, ExpectedOld::Exact(None));
     if create_parent {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("无法创建配置目录 {}", parent.display()))?;
@@ -80,14 +78,13 @@ fn write_temp_and_replace(
         if let Some(hook) = before_compare.as_mut() {
             hook(path)?;
         }
-        if let ExpectedOld::Exact(expected) = expected_old {
-            let current = read_existing_bytes(path)?;
-            if current.as_deref() != expected {
-                bail!(
-                    "目标文件 {} 在临时文件准备后被外部修改，拒绝原子替换",
-                    path.display()
-                );
-            }
+        let ExpectedOld::Exact(expected) = expected_old;
+        let current = read_existing_bytes(path)?;
+        if current.as_deref() != expected {
+            bail!(
+                "目标文件 {} 在临时文件准备后已在外部修改，拒绝原子替换",
+                path.display()
+            );
         }
 
         std::fs::rename(&tmp_path, path)
@@ -118,25 +115,6 @@ fn write_temp_and_replace(
         return Err(write_err);
     }
     Ok(())
-}
-
-pub fn safe_write_file(path: &Path, bytes: &[u8]) -> Result<()> {
-    write_temp_and_replace(path, bytes, ExpectedOld::Any, None)
-}
-
-pub fn safe_restore_bytes(path: &Path, old_bytes: Option<&[u8]>) -> Result<()> {
-    validate_target_path(path)?;
-    match old_bytes {
-        Some(bytes) => safe_write_file(path, bytes),
-        None => {
-            if check_symlink_metadata(path)?.is_some() {
-                validate_target_path(path)?;
-                std::fs::remove_file(path)
-                    .with_context(|| format!("回滚删除文件失败: {}", path.display()))?;
-            }
-            Ok(())
-        }
-    }
 }
 
 /// CAS 恢复：仅当目标当前字节与本次写入完全一致时才恢复 old_bytes
@@ -171,49 +149,6 @@ pub fn safe_restore_bytes_cas(
     }
 }
 
-/// 原子写入 + 回读校验。`expected_old` 是渲染阶段读出的旧字节（None 表示
-/// 渲染时目标不存在）：原子替换前再次读取并逐字节比较，不一致则
-/// fail-closed 拒绝覆盖，保留外部新内容；回读校验失败时的恢复同样走 CAS，
-/// 仅当当前字节仍等于本次写入时才恢复，否则保留并报告冲突。
-pub fn atomic_write_checked(
-    path: &Path,
-    content: &str,
-    expect: Option<(&str, &Entry, Format)>,
-    expect_removed: Option<(&str, Format)>,
-    expected_old: Option<&[u8]>,
-) -> Result<()> {
-    let content_bytes = content.as_bytes();
-    write_temp_and_replace(path, content_bytes, ExpectedOld::Exact(expected_old), None)?;
-
-    let verify = (|| -> Result<()> {
-        if let Some((server, entry, format)) = expect {
-            let (actual, legacy_marker) = extract_entry(path, format, server)?;
-            let actual = actual.ok_or_else(|| anyhow!("回读校验失败: 条目 '{}' 缺失", server))?;
-            if legacy_marker {
-                bail!("回读校验失败: 条目 '{}' 仍含旧版标记", server);
-            }
-            if actual.digest() != entry.digest() {
-                bail!("回读校验失败: 条目 '{}' 摘要与写入不一致", server);
-            }
-        }
-        if let Some((server, format)) = expect_removed {
-            let (actual, _) = extract_entry(path, format, server)?;
-            if actual.is_some() {
-                bail!("回读校验失败: 条目 '{}' 应已移除但仍存在", server);
-            }
-        }
-        Ok(())
-    })();
-
-    if let Err(exc) = verify {
-        if let Err(restore_err) = safe_restore_bytes_cas(path, content_bytes, expected_old) {
-            return Err(exc.context(format!("回滚恢复失败: {restore_err:#}")));
-        }
-        return Err(exc);
-    }
-    Ok(())
-}
-
 /// 整文件原子 CAS 写入（crate 内复用，例如 Rules 渲染产物）：复用
 /// write_temp_and_replace 的临时文件 + rename 原子路径与既有安全校验
 /// （目标/祖先 symlink、目录、非普通文件一律拒绝），替换前精确比较
@@ -221,7 +156,7 @@ pub fn atomic_write_checked(
 /// 视为回读失败，走 safe_restore_bytes_cas —— 仅在当前仍是本次 bytes
 /// 时恢复旧字节，若外部再次修改则保留外部内容并报告回滚冲突。
 /// 新文件沿用现有 0600 与父目录创建/同步行为，现有文件保留既有 mode。
-pub(crate) fn atomic_write_bytes_checked(
+pub fn atomic_write_bytes_checked(
     path: &Path,
     bytes: &[u8],
     expected_old: Option<&[u8]>,

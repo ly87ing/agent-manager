@@ -7,10 +7,12 @@ import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 const BACKUP = {
   format: "agent-manager/config-backup/v1",
   exported_at: "2026-09-17T00:00:00Z",
-  policy: { mcp: { definitions: { demo: { command: "npx", env: { T: "${T}" } } } } },
+  policy: { mcp: { definitions: {} } },
   // 规则不再是来源：导出里是规则模板（名称 + 正文），来源只剩 hooks/aliases
   sources: { "aliases.shell": "{}" },
   rule_templates: [{ name: "团队规则", body: "我的规则\n", origin: "user" }],
+  // MCP 定义随「已保存项」导出（原先计在策略的服务库定义里）
+  mcp_saved: [{ server: "demo", agent: "", entry: { command: "npx", env: { T: "${T}" } }, resolve: { env: [], headers: [] }, origin: "migrated" }],
 };
 
 function routes() {
@@ -29,7 +31,7 @@ describe("配置备份", () => {
     await userEvent.click(screen.getByTestId("config-export-button"));
 
     const output = await screen.findByTestId("config-export-output");
-    expect(output).toHaveTextContent("1 条定义");
+    expect(output).toHaveTextContent("0 条定义 · 1 个 MCP 已保存项");
     expect(output).toHaveTextContent("1 个规则模板");
     expect(output).toHaveTextContent("不含密钥");
     expect(screen.getByText(/不含密钥取值，也不含外部密钥文件路径/)).toBeInTheDocument();
@@ -53,7 +55,8 @@ describe("配置备份", () => {
   it("导入前先给差异预览，确认后才整份提交", async () => {
     const onGoSync = vi.fn();
     const { calls } = renderWithEngine(<ConfigBackupSection onGoSync={onGoSync} />, routes());
-    // 这份旧格式备份相对当前少了 demo、多了 newcomer，还带着旧的规则来源（导入时转为模板）
+    // 这份旧格式备份多了 newcomer（服务库定义按 MCP 已保存项计入），还带着旧的规则来源
+    //（导入时转为模板）；本机已有的 MCP 已保存项 demo 导入后保留，不算消失
     fireEvent.change(screen.getByTestId("config-import-input"), {
       target: {
         value: JSON.stringify({
@@ -67,7 +70,7 @@ describe("配置备份", () => {
 
     const preview = await screen.findByTestId("config-import-diff");
     expect(preview).toHaveTextContent("新增：newcomer");
-    expect(preview).toHaveTextContent("消失：demo");
+    expect(preview).not.toHaveTextContent("消失：demo");
     expect(preview).toHaveTextContent("会被替换：旧规则来源（共享，导入后转为模板）");
     // 旧格式没带规则模板：现有模板不动，不报消失
     expect(screen.queryByTestId("config-diff-规则模板")).toBeNull();

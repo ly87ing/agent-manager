@@ -13,10 +13,10 @@
       "type": "array",
       "items": {"$ref": "#/$defs/element"}
     },
-    "import_candidates": {
-      "description": "MCP domain only: unmanaged server entries found in configured agent target files, offered for import into the library. Each spec is masked — env and static header values are always '<literal>', only Codex env_http_headers pass through as ${VAR} references; plaintext secret values never appear. Read-only, zero-write.",
+    "targets": {
+      "description": "MCP domain only: one entry per agent whose MCP config file the engine reads (agents without an mcp_config are omitted). A non-null error means that agent's file cannot be listed or written; other agents are unaffected. Read-only, zero-write.",
       "type": "array",
-      "items": {"$ref": "#/$defs/import_candidate"}
+      "items": {"$ref": "#/$defs/mcp_target"}
     },
     "recommendations": {
       "description": "Skills domain only: compiled-in recommended skill sources. Read-only catalog, never elements, never counted as pending sync, never probed or fetched. Adding one saves its 'definition' as an ordinary collection (no agents restriction, no assignment).",
@@ -98,28 +98,41 @@
         "collection": {"description": "Owning collection for managed entries, or the matching collection for collection-extra-link; otherwise null.", "type": ["string", "null"]}
       }
     },
-    "import_candidate": {
-      "description": "One unmanaged MCP server entry discovered in an agent's existing config file.",
+    "mcp_target": {
+      "description": "One agent's MCP config target as seen by mcp.status.",
       "type": "object",
-      "required": ["name", "agent", "transport", "spec"],
+      "required": ["agent", "path", "format", "exists", "agent_enabled", "disable_mode", "error"],
       "additionalProperties": false,
       "properties": {
-        "name": {
-          "description": "Server entry name as found in the client config; guaranteed to pass server-name validation.",
-          "type": "string"
-        },
         "agent": {
-          "description": "Canonical agent id whose target file holds the entry, e.g. 'claude-code' or 'codex'.",
+          "description": "Canonical agent id, e.g. 'claude-code' or 'codex' (profile instances included).",
           "type": "string"
         },
-        "transport": {
-          "description": "Entry transport shape: 'stdio' (command/args/env) or 'remote' (url/headers).",
-          "type": "string",
-          "enum": ["stdio", "remote"]
+        "path": {
+          "description": "Absolute path of the agent's MCP config file.",
+          "type": "string"
         },
-        "spec": {
-          "description": "Masked definition shape: stdio {command, args, env:{KEY:'<literal>'}}; remote {url, headers:{NAME:'<literal>'|'${VAR}'}}.",
-          "type": "object"
+        "format": {
+          "description": "Config codec.",
+          "type": "string",
+          "enum": ["claude-json", "codex-toml", "opencode-json", "unsupported"]
+        },
+        "exists": {
+          "description": "Whether the config file exists.",
+          "type": "boolean"
+        },
+        "agent_enabled": {
+          "description": "false when the agent is disabled in this tool; its entries are listed read-only.",
+          "type": "boolean"
+        },
+        "disable_mode": {
+          "description": "'field' = disabling writes the client's official enabled=false and keeps the entry in the file (Codex, OpenCode); 'snapshot' = the client has no global per-server switch, so disabling moves the entry out of the file into a saved snapshot in native-manager.db (Claude Code).",
+          "type": "string",
+          "enum": ["field", "snapshot"]
+        },
+        "error": {
+          "description": "File or path level problem (parse failure, symlink, non-regular file, unsupported format, shared with another agent), or null.",
+          "type": ["string", "null"]
         }
       }
     },

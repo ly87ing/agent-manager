@@ -51,19 +51,12 @@ export function versionRangeHint(freshness: Freshness): string {
 
 // ---------- 矩阵单元格 ----------
 
-/** MCP 服务 × 助手 配置状态。 */
+/** MCP 服务 × 助手：该助手配置里这一条的状态（saved = 停用后保存在本工具里）。 */
 export const MCP_CELL_COPY: Record<string, string> = {
-  "managed-ok": "已配置",
-  drifted: "不一致",
-  missing: "未配置",
-  absent: "未配置",
-  "agent-disabled": "未配置",
-  "not-materialized": "尚未生成",
-  leftover: "以前配过",
-  "probe-error": "检查出错",
+  enabled: "已启用",
   disabled: "已停用",
-  // 服务定义里没勾这个助手；「不支持」会被读成「这个助手用不了 MCP」
-  unsupported: "未配置",
+  saved: "已停用（已保存）",
+  invalid: "无法识别",
 };
 
 /** 技能 × 助手 启用状态。 */
@@ -139,8 +132,6 @@ export const OVERLAY_COPY = {
   removeServer: "移除",
   addCollection: "新增集合",
   removeCollection: "移除",
-  /** 编辑内置条目时表单内提示。 */
-  editBuiltinNote: "该条目由内置默认值提供；你的修改会写入本地数据库，内置默认值不受影响。",
   /** 移除定义时确认文案（tombstone 语义）。 */
   removeDefinitionNote: "写入移除标记，使该条目停止生效；删除标记即可恢复定义。确认后会清理本工具管理的配置或链接。",
   /** 移除覆盖层条目时确认文案（policy:delete 语义）。 */

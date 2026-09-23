@@ -1,38 +1,42 @@
-//! Rust 原生 MCP 域（native-manager.db 自管域表，无旧 Python 迁移/兼容）。
+//! Rust 原生 MCP 域：各助手配置文件里的实际条目即当前配置。
 //!
 //! 模块结构：
-//! - `model`：绑定模型、版本/写入摘要与定义清理
-//! - `targets`：各 Agent 配置文件格式（Claude JSON / Codex TOML / OpenCode JSON）与原子 I/O
-//! - `policy_view`：有效策略视图与凭证解析
-//! - `persistence`：SQLite `mcp_bindings` 表读写
-//! - `status`：状态查询实现（零写）
-//! - `apply`：预检与动作执行（加锁事务写）
+//! - `targets`：各助手的 MCP 目标文件、格式与路径安全校验
+//! - `codecs`：配置文件解析与 Codex TOML 文本渲染
+//! - `entry`：条目的已建模视图、脱敏展示与写入变换
+//! - `inventory`：实际条目 + 已保存项的只读清单
+//! - `saved`：「已保存未生效」项（`mcp_saved` 表：停用快照、未分配定义）
+//! - `snapshot`：Claude 停用快照的生成与写回（疑似凭据转存外部密钥文件）
+//! - `legacy`：旧服务库定义 + `mcp_bindings` 的迁移（读路径推导、写路径落库）
+//! - `write`：单条目写入的新字节计算与写前自检
+//! - `status` / `preflight` / `apply`：只读状态、写入计划、执行
+//! - `policy_view`：定义形态校验（policy:set / config:import / 已保存定义）
 
 pub mod apply;
 pub mod codecs;
-pub mod discovery;
+pub mod entry;
+pub mod inventory;
+pub mod legacy;
 pub mod model;
-pub mod persistence;
 pub mod policy_view;
 pub mod preflight;
-pub mod render;
 pub mod rollback;
+pub mod saved;
+pub mod snapshot;
 pub mod status;
 pub mod targets;
+pub mod write;
 
 use anyhow::{bail, Result};
 use serde_json::Value;
 
-pub use model::{
-    clean_definition, compute_applied_digest, compute_definition_version, Binding, Bindings,
-};
 pub use preflight::preflight_apply;
 pub use targets::{AgentTarget, Entry, Format};
 
 use crate::native::{Context, Request};
 
-/// MCP 域主入口：分发 status / apply 命令
-pub fn handle(ctx: &Context, req: &Request) -> Result<Value> {
+/// MCP 域主入口：返回 (data, warnings)。
+pub fn dispatch(ctx: &Context, req: &Request) -> Result<(Value, Vec<String>)> {
     let cmd = req.command.replace('.', ":");
     match cmd.as_str() {
         "mcp:status" => {
@@ -44,9 +48,14 @@ pub fn handle(ctx: &Context, req: &Request) -> Result<Value> {
                     bail!("mcp:status 仅接受可选的单个 --offline 参数，得到 '{}'", arg);
                 }
             }
-            status::status(ctx)
+            Ok((status::status(ctx)?, Vec::new()))
         }
         "mcp:apply" => apply::apply(ctx, req),
         _ => bail!("mcp 域不支持命令 '{}'", req.command),
     }
+}
+
+/// 只要 data 的调用方（system:audit）。
+pub fn handle(ctx: &Context, req: &Request) -> Result<Value> {
+    dispatch(ctx, req).map(|(data, _)| data)
 }

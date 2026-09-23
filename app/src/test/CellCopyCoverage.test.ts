@@ -27,10 +27,13 @@ describe("格子文案覆盖", () => {
   });
 
   it("MCP：引擎输出的格子状态都有中文说法", () => {
-    const states = enginePolicyStates("../engine-rs/src/native_mcp/status.rs")
-      .filter((state) => !KNOWN_NON_CELL.has(state))
-      .filter((state) => CANDIDATE_MCP_STATES.has(state));
+    // MCP 格子状态改成了单词（enabled/disabled/invalid，界面另把快照记作 saved），
+    // kebab 提取抓不到，按候选集合在引擎源码里的字面量出现来比对。
+    const source = readFileSync("../engine-rs/src/native_mcp/status.rs", "utf8");
+    const states = [...CANDIDATE_MCP_STATES].filter((state) => source.includes(`"${state}"`));
+    expect(states.length).toBeGreaterThan(0);
     expect(states.filter((state) => !(state in MCP_CELL_COPY))).toEqual([]);
+    expect("saved" in MCP_CELL_COPY).toBe(true);
   });
 });
 
@@ -39,7 +42,4 @@ const CANDIDATE_SKILL_STATES = new Set([
   "linked", "missing-link", "dead-link", "drifted", "extra-link", "disabled",
   "unsupported", "not-assigned", "not-materialized", "managed-ok",
 ]);
-const CANDIDATE_MCP_STATES = new Set([
-  "managed-ok", "drifted", "missing", "absent", "agent-disabled", "not-materialized",
-  "leftover", "probe-error", "disabled", "unsupported",
-]);
+const CANDIDATE_MCP_STATES = new Set(["enabled", "disabled", "invalid"]);

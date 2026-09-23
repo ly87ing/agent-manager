@@ -13,11 +13,9 @@
 
 ## MCP 与 Agent 配置
 
-MCP 定义、库分配和启用偏好由本机 `native-manager.db` 管理。Rust dispatcher 已实现本地 stdio 与远程 HTTP MCP 的 `mcp:status`（只读）与真实 `mcp:apply`。当前产品支持 Claude JSON 与 Codex TOML；旧 OpenCode codec 仅用于兼容既有数据。定义保存与执行动作分开；执行按钮直接触发真实 `apply`，`apply` 内部先做 preflight/写前校验，再按精确 scope、锁、外部修改检测、CAS/条件回滚执行并审计。
+MCP 以各助手配置文件里的实际条目为准，`native-manager.db` 只保存「已保存未生效」的 MCP 项（Claude 侧停用的快照、还没写进任何助手的定义），不另存当前配置；见 [MCP 配置指南](MCP-CONFIG-GUIDE.md)。写入条目时新设的 env `${VAR}` 按助手解析取值、headers 以客户端原生引用形式写入；新写的 env 字面量命中疑似凭据检测时拒绝。外部文件中的取值优先，进程环境只作只读回退；没有可用外部文件时，界面填写与需要转存密钥的 Claude 停用 fail-closed。
 
-逐 Agent 支持 `add`、`update`、`enable`、`disable`、`remove`；库级支持 `enable`、`disable`、`remove`。`mcp:status` 只读零写；真实 `apply` 具备锁、审计、CAS 和回滚保护。外部文件中的取值优先，进程环境只作只读回退；没有可用外部文件时，界面填写和 MCP 明文接管 fail-closed。远程 HTTP MCP 的 `headers` 与 `env` 同级：定义中只持久化 `${VAR}` 占位符，并以客户端原生引用形式写入目标。
-
-`secrets:source` 只保存路径；`secrets:set` 只更新指定变量；`secrets:adopt` 只补缺失值，同名不同值拒绝覆盖。旧版 `secret_values` 表只用于一次性迁移：页面显示数量但不读取回显，用户输入确认词后才执行；引擎先把全部旧值无覆盖写入外部文件，成功后再删除旧表，任一步失败都保留旧表。配置导出永不包含取值或外部文件路径，导入遇到旧版非空 `secrets` 段会拒绝。
+`secrets:source` 只保存路径；`secrets:set` 只更新指定变量；停用 Claude MCP 条目时，疑似凭据的明文取值由 MCP 域转存到该文件（只补缺失值，同名不同值拒绝覆盖），快照里只留 `${VAR}`。旧版 `secret_values` 表只用于一次性迁移：页面显示数量但不读取回显，用户输入确认词后才执行；引擎先把全部旧值无覆盖写入外部文件，成功后再删除旧表，任一步失败都保留旧表。配置导出永不包含取值或外部文件路径，导入遇到旧版非空 `secrets` 段会拒绝。
 
 Claude Code 与 Codex 的内置默认安装渠道是官方 `native` 命令。brew 只作为实际检测来源展示，不是默认渠道；凭据本身仍由对应工具和用户环境管理。
 
