@@ -664,6 +664,17 @@ fn delete_dot_path(root: &mut Value, segments: &[&str]) -> Result<(), DispatchEr
     Ok(())
 }
 
+/// 变量名看起来是否承载凭据（TOKEN / KEY / SECRET / PASSWORD / CREDENTIAL / AUTH）。
+///
+/// 取值格式检测（`reject_secret_text`）只认得常见厂商前缀，自定义格式的令牌会漏过；
+/// 凡是要落库的环境变量或请求头字面量，名字像凭据就按凭据处理，不看取值长什么样。
+pub(crate) fn credential_like_name(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    ["TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH"]
+        .iter()
+        .any(|needle| upper.contains(needle))
+}
+
 pub(crate) fn reject_secret_text(text: &str) -> Option<&'static str> {
     use std::sync::OnceLock;
     static RULES: OnceLock<Vec<(&'static str, regex::Regex)>> = OnceLock::new();

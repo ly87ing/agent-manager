@@ -136,7 +136,10 @@ fn check_env_values(map: Option<&Value>, what: &str) -> Result<()> {
         let text = value
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("{what}.{key} 必须是字符串"))?;
-        if !is_reference(text) && crate::native::reject_secret_text(text).is_some() {
+        if !is_reference(text)
+            && (crate::native::credential_like_name(key)
+                || crate::native::reject_secret_text(text).is_some())
+        {
             bail!("已保存项的 {what}.{key} 含疑似凭据明文，拒绝保存");
         }
     }

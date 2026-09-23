@@ -84,7 +84,12 @@ pub fn from_claude_entry(
 
     let mut env_updates = Vec::new();
     for (key, value) in &view.env {
-        if env_ref(&format, value).is_some() || crate::native::reject_secret_text(value).is_none() {
+        // 名字像凭据（GITHUB_TOKEN 等）或取值像凭据都转存；只有两者都不像的普通字面量
+        // （如 NODE_ENV=production）才原样进快照
+        if env_ref(&format, value).is_some()
+            || (!crate::native::credential_like_name(key)
+                && crate::native::reject_secret_text(value).is_none())
+        {
             continue;
         }
         let candidates = vec![

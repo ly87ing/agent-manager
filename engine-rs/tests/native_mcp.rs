@@ -1031,12 +1031,14 @@ fn claude_disable_without_secrets_file_refuses_only_when_secrets_must_move() {
         &ctx,
         json!({"mcpServers": {
             "secret-env": {"command": "a", "env": {"AM_T6_KEY": "ghp_abcdefghijklmnopqrstuvwxyz0123"}},
+            // 取值没有可识别的厂商前缀，但变量名像凭据：同样必须转存，不能以明文进快照
+            "named-token": {"command": "c", "env": {"GITHUB_TOKEN": "custom-format-9f3a7c21", "NODE_ENV": "production"}},
             "plain-header": {"type": "http", "url": "https://x.example.com/mcp", "headers": {"X-Team": "platform"}},
             "plain-env": {"command": "b", "env": {"NODE_ENV": "production", "LOG_LEVEL": "debug"}}
         }}),
     );
     let before = read(&claude_path(&ctx));
-    for name in ["secret-env", "plain-header"] {
+    for name in ["secret-env", "named-token", "plain-header"] {
         let err = apply_err(
             &ctx,
             &[
@@ -1052,6 +1054,7 @@ fn claude_disable_without_secrets_file_refuses_only_when_secrets_must_move() {
         );
         assert!(err.contains("外部密钥文件"), "{err}");
         assert!(!err.contains("ghp_"), "错误不得回显取值: {err}");
+        assert!(!err.contains("custom-format"), "错误不得回显取值: {err}");
         assert_eq!(read(&claude_path(&ctx)), before, "被拒绝时文件不变");
     }
     assert!(!ctx.data_dir.exists(), "被拒绝时不建库");

@@ -138,10 +138,7 @@ fn is_placeholder(value: &str) -> bool {
 
 /// 变量名看起来是否承载凭据：这类值一律只接受 `${VAR}` 引用。
 fn looks_like_credential(name: &str) -> bool {
-    let upper = name.to_ascii_uppercase();
-    ["TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH"]
-        .iter()
-        .any(|needle| upper.contains(needle))
+    crate::native::credential_like_name(name)
 }
 
 fn valid_env_name(name: &str) -> bool {

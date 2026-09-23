@@ -617,7 +617,9 @@ pub fn neutral_from_spec(spec: &Spec) -> Result<Neutral> {
 
 /// 新写的 env 字面量不得像凭据：取值只写进客户端文件，但界面与命令行参数都会经手它。
 pub fn reject_secret_literal(key: &str, value: &str) -> Result<()> {
-    if crate::native::reject_secret_text(value).is_some() {
+    if crate::native::credential_like_name(key)
+        || crate::native::reject_secret_text(value).is_some()
+    {
         bail!("环境变量 {key} 的取值疑似凭据，请改用 ${{VAR}} 引用（取值放进「设置 → 密钥」选择的外部文件）");
     }
     Ok(())
