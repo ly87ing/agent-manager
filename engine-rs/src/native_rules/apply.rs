@@ -1,22 +1,26 @@
 //! rules 域写入：把新内容写进一个规则目标的实际文件。
 //!
-//! 新内容来自直接编辑（--value）、已保存模板、内置推荐或另一目标的实际正文。
-//! 写入前重读实际内容并与调用方传入的 base（status 输出）比对，不一致即拒绝
-//!（「已在外部修改」），文件与库都不变。用模板/推荐/复制覆盖之前先回填：目标现有
-//! 内容非空、且对不上任何已保存模板或内置推荐时，另存为备份模板。锁前预检零写；
-//! 锁内 Immediate 事务重检、原子 CAS 写入、单条审计；失败时回滚文件、事务整体回滚。
-//! 错误与审计只含 id/摘要等元数据，不含规则正文。
+//! 新内容来自直接编辑（--value）、已保存模板、来源规则（技能来源里的 rules/*.md）或另一
+//! 目标的实际正文。写入前重读实际内容并与调用方传入的 base（status 输出）比对，不一致即
+//! 拒绝（「已在外部修改」），文件与库都不变。用模板/来源规则/复制覆盖之前先回填：目标现有
+//! 内容非空、且对不上任何已保存模板、来源规则或上次从来源写入的那一版时，另存为备份模板。
+//! 应用来源规则时记下写入的是哪条规则、摘要多少（据此提示「来源有新版本」）；用别的内容
+//! 写入则清掉这条记录。锁前预检零写；锁内 Immediate 事务重检、原子 CAS 写入、单条审计；
+//! 失败时回滚文件、事务整体回滚。错误与审计只含 id/摘要等元数据，不含规则正文。
+
+use std::collections::BTreeMap;
 
 use anyhow::{anyhow, bail, Result};
 use rusqlite::TransactionBehavior;
 use serde_json::{json, Value};
 
 use super::args::{self, ApplyArgs, Source};
-use super::model::{self, Target, RECOMMENDED_BODY};
+use super::model::{self, Target};
+use super::sources::{self, Applied, SourceRule};
 use super::status::{self, Probe};
 use super::templates::{self, Template};
 use crate::native::{Context, Request};
-use crate::native_mcp::model::sha256_hex_bytes;
+use crate::native_mcp::model::{sha256_hex, sha256_hex_bytes};
 use crate::native_mcp::rollback::{atomic_write_bytes_checked, RollbackGuard};
 use crate::store;
 
@@ -53,7 +57,13 @@ fn writable_content(target: &Target) -> Result<(Option<Vec<u8>>, Option<String>,
 
 /// 基于一次读取的 policy/模板与实际文件，确定写入内容与是否需要备份。
 /// 锁前预检与锁内执行都调用它，锁内结果才是最终依据。
-fn prepare(targets: &[Target], list: &[Template], parsed: &ApplyArgs) -> Result<Prepared> {
+fn prepare(
+    targets: &[Target],
+    list: &[Template],
+    rules: &[SourceRule],
+    applied: &BTreeMap<String, Applied>,
+    parsed: &ApplyArgs,
+) -> Result<Prepared> {
     let target = find(targets, &parsed.target)?.clone();
     let (old_bytes, old_text, base) = writable_content(&target)?;
     if base != parsed.base {
@@ -74,7 +84,13 @@ fn prepare(targets: &[Target], list: &[Template], parsed: &ApplyArgs) -> Result<
             .find(|t| &t.id == id)
             .map(|t| t.body.clone())
             .ok_or_else(|| anyhow!("模板不存在或已被删除，请刷新后重试"))?,
-        Source::Recommended => RECOMMENDED_BODY.to_string(),
+        Source::Rule(id) => rules
+            .iter()
+            .find(|r| &r.id == id)
+            .map(|r| r.body.clone())
+            .ok_or_else(|| {
+                anyhow!("来源规则不存在：来源可能已停用、删除或还没取回，请刷新后重试")
+            })?,
         Source::From(from) => {
             if from == &target.id {
                 bail!("来源与目标是同一个规则文件");
@@ -90,7 +106,12 @@ fn prepare(targets: &[Target], list: &[Template], parsed: &ApplyArgs) -> Result<
     let backup = match (&parsed.source, old_text) {
         (Source::Value(_), _) | (_, None) => None,
         (_, Some(text)) => {
-            let known = text == RECOMMENDED_BODY || list.iter().any(|t| t.body == text);
+            let followed = applied
+                .get(&target.id)
+                .is_some_and(|a| a.digest == sha256_hex(&text));
+            let known = followed
+                || list.iter().any(|t| t.body == text)
+                || rules.iter().any(|r| r.body == text);
             if text.trim().is_empty() || known || text == new_body {
                 None
             } else {
@@ -118,15 +139,22 @@ pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
     let parsed = args::parse_apply_args(req)?;
     let (policy, list) = status::load_snapshot(ctx)?;
     let targets = model::resolve_targets(ctx, &policy);
-    prepare(&targets, &list, &parsed)?;
+    let rules = sources::load(ctx)?;
+    let applied = sources::load_applied(ctx)?;
+    prepare(&targets, &list, &rules, &applied, &parsed)?;
     Ok(())
 }
 
-fn source_meta(source: &Source) -> Value {
+fn source_meta(source: &Source, rule: Option<&SourceRule>) -> Value {
     match source {
         Source::Value(_) => json!({ "kind": "edit" }),
         Source::Template(id) => json!({ "kind": "template", "template": id }),
-        Source::Recommended => json!({ "kind": "recommended" }),
+        Source::Rule(id) => json!({
+            "kind": "source-rule",
+            "rule": id,
+            "revision": rule.map(|r| r.revision.clone()),
+            "commit": rule.and_then(sources::source_commit),
+        }),
         Source::From(from) => json!({ "kind": "copy", "from": from }),
     }
 }
@@ -150,10 +178,37 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     let policy = store::policy_from_connection(&tx)?;
     let list = templates::load_from(&tx)?;
     let targets = model::resolve_targets(ctx, &policy);
-    let prep = prepare(&targets, &list, &parsed)?;
+    let rules = sources::load(ctx)?;
+    let applied = sources::load_applied_from(&tx)?;
+    let prep = prepare(&targets, &list, &rules, &applied, &parsed)?;
     let target_id = prep.target.id.clone();
+    let source_rule = match &parsed.source {
+        Source::Rule(id) => rules.iter().find(|r| &r.id == id),
+        _ => None,
+    };
 
     if prep.old_bytes.as_deref() == Some(prep.new_body.as_bytes()) {
+        // 文件已经是这份内容：应用来源规则时只记下「跟随这条来源规则」，文件不动
+        if let Some(rule) = source_rule {
+            if applied
+                .get(&target_id)
+                .map(|a| (a.rule.as_str(), a.digest.as_str()))
+                != Some((rule.id.as_str(), rule.revision.as_str()))
+            {
+                sources::record_applied(&tx, &target_id, &rule.id, &rule.revision)?;
+                store::record_operation(
+                    &tx,
+                    Some(&req.run_id),
+                    "rules:apply",
+                    Some(&target_id),
+                    Some(&json!({
+                        "action": "follow",
+                        "source": source_meta(&parsed.source, Some(rule)),
+                        "base": parsed.base,
+                    })),
+                )?;
+            }
+        }
         tx.commit()?;
         return Ok(json!({ "domain": "rules", "steps": [], "skipped": [target_id] }));
     }
@@ -190,6 +245,10 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     steps.push(json!({ "name": format!("rules:write {target_id}"), "ok": true, "exit_code": 0 }));
 
     let finish = (|| -> Result<()> {
+        match source_rule {
+            Some(rule) => sources::record_applied(&tx, &target_id, &rule.id, &rule.revision)?,
+            None => sources::forget_applied(&tx, &target_id)?,
+        }
         store::record_operation(
             &tx,
             Some(&req.run_id),
@@ -197,7 +256,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
             Some(&target_id),
             Some(&json!({
                 "action": "write",
-                "source": source_meta(&parsed.source),
+                "source": source_meta(&parsed.source, source_rule),
                 "base": parsed.base,
                 "after_digest": sha256_hex_bytes(new_bytes),
                 "backup_template": backup_id,
@@ -273,6 +332,10 @@ mod tests {
         let path = ctx.home_dir.join(".claude/CLAUDE.md");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "用户原有规则\n").unwrap();
+        // 用另一目标的正文覆盖：同样先把现有内容另存为备份模板，再写文件、记审计
+        let codex = ctx.home_dir.join(".codex/AGENTS.md");
+        std::fs::create_dir_all(codex.parent().unwrap()).unwrap();
+        std::fs::write(&codex, "Codex 规则\n").unwrap();
         {
             let conn = store::open_write(&ctx).unwrap();
             conn.execute_batch(
@@ -289,7 +352,8 @@ mod tests {
                 "rules:claude_global",
                 "--base",
                 &base,
-                "--recommended",
+                "--from",
+                "rules:codex_global",
             ]),
         )
         .unwrap_err();

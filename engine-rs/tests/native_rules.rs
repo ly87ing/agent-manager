@@ -1,8 +1,9 @@
 //! rules 域：实际文件为准 + 模板 + 回填。
 //!
 //! 生效规则就是各助手的规则文件；status 输出实际全文与 base，apply 以 base 做 CAS
-//! 写回实际文件；模板只写库；用模板/推荐/复制覆盖前先把对不上任何模板的现有内容
-//! 另存为备份模板；旧 rule_sources 在写路径迁移成模板。
+//! 写回实际文件；模板只写库；来源规则来自技能来源里的 rules/*.md，不编进程序；用模板/
+//! 来源规则/复制覆盖前先把对不上任何已知内容的现有内容另存为备份模板；旧 rule_sources
+//! 在写路径迁移成模板。
 
 use agent_manager_engine::{execute, store, Context, Envelope, Request};
 use fs2::FileExt;
@@ -11,7 +12,8 @@ use sha2::{Digest, Sha256};
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 
-const RECOMMENDED: &str = include_str!("../../agent-rule/rules/src/shared/core.md");
+/// 旧版本内置的共享规则（冻结副本，只用于旧库迁移判定）。
+const LEGACY_SHARED: &str = include_str!("../assets/legacy-rules/shared-core.md");
 
 fn temp_ctx(tag: &str) -> (PathBuf, Context) {
     let base = std::env::temp_dir().join(format!(
@@ -130,8 +132,9 @@ fn status_on_fresh_context_creates_nothing() {
         .map(|e| e["id"].as_str().unwrap())
         .collect();
     assert_eq!(ids, ["rules:codex_global", "rules:claude_global"]);
-    assert_eq!(env.data["recommended"]["name"], "内置推荐规则");
-    assert_eq!(env.data["recommended"]["body"], RECOMMENDED);
+    // 规则不编进程序：没有来源时只给推荐来源
+    assert_eq!(env.data["source_rules"], serde_json::json!([]));
+    assert_eq!(env.data["suggested_sources"][0]["name"], "agent-skills");
     assert!(!ctx.data_dir.exists(), "status 不得创建 data_dir");
     assert!(!ctx.home_dir.exists(), "status 不得创建 home_dir");
     let _ = std::fs::remove_dir_all(&base);
@@ -228,7 +231,8 @@ fn missing_file_uses_missing_base_and_rejects_file_created_meanwhile() {
             "rules:codex_global",
             "--base",
             "missing",
-            "--recommended",
+            "--value",
+            "新内容\n",
         ],
     );
     assert!(!env.ok);
@@ -373,55 +377,109 @@ fn applying_template_backs_up_unmatched_content_only() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// 内置推荐：应用前后回读；推荐正文从不入库。
+/// 登记一个本地目录技能来源，目录下放 rules/*.md。返回来源根目录。
+fn add_local_source(ctx: &Context, name: &str, rules: &[(&str, &str)]) -> PathBuf {
+    let dir = ctx
+        .data_dir
+        .parent()
+        .unwrap()
+        .join(format!("source-{name}"));
+    for (file, body) in rules {
+        write_file(&dir.join("rules").join(file), body);
+    }
+    let env = run(
+        ctx,
+        "policy:set",
+        &[
+            "--layer",
+            "local",
+            "--key",
+            &format!("skills.repositories.{name}"),
+            "--value",
+            &serde_json::json!({ "source_path": dir.to_string_lossy() }).to_string(),
+        ],
+    );
+    assert!(env.ok, "{:?}", env.errors);
+    dir
+}
+
+fn apply_source_rule(ctx: &Context, target: &str, rule: &str) -> Envelope {
+    let base = base_of(ctx, target);
+    run(
+        ctx,
+        "rules:apply",
+        &["--only", target, "--base", &base, "--source-rule", rule],
+    )
+}
+
+/// 来源规则：应用后跟随；来源出新版而文件没改过时提示可更新，更新不把旧版当备份；
+/// 文件被外部改过就不提示可更新；用别的内容写入后不再跟随。来源正文从不入库。
 #[test]
-fn recommended_is_applied_but_never_stored() {
-    let (root, ctx) = temp_ctx("recommended");
+fn source_rule_is_applied_followed_and_never_stored() {
+    let (root, ctx) = temp_ctx("source-rule");
+    let v1 = "- 规则一\n";
+    let v2 = "- 规则一\n- 规则二\n";
+    let dir = add_local_source(
+        &ctx,
+        "mine",
+        &[
+            ("core.md", v1),
+            ("README.md", "维护说明\n"),
+            ("notes.txt", "x\n"),
+        ],
+    );
     write_file(&codex_md(&ctx), "旧的 Codex 规则\n");
-    let before = status(&ctx);
-    let codex = element(&before, "rules:codex_global");
-    assert_eq!(codex["observed"]["matches_recommended"], false);
-    let base = codex["observed"]["base"].as_str().unwrap().to_string();
 
-    let env = run(
-        &ctx,
-        "rules:apply",
-        &[
-            "--only",
-            "rules:codex_global",
-            "--base",
-            &base,
-            "--recommended",
-        ],
-    );
+    let st = status(&ctx);
+    let ids: Vec<&str> = st["source_rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["mine/core"], "README 与非 .md 文件不是规则");
+    assert_eq!(st["source_rules"][0]["local"], true);
+    assert_eq!(st["suggested_sources"], serde_json::json!([]));
+
+    // 应用：旧内容先备份，写入来源正文，开始跟随
+    let env = apply_source_rule(&ctx, "rules:codex_global", "mine/core");
     assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(std::fs::read_to_string(codex_md(&ctx)).unwrap(), v1);
+    let st = status(&ctx);
+    let codex = &element(&st, "rules:codex_global")["observed"];
+    assert_eq!(codex["matched_source_rule"]["id"], "mine/core");
+    assert_eq!(codex["source_follow"]["rule"], "mine/core");
+    assert_eq!(codex["source_follow"]["file_unchanged"], true);
+    assert_eq!(codex["source_follow"]["update_available"], false);
+    assert_eq!(templates(&ctx).len(), 1);
+    assert_eq!(templates(&ctx)[0]["body"], "旧的 Codex 规则\n");
+
+    // 来源出新版：文件还是上次写入的那版 → 可更新；更新不把旧版另存备份
+    write_file(&dir.join("rules/core.md"), v2);
+    let st = status(&ctx);
+    let codex = &element(&st, "rules:codex_global")["observed"];
+    assert_eq!(codex["source_follow"]["update_available"], true);
+    assert_eq!(codex["matched_source_rule"], Value::Null);
+    let env = apply_source_rule(&ctx, "rules:codex_global", "mine/core");
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(std::fs::read_to_string(codex_md(&ctx)).unwrap(), v2);
+    assert_eq!(templates(&ctx).len(), 1, "上次从来源写入的那版不算未知内容");
+    let st = status(&ctx);
     assert_eq!(
-        std::fs::read_to_string(codex_md(&ctx)).unwrap(),
-        RECOMMENDED
+        element(&st, "rules:codex_global")["observed"]["source_follow"]["update_available"],
+        false
     );
-    let after = status(&ctx);
-    let codex = element(&after, "rules:codex_global");
-    assert_eq!(codex["observed"]["content"], RECOMMENDED);
-    assert_eq!(codex["observed"]["matches_recommended"], true);
 
-    // 库里只有旧内容的备份，没有任何一行是推荐正文
-    let list = templates(&ctx);
-    assert_eq!(list.len(), 1);
-    assert_eq!(list[0]["body"], "旧的 Codex 规则\n");
-    let conn = store::open_readonly(&ctx).unwrap().unwrap();
-    let stored_recommended: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM rule_templates WHERE body = ?1",
-            [RECOMMENDED],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(stored_recommended, 0, "内置推荐不得入库");
-    drop(conn);
+    // 外部改过文件，来源又出新版：只报「改过」，不提示可更新
+    write_file(&codex_md(&ctx), "我改过的\n");
+    write_file(&dir.join("rules/core.md"), "- 第三版\n");
+    let st = status(&ctx);
+    let follow = &element(&st, "rules:codex_global")["observed"]["source_follow"];
+    assert_eq!(follow["file_unchanged"], false);
+    assert_eq!(follow["update_available"], false);
+    assert_ne!(follow["current_revision"], follow["applied_revision"]);
 
-    // 目标已是推荐内容时再用模板覆盖：推荐内容不当备份存进库
-    let tpl = save_template(&ctx, "另一个", "另一个\n");
-    let base = base_of(&ctx, "rules:codex_global");
+    // 用别的内容写入：不再跟随
     let env = run(
         &ctx,
         "rules:apply",
@@ -429,38 +487,125 @@ fn recommended_is_applied_but_never_stored() {
             "--only",
             "rules:codex_global",
             "--base",
-            &base,
-            "--template",
-            tpl["id"].as_str().unwrap(),
+            &base_of(&ctx, "rules:codex_global"),
+            "--value",
+            "直接编辑\n",
         ],
     );
     assert!(env.ok, "{:?}", env.errors);
-    let conn = store::open_readonly(&ctx).unwrap().unwrap();
-    let stored_recommended: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM rule_templates WHERE body = ?1",
-            [RECOMMENDED],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(stored_recommended, 0, "推荐内容被覆盖时也不入库");
+    let st = status(&ctx);
+    assert_eq!(
+        element(&st, "rules:codex_global")["observed"]["source_follow"],
+        Value::Null
+    );
+
+    // 来源正文从不入库
+    for body in [v1, v2] {
+        let conn = store::open_readonly(&ctx).unwrap().unwrap();
+        let stored: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM rule_templates WHERE body = ?1",
+                [body],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, 0, "来源规则不得入库");
+    }
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// 文件已经与来源规则一致：status 只报一致、零写；应用时文件不动，只记下开始跟随。
 #[test]
-fn recommended_not_applied_leaves_no_db_at_all() {
-    let (root, ctx) = temp_ctx("recommended-untouched");
-    write_file(&claude_md(&ctx), RECOMMENDED);
+fn identical_file_starts_following_without_being_rewritten() {
+    let (root, ctx) = temp_ctx("source-follow");
+    let body = "- 规则一\n";
+    let dir = add_local_source(&ctx, "mine", &[("core.md", body)]);
+    write_file(&claude_md(&ctx), body);
+    let db_before = std::fs::read(store::db_path(&ctx)).unwrap();
+    let st = status(&ctx);
+    let claude = &element(&st, "rules:claude_global")["observed"];
+    assert_eq!(claude["matched_source_rule"]["id"], "mine/core");
+    assert_eq!(claude["source_follow"], Value::Null);
+    assert_eq!(
+        std::fs::read(store::db_path(&ctx)).unwrap(),
+        db_before,
+        "status 零写"
+    );
+
+    let mtime = std::fs::metadata(claude_md(&ctx))
+        .unwrap()
+        .modified()
+        .unwrap();
+    let env = apply_source_rule(&ctx, "rules:claude_global", "mine/core");
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(
+        env.data["skipped"],
+        serde_json::json!(["rules:claude_global"])
+    );
+    assert_eq!(
+        std::fs::metadata(claude_md(&ctx))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        mtime
+    );
     let st = status(&ctx);
     assert_eq!(
-        element(&st, "rules:claude_global")["observed"]["matches_recommended"],
-        true,
-        "旧版本按默认写入的文件被识别为内置推荐"
+        element(&st, "rules:claude_global")["observed"]["source_follow"]["rule"],
+        "mine/core"
     );
-    assert!(
-        !store::db_path(&ctx).exists(),
-        "未应用时库都不存在，更没有推荐行"
+    // 来源出新版即可更新
+    write_file(&dir.join("rules/core.md"), "- 新版\n");
+    let st = status(&ctx);
+    assert_eq!(
+        element(&st, "rules:claude_global")["observed"]["source_follow"]["update_available"],
+        true
     );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// git 来源读的是数据目录里的仓库镜像；来源停用后它的规则不再出现，推荐来源认出已登记的同名集合。
+#[test]
+fn git_source_rules_come_from_the_mirror_and_follow_the_collection_switch() {
+    let (root, ctx) = temp_ctx("source-git");
+    write_file(
+        &ctx.data_dir.join("repositories/agent-skills/rules/core.md"),
+        "- 来自镜像\n",
+    );
+    let env = run(
+        &ctx,
+        "policy:set",
+        &[
+            "--layer",
+            "local",
+            "--key",
+            "skills.repositories.agent-skills",
+            "--value",
+            r#"{"url": "https://github.com/ly87ing/agent-skills.git"}"#,
+        ],
+    );
+    assert!(env.ok, "{:?}", env.errors);
+    let st = status(&ctx);
+    assert_eq!(st["source_rules"][0]["id"], "agent-skills/core");
+    assert_eq!(st["source_rules"][0]["local"], false);
+    assert_eq!(st["source_rules"][0]["body"], "- 来自镜像\n");
+
+    let env = run(
+        &ctx,
+        "policy:set",
+        &[
+            "--layer",
+            "local",
+            "--key",
+            "skills.agent-skills.enabled",
+            "--value",
+            "false",
+        ],
+    );
+    assert!(env.ok, "{:?}", env.errors);
+    let st = status(&ctx);
+    assert_eq!(st["source_rules"], serde_json::json!([]));
+    assert_eq!(st["suggested_sources"][0]["collection"], "agent-skills");
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -538,6 +683,7 @@ fn backup_refuses_content_that_looks_like_a_secret() {
     let (root, ctx) = temp_ctx("secret-backup");
     let secret_line = format!("token sk-{}\n", "a".repeat(24));
     write_file(&claude_md(&ctx), &secret_line);
+    write_file(&codex_md(&ctx), "Codex 规则\n");
     let base = base_of(&ctx, "rules:claude_global");
     let env = run(
         &ctx,
@@ -547,7 +693,8 @@ fn backup_refuses_content_that_looks_like_a_secret() {
             "rules:claude_global",
             "--base",
             &base,
-            "--recommended",
+            "--from",
+            "rules:codex_global",
         ],
     );
     assert!(!env.ok, "疑似凭据不能进库，也就不能不备份就覆盖");
@@ -786,7 +933,10 @@ fn template_summary(list: &[Value]) -> Vec<(String, String, String)> {
 #[test]
 fn legacy_sources_never_changed_yield_no_templates() {
     let (root, ctx) = temp_ctx("legacy-none");
-    legacy_db(&ctx, &[("rules.shared", RECOMMENDED), ("rules.codex", "")]);
+    legacy_db(
+        &ctx,
+        &[("rules.shared", LEGACY_SHARED), ("rules.codex", "")],
+    );
     assert!(templates(&ctx).is_empty(), "读路径不推导");
     save_template(&ctx, "触发写路径", "x\n");
     let list = templates(&ctx);
@@ -872,10 +1022,10 @@ fn legacy_changed_adapter_becomes_one_template() {
     let list = templates(&ctx);
     assert_eq!(list.len(), 1);
     assert_eq!(list[0]["id"], "legacy-claude");
-    assert_eq!(list[0]["body"], format!("{RECOMMENDED}只给 Claude\n"));
+    assert_eq!(list[0]["body"], format!("{LEGACY_SHARED}只给 Claude\n"));
 
-    // 应用它：目标原内容若对不上模板会先备份
-    write_file(&claude_md(&ctx), RECOMMENDED);
+    // 应用它：目标原内容若对不上任何已知内容会先备份
+    write_file(&claude_md(&ctx), LEGACY_SHARED);
     let base = base_of(&ctx, "rules:claude_global");
     let env = run(
         &ctx,
@@ -892,9 +1042,11 @@ fn legacy_changed_adapter_becomes_one_template() {
     assert!(env.ok, "{:?}", env.errors);
     assert_eq!(
         std::fs::read_to_string(claude_md(&ctx)).unwrap(),
-        format!("{RECOMMENDED}只给 Claude\n")
+        format!("{LEGACY_SHARED}只给 Claude\n")
     );
-    assert_eq!(templates(&ctx).len(), 1, "原内容是内置推荐，不另存备份");
+    // 旧版本的内置共享规则已不随程序提供（改由来源提供），没登记来源时它就是未知内容：
+    // 覆盖前另存备份，不丢
+    assert_eq!(templates(&ctx).len(), 2, "原内容另存为备份模板");
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -944,13 +1096,14 @@ fn retired_and_invalid_args_are_rejected_without_writes() {
         vec!["--dry-run"],
         vec!["--only", "rules:claude_global", "--allow-takeover"],
         vec!["--only", "rules:claude_global", "--base", "missing"],
-        vec!["--only", marker, "--base", "missing", "--recommended"],
+        vec!["--only", marker, "--base", "missing", "--value", "x"],
         vec![
             "--only",
             "rules:claude_global",
             "--base",
             "missing",
-            "--recommended",
+            "--value",
+            "x",
             marker,
         ],
         vec![
@@ -958,7 +1111,24 @@ fn retired_and_invalid_args_are_rejected_without_writes() {
             "rules:profile:nobody",
             "--base",
             "missing",
+            "--value",
+            "x",
+        ],
+        // 内置推荐已退役；来源规则不存在时拒绝且零写
+        vec![
+            "--only",
+            "rules:claude_global",
+            "--base",
+            "missing",
             "--recommended",
+        ],
+        vec![
+            "--only",
+            "rules:claude_global",
+            "--base",
+            "missing",
+            "--source-rule",
+            "agent-skills/core",
         ],
         vec![
             "--only",
@@ -1010,7 +1180,8 @@ fn apply_rejects_contended_lock_without_touching_target() {
                     "rules:codex_global",
                     "--base",
                     "missing",
-                    "--recommended",
+                    "--value",
+                    "x\n",
                 ],
             ),
         )
@@ -1050,11 +1221,22 @@ fn status_matches_contract_schema() {
         assert_eq!(keys(item), keys(&template_def["properties"]));
         assert_eq!(keys(item), strings(&template_def["required"]));
     }
-    let recommended_def = &schema["properties"]["recommended"];
-    assert_eq!(
-        keys(&data["recommended"]),
-        keys(&recommended_def["properties"])
-    );
+    // 没有来源规则时的推荐来源
+    let suggested_def = &schema["$defs"]["rule_suggested_source"];
+    let suggested = data["suggested_sources"].as_array().unwrap();
+    assert!(!suggested.is_empty());
+    for item in suggested {
+        assert_eq!(keys(item), keys(&suggested_def["properties"]));
+    }
+    // 登记来源后的来源规则
+    add_local_source(&ctx, "mine", &[("core.md", "- 规则\n")]);
+    let with_source = status(&ctx);
+    assert!(keys(&with_source).is_subset(&keys(&schema["properties"])));
+    let rule_def = &schema["$defs"]["rule_source"];
+    for item in with_source["source_rules"].as_array().unwrap() {
+        assert_eq!(keys(item), keys(&rule_def["properties"]));
+        assert_eq!(keys(item), strings(&rule_def["required"]));
+    }
     let states = strings(&schema["$defs"]["element"]["properties"]["state"]["enum"]);
     for element in data["elements"].as_array().unwrap() {
         assert!(states.contains(element["state"].as_str().unwrap()));

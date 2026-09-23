@@ -25,7 +25,8 @@ function routes() {
   };
 }
 
-const RECOMMENDED_BODY = "- Use Chinese (Simplified).\n- Prefer the simplest local change.\n";
+const SOURCE_BODY = "- Use Chinese (Simplified).\n- Prefer the simplest local change.\n";
+const SOURCE_RULE = { id: "agent-skills/core", collection: "agent-skills", name: "core", body: SOURCE_BODY, revision: "rev-core", local: false };
 const CLAUDE_BODY = "# Claude 规则\n- 回答用简体中文。\n";
 const CLAUDE_BASE = "b".repeat(64);
 const CODEX_BASE = "c".repeat(64);
@@ -44,14 +45,14 @@ function ruleElement(
     domain: "rules",
     spec: { name, group: id.startsWith("rules:profile:") ? "profile-rules" : "global-rules", kind: "claude", profile_id: null, target },
     policy: { enabled: state !== "disabled", agent_id: "claude-code" },
-    observed: { target: `/tmp/home/${target.slice(2)}`, target_exists: null, content: null, base: null, matched_template: null, matches_recommended: false, blocked_reason: null, ...observed },
+    observed: { target: `/tmp/home/${target.slice(2)}`, target_exists: null, content: null, base: null, matched_template: null, matched_source_rule: null, source_follow: null, blocked_reason: null, ...observed },
     state,
     freshness: makeFreshness(),
     actions: writable ? WRITE : [],
   });
 }
 
-/** 规则新契约的一组典型目标：有文件、与推荐一致、缺文件的实例、阻塞与停用的实例。 */
+/** 规则新契约的一组典型目标：与来源规则一致、有文件、缺文件的实例、阻塞与停用的实例。 */
 function rulesRoutes(): Record<string, Envelope> {
   return {
     "rules:status": makeEnvelope(
@@ -59,7 +60,7 @@ function rulesRoutes(): Record<string, Envelope> {
         domain: "rules",
         elements: [
           ruleElement("rules:codex_global", "Codex 全局规则", "~/.codex/AGENTS.md",
-            { target_exists: true, content: RECOMMENDED_BODY, base: CODEX_BASE, matches_recommended: true }, "managed-ok", true),
+            { target_exists: true, content: SOURCE_BODY, base: CODEX_BASE, matched_source_rule: { id: SOURCE_RULE.id, name: "core", collection: "agent-skills" } }, "managed-ok", true),
           ruleElement("rules:claude_global", "Claude Code 全局规则", "~/.claude/CLAUDE.md",
             { target_exists: true, content: CLAUDE_BODY, base: CLAUDE_BASE, matched_template: { id: "tpl-team", name: "团队规则" } }, "managed-ok", true),
           ruleElement("rules:profile:cc-work", "Claude · work 实例规则", "~/.claude-work/CLAUDE.md",
@@ -73,7 +74,8 @@ function rulesRoutes(): Record<string, Envelope> {
           { id: "tpl-team", name: "团队规则", body: CLAUDE_BODY, revision: "rev-team", origin: "user", created_at: "2026-09-10T00:00:00Z", updated_at: "2026-09-10T00:00:00Z" },
           { id: "tpl-backup", name: "备份 · Codex 全局规则 · 2026-09-21 10:00:00", body: "老备份\n", revision: "rev-backup", origin: "backup", created_at: "2026-09-21T02:00:00Z", updated_at: "2026-09-21T02:00:00Z" },
         ],
-        recommended: { id: "builtin", name: "内置推荐规则", body: RECOMMENDED_BODY, revision: "rev-builtin" },
+        source_rules: [SOURCE_RULE],
+        suggested_sources: [],
       },
       { command: "rules.status" },
     ),
@@ -226,7 +228,7 @@ describe("RulesPage：实际文件为准", () => {
     expect(within(claude).getByRole("button", { name: "编辑 Claude Code 全局规则" })).toBeInTheDocument();
 
     const codex = screen.getByTestId("rules-target-rules:codex_global");
-    expect(within(codex).getByText("与内置推荐一致")).toBeInTheDocument();
+    expect(within(codex).getByText("与来源规则「core」（agent-skills）一致")).toBeInTheDocument();
 
     const missing = screen.getByTestId("rules-target-rules:profile:cc-work");
     expect(within(missing).getByText("还没有文件")).toBeInTheDocument();
@@ -306,12 +308,12 @@ describe("RulesPage：实际文件为准", () => {
     await userEvent.click(await screen.findByRole("button", { name: "应用模板到 Codex 全局规则" }));
     const dialog = screen.getByRole("dialog", { name: "应用模板到 Codex 全局规则" });
     const sourceSelect = within(dialog).getByRole("combobox", { name: "内容来源" });
-    // 来源列出全部已保存模板，最后是内置推荐
+    // 来源先列来源规则，再列全部已保存模板
     expect(within(sourceSelect).getAllByRole("option").map((option) => option.getAttribute("value"))).toEqual([
+      "rule:agent-skills/core",
       "template:legacy-claude",
       "template:tpl-team",
       "template:tpl-backup",
-      "recommended",
     ]);
     await userEvent.selectOptions(sourceSelect, "template:tpl-team");
     const diff = within(dialog).getByTestId("rules-diff");
@@ -328,36 +330,38 @@ describe("RulesPage：实际文件为准", () => {
     await waitFor(() => expect(infoSpy).toHaveBeenCalledWith("原内容已另存为备份模板"));
   });
 
-  it("内容与所选来源相同时不提供写入；切换到内置推荐后发出 --recommended", async () => {
+  it("内容与所选来源相同时不提供写入；切换到来源规则后发出 --source-rule", async () => {
     const { calls } = renderWithEngine(<RulesPage />, rulesRoutes());
 
-    // Codex 现在就是内置推荐：选推荐时没有差异，写入按钮不可用
+    // Codex 现在就是来源规则：选它时没有差异，写入按钮不可用
     await userEvent.click(await screen.findByRole("button", { name: "应用模板到 Codex 全局规则" }));
     let dialog = screen.getByRole("dialog", { name: "应用模板到 Codex 全局规则" });
-    await userEvent.selectOptions(within(dialog).getByRole("combobox", { name: "内容来源" }), "recommended");
+    await userEvent.selectOptions(within(dialog).getByRole("combobox", { name: "内容来源" }), "rule:agent-skills/core");
     expect(within(dialog).getByTestId("rules-diff-same")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "写入" })).toBeDisabled();
     await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
 
     await userEvent.click(screen.getByRole("button", { name: "应用模板到 Claude Code 全局规则" }));
     dialog = screen.getByRole("dialog", { name: "应用模板到 Claude Code 全局规则" });
-    await userEvent.selectOptions(within(dialog).getByRole("combobox", { name: "内容来源" }), "recommended");
+    await userEvent.selectOptions(within(dialog).getByRole("combobox", { name: "内容来源" }), "rule:agent-skills/core");
     expect(within(dialog).getByTestId("rules-diff")).toBeInTheDocument();
     await userEvent.click(within(dialog).getByRole("button", { name: "写入" }));
 
     await waitFor(() => expect(calls.some((call) => call.command === "rules:apply")).toBe(true));
     expect(calls.find((call) => call.command === "rules:apply")!.args).toEqual([
-      "--only", "rules:claude_global", "--base", CLAUDE_BASE, "--recommended",
+      "--only", "rules:claude_global", "--base", CLAUDE_BASE, "--source-rule", "agent-skills/core",
     ]);
   });
 
-  it("内置推荐区：可预览正文，「应用到…」选目标后发出 --recommended", async () => {
+  it("来源规则区：可预览正文，「应用到…」选目标后发出 --source-rule", async () => {
     const { calls } = renderWithEngine(<RulesPage />, rulesRoutes());
 
-    await userEvent.click(await screen.findByRole("button", { name: "预览正文" }));
-    expect(screen.getByTestId("rules-recommended-body").textContent).toBe(RECOMMENDED_BODY);
-    await userEvent.click(screen.getByRole("button", { name: "应用内置推荐规则到…" }));
-    const dialog = screen.getByRole("dialog", { name: "应用内置推荐规则" });
+    const section = await screen.findByRole("region", { name: "来源规则" });
+    expect(section).toHaveTextContent("agent-skills · git 镜像");
+    await userEvent.click(within(section).getByRole("button", { name: "预览" }));
+    expect(screen.getByTestId("rules-source-body-agent-skills/core").textContent).toBe(SOURCE_BODY);
+    await userEvent.click(screen.getByRole("button", { name: "应用来源规则「core」（agent-skills）到…" }));
+    const dialog = screen.getByRole("dialog", { name: "应用来源规则「core」（agent-skills）" });
     // 只列可写目标：阻塞与停用的实例不在其中
     const targetSelect = within(dialog).getByRole("combobox", { name: "写入目标" });
     expect(within(targetSelect).getAllByRole("option").map((option) => option.getAttribute("value"))).toEqual([
@@ -370,7 +374,96 @@ describe("RulesPage：实际文件为准", () => {
 
     await waitFor(() => expect(calls.some((call) => call.command === "rules:apply")).toBe(true));
     expect(calls.find((call) => call.command === "rules:apply")!.args).toEqual([
-      "--only", "rules:profile:cc-work", "--base", "missing", "--recommended",
+      "--only", "rules:profile:cc-work", "--base", "missing", "--source-rule", "agent-skills/core",
+    ]);
+  });
+
+  it("文件与来源规则一致但还没跟随：点「跟随来源更新」只记下跟随，不弹差异", async () => {
+    const infoSpy = vi.spyOn(toast, "info");
+    const { calls } = renderWithEngine(<RulesPage />, rulesRoutes());
+
+    const card = await screen.findByTestId("rules-target-rules:codex_global");
+    expect(card).toHaveTextContent("与来源规则「core」（agent-skills）一致");
+    await userEvent.click(within(card).getByTestId("rules-follow-rules:codex_global"));
+    await waitFor(() => expect(calls.some((call) => call.command === "rules:apply")).toBe(true));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(calls.find((call) => call.command === "rules:apply")!.args).toEqual([
+      "--only", "rules:codex_global", "--base", CODEX_BASE, "--source-rule", "agent-skills/core",
+    ]);
+    await waitFor(() => expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("已跟随来源规则「core」")));
+  });
+
+  it("来源出了新版且文件没改过：标出「来源有新版本」，一键打开差异后更新", async () => {
+    const routes = rulesRoutes();
+    const status = routes["rules:status"].data as { elements: Array<{ id: string; observed: Record<string, unknown> }> };
+    const codex = status.elements.find((element) => element.id === "rules:codex_global")!;
+    codex.observed.content = "- 旧版\n";
+    codex.observed.matched_source_rule = null;
+    codex.observed.source_follow = { rule: "agent-skills/core", applied_revision: "rev-old", current_revision: "rev-core", file_unchanged: true, update_available: true };
+    const { calls } = renderWithEngine(<RulesPage />, routes);
+
+    expect(await screen.findByTestId("rules-update-available-rules:codex_global")).toHaveTextContent("来源有新版本");
+    expect(screen.queryByTestId("rules-follow-rules:codex_global")).toBeNull();
+    await userEvent.click(screen.getByTestId("rules-update-from-source-rules:codex_global"));
+    const dialog = screen.getByRole("dialog", { name: "用来源规则「core」（agent-skills）更新 Codex 全局规则" });
+    expect(within(dialog).getByTestId("rules-diff")).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: "写入" }));
+    await waitFor(() => expect(calls.some((call) => call.command === "rules:apply")).toBe(true));
+    expect(calls.find((call) => call.command === "rules:apply")!.args).toEqual([
+      "--only", "rules:codex_global", "--base", CODEX_BASE, "--source-rule", "agent-skills/core",
+    ]);
+  });
+
+  it("文件在跟随后被改过：只说明情况，不标「可更新」，仍可看差异再决定", async () => {
+    const routes = rulesRoutes();
+    const status = routes["rules:status"].data as { elements: Array<{ id: string; observed: Record<string, unknown> }> };
+    const codex = status.elements.find((element) => element.id === "rules:codex_global")!;
+    codex.observed.content = "- 我改过\n";
+    codex.observed.matched_source_rule = null;
+    codex.observed.source_follow = { rule: "agent-skills/core", applied_revision: "rev-old", current_revision: "rev-core", file_unchanged: false, update_available: false };
+    renderWithEngine(<RulesPage />, routes);
+
+    expect(await screen.findByTestId("rules-changed-since-follow-rules:codex_global")).toHaveTextContent("被改过");
+    expect(screen.queryByTestId("rules-update-available-rules:codex_global")).toBeNull();
+    expect(screen.getByTestId("rules-update-from-source-rules:codex_global")).toHaveTextContent("查看新版本");
+  });
+
+  it("git 来源可在规则页直接「更新来源」，发出与技能页相同的更新动作", async () => {
+    const { calls } = renderWithEngine(<RulesPage />, {
+      ...rulesRoutes(),
+      "skills:apply": makeEnvelope({ domain: "skills", steps: [], skipped: [] }, { command: "skills.apply" }),
+    });
+    await userEvent.click(await screen.findByTestId("rules-fetch-source-agent-skills"));
+    await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));
+    expect(calls.find((call) => call.command === "skills:apply")!.args).toEqual([
+      "--only", "skill:agent-skills", "--action", "update",
+    ]);
+  });
+
+  it("还没有来源规则：已登记的推荐来源给「取回」，没登记的引导去技能页添加", async () => {
+    const routes = rulesRoutes();
+    const data = routes["rules:status"].data as Record<string, unknown>;
+    data.source_rules = [];
+    data.suggested_sources = [
+      { name: "agent-skills", description: "作者维护的技能与常驻规则", url: "https://github.com/ly87ing/agent-skills.git", collection: null },
+    ];
+    const onOpenSkills = vi.fn();
+    const first = renderWithEngine(<RulesPage onOpenSkills={onOpenSkills} />, routes);
+    const empty = await screen.findByTestId("rules-no-source");
+    expect(empty).toHaveTextContent("规则内容不随程序发布");
+    await userEvent.click(within(empty).getByRole("button", { name: "技能页" }));
+    expect(onOpenSkills).toHaveBeenCalled();
+    first.unmount();
+
+    (data.suggested_sources as Array<Record<string, unknown>>)[0].collection = "agent-skills";
+    const { calls } = renderWithEngine(<RulesPage />, {
+      ...routes,
+      "skills:apply": makeEnvelope({ domain: "skills", steps: [], skipped: [] }, { command: "skills.apply" }),
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "取回 agent-skills" }));
+    await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));
+    expect(calls.find((call) => call.command === "skills:apply")!.args).toEqual([
+      "--only", "skill:agent-skills", "--action", "update",
     ]);
   });
 

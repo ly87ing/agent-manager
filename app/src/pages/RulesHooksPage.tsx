@@ -10,7 +10,7 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
-export default function RulesHooksPage() {
+export default function RulesHooksPage({ onNavigate }: { onNavigate?: (page: string) => void } = {}) {
   const [activeTab, setActiveTab] = useState<TabId>("rules");
   const tabRefs = useRef<Record<TabId, HTMLButtonElement | null>>({
     rules: null,
@@ -79,7 +79,7 @@ export default function RulesHooksPage() {
         tabIndex={0}
         className="focus:outline-none"
       >
-        {activeTab === "rules" ? <RulesPage /> : <HooksPage />}
+        {activeTab === "rules" ? <RulesPage onOpenSkills={onNavigate ? () => onNavigate("skills") : undefined} /> : <HooksPage />}
       </div>
     </div>
   );

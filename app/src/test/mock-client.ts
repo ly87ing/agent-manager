@@ -399,6 +399,8 @@ function demoEnvelopes(): Record<string, Envelope> {
   );
 
   const demoRulesBody = "- Use Chinese (Simplified) for interactions and generated content.\n- Prefer the simplest local change.\n";
+  // 来源（agent-skills 的 rules/core.md）已有新版：Codex 规则文件还停在上次写入的旧版
+  const demoRulesBodyV2 = `${demoRulesBody}- After every change, run the smallest relevant verification that could fail.\n`;
   const rulesStatus = makeEnvelope(
     {
       domain: "rules",
@@ -414,7 +416,14 @@ function demoEnvelopes(): Record<string, Envelope> {
             content: demoRulesBody,
             base: "aaaa3c8ae2687d47a8e7543d3c8c43ef8dd9f744e3a3e2ce9aa9ad7a90de12a2",
             matched_template: null,
-            matches_recommended: true,
+            matched_source_rule: null,
+            source_follow: {
+              rule: "agent-skills/core",
+              applied_revision: "demo-rule-v1",
+              current_revision: "demo-rule-v2",
+              file_unchanged: true,
+              update_available: true,
+            },
             blocked_reason: null,
           },
           state: "managed-ok",
@@ -431,7 +440,8 @@ function demoEnvelopes(): Record<string, Envelope> {
             content: "# 我的 Claude 规则\n- 回答用简体中文。\n",
             base: "bbbb4b5c130887752148845080715867e6c3e6f40e69189067dd7d92db8b40c3",
             matched_template: { id: "tpl-demo-team", name: "团队规则" },
-            matches_recommended: false,
+            matched_source_rule: null,
+            source_follow: null,
             blocked_reason: null,
           },
           state: "managed-ok",
@@ -448,7 +458,8 @@ function demoEnvelopes(): Record<string, Envelope> {
             content: null,
             base: "missing",
             matched_template: null,
-            matches_recommended: false,
+            matched_source_rule: null,
+            source_follow: null,
             blocked_reason: null,
           },
           state: "missing",
@@ -466,7 +477,10 @@ function demoEnvelopes(): Record<string, Envelope> {
           updated_at: "2026-09-20T08:00:00Z",
         },
       ],
-      recommended: { id: "builtin", name: "内置推荐规则", body: demoRulesBody, revision: "demo-recommended-revision" },
+      source_rules: [
+        { id: "agent-skills/core", collection: "agent-skills", name: "core", body: demoRulesBodyV2, revision: "demo-rule-v2", local: false },
+      ],
+      suggested_sources: [],
     },
     { command: "rules.status" },
   );
@@ -850,7 +864,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
   type MockRulesData = {
     elements: Array<{ id: string; state: string; spec: { name: string }; observed: Record<string, unknown> }>;
     templates: MockRuleTemplate[];
-    recommended: { name: string; body: string };
+    source_rules: Array<{ id: string; name: string; collection: string; body: string; revision: string }>;
   };
   const rulesData = () => routes["rules:status"].data as MockRulesData;
   const argOf = (args: string[], flag: string): string | undefined => {
@@ -865,7 +879,8 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       const content = element.observed.content;
       const match = typeof content === "string" ? data.templates.find((item) => item.body === content) : undefined;
       element.observed.matched_template = match ? { id: match.id, name: match.name } : null;
-      element.observed.matches_recommended = content === data.recommended.body;
+      const rule = typeof content === "string" ? data.source_rules.find((item) => item.body === content) : undefined;
+      element.observed.matched_source_rule = rule ? { id: rule.id, name: rule.name, collection: rule.collection } : null;
     }
   };
   let ruleRevision = 0;
@@ -878,7 +893,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
     }
     let next: string | undefined;
     if (args.includes("--value")) next = argOf(args, "--value");
-    else if (args.includes("--recommended")) next = data.recommended.body;
+    else if (args.includes("--source-rule")) next = data.source_rules.find((item) => item.id === argOf(args, "--source-rule"))?.body;
     else if (args.includes("--template")) next = data.templates.find((item) => item.id === argOf(args, "--template"))?.body;
     else if (args.includes("--from")) {
       const from = data.elements.find((item) => item.id === argOf(args, "--from"))?.observed.content;
@@ -887,12 +902,20 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
     if (next === undefined) return ruleError("rules.apply", "找不到要写入的内容");
     const steps: { name: string; ok: boolean; exit_code: number }[] = [];
     const current = target.observed.content;
+    const follow = target.observed.source_follow as { file_unchanged?: boolean } | null;
     if (!args.includes("--value") && typeof current === "string" && current.trim() !== ""
-      && !data.templates.some((item) => item.body === current) && current !== data.recommended.body) {
+      && !data.templates.some((item) => item.body === current)
+      && !data.source_rules.some((item) => item.body === current)
+      && !follow?.file_unchanged) {
       const now = new Date().toISOString();
       data.templates.push({ id: `tpl-backup-${data.templates.length + 1}`, name: `备份 · ${target.spec.name} · ${now.slice(0, 19).replace("T", " ")}`, body: current, revision: `demo-template-revision-${++ruleRevision}`, origin: "backup", created_at: now, updated_at: now });
       steps.push({ name: `rules:backup ${target.id}`, ok: true, exit_code: 0 });
     }
+    const rule = data.source_rules.find((item) => item.id === argOf(args, "--source-rule"));
+    // 从来源规则写入：记下跟随；用别的内容写入：不再跟随
+    target.observed.source_follow = rule
+      ? { rule: rule.id, applied_revision: rule.revision, current_revision: rule.revision, file_unchanged: true, update_available: false }
+      : null;
     target.observed.content = next;
     target.observed.target_exists = true;
     target.observed.base = `demo-base-${++ruleRevision}`;

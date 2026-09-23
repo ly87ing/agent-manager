@@ -1,8 +1,9 @@
-//! rules 域模型：规则目标与内置推荐正文。
+//! rules 域模型：规则目标。
 //!
 //! 生效规则以各助手的规则文件为准：主 Claude（`~/.claude/CLAUDE.md`）、主 Codex
 //! （`~/.codex/AGENTS.md`），以及每个实例配置目录下对应的规则文件。本工具不再拼接
-//! 共享与助手专用来源，只保存用户模板（见 templates.rs）；内置推荐只读、不入库。
+//! 共享与助手专用来源，只保存用户模板（见 templates.rs）；推荐的规则内容来自技能来源
+//! （见 sources.rs），不编进程序。
 
 use std::path::PathBuf;
 
@@ -10,12 +11,6 @@ use serde_json::Value;
 
 use crate::native::Context;
 use crate::native_profiles::model as profiles;
-
-/// 内置推荐规则：编译内置的 `agent-rule/rules/src/shared/core.md`，只读、从不写库。
-pub(crate) const RECOMMENDED_ID: &str = "builtin";
-pub(crate) const RECOMMENDED_NAME: &str = "内置推荐规则";
-pub(crate) const RECOMMENDED_BODY: &str =
-    include_str!("../../../agent-rule/rules/src/shared/core.md");
 
 pub(crate) const TARGET_CODEX: &str = "rules:codex_global";
 pub(crate) const TARGET_CLAUDE: &str = "rules:claude_global";

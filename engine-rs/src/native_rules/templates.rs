@@ -11,7 +11,6 @@ use anyhow::{bail, Result};
 use rusqlite::Connection;
 use serde_json::{json, Value};
 
-use super::model::RECOMMENDED_BODY;
 use crate::native_mcp::model::sha256_hex;
 
 const TABLE_DDL: &str = "CREATE TABLE IF NOT EXISTS rule_templates (
@@ -270,11 +269,12 @@ pub(crate) const LEGACY_KEY_CLAUDE: &str = "rules.claude";
 pub(crate) const LEGACY_KEY_CODEX: &str = "rules.codex";
 pub(crate) const LEGACY_KEYS: [&str; 3] = [LEGACY_KEY_SHARED, LEGACY_KEY_CLAUDE, LEGACY_KEY_CODEX];
 
-/// 旧版本编译内置的来源默认值：只用于判定旧库行「是否改过」。
-const LEGACY_DEFAULT_CLAUDE: &str =
-    include_str!("../../../agent-rule/rules/src/agents/claude/adapter.md");
-const LEGACY_DEFAULT_CODEX: &str =
-    include_str!("../../../agent-rule/rules/src/agents/codex/adapter.md");
+/// 旧版本编译内置的来源默认值：只用于判定旧库行「是否改过」。共享规则冻结在规则迁出本仓
+/// （2026-09-23）时的内容；两个助手专用来源当时是空的。
+pub(crate) const LEGACY_DEFAULT_SHARED: &str =
+    include_str!("../../assets/legacy-rules/shared-core.md");
+const LEGACY_DEFAULT_CLAUDE: &str = "";
+const LEGACY_DEFAULT_CODEX: &str = "";
 
 /// 迁移完成标记（schema_meta）：迁移后用户删掉旧来源模板也不会再冒出来。
 const LEGACY_MARKER_KEY: &str = "rules_legacy_migrated_at";
@@ -284,7 +284,7 @@ pub(crate) const LEGACY_ID_CODEX: &str = "legacy-codex";
 
 fn legacy_default(key: &str) -> &'static str {
     match key {
-        LEGACY_KEY_SHARED => RECOMMENDED_BODY,
+        LEGACY_KEY_SHARED => LEGACY_DEFAULT_SHARED,
         LEGACY_KEY_CLAUDE => LEGACY_DEFAULT_CLAUDE,
         _ => LEGACY_DEFAULT_CODEX,
     }
@@ -445,15 +445,15 @@ mod tests {
     }
 
     #[test]
-    fn recommended_equals_what_old_default_apply_wrote() {
-        // 旧版本按默认来源写入的文件，在新版本里应被识别为「与内置推荐一致」
+    fn old_default_apply_wrote_exactly_the_shared_core() {
+        // 旧版本按默认来源写入的文件就是共享规则本身（助手专用来源为空），与迁出时的 core.md 一致
         assert_eq!(
-            legacy_render(RECOMMENDED_BODY, LEGACY_DEFAULT_CLAUDE),
-            RECOMMENDED_BODY
+            legacy_render(LEGACY_DEFAULT_SHARED, LEGACY_DEFAULT_CLAUDE),
+            LEGACY_DEFAULT_SHARED
         );
         assert_eq!(
-            legacy_render(RECOMMENDED_BODY, LEGACY_DEFAULT_CODEX),
-            RECOMMENDED_BODY
+            legacy_render(LEGACY_DEFAULT_SHARED, LEGACY_DEFAULT_CODEX),
+            LEGACY_DEFAULT_SHARED
         );
     }
 
@@ -461,7 +461,7 @@ mod tests {
     fn never_changed_sources_yield_no_templates() {
         assert!(legacy_templates(&stored(&[]), "t").is_empty());
         let same = stored(&[
-            (LEGACY_KEY_SHARED, RECOMMENDED_BODY),
+            (LEGACY_KEY_SHARED, LEGACY_DEFAULT_SHARED),
             (LEGACY_KEY_CLAUDE, LEGACY_DEFAULT_CLAUDE),
         ]);
         assert!(
@@ -491,7 +491,7 @@ mod tests {
         let out = legacy_templates(&stored(&[(LEGACY_KEY_CLAUDE, "只给 Claude\n")]), "t");
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].id, LEGACY_ID_CLAUDE);
-        assert_eq!(out[0].body, format!("{RECOMMENDED_BODY}只给 Claude\n"));
+        assert_eq!(out[0].body, format!("{LEGACY_DEFAULT_SHARED}只给 Claude\n"));
     }
 
     #[test]

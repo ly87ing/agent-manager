@@ -345,11 +345,24 @@ export interface RulesObserved {
   /** 写入基准：文件字节摘要；文件不存在为 "missing"；已停用或不能读写时为 null。 */
   base: string | null;
   matched_template: { id: string; name: string } | null;
-  matches_recommended: boolean;
+  /** 文件内容与某条来源规则逐字一致。 */
+  matched_source_rule: { id: string; name: string; collection: string } | null;
+  /** 最后一次从来源规则写入的记录；没有则为 null。 */
+  source_follow: RuleSourceFollow | null;
   blocked_reason: string | null;
 }
 
-export type { RuleTemplate, RuleRecommended } from "./contract";
+/** 跟随来源：上次写入的是哪条来源规则、文件是否还是那一版、来源是否有新版本。 */
+export interface RuleSourceFollow {
+  rule: string;
+  applied_revision: string;
+  /** 来源规则当前版本；来源已停用、删除或没取回时为 null。 */
+  current_revision: string | null;
+  file_unchanged: boolean;
+  update_available: boolean;
+}
+
+export type { RuleTemplate, RuleSourceRule, RuleSuggestedSource } from "./contract";
 
 // ---------- hooks ----------
 

@@ -104,8 +104,10 @@ export interface StatusData {
   installed?: SkillInstalledEntry[];
   /** 仅 rules 域：本机库里已保存的规则模板（含旧版来源即时推导出的模板）。 */
   templates?: RuleTemplate[];
-  /** 仅 rules 域：编译内置的推荐规则。只读，不入库，不计入待同步。 */
-  recommended?: RuleRecommended;
+  /** 仅 rules 域：技能来源里的规则模板（集合根下 rules/*.md，README 除外）。只读，不入库。 */
+  source_rules?: RuleSourceRule[];
+  /** 仅 rules 域：没有来源规则时的推荐来源；collection 为已登记的同名/同地址集合。 */
+  suggested_sources?: RuleSuggestedSource[];
   /** 仅 aliases 域：两个 rc 文件受管区块里的实际别名，按名合并。这就是当前配置。 */
   aliases?: AliasCurrent[];
   /** 仅 aliases 域：内置推荐别名（任一文件里已有同名的不推荐）。只读，不计入待同步。 */
@@ -156,11 +158,24 @@ export interface RuleTemplate {
   updated_at: string;
 }
 
-export interface RuleRecommended {
+/** 一条来源规则：id 为 `<集合>/<名字>`，传给 rules:apply --source-rule。 */
+export interface RuleSourceRule {
   id: string;
+  collection: string;
   name: string;
   body: string;
+  /** 正文 sha256：来源规则的版本。 */
   revision: string;
+  /** 本地目录来源（改了即时生效）；否则是 git 镜像，靠「更新资源库」取新版本。 */
+  local: boolean;
+}
+
+export interface RuleSuggestedSource {
+  name: string;
+  description: string;
+  url: string;
+  /** 已登记的同名/同地址集合；null 表示还没添加。 */
+  collection: string | null;
 }
 
 // ---------- skills:status recommendations / installed ----------

@@ -148,7 +148,7 @@ export default function App() {
             />
           )}
           {activePage === "mcp" && <McpPage />}
-          {activePage === "rules-hooks" && <RulesHooksPage />}
+          {activePage === "rules-hooks" && <RulesHooksPage onNavigate={handleNavigate} />}
           {activePage === "takeover" && <TakeoverPage />}
           {activePage === "usage" && <UsagePage />}
           {activePage === "runs" && <RunsPage />}

@@ -309,7 +309,8 @@ fn backup_with_malformed_secrets_is_rejected_whole() {
 #[test]
 fn legacy_rule_sources_in_backup_become_templates() {
     let (root, ctx) = temp_ctx("legacy-rules");
-    let core = include_str!("../../agent-rule/rules/src/shared/core.md");
+    // 旧版本内置的共享规则（冻结副本）：与它相同的旧来源算「没改过」
+    let core = include_str!("../assets/legacy-rules/shared-core.md");
     let payload = serde_json::json!({
         "format": "agent-manager/config-backup/v1",
         "policy": {},

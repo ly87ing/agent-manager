@@ -33,17 +33,15 @@
       "type": "array",
       "items": {"$ref": "#/$defs/rule_template"}
     },
-    "recommended": {
-      "description": "Rules domain only: the compiled-in recommended rules. Read-only, never stored, never counted as pending; applied only on explicit request.",
-      "type": "object",
-      "required": ["id", "name", "body", "revision"],
-      "additionalProperties": false,
-      "properties": {
-        "id": {"type": "string"},
-        "name": {"type": "string"},
-        "body": {"type": "string"},
-        "revision": {"description": "sha256 of body.", "type": "string"}
-      }
+    "source_rules": {
+      "description": "Rules domain only: rule templates offered by skill sources — every rules/*.md except README.md under an enabled collection's root (the git mirror in the data directory, or a local source directory). Read-only, never stored; applying one (rules:apply --source-rule) writes a target's real rules file. The program itself ships no rule content.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/rule_source"}
+    },
+    "suggested_sources": {
+      "description": "Rules domain only: when no source provides rules, the recommended skill sources that do (the skills recommendation catalog). 'collection' names an already registered collection with the same name or URL (fetch it with skills:apply --action update), or null when it still has to be added.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/rule_suggested_source"}
     },
     "aliases": {
       "description": "Aliases domain only: the aliases actually present in the managed blocks of ~/.zshrc and ~/.zprofile, merged by name. This is the current configuration; nothing here comes from the database. Read-only, zero-write.",
@@ -97,6 +95,32 @@
         "value": {"description": "Saved value with the saved timezone/lang resolved.", "type": "string"},
         "line": {"type": "string"},
         "actual": {"description": "The line currently defining this name in a managed block, or null.", "type": ["string", "null"]}
+      }
+    },
+    "rule_source": {
+      "description": "One rule template from a skill source.",
+      "type": "object",
+      "required": ["id", "collection", "name", "body", "revision", "local"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"description": "'<collection>/<file name without .md>'; pass to rules:apply --source-rule.", "type": "string"},
+        "collection": {"type": "string"},
+        "name": {"type": "string"},
+        "body": {"description": "Full rules text.", "type": "string"},
+        "revision": {"description": "sha256 of body: the source rule's version.", "type": "string"},
+        "local": {"description": "true for a local source directory (edits show immediately); false for a git mirror refreshed by skills:apply --action update.", "type": "boolean"}
+      }
+    },
+    "rule_suggested_source": {
+      "description": "A recommended skill source that carries rules.",
+      "type": "object",
+      "required": ["name", "description", "url", "collection"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string"},
+        "description": {"type": "string"},
+        "url": {"type": "string"},
+        "collection": {"type": ["string", "null"]}
       }
     },
     "rule_template": {

@@ -14,8 +14,8 @@ pub(crate) enum Source {
     Value(String),
     /// 已保存模板 id。
     Template(String),
-    /// 内置推荐规则。
-    Recommended,
+    /// 来源规则 id（`<集合>/<名字>`，见 sources.rs）。
+    Rule(String),
     /// 另一个规则目标的实际正文。
     From(String),
 }
@@ -78,10 +78,6 @@ fn get<'a>(parsed: &[(&str, Option<&'a str>)], flag: &str) -> Option<&'a str> {
         .and_then(|(_, v)| *v)
 }
 
-fn has(parsed: &[(&str, Option<&str>)], flag: &str) -> bool {
-    parsed.iter().any(|(f, _)| *f == flag)
-}
-
 fn valid_base(value: &str) -> bool {
     value == "missing" || crate::native_mcp::model::is_sha256_hex(value)
 }
@@ -93,13 +89,20 @@ pub(crate) fn parse_status_args(req: &Request) -> Result<()> {
 }
 
 /// rules:apply —— 恰好一个 --only 与 --base，外加恰好一种来源：
-/// --value <全文> | --template <id> | --recommended | --from <目标>。
+/// --value <全文> | --template <id> | --source-rule <集合>/<名字> | --from <目标>。
 pub(crate) fn parse_apply_args(req: &Request) -> Result<ApplyArgs> {
     let parsed = collect(
         req,
-        &["--only", "--base", "--value", "--template", "--from"],
+        &[
+            "--only",
+            "--base",
+            "--value",
+            "--template",
+            "--source-rule",
+            "--from",
+        ],
         &["--value"],
-        &["--recommended", "--offline"],
+        &["--offline"],
     )?;
     let Some(target) = get(&parsed, "--only") else {
         bail!("参数错误: 需要 --only 指定一个规则目标");
@@ -123,8 +126,11 @@ pub(crate) fn parse_apply_args(req: &Request) -> Result<ApplyArgs> {
         }
         sources.push(Source::Template(id.to_string()));
     }
-    if has(&parsed, "--recommended") {
-        sources.push(Source::Recommended);
+    if let Some(id) = get(&parsed, "--source-rule") {
+        if !valid_source_rule_id(id) {
+            bail!("参数错误: --source-rule 须为 <集合>/<名字>");
+        }
+        sources.push(Source::Rule(id.to_string()));
     }
     if let Some(from) = get(&parsed, "--from") {
         if !model::valid_target_id(from) {
@@ -133,13 +139,25 @@ pub(crate) fn parse_apply_args(req: &Request) -> Result<ApplyArgs> {
         sources.push(Source::From(from.to_string()));
     }
     if sources.len() != 1 {
-        bail!("参数错误: --value / --template / --recommended / --from 必须恰好给一个");
+        bail!("参数错误: --value / --template / --source-rule / --from 必须恰好给一个");
     }
     Ok(ApplyArgs {
         target: target.to_string(),
         base: base.to_string(),
         source: sources.remove(0),
     })
+}
+
+/// 来源规则 id：`<集合>/<名字>`，两段都只含字母、数字与 `-_.`，且不是 `.`/`..`。
+fn valid_source_rule_id(id: &str) -> bool {
+    let part = |p: &str| {
+        !p.is_empty()
+            && p != "."
+            && p != ".."
+            && p.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    };
+    matches!(id.split_once('/'), Some((coll, name)) if part(coll) && part(name))
 }
 
 /// rules:save-template —— 新建：--name --value；修改：再加 --template 与 --revision。
@@ -198,6 +216,7 @@ mod tests {
     }
 
     const BASE: &str = "missing";
+    const SR: &str = "agent-skills/core";
 
     #[test]
     fn status_accepts_nothing_or_single_offline() {
@@ -246,10 +265,11 @@ mod tests {
             "rules:codex_global",
             "--base",
             BASE,
-            "--recommended",
+            "--source-rule",
+            SR,
         ]))
         .unwrap();
-        assert_eq!(args.source, Source::Recommended);
+        assert_eq!(args.source, Source::Rule(SR.into()));
 
         let args = parse_apply_args(&req(&[
             "--only",
@@ -268,16 +288,17 @@ mod tests {
         let only = ["--only", "rules:codex_global"];
         for bad in [
             vec![],
-            vec!["--recommended"],
-            vec![only[0], only[1], "--recommended"],
-            vec![only[0], only[1], "--base", "nothex", "--recommended"],
+            vec!["--source-rule", SR],
+            vec![only[0], only[1], "--source-rule", SR],
+            vec![only[0], only[1], "--base", "nothex", "--source-rule", SR],
             vec![only[0], only[1], "--base", BASE],
             vec![
                 only[0],
                 only[1],
                 "--base",
                 BASE,
-                "--recommended",
+                "--source-rule",
+                SR,
                 "--template",
                 "tpl-1",
             ],
@@ -291,9 +312,10 @@ mod tests {
                 only[1],
                 "--base",
                 BASE,
-                "--recommended",
+                "--source-rule",
+                SR,
             ],
-            vec!["--only", "rules:codex", "--base", BASE, "--recommended"],
+            vec!["--only", "rules:codex", "--base", BASE, "--source-rule", SR],
             vec![only[0], only[1], "--base", BASE, "--template", "Bad"],
             vec![only[0], only[1], "--base", BASE, "--from", "codex"],
             vec![
@@ -301,7 +323,8 @@ mod tests {
                 only[1],
                 "--base",
                 BASE,
-                "--recommended",
+                "--source-rule",
+                SR,
                 "--allow-takeover",
             ],
             vec![
@@ -309,7 +332,8 @@ mod tests {
                 only[1],
                 "--base",
                 BASE,
-                "--recommended",
+                "--source-rule",
+                SR,
                 "--dry-run",
             ],
             vec![
@@ -317,11 +341,25 @@ mod tests {
                 only[1],
                 "--base",
                 BASE,
-                "--recommended",
+                "--source-rule",
+                SR,
                 "positional",
             ],
-            vec![only[0], only[1], "--base", "--recommended"],
+            vec![only[0], only[1], "--base", "--source-rule", SR],
             vec![only[0], only[1], "--base", BASE, "--value"],
+            // 内置推荐已退役：规则来自技能来源
+            vec![only[0], only[1], "--base", BASE, "--recommended"],
+            vec![only[0], only[1], "--base", BASE, "--source-rule", "core"],
+            vec![only[0], only[1], "--base", BASE, "--source-rule", "a/b/c"],
+            vec![only[0], only[1], "--base", BASE, "--source-rule", "../core"],
+            vec![
+                only[0],
+                only[1],
+                "--base",
+                BASE,
+                "--source-rule",
+                "agent skills/core",
+            ],
         ] {
             assert!(parse_apply_args(&req(&bad)).is_err(), "{bad:?}");
         }
@@ -331,7 +369,7 @@ mod tests {
     fn apply_errors_never_echo_values() {
         let marker = "RULE-ARG-MARKER-5c1e";
         for bad in [
-            vec!["--only", marker, "--base", BASE, "--recommended"],
+            vec!["--only", marker, "--base", BASE, "--source-rule", SR],
             vec!["--only", "rules:codex_global", "--base", BASE, marker],
             vec![
                 "--only",

@@ -1,19 +1,21 @@
-//! rules 域只读状态：逐目标输出实际规则文件的全文、base 摘要与匹配到的模板，
-//! 另附已保存模板与内置推荐。
+//! rules 域只读状态：逐目标输出实际规则文件的全文、base 摘要、匹配到的模板或来源规则、
+//! 是否跟随来源及来源有无新版本，另附已保存模板与来源规则（没有来源规则时附推荐来源）。
 //!
 //! 生效规则就是各助手的规则文件；status 只读零写：不创建 data/home 目录、DB、表或
 //! 文件。DB 存在时只打开一次 readonly 连接，在同一 snapshot 读 policy 与模板；
 //! 模板表损坏 fail-closed；目标路径安全问题降级为 unmanaged-detected + blocked_reason。
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use super::model::{self, Target, RECOMMENDED_BODY, RECOMMENDED_ID, RECOMMENDED_NAME};
+use super::model::{self, Target};
+use super::sources::{self, Applied, SourceRule};
 use super::templates::{self, Template};
 use crate::native::Context;
-use crate::native_mcp::model::{sha256_hex, sha256_hex_bytes};
+use crate::native_mcp::model::sha256_hex_bytes;
 use crate::native_mcp::targets::{check_symlink_metadata, validate_target_path};
 use crate::store;
 
@@ -126,7 +128,12 @@ pub(crate) fn load_snapshot(ctx: &Context) -> Result<(Value, Vec<Template>)> {
     }
 }
 
-fn element(target: &Target, templates: &[Template]) -> Value {
+fn element(
+    target: &Target,
+    templates: &[Template],
+    rules: &[SourceRule],
+    applied: &BTreeMap<String, Applied>,
+) -> Value {
     let probe = probe(target);
     let base = probe.base();
     let writable = probe.writable();
@@ -142,6 +149,12 @@ fn element(target: &Target, templates: &[Template]) -> Value {
         ),
     };
     let matched = content.and_then(|text| templates.iter().find(|t| t.body == text));
+    let matched_rule = content.and_then(|text| rules.iter().find(|r| r.body == text));
+    // 文件摘要：只对存在的文件有意义，用来判断是否还是上次从来源写入的那一版
+    let file_digest = matches!(probe, Probe::Present { .. })
+        .then(|| base.clone())
+        .flatten();
+    let follow = sources::follow_json(applied.get(&target.id), file_digest.as_deref(), rules);
     let actions = if writable {
         json!([{ "id": "write", "risk": "write-local", "needs_lock": true, "offline_ok": true }])
     } else {
@@ -164,7 +177,9 @@ fn element(target: &Target, templates: &[Template]) -> Value {
             "content": content,
             "base": base,
             "matched_template": matched.map(|t| json!({ "id": t.id, "name": t.name })),
-            "matches_recommended": content == Some(RECOMMENDED_BODY),
+            "matched_source_rule": matched_rule
+                .map(|r| json!({ "id": r.id, "name": r.name, "collection": r.collection })),
+            "source_follow": follow,
             "blocked_reason": blocked_reason,
         },
         "state": state,
@@ -180,26 +195,25 @@ fn element(target: &Target, templates: &[Template]) -> Value {
     })
 }
 
-pub(crate) fn recommended_json() -> Value {
-    json!({
-        "id": RECOMMENDED_ID,
-        "name": RECOMMENDED_NAME,
-        "body": RECOMMENDED_BODY,
-        "revision": sha256_hex(RECOMMENDED_BODY),
-    })
-}
-
 pub(crate) fn build_status(ctx: &Context) -> Result<Value> {
     let (policy, list) = load_snapshot(ctx)?;
+    let rules = sources::load(ctx)?;
+    let applied = sources::load_applied(ctx)?;
     let elements: Vec<Value> = model::resolve_targets(ctx, &policy)
         .iter()
-        .map(|target| element(target, &list))
+        .map(|target| element(target, &list, &rules, &applied))
         .collect();
+    let suggested = if rules.is_empty() {
+        sources::suggested_sources(ctx)?
+    } else {
+        json!([])
+    };
     Ok(json!({
         "domain": "rules",
         "elements": elements,
         "templates": list.iter().map(Template::to_json).collect::<Vec<_>>(),
-        "recommended": recommended_json(),
+        "source_rules": rules.iter().map(SourceRule::to_json).collect::<Vec<_>>(),
+        "suggested_sources": suggested,
     }))
 }
 
@@ -236,7 +250,7 @@ mod tests {
     }
 
     #[test]
-    fn no_db_no_dirs_returns_targets_and_recommended_without_creating_anything() {
+    fn no_db_no_dirs_returns_targets_and_suggested_source_without_creating_anything() {
         let root = temp_root("empty");
         let ctx = ctx_at(&root);
         let status = build_status(&ctx).unwrap();
@@ -251,32 +265,36 @@ mod tests {
             assert_eq!(el["actions"][0]["id"], "write");
         }
         assert_eq!(status["templates"], json!([]));
-        assert_eq!(status["recommended"]["body"], RECOMMENDED_BODY);
+        // 规则不编进程序：没有来源规则时只给推荐来源，它还没登记
+        assert_eq!(status["source_rules"], json!([]));
+        assert_eq!(status["suggested_sources"][0]["name"], "agent-skills");
+        assert_eq!(status["suggested_sources"][0]["collection"], Value::Null);
         assert!(!ctx.data_dir.exists());
         assert!(!ctx.home_dir.exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn present_file_reports_full_text_base_and_recommended_match() {
+    fn present_file_reports_full_text_and_base() {
         let root = temp_root("present");
         let ctx = ctx_at(&root);
+        let body = "- 用中文交流\n";
         std::fs::create_dir_all(ctx.home_dir.join(".claude")).unwrap();
-        std::fs::write(ctx.home_dir.join(".claude/CLAUDE.md"), RECOMMENDED_BODY).unwrap();
+        std::fs::write(ctx.home_dir.join(".claude/CLAUDE.md"), body).unwrap();
         std::fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
         std::fs::write(ctx.home_dir.join(".codex/AGENTS.md"), "我自己的规则\n").unwrap();
         let status = build_status(&ctx).unwrap();
         let claude = element_of(&status, "rules:claude_global");
         assert_eq!(claude["state"], "managed-ok");
-        assert_eq!(claude["observed"]["content"], RECOMMENDED_BODY);
-        assert_eq!(claude["observed"]["matches_recommended"], true);
+        assert_eq!(claude["observed"]["content"], body);
         assert_eq!(
             claude["observed"]["base"],
-            sha256_hex_bytes(RECOMMENDED_BODY.as_bytes())
+            sha256_hex_bytes(body.as_bytes())
         );
+        assert_eq!(claude["observed"]["matched_source_rule"], Value::Null);
+        assert_eq!(claude["observed"]["source_follow"], Value::Null);
         let codex = element_of(&status, "rules:codex_global");
         assert_eq!(codex["observed"]["content"], "我自己的规则\n");
-        assert_eq!(codex["observed"]["matches_recommended"], false);
         assert_eq!(codex["observed"]["matched_template"], Value::Null);
         let _ = std::fs::remove_dir_all(&root);
     }
