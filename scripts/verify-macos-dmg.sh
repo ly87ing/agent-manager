@@ -233,17 +233,23 @@ if grep -Fq "$HOME" "$STRINGS_FILE"; then
 fi
 log_info "路径脱敏检查通过: 二进制不包含本机构建 HOME 或源码绝对路径"
 
-# 构建身份核验（发布候选 fail-closed）：包内必须有且仅有 1 处与期望整行一致
-# 的 build-commit 标记（整行匹配，clean 期望不得命中 -dirty 标记，反之亦然）；
-# 缺失、不匹配或不唯一均拒绝。
+# 构建身份核验（发布候选 fail-closed）：包内必须有且仅有 1 处与期望一致的
+# build-commit 标记；clean 期望不得命中 -dirty 标记，反之亦然；缺失、不匹配或
+# 不唯一均拒绝。标记是不带分隔符的字符串常量，编译器可能把它与相邻常量排在一起，
+# strings 输出里同一行会连着别的文字，因此按标记格式精确提取取值再比对，不依赖整行。
 EXPECTED_MARKER="agent-manager-build-commit:${EXPECTED_COMMIT}"
-MARKER_COUNT="$(grep -Fxc "$EXPECTED_MARKER" "$STRINGS_FILE" || true)"
+MARKERS_FILE="${TEMP_DIR}/build_commit_markers.txt"
+grep -aoE 'agent-manager-build-commit:[0-9a-f]{40}(-dirty)?' "$STRINGS_FILE" > "$MARKERS_FILE" || true
+MARKER_COUNT="$(grep -Fxc "$EXPECTED_MARKER" "$MARKERS_FILE" || true)"
 if [[ "$MARKER_COUNT" == "0" ]]; then
-  FOUND_MARKER="$(grep -F "agent-manager-build-commit:" "$STRINGS_FILE" | head -n 1 || true)"
+  FOUND_MARKER="$(head -n 1 "$MARKERS_FILE" || true)"
   if [[ -n "$FOUND_MARKER" ]]; then
     fail "阶段失败 [build identity 核验]：包内构建身份与期望不匹配，期望 commit=${EXPECTED_COMMIT}，实际标记: ${FOUND_MARKER}"
   fi
   fail "阶段失败 [build identity 核验]：包内缺少构建身份标记（非发布候选构建或未注入构建元数据）"
+fi
+if [[ "$(wc -l < "$MARKERS_FILE" | tr -d ' ')" != "1" ]]; then
+  MARKER_COUNT="$(wc -l < "$MARKERS_FILE" | tr -d ' ')"
 fi
 if [[ "$MARKER_COUNT" != "1" ]]; then
   fail "阶段失败 [build identity 核验]：包内构建身份标记不唯一（${MARKER_COUNT} 处）"
@@ -253,13 +259,18 @@ log_info "build identity 核验通过: commit=${EXPECTED_COMMIT}"
 # 构建日期核验（与 commit 同级 fail-closed）：agent-manager-build-date: 整行
 # 精确匹配期望日期且恰好 1 处；缺失、不匹配、不唯一均拒绝。
 EXPECTED_DATE_MARKER="agent-manager-build-date:${EXPECTED_DATE}"
-DATE_MARKER_COUNT="$(grep -Fxc "$EXPECTED_DATE_MARKER" "$STRINGS_FILE" || true)"
+DATE_MARKERS_FILE="${TEMP_DIR}/build_date_markers.txt"
+grep -aoE 'agent-manager-build-date:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(Z|[+-][0-9]{2}:[0-9]{2})' "$STRINGS_FILE" > "$DATE_MARKERS_FILE" || true
+DATE_MARKER_COUNT="$(grep -Fxc "$EXPECTED_DATE_MARKER" "$DATE_MARKERS_FILE" || true)"
 if [[ "$DATE_MARKER_COUNT" == "0" ]]; then
-  FOUND_DATE_MARKER="$(grep -F "agent-manager-build-date:" "$STRINGS_FILE" | head -n 1 || true)"
+  FOUND_DATE_MARKER="$(head -n 1 "$DATE_MARKERS_FILE" || true)"
   if [[ -n "$FOUND_DATE_MARKER" ]]; then
     fail "阶段失败 [build identity 核验]：包内构建日期与期望不匹配，期望 date=${EXPECTED_DATE}，实际标记: ${FOUND_DATE_MARKER}"
   fi
   fail "阶段失败 [build identity 核验]：包内缺少构建日期标记（非发布候选构建或未注入构建元数据）"
+fi
+if [[ "$(wc -l < "$DATE_MARKERS_FILE" | tr -d ' ')" != "1" ]]; then
+  DATE_MARKER_COUNT="$(wc -l < "$DATE_MARKERS_FILE" | tr -d ' ')"
 fi
 if [[ "$DATE_MARKER_COUNT" != "1" ]]; then
   fail "阶段失败 [build identity 核验]：包内构建日期标记不唯一（${DATE_MARKER_COUNT} 处）"
