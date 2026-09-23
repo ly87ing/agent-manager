@@ -49,7 +49,10 @@ pub struct DomainMetadata {
 pub fn load_metadata(ctx: &Context) -> Result<DomainMetadata> {
     let policy = store::effective_policy(ctx)?;
     let agents = load_agent_targets(&policy, &ctx.home_dir);
-    let collections = load_collection_defs(&policy);
+    let mut collections = load_collection_defs(&policy);
+    // 旧库固化、从未生效的内置集合按推荐处理，不作为集合（写路径迁移会把它移出库）
+    let hidden = super::hidden_builtin_collections(ctx, &policy)?;
+    collections.retain(|name, _| !hidden.contains(name));
     Ok(DomainMetadata {
         collections,
         agents,
@@ -666,5 +669,9 @@ pub fn build_status(ctx: &Context) -> Result<Value> {
     Ok(json!({
         "domain": "skills",
         "elements": elements,
+        // 内置推荐来源：只读目录，不是元素，不计入待同步
+        "recommendations": super::recommend::recommendations_value(&meta.collections),
+        // 各助手技能目录的实际条目（当前视图），不产生待处理项
+        "installed": super::discover::installed(ctx, &meta, &bindings),
     }))
 }

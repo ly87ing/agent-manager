@@ -78,11 +78,6 @@ fn set_skills_repo(ctx: &Context, name: &str, def: Value) {
     policy_set(ctx, &format!("skills.repositories.{name}"), def);
 }
 
-/// 关闭内置 agent-skills 集合（有 url，默认在探测宇宙内），隔离测试计数。
-fn disable_builtin_skills_repo(ctx: &Context) {
-    policy_set(ctx, "skills.agent-skills", json!({"enabled": false}));
-}
-
 fn write_shim(dir: &Path, name: &str, body: &str) {
     let path = dir.join(name);
     std::fs::write(&path, body).unwrap();
@@ -193,8 +188,6 @@ fn install_shims(base: &Path) -> PathBuf {
 /// 完整探测宇宙（11 个元素）：agents 五态 + mcp npx/uvx + skills git 三态，
 /// 外加不参与探测的反例（disabled / 非 npm / 非 npx/uvx / 无 url / 已停用）。
 fn setup_full_universe(ctx: &Context) {
-    disable_builtin_skills_repo(ctx);
-
     set_npm_agent(ctx, "behind-agent", "am-test-behind-bin", "behind-pkg");
     set_npm_agent(ctx, "current-agent", "am-test-current-bin", "current-pkg");
     set_npm_agent(ctx, "ahead-agent", "am-test-ahead-bin", "ahead-pkg");
@@ -335,20 +328,13 @@ fn status_element_freshness(ctx: &Context, command: &str, element_id: &str) -> V
 fn fresh_context_status_unknown_and_zero_write() {
     let (base, ctx) = temp_ctx("fresh");
 
-    // 1a. 完全无 DB：内置策略下 agent-skills 集合（有 url）可探测 → unknown；
-    //     内置 agents 为 native provider → not-applicable；status 不得创建 DB。
+    // 1a. 完全无 DB：内置技能仓库只是推荐来源，不是元素、不带新鲜度（可探测集合的
+    //     unknown 语义见 1b 的 skill:coll）；status 不得创建 DB。
     let skills = execute(&ctx, &request("skills:status", &[]));
     assert!(skills.ok, "{:?}", skills.errors);
-    let coll = skills.data["elements"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|el| el["id"] == "skill:agent-skills")
-        .unwrap();
-    assert_eq!(coll["freshness"]["state"], "unknown");
-    assert_eq!(coll["freshness"]["checked_at"], Value::Null);
-    assert_eq!(coll["freshness"]["probe"], Value::Null);
-    assert_eq!(coll["freshness"]["cache_age_sec"], Value::Null);
+    assert_eq!(skills.data["elements"], json!([]));
+    assert_eq!(skills.data["recommendations"][0]["name"], "agent-skills");
+    assert!(skills.data["recommendations"][0].get("freshness").is_none());
     let agents = execute(&ctx, &request("agents:status", &[]));
     assert!(agents.ok);
     for el in agents.data["elements"].as_array().unwrap() {
@@ -368,7 +354,6 @@ fn fresh_context_status_unknown_and_zero_write() {
 
     // 1b. 有 DB（policy:set 首次写入）但从未 refresh：probeable 元素仍全
     //     unknown，且 upstream_probes 表不存在（status 不建表）。
-    policy_set(&ctx, "skills.agent-skills", json!({"enabled": false}));
     set_npm_agent(&ctx, "npm-agent", "am-test-npm-bin", "behind-pkg");
     set_mcp_definition(
         &ctx,
@@ -411,7 +396,6 @@ fn offline_is_rejected_and_cache_untouched() {
     let (base, ctx) = temp_ctx("offline");
     let shim_dir = install_shims(&base);
     let _path = PathGuard::prepend(&shim_dir);
-    disable_builtin_skills_repo(&ctx);
     set_npm_agent(&ctx, "behind-agent", "am-test-behind-bin", "behind-pkg");
     shim_agent_bin(
         &ctx,
@@ -700,7 +684,6 @@ fn only_filters_probe_universe() {
 
     // 未知元素：USAGE_ERROR，不回显取值，零写（不新增缓存行）
     let (fresh_base, fresh_ctx) = temp_ctx("only-unknown");
-    disable_builtin_skills_repo(&fresh_ctx);
     set_npm_agent(&fresh_ctx, "npm-agent", "am-test-npm-bin", "behind-pkg");
     let env = refresh(&fresh_ctx, &["--only", "agents:no-such-element"]);
     assert!(!env.ok);
@@ -717,7 +700,6 @@ fn only_filters_probe_universe() {
 #[test]
 fn illegal_args_are_usage_error_without_echo() {
     let (base, ctx) = temp_ctx("usage");
-    disable_builtin_skills_repo(&ctx);
     set_npm_agent(&ctx, "npm-agent", "am-test-npm-bin", "behind-pkg");
 
     for (args, sentinel) in [
@@ -763,7 +745,6 @@ fn npx类mcp的本机版本取缓存最高版_钉死版本则以定义为准() {
     let shim_dir = install_shims(&base);
     let _path = PathGuard::prepend(&shim_dir);
 
-    disable_builtin_skills_repo(&ctx);
     set_mcp_definition(
         &ctx,
         "multi",
@@ -818,7 +799,6 @@ fn npx类mcp有新版时可以把定义钉到最新版() {
     let shim_dir = install_shims(&base);
     let _path = PathGuard::prepend(&shim_dir);
 
-    disable_builtin_skills_repo(&ctx);
     set_mcp_definition(
         &ctx,
         "multi",
@@ -916,7 +896,6 @@ fn uvx源没有版本号可钉不给升级动作() {
     let shim_dir = install_shims(&base);
     let _path = PathGuard::prepend(&shim_dir);
 
-    disable_builtin_skills_repo(&ctx);
     set_mcp_definition(
         &ctx,
         "uvxsrv",
@@ -957,5 +936,54 @@ fn uvx源没有版本号可钉不给升级动作() {
         env.errors
     );
 
+    let _ = std::fs::remove_dir_all(base);
+}
+
+/// 旧库固化、从未生效的内置技能仓库按推荐处理：refresh-upstream 不把它纳入探测
+/// （推荐不做网络检查），刷新本身作为写操作顺带把它移出 policy。
+#[test]
+fn legacy_builtin_skills_repo_is_not_probed() {
+    let (base, ctx) = temp_ctx("legacy-builtin");
+    let shim_dir = install_shims(&base);
+    let _path = PathGuard::prepend(&shim_dir);
+    {
+        let conn = store::open_write(&ctx).unwrap();
+        let mut policy = store::policy_from_connection(&conn).unwrap();
+        // 与普通集合一起直接落库：刷新前不经任何写路径，确保探测收集时旧值仍在库里
+        policy["skills"] = json!({
+            "agent-skills": {"enabled": true},
+            "repositories": {
+                "agent-skills": {
+                    "url": "https://github.com/ly87ing/agent-skills.git",
+                    "skill_paths": ["safe-merge-review", "solution-shaping", "change-discipline",
+                                    "verification", "artifact-hygiene", "reader-facing-writing",
+                                    "technical-diagramming"],
+                    "agents": ["claude-code", "codex"]
+                },
+                "coll-equal": {"url": "https://example.invalid/skills-equal.git"}
+            }
+        });
+        store::write_policy(&conn, &policy).unwrap();
+    }
+
+    let env = refresh(&ctx, &[]);
+    assert!(env.ok, "{:?}", env.errors);
+    let ids: Vec<&str> = env.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|el| el["id"].as_str().unwrap())
+        .collect();
+    assert!(ids.contains(&"skill:coll-equal"), "{ids:?}");
+    assert!(
+        !ids.contains(&"skill:agent-skills"),
+        "推荐不得参与探测: {ids:?}"
+    );
+    assert!(cached_row(&ctx, "skill:agent-skills").is_none());
+    let conn = store::open_readonly(&ctx).unwrap().unwrap();
+    let policy = store::policy_from_connection(&conn).unwrap();
+    assert!(policy["skills"]["repositories"]
+        .get("agent-skills")
+        .is_none());
     let _ = std::fs::remove_dir_all(base);
 }

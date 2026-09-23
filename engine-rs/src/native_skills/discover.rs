@@ -10,6 +10,9 @@
 //! 5. 链接目标落在 manager 自管基目录内 → `legacy-link`：旧体系残留，只建议清理；
 //! 6. 其余符号链接 → `external-link`：按源根目录聚合为建议的本地来源集合，软链接纳管。
 //!
+//! 同一扫描与分类也供 skills:status 的实际安装视图（`installed`）使用：那里列出全部条目，
+//! 已有 assigned binding 且链接落在受管基准内的记为 `managed`（本工具链接），其余同上。
+//!
 //! 全程只读：仅 `read_dir`/`symlink_metadata`/`read_link` 与目标存在性判断，不创建
 //! data_dir/DB/目录，不跟随链接递归扫描。
 
@@ -19,12 +22,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::paths::{
-    collection_source_root, is_link_entry, is_local_source, is_path_within, manager_bases,
-    resolve_link_target, resolve_loose,
+    collection_source_root, is_link_entry, is_local_source, is_managed_link, is_path_within,
+    managed_bases, manager_bases, resolve_link_target, resolve_loose,
 };
 use super::persistence::load_bindings_readonly;
-use super::status::load_metadata;
+use super::status::{load_metadata, DomainMetadata};
+use super::BindingEntry;
 use crate::native::Context;
+
+type Bindings = BTreeMap<(String, String, String), BindingEntry>;
 
 /// 绝对路径转 `~/...` 展示/持久化形式；不在 home 下时原样返回。
 fn tildify(path: &Path, home_dir: &Path) -> String {
@@ -153,23 +159,10 @@ fn unlinked_skills_in(
     out
 }
 
-pub(crate) fn discover(ctx: &Context) -> Result<Value> {
-    let meta = load_metadata(ctx)?;
-    let bindings = load_bindings_readonly(ctx)?;
-    let bases = manager_bases(ctx);
-
-    // (skill, agent) → 已有 assigned binding：已受管条目不进候选。
-    let managed_pairs: BTreeSet<(String, String)> = bindings
-        .iter()
-        .filter(|(_, entry)| entry.assigned)
-        .map(|((_, skill, agent), _)| (skill.clone(), agent.clone()))
-        .collect();
-
-    // skill 名 → 已定义集合名（来自集合 skill_paths；整仓发现的集合无法按名判定，留给 external）
+/// skill 名 → 已定义集合名（来自集合 skill_paths；整仓发现的集合无法按名判定，留给 external）。
+fn collection_of_skill_map(meta: &DomainMetadata) -> BTreeMap<String, String> {
     let mut collection_of_skill: BTreeMap<String, String> = BTreeMap::new();
-    let mut taken_names: BTreeSet<String> = BTreeSet::new();
     for (coll_name, coll) in &meta.collections {
-        taken_names.insert(coll_name.clone());
         if coll.deleted {
             continue;
         }
@@ -185,6 +178,78 @@ pub(crate) fn discover(ctx: &Context) -> Result<Value> {
             }
         }
     }
+    collection_of_skill
+}
+
+/// 逐助手扫描技能目录（助手按 id、条目按路径排序），每条带上「已有 assigned binding
+/// 时所属集合」。discover 与实际安装视图共用这一次扫描。
+fn scan_all(meta: &DomainMetadata, bindings: &Bindings) -> Vec<(RawEntry, Option<String>)> {
+    // (skill, agent) → 已有 assigned binding 的集合
+    let mut bound: BTreeMap<(String, String), String> = BTreeMap::new();
+    for ((coll, skill, agent), entry) in bindings {
+        if entry.assigned {
+            bound
+                .entry((skill.clone(), agent.clone()))
+                .or_insert_with(|| coll.clone());
+        }
+    }
+    let mut out = Vec::new();
+    for (agent_id, agent_info) in &meta.agents {
+        for entry in scan_agent_dir(agent_id, &agent_info.skills_dir) {
+            let collection = bound
+                .get(&(entry.name.clone(), entry.agent.clone()))
+                .cloned();
+            out.push((entry, collection));
+        }
+    }
+    out
+}
+
+/// skills:status 的 `installed`：各助手技能目录里的实际条目（「当前」视图），与 discover
+/// 同一扫描与分类。本工具链接（origin=managed）= 有 assigned binding、链接目标存在且落在
+/// 受管基准内（自管基目录或已登记的本地来源）；其余沿用 discover 的分类。只展示、不产生
+/// 待处理项；只读零写。
+pub(crate) fn installed(ctx: &Context, meta: &DomainMetadata, bindings: &Bindings) -> Value {
+    let bases = manager_bases(ctx);
+    let link_bases = managed_bases(ctx, &meta.collections);
+    let collection_of_skill = collection_of_skill_map(meta);
+    let items: Vec<Value> = scan_all(meta, bindings)
+        .into_iter()
+        .map(|(entry, bound)| {
+            let managed = bound.is_some()
+                && entry.is_link
+                && entry.target_exists
+                && is_managed_link(&entry.link_path, &link_bases);
+            let (origin, collection) = if managed {
+                ("managed", bound)
+            } else {
+                let (origin, _, _) = classify(&entry, &bases, &collection_of_skill);
+                let collection = if origin == "collection-extra-link" {
+                    collection_of_skill.get(&entry.name).cloned()
+                } else {
+                    None
+                };
+                (origin, collection)
+            };
+            json!({
+                "agent": entry.agent,
+                "name": entry.name,
+                "link_path": tildify(&entry.link_path, &ctx.home_dir),
+                "target": entry.target.as_ref().map(|t| Value::String(tildify(t, &ctx.home_dir))).unwrap_or(Value::Null),
+                "origin": origin,
+                "collection": collection.map(Value::String).unwrap_or(Value::Null),
+            })
+        })
+        .collect();
+    Value::Array(items)
+}
+
+pub(crate) fn discover(ctx: &Context) -> Result<Value> {
+    let meta = load_metadata(ctx)?;
+    let bindings = load_bindings_readonly(ctx)?;
+    let bases = manager_bases(ctx);
+    let collection_of_skill = collection_of_skill_map(&meta);
+    let mut taken_names: BTreeSet<String> = meta.collections.keys().cloned().collect();
 
     // 已登记的本地来源集合：源根 → 集合名。指向这些源根的未绑定链接直接接管进该集合，
     // 不另建同源集合。
@@ -200,39 +265,38 @@ pub(crate) fn discover(ctx: &Context) -> Result<Value> {
     // 源根目录 → (建议集合名, skill 名 → 出现的 agent 列表)
     let mut group_roots: BTreeMap<PathBuf, BTreeMap<String, BTreeSet<String>>> = BTreeMap::new();
 
-    for (agent_id, agent_info) in &meta.agents {
-        for entry in scan_agent_dir(agent_id, &agent_info.skills_dir) {
-            if managed_pairs.contains(&(entry.name.clone(), entry.agent.clone())) {
-                continue;
-            }
-            let (origin, manage, group_root) = classify(&entry, &bases, &collection_of_skill);
-            let collection = collection_of_skill.get(&entry.name).cloned();
-            if let Some(root) = group_root.clone() {
-                group_roots
-                    .entry(root)
-                    .or_default()
-                    .entry(entry.name.clone())
-                    .or_default()
-                    .insert(entry.agent.clone());
-            }
-            let source = entry
-                .target
-                .clone()
-                .unwrap_or_else(|| entry.link_path.clone());
-            items.push(json!({
-                "agent": entry.agent,
-                "name": entry.name,
-                "link_path": tildify(&entry.link_path, &ctx.home_dir),
-                "target": entry.target.as_ref().map(|t| Value::String(tildify(t, &ctx.home_dir))).unwrap_or(Value::Null),
-                "origin": origin,
-                "manage": manage,
-                "collection": collection.map(Value::String).unwrap_or(Value::Null),
-                "group": group_root
-                    .map(|root| Value::String(tildify(&root, &ctx.home_dir)))
-                    .unwrap_or(Value::Null),
-                "has_skill_md": entry.target_exists && source.join("SKILL.md").is_file(),
-            }));
+    for (entry, bound) in scan_all(&meta, &bindings) {
+        // 已有 assigned binding 的条目已受管，不进候选
+        if bound.is_some() {
+            continue;
         }
+        let (origin, manage, group_root) = classify(&entry, &bases, &collection_of_skill);
+        let collection = collection_of_skill.get(&entry.name).cloned();
+        if let Some(root) = group_root.clone() {
+            group_roots
+                .entry(root)
+                .or_default()
+                .entry(entry.name.clone())
+                .or_default()
+                .insert(entry.agent.clone());
+        }
+        let source = entry
+            .target
+            .clone()
+            .unwrap_or_else(|| entry.link_path.clone());
+        items.push(json!({
+            "agent": entry.agent,
+            "name": entry.name,
+            "link_path": tildify(&entry.link_path, &ctx.home_dir),
+            "target": entry.target.as_ref().map(|t| Value::String(tildify(t, &ctx.home_dir))).unwrap_or(Value::Null),
+            "origin": origin,
+            "manage": manage,
+            "collection": collection.map(Value::String).unwrap_or(Value::Null),
+            "group": group_root
+                .map(|root| Value::String(tildify(&root, &ctx.home_dir)))
+                .unwrap_or(Value::Null),
+            "has_skill_md": entry.target_exists && source.join("SKILL.md").is_file(),
+        }));
     }
 
     let mut groups: Vec<Value> = Vec::new();

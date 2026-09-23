@@ -66,9 +66,6 @@ fn make_skill(dir: &Path, name: &str) -> PathBuf {
     path
 }
 
-/// 内置 agent-skills 集合的 skill_paths 成员之一（用于 collection-extra-link 判定）。
-const BUILTIN_COLLECTION_SKILL: &str = "safe-merge-review";
-
 #[test]
 fn discover_classifies_skill_entries_by_origin_and_stays_read_only() {
     let (root, ctx) = temp_ctx("classify");
@@ -89,12 +86,7 @@ fn discover_classifies_skill_entries_by_origin_and_stays_read_only() {
         &ctx.home_dir.join(".vendor-tool/skills/missing"),
         &claude_skills.join("ghost"),
     );
-    // 4) 已定义集合的计划外链接
-    let repo_skill = ctx.home_dir.join("elsewhere");
-    std::fs::create_dir_all(&repo_skill).unwrap();
-    let coll_skill = make_skill(&repo_skill, BUILTIN_COLLECTION_SKILL);
-    link(&coll_skill, &claude_skills.join(BUILTIN_COLLECTION_SKILL));
-    // 5) 隐藏项（Codex .system 等内置目录）不进入候选
+    // 4) 隐藏项（Codex .system 等内置目录）不进入候选
     std::fs::create_dir_all(claude_skills.join(".system")).unwrap();
 
     let env = execute(&ctx, &request("system:discover", &["--only", "skills"]));
@@ -114,12 +106,6 @@ fn discover_classifies_skill_entries_by_origin_and_stays_read_only() {
     assert_eq!(find("alpha")["suggested_collection"], "vendor-tool");
     assert_eq!(find("ghost")["origin"], "dead-link");
     assert_eq!(find("ghost")["manage"], "cleanup");
-    assert_eq!(
-        find(BUILTIN_COLLECTION_SKILL)["origin"],
-        "collection-extra-link"
-    );
-    assert_eq!(find(BUILTIN_COLLECTION_SKILL)["manage"], "collection");
-    assert_eq!(find(BUILTIN_COLLECTION_SKILL)["collection"], "agent-skills");
     assert!(
         !items.iter().any(|item| item["name"] == ".system"),
         "隐藏项不得进入候选"
@@ -152,11 +138,56 @@ fn discover_classifies_skill_entries_by_origin_and_stays_read_only() {
     assert_eq!(summary["skills_symlink"], 2);
     assert_eq!(summary["skills_native"], 1);
     assert_eq!(summary["skills_cleanup"], 1);
-    assert_eq!(summary["skills_collection"], 1);
+    // 空库没有任何集合：内置推荐来源不是集合，不把同名链接判成计划外链接
+    assert_eq!(summary["skills_collection"], 0);
 
     // 零写：不创建 data_dir 与数据库
     assert!(!ctx.data_dir.exists());
     assert!(!store::db_path(&ctx).exists());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// 计划外链接判定只认用户已保存的集合（原先依赖内置 agent-skills 固化进库）。
+#[test]
+fn discover_marks_collection_extra_link_for_user_collection() {
+    let (root, ctx) = temp_ctx("extra-link");
+    let claude_skills = ctx.home_dir.join(".claude/skills");
+    std::fs::create_dir_all(&claude_skills).unwrap();
+    let elsewhere = ctx.home_dir.join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let coll_skill = make_skill(&elsewhere, "safe-merge-review");
+    link(&coll_skill, &claude_skills.join("safe-merge-review"));
+
+    let set = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "skills.repositories.my-skills",
+                "--value",
+                r#"{"url":"https://example.invalid/my-skills.git","skill_paths":["safe-merge-review"]}"#,
+            ],
+        ),
+    );
+    assert!(set.ok, "{:?}", set.errors);
+    let db = store::db_path(&ctx);
+    let before = std::fs::read(&db).unwrap();
+
+    let env = execute(&ctx, &request("system:discover", &["--only", "skills"]));
+    assert!(env.ok, "{:?}", env.errors);
+    let items = env.data["skills"]["items"].as_array().unwrap();
+    let item = items
+        .iter()
+        .find(|item| item["name"] == "safe-merge-review")
+        .expect("计划外链接必须列出");
+    assert_eq!(item["origin"], "collection-extra-link");
+    assert_eq!(item["manage"], "collection");
+    assert_eq!(item["collection"], "my-skills");
+    assert_eq!(env.data["summary"]["skills_collection"], 1);
+    assert_eq!(std::fs::read(&db).unwrap(), before, "发现不得写库");
     let _ = std::fs::remove_dir_all(root);
 }
 

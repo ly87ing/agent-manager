@@ -98,6 +98,43 @@ export interface StatusData {
   elements: EngineElement[];
   /** 仅 mcp 域输出：各助手现有配置中未受管的导入候选（掩码形态，绝无明文）。 */
   import_candidates?: McpImportCandidate[];
+  /** 仅 skills 域：编译内置的推荐技能来源。不是元素，不计入待同步。 */
+  recommendations?: SkillRecommendation[];
+  /** 仅 skills 域：各助手技能目录里的实际条目（当前视图，只展示）。 */
+  installed?: SkillInstalledEntry[];
+}
+
+// ---------- skills:status recommendations / installed ----------
+
+export interface SkillRecommendation {
+  name: string;
+  description: string;
+  url: string;
+  skill_paths: string[];
+  /** 已有同名或同地址的集合：不再提供添加，避免覆盖用户已有的同名集合。 */
+  added: boolean;
+  /** 添加时保存的集合定义：只含 url 与 skill_paths，不限助手、不做任何分配。 */
+  definition: Record<string, unknown>;
+}
+
+/** managed = 本工具写的链接；native-dir = 真实目录；external-link / collection-extra-link = 指向外部路径的链接；
+ * legacy-link = 旧版本留下、没有分配记录的链接；dead-link = 目标已不存在的链接。 */
+export type SkillInstalledOrigin =
+  | "managed"
+  | "native-dir"
+  | "external-link"
+  | "collection-extra-link"
+  | "legacy-link"
+  | "dead-link";
+
+export interface SkillInstalledEntry {
+  agent: string;
+  name: string;
+  link_path: string;
+  target: string | null;
+  origin: SkillInstalledOrigin | string;
+  /** 本工具链接所属集合，或同名的已定义集合（collection-extra-link）。 */
+  collection: string | null;
 }
 
 // ---------- mcp:status import_candidates ----------

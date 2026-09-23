@@ -787,3 +787,103 @@ describe("集合的「用哪些技能」改成勾选", () => {
     expect(screen.getByTestId("collection-paths-empty")).toHaveTextContent("仓库还没取到本地");
   });
 });
+
+const RECOMMENDED_PATHS = ["safe-merge-review", "verification"];
+
+function recommendationRoutes(opts: { added?: boolean; collections?: boolean } = {}) {
+  const base = skillsRoutes();
+  const elements = opts.collections === false ? [] : (base["skills:status"].data as { elements: unknown[] }).elements;
+  return {
+    ...base,
+    "skills:status": makeEnvelope(
+      {
+        domain: "skills",
+        elements: elements as ReturnType<typeof makeElement>[],
+        recommendations: [
+          {
+            name: "agent-skills-rec",
+            description: "作者维护的通用工作技能",
+            url: "https://github.com/ly87ing/agent-skills.git",
+            skill_paths: RECOMMENDED_PATHS,
+            added: opts.added ?? false,
+            definition: { url: "https://github.com/ly87ing/agent-skills.git", skill_paths: RECOMMENDED_PATHS },
+          },
+        ],
+        installed: [
+          { agent: "claude-code", name: "alpha", link_path: "~/.claude/skills/alpha", target: "~/data/skill-versions/x/content", origin: "managed", collection: "agent-skills" },
+          { agent: "claude-code", name: "vendor-lint", link_path: "~/.claude/skills/vendor-lint", target: "~/.vendor/skills/vendor-lint", origin: "external-link", collection: null },
+          { agent: "claude-code", name: "synced", link_path: "~/.claude/skills/synced", target: null, origin: "native-dir", collection: null },
+          { agent: "codex", name: "ghost", link_path: "~/.codex/skills/ghost", target: "~/gone/ghost", origin: "dead-link", collection: null },
+        ],
+      },
+      { command: "skills.status" },
+    ),
+  };
+}
+
+describe("SkillsPage 推荐来源与当前安装", () => {
+  it("推荐来源：确认后才保存为集合定义（不限助手、不分配），不下载、不同步", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, recommendationRoutes());
+    const card = await screen.findByTestId("recommendation-agent-skills-rec");
+    expect(card).toHaveTextContent("2 个技能");
+    await userEvent.click(within(card).getByTestId("recommendation-add-agent-skills-rec"));
+
+    // 逐项确认：弹窗出现前后都还没写
+    const dialog = await screen.findByRole("dialog", { name: "添加推荐来源 agent-skills-rec" });
+    expect(dialog).toHaveTextContent("不会下载，也不会启用到任何助手");
+    expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(0);
+    await userEvent.click(within(dialog).getByRole("button", { name: "添加" }));
+
+    await waitFor(() => expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(1));
+    const write = calls.find((call) => call.command === "policy:set")!;
+    expect(write.args[write.args.indexOf("--key") + 1]).toBe("skills.repositories.agent-skills-rec");
+    const definition = JSON.parse(write.args[write.args.indexOf("--value") + 1]);
+    expect(definition).toEqual({
+      url: "https://github.com/ly87ing/agent-skills.git",
+      skill_paths: RECOMMENDED_PATHS,
+      _delete: false,
+      _replace: true,
+    });
+    expect("agents" in definition).toBe(false);
+    expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
+    expect(calls.some((call) => call.command === "db:migrate")).toBe(false);
+  });
+
+  it("推荐来源：取消确认零写入；已添加的不再给添加按钮", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, recommendationRoutes());
+    await userEvent.click(await screen.findByTestId("recommendation-add-agent-skills-rec"));
+    const dialog = await screen.findByRole("dialog", { name: "添加推荐来源 agent-skills-rec" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(0);
+  });
+
+  it("推荐来源已添加时只显示「已添加」", async () => {
+    renderWithEngine(<SkillsPage />, recommendationRoutes({ added: true }));
+    expect(await screen.findByTestId("recommendation-added-agent-skills-rec")).toHaveTextContent("已添加");
+    expect(screen.queryByTestId("recommendation-add-agent-skills-rec")).toBeNull();
+  });
+
+  it("当前安装：按助手列出实际条目并分类，只展示不给操作", async () => {
+    renderWithEngine(<SkillsPage />, recommendationRoutes());
+    const section = await screen.findByTestId("skills-installed");
+    const claude = within(section).getByTestId("skills-installed-claude-code");
+    expect(within(claude).getByTestId("skills-installed-claude-code-managed")).toHaveTextContent("本工具链接 1");
+    expect(within(claude).getByTestId("skills-installed-claude-code-external")).toHaveTextContent("外部链接 1");
+    expect(within(claude).getByTestId("skills-installed-claude-code-native")).toHaveTextContent("真实目录 1");
+    expect(within(claude).getByTestId("skills-installed-entry-claude-code-alpha")).toHaveTextContent("本工具链接");
+    expect(within(claude).getByTestId("skills-installed-entry-claude-code-alpha")).toHaveTextContent("来自集合 agent-skills");
+    expect(within(claude).getByTestId("skills-installed-entry-claude-code-vendor-lint")).toHaveTextContent("→ ~/.vendor/skills/vendor-lint");
+    expect(within(claude).getByTestId("skills-installed-entry-claude-code-synced")).toHaveTextContent("真实目录");
+    const codex = within(section).getByTestId("skills-installed-codex");
+    expect(within(codex).getByTestId("skills-installed-codex-dead")).toHaveTextContent("失效链接 1");
+    // 不把外部条目当作待处理项：整个区块没有任何按钮
+    expect(within(section).queryAllByRole("button")).toHaveLength(0);
+  });
+
+  it("还没有任何集合时给出空态，推荐来源仍可添加", async () => {
+    renderWithEngine(<SkillsPage />, recommendationRoutes({ collections: false }));
+    expect(await screen.findByTestId("skills-collections-empty")).toHaveTextContent("还没有技能集合");
+    expect(screen.getByTestId("recommendation-add-agent-skills-rec")).toBeInTheDocument();
+  });
+});

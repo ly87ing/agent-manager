@@ -10,7 +10,9 @@ import { ResourceAgentMatrix, type MatrixRow, type MatrixRowCell } from "../comp
 import { SkillAgentCellActions, skillNeedsUpdate } from "../components/SkillAgentActions";
 import { SkillCollectionCard } from "../components/SkillCollectionCard";
 import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDialog";
-import type { EngineElement, PolicyData, PolicyLayers, StatusData } from "../lib/contract";
+import { SkillInstalledView } from "../components/SkillInstalledView";
+import { SkillRecommendations } from "../components/SkillRecommendations";
+import type { EngineElement, PolicyData, PolicyLayers, SkillRecommendation, StatusData } from "../lib/contract";
 import {
   agentCellsOf,
   type SkillAgentCell,
@@ -97,6 +99,8 @@ export default function SkillsPage({
   const [selectedKeys, setSelectedKeys] = useState<ReadonlySet<string>>(new Set());
 
   const [pendingRemove, setPendingRemove] = useState<EngineElement | null>(null);
+  /** 添加推荐来源前的确认：只保存集合定义，不下载、不分配。 */
+  const [pendingRecommendation, setPendingRecommendation] = useState<SkillRecommendation | null>(null);
   /** 计划外链接的外部链接接管确认：add=纳入管理、remove=取消链接，确认后携带 --allow-takeover。 */
   const [pendingTakeover, setPendingTakeover] = useState<
     { element: EngineElement; agent: string; action: "add" | "remove" } | null
@@ -146,6 +150,8 @@ export default function SkillsPage({
 
   // 数据计算容忍查询未就绪（空数组兜底），选择剔除 effect 必须在下方早退之前声明。
   const elements = query.data?.data.elements ?? [];
+  const recommendations = query.data?.data.recommendations ?? [];
+  const installed = query.data?.data.installed ?? [];
   const collections = elements.filter(isCollection);
   const skills = elements.filter((element) => !isCollection(element));
 
@@ -396,6 +402,16 @@ export default function SkillsPage({
     setPendingRemove(null);
   };
 
+  /** 添加推荐来源：把推荐里的定义存成普通集合（新增语义），不限助手、不分配、不下载。 */
+  const confirmRecommendation = () => {
+    if (!pendingRecommendation) return;
+    const { name, definition } = pendingRecommendation;
+    setPendingRecommendation(null);
+    void definitionOps.saveDefinition({ name, definition, isNew: true }).then((ok) => {
+      if (ok) toast.info(`集合 ${name} 已添加。点「更新资源库」取回仓库后，到「全部技能」里逐个启用到需要的助手。`);
+    });
+  };
+
   /** 接管确认后执行：apply 在原范围上追加 --allow-takeover（引擎侧仍对真实文件/目录 fail-closed）。 */
   const confirmTakeover = () => {
     if (!pendingTakeover) return;
@@ -423,6 +439,8 @@ export default function SkillsPage({
       <PageHeader title="技能" description="管理技能集合与技能分发。支持查看集合资源库状态，并在全部技能列表中搜索、按集合与助手筛选操作。" />
 
       {query.data.errors.length > 0 && <ErrorPanel title="技能状态读取失败" errors={query.data.errors} />}
+
+      <SkillInstalledView entries={installed} agents={agentColumns} />
 
       <div role="tablist" aria-label="技能管理视图" className="flex border-b">
         {(["collections", "skills"] as const).map((tab) => (
@@ -484,6 +502,13 @@ export default function SkillsPage({
                 </button>
               }
             />
+          ) : collections.length === 0 ? (
+            <EmptyState
+              icon={PackageOpen}
+              testId="skills-collections-empty"
+              title="还没有技能集合"
+              description="新增一个 git 仓库或本机目录作为集合，或从下面的推荐来源添加。"
+            />
           ) : (
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
               {filteredCollections.map((collection) => (
@@ -501,6 +526,10 @@ export default function SkillsPage({
                 />
               ))}
             </div>
+          )}
+
+          {recommendations.length > 0 && (
+            <SkillRecommendations items={recommendations} onAdd={setPendingRecommendation} />
           )}
         </div>
       )}
@@ -732,6 +761,18 @@ export default function SkillsPage({
           executing={directApply.executing}
           onConfirm={confirmRemove}
           onClose={() => setPendingRemove(null)}
+        />
+      )}
+
+      {pendingRecommendation && (
+        <ConfirmModal
+          title={`添加推荐来源 ${pendingRecommendation.name}`}
+          description={`只保存集合定义：仓库 ${pendingRecommendation.url}，含 ${pendingRecommendation.skill_paths.length} 个技能。不会下载，也不会启用到任何助手；保存后在集合卡片上点「更新资源库」取回仓库，再到「全部技能」里逐个启用。`}
+          risk="write-local"
+          confirmLabel="添加"
+          executing={false}
+          onConfirm={confirmRecommendation}
+          onClose={() => setPendingRecommendation(null)}
         />
       )}
 

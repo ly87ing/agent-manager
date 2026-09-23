@@ -1,6 +1,7 @@
 import type { EngineElement, Envelope, StatusData } from "./contract";
-import type { AgentUsage } from "./observed";
+import type { AgentUsage, SkillAgentCell } from "./observed";
 import { isStale, tightestWindow } from "./agentUsage";
+import { skillNeedsUpdate } from "../components/SkillAgentActions";
 
 /**
  * 总览清单模型：本机有哪些助手 / MCP / 技能 / 规则 / Hooks / 快捷命令，各自什么版本、
@@ -79,7 +80,7 @@ interface Cell {
   blocked_reason?: string | null;
 }
 
-/** 逐助手的域（mcp / skills）：把各助手单元格聚合成这个资源的一个同步状态。 */
+/** 逐助手的域（mcp；技能另见 skillSyncOf）：把各助手单元格聚合成这个资源的一个同步状态。 */
 function syncFromCells(element: EngineElement, cells: Record<string, Cell>): Pick<OverviewItem, "sync" | "syncArgs" | "reason"> {
   let pendingArgs: string[] | null = null;
   let decisionReason: string | null = null;
@@ -106,6 +107,44 @@ function syncFromCells(element: EngineElement, cells: Record<string, Cell>): Pic
   return { sync: sawAny ? "ok" : "ok" };
 }
 
+/**
+ * 技能的同步轴。只有两种算待同步：用户已添加的集合有可用更新（集合 freshness=behind），
+ * 以及已启用的技能链接缺失/失效或来源有新内容（与技能页「更新/修复」同一判定）。
+ * 推荐来源不是元素，永不计入；没拉取的集合、没启用到任何助手的技能是「没装」而不是待办；
+ * 未分配的外部同名链接不是待处理项；链接被本工具以外改过的要你决定。
+ */
+function skillSyncOf(element: EngineElement): Pick<OverviewItem, "sync" | "syncArgs" | "reason"> {
+  if (!isSingleSkill(element)) {
+    if (element.state === "disabled") return { sync: "disabled" };
+    if (element.freshness.state === "behind" && actionIds(element.actions).includes("update")) {
+      return { sync: "pending", syncArgs: ["--only", element.id, "--action", "update"] };
+    }
+    if (element.state === "not-materialized") return { sync: "absent" };
+    return { sync: "ok" };
+  }
+  const cells = (element.observed as { agents?: Record<string, SkillAgentCell> }).agents ?? {};
+  let pendingArgs: string[] | null = null;
+  let decisionReason: string | null = null;
+  let anyAssigned = false;
+  let anyEnabled = false;
+  for (const [agent, cell] of Object.entries(cells)) {
+    if (!cell?.assigned) continue;
+    anyAssigned = true;
+    if (cell.enabled) anyEnabled = true;
+    if (cell.state === "drifted") {
+      decisionReason ??= cell.blocked_reason ?? "链接被本工具以外改过";
+    } else if (skillNeedsUpdate(cell)) {
+      pendingArgs ??= ["--only", element.id, "--agent", agent, "--action", "update"];
+    } else if (cell.state === "missing-link" || cell.state === "dead-link") {
+      decisionReason ??= cell.blocked_reason ?? "来源里找不到这个技能，补不了链接";
+    }
+  }
+  if (decisionReason) return { sync: "decision", reason: decisionReason };
+  if (pendingArgs) return { sync: "pending", syncArgs: pendingArgs };
+  if (!anyAssigned) return { sync: "absent" };
+  return { sync: anyEnabled ? "ok" : "disabled" };
+}
+
 function itemOf(element: EngineElement, name: string): OverviewItem {
   // AI CLI 的软件生命周期交还给各自安装渠道；总览只保留助手状态与额度，
   // 版本和安装来源集中到「设置 → 客户端诊断」只读展示。
@@ -124,6 +163,7 @@ function itemOf(element: EngineElement, name: string): OverviewItem {
     usedPercent: tightestWindow(usage)?.used_percent ?? null,
     usageStale: usage ? isStale(usage.checked_at) : false,
   };
+  if (element.domain === "skills") return { ...base, ...skillSyncOf(element) };
   const observed = element.observed as { agents?: Record<string, Cell>; blocked_reason?: string | null };
 
   if (observed.agents && Object.keys(observed.agents).length > 0) {
@@ -135,10 +175,6 @@ function itemOf(element: EngineElement, name: string): OverviewItem {
   const acts = actionIds(element.actions);
   if (acts.includes("sync")) {
     return { ...base, sync: "pending", syncArgs: ["--only", element.id] };
-  }
-  // 技能集合还没拉下来时只有 update 能把它变出来，等价于「待同步」
-  if (acts.includes("update")) {
-    return { ...base, sync: "pending", syncArgs: ["--only", element.id, "--action", "update"] };
   }
   return { ...base, sync: "decision", reason: observed.blocked_reason ?? "被本工具以外改过" };
 }
@@ -181,12 +217,14 @@ function isSingleSkill(element: EngineElement): boolean {
 
 /**
  * 技能来源还没拉下来时展不开单个技能。这时候留下来源那一行，否则整段技能凭空消失，
- * 用户看不出「配了个来源但还没生效」。
+ * 用户看不出「配了个来源但还没生效」。来源有可用更新时也留一行：更新是按来源做的。
  */
 function skillElements(elements: EngineElement[]): EngineElement[] {
   const singles = elements.filter(isSingleSkill);
   const covered = new Set(singles.map((element) => element.id.slice(0, element.id.lastIndexOf("/"))));
-  const bare = elements.filter((element) => !isSingleSkill(element) && !covered.has(element.id));
+  const bare = elements.filter(
+    (element) => !isSingleSkill(element) && (!covered.has(element.id) || element.freshness.state === "behind"),
+  );
   return [...bare, ...singles];
 }
 

@@ -28,25 +28,36 @@ fn request_with_run(command: &str, args: &[&str], run_id: &str) -> Request {
         run_id: run_id.to_string(),
     }
 }
+/// 空库：内置技能仓库只是推荐来源（recommendations），不是元素；status 不建库、不写文件。
 #[test]
-fn skills_builtin_defaults_and_status_without_db() {
+fn skills_status_without_db_offers_recommendation_not_element() {
     let (root, context) = temp_ctx("skills-builtin");
     let env = execute(&context, &request("skills:status", &[]));
     assert!(env.ok, "{:?}", env.errors);
     assert_eq!(env.data["domain"], "skills");
-    let elements = env.data["elements"].as_array().unwrap();
-    let coll = elements.iter().find(|el| el["id"] == "skill:agent-skills");
-    assert!(coll.is_some(), "builtin agent-skills 必须在 status 中呈现");
-    let coll = coll.unwrap();
     assert_eq!(
-        coll["spec"]["url"],
-        "https://github.com/ly87ing/agent-skills.git"
+        env.data["elements"],
+        serde_json::json!([]),
+        "空库不得有任何集合元素（内置仓库不再是元素）"
     );
-    assert_eq!(coll["policy"]["enabled"], true);
-    assert_eq!(coll["state"], "not-materialized");
+    let recs = env.data["recommendations"].as_array().unwrap();
+    let rec = recs
+        .iter()
+        .find(|r| r["name"] == "agent-skills")
+        .expect("内置仓库以推荐来源出现");
+    assert_eq!(rec["url"], "https://github.com/ly87ing/agent-skills.git");
+    assert_eq!(rec["added"], false);
+    assert_eq!(rec["definition"]["url"], rec["url"]);
+    assert_eq!(rec["definition"]["skill_paths"], rec["skill_paths"]);
+    assert!(
+        rec["definition"].get("agents").is_none(),
+        "添加推荐不限定也不分配助手"
+    );
+    assert_eq!(env.data["installed"], serde_json::json!([]));
     // 零写库保证
     assert!(!context.data_dir.exists());
     assert!(!store::db_path(&context).exists());
+    assert!(!context.home_dir.exists(), "status 不得创建助手目录");
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -2064,4 +2075,445 @@ fn 上游改写历史后更新资源库仍然成功() {
     );
 
     let _ = std::fs::remove_dir_all(root);
+}
+
+// ---------- 内置技能仓库改为推荐来源 ----------
+
+/// 旧版本 947bc09 起固化进库的 agent-skills 原值。
+const LEGACY_BUILTIN_REPO: &str = r#"{"url":"https://github.com/ly87ing/agent-skills.git","skill_paths":["safe-merge-review","solution-shaping","change-discipline","verification","artifact-hygiene","reader-facing-writing","technical-diagramming"],"agents":["claude-code","codex"]}"#;
+
+/// 模拟旧版本写下的库：内置集合与它的开关原样固化进 policy，另可带旧版本留下的
+/// skill_bindings 行。全部在建库的同一连接里完成（新库初始化不跑迁移）。
+fn seed_legacy_builtin(ctx: &Context, repo: serde_json::Value, bindings: &[(&str, &str, &str)]) {
+    let conn = store::open_write(ctx).unwrap();
+    let mut policy = store::policy_from_connection(&conn).unwrap();
+    policy["skills"] = serde_json::json!({
+        "agent-skills": {"enabled": true},
+        "repositories": {"agent-skills": repo},
+    });
+    store::write_policy(&conn, &policy).unwrap();
+    if bindings.is_empty() {
+        return;
+    }
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS skill_bindings (
+            collection TEXT NOT NULL, skill TEXT NOT NULL, agent TEXT NOT NULL,
+            version TEXT NOT NULL, enabled INTEGER NOT NULL, assigned INTEGER NOT NULL,
+            updated_at TEXT NOT NULL, PRIMARY KEY (collection, skill, agent));",
+        [],
+    )
+    .unwrap();
+    for (collection, skill, agent) in bindings {
+        conn.execute(
+            "INSERT INTO skill_bindings VALUES (?1, ?2, ?3, 'v1', 1, 1, 'now')",
+            [collection, skill, agent],
+        )
+        .unwrap();
+    }
+}
+
+fn stored_skills_policy(ctx: &Context) -> serde_json::Value {
+    let conn = store::open_readonly(ctx).unwrap().unwrap();
+    store::policy_from_connection(&conn).unwrap()["skills"].clone()
+}
+
+fn retire_log_count(ctx: &Context) -> i64 {
+    let conn = store::open_readonly(ctx).unwrap().unwrap();
+    conn.query_row(
+        "SELECT count(*) FROM operation_logs WHERE operation_type = 'skills:retire-builtin' AND target = 'agent-skills'",
+        [],
+        |r| r.get(0),
+    )
+    .unwrap()
+}
+
+fn unrelated_write(ctx: &Context) {
+    let env = execute(
+        ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions.demo",
+                "--value",
+                r#"{"command":"node","args":["demo.js"]}"#,
+            ],
+        ),
+    );
+    assert!(env.ok, "{:?}", env.errors);
+}
+
+/// 旧库固化了原内置值且从未生效：读路径按推荐处理（不作为元素、零写）；任一写操作
+/// 把它移出 policy 并记日志，已下载的仓库镜像保留；迁移幂等。
+#[test]
+fn legacy_builtin_without_bindings_is_recommendation_and_retired_on_write() {
+    let (root, ctx) = temp_ctx("skills-legacy-retire");
+    seed_legacy_builtin(
+        &ctx,
+        serde_json::from_str(LEGACY_BUILTIN_REPO).unwrap(),
+        &[],
+    );
+    // 旧版本「全部同步」已 clone 下来的镜像
+    let mirror = ctx.data_dir.join("repositories").join("agent-skills");
+    std::fs::create_dir_all(mirror.join("verification")).unwrap();
+    std::fs::write(mirror.join("verification").join("SKILL.md"), "# v").unwrap();
+    // 同名外部链接：不得因旧内置集合被判成计划外链接
+    let vendor = ctx.home_dir.join(".vendor").join("skills");
+    std::fs::create_dir_all(vendor.join("verification")).unwrap();
+    std::fs::write(vendor.join("verification").join("SKILL.md"), "# v").unwrap();
+    let claude_skills = ctx.home_dir.join(".claude").join("skills");
+    std::fs::create_dir_all(&claude_skills).unwrap();
+    std::os::unix::fs::symlink(
+        vendor.join("verification"),
+        claude_skills.join("verification"),
+    )
+    .unwrap();
+
+    let db = store::db_path(&ctx);
+    let bytes_before = std::fs::read(&db).unwrap();
+    let status = execute(&ctx, &request("skills:status", &[]));
+    assert!(status.ok, "{:?}", status.errors);
+    assert!(
+        !status.data["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|el| el["id"].as_str().unwrap().starts_with("skill:agent-skills")),
+        "未采用的旧内置集合不得作为元素: {}",
+        status.data["elements"]
+    );
+    assert_eq!(status.data["recommendations"][0]["name"], "agent-skills");
+    assert_eq!(status.data["recommendations"][0]["added"], false);
+    let discover = execute(&ctx, &request("system:discover", &["--only", "skills"]));
+    assert!(discover.ok, "{:?}", discover.errors);
+    let item = discover.data["skills"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["name"] == "verification")
+        .unwrap()
+        .clone();
+    assert_eq!(item["origin"], "external-link");
+    assert_eq!(
+        std::fs::read(&db).unwrap(),
+        bytes_before,
+        "读路径不得迁移或写库"
+    );
+    assert!(
+        stored_skills_policy(&ctx)["repositories"]
+            .get("agent-skills")
+            .is_some(),
+        "读路径不改库"
+    );
+
+    unrelated_write(&ctx);
+    let skills = stored_skills_policy(&ctx);
+    assert!(
+        skills["repositories"].get("agent-skills").is_none(),
+        "{skills}"
+    );
+    assert!(
+        skills.get("agent-skills").is_none(),
+        "集合开关一并移除: {skills}"
+    );
+    assert_eq!(retire_log_count(&ctx), 1);
+    assert!(mirror.join("verification").is_dir(), "已下载的镜像保留不删");
+
+    // 幂等：再写一次不重复记录
+    unrelated_write(&ctx);
+    assert_eq!(retire_log_count(&ctx), 1);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// 旧库里内置集合已在助手生效（有 bindings）或被用户改过：保持为用户集合，写路径不动。
+#[test]
+fn legacy_builtin_with_bindings_or_edits_stays_user_collection() {
+    let (root, ctx) = temp_ctx("skills-legacy-keep");
+    seed_legacy_builtin(
+        &ctx,
+        serde_json::from_str(LEGACY_BUILTIN_REPO).unwrap(),
+        &[("agent-skills", "verification", "codex")],
+    );
+    let before = stored_skills_policy(&ctx);
+
+    let status = execute(&ctx, &request("skills:status", &[]));
+    assert!(status.ok, "{:?}", status.errors);
+    assert!(status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|el| el["id"] == "skill:agent-skills"));
+    assert_eq!(status.data["recommendations"][0]["added"], true);
+    unrelated_write(&ctx);
+    assert_eq!(stored_skills_policy(&ctx), before);
+    assert_eq!(retire_log_count(&ctx), 0);
+
+    // 改过的定义（哪怕无 bindings）也是用户集合
+    let (root2, ctx2) = temp_ctx("skills-legacy-edited");
+    let mut edited: serde_json::Value = serde_json::from_str(LEGACY_BUILTIN_REPO).unwrap();
+    edited["agents"] = serde_json::json!(["codex"]);
+    seed_legacy_builtin(&ctx2, edited, &[]);
+    let before2 = stored_skills_policy(&ctx2);
+    let status2 = execute(&ctx2, &request("skills:status", &[]));
+    assert!(status2.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|el| el["id"] == "skill:agent-skills"));
+    unrelated_write(&ctx2);
+    assert_eq!(stored_skills_policy(&ctx2), before2);
+    assert_eq!(retire_log_count(&ctx2), 0);
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(root2);
+}
+
+/// 添加推荐来源 = 按推荐里的 definition 写一条普通集合定义（界面走 policy:set）：
+/// 集合出现、不限助手、不链接任何助手；逐个启用后只在所选助手出现正确链接。
+#[test]
+fn adding_recommendation_creates_unassigned_collection_then_per_skill_enable() {
+    let (root, ctx) = temp_ctx("skills-add-recommendation");
+    let status = execute(&ctx, &request("skills:status", &[]));
+    let rec = status.data["recommendations"][0].clone();
+    let mut definition = rec["definition"].clone();
+    definition["_delete"] = serde_json::json!(false);
+    definition["_replace"] = serde_json::json!(true);
+    let key = format!("skills.repositories.{}", rec["name"].as_str().unwrap());
+    let set = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                &key,
+                "--value",
+                &definition.to_string(),
+            ],
+        ),
+    );
+    assert!(set.ok, "{:?}", set.errors);
+
+    let claude_skills = ctx.home_dir.join(".claude").join("skills");
+    let codex_skills = ctx.home_dir.join(".codex").join("skills");
+    let status = execute(&ctx, &request("skills:status", &[]));
+    let coll = status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|el| el["id"] == "skill:agent-skills")
+        .expect("添加后集合出现")
+        .clone();
+    assert_eq!(coll["spec"]["agents"], serde_json::Value::Null);
+    assert_eq!(status.data["recommendations"][0]["added"], true);
+    assert!(
+        !claude_skills.exists() && !codex_skills.exists(),
+        "添加不链接任何助手"
+    );
+
+    // 仓库取回后（测试不走网络，直接按推荐的 skill_paths 放镜像）逐个技能启用
+    let mirror = ctx.data_dir.join("repositories").join("agent-skills");
+    for skill in rec["skill_paths"].as_array().unwrap() {
+        let skill = skill.as_str().unwrap();
+        std::fs::create_dir_all(mirror.join(skill)).unwrap();
+        std::fs::write(mirror.join(skill).join("SKILL.md"), format!("# {skill}")).unwrap();
+    }
+    let status = execute(&ctx, &request("skills:status", &[]));
+    let skill = status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|el| el["id"] == "skill:agent-skills/verification")
+        .unwrap()
+        .clone();
+    for agent in ["claude-code", "codex"] {
+        let cell = &skill["observed"]["agents"][agent];
+        assert_eq!(cell["state"], "not-assigned", "{agent}: {cell}");
+        assert!(cell["actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a == "add"));
+    }
+    let add = execute(
+        &ctx,
+        &request(
+            "skills:apply",
+            &[
+                "--only",
+                "skill:agent-skills/verification",
+                "--action",
+                "add",
+                "--agent",
+                "codex",
+            ],
+        ),
+    );
+    assert!(add.ok, "{:?}", add.errors);
+    let link = codex_skills.join("verification");
+    assert!(std::fs::symlink_metadata(&link)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(
+        std::fs::read_to_string(link.join("SKILL.md")).unwrap(),
+        "# verification"
+    );
+    assert!(
+        !claude_skills.join("verification").exists(),
+        "未启用的助手不得出现链接"
+    );
+    assert!(
+        !codex_skills.join("change-discipline").exists(),
+        "未启用的技能不得出现链接"
+    );
+    let status = execute(&ctx, &request("skills:status", &[]));
+    let cells = &status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|el| el["id"] == "skill:agent-skills/verification")
+        .unwrap()["observed"]["agents"];
+    assert_eq!(cells["codex"]["state"], "linked");
+    assert_eq!(cells["claude-code"]["state"], "not-assigned");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// 实际安装视图：真实目录 / 外部链接 / 本工具链接三类正确分类，查询零写。
+#[test]
+fn installed_view_classifies_real_entries_with_zero_writes() {
+    let (root, ctx) = temp_ctx("skills-installed-view");
+    let repo_dir = ctx.data_dir.join("repositories").join("test-skills");
+    std::fs::create_dir_all(repo_dir.join("alpha")).unwrap();
+    std::fs::write(repo_dir.join("alpha").join("SKILL.md"), "# Alpha").unwrap();
+    let set = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "skills.repositories.test-skills",
+                "--value",
+                r#"{"url":"https://example.invalid/test-skills.git"}"#,
+            ],
+        ),
+    );
+    assert!(set.ok, "{:?}", set.errors);
+    let add = execute(
+        &ctx,
+        &request(
+            "skills:apply",
+            &[
+                "--only",
+                "skill:test-skills/alpha",
+                "--action",
+                "add",
+                "--agent",
+                "claude-code",
+            ],
+        ),
+    );
+    assert!(add.ok, "{:?}", add.errors);
+    let claude_skills = ctx.home_dir.join(".claude").join("skills");
+    std::fs::create_dir_all(claude_skills.join("synced")).unwrap();
+    std::fs::write(claude_skills.join("synced").join("SKILL.md"), "# s").unwrap();
+    let vendor = ctx.home_dir.join(".vendor").join("skills");
+    std::fs::create_dir_all(vendor.join("beta")).unwrap();
+    std::os::unix::fs::symlink(vendor.join("beta"), claude_skills.join("beta")).unwrap();
+
+    let db = store::db_path(&ctx);
+    let db_before = std::fs::read(&db).unwrap();
+    let mtime_before = std::fs::metadata(&db).unwrap().modified().unwrap();
+    let list = |dir: &std::path::Path| {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        names.sort();
+        names
+    };
+    let dir_before = list(&claude_skills);
+
+    let status = execute(&ctx, &request("skills:status", &[]));
+    assert!(status.ok, "{:?}", status.errors);
+    let installed = status.data["installed"].as_array().unwrap();
+    let find = |name: &str| {
+        installed
+            .iter()
+            .find(|item| item["name"] == name && item["agent"] == "claude-code")
+            .unwrap_or_else(|| panic!("缺少 {name}: {installed:?}"))
+    };
+    assert_eq!(find("alpha")["origin"], "managed");
+    assert_eq!(find("alpha")["collection"], "test-skills");
+    assert_eq!(find("beta")["origin"], "external-link");
+    assert_eq!(find("beta")["target"], "~/.vendor/skills/beta");
+    assert_eq!(find("beta")["collection"], serde_json::Value::Null);
+    assert_eq!(find("synced")["origin"], "native-dir");
+    assert_eq!(find("synced")["link_path"], "~/.claude/skills/synced");
+    assert_eq!(
+        installed.len(),
+        3,
+        "codex 目录不存在时没有条目: {installed:?}"
+    );
+    assert_status_matches_contract(&status.data);
+
+    assert_eq!(std::fs::read(&db).unwrap(), db_before, "查询不得写库");
+    assert_eq!(
+        std::fs::metadata(&db).unwrap().modified().unwrap(),
+        mtime_before
+    );
+    assert_eq!(list(&claude_skills), dir_before, "查询不得改动助手目录");
+    assert!(
+        !ctx.home_dir.join(".codex").exists(),
+        "查询不得创建助手目录"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// status.schema.json 里 status 数据与两个技能字段都是 additionalProperties=false：
+/// 输出的键必须与契约声明一致，origin 取值必须在枚举内。
+fn assert_status_matches_contract(data: &serde_json::Value) {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../contract/engine-v1/status.schema.json");
+    let schema: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let keys = |value: &serde_json::Value| -> std::collections::BTreeSet<String> {
+        value.as_object().unwrap().keys().cloned().collect()
+    };
+    let declared = keys(&schema["properties"]);
+    assert!(
+        keys(data).is_subset(&declared),
+        "{:?} ⊄ {:?}",
+        keys(data),
+        declared
+    );
+    for (field, def) in [
+        ("recommendations", "skill_recommendation"),
+        ("installed", "skill_installed_entry"),
+    ] {
+        let def = &schema["$defs"][def];
+        let props = keys(&def["properties"]);
+        let required: std::collections::BTreeSet<String> = def["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        for item in data[field].as_array().unwrap() {
+            let item_keys = keys(item);
+            assert!(item_keys.is_subset(&props), "{field}: {item_keys:?}");
+            assert!(required.is_subset(&item_keys), "{field}: {item_keys:?}");
+        }
+    }
+    let origins = schema["$defs"]["skill_installed_entry"]["properties"]["origin"]["enum"]
+        .as_array()
+        .unwrap()
+        .clone();
+    for item in data["installed"].as_array().unwrap() {
+        assert!(origins.contains(&item["origin"]), "{}", item["origin"]);
+    }
 }

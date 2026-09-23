@@ -153,10 +153,10 @@ fn builtin_policy_is_default_effective() {
         effective["agents"]["definitions"].get("opencode").is_none(),
         "新安装只内置 Claude Code 与 Codex"
     );
-    assert_eq!(
-        effective["skills"]["repositories"]["agent-skills"]["agents"],
-        serde_json::json!(["claude-code", "codex"])
-    );
+    // 技能仓库只作推荐来源（skills:status 的 recommendations），内置 policy 不再带集合，
+    // 首次写库也就不会把它固化成用户集合
+    assert_eq!(effective["skills"]["repositories"], serde_json::json!({}));
+    assert!(effective["skills"].get("agent-skills").is_none());
     let _ = std::fs::remove_dir_all(&base);
 }
 

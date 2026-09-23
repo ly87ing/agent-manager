@@ -1,7 +1,8 @@
 //! Rust 原生 Skills 域（native-manager.db 自管域表，无旧 Python 依赖）。
 //!
 //! 职责：
-//! - status（只读，零写库/零网络）：集合定义 ∪ bindings 的全集视图；
+//! - status（只读，零写库/零网络）：集合定义 ∪ bindings 的全集视图，另带内置推荐来源
+//!   （`recommendations`，不是元素）与各助手技能目录的实际条目（`installed`）；
 //! - apply：执行单 Skill 或集合动作，通过内容快照与安全软连接落地，支持回滚与操作审计。
 //!   plan 与 --dry-run 已退役：apply 一律真实执行，经 preflight 后由调用方恒取全局锁。
 
@@ -10,11 +11,13 @@ mod discover;
 mod paths;
 mod persistence;
 mod preflight;
+mod recommend;
 mod snapshot;
 mod status;
 
 use anyhow::{bail, Result};
 use serde_json::{Map, Value};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use crate::native::{Context, Request};
@@ -70,6 +73,18 @@ pub(crate) use discover::discover as discover_unmanaged;
 
 // 供集成测试使用的最小公开发行接口
 pub use snapshot::hash_skill_dir;
+
+/// 旧库固化、从未生效的内置集合名：读路径按推荐处理（不作为集合、不参与上游检查）。
+/// 零写；集合元数据与 native_upstream 的探测范围共用这一判定。
+pub(crate) fn hidden_builtin_collections(
+    ctx: &Context,
+    policy: &Value,
+) -> Result<BTreeSet<String>> {
+    Ok(recommend::unadopted_builtin_collections(
+        policy,
+        &persistence::load_bindings_readonly(ctx)?,
+    ))
+}
 
 pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
     match req.command.as_str() {

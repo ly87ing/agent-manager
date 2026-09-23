@@ -141,7 +141,9 @@ describe("buildOverview 真实形态", () => {
     expect(syncableOf(groups)).toEqual([]);
   });
 
-  it("技能来源还没拉下来时保留来源那一行，拉下来后只列单个技能", () => {
+  it("技能来源还没拉下来时保留来源那一行、算「没装」，不进一键同步；拉下来后只列单个技能", () => {
+    // 原预期是「待同步 + 一键同步去 clone」：那来自内置仓库固化进库、被当成生效配置的旧模型。
+    // 现在没拉取的集合只是还没生效，不是待办；用户在集合卡片上自己点「更新资源库」。
     const bare = makeElement({
       id: "skill:agent-skills",
       domain: "skills",
@@ -149,17 +151,82 @@ describe("buildOverview 真实形态", () => {
       state: "not-materialized",
       actions: [makeAction("update"), makeAction("remove")],
     });
-    expect(buildOverview({ skills: status("skills", [bare]) })[0].items.map((item) => [item.name, item.sync])).toEqual([
-      ["agent-skills", "pending"],
-    ]);
-    expect(syncableOf(buildOverview({ skills: status("skills", [bare]) }))).toEqual([
-      { domain: "skills", name: "agent-skills", args: ["--only", "skill:agent-skills", "--action", "update"] },
-    ]);
+    const groups = buildOverview({ skills: status("skills", [bare]) });
+    expect(groups[0].items.map((item) => [item.name, item.sync])).toEqual([["agent-skills", "absent"]]);
+    expect(groups[0].pending).toBe(0);
+    expect(syncableOf(groups)).toEqual([]);
 
     const expanded = buildOverview({
       skills: status("skills", [bare, makeElement({ id: "skill:agent-skills/find-skills", domain: "skills", spec: { name: "find-skills" } })]),
     });
     expect(expanded[0].items.map((item) => item.name)).toEqual(["find-skills"]);
+  });
+
+  it("推荐来源不是元素：空库只有推荐时技能不占位置、待同步为 0", () => {
+    const envelope = makeEnvelope(
+      {
+        domain: "skills",
+        elements: [],
+        recommendations: [
+          {
+            name: "agent-skills",
+            description: "",
+            url: "https://github.com/ly87ing/agent-skills.git",
+            skill_paths: ["verification"],
+            added: false,
+            definition: { url: "https://github.com/ly87ing/agent-skills.git", skill_paths: ["verification"] },
+          },
+        ],
+        installed: [],
+      },
+      { command: "skills.status" },
+    );
+    const groups = buildOverview({ skills: envelope });
+    expect(groups).toEqual([]);
+    expect(syncableOf(groups)).toEqual([]);
+  });
+
+  it("技能只在集合有可用更新、已启用链接缺失时算待同步；未分配与外部同名链接不算，被外部改过要你决定", () => {
+    const behind = makeElement({
+      id: "skill:mine",
+      domain: "skills",
+      spec: { name: "mine" },
+      state: "managed-ok",
+      actions: [makeAction("update"), makeAction("disable"), makeAction("remove")],
+      freshness: makeFreshness({ state: "behind", current: "a".repeat(40), upstream: "b".repeat(40) }),
+    });
+    const cell = (extra: Record<string, unknown>) => ({ link_path: "/x", target_dir_exists: true, ...extra });
+    const skill = (name: string, agents: Record<string, unknown>) =>
+      makeElement({ id: `skill:mine/${name}`, domain: "skills", spec: { collection: "mine", name }, observed: { agents } });
+    const groups = buildOverview({
+      skills: status("skills", [
+        behind,
+        skill("linked", { codex: cell({ state: "linked", assigned: true, enabled: true, actions: ["update", "disable", "remove"], version: "v1", available_version: "v1" }) }),
+        skill("missing", {
+          "claude-code": cell({ state: "not-assigned", assigned: false, enabled: false, actions: ["add"] }),
+          codex: cell({ state: "missing-link", assigned: true, enabled: true, actions: ["update", "disable", "remove"] }),
+        }),
+        skill("unassigned", { codex: cell({ state: "not-assigned", assigned: false, enabled: false, actions: ["add"] }) }),
+        skill("external-same-name", { codex: cell({ state: "extra-link", assigned: false, enabled: false, managed: false, actions: ["add", "remove"] }) }),
+        skill("changed", { codex: cell({ state: "drifted", assigned: true, enabled: true, actions: ["update", "disable", "remove"], blocked_reason: "目标入口存在外部内容" }) }),
+        skill("off", { codex: cell({ state: "disabled", assigned: true, enabled: false, actions: ["enable", "remove"] }) }),
+      ]),
+    });
+    const skills = groups.find((group) => group.domain === "skills");
+    expect(skills?.items.map((item) => [item.name, item.sync])).toEqual([
+      ["mine", "pending"],
+      ["linked", "ok"],
+      ["missing", "pending"],
+      ["unassigned", "absent"],
+      ["external-same-name", "absent"],
+      ["changed", "decision"],
+      ["off", "disabled"],
+    ]);
+    expect(skills?.pending).toBe(3);
+    expect(syncableOf(groups)).toEqual([
+      { domain: "skills", name: "mine", args: ["--only", "skill:mine", "--action", "update"] },
+      { domain: "skills", name: "missing", args: ["--only", "skill:mine/missing", "--agent", "codex", "--action", "update"] },
+    ]);
   });
 });
 

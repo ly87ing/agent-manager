@@ -359,6 +359,25 @@ function demoEnvelopes(): Record<string, Envelope> {
           state: "disabled",
         }),
       ],
+      recommendations: [
+        {
+          name: "agent-skills",
+          description: "本项目作者维护的通用工作技能：合并审查、方案设计、改动纪律、验证、临时产物整理、面向读者写作、技术图示。",
+          url: "https://github.com/ly87ing/agent-skills.git",
+          skill_paths: ["safe-merge-review", "solution-shaping", "change-discipline", "verification", "artifact-hygiene", "reader-facing-writing", "technical-diagramming"],
+          added: true,
+          definition: { url: "https://github.com/ly87ing/agent-skills.git", skill_paths: ["safe-merge-review", "solution-shaping", "change-discipline", "verification", "artifact-hygiene", "reader-facing-writing", "technical-diagramming"] },
+        },
+      ],
+      installed: [
+        { agent: "claude-code", name: "artifact-hygiene", link_path: "~/.claude/skills/artifact-hygiene", target: "~/Library/Application Support/agent-manager/skill-versions/aaaa/content", origin: "managed", collection: "agent-skills" },
+        { agent: "claude-code", name: "dead-one", link_path: "~/.claude/skills/dead-one", target: "~/gone/dead-one", origin: "dead-link", collection: null },
+        { agent: "claude-code", name: "safe-merge-review", link_path: "~/.claude/skills/safe-merge-review", target: "~/elsewhere/safe-merge-review", origin: "collection-extra-link", collection: "agent-skills" },
+        { agent: "claude-code", name: "synced", link_path: "~/.claude/skills/synced", target: null, origin: "native-dir", collection: null },
+        { agent: "claude-code", name: "vendor-lint", link_path: "~/.claude/skills/vendor-lint", target: "~/.vendor-tool/skills/vendor-lint", origin: "external-link", collection: null },
+        { agent: "codex", name: "artifact-hygiene", link_path: "~/.codex/skills/artifact-hygiene", target: "~/Library/Application Support/agent-manager/skill-versions/aaaa/content", origin: "managed", collection: "agent-skills" },
+        { agent: "codex", name: "safe-merge-review", link_path: "~/.codex/skills/safe-merge-review", target: "~/Library/Application Support/agent-manager/skill-versions/bbbb/content", origin: "managed", collection: "agent-skills" },
+      ],
     },
     { command: "skills.status" },
   );

@@ -9,6 +9,9 @@
 //! - `open_write` creates the data dir, initializes the shared schema and
 //!   freezes the builtin defaults into policy_entries on first write
 //!   ("firstwrite固化"), so later reads see a stable persisted baseline.
+//!   On an existing store it also runs write-path data migrations inside the
+//!   same write transaction (retire_unadopted_builtin_skill_repo); read paths
+//!   derive the same outcome on the fly and never migrate.
 //! - Write paths run on ONE connection with an explicit transaction and a busy
 //!   timeout; there is no nested/double initialization (schema init happens in
 //!   open_write before any user transaction starts).
@@ -102,31 +105,111 @@ pub const BUILTIN_POLICY_JSON: &str = r#"{
       "claude-haiku-4-5": {"input": 1, "output": 5, "cache_write": 1.25, "cache_read": 0.1}
     }
   },
-  "skills": {
-    "agent-skills": {"enabled": true},
-    "repositories": {
-      "agent-skills": {
-        "url": "https://github.com/ly87ing/agent-skills.git",
-        "skill_paths": [
-          "safe-merge-review",
-          "solution-shaping",
-          "change-discipline",
-          "verification",
-          "artifact-hygiene",
-          "reader-facing-writing",
-          "technical-diagramming"
-        ],
-        "agents": [
-          "claude-code",
-          "codex"
-        ]
-      }
-    }
-  }
+  "skills": {"repositories": {}}
 }"#;
 
 pub fn builtin_policy() -> Value {
     serde_json::from_str(BUILTIN_POLICY_JSON).expect("builtin policy template is valid JSON")
+}
+
+/// 旧版本内置并在首次写库时固化的技能集合名。现在它只是编译内置的推荐来源
+/// （native_skills::recommend），不再进库。
+pub const LEGACY_BUILTIN_SKILL_COLLECTION: &str = "agent-skills";
+
+/// 旧版本各时期固化进库的 `skills.repositories.agent-skills` 原值（按提交历史逐字取出：
+/// 77491f5 起 6 项 + 两个助手、676ad59 起多一个 opencode、947bc09 起 7 项）。
+const LEGACY_BUILTIN_SKILL_REPOS: &[&str] = &[
+    r#"{"url": "https://github.com/ly87ing/agent-skills.git",
+        "skill_paths": ["safe-merge-review", "change-discipline", "frontend-verification",
+                        "artifact-hygiene", "reader-facing-writing", "technical-diagramming"],
+        "agents": ["claude-code", "codex"]}"#,
+    r#"{"url": "https://github.com/ly87ing/agent-skills.git",
+        "skill_paths": ["safe-merge-review", "change-discipline", "frontend-verification",
+                        "artifact-hygiene", "reader-facing-writing", "technical-diagramming"],
+        "agents": ["claude-code", "codex", "opencode"]}"#,
+    r#"{"url": "https://github.com/ly87ing/agent-skills.git",
+        "skill_paths": ["safe-merge-review", "solution-shaping", "change-discipline",
+                        "verification", "artifact-hygiene", "reader-facing-writing",
+                        "technical-diagramming"],
+        "agents": ["claude-code", "codex"]}"#,
+];
+
+/// 集合定义是否仍是旧版本固化的内置原值（逐字段相同）。只比对定义本身；
+/// 是否从未生效（无 skill_bindings）由调用方按各自的数据源判定。
+pub fn is_legacy_builtin_skill_repo(name: &str, value: &Value) -> bool {
+    name == LEGACY_BUILTIN_SKILL_COLLECTION
+        && LEGACY_BUILTIN_SKILL_REPOS.iter().any(|raw| {
+            serde_json::from_str::<Value>(raw).expect("legacy builtin skill repo is valid JSON")
+                == *value
+        })
+}
+
+/// 写路径迁移：旧库里固化、仍为原值且从未在任何助手生效（该集合没有任何
+/// skill_bindings 行）的内置集合，从 policy 移除（连同它的集合开关）并记操作日志。
+/// 有 bindings 或被改过的保持为用户集合不动；已下载的仓库镜像不删。幂等：
+/// 条件不成立即零写。只在 open_write 的写事务里调用，读路径按同一判定即时推导。
+fn retire_unadopted_builtin_skill_repo(conn: &Connection) -> Result<()> {
+    let raw: Option<String> = conn
+        .query_row(
+            "SELECT value_json FROM policy_entries WHERE key = 'skills'",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+    let Some(raw) = raw else {
+        return Ok(());
+    };
+    let Ok(mut skills) = serde_json::from_str::<Value>(&raw) else {
+        // 损坏的 skills 行交给读路径 fail-closed 报错，迁移不碰它
+        return Ok(());
+    };
+    let name = LEGACY_BUILTIN_SKILL_COLLECTION;
+    let Some(repo) = skills.get("repositories").and_then(|repos| repos.get(name)) else {
+        return Ok(());
+    };
+    if !is_legacy_builtin_skill_repo(name, repo) {
+        return Ok(());
+    }
+    let has_bindings_table: bool = conn.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='skill_bindings'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )? > 0;
+    if has_bindings_table {
+        let bindings: i64 = conn.query_row(
+            "SELECT count(*) FROM skill_bindings WHERE collection = ?1",
+            [name],
+            |row| row.get(0),
+        )?;
+        if bindings > 0 {
+            return Ok(());
+        }
+    }
+    let object = skills
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("skills 配置不是对象"))?;
+    object.remove(name);
+    if let Some(repos) = object
+        .get_mut("repositories")
+        .and_then(Value::as_object_mut)
+    {
+        repos.remove(name);
+    }
+    conn.execute(
+        "UPDATE policy_entries SET value_json = ?1, updated_at = ?2 WHERE key = 'skills'",
+        rusqlite::params![serde_json::to_string(&skills)?, now_iso()],
+    )?;
+    record_operation(
+        conn,
+        None,
+        "skills:retire-builtin",
+        Some(name),
+        Some(&serde_json::json!({
+            "action": "retire-builtin",
+            "reason": "旧版本固化的内置技能仓库从未在任何助手生效，改为推荐来源",
+        })),
+    )?;
+    Ok(())
 }
 
 /// Path of the native database (pure: never touches the filesystem).
@@ -300,7 +383,11 @@ pub fn open_write(ctx: &Context) -> Result<Connection> {
             )
             .ok();
         match version.and_then(|raw| raw.parse::<i64>().ok()) {
-            Some(ver) if ver <= SCHEMA_VERSION => tx.commit()?,
+            Some(ver) if ver <= SCHEMA_VERSION => {
+                // 旧库数据迁移只在写路径执行，与版本校验同一写事务
+                retire_unadopted_builtin_skill_repo(&tx)?;
+                tx.commit()?
+            }
             Some(ver) => {
                 tx.rollback()?;
                 bail!("数据库版本 ({ver}) 高于当前程序支持版本 ({SCHEMA_VERSION})，拒绝访问")
@@ -536,6 +623,28 @@ mod tests {
                 home_dir: root.join("home"),
             },
         )
+    }
+
+    #[test]
+    fn legacy_builtin_skill_repo_matches_only_historical_values() {
+        for raw in LEGACY_BUILTIN_SKILL_REPOS {
+            let value: Value = serde_json::from_str(raw).unwrap();
+            assert!(is_legacy_builtin_skill_repo("agent-skills", &value));
+            // 同值换了集合名不算
+            assert!(!is_legacy_builtin_skill_repo("my-skills", &value));
+            // 任一字段被改过（含界面保存留下的 _delete:false）都是用户集合
+            let mut edited = value.clone();
+            edited["_delete"] = Value::Bool(false);
+            assert!(!is_legacy_builtin_skill_repo("agent-skills", &edited));
+            let mut edited = value.clone();
+            edited["agents"] = serde_json::json!(["codex"]);
+            assert!(!is_legacy_builtin_skill_repo("agent-skills", &edited));
+        }
+        // 当前内置 policy 不再带任何技能集合
+        assert_eq!(
+            builtin_policy()["skills"],
+            serde_json::json!({"repositories": {}})
+        );
     }
 
     #[test]

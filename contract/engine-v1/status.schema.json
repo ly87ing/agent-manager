@@ -17,9 +17,51 @@
       "description": "MCP domain only: unmanaged server entries found in configured agent target files, offered for import into the library. Each spec is masked — env and static header values are always '<literal>', only Codex env_http_headers pass through as ${VAR} references; plaintext secret values never appear. Read-only, zero-write.",
       "type": "array",
       "items": {"$ref": "#/$defs/import_candidate"}
+    },
+    "recommendations": {
+      "description": "Skills domain only: compiled-in recommended skill sources. Read-only catalog, never elements, never counted as pending sync, never probed or fetched. Adding one saves its 'definition' as an ordinary collection (no agents restriction, no assignment).",
+      "type": "array",
+      "items": {"$ref": "#/$defs/skill_recommendation"}
+    },
+    "installed": {
+      "description": "Skills domain only: actual entries found in each agent's skills directory (the current view), classified by the same scanner as system:discover. Display only, not pending items. Read-only, zero-write.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/skill_installed_entry"}
     }
   },
   "$defs": {
+    "skill_recommendation": {
+      "description": "One compiled-in recommended skill source.",
+      "type": "object",
+      "required": ["name", "description", "url", "skill_paths", "added", "definition"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"description": "Collection name used when the recommendation is added.", "type": "string"},
+        "description": {"description": "Human-readable summary.", "type": "string"},
+        "url": {"description": "Git repository URL of the source.", "type": "string"},
+        "skill_paths": {"description": "Skills the source offers.", "type": "array", "items": {"type": "string"}},
+        "added": {"description": "True when a non-deleted collection with the same name or URL already exists; the UI then offers no add action.", "type": "boolean"},
+        "definition": {"description": "Collection definition written on add: url and skill_paths only (no agents, no assignment).", "type": "object"}
+      }
+    },
+    "skill_installed_entry": {
+      "description": "One direct child of an agent's skills directory (hidden entries skipped).",
+      "type": "object",
+      "required": ["agent", "name", "link_path", "target", "origin", "collection"],
+      "additionalProperties": false,
+      "properties": {
+        "agent": {"description": "Agent id whose skills directory holds the entry.", "type": "string"},
+        "name": {"description": "Entry name (skill directory or link name).", "type": "string"},
+        "link_path": {"description": "Entry path, '~/...' when under HOME.", "type": "string"},
+        "target": {"description": "Symlink target ('~/...' when under HOME); null for real directories.", "type": ["string", "null"]},
+        "origin": {
+          "description": "managed = link written by this tool (assigned binding, target inside a managed base); native-dir = real directory; external-link / collection-extra-link = link to an outside path; legacy-link = unassigned link into a managed base; dead-link = link whose target is gone.",
+          "type": "string",
+          "enum": ["managed", "native-dir", "external-link", "collection-extra-link", "legacy-link", "dead-link"]
+        },
+        "collection": {"description": "Owning collection for managed entries, or the matching collection for collection-extra-link; otherwise null.", "type": ["string", "null"]}
+      }
+    },
     "import_candidate": {
       "description": "One unmanaged MCP server entry discovered in an agent's existing config file.",
       "type": "object",

@@ -259,13 +259,15 @@ fn collect_targets(ctx: &Context) -> Result<Vec<ProbeTarget>> {
         });
     }
 
+    // 旧库固化、从未生效的内置集合按推荐处理，推荐不参与上游检查
+    let hidden_skills = crate::native_skills::hidden_builtin_collections(ctx, &policy)?;
     if let Some(repos) = policy
         .get("skills")
         .and_then(|v| v.get("repositories"))
         .and_then(Value::as_object)
     {
         for (name, raw) in repos {
-            if raw.get("_delete") == Some(&Value::Bool(true)) {
+            if raw.get("_delete") == Some(&Value::Bool(true)) || hidden_skills.contains(name) {
                 continue;
             }
             let enabled = policy
