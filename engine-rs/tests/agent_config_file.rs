@@ -314,3 +314,31 @@ fn io_failure_is_reported_as_is_not_as_external_change() {
     );
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn length_params_stay_visible_and_pat_like_names_are_hidden() {
+    let (root, ctx) = temp_ctx("classes");
+    std::fs::write(
+        ctx.home_dir.join(".claude/settings.json"),
+        serde_json::to_vec_pretty(&json!({"env": {
+            "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "32000",
+            "GITHUB_PAT": "plain-pat-value-1",
+            "DB_PASS": "plain-pass-value-2"
+        }}))
+        .unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        ctx.home_dir.join(".codex/config.toml"),
+        "preferred_auth_method = \"apikey\"\n",
+    )
+    .unwrap();
+    let claude = read(&ctx, "agents:claude-code");
+    let content = claude["content"].as_str().unwrap();
+    assert!(content.contains("\"32000\""), "{content}");
+    assert!(!content.contains("plain-pat-value-1") && !content.contains("plain-pass-value-2"));
+    assert_eq!(claude["hidden"], 2);
+    let codex = read(&ctx, "agents:codex");
+    assert!(codex["content"].as_str().unwrap().contains("\"apikey\""));
+    let _ = std::fs::remove_dir_all(root);
+}

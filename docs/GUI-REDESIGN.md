@@ -204,6 +204,9 @@ profile 与各类表等）在「实际配置」页的「编辑配置文件」里
 --only <助手>` 只读零写，返回路径、格式（`json` / `toml`）、遮住凭据后的全文、遮住处数与整文件
 摘要 `base`（文件不存在为 `missing`）；读不懂的文件只给原因、不给全文，也不允许写。凭据取值
 （能认出的令牌，或名字像凭据的键上不像变量名、`${…}` 引用和路径的取值）显示为 `<hidden>`。
+「名字像凭据」与 MCP、独立环境落库前的判断是同一条规则，按整类判断：SECRET、PASSWORD、
+CREDENTIAL 这类词出现在哪都算；TOKEN、KEY 须是独立的词，`MAX_OUTPUT_TOKENS` 这类长度参数不算；
+PAT、PASS、PWD、AUTH 只在带前缀的末尾才算（`GITHUB_PAT` 算，`PWD`、`preferred_auth_method` 不算）。
 `agents:edit-config --only <助手> --file-base <base> --value <全文>` 写回：先比对整文件摘要，对不上即
 返回 `AGENT_CONFIG_CHANGED`（「已在外部修改」，包括助手自己改过），文件不动，界面重新读取最新内容；
 再按格式解析（JSON 须是对象），把仍在原位置的 `<hidden>` 还原成原值，出现在原来没有的位置一律

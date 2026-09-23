@@ -674,15 +674,71 @@ fn delete_dot_path(root: &mut Value, segments: &[&str]) -> Result<(), DispatchEr
     Ok(())
 }
 
-/// 变量名看起来是否承载凭据（TOKEN / KEY / SECRET / PASSWORD / CREDENTIAL / AUTH）。
+/// 变量名、请求头或配置键看起来是否承载凭据。
 ///
 /// 取值格式检测（`reject_secret_text`）只认得常见厂商前缀，自定义格式的令牌会漏过；
 /// 凡是要落库的环境变量或请求头字面量，名字像凭据就按凭据处理，不看取值长什么样。
+///
+/// 按整类匹配（参照 CC Switch 的 `is_sensitive_config_key`）：SECRET、PASSWORD、CREDENTIAL
+/// 这类词出现在哪都算；TOKEN、KEY 必须是独立的词（按 `_`、`-`、`.` 与驼峰分词），所以
+/// `MAX_OUTPUT_TOKENS` 这类长度参数不算；PAT、PASS、PWD、AUTH 只在带前缀的末尾才算——
+/// `GITHUB_PAT`、`DB_PASS`、`X-Auth` 算，shell 的 `PWD` 与 `preferred_auth_method` 不算。
 pub(crate) fn credential_like_name(name: &str) -> bool {
     let upper = name.to_ascii_uppercase();
-    ["TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH"]
+    if [
+        "SECRET",
+        "PASSWORD",
+        "PASSWD",
+        "PASSPHRASE",
+        "CREDENTIAL",
+        "AUTHORIZATION",
+        "APIKEY",
+        "APITOKEN",
+        "ACCESSKEY",
+    ]
+    .iter()
+    .any(|needle| upper.contains(needle))
+    {
+        return true;
+    }
+    let words = name_words(name);
+    words
         .iter()
-        .any(|needle| upper.contains(needle))
+        .any(|word| matches!(word.as_str(), "TOKEN" | "KEY" | "KEYS" | "CREDS"))
+        || (words.len() > 1
+            && matches!(
+                words.last().map(String::as_str),
+                Some("PAT" | "PASS" | "PWD" | "AUTH")
+            ))
+}
+
+/// 按 `_`、`-`、`.` 与驼峰边界拆成大写单词：`apiKeyHelper` → API KEY HELPER，`APIKey` → API KEY。
+fn name_words(name: &str) -> Vec<String> {
+    let chars: Vec<char> = name.chars().collect();
+    let mut words = Vec::new();
+    let mut word = String::new();
+    for (index, &c) in chars.iter().enumerate() {
+        if !c.is_ascii_alphanumeric() {
+            if !word.is_empty() {
+                words.push(std::mem::take(&mut word));
+            }
+            continue;
+        }
+        let camel = c.is_ascii_uppercase()
+            && index > 0
+            && (chars[index - 1].is_ascii_lowercase()
+                || chars[index - 1].is_ascii_digit()
+                || (chars[index - 1].is_ascii_uppercase()
+                    && chars.get(index + 1).is_some_and(|n| n.is_ascii_lowercase())));
+        if camel && !word.is_empty() {
+            words.push(std::mem::take(&mut word));
+        }
+        word.push(c.to_ascii_uppercase());
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    words
 }
 
 pub(crate) fn reject_secret_text(text: &str) -> Option<&'static str> {
@@ -696,7 +752,10 @@ pub(crate) fn reject_secret_text(text: &str) -> Option<&'static str> {
             ),
             (
                 "github_token",
-                regex::Regex::new(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b").unwrap(),
+                regex::Regex::new(
+                    r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b",
+                )
+                .unwrap(),
             ),
             (
                 "google_api_key",
@@ -1089,6 +1148,59 @@ mod tests {
             args: args.iter().map(|s| s.to_string()).collect(),
             run_id: "run-test".to_string(),
         }
+    }
+
+    #[test]
+    fn credential_names_match_by_word_class() {
+        for name in [
+            "GITHUB_TOKEN",
+            "ANTHROPIC_AUTH_TOKEN",
+            "OPENAI_API_KEY",
+            "API_KEYS",
+            "apiKey",
+            "accessToken",
+            "APIKey",
+            "S3Key",
+            "clientSecret",
+            "CLIENTSECRET",
+            "AWS_SECRET_ACCESS_KEY",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "SERVICE_CREDS",
+            "Authorization",
+            "X-Api-Key",
+            "X-Auth",
+            "OPENAI_APIKEY",
+            "VOLC_ACCESSKEY",
+            "GITHUB_PAT",
+            "DB_PASS",
+            "DB_PWD",
+            "MY_PASSWD",
+            "experimental_bearer_token",
+        ] {
+            assert!(credential_like_name(name), "{name} 应算凭据");
+        }
+        for name in [
+            "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+            "MAX_THINKING_TOKENS",
+            "maxOutputTokens",
+            "preferred_auth_method",
+            "PWD",
+            "OLDPWD",
+            "PATH",
+            "PASS_THROUGH",
+            "KEYBINDINGS",
+            "NODE_ENV",
+        ] {
+            assert!(!credential_like_name(name), "{name} 不应算凭据");
+        }
+    }
+
+    #[test]
+    fn github_fine_grained_pat_value_is_recognised() {
+        assert_eq!(
+            reject_secret_text("github_pat_11ABCDEFG0123456789_abcdefghijklmnop"),
+            Some("github_token")
+        );
     }
 
     #[test]
