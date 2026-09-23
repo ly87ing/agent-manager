@@ -110,34 +110,6 @@ pub(crate) fn load(ctx: &Context) -> Result<Vec<SourceRule>> {
     Ok(out)
 }
 
-/// 没有任何来源规则时，给界面的推荐来源（与技能推荐同一份），带上已登记的同名/同地址集合。
-pub(crate) fn suggested_sources(ctx: &Context) -> Result<Value> {
-    let meta = crate::native_skills::load_metadata(ctx)?;
-    let items = crate::native_skills::recommendations_value(&meta.collections);
-    let items = items
-        .as_array()
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|item| {
-            let url = item["url"].as_str().unwrap_or_default();
-            let name = item["name"].as_str().unwrap_or_default();
-            let collection = meta
-                .collections
-                .values()
-                .find(|c| !c.deleted && (c.name == name || c.url.as_deref() == Some(url)))
-                .map(|c| c.name.clone());
-            json!({
-                "name": name,
-                "description": item["description"],
-                "url": url,
-                "collection": collection,
-            })
-        })
-        .collect::<Vec<_>>();
-    Ok(Value::Array(items))
-}
-
 /// 某个规则文件最后一次从来源规则写入的记录。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Applied {

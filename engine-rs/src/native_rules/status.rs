@@ -204,7 +204,7 @@ pub(crate) fn build_status(ctx: &Context) -> Result<Value> {
         .map(|target| element(target, &list, &rules, &applied))
         .collect();
     let suggested = if rules.is_empty() {
-        sources::suggested_sources(ctx)?
+        crate::native_skills::suggested_sources(ctx)?
     } else {
         json!([])
     };

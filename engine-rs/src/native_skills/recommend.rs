@@ -60,6 +60,29 @@ pub(crate) fn unadopted_builtin_collections(
     out
 }
 
+/// 某个域（规则、别名）没有任何来源内容时给界面的推荐来源：与技能推荐同一份，
+/// `collection` 为已登记的同名/同地址集合（取回即可），没登记为 null。只读零写。
+pub(crate) fn suggested_sources(ctx: &crate::native::Context) -> anyhow::Result<Value> {
+    let meta = super::status::load_metadata(ctx)?;
+    let items = RECOMMENDATIONS
+        .iter()
+        .map(|rec| {
+            let collection = meta
+                .collections
+                .values()
+                .find(|c| !c.deleted && (c.name == rec.name || c.url.as_deref() == Some(rec.url)))
+                .map(|c| c.name.clone());
+            json!({
+                "name": rec.name,
+                "description": rec.description,
+                "url": rec.url,
+                "collection": collection,
+            })
+        })
+        .collect();
+    Ok(Value::Array(items))
+}
+
 /// status 的 `recommendations` 字段。`added`：已有同名或同地址的集合（未删除），
 /// 界面据此不再提供「添加」，避免覆盖用户已有的同名集合。
 pub(crate) fn recommendations_value(collections: &BTreeMap<String, CollectionDef>) -> Value {
