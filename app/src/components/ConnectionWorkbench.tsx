@@ -1,6 +1,7 @@
 import { useState, type MouseEvent } from "react";
 import { Activity, ArrowDown, ArrowUp, Check, Download, Loader2, MoreHorizontal, Pencil, Save, Settings2, Terminal, Trash2, Upload } from "lucide-react";
 import { AgentCurrentConfigView } from "./AgentCurrentConfigView";
+import { ConfigFileEditorDialog } from "./ConfigFileEditorDialog";
 import type { EngineElement } from "../lib/contract";
 import type { AgentCurrentConfig, AgentsObserved, AgentsSpec } from "../lib/observed";
 import {
@@ -123,6 +124,7 @@ export function ConnectionWorkbench({
   onClearEnvOverrides: (element: EngineElement) => void;
 }) {
   const [tab, setTab] = useState<WorkbenchTab>("providers");
+  const [editingFile, setEditingFile] = useState(false);
   const selected = agents.find((element) => element.id === selectedAgentId) ?? agents[0];
   if (!selected) return null;
 
@@ -378,15 +380,35 @@ export function ConnectionWorkbench({
 
         {tab === "actual" && (
           <div data-testid="actual-config-panel" className="space-y-3 rounded-xl border px-4 py-4">
-            <div>
-              <h3 className="text-sm font-medium text-foreground">当前实际生效值</h3>
-              <p className="mt-1 text-xs text-muted-foreground">按用途整理客户端最终读取值；敏感值只显示是否已配置。</p>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-medium text-foreground">当前实际生效值</h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  按用途整理客户端最终读取值；敏感值只显示是否已配置。表单没覆盖的设置（权限规则、插件、自定义环境变量等）可以直接编辑配置文件。
+                </p>
+              </div>
+              <button
+                type="button"
+                data-testid="agent-edit-config-file"
+                disabled={!kind}
+                onClick={() => setEditingFile(true)}
+                className="shrink-0 rounded-lg border px-3 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50"
+              >
+                编辑配置文件
+              </button>
             </div>
             <AgentCurrentConfigView
               status={currentConfig}
               fields={runtimeFields}
             />
           </div>
+        )}
+        {editingFile && (
+          <ConfigFileEditorDialog
+            agentId={agentId}
+            agentName={(selected.spec as AgentsSpec).display_name ?? agentId}
+            onClose={() => setEditingFile(false)}
+          />
         )}
 
         {!kind && (

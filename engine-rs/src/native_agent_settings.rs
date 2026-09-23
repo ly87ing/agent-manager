@@ -2436,6 +2436,34 @@ fn base_digest(kind: Kind, bytes: &[u8], recorded: &[String], statusline_path: &
     }
 }
 
+/// 原文编辑用的目标：与 configure 同一套助手查找、路径与链接规则。
+/// 返回（形态, 展示用路径, 实际读写的最终文件, 现有字节）。
+pub(crate) fn editable_target(
+    ctx: &Context,
+    agent_id: &str,
+) -> Result<(Kind, PathBuf, PathBuf, Option<Vec<u8>>)> {
+    let defs = crate::native_agents::load_definitions(ctx)?;
+    let def = defs
+        .iter()
+        .find(|d| d.id == agent_id)
+        .ok_or_else(|| anyhow::anyhow!("没有这个助手：{agent_id}"))?;
+    if def.spec_ref().get("profile").is_some() {
+        bail!("独立环境的配置文件请在独立环境里维护");
+    }
+    let kind = kind_for_bin(&def.bin)
+        .ok_or_else(|| anyhow::anyhow!("只有 Claude Code 与 Codex 形态的助手支持编辑配置文件"))?;
+    let path = target_path(ctx, kind, def.config_path())?;
+    let real = resolve_write_target(&path)?;
+    let existing = crate::native_mcp::rollback::read_existing_bytes(&real)?;
+    if existing
+        .as_ref()
+        .is_some_and(|bytes| bytes.len() as u64 > MAX_CLIENT_CONFIG_BYTES)
+    {
+        bail!("{} 超过安全读取上限，拒绝编辑", path.display());
+    }
+    Ok((kind, path, real, existing))
+}
+
 /// 该形态的目标文件。
 fn target_path(ctx: &Context, kind: Kind, config_path: Option<&str>) -> Result<PathBuf> {
     match kind {

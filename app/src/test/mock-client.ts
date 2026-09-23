@@ -1079,8 +1079,46 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
     return makeEnvelope({ variable, stored: value.length > 0 }, { command: "secrets.set", run_id: runId });
   };
 
+  // 配置文件原文编辑：只按整文件基准比对，凭据在 mock 里已是 <hidden>
+  const configFiles: Record<string, { path: string; format: string; content: string; base: string }> = {
+    "agents:claude-code": {
+      path: "~/.claude/settings.json",
+      format: "json",
+      content: '{\n  "env": {\n    "ANTHROPIC_AUTH_TOKEN": "<hidden>"\n  },\n  "effortLevel": "high",\n  "theme": "dark"\n}\n',
+      base: "f".repeat(64),
+    },
+    "agents:codex": {
+      path: "~/.codex/config.toml",
+      format: "toml",
+      content: '# 我的 codex 配置\nmodel = "gpt-5"\nmodel_reasoning_effort = "high"\n',
+      base: "e".repeat(64),
+    },
+  };
+  const readConfigFile = (args: string[]): Envelope => {
+    const element = argOf(args, "--only") ?? "";
+    const file = configFiles[element];
+    if (!file) {
+      return makeEnvelope({}, { command: "agents.config-file", ok: false, errors: [{ code: "AGENT_ERROR", element, message: "这个助手没有可直接编辑的配置文件" }] });
+    }
+    return makeEnvelope(
+      { domain: "agents", element, ...file, exists: true, hidden: (file.content.match(/<hidden>/g) ?? []).length, blocked_reason: null },
+      { command: "agents.config-file" },
+    );
+  };
+  const editConfigFile = (args: string[], runId: string): Envelope => {
+    const element = argOf(args, "--only") ?? "";
+    const file = configFiles[element];
+    if (!file || argOf(args, "--file-base") !== file.base) {
+      return makeEnvelope({}, { command: "agents.edit-config", ok: false, errors: [{ code: "AGENT_CONFIG_CHANGED", element, message: `${file?.path ?? element} 已在外部修改` }] });
+    }
+    file.content = argOf(args, "--value") ?? file.content;
+    file.base = (parseInt(file.base.slice(0, 8), 16) + 1).toString(16).padStart(64, "0");
+    recordRun(runId, "agents.edit-config");
+    return makeEnvelope({ domain: "agents", element, path: file.path, changed: [], base: file.base }, { command: "agents.edit-config", run_id: runId });
+  };
+
   let baseSeed = 100;
-  const configureAgent = (args: string[], runId: string): Envelope => {
+  const configureAgent =(args: string[], runId: string): Envelope => {
     const agentId = args[args.indexOf("--only") + 1];
     const data = routes["agents:status"].data as {
       elements: Array<{ id: string; spec: Record<string, unknown>; observed: Record<string, unknown> }>;
@@ -1318,6 +1356,8 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
         return makeEnvelope({ deleted }, { command: "runs.clear" });
       }
       if (command === "agents:configure") return configureAgent(args, runId);
+      if (command === "agents:config-file") return readConfigFile(args);
+      if (command === "agents:edit-config") return editConfigFile(args, runId);
       if (command === "agents:check") {
         return makeEnvelope(
           { ok: true, detail: "模拟连接正常", latency_ms: 128 },

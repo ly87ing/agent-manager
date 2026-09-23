@@ -37,7 +37,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:adopt / agents:configure|check / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:adopt / agents:configure|check|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
             ),
         )
     };
@@ -66,6 +66,8 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("agents", "configure") => true,
         // 接入配置可用性检查：会联网，但只在界面上点它时才发
         ("agents", "check") => true,
+        // 配置文件原文：读（凭据遮住）与整文件按基准写回
+        ("agents", "config-file" | "edit-config") => true,
         // 用量：status 只读，scan 读会话文件后写聚合，clear 清空重来
         ("usage", "status" | "scan" | "clear") => true,
         (d, "status" | "apply") => READ_WRITE_DOMAINS.contains(&d),
@@ -195,6 +197,13 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         ("agents", "check") => {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--use", ArgValueKind::ElementId));
+        }
+        ("agents", "config-file") => specs.push(("--only", ArgValueKind::ElementId)),
+        // 整文件写回：基准是 config-file 给出的文件摘要（或 missing），正文由引擎按格式校验
+        ("agents", "edit-config") => {
+            specs.push(("--only", ArgValueKind::ElementId));
+            specs.push(("--file-base", ArgValueKind::RuleBase));
+            specs.push(("--value", ArgValueKind::RuleText));
         }
         // 运行参数写助手配置文件：每次写入都带 status 给出的基准，外部改过就被拒；
         // 降安全等级与放弃实际配置都要显式标志。「接管 = 用库覆盖」的通道已退役。
@@ -1181,6 +1190,48 @@ mod tests {
                 "{command} {args:?} should fail"
             );
         }
+    }
+
+    #[test]
+    fn config_file_args_follow_the_contract() {
+        let base = "c".repeat(64);
+        let args = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(validate_command("agents:config-file").is_ok());
+        assert!(validate_command("agents:edit-config").is_ok());
+        assert!(validate_args(
+            "agents:config-file",
+            &args(&["--only", "agents:claude-code"])
+        )
+        .is_ok());
+        assert!(validate_args(
+            "agents:edit-config",
+            &args(&[
+                "--only",
+                "agents:claude-code",
+                "--file-base",
+                &base,
+                "--value",
+                "{\n  \"a\": 1\n}"
+            ])
+        )
+        .is_ok());
+        assert!(validate_args(
+            "agents:edit-config",
+            &args(&[
+                "--only",
+                "agents:claude-code",
+                "--file-base",
+                "BAD",
+                "--value",
+                "{}"
+            ])
+        )
+        .is_err());
+        assert!(validate_args(
+            "agents:config-file",
+            &args(&["--only", "agents:claude-code", "--value", "x"])
+        )
+        .is_err());
     }
 
     /// 实例以实际文件为准：写入与采纳都带基准；「接管」参数已退役。

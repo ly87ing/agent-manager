@@ -147,7 +147,10 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     let is_profile_apply = request.command.replace('.', ":") == "profiles:apply";
     // 运行参数写助手配置文件，与别的写动作同样要排他；校验在 configure 内部做，
     // 这里只负责取锁。
-    let is_agent_configure = request.command.replace('.', ":") == "agents:configure";
+    let is_agent_configure = matches!(
+        request.command.replace('.', ":").as_str(),
+        "agents:configure" | "agents:edit-config"
+    );
     let is_secret_write = matches!(
         request.command.replace('.', ":").as_str(),
         "secrets:set" | "secrets:source" | "secrets:migrate-legacy"
@@ -452,6 +455,13 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         // 运行参数落到助手自己的配置文件；与装卸升级分开，那条走 shell 命令，这条写文件
         ("agents", "configure") => {
             crate::native_agent_settings::apply(ctx, request).map(|data| (data, vec![]))
+        }
+        // 配置文件原文：读只读零写；写整文件按基准比对（取锁）
+        ("agents", "config-file") => crate::native_agent_config_file::read(ctx, request)
+            .map(|data| (data, vec![]))
+            .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}"))),
+        ("agents", "edit-config") => {
+            crate::native_agent_config_file::write(ctx, request).map(|data| (data, vec![]))
         }
         ("skills", "status" | "apply") => crate::native_skills::handle(ctx, request)
             .map(|data| (data, vec![]))
