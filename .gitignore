@@ -27,8 +27,7 @@ app/src-tauri/resources/
 app/.standalone-build/
 .claude/scheduled_tasks.lock
 
-# Agent Rule backups
-agent-rule/rules/**/*.bak.*
+# Backups
 **/*.bak.[0-9]*
 agent-skill/*
 !agent-skill/*.py
