@@ -130,10 +130,11 @@ fn claude_observed_config(
     let statusline = path_get(&value, &["statusLine", "command"])
         .and_then(Value::as_str)
         .map(|command| {
-            if statusline_path.is_some_and(|path| std::path::Path::new(command) == path) {
-                "builtin"
-            } else {
-                "custom"
+            match statusline_path.and_then(|path| builtin_statusline_form(command, path)) {
+                Some(StatuslineForm::Quoted) => "builtin",
+                // 旧版写的裸路径：仍是我们的，但不能报成与期望一致，否则用户不会重新应用
+                Some(StatuslineForm::Legacy) => "builtin-legacy",
+                None => "custom",
             }
         });
     let hide_attribution = path_get(&value, &["attribution", "commit"]).and_then(Value::as_str)
@@ -238,10 +239,42 @@ pub(crate) fn inspect_current_config(
 /// 用户自己定义的状态栏与本工具无关，既不清空也不算外部修改。
 const STATUSLINE_PATH: &[&str] = &["statusLine"];
 
+/// POSIX shell 单引号引用：整体包进 `'…'`，其中的 `'` 写成 `'\''`。
+fn shell_single_quote(raw: &str) -> String {
+    format!("'{}'", raw.replace('\'', "'\\''"))
+}
+
+/// 写进 `statusLine.command` 的内置状态栏命令。Claude Code 在 shell 里执行这条命令，
+/// 数据目录可能含空格（macOS 的 Application Support），所以始终引用，与路径内容无关。
+fn statusline_command(statusline_path: &std::path::Path) -> String {
+    shell_single_quote(&statusline_path.display().to_string())
+}
+
+/// 指向本工具状态栏的两种写法：当前的引用形式，与旧版写入的裸路径。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StatuslineForm {
+    Quoted,
+    Legacy,
+}
+
+/// 这条命令是不是本工具的状态栏、是哪种写法；识别、摘要与撤销都走这一个判定。
+fn builtin_statusline_form(
+    command: &str,
+    statusline_path: &std::path::Path,
+) -> Option<StatuslineForm> {
+    if command == statusline_command(statusline_path) {
+        Some(StatuslineForm::Quoted)
+    } else if std::path::Path::new(command) == statusline_path {
+        Some(StatuslineForm::Legacy)
+    } else {
+        None
+    }
+}
+
 fn statusline_is_ours(root: &Value, statusline_path: &std::path::Path) -> bool {
     path_get(root, &["statusLine", "command"])
         .and_then(Value::as_str)
-        .is_some_and(|cmd| std::path::Path::new(cmd) == statusline_path)
+        .is_some_and(|cmd| builtin_statusline_form(cmd, statusline_path).is_some())
 }
 
 /// 令牌走哪个请求头。两种中转站都有，配错了会一直 401。
@@ -748,7 +781,7 @@ pub(crate) fn render_claude(
         entry.insert("type".into(), Value::String("command".into()));
         entry.insert(
             "command".into(),
-            Value::String(statusline_path.display().to_string()),
+            Value::String(statusline_command(statusline_path)),
         );
         entry.insert("padding".into(), Value::Number(0.into()));
         path_set(&mut root, STATUSLINE_PATH, Value::Object(entry));
@@ -1886,13 +1919,107 @@ mod tests {
         let out = render_claude(None, &builtin, &no_secrets, &sl()).unwrap();
         let parsed: Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(parsed["statusLine"]["type"], "command");
-        assert_eq!(parsed["statusLine"]["command"], "/data/statusline.sh");
+        // command 在 shell 里执行：始终按单引号引用，路径含空格也不会被拆开
+        assert_eq!(parsed["statusLine"]["command"], "'/data/statusline.sh'");
 
         // 从内置切回「不碰」：把我们指过去的那条撤掉，用户之后自己配什么是他的事
         let back =
             render_claude(Some(&out), &AgentSettings::default(), &no_secrets, &sl()).unwrap();
         let parsed: Value = serde_json::from_slice(&back).unwrap();
         assert!(parsed.get("statusLine").is_none());
+
+        // 旧版写的裸路径同样是我们的：「不碰」时一并撤掉
+        let legacy = serde_json::to_vec(&json!({
+            "statusLine": {"type": "command", "command": "/data/statusline.sh"}
+        }))
+        .unwrap();
+        let back =
+            render_claude(Some(&legacy), &AgentSettings::default(), &no_secrets, &sl()).unwrap();
+        let parsed: Value = serde_json::from_slice(&back).unwrap();
+        assert!(parsed.get("statusLine").is_none());
+    }
+
+    #[test]
+    fn 状态栏命令按_posix_单引号引用_空格与单引号都不拆() {
+        assert_eq!(shell_single_quote("/a b/c.sh"), "'/a b/c.sh'");
+        assert_eq!(shell_single_quote("/it's/c.sh"), "'/it'\\''s/c.sh'");
+        let path = std::path::Path::new("/Library/Application Support/it's/statusline.sh");
+        let command = statusline_command(path);
+        assert_eq!(
+            command,
+            "'/Library/Application Support/it'\\''s/statusline.sh'"
+        );
+        assert_eq!(
+            builtin_statusline_form(&command, path),
+            Some(StatuslineForm::Quoted)
+        );
+        assert_eq!(
+            builtin_statusline_form(&path.display().to_string(), path),
+            Some(StatuslineForm::Legacy)
+        );
+        assert_eq!(builtin_statusline_form("/x/other.sh", path), None);
+        // 真让 shell 解一遍：得回原路径且只有一个词
+        let echoed = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(format!("printf '%s\\n' {command}"))
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(echoed.stdout).unwrap(),
+            format!("{}\n", path.display())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn 引用形式经_shell_执行部署的脚本_额度落在数据目录下() {
+        let root = std::env::temp_dir().join(format!(
+            "am statusline it's-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let data_dir = root.join("Application Support");
+        let path = data_dir.join(STATUSLINE_FILE);
+        deploy_statusline(&path).unwrap();
+        let command = statusline_command(&path);
+
+        let mut child = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&command)
+            .env("CLAUDE_CONFIG_DIR", "/tmp/am-config")
+            .env("AM_STATUSLINE_NOW", "1000")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        {
+            use std::io::Write;
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(
+                    br#"{"model":{"display_name":"Claude Opus"},"rate_limits":{"five_hour":{"used_percentage":42,"resets_at":4600},"seven_day":{"used_percentage":7,"resets_at":90000}}}"#,
+                )
+                .unwrap();
+        }
+        let out = child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(stdout.contains("Opus"), "{stdout}");
+        let usage = data_dir.join("usage").join("%2Ftmp%2Fam-config.json");
+        let saved = std::fs::read_to_string(&usage).unwrap();
+        assert!(saved.contains("\"used_percentage\":42"), "{saved}");
+        assert!(saved.contains("\"used_percentage\":7"), "{saved}");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -1996,7 +2123,7 @@ mod tests {
                 "API_TIMEOUT_MS": "600000",
                 "CLAUDE_CODE_EFFORT_LEVEL": "high"
             },
-            "statusLine": {"command": statusline.display().to_string()},
+            "statusLine": {"command": statusline_command(&statusline)},
             "attribution": {"commit": "", "pr": ""}
         }))
         .unwrap();
@@ -2075,12 +2202,20 @@ stream_idle_timeout_ms = 450000
         assert_eq!(custom["runtime"]["claude_hide_attribution"], false);
 
         let builtin = claude_observed_config(
-            br#"{"statusLine":{"command":"/tmp/agent-manager/statusline.sh"},"attribution":{"commit":"","pr":""}}"#,
+            br#"{"statusLine":{"command":"'/tmp/agent-manager/statusline.sh'"},"attribution":{"commit":"","pr":""}}"#,
             Some(statusline),
         )
         .unwrap();
         assert_eq!(builtin["runtime"]["statusline"], "builtin");
         assert_eq!(builtin["runtime"]["claude_hide_attribution"], true);
+
+        // 旧版写的裸路径：认得是我们的，但单独报出来，界面据此提示重新应用
+        let legacy = claude_observed_config(
+            br#"{"statusLine":{"command":"/tmp/agent-manager/statusline.sh"}}"#,
+            Some(statusline),
+        )
+        .unwrap();
+        assert_eq!(legacy["runtime"]["statusline"], "builtin-legacy");
     }
 
     #[cfg(unix)]

@@ -515,9 +515,10 @@ fn 内置状态栏会部署脚本并指过去_切回不碰只撤自己那条() {
         let mode = fs::metadata(&script).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o755, "状态栏脚本要可执行");
     }
+    // command 在 shell 里执行：按单引号引用，数据目录含空格也不会被拆开
     assert_eq!(
         settings_file(&ctx)["statusLine"]["command"],
-        script.display().to_string()
+        format!("'{}'", script.display())
     );
 
     // 落盘是它存在的理由：像 Claude Code 那样按绝对路径跑一次，额度落在数据目录下，
@@ -589,6 +590,127 @@ fn 内置状态栏会部署脚本并指过去_切回不碰只撤自己那条() {
         .ok
     );
     assert!(settings_file(&ctx).get("statusLine").is_none());
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+/// 模拟旧版本写下的状态：settings.json 里是裸路径的状态栏，库里的摘要按旧版口径
+/// （本工具拥有的切片序列化后取 sha256）计算，与旧版本写入后落库的值一致。
+fn seed_legacy_statusline(ctx: &Context, extra: Value) -> String {
+    use sha2::{Digest, Sha256};
+    let bare = ctx.data_dir.join("statusline.sh").display().to_string();
+    let statusline = json!({"type": "command", "command": bare, "padding": 0});
+    let mut file = json!({"statusLine": statusline.clone()});
+    for (key, value) in extra.as_object().unwrap() {
+        file[key] = value.clone();
+    }
+    fs::write(
+        ctx.home_dir.join(".claude/settings.json"),
+        serde_json::to_vec_pretty(&file).unwrap(),
+    )
+    .unwrap();
+    let slice = serde_json::to_vec(&json!({"statusLine": statusline})).unwrap();
+    let digest: String = Sha256::digest(&slice)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let conn = rusqlite::Connection::open(store::db_path(ctx)).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS agent_settings_bindings (
+             agent_id TEXT PRIMARY KEY NOT NULL, file TEXT NOT NULL,
+             applied_digest TEXT NOT NULL, updated_at TEXT NOT NULL,
+             owned_providers TEXT NOT NULL DEFAULT '[]')",
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT OR REPLACE INTO agent_settings_bindings
+             (agent_id, file, applied_digest, updated_at) VALUES ('claude-code', 'settings.json', ?1, 'old')",
+        [&digest],
+    )
+    .unwrap();
+    bare
+}
+
+fn claude_observed_statusline(ctx: &Context) -> Value {
+    let status = execute(ctx, &request("agents:status", &[]));
+    assert!(status.ok, "{:?}", status.errors);
+    status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|element| element["id"] == "agents:claude-code")
+        .unwrap()["observed"]["current_config"]["config"]["runtime"]["statusline"]
+        .clone()
+}
+
+#[test]
+fn 旧版裸路径状态栏_升级后报旧格式且不算外部修改_重新应用改成引用形式() {
+    let (base, ctx) = temp_ctx("statusline-legacy");
+    define_settings(&ctx, json!({"statusline": "builtin"}));
+    let bare = seed_legacy_statusline(&ctx, json!({"env": {"MY_OWN": "keep-me"}}));
+    let legacy_bytes = fs::read(ctx.home_dir.join(".claude/settings.json")).unwrap();
+
+    // 只读查询：认得是我们的，但单独报旧格式，界面据此判为不一致；查询零写
+    assert_eq!(claude_observed_statusline(&ctx), json!("builtin-legacy"));
+    assert_eq!(
+        fs::read(ctx.home_dir.join(".claude/settings.json")).unwrap(),
+        legacy_bytes
+    );
+
+    // 按旧口径算的摘要与现在一致：不带接管也能写，不被判外部修改
+    let applied = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:claude-code"]),
+    );
+    assert!(applied.ok, "{:?}", applied.errors);
+    assert_eq!(applied.data["takeover"], json!(false));
+    let after = settings_file(&ctx);
+    assert_eq!(after["statusLine"]["command"], format!("'{bare}'"));
+    assert_eq!(after["env"]["MY_OWN"], "keep-me");
+    assert_eq!(claude_observed_statusline(&ctx), json!("builtin"));
+
+    // 写成引用形式之后摘要照样对得上
+    let again = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:claude-code"]),
+    );
+    assert!(again.ok, "{:?}", again.errors);
+    assert_eq!(again.data["takeover"], json!(false));
+
+    // 「不碰」：引用形式被撤掉
+    define_settings(&ctx, json!({}));
+    let cleared = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:claude-code"]),
+    );
+    assert!(cleared.ok, "{:?}", cleared.errors);
+    assert!(settings_file(&ctx).get("statusLine").is_none());
+
+    // 「不碰」：旧裸路径同样被撤掉，也不算外部修改
+    seed_legacy_statusline(&ctx, json!({}));
+    let cleared = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:claude-code"]),
+    );
+    assert!(cleared.ok, "{:?}", cleared.errors);
+    assert_eq!(cleared.data["takeover"], json!(false));
+    assert!(settings_file(&ctx).get("statusLine").is_none());
+
+    // 用户自定义的状态栏：「不碰」时原样保留
+    let mut file = settings_file(&ctx);
+    file["statusLine"] = json!({"type": "command", "command": "/x/mine.sh"});
+    fs::write(
+        ctx.home_dir.join(".claude/settings.json"),
+        serde_json::to_vec_pretty(&file).unwrap(),
+    )
+    .unwrap();
+    let kept = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:claude-code"]),
+    );
+    assert!(kept.ok, "{:?}", kept.errors);
+    assert_eq!(settings_file(&ctx)["statusLine"]["command"], "/x/mine.sh");
+    assert_eq!(claude_observed_statusline(&ctx), json!("custom"));
 
     let _ = fs::remove_dir_all(&base);
 }

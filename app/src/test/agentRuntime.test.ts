@@ -57,4 +57,28 @@ describe("运行设置实际值对比", () => {
       .find((item) => item.key === "statusline")?.actual)
       .toBe("自定义状态栏（不受本工具管理）");
   });
+
+  it("旧格式的本工具状态栏显示升级提示，并与软件配置 builtin 判为不一致", () => {
+    const fields = agentManagementFixture("claude").runtime_fields;
+    const status = {
+      state: "ready",
+      file: "settings.json",
+      config: { runtime: { automation_mode: "manual", statusline: "builtin-legacy" } },
+    };
+    const saved = { automation_mode: "manual", statusline: "builtin" };
+
+    expect(runtimeAlignment(fields, saved, status)).toBe("drifted");
+    expect(runtimeComparisons(fields, saved, status).find((item) => item.key === "statusline"))
+      .toEqual(expect.objectContaining({
+        aligned: false,
+        saved: "用量状态栏",
+        actual: "本工具状态栏（旧格式，路径含空格时无法运行，重新应用即可修复）",
+      }));
+
+    // 重新应用后回读为 builtin：恢复一致
+    expect(runtimeAlignment(fields, saved, {
+      ...status,
+      config: { runtime: { automation_mode: "manual", statusline: "builtin" } },
+    })).toBe("aligned");
+  });
 });

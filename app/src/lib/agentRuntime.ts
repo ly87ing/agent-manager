@@ -45,6 +45,10 @@ function comparableValue(field: AgentRuntimeField, value: unknown): unknown {
 
 export function runtimeValueLabel(field: AgentRuntimeField, value: unknown): string {
   if (field.key === "statusline" && value === "custom") return "自定义状态栏（不受本工具管理）";
+  // 旧版写的裸路径：仍是本工具的状态栏，但与软件配置 builtin 不相等，因而判为不一致并给出重新应用入口
+  if (field.key === "statusline" && value === "builtin-legacy") {
+    return "本工具状态栏（旧格式，路径含空格时无法运行，重新应用即可修复）";
+  }
   if (value === undefined) return "暂不可读";
   if (value === null || value === "" || value === false) return field.summary?.default ?? "客户端默认";
   if (field.type === "boolean") return field.summary?.enabled ?? "已开启";

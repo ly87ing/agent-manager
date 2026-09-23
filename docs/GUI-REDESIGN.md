@@ -117,7 +117,7 @@ x-api-key，中转站两种都有）、模型、小任务模型、opus/sonnet/ha
 这几条的摘要。从没写过而这几项已有内容时按外部内容对待，同样要 `--allow-takeover`。
 
 **状态栏**是条件受管：`settings.statusline` 为 `builtin` 时部署内置脚本到
-`<data_dir>/statusline.sh`（0755）并把 `statusLine` 指过去；为 `untouched`（默认）时
+`<data_dir>/statusline.sh`（0755）并把 `statusLine` 指过去（Claude Code 在 shell 中执行该命令，路径按单引号引用；旧版写入的裸路径仍识别为本工具的，并报 `builtin-legacy` 提示重新应用）；为 `untouched`（默认）时
 只撤掉我们自己指过去的那条，用户手配的原样留着。判据是 `statusLine.command` 是否指向
 本工具部署的那份——指向别处的是用户的，既不清空也不算外部修改。内置脚本除了显示，
 还会把助手推给状态栏的 `rate_limits` 落盘（见「额度来源」）。
