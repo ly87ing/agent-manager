@@ -2,9 +2,9 @@
 
 Rust 原生库读写 `native-manager.db`，CLI 和 Tauri bridge 共同调用它，React UI 通过 bridge 展示结果并提交请求。
 
-## 唯一事实源
+## 事实源
 
-`native-manager.db` 保存本工具的定义、分配、policy 和应用偏好；设置位于 `app_settings` 表。没有第二份可写 JSON settings，也没有共享 profile 层。缺库读取不建库，写入通过 SQLite 事务初始化 schema 并记录 operation log。
+生效配置以各助手真实文件与目录为准（见 `GUI-REDESIGN.md`「数据模型：实际配置为准」）。`native-manager.db` 保存应用偏好、助手识别定义、归属记录与未生效的备选；设置位于 `app_settings` 表。没有第二份可写 JSON settings，也没有共享 profile 层。缺库读取不建库，写入通过 SQLite 事务初始化 schema 并记录 operation log。
 
 内置 policy 是编译进 Rust 的只读默认值。`policy:get` 只返回 builtin 与 sqlite 归属；写入参数固定为 `--layer local`，持久化层名为 `sqlite`。
 

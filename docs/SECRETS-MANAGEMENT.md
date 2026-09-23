@@ -1,6 +1,6 @@
 # Secrets 边界
 
-本页描述当前 Agent Manager 的边界。`native-manager.db` 是本工具定义、分配和偏好的唯一事实源；它不保存外部 secrets 仓库的明文凭据。设置位于 SQLite 的 `app_settings` 表。
+本页描述当前 Agent Manager 的边界。生效配置以各助手真实文件为准，`native-manager.db` 只保存偏好、归属记录与未生效的备选；它不保存外部 secrets 仓库的明文凭据。设置位于 SQLite 的 `app_settings` 表。
 
 ## 当前规则
 

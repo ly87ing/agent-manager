@@ -1,6 +1,6 @@
 # 故障排查
 
-本文面向当前 Rust/Tauri 实现。Agent Manager 的唯一事实源是 `native-manager.db`；设置在 `app_settings` 表。旧 Python、`manage.sh`、三层 JSON 和 profile 同步入口已退役，不是排查步骤。
+本文面向当前 Rust/Tauri 实现。生效配置以各助手真实文件为准；Agent Manager 自身的偏好、归属记录与未生效备选在 `native-manager.db`，设置在 `app_settings` 表。旧 Python、`manage.sh`、三层 JSON 和 profile 同步入口已退役，不是排查步骤。
 
 ## 先确认开发环境
 

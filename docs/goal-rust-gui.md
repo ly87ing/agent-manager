@@ -2,7 +2,7 @@
 
 ## 当前结论
 
-- 核心已就绪：Rust/SQLite/Tauri 共用库与 `native-manager.db` 唯一事实源。
+- 核心已就绪：Rust/SQLite/Tauri 共用库；2026-09-22 起数据模型改为「实际配置为准」（见下方裁决与 `GUI-REDESIGN.md`），实施中。
 - 已接线闭环：Agents、Skills、MCP、Rules、Hooks、Aliases 六个资源域，以及只读 `system:audit`、`secrets:status`、`system:discover`（接管发现，见下）、`system:refresh-upstream`（探测宇宙 agents/mcp/skills，缓存落 SQLite `upstream_probes` 表，三域 status 回填 freshness，前端收敛调用已补显式 `--action`）。
 - 2026-09-12 高级管理入口裁决已执行完毕：Aliases 原生闭环落地（`b7f30db`）；Tools、快照与 `system:converge` 退役清理完成（`9080c1d`）。
 - 远程 HTTP MCP 已落地（`b353aac`）：三客户端引用形式零明文落盘，与本地 stdio 同级安全语义。
@@ -15,7 +15,7 @@
 
 ## 目标
 
-让 CLI 与 Tauri 共享一个 Rust 原生库，并让 `native-manager.db` 成为本工具定义、分配和偏好的唯一事实源。设置保存在 `app_settings` 表，不引入可写 JSON settings 或 profile 层。
+让 CLI 与 Tauri 共享一个 Rust 原生库，生效配置以各助手真实文件为准，`native-manager.db` 保存偏好、归属记录与未生效的备选。设置保存在 `app_settings` 表，不引入可写 JSON settings 或 profile 层。
 
 ## 已完成
 
@@ -600,6 +600,13 @@ state 与 actions，不自己推断；用户主动停用的不催。syncPlan 是
 - Codex 运行配置：`agent_settings_bindings.owned_providers` 记录本工具写入的 provider id；旧注释仅用于一次性迁移识别。
 - 状态栏额度缓存迁至数据目录 `usage/`，不再读写助手配置目录内的缓存文件。
 - Shell 别名区块注释保留（rc 文件不是助手配置，无结构化字段可用）。Codex 实例的 `agent-manager.config.toml` 是 Codex 官方 profile 文件形式，保留。
+
+## 2026-09-22 实际配置为准裁决
+
+- 触发：用户指出除内置默认（需确认后应用）外，所有配置都应直接读取用户真实环境。盘点确认现状相反：内置 policy 首次写库即固化；规则、hooks、别名、MCP 卡片、运行参数表单展示库内副本；外部修改的唯一出路是「接管 = 用库覆盖」；内置别名、技能仓库、hooks 被计为待同步。
+- 参考：CC Switch（`farion1231/cc-switch@8e478b2`）首启把实际配置导入为当前项、官方预设只追加不激活（`src-tauri/src/lib.rs:728-782`），切换前回填实际配置（`services/provider/mod.rs:5836-5884`），提示词读取以实际文件刷新已启用项（`services/prompt.rs:62-85`）。不照搬其整份覆盖 settings.json、MCP 导入后以库为准、读取时写库三点。
+- 裁决：采用 `GUI-REDESIGN.md`「数据模型：实际配置为准」三层模型；规则取消 shared + adapter 拼接，改为每个助手一个实际文件，另提供「复制到另一个助手」；Codex MCP 停用使用官方 `mcp_servers.<id>.enabled = false`。
+- 实施阶段：契约 → 技能内置仓库改推荐 → 接入与运行参数（首启导入、实际值预填、切换回填）→ 规则（实际文件、模板、回填）→ Hooks（实际读写、清理建议）→ 别名（实际区块、推荐项）→ MCP（实际条目为主）。各阶段隔离环境实测回读、独立验收后分批提交推送。
 
 ## 本次停止点与恢复入口
 
