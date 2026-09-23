@@ -274,6 +274,8 @@ export interface SkillAgentCell {
   available_version?: string | null;
   actions?: string[];
   blocked_reason?: string | null;
+  /** 来源已取回且正常，却没有这个技能（上游删了）：只能移除这条分配。 */
+  source_missing?: boolean;
   target?: string | null;
 }
 

@@ -1289,6 +1289,170 @@ fn skills_moved_under_skills_dir_are_found_by_old_and_new_definitions() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+fn skill_cell(context: &Context, id: &str, agent: &str) -> Option<serde_json::Value> {
+    let status = execute(context, &request("skills:status", &[]));
+    assert!(status.ok, "{:?}", status.errors);
+    status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|el| el["id"] == id)
+        .map(|el| el["observed"]["agents"][agent].clone())
+}
+
+fn binding_agents(context: &Context, coll: &str, skill: &str) -> Vec<String> {
+    let conn = rusqlite::Connection::open(context.data_dir.join("native-manager.db")).unwrap();
+    let mut stmt = conn
+        .prepare(
+            "SELECT agent FROM skill_bindings WHERE collection = ?1 AND skill = ?2 ORDER BY agent",
+        )
+        .unwrap();
+    stmt.query_map([coll, skill], |row| row.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
+fn skill_action(
+    context: &Context,
+    id: &str,
+    action: &str,
+    agent: &str,
+) -> agent_manager_engine::Envelope {
+    execute(
+        context,
+        &request(
+            "skills:apply",
+            &["--only", id, "--action", action, "--agent", agent],
+        ),
+    )
+}
+
+#[test]
+fn skill_dropped_by_its_source_can_only_be_removed_and_leaves_no_record() {
+    let (root, context) = temp_ctx("skills-dropped-upstream");
+    let repo_dir = context.data_dir.join("repositories").join("drop-skills");
+    for name in ["alpha", "beta"] {
+        std::fs::create_dir_all(repo_dir.join("skills").join(name)).unwrap();
+        std::fs::write(
+            repo_dir.join("skills").join(name).join("SKILL.md"),
+            format!("# {name}\n"),
+        )
+        .unwrap();
+    }
+    set_collection(
+        &context,
+        "drop-skills",
+        r#"{"url":"https://example.com/drop-skills.git","skill_paths":["skills"]}"#,
+    );
+    for agent in ["claude-code", "codex"] {
+        let add = skill_action(&context, "skill:drop-skills/beta", "add", agent);
+        assert!(add.ok, "{:?}", add.errors);
+    }
+    let claude_link = context.home_dir.join(".claude/skills/beta");
+    let codex_link = context.home_dir.join(".codex/skills/beta");
+
+    // 上游删掉 beta；codex 那条链接也已经没了，claude 的还指着旧快照
+    std::fs::remove_dir_all(repo_dir.join("skills").join("beta")).unwrap();
+    std::fs::remove_file(&codex_link).unwrap();
+    for (agent, state) in [("claude-code", "linked"), ("codex", "missing-link")] {
+        let cell = skill_cell(&context, "skill:drop-skills/beta", agent).unwrap();
+        assert_eq!(cell["state"], state, "{agent}: {cell}");
+        assert_eq!(cell["source_missing"], true, "{agent}: {cell}");
+        assert_eq!(
+            cell["actions"],
+            serde_json::json!(["remove"]),
+            "{agent}: {cell}"
+        );
+        assert!(
+            cell["blocked_reason"]
+                .as_str()
+                .unwrap()
+                .contains("来源里已没有"),
+            "{agent}: {cell}"
+        );
+    }
+    // 来源里还在的技能不受影响
+    let alpha = skill_cell(&context, "skill:drop-skills/alpha", "codex").unwrap();
+    assert_eq!(alpha["source_missing"], false);
+
+    // 停用做不成：照旧拒绝，记录不动
+    let disable = skill_action(&context, "skill:drop-skills/beta", "disable", "codex");
+    assert!(!disable.ok);
+    assert_eq!(
+        binding_agents(&context, "drop-skills", "beta"),
+        ["claude-code", "codex"]
+    );
+
+    // 逐助手移除：codex 的记录删掉，claude 的记录与链接不动
+    let remove = skill_action(&context, "skill:drop-skills/beta", "remove", "codex");
+    assert!(remove.ok, "{:?}", remove.errors);
+    assert_eq!(
+        binding_agents(&context, "drop-skills", "beta"),
+        ["claude-code"]
+    );
+    assert!(
+        std::fs::symlink_metadata(&claude_link).is_ok(),
+        "另一个助手的链接不能动"
+    );
+    let codex_cell = skill_cell(&context, "skill:drop-skills/beta", "codex").unwrap();
+    assert_eq!(codex_cell["state"], "not-assigned");
+    assert_eq!(codex_cell["source_missing"], false);
+
+    // claude 那条链接还在（本工具建的），移除时一并删掉；最后这个技能从状态里消失
+    let remove = skill_action(&context, "skill:drop-skills/beta", "remove", "claude-code");
+    assert!(remove.ok, "{:?}", remove.errors);
+    assert!(
+        std::fs::symlink_metadata(&claude_link).is_err(),
+        "残留链接应删掉"
+    );
+    assert!(binding_agents(&context, "drop-skills", "beta").is_empty());
+    assert!(skill_cell(&context, "skill:drop-skills/beta", "codex").is_none());
+
+    // 没有分配记录的也不能凭空「移除」
+    let again = skill_action(&context, "skill:drop-skills/beta", "remove", "codex");
+    assert!(!again.ok);
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn unfetched_or_broken_source_is_not_mistaken_for_a_dropped_skill() {
+    let (root, context) = temp_ctx("skills-source-unknown");
+    let repo_dir = context.data_dir.join("repositories").join("flaky-skills");
+    std::fs::create_dir_all(repo_dir.join("skills").join("alpha")).unwrap();
+    std::fs::write(repo_dir.join("skills/alpha/SKILL.md"), "# alpha\n").unwrap();
+    set_collection(
+        &context,
+        "flaky-skills",
+        r#"{"url":"https://example.com/flaky-skills.git","skill_paths":["skills"]}"#,
+    );
+    let add = skill_action(&context, "skill:flaky-skills/alpha", "add", "codex");
+    assert!(add.ok, "{:?}", add.errors);
+
+    // 发现失败：技能都找不到，但不能提示移除
+    set_collection(
+        &context,
+        "flaky-skills",
+        r#"{"url":"https://example.com/flaky-skills.git","skill_paths":["skills","ghost"]}"#,
+    );
+    let cell = skill_cell(&context, "skill:flaky-skills/alpha", "codex").unwrap();
+    assert_eq!(cell["source_missing"], false, "{cell}");
+    assert_ne!(cell["actions"], serde_json::json!(["remove"]), "{cell}");
+
+    // 镜像不在：同样不算上游删掉
+    set_collection(
+        &context,
+        "flaky-skills",
+        r#"{"url":"https://example.com/flaky-skills.git","skill_paths":["skills"]}"#,
+    );
+    std::fs::rename(&repo_dir, context.data_dir.join("moved-away")).unwrap();
+    let cell = skill_cell(&context, "skill:flaky-skills/alpha", "codex").unwrap();
+    assert_eq!(cell["source_missing"], false, "{cell}");
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[cfg(unix)]
 #[test]
 fn skills_dir_fallback_does_not_escape_the_repository() {

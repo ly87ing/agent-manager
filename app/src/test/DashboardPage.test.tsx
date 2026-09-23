@@ -19,7 +19,7 @@ afterEach(() => {
   }
 });
 
-function renderDashboard(routes: Record<string, EngineRoute>) {
+function renderDashboard(routes: Record<string, EngineRoute>, onNavigate: (page: string) => void = () => {}) {
   servers.push(startEngineServer(routes));
   setEngineClient(createMswEngineClient());
   const queryClient = createQueryClient({ retry: false });
@@ -27,7 +27,7 @@ function renderDashboard(routes: Record<string, EngineRoute>) {
     <QueryClientProvider client={queryClient}>
       {/* 总览清单能一键同步，会执行 apply，所以需要执行通道 */}
       <ExecutionProvider>
-        <DashboardPage onNavigate={() => {}} />
+        <DashboardPage onNavigate={onNavigate} />
       </ExecutionProvider>
       <Toaster richColors position="bottom-right" />
     </QueryClientProvider>,
@@ -224,6 +224,36 @@ describe("DashboardPage", () => {
     await userEvent.click(within(confirm).getByRole("button", { name: "确认同步" }));
 
     expect(await screen.findByText("同步完成：成功 1，失败 0")).toBeInTheDocument();
+  });
+
+  it("要你决定的技能「去处理」直接定位到那个技能，不只是打开技能页", async () => {
+    const routes = okRoutes();
+    const skills = routes["skills:status"] as ReturnType<typeof makeEnvelope<{ domain: string; elements: ReturnType<typeof makeElement>[] }>>;
+    skills.data.elements.push(
+      makeElement({
+        id: "skill:agent-skills/gone",
+        domain: "skills",
+        spec: { collection: "agent-skills", name: "gone", source_path: null },
+        observed: {
+          agents: {
+            codex: {
+              state: "missing-link",
+              assigned: true,
+              enabled: true,
+              actions: ["remove"],
+              blocked_reason: "来源里已没有这个技能，可以移除",
+              source_missing: true,
+            },
+          },
+        },
+        state: "missing",
+      }),
+    );
+    const pages: string[] = [];
+    renderDashboard(routes, (page) => pages.push(page));
+
+    await userEvent.click(await screen.findByTestId("overview-goto-skill:agent-skills/gone"));
+    expect(pages).toEqual(["skills:gone"]);
   });
 
   it("envelope errors 时 ErrorPanel 展示 code/message，其余内容照常渲染", async () => {

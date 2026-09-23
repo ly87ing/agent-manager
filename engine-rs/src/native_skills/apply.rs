@@ -10,7 +10,9 @@ use super::paths::{
     resolve_link_target, resolve_loose, safe_remove_link, safe_remove_link_with_takeover,
     validate_local_source, ExpectedLinkState, RollbackGuard,
 };
-use super::persistence::{load_bindings_from_conn, load_bindings_readonly, write_binding};
+use super::persistence::{
+    delete_binding, load_bindings_from_conn, load_bindings_readonly, write_binding,
+};
 use super::snapshot::{discover_repo_skills, hash_skill_dir, snapshot_skill};
 use super::status::{load_metadata, record_apply_operation, DomainMetadata};
 use super::CollectionDef;
@@ -181,15 +183,22 @@ fn apply_single_skill(
         .agents
         .get(agent)
         .ok_or_else(|| anyhow!("未知 agent: {}", agent))?;
+    // 移除分配不需要来源：上游删掉了这个技能、或来源本身坏了，也要能撤掉分配。
+    let removing = action == "remove";
     // 本地来源集合直接在登记的源目录里发现 skill（直链模式）；git 集合仍走自管仓库缓存。
-    if is_local_source(coll) {
+    if is_local_source(coll) && !removing {
         validate_local_source(ctx, coll, &agent_target_map(meta))?;
     }
     let repo_dir = collection_source_root(ctx, coll);
-    let (discovered, _) = discover_repo_skills(&repo_dir, &coll.raw)?;
-    let source_dir = discovered
-        .get(skill)
-        .ok_or_else(|| anyhow!("集合 {} 中未发现 skill: {}", coll.name, skill))?;
+    let discovered = match discover_repo_skills(&repo_dir, &coll.raw) {
+        Ok((found, _)) => found,
+        Err(_) if removing => std::collections::BTreeMap::new(),
+        Err(err) => return Err(err),
+    };
+    let source_dir = discovered.get(skill);
+    if source_dir.is_none() && !removing {
+        bail!("集合 {} 中未发现 skill: {}", coll.name, skill);
+    }
     let link_path = agent_info.skills_dir.join(skill);
     let bases = managed_bases(ctx, &meta.collections);
 
@@ -197,6 +206,23 @@ fn apply_single_skill(
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let bindings = load_bindings_from_conn(&tx)?;
     let existing_binding = bindings.get(&(coll.name.clone(), skill.to_string(), agent.to_string()));
+    let Some(source_dir) = source_dir else {
+        // 来源里已经没有这个技能：连分配记录一起删掉，不留下永远找不到来源的一行
+        if existing_binding.is_none() {
+            bail!("集合 {} 中未发现 skill: {}", coll.name, skill);
+        }
+        return apply_skill_remove(
+            req,
+            coll,
+            existing_binding,
+            &link_path,
+            &bases,
+            tx,
+            skill,
+            agent,
+            true,
+        );
+    };
 
     dispatch_single_skill_action(
         ctx,
@@ -286,6 +312,7 @@ fn dispatch_single_skill_action(
             tx,
             skill,
             agent,
+            false,
         ),
         _ => bail!("不支持的技能动作: {}", action),
     }
@@ -595,6 +622,7 @@ fn apply_skill_remove(
     tx: rusqlite::Transaction,
     skill: &str,
     agent: &str,
+    source_missing: bool,
 ) -> Result<()> {
     let old_version = existing_binding
         .map(|b| b.version.clone())
@@ -614,13 +642,19 @@ fn apply_skill_remove(
         rollback_guard.record_mutation(link_path, old_target, ExpectedLinkState::Absent);
     }
     let res = (move || -> Result<()> {
-        write_binding(&tx, &coll.name, skill, agent, &old_version, false, false)?;
+        if source_missing {
+            delete_binding(&tx, &coll.name, skill, agent)?;
+        } else {
+            write_binding(&tx, &coll.name, skill, agent, &old_version, false, false)?;
+        }
         store::record_operation(
             &tx,
             Some(&req.run_id),
             "skills:remove",
             Some(&format!("{}/{}@{}", coll.name, skill, agent)),
-            Some(&json!({"action": "remove", "takeover": takeover})),
+            Some(
+                &json!({"action": "remove", "takeover": takeover, "source_missing": source_missing}),
+            ),
         )?;
         tx.commit()?;
         Ok(())

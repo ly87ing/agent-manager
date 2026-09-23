@@ -57,6 +57,8 @@ export default function App() {
   const settings = useSettings();
   const [activePage, setActivePage] = useState<string>("agents");
   const [selectedSkillAgent, setSelectedSkillAgent] = useState<string | null>(null);
+  /** 「skills:<名称>」跳转带进来的技能搜索词：总览「去处理」直接定位到那一行。 */
+  const [skillSearch, setSkillSearch] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteScope, setPaletteScope] = useState<"all" | "connections">("all");
   const [paletteConnectionTarget, setPaletteConnectionTarget] = useState<{ keyword: string; itemId: string } | null>(null);
@@ -114,8 +116,15 @@ export default function App() {
   if (settings.isError) return <PageError title="应用设置加载失败" error={settings.error} />;
 
   const handleNavigate = (page: string) => {
+    if (page.startsWith("skills:")) {
+      setSelectedSkillAgent(null);
+      setSkillSearch(page.slice("skills:".length));
+      setActivePage("skills");
+      return;
+    }
     if (page === "skills") {
       setSelectedSkillAgent(null);
+      setSkillSearch(null);
     }
     setActivePage(page);
   };
@@ -136,6 +145,7 @@ export default function App() {
             <AgentsPage
               onManageSkills={(agentId) => {
                 setSelectedSkillAgent(agentId);
+                setSkillSearch(null);
                 setActivePage("skills");
               }}
               onOpenSecrets={() => setActivePage("settings:secrets")}
@@ -144,6 +154,7 @@ export default function App() {
           {activePage === "skills" && (
             <SkillsPage
               initialAgent={selectedSkillAgent}
+              initialSearch={skillSearch}
               onResetAgent={() => setSelectedSkillAgent(null)}
             />
           )}
@@ -172,11 +183,15 @@ export default function App() {
           setPaletteConnectionTarget(null);
         }}
         onNavigate={(page) => {
-          if (page === "skills") setSelectedSkillAgent(null);
+          if (page === "skills") {
+            setSelectedSkillAgent(null);
+            setSkillSearch(null);
+          }
           setActivePage(page);
         }}
         onOpenAgentSkills={(agentId) => {
           setSelectedSkillAgent(agentId);
+          setSkillSearch(null);
           setActivePage("skills");
         }}
       />

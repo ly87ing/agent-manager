@@ -273,6 +273,35 @@ describe("buildOverview 真实形态", () => {
   });
 });
 
+describe("buildOverview 来源里已删除的技能", () => {
+  it("链接已丢的要你决定，并说明可以移除；链接还在的不催", () => {
+    const cell = (state: string) => ({
+      state,
+      link_path: "/x",
+      target_dir_exists: true,
+      assigned: true,
+      enabled: true,
+      actions: ["remove"],
+      blocked_reason: "来源里已没有这个技能，可以移除",
+      source_missing: true,
+    });
+    const groups = buildOverview({
+      skills: status("skills", [
+        makeElement({
+          id: "skill:mine/gone",
+          domain: "skills",
+          spec: { collection: "mine", name: "gone", source_path: null },
+          observed: { agents: { "claude-code": cell("missing-link"), codex: cell("linked") } },
+        }),
+      ]),
+    });
+    const item = groups.find((group) => group.domain === "skills")?.items[0];
+    expect(item?.sync).toBe("decision");
+    expect(item?.reason).toBe("来源里已没有这个技能，可以移除");
+    expect(syncableOf(groups)).toEqual([]);
+  });
+});
+
 describe("buildOverview 规则", () => {
   it("规则以实际文件为准，永不算待同步：有文件已同步、没文件没装、读写不了要你决定，也不进一键同步", () => {
     const write = [makeAction("write")];

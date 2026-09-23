@@ -63,6 +63,20 @@ pub(crate) fn load_bindings_readonly(
     }
 }
 
+/// 删掉一条分配记录（来源里已没有这个技能时的移除）。
+pub fn delete_binding(
+    tx: &rusqlite::Transaction,
+    coll: &str,
+    skill: &str,
+    agent: &str,
+) -> Result<()> {
+    tx.execute(
+        "DELETE FROM skill_bindings WHERE collection = ?1 AND skill = ?2 AND agent = ?3",
+        params![coll, skill, agent],
+    )?;
+    Ok(())
+}
+
 pub fn write_binding(
     tx: &rusqlite::Transaction,
     coll: &str,

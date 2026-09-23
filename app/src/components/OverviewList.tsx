@@ -213,7 +213,7 @@ export function OverviewList({ onNavigate }: { onNavigate?: (page: string) => vo
                     <button
                       type="button"
                       data-testid={`overview-goto-${item.id}`}
-                      onClick={() => onNavigate(pageOf(item.domain))}
+                      onClick={() => onNavigate(targetOf(item))}
                       className="rounded border px-2 text-[11px] leading-5 text-muted-foreground hover:bg-accent"
                     >
                       去处理
@@ -252,6 +252,12 @@ export function OverviewList({ onNavigate }: { onNavigate?: (page: string) => vo
       )}
     </div>
   );
+}
+
+/** 单个技能直接打开「全部技能」并搜到它：处理动作就在那一行，不让用户自己找。 */
+function targetOf(item: OverviewItem): string {
+  if (item.domain === "skills" && item.id.includes("/")) return `skills:${item.name}`;
+  return pageOf(item.domain);
 }
 
 function pageOf(domain: string): string {

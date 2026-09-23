@@ -73,19 +73,24 @@ function fullSkillDefinition(layers: PolicyLayers | null, name: string): Record<
 
 export default function SkillsPage({
   initialAgent,
+  initialSearch,
   onResetAgent,
 }: {
   initialAgent?: string | null;
+  /** 从总览「去处理」进来时直接搜到那个技能，处理动作就在它那一行。 */
+  initialSearch?: string | null;
   onResetAgent?: () => void;
 } = {}) {
   const query = useEngineQuery<StatusData>("skills:status");
   const agentsQuery = useEngineQuery<StatusData>("agents:status");
   const profilesQuery = useEngineQuery<StatusData>("profiles:status");
   const policyQuery = useEngineQuery<PolicyData>("policy:get");
-  const [activeTab, setActiveTab] = useState<"collections" | "skills">(() => (initialAgent ? "skills" : "collections"));
+  const [activeTab, setActiveTab] = useState<"collections" | "skills">(() =>
+    initialAgent || initialSearch ? "skills" : "collections",
+  );
   const [collectionFilter, setCollectionFilter] = useState<string>("all");
   const [agentFilter, setAgentFilter] = useState<string>(() => initialAgent ?? "all");
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSearch ?? "");
   const [showAddForm, setShowAddForm] = useState(false);
   const [editing, setEditing] = useState<EngineElement | null>(null);
 
@@ -104,6 +109,10 @@ export default function SkillsPage({
   /** 计划外链接的外部链接接管确认：add=纳入管理、remove=取消链接，确认后携带 --allow-takeover。 */
   const [pendingTakeover, setPendingTakeover] = useState<
     { element: EngineElement; agent: string; action: "add" | "remove" } | null
+  >(null);
+  /** 移除来源里已经没有的技能在某个助手上的分配：删掉记录和残留入口，先确认。 */
+  const [pendingDropped, setPendingDropped] = useState<
+    { element: EngineElement; agent: string; cell: SkillAgentCell } | null
   >(null);
   /** 批量 纳入管理/取消链接 的汇总确认：含外部链接（managed=false）的行先统一确认一次。 */
   const [pendingBatch, setPendingBatch] = useState<
@@ -291,6 +300,10 @@ export default function SkillsPage({
    * 计划外链接（extra-link）行：外部链接（managed=false）的纳入管理/取消链接先经确认，
    * 确认后携带 --allow-takeover；受管残留链接（managed=true）直接执行不弹确认。 */
   const handleSkillAction = (skill: EngineElement, agent: string, action: string, cell: SkillAgentCell | null) => {
+    if (cell?.source_missing && action === "remove") {
+      setPendingDropped({ element: skill, agent, cell });
+      return;
+    }
     const isExtraLinkAction = cell?.state === "extra-link" && (action === "add" || action === "remove");
     if (isExtraLinkAction && cell?.managed === false) {
       setPendingTakeover({ element: skill, agent, action: action as "add" | "remove" });
@@ -410,6 +423,27 @@ export default function SkillsPage({
     void definitionOps.saveDefinition({ name, definition, isNew: true }).then((ok) => {
       if (ok) toast.info(`集合 ${name} 已添加。点「更新资源库」取回仓库后，到「全部技能」里逐个启用到需要的助手。`);
     });
+  };
+
+  /** 入口被本工具以外的链接占着时，移除要显式接管（引擎侧仍对真实文件/目录 fail-closed）。 */
+  const confirmDropped = () => {
+    if (!pendingDropped) return;
+    const { element, agent, cell } = pendingDropped;
+    const skillName = (element.spec as SkillSpec).name ?? element.id;
+    void directApply.apply({
+      command: "skills:apply",
+      label: `移除 ${skillName} @ ${agent}`,
+      args: [
+        "--only",
+        element.id,
+        "--action",
+        "remove",
+        "--agent",
+        agent,
+        ...(cell.state === "drifted" ? ["--allow-takeover"] : []),
+      ],
+    });
+    setPendingDropped(null);
   };
 
   /** 接管确认后执行：apply 在原范围上追加 --allow-takeover（引擎侧仍对真实文件/目录 fail-closed）。 */
@@ -773,6 +807,24 @@ export default function SkillsPage({
           executing={false}
           onConfirm={confirmRecommendation}
           onClose={() => setPendingRecommendation(null)}
+        />
+      )}
+
+      {pendingDropped && (
+        <ConfirmModal
+          title={`移除 ${(pendingDropped.element.spec as SkillSpec).name ?? pendingDropped.element.id} @ ${pendingDropped.agent}`}
+          description={`来源里已经没有这个技能，删掉它在 ${pendingDropped.agent} 上的分配记录${
+            pendingDropped.cell.state === "drifted"
+              ? "；入口现在是本工具以外的链接，会一并删除这条链接"
+              : pendingDropped.cell.state === "missing-link"
+                ? "（入口已经不在了，不改动任何文件）"
+                : "，并删除本工具建的入口链接"
+          }。不影响其他助手。`}
+          risk="write-local"
+          confirmLabel="确认移除"
+          executing={directApply.executing}
+          onConfirm={confirmDropped}
+          onClose={() => setPendingDropped(null)}
         />
       )}
 

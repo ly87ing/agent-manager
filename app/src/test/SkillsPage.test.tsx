@@ -888,3 +888,85 @@ describe("SkillsPage 推荐来源与当前安装", () => {
     expect(screen.getByTestId("recommendation-add-agent-skills-rec")).toBeInTheDocument();
   });
 });
+
+/** 来源里已经删掉的技能：两个助手上都还有分配，一个链接已丢、一个还指着旧快照。 */
+function droppedRoutes() {
+  const routes = skillsRoutes();
+  const status = routes["skills:status"] as Envelope<{ domain: string; elements: ReturnType<typeof makeElement>[] }>;
+  status.data.elements.push(
+    makeElement({
+      id: "skill:agent-skills/gone",
+      domain: "skills",
+      spec: { collection: "agent-skills", name: "gone", source_path: null },
+      policy: { enabled: true, agents: { "claude-code": true, codex: true } },
+      observed: {
+        agents: {
+          "claude-code": {
+            state: "missing-link",
+            link_path: "/home/.claude/skills/gone",
+            target_dir_exists: true,
+            assigned: true,
+            enabled: true,
+            actions: ["remove"],
+            blocked_reason: "来源里已没有这个技能，可以移除",
+            source_missing: true,
+          },
+          codex: {
+            state: "linked",
+            link_path: "/home/.codex/skills/gone",
+            target_dir_exists: true,
+            assigned: true,
+            enabled: true,
+            managed: true,
+            actions: ["remove"],
+            blocked_reason: "来源里已没有这个技能，可以移除",
+            source_missing: true,
+          },
+        },
+        discovery_inbox: false,
+      },
+      state: "missing",
+    }),
+  );
+  return routes;
+}
+
+describe("SkillsPage 来源里已删除的技能", () => {
+  it("从总览定位进来：直接在全部技能里搜到它，只给「移除」，确认后按助手移除", async () => {
+    const { calls } = renderWithEngine(<SkillsPage initialSearch="gone" />, droppedRoutes());
+    const search = await screen.findByTestId("skills-search");
+    expect(search).toHaveValue("gone");
+    await screen.findByTestId("action-remove-skill:agent-skills/gone-claude-code");
+    // 搜索只留下这一行
+    expect(screen.queryByTestId("action-disable-skill:agent-skills/beta-claude-code")).toBeNull();
+    // 停用做不成，不再给
+    expect(screen.queryByTestId("action-disable-skill:agent-skills/gone-claude-code")).toBeNull();
+    expect(screen.getAllByText("来源里已没有这个技能，可以移除").length).toBeGreaterThan(0);
+
+    await userEvent.click(screen.getByTestId("action-remove-skill:agent-skills/gone-claude-code"));
+    const dialog = await screen.findByRole("dialog", { name: "移除 gone @ claude-code" });
+    expect(dialog).toHaveTextContent("入口已经不在了，不改动任何文件");
+    expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(0);
+    await userEvent.click(within(dialog).getByRole("button", { name: "确认移除" }));
+
+    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(1));
+    expect(calls.find((call) => call.command === "skills:apply")!.args).toEqual([
+      "--only",
+      "skill:agent-skills/gone",
+      "--action",
+      "remove",
+      "--agent",
+      "claude-code",
+    ]);
+  });
+
+  it("链接还在的那个助手：确认里说明会删掉本工具建的链接，取消则不写", async () => {
+    const { calls } = renderWithEngine(<SkillsPage initialSearch="gone" />, droppedRoutes());
+    await userEvent.click(await screen.findByTestId("action-remove-skill:agent-skills/gone-codex"));
+    const dialog = await screen.findByRole("dialog", { name: "移除 gone @ codex" });
+    expect(dialog).toHaveTextContent("并删除本工具建的入口链接");
+    expect(dialog).toHaveTextContent("不影响其他助手");
+    await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(0);
+  });
+});

@@ -51,8 +51,11 @@ export function SkillAgentCellActions({
   const needsUpdate = skillNeedsUpdate(cell);
   const needsRepair = (cell.state === "missing-link" || cell.state === "dead-link") && actions.includes("update");
   // 当前技能分发只有软链接：已分配技能的 disable/remove 都删除同一入口，
-  // UI 只保留可逆的停用；remove 仅用于未分配的计划外链接（取消链接）。
-  const visibleActions = cell.state === "extra-link"
+  // UI 只保留可逆的停用；remove 用于未分配的计划外链接（取消链接），以及来源里已经
+  // 没有的技能（启用、停用、更新都做不成，只剩移除）。
+  const visibleActions = cell.source_missing
+    ? actions.filter((action) => action === "remove")
+    : cell.state === "extra-link"
     ? (["add", "remove"] as const).filter((action) => actions.includes(action))
     : ([
         ...(needsUpdate ? ["update"] : []),
@@ -61,6 +64,7 @@ export function SkillAgentCellActions({
   const showStatus = !["linked", "disabled", "not-assigned"].includes(cell.state) || visibleActions.length === 0;
 
   const actionLabel = (action: string) => {
+    if (cell.source_missing && action === "remove") return "移除";
     if (needsRepair && action === "update") return "修复";
     if (cell.state === "not-assigned" && action === "add") return "启用";
     return cell.state === "extra-link" ? (EXTRA_LINK_ACTION_VIEW[action]?.label ?? SKILL_ACTION_VIEW[action]?.label) : SKILL_ACTION_VIEW[action]?.label;
@@ -75,7 +79,9 @@ export function SkillAgentCellActions({
           type="button"
           data-testid={`action-${action}-${skill.id}-${agent}`}
           title={
-            cell.state === "extra-link"
+            cell.source_missing
+              ? "来源里已没有这个技能：删掉这条分配记录和残留入口"
+              : cell.state === "extra-link"
               ? EXTRA_LINK_ACTION_VIEW[action]?.title
               : cell.state === "not-assigned" && action === "add"
                 ? "首次启用并建立分配"

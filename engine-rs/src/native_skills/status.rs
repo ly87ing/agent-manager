@@ -342,6 +342,7 @@ fn aggregate_skill_agents(
     skill_name: &str,
     available: bool,
     available_version: Option<&str>,
+    source_missing: bool,
     meta: &DomainMetadata,
     bindings: &BTreeMap<(String, String, String), super::BindingEntry>,
     bases: &[PathBuf],
@@ -370,6 +371,12 @@ fn aggregate_skill_agents(
         let mut ev = eval_agent_cell(
             coll, agent_info, agent_id, binding, &link_path, bases, available,
         );
+        // 来源已取回且发现正常，却没有这个技能：上游删掉了它。启用、停用、更新都做不成，
+        // 只剩移除这条分配（连同残留入口）
+        if source_missing && assigned {
+            ev.actions = vec!["remove"];
+            ev.blocked_reason = Some("来源里已没有这个技能，可以移除".to_string());
+        }
         let expected = expected_link_path(ctx, coll, skill_name, version.as_deref());
         verify_agent_link_state(
             &mut ev,
@@ -394,6 +401,7 @@ fn aggregate_skill_agents(
                 "available_version": available_version,
                 "actions": ev.actions,
                 "blocked_reason": ev.blocked_reason,
+                "source_missing": source_missing && assigned,
                 "target": link_path.display().to_string(),
             }),
         );
@@ -449,6 +457,7 @@ fn build_skill_element(
     coll: &CollectionDef,
     skill_name: &str,
     source_path: Option<&PathBuf>,
+    source_known: bool,
     meta: &DomainMetadata,
     bindings: &BTreeMap<(String, String, String), super::BindingEntry>,
     bases: &[PathBuf],
@@ -463,6 +472,7 @@ fn build_skill_element(
         skill_name,
         available,
         available_version.as_deref(),
+        source_known && !available,
         meta,
         bindings,
         bases,
@@ -646,6 +656,8 @@ pub fn build_status(ctx: &Context) -> Result<Value> {
                 coll,
                 skill_name,
                 discovered_map.get(skill_name),
+                // 镜像没取回或发现失败时，找不到不代表上游删了，不据此提示移除
+                repo_cached && discovery_error.is_none(),
                 &meta,
                 &bindings,
                 &bases,
