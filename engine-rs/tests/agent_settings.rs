@@ -1389,6 +1389,182 @@ fn codex_用户自己配的顶层键首次也要显式接管() {
     let _ = fs::remove_dir_all(&base);
 }
 
+/// 库里 agent_settings_bindings 有没有 codex 这一行；表不存在也算没有。
+fn has_codex_binding(ctx: &Context) -> bool {
+    let conn = rusqlite::Connection::open(store::db_path(ctx)).unwrap();
+    let exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='agent_settings_bindings'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    exists == 1
+        && conn
+            .query_row(
+                "SELECT COUNT(*) FROM agent_settings_bindings WHERE agent_id = 'codex'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+            == 1
+}
+
+fn header_count(text: &str, header: &str) -> usize {
+    text.lines().filter(|line| line.trim() == header).count()
+}
+
+/// 用户手写的同名 relay（带子表），旁边还有别的 provider 与同名 MCP 表。
+const USER_RELAY: &str = concat!(
+    "# 我自己的 relay\n",
+    "[model_providers.relay]\n",
+    "name = \"Hand Relay\"\n",
+    "base_url = \"https://hand.example.com/v1\"\n",
+    "\n",
+    "[model_providers.relay.http_headers]\n",
+    "X-Hand = \"1\"\n",
+    "\n",
+);
+const USER_OTHERS: &str = concat!(
+    "[model_providers.mine]\n",
+    "name = \"Mine\"\n",
+    "base_url  =  \"https://mine.example.com/v1\"   # 手写的对齐\n",
+    "\n",
+    "[mcp_servers.relay]\n",
+    "command = \"relay-mcp\"\n",
+);
+
+#[test]
+fn codex_用户自己的同名_provider_首次写入要显式接管_接管后只剩一张表() {
+    let (base, ctx) = temp_ctx("codex-provider-collision");
+    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
+    let path = ctx.home_dir.join(".codex/config.toml");
+    let original = format!("{USER_RELAY}{USER_OTHERS}");
+    fs::write(&path, &original).unwrap();
+    define_codex(
+        &ctx,
+        json!({"active": "relay", "profiles": {"relay": {"base_url": "https://relay.example.com/v1", "token_var": "RELAY_KEY"}}}),
+    );
+
+    let refused = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:codex"]),
+    );
+    assert!(!refused.ok, "追加同名表会生成重复表，必须拒绝");
+    // 与外部修改同一错误码与判定词：界面据此弹出接管确认
+    assert_eq!(refused.errors[0].code, "AGENT_ERROR");
+    assert!(
+        refused.errors[0].message.contains("拒绝覆盖")
+            && refused.errors[0]
+                .message
+                .contains("config.toml 中已有你自己的同名接入方式 relay"),
+        "{:?}",
+        refused.errors
+    );
+    assert_eq!(codex_config(&ctx), original, "拒绝时一个字节都不许动");
+    assert_eq!(
+        header_count(&codex_config(&ctx), "[model_providers.relay]"),
+        1
+    );
+    assert!(!has_codex_binding(&ctx), "拒绝时库里不许记下认领");
+
+    let taken = execute(
+        &ctx,
+        &request(
+            "agents:configure",
+            &["--only", "agents:codex", "--allow-takeover"],
+        ),
+    );
+    assert!(taken.ok, "{:?}", taken.errors);
+    assert_eq!(taken.data["takeover"], json!(true));
+    let after = codex_config(&ctx);
+    let parsed: toml::Value = after.parse().expect("接管后必须是合法 TOML");
+    assert_eq!(
+        header_count(&after, "[model_providers.relay]"),
+        1,
+        "{after}"
+    );
+    assert_eq!(
+        header_count(&after, "[model_providers.relay.http_headers]"),
+        0,
+        "用户那张表的子表随接管一起撤掉：{after}"
+    );
+    let relay = &parsed["model_providers"]["relay"];
+    assert_eq!(
+        relay["base_url"].as_str(),
+        Some("https://relay.example.com/v1")
+    );
+    assert_eq!(relay["env_key"].as_str(), Some("RELAY_KEY"));
+    assert_eq!(relay["requires_openai_auth"].as_bool(), Some(true));
+    assert!(relay.get("http_headers").is_none(), "{after}");
+    assert!(!after.contains("hand.example.com"), "{after}");
+    assert!(
+        after.contains(USER_OTHERS),
+        "别的 provider 与 MCP 表逐字节保留：{after}"
+    );
+    assert!(
+        after.contains("# 我自己的 relay\n"),
+        "用户注释保留：{after}"
+    );
+    assert_eq!(
+        parsed["mcp_servers"]["relay"]["command"].as_str(),
+        Some("relay-mcp")
+    );
+    assert_eq!(owned_providers(&ctx), json!(["relay"]));
+
+    // 接管之后就是本工具的表：再次写入不需要接管，也不报外部修改
+    let again = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:codex"]),
+    );
+    assert!(again.ok, "{:?}", again.errors);
+    assert_eq!(again.data["takeover"], json!(false));
+    assert_eq!(codex_config(&ctx), after, "同一套再写一遍应当稳定");
+    assert_eq!(owned_providers(&ctx), json!(["relay"]));
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn codex_本工具自己写过的同名_provider_再次写入不受影响() {
+    let (base, ctx) = temp_ctx("codex-provider-own");
+    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
+    fs::write(ctx.home_dir.join(".codex/config.toml"), USER_OTHERS).unwrap();
+    define_codex(
+        &ctx,
+        json!({"active": "relay", "profiles": {"relay": {"base_url": "https://relay.example.com/v1"}}}),
+    );
+    let first = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:codex"]),
+    );
+    assert!(first.ok, "{:?}", first.errors);
+    assert_eq!(owned_providers(&ctx), json!(["relay"]));
+
+    define_codex(
+        &ctx,
+        json!({"active": "relay", "profiles": {"relay": {"base_url": "https://relay2.example.com/v1"}}}),
+    );
+    let second = execute(
+        &ctx,
+        &request("agents:configure", &["--only", "agents:codex"]),
+    );
+    assert!(second.ok, "{:?}", second.errors);
+    assert_eq!(second.data["takeover"], json!(false));
+    let after = codex_config(&ctx);
+    assert!(after.parse::<toml::Value>().is_ok(), "{after}");
+    assert_eq!(
+        header_count(&after, "[model_providers.relay]"),
+        1,
+        "{after}"
+    );
+    assert!(after.contains("https://relay2.example.com/v1"), "{after}");
+    assert!(after.contains(USER_OTHERS), "{after}");
+    assert_eq!(owned_providers(&ctx), json!(["relay"]));
+
+    let _ = fs::remove_dir_all(&base);
+}
+
 // ---------- 可用性检查 ----------
 
 #[test]

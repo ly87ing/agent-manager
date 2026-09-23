@@ -893,6 +893,20 @@ fn codex_claimed_providers(content: &str, recorded: &[String]) -> BTreeSet<Strin
     claimed
 }
 
+/// 文件里有没有 `[model_providers.<name>]` 或它的子表（与认领同一套表头解析）。
+fn toml_has_provider(content: &str, name: &str) -> bool {
+    content
+        .lines()
+        .any(|line| toml_header(line.trim()).and_then(provider_id_of) == Some(name))
+}
+
+/// 本次要写的 provider 表名：生效的接入配置真配了地址或令牌变量才建表。
+fn codex_provider_to_write(settings: &AgentSettings) -> Option<&str> {
+    let name = settings.active.as_deref()?;
+    let profile = settings.current()?;
+    (profile.base_url.is_some() || profile.token_var.is_some()).then_some(name)
+}
+
 /// 删掉认领集合里的 provider 表（含子表）以及紧贴在它们前面的旧受管注释，其余原样保留。
 fn toml_remove_provider_tables(content: &str, claimed: &BTreeSet<String>) -> String {
     let mut out = String::new();
@@ -1025,6 +1039,12 @@ pub(crate) fn render_codex(
             let Some(url) = profile.base_url.as_deref() else {
                 bail!("接入配置 {name} 要填接口地址，Codex 的自定义接入方式没有默认地址");
             };
+            // 库里没记录的同名表是用户自己的：再追加一个会成重复表，Codex 读不了
+            if !claimed.contains(name) && toml_has_provider(existing, name) {
+                bail!(
+                    "{CODEX_CONFIG} 中已有你自己的同名接入方式 {name}，拒绝覆盖；确认要用这里的内容替换请选择接管"
+                );
+            }
             let mut table = format!(
                 "\n[model_providers.{}]\nname = {}\nbase_url = {}\n",
                 name,
@@ -1365,7 +1385,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
         Kind::Claude => CLAUDE_SETTINGS,
         Kind::Codex => CODEX_CONFIG,
     };
-    let takeover = external_change(ctx, &id, kind, &path)
+    let mut takeover = external_change(ctx, &id, kind, &path)
         .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}")))?;
     if takeover && !req.flag("--allow-takeover") {
         return Err(DispatchError::new(
@@ -1400,7 +1420,18 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
                 .unwrap_or_default()
                 .to_string();
             recorded_providers(ctx, &id)
-                .and_then(|recorded| render_codex(&text, &settings, &recorded))
+                .and_then(|mut recorded| {
+                    // 显式接管时，文件里用户自己的同名 provider 表一并认领：撤掉后换成本工具的
+                    if let Some(name) = codex_provider_to_write(&settings) {
+                        let foreign = !codex_claimed_providers(&text, &recorded).contains(name)
+                            && toml_has_provider(&text, name);
+                        if foreign && req.flag("--allow-takeover") {
+                            recorded.push(name.to_string());
+                            takeover = true;
+                        }
+                    }
+                    render_codex(&text, &settings, &recorded)
+                })
                 .map(|(text, written)| {
                     owned_providers = written;
                     text.into_bytes()
@@ -1590,6 +1621,46 @@ mod tests {
         // MCP 域的受管注释与表不归这里管
         assert!(out.contains("# [agent-manager:managed]\n[mcp_servers.grok]\ncommand = \"grok\"\n"));
         assert_eq!(out.matches("# [agent-manager:managed]").count(), 1);
+    }
+
+    #[test]
+    fn 用户自己的同名_provider_含引号写法_未认领就拒绝_认领后撤掉再写() {
+        let existing = concat!(
+            "[model_providers.\"relay\"]\n",
+            "base_url = \"https://hand.example.com\"\n",
+            "[model_providers.\"relay\".http_headers]\n",
+            "X = \"1\"\n",
+            "[mcp_servers.relay]\n",
+            "command = \"relay-mcp\"\n",
+        );
+        let err = render_codex(existing, &relay_settings("relay"), &[]).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("config.toml 中已有你自己的同名接入方式 relay，拒绝覆盖"),
+            "{err}"
+        );
+        // 只有 MCP 同名表不算冲突
+        let (_, written) = render_codex(
+            "[mcp_servers.relay]\ncommand = \"relay-mcp\"\n",
+            &relay_settings("relay"),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(written, vec!["relay".to_string()]);
+
+        let (out, written) =
+            render_codex(existing, &relay_settings("relay"), &["relay".to_string()]).unwrap();
+        assert_eq!(written, vec!["relay".to_string()]);
+        let parsed: toml::Value = out.parse().unwrap();
+        assert_eq!(
+            parsed["model_providers"]["relay"]["base_url"].as_str(),
+            Some("https://relay.example.com/v1")
+        );
+        assert!(!out.contains("hand.example.com"), "{out}");
+        assert!(
+            out.contains("[mcp_servers.relay]\ncommand = \"relay-mcp\"\n"),
+            "{out}"
+        );
     }
 
     #[test]
