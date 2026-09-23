@@ -36,476 +36,6 @@ fn sha256_hex(text: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-const DEFAULT_SHARED: &str = include_str!("../../agent-rule/rules/src/shared/core.md");
-const DEFAULT_CLAUDE: &str = include_str!("../../agent-rule/rules/src/agents/claude/adapter.md");
-const DEFAULT_CODEX: &str = include_str!("../../agent-rule/rules/src/agents/codex/adapter.md");
-
-fn assert_source_item_shape(item: &Value, key: &str, value: &str) {
-    let obj = item.as_object().unwrap();
-    let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
-    keys.sort_unstable();
-    assert_eq!(
-        keys,
-        ["format", "key", "label", "revision", "value"],
-        "sources[] 项严格为 key/label/value/revision/format"
-    );
-    assert_eq!(item["key"], key);
-    assert!(item["label"].is_string());
-    assert!(!item["label"].as_str().unwrap().is_empty());
-    assert_eq!(item["value"], value);
-    assert_eq!(item["revision"], sha256_hex(value));
-    assert_eq!(item["format"], "text");
-}
-
-#[test]
-fn get_returns_compiled_defaults_for_prefix_and_exact_keys() {
-    let (base, ctx) = temp_ctx("defaults");
-    let env = execute(&ctx, &request("sources:get", &["--key", "rules"]));
-    assert!(env.ok, "{:?}", env.errors);
-    let items = env.data["sources"].as_array().unwrap();
-    assert_eq!(items.len(), 3);
-    assert_source_item_shape(&items[0], "rules.shared", DEFAULT_SHARED);
-    assert_source_item_shape(&items[1], "rules.claude", DEFAULT_CLAUDE);
-    assert_source_item_shape(&items[2], "rules.codex", DEFAULT_CODEX);
-    assert_eq!(items[0]["label"], "共享核心规则");
-    assert_eq!(items[1]["label"], "Claude 专用适配");
-    assert_eq!(items[2]["label"], "Codex 专用适配");
-
-    for (key, default) in [
-        ("rules.shared", DEFAULT_SHARED),
-        ("rules.claude", DEFAULT_CLAUDE),
-        ("rules.codex", DEFAULT_CODEX),
-    ] {
-        let env = execute(&ctx, &request("sources:get", &["--key", key]));
-        assert!(env.ok, "{key}: {:?}", env.errors);
-        let items = env.data["sources"].as_array().unwrap();
-        assert_eq!(items.len(), 1);
-        assert_source_item_shape(&items[0], key, default);
-    }
-    assert!(!ctx.data_dir.exists(), "sources:get 不得创建数据目录");
-    assert!(!ctx.home_dir.exists());
-    let _ = std::fs::remove_dir_all(base);
-}
-
-#[test]
-fn get_rejects_nonconforming_args_with_source_error_and_zero_writes() {
-    let (base, ctx) = temp_ctx("get-strict");
-    let cases: Vec<Vec<&str>> = vec![
-        vec![],
-        vec!["--key"],
-        vec!["--key", "--value"],
-        vec!["--key", "rules.nope"],
-        vec!["--key", "RULES"],
-        vec!["--key", "rules", "--key", "rules"],
-        vec!["--key", "rules", "positional"],
-        vec!["--key", "rules", "--offline"],
-        vec!["--key", "rules", "--value", "{}"],
-        vec!["--key", "rules", "--dry-run"],
-    ];
-    for args in cases {
-        let env = execute(&ctx, &request("sources:get", &args));
-        assert!(!env.ok, "args {args:?} 应失败");
-        assert_eq!(env.errors[0].code, "SOURCE_ERROR", "args {args:?}");
-    }
-    assert!(!ctx.data_dir.exists());
-    assert!(!store::db_path(&ctx).exists());
-    let _ = std::fs::remove_dir_all(base);
-}
-
-#[test]
-fn set_dry_run_is_rejected_before_any_write() {
-    let (base, ctx) = temp_ctx("dry-run");
-    let current = execute(&ctx, &request("sources:get", &["--key", "rules.shared"]));
-    let revision = current.data["sources"][0]["revision"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let candidate = "新的共享规则正文\n第二行\n";
-    let wrapper = json!({ "revision": revision, "value": candidate }).to_string();
-    let env = execute(
-        &ctx,
-        &request(
-            "sources:set",
-            &["--key", "rules.shared", "--value", &wrapper, "--dry-run"],
-        ),
-    );
-    assert!(!env.ok, "--dry-run 已退役，必须拒绝: {:?}", env.data);
-    assert_eq!(env.errors[0].code, "SOURCE_ERROR");
-    // 零目标写：无 DB/表/apply lock/助手目标文件（失败写动作的诊断日志按统一
-    // 策略写 data_dir，不属于目标状态）
-    assert!(!store::db_path(&ctx).exists());
-    assert!(!ctx.home_dir.exists());
-    assert!(!ctx.data_dir.join("agent-manager.apply.lock").exists());
-    let after = execute(&ctx, &request("sources:get", &["--key", "rules.shared"]));
-    assert_eq!(after.data["sources"][0]["value"], DEFAULT_SHARED);
-    let _ = std::fs::remove_dir_all(base);
-}
-
-#[test]
-fn set_rejects_invalid_secret_nul_and_stale_inputs_without_writes() {
-    let (base, ctx) = temp_ctx("set-invalid");
-    let current = execute(&ctx, &request("sources:get", &["--key", "rules.shared"]));
-    let good_revision = current.data["sources"][0]["revision"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let secret_body = format!("sk-{}", "a".repeat(24));
-
-    let cases: Vec<Vec<String>> = vec![
-        // 前缀/未知 key
-        vec!["--key".into(), "rules".into()],
-        vec![
-            "--key".into(),
-            "rules.nope".into(),
-            "--value".into(),
-            json!({"revision": good_revision, "value": "x"}).to_string(),
-        ],
-        // 缺 --value / 缺值 / 位置参数 / 未知 flag / 重复 flag
-        vec!["--key".into(), "rules.shared".into()],
-        vec!["--key".into(), "rules.shared".into(), "--value".into()],
-        vec!["positional".into()],
-        vec![
-            "--key".into(),
-            "rules.shared".into(),
-            "--value".into(),
-            "{}".into(),
-            "--offline".into(),
-        ],
-        vec![
-            "--key".into(),
-            "rules.shared".into(),
-            "--key".into(),
-            "rules.claude".into(),
-            "--value".into(),
-            "{}".into(),
-        ],
-        // 非法 wrapper
-        vec![
-            "--key".into(),
-            "rules.shared".into(),
-            "--value".into(),
-            "{not json".into(),
-        ],
-        vec![
-            "--key".into(),
-            "rules.shared".into(),
-            "--value".into(),
-            "true".into(),
-        ],
-        vec![
-            "--key".into(),
-            "rules.shared".into(),
-            "--value".into(),
-            "[]".into(),
-        ],
-        vec![
-            "--key".into(),
-            "rules.shared".into(),
-            "--value".into(),
-            json!({"revision": good_revision, "value": "x", "extra": 1}).to_string(),
-        ],
-        vec![
-            "--key".into(),
-            "rules.shared".into(),
-            "--value".into(),
-            json!({"value": "x"}).to_string(),
-        ],
-        vec![
-            "--key".into(),
-            "rules.shared".into(),
-            "--value".into(),
-            json!({"revision": good_revision}).to_string(),
-        ],
-        vec![
-            "--key".into(),
-            "rules.shared".into(),
-            "--value".into(),
-            json!({"revision": 1, "value": "x"}).to_string(),
-        ],
-        vec![
-            "--key".into(),
-            "rules.shared".into(),
-            "--value".into(),
-            json!({"revision": good_revision, "value": 1}).to_string(),
-        ],
-        // NUL 正文
-        vec![
-            "--key".into(),
-            "rules.shared".into(),
-            "--value".into(),
-            json!({"revision": good_revision, "value": "a\0b"}).to_string(),
-        ],
-        // 过期 revision
-        vec![
-            "--key".into(),
-            "rules.shared".into(),
-            "--value".into(),
-            json!({"revision": "0".repeat(64), "value": "x"}).to_string(),
-        ],
-        // --dry-run 已退役：与其他未知选项一样在解析期、任何写之前拒绝
-        vec![
-            "--key".into(),
-            "rules.shared".into(),
-            "--value".into(),
-            json!({"revision": good_revision, "value": "x"}).to_string(),
-            "--dry-run".into(),
-        ],
-    ];
-    for args in cases {
-        let env = execute(&ctx, &request_owned("sources:set", args.clone()));
-        assert!(!env.ok, "args {args:?} 应失败");
-        assert_eq!(env.errors[0].code, "SOURCE_ERROR", "args {args:?}");
-    }
-
-    // 疑似凭据：拒绝且错误不回显正文
-    let secret = json!({"revision": good_revision, "value": secret_body}).to_string();
-    let env = execute(
-        &ctx,
-        &request(
-            "sources:set",
-            &["--key", "rules.shared", "--value", &secret],
-        ),
-    );
-    assert!(!env.ok);
-    assert_eq!(env.errors[0].code, "SOURCE_ERROR");
-    assert!(
-        !env.errors[0].message.contains("sk-"),
-        "错误不得回显凭据正文: {}",
-        env.errors[0].message
-    );
-
-    // 零写：未创建 DB/表/operation_logs，助手目标文件不存在
-    assert!(!store::db_path(&ctx).exists());
-    assert!(!ctx.home_dir.join(".claude/CLAUDE.md").exists());
-    assert!(!ctx.home_dir.join(".codex/AGENTS.md").exists());
-    let _ = std::fs::remove_dir_all(base);
-}
-
-#[test]
-fn real_set_roundtrip_revision_cas_and_audit_without_body() {
-    let (base, ctx) = temp_ctx("set-roundtrip");
-    let claude_md = ctx.home_dir.join(".claude/CLAUDE.md");
-    let codex_md = ctx.home_dir.join(".codex/AGENTS.md");
-    std::fs::create_dir_all(claude_md.parent().unwrap()).unwrap();
-    std::fs::create_dir_all(codex_md.parent().unwrap()).unwrap();
-    std::fs::write(&claude_md, b"# claude sentinel\n").unwrap();
-    std::fs::write(&codex_md, b"# codex sentinel\n").unwrap();
-
-    let env = execute(&ctx, &request("sources:get", &["--key", "rules.shared"]));
-    let rev0 = env.data["sources"][0]["revision"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    assert_eq!(rev0, sha256_hex(DEFAULT_SHARED));
-
-    let v1 = "团队规则 v1：显式假设。\n";
-    let wrapper = json!({"revision": rev0, "value": v1}).to_string();
-    let env = execute(
-        &ctx,
-        &request(
-            "sources:set",
-            &["--key", "rules.shared", "--value", &wrapper],
-        ),
-    );
-    assert!(env.ok, "{:?}", env.errors);
-    assert_source_item_shape(&env.data["sources"][0], "rules.shared", v1);
-    let rev1 = sha256_hex(v1);
-    assert_ne!(rev0, rev1);
-
-    let env = execute(&ctx, &request("sources:get", &["--key", "rules"]));
-    let items = env.data["sources"].as_array().unwrap();
-    assert_eq!(items[0]["value"], v1);
-    assert_eq!(items[0]["revision"], rev1);
-    assert_eq!(items[1]["value"], DEFAULT_CLAUDE);
-    assert_eq!(items[2]["value"], DEFAULT_CODEX);
-
-    // 过期 revision CAS 拒绝，已存内容不变且错误不回显候选正文
-    let stale = json!({"revision": rev0, "value": "不应写入"}).to_string();
-    let env = execute(
-        &ctx,
-        &request("sources:set", &["--key", "rules.shared", "--value", &stale]),
-    );
-    assert!(!env.ok);
-    assert_eq!(env.errors[0].code, "SOURCE_ERROR");
-    assert!(!env.errors[0].message.contains("不应写入"));
-    let env = execute(&ctx, &request("sources:get", &["--key", "rules.shared"]));
-    assert_eq!(env.data["sources"][0]["value"], v1);
-
-    // 当前 revision 再次保存成功
-    let v2 = "团队规则 v2：最小改动。\n";
-    let wrapper2 = json!({"revision": rev1, "value": v2}).to_string();
-    let env = execute(
-        &ctx,
-        &request(
-            "sources:set",
-            &["--key", "rules.shared", "--value", &wrapper2],
-        ),
-    );
-    assert!(env.ok, "{:?}", env.errors);
-    let rev2 = sha256_hex(v2);
-    let env = execute(&ctx, &request("sources:get", &["--key", "rules.shared"]));
-    assert_eq!(env.data["sources"][0]["value"], v2);
-
-    // 审计：只记 key 与新 revision，不记正文
-    let conn = store::open_readonly(&ctx).unwrap().unwrap();
-    let mut stmt = conn
-        .prepare(
-            "SELECT target, detail_json FROM operation_logs
-             WHERE operation_type='sources:set' ORDER BY created_at, rowid",
-        )
-        .unwrap();
-    let rows: Vec<(String, String)> = stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
-    assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0].0, "rules.shared");
-    assert_eq!(rows[1].0, "rules.shared");
-    assert!(rows[0].1.contains(&rev1));
-    assert!(rows[1].1.contains(&rev2));
-    for (target, detail) in &rows {
-        assert!(detail.contains("rules.shared"));
-        assert!(!detail.contains("团队规则"), "审计不得包含正文: {detail}");
-        assert!(!target.contains("团队规则"));
-    }
-    drop(stmt);
-    drop(conn);
-
-    // 助手目标文件字节不变；sources 不使用共享 apply lock
-    assert_eq!(std::fs::read(&claude_md).unwrap(), b"# claude sentinel\n");
-    assert_eq!(std::fs::read(&codex_md).unwrap(), b"# codex sentinel\n");
-    assert!(!ctx.data_dir.join("agent-manager.apply.lock").exists());
-
-    // policy 行为不受影响
-    let env = execute(&ctx, &request("policy:get", &[]));
-    assert!(env.ok);
-    assert_eq!(
-        env.data["effective"]["agents"]["definitions"]["codex"]["providers"]["native"]["upgrade"],
-        "curl -fsSL https://chatgpt.com/codex/install.sh | sh"
-    );
-    let _ = std::fs::remove_dir_all(base);
-}
-
-#[test]
-fn existing_db_without_table_reads_defaults_with_zero_write() {
-    let (base, ctx) = temp_ctx("existing-db");
-    let conn = store::open_write(&ctx).unwrap();
-    drop(conn);
-    let db = store::db_path(&ctx);
-    let bytes_before = std::fs::read(&db).unwrap();
-
-    let env = execute(&ctx, &request("sources:get", &["--key", "rules"]));
-    assert!(env.ok, "{:?}", env.errors);
-    let items = env.data["sources"].as_array().unwrap();
-    assert_eq!(items.len(), 3);
-    assert_source_item_shape(&items[0], "rules.shared", DEFAULT_SHARED);
-    assert_source_item_shape(&items[1], "rules.claude", DEFAULT_CLAUDE);
-    assert_source_item_shape(&items[2], "rules.codex", DEFAULT_CODEX);
-
-    // --dry-run 已退役：与过期 revision 一样在打开写连接前被拒绝
-    let rev = items[0]["revision"].as_str().unwrap().to_string();
-    let wrapper = json!({"revision": rev, "value": "候选正文"}).to_string();
-    let dry = execute(
-        &ctx,
-        &request(
-            "sources:set",
-            &["--key", "rules.shared", "--value", &wrapper, "--dry-run"],
-        ),
-    );
-    assert!(!dry.ok, "--dry-run 已退役，必须拒绝: {:?}", dry.data);
-    assert_eq!(dry.errors[0].code, "SOURCE_ERROR");
-
-    // 过期 revision 在打开写连接前即被拒绝
-    let stale = json!({"revision": "0".repeat(64), "value": "x"}).to_string();
-    let err = execute(
-        &ctx,
-        &request("sources:set", &["--key", "rules.shared", "--value", &stale]),
-    );
-    assert!(!err.ok);
-    assert_eq!(err.errors[0].code, "SOURCE_ERROR");
-
-    assert_eq!(
-        std::fs::read(&db).unwrap(),
-        bytes_before,
-        "只读路径 DB 字节不变"
-    );
-    let conn = store::open_readonly(&ctx).unwrap().unwrap();
-    let has_table: bool = conn
-        .query_row(
-            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='rule_sources'",
-            [],
-            |r| r.get::<_, i64>(0),
-        )
-        .unwrap()
-        > 0;
-    assert!(!has_table, "读路径不得创建 rule_sources 表");
-    drop(conn);
-    let _ = std::fs::remove_dir_all(base);
-}
-
-#[test]
-fn positional_body_marker_never_leaks_into_envelope() {
-    let (base, ctx) = temp_ctx("no-body-leak");
-    let marker = format!("LEAKMARKER-{}-唯一占位正文标记", std::process::id());
-    let current = execute(&ctx, &request("sources:get", &["--key", "rules.shared"]));
-    let revision = current.data["sources"][0]["revision"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let wrapper = json!({"revision": revision, "value": "合法候选正文"}).to_string();
-
-    // 非 dry-run 的真实 set：正文标记被误传为位置参数
-    let env = execute(
-        &ctx,
-        &request_owned(
-            "sources:set",
-            vec![
-                "--key".into(),
-                "rules.shared".into(),
-                "--value".into(),
-                wrapper.clone(),
-                marker.clone(),
-            ],
-        ),
-    );
-    assert!(!env.ok);
-    assert_eq!(env.errors[0].code, "SOURCE_ERROR");
-    assert_eq!(env.errors[0].message, "sources 参数错误：不接受位置参数");
-    assert!(!env.errors[0].message.contains(&marker));
-
-    // 同类解析错误同样不得回显参数值：未知选项与重复 flag
-    for extra in [
-        vec![format!("--{marker}")],
-        vec![format!("--{marker}"), format!("--{marker}")],
-    ] {
-        let mut args = vec![
-            "--key".into(),
-            "rules.shared".into(),
-            "--value".into(),
-            wrapper.clone(),
-        ];
-        args.extend(extra);
-        let env = execute(&ctx, &request_owned("sources:set", args));
-        assert!(!env.ok);
-        assert_eq!(env.errors[0].code, "SOURCE_ERROR");
-        assert!(
-            !env.errors[0].message.contains(&marker),
-            "错误消息不得回显参数值: {}",
-            env.errors[0].message
-        );
-    }
-
-    // 诊断日志已退役：错误路径不得在数据目录留下日志文件
-    assert!(!ctx.data_dir.join("logs").exists(), "不应再写诊断日志目录");
-
-    // SQLite / 助手目标文件 / operation_logs 零写
-    assert!(!store::db_path(&ctx).exists());
-    assert!(!ctx.home_dir.join(".claude/CLAUDE.md").exists());
-    assert!(!ctx.home_dir.join(".codex/AGENTS.md").exists());
-    let _ = std::fs::remove_dir_all(base);
-}
-
 // ---------- hooks 来源（hooks.claude / hooks.codex） ----------
 
 fn canonicalize_value(value: &Value) -> Value {
@@ -541,6 +71,369 @@ fn default_hook_canonical(raw: &str) -> String {
     obj.remove("settings_path");
     obj.remove("hooks_path");
     serde_json::to_string(&canonicalize_value(&Value::Object(obj))).unwrap()
+}
+
+/// 规则来源已退役：生效规则以各助手的规则文件为准（rules 域直接编辑、模板存
+/// rule_templates）。rules 前缀与三个精确键在 get/set 上一律拒绝，且零写。
+#[test]
+fn rules_source_keys_are_retired_with_zero_writes() {
+    let (base, ctx) = temp_ctx("rules-retired");
+    let wrapper = json!({"revision": "0".repeat(64), "value": "团队规则\n"}).to_string();
+    for key in ["rules", "rules.shared", "rules.claude", "rules.codex"] {
+        let env = execute(&ctx, &request("sources:get", &["--key", key]));
+        assert!(!env.ok, "{key} 已退役");
+        assert_eq!(env.errors[0].code, "SOURCE_ERROR");
+        assert!(env.errors[0].message.contains("规则来源已退役"), "{key}");
+        let env = execute(
+            &ctx,
+            &request("sources:set", &["--key", key, "--value", &wrapper]),
+        );
+        assert!(!env.ok, "{key} 已退役");
+        assert_eq!(env.errors[0].code, "SOURCE_ERROR");
+        assert!(env.errors[0].message.contains("规则来源已退役"), "{key}");
+        assert!(!env.errors[0].message.contains("团队规则"));
+    }
+    assert!(!ctx.data_dir.exists(), "拒绝不得创建数据目录");
+
+    // 已有库：同样拒绝，库字节不变，不会建出 rule_sources 表
+    let conn = store::open_write(&ctx).unwrap();
+    drop(conn);
+    let db = store::db_path(&ctx);
+    let before = std::fs::read(&db).unwrap();
+    let env = execute(
+        &ctx,
+        &request(
+            "sources:set",
+            &["--key", "rules.shared", "--value", &wrapper],
+        ),
+    );
+    assert!(!env.ok);
+    assert_eq!(std::fs::read(&db).unwrap(), before);
+    let conn = store::open_readonly(&ctx).unwrap().unwrap();
+    let has_table: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='rule_sources'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(has_table, 0);
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
+fn get_rejects_nonconforming_args_with_source_error_and_zero_writes() {
+    let (base, ctx) = temp_ctx("get-strict");
+    let cases: Vec<Vec<&str>> = vec![
+        vec![],
+        vec!["--key"],
+        vec!["--key", "--value"],
+        vec!["--key", "hooks.nope"],
+        vec!["--key", "HOOKS"],
+        vec!["--key", "hooks", "--key", "hooks"],
+        vec!["--key", "hooks", "positional"],
+        vec!["--key", "hooks", "--offline"],
+        vec!["--key", "hooks", "--value", "{}"],
+        vec!["--key", "hooks", "--dry-run"],
+    ];
+    for args in cases {
+        let env = execute(&ctx, &request("sources:get", &args));
+        assert!(!env.ok, "args {args:?} 应失败");
+        assert_eq!(env.errors[0].code, "SOURCE_ERROR", "args {args:?}");
+    }
+    assert!(!ctx.data_dir.exists());
+    assert!(!store::db_path(&ctx).exists());
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
+fn set_dry_run_is_rejected_before_any_write() {
+    let (base, ctx) = temp_ctx("dry-run");
+    let current = execute(&ctx, &request("sources:get", &["--key", "hooks.codex"]));
+    let revision = current.data["sources"][0]["revision"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let default_value = current.data["sources"][0]["value"].clone();
+    let candidate = json!({"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo dry"}]}]}});
+    let wrapper = json!({ "revision": revision, "value": candidate }).to_string();
+    let env = execute(
+        &ctx,
+        &request(
+            "sources:set",
+            &["--key", "hooks.codex", "--value", &wrapper, "--dry-run"],
+        ),
+    );
+    assert!(!env.ok, "--dry-run 已退役，必须拒绝: {:?}", env.data);
+    assert_eq!(env.errors[0].code, "SOURCE_ERROR");
+    // 零目标写：无 DB/表/apply lock/助手目标文件
+    assert!(!store::db_path(&ctx).exists());
+    assert!(!ctx.home_dir.exists());
+    assert!(!ctx.data_dir.join("agent-manager.apply.lock").exists());
+    let after = execute(&ctx, &request("sources:get", &["--key", "hooks.codex"]));
+    assert_eq!(after.data["sources"][0]["value"], default_value);
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
+fn set_rejects_invalid_secret_nul_and_stale_inputs_without_writes() {
+    let (base, ctx) = temp_ctx("set-invalid");
+    let current = execute(&ctx, &request("sources:get", &["--key", "hooks.codex"]));
+    let good_revision = current.data["sources"][0]["revision"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let hooks_with = |command: &str| json!({"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": command}]}]}});
+    let secret_body = format!("sk-{}", "a".repeat(24));
+
+    let cases: Vec<Vec<String>> = vec![
+        // 前缀/未知 key
+        vec!["--key".into(), "hooks".into()],
+        vec![
+            "--key".into(),
+            "hooks.nope".into(),
+            "--value".into(),
+            json!({"revision": good_revision, "value": {"hooks": {}}}).to_string(),
+        ],
+        // 缺 --value / 缺值 / 位置参数 / 未知 flag / 重复 flag
+        vec!["--key".into(), "hooks.codex".into()],
+        vec!["--key".into(), "hooks.codex".into(), "--value".into()],
+        vec!["positional".into()],
+        vec![
+            "--key".into(),
+            "hooks.codex".into(),
+            "--value".into(),
+            "{}".into(),
+            "--offline".into(),
+        ],
+        vec![
+            "--key".into(),
+            "hooks.codex".into(),
+            "--key".into(),
+            "hooks.claude".into(),
+            "--value".into(),
+            "{}".into(),
+        ],
+        // 非法 wrapper
+        vec![
+            "--key".into(),
+            "hooks.codex".into(),
+            "--value".into(),
+            "{not json".into(),
+        ],
+        vec![
+            "--key".into(),
+            "hooks.codex".into(),
+            "--value".into(),
+            "true".into(),
+        ],
+        vec![
+            "--key".into(),
+            "hooks.codex".into(),
+            "--value".into(),
+            "[]".into(),
+        ],
+        vec![
+            "--key".into(),
+            "hooks.codex".into(),
+            "--value".into(),
+            json!({"revision": good_revision, "value": {"hooks": {}}, "extra": 1}).to_string(),
+        ],
+        vec![
+            "--key".into(),
+            "hooks.codex".into(),
+            "--value".into(),
+            json!({"value": {"hooks": {}}}).to_string(),
+        ],
+        vec![
+            "--key".into(),
+            "hooks.codex".into(),
+            "--value".into(),
+            json!({"revision": good_revision}).to_string(),
+        ],
+        vec![
+            "--key".into(),
+            "hooks.codex".into(),
+            "--value".into(),
+            json!({"revision": 1, "value": {"hooks": {}}}).to_string(),
+        ],
+        vec![
+            "--key".into(),
+            "hooks.codex".into(),
+            "--value".into(),
+            json!({"revision": good_revision, "value": 1}).to_string(),
+        ],
+        // NUL 正文
+        vec![
+            "--key".into(),
+            "hooks.codex".into(),
+            "--value".into(),
+            json!({"revision": good_revision, "value": hooks_with("a\0b")}).to_string(),
+        ],
+        // 过期 revision
+        vec![
+            "--key".into(),
+            "hooks.codex".into(),
+            "--value".into(),
+            json!({"revision": "0".repeat(64), "value": {"hooks": {}}}).to_string(),
+        ],
+        // --dry-run 已退役：与其他未知选项一样在解析期、任何写之前拒绝
+        vec![
+            "--key".into(),
+            "hooks.codex".into(),
+            "--value".into(),
+            json!({"revision": good_revision, "value": {"hooks": {}}}).to_string(),
+            "--dry-run".into(),
+        ],
+    ];
+    for args in cases {
+        let env = execute(&ctx, &request_owned("sources:set", args.clone()));
+        assert!(!env.ok, "args {args:?} 应失败");
+        assert_eq!(env.errors[0].code, "SOURCE_ERROR", "args {args:?}");
+    }
+
+    // 疑似凭据：拒绝且错误不回显正文
+    let secret = json!({"revision": good_revision, "value": hooks_with(&secret_body)}).to_string();
+    let env = execute(
+        &ctx,
+        &request("sources:set", &["--key", "hooks.codex", "--value", &secret]),
+    );
+    assert!(!env.ok);
+    assert_eq!(env.errors[0].code, "SOURCE_ERROR");
+    assert!(
+        !env.errors[0].message.contains("sk-"),
+        "错误不得回显凭据正文: {}",
+        env.errors[0].message
+    );
+
+    // 零写：未创建 DB/表/operation_logs，助手目标文件不存在
+    assert!(!store::db_path(&ctx).exists());
+    assert!(!ctx.home_dir.join(".codex/hooks.json").exists());
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
+fn existing_db_without_table_reads_defaults_with_zero_write() {
+    let (base, ctx) = temp_ctx("existing-db");
+    let conn = store::open_write(&ctx).unwrap();
+    drop(conn);
+    let db = store::db_path(&ctx);
+    let bytes_before = std::fs::read(&db).unwrap();
+
+    let env = execute(&ctx, &request("sources:get", &["--key", "hooks"]));
+    assert!(env.ok, "{:?}", env.errors);
+    let items = env.data["sources"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(
+        serde_json::to_string(&items[0]["value"]).unwrap(),
+        default_hook_canonical(RAW_DEFAULT_HOOKS_CLAUDE)
+    );
+    assert_eq!(
+        serde_json::to_string(&items[1]["value"]).unwrap(),
+        default_hook_canonical(RAW_DEFAULT_HOOKS_CODEX)
+    );
+
+    // --dry-run 已退役：与过期 revision 一样在打开写连接前被拒绝
+    let rev = items[1]["revision"].as_str().unwrap().to_string();
+    let wrapper = json!({"revision": rev, "value": {"hooks": {}}}).to_string();
+    let dry = execute(
+        &ctx,
+        &request(
+            "sources:set",
+            &["--key", "hooks.codex", "--value", &wrapper, "--dry-run"],
+        ),
+    );
+    assert!(!dry.ok, "--dry-run 已退役，必须拒绝: {:?}", dry.data);
+    assert_eq!(dry.errors[0].code, "SOURCE_ERROR");
+
+    // 过期 revision 在打开写连接前即被拒绝
+    let stale = json!({"revision": "0".repeat(64), "value": {"hooks": {}}}).to_string();
+    let err = execute(
+        &ctx,
+        &request("sources:set", &["--key", "hooks.codex", "--value", &stale]),
+    );
+    assert!(!err.ok);
+    assert_eq!(err.errors[0].code, "SOURCE_ERROR");
+
+    assert_eq!(
+        std::fs::read(&db).unwrap(),
+        bytes_before,
+        "只读路径 DB 字节不变"
+    );
+    let conn = store::open_readonly(&ctx).unwrap().unwrap();
+    let has_table: bool = conn
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='hook_sources'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap()
+        > 0;
+    assert!(!has_table, "读路径不得创建 hook_sources 表");
+    drop(conn);
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
+fn positional_body_marker_never_leaks_into_envelope() {
+    let (base, ctx) = temp_ctx("no-body-leak");
+    let marker = format!("LEAKMARKER-{}-唯一占位正文标记", std::process::id());
+    let current = execute(&ctx, &request("sources:get", &["--key", "hooks.claude"]));
+    let revision = current.data["sources"][0]["revision"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let wrapper =
+        json!({"revision": revision, "value": {"hooks": {}, "removed_signatures": []}}).to_string();
+
+    // 真实 set：正文标记被误传为位置参数
+    let env = execute(
+        &ctx,
+        &request_owned(
+            "sources:set",
+            vec![
+                "--key".into(),
+                "hooks.claude".into(),
+                "--value".into(),
+                wrapper.clone(),
+                marker.clone(),
+            ],
+        ),
+    );
+    assert!(!env.ok);
+    assert_eq!(env.errors[0].code, "SOURCE_ERROR");
+    assert_eq!(env.errors[0].message, "sources 参数错误：不接受位置参数");
+    assert!(!env.errors[0].message.contains(&marker));
+
+    // 同类解析错误同样不得回显参数值：未知选项与重复 flag
+    for extra in [
+        vec![format!("--{marker}")],
+        vec![format!("--{marker}"), format!("--{marker}")],
+    ] {
+        let mut args = vec![
+            "--key".into(),
+            "hooks.claude".into(),
+            "--value".into(),
+            wrapper.clone(),
+        ];
+        args.extend(extra);
+        let env = execute(&ctx, &request_owned("sources:set", args));
+        assert!(!env.ok);
+        assert_eq!(env.errors[0].code, "SOURCE_ERROR");
+        assert!(
+            !env.errors[0].message.contains(&marker),
+            "错误消息不得回显参数值: {}",
+            env.errors[0].message
+        );
+    }
+
+    // 诊断日志已退役：错误路径不得在数据目录留下日志文件
+    assert!(!ctx.data_dir.join("logs").exists(), "不应再写诊断日志目录");
+
+    // SQLite / 助手目标文件 / operation_logs 零写
+    assert!(!store::db_path(&ctx).exists());
+    assert!(!ctx.home_dir.join(".claude/settings.json").exists());
+    let _ = std::fs::remove_dir_all(base);
 }
 
 #[test]

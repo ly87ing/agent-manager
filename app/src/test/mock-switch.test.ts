@@ -36,7 +36,18 @@ describe("dev-only mock 开关", () => {
       "config:export",
       "runs:clear",
     ]) {
-      const envelope = await client.run(command);
+      // 规则写入必须精确到一个目标并带写入基准，裸 rules:apply 不再是合法命令
+      const args = command === "rules:apply"
+        ? ["--only", "rules:codex_global", "--base", "aaaa3c8ae2687d47a8e7543d3c8c43ef8dd9f744e3a3e2ce9aa9ad7a90de12a2", "--recommended"]
+        : [];
+      const envelope = await client.run(command, args);
+      expect(envelope.ok, command).toBe(true);
+    }
+    for (const [command, args] of [
+      ["rules:save-template", ["--name", "演示模板", "--value", "- x\n"]],
+      ["rules:delete-template", ["--template", "tpl-demo-team"]],
+    ] as const) {
+      const envelope = await client.run(command, [...args]);
       expect(envelope.ok, command).toBe(true);
     }
 

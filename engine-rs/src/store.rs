@@ -10,8 +10,9 @@
 //!   freezes the builtin defaults into policy_entries on first write
 //!   ("firstwrite固化"), so later reads see a stable persisted baseline.
 //!   On an existing store it also runs write-path data migrations inside the
-//!   same write transaction (retire_unadopted_builtin_skill_repo); read paths
-//!   derive the same outcome on the fly and never migrate.
+//!   same write transaction (retire_unadopted_builtin_skill_repo, and
+//!   native_rules::templates::migrate_legacy_sources for the retired rule
+//!   sources); read paths derive the same outcome on the fly and never migrate.
 //! - Write paths run on ONE connection with an explicit transaction and a busy
 //!   timeout; there is no nested/double initialization (schema init happens in
 //!   open_write before any user transaction starts).
@@ -386,6 +387,7 @@ pub fn open_write(ctx: &Context) -> Result<Connection> {
             Some(ver) if ver <= SCHEMA_VERSION => {
                 // 旧库数据迁移只在写路径执行，与版本校验同一写事务
                 retire_unadopted_builtin_skill_repo(&tx)?;
+                crate::native_rules::templates::migrate_legacy_sources(&tx)?;
                 tx.commit()?
             }
             Some(ver) => {

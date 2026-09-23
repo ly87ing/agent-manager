@@ -15,7 +15,7 @@
 - **客户端诊断**：在「设置 → 客户端诊断」只读查看 AI CLI 是否可用、当前版本与安装来源；安装和更新继续使用客户端官方安装器或系统包管理器。
 - **Skills**：管理 Skill 集合与单个技能，按助手逐一启用、停用、更新或移除。
 - **MCP 服务器**：管理本地 stdio 与远程 HTTP 两类 MCP 服务器，按助手分配并写入 Claude JSON 或 Codex TOML；可从客户端现有配置发现导入。旧 OpenCode codec 仅用于兼容既有数据，不构成当前产品支持。
-- **Rules**：编辑共享与助手专用规则，应用到 `~/.codex/AGENTS.md` 与 `~/.claude/CLAUDE.md`。
+- **Rules**：直接查看和编辑 `~/.codex/AGENTS.md`、`~/.claude/CLAUDE.md` 与各实例的规则文件；规则模板只存在本机，应用模板、内置推荐或复制前先把对不上模板的原内容另存为备份。
 - **Hooks**：管理 Claude `~/.claude/settings.json` 与 Codex `~/.codex/hooks.json` 的钩子配置。
 - **助手实例**：为同一个助手配多套独立配置（不同账号或接口），各有自己的配置目录、登录、会话、技能与 MCP，多个实例可以同时开着互不干扰；全局 `~/.claude` 与 `~/.codex` 不受影响。鉴权只登记环境变量名，取值不进本工具的库。
 - **实例启动命令**：实例可维护自己的启动命令；通用终端快捷命令放在「设置 → 终端快捷命令」，写入 `~/.zshrc` 与 `~/.zprofile` 中由本工具维护的那一段，该段以外的内容不受影响。
@@ -112,7 +112,7 @@ cd app && pnpm test:unit run && pnpm typecheck && pnpm build
 
 Agent Manager is a desktop app (Tauri 2 + React + Rust/SQLite) for centrally managing Claude Code and Codex. The desktop app and CLI share one Rust engine. The UI is in Simplified Chinese.
 
-- **Features**: manage providers, isolated account instances, runtime settings, Skills, local stdio and remote HTTP MCP servers, Rules (`~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`), Hooks, and managed shell alias blocks in `~/.zshrc` / `~/.zprofile`; check for upstream updates; view redacted authentication and secrets status, local usage, and task history. AI CLI installation and updates remain with the official installer or system package manager.
+- **Features**: manage providers, isolated account instances, runtime settings, Skills, local stdio and remote HTTP MCP servers, Rules (edit `~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md` and per-instance rules files in place, with saved templates), Hooks, and managed shell alias blocks in `~/.zshrc` / `~/.zprofile`; check for upstream updates; view redacted authentication and secrets status, local usage, and task history. AI CLI installation and updates remain with the official installer or system package manager.
 - **Install**: no public GitHub Release yet — packages are unavailable until external prerequisites (signing keys, Apple Developer ID and notarization, Windows signing, per-platform hardware acceptance) are met; see [platform status](docs/GUI-PLATFORM-STATUS.md). To build from source on macOS, install the Rust toolchain, Node.js, and pnpm, clone without `--recursive` (the private `secrets/` submodule is not needed), then run `pnpm --dir app install --frozen-lockfile && pnpm --dir app run build:macos`.
 - **Safety model**: saving a definition only writes the local SQLite database (`native-manager.db` in the app data directory); nothing is installed or modified until you click execute. Apply runs with preflight checks, exact scope, an exclusive lock, fail-closed external-modification detection, conditional rollback, and audit logging; destructive actions require confirmation. MCP secrets are stored as `${VAR}` placeholders and written to client configs by reference — plaintext never lands in this tool's database or logs. No telemetry.
 - **License**: [MIT](LICENSE).

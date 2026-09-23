@@ -37,7 +37,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / agents:configure|check / secrets:status|set|adopt|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / sources:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / agents:configure|check / secrets:status|set|adopt|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / sources:* / db:*）"
             ),
         )
     };
@@ -55,6 +55,8 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("sources", "get" | "set") => true,
         ("db", "status" | "migrate") => true,
         ("config", "export" | "import") => true,
+        // 规则模板只写库：保存与删除，不动规则文件
+        ("rules", "save-template" | "delete-template") => true,
         // 运行参数写助手自己的配置文件：与装卸升级的 apply 分开，那条走 shell 命令
         ("agents", "configure") => true,
         // 接入配置可用性检查：会联网，但只在界面上点它时才发
@@ -99,6 +101,16 @@ enum ArgValueKind {
     FilePath,
     /// agents:configure 的写入基准：status 给出的 64 位小写十六进制摘要。
     Digest,
+    /// 规则正文（整份文件内容）：任意文本，换行等照常；NUL 等内容规则由引擎判定。
+    RuleText,
+    /// 规则写入的 CAS 基准：64 位小写 sha256，或文件不存在时的 missing。
+    RuleBase,
+    /// 规则模板 id：小写字母、数字与连字符。
+    TemplateId,
+    /// 规则模板名称：不含控制字符（换行也不行），长度有上限。
+    TemplateName,
+    /// 规则模板 revision：64 位小写 sha256。
+    Revision,
 }
 
 /// 每个命令允许的 flag 集合（命令感知白名单）。
@@ -122,6 +134,22 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--value", ArgValueKind::JsonValue));
         }
         ("system", "refresh-upstream") => specs.push(("--only", ArgValueKind::ElementId)),
+        // 规则以实际文件为准：写一个目标，base 做 CAS；新内容四选一（引擎再强制恰好一个）
+        ("rules", "apply") => {
+            specs.push(("--only", ArgValueKind::ElementId));
+            specs.push(("--base", ArgValueKind::RuleBase));
+            specs.push(("--value", ArgValueKind::RuleText));
+            specs.push(("--template", ArgValueKind::TemplateId));
+            specs.push(("--recommended", ArgValueKind::Flag));
+            specs.push(("--from", ArgValueKind::ElementId));
+        }
+        ("rules", "save-template") => {
+            specs.push(("--name", ArgValueKind::TemplateName));
+            specs.push(("--value", ArgValueKind::RuleText));
+            specs.push(("--template", ArgValueKind::TemplateId));
+            specs.push(("--revision", ArgValueKind::Revision));
+        }
+        ("rules", "delete-template") => specs.push(("--template", ArgValueKind::TemplateId)),
         // 只读发现：--only 取域名（agents/skills/mcp），引擎侧再做词汇表校验
         ("system", "discover") => specs.push(("--only", ArgValueKind::ElementId)),
         ("runs", "get") => {
@@ -176,9 +204,9 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
                 specs.push(("--action", ArgValueKind::McpAction));
                 specs.push(("--allow-takeover", ArgValueKind::Flag));
             }
-            // 受管目标被外部改过时的显式接管通道：hooks 与 rules 整文件替换、
+            // 受管目标被外部改过时的显式接管通道：hooks 整文件替换、
             // aliases 换整个受管区块，引擎侧再强制「须恰好选中一个目标」。
-            if matches!(domain, "hooks" | "rules" | "aliases") {
+            if matches!(domain, "hooks" | "aliases") {
                 specs.push(("--allow-takeover", ArgValueKind::Flag));
             }
             // 实例配置文件由本工具全权拥有：已有他人内容时需显式接管
@@ -316,6 +344,54 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
                 ))
             }
         }
+        ArgValueKind::RuleText => Ok(()),
+        ArgValueKind::RuleBase => {
+            if value == "missing" || is_sha256_hex(value) {
+                Ok(())
+            } else {
+                Err(EngineError::new(
+                    "invalid_args",
+                    "--base 必须是 64 位小写 sha256 或 missing",
+                ))
+            }
+        }
+        ArgValueKind::Revision => {
+            if is_sha256_hex(value) {
+                Ok(())
+            } else {
+                Err(EngineError::new(
+                    "invalid_args",
+                    "--revision 必须是 64 位小写 sha256",
+                ))
+            }
+        }
+        ArgValueKind::TemplateId => {
+            let ok = !value.is_empty()
+                && value.len() <= 64
+                && value
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+                && value
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+            if ok {
+                Ok(())
+            } else {
+                Err(EngineError::new("invalid_args", "非法规则模板 id"))
+            }
+        }
+        // 名称不回显：只说形状
+        ArgValueKind::TemplateName => {
+            if value.len() > 400 || value.chars().any(|c| c.is_control()) {
+                Err(EngineError::new(
+                    "invalid_args",
+                    "规则模板名称不能包含换行或控制字符，且不能过长",
+                ))
+            } else {
+                Ok(())
+            }
+        }
         ArgValueKind::JsonValue => serde_json::from_str::<serde_json::Value>(value)
             .map(|_| ())
             .map_err(|err| {
@@ -342,15 +418,35 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
     }
 }
 
+fn is_sha256_hex(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+}
+
+/// 规则目标 id：两个全局目标，或 `rules:profile:<实例 id>`（实例 id 与别名同一规则）。
+fn is_rules_target(value: &str) -> bool {
+    if value == "rules:codex_global" || value == "rules:claude_global" {
+        return true;
+    }
+    value.strip_prefix("rules:profile:").is_some_and(|id| {
+        id.chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+            && id
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    })
+}
+
 pub fn validate_args(command: &str, args: &[String]) -> Result<(), EngineError> {
     let specs = allowed_arg_specs(command);
     let (domain, _) = command.split_once(':').unwrap_or(("", ""));
     let is_rules = domain == "rules";
-    // sources 与 native 严格参数保持一致：拒绝重复 flag。
-    let reject_duplicates = matches!(command, "sources:get" | "sources:set");
+    // sources 与 rules 同 native 严格参数保持一致：拒绝重复 flag。
+    let reject_duplicates = matches!(command, "sources:get" | "sources:set") || is_rules;
     let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
-    // Rules 严格契约：--only 的 flag 可重复但值不可重复。
-    let mut rules_only_seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let mut index = 0;
     while index < args.len() {
         let arg = &args[index];
@@ -375,21 +471,13 @@ pub fn validate_args(command: &str, args: &[String]) -> Result<(), EngineError> 
                 ));
             };
             validate_arg_value(*kind, value)?;
-            if is_rules && arg == "--only" {
-                if value != "rules:codex_global" && value != "rules:claude_global" {
-                    return Err(EngineError::new(
-                        "invalid_args",
-                        format!(
-                            "非法 rules 目标 '{value}'（仅 rules:codex_global|rules:claude_global）"
-                        ),
-                    ));
-                }
-                if !rules_only_seen.insert(value.as_str()) {
-                    return Err(EngineError::new(
-                        "invalid_args",
-                        format!("命令 '{command}' 重复提供 --only 目标 '{value}'"),
-                    ));
-                }
+            if is_rules && (arg == "--only" || arg == "--from") && !is_rules_target(value) {
+                return Err(EngineError::new(
+                    "invalid_args",
+                    format!(
+                        "非法 rules 目标 '{value}'（仅 rules:codex_global|rules:claude_global|rules:profile:<实例>）"
+                    ),
+                ));
             }
         }
         index += 1;
@@ -460,6 +548,8 @@ mod tests {
             "skills:apply",
             "rules:status",
             "rules:apply",
+            "rules:save-template",
+            "rules:delete-template",
             "hooks:status",
             "hooks:apply",
             "aliases:status",
@@ -496,6 +586,9 @@ mod tests {
             "mcp:plan",
             "skills:plan",
             "rules:plan",
+            "rules:templates",
+            "rules:set",
+            "hooks:save-template",
             "hooks:plan",
             "aliases:plan",
             "secrets:plan",
@@ -637,12 +730,12 @@ mod tests {
                     "mcp.enabled".into(),
                 ],
             ),
-            ("sources:get", vec!["--key".into(), "rules.shared".into()]),
+            ("sources:get", vec!["--key".into(), "hooks.claude".into()]),
             (
                 "sources:set",
                 vec![
                     "--key".into(),
-                    "rules.shared".into(),
+                    "hooks.claude".into(),
                     "--value".into(),
                     "{}".into(),
                 ],
@@ -803,20 +896,19 @@ mod tests {
             .is_ok(),
             "hooks:apply --allow-takeover should pass"
         );
-        // rules:apply / aliases:apply 同样放行：目标被外部改过时的唯一出路
-        for (command, target) in [
-            ("rules:apply", "rules:claude_global"),
-            ("aliases:apply", "aliases:zshrc"),
-        ] {
-            assert!(
-                validate_args(
-                    command,
-                    &["--only".into(), target.into(), "--allow-takeover".into()]
-                )
-                .is_ok(),
-                "{command} --allow-takeover should pass"
-            );
-        }
+        // aliases:apply 同样放行：受管区块被外部改过时的唯一出路
+        assert!(
+            validate_args(
+                "aliases:apply",
+                &[
+                    "--only".into(),
+                    "aliases:zshrc".into(),
+                    "--allow-takeover".into()
+                ]
+            )
+            .is_ok(),
+            "aliases:apply --allow-takeover should pass"
+        );
         // skills:apply 放行（逐 skill add/remove 显式接管，引擎侧再强制动作范围）
         assert!(
             validate_args(
@@ -840,6 +932,15 @@ mod tests {
             ("skills:status", vec!["--allow-takeover".into()]),
             ("agents:apply", vec!["--allow-takeover".into()]),
             ("rules:status", vec!["--allow-takeover".into()]),
+            // 规则以实际文件为准，没有「接管」：直接编辑本身就是写实际文件
+            (
+                "rules:apply",
+                vec![
+                    "--only".into(),
+                    "rules:claude_global".into(),
+                    "--allow-takeover".into(),
+                ],
+            ),
             ("aliases:status", vec!["--allow-takeover".into()]),
         ] {
             assert!(
@@ -848,21 +949,73 @@ mod tests {
             );
         }
 
-        // Rules 严格契约：无 only / 单 only / 两个不同 only（顺序不限）均通过。
+        // Rules 契约：写一个目标（--only + --base + 四种来源之一）与模板保存/删除。
+        let base = "a".repeat(64);
+        let only = |target: &str| vec!["--only".to_string(), target.to_string()];
+        let with = |target: &str, extra: &[&str]| {
+            let mut args = only(target);
+            args.extend(extra.iter().map(|s| s.to_string()));
+            args
+        };
         for (command, args) in [
-            ("rules:apply", vec![]),
             (
                 "rules:apply",
-                vec!["--only".into(), "rules:codex_global".into()],
+                with(
+                    "rules:claude_global",
+                    &[
+                        "--base",
+                        &base,
+                        "--value",
+                        "---\nfront: matter\n---\n正文\n",
+                    ],
+                ),
             ),
             (
                 "rules:apply",
+                with(
+                    "rules:codex_global",
+                    &["--base", "missing", "--recommended"],
+                ),
+            ),
+            (
+                "rules:apply",
+                with(
+                    "rules:profile:cc-ly",
+                    &["--base", "missing", "--template", "tpl-0a1b"],
+                ),
+            ),
+            (
+                "rules:apply",
+                with(
+                    "rules:codex_global",
+                    &["--base", &base, "--from", "rules:profile:cx-work"],
+                ),
+            ),
+            (
+                "rules:save-template",
                 vec![
-                    "--only".into(),
-                    "rules:codex_global".into(),
-                    "--only".into(),
-                    "rules:claude_global".into(),
+                    "--name".into(),
+                    "团队规则".into(),
+                    "--value".into(),
+                    "多行\n正文\n".into(),
                 ],
+            ),
+            (
+                "rules:save-template",
+                vec![
+                    "--template".into(),
+                    "legacy-claude".into(),
+                    "--revision".into(),
+                    base.clone(),
+                    "--name".into(),
+                    "改名".into(),
+                    "--value".into(),
+                    "".into(),
+                ],
+            ),
+            (
+                "rules:delete-template",
+                vec!["--template".into(), "tpl-0a1b".into()],
             ),
         ] {
             assert!(
@@ -872,30 +1025,56 @@ mod tests {
         }
 
         // Rules 拒绝：status 任意 raw arg（含 --offline，只能由 bridge 注入）、
-        // 重复 only、未知/别名 target、缺值、apply --dry-run。
+        // 重复 flag、未知/别名 target、非法 base/模板 id/名称、缺值、退役的 --dry-run。
         for (command, args) in [
             ("rules:status", vec!["--offline".into()]),
-            (
-                "rules:status",
-                vec!["--only".into(), "rules:codex_global".into()],
-            ),
+            ("rules:status", only("rules:codex_global")),
             ("rules:status", vec!["--dry-run".into()]),
             ("rules:status", vec!["positional".into()]),
             ("rules:apply", vec!["--offline".into()]),
             (
                 "rules:apply",
-                vec![
-                    "--only".into(),
-                    "rules:codex_global".into(),
-                    "--only".into(),
-                    "rules:codex_global".into(),
-                ],
+                with("rules:codex_global", &["--only", "rules:claude_global"]),
             ),
-            ("rules:apply", vec!["--only".into(), "rules:unknown".into()]),
-            ("rules:apply", vec!["--only".into(), "rules:codex".into()]),
-            ("rules:apply", vec!["--only".into(), "codex".into()]),
+            (
+                "rules:apply",
+                with(
+                    "rules:codex_global",
+                    &["--base", "missing", "--base", "missing"],
+                ),
+            ),
+            ("rules:apply", only("rules:unknown")),
+            ("rules:apply", only("rules:codex")),
+            ("rules:apply", only("codex")),
+            ("rules:apply", only("rules:profile:Bad_Id")),
             ("rules:apply", vec!["--only".into()]),
             ("rules:apply", vec!["--dry-run".into()]),
+            (
+                "rules:apply",
+                with("rules:codex_global", &["--base", "not-a-digest"]),
+            ),
+            (
+                "rules:apply",
+                with("rules:codex_global", &["--from", "codex"]),
+            ),
+            (
+                "rules:apply",
+                with("rules:codex_global", &["--template", "Bad Id"]),
+            ),
+            (
+                "rules:save-template",
+                vec!["--name".into(), "两\n行".into()],
+            ),
+            (
+                "rules:save-template",
+                vec!["--revision".into(), "short".into()],
+            ),
+            ("rules:save-template", vec!["--recommended".into()]),
+            ("rules:delete-template", vec!["--template".into()]),
+            (
+                "rules:delete-template",
+                vec!["--template".into(), "../x".into()],
+            ),
         ] {
             assert!(
                 validate_args(command, &args).is_err(),
@@ -1053,12 +1232,12 @@ mod tests {
 
     #[test]
     fn sources_args_match_native_strictness() {
-        assert!(validate_args("sources:get", &["--key".into(), "rules".into()]).is_ok());
+        assert!(validate_args("sources:get", &["--key".into(), "hooks".into()]).is_ok());
         assert!(validate_args(
             "sources:set",
             &[
                 "--key".into(),
-                "rules.shared".into(),
+                "hooks.claude".into(),
                 "--value".into(),
                 "{\"revision\":\"r\",\"value\":\"v\"}".into(),
             ]
@@ -1070,16 +1249,16 @@ mod tests {
                 "sources:get",
                 vec![
                     "--key".into(),
-                    "rules".into(),
+                    "hooks".into(),
                     "--key".into(),
-                    "rules".into(),
+                    "hooks".into(),
                 ],
             ),
             (
                 "sources:set",
                 vec![
                     "--key".into(),
-                    "rules.shared".into(),
+                    "hooks.claude".into(),
                     "--value".into(),
                     "{}".into(),
                     "--value".into(),
@@ -1108,14 +1287,14 @@ mod tests {
         let env = dispatch_native(
             c(),
             "sources:get".into(),
-            vec!["--key".into(), "rules".into()],
+            vec!["--key".into(), "hooks".into()],
             "sources-offline".into(),
         )
         .unwrap();
         assert!(env.ok, "{:?}", env.errors);
         assert!(!env.mode.offline, "sources 不注入 --offline");
-        // rules 来源三项：shared、claude、codex
-        assert_eq!(env.data["sources"].as_array().unwrap().len(), 3);
+        // hooks 来源两项：claude、codex（规则来源已退役）
+        assert_eq!(env.data["sources"].as_array().unwrap().len(), 2);
         assert!(!root.join("data").exists(), "sources:get 零写");
         let _ = std::fs::remove_dir_all(root);
     }

@@ -102,6 +102,31 @@ export interface StatusData {
   recommendations?: SkillRecommendation[];
   /** 仅 skills 域：各助手技能目录里的实际条目（当前视图，只展示）。 */
   installed?: SkillInstalledEntry[];
+  /** 仅 rules 域：本机库里已保存的规则模板（含旧版来源即时推导出的模板）。 */
+  templates?: RuleTemplate[];
+  /** 仅 rules 域：编译内置的推荐规则。只读，不入库，不计入待同步。 */
+  recommended?: RuleRecommended;
+}
+
+// ---------- rules:status templates / recommended ----------
+
+export type RuleTemplateOrigin = "user" | "backup" | "legacy";
+
+export interface RuleTemplate {
+  id: string;
+  name: string;
+  body: string;
+  revision: string;
+  origin: RuleTemplateOrigin;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RuleRecommended {
+  id: string;
+  name: string;
+  body: string;
+  revision: string;
 }
 
 // ---------- skills:status recommendations / installed ----------

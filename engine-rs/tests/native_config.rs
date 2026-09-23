@@ -32,7 +32,7 @@ fn export_is_read_only_and_roundtrips_definitions_and_sources() {
     assert_eq!(fresh.data["format"], "agent-manager/config-backup/v1");
     assert!(!ctx.data_dir.exists(), "导出不得创建数据目录");
 
-    // 造一份本机配置：一个 MCP 定义 + 改过的规则来源
+    // 造一份本机配置：一个 MCP 定义 + 一个规则模板
     assert!(
         execute(
             &ctx,
@@ -50,27 +50,12 @@ fn export_is_read_only_and_roundtrips_definitions_and_sources() {
         )
         .ok
     );
-    let sources = execute(&ctx, &request("sources:get", &["--key", "rules"]));
-    let revision = sources.data["sources"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|s| s["key"] == "rules.shared")
-        .unwrap()["revision"]
-        .as_str()
-        .unwrap()
-        .to_string();
     assert!(
         execute(
             &ctx,
             &request(
-                "sources:set",
-                &[
-                    "--key",
-                    "rules.shared",
-                    "--value",
-                    &format!(r#"{{"revision":"{revision}","value":"我的共享规则\n"}}"#),
-                ],
+                "rules:save-template",
+                &["--name", "我的规则模板", "--value", "我的共享规则\n"],
             ),
         )
         .ok
@@ -81,6 +66,9 @@ fn export_is_read_only_and_roundtrips_definitions_and_sources() {
     let payload = serde_json::to_string(&exported.data).unwrap();
     assert!(payload.contains("${DEMO_TOKEN}"), "定义以引用形式进备份");
     assert!(payload.contains("我的共享规则"));
+    // 规则不再是来源：备份只带模板，不带 rules.* 来源键
+    assert!(exported.data["sources"].get("rules.shared").is_none());
+    assert_eq!(exported.data["rule_templates"][0]["name"], "我的规则模板");
     // 分配记录与本机落地状态不进备份
     assert!(exported.data.get("bindings").is_none());
 
@@ -94,7 +82,8 @@ fn export_is_read_only_and_roundtrips_definitions_and_sources() {
         after.data["policy"]["mcp"]["definitions"]["demo"]["command"],
         "npx"
     );
-    assert_eq!(after.data["sources"]["rules.shared"], "我的共享规则\n");
+    assert_eq!(after.data["rule_templates"][0]["name"], "我的规则模板");
+    assert_eq!(after.data["rule_templates"][0]["body"], "我的共享规则\n");
 
     // 恢复的是定义，不是落地状态：还没应用过，目标文件不存在
     assert!(!ctx2.home_dir.join(".claude/CLAUDE.md").exists());
@@ -290,4 +279,51 @@ fn backup_with_malformed_secrets_is_rejected_whole() {
         assert!(!env.ok, "结构非法的 secrets 必须被拒绝");
     }
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 旧备份里的规则来源（rules.*）仍能导入：按旧规则渲染成「旧规则来源」模板，
+/// 与内置相同的不生成；不写任何规则文件。
+#[test]
+fn legacy_rule_sources_in_backup_become_templates() {
+    let (root, ctx) = temp_ctx("legacy-rules");
+    let core = include_str!("../../agent-rule/rules/src/shared/core.md");
+    let payload = serde_json::json!({
+        "format": "agent-manager/config-backup/v1",
+        "policy": {},
+        "sources": {
+            "rules.shared": core,
+            "rules.claude": "只给 Claude\n",
+            "rules.codex": "",
+        },
+    })
+    .to_string();
+    let env = execute(&ctx, &request("config:import", &["--value", &payload]));
+    assert!(env.ok, "{:?}", env.errors);
+    let status = execute(&ctx, &request("rules:status", &[]));
+    let templates = status.data["templates"].as_array().unwrap();
+    assert_eq!(
+        templates.len(),
+        1,
+        "只有改过的 Claude 生成模板: {templates:?}"
+    );
+    assert_eq!(templates[0]["name"], "旧规则来源（Claude）");
+    assert_eq!(templates[0]["body"], format!("{core}只给 Claude\n"));
+    assert!(!ctx.home_dir.join(".claude/CLAUDE.md").exists());
+
+    // 模板段里有疑似凭据：整份拒绝
+    let bad = serde_json::json!({
+        "format": "agent-manager/config-backup/v1",
+        "policy": {},
+        "rule_templates": [{"name": "x", "body": format!("sk-{}", "a".repeat(24))}],
+    })
+    .to_string();
+    let env = execute(&ctx, &request("config:import", &["--value", &bad]));
+    assert!(!env.ok);
+    let status = execute(&ctx, &request("rules:status", &[]));
+    assert_eq!(
+        status.data["templates"].as_array().unwrap().len(),
+        1,
+        "失败不改库"
+    );
+    let _ = std::fs::remove_dir_all(root);
 }

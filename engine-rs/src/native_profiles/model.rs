@@ -24,13 +24,15 @@ const CODEX_PROFILE_FILE: &str = "agent-manager.config.toml";
 
 /// 实例配置目录里由本工具维护的文件。
 ///
-/// 规则与 Hooks 的主实例目标是固定路径（`~/.claude`、`~/.codex`），不随实例走；
-/// 实例目录下的这些文件因此全部由 profiles 域一并渲染——一个目录一个域，
-/// 外部修改检测不会两个域互相判定对方是「外部改动」。
+/// Hooks 的主实例目标是固定路径（`~/.claude`、`~/.codex`），不随实例走；实例目录下的
+/// 配置与 Hooks 文件因此由 profiles 域一并渲染。
 pub(crate) const FILE_CLAUDE_SETTINGS: &str = "settings.json";
+pub(crate) const FILE_CODEX_HOOKS: &str = "hooks.json";
+
+/// 实例目录下的规则文件：以实际文件为准，归 rules 域作为规则目标直接编辑，
+/// profiles 域不渲染、不写、不检测它。
 pub(crate) const FILE_CLAUDE_RULES: &str = "CLAUDE.md";
 pub(crate) const FILE_CODEX_RULES: &str = "AGENTS.md";
-pub(crate) const FILE_CODEX_HOOKS: &str = "hooks.json";
 
 /// 一个待写入的受管文件。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -386,31 +388,22 @@ pub(crate) fn owned_slice_digest(file: &str, bytes: &[u8]) -> String {
     )
 }
 
-/// 渲染该实例配置目录下的全部受管文件。
+/// 渲染该实例配置目录下的全部受管文件（不含规则文件，见 FILE_CLAUDE_RULES）。
 ///
 /// `existing` 给出目标文件的现有字节：Claude 的 `settings.json` 采用合并写入，
 /// 用户自己加的根级字段原样保留，本工具只覆盖它管的 env/model/hooks 三项。
-/// 规则与 Hooks 的正文复用主实例那套来源与渲染，实例因此和主实例拿到同一份内容。
+/// Hooks 的正文复用主实例那套来源与渲染，实例因此和主实例拿到同一份内容。
 pub(crate) fn render_all(
     ctx: &Context,
     def: &ProfileDef,
     existing: &dyn Fn(&str) -> Option<Vec<u8>>,
     resolve: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Vec<RenderedTarget>> {
-    let rule_sources = crate::native_sources::current_sources_readonly(ctx)?;
     let hook_sources = crate::native_sources::current_hook_sources_readonly(ctx)?;
-    let shared = rule_sources
-        .get(crate::native_sources::KEY_SHARED)
-        .cloned()
-        .unwrap_or_default();
 
     let mut out = Vec::new();
     match def.kind {
         ProfileKind::Claude => {
-            let adapter = rule_sources
-                .get(crate::native_sources::KEY_CLAUDE)
-                .cloned()
-                .unwrap_or_default();
             let managed =
                 parse_hook_source(&hook_sources, crate::native_sources::KEY_HOOKS_CLAUDE)?;
             // settings.json：既有内容为基底 → 覆盖 env/model → 合入 hooks
@@ -437,24 +430,12 @@ pub(crate) fn render_all(
                 file: FILE_CLAUDE_SETTINGS.to_string(),
                 content: crate::native_hooks::model::render_bytes(&merged),
             });
-            out.push(RenderedTarget {
-                file: FILE_CLAUDE_RULES.to_string(),
-                content: crate::native_rules::model::render_rules(&shared, &adapter).into_bytes(),
-            });
         }
         ProfileKind::Codex => {
-            let adapter = rule_sources
-                .get(crate::native_sources::KEY_CODEX)
-                .cloned()
-                .unwrap_or_default();
             let managed = parse_hook_source(&hook_sources, crate::native_sources::KEY_HOOKS_CODEX)?;
             out.push(RenderedTarget {
                 file: CODEX_PROFILE_FILE.to_string(),
                 content: render_codex_provider(def).into_bytes(),
-            });
-            out.push(RenderedTarget {
-                file: FILE_CODEX_RULES.to_string(),
-                content: crate::native_rules::model::render_rules(&shared, &adapter).into_bytes(),
             });
             out.push(RenderedTarget {
                 file: FILE_CODEX_HOOKS.to_string(),
@@ -748,9 +729,9 @@ mod owned_slice_tests {
 
     #[test]
     fn other_files_are_compared_whole() {
-        // CLAUDE.md 等整份归本工具：任何一个字节变了都算变了
-        let a = owned_slice_digest(FILE_CLAUDE_RULES, b"x");
-        let b = owned_slice_digest(FILE_CLAUDE_RULES, b"y");
+        // hooks.json 等整份归本工具：任何一个字节变了都算变了
+        let a = owned_slice_digest(FILE_CODEX_HOOKS, b"x");
+        let b = owned_slice_digest(FILE_CODEX_HOOKS, b"y");
         assert_ne!(a, b);
     }
 }

@@ -1,11 +1,17 @@
-//! rules 域入口：status/apply 的命令规范化与分发。
+//! rules 域入口：生效规则以各助手的规则文件为准。
+//!
+//! - `rules:status`：逐目标（主 Claude/Codex + 各实例）输出实际全文、base 摘要与匹配模板，
+//!   另附已保存模板与内置推荐；只读零写。
+//! - `rules:apply`：写一个目标的实际文件（直接编辑 / 应用模板 / 应用内置推荐 / 复制另一目标），
+//!   base CAS、先回填再写，取 apply 锁。
+//! - `rules:save-template` / `rules:delete-template`：只写库。
 
 pub(crate) mod apply;
 pub(crate) mod args;
 pub(crate) mod model;
-pub(crate) mod persistence;
-pub(crate) mod preflight;
 pub(crate) mod status;
+pub(crate) mod template_ops;
+pub(crate) mod templates;
 
 pub(crate) use apply::preflight_apply;
 
@@ -23,6 +29,8 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
             status::build_status(ctx)
         }
         "rules:apply" => apply::apply(ctx, req),
+        "rules:save-template" => template_ops::save(ctx, req),
+        "rules:delete-template" => template_ops::delete(ctx, req),
         _ => bail!("rules 域不支持命令 '{}'", req.command),
     }
 }

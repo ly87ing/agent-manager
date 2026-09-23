@@ -145,6 +145,18 @@ function skillSyncOf(element: EngineElement): Pick<OverviewItem, "sync" | "syncA
   return { sync: anyEnabled ? "ok" : "disabled" };
 }
 
+/**
+ * 规则的同步轴。规则以各助手的规则文件为准，没有「该写成什么样」的库内期望，
+ * 因此永远不算待同步：有文件就是已到位，没有文件是没装，读写不了的要你决定。
+ */
+function rulesSyncOf(element: EngineElement): Pick<OverviewItem, "sync" | "reason"> {
+  if (element.state === "disabled") return { sync: "disabled" };
+  if (element.state === "managed-ok") return { sync: "ok" };
+  if (element.state === "missing") return { sync: "absent" };
+  const reason = (element.observed as { blocked_reason?: string | null }).blocked_reason;
+  return { sync: "decision", reason: reason ?? "规则文件不能安全读写" };
+}
+
 function itemOf(element: EngineElement, name: string): OverviewItem {
   // AI CLI 的软件生命周期交还给各自安装渠道；总览只保留助手状态与额度，
   // 版本和安装来源集中到「设置 → 客户端诊断」只读展示。
@@ -164,6 +176,7 @@ function itemOf(element: EngineElement, name: string): OverviewItem {
     usageStale: usage ? isStale(usage.checked_at) : false,
   };
   if (element.domain === "skills") return { ...base, ...skillSyncOf(element) };
+  if (element.domain === "rules") return { ...base, ...rulesSyncOf(element) };
   const observed = element.observed as { agents?: Record<string, Cell>; blocked_reason?: string | null };
 
   if (observed.agents && Object.keys(observed.agents).length > 0) {

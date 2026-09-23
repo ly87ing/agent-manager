@@ -1,250 +1,235 @@
-//! rules 域 apply 核心：preflight 纯读校验 + 单 Immediate 事务内重检、
-//! 原子写入、binding 登记与单条审计。任何阻塞（外部修改/不安全路径/
-//! 来源或绑定损坏）fail-closed；失败时 RollbackGuard 恢复文件、DB 事务
-//! 整体回滚。错误与审计只含 digest/revision 元数据，严禁规则正文。
+//! rules 域写入：把新内容写进一个规则目标的实际文件。
+//!
+//! 新内容来自直接编辑（--value）、已保存模板、内置推荐或另一目标的实际正文。
+//! 写入前重读实际内容并与调用方传入的 base（status 输出）比对，不一致即拒绝
+//!（「已在外部修改」），文件与库都不变。用模板/推荐/复制覆盖之前先回填：目标现有
+//! 内容非空、且对不上任何已保存模板或内置推荐时，另存为备份模板。锁前预检零写；
+//! 锁内 Immediate 事务重检、原子 CAS 写入、单条审计；失败时回滚文件、事务整体回滚。
+//! 错误与审计只含 id/摘要等元数据，不含规则正文。
 
 use anyhow::{anyhow, bail, Result};
 use rusqlite::TransactionBehavior;
 use serde_json::{json, Value};
 
-use super::model::{render_rules, Binding};
-use super::{args, preflight, status};
+use super::args::{self, ApplyArgs, Source};
+use super::model::{self, Target, RECOMMENDED_BODY};
+use super::status::{self, Probe};
+use super::templates::{self, Template};
 use crate::native::{Context, Request};
-use crate::native_mcp::model::{now_iso, sha256_hex};
-use crate::native_mcp::rollback::{atomic_write_bytes_checked, read_existing_bytes, RollbackGuard};
-use crate::native_mcp::targets::validate_target_path;
-use crate::native_sources::{self, KEY_SHARED};
+use crate::native_mcp::model::sha256_hex_bytes;
+use crate::native_mcp::rollback::{atomic_write_bytes_checked, RollbackGuard};
 use crate::store;
 
-/// 锁前预检：严格解析 + 私有 preflight 纯读校验。Ok(()) 表示合法 apply
-///（execute 稍后必须取得全局 apply lock）；参数无效（含已退役的
-/// --dry-run）或目标阻塞即 Err。无效/阻塞预检不创建 data/home/DB/表/文件。
-pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
-    let parsed = args::parse_apply_args(req)?;
-    preflight::build_preflight(ctx, &parsed)?;
-    Ok(())
+/// 解析好、可以写的一次操作。
+struct Prepared {
+    target: Target,
+    old_bytes: Option<Vec<u8>>,
+    new_body: String,
+    /// 需要先另存为备份模板的现有内容。
+    backup: Option<String>,
 }
 
-enum Decision {
-    Skip,
-    Write {
-        expected: Vec<u8>,
-        old_bytes: Option<Vec<u8>>,
-        binding: Binding,
-    },
+fn find<'a>(targets: &'a [Target], id: &str) -> Result<&'a Target> {
+    targets
+        .iter()
+        .find(|t| t.id == id)
+        .ok_or_else(|| anyhow!("规则目标不存在（实例可能已被删除）"))
 }
 
-fn result_json(steps: Vec<Value>, skipped: Vec<String>) -> Value {
-    json!({
-        "domain": "rules",
-        "steps": steps,
-        "skipped": skipped,
+/// 目标能否写入；能写时返回现有字节与文本（不存在为 None）。
+fn writable_content(target: &Target) -> Result<(Option<Vec<u8>>, Option<String>, String)> {
+    let probe = status::probe(target);
+    let base = probe.base();
+    match probe {
+        Probe::Disabled => bail!("{} 所属助手已停用，不写规则文件", target.name),
+        Probe::Blocked { reason, .. } => bail!("{} 当前不能读写：{reason}", target.name),
+        Probe::Missing {
+            reason: Some(reason),
+        } => bail!("{reason}"),
+        Probe::Missing { reason: None } => Ok((None, None, base.expect("missing base"))),
+        Probe::Present { bytes, text } => Ok((Some(bytes), Some(text), base.expect("base"))),
+    }
+}
+
+/// 基于一次读取的 policy/模板与实际文件，确定写入内容与是否需要备份。
+/// 锁前预检与锁内执行都调用它，锁内结果才是最终依据。
+fn prepare(targets: &[Target], list: &[Template], parsed: &ApplyArgs) -> Result<Prepared> {
+    let target = find(targets, &parsed.target)?.clone();
+    let (old_bytes, old_text, base) = writable_content(&target)?;
+    if base != parsed.base {
+        bail!(
+            "{} 已在外部修改（与打开时读到的内容不同），没有写入；请刷新后重新操作",
+            target.name
+        );
+    }
+    let new_body = match &parsed.source {
+        Source::Value(text) => {
+            if text.contains('\0') {
+                bail!("规则正文不能包含 NUL 字符");
+            }
+            text.clone()
+        }
+        Source::Template(id) => list
+            .iter()
+            .find(|t| &t.id == id)
+            .map(|t| t.body.clone())
+            .ok_or_else(|| anyhow!("模板不存在或已被删除，请刷新后重试"))?,
+        Source::Recommended => RECOMMENDED_BODY.to_string(),
+        Source::From(from) => {
+            if from == &target.id {
+                bail!("来源与目标是同一个规则文件");
+            }
+            let source = find(targets, from)?;
+            match writable_content(source)? {
+                (_, Some(text), _) => text,
+                (_, None, _) => bail!("{} 还没有规则文件，没有可复制的内容", source.name),
+            }
+        }
+    };
+    // 回填：只在用别处的内容覆盖时做；直接编辑本身就是在改这份内容。
+    let backup = match (&parsed.source, old_text) {
+        (Source::Value(_), _) | (_, None) => None,
+        (_, Some(text)) => {
+            let known = text == RECOMMENDED_BODY || list.iter().any(|t| t.body == text);
+            if text.trim().is_empty() || known || text == new_body {
+                None
+            } else {
+                if let Some(kind) = crate::native::reject_secret_text(&text) {
+                    bail!(
+                        "{} 现有内容疑似含凭据（{kind}），不能另存为备份模板，已停止；请先编辑去掉后再应用",
+                        target.name
+                    );
+                }
+                Some(text)
+            }
+        }
+    };
+    Ok(Prepared {
+        target,
+        old_bytes,
+        new_body,
+        backup,
     })
 }
 
-pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
-    // 自身再次解析 + 等价 preflight 预检：直接调用 apply 不能绕过安全校验。
+/// 锁前预检：严格解析 + 只读校验（目标可写、base 一致、来源可用）。
+/// 无效/阻塞预检不创建 data/home/DB/表/文件。
+pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
     let parsed = args::parse_apply_args(req)?;
-    preflight::build_preflight(ctx, &parsed)?;
+    let (policy, list) = status::load_snapshot(ctx)?;
+    let targets = model::resolve_targets(ctx, &policy);
+    prepare(&targets, &list, &parsed)?;
+    Ok(())
+}
 
-    let selected = parsed.only.clone();
+fn source_meta(source: &Source) -> Value {
+    match source {
+        Source::Value(_) => json!({ "kind": "edit" }),
+        Source::Template(id) => json!({ "kind": "template", "template": id }),
+        Source::Recommended => json!({ "kind": "recommended" }),
+        Source::From(from) => json!({ "kind": "copy", "from": from }),
+    }
+}
+
+fn backup_name(target: &Target) -> String {
+    format!(
+        "备份 · {} · {}",
+        target.name,
+        chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+    )
+}
+
+pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
+    // 自身再次预检：直接调用 apply 不能绕过校验。
+    preflight_apply(ctx, req)?;
+    let parsed = args::parse_apply_args(req)?;
 
     let mut conn = store::open_write(ctx)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-
-    // Immediate 事务内基于同一 snapshot 重新读取并重检，不沿用锁前
-    // preflight 的正文/摘要。
+    // 锁内基于同一 snapshot 重新读取并重检，不沿用锁前的结果。
     let policy = store::policy_from_connection(&tx)?;
-    let sources = native_sources::current_sources_from(&tx)?;
-    let bindings = super::persistence::load_bindings_from(&tx)?;
+    let list = templates::load_from(&tx)?;
+    let targets = model::resolve_targets(ctx, &policy);
+    let prep = prepare(&targets, &list, &parsed)?;
+    let target_id = prep.target.id.clone();
 
-    let mut skipped: Vec<String> = Vec::new();
-    let mut pending: Vec<(String, std::path::PathBuf, Decision)> = Vec::new();
-
-    for spec in super::model::targets() {
-        if !selected.iter().any(|id| id == spec.target_id) {
-            continue;
-        }
-        if !status::target_enabled(&policy, spec.agent_id) {
-            // disabled：绝不探测路径。
-            skipped.push(spec.target_id.to_string());
-            continue;
-        }
-        let shared = &sources[KEY_SHARED];
-        let adapter = &sources[spec.adapter_key];
-        let expected = render_rules(shared, adapter);
-        let expected_digest = sha256_hex(&expected);
-        let shared_revision = sha256_hex(shared);
-        let adapter_revision = sha256_hex(adapter);
-        let binding = bindings.get(spec.target_id);
-
-        let abs = ctx.home_dir.join(spec.target);
-        validate_target_path(&abs)?;
-        // 只读取一次旧字节，作为本次写入的 CAS 基准。
-        let old_bytes = read_existing_bytes(&abs)?;
-        let actual_digest = old_bytes
-            .as_deref()
-            .map(crate::native_mcp::model::sha256_hex_bytes);
-
-        let decision = match (&actual_digest, binding) {
-            (None, _) => Decision::Write {
-                expected: expected.into_bytes(),
-                old_bytes,
-                binding: Binding {
-                    target_id: spec.target_id.to_string(),
-                    applied_digest: expected_digest,
-                    shared_revision,
-                    adapter_revision,
-                    updated_at: now_iso(),
-                },
-            },
-            (Some(actual), Some(b)) => {
-                if *actual != b.applied_digest && !parsed.allow_takeover {
-                    bail!("目标 {} 存在外部修改，拒绝覆盖", spec.target_id);
-                }
-                if *actual == expected_digest {
-                    skipped.push(spec.target_id.to_string());
-                    Decision::Skip
-                } else {
-                    Decision::Write {
-                        expected: expected.into_bytes(),
-                        old_bytes,
-                        binding: Binding {
-                            target_id: spec.target_id.to_string(),
-                            applied_digest: expected_digest,
-                            shared_revision,
-                            adapter_revision,
-                            updated_at: now_iso(),
-                        },
-                    }
-                }
-            }
-            (Some(actual), None) => {
-                if *actual == expected_digest {
-                    // 字节一致但无绑定：登记受管绑定。
-                    Decision::Write {
-                        expected: expected.into_bytes(),
-                        old_bytes,
-                        binding: Binding {
-                            target_id: spec.target_id.to_string(),
-                            applied_digest: expected_digest,
-                            shared_revision,
-                            adapter_revision,
-                            updated_at: now_iso(),
-                        },
-                    }
-                } else if parsed.allow_takeover {
-                    // 显式接管：用本工具的内容整体替换现有文件，并登记受管绑定。
-                    Decision::Write {
-                        expected: expected.into_bytes(),
-                        old_bytes,
-                        binding: Binding {
-                            target_id: spec.target_id.to_string(),
-                            applied_digest: expected_digest,
-                            shared_revision,
-                            adapter_revision,
-                            updated_at: now_iso(),
-                        },
-                    }
-                } else {
-                    bail!("目标 {} 已有外部内容，拒绝覆盖", spec.target_id);
-                }
-            }
-        };
-        if !matches!(decision, Decision::Skip) {
-            pending.push((spec.target_id.to_string(), abs, decision));
-        }
-    }
-
-    // 没有任何待写：直接提交（不建表、不写审计）。
-    if pending.is_empty() {
+    if prep.old_bytes.as_deref() == Some(prep.new_body.as_bytes()) {
         tx.commit()?;
-        return Ok(result_json(vec![], selected));
+        return Ok(json!({ "domain": "rules", "steps": [], "skipped": [target_id] }));
     }
 
-    super::persistence::ensure_table(&tx)?;
+    let mut steps = Vec::new();
+    let mut backup_id: Option<String> = None;
+    if let Some(body) = &prep.backup {
+        templates::ensure_table(&tx)?;
+        let now = templates::now();
+        let template = Template {
+            id: templates::new_id(),
+            name: templates::unique_name(&list, &backup_name(&prep.target)),
+            body: body.clone(),
+            origin: templates::ORIGIN_BACKUP.to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        templates::insert(&tx, &template)?;
+        steps.push(
+            json!({ "name": format!("rules:backup {target_id}"), "ok": true, "exit_code": 0 }),
+        );
+        backup_id = Some(template.id);
+    }
+
+    let new_bytes = prep.new_body.as_bytes();
+    // 写失败时事务随 drop 回滚（备份模板不落库），文件由 CAS 写保证未被替换。
+    atomic_write_bytes_checked(&prep.target.path, new_bytes, prep.old_bytes.as_deref())?;
     let mut guard = RollbackGuard::new();
-
-    let run = (|| -> Result<(Vec<Value>, Vec<Value>)> {
-        let mut steps = Vec::new();
-        let mut audit_targets = Vec::new();
-        for (id, abs, decision) in &pending {
-            let Decision::Write {
-                expected,
-                old_bytes,
-                binding,
-            } = decision
-            else {
-                continue;
-            };
-            atomic_write_bytes_checked(abs, expected, old_bytes.as_deref())?;
-            guard.record_written(abs, old_bytes.clone(), expected.clone());
-            super::persistence::write_binding(&tx, binding)?;
-            steps.push(json!({
-                "name": format!("rules:sync {id}"),
-                "ok": true,
-                "exit_code": 0,
-            }));
-            audit_targets.push(json!({
-                "target_id": binding.target_id,
-                "applied_digest": binding.applied_digest,
-                "shared_revision": binding.shared_revision,
-                "adapter_revision": binding.adapter_revision,
-            }));
-        }
-        Ok((steps, audit_targets))
-    })();
-
-    let (steps, audit_targets) = match run {
-        Ok(v) => v,
-        Err(e) => {
-            drop(tx);
-            if let Err(rb_err) = guard.rollback() {
-                return Err(anyhow!("执行失败: {e:#}；配置回滚同时失败: {rb_err:#}"));
-            }
-            return Err(e);
-        }
-    };
-
-    let ids: Vec<&str> = pending.iter().map(|(id, _, _)| id.as_str()).collect();
-    let audit_target = if ids.len() == 1 { ids[0] } else { "rules" };
-    let audit_result = store::record_operation(
-        &tx,
-        Some(&req.run_id),
-        "rules:apply",
-        Some(audit_target),
-        Some(&json!({
-            "action": "sync",
-            "targets": ids,
-            "count": ids.len(),
-            "meta": audit_targets,
-        })),
+    guard.record_written(
+        &prep.target.path,
+        prep.old_bytes.clone(),
+        new_bytes.to_vec(),
     );
+    steps.push(json!({ "name": format!("rules:write {target_id}"), "ok": true, "exit_code": 0 }));
 
-    if let Err(e) = audit_result {
+    let finish = (|| -> Result<()> {
+        store::record_operation(
+            &tx,
+            Some(&req.run_id),
+            "rules:apply",
+            Some(&target_id),
+            Some(&json!({
+                "action": "write",
+                "source": source_meta(&parsed.source),
+                "base": parsed.base,
+                "after_digest": sha256_hex_bytes(new_bytes),
+                "backup_template": backup_id,
+            })),
+        )?;
+        Ok(())
+    })();
+    if let Err(err) = finish {
         drop(tx);
         if let Err(rb_err) = guard.rollback() {
-            return Err(anyhow!("执行失败: {e:#}；配置回滚同时失败: {rb_err:#}"));
+            return Err(anyhow!(
+                "执行失败: {err:#}；规则文件恢复同时失败: {rb_err:#}"
+            ));
         }
-        return Err(e.into());
+        return Err(err);
     }
-
-    if let Err(e) = tx.commit() {
+    if let Err(err) = tx.commit() {
         if let Err(rb_err) = guard.rollback() {
-            return Err(anyhow!("提交失败: {e:#}；配置回滚同时失败: {rb_err:#}"));
+            return Err(anyhow!(
+                "提交失败: {err:#}；规则文件恢复同时失败: {rb_err:#}"
+            ));
         }
-        return Err(e.into());
+        return Err(err.into());
     }
     guard.commit();
 
-    Ok(result_json(steps, skipped))
+    Ok(json!({ "domain": "rules", "steps": steps, "skipped": [] }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::native_rules::model::targets;
-    use crate::native_sources::KEY_SHARED;
     use std::path::Path;
 
     fn temp_root(tag: &str) -> std::path::PathBuf {
@@ -266,10 +251,6 @@ mod tests {
         }
     }
 
-    fn drop_root(root: &Path) {
-        let _ = std::fs::remove_dir_all(root);
-    }
-
     fn req(args: &[&str]) -> Request {
         Request {
             command: "rules:apply".to_string(),
@@ -278,280 +259,20 @@ mod tests {
         }
     }
 
-    fn write_policy_disabled_agent(ctx: &Context, agent_id: &str) {
-        let mut policy = store::builtin_policy();
-        policy["agents"][agent_id]["enabled"] = Value::Bool(false);
-        let conn = store::open_write(ctx).unwrap();
-        store::write_policy(&conn, &policy).unwrap();
-    }
-
-    fn write_source(ctx: &Context, key: &str, value: &str) {
-        let conn = store::open_write(ctx).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS rule_sources (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                revision TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )",
-        )
-        .unwrap();
-        let revision = sha256_hex(value);
-        conn.execute(
-            "INSERT INTO rule_sources (key, value, revision, updated_at) VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value, revision = excluded.revision, updated_at = excluded.updated_at",
-            rusqlite::params![key, value, revision, "2026-09-12T00:00:00Z"],
-        )
-        .unwrap();
-    }
-
-    fn current_rendered(ctx: &Context, spec: &super::super::model::TargetSpec) -> String {
-        let conn = store::open_readonly(ctx).unwrap();
-        let (shared, adapter) = match conn {
-            Some(c) => {
-                let sources = native_sources::current_sources_from(&c).unwrap();
-                (
-                    sources[KEY_SHARED].clone(),
-                    sources[spec.adapter_key].clone(),
-                )
-            }
-            None => (
-                native_sources::default_value(KEY_SHARED)
-                    .unwrap()
-                    .to_string(),
-                native_sources::default_value(spec.adapter_key)
-                    .unwrap()
-                    .to_string(),
-            ),
-        };
-        render_rules(&shared, &adapter)
-    }
-
-    fn read_binding(ctx: &Context, target_id: &str) -> Option<Binding> {
-        let conn = store::open_readonly(ctx).unwrap()?;
-        super::super::persistence::load_bindings_from(&conn)
-            .unwrap()
-            .remove(target_id)
-    }
-
-    fn operation_log_rows(ctx: &Context) -> Vec<(String, Option<String>, Option<String>)> {
-        let Some(conn) = store::open_readonly(ctx).unwrap() else {
-            return Vec::new();
-        };
-        let mut stmt = conn
-            .prepare("SELECT operation_type, target, detail_json FROM operation_logs WHERE operation_type = 'rules:apply'")
-            .unwrap();
-        stmt.query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, Option<String>>(1)?,
-                r.get::<_, Option<String>>(2)?,
-            ))
-        })
-        .unwrap()
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .unwrap()
-    }
-
-    #[test]
-    fn dry_run_is_rejected_before_any_write_and_creates_nothing() {
-        let root = temp_root("dryrun");
-        let ctx = ctx_at(&root);
-        let err = apply(&ctx, &req(&["--dry-run"])).unwrap_err();
-        assert!(format!("{err:#}").contains("参数错误"));
-        assert!(preflight_apply(&ctx, &req(&["--dry-run"])).is_err());
-        assert!(!ctx.data_dir.exists());
-        assert!(!ctx.home_dir.exists());
-        drop_root(&root);
-    }
-
-    #[test]
-    fn invalid_or_blocked_apply_creates_nothing() {
-        let root = temp_root("invalid");
-        let ctx = ctx_at(&root);
-        assert!(apply(&ctx, &req(&["--bogus"])).is_err());
-        assert!(apply(&ctx, &req(&["--only", "rules:unknown"])).is_err());
-        assert!(!ctx.data_dir.exists());
-        assert!(!ctx.home_dir.exists());
-
-        // 阻塞：外部内容 + 无绑定，preflight 预检 fail-closed。
-        std::fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
-        std::fs::write(
-            ctx.home_dir.join(".codex/AGENTS.md"),
-            "external body marker\n",
-        )
-        .unwrap();
-        let err = apply(&ctx, &req(&[])).unwrap_err();
-        assert!(!format!("{err:#}").contains("external body marker"));
-        assert!(!ctx.data_dir.exists());
-        drop_root(&root);
-    }
-
-    #[test]
-    fn only_writes_selected_and_leaves_other_sentinel() {
-        let root = temp_root("only");
-        let ctx = ctx_at(&root);
-        std::fs::create_dir_all(ctx.home_dir.join(".claude")).unwrap();
-        std::fs::write(ctx.home_dir.join(".claude/CLAUDE.md"), "sentinel\n").unwrap();
-
-        let result = apply(&ctx, &req(&["--only", "rules:codex_global"])).unwrap();
-        let steps = result["steps"].as_array().unwrap();
-        assert_eq!(steps.len(), 1);
-        assert_eq!(steps[0]["name"], "rules:sync rules:codex_global");
-        assert_eq!(result["skipped"], json!([]));
-
-        let spec = &targets()[0];
-        assert_eq!(
-            std::fs::read(ctx.home_dir.join(spec.target)).unwrap(),
-            current_rendered(&ctx, spec).into_bytes()
-        );
-        assert_eq!(
-            std::fs::read(ctx.home_dir.join(".claude/CLAUDE.md")).unwrap(),
-            b"sentinel\n"
-        );
-        drop_root(&root);
-    }
-
-    #[test]
-    fn new_file_bytes_mode_binding_and_audit_are_exact() {
-        let root = temp_root("fresh");
-        let ctx = ctx_at(&root);
-        let marker = "AUDIT-BODY-LEAK-MARKER-9c4e1b";
-        write_source(&ctx, KEY_SHARED, &format!("{marker}\n"));
-        let result = apply(&ctx, &req(&["--only", "rules:codex_global"])).unwrap();
-        assert_eq!(result["steps"].as_array().unwrap().len(), 1);
-        assert!(
-            !serde_json::to_string(&result).unwrap().contains(marker),
-            "ApplyResultData 泄漏规则正文"
-        );
-
-        let spec = &targets()[0];
-        let rendered = current_rendered(&ctx, spec);
-        assert!(rendered.contains(marker), "渲染正文必须包含 marker");
-        let bytes = std::fs::read(ctx.home_dir.join(spec.target)).unwrap();
-        assert_eq!(bytes, rendered.as_bytes());
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(ctx.home_dir.join(spec.target))
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o777;
-            assert_eq!(mode, 0o600);
+    fn base_of(path: &Path) -> String {
+        match std::fs::read(path) {
+            Ok(bytes) => sha256_hex_bytes(&bytes),
+            Err(_) => "missing".to_string(),
         }
-
-        let binding = read_binding(&ctx, "rules:codex_global").unwrap();
-        assert_eq!(binding.applied_digest, sha256_hex(&rendered));
-        assert_eq!(binding.shared_revision, sha256_hex(&format!("{marker}\n")));
-        assert!(!binding.updated_at.is_empty());
-        for field in [
-            &binding.target_id,
-            &binding.applied_digest,
-            &binding.shared_revision,
-            &binding.adapter_revision,
-            &binding.updated_at,
-        ] {
-            assert!(!field.contains(marker), "Binding 字段泄漏规则正文");
-        }
-
-        let logs = operation_log_rows(&ctx);
-        assert_eq!(logs.len(), 1);
-        let (op, target, detail) = &logs[0];
-        assert_eq!(op, "rules:apply");
-        assert_eq!(target.as_deref(), Some("rules:codex_global"));
-        let detail = detail.as_deref().unwrap_or("");
-        assert!(!detail.contains(marker), "审计 detail_json 泄漏规则正文");
-        assert!(!detail.contains(rendered.as_str()));
-        drop_root(&root);
     }
 
     #[test]
-    fn second_apply_is_noop_with_empty_steps_and_no_new_audit() {
-        let root = temp_root("noop");
-        let ctx = ctx_at(&root);
-        apply(&ctx, &req(&[])).unwrap();
-        let logs_before = operation_log_rows(&ctx).len();
-        let result = apply(&ctx, &req(&[])).unwrap();
-        assert_eq!(result["steps"], json!([]));
-        assert_eq!(
-            result["skipped"],
-            json!(["rules:codex_global", "rules:claude_global"])
-        );
-        assert_eq!(operation_log_rows(&ctx).len(), logs_before);
-        drop_root(&root);
-    }
-
-    #[test]
-    fn source_change_updates_file_and_binding() {
-        let root = temp_root("update");
-        let ctx = ctx_at(&root);
-        apply(&ctx, &req(&["--only", "rules:codex_global"])).unwrap();
-        write_source(&ctx, KEY_SHARED, "shared v2 marker\n");
-
-        let result = apply(&ctx, &req(&["--only", "rules:codex_global"])).unwrap();
-        assert_eq!(result["steps"].as_array().unwrap().len(), 1);
-        let spec = &targets()[0];
-        let rendered = current_rendered(&ctx, spec);
-        assert_eq!(
-            std::fs::read(ctx.home_dir.join(spec.target)).unwrap(),
-            rendered.as_bytes()
-        );
-        let binding = read_binding(&ctx, "rules:codex_global").unwrap();
-        assert_eq!(binding.applied_digest, sha256_hex(&rendered));
-        drop_root(&root);
-    }
-
-    #[test]
-    fn external_modification_is_rejected_keeping_file_and_binding() {
-        let root = temp_root("tamper");
-        let ctx = ctx_at(&root);
-        apply(&ctx, &req(&["--only", "rules:codex_global"])).unwrap();
-        let binding_before = read_binding(&ctx, "rules:codex_global").unwrap();
-        let path = ctx.home_dir.join(targets()[0].target);
-        std::fs::write(&path, "tampered external\n").unwrap();
-
-        let err = apply(&ctx, &req(&["--only", "rules:codex_global"])).unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(
-            msg.contains("外部修改") || msg.contains("preflight 拒绝"),
-            "fail-closed 消息不符: {msg}"
-        );
-        assert!(!msg.contains("tampered external"));
-        assert_eq!(std::fs::read(&path).unwrap(), b"tampered external\n");
-        assert_eq!(
-            read_binding(&ctx, "rules:codex_global").unwrap(),
-            binding_before
-        );
-        drop_root(&root);
-    }
-
-    #[test]
-    fn disabled_target_is_skipped_without_probing_or_writing() {
-        let root = temp_root("disabled");
-        let ctx = ctx_at(&root);
-        write_policy_disabled_agent(&ctx, "codex");
-        let result = apply(&ctx, &req(&[])).unwrap();
-        assert_eq!(result["skipped"], json!(["rules:codex_global"]));
-        // 产品只支持 Claude/Codex；Codex 停用后只写 Claude。
-        assert_eq!(result["steps"].as_array().unwrap().len(), 1);
-        assert!(!ctx.home_dir.join(".codex").exists());
-        assert!(read_binding(&ctx, "rules:codex_global").is_none());
-        assert!(read_binding(&ctx, "rules:claude_global").is_some());
-        drop_root(&root);
-    }
-
-    #[test]
-    fn late_db_failure_rolls_back_files_bindings_and_audit() {
+    fn late_audit_failure_restores_file_and_drops_backup() {
         let root = temp_root("rollback");
         let ctx = ctx_at(&root);
-        // 先写好 claude，让第二次 apply 覆盖两个目标的更新/登记路径。
-        apply(&ctx, &req(&["--only", "rules:claude_global"])).unwrap();
-        write_source(&ctx, KEY_SHARED, "shared v3 rollback\n");
-        let claude_bytes_before = std::fs::read(ctx.home_dir.join(".claude/CLAUDE.md")).unwrap();
-
-        // 末端失败注入：审计写入 operation_logs 时触发。
+        let path = ctx.home_dir.join(".claude/CLAUDE.md");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "用户原有规则\n").unwrap();
         {
             let conn = store::open_write(&ctx).unwrap();
             conn.execute_batch(
@@ -560,55 +281,47 @@ mod tests {
             )
             .unwrap();
         }
-
-        let err = apply(&ctx, &req(&[])).unwrap_err();
+        let base = base_of(&path);
+        let err = apply(
+            &ctx,
+            &req(&[
+                "--only",
+                "rules:claude_global",
+                "--base",
+                &base,
+                "--recommended",
+            ]),
+        )
+        .unwrap_err();
         assert!(format!("{err:#}").contains("injected-end-failure"));
-
-        // 两个文件均恢复：codex 回到缺失，claude 回到旧 bytes。
-        assert!(!ctx.home_dir.join(".codex/AGENTS.md").exists());
-        assert_eq!(
-            std::fs::read(ctx.home_dir.join(".claude/CLAUDE.md")).unwrap(),
-            claude_bytes_before
+        assert_eq!(std::fs::read(&path).unwrap(), "用户原有规则\n".as_bytes());
+        let conn = store::open_readonly(&ctx).unwrap().unwrap();
+        assert!(
+            templates::load_from(&conn).unwrap().is_empty(),
+            "失败时备份模板随事务回滚"
         );
-        // 绑定与审计均回滚。
-        assert!(read_binding(&ctx, "rules:codex_global").is_none());
-        let claude_binding = read_binding(&ctx, "rules:claude_global").unwrap();
-        assert_ne!(
-            claude_binding.shared_revision,
-            sha256_hex("shared v3 rollback\n")
-        );
-        let logs = operation_log_rows(&ctx);
-        assert_eq!(logs.len(), 1, "注入失败后不得新增审计");
-        assert!(!logs[0].2.as_deref().unwrap_or("").contains("shared v3"));
-        drop_root(&root);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn result_schema_matches_apply_result_contract() {
-        let root = temp_root("schema");
+    fn copying_a_target_onto_itself_is_rejected() {
+        let root = temp_root("self-copy");
         let ctx = ctx_at(&root);
-        let result = apply(&ctx, &req(&["--only", "rules:codex_global"])).unwrap();
-        for key in ["domain", "steps", "skipped"] {
-            assert!(result.get(key).is_some(), "缺字段 {key}");
-        }
-        assert!(
-            result.get("dry_run").is_none(),
-            "apply 输出不再携带 dry_run 字段"
-        );
-        assert!(
-            result.get("snapshot").is_none(),
-            "apply 输出不再携带 snapshot 字段"
-        );
-        assert_eq!(result["domain"], "rules");
-        assert!(result["steps"].is_array());
-        assert!(result["skipped"].is_array());
-        for step in result["steps"].as_array().unwrap() {
-            for key in ["name", "ok", "exit_code"] {
-                assert!(step.get(key).is_some(), "step 缺字段 {key}");
-            }
-            assert_eq!(step["ok"], true);
-            assert_eq!(step["exit_code"], 0);
-        }
-        drop_root(&root);
+        let err = apply(
+            &ctx,
+            &req(&[
+                "--only",
+                "rules:codex_global",
+                "--base",
+                "missing",
+                "--from",
+                "rules:codex_global",
+            ]),
+        )
+        .unwrap_err();
+        assert!(format!("{err:#}").contains("同一个"));
+        assert!(!ctx.data_dir.exists());
+        assert!(!ctx.home_dir.exists());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

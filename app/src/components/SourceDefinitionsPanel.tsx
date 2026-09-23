@@ -8,7 +8,7 @@ import { useDialogFocus } from "../lib/dialogFocus";
 
 type Source = { key: string; label: string; value: string | Record<string, unknown>; revision: string; format: "text" | "json" };
 
-export function SourceDefinitionsPanel({ domain }: { domain: "rules" | "hooks" | "aliases" }) {
+export function SourceDefinitionsPanel({ domain }: { domain: "hooks" | "aliases" }) {
   const query = useQuery({ queryKey: [...engineKeys.command("sources:get"), domain], queryFn: () => runEngine<{ sources: Source[] }>("sources:get", ["--key", domain]) });
   const [editing, setEditing] = useState<Source | null>(null);
   const [text, setText] = useState("");
@@ -39,13 +39,13 @@ export function SourceDefinitionsPanel({ domain }: { domain: "rules" | "hooks" |
   return <>
     <section className="rounded-lg border bg-card p-4">
       <h3 className="text-sm font-semibold">管理定义</h3>
-      <p className="mt-1 text-xs text-muted-foreground">在来源中添加、修改或移除条目，保存定义到本地资源库。{domain === "rules" && "规则按共享内容和助手专用内容分别编辑。"}</p>
+      <p className="mt-1 text-xs text-muted-foreground">在来源中添加、修改或移除条目，保存定义到本地资源库。</p>
       <div className="mt-3 flex flex-wrap gap-2">{query.data.data.sources.map((source) => <button type="button" key={source.key} onClick={() => { setEditing(source); setText(source.format === "json" ? JSON.stringify(source.value, null, 2) : String(source.value)); setError(null); }} className="rounded border px-3 py-2 text-sm">编辑 {source.label}</button>)}</div>
     </section>
     {editing && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
       <section ref={dialogRef} role="dialog" aria-modal="true" aria-label={`编辑 ${editing.label}`} tabIndex={-1} onKeyDown={onDialogKeyDown} className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-card p-5 shadow-xl">
         <h3 className="font-semibold">编辑 {editing.label}</h3>
-        <p className="my-2 text-sm text-muted-foreground">{editing.format === "json" ? "添加或修改对象中的条目，删除对应键即可移除。使用 {} 清空这组定义。" : "直接添加、修改或删除规则文本；清空内容可移除这组规则。"}</p>
+        <p className="my-2 text-sm text-muted-foreground">{editing.format === "json" ? "添加或修改对象中的条目，删除对应键即可移除。使用 {} 清空这组定义。" : "直接修改文本内容后保存。"}</p>
         <textarea aria-label="定义内容" autoFocus value={text} onChange={(event) => setText(event.target.value)} rows={16} disabled={saving} spellCheck={false} autoCorrect="off" autoCapitalize="off" className="w-full rounded border p-2 font-mono text-sm" />
         {error && <p role="alert" className="mt-2 text-sm text-destructive">{error}</p>}
         <div className="mt-4 flex justify-end gap-2"><button type="button" disabled={saving} onClick={() => setEditing(null)} className="rounded border px-4 py-2">取消</button><button type="button" disabled={saving} onClick={() => void save()} className="rounded bg-primary px-4 py-2 text-primary-foreground">保存</button></div>

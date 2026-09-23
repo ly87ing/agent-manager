@@ -291,21 +291,27 @@ export interface SkillObserved {
 
 export interface RulesSpec {
   name: string;
-  group: string;
-  source_keys: string[];
+  group: "global-rules" | "profile-rules" | string;
+  kind: "claude" | "codex" | string;
+  profile_id: string | null;
+  /** 展示路径（~/...）。 */
   target: string;
 }
 
 export interface RulesObserved {
+  /** 绝对路径。 */
   target: string;
   target_exists: boolean | null;
-  expected_digest: string;
-  applied_digest: string | null;
-  shared_revision: string;
-  adapter_revision: string;
+  /** 规则文件实际全文；文件缺失、已停用或不能安全读取时为 null。 */
+  content: string | null;
+  /** 写入基准：文件字节摘要；文件不存在为 "missing"；已停用或不能读写时为 null。 */
+  base: string | null;
+  matched_template: { id: string; name: string } | null;
+  matches_recommended: boolean;
   blocked_reason: string | null;
-  registration_needed: boolean;
 }
+
+export type { RuleTemplate, RuleRecommended } from "./contract";
 
 // ---------- secrets ----------
 

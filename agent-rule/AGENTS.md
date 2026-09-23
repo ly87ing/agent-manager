@@ -4,7 +4,7 @@
 - Edit shared rules in `agent-rule/rules/src/`.
 
 ## Workflow
-- `rules:apply` renders shared core + adapter straight to each agent's rules file; there is no build or dist step. Editing `rules/src/` changes the defaults compiled into the engine, not what a machine already has in SQLite.
+- `rules/src/shared/core.md` is compiled into the engine as the read-only recommended rules; it reaches an agent's rules file only when the user applies it. The effective rules are each agent's real rules file; the engine no longer renders shared core + adapter, and the adapters are read only to migrate legacy saved sources into templates.
 
 ## Boundaries
 - Keep `rules/src/shared/core.md` limited to always-on cross-agent rules.

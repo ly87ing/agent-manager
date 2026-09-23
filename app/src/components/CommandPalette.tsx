@@ -353,14 +353,6 @@ export function CommandPalette({
         run: () => refreshUpstream.mutate(undefined),
       },
       {
-        id: "action:apply-rules",
-        label: "同步规则",
-        hint: "写入 AGENTS.md 与 CLAUDE.md",
-        keywords: "rules 规则 同步",
-        group: "动作",
-        run: () => void directApply.apply({ command: "rules:apply", label: "同步规则" }),
-      },
-      {
         id: "action:apply-aliases",
         label: "同步终端快捷命令",
         hint: "写入 .zshrc 与 .zprofile",

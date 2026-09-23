@@ -459,9 +459,12 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("mcp", "status" | "apply") => crate::native_mcp::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("MCP_ERROR", format!("{err:#}"))),
-        ("rules", "status" | "apply") => crate::native_rules::handle(ctx, request)
-            .map(|data| (data, vec![]))
-            .map_err(|err| DispatchError::new("RULE_ERROR", format!("{err:#}"))),
+        // 规则以实际文件为准：apply 写文件（取锁），模板保存/删除只写库
+        ("rules", "status" | "apply" | "save-template" | "delete-template") => {
+            crate::native_rules::handle(ctx, request)
+                .map(|data| (data, vec![]))
+                .map_err(|err| DispatchError::new("RULE_ERROR", format!("{err:#}")))
+        }
         ("hooks", "status" | "apply") => crate::native_hooks::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("HOOK_ERROR", format!("{err:#}"))),

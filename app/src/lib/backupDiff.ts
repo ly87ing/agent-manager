@@ -52,10 +52,22 @@ function diffMaps(label: string, before: Json, after: Json): DiffSection {
   return { label, added: added.sort(), changed: changed.sort(), removed: removed.sort() };
 }
 
+/** 规则模板按名称比正文（名称在本机唯一；id 导入时重新生成，不参与比较）。 */
+function templatesByName(value: unknown): Json {
+  const out: Json = {};
+  if (!Array.isArray(value)) return out;
+  for (const item of value) {
+    const template = asObject(item);
+    if (typeof template.name === "string") out[template.name] = template.body ?? "";
+  }
+  return out;
+}
+
 const SOURCE_LABELS: Record<string, string> = {
-  "rules.shared": "共享规则",
-  "rules.claude": "Claude 专用规则",
-  "rules.codex": "Codex 专用规则",
+  // 旧备份里的规则来源：导入时转成「旧规则来源」模板，不再作为来源保存
+  "rules.shared": "旧规则来源（共享，导入后转为模板）",
+  "rules.claude": "旧规则来源（Claude 专用，导入后转为模板）",
+  "rules.codex": "旧规则来源（Codex 专用，导入后转为模板）",
   "hooks.claude": "Claude Hooks",
   "hooks.codex": "Codex Hooks",
   "aliases.shell": "终端快捷命令",
@@ -80,6 +92,10 @@ export function diffBackup(current: Json, incoming: Json): BackupDiff {
       asObject(asObject(currentPolicy.skills).repositories),
       asObject(asObject(incomingPolicy.skills).repositories),
     ),
+    // 备份里带了模板才会整体替换；没带就不动现有模板，不报消失
+    ...("rule_templates" in incoming
+      ? [diffMaps("规则模板", templatesByName(current.rule_templates), templatesByName(incoming.rule_templates))]
+      : []),
   ].filter((section) => section.added.length + section.changed.length + section.removed.length > 0);
 
   const currentSources = asObject(current.sources);

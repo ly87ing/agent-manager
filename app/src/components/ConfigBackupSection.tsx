@@ -38,14 +38,14 @@ export function ConfigBackupSection({ onGoSync }: { onGoSync?: () => void } = {}
         toast.error(`导出失败:${envelope.errors[0]?.message ?? "未知错误"}`);
         return;
       }
-      const data = envelope.data as { policy?: Record<string, unknown>; sources?: Record<string, unknown> };
+      const data = envelope.data as { policy?: Record<string, unknown>; sources?: Record<string, unknown>; rule_templates?: unknown[] };
       const policy = (data.policy ?? {}) as Record<string, any>;
       const count = (obj: unknown) => Object.keys((obj ?? {}) as Record<string, unknown>).length;
       const definitions =
         count(policy.agents?.definitions) + count(policy.mcp?.definitions) + count(policy.skills?.repositories);
       setExported(JSON.stringify(envelope.data, null, 2));
       setExportSummary(
-        `${definitions} 条定义 · ${count(data.sources)} 份来源 · 不含密钥`,
+        `${definitions} 条定义 · ${count(data.sources)} 份来源 · ${data.rule_templates?.length ?? 0} 个规则模板 · 不含密钥`,
       );
       toast.success("已生成备份内容");
     } catch (err) {

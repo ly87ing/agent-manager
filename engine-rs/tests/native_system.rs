@@ -90,9 +90,16 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
             .count() as u64
     })
     .sum();
+    // 规则以实际文件为准：没有规则文件是正常空状态（notice），不再算「未生成」warning
+    let rules = section(&env, "rules");
+    assert_eq!(rules.len(), 2);
+    for entry in rules {
+        assert_eq!(entry["status"], "notice", "{entry}");
+        assert!(entry.get("category").is_none(), "{entry}");
+    }
     assert!(
-        total_warnings >= 3,
-        "aliases 两目标与 agents/rules 未生成目标至少带来 3 个 warning"
+        total_warnings >= 2,
+        "aliases 两目标未生成至少带来 2 个 warning"
     );
     assert_eq!(summary["warnings"].as_u64().unwrap(), total_warnings);
     assert_eq!(summary["warning_categories"]["optional_tools"], 0);

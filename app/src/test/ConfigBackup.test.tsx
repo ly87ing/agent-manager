@@ -8,7 +8,9 @@ const BACKUP = {
   format: "agent-manager/config-backup/v1",
   exported_at: "2026-09-17T00:00:00Z",
   policy: { mcp: { definitions: { demo: { command: "npx", env: { T: "${T}" } } } } },
-  sources: { "rules.shared": "我的规则\n" },
+  // 规则不再是来源：导出里是规则模板（名称 + 正文），来源只剩 hooks/aliases
+  sources: { "aliases.shell": "{}" },
+  rule_templates: [{ name: "团队规则", body: "我的规则\n", origin: "user" }],
 };
 
 function routes() {
@@ -28,6 +30,7 @@ describe("配置备份", () => {
 
     const output = await screen.findByTestId("config-export-output");
     expect(output).toHaveTextContent("1 条定义");
+    expect(output).toHaveTextContent("1 个规则模板");
     expect(output).toHaveTextContent("不含密钥");
     expect(screen.getByText(/不含密钥取值，也不含外部密钥文件路径/)).toBeInTheDocument();
     expect(calls.find((call) => call.command === "config:export")?.args).toEqual([]);
@@ -50,7 +53,7 @@ describe("配置备份", () => {
   it("导入前先给差异预览，确认后才整份提交", async () => {
     const onGoSync = vi.fn();
     const { calls } = renderWithEngine(<ConfigBackupSection onGoSync={onGoSync} />, routes());
-    // 这份备份相对当前少了 demo、多了 newcomer，规则来源也换了
+    // 这份旧格式备份相对当前少了 demo、多了 newcomer，还带着旧的规则来源（导入时转为模板）
     fireEvent.change(screen.getByTestId("config-import-input"), {
       target: {
         value: JSON.stringify({
@@ -65,7 +68,9 @@ describe("配置备份", () => {
     const preview = await screen.findByTestId("config-import-diff");
     expect(preview).toHaveTextContent("新增：newcomer");
     expect(preview).toHaveTextContent("消失：demo");
-    expect(preview).toHaveTextContent("会被替换：共享规则");
+    expect(preview).toHaveTextContent("会被替换：旧规则来源（共享，导入后转为模板）");
+    // 旧格式没带规则模板：现有模板不动，不报消失
+    expect(screen.queryByTestId("config-diff-规则模板")).toBeNull();
     expect(preview).toHaveTextContent("导入是整体替换，不能撤销");
     // 看差异这一步只读当前配置，不写任何东西
     expect(calls.some((call) => call.command === "config:import")).toBe(false);

@@ -1,8 +1,8 @@
-//! sources 域：rules 来源文本（rules.shared / rules.claude / rules.codex）、
-//! hooks 来源 JSON（hooks.claude / hooks.codex）与 aliases 来源 JSON
-//!（aliases.shell）读写。
+//! sources 域：hooks 来源 JSON（hooks.claude / hooks.codex）与 aliases 来源 JSON
+//!（aliases.shell）读写。规则来源（rules.*）已退役：生效规则以各助手的规则文件为准，
+//! 由 rules 域直接编辑，模板存 rule_templates；旧 rule_sources 只在写路径迁移成模板。
 //!
-//! native-manager.db 的 rule_sources / hook_sources / alias_sources 表是来源的
+//! native-manager.db 的 hook_sources / alias_sources 表是来源的
 //! 唯一可写事实源；编译期 include_str 固化只读默认（hooks 默认来自
 //! config/claude-hooks.json 与 config/codex-hooks.json，去掉
 //! settings_path/hooks_path 后固化；aliases 默认来自 config/shell-aliases.json），
@@ -21,11 +21,6 @@ use crate::native::{reject_secret_text, Context, DispatchError, DispatchResult, 
 use crate::native_mcp::model::{now_iso, sha256_hex};
 use crate::store;
 
-pub const KEY_SHARED: &str = "rules.shared";
-pub const KEY_CLAUDE: &str = "rules.claude";
-pub const KEY_CODEX: &str = "rules.codex";
-pub const SOURCE_KEYS: [&str; 3] = [KEY_SHARED, KEY_CLAUDE, KEY_CODEX];
-
 pub const KEY_HOOKS_CLAUDE: &str = "hooks.claude";
 pub const KEY_HOOKS_CODEX: &str = "hooks.codex";
 
@@ -37,21 +32,10 @@ pub const KEY_ALIAS_SHELL: &str = "aliases.shell";
 /// aliases 来源固定 key（单键）。
 pub const ALIAS_SOURCE_KEYS: [&str; 1] = [KEY_ALIAS_SHELL];
 
-const DEFAULT_SHARED: &str = include_str!("../../agent-rule/rules/src/shared/core.md");
-const DEFAULT_CLAUDE: &str = include_str!("../../agent-rule/rules/src/agents/claude/adapter.md");
-const DEFAULT_CODEX: &str = include_str!("../../agent-rule/rules/src/agents/codex/adapter.md");
-
 const RAW_DEFAULT_HOOKS_CLAUDE: &str = include_str!("../../config/claude-hooks.json");
 const RAW_DEFAULT_HOOKS_CODEX: &str = include_str!("../../config/codex-hooks.json");
 
 const RAW_DEFAULT_ALIAS_SHELL: &str = include_str!("../../config/shell-aliases.json");
-
-const TABLE_DDL: &str = "CREATE TABLE IF NOT EXISTS rule_sources (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    revision TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-)";
 
 const HOOK_TABLE_DDL: &str = "CREATE TABLE IF NOT EXISTS hook_sources (
     key TEXT PRIMARY KEY NOT NULL,
@@ -79,20 +63,8 @@ fn internal(err: impl Into<anyhow::Error>) -> DispatchError {
     DispatchError::new(SOURCE_ERROR, format!("{err:#}"))
 }
 
-pub fn default_value(key: &str) -> Option<&'static str> {
-    match key {
-        KEY_SHARED => Some(DEFAULT_SHARED),
-        KEY_CLAUDE => Some(DEFAULT_CLAUDE),
-        KEY_CODEX => Some(DEFAULT_CODEX),
-        _ => None,
-    }
-}
-
 pub fn label_of(key: &str) -> &'static str {
     match key {
-        KEY_SHARED => "共享核心规则",
-        KEY_CLAUDE => "Claude 专用适配",
-        KEY_CODEX => "Codex 专用适配",
         KEY_HOOKS_CLAUDE => "Claude Hooks",
         KEY_HOOKS_CODEX => "Codex Hooks",
         KEY_ALIAS_SHELL => "Shell 别名",
@@ -100,8 +72,7 @@ pub fn label_of(key: &str) -> &'static str {
     }
 }
 
-/// 来源 revision：rules 为当前有效文本的 sha256；hooks 为 canonical
-/// compact JSON 的 64 位小写 sha256。
+/// 来源 revision：canonical compact JSON 的 64 位小写 sha256。
 pub fn revision_of(text: &str) -> String {
     sha256_hex(text)
 }
@@ -170,15 +141,6 @@ pub(crate) fn write_source_in_tx(
 ) -> anyhow::Result<()> {
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let revision = revision_of(text);
-    if SOURCE_KEYS.contains(&key) {
-        tx.execute_batch(TABLE_DDL)?;
-        tx.execute(
-            "INSERT INTO rule_sources (key, value, revision, updated_at) VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value, revision = excluded.revision, updated_at = excluded.updated_at",
-            rusqlite::params![key, text, revision, now],
-        )?;
-        return Ok(());
-    }
     if HOOK_SOURCE_KEYS.contains(&key) {
         tx.execute_batch(HOOK_TABLE_DDL)?;
         tx.execute(
@@ -198,66 +160,6 @@ pub(crate) fn write_source_in_tx(
         return Ok(());
     }
     anyhow::bail!("未知来源 key，拒绝写入")
-}
-
-fn ensure_table(conn: &Connection) -> anyhow::Result<()> {
-    conn.execute_batch(TABLE_DDL)?;
-    Ok(())
-}
-
-/// 读取已保存的来源文本；缺表视为空（域名自管表，读路径不建表）。
-fn load_stored_from(conn: &Connection) -> anyhow::Result<BTreeMap<String, String>> {
-    let mut stmt = match conn.prepare("SELECT key, value FROM rule_sources") {
-        Ok(stmt) => stmt,
-        Err(exc) => {
-            if exc.to_string().contains("no such table") {
-                return Ok(BTreeMap::new());
-            }
-            return Err(exc.into());
-        }
-    };
-    let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
-    let mut out = BTreeMap::new();
-    for row in rows {
-        let (key, value) = row?;
-        if default_value(&key).is_some() {
-            out.insert(key, value);
-        }
-    }
-    Ok(out)
-}
-
-/// 由连接读出三个来源的当前文本（已存值覆盖编译期默认）。
-pub fn current_sources_from(conn: &Connection) -> anyhow::Result<BTreeMap<String, String>> {
-    let stored = load_stored_from(conn)?;
-    let mut out = BTreeMap::new();
-    for key in SOURCE_KEYS {
-        let value = stored
-            .get(key)
-            .cloned()
-            .unwrap_or_else(|| default_value(key).expect("已知来源 key").to_string());
-        out.insert(key.to_string(), value);
-    }
-    Ok(out)
-}
-
-/// 只读读取三个来源的当前文本；无 DB 时返回纯默认，零写。
-pub fn current_sources_readonly(ctx: &Context) -> anyhow::Result<BTreeMap<String, String>> {
-    match store::open_readonly(ctx)? {
-        Some(conn) => current_sources_from(&conn),
-        None => {
-            let mut out = BTreeMap::new();
-            for key in SOURCE_KEYS {
-                out.insert(
-                    key.to_string(),
-                    default_value(key).expect("已知来源 key").to_string(),
-                );
-            }
-            Ok(out)
-        }
-    }
 }
 
 /// hook_sources 精确 4 列 schema 校验；错误只含类别，不回显 DB 原值。
@@ -561,16 +463,6 @@ fn hook_source_item(key: &str, canonical: &str) -> anyhow::Result<Value> {
     }))
 }
 
-fn source_item(key: &str, value: &str) -> Value {
-    json!({
-        "key": key,
-        "label": label_of(key),
-        "value": value,
-        "revision": revision_of(value),
-        "format": "text",
-    })
-}
-
 struct SourcesArgs {
     key: Option<String>,
     value: Option<String>,
@@ -621,30 +513,24 @@ fn parse_args(req: &Request) -> Result<SourcesArgs, DispatchError> {
     Ok(SourcesArgs { key, value })
 }
 
+/// 已退役的规则来源键：rules 前缀与 rules.* 精确键。
+fn is_retired_rules_key(key: &str) -> bool {
+    key == "rules" || key.starts_with("rules.")
+}
+
+const RULES_RETIRED: &str =
+    "规则来源已退役：生效规则以各助手的规则文件为准，请在规则页直接编辑或使用规则模板";
+
 pub(crate) fn get(ctx: &Context, req: &Request) -> DispatchResult {
     let args = parse_args(req)?;
     if args.value.is_some() {
         return Err(source_error("sources:get 不接受 --value"));
     }
     let key = args.key.ok_or_else(|| {
-        source_error("sources:get 需要 --key <rules|hooks|aliases|rules.*|hooks.*|aliases.shell>")
+        source_error("sources:get 需要 --key <hooks|aliases|hooks.*|aliases.shell>")
     })?;
     match key.as_str() {
-        "rules" => {
-            let sources = current_sources_readonly(ctx).map_err(internal)?;
-            let items: Vec<Value> = SOURCE_KEYS
-                .iter()
-                .map(|key| source_item(key, &sources[*key]))
-                .collect();
-            Ok((json!({ "sources": items }), vec![]))
-        }
-        exact if SOURCE_KEYS.contains(&exact) => {
-            let sources = current_sources_readonly(ctx).map_err(internal)?;
-            Ok((
-                json!({ "sources": [source_item(exact, &sources[exact])] }),
-                vec![],
-            ))
-        }
+        retired if is_retired_rules_key(retired) => Err(source_error(RULES_RETIRED)),
         "hooks" => {
             let sources = current_hook_sources_readonly(ctx).map_err(internal)?;
             let mut items = Vec::new();
@@ -675,7 +561,7 @@ pub(crate) fn get(ctx: &Context, req: &Request) -> DispatchResult {
             ))
         }
         _ => Err(source_error(
-            "未知来源 key（支持 rules / hooks / aliases 前缀与精确 key）",
+            "未知来源 key（支持 hooks / aliases 前缀与精确 key）",
         )),
     }
 }
@@ -707,20 +593,6 @@ fn parse_wrapper(raw: &str) -> Result<(String, Value), DispatchError> {
         return Err(source_error("来源内容不允许包含 NUL 字符"));
     }
     Ok((revision.to_string(), value))
-}
-
-/// rules 文本值的既有校验：字符串、无 NUL、不命中凭据检测。
-fn validate_rules_value(value: &Value) -> Result<String, DispatchError> {
-    let text = value
-        .as_str()
-        .ok_or_else(|| source_error("--value.value 缺失或不是字符串"))?;
-    if text.contains('\0') {
-        return Err(source_error("来源内容不允许包含 NUL 字符"));
-    }
-    if let Some(kind) = reject_secret_text(text) {
-        return Err(source_error(format!("拒绝写入疑似凭据: {kind}")));
-    }
-    Ok(text.to_string())
 }
 
 /// 递归检查 JSON 字符串叶是否含 NUL。
@@ -772,26 +644,19 @@ fn validate_alias_value(key: &str, value: &Value) -> Result<String, DispatchErro
     Ok(canonical)
 }
 
-fn current_revision_in(conn: &Connection, key: &str) -> anyhow::Result<String> {
-    let stored = load_stored_from(conn)?;
-    let current = stored
-        .get(key)
-        .cloned()
-        .unwrap_or_else(|| default_value(key).expect("已知来源 key").to_string());
-    Ok(revision_of(&current))
-}
-
 pub(crate) fn set(ctx: &Context, req: &Request) -> DispatchResult {
     let args = parse_args(req)?;
     let key = args
         .key
-        .ok_or_else(|| source_error("sources:set 需要 --key <rules.*|hooks.*|aliases.shell>"))?;
-    let is_rules_key = SOURCE_KEYS.contains(&key.as_str());
+        .ok_or_else(|| source_error("sources:set 需要 --key <hooks.*|aliases.shell>"))?;
+    if is_retired_rules_key(&key) {
+        return Err(source_error(RULES_RETIRED));
+    }
     let is_hooks_key = HOOK_SOURCE_KEYS.contains(&key.as_str());
     let is_alias_key = ALIAS_SOURCE_KEYS.contains(&key.as_str());
-    if !is_rules_key && !is_hooks_key && !is_alias_key {
+    if !is_hooks_key && !is_alias_key {
         return Err(source_error(
-            "sources:set 只接受精确 key（rules.* / hooks.* / aliases.shell 固定 key）",
+            "sources:set 只接受精确 key（hooks.* / aliases.shell 固定 key）",
         ));
     }
     let raw_value = args
@@ -800,12 +665,7 @@ pub(crate) fn set(ctx: &Context, req: &Request) -> DispatchResult {
     let (revision, value) = parse_wrapper(&raw_value)?;
 
     // 预检（只读）：revision CAS 基于当前有效来源。
-    let current_revision = if is_rules_key {
-        current_sources_readonly(ctx)
-            .map_err(internal)?
-            .get(&key)
-            .map(|v| revision_of(v))
-    } else if is_hooks_key {
+    let current_revision = if is_hooks_key {
         current_hook_sources_readonly(ctx)
             .map_err(internal)?
             .get(&key)
@@ -820,40 +680,6 @@ pub(crate) fn set(ctx: &Context, req: &Request) -> DispatchResult {
     };
     if revision != current_revision {
         return Err(source_error("来源 revision 已过期，请重新读取后再保存"));
-    }
-
-    if is_rules_key {
-        let new_value = validate_rules_value(&value)?;
-        let new_revision = revision_of(&new_value);
-        let mut conn = store::open_write(ctx).map_err(internal)?;
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(internal)?;
-        ensure_table(&tx).map_err(internal)?;
-        // 事务内复查 CAS：预检与写入之间来源可能被其他写入方改动。
-        let in_tx_revision = current_revision_in(&tx, &key).map_err(internal)?;
-        if revision != in_tx_revision {
-            return Err(source_error("来源 revision 已过期，请重新读取后再保存"));
-        }
-        tx.execute(
-            "INSERT INTO rule_sources (key, value, revision, updated_at) VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value, revision = excluded.revision, updated_at = excluded.updated_at",
-            rusqlite::params![key, new_value, new_revision, now_iso()],
-        )
-        .map_err(internal)?;
-        store::record_operation(
-            &tx,
-            Some(&req.run_id),
-            "sources:set",
-            Some(&key),
-            Some(&json!({ "key": key, "revision": new_revision })),
-        )
-        .map_err(internal)?;
-        tx.commit().map_err(internal)?;
-        return Ok((
-            json!({ "sources": [source_item(&key, &new_value)] }),
-            vec![],
-        ));
     }
 
     if is_alias_key {

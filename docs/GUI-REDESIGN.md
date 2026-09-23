@@ -16,7 +16,7 @@
 - **写入**：编辑生效项即写回实际文件，只改本工具负责的键、条目或区块；写入前重读实际内容，与打开编辑时的内容比对，不一致即提示「已在外部修改」并刷新，不静默覆盖。
 - **切换**：启用另一个已保存备选（接入配置、规则模板）时，先把实际内容回填进当前项（对不上任何已保存项时另存为备份），再写入目标项。外部修改因此默认保留，不再以「接管 = 用库覆盖」作为唯一出路。
 - **内置推荐**：只以「推荐 · 应用」出现，逐项确认、应用前展示与实际内容的差异；不计入「待同步」，不进入批量同步，不在首次运行时固化进库。
-- **首次运行**：已有的实际配置就是当前配置（接入配置首次读取即导入为当前项）；不因为库里没有记录就把内置默认当作生效配置。
+- **首次运行**：已有的实际配置就是当前配置——读取保持零写，接入配置对不上任何已保存项时显示为「当前实际配置（未保存）」，在用户保存或切换时才入库；不因为库里没有记录就把内置默认当作生效配置。
 
 设置写入 `app_settings` 表；policy 写入固定使用 `--layer local`，界面不提供配置原文编辑器。
 
@@ -56,9 +56,13 @@ Claude Code 和 Codex 的内置默认渠道均为官方 `native` 命令；brew �
 
 ## Rules 与来源原生域状态
 
-`sources:get/set` 已原生接线：规则来源固定为 `rules.shared`、`rules.codex`、`rules.claude` 三项，保存使用 revision CAS 且只写 SQLite，不执行任何同步动作。
+规则以各助手的规则文件为准。规则目标是主 Claude（`~/.claude/CLAUDE.md`）、主 Codex（`~/.codex/AGENTS.md`）与每个实例配置目录下对应的 `CLAUDE.md` / `AGENTS.md`。`rules:status` 只读零写，逐目标输出路径、是否存在、实际全文、`base`（文件字节 sha256，文件不存在为 `missing`）以及与哪个已保存模板或内置推荐逐字节一致，另附已保存模板 `templates` 与内置推荐 `recommended`。停用的助手或实例不探测；符号链接、非普通文件、读不了或非 UTF-8 的目标只报原因，不提供写入。
 
-Rust dispatcher 已实现 `rules:status`（只读）与真实 `rules:apply`。固定目标为 `rules:codex_global`（`~/.codex/AGENTS.md`）与 `rules:claude_global`（`~/.claude/CLAUDE.md`），内容由共享与助手专用来源渲染；`rules:status` 只读零写；真实 `apply` 具备全局排他锁、操作审计、文件字节 CAS 与事务/文件回滚保护；目标被外部修改时 fail-closed 拒绝覆盖，不承诺备份。没有中间产物目录，来源直接渲染写入目标。Tauri bridge 参数白名单与 Rules 页面已对齐真实 schema，详情与逐目标操作均以 `--only <目标>` 精确限定。
+`rules:apply` 每次写一个目标的实际文件，必须带 `--only` 与 `--base`，新内容四选一：直接编辑（`--value`）、已保存模板（`--template`）、内置推荐（`--recommended`）、另一目标的实际正文（`--from`）。写入前重读实际内容与 `base` 比对，不一致即拒绝并提示「已在外部修改」，文件与库不变；写入取全局排他锁，做文件字节 CAS、失败回滚与审计，审计只记 id 与摘要。用模板、推荐或复制覆盖前先回填：目标现有内容非空且对不上任何已保存模板或内置推荐时，自动另存为备份模板（名称含目标与时间）；现有内容疑似含凭据时不入库，改为拒绝覆盖。直接编辑不另存备份。规则没有「同步」与「接管」，不产生「待同步」。
+
+规则模板（`rule_templates`）由 `rules:save-template`（修改带 revision CAS）与 `rules:delete-template` 维护，只写库、不动文件、不取 apply 锁。内置推荐是编译内置的 `agent-rule/rules/src/shared/core.md`，只读、从不入库，界面应用前展示与目标现有内容的差异。`profiles:apply` 不再渲染或检测实例规则文件；新建实例不自动写规则文件，可在规则页从主助手复制。
+
+旧的共享 + 助手专用来源（`rules.shared` / `rules.claude` / `rules.codex`）已退役，`sources:get/set` 拒绝这些键，hooks 与别名来源不变。旧库 `rule_sources` 中用户改过、且与内置不同的内容在写路径迁移成「旧规则来源（Claude）」「旧规则来源（Codex）」模板（按旧规则渲染共享 + 对应专用来源），读路径即时推导同一结果；迁移不改实际文件、不删旧表，旧 `rule_target_bindings` 不再作为写入门槛。配置备份导出 `rule_templates`，旧备份里的 `rules.*` 来源导入时同样转成旧来源模板。
 
 `system:audit` 已接入 Rust dispatcher：只读聚合 agents/skills/mcp/rules/hooks/aliases/secrets 与 runtime/storage 状态。密钥页先明确显示保存位置，再列变量与来源；用户选择权限为 `600` 的外部 `.env` 文件后才能填写或接管取值。SQLite 只保存路径，状态、日志与配置备份都不含取值；历史数据库值只显示数量并通过输入确认词显式迁移，写文件成功后才删旧表。设置页「配置工具」可达客户端诊断、Aliases 与 Secrets，Aliases 原生 `aliases:status/apply` 已接线。按 2026-09-12 产品裁决，Tools 域、快照（`snapshots:*`）与 `system:converge` 已退役，相关页面、Tauri 白名单与契约 schema 已移除；`system:refresh-upstream` 已接线 Rust dispatcher：探测宇宙为 agents/mcp/skills，缓存落 SQLite `upstream_probes` 表，三域 status 只读回填 freshness（缺表/缺行一律 unknown，status 零写零网络），`--offline` 拒绝。
 

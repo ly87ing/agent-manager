@@ -1,102 +1,188 @@
 //! Rules 命令的严格参数解析：不复用 Request::flag/value 的宽松语义。
-//! 所有错误固定描述参数种类，不回显未知 token/值，避免正文或凭据进入
-//! envelope。--dry-run 已退役，一律作为不支持的选项拒绝。
+//! 所有错误固定描述参数种类，不回显未知 token/值，避免规则正文或凭据进入
+//! envelope。--dry-run 与 --allow-takeover 已退役，按不支持的选项拒绝。
 
 use anyhow::{bail, Result};
 
-use super::model;
+use super::{model, templates};
 use crate::native::Request;
 
-pub(crate) struct RuleArgs {
-    pub only: Vec<String>,
-    /// 显式接管：目标被外部改过时允许用本工具的内容整体替换它。
-    pub allow_takeover: bool,
+/// 写入目标的新内容从哪里来。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Source {
+    /// 直接编辑：新的全文。
+    Value(String),
+    /// 已保存模板 id。
+    Template(String),
+    /// 内置推荐规则。
+    Recommended,
+    /// 另一个规则目标的实际正文。
+    From(String),
 }
 
-fn valid_target_id(value: &str) -> bool {
-    model::targets().iter().any(|t| t.target_id == value)
+#[derive(Debug)]
+pub(crate) struct ApplyArgs {
+    pub target: String,
+    /// status 输出的 observed.base：文件字节 sha256，或 "missing"。
+    pub base: String,
+    pub source: Source,
 }
 
-fn normalize_only(selected: &[String]) -> Vec<String> {
-    model::targets()
-        .iter()
-        .filter(|t| selected.iter().any(|s| s == t.target_id))
-        .map(|t| t.target_id.to_string())
-        .collect()
+#[derive(Debug)]
+pub(crate) struct SaveArgs {
+    /// 修改已有模板时的 (id, revision)；新建时为 None。
+    pub existing: Option<(String, String)>,
+    pub name: String,
+    pub body: String,
 }
 
-fn parse_args(req: &Request, allow_only: bool, allow_takeover_flag: bool) -> Result<RuleArgs> {
-    let mut selected: Vec<String> = Vec::new();
-    let mut offline_seen = false;
-    let mut allow_takeover = false;
-
+/// 逐个取 flag；`free_value` 中的 flag 原样取下一个 token（正文可能以 `--` 开头，
+/// 例如 YAML front matter 的 `---`），其余 flag 的值不得缺失或像选项。
+fn collect<'a>(
+    req: &'a Request,
+    value_flags: &[&str],
+    free_value: &[&str],
+    switch_flags: &[&str],
+) -> Result<Vec<(&'a str, Option<&'a str>)>> {
+    let mut out: Vec<(&str, Option<&str>)> = Vec::new();
     let mut iter = req.args.iter();
     while let Some(arg) = iter.next() {
-        match arg.as_str() {
-            "--only" if allow_only => {
-                let Some(value) = iter.next() else {
-                    bail!("参数错误: --only 缺少目标值");
-                };
-                if value.starts_with("--") {
-                    bail!("参数错误: --only 的值不能是选项");
-                }
-                if !valid_target_id(value) {
-                    bail!("参数错误: --only 目标无效");
-                }
-                if selected.iter().any(|s| s == value) {
-                    bail!("参数错误: --only 目标重复");
-                }
-                selected.push(value.clone());
+        let flag = arg.as_str();
+        if !flag.starts_with("--") {
+            bail!("参数错误: 不接受位置参数");
+        }
+        if out.iter().any(|(seen, _)| *seen == flag) {
+            bail!("参数错误: 选项重复");
+        }
+        if switch_flags.contains(&flag) {
+            out.push((flag, None));
+        } else if value_flags.contains(&flag) {
+            let Some(value) = iter.next() else {
+                bail!("参数错误: 选项缺少取值");
+            };
+            if !free_value.contains(&flag) && value.starts_with("--") {
+                bail!("参数错误: 选项取值不能是另一个选项");
             }
-            "--allow-takeover" if allow_takeover_flag => {
-                if allow_takeover {
-                    bail!("参数错误: --allow-takeover 重复");
-                }
-                allow_takeover = true;
-            }
-            "--offline" => {
-                if offline_seen {
-                    bail!("参数错误: --offline 重复");
-                }
-                offline_seen = true;
-            }
-            other if other.starts_with("--") => {
-                bail!("参数错误: 存在不支持的选项");
-            }
-            _ => {
-                bail!("参数错误: 不接受位置参数");
-            }
+            out.push((flag, Some(value.as_str())));
+        } else {
+            bail!("参数错误: 存在不支持的选项");
         }
     }
+    Ok(out)
+}
 
-    // 接管是整文件替换，必须逐个目标显式来，不能一把全接管。
-    if allow_takeover && selected.len() != 1 {
-        bail!("参数错误: --allow-takeover 仅允许与 --only 指定单个目标同时使用");
-    }
+fn get<'a>(parsed: &[(&str, Option<&'a str>)], flag: &str) -> Option<&'a str> {
+    parsed
+        .iter()
+        .find(|(f, _)| *f == flag)
+        .and_then(|(_, v)| *v)
+}
 
-    let only = if selected.is_empty() {
-        model::targets()
-            .iter()
-            .map(|t| t.target_id.to_string())
-            .collect()
-    } else {
-        normalize_only(&selected)
-    };
-    Ok(RuleArgs {
-        only,
-        allow_takeover,
-    })
+fn has(parsed: &[(&str, Option<&str>)], flag: &str) -> bool {
+    parsed.iter().any(|(f, _)| *f == flag)
+}
+
+fn valid_base(value: &str) -> bool {
+    value == "missing" || crate::native_mcp::model::is_sha256_hex(value)
 }
 
 /// rules:status —— 只接受可选且最多一次 --offline。
-pub(crate) fn parse_status_args(req: &Request) -> Result<RuleArgs> {
-    parse_args(req, false, false)
+pub(crate) fn parse_status_args(req: &Request) -> Result<()> {
+    collect(req, &[], &[], &["--offline"])?;
+    Ok(())
 }
 
-/// rules:apply —— --only（零或多个）+ 可选最多一次 --offline + 可选
-/// --allow-takeover（须恰好选中一个目标）；--dry-run 与其余未知选项一样被拒绝。
-pub(crate) fn parse_apply_args(req: &Request) -> Result<RuleArgs> {
-    parse_args(req, true, true)
+/// rules:apply —— 恰好一个 --only 与 --base，外加恰好一种来源：
+/// --value <全文> | --template <id> | --recommended | --from <目标>。
+pub(crate) fn parse_apply_args(req: &Request) -> Result<ApplyArgs> {
+    let parsed = collect(
+        req,
+        &["--only", "--base", "--value", "--template", "--from"],
+        &["--value"],
+        &["--recommended", "--offline"],
+    )?;
+    let Some(target) = get(&parsed, "--only") else {
+        bail!("参数错误: 需要 --only 指定一个规则目标");
+    };
+    if !model::valid_target_id(target) {
+        bail!("参数错误: --only 目标无效");
+    }
+    let Some(base) = get(&parsed, "--base") else {
+        bail!("参数错误: 需要 --base（取自 rules:status 的 observed.base）");
+    };
+    if !valid_base(base) {
+        bail!("参数错误: --base 必须是 64 位小写 sha256 或 missing");
+    }
+    let mut sources = Vec::new();
+    if let Some(value) = get(&parsed, "--value") {
+        sources.push(Source::Value(value.to_string()));
+    }
+    if let Some(id) = get(&parsed, "--template") {
+        if !templates::valid_id(id) {
+            bail!("参数错误: --template 模板 id 无效");
+        }
+        sources.push(Source::Template(id.to_string()));
+    }
+    if has(&parsed, "--recommended") {
+        sources.push(Source::Recommended);
+    }
+    if let Some(from) = get(&parsed, "--from") {
+        if !model::valid_target_id(from) {
+            bail!("参数错误: --from 目标无效");
+        }
+        sources.push(Source::From(from.to_string()));
+    }
+    if sources.len() != 1 {
+        bail!("参数错误: --value / --template / --recommended / --from 必须恰好给一个");
+    }
+    Ok(ApplyArgs {
+        target: target.to_string(),
+        base: base.to_string(),
+        source: sources.remove(0),
+    })
+}
+
+/// rules:save-template —— 新建：--name --value；修改：再加 --template 与 --revision。
+pub(crate) fn parse_save_args(req: &Request) -> Result<SaveArgs> {
+    let parsed = collect(
+        req,
+        &["--name", "--value", "--template", "--revision"],
+        &["--value"],
+        &[],
+    )?;
+    let (Some(name), Some(body)) = (get(&parsed, "--name"), get(&parsed, "--value")) else {
+        bail!("参数错误: 需要 --name 与 --value");
+    };
+    let existing = match (get(&parsed, "--template"), get(&parsed, "--revision")) {
+        (None, None) => None,
+        (Some(id), Some(revision)) => {
+            if !templates::valid_id(id) {
+                bail!("参数错误: --template 模板 id 无效");
+            }
+            if !crate::native_mcp::model::is_sha256_hex(revision) {
+                bail!("参数错误: --revision 必须是 64 位小写 sha256");
+            }
+            Some((id.to_string(), revision.to_string()))
+        }
+        _ => bail!("参数错误: 修改模板需要同时给 --template 与 --revision"),
+    };
+    Ok(SaveArgs {
+        existing,
+        name: name.to_string(),
+        body: body.to_string(),
+    })
+}
+
+/// rules:delete-template —— 恰好一个 --template。
+pub(crate) fn parse_delete_args(req: &Request) -> Result<String> {
+    let parsed = collect(req, &["--template"], &[], &[])?;
+    let Some(id) = get(&parsed, "--template") else {
+        bail!("参数错误: 需要 --template");
+    };
+    if !templates::valid_id(id) {
+        bail!("参数错误: --template 模板 id 无效");
+    }
+    Ok(id.to_string())
 }
 
 #[cfg(test)]
@@ -111,114 +197,198 @@ mod tests {
         }
     }
 
-    /// 不带 --only 时的默认目标全集。
-    fn both_targets() -> Vec<String> {
-        vec![
-            "rules:codex_global".to_string(),
-            "rules:claude_global".to_string(),
-        ]
+    const BASE: &str = "missing";
+
+    #[test]
+    fn status_accepts_nothing_or_single_offline() {
+        assert!(parse_status_args(&req(&[])).is_ok());
+        assert!(parse_status_args(&req(&["--offline"])).is_ok());
+        for bad in [
+            vec!["--offline", "--offline"],
+            vec!["--only", "rules:codex_global"],
+            vec!["--dry-run"],
+            vec!["codex"],
+        ] {
+            assert!(parse_status_args(&req(&bad)).is_err(), "{bad:?}");
+        }
     }
 
     #[test]
-    fn status_no_args_defaults_to_both_targets() {
-        let args = parse_status_args(&req(&[])).unwrap();
-        assert_eq!(args.only, both_targets());
-    }
+    fn apply_accepts_each_single_source() {
+        let args = parse_apply_args(&req(&[
+            "--only",
+            "rules:claude_global",
+            "--base",
+            BASE,
+            "--value",
+            "---\nfront: matter\n---\n",
+        ]))
+        .unwrap();
+        assert_eq!(args.target, "rules:claude_global");
+        assert_eq!(
+            args.source,
+            Source::Value("---\nfront: matter\n---\n".into())
+        );
 
-    #[test]
-    fn status_accepts_offline_once() {
-        let args = parse_status_args(&req(&["--offline"])).unwrap();
-        assert_eq!(args.only, both_targets());
-    }
-
-    #[test]
-    fn status_rejects_only_dry_run_positional_unknown_and_repeat() {
-        assert!(parse_status_args(&req(&["--only", "rules:codex_global"])).is_err());
-        assert!(parse_status_args(&req(&["--dry-run"])).is_err());
-        assert!(parse_status_args(&req(&["codex"])).is_err());
-        assert!(parse_status_args(&req(&["--bogus"])).is_err());
-        assert!(parse_status_args(&req(&["--offline", "--offline"])).is_err());
-    }
-
-    #[test]
-    fn apply_no_only_defaults_to_both_targets() {
-        let args = parse_apply_args(&req(&["--offline"])).unwrap();
-        assert_eq!(args.only, both_targets());
-    }
-
-    #[test]
-    fn apply_accepts_single_only_and_distinct_multiple_only() {
-        let args = parse_apply_args(&req(&["--only", "rules:claude_global"])).unwrap();
-        assert_eq!(args.only, vec!["rules:claude_global".to_string()]);
+        let args = parse_apply_args(&req(&[
+            "--only",
+            "rules:profile:cc-ly",
+            "--base",
+            &"a".repeat(64),
+            "--template",
+            "tpl-1",
+        ]))
+        .unwrap();
+        assert_eq!(args.source, Source::Template("tpl-1".into()));
 
         let args = parse_apply_args(&req(&[
             "--only",
             "rules:codex_global",
-            "--only",
-            "rules:claude_global",
+            "--base",
+            BASE,
+            "--recommended",
         ]))
         .unwrap();
-        assert_eq!(
-            args.only,
-            vec![
-                "rules:codex_global".to_string(),
-                "rules:claude_global".to_string()
-            ]
-        );
-    }
+        assert_eq!(args.source, Source::Recommended);
 
-    #[test]
-    fn apply_reversed_only_order_is_normalized_to_model_order() {
         let args = parse_apply_args(&req(&[
             "--only",
-            "rules:claude_global",
-            "--only",
             "rules:codex_global",
+            "--base",
+            BASE,
+            "--from",
+            "rules:claude_global",
         ]))
         .unwrap();
-        assert_eq!(
-            args.only,
+        assert_eq!(args.source, Source::From("rules:claude_global".into()));
+    }
+
+    #[test]
+    fn apply_rejects_missing_duplicate_conflicting_and_retired_options() {
+        let only = ["--only", "rules:codex_global"];
+        for bad in [
+            vec![],
+            vec!["--recommended"],
+            vec![only[0], only[1], "--recommended"],
+            vec![only[0], only[1], "--base", "nothex", "--recommended"],
+            vec![only[0], only[1], "--base", BASE],
             vec![
-                "rules:codex_global".to_string(),
-                "rules:claude_global".to_string()
-            ]
+                only[0],
+                only[1],
+                "--base",
+                BASE,
+                "--recommended",
+                "--template",
+                "tpl-1",
+            ],
+            vec![
+                only[0], only[1], "--base", BASE, "--value", "a", "--value", "b",
+            ],
+            vec![
+                only[0],
+                only[1],
+                only[0],
+                only[1],
+                "--base",
+                BASE,
+                "--recommended",
+            ],
+            vec!["--only", "rules:codex", "--base", BASE, "--recommended"],
+            vec![only[0], only[1], "--base", BASE, "--template", "Bad"],
+            vec![only[0], only[1], "--base", BASE, "--from", "codex"],
+            vec![
+                only[0],
+                only[1],
+                "--base",
+                BASE,
+                "--recommended",
+                "--allow-takeover",
+            ],
+            vec![
+                only[0],
+                only[1],
+                "--base",
+                BASE,
+                "--recommended",
+                "--dry-run",
+            ],
+            vec![
+                only[0],
+                only[1],
+                "--base",
+                BASE,
+                "--recommended",
+                "positional",
+            ],
+            vec![only[0], only[1], "--base", "--recommended"],
+            vec![only[0], only[1], "--base", BASE, "--value"],
+        ] {
+            assert!(parse_apply_args(&req(&bad)).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn apply_errors_never_echo_values() {
+        let marker = "RULE-ARG-MARKER-5c1e";
+        for bad in [
+            vec!["--only", marker, "--base", BASE, "--recommended"],
+            vec!["--only", "rules:codex_global", "--base", BASE, marker],
+            vec![
+                "--only",
+                "rules:codex_global",
+                "--base",
+                BASE,
+                "--value",
+                marker,
+                "--x",
+            ],
+        ] {
+            let err = parse_apply_args(&req(&bad)).unwrap_err();
+            assert!(!format!("{err:#}").contains(marker), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn save_and_delete_args() {
+        let args = parse_save_args(&req(&["--name", "我的", "--value", "正文\n"])).unwrap();
+        assert!(args.existing.is_none());
+        let rev = "b".repeat(64);
+        let args = parse_save_args(&req(&[
+            "--template",
+            "tpl-1",
+            "--revision",
+            &rev,
+            "--name",
+            "我的",
+            "--value",
+            "",
+        ]))
+        .unwrap();
+        assert_eq!(args.existing, Some(("tpl-1".into(), rev.clone())));
+        for bad in [
+            vec!["--name", "x"],
+            vec!["--value", "x"],
+            vec!["--name", "x", "--value", "y", "--template", "tpl-1"],
+            vec!["--name", "x", "--value", "y", "--revision", &rev],
+            vec![
+                "--name",
+                "x",
+                "--value",
+                "y",
+                "--template",
+                "tpl-1",
+                "--revision",
+                "short",
+            ],
+        ] {
+            assert!(parse_save_args(&req(&bad)).is_err(), "{bad:?}");
+        }
+        assert_eq!(
+            parse_delete_args(&req(&["--template", "tpl-1"])).unwrap(),
+            "tpl-1"
         );
-    }
-
-    #[test]
-    fn apply_rejects_dry_run_unknown_flag_and_positional() {
-        assert!(parse_apply_args(&req(&["--dry-run"])).is_err());
-        assert!(parse_apply_args(&req(&["--dry-run", "--dry-run"])).is_err());
-        assert!(parse_apply_args(&req(&["--verbose"])).is_err());
-        assert!(parse_apply_args(&req(&["rules:codex_global"])).is_err());
-        assert!(parse_apply_args(&req(&["--offline", "--offline"])).is_err());
-    }
-
-    #[test]
-    fn apply_rejects_duplicate_unknown_missing_and_flag_like_only() {
-        assert!(parse_apply_args(&req(&[
-            "--only",
-            "rules:codex_global",
-            "--only",
-            "rules:codex_global",
-        ]))
-        .is_err());
-        assert!(parse_apply_args(&req(&["--only", "rules:unknown"])).is_err());
-        assert!(parse_apply_args(&req(&["--only", "rules:codex"])).is_err());
-        assert!(parse_apply_args(&req(&["--only", "rules:"])).is_err());
-        assert!(parse_apply_args(&req(&["--only", ""])).is_err());
-        assert!(parse_apply_args(&req(&["--only"])).is_err());
-        assert!(parse_apply_args(&req(&["--only", "--offline"])).is_err());
-    }
-
-    #[test]
-    fn apply_rejects_dry_run_even_alongside_valid_only_and_offline() {
-        assert!(parse_apply_args(&req(&[
-            "--only",
-            "rules:codex_global",
-            "--dry-run",
-            "--offline",
-        ]))
-        .is_err());
+        assert!(parse_delete_args(&req(&[])).is_err());
+        assert!(parse_delete_args(&req(&["--template", "Bad"])).is_err());
+        assert!(parse_delete_args(&req(&["--template", "tpl-1", "--x"])).is_err());
     }
 }

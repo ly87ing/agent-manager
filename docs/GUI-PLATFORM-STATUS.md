@@ -14,7 +14,7 @@
 | Runs 操作记录与清理 | 已完成：列表与详情读取 SQLite `operation_logs`；新增操作记录时按设置（`log_retention_days`，0 为不清理）删除过期记录；提供 `runs:clear` 二次确认手动清空（清空自身零审计且不删库改配置） |
 | 本地结构化诊断日志与清理 | 已退役（2026-09-19 裁决）：JSONL 诊断日志、`logs:clear` 与 envelope `log_file` 一并移除；错误消息出库前仍统一脱敏，排查依赖 `operation_logs` |
 | MCP 原生域 | 已完成：Rust dispatcher 已接入本地 stdio 与远程 HTTP `mcp:status` / 真实 `mcp:apply`；定义与分配存 SQLite；当前产品支持 Claude JSON 与 Codex TOML，旧 OpenCode codec 仅用于兼容既有数据；逐助手 add/update/enable/disable/remove，库级 enable/disable/remove；status 只读零写；apply 具备锁、审计、CAS/回滚；env 在 SQLite definition/binding 中只持久化字面量 `${VAR}` 形式的环境变量引用；status、诊断与操作日志不展示或保存解析后的真实值 |
-| Rules 原生域 | 已完成：Rust dispatcher 已接入 `rules:status` / 真实 `rules:apply`；固定 Codex/Claude 两目标；规则专用 `sources:get/set`（rules.shared/rules.codex/rules.claude）使用 revision CAS 只写 SQLite；status 只读零写；apply 具备排他锁、审计与 CAS/回滚，外部修改 fail-closed |
+| Rules 原生域 | 已完成（2026-09-22 改为实际文件为准）：`rules:status` 输出主 Codex/Claude 与各实例规则文件的实际全文与写入基准；`rules:apply` 按 `--base` 直接编辑，或应用模板/内置推荐/复制另一目标（覆盖前回填备份）；模板存 `rule_templates`；status 只读零写；apply 具备排他锁、审计与 CAS/回滚，外部修改时拒绝并提示刷新 |
 | Hooks 原生域 | 已完成：Rust dispatcher 已接入 `hooks:status` / 真实 `hooks:apply`；hooks 专用 `sources:get/set`（hooks.claude/hooks.codex）revision CAS 只写 SQLite；固定 Claude `~/.claude/settings.json` signature-set 合并与 Codex `~/.codex/hooks.json` whole-file 两目标，外部修改 fail-closed |
 | 定义编辑原文保存 | 已完成（`5ae995b`）：SourceDefinitionsPanel 禁用文本框自动替换并有单测，Rules/Hooks 原文保存不被 smart quotes 等自动改写 |
 | 系统审计 | 已完成：Rust dispatcher 已接入只读 `system:audit`；聚合 agents/skills/mcp/rules/hooks/aliases/secrets 与 runtime/storage 状态 |

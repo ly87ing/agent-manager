@@ -25,7 +25,7 @@ describe("来源编辑", () => {
   });
 
   it("加载失败展示错误，不把空白页面当作成功", async () => {
-    renderWithEngine(<SourceDefinitionsPanel domain="rules" />, {
+    renderWithEngine(<SourceDefinitionsPanel domain="hooks" />, {
       "sources:get": makeEnvelope({}, { ok: false, errors: [{ code: "CONFIG_INVALID", element: null, message: "来源文件不可用" }] }),
     });
     expect(await screen.findByText("来源文件不可用")).toBeInTheDocument();
@@ -72,14 +72,7 @@ describe("输入保真", () => {
 });
 
 describe("域专属说明文案", () => {
-  it("rules 页显示共享/专用说明，hooks 页不出现", async () => {
-    renderWithEngine(<SourceDefinitionsPanel domain="rules" />, {
-      "sources:get": makeEnvelope({ sources: [{ key: "rules.shared", label: "共享规则", value: "x\n", revision: "r1", format: "text" }] }),
-    });
-    expect(await screen.findByText(/规则按共享内容和助手专用内容分别编辑/)).toBeInTheDocument();
-  });
-
-  it("hooks 页不出现 rules 专属说明", async () => {
+  it("hooks 页不出现已退役的规则拼接说明", async () => {
     renderWithEngine(<SourceDefinitionsPanel domain="hooks" />, {
       "sources:get": makeEnvelope({ sources: [{ key: "hooks.claude", label: "Claude Hooks", value: { hooks: {} }, revision: "r1", format: "json" }] }),
     });

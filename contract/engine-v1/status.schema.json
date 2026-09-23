@@ -27,9 +27,45 @@
       "description": "Skills domain only: actual entries found in each agent's skills directory (the current view), classified by the same scanner as system:discover. Display only, not pending items. Read-only, zero-write.",
       "type": "array",
       "items": {"$ref": "#/$defs/skill_installed_entry"}
+    },
+    "templates": {
+      "description": "Rules domain only: saved rule templates (stored, not in effect), including templates derived on the fly from not-yet-migrated legacy rule sources. Applying one writes a target's real rules file.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/rule_template"}
+    },
+    "recommended": {
+      "description": "Rules domain only: the compiled-in recommended rules. Read-only, never stored, never counted as pending; applied only on explicit request.",
+      "type": "object",
+      "required": ["id", "name", "body", "revision"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "name": {"type": "string"},
+        "body": {"type": "string"},
+        "revision": {"description": "sha256 of body.", "type": "string"}
+      }
     }
   },
   "$defs": {
+    "rule_template": {
+      "description": "One saved rule template.",
+      "type": "object",
+      "required": ["id", "name", "body", "revision", "origin", "created_at", "updated_at"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"description": "Template id: 'tpl-<uuid>' or 'legacy-claude' / 'legacy-codex'.", "type": "string"},
+        "name": {"description": "Unique display name.", "type": "string"},
+        "body": {"description": "Full rules text.", "type": "string"},
+        "revision": {"description": "CAS token for rules:save-template edits; changes when name or body changes.", "type": "string"},
+        "origin": {
+          "description": "user = saved by the user; backup = a target's previous content saved automatically before it was overwritten; legacy = converted from the retired rules.shared + adapter sources.",
+          "type": "string",
+          "enum": ["user", "backup", "legacy"]
+        },
+        "created_at": {"type": "string"},
+        "updated_at": {"type": "string"}
+      }
+    },
     "skill_recommendation": {
       "description": "One compiled-in recommended skill source.",
       "type": "object",

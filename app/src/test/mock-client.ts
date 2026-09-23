@@ -404,6 +404,7 @@ function demoEnvelopes(): Record<string, Envelope> {
     { command: "skills.status" },
   );
 
+  const demoRulesBody = "- Use Chinese (Simplified) for interactions and generated content.\n- Prefer the simplest local change.\n";
   const rulesStatus = makeEnvelope(
     {
       domain: "rules",
@@ -411,36 +412,67 @@ function demoEnvelopes(): Record<string, Envelope> {
         makeElement({
           id: "rules:codex_global",
           domain: "rules",
-          spec: { name: "Codex 全局规则", group: "global-rules", source_keys: ["rules.shared", "rules.codex"], target: "~/.codex/AGENTS.md" },
+          spec: { name: "Codex 全局规则", group: "global-rules", kind: "codex", profile_id: null, target: "~/.codex/AGENTS.md" },
           policy: { enabled: true, agent_id: "codex" },
-          observed: { install_source: null, target: "/Users/demo/.codex/AGENTS.md",
+          observed: {
+            target: "/Users/demo/.codex/AGENTS.md",
             target_exists: true,
-            expected_digest: "aaaa3c8ae2687d47a8e7543d3c8c43ef8dd9f744e3a3e2ce9aa9ad7a90de12a2",
-            applied_digest: "aaaa3c8ae2687d47a8e7543d3c8c43ef8dd9f744e3a3e2ce9aa9ad7a90de12a2",
-            shared_revision: "1111",
-            adapter_revision: "2222",
+            content: demoRulesBody,
+            base: "aaaa3c8ae2687d47a8e7543d3c8c43ef8dd9f744e3a3e2ce9aa9ad7a90de12a2",
+            matched_template: null,
+            matches_recommended: true,
             blocked_reason: null,
-            registration_needed: false },
+          },
           state: "managed-ok",
-          actions: [],
+          actions: [{ id: "write", risk: "write-local", needs_lock: true, offline_ok: true }],
         }),
         makeElement({
           id: "rules:claude_global",
           domain: "rules",
-          spec: { name: "Claude Code 全局规则", group: "global-rules", source_keys: ["rules.shared", "rules.claude"], target: "~/.claude/CLAUDE.md" },
+          spec: { name: "Claude Code 全局规则", group: "global-rules", kind: "claude", profile_id: null, target: "~/.claude/CLAUDE.md" },
           policy: { enabled: true, agent_id: "claude-code" },
-          observed: { install_source: null, target: "/Users/demo/.claude/CLAUDE.md",
+          observed: {
+            target: "/Users/demo/.claude/CLAUDE.md",
             target_exists: true,
-            expected_digest: "bbbb4b5c130887752148845080715867e6c3e6f40e69189067dd7d92db8b40c36",
-            applied_digest: "aaaa3c8ae2687d47a8e7543d3c8c43ef8dd9f744e3a3e2ce9aa9ad7a90de12a2",
-            shared_revision: "1111",
-            adapter_revision: "3333",
+            content: "# 我的 Claude 规则\n- 回答用简体中文。\n",
+            base: "bbbb4b5c130887752148845080715867e6c3e6f40e69189067dd7d92db8b40c3",
+            matched_template: { id: "tpl-demo-team", name: "团队规则" },
+            matches_recommended: false,
             blocked_reason: null,
-            registration_needed: false },
-          state: "drifted",
-          actions: [{ id: "sync", risk: "write-local", needs_lock: true, offline_ok: true }],
+          },
+          state: "managed-ok",
+          actions: [{ id: "write", risk: "write-local", needs_lock: true, offline_ok: true }],
+        }),
+        makeElement({
+          id: "rules:profile:cc-work",
+          domain: "rules",
+          spec: { name: "Claude · work 实例规则", group: "profile-rules", kind: "claude", profile_id: "cc-work", target: "~/.claude-work/CLAUDE.md" },
+          policy: { enabled: true, agent_id: "cc-work" },
+          observed: {
+            target: "/Users/demo/.claude-work/CLAUDE.md",
+            target_exists: false,
+            content: null,
+            base: "missing",
+            matched_template: null,
+            matches_recommended: false,
+            blocked_reason: null,
+          },
+          state: "missing",
+          actions: [{ id: "write", risk: "write-local", needs_lock: true, offline_ok: true }],
         }),
       ],
+      templates: [
+        {
+          id: "tpl-demo-team",
+          name: "团队规则",
+          body: "# 我的 Claude 规则\n- 回答用简体中文。\n",
+          revision: "demo-template-revision-1",
+          origin: "user",
+          created_at: "2026-09-20T08:00:00Z",
+          updated_at: "2026-09-20T08:00:00Z",
+        },
+      ],
+      recommended: { id: "builtin", name: "内置推荐规则", body: demoRulesBody, revision: "demo-recommended-revision" },
     },
     { command: "rules.status" },
   );
@@ -797,7 +829,6 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
     agents: "agent-lifecycle",
     mcp: "mcp-sync",
     skills: "skills-link",
-    rules: "rules-sync",
     hooks: "hooks-sync",
     aliases: "shell-aliases",
   };
@@ -816,6 +847,95 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       },
       { command: `${domain}.apply`, run_id: runId, lock: { held: true, pid: 4242 } },
     );
+  };
+
+  // ---- 规则：实际文件为准 + 模板（内存态演示） ----
+  type MockRuleTemplate = { id: string; name: string; body: string; revision: string; origin: string; created_at: string; updated_at: string };
+  type MockRulesData = {
+    elements: Array<{ id: string; state: string; spec: { name: string }; observed: Record<string, unknown> }>;
+    templates: MockRuleTemplate[];
+    recommended: { name: string; body: string };
+  };
+  const rulesData = () => routes["rules:status"].data as MockRulesData;
+  const argOf = (args: string[], flag: string): string | undefined => {
+    const index = args.indexOf(flag);
+    return index >= 0 ? args[index + 1] : undefined;
+  };
+  const ruleError = (command: string, message: string): Envelope =>
+    makeEnvelope({}, { command, ok: false, errors: [{ code: "RULE_ERROR", element: null, message }] });
+  const refreshRuleMatches = () => {
+    const data = rulesData();
+    for (const element of data.elements) {
+      const content = element.observed.content;
+      const match = typeof content === "string" ? data.templates.find((item) => item.body === content) : undefined;
+      element.observed.matched_template = match ? { id: match.id, name: match.name } : null;
+      element.observed.matches_recommended = content === data.recommended.body;
+    }
+  };
+  let ruleRevision = 0;
+  const applyRules = (args: string[], runId: string): Envelope => {
+    const data = rulesData();
+    const target = data.elements.find((item) => item.id === argOf(args, "--only"));
+    if (!target) return ruleError("rules.apply", "参数错误: --only 目标无效");
+    if (argOf(args, "--base") !== target.observed.base) {
+      return ruleError("rules.apply", `${target.spec.name} 已在外部修改，没有写入`);
+    }
+    let next: string | undefined;
+    if (args.includes("--value")) next = argOf(args, "--value");
+    else if (args.includes("--recommended")) next = data.recommended.body;
+    else if (args.includes("--template")) next = data.templates.find((item) => item.id === argOf(args, "--template"))?.body;
+    else if (args.includes("--from")) {
+      const from = data.elements.find((item) => item.id === argOf(args, "--from"))?.observed.content;
+      next = typeof from === "string" ? from : undefined;
+    }
+    if (next === undefined) return ruleError("rules.apply", "找不到要写入的内容");
+    const steps: { name: string; ok: boolean; exit_code: number }[] = [];
+    const current = target.observed.content;
+    if (!args.includes("--value") && typeof current === "string" && current.trim() !== ""
+      && !data.templates.some((item) => item.body === current) && current !== data.recommended.body) {
+      const now = new Date().toISOString();
+      data.templates.push({ id: `tpl-backup-${data.templates.length + 1}`, name: `备份 · ${target.spec.name} · ${now.slice(0, 19).replace("T", " ")}`, body: current, revision: `demo-template-revision-${++ruleRevision}`, origin: "backup", created_at: now, updated_at: now });
+      steps.push({ name: `rules:backup ${target.id}`, ok: true, exit_code: 0 });
+    }
+    target.observed.content = next;
+    target.observed.target_exists = true;
+    target.observed.base = `demo-base-${++ruleRevision}`;
+    target.state = "managed-ok";
+    steps.push({ name: `rules:write ${target.id}`, ok: true, exit_code: 0 });
+    refreshRuleMatches();
+    recordRun(runId, "rules.apply");
+    return makeEnvelope({ domain: "rules", steps, skipped: [] }, { command: "rules.apply", run_id: runId, lock: { held: true, pid: 4242 } });
+  };
+  const saveRuleTemplate = (args: string[]): Envelope => {
+    const data = rulesData();
+    const name = (argOf(args, "--name") ?? "").trim();
+    const body = argOf(args, "--value") ?? "";
+    if (!name) return ruleError("rules.save-template", "模板名称不能为空");
+    const id = argOf(args, "--template");
+    const now = new Date().toISOString();
+    if (data.templates.some((item) => item.name === name && item.id !== id)) return ruleError("rules.save-template", "已有同名模板");
+    let template: MockRuleTemplate;
+    if (id) {
+      const existing = data.templates.find((item) => item.id === id);
+      if (!existing) return ruleError("rules.save-template", "模板不存在");
+      if (existing.revision !== argOf(args, "--revision")) return ruleError("rules.save-template", "模板已被改过，请重新打开后再保存");
+      Object.assign(existing, { name, body, revision: `demo-template-revision-${++ruleRevision}`, updated_at: now });
+      template = existing;
+    } else {
+      template = { id: `tpl-demo-${++ruleRevision}`, name, body, revision: `demo-template-revision-${ruleRevision}`, origin: "user", created_at: now, updated_at: now };
+      data.templates.push(template);
+    }
+    refreshRuleMatches();
+    return makeEnvelope({ domain: "rules", template }, { command: "rules.save-template" });
+  };
+  const deleteRuleTemplate = (args: string[]): Envelope => {
+    const data = rulesData();
+    const id = argOf(args, "--template");
+    const index = data.templates.findIndex((item) => item.id === id);
+    if (index < 0) return ruleError("rules.delete-template", "模板不存在");
+    data.templates.splice(index, 1);
+    refreshRuleMatches();
+    return makeEnvelope({ domain: "rules", deleted: id }, { command: "rules.delete-template" });
   };
 
   const setSecret = (args: string[], runId: string): Envelope => {
@@ -1073,8 +1193,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
             { command: "sources.get" },
           );
         }
-        const suffix = domain === "rules" ? "shared" : "shell";
-        return makeEnvelope({ sources: [{ key: `${domain}.${suffix}`, label: domain === "rules" ? "共享规则" : "Shell aliases", value: domain === "rules" ? "使用简体中文回答。\n" : {}, revision: "demo-revision", format: domain === "rules" ? "text" : "json" }] }, { command: "sources.get" });
+        return makeEnvelope({ sources: [{ key: `${domain}.shell`, label: "Shell aliases", value: {}, revision: "demo-revision", format: "json" }] }, { command: "sources.get" });
       }
       if (command === "sources:set") return makeEnvelope({}, { command: "sources.set" });
       if (command === "policy:get") return policyGet();
@@ -1146,6 +1265,9 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
           { command: "agents.check" },
         );
       }
+      if (command === "rules:apply") return applyRules(args, runId);
+      if (command === "rules:save-template") return saveRuleTemplate(args);
+      if (command === "rules:delete-template") return deleteRuleTemplate(args);
       if (command.endsWith(":apply")) {
         return applyEnvelope(command.split(":")[0], args, runId);
       }

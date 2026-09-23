@@ -161,7 +161,6 @@ function routes(): Record<string, TestRoute> {
     "runs:list": makeEnvelope({ runs: [] }, { command: "runs.list" }),
     "policy:get": makeEnvelope(makePolicyData({ layers: { sqlite: null } }), { command: "policy.get" }),
     "sources:get": makeEnvelope({ sources: [] }, { command: "sources.get" }),
-    "rules:apply": makeEnvelope(makeApplyResult({ domain: "rules" }), { command: "rules.apply" }),
     "aliases:apply": makeEnvelope(makeApplyResult({ domain: "aliases" }), { command: "aliases.apply" }),
   };
 }
@@ -220,11 +219,16 @@ describe("命令面板", () => {
     await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
 
     await openPalette();
+    // 规则改为逐文件编辑后没有「一键同步规则」
     await userEvent.type(screen.getByTestId("command-palette-input"), "同步规则");
-    await userEvent.click(await screen.findByTestId("command-item-action:apply-rules"));
+    expect(screen.queryByTestId("command-item-action:apply-rules")).toBeNull();
+    await userEvent.clear(screen.getByTestId("command-palette-input"));
+    await userEvent.type(screen.getByTestId("command-palette-input"), "同步终端快捷命令");
+    await userEvent.click(await screen.findByTestId("command-item-action:apply-aliases"));
 
-    await waitFor(() => expect(calls.some((call) => call.command === "rules:apply")).toBe(true));
-    expect(calls.find((call) => call.command === "rules:apply")?.options?.runId).toMatch(/^gui-/);
+    await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
+    expect(calls.find((call) => call.command === "aliases:apply")?.options?.runId).toMatch(/^gui-/);
+    expect(calls.some((call) => call.command === "rules:apply")).toBe(false);
   });
 
   it("键盘可完成：方向键选择、回车执行、Esc 关闭", async () => {

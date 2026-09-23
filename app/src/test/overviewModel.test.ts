@@ -230,6 +230,39 @@ describe("buildOverview 真实形态", () => {
   });
 });
 
+describe("buildOverview 规则", () => {
+  it("规则以实际文件为准，永不算待同步：有文件已同步、没文件没装、读写不了要你决定，也不进一键同步", () => {
+    const write = [makeAction("write")];
+    const groups = buildOverview({
+      rules: status("rules", [
+        makeElement({ id: "rules:codex_global", domain: "rules", spec: { name: "Codex 全局规则" }, state: "managed-ok", actions: write }),
+        makeElement({ id: "rules:claude_global", domain: "rules", spec: { name: "Claude Code 全局规则" }, state: "missing", actions: write }),
+        makeElement({
+          id: "rules:profile:cc-link",
+          domain: "rules",
+          spec: { name: "Claude · link 实例规则" },
+          observed: { blocked_reason: "目标路径是符号链接，拒绝操作以保证安全" },
+          state: "unmanaged-detected",
+        }),
+        makeElement({ id: "rules:profile:cc-off", domain: "rules", spec: { name: "Claude · off 实例规则" }, state: "disabled" }),
+        // 旧形态（不一致 + sync 动作）在别的域会算待同步；规则不再有「应该写成什么样」，不能进一键同步
+        makeElement({ id: "rules:profile:cc-odd", domain: "rules", spec: { name: "odd" }, state: "drifted", actions: [makeAction("sync")] }),
+      ]),
+    });
+
+    const rules = groups.find((group) => group.domain === "rules");
+    expect(rules?.items.map((item) => [item.id, item.sync, item.reason ?? null])).toEqual([
+      ["rules:codex_global", "ok", null],
+      ["rules:claude_global", "absent", null],
+      ["rules:profile:cc-link", "decision", "目标路径是符号链接，拒绝操作以保证安全"],
+      ["rules:profile:cc-off", "disabled", null],
+      ["rules:profile:cc-odd", "decision", "规则文件不能安全读写"],
+    ]);
+    expect(rules?.items.some((item) => item.sync === "pending")).toBe(false);
+    expect(syncableOf(groups)).toEqual([]);
+  });
+});
+
 describe("syncableOf", () => {
   it("快捷命令整块写入，多条待同步只执行一次 apply", () => {
     const groups = buildOverview({

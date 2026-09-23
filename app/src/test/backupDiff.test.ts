@@ -66,8 +66,37 @@ describe("备份导入差异", () => {
     expect(byLabel["MCP 服务"].removed).toEqual(["edit", "keep"]);
   });
 
-  it("来源键有可读名称", () => {
+  it("来源键有可读名称；旧备份的规则来源标明导入后转为模板", () => {
     expect(sourceLabel("aliases.shell")).toBe("终端快捷命令");
     expect(sourceLabel("unknown.key")).toBe("unknown.key");
+    expect(sourceLabel("rules.shared")).toContain("导入后转为模板");
+  });
+
+  it("备份带规则模板时按名称比正文，报出新增、改动与消失", () => {
+    const withTemplates = {
+      ...current,
+      rule_templates: [
+        { name: "团队规则", body: "旧\n", origin: "user" },
+        { name: "会消失", body: "x\n", origin: "backup" },
+      ],
+    };
+    const incomingTemplates = {
+      ...current,
+      rule_templates: [
+        { name: "团队规则", body: "新\n", origin: "user" },
+        { name: "新模板", body: "y\n", origin: "user" },
+      ],
+    };
+    const diff = diffBackup(withTemplates, incomingTemplates);
+    const section = diff.sections.find((s) => s.label === "规则模板");
+    expect(section).toMatchObject({ added: ["新模板"], changed: ["团队规则"], removed: ["会消失"] });
+    expect(diff.identical).toBe(false);
+  });
+
+  it("备份没带规则模板（旧格式）时不动现有模板，也不报消失", () => {
+    const withTemplates = { ...current, rule_templates: [{ name: "团队规则", body: "旧\n", origin: "user" }] };
+    const diff = diffBackup(withTemplates, current);
+    expect(diff.sections.find((s) => s.label === "规则模板")).toBeUndefined();
+    expect(diff.identical).toBe(true);
   });
 });
