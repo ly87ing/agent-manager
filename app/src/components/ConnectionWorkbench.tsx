@@ -91,6 +91,7 @@ export function ConnectionWorkbench({
   onRuntimeSettings,
   onSaveCurrent,
   onFixStatusline,
+  onClearEnvOverrides,
 }: {
   agents: EngineElement[];
   selectedAgentId: string | null;
@@ -118,6 +119,8 @@ export function ConnectionWorkbench({
   onSaveCurrent: (element: EngineElement) => void;
   /** 旧格式状态栏：按引用形式重写一次。 */
   onFixStatusline: (element: EngineElement) => void;
+  /** 清理旧版本写进 env 的单次会话覆盖变量（用户点按钮才执行）。 */
+  onClearEnvOverrides: (element: EngineElement) => void;
 }) {
   const [tab, setTab] = useState<WorkbenchTab>("providers");
   const selected = agents.find((element) => element.id === selectedAgentId) ?? agents[0];
@@ -147,6 +150,8 @@ export function ConnectionWorkbench({
     .sort(([left], [right]) => left.localeCompare(right));
   const currentConfig = currentConfigOf(selected);
   const legacyStatusline = currentConfig?.config?.runtime?.statusline === "builtin-legacy";
+  const modelEfforts = Object.entries(currentConfig?.config?.claude_model_efforts ?? {});
+  const envOverrides = Object.entries(currentConfig?.config?.claude_env_overrides ?? {});
   const driftedEntry = current?.drifted_from
     ? form.connections.find((item) => item.name === current.drifted_from)
     : undefined;
@@ -297,8 +302,25 @@ export function ConnectionWorkbench({
                   本工具的状态栏还是旧格式，数据目录含空格时无法运行；修复一次即可。
                 </p>
               )}
+              {modelEfforts.length > 0 && (
+                <p data-testid="model-efforts" className="mt-2 text-xs text-muted-foreground">
+                  按模型保存的推理强度（Claude Code 里用 /effort 保存，优先于默认推理强度）：
+                  {modelEfforts.map(([model, level]) => `${model} = ${level}`).join("，")}
+                </p>
+              )}
+              {envOverrides.length > 0 && (
+                <p data-testid="env-overrides-notice" className="mt-2 text-xs text-warning">
+                  settings.json 的 env 里有单次会话覆盖变量（{envOverrides.map(([name, value]) => `${name}=${value}`).join("，")}），
+                  它们优先于这里和 /effort 保存的所有设置，是旧版本写进去的。清理后以正常设置为准。
+                </p>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {envOverrides.length > 0 && (
+                <button type="button" data-testid="agent-env-overrides-clear" disabled={!kind || busyTarget !== null || Boolean(writeBlocked)} onClick={() => onClearEnvOverrides(selected)} className="rounded-lg border border-warning/40 px-3 py-2 text-sm font-medium text-warning hover:bg-warning/10 disabled:opacity-50">
+                  清理覆盖变量
+                </button>
+              )}
               {legacyStatusline && (
                 <button type="button" data-testid="agent-statusline-fix" disabled={!kind || busyTarget !== null || Boolean(writeBlocked)} onClick={() => onFixStatusline(selected)} className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
                   修复状态栏

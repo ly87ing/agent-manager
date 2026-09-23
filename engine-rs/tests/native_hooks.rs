@@ -584,7 +584,7 @@ fn hooks_and_agent_settings_never_overwrite_each_other() {
     );
     assert!(env.ok, "{:?}", env.errors);
     let after_configure = read_json(&settings(&ctx));
-    assert_eq!(after_configure["env"]["CLAUDE_CODE_EFFORT_LEVEL"], "low");
+    assert_eq!(after_configure["effortLevel"], "low");
     assert_eq!(after_configure["hooks"], hooks);
     assert_eq!(base_of(&ctx, "hooks:claude"), hooks_base);
     let _ = std::fs::remove_dir_all(&root);

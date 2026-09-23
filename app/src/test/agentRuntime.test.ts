@@ -123,3 +123,13 @@ describe("运行设置以客户端实际值为准", () => {
     expect(liveRefusalDescription("unrepresentable", "意外格式 --discard-live")).not.toContain("--");
   });
 });
+
+describe("runtimePatchApplied 清理覆盖变量", () => {
+  it("回读到一个覆盖变量都不剩才算生效", () => {
+    const ready = (overrides: Record<string, string>) =>
+      ({ state: "ready", config: { runtime: {}, claude_env_overrides: overrides } }) as never;
+    expect(runtimePatchApplied([], { claude_clear_env_overrides: true }, ready({}))).toBe(true);
+    expect(runtimePatchApplied([], { claude_clear_env_overrides: true }, ready({ CLAUDE_CODE_EFFORT_LEVEL: "low" }))).toBe(false);
+  });
+});
+

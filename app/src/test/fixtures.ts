@@ -58,15 +58,15 @@ export function agentManagementFixture(kind: "claude" | "codex"): AgentManagemen
           summary: summary("状态栏", { default: "保持现状", values: { builtin: "用量状态栏" } }),
         },
         {
-          key: "claude_effort_level", type: "enum", section: "界面与模型行为", label: "推理强度",
-          description: "留空即恢复 Claude 自己的默认值。",
-          options: ["auto", "low", "medium", "high", "xhigh", "max"].map((value) => ({ value, label: value })),
-          targets: [{ key: "env.CLAUDE_CODE_EFFORT_LEVEL" }], summary: summary("推理强度"),
+          key: "claude_effort_level", type: "enum", section: "界面与模型行为", label: "默认推理强度",
+          description: "写入 settings.json 的 effortLevel，作为没有单独保存级别的模型的默认值；在 Claude Code 里用 /effort 按模型保存的级别优先。留空即撤掉。",
+          options: ["low", "medium", "high", "xhigh"].map((value) => ({ value, label: value })),
+          targets: [{ key: "effortLevel" }], summary: summary("推理强度"),
         },
         ...[
           ["claude_tool_search", "工具搜索", "env.ENABLE_TOOL_SEARCH", '"true"'],
           ["claude_agent_teams", "Agent Teams", "env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", '"1"'],
-          ["claude_disable_artifact", "禁用 Artifact", "env.CLAUDE_CODE_DISABLE_ARTIFACT", '"1"'],
+          ["claude_disable_artifact", "禁用 Artifact", "enableArtifact", "false"],
           ["claude_hide_attribution", "隐藏提交与 PR 署名", "attribution.commit", '""'],
         ].map(([key, label, target, enabled]) => ({
           key, type: "boolean", section: "高级能力", label,

@@ -695,6 +695,12 @@ export default function AgentsPage({
             { message: "已修复状态栏" },
           )
         }
+        onClearEnvOverrides={(element) =>
+          void runConfigure(
+            { agentId: element.id.replace(/^agents:/, ""), runtime: { claude_clear_env_overrides: true } },
+            { message: "已清理 env 里的单次会话覆盖变量" },
+          )
+        }
       />}
       {environmentView === "independent" && (
           <section data-testid="independent-environments" className="space-y-4 rounded-xl border bg-card p-5 shadow-sm">

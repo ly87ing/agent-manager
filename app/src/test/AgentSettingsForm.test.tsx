@@ -189,7 +189,9 @@ describe("助手运行参数", () => {
     const dialog = await screen.findByRole("dialog", { name: "Claude Code 运行设置" });
     expect(dialog).not.toHaveTextContent("env.ENABLE_TOOL_SEARCH");
 
-    await userEvent.selectOptions(screen.getByTestId("agent-runtime-claude-effort-level"), "max");
+    // max 只对单次会话有效，官方不接受持久保存：选项里没有它
+    expect(screen.queryByRole("option", { name: "max" })).toBeNull();
+    await userEvent.selectOptions(screen.getByTestId("agent-runtime-claude-effort-level"), "xhigh");
     await userEvent.click(screen.getByTestId("agent-runtime-claude-tool-search"));
     await userEvent.click(screen.getByTestId("agent-runtime-claude-agent-teams"));
     await userEvent.click(screen.getByTestId("agent-runtime-claude-disable-artifact"));
@@ -199,11 +201,16 @@ describe("助手运行参数", () => {
     expect(dialog).toHaveTextContent('"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"');
     expect(dialog).toHaveTextContent('"commit": ""');
     expect(dialog).toHaveTextContent('"pr": ""');
+    // 官方持久键，不再写单次会话覆盖变量
+    expect(dialog).toHaveTextContent('"effortLevel": "xhigh"');
+    expect(dialog).toHaveTextContent('"enableArtifact": false');
+    expect(dialog).not.toHaveTextContent("CLAUDE_CODE_EFFORT_LEVEL");
+    expect(dialog).not.toHaveTextContent("CLAUDE_CODE_DISABLE_ARTIFACT");
     await userEvent.click(screen.getByTestId("agent-runtime-submit"));
 
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
     expect(runtimeOf(configureCalls(calls)[0])).toEqual({
-      claude_effort_level: "max",
+      claude_effort_level: "xhigh",
       claude_tool_search: true,
       claude_agent_teams: true,
       claude_disable_artifact: true,
@@ -368,6 +375,35 @@ describe("助手运行参数", () => {
     await userEvent.click(screen.getByTestId("agent-statusline-fix"));
     expect(await screen.findByText("已修复状态栏")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByTestId("statusline-legacy-notice")).toBeNull());
+  });
+
+  it("env 里的单次会话覆盖变量如实提示，点「清理覆盖变量」才撤掉；按模型保存的推理强度只读展示", async () => {
+    const withOverrides: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
+    const status = withOverrides["agents:status"] as { data: { elements: EngineElement[] } };
+    const element = status.data.elements[0];
+    setClaudeCurrentConfig(element, null);
+    const config = (element.observed as any).current_config.config;
+    config.runtime = { automation_mode: "manual", claude_effort_level: "high" };
+    config.claude_model_efforts = { "claude-opus-5": "medium" };
+    config.claude_env_overrides = { CLAUDE_CODE_EFFORT_LEVEL: "low" };
+    withOverrides["agents:configure"] = async () => {
+      config.claude_env_overrides = {};
+      return makeEnvelope({ domain: "agents", action: "configure" }, { command: "agents.configure" });
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, withOverrides);
+
+    await userEvent.click(await screen.findByTestId("workbench-tab-automation"));
+    expect(screen.getByTestId("model-efforts")).toHaveTextContent("claude-opus-5 = medium");
+    expect(screen.getByTestId("env-overrides-notice")).toHaveTextContent("CLAUDE_CODE_EFFORT_LEVEL=low");
+    // 只看不写
+    expect(configureCalls(calls)).toHaveLength(0);
+    await userEvent.click(screen.getByTestId("agent-env-overrides-clear"));
+    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
+    expect(configureCalls(calls)[0].args).toEqual(
+      configureArgsOf("--runtime", JSON.stringify({ claude_clear_env_overrides: true })),
+    );
+    expect(await screen.findByText("已清理 env 里的单次会话覆盖变量")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("env-overrides-notice")).toBeNull());
   });
 
   it("配置文件已在外部修改：拒绝后刷新状态并提示重来，不再提供用库覆盖", async () => {

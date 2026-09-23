@@ -172,10 +172,17 @@ Codex：地址 + 令牌变量且仍是本工具写的那张表，或引用同一
 `env.ANTHROPIC_AUTH_TOKEN`、`env.ANTHROPIC_API_KEY`、`env.ANTHROPIC_MODEL`、
 `env.ANTHROPIC_SMALL_FAST_MODEL`、`env.ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`、
 `env.API_TIMEOUT_MS`、`env.ENABLE_TOOL_SEARCH`、`env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`、
-`env.CLAUDE_CODE_EFFORT_LEVEL`、`env.CLAUDE_CODE_DISABLE_ARTIFACT`、`permissions.defaultMode`
+`effortLevel`、`enableArtifact`（连同已废弃的 `disableArtifact`）、`permissions.defaultMode`
 与 `attribution.{commit,pr}`。同一文件里 hooks 域的内容、
 用户自己的 `permissions.allow/deny` 与别的 `env` 变量原样保留；写入基准也只算
 这几条的摘要。从没写过而这几项已有内容时，表单已按实际值预填，带基准写入即可。
+
+写的都是 Claude Code 自己的持久设置键（`/effort`、`/config` 写的同一批）：默认推理强度写顶层
+`effortLevel`，只接受官方允许持久保存的 `low`/`medium`/`high`/`xhigh`（`max` 只对单次会话有效）；
+`/effort` 按模型保存在 `modelSettings` 里的级别优先于它，界面只读列出。禁用 Artifact 写
+`enableArtifact: false`。`CLAUDE_CODE_EFFORT_LEVEL`、`CLAUDE_CODE_DISABLE_ARTIFACT` 是官方的单次会话
+覆盖变量、优先级最高，本工具不写；旧版本写进 `env` 的这两个变量在界面上标为「覆盖变量」，用户点
+「清理覆盖变量」（`--runtime {"claude_clear_env_overrides": true}`）才撤掉。
 
 **状态栏**是条件受管：运行参数 `statusline` 设为 `builtin` 时部署内置脚本到
 `<data_dir>/statusline.sh`（0755）并把 `statusLine` 指过去（Claude Code 在 shell 中执行该命令，路径按单引号引用；旧版写入的裸路径仍识别为本工具的，并报 `builtin-legacy`，界面给出「修复状态栏」入口）；设回保持现状时

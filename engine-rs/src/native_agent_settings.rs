@@ -26,7 +26,8 @@ use serde_json::{Map, Value};
 use crate::native::Context;
 pub(crate) use crate::native_agent_adapters::AdapterKind as Kind;
 use crate::native_agent_adapters::{
-    kind_for_bin, CLAUDE_EFFORT_LEVELS, CODEX_REASONING_EFFORTS, CODEX_WEB_SEARCH_MODES,
+    kind_for_bin, CLAUDE_EFFORT_LEVELS, CLAUDE_EFFORT_PERSISTED, CODEX_REASONING_EFFORTS,
+    CODEX_WEB_SEARCH_MODES,
 };
 
 /// Claude 的目标文件，相对 home。
@@ -51,6 +52,11 @@ const CLAUDE_OWNED_PATHS: &[&[&str]] = &[
     &["env", "API_TIMEOUT_MS"],
     &["env", "ENABLE_TOOL_SEARCH"],
     &["env", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"],
+    // 官方持久键：默认推理强度与 Artifact 开关（/effort、/config 写的就是它们）
+    &["effortLevel"],
+    &["enableArtifact"],
+    &["disableArtifact"],
+    // 旧版本写过的单次会话覆盖变量：优先级高于一切，本工具不再写，只在用户确认后清理
     &["env", "CLAUDE_CODE_EFFORT_LEVEL"],
     &["env", "CLAUDE_CODE_DISABLE_ARTIFACT"],
     &["permissions", "defaultMode"],
@@ -174,7 +180,8 @@ fn claude_observed_config(
     // 三档预设之外的取值（acceptEdits、plan 等）如实报 custom 并给出原值：表单据此预填，不改就不动
     let (automation_mode, automation_raw) = match string_at(&value, &["permissions", "defaultMode"])
     {
-        None | Some("manual") => ("manual", Value::Null),
+        // "manual" 是官方 "default" 的别名（Claude Code v2.1.200+）
+        None | Some("manual") | Some("default") => ("manual", Value::Null),
         Some("auto") => ("auto", Value::Null),
         Some("bypassPermissions") => ("full", Value::Null),
         Some(other) => ("custom", json!({"permissions.defaultMode": other})),
@@ -198,13 +205,46 @@ fn claude_observed_config(
             "automation_mode": automation_mode,
             "automation_raw": automation_raw,
             "statusline": statusline,
-            "claude_effort_level": string_at(&value, &["env", "CLAUDE_CODE_EFFORT_LEVEL"]),
+            // 顶层 effortLevel：没有单独保存推理强度的模型用它（/effort 现在按模型存进 modelSettings）
+            "claude_effort_level": string_at(&value, &["effortLevel"]),
             "claude_tool_search": string_at(&value, &["env", "ENABLE_TOOL_SEARCH"]) == Some("true"),
             "claude_agent_teams": string_at(&value, &["env", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"]) == Some("1"),
-            "claude_disable_artifact": string_at(&value, &["env", "CLAUDE_CODE_DISABLE_ARTIFACT"]) == Some("1"),
+            // enableArtifact: false 关掉；已废弃的 disableArtifact: true 官方仍按关掉处理
+            "claude_disable_artifact": path_get(&value, &["enableArtifact"]) == Some(&Value::Bool(false))
+                || path_get(&value, &["disableArtifact"]) == Some(&Value::Bool(true)),
             "claude_hide_attribution": hide_attribution
-        }
+        },
+        // 只读展示：/effort 按模型保存的推理强度
+        "claude_model_efforts": claude_model_efforts(&value),
+        // 单次会话覆盖变量写进了持久配置：优先级高于上面的设置，界面据此提示并提供清理
+        "claude_env_overrides": claude_env_overrides(&value)
     }))
+}
+
+/// `modelSettings` 里按模型保存的推理强度：`{模型: 级别}`，没有时为空对象。
+fn claude_model_efforts(root: &Value) -> Value {
+    let mut out = Map::new();
+    if let Some(models) = path_get(root, &["modelSettings"]).and_then(Value::as_object) {
+        for (model, entry) in models {
+            if let Some(level) = entry.get("effortLevel").and_then(Value::as_str) {
+                out.insert(model.clone(), Value::String(level.to_string()));
+            }
+        }
+    }
+    Value::Object(out)
+}
+
+/// 旧版本写进 settings.json `env` 的单次会话覆盖变量（官方定位为临时覆盖、优先级最高）。
+const CLAUDE_ENV_OVERRIDES: &[&str] = &["CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_DISABLE_ARTIFACT"];
+
+fn claude_env_overrides(root: &Value) -> Value {
+    let mut out = Map::new();
+    for name in CLAUDE_ENV_OVERRIDES {
+        if let Some(value) = string_at(root, &["env", name]) {
+            out.insert((*name).to_string(), Value::String(value.to_string()));
+        }
+    }
+    Value::Object(out)
 }
 
 fn codex_observed_config(bytes: &[u8]) -> Option<Value> {
@@ -895,7 +935,7 @@ fn write_claude_runtime(
                 }
             }
             ("claude_effort_level", RuntimeValue::Text(level)) => {
-                set_or_remove(root, &["env", "CLAUDE_CODE_EFFORT_LEVEL"], level.clone());
+                set_or_remove(root, &["effortLevel"], level.clone());
             }
             ("claude_tool_search", RuntimeValue::Flag(on)) => {
                 set_or_remove(
@@ -912,11 +952,18 @@ fn write_claude_runtime(
                 );
             }
             ("claude_disable_artifact", RuntimeValue::Flag(on)) => {
-                set_or_remove(
-                    root,
-                    &["env", "CLAUDE_CODE_DISABLE_ARTIFACT"],
-                    on.then(|| "1".to_string()),
-                );
+                // 官方键 enableArtifact: false；打开时撤掉它，连同已废弃、会锁死关闭的 disableArtifact
+                if *on {
+                    path_set(root, &["enableArtifact"], Value::Bool(false));
+                } else {
+                    path_remove(root, &["enableArtifact"]);
+                }
+                path_remove(root, &["disableArtifact"]);
+            }
+            ("claude_clear_env_overrides", RuntimeValue::Flag(true)) => {
+                for name in CLAUDE_ENV_OVERRIDES {
+                    path_remove(root, &["env", name]);
+                }
             }
             ("claude_hide_attribution", RuntimeValue::Flag(on)) => {
                 set_or_remove(root, &["attribution", "commit"], on.then(String::new));
@@ -971,12 +1018,14 @@ const CLAUDE_RUNTIME_FIELDS: &[(&str, FieldKind)] = &[
     ("statusline", FieldKind::Statusline),
     (
         "claude_effort_level",
-        FieldKind::Choice(CLAUDE_EFFORT_LEVELS),
+        FieldKind::Choice(CLAUDE_EFFORT_PERSISTED),
     ),
     ("claude_tool_search", FieldKind::Flag),
     ("claude_agent_teams", FieldKind::Flag),
     ("claude_disable_artifact", FieldKind::Flag),
     ("claude_hide_attribution", FieldKind::Flag),
+    // 不是表单项：用户确认后清理旧版本写进 env 的单次会话覆盖变量
+    ("claude_clear_env_overrides", FieldKind::Flag),
 ];
 
 const CODEX_RUNTIME_FIELDS: &[(&str, FieldKind)] = &[
@@ -3244,7 +3293,7 @@ mod tests {
             json!({
                 "claude_tool_search": true,
                 "claude_agent_teams": true,
-                "claude_effort_level": "max",
+                "claude_effort_level": "xhigh",
                 "claude_disable_artifact": true,
                 "claude_hide_attribution": true
             }),
@@ -3252,8 +3301,13 @@ mod tests {
         let parsed: Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(parsed["env"]["ENABLE_TOOL_SEARCH"], "true");
         assert_eq!(parsed["env"]["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"], "1");
-        assert_eq!(parsed["env"]["CLAUDE_CODE_EFFORT_LEVEL"], "max");
-        assert_eq!(parsed["env"]["CLAUDE_CODE_DISABLE_ARTIFACT"], "1");
+        // 官方持久键：effortLevel 与 enableArtifact；单次会话覆盖变量一律不写
+        assert_eq!(parsed["effortLevel"], "xhigh");
+        assert_eq!(parsed["enableArtifact"], false);
+        assert!(parsed["env"].get("CLAUDE_CODE_EFFORT_LEVEL").is_none());
+        assert!(parsed["env"].get("CLAUDE_CODE_DISABLE_ARTIFACT").is_none());
+        // max 只对单次会话有效，官方不接受持久保存
+        assert!(parse_runtime_patch(Kind::Claude, &json!({"claude_effort_level": "max"})).is_err());
         assert_eq!(parsed["attribution"]["commit"], "");
         assert_eq!(parsed["attribution"]["pr"], "");
 
@@ -3272,6 +3326,56 @@ mod tests {
         assert_eq!(parsed["attribution"]["other"], "keep");
         assert!(parsed["env"].get("ENABLE_TOOL_SEARCH").is_none());
         assert!(parsed["attribution"].get("commit").is_none());
+        assert!(parsed.get("effortLevel").is_none());
+        assert!(parsed.get("enableArtifact").is_none());
+    }
+
+    #[test]
+    fn artifact_打开时连同已废弃的_disable_artifact_一起撤掉() {
+        let existing =
+            serde_json::to_vec(&json!({"disableArtifact": true, "theme": "dark"})).unwrap();
+        let out = runtime(Some(&existing), json!({"claude_disable_artifact": false}));
+        let parsed: Value = serde_json::from_slice(&out).unwrap();
+        assert!(parsed.get("disableArtifact").is_none(), "{parsed}");
+        assert!(parsed.get("enableArtifact").is_none());
+        assert_eq!(parsed["theme"], "dark");
+    }
+
+    #[test]
+    fn 旧版_env_覆盖如实报出_只在显式清理时撤掉() {
+        let existing = serde_json::to_vec(&json!({
+            "effortLevel": "high",
+            "modelSettings": {"claude-opus-5": {"effortLevel": "medium"}},
+            "env": {"CLAUDE_CODE_EFFORT_LEVEL": "low", "CLAUDE_CODE_DISABLE_ARTIFACT": "1", "MY_OWN": "keep"}
+        }))
+        .unwrap();
+        let observed = claude_observed_config(&existing, None).unwrap();
+        assert_eq!(observed["runtime"]["claude_effort_level"], "high");
+        assert_eq!(observed["runtime"]["claude_disable_artifact"], false);
+        assert_eq!(observed["claude_model_efforts"]["claude-opus-5"], "medium");
+        assert_eq!(
+            observed["claude_env_overrides"]["CLAUDE_CODE_EFFORT_LEVEL"],
+            "low"
+        );
+        assert_eq!(
+            observed["claude_env_overrides"]["CLAUDE_CODE_DISABLE_ARTIFACT"],
+            "1"
+        );
+        // 改别的运行参数不碰覆盖变量
+        let untouched = runtime(Some(&existing), json!({"claude_effort_level": "xhigh"}));
+        let parsed: Value = serde_json::from_slice(&untouched).unwrap();
+        assert_eq!(parsed["env"]["CLAUDE_CODE_EFFORT_LEVEL"], "low");
+        // 显式清理：只撤这两个覆盖变量，用户自己的 env 与按模型保存的级别保留
+        let cleared = runtime(Some(&existing), json!({"claude_clear_env_overrides": true}));
+        let parsed: Value = serde_json::from_slice(&cleared).unwrap();
+        assert!(parsed["env"].get("CLAUDE_CODE_EFFORT_LEVEL").is_none());
+        assert!(parsed["env"].get("CLAUDE_CODE_DISABLE_ARTIFACT").is_none());
+        assert_eq!(parsed["env"]["MY_OWN"], "keep");
+        assert_eq!(parsed["effortLevel"], "high");
+        assert_eq!(
+            parsed["modelSettings"]["claude-opus-5"]["effortLevel"],
+            "medium"
+        );
     }
 
     #[test]
@@ -3756,13 +3860,13 @@ stream_idle_timeout_ms = 450000
     fn 补丁外的运行参数原样保留_包括本工具不提供的取值() {
         let existing = serde_json::to_vec(&json!({
             "permissions": {"defaultMode": "acceptEdits", "allow": ["Bash(ls:*)"]},
-            "env": {"CLAUDE_CODE_EFFORT_LEVEL": "low"}
+            "effortLevel": "low"
         }))
         .unwrap();
         let out = runtime(Some(&existing), json!({"claude_effort_level": "high"}));
         let parsed: Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(parsed["permissions"]["defaultMode"], "acceptEdits");
-        assert_eq!(parsed["env"]["CLAUDE_CODE_EFFORT_LEVEL"], "high");
+        assert_eq!(parsed["effortLevel"], "high");
 
         let codex = "approval_policy = \"never\"\nmodel = \"gpt-5\"\n";
         let out = write_codex_runtime(codex, &codex_patch(json!({"codex_web_search": "live"})));

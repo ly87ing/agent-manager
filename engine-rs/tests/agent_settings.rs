@@ -717,7 +717,12 @@ fn 外部把默认模式改为_accept_edits_如实显示_旧基准被拒_新基�
         after["permissions"]["defaultMode"], "acceptEdits",
         "没提交的不动"
     );
-    assert_eq!(after["env"]["CLAUDE_CODE_EFFORT_LEVEL"], "low");
+    // 官方持久键 effortLevel（/effort 写的同一个键）；不写单次会话覆盖变量
+    assert_eq!(after["effortLevel"], "low");
+    assert!(after
+        .get("env")
+        .and_then(|env| env.get("CLAUDE_CODE_EFFORT_LEVEL"))
+        .is_none());
     assert_eq!(
         settings_in_db(&ctx, "claude-code")["claude_effort_level"],
         "low"

@@ -115,6 +115,10 @@ export interface AgentCurrentConfig {
   timeout_ms?: string | number | null;
   credential?: AgentCurrentConfigCredential | null;
   runtime?: Record<string, unknown>;
+  /** Claude：/effort 按模型保存在 modelSettings 里的推理强度（只读展示）。 */
+  claude_model_efforts?: Record<string, string> | null;
+  /** Claude：旧版本写进 settings.json env 的单次会话覆盖变量（优先于一切设置）。 */
+  claude_env_overrides?: Record<string, string> | null;
 }
 
 export interface AgentCurrentConfigStatus {

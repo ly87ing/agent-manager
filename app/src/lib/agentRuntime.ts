@@ -101,6 +101,11 @@ export function runtimePatchApplied(
   if (!status || (status.state !== "ready" && status.state !== "missing")) return false;
   const actual = actualRuntimeSettings(fields, status);
   return Object.entries(patch).every(([key, value]) => {
+    // 清理旧版 env 覆盖变量不是表单项：回读到一个都不剩才算生效
+    if (key === "claude_clear_env_overrides") {
+      const overrides = status.state === "ready" ? status.config?.claude_env_overrides : undefined;
+      return !overrides || Object.keys(overrides).length === 0;
+    }
     const field = fields.find((candidate) => candidate.key === key);
     if (!field) return false;
     if (key === "statusline") {

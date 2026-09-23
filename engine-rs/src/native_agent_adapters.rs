@@ -5,7 +5,10 @@
 
 use serde_json::{json, Value};
 
+/// 旧版本存进库里的取值（含只对单次会话有效的 max 与表示「清除」的 auto）：解析库内旧记录时仍认。
 pub(crate) const CLAUDE_EFFORT_LEVELS: &[&str] = &["auto", "low", "medium", "high", "xhigh", "max"];
+/// 官方允许持久保存的推理强度（settings.json 的 effortLevel 只接受这四个；max 只在单次会话有效）。
+pub(crate) const CLAUDE_EFFORT_PERSISTED: &[&str] = &["low", "medium", "high", "xhigh"];
 pub(crate) const CODEX_REASONING_EFFORTS: &[&str] = &["minimal", "low", "medium", "high", "xhigh"];
 pub(crate) const CODEX_WEB_SEARCH_MODES: &[&str] = &["disabled", "cached", "indexed", "live"];
 
@@ -119,9 +122,10 @@ fn claude_fields() -> Vec<Value> {
         }),
         json!({
             "key": "claude_effort_level", "type": "enum", "section": "界面与模型行为",
-            "label": "推理强度", "description": "留空即恢复 Claude 自己的默认值。",
-            "options": CLAUDE_EFFORT_LEVELS.iter().map(|value| json!({"value": value, "label": value})).collect::<Vec<_>>(),
-            "targets": [{"key": "env.CLAUDE_CODE_EFFORT_LEVEL"}],
+            "label": "默认推理强度",
+            "description": "写入 settings.json 的 effortLevel，作为没有单独保存级别的模型的默认值；在 Claude Code 里用 /effort 按模型保存的级别优先。留空即撤掉。",
+            "options": CLAUDE_EFFORT_PERSISTED.iter().map(|value| json!({"value": value, "label": value})).collect::<Vec<_>>(),
+            "targets": [{"key": "effortLevel"}],
             "summary": {"label": "推理强度", "default": "客户端默认"}
         }),
         json!({
@@ -139,7 +143,7 @@ fn claude_fields() -> Vec<Value> {
         json!({
             "key": "claude_disable_artifact", "type": "boolean", "section": "高级能力",
             "label": "禁用 Artifact", "description": "不让 Claude Code 创建 Artifact；适合只需要代码与终端输出的环境。",
-            "targets": [{"key": "env.CLAUDE_CODE_DISABLE_ARTIFACT", "enabled_value": "\"1\""}]
+            "targets": [{"key": "enableArtifact", "enabled_value": "false"}]
         }),
         json!({
             "key": "claude_hide_attribution", "type": "boolean", "section": "高级能力",
@@ -232,7 +236,8 @@ mod tests {
             .iter()
             .map(|option| option["value"].as_str().unwrap())
             .collect();
-        assert_eq!(values, CLAUDE_EFFORT_LEVELS);
+        // 界面可选值 = 运行参数补丁校验的词汇表 = 官方允许持久保存的级别
+        assert_eq!(values, CLAUDE_EFFORT_PERSISTED);
     }
 
     #[test]
