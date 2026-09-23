@@ -515,7 +515,17 @@ pub fn toml_remove_server_text(content: &str, server: &str) -> String {
             let header = &trimmed[1..trimmed.len() - 1];
             let removing = header_is_server(header, server);
             if skip && !removing {
-                out.append(&mut trailing);
+                // 被删表前后的空行不叠加：前文已以空行结尾时，不再保留紧随的空行
+                let prev_blank = out.last().map_or(false, |prev| prev.trim().is_empty());
+                let skip_blank = if prev_blank {
+                    trailing
+                        .iter()
+                        .take_while(|line| line.trim().is_empty())
+                        .count()
+                } else {
+                    0
+                };
+                out.extend(trailing.drain(..).skip(skip_blank));
             }
             trailing.clear();
             if removing && !skip && out.last().map(|prev| prev.trim()) == Some(LEGACY_TOML_COMMENT)

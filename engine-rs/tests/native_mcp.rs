@@ -8617,3 +8617,104 @@ fn mcp_library_remove_skips_user_entries_and_removes_owned() {
         let _ = std::fs::remove_dir_all(root);
     }
 }
+
+/// Codex TOML 反复 update 不累积空行：新表与前文恰好隔一个空行，第二次 update 后字节稳定。
+#[test]
+fn mcp_codex_repeated_update_does_not_accumulate_blank_lines() {
+    let (root, ctx) = temp_ctx("codex-blank-lines");
+    set_stdio_def(&ctx, "stdio1", r#"["codex"]"#);
+    let codex_path = ctx.home_dir.join(".codex/config.toml");
+    std::fs::create_dir_all(codex_path.parent().unwrap()).unwrap();
+    let user = "# user\n[mcp_servers.userx]\ncommand = \"userx\"\n";
+    std::fs::write(&codex_path, user).unwrap();
+    let update = [
+        "--only",
+        "mcp:stdio1",
+        "--action",
+        "update",
+        "--agent",
+        "codex",
+    ];
+
+    let check_layout = |text: &str| {
+        let rest = text
+            .strip_prefix(user)
+            .unwrap_or_else(|| panic!("用户内容必须逐字节保留在前: {text:?}"));
+        assert!(
+            rest.starts_with("\n[mcp_servers.stdio1]\n"),
+            "与用户内容之间恰好一个空行: {text:?}"
+        );
+        assert!(!text.contains("\n\n\n"), "不得出现连续空行: {text:?}");
+    };
+
+    apply_ok(
+        &ctx,
+        &[
+            "--only",
+            "mcp:stdio1",
+            "--action",
+            "add",
+            "--agent",
+            "codex",
+        ],
+    );
+    check_layout(&std::fs::read_to_string(&codex_path).unwrap());
+
+    // 内容不变的 update：第一次后即稳定
+    apply_ok(&ctx, &update);
+    let first = std::fs::read(&codex_path).unwrap();
+    check_layout(std::str::from_utf8(&first).unwrap());
+    for _ in 0..3 {
+        apply_ok(&ctx, &update);
+        assert_eq!(
+            std::fs::read(&codex_path).unwrap(),
+            first,
+            "重复 update 字节不变"
+        );
+    }
+
+    // 定义变更触发内容变化：第二次 update 后字节稳定
+    let res = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "mcp.definitions.stdio1",
+                "--value",
+                r#"{"command":"npx","args":["-y","stdio1-pkg","--changed"],"agents":["codex"]}"#,
+            ],
+        ),
+    );
+    assert!(res.ok, "{:?}", res.errors);
+    apply_ok(&ctx, &update);
+    let changed = std::fs::read_to_string(&codex_path).unwrap();
+    assert!(changed.contains("--changed"), "{changed}");
+    check_layout(&changed);
+    apply_ok(&ctx, &update);
+    let second = std::fs::read(&codex_path).unwrap();
+    assert_eq!(second, changed.as_bytes(), "第二次 update 后字节稳定");
+    apply_ok(&ctx, &update);
+    assert_eq!(std::fs::read(&codex_path).unwrap(), second);
+
+    // 受管表位于文件中间（其后还有用户表）：update 后同样不叠加空行，之后稳定
+    let block = std::str::from_utf8(&second)
+        .unwrap()
+        .strip_prefix(user)
+        .unwrap();
+    let after = "\n# after\n[mcp_servers.after]\ncommand = \"after\"\n";
+    std::fs::write(&codex_path, format!("{user}{block}{after}")).unwrap();
+    apply_ok(&ctx, &update);
+    let moved = std::fs::read_to_string(&codex_path).unwrap();
+    assert!(!moved.contains("\n\n\n"), "{moved:?}");
+    assert!(
+        moved.starts_with(&format!("{user}\n# after\n[mcp_servers.after]\n")),
+        "{moved:?}"
+    );
+    apply_ok(&ctx, &update);
+    assert_eq!(std::fs::read_to_string(&codex_path).unwrap(), moved);
+
+    let _ = std::fs::remove_dir_all(root);
+}

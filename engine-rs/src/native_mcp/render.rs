@@ -55,10 +55,22 @@ pub fn render_target_content(
             };
             let mut content = toml_remove_server_text(&current_text, server);
             if let Some(e) = entry {
-                if !content.ends_with('\n') && !content.is_empty() {
-                    content.push('\n');
+                // 追加的新表与前文恰好隔一个空行：删除旧表时留下的末尾空行在这里收掉，
+                // 否则每次 update 都会多累积一个空行。只动文件末尾的空白行。
+                let mut lines: Vec<&str> = content.split_inclusive('\n').collect();
+                while lines.last().map_or(false, |line| line.trim().is_empty()) {
+                    lines.pop();
                 }
-                content.push_str(&render_entry_toml(server, e));
+                content = lines.concat();
+                let rendered = render_entry_toml(server, e);
+                if content.is_empty() {
+                    content.push_str(rendered.trim_start_matches('\n'));
+                } else {
+                    if !content.ends_with('\n') {
+                        content.push('\n');
+                    }
+                    content.push_str(&rendered);
+                }
             }
             content
         }
