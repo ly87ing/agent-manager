@@ -2,6 +2,8 @@
 
 `native-manager.db` 是本工具定义、分配和偏好的唯一事实源。设置写入 `app_settings` 表，定义和本机 policy 写入 SQLite。内置默认值由 Rust 编译提供，只读；policy 写入固定使用 `--layer local`，界面不提供配置原文编辑器。
 
+**助手配置零标记。** 写进各助手配置文件的只能是该助手官方支持的字段与文件：不写自定义键（如 `_MANAGED_BY`），不往 `env`/`environment` 塞管理用变量，不写认领用注释，也不在助手配置目录放管理器文件。「哪些内容由本工具写入」只记在 `native-manager.db`：每个写入位置记定位（文件、键路径、条目名、签名或 provider id）与写入后的摘要。有记录且摘要一致才可更新或移除；有记录但摘要不符按外部修改处理；无记录一律视为用户内容，不改不删，除非用户显式接管。旧版本留下的标记只在读取时识别剥离，不再代表归属，也不再写入；仅在用户显式应用该条目时顺带清理，不做启动时批量改写。唯一例外是 Shell 别名：rc 文件不是助手配置、没有可用的结构化字段，仍以成对区块注释界定受管区块。
+
 查询与 status 必须只读零写；缺库读取不能创建数据库。表单保存只保存定义，不执行链接或刷新。资源执行按钮直接触发真实 `apply`；`apply` 内部先做 preflight/写前校验，再按精确 scope、排他锁、外部修改检测、CAS/条件回滚执行并审计；普通同步、启停、更新不二次确认；定义移除、清日志等破坏性动作仍独立确认。
 
 Skill、MCP 等资源及其逐助手分配要求新增、编辑/更新、启用、禁用、删除。AI CLI 定义是例外：普通界面只维护接入、运行参数和账号实例；安装、升级、卸载及完整定义编辑不再作为产品入口，软件生命周期交给原安装渠道。既有生命周期字段与引擎能力第一阶段仅作兼容保留，不代表当前产品承诺。
@@ -20,7 +22,7 @@ Skill、MCP 等资源及其逐助手分配要求新增、编辑/更新、启用�
 | 自管基目录内的无绑定链接 | 目标在 `repositories`/`skill-versions` 内 | 旧体系残留，只建议清理 |
 | 断链 | 目标不存在 | 只建议清理，不自动删除 |
 | 已安装但无定义的助手 CLI | 已知 bin 在 PATH 或 `~/.local/bin` 解析到 | 只登记识别与配置所需定义；安装、升级、卸载继续由原渠道负责 |
-| 助手配置里未受管的 MCP 条目 | 复用 `mcp:status` 同一扫描与掩码路径 | 导入库定义（密钥只以 `${VAR}` 引用入库）后写回受管标记 |
+| 助手配置里未受管的 MCP 条目 | 复用 `mcp:status` 同一扫描与掩码路径 | 导入库定义（密钥只以 `${VAR}` 引用入库）后按库定义写回，分配记录入库 |
 
 `system:discover` 只读零写零网络，不取 apply 锁；助手候选沿用 `agents:status` 同一来源分类器与有界 `--version` 探测。接管本身不是新写路径：助手登记只写定义，技能与 MCP 都走各自域既有的真实 `apply`（锁、外部修改检测、CAS/条件回滚与审计不变）。
 
@@ -30,7 +32,7 @@ Skill、MCP 等资源及其逐助手分配要求新增、编辑/更新、启用�
 
 Rust dispatcher 已实现本地 stdio 与远程 HTTP MCP 的 `mcp:status`（只读）与真实 `mcp:apply`。定义、库级开关和逐助手分配保存在 `native-manager.db` 的 SQLite 表中；当前产品只向 Claude Code 与 Codex 暴露分配入口。内部保留的旧 codec 只用于兼容既有数据，不构成 OpenCode 产品支持承诺。
 
-逐助手支持 `add`、`update`、`enable`、`disable`、`remove`；库级支持 `enable`、`disable`、`remove`。`mcp:status` 只读零写；真实 `apply` 具备排他锁、操作审计、CAS 和回滚保护；`env` 在 SQLite definition/binding 中只持久化字面量 `${VAR}` 形式的环境变量引用；status、诊断与操作日志不展示或保存解析后的真实值；真实 apply 执行时从进程环境解析，并按目标 codec 写入 Claude 或 Codex 的目标客户端配置，目标文件的明文由文件权限与客户端安全边界保护。远程 HTTP MCP 已实现，与本地 stdio 同级：远程定义含 `url`（必填；仅允许 `https://`，或本机回环 `http://localhost` / `http://127.0.0.1`）与可选 `headers`（值只允许 `${VAR}` 占位符），与 stdio 字段互斥；headers 以引用形式写入目标（Claude 字面量 `${VAR}`、Codex `env_http_headers`），解析后明文不落盘；受管标记统一条目级 `_MANAGED_BY`；远程定义不参与上游探测，freshness 恒 not-applicable。
+逐助手支持 `add`、`update`、`enable`、`disable`、`remove`；库级支持 `enable`、`disable`、`remove`。`mcp:status` 只读零写；真实 `apply` 具备排他锁、操作审计、CAS 和回滚保护；`env` 在 SQLite definition/binding 中只持久化字面量 `${VAR}` 形式的环境变量引用；status、诊断与操作日志不展示或保存解析后的真实值；真实 apply 执行时从进程环境解析，并按目标 codec 写入 Claude 或 Codex 的目标客户端配置，目标文件的明文由文件权限与客户端安全边界保护。远程 HTTP MCP 已实现，与本地 stdio 同级：远程定义含 `url`（必填；仅允许 `https://`，或本机回环 `http://localhost` / `http://127.0.0.1`）与可选 `headers`（值只允许 `${VAR}` 占位符），与 stdio 字段互斥；headers 以引用形式写入目标（Claude 字面量 `${VAR}`、Codex `env_http_headers`），解析后明文不落盘；归属只记在 `mcp_bindings`（已分配且启用即为本工具所写），目标条目不写任何管理标记；旧版 `_MANAGED_BY` 与 `# [agent-manager:managed]` 读取时剥离、不代表归属，status 对带旧标记的条目提示更新以清理；远程定义不参与上游探测，freshness 恒 not-applicable。
 
 Claude Code 和 Codex 的内置默认渠道均为官方 `native` 命令；brew 只在 observed 检测结果中展示，不是默认。
 
@@ -50,7 +52,8 @@ SQLite 核心、Tauri bridge、设置页面、主要资源页面布局、Agent �
 
 助手卡片的额度只读本机文件，不联网、不调 API、不装 hook。
 
-Claude 侧两个来源取 `checked_at` 较新的那个：`<配置目录>/.agent-manager-usage.json`
+Claude 侧两个来源取 `checked_at` 较新的那个：`<data_dir>/usage/<编码后的配置目录>.json`
+（编码先把 `%` 换成 `%25` 再把 `/` 换成 `%2F`，不往助手配置目录放文件）
 （状态栏脚本落盘的实时值，字段沿用 Claude Code 推给状态栏的 `used_percentage` 与
 Unix 秒 `resets_at`）与 `~/.claude.json` 的 `cachedUsageUtilization`（Claude Code 主动查
 额度时才刷新，常规对话不更新）。落盘文件由用户自愿在自己的状态栏脚本里加几行产生，
@@ -213,10 +216,11 @@ AI CLI 软件生命周期不再由产品界面维护。客户端是否可用、�
 **Codex 侧**写同一份 `config.toml`——MCP 域也写它，因此按段落分工：本工具在这里拥有
 `model_provider`、`model`、`approval_policy`、`sandbox_mode`、`approvals_reviewer`、
 `model_reasoning_effort`、`model_context_window`、`model_auto_compact_token_limit`、`web_search`
-九个顶层键与带受管标记
-`# [agent-manager:managed]` 的 `[model_providers.*]` 段，其余行（含注释、用户自己的键、
-MCP 域写的 `[mcp_servers.*]`）逐行原样保留。写入是文本级编辑：顶层键就地替换或插在第一个
-表头之前（越过紧贴表头的注释，否则会把受管标记与它的表段拆散），表段整段替换。
+九个顶层键，以及 `agent_settings_bindings.owned_providers` 记下的本工具写入的
+`[model_providers.*]` 段（含子表）；文件里不写任何管理注释。旧版本写在 provider 段前的
+`# [agent-manager:managed]` 只在迁移时用于认领，下次写入即随旧段撤掉。其余行（含注释、用户自己的键与
+provider、MCP 域写的 `[mcp_servers.*]`）逐行原样保留。写入是文本级编辑：顶层键就地替换或插在第一个
+表头之前（越过紧贴表头的注释），表段整段替换。
 
 Codex 的令牌不落盘：provider 用 `env_key` 指向环境变量名，由 Codex 启动时自己去读，
 因此这里只写变量名——与 Claude 那边被迫写真值不同。`wire_api` 固定 `responses`

@@ -2,7 +2,7 @@
 
 当前 MCP 定义、库分配和启用偏好的事实源是本机 `native-manager.db`。设置位于 `app_settings` 表；不要把 JSON 文件当作 Agent Manager 的可写状态。
 
-Rust dispatcher 已实现本地 stdio 与远程 HTTP MCP 的 `mcp:status`（只读）与真实 `mcp:apply`；公共 `mcp:plan` 与 `--dry-run` 入口已退役并拒绝。定义与分配写入 SQLite；当前产品支持 Claude JSON 与 Codex TOML，旧 OpenCode codec 仅用于兼容既有数据。远程定义含 `url`（必填；仅允许 `https://`，或本机回环 `http://localhost` / `http://127.0.0.1`）与可选 `headers`（值只允许 `${VAR}` 占位符，不超过 20 个），与 command/args/env/startup_timeout_sec 互斥；headers 以客户端原生引用形式写入目标，解析后明文不落盘；受管标记统一为条目级 `_MANAGED_BY`（stdio 旧位置 env 内标记继续兼容）。
+Rust dispatcher 已实现本地 stdio 与远程 HTTP MCP 的 `mcp:status`（只读）与真实 `mcp:apply`；公共 `mcp:plan` 与 `--dry-run` 入口已退役并拒绝。定义与分配写入 SQLite；当前产品支持 Claude JSON 与 Codex TOML，旧 OpenCode codec 仅用于兼容既有数据。远程定义含 `url`（必填；仅允许 `https://`，或本机回环 `http://localhost` / `http://127.0.0.1`）与可选 `headers`（值只允许 `${VAR}` 占位符，不超过 20 个），与 command/args/env/startup_timeout_sec 互斥；headers 以客户端原生引用形式写入目标，解析后明文不落盘；目标条目只含客户端官方字段，不写 `_MANAGED_BY` 或管理注释；归属由 SQLite `mcp_bindings` 判定：无分配记录的同名条目视为用户条目，需显式接管才会覆盖。旧版标记读取时剥离，带旧标记的受管条目在 status 中提示更新，更新后即清除。
 
 逐 Agent MCP 支持 `add`、`update`、`enable`、`disable`、`remove`；库级支持 `enable`、`disable`、`remove`。移除管理定义不等于卸载外部软件；卸载必须是引擎单独返回并单独确认的高风险 action。
 

@@ -592,6 +592,15 @@ state 与 actions，不自己推断；用户主动停用的不催。syncPlan 是
 - 定义保存仍只保存，不执行安装/链接/同步；破坏性定义移除、清空日志等高风险动作保持独立二次确认。
 - MCP secrets 边界保留：SQLite 字面量 `${VAR}`；status/诊断/操作日志不暴露解析值；apply-time 可能按目标 codec 写入下游配置。
 
+## 2026-09-22 助手配置零标记裁决
+
+- 触发：Codex 对 MCP 远程条目中的 `_MANAGED_BY` 报告无法识别的配置；盘点发现 MCP 三个 codec 都写该标记（stdio 写进 `env`/`environment`，会传给 MCP 进程），Codex MCP 条目与 `[model_providers.*]` 段前还写 `# [agent-manager:managed]` 注释，状态栏脚本在 Claude 配置目录写 `.agent-manager-usage.json`。
+- 裁决：以 `docs/GUI-REDESIGN.md`「助手配置零标记」为准。归属只记在 `native-manager.db`，与 rules、hooks、Claude 运行配置已采用的「定位 + 摘要」做法统一；本节取代上文远程 HTTP MCP 接线中「受管 marker 迁至条目级 `_MANAGED_BY`」的要求。
+- MCP：归属 = `mcp_bindings` 已分配且启用；旧标记只读剥离；无记录的同名条目（含带旧标记的残留）按用户条目处理，需显式接管。
+- Codex 运行配置：`agent_settings_bindings.owned_providers` 记录本工具写入的 provider id；旧注释仅用于一次性迁移识别。
+- 状态栏额度缓存迁至数据目录 `usage/`，不再读写助手配置目录内的缓存文件。
+- Shell 别名区块注释保留（rc 文件不是助手配置，无结构化字段可用）。Codex 实例的 `agent-manager.config.toml` 是 Codex 官方 profile 文件形式，保留。
+
 ## 本次停止点与恢复入口
 
 - 停止点：验收基线提交 `5a110be3` 的旧版 x86_64 DMG 与 GUI E2E、arm64 静态验收均已完成；直接 apply 改造已完成源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收，最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify，交付回执见上；本轮三提交（`d46b85a`/`47702ed`/`14e6790`）完成对外发布就绪的仓库内改造（LICENSE/元数据/CSP/图标/错误边界/自定义助手确认/MCP 空态/管线草稿先行单写者重构），发布管线（`14e6790`）与 Windows 阻断 CI（`9f56f00`）已就绪，公开发布仍受外部条件阻塞，未创建 tag 或 Release。
