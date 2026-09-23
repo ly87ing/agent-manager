@@ -626,6 +626,14 @@ state 与 actions，不自己推断；用户主动停用的不催。syncPlan 是
 - 验收中发现并已修复：`7c6eee7` 起桥的命令白名单没放行 `rules:apply --source-rule`，桌面端点「应用来源规则」只显示「写入失败」；引擎、前端测试都不经过桥，是对安装包逐步点击时暴露的（`37c6933` 修复并补桥测试）。`329e2b1` 提交前漏跑 Tauri 测试，桥直连的别名状态测试仍按内置推荐断言，一并修正。规则页「更新来源」按钮起初用错技能 id 前缀（`skills:` 应为 `skill:`），单元测试与代码错在同一处，隔离 CLI 实测抓出后修正。
 - 验收：两套 cargo test（引擎 387、Tauri 20）、前端 558 项、typecheck、build 全绿；agent-skills 39 项测试全绿，门禁各做一次反例。隔离 HOME 用 CLI 以 agent-skills 临时克隆为上游，规则走通「推荐来源 → 登记 → 取回 → 应用（先备份）→ 上游出新版 → 可更新 → 一键更新不另存备份」，别名走通「推荐来源 → 取回 → 推荐带来源 → 添加 → 两个 rc 文件写入、`zsh -n` 通过」，审计记规则 id、摘要、上游提交号或别名来源，不含正文。`37c6933` 安装包 `verify:macos` 全部通过；从 DMG 取出的 .app 在隔离 HOME、隔离数据目录、替身 CLI 下经 System Events 逐步点击：规则页「取回 agent-skills」→ 出现来源规则 →「应用到…」写入且与来源 core.md 逐字节一致 → 上游提交新版后「更新来源」→「来源有新版本」→「更新到新版本」写入新版、无备份模板；终端快捷命令页推荐标「来自 agent-skills」，添加 grok 后两个 rc 文件出现区块、`zsh -n` 通过、审计记来源；运行设置页有「禁止自动更新」，展开「直接编辑配置文件」为 CodeMirror 编辑器（原文含令牌、格式化与查看改动在）。全程真实 `~/.claude`、`~/.codex`、rc 文件摘要不变。真实环境里 agent-skills 镜像尚未取回，由用户在规则页点「取回 agent-skills」。
 
+## 2026-09-23 agent-skills 目录整理裁决
+
+- 触发：用户指出 agent-skills 目录乱：七个技能与 `rules/`、`aliases/`、`tests/` 平铺在顶层，`tests/` 里混着调用模型的评测执行器，33KB 的 README 同时装着目录、实测记录、读数规则与投稿约定。
+- 裁决：agent-skills 把技能收进 `skills/`，调用模型的执行器与内置技能夹具挪到 `tools/evals/`，`tests/` 只留离线门禁；README 原文拆到 `docs/authoring.md`（设计原则、技能包结构、运行时适配、投稿约定）与 `docs/evaluation.md`（执行器、读数规则、宿主截断、实测记录、已试死路），README 只留范围、目录、结构、验证与用法。本工具：推荐定义改为 `skill_paths: ["skills"]`；旧定义里的单段技能名在顶层找不到时按 `skills/<名>` 找（只读，不改库，旧定义与旧库备份照常可用）；接管扫描按集合实际发现的技能名判定计划外链接，否则目录定义下同名链接会被当成外部链接另建集合；推荐卡片与确认框的「含 N 个技能」改为「技能取自 skills/」，因为一个 `skill_paths` 项可以装多个技能。
+- 提交：agent-skills `fb35311`（执行器与文档拆分）、`8566c8e`（技能收进 `skills/`）；本仓 `30a624e`。均已推送。
+- 验收：引擎全量 cargo test、Tauri 20 项、前端 558 项、build 全绿，新增用例在撤掉回退或名称匹配改动后各自失败；agent-skills 39 项全绿，新增「顶层不得出现技能包」门禁、英文检查覆盖 `docs/`，各做一次反例；四个执行器从任意目录都能找到 7 个技能、196 条触发用例与规则评测文件（只加载，未调用模型）。隔离 HOME 以本地裸仓库为上游：旧布局取回并启用 `verification` → 上游前进到整理后的提交再更新 → 旧定义仍发现 7 个技能、链接目标不变、来源规则与推荐别名照常 → 定义改为 `["skills"]` 后结果一致。
+- 真实环境：先备份库（`before-reorg`），经 CLI 执行与「更新资源库」相同的集合更新（镜像 `cbf1fd2` → `8566c8e`），再把集合定义改为 `["skills"]`（url、agents 不变）。前后 `skills:status` 逐行一致，`~/.claude/skills`、`~/.codex/skills` 共 24 条链接目标一致，各配置文件摘要一致；规则页两份规则文件匹配来源规则 `agent-skills/core`；四条推荐别名已在两个 rc 文件里，故不再推荐。CLI 更新镜像不刷新上游探测缓存，集合卡片仍显示 3 小时前探到的 `cbf1fd2`，另跑一次 `system:refresh-upstream --only skill:agent-skills`（只写探测缓存）后显示 `8566c8e`、已是最新。`30a624e` 安装包 SHA256 `d1cb0ae5d782ec47fb2da328ca0e9c1b314aa9542a317cba20e4b51259dba74b`（8689586 bytes），`verify:macos` 全部通过（未签名、只验 x86_64）；换成该版本后技能页推荐卡片显示「技能取自 skills/ · 已添加」，集合卡片「正常 · 已收录 7 个技能」，无发现失败。遗留：库里仍有已并入 `verification` 的 `frontend-verification` 绑定（两个助手均 missing-link），整理前即存在，未处理。
+
 ## 交付回执（2026-09-23，实际配置为准 x86_64 DMG 真机验收）
 
 绑定提交：`c0065c090e2ed89e6adedac60bc025a159baefda`（产品代码；其后 `0ceb7e0` 只改验收脚本）。
