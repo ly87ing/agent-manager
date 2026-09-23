@@ -17,6 +17,11 @@ import {
 
 const CHECKED_AT = "2026-09-05T10:00:00Z";
 
+/** mock 的写入基准：每次写入换一个，模拟 status 给出的摘要。 */
+function mockBase(seed: number): string {
+  return seed.toString(16).padStart(64, "0");
+}
+
 function demoEnvelopes(): Record<string, Envelope> {
   const audit = makeEnvelope(
     makeAuditData({
@@ -66,9 +71,18 @@ function demoEnvelopes(): Record<string, Envelope> {
                 small_fast_model: null,
                 model_aliases: { opus: null, sonnet: null, haiku: null },
                 timeout_ms: null,
-                credential: { configured: true, kind: "token", variable: null },
-                runtime: {},
+                credential: { configured: true, kind: "token", variable: null, saved_var: null },
+                // 演示：本工具不提供的档位（表单显示「保持当前」）、已有取值的预填、旧格式状态栏的修复入口
+                runtime: {
+                  automation_mode: "custom",
+                  automation_raw: { "permissions.defaultMode": "acceptEdits" },
+                  claude_effort_level: "high",
+                  statusline: "builtin-legacy",
+                },
               },
+              // 实际配置对不上任何已保存接入：演示「当前实际配置（未保存）」
+              base: mockBase(1),
+              current: { profile: null, default: false, last_written: null, unverified: [], drifted_from: null },
             },
           },
           state: "managed-ok",
@@ -101,6 +115,14 @@ function demoEnvelopes(): Record<string, Envelope> {
             installed: true,
             management: agentManagementFixture("codex"),
             auth: { state: "ready", authenticated: true, mode: "chatgpt", storage: "file", file: "auth.json" },
+            current_config: {
+              state: "missing",
+              file: "config.toml",
+              target: "/Users/demo/.codex/config.toml",
+              config: null,
+              base: mockBase(2),
+              current: { profile: null, default: true, last_written: null, unverified: [], drifted_from: null },
+            },
           },
           state: "managed-ok",
           freshness: makeFreshness({ state: "ahead", current: "0.43.0-beta.1", upstream: "0.42.0", checked_at: CHECKED_AT, probe: "native", cache_age_sec: 300 }),
@@ -839,106 +861,178 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
     return makeEnvelope({ variable, stored: value.length > 0 }, { command: "secrets.set", run_id: runId });
   };
 
+  let baseSeed = 100;
   const configureAgent = (args: string[], runId: string): Envelope => {
     const agentId = args[args.indexOf("--only") + 1];
     const data = routes["agents:status"].data as {
       elements: Array<{ id: string; spec: Record<string, unknown>; observed: Record<string, unknown> }>;
     };
     const element = data.elements.find((item) => item.id === agentId);
-    if (!element) {
-      return makeEnvelope({}, {
-        command: "agents.configure",
-        ok: false,
-        errors: [{ code: "UNKNOWN_ELEMENT", element: agentId ?? null, message: `找不到助手:${agentId ?? ""}` }],
-      });
+    const refuse = (code: string, message: string) => makeEnvelope({}, {
+      command: "agents.configure",
+      ok: false,
+      errors: [{ code, element: agentId ?? null, message }],
+    });
+    if (!element) return refuse("AGENT_ERROR", `没有这个助手：${agentId ?? ""}`);
+    const observed = element.observed.current_config as {
+      state: string;
+      file: string;
+      target?: string;
+      config: Record<string, unknown> | null;
+      base?: string | null;
+      current?: Record<string, unknown> | null;
+    } | undefined;
+    const baseAt = args.indexOf("--base");
+    if (baseAt < 0 || !observed?.base) return refuse("USAGE_ERROR", "agents:configure 需要 --base");
+    if (args[baseAt + 1] !== observed.base) {
+      return refuse("AGENT_CONFIG_CHANGED", "配置文件已在外部修改（与读取时不一致），文件与库都没有改动；请刷新后重试");
     }
 
-    const current =
+    const codex = element.spec.bin === "codex";
+    const settings =
       element.spec.settings && typeof element.spec.settings === "object" && !Array.isArray(element.spec.settings)
-        ? (element.spec.settings as Record<string, unknown>)
+        ? structuredClone(element.spec.settings as Record<string, unknown>)
         : {};
-    const next = structuredClone(current);
-    const runtime = element.spec.bin === "codex"
-      ? {
-          automation_mode: next.automation_mode ?? "manual",
-          codex_reasoning_effort: next.codex_reasoning_effort ?? null,
-          codex_web_search: next.codex_web_search ?? null,
-          codex_context_window: next.codex_context_window ?? null,
-          codex_auto_compact_token_limit: next.codex_auto_compact_token_limit ?? null,
-        }
-      : {
-          automation_mode: next.automation_mode ?? "manual",
-          statusline: next.statusline === "builtin" ? "builtin" : null,
-          claude_effort_level: next.claude_effort_level ?? null,
-          claude_tool_search: next.claude_tool_search === true,
-          claude_agent_teams: next.claude_agent_teams === true,
-          claude_disable_artifact: next.claude_disable_artifact === true,
-          claude_hide_attribution: next.claude_hide_attribution === true,
-        };
-    const useIndex = args.indexOf("--use");
-    if (useIndex >= 0) {
-      const profile = args[useIndex + 1];
-      const profiles = next.profiles;
-      if (!profile || !profiles || typeof profiles !== "object" || Array.isArray(profiles) || !(profile in profiles)) {
-        return makeEnvelope({}, {
-          command: "agents.configure",
-          ok: false,
-          errors: [{ code: "UNKNOWN_PROFILE", element: agentId, message: `找不到接入:${profile ?? ""}` }],
-        });
+    const profiles = (settings.profiles && typeof settings.profiles === "object" && !Array.isArray(settings.profiles)
+      ? settings.profiles
+      : {}) as Record<string, Record<string, unknown>>;
+    const liveConfig = (observed.config ?? {}) as Record<string, unknown>;
+    const runtime = (liveConfig.runtime ?? {}) as Record<string, unknown>;
+    let backfill: Record<string, unknown> | null = null;
+    const secretSourceReady = () => {
+      const secrets = routes["secrets:status"].data as { elements: Array<{ observed: { source?: { configured?: boolean; ready?: boolean } } }> };
+      const source = secrets.elements[0]?.observed.source;
+      return Boolean(source?.configured && source.ready);
+    };
+    /**
+     * 切换或保存前回填还没保存的实际配置，与引擎同一套令牌规则：已选密钥文件就写进去，
+     * 没选且没带放弃标志就拒绝。返回拒绝信封或 null。
+     */
+    const saveLive = (): Envelope | null => {
+      if (observed.current?.profile || observed.current?.default || args.includes("--discard-live")) return null;
+      const credential = liveConfig.credential as { configured?: boolean; kind?: string | null; saved_var?: string | null } | undefined;
+      const tokenUnsaved = Boolean(
+        credential?.configured && (credential.kind === "token" || credential.kind === "api_key") && !credential.saved_var,
+      );
+      const discardToken = args.includes("--discard-live-token");
+      if (tokenUnsaved && !discardToken && !secretSourceReady()) {
+        return refuse(
+          "AGENT_LIVE_TOKEN_UNSAVED",
+          "当前实际配置里的令牌还没有保存在任何变量里，切换会丢失它：先到“设置 → 密钥”选择外部密钥文件（令牌会写进该文件，库里只存变量名），或确认放弃这个令牌后带 --discard-live-token 重试",
+        );
       }
-      next.active = profile;
-      const selected = (profiles as Record<string, Record<string, unknown>>)[profile];
-      const codex = element.spec.bin === "codex";
-      element.observed.current_config = {
-        state: "ready",
-        file: codex ? "config.toml" : "settings.json",
-        target: codex ? "/Users/demo/.codex/config.toml" : "/Users/demo/.claude/settings.json",
-        config: {
-          provider: codex ? profile : "anthropic",
-          base_url: selected.base_url ?? null,
-          model: selected.model ?? null,
-          small_fast_model: selected.small_fast_model ?? null,
-          model_aliases: selected.model_aliases ?? { opus: null, sonnet: null, haiku: null },
-          timeout_ms: selected.timeout_ms ?? null,
-          credential: {
-            configured: true,
-            kind: codex ? "env" : selected.auth ?? "token",
-            variable: codex ? selected.token_var ?? null : null,
-          },
-          runtime,
-        },
+      const name = `imported-${baseSeed}`;
+      const tokenVar = tokenUnsaved && !discardToken ? `IMPORTED_${baseSeed}_TOKEN` : null;
+      profiles[name] = {
+        label: "导入的配置（演示）",
+        note: "切换前从助手实际配置自动保存",
+        ...(liveConfig.base_url ? { base_url: liveConfig.base_url } : {}),
+        ...(liveConfig.model ? { model: liveConfig.model } : {}),
+        ...(tokenVar ? { token_var: tokenVar } : {}),
       };
-    } else if (args.includes("--use-default")) {
-      delete next.active;
-      const codex = element.spec.bin === "codex";
-      element.observed.current_config = {
-        state: "ready",
-        file: codex ? "config.toml" : "settings.json",
-        target: codex ? "/Users/demo/.codex/config.toml" : "/Users/demo/.claude/settings.json",
-        config: {
-          provider: codex ? "openai" : "anthropic",
-          base_url: null,
-          model: null,
-          small_fast_model: null,
-          model_aliases: { opus: null, sonnet: null, haiku: null },
-          timeout_ms: null,
-          credential: { configured: false, kind: null, variable: null },
-          runtime,
-        },
+      backfill = {
+        name,
+        created: true,
+        label: "导入的配置（演示）",
+        token: !tokenUnsaved ? "none" : discardToken ? "discarded" : "adopted",
+        token_var: tokenVar,
       };
+      return null;
+    };
+    const live = (profile: string | null): Record<string, unknown> => {
+      const selected = profile ? profiles[profile] : null;
+      return {
+        provider: codex ? (profile ?? "openai") : "anthropic",
+        base_url: selected?.base_url ?? null,
+        model: selected?.model ?? null,
+        small_fast_model: selected?.small_fast_model ?? null,
+        model_aliases: selected?.model_aliases ?? { opus: null, sonnet: null, haiku: null },
+        timeout_ms: selected?.timeout_ms ?? null,
+        credential: selected
+          ? { configured: Boolean(selected.token_var), kind: codex ? "env" : selected.auth ?? "token", variable: codex ? selected.token_var ?? null : null, saved_var: codex ? null : selected.token_var ?? null }
+          : { configured: false, kind: null, variable: null, saved_var: null },
+        runtime,
+      };
+    };
+
+    let current = observed.current ?? null;
+    const runtimeAt = args.indexOf("--runtime");
+    const useAt = args.indexOf("--use");
+    if (runtimeAt >= 0) {
+      const patch = JSON.parse(args[runtimeAt + 1]) as Record<string, unknown>;
+      if ("automation_mode" in patch) delete runtime.automation_raw;
+      for (const [key, value] of Object.entries(patch)) {
+        if (value === null || value === false || value === "") {
+          delete runtime[key];
+          delete settings[key];
+        } else {
+          runtime[key] = value;
+          settings[key] = value;
+        }
+      }
+      observed.config = { ...liveConfig, runtime };
+      if (observed.state === "missing") observed.state = "ready";
+    } else if (useAt >= 0 || args.includes("--use-default")) {
+      const profile = useAt >= 0 ? args[useAt + 1] : null;
+      const connectionAt = args.indexOf("--connection");
+      if (profile && connectionAt >= 0) profiles[profile] = JSON.parse(args[connectionAt + 1]);
+      if (profile && !(profile in profiles)) return refuse("AGENT_ERROR", `找不到接入:${profile}`);
+      const refused = saveLive();
+      if (refused) return refused;
+      if (profile) settings.active = profile;
+      else delete settings.active;
+      observed.state = "ready";
+      observed.config = live(profile);
+      current = { profile, default: profile === null, last_written: profile, unverified: [], drifted_from: null };
+    } else if (args.includes("--save-current")) {
+      const refused = saveLive();
+      if (refused) return refused;
+      current = backfill
+        ? { ...current, profile: (backfill as { name: string }).name, default: false }
+        : current;
     }
-    const observed = element.observed.current_config as {
-      state?: string;
-      config?: { runtime?: Record<string, unknown> } | null;
-    } | undefined;
-    if (observed?.state === "ready" && observed.config) observed.config.runtime = runtime;
-    element.spec.settings = next;
+    settings.profiles = profiles;
+    element.spec.settings = settings;
+    baseSeed += 1;
+    observed.base = mockBase(baseSeed);
+    observed.current = current;
     recordRun(runId, "agents.configure");
     return makeEnvelope(
-      { domain: "agents", steps: [{ name: "agent-settings", ok: true, exit_code: 0 }], skipped: [] },
+      { domain: "agents", action: "configure", element: agentId, active: settings.active ?? null, current: current?.profile ?? null, backfill, discarded_live: args.includes("--discard-live"), base: observed.base },
       { command: "agents.configure", run_id: runId, lock: { held: true, pid: 4242 } },
     );
   };
+
+  /**
+   * 浏览器验收用的 DEV mock 钩子（只在 ?mock=1 下存在）：模拟「本工具以外改了配置文件」，
+   * 与切换密钥文件是否可用。界面缓存里的写入基准随之过期，下一次写入会被拒并刷新。
+   */
+  if (typeof window !== "undefined") {
+    (window as unknown as { __agentManagerMock?: unknown }).__agentManagerMock = {
+      externalEdit(agentId = "agents:claude-code") {
+        const data = routes["agents:status"].data as { elements: Array<{ id: string; observed: Record<string, unknown> }> };
+        const observed = data.elements.find((item) => item.id === agentId)?.observed.current_config as
+          | { state: string; config: Record<string, unknown> | null; base?: string | null }
+          | undefined;
+        if (!observed) return false;
+        baseSeed += 1;
+        observed.state = "ready";
+        const config = observed.config ?? {};
+        const runtime = (config.runtime ?? {}) as Record<string, unknown>;
+        observed.config = { ...config, model: "edited-outside", runtime: { ...runtime, claude_effort_level: "low" } };
+        observed.base = mockBase(baseSeed);
+        return true;
+      },
+      setSecretSourceReady(ready: boolean) {
+        const secrets = routes["secrets:status"].data as { elements: Array<{ observed: Record<string, unknown> }> };
+        if (secrets.elements[0]) {
+          secrets.elements[0].observed.source = ready
+            ? { configured: true, path: "~/agent-manager/secrets/mcp.env", ready: true, error: null }
+            : { configured: false, path: null, ready: false, error: null };
+        }
+      },
+    };
+  }
 
   return {
     async run(command, args = [], runOptions = {}) {

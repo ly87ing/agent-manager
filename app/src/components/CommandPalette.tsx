@@ -3,8 +3,14 @@ import { Search } from "lucide-react";
 import { toast } from "sonner";
 import type { StatusData } from "../lib/contract";
 import { parseInitialToFormValues } from "../lib/agentDefinitionForm";
-import { connectionKindOf } from "../lib/agentManagement";
-import type { AgentsObserved } from "../lib/observed";
+import {
+  backfillNotice,
+  configureArgs,
+  configureBaseOf,
+  configureRefusalOf,
+  currentConnectionOf,
+  liveRefusalDescription,
+} from "../lib/agentCurrent";
 import { useExecutions } from "../lib/execution";
 import { useEngineQuery } from "../lib/queries";
 import { useDirectApply } from "../lib/useDirectApply";
@@ -12,7 +18,6 @@ import { useRefreshUpstream } from "../lib/queries";
 import { matchesKeyword } from "./SearchInput";
 import { cn } from "../lib/utils";
 import { ConfirmModal } from "./ConfirmModal";
-import { connectionAlignment } from "./ConnectionWorkbench";
 import {
   publishTrayConnections,
   type TrayConnection,
@@ -59,20 +64,12 @@ function supportsConnectionSwitch(spec: Record<string, unknown>): boolean {
   return bin === "claude" || bin === "codex";
 }
 
-function connectionSwitchConfirmed(data: StatusData | undefined, agentId: string, profile: string): boolean {
+/** 当前接入以实际配置为准：引擎按内容识别，默认账号即实际没有任何接入键。 */
+function isCurrentConnection(data: StatusData | undefined, agentId: string, profile: string): boolean {
   const element = data?.elements.find((item) => item.id === `agents:${agentId}`);
-  if (!element) return false;
-  const form = parseInitialToFormValues(agentId, element.spec);
-  if (form.activeConnection !== profile) return false;
-  const kind = connectionKindOf(element);
-  const currentConfig = (element.observed as AgentsObserved).current_config;
-  const selected = profile
-    ? form.connections.find((connection) => connection.name === profile) ?? null
-    : null;
-  return Boolean(
-    kind && currentConfig
-    && connectionAlignment(kind, selected, currentConfig) === "aligned",
-  );
+  const current = element ? currentConnectionOf(element) : null;
+  if (!current) return false;
+  return profile ? current.profile === profile : current.default;
 }
 
 /**
@@ -105,7 +102,12 @@ export function CommandPalette({
   const [targetItemId, setTargetItemId] = useState<string | null>(null);
   const [active, setActive] = useState(0);
   const [switchingTarget, setSwitchingTarget] = useState<string | null>(null);
-  const [pendingSwitch, setPendingSwitch] = useState<ConnectionSwitchRequest | null>(null);
+  /** 切换前的回填被拒：由用户显式选择放弃，或先去选密钥文件。 */
+  const [pendingSwitch, setPendingSwitch] = useState<{
+    request: ConnectionSwitchRequest;
+    kind: "live-token" | "unrepresentable";
+    message: string;
+  } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const switchBusyRef = useRef(false);
   const directApply = useDirectApply();
@@ -121,19 +123,26 @@ export function CommandPalette({
   const refetchAgents = agents.refetch;
 
   const switchConnection = useCallback(
-    async (request: ConnectionSwitchRequest, allowTakeover = false) => {
+    async (
+      request: ConnectionSwitchRequest,
+      discard: { discardLive?: boolean; discardLiveToken?: boolean } = {},
+    ) => {
       if (switchBusyRef.current) return;
+      const element = agents.data?.ok
+        ? agents.data.data.elements.find((item) => item.id === `agents:${request.agentId}`)
+        : undefined;
+      const base = element ? configureBaseOf(element) : null;
+      if (!base) {
+        toast.error("客户端配置文件暂不可读，接入没有切换", { description: "到助手页的“实际配置”查看原因。" });
+        return;
+      }
       switchBusyRef.current = true;
       const target = `${request.agentId}/${request.profile || "default"}`;
       setSwitchingTarget(target);
       try {
-        const args = ["--only", `agents:${request.agentId}`];
-        args.push(...(request.profile ? ["--use", request.profile] : ["--use-default"]));
-        if (allowTakeover) args.push("--allow-takeover");
-
         const envelope = await execute({
           command: "agents:configure",
-          args,
+          args: configureArgs({ agentId: request.agentId, base, use: request.profile, ...discard }),
           label: `切换 ${request.agentName} 到 ${request.profileLabel}`,
           silent: true,
         });
@@ -143,8 +152,16 @@ export function CommandPalette({
         }
         if (!envelope.ok) {
           const message = envelope.errors[0]?.message ?? "未知错误";
-          if (!allowTakeover && message.includes("拒绝覆盖")) {
-            setPendingSwitch(request);
+          const refusal = configureRefusalOf(envelope);
+          if (refusal === "changed") {
+            await refetchAgents();
+            toast.error("配置文件已在外部修改，接入没有切换", {
+              description: "已刷新为客户端当前的实际配置，请确认后重新选择。",
+            });
+            return;
+          }
+          if (refusal === "live-token" || refusal === "unrepresentable") {
+            setPendingSwitch({ request, kind: refusal, message });
             return;
           }
           toast.error(`接入没有切换：${message}`);
@@ -153,21 +170,24 @@ export function CommandPalette({
 
         const refreshed = await refetchAgents();
         const confirmed = refreshed.data?.ok
-          && connectionSwitchConfirmed(refreshed.data.data, request.agentId, request.profile);
+          && isCurrentConnection(refreshed.data.data, request.agentId, request.profile);
         if (!confirmed) {
           toast.error("写入已经返回成功，但状态回读没有确认接入生效，请在助手页检查");
           return;
         }
         setPendingSwitch(null);
+        const notice = backfillNotice(envelope.data);
         toast.success(`已切换 ${request.agentName} 到 ${request.profileLabel}`, {
-          description: "助手下次启动生效；已经开着的要重启它。",
+          description: notice
+            ? `${notice}。助手下次启动生效。`
+            : "助手下次启动生效；已经开着的要重启它。",
         });
       } finally {
         switchBusyRef.current = false;
         setSwitchingTarget(null);
       }
     },
-    [execute, refetchAgents],
+    [agents.data, execute, refetchAgents],
   );
 
   const trayConnections = useMemo<TrayConnection[]>(() => {
@@ -186,17 +206,12 @@ export function CommandPalette({
         ...form.connections.map((connection) => ({ profile: connection.name, label: connection.label || connection.name })),
       ];
       for (const option of options) {
-        const selected = form.activeConnection === option.profile;
-        const confirmed = selected && Boolean(
-          agents.data?.ok && connectionSwitchConfirmed(agents.data.data, agentId, option.profile),
-        );
         out.push({
           agentId,
           agentName,
           profile: option.profile,
           profileLabel: option.label,
-          current: confirmed,
-          needsRepair: selected && !confirmed,
+          current: Boolean(agents.data?.ok && isCurrentConnection(agents.data.data, agentId, option.profile)),
         });
       }
     }
@@ -265,25 +280,22 @@ export function CommandPalette({
           })),
         ];
         for (const option of options) {
-          const current = form.activeConnection === option.profile;
-          const currentConfirmed = current && Boolean(
-            agents.data?.ok
-            && connectionSwitchConfirmed(agents.data.data, id, option.profile),
+          const current = Boolean(
+            agents.data?.ok && isCurrentConnection(agents.data.data, id, option.profile),
           );
-          const needsRepair = current && !currentConfirmed;
           const target = `${id}/${option.profile || "default"}`;
           out.push({
             id: `connection:${id}:${option.profile || "default"}`,
             label: `${displayName} · ${option.label}`,
-            hint: currentConfirmed
+            hint: current
               ? "当前接入"
               : switchingTarget === target
-                ? needsRepair ? "正在重新应用…" : "正在切换…"
-                : needsRepair ? "配置不一致 · 重新应用" : "切换接入",
-            keywords: `${id} ${spec.bin ?? ""} ${option.profile} ${option.label} ${option.baseUrl} ${option.model} ${option.note} provider 供应商 接入 切换 ${needsRepair ? "修复 重新应用" : ""}`,
+                ? "正在切换…"
+                : "切换接入",
+            keywords: `${id} ${spec.bin ?? ""} ${option.profile} ${option.label} ${option.baseUrl} ${option.model} ${option.note} provider 供应商 接入 切换`,
             group: "切换接入",
-            disabled: currentConfirmed || switchingTarget !== null,
-            current: currentConfirmed,
+            disabled: current || switchingTarget !== null,
+            current,
             run: () =>
               void switchConnection({
                 agentId: id,
@@ -489,13 +501,23 @@ export function CommandPalette({
       )}
       {pendingSwitch && (
         <ConfirmModal
-          title="覆盖被改过的接入配置"
-          description={`${pendingSwitch.agentName} 的配置文件中，本工具负责的接入项已被外部修改。确认后会用“${pendingSwitch.profileLabel}”替换这些接入项，其他配置保持不变。`}
+          title={pendingSwitch.kind === "live-token" ? "当前实际令牌还没有保存" : "当前实际配置无法完整保存"}
+          description={liveRefusalDescription(pendingSwitch.kind, pendingSwitch.message)}
           risk="write-local"
-          riskLabel="覆盖接入项"
-          confirmLabel="确认切换"
+          riskLabel={pendingSwitch.kind === "live-token" ? "放弃令牌" : "放弃实际配置"}
+          confirmLabel={pendingSwitch.kind === "live-token" ? "放弃这个令牌并切换" : "放弃当前实际配置继续切换"}
+          secondaryLabel={pendingSwitch.kind === "live-token" ? "去选择密钥文件" : undefined}
+          onSecondary={pendingSwitch.kind === "live-token"
+            ? () => {
+                setPendingSwitch(null);
+                onNavigate("settings:secrets");
+              }
+            : undefined}
           executing={switchingTarget !== null}
-          onConfirm={() => void switchConnection(pendingSwitch, true)}
+          onConfirm={() => void switchConnection(
+            pendingSwitch.request,
+            pendingSwitch.kind === "live-token" ? { discardLiveToken: true } : { discardLive: true },
+          )}
           onClose={() => setPendingSwitch(null)}
         />
       )}

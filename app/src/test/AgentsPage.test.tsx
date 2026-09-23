@@ -5,6 +5,10 @@ import { agentManagementFixture, makeAuditData, makeElement, makeEnvelope, makeF
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 import type { EngineElement, Envelope } from "../lib/contract";
 
+const BASE = "c".repeat(64);
+/** 实际配置对不上任何已保存接入：引擎报「未保存」。 */
+const UNSAVED = { profile: null, default: false, last_written: null, unverified: [], drifted_from: null };
+
 function routes(bin = "claude", id = "claude-code"): Record<string, Envelope> {
   return {
     "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode() }),
@@ -53,6 +57,8 @@ function routes(bin = "claude", id = "claude-code"): Record<string, Envelope> {
                       credential: { configured: true, kind: "env", variable: "CODEX_RELAY_KEY" },
                       runtime: { codex_reasoning_effort: "high" },
                     },
+                    base: BASE,
+                    current: UNSAVED,
                   }
                 : {
                     state: "ready",
@@ -61,9 +67,11 @@ function routes(bin = "claude", id = "claude-code"): Record<string, Envelope> {
                       provider: "anthropic",
                       base_url: "https://claude.example.com",
                       model: "claude-test",
-                      credential: { configured: true, kind: "token", variable: null },
+                      credential: { configured: true, kind: "token", variable: null, saved_var: null },
                       runtime: { claude_effort_level: "high" },
                     },
+                    base: BASE,
+                    current: UNSAVED,
                   },
             },
             state: "managed-ok",
@@ -110,7 +118,9 @@ describe("助手页产品边界", () => {
     expect(screen.getByTestId("add-connection-button")).toBeEnabled();
     expect(screen.getByTestId("connection-card-claude-code-default")).toHaveTextContent("助手默认账号");
     expect(screen.getAllByText("默认环境").length).toBeGreaterThan(0);
-    expect(screen.getByText(/2 项运行设置尚未生效/)).toBeInTheDocument();
+    // 当前以客户端实际配置为准：对不上已保存接入就是未保存的实际配置，不报「尚未生效」
+    expect(screen.getByText(/当前接入：当前实际配置（未保存）/)).toBeInTheDocument();
+    expect(screen.queryByText(/尚未生效/)).toBeNull();
     expect(screen.getByTestId("workbench-tab-automation")).toHaveTextContent("自动化与权限");
     expect(screen.getByTestId("manage-instances-button")).toHaveTextContent("独立环境");
     await userEvent.click(screen.getByTestId("workbench-tab-launch"));
@@ -122,9 +132,9 @@ describe("助手页产品边界", () => {
     expect(within(launches).getByTestId("agent-sync-launch-claude-code")).toHaveTextContent("同步到终端");
     expect(within(launches).getByTestId("agent-launch-override-claude-code-claude")).toHaveTextContent("覆盖环境自动化");
     await userEvent.click(screen.getByTestId("workbench-tab-providers"));
-    expect(screen.getByText("尚未生效")).toBeInTheDocument();
-    expect(screen.getByText(/当前 Provider 尚未应用/)).toBeInTheDocument();
-    expect(screen.getByTestId("reset-connection-claude-code-default")).toHaveTextContent("应用默认配置");
+    expect(screen.getByTestId("connection-card-claude-code-live")).toHaveTextContent("https://claude.example.com");
+    expect(screen.queryByText(/当前 Provider 尚未应用/)).toBeNull();
+    expect(screen.getByTestId("reset-connection-claude-code-default")).toHaveTextContent("应用");
     expect(screen.queryByRole("heading", { name: "实例" })).toBeNull();
     expect(screen.queryByText("本机配置状态")).toBeNull();
     expect(screen.queryByText("状态栏：用量状态栏")).toBeNull();
@@ -156,8 +166,10 @@ describe("助手页产品边界", () => {
     expect(panel).toHaveTextContent("settings.json");
     expect(panel).toHaveTextContent("https://claude.example.com");
     expect(panel).toHaveTextContent("已配置（token）");
-    expect(panel).toHaveTextContent("软件保存值");
-    expect(panel).toHaveTextContent("客户端实际值");
+    expect(panel).toHaveTextContent("令牌还没有保存为变量");
+    // 只展示实际值，不再并列库里的上次写入记录
+    expect(panel).not.toHaveTextContent("软件保存值");
+    expect(within(screen.getByTestId("runtime-actual-claude_effort_level")).getByText("high")).toBeInTheDocument();
     expect(panel).not.toHaveTextContent('"configured"');
     expect(panel).not.toHaveTextContent("ANTHROPIC_AUTH_TOKEN=");
   });
@@ -176,6 +188,12 @@ describe("助手页产品边界", () => {
           model: "claude-test",
         },
       },
+    };
+    // 引擎按内容识别出 relay 是当前接入
+    ((status.data.elements[0] as unknown as EngineElement).observed as any).current_config.current = {
+      ...UNSAVED,
+      profile: "relay",
+      last_written: "relay",
     };
     renderWithEngine(<AgentsPage />, matched);
 
@@ -206,6 +224,8 @@ describe("助手页产品边界", () => {
           credential: { configured: false, kind: null, variable: null },
           runtime: {},
         },
+        base: BASE,
+        current: { ...UNSAVED, default: true },
       };
       return makeEnvelope(
         { domain: "agents", action: "configure", element: "agents:claude-code" },
@@ -221,6 +241,8 @@ describe("助手页产品边界", () => {
     expect(calls.find((call) => call.command === "agents:configure")?.args).toEqual([
       "--only",
       "agents:claude-code",
+      "--base",
+      BASE,
       "--use-default",
     ]);
     await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("助手默认账号"));
@@ -245,7 +267,7 @@ describe("助手页产品边界", () => {
     const observedValues = screen.getByTestId("agent-runtime-observed-values");
     expect(observedValues).toHaveTextContent("推理强度");
     expect(observedValues).toHaveTextContent("high");
-    expect(observedValues).toHaveTextContent("软件保存值");
+    expect(observedValues).not.toHaveTextContent("软件保存值");
     expect(observedValues).not.toHaveTextContent('"model"');
     expect(observedValues).not.toHaveTextContent("token");
     expect(screen.queryByTestId("agent-runtime-submit")).toBeNull();

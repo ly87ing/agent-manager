@@ -116,14 +116,34 @@ Codex 侧读 `<CODEX_HOME>/sessions/**/rollout-*.jsonl` 里最后一条 `rate_li
 （按可执行名判定），目标分别是 `~/.claude/settings.json` 与定义里 `mcp_config` 指向的
 `config.toml`（缺省 `~/.codex/config.toml`）。
 
-**接入配置**：`settings.profiles` 存多套（官方、各家中转站），`settings.active` 指向
-当前生效的那套，同一时刻只有一套写进目标文件。每套含地址、令牌变量名、令牌走哪个头
-（`token` → `ANTHROPIC_AUTH_TOKEN` 的 Bearer，`api_key` → `ANTHROPIC_API_KEY` 的
-x-api-key，中转站两种都有）、模型、小任务模型、opus/sonnet/haiku 别名与超时。
-渲染时先把受管的每条路径清空再写当前这套，切换后上一套留下的变量不会残留。
-`--use <名字>` 切换、`--use-default` 切回助手自带的账号与地址，切换与写入是同一条
-命令：库里的 `active` 与目标文件要么一起变，要么都不变。`active` 指向不存在的配置
-一律当场拒绝。
+**接入配置**：`settings.profiles` 存多套（官方、各家中转站），同一时刻只有一套写进
+目标文件。每套含地址、令牌变量名、令牌走哪个头（`token` → `ANTHROPIC_AUTH_TOKEN` 的
+Bearer，`api_key` → `ANTHROPIC_API_KEY` 的 x-api-key，中转站两种都有）、模型、小任务模型、
+opus/sonnet/haiku 别名与超时；地址允许 `https://` 与任意主机的 `http://`（界面对非 https
+提示令牌将明文传输）。当前是哪一套以目标文件为准：`agents:status` 把实际接入与每套已保存
+接入按渲染结果逐项比较，给出 `current_config.current`（`profile` 为匹配到的那套，`default`
+为助手默认账号，都不是即「当前实际配置（未保存）」）。库里的 `settings.active` 只是上次写入
+记录，只在内容相同的候选之间裁决。切换时先清空接入键再写目标那套，上一套留下的变量
+不会残留。`active` 指向不存在的配置一律当场拒绝。
+
+**写入**：`agents:configure --only <助手> --base <摘要>` 加一种写法——`--runtime <json>`
+只改补丁里的运行参数（`null`、`""`、`false` 撤掉该项，未出现的项不碰）；`--use <名字>` /
+`--use-default` 只改接入键，可带 `--connection <json>` 先替换目标那套（编辑当前接入）；
+`--save-current` 只把实际配置存成接入配置，不写助手文件。`--base` 取 status 的
+`current_config.base`（本工具负责部分的摘要，Codex 还算上当前引用的 provider 表）；重读后
+对不上即返回 `AGENT_CONFIG_CHANGED`（「已在外部修改」），文件与库都不动。文件读不了、不是
+普通文件或解析失败时 status 不给 base，界面据此禁止写入；目标是符号链接时写到最终目标文件，
+链接本身不变。密钥文件、助手配置与库在同一事务里写，任一步失败全部回滚。
+
+**切换前回填**：实际接入对不上任何已保存项时先存进库，再切换。身份（Claude：地址 + 认证头；
+Codex：地址 + 令牌变量且仍是本工具写的那张表，或引用同一个接入方式）与上次写入的那套一致，
+就把模型、别名、超时回填进它；否则新建「导入的配置（时间）」。Codex 用户自己的表或内置接入
+方式只以 `provider_ref` 引用，不复制也不认领，切到它时只写 `model_provider` / `model`，
+引用的表不在了就拒绝。Claude 的实际令牌没有对应已保存变量时：已选外部密钥文件就写进去并
+生成变量名（结果里返回变量名），否则返回 `AGENT_LIVE_TOKEN_UNSAVED`，由用户去密钥页选文件或
+以 `--discard-live-token` 放弃。回填后无法原样渲染回实际内容（如 AUTH_TOKEN 与 API_KEY 同时
+存在）时返回 `AGENT_LIVE_UNREPRESENTABLE` 并列出原因，用户确认后以 `--discard-live` 放弃
+回填直接切换。库与操作记录只存变量名，不存令牌。
 
 **受管粒度**按键路径而不是整个顶层键：本工具只拥有 `env.ANTHROPIC_BASE_URL`、
 `env.ANTHROPIC_AUTH_TOKEN`、`env.ANTHROPIC_API_KEY`、`env.ANTHROPIC_MODEL`、
@@ -131,11 +151,11 @@ x-api-key，中转站两种都有）、模型、小任务模型、opus/sonnet/ha
 `env.API_TIMEOUT_MS`、`env.ENABLE_TOOL_SEARCH`、`env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`、
 `env.CLAUDE_CODE_EFFORT_LEVEL`、`env.CLAUDE_CODE_DISABLE_ARTIFACT`、`permissions.defaultMode`
 与 `attribution.{commit,pr}`。同一文件里 hooks 域的内容、
-用户自己的 `permissions.allow/deny` 与别的 `env` 变量原样保留；外部修改检测也只比
-这几条的摘要。从没写过而这几项已有内容时按外部内容对待，同样要 `--allow-takeover`。
+用户自己的 `permissions.allow/deny` 与别的 `env` 变量原样保留；写入基准也只算
+这几条的摘要。从没写过而这几项已有内容时，表单已按实际值预填，带基准写入即可。
 
-**状态栏**是条件受管：`settings.statusline` 为 `builtin` 时部署内置脚本到
-`<data_dir>/statusline.sh`（0755）并把 `statusLine` 指过去（Claude Code 在 shell 中执行该命令，路径按单引号引用；旧版写入的裸路径仍识别为本工具的，并报 `builtin-legacy` 提示重新应用）；为 `untouched`（默认）时
+**状态栏**是条件受管：运行参数 `statusline` 设为 `builtin` 时部署内置脚本到
+`<data_dir>/statusline.sh`（0755）并把 `statusLine` 指过去（Claude Code 在 shell 中执行该命令，路径按单引号引用；旧版写入的裸路径仍识别为本工具的，并报 `builtin-legacy`，界面给出「修复状态栏」入口）；设回保持现状时
 只撤掉我们自己指过去的那条，用户手配的原样留着。判据是 `statusLine.command` 是否指向
 本工具部署的那份——指向别处的是用户的，既不清空也不算外部修改。内置脚本除了显示，
 还会把助手推给状态栏的 `rate_limits` 落盘（见「额度来源」）。
@@ -146,7 +166,7 @@ x-api-key，中转站两种都有）、模型、小任务模型、opus/sonnet/ha
 
 自动化以 `settings.automation_mode` 表达手动、智能自动、完全放开三档，由 Claude/Codex
 适配器分别渲染成客户端支持的字段。完全放开会改掉助手的安全默认值，因此 `--allow-yolo`
-由引擎强制：少了这个标志一律拒绝，界面在此之前弹二次确认。写入取排他锁、记操作审计，
+由引擎强制：补丁把档位设为完全放开时少了这个标志一律拒绝，界面在此之前弹二次确认。写入取排他锁、记操作审计，
 审计只记改了哪几项与变量名，不记取值。
 
 助手页只服务运行时任务：先选助手，再选默认环境或独立环境。默认环境按「接入 Provider / 自动化
@@ -154,10 +174,10 @@ x-api-key，中转站两种都有）、模型、小任务模型、opus/sonnet/ha
 调用 `agents:configure`，成功回读 status 后再提示完成。每套非默认接入可单独执行只读可用性
 检查，也可由用户显式触发当前助手的全部接入并发检查；单项失败不阻断其他结果，完成后汇总
 可用数量与最快线路。检查不切换接入、不写配置；最快线路不是当前项时提供显式启用入口，切换
-仍复用 `agents:configure`、外部修改确认与状态回读。独立环境在同一工作区单独创建，用于独立账号、
+仍复用 `agents:configure` 与状态回读。独立环境在同一工作区单独创建，用于独立账号、
 登录和会话；它不是新增 Provider 的另一种写法。启动命令若携带权限参数，界面明确标记其会覆盖环境
-自动化；实际配置页按 Provider 与运行设置分组展示目标文件和脱敏后的最终读取值，运行设置逐项并列
-软件保存值与客户端实际值，不把内部 JSON 直接交给用户判断。
+自动化；实际配置页按 Provider 与运行设置分组展示目标文件和脱敏后的最终读取值，运行设置逐项展示
+客户端实际值，不把内部 JSON 直接交给用户判断。
 普通页面不展示 AI CLI 的安装、升级、卸载动作、生命周期脚本或完整 alias。
 
 AI CLI 软件生命周期不再由产品界面维护。客户端是否可用、当前版本和安装来源只在
@@ -172,20 +192,20 @@ AI CLI 软件生命周期不再由产品界面维护。客户端是否可用、�
 单独保存；Codex 只登记环境变量名，不提供明文取值框。创建完成后仍需用户显式点击应用；后一步
 失败不把新 Provider 冒充为当前项。
 
-接入工作台中的「自动化与权限」使用短弹窗，只拥有 `settings.automation_mode`、适配器声明的运行字段
-与 Claude 的 `settings.statusline`。保存时深拷贝完整定义，只替换这些键，`profiles`、`active`、未知设置、
-定义扩展字段和兼容保留的生命周期字段原样保留；随后执行一次真实 `agents:configure`。开启
-完全放开仍由引擎要求 `--allow-yolo` 并经独立二次确认；外部修改仍需 `--allow-takeover`，取消或
-失败时已保存定义与未写入目标文件的边界必须明确说明。
+接入工作台中的「自动化与权限」使用短弹窗，按客户端实际值预填，只拥有 `automation_mode`、
+适配器声明的运行字段与 Claude 的 `statusline`。提交只把改动过的字段作为 `--runtime` 补丁交给
+`agents:configure`，由引擎在同一事务里写文件并更新库里的上次写入记录；未改动的项（包括本工具
+不提供的取值，如 `acceptEdits`，表单显示为「保持当前」）原样保留。开启完全放开仍由引擎要求
+`--allow-yolo` 并经独立二次确认。
 
-目标文件与本工具记录不一致时，不允许只给“确认覆盖”的盲确认。接管弹窗逐项列出本工具负责的
-配置键、软件配置值与客户端当前值；用户可选择“使用软件配置”，只覆盖这些受管键，也可选择
-“保留并纳管当前配置”，进入只核对显示名称、API 地址、默认模型和凭据变量的专用精简表单；内部
-名称自动生成并隐藏，高级字段默认收起，缺少必填项时禁止保存。未受管键始终不动，保存本身不应用，
-凭据明文不读取、不展示也不导入。
+目标文件被外部改过时不再提供「用软件配置覆盖」：引擎按写入基准拒绝后，界面刷新为实际值，
+由用户确认后重来。实际配置对不上任何已保存接入时，接入列表首位显示「当前实际配置（未保存）」，
+可「保存为接入配置」（`--save-current`），切换到别的接入时也会先自动保存；令牌还没保存或实际
+内容存不下时弹窗说明原因，由用户选择去密钥页或显式放弃。
 
-接入卡片可直接编辑和删除，不再要求进入完整助手定义。编辑当前项默认勾选保存后更新，写入和
-状态回读沿用切换路径；编辑非当前项默认只保存，不暗中改变当前项。内部唯一名称在编辑时固定，
+接入卡片可直接编辑和删除，不再要求进入完整助手定义。编辑当前项即写入：`--use <名字>
+--connection <json>` 一条命令写文件并更新库，被拒时两边都不动；编辑非当前项只保存，不暗中
+改变当前项。内部唯一名称在编辑时固定，
 避免一次编辑变成复制并遗留旧项。删除只允许非当前项，先确认再从定义中移除目标 profile；凭据
 变量可能被其他接入复用，因此不随 profile 自动删除。目标 profile 中表单尚不认识的字段保留，
 已知可选字段仍允许清空。每套接入可保存不超过 200 字的备注；卡片直接展示，命令面板把备注纳入
@@ -206,26 +226,23 @@ AI CLI 软件生命周期不再由产品界面维护。客户端是否可用、�
 `CLAUDE_CONFIG_DIR` 或 `CODEX_HOME`，用户须在终端核对目标实例后手动运行。
 
 `agents:status` 还会只读解析 Claude `settings.json` 与 Codex `config.toml`，把本机实际 provider、
-地址、模型、凭据是否配置及运行参数放进脱敏的 `observed.current_config`。它不返回 token/API key
-正文，不自动生成数据库 profile，也不接管外部配置；符号链接、非普通文件、超限或畸形内容按固定
-状态 fail-closed。界面将“本机当前配置”与“Agent Manager 已纳管选择”分开；运行设置弹窗使用
-按项表单编辑，写入预览集中展示真实键值，本机实际值则用只读对照表展示，避免把数据库期望值
-冒充客户端实际值。运行设置的一致性按适配器声明的全部字段逐项判断，而不是只比较自动化档位；
-`agents:configure` 返回成功后也必须回读到 `ready` 且 Provider 与全部运行字段一致，才向用户提示成功。
-接入工作台只比较本工具拥有且能安全观察的 provider 字段，并明确显示“一致”“不一致”或“无法
-比较”；不一致时由用户显式点击“重新应用已纳管选择”。修复继续复用 `agents:configure` 的外部
-修改接管确认、锁、审计和成功后状态回读，不后台自动覆盖客户端配置，也不比较或暴露凭据取值。
+地址、模型、凭据是否配置及运行参数放进脱敏的 `observed.current_config`，并给出写入基准 `base`
+与按内容识别的 `current`（另含 `last_written`、令牌无法核对的 `unverified`、身份与上次写入一致的
+`drifted_from`）。Claude 的 `credential.saved_var` 说明实际令牌与哪个已保存变量一致；自动化档位
+不在预设里时报 `custom`，原值放在 `automation_raw`。status 零写，不返回 token/API key 正文，
+不生成数据库 profile；符号链接按最终目标读，断链、非普通文件、超限或畸形内容按固定状态
+fail-closed。界面的当前接入、运行参数与表单预填全部读实际值；写入预览只列这次改动的键。
+`agents:configure` 返回成功后，必须回读到 `current` 是目标、或补丁里每一项都已是实际值，才向
+用户提示成功。
 
-`⌘K` 命令面板同时索引默认账号和每套接入，并匹配接入名称、内部名、地址、模型及备注。只有已纳管
-选择与客户端实际配置一致时，当前项才标为
-「当前接入」且不可重复执行；若已纳管选择仍指向该项但实际配置不一致，则原位标明「配置不一致 ·
-重新应用」，由用户显式触发同一条安全修复路径。选择其他项
-直接走 `agents:configure --use`（切回默认走 `--use-default`），写入带操作记录 ID。成功必须重新读取
-`agents:status`，同时确认 `active` 与脱敏 `observed.current_config` 都和目标一致；普通失败保留真实状态
-并说明原因。只有引擎明确以外部修改拒绝覆盖时才弹出接管确认，确认后携带 `--allow-takeover`
-重试。托盘按助手分组展示默认账号与每套接入，可信当前项带勾且不可重复执行，配置不一致项明确
-提示重新应用；点击目标会唤回已精确过滤的命令面板，用户再按一次 Enter 或点击后才写入。托盘不
-静默切换，也不绕开可见反馈、锁、审计和确认路径。
+`⌘K` 命令面板同时索引默认账号和每套接入，并匹配接入名称、内部名、地址、模型及备注。status 的
+`current` 指向的那项标为「当前接入」且不可重复执行。选择其他项直接走带基准的
+`agents:configure --use`（切回默认走 `--use-default`），写入带操作记录 ID。成功必须重新读取
+`agents:status`，确认 `current` 已是目标；普通失败保留真实状态并说明原因。外部修改被拒时刷新并
+提示重新选择；令牌未保存或实际配置存不下时弹窗说明，确认后带 `--discard-live-token` /
+`--discard-live` 重试。托盘按助手分组展示默认账号与每套接入，当前项带勾且不可重复执行，实际配置
+未保存时子菜单标为「实际配置（未保存）」；点击目标会唤回已精确过滤的命令面板，用户再按一次
+Enter 或点击后才写入。托盘不静默切换，也不绕开可见反馈、锁、审计和确认路径。
 
 `⌘⇧K` 使用同一命令面板进入“接入快切”范围，初始只展示 Claude/Codex 的默认账号与自定义接入，
 仍可按名称、备注、地址或模型过滤。Esc 关闭后不保留该范围，下一次 `⌘K` 恢复完整页面、资源与
@@ -235,7 +252,8 @@ AI CLI 软件生命周期不再由产品界面维护。客户端是否可用、�
 `model_provider`、`model`、`approval_policy`、`sandbox_mode`、`approvals_reviewer`、
 `model_reasoning_effort`、`model_context_window`、`model_auto_compact_token_limit`、`web_search`
 九个顶层键，以及 `agent_settings_bindings.owned_providers` 记下的本工具写入的
-`[model_providers.*]` 段（含子表）；文件里不写任何管理注释。旧版本写在 provider 段前的
+`[model_providers.*]` 段（含子表）；文件里不写任何管理注释。引用型接入（`provider_ref`）
+只写 `model_provider` / `model`，被引用的表不归本工具，既不写也不删。旧版本写在 provider 段前的
 `# [agent-manager:managed]` 只在迁移时用于认领，下次写入即随旧段撤掉。其余行（含注释、用户自己的键与
 provider、MCP 域写的 `[mcp_servers.*]`）逐行原样保留。写入是文本级编辑：顶层键就地替换或插在第一个
 表头之前（越过紧贴表头的注释），表段整段替换。
@@ -243,7 +261,7 @@ provider、MCP 域写的 `[mcp_servers.*]`）逐行原样保留。写入是文�
 Codex 的令牌不落盘：provider 用 `env_key` 指向环境变量名，由 Codex 启动时自己去读，
 因此这里只写变量名——与 Claude 那边被迫写真值不同。`wire_api` 固定 `responses`
 （当前唯一支持值）。`openai` / `ollama` / `lmstudio` 是 Codex 内置 id，用作接入配置名会被
-拒绝。自定义接入方式没有默认地址，只填令牌变量名而不填地址同样拒绝。
+拒绝（引用它们的 `provider_ref` 可以）。用户自己已有同名 provider 表时拒绝写入，提示给接入换名。自定义接入方式没有默认地址，只填令牌变量名而不填地址同样拒绝。
 跳过权限确认在 Codex 侧写 `approval_policy = "never"` 与 `sandbox_mode = "danger-full-access"`。
 
 状态栏只有 Claude 侧有（Codex 没有这个机制）。
@@ -251,7 +269,9 @@ Codex 的令牌不落盘：provider 用 `env_key` 指向环境变量名，由 Co
 **可用性检查**（`agents:check --only <助手> [--use <接入配置>]`）是全局唯一会主动联网的
 助手侧命令，只在调用方点它时才发请求，其余命令一律零网络。它只读：不碰配置文件、
 不改生效的接入配置，除审计外不写库。缺地址、缺模型、缺变量名或变量没取值时在发请求之前
-就拒绝并说清楚缺什么。请求按各自协议拼（Claude `{base}/v1/messages`、
+就拒绝并说清楚缺什么。引用型 Codex 接入（`provider_ref`）的地址与令牌变量从 `config.toml` 里
+被引用的那张表读取，表不在时内置接入方式用已知默认值（openai 读 `OPENAI_API_KEY`，本机
+ollama、lmstudio 不带令牌），其余明确报「已不在 config.toml 中」。请求按各自协议拼（Claude `{base}/v1/messages`、
 Codex `{base}/responses`），HTTP 结果翻成可执行的话（401 → 令牌无效、404 → 端点形状不对、
 429 → 地址与令牌都对但被限流，算通过）。令牌经 0600 临时文件交给 curl 的 `--config`
 读取，不进命令行（`ps` 对同机进程可见），上游错误正文出库前走脱敏。

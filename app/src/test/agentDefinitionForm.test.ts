@@ -6,17 +6,15 @@ import {
   extractCommandForPlatform,
   extractUnknownFields,
   getProviderNames,
-  normalizeAgentRuntimeSettings,
   parseInitialToFormValues,
   removeAgentConnection,
   moveAgentConnection,
   parseConnectionBundle,
   runtimeRequiresYoloConfirmation,
-  runtimeSettingsOf,
   serializeConnectionBundle,
   upsertAgentConnection,
-  updateAgentRuntimeSettings,
   updateCommandWithPlatform,
+  validateConnectionEntry,
 } from "../lib/agentDefinitionForm";
 import { agentManagementFixture } from "./fixtures";
 
@@ -45,8 +43,14 @@ describe("agentDefinitionForm helpers", () => {
     expect(() => parseConnectionBundle(JSON.stringify({
       format: "agent-manager/provider/v1",
       kind: "claude",
-      connection: { ...connection, baseUrl: "http://remote.example.com", secretValue: "must-not-pass" },
-    }), "claude")).toThrow("接口地址必须是 https://");
+      connection: { ...connection, baseUrl: "ftp://remote.example.com", secretValue: "must-not-pass" },
+    }), "claude")).toThrow("接口地址必须是 https:// 或 http://");
+    // 实际配置里已有的局域网 http 中转要能存下：任意主机的 http 放行，界面另行提示明文传输
+    expect(parseConnectionBundle(JSON.stringify({
+      format: "agent-manager/provider/v1",
+      kind: "claude",
+      connection: { ...connection, baseUrl: "http://192.168.1.10:8080" },
+    }), "claude").baseUrl).toBe("http://192.168.1.10:8080");
     expect(() => parseConnectionBundle(JSON.stringify({
       format: "agent-manager/provider/v1",
       kind: "claude",
@@ -279,88 +283,30 @@ describe("agentDefinitionForm helpers", () => {
     expect(initial.settings.profiles.relay).toEqual({ label: "中转" });
   });
 
-  it("运行设置完整往返未知键，并保留接入和生命周期定义", () => {
-    const initial = {
-      display_name: "Claude Code",
-      providers: {
-        native: {
-          install: "install.sh",
-          upgrade: "claude update",
-          uninstall: "uninstall.sh",
-        },
-      },
-      custom_meta: { owner: "local" },
-      settings: {
-        active: "relay",
-        yolo: true,
-        statusline: "builtin",
-        unknown_runtime_flag: "keep",
-        profiles: { relay: { label: "中转", future_option: 7 } },
-      },
-    };
-
-    expect(runtimeSettingsOf(initial)).toEqual({
-      automation_mode: "full",
-      statusline: "builtin",
-      unknown_runtime_flag: "keep",
-    });
-    const result = updateAgentRuntimeSettings(initial, {
-      ...runtimeSettingsOf(initial),
-      future_runtime_option: { mode: "custom" },
-    });
-
-    expect(result).toEqual({
-      ...initial,
-      settings: {
-        active: "relay",
-        automation_mode: "full",
-        statusline: "builtin",
-        unknown_runtime_flag: "keep",
-        future_runtime_option: { mode: "custom" },
-        profiles: { relay: { label: "中转", future_option: 7 } },
-      },
-    });
-    expect(initial.settings.yolo).toBe(true);
-    expect((result.providers as any).native.uninstall).toBe("uninstall.sh");
-  });
-
-  it("运行设置能从无 settings 的定义新增，并在清空最后一个键时移除空对象", () => {
-    const enabled = updateAgentRuntimeSettings(
-      { display_name: "Codex", bin: "codex" },
-      { automation_mode: "full", codex_web_search: "live" },
-    );
-    expect(enabled.settings).toEqual({ automation_mode: "full", codex_web_search: "live" });
-    expect(updateAgentRuntimeSettings(enabled, {})).toEqual({
-      display_name: "Codex",
-      bin: "codex",
-    });
-  });
-
-  it("后端 schema 校验已知参数、归一化数值，并保留未来参数", () => {
+  it("只有补丁把档位改成完全放开时才要求二次确认", () => {
     const fields = agentManagementFixture("codex").runtime_fields;
-    const normalized = normalizeAgentRuntimeSettings({
-      automation_mode: "full",
-      codex_reasoning_effort: "high",
-      codex_context_window: "1000000",
-      codex_auto_compact_token_limit: 900000,
-      codex_web_search: "live",
-      future_runtime_option: { mode: "keep" },
-    }, fields);
-    const configured = updateAgentRuntimeSettings({ bin: "codex" }, normalized);
-    expect(configured.settings).toEqual({
-      automation_mode: "full",
-      codex_reasoning_effort: "high",
-      codex_context_window: 1000000,
-      codex_auto_compact_token_limit: 900000,
-      codex_web_search: "live",
-      future_runtime_option: { mode: "keep" },
-    });
-    expect(runtimeSettingsOf(configured)).toEqual(normalized);
-    expect(runtimeRequiresYoloConfirmation(normalized, fields)).toBe(true);
-    expect(() => normalizeAgentRuntimeSettings({ codex_web_search: "invalid" }, fields)).toThrow(
-      "Web 搜索模式不是适配器支持的取值",
-    );
-    expect(() => normalizeAgentRuntimeSettings({ profiles: {} }, fields)).toThrow("接入 profiles");
+    expect(runtimeRequiresYoloConfirmation({ automation_mode: "full" }, fields)).toBe(true);
+    expect(runtimeRequiresYoloConfirmation({ codex_web_search: "live" }, fields)).toBe(false);
+  });
+
+  it("编辑已有接入时地址、凭据变量与模型可留空，填了仍要合法；新增时照旧必填", () => {
+    const imported = {
+      name: "imported-20260922-193000",
+      label: "导入的配置",
+      baseUrl: "",
+      auth: "token" as const,
+      tokenVar: "",
+      model: "",
+      smallFastModel: "",
+      aliasOpus: "",
+      aliasSonnet: "",
+      aliasHaiku: "",
+      timeoutMs: "",
+    };
+    expect(validateConnectionEntry(imported, false)).toBeNull();
+    expect(validateConnectionEntry(imported)).toBe("接口地址必须是 https:// 或 http://");
+    expect(validateConnectionEntry({ ...imported, tokenVar: "has-dash" }, false)).toBe("凭据变量名格式不正确");
+    expect(validateConnectionEntry({ ...imported, providerRef: "kimi", model: "k2" })).toBeNull();
   });
 
   it("extractCommandForPlatform extracts plain string and platform-specific mapping", () => {

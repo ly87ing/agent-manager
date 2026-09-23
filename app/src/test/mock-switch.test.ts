@@ -72,9 +72,19 @@ describe("dev-only mock 开关", () => {
     expect(checked.ok).toBe(true);
     expect((checked.data as { ok: boolean }).ok).toBe(true);
 
+    // 每次写入都带 status 给出的写入基准
+    const baseOf = async () => {
+      const status = await client.run("agents:status");
+      return (status.data as { elements: Array<{ id: string; observed: { current_config?: { base?: string } } }> }).elements
+        .find((element) => element.id === "agents:codex")?.observed.current_config?.base ?? "";
+    };
+    const stale = await client.run("agents:configure", ["--only", "agents:codex", "--base", "0".repeat(64), "--use", "kimi"]);
+    expect(stale.ok).toBe(false);
+    expect(stale.errors[0]?.code).toBe("AGENT_CONFIG_CHANGED");
+
     const switched = await client.run(
       "agents:configure",
-      ["--only", "agents:codex", "--use", "kimi"],
+      ["--only", "agents:codex", "--base", await baseOf(), "--use", "kimi"],
       { runId: "gui-mock-switch" },
     );
     expect(switched.ok).toBe(true);
@@ -84,13 +94,60 @@ describe("dev-only mock 开关", () => {
       .find((element) => element.id === "agents:codex");
     expect(codex?.spec.settings?.active).toBe("kimi");
 
-    await client.run("agents:configure", ["--only", "agents:codex", "--use-default"]);
+    await client.run("agents:configure", ["--only", "agents:codex", "--base", await baseOf(), "--use-default"]);
     const restored = await client.run("agents:status");
     const restoredCodex = (restored.data as { elements: Array<{ id: string; spec: { settings?: { active?: string } }; observed: { current_config?: { config?: { provider?: string | null; base_url?: string | null } } } }> }).elements
       .find((element) => element.id === "agents:codex");
     expect(restoredCodex?.spec.settings?.active).toBeUndefined();
     expect(restoredCodex?.observed.current_config?.config?.provider).toBe("openai");
     expect(restoredCodex?.observed.current_config?.config?.base_url).toBeNull();
+  });
+
+  it("mock client 按实际配置为准演示：未保存当前项、运行参数补丁、外部修改被拒、令牌未保存", async () => {
+    const client = createMockEngineClient();
+    type Current = { base: string; current: { profile: string | null; default: boolean }; config: { runtime: Record<string, unknown>; credential: { saved_var: string | null } } };
+    const claude = async () => ((await client.run("agents:status")).data as { elements: Array<{ id: string; observed: { current_config: Current } }> })
+      .elements.find((element) => element.id === "agents:claude-code")!.observed.current_config;
+    const configure = async (...rest: string[]) =>
+      client.run("agents:configure", ["--only", "agents:claude-code", "--base", (await claude()).base, ...rest]);
+
+    const before = await claude();
+    expect(before.current).toMatchObject({ profile: null, default: false });
+    expect(before.config.credential.saved_var).toBeNull();
+    expect(before.config.runtime).toMatchObject({ automation_mode: "custom", claude_effort_level: "high" });
+
+    // 运行参数补丁只改提交的字段
+    expect((await configure("--runtime", JSON.stringify({ claude_effort_level: "low" }))).ok).toBe(true);
+    expect((await claude()).config.runtime).toMatchObject({ automation_mode: "custom", claude_effort_level: "low" });
+
+    // 本工具以外改了配置：界面手里的旧基准被拒
+    const stale = (await claude()).base;
+    const hooks = (window as unknown as { __agentManagerMock: { externalEdit: (id?: string) => boolean; setSecretSourceReady: (ready: boolean) => void } }).__agentManagerMock;
+    expect(hooks.externalEdit()).toBe(true);
+    const refused = await client.run("agents:configure", ["--only", "agents:claude-code", "--base", stale, "--use-default"]);
+    expect(refused.errors[0]?.code).toBe("AGENT_CONFIG_CHANGED");
+    expect((await claude()).config.runtime.claude_effort_level).toBe("low");
+
+    // 没选密钥文件：实际令牌未保存，切换被拒；显式放弃后成功，导入项不带令牌
+    hooks.setSecretSourceReady(false);
+    const tokenRefused = await configure("--use-default");
+    expect(tokenRefused.errors[0]?.code).toBe("AGENT_LIVE_TOKEN_UNSAVED");
+    const discarded = await configure("--use-default", "--discard-live-token");
+    expect(discarded.ok).toBe(true);
+    expect((discarded.data as { backfill: { token: string } }).backfill.token).toBe("discarded");
+    expect((await claude()).current).toMatchObject({ profile: null, default: true });
+  });
+
+  it("mock client 在已选密钥文件时把实际令牌写进变量，并支持保存当前实际配置", async () => {
+    const client = createMockEngineClient();
+    const status = async () => ((await client.run("agents:status")).data as { elements: Array<{ id: string; observed: { current_config: { base: string; current: { profile: string | null } } } }> })
+      .elements.find((element) => element.id === "agents:claude-code")!.observed.current_config;
+    const saved = await client.run("agents:configure", ["--only", "agents:claude-code", "--base", (await status()).base, "--save-current"]);
+    expect(saved.ok).toBe(true);
+    const backfill = (saved.data as { backfill: { name: string; token: string; token_var: string } }).backfill;
+    expect(backfill).toMatchObject({ token: "adopted" });
+    expect(backfill.token_var).toMatch(/_TOKEN$/);
+    expect((await status()).current.profile).toBe(backfill.name);
   });
 
   it("mock client 支持 MCP 页就地填写缺失变量并回读状态", async () => {

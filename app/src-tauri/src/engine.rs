@@ -97,6 +97,8 @@ enum ArgValueKind {
     SecretValue,
     /// 用户选择的外部密钥文件路径。允许空值表示停止使用，但拒绝控制字符与超长输入。
     FilePath,
+    /// agents:configure 的写入基准：status 给出的 64 位小写十六进制摘要。
+    Digest,
 }
 
 /// 每个命令允许的 flag 集合（命令感知白名单）。
@@ -136,17 +138,23 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         }
         // 配置备份：导出不带参数，导入只接整份备份正文
         ("config", "import") => specs.push(("--value", ArgValueKind::JsonValue)),
-        // 运行参数写助手配置文件：外部改过要显式接管，降安全等级要显式确认
         ("agents", "check") => {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--use", ArgValueKind::ElementId));
         }
+        // 运行参数写助手配置文件：每次写入都带 status 给出的基准，外部改过就被拒；
+        // 降安全等级与放弃实际配置都要显式标志。「接管 = 用库覆盖」的通道已退役。
         ("agents", "configure") => {
             specs.push(("--only", ArgValueKind::ElementId));
+            specs.push(("--base", ArgValueKind::Digest));
             // 切换生效的接入配置：名字与元素 id 同一把尺子
             specs.push(("--use", ArgValueKind::ElementId));
             specs.push(("--use-default", ArgValueKind::Flag));
-            specs.push(("--allow-takeover", ArgValueKind::Flag));
+            specs.push(("--save-current", ArgValueKind::Flag));
+            specs.push(("--runtime", ArgValueKind::JsonValue));
+            specs.push(("--connection", ArgValueKind::JsonValue));
+            specs.push(("--discard-live", ArgValueKind::Flag));
+            specs.push(("--discard-live-token", ArgValueKind::Flag));
             specs.push(("--allow-yolo", ArgValueKind::Flag));
         }
         (_, "apply") => {
@@ -292,6 +300,20 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
                 ))
             } else {
                 Ok(())
+            }
+        }
+        ArgValueKind::Digest => {
+            let ok = value.len() == 64
+                && value
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c));
+            if ok {
+                Ok(())
+            } else {
+                Err(EngineError::new(
+                    "invalid_args",
+                    "写入基准必须是 64 位小写十六进制摘要".to_string(),
+                ))
             }
         }
         ArgValueKind::JsonValue => serde_json::from_str::<serde_json::Value>(value)
@@ -880,6 +902,70 @@ mod tests {
                 "{command} {args:?} should fail"
             );
         }
+    }
+
+    #[test]
+    fn agents_configure_args_require_digest_shape_and_reject_retired_takeover() {
+        let digest = "a".repeat(64);
+        for extra in [
+            vec!["--use".to_string(), "relay".into()],
+            vec![
+                "--use".into(),
+                "relay".into(),
+                "--connection".into(),
+                r#"{"base_url":"https://x"}"#.into(),
+            ],
+            vec!["--use-default".into(), "--discard-live-token".into()],
+            vec!["--use".into(), "relay".into(), "--discard-live".into()],
+            vec!["--save-current".into()],
+            vec![
+                "--runtime".into(),
+                r#"{"automation_mode":"full"}"#.into(),
+                "--allow-yolo".into(),
+            ],
+        ] {
+            let mut args = vec![
+                "--only".to_string(),
+                "agents:claude-code".into(),
+                "--base".into(),
+                digest.clone(),
+            ];
+            args.extend(extra);
+            assert!(validate_args("agents:configure", &args).is_ok(), "{args:?}");
+        }
+        for (flag, value) in [
+            ("--base", "ABC"),
+            ("--base", "g".repeat(64).as_str()),
+            ("--runtime", "{not json"),
+            ("--connection", "{not json"),
+        ] {
+            assert!(
+                validate_args(
+                    "agents:configure",
+                    &[
+                        "--only".into(),
+                        "agents:codex".into(),
+                        flag.into(),
+                        value.into()
+                    ]
+                )
+                .is_err(),
+                "{flag} {value} should fail"
+            );
+        }
+        assert!(validate_args(
+            "agents:configure",
+            &[
+                "--only".into(),
+                "agents:codex".into(),
+                "--base".into(),
+                digest,
+                "--use".into(),
+                "relay".into(),
+                "--allow-takeover".into()
+            ]
+        )
+        .is_err());
     }
 
     #[test]

@@ -575,32 +575,14 @@ fn status_element(
             "auth".into(),
             crate::native_auth::inspect(&config_dir, auth_kind),
         );
-        let current_config = match kind {
-            crate::native_agent_adapters::AdapterKind::Claude => {
-                crate::native_agent_settings::inspect_current_config(
-                    &crate::native_agent_settings::claude_target(ctx),
-                    kind,
-                    Some(&crate::native_agent_settings::statusline_target(ctx)),
-                )
-            }
-            crate::native_agent_adapters::AdapterKind::Codex => {
-                match crate::native_agent_settings::codex_target(ctx, def.config_path()) {
-                    Ok(target) => {
-                        crate::native_agent_settings::inspect_current_config(&target, kind, None)
-                    }
-                    Err(_) => {
-                        let raw = def.config_path().unwrap_or("~/.codex/config.toml");
-                        let target = crate::native_mcp::targets::expand_home(raw, &ctx.home_dir);
-                        json!({
-                            "state": "invalid-target",
-                            "file": target.file_name().and_then(|name| name.to_str()).unwrap_or_default(),
-                            "target": target.display().to_string(),
-                            "config": null
-                        })
-                    }
-                }
-            }
-        };
+        // 实际值、写入基准与按内容识别的当前接入；只读零写
+        let current_config = crate::native_agent_settings::current_config_status(
+            ctx,
+            &def.id,
+            &def.spec,
+            def.config_path(),
+            kind,
+        );
         observed.insert("current_config".into(), current_config);
     }
 

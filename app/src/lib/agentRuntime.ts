@@ -4,50 +4,132 @@ import type {
 } from "./observed";
 import type { AgentRuntimeSettings } from "./agentDefinitionForm";
 
-export type RuntimeAlignment = "aligned" | "drifted" | "unknown";
+/**
+ * 运行参数以客户端实际配置为准：表单用实际值预填，提交只发改动过的字段；
+ * 库里的副本只是上次写入记录，不再拿来对比「是否生效」。
+ */
 
-export interface RuntimeComparison {
-  key: string;
-  label: string;
-  saved: string;
-  actual: string;
-  aligned: boolean | null;
-}
-
-function defaultValue(field: AgentRuntimeField): unknown {
-  if (field.key === "automation_mode") return "manual";
-  if (field.type === "boolean") return false;
-  return null;
-}
-
-function savedValue(field: AgentRuntimeField, settings: AgentRuntimeSettings): unknown {
-  const value = settings[field.key];
-  if (value === undefined || value === null || value === "") return defaultValue(field);
-  if (field.type === "boolean") return value === true;
-  return value;
-}
+/** 实际档位不属于本工具的三档预设时，表单用它表示「保持当前」。 */
+export const CUSTOM_AUTOMATION = "custom";
 
 function actualValue(field: AgentRuntimeField, status: AgentCurrentConfigStatus): unknown {
-  if (status.state === "missing") return defaultValue(field);
-  if (status.state !== "ready") return undefined;
-  const value = status.config?.runtime?.[field.key];
-  return value === undefined || value === "" ? defaultValue(field) : value;
+  if (status.state === "missing") return field.key === "automation_mode" ? "manual" : undefined;
+  return status.config?.runtime?.[field.key];
 }
 
-function comparableValue(field: AgentRuntimeField, value: unknown): unknown {
-  if (field.key === "statusline" && value === "custom") return null;
-  if (field.type === "positive_integer" && value !== null && value !== undefined) {
-    const number = Number(value);
-    return Number.isFinite(number) ? number : value;
+/** 实际值 → 表单初值。只含适配器声明的字段；实际读不了时为空对象。 */
+export function actualRuntimeSettings(
+  fields: AgentRuntimeField[],
+  status: AgentCurrentConfigStatus | null | undefined,
+): AgentRuntimeSettings {
+  const settings: AgentRuntimeSettings = {};
+  if (!status || (status.state !== "ready" && status.state !== "missing")) return settings;
+  for (const field of fields) {
+    const value = actualValue(field, status);
+    if (field.key === "automation_mode") {
+      settings[field.key] = typeof value === "string" && value ? value : "manual";
+    } else if (field.key === "statusline") {
+      // 本工具的状态栏（含旧格式）= builtin；用户自己的与没有 = 保持现状
+      if (value === "builtin" || value === "builtin-legacy") settings[field.key] = "builtin";
+    } else if (field.type === "boolean") {
+      if (value === true) settings[field.key] = true;
+    } else if (value !== undefined && value !== null && value !== "") {
+      settings[field.key] = value;
+    }
   }
-  return value;
+  return settings;
 }
 
-export function runtimeValueLabel(field: AgentRuntimeField, value: unknown): string {
+function comparable(field: AgentRuntimeField, value: unknown): string {
+  if (field.type === "boolean") return value === true ? "true" : "false";
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
+}
+
+/**
+ * 提交值与初值的差异：只含改动过的字段，撤掉的项用 null（恢复客户端默认）。
+ * 只校验改动过的字段——没动的实际值可能不在本工具的词汇表里（例如 acceptEdits），照样保留。
+ */
+export function runtimePatch(
+  fields: AgentRuntimeField[],
+  initial: AgentRuntimeSettings,
+  edited: AgentRuntimeSettings,
+): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  for (const field of fields) {
+    const after = comparable(field, edited[field.key]);
+    if (comparable(field, initial[field.key]) === after) continue;
+    if (field.type === "boolean") {
+      patch[field.key] = after === "true";
+    } else if (field.type === "enum") {
+      if (after === "") {
+        if (field.key === "automation_mode") throw new Error(`${field.label}不能留空`);
+        patch[field.key] = null;
+      } else if (!field.options?.some((option) => option.value === after)) {
+        throw new Error(`${field.label}不是适配器支持的取值`);
+      } else {
+        patch[field.key] = after;
+      }
+    } else if (field.type === "positive_integer") {
+      if (after === "") {
+        patch[field.key] = null;
+      } else {
+        const number = Number(after);
+        if (!Number.isInteger(number) || number <= 0) {
+          throw new Error(`${field.label}必须是正整数，留空表示使用客户端默认值`);
+        }
+        patch[field.key] = number;
+      }
+    } else {
+      throw new Error(`当前版本不认识运行设置类型 ${field.type}（${field.key}）`);
+    }
+  }
+  return patch;
+}
+
+/**
+ * 写入成功后回读：补丁里每一项都已是实际值，才算生效。
+ *
+ * 状态栏按原始观测值判断：预填时旧格式（builtin-legacy）也算本工具的状态栏，但「修复」要求回读到
+ * 引用形式 builtin，旧格式仍在就是没修好。
+ */
+export function runtimePatchApplied(
+  fields: AgentRuntimeField[],
+  patch: Record<string, unknown>,
+  status: AgentCurrentConfigStatus | null | undefined,
+): boolean {
+  if (!status || (status.state !== "ready" && status.state !== "missing")) return false;
+  const actual = actualRuntimeSettings(fields, status);
+  return Object.entries(patch).every(([key, value]) => {
+    const field = fields.find((candidate) => candidate.key === key);
+    if (!field) return false;
+    if (key === "statusline") {
+      const observed = status.state === "ready" ? status.config?.runtime?.statusline : undefined;
+      return value === "builtin"
+        ? observed === "builtin"
+        : observed !== "builtin" && observed !== "builtin-legacy";
+    }
+    return comparable(field, actual[key]) === comparable(field, value);
+  });
+}
+
+/** 实际档位是 custom 时，把客户端里的原始键值拼成一句可读的说明。 */
+export function automationRawText(status: AgentCurrentConfigStatus | null | undefined): string {
+  const raw = status?.config?.runtime?.automation_raw;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return "";
+  return Object.entries(raw as Record<string, unknown>)
+    .map(([key, value]) => `${key} = ${String(value)}`)
+    .join("，");
+}
+
+export function runtimeValueLabel(field: AgentRuntimeField, value: unknown, rawText = ""): string {
+  if (field.key === "automation_mode" && value === CUSTOM_AUTOMATION) {
+    return rawText ? `自定义（${rawText}）` : "自定义";
+  }
   if (field.key === "statusline" && value === "custom") return "自定义状态栏（不受本工具管理）";
-  // 旧版写的裸路径：仍是本工具的状态栏，但与软件配置 builtin 不相等，因而判为不一致并给出重新应用入口
+  // 旧版写的裸路径：仍是本工具的状态栏，但路径含空格时无法运行，界面单独给修复入口
   if (field.key === "statusline" && value === "builtin-legacy") {
-    return "本工具状态栏（旧格式，路径含空格时无法运行，重新应用即可修复）";
+    return "本工具状态栏（旧格式，路径含空格时无法运行，修复一次即可）";
   }
   if (value === undefined) return "暂不可读";
   if (value === null || value === "" || value === false) return field.summary?.default ?? "客户端默认";
@@ -60,34 +142,30 @@ export function runtimeValueLabel(field: AgentRuntimeField, value: unknown): str
   return String(value);
 }
 
-export function runtimeComparisons(
+export interface RuntimeActualItem {
+  key: string;
+  label: string;
+  actual: string;
+}
+
+/** 按适配器字段逐项列出客户端实际值（展示用）。 */
+export function runtimeActualItems(
   fields: AgentRuntimeField[],
-  settings: AgentRuntimeSettings,
   status: AgentCurrentConfigStatus | null | undefined,
-): RuntimeComparison[] {
+): RuntimeActualItem[] {
+  const readable = status?.state === "ready" || status?.state === "missing";
+  const rawText = automationRawText(status);
   return fields.map((field) => {
-    const saved = savedValue(field, settings);
-    const actual = status ? actualValue(field, status) : undefined;
-    const readable = status?.state === "missing" || status?.state === "ready";
+    let value: unknown = undefined;
+    if (readable && status) {
+      value = actualValue(field, status);
+      if (field.key === "automation_mode" && (value === undefined || value === null || value === "")) value = "manual";
+      if (value === undefined) value = null;
+    }
     return {
       key: field.key,
       label: field.summary?.label ?? field.label,
-      saved: runtimeValueLabel(field, saved),
-      actual: runtimeValueLabel(field, actual),
-      aligned: readable
-        ? comparableValue(field, saved) === comparableValue(field, actual)
-        : null,
+      actual: runtimeValueLabel(field, value, rawText),
     };
   });
-}
-
-export function runtimeAlignment(
-  fields: AgentRuntimeField[],
-  settings: AgentRuntimeSettings,
-  status: AgentCurrentConfigStatus | null | undefined,
-): RuntimeAlignment {
-  if (fields.length === 0) return "unknown";
-  const comparisons = runtimeComparisons(fields, settings, status);
-  if (comparisons.some((item) => item.aligned === null)) return "unknown";
-  return comparisons.every((item) => item.aligned) ? "aligned" : "drifted";
 }

@@ -46,6 +46,11 @@ export interface ConnectionEntry {
   aliasHaiku: string;
   /** 请求超时（毫秒）；留空用默认。 */
   timeoutMs: string;
+  /**
+   * Codex 导入项：直接引用 config.toml 里已有的接入方式（用户自己的表或内置 id），
+   * 地址、凭据变量与超时由那张表决定。表单只读展示，不编辑。
+   */
+  providerRef?: string;
 }
 
 /** 账号、地址、模型与凭据变量之外的完整运行设置文档；未知键必须原样往返。 */
@@ -79,26 +84,42 @@ export interface ConnectionBundle {
   connection: ConnectionEntry;
 }
 
+/**
+ * 实际配置里已有的地址不能因为这里的校验存不下：https 与任意主机的 http 都可以，
+ * 非 https 由界面提示「令牌将明文传输」。
+ */
 function validConnectionBaseUrl(value: string): boolean {
   try {
     const url = new URL(value);
-    if (url.protocol === "https:") return true;
-    return url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+    return url.protocol === "https:" || url.protocol === "http:";
   } catch {
     return false;
   }
 }
 
-/** 校验可保存的连接定义。凭据取值不属于这个结构，也不会被导入导出。 */
-export function validateConnectionEntry(item: ConnectionEntry): string | null {
+/** 非 https 的地址：令牌会明文经过网络。 */
+export function isPlainHttpUrl(value: string | undefined): boolean {
+  return (value ?? "").trim().toLowerCase().startsWith("http://");
+}
+
+/**
+ * 校验可保存的连接定义。凭据取值不属于这个结构，也不会被导入导出。
+ *
+ * `strict` 为 false 时（编辑已有接入，例如从实际配置导入的那套）地址、凭据变量与模型允许留空，
+ * 填了仍要合法——已保存的接入可能本来就没有它们，不能逼用户编一个值。
+ */
+export function validateConnectionEntry(item: ConnectionEntry, strict = true): string | null {
   if (!CONNECTION_NAME_RE.test(item.name.trim())) {
     return "唯一名称只能用字母、数字、连字符与下划线，长度不超过 64";
   }
-  if (!validConnectionBaseUrl(item.baseUrl.trim())) {
-    return "接口地址必须是 https://，或本机 localhost / 127.0.0.1 地址";
+  const referenced = Boolean(item.providerRef);
+  if ((strict || item.baseUrl.trim()) && !referenced && !validConnectionBaseUrl(item.baseUrl.trim())) {
+    return "接口地址必须是 https:// 或 http://";
   }
-  if (!ENV_NAME_RE.test(item.tokenVar.trim())) return "凭据变量名格式不正确";
-  if (!item.model.trim()) return "要填写模型名";
+  if ((strict || item.tokenVar.trim()) && !referenced && !ENV_NAME_RE.test(item.tokenVar.trim())) {
+    return "凭据变量名格式不正确";
+  }
+  if (strict && !item.model.trim()) return "要填写模型名";
   if ((item.note?.trim().length ?? 0) > 200) return "备注不能超过 200 个字符";
   if (item.timeoutMs.trim()) {
     const timeout = Number(item.timeoutMs.trim());
@@ -518,6 +539,9 @@ function readAgentSettings(
       aliasSonnet: alias("sonnet"),
       aliasHaiku: alias("haiku"),
       timeoutMs: typeof entry.timeout_ms === "number" ? String(entry.timeout_ms) : "",
+      ...(typeof entry.provider_ref === "string" && entry.provider_ref
+        ? { providerRef: entry.provider_ref }
+        : {}),
     };
   });
   return {
@@ -558,96 +582,6 @@ export function hasAgentSettings(definition: Record<string, unknown> | undefined
   return !!raw && typeof raw === "object" && !Array.isArray(raw) && Object.keys(raw).length > 0;
 }
 
-/** 从定义读取运行设置；接入 profiles 与 active 由接入工作台单独管理。 */
-export function runtimeSettingsOf(
-  definition: Record<string, unknown> | undefined,
-): AgentRuntimeSettings {
-  const raw = definition?.settings;
-  const settings = raw && typeof raw === "object" && !Array.isArray(raw)
-    ? (raw as Record<string, unknown>)
-    : {};
-  const runtime = Object.fromEntries(
-    Object.entries(settings)
-      .filter(([key]) => key !== "profiles" && key !== "active" && key !== "yolo")
-      .map(([key, value]) => [key, JSON.parse(JSON.stringify(value))]),
-  );
-  if (typeof runtime.automation_mode !== "string") {
-    runtime.automation_mode = settings.yolo === true ? "full" : "manual";
-  }
-  return runtime;
-}
-
-/**
- * 用完整运行设置文档替换定义里的运行设置，同时保留接入 profiles/active 与定义其他字段。
- * 表单模式从 runtimeSettingsOf 开始编辑，因此未知运行键也会原样保留。
- */
-export function updateAgentRuntimeSettings(
-  definition: Record<string, unknown>,
-  runtime: AgentRuntimeSettings,
-): Record<string, unknown> {
-  const next = JSON.parse(JSON.stringify(definition)) as Record<string, unknown>;
-  const raw = next.settings;
-  const previous = raw && typeof raw === "object" && !Array.isArray(raw)
-    ? (raw as Record<string, unknown>)
-    : {};
-  const settings: Record<string, unknown> = {};
-  if (previous.profiles !== undefined) settings.profiles = previous.profiles;
-  if (previous.active !== undefined) settings.active = previous.active;
-  for (const [key, value] of Object.entries(runtime)) {
-    if (key !== "yolo") settings[key] = value;
-  }
-
-  if (Object.keys(settings).length > 0) next.settings = settings;
-  else delete next.settings;
-  return next;
-}
-
-/** 按后端 schema 校验并归一化运行设置；未知键保留，已知空值删除。 */
-export function normalizeAgentRuntimeSettings(
-  input: AgentRuntimeSettings,
-  fields: AgentRuntimeField[],
-): AgentRuntimeSettings {
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    throw new Error("运行设置必须是 JSON 对象");
-  }
-  if ("profiles" in input || "active" in input) {
-    throw new Error("接入 profiles 与 active 请在接入工作台维护，不能放进运行设置 JSON");
-  }
-  const normalized = JSON.parse(JSON.stringify(input)) as AgentRuntimeSettings;
-  for (const field of fields) {
-    const value = normalized[field.key];
-    if (field.type === "boolean") {
-      if (value === undefined || value === false) delete normalized[field.key];
-      else if (value !== true) throw new Error(`${field.label}必须是 true 或 false`);
-      continue;
-    }
-    if (field.type === "enum") {
-      if (value === undefined || value === null || value === "") {
-        delete normalized[field.key];
-        continue;
-      }
-      if (typeof value !== "string" || !field.options?.some((option) => option.value === value)) {
-        throw new Error(`${field.label}不是适配器支持的取值`);
-      }
-      continue;
-    }
-    if (field.type === "positive_integer") {
-      if (value === undefined || value === null || value === "") {
-        delete normalized[field.key];
-        continue;
-      }
-      const number = typeof value === "number" ? value : Number(String(value).trim());
-      if (!Number.isInteger(number) || number <= 0) {
-        throw new Error(`${field.label}必须是正整数，留空表示使用客户端默认值`);
-      }
-      normalized[field.key] = number;
-      continue;
-    }
-    throw new Error(`当前版本不认识运行设置类型 ${field.type}（${field.key}）`);
-  }
-  return normalized;
-}
-
 export function runtimeRequiresYoloConfirmation(
   runtime: AgentRuntimeSettings,
   fields: AgentRuntimeField[],
@@ -659,14 +593,6 @@ export function runtimeRequiresYoloConfirmation(
       (option) => option.value === value && option.requires_confirmation === true,
     ) === true;
   });
-}
-
-/** 定义里当前生效的接入配置名；没有就返回 null。 */
-export function activeConnectionOf(definition: Record<string, unknown> | undefined): string | null {
-  const raw = definition?.settings;
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const active = (raw as Record<string, unknown>).active;
-  return typeof active === "string" && active ? active : null;
 }
 
 /** 定义里的接入配置清单（名字 + 显示名），供卡片上的切换用。 */

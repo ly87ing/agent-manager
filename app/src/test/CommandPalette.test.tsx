@@ -28,6 +28,9 @@ const dummySettings: SettingsData = {
 
 type TestRoute = Envelope | ((args: string[]) => Promise<Envelope>);
 
+const BASE = "d".repeat(64);
+
+/** active 是库里的上次写入记录；actual 是客户端实际配置——当前接入只看后者。 */
 function agentsStatus(active = "", actual = active) {
   const actualConnection = actual === "kimi"
     ? {
@@ -80,6 +83,14 @@ function agentsStatus(active = "", actual = active) {
                   variable: null,
                 },
                 runtime: {},
+              },
+              base: BASE,
+              current: {
+                profile: actual === "kimi" ? "kimi" : null,
+                default: actual !== "kimi",
+                last_written: active || null,
+                unverified: [],
+                drifted_from: null,
               },
             },
           },
@@ -273,7 +284,7 @@ describe("命令面板", () => {
 
     await screen.findByText("已切换 Claude Code 到 Kimi Code");
     const configure = calls.find((call) => call.command === "agents:configure");
-    expect(configure?.args).toEqual(["--only", "agents:claude-code", "--use", "kimi"]);
+    expect(configure?.args).toEqual(["--only", "agents:claude-code", "--base", BASE, "--use", "kimi"]);
     expect(configure?.options?.runId).toMatch(/^gui-/);
     expect(calls.filter((call) => call.command === "agents:status").length).toBeGreaterThanOrEqual(2);
 
@@ -327,24 +338,34 @@ describe("命令面板", () => {
     expect(calls.find((call) => call.command === "agents:configure")?.args).toEqual([
       "--only",
       "agents:claude-code",
+      "--base",
+      BASE,
       "--use",
       "kimi",
     ]);
     expect(calls.filter((call) => call.command === "agents:status").length).toBeGreaterThanOrEqual(2);
   });
 
-  it("托盘目标遇到外部修改时不静默覆盖而是转入可见确认", async () => {
+  it("托盘目标遇到还没保存的实际令牌时不静默丢弃，转入可见确认后才带放弃标志重试", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
+    let actual = "";
     const testRoutes = routes();
-    testRoutes["agents:configure"] = async () => makeEnvelope(
-      {},
-      {
-        command: "agents.configure",
-        ok: false,
-        errors: [{ code: "EXTERNAL_MODIFICATION", element: "agents:claude-code", message: "配置已被外部修改，拒绝覆盖" }],
-      },
-    );
-    renderWithEngine(<App />, testRoutes);
+    testRoutes["agents:status"] = async () => agentsStatus("", actual);
+    testRoutes["agents:configure"] = async (args) => {
+      if (!args.includes("--discard-live-token")) {
+        return makeEnvelope(
+          {},
+          {
+            command: "agents.configure",
+            ok: false,
+            errors: [{ code: "AGENT_LIVE_TOKEN_UNSAVED", element: "agents:claude-code", message: "当前实际配置里的令牌还没有保存在任何变量里，切换会丢失它：先到“设置 → 密钥”选择外部密钥文件（令牌会写进该文件，库里只存变量名），或确认放弃这个令牌后带 --discard-live-token 重试" }],
+          },
+        );
+      }
+      actual = "kimi";
+      return makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.configure" });
+    };
+    const { calls } = renderWithEngine(<App />, testRoutes);
     await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
     await waitFor(() => expect(trayEvents.listeners.size).toBe(1));
 
@@ -362,7 +383,21 @@ describe("命令面板", () => {
 
     expect(await screen.findByTestId("command-palette")).toBeInTheDocument();
     await userEvent.keyboard("{Enter}");
-    expect(await screen.findByRole("dialog", { name: "覆盖被改过的接入配置" })).toBeInTheDocument();
+    const confirm = await screen.findByRole("dialog", { name: "当前实际令牌还没有保存" });
+    expect(within(confirm).getByTestId("confirm-modal-secondary")).toHaveTextContent("去选择密钥文件");
+    expect(confirm).toHaveTextContent("设置 → 密钥");
+    expect(confirm).not.toHaveTextContent("--discard-live-token");
+    await userEvent.click(within(confirm).getByTestId("confirm-modal-confirm"));
+    expect(await screen.findByText("已切换 Claude Code 到 Kimi Code")).toBeInTheDocument();
+    expect(calls.filter((call) => call.command === "agents:configure")[1]?.args).toEqual([
+      "--only",
+      "agents:claude-code",
+      "--base",
+      BASE,
+      "--use",
+      "kimi",
+      "--discard-live-token",
+    ]);
   });
 
   it("切回助手默认账号使用 use-default，不复写不存在的 profile", async () => {
@@ -385,11 +420,13 @@ describe("命令面板", () => {
     expect(calls.find((call) => call.command === "agents:configure")?.args).toEqual([
       "--only",
       "agents:claude-code",
+      "--base",
+      BASE,
       "--use-default",
     ]);
   });
 
-  it("纳管选择已变化但客户端实际配置未生效时不误报成功", async () => {
+  it("库里的记录变了但客户端实际配置没变时不误报成功", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     let active = "";
     const testRoutes = routes();
@@ -409,7 +446,7 @@ describe("命令面板", () => {
     expect(screen.queryByText("已切换 Claude Code 到 Kimi Code")).not.toBeInTheDocument();
   });
 
-  it("当前接入被外部改动时可在命令面板原位重新应用并恢复可信状态", async () => {
+  it("库里记着 kimi 但实际不是时按实际显示，可在命令面板一键切回", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     let actual = "";
     const testRoutes = routes();
@@ -425,13 +462,15 @@ describe("命令面板", () => {
     await userEvent.type(screen.getByTestId("command-palette-input"), "Kimi Code");
     const repair = await screen.findByTestId("command-item-connection:claude-code:kimi");
     expect(repair).toBeEnabled();
-    expect(repair).toHaveTextContent("配置不一致 · 重新应用");
+    expect(repair).toHaveTextContent("切换接入");
     await userEvent.click(repair);
 
     expect(await screen.findByText("已切换 Claude Code 到 Kimi Code")).toBeInTheDocument();
     expect(calls.find((call) => call.command === "agents:configure")?.args).toEqual([
       "--only",
       "agents:claude-code",
+      "--base",
+      BASE,
       "--use",
       "kimi",
     ]);
@@ -443,49 +482,37 @@ describe("命令面板", () => {
     expect(current).toHaveTextContent("当前接入");
   });
 
-  it("外部修改时不冒充成功，确认后才携带 allow-takeover 重试", async () => {
+  it("外部修改时不冒充成功：刷新后提示重新选择，不再提供用库覆盖", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
-    let active = "";
     let attempts = 0;
     const testRoutes = routes();
-    testRoutes["agents:status"] = async () => agentsStatus(active);
-    testRoutes["agents:configure"] = async (args) => {
+    testRoutes["agents:configure"] = async () => {
       attempts += 1;
-      if (!args.includes("--allow-takeover")) {
-        return makeEnvelope(
-          {},
-          {
-            command: "agents.configure",
-            ok: false,
-            errors: [{ code: "EXTERNAL_MODIFICATION", element: "agents:claude-code", message: "配置已被外部修改，拒绝覆盖" }],
-          },
-        );
-      }
-      active = "kimi";
-      return makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.configure" });
+      return makeEnvelope(
+        {},
+        {
+          command: "agents.configure",
+          ok: false,
+          errors: [{ code: "AGENT_CONFIG_CHANGED", element: "agents:claude-code", message: "settings.json 已在外部修改（与读取时不一致），文件与库都没有改动；请刷新后重试" }],
+        },
+      );
     };
     const { calls } = renderWithEngine(<App />, testRoutes);
     await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
 
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "Kimi Code");
+    const statusBefore = calls.filter((call) => call.command === "agents:status").length;
     await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:kimi"));
 
-    const confirm = await screen.findByRole("dialog", { name: "覆盖被改过的接入配置" });
+    expect(await screen.findByText("配置文件已在外部修改，接入没有切换")).toBeInTheDocument();
     expect(screen.queryByText("已切换 Claude Code 到 Kimi Code")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
-    await waitFor(() => expect(confirm).not.toBeInTheDocument());
-    expect(attempts).toBe(2);
-    expect(calls.filter((call) => call.command === "agents:configure")[1]?.args).toEqual([
-      "--only",
-      "agents:claude-code",
-      "--use",
-      "kimi",
-      "--allow-takeover",
-    ]);
+    expect(screen.queryByRole("dialog", { name: "覆盖被改过的接入配置" })).not.toBeInTheDocument();
+    expect(attempts).toBe(1);
+    expect(calls.filter((call) => call.command === "agents:status").length).toBeGreaterThan(statusBefore);
   });
 
-  it("配置被拒绝时保留真实状态并说明失败，不弹接管确认", async () => {
+  it("配置被拒绝时保留真实状态并说明失败，不弹放弃确认", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     const testRoutes = routes();
     testRoutes["agents:configure"] = async () =>
@@ -505,6 +532,6 @@ describe("命令面板", () => {
     await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:kimi"));
 
     expect(await screen.findByText("接入没有切换：凭据变量 KIMI_API_KEY 未配置")).toBeInTheDocument();
-    expect(screen.queryByRole("dialog", { name: "覆盖被改过的接入配置" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "当前实际令牌还没有保存" })).not.toBeInTheDocument();
   });
 });

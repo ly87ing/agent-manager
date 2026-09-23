@@ -1,9 +1,7 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Braces, FormInput, Loader2, X } from "lucide-react";
-import {
-  normalizeAgentRuntimeSettings,
-  type AgentRuntimeSettings,
-} from "../lib/agentDefinitionForm";
+import type { AgentRuntimeSettings } from "../lib/agentDefinitionForm";
+import { automationRawText, CUSTOM_AUTOMATION, runtimePatch } from "../lib/agentRuntime";
 import type { AgentCurrentConfigStatus, AgentRuntimeField, AgentRuntimeTarget } from "../lib/observed";
 import { cn } from "../lib/utils";
 import { useDialogFocus } from "../lib/dialogFocus";
@@ -27,16 +25,24 @@ function previewValue(target: AgentRuntimeTarget, value: unknown): unknown {
   }
 }
 
-function runtimePreview(adapter: string, fields: AgentRuntimeField[], settings: AgentRuntimeSettings): string {
-  const entries = fields.flatMap((field) => {
-    const value = settings[field.key];
+/** 只预览这次改动的字段：设值的给出最终键值，撤掉的列为删除；没改的保持客户端当前值。 */
+function runtimePreview(adapter: string, fields: AgentRuntimeField[], patch: Record<string, unknown>): string {
+  const changed = fields.filter((field) => field.key in patch);
+  if (changed.length === 0) return "# 还没有改动；未改动的项保持客户端当前值\n";
+  const removed = changed
+    .filter((field) => {
+      const value = patch[field.key];
+      return value === null || value === "" || value === false;
+    })
+    .flatMap((field) => field.targets.map((target) => target.key));
+  const entries = changed.flatMap((field) => {
+    const value = patch[field.key];
     if (value === undefined || value === null || value === "" || value === false) return [];
     return targetsFor(field, value).map((target) => [target.key, previewValue(target, value)] as const);
   });
+  const removedText = removed.length > 0 ? `${removed.map((key) => `# 删除 ${key}`).join("\n")}\n` : "";
   if (adapter === "codex") {
-    return entries.length > 0
-      ? `${entries.map(([key, value]) => `${key} = ${JSON.stringify(value)}`).join("\n")}\n`
-      : "# 未设置运行覆盖，使用 Codex 默认值\n";
+    return `${entries.map(([key, value]) => `${key} = ${JSON.stringify(value)}`).join("\n")}${entries.length > 0 ? "\n" : ""}${removedText}`;
   }
   const root: Record<string, unknown> = {};
   for (const [key, value] of entries) {
@@ -49,7 +55,7 @@ function runtimePreview(adapter: string, fields: AgentRuntimeField[], settings: 
     }
     cursor[parts[parts.length - 1]] = value;
   }
-  return JSON.stringify(root, null, 2);
+  return `${entries.length > 0 ? `${JSON.stringify(root, null, 2)}\n` : ""}${removedText}`;
 }
 
 function RuntimeField({
@@ -184,7 +190,10 @@ function RuntimeField({
   );
 }
 
-/** 后端 schema 驱动的运行设置编辑器；表单修改后可即时查看真实目标键值。 */
+/**
+ * 后端 schema 驱动的运行设置编辑器。表单以客户端实际值预填，提交只发改动过的字段，
+ * 没改的项（包括本工具不提供的取值）保持客户端当前值。
+ */
 export function AgentRuntimeDialog({
   agentName,
   adapter,
@@ -199,14 +208,51 @@ export function AgentRuntimeDialog({
   agentName: string;
   adapter: string;
   fields: AgentRuntimeField[];
+  /** 客户端实际值（actualRuntimeSettings）。 */
   initial: AgentRuntimeSettings;
   currentConfig?: AgentCurrentConfigStatus | null;
   busy: boolean;
   error?: string | null;
-  onSubmit: (settings: AgentRuntimeSettings) => void;
+  /** 只含改动过的字段；撤掉的项为 null。 */
+  onSubmit: (patch: Record<string, unknown>) => void;
   onClose: () => void;
 }) {
   const [settings, setSettings] = useState<AgentRuntimeSettings>(initial);
+  const rawText = automationRawText(currentConfig);
+  // 实际档位不在三档预设里：多给一张「保持当前」卡片，不改就原样保留
+  const shownFields = useMemo(() => fields.map((field) => {
+    const current = initial[field.key];
+    if (field.key === "automation_mode" && current === CUSTOM_AUTOMATION) {
+      return {
+        ...field,
+        options: [
+          {
+            value: CUSTOM_AUTOMATION,
+            label: "保持当前",
+            description: `客户端当前是 ${rawText || "本工具未提供的设置"}；不改就原样保留。`,
+          },
+          ...(field.options ?? []),
+        ],
+      };
+    }
+    // 其他下拉项的实际值不在可选范围里：照样显示成当前值，不改就原样保留
+    if (
+      field.type === "enum"
+      && typeof current === "string"
+      && current
+      && !field.options?.some((option) => option.value === current)
+    ) {
+      return { ...field, options: [{ value: current, label: `${current}（当前值）` }, ...(field.options ?? [])] };
+    }
+    return field;
+  }), [fields, initial, rawText]);
+  const pendingPatch = (() => {
+    try {
+      return runtimePatch(fields, initial, settings);
+    } catch {
+      return {};
+    }
+  })();
   const [mode, setMode] = useState<"form" | "preview" | "observed">("form");
   const [localError, setLocalError] = useState<string | null>(null);
   const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLElement>({
@@ -225,15 +271,19 @@ export function AgentRuntimeDialog({
 
   const submit = () => {
     try {
-      const normalized = normalizeAgentRuntimeSettings(settings, fields);
+      const patch = runtimePatch(fields, initial, settings);
+      if (Object.keys(patch).length === 0) {
+        setLocalError("还没有改动；未改动的项保持客户端当前值");
+        return;
+      }
       setLocalError(null);
-      onSubmit(normalized);
+      onSubmit(patch);
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : String(err));
     }
   };
 
-  const sections = Array.from(new Set(fields.map((field) => field.section)));
+  const sections = Array.from(new Set(shownFields.map((field) => field.section)));
 
   return (
     <div
@@ -252,7 +302,7 @@ export function AgentRuntimeDialog({
           <div>
             <h3 className="text-lg font-semibold text-foreground">{agentName} 运行设置</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              先选择要达到的效果；“写入预览”集中展示最终配置键值。账号、接口地址、模型与凭据变量在 Provider 卡片中维护。
+              已按客户端当前的实际配置填好；只改需要改的项，“写入预览”列出这次会写入的键值。账号、接口地址、模型与凭据变量在 Provider 卡片中维护。
             </p>
           </div>
           <button type="button" aria-label="关闭" disabled={busy} onClick={close} className="rounded p-1 text-muted-foreground hover:bg-accent disabled:opacity-50">
@@ -294,7 +344,7 @@ export function AgentRuntimeDialog({
           {mode === "form" ? (
             <div className="space-y-5 text-sm">
               {sections.map((section) => {
-                const sectionFields = fields.filter((field) => field.section === section);
+                const sectionFields = shownFields.filter((field) => field.section === section);
                 return (
                   <section key={section}>
                     <h4 className="font-semibold text-foreground">{section}</h4>
@@ -327,12 +377,12 @@ export function AgentRuntimeDialog({
           ) : mode === "preview" ? (
             <div className="space-y-3">
               <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-3 text-sm text-foreground">
-                <span className="text-muted-foreground">保存后写入：</span>{" "}
+                <span className="text-muted-foreground">写入：</span>{" "}
                 <code data-testid="agent-runtime-target" className="break-all font-semibold">
                   {currentConfig?.target ?? currentConfig?.file ?? "目标文件暂不可用"}
                 </code>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  下方是 Agent Manager 负责的最终配置值；目标文件中的其他配置保持不变。返回“按项填写”可直接修改。
+                  下方只列出这次改动的配置键；未改动的项与目标文件中的其他配置保持不变。返回“按项填写”可直接修改。
                 </p>
               </div>
               <pre
@@ -340,7 +390,7 @@ export function AgentRuntimeDialog({
                 data-testid="agent-runtime-preview"
                 className="min-h-[24rem] w-full overflow-auto rounded-lg border border-input bg-slate-950 p-4 font-mono text-xs leading-5 text-slate-100"
               >
-                {runtimePreview(adapter, fields, settings)}
+                {runtimePreview(adapter, fields, pendingPatch)}
               </pre>
             </div>
           ) : (
@@ -348,7 +398,6 @@ export function AgentRuntimeDialog({
               <AgentCurrentConfigView
                 status={currentConfig}
                 fields={fields}
-                savedRuntime={settings}
                 showProvider={false}
               />
             </div>
@@ -369,7 +418,7 @@ export function AgentRuntimeDialog({
               className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-              {busy ? "正在写入…" : "保存并写入助手"}
+              {busy ? "正在写入…" : "写入助手"}
             </button>
           )}
         </div>

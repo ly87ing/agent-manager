@@ -6,10 +6,14 @@ import { renderWithEngine, screen, userEvent, within } from "./render-with-engin
 import type { EngineElement, Envelope } from "../lib/contract";
 
 /**
- * 助手运行参数：保存即写进助手自己的配置文件。
+ * 助手运行参数与接入：以客户端实际配置为准。表单按实际值预填，写入只发改动项并带上
+ * status 给出的写入基准；外部改过就被引擎拒绝，界面刷新后让用户重来。
  *
- * 两处必须先问过用户，引擎侧强制、界面负责问：降安全等级（YOLO）、目标被外部改过。
+ * 需要用户点头的，引擎侧强制、界面负责问：降安全等级（YOLO）、放弃切换前存不下的实际配置或令牌。
  */
+
+const BASE = "b".repeat(64);
+const DEFAULT_CURRENT = { profile: null, default: true, last_written: null, unverified: [], drifted_from: null };
 
 function routes(overrides: Record<string, Envelope> = {}): Record<string, Envelope> {
   return {
@@ -34,7 +38,7 @@ function routes(overrides: Record<string, Envelope> = {}): Record<string, Envelo
               install_source: "native",
               installed: true,
               management: agentManagementFixture("claude"),
-              current_config: { state: "missing", file: "settings.json", target: "/Users/demo/.claude/settings.json", config: null },
+              current_config: { state: "missing", file: "settings.json", target: "/Users/demo/.claude/settings.json", config: null, base: BASE, current: DEFAULT_CURRENT },
             },
             state: "managed-ok",
             freshness: makeFreshness(),
@@ -82,6 +86,24 @@ function configureCalls<T extends { command: string }>(calls: T[]): T[] {
   return calls.filter((call) => call.command === "agents:configure");
 }
 
+/** 引擎按内容识别出的当前接入：测试里直接指定。 */
+function markCurrent(element: EngineElement, profile: string | null): void {
+  const observed = element.observed as Record<string, any>;
+  observed.current_config = {
+    ...(observed.current_config ?? { state: "missing", file: "settings.json", config: null }),
+    base: BASE,
+    current: { ...DEFAULT_CURRENT, profile, default: profile === null, last_written: profile },
+  };
+}
+
+function configureArgsOf(...rest: string[]): string[] {
+  return ["--only", "agents:claude-code", "--base", BASE, ...rest];
+}
+
+function runtimeOf<T extends { args?: string[] }>(call: T): Record<string, unknown> {
+  return JSON.parse(call.args![call.args!.indexOf("--runtime") + 1]);
+}
+
 function setClaudeCurrentConfig(element: EngineElement, profile: string | null): void {
   const settings = (element.spec as { settings?: { profiles?: Record<string, Record<string, unknown>> } }).settings;
   const connection = profile ? settings?.profiles?.[profile] : null;
@@ -89,6 +111,8 @@ function setClaudeCurrentConfig(element: EngineElement, profile: string | null):
     state: "ready",
     file: "settings.json",
     target: "/Users/demo/.claude/settings.json",
+    base: BASE,
+    current: { ...DEFAULT_CURRENT, profile, default: profile === null, last_written: profile },
     config: {
       provider: "anthropic",
       base_url: connection?.base_url ?? null,
@@ -128,8 +152,8 @@ describe("助手运行参数", () => {
                 installed: true,
                 management: bin === "claude" || bin === "codex" ? agentManagementFixture(bin) : null,
                 current_config: bin === "codex"
-                  ? { state: "missing", file: "config.toml", target: "/Users/demo/.codex/config.toml", config: null }
-                  : { state: "missing", file: "settings.json", target: "/Users/demo/.claude/settings.json", config: null },
+                  ? { state: "missing", file: "config.toml", target: "/Users/demo/.codex/config.toml", config: null, base: BASE, current: DEFAULT_CURRENT }
+                  : { state: "missing", file: "settings.json", target: "/Users/demo/.claude/settings.json", config: null, base: BASE, current: DEFAULT_CURRENT },
               },
               state: "managed-ok",
               freshness: makeFreshness(),
@@ -142,7 +166,7 @@ describe("助手运行参数", () => {
     });
   }
 
-  it("运行设置短弹窗不展示生命周期脚本，保存只改自有键并回写助手", async () => {
+  it("运行设置短弹窗不展示生命周期脚本，只把改动交给引擎一条命令写入", async () => {
     const withExisting = routes();
     const status = withExisting["agents:status"] as { data: { elements: { spec: Record<string, any> }[] } };
     status.data.elements[0].spec.custom_meta = { owner: "local" };
@@ -166,19 +190,11 @@ describe("助手运行参数", () => {
     await userEvent.click(screen.getByTestId("agent-runtime-submit"));
 
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
-    const saved = calls.find((call) => call.command === "policy:set")!;
-    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
-    expect(definition.custom_meta).toEqual({ owner: "local" });
-    expect(definition.providers.native.uninstall).toBe("keep-uninstall.sh");
-    expect(definition.settings).toEqual({
-      active: "relay",
-      automation_mode: "manual",
-      unknown_runtime_flag: "keep",
-      profiles: { relay: { label: "中转", future_option: 7 } },
-      statusline: "builtin",
-    });
-    expect(configureCalls(calls)[0].args).toEqual(["--only", "agents:claude-code"]);
-    expect(calls.indexOf(saved)).toBeLessThan(calls.indexOf(configureCalls(calls)[0]));
+    // 文件与库由引擎在同一事务里写，界面不再先存一份定义（被拒时库也不会先变）
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    expect(configureCalls(calls)[0].args).toEqual(
+      configureArgsOf("--runtime", JSON.stringify({ statusline: "builtin" })),
+    );
   });
 
   it("Claude 高级运行参数在写入预览集中显示真实配置键并保存具体值", async () => {
@@ -200,9 +216,7 @@ describe("助手运行参数", () => {
     await userEvent.click(screen.getByTestId("agent-runtime-submit"));
 
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
-    const saved = calls.find((call) => call.command === "policy:set")!;
-    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
-    expect(definition.settings).toMatchObject({
+    expect(runtimeOf(configureCalls(calls)[0])).toEqual({
       claude_effort_level: "max",
       claude_tool_search: true,
       claude_agent_teams: true,
@@ -254,9 +268,7 @@ describe("助手运行参数", () => {
     await userEvent.click(screen.getByTestId("agent-runtime-submit"));
 
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
-    const saved = calls.find((call) => call.command === "policy:set")!;
-    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
-    expect(definition.settings).toMatchObject({
+    expect(runtimeOf(configureCalls(calls)[0])).toEqual({
       codex_reasoning_effort: "high",
       codex_context_window: 1000000,
       codex_auto_compact_token_limit: 900000,
@@ -288,162 +300,253 @@ describe("助手运行参数", () => {
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
 
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
-    expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(1);
-    expect(configureCalls(calls)[0].args).toEqual([
-      "--only",
-      "agents:claude-code",
-      "--allow-yolo",
-    ]);
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    expect(configureCalls(calls)[0].args).toEqual(
+      configureArgsOf("--runtime", JSON.stringify({ automation_mode: "full" }), "--allow-yolo"),
+    );
   });
 
-  it("已保存自动化与客户端实际值不一致时明确提示并可直接应用", async () => {
-    const drifted = routes();
-    const status = drifted["agents:status"] as { data: { elements: EngineElement[] } };
+  it("自动化页与表单都以客户端实际值为准，不拿库里的上次写入记录比对", async () => {
+    const withRecord = routes();
+    const status = withRecord["agents:status"] as { data: { elements: EngineElement[] } };
     const element = status.data.elements[0];
+    // 库里记着上次写的是智能自动，客户端实际已是手动确认
     (element.spec as Record<string, unknown>).settings = { automation_mode: "auto" };
     setClaudeCurrentConfig(element, null);
     const current = (element.observed as any).current_config.config;
     current.runtime = { automation_mode: "manual" };
-    const { calls } = renderWithEngine(<AgentsPage />, drifted);
-
-    await userEvent.click(await screen.findByTestId("workbench-tab-automation"));
-    expect(screen.getByTestId("automation-panel")).toHaveTextContent("1 项设置尚未生效");
-    expect(screen.getByTestId("automation-panel")).toHaveTextContent("自动化：已保存 智能自动，客户端实际 手动确认");
-    await userEvent.click(screen.getByTestId("agent-runtime-apply"));
-
-    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
-    expect(configureCalls(calls)[0].args).toEqual(["--only", "agents:claude-code"]);
-  });
-
-  it("自动化档位一致但其他运行设置漂移时仍显示差异且回读不误报成功", async () => {
-    const drifted = routes();
-    const status = drifted["agents:status"] as { data: { elements: EngineElement[] } };
-    const element = status.data.elements[0];
-    (element.spec as Record<string, unknown>).settings = {
-      automation_mode: "manual",
-      claude_effort_level: "high",
-    };
-    setClaudeCurrentConfig(element, null);
-    const current = (element.observed as any).current_config.config;
-    current.runtime = { automation_mode: "manual", claude_effort_level: "low" };
-    const { calls } = renderWithEngine(<AgentsPage />, drifted);
+    const { calls } = renderWithEngine(<AgentsPage />, withRecord);
 
     await userEvent.click(await screen.findByTestId("workbench-tab-automation"));
     const panel = screen.getByTestId("automation-panel");
-    expect(panel).toHaveTextContent("1 项设置尚未生效");
-    expect(panel).toHaveTextContent("推理强度：已保存 high，客户端实际 low");
-    expect(panel).toHaveTextContent("自动化档位已是 手动确认");
-    await userEvent.click(screen.getByTestId("agent-runtime-apply"));
-
-    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
-    expect(await screen.findByText("写入已经返回成功，但状态回读没有确认运行设置生效")).toBeInTheDocument();
+    expect(panel).toHaveTextContent("当前自动化：手动确认");
+    expect(panel).not.toHaveTextContent("尚未生效");
+    expect(screen.queryByTestId("agent-runtime-apply")).toBeNull();
+    await userEvent.click(screen.getByTestId("agent-runtime-button"));
+    expect(screen.getByTestId("agent-runtime-automation-mode-manual")).toBeChecked();
+    expect(configureCalls(calls)).toHaveLength(0);
   });
 
-  it("配置文件被外部改过：先问再覆盖，确认后带 --allow-takeover 重试", async () => {
-    let allowed = false;
+  it("实际档位是本工具不提供的值时显示「保持当前」，只提交改动项，回读不误报成功", async () => {
+    const withCustom = routes();
+    const status = withCustom["agents:status"] as { data: { elements: EngineElement[] } };
+    const element = status.data.elements[0];
+    setClaudeCurrentConfig(element, null);
+    (element.observed as any).current_config.config.runtime = {
+      automation_mode: "custom",
+      automation_raw: { "permissions.defaultMode": "acceptEdits" },
+      claude_effort_level: "low",
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, withCustom);
+
+    await openRuntimeSettings();
+    expect(screen.getByTestId("agent-runtime-automation-mode-custom")).toBeChecked();
+    expect(screen.getByRole("dialog", { name: "Claude Code 运行设置" })).toHaveTextContent("acceptEdits");
+    expect(screen.getByTestId("agent-runtime-claude-effort-level")).toHaveValue("low");
+    await userEvent.selectOptions(screen.getByTestId("agent-runtime-claude-effort-level"), "high");
+    await userEvent.click(screen.getByTestId("agent-runtime-submit"));
+
+    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
+    expect(runtimeOf(configureCalls(calls)[0])).toEqual({ claude_effort_level: "high" });
+    // 引擎说成功，但回读的实际值没变：不能报成功
+    expect(await screen.findByText("写入已经返回成功，但状态回读没有确认生效")).toBeInTheDocument();
+  });
+
+  it("旧格式状态栏修复后回读仍是旧格式（被外部改回裸路径）时不报成功", async () => {
+    const legacy: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
+    const status = legacy["agents:status"] as { data: { elements: EngineElement[] } };
+    const element = status.data.elements[0];
+    setClaudeCurrentConfig(element, null);
+    (element.observed as any).current_config.config.runtime = { automation_mode: "manual", statusline: "builtin-legacy" };
+    let revertedExternally = true;
+    legacy["agents:configure"] = async () => {
+      // 引擎写成了引用形式，但回读前文件又被外部改回了裸路径
+      (element.observed as any).current_config.config.runtime.statusline = revertedExternally ? "builtin-legacy" : "builtin";
+      return makeEnvelope({ domain: "agents", action: "configure", statusline: true }, { command: "agents.configure" });
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, legacy);
+
+    await userEvent.click(await screen.findByTestId("workbench-tab-automation"));
+    expect(screen.getByTestId("statusline-legacy-notice")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("agent-statusline-fix"));
+    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
+    expect(configureCalls(calls)[0].args).toEqual(
+      configureArgsOf("--runtime", JSON.stringify({ statusline: "builtin" })),
+    );
+    expect(await screen.findByText("写入已经返回成功，但状态回读没有确认生效")).toBeInTheDocument();
+    expect(screen.queryByText("已修复状态栏")).toBeNull();
+    expect(screen.getByTestId("statusline-legacy-notice")).toBeInTheDocument();
+
+    // 回读到引用形式才算修好
+    revertedExternally = false;
+    await userEvent.click(screen.getByTestId("agent-statusline-fix"));
+    expect(await screen.findByText("已修复状态栏")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("statusline-legacy-notice")).toBeNull());
+  });
+
+  it("配置文件已在外部修改：拒绝后刷新状态并提示重来，不再提供用库覆盖", async () => {
     const withRefusal: Record<string, Envelope | (() => Promise<Envelope>)> = {
       ...routes(),
-      "agents:configure": async () => {
-        if (allowed) {
-          return makeEnvelope(
-            { domain: "agents", action: "configure", element: "agents:claude-code" },
-            { command: "agents.configure" },
-          );
-        }
-        allowed = true;
-        return makeEnvelope(
-          {},
-          {
-            command: "agents.configure",
-            ok: false,
-            errors: [{
-              code: "AGENT_ERROR",
-              element: null,
-              message: ".claude/settings.json 里这几项被本工具以外改过，拒绝覆盖；确认要用这里的内容替换请选择接管",
-            }],
-          },
-        );
-      },
+      "agents:configure": async () => makeEnvelope(
+        {},
+        {
+          command: "agents.configure",
+          ok: false,
+          errors: [{
+            code: "AGENT_CONFIG_CHANGED",
+            element: null,
+            message: ".claude/settings.json 已在外部修改（与读取时不一致），文件与库都没有改动；请刷新后重试",
+          }],
+        },
+      ),
     };
     const { calls } = renderWithEngine(<AgentsPage />, withRefusal);
     await openRuntimeSettings();
     await userEvent.selectOptions(screen.getByTestId("agent-runtime-statusline"), "builtin");
+    const statusCallsBefore = calls.filter((call) => call.command === "agents:status").length;
     await userEvent.click(screen.getByTestId("agent-runtime-submit"));
 
-    await screen.findByRole("dialog", { name: "选择如何处理配置差异" });
+    expect(await screen.findByText("配置文件已在外部修改，没有写入")).toBeInTheDocument();
     expect(configureCalls(calls)).toHaveLength(1);
-    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
-    await waitFor(() => expect(configureCalls(calls)).toHaveLength(2));
-    expect(configureCalls(calls)[1].args).toContain("--allow-takeover");
+    expect(configureCalls(calls)[0].args).not.toContain("--allow-takeover");
+    expect(screen.queryByRole("dialog", { name: "选择如何处理配置差异" })).toBeNull();
+    expect(calls.filter((call) => call.command === "agents:status").length).toBeGreaterThan(statusCallsBefore);
   });
 
-  it("Provider 接管前逐项对比，并允许把客户端当前值导入为新 Provider", async () => {
-    const matched: Record<string, Envelope | (() => Promise<Envelope>)> = routes();
-    const status = matched["agents:status"] as { data: { elements: EngineElement[] } };
+  it("实际配置对不上已保存接入时显示「当前实际配置（未保存）」，可一键保存", async () => {
+    const live: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
+    const status = live["agents:status"] as { data: { elements: EngineElement[] } };
     (status.data.elements[0].observed as Record<string, unknown>).current_config = {
       state: "ready",
       file: "settings.json",
+      target: "/Users/demo/.claude/settings.json",
+      base: BASE,
+      current: { ...DEFAULT_CURRENT, default: false },
       config: {
         base_url: "https://client.example.com",
         model: "client-model",
-        credential: { configured: true, kind: "token", variable: "CLIENT_TOKEN" },
+        credential: { configured: true, kind: "token", variable: null, saved_var: null },
         runtime: {},
       },
     };
-    matched["agents:configure"] = async () => makeEnvelope({}, {
-      command: "agents.configure",
-      ok: false,
-      errors: [{ code: "AGENT_ERROR", element: null, message: "配置被本工具以外改过，拒绝覆盖" }],
-    });
-    renderWithEngine(<AgentsPage />, matched);
+    live["agents:configure"] = async () => {
+      (status.data.elements[0].spec as Record<string, unknown>).settings = {
+        profiles: { "imported-1": { label: "导入的配置", base_url: "https://client.example.com" } },
+      };
+      markCurrent(status.data.elements[0], "imported-1");
+      return makeEnvelope(
+        { domain: "agents", action: "configure", backfill: { name: "imported-1", created: true, label: "导入的配置", token: "adopted", token_var: "IMPORTED_1_TOKEN" } },
+        { command: "agents.configure" },
+      );
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, live);
 
-    await userEvent.click(await screen.findByTestId("reset-connection-claude-code-default"));
-    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
-    const conflict = await screen.findByRole("dialog", { name: "选择如何处理配置差异" });
-    const differences = within(conflict).getByTestId("takeover-differences");
-    expect(differences).toHaveTextContent("接口地址");
-    expect(differences).toHaveTextContent("https://client.example.com");
-    expect(differences).toHaveTextContent("凭据");
+    const card = await screen.findByTestId("connection-card-claude-code-live");
+    expect(card).toHaveTextContent("当前实际配置（未保存）");
+    expect(card).toHaveTextContent("https://client.example.com");
+    expect(card).toHaveTextContent("令牌还没有保存为变量");
+    expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("当前实际配置（未保存）");
+    expect(within(screen.getByTestId("connection-card-claude-code-default")).queryByText("当前使用")).toBeNull();
 
-    await userEvent.click(within(conflict).getByTestId("confirm-modal-secondary"));
-    const editor = await screen.findByRole("dialog", { name: "纳管 Claude Code 的客户端当前配置" });
-    expect(within(editor).getByTestId("new-connection-base-url")).toHaveValue("https://client.example.com");
-    expect(within(editor).getByTestId("new-connection-model")).toHaveValue("client-model");
-    expect(within(editor).getByTestId("new-connection-token-var")).toHaveValue("CLIENT_TOKEN");
-    expect(within(editor).queryByTestId("new-connection-name")).toBeNull();
-    expect(within(editor).queryByTestId("new-connection-note")).toBeNull();
-    expect(within(editor).getByTestId("adoption-readiness")).toHaveTextContent("已完整");
-    expect(within(editor).getByTestId("connection-form-submit")).toHaveTextContent("保存为 Provider");
-    expect(within(editor).getByText(/不会应用到客户端/)).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("save-live-connection-claude-code"));
+    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
+    expect(configureCalls(calls)[0].args).toEqual(configureArgsOf("--save-current"));
+    expect(await screen.findByText("已把当前实际配置保存为接入配置")).toBeInTheDocument();
+    expect(screen.getByText(/令牌写进了密钥文件的变量 IMPORTED_1_TOKEN/)).toBeInTheDocument();
+    expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("导入的配置");
   });
 
-  it("客户端当前配置不完整时明确缺失项并禁止保存", async () => {
-    const matched: Record<string, Envelope | (() => Promise<Envelope>)> = routes();
-    const status = matched["agents:status"] as { data: { elements: EngineElement[] } };
-    (status.data.elements[0].observed as Record<string, unknown>).current_config = {
-      state: "ready",
-      file: "settings.json",
-      config: {
-        base_url: "",
-        model: "",
-        credential: { configured: false, kind: "token", variable: "ANTHROPIC_AUTH_TOKEN" },
-        runtime: {},
-      },
+  it("实际令牌没保存时切换被拒：可去选密钥文件，或确认放弃后带标志重试", async () => {
+    const onOpenSecrets = vi.fn();
+    const refusing: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
+    const status = refusing["agents:status"] as { data: { elements: EngineElement[] } };
+    (status.data.elements[0].spec as Record<string, unknown>).settings = {
+      profiles: { relay: { label: "我的中转", base_url: "https://relay.example.com" } },
     };
-    matched["agents:configure"] = async () => makeEnvelope({}, {
-      command: "agents.configure",
-      ok: false,
-      errors: [{ code: "AGENT_ERROR", element: null, message: "配置被本工具以外改过，拒绝覆盖" }],
-    });
-    renderWithEngine(<AgentsPage />, matched);
+    markCurrent(status.data.elements[0], null);
+    (status.data.elements[0].observed as any).current_config.current.default = false;
+    refusing["agents:configure"] = async (args) => {
+      if (!args.includes("--discard-live-token")) {
+        return makeEnvelope({}, {
+          command: "agents.configure",
+          ok: false,
+          errors: [{ code: "AGENT_LIVE_TOKEN_UNSAVED", element: null, message: "当前实际配置里的令牌还没有保存在任何变量里，切换会丢失它：先到“设置 → 密钥”选择外部密钥文件（令牌会写进该文件，库里只存变量名），或确认放弃这个令牌后带 --discard-live-token 重试" }],
+        });
+      }
+      markCurrent(status.data.elements[0], "relay");
+      return makeEnvelope({ domain: "agents", action: "configure" }, { command: "agents.configure" });
+    };
+    const { calls } = renderWithEngine(<AgentsPage onOpenSecrets={onOpenSecrets} />, refusing);
 
-    await userEvent.click(await screen.findByTestId("reset-connection-claude-code-default"));
-    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
-    const conflict = await screen.findByRole("dialog", { name: "选择如何处理配置差异" });
-    await userEvent.click(within(conflict).getByTestId("confirm-modal-secondary"));
-    const editor = await screen.findByRole("dialog", { name: "纳管 Claude Code 的客户端当前配置" });
-    expect(within(editor).getByTestId("adoption-readiness")).toHaveTextContent("API 地址、默认模型");
-    expect(within(editor).getByTestId("connection-form-submit")).toBeDisabled();
+    await userEvent.click(await screen.findByTestId("activate-connection-claude-code-relay"));
+    const dialog = await screen.findByRole("dialog", { name: "当前实际令牌还没有保存" });
+    expect(dialog).toHaveTextContent("切换会丢失它");
+    expect(dialog).toHaveTextContent("设置 → 密钥");
+    // 用界面自己的话，不把给命令行用户的参数提示展示出来
+    expect(dialog).not.toHaveTextContent("--discard-live-token");
+    expect(within(dialog).getByTestId("confirm-modal-secondary")).toHaveTextContent("去选择密钥文件");
+    await userEvent.click(within(dialog).getByTestId("confirm-modal-confirm"));
+
+    await waitFor(() => expect(configureCalls(calls)).toHaveLength(2));
+    expect(configureCalls(calls)[1].args).toEqual(configureArgsOf("--use", "relay", "--discard-live-token"));
+    await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("我的中转"));
+    expect(onOpenSecrets).not.toHaveBeenCalled();
+  });
+
+  it("实际令牌没保存时可直接去密钥设置，不做任何写入", async () => {
+    const onOpenSecrets = vi.fn();
+    const refusing: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes({
+      "agents:configure": makeEnvelope({}, {
+        command: "agents.configure",
+        ok: false,
+        errors: [{ code: "AGENT_LIVE_TOKEN_UNSAVED", element: null, message: "当前实际配置里的令牌还没有保存在任何变量里" }],
+      }),
+    });
+    const status = refusing["agents:status"] as { data: { elements: EngineElement[] } };
+    (status.data.elements[0].spec as Record<string, unknown>).settings = {
+      profiles: { relay: { label: "我的中转", base_url: "https://relay.example.com" } },
+    };
+    const { calls } = renderWithEngine(<AgentsPage onOpenSecrets={onOpenSecrets} />, refusing);
+
+    await userEvent.click(await screen.findByTestId("activate-connection-claude-code-relay"));
+    const dialog = await screen.findByRole("dialog", { name: "当前实际令牌还没有保存" });
+    await userEvent.click(within(dialog).getByTestId("confirm-modal-secondary"));
+    expect(onOpenSecrets).toHaveBeenCalledTimes(1);
+    expect(configureCalls(calls)).toHaveLength(1);
+  });
+
+  it("实际配置存不下时列出原因，确认放弃后带 --discard-live 重试", async () => {
+    const refusing: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
+    const status = refusing["agents:status"] as { data: { elements: EngineElement[] } };
+    (status.data.elements[0].spec as Record<string, unknown>).settings = {
+      profiles: { relay: { label: "我的中转", base_url: "https://relay.example.com" } },
+    };
+    refusing["agents:configure"] = async (args) => {
+      if (!args.includes("--discard-live")) {
+        return makeEnvelope({}, {
+          command: "agents.configure",
+          ok: false,
+          errors: [{
+            code: "AGENT_LIVE_UNREPRESENTABLE",
+            element: null,
+            message: "当前实际接入配置无法完整保存，切换会丢失这些内容：同时设置了 ANTHROPIC_AUTH_TOKEN 与 ANTHROPIC_API_KEY，只能保存其中一个。确认放弃当前实际配置后可带 --discard-live 重试",
+          }],
+        });
+      }
+      markCurrent(status.data.elements[0], "relay");
+      return makeEnvelope({ domain: "agents", action: "configure" }, { command: "agents.configure" });
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, refusing);
+
+    await userEvent.click(await screen.findByTestId("activate-connection-claude-code-relay"));
+    const dialog = await screen.findByRole("dialog", { name: "当前实际配置无法完整保存" });
+    expect(dialog).toHaveTextContent("ANTHROPIC_AUTH_TOKEN 与 ANTHROPIC_API_KEY");
+    expect(dialog).toHaveTextContent("可以先在配置文件里处理后再切换");
+    expect(dialog).not.toHaveTextContent("--discard-live");
+    expect(within(dialog).queryByTestId("confirm-modal-secondary")).toBeNull();
+    await userEvent.click(within(dialog).getByTestId("confirm-modal-confirm"));
+    await waitFor(() => expect(configureCalls(calls)).toHaveLength(2));
+    expect(configureCalls(calls)[1].args).toEqual(configureArgsOf("--use", "relay", "--discard-live"));
   });
 
   it("工作台一键切换接入：一条命令带 --use，切回默认带 --use-default", async () => {
@@ -483,12 +586,7 @@ describe("助手运行参数", () => {
 
     await userEvent.click(screen.getByTestId("activate-connection-claude-code-official"));
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
-    expect(configureCalls(calls)[0].args).toEqual([
-      "--only",
-      "agents:claude-code",
-      "--use",
-      "official",
-    ]);
+    expect(configureCalls(calls)[0].args).toEqual(configureArgsOf("--use", "official"));
     await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("官方"));
 
     await userEvent.click(screen.getByTestId("reset-connection-claude-code-default"));
@@ -497,15 +595,11 @@ describe("助手运行参数", () => {
     expect(resetConfirm).toHaveTextContent("不会删除助手登录状态、密钥变量或其他 Provider 定义");
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(2));
-    expect(configureCalls(calls)[1].args).toEqual([
-      "--only",
-      "agents:claude-code",
-      "--use-default",
-    ]);
+    expect(configureCalls(calls)[1].args).toEqual(configureArgsOf("--use-default"));
     await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("助手默认账号"));
   });
 
-  it("纳管选择已变化但客户端实际配置仍漂移时不误报成功", async () => {
+  it("切换返回成功但实际配置没变时不误报成功，当前项仍按实际显示", async () => {
     const withProfiles: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
     const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
     status.data.elements[0].spec.settings = {
@@ -526,12 +620,12 @@ describe("助手运行参数", () => {
     renderWithEngine(<AgentsPage />, withProfiles);
 
     await userEvent.click(await screen.findByTestId("activate-connection-claude-code-official"));
-    expect(await screen.findByText("写入已经返回成功，但状态回读没有确认全部配置生效")).toBeInTheDocument();
-    expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("官方");
-    expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("官方");
+    expect(await screen.findByText("写入已经返回成功，但状态回读没有确认生效")).toBeInTheDocument();
+    // 库里的上次写入记录变了也不算：当前项跟着实际配置走
+    expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("我的中转");
   });
 
-  it("工作台编辑当前接入：预填原值、唯一名称不可改，保存不写助手配置", async () => {
+  it("工作台编辑当前接入：预填原值、唯一名称不可改，保存即带基准写进助手配置", async () => {
     const withProfiles = routes();
     const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
     status.data.elements[0].spec.settings = {
@@ -549,6 +643,7 @@ describe("助手运行参数", () => {
         },
       },
     };
+    markCurrent(status.data.elements[0] as EngineElement, "relay");
     const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
 
     expect(await screen.findByTestId("connection-note-claude-code-relay")).toHaveTextContent("旧备注");
@@ -558,7 +653,8 @@ describe("助手运行参数", () => {
     expect(screen.getByTestId("new-connection-base-url")).toHaveValue("https://old.example.com");
     expect(screen.getByTestId("new-connection-note")).toHaveValue("旧备注");
     expect(screen.queryByTestId("new-connection-activate")).toBeNull();
-    expect(screen.getByText(/保存只更新 Provider 定义/)).toBeInTheDocument();
+    expect(screen.getByText(/外部改过时会拒绝写入并刷新/)).toBeInTheDocument();
+    expect(screen.getByTestId("connection-form-submit")).toHaveTextContent("保存并写入");
     await userEvent.click(screen.getByTestId("new-connection-advanced"));
     expect(screen.getByTestId("new-connection-name")).toBeDisabled();
     await userEvent.clear(screen.getByTestId("new-connection-label"));
@@ -571,13 +667,13 @@ describe("助手运行参数", () => {
     await userEvent.type(screen.getByTestId("new-connection-model"), "new-model");
     await userEvent.click(screen.getByTestId("connection-form-submit"));
 
-    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
-    const saved = calls.find((call) => call.command === "policy:set")!;
-    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
-    expect(definition.settings.active).toBe("relay");
-    expect(definition.settings.unknown_runtime_flag).toBe("keep");
-    expect(definition.settings.profiles.official).toEqual({ label: "官方", custom_profile_flag: 7 });
-    expect(definition.settings.profiles.relay).toMatchObject({
+    // 编辑当前生效的那套：一条命令既写文件也更新库，被拒时两边都不动
+    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    const args = configureCalls(calls)[0].args!;
+    expect(args.slice(0, 6)).toEqual(configureArgsOf("--use", "relay"));
+    expect(args[6]).toBe("--connection");
+    expect(JSON.parse(args[7])).toEqual({
       label: "新版中转",
       note: "工作账号，月底到期",
       base_url: "https://new.example.com",
@@ -585,7 +681,6 @@ describe("助手运行参数", () => {
       model: "new-model",
       future_option: { mode: "keep" },
     });
-    expect(configureCalls(calls)).toHaveLength(0);
   });
 
   it("Provider 卡片直接提供编辑入口，点击卡片主体也能打开同一个编辑页", async () => {
@@ -605,10 +700,11 @@ describe("助手运行参数", () => {
     expect(await screen.findByRole("dialog", { name: "编辑 我的中转" })).toBeInTheDocument();
   });
 
-  it("默认官方 Provider 只提供重新应用，不伪装成可编辑或可删除项", async () => {
+  it("默认账号是当前项时不提供应用，也不伪装成可编辑或可删除项", async () => {
     renderWithEngine(<AgentsPage />, routes());
 
-    expect(await screen.findByTestId("reset-connection-claude-code-default")).toHaveTextContent("重新应用");
+    expect(await screen.findByTestId("connection-card-claude-code-default")).toHaveTextContent("当前使用");
+    expect(screen.queryByTestId("reset-connection-claude-code-default")).toBeNull();
     expect(screen.queryByTestId("edit-connection-claude-code-default")).toBeNull();
     expect(screen.queryByTestId("remove-connection-claude-code-default")).toBeNull();
   });
@@ -776,6 +872,7 @@ describe("助手运行参数", () => {
         relay: { label: "我的中转", base_url: "https://relay.example.com" },
       },
     };
+    markCurrent(status.data.elements[0] as EngineElement, "relay");
     const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
 
     const remove = await screen.findByTestId("remove-connection-claude-code-relay");
@@ -933,19 +1030,14 @@ describe("助手运行参数", () => {
     await userEvent.click(screen.getByTestId("activate-fastest-connection"));
     await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("Relay"));
     const configure = configureCalls(calls);
-    expect(configure[configure.length - 1]?.args).toEqual([
-      "--only",
-      "agents:claude-code",
-      "--use",
-      "relay",
-    ]);
+    expect(configure[configure.length - 1]?.args).toEqual(configureArgsOf("--use", "relay"));
     expect(screen.queryByTestId("activate-fastest-connection")).toBeNull();
   });
 
   it("没配接入配置的助手：工作台明确展示默认账号和新增入口", async () => {
     renderWithEngine(<AgentsPage />, routes());
     expect(await screen.findByTestId("connection-card-claude-code-default")).toHaveTextContent("当前使用");
-    expect(screen.getByTestId("reset-connection-claude-code-default")).toHaveTextContent("重新应用");
+    expect(screen.queryByTestId("reset-connection-claude-code-default")).toBeNull();
     expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("助手默认账号");
     expect(screen.getByTestId("add-connection-button")).toBeEnabled();
   });
@@ -1120,7 +1212,18 @@ describe("助手运行参数", () => {
         },
       },
       policy: { enabled: true },
-      observed: { install_source: "native", installed: true, management: agentManagementFixture("codex") },
+      observed: {
+        install_source: "native",
+        installed: true,
+        management: agentManagementFixture("codex"),
+        current_config: {
+          state: "ready",
+          file: "config.toml",
+          config: { provider: "glm", base_url: "https://open.bigmodel.cn/api/v1", runtime: {} },
+          base: BASE,
+          current: { ...DEFAULT_CURRENT, profile: "glm", default: false },
+        },
+      },
       state: "managed-ok",
       freshness: makeFreshness(),
       actions: [],

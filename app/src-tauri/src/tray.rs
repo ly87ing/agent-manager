@@ -25,8 +25,8 @@ pub struct TrayConnection {
     agent_name: String,
     profile: String,
     profile_label: String,
+    /// 与客户端实际配置一致的那一项（引擎按内容识别）。
     current: bool,
-    needs_repair: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -50,11 +50,6 @@ fn escape_menu_text(value: &str) -> String {
 fn connection_menu_label(connection: &TrayConnection) -> String {
     if connection.current {
         format!("✓ {}", escape_menu_text(&connection.profile_label))
-    } else if connection.needs_repair {
-        format!(
-            "⚠ {} · 重新应用",
-            escape_menu_text(&connection.profile_label)
-        )
     } else {
         escape_menu_text(&connection.profile_label)
     }
@@ -139,7 +134,8 @@ fn build_menu(app: &AppHandle, connections: &[TrayConnection]) -> tauri::Result<
                 .iter()
                 .find(|(_, connection)| connection.current)
                 .map(|(_, connection)| connection.profile_label.as_str())
-                .unwrap_or("待确认");
+                // 实际配置对不上任何已保存接入：切换前会先把它保存下来
+                .unwrap_or("实际配置（未保存）");
             let agent_name = agent_connections
                 .first()
                 .map(|(_, connection)| connection.agent_name.as_str())
@@ -235,32 +231,21 @@ pub fn remove_tray_icon_before_exit(app: &AppHandle) {
 mod tests {
     use super::*;
 
-    fn connection(current: bool, needs_repair: bool) -> TrayConnection {
+    fn connection(current: bool) -> TrayConnection {
         TrayConnection {
             agent_id: "claude-code".into(),
             agent_name: "Claude Code".into(),
             profile: "kimi".into(),
             profile_label: "Kimi Code".into(),
             current,
-            needs_repair,
         }
     }
 
     #[test]
-    fn connection_labels_distinguish_confirmed_current_and_repair() {
-        assert_eq!(
-            connection_menu_label(&connection(true, false)),
-            "✓ Kimi Code"
-        );
-        assert_eq!(
-            connection_menu_label(&connection(false, true)),
-            "⚠ Kimi Code · 重新应用"
-        );
-        assert_eq!(
-            connection_menu_label(&connection(false, false)),
-            "Kimi Code"
-        );
-        let mut with_mnemonic = connection(false, false);
+    fn connection_labels_mark_only_the_current_connection() {
+        assert_eq!(connection_menu_label(&connection(true)), "✓ Kimi Code");
+        assert_eq!(connection_menu_label(&connection(false)), "Kimi Code");
+        let mut with_mnemonic = connection(false);
         with_mnemonic.profile_label = "A&B".into();
         assert_eq!(connection_menu_label(&with_mnemonic), "A&&B");
     }

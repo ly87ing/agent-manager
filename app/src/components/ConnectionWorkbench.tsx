@@ -1,16 +1,16 @@
 import { useState, type MouseEvent } from "react";
-import { Activity, ArrowDown, ArrowUp, Check, Download, Loader2, MoreHorizontal, Pencil, Settings2, Terminal, Trash2, Upload } from "lucide-react";
-import type { ConnectionKind } from "./ConnectionFormDialog";
+import { Activity, ArrowDown, ArrowUp, Check, Download, Loader2, MoreHorizontal, Pencil, Save, Settings2, Terminal, Trash2, Upload } from "lucide-react";
 import { AgentCurrentConfigView } from "./AgentCurrentConfigView";
 import type { EngineElement } from "../lib/contract";
-import type { AgentCurrentConfigStatus, AgentsObserved, AgentsSpec } from "../lib/observed";
+import type { AgentCurrentConfig, AgentsObserved, AgentsSpec } from "../lib/observed";
 import {
+  isPlainHttpUrl,
   parseInitialToFormValues,
-  runtimeSettingsOf,
   type ConnectionEntry,
 } from "../lib/agentDefinitionForm";
 import { connectionKindOf } from "../lib/agentManagement";
-import { runtimeAlignment, runtimeComparisons } from "../lib/agentRuntime";
+import { configureBaseOf, currentConfigOf, currentConnectionOf, hasUnsavedLive } from "../lib/agentCurrent";
+import { automationRawText, runtimeValueLabel } from "../lib/agentRuntime";
 import { parseAliasValue, renderAliasPreview } from "../lib/aliasCommand";
 import { cn } from "../lib/utils";
 
@@ -25,21 +25,14 @@ function displayNameOf(element: EngineElement): string {
   return (element.spec as AgentsSpec).display_name ?? element.id.replace(/^agents:/, "");
 }
 
-/** 默认实例当前选择的自动化档位；显示词仍由后端适配器 schema 提供。 */
-function automationValueOf(element: EngineElement): string {
-  const spec = element.spec as Record<string, unknown>;
-  const settings = spec.settings && typeof spec.settings === "object" && !Array.isArray(spec.settings)
-    ? spec.settings as Record<string, unknown>
-    : {};
-  return typeof settings.automation_mode === "string"
-    ? settings.automation_mode
-    : settings.yolo === true ? "full" : "manual";
-}
-
-function automationLabelOf(element: EngineElement, value = automationValueOf(element)): string {
+/** 客户端实际的自动化档位；显示词由后端适配器 schema 提供。 */
+function automationLabelOf(element: EngineElement): string {
   const management = (element.observed as AgentsObserved).management;
   const field = management?.runtime_fields.find((candidate) => candidate.key === "automation_mode");
-  return field?.summary?.values?.[value] ?? field?.summary?.default ?? "未设置";
+  const status = currentConfigOf(element);
+  if (!field || !status || (status.state !== "ready" && status.state !== "missing")) return "暂不可读";
+  const value = status.state === "missing" ? "manual" : status.config?.runtime?.automation_mode ?? "manual";
+  return runtimeValueLabel(field, value, automationRawText(status));
 }
 
 /** details 没有内建“选择后关闭”，执行菜单动作时显式收起，避免弹窗后面还挂着旧菜单。 */
@@ -64,54 +57,13 @@ function automationOverrideOf(value: string): string | null {
   return null;
 }
 
-export type ConnectionAlignment = "aligned" | "drifted" | "unknown";
-
-function observedText(value: unknown): string {
-  return value === undefined || value === null ? "" : String(value);
-}
-
-/** 只比较接入流程明确拥有、且 status 能脱敏观察到的字段。 */
-export function connectionAlignment(
-  kind: ConnectionKind,
-  connection: ConnectionEntry | null,
-  status: AgentCurrentConfigStatus,
-): ConnectionAlignment {
-  if (status.state === "missing") return connection ? "drifted" : "aligned";
-  if (status.state !== "ready" || !status.config) return "unknown";
-  const config = status.config;
-  const credential = config.credential;
-  if (!connection) {
-    const hasManagedValue = [
-      config.base_url,
-      config.model,
-      config.small_fast_model,
-      config.model_aliases?.opus,
-      config.model_aliases?.sonnet,
-      config.model_aliases?.haiku,
-      config.timeout_ms,
-    ].some((value) => observedText(value) !== "");
-    return !hasManagedValue && credential?.configured !== true ? "aligned" : "drifted";
-  }
-
-  const commonMatches = observedText(config.base_url) === connection.baseUrl
-    && observedText(config.model) === connection.model
-    && observedText(config.timeout_ms) === connection.timeoutMs;
-  if (!commonMatches) return "drifted";
-  if (kind === "codex") {
-    return config.provider === connection.name
-      && credential?.configured === true
-      && credential.variable === connection.tokenVar
-      ? "aligned"
-      : "drifted";
-  }
-  return observedText(config.small_fast_model) === connection.smallFastModel
-    && observedText(config.model_aliases?.opus) === connection.aliasOpus
-    && observedText(config.model_aliases?.sonnet) === connection.aliasSonnet
-    && observedText(config.model_aliases?.haiku) === connection.aliasHaiku
-    && credential?.configured === true
-    && credential.kind === connection.auth
-    ? "aligned"
-    : "drifted";
+/** 实际配置读不了（不是普通文件、无法解析等）时说明为什么不能写。 */
+function unwritableReason(element: EngineElement): string | null {
+  if (configureBaseOf(element)) return null;
+  const state = currentConfigOf(element)?.state;
+  return state === "invalid"
+    ? "配置文件无法解析，修好之前不能写入"
+    : "客户端配置文件暂不可读，不能写入";
 }
 
 export function ConnectionWorkbench({
@@ -140,7 +92,8 @@ export function ConnectionWorkbench({
   onRemove,
   onMove,
   onRuntimeSettings,
-  onApplyRuntime,
+  onSaveCurrent,
+  onFixStatusline,
 }: {
   agents: EngineElement[];
   selectedAgentId: string | null;
@@ -167,7 +120,10 @@ export function ConnectionWorkbench({
   onRemove: (element: EngineElement, connection: ConnectionEntry) => void;
   onMove: (element: EngineElement, connection: ConnectionEntry, direction: "up" | "down") => void;
   onRuntimeSettings: (element: EngineElement) => void;
-  onApplyRuntime: (element: EngineElement) => void;
+  /** 把「当前实际配置（未保存）」存成接入配置，不写助手文件。 */
+  onSaveCurrent: (element: EngineElement) => void;
+  /** 旧格式状态栏：按引用形式重写一次。 */
+  onFixStatusline: (element: EngineElement) => void;
 }) {
   const [tab, setTab] = useState<WorkbenchTab>("providers");
   const selected = agents.find((element) => element.id === selectedAgentId) ?? agents[0];
@@ -175,14 +131,16 @@ export function ConnectionWorkbench({
 
   const agentId = selected.id.replace(/^agents:/, "");
   const name = displayNameOf(selected);
-  const savedAutomationValue = automationValueOf(selected);
-  const savedAutomationLabel = automationLabelOf(selected, savedAutomationValue);
+  const automationLabel = automationLabelOf(selected);
   const management = (selected.observed as AgentsObserved).management;
   const runtimeFields = management?.runtime_fields ?? [];
-  const savedRuntime = runtimeSettingsOf(selected.spec as Record<string, unknown>);
   const form = parseInitialToFormValues(agentId, selected.spec as Record<string, unknown>);
-  const active = form.activeConnection;
+  // 当前项以实际配置为准：引擎按内容识别，库里的 active 只是上次写入记录
+  const current = currentConnectionOf(selected);
+  const active = current?.profile ?? "";
   const activeEntry = form.connections.find((item) => item.name === active);
+  const unsaved = hasUnsavedLive(current);
+  const writeBlocked = unwritableReason(selected);
   const kind = connectionKindOf(selected);
   const bin = (selected.spec as AgentsSpec).bin ?? (kind === "codex" ? "codex" : "claude");
   const launchAliases = Object.entries(aliases)
@@ -193,14 +151,18 @@ export function ConnectionWorkbench({
         && parsed.otherEnv.CODEX_HOME === undefined;
     })
     .sort(([left], [right]) => left.localeCompare(right));
-  const currentConfig = (selected.observed as AgentsObserved).current_config;
-  const runtimeState = runtimeAlignment(runtimeFields, savedRuntime, currentConfig);
-  const runtimeComparisonItems = runtimeComparisons(runtimeFields, savedRuntime, currentConfig);
-  const runtimeDifferences = runtimeComparisonItems.filter((item) => item.aligned === false);
-  const automationComparison = runtimeComparisonItems.find((item) => item.key === "automation_mode");
-  const activeAlignment = kind && currentConfig
-    ? connectionAlignment(kind, activeEntry ?? null, currentConfig)
-    : "unknown";
+  const currentConfig = currentConfigOf(selected);
+  const legacyStatusline = currentConfig?.config?.runtime?.statusline === "builtin-legacy";
+  const driftedEntry = current?.drifted_from
+    ? form.connections.find((item) => item.name === current.drifted_from)
+    : undefined;
+  const summary = activeEntry
+    ? activeEntry.label || activeEntry.name
+    : current?.default
+      ? "助手默认账号"
+      : unsaved
+        ? "当前实际配置（未保存）"
+        : "无法读取实际配置";
   const connectionCheckStates = form.connections
     .map((connection) => ({ connection, result: checkResults[`${agentId}/${connection.name}`] }));
   const connectionChecks = connectionCheckStates.filter(
@@ -212,6 +174,7 @@ export function ConnectionWorkbench({
     .filter((item) => item.result.ok && item.result.latencyMs > 0)
     .sort((a, b) => a.result.latencyMs - b.result.latencyMs)[0];
   const checkingAll = checkingAllAgentId === agentId;
+  // 当前那张排在最前：已保存的当前项、默认账号，或虚拟的「当前实际配置（未保存）」
   const orderedEntries: Array<ConnectionEntry | null> = activeEntry
     ? [activeEntry, null, ...form.connections.filter((connection) => connection.name !== active)]
     : [null, ...form.connections];
@@ -244,7 +207,7 @@ export function ConnectionWorkbench({
           })}
           </div>
           <span className="sr-only" data-testid="active-connection-summary">
-            {activeEntry?.label || activeEntry?.name || "助手默认账号"}
+            {summary}
           </span>
           {tab === "providers" && <div className="flex items-center gap-2">
             {form.connections.length > 0 && (
@@ -296,13 +259,11 @@ export function ConnectionWorkbench({
               <strong className="text-sm font-semibold text-foreground">{name}</strong>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              当前选择：{activeEntry?.label || activeEntry?.name || "助手默认账号"} · {runtimeState === "aligned"
-                ? `运行设置已生效（自动化：${savedAutomationLabel}）`
-                : runtimeState === "drifted"
-                  ? `${runtimeDifferences.length} 项运行设置尚未生效`
-                  : "运行设置暂时无法核对"}。
-              {activeAlignment === "drifted" ? " 当前 Provider 尚未应用，请在下方点击应用。" : " 下面所有页签都属于这一个环境。"}
+              当前接入：{summary} · 自动化：{automationLabel}。以客户端实际配置为准，下面所有页签都属于这一个环境。
             </p>
+            {writeBlocked && (
+              <p data-testid="configure-blocked" className="mt-1 text-xs text-warning">{writeBlocked}</p>
+            )}
           </div>
         </div>
 
@@ -333,40 +294,23 @@ export function ConnectionWorkbench({
         {tab === "automation" && (
           <div data-testid="automation-panel" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-4">
             <div>
-              <h3 className="text-sm font-medium text-foreground">
-                {runtimeState === "aligned"
-                  ? `运行设置已生效 · ${savedAutomationLabel}`
-                  : runtimeState === "drifted"
-                    ? `${runtimeDifferences.length} 项设置尚未生效`
-                    : "客户端实际值暂不可读"}
-              </h3>
+              <h3 className="text-sm font-medium text-foreground">当前自动化：{automationLabel}</h3>
               <p className="mt-1 text-xs text-muted-foreground">
-                {runtimeState === "aligned"
-                  ? "软件保存值与客户端实际配置逐项一致；启动命令若带权限参数，会在启动时覆盖它。"
-                  : runtimeState === "drifted"
-                    ? "下面直接列出不一致项；应用只写本工具负责的配置键。"
-                    : "可以先到“实际配置”查看读取失败原因，再决定是否重新应用。"}
+                以客户端配置文件里的实际值为准；修改只写你改动的那几项。启动命令若带权限参数，会在启动时覆盖它。
               </p>
-              {runtimeDifferences.length > 0 && (
-                <ul data-testid="runtime-differences" className="mt-2 space-y-1 text-xs">
-                  {runtimeDifferences.map((item) => (
-                    <li key={item.key} className="text-warning">
-                      {item.label}：已保存 {item.saved}，客户端实际 {item.actual}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {automationComparison?.aligned === true && runtimeState === "drifted" && (
-                <p className="mt-2 text-xs text-muted-foreground">自动化档位已是 {automationComparison.actual}；差异来自其他运行设置。</p>
+              {legacyStatusline && (
+                <p data-testid="statusline-legacy-notice" className="mt-2 text-xs text-warning">
+                  本工具的状态栏还是旧格式，数据目录含空格时无法运行；修复一次即可。
+                </p>
               )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {runtimeState !== "aligned" && (
-                <button type="button" data-testid="agent-runtime-apply" disabled={!kind || busyTarget !== null} onClick={() => onApplyRuntime(selected)} className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-                  应用已保存设置
+              {legacyStatusline && (
+                <button type="button" data-testid="agent-statusline-fix" disabled={!kind || busyTarget !== null || Boolean(writeBlocked)} onClick={() => onFixStatusline(selected)} className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+                  修复状态栏
                 </button>
               )}
-              <button type="button" data-testid="agent-runtime-button" disabled={!kind} onClick={() => onRuntimeSettings(selected)} className="rounded-lg border px-3 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50">
+              <button type="button" data-testid="agent-runtime-button" disabled={!kind || Boolean(writeBlocked)} title={writeBlocked ?? undefined} onClick={() => onRuntimeSettings(selected)} className="rounded-lg border px-3 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50">
                 修改自动化与权限
               </button>
             </div>
@@ -428,7 +372,6 @@ export function ConnectionWorkbench({
             <AgentCurrentConfigView
               status={currentConfig}
               fields={runtimeFields}
-              savedRuntime={savedRuntime}
             />
           </div>
         )}
@@ -472,29 +415,37 @@ export function ConnectionWorkbench({
         )}
 
         {tab === "providers" && <div className="flex flex-col gap-3">
+            {unsaved && currentConfig?.config && (
+              <LiveConfigCard
+                agentId={agentId}
+                config={currentConfig.config}
+                driftedLabel={driftedEntry ? driftedEntry.label || driftedEntry.name : null}
+                unverified={(current?.unverified ?? []).map((item) => form.connections.find((entry) => entry.name === item)?.label || item)}
+                busy={busyTarget === `${agentId}/save-current`}
+                disabled={busyTarget !== null || Boolean(writeBlocked)}
+                onSave={kind ? () => onSaveCurrent(selected) : undefined}
+              />
+            )}
             {orderedEntries.map((connection) => {
               const connectionName = connection?.name ?? "";
               const key = `${agentId}/${connectionName || "default"}`;
               const index = connection
                 ? form.connections.findIndex((item) => item.name === connection.name)
                 : -1;
-              const alignment = kind && currentConfig
-                ? connectionAlignment(kind, connection, currentConfig)
-                : "unknown";
+              const isCurrent = connection ? active === connectionName : current?.default === true;
               return (
               <ConnectionCard
                 key={connection?.name ?? "default"}
                 agentId={agentId}
                 connection={connection}
-                active={active === connectionName}
-                alignment={alignment}
+                active={isCurrent}
                 busy={busyTarget === key}
-                disabled={busyTarget !== null}
+                disabled={busyTarget !== null || Boolean(writeBlocked)}
                 check={checkResults[key]}
-                onActivate={kind && connection && (active !== connectionName || alignment === "drifted")
+                onActivate={kind && connection && !isCurrent
                   ? () => onSwitch(selected, connectionName)
                   : undefined}
-                onReset={kind && !connection ? () => onResetDefault(selected) : undefined}
+                onReset={kind && !connection && !isCurrent ? () => onResetDefault(selected) : undefined}
                 onCheck={kind && connection ? () => onCheck(selected, connection.name) : undefined}
                 onEdit={kind && connection ? () => onEdit(selected, connection) : undefined}
                 onDuplicate={kind && connection ? () => onDuplicate(selected, connection) : undefined}
@@ -511,11 +462,77 @@ export function ConnectionWorkbench({
   );
 }
 
+/** 实际配置对不上任何已保存接入时的虚拟卡片：展示实际值，可存成接入配置。 */
+function LiveConfigCard({
+  agentId,
+  config,
+  driftedLabel,
+  unverified,
+  busy,
+  disabled,
+  onSave,
+}: {
+  agentId: string;
+  config: AgentCurrentConfig;
+  driftedLabel: string | null;
+  unverified: string[];
+  busy: boolean;
+  disabled: boolean;
+  onSave?: () => void;
+}) {
+  const tokenUnsaved = Boolean(
+    config.credential?.configured
+    && (config.credential.kind === "token" || config.credential.kind === "api_key")
+    && !config.credential.saved_var,
+  );
+  return (
+    <article
+      data-testid={`connection-card-${agentId}-live`}
+      className="flex min-h-24 items-center gap-4 rounded-2xl border border-success/40 bg-success/5 px-5 py-4 shadow-sm"
+    >
+      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border bg-muted text-lg font-semibold text-foreground">实</div>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-lg font-semibold text-foreground">当前实际配置（未保存）</h3>
+          <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2.5 py-1 text-xs font-medium text-success">
+            <Check className="h-3 w-3" aria-hidden />当前使用
+          </span>
+        </div>
+        <p className="mt-1 truncate text-sm text-primary">
+          {config.base_url || (config.provider && config.provider !== "anthropic" && config.provider !== "openai" ? `接入方式 ${config.provider}` : "助手自己的默认地址")}
+          {config.model ? ` · ${config.model}` : ""}
+        </p>
+        <p data-testid={`connection-live-hint-${agentId}`} className="mt-1 text-xs text-muted-foreground">
+          {driftedLabel
+            ? `与「${driftedLabel}」地址相同，外部改了模型等参数；切换或保存时会更新「${driftedLabel}」。`
+            : "还没有保存为接入配置；切换到其他接入前会自动保存，不会丢。"}
+          {tokenUnsaved ? " 令牌还没有保存为变量，切换前需要选择密钥文件或确认放弃。" : ""}
+          {unverified.length > 0 ? ` 与「${unverified.join("」「")}」地址和模型一致，但其令牌变量在本机取不到值，无法核对。` : ""}
+        </p>
+        {isPlainHttpUrl(config.base_url ?? "") && (
+          <p className="mt-1 text-xs text-warning">非 https 地址：令牌将明文传输。</p>
+        )}
+      </div>
+      {onSave && (
+        <button
+          type="button"
+          data-testid={`save-live-connection-${agentId}`}
+          disabled={disabled}
+          onClick={onSave}
+          className="inline-flex shrink-0 items-center gap-1 rounded-lg border px-3 py-2 text-xs font-medium text-foreground hover:bg-accent disabled:opacity-50"
+        >
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Save className="h-3.5 w-3.5" aria-hidden />}
+          {busy ? "正在保存…" : driftedLabel ? `保存到「${driftedLabel}」` : "保存为接入配置"}
+        </button>
+      )}
+    </article>
+  );
+}
+
 function ConnectionCard({
   agentId,
   connection,
   active,
-  alignment,
   busy,
   disabled,
   check,
@@ -532,7 +549,6 @@ function ConnectionCard({
   agentId: string;
   connection: ConnectionEntry | null;
   active: boolean;
-  alignment: ConnectionAlignment;
   busy: boolean;
   disabled: boolean;
   check?: ConnectionCheckResult;
@@ -556,9 +572,7 @@ function ConnectionCard({
       className={cn(
         "flex min-h-24 items-center gap-4 rounded-2xl border bg-background px-5 py-4 shadow-sm transition-colors",
         onEdit && "cursor-pointer",
-        active && alignment === "aligned" && "border-success/40 bg-success/5",
-        active && alignment === "drifted" && "border-warning/40 bg-warning/5",
-        (!active || alignment === "unknown") && "hover:border-primary/30",
+        active ? "border-success/40 bg-success/5" : "hover:border-primary/30",
       )}
     >
       <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border bg-muted text-lg font-semibold text-foreground">
@@ -569,22 +583,21 @@ function ConnectionCard({
           <h3 className="text-lg font-semibold text-foreground">
             {connection ? connection.label || connection.name : "助手默认账号"}
           </h3>
-          {active && alignment !== "unknown" && (
-            <span className={cn(
-              "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium",
-              alignment === "drifted" ? "bg-warning/15 text-warning" : "bg-success/15 text-success",
-            )}>
-              {alignment === "aligned" && <Check className="h-3 w-3" aria-hidden />}
-              {alignment === "drifted" ? "尚未生效" : "当前使用"}
+          {active && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2.5 py-1 text-xs font-medium text-success">
+              <Check className="h-3 w-3" aria-hidden />
+              当前使用
             </span>
-          )}
-          {active && alignment === "unknown" && (
-            <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">无法确认是否生效</span>
           )}
         </div>
         <p className="mt-1 truncate text-sm text-primary">
-          {connection?.baseUrl || "使用助手自己的登录与默认地址"}
+          {connection?.providerRef
+            ? `引用 config.toml 中的接入方式 ${connection.providerRef}`
+            : connection?.baseUrl || "使用助手自己的登录与默认地址"}
         </p>
+        {connection && isPlainHttpUrl(connection.baseUrl) && (
+          <p className="mt-1 text-xs text-warning">非 https 地址：令牌将明文传输。</p>
+        )}
         {connection?.note && (
           <p data-testid={`connection-note-${agentId}-${id}`} className="mt-1 truncate text-xs text-muted-foreground">
             {connection.note}
@@ -609,7 +622,7 @@ function ConnectionCard({
             className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
             {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
-            {busy ? "正在应用…" : active ? "应用修改" : "应用"}
+            {busy ? "正在应用…" : "应用"}
           </button>
         )}
         {onReset && (
@@ -618,15 +631,10 @@ function ConnectionCard({
             data-testid={`reset-connection-${agentId}-${id}`}
             disabled={disabled}
             onClick={onReset}
-            className={cn(
-              "inline-flex shrink-0 items-center gap-1 rounded-lg px-3 py-2 text-xs font-medium disabled:opacity-50",
-              alignment === "drifted"
-                ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                : "border text-foreground hover:bg-accent",
-            )}
+            className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
             {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
-            {busy ? "正在应用…" : alignment === "drifted" ? "应用默认配置" : "重新应用"}
+            {busy ? "正在应用…" : "应用"}
           </button>
         )}
         {onEdit && (

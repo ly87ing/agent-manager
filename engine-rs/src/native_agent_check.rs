@@ -50,18 +50,26 @@ fn probe_endpoint(kind: Kind, base_url: &str) -> String {
     }
 }
 
-fn headers(kind: Kind, auth: AuthKind, token: &str) -> Vec<String> {
+/// `token` 为 None 时不带认证头：只有引用了不需要令牌的接入方式（如本机 ollama）才会这样。
+fn headers(kind: Kind, auth: AuthKind, token: Option<&str>) -> Vec<String> {
     let mut out = vec!["content-type: application/json".to_string()];
     match kind {
         Kind::Claude => {
             out.push("anthropic-version: 2023-06-01".to_string());
-            match auth {
-                AuthKind::ApiKey => out.push(format!("x-api-key: {token}")),
-                AuthKind::Token => out.push(format!("authorization: Bearer {token}")),
+            match (auth, token) {
+                (AuthKind::ApiKey, Some(token)) => out.push(format!("x-api-key: {token}")),
+                (AuthKind::Token, Some(token)) => {
+                    out.push(format!("authorization: Bearer {token}"))
+                }
+                (_, None) => {}
             }
         }
         // Codex 侧一律 Bearer：provider 的 env_key 就是按这个用的
-        Kind::Codex => out.push(format!("authorization: Bearer {token}")),
+        Kind::Codex => {
+            if let Some(token) = token {
+                out.push(format!("authorization: Bearer {token}"));
+            }
+        }
     }
     out
 }
@@ -280,11 +288,29 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value, DispatchErro
         DispatchError::new("AGENT_ERROR", format!("{id} 没有名为 {name} 的接入配置"))
     })?;
 
-    let Some(base_url) = profile.base_url.as_deref() else {
-        return Err(DispatchError::new(
-            "AGENT_ERROR",
-            format!("接入配置 {name} 没填地址，没有可测的端点"),
-        ));
+    // 引用型接入（Codex）：地址与令牌变量以 config.toml 里被引用的那张表为准，内置接入方式用已知默认值
+    let (base_url, token_var) = match profile.provider_ref.as_deref() {
+        Some(_) if kind == Kind::Claude => {
+            return Err(DispatchError::new(
+                "AGENT_ERROR",
+                format!("接入配置 {name} 引用了 config.toml 的接入方式，只适用于 Codex"),
+            ));
+        }
+        Some(reference) => {
+            native_agent_settings::codex_referenced_endpoint(ctx, def.config_path(), reference)
+                .map_err(|err| {
+                    DispatchError::new("AGENT_ERROR", format!("接入配置 {name}：{err:#}"))
+                })?
+        }
+        None => {
+            let Some(base_url) = profile.base_url.clone() else {
+                return Err(DispatchError::new(
+                    "AGENT_ERROR",
+                    format!("接入配置 {name} 没填地址，没有可测的端点"),
+                ));
+            };
+            (base_url, profile.token_var.clone())
+        }
     };
     let Some(model) = profile.model.as_deref() else {
         return Err(DispatchError::new(
@@ -292,24 +318,30 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value, DispatchErro
             format!("接入配置 {name} 没填模型，检查要靠它才能确认模型名对不对"),
         ));
     };
-    let Some(token_var) = profile.token_var.as_deref() else {
+    // 自己填的接入必须带令牌变量；引用的接入方式本来就不需要令牌时（本机 ollama 等）不带认证头
+    if token_var.is_none() && profile.provider_ref.is_none() {
         return Err(DispatchError::new(
             "AGENT_ERROR",
             format!("接入配置 {name} 没填令牌变量名，没法带凭据去问"),
         ));
-    };
-    let Some(token) = crate::secret_values::lookup(token_var) else {
-        return Err(DispatchError::new(
-            "AGENT_ERROR",
-            format!("环境变量 {token_var} 还没有取值：先在密钥页填上，或在启动环境里 export 它"),
-        ));
+    }
+    let token = match token_var.as_deref() {
+        Some(token_var) => Some(crate::secret_values::lookup(token_var).ok_or_else(|| {
+            DispatchError::new(
+                "AGENT_ERROR",
+                format!(
+                    "环境变量 {token_var} 还没有取值：先在密钥页填上，或在启动环境里 export 它"
+                ),
+            )
+        })?),
+        None => None,
     };
 
-    let endpoint = probe_endpoint(kind, base_url);
+    let endpoint = probe_endpoint(kind, &base_url);
     let probe = run_probe(
         ctx,
         &endpoint,
-        &headers(kind, profile.auth, &token),
+        &headers(kind, profile.auth, token.as_deref()),
         &probe_body(kind, model),
     );
     let (ok, detail) = verdict(kind, &probe);
@@ -380,17 +412,21 @@ mod tests {
 
     #[test]
     fn 两种认证方式发不同的头_codex一律bearer() {
-        let bearer = headers(Kind::Claude, AuthKind::Token, "T");
+        let bearer = headers(Kind::Claude, AuthKind::Token, Some("T"));
         assert!(bearer.iter().any(|h| h == "authorization: Bearer T"));
         assert!(bearer.iter().any(|h| h.starts_with("anthropic-version:")));
 
-        let api_key = headers(Kind::Claude, AuthKind::ApiKey, "T");
+        let api_key = headers(Kind::Claude, AuthKind::ApiKey, Some("T"));
         assert!(api_key.iter().any(|h| h == "x-api-key: T"));
         assert!(!api_key.iter().any(|h| h.starts_with("authorization:")));
 
         // Codex 的 provider 用 env_key，按 Bearer 发
-        let codex = headers(Kind::Codex, AuthKind::ApiKey, "T");
+        let codex = headers(Kind::Codex, AuthKind::ApiKey, Some("T"));
         assert!(codex.iter().any(|h| h == "authorization: Bearer T"));
+
+        // 引用了不需要令牌的接入方式：不带任何认证头
+        let keyless = headers(Kind::Codex, AuthKind::Token, None);
+        assert!(!keyless.iter().any(|h| h.starts_with("authorization:")));
     }
 
     #[test]

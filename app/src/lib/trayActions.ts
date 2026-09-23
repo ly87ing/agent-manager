@@ -11,11 +11,11 @@ export interface TrayConnection {
   agentName: string;
   profile: string;
   profileLabel: string;
+  /** 与客户端实际配置一致的那一项（引擎按内容识别）。 */
   current: boolean;
-  needsRepair: boolean;
 }
 
-export type TrayAction = "search" | "takeover" | ({ type: "switch-connection" } & Omit<TrayConnection, "current" | "needsRepair">);
+export type TrayAction = "search" | "takeover" | ({ type: "switch-connection" } & Omit<TrayConnection, "current">);
 
 const TRAY_ACTION_EVENT = "tray-action";
 

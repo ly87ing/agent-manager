@@ -9,13 +9,13 @@ import {
   ConnectionFormDialog,
   type ConnectionSubmission,
 } from "../components/ConnectionFormDialog";
-import { ConnectionWorkbench, connectionAlignment } from "../components/ConnectionWorkbench";
+import { ConnectionWorkbench } from "../components/ConnectionWorkbench";
 import { ConnectionImportDialog } from "../components/ConnectionImportDialog";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageLoading } from "../components/PageState";
-import type { EngineElement, PolicyData, StatusData } from "../lib/contract";
+import type { EngineElement, Envelope, PolicyData, StatusData } from "../lib/contract";
 import { parseAliasValue } from "../lib/aliasCommand";
 import {
   buildProfileDefinition,
@@ -30,23 +30,28 @@ import {
 import { runEngine } from "../lib/engine";
 import { toastWithUndo } from "../lib/undo";
 import {
-  activeConnectionOf,
   connectionsOf,
   duplicateConnectionDraft,
   moveAgentConnection,
-  parseInitialToFormValues,
   serializeConnectionBundle,
   removeAgentConnection,
   runtimeRequiresYoloConfirmation,
-  runtimeSettingsOf,
   upsertAgentConnection,
-  updateAgentRuntimeSettings,
-  type AgentRuntimeSettings,
   type ConnectionEntry,
 } from "../lib/agentDefinitionForm";
 import { agentManagementOf, connectionKindOf } from "../lib/agentManagement";
-import { runtimeAlignment } from "../lib/agentRuntime";
-import type { AgentCurrentConfig, AgentsObserved, AgentsSpec } from "../lib/observed";
+import {
+  backfillNotice,
+  configureArgs,
+  configureBaseOf,
+  configureRefusalOf,
+  currentConfigOf,
+  currentConnectionOf,
+  liveRefusalDescription,
+  type ConfigureRequest,
+} from "../lib/agentCurrent";
+import { actualRuntimeSettings, runtimePatchApplied } from "../lib/agentRuntime";
+import type { AgentsSpec } from "../lib/observed";
 import { useEngineQuery } from "../lib/queries";
 import { useAliasSource } from "../lib/useAliasSource";
 import { useDirectApply } from "../lib/useDirectApply";
@@ -76,7 +81,7 @@ export default function AgentsPage({
   const [connectionForm, setConnectionForm] = useState<{
     agent: EngineElement;
     initial?: ConnectionEntry;
-    variant?: "edit" | "duplicate" | "adopt";
+    variant?: "edit" | "duplicate";
     preserveUnknownFrom?: string;
   } | null>(null);
   const [connectionSaving, setConnectionSaving] = useState(false);
@@ -102,18 +107,23 @@ export default function AgentsPage({
   const [runtimeFormAgent, setRuntimeFormAgent] = useState<EngineElement | null>(null);
   const [runtimeSaving, setRuntimeSaving] = useState(false);
   const [runtimeFormError, setRuntimeFormError] = useState<string | null>(null);
-  /** 高风险运行模式先确认，再保存定义和写入客户端；取消必须保持零写入。 */
+  /** 高风险运行模式先确认，再写入客户端；取消必须保持零写入。 */
   const [pendingRuntimeSave, setPendingRuntimeSave] = useState<{
     agent: EngineElement;
-    settings: AgentRuntimeSettings;
+    patch: Record<string, unknown>;
   } | null>(null);
-  /** 运行参数写入前要用户点头的那一步：降安全等级，或目标被外部改过。 */
-  const [pendingConfigure, setPendingConfigure] = useState<
-    { agentId: string; yolo: boolean; use?: string; reason: "yolo" | "takeover" } | null
-  >(null);
+  /**
+   * 切换前的回填被拒：实际令牌还没保存，或实际配置无法完整保存。由用户显式选择出路，
+   * 确认后带对应的放弃标志重试；取消则文件与库都不动。
+   */
+  const [pendingRefusal, setPendingRefusal] = useState<{
+    kind: "live-token" | "unrepresentable";
+    message: string;
+    request: Omit<ConfigureRequest, "base">;
+    success?: ConfigureSuccess;
+  } | null>(null);
   /** 正在写入哪一个助手/接入；非空时禁止并发切换。 */
   const [configuringTarget, setConfiguringTarget] = useState<string | null>(null);
-  const configuring = configuringTarget !== null;
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="助手状态读取失败" error={query.error} />;
 
@@ -149,107 +159,90 @@ export default function AgentsPage({
     }))
     .filter((item) => item.kind === "claude" || item.kind === "codex");
   const runtimeManagement = runtimeFormAgent ? agentManagementOf(runtimeFormAgent) : null;
+  const elementOf = (agentId: string) => elements.find((element) => element.id === `agents:${agentId}`);
   const baseBinOf = (agentId: string) =>
     (elements.find((element) => element.id === `agents:${agentId}`)?.spec as AgentsSpec | undefined)?.bin ??
     (agentId === "codex" ? "codex" : "claude");
 
-  const takeoverAgent = pendingConfigure?.reason === "takeover"
-    ? elements.find((element) => element.id === `agents:${pendingConfigure.agentId}`) ?? null
-    : null;
-  const takeoverKind = takeoverAgent ? connectionKindOf(takeoverAgent) : null;
-  const takeoverCurrent = takeoverAgent
-    ? (takeoverAgent.observed as AgentsObserved).current_config?.config ?? null
-    : null;
-  const takeoverConnection = takeoverAgent && pendingConfigure?.use
-    ? parseInitialToFormValues(pendingConfigure.agentId, takeoverAgent.spec as Record<string, unknown>).connections
-      .find((item) => item.name === pendingConfigure.use) ?? null
-    : null;
-  const takeoverDiffs = pendingConfigure?.reason === "takeover" && pendingConfigure.use !== undefined
-    ? connectionDifferences(takeoverKind, takeoverConnection, takeoverCurrent)
-    : [];
-
   /**
-   * 把运行参数写进助手自己的配置文件。
+   * 写助手自己的配置文件：切换接入、编辑当前接入、改运行参数或保存当前实际配置。
    *
-   * 两处需要用户点头，都由引擎强制、界面只负责问：降安全等级（--allow-yolo）、
-   * 目标里我们那几项被外部改过（--allow-takeover）。引擎拒绝时一个字节都不会动。
+   * 每次都带 status 给出的写入基准：本工具以外改过就被引擎拒绝，界面刷新后让用户重来。
+   * 降安全等级（--allow-yolo）与放弃实际配置（--discard-live / --discard-live-token）都要用户点头；
+   * 引擎拒绝时文件与库一个字节都不会动。成功后以 status 回读确认，不靠本地乐观改状态。
    */
   const runConfigure = async (
-    agentId: string,
-    opts: { allowYolo?: boolean; allowTakeover?: boolean; use?: string } = {},
+    request: Omit<ConfigureRequest, "base">,
+    success: ConfigureSuccess = {},
   ): Promise<boolean> => {
-    const args = ["--only", `agents:${agentId}`];
-    // 切换与写入是一条命令：库里的生效项和目标文件要么一起变，要么都不变
-    if (opts.use !== undefined) args.push(...(opts.use ? ["--use", opts.use] : ["--use-default"]));
-    if (opts.allowYolo) args.push("--allow-yolo");
-    if (opts.allowTakeover) args.push("--allow-takeover");
-    const target = opts.use !== undefined ? `${agentId}/${opts.use || "default"}` : `${agentId}/settings`;
+    const agentId = request.agentId;
+    const element = elementOf(agentId);
+    const base = element ? configureBaseOf(element) : null;
+    if (!base) {
+      toast.error("客户端配置文件暂不可读，没有写入", {
+        description: "到“实际配置”查看原因；修好之后再试。",
+      });
+      return false;
+    }
+    const target = request.saveCurrent
+      ? `${agentId}/save-current`
+      : request.use !== undefined
+        ? `${agentId}/${request.use || "default"}`
+        : `${agentId}/settings`;
     setConfiguringTarget(target);
     try {
-      const envelope = await runEngine("agents:configure", args);
+      const envelope: Envelope = await runEngine("agents:configure", configureArgs({ ...request, base }));
       if (envelope.ok) {
-        // 以 status 的真实回读更新界面，再宣布成功；不靠本地乐观改状态。
         const refreshed = await query.refetch();
         const refreshedAgent = refreshed.data?.data.elements.find(
-          (element) => element.id === `agents:${agentId}`,
+          (candidate) => candidate.id === `agents:${agentId}`,
         );
-        const currentConfig = refreshedAgent
-          ? (refreshedAgent.observed as AgentsObserved).current_config
-          : undefined;
+        const current = refreshedAgent ? currentConnectionOf(refreshedAgent) : null;
         const management = refreshedAgent ? agentManagementOf(refreshedAgent) : null;
-        const runtimeVerified = Boolean(
-          refreshedAgent
-          && currentConfig?.state === "ready"
-          && management
-          && runtimeAlignment(
+        const verified = request.runtime
+          ? Boolean(management && refreshedAgent && runtimePatchApplied(
             management.runtime_fields,
-            runtimeSettingsOf(refreshedAgent.spec as Record<string, unknown>),
-            currentConfig,
-          ) === "aligned",
-        );
-        if (opts.use !== undefined) {
-          const actual = refreshedAgent
-            ? activeConnectionOf(refreshedAgent.spec as Record<string, unknown>)
-            : null;
-          const expected = opts.use || null;
-          const kind = refreshedAgent ? connectionKindOf(refreshedAgent) : null;
-          const selectedConnection = refreshedAgent && expected
-            ? parseInitialToFormValues(agentId, refreshedAgent.spec as Record<string, unknown>).connections
-              .find((connection) => connection.name === expected) ?? null
-            : null;
-          const actualAligned = Boolean(
-            kind && currentConfig
-            && connectionAlignment(kind, selectedConnection, currentConfig) === "aligned",
-          );
-          if (!refreshedAgent || actual !== expected || !actualAligned || !runtimeVerified) {
-            toast.error("写入已经返回成功，但状态回读没有确认全部配置生效", {
-              description: "界面保留软件保存值和客户端实际值，请到“实际配置”查看不一致项后重试。",
-            });
-            return false;
-          }
-        } else if (!runtimeVerified) {
-          toast.error("写入已经返回成功，但状态回读没有确认运行设置生效", {
-            description: "请到“实际配置”查看软件保存值与客户端实际值，再决定是否重试。",
+            request.runtime,
+            currentConfigOf(refreshedAgent),
+          ))
+          : request.use !== undefined
+            ? request.use
+              ? current?.profile === request.use
+              : current?.default === true
+            : Boolean(current?.profile);
+        if (!verified) {
+          toast.error("写入已经返回成功，但状态回读没有确认生效", {
+            description: "请到“实际配置”查看客户端当前的值后再决定是否重试。",
           });
           return false;
         }
-        toast.success(opts.use !== undefined ? `已切换 ${agentId} 的接入配置` : `已写入 ${agentId} 的运行参数`, {
-          description: "助手下次启动生效；已经开着的要重启它。",
+        const notice = backfillNotice(envelope.data);
+        toast.success(success.message ?? `已写入 ${agentId} 的配置`, {
+          description: notice
+            ? `${notice}。助手下次启动生效。`
+            : "助手下次启动生效；已经开着的要重启它。",
         });
         return true;
       }
       const message = envelope.errors[0]?.message ?? "未知错误";
-      // 外部改过：让用户看清再决定要不要用这里的内容替换
-      if (!opts.allowTakeover && message.includes("拒绝覆盖")) {
-        setPendingConfigure({ agentId, yolo: opts.allowYolo === true, use: opts.use, reason: "takeover" });
+      const refusal = configureRefusalOf(envelope);
+      if (refusal === "changed") {
+        await query.refetch();
+        toast.error("配置文件已在外部修改，没有写入", {
+          description: "已刷新为客户端当前的实际配置，请确认后重新操作。",
+        });
         return false;
       }
-      toast.error(`运行参数没写进去:${message}`, {
-        description: "定义已经存下了，助手的配置文件没动。",
+      if (refusal === "live-token" || refusal === "unrepresentable") {
+        setPendingRefusal({ kind: refusal, message, request, success });
+        return false;
+      }
+      toast.error(`没有写入：${message}`, {
+        description: "助手的配置文件与本工具保存的内容都没动。",
       });
       return false;
     } catch (err) {
-      toast.error(`运行参数没写进去:${String(err)}`);
+      toast.error(`没有写入：${String(err)}`);
       return false;
     } finally {
       setConfiguringTarget(null);
@@ -312,6 +305,32 @@ export default function AgentsPage({
         submission.connection,
         connectionForm?.preserveUnknownFrom,
       );
+      const editingCurrent = connectionForm?.variant === "edit"
+        && currentConnectionOf(element)?.profile === submission.connection.name;
+      if (editingCurrent) {
+        // 编辑当前生效的那套：先存凭据取值，再把新定义写进助手配置并同步更新库，一条命令同成同败
+        if (submission.secretValue) {
+          const secret = await runEngine("secrets:set", [
+            "--var",
+            submission.connection.tokenVar,
+            "--value",
+            submission.secretValue,
+          ]);
+          if (!secret.ok) {
+            setConnectionFormError(
+              `凭据没有写入外部文件，接入也没有修改：${secret.errors[0]?.message ?? "请先在“设置 → 密钥”选择外部文件，或从进程环境提供这个变量"}`,
+            );
+            return;
+          }
+        }
+        const profiles = ((definition.settings as Record<string, unknown> | undefined)?.profiles ?? {}) as Record<string, Record<string, unknown>>;
+        setConnectionForm(null);
+        await runConfigure(
+          { agentId, use: submission.connection.name, connection: profiles[submission.connection.name] ?? {} },
+          { message: `已修改并写入 ${submission.connection.label || submission.connection.name}` },
+        );
+        return;
+      }
       const saved = await definitionOps.saveDefinition({ name: agentId, definition, isNew: false });
       if (!saved) {
         setConnectionFormError("接入没有保存，请根据提示修正后重试");
@@ -347,7 +366,7 @@ export default function AgentsPage({
   const removeConnection = async (element: EngineElement, connection: ConnectionEntry) => {
     if (connectionRemovingBusy) return;
     const definition = element.spec as Record<string, unknown>;
-    if (activeConnectionOf(definition) === connection.name) {
+    if (currentConnectionOf(element)?.profile === connection.name) {
       toast.error("当前接入不能删除，请先切换到其他接入或助手默认账号");
       return;
     }
@@ -407,62 +426,39 @@ export default function AgentsPage({
     }
   };
 
-  /** 保存运行偏好后立刻写进助手配置；失败时保留为明确的“待应用”方案。 */
-  const persistRuntimeSettings = async (
-    element: EngineElement,
-    settings: AgentRuntimeSettings,
-    allowYolo = false,
-  ) => {
-    if (runtimeSaving) return;
-    const agentId = element.id.replace(/^agents:/, "");
-    setRuntimeSaving(true);
-    setRuntimeFormError(null);
-    try {
-      const definition = updateAgentRuntimeSettings(element.spec as Record<string, unknown>, settings);
-      const saved = await definitionOps.saveDefinition({ name: agentId, definition, isNew: false });
-      if (!saved) {
-        setRuntimeFormError("运行设置没有保存，请根据提示修正后重试");
-        setRuntimeFormAgent(element);
-        return;
-      }
-      setRuntimeFormAgent(null);
-      await query.refetch();
-      await runConfigure(agentId, { allowYolo });
-    } catch (err) {
-      setRuntimeFormError(`保存运行设置失败:${String(err)}`);
-      setRuntimeFormAgent(element);
-    } finally {
-      setRuntimeSaving(false);
-    }
-  };
-
-  /** 普通模式直接保存并应用；完全放开先确认，取消时定义和客户端都不动。 */
-  const saveRuntimeSettings = (element: EngineElement, settings: AgentRuntimeSettings) => {
+  /** 运行参数只发改动过的字段；完全放开先确认，取消时文件与库都不动。 */
+  const saveRuntimeSettings = (element: EngineElement, patch: Record<string, unknown>) => {
     if (runtimeSaving) return;
     const management = agentManagementOf(element);
     if (!management) {
       setRuntimeFormError("当前助手没有可用的运行设置适配器");
       return;
     }
-    if (runtimeRequiresYoloConfirmation(settings, management.runtime_fields)) {
+    if (runtimeRequiresYoloConfirmation(patch, management.runtime_fields)) {
       setRuntimeFormAgent(null);
-      setPendingRuntimeSave({ agent: element, settings });
+      setPendingRuntimeSave({ agent: element, patch });
       return;
     }
-    void persistRuntimeSettings(element, settings);
+    void persistRuntimeSettings(element, patch);
   };
 
-  /** 把已经保存但尚未生效的运行设置重新应用到客户端。 */
-  const applySavedRuntimeSettings = (element: EngineElement) => {
-    const management = agentManagementOf(element);
-    if (!management) return;
-    const settings = runtimeSettingsOf(element.spec as Record<string, unknown>);
+  const persistRuntimeSettings = async (
+    element: EngineElement,
+    patch: Record<string, unknown>,
+    allowYolo = false,
+  ) => {
     const agentId = element.id.replace(/^agents:/, "");
-    if (runtimeRequiresYoloConfirmation(settings, management.runtime_fields)) {
-      setPendingConfigure({ agentId, yolo: true, reason: "yolo" });
-      return;
+    setRuntimeSaving(true);
+    setRuntimeFormError(null);
+    setRuntimeFormAgent(null);
+    try {
+      await runConfigure(
+        { agentId, runtime: patch, allowYolo },
+        { message: `已写入 ${agentId} 的运行参数` },
+      );
+    } finally {
+      setRuntimeSaving(false);
     }
-    void runConfigure(agentId);
   };
 
   /** 保存实例：写定义 + 把启动命令存成同名快捷命令；两步都只写配置，不落地。 */
@@ -642,7 +638,10 @@ export default function AgentsPage({
         }}
         onImport={setConnectionImportAgent}
         onSwitch={(element, connection) =>
-          void runConfigure(element.id.replace(/^agents:/, ""), { use: connection })
+          void runConfigure(
+            { agentId: element.id.replace(/^agents:/, ""), use: connection },
+            { message: `已切换 ${element.id.replace(/^agents:/, "")} 的接入配置` },
+          )
         }
         onResetDefault={setConnectionResetting}
         aliases={aliasSource.source?.aliases ?? {}}
@@ -701,7 +700,18 @@ export default function AgentsPage({
           setRuntimeFormError(null);
           setRuntimeFormAgent(element);
         }}
-        onApplyRuntime={applySavedRuntimeSettings}
+        onSaveCurrent={(element) =>
+          void runConfigure(
+            { agentId: element.id.replace(/^agents:/, ""), saveCurrent: true },
+            { message: "已把当前实际配置保存为接入配置" },
+          )
+        }
+        onFixStatusline={(element) =>
+          void runConfigure(
+            { agentId: element.id.replace(/^agents:/, ""), runtime: { statusline: "builtin" } },
+            { message: "已修复状态栏" },
+          )
+        }
       />}
       {environmentView === "independent" && (
           <section data-testid="independent-environments" className="space-y-4 rounded-xl border bg-card p-5 shadow-sm">
@@ -837,6 +847,10 @@ export default function AgentsPage({
           existingNames={connectionsOf(connectionForm.agent.spec as Record<string, unknown>).map((item) => item.name)}
           initialConnection={connectionForm.initial}
           variant={connectionForm.variant}
+          editingCurrent={
+            connectionForm.variant === "edit"
+            && currentConnectionOf(connectionForm.agent)?.profile === connectionForm.initial?.name
+          }
           busy={connectionSaving}
           error={connectionFormError}
           onOpenSecrets={onOpenSecrets}
@@ -874,7 +888,7 @@ export default function AgentsPage({
       {connectionResetting && (
         <ConfirmModal
           title={`应用 ${(connectionResetting.spec as AgentsSpec).display_name ?? connectionResetting.id.replace(/^agents:/, "")} 的官方 Provider`}
-          description="把官方默认地址与账号配置写入助手，解决当前选择与实际配置不一致。不会删除助手登录状态、密钥变量或其他 Provider 定义；已经打开的助手需要重启后生效。"
+          description="撤掉助手配置里的接入地址、模型与令牌，改用助手自己的账号与默认地址；切换前还没保存的实际配置会先保存成接入配置。不会删除助手登录状态、密钥变量或其他 Provider 定义；已经打开的助手需要重启后生效。"
           risk="write-local"
           riskLabel="应用官方 Provider"
           confirmLabel="确认应用"
@@ -882,7 +896,7 @@ export default function AgentsPage({
           onConfirm={() => {
             const agentId = connectionResetting.id.replace(/^agents:/, "");
             setConnectionResetting(null);
-            void runConfigure(agentId, { use: "" });
+            void runConfigure({ agentId, use: "" }, { message: `已切回 ${agentId} 的默认账号` });
           }}
           onClose={() => setConnectionResetting(null)}
         />
@@ -950,11 +964,11 @@ export default function AgentsPage({
           agentName={(runtimeFormAgent.spec as AgentsSpec).display_name ?? runtimeFormAgent.id.replace(/^agents:/, "")}
           adapter={runtimeManagement.adapter}
           fields={runtimeManagement.runtime_fields}
-          initial={runtimeSettingsOf(runtimeFormAgent.spec as Record<string, unknown>)}
-          currentConfig={(runtimeFormAgent.observed as AgentsObserved).current_config}
+          initial={actualRuntimeSettings(runtimeManagement.runtime_fields, currentConfigOf(runtimeFormAgent))}
+          currentConfig={currentConfigOf(runtimeFormAgent)}
           busy={runtimeSaving}
           error={runtimeFormError}
-          onSubmit={(settings) => void saveRuntimeSettings(runtimeFormAgent, settings)}
+          onSubmit={(patch) => void saveRuntimeSettings(runtimeFormAgent, patch)}
           onClose={() => {
             setRuntimeFormAgent(null);
             setRuntimeFormError(null);
@@ -963,68 +977,53 @@ export default function AgentsPage({
       )}
       {definitionOps.modals}
 
-      {pendingConfigure && (
+      {pendingRefusal && (
         <ConfirmModal
-          title={pendingConfigure.reason === "yolo" ? "完全放开助手权限" : "选择如何处理配置差异"}
-          description={
-            pendingConfigure.reason === "yolo"
-              ? "这会关闭权限询问，并允许助手脱离工作区沙箱操作；任何入口启动它都一样。只应在可信且已经隔离的环境中使用。"
-              : "下面只列出本工具负责且与软件配置不一致的项目。可以使用软件配置覆盖这些项目，也可以保留客户端当前值并导入为新的 Provider。"
-          }
+          title={pendingRefusal.kind === "live-token" ? "当前实际令牌还没有保存" : "当前实际配置无法完整保存"}
+          description={liveRefusalDescription(pendingRefusal.kind, pendingRefusal.message)}
           risk="write-local"
-          confirmLabel={pendingConfigure.reason === "yolo" ? "确认完全放开" : "使用软件配置"}
-          secondaryLabel={pendingConfigure.reason === "takeover" && pendingConfigure.use !== undefined && takeoverCurrent ? "保留并纳管当前配置" : undefined}
-          onSecondary={pendingConfigure.reason === "takeover" && pendingConfigure.use !== undefined && takeoverAgent && takeoverCurrent
+          riskLabel={pendingRefusal.kind === "live-token" ? "放弃令牌" : "放弃实际配置"}
+          confirmLabel={pendingRefusal.kind === "live-token" ? "放弃这个令牌并继续" : "放弃当前实际配置继续切换"}
+          secondaryLabel={pendingRefusal.kind === "live-token" && onOpenSecrets ? "去选择密钥文件" : undefined}
+          onSecondary={pendingRefusal.kind === "live-token" && onOpenSecrets
             ? () => {
-                const draft = observedConnectionDraft(takeoverKind, takeoverCurrent, connectionsOf(takeoverAgent.spec as Record<string, unknown>).map((item) => item.name));
-                setPendingConfigure(null);
-                setConnectionFormError(null);
-                setConnectionForm({ agent: takeoverAgent, initial: draft, variant: "adopt" });
+                setPendingRefusal(null);
+                onOpenSecrets();
               }
             : undefined}
-          executing={configuring}
+          executing={configuringTarget !== null}
           onConfirm={() => {
-            const pending = pendingConfigure;
-            setPendingConfigure(null);
-            void runConfigure(pending.agentId, {
-              allowYolo: pending.yolo,
-              allowTakeover: pending.reason === "takeover",
-              use: pending.use,
-            });
+            const pending = pendingRefusal;
+            setPendingRefusal(null);
+            void runConfigure(
+              pending.kind === "live-token"
+                ? { ...pending.request, discardLiveToken: true }
+                : { ...pending.request, discardLive: true },
+              pending.success,
+            );
           }}
           onClose={() => {
-            setPendingConfigure(null);
-            toast.message("没有应用到客户端", { description: "已保存方案保持不变，客户端配置没有修改。" });
+            setPendingRefusal(null);
+            toast.message("没有写入", { description: "助手的配置文件与本工具保存的内容都没动。" });
           }}
-        >
-          {pendingConfigure.reason === "takeover" && (
-            <div className="mt-4 overflow-hidden rounded-lg border" data-testid="takeover-differences">
-              {takeoverDiffs.length > 0 ? (
-                <table className="w-full table-fixed text-left text-xs">
-                  <thead className="bg-muted/60 text-muted-foreground"><tr><th className="w-1/4 px-3 py-2">配置项</th><th className="px-3 py-2">软件配置</th><th className="px-3 py-2">客户端当前值</th></tr></thead>
-                  <tbody>{takeoverDiffs.map((item) => <tr key={item.label} className="border-t"><th className="px-3 py-2 font-medium text-foreground">{item.label}</th><td className="break-all px-3 py-2 text-primary">{item.managed}</td><td className="break-all px-3 py-2 text-warning">{item.actual}</td></tr>)}</tbody>
-                </table>
-              ) : <p className="px-3 py-3 text-xs text-muted-foreground">客户端运行参数与软件记录的摘要不一致；请回到“自动化与权限”审查最终写入值。</p>}
-            </div>
-          )}
-        </ConfirmModal>
+        />
       )}
       {pendingRuntimeSave && (
         <ConfirmModal
           title="完全放开助手权限"
-          description="这会保存高风险方案并写入客户端：关闭权限询问，同时允许助手脱离工作区沙箱操作。只应在可信且已经隔离的环境中使用。"
+          description="这会写入客户端：关闭权限询问，同时允许助手脱离工作区沙箱操作。只应在可信且已经隔离的环境中使用。"
           risk="write-local"
           riskLabel="完全放开"
-          confirmLabel="确认保存并应用"
+          confirmLabel="确认写入"
           executing={runtimeSaving}
           onConfirm={() => {
             const pending = pendingRuntimeSave;
             setPendingRuntimeSave(null);
-            void persistRuntimeSettings(pending.agent, pending.settings, true);
+            void persistRuntimeSettings(pending.agent, pending.patch, true);
           }}
           onClose={() => {
             setPendingRuntimeSave(null);
-            toast.message("已取消", { description: "运行设置没有保存，客户端配置也没有修改。" });
+            toast.message("已取消", { description: "客户端配置与本工具保存的内容都没有修改。" });
           }}
         />
       )}
@@ -1032,60 +1031,7 @@ export default function AgentsPage({
   );
 }
 
-function displayConfigValue(value: unknown): string {
-  return value === undefined || value === null || value === "" ? "使用客户端默认值" : String(value);
-}
-
-function connectionDifferences(
-  kind: "claude" | "codex" | null,
-  connection: ConnectionEntry | null,
-  current: AgentCurrentConfig | null,
-): Array<{ label: string; managed: string; actual: string }> {
-  if (!current) return [];
-  const expected = connection ?? emptyObservedConnection();
-  const fields: Array<[string, unknown, unknown]> = [
-    ["接口地址", expected.baseUrl, current.base_url],
-    ["模型", expected.model, current.model],
-  ];
-  if (kind === "claude") fields.push(
-    ["小任务模型", expected.smallFastModel, current.small_fast_model],
-    ["Opus 映射", expected.aliasOpus, current.model_aliases?.opus],
-    ["Sonnet 映射", expected.aliasSonnet, current.model_aliases?.sonnet],
-    ["Haiku 映射", expected.aliasHaiku, current.model_aliases?.haiku],
-    ["请求超时", expected.timeoutMs, current.timeout_ms],
-  );
-  if (connection) {
-    fields.push(["凭据", `${connection.auth} · ${connection.tokenVar}`, current.credential?.configured
-      ? `${current.credential.kind ?? "已配置"}${current.credential.variable ? ` · ${current.credential.variable}` : ""}`
-      : "未配置"]);
-  } else if (current.credential?.configured) {
-    fields.push(["凭据", "使用助手默认登录", `${current.credential.kind ?? "已配置"}${current.credential.variable ? ` · ${current.credential.variable}` : ""}`]);
-  }
-  return fields
-    .filter(([, managed, actual]) => displayConfigValue(managed) !== displayConfigValue(actual))
-    .map(([label, managed, actual]) => ({ label, managed: displayConfigValue(managed), actual: displayConfigValue(actual) }));
-}
-
-function emptyObservedConnection(): ConnectionEntry {
-  return { name: "", label: "", baseUrl: "", auth: "token", tokenVar: "", model: "", smallFastModel: "", aliasOpus: "", aliasSonnet: "", aliasHaiku: "", timeoutMs: "" };
-}
-
-function observedConnectionDraft(kind: "claude" | "codex" | null, current: AgentCurrentConfig, existingNames: string[]): ConnectionEntry {
-  let name = "client-current";
-  let index = 2;
-  while (existingNames.includes(name)) name = `client-current-${index++}`;
-  return {
-    name,
-    label: "客户端当前配置",
-    note: "从客户端现有配置导入，请核对后保存",
-    baseUrl: current.base_url ?? "",
-    auth: current.credential?.kind === "api_key" ? "api_key" : "token",
-    tokenVar: current.credential?.variable ?? "",
-    model: current.model ?? "",
-    smallFastModel: kind === "claude" ? current.small_fast_model ?? "" : "",
-    aliasOpus: kind === "claude" ? current.model_aliases?.opus ?? "" : "",
-    aliasSonnet: kind === "claude" ? current.model_aliases?.sonnet ?? "" : "",
-    aliasHaiku: kind === "claude" ? current.model_aliases?.haiku ?? "" : "",
-    timeoutMs: current.timeout_ms === undefined || current.timeout_ms === null ? "" : String(current.timeout_ms),
-  };
+/** 写入成功后的提示文案。 */
+interface ConfigureSuccess {
+  message?: string;
 }

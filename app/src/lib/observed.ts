@@ -84,6 +84,22 @@ export interface AgentCurrentConfigCredential {
   configured: boolean;
   kind?: string | null;
   variable?: string | null;
+  /** Claude：哪个已保存接入的令牌变量解析值与实际令牌一致；没有为 null。不含取值。 */
+  saved_var?: string | null;
+}
+
+/** 引擎按内容识别出的当前接入。 */
+export interface AgentCurrentConnection {
+  /** 与实际配置逐项一致的已保存接入；null 表示助手默认账号或还没保存。 */
+  profile: string | null;
+  /** 实际没有任何接入键：助手默认账号。 */
+  default: boolean;
+  /** 库里记下的上次写入的接入，只作记录，不代表当前。 */
+  last_written?: string | null;
+  /** 地址、模型都对上，但令牌变量在本进程取不到值、无法核对的接入。 */
+  unverified?: string[];
+  /** 还没保存、但与上次写入的那套身份一致：切换时外部改动会保存进它。 */
+  drifted_from?: string | null;
 }
 
 export interface AgentCurrentConfig {
@@ -107,6 +123,9 @@ export interface AgentCurrentConfigStatus {
   /** 运行设置保存时使用的真实目标文件。 */
   target?: string;
   config?: AgentCurrentConfig | null;
+  /** 写入基准：写入时原样带回；没有（文件读不了）就不能写。 */
+  base?: string | null;
+  current?: AgentCurrentConnection | null;
 }
 
 export interface AgentAuthStatus {

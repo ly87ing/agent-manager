@@ -3,6 +3,7 @@ import { Loader2, X } from "lucide-react";
 import {
   CONNECTION_NAME_RE,
   emptyConnection,
+  isPlainHttpUrl,
   validateConnectionEntry,
   type ConnectionEntry,
 } from "../lib/agentDefinitionForm";
@@ -29,6 +30,7 @@ export function ConnectionFormDialog({
   existingNames,
   initialConnection,
   variant,
+  editingCurrent = false,
   busy,
   error,
   onSubmit,
@@ -38,10 +40,12 @@ export function ConnectionFormDialog({
   agentName: string;
   kind: ConnectionKind;
   existingNames: string[];
-  /** 编辑、复制或纳管时的预填值；具体语义由 variant 决定。 */
+  /** 编辑或复制时的预填值；具体语义由 variant 决定。 */
   initialConnection?: ConnectionEntry;
-  /** 复制和纳管模式允许创建新名称；凭据取值始终为空。 */
-  variant?: "edit" | "duplicate" | "adopt";
+  /** 复制模式允许创建新名称；凭据取值始终为空。 */
+  variant?: "edit" | "duplicate";
+  /** 编辑的是当前生效的那套：保存即写进助手配置。 */
+  editingCurrent?: boolean;
   busy: boolean;
   error?: string | null;
   onSubmit: (submission: ConnectionSubmission) => void;
@@ -56,14 +60,14 @@ export function ConnectionFormDialog({
   const prefilled = initialConnection !== undefined;
   const editing = prefilled && (variant === undefined || variant === "edit");
   const duplicating = prefilled && variant === "duplicate";
-  const adopting = prefilled && variant === "adopt";
+  const referenced = Boolean(initialConnection?.providerRef);
   const [choice, setChoice] = useState<string | null>(prefilled ? variant ?? "edit" : null);
   const [connection, setConnection] = useState<ConnectionEntry | null>(
     initialConnection ? { ...initialConnection } : null,
   );
   const [secretValue, setSecretValue] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
-  const [advancedOpen, setAdvancedOpen] = useState(!adopting && !duplicating && Boolean(
+  const [advancedOpen, setAdvancedOpen] = useState(!duplicating && Boolean(
     initialConnection?.timeoutMs || initialConnection?.smallFastModel || initialConnection?.aliasOpus
     || initialConnection?.aliasSonnet || initialConnection?.aliasHaiku || initialConnection?.auth === "api_key",
   ));
@@ -71,32 +75,17 @@ export function ConnectionFormDialog({
     ? `编辑 ${initialConnection.label || initialConnection.name}`
     : duplicating
       ? "复制 Provider"
-      : adopting
-        ? `纳管 ${agentName} 的客户端当前配置`
-        : `为 ${agentName} 添加接入`;
+      : `为 ${agentName} 添加接入`;
 
-  const adoptionMissing = adopting && connection
-    ? [
-        !connection.label.trim() ? "显示名称" : null,
-        !connection.baseUrl.trim() ? "API 地址" : null,
-        !connection.model.trim() ? "默认模型" : null,
-        !connection.tokenVar.trim() ? "凭据变量" : null,
-      ].filter((item): item is string => Boolean(item))
-    : [];
+  // 编辑已有接入（例如从实际配置导入的那套）时地址、凭据变量与模型可以留空：它本来可能就没有
+  const strict = !editing && !referenced;
   const validationError = connection
-    ? (!connection.label.trim() && (adopting || duplicating) ? "请填写显示名称" : validateConnectionEntry(connection))
+    ? (!connection.label.trim() && duplicating ? "请填写显示名称" : validateConnectionEntry(connection, strict))
     : null;
   const duplicateName = Boolean(
     connection && existingNames.includes(connection.name.trim()) && !(editing && connection.name.trim() === initialConnection?.name),
   );
-  const adoptionIssue = adoptionMissing.length > 0
-    ? `客户端没有提供：${adoptionMissing.join("、")}。补全后才能保存。`
-    : validationError
-      ? `还不能保存：${validationError}`
-      : duplicateName
-        ? "内部名称已存在，请关闭后重试。"
-        : null;
-  const saveDisabled = busy || !connection || ((adopting || duplicating) && (Boolean(validationError) || duplicateName));
+  const saveDisabled = busy || !connection || (duplicating && (Boolean(validationError) || duplicateName));
 
   useLayoutEffect(() => {
     return () => restoreFocusRef.current?.focus();
@@ -169,7 +158,7 @@ export function ConnectionFormDialog({
       setLocalError(`已经有名为 ${name} 的接入，请换一个名称`);
       return;
     }
-    const validationError = validateConnectionEntry(connection);
+    const validationError = validateConnectionEntry(connection, strict);
     if (validationError) {
       setLocalError(validationError);
       return;
@@ -207,11 +196,11 @@ export function ConnectionFormDialog({
             <h2 className="text-lg font-semibold text-foreground">{dialogTitle}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               {editing
-                ? `修改 ${agentName} 的这套接入；留空凭据取值不会覆盖外部密钥文件中的值。`
+                ? editingCurrent
+                  ? `这是 ${agentName} 当前生效的接入：保存即写进助手配置，并同步更新这里保存的内容；留空凭据取值不会覆盖外部密钥文件中的值。`
+                  : `修改 ${agentName} 的这套接入；只保存，不切换当前接入。留空凭据取值不会覆盖外部密钥文件中的值。`
                 : duplicating
                   ? "确认新名称即可创建；原 Provider、当前接入和客户端配置都不会改变。"
-                  : adopting
-                    ? "这里只把客户端当前值保存成一个 Provider，不会修改、切换或覆盖客户端配置。"
                 : "先选厂商，再确认地址、模型和凭据；安装命令不在这里。"}
             </p>
           </div>
@@ -326,23 +315,8 @@ export function ConnectionFormDialog({
                 </>
               ) : (
                 <>
-              {adopting && (
-                <div
-                  data-testid="adoption-readiness"
-                  className={cn(
-                    "rounded-lg border px-3 py-2 text-sm",
-                    adoptionIssue
-                      ? "border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100"
-                      : "border-emerald-300 bg-emerald-50 text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-100",
-                  )}
-                >
-                  {adoptionIssue ?? "客户端当前配置已完整，可以保存为 Provider。"}
-                </div>
-              )}
               <div className="flex items-center justify-between gap-3">
-                <h3 className="text-sm font-medium text-foreground">
-                  {adopting ? "请核对这 4 项" : "Provider 配置"}
-                </h3>
+                <h3 className="text-sm font-medium text-foreground">Provider 配置</h3>
                 {!prefilled && (
                   <span data-testid="selected-connection-preset" className="text-xs text-muted-foreground">
                     已选择：{presets.find((preset) => preset.id === choice)?.label ?? "自定义"}
@@ -358,7 +332,7 @@ export function ConnectionFormDialog({
                     value={connection.label}
                     onChange={(event) => patch({ label: event.target.value })}
                     placeholder="例如：工作账号"
-                    className={cn("mt-1 w-full rounded border p-2 text-sm", adopting && !connection.label.trim() ? "border-amber-500" : "border-input")}
+                    className="mt-1 w-full rounded border border-input p-2 text-sm"
                   />
                 </label>
                 <label className="text-sm text-foreground">
@@ -368,11 +342,16 @@ export function ConnectionFormDialog({
                     value={connection.model}
                     onChange={(event) => patch({ model: event.target.value })}
                     placeholder={kind === "claude" ? "例如：claude-sonnet-4-5" : "例如：gpt-5"}
-                    className={cn("mt-1 w-full rounded border p-2 font-mono text-sm", adopting && !connection.model.trim() ? "border-amber-500" : "border-input")}
+                    className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
                     spellCheck={false}
                   />
                 </label>
               </div>
+              {referenced ? (
+                <p data-testid="connection-provider-ref" className="rounded border bg-muted px-3 py-2 text-xs text-muted-foreground">
+                  引用 config.toml 中已有的接入方式 <code>{connection.providerRef}</code>：地址、凭据变量与超时由那张表决定，这里不改。
+                </p>
+              ) : (
               <label className="block text-sm text-foreground">
                 API 地址
                 <input
@@ -380,11 +359,17 @@ export function ConnectionFormDialog({
                   value={connection.baseUrl}
                   onChange={(event) => patch({ baseUrl: event.target.value })}
                   placeholder="https://api.example.com"
-                  className={cn("mt-1 w-full rounded border p-2 font-mono text-sm", adopting && !connection.baseUrl.trim() ? "border-amber-500" : "border-input")}
+                  className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
                   spellCheck={false}
                 />
+                {isPlainHttpUrl(connection.baseUrl) && (
+                  <span data-testid="connection-plain-http" className="mt-1 block text-xs text-warning">
+                    非 https 地址：令牌将明文传输，只在可信的内网或本机使用。
+                  </span>
+                )}
               </label>
-              {!adopting && <label className="block text-sm text-foreground">
+              )}
+              <label className="block text-sm text-foreground">
                 备注（可选）
                 <textarea
                   data-testid="new-connection-note"
@@ -398,8 +383,8 @@ export function ConnectionFormDialog({
                 <span className="mt-1 block text-xs text-muted-foreground">
                   仅用于本应用展示和搜索，不会写进助手配置；导出接入时会一并包含。
                 </span>
-              </label>}
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              </label>
+              {!referenced && <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className="text-sm text-foreground">
                   API Key 环境变量
                   <input
@@ -407,11 +392,11 @@ export function ConnectionFormDialog({
                     value={connection.tokenVar}
                     onChange={(event) => patch({ tokenVar: event.target.value })}
                     placeholder={kind === "claude" ? "ANTHROPIC_AUTH_TOKEN" : "OPENAI_API_KEY"}
-                    className={cn("mt-1 w-full rounded border p-2 font-mono text-sm", adopting && !connection.tokenVar.trim() ? "border-amber-500" : "border-input")}
+                    className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
                     spellCheck={false}
                   />
                 </label>
-                {kind === "claude" && !adopting ? (
+                {kind === "claude" ? (
                   <label className="text-sm text-foreground">
                     API Key（可选）
                     <input
@@ -432,7 +417,7 @@ export function ConnectionFormDialog({
                     Codex 启动时自己读取这个环境变量；本应用不会把明文凭据写进 Codex 配置。
                   </p>
                 ) : null}
-              </div>
+              </div>}
 
               <details
                 className="rounded-lg border px-3 py-2"
@@ -443,7 +428,7 @@ export function ConnectionFormDialog({
                   高级字段
                 </summary>
                 <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {!adopting && <label className="text-sm text-foreground">
+                  <label className="text-sm text-foreground">
                     唯一名称
                     <input
                       data-testid="new-connection-name"
@@ -453,8 +438,8 @@ export function ConnectionFormDialog({
                       title={editing ? "唯一名称用于配置引用，编辑时保持不变" : undefined}
                       className="mt-1 w-full rounded border border-input p-2 font-mono text-sm disabled:bg-muted disabled:text-muted-foreground"
                     />
-                  </label>}
-                  <label className="text-sm text-foreground">
+                  </label>
+                  {!referenced && <label className="text-sm text-foreground">
                     请求超时（毫秒，可选）
                     <input
                       value={connection.timeoutMs}
@@ -462,7 +447,7 @@ export function ConnectionFormDialog({
                       inputMode="numeric"
                       className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
                     />
-                  </label>
+                  </label>}
                   {kind === "claude" && (
                     <label className="text-sm text-foreground">
                       认证方式
@@ -523,8 +508,8 @@ export function ConnectionFormDialog({
               </details>
 
               <p className="rounded-lg border bg-muted/40 px-3 py-2 text-xs leading-5 text-muted-foreground">
-                {adopting
-                  ? "点击保存只会创建一个新的 Provider，不会应用到客户端。保存后可在卡片上单独选择是否应用。"
+                {editingCurrent
+                  ? "保存即写进助手配置；配置文件在打开后被外部改过时会拒绝写入并刷新，不会覆盖外部修改。"
                   : "保存只更新 Provider 定义，不写助手配置。需要生效时，请回到卡片点击“应用”。"}
               </p>
                 </>
@@ -564,12 +549,12 @@ export function ConnectionFormDialog({
             {busy
               ? "正在保存…"
               : editing
-                ? "保存修改"
+                ? editingCurrent
+                  ? "保存并写入"
+                  : "保存修改"
                 : duplicating
                   ? "创建副本"
-                  : adopting
-                    ? "保存为 Provider"
-                    : "保存接入"}
+                  : "保存接入"}
           </button>
         </div>
       </section>
