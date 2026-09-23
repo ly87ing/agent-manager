@@ -160,23 +160,38 @@ fn parse_definitions(policy: &Value, builtin: &Value) -> Result<Vec<AgentDef>> {
             .and_then(|v| v.get("path").or(Some(v)))
             .and_then(Value::as_str)
             .map(str::to_string);
-        let providers = raw
-            .get("providers")
-            .and_then(Value::as_object)
-            .ok_or_else(|| anyhow!("agents.definitions 中 '{}' 缺少 providers", id))?;
-        let preferred = raw
-            .get("preferred_provider")
-            .and_then(Value::as_str)
-            .ok_or_else(|| anyhow!("agents.definitions 中 '{}' 缺少 preferred_provider", id))?;
-        let cfg = providers
-            .get(preferred)
-            .and_then(Value::as_object)
-            .ok_or_else(|| {
-                anyhow!(
-                    "agents.definitions 中 '{}' 的 preferred_provider 未在 providers 声明",
-                    id
-                )
-            })?;
+        // 实例（带 profile 段）借用基础助手的软件，自己没有安装渠道：界面建的实例定义不带
+        // providers，缺省按空渠道处理，否则一个实例就会让整个 agents:status 失败。
+        let no_providers = Map::new();
+        let instance_without_providers =
+            raw.get("profile").is_some() && raw.get("providers").is_none();
+        let providers = if instance_without_providers {
+            &no_providers
+        } else {
+            raw.get("providers")
+                .and_then(Value::as_object)
+                .ok_or_else(|| anyhow!("agents.definitions 中 '{}' 缺少 providers", id))?
+        };
+        let preferred = if instance_without_providers {
+            "native"
+        } else {
+            raw.get("preferred_provider")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("agents.definitions 中 '{}' 缺少 preferred_provider", id))?
+        };
+        let cfg = if instance_without_providers {
+            &no_providers
+        } else {
+            providers
+                .get(preferred)
+                .and_then(Value::as_object)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "agents.definitions 中 '{}' 的 preferred_provider 未在 providers 声明",
+                        id
+                    )
+                })?
+        };
         let builtin_cfg = builtin_raw
             .and_then(|v| v.get("providers"))
             .and_then(|v| v.get(preferred))
@@ -560,7 +575,12 @@ fn status_element(
         "management".into(),
         crate::native_agent_adapters::management_for_bin(&def.bin),
     );
-    if let Some(kind) = crate::native_agent_adapters::kind_for_bin(&def.bin) {
+    // 实例（带 profile 段的定义）的登录状态与实际配置在它自己的配置目录里，由 profiles:status
+    // 报告；这里读主目录会把主实例的值错当成实例的
+    let is_instance = def.spec.get("profile").is_some();
+    if let Some(kind) =
+        crate::native_agent_adapters::kind_for_bin(&def.bin).filter(|_| !is_instance)
+    {
         let auth_kind = match kind {
             crate::native_agent_adapters::AdapterKind::Claude => {
                 crate::native_auth::AuthKind::Claude

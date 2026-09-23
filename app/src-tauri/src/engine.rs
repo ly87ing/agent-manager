@@ -37,7 +37,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / agents:configure|check / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:adopt / agents:configure|check / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
             ),
         )
     };
@@ -60,6 +60,8 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("hooks", "discard-legacy") => true,
         // 丢弃旧版本保存的终端快捷命令：只写库，不动 rc 文件
         ("aliases", "discard-legacy") => true,
+        // 以实例的实际配置更新实例定义：只写库，不动实例文件
+        ("profiles", "adopt") => true,
         // 运行参数写助手自己的配置文件：与装卸升级的 apply 分开，那条走 shell 命令
         ("agents", "configure") => true,
         // 接入配置可用性检查：会联网，但只在界面上点它时才发
@@ -169,6 +171,11 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--legacy", ArgValueKind::SuggestionId));
         }
         ("aliases", "discard-legacy") => specs.push(("--legacy", ArgValueKind::SuggestionId)),
+        // 以实际配置更新实例定义：同样带基准，确认采纳的就是用户看到的那份实际内容
+        ("profiles", "adopt") => {
+            specs.push(("--only", ArgValueKind::ElementId));
+            specs.push(("--base", ArgValueKind::RuleBase));
+        }
         // 只读发现：--only 取域名（agents/skills/mcp），引擎侧再做词汇表校验
         ("system", "discover") => specs.push(("--only", ArgValueKind::ElementId)),
         ("runs", "get") => {
@@ -229,9 +236,9 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
                 specs.push(("--to-base", ArgValueKind::Digest));
                 specs.push(("--replace", ArgValueKind::Flag));
             }
-            // 实例配置文件由本工具全权拥有：已有他人内容时需显式接管
+            // 实例配置以实际文件为准：写入带 status 给出的基准，外部改过就被拒；「接管」已退役
             if domain == "profiles" {
-                specs.push(("--allow-takeover", ArgValueKind::Flag));
+                specs.push(("--base", ArgValueKind::RuleBase));
             }
         }
         _ => {}
@@ -619,6 +626,7 @@ mod tests {
             "aliases:discard-legacy",
             "profiles:status",
             "profiles:apply",
+            "profiles:adopt",
             "secrets:status",
             "secrets:set",
             "secrets:source",
@@ -1173,6 +1181,39 @@ mod tests {
                 "{command} {args:?} should fail"
             );
         }
+    }
+
+    /// 实例以实际文件为准：写入与采纳都带基准；「接管」参数已退役。
+    #[test]
+    fn profiles_args_follow_the_actual_config_contract() {
+        let base = "b".repeat(64);
+        let args = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(validate_command("profiles:adopt").is_ok());
+        for command in ["profiles:apply", "profiles:adopt"] {
+            assert!(
+                validate_args(
+                    command,
+                    &args(&["--only", "profiles:cc-ly", "--base", &base])
+                )
+                .is_ok(),
+                "{command} 带 base 应放行"
+            );
+            assert!(validate_args(
+                command,
+                &args(&["--only", "profiles:cc-ly", "--base", "missing"])
+            )
+            .is_ok());
+            assert!(validate_args(
+                command,
+                &args(&["--only", "profiles:cc-ly", "--base", "XYZ"])
+            )
+            .is_err());
+        }
+        assert!(validate_args(
+            "profiles:apply",
+            &args(&["--only", "profiles:cc-ly", "--allow-takeover"])
+        )
+        .is_err());
     }
 
     #[test]

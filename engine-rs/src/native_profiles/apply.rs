@@ -1,8 +1,13 @@
 //! profiles 域真实写入：为一个实例建好独立配置目录并写入它的那份配置文件。
 //!
-//! 写入面只有 `<配置目录>/settings.json`（Claude）或 `<配置目录>/config.toml`（Codex），
-//! 这个文件由本工具全权拥有：目标已存在且不是本工具最后写入的那份时 fail-closed，
-//! 需要显式 `--allow-takeover` 才替换。全局 `~/.claude` 与 `~/.codex` 全程不碰。
+//! 写入面只有 `<配置目录>/settings.json`（Claude，只改实例定义声明的 env 变量与 model）
+//! 或 `<配置目录>/agent-manager.config.toml`（Codex，整份由本工具维护）。以实际文件为准：
+//! 调用方必须带 status 给出的 `--base`，实际与之不符时拒绝（「已在外部修改」），文件与库都
+//! 不动；不再有「接管 = 用库覆盖」。目标是符号链接时写到最终目标文件，链接本身不变。
+//! 全局 `~/.claude` 与 `~/.codex` 全程不碰。
+//!
+//! `profiles:adopt` 反方向：把实际文件里的值写回实例定义（只改库，不动文件），同样按
+//! `--base` 确认用户看到的就是这份实际内容；凭据不以明文进库。
 //!
 //! 事务顺序：preflight（零写）→ 取全局锁（调用方）→ 建目录 → 原子换入文件 →
 //! 写 binding 与审计 → 提交；提交失败即回滚文件到写前状态。
@@ -28,6 +33,33 @@ fn parse_only(req: &Request) -> Result<String> {
     Ok(id.to_string())
 }
 
+fn parse_base(req: &Request) -> Result<String> {
+    let base = req
+        .value("--base")
+        .ok_or_else(|| anyhow!("缺少 --base（取 profiles:status 给出的写入基准）"))?;
+    if base != model::BASE_MISSING && !crate::native_mcp::model::is_sha256_hex(base) {
+        bail!("--base 必须是 64 位小写 sha256 或 missing");
+    }
+    Ok(base.to_string())
+}
+
+/// 严格参数：只接受 `--only <id> --base <digest>`。
+fn check_args(req: &Request, command: &str) -> Result<()> {
+    if req.flag("--dry-run") {
+        bail!("{command} 已退役 --dry-run，拒绝该参数");
+    }
+    let mut iter = req.args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--only" | "--base" => {
+                iter.next();
+            }
+            other => bail!("{command} 不支持参数 '{other}'"),
+        }
+    }
+    Ok(())
+}
+
 fn find_def(ctx: &Context, id: &str) -> Result<ProfileDef> {
     let policy = store::effective_policy(ctx)?;
     for parsed in model::load_definitions(&policy) {
@@ -39,7 +71,6 @@ fn find_def(ctx: &Context, id: &str) -> Result<ProfileDef> {
         }
     }
     // 精确定位：目标实例可能就是那条损坏定义
-    let policy = store::effective_policy(ctx)?;
     if let Some(raw) = policy
         .get("agents")
         .and_then(|v| v.get("definitions"))
@@ -51,81 +82,96 @@ fn find_def(ctx: &Context, id: &str) -> Result<ProfileDef> {
     bail!("未知实例: {}", id)
 }
 
-/// 锁前预检：参数与状态校验，全程零写。
-pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
-    if req.flag("--dry-run") {
-        bail!("profiles:apply 已退役 --dry-run，拒绝该参数");
-    }
-    for arg in &req.args {
-        if !matches!(arg.as_str(), "--only" | "--allow-takeover") && arg.starts_with("--") {
-            bail!("profiles:apply 不支持参数 '{}'", arg);
-        }
-    }
+/// 实例目标文件：解析符号链接到最终普通文件（与 hooks、接入配置一致），返回
+/// （展示用文件名, 实际读写路径, 现有字节）。
+fn read_target(def: &ProfileDef, dir: &Path) -> Result<(String, PathBuf, Option<Vec<u8>>)> {
+    let file = def.kind.target_file().to_string();
+    let path = dir.join(&file);
+    let real = crate::native_agent_settings::resolve_write_target(&path)
+        .map_err(|err| anyhow!("[{}] {err:#}", def.id))?;
+    let bytes = match std::fs::symlink_metadata(&real) {
+        Ok(meta) if meta.is_file() => Some(std::fs::read(&real)?),
+        Ok(_) => bail!("[{}] {} 不是普通文件，拒绝写入", def.id, file),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(err) => return Err(err.into()),
+    };
+    Ok((file, real, bytes))
+}
+
+/// 上次写入记下的路径（没有记录时为空）。
+fn recorded_paths(ctx: &Context, def: &ProfileDef, file: &str) -> Result<Vec<String>> {
+    Ok(match store::open_readonly(ctx)? {
+        Some(conn) => load_bindings_from(&conn)?
+            .get(&(def.id.clone(), file.to_string()))
+            .map(|b| b.owned.clone())
+            .unwrap_or_default(),
+        None => Vec::new(),
+    })
+}
+
+fn stale(def: &ProfileDef, file: &str) -> anyhow::Error {
+    anyhow!(
+        "[{}] {} 已在外部修改（与打开时读到的内容不同），没有写入；请刷新后重新操作",
+        def.id,
+        file
+    )
+}
+
+/// 一次写入的计划：锁前与锁内各算一次，锁内结果为准。
+struct Plan {
+    def: ProfileDef,
+    dir: PathBuf,
+    file: String,
+    real: PathBuf,
+    previous: Option<Vec<u8>>,
+    content: Vec<u8>,
+}
+
+fn plan(ctx: &Context, req: &Request) -> Result<Plan> {
+    check_args(req, "profiles:apply")?;
     let id = parse_only(req)?;
+    let base = parse_base(req)?;
     let def = find_def(ctx, &id)?;
     if !def.enabled {
         bail!("[{}] 实例已停用，拒绝写入", id);
     }
     let dir = model::validate_config_dir(&def, &ctx.home_dir, &ctx.data_dir)?;
-    // 渲染一次：变量缺失、来源结构非法在取锁前就暴露
+    let (file, real, previous) = read_target(&def, &dir)?;
+    if model::live_base(def.kind, previous.as_deref())? != base {
+        return Err(stale(&def, &file));
+    }
+    let recorded = recorded_paths(ctx, &def, &file)?;
+    // 渲染：变量缺失、现有文件损坏在取锁前就暴露
     let rendered = model::render_all(
         &def,
-        &|file| std::fs::read(dir.join(file)).ok(),
+        &|_| previous.clone(),
         &crate::secret_values::lookup,
+        &recorded,
     )?;
-
-    let allow = req.flag("--allow-takeover");
-    for target in &rendered {
-        let path = dir.join(&target.file);
-        if std::fs::symlink_metadata(&path)
-            .map(|m| m.file_type().is_symlink())
-            .unwrap_or(false)
-        {
-            bail!("[{}] {} 是符号链接，拒绝写入", id, target.file);
-        }
-        if path.exists() && !path.is_file() {
-            bail!("[{}] {} 被目录占用，拒绝写入", id, target.file);
-        }
-        check_takeover(ctx, &def, &target.file, &path, &target.content, allow)?;
-    }
-    Ok(())
+    let content = rendered
+        .into_iter()
+        .next()
+        .map(|target| target.content)
+        .ok_or_else(|| anyhow!("[{}] 没有要写的文件", id))?;
+    Ok(Plan {
+        def,
+        dir,
+        file,
+        real,
+        previous,
+        content,
+    })
 }
 
-/// 目标已存在但不是本工具最后写入的那份时，必须显式接管。
-fn check_takeover(
-    ctx: &Context,
-    def: &ProfileDef,
-    file: &str,
-    path: &Path,
-    expected: &[u8],
-    allow: bool,
-) -> Result<bool> {
-    if !path.is_file() {
-        return Ok(false);
+/// 锁前预检：参数与状态校验，全程零写。
+pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
+    let cmd = req.command.replace('.', ":");
+    if cmd == "profiles:adopt" {
+        plan_adopt(ctx, req)?;
+    } else {
+        plan(ctx, req)?;
     }
-    let bytes = std::fs::read(path)?;
-    // settings.json 合并写入，只比本工具拥有的键（env/model）；旧绑定的整文件摘要与
-    // 旧版本含 hooks 的摘要照常认（下次写入自动升级），存量用户不会被误报一次。
-    let known = match store::open_readonly(ctx)? {
-        Some(conn) => load_bindings_from(&conn)?
-            .get(&(def.id.clone(), file.to_string()))
-            .map(|b| b.applied_digest.clone()),
-        None => None,
-    };
-    if known
-        .as_deref()
-        .is_some_and(|known| super::model::ours_unchanged(file, &bytes, known, expected))
-    {
-        return Ok(false);
-    }
-    if !allow {
-        bail!(
-            "[{}] {} 里本工具写的那部分被改过，拒绝覆盖；确认要用这里的内容替换它请选择接管",
-            def.id,
-            file
-        );
-    }
-    Ok(true)
+    Ok(())
 }
 
 /// 原子换入：同目录临时文件 + rename，权限 0600。
@@ -160,88 +206,56 @@ fn ensure_dir(path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
+fn now() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
 pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
-    preflight_apply(ctx, req)?;
-    let id = parse_only(req)?;
-    let def = find_def(ctx, &id)?;
-    let dir = model::validate_config_dir(&def, &ctx.home_dir, &ctx.data_dir)?;
-    let allow = req.flag("--allow-takeover");
-    let rendered = model::render_all(
-        &def,
-        &|file| std::fs::read(dir.join(file)).ok(),
-        &crate::secret_values::lookup,
-    )?;
-
-    let mut takeover = false;
-    for target in &rendered {
-        takeover |= check_takeover(
-            ctx,
-            &def,
-            &target.file,
-            &dir.join(&target.file),
-            &target.content,
-            allow,
-        )?;
+    let cmd = req.command.replace('.', ":");
+    if cmd == "profiles:adopt" {
+        return adopt(ctx, req);
     }
+    // 锁内重新读取并比对基准，不沿用锁前结果
+    let plan = plan(ctx, req)?;
+    let def = &plan.def;
 
-    ensure_dir(&dir)?;
-    // 写前留存每个文件的原状，任一步失败就整体还原，不留半套配置
-    let mut restore: Vec<(PathBuf, Option<Vec<u8>>)> = Vec::new();
-    let mut written: Vec<(String, String)> = Vec::new();
-    let rollback = |restore: &[(PathBuf, Option<Vec<u8>>)]| {
-        for (path, previous) in restore {
-            match previous {
-                Some(bytes) => {
-                    let _ = std::fs::write(path, bytes);
-                }
-                None => {
-                    let _ = std::fs::remove_file(path);
-                }
-            }
+    ensure_dir(&plan.dir)?;
+    let existed = plan.previous.is_some();
+    // 写前再比一次字节：锁内读取之后若又被改过，拒绝替换
+    let current = std::fs::read(&plan.real).ok();
+    if current != plan.previous {
+        return Err(stale(def, &plan.file));
+    }
+    atomic_write(&plan.real, &plan.content)?;
+    let rollback = || match &plan.previous {
+        Some(bytes) => {
+            let _ = std::fs::write(&plan.real, bytes);
+        }
+        None => {
+            let _ = std::fs::remove_file(&plan.real);
         }
     };
-
-    for target in &rendered {
-        let path = dir.join(&target.file);
-        let previous = if path.is_file() {
-            match std::fs::read(&path) {
-                Ok(bytes) => Some(bytes),
-                Err(err) => {
-                    rollback(&restore);
-                    return Err(err.into());
-                }
-            }
-        } else {
-            None
-        };
-        restore.push((path.clone(), previous));
-        if let Err(err) = atomic_write(&path, &target.content) {
-            rollback(&restore);
-            return Err(err);
-        }
-        // 记「本工具拥有的那部分」的摘要：settings.json 是合并写入，
-        // 用户随后往里加自己的设置不该被判成外部修改。
-        written.push((
-            target.file.clone(),
-            super::model::owned_slice_digest(&target.file, &target.content),
-        ));
-    }
 
     let result = (|| -> Result<()> {
         let mut conn = store::open_write(ctx)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        for (file, digest) in &written {
-            write_binding(
-                &tx,
-                &Binding {
-                    profile_id: def.id.clone(),
-                    file: file.clone(),
-                    applied_digest: digest.clone(),
-                    updated_at: chrono::Utc::now()
-                        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        write_binding(
+            &tx,
+            &Binding {
+                profile_id: def.id.clone(),
+                file: plan.file.clone(),
+                applied_digest: {
+                    let base = model::live_base(def.kind, Some(&plan.content))?;
+                    if base == model::BASE_MISSING {
+                        crate::native_mcp::model::sha256_hex_bytes(&plan.content)
+                    } else {
+                        base
+                    }
                 },
-            )?;
-        }
+                updated_at: now(),
+                owned: model::owned_paths(def),
+            },
+        )?;
         store::record_operation(
             &tx,
             Some(&req.run_id),
@@ -250,8 +264,8 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
             Some(&json!({
                 "action": "apply",
                 "kind": def.kind.as_str(),
-                "takeover": takeover,
-                "files": written.iter().map(|(file, _)| file.clone()).collect::<Vec<_>>(),
+                "created": !existed,
+                "files": [plan.file.clone()],
             })),
         )?;
         tx.commit()?;
@@ -259,7 +273,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     })();
 
     if let Err(err) = result {
-        rollback(&restore);
+        rollback();
         return Err(err);
     }
 
@@ -267,5 +281,88 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
         "domain": "profiles",
         "steps": [{"name": format!("profiles:apply {}", def.id), "ok": true, "exit_code": 0}],
         "skipped": [],
+        "base": model::live_base(def.kind, Some(&plan.content))?,
+    }))
+}
+
+/// 采纳计划：新 profile 段与提示。
+struct AdoptPlan {
+    def: ProfileDef,
+    profile: serde_json::Map<String, Value>,
+    notes: Vec<String>,
+}
+
+fn plan_adopt(ctx: &Context, req: &Request) -> Result<AdoptPlan> {
+    check_args(req, "profiles:adopt")?;
+    let id = parse_only(req)?;
+    let base = parse_base(req)?;
+    let def = find_def(ctx, &id)?;
+    let dir = model::validate_config_dir(&def, &ctx.home_dir, &ctx.data_dir)?;
+    let (file, _real, bytes) = read_target(&def, &dir)?;
+    if model::live_base(def.kind, bytes.as_deref())? != base {
+        return Err(stale(&def, &file));
+    }
+    let policy = store::effective_policy(ctx)?;
+    let raw_profile = policy
+        .get("agents")
+        .and_then(|v| v.get("definitions"))
+        .and_then(|v| v.get(&id))
+        .and_then(|v| v.get("profile"))
+        .and_then(Value::as_object)
+        .cloned()
+        .ok_or_else(|| anyhow!("未知实例: {}", id))?;
+    let (profile, notes) = model::adopt_profile(
+        &def,
+        &raw_profile,
+        bytes.as_deref(),
+        &crate::secret_values::lookup,
+    )?;
+    // 采纳结果必须仍是合法定义（凭据仍只能是引用等），否则整体拒绝
+    let mut candidate = policy
+        .get("agents")
+        .and_then(|v| v.get("definitions"))
+        .and_then(|v| v.get(&id))
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    candidate["profile"] = Value::Object(profile.clone());
+    model::parse_definition(&id, &candidate, true)
+        .map_err(|err| anyhow!("[{id}] 实际配置无法作为实例定义保存：{err:#}"))?;
+    Ok(AdoptPlan {
+        def,
+        profile,
+        notes,
+    })
+}
+
+/// 以实际配置更新实例定义：只写库。
+fn adopt(ctx: &Context, req: &Request) -> Result<Value> {
+    let plan = plan_adopt(ctx, req)?;
+    let id = plan.def.id.clone();
+    let mut conn = store::open_write(ctx)?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let mut policy = store::policy_from_connection(&tx)?;
+    let definition = policy
+        .get_mut("agents")
+        .and_then(|v| v.get_mut("definitions"))
+        .and_then(|v| v.get_mut(&id))
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| anyhow!("未知实例: {}", id))?;
+    definition.insert("profile".into(), Value::Object(plan.profile));
+    store::write_policy(&tx, &policy)?;
+    store::record_operation(
+        &tx,
+        Some(&req.run_id),
+        "profiles:adopt",
+        Some(&id),
+        Some(
+            &json!({"action": "adopt", "kind": plan.def.kind.as_str(), "notes": plan.notes.len()}),
+        ),
+    )?;
+    tx.commit()?;
+    Ok(json!({
+        "domain": "profiles",
+        "steps": [{"name": format!("profiles:adopt {id}"), "ok": true, "exit_code": 0}],
+        "skipped": [],
+        "notes": plan.notes,
     }))
 }

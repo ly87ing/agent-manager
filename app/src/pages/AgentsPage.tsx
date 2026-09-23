@@ -75,6 +75,8 @@ export default function AgentsPage({
   /** 复制实例：表单带着预填内容，但名称与配置目录仍要能改（否则两个实例指同一套配置）。 */
   const [profileDuplicating, setProfileDuplicating] = useState(false);
   const [profileRemoving, setProfileRemoving] = useState<string | null>(null);
+  // 实际配置与实例定义不同时，用定义覆盖实际配置前先确认
+  const [profileOverwriting, setProfileOverwriting] = useState<EngineElement | null>(null);
   /** 日常接入工作台当前查看的主助手；null 时跟随列表里的第一个。 */
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [connectionForm, setConnectionForm] = useState<{
@@ -282,6 +284,17 @@ export default function AgentsPage({
   };
 
   /** 用户显式触发后并发检查当前助手的全部接入；单项失败不阻断其他结果。 */
+  /** 实例写入基准：status 给出的实际内容摘要（文件不存在为 missing）。 */
+  const profileBaseOf = (element: EngineElement): string =>
+    ((element.observed as unknown as { base?: string | null }).base ?? "missing");
+
+  const writeProfile = (element: EngineElement) =>
+    profileApply.apply({
+      command: "profiles:apply",
+      label: `写入实例配置 ${element.id.replace(/^profiles:/, "")}`,
+      args: ["--only", element.id, "--base", profileBaseOf(element)],
+    });
+
   const runCheckAll = async (agentId: string, profiles: string[]): Promise<void> => {
     if (checkingAllAgentId || profiles.length === 0) return;
     setCheckingAllAgentId(agentId);
@@ -726,18 +739,18 @@ export default function AgentsPage({
                   element={element}
                   bin={baseBinOf((element.spec as unknown as { base_agent?: string }).base_agent ?? id)}
                   busy={profileApply.executing}
-                  onApply={() =>
+                  onApply={() => {
+                    if (element.state === "drifted") {
+                      setProfileOverwriting(element);
+                      return;
+                    }
+                    void writeProfile(element);
+                  }}
+                  onAdopt={() =>
                     void profileApply.apply({
-                      command: "profiles:apply",
-                      label: `写入实例配置 ${id}`,
-                      args: ["--only", element.id],
-                    })
-                  }
-                  onTakeover={() =>
-                    void profileApply.apply({
-                      command: "profiles:apply",
-                      label: `接管并写入实例配置 ${id}`,
-                      args: ["--only", element.id, "--allow-takeover"],
+                      command: "profiles:adopt",
+                      label: `以实际配置更新实例定义 ${id}`,
+                      args: ["--only", element.id, "--base", profileBaseOf(element)],
                     })
                   }
                   onEdit={() => {
@@ -881,6 +894,22 @@ export default function AgentsPage({
             setProfileForm(null);
             setProfileDuplicating(false);
           }}
+        />
+      )}
+
+      {profileOverwriting && (
+        <ConfirmModal
+          title={`用定义覆盖 ${profileOverwriting.id.replace(/^profiles:/, "")} 的实际配置`}
+          description="实例目录里的实际配置与实例定义不同。继续会按定义写入这几项（你自己加的其他设置保留）；想保留实际配置请改用「以实际配置更新定义」。"
+          risk="write-local"
+          confirmLabel="确认覆盖"
+          executing={profileApply.executing}
+          onConfirm={() => {
+            const target = profileOverwriting;
+            setProfileOverwriting(null);
+            void writeProfile(target);
+          }}
+          onClose={() => setProfileOverwriting(null)}
         />
       )}
 

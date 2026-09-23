@@ -74,6 +74,26 @@ fn write_json(path: &Path, value: &Value) {
     std::fs::write(path, serde_json::to_vec_pretty(value).unwrap()).unwrap();
 }
 
+/// 实例写入基准（profiles:status 给出的实际内容摘要）。
+fn profile_base(ctx: &Context, id: &str) -> String {
+    let st = run(ctx, "profiles:status", &[]);
+    st.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == id)
+        .unwrap_or_else(|| panic!("缺实例 {id}"))["observed"]["base"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{id} 没有 base"))
+        .to_string()
+}
+
+/// 按当前实际内容写入实例。
+fn apply_profile(ctx: &Context, id: &str) -> Envelope {
+    let base = profile_base(ctx, id);
+    run(ctx, "profiles:apply", &["--only", id, "--base", &base])
+}
+
 fn read_json(path: &Path) -> Value {
     serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
 }
@@ -614,7 +634,7 @@ fn instance_hooks_are_targets_and_profiles_apply_leaves_them_alone() {
 
     // profiles:apply 建目录，但不生成 hooks
     for id in ["profiles:cc-ly", "profiles:cx-work"] {
-        let env = run(&ctx, "profiles:apply", &["--only", id]);
+        let env = apply_profile(&ctx, id);
         assert!(env.ok, "{:?}", env.errors);
     }
     let cc_settings = ctx.home_dir.join(".claude-ly/settings.json");
@@ -647,7 +667,7 @@ fn instance_hooks_are_targets_and_profiles_apply_leaves_them_alone() {
     let cc_base = base_of(&ctx, "hooks:profile:cc-ly");
     let cx_bytes = std::fs::read(&cx_hooks).unwrap();
     for id in ["profiles:cc-ly", "profiles:cx-work"] {
-        let env = run(&ctx, "profiles:apply", &["--only", id]);
+        let env = apply_profile(&ctx, id);
         assert!(
             env.ok,
             "改过实例 hooks 不算实例配置被外部改过: {:?}",
@@ -717,8 +737,8 @@ fn old_profile_fingerprint_with_hooks_does_not_block_after_hooks_edit() {
         &json!({"Stop": [{"hooks": [hook("new")]}]}),
     );
     assert!(env.ok, "{:?}", env.errors);
-    let env = run(&ctx, "profiles:apply", &["--only", "profiles:cc-old"]);
-    assert!(env.ok, "只改了 hooks，不需要接管: {:?}", env.errors);
+    let env = apply_profile(&ctx, "profiles:cc-old");
+    assert!(env.ok, "只改了 hooks，实例写入照常: {:?}", env.errors);
     assert_eq!(
         read_json(&path)["hooks"]["Stop"][0]["hooks"][0]["command"],
         "new"

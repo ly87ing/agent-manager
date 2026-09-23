@@ -477,7 +477,7 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
                 .map(|data| (data, vec![]))
                 .map_err(|err| DispatchError::new("HOOK_ERROR", format!("{err:#}")))
         }
-        ("profiles", "status" | "apply") => crate::native_profiles::handle(ctx, request)
+        ("profiles", "status" | "apply" | "adopt") => crate::native_profiles::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("PROFILE_ERROR", format!("{err:#}"))),
         // 别名以 rc 文件受管区块的实际行为准：apply 写文件（取锁），丢弃旧版保存的别名只写库

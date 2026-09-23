@@ -1,16 +1,14 @@
-//! profiles 域只读状态：实例定义 ∪ 已写入记录的全集视图。
+//! profiles 域只读状态：每个实例定义一个元素。
 //!
 //! 零写：不创建配置目录、数据目录、数据库或目标文件；只做路径校验与字节读取。
-//! 输出只含变量名与是否可解析，绝不含变量取值或目标文件正文。
+//! 以实际文件为准：输出实例目标文件的写入基准与逐字段对比（定义 vs 实际）；凭据只给
+//! 是否一致，绝不含取值或目标文件正文。
 
 use anyhow::Result;
 use serde_json::{json, Map, Value};
-use std::collections::BTreeMap;
 
 use super::model::{self, ProfileDef};
-use super::persistence::{load_bindings_from, Binding};
 use crate::native::Context;
-use crate::native_mcp::model::sha256_hex_bytes;
 use crate::store;
 
 /// 实例执行的命令：取基础助手定义里的 bin，取不到时退回实例类型的默认命令名。
@@ -33,13 +31,6 @@ fn base_bin(ctx: &Context, def: &ProfileDef) -> String {
         .unwrap_or_else(|| fallback.to_string())
 }
 
-fn bindings(ctx: &Context) -> Result<BTreeMap<(String, String), Binding>> {
-    match store::open_readonly(ctx)? {
-        Some(conn) => load_bindings_from(&conn),
-        None => Ok(BTreeMap::new()),
-    }
-}
-
 /// 定义解析失败的固定语义块：只给类别与可读原因，不回显定义正文。
 fn invalid_element(id: &str, err: &anyhow::Error) -> Value {
     json!({
@@ -54,11 +45,7 @@ fn invalid_element(id: &str, err: &anyhow::Error) -> Value {
     })
 }
 
-fn element(
-    ctx: &Context,
-    def: &ProfileDef,
-    bindings: &BTreeMap<(String, String), Binding>,
-) -> Value {
+fn element(ctx: &Context, def: &ProfileDef) -> Value {
     let dir_check = model::validate_config_dir(def, &ctx.home_dir, &ctx.data_dir);
     let (config_dir, blocked) = match dir_check {
         Ok(path) => (Some(path), None),
@@ -66,51 +53,54 @@ fn element(
     };
     let dir_exists = config_dir.as_ref().map(|dir| dir.is_dir()).unwrap_or(false);
 
-    // 逐个受管文件报状态：没渲染出来（来源损坏等）就只报目录层信息，不谎报就绪
-    let rendered = config_dir.as_ref().and_then(|dir| {
-        model::render_all(
-            def,
-            &|file| std::fs::read(dir.join(file)).ok(),
-            &crate::secret_values::lookup,
-        )
-        .ok()
-    });
-    let mut files = Vec::new();
-    let mut all_applied = rendered.is_some();
-    let mut any_present = false;
-    if let (Some(dir), Some(targets)) = (config_dir.as_ref(), rendered.as_ref()) {
-        for target in targets {
-            let path = dir.join(&target.file);
-            let bytes = std::fs::read(&path).ok();
-            // settings.json 合并写入，只比本工具拥有的键（env/model）；其余文件
-            // 整份归本工具，比整文件。旧绑定的整文件摘要与含 hooks 的旧摘要也照常认。
-            let actual = bytes.as_ref().map(|b| sha256_hex_bytes(b));
-            let known = bindings
-                .get(&(def.id.clone(), target.file.clone()))
-                .map(|b| b.applied_digest.as_str());
-            let expected = sha256_hex_bytes(&target.content);
-            let ours_unchanged = match (&bytes, known) {
-                (Some(bytes), Some(known)) => {
-                    super::model::ours_unchanged(&target.file, bytes, known, &target.content)
-                }
-                _ => false,
-            };
-            let state = match (&actual, known) {
-                (None, _) => "not-materialized",
-                (Some(actual), Some(_)) if ours_unchanged && *actual == expected => "managed-ok",
-                // 本工具写过但内容该更新了：按需要重新写入处理，不算外部改动
-                (Some(_), Some(_)) if ours_unchanged => "outdated",
-                (Some(_), _) => "drifted",
-            };
-            if actual.is_some() {
-                any_present = true;
-            }
-            if state != "managed-ok" {
-                all_applied = false;
-            }
-            files.push(json!({"file": target.file, "state": state}));
+    // 实际文件为准：读实例配置目录里的目标文件（符号链接解析到最终文件），给出写入基准与
+    // 逐字段对比；不再用「上次写入指纹」判定能不能写。
+    let file = def.kind.target_file();
+    let mut file_blocked: Option<String> = None;
+    let mut bytes: Option<Vec<u8>> = None;
+    if let Some(dir) = config_dir.as_ref() {
+        match crate::native_agent_settings::resolve_write_target(&dir.join(file)) {
+            Ok(real) => match std::fs::symlink_metadata(&real) {
+                Ok(meta) if meta.is_file() => match std::fs::read(&real) {
+                    Ok(read) => bytes = Some(read),
+                    Err(err) => file_blocked = Some(format!("无法读取 {file}: {err}")),
+                },
+                Ok(_) => file_blocked = Some(format!("{file} 不是普通文件")),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => file_blocked = Some(format!("无法读取 {file}: {err}")),
+            },
+            Err(err) => file_blocked = Some(format!("{err:#}")),
         }
     }
+    let base = if file_blocked.is_none() && config_dir.is_some() {
+        match model::live_base(def.kind, bytes.as_deref()) {
+            Ok(base) => Some(base),
+            Err(err) => {
+                file_blocked = Some(format!("{err:#}"));
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let fields = if file_blocked.is_none() && config_dir.is_some() {
+        model::compare_fields(def, bytes.as_deref(), &crate::secret_values::lookup)
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let any_present = bytes.is_some();
+    let all_same = fields.iter().all(|f| f["state"] == "same");
+    let file_state = if file_blocked.is_some() {
+        "unsupported"
+    } else if !any_present {
+        "not-materialized"
+    } else if all_same {
+        "managed-ok"
+    } else {
+        "drifted"
+    };
+    let files = vec![json!({"file": file, "state": file_state})];
 
     // 环境变量只报变量名与当前环境是否给得出取值，绝不输出取值本身。
     let mut env_refs = Vec::new();
@@ -133,25 +123,26 @@ fn element(
         }));
     }
 
-    let state = if blocked.is_some() {
+    let state = if blocked.is_some() || file_blocked.is_some() {
         "unsupported"
     } else if !def.enabled {
         "disabled"
-    } else if all_applied && !files.is_empty() {
-        "managed-ok"
-    } else if files.iter().any(|f| f["state"] == "drifted") {
-        "drifted"
-    } else if !any_present {
-        "not-materialized"
     } else {
-        "drifted"
+        file_state
     };
 
+    // 写入实例文件（用定义覆盖实际）与采纳实际配置（用实际更新定义）都要带 base；
+    // 两个方向都由用户明确选择，不自动改写任一方。
     let mut actions = Vec::new();
-    if blocked.is_none() && def.enabled {
+    if blocked.is_none() && file_blocked.is_none() && def.enabled {
         actions.push(
             json!({"id": "apply", "risk": "write-local", "needs_lock": true, "offline_ok": true}),
         );
+        if any_present && !all_same {
+            actions.push(
+                json!({"id": "adopt", "risk": "write-local", "needs_lock": false, "offline_ok": true}),
+            );
+        }
     }
 
     let mut observed = Map::new();
@@ -181,6 +172,8 @@ fn element(
         observed.insert("auth".into(), crate::native_auth::inspect(dir, auth_kind));
     }
     observed.insert("files".into(), Value::Array(files));
+    observed.insert("base".into(), json!(base));
+    observed.insert("fields".into(), Value::Array(fields));
     observed.insert("env_refs".into(), Value::Array(env_refs));
     observed.insert(
         "launch_value".into(),
@@ -188,7 +181,11 @@ fn element(
     );
     observed.insert(
         "blocked_reason".into(),
-        blocked.clone().map(Value::String).unwrap_or(Value::Null),
+        blocked
+            .clone()
+            .or(file_blocked.clone())
+            .map(Value::String)
+            .unwrap_or(Value::Null),
     );
 
     json!({
@@ -212,11 +209,10 @@ fn element(
 
 pub(crate) fn build_status(ctx: &Context) -> Result<Value> {
     let policy = store::effective_policy(ctx)?;
-    let bindings = bindings(ctx)?;
     let mut elements = Vec::new();
     for (index, parsed) in model::load_definitions(&policy).into_iter().enumerate() {
         match parsed {
-            Ok(def) => elements.push(element(ctx, &def, &bindings)),
+            Ok(def) => elements.push(element(ctx, &def)),
             Err(err) => elements.push(invalid_element(&format!("invalid-{index}"), &err)),
         }
     }

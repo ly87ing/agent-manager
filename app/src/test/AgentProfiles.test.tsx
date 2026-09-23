@@ -33,6 +33,8 @@ function profileElement(overrides: Record<string, unknown> = {}) {
         checked_at: "2026-09-18T03:00:00Z",
         windows: [{ window_minutes: 300, used_percent: 7, resets_at: null }],
       },
+      base: "missing",
+      fields: [],
       blocked_reason: null,
     },
     state: "not-materialized",
@@ -98,6 +100,7 @@ function routes(profiles: ReturnType<typeof profileElement>[] = [profileElement(
     ),
     "profiles:status": makeEnvelope({ domain: "profiles", elements: profiles }, { command: "profiles.status" }),
     "profiles:apply": makeEnvelope(makeApplyResult({ domain: "profiles" }), { command: "profiles.apply" }),
+    "profiles:adopt": makeEnvelope(makeApplyResult({ domain: "profiles" }), { command: "profiles.adopt" }),
     "agents:apply": makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }),
     "aliases:apply": makeEnvelope(makeApplyResult({ domain: "aliases" }), { command: "aliases.apply" }),
     "policy:set": makeEnvelope(makePolicyData(), { command: "policy.set" }),
@@ -228,29 +231,56 @@ describe("助手实例", () => {
     expect(within(dialog).getByTestId("profile-launch-preview")).toHaveTextContent("--dangerously-skip-permissions");
   });
 
-  it("写入配置触发 profiles:apply，限定在该实例", async () => {
+  it("写入配置触发 profiles:apply，限定在该实例并带实际内容的基准", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await openInstanceManager();
     await userEvent.click(await screen.findByTestId("profile-apply-cc-ly"));
     await waitFor(() => expect(calls.some((call) => call.command === "profiles:apply")).toBe(true));
     const apply = calls.find((call) => call.command === "profiles:apply")!;
-    expect(apply.args).toEqual(["--only", "profiles:cc-ly"]);
+    expect(apply.args).toEqual(["--only", "profiles:cc-ly", "--base", "missing"]);
     expect(apply.args).not.toContain("--allow-takeover");
   });
 
-  it("配置被外部改过时按钮转为接管，并显式带接管旗标", async () => {
-    const drifted = profileElement({ state: "drifted", observed: { install_source: null, ...profileElement().observed, target_exists: true, config_dir_exists: true } });
+  it("实际配置与定义不同时列出差异；覆盖要先确认，也可以以实际配置更新定义", async () => {
+    const base = "c".repeat(64);
+    const drifted = profileElement({
+      state: "drifted",
+      observed: {
+        install_source: null,
+        ...profileElement().observed,
+        target_exists: true,
+        config_dir_exists: true,
+        base,
+        fields: [
+          { field: "env.ANTHROPIC_BASE_URL", state: "differs", definition: "https://api.example.com", live: "http://10.0.0.8:8080" },
+          { field: "env.ANTHROPIC_AUTH_TOKEN", state: "same", definition: "${MY_TOKEN}", live: "<hidden>" },
+        ],
+      },
+      actions: [
+        { id: "apply", risk: "write-local", needs_lock: true, offline_ok: true },
+        { id: "adopt", risk: "write-local", needs_lock: false, offline_ok: true },
+      ],
+    });
     const { calls } = renderWithEngine(<AgentsPage />, routes([drifted]));
     await openInstanceManager();
-    const button = await screen.findByTestId("profile-apply-cc-ly");
-    expect(button).toHaveTextContent("接管并写入");
-    await userEvent.click(button);
+    const differs = await screen.findByTestId("profile-differs-cc-ly");
+    expect(differs).toHaveTextContent("env.ANTHROPIC_BASE_URL");
+    expect(differs).toHaveTextContent("http://10.0.0.8:8080");
+    expect(differs).not.toHaveTextContent("ANTHROPIC_AUTH_TOKEN");
+
+    // 覆盖：先确认，确认后带基准写入，不带接管旗标
+    const apply = screen.getByTestId("profile-apply-cc-ly");
+    expect(apply).toHaveTextContent("用定义覆盖实际配置");
+    await userEvent.click(apply);
+    expect(calls.some((call) => call.command === "profiles:apply")).toBe(false);
+    await userEvent.click(await screen.findByRole("button", { name: "确认覆盖" }));
     await waitFor(() => expect(calls.some((call) => call.command === "profiles:apply")).toBe(true));
-    expect(calls.find((call) => call.command === "profiles:apply")!.args).toEqual([
-      "--only",
-      "profiles:cc-ly",
-      "--allow-takeover",
-    ]);
+    expect(calls.find((call) => call.command === "profiles:apply")!.args).toEqual(["--only", "profiles:cc-ly", "--base", base]);
+
+    // 采纳：以实际配置更新定义
+    await userEvent.click(screen.getByTestId("profile-adopt-cc-ly"));
+    await waitFor(() => expect(calls.some((call) => call.command === "profiles:adopt")).toBe(true));
+    expect(calls.find((call) => call.command === "profiles:adopt")!.args).toEqual(["--only", "profiles:cc-ly", "--base", base]);
   });
 
   it("环境变量取不到值时先给出提示", async () => {

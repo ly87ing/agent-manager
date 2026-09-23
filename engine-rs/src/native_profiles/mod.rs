@@ -30,7 +30,8 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
             }
             status::build_status(ctx)
         }
-        "profiles:apply" => apply::apply(ctx, req),
+        // apply：用实例定义写实例文件（取锁）；adopt：用实际文件更新实例定义（只写库）
+        "profiles:apply" | "profiles:adopt" => apply::apply(ctx, req),
         _ => bail!("profiles 域不支持命令 '{}'", req.command),
     }
 }

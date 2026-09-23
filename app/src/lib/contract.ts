@@ -250,7 +250,20 @@ export interface ProfileObserved {
   usage?: AgentUsage | null;
   /** 官方认证文件的脱敏状态；不含账号或凭据正文。 */
   auth?: import("./observed").AgentAuthStatus | null;
+  /** 写入基准：实例目标文件本工具负责部分的摘要，文件不存在为 missing；读不了时为 null。 */
+  base?: string | null;
+  /** 实例定义与实际文件逐字段对比；凭据只给是否一致，取值为 <hidden>。 */
+  fields?: ProfileField[];
   blocked_reason: string | null;
+}
+
+export interface ProfileField {
+  /** env.<变量名> / model，Codex 另有 model_provider、provider.base_url 等。 */
+  field: string;
+  /** same = 一致；differs = 不同；missing = 实际里没有；unresolved = 定义引用的变量取不到值。 */
+  state: "same" | "differs" | "missing" | "unresolved" | string;
+  definition: string | null;
+  live: string | null;
 }
 
 // ---------- system:discover（只读接管发现） ----------

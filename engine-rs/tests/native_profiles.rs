@@ -53,6 +53,32 @@ fn element<'a>(env: &'a agent_manager_engine::Envelope, id: &str) -> &'a serde_j
         .unwrap_or_else(|| panic!("缺少实例 {id}"))
 }
 
+fn status(ctx: &Context) -> agent_manager_engine::Envelope {
+    let env = execute(ctx, &request("profiles:status", &[]));
+    assert!(env.ok, "{:?}", env.errors);
+    env
+}
+
+/// status 给出的写入基准（实际文件为准）。
+fn base_of(ctx: &Context, id: &str) -> String {
+    element(&status(ctx), id)["observed"]["base"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{id} 没有 base"))
+        .to_string()
+}
+
+/// 按当前实际内容写入实例（先取 base 再 apply）。
+fn apply_now(ctx: &Context, id: &str) -> agent_manager_engine::Envelope {
+    let base = base_of(ctx, id);
+    execute(
+        ctx,
+        &request(
+            "profiles:apply",
+            &["--only", &format!("profiles:{id}"), "--base", &base],
+        ),
+    )
+}
+
 /// 测试并行执行，环境变量是进程级共享的：每个用例用各自的变量名，互不清掉对方的。
 fn claude_profile(token_var: &str) -> String {
     format!(
@@ -103,11 +129,16 @@ fn claude_profile_writes_isolated_settings_without_touching_global() {
         .unwrap()
         .contains("sentinel-token-value"));
 
-    // 真实写入
-    let apply = execute(
+    // 没带 base 的写入被拒（必须基于读到的实际内容）
+    let no_base = execute(
         &ctx,
         &request("profiles:apply", &["--only", "profiles:cc-ly"]),
     );
+    assert!(!no_base.ok);
+    assert_eq!(el["observed"]["base"], "missing");
+
+    // 真实写入
+    let apply = apply_now(&ctx, "cc-ly");
     assert!(apply.ok, "{:?}", apply.errors);
     let target = ctx.home_dir.join(".claude-ly/settings.json");
     let written: serde_json::Value =
@@ -157,10 +188,7 @@ fn codex_profile_target_never_contains_the_secret_value() {
         "cx-work",
         r#"{"display_name":"Codex · work","bin":"codex","profile":{"base_agent":"codex","config_dir":"~/.codex-work","base_url":"https://api.example.com/v1","env_key":"AM_TEST_CODEX_TOKEN","model":"gpt-5.5"},"_delete":false,"_replace":true}"#
     ));
-    let apply = execute(
-        &ctx,
-        &request("profiles:apply", &["--only", "profiles:cx-work"]),
-    );
+    let apply = apply_now(&ctx, "cx-work");
     assert!(apply.ok, "{:?}", apply.errors);
     // 供应商配置写独立的叠加文件，config.toml 留给 MCP 域，两者互不覆盖
     assert!(
@@ -202,7 +230,10 @@ fn unsafe_config_dirs_are_rejected_before_any_write() {
         );
         let apply = execute(
             &ctx,
-            &request("profiles:apply", &["--only", &format!("profiles:{id}")]),
+            &request(
+                "profiles:apply",
+                &["--only", &format!("profiles:{id}"), "--base", "missing"],
+            ),
         );
         assert!(!apply.ok, "[{dir}] 必须 fail-closed");
         assert_eq!(apply.errors[0].code, "PROFILE_ERROR");
@@ -212,54 +243,222 @@ fn unsafe_config_dirs_are_rejected_before_any_write() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// 实际文件为准：已有用户内容按 base 合并写入（用户自己的 env 变量保留）；外部改了实例
+/// 负责的字段后状态逐字段报出差异，旧 base 写入被拒且文件不变；「采纳实际配置」把实际值
+/// 写回定义（只改库），凭据不以明文进库。
 #[test]
-fn existing_foreign_target_needs_explicit_takeover() {
-    let (root, ctx) = temp_ctx("takeover");
-    std::env::set_var("AM_TEST_TOKEN_TAKEOVER", "x");
+fn live_settings_are_merged_and_external_edits_can_be_adopted() {
+    let (root, ctx) = temp_ctx("live-first");
+    std::env::set_var("AM_TEST_TOKEN_LIVE", "live-token-value");
     assert!(save_definition(
         &ctx,
         "cc-ly",
-        &claude_profile("AM_TEST_TOKEN_TAKEOVER")
+        &claude_profile("AM_TEST_TOKEN_LIVE")
     ));
-    // 用户自己先放了一份 settings
     std::fs::create_dir_all(ctx.home_dir.join(".claude-ly")).unwrap();
     let target = ctx.home_dir.join(".claude-ly/settings.json");
-    std::fs::write(&target, "{\"env\":{\"MINE\":\"keep\"}}\n").unwrap();
+    std::fs::write(
+        &target,
+        "{\"env\":{\"MINE\":\"keep\"},\"theme\":\"dark\"}\n",
+    )
+    .unwrap();
 
-    let denied = execute(
-        &ctx,
-        &request("profiles:apply", &["--only", "profiles:cc-ly"]),
-    );
-    assert!(!denied.ok, "已有他人内容时必须拒绝覆盖");
+    let before = status(&ctx);
+    let el = element(&before, "cc-ly");
+    assert_eq!(el["state"], "drifted", "实际文件还没有实例定义的变量");
+    assert!(el["observed"]["base"].as_str().unwrap().len() == 64);
+    let apply = apply_now(&ctx, "cc-ly");
+    assert!(apply.ok, "{:?}", apply.errors);
+    let written: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&target).unwrap()).unwrap();
+    assert_eq!(written["env"]["MINE"], "keep", "用户自己的 env 变量保留");
+    assert_eq!(written["theme"], "dark");
     assert_eq!(
-        std::fs::read_to_string(&target).unwrap(),
-        "{\"env\":{\"MINE\":\"keep\"}}\n",
-        "拒绝时原文件不得改动"
+        written["env"]["ANTHROPIC_BASE_URL"],
+        "https://api.example.com"
     );
+    assert_eq!(element(&status(&ctx), "cc-ly")["state"], "managed-ok");
 
-    let allowed = execute(
+    // 外部改了实例负责的字段：状态逐字段报出，不回显令牌
+    let stale = base_of(&ctx, "cc-ly");
+    let mut edited = written.clone();
+    edited["env"]["ANTHROPIC_BASE_URL"] = serde_json::json!("http://10.0.0.8:8080");
+    edited["env"]["ANTHROPIC_AUTH_TOKEN"] = serde_json::json!("sk-edited-outside-123456");
+    std::fs::write(&target, serde_json::to_string_pretty(&edited).unwrap()).unwrap();
+    let now = status(&ctx);
+    let el = element(&now, "cc-ly");
+    assert_eq!(el["state"], "drifted");
+    let fields = el["observed"]["fields"].as_array().unwrap();
+    let url = fields
+        .iter()
+        .find(|f| f["field"] == "env.ANTHROPIC_BASE_URL")
+        .unwrap();
+    assert_eq!(url["state"], "differs");
+    assert_eq!(url["live"], "http://10.0.0.8:8080");
+    assert!(!serde_json::to_string(&now.data)
+        .unwrap()
+        .contains("sk-edited-outside"));
+    assert!(el["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|a| a["id"] == "adopt"));
+
+    // 旧 base 写入被拒，文件字节不变
+    let bytes = std::fs::read(&target).unwrap();
+    let denied = execute(
         &ctx,
         &request(
             "profiles:apply",
-            &["--only", "profiles:cc-ly", "--allow-takeover"],
+            &["--only", "profiles:cc-ly", "--base", &stale],
         ),
     );
-    assert!(allowed.ok, "{:?}", allowed.errors);
-    assert!(std::fs::read_to_string(&target)
-        .unwrap()
-        .contains("ANTHROPIC_BASE_URL"));
-
-    // 写入后被外部改动 → 状态报漂移，再次写入又需要接管
-    std::fs::write(&target, "{\"env\":{\"EXTERNAL\":\"edit\"}}\n").unwrap();
-    let status = execute(&ctx, &request("profiles:status", &[]));
-    assert_eq!(element(&status, "cc-ly")["state"], "drifted");
-    let denied2 = execute(
-        &ctx,
-        &request("profiles:apply", &["--only", "profiles:cc-ly"]),
+    assert!(!denied.ok);
+    assert!(
+        denied.errors[0].message.contains("已在外部修改"),
+        "{:?}",
+        denied.errors
     );
-    assert!(!denied2.ok, "外部改过之后必须再次要求接管");
+    assert_eq!(std::fs::read(&target).unwrap(), bytes);
 
-    std::env::remove_var("AM_TEST_TOKEN_TAKEOVER");
+    // 采纳实际配置：地址写回定义，令牌只保留引用；文件不动
+    let fresh = base_of(&ctx, "cc-ly");
+    let adopt = execute(
+        &ctx,
+        &request(
+            "profiles:adopt",
+            &["--only", "profiles:cc-ly", "--base", &fresh],
+        ),
+    );
+    assert!(adopt.ok, "{:?}", adopt.errors);
+    assert!(adopt.data["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|n| n.as_str().unwrap().contains("ANTHROPIC_AUTH_TOKEN")));
+    assert_eq!(std::fs::read(&target).unwrap(), bytes, "采纳只改库");
+    let policy = execute(&ctx, &request("policy:get", &[]));
+    let profile = &policy.data["effective"]["agents"]["definitions"]["cc-ly"]["profile"];
+    assert_eq!(profile["env"]["ANTHROPIC_BASE_URL"], "http://10.0.0.8:8080");
+    assert_eq!(
+        profile["env"]["ANTHROPIC_AUTH_TOKEN"],
+        "${AM_TEST_TOKEN_LIVE}"
+    );
+    let conn = store::open_readonly(&ctx).unwrap().unwrap();
+    let rows: Vec<String> = conn
+        .prepare("SELECT value_json FROM policy_entries")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert!(rows.iter().all(|row| !row.contains("sk-edited-outside")));
+
+    // 用旧 base 采纳同样被拒
+    let denied = execute(
+        &ctx,
+        &request(
+            "profiles:adopt",
+            &["--only", "profiles:cc-ly", "--base", &stale],
+        ),
+    );
+    assert!(!denied.ok);
+
+    std::env::remove_var("AM_TEST_TOKEN_LIVE");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// 实例 settings.json 是符号链接（dotfiles）时写到最终目标文件，链接本身不变；
+/// agents:status 不再把主目录 ~/.claude 的配置当成实例的当前配置。
+#[cfg(unix)]
+#[test]
+fn symlinked_instance_settings_are_written_through_and_agents_status_does_not_read_main_dir() {
+    let (root, ctx) = temp_ctx("symlink");
+    std::env::set_var("AM_TEST_TOKEN_LINK", "t");
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_TEST_TOKEN_LINK")
+    ));
+    std::fs::create_dir_all(ctx.home_dir.join(".claude-ly")).unwrap();
+    let real = root.join("dotfiles-settings.json");
+    std::fs::write(&real, "{\"theme\":\"dark\"}\n").unwrap();
+    let link = ctx.home_dir.join(".claude-ly/settings.json");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let apply = apply_now(&ctx, "cc-ly");
+    assert!(apply.ok, "{:?}", apply.errors);
+    assert!(std::fs::symlink_metadata(&link)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    let text = std::fs::read_to_string(&real).unwrap();
+    assert!(
+        text.contains("ANTHROPIC_BASE_URL") && text.contains("\"theme\": \"dark\""),
+        "{text}"
+    );
+
+    // 主目录放一份不同的配置：agents:status 对实例不得读它
+    std::fs::create_dir_all(ctx.home_dir.join(".claude")).unwrap();
+    std::fs::write(
+        ctx.home_dir.join(".claude/settings.json"),
+        "{\"env\":{\"ANTHROPIC_BASE_URL\":\"https://main.example.com\"}}\n",
+    )
+    .unwrap();
+    let agents = execute(&ctx, &request("agents:status", &[]));
+    assert!(agents.ok, "{:?}", agents.errors);
+    let instance = agents.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "agents:cc-ly")
+        .expect("实例也是一个助手定义");
+    assert!(
+        instance["observed"].get("current_config").is_none(),
+        "实例的当前配置由 profiles:status 报告，不能读主目录"
+    );
+    std::env::remove_var("AM_TEST_TOKEN_LINK");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// 旧库：profile_bindings 没有 owned_json 列时读路径照常（零写），写入时补列。
+#[test]
+fn legacy_bindings_table_without_owned_column_still_works() {
+    let (root, ctx) = temp_ctx("legacy-bindings");
+    std::env::set_var("AM_TEST_TOKEN_LEGACY", "t");
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_TEST_TOKEN_LEGACY")
+    ));
+    {
+        let conn = store::open_write(&ctx).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE profile_bindings (
+                profile_id TEXT NOT NULL,
+                file TEXT NOT NULL,
+                applied_digest TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (profile_id, file)
+            );",
+        )
+        .unwrap();
+    }
+    let db = store::db_path(&ctx);
+    let before = std::fs::read(&db).unwrap();
+    let _ = status(&ctx);
+    assert_eq!(std::fs::read(&db).unwrap(), before, "status 零写");
+    let apply = apply_now(&ctx, "cc-ly");
+    assert!(apply.ok, "{:?}", apply.errors);
+    let conn = store::open_readonly(&ctx).unwrap().unwrap();
+    let owned: String = conn
+        .query_row(
+            "SELECT owned_json FROM profile_bindings WHERE profile_id = 'cc-ly'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(owned.contains("env.ANTHROPIC_BASE_URL"), "{owned}");
+    std::env::remove_var("AM_TEST_TOKEN_LEGACY");
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -274,7 +473,10 @@ fn missing_variable_and_bad_definitions_fail_closed() {
     ));
     let apply = execute(
         &ctx,
-        &request("profiles:apply", &["--only", "profiles:cc-miss"]),
+        &request(
+            "profiles:apply",
+            &["--only", "profiles:cc-miss", "--base", "missing"],
+        ),
     );
     assert!(!apply.ok);
     assert!(
@@ -344,13 +546,8 @@ fn profile_directory_leaves_rules_file_and_hooks_alone() {
     )
     .unwrap();
 
-    let apply = execute(
-        &ctx,
-        &request(
-            "profiles:apply",
-            &["--only", "profiles:cc-ly", "--allow-takeover"],
-        ),
-    );
+    // 已有用户内容：按读到的实际内容（base）合并写入，不再需要接管
+    let apply = apply_now(&ctx, "cc-ly");
     assert!(apply.ok, "{:?}", apply.errors);
 
     // 1) settings.json：本工具管的字段写入，用户字段保留
@@ -386,10 +583,7 @@ fn profile_directory_leaves_rules_file_and_hooks_alone() {
     .unwrap();
     let status = execute(&ctx, &request("profiles:status", &[]));
     assert_eq!(element(&status, "cc-ly")["state"], "managed-ok");
-    let again = execute(
-        &ctx,
-        &request("profiles:apply", &["--only", "profiles:cc-ly"]),
-    );
+    let again = apply_now(&ctx, "cc-ly");
     assert!(again.ok, "{:?}", again.errors);
     assert_eq!(
         std::fs::read_to_string(&instance_rules).unwrap(),
@@ -415,10 +609,7 @@ fn codex_profile_directory_gets_no_rules_or_hooks_file() {
         "cx-work",
         r#"{"display_name":"Codex · work","bin":"codex","profile":{"base_agent":"codex","config_dir":"~/.codex-work","base_url":"https://api.example.com/v1","env_key":"AM_TEST_ABSENT_OK","model":"gpt-5.5"},"_delete":false,"_replace":true}"#
     ));
-    let apply = execute(
-        &ctx,
-        &request("profiles:apply", &["--only", "profiles:cx-work"]),
-    );
+    let apply = apply_now(&ctx, "cx-work");
     assert!(apply.ok, "{:?}", apply.errors);
 
     let dir = ctx.home_dir.join(".codex-work");

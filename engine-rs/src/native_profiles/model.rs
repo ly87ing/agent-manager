@@ -153,15 +153,16 @@ fn valid_env_name(name: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// 接口地址：仅 https，或本机回环 http（与 MCP 远程定义同一口径）。错误不回显地址。
+/// 接口地址：https 或 http（与接入配置同一口径：实际配置里已有的局域网 http 中转不因
+/// 本工具的校验而存不下；界面对非 https 提示令牌将明文传输）。错误不回显地址。
 fn validate_base_url(url: &str) -> Result<()> {
-    if url.starts_with("https://") {
-        return Ok(());
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"));
+    match rest {
+        Some(host) if !host.is_empty() && !host.starts_with('/') => Ok(()),
+        _ => bail!("接口地址只允许 https:// 或 http:// 开头的完整地址"),
     }
-    if url.starts_with("http://localhost") || url.starts_with("http://127.0.0.1") {
-        return Ok(());
-    }
-    bail!("接口地址只允许 https，或本机回环 http://localhost / http://127.0.0.1");
 }
 
 /// 展开 `~/` 前缀；其余原样。
@@ -356,83 +357,316 @@ pub(crate) fn load_definitions(policy: &Value) -> Vec<Result<ProfileDef>> {
     out
 }
 
-/// 本工具在实例 settings.json 里真正拥有的键：env / model。`hooks` 归 hooks 域，
-/// 其余根级字段是用户自己的（合并写入时原样保留），因此外部修改检测不该看它们。
-const CLAUDE_SETTINGS_OWNED_KEYS: &[&str] = &["env", "model"];
+/// 实例 settings.json 里与本工具有关的键只有 env / model：`hooks` 归 hooks 域，其余根级
+/// 字段是用户自己的（合并写入时原样保留）。env 只写实例定义里声明的那几个变量，
+/// 用户自己加的 env 变量原样保留。
 
-/// 旧版本还一并渲染 hooks：那时记下的写入指纹按 env / model / hooks 算。
-const LEGACY_CLAUDE_SETTINGS_OWNED_KEYS: &[&str] = &["env", "model", "hooks"];
+/// 文件不存在时的写入基准。
+pub(crate) const BASE_MISSING: &str = "missing";
 
-fn slice_digest(file: &str, bytes: &[u8], keys: &[&str]) -> String {
-    if file != FILE_CLAUDE_SETTINGS {
-        return crate::native_mcp::model::sha256_hex_bytes(bytes);
+/// 本次定义要写的路径：`env.<变量名>` 与（定义了模型时）`model`。
+/// 与库里记下的上次写入路径求并，就是这次写入可能改动的全部位置。
+pub(crate) fn owned_paths(def: &ProfileDef) -> Vec<String> {
+    let mut paths: Vec<String> = match def.kind {
+        ProfileKind::Claude => def.env.keys().map(|key| format!("env.{key}")).collect(),
+        // Codex 实例文件整份由本工具维护，不按路径记
+        ProfileKind::Codex => Vec::new(),
+    };
+    if def.kind == ProfileKind::Claude && def.model.is_some() {
+        paths.push("model".to_string());
     }
-    let owned = serde_json::from_slice::<Value>(bytes)
+    paths
+}
+
+/// 实例目标文件的写入基准：Claude 取 settings.json 里 env 与 model 两项的摘要（用户改
+/// permissions、hooks 等其他键不影响它）；Codex 实例文件整份归本工具，取文件字节摘要。
+/// 文件不存在为 `missing`；Claude 文件不是 JSON 对象时报错（不给基准，也就不能写）。
+pub(crate) fn live_base(kind: ProfileKind, bytes: Option<&[u8]>) -> Result<String> {
+    let Some(bytes) = bytes else {
+        return Ok(BASE_MISSING.to_string());
+    };
+    match kind {
+        ProfileKind::Codex => Ok(crate::native_mcp::model::sha256_hex_bytes(bytes)),
+        ProfileKind::Claude => {
+            let root = parse_settings(bytes)?;
+            let slice = serde_json::json!({
+                "env": root.get("env").cloned().unwrap_or(Value::Null),
+                "model": root.get("model").cloned().unwrap_or(Value::Null),
+            });
+            Ok(crate::native_mcp::model::sha256_hex(
+                &crate::native_mcp::model::canonical_compact(&slice),
+            ))
+        }
+    }
+}
+
+/// 解析实例 settings.json：必须是 JSON 对象，`env` 若存在必须是对象。不当成空文件覆盖。
+fn parse_settings(bytes: &[u8]) -> Result<Map<String, Value>> {
+    let root = serde_json::from_slice::<Value>(bytes)
         .ok()
-        .and_then(|v| v.as_object().cloned())
-        .map(|obj| {
-            let mut slice = Map::new();
-            for key in keys {
-                if let Some(value) = obj.get(*key) {
-                    slice.insert((*key).to_string(), value.clone());
+        .and_then(|value| value.as_object().cloned())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "实例的 settings.json 不是合法的 JSON 对象，拒绝读写（不会当成空文件覆盖）"
+            )
+        })?;
+    if root.get("env").is_some_and(|env| !env.is_object()) {
+        bail!("实例 settings.json 里的 env 不是对象，拒绝读写");
+    }
+    Ok(root)
+}
+
+/// 展示实际取值：凭据类变量或看起来像凭据的取值一律不输出。
+fn display_value(name: &str, value: &str) -> Value {
+    if looks_like_credential(name) || crate::native::reject_secret_text(value).is_some() {
+        Value::String("<hidden>".to_string())
+    } else {
+        Value::String(value.to_string())
+    }
+}
+
+/// 逐字段比较实例定义与实际文件：`same` / `differs` / `missing`（实际里没有）/
+/// `unresolved`（定义引用的变量取不到值，无法判断）。不输出凭据取值。
+pub(crate) fn compare_fields(
+    def: &ProfileDef,
+    bytes: Option<&[u8]>,
+    resolve: &dyn Fn(&str) -> Option<String>,
+) -> Result<Vec<Value>> {
+    let mut fields = Vec::new();
+    match def.kind {
+        ProfileKind::Claude => {
+            let root = match bytes {
+                Some(bytes) => parse_settings(bytes)?,
+                None => Map::new(),
+            };
+            let live_env = root
+                .get("env")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            for (name, value) in &def.env {
+                let text = value.as_str().unwrap_or("");
+                let expected = match text.strip_prefix("${").and_then(|v| v.strip_suffix('}')) {
+                    Some(var) => resolve(var),
+                    None => Some(text.to_string()),
+                };
+                let live = live_env.get(name).and_then(Value::as_str);
+                let state = match (live, &expected) {
+                    (None, _) => "missing",
+                    (Some(_), None) => "unresolved",
+                    (Some(live), Some(expected)) if live == expected => "same",
+                    _ => "differs",
+                };
+                fields.push(serde_json::json!({
+                    "field": format!("env.{name}"),
+                    "state": state,
+                    "definition": text,
+                    "live": live.map(|v| display_value(name, v)).unwrap_or(Value::Null),
+                }));
+            }
+            if let Some(model) = &def.model {
+                let live = root.get("model").and_then(Value::as_str);
+                fields.push(serde_json::json!({
+                    "field": "model",
+                    "state": match live {
+                        None => "missing",
+                        Some(live) if live == model => "same",
+                        Some(_) => "differs",
+                    },
+                    "definition": model,
+                    "live": live,
+                }));
+            }
+        }
+        ProfileKind::Codex => {
+            let expected = codex_fields(render_codex_provider(def).as_bytes());
+            let live = bytes.map(codex_fields).unwrap_or_default();
+            for (field, want) in &expected {
+                let have = live.get(field);
+                fields.push(serde_json::json!({
+                    "field": field,
+                    "state": match have {
+                        None => "missing",
+                        Some(have) if have == want => "same",
+                        Some(_) => "differs",
+                    },
+                    "definition": want,
+                    "live": have,
+                }));
+            }
+        }
+    }
+    Ok(fields)
+}
+
+/// Codex 实例文件里与定义对应的字段（解析失败时为空：整份都算不一致）。
+fn codex_fields(bytes: &[u8]) -> std::collections::BTreeMap<String, String> {
+    let mut out = std::collections::BTreeMap::new();
+    let Some(doc) = std::str::from_utf8(bytes)
+        .ok()
+        .and_then(|text| text.parse::<toml::Value>().ok())
+    else {
+        return out;
+    };
+    for key in ["model", "model_provider"] {
+        if let Some(value) = doc.get(key).and_then(toml::Value::as_str) {
+            out.insert(key.to_string(), value.to_string());
+        }
+    }
+    if let Some(table) = doc
+        .get("model_providers")
+        .and_then(|providers| providers.get(CODEX_PROFILE_NAME))
+        .and_then(toml::Value::as_table)
+    {
+        for key in ["name", "base_url", "env_key", "wire_api"] {
+            if let Some(value) = table.get(key).and_then(toml::Value::as_str) {
+                out.insert(format!("provider.{key}"), value.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// 采纳实际配置：把实际文件里的值写回实例定义的 profile 段（只改库，不动文件）。
+/// 返回新的 profile 段与提示；令牌等凭据不以明文进库——实际取值与引用变量不一致时只提示。
+pub(crate) fn adopt_profile(
+    def: &ProfileDef,
+    raw_profile: &Map<String, Value>,
+    bytes: Option<&[u8]>,
+    resolve: &dyn Fn(&str) -> Option<String>,
+) -> Result<(Map<String, Value>, Vec<String>)> {
+    let Some(bytes) = bytes else {
+        bail!("[{}] 实例配置文件还不存在，没有可采纳的实际配置", def.id);
+    };
+    let mut profile = raw_profile.clone();
+    let mut notes = Vec::new();
+    match def.kind {
+        ProfileKind::Claude => {
+            let root = parse_settings(bytes)?;
+            let live_env = root
+                .get("env")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            let mut env = profile
+                .get("env")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            for (name, value) in &def.env {
+                let text = value.as_str().unwrap_or("");
+                let Some(live) = live_env.get(name).and_then(Value::as_str) else {
+                    notes.push(format!("实际配置里没有 {name}，保留定义里的值"));
+                    continue;
+                };
+                match text.strip_prefix("${").and_then(|v| v.strip_suffix('}')) {
+                    Some(var) => {
+                        if resolve(var).as_deref() != Some(live) {
+                            notes.push(format!(
+                                "{name} 的实际取值与变量 {var} 不同；凭据不会以明文写进库，未采纳"
+                            ));
+                        }
+                    }
+                    None if live != text => {
+                        if looks_like_credential(name)
+                            || crate::native::reject_secret_text(live).is_some()
+                        {
+                            notes.push(format!("{name} 的实际取值像是凭据，未采纳"));
+                        } else {
+                            env.insert(name.clone(), Value::String(live.to_string()));
+                        }
+                    }
+                    None => {}
                 }
             }
-            Value::Object(slice)
-        })
-        .unwrap_or(Value::Null);
-    crate::native_mcp::model::sha256_hex_bytes(
-        serde_json::to_vec(&owned).unwrap_or_default().as_slice(),
-    )
-}
-
-/// 某个受管文件里「本工具拥有的那部分」的摘要。
-///
-/// settings.json 是合并写入的，用户可以在里面放自己的设置（permissions、statusLine…），
-/// 拿整文件做外部修改检测会把用户改这些误判成冲突。其余文件整份归本工具，比整文件。
-pub(crate) fn owned_slice_digest(file: &str, bytes: &[u8]) -> String {
-    slice_digest(file, bytes, CLAUDE_SETTINGS_OWNED_KEYS)
-}
-
-/// 本工具写的那部分是否仍是上次写入的样子：`known` 是库里记的写入指纹。
-///
-/// 兼容旧指纹：整文件摘要、旧版本按 env/model/hooks 算的摘要都照常认（下次写入自动升级）。
-/// 另外本工具那部分已经等于这次要写的内容时（`expected` 为渲染结果）也不算冲突——写入不会
-/// 改掉任何东西；升级后只在 hooks 页改过实例 hooks、还没重新应用实例的用户因此不被误报。
-pub(crate) fn ours_unchanged(file: &str, actual: &[u8], known: &str, expected: &[u8]) -> bool {
-    let owned = owned_slice_digest(file, actual);
-    owned == known
-        || crate::native_mcp::model::sha256_hex_bytes(actual) == known
-        || slice_digest(file, actual, LEGACY_CLAUDE_SETTINGS_OWNED_KEYS) == known
-        || owned == owned_slice_digest(file, expected)
+            profile.insert("env".into(), Value::Object(env));
+            match root.get("model").and_then(Value::as_str) {
+                Some(model) => {
+                    profile.insert("model".into(), Value::String(model.to_string()));
+                }
+                None => {
+                    profile.remove("model");
+                }
+            }
+        }
+        ProfileKind::Codex => {
+            let live = codex_fields(bytes);
+            if live.get("model_provider").map(String::as_str) != Some(CODEX_PROFILE_NAME) {
+                notes.push("实际配置没有使用本实例的接入方式，只采纳模型".to_string());
+            }
+            for (field, key) in [
+                ("model", "model"),
+                ("provider.base_url", "base_url"),
+                ("provider.env_key", "env_key"),
+                ("provider.wire_api", "wire_api"),
+            ] {
+                if key != "model"
+                    && live.get("model_provider").map(String::as_str) != Some(CODEX_PROFILE_NAME)
+                {
+                    continue;
+                }
+                match live.get(field) {
+                    Some(value) => {
+                        profile.insert(key.into(), Value::String(value.clone()));
+                    }
+                    None => {
+                        profile.remove(key);
+                    }
+                }
+            }
+        }
+    }
+    Ok((profile, notes))
 }
 
 /// 渲染该实例配置目录下的全部受管文件（不含规则与 hooks，见 FILE_CLAUDE_RULES /
 /// FILE_CODEX_HOOKS）。
 ///
-/// `existing` 给出目标文件的现有字节：Claude 的 `settings.json` 采用合并写入，
-/// 用户自己加的根级字段与 hooks 原样保留，本工具只覆盖它管的 env/model 两项。
+/// `existing` 给出目标文件的现有字节：Claude 的 `settings.json` 采用合并写入，只改实例
+/// 定义声明的 env 变量与 model；用户自己加的 env 变量、根级字段与 hooks 原样保留。
+/// `recorded` 是上次写入记下的路径（`env.<名>` / `model`）：定义里已删掉的那几项在这次撤掉，
+/// 从没由本工具写过的键不碰。现有文件不是 JSON 对象时拒绝，不当成空文件覆盖。
 pub(crate) fn render_all(
     def: &ProfileDef,
     existing: &dyn Fn(&str) -> Option<Vec<u8>>,
     resolve: &dyn Fn(&str) -> Option<String>,
+    recorded: &[String],
 ) -> Result<Vec<RenderedTarget>> {
     let mut out = Vec::new();
     match def.kind {
         ProfileKind::Claude => {
-            // settings.json：既有内容为基底 → 覆盖 env/model
-            let base = existing(FILE_CLAUDE_SETTINGS)
-                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-                .filter(Value::is_object)
-                .unwrap_or_else(|| Value::Object(Map::new()));
-            let mut settings = base.as_object().cloned().unwrap_or_default();
-            settings.insert("env".into(), Value::Object(resolved_env(def, resolve)?));
+            let mut settings = match existing(FILE_CLAUDE_SETTINGS) {
+                Some(bytes) => parse_settings(&bytes)?,
+                None => Map::new(),
+            };
+            let mut env = settings
+                .get("env")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            for path in recorded {
+                if let Some(name) = path.strip_prefix("env.") {
+                    if !def.env.contains_key(name) {
+                        env.remove(name);
+                    }
+                }
+            }
+            for (name, value) in resolved_env(def, resolve)? {
+                env.insert(name, value);
+            }
+            if env.is_empty() {
+                settings.remove("env");
+            } else {
+                settings.insert("env".into(), Value::Object(env));
+            }
             match &def.model {
                 Some(model) => {
                     settings.insert("model".into(), Value::String(model.clone()));
                 }
-                None => {
+                None if recorded.iter().any(|path| path == "model") => {
                     settings.remove("model");
                 }
+                None => {}
             }
             out.push(RenderedTarget {
                 file: FILE_CLAUDE_SETTINGS.to_string(),
@@ -563,11 +797,18 @@ mod tests {
         assert_eq!(parsed.env["ANTHROPIC_AUTH_TOKEN"], "${MY_TOKEN}");
     }
 
+    /// 与接入配置同一口径：实际配置里已有的局域网 http 中转要能存下（界面另行提示明文
+    /// 传输）；非 http(s) 的地址仍拒绝。
     #[test]
-    fn plain_http_base_url_is_rejected() {
+    fn http_base_url_is_accepted_but_other_schemes_are_rejected() {
+        assert!(def(json!({
+            "profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly",
+                        "env": {"ANTHROPIC_BASE_URL": "http://10.0.0.5:8080"}}
+        }))
+        .is_ok());
         let err = def(json!({
             "profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly",
-                        "env": {"ANTHROPIC_BASE_URL": "http://api.example.com"}}
+                        "env": {"ANTHROPIC_BASE_URL": "ftp://api.example.com"}}
         }))
         .unwrap_err();
         assert!(format!("{err:#}").contains("https"));
@@ -677,101 +918,133 @@ mod tests {
 }
 
 #[cfg(test)]
-mod owned_slice_tests {
+mod live_tests {
     use super::*;
     use serde_json::json;
 
-    fn settings(extra: Value) -> Vec<u8> {
-        let mut obj = serde_json::json!({
-            "env": {"A": "1"},
-            "model": "claude-opus-5",
-            "hooks": {}
-        });
-        if let (Some(dst), Some(src)) = (obj.as_object_mut(), extra.as_object()) {
-            for (k, v) in src {
-                dst.insert(k.clone(), v.clone());
-            }
+    fn claude_def(env: Value, model: Option<&str>) -> ProfileDef {
+        let mut profile =
+            json!({"base_agent": "claude-code", "config_dir": "~/.claude-ly", "env": env});
+        if let Some(model) = model {
+            profile["model"] = json!(model);
         }
-        serde_json::to_vec(&obj).unwrap()
+        parse_definition("cc-ly", &json!({ "profile": profile }), true).unwrap()
+    }
+
+    fn no_vars(_: &str) -> Option<String> {
+        None
     }
 
     #[test]
-    fn user_own_settings_do_not_change_the_owned_digest() {
-        let before = owned_slice_digest(FILE_CLAUDE_SETTINGS, &settings(json!({})));
-        let after = owned_slice_digest(
-            FILE_CLAUDE_SETTINGS,
-            &settings(
-                json!({"statusLine": {"type": "command"}, "permissions": {"allow": ["Bash"]}}),
-            ),
+    fn base_ignores_user_keys_outside_env_and_model() {
+        let a = br#"{"env":{"A":"1"},"model":"m","theme":"dark"}"#;
+        let b = br#"{"env":{"A":"1"},"model":"m","theme":"light","hooks":{"Stop":[]}}"#;
+        let c = br#"{"env":{"A":"2"},"model":"m"}"#;
+        assert_eq!(
+            live_base(ProfileKind::Claude, Some(a)).unwrap(),
+            live_base(ProfileKind::Claude, Some(b)).unwrap()
         );
-        assert_eq!(before, after, "用户自己的设置不该被判成本工具那部分变了");
-    }
-
-    #[test]
-    fn touching_an_owned_key_changes_the_digest() {
-        let before = owned_slice_digest(FILE_CLAUDE_SETTINGS, &settings(json!({})));
-        let after = owned_slice_digest(FILE_CLAUDE_SETTINGS, &settings(json!({"env": {"A": "2"}})));
-        assert_ne!(before, after, "本工具拥有的键被改必须检出");
-    }
-
-    #[test]
-    fn other_files_are_compared_whole() {
-        // agent-manager.config.toml 整份归本工具：任何一个字节变了都算变了
-        let a = owned_slice_digest(CODEX_PROFILE_FILE, b"x");
-        let b = owned_slice_digest(CODEX_PROFILE_FILE, b"y");
-        assert_ne!(a, b);
-    }
-
-    #[test]
-    fn hooks_are_not_part_of_the_owned_slice() {
-        let before = owned_slice_digest(FILE_CLAUDE_SETTINGS, &settings(json!({})));
-        let after = owned_slice_digest(
-            FILE_CLAUDE_SETTINGS,
-            &settings(
-                json!({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x"}]}]}}),
-            ),
+        assert_ne!(
+            live_base(ProfileKind::Claude, Some(a)).unwrap(),
+            live_base(ProfileKind::Claude, Some(c)).unwrap()
         );
-        assert_eq!(before, after, "hooks 归 hooks 域，改它不算实例配置被改");
+        assert_eq!(live_base(ProfileKind::Claude, None).unwrap(), BASE_MISSING);
+        assert!(live_base(ProfileKind::Claude, Some(b"not json")).is_err());
+        assert_ne!(
+            live_base(ProfileKind::Codex, Some(b"x")).unwrap(),
+            live_base(ProfileKind::Codex, Some(b"y")).unwrap()
+        );
     }
 
     #[test]
-    fn legacy_fingerprints_and_already_expected_content_count_as_unchanged() {
-        let written = settings(json!({}));
-        // 旧版本按 env/model/hooks 记的指纹
-        let legacy = slice_digest(
-            FILE_CLAUDE_SETTINGS,
-            &written,
-            LEGACY_CLAUDE_SETTINGS_OWNED_KEYS,
+    fn render_only_touches_declared_env_keys_and_keeps_user_ones() {
+        let def = claude_def(json!({"ANTHROPIC_BASE_URL": "https://a.example.com"}), None);
+        let existing =
+            br#"{"env":{"MY_VAR":"1","OLD":"x"},"model":"user-model","theme":"dark"}"#.to_vec();
+        let rendered = render_all(
+            &def,
+            &|_| Some(existing.clone()),
+            &no_vars,
+            &["env.OLD".to_string()],
+        )
+        .unwrap();
+        let out: Value = serde_json::from_slice(&rendered[0].content).unwrap();
+        assert_eq!(out["env"]["MY_VAR"], "1", "用户自己的 env 变量保留");
+        assert!(
+            out["env"].get("OLD").is_none(),
+            "定义里删掉、上次由本工具写的变量撤掉"
         );
-        assert!(ours_unchanged(
-            FILE_CLAUDE_SETTINGS,
-            &written,
-            &legacy,
-            b"{}"
-        ));
-        // 旧指纹之后用户在 hooks 页改了实例 hooks：env/model 仍是要写的样子 → 不冲突
-        let edited = settings(
-            json!({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x"}]}]}}),
+        assert_eq!(out["env"]["ANTHROPIC_BASE_URL"], "https://a.example.com");
+        assert_eq!(
+            out["model"], "user-model",
+            "定义没管 model 时不碰用户的 model"
         );
-        assert!(!ours_unchanged(
-            FILE_CLAUDE_SETTINGS,
-            &edited,
-            &legacy,
-            b"{}"
-        ));
-        assert!(ours_unchanged(
-            FILE_CLAUDE_SETTINGS,
-            &edited,
-            &legacy,
-            &written
-        ));
-        // env 被外部改过、也不等于要写的内容 → 冲突
-        let tampered = settings(json!({"env": {"A": "2"}}));
-        assert!(!ours_unchanged(
-            FILE_CLAUDE_SETTINGS,
-            &tampered,
-            &legacy,
-            &written
-        ));
+        assert_eq!(out["theme"], "dark");
+        // 上次由本工具写过 model、定义里去掉了 → 撤掉
+        let rendered = render_all(
+            &def,
+            &|_| Some(existing.clone()),
+            &no_vars,
+            &["model".into()],
+        )
+        .unwrap();
+        let out: Value = serde_json::from_slice(&rendered[0].content).unwrap();
+        assert!(out.get("model").is_none());
+        // 现有文件不是 JSON 对象：拒绝，不当成空文件覆盖
+        assert!(render_all(&def, &|_| Some(b"[1]".to_vec()), &no_vars, &[]).is_err());
+    }
+
+    #[test]
+    fn compare_reports_differences_without_leaking_credentials() {
+        let def = claude_def(
+            json!({"ANTHROPIC_BASE_URL": "https://a.example.com", "ANTHROPIC_AUTH_TOKEN": "${TOK}"}),
+            Some("m1"),
+        );
+        let live = br#"{"env":{"ANTHROPIC_BASE_URL":"https://b.example.com","ANTHROPIC_AUTH_TOKEN":"sk-live-secret-123456"},"model":"m1"}"#;
+        let fields = compare_fields(&def, Some(live), &|var| {
+            (var == "TOK").then(|| "other".to_string())
+        })
+        .unwrap();
+        let by = |f: &str| fields.iter().find(|x| x["field"] == f).unwrap().clone();
+        assert_eq!(by("env.ANTHROPIC_BASE_URL")["state"], "differs");
+        assert_eq!(
+            by("env.ANTHROPIC_BASE_URL")["live"],
+            "https://b.example.com"
+        );
+        assert_eq!(by("env.ANTHROPIC_AUTH_TOKEN")["state"], "differs");
+        assert_eq!(by("env.ANTHROPIC_AUTH_TOKEN")["live"], "<hidden>");
+        assert_eq!(by("model")["state"], "same");
+        assert!(!serde_json::to_string(&fields)
+            .unwrap()
+            .contains("sk-live-secret"));
+    }
+
+    #[test]
+    fn adopt_takes_plain_values_but_never_plaintext_credentials() {
+        let def = claude_def(
+            json!({"ANTHROPIC_BASE_URL": "https://a.example.com", "ANTHROPIC_AUTH_TOKEN": "${TOK}"}),
+            Some("m1"),
+        );
+        let raw = json!({"base_agent": "claude-code", "config_dir": "~/.claude-ly",
+            "env": {"ANTHROPIC_BASE_URL": "https://a.example.com", "ANTHROPIC_AUTH_TOKEN": "${TOK}"}, "model": "m1"});
+        let live = br#"{"env":{"ANTHROPIC_BASE_URL":"http://10.0.0.5:8080","ANTHROPIC_AUTH_TOKEN":"sk-live-secret-123456"},"model":"m2"}"#;
+        let (profile, notes) = adopt_profile(&def, raw.as_object().unwrap(), Some(live), &|_| {
+            Some("other".into())
+        })
+        .unwrap();
+        assert_eq!(profile["env"]["ANTHROPIC_BASE_URL"], "http://10.0.0.5:8080");
+        assert_eq!(
+            profile["env"]["ANTHROPIC_AUTH_TOKEN"], "${TOK}",
+            "凭据只保留引用"
+        );
+        assert_eq!(profile["model"], "m2");
+        assert!(notes.iter().any(|n| n.contains("ANTHROPIC_AUTH_TOKEN")));
+        assert!(!serde_json::to_string(&profile)
+            .unwrap()
+            .contains("sk-live-secret"));
+        // 采纳结果仍是合法定义（局域网 http 地址按接入配置同一口径放行）
+        let mut full = serde_json::Map::new();
+        full.insert("profile".into(), Value::Object(profile));
+        assert!(parse_definition("cc-ly", &Value::Object(full), true).is_ok());
     }
 }

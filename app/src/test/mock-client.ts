@@ -521,12 +521,21 @@ function demoEnvelopes(): Record<string, Envelope> {
             target_exists: true,
             env_refs: [{ name: "ANTHROPIC_AUTH_TOKEN", kind: "reference", variable: "WORK_API_KEY", resolved: true }],
             launch_value: 'CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude',
+            // 实际配置为准：演示外部改过实例模型后的逐字段差异，可覆盖也可采纳
+            base: "d".repeat(64),
+            fields: [
+              { field: "env.ANTHROPIC_AUTH_TOKEN", state: "same", definition: "${WORK_API_KEY}", live: "<hidden>" },
+              { field: "model", state: "differs", definition: "claude-sonnet-demo", live: "claude-opus-demo" },
+            ],
             blocked_reason: null,
             auth: { state: "missing", authenticated: false, mode: null, storage: "file", file: ".credentials.json" },
           },
-          state: "managed-ok",
+          state: "drifted",
           freshness: makeFreshness({ state: "not-applicable" }),
-          actions: [{ id: "apply", risk: "write-local", needs_lock: true, offline_ok: true }],
+          actions: [
+            { id: "apply", risk: "write-local", needs_lock: true, offline_ok: true },
+            { id: "adopt", risk: "write-local", needs_lock: false, offline_ok: true },
+          ],
         }),
       ],
     },
@@ -1327,7 +1336,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
         aliasLegacy = aliasLegacy.filter((entry) => entry.id !== id);
         return makeEnvelope({ domain: "aliases", discarded: id, source_removed: aliasLegacy.length === 0 }, { command: "aliases.discard-legacy" });
       }
-      if (command.endsWith(":apply")) {
+      if (command.endsWith(":apply") || command === "profiles:adopt") {
         return applyEnvelope(command.split(":")[0], args, runId);
       }
 

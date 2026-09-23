@@ -11,7 +11,7 @@ import { cn } from "../lib/utils";
 const STATE_NOTE: Record<string, string> = {
   "not-materialized": "还没写入这套配置，点「写入配置」后就能用这个名字启动。",
   "managed-ok": "配置已写入，终端里用它的名字即可启动这个独立环境。",
-  drifted: "配置文件被本工具以外改过，写入会覆盖它——确认后再接管。",
+  drifted: "实例定义与实际配置不同：可以用定义写入覆盖实际配置，也可以以实际配置更新定义。",
   disabled: "已停用，不再维护这套配置。",
   unsupported: "定义有问题，先修好再写入。",
 };
@@ -22,7 +22,7 @@ export function ProfileCard({
   busy,
   launchCommands,
   onApply,
-  onTakeover,
+  onAdopt,
   onEdit,
   onDuplicate,
   onRemove,
@@ -38,8 +38,10 @@ export function ProfileCard({
   busy: boolean;
   /** 指向这个实例配置目录的全部启动命令（按配置目录反查，可以有多条）。 */
   launchCommands: ProfileLaunchCommand[];
+  /** 用实例定义写入实际配置（不一致时由调用方先确认）。 */
   onApply: () => void;
-  onTakeover: () => void;
+  /** 以实际配置更新实例定义（只改库，不动实例文件）。 */
+  onAdopt: () => void;
   onEdit: () => void;
   onDuplicate: () => void;
   onRemove: () => void;
@@ -55,6 +57,9 @@ export function ProfileCard({
   const id = element.id.replace(/^profiles:/, "");
   const blocked = observed.blocked_reason;
   const missingVars = (observed.env_refs ?? []).filter((ref) => ref.resolved === false);
+  const differs = (observed.fields ?? []).filter((field) => field.state !== "same");
+  const canAdopt = element.actions.some((action) => action.id === "adopt");
+  const canApply = element.actions.some((action) => action.id === "apply");
 
   return (
     <section
@@ -204,23 +209,53 @@ export function ProfileCard({
         </p>
       )}
 
+      {element.state === "drifted" && differs.length > 0 && (
+        <div data-testid={`profile-differs-${id}`} className="mt-2 rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs">
+          <p className="font-medium text-warning">实际配置与实例定义不同</p>
+          <ul className="mt-1 space-y-0.5 text-muted-foreground">
+            {differs.map((field) => (
+              <li key={field.field} className="break-all">
+                <span className="font-mono text-foreground">{field.field}</span>
+                {"：定义 "}
+                <span className="font-mono">{field.definition ?? "（无）"}</span>
+                {" · 实际 "}
+                <span className="font-mono">
+                  {field.state === "missing" ? "（没有）" : field.state === "unresolved" ? "（变量取不到值，无法比较）" : field.live ?? "（无）"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
         <button
           type="button"
           data-testid={`profile-apply-${id}`}
-          disabled={busy || element.actions.length === 0}
-          onClick={element.state === "drifted" ? onTakeover : onApply}
+          disabled={busy || !canApply}
+          onClick={onApply}
           className={cn(
             "inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs",
             element.state === "drifted"
               ? "border-warning/40 bg-warning/10 text-warning hover:bg-warning/15"
               : "border-primary/30 bg-primary/10 text-primary hover:bg-primary/15",
-            (busy || element.actions.length === 0) && "cursor-not-allowed opacity-50",
+            (busy || !canApply) && "cursor-not-allowed opacity-50",
           )}
         >
           {busy ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : <PlayCircle className="h-3 w-3" aria-hidden />}
-          {busy ? "执行中…" : element.state === "drifted" ? "接管并写入" : "写入配置"}
+          {busy ? "执行中…" : element.state === "drifted" ? "用定义覆盖实际配置" : "写入配置"}
         </button>
+        {canAdopt && (
+          <button
+            type="button"
+            data-testid={`profile-adopt-${id}`}
+            disabled={busy}
+            onClick={onAdopt}
+            className="inline-flex items-center gap-1 rounded border border-primary/30 px-2.5 py-1 text-xs text-primary hover:bg-primary/10 disabled:opacity-50"
+          >
+            以实际配置更新定义
+          </button>
+        )}
         <button type="button" data-testid={`profile-edit-${id}`} onClick={onEdit} className="rounded border px-2.5 py-1 text-xs">
           编辑
         </button>
