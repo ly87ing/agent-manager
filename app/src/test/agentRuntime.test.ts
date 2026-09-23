@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   actualRuntimeSettings,
-  runtimeActualItems,
+  automationRawText,
   runtimePatch,
   runtimePatchApplied,
+  runtimeValueLabel,
 } from "../lib/agentRuntime";
 import { liveRefusalDescription } from "../lib/agentCurrent";
 import { agentManagementFixture } from "./fixtures";
@@ -51,8 +52,6 @@ describe("运行设置以客户端实际值为准", () => {
     });
     expect(actualRuntimeSettings(fields, status("builtin-legacy")).statusline).toBe("builtin");
     expect(actualRuntimeSettings(fields, status("custom")).statusline).toBeUndefined();
-    expect(runtimeActualItems(fields, status("custom")).find((item) => item.key === "statusline")?.actual)
-      .toBe("自定义状态栏（不受本工具管理）");
   });
 
   it("提交只发改动过的字段，撤掉的项为 null；没改的本工具不提供的取值原样保留", () => {
@@ -89,7 +88,8 @@ describe("运行设置以客户端实际值为准", () => {
         },
       },
     };
-    expect(runtimeActualItems(fields, status).find((item) => item.key === "automation_mode")?.actual)
+    const automation = fields.find((field) => field.key === "automation_mode")!;
+    expect(runtimeValueLabel(automation, "custom", automationRawText(status)))
       .toBe("自定义（permissions.defaultMode = acceptEdits）");
     expect(runtimePatchApplied(fields, { claude_effort_level: "low" }, status)).toBe(true);
     expect(runtimePatchApplied(fields, { claude_effort_level: "high" }, status)).toBe(false);

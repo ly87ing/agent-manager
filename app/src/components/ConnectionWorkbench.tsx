@@ -1,7 +1,7 @@
 import { useState, type MouseEvent } from "react";
-import { Activity, ArrowDown, ArrowUp, Check, Download, Loader2, MoreHorizontal, Pencil, Save, Settings2, Terminal, Trash2, Upload } from "lucide-react";
-import { AgentCurrentConfigView } from "./AgentCurrentConfigView";
-import { ConfigFileEditorDialog } from "./ConfigFileEditorDialog";
+import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, Download, Loader2, MoreHorizontal, Pencil, Save, Settings2, Terminal, Trash2, Upload } from "lucide-react";
+import { AgentRuntimePanel } from "./AgentRuntimePanel";
+import { ConfigFileEditor } from "./ConfigFileEditor";
 import type { EngineElement } from "../lib/contract";
 import type { AgentCurrentConfig, AgentsObserved, AgentsSpec } from "../lib/observed";
 import {
@@ -11,7 +11,7 @@ import {
 } from "../lib/agentDefinitionForm";
 import { connectionKindOf } from "../lib/agentManagement";
 import { configureBaseOf, currentConfigOf, currentConnectionOf, hasUnsavedLive } from "../lib/agentCurrent";
-import { automationRawText, runtimeValueLabel } from "../lib/agentRuntime";
+import { actualRuntimeSettings, automationRawText, runtimeValueLabel } from "../lib/agentRuntime";
 import { parseAliasValue, renderAliasPreview } from "../lib/aliasCommand";
 import { cn } from "../lib/utils";
 
@@ -42,7 +42,7 @@ function runMenuAction(event: MouseEvent<HTMLButtonElement>, action: (() => void
   action?.();
 }
 
-type WorkbenchTab = "providers" | "automation" | "launch" | "actual";
+type WorkbenchTab = "providers" | "automation" | "launch";
 
 function automationOverrideOf(value: string): string | null {
   const args = parseAliasValue(value).extraArgs;
@@ -89,7 +89,8 @@ export function ConnectionWorkbench({
   onExport,
   onRemove,
   onMove,
-  onRuntimeSettings,
+  runtimeSaving,
+  onSaveRuntime,
   onSaveCurrent,
   onFixStatusline,
   onClearEnvOverrides,
@@ -115,7 +116,9 @@ export function ConnectionWorkbench({
   onExport: (element: EngineElement, connection: ConnectionEntry) => void;
   onRemove: (element: EngineElement, connection: ConnectionEntry) => void;
   onMove: (element: EngineElement, connection: ConnectionEntry, direction: "up" | "down") => void;
-  onRuntimeSettings: (element: EngineElement) => void;
+  runtimeSaving: boolean;
+  /** 运行设置只发改动过的字段；撤掉的项为 null。 */
+  onSaveRuntime: (element: EngineElement, patch: Record<string, unknown>) => void;
   /** 把「当前实际配置（未保存）」存成接入配置，不写助手文件。 */
   onSaveCurrent: (element: EngineElement) => void;
   /** 旧格式状态栏：按引用形式重写一次。 */
@@ -124,7 +127,7 @@ export function ConnectionWorkbench({
   onClearEnvOverrides: (element: EngineElement) => void;
 }) {
   const [tab, setTab] = useState<WorkbenchTab>("providers");
-  const [editingFile, setEditingFile] = useState(false);
+  const [fileOpen, setFileOpen] = useState(false);
   const selected = agents.find((element) => element.id === selectedAgentId) ?? agents[0];
   if (!selected) return null;
 
@@ -271,9 +274,8 @@ export function ConnectionWorkbench({
         <div aria-label="环境配置" role="tablist" className="flex gap-1 overflow-x-auto border-b">
           {([
             ["providers", "接入 Provider"],
-            ["automation", "自动化与权限"],
+            ["automation", "运行设置"],
             ["launch", "启动命令"],
-            ["actual", "实际配置"],
           ] as const).map(([id, label]) => (
             <button
               key={id}
@@ -293,45 +295,67 @@ export function ConnectionWorkbench({
         </div>
 
         {tab === "automation" && (
-          <div data-testid="automation-panel" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-4">
-            <div>
-              <h3 className="text-sm font-medium text-foreground">当前自动化：{automationLabel}</h3>
-              <p className="mt-1 text-xs text-muted-foreground">
-                以客户端配置文件里的实际值为准；修改只写你改动的那几项。启动命令若带权限参数，会在启动时覆盖它。
-              </p>
-              {legacyStatusline && (
-                <p data-testid="statusline-legacy-notice" className="mt-2 text-xs text-warning">
+          <div data-testid="automation-panel" className="space-y-4 rounded-xl border px-4 py-4">
+            <p className="text-xs text-muted-foreground">
+              以客户端配置文件里的实际值为准，只写你改动的那几项；账号、接口地址、模型与凭据在「接入 Provider」维护。启动命令若带权限参数，会在启动时覆盖这里的自动化设置。
+            </p>
+            {legacyStatusline && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2">
+                <p data-testid="statusline-legacy-notice" className="text-xs text-warning">
                   本工具的状态栏还是旧格式，数据目录含空格时无法运行；修复一次即可。
                 </p>
-              )}
-              {modelEfforts.length > 0 && (
-                <p data-testid="model-efforts" className="mt-2 text-xs text-muted-foreground">
-                  按模型保存的推理强度（Claude Code 里用 /effort 保存，优先于默认推理强度）：
-                  {modelEfforts.map(([model, level]) => `${model} = ${level}`).join("，")}
-                </p>
-              )}
-              {envOverrides.length > 0 && (
-                <p data-testid="env-overrides-notice" className="mt-2 text-xs text-warning">
+                <button type="button" data-testid="agent-statusline-fix" disabled={!kind || busyTarget !== null || Boolean(writeBlocked)} onClick={() => onFixStatusline(selected)} className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+                  修复状态栏
+                </button>
+              </div>
+            )}
+            {envOverrides.length > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2">
+                <p data-testid="env-overrides-notice" className="text-xs text-warning">
                   settings.json 的 env 里有单次会话覆盖变量（{envOverrides.map(([name, value]) => `${name}=${value}`).join("，")}），
                   它们优先于这里和 /effort 保存的所有设置，是旧版本写进去的。清理后以正常设置为准。
                 </p>
-              )}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {envOverrides.length > 0 && (
-                <button type="button" data-testid="agent-env-overrides-clear" disabled={!kind || busyTarget !== null || Boolean(writeBlocked)} onClick={() => onClearEnvOverrides(selected)} className="rounded-lg border border-warning/40 px-3 py-2 text-sm font-medium text-warning hover:bg-warning/10 disabled:opacity-50">
+                <button type="button" data-testid="agent-env-overrides-clear" disabled={!kind || busyTarget !== null || Boolean(writeBlocked)} onClick={() => onClearEnvOverrides(selected)} className="rounded-lg border border-warning/40 px-3 py-1.5 text-xs font-medium text-warning hover:bg-warning/10 disabled:opacity-50">
                   清理覆盖变量
                 </button>
-              )}
-              {legacyStatusline && (
-                <button type="button" data-testid="agent-statusline-fix" disabled={!kind || busyTarget !== null || Boolean(writeBlocked)} onClick={() => onFixStatusline(selected)} className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-                  修复状态栏
+              </div>
+            )}
+            {modelEfforts.length > 0 && (
+              <p data-testid="model-efforts" className="text-xs text-muted-foreground">
+                按模型保存的推理强度（Claude Code 里用 /effort 保存，优先于默认推理强度）：
+                {modelEfforts.map(([model, level]) => `${model} = ${level}`).join("，")}
+              </p>
+            )}
+            {kind && management && !writeBlocked && (
+              <AgentRuntimePanel
+                key={`${agentId}:${configureBaseOf(selected)}`}
+                adapter={management.adapter}
+                fields={runtimeFields}
+                initial={actualRuntimeSettings(runtimeFields, currentConfig)}
+                currentConfig={currentConfig}
+                busy={runtimeSaving}
+                onSubmit={(patch) => onSaveRuntime(selected, patch)}
+              />
+            )}
+            {kind && writeBlocked && (
+              <p className="text-sm text-warning">{writeBlocked}；可以在下方直接编辑配置文件修好它。</p>
+            )}
+            {kind && (
+              <div className="rounded-lg border">
+                <button
+                  type="button"
+                  data-testid="agent-edit-config-file"
+                  aria-expanded={fileOpen}
+                  onClick={() => setFileOpen((open) => !open)}
+                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-foreground hover:bg-accent/50"
+                >
+                  {fileOpen ? <ChevronDown className="h-4 w-4" aria-hidden /> : <ChevronRight className="h-4 w-4" aria-hidden />}
+                  <span className="font-medium">直接编辑配置文件</span>
+                  <code className="min-w-0 truncate text-xs text-muted-foreground">{currentConfig?.target ?? currentConfig?.file ?? ""}</code>
                 </button>
-              )}
-              <button type="button" data-testid="agent-runtime-button" disabled={!kind || Boolean(writeBlocked)} title={writeBlocked ?? undefined} onClick={() => onRuntimeSettings(selected)} className="rounded-lg border px-3 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50">
-                修改自动化与权限
-              </button>
-            </div>
+                {fileOpen && <ConfigFileEditor key={agentId} agentId={agentId} />}
+              </div>
+            )}
           </div>
         )}
 
@@ -377,39 +401,6 @@ export function ConnectionWorkbench({
             </ul>
           )}
         </div>}
-
-        {tab === "actual" && (
-          <div data-testid="actual-config-panel" className="space-y-3 rounded-xl border px-4 py-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-medium text-foreground">当前实际生效值</h3>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  按用途整理客户端最终读取值；敏感值只显示是否已配置。表单没覆盖的设置（权限规则、插件、自定义环境变量等）可以直接编辑配置文件。
-                </p>
-              </div>
-              <button
-                type="button"
-                data-testid="agent-edit-config-file"
-                disabled={!kind}
-                onClick={() => setEditingFile(true)}
-                className="shrink-0 rounded-lg border px-3 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50"
-              >
-                编辑配置文件
-              </button>
-            </div>
-            <AgentCurrentConfigView
-              status={currentConfig}
-              fields={runtimeFields}
-            />
-          </div>
-        )}
-        {editingFile && (
-          <ConfigFileEditorDialog
-            agentId={agentId}
-            agentName={(selected.spec as AgentsSpec).display_name ?? agentId}
-            onClose={() => setEditingFile(false)}
-          />
-        )}
 
         {!kind && (
           <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">

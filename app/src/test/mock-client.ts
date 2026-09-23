@@ -1079,12 +1079,12 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
     return makeEnvelope({ variable, stored: value.length > 0 }, { command: "secrets.set", run_id: runId });
   };
 
-  // 配置文件原文编辑：只按整文件基准比对，凭据在 mock 里已是 <hidden>
+  // 配置文件原文编辑：只按整文件基准比对
   const configFiles: Record<string, { path: string; format: string; content: string; base: string }> = {
     "agents:claude-code": {
       path: "~/.claude/settings.json",
       format: "json",
-      content: '{\n  "env": {\n    "ANTHROPIC_AUTH_TOKEN": "<hidden>"\n  },\n  "effortLevel": "high",\n  "theme": "dark"\n}\n',
+      content: '{\n  "env": {\n    "ANTHROPIC_AUTH_TOKEN": "demo-token"\n  },\n  "effortLevel": "high",\n  "theme": "dark"\n}\n',
       base: "f".repeat(64),
     },
     "agents:codex": {
@@ -1101,7 +1101,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       return makeEnvelope({}, { command: "agents.config-file", ok: false, errors: [{ code: "AGENT_ERROR", element, message: "这个助手没有可直接编辑的配置文件" }] });
     }
     return makeEnvelope(
-      { domain: "agents", element, ...file, exists: true, hidden: (file.content.match(/<hidden>/g) ?? []).length, blocked_reason: null },
+      { domain: "agents", element, ...file, exists: true, blocked_reason: null },
       { command: "agents.config-file" },
     );
   };

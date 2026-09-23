@@ -1,11 +1,9 @@
 import { useMemo, useState } from "react";
-import { Braces, FormInput, Loader2, X } from "lucide-react";
+import { Braces, Loader2 } from "lucide-react";
 import type { AgentRuntimeSettings } from "../lib/agentDefinitionForm";
 import { automationRawText, CUSTOM_AUTOMATION, runtimePatch } from "../lib/agentRuntime";
 import type { AgentCurrentConfigStatus, AgentRuntimeField, AgentRuntimeTarget } from "../lib/observed";
 import { cn } from "../lib/utils";
-import { useDialogFocus } from "../lib/dialogFocus";
-import { AgentCurrentConfigView } from "./AgentCurrentConfigView";
 
 function testIdOf(field: AgentRuntimeField): string {
   return `agent-runtime-${field.key.replaceAll("_", "-")}`;
@@ -74,7 +72,7 @@ function RuntimeField({
     return (
       <label
         className={cn(
-          "flex min-h-28 items-start gap-3 rounded-lg border bg-background p-3",
+          "flex items-start gap-3 rounded-lg border bg-background p-3",
           field.danger && "border-destructive/25 bg-destructive/5",
         )}
       >
@@ -191,33 +189,30 @@ function RuntimeField({
 }
 
 /**
- * 后端 schema 驱动的运行设置编辑器。表单以客户端实际值预填，提交只发改动过的字段，
- * 没改的项（包括本工具不提供的取值）保持客户端当前值。
+ * 后端 schema 驱动的运行设置，直接嵌在「运行设置」页签里。表单以客户端实际值预填，
+ * 提交只发改动过的字段，没改的项（包括本工具不提供的取值）保持客户端当前值。
+ * 写入后状态回读换了基准，调用方用新的 key 重建它，表单即回到新的实际值。
  */
-export function AgentRuntimeDialog({
-  agentName,
+export function AgentRuntimePanel({
   adapter,
   fields,
   initial,
   currentConfig,
   busy,
-  error,
   onSubmit,
-  onClose,
 }: {
-  agentName: string;
   adapter: string;
   fields: AgentRuntimeField[];
   /** 客户端实际值（actualRuntimeSettings）。 */
   initial: AgentRuntimeSettings;
   currentConfig?: AgentCurrentConfigStatus | null;
   busy: boolean;
-  error?: string | null;
   /** 只含改动过的字段；撤掉的项为 null。 */
   onSubmit: (patch: Record<string, unknown>) => void;
-  onClose: () => void;
 }) {
   const [settings, setSettings] = useState<AgentRuntimeSettings>(initial);
+  const [showPreview, setShowPreview] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
   const rawText = automationRawText(currentConfig);
   // 实际档位不在三档预设里：多给一张「保持当前」卡片，不改就原样保留
   const shownFields = useMemo(() => fields.map((field) => {
@@ -253,29 +248,12 @@ export function AgentRuntimeDialog({
       return {};
     }
   })();
-  const [mode, setMode] = useState<"form" | "preview" | "observed">("form");
-  const [localError, setLocalError] = useState<string | null>(null);
-  const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLElement>({
-    onEscape: busy ? undefined : onClose,
-    initialFocusSelector: '[data-testid="agent-runtime-cancel"]',
-  });
-
-  const close = () => {
-    if (!busy) onClose();
-  };
-
-  const switchMode = (next: "form" | "preview" | "observed") => {
-    setLocalError(null);
-    setMode(next);
-  };
+  const changedCount = Object.keys(pendingPatch).length;
 
   const submit = () => {
     try {
       const patch = runtimePatch(fields, initial, settings);
-      if (Object.keys(patch).length === 0) {
-        setLocalError("还没有改动；未改动的项保持客户端当前值");
-        return;
-      }
+      if (Object.keys(patch).length === 0) return;
       setLocalError(null);
       onSubmit(patch);
     } catch (err) {
@@ -283,146 +261,96 @@ export function AgentRuntimeDialog({
     }
   };
 
+  const reset = () => {
+    setSettings(initial);
+    setLocalError(null);
+  };
+
   const sections = Array.from(new Set(shownFields.map((field) => field.section)));
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-3 sm:p-6 animate-fade-in"
-      onClick={(event) => event.target === event.currentTarget && close()}
-    >
-      <section
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`${agentName} 运行设置`}
-        onKeyDown={onDialogKeyDown}
-        className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border bg-card shadow-xl animate-zoom-in-95"
-      >
-        <div className="flex items-start justify-between gap-3 border-b px-5 py-4 sm:px-6">
-          <div>
-            <h3 className="text-lg font-semibold text-foreground">{agentName} 运行设置</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              已按客户端当前的实际配置填好；只改需要改的项，“写入预览”列出这次会写入的键值。账号、接口地址、模型与凭据变量在 Provider 卡片中维护。
-            </p>
-          </div>
-          <button type="button" aria-label="关闭" disabled={busy} onClick={close} className="rounded p-1 text-muted-foreground hover:bg-accent disabled:opacity-50">
-            <X className="h-4 w-4" aria-hidden />
-          </button>
-        </div>
-
-        <div className="flex items-center gap-2 border-b px-5 py-3 sm:px-6" role="group" aria-label="编辑方式">
-          <button
-            type="button"
-            aria-pressed={mode === "form"}
-            data-testid="agent-runtime-form-mode"
-            onClick={() => switchMode("form")}
-            className={cn("inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm", mode === "form" ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent")}
-          >
-            <FormInput className="h-4 w-4" aria-hidden /> 按项填写
-          </button>
-          <button
-            type="button"
-            aria-pressed={mode === "preview"}
-            data-testid="agent-runtime-preview-mode"
-            onClick={() => switchMode("preview")}
-            className={cn("inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm", mode === "preview" ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent")}
-          >
-            <Braces className="h-4 w-4" aria-hidden /> 写入预览
-          </button>
-          <button
-            type="button"
-            aria-pressed={mode === "observed"}
-            data-testid="agent-runtime-observed-mode"
-            onClick={() => switchMode("observed")}
-            className={cn("inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm", mode === "observed" ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent")}
-          >
-            <Braces className="h-4 w-4" aria-hidden /> 本机实际值
-          </button>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
-          {mode === "form" ? (
-            <div className="space-y-5 text-sm">
-              {sections.map((section) => {
-                const sectionFields = shownFields.filter((field) => field.section === section);
-                return (
-                  <section key={section}>
-                    <h4 className="font-semibold text-foreground">{section}</h4>
-                    {sectionFields[0]?.section_description && (
-                      <p className="mt-1 text-xs text-muted-foreground">{sectionFields[0].section_description}</p>
-                    )}
-                    <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
-                      {sectionFields.map((field) => (
-                        <RuntimeField
-                          key={field.key}
-                          field={field}
-                          value={settings[field.key]}
-                          disabled={busy}
-                          onChange={(value) => setSettings((current) => {
-                            const next = { ...current };
-                            if (value === false || value === "") delete next[field.key];
-                            else next[field.key] = value;
-                            return next;
-                          })}
-                        />
-                      ))}
-                    </div>
-                  </section>
-                );
-              })}
-              <p className="rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
-                官方账号仍在助手自身完成登录；本工具不读取账号密码或令牌明文。
-              </p>
+    <div data-testid="agent-runtime-panel" className="space-y-5 text-sm">
+      {sections.map((section) => {
+        const sectionFields = shownFields.filter((field) => field.section === section);
+        return (
+          <section key={section}>
+            <h4 className="font-semibold text-foreground">{section}</h4>
+            {sectionFields[0]?.section_description && (
+              <p className="mt-1 text-xs text-muted-foreground">{sectionFields[0].section_description}</p>
+            )}
+            <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+              {sectionFields.map((field) => (
+                <RuntimeField
+                  key={field.key}
+                  field={field}
+                  value={settings[field.key]}
+                  disabled={busy}
+                  onChange={(value) => setSettings((current) => {
+                    const next = { ...current };
+                    if (value === false || value === "") delete next[field.key];
+                    else next[field.key] = value;
+                    return next;
+                  })}
+                />
+              ))}
             </div>
-          ) : mode === "preview" ? (
-            <div className="space-y-3">
-              <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-3 text-sm text-foreground">
-                <span className="text-muted-foreground">写入：</span>{" "}
-                <code data-testid="agent-runtime-target" className="break-all font-semibold">
-                  {currentConfig?.target ?? currentConfig?.file ?? "目标文件暂不可用"}
-                </code>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  下方只列出这次改动的配置键；未改动的项与目标文件中的其他配置保持不变。返回“按项填写”可直接修改。
-                </p>
-              </div>
-              <pre
-                aria-label="最终写入配置预览"
-                data-testid="agent-runtime-preview"
-                className="min-h-[24rem] w-full overflow-auto rounded-lg border border-input bg-slate-950 p-4 font-mono text-xs leading-5 text-slate-100"
-              >
-                {runtimePreview(adapter, fields, pendingPatch)}
-              </pre>
-            </div>
-          ) : (
-            <div data-testid="agent-runtime-observed-values" className="space-y-3">
-              <AgentCurrentConfigView
-                status={currentConfig}
-                fields={fields}
-                showProvider={false}
-              />
-            </div>
-          )}
-          {(error || localError) && <p role="alert" className="mt-3 text-sm text-destructive">{error ?? localError}</p>}
-        </div>
+          </section>
+        );
+      })}
 
-        <div className="flex justify-end gap-2 border-t px-5 py-4 sm:px-6">
-          <button type="button" data-testid="agent-runtime-cancel" disabled={busy} onClick={close} className="rounded-md border px-4 py-2 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50">
-            取消
-          </button>
-          {mode !== "observed" && (
-            <button
-              type="button"
-              data-testid="agent-runtime-submit"
-              disabled={busy}
-              onClick={submit}
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-            >
-              {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-              {busy ? "正在写入…" : "写入助手"}
-            </button>
-          )}
+      {showPreview && (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            写入{" "}
+            <code data-testid="agent-runtime-target" className="break-all font-semibold text-foreground">
+              {currentConfig?.target ?? currentConfig?.file ?? "目标文件暂不可用"}
+            </code>
+            ：只列出这次改动的配置键，未改动的项与文件里的其他配置保持不变。
+          </p>
+          <pre
+            aria-label="最终写入配置预览"
+            data-testid="agent-runtime-preview"
+            className="max-h-72 w-full overflow-auto rounded-lg border border-input bg-slate-950 p-4 font-mono text-xs leading-5 text-slate-100"
+          >
+            {runtimePreview(adapter, fields, pendingPatch)}
+          </pre>
         </div>
-      </section>
+      )}
+      {localError && <p role="alert" className="text-sm text-destructive">{localError}</p>}
+
+      <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-3">
+        <span data-testid="agent-runtime-pending" className="mr-auto text-xs text-muted-foreground">
+          {changedCount > 0 ? `${changedCount} 项改动还没写入` : "按客户端当前的实际配置显示"}
+        </span>
+        <button
+          type="button"
+          aria-pressed={showPreview}
+          data-testid="agent-runtime-preview-mode"
+          onClick={() => setShowPreview((shown) => !shown)}
+          className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent"
+        >
+          <Braces className="h-4 w-4" aria-hidden /> {showPreview ? "收起写入预览" : "写入预览"}
+        </button>
+        <button
+          type="button"
+          data-testid="agent-runtime-reset"
+          disabled={busy || changedCount === 0}
+          onClick={reset}
+          className="rounded-md border px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
+        >
+          撤销改动
+        </button>
+        <button
+          type="button"
+          data-testid="agent-runtime-submit"
+          disabled={busy || changedCount === 0}
+          onClick={submit}
+          className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+        >
+          {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+          {busy ? "正在写入…" : "写入助手"}
+        </button>
+      </div>
     </div>
   );
 }

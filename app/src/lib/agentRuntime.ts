@@ -131,11 +131,6 @@ export function runtimeValueLabel(field: AgentRuntimeField, value: unknown, rawT
   if (field.key === "automation_mode" && value === CUSTOM_AUTOMATION) {
     return rawText ? `自定义（${rawText}）` : "自定义";
   }
-  if (field.key === "statusline" && value === "custom") return "自定义状态栏（不受本工具管理）";
-  // 旧版写的裸路径：仍是本工具的状态栏，但路径含空格时无法运行，界面单独给修复入口
-  if (field.key === "statusline" && value === "builtin-legacy") {
-    return "本工具状态栏（旧格式，路径含空格时无法运行，修复一次即可）";
-  }
   if (value === undefined) return "暂不可读";
   if (value === null || value === "" || value === false) return field.summary?.default ?? "客户端默认";
   if (field.type === "boolean") return field.summary?.enabled ?? "已开启";
@@ -145,32 +140,4 @@ export function runtimeValueLabel(field: AgentRuntimeField, value: unknown, rawT
       ?? value;
   }
   return String(value);
-}
-
-export interface RuntimeActualItem {
-  key: string;
-  label: string;
-  actual: string;
-}
-
-/** 按适配器字段逐项列出客户端实际值（展示用）。 */
-export function runtimeActualItems(
-  fields: AgentRuntimeField[],
-  status: AgentCurrentConfigStatus | null | undefined,
-): RuntimeActualItem[] {
-  const readable = status?.state === "ready" || status?.state === "missing";
-  const rawText = automationRawText(status);
-  return fields.map((field) => {
-    let value: unknown = undefined;
-    if (readable && status) {
-      value = actualValue(field, status);
-      if (field.key === "automation_mode" && (value === undefined || value === null || value === "")) value = "manual";
-      if (value === undefined) value = null;
-    }
-    return {
-      key: field.key,
-      label: field.summary?.label ?? field.label,
-      actual: runtimeValueLabel(field, value, rawText),
-    };
-  });
 }

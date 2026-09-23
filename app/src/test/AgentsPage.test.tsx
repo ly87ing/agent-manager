@@ -106,7 +106,8 @@ describe("助手页产品边界", () => {
     // 当前以客户端实际配置为准：对不上已保存接入就是未保存的实际配置，不报「尚未生效」
     expect(screen.getByText(/当前接入：当前实际配置（未保存）/)).toBeInTheDocument();
     expect(screen.queryByText(/尚未生效/)).toBeNull();
-    expect(screen.getByTestId("workbench-tab-automation")).toHaveTextContent("自动化与权限");
+    expect(screen.getByTestId("workbench-tab-automation")).toHaveTextContent("运行设置");
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["接入 Provider", "运行设置", "启动命令"]);
     expect(screen.getByTestId("manage-instances-button")).toHaveTextContent("独立环境");
     await userEvent.click(screen.getByTestId("workbench-tab-launch"));
     const launches = screen.getByTestId("agent-launch-commands-claude-code");
@@ -155,20 +156,34 @@ describe("助手页产品边界", () => {
     expect(args).not.toContain("--rename-from");
   });
 
-  it("实际配置页直接展示目标文件与脱敏后的最终生效值", async () => {
-    renderWithEngine(<AgentsPage />, routes());
+  it("没有单独的「实际配置」页签：运行设置按实际值预填，文件原文收在底部按需展开", async () => {
+    const withFile: Record<string, Envelope> = {
+      ...routes(),
+      "agents:config-file": makeEnvelope(
+        {
+          element: "agents:claude-code",
+          path: "~/.claude/settings.json",
+          format: "json",
+          exists: true,
+          content: '{\n  "effortLevel": "high"\n}\n',
+          base: "d".repeat(64),
+          blocked_reason: null,
+        },
+        { command: "agents.config-file" },
+      ),
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, withFile);
 
-    await userEvent.click(await screen.findByTestId("workbench-tab-actual"));
-    const panel = screen.getByTestId("actual-config-panel");
-    expect(panel).toHaveTextContent("settings.json");
-    expect(panel).toHaveTextContent("https://claude.example.com");
-    expect(panel).toHaveTextContent("已配置（token）");
-    expect(panel).toHaveTextContent("令牌还没有保存为变量");
-    // 只展示实际值，不再并列库里的上次写入记录
-    expect(panel).not.toHaveTextContent("软件保存值");
-    expect(within(screen.getByTestId("runtime-actual-claude_effort_level")).getByText("high")).toBeInTheDocument();
-    expect(panel).not.toHaveTextContent('"configured"');
-    expect(panel).not.toHaveTextContent("ANTHROPIC_AUTH_TOKEN=");
+    await userEvent.click(await screen.findByTestId("workbench-tab-automation"));
+    expect(screen.queryByTestId("workbench-tab-actual")).toBeNull();
+    expect(screen.getByTestId("agent-runtime-claude-effort-level")).toHaveValue("high");
+    // 原文默认收起，不读文件
+    const toggle = screen.getByTestId("agent-edit-config-file");
+    expect(toggle).toHaveTextContent("settings.json");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(calls.some((call) => call.command === "agents:config-file")).toBe(false);
+    await userEvent.click(toggle);
+    expect(await screen.findByTestId("config-file-text")).toHaveValue('{\n  "effortLevel": "high"\n}\n');
   });
 
   it("当前 Provider 排在首位并直接标记当前使用", async () => {
@@ -252,21 +267,15 @@ describe("助手页产品边界", () => {
     expect(screen.queryByText("opencode 接入工作台")).toBeNull();
   });
 
-  it("Codex 主界面不展示认证细节，运行偏好仍只读展示脱敏观察值", async () => {
+  it("Codex 主界面不展示认证细节，运行设置按实际值预填", async () => {
     renderWithEngine(<AgentsPage />, routes("codex", "codex"));
 
     expect(await screen.findByTestId("connection-workbench")).toBeInTheDocument();
     expect(screen.queryByText("auth.json")).toBeNull();
 
     await userEvent.click(screen.getByTestId("workbench-tab-automation"));
-    await userEvent.click(screen.getByTestId("agent-runtime-button"));
-    await userEvent.click(screen.getByTestId("agent-runtime-observed-mode"));
-    const observedValues = screen.getByTestId("agent-runtime-observed-values");
-    expect(observedValues).toHaveTextContent("推理强度");
-    expect(observedValues).toHaveTextContent("high");
-    expect(observedValues).not.toHaveTextContent("软件保存值");
-    expect(observedValues).not.toHaveTextContent('"model"');
-    expect(observedValues).not.toHaveTextContent("token");
-    expect(screen.queryByTestId("agent-runtime-submit")).toBeNull();
+    expect(screen.getByTestId("agent-runtime-codex-reasoning-effort")).toHaveValue("high");
+    expect(screen.getByTestId("automation-panel")).not.toHaveTextContent("软件保存值");
+    expect(screen.getByTestId("agent-runtime-submit")).toBeDisabled();
   });
 });

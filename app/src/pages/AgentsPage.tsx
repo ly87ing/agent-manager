@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { AgentRuntimeDialog } from "../components/AgentRuntimeDialog";
 import { AliasEditorDialog } from "../components/AliasEditorDialog";
 import { ProfileCard } from "../components/ProfileCards";
 import { ProfileFormDialog } from "../components/ProfileFormDialog";
@@ -50,7 +49,7 @@ import {
   liveRefusalDescription,
   type ConfigureRequest,
 } from "../lib/agentCurrent";
-import { actualRuntimeSettings, runtimePatchApplied } from "../lib/agentRuntime";
+import { runtimePatchApplied } from "../lib/agentRuntime";
 import type { AgentsSpec } from "../lib/observed";
 import { useEngineQuery } from "../lib/queries";
 import { DEFAULT_LANG, DEFAULT_TIMEZONE, useAliasSource } from "../lib/useAliasSource";
@@ -105,9 +104,7 @@ export default function AgentsPage({
     { bin: string; name: string; value: string | null; presetName?: string } | null
   >(null);
   const [launchRemoving, setLaunchRemoving] = useState<string | null>(null);
-  const [runtimeFormAgent, setRuntimeFormAgent] = useState<EngineElement | null>(null);
   const [runtimeSaving, setRuntimeSaving] = useState(false);
-  const [runtimeFormError, setRuntimeFormError] = useState<string | null>(null);
   /** 高风险运行模式先确认，再写入客户端；取消必须保持零写入。 */
   const [pendingRuntimeSave, setPendingRuntimeSave] = useState<{
     agent: EngineElement;
@@ -159,7 +156,6 @@ export default function AgentsPage({
       kind: item.management!.connection_kind as "claude" | "codex",
     }))
     .filter((item) => item.kind === "claude" || item.kind === "codex");
-  const runtimeManagement = runtimeFormAgent ? agentManagementOf(runtimeFormAgent) : null;
   const elementOf = (agentId: string) => elements.find((element) => element.id === `agents:${agentId}`);
   const baseBinOf = (agentId: string) =>
     (elements.find((element) => element.id === `agents:${agentId}`)?.spec as AgentsSpec | undefined)?.bin ??
@@ -181,7 +177,7 @@ export default function AgentsPage({
     const base = element ? configureBaseOf(element) : null;
     if (!base) {
       toast.error("客户端配置文件暂不可读，没有写入", {
-        description: "到“实际配置”查看原因；修好之后再试。",
+        description: "到“运行设置”底部直接编辑配置文件查看原因；修好之后再试。",
       });
       return false;
     }
@@ -213,7 +209,7 @@ export default function AgentsPage({
             : Boolean(current?.profile);
         if (!verified) {
           toast.error("写入已经返回成功，但状态回读没有确认生效", {
-            description: "请到“实际配置”查看客户端当前的值后再决定是否重试。",
+            description: "请到“运行设置”查看客户端当前的值后再决定是否重试。",
           });
           return false;
         }
@@ -443,11 +439,10 @@ export default function AgentsPage({
     if (runtimeSaving) return;
     const management = agentManagementOf(element);
     if (!management) {
-      setRuntimeFormError("当前助手没有可用的运行设置适配器");
+      toast.error("当前助手没有可用的运行设置适配器");
       return;
     }
     if (runtimeRequiresYoloConfirmation(patch, management.runtime_fields)) {
-      setRuntimeFormAgent(null);
       setPendingRuntimeSave({ agent: element, patch });
       return;
     }
@@ -461,8 +456,6 @@ export default function AgentsPage({
   ) => {
     const agentId = element.id.replace(/^agents:/, "");
     setRuntimeSaving(true);
-    setRuntimeFormError(null);
-    setRuntimeFormAgent(null);
     try {
       await runConfigure(
         { agentId, runtime: patch, allowYolo },
@@ -679,10 +672,8 @@ export default function AgentsPage({
         onExport={(element, connection) => void exportConnection(element, connection)}
         onRemove={(element, connection) => setConnectionRemoving({ agent: element, connection })}
         onMove={(element, connection, direction) => void moveConnection(element, connection, direction)}
-        onRuntimeSettings={(element) => {
-          setRuntimeFormError(null);
-          setRuntimeFormAgent(element);
-        }}
+        runtimeSaving={runtimeSaving}
+        onSaveRuntime={(element, patch) => saveRuntimeSettings(element, patch)}
         onSaveCurrent={(element) =>
           void runConfigure(
             { agentId: element.id.replace(/^agents:/, ""), saveCurrent: true },
@@ -958,23 +949,6 @@ export default function AgentsPage({
           executing={aliasSource.busy}
           onConfirm={() => void removeLaunchAlias(launchRemoving)}
           onClose={() => setLaunchRemoving(null)}
-        />
-      )}
-      {runtimeFormAgent && runtimeManagement && (
-        <AgentRuntimeDialog
-          key={runtimeFormAgent.id}
-          agentName={(runtimeFormAgent.spec as AgentsSpec).display_name ?? runtimeFormAgent.id.replace(/^agents:/, "")}
-          adapter={runtimeManagement.adapter}
-          fields={runtimeManagement.runtime_fields}
-          initial={actualRuntimeSettings(runtimeManagement.runtime_fields, currentConfigOf(runtimeFormAgent))}
-          currentConfig={currentConfigOf(runtimeFormAgent)}
-          busy={runtimeSaving}
-          error={runtimeFormError}
-          onSubmit={(patch) => void saveRuntimeSettings(runtimeFormAgent, patch)}
-          onClose={() => {
-            setRuntimeFormAgent(null);
-            setRuntimeFormError(null);
-          }}
         />
       )}
       {definitionOps.modals}

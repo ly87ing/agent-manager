@@ -63,9 +63,10 @@ function routes(overrides: Record<string, Envelope> = {}): Record<string, Envelo
   };
 }
 
-async function openRuntimeSettings() {
+/** 运行设置直接在页签里，不再弹对话框。 */
+async function openRuntimeSettings(): Promise<HTMLElement> {
   await userEvent.click(await screen.findByTestId("workbench-tab-automation"));
-  await userEvent.click(await screen.findByTestId("agent-runtime-button"));
+  return screen.findByTestId("automation-panel");
 }
 
 function configureCalls<T extends { command: string }>(calls: T[]): T[] {
@@ -152,7 +153,7 @@ describe("助手运行参数", () => {
     });
   }
 
-  it("运行设置短弹窗不展示生命周期脚本，只把改动交给引擎一条命令写入", async () => {
+  it("运行设置页不展示生命周期脚本，只把改动交给引擎一条命令写入", async () => {
     const withExisting = routes();
     const status = withExisting["agents:status"] as { data: { elements: { spec: Record<string, any> }[] } };
     status.data.elements[0].spec.custom_meta = { owner: "local" };
@@ -165,10 +166,10 @@ describe("助手运行参数", () => {
     };
     const { calls } = renderWithEngine(<AgentsPage />, withExisting);
 
-    await openRuntimeSettings();
-    const dialog = await screen.findByRole("dialog", { name: "Claude Code 运行设置" });
-    expect(screen.getByTestId("agent-runtime-cancel")).toHaveFocus();
-    expect(dialog).toHaveTextContent("账号、接口地址、模型与凭据变量在 Provider 卡片中维护");
+    const panel = await openRuntimeSettings();
+    expect(panel).toHaveTextContent("账号、接口地址、模型与凭据在「接入 Provider」维护");
+    // 没改动时不能写
+    expect(screen.getByTestId("agent-runtime-submit")).toBeDisabled();
     expect(screen.queryByLabelText("安装命令")).toBeNull();
     expect(screen.queryByLabelText("升级命令")).toBeNull();
     expect(screen.queryByLabelText("卸载命令")).toBeNull();
@@ -185,8 +186,7 @@ describe("助手运行参数", () => {
 
   it("Claude 高级运行参数在写入预览集中显示真实配置键并保存具体值", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
-    await openRuntimeSettings();
-    const dialog = await screen.findByRole("dialog", { name: "Claude Code 运行设置" });
+    const dialog = await openRuntimeSettings();
     expect(dialog).not.toHaveTextContent("env.ENABLE_TOOL_SEARCH");
 
     // max 只对单次会话有效，官方不接受持久保存：选项里没有它
@@ -220,14 +220,13 @@ describe("助手运行参数", () => {
 
   it("写入预览显示 Claude 最终配置值和真实目标文件", async () => {
     renderWithEngine(<AgentsPage />, routes());
-    await openRuntimeSettings();
-    const dialog = await screen.findByRole("dialog", { name: "Claude Code 运行设置" });
+    const dialog = await openRuntimeSettings();
     await userEvent.click(screen.getByTestId("agent-runtime-automation-mode-full"));
 
     await userEvent.click(screen.getByTestId("agent-runtime-preview-mode"));
     expect(screen.getByTestId("agent-runtime-target")).toHaveTextContent("/Users/demo/.claude/settings.json");
     expect(screen.getByTestId("agent-runtime-preview")).toHaveTextContent('"defaultMode": "bypassPermissions"');
-    expect(dialog).toHaveTextContent("目标文件中的其他配置保持不变");
+    expect(dialog).toHaveTextContent("文件里的其他配置保持不变");
   });
 
   it("写入预览显示 Codex TOML 最终配置值和真实目标文件", async () => {
@@ -246,8 +245,7 @@ describe("助手运行参数", () => {
 
   it("Codex 运行参数允许研发填写推理、上下文、压缩与搜索的具体值", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, agentRoutes("codex", "codex"));
-    await openRuntimeSettings();
-    const dialog = await screen.findByRole("dialog", { name: "codex 运行设置" });
+    const dialog = await openRuntimeSettings();
 
     await userEvent.selectOptions(screen.getByTestId("agent-runtime-codex-reasoning-effort"), "high");
     await userEvent.type(screen.getByTestId("agent-runtime-codex-context-window"), "1000000");
@@ -310,12 +308,10 @@ describe("助手运行参数", () => {
     current.runtime = { automation_mode: "manual" };
     const { calls } = renderWithEngine(<AgentsPage />, withRecord);
 
-    await userEvent.click(await screen.findByTestId("workbench-tab-automation"));
-    const panel = screen.getByTestId("automation-panel");
-    expect(panel).toHaveTextContent("当前自动化：手动确认");
+    const panel = await openRuntimeSettings();
+    expect(screen.getByTestId("connection-workbench")).toHaveTextContent("自动化：手动确认");
     expect(panel).not.toHaveTextContent("尚未生效");
     expect(screen.queryByTestId("agent-runtime-apply")).toBeNull();
-    await userEvent.click(screen.getByTestId("agent-runtime-button"));
     expect(screen.getByTestId("agent-runtime-automation-mode-manual")).toBeChecked();
     expect(configureCalls(calls)).toHaveLength(0);
   });
@@ -334,7 +330,7 @@ describe("助手运行参数", () => {
 
     await openRuntimeSettings();
     expect(screen.getByTestId("agent-runtime-automation-mode-custom")).toBeChecked();
-    expect(screen.getByRole("dialog", { name: "Claude Code 运行设置" })).toHaveTextContent("acceptEdits");
+    expect(screen.getByTestId("agent-runtime-panel")).toHaveTextContent("acceptEdits");
     expect(screen.getByTestId("agent-runtime-claude-effort-level")).toHaveValue("low");
     await userEvent.selectOptions(screen.getByTestId("agent-runtime-claude-effort-level"), "high");
     await userEvent.click(screen.getByTestId("agent-runtime-submit"));
@@ -1269,7 +1265,7 @@ describe("助手运行参数", () => {
     await userEvent.keyboard("{Escape}");
 
     await openRuntimeSettings();
-    expect(await screen.findByRole("dialog", { name: "codex 运行设置" })).toBeInTheDocument();
+    expect(await screen.findByTestId("agent-runtime-panel")).toBeInTheDocument();
     expect(screen.queryByTestId("agent-runtime-statusline")).toBeNull();
     expect(screen.getByTestId("agent-runtime-automation-mode")).toBeInTheDocument();
   });
