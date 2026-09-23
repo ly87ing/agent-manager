@@ -94,6 +94,13 @@ struct ApplyLock {
     _file: std::fs::File,
 }
 
+/// 锁被占用时最多再等这么久才判定为并发。
+///
+/// 同一进程里别的线程启动子进程时，子进程在 exec 之前握着这把锁所在文件描述符的副本，
+/// 刚释放的锁会被它短暂占住（flock 挂在打开的文件描述上）。这个窗口很短，等它过去即可；
+/// 真正在执行的写动作远比这长，照样拒绝。
+const APPLY_LOCK_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
+
 fn acquire_apply_lock(ctx: &Context, domain: &str) -> Result<ApplyLock> {
     std::fs::create_dir_all(&ctx.data_dir)?;
     let path = ctx.data_dir.join("agent-manager.apply.lock");
@@ -102,9 +109,23 @@ fn acquire_apply_lock(ctx: &Context, domain: &str) -> Result<ApplyLock> {
         .read(true)
         .write(true)
         .open(path)?;
-    file.try_lock_exclusive()
-        .map_err(|err| anyhow::anyhow!("{domain} apply 正在执行，拒绝并发动作：{err}"))?;
-    Ok(ApplyLock { _file: file })
+    let deadline = std::time::Instant::now() + APPLY_LOCK_GRACE;
+    loop {
+        match file.try_lock_exclusive() {
+            Ok(()) => return Ok(ApplyLock { _file: file }),
+            Err(err)
+                if err.raw_os_error() == fs2::lock_contended_error().raw_os_error()
+                    && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(err) => {
+                return Err(anyhow::anyhow!(
+                    "{domain} apply 正在执行，拒绝并发动作：{err}"
+                ))
+            }
+        }
+    }
 }
 
 /// The single native entry point. Pure with respect to process state: no exit
@@ -1148,6 +1169,42 @@ mod tests {
             args: args.iter().map(|s| s.to_string()).collect(),
             run_id: "run-test".to_string(),
         }
+    }
+
+    #[test]
+    fn apply_lock_waits_out_a_briefly_held_handle_but_refuses_a_real_holder() {
+        let (root, ctx) = temp_ctx("apply-lock-grace");
+        std::fs::create_dir_all(&ctx.data_dir).unwrap();
+        let path = ctx.data_dir.join("agent-manager.apply.lock");
+        let open = || {
+            OpenOptions::new()
+                .create(true)
+                .read(true)
+                .write(true)
+                .open(&path)
+                .unwrap()
+        };
+        // 像 fork 出来、还没 exec 的子进程那样短暂占着：稍后释放，取锁应等到它
+        let brief = open();
+        brief.lock_exclusive().unwrap();
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            drop(brief);
+        });
+        let lock = acquire_apply_lock(&ctx, "Test");
+        releaser.join().unwrap();
+        assert!(lock.is_ok(), "短暂占用应等过去");
+        drop(lock);
+
+        // 真在执行的写动作一直占着：宽限期过后拒绝
+        let holder = open();
+        holder.lock_exclusive().unwrap();
+        let started = std::time::Instant::now();
+        let err = acquire_apply_lock(&ctx, "Test").err().expect("应拒绝");
+        assert!(started.elapsed() >= APPLY_LOCK_GRACE);
+        assert!(format!("{err}").contains("拒绝并发动作"), "{err}");
+        drop(holder);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
