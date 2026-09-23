@@ -118,6 +118,8 @@ enum ArgValueKind {
     SuggestionId,
     /// 规则模板 id：小写字母、数字与连字符。
     TemplateId,
+    /// 来源规则 id：`<集合>/<名字>`，两段只含字母、数字与 `-_.`，且不是 `.`/`..`。
+    SourceRuleId,
     /// 规则模板名称：不含控制字符（换行也不行），长度有上限。
     TemplateName,
     /// 规则模板 revision：64 位小写 sha256。
@@ -141,7 +143,7 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--base", ArgValueKind::RuleBase));
             specs.push(("--value", ArgValueKind::RuleText));
             specs.push(("--template", ArgValueKind::TemplateId));
-            specs.push(("--recommended", ArgValueKind::Flag));
+            specs.push(("--source-rule", ArgValueKind::SourceRuleId));
             specs.push(("--from", ArgValueKind::ElementId));
         }
         ("rules", "save-template") => {
@@ -430,6 +432,25 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
                 Ok(())
             } else {
                 Err(EngineError::new("invalid_args", "非法规则模板 id"))
+            }
+        }
+        ArgValueKind::SourceRuleId => {
+            let part = |p: &str| {
+                !p.is_empty()
+                    && p != "."
+                    && p != ".."
+                    && p.chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            };
+            let ok = value.len() <= 200
+                && matches!(value.split_once('/'), Some((coll, name)) if part(coll) && part(name));
+            if ok {
+                Ok(())
+            } else {
+                Err(EngineError::new(
+                    "invalid_args",
+                    "来源规则 id 须为 <集合>/<名字>",
+                ))
             }
         }
         // 名称不回显：只说形状
@@ -1083,7 +1104,7 @@ mod tests {
                 "rules:apply",
                 with(
                     "rules:codex_global",
-                    &["--base", "missing", "--recommended"],
+                    &["--base", "missing", "--source-rule", "agent-skills/core"],
                 ),
             ),
             (
@@ -1169,6 +1190,26 @@ mod tests {
             (
                 "rules:apply",
                 with("rules:codex_global", &["--template", "Bad Id"]),
+            ),
+            // 内置推荐已退役；来源规则 id 形状不对的拒绝
+            (
+                "rules:apply",
+                with(
+                    "rules:codex_global",
+                    &["--base", "missing", "--recommended"],
+                ),
+            ),
+            (
+                "rules:apply",
+                with("rules:codex_global", &["--source-rule", "../core"]),
+            ),
+            (
+                "rules:apply",
+                with("rules:codex_global", &["--source-rule", "a/b/c"]),
+            ),
+            (
+                "rules:apply",
+                with("rules:codex_global", &["--source-rule", "core"]),
             ),
             (
                 "rules:save-template",
@@ -1592,9 +1633,14 @@ mod tests {
         )
         .unwrap();
         assert!(env.ok, "{:?}", env.errors);
+        // 推荐快捷命令不编进程序：没有来源时不推荐，只给推荐来源
         assert_eq!(
             env.data["alias_recommendations"].as_array().unwrap().len(),
-            4
+            0
+        );
+        assert_eq!(
+            env.data["alias_suggested_sources"][0]["name"],
+            "agent-skills"
         );
         assert!(!root.join("data").exists(), "aliases:status 零写");
         assert!(!root.join("home").exists(), "aliases:status 零写");
