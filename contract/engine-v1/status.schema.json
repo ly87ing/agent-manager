@@ -41,7 +41,7 @@
     "suggested_sources": {
       "description": "Rules domain only: when no source provides rules, the recommended skill sources that do (the skills recommendation catalog). 'collection' names an already registered collection with the same name or URL (fetch it with skills:apply --action update), or null when it still has to be added.",
       "type": "array",
-      "items": {"$ref": "#/$defs/rule_suggested_source"}
+      "items": {"$ref": "#/$defs/suggested_source"}
     },
     "aliases": {
       "description": "Aliases domain only: the aliases actually present in the managed blocks of ~/.zshrc and ~/.zprofile, merged by name. This is the current configuration; nothing here comes from the database. Read-only, zero-write.",
@@ -49,9 +49,14 @@
       "items": {"$ref": "#/$defs/alias_current"}
     },
     "alias_recommendations": {
-      "description": "Aliases domain only: compiled-in recommended aliases whose name is not defined in either file (inside or outside the managed block). Never stored, never counted as pending; added one by one on explicit request (aliases:apply --recommended).",
+      "description": "Aliases domain only: recommended aliases from skill sources (every aliases/*.json under an enabled collection's root; the program ships none) whose name is not defined in either file (inside or outside the managed block). Never stored, never counted as pending; added one by one on explicit request (aliases:apply --recommended).",
       "type": "array",
       "items": {"$ref": "#/$defs/alias_recommendation"}
+    },
+    "alias_suggested_sources": {
+      "description": "Aliases domain only: when no source provides aliases, the recommended skill sources that do (same shape as suggested_sources).",
+      "type": "array",
+      "items": {"$ref": "#/$defs/suggested_source"}
     },
     "alias_legacy": {
       "description": "Aliases domain only: aliases saved by an older version (legacy alias_sources row) that differ from the recommendations and are not in any managed block with the same value. Can be added (aliases:apply --legacy) or discarded (aliases:discard-legacy).",
@@ -74,14 +79,15 @@
       }
     },
     "alias_recommendation": {
-      "description": "One compiled-in recommended alias, placeholders already resolved.",
+      "description": "One recommended alias from a skill source, placeholders already resolved.",
       "type": "object",
-      "required": ["name", "value", "line"],
+      "required": ["name", "value", "line", "source"],
       "additionalProperties": false,
       "properties": {
         "name": {"type": "string"},
         "value": {"type": "string"},
-        "line": {"type": "string"}
+        "line": {"type": "string"},
+        "source": {"description": "Collection that provides it.", "type": "string"}
       }
     },
     "alias_legacy": {
@@ -111,8 +117,8 @@
         "local": {"description": "true for a local source directory (edits show immediately); false for a git mirror refreshed by skills:apply --action update.", "type": "boolean"}
       }
     },
-    "rule_suggested_source": {
-      "description": "A recommended skill source that carries rules.",
+    "suggested_source": {
+      "description": "A recommended skill source that carries rules or aliases.",
       "type": "object",
       "required": ["name", "description", "url", "collection"],
       "additionalProperties": false,

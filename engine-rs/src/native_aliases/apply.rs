@@ -17,6 +17,7 @@ use serde_json::{json, Map, Value};
 use super::args::{self, ApplyArgs, Op};
 use super::legacy::{self, Pruned};
 use super::model::{self, Edit};
+use super::sources::SourceAlias;
 use super::status::{self, Probe, View};
 use crate::native::{reject_secret_text, Context, Request};
 use crate::native_mcp::rollback::{atomic_write_bytes_checked, RollbackGuard};
@@ -36,6 +37,8 @@ struct Write {
 /// 解析好、可以写的一次操作。
 struct Prepared {
     edit: Edit,
+    /// 添加推荐时它来自哪个来源（集合名），只进审计。
+    origin: Option<String>,
     writes: Vec<Write>,
     /// 选中但内容不变、不用写的文件。
     skipped: Vec<&'static str>,
@@ -63,8 +66,14 @@ fn pairs(split: &model::Split) -> impl Iterator<Item = (String, String)> {
         .filter_map(|e| e.value.map(|value| (e.name, value)))
 }
 
-/// 把操作落成一次对区块的编辑（推荐与旧版别名在这里按当前实际内容查找）。
-fn edit_of(op: &Op, views: &[View], row: Option<&Map<String, Value>>) -> Result<Edit> {
+/// 把操作落成一次对区块的编辑（推荐与旧版别名在这里按当前实际内容查找）。添加推荐时
+/// 另返回它来自哪个来源。
+fn edit_of(
+    op: &Op,
+    views: &[View],
+    row: Option<&Map<String, Value>>,
+    source: &[SourceAlias],
+) -> Result<(Edit, Option<String>)> {
     Ok(match op {
         Op::Set {
             name,
@@ -72,23 +81,27 @@ fn edit_of(op: &Op, views: &[View], row: Option<&Map<String, Value>>) -> Result<
             rename_from,
         } => {
             validate_value(value)?;
-            Edit::Set {
+            let edit = Edit::Set {
                 name: name.clone(),
                 value: value.clone(),
                 rename_from: rename_from.clone().filter(|old| old != name),
-            }
+            };
+            (edit, None)
         }
-        Op::Remove { name } => Edit::Remove { name: name.clone() },
+        Op::Remove { name } => (Edit::Remove { name: name.clone() }, None),
         Op::Recommended(name) => {
-            let (name, value) = status::recommendations(views)
+            let alias = status::recommendations(views, source)
                 .into_iter()
-                .find(|(n, _)| n == name)
-                .ok_or_else(|| anyhow!("这条推荐已不适用（同名快捷命令已存在），请刷新后重试"))?;
-            Edit::Set {
-                name,
-                value,
+                .find(|a| &a.name == name)
+                .ok_or_else(|| {
+                    anyhow!("这条推荐已不适用（同名快捷命令已存在，或来源已停用、还没取回），请刷新后重试")
+                })?;
+            let edit = Edit::Set {
+                name: alias.name.clone(),
+                value: alias.value.clone(),
                 rename_from: None,
-            }
+            };
+            (edit, Some(alias.collection.clone()))
         }
         Op::Legacy(id) => {
             let item = status::legacy_suggestions(views, row)
@@ -97,11 +110,12 @@ fn edit_of(op: &Op, views: &[View], row: Option<&Map<String, Value>>) -> Result<
                 .ok_or_else(|| {
                     anyhow!("这条已保存的快捷命令已不存在（可能已加入或已丢弃），请刷新后重试")
                 })?;
-            Edit::Set {
+            let edit = Edit::Set {
                 name: item.name,
                 value: item.value,
                 rename_from: None,
-            }
+            };
+            (edit, None)
         }
     })
 }
@@ -140,7 +154,8 @@ fn prepare(
         }
         selected.push((view, old_bytes, split));
     }
-    let edit = edit_of(&parsed.op, &views, row)?;
+    let source = super::sources::load(ctx)?;
+    let (edit, origin) = edit_of(&parsed.op, &views, row, &source)?;
 
     let mut writes = Vec::new();
     let mut skipped = Vec::new();
@@ -167,6 +182,7 @@ fn prepare(
     }
     Ok(Prepared {
         edit,
+        origin,
         writes,
         skipped,
         present,
@@ -182,7 +198,7 @@ pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
     Ok(())
 }
 
-fn op_meta(op: &Op, edit: &Edit) -> Value {
+fn op_meta(op: &Op, edit: &Edit, origin: Option<&str>) -> Value {
     let name = match edit {
         Edit::Set { name, .. } | Edit::Remove { name } => name,
     };
@@ -193,7 +209,7 @@ fn op_meta(op: &Op, edit: &Edit) -> Value {
             "renamed_from": match edit { Edit::Set { rename_from, .. } => json!(rename_from), _ => Value::Null },
         }),
         Op::Remove { .. } => json!({ "kind": "remove", "name": name }),
-        Op::Recommended(_) => json!({ "kind": "recommended", "name": name }),
+        Op::Recommended(_) => json!({ "kind": "recommended", "name": name, "source": origin }),
         Op::Legacy(id) => json!({ "kind": "legacy", "suggestion": id, "name": name }),
     }
 }
@@ -249,7 +265,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
             Some(if ids.len() == 1 { ids[0] } else { "aliases" }),
             Some(&json!({
                 "action": "write",
-                "source": op_meta(&parsed.op, &prep.edit),
+                "source": op_meta(&parsed.op, &prep.edit, prep.origin.as_deref()),
                 "targets": ids,
                 "bases": bases,
                 "legacy_pruned": pruned != Pruned::Unchanged,

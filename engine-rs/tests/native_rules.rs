@@ -1222,7 +1222,7 @@ fn status_matches_contract_schema() {
         assert_eq!(keys(item), strings(&template_def["required"]));
     }
     // 没有来源规则时的推荐来源
-    let suggested_def = &schema["$defs"]["rule_suggested_source"];
+    let suggested_def = &schema["$defs"]["suggested_source"];
     let suggested = data["suggested_sources"].as_array().unwrap();
     assert!(!suggested.is_empty());
     for item in suggested {

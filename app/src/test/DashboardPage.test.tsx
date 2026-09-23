@@ -151,7 +151,7 @@ function okRoutes(): Record<string, EngineRoute> {
     "aliases:status": makeEnvelope(
       makeAliasStatus(
         { cc: "claude", yolo: "claude --dangerously-skip-permissions" },
-        { recommendations: [{ name: "grok", value: "grok", line: "alias grok='grok'" }] },
+        { recommendations: [{ name: "grok", value: "grok", line: "alias grok='grok'", source: "agent-skills" }] },
       ),
       { command: "aliases.status" },
     ),

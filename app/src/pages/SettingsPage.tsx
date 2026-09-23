@@ -289,7 +289,7 @@ export default function SettingsPage({
           </button>
           <span className="text-xs text-muted-foreground">/ 配置工具 / {currentEntry?.title}</span>
         </div>
-        {activeAdvanced === "aliases" && <AliasesPage />}
+        {activeAdvanced === "aliases" && <AliasesPage onOpenSkills={onNavigate ? () => onNavigate("skills") : undefined} />}
         {activeAdvanced === "client-diagnostics" && <ClientDiagnosticsPage />}
         {activeAdvanced === "secrets" && <SecretsPage />}
       </div>

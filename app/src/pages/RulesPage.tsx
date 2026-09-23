@@ -5,7 +5,7 @@ import { ChevronDown, ChevronRight, Plus } from "lucide-react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
-import type { EngineElement, RuleSourceRule, RuleSuggestedSource, RuleTemplate, StatusData } from "../lib/contract";
+import type { EngineElement, RuleSourceRule, SuggestedSource, RuleTemplate, StatusData } from "../lib/contract";
 import type { RulesObserved, RulesSpec } from "../lib/observed";
 import { useDialogFocus } from "../lib/dialogFocus";
 import { engineErrorMessage, runEngine } from "../lib/engine";
@@ -441,7 +441,7 @@ function SourceRulesSection({
   onOpenSkills,
 }: {
   rules: RuleSourceRule[];
-  suggested: RuleSuggestedSource[];
+  suggested: SuggestedSource[];
   busy: boolean;
   onApply?: (rule: RuleSourceRule) => void;
   onFetch: (collection: string) => void;

@@ -107,11 +107,13 @@ export interface StatusData {
   /** 仅 rules 域：技能来源里的规则模板（集合根下 rules/*.md，README 除外）。只读，不入库。 */
   source_rules?: RuleSourceRule[];
   /** 仅 rules 域：没有来源规则时的推荐来源；collection 为已登记的同名/同地址集合。 */
-  suggested_sources?: RuleSuggestedSource[];
+  suggested_sources?: SuggestedSource[];
   /** 仅 aliases 域：两个 rc 文件受管区块里的实际别名，按名合并。这就是当前配置。 */
   aliases?: AliasCurrent[];
-  /** 仅 aliases 域：内置推荐别名（任一文件里已有同名的不推荐）。只读，不计入待同步。 */
+  /** 仅 aliases 域：来源推荐别名（技能来源里的 aliases/*.json；任一文件里已有同名的不推荐）。只读，不计入待同步。 */
   alias_recommendations?: AliasRecommendation[];
+  /** 仅 aliases 域：没有来源别名时的推荐来源；collection 为已登记的同名/同地址集合。 */
+  alias_suggested_sources?: SuggestedSource[];
   /** 仅 aliases 域：旧版本保存、实际区块里还没有的别名（已保存未生效）。 */
   alias_legacy?: AliasLegacySuggestion[];
 }
@@ -133,6 +135,8 @@ export interface AliasRecommendation {
   name: string;
   value: string;
   line: string;
+  /** 提供它的技能来源（集合名）。 */
+  source: string;
 }
 
 export interface AliasLegacySuggestion {
@@ -170,7 +174,7 @@ export interface RuleSourceRule {
   local: boolean;
 }
 
-export interface RuleSuggestedSource {
+export interface SuggestedSource {
   name: string;
   description: string;
   url: string;

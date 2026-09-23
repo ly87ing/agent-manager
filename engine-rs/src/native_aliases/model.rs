@@ -1,4 +1,4 @@
-//! aliases 域固定目标、受管区块的解析与编辑、内置推荐与旧来源结构校验。
+//! aliases 域固定目标、受管区块的解析与编辑、旧来源结构校验与旧版内置别名（只供旧库判定）。
 //!
 //! 生效的别名就是 ~/.zshrc 与 ~/.zprofile 里 marker 区块内的实际行；区块外字节逐字节
 //! 保留，其中用户自己的 `alias` 行只读列出。本工具写出的行固定为 `alias <name>='<value>'`；
@@ -16,12 +16,13 @@ pub(crate) const MARKER_END: &str = "# <<< agent-manager shell aliases <<<";
 /// 没有受管区块（文件不存在或文件里没有区块）时的写入基准。
 pub(crate) const BASE_MISSING: &str = "missing";
 
-/// 内置推荐与旧来源都以 {timezone}/{lang} 占位，按这两个默认值解析。
+/// 来源与旧来源都以 {timezone}/{lang} 占位，没写这两个字段时按这两个默认值解析。
 const DEFAULT_TIMEZONE: &str = "America/Los_Angeles";
 const DEFAULT_LANG: &str = "en_US.UTF-8";
 
-/// 编译内置的推荐别名（旧版本的默认来源），只读、从不入库。
-const RAW_BUILTIN: &str = include_str!("../../../config/shell-aliases.json");
+/// 旧版本编译内置的推荐别名（默认来源），冻结在推荐别名迁出本仓（2026-09-23）时的内容，
+/// 只用于判定旧库行「是否改过」；推荐内容改由技能来源提供（见 sources.rs）。
+const LEGACY_BUILTIN: &str = include_str!("../../assets/legacy-aliases/shell-aliases.json");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TargetSpec {
@@ -142,10 +143,10 @@ pub(crate) fn source_aliases(cfg: &Map<String, Value>) -> Vec<(String, String)> 
     out
 }
 
-/// 内置推荐别名（按内置 timezone/lang 解析后的取值）。
-pub(crate) fn builtin_aliases() -> Vec<(String, String)> {
+/// 旧版内置别名（按其 timezone/lang 解析后的取值），只供旧库判定。
+pub(crate) fn legacy_builtin_aliases() -> Vec<(String, String)> {
     let obj: Map<String, Value> =
-        serde_json::from_str(RAW_BUILTIN).expect("内置 aliases 默认是合法 JSON 对象");
+        serde_json::from_str(LEGACY_BUILTIN).expect("旧版内置 aliases 是合法 JSON 对象");
     source_aliases(&obj)
 }
 
@@ -403,7 +404,7 @@ mod tests {
             ]
         );
         assert!(source_aliases(&Map::new()).is_empty());
-        let builtin = builtin_aliases();
+        let builtin = legacy_builtin_aliases();
         let names: Vec<&str> = builtin.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(names, ["chrome", "claude", "codex", "grok"]);
         assert!(builtin[1].1.contains("TZ=\"America/Los_Angeles\""));

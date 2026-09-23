@@ -2,6 +2,7 @@ import {
   CONTRACT_ID,
   type AliasLegacySuggestion,
   type AliasRecommendation,
+  type SuggestedSource,
   type ApplyResultData,
   type AuditData,
   type ElementAction,
@@ -227,6 +228,7 @@ export function makeAliasStatus(
   aliases: Record<string, string>,
   options: {
     recommendations?: AliasRecommendation[];
+    suggestedSources?: SuggestedSource[];
     legacy?: AliasLegacySuggestion[];
     external?: Record<string, string>;
     blockedZprofile?: string;
@@ -270,6 +272,7 @@ export function makeAliasStatus(
       }))
       .sort((a, b) => a.name.localeCompare(b.name)),
     alias_recommendations: options.recommendations ?? [],
+    alias_suggested_sources: options.suggestedSources ?? [],
     alias_legacy: options.legacy ?? [],
   };
 }

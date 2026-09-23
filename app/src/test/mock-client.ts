@@ -1029,7 +1029,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
     codex: `${TZ_LANG} codex`,
     chrome: 'open --env TZ="America/Los_Angeles" -n -a "Google Chrome" --args --lang=en-US',
   };
-  const aliasRecommended = ["grok"].map((name) => ({ name, value: `${TZ_LANG} ${name}`, line: `alias ${name}='${TZ_LANG} ${name}'` }));
+  const aliasRecommended = ["grok"].map((name) => ({ name, value: `${TZ_LANG} ${name}`, line: `alias ${name}='${TZ_LANG} ${name}'`, source: "agent-skills" }));
   let aliasLegacy = [
     {
       id: "legacy-0a1b2c3d4e5f6a7b",

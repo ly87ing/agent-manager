@@ -138,10 +138,50 @@ fn seed_legacy(ctx: &Context, value: &Value) {
     .unwrap();
 }
 
-/// 空环境：status 零写；两文件都没有区块（missing，base=missing，可写）；4 条内置别名只作推荐，
-/// 不是当前别名；审计把「没有区块」当正常空状态（notice），不算待生成。
+/// 与 agent-skills 的 aliases/aliases.json 相同结构的一份来源别名。
+const ALIAS_SOURCE: &str = r#"{
+  "timezone": "America/Los_Angeles",
+  "lang": "en_US.UTF-8",
+  "aliases": {
+    "claude": "TZ=\"{timezone}\" LANG=\"{lang}\" LC_ALL=\"{lang}\" claude",
+    "codex": "TZ=\"{timezone}\" LANG=\"{lang}\" LC_ALL=\"{lang}\" codex",
+    "grok": "TZ=\"{timezone}\" LANG=\"{lang}\" LC_ALL=\"{lang}\" grok",
+    "chrome": "open --env TZ=\"{timezone}\" --env LANG=\"{lang}\" --env LC_ALL=\"{lang}\" -n -a \"Google Chrome\" --args --lang=en-US"
+  }
+}"#;
+
+/// 登记一个本地目录技能来源，目录下放 aliases/*.json。返回来源根目录。
+fn add_alias_source(ctx: &Context, name: &str, files: &[(&str, &str)]) -> PathBuf {
+    let dir = ctx
+        .data_dir
+        .parent()
+        .unwrap()
+        .join(format!("source-{name}"));
+    for (file, body) in files {
+        let path = dir.join("aliases").join(file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+    let env = run(
+        ctx,
+        "policy:set",
+        &[
+            "--layer",
+            "local",
+            "--key",
+            &format!("skills.repositories.{name}"),
+            "--value",
+            &json!({ "source_path": dir.to_string_lossy() }).to_string(),
+        ],
+    );
+    assert!(env.ok, "{:?}", env.errors);
+    dir
+}
+
+/// 空环境：status 零写；两文件都没有区块（missing，base=missing，可写）；程序不带推荐别名，
+/// 只给推荐来源；审计把「没有区块」当正常空状态（notice），不算待生成。
 #[test]
-fn fresh_status_is_zero_write_and_builtin_aliases_are_only_recommended() {
+fn fresh_status_is_zero_write_and_only_suggests_a_source() {
     let (root, ctx) = temp_ctx("fresh");
     let env = run(&ctx, "aliases:status", &["--offline"]);
     assert!(env.ok, "{:?}", env.errors);
@@ -162,15 +202,16 @@ fn fresh_status_is_zero_write_and_builtin_aliases_are_only_recommended() {
         assert_eq!(el["observed"]["external"], json!([]));
         assert_eq!(el["actions"][0]["id"], "write");
     }
-    assert_eq!(data["aliases"], json!([]), "内置别名不是当前别名");
+    assert_eq!(data["aliases"], json!([]));
     assert_eq!(
-        names(&data["alias_recommendations"]),
-        ["chrome", "claude", "codex", "grok"]
+        data["alias_recommendations"],
+        json!([]),
+        "推荐别名不编进程序"
     );
-    let claude = &data["alias_recommendations"][1];
+    assert_eq!(data["alias_suggested_sources"][0]["name"], "agent-skills");
     assert_eq!(
-        claude["line"],
-        "alias claude='TZ=\"America/Los_Angeles\" LANG=\"en_US.UTF-8\" LC_ALL=\"en_US.UTF-8\" claude'"
+        data["alias_suggested_sources"][0]["collection"],
+        Value::Null
     );
     assert_eq!(data["alias_legacy"], json!([]));
 
@@ -196,11 +237,46 @@ fn fresh_status_is_zero_write_and_builtin_aliases_are_only_recommended() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// 来源别名：按来源里 aliases/*.json 推荐，带上来源名；同名取先读到的文件，结构不合法的
+/// 文件整份跳过，README 不算；有来源别名时不再给推荐来源。
+#[test]
+fn source_aliases_are_recommended_with_their_source() {
+    let (root, ctx) = temp_ctx("source");
+    add_alias_source(
+        &ctx,
+        "mine",
+        &[
+            ("aliases.json", ALIAS_SOURCE),
+            (
+                "b-more.json",
+                r#"{"aliases": {"claude": "claude-other", "ll": "ls -l"}}"#,
+            ),
+            ("c-bad.json", r#"{"aliases": {"bad": "has'quote"}}"#),
+            ("README.md", "说明\n"),
+        ],
+    );
+    let data = status(&ctx);
+    assert_eq!(
+        names(&data["alias_recommendations"]),
+        ["chrome", "claude", "codex", "grok", "ll"]
+    );
+    let claude = &data["alias_recommendations"][1];
+    assert_eq!(
+        claude["line"],
+        "alias claude='TZ=\"America/Los_Angeles\" LANG=\"en_US.UTF-8\" LC_ALL=\"en_US.UTF-8\" claude'",
+        "同名取先读到的文件"
+    );
+    assert_eq!(claude["source"], "mine");
+    assert_eq!(data["alias_suggested_sources"], json!([]));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// 添加一条推荐：两个文件都出现区块（新文件 0600），推荐列表里不再有它；审计不含取值；
 /// 写出的内容能过 zsh 语法检查（本机有 zsh 时）。
 #[test]
 fn adding_a_recommendation_writes_both_files_and_passes_zsh_syntax() {
     let (root, ctx) = temp_ctx("recommend");
+    add_alias_source(&ctx, "mine", &[("aliases.json", ALIAS_SOURCE)]);
     let before = status(&ctx);
     let env = apply(&ctx, &both_bases(&before), &["--recommended", "claude"]);
     assert!(env.ok, "{:?}", env.errors);
@@ -245,6 +321,10 @@ fn adding_a_recommendation_writes_both_files_and_passes_zsh_syntax() {
         )
         .unwrap();
     assert!(detail.contains("\"recommended\""), "{detail}");
+    assert!(
+        detail.contains("\"source\":\"mine\""),
+        "审计记来源: {detail}"
+    );
     assert!(!detail.contains("Los_Angeles"), "审计不得含取值: {detail}");
 
     // 再添加同一条推荐：它已不在推荐里，拒绝且文件不变
@@ -324,6 +404,7 @@ fn external_edit_is_shown_and_stale_base_is_rejected_for_every_file() {
 #[test]
 fn outside_aliases_are_listed_read_only_and_never_touched() {
     let (root, ctx) = temp_ctx("outside");
+    add_alias_source(&ctx, "mine", &[("aliases.json", ALIAS_SOURCE)]);
     let pre = "# 我的配置\nalias claude='my-own-claude'\nexport PATH=/opt/bin:$PATH\n";
     let post = "alias gp=\"git push\"\nbindkey '^R' history-incremental-search-backward\n";
     write(
@@ -835,6 +916,7 @@ fn upgraded_database_reads_actual_blocks_and_old_tables_never_gate_writes() {
         "alias codex='user-changed-codex'",
     ]);
     write(&ctx, ".zshrc", &format!("# mine\n\n{synced}"));
+    add_alias_source(&ctx, "mine", &[("aliases.json", ALIAS_SOURCE)]);
     let db_before = std::fs::read(store::db_path(&ctx)).unwrap();
     let now = status(&ctx);
     assert_eq!(std::fs::read(store::db_path(&ctx)).unwrap(), db_before);

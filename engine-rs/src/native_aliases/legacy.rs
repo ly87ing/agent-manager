@@ -67,7 +67,7 @@ pub(crate) fn candidates(row: Option<&Map<String, Value>>) -> Vec<LegacyAlias> {
     let Some(row) = row else {
         return Vec::new();
     };
-    let builtin = model::builtin_aliases();
+    let builtin = model::legacy_builtin_aliases();
     model::source_aliases(row)
         .into_iter()
         .filter(|(name, value)| !builtin.iter().any(|(n, v)| n == name && v == value))
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn only_aliases_differing_from_builtin_are_candidates() {
-        let builtin_claude = model::builtin_aliases()
+        let builtin_claude = model::legacy_builtin_aliases()
             .into_iter()
             .find(|(n, _)| n == "claude")
             .unwrap()

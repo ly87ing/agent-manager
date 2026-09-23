@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { toast } from "sonner";
-import type { AliasCurrent, AliasLegacySuggestion, AliasRecommendation, EngineElement, StatusData } from "./contract";
+import type { AliasCurrent, AliasLegacySuggestion, AliasRecommendation, EngineElement, StatusData, SuggestedSource } from "./contract";
 import type { AliasesObserved, AliasesSpec, AliasLine } from "./observed";
 import { useExecutions } from "./execution";
 import { useEngineQuery } from "./queries";
@@ -37,6 +37,8 @@ export interface AliasSource {
   current: AliasCurrent[];
   targets: AliasTarget[];
   recommendations: AliasRecommendation[];
+  /** 没有来源别名时的推荐来源。 */
+  suggestedSources: SuggestedSource[];
   legacy: AliasLegacySuggestion[];
   /** 至少有一个文件能写。 */
   writable: boolean;
@@ -70,6 +72,7 @@ function toSource(data: StatusData): AliasSource {
     current,
     targets,
     recommendations: data.alias_recommendations ?? [],
+    suggestedSources: data.alias_suggested_sources ?? [],
     legacy: data.alias_legacy ?? [],
     writable: targets.some((target) => target.base !== null),
   };
@@ -136,5 +139,9 @@ export function useAliasSource() {
   const discardLegacy = (item: AliasLegacySuggestion): Promise<boolean> =>
     run("aliases:discard-legacy", ["--legacy", item.id], `丢弃已保存的快捷命令 ${item.name}`);
 
-  return { query, source, busy, setAlias, removeAlias, addRecommended, addLegacy, discardLegacy };
+  /** git 来源：取回仓库新版本（与技能页的「更新资源库」同一个动作）。 */
+  const fetchSource = (collection: string): Promise<boolean> =>
+    run("skills:apply", ["--only", `skill:${collection}`, "--action", "update"], `更新来源 ${collection}`);
+
+  return { query, source, busy, setAlias, removeAlias, addRecommended, addLegacy, discardLegacy, fetchSource };
 }

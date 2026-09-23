@@ -33,8 +33,8 @@ type Dialog =
  * 终端快捷命令页：逐条显示 rc 文件受管区块里的实际命令并直接编辑；内置命令只作推荐，
  * 旧版本保存、还没写进文件的命令作为建议，可加入或丢弃。
  */
-export default function AliasesPage() {
-  const { query, source, busy, setAlias, removeAlias, addRecommended, addLegacy, discardLegacy } = useAliasSource();
+export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => void } = {}) {
+  const { query, source, busy, setAlias, removeAlias, addRecommended, addLegacy, discardLegacy, fetchSource } = useAliasSource();
   const [dialog, setDialog] = useState<Dialog | null>(null);
 
   if (query.isPending) return <PageLoading text="正在读取终端快捷命令…" />;
@@ -171,11 +171,14 @@ export default function AliasesPage() {
         <SuggestionSection
           testId="alias-recommendations"
           title="推荐"
-          note="内置的常用快捷命令，不会自动写入；逐条确认后才添加。已有同名命令的不再推荐。"
+          note="来自技能来源（如 agent-skills 的 aliases/）的常用快捷命令，不随程序发布，不会自动写入；逐条确认后才添加。已有同名命令的不再推荐。"
         >
           {source.recommendations.map((item) => (
             <li key={item.name} data-testid={`alias-recommend-${item.name}`} className="flex flex-wrap items-start justify-between gap-2">
-              <AliasLineView name={item.name} line={item.line} />
+              <div className="min-w-0">
+                <AliasLineView name={item.name} line={item.line} />
+                <p className="mt-0.5 text-[11px] text-muted-foreground">来自 {item.source}</p>
+              </div>
               <button
                 type="button"
                 data-testid={`add-recommended-${item.name}`}
@@ -185,6 +188,46 @@ export default function AliasesPage() {
               >
                 添加
               </button>
+            </li>
+          ))}
+        </SuggestionSection>
+      )}
+
+      {source.recommendations.length === 0 && source.suggestedSources.length > 0 && (
+        <SuggestionSection
+          testId="alias-suggested-sources"
+          title="推荐"
+          note="推荐的快捷命令不随程序发布，需要从技能来源取回。"
+        >
+          {source.suggestedSources.map((item) => (
+            <li key={item.name} className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{item.name}</p>
+                <p className="text-xs text-muted-foreground">{item.description}</p>
+              </div>
+              {item.collection ? (
+                <button
+                  type="button"
+                  data-testid={`alias-fetch-source-${item.collection}`}
+                  disabled={busy}
+                  onClick={() => void fetchSource(item.collection as string)}
+                  className="shrink-0 rounded border border-primary/30 px-2.5 py-1 text-xs text-primary hover:bg-primary/10 disabled:opacity-50"
+                >
+                  取回 {item.collection}
+                </button>
+              ) : (
+                <span className="text-xs text-muted-foreground">
+                  还没添加：到
+                  {onOpenSkills ? (
+                    <button type="button" onClick={onOpenSkills} className="mx-1 text-primary underline-offset-2 hover:underline">
+                      技能页
+                    </button>
+                  ) : (
+                    "技能页"
+                  )}
+                  添加推荐来源 {item.name}，再回来取回。
+                </span>
+              )}
             </li>
           ))}
         </SuggestionSection>

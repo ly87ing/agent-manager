@@ -1,8 +1,9 @@
 //! aliases 域只读状态：生效的别名就是 ~/.zshrc 与 ~/.zprofile 受管区块里的实际行。
 //!
 //! 逐文件输出区块内的别名、区块外用户自己的别名（只读）与写入基准 `base`（区块正文
-//! sha256，没有区块为 missing）；另在顶层输出按名合并的当前别名、内置推荐（不在任何
-//! 文件里的同名别名才推荐）与旧版本保存、尚未生效的别名。status 只读零写：不创建
+//! sha256，没有区块为 missing）；另在顶层输出按名合并的当前别名、来源推荐（技能来源里
+//! 的 aliases/*.json，不在任何文件里的同名别名才推荐；没有来源别名时附推荐来源）与旧版本
+//! 保存、尚未生效的别名。status 只读零写：不创建
 //! data/home 目录、DB、表或文件；目标路径不安全、读不了、非 UTF-8 或区块 marker 不成对时
 //! 降级为 unmanaged-detected + blocked_reason，不提供写入。
 
@@ -14,6 +15,7 @@ use serde_json::{json, Map, Value};
 
 use super::legacy::{self, LegacyAlias};
 use super::model::{self, AliasLine, Split, TargetSpec};
+use super::sources::SourceAlias;
 use crate::native::Context;
 use crate::native_mcp::targets::{check_symlink_metadata, validate_target_path};
 
@@ -161,8 +163,11 @@ pub(crate) fn is_present(views: &[View], name: &str, value: &str) -> bool {
     })
 }
 
-/// 内置推荐：任一文件里（区块内或区块外）已有同名别名的不推荐。
-pub(crate) fn recommendations(views: &[View]) -> Vec<(String, String)> {
+/// 来源推荐：任一文件里（区块内或区块外）已有同名别名的不推荐。
+pub(crate) fn recommendations<'a>(
+    views: &[View],
+    source: &'a [SourceAlias],
+) -> Vec<&'a SourceAlias> {
     let taken = |name: &str| {
         views.iter().any(|view| {
             view.entries()
@@ -171,10 +176,7 @@ pub(crate) fn recommendations(views: &[View]) -> Vec<(String, String)> {
                 .any(|e| e.name == name)
         })
     };
-    model::builtin_aliases()
-        .into_iter()
-        .filter(|(name, _)| !taken(name))
-        .collect()
+    source.iter().filter(|alias| !taken(&alias.name)).collect()
 }
 
 /// 旧版本保存、实际区块里还没有（同名同值）的别名。
@@ -300,12 +302,23 @@ pub(crate) fn build_status(ctx: &Context) -> Result<Value> {
             .map(|item| item["line"].clone())
             .unwrap_or(Value::Null)
     };
-    let recommended: Vec<Value> = recommendations(&views)
+    let source = super::sources::load(ctx)?;
+    let recommended: Vec<Value> = recommendations(&views, &source)
         .iter()
-        .map(|(name, value)| {
-            json!({ "name": name, "value": value, "line": model::alias_line(name, value) })
+        .map(|alias| {
+            json!({
+                "name": alias.name,
+                "value": alias.value,
+                "line": model::alias_line(&alias.name, &alias.value),
+                "source": alias.collection,
+            })
         })
         .collect();
+    let suggested = if source.is_empty() {
+        crate::native_skills::suggested_sources(ctx)?
+    } else {
+        json!([])
+    };
     let legacy: Vec<Value> = legacy_suggestions(&views, row.as_ref())
         .iter()
         .map(|item| {
@@ -323,6 +336,7 @@ pub(crate) fn build_status(ctx: &Context) -> Result<Value> {
         "elements": views.iter().map(element).collect::<Vec<_>>(),
         "aliases": merged,
         "alias_recommendations": recommended,
+        "alias_suggested_sources": suggested,
         "alias_legacy": legacy,
     }))
 }

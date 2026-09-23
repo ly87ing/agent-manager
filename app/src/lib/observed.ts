@@ -362,7 +362,7 @@ export interface RuleSourceFollow {
   update_available: boolean;
 }
 
-export type { RuleTemplate, RuleSourceRule, RuleSuggestedSource } from "./contract";
+export type { RuleTemplate, RuleSourceRule, SuggestedSource } from "./contract";
 
 // ---------- hooks ----------
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { waitFor } from "@testing-library/react";
 import AliasesPage from "../pages/AliasesPage";
 import type { Envelope } from "../lib/contract";
@@ -306,13 +306,14 @@ describe("终端快捷命令页", () => {
     expect(valueOf(args, "--zshrc-base")).toBe("base-aliases:zshrc");
   });
 
-  it("内置推荐不自动写入，逐条确认后才添加", async () => {
+  it("来源推荐不自动写入，逐条确认后才添加，并标出来自哪个来源", async () => {
     const { calls } = renderWithEngine(
       <AliasesPage />,
-      aliasRoutes({}, { recommendations: [{ name: "grok", value: "grok", line: "alias grok='grok'" }] }),
+      aliasRoutes({}, { recommendations: [{ name: "grok", value: "grok", line: "alias grok='grok'", source: "agent-skills" }] }),
     );
     const item = await screen.findByTestId("alias-recommend-grok");
     expect(item).toHaveTextContent("alias grok='grok'");
+    expect(item).toHaveTextContent("来自 agent-skills");
     expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
     await userEvent.click(screen.getByTestId("add-recommended-grok"));
     const modal = await screen.findByRole("dialog");
@@ -322,6 +323,30 @@ describe("终端快捷命令页", () => {
     const args = applyArgs(calls);
     expect(valueOf(args, "--recommended")).toBe("grok");
     expect(args).not.toContain("--value");
+  });
+
+  it("还没有来源别名：已登记的推荐来源给「取回」，没登记的引导去技能页添加", async () => {
+    const suggested = { name: "agent-skills", description: "作者维护的技能与快捷命令", url: "https://github.com/ly87ing/agent-skills.git", collection: null as string | null };
+    const onOpenSkills = vi.fn();
+    const first = renderWithEngine(<AliasesPage onOpenSkills={onOpenSkills} />, aliasRoutes({}, { suggestedSources: [suggested] }));
+    const section = await screen.findByTestId("alias-suggested-sources");
+    expect(section).toHaveTextContent("不随程序发布");
+    await userEvent.click(within(section).getByRole("button", { name: "技能页" }));
+    expect(onOpenSkills).toHaveBeenCalled();
+    first.unmount();
+
+    const { calls } = renderWithEngine(
+      <AliasesPage />,
+      {
+        ...aliasRoutes({}, { suggestedSources: [{ ...suggested, collection: "agent-skills" }] }),
+        "skills:apply": makeEnvelope({ domain: "skills", steps: [], skipped: [] }, { command: "skills.apply" }),
+      },
+    );
+    await userEvent.click(await screen.findByTestId("alias-fetch-source-agent-skills"));
+    await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));
+    expect(calls.find((call) => call.command === "skills:apply")!.args).toEqual([
+      "--only", "skill:agent-skills", "--action", "update",
+    ]);
   });
 
   it("旧版本保存、还没生效的命令：可加入终端配置或丢弃（只删库）", async () => {
