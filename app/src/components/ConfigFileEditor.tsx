@@ -1,8 +1,11 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { runEngine } from "../lib/engine";
 import { useExecutions } from "../lib/execution";
 import { diffLines, hasChanges } from "../lib/textDiff";
 import { cn } from "../lib/utils";
+
+// 编辑器只在展开「直接编辑配置文件」时才需要，单独打包按需加载
+const CodeEditor = lazy(() => import("./CodeEditor"));
 
 /** agents:config-file 的返回：配置文件原文与整文件写入基准。 */
 export interface AgentConfigFile {
@@ -63,6 +66,15 @@ export function ConfigFileEditor({ agentId }: { agentId: string }) {
     return null;
   };
 
+  const format = () => {
+    try {
+      setText(`${JSON.stringify(JSON.parse(text), null, 2)}\n`);
+      setError(null);
+    } catch {
+      setError("不是合法的 JSON，无法格式化");
+    }
+  };
+
   const submit = async () => {
     if (!file || busy) return;
     const invalid = validate();
@@ -120,17 +132,28 @@ export function ConfigFileEditor({ agentId }: { agentId: string }) {
                 {label}
               </button>
             ))}
+            {file.format === "json" && mode === "edit" && (
+              <button
+                type="button"
+                data-testid="config-file-format"
+                onClick={format}
+                className="ml-auto rounded-md border px-3 py-1 text-xs text-muted-foreground hover:bg-accent"
+              >
+                格式化
+              </button>
+            )}
           </div>
           {mode === "edit" ? (
-            <textarea
-              data-testid="config-file-text"
-              aria-label="配置文件内容"
-              spellCheck={false}
-              value={text}
-              placeholder={file.format === "json" ? "{\n  \n}" : ""}
-              onChange={(event) => setText(event.target.value)}
-              className="h-80 w-full resize-y rounded-md border bg-background p-3 font-mono text-xs leading-relaxed text-foreground"
-            />
+            <Suspense fallback={<p className="text-sm text-muted-foreground">正在加载编辑器…</p>}>
+              <CodeEditor
+                testId="config-file-text"
+                ariaLabel="配置文件内容"
+                language={file.format === "toml" ? "toml" : "json"}
+                value={text}
+                placeholder={file.format === "json" ? "{ }" : ""}
+                onChange={setText}
+              />
+            </Suspense>
           ) : (
             <pre data-testid="config-file-diff" className="max-h-80 overflow-auto rounded border p-2 font-mono text-xs whitespace-pre-wrap">
               {changed

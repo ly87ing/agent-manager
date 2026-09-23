@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { fireEvent, waitFor } from "@testing-library/react";
+import { waitFor } from "@testing-library/react";
+import { forceLinting, diagnosticCount } from "@codemirror/lint";
 import { ConfigFileEditor } from "../components/ConfigFileEditor";
 import type { Envelope } from "../lib/contract";
 import { makeEnvelope } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
+import { editorText, editorView, setEditorText } from "./code-editor";
 
 const BASE = "a".repeat(64);
 const CONTENT = '{\n  "env": {\n    "ANTHROPIC_AUTH_TOKEN": "tok-plain-1"\n  },\n  "theme": "dark"\n}\n';
@@ -34,12 +36,12 @@ describe("直接编辑配置文件", () => {
       "agents:config-file": file(),
       "agents:edit-config": makeEnvelope({ changed: ["theme"], base: "b".repeat(64) }, { command: "agents.edit-config" }),
     });
-    const textarea = await screen.findByTestId("config-file-text");
-    expect(textarea).toHaveValue(CONTENT);
+    const view = await editorView("config-file-text");
+    expect(editorText(view)).toBe(CONTENT);
     expect(screen.getByTestId("config-file-submit")).toBeDisabled();
 
     const edited = CONTENT.replace('"dark"', '"light"');
-    fireEvent.change(textarea, { target: { value: edited } });
+    setEditorText(view, edited);
     await userEvent.click(screen.getByTestId("config-file-mode-diff"));
     const diff = screen.getByTestId("config-file-diff");
     const added = [...diff.querySelectorAll('[data-kind="add"]')].map((line) => line.textContent?.trim());
@@ -58,17 +60,20 @@ describe("直接编辑配置文件", () => {
 
   it("放弃改动回到文件原文，不发写入", async () => {
     const { calls } = renderWithEngine(<ConfigFileEditor agentId="claude-code" />, { "agents:config-file": file() });
-    const textarea = await screen.findByTestId("config-file-text");
-    fireEvent.change(textarea, { target: { value: "{}" } });
+    const view = await editorView("config-file-text");
+    setEditorText(view, "{}");
     await userEvent.click(screen.getByTestId("config-file-reset"));
-    expect(screen.getByTestId("config-file-text")).toHaveValue(CONTENT);
+    expect(editorText(view)).toBe(CONTENT);
     expect(edits(calls)).toHaveLength(0);
   });
 
   it("不是合法 JSON 时不发写入", async () => {
     const { calls } = renderWithEngine(<ConfigFileEditor agentId="claude-code" />, { "agents:config-file": file() });
-    const textarea = await screen.findByTestId("config-file-text");
-    fireEvent.change(textarea, { target: { value: "{ broken" } });
+    const view = await editorView("config-file-text");
+    setEditorText(view, "{ broken");
+    // 编辑器里就地标出语法错误
+    forceLinting(view);
+    await waitFor(() => expect(diagnosticCount(view.state)).toBeGreaterThan(0));
     await userEvent.click(screen.getByTestId("config-file-submit"));
     expect(await screen.findByTestId("config-file-error")).toHaveTextContent("不是合法的 JSON");
     expect(edits(calls)).toHaveLength(0);
@@ -89,11 +94,36 @@ describe("直接编辑配置文件", () => {
         }),
     };
     renderWithEngine(<ConfigFileEditor agentId="claude-code" />, routes);
-    const textarea = await screen.findByTestId("config-file-text");
-    fireEvent.change(textarea, { target: { value: CONTENT.replace('"dark"', '"light"') } });
+    const view = await editorView("config-file-text");
+    setEditorText(view, CONTENT.replace('"dark"', '"light"'));
     await userEvent.click(screen.getByTestId("config-file-submit"));
     expect(await screen.findByTestId("config-file-error")).toHaveTextContent("已在外部修改");
-    await waitFor(() => expect(screen.getByTestId("config-file-text")).toHaveValue(CONTENT.replace('"dark"', '"solarized"')));
+    await waitFor(async () => expect(editorText(await editorView("config-file-text"))).toBe(CONTENT.replace('"dark"', '"solarized"')));
+  });
+
+  it("格式化只在点按钮时按两格缩进重排 JSON", async () => {
+    renderWithEngine(<ConfigFileEditor agentId="claude-code" />, {
+      "agents:config-file": file({ content: '{"theme":"dark","env":{"A":"1"}}' }),
+    });
+    const view = await editorView("config-file-text");
+    expect(editorText(view)).toBe('{"theme":"dark","env":{"A":"1"}}');
+    await userEvent.click(screen.getByTestId("config-file-format"));
+    expect(editorText(view)).toBe('{\n  "theme": "dark",\n  "env": {\n    "A": "1"\n  }\n}\n');
+  });
+
+  it("Codex 的 TOML 同样可编辑，没有 JSON 格式化按钮", async () => {
+    const toml = '# 我的配置\nmodel = "o3"\n';
+    const { calls } = renderWithEngine(<ConfigFileEditor agentId="codex" />, {
+      "agents:config-file": file({ element: "agents:codex", path: "~/.codex/config.toml", format: "toml", content: toml }),
+      "agents:edit-config": makeEnvelope({ changed: ["model"], base: "b".repeat(64) }, { command: "agents.edit-config" }),
+    });
+    const view = await editorView("config-file-text");
+    expect(editorText(view)).toBe(toml);
+    expect(screen.queryByTestId("config-file-format")).toBeNull();
+    setEditorText(view, toml.replace('"o3"', '"o4"'));
+    await userEvent.click(screen.getByTestId("config-file-submit"));
+    await waitFor(() => expect(edits(calls)).toHaveLength(1));
+    expect(edits(calls)[0].args[edits(calls)[0].args.length - 1]).toBe(toml.replace('"o3"', '"o4"'));
   });
 
   it("不是文本的文件只说明原因，不给编辑框", async () => {

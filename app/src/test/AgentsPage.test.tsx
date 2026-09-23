@@ -3,6 +3,7 @@ import { waitFor } from "@testing-library/react";
 import AgentsPage from "../pages/AgentsPage";
 import { agentManagementFixture, makeAliasStatus, makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
+import { editorText, editorView } from "./code-editor";
 import type { EngineElement, Envelope } from "../lib/contract";
 
 const BASE = "c".repeat(64);
@@ -183,7 +184,7 @@ describe("助手页产品边界", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(calls.some((call) => call.command === "agents:config-file")).toBe(false);
     await userEvent.click(toggle);
-    expect(await screen.findByTestId("config-file-text")).toHaveValue('{\n  "effortLevel": "high"\n}\n');
+    expect(editorText(await editorView("config-file-text"))).toBe('{\n  "effortLevel": "high"\n}\n');
   });
 
   it("当前 Provider 排在首位并直接标记当前使用", async () => {
