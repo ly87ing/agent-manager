@@ -1,10 +1,15 @@
-//! hooks 域入口：status/apply 的命令规范化与分发。
+//! hooks 域入口：生效 hooks 以各助手的实际配置为准。
+//!
+//! - `hooks:status`：逐目标（主 Claude/Codex + 各实例）输出实际 hooks、base 摘要，
+//!   以及清理建议与旧版本保存的 hooks（未生效）建议；只读零写。
+//! - `hooks:apply`：写一个目标的实际文件（直接编辑 / 清理一条建议 / 加入一条旧版 hook），
+//!   base CAS，取 apply 锁。
+//! - `hooks:discard-legacy`：丢弃一条旧版本保存的 hook，只写库。
 
 pub(crate) mod apply;
 pub(crate) mod args;
+pub(crate) mod legacy;
 pub(crate) mod model;
-pub(crate) mod persistence;
-pub(crate) mod preflight;
 pub(crate) mod status;
 
 pub(crate) use apply::preflight_apply;
@@ -23,6 +28,7 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
             status::build_status(ctx)
         }
         "hooks:apply" => apply::apply(ctx, req),
+        "hooks:discard-legacy" => legacy::discard(ctx, req),
         _ => bail!("hooks 域不支持命令 '{}'", req.command),
     }
 }

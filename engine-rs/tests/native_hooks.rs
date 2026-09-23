@@ -1,8 +1,15 @@
-use agent_manager_engine::{execute, store, Context, Request};
+//! hooks 域：实际配置为准 + 清理建议 + 旧版本保存的 hooks（未生效）。
+//!
+//! 生效 hooks 就是各助手的实际配置：status 输出实际 hooks 与 base，apply 以 base 做 CAS
+//! 写回实际文件（Claude 只替换 settings.json 的 hooks 键）；内置 removed_signatures 只作
+//! 清理建议；旧 hook_sources 里没生效的 hooks 作为建议出现，可加入或丢弃。
+
+use agent_manager_engine::{execute, store, Context, Envelope, Request};
 use fs2::FileExt;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::fs::OpenOptions;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn temp_ctx(tag: &str) -> (PathBuf, Context) {
     let base = std::env::temp_dir().join(format!(
@@ -30,31 +37,77 @@ fn request(command: &str, args: &[&str]) -> Request {
     }
 }
 
-fn request_with_run(command: &str, args: &[&str], run_id: &str) -> Request {
-    Request {
-        command: command.to_string(),
-        args: args.iter().map(|s| s.to_string()).collect(),
-        run_id: run_id.to_string(),
-    }
+fn run(ctx: &Context, command: &str, args: &[&str]) -> Envelope {
+    execute(ctx, &request(command, args))
 }
 
-fn canonicalize_value(value: &Value) -> Value {
-    match value {
-        Value::Object(map) => {
-            let mut entries: Vec<(&String, &Value)> = map.iter().collect();
-            entries.sort_by(|a, b| a.0.cmp(b.0));
-            let mut out = serde_json::Map::new();
-            for (key, item) in entries {
-                out.insert(key.clone(), canonicalize_value(item));
-            }
-            Value::Object(out)
-        }
-        Value::Array(items) => Value::Array(items.iter().map(canonicalize_value).collect()),
-        other => other.clone(),
-    }
+fn sha(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
 }
 
-fn write_hook_source(ctx: &Context, key: &str, value: &Value) {
+fn status(ctx: &Context) -> Value {
+    let env = run(ctx, "hooks:status", &[]);
+    assert!(env.ok, "{:?}", env.errors);
+    env.data
+}
+
+fn element(status: &Value, id: &str) -> Value {
+    status["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == id)
+        .cloned()
+        .unwrap_or_else(|| panic!("缺少目标 {id}: {status}"))
+}
+
+fn observed(ctx: &Context, id: &str) -> Value {
+    element(&status(ctx), id)["observed"].clone()
+}
+
+fn base_of(ctx: &Context, id: &str) -> String {
+    observed(ctx, id)["base"].as_str().unwrap().to_string()
+}
+
+fn write_json(path: &Path, value: &Value) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, serde_json::to_vec_pretty(value).unwrap()).unwrap();
+}
+
+fn read_json(path: &Path) -> Value {
+    serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+}
+
+fn settings(ctx: &Context) -> PathBuf {
+    ctx.home_dir.join(".claude/settings.json")
+}
+
+fn codex_hooks(ctx: &Context) -> PathBuf {
+    ctx.home_dir.join(".codex/hooks.json")
+}
+
+fn hook(command: &str) -> Value {
+    json!({"type": "command", "command": command})
+}
+
+/// 去掉 hooks 键后的其余内容：用来断言「其他键语义不变」。
+fn without_hooks(value: &Value) -> Value {
+    let mut obj = value.as_object().unwrap().clone();
+    obj.remove("hooks");
+    Value::Object(obj)
+}
+
+fn apply(ctx: &Context, id: &str, base: &str, source: &[&str]) -> Envelope {
+    let mut args = vec!["--only", id, "--base", base];
+    args.extend_from_slice(source);
+    run(ctx, "hooks:apply", &args)
+}
+
+fn apply_value(ctx: &Context, id: &str, base: &str, hooks: &Value) -> Envelope {
+    apply(ctx, id, base, &["--value", &hooks.to_string()])
+}
+
+fn write_legacy_row(ctx: &Context, key: &str, value: &Value) {
     let conn = store::open_write(ctx).unwrap();
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS hook_sources (
@@ -65,251 +118,144 @@ fn write_hook_source(ctx: &Context, key: &str, value: &Value) {
         )",
     )
     .unwrap();
-    let canonical = serde_json::to_string(&canonicalize_value(value)).unwrap();
-    let revision = agent_manager_engine::native_mcp::model::sha256_hex(&canonical);
+    let text = value.to_string();
     conn.execute(
         "INSERT INTO hook_sources (key, value_json, revision, updated_at) VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, revision = excluded.revision, updated_at = excluded.updated_at",
-        rusqlite::params![key, canonical, revision, "2026-09-12T00:00:00Z"],
+         ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, revision = excluded.revision",
+        rusqlite::params![key, text, sha(text.as_bytes()), "2026-09-12T00:00:00Z"],
     )
     .unwrap();
 }
 
-fn write_policy_disabled_agent(ctx: &Context, agent_id: &str) {
-    let mut policy = store::builtin_policy();
-    policy["agents"][agent_id]["enabled"] = Value::Bool(false);
-    let conn = store::open_write(ctx).unwrap();
-    store::write_policy(&conn, &policy).unwrap();
-}
-
-fn count_rows(ctx: &Context, sql: &str) -> i64 {
-    let conn = store::open_readonly(ctx).unwrap().expect("db must exist");
-    // 从 SQL 里取表名；表不存在视为 0 行（回滚/未创建场景）。
-    let table = sql
-        .split_whitespace()
-        .skip_while(|w| !w.eq_ignore_ascii_case("from"))
-        .nth(1)
-        .expect("sql must contain FROM <table>")
-        .trim_end_matches(';');
-    let exists: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
-            [table],
-            |r| r.get(0),
-        )
+fn legacy_rows(ctx: &Context) -> Vec<String> {
+    let conn = store::open_readonly(ctx).unwrap().unwrap();
+    let mut stmt = conn
+        .prepare("SELECT key FROM hook_sources ORDER BY key")
         .unwrap();
-    if exists == 0 {
-        return 0;
-    }
-    conn.query_row(sql, [], |row| row.get(0)).unwrap()
+    stmt.query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
 }
 
-fn element(env: &agent_manager_engine::Envelope, id: &str) -> Value {
-    env.data["elements"]
-        .as_array()
+fn commands(list: &Value) -> Vec<String> {
+    list.as_array()
         .unwrap()
         .iter()
-        .find(|e| e["id"] == id)
-        .cloned()
-        .unwrap_or_else(|| panic!("缺元素 {id}"))
-}
-
-fn managed_claude_source(command: &str) -> Value {
-    json!({
-        "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": command}]}]},
-        "removed_signatures": [{
-            "event": "PreToolUse",
-            "matcher": "Write",
-            "command_contains": "legacy-hook.sh"
-        }]
-    })
-}
-
-fn managed_codex_source(command: &str) -> Value {
-    json!({
-        "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": command}]}]}
-    })
+        .map(|item| item["command"].as_str().unwrap().to_string())
+        .collect()
 }
 
 #[test]
 fn status_on_fresh_context_is_zero_write_with_two_targets() {
-    let (base, ctx) = temp_ctx("fresh");
-    // 默认来源：claude 只有 removed_signatures、codex hooks 为空 → 两目标 managed-ok 无动作
-    let env = execute(&ctx, &request("hooks:status", &["--offline"]));
+    let (root, ctx) = temp_ctx("fresh");
+    let env = run(&ctx, "hooks:status", &["--offline"]);
     assert!(env.ok, "{:?}", env.errors);
     assert!(env.mode.offline);
     assert!(!env.lock.held);
     let elements = env.data["elements"].as_array().unwrap();
-    assert_eq!(elements.len(), 2);
-    assert_eq!(elements[0]["id"], "hooks:claude");
-    assert_eq!(elements[1]["id"], "hooks:codex");
-    assert_eq!(elements[0]["spec"]["merge"], "signature-set");
-    assert_eq!(elements[0]["spec"]["source_key"], "hooks.claude");
+    let ids: Vec<&str> = elements.iter().map(|e| e["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["hooks:claude", "hooks:codex"]);
     assert_eq!(elements[0]["spec"]["target"], "~/.claude/settings.json");
-    assert_eq!(elements[1]["spec"]["merge"], "whole-file");
-    assert_eq!(elements[1]["spec"]["source_key"], "hooks.codex");
+    assert_eq!(elements[0]["spec"]["scope"], "hooks-key");
+    assert_eq!(elements[1]["spec"]["target"], "~/.codex/hooks.json");
+    assert_eq!(elements[1]["spec"]["scope"], "whole-file");
     for el in elements {
-        assert_eq!(el["state"], "managed-ok");
-        assert_eq!(el["actions"], json!([]));
+        assert_eq!(el["state"], "missing");
         let observed = &el["observed"];
-        for key in [
-            "target",
-            "target_exists",
-            "expected_digest",
-            "applied_digest",
-            "source_revision",
-            "blocked_reason",
-            "registration_needed",
-            "managed_hook_count",
-            "missing_signatures",
-            "removed_signatures_present",
-        ] {
-            assert!(observed.get(key).is_some(), "observed 缺字段 {key}");
-        }
-        assert_eq!(observed["target_exists"], Value::Bool(false));
-        assert_eq!(observed["managed_hook_count"], 0);
+        assert_eq!(observed["base"], "missing");
+        assert_eq!(observed["hooks"], json!({}));
+        assert_eq!(observed["hook_count"], 0);
+        assert_eq!(observed["cleanup"], json!([]));
+        assert_eq!(observed["legacy"], json!([]));
+        assert_eq!(el["actions"][0]["id"], "write");
     }
-
-    assert!(!ctx.data_dir.exists());
-    assert!(!ctx.home_dir.exists());
-    let _ = std::fs::remove_dir_all(&base);
-}
-
-#[test]
-fn status_strict_args_and_missing_with_managed_hooks_offers_sync() {
-    let (base, ctx) = temp_ctx("missing");
-    write_hook_source(&ctx, "hooks.claude", &managed_claude_source("echo managed"));
-    let env = execute(&ctx, &request("hooks:status", &[]));
-    assert!(env.ok, "{:?}", env.errors);
-    let claude = element(&env, "hooks:claude");
-    assert_eq!(claude["state"], "missing");
-    assert_eq!(claude["observed"]["managed_hook_count"], 1);
-    assert_eq!(claude["observed"]["missing_signatures"], 1);
-    assert_eq!(
-        claude["actions"],
-        json!([{ "id": "sync", "risk": "write-local", "needs_lock": true, "offline_ok": true }])
-    );
-
-    for args in [
-        vec!["--only", "hooks:claude"],
-        vec!["--dry-run"],
-        vec!["positional"],
-        vec!["--offline", "--offline"],
-    ] {
-        let env = execute(&ctx, &request("hooks:status", &args));
-        assert!(!env.ok, "status args {args:?} 应失败");
-        assert_eq!(env.errors[0].code, "HOOK_ERROR");
-    }
-    for args in [
-        vec!["--only", "hooks:nope"],
-        vec!["--only", "hooks:claude", "--only", "hooks:claude"],
-        vec!["--only"],
-        vec!["--dry-run"],
-    ] {
-        let env = execute(&ctx, &request("hooks:apply", &args));
-        assert!(!env.ok, "apply args {args:?} 应失败");
-        assert_eq!(env.errors[0].code, "HOOK_ERROR");
-        assert!(!env.lock.held, "参数拒绝不得持锁: {args:?}");
-    }
-    let _ = std::fs::remove_dir_all(&base);
-}
-
-#[test]
-fn apply_dry_run_is_rejected_without_lock_or_writes() {
-    let (base, ctx) = temp_ctx("dryrun");
-    write_hook_source(&ctx, "hooks.claude", &managed_claude_source("echo managed"));
-    // 测试夹具写来源时已建库；--dry-run 拒绝自身不得取锁、不得写目标/DB
-    let db = store::db_path(&ctx);
-    let db_before = std::fs::read(&db).unwrap();
-    let env = execute(&ctx, &request("hooks:apply", &["--dry-run"]));
-    assert!(!env.ok, "--dry-run 必须以参数错误拒绝: {:?}", env.data);
-    assert_eq!(env.errors[0].code, "HOOK_ERROR");
-    assert!(env.errors[0].message.contains("参数错误"));
-    assert!(!env.lock.held);
-    assert!(!ctx.data_dir.join("agent-manager.apply.lock").exists());
-    assert_eq!(std::fs::read(&db).unwrap(), db_before, "拒绝路径 DB 不变");
-    assert!(!ctx.home_dir.exists());
-    let _ = std::fs::remove_dir_all(&base);
-}
-
-#[test]
-fn claude_first_merge_preserves_user_fields_and_strips_removed_signature() {
-    let (base, ctx) = temp_ctx("merge");
-    let marker = "HOOKS-MERGE-MARKER-61cf";
-    write_hook_source(
-        &ctx,
-        "hooks.claude",
-        &managed_claude_source(&format!("echo {marker}")),
-    );
-    let settings = ctx.home_dir.join(".claude/settings.json");
-    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
-    std::fs::write(
-        &settings,
-        json!({
-            "model": "user-model",
-            "hooks": {
-                "PreToolUse": [
-                    {"matcher": "Write", "hooks": [
-                        {"type": "command", "command": "sh legacy-hook.sh"},
-                        {"type": "command", "command": "sh keep-user.sh"}
-                    ]}
-                ],
-                "SessionStart": [{"hooks": [{"type": "command", "command": "echo user-own"}]}]
-            }
-        })
-        .to_string(),
+    // 契约：status 顶层只用已声明的键
+    let schema: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../contract/engine-v1/status.schema.json"),
+        )
+        .unwrap(),
     )
     .unwrap();
-
-    let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:claude"]));
-    assert!(env.ok, "{:?}", env.errors);
-    assert!(env.lock.held, "real apply 必须持锁");
-    assert_eq!(env.data["steps"].as_array().unwrap().len(), 1);
-
-    let merged: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
-    assert_eq!(merged["model"], "user-model", "根级用户字段必须保留");
-    let pre = merged["hooks"]["PreToolUse"].as_array().unwrap();
-    let commands: Vec<&str> = pre
-        .iter()
-        .flat_map(|e| e["hooks"].as_array().unwrap().iter())
-        .filter_map(|h| h["command"].as_str())
-        .collect();
-    assert!(commands.contains(&"sh keep-user.sh"), "非托管 hook 保留");
-    assert!(
-        !commands.contains(&"sh legacy-hook.sh"),
-        "removed signature 命中项必须移除"
-    );
-    let session = merged["hooks"]["SessionStart"].as_array().unwrap();
-    let session_commands: Vec<&str> = session
-        .iter()
-        .flat_map(|e| e["hooks"].as_array().unwrap().iter())
-        .filter_map(|h| h["command"].as_str())
-        .collect();
-    assert!(session_commands.contains(&"echo user-own"));
-    assert!(session_commands.contains(&format!("echo {marker}").as_str()));
-
-    #[cfg(unix)]
-    {
-        // 既有文件保留原 mode（新建文件的 0600 在 only-lock 测试断言）。
-        use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(&settings).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o644);
+    for key in env.data.as_object().unwrap().keys() {
+        assert!(schema["properties"].get(key).is_some(), "{key}");
     }
+    assert!(!ctx.data_dir.exists(), "status 不得创建 data_dir");
+    assert!(!ctx.home_dir.exists(), "status 不得创建 home_dir");
+    let _ = std::fs::remove_dir_all(&root);
+}
 
-    // status 转 managed-ok；binding 与审计各一条且 detail 无正文
-    let status = execute(&ctx, &request("hooks:status", &[]));
-    assert_eq!(element(&status, "hooks:claude")["state"], "managed-ok");
+/// 外部在 settings.json 加了一个 hook：status 如实展示；旧 base 被拒且文件不变；
+/// 带新 base 编辑另一个 hook 后，外部加的那个仍在，settings.json 其他键原样保留。
+#[test]
+fn external_hook_is_shown_stale_base_rejected_and_edit_keeps_everything_else() {
+    let (root, ctx) = temp_ctx("external");
+    let initial = json!({
+        "env": {"ANTHROPIC_MODEL": "claude-opus-5", "MY_VAR": "1"},
+        "permissions": {"allow": ["Bash"], "defaultMode": "manual"},
+        "hooks": {"Stop": [{"hooks": [hook("echo ours")]}]},
+        "statusLine": {"type": "command", "command": "status.sh"}
+    });
+    write_json(&settings(&ctx), &initial);
+    let stale = base_of(&ctx, "hooks:claude");
+
+    // 外部加了一个 hook
+    let mut external = initial.clone();
+    external["hooks"]["PreToolUse"] = json!([{"matcher": "Bash", "hooks": [{"type": "command", "command": "guard.sh", "timeout": 30}]}]);
+    write_json(&settings(&ctx), &external);
+    let shown = observed(&ctx, "hooks:claude");
+    assert_eq!(shown["hooks"], external["hooks"], "status 展示实际 hooks");
+    assert_eq!(shown["hook_count"], 2);
     assert_eq!(
-        count_rows(&ctx, "SELECT COUNT(*) FROM hook_target_bindings"),
-        1
+        element(&status(&ctx), "hooks:claude")["state"],
+        "managed-ok"
+    );
+
+    // 旧 base：拒绝，文件字节不变
+    let before = std::fs::read(settings(&ctx)).unwrap();
+    let edited = json!({
+        "Stop": [{"hooks": [hook("echo ours v2")]}],
+        "PreToolUse": external["hooks"]["PreToolUse"].clone()
+    });
+    let refused = apply_value(&ctx, "hooks:claude", &stale, &edited);
+    assert!(!refused.ok);
+    assert_eq!(refused.errors[0].code, "HOOK_ERROR");
+    assert!(
+        refused.errors[0].message.contains("已在外部修改"),
+        "{:?}",
+        refused.errors
+    );
+    assert_eq!(std::fs::read(settings(&ctx)).unwrap(), before);
+
+    // 用户改 settings.json 的其他键不影响 hooks 的 base
+    let fresh = base_of(&ctx, "hooks:claude");
+    let mut other_edit = external.clone();
+    other_edit["model"] = json!("claude-sonnet-5");
+    write_json(&settings(&ctx), &other_edit);
+    assert_eq!(base_of(&ctx, "hooks:claude"), fresh);
+
+    let env = apply_value(&ctx, "hooks:claude", &fresh, &edited);
+    assert!(env.ok, "{:?}", env.errors);
+    let after = read_json(&settings(&ctx));
+    assert_eq!(
+        after["hooks"], edited,
+        "编辑的那个改了，外部加的仍在（含 timeout）"
     );
     assert_eq!(
-        count_rows(
-            &ctx,
-            "SELECT COUNT(*) FROM operation_logs WHERE operation_type = 'hooks:apply'"
-        ),
-        1
+        without_hooks(&after),
+        without_hooks(&other_edit),
+        "其他键语义不变"
     );
+    let keys: Vec<&String> = after.as_object().unwrap().keys().collect();
+    assert_eq!(
+        keys,
+        ["env", "permissions", "hooks", "statusLine", "model"],
+        "hooks 键原位"
+    );
+
+    // 审计只记 id 与摘要，不含命令
     let conn = store::open_readonly(&ctx).unwrap().unwrap();
     let detail: String = conn
         .query_row(
@@ -318,917 +264,912 @@ fn claude_first_merge_preserves_user_fields_and_strips_removed_signature() {
             |r| r.get(0),
         )
         .unwrap();
-    assert!(!detail.contains(&marker), "审计 detail 不得含 command 正文");
-    let serialized = serde_json::to_string(&env).unwrap();
-    assert!(!serialized.contains(&marker), "envelope 不得含来源正文");
-    let _ = std::fs::remove_dir_all(&base);
+    assert!(!detail.contains("echo ours"), "{detail}");
+    assert!(detail.contains(&fresh));
+    let _ = std::fs::remove_dir_all(&root);
 }
 
+/// Codex hooks.json 外部改过：直接展示实际内容，不再判「非受管」；编辑保留其他根键。
 #[test]
-fn codex_foreign_whole_file_without_binding_is_rejected() {
-    let (base, ctx) = temp_ctx("codex-foreign");
-    write_hook_source(
+fn codex_external_content_is_shown_and_editable() {
+    let (root, ctx) = temp_ctx("codex");
+    let foreign = json!({
+        "hooks": {"SessionStart": [{"hooks": [hook("sh user-own.sh")]}]},
+        "foreign": true
+    });
+    write_json(&codex_hooks(&ctx), &foreign);
+    let st = status(&ctx);
+    let codex = element(&st, "hooks:codex");
+    assert_eq!(codex["state"], "managed-ok");
+    assert_eq!(codex["observed"]["blocked_reason"], Value::Null);
+    assert_eq!(codex["observed"]["hooks"], foreign["hooks"]);
+    assert_eq!(
+        codex["observed"]["base"],
+        sha(&std::fs::read(codex_hooks(&ctx)).unwrap())
+    );
+    let base = codex["observed"]["base"].as_str().unwrap().to_string();
+    let next = json!({"SessionStart": [{"hooks": [hook("sh user-own.sh"), hook("echo added")]}]});
+    let env = apply_value(&ctx, "hooks:codex", &base, &next);
+    assert!(env.ok, "{:?}", env.errors);
+    let after = read_json(&codex_hooks(&ctx));
+    assert_eq!(after["hooks"], next);
+    assert_eq!(after["foreign"], true, "hooks.json 的其他根键原样保留");
+
+    // 整份字节变了就是外部修改（Codex 的 base 覆盖整个文件）
+    let base = base_of(&ctx, "hooks:codex");
+    let mut touched = after.clone();
+    touched["foreign"] = json!(false);
+    write_json(&codex_hooks(&ctx), &touched);
+    let refused = apply_value(&ctx, "hooks:codex", &base, &json!({}));
+    assert!(!refused.ok);
+    assert!(refused.errors[0].message.contains("已在外部修改"));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 清理建议：实际 hooks 命中内置旧签名才出现；确认清理一条只移除那一条；不算待同步。
+#[test]
+fn cleanup_suggestion_removes_only_that_hook() {
+    let (root, ctx) = temp_ctx("cleanup");
+    let st = status(&ctx);
+    assert_eq!(
+        element(&st, "hooks:claude")["observed"]["cleanup"],
+        json!([]),
+        "无匹配不显示"
+    );
+
+    let old_check = "bash /repo/agent-rule/hooks/check-rules-build.sh";
+    let old_block = "sh /repo/agent-rule/hooks/block-dist-edits.sh";
+    write_json(
+        &settings(&ctx),
+        &json!({
+            "model": "m",
+            "hooks": {
+                "SubagentStop": [{"hooks": [hook(old_check)]}],
+                "PreToolUse": [{"matcher": "Edit|MultiEdit|Write", "hooks": [hook(old_block), hook("keep.sh")]}]
+            }
+        }),
+    );
+    let claude = element(&status(&ctx), "hooks:claude");
+    assert_eq!(claude["state"], "managed-ok", "清理建议不改变状态");
+    let cleanup = claude["observed"]["cleanup"].clone();
+    assert_eq!(commands(&cleanup), [old_check, old_block]);
+    let block_id = cleanup[1]["id"].as_str().unwrap().to_string();
+    let base = claude["observed"]["base"].as_str().unwrap().to_string();
+
+    let env = apply(&ctx, "hooks:claude", &base, &["--cleanup", &block_id]);
+    assert!(env.ok, "{:?}", env.errors);
+    let after = read_json(&settings(&ctx));
+    assert_eq!(
+        after["hooks"],
+        json!({
+            "SubagentStop": [{"hooks": [hook(old_check)]}],
+            "PreToolUse": [{"matcher": "Edit|MultiEdit|Write", "hooks": [hook("keep.sh")]}]
+        }),
+        "只移除确认清理的那一条"
+    );
+    assert_eq!(after["model"], "m");
+    let left = observed(&ctx, "hooks:claude")["cleanup"].clone();
+    assert_eq!(commands(&left), [old_check]);
+
+    // 已清理的建议再点一次：建议已不存在
+    let base = base_of(&ctx, "hooks:claude");
+    let again = apply(&ctx, "hooks:claude", &base, &["--cleanup", &block_id]);
+    assert!(!again.ok);
+    assert!(again.errors[0].message.contains("已不存在"));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 旧库迁移：库中存过、实际没有的 hooks 显示为未生效建议；读路径零写；加入后出现在实际
+/// 配置里并从库里清掉；丢弃后库中无该来源；已在实际里的不重复提示，之后删掉也不再冒出来。
+#[test]
+fn legacy_saved_hooks_can_be_added_or_discarded() {
+    let (root, ctx) = temp_ctx("legacy");
+    write_legacy_row(
+        &ctx,
+        "hooks.claude",
+        &json!({
+            "hooks": {
+                "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "echo x", "timeout": 5}]}],
+                "SessionStart": [{"hooks": [hook("echo y"), hook("echo z")]}]
+            },
+            "removed_signatures": []
+        }),
+    );
+    write_legacy_row(
         &ctx,
         "hooks.codex",
-        &managed_codex_source("echo codex-managed"),
+        &json!({"hooks": {"Stop": [{"hooks": [hook("echo w")]}]}}),
     );
-    let target = ctx.home_dir.join(".codex/hooks.json");
-    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
-    std::fs::write(
-        &target,
-        json!({"hooks": {"Other": []}, "foreign": true}).to_string(),
-    )
-    .unwrap();
-
-    let env = execute(&ctx, &request("hooks:status", &[]));
-    let codex = element(&env, "hooks:codex");
-    assert_eq!(codex["state"], "unmanaged-detected");
-    assert!(codex["observed"]["blocked_reason"].as_str().is_some());
-    assert_eq!(codex["actions"], json!([]));
-
-    let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:codex"]));
-    assert!(!env.ok);
-    assert_eq!(env.errors[0].code, "HOOK_ERROR");
-    assert!(!env.lock.held);
-    let after = std::fs::read_to_string(&target).unwrap();
-    assert!(after.contains("foreign"), "外部内容必须保留");
-    assert!(!ctx.home_dir.join(".codex/hooks.json.tmp").exists());
-    let _ = std::fs::remove_dir_all(&base);
-}
-
-#[test]
-fn codex_semantic_match_without_binding_registers_via_sync() {
-    let (base, ctx) = temp_ctx("codex-regneed");
-    let source = managed_codex_source("echo codex-managed");
-    write_hook_source(&ctx, "hooks.codex", &source);
-    let target = ctx.home_dir.join(".codex/hooks.json");
-    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
-    // 语义相等但字节不同（不同键序/空白）
-    std::fs::write(&target, "{ \"hooks\": { \"SessionStart\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"echo codex-managed\" } ] } ] } }").unwrap();
-
-    let env = execute(&ctx, &request("hooks:status", &[]));
-    let codex = element(&env, "hooks:codex");
-    assert_eq!(codex["state"], "drifted");
-    assert_eq!(codex["observed"]["registration_needed"], true);
-    assert_eq!(codex["actions"][0]["id"], "sync");
-
-    let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:codex"]));
-    assert!(env.ok, "{:?}", env.errors);
-    assert_eq!(
-        count_rows(
-            &ctx,
-            "SELECT COUNT(*) FROM hook_target_bindings WHERE target_id='hooks:codex'"
-        ),
-        1
+    write_json(
+        &settings(&ctx),
+        &json!({"hooks": {"SessionStart": [{"hooks": [hook("echo y")]}]}}),
     );
-    let status = execute(&ctx, &request("hooks:status", &[]));
-    assert_eq!(element(&status, "hooks:codex")["state"], "managed-ok");
-    let _ = std::fs::remove_dir_all(&base);
-}
-
-#[test]
-fn disabled_target_is_never_probed() {
-    let (base, ctx) = temp_ctx("disabled");
-    write_policy_disabled_agent(&ctx, "claude-code");
-    // claude 目标放在 symlink 祖先之下；若被探测会 unmanaged-detected。
-    let real = base.join("real");
-    std::fs::create_dir_all(real.join(".claude")).unwrap();
-    std::fs::write(real.join(".claude/settings.json"), "{}").unwrap();
-    std::os::unix::fs::symlink(&real, &ctx.home_dir).unwrap();
-
-    let env = execute(&ctx, &request("hooks:status", &[]));
-    assert!(env.ok, "{:?}", env.errors);
-    let claude = element(&env, "hooks:claude");
-    assert_eq!(claude["state"], "disabled");
-    assert_eq!(claude["observed"]["target_exists"], Value::Null);
-    assert_eq!(claude["actions"], json!([]));
-    // 对照：enabled 的 codex 目标确实被探测并因祖先符号链接被阻塞。
-    let codex = element(&env, "hooks:codex");
-    assert_eq!(codex["state"], "unmanaged-detected");
-    let _ = std::fs::remove_dir_all(&base);
-}
-
-#[test]
-fn source_change_produces_drift_with_distinct_digests() {
-    let (base, ctx) = temp_ctx("drift");
-    write_hook_source(&ctx, "hooks.codex", &managed_codex_source("echo v1"));
-    let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:codex"]));
-    assert!(env.ok, "{:?}", env.errors);
-
-    write_hook_source(&ctx, "hooks.codex", &managed_codex_source("echo v2"));
-    let env = execute(&ctx, &request("hooks:status", &[]));
-    let codex = element(&env, "hooks:codex");
-    assert_eq!(codex["state"], "drifted");
-    assert_ne!(
-        codex["observed"]["expected_digest"],
-        codex["observed"]["applied_digest"]
-    );
-
-    // 真实 apply 收敛 drift：单步写入 v2 渲染，status 转 managed-ok。
-    let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:codex"]));
-    assert!(env.ok, "{:?}", env.errors);
-    assert_eq!(env.data["steps"].as_array().unwrap().len(), 1);
-    let content = std::fs::read_to_string(ctx.home_dir.join(".codex/hooks.json")).unwrap();
-    assert!(
-        content.contains("echo v2"),
-        "目标必须写入 v2 渲染: {content}"
-    );
-    let status = execute(&ctx, &request("hooks:status", &[]));
-    let codex = element(&status, "hooks:codex");
-    assert_eq!(codex["state"], "managed-ok");
-    assert_eq!(
-        codex["observed"]["expected_digest"], codex["observed"]["applied_digest"],
-        "收敛后期望与绑定摘要一致"
-    );
-    let _ = std::fs::remove_dir_all(&base);
-}
-
-#[test]
-fn external_modification_after_binding_is_rejected_fail_closed() {
-    let (base, ctx) = temp_ctx("tamper");
-    write_hook_source(&ctx, "hooks.codex", &managed_codex_source("echo v1"));
-    execute(&ctx, &request("hooks:apply", &["--only", "hooks:codex"])).unwrap_apply();
-    let target = ctx.home_dir.join(".codex/hooks.json");
-    std::fs::write(&target, "{\"hooks\":{}}\n").unwrap();
-
-    let env = execute(&ctx, &request("hooks:status", &[]));
-    let codex = element(&env, "hooks:codex");
-    assert_eq!(codex["state"], "unmanaged-detected");
-
-    let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:codex"]));
-    assert!(!env.ok);
-    assert_eq!(env.errors[0].code, "HOOK_ERROR");
-    assert_eq!(std::fs::read(&target).unwrap(), b"{\"hooks\":{}}\n");
-    assert_eq!(
-        count_rows(&ctx, "SELECT COUNT(*) FROM hook_target_bindings"),
-        1,
-        "binding 必须保留"
-    );
-    let _ = std::fs::remove_dir_all(&base);
-}
-
-trait ApplyExt {
-    fn unwrap_apply(&self);
-}
-
-impl ApplyExt for agent_manager_engine::Envelope {
-    fn unwrap_apply(&self) {
-        assert!(self.ok, "{:?}", self.errors);
-    }
-}
-
-#[test]
-fn symlink_target_and_bad_json_are_blocked_without_writes() {
-    let (base, ctx) = temp_ctx("unsafe");
-    write_hook_source(&ctx, "hooks.claude", &managed_claude_source("echo m"));
-
-    // 目标为符号链接
-    let elsewhere = base.join("elsewhere.json");
-    std::fs::write(&elsewhere, "{}").unwrap();
-    let settings = ctx.home_dir.join(".claude/settings.json");
-    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
-    std::os::unix::fs::symlink(&elsewhere, &settings).unwrap();
-    let env = execute(&ctx, &request("hooks:status", &[]));
-    assert_eq!(element(&env, "hooks:claude")["state"], "unmanaged-detected");
-    let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:claude"]));
-    assert!(!env.ok);
-    assert_eq!(std::fs::read(&elsewhere).unwrap(), b"{}");
-    std::fs::remove_file(&settings).unwrap();
-
-    // 坏 JSON
-    std::fs::write(&settings, "{not json").unwrap();
-    let env = execute(&ctx, &request("hooks:status", &[]));
-    let claude = element(&env, "hooks:claude");
-    assert_eq!(claude["state"], "unmanaged-detected");
-    assert!(claude["observed"]["blocked_reason"].as_str().is_some());
-    // 批量 apply 整单 fail-closed：选中的 unmanaged 目标不产出半份写入
     let db = store::db_path(&ctx);
     let db_before = std::fs::read(&db).unwrap();
-    let env = execute(&ctx, &request("hooks:apply", &[]));
-    assert!(!env.ok);
-    assert_eq!(env.errors[0].code, "HOOK_ERROR");
-    assert!(!env.lock.held);
+
+    let st = status(&ctx);
+    assert_eq!(std::fs::read(&db).unwrap(), db_before, "读路径推导零写");
+    let claude = element(&st, "hooks:claude");
+    assert_eq!(claude["state"], "managed-ok", "未生效建议不算待同步");
+    let legacy = claude["observed"]["legacy"].clone();
     assert_eq!(
-        std::fs::read(&db).unwrap(),
-        db_before,
-        "preflight 拒绝不得写 DB"
+        commands(&legacy),
+        ["echo x", "echo z"],
+        "已在实际里的 y 不提示"
     );
-    // 未选中不阻塞：--only codex 真实 apply 为 no-op（默认来源空 hooks），
-    // 不产生绑定与审计。
-    let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:codex"]));
+    assert_eq!(legacy[0]["source_key"], "hooks.claude");
+    let codex_legacy = element(&st, "hooks:codex")["observed"]["legacy"].clone();
+    assert_eq!(commands(&codex_legacy), ["echo w"]);
+
+    // 加入 x：出现在实际配置里，条目字段（matcher、timeout）原样带上
+    let x_id = legacy[0]["id"].as_str().unwrap().to_string();
+    let base = claude["observed"]["base"].as_str().unwrap().to_string();
+    let env = apply(&ctx, "hooks:claude", &base, &["--legacy", &x_id]);
     assert!(env.ok, "{:?}", env.errors);
-    assert_eq!(env.data["steps"].as_array().unwrap().len(), 0);
-    assert_eq!(env.data["skipped"], json!(["hooks:codex"]));
-    assert!(!ctx.home_dir.join(".codex/hooks.json").exists());
+    let after = read_json(&settings(&ctx));
     assert_eq!(
-        count_rows(&ctx, "SELECT COUNT(*) FROM hook_target_bindings"),
-        0
+        after["hooks"]["Stop"],
+        json!([{"matcher": "", "hooks": [{"type": "command", "command": "echo x", "timeout": 5}]}])
     );
     assert_eq!(
-        count_rows(
+        after["hooks"]["SessionStart"],
+        json!([{"hooks": [hook("echo y")]}])
+    );
+    // 写路径清理：已在实际里的 x、y 从库里删掉，只剩 z
+    let legacy = observed(&ctx, "hooks:claude")["legacy"].clone();
+    assert_eq!(commands(&legacy), ["echo z"]);
+    let conn = store::open_readonly(&ctx).unwrap().unwrap();
+    let stored: String = conn
+        .query_row(
+            "SELECT value_json FROM hook_sources WHERE key = 'hooks.claude'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    drop(conn);
+    assert!(
+        !stored.contains("echo x") && !stored.contains("echo y"),
+        "{stored}"
+    );
+
+    // 丢弃 z：库中无该来源；实际文件不动
+    let file_before = std::fs::read(settings(&ctx)).unwrap();
+    let z_id = legacy[0]["id"].as_str().unwrap().to_string();
+    let env = run(&ctx, "hooks:discard-legacy", &["--legacy", &z_id]);
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(env.data["source_removed"], true);
+    assert!(!env.lock.held, "丢弃只写库，不取 apply 锁");
+    assert_eq!(legacy_rows(&ctx), ["hooks.codex"]);
+    assert_eq!(std::fs::read(settings(&ctx)).unwrap(), file_before);
+    assert_eq!(observed(&ctx, "hooks:claude")["legacy"], json!([]));
+
+    // 之后用户在实际配置里删掉 x：不会再冒出来
+    let base = base_of(&ctx, "hooks:claude");
+    let env = apply_value(
+        &ctx,
+        "hooks:claude",
+        &base,
+        &json!({"SessionStart": [{"hooks": [hook("echo y")]}]}),
+    );
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(observed(&ctx, "hooks:claude")["legacy"], json!([]));
+
+    // Codex 旧来源丢弃后整行删除；同一 id 再丢弃被拒
+    let w_id = codex_legacy[0]["id"].as_str().unwrap().to_string();
+    let env = run(&ctx, "hooks:discard-legacy", &["--legacy", &w_id]);
+    assert!(env.ok, "{:?}", env.errors);
+    assert!(legacy_rows(&ctx).is_empty(), "丢弃后库中无该来源");
+    let again = run(&ctx, "hooks:discard-legacy", &["--legacy", &w_id]);
+    assert!(!again.ok);
+    assert_eq!(again.errors[0].code, "HOOK_ERROR");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 旧库里与内置相同的来源不产生建议；旧表损坏不挡住 hooks 页，也不回显内容。
+#[test]
+fn builtin_or_corrupt_legacy_rows_yield_nothing_and_never_block() {
+    let (root, ctx) = temp_ctx("legacy-builtin");
+    let builtin: Value =
+        serde_json::from_str(include_str!("../../config/claude-hooks.json")).unwrap();
+    let mut row = builtin.as_object().unwrap().clone();
+    row.remove("settings_path");
+    write_legacy_row(&ctx, "hooks.claude", &Value::Object(row));
+    let marker = "LEGACY-MARKER-4a1e";
+    write_legacy_row(&ctx, "hooks.codex", &json!({"hooks": [marker]}));
+    {
+        let conn = store::open_write(&ctx).unwrap();
+        conn.execute(
+            "INSERT INTO hook_sources VALUES ('claude', ?1, 'r', 't')",
+            [format!("{{not json {marker}")],
+        )
+        .unwrap();
+    }
+    let env = run(&ctx, "hooks:status", &[]);
+    assert!(env.ok, "{:?}", env.errors);
+    for el in env.data["elements"].as_array().unwrap() {
+        assert_eq!(el["observed"]["legacy"], json!([]), "{el}");
+    }
+    assert!(!serde_json::to_string(&env).unwrap().contains(marker));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// hooks 写入不动接入/运行参数键（agents:configure 的写入基准不变）；
+/// 反之 agents:configure 写入不改变 hooks（hooks 的 base 不变）。
+#[test]
+fn hooks_and_agent_settings_never_overwrite_each_other() {
+    let (root, ctx) = temp_ctx("cross");
+    std::fs::create_dir_all(ctx.home_dir.join(".claude")).unwrap();
+    let configured = {
+        let status = run(&ctx, "agents:status", &[]);
+        let base = status.data["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["id"] == "agents:claude-code")
+            .unwrap()["observed"]["current_config"]["base"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        run(
             &ctx,
-            "SELECT COUNT(*) FROM operation_logs WHERE operation_type='hooks:apply'"
-        ),
-        0
+            "agents:configure",
+            &[
+                "--only",
+                "agents:claude-code",
+                "--base",
+                &base,
+                "--runtime",
+                r#"{"claude_effort_level": "high", "automation_mode": "auto"}"#,
+            ],
+        )
+    };
+    assert!(configured.ok, "{:?}", configured.errors);
+    let agent_base = |ctx: &Context| -> String {
+        let status = run(ctx, "agents:status", &[]);
+        status.data["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["id"] == "agents:claude-code")
+            .unwrap()["observed"]["current_config"]["base"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+
+    // hooks 写入：接入/运行参数键语义不变，agents 的写入基准不变
+    let before = read_json(&settings(&ctx));
+    let agents_base_before = agent_base(&ctx);
+    let hooks = json!({"Stop": [{"hooks": [hook("echo done")]}]});
+    let env = apply_value(&ctx, "hooks:claude", &base_of(&ctx, "hooks:claude"), &hooks);
+    assert!(env.ok, "{:?}", env.errors);
+    let after = read_json(&settings(&ctx));
+    assert_eq!(after["hooks"], hooks);
+    assert_eq!(without_hooks(&after), without_hooks(&before));
+    assert_eq!(agent_base(&ctx), agents_base_before);
+
+    // agents:configure 写入：hooks 子树与 hooks 的 base 不变
+    let hooks_base = base_of(&ctx, "hooks:claude");
+    let env = run(
+        &ctx,
+        "agents:configure",
+        &[
+            "--only",
+            "agents:claude-code",
+            "--base",
+            &agents_base_before,
+            "--runtime",
+            r#"{"claude_effort_level": "low"}"#,
+        ],
     );
-    let _ = std::fs::remove_dir_all(&base);
+    assert!(env.ok, "{:?}", env.errors);
+    let after_configure = read_json(&settings(&ctx));
+    assert_eq!(after_configure["env"]["CLAUDE_CODE_EFFORT_LEVEL"], "low");
+    assert_eq!(after_configure["hooks"], hooks);
+    assert_eq!(base_of(&ctx, "hooks:claude"), hooks_base);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+fn save_profile(ctx: &Context, id: &str, value: &str) {
+    let env = run(
+        ctx,
+        "policy:set",
+        &[
+            "--layer",
+            "local",
+            "--key",
+            &format!("agents.definitions.{id}"),
+            "--value",
+            value,
+        ],
+    );
+    assert!(env.ok, "{:?}", env.errors);
+}
+
+/// 实例的 hooks 文件是 hooks 目标；profiles:apply 不再渲染 hooks，前后实例 hooks 字节不变。
+#[test]
+fn instance_hooks_are_targets_and_profiles_apply_leaves_them_alone() {
+    let (root, ctx) = temp_ctx("profiles");
+    save_profile(
+        &ctx,
+        "cc-ly",
+        r#"{"display_name":"Claude ly","bin":"claude","profile":{"base_agent":"claude-code","config_dir":"~/.claude-ly","model":"claude-opus-5"},"_replace":true}"#,
+    );
+    save_profile(
+        &ctx,
+        "cx-work",
+        r#"{"display_name":"Codex 工作","bin":"codex","profile":{"base_agent":"codex","config_dir":"~/.codex-work"},"_replace":true}"#,
+    );
+    // 目录还不存在：可见但不能写
+    let st = status(&ctx);
+    let cc = element(&st, "hooks:profile:cc-ly");
+    assert_eq!(cc["spec"]["target"], "~/.claude-ly/settings.json");
+    assert_eq!(cc["state"], "missing");
+    assert!(cc["observed"]["blocked_reason"].as_str().is_some());
+    assert_eq!(cc["actions"], json!([]));
+    assert_eq!(
+        element(&st, "hooks:profile:cx-work")["spec"]["target"],
+        "~/.codex-work/hooks.json"
+    );
+
+    // profiles:apply 建目录，但不生成 hooks
+    for id in ["profiles:cc-ly", "profiles:cx-work"] {
+        let env = run(&ctx, "profiles:apply", &["--only", id]);
+        assert!(env.ok, "{:?}", env.errors);
+    }
+    let cc_settings = ctx.home_dir.join(".claude-ly/settings.json");
+    let cx_hooks = ctx.home_dir.join(".codex-work/hooks.json");
+    assert!(
+        read_json(&cc_settings).get("hooks").is_none(),
+        "实例 settings.json 不再带 hooks"
+    );
+    assert!(!cx_hooks.exists(), "实例不再生成 hooks.json");
+
+    // 在 hooks 页给两个实例写 hooks
+    let cc_hooks = json!({"Stop": [{"hooks": [hook("echo cc")]}]});
+    let env = apply_value(
+        &ctx,
+        "hooks:profile:cc-ly",
+        &base_of(&ctx, "hooks:profile:cc-ly"),
+        &cc_hooks,
+    );
+    assert!(env.ok, "{:?}", env.errors);
+    let cx = json!({"Stop": [{"hooks": [hook("echo cx")]}]});
+    let env = apply_value(&ctx, "hooks:profile:cx-work", "missing", &cx);
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(
+        read_json(&cc_settings)["model"],
+        "claude-opus-5",
+        "实例自己的键保留"
+    );
+
+    // 再次 profiles:apply：实例 hooks 字节不变（Codex 文件、Claude hooks 子树）
+    let cc_base = base_of(&ctx, "hooks:profile:cc-ly");
+    let cx_bytes = std::fs::read(&cx_hooks).unwrap();
+    for id in ["profiles:cc-ly", "profiles:cx-work"] {
+        let env = run(&ctx, "profiles:apply", &["--only", id]);
+        assert!(
+            env.ok,
+            "改过实例 hooks 不算实例配置被外部改过: {:?}",
+            env.errors
+        );
+    }
+    assert_eq!(std::fs::read(&cx_hooks).unwrap(), cx_bytes);
+    assert_eq!(base_of(&ctx, "hooks:profile:cc-ly"), cc_base);
+    assert_eq!(read_json(&cc_settings)["hooks"], cc_hooks);
+    let profiles = run(&ctx, "profiles:status", &[]);
+    for el in profiles.data["elements"].as_array().unwrap() {
+        assert_eq!(el["state"], "managed-ok", "{el}");
+    }
+    // 实例目标不带旧版建议，只有主助手才对照旧来源
+    assert_eq!(observed(&ctx, "hooks:profile:cc-ly")["legacy"], json!([]));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 旧版本 profiles 记的写入指纹含 hooks：升级后在 hooks 页改实例 hooks，再应用实例不误报。
+#[test]
+fn old_profile_fingerprint_with_hooks_does_not_block_after_hooks_edit() {
+    let (root, ctx) = temp_ctx("profile-legacy-fp");
+    save_profile(
+        &ctx,
+        "cc-old",
+        r#"{"display_name":"Claude old","bin":"claude","profile":{"base_agent":"claude-code","config_dir":"~/.claude-old","model":"m1"},"_replace":true}"#,
+    );
+    // 模拟旧版本写出的实例文件与写入指纹（env/model/hooks）
+    let path = ctx.home_dir.join(".claude-old/settings.json");
+    let old_file = json!({"env": {}, "model": "m1", "hooks": {"Stop": [{"hooks": [hook("old")]}]}});
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    // 旧版本写盘格式：pretty JSON + 换行
+    std::fs::write(
+        &path,
+        format!("{}\n", serde_json::to_string_pretty(&old_file).unwrap()),
+    )
+    .unwrap();
+    let fp = sha(&serde_json::to_vec(
+        &json!({"env": {}, "model": "m1", "hooks": old_file["hooks"]}),
+    )
+    .unwrap());
+    {
+        let conn = store::open_write(&ctx).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS profile_bindings (
+                profile_id TEXT NOT NULL, file TEXT NOT NULL, applied_digest TEXT NOT NULL,
+                updated_at TEXT NOT NULL, PRIMARY KEY (profile_id, file))",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO profile_bindings VALUES ('cc-old', 'settings.json', ?1, 't')",
+            [&fp],
+        )
+        .unwrap();
+    }
+    let st = run(&ctx, "profiles:status", &[]);
+    assert_eq!(
+        st.data["elements"][0]["state"], "managed-ok",
+        "旧指纹照常认"
+    );
+
+    let base = base_of(&ctx, "hooks:profile:cc-old");
+    let env = apply_value(
+        &ctx,
+        "hooks:profile:cc-old",
+        &base,
+        &json!({"Stop": [{"hooks": [hook("new")]}]}),
+    );
+    assert!(env.ok, "{:?}", env.errors);
+    let env = run(&ctx, "profiles:apply", &["--only", "profiles:cc-old"]);
+    assert!(env.ok, "只改了 hooks，不需要接管: {:?}", env.errors);
+    assert_eq!(
+        read_json(&path)["hooks"]["Stop"][0]["hooks"][0]["command"],
+        "new"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// status 在已有库、旧来源与实际文件都在时同样零写。
+#[test]
+fn status_is_zero_write_on_existing_db_and_files() {
+    let (root, ctx) = temp_ctx("zero-write");
+    write_legacy_row(
+        &ctx,
+        "hooks.claude",
+        &json!({"hooks": {"Stop": [{"hooks": [hook("x")]}]}}),
+    );
+    write_json(&settings(&ctx), &json!({"model": "m"}));
+    let db = store::db_path(&ctx);
+    let db_before = std::fs::read(&db).unwrap();
+    let file_before = std::fs::read(settings(&ctx)).unwrap();
+    for _ in 0..2 {
+        let st = status(&ctx);
+        assert_eq!(
+            commands(&element(&st, "hooks:claude")["observed"]["legacy"]),
+            ["x"]
+        );
+    }
+    assert_eq!(std::fs::read(&db).unwrap(), db_before);
+    assert_eq!(std::fs::read(settings(&ctx)).unwrap(), file_before);
+    assert!(!ctx.home_dir.join(".codex").exists());
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 空 hooks：Claude 移除 hooks 键；不存在的文件不会因为空 hooks 被建出来。
+#[test]
+fn empty_hooks_remove_claude_key_and_never_create_empty_files() {
+    let (root, ctx) = temp_ctx("empty");
+    let env = apply_value(&ctx, "hooks:codex", "missing", &json!({}));
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(env.data["skipped"], json!(["hooks:codex"]));
+    assert!(!codex_hooks(&ctx).exists());
+
+    write_json(
+        &settings(&ctx),
+        &json!({"model": "m", "hooks": {"Stop": [{"hooks": [hook("x")]}]}}),
+    );
+    let env = apply_value(
+        &ctx,
+        "hooks:claude",
+        &base_of(&ctx, "hooks:claude"),
+        &json!({}),
+    );
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(read_json(&settings(&ctx)), json!({"model": "m"}));
+    assert_eq!(base_of(&ctx, "hooks:claude"), "missing");
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
-fn only_scopes_apply_and_global_lock_is_shared() {
-    let (base, ctx) = temp_ctx("only-lock");
-    write_hook_source(&ctx, "hooks.claude", &managed_claude_source("echo m"));
-    write_hook_source(&ctx, "hooks.codex", &managed_codex_source("echo c"));
+fn invalid_values_and_args_are_rejected_without_writes_or_echo() {
+    let (root, ctx) = temp_ctx("invalid");
+    let marker = "HOOKS-ARG-MARKER-e81c";
+    write_json(&settings(&ctx), &json!({"model": "m"}));
+    let before = std::fs::read(settings(&ctx)).unwrap();
+    let bad_values = [
+        "{not json".to_string(),
+        "[]".to_string(),
+        json!({"Stop": []}).to_string(),
+        json!({"Stop": [{}]}).to_string(),
+        json!({"Stop": [{"hooks": [marker]}]}).to_string(),
+        json!({"Stop": [{"hooks": [{"type": "command", "command": " "}]}]}).to_string(),
+        json!({"Stop": [{"matcher": 1, "hooks": [hook(marker)]}]}).to_string(),
+        json!({"Stop": [{"hooks": [hook("a\0b")]}]}).to_string(),
+        json!({"": [{"hooks": [hook(marker)]}]}).to_string(),
+    ];
+    for value in &bad_values {
+        let env = run(
+            &ctx,
+            "hooks:apply",
+            &[
+                "--only",
+                "hooks:claude",
+                "--base",
+                "missing",
+                "--value",
+                value,
+            ],
+        );
+        assert!(!env.ok, "{value}");
+        assert_eq!(env.errors[0].code, "HOOK_ERROR");
+        assert!(!env.lock.held, "预检拒绝不取锁: {value}");
+        assert!(
+            !serde_json::to_string(&env).unwrap().contains(marker),
+            "{value}"
+        );
+    }
+    for args in [
+        vec![],
+        vec!["--dry-run"],
+        vec!["--only", "hooks:claude", "--allow-takeover"],
+        vec!["--only", "hooks:claude", "--base", "missing"],
+        vec!["--only", marker, "--base", "missing", "--value", "{}"],
+        vec![
+            "--only",
+            "hooks:claude",
+            "--base",
+            "missing",
+            "--value",
+            "{}",
+            marker,
+        ],
+        vec![
+            "--only",
+            "hooks:profile:nobody",
+            "--base",
+            "missing",
+            "--value",
+            "{}",
+        ],
+        vec![
+            "--only",
+            "hooks:claude",
+            "--base",
+            "missing",
+            "--legacy",
+            "legacy-0123456789abcdef",
+        ],
+        vec![
+            "--only",
+            "hooks:claude",
+            "--base",
+            "missing",
+            "--cleanup",
+            "cleanup-0123456789abcdef",
+        ],
+    ] {
+        let env = run(&ctx, "hooks:apply", &args);
+        assert!(!env.ok, "{args:?}");
+        assert_eq!(env.errors[0].code, "HOOK_ERROR", "{args:?}");
+        assert!(!env.lock.held, "{args:?}");
+        assert!(
+            !serde_json::to_string(&env).unwrap().contains(marker),
+            "{args:?}"
+        );
+    }
+    for args in [
+        vec!["--only", "hooks:claude"],
+        vec!["--dry-run"],
+        vec!["x"],
+        vec!["--offline", "--offline"],
+    ] {
+        let env = run(&ctx, "hooks:status", &args);
+        assert!(!env.ok, "{args:?}");
+        assert_eq!(env.errors[0].code, "HOOK_ERROR");
+    }
+    for args in [
+        vec![],
+        vec!["--legacy", "legacy-0123456789abcdef"],
+        vec!["--legacy", marker],
+    ] {
+        let env = run(&ctx, "hooks:discard-legacy", &args);
+        assert!(!env.ok, "{args:?}");
+        assert!(
+            !serde_json::to_string(&env).unwrap().contains(marker),
+            "{args:?}"
+        );
+    }
+    assert_eq!(std::fs::read(settings(&ctx)).unwrap(), before);
+    assert!(!store::db_path(&ctx).exists(), "拒绝路径不建库");
+    assert!(!ctx.data_dir.join("agent-manager.apply.lock").exists());
+    let _ = std::fs::remove_dir_all(&root);
+}
 
-    // 精确 --only：只写 codex（新文件 0600）
-    let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:codex"]));
-    assert!(env.ok, "{:?}", env.errors);
-    let codex_target = ctx.home_dir.join(".codex/hooks.json");
-    assert!(codex_target.exists());
+/// 断链、指向目录的链接与坏 JSON：只报原因，不提供写入，文件不变。
+#[test]
+fn broken_or_directory_links_and_bad_json_are_blocked_without_writes() {
+    let (root, ctx) = temp_ctx("blocked");
+    std::fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
+    std::fs::write(codex_hooks(&ctx), "{bad json").unwrap();
+    let mut blocked = vec!["hooks:codex"];
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(&codex_target)
-            .unwrap()
-            .permissions()
-            .mode()
-            & 0o777;
-        assert_eq!(mode, 0o600);
+        std::fs::create_dir_all(ctx.home_dir.join(".claude")).unwrap();
+        std::os::unix::fs::symlink(root.join("gone.json"), settings(&ctx)).unwrap();
+        blocked.push("hooks:claude");
+        save_profile(
+            &ctx,
+            "cc-dir",
+            r#"{"display_name":"Claude dir","bin":"claude","profile":{"base_agent":"claude-code","config_dir":"~/.claude-dir"},"_replace":true}"#,
+        );
+        let elsewhere = root.join("a-directory");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::create_dir_all(ctx.home_dir.join(".claude-dir")).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, ctx.home_dir.join(".claude-dir/settings.json"))
+            .unwrap();
+        blocked.push("hooks:profile:cc-dir");
     }
-    assert!(!ctx.home_dir.join(".claude/settings.json").exists());
+    let st = status(&ctx);
+    for id in blocked {
+        let el = element(&st, id);
+        assert_eq!(el["state"], "unmanaged-detected", "{id}");
+        assert_eq!(el["observed"]["base"], Value::Null, "{id}");
+        assert_eq!(el["observed"]["hooks"], Value::Null, "{id}");
+        assert!(el["observed"]["blocked_reason"].as_str().is_some(), "{id}");
+        assert_eq!(el["actions"], json!([]), "{id}");
+        let env = apply_value(
+            &ctx,
+            id,
+            "missing",
+            &json!({"Stop": [{"hooks": [hook("x")]}]}),
+        );
+        assert!(!env.ok, "{id}");
+    }
+    assert_eq!(
+        std::fs::read_to_string(codex_hooks(&ctx)).unwrap(),
+        "{bad json"
+    );
+    #[cfg(unix)]
+    {
+        assert!(!root.join("gone.json").exists(), "断链不会被写出目标文件");
+        assert!(std::fs::symlink_metadata(settings(&ctx))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
 
-    // 预独占现有全局锁：real apply 拒绝
-    let lock_path = ctx.data_dir.join("agent-manager.apply.lock");
+/// settings.json / hooks.json 是指向普通文件的符号链接（dotfiles 仓库常见）：与
+/// agents:configure 同一裁决，解析到最终目标读写；CAS 比对目标字节，链接本身不变。
+#[cfg(unix)]
+#[test]
+fn symlinked_targets_are_read_and_written_through_to_the_real_file() {
+    let (root, ctx) = temp_ctx("symlink");
+    let dotfiles = root.join("dotfiles");
+    let real_settings = dotfiles.join("claude-settings.json");
+    write_json(
+        &real_settings,
+        &json!({"model": "m", "hooks": {"Stop": [{"hooks": [hook("echo real")]}]}}),
+    );
+    std::fs::create_dir_all(ctx.home_dir.join(".claude")).unwrap();
+    std::os::unix::fs::symlink(&real_settings, settings(&ctx)).unwrap();
+    // Codex：整个 ~/.codex 目录链接到 dotfiles
+    let real_codex_dir = dotfiles.join("codex");
+    write_json(
+        &real_codex_dir.join("hooks.json"),
+        &json!({"hooks": {"SessionStart": [{"hooks": [hook("echo codex")]}]}}),
+    );
+    std::os::unix::fs::symlink(&real_codex_dir, ctx.home_dir.join(".codex")).unwrap();
+
+    let st = status(&ctx);
+    let claude = element(&st, "hooks:claude");
+    assert_eq!(claude["state"], "managed-ok");
+    assert_eq!(
+        claude["observed"]["hooks"]["Stop"][0]["hooks"][0]["command"],
+        "echo real"
+    );
+    let codex = element(&st, "hooks:codex");
+    assert_eq!(codex["state"], "managed-ok");
+    assert_eq!(
+        codex["observed"]["base"],
+        sha(&std::fs::read(real_codex_dir.join("hooks.json")).unwrap())
+    );
+
+    // 写入：落到最终目标，链接不变，其他键保留
+    let base = claude["observed"]["base"].as_str().unwrap().to_string();
+    let next = json!({"Stop": [{"hooks": [hook("echo edited")]}]});
+    let env = apply_value(&ctx, "hooks:claude", &base, &next);
+    assert!(env.ok, "{:?}", env.errors);
+    assert!(std::fs::symlink_metadata(settings(&ctx))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(std::fs::read_link(settings(&ctx)).unwrap(), real_settings);
+    let written = read_json(&real_settings);
+    assert_eq!(written["hooks"], next);
+    assert_eq!(written["model"], "m");
+    let codex_base = codex["observed"]["base"].as_str().unwrap().to_string();
+    let env = apply_value(&ctx, "hooks:codex", &codex_base, &json!({}));
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(
+        read_json(&real_codex_dir.join("hooks.json")),
+        json!({"hooks": {}})
+    );
+    assert!(std::fs::symlink_metadata(ctx.home_dir.join(".codex"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+
+    // CAS 比对的是目标字节：外部改了目标文件，旧 base 被拒
+    let stale = base_of(&ctx, "hooks:claude");
+    write_json(
+        &real_settings,
+        &json!({"model": "m", "hooks": {"Stop": [{"hooks": [hook("changed outside")]}]}}),
+    );
+    let before = std::fs::read(&real_settings).unwrap();
+    let refused = apply_value(&ctx, "hooks:claude", &stale, &json!({}));
+    assert!(!refused.ok);
+    assert!(refused.errors[0].message.contains("已在外部修改"));
+    assert_eq!(std::fs::read(&real_settings).unwrap(), before);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 官方 hook 类型不止 command（http / mcp_tool / prompt / agent，以及将来的未知类型）：
+/// 不阻塞目标，status 如实展示；编辑其中一条 command 后，其余类型逐字段保留；
+/// 清理建议只看 command 类型。
+#[test]
+fn non_command_hook_types_are_shown_and_preserved_on_edit() {
+    let (root, ctx) = temp_ctx("hook-types");
+    let others = json!([
+        {"type": "http", "url": "https://hooks.example.com/pre", "headers": {"X-Token": "${HOOK_TOKEN}"}, "timeout": 10},
+        {"type": "prompt", "prompt": "Is this safe? $ARGUMENTS", "model": "claude-haiku"},
+        {"type": "agent", "prompt": "Review the diff", "timeout": 120},
+        {"type": "mcp_tool", "server": "guard", "tool": "check"},
+        {"type": "brand-new-kind", "nested": {"a": [1, 2, 3]}},
+        {"type": "http", "url": "https://x", "command": "sh /old/agent-rule/hooks/block-dist-edits.sh"}
+    ]);
+    let mut entry_hooks = others.as_array().unwrap().clone();
+    entry_hooks.insert(1, hook("echo mine"));
+    let file = json!({
+        "model": "m",
+        "hooks": {
+            "PreToolUse": [{"matcher": "Edit|MultiEdit|Write", "hooks": entry_hooks}],
+            "Stop": [{"hooks": [{"type": "prompt", "prompt": "done?"}]}]
+        }
+    });
+    write_json(&settings(&ctx), &file);
+
+    let claude = element(&status(&ctx), "hooks:claude");
+    assert_eq!(claude["state"], "managed-ok", "非 command 类型不阻塞目标");
+    assert_eq!(claude["observed"]["hooks"], file["hooks"]);
+    assert_eq!(claude["observed"]["hook_count"], 8);
+    assert_eq!(
+        claude["observed"]["cleanup"],
+        json!([]),
+        "http 类型即使带 command 字段也不算清理建议"
+    );
+
+    // 与界面一致：拿实际 hooks，只改 command 那一条，其余原样带回
+    let mut edited = claude["observed"]["hooks"].clone();
+    edited["PreToolUse"][0]["hooks"][1]["command"] = json!("echo mine v2");
+    let base = claude["observed"]["base"].as_str().unwrap().to_string();
+    let env = apply_value(&ctx, "hooks:claude", &base, &edited);
+    assert!(env.ok, "{:?}", env.errors);
+    let after = read_json(&settings(&ctx));
+    let list = after["hooks"]["PreToolUse"][0]["hooks"].as_array().unwrap();
+    assert_eq!(list[1]["command"], "echo mine v2");
+    let kept: Vec<Value> = list
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != 1)
+        .map(|(_, v)| v.clone())
+        .collect();
+    assert_eq!(Value::Array(kept), others, "其余类型逐字段保留");
+    assert_eq!(after["hooks"]["Stop"], file["hooks"]["Stop"]);
+    assert_eq!(after["model"], "m");
+
+    // 原文编辑可直接改非 command 类型；只做骨架校验
+    let base = base_of(&ctx, "hooks:claude");
+    let mut raw = after["hooks"].clone();
+    raw["PreToolUse"][0]["hooks"][0]["url"] = json!("https://hooks.example.com/v2");
+    let env = apply_value(&ctx, "hooks:claude", &base, &raw);
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(
+        read_json(&settings(&ctx))["hooks"]["PreToolUse"][0]["hooks"][0]["url"],
+        "https://hooks.example.com/v2"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn disabled_agent_target_is_never_probed_or_written() {
+    let (root, ctx) = temp_ctx("disabled");
+    let mut policy = store::builtin_policy();
+    policy["agents"]["codex"]["enabled"] = Value::Bool(false);
+    {
+        let conn = store::open_write(&ctx).unwrap();
+        store::write_policy(&conn, &policy).unwrap();
+    }
+    std::fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
+    std::fs::write(codex_hooks(&ctx), "{bad json").unwrap();
+    let codex = element(&status(&ctx), "hooks:codex");
+    assert_eq!(codex["state"], "disabled");
+    assert_eq!(codex["observed"]["target_exists"], Value::Null);
+    assert_eq!(codex["actions"], json!([]));
+    let env = apply_value(&ctx, "hooks:codex", "missing", &json!({}));
+    assert!(!env.ok);
+    assert!(env.errors[0].message.contains("已停用"));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 旧 hook_target_bindings 不再是写入门槛：记录对不上实际文件也照常编辑。
+#[test]
+fn old_bindings_table_is_no_longer_a_write_gate() {
+    let (root, ctx) = temp_ctx("old-bindings");
+    {
+        let conn = store::open_write(&ctx).unwrap();
+        conn.execute_batch(&format!(
+            "CREATE TABLE hook_target_bindings (
+                target_id TEXT PRIMARY KEY NOT NULL, applied_digest TEXT NOT NULL,
+                source_revision TEXT NOT NULL, updated_at TEXT NOT NULL);
+             INSERT INTO hook_target_bindings VALUES ('hooks:codex', '{0}', '{0}', 't');",
+            "0".repeat(64)
+        ))
+        .unwrap();
+    }
+    write_json(
+        &codex_hooks(&ctx),
+        &json!({"hooks": {"Stop": [{"hooks": [hook("mine")]}]}}),
+    );
+    let codex = element(&status(&ctx), "hooks:codex");
+    assert_eq!(codex["state"], "managed-ok");
+    let base = codex["observed"]["base"].as_str().unwrap().to_string();
+    let env = apply_value(
+        &ctx,
+        "hooks:codex",
+        &base,
+        &json!({"Stop": [{"hooks": [hook("mine2")]}]}),
+    );
+    assert!(env.ok, "{:?}", env.errors);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn apply_rejects_contended_lock_without_touching_target() {
+    let (root, ctx) = temp_ctx("lock");
+    std::fs::create_dir_all(&ctx.data_dir).unwrap();
     let lock_file = OpenOptions::new()
         .create(true)
         .read(true)
         .write(true)
-        .open(&lock_path)
+        .truncate(false)
+        .open(ctx.data_dir.join("agent-manager.apply.lock"))
         .unwrap();
     lock_file.lock_exclusive().unwrap();
     let worker_ctx = Context {
         data_dir: ctx.data_dir.clone(),
         home_dir: ctx.home_dir.clone(),
     };
-    let worker = std::thread::spawn(move || {
-        execute(
+    let env = std::thread::spawn(move || {
+        apply_value(
             &worker_ctx,
-            &request_with_run(
-                "hooks:apply",
-                &["--only", "hooks:claude"],
-                "contended-hooks",
-            ),
+            "hooks:codex",
+            "missing",
+            &json!({"Stop": [{"hooks": [hook("x")]}]}),
         )
-    });
-    let env = worker.join().unwrap();
+    })
+    .join()
+    .unwrap();
     assert!(!env.ok);
     assert_eq!(env.errors[0].code, "HOOK_ERROR");
-    assert!(!env.lock.held);
-    assert!(!ctx.home_dir.join(".claude/settings.json").exists());
-    let _ = std::fs::remove_dir_all(&base);
-}
-
-#[test]
-fn second_target_binding_failure_rolls_back_both_files_and_db() {
-    let (base, ctx) = temp_ctx("rollback-late");
-    write_hook_source(&ctx, "hooks.claude", &managed_claude_source("echo m"));
-    write_hook_source(&ctx, "hooks.codex", &managed_codex_source("echo c"));
-    // 确定性晚失败：合法 binding 表 + 仅对 hooks:codex INSERT RAISE 的 trigger；
-    // 两目标都进入 pending，两文件均被原子写入后第二 binding 才失败。
-    {
-        let conn = store::open_write(&ctx).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE hook_target_bindings (
-                target_id TEXT PRIMARY KEY NOT NULL,
-                applied_digest TEXT NOT NULL,
-                source_revision TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TRIGGER fail_codex_binding BEFORE INSERT ON hook_target_bindings
-             WHEN NEW.target_id = 'hooks:codex'
-             BEGIN SELECT RAISE(ABORT, 'injected-codex-binding-failure'); END;",
-        )
-        .unwrap();
-    }
-
-    let env = execute(&ctx, &request("hooks:apply", &[]));
-    assert!(!env.ok);
-    assert_eq!(env.errors[0].code, "HOOK_ERROR");
-    assert!(env.lock.held, "已进入真实 apply，envelope lock.held=true");
-    assert!(
-        env.errors[0]
-            .message
-            .contains("injected-codex-binding-failure"),
-        "错误须包含注入失败标记: {}",
-        env.errors[0].message
-    );
-    assert!(
-        !ctx.home_dir.join(".claude/settings.json").exists(),
-        "第一目标已写文件必须回滚删除"
-    );
-    assert!(
-        !ctx.home_dir.join(".codex/hooks.json").exists(),
-        "第二目标已写文件必须回滚删除"
-    );
-    assert_eq!(
-        count_rows(&ctx, "SELECT COUNT(*) FROM hook_target_bindings"),
-        0,
-        "DB 事务必须整体回滚"
-    );
-    assert_eq!(
-        count_rows(
-            &ctx,
-            "SELECT COUNT(*) FROM operation_logs WHERE operation_type='hooks:apply'"
-        ),
-        0
-    );
-    let _ = std::fs::remove_dir_all(&base);
-}
-
-#[test]
-fn audit_failure_rolls_back_files_and_bindings() {
-    let (base, ctx) = temp_ctx("rollback-audit");
-    write_hook_source(&ctx, "hooks.claude", &managed_claude_source("echo m"));
-    // 审计写入触发失败
-    {
-        let conn = store::open_write(&ctx).unwrap();
-        conn.execute_batch(
-            "CREATE TRIGGER fail_operation_logs BEFORE INSERT ON operation_logs
-             BEGIN SELECT RAISE(ABORT, 'injected-end-failure'); END;",
-        )
-        .unwrap();
-    }
-    let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:claude"]));
-    assert!(!env.ok);
-    assert!(
-        !ctx.home_dir.join(".claude/settings.json").exists(),
-        "审计失败后已写文件必须回滚"
-    );
-    assert_eq!(
-        count_rows(&ctx, "SELECT COUNT(*) FROM hook_target_bindings"),
-        0
-    );
-    let _ = std::fs::remove_dir_all(&base);
-}
-
-#[test]
-fn corrupt_hook_source_rows_fail_closed_without_leaking_markers() {
-    let source_marker = "SOURCE-MARKER-77aa";
-    let sha = agent_manager_engine::native_mcp::model::sha256_hex;
-
-    // 辅助：建合法表并插入一行指定 value_json/revision
-    let seed = |ctx: &Context, value_json: String, revision: String| {
-        let conn = store::open_write(ctx).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE hook_sources (
-                key TEXT PRIMARY KEY NOT NULL,
-                value_json TEXT NOT NULL,
-                revision TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )",
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO hook_sources VALUES ('hooks.claude', ?1, ?2, '2026-01-01')",
-            rusqlite::params![value_json, revision],
-        )
-        .unwrap();
-    };
-
-    let assert_fail_closed = |ctx: &Context| {
-        for command in ["sources:get", "hooks:status", "hooks:apply"] {
-            let args: &[&str] = if command == "sources:get" {
-                &["--key", "hooks.claude"]
-            } else {
-                &[]
-            };
-            let env = execute(ctx, &request_with_run(command, args, "corrupt-source"));
-            assert!(!env.ok, "{command} 应 fail-closed");
-            let serialized = serde_json::to_string(&env).unwrap();
-            assert!(
-                !serialized.contains(source_marker),
-                "{command} envelope 不得含来源 marker"
-            );
-        }
-    };
-
-    // 1) value_json 结构非法（cmd 而非 command）且含 marker
-    {
-        let (base, ctx) = temp_ctx("corrupt-src-structure");
-        let bad =
-            json!({"hooks": {"Ev": [{"hooks": [{"type": "command", "cmd": source_marker }]}]}})
-                .to_string();
-        let rev = sha(&bad);
-        seed(&ctx, bad, rev);
-        assert_fail_closed(&ctx);
-        assert!(!ctx.home_dir.exists());
-        let _ = std::fs::remove_dir_all(&base);
-    }
-    // 2) value_json 非合法 JSON
-    {
-        let (base, ctx) = temp_ctx("corrupt-src-json");
-        seed(&ctx, "{not json".to_string(), sha("x"));
-        let env = execute(&ctx, &request("sources:get", &["--key", "hooks.claude"]));
-        assert!(!env.ok);
-        assert_eq!(env.errors[0].code, "SOURCE_ERROR");
-        let env = execute(&ctx, &request("hooks:status", &[]));
-        assert!(!env.ok);
-        assert_eq!(env.errors[0].code, "HOOK_ERROR");
-        let _ = std::fs::remove_dir_all(&base);
-    }
-    // 3) revision 与 value_json 不一致
-    {
-        let (base, ctx) = temp_ctx("corrupt-src-revision");
-        let good = json!({"hooks": {}}).to_string();
-        seed(&ctx, good, sha("other"));
-        let env = execute(&ctx, &request("hooks:status", &[]));
-        assert!(!env.ok);
-        let _ = std::fs::remove_dir_all(&base);
-    }
-    // 4) 未知 key 行
-    {
-        let (base, ctx) = temp_ctx("corrupt-src-key");
-        let conn = store::open_write(&ctx).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE hook_sources (
-                key TEXT PRIMARY KEY NOT NULL,
-                value_json TEXT NOT NULL,
-                revision TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )",
-        )
-        .unwrap();
-        let value = json!({"hooks": {}}).to_string();
-        conn.execute(
-            "INSERT INTO hook_sources VALUES (?1, ?2, ?3, '2026-01-01')",
-            rusqlite::params![format!("hooks.unknown-{source_marker}"), value, sha("x")],
-        )
-        .unwrap();
-        drop(conn);
-        let env = execute(&ctx, &request("hooks:status", &[]));
-        assert!(!env.ok);
-        assert!(!serde_json::to_string(&env).unwrap().contains(source_marker));
-        let _ = std::fs::remove_dir_all(&base);
-    }
-    // 5) 坏 schema（3 列）
-    {
-        let (base, ctx) = temp_ctx("corrupt-src-schema");
-        let conn = store::open_write(&ctx).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE hook_sources (
-                key TEXT PRIMARY KEY NOT NULL,
-                value_json TEXT NOT NULL,
-                revision TEXT NOT NULL
-            )",
-        )
-        .unwrap();
-        drop(conn);
-        let env = execute(&ctx, &request("hooks:status", &[]));
-        assert!(!env.ok);
-        assert_eq!(env.errors[0].code, "HOOK_ERROR");
-        let _ = std::fs::remove_dir_all(&base);
-    }
-}
-
-#[test]
-fn corrupt_binding_rows_fail_closed_without_leaking_markers() {
-    let (base, ctx) = temp_ctx("corrupt-binding");
-    let binding_marker = "BINDING-MARKER-88bb";
-    {
-        let conn = store::open_write(&ctx).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE hook_target_bindings (
-                target_id TEXT PRIMARY KEY NOT NULL,
-                applied_digest TEXT NOT NULL,
-                source_revision TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )",
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO hook_target_bindings VALUES (?1, ?2, ?3, '2026-01-01')",
-            rusqlite::params![
-                format!("hooks:claude-{binding_marker}"),
-                agent_manager_engine::native_mcp::model::sha256_hex("a"),
-                agent_manager_engine::native_mcp::model::sha256_hex("b")
-            ],
-        )
-        .unwrap();
-    }
-    for command in ["hooks:status", "hooks:apply"] {
-        let env = execute(&ctx, &request_with_run(command, &[], "corrupt-binding"));
-        assert!(!env.ok, "{command} 应 fail-closed");
-        assert_eq!(env.errors[0].code, "HOOK_ERROR");
-        let serialized = serde_json::to_string(&env).unwrap();
-        assert!(
-            !serialized.contains(binding_marker),
-            "{command} envelope 不得含绑定行 marker"
-        );
-    }
-    assert!(!ctx.home_dir.exists());
-    let _ = std::fs::remove_dir_all(&base);
-}
-
-#[test]
-fn invalid_target_hooks_subtree_is_unmanaged_and_apply_refuses() {
-    let (base, ctx) = temp_ctx("bad-subtree");
-    write_hook_source(&ctx, "hooks.claude", &managed_claude_source("echo m"));
-    let settings = ctx.home_dir.join(".claude/settings.json");
-    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
-
-    for (tag, content) in [
-        (
-            "event-not-array",
-            json!({"hooks": {"SessionStart": {"hooks": []}}}).to_string(),
-        ),
-        (
-            "entry-not-object",
-            json!({"hooks": {"SessionStart": ["x"]}}).to_string(),
-        ),
-        (
-            "hooks-not-array",
-            json!({"hooks": {"SessionStart": [{"hooks": {}}]}}).to_string(),
-        ),
-        (
-            "hook-missing-command",
-            json!({"hooks": {"SessionStart": [{"hooks": [{"type": "command"}]}]}}).to_string(),
-        ),
-        (
-            "hook-type-not-command",
-            json!({"hooks": {"SessionStart": [{"hooks": [{"type": "prompt", "command": "x"}]}]}})
-                .to_string(),
-        ),
-        (
-            "hook-empty-command",
-            json!({"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": " "}]}]}})
-                .to_string(),
-        ),
-        (
-            "empty-event-array",
-            json!({"hooks": {"SessionStart": []}}).to_string(),
-        ),
-        (
-            "empty-entry-hooks",
-            json!({"hooks": {"SessionStart": [{"hooks": []}]}}).to_string(),
-        ),
-        (
-            "empty-event-name",
-            json!({"hooks": {"": [{"hooks": [{"type": "command", "command": "x"}]}]}}).to_string(),
-        ),
-        (
-            "blank-event-name",
-            json!({"hooks": {"  ": [{"hooks": [{"type": "command", "command": "x"}]}]}})
-                .to_string(),
-        ),
-    ] {
-        std::fs::write(&settings, &content).unwrap();
-        let env = execute(&ctx, &request("hooks:status", &[]));
-        let claude = element(&env, "hooks:claude");
-        assert_eq!(claude["state"], "unmanaged-detected", "{tag}");
-        assert_eq!(claude["actions"], json!([]), "{tag}");
-        let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:claude"]));
-        assert!(!env.ok, "{tag} apply 应拒绝");
-        assert!(!env.lock.held, "{tag} preflight 拒绝不得持锁");
-        assert_eq!(
-            std::fs::read(&settings).unwrap(),
-            content.as_bytes(),
-            "{tag} 目标不变"
-        );
-    }
-    // 合法但有未知附加字段的文件仍可安全合并
-    std::fs::write(
-        &settings,
-        json!({"custom_root": true, "hooks": {"SessionStart": [{"matcher": "Write", "extra_field": 1, "hooks": [{"type": "command", "command": "echo user", "timeout": 5}]}]}}).to_string(),
-    )
-    .unwrap();
-    let env = execute(&ctx, &request("hooks:status", &[]));
-    assert_eq!(element(&env, "hooks:claude")["state"], "drifted");
-    let _ = std::fs::remove_dir_all(&base);
-}
-
-#[test]
-fn status_actual_digest_matches_bytes_for_unbound_merge() {
-    let (base, ctx) = temp_ctx("before-digest");
-    write_hook_source(
-        &ctx,
-        "hooks.claude",
-        &managed_claude_source("echo new-managed"),
-    );
-    let settings = ctx.home_dir.join(".claude/settings.json");
-    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
-    let existing = json!({"model": "m", "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo user"}]}]}});
-    std::fs::write(
-        &settings,
-        format!(
-            "{}
-",
-            serde_json::to_string_pretty(&existing).unwrap()
-        ),
-    )
-    .unwrap();
-    let old_sha = agent_manager_engine::native_mcp::model::sha256_hex_bytes(
-        &std::fs::read(&settings).unwrap(),
-    );
-
-    // status observed.actual_digest 与实际字节一致（动作 before_digest 的
-    // 同一来源，动作形态见私有 preflight 单测）。
-    let env = execute(&ctx, &request("hooks:status", &[]));
-    assert_eq!(
-        element(&env, "hooks:claude")["observed"]["actual_digest"]
-            .as_str()
-            .unwrap(),
-        old_sha
-    );
-    assert_eq!(
-        element(&env, "hooks:codex")["observed"]["actual_digest"],
-        Value::Null
-    );
-
-    // 真实 apply 合并后登记绑定，实际摘要切换为期望摘要。
-    let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:claude"]));
-    assert!(env.ok, "{:?}", env.errors);
-    let status = execute(&ctx, &request("hooks:status", &[]));
-    let claude = element(&status, "hooks:claude");
-    assert_eq!(claude["state"], "managed-ok");
-    assert_ne!(
-        claude["observed"]["actual_digest"].as_str().unwrap(),
-        old_sha,
-        "合并后实际摘要必须不同于旧字节"
-    );
-    let _ = std::fs::remove_dir_all(&base);
-}
-
-#[test]
-fn invalid_args_return_hook_error_without_echoing_values() {
-    let (base, ctx) = temp_ctx("invalid-args");
-    let marker = "HOOKS-ARG-MARKER-c391";
-    for args in [
-        vec!["--only", marker],
-        vec!["--bogus"],
-        vec!["positional"],
-        vec!["--dry-run", "--dry-run"],
-    ] {
-        let env = execute(
-            &ctx,
-            &request_with_run("hooks:apply", &args, "hooks-invalid"),
-        );
-        assert!(!env.ok, "{args:?} 应失败");
-        assert_eq!(env.errors[0].code, "HOOK_ERROR");
-        assert!(!serde_json::to_string(&env).unwrap().contains(marker));
-    }
-    assert!(!ctx.data_dir.join("agent-manager.apply.lock").exists());
-    assert!(!ctx.home_dir.exists());
-    let _ = std::fs::remove_dir_all(&base);
-}
-
-// ---------- --allow-takeover：显式接管（仅 --only 单目标） ----------
-
-fn audit_takeover_flags(ctx: &Context) -> Vec<bool> {
-    let conn = store::open_readonly(ctx).unwrap().expect("db must exist");
-    let mut stmt = conn
-        .prepare("SELECT detail_json FROM operation_logs WHERE operation_type = 'hooks:apply'")
-        .unwrap();
-    let rows = stmt
-        .query_map([], |r| r.get::<_, String>(0))
-        .unwrap()
-        .collect::<Result<Vec<String>, _>>()
-        .unwrap();
-    rows.iter()
-        .map(|detail| {
-            let value: Value = serde_json::from_str(detail).unwrap();
-            value["takeover"]
-                .as_bool()
-                .unwrap_or_else(|| panic!("审计 detail 必须恒含 takeover 布尔字段: {detail}"))
-        })
-        .collect()
-}
-
-#[test]
-fn allow_takeover_flag_requires_exactly_one_only_target() {
-    let (base, ctx) = temp_ctx("takeover-args");
-    // 缺 --only（批量缺省）、多个 --only、重复 flag：一律拒绝
-    for (command, args) in [
-        ("hooks:apply", vec!["--allow-takeover"]),
-        (
-            "hooks:apply",
-            vec![
-                "--only",
-                "hooks:claude",
-                "--only",
-                "hooks:codex",
-                "--allow-takeover",
-            ],
-        ),
-        (
-            "hooks:apply",
-            vec![
-                "--only",
-                "hooks:codex",
-                "--allow-takeover",
-                "--allow-takeover",
-            ],
-        ),
-        ("hooks:status", vec!["--allow-takeover"]),
-    ] {
-        let env = execute(&ctx, &request(command, &args));
-        assert!(!env.ok, "{command} {args:?} 应失败");
-        assert_eq!(env.errors[0].code, "HOOK_ERROR");
-        assert!(
-            env.errors[0].message.contains("参数错误"),
-            "{command} {args:?} 必须是参数错误: {}",
-            env.errors[0].message
-        );
-    }
-    // 合法形态：单目标 + flag 通过参数解析（fresh ctx 两目标 managed-ok，
-    // 真实 apply 为 no-op 且不写目标）。
-    let env = execute(
-        &ctx,
-        &request(
-            "hooks:apply",
-            &["--only", "hooks:codex", "--allow-takeover"],
-        ),
-    );
-    assert!(env.ok, "{:?}", env.errors);
-    assert_eq!(env.data["steps"].as_array().unwrap().len(), 0);
-    assert_eq!(env.data["skipped"], json!(["hooks:codex"]));
-    assert!(!ctx.home_dir.exists());
-    let _ = std::fs::remove_dir_all(&base);
-}
-
-#[test]
-fn codex_foreign_whole_file_takeover_with_flag_replaces_and_marks_audit() {
-    let (base, ctx) = temp_ctx("codex-takeover");
-    write_hook_source(
-        &ctx,
-        "hooks.codex",
-        &managed_codex_source("echo codex-managed-takeover"),
-    );
-    let target = ctx.home_dir.join(".codex/hooks.json");
-    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
-    let foreign = json!({
-        "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "sh user-own-session.sh"}]}]},
-        "foreign": true
-    });
-    std::fs::write(
-        &target,
-        format!("{}\n", serde_json::to_string_pretty(&foreign).unwrap()),
-    )
-    .unwrap();
-
-    // 无 flag：apply 维持 fail-closed（与此前行为完全一致）
-    let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:codex"]));
-    assert!(!env.ok, "无 flag apply 必须拒绝");
-    assert!(!env.lock.held);
-
-    // 有 flag 的 preflight 动作标注 takeover + whole-file 风险说明（形态见
-    // 私有 preflight 单测）；apply：整文件替换外部内容，登记 binding，
-    // 审计 takeover=true
-    let env = execute(
-        &ctx,
-        &request(
-            "hooks:apply",
-            &["--only", "hooks:codex", "--allow-takeover"],
-        ),
-    );
-    assert!(env.ok, "{:?}", env.errors);
-    let after: Value = serde_json::from_str(&std::fs::read_to_string(&target).unwrap()).unwrap();
-    assert_eq!(after.get("foreign"), None, "外部根字段必须被整体替换");
-    let session = after["hooks"]["SessionStart"].as_array().unwrap();
-    let commands: Vec<&str> = session
-        .iter()
-        .flat_map(|e| e["hooks"].as_array().unwrap().iter())
-        .filter_map(|h| h["command"].as_str())
-        .collect();
-    assert!(commands.contains(&"echo codex-managed-takeover"));
-    assert!(
-        !commands.contains(&"sh user-own-session.sh"),
-        "外部 hook 必须被整体替换"
-    );
-    assert_eq!(
-        count_rows(
-            &ctx,
-            "SELECT COUNT(*) FROM hook_target_bindings WHERE target_id='hooks:codex'"
-        ),
-        1
-    );
-    assert_eq!(audit_takeover_flags(&ctx), vec![true]);
-
-    // status 转 managed-ok
-    let status = execute(&ctx, &request("hooks:status", &[]));
-    assert_eq!(element(&status, "hooks:codex")["state"], "managed-ok");
-    let _ = std::fs::remove_dir_all(&base);
-}
-
-#[test]
-fn claude_user_own_edits_do_not_block_and_managed_tampering_still_does() {
-    let (base, ctx) = temp_ctx("claude-takeover");
-    write_hook_source(
-        &ctx,
-        "hooks.claude",
-        &managed_claude_source("echo managed-takeover"),
-    );
-    let settings = ctx.home_dir.join(".claude/settings.json");
-    execute(&ctx, &request("hooks:apply", &["--only", "hooks:claude"])).unwrap_apply();
-
-    // ---- 用户改自己的东西：根字段 + 自己的 hook ----
-    // settings.json 是用户天天要动的文件（model、permissions、statusLine…），
-    // signature-set 合并的前提就是「用户可以有自己的字段」，因此这不该阻塞。
-    let mut current: Value =
-        serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
-    current["model"] = json!("user-model");
-    current["hooks"]["SessionStart"]
-        .as_array_mut()
-        .unwrap()
-        .push(json!({"hooks": [{"type": "command", "command": "echo user-own"}]}));
-    std::fs::write(&settings, serde_json::to_string_pretty(&current).unwrap()).unwrap();
-
-    let status = execute(&ctx, &request("hooks:status", &[]));
-    assert_ne!(
-        element(&status, "hooks:claude")["state"],
-        "unmanaged-detected",
-        "用户改自己的字段不该被判成外部修改"
-    );
-    let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:claude"]));
-    assert!(env.ok, "用户改自己的东西之后仍须能同步: {:?}", env.errors);
-    let merged: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
-    assert_eq!(merged["model"], "user-model", "根级用户字段必须保留");
-
-    // ---- 用户动了本工具写的那条 hook：这才是真冲突 ----
-    let mut tampered: Value =
-        serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
-    for entry in tampered["hooks"]["SessionStart"].as_array_mut().unwrap() {
-        for hook in entry["hooks"].as_array_mut().unwrap() {
-            if hook["command"] == json!("echo managed-takeover") {
-                hook["command"] = json!("echo tampered");
-            }
-        }
-    }
-    std::fs::write(&settings, serde_json::to_string_pretty(&tampered).unwrap()).unwrap();
-
-    let status = execute(&ctx, &request("hooks:status", &[]));
-    assert_eq!(
-        element(&status, "hooks:claude")["state"],
-        "unmanaged-detected",
-        "受管 hook 被改必须检出"
-    );
-    let env = execute(&ctx, &request("hooks:apply", &["--only", "hooks:claude"]));
-    assert!(!env.ok, "无 flag apply 必须拒绝被改过的受管 hook");
-
-    // ---- 接管：合并仍保留用户内容 ----
-    let env = execute(
-        &ctx,
-        &request(
-            "hooks:apply",
-            &["--only", "hooks:claude", "--allow-takeover"],
-        ),
-    );
-    assert!(env.ok, "{:?}", env.errors);
-    let merged: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
-    assert_eq!(merged["model"], "user-model", "根级用户字段必须保留");
-    let session = merged["hooks"]["SessionStart"].as_array().unwrap();
-    let commands: Vec<&str> = session
-        .iter()
-        .flat_map(|e| e["hooks"].as_array().unwrap().iter())
-        .filter_map(|h| h["command"].as_str())
-        .collect();
-    assert!(commands.contains(&"echo user-own"), "用户自有 hook 保留");
-    assert!(
-        commands.contains(&"echo managed-takeover"),
-        "受管 hook 合入"
-    );
-    let status = execute(&ctx, &request("hooks:status", &[]));
-    assert_eq!(element(&status, "hooks:claude")["state"], "managed-ok");
-    let _ = std::fs::remove_dir_all(&base);
-}
-
-#[test]
-fn allow_takeover_does_not_bypass_structural_or_batch_fail_closed() {
-    let (base, ctx) = temp_ctx("takeover-hard-block");
-    write_hook_source(
-        &ctx,
-        "hooks.codex",
-        &managed_codex_source("echo codex-managed"),
-    );
-    let target = ctx.home_dir.join(".codex/hooks.json");
-    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
-    // 目标 JSON 损坏：探测即阻塞（actual_digest 为空），flag 也不得放行
-    std::fs::write(&target, "{not json").unwrap();
-
-    let env = execute(
-        &ctx,
-        &request(
-            "hooks:apply",
-            &["--only", "hooks:codex", "--allow-takeover"],
-        ),
-    );
-    assert!(!env.ok, "结构损坏目标即使带 flag 也必须拒绝");
-    assert!(!env.lock.held);
-    assert_eq!(std::fs::read(&target).unwrap(), b"{not json");
-
-    // 批量场景：claude 正常、codex 外部内容阻塞；无 flag 的批量 apply 仍整体拒绝
-    std::fs::write(&target, json!({"hooks": {}, "foreign": true}).to_string()).unwrap();
-    let env = execute(&ctx, &request("hooks:apply", &[]));
-    assert!(!env.ok, "批量 apply 对阻塞目标仍整体 fail-closed");
-    assert!(!env.lock.held);
-    let _ = std::fs::remove_dir_all(&base);
+    assert!(!ctx.home_dir.exists(), "锁竞争失败不得写目标");
+    let _ = std::fs::remove_dir_all(&root);
 }

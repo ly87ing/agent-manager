@@ -582,40 +582,41 @@ function demoEnvelopes(): Record<string, Envelope> {
           makeElement({
             id: "hooks:claude",
             domain: "hooks",
-            spec: { name: "Claude Hooks", merge: "signature-set", source_key: "hooks.claude", target: "~/.claude/settings.json" },
+            spec: { name: "Claude Code Hooks", group: "global-hooks", kind: "claude", scope: "hooks-key", profile_id: null, target: "~/.claude/settings.json" },
             policy: { enabled: true, agent_id: "claude-code" },
-            observed: { install_source: null, target: "/Users/demo/.claude/settings.json",
+            observed: {
+              target: "/Users/demo/.claude/settings.json",
               target_exists: true,
-              expected_digest: "cccc5d5e240998863259085b2b52df0f1e0a855f4b4b4d3d0bb0be8ba91ef23b3",
-              applied_digest: "aaaa3c8ae2687d47a8e7543d3c8c43ef8dd9f744e3a3e2ce9aa9ad7a90de12a2",
-              actual_digest: "aaaa3c8ae2687d47a8e7543d3c8c43ef8dd9f744e3a3e2ce9aa9ad7a90de12a2",
-              source_revision: "1111",
+              hooks: {
+                SessionStart: [{ hooks: [{ type: "command", command: "echo demo-hook" }] }],
+                PreToolUse: [{ matcher: "Edit|MultiEdit|Write", hooks: [{ type: "command", command: "sh ~/agent-manager/agent-rule/hooks/block-dist-edits.sh", timeout: 30 }] }],
+              },
+              hook_count: 2,
+              base: "demo-hooks-base-claude",
+              cleanup: [{ id: "cleanup-0123456789abcdef", event: "PreToolUse", matcher: "Edit|MultiEdit|Write", command: "sh ~/agent-manager/agent-rule/hooks/block-dist-edits.sh" }],
+              legacy: [{ id: "legacy-0123456789abcdef", source_key: "hooks.claude", event: "Stop", matcher: null, command: "echo saved-but-not-applied" }],
               blocked_reason: null,
-              registration_needed: false,
-              managed_hook_count: 1,
-              missing_signatures: 1,
-              removed_signatures_present: 0 },
-            state: "drifted",
-            actions: [{ id: "sync", risk: "write-local", needs_lock: true, offline_ok: true }],
+            },
+            state: "managed-ok",
+            actions: [{ id: "write", risk: "write-local", needs_lock: true, offline_ok: true }],
           }),
           makeElement({
             id: "hooks:codex",
             domain: "hooks",
-            spec: { name: "Codex Hooks", merge: "whole-file", source_key: "hooks.codex", target: "~/.codex/hooks.json" },
+            spec: { name: "Codex Hooks", group: "global-hooks", kind: "codex", scope: "whole-file", profile_id: null, target: "~/.codex/hooks.json" },
             policy: { enabled: true, agent_id: "codex" },
-            observed: { install_source: null, target: "/Users/demo/.codex/hooks.json",
-              target_exists: true,
-              expected_digest: "dddd6e6f351aa997436a196c3c63e01f2f1b96605c5c5e4e1cc1cf9cb02f034c4",
-              applied_digest: "dddd6e6f351aa997436a196c3c63e01f2f1b96605c5c5e4e1cc1cf9cb02f034c4",
-              actual_digest: "dddd6e6f351aa997436a196c3c63e01f2f1b96605c5c5e4e1cc1cf9cb02f034c4",
-              source_revision: "2222",
+            observed: {
+              target: "/Users/demo/.codex/hooks.json",
+              target_exists: false,
+              hooks: {},
+              hook_count: 0,
+              base: "missing",
+              cleanup: [],
+              legacy: [],
               blocked_reason: null,
-              registration_needed: false,
-              managed_hook_count: 0,
-              missing_signatures: 0,
-              removed_signatures_present: 0 },
-            state: "managed-ok",
-            actions: [],
+            },
+            state: "missing",
+            actions: [{ id: "write", risk: "write-local", needs_lock: true, offline_ok: true }],
           }),
         ],
       },
@@ -815,7 +816,6 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
     agents: "agent-lifecycle",
     mcp: "mcp-sync",
     skills: "skills-link",
-    hooks: "hooks-sync",
     aliases: "shell-aliases",
   };
 
@@ -922,6 +922,71 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
     data.templates.splice(index, 1);
     refreshRuleMatches();
     return makeEnvelope({ domain: "rules", deleted: id }, { command: "rules.delete-template" });
+  };
+
+  // ---- Hooks：实际配置为准 + 建议（内存态演示） ----
+  type MockHookSuggestion = { id: string; event: string; matcher: string | null; command: string };
+  type MockHooksElement = { id: string; state: string; spec: { name: string; kind: string }; observed: { hooks: Record<string, unknown[]>; base: string; hook_count: number; cleanup: MockHookSuggestion[]; legacy: MockHookSuggestion[]; target_exists: boolean } };
+  const hooksElements = () => (routes["hooks:status"].data as { elements: MockHooksElement[] }).elements;
+  const hookError = (command: string, message: string): Envelope =>
+    makeEnvelope({}, { command, ok: false, errors: [{ code: "HOOK_ERROR", element: null, message }] });
+  const countHooks = (hooks: Record<string, unknown[]>): number =>
+    Object.values(hooks).reduce((sum, entries) => sum + entries.reduce((n: number, entry) => n + ((entry as { hooks?: unknown[] }).hooks?.length ?? 0), 0), 0);
+  const withoutCommand = (hooks: Record<string, unknown[]>, command: string): Record<string, unknown[]> => {
+    const out: Record<string, unknown[]> = {};
+    for (const [event, entries] of Object.entries(hooks)) {
+      const kept = entries
+        .map((entry) => {
+          const typed = entry as { hooks: { command?: string }[] };
+          return { ...typed, hooks: typed.hooks.filter((hook) => hook.command !== command) };
+        })
+        .filter((entry) => entry.hooks.length > 0);
+      if (kept.length > 0) out[event] = kept;
+    }
+    return out;
+  };
+  let hooksRevision = 0;
+  const applyHooks = (args: string[], runId: string): Envelope => {
+    const target = hooksElements().find((item) => item.id === argOf(args, "--only"));
+    if (!target) return hookError("hooks.apply", "参数错误: --only 目标无效");
+    if (argOf(args, "--base") !== target.observed.base) {
+      return hookError("hooks.apply", `${target.spec.name} 已在外部修改（与打开时读到的内容不同），没有写入；请刷新后重新操作`);
+    }
+    let next: Record<string, unknown[]> = target.observed.hooks;
+    if (args.includes("--value")) {
+      next = JSON.parse(argOf(args, "--value") ?? "{}") as Record<string, unknown[]>;
+    } else if (args.includes("--cleanup")) {
+      const item = target.observed.cleanup.find((c) => c.id === argOf(args, "--cleanup"));
+      if (!item) return hookError("hooks.apply", "这条清理建议已不存在，请刷新后重试");
+      next = withoutCommand(next, item.command);
+      target.observed.cleanup = target.observed.cleanup.filter((c) => c !== item);
+    } else if (args.includes("--legacy")) {
+      const item = target.observed.legacy.find((c) => c.id === argOf(args, "--legacy"));
+      if (!item) return hookError("hooks.apply", "这条旧版 hooks 已不存在或不属于这个目标，请刷新后重试");
+      next = { ...next, [item.event]: [...(next[item.event] ?? []), { ...(item.matcher ? { matcher: item.matcher } : {}), hooks: [{ type: "command", command: item.command }] }] };
+      target.observed.legacy = target.observed.legacy.filter((c) => c !== item);
+    }
+    target.observed.hooks = next;
+    target.observed.hook_count = countHooks(next);
+    target.observed.base = `demo-hooks-base-${++hooksRevision}`;
+    target.observed.target_exists = true;
+    target.state = "managed-ok";
+    recordRun(runId, "hooks.apply");
+    return makeEnvelope(
+      { domain: "hooks", steps: [{ name: `hooks:write ${target.id}`, ok: true, exit_code: 0 }], skipped: [] },
+      { command: "hooks.apply", run_id: runId, lock: { held: true, pid: 4242 } },
+    );
+  };
+  const discardLegacyHook = (args: string[]): Envelope => {
+    const id = argOf(args, "--legacy");
+    for (const element of hooksElements()) {
+      const before = element.observed.legacy.length;
+      element.observed.legacy = element.observed.legacy.filter((item) => item.id !== id);
+      if (element.observed.legacy.length !== before) {
+        return makeEnvelope({ domain: "hooks", discarded: id, source_removed: true }, { command: "hooks.discard-legacy" });
+      }
+    }
+    return hookError("hooks.discard-legacy", "这条旧版 hooks 已不存在（可能已加入或已丢弃），请刷新后重试");
   };
 
   const setSecret = (args: string[], runId: string): Envelope => {
@@ -1140,12 +1205,6 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       // ---- 写路径与有状态命令 ----
       if (command === "sources:get") {
         const domain = args[args.indexOf("--key") + 1];
-        if (domain === "hooks") {
-          return makeEnvelope({ sources: [
-            { key: "hooks.claude", label: "Claude Hooks", value: { hooks: { SessionStart: [{ hooks: [{ type: "command", command: "echo demo-hook" }] }] }, removed_signatures: [] }, revision: "demo-revision-claude", format: "json" },
-            { key: "hooks.codex", label: "Codex Hooks", value: { hooks: {} }, revision: "demo-revision-codex", format: "json" },
-          ] }, { command: "sources.get" });
-        }
         if (domain === "aliases") {
           return makeEnvelope(
             {
@@ -1241,6 +1300,8 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       if (command === "rules:apply") return applyRules(args, runId);
       if (command === "rules:save-template") return saveRuleTemplate(args);
       if (command === "rules:delete-template") return deleteRuleTemplate(args);
+      if (command === "hooks:apply") return applyHooks(args, runId);
+      if (command === "hooks:discard-legacy") return discardLegacyHook(args);
       if (command.endsWith(":apply")) {
         return applyEnvelope(command.split(":")[0], args, runId);
       }

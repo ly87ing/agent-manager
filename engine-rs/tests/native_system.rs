@@ -90,12 +90,14 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
             .count() as u64
     })
     .sum();
-    // 规则以实际文件为准：没有规则文件是正常空状态（notice），不再算「未生成」warning
-    let rules = section(&env, "rules");
-    assert_eq!(rules.len(), 2);
-    for entry in rules {
-        assert_eq!(entry["status"], "notice", "{entry}");
-        assert!(entry.get("category").is_none(), "{entry}");
+    // 规则与 hooks 以实际文件为准：没有文件是正常空状态（notice），不再算「未生成」warning
+    for name in ["rules", "hooks"] {
+        let entries = section(&env, name);
+        assert_eq!(entries.len(), 2, "{name}");
+        for entry in entries {
+            assert_eq!(entry["status"], "notice", "{entry}");
+            assert!(entry.get("category").is_none(), "{entry}");
+        }
     }
     assert!(
         total_warnings >= 2,
@@ -148,12 +150,13 @@ fn existing_db_is_byte_identical_after_audit() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
-// C. 仅 hook_sources 损坏且含 marker：hooks section 固定 error，其余 section
-// 仍在；data.status=error；envelope 恰好一条 AUDIT_ERRORS；marker/临时路径/
-// 原始 DB 错误不外泄；DB 字节不变。
+// C. 子域状态查询失败只降级该子域：rule_templates 损坏（含 marker）→ rules section 固定
+// error，其余 section 仍在；data.status=error；envelope 恰好一条 AUDIT_ERRORS；
+// marker/临时路径/原始 DB 错误不外泄；DB 字节不变。旧 hook_sources 损坏不再让 hooks
+// 失败（旧来源宽松读取，只是不产生建议），同样不外泄。
 #[test]
-fn corrupted_hook_sources_degrade_only_hooks_section_without_leaks() {
-    let (base, ctx) = temp_ctx("hook-corrupt");
+fn failing_domain_degrades_only_its_section_without_leaks() {
+    let (base, ctx) = temp_ctx("domain-corrupt");
     let marker = "AUDIT-MARKER-9f31c7";
     {
         let conn = store::open_write(&ctx).unwrap();
@@ -163,17 +166,23 @@ fn corrupted_hook_sources_degrade_only_hooks_section_without_leaks() {
                 value_json TEXT NOT NULL,
                 revision TEXT NOT NULL,
                 updated_at TEXT NOT NULL
-            )",
+            );
+            CREATE TABLE rule_templates (id TEXT PRIMARY KEY, note TEXT);",
         )
         .unwrap();
         conn.execute(
             "INSERT INTO hook_sources (key, value_json, revision, updated_at) VALUES (?1, ?2, ?3, ?4)",
             rusqlite::params![
-                "claude",
+                "hooks.claude",
                 format!("{{not-json-{marker}"),
                 "rev",
                 "2026-09-12T00:00:00Z"
             ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO rule_templates (id, note) VALUES ('x', ?1)",
+            [format!("value_json {marker}")],
         )
         .unwrap();
     }
@@ -181,17 +190,22 @@ fn corrupted_hook_sources_degrade_only_hooks_section_without_leaks() {
     let env = audit(&ctx, &[]);
     assert!(!env.ok, "损坏子域必须让 envelope ok=false");
     assert_eq!(env.data["status"], "error");
-    let hooks = section(&env, "hooks");
-    assert_eq!(hooks.len(), 1);
-    assert_eq!(hooks[0]["status"], "error");
-    for name in ["agents", "skills", "mcp", "rules", "runtime", "storage"] {
+    let rules = section(&env, "rules");
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0]["status"], "error");
+    for name in ["agents", "skills", "mcp", "hooks", "runtime", "storage"] {
         assert!(
             section(&env, name)
                 .iter()
                 .all(|entry| entry["status"] != "error"),
-            "section '{name}' 不应被 hooks 损坏波及"
+            "section '{name}' 不应被 rules 损坏波及"
         );
     }
+    assert_eq!(
+        section(&env, "hooks").len(),
+        2,
+        "旧 hook_sources 损坏不挡 hooks"
+    );
     let summary = &env.data["summary"];
     assert_eq!(summary["errors"], 1);
     assert_eq!(env.errors.len(), 1);

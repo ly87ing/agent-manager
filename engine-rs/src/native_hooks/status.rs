@@ -1,449 +1,245 @@
-//! hooks 域只读状态闭环：目标固定为 model::targets()，来源只从
-//! hook_sources 当前有效 JSON 取得（缺 DB/表用编译期默认），运行时不读
-//! checkout。status 不创建 data/home 目录、DB、表或文件；来源/数据库损坏
-//! fail-closed，目标路径安全与解析问题降级为 unmanaged-detected +
-//! blocked_reason。输出不含来源/目标正文。
+//! hooks 域只读状态：逐目标输出实际 hooks、写入基准 base，以及清理建议与旧版本保存的
+//! hooks（未生效）建议。
+//!
+//! 生效 hooks 就是各助手的实际配置；status 只读零写：不创建 data/home 目录、DB、表或
+//! 文件。DB 存在时只打开一次 readonly 连接，在同一 snapshot 读 policy 与旧来源；目标路径
+//! 安全与解析问题降级为 unmanaged-detected + blocked_reason。目标是符号链接时与
+//! agents:configure 同一裁决：解析到最终目标读写（链接本身不变），断链或指向目录拒绝。
 
-use std::collections::BTreeMap;
+use std::path::PathBuf;
+
 use std::path::Path;
 
 use anyhow::Result;
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 
-use super::model::{
-    self, collect_present_signatures, collect_signatures, count_removed_present, TargetSpec,
-};
-use super::persistence::{load_bindings_from, Binding};
+use super::legacy::{self, Rows};
+use super::model::{self, HookKind, Target};
 use crate::native::Context;
 use crate::native_mcp::targets::{check_symlink_metadata, validate_target_path};
-use crate::native_sources;
 use crate::store;
 
-pub(crate) fn target_enabled(policy: &Value, agent_id: &str) -> bool {
-    let defs = policy
-        .get("agents")
-        .and_then(|v| v.get("definitions"))
-        .and_then(Value::as_object);
-    let Some(defs) = defs else {
-        return false;
-    };
-    let Some(def) = defs.get(agent_id) else {
-        return false;
-    };
-    if !def.is_object() {
-        return false;
-    }
-    if def.get("_delete") == Some(&Value::Bool(true)) {
-        return false;
-    }
-    policy
-        .get("agents")
-        .and_then(|v| v.get(agent_id))
-        .and_then(|v| v.get("enabled"))
-        .and_then(Value::as_bool)
-        != Some(false)
-}
-
-struct Snapshot {
-    policy: Value,
-    sources: BTreeMap<String, String>,
-    bindings: BTreeMap<String, Binding>,
-}
-
-fn load_snapshot(ctx: &Context) -> Result<Snapshot> {
-    match store::open_readonly(ctx)? {
-        Some(mut conn) => {
-            // 显式 Deferred 只读事务：三个 SELECT 在同一 SQLite snapshot 上执行；
-            // 不抢写锁，不写 DB。任一读取失败即传播 Err，事务随之回滚。
-            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)?;
-            let snap = Snapshot {
-                policy: store::policy_from_connection(&tx)?,
-                sources: native_sources::current_hook_sources_from(&tx)?,
-                bindings: load_bindings_from(&tx)?,
-            };
-            tx.commit()?;
-            Ok(snap)
-        }
-        None => Ok(Snapshot {
-            policy: store::builtin_policy(),
-            sources: native_sources::current_hook_sources_readonly(ctx)?,
-            bindings: BTreeMap::new(),
-        }),
-    }
-}
-
-/// 解析并校验来源 canonical JSON；损坏 fail-closed，错误不回显正文。
-pub(crate) fn parse_source(
-    spec: &TargetSpec,
-    canonical: &str,
-) -> Result<(model::HookMap, Vec<model::RemovedRule>)> {
-    let value: Value = serde_json::from_str(canonical)
-        .map_err(|_| anyhow::anyhow!("hooks 来源 {} 不是合法 JSON 对象", spec.source_key))?;
-    let obj = value
-        .as_object()
-        .ok_or_else(|| anyhow::anyhow!("hooks 来源 {} 不是合法 JSON 对象", spec.source_key))?;
-    model::validate_source(spec.source_key, obj)
-        .map_err(|err| anyhow::anyhow!("hooks 来源 {} 结构非法: {err:#}", spec.source_key))
-}
-
-enum TargetProbe {
-    Missing,
+/// 一个目标的实际状态。
+pub(crate) enum Probe {
+    /// 助手或实例已停用：不探测。
+    Disabled,
+    /// 文件不存在；`reason` 非空表示当前不能新建（实例配置目录还不存在）。
+    /// `real` 是要新建的落点（父目录已解析链接）。
+    Missing {
+        reason: Option<String>,
+        real: PathBuf,
+    },
+    /// 文件存在、是 JSON 对象且 hooks 结构合法；`real` 是解析链接后的最终文件。
     Present {
         bytes: Vec<u8>,
-        json: Value,
+        root: Value,
+        real: PathBuf,
     },
+    /// 不能安全读写。
     Blocked {
         exists: Option<bool>,
         reason: String,
     },
 }
 
-/// 只读探测目标：路径安全校验 + JSON 对象/结构检查；绝不写文件。
-fn probe_target(abs_path: &Path) -> TargetProbe {
-    if let Err(err) = validate_target_path(abs_path) {
-        return TargetProbe::Blocked {
+impl Probe {
+    /// 实际 hooks：文件不存在或没有 hooks 键时为空对象；不能读时为 None。
+    pub(crate) fn hooks(&self) -> Option<Value> {
+        match self {
+            Probe::Present { root, .. } => Some(model::hooks_of(root)),
+            Probe::Missing { .. } => Some(json!({})),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn base(&self, kind: HookKind) -> Option<String> {
+        match self {
+            Probe::Present { bytes, root, .. } => Some(model::base_of(kind, Some((bytes, root)))),
+            Probe::Missing { .. } => Some(model::base_of(kind, None)),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn writable(&self) -> bool {
+        matches!(
+            self,
+            Probe::Present { .. } | Probe::Missing { reason: None, .. }
+        )
+    }
+}
+
+fn parent_is_dir(path: &Path) -> bool {
+    path.parent().is_some_and(Path::is_dir)
+}
+
+/// 只读探测：链接先解析到最终目标；断链/指向目录/非普通文件/读取失败/非 JSON 对象/
+/// hooks 结构非法一律 Blocked，绝不写。
+pub(crate) fn probe(target: &Target) -> Probe {
+    if !target.enabled {
+        return Probe::Disabled;
+    }
+    if let Some(reason) = &target.blocked {
+        return Probe::Blocked {
             exists: None,
-            reason: format!("{err:#}"),
+            reason: reason.clone(),
         };
     }
-    let meta = match check_symlink_metadata(abs_path) {
-        Ok(Some(meta)) => meta,
-        Ok(None) => return TargetProbe::Missing,
+    let real = match crate::native_agent_settings::resolve_write_target(&target.path) {
+        Ok(real) => real,
         Err(err) => {
-            return TargetProbe::Blocked {
-                exists: None,
+            return Probe::Blocked {
+                exists: Some(true),
                 reason: format!("{err:#}"),
             }
         }
     };
-    if !meta.is_file() {
-        return TargetProbe::Blocked {
-            exists: Some(true),
-            reason: "目标路径不是普通文件".to_string(),
+    let path = real.as_path();
+    if let Err(err) = validate_target_path(path) {
+        return Probe::Blocked {
+            exists: None,
+            reason: format!("{err:#}"),
         };
     }
-    let bytes = match std::fs::read(abs_path) {
+    match check_symlink_metadata(path) {
+        Ok(None) => {
+            let reason = (target.needs_existing_dir && !parent_is_dir(path)).then(|| {
+                "实例配置目录还不存在；先在实例页应用一次这个实例，再为它编辑 Hooks".to_string()
+            });
+            return Probe::Missing { reason, real };
+        }
+        Ok(Some(meta)) if !meta.is_file() => {
+            return Probe::Blocked {
+                exists: Some(true),
+                reason: "目标路径不是普通文件".to_string(),
+            }
+        }
+        Ok(Some(_)) => {}
+        Err(err) => {
+            return Probe::Blocked {
+                exists: None,
+                reason: format!("{err:#}"),
+            }
+        }
+    }
+    let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(err) => {
-            return TargetProbe::Blocked {
+            return Probe::Blocked {
                 exists: Some(true),
                 reason: format!("无法读取目标文件: {err}"),
             }
         }
     };
-    let json: Value = match serde_json::from_slice(&bytes) {
+    let root: Value = match serde_json::from_slice(&bytes) {
         Ok(value) => value,
         Err(_) => {
-            return TargetProbe::Blocked {
+            return Probe::Blocked {
                 exists: Some(true),
                 reason: "目标文件不是合法 JSON".to_string(),
             }
         }
     };
-    if !json.is_object() {
-        return TargetProbe::Blocked {
+    if !root.is_object() {
+        return Probe::Blocked {
             exists: Some(true),
             reason: "目标文件 JSON 不是对象".to_string(),
         };
     }
-    if let Err(err) = model::validate_target_hooks(&json) {
-        return TargetProbe::Blocked {
+    if let Err(err) = model::validate_target_hooks(&root) {
+        return Probe::Blocked {
             exists: Some(true),
             reason: format!("{err:#}"),
         };
     }
-    TargetProbe::Present { bytes, json }
+    Probe::Present { bytes, root, real }
 }
 
-/// 计算期望渲染（Claude 依赖现有内容；缺失/损坏按空 settings 渲染）。
-pub(crate) fn expected_render(
-    spec: &TargetSpec,
-    managed_hooks: &model::HookMap,
-    removed: &[model::RemovedRule],
-    current: Option<&Value>,
-) -> Value {
-    match spec.merge {
-        "signature-set" => model::claude_render(
-            current.unwrap_or(&Value::Object(Map::new())),
-            managed_hooks,
-            removed,
-        ),
-        _ => model::codex_render(managed_hooks),
+/// 同一 snapshot 读出的 policy 与旧来源；缺库时为内置 policy + 无旧来源（零写）。
+pub(crate) fn load_snapshot(ctx: &Context) -> Result<(Value, Rows)> {
+    match store::open_readonly(ctx)? {
+        Some(mut conn) => {
+            // 显式 Deferred 只读事务：两个读取在同一 SQLite snapshot 上执行，不抢写锁。
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)?;
+            let policy = store::policy_from_connection(&tx)?;
+            let rows = legacy::read_rows(&tx);
+            tx.commit()?;
+            Ok((policy, rows))
+        }
+        None => Ok((store::builtin_policy(), Rows::new())),
     }
 }
 
-fn freshness_json() -> Value {
-    json!({
-        "state": "not-applicable",
-        "current": Value::Null,
-        "upstream": Value::Null,
-        "checked_at": Value::Null,
-        "probe": "native",
-        "cache_age_sec": Value::Null,
-    })
-}
-
-fn sync_action() -> Value {
-    json!([{ "id": "sync", "risk": "write-local", "needs_lock": true, "offline_ok": true }])
-}
-
-fn build_element(ctx: &Context, snap: &Snapshot, spec: &TargetSpec) -> Result<Value> {
-    let enabled = target_enabled(&snap.policy, spec.agent_id);
-    let canonical = &snap.sources[spec.source_key];
-    let (managed_hooks, removed) = parse_source(spec, canonical)?;
-    let source_revision = crate::native_mcp::model::sha256_hex(canonical);
-    let managed_signatures = collect_signatures(&managed_hooks);
-    let managed_hook_count = managed_signatures.len() as u64;
-    let binding = snap.bindings.get(spec.target_id);
-    let applied_digest = binding.map(|b| b.applied_digest.clone());
-
-    let abs_target = ctx.home_dir.join(spec.target);
-    let abs_display = abs_target.display().to_string();
-
-    if !enabled {
-        // disabled：绝不探测路径。expected_digest 基于空 settings 计算，保持确定性。
-        let expected = expected_render(spec, &managed_hooks, &removed, None);
-        let expected_digest = model::digest_bytes(&model::render_bytes(&expected));
-        return Ok(json!({
-            "id": spec.target_id,
-            "domain": "hooks",
-            "spec": spec_json(spec),
-            "policy": { "enabled": false, "agent_id": spec.agent_id },
-            "observed": {
-                "target": abs_display,
-                "target_exists": Value::Null,
-                "expected_digest": expected_digest,
-                "applied_digest": applied_digest,
-                "actual_digest": Value::Null,
-                "source_revision": source_revision,
-                "blocked_reason": Value::Null,
-                "registration_needed": false,
-                "managed_hook_count": managed_hook_count,
-                "missing_signatures": 0,
-                "removed_signatures_present": 0,
-            },
-            "state": "disabled",
-            "freshness": freshness_json(),
-            "actions": [],
-        }));
-    }
-
-    let probe = probe_target(&abs_target);
-    let mut actual_digest_out = Value::Null;
-    let (
-        state,
-        target_exists,
-        blocked_reason,
-        registration_needed,
-        missing_signatures,
-        removed_present,
-        has_sync,
-        expected_digest,
-    ) = match probe {
-        TargetProbe::Blocked { exists, reason } => (
+fn element(target: &Target, rows: &Rows) -> Value {
+    let probe = probe(target);
+    let base = probe.base(target.kind);
+    let writable = probe.writable();
+    let hooks = probe.hooks();
+    let (state, exists, blocked_reason) = match &probe {
+        Probe::Disabled => ("disabled", Value::Null, None),
+        Probe::Missing { reason, .. } => ("missing", json!(false), reason.clone()),
+        Probe::Present { .. } => ("managed-ok", json!(true), None),
+        Probe::Blocked { exists, reason } => (
             "unmanaged-detected",
             exists.map_or(Value::Null, Value::Bool),
-            Value::String(reason),
-            false,
-            0u64,
-            0u64,
-            false,
-            {
-                let expected = expected_render(spec, &managed_hooks, &removed, None);
-                model::digest_bytes(&model::render_bytes(&expected))
+            Some(reason.clone()),
+        ),
+    };
+    // 建议只对能写的目标给：点了才能落地。
+    let (cleanup, legacy) = match (&hooks, writable) {
+        (Some(hooks), true) => (
+            model::cleanup_suggestions(target.kind, hooks)
+                .iter()
+                .map(model::Cleanup::to_json)
+                .collect::<Vec<_>>(),
+            if target.is_main() {
+                legacy::suggestions(rows, target.kind, hooks)
+                    .iter()
+                    .map(legacy::LegacyHook::to_json)
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
             },
         ),
-        TargetProbe::Missing => {
-            let expected = expected_render(spec, &managed_hooks, &removed, None);
-            let expected_digest = model::digest_bytes(&model::render_bytes(&expected));
-            if managed_signatures.is_empty() {
-                // 无 managed hooks（removed 仅清理已有文件）：不建空文件。
-                (
-                    "managed-ok",
-                    Value::Bool(false),
-                    Value::Null,
-                    false,
-                    0,
-                    0,
-                    false,
-                    expected_digest,
-                )
-            } else {
-                (
-                    "missing",
-                    Value::Bool(false),
-                    Value::Null,
-                    false,
-                    managed_hook_count,
-                    0,
-                    true,
-                    expected_digest,
-                )
-            }
-        }
-        TargetProbe::Present {
-            bytes,
-            json: current,
-        } => {
-            let actual_digest = model::digest_bytes(&bytes);
-            actual_digest_out = Value::String(actual_digest.clone());
-            let expected = expected_render(spec, &managed_hooks, &removed, Some(&current));
-            let expected_bytes = model::render_bytes(&expected);
-            let expected_digest = model::digest_bytes(&expected_bytes);
-            let hooks_value = current
-                .get("hooks")
-                .cloned()
-                .unwrap_or(Value::Object(Map::new()));
-            let present = collect_present_signatures(&hooks_value);
-            let missing = managed_signatures
-                .iter()
-                .filter(|s| !present.contains(s))
-                .count() as u64;
-            let removed_present = count_removed_present(&removed, &present) as u64;
-            // signature-set 目标只比本工具拥有的那部分 hook 条目；whole-file 目标
-            // 整个文件都归本工具，仍比整文件。旧绑定存的是整文件摘要，整文件没变
-            // 也照常放行（下次写入时自动升级），存量用户不会被误报一次。
-            let owned_digest = if spec.merge == "whole-file" {
-                actual_digest.clone()
-            } else {
-                model::managed_slice_digest(&current, &managed_signatures)
-            };
-            match binding {
-                Some(b) => {
-                    if owned_digest != b.applied_digest && actual_digest != b.applied_digest {
-                        (
-                            "unmanaged-detected",
-                            Value::Bool(true),
-                            Value::String("受管 hook 被外部修改，拒绝覆盖".to_string()),
-                            false,
-                            missing,
-                            removed_present,
-                            false,
-                            expected_digest,
-                        )
-                    } else if actual_digest != expected_digest {
-                        (
-                            "drifted",
-                            Value::Bool(true),
-                            Value::Null,
-                            false,
-                            missing,
-                            removed_present,
-                            true,
-                            expected_digest,
-                        )
-                    } else {
-                        (
-                            "managed-ok",
-                            Value::Bool(true),
-                            Value::Null,
-                            false,
-                            missing,
-                            removed_present,
-                            false,
-                            expected_digest,
-                        )
-                    }
-                }
-                None => {
-                    if spec.merge == "whole-file" {
-                        // Codex：仅当实际 JSON 语义与整文件期望相等才允许登记。
-                        if current == expected {
-                            (
-                                "drifted",
-                                Value::Bool(true),
-                                Value::Null,
-                                true,
-                                missing,
-                                removed_present,
-                                true,
-                                expected_digest,
-                            )
-                        } else {
-                            (
-                                "unmanaged-detected",
-                                Value::Bool(true),
-                                Value::String(
-                                    "这个文件里已经有本工具以外写的内容，不会覆盖它".to_string(),
-                                ),
-                                false,
-                                missing,
-                                removed_present,
-                                false,
-                                expected_digest,
-                            )
-                        }
-                    } else if current != expected {
-                        // Claude：按签名集合可安全合并有效 JSON。
-                        (
-                            "drifted",
-                            Value::Bool(true),
-                            Value::Null,
-                            false,
-                            missing,
-                            removed_present,
-                            true,
-                            expected_digest,
-                        )
-                    } else {
-                        (
-                            "drifted",
-                            Value::Bool(true),
-                            Value::Null,
-                            true,
-                            missing,
-                            removed_present,
-                            true,
-                            expected_digest,
-                        )
-                    }
-                }
-            }
-        }
+        _ => (Vec::new(), Vec::new()),
     };
-
-    let actions = if has_sync { sync_action() } else { json!([]) };
-    Ok(json!({
-        "id": spec.target_id,
+    let actions = if writable {
+        json!([{ "id": "write", "risk": "write-local", "needs_lock": true, "offline_ok": true }])
+    } else {
+        json!([])
+    };
+    json!({
+        "id": target.id,
         "domain": "hooks",
-        "spec": spec_json(spec),
-        "policy": { "enabled": true, "agent_id": spec.agent_id },
+        "spec": target.spec_json(),
+        "policy": { "enabled": target.enabled, "agent_id": target.agent_id },
         "observed": {
-            "target": abs_display,
-            "target_exists": target_exists,
-            "expected_digest": expected_digest,
-            "applied_digest": applied_digest,
-            "actual_digest": actual_digest_out,
-            "source_revision": source_revision,
+            "target": target.path.display().to_string(),
+            "target_exists": exists,
+            "hooks": hooks,
+            "hook_count": hooks.as_ref().map(model::hook_count).unwrap_or(0),
+            "base": base,
+            "cleanup": cleanup,
+            "legacy": legacy,
             "blocked_reason": blocked_reason,
-            "registration_needed": registration_needed,
-            "managed_hook_count": managed_hook_count,
-            "missing_signatures": missing_signatures,
-            "removed_signatures_present": removed_present,
         },
         "state": state,
-        "freshness": freshness_json(),
+        "freshness": {
+            "state": "not-applicable",
+            "current": Value::Null,
+            "upstream": Value::Null,
+            "checked_at": Value::Null,
+            "probe": "native",
+            "cache_age_sec": Value::Null,
+        },
         "actions": actions,
-    }))
-}
-
-fn spec_json(spec: &TargetSpec) -> Value {
-    json!({
-        "name": spec.name,
-        "merge": spec.merge,
-        "source_key": spec.source_key,
-        "target": format!("~/{}", spec.target),
     })
 }
 
 pub(crate) fn build_status(ctx: &Context) -> Result<Value> {
-    let snap = load_snapshot(ctx)?;
-    let mut elements = Vec::new();
-    for spec in model::targets() {
-        elements.push(build_element(ctx, &snap, &spec)?);
-    }
-    Ok(json!({
-        "domain": "hooks",
-        "elements": elements,
-    }))
+    let (policy, rows) = load_snapshot(ctx)?;
+    let elements: Vec<Value> = model::resolve_targets(ctx, &policy)
+        .iter()
+        .map(|target| element(target, &rows))
+        .collect();
+    Ok(json!({ "domain": "hooks", "elements": elements }))
 }

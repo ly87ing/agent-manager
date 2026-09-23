@@ -1,6 +1,6 @@
 import { useState, useRef, type KeyboardEvent } from "react";
 import RulesPage from "./RulesPage";
-import DomainApplyPage from "./DomainApplyPage";
+import HooksPage from "./HooksPage";
 import { cn } from "../lib/utils";
 
 const TABS = [
@@ -79,15 +79,7 @@ export default function RulesHooksPage() {
         tabIndex={0}
         className="focus:outline-none"
       >
-        {activeTab === "rules" ? (
-          <RulesPage />
-        ) : (
-          <DomainApplyPage
-            domain="hooks"
-            title="Hooks"
-            description="助手钩子定义的写入与同步状态。"
-          />
-        )}
+        {activeTab === "rules" ? <RulesPage /> : <HooksPage />}
       </div>
     </div>
   );

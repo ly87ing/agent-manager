@@ -335,6 +335,46 @@ export interface RulesObserved {
 
 export type { RuleTemplate, RuleRecommended } from "./contract";
 
+// ---------- hooks ----------
+
+export interface HooksSpec {
+  name: string;
+  group: "global-hooks" | "profile-hooks" | string;
+  kind: "claude" | "codex" | string;
+  /** hooks-key：只改 settings.json 的 hooks 键；whole-file：hooks.json 整份。 */
+  scope: "hooks-key" | "whole-file" | string;
+  profile_id: string | null;
+  /** 展示路径（~/...）。 */
+  target: string;
+}
+
+/** 一条清理建议：实际 hooks 里命中内置旧签名的 hook。 */
+export interface HookCleanupSuggestion {
+  id: string;
+  event: string;
+  matcher: string | null;
+  command: string;
+}
+
+/** 一条旧版本保存、还没生效的 hook。 */
+export interface HookLegacySuggestion extends HookCleanupSuggestion {
+  source_key: string;
+}
+
+export interface HooksObserved {
+  /** 绝对路径。 */
+  target: string;
+  target_exists: boolean | null;
+  /** 实际 hooks（事件 → 条目数组）；已停用或不能安全读取时为 null。 */
+  hooks: Record<string, unknown> | null;
+  hook_count: number;
+  /** 写入基准；没有 hooks 为 "missing"；已停用或不能读写时为 null。 */
+  base: string | null;
+  cleanup: HookCleanupSuggestion[];
+  legacy: HookLegacySuggestion[];
+  blocked_reason: string | null;
+}
+
 // ---------- secrets ----------
 
 export interface SecretsEnvVariable {

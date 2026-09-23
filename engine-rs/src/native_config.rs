@@ -4,6 +4,10 @@
 //! 备份只带已保存的规则模板（`rule_templates`）。旧备份里的 `rules.*` 来源仍接受，
 //! 按旧规则渲染转换成「旧规则来源」模板。
 //!
+//! hooks 同样以各助手的实际配置为准，不进备份。只有旧版本保存、还没加入实际配置的
+//! hooks（`hook_sources` 里仍有候选的行）以 `hooks.*` 来源导出；导入 `hooks.*`（含旧备份）
+//! 写回旧表，在 hooks 页作为「旧版已保存的 hooks（未生效）」出现，不改任何助手文件。
+//!
 //! 导出只读零写；导入是整体替换，走与逐条保存相同的校验闸门（疑似凭据拒绝、
 //! MCP 定义校验、来源结构校验），并在一个事务里完成——要么整份生效，要么原样不动。
 //!
@@ -22,6 +26,7 @@ use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
 use crate::native::{Context, Request};
+use crate::native_hooks::model as hooks_model;
 use crate::native_mcp::saved::{self as mcp_saved, SavedRow};
 use crate::native_rules::templates::{self, Template};
 use crate::native_sources;
@@ -30,21 +35,26 @@ use crate::store;
 /// 备份格式标识：导入时严格比对，不认识的格式直接拒绝而不是尽力解析。
 const FORMAT: &str = "agent-manager/config-backup/v1";
 
-/// 参与备份的来源键，顺序固定，便于逐份比对。
+/// 参与备份的来源键，顺序固定，便于逐份比对。hooks.* 只在有旧版本保存的 hooks 时出现。
 const SOURCE_KEYS: &[&str] = &[
-    native_sources::KEY_HOOKS_CLAUDE,
-    native_sources::KEY_HOOKS_CODEX,
+    hooks_model::LEGACY_KEY_CLAUDE,
+    hooks_model::LEGACY_KEY_CODEX,
     native_sources::KEY_ALIAS_SHELL,
 ];
 
 fn collect_sources(ctx: &Context) -> Result<Map<String, Value>> {
-    let hooks = native_sources::current_hook_sources_readonly(ctx)?;
+    let legacy_hooks = crate::native_hooks::legacy::exportable(
+        &crate::native_hooks::legacy::read_rows_readonly(ctx)?,
+    );
     let alias = native_sources::current_alias_source_readonly(ctx)?;
     let mut out = Map::new();
     for key in SOURCE_KEYS {
         let text = match *key {
             native_sources::KEY_ALIAS_SHELL => alias.clone(),
-            k => hooks.get(k).cloned().unwrap_or_default(),
+            k => match legacy_hooks.get(k) {
+                Some(text) => text.clone(),
+                None => continue,
+            },
         };
         out.insert((*key).to_string(), Value::String(text));
     }
@@ -176,7 +186,7 @@ fn validate_payload(payload: &Value) -> Result<Payload> {
             let map = parsed
                 .as_object()
                 .ok_or_else(|| anyhow::anyhow!("来源 {key} 不是 JSON 对象"))?;
-            crate::native_hooks::model::validate_source(key, map)?;
+            hooks_model::validate_source(key, map)?;
         } else if key == native_sources::KEY_ALIAS_SHELL {
             let parsed: Value = serde_json::from_str(text)
                 .map_err(|_| anyhow::anyhow!("来源 {key} 不是合法 JSON"))?;
@@ -268,7 +278,16 @@ pub(crate) fn import(ctx: &Context, req: &Request) -> Result<Value> {
     let mut restored = Vec::new();
     for (key, value) in &payload.sources {
         let text = value.as_str().unwrap_or("");
-        native_sources::write_source_in_tx(&tx, key, text)?;
+        if key.starts_with("hooks.") {
+            // 旧版本保存的 hooks：写回旧表，作为未生效建议出现（校验已在 validate_payload 做过）
+            let parsed: Value = serde_json::from_str(text)?;
+            let map = parsed
+                .as_object()
+                .ok_or_else(|| anyhow::anyhow!("来源 {key} 不是 JSON 对象"))?;
+            crate::native_hooks::legacy::write_row_in_tx(&tx, key, map)?;
+        } else {
+            native_sources::write_source_in_tx(&tx, key, text)?;
+        }
         restored.push(key.clone());
     }
     let now = templates::now();

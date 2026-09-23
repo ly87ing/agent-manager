@@ -38,6 +38,7 @@ const MSG_UNSUPPORTED: &str = "当前来源或环境不受支持";
 const MSG_ABNORMAL: &str = "状态数据异常";
 const MSG_DOMAIN_FAILED: &str = "状态查询失败（已脱敏）";
 const MSG_RULES_ABSENT: &str = "还没有规则文件";
+const MSG_HOOKS_ABSENT: &str = "还没有 Hooks 配置文件";
 
 fn entry(name: &str, status: &str, message: &str, category: Option<&str>) -> Value {
     let mut map = Map::new();
@@ -104,13 +105,19 @@ fn wired_section(ctx: &Context, domain: &str, offline: bool) -> Vec<Value> {
                     let state = element.get("state").and_then(Value::as_str);
                     let item =
                         map_element_entry(element.get("id").and_then(Value::as_str), state, domain);
-                    // 规则以实际文件为准：没有规则文件是正常的空状态，不是待生成的产物
-                    if domain == "rules" && state == Some("missing") && item["status"] == "warning"
+                    // 规则与 hooks 以实际文件为准：没有文件是正常的空状态，不是待生成的产物
+                    let absent = match domain {
+                        "rules" => Some(MSG_RULES_ABSENT),
+                        "hooks" => Some(MSG_HOOKS_ABSENT),
+                        _ => None,
+                    };
+                    if let Some(message) =
+                        absent.filter(|_| state == Some("missing") && item["status"] == "warning")
                     {
                         return entry(
                             item["name"].as_str().unwrap_or(domain),
                             "notice",
-                            MSG_RULES_ABSENT,
+                            message,
                             None,
                         );
                     }

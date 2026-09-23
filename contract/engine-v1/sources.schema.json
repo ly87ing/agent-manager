@@ -1,5 +1,5 @@
 {
-  "description": "sources.get 和 sources.set 的 data（hooks.* 与 aliases.shell；规则来源 rules.* 已退役，规则见 rules.status 的 templates）。get 返回可编辑来源；set 返回保存后读回的单个来源。",
+  "description": "sources.get 和 sources.set 的 data（aliases.shell；规则来源 rules.* 与 hooks 来源 hooks.* 已退役，规则见 rules.status 的 templates，hooks 见 hooks.status 的实际配置）。get 返回可编辑来源；set 返回保存后读回的单个来源。",
   "type": "object",
   "required": ["sources"],
   "additionalProperties": false,

@@ -117,15 +117,16 @@ function skillSyncOf(element: EngineElement): Pick<OverviewItem, "sync" | "syncA
 }
 
 /**
- * 规则的同步轴。规则以各助手的规则文件为准，没有「该写成什么样」的库内期望，
- * 因此永远不算待同步：有文件就是已到位，没有文件是没装，读写不了的要你决定。
+ * 规则与 Hooks 的同步轴。两者都以各助手的实际文件为准，没有「该写成什么样」的库内期望，
+ * 因此永远不算待同步（Hooks 的清理建议与旧版未生效建议也不算）：有文件就是已到位，
+ * 没有文件是没装，读写不了的要你决定。
  */
-function rulesSyncOf(element: EngineElement): Pick<OverviewItem, "sync" | "reason"> {
+function fileSyncOf(element: EngineElement, fallback: string): Pick<OverviewItem, "sync" | "reason"> {
   if (element.state === "disabled") return { sync: "disabled" };
   if (element.state === "managed-ok") return { sync: "ok" };
   if (element.state === "missing") return { sync: "absent" };
   const reason = (element.observed as { blocked_reason?: string | null }).blocked_reason;
-  return { sync: "decision", reason: reason ?? "规则文件不能安全读写" };
+  return { sync: "decision", reason: reason ?? fallback };
 }
 
 function itemOf(element: EngineElement, name: string): OverviewItem {
@@ -147,7 +148,8 @@ function itemOf(element: EngineElement, name: string): OverviewItem {
     usageStale: usage ? isStale(usage.checked_at) : false,
   };
   if (element.domain === "skills") return { ...base, ...skillSyncOf(element) };
-  if (element.domain === "rules") return { ...base, ...rulesSyncOf(element) };
+  if (element.domain === "rules") return { ...base, ...fileSyncOf(element, "规则文件不能安全读写") };
+  if (element.domain === "hooks") return { ...base, ...fileSyncOf(element, "Hooks 配置文件不能安全读写") };
   const observed = element.observed as { agents?: Record<string, Cell>; blocked_reason?: string | null };
 
   // MCP 的实际条目就是当前配置，没有「待同步」：有助手启用着就算到位，否则是停用

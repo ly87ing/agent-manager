@@ -15,7 +15,7 @@
 | 本地结构化诊断日志与清理 | 已退役（2026-09-19 裁决）：JSONL 诊断日志、`logs:clear` 与 envelope `log_file` 一并移除；错误消息出库前仍统一脱敏，排查依赖 `operation_logs` |
 | MCP 原生域 | 2026-09-22 改为「实际条目为主」，待主审验收：`mcp:status` 直接列出各助手配置文件里的 stdio 与远程条目（脱敏、原样保留未建模字段、给出条目摘要），`mcp:apply` 逐条 add/edit/enable/disable/remove/copy/forget，写前按摘要 CAS、外部修改报「已在外部修改」；Codex/OpenCode 用官方 `enabled` 停用，Claude 停用移出条目并存快照（疑似凭据转存外部密钥文件）；旧服务库与分配表在首次写入时迁移，迁移不改配置文件；status 只读零写，apply 具备锁、审计、回读与条件回滚 |
 | Rules 原生域 | 已完成（2026-09-22 改为实际文件为准）：`rules:status` 输出主 Codex/Claude 与各实例规则文件的实际全文与写入基准；`rules:apply` 按 `--base` 直接编辑，或应用模板/内置推荐/复制另一目标（覆盖前回填备份）；模板存 `rule_templates`；status 只读零写；apply 具备排他锁、审计与 CAS/回滚，外部修改时拒绝并提示刷新 |
-| Hooks 原生域 | 已完成：Rust dispatcher 已接入 `hooks:status` / 真实 `hooks:apply`；hooks 专用 `sources:get/set`（hooks.claude/hooks.codex）revision CAS 只写 SQLite；固定 Claude `~/.claude/settings.json` signature-set 合并与 Codex `~/.codex/hooks.json` whole-file 两目标，外部修改 fail-closed |
+| Hooks 原生域 | 以实际配置为准：`hooks:status` 输出主 Claude（settings.json 的 `hooks` 键）、主 Codex（`~/.codex/hooks.json`）与各实例的实际 hooks 和 `base`；`hooks:apply` 带 `--base` 直接编辑、清理一条建议或加入一条旧版 hook，外部修改即拒绝（「已在外部修改」）；内置旧签名只作清理建议，旧 `hook_sources` 未生效的 hooks 作建议，可加入或 `hooks:discard-legacy` 丢弃；hooks 专用 `sources:get/set` 已退役，实例不再由 profiles 渲染 hooks |
 | 定义编辑原文保存 | 已完成（`5ae995b`）：SourceDefinitionsPanel 禁用文本框自动替换并有单测，Rules/Hooks 原文保存不被 smart quotes 等自动改写 |
 | 系统审计 | 已完成：Rust dispatcher 已接入只读 `system:audit`；聚合 agents/skills/mcp/rules/hooks/aliases/secrets 与 runtime/storage 状态 |
 | 密钥状态 | 已完成：`secrets:status` 只读输出变量名、来源与布尔状态；用户显式选择权限为 `600` 的外部 `.env` 文件，数据库只存路径，`secrets:set` 与 MCP 停用时的密钥转存只写文件，配置备份不含路径或取值；历史数据库值需显式确认迁移，写入成功后才删旧表；变量行来自各助手实际 MCP 条目与停用快照，字面量不列出、不回显 |

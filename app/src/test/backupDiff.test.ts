@@ -81,6 +81,8 @@ describe("备份导入差异", () => {
     expect(sourceLabel("aliases.shell")).toBe("终端快捷命令");
     expect(sourceLabel("unknown.key")).toBe("unknown.key");
     expect(sourceLabel("rules.shared")).toContain("导入后转为模板");
+    // hooks 以实际配置为准：备份里的 hooks.* 只是旧版保存、还没生效的那些
+    expect(sourceLabel("hooks.claude")).toContain("未生效");
   });
 
   it("备份带规则模板时按名称比正文，报出新增、改动与消失", () => {

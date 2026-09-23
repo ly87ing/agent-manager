@@ -259,6 +259,45 @@ describe("buildOverview 规则", () => {
   });
 });
 
+describe("buildOverview Hooks", () => {
+  it("Hooks 以实际配置为准：有清理建议或旧版未生效建议也不算待同步，不进一键同步", () => {
+    const write = [makeAction("write")];
+    const groups = buildOverview({
+      hooks: status("hooks", [
+        makeElement({
+          id: "hooks:claude",
+          domain: "hooks",
+          spec: { name: "Claude Code Hooks" },
+          observed: {
+            cleanup: [{ id: "cleanup-0123456789abcdef", event: "Stop", matcher: null, command: "old.sh" }],
+            legacy: [{ id: "legacy-0123456789abcdef", source_key: "hooks.claude", event: "Stop", matcher: null, command: "x" }],
+          },
+          state: "managed-ok",
+          actions: write,
+        }),
+        makeElement({ id: "hooks:codex", domain: "hooks", spec: { name: "Codex Hooks" }, state: "missing", actions: write }),
+        makeElement({
+          id: "hooks:profile:cc-link",
+          domain: "hooks",
+          spec: { name: "Claude link 实例 Hooks" },
+          observed: { blocked_reason: "目标路径是符号链接，拒绝操作以保证安全" },
+          state: "unmanaged-detected",
+        }),
+        // 旧形态（drifted + sync）在别的域会算待同步；hooks 不再有库内期望，不能进一键同步
+        makeElement({ id: "hooks:profile:cc-odd", domain: "hooks", spec: { name: "odd" }, state: "drifted", actions: [makeAction("sync")] }),
+      ]),
+    });
+    const hooks = groups.find((group) => group.domain === "hooks");
+    expect(hooks?.items.map((item) => [item.id, item.sync, item.reason ?? null])).toEqual([
+      ["hooks:claude", "ok", null],
+      ["hooks:codex", "absent", null],
+      ["hooks:profile:cc-link", "decision", "目标路径是符号链接，拒绝操作以保证安全"],
+      ["hooks:profile:cc-odd", "decision", "Hooks 配置文件不能安全读写"],
+    ]);
+    expect(syncableOf(groups)).toEqual([]);
+  });
+});
+
 describe("syncableOf", () => {
   it("快捷命令整块写入，多条待同步只执行一次 apply", () => {
     const groups = buildOverview({

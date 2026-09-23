@@ -37,7 +37,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / agents:configure|check / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / sources:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / hooks:discard-legacy / agents:configure|check / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / sources:* / db:*）"
             ),
         )
     };
@@ -57,6 +57,8 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("config", "export" | "import") => true,
         // 规则模板只写库：保存与删除，不动规则文件
         ("rules", "save-template" | "delete-template") => true,
+        // 丢弃旧版本保存的 hooks：只写库，不动助手文件
+        ("hooks", "discard-legacy") => true,
         // 运行参数写助手自己的配置文件：与装卸升级的 apply 分开，那条走 shell 命令
         ("agents", "configure") => true,
         // 接入配置可用性检查：会联网，但只在界面上点它时才发
@@ -104,8 +106,10 @@ enum ArgValueKind {
     Digest,
     /// 规则正文（整份文件内容）：任意文本，换行等照常；NUL 等内容规则由引擎判定。
     RuleText,
-    /// 规则写入的 CAS 基准：64 位小写 sha256，或文件不存在时的 missing。
+    /// 规则与 Hooks 写入的 CAS 基准：64 位小写 sha256，或没有内容时的 missing。
     RuleBase,
+    /// Hooks 建议 id：cleanup-/legacy- 前缀加 16 位小写十六进制（引擎再校验前缀与来源）。
+    SuggestionId,
     /// 规则模板 id：小写字母、数字与连字符。
     TemplateId,
     /// 规则模板名称：不含控制字符（换行也不行），长度有上限。
@@ -146,6 +150,15 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--revision", ArgValueKind::Revision));
         }
         ("rules", "delete-template") => specs.push(("--template", ArgValueKind::TemplateId)),
+        // Hooks 以实际配置为准：写一个目标，base 做 CAS；新 hooks 三选一（引擎再强制恰好一个）
+        ("hooks", "apply") => {
+            specs.push(("--only", ArgValueKind::ElementId));
+            specs.push(("--base", ArgValueKind::RuleBase));
+            specs.push(("--value", ArgValueKind::JsonValue));
+            specs.push(("--cleanup", ArgValueKind::SuggestionId));
+            specs.push(("--legacy", ArgValueKind::SuggestionId));
+        }
+        ("hooks", "discard-legacy") => specs.push(("--legacy", ArgValueKind::SuggestionId)),
         // 只读发现：--only 取域名（agents/skills/mcp），引擎侧再做词汇表校验
         ("system", "discover") => specs.push(("--only", ArgValueKind::ElementId)),
         ("runs", "get") => {
@@ -206,9 +219,9 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
                 specs.push(("--to-base", ArgValueKind::Digest));
                 specs.push(("--replace", ArgValueKind::Flag));
             }
-            // 受管目标被外部改过时的显式接管通道：hooks 整文件替换、
-            // aliases 换整个受管区块，引擎侧再强制「须恰好选中一个目标」。
-            if matches!(domain, "hooks" | "aliases") {
+            // 受管目标被外部改过时的显式接管通道：aliases 换整个受管区块，
+            // 引擎侧再强制「须恰好选中一个目标」。
+            if domain == "aliases" {
                 specs.push(("--allow-takeover", ArgValueKind::Flag));
             }
             // 实例配置文件由本工具全权拥有：已有他人内容时需显式接管
@@ -357,6 +370,21 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
                 ))
             }
         }
+        ArgValueKind::SuggestionId => {
+            let ok = ["cleanup-", "legacy-"].iter().any(|prefix| {
+                value.strip_prefix(prefix).is_some_and(|hex| {
+                    hex.len() == 16
+                        && hex
+                            .chars()
+                            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+                })
+            });
+            if ok {
+                Ok(())
+            } else {
+                Err(EngineError::new("invalid_args", "非法 Hooks 建议 id"))
+            }
+        }
         ArgValueKind::Revision => {
             if is_sha256_hex(value) {
                 Ok(())
@@ -444,12 +472,29 @@ fn is_rules_target(value: &str) -> bool {
     })
 }
 
+/// Hooks 目标 id：两个主助手目标，或 `hooks:profile:<实例 id>`。
+fn is_hooks_target(value: &str) -> bool {
+    if value == "hooks:claude" || value == "hooks:codex" {
+        return true;
+    }
+    value.strip_prefix("hooks:profile:").is_some_and(|id| {
+        id.chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+            && id
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    })
+}
+
 pub fn validate_args(command: &str, args: &[String]) -> Result<(), EngineError> {
     let specs = allowed_arg_specs(command);
     let (domain, _) = command.split_once(':').unwrap_or(("", ""));
     let is_rules = domain == "rules";
-    // sources 与 rules 同 native 严格参数保持一致：拒绝重复 flag。
-    let reject_duplicates = matches!(command, "sources:get" | "sources:set") || is_rules;
+    let is_hooks = domain == "hooks";
+    // sources、rules 与 hooks 同 native 严格参数保持一致：拒绝重复 flag。
+    let reject_duplicates =
+        matches!(command, "sources:get" | "sources:set") || is_rules || is_hooks;
     let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let mut index = 0;
     while index < args.len() {
@@ -480,6 +525,14 @@ pub fn validate_args(command: &str, args: &[String]) -> Result<(), EngineError> 
                     "invalid_args",
                     format!(
                         "非法 rules 目标 '{value}'（仅 rules:codex_global|rules:claude_global|rules:profile:<实例>）"
+                    ),
+                ));
+            }
+            if is_hooks && arg == "--only" && !is_hooks_target(value) {
+                return Err(EngineError::new(
+                    "invalid_args",
+                    format!(
+                        "非法 hooks 目标 '{value}'（仅 hooks:claude|hooks:codex|hooks:profile:<实例>）"
                     ),
                 ));
             }
@@ -556,6 +609,7 @@ mod tests {
             "rules:delete-template",
             "hooks:status",
             "hooks:apply",
+            "hooks:discard-legacy",
             "aliases:status",
             "aliases:apply",
             "profiles:status",
@@ -733,12 +787,12 @@ mod tests {
                     "mcp.enabled".into(),
                 ],
             ),
-            ("sources:get", vec!["--key".into(), "hooks.claude".into()]),
+            ("sources:get", vec!["--key".into(), "aliases.shell".into()]),
             (
                 "sources:set",
                 vec![
                     "--key".into(),
-                    "hooks.claude".into(),
+                    "aliases.shell".into(),
                     "--value".into(),
                     "{}".into(),
                 ],
@@ -929,19 +983,6 @@ mod tests {
             "mcp:apply 已不再接受 --allow-takeover"
         );
         assert!(validate_command("secrets:adopt").is_err());
-        // hooks:apply 同样放行（单目标显式接管，引擎侧再强制 --only 约束）
-        assert!(
-            validate_args(
-                "hooks:apply",
-                &[
-                    "--only".into(),
-                    "hooks:codex".into(),
-                    "--allow-takeover".into()
-                ]
-            )
-            .is_ok(),
-            "hooks:apply --allow-takeover should pass"
-        );
         // aliases:apply 同样放行：受管区块被外部改过时的唯一出路
         assert!(
             validate_args(
@@ -988,6 +1029,15 @@ mod tests {
                 ],
             ),
             ("aliases:status", vec!["--allow-takeover".into()]),
+            // hooks 以实际配置为准，同样没有「接管」
+            (
+                "hooks:apply",
+                vec![
+                    "--only".into(),
+                    "hooks:codex".into(),
+                    "--allow-takeover".into(),
+                ],
+            ),
         ] {
             assert!(
                 validate_args(command, &args).is_err(),
@@ -1125,6 +1175,91 @@ mod tests {
             assert!(
                 validate_args(command, &args).is_err(),
                 "{command} {args:?} should fail"
+            );
+        }
+    }
+
+    #[test]
+    fn hooks_args_follow_the_actual_config_contract() {
+        let base = "a".repeat(64);
+        let args = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        for (command, list) in [
+            (
+                "hooks:apply",
+                args(&[
+                    "--only",
+                    "hooks:claude",
+                    "--base",
+                    &base,
+                    "--value",
+                    r#"{"Stop":[{"hooks":[{"type":"command","command":"x"}]}]}"#,
+                ]),
+            ),
+            (
+                "hooks:apply",
+                args(&[
+                    "--only",
+                    "hooks:profile:cc-ly",
+                    "--base",
+                    "missing",
+                    "--cleanup",
+                    "cleanup-0123456789abcdef",
+                ]),
+            ),
+            (
+                "hooks:apply",
+                args(&[
+                    "--only",
+                    "hooks:codex",
+                    "--base",
+                    "missing",
+                    "--legacy",
+                    "legacy-0123456789abcdef",
+                ]),
+            ),
+            (
+                "hooks:discard-legacy",
+                args(&["--legacy", "legacy-0123456789abcdef"]),
+            ),
+        ] {
+            assert!(
+                validate_args(command, &list).is_ok(),
+                "{command} {list:?} should pass"
+            );
+        }
+        for (command, list) in [
+            ("hooks:status", args(&["--offline"])),
+            (
+                "hooks:apply",
+                args(&["--only", "hooks:nope", "--base", "missing"]),
+            ),
+            ("hooks:apply", args(&["--only", "rules:claude_global"])),
+            (
+                "hooks:apply",
+                args(&["--only", "hooks:claude", "--only", "hooks:codex"]),
+            ),
+            (
+                "hooks:apply",
+                args(&["--only", "hooks:claude", "--base", "nothex"]),
+            ),
+            (
+                "hooks:apply",
+                args(&["--only", "hooks:claude", "--value", "{not json"]),
+            ),
+            (
+                "hooks:apply",
+                args(&["--only", "hooks:claude", "--cleanup", "cleanup-xyz"]),
+            ),
+            (
+                "hooks:apply",
+                args(&["--only", "hooks:claude", "--dry-run"]),
+            ),
+            ("hooks:discard-legacy", args(&["--legacy", "Bad"])),
+            ("hooks:discard-legacy", args(&["--only", "hooks:claude"])),
+        ] {
+            assert!(
+                validate_args(command, &list).is_err(),
+                "{command} {list:?} should fail"
             );
         }
     }
@@ -1278,12 +1413,12 @@ mod tests {
 
     #[test]
     fn sources_args_match_native_strictness() {
-        assert!(validate_args("sources:get", &["--key".into(), "hooks".into()]).is_ok());
+        assert!(validate_args("sources:get", &["--key".into(), "aliases".into()]).is_ok());
         assert!(validate_args(
             "sources:set",
             &[
                 "--key".into(),
-                "hooks.claude".into(),
+                "aliases.shell".into(),
                 "--value".into(),
                 "{\"revision\":\"r\",\"value\":\"v\"}".into(),
             ]
@@ -1295,16 +1430,16 @@ mod tests {
                 "sources:get",
                 vec![
                     "--key".into(),
-                    "hooks".into(),
+                    "aliases".into(),
                     "--key".into(),
-                    "hooks".into(),
+                    "aliases".into(),
                 ],
             ),
             (
                 "sources:set",
                 vec![
                     "--key".into(),
-                    "hooks.claude".into(),
+                    "aliases.shell".into(),
                     "--value".into(),
                     "{}".into(),
                     "--value".into(),
@@ -1333,14 +1468,14 @@ mod tests {
         let env = dispatch_native(
             c(),
             "sources:get".into(),
-            vec!["--key".into(), "hooks".into()],
+            vec!["--key".into(), "aliases".into()],
             "sources-offline".into(),
         )
         .unwrap();
         assert!(env.ok, "{:?}", env.errors);
         assert!(!env.mode.offline, "sources 不注入 --offline");
-        // hooks 来源两项：claude、codex（规则来源已退役）
-        assert_eq!(env.data["sources"].as_array().unwrap().len(), 2);
+        // 只剩 aliases 来源（规则与 hooks 来源已退役）
+        assert_eq!(env.data["sources"].as_array().unwrap().len(), 1);
         assert!(!root.join("data").exists(), "sources:get 零写");
         let _ = std::fs::remove_dir_all(root);
     }

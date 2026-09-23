@@ -8,7 +8,7 @@ import { useDialogFocus } from "../lib/dialogFocus";
 
 type Source = { key: string; label: string; value: string | Record<string, unknown>; revision: string; format: "text" | "json" };
 
-export function SourceDefinitionsPanel({ domain }: { domain: "hooks" | "aliases" }) {
+export function SourceDefinitionsPanel({ domain }: { domain: "aliases" }) {
   const query = useQuery({ queryKey: [...engineKeys.command("sources:get"), domain], queryFn: () => runEngine<{ sources: Source[] }>("sources:get", ["--key", domain]) });
   const [editing, setEditing] = useState<Source | null>(null);
   const [text, setText] = useState("");

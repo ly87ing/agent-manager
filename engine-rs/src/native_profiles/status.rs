@@ -69,7 +69,6 @@ fn element(
     // 逐个受管文件报状态：没渲染出来（来源损坏等）就只报目录层信息，不谎报就绪
     let rendered = config_dir.as_ref().and_then(|dir| {
         model::render_all(
-            ctx,
             def,
             &|file| std::fs::read(dir.join(file)).ok(),
             &crate::secret_values::lookup,
@@ -83,19 +82,17 @@ fn element(
         for target in targets {
             let path = dir.join(&target.file);
             let bytes = std::fs::read(&path).ok();
-            // settings.json 合并写入，只比本工具拥有的键（env/model/hooks）；其余文件
-            // 整份归本工具，比整文件。旧绑定记的是整文件摘要，也照常认。
-            let actual_owned = bytes
-                .as_ref()
-                .map(|b| super::model::owned_slice_digest(&target.file, b));
-            let actual_whole = bytes.as_ref().map(|b| sha256_hex_bytes(b));
-            let actual = actual_whole.clone();
+            // settings.json 合并写入，只比本工具拥有的键（env/model）；其余文件
+            // 整份归本工具，比整文件。旧绑定的整文件摘要与含 hooks 的旧摘要也照常认。
+            let actual = bytes.as_ref().map(|b| sha256_hex_bytes(b));
             let known = bindings
                 .get(&(def.id.clone(), target.file.clone()))
                 .map(|b| b.applied_digest.as_str());
             let expected = sha256_hex_bytes(&target.content);
-            let ours_unchanged = match (&actual_owned, &actual_whole, known) {
-                (Some(owned), Some(whole), Some(known)) => owned == known || whole == known,
+            let ours_unchanged = match (&bytes, known) {
+                (Some(bytes), Some(known)) => {
+                    super::model::ours_unchanged(&target.file, bytes, known, &target.content)
+                }
                 _ => false,
             };
             let state = match (&actual, known) {

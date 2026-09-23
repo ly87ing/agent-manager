@@ -85,8 +85,9 @@ const SOURCE_LABELS: Record<string, string> = {
   "rules.shared": "旧规则来源（共享，导入后转为模板）",
   "rules.claude": "旧规则来源（Claude 专用，导入后转为模板）",
   "rules.codex": "旧规则来源（Codex 专用，导入后转为模板）",
-  "hooks.claude": "Claude Hooks",
-  "hooks.codex": "Codex Hooks",
+  // 旧版本保存、还没生效的 hooks：导入后在 Hooks 页作为未生效建议出现，不改实际配置
+  "hooks.claude": "旧版已保存的 Claude Hooks（未生效）",
+  "hooks.codex": "旧版已保存的 Codex Hooks（未生效）",
   "aliases.shell": "终端快捷命令",
 };
 

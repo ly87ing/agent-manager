@@ -16,17 +16,15 @@ use anyhow::{bail, Result};
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 
-use crate::native::Context;
-
 /// Codex 叠加配置的固定名字：文件名与 `-p` 参数取值必须一致。
 pub(crate) const CODEX_PROFILE_NAME: &str = "agent-manager";
 const CODEX_PROFILE_FILE: &str = "agent-manager.config.toml";
 
 /// 实例配置目录里由本工具维护的文件。
-///
-/// Hooks 的主实例目标是固定路径（`~/.claude`、`~/.codex`），不随实例走；实例目录下的
-/// 配置与 Hooks 文件因此由 profiles 域一并渲染。
 pub(crate) const FILE_CLAUDE_SETTINGS: &str = "settings.json";
+
+/// 实例目录下的 hooks：以实际文件为准，归 hooks 域作为 hooks 目标直接编辑。
+/// profiles 域不渲染 hooks.json，也不碰 settings.json 的 `hooks` 键。
 pub(crate) const FILE_CODEX_HOOKS: &str = "hooks.json";
 
 /// 实例目录下的规则文件：以实际文件为准，归 rules 域作为规则目标直接编辑，
@@ -358,15 +356,14 @@ pub(crate) fn load_definitions(policy: &Value) -> Vec<Result<ProfileDef>> {
     out
 }
 
-/// 本工具在实例 settings.json 里真正拥有的键：env / model / hooks。
+/// 本工具在实例 settings.json 里真正拥有的键：env / model。`hooks` 归 hooks 域，
 /// 其余根级字段是用户自己的（合并写入时原样保留），因此外部修改检测不该看它们。
-const CLAUDE_SETTINGS_OWNED_KEYS: [&str; 3] = ["env", "model", "hooks"];
+const CLAUDE_SETTINGS_OWNED_KEYS: &[&str] = &["env", "model"];
 
-/// 某个受管文件里「本工具拥有的那部分」的摘要。
-///
-/// settings.json 是合并写入的，用户可以在里面放自己的设置（permissions、statusLine…），
-/// 拿整文件做外部修改检测会把用户改这些误判成冲突。其余文件整份归本工具，比整文件。
-pub(crate) fn owned_slice_digest(file: &str, bytes: &[u8]) -> String {
+/// 旧版本还一并渲染 hooks：那时记下的写入指纹按 env / model / hooks 算。
+const LEGACY_CLAUDE_SETTINGS_OWNED_KEYS: &[&str] = &["env", "model", "hooks"];
+
+fn slice_digest(file: &str, bytes: &[u8], keys: &[&str]) -> String {
     if file != FILE_CLAUDE_SETTINGS {
         return crate::native_mcp::model::sha256_hex_bytes(bytes);
     }
@@ -375,9 +372,9 @@ pub(crate) fn owned_slice_digest(file: &str, bytes: &[u8]) -> String {
         .and_then(|v| v.as_object().cloned())
         .map(|obj| {
             let mut slice = Map::new();
-            for key in CLAUDE_SETTINGS_OWNED_KEYS {
-                if let Some(value) = obj.get(key) {
-                    slice.insert(key.to_string(), value.clone());
+            for key in keys {
+                if let Some(value) = obj.get(*key) {
+                    slice.insert((*key).to_string(), value.clone());
                 }
             }
             Value::Object(slice)
@@ -388,25 +385,41 @@ pub(crate) fn owned_slice_digest(file: &str, bytes: &[u8]) -> String {
     )
 }
 
-/// 渲染该实例配置目录下的全部受管文件（不含规则文件，见 FILE_CLAUDE_RULES）。
+/// 某个受管文件里「本工具拥有的那部分」的摘要。
+///
+/// settings.json 是合并写入的，用户可以在里面放自己的设置（permissions、statusLine…），
+/// 拿整文件做外部修改检测会把用户改这些误判成冲突。其余文件整份归本工具，比整文件。
+pub(crate) fn owned_slice_digest(file: &str, bytes: &[u8]) -> String {
+    slice_digest(file, bytes, CLAUDE_SETTINGS_OWNED_KEYS)
+}
+
+/// 本工具写的那部分是否仍是上次写入的样子：`known` 是库里记的写入指纹。
+///
+/// 兼容旧指纹：整文件摘要、旧版本按 env/model/hooks 算的摘要都照常认（下次写入自动升级）。
+/// 另外本工具那部分已经等于这次要写的内容时（`expected` 为渲染结果）也不算冲突——写入不会
+/// 改掉任何东西；升级后只在 hooks 页改过实例 hooks、还没重新应用实例的用户因此不被误报。
+pub(crate) fn ours_unchanged(file: &str, actual: &[u8], known: &str, expected: &[u8]) -> bool {
+    let owned = owned_slice_digest(file, actual);
+    owned == known
+        || crate::native_mcp::model::sha256_hex_bytes(actual) == known
+        || slice_digest(file, actual, LEGACY_CLAUDE_SETTINGS_OWNED_KEYS) == known
+        || owned == owned_slice_digest(file, expected)
+}
+
+/// 渲染该实例配置目录下的全部受管文件（不含规则与 hooks，见 FILE_CLAUDE_RULES /
+/// FILE_CODEX_HOOKS）。
 ///
 /// `existing` 给出目标文件的现有字节：Claude 的 `settings.json` 采用合并写入，
-/// 用户自己加的根级字段原样保留，本工具只覆盖它管的 env/model/hooks 三项。
-/// Hooks 的正文复用主实例那套来源与渲染，实例因此和主实例拿到同一份内容。
+/// 用户自己加的根级字段与 hooks 原样保留，本工具只覆盖它管的 env/model 两项。
 pub(crate) fn render_all(
-    ctx: &Context,
     def: &ProfileDef,
     existing: &dyn Fn(&str) -> Option<Vec<u8>>,
     resolve: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Vec<RenderedTarget>> {
-    let hook_sources = crate::native_sources::current_hook_sources_readonly(ctx)?;
-
     let mut out = Vec::new();
     match def.kind {
         ProfileKind::Claude => {
-            let managed =
-                parse_hook_source(&hook_sources, crate::native_sources::KEY_HOOKS_CLAUDE)?;
-            // settings.json：既有内容为基底 → 覆盖 env/model → 合入 hooks
+            // settings.json：既有内容为基底 → 覆盖 env/model
             let base = existing(FILE_CLAUDE_SETTINGS)
                 .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
                 .filter(Value::is_object)
@@ -421,52 +434,26 @@ pub(crate) fn render_all(
                     settings.remove("model");
                 }
             }
-            let merged = crate::native_hooks::model::claude_render(
-                &Value::Object(settings),
-                &managed.0,
-                &managed.1,
-            );
             out.push(RenderedTarget {
                 file: FILE_CLAUDE_SETTINGS.to_string(),
-                content: crate::native_hooks::model::render_bytes(&merged),
+                content: render_json(&Value::Object(settings)),
             });
         }
         ProfileKind::Codex => {
-            let managed = parse_hook_source(&hook_sources, crate::native_sources::KEY_HOOKS_CODEX)?;
             out.push(RenderedTarget {
                 file: CODEX_PROFILE_FILE.to_string(),
                 content: render_codex_provider(def).into_bytes(),
-            });
-            out.push(RenderedTarget {
-                file: FILE_CODEX_HOOKS.to_string(),
-                content: crate::native_hooks::model::render_bytes(
-                    &crate::native_hooks::model::codex_render(&managed.0),
-                ),
             });
         }
     }
     Ok(out)
 }
 
-/// 解析 hooks 来源；结构非法即 fail-closed，不回显来源正文。
-fn parse_hook_source(
-    sources: &std::collections::BTreeMap<String, String>,
-    key: &str,
-) -> Result<(
-    crate::native_hooks::model::HookMap,
-    Vec<crate::native_hooks::model::RemovedRule>,
-)> {
-    let raw = sources
-        .get(key)
-        .cloned()
-        .unwrap_or_else(|| "{}".to_string());
-    let value: Value = serde_json::from_str(&raw)
-        .map_err(|_| anyhow::anyhow!("hooks 来源 {key} 不是合法 JSON 对象"))?;
-    let obj = value
-        .as_object()
-        .ok_or_else(|| anyhow::anyhow!("hooks 来源 {key} 不是合法 JSON 对象"))?;
-    crate::native_hooks::model::validate_source(key, obj)
-        .map_err(|err| anyhow::anyhow!("hooks 来源 {key} 结构非法: {err:#}"))
+/// 写盘字节：pretty JSON（2 空格）+ 单个换行。
+fn render_json(payload: &Value) -> Vec<u8> {
+    let mut text = serde_json::to_string_pretty(payload).expect("render");
+    text.push('\n');
+    text.into_bytes()
 }
 
 /// env 引用解析：缺变量即 fail-closed，不写出不完整的配置。
@@ -729,9 +716,62 @@ mod owned_slice_tests {
 
     #[test]
     fn other_files_are_compared_whole() {
-        // hooks.json 等整份归本工具：任何一个字节变了都算变了
-        let a = owned_slice_digest(FILE_CODEX_HOOKS, b"x");
-        let b = owned_slice_digest(FILE_CODEX_HOOKS, b"y");
+        // agent-manager.config.toml 整份归本工具：任何一个字节变了都算变了
+        let a = owned_slice_digest(CODEX_PROFILE_FILE, b"x");
+        let b = owned_slice_digest(CODEX_PROFILE_FILE, b"y");
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn hooks_are_not_part_of_the_owned_slice() {
+        let before = owned_slice_digest(FILE_CLAUDE_SETTINGS, &settings(json!({})));
+        let after = owned_slice_digest(
+            FILE_CLAUDE_SETTINGS,
+            &settings(
+                json!({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x"}]}]}}),
+            ),
+        );
+        assert_eq!(before, after, "hooks 归 hooks 域，改它不算实例配置被改");
+    }
+
+    #[test]
+    fn legacy_fingerprints_and_already_expected_content_count_as_unchanged() {
+        let written = settings(json!({}));
+        // 旧版本按 env/model/hooks 记的指纹
+        let legacy = slice_digest(
+            FILE_CLAUDE_SETTINGS,
+            &written,
+            LEGACY_CLAUDE_SETTINGS_OWNED_KEYS,
+        );
+        assert!(ours_unchanged(
+            FILE_CLAUDE_SETTINGS,
+            &written,
+            &legacy,
+            b"{}"
+        ));
+        // 旧指纹之后用户在 hooks 页改了实例 hooks：env/model 仍是要写的样子 → 不冲突
+        let edited = settings(
+            json!({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x"}]}]}}),
+        );
+        assert!(!ours_unchanged(
+            FILE_CLAUDE_SETTINGS,
+            &edited,
+            &legacy,
+            b"{}"
+        ));
+        assert!(ours_unchanged(
+            FILE_CLAUDE_SETTINGS,
+            &edited,
+            &legacy,
+            &written
+        ));
+        // env 被外部改过、也不等于要写的内容 → 冲突
+        let tampered = settings(json!({"env": {"A": "2"}}));
+        assert!(!ours_unchanged(
+            FILE_CLAUDE_SETTINGS,
+            &tampered,
+            &legacy,
+            &written
+        ));
     }
 }

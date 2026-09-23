@@ -2396,8 +2396,8 @@ fn target_path(ctx: &Context, kind: Kind, config_path: Option<&str>) -> Result<P
 }
 
 /// 写入落点：符号链接解析到最终目标（链接本身保持不变），目标必须是普通文件；
-/// 文件还不存在时只解析它的父目录。
-fn resolve_write_target(path: &Path) -> Result<PathBuf> {
+/// 文件还不存在时只解析它的父目录。hooks 域写同一类助手配置文件，沿用这一裁决。
+pub(crate) fn resolve_write_target(path: &Path) -> Result<PathBuf> {
     match std::fs::symlink_metadata(path) {
         Ok(_) => {
             let real = std::fs::canonicalize(path).map_err(|_| {

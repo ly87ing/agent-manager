@@ -350,3 +350,82 @@ fn legacy_rule_sources_in_backup_become_templates() {
     );
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// hooks 以实际配置为准，不进备份；只有旧版本保存、还没生效的 hooks 以 hooks.* 来源导出，
+/// 导入（含旧备份）后在 hooks 页作为未生效建议出现，不改任何助手文件。
+#[test]
+fn only_unapplied_legacy_hooks_travel_in_backups() {
+    let (root, ctx) = temp_ctx("hooks-backup");
+    // 实际配置里的 hooks 不进备份
+    let settings = ctx.home_dir.join(".claude/settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    std::fs::write(
+        &settings,
+        r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo live"}]}]}}"#,
+    )
+    .unwrap();
+    let exported = execute(&ctx, &request("config:export", &[]));
+    assert!(exported.ok, "{:?}", exported.errors);
+    assert!(exported.data["sources"].get("hooks.claude").is_none());
+    assert!(exported.data["sources"].get("hooks.codex").is_none());
+    assert!(!serde_json::to_string(&exported.data)
+        .unwrap()
+        .contains("echo live"));
+
+    // 旧备份：hooks.claude 来源（一条已在实际里，一条没有）
+    let legacy = r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo live"},{"type":"command","command":"echo old"}]}]},"removed_signatures":[]}"#;
+    let mut backup = exported.data.clone();
+    backup["sources"]["hooks.claude"] = serde_json::json!(legacy);
+    let payload = backup.to_string();
+    let before = std::fs::read(&settings).unwrap();
+    let env = execute(&ctx, &request("config:import", &["--value", &payload]));
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(
+        std::fs::read(&settings).unwrap(),
+        before,
+        "导入不改助手文件"
+    );
+    let status = execute(&ctx, &request("hooks:status", &[]));
+    let claude = status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "hooks:claude")
+        .unwrap()
+        .clone();
+    let legacy_commands: Vec<&str> = claude["observed"]["legacy"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["command"].as_str().unwrap())
+        .collect();
+    assert_eq!(legacy_commands, ["echo old"]);
+
+    // 仍有未生效的旧 hooks：导出带上这一行，换机器导入后照样是建议
+    let exported = execute(&ctx, &request("config:export", &[]));
+    let text = exported.data["sources"]["hooks.claude"].as_str().unwrap();
+    assert!(text.contains("echo old"));
+    let (root2, ctx2) = temp_ctx("hooks-backup-2");
+    let env = execute(
+        &ctx2,
+        &request(
+            "config:import",
+            &["--value", &serde_json::to_string(&exported.data).unwrap()],
+        ),
+    );
+    assert!(env.ok, "{:?}", env.errors);
+    assert!(
+        std::fs::read_dir(&ctx2.home_dir).unwrap().next().is_none(),
+        "导入不写助手目录"
+    );
+    let status = execute(&ctx2, &request("hooks:status", &[]));
+    assert_eq!(
+        status.data["elements"][0]["observed"]["legacy"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(root2);
+}

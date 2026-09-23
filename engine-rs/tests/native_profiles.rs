@@ -317,10 +317,10 @@ fn status_is_read_only_and_args_are_strict() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// 实例目录下由本工具写的是配置与 Hooks；规则文件以实际文件为准，归规则页管理，
-/// profiles:apply 既不生成也不检测它。主实例的固定路径一个字节都不动。
+/// 实例目录下由本工具写的是配置（env/model）；规则文件与 hooks 以实际文件为准，分别归
+/// 规则页与 Hooks 页管理，profiles:apply 既不生成也不检测它们。主实例的固定路径一个字节都不动。
 #[test]
-fn profile_directory_gets_hooks_but_leaves_rules_file_alone() {
+fn profile_directory_leaves_rules_file_and_hooks_alone() {
     let (root, ctx) = temp_ctx("full-set");
     std::fs::create_dir_all(ctx.home_dir.join(".claude")).unwrap();
     let global_settings = ctx.home_dir.join(".claude/settings.json");
@@ -360,7 +360,10 @@ fn profile_directory_gets_hooks_but_leaves_rules_file_alone() {
     .unwrap();
     assert_eq!(settings["statusLine"], "mine", "用户自己的设置不得被抹掉");
     assert!(settings["env"]["ANTHROPIC_BASE_URL"].is_string());
-    assert!(settings["hooks"].is_object(), "Hooks 也随实例落地");
+    assert!(
+        settings.get("hooks").is_none(),
+        "profiles:apply 不再写 hooks 键（归 Hooks 页）"
+    );
 
     // 2) 新建实例不自动写规则文件（用户在规则页从主助手复制或自己写）
     let instance_rules = ctx.home_dir.join(".claude-ly/CLAUDE.md");
@@ -370,8 +373,17 @@ fn profile_directory_gets_hooks_but_leaves_rules_file_alone() {
     assert_eq!(std::fs::read(&global_settings).unwrap(), settings_before);
     assert_eq!(std::fs::read(&global_rules).unwrap(), rules_before);
 
-    // 4) 用户自己写的实例规则：状态不因它变化，再次应用也不碰它的字节
+    // 4) 用户自己写的实例规则与 hooks：状态不因它们变化，再次应用也不碰它们
     std::fs::write(&instance_rules, "external edit\n").unwrap();
+    let mut with_hooks = settings.clone();
+    with_hooks["hooks"] =
+        serde_json::json!({"Stop": [{"hooks": [{"type": "command", "command": "echo mine"}]}]});
+    // 与 Hooks 页写盘同一格式（pretty + 换行）
+    std::fs::write(
+        ctx.home_dir.join(".claude-ly/settings.json"),
+        format!("{}\n", serde_json::to_string_pretty(&with_hooks).unwrap()),
+    )
+    .unwrap();
     let status = execute(&ctx, &request("profiles:status", &[]));
     assert_eq!(element(&status, "cc-ly")["state"], "managed-ok");
     let again = execute(
@@ -384,14 +396,19 @@ fn profile_directory_gets_hooks_but_leaves_rules_file_alone() {
         "external edit\n",
         "实例规则文件字节不变"
     );
+    let after: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(ctx.home_dir.join(".claude-ly/settings.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(after["hooks"], with_hooks["hooks"], "实例 hooks 原样保留");
 
     std::env::remove_var("AM_TEST_TOKEN_FULLSET");
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// Codex 实例同样拿到 Hooks，不生成规则文件，也不碰归 MCP 域的 config.toml。
+/// Codex 实例同样不生成规则文件与 hooks.json，也不碰归 MCP 域的 config.toml。
 #[test]
-fn codex_profile_directory_gets_hooks_without_rules_file() {
+fn codex_profile_directory_gets_no_rules_or_hooks_file() {
     let (root, ctx) = temp_ctx("codex-full-set");
     assert!(save_definition(
         &ctx,
@@ -408,9 +425,10 @@ fn codex_profile_directory_gets_hooks_without_rules_file() {
     assert!(dir.join("agent-manager.config.toml").is_file());
     assert!(!dir.join("config.toml").exists(), "config.toml 仍归 MCP 域");
     assert!(!dir.join("AGENTS.md").exists(), "规则文件不由实例域生成");
-    let hooks: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(dir.join("hooks.json")).unwrap()).unwrap();
-    assert!(hooks["hooks"].is_object());
+    assert!(
+        !dir.join("hooks.json").exists(),
+        "hooks.json 以实际文件为准，归 Hooks 页"
+    );
 
     let _ = std::fs::remove_dir_all(root);
 }

@@ -15,7 +15,6 @@ use std::path::{Path, PathBuf};
 use super::model::{self, ProfileDef};
 use super::persistence::{load_bindings_from, write_binding, Binding};
 use crate::native::{Context, Request};
-use crate::native_mcp::model::sha256_hex_bytes;
 use crate::store;
 
 fn parse_only(req: &Request) -> Result<String> {
@@ -70,7 +69,6 @@ pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
     let dir = model::validate_config_dir(&def, &ctx.home_dir, &ctx.data_dir)?;
     // 渲染一次：变量缺失、来源结构非法在取锁前就暴露
     let rendered = model::render_all(
-        ctx,
         &def,
         &|file| std::fs::read(dir.join(file)).ok(),
         &crate::secret_values::lookup,
@@ -88,7 +86,7 @@ pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
         if path.exists() && !path.is_file() {
             bail!("[{}] {} 被目录占用，拒绝写入", id, target.file);
         }
-        check_takeover(ctx, &def, &target.file, &path, allow)?;
+        check_takeover(ctx, &def, &target.file, &path, &target.content, allow)?;
     }
     Ok(())
 }
@@ -99,23 +97,25 @@ fn check_takeover(
     def: &ProfileDef,
     file: &str,
     path: &Path,
+    expected: &[u8],
     allow: bool,
 ) -> Result<bool> {
     if !path.is_file() {
         return Ok(false);
     }
     let bytes = std::fs::read(path)?;
-    let actual = sha256_hex_bytes(&bytes);
-    // settings.json 合并写入，只比本工具拥有的键；旧绑定记的是整文件摘要，
-    // 整文件没变也照常放行（下次写入自动升级），存量用户不会被误报一次。
-    let owned = super::model::owned_slice_digest(file, &bytes);
+    // settings.json 合并写入，只比本工具拥有的键（env/model）；旧绑定的整文件摘要与
+    // 旧版本含 hooks 的摘要照常认（下次写入自动升级），存量用户不会被误报一次。
     let known = match store::open_readonly(ctx)? {
         Some(conn) => load_bindings_from(&conn)?
             .get(&(def.id.clone(), file.to_string()))
             .map(|b| b.applied_digest.clone()),
         None => None,
     };
-    if known.as_deref() == Some(actual.as_str()) || known.as_deref() == Some(owned.as_str()) {
+    if known
+        .as_deref()
+        .is_some_and(|known| super::model::ours_unchanged(file, &bytes, known, expected))
+    {
         return Ok(false);
     }
     if !allow {
@@ -167,7 +167,6 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     let dir = model::validate_config_dir(&def, &ctx.home_dir, &ctx.data_dir)?;
     let allow = req.flag("--allow-takeover");
     let rendered = model::render_all(
-        ctx,
         &def,
         &|file| std::fs::read(dir.join(file)).ok(),
         &crate::secret_values::lookup,
@@ -175,7 +174,14 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
 
     let mut takeover = false;
     for target in &rendered {
-        takeover |= check_takeover(ctx, &def, &target.file, &dir.join(&target.file), allow)?;
+        takeover |= check_takeover(
+            ctx,
+            &def,
+            &target.file,
+            &dir.join(&target.file),
+            &target.content,
+            allow,
+        )?;
     }
 
     ensure_dir(&dir)?;

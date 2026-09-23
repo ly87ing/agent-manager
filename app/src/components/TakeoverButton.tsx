@@ -10,7 +10,6 @@ import type { EngineElement } from "../lib/contract";
 
 /** 接管会改掉什么，按域说清楚——用户点之前要知道代价。 */
 const TAKEOVER_NOTE: Record<string, string> = {
-  hooks: "整文件替换：现有内容将被整体替换，先把需要保留的 hook 并入来源定义。",
   aliases: "只替换本工具维护的那一段：这段里被改过的内容会按当前配置重写，段外的内容不动。",
 };
 
