@@ -60,7 +60,7 @@ Agent、Skills、MCP、Rules 和 Hooks 原生域已接线；实际安装来源�
 
 | 来源 | 什么时候更新 |
 | --- | --- |
-| `<配置目录>/.agent-manager-usage.json` | 状态栏每次渲染（事件驱动，300ms 防抖） |
+| `<数据目录>/usage/<编码后的配置目录>.json` | 状态栏每次渲染（事件驱动，300ms 防抖） |
 | `~/.claude.json` 的 `cachedUsageUtilization` | 只在 Claude Code 主动查额度时；**常规对话不触发** |
 
 只有后者时，数字会停在上次查额度的时刻——连用几天都不动是正常现象，不是读错了。
@@ -80,9 +80,17 @@ Claude Code 每次渲染状态栏都会把 `rate_limits` 通过 stdin 推给脚�
 ```bash
 # $five / $week 是已用百分比，$five_reset / $week_reset 是 Unix 秒的重置时刻，
 # $now 是当前时刻（这几个变量名按你自己脚本里的实际命名改）
+# 存到 Agent Manager 数据目录（macOS 默认 ~/Library/Application Support/agent-manager，
+# Linux 为 ${XDG_DATA_HOME:-~/.local/share}/agent-manager；设置了 AGENT_MANAGER_DATA_DIR 时以它为准），
+# 文件名是配置目录编码：先 % -> %25，再 / -> %2F。不要写进助手自己的配置目录。
 if [[ -n $five || -n $week ]]; then
   am_dir=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
-  am_file=$am_dir/.agent-manager-usage.json
+  am_pct='%'
+  am_key=${am_dir//$am_pct/%25}
+  am_key=${am_key//\//%2F}
+  am_usage="$HOME/Library/Application Support/agent-manager/usage"
+  [[ -d $am_usage ]] || mkdir -p "$am_usage" 2>/dev/null
+  am_file=$am_usage/$am_key.json
   am_tmp=$am_file.$$
   {
     printf '{"at":%s' "${now:-0}"
