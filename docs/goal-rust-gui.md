@@ -2,7 +2,7 @@
 
 ## 当前结论
 
-- 核心已就绪：Rust/SQLite/Tauri 共用库；2026-09-22 起数据模型改为「实际配置为准」（见下方裁决与 `GUI-REDESIGN.md`），实施中。
+- 核心已就绪：Rust/SQLite/Tauri 共用库；2026-09-22 起数据模型改为「实际配置为准」（见下方裁决与 `GUI-REDESIGN.md`），源码与隔离实测验收已完成，安装包真机 E2E 待补。
 - 已接线闭环：Agents、Skills、MCP、Rules、Hooks、Aliases 六个资源域，以及只读 `system:audit`、`secrets:status`、`system:discover`（接管发现，见下）、`system:refresh-upstream`（探测宇宙 agents/mcp/skills，缓存落 SQLite `upstream_probes` 表，三域 status 回填 freshness，前端收敛调用已补显式 `--action`）。
 - 2026-09-12 高级管理入口裁决已执行完毕：Aliases 原生闭环落地（`b7f30db`）；Tools、快照与 `system:converge` 退役清理完成（`9080c1d`）。
 - 远程 HTTP MCP 已落地（`b353aac`）：三客户端引用形式零明文落盘，与本地 stdio 同级安全语义。
@@ -606,7 +606,8 @@ state 与 actions，不自己推断；用户主动停用的不催。syncPlan 是
 - 触发：用户指出除内置默认（需确认后应用）外，所有配置都应直接读取用户真实环境。盘点确认现状相反：内置 policy 首次写库即固化；规则、hooks、别名、MCP 卡片、运行参数表单展示库内副本；外部修改的唯一出路是「接管 = 用库覆盖」；内置别名、技能仓库、hooks 被计为待同步。
 - 参考：CC Switch（`farion1231/cc-switch@8e478b2`）首启把实际配置导入为当前项、官方预设只追加不激活（`src-tauri/src/lib.rs:728-782`），切换前回填实际配置（`services/provider/mod.rs:5836-5884`），提示词读取以实际文件刷新已启用项（`services/prompt.rs:62-85`）。不照搬其整份覆盖 settings.json、MCP 导入后以库为准、读取时写库三点。
 - 裁决：采用 `GUI-REDESIGN.md`「数据模型：实际配置为准」三层模型；规则取消 shared + adapter 拼接，改为每个助手一个实际文件，另提供「复制到另一个助手」；Codex MCP 停用使用官方 `mcp_servers.<id>.enabled = false`。
-- 实施阶段：契约 → 技能内置仓库改推荐 → 接入与运行参数（首启导入、实际值预填、切换回填）→ 规则（实际文件、模板、回填）→ Hooks（实际读写、清理建议）→ 别名（实际区块、推荐项）→ MCP（实际条目为主）。各阶段隔离环境实测回读、独立验收后分批提交推送。
+- 实施阶段与回执（均已推送 `rust`）：契约 `1ce4a15` → 技能内置仓库改推荐 `1e60a7b` → 接入与运行参数（实际值预填、切换前回填、令牌只经外部密钥文件）`1acc84a` → 规则（实际文件、模板、回填，取消拼接）`e89abc5` → MCP（实际条目为主、官方字段停用）`e318d8d` → Hooks（实际读写、清理建议）`94037ef` → 别名（实际区块、推荐项）`b2eb229` → 实例（生成文件以实际为准、覆盖或采纳二选一）`4268bad`。
+- 验收方式：每阶段两套 cargo test、前端单测、typecheck、build 全绿；关键修复做反向验证；隔离 HOME 用编译出的 CLI 实测回读（含用改动前二进制造旧库再升级）；接入、MCP、实例另在 DEV mock 下浏览器验收；Codex 停用由真实 `codex mcp list` 回读。未做：安装包真机 GUI E2E。
 
 ## 本次停止点与恢复入口
 

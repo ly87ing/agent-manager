@@ -46,7 +46,7 @@ Policy UI 只显示 `builtin` 和 `sqlite`。编辑请求固定使用 `--layer l
 
 确认弹窗只用于定义移除、清空日志等破坏性动作；普通同步、启停、更新没有二次确认步骤。
 
-Agent、Skills、MCP、Rules 和 Hooks 原生域已接线；实际安装来源不可管理、Agent 已禁用、offline 阻断或动作不适用时，引擎不会提供或执行对应 action。Skills 集合与技能分配通过内容快照与安全软连接落地，status 只读零写，遇外部非受管内容或冲突时 fail-closed 拒绝覆盖。MCP 支持本地 stdio 与远程 HTTP，dispatcher 提供 `mcp:status`（只读）与真实 `mcp:apply`；当前产品支持 Claude JSON 与 Codex TOML，旧 OpenCode codec 仅用于兼容既有数据；`env` 在 SQLite definition/binding 中只持久化字面量 `${VAR}` 形式的环境变量引用；status 与操作日志不展示或保存解析后的真实值。远程 HTTP 定义含 `url`（仅 `https://` 或本机回环 `http://localhost` / `http://127.0.0.1`）与可选 `headers`（仅 `${VAR}` 占位符，引用形式写入、明文不落盘），与 stdio 字段互斥。Runs 操作记录基于 SQLite `operation_logs` 提供历史审计与二次确认清空，保留期由 `log_retention_days` 控制。Rules 原生 `status/apply` 与规则专用 `sources:get/set` 已接线（固定 Codex/Claude 两目标，外部修改 fail-closed）；Hooks 原生 status/apply 与 hooks 专用 `sources:get/set`（hooks.claude/hooks.codex）已接线：固定 Claude `~/.claude/settings.json` signature-set 合并与 Codex `~/.codex/hooks.json` whole-file 两目标，外部修改 fail-closed。
+Agent、Skills、MCP、Rules、Hooks、Aliases 与实例原生域已接线，生效配置都以各助手的实际文件为准：status 只读零写，输出实际内容与写入基准 `base`；写入带 `--base`，文件在打开后被外部改过时拒绝并提示「已在外部修改」，刷新后重新操作即可，不再有「接管 = 用库覆盖」。实际安装来源不可管理、Agent 已禁用、offline 阻断或动作不适用时，引擎不会提供或执行对应 action。Skills 集合与技能分配通过内容快照与安全软连接落地，遇外部非受管内容或冲突时 fail-closed 拒绝覆盖。MCP 支持本地 stdio 与远程 HTTP，`mcp:status` 直接列出各助手配置文件里的条目，`mcp:apply` 逐条编辑、启停、复制、删除；Claude 停用的条目以快照存库（疑似凭据转存到外部密钥文件、库里只留 `${VAR}`），Codex/OpenCode 用官方 `enabled = false`。Runs 操作记录基于 SQLite `operation_logs` 提供历史审计与二次确认清空，保留期由 `log_retention_days` 控制。
 
 公共 `*:plan` 与 `--dry-run` 入口已退役，调用会被拒绝；执行前请用 `<domain>:status` 确认状态。
 
