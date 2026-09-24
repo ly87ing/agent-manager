@@ -170,7 +170,7 @@ pub(crate) fn write(ctx: &Context, req: &Request) -> Result<Value, DispatchError
             .unwrap_or_default();
         if !issues.is_empty() {
             return Err(agent_error(anyhow!(
-                "这份内容会让 Codex 拒绝加载整份配置，没有写入：{}",
+                "这份内容会让 Codex（按 0.156 起的规则）拒绝加载整份配置，没有写入：{}",
                 issues.join("；")
             )));
         }

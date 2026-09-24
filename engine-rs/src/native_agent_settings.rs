@@ -320,18 +320,26 @@ pub(crate) fn codex_fatal_issues(root: &toml::Value) -> Vec<String> {
                     "[model_providers.{id}] 缺少 name（Codex 要求自定义接入方式有非空名称）"
                 ));
             }
-            if table.contains_key("auth")
-                && [
-                    "env_key",
-                    "experimental_bearer_token",
-                    "requires_openai_auth",
-                ]
-                .iter()
-                .any(|key| table.contains_key(*key))
-            {
-                issues.push(format!(
-                    "[model_providers.{id}] 的 auth 命令不能和 env_key、experimental_bearer_token 或 requires_openai_auth 同时设置"
-                ));
+            if let Some(auth) = table.get("auth") {
+                // `requires_openai_auth` 是布尔值，只有 true 才冲突（`model-provider-info` 的校验）
+                let conflicts = table.contains_key("env_key")
+                    || table.contains_key("experimental_bearer_token")
+                    || table
+                        .get("requires_openai_auth")
+                        .and_then(toml::Value::as_bool)
+                        == Some(true);
+                if auth
+                    .get("command")
+                    .and_then(toml::Value::as_str)
+                    .is_some_and(|command| command.trim().is_empty())
+                {
+                    issues.push(format!("[model_providers.{id}] 的 auth.command 不能为空"));
+                }
+                if conflicts {
+                    issues.push(format!(
+                        "[model_providers.{id}] 的 auth 命令不能和 env_key、experimental_bearer_token 或 requires_openai_auth = true 同时设置"
+                    ));
+                }
             }
         }
     }
@@ -3961,11 +3969,15 @@ stream_idle_timeout_ms = 450000
             "[model_providers.x]\nname = \"x\"\nbase_url = \"https://a.example.com/v1\"\nwire_api = \"chat\"\n",
             "[model_providers.x]\nbase_url = \"https://a.example.com/v1\"\n",
             "[model_providers.x]\nname = \"x\"\nbase_url = \"https://a.example.com/v1\"\nenv_key = \"K\"\n[model_providers.x.auth]\ncommand = \"echo\"\n",
+            "[model_providers.x]\nname = \"x\"\nbase_url = \"https://a.example.com/v1\"\nrequires_openai_auth = true\n[model_providers.x.auth]\ncommand = \"echo\"\n",
+            "[model_providers.x]\nname = \"x\"\nbase_url = \"https://a.example.com/v1\"\n[model_providers.x.auth]\ncommand = \"\"\n",
         ];
         let loads = [
             "[model_providers.amazon-bedrock]\nbase_url = \"https://bedrock.example.com\"\n",
             "approval_policy = \"on-request\"\nsandbox_mode = \"workspace-write\"\nweb_search = \"live\"\nmodel_reasoning_effort = \"max\"\n[model_providers.x]\nname = \"x\"\nbase_url = \"https://a.example.com/v1\"\nexperimental_bearer_token = \"t\"\n",
             "approval_policy = \"on-failure\"\n",
+            // 布尔值 false 不算和 auth 冲突
+            "[model_providers.x]\nname = \"x\"\nbase_url = \"https://a.example.com/v1\"\nrequires_openai_auth = false\n[model_providers.x.auth]\ncommand = \"echo\"\n",
         ];
         for text in fatal {
             let root: toml::Value = text.parse().unwrap();

@@ -310,7 +310,7 @@ export function ConnectionWorkbench({
             data-testid="codex-fatal-issues"
             className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
           >
-            <p className="font-medium">Codex 会拒绝加载这份配置，所有 codex 命令（包括登录）都会直接报错：</p>
+            <p className="font-medium">Codex 会拒绝加载这份配置，所有 codex 命令（包括登录）都会直接报错（按 Codex 0.156 起的规则）：</p>
             <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
               {fatalIssues.map((issue) => <li key={issue}>{issue}</li>)}
             </ul>
