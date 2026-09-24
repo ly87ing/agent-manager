@@ -857,6 +857,12 @@ describe("助手运行参数", () => {
         },
       },
     };
+    // 新环境的目标文件还不存在：保存后先把配置写进它自己的目录
+    withProfiles["profiles:status"] = makeEnvelope(
+      { domain: "profiles", elements: [makeElement({ id: "profiles:relay", domain: "profiles", observed: { base: "missing" } })] },
+      { command: "profiles.status" },
+    );
+    withProfiles["profiles:apply"] = makeEnvelope(makeApplyResult({ domain: "profiles" }), { command: "profiles.apply" });
     const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
 
     await userEvent.click(await screen.findByLabelText("管理 我的中转"));
@@ -887,6 +893,29 @@ describe("助手运行参数", () => {
     });
     expect(configureCalls(calls)).toHaveLength(0);
     expect(calls.some((call) => call.command === "secrets:set")).toBe(false);
+    // 只写这个新环境自己的配置文件，且只在它还不存在时写
+    await waitFor(() => expect(calls.some((call) => call.command === "profiles:apply")).toBe(true));
+    expect(calls.find((call) => call.command === "profiles:apply")!.args).toEqual(["--only", "profiles:relay", "--base", "missing"]);
+  });
+
+  it("建成独立环境时查不到实例状态：提示配置没写入，不留未处理的错误", async () => {
+    const withProfiles = routes();
+    const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.settings = {
+      active: "official",
+      profiles: {
+        official: { label: "官方" },
+        relay: { label: "我的中转", base_url: "https://relay.example.com", auth: "api_key", token_var: "RELAY_KEY" },
+      },
+    };
+    // 没有注册 profiles:status：模拟引擎调用本身失败
+    const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
+    await userEvent.click(await screen.findByLabelText("管理 我的中转"));
+    await userEvent.click(screen.getByTestId("make-profile-claude-code-relay"));
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    expect(await screen.findByText("已保存独立环境 relay，但配置没有写入，启动命令也先不写")).toBeInTheDocument();
+    expect(calls.some((call) => call.command === "profiles:apply")).toBe(false);
   });
 
   it("工作台导入接入：先预览，只保存定义且不启用、不写凭据", async () => {

@@ -474,8 +474,14 @@ export default function AgentsPage({
    * 目标文件已存在时不自动覆盖，交给卡片上的逐字段对比由用户选择。返回 false 表示应该写却没写成。
    */
   const writeNewProfileConfig = async (id: string): Promise<boolean> => {
-    const status = await runEngine<StatusData>("profiles:status", []);
-    const element = status.ok ? status.data.elements.find((item) => item.id === `profiles:${id}`) : undefined;
+    let element: EngineElement | undefined;
+    try {
+      const status = await runEngine<StatusData>("profiles:status", []);
+      element = status.ok ? status.data.elements.find((item) => item.id === `profiles:${id}`) : undefined;
+    } catch {
+      // 查不到状态就不知道目标文件在不在：按没写成处理，由调用方提示并先不写启动命令
+      return false;
+    }
     if (!element || profileBaseOf(element) !== "missing") return true;
     const applied = await profileApply.apply({
       command: "profiles:apply",
