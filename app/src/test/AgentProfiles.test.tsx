@@ -825,6 +825,39 @@ describe("助手实例", () => {
     expect(JSON.parse(call.args[1])).toEqual({ kind: "claude", base_url: "https://relay.example.com", token_var: "RELAY_KEY" });
   });
 
+  it("密钥换了还没写进环境：卡片单独说明，按钮是「写入新密钥」，直接写不弹覆盖确认", async () => {
+    const base = profileElement();
+    const stale = profileElement({
+      state: "drifted",
+      observed: {
+        ...(base.observed as Record<string, unknown>),
+        third_party: true,
+        target_exists: true,
+        base: "b".repeat(64),
+        fields: [
+          { field: "env.ANTHROPIC_AUTH_TOKEN", state: "differs", definition: "${MY_TOKEN}", live: "<hidden>", purpose: "credential", variable: "MY_TOKEN" },
+          { field: "env.ANTHROPIC_BASE_URL", state: "same", definition: "https://api.example.com", live: "https://api.example.com" },
+        ],
+      },
+    });
+    const { calls } = renderWithEngine(<AgentsPage />, routes([stale]));
+    await openInstanceManager();
+    const card = await screen.findByTestId("profile-card-cc-ly");
+    expect(card).toHaveTextContent("密钥换过了，这个环境还在用旧的");
+    expect(within(card).getByTestId("profile-credential-cc-ly")).toHaveTextContent(
+      "凭据：密钥文件里的 MY_TOKEN，写入时把值写进 ~/.claude-cc-ly/settings.json（仅本人可读）",
+    );
+    // 凭据不混进一般差异，也不出现「用定义覆盖」
+    expect(within(card).queryByTestId("profile-differs-cc-ly")).toBeNull();
+    const write = within(card).getByTestId("profile-apply-cc-ly");
+    expect(write).toHaveTextContent("写入新密钥");
+    await userEvent.click(write);
+    await waitFor(() => expect(calls.some((call) => call.command === "profiles:apply")).toBe(true));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const apply = calls.find((call) => call.command === "profiles:apply")!;
+    expect(apply.args).toEqual(["--only", "profiles:cc-ly", "--base", "b".repeat(64)]);
+  });
+
   it("移除实例需确认，且只停止管理、不动配置目录", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await openInstanceManager();

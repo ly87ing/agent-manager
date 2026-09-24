@@ -609,12 +609,23 @@ pub(crate) fn compare_fields(
                     (Some(live), Some(expected)) if live == expected => "same",
                     _ => "differs",
                 };
-                fields.push(serde_json::json!({
+                let mut field = serde_json::json!({
                     "field": format!("env.{name}"),
                     "state": state,
                     "definition": text,
                     "live": live.map(|v| display_value(name, v)).unwrap_or(Value::Null),
-                }));
+                });
+                // 凭据：定义里只有变量名，实际写的是取值。不一致多半是密钥文件里换了值还没写进来，
+                // 界面单独说明；「以实际配置更新定义」对它没有意义，不参与采纳判断
+                if let Some(var) = text
+                    .strip_prefix("${")
+                    .and_then(|v| v.strip_suffix('}'))
+                    .filter(|_| CLAUDE_CREDENTIAL_ENV.contains(&name.as_str()))
+                {
+                    field["purpose"] = Value::String("credential".into());
+                    field["variable"] = Value::String(var.to_string());
+                }
+                fields.push(field);
             }
             for name in claude_cancelled_env(def) {
                 let live = live_env.get(name).and_then(Value::as_str);
@@ -671,7 +682,8 @@ pub(crate) fn compare_fields(
             for (field, definition, want) in expected {
                 let have = live.get(&field);
                 let secret = field.ends_with(CODEX_BEARER_TOKEN);
-                fields.push(serde_json::json!({
+                let variable = secret.then(|| def.env_key.clone()).flatten();
+                let mut entry = serde_json::json!({
                     "field": field,
                     "state": match (have, &want) {
                         (None, _) => "missing",
@@ -685,12 +697,20 @@ pub(crate) fn compare_fields(
                         Some(have) => display_value(&field, have),
                         None => Value::Null,
                     },
-                }));
+                });
+                if let Some(var) = variable {
+                    entry["purpose"] = Value::String("credential".into());
+                    entry["variable"] = Value::String(var);
+                }
+                fields.push(entry);
             }
         }
     }
     Ok(fields)
 }
+
+/// Claude 实例 env 里放第三方凭据的变量（值写取值，定义里是 `${变量}`）。
+const CLAUDE_CREDENTIAL_ENV: &[&str] = &["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"];
 
 /// Codex 接入表里放第三方凭据的字段。官方说明：取值作为 `Authorization: Bearer` 请求头
 /// 发出，以程序方式配置时使用；0.48 起就有，CC Switch 保留官方登录时也写这个字段。

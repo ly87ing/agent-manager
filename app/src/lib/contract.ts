@@ -287,8 +287,13 @@ export interface ProfileField {
   state: "same" | "differs" | "missing" | "unresolved" | string;
   definition: string | null;
   live: string | null;
-  /** isolation = 置空取消 shell 继承的凭据相关变量（界面合并成一句说明）。 */
-  purpose?: "isolation" | string;
+  /**
+   * isolation = 置空取消 shell 继承的凭据相关变量（界面合并成一句说明）；
+   * credential = 第三方凭据（定义里是变量名，实际写的是取值），界面单独说明。
+   */
+  purpose?: "isolation" | "credential" | string;
+  /** credential 项引用的变量名。 */
+  variable?: string | null;
 }
 
 // ---------- system:discover（只读接管发现） ----------

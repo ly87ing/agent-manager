@@ -1637,3 +1637,63 @@ fn 带设置的前提不满足时拒绝且零写_各项失败互不牵连() {
     );
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn 密钥换了还没写进环境_状态标出凭据项_不提供以实际配置更新定义() {
+    let (root, ctx) = temp_ctx("credential-stale");
+    std::env::set_var("AM_TEST_STALE_TOKEN", "sk-old-value-1234567890");
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_TEST_STALE_TOKEN")
+    ));
+    let apply = apply_now(&ctx, "cc-ly");
+    assert!(apply.ok, "{:?}", apply.errors);
+    let el = element(&status(&ctx), "cc-ly").clone();
+    let token = el["observed"]["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["field"] == "env.ANTHROPIC_AUTH_TOKEN")
+        .cloned()
+        .expect("有凭据字段");
+    assert_eq!(token["purpose"], "credential");
+    assert_eq!(token["variable"], "AM_TEST_STALE_TOKEN");
+    assert_eq!(token["state"], "same");
+
+    // 用户在密钥文件里换了值：环境里还是旧的
+    std::env::set_var("AM_TEST_STALE_TOKEN", "sk-new-value-0987654321");
+    let el = element(&status(&ctx), "cc-ly").clone();
+    let text = serde_json::to_string(&el).unwrap();
+    assert!(
+        !text.contains("sk-old-value") && !text.contains("sk-new-value"),
+        "不输出取值"
+    );
+    let token = el["observed"]["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["field"] == "env.ANTHROPIC_AUTH_TOKEN")
+        .cloned()
+        .unwrap();
+    assert_eq!(token["state"], "differs");
+    assert_eq!(token["purpose"], "credential");
+    assert_eq!(el["state"], "drifted");
+    let actions: Vec<&str> = el["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|a| a["id"].as_str())
+        .collect();
+    assert_eq!(actions, vec!["apply"], "只剩凭据不同：只给写入，不给采纳");
+
+    // 写入后新值生效
+    let apply = apply_now(&ctx, "cc-ly");
+    assert!(apply.ok, "{:?}", apply.errors);
+    assert_eq!(
+        claude_settings(&ctx, ".claude-ly")["env"]["ANTHROPIC_AUTH_TOKEN"],
+        "sk-new-value-0987654321"
+    );
+    std::env::remove_var("AM_TEST_STALE_TOKEN");
+    let _ = std::fs::remove_dir_all(root);
+}

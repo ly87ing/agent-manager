@@ -42,6 +42,7 @@ export function ProfileCard({
   onCheckEndpoint,
   onCheckBalance,
   onSeed,
+  onWriteCredential,
 }: {
   element: EngineElement;
   bin: string;
@@ -69,6 +70,8 @@ export function ProfileCard({
   onCheckBalance?: () => Promise<string>;
   /** 从默认环境把勾选的设置带进这个环境；返回逐项结果或失败原因。 */
   onSeed?: (items: SeedItem[]) => Promise<SeedResult[] | string>;
+  /** 只有密钥换了：直接把新密钥写进这个环境（不用确认覆盖其他内容，因为没有别的不同）。 */
+  onWriteCredential?: () => void;
 }) {
   const [seedOpen, setSeedOpen] = useState(false);
   const [seedItems, setSeedItems] = useState<SeedItem[]>(ALL_SEED_ITEMS);
@@ -106,7 +109,12 @@ export function ProfileCard({
   // 实际里还没有（shell 导出的会压过来）与实例文件自己设了值（定义没声明、写入会置空）分开说
   const isolationGaps = allDiffers.filter((field) => field.purpose === "isolation" && field.state === "missing");
   const isolationSet = allDiffers.filter((field) => field.purpose === "isolation" && field.state !== "missing");
-  const differs = allDiffers.filter((field) => field.purpose !== "isolation");
+  const differs = allDiffers.filter((field) => field.purpose !== "isolation" && field.purpose !== "credential");
+  // 第三方凭据：定义里只有变量名，实际写的是取值；换了密钥还没写进来时单独说明，不混进一般差异
+  const credentials = (observed.fields ?? []).filter((field) => field.purpose === "credential");
+  const staleCredential = credentials.some((field) => field.state === "differs");
+  const credentialOnlyDrift =
+    element.state === "drifted" && staleCredential && differs.length === 0 && isolationGaps.length === 0 && isolationSet.length === 0;
   const canAdopt = element.actions.some((action) => action.id === "adopt");
   const canApply = element.actions.some((action) => action.id === "apply");
   const thirdParty = observed.third_party === true;
@@ -173,7 +181,27 @@ export function ProfileCard({
         <StateBadge state={element.state} />
       </div>
 
-      <p className="mt-2 text-xs text-muted-foreground">{blocked ?? STATE_NOTE[element.state] ?? ""}</p>
+      <p className="mt-2 text-xs text-muted-foreground">
+        {blocked ?? (credentialOnlyDrift ? "密钥换过了，这个环境还在用旧的：点「写入新密钥」。" : STATE_NOTE[element.state] ?? "")}
+      </p>
+
+      {credentials.map((field) => (
+        <p
+          key={field.field}
+          data-testid={`profile-credential-${id}`}
+          className={cn(
+            "mt-2 rounded-md border px-3 py-2 text-xs",
+            field.state === "same" ? "text-muted-foreground" : "border-warning/30 bg-warning/5 text-warning",
+          )}
+        >
+          凭据：密钥文件里的 <code className="font-mono">{field.variable}</code>，写入时把值写进{" "}
+          <code className="font-mono">{observed.target}</code>（仅本人可读），不用在终端里导出。
+          {field.state === "same" && " 现在和密钥文件里的一致。"}
+          {field.state === "differs" && " 密钥文件里的值换了，这个环境还在用旧的。"}
+          {field.state === "missing" && " 还没写进这个环境。"}
+          {field.state === "unresolved" && " 密钥文件里没有这个变量：先到「设置 → 密钥」或接入表单里填上。"}
+        </p>
+      ))}
 
       {/* 实例多半是另一个账号，额度各算各的 */}
       {observed.usage && (
@@ -475,7 +503,7 @@ export function ProfileCard({
           type="button"
           data-testid={`profile-apply-${id}`}
           disabled={busy || !canApply}
-          onClick={onApply}
+          onClick={credentialOnlyDrift && onWriteCredential ? onWriteCredential : onApply}
           className={cn(
             "inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs",
             element.state === "drifted"
@@ -485,7 +513,13 @@ export function ProfileCard({
           )}
         >
           {busy ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : <PlayCircle className="h-3 w-3" aria-hidden />}
-          {busy ? "执行中…" : element.state === "drifted" ? "用定义覆盖实际配置" : "写入配置"}
+          {busy
+            ? "执行中…"
+            : credentialOnlyDrift
+              ? "写入新密钥"
+              : element.state === "drifted"
+                ? "用定义覆盖实际配置"
+                : "写入配置"}
         </button>
         {canAdopt && (
           <button

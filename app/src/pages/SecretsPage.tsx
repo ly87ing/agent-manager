@@ -9,6 +9,7 @@ import type { SecretsMcpEnvObserved } from "../lib/observed";
 import { useEngineQuery } from "../lib/queries";
 import { useDirectApply } from "../lib/useDirectApply";
 import { cn } from "../lib/utils";
+import { DEFAULT_SECRETS_PATH } from "../lib/secretSource";
 
 export default function SecretsPage() {
   const query = useEngineQuery<StatusData>("secrets:status");
@@ -60,6 +61,22 @@ export default function SecretsPage() {
       });
   };
 
+  /** 路径处的文件还不存在时新建一个（0600）；已存在就照常验证并使用，不改它。 */
+  const createSource = () => {
+    const path = sourcePath.trim() || DEFAULT_SECRETS_PATH;
+    void directApply
+      .apply({
+        command: "secrets:source",
+        label: `新建密钥文件 ${path}`,
+        args: ["--path", path, "--create"],
+      })
+      .then((envelope) => {
+        if (!envelope?.ok) return;
+        setSourceTouched(false);
+        void query.refetch();
+      });
+  };
+
   const disconnectSource = () => {
     setConfirmDisconnect(false);
     void directApply
@@ -85,7 +102,7 @@ export default function SecretsPage() {
           <div>
             <h3 className="text-sm font-semibold text-foreground">密钥保存位置</h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              选择私有仓库里的 `.env` 文件。以后在本应用填写或接管的密钥都只写这里。
+              在本应用里填的 API Key 只写进这个 `.env` 文件（仅本人可读），不进本应用的数据库。可以选已有的文件（比如私有仓库里的），也可以在这里新建一个。
             </p>
           </div>
           <span
@@ -115,7 +132,7 @@ export default function SecretsPage() {
               setSourcePath(event.target.value);
               setSourceTouched(true);
             }}
-            placeholder="例如：~/agent-manager/secrets/mcp.env"
+            placeholder={`例如：${DEFAULT_SECRETS_PATH}`}
             spellCheck={false}
             className="min-w-0 flex-1 rounded border border-input px-3 py-2 font-mono text-xs"
           />
@@ -128,9 +145,21 @@ export default function SecretsPage() {
           >
             {directApply.executing ? "正在验证…" : sourcePath.trim() ? "验证并使用" : "停止使用"}
           </button>
+          {!source.configured && (
+            <button
+              type="button"
+              data-testid="secrets-source-create"
+              disabled={directApply.executing}
+              onClick={createSource}
+              title="路径处还没有文件就新建一个空的（仅本人可读）；已有文件不改动"
+              className="rounded border border-primary/40 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10 disabled:opacity-50"
+            >
+              新建一个
+            </button>
+          )}
         </div>
         <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
-          文件必须已存在、权限为 600，并使用 `KEY=VALUE` 格式。不会自动克隆仓库，也不会把文件内容放进配置备份。
+          已有文件须权限为 600、使用 `KEY=VALUE` 格式；「新建一个」按上面的路径（留空用 {DEFAULT_SECRETS_PATH}）建一个仅本人可读的空文件。第一次在接入里填 API Key 时，没有文件也会自动在默认位置新建。文件内容不会放进配置备份。
         </p>
         {source.error && !sourceChanged && (
           <p role="alert" data-testid="secrets-source-error" className="mt-2 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
@@ -167,7 +196,7 @@ export default function SecretsPage() {
         <section data-testid="secrets-provider-keys" className="rounded-lg border bg-card p-5 shadow-sm">
           <h3 className="text-sm font-semibold text-foreground">接入与独立环境用到的密钥</h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            独立环境写配置时把取值写进了自己的配置文件：改了取值后，到下面列出的独立环境卡片上重新「写入配置」才生效。
+            独立环境写配置时把取值写进了自己的配置文件（仅本人可读）。在这里改了取值后，用到它的独立环境卡片会提示「密钥换过了」，点卡片上的「写入新密钥」才生效。
           </p>
           <table className="mt-3 w-full text-left text-sm">
             <thead>

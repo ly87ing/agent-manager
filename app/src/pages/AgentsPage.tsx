@@ -62,6 +62,7 @@ import { useDirectApply } from "../lib/useDirectApply";
 import { useExecutions } from "../lib/execution";
 import { seedArgs, summarizeSeed, type SeedItem, type SeedResult } from "../lib/profileSeed";
 import { isOfficial, switchBackEffects } from "../lib/defaultEnvironment";
+import { DEFAULT_SECRETS_PATH, secretSourceOf } from "../lib/secretSource";
 
 /** 用定义覆盖实例实际配置前的说明：实例文件自己设了、定义没声明的凭据相关变量会被置空，点名说出来。 */
 function overwriteDescription(element: EngineElement): string {
@@ -89,6 +90,8 @@ export default function AgentsPage({
   const aliasSource = useAliasSource();
   // 实例（同一助手的多套独立配置）：定义与 agents 共用，状态与写入走 profiles 域
   const profilesQuery = useEngineQuery<StatusData>("profiles:status");
+  // 只读：API Key 写到哪、变量有没有值，给接入表单说明用
+  const secretsQuery = useEngineQuery<StatusData>("secrets:status");
   const profileApply = useDirectApply();
   const { execute } = useExecutions();
   const [profileForm, setProfileForm] = useState<ProfileFormInput | "new" | null>(null);
@@ -343,6 +346,21 @@ export default function AgentsPage({
       }
 
       if (submission.secretValue) {
+        const source = secretSourceOf(secretsQuery.data?.ok ? secretsQuery.data.data : null);
+        if (source && !source.configured) {
+          // 第一次填 API Key 还没有密钥文件：在默认位置新建一个（仅本人可读），不用先去建文件、改权限
+          const created = await runEngine("secrets:source", ["--path", DEFAULT_SECRETS_PATH, "--create"]);
+          if (!created.ok) {
+            await query.refetch();
+            setConnectionFormError(
+              `接入已保存，但没能新建密钥文件 ${DEFAULT_SECRETS_PATH}：${created.errors[0]?.message ?? "未知原因"}。可以到“设置 → 密钥”选一个已有的文件。`,
+            );
+            return;
+          }
+          toast.success(`已新建密钥文件 ${DEFAULT_SECRETS_PATH}`, {
+            description: "只有你能读；API Key 只存在这里，不进本应用的数据库。",
+          });
+        }
         const secret = await runEngine("secrets:set", [
           "--var",
           submission.connection.tokenVar,
@@ -356,6 +374,7 @@ export default function AgentsPage({
           );
           return;
         }
+        void secretsQuery.refetch();
       }
 
       setConnectionForm(null);
@@ -901,6 +920,7 @@ export default function AgentsPage({
                     }
                     void writeProfile(element);
                   }}
+                  onWriteCredential={() => void writeProfile(element)}
                   onAdopt={() =>
                     void profileApply.apply({
                       command: "profiles:adopt",
@@ -986,6 +1006,7 @@ export default function AgentsPage({
           initialConnection={connectionForm.initial}
           variant={connectionForm.variant}
           intent={connectionForm.intent}
+          secretSource={secretSourceOf(secretsQuery.data?.ok ? secretsQuery.data.data : null)}
           busy={connectionSaving}
           error={connectionFormError}
           onOpenSecrets={onOpenSecrets}
@@ -1074,6 +1095,7 @@ export default function AgentsPage({
           existingIds={elements.map((element) => element.id.replace(/^agents:/, ""))}
           baseBinOf={baseBinOf}
           onFetchModels={fetchModelsForDraft}
+          secretSource={secretSourceOf(secretsQuery.data?.ok ? secretsQuery.data.data : null)}
           onSubmit={(input, options) => void saveProfile(input, options.seedItems)}
           onClose={() => {
             setProfileForm(null);

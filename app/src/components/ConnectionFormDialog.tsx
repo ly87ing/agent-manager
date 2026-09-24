@@ -13,6 +13,7 @@ import {
   presetsFor,
 } from "../lib/connectionPresets";
 import { cn } from "../lib/utils";
+import { keyStatus, type SecretSourceState } from "../lib/secretSource";
 
 export type ConnectionKind = "claude" | "codex";
 
@@ -33,6 +34,7 @@ export function ConnectionFormDialog({
   initialConnection,
   variant,
   intent,
+  secretSource,
   busy,
   error,
   onSubmit,
@@ -49,6 +51,8 @@ export function ConnectionFormDialog({
   variant?: "edit" | "duplicate";
   /** environment：从「新建环境」进来，主按钮是建成独立环境，只保存接入退为次要。 */
   intent?: "environment";
+  /** 密钥文件的状态：说明 API Key 会写到哪、这个变量现在有没有值。 */
+  secretSource?: SecretSourceState | null;
   busy: boolean;
   error?: string | null;
   onSubmit: (submission: ConnectionSubmission) => void;
@@ -469,36 +473,50 @@ export function ConnectionFormDialog({
                   仅用于本应用展示和搜索，不会写进助手配置；导出接入时会一并包含。
                 </span>
               </label>
-              {!referenced && <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <label className="text-sm text-foreground">
-                  API Key 环境变量
-                  <input
-                    data-testid="new-connection-token-var"
-                    value={connection.tokenVar}
-                    onChange={(event) => patch({ tokenVar: event.target.value })}
-                    placeholder={kind === "claude" ? "ANTHROPIC_AUTH_TOKEN" : "OPENAI_API_KEY"}
-                    className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
-                    spellCheck={false}
-                  />
-                </label>
-                {kind === "claude" || kind === "codex" ? (
-                  <label className="text-sm text-foreground">
-                    API Key（可选）
-                    <input
-                      type="password"
-                      autoComplete="new-password"
-                      data-testid="new-connection-secret"
-                      value={secretValue}
-                      onChange={(event) => setSecretValue(event.target.value)}
-                      placeholder="留空则保持外部文件或进程环境中的值"
-                      className="mt-1 w-full rounded border border-input p-2 text-sm"
-                    />
-                    <span className="mt-1 block text-xs text-muted-foreground">
-                      填写后只写入“设置 → 密钥”选择的外部文件，不进入本机数据库。
-                    </span>
-                  </label>
-                ) : null}
-              </div>}
+              {!referenced && (() => {
+                const status = keyStatus(secretSource ?? null, connection.tokenVar);
+                return (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {kind === "claude" || kind === "codex" ? (
+                      <label className="text-sm text-foreground">
+                        API Key
+                        <input
+                          type="password"
+                          autoComplete="new-password"
+                          data-testid="new-connection-secret"
+                          value={secretValue}
+                          onChange={(event) => setSecretValue(event.target.value)}
+                          placeholder="粘贴厂商给你的 API Key"
+                          className="mt-1 w-full rounded border border-input p-2 text-sm"
+                        />
+                      </label>
+                    ) : null}
+                    <label className="text-sm text-foreground">
+                      保存为变量
+                      <input
+                        data-testid="new-connection-token-var"
+                        value={connection.tokenVar}
+                        onChange={(event) => patch({ tokenVar: event.target.value })}
+                        placeholder={kind === "claude" ? "ANTHROPIC_AUTH_TOKEN" : "OPENAI_API_KEY"}
+                        className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
+                        spellCheck={false}
+                      />
+                      <span className="mt-1 block text-xs text-muted-foreground">
+                        密钥文件里用这个名字保存；几套接入用同一个 Key 就填同一个名字。
+                      </span>
+                    </label>
+                    <p
+                      data-testid="new-connection-key-status"
+                      className={cn(
+                        "text-xs sm:col-span-2",
+                        status.tone === "ok" ? "text-success" : status.tone === "warn" ? "text-warning" : "text-muted-foreground",
+                      )}
+                    >
+                      {status.text}
+                    </p>
+                  </div>
+                );
+              })()}
 
               <details
                 className="rounded-lg border px-3 py-2"
@@ -653,7 +671,9 @@ export function ConnectionFormDialog({
               </details>
 
               <p className="rounded-lg border bg-muted/40 px-3 py-2 text-xs leading-5 text-muted-foreground">
-                保存只更新接入定义，不写助手配置。主配置只放官方账号；要使用这套接入，点「保存并建成独立环境」，或保存后在卡片上选「建成独立环境」。
+                {intent === "environment"
+                  ? "保存只更新接入定义，不写助手配置，主配置里的官方账号不会被改。「下一步」先保存这套接入，再打开建成独立环境的表单，确认启动命令名与要从默认环境带上的设置。"
+                  : "保存只更新接入定义，不写助手配置。主配置只放官方账号；要使用这套接入，点「保存并建成独立环境」，或保存后在卡片上选「建成独立环境」。"}
               </p>
                 </>
               )}

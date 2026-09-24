@@ -143,7 +143,11 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--var", ArgValueKind::VarName));
             specs.push(("--value", ArgValueKind::SecretValue));
         }
-        ("secrets", "source") => specs.push(("--path", ArgValueKind::FilePath)),
+        // 选用外部密钥文件；--create 在文件不存在时以 0600 新建一个空的（引擎再校验路径）
+        ("secrets", "source") => {
+            specs.push(("--path", ArgValueKind::FilePath));
+            specs.push(("--create", ArgValueKind::Flag));
+        }
         ("system", "refresh-upstream") => specs.push(("--only", ArgValueKind::ElementId)),
         // 规则以实际文件为准：写一个目标，base 做 CAS；新内容四选一（引擎再强制恰好一个）
         ("rules", "apply") => {
@@ -814,6 +818,14 @@ mod tests {
                 vec!["--path".into(), "~/private/secrets.env".into()],
             ),
             ("secrets:source", vec!["--path".into(), "".into()]),
+            (
+                "secrets:source",
+                vec![
+                    "--path".into(),
+                    "~/.config/agent-manager/secrets.env".into(),
+                    "--create".into(),
+                ],
+            ),
             ("secrets:migrate-legacy", vec![]),
             (
                 "config:import",

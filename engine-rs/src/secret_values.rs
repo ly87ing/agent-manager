@@ -89,6 +89,51 @@ fn validated_source_path(ctx: &Context) -> Result<(String, PathBuf)> {
     Ok((display, canonical))
 }
 
+/// 新建一个空的外部密钥文件（`secrets:source --create`）：文件已存在就什么都不动；不存在时
+/// 缺的父目录以 0700 新建，文件以 0600 独占新建（不跟随、不覆盖）。不能建在数据目录里。
+/// 返回这次新建的文件路径。
+pub fn create_source_file(ctx: &Context, raw: &str) -> Result<Option<PathBuf>> {
+    let trimmed = raw.trim();
+    let path = if let Some(rest) = trimmed.strip_prefix("~/") {
+        ctx.home_dir.join(rest)
+    } else {
+        PathBuf::from(trimmed)
+    };
+    if !path.is_absolute() || trimmed == "~" {
+        bail!("外部密钥文件必须使用绝对路径或 ~/ 开头的文件路径");
+    }
+    if path.starts_with(&ctx.data_dir) {
+        bail!("外部密钥文件不能放在 Agent Manager 数据目录中");
+    }
+    if fs::symlink_metadata(&path).is_ok() {
+        return Ok(None);
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("外部密钥文件路径没有上级目录"))?;
+    if !parent.exists() {
+        fs::create_dir_all(parent).with_context(|| "无法创建外部密钥文件所在的目录")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+        }
+    }
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&path)
+        .with_context(|| "无法新建外部密钥文件")?;
+    file.write_all("# Agent Manager 保存的 API Key：一行一个 KEY=VALUE，仅本人可读\n".as_bytes())?;
+    file.sync_all()?;
+    Ok(Some(path))
+}
+
 pub fn validate_source(ctx: &Context, raw: &str) -> Result<()> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {

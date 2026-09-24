@@ -156,6 +156,12 @@ fn status(ctx: &Context) -> Result<Value> {
                     "path": source_path,
                     "ready": source_ready,
                     "error": source_error,
+                    // 文件里已有哪些变量（只有名字）：表单据此说明这个变量有没有值
+                    "names": if source_ready {
+                        crate::secret_values::stored_names().into_iter().collect::<Vec<_>>()
+                    } else {
+                        Vec::new()
+                    },
                 },
                 "legacy_database_values": legacy_count,
                 "provider_keys": provider_key_references(ctx)
@@ -228,9 +234,11 @@ fn set_value(ctx: &Context, req: &Request) -> Result<Value> {
 
 fn set_source(ctx: &Context, req: &Request) -> Result<Value> {
     let mut path: Option<String> = None;
+    let mut create = false;
     let mut iter = req.args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
+            "--create" if !create => create = true,
             "--path" if path.is_none() => {
                 path = Some(
                     iter.next()
@@ -245,7 +253,21 @@ fn set_source(ctx: &Context, req: &Request) -> Result<Value> {
         }
     }
     let path = path.ok_or_else(|| anyhow::anyhow!("参数错误: 缺少 --path"))?;
-    crate::secret_values::validate_source(ctx, &path)?;
+    if create && path.is_empty() {
+        bail!("参数错误: --create 需要 --path");
+    }
+    let created = if create {
+        crate::secret_values::create_source_file(ctx, &path)?
+    } else {
+        None
+    };
+    if let Err(err) = crate::secret_values::validate_source(ctx, &path) {
+        // 这次新建的空文件没用上：删掉，不留垃圾
+        if let Some(file) = created {
+            let _ = std::fs::remove_file(file);
+        }
+        return Err(err);
+    }
     let mut conn = store::open_write(ctx)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     // 与设置页各自只改自己拥有的字段；同一事务读取可避免并发保存时互相覆盖。
@@ -254,7 +276,7 @@ fn set_source(ctx: &Context, req: &Request) -> Result<Value> {
     store::write_settings(&tx, &settings)?;
     tx.commit()?;
     crate::secret_values::refresh(ctx);
-    Ok(json!({"domain": "secrets", "configured": !path.is_empty()}))
+    Ok(json!({"domain": "secrets", "configured": !path.is_empty(), "created": created.is_some()}))
 }
 
 fn migrate_legacy(ctx: &Context, req: &Request) -> Result<Value> {

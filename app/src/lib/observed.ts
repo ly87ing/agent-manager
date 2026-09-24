@@ -443,6 +443,8 @@ export interface SecretsMcpEnvObserved {
     path?: string | null;
     ready?: boolean;
     error?: string | null;
+    /** 文件里已有的变量名（只有名字，没有取值）。 */
+    names?: string[];
   };
   legacy_database_values?: number;
   /** 接入配置与独立环境引用的凭据变量：用在哪里、有没有取值；不含取值。 */

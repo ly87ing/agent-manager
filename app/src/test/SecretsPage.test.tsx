@@ -78,7 +78,7 @@ describe("SecretsPage", () => {
       "secrets:status": makeEnvelope({ domain: "secrets", elements: [element] }, { command: "secrets.status" }),
     });
     const section = await screen.findByTestId("secrets-provider-keys");
-    expect(section).toHaveTextContent("改了取值后，到下面列出的独立环境卡片上重新「写入配置」才生效");
+    expect(section).toHaveTextContent("用到它的独立环境卡片会提示「密钥换过了」，点卡片上的「写入新密钥」才生效");
     expect(screen.getByTestId("provider-key-GLM_API_KEY")).toHaveTextContent("接入 智谱（claude-code）、独立环境 Claude · GLM（cc-glm）");
     expect(screen.getByTestId("provider-key-GLM_API_KEY")).toHaveTextContent("外部文件");
     expect(screen.getByTestId("provider-key-KIMI_API_KEY")).toHaveTextContent("未配置");
@@ -263,5 +263,39 @@ describe("SecretsPage", () => {
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("title", "先在上方选择可用的外部密钥文件");
     expect(screen.getByTestId("secrets-source-status")).toHaveTextContent("尚未选择");
+  });
+});
+
+describe("SecretsPage 新建密钥文件", () => {
+  it("还没有密钥文件时可以就地新建：留空用默认位置，带 --create", async () => {
+    const calls: { command: string; args: string[] }[] = [];
+    const element = mcpEnvElement([], 0, "managed-ok", { configured: false, path: null, ready: false, error: null });
+    renderSecrets(
+      {
+        "secrets:status": makeEnvelope({ domain: "secrets", elements: [element] }, { command: "secrets.status" }),
+        "secrets:source": makeEnvelope({ domain: "secrets", configured: true, created: true }, { command: "secrets.source" }),
+      },
+      calls,
+    );
+    const create = await screen.findByTestId("secrets-source-create");
+    expect(screen.getByTestId("secrets-source-card")).toHaveTextContent("也可以在这里新建一个");
+    await userEvent.click(create);
+    await waitFor(() => expect(calls.some((call) => call.command === "secrets:source")).toBe(true));
+    expect(calls.find((call) => call.command === "secrets:source")!.args).toEqual([
+      "--path",
+      "~/.config/agent-manager/secrets.env",
+      "--create",
+    ]);
+  });
+
+  it("已经选了密钥文件就不再给新建按钮", async () => {
+    renderSecrets({
+      "secrets:status": makeEnvelope(
+        { domain: "secrets", elements: [mcpEnvElement([], 0, "managed-ok")] },
+        { command: "secrets.status" },
+      ),
+    });
+    await screen.findByTestId("secrets-source-status");
+    expect(screen.queryByTestId("secrets-source-create")).toBeNull();
   });
 });

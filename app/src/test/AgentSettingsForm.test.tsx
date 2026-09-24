@@ -1426,6 +1426,70 @@ describe("助手运行参数", () => {
     expect(calls.indexOf(saved)).toBeLessThan(calls.indexOf(secret));
   });
 
+  it("第一次填 API Key 还没有密钥文件：表单先说明会新建到哪，保存时先新建（仅本人可读）再写入", async () => {
+    const secretsStatus = (source: Record<string, unknown>) =>
+      makeEnvelope(
+        {
+          domain: "secrets",
+          elements: [
+            makeElement({ id: "secrets:mcp-env", domain: "secrets", spec: {}, policy: {}, observed: { variables: [], source }, state: "managed-ok", actions: [] }),
+          ],
+        },
+        { command: "secrets.status" },
+      );
+    const { calls } = renderWithEngine(<AgentsPage />, routes({
+      "secrets:status": secretsStatus({ configured: false, ready: false, path: null, error: null, names: [] }),
+      "secrets:source": makeEnvelope({ domain: "secrets", configured: true, created: true }, { command: "secrets.source" }),
+    }));
+
+    await userEvent.click(await screen.findByTestId("add-connection-button"));
+    await userEvent.click(screen.getByTestId("connection-preset-kimi-cn-claude"));
+    expect(screen.getByTestId("new-connection-key-status")).toHaveTextContent(
+      "还没有密钥文件：保存时会新建 ~/.config/agent-manager/secrets.env（仅本人可读），API Key 只写进这个文件",
+    );
+    await userEvent.type(screen.getByTestId("new-connection-secret"), "fake-secret-value");
+    await userEvent.click(screen.getByTestId("connection-form-submit"));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "secrets:set")).toBe(true));
+    const source = calls.find((call) => call.command === "secrets:source")!;
+    expect(source.args).toEqual(["--path", "~/.config/agent-manager/secrets.env", "--create"]);
+    const secret = calls.find((call) => call.command === "secrets:set")!;
+    expect(calls.indexOf(source)).toBeLessThan(calls.indexOf(secret));
+    expect(await screen.findByText("已新建密钥文件 ~/.config/agent-manager/secrets.env")).toBeInTheDocument();
+  });
+
+  it("密钥文件里已有这个变量：说明留空保持不变；没有时说明要填上才能用", async () => {
+    const withSource = (names: string[]) =>
+      makeEnvelope(
+        {
+          domain: "secrets",
+          elements: [
+            makeElement({
+              id: "secrets:mcp-env",
+              domain: "secrets",
+              spec: {},
+              policy: {},
+              observed: { variables: [], source: { configured: true, ready: true, path: "~/private/secrets.env", error: null, names } },
+              state: "managed-ok",
+              actions: [],
+            }),
+          ],
+        },
+        { command: "secrets.status" },
+      );
+    const { calls } = renderWithEngine(<AgentsPage />, routes({ "secrets:status": withSource(["KIMI_API_KEY"]) }));
+    await userEvent.click(await screen.findByTestId("add-connection-button"));
+    await userEvent.click(screen.getByTestId("connection-preset-kimi-cn-claude"));
+    expect(screen.getByTestId("new-connection-key-status")).toHaveTextContent(
+      "~/private/secrets.env 里已有 KIMI_API_KEY 的值：留空保持不变，填了就替换",
+    );
+    await userEvent.clear(screen.getByTestId("new-connection-token-var"));
+    await userEvent.type(screen.getByTestId("new-connection-token-var"), "OTHER_KEY");
+    expect(screen.getByTestId("new-connection-key-status")).toHaveTextContent("~/private/secrets.env 里还没有 OTHER_KEY：填上才能用");
+    // 已有密钥文件时不再新建
+    expect(calls.some((call) => call.command === "secrets:source")).toBe(false);
+  });
+
   it("凭据保存被拒绝：保留弹窗和输入，说明已保存到哪一步且不继续启用", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes({
       "secrets:set": makeEnvelope(

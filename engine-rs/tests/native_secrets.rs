@@ -412,3 +412,85 @@ fn provider_key_variables_list_their_connections_and_instances() {
     std::env::remove_var("AM_TEST_PK_KIMI");
     let _ = std::fs::remove_dir_all(base);
 }
+
+#[test]
+fn 密钥文件可以就地新建_仅本人可读_已有的不覆盖_不能建在数据目录() {
+    use std::os::unix::fs::PermissionsExt;
+    let (base, ctx) = temp_ctx("create-source");
+    std::fs::create_dir_all(&ctx.home_dir).unwrap();
+    let path = "~/.config/agent-manager/secrets.env";
+    let real = ctx.home_dir.join(".config/agent-manager/secrets.env");
+
+    // 不带 --create：文件不存在就拒绝（原行为不变）
+    let refused = execute(&ctx, &request("secrets:source", &["--path", path]));
+    assert!(!refused.ok);
+    assert!(!real.exists());
+
+    let created = execute(
+        &ctx,
+        &request("secrets:source", &["--path", path, "--create"]),
+    );
+    assert!(created.ok, "{:?}", created.errors);
+    assert_eq!(created.data["created"], true);
+    let file_mode = std::fs::metadata(&real).unwrap().permissions().mode() & 0o777;
+    let dir_mode = std::fs::metadata(real.parent().unwrap())
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(file_mode, 0o600);
+    assert_eq!(dir_mode, 0o700);
+
+    // 写进去的密钥只在这个文件里；状态只报变量名
+    let set = execute(
+        &ctx,
+        &request(
+            "secrets:set",
+            &["--var", "KIMI_API_KEY", "--value", "sk-created-file-value"],
+        ),
+    );
+    assert!(set.ok, "{:?}", set.errors);
+    let status = secrets_status(&ctx, &[]);
+    let source = &mcp_env_element(&status)["observed"]["source"];
+    assert_eq!(source["ready"], true);
+    assert_eq!(source["names"], json!(["KIMI_API_KEY"]));
+    assert!(!serde_json::to_string(&status.data)
+        .unwrap()
+        .contains("sk-created-file-value"));
+
+    // 再带 --create：文件已存在，一个字节都不动
+    let before = std::fs::read(&real).unwrap();
+    let again = execute(
+        &ctx,
+        &request("secrets:source", &["--path", path, "--create"]),
+    );
+    assert!(again.ok, "{:?}", again.errors);
+    assert_eq!(again.data["created"], false);
+    assert_eq!(std::fs::read(&real).unwrap(), before);
+
+    // 数据目录里、相对路径：拒绝，什么都不建
+    let inside = ctx.data_dir.join("secrets.env");
+    let refused = execute(
+        &ctx,
+        &request(
+            "secrets:source",
+            &["--path", inside.to_str().unwrap(), "--create"],
+        ),
+    );
+    assert!(!refused.ok);
+    assert!(!inside.exists());
+    let refused = execute(
+        &ctx,
+        &request("secrets:source", &["--path", "secrets.env", "--create"]),
+    );
+    assert!(!refused.ok);
+    assert!(
+        !execute(
+            &ctx,
+            &request("secrets:source", &["--path", "", "--create"])
+        )
+        .ok
+    );
+
+    let _ = std::fs::remove_dir_all(&base);
+}

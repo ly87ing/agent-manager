@@ -5,6 +5,7 @@ import { cn } from "../lib/utils";
 import { useDialogFocus } from "../lib/dialogFocus";
 import { detectSystemPlatform, urlHasUserinfo } from "../lib/agentDefinitionForm";
 import { ALL_SEED_ITEMS, type SeedItem } from "../lib/profileSeed";
+import { keyStatus, type SecretSourceState } from "../lib/secretSource";
 import { ProfileSeedPicker } from "./ProfileSeedPicker";
 import {
   PROFILE_ID_RE,
@@ -39,6 +40,7 @@ export function ProfileFormDialog({
   baseBinOf,
   onSubmit,
   onFetchModels,
+  secretSource,
   onClose,
 }: {
   /** 可作为归属的助手（目前支持 Claude Code 与 Codex）。 */
@@ -52,6 +54,8 @@ export function ProfileFormDialog({
   onSubmit: (input: ProfileFormInput, options: { seedItems: SeedItem[] }) => void;
   /** 用表单里的地址与凭据变量问接口能用哪些模型；失败时返回原因。只在点按钮时才联网。 */
   onFetchModels?: (draft: { kind: ProfileKind; baseUrl: string; tokenVar: string }) => Promise<string[] | string>;
+  /** 密钥文件的状态：说明这个变量现在有没有值。 */
+  secretSource?: SecretSourceState | null;
   onClose: () => void;
 }) {
   const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
@@ -309,8 +313,8 @@ export function ProfileFormDialog({
                 </label>
                 <div className="mt-4 grid gap-4 md:grid-cols-2">
                   <label className="block text-sm font-medium text-foreground" htmlFor="profile-token-var">
-                    鉴权变量名
-                    <span className="ml-2 text-xs font-normal text-muted-foreground">可选</span>
+                    API Key 所在的变量
+                    <span className="ml-2 text-xs font-normal text-muted-foreground">第三方环境必填</span>
                     <input
                       id="profile-token-var"
                       value={tokenVar}
@@ -319,6 +323,24 @@ export function ProfileFormDialog({
                       placeholder="WORK_API_TOKEN"
                       className="mt-2 h-11 w-full rounded-lg border border-input bg-background px-3 font-mono text-sm"
                     />
+                    {tokenVar.trim() && secretSource !== undefined && (() => {
+                      const status = keyStatus(secretSource, tokenVar);
+                      return (
+                        <span
+                          data-testid="profile-key-status"
+                          className={cn(
+                            "mt-1 block text-xs font-normal",
+                            status.tone === "ok" ? "text-success" : status.tone === "warn" ? "text-warning" : "text-muted-foreground",
+                          )}
+                        >
+                          {status.tone === "ok"
+                            ? `密钥文件里已有 ${tokenVar.trim()}，写入环境时用它的值。`
+                            : status.tone === "warn" && secretSource?.configured && secretSource.ready
+                              ? `密钥文件里还没有 ${tokenVar.trim()}：到「设置 → 密钥」填上，或用「新建环境 → 第三方厂商」在表单里直接填 API Key。`
+                              : status.text}
+                        </span>
+                      );
+                    })()}
                   </label>
                   <label className="block text-sm font-medium text-foreground" htmlFor="profile-model">
                     模型
