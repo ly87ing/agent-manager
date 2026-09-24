@@ -29,7 +29,11 @@ export interface ConnectionPreset {
   aliasHaiku?: string;
   /** 厂商建议的请求超时（毫秒）。 */
   timeoutMs?: string;
-  /** 建议的环境变量名；取值仍要自己在密钥页填。 */
+  /**
+   * 建议的环境变量名；取值仍要自己在密钥页填。国内与国际是两套账号、两把密钥，变量名分开：
+   * 厂商自己的接入代码有写法的照它（MiniMax 命令行国内用 MINIMAX_CN_API_KEY，Z.ai 配置助手用
+   * Z_AI_API_KEY），其余国际版加 _GLOBAL。
+   */
   tokenVar: string;
   /** 这条取自哪家的什么文档，便于自己去核对。 */
   source: string;
@@ -60,7 +64,7 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     aliasSonnet: "glm-5.3[1m]",
     aliasHaiku: "glm-5.3-flash[1m]",
     timeoutMs: "3000000",
-    tokenVar: "GLM_API_KEY",
+    tokenVar: "Z_AI_API_KEY",
     source: "智谱官方配置助手 @z_ai/coding-helper 与文档 docs.z.ai",
   },
   {
@@ -84,7 +88,7 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     aliasOpus: "kimi-k3[1m]",
     aliasSonnet: "kimi-k3[1m]",
     aliasHaiku: "kimi-k2.7-code",
-    tokenVar: "KIMI_API_KEY",
+    tokenVar: "KIMI_GLOBAL_API_KEY",
     source: "Kimi 开放平台文档 platform.kimi.ai",
   },
   {
@@ -109,7 +113,7 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     aliasSonnet: "MiniMax-M2.7",
     aliasHaiku: "MiniMax-M2.7-highspeed",
     timeoutMs: "3000000",
-    tokenVar: "MINIMAX_API_KEY",
+    tokenVar: "MINIMAX_CN_API_KEY",
     source: "MiniMax 官方命令行 MiniMax-AI/cli 与文档 platform.minimaxi.com",
   },
   {
@@ -142,7 +146,7 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     kind: "codex",
     baseUrl: "https://api.z.ai/api/v1",
     model: "glm-5.3",
-    tokenVar: "GLM_API_KEY",
+    tokenVar: "Z_AI_API_KEY",
     source: "智谱官方配置助手 @z_ai/coding-helper 与文档 docs.z.ai",
   },
   {
@@ -160,7 +164,7 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     kind: "codex",
     baseUrl: "https://api.moonshot.ai/v1",
     model: "kimi-k3",
-    tokenVar: "KIMI_API_KEY",
+    tokenVar: "KIMI_GLOBAL_API_KEY",
     source: "Kimi 开放平台文档 platform.kimi.ai（Codex 接入指南）",
   },
   {
@@ -197,7 +201,7 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     kind: "codex",
     baseUrl: "https://api.minimaxi.com/v1",
     model: "MiniMax-M3",
-    tokenVar: "MINIMAX_API_KEY",
+    tokenVar: "MINIMAX_CN_API_KEY",
     source: "MiniMax 官方命令行 MiniMax-AI/cli 与文档 platform.minimaxi.com",
   },
   {

@@ -63,6 +63,21 @@ describe("接入配置预设", () => {
     expect(code.every((p) => p.label.includes("Kimi Code"))).toBe(true);
   });
 
+  it("同一厂商国内与国际是两套账号：密钥变量不混用，同一区域两种形态共用一个", () => {
+    for (const vendor of ["glm", "kimi", "minimax"]) {
+      const cn = CONNECTION_PRESETS.filter((p) => p.id.startsWith(`${vendor}-cn-`));
+      const global = CONNECTION_PRESETS.filter((p) => p.id.startsWith(`${vendor}-global-`));
+      expect(cn.length, vendor).toBe(2);
+      expect(global.length, vendor).toBe(2);
+      expect(new Set(cn.map((p) => p.tokenVar)).size, vendor).toBe(1);
+      expect(new Set(global.map((p) => p.tokenVar)).size, vendor).toBe(1);
+      expect(cn[0].tokenVar, vendor).not.toBe(global[0].tokenVar);
+    }
+    // 厂商自己的命令行怎么叫就怎么叫
+    expect(CONNECTION_PRESETS.find((p) => p.id === "minimax-cn-claude")!.tokenVar).toBe("MINIMAX_CN_API_KEY");
+    expect(CONNECTION_PRESETS.find((p) => p.id === "minimax-global-claude")!.tokenVar).toBe("MINIMAX_API_KEY");
+  });
+
   it("厂商建议的请求超时带进表单", () => {
     const preset = CONNECTION_PRESETS.find((p) => p.id === "glm-cn-claude")!;
     expect(connectionFromPreset(preset, "glm-cn").timeoutMs).toBe("3000000");
