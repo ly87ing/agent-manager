@@ -247,3 +247,170 @@ fn 清空之后可以从头再扫一遍() {
 
     let _ = fs::remove_dir_all(&base);
 }
+
+fn request_with(command: &str, args: &[&str]) -> Request {
+    Request {
+        command: command.to_string(),
+        args: args.iter().map(|s| s.to_string()).collect(),
+        run_id: "usage-test".to_string(),
+    }
+}
+
+/// 真实 claude 2.1.281 的 `--fork-session` 新建一个会话文件，把之前的回复（同一个
+/// message.id、同样的用量）原样抄进去：跨文件只算一次。
+#[test]
+fn claude_分叉会话抄来的旧回复只算一次() {
+    let (base, ctx) = temp_ctx("fork-session");
+    write_claude_session(
+        &ctx,
+        "parent.jsonl",
+        &[
+            claude_event("1", "02", "m", 10, 1, 0),
+            claude_event("2", "02", "m", 20, 2, 0),
+        ],
+    );
+    assert!(execute(&ctx, &request("usage:scan")).ok);
+    write_claude_session(
+        &ctx,
+        "fork.jsonl",
+        &[
+            claude_event("1", "02", "m", 10, 1, 0),
+            claude_event("2", "02", "m", 20, 2, 0),
+            claude_event("3", "02", "m", 30, 3, 0),
+        ],
+    );
+    assert!(execute(&ctx, &request("usage:scan")).ok);
+    let rows = rows_of(&execute(&ctx, &request("usage:status")));
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0]["input"], 60, "10 + 20 + 30，抄来的两条不重复算");
+    assert_eq!(rows[0]["requests"], 3);
+    let _ = fs::remove_dir_all(&base);
+}
+
+/// 升级前已经扫过的会话：去重表第一次建立时用已扫过的内容回填，之后分叉出来的文件里
+/// 抄来的旧回复同样认得出来。
+#[test]
+fn 升级前扫过的会话也认得出分叉里抄来的回复() {
+    let (base, ctx) = temp_ctx("backfill");
+    write_claude_session(
+        &ctx,
+        "parent.jsonl",
+        &[claude_event("1", "02", "m", 10, 1, 0)],
+    );
+    assert!(execute(&ctx, &request("usage:scan")).ok);
+    // 模拟旧版本的库：没有去重表
+    store::open_write(&ctx)
+        .unwrap()
+        .execute_batch("DROP TABLE usage_seen_messages")
+        .unwrap();
+    write_claude_session(
+        &ctx,
+        "fork.jsonl",
+        &[
+            claude_event("1", "02", "m", 10, 1, 0),
+            claude_event("2", "02", "m", 5, 1, 0),
+        ],
+    );
+    assert!(execute(&ctx, &request("usage:scan")).ok);
+    let rows = rows_of(&execute(&ctx, &request("usage:status")));
+    assert_eq!(rows[0]["input"], 15, "{rows:?}");
+    let _ = fs::remove_dir_all(&base);
+}
+
+/// 第三方接入只在独立环境里用：实例配置目录下的会话同样统计，助手一栏记作 `<类型>:<实例>`。
+#[test]
+fn 独立环境的会话也统计_按实例分开记() {
+    let (base, ctx) = temp_ctx("instances");
+    let saved = execute(
+        &ctx,
+        &request_with(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "agents.definitions.cc-relay",
+                "--value",
+                r#"{"display_name":"relay","bin":"claude","profile":{"base_agent":"claude-code","kind":"claude","config_dir":"~/.claude-relay"},"_delete":false,"_replace":true}"#,
+            ],
+        ),
+    );
+    assert!(saved.ok, "{:?}", saved.errors);
+    let saved = execute(
+        &ctx,
+        &request_with(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "agents.definitions.cx-relay",
+                "--value",
+                r#"{"display_name":"cx","bin":"codex","profile":{"base_agent":"codex","kind":"codex","config_dir":"~/.codex-relay"},"_delete":false,"_replace":true}"#,
+            ],
+        ),
+    );
+    assert!(saved.ok, "{:?}", saved.errors);
+    write_claude_session(&ctx, "main.jsonl", &[claude_event("m", "02", "m", 1, 1, 0)]);
+    let dir = ctx.home_dir.join(".claude-relay/projects/-demo");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("s.jsonl"),
+        format!("{}\n", claude_event("r", "02", "relay-model", 40, 4, 0)),
+    )
+    .unwrap();
+    let dir = ctx.home_dir.join(".codex-relay/sessions/2026/09/17");
+    fs::create_dir_all(&dir).unwrap();
+    let lines = [
+        json!({"timestamp": "2026-09-17T09:00:00Z", "type": "turn_context", "payload": {"model": "k3"}}).to_string(),
+        json!({"timestamp": "2026-09-17T09:10:00Z", "type": "event_msg", "payload": {"type": "token_count", "info": {
+            "total_token_usage": {"input_tokens": 70, "output_tokens": 7},
+            "last_token_usage": {"input_tokens": 70, "cached_input_tokens": 0, "output_tokens": 7}
+        }}}).to_string(),
+    ];
+    fs::write(
+        dir.join("rollout-y.jsonl"),
+        format!("{}\n", lines.join("\n")),
+    )
+    .unwrap();
+
+    assert!(execute(&ctx, &request("usage:scan")).ok);
+    let rows = rows_of(&execute(&ctx, &request("usage:status")));
+    let by_agent = |agent: &str| rows.iter().find(|row| row["agent"] == agent).cloned();
+    assert_eq!(by_agent("claude").unwrap()["input"], 1, "{rows:?}");
+    let relay = by_agent("claude:cc-relay").unwrap();
+    assert_eq!(relay["model"], "relay-model");
+    assert_eq!(relay["input"], 40);
+    let codex = by_agent("codex:cx-relay").unwrap();
+    assert_eq!(codex["model"], "k3");
+    assert_eq!(codex["input"], 70);
+    let _ = fs::remove_dir_all(&base);
+}
+
+/// Codex 会话文件被截断重写：分不清哪些已经算过，不从头重算，接着往后读。
+#[test]
+fn codex_文件被截断后不从头重算() {
+    let (base, ctx) = temp_ctx("codex-truncate");
+    let dir = ctx.home_dir.join(".codex/sessions/2026/09/17");
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("rollout-z.jsonl");
+    let event = |total: i64, last: i64| {
+        json!({"timestamp": "2026-09-17T09:10:00Z", "type": "event_msg", "payload": {"type": "token_count", "info": {
+            "total_token_usage": {"input_tokens": total, "output_tokens": 0},
+            "last_token_usage": {"input_tokens": last, "cached_input_tokens": 0, "output_tokens": 0}
+        }}})
+        .to_string()
+    };
+    fs::write(&path, format!("{}\n{}\n", event(100, 100), event(300, 200))).unwrap();
+    assert!(execute(&ctx, &request("usage:scan")).ok);
+    fs::write(&path, format!("{}\n", event(100, 100))).unwrap();
+    assert!(execute(&ctx, &request("usage:scan")).ok);
+    let mut text = fs::read_to_string(&path).unwrap();
+    text.push_str(&event(150, 50));
+    text.push('\n');
+    fs::write(&path, text).unwrap();
+    assert!(execute(&ctx, &request("usage:scan")).ok);
+    let rows = rows_of(&execute(&ctx, &request("usage:status")));
+    assert_eq!(rows[0]["input"], 350, "300 + 之后新增的 50：{rows:?}");
+    let _ = fs::remove_dir_all(&base);
+}

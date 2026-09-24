@@ -154,9 +154,13 @@ const RANGES: { days: number; label: string }[] = [
   { days: 0, label: "全部" },
 ];
 
+/** 助手一栏：主配置记作 claude / codex，独立环境记作 `claude:<实例>` / `codex:<实例>`。 */
 function agentLabel(agent: string): string {
   if (agent === "claude" || agent === "claude-code") return "Claude Code";
   if (agent === "codex") return "Codex";
+  const [kind, instance] = agent.split(":", 2);
+  if (instance && kind === "claude") return `Claude Code · ${instance}`;
+  if (instance && kind === "codex") return `Codex · ${instance}`;
   return agent;
 }
 

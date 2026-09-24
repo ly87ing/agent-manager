@@ -62,6 +62,27 @@ describe("用量页", () => {
     expect(screen.getByTestId("usage-total-cost")).toHaveTextContent("$10.00");
   });
 
+  it("独立环境的用量按实例单独列出，可在助手筛选里选到", async () => {
+    const withInstance = routes();
+    const status = withInstance["usage:status"] as { data: { rows: Record<string, unknown>[] } };
+    status.data.rows.push({
+      hour: `${new Date().toISOString().slice(0, 10)}T04:00:00Z`,
+      agent: "claude:cc-relay",
+      model: "relay-model",
+      input: 10,
+      output: 1,
+      cache_write: 0,
+      cache_read: 0,
+      requests: 1,
+    });
+    renderWithEngine(<UsagePage />, withInstance);
+    const filter = await screen.findByTestId("usage-agent-filter");
+    await waitFor(() => expect(filter).toHaveTextContent("Claude Code · cc-relay"));
+    await userEvent.selectOptions(filter, "claude:cc-relay");
+    expect(screen.getByTestId(`usage-row-${new Date().toISOString().slice(0, 10)}-relay-model`)).toBeInTheDocument();
+    expect(screen.queryByTestId(`usage-row-${new Date().toISOString().slice(0, 10)}-claude-opus-5`)).toBeNull();
+  });
+
   it("没单价的那行费用留空，不拿 0 冒充", async () => {
     renderWithEngine(<UsagePage />, routes());
     const row = await screen.findByTestId(
