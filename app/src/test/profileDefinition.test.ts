@@ -291,3 +291,14 @@ describe("用着某套接入的独立环境", () => {
     expect(instancesUsingConnection(definitions, "claude-code", { baseUrl: "", tokenVar: "GLM_API_KEY" })).toEqual([]);
   });
 });
+
+describe("子代理模型随接入进独立环境", () => {
+  it("接入的子代理模型写成实例 env 的 CLAUDE_CODE_SUBAGENT_MODEL", () => {
+    const made = connectionToProfileInput(
+      { id: "claude-code", kind: "claude" },
+      { ...emptyConnection("glm"), baseUrl: "https://open.bigmodel.cn/api/anthropic", tokenVar: "GLM_API_KEY", model: "glm-5.3", subagentModel: "glm-5.3-air" },
+      [],
+    );
+    expect(made?.input.extraEnv.CLAUDE_CODE_SUBAGENT_MODEL).toBe("glm-5.3-air");
+  });
+});

@@ -969,6 +969,44 @@ describe("助手运行参数", () => {
     expect(within(dialog).getByTestId("profile-token-var")).toHaveValue("DEEPSEEK_API_KEY");
   });
 
+  it("添加接入时可获取模型列表挑模型；别名可一键都用默认模型；子代理模型随接入保存", async () => {
+    const withModels = routes();
+    withModels["agents:models"] = makeEnvelope(
+      { endpoint: "https://api.deepseek.com/anthropic/v1/models", count: 2, models: ["deepseek-v4-pro", "deepseek-v4-flash"] },
+      { command: "agents.models" },
+    );
+    const rendered = renderWithEngine(<AgentsPage />, withModels);
+    await userEvent.click(await screen.findByTestId("add-connection-button"));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: /DeepSeek/ }));
+    await userEvent.click(within(dialog).getByTestId("connection-fetch-models"));
+    expect(await within(dialog).findByTestId("connection-models-message")).toHaveTextContent("已获取 2 个模型");
+    const options = [...within(dialog).getByTestId("connection-model-options").querySelectorAll("option")].map((o) => o.getAttribute("value"));
+    expect(options).toEqual(["deepseek-v4-pro", "deepseek-v4-flash"]);
+    const fetch = rendered.calls.find((call) => call.command === "agents:models")!;
+    expect(JSON.parse(fetch.args[fetch.args.indexOf("--draft") + 1])).toEqual({
+      kind: "claude",
+      base_url: "https://api.deepseek.com/anthropic",
+      token_var: "DEEPSEEK_API_KEY",
+    });
+    const model = within(dialog).getByTestId("new-connection-model");
+    await userEvent.clear(model);
+    await userEvent.type(model, "deepseek-v4-pro");
+    await userEvent.click(within(dialog).getByText("高级字段"));
+    await userEvent.click(within(dialog).getByTestId("connection-fill-aliases"));
+    for (const tier of ["opus", "sonnet", "haiku", "fable"]) {
+      expect(within(dialog).getByTestId(`new-connection-alias-${tier}`)).toHaveValue("deepseek-v4-pro");
+    }
+    await userEvent.type(within(dialog).getByTestId("new-connection-subagent-model"), "deepseek-v4-flash");
+    await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
+    await waitFor(() => expect(rendered.calls.some((call) => call.command === "policy:set")).toBe(true));
+    const saved = rendered.calls.find((call) => call.command === "policy:set")!;
+    const definition = JSON.parse(saved.args[saved.args.indexOf("--value") + 1]);
+    const entry = Object.values(definition.settings.profiles as Record<string, Record<string, unknown>>).find((item) => item.base_url === "https://api.deepseek.com/anthropic")!;
+    expect(entry.subagent_model).toBe("deepseek-v4-flash");
+    expect(entry.model_aliases).toEqual({ opus: "deepseek-v4-pro", sonnet: "deepseek-v4-pro", haiku: "deepseek-v4-pro", fable: "deepseek-v4-pro" });
+  });
+
   it("工作台导入接入：先预览，只保存定义且不启用、不写凭据", async () => {
     const withProfiles = routes();
     const { calls } = renderWithEngine(<AgentsPage />, withProfiles);

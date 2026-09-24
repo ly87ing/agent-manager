@@ -46,6 +46,11 @@ export interface ConnectionEntry {
   aliasHaiku: string;
   /** Claude Code 的 fable 别名解析到的模型（官方 ANTHROPIC_DEFAULT_FABLE_MODEL）。 */
   aliasFable?: string;
+  /**
+   * 子代理、团队成员与工作流代理的默认模型（官方 CLAUDE_CODE_SUBAGENT_MODEL，可填别名或完整模型名）。
+   * 只随接入建成独立环境时写进实例 env，不参与主配置的接入识别（官方账号也可能自己设它）。
+   */
+  subagentModel?: string;
   /** 请求超时（毫秒）；留空用默认。 */
   timeoutMs: string;
   /**
@@ -186,6 +191,7 @@ export function parseConnectionBundle(text: string, expectedKind: "claude" | "co
     aliasSonnet: stringField("aliasSonnet").trim(),
     aliasHaiku: stringField("aliasHaiku").trim(),
     ...(stringField("aliasFable").trim() ? { aliasFable: stringField("aliasFable").trim() } : {}),
+    ...(stringField("subagentModel").trim() ? { subagentModel: stringField("subagentModel").trim() } : {}),
     timeoutMs: stringField("timeoutMs").trim(),
   };
   const error = validateConnectionEntry(connection);
@@ -212,6 +218,7 @@ export function connectionToDefinitionValue(item: ConnectionEntry): Record<strin
   if (item.aliasHaiku.trim()) aliases.haiku = item.aliasHaiku.trim();
   if (item.aliasFable?.trim()) aliases.fable = item.aliasFable.trim();
   if (Object.keys(aliases).length > 0) entry.model_aliases = aliases;
+  if (item.subagentModel?.trim()) entry.subagent_model = item.subagentModel.trim();
   const timeout = Number(item.timeoutMs.trim());
   if (item.timeoutMs.trim() && Number.isFinite(timeout) && timeout > 0) {
     entry.timeout_ms = Math.floor(timeout);
@@ -256,6 +263,7 @@ export function upsertAgentConnection(
     "model",
     "small_fast_model",
     "model_aliases",
+    "subagent_model",
     "timeout_ms",
   ]) {
     delete currentEntry[key];
@@ -554,6 +562,7 @@ function readAgentSettings(
       aliasSonnet: alias("sonnet"),
       aliasHaiku: alias("haiku"),
       ...(alias("fable") ? { aliasFable: alias("fable") } : {}),
+      ...(text("subagent_model") ? { subagentModel: text("subagent_model") } : {}),
       timeoutMs: typeof entry.timeout_ms === "number" ? String(entry.timeout_ms) : "",
       ...(typeof entry.provider_ref === "string" && entry.provider_ref
         ? { providerRef: entry.provider_ref }

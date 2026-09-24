@@ -1392,6 +1392,12 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
           { command: "agents.check" },
         );
       }
+      if (command === "agents:models") {
+        return makeEnvelope(
+          { endpoint: "https://api.example.com/v1/models", count: 3, models: ["mock-model-large", "mock-model-fast", "mock-model-mini"] },
+          { command: "agents.models" },
+        );
+      }
       if (command === "rules:apply") return applyRules(args, runId);
       if (command === "rules:save-template") return saveRuleTemplate(args);
       if (command === "rules:delete-template") return deleteRuleTemplate(args);

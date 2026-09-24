@@ -173,7 +173,9 @@ Codex 侧读 `<CODEX_HOME>/sessions/**/rollout-*.jsonl` 里最后一条 `rate_li
 **接入配置**：`settings.profiles` 存多套各家中转站的接入定义，作为备选保存、测试、导入导出，
 或建成独立环境。每套含地址、令牌变量名、令牌走哪个头（`token` → `ANTHROPIC_AUTH_TOKEN` 的
 Bearer，`api_key` → `ANTHROPIC_API_KEY` 的 x-api-key，中转站两种都有）、模型、
-opus/sonnet/haiku/fable 别名与超时（官方已弃用的小任务模型 `ANTHROPIC_SMALL_FAST_MODEL` 只读旧值，新接入不再
+opus/sonnet/haiku/fable 别名（表单可一键都指向默认模型：第三方接口没配的别名会把 Claude 的模型名原样发过去）、
+子代理模型（官方 `CLAUDE_CODE_SUBAGENT_MODEL`，存为接入的 `subagent_model`，只在建成独立环境时写进实例 env，
+不参与主配置的接入识别——官方账号也可能自己设它）与超时（官方已弃用的小任务模型 `ANTHROPIC_SMALL_FAST_MODEL` 只读旧值，新接入不再
 提供，建成独立环境时按官方替代写成 Haiku 别名）；地址允许 `https://` 与任意主机的 `http://`（界面对非 https
 提示令牌将明文传输）。当前是哪一套以目标文件为准：`agents:status` 把实际接入与每套已保存
 接入按渲染结果逐项比较，给出 `current_config.current`（`profile` 为匹配到的那套，`default`
@@ -493,6 +495,16 @@ Codex `{base}/responses`），HTTP 结果翻成可执行的话（401 → 令牌�
 第三方接入真正在用的是独立环境，因此 `agents:check --only profiles:<实例>` 也检查实例：按实例定义取地址、
 凭据变量（Claude 的 `${VAR}` 引用、Codex 的 `env_key`）与模型，与写进实例配置的一致；官方账号实例没有第三方
 端点，不代为发请求，说明到终端里用它的启动命令验证。实例卡片对第三方环境提供「测一下」，结果就地显示。
+
+**获取模型列表**（`agents:models`）与检查同一口径：只在点「获取模型列表」时联网，只读（除审计外不写），凭据
+经 0600 临时文件交给 curl。目标可以是已保存的接入（`--only <助手> --use <接入>`）、独立环境（`--only
+profiles:<实例>`）或表单里还没保存的草稿（`--draft {"kind","base_url","token_var"}`，凭据取值仍由引擎从密钥
+来源解析，不经界面传递，没取值就在发请求前拒绝）。候选地址都在接入地址的同一主机下：Claude 形态先试
+`{base}/v1/models`、`{base}/models`，再去掉 `/anthropic`、`/api/anthropic`、`/apps/anthropic` 这类兼容后缀
+试同一厂商 OpenAI 协议的 `/v1/models`、`/models`；Codex 形态试 `{base}/models`（地址不带 `/v1` 时再试
+`{base}/v1/models`）。同一把凭据同时放进 `x-api-key` 与 `Authorization: Bearer`（官方 `apiKeyHelper` 的做法），
+Claude 形态另带 `anthropic-version`。404/405 换下一个，其他错误按检查的口径翻成能照着做的话；都拿不到列表时如实
+说「这个接口没有提供模型列表」，不编模型名。结果只填进接入与独立环境表单里模型与别名输入框的下拉候选。
 
 **厂商预设**（`app/src/lib/connectionPresets.ts`）只是填表助手，不参与落地：选中即把地址、
 模型与模型别名填进表单，用户可继续改。收录标准是「厂商自营 + 官方文档写明端点」，

@@ -687,6 +687,24 @@ describe("助手实例", () => {
     expect(calls.some((item) => item.command === "profiles:apply")).toBe(false);
   });
 
+  it("新建独立环境时可获取模型列表：失败时就地说明原因", async () => {
+    const routeMap = {
+      ...routes([profileElement()]),
+      "agents:models": makeEnvelope(null, { ok: false, command: "agents.models", errors: [{ code: "AGENT_ERROR", message: "环境变量 RELAY_KEY 还没有取值", element: null }] }),
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, routeMap);
+    await openInstanceManager();
+    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    expect(within(dialog).getByTestId("profile-fetch-models")).toBeDisabled();
+    await userEvent.type(within(dialog).getByTestId("profile-base-url"), "https://relay.example.com");
+    await userEvent.type(within(dialog).getByTestId("profile-token-var"), "RELAY_KEY");
+    await userEvent.click(within(dialog).getByTestId("profile-fetch-models"));
+    expect(await within(dialog).findByTestId("profile-models-message")).toHaveTextContent("RELAY_KEY 还没有取值");
+    const call = calls.find((item) => item.command === "agents:models")!;
+    expect(JSON.parse(call.args[1])).toEqual({ kind: "claude", base_url: "https://relay.example.com", token_var: "RELAY_KEY" });
+  });
+
   it("移除实例需确认，且只停止管理、不动配置目录", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await openInstanceManager();

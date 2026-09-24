@@ -36,6 +36,7 @@ export function ConnectionFormDialog({
   error,
   onSubmit,
   onOpenSecrets,
+  onFetchModels,
   onClose,
 }: {
   agentName: string;
@@ -49,8 +50,13 @@ export function ConnectionFormDialog({
   error?: string | null;
   onSubmit: (submission: ConnectionSubmission) => void;
   onOpenSecrets?: () => void;
+  /** 用表单里的地址与凭据变量问接口能用哪些模型；失败时返回原因。只在点按钮时才联网。 */
+  onFetchModels?: (draft: { kind: ConnectionKind; baseUrl: string; tokenVar: string }) => Promise<string[] | string>;
   onClose: () => void;
 }) {
+  const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
+  const [modelsMessage, setModelsMessage] = useState<string | null>(null);
+  const [fetchingModels, setFetchingModels] = useState(false);
   const rootRef = useRef<HTMLElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(
     typeof document === "undefined" ? null : (document.activeElement as HTMLElement | null),
@@ -68,7 +74,7 @@ export function ConnectionFormDialog({
   const [localError, setLocalError] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(!duplicating && Boolean(
     initialConnection?.timeoutMs || initialConnection?.smallFastModel || initialConnection?.aliasOpus
-    || initialConnection?.aliasSonnet || initialConnection?.aliasHaiku || initialConnection?.aliasFable || initialConnection?.auth === "api_key",
+    || initialConnection?.aliasSonnet || initialConnection?.aliasHaiku || initialConnection?.aliasFable || initialConnection?.subagentModel || initialConnection?.auth === "api_key",
   ));
   const dialogTitle = editing
     ? `编辑 ${initialConnection.label || initialConnection.name}`
@@ -292,7 +298,7 @@ export function ConnectionFormDialog({
                         <dd className="break-all font-mono text-xs text-foreground">环境变量 {connection.tokenVar}</dd>
                       </div>
                     </dl>
-                    {(connection.timeoutMs || connection.smallFastModel || connection.aliasOpus || connection.aliasSonnet || connection.aliasHaiku || connection.aliasFable || connection.auth === "api_key") && (
+                    {(connection.timeoutMs || connection.smallFastModel || connection.aliasOpus || connection.aliasSonnet || connection.aliasHaiku || connection.aliasFable || connection.subagentModel || connection.auth === "api_key") && (
                       <details className="border-t px-3 py-2 text-xs">
                         <summary className="cursor-pointer text-muted-foreground">查看一并复制的高级配置</summary>
                         <dl className="mt-2 grid grid-cols-[7rem_minmax(0,1fr)] gap-x-3 gap-y-1 text-foreground">
@@ -303,6 +309,7 @@ export function ConnectionFormDialog({
                           {connection.aliasSonnet && <><dt>Sonnet 映射</dt><dd className="break-all font-mono">{connection.aliasSonnet}</dd></>}
                           {connection.aliasHaiku && <><dt>Haiku 映射</dt><dd className="break-all font-mono">{connection.aliasHaiku}</dd></>}
                           {connection.aliasFable && <><dt>Fable 映射</dt><dd className="break-all font-mono">{connection.aliasFable}</dd></>}
+                          {connection.subagentModel && <><dt>子代理模型</dt><dd className="break-all font-mono">{connection.subagentModel}</dd></>}
                         </dl>
                       </details>
                     )}
@@ -335,17 +342,63 @@ export function ConnectionFormDialog({
                   />
                 </label>
                 <label className="text-sm text-foreground">
-                  默认模型
+                  <span className="flex items-center justify-between gap-2">
+                    默认模型
+                    {onFetchModels && !referenced && (
+                      <button
+                        type="button"
+                        data-testid="connection-fetch-models"
+                        disabled={fetchingModels || !connection.baseUrl.trim() || !connection.tokenVar.trim()}
+                        title="用上面的地址与凭据变量问接口能用哪些模型；只在点它时联网，不改任何配置"
+                        onClick={async () => {
+                          setFetchingModels(true);
+                          setModelsMessage(null);
+                          try {
+                            const result = await onFetchModels({ kind, baseUrl: connection.baseUrl.trim(), tokenVar: connection.tokenVar.trim() });
+                            if (typeof result === "string") {
+                              setFetchedModels(null);
+                              setModelsMessage(result);
+                            } else {
+                              setFetchedModels(result);
+                              setModelsMessage(`已获取 ${result.length} 个模型，模型与别名输入框可直接下拉挑选`);
+                            }
+                          } finally {
+                            setFetchingModels(false);
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs font-normal text-muted-foreground hover:bg-accent disabled:opacity-50"
+                      >
+                        {fetchingModels && <Loader2 className="h-3 w-3 animate-spin" aria-hidden />}
+                        {fetchingModels ? "正在获取…" : "获取模型列表"}
+                      </button>
+                    )}
+                  </span>
                   <input
                     data-testid="new-connection-model"
                     value={connection.model}
                     onChange={(event) => patch({ model: event.target.value })}
                     placeholder={kind === "claude" ? "例如：claude-sonnet-4-5" : "例如：gpt-5"}
+                    list={fetchedModels ? "connection-model-options" : undefined}
                     className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
                     spellCheck={false}
                   />
                 </label>
               </div>
+              {modelsMessage && (
+                <p
+                  data-testid="connection-models-message"
+                  className={cn("text-xs", fetchedModels ? "text-muted-foreground" : "text-destructive")}
+                >
+                  {modelsMessage}
+                </p>
+              )}
+              {fetchedModels && (
+                <datalist id="connection-model-options" data-testid="connection-model-options">
+                  {fetchedModels.map((model) => (
+                    <option key={model} value={model} />
+                  ))}
+                </datalist>
+              )}
               {referenced ? (
                 <p data-testid="connection-provider-ref" className="rounded border bg-muted px-3 py-2 text-xs text-muted-foreground">
                   引用 config.toml 中已有的接入方式 <code>{connection.providerRef}</code>：地址、凭据变量与超时由那张表决定，这里不改。
@@ -483,12 +536,30 @@ export function ConnectionFormDialog({
                     </label>
                   )}
                   {kind === "claude" && (
+                    <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-2 rounded border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                      <span>第三方接口没配的别名会把 Claude 的模型名原样发过去，多半报模型不存在；只有一个模型时可全部指向默认模型。</span>
+                      <button
+                        type="button"
+                        data-testid="connection-fill-aliases"
+                        disabled={!connection.model.trim()}
+                        onClick={() => {
+                          const model = connection.model.trim();
+                          patch({ aliasOpus: model, aliasSonnet: model, aliasHaiku: model, aliasFable: model });
+                        }}
+                        className="rounded border bg-card px-2.5 py-1 text-xs text-foreground hover:bg-accent disabled:opacity-50"
+                      >
+                        别名都用默认模型
+                      </button>
+                    </div>
+                  )}
+                  {kind === "claude" && (
                     <label className="text-sm text-foreground">
                       Opus 别名（可选）
                       <input
                         data-testid="new-connection-alias-opus"
                         value={connection.aliasOpus}
                         onChange={(event) => patch({ aliasOpus: event.target.value })}
+                        list={fetchedModels ? "connection-model-options" : undefined}
                         className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
                       />
                     </label>
@@ -500,6 +571,7 @@ export function ConnectionFormDialog({
                         data-testid="new-connection-alias-sonnet"
                         value={connection.aliasSonnet}
                         onChange={(event) => patch({ aliasSonnet: event.target.value })}
+                        list={fetchedModels ? "connection-model-options" : undefined}
                         className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
                       />
                     </label>
@@ -511,6 +583,7 @@ export function ConnectionFormDialog({
                         data-testid="new-connection-alias-haiku"
                         value={connection.aliasHaiku}
                         onChange={(event) => patch({ aliasHaiku: event.target.value })}
+                        list={fetchedModels ? "connection-model-options" : undefined}
                         className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
                       />
                     </label>
@@ -522,15 +595,32 @@ export function ConnectionFormDialog({
                         data-testid="new-connection-alias-fable"
                         value={connection.aliasFable ?? ""}
                         onChange={(event) => patch({ aliasFable: event.target.value })}
+                        list={fetchedModels ? "connection-model-options" : undefined}
                         className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
                       />
+                    </label>
+                  )}
+                  {kind === "claude" && (
+                    <label className="text-sm text-foreground">
+                      子代理模型（可选）
+                      <input
+                        data-testid="new-connection-subagent-model"
+                        value={connection.subagentModel ?? ""}
+                        onChange={(event) => patch({ subagentModel: event.target.value })}
+                        list={fetchedModels ? "connection-model-options" : undefined}
+                        placeholder="别名如 haiku，或完整模型名"
+                        className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
+                      />
+                      <span className="mt-1 block text-xs font-normal text-muted-foreground">
+                        官方 CLAUDE_CODE_SUBAGENT_MODEL：子代理、团队成员与工作流代理没指定模型时用它；建成独立环境时写进环境变量。
+                      </span>
                     </label>
                   )}
                 </div>
               </details>
 
               <p className="rounded-lg border bg-muted/40 px-3 py-2 text-xs leading-5 text-muted-foreground">
-                保存只更新接入定义，不写助手配置。主配置只放官方账号；要使用这套接入，在卡片菜单里选「建成独立环境」。
+                保存只更新接入定义，不写助手配置。主配置只放官方账号；要使用这套接入，点「保存并建成独立环境」，或保存后在卡片上选「建成独立环境」。
               </p>
                 </>
               )}

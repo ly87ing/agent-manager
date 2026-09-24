@@ -104,6 +104,18 @@ struct Probe {
 
 /// 发一次请求。令牌只经由 0600 的 config 文件传给 curl，不进命令行。
 fn run_probe(ctx: &Context, url: &str, headers: &[String], body: &Value) -> Probe {
+    run_request(ctx, "POST", url, headers, Some(body), TIMEOUT)
+}
+
+/// 发一次请求（`body` 为 None 时不带正文）。令牌只经由 0600 的 config 文件传给 curl，不进命令行。
+fn run_request(
+    ctx: &Context,
+    method: &str,
+    url: &str,
+    headers: &[String],
+    body: Option<&Value>,
+    timeout: Duration,
+) -> Probe {
     let stamp = format!(
         "{}-{:x}",
         std::process::id(),
@@ -122,24 +134,26 @@ fn run_probe(ctx: &Context, url: &str, headers: &[String], body: &Value) -> Prob
 
     let mut cfg = String::new();
     cfg.push_str(&format!("url = {}\n", cfg_quote(url)));
-    cfg.push_str("request = \"POST\"\n");
+    cfg.push_str(&format!("request = {}\n", cfg_quote(method)));
     for header in headers {
         cfg.push_str(&format!("header = {}\n", cfg_quote(header)));
     }
-    cfg.push_str(&format!(
-        "data-binary = {}\n",
-        cfg_quote(&format!("@{}", body_path.display()))
-    ));
+    if body.is_some() {
+        cfg.push_str(&format!(
+            "data-binary = {}\n",
+            cfg_quote(&format!("@{}", body_path.display()))
+        ));
+    }
     cfg.push_str(&format!(
         "output = {}\n",
         cfg_quote(&out_path.display().to_string())
     ));
     cfg.push_str("silent\nshow-error\n");
-    cfg.push_str(&format!("max-time = {}\n", TIMEOUT.as_secs()));
+    cfg.push_str(&format!("max-time = {}\n", timeout.as_secs()));
     cfg.push_str("write-out = \"%{http_code} %{time_total}\"\n");
 
     if write_private(&cfg_path, &cfg).is_err()
-        || write_private(&body_path, &body.to_string()).is_err()
+        || body.is_some_and(|body| write_private(&body_path, &body.to_string()).is_err())
     {
         cleanup(&[&cfg_path, &body_path, &out_path]);
         return Probe {
@@ -155,7 +169,7 @@ fn run_probe(ctx: &Context, url: &str, headers: &[String], body: &Value) -> Prob
         &["--config", &cfg_path.display().to_string()],
         None,
         ctx,
-        TIMEOUT + Duration::from_secs(5),
+        timeout + Duration::from_secs(5),
     );
 
     let response_body = std::fs::read_to_string(&out_path).unwrap_or_default();
@@ -440,7 +454,7 @@ struct ProfileEndpoint {
     base_url: String,
     auth: AuthKind,
     token_var: String,
-    model: String,
+    model: Option<String>,
 }
 
 /// 从实例定义取出检查要用的地址、凭据变量与模型。官方账号环境没有第三方端点，不代为发请求。
@@ -505,13 +519,7 @@ fn profile_endpoint(
                 .and_then(Value::as_str)
                 .map(str::to_string)
         })
-        .filter(|model| !model.trim().is_empty())
-        .ok_or_else(|| {
-            format!(
-                "独立环境 {} 没填模型，检查要靠它才能确认模型名对不对",
-                def.id
-            )
-        })?;
+        .filter(|model| !model.trim().is_empty());
     Ok(ProfileEndpoint {
         kind,
         base_url,
@@ -532,6 +540,12 @@ fn handle_profile(ctx: &Context, req: &Request, id: &str) -> Result<Value, Dispa
         .2
         .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}")))?;
     let endpoint = profile_endpoint(&def).map_err(|err| DispatchError::new("AGENT_ERROR", err))?;
+    let model = endpoint.model.clone().ok_or_else(|| {
+        DispatchError::new(
+            "AGENT_ERROR",
+            format!("独立环境 {id} 没填模型，检查要靠它才能确认模型名对不对"),
+        )
+    })?;
     let token = crate::secret_values::lookup(&endpoint.token_var).ok_or_else(|| {
         DispatchError::new(
             "AGENT_ERROR",
@@ -550,14 +564,337 @@ fn handle_profile(ctx: &Context, req: &Request, id: &str) -> Result<Value, Dispa
         &endpoint.base_url,
         endpoint.auth,
         Some(&token),
-        &endpoint.model,
+        &model,
     );
     Ok(Value::Object(out))
+}
+/// 模型列表的单次请求上限：列模型不该比真正对话还慢。
+const MODELS_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// 列模型要试的地址，都在接入地址的同一主机下（凭据不发往别处）。Claude 形态先按 Anthropic
+/// 协议的 `{base}/v1/models`，再去掉 `/anthropic` 这类兼容后缀试同一厂商的 OpenAI 协议列表；
+/// Codex 形态的地址通常已带 `/v1`。
+fn model_list_urls(kind: Kind, base_url: &str) -> Vec<String> {
+    let base = base_url.trim_end_matches('/');
+    let mut urls = Vec::new();
+    match kind {
+        Kind::Claude => {
+            urls.push(format!("{base}/v1/models"));
+            urls.push(format!("{base}/models"));
+            for suffix in ["/apps/anthropic", "/api/anthropic", "/anthropic"] {
+                if let Some(root) = base.strip_suffix(suffix) {
+                    urls.push(format!("{root}/v1/models"));
+                    urls.push(format!("{root}/models"));
+                    break;
+                }
+            }
+        }
+        Kind::Codex => {
+            urls.push(format!("{base}/models"));
+            if !base.ends_with("/v1") {
+                urls.push(format!("{base}/v1/models"));
+            }
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    urls.retain(|url| seen.insert(url.clone()));
+    urls
+}
+
+/// 从模型列表响应里取出模型 id：OpenAI 与 Anthropic 都是 `{"data": [{"id": …}]}`，也认
+/// `{"models": [...]}` 与纯字符串数组。去重、保持顺序，最多 500 个；取不出返回 None。
+fn model_ids(body: &str) -> Option<Vec<String>> {
+    let value: Value = serde_json::from_str(body).ok()?;
+    let items = value
+        .get("data")
+        .or_else(|| value.get("models"))
+        .unwrap_or(&value)
+        .as_array()?;
+    let mut seen = std::collections::HashSet::new();
+    let ids: Vec<String> = items
+        .iter()
+        .filter_map(|item| {
+            item.as_str().or_else(|| {
+                ["id", "name", "model"]
+                    .iter()
+                    .find_map(|key| item.get(*key).and_then(Value::as_str))
+            })
+        })
+        .map(str::trim)
+        .filter(|id| !id.is_empty() && id.len() <= 200 && !id.chars().any(char::is_control))
+        .filter(|id| seen.insert(id.to_string()))
+        .take(500)
+        .map(str::to_string)
+        .collect();
+    (!ids.is_empty()).then_some(ids)
+}
+
+/// 列模型要用的端点与凭据变量。
+struct ModelsTarget {
+    element: String,
+    kind: Kind,
+    base_url: String,
+    token_var: Option<String>,
+}
+
+fn models_target(ctx: &Context, req: &Request) -> Result<ModelsTarget, DispatchError> {
+    let error = |message: String| DispatchError::new("AGENT_ERROR", message);
+    // 表单里还没保存的接入：地址、凭据变量名与形态随请求给出，凭据取值仍从密钥来源解析
+    if let Some(raw) = req.value("--draft") {
+        let draft: Value = serde_json::from_str(raw)
+            .map_err(|_| DispatchError::new("USAGE_ERROR", "--draft 必须是 JSON 对象"))?;
+        let text = |key: &str| {
+            draft
+                .get(key)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_string)
+        };
+        let kind = match text("kind").as_deref() {
+            Some("claude") => Kind::Claude,
+            Some("codex") => Kind::Codex,
+            _ => return Err(error("--draft 的 kind 只能是 claude 或 codex".into())),
+        };
+        let base_url = text("base_url").ok_or_else(|| error("先填接口地址".into()))?;
+        if !(base_url.starts_with("https://") || base_url.starts_with("http://"))
+            || crate::native::url_has_userinfo(&base_url)
+        {
+            return Err(error(
+                "接口地址只允许 https:// 或 http://，且不能带账号密码".into(),
+            ));
+        }
+        let token_var = text("token_var").ok_or_else(|| error("先填凭据变量名".into()))?;
+        if !crate::secret_values::valid_var_name(&token_var) {
+            return Err(error("凭据变量名不合法".into()));
+        }
+        return Ok(ModelsTarget {
+            element: "draft".into(),
+            kind,
+            base_url,
+            token_var: Some(token_var),
+        });
+    }
+    let only = req.value("--only").ok_or_else(|| {
+        DispatchError::new(
+            "USAGE_ERROR",
+            "agents:models 需要 --only <助手> --use <接入配置>、--only profiles:<独立环境> 或 --draft <JSON>",
+        )
+    })?;
+    if let Some(id) = only.strip_prefix("profiles:") {
+        let policy =
+            crate::store::effective_policy(ctx).map_err(|err| error(format!("{err:#}")))?;
+        let def = crate::native_profiles::model::load_definition_entries(&policy)
+            .into_iter()
+            .find(|(entry_id, _, _)| entry_id == id)
+            .ok_or_else(|| error(format!("没有这个独立环境：{id}")))?
+            .2
+            .map_err(|err| error(format!("{err:#}")))?;
+        let endpoint = profile_endpoint(&def).map_err(error)?;
+        return Ok(ModelsTarget {
+            element: format!("profiles:{id}"),
+            kind: endpoint.kind,
+            base_url: endpoint.base_url,
+            token_var: Some(endpoint.token_var),
+        });
+    }
+    let id = only.trim_start_matches("agents:").to_string();
+    let defs =
+        crate::native_agents::load_definitions(ctx).map_err(|err| error(format!("{err:#}")))?;
+    let def = defs
+        .iter()
+        .find(|d| d.id == id)
+        .ok_or_else(|| error(format!("没有这个助手：{id}")))?;
+    let kind = kind_of(&def.bin)
+        .ok_or_else(|| error("只有 Claude Code 与 Codex 形态的助手能列模型".into()))?;
+    let name = req.value("--use").ok_or_else(|| {
+        DispatchError::new("USAGE_ERROR", "列接入配置的模型要带 --use <接入配置>")
+    })?;
+    let settings =
+        native_agent_settings::parse(def.spec_ref()).map_err(|err| error(format!("{err:#}")))?;
+    let profile = settings
+        .profiles
+        .get(name)
+        .ok_or_else(|| error(format!("{id} 没有名为 {name} 的接入配置")))?;
+    let (base_url, token_var) = match profile.provider_ref.as_deref() {
+        Some(reference) if kind == Kind::Codex => {
+            native_agent_settings::codex_referenced_endpoint(ctx, def.config_path(), reference)
+                .map_err(|err| error(format!("接入配置 {name}：{err:#}")))?
+        }
+        Some(_) => {
+            return Err(error(format!(
+                "接入配置 {name} 引用了 config.toml 的接入方式，只适用于 Codex"
+            )))
+        }
+        None => (
+            profile
+                .base_url
+                .clone()
+                .ok_or_else(|| error(format!("接入配置 {name} 没填地址")))?,
+            profile.token_var.clone(),
+        ),
+    };
+    Ok(ModelsTarget {
+        element: format!("agents:{id}"),
+        kind,
+        base_url,
+        token_var,
+    })
+}
+
+/// `agents:models`：问接口这把凭据能用哪些模型，给表单挑模型名用。
+///
+/// 与检查一样只在用户点它时才联网、只读（除审计外不写）；凭据经 0600 临时文件交给 curl，
+/// 只发往接入地址的同一主机。试完候选地址都拿不到列表时如实说明，不编模型名。
+pub(crate) fn handle_models(ctx: &Context, req: &Request) -> Result<Value, DispatchError> {
+    let target = models_target(ctx, req)?;
+    let token = match target.token_var.as_deref() {
+        Some(var) => Some(crate::secret_values::lookup(var).ok_or_else(|| {
+            DispatchError::new(
+                "AGENT_ERROR",
+                format!(
+                    "环境变量 {var} 还没有取值：先在密钥页填上（或保存接入时一并填写），再获取模型列表"
+                ),
+            )
+        })?),
+        None => None,
+    };
+    let mut headers = vec!["accept: application/json".to_string()];
+    if let Some(token) = token.as_deref() {
+        // 与官方 apiKeyHelper 的做法一致：同一把凭据同时放进 x-api-key 与 Bearer，
+        // Anthropic 协议与 OpenAI 协议的列表接口各认其一
+        if target.kind == Kind::Claude {
+            headers.push(format!("x-api-key: {token}"));
+        }
+        headers.push(format!("authorization: Bearer {token}"));
+    }
+    if target.kind == Kind::Claude {
+        headers.push("anthropic-version: 2023-06-01".to_string());
+    }
+
+    let urls = model_list_urls(target.kind, &target.base_url);
+    let mut outcome: Result<(String, Vec<String>), String> = Err(format!(
+        "这个接口没有提供模型列表（试过 {} 个地址）；模型名请按厂商文档填写",
+        urls.len()
+    ));
+    let mut last_status = 0;
+    for url in &urls {
+        let probe = run_request(ctx, "GET", url, &headers, None, MODELS_TIMEOUT);
+        last_status = probe.status;
+        if probe.transport_error.is_some() {
+            outcome = Err(verdict(target.kind, &probe).1);
+            break;
+        }
+        match probe.status {
+            200 => {
+                if let Some(ids) = model_ids(&probe.body) {
+                    outcome = Ok((url.clone(), ids));
+                    break;
+                }
+            }
+            // 这个地址没有列表接口：换下一个
+            404 | 405 => {}
+            _ => {
+                let (_, detail) = verdict(target.kind, &probe);
+                outcome = Err(format!("获取模型列表失败：{detail}"));
+                break;
+            }
+        }
+    }
+
+    if let Ok(mut conn) = crate::store::open_write(ctx) {
+        if let Ok(tx) = conn.transaction() {
+            let _ = crate::store::record_operation(
+                &tx,
+                Some(&req.run_id),
+                "agents:models",
+                Some(target.element.trim_start_matches("agents:")),
+                Some(&json!({
+                    "endpoint": outcome.as_ref().ok().map(|(url, _)| url.clone()),
+                    "count": outcome.as_ref().map(|(_, ids)| ids.len()).unwrap_or(0),
+                    "http_status": last_status,
+                })),
+            );
+            let _ = tx.commit();
+        }
+    }
+
+    let (endpoint, models) =
+        outcome.map_err(|message| DispatchError::new("AGENT_ERROR", message))?;
+    Ok(json!({
+        "domain": "agents",
+        "action": "models",
+        "element": target.element,
+        "endpoint": endpoint,
+        "count": models.len(),
+        "models": models,
+    }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 列模型只在接入地址的同一主机下找：Anthropic 协议的 /v1/models 优先，再去掉兼容后缀
+    /// 试同一厂商的 OpenAI 协议列表；Codex 地址已带 /v1 时不重复拼。
+    #[test]
+    fn 列模型的候选地址都在同一主机下() {
+        assert_eq!(
+            model_list_urls(Kind::Claude, "https://api.moonshot.cn/anthropic/"),
+            vec![
+                "https://api.moonshot.cn/anthropic/v1/models",
+                "https://api.moonshot.cn/anthropic/models",
+                "https://api.moonshot.cn/v1/models",
+                "https://api.moonshot.cn/models",
+            ]
+        );
+        assert_eq!(
+            model_list_urls(Kind::Claude, "https://open.bigmodel.cn/api/anthropic"),
+            vec![
+                "https://open.bigmodel.cn/api/anthropic/v1/models",
+                "https://open.bigmodel.cn/api/anthropic/models",
+                "https://open.bigmodel.cn/v1/models",
+                "https://open.bigmodel.cn/models",
+            ]
+        );
+        assert_eq!(
+            model_list_urls(Kind::Codex, "https://api.deepseek.com/v1"),
+            vec!["https://api.deepseek.com/v1/models"]
+        );
+        assert_eq!(
+            model_list_urls(Kind::Codex, "https://api.deepseek.com"),
+            vec![
+                "https://api.deepseek.com/models",
+                "https://api.deepseek.com/v1/models"
+            ]
+        );
+    }
+
+    #[test]
+    fn 模型列表按常见形状取出_id() {
+        assert_eq!(
+            model_ids(
+                r#"{"data":[{"id":"kimi-k3","object":"model"},{"id":"kimi-k3"},{"id":" moonshot-v2 "}]}"#
+            ),
+            Some(vec!["kimi-k3".to_string(), "moonshot-v2".to_string()])
+        );
+        assert_eq!(
+            model_ids(
+                r#"{"data":[{"type":"model","id":"claude-sonnet-5","display_name":"Sonnet"}],"has_more":false}"#
+            ),
+            Some(vec!["claude-sonnet-5".to_string()])
+        );
+        assert_eq!(
+            model_ids(r#"{"models":[{"name":"glm-5.3"}]}"#),
+            Some(vec!["glm-5.3".to_string()])
+        );
+        assert_eq!(
+            model_ids(r#"["a","b"]"#),
+            Some(vec!["a".to_string(), "b".to_string()])
+        );
+        assert_eq!(model_ids(r#"{"data":[]}"#), None);
+        assert_eq!(model_ids("<html>"), None);
+    }
 
     fn probe(status: u16, body: &str) -> Probe {
         Probe {

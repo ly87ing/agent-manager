@@ -360,6 +360,22 @@ export default function AgentsPage({
     }
   };
 
+  /**
+   * 用表单里的地址与凭据变量问接口能用哪些模型（接入与独立环境表单共用）。只在点按钮时才联网、
+   * 只读；凭据取值由引擎从密钥来源解析，不经界面传递。失败时返回原因。
+   */
+  const fetchModelsForDraft = async ({ kind, baseUrl, tokenVar }: { kind: "claude" | "codex"; baseUrl: string; tokenVar: string }) => {
+    try {
+      const envelope = await runEngine<{ models?: string[] }>("agents:models", [
+        "--draft",
+        JSON.stringify({ kind, base_url: baseUrl, token_var: tokenVar }),
+      ]);
+      return envelope.ok ? envelope.data?.models ?? [] : envelope.errors[0]?.message ?? "没拿到模型列表";
+    } catch (err) {
+      return String(err);
+    }
+  };
+
   /** 删除非当前接入：只删定义里的目标 profile，不清理可能被其他接入复用的凭据变量。 */
   const removeConnection = async (element: EngineElement, connection: ConnectionEntry) => {
     if (connectionRemovingBusy) return;
@@ -912,6 +928,7 @@ export default function AgentsPage({
           busy={connectionSaving}
           error={connectionFormError}
           onOpenSecrets={onOpenSecrets}
+          onFetchModels={fetchModelsForDraft}
           onSubmit={(submission) => void saveConnection(connectionForm.agent, submission)}
           onClose={() => {
             setConnectionForm(null);
@@ -967,6 +984,7 @@ export default function AgentsPage({
           isEdit={profileForm !== "new" && !profileDuplicating}
           existingIds={elements.map((element) => element.id.replace(/^agents:/, ""))}
           baseBinOf={baseBinOf}
+          onFetchModels={fetchModelsForDraft}
           onSubmit={(input) => void saveProfile(input)}
           onClose={() => {
             setProfileForm(null);

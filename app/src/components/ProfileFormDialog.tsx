@@ -36,6 +36,7 @@ export function ProfileFormDialog({
   existingIds,
   baseBinOf,
   onSubmit,
+  onFetchModels,
   onClose,
 }: {
   /** 可作为归属的助手（目前支持 Claude Code 与 Codex）。 */
@@ -46,8 +47,13 @@ export function ProfileFormDialog({
   existingIds: string[];
   baseBinOf: (agentId: string) => string;
   onSubmit: (input: ProfileFormInput) => void;
+  /** 用表单里的地址与凭据变量问接口能用哪些模型；失败时返回原因。只在点按钮时才联网。 */
+  onFetchModels?: (draft: { kind: ProfileKind; baseUrl: string; tokenVar: string }) => Promise<string[] | string>;
   onClose: () => void;
 }) {
+  const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
+  const [modelsMessage, setModelsMessage] = useState<string | null>(null);
+  const [fetchingModels, setFetchingModels] = useState(false);
   const isEdit = isEditProp ?? Boolean(initial);
   const firstAgent = baseAgents[0]?.id ?? "claude-code";
   const [id, setId] = useState(initial?.id ?? "");
@@ -312,14 +318,50 @@ export function ProfileFormDialog({
                   <label className="block text-sm font-medium text-foreground" htmlFor="profile-model">
                     模型
                     <span className="ml-2 text-xs font-normal text-muted-foreground">可选</span>
+                    {onFetchModels && (
+                      <button
+                        type="button"
+                        data-testid="profile-fetch-models"
+                        disabled={fetchingModels || !baseUrl.trim() || !tokenVar.trim()}
+                        title="用上面的地址与凭据变量问接口能用哪些模型；只在点它时联网，不改任何配置"
+                        onClick={async (event) => {
+                          event.preventDefault();
+                          setFetchingModels(true);
+                          setModelsMessage(null);
+                          try {
+                            const result = await onFetchModels({ kind, baseUrl: baseUrl.trim(), tokenVar: tokenVar.trim() });
+                            setFetchedModels(typeof result === "string" ? null : result);
+                            setModelsMessage(typeof result === "string" ? result : `已获取 ${result.length} 个模型，可在输入框下拉挑选`);
+                          } finally {
+                            setFetchingModels(false);
+                          }
+                        }}
+                        className="ml-2 rounded border px-2 py-0.5 text-xs font-normal text-muted-foreground hover:bg-accent disabled:opacity-50"
+                      >
+                        {fetchingModels ? "正在获取…" : "获取模型列表"}
+                      </button>
+                    )}
                     <input
                       id="profile-model"
                       value={model}
                       onChange={(event) => setModel(event.target.value)}
                       data-testid="profile-model"
                       placeholder="使用助手默认模型"
+                      list={fetchedModels ? "profile-model-options" : undefined}
                       className="mt-2 h-11 w-full rounded-lg border border-input bg-background px-3 font-mono text-sm"
                     />
+                    {modelsMessage && (
+                      <span data-testid="profile-models-message" className={cn("mt-1 block text-xs font-normal", fetchedModels ? "text-muted-foreground" : "text-destructive")}>
+                        {modelsMessage}
+                      </span>
+                    )}
+                    {fetchedModels && (
+                      <datalist id="profile-model-options">
+                        {fetchedModels.map((item) => (
+                          <option key={item} value={item} />
+                        ))}
+                      </datalist>
+                    )}
                   </label>
                 </div>
                 {kind === "claude" && (

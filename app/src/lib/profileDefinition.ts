@@ -342,6 +342,7 @@ export function connectionToProfileInput(
     // 官方已弃用 ANTHROPIC_SMALL_FAST_MODEL：后台任务改用 Haiku 别名那个模型。旧接入里只填了
     // 小任务模型的，按官方替代写成 Haiku 别名；两者都填了以 Haiku 别名为准。
     if (connection.aliasFable?.trim()) extraEnv.ANTHROPIC_DEFAULT_FABLE_MODEL = connection.aliasFable.trim();
+    if (connection.subagentModel?.trim()) extraEnv.CLAUDE_CODE_SUBAGENT_MODEL = connection.subagentModel.trim();
     const haiku = connection.aliasHaiku.trim() || connection.smallFastModel.trim();
     if (haiku) extraEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL = haiku;
     if (connection.aliasHaiku.trim() && connection.smallFastModel.trim()
